@@ -182,6 +182,9 @@ function releaseRitualSkillCard(e, now) {
   const evidence = { id: 'release-ritual-skill', ...e };
   return {
     id: 'release-ritual-skill',
+    // §4.5 association: this card is about ONE specific cluster (its seed match),
+    // so it publishes that cluster's key and names no kind.
+    clusterKey: e.clusterKey ?? null, targetKind: null,
     title: 'The release ritual is still muscle memory',
     finding: `"${RELEASE_RITUAL_NAME}" recurred ${e.count} times across ${e.sessions} sessions and `
       + `${e.days} days — a procedure retyped instead of reused.`,
@@ -202,6 +205,7 @@ function commitPushClaudeMdCard(e, now) {
   const evidence = { id: 'commit-push-claude-md', ...e };
   return {
     id: 'commit-push-claude-md',
+    clusterKey: e.clusterKey ?? null, targetKind: null, // §4.5: cluster-specific card
     title: 'Commit-and-push is retyped, not remembered',
     finding: `"${COMMIT_PUSH_NAME}" recurred ${e.count} times across ${e.sessions} sessions and `
       + `${e.days} days — a one-line habit the agent could apply on its own.`,
@@ -218,6 +222,9 @@ function reaskDeltaCard(e, now) {
   const evidence = { id: 'reask-delta', ...e };
   return {
     id: 'reask-delta',
+    // §4.5 association: kind-level, not cluster-specific — it addresses the
+    // derived `reask` kind wherever it appears, so the client joins it by kind.
+    clusterKey: null, targetKind: 'reask',
     title: 'The same ask lands twice, often',
     finding: `${e.count} prompts were asked again inside the same session this window, across `
       + `${e.sessionCount} session${e.sessionCount === 1 ? '' : 's'} — the first ask did not land.`,
@@ -250,6 +257,9 @@ function completionCriteriaCard(e, now) {
       : 'runs measurably longer prompts than Claude does';
   return {
     id: 'codex-completion-criteria',
+    // §4.5: host-level (Codex vs Claude asymmetry) — maps to neither a cluster
+    // nor a derived kind, so it is deferred from the pattern table in v1.
+    clusterKey: null, targetKind: null,
     title: 'Codex needs the finish line stated up front',
     finding: `Codex ${findingArm} — a pattern consistent with not being told what "done" looks like `
       + 'up front, measured from prompt shape alone.',
@@ -277,6 +287,7 @@ function progressReportCard(e, now) {
   const hostsText = e.hosts.join(', ');
   return {
     id: 'progress-report-taps',
+    clusterKey: null, targetKind: 'tap', // §4.5: addresses the tap kind
     title: 'You are tapping for progress the agent already has',
     finding: `Supervision taps on ${hostsText} are elevated ${progressReportComparatorText(e)} — some `
       + 'of that is you checking on progress the agent could have volunteered.',
@@ -292,6 +303,8 @@ function roleLibraryCard(e, now) {
   const evidence = { id: 'codex-role-library', ...e };
   return {
     id: 'codex-role-library',
+    clusterKey: null, targetKind: 'persona', // §4.5: addresses the role-preamble kind
+
     title: 'A role gets retyped by hand on Codex',
     // No superlative (Fix round 1, M-5): "the largest measured pattern" was a
     // fact about the RESEARCH corpus, not this operator's — nothing here

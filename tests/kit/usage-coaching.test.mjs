@@ -293,6 +293,71 @@ test('codex-role-library fires at personaOpeners >= 10 on Codex, not below, and 
   assert.equal(currentEvidenceFor('codex-role-library', { promptsByHost: { claude: hostRow() } }), null);
 });
 
+// ── Coaching redesign §4.5: the cluster→card association keys published on ───
+// each card. `clusterKey` (a cluster this card is specifically about) comes
+// from the rule's own evidence; `targetKind` (the derived kind this card
+// addresses when it is kind-level, not cluster-specific) is STATIC per rule.
+// Both are ids/enums only — no prompt text is added to any card by this.
+
+test('cluster-targeting cards carry clusterKey from evidence, and no targetKind', () => {
+  const rr = cluster({ name: 'Release ritual', key: 'aaaa1111bbbb2222', count: RELEASE_RITUAL_MIN_COUNT, sessions: 5, days: 3 });
+  const cp = cluster({ name: 'Commit-and-push instruction', key: 'cccc3333dddd4444', count: COMMIT_PUSH_MIN_COUNT, sessions: 6, days: 4 });
+  const cards = deriveCards({ promptPatterns: { clusters: [rr, cp] }, promptBaselines: null, promptsByHost: null, insights: [], now: NOW });
+  const rrCard = cards.find((c) => c.id === 'release-ritual-skill');
+  const cpCard = cards.find((c) => c.id === 'commit-push-claude-md');
+  assert.equal(rrCard.clusterKey, 'aaaa1111bbbb2222', 'release-ritual-skill is about its seed cluster');
+  assert.equal(rrCard.targetKind, null, 'a cluster-specific card names no kind');
+  assert.equal(cpCard.clusterKey, 'cccc3333dddd4444', 'commit-push-claude-md is about its seed cluster');
+  assert.equal(cpCard.targetKind, null);
+});
+
+test('kind-level cards carry a static targetKind and a null clusterKey', () => {
+  const reask = deriveCards({
+    promptPatterns: { reAsks: { pairCount: REASK_DELTA_MIN_PAIRS, sessionCount: 7 } },
+    promptBaselines: null, promptsByHost: null, insights: [], now: NOW,
+  }).find((c) => c.id === 'reask-delta');
+  assert.equal(reask.targetKind, 'reask', 'reask-delta addresses the re-ask kind');
+  assert.equal(reask.clusterKey, null, 'a kind-level card is not about one cluster');
+
+  const taps = deriveCards({
+    promptPatterns: null, promptBaselines: null, promptsByHost: { claude: OVER_THRESHOLD_HOST },
+    insights: [insight('supervision-tap-share')], now: NOW,
+  }).find((c) => c.id === 'progress-report-taps');
+  assert.equal(taps.targetKind, 'tap', 'progress-report-taps addresses the tap kind');
+  assert.equal(taps.clusterKey, null);
+
+  const roleLib = deriveCards({
+    promptPatterns: null, promptBaselines: null,
+    promptsByHost: { codex: hostRow({ personaOpeners: PERSONA_LIBRARY_MIN_COUNT }), claude: hostRow({ personaOpeners: 1 }) },
+    insights: [], now: NOW,
+  }).find((c) => c.id === 'codex-role-library');
+  assert.equal(roleLib.targetKind, 'persona', 'codex-role-library addresses the role-preamble kind');
+  assert.equal(roleLib.clusterKey, null);
+});
+
+test('a host-level card (codex-completion-criteria) carries neither clusterKey nor targetKind', () => {
+  const byHost = { codex: hostRow({ personaOpeners: 12, p90TypedTokens: 200 }), claude: hostRow({ personaOpeners: 2, p90TypedTokens: 80 }) };
+  const card = deriveCards({
+    promptPatterns: null, promptBaselines: null, promptsByHost: byHost,
+    insights: [insight('host-prompt-asymmetry')], now: NOW,
+  }).find((c) => c.id === 'codex-completion-criteria');
+  assert.equal(card.clusterKey, null, 'a host-asymmetry card maps to no single cluster');
+  assert.equal(card.targetKind, null, 'and to no derived kind either — it is deferred from the pattern table in v1');
+});
+
+test('publishing clusterKey/targetKind does not perturb the evidence hash', () => {
+  // The keys are card-surface fields, not evidence inputs — a card built with
+  // them present must hash the same as the evidence that produced it always did.
+  const rr = cluster({ name: 'Release ritual', key: 'aaaa1111bbbb2222', count: RELEASE_RITUAL_MIN_COUNT, sessions: 5, days: 3 });
+  const card = deriveCards({ promptPatterns: { clusters: [rr] }, promptBaselines: null, promptsByHost: null, insights: [], now: NOW })
+    .find((c) => c.id === 'release-ritual-skill');
+  // The evidence for this rule is { id, count, clusterKey, sessions, days } — the
+  // clusterKey was already part of it before it was surfaced on the card.
+  assert.equal(card.evidenceHash, evidenceHash({
+    id: 'release-ritual-skill', count: RELEASE_RITUAL_MIN_COUNT, clusterKey: 'aaaa1111bbbb2222', sessions: 5, days: 3,
+  }));
+});
+
 // ── evidence-honesty: absent inputs yield NO card, never a zero-count one ───
 
 test('absent promptPatterns yields no cluster/reask cards at all — never a fabricated zero', () => {
