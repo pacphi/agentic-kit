@@ -677,8 +677,8 @@ export const USAGE_CSS = `
    Reuses the scorecard's own grammar wherever one exists — .kpi for the strip,
    .mbar for magnitude, .strip/.sh for section chrome — so a panel here is the
    same object a reader already knows from Scorecard. Only the shapes with no
-   existing equivalent are new: the per-host interplay row, the patterns table,
-   and the two "not built yet" placeholders.
+   existing equivalent are new: the per-host interplay row, the sortable Coaching
+   table, and its expanded coaching panel.
    Every colour is a token; nothing below hardcodes a hue, so the view follows
    the viewer's theme with the rest of the panel. */
 
@@ -872,6 +872,9 @@ export const USAGE_CSS = `
 /* recommendation */
 .rec-title{font-size:14px; font-weight:600; color:var(--ink); line-height:1.4}
 .rec-why{margin:6px 0 0; font-size:12.5px; color:var(--ink-2); line-height:1.5}
+/* the window-scope label on a kind-level card's rationale (QE F-1): brighter
+   and bolder than the finding it prefixes, so the two scopes read apart. */
+.rec-scope{font-weight:600; color:var(--ink)}
 /* draft + copy */
 .draft-wrap{position:relative}
 .draft-pre{
@@ -925,8 +928,13 @@ export const USAGE_CSS = `
 .pr-card-source[data-source="enriched"]{color:var(--purple); border-color:color-mix(in srgb,var(--purple) 40%,var(--line))}
 .pr-card-source[data-source="rule"]{color:var(--accent); border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
 
-/* prompt-text posture toggle — top-right of the Prompts view (§2.2) */
-.pr-toolbar{display:flex; justify-content:flex-end; margin:0 0 16px}
+/* prompt-text posture toggle — right-aligned in the Coaching panel header, next
+   to its subtitle (§2.2, P16). The header centres (not baselines) so the
+   bordered toggle sits level with the heading, and the note takes the auto
+   margin so it and the toggle group to the right; the row wraps on narrow
+   widths rather than overflowing. */
+.sh-coach{align-items:center; flex-wrap:wrap}
+.sh-coach .n{margin-left:auto}
 .pr-posture{display:inline-flex; align-items:center; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:var(--panel)}
 .pt-lbl{padding:0 9px 0 12px; font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-dim)}
 .pt-btn{padding:6px 12px; border:0; background:none; color:var(--ink-2); font:inherit; font-size:11.5px; cursor:pointer}

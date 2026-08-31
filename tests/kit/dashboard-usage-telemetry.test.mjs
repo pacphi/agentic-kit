@@ -789,7 +789,37 @@ const PANEL_PROMPTS = {
     exactRepeats: [{ key: 'dddd', count: 9, tokens: 2, sessions: 7, days: 4, hosts: ['claude'] }],
     computedAt: '2026-08-20T12:00:00.000Z',
   },
+  // P15: the Coaching table shows ONLY patterns that have advice, so the base
+  // fixture gives each of its three clusters a clusterKey card. Tests that
+  // exercise a SPECIFIC card build their own payload via promptsWithCoaching,
+  // which replaces this block wholesale.
+  coaching: {
+    cards: [
+      { id: 'aaaa-card', clusterKey: 'aaaa', targetKind: null, title: 'Commit-and-push retyped',
+        try: 'Add a commit-and-push rule to CLAUDE.md.', finding: 'typed 12 times across 9 sessions.',
+        source: 'rule', status: 'proposed', draft: { text: 'Commit and push once verified.' } },
+      { id: 'bbbb-card', clusterKey: 'bbbb', targetKind: null, title: 'A recurring question',
+        try: 'Capture this as a repo skill.', finding: 'asked 5 times across 4 sessions.',
+        source: 'rule', status: 'proposed', draft: { text: 'Skill draft.' } },
+      { id: 'cccc-card', clusterKey: 'cccc', targetKind: null, title: 'A re-ask pattern',
+        try: 'State acceptance criteria up front.', finding: 'recurred 3 times across 3 sessions.',
+        source: 'rule', status: 'proposed', draft: { text: 'Done when: <criteria>.' } },
+    ],
+    summary: null,
+  },
 };
+
+/** A minimal proposed clusterKey card per cluster. Under P15 the Coaching table
+ *  hides any cluster without a joined card, so a fixture that means to render
+ *  rows carries one per cluster; fields are kept minimal because these tests
+ *  assert row/pill/sort behaviour, not card content. */
+function keyCards(clusters) {
+  return (clusters || []).map((c) => ({
+    id: `${c.key}-card`, clusterKey: c.key, targetKind: null,
+    title: `${c.key} advice`, try: `${c.key} advice`, finding: '',
+    source: 'rule', status: 'proposed', draft: { text: `${c.key} draft` },
+  }));
+}
 
 test('the KPI strip renders five tiles, each stating what it does not model', () => {
   const html = promptKpis(PANEL_PROMPTS);
@@ -1003,11 +1033,13 @@ test('a filter slices the table to its kind, and stacks with the active sort', (
   assert.match(filtered, /class="fpill on" data-pr-filter="question"/, 'the active pill is marked');
   // The stack: filter to one kind, then sort within it — the sort must apply
   // AFTER the filter, and a higher-count row of another kind must not leak in.
-  const many = { ...PANEL_PROMPTS, patterns: { ...PANEL_PROMPTS.patterns, clusters: [
+  const manyClusters = [
     { key: 'i1', kind: 'instruction', label: { name: 'A instr', source: 'seed' }, class: 'other', count: 3, sessions: 2, days: 1, hosts: ['claude'], medianTokens: 8, sampleSessionIds: [] },
     { key: 'i2', kind: 'instruction', label: { name: 'B instr', source: 'seed' }, class: 'other', count: 9, sessions: 5, days: 3, hosts: ['claude'], medianTokens: 8, sampleSessionIds: [] },
     { key: 'q1', kind: 'question', label: { name: 'Q', source: 'seed' }, class: 'question', count: 20, sessions: 9, days: 6, hosts: ['claude'], medianTokens: 8, sampleSessionIds: [] },
-  ] } };
+  ];
+  const many = { ...PANEL_PROMPTS, patterns: { ...PANEL_PROMPTS.patterns, clusters: manyClusters },
+    coaching: { cards: keyCards(manyClusters), summary: null } };
   const stacked = coachingPanel(many, { filter: 'instruction', sort: { key: 'count', dir: 'desc' } });
   assert.deepEqual([...stacked.matchAll(/data-pr-row="(\w+)"/g)].map((m) => m[1]), ['i2', 'i1'],
     'only instruction rows, ordered by the active count-desc sort');
@@ -1229,17 +1261,23 @@ test('Seen in shows session·date once the samples fetch resolves, formatted wit
   assert.match(html, /s\.s2 · Jul 23/);
 });
 
-test('the §4.5 join: clusterKey first, then targetKind, else the neutral note (never force-fit)', () => {
+test('the §4.5 join: clusterKey first, then targetKind, else the cluster is hidden (never force-fit)', () => {
   const byKey = coachingPanel(promptsWithCoaching([coachCardFx()]), { openKey: 'aaaa' });
   assert.match(byKey, /Add one line to CLAUDE\.md\./, 'a cluster-specific card supplies the recommendation');
+  assert.match(byKey, /data-pr-row="aaaa"/, 'and its cluster is the advised row shown');
 
   const byKind = coachingPanel(promptsWithCoaching([
     coachCardFx({ id: 'reask-delta', clusterKey: null, targetKind: 'reask', try: 'State the acceptance criteria up front.' }),
   ]), { openKey: 'cccc' }); // cccc has kind 'reask'
   assert.match(byKind, /State the acceptance criteria up front\./, 'a kind-level card joins by targetKind');
+  assert.match(byKind, /data-pr-row="cccc"/);
 
-  const none = coachingPanel(promptsWithCoaching([coachCardFx({ clusterKey: 'zzzz', targetKind: 'persona' })]), { openKey: 'aaaa' });
-  assert.match(none, /No specific coaching for this pattern yet\./);
+  // A card that matches no cluster leaves every cluster advice-less: under P15
+  // the table hides them all and names the clean empty state, never a neutral
+  // "no coaching" note behind a still-shown row.
+  const none = coachingPanel(promptsWithCoaching([coachCardFx({ clusterKey: 'zzzz', targetKind: 'persona' })]), {});
+  assert.doesNotMatch(none, /data-pr-row=/, 'a cluster with no matching card is hidden, not shown blank');
+  assert.match(none, /no repeated pattern has coaching advice yet/);
   assert.doesNotMatch(none, /Add one line to CLAUDE\.md/, "another cluster's card is not shown here");
 });
 
@@ -1279,6 +1317,77 @@ test('Dismiss carries the card id + a HOVER explanation; the dismissed state fli
 
   const persisted = coachingPanel(promptsWithCoaching([coachCardFx({ status: 'dismissed' })]), { openKey: 'aaaa' });
   assert.match(persisted, /class="coach-foot done"/, 'a persisted ledger dismissal shows it too');
+
+  // F1: after a page-load-persisted dismissal, an Undo sets the client flag to
+  // false; that EXPLICIT false must override the stale card.status so the row
+  // re-renders un-dismissed live, without waiting for the next /api/usage load.
+  const undone = coachingPanel(promptsWithCoaching([coachCardFx({ status: 'dismissed' })]),
+    { openKey: 'aaaa', dismissed: { 'commit-push-claude-md': false } });
+  assert.doesNotMatch(undone, /coach-foot done/, 'an explicit client un-dismiss overrides the persisted status');
+  assert.match(undone, /data-pr-dismiss="commit-push-claude-md"/, 'the Dismiss control is back, live');
+});
+
+// ── P15: the table shows ONLY patterns that have advice ──────────────────────
+
+test('P15: a cluster with no coaching card is hidden from the table, whatever its count', () => {
+  const prompts = {
+    ...PANEL_PROMPTS,
+    patterns: { ...PANEL_PROMPTS.patterns, clusters: [
+      PANEL_PROMPTS.patterns.clusters[0], // aaaa (instruction) — advised
+      { key: 'noadv', kind: 'tap', label: { name: 'Bare tap', source: 'seed' }, class: 'other',
+        count: 99, sessions: 40, days: 20, hosts: ['claude'], medianTokens: 1, sampleSessionIds: [] },
+    ] },
+    coaching: { cards: keyCards([PANEL_PROMPTS.patterns.clusters[0]]), summary: null },
+  };
+  const html = coachingPanel(prompts, {});
+  assert.match(html, /data-pr-row="aaaa"/, 'the advised cluster is shown');
+  assert.doesNotMatch(html, /data-pr-row="noadv"/, 'the advice-less cluster is hidden even at the highest count');
+  assert.doesNotMatch(html, /data-pr-filter="tap"/, 'no pill for a kind with no advice-bearing pattern');
+  assert.match(html, /data-pr-filter="all"[^>]*>All <span class="fc mono">1</, 'All counts only the advised set');
+});
+
+test('P15: no advice-bearing pattern names the clean empty state, not a blank grid', () => {
+  const html = coachingPanel({ ...PANEL_PROMPTS, coaching: { cards: [], summary: null } }, {});
+  assert.match(html, /no repeated pattern has coaching advice yet/, 'the named clean-result empty state');
+  assert.doesNotMatch(html, /data-pr-row=/, 'no rows behind the message');
+  assert.doesNotMatch(html, /class="pr-filters"/, 'and no pills when nothing is advised');
+  assert.match(html, /class="pr-insight"/, 'the re-ask insight still leads, so the panel is never truly blank');
+});
+
+// ── QE F-1: a kind-level card names its window scope inside a cluster panel ───
+
+test('QE F-1: a kind-level card labels its rationale window-scope; a clusterKey card does not', () => {
+  // cccc (kind reask, count 3) joins a kind-level reask card whose finding is a
+  // WINDOW aggregate; the panel must name that scope so "107 across 29 sessions"
+  // is not read as this count-3 row's.
+  const kindJoined = coachingPanel(promptsWithCoaching([
+    coachCardFx({ id: 'reask-delta', clusterKey: null, targetKind: 'reask',
+      try: 'State the acceptance criteria up front.', finding: '107 re-asks across 29 sessions.' }),
+  ]), { openKey: 'cccc' });
+  assert.match(kindJoined,
+    /class="rec-scope">Across all re-ask patterns this window:<\/span> 107 re-asks across 29 sessions\./,
+    'the kind-level finding is prefixed with its window-scope label');
+
+  // A clusterKey card's numbers already are this cluster's, so no scope prefix.
+  const keyJoined = coachingPanel(promptsWithCoaching([coachCardFx()]), { openKey: 'aaaa' });
+  assert.match(keyJoined, /class="rec-why">recurred 12 times across 8 sessions\.</, 'the finding renders plainly');
+  assert.doesNotMatch(keyJoined, /rec-scope/, 'a cluster-specific card gets no window-scope prefix');
+});
+
+// ── F-5: the sort is stable across ties ──────────────────────────────────────
+
+test('F-5: equal-value rows keep a deterministic order across a re-sort (name tiebreak)', () => {
+  const tied = [
+    { key: 't-b', kind: 'instruction', label: { name: 'Bravo', source: 'seed' }, class: 'other', count: 5, sessions: 3, days: 2, hosts: ['claude'], medianTokens: 8, sampleSessionIds: [] },
+    { key: 't-a', kind: 'instruction', label: { name: 'Alpha', source: 'seed' }, class: 'other', count: 5, sessions: 3, days: 2, hosts: ['claude'], medianTokens: 8, sampleSessionIds: [] },
+  ];
+  const prompts = { ...PANEL_PROMPTS, patterns: { ...PANEL_PROMPTS.patterns, clusters: tied },
+    coaching: { cards: keyCards(tied), summary: null } };
+  const rowsOf = (h) => [...h.matchAll(/data-pr-row="([\w-]+)"/g)].map((m) => m[1]);
+  const desc = rowsOf(coachingPanel(prompts, { sort: { key: 'count', dir: 'desc' } }));
+  const asc = rowsOf(coachingPanel(prompts, { sort: { key: 'count', dir: 'asc' } }));
+  assert.deepEqual(desc, ['t-a', 't-b'], 'a count tie breaks on the name, Alpha before Bravo');
+  assert.deepEqual(asc, ['t-a', 't-b'], 'and the tiebreak is direction-stable, so a re-sort never shuffles ties');
 });
 
 test('the card source chip is three-valued: rule / enriched / unknown (F-9, re-pointed at the expand panel)', () => {

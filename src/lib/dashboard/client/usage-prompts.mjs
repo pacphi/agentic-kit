@@ -215,8 +215,8 @@ function hostChips(p) {
  * this panel renders ONLY what the fingerprint layer actually carries: whether
  * a prompt asks, and whether it is short enough to be an approval. The residue
  * is named "statements and instructions" rather than split into a guess, and
- * the panel beside it says the taxonomy is missing instead of implying these
- * three bars are it.
+ * the panel's own caveat says the split is partial, so these three bars never
+ * read as the full taxonomy.
  */
 export function steerPanel(p) {
   var pp = pat(p);
@@ -486,8 +486,18 @@ var PR_KIND_LABEL = {
   reask: 'Re-asks', persona: 'Role preambles', tap: 'Taps',
   question: 'Questions', instruction: 'Instructions',
 };
-// Pill order — most actionable first, matching the kind precedence (§3).
-var PR_KIND_ORDER = ['reask', 'persona', 'tap', 'question', 'instruction'];
+// Pill order — the locked mockup's order (Taps first): the reading order the
+// user hand-designed for the panel, NOT the §3 kind precedence.
+var PR_KIND_ORDER = ['tap', 'question', 'instruction', 'persona', 'reask'];
+
+// The whole-KIND phrase used when a kind-level card's rationale is shown inside
+// a single cluster's panel — it names the window-wide span so the aggregate
+// numbers in the finding are not read as this one row's (QE F-1). Lower-case so
+// it reads inside the "Across all … this window:" sentence.
+var PR_KIND_SCOPE = {
+  tap: 'supervision taps', question: 'question patterns', instruction: 'instruction patterns',
+  persona: 'role-preamble patterns', reask: 're-ask patterns',
+};
 
 // The sortable columns, in render order. `num` right-aligns and defaults to a
 // descending first click; `tip` is the header's precise-definition tooltip.
@@ -627,14 +637,24 @@ export function coachingPanel(p, state) {
       + '<div class="empty">no prompt repeated across enough sessions or days to cluster. '
       + 'That is a clean result, not a missing one.</div>';
   }
+  // P15: the table shows ONLY patterns that have advice — a cluster with no
+  // joined coaching card (§4.5) is hidden here (it still counts in the
+  // provenance / steer panels and `ak usage prompts --deep`), so a row never
+  // promises coaching it has none of. Pills, counts and the table all draw from
+  // this advised set, not the full cluster list.
+  var advised = advisedClusters(p);
+  if (!advised.length) {
+    return coachingInsight(pp)
+      + '<div class="empty">no repeated pattern has coaching advice yet &mdash; a clean result.</div>';
+  }
   var sort = state.sort || COACH_DEFAULT_SORT;
-  var rows = coachingRows(clusters, state);
+  var rows = coachingRows(advised, state);
   var body = rows.length
     ? rows.map(function (c) { return coachRow(c, state) + coachDetailRow(c, p, state); }).join('')
     : '<tr><td colspan="' + COACH_COLS.length + '" class="pr-empty">no patterns of this kind in '
       + 'this window &mdash; clear the filter to see the rest.</td></tr>';
   return coachingInsight(pp)
-    + coachingFilters(clusters, state.filter || 'all')
+    + coachingFilters(advised, state.filter || 'all')
     + '<div class="pr-tablewrap" role="region" aria-label="Recurring prompt patterns" tabindex="0">'
     + '<table class="pr-coach"><caption class="sr-only">Recurring prompt clusters; each row expands '
     + 'to its coaching panel.</caption>'
@@ -682,6 +702,18 @@ function cardForCluster(cards, c) {
     if (!byKind && card.targetKind && card.targetKind === clusterKind(c)) byKind = card;
   }
   return byKey || byKind || null;
+}
+
+/** The advice-bearing clusters — those a coaching card joins (§4.5). The
+ *  Coaching table draws ONLY these (P15): a recurring pattern with no proposed
+ *  card is real, but it has nothing to advise, so it belongs in the provenance /
+ *  steer panels and `--deep`, not in a table that promises coaching. Exported so
+ *  usage.mjs's panel subtitle counts the same set the table shows. */
+export function advisedClusters(p) {
+  var pp = pat(p);
+  var clusters = pp && Array.isArray(pp.clusters) ? pp.clusters : [];
+  var cards = p && p.coaching && Array.isArray(p.coaching.cards) ? p.coaching.cards : [];
+  return clusters.filter(function (c) { return cardForCluster(cards, c); });
 }
 
 // Both icons ship in the copy button; CSS shows one at a time by the `.copied`
@@ -769,10 +801,16 @@ function coachDraft(card, key) {
 }
 
 /** Dismiss + its hover explanation, the source chip, and the post-dismiss
- *  "Dismissed … Undo" inline (§2.5, §4.3). A card is shown as dismissed if the
- *  optimistic client flag is set OR its persisted ledger status already is. */
+ *  "Dismissed … Undo" inline (§2.5, §4.3). Three-valued (F1): an EXPLICIT client
+ *  flag — set by either a Dismiss or an Undo — wins over the persisted ledger
+ *  `status`; only when the client has said nothing does the persisted status
+ *  decide. Without this, an Undo of a page-load-persisted dismissal (which sets
+ *  the flag to false) is masked by the stale `status:'dismissed'` and the row
+ *  stays "Dismissed" until the next data refresh. */
 function coachFoot(card, state) {
-  var dismissed = (state.dismissed && state.dismissed[card.id]) || card.status === 'dismissed';
+  var dismissed = state.dismissed && (card.id in state.dismissed)
+    ? !!state.dismissed[card.id]
+    : card.status === 'dismissed';
   return '<div class="coach-foot' + (dismissed ? ' done' : '') + '">'
     + '<span class="dismiss-wrap"><button type="button" class="pr-dismiss" data-pr-dismiss="' + esc(card.id) + '">'
     + 'Dismiss</button><span class="dismiss-tip">Tells the tool you&rsquo;ve got this &mdash; it stops being '
@@ -783,12 +821,28 @@ function coachFoot(card, state) {
     + coachSourceChip(card) + '</div>';
 }
 
+function kindScopeLabel(kind) { return PR_KIND_SCOPE[kind] || 'patterns of this kind'; }
+
+/** The rationale line under the recommendation. A KIND-level card (targetKind,
+ *  no clusterKey) states WINDOW-aggregate numbers — the whole re-ask phenomenon,
+ *  not this one cluster — so it is prefixed with a scope label naming that span,
+ *  keeping "107 across 29 sessions" from being read as this count-11 row's
+ *  (QE F-1). A cluster-specific card needs no prefix: its numbers already are
+ *  this cluster's. */
+function coachWhy(card) {
+  if (!card.finding) return '';
+  var scope = card.targetKind && !card.clusterKey
+    ? '<span class="rec-scope">Across all ' + esc(kindScopeLabel(card.targetKind)) + ' this window:</span> '
+    : '';
+  return '<p class="rec-why">' + scope + esc(card.finding) + '</p>';
+}
+
 /** Recommendation → Draft → Dismiss, from the joined card. The recommendation
  *  is the card's action (no "Try:" prefix) with its finding as the rationale. */
 function coachCardBlock(card, key, state) {
   return '<section class="coach-sec"><h5>Recommendation</h5>'
     + '<div class="rec-title">' + esc(card.try || card.title) + '</div>'
-    + (card.finding ? '<p class="rec-why">' + esc(card.finding) + '</p>' : '') + '</section>'
+    + coachWhy(card) + '</section>'
     + coachDraft(card, key)
     + coachFoot(card, state);
 }

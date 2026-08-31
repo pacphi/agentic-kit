@@ -519,13 +519,6 @@ export function renderPage({ name, version }) {
         panel can show a pattern&rsquo;s own prompts back to you on demand &mdash; masked, with secrets
         redacted server-side, from your local transcripts. Only turns a person typed are counted; agent
         deliveries, tool templates and slash records are filtered out before anything below is measured.</span></div>
-      <div class="pr-toolbar">
-        <div class="pr-posture" id="u-pr-posture" role="group" aria-label="Prompt text visibility">
-          <span class="pt-lbl mono">prompt text</span>
-          <button type="button" class="pt-btn" data-pr-posture="shown" aria-pressed="true">shown</button>
-          <button type="button" class="pt-btn" data-pr-posture="hidden" aria-pressed="false">hidden</button>
-        </div>
-      </div>
       <div class="hero" id="u-pr-kpis"></div>
       <section class="strip">
         <div class="sh"><h2>Who is typing</h2><span class="n mono" id="u-pr-prov-note"></span></div>
@@ -550,7 +543,13 @@ export function renderPage({ name, version }) {
         <div id="u-pr-hosts"></div>
       </section>
       <section class="strip">
-        <div class="sh"><h2>Coaching</h2><span class="n mono" id="u-pr-coaching-note"></span></div>
+        <div class="sh sh-coach"><h2>Coaching</h2><span class="n mono" id="u-pr-coaching-note"></span>
+          <div class="pr-posture" id="u-pr-posture" role="group" aria-label="Prompt text visibility">
+            <span class="pt-lbl mono">prompt text</span>
+            <button type="button" class="pt-btn" data-pr-posture="shown" aria-pressed="true">shown</button>
+            <button type="button" class="pt-btn" data-pr-posture="hidden" aria-pressed="false">hidden</button>
+          </div>
+        </div>
         <div id="u-pr-coaching"></div>
       </section>
     </section>

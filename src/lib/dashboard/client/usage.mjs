@@ -5,7 +5,7 @@ import { VIEWS, authHeaders, esc, setTab, syncHash } from './bootstrap.mjs';
 import { ago } from './intelligence.mjs';
 import { renderModelFacets, renderModelInventory, renderModelLifecycle } from './model-lifecycle.mjs';
 import { bucketPercentile, bucketPositionPct, deltaChip, donut2, histogram, rankedRows, sparklineSvg, stackedDays } from './usage-rhythm.mjs';
-import { coachingPanel, hostInterplay, promptKpis, provenancePanel, steerPanel, tapLengthPanel } from './usage-prompts.mjs';
+import { advisedClusters, coachingPanel, hostInterplay, promptKpis, provenancePanel, steerPanel, tapLengthPanel } from './usage-prompts.mjs';
 import { renderUsage } from './usage-orchestrators.mjs';
 
   // ══ Usage tab ══════════════════════════════════════════════════════════════
@@ -14,9 +14,11 @@ import { renderUsage } from './usage-orchestrators.mjs';
   // the pure builder so a re-render is idempotent (usage-prompts.mjs). `filter`
   // is a kind or 'all'; `sort` a {key,dir}; `openKey` the one expanded cluster;
   // `posture` the shown/hidden prompt-text toggle; `samples` a per-cluster fetch
-  // cache; `dismissed` the optimistic per-card dismissal map.
+  // cache; `dismissed` the optimistic per-card dismissal map. `promptSamplesWindow`
+  // remembers which `usageDays` window the cache was filled under, so a window
+  // change can drop it rather than render stale samples (fable F3).
   var promptFilter="all", promptSort={key:"count",dir:"desc"}, promptOpenKey=null,
-    promptPosture="shown", promptSamples={}, promptDismissed={};
+    promptPosture="shown", promptSamples={}, promptDismissed={}, promptSamplesWindow=null;
   export var MODELS=null,MODEL_PAGE=null,modelRows=[],modelSnapshotId=null,modelsBusy=false,modelRequestSeq=0,modelSearchTimer=null;
   export var MODEL_LIMIT=50,modelSort="lifecycle",modelDirection="asc",modelRouteSort="model",modelRouteDirection="asc";
 
@@ -125,6 +127,14 @@ import { renderUsage } from './usage-orchestrators.mjs';
   export function loadUsage(force){
     if(usageBusy)return Promise.resolve();
     usageBusy=true;
+    // The per-cluster samples cache is window-scoped: its keys resolve only
+    // against the window they were fetched under, so a window change must drop it
+    // (and collapse the open row, whose key may not exist in the new window)
+    // rather than render the prior window's masked text under the new one — a
+    // same-window poll leaves it untouched (fable F3 / I-3).
+    if(promptSamplesWindow!=null&&promptSamplesWindow!==usageDays){
+      promptSamples={}; promptOpenKey=null; promptSamplesWindow=null;
+    }
     var jobs=[fetch("/api/usage?days="+usageDays,{cache:"no-store",headers:authHeaders()}).then(function(r){return r.json();})
       .then(function(d){USAGE=d; usageLoaded=true;})];
     if(usageView==="transcript"&&usageSession&&(force||!TRANSCRIPT||TRANSCRIPT.id!==usageSession))
@@ -236,7 +246,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
   export function setUsageView(v,session){
     usageView=v;
     if(session!==undefined)usageSession=session;
-    var headings={score:["Usage scorecard","Token consumption, API-equivalent cost, efficiency, and trends."],limits:["Provider limits","Current provider windows, reset timing, and available capacity."],findings:["Usage findings","Actionable anomalies, efficiency opportunities, and evidence-backed recommendations."],prompts:["Prompt patterns","What you type across every host, which patterns repeat, and what to change — from fingerprints, never prompt text."],sessions:["Session usage","Browse retained sessions by project, category, duration, tokens, and cost."],models:["Models","Observed models in this window, configured routes, and the separate provider/local catalogue."],transcript:["Transcript detail","Inspect the selected session's locally retained, server-masked evidence."]},heading=headings[v]||headings.score;
+    var headings={score:["Usage scorecard","Token consumption, API-equivalent cost, efficiency, and trends."],limits:["Provider limits","Current provider windows, reset timing, and available capacity."],findings:["Usage findings","Actionable anomalies, efficiency opportunities, and evidence-backed recommendations."],prompts:["Prompt patterns","What you type across every host, which patterns repeat, and what to change — from fingerprints, with masked prompt text on demand."],sessions:["Session usage","Browse retained sessions by project, category, duration, tokens, and cost."],models:["Models","Observed models in this window, configured routes, and the separate provider/local catalogue."],transcript:["Transcript detail","Inspect the selected session's locally retained, server-masked evidence."]},heading=headings[v]||headings.score;
     document.getElementById("usage-view-title").textContent=heading[0];document.getElementById("usage-view-description").textContent=heading[1];
     var btns=document.querySelectorAll("#usage-seg [data-view]");
     for(var i=0;i<btns.length;i++){var on=btns[i].getAttribute("data-view")===v;btns[i].setAttribute("aria-selected",on?"true":"false");btns[i].tabIndex=on?0:-1;}
@@ -336,12 +346,18 @@ import { renderUsage } from './usage-orchestrators.mjs';
   // SHOWN posture (hidden makes NO request); the SAME `usageDays` window as
   // /api/usage, or the cluster key set will not resolve. Cached per key for the
   // session (loading/ok/empty/error), so re-expanding never refetches; one
-  // in-flight fetch per row. A late response is ignored if the row has since
-  // collapsed or another opened (the openKey guard), but the result is still
-  // cached for a later re-expand.
+  // in-flight fetch per row.
+  //
+  // The per-KEY cache is what keeps a late response from ever crossing rows:
+  // each response writes promptSamples[itsOwnKey], and the panel only ever reads
+  // promptSamples[openKey], so a late A cannot land in an open B regardless of
+  // arrival order. The `promptOpenKey===key` check below is therefore an
+  // OPTIMIZATION — it skips a wasted re-render when the row has since collapsed
+  // or another opened — not the safety property (QE F-2).
   function maybeFetchSamples(key){
     if(promptPosture!=="shown")return;
     if(promptSamples[key])return;
+    promptSamplesWindow=usageDays;   // the window this cache belongs to (fable F3)
     promptSamples[key]={state:"loading"};
     renderCoaching(true);
     var url="/api/prompts/samples?key="+encodeURIComponent(key)+"&window="+usageDays;
@@ -1363,10 +1379,11 @@ import { renderUsage } from './usage-orchestrators.mjs';
     host.innerHTML=coachingPanel(USAGE.prompts,coachState());
     if(preserveScroll){var w2=host.querySelector(".pr-tablewrap"); if(w2)w2.scrollTop=top;}
   }
+  // The subtitle counts the ADVISED set the table actually draws (P15), not
+  // every recurring cluster — so the header and the rows below it agree.
   function coachingNote(p,win){
-    var pat=p.patterns;
-    var n=pat&&pat.clusters?pat.clusters.length:0;
-    return win+" · "+n+" recurring pattern"+(n===1?"":"s")+" · click one for coaching";
+    var n=advisedClusters(p).length;
+    return win+" · "+n+" pattern"+(n===1?"":"s")+" with advice · click one for coaching";
   }
   function setText(id,txt){var el=document.getElementById(id);if(el)el.textContent=txt;}
   function windowLabel(){return usageDays>=365?"all history":"last "+usageDays+"d";}

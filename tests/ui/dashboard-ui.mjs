@@ -3581,6 +3581,30 @@ async function main() {
             title: 'The same ask lands twice', try: 'State the acceptance criteria in the first ask.',
             finding: '107 re-asks across 29 sessions.', basis: '107 re-ask pairs.',
             source: 'rule', status: 'proposed', stale: false, generatedAt: '2026-08-29T00:00:00.000Z', evidenceHash: 'b'.repeat(16) },
+          // P15: the table shows only advice-bearing clusters, so every fixture
+          // cluster carries a card (the four taps/question/persona rows here) —
+          // otherwise they would be hidden and the pill/sort/scroll assertions
+          // below would have nothing to measure.
+          { id: 'yes-standing-rule', clusterKey: 'k-yes', targetKind: null,
+            title: 'Approvals that could stand as a rule', try: 'Let low-risk steps proceed without a confirmation tap.',
+            finding: '47 one-word approvals across 23 sessions.', basis: '47 taps.',
+            source: 'rule', status: 'proposed', stale: false, generatedAt: '2026-08-29T00:00:00.000Z', evidenceHash: 'c'.repeat(16),
+            draft: { kind: 'claude-md-line', text: 'Proceed through low-risk, reversible steps without asking for confirmation.' } },
+          { id: 'continue-standing-rule', clusterKey: 'k-continue', targetKind: null,
+            title: 'Continue nudges the agent could skip', try: 'Have the agent continue through checkpoints on its own.',
+            finding: '40 continue nudges across 26 sessions.', basis: '40 taps.',
+            source: 'rule', status: 'proposed', stale: false, generatedAt: '2026-08-29T00:00:00.000Z', evidenceHash: 'd'.repeat(16),
+            draft: { kind: 'claude-md-line', text: 'After finishing a step, continue to the next without waiting to be told.' } },
+          { id: 'status-checkins', clusterKey: 'k-status', targetKind: null,
+            title: 'Progress check-ins you keep asking for', try: 'Have the agent post progress at checkpoints.',
+            finding: '16 status prompts across 16 sessions.', basis: '16 check-ins.',
+            source: 'rule', status: 'proposed', stale: false, generatedAt: '2026-08-29T00:00:00.000Z', evidenceHash: 'e'.repeat(16),
+            draft: { kind: 'claude-md-line', text: 'Post a one-line progress update before and after each major step.' } },
+          { id: 'role-fragment', clusterKey: 'k-role', targetKind: null,
+            title: 'A retyped role preamble', try: 'Move the retyped role into a managed prompt fragment.',
+            finding: 'Nine ~1,260-token role preambles this window.', basis: '9 preambles.',
+            source: 'enriched', status: 'proposed', stale: false, generatedAt: '2026-08-29T00:00:00.000Z', evidenceHash: 'f'.repeat(16),
+            draft: { kind: 'fragment', text: 'role: senior-ts-engineer' } },
         ],
         summary: null,
       },
@@ -3671,6 +3695,11 @@ async function main() {
         && !/Try:/.test(await visibleText(page, '#u-pr-coaching .detail-row')),
       'the recommendation did not render from the clusterKey-joined card');
 
+    // The deliverable shot: the advice-only Coaching table (P15) with the
+    // prompt-text toggle relocated into the panel header (P16) and Taps-first
+    // filter pills (P5), one pattern expanded to its coaching card.
+    await shoot(page, 'coaching-advice-table');
+
     // copy the draft → the button flips to its copied state (clipboard granted)
     await page.click('#u-pr-coaching [data-pr-copy="k-commit"]');
     await page.waitForTimeout(120);
@@ -3702,6 +3731,103 @@ async function main() {
     await page.waitForFunction(() => /commit and push/.test(document.querySelector('#u-pr-coaching .pr-typed')?.textContent || ''), null, { timeout: 4000 });
     check('showing it again restores the masked text from cache, without a re-fetch',
       samplesWindows.length === samplesBeforeReshow, `an extra samples fetch fired (${samplesBeforeReshow} → ${samplesWindows.length})`);
+
+    // ── fable F3: a window change invalidates the samples cache ───────────────
+    // The per-cluster cache is window-scoped; changing the window must drop it so
+    // re-opening the same pattern refetches under the new window rather than
+    // serving the prior window's masked text (I-3). Without the invalidation the
+    // cache-hit guard would serve stale samples and no second fetch would fire.
+    const winBefore = usageDaysSeen[usageDaysSeen.length - 1];
+    const samplesBeforeWin = samplesWindows.length;
+    const otherDay = await page.$$eval('#usage-days [data-days]', (chips, cur) => {
+      const c = chips.find((b) => b.getAttribute('data-days') !== cur && !b.hidden);
+      return c ? c.getAttribute('data-days') : null;
+    }, winBefore);
+    if (otherDay) {
+      await page.click(`#usage-days [data-days="${otherDay}"]`);
+      await page.waitForTimeout(150); // loadUsage + re-render under the new window
+      await page.waitForSelector('#u-pr-coaching .pr-coach', { state: 'attached' });
+      // the invalidation collapses the open row; if a regression left it open,
+      // close it ourselves so the re-open is deterministic either way — then a
+      // fresh open MUST refetch, since a surviving cache would serve a hit and
+      // never fetch (which is exactly what this pins).
+      if (await page.$('#u-pr-coaching .detail-row')) {
+        await page.click('#u-pr-coaching [data-pr-open="k-commit"]');
+        await page.waitForTimeout(60);
+      }
+      await page.click('#u-pr-coaching [data-pr-open="k-commit"]');
+      await page.waitForSelector('#u-pr-coaching .detail-row', { state: 'attached' });
+      await page.waitForTimeout(150);
+      check('a window change invalidates the samples cache, so re-opening refetches (fable F3)',
+        samplesWindows.length > samplesBeforeWin && samplesWindows[samplesWindows.length - 1] === otherDay,
+        `expected a refetch at window ${otherDay}; windows seen ${JSON.stringify(samplesWindows)} (before ${samplesBeforeWin})`);
+    } else {
+      check('a window change invalidates the samples cache (fable F3)', true, 'only one usable window chip — skipped');
+    }
+
+    // ── QE F-3: the hidden posture makes NO fetch for a FRESH row ─────────────
+    // The re-show test above only re-shows an ALREADY-cached row (guarded by the
+    // cache, not the posture). This opens a row that was never fetched while the
+    // posture is hidden — the ONLY path the `promptPosture!=="shown"` gate
+    // governs — and asserts zero samples traffic + no verbatim. Fails if that
+    // gate regresses (M13 survived without this).
+    await page.click('#u-pr-posture [data-pr-posture="hidden"]');
+    await page.waitForTimeout(60);
+    const samplesBeforeFresh = samplesWindows.length;
+    await page.click('#u-pr-coaching [data-pr-open="k-status"]'); // never expanded → uncached
+    await page.waitForSelector('#u-pr-coaching .detail-row', { state: 'attached' });
+    await page.waitForTimeout(150); // give any (buggy) fetch time to fire
+    check('opening a fresh row while hidden fetches nothing and renders no verbatim (QE F-3)',
+      samplesWindows.length === samplesBeforeFresh
+        && (await page.$$eval('#u-pr-coaching .verbatim', (v) => v.length === 0))
+        && /Prompt text is hidden/.test(await visibleText(page, '#u-pr-coaching .pr-typed')),
+      `hidden-posture open fetched samples (${samplesBeforeFresh} → ${samplesWindows.length}) or rendered text`);
+    await page.click('#u-pr-posture [data-pr-posture="shown"]'); // restore shown for the race below
+    await page.waitForTimeout(80);
+
+    // ── QE F-2: the async race — a late response never crosses rows ───────────
+    // Swap in a samples route that HOLDS each response until released, so we can
+    // open A, open B before A resolves, release A, and prove A's text lands in
+    // A's OWN (keyed) cache — never in the open B panel — and that a response for
+    // a since-collapsed row is a no-op. This pins the SAFETY invariant (the
+    // per-key cache); the openKey check is only an optimization, so this guards
+    // against a future non-keyed cache, honestly (QE F-2).
+    await page.unroute(/\/api\/prompts\/samples/);
+    const gate = {};
+    const gateText = { 'k-yes': 'RACE-ALPHA-YES', 'k-continue': 'RACE-BRAVO-CONTINUE', 'k-role': 'RACE-GAMMA-ROLE' };
+    await page.route(/\/api\/prompts\/samples/, async (route) => {
+      const key = new URL(route.request().url()).searchParams.get('key');
+      samplesWindows.push(new URL(route.request().url()).searchParams.get('window'));
+      await new Promise((res) => { gate[key] = res; });
+      await route.fulfill({ contentType: 'application/json',
+        body: JSON.stringify({ samples: [gateText[key] || 'x'], occurrences: [] }) });
+    });
+    const waitGate = async (key) => { for (let i = 0; i < 100 && !gate[key]; i++) await page.waitForTimeout(20); };
+    await page.click('#u-pr-coaching [data-pr-open="k-yes"]');       // open A
+    await waitGate('k-yes');
+    await page.click('#u-pr-coaching [data-pr-open="k-continue"]');  // open B before A resolves
+    await waitGate('k-continue');
+    gate['k-yes']();                                                 // release A (now collapsed)
+    await page.waitForTimeout(120);
+    check('a late response for a collapsed row never renders into the open row (QE F-2)',
+      !/RACE-ALPHA-YES/.test(await visibleText(page, '#u-pr-coaching .pr-typed')),
+      `A's late text leaked into B: ${JSON.stringify(await visibleText(page, '#u-pr-coaching .pr-typed'))}`);
+    gate['k-continue']();                                            // release B (still open)
+    await page.waitForFunction(() => /RACE-BRAVO-CONTINUE/.test(document.querySelector('#u-pr-coaching .pr-typed')?.textContent || ''), null, { timeout: 4000 });
+    check('the open row renders its OWN masked samples, never the other row\'s (QE F-2)',
+      /RACE-BRAVO-CONTINUE/.test(await visibleText(page, '#u-pr-coaching .pr-typed'))
+        && !/RACE-ALPHA-YES/.test(await visibleText(page, '#u-pr-coaching .pr-typed')),
+      `B panel read ${JSON.stringify(await visibleText(page, '#u-pr-coaching .pr-typed'))}`);
+    await page.click('#u-pr-coaching [data-pr-open="k-role"]');      // open C
+    await waitGate('k-role');
+    await page.click('#u-pr-coaching [data-pr-open="k-role"]');      // collapse C before it resolves
+    await page.waitForTimeout(40);
+    gate['k-role']();                                                // release the collapsed row
+    await page.waitForTimeout(120);
+    check('a late response for a since-collapsed row renders nothing (QE F-2)',
+      (await page.$$eval('#u-pr-coaching .detail-row', (r) => r.length)) === 0
+        && !/RACE-GAMMA-ROLE/.test(await visibleText(page, '#u-pr-coaching')),
+      'a collapsed row re-opened itself when its late samples arrived');
 
     await page.unroute(/\/api\/usage(\?|$)/);
     await page.unroute(/\/api\/prompts\/samples/);
