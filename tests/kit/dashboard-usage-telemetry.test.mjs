@@ -1327,6 +1327,14 @@ test('Dismiss carries the card id + a HOVER explanation; the dismissed state fli
   assert.match(undone, /data-pr-dismiss="commit-push-claude-md"/, 'the Dismiss control is back, live');
 });
 
+test('P6: a failed dismiss surfaces an inline "couldn\'t save" hint, not a silent no-op', () => {
+  const failed = coachingPanel(promptsWithCoaching([coachCardFx()]),
+    { openKey: 'aaaa', dismissError: { 'commit-push-claude-md': true } });
+  assert.match(failed, /class="dismiss-err"[^>]*>Couldn&rsquo;t save that/, 'the failure is surfaced inline');
+  const clean = coachingPanel(promptsWithCoaching([coachCardFx()]), { openKey: 'aaaa' });
+  assert.doesNotMatch(clean, /dismiss-err/, 'no hint when nothing failed');
+});
+
 // ── P15: the table shows ONLY patterns that have advice ──────────────────────
 
 test('P15: a cluster with no coaching card is hidden from the table, whatever its count', () => {

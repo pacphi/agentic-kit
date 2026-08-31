@@ -18,7 +18,8 @@ import { renderUsage } from './usage-orchestrators.mjs';
   // remembers which `usageDays` window the cache was filled under, so a window
   // change can drop it rather than render stale samples (fable F3).
   var promptFilter="all", promptSort={key:"count",dir:"desc"}, promptOpenKey=null,
-    promptPosture="shown", promptSamples={}, promptDismissed={}, promptSamplesWindow=null;
+    promptPosture="shown", promptSamples={}, promptDismissed={}, promptSamplesWindow=null,
+    promptDismissError={};
   export var MODELS=null,MODEL_PAGE=null,modelRows=[],modelSnapshotId=null,modelsBusy=false,modelRequestSeq=0,modelSearchTimer=null;
   export var MODEL_LIMIT=50,modelSort="lifecycle",modelDirection="asc",modelRouteSort="model",modelRouteDirection="asc";
 
@@ -399,17 +400,19 @@ import { renderUsage } from './usage-orchestrators.mjs';
       headers:Object.assign({"content-type":"application/json"},authHeaders()),
       body:JSON.stringify({id:id})}).then(function(r){return r.ok;});
   }
+  // On a failed write the optimistic state reverts AND a brief inline "couldn't
+  // save" hint is surfaced (P6) instead of a silent no-op — a retry clears it.
   function doDismiss(id){
-    promptDismissed[id]=true; renderCoaching(true);
+    promptDismissed[id]=true; promptDismissError[id]=false; renderCoaching(true);
     postCoaching("/api/prompts/dismiss",id).then(function(okv){
-      if(!okv){promptDismissed[id]=false; renderCoaching(true);}
-    }).catch(function(){promptDismissed[id]=false; renderCoaching(true);});
+      if(!okv){promptDismissed[id]=false; promptDismissError[id]=true; renderCoaching(true);}
+    }).catch(function(){promptDismissed[id]=false; promptDismissError[id]=true; renderCoaching(true);});
   }
   function doUndismiss(id){
-    promptDismissed[id]=false; renderCoaching(true);
+    promptDismissed[id]=false; promptDismissError[id]=false; renderCoaching(true);
     postCoaching("/api/prompts/undismiss",id).then(function(okv){
-      if(!okv){promptDismissed[id]=true; renderCoaching(true);}
-    }).catch(function(){promptDismissed[id]=true; renderCoaching(true);});
+      if(!okv){promptDismissed[id]=true; promptDismissError[id]=true; renderCoaching(true);}
+    }).catch(function(){promptDismissed[id]=true; promptDismissError[id]=true; renderCoaching(true);});
   }
 
   // One delegated listener on the static Coaching container (its innerHTML is
@@ -1366,7 +1369,8 @@ import { renderUsage } from './usage-orchestrators.mjs';
   // sort, expand and dismiss is just `renderCoaching()` again.
   function coachState(){
     return {filter:promptFilter,sort:promptSort,openKey:promptOpenKey,
-      posture:promptPosture,samples:promptSamples,dismissed:promptDismissed};
+      posture:promptPosture,samples:promptSamples,dismissed:promptDismissed,
+      dismissError:promptDismissError};
   }
   // `preserveScroll` holds the capped table's scroll position across a
   // re-render — used when samples land under an already-open row, so the row

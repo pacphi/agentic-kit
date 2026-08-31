@@ -919,6 +919,8 @@ export const USAGE_CSS = `
 }
 .coach-foot.done .dismiss-wrap{display:none}
 .coach-foot.done .dismissed-note{display:inline-flex}
+/* the inline "couldn't save" hint after a failed dismiss/undo POST (P6) */
+.dismiss-err{font-size:11.5px; color:var(--fail)}
 .coach-none{margin:0; font-size:12.5px; color:var(--ink-dim); font-style:italic}
 /* the card's source chip, right-aligned in the foot */
 .pr-card-source{

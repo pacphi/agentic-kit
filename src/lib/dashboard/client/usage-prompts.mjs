@@ -811,6 +811,10 @@ function coachFoot(card, state) {
   var dismissed = state.dismissed && (card.id in state.dismissed)
     ? !!state.dismissed[card.id]
     : card.status === 'dismissed';
+  // P6: when the last dismiss/undo POST failed, the optimistic state has already
+  // reverted (usage.mjs) — surface a brief inline hint here so the no-op is not
+  // silent; a retry clears it.
+  var failed = state.dismissError && state.dismissError[card.id];
   return '<div class="coach-foot' + (dismissed ? ' done' : '') + '">'
     + '<span class="dismiss-wrap"><button type="button" class="pr-dismiss" data-pr-dismiss="' + esc(card.id) + '">'
     + 'Dismiss</button><span class="dismiss-tip">Tells the tool you&rsquo;ve got this &mdash; it stops being '
@@ -818,6 +822,7 @@ function coachFoot(card, state) {
     + 'untouched.</span></span>'
     + '<span class="dismissed-note">Dismissed &mdash; won&rsquo;t resurface unless it gets materially worse. '
     + '<button type="button" class="undo" data-pr-undismiss="' + esc(card.id) + '">Undo</button></span>'
+    + (failed ? '<span class="dismiss-err" role="status">Couldn&rsquo;t save that &mdash; try again.</span>' : '')
     + coachSourceChip(card) + '</div>';
 }
 
