@@ -862,6 +862,8 @@ export const USAGE_CSS = `
 /* what you typed — masked, inline */
 .typed-load,.typed-empty,.typed-hidden{font-size:12px; color:var(--ink-dim)}
 .typed-hidden code,.typed-cap code{font-family:var(--mono); font-size:11px; color:var(--ink-2)}
+/* the command pointer in the advice-less Coaching empty state (P15) */
+.empty code{font-family:var(--mono); font-size:.92em; color:var(--accent)}
 .verbatim{
   margin-bottom:6px; padding:10px 12px; background:var(--bg); border:1px solid var(--line);
   border-left:2px solid var(--accent); border-radius:6px; font-family:var(--mono); font-size:12px;

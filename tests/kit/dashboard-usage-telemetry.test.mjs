@@ -1277,7 +1277,7 @@ test('the §4.5 join: clusterKey first, then targetKind, else the cluster is hid
   // "no coaching" note behind a still-shown row.
   const none = coachingPanel(promptsWithCoaching([coachCardFx({ clusterKey: 'zzzz', targetKind: 'persona' })]), {});
   assert.doesNotMatch(none, /data-pr-row=/, 'a cluster with no matching card is hidden, not shown blank');
-  assert.match(none, /no repeated pattern has coaching advice yet/);
+  assert.match(none, /No repeated pattern has coaching advice yet/);
   assert.doesNotMatch(none, /Add one line to CLAUDE\.md/, "another cluster's card is not shown here");
 });
 
@@ -1354,9 +1354,11 @@ test('P15: a cluster with no coaching card is hidden from the table, whatever it
   assert.match(html, /data-pr-filter="all"[^>]*>All <span class="fc mono">1</, 'All counts only the advised set');
 });
 
-test('P15: no advice-bearing pattern names the clean empty state, not a blank grid', () => {
+test('P15: no advice-bearing pattern names the clean empty state and points forward, not a blank grid', () => {
   const html = coachingPanel({ ...PANEL_PROMPTS, coaching: { cards: [], summary: null } }, {});
-  assert.match(html, /no repeated pattern has coaching advice yet/, 'the named clean-result empty state');
+  assert.match(html, /No repeated pattern has coaching advice yet/, 'the named clean-result empty state');
+  assert.match(html, /that&rsquo;s a clean result, not a missing one/, 'it frames the absence as clean, not missing');
+  assert.match(html, /<code>ak usage prompts --enrich<\/code>/, 'it points forward to --enrich, rendered as a command');
   assert.doesNotMatch(html, /data-pr-row=/, 'no rows behind the message');
   assert.doesNotMatch(html, /class="pr-filters"/, 'and no pills when nothing is advised');
   assert.match(html, /class="pr-insight"/, 'the re-ask insight still leads, so the panel is never truly blank');

@@ -645,7 +645,9 @@ export function coachingPanel(p, state) {
   var advised = advisedClusters(p);
   if (!advised.length) {
     return coachingInsight(pp)
-      + '<div class="empty">no repeated pattern has coaching advice yet &mdash; a clean result.</div>';
+      + '<div class="empty">No repeated pattern has coaching advice yet &mdash; that&rsquo;s a clean '
+      + 'result, not a missing one. Keep working, or run <code>ak usage prompts --enrich</code> to have '
+      + 'your own recurring patterns named.</div>';
   }
   var sort = state.sort || COACH_DEFAULT_SORT;
   var rows = coachingRows(advised, state);
