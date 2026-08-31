@@ -145,7 +145,13 @@ const SECRET_PATTERNS = [
   // Case-insensitive is safe here: the quote delimiters are a shape prose never
   // has, so this cannot widen into "tokens used" the way the assignment rule's
   // /i would (that rule stays case-sensitive above for exactly that reason).
-  [/(["'][A-Za-z0-9_-]*(?:secret|token|password|passwd|api_?key|private_?key)[A-Za-z0-9_-]*["']\s*:\s*)(["'])[^"']{8,}\2/gi,
+  // The {0,MAX_KEY_NAME_CHARS} bounds on BOTH classes are the SEC-1 fix — the
+  // same narrowing rules 142/154 already carry. Unbounded, a quote followed by a
+  // long secret-word run (never closing the quote) drove O(n^2) backtracking, and
+  // the masked-samples endpoint routes attacker-authored prompt text through here
+  // by default. A real key name never runs to hundreds of chars, so the bound
+  // costs nothing a caller would notice.
+  [new RegExp(`(["'][A-Za-z0-9_-]{0,${MAX_KEY_NAME_CHARS}}(?:secret|token|password|passwd|api_?key|private_?key)[A-Za-z0-9_-]{0,${MAX_KEY_NAME_CHARS}}["']\\s*:\\s*)(["'])[^"']{8,}\\2`, 'gi'),
     '$1$2…redacted$2'],
   // Line-anchored YAML/TOML/ini assignment — api_key = …, password: … — with no
   // quoting required. Anchored to line-start-through-key-through-:/= so it

@@ -335,3 +335,46 @@ test('the samples route is token-gated like the rest of /api/', async () => {
     await srv.close();
   }
 });
+
+// ── (g) SEC-1: the masker the endpoint routes attacker text through is linear ─
+// This endpoint is the first surface to route attacker-authored prompt text
+// through `maskSecrets` BY DEFAULT (masked-shown is the default posture). Rule
+// 148 — the quoted secret-key rule — had two UNBOUNDED `[A-Za-z0-9_-]*` classes
+// around its secret-word alternation, so a quote followed by a long `token…token`
+// run (that never closes the quote) drove O(n^2) catastrophic backtracking:
+// measured here 64ms@20KB → 235ms@40KB → 917ms@80KB, extrapolating to minutes on
+// a ~1.6MB paste and freezing the single-threaded event loop for every concurrent
+// request. Sibling rules 142/154 already bound this with MAX_KEY_NAME_CHARS; 148
+// was missed. These pin the fix.
+
+test('SEC-1: rule 148 masks a hostile quote-prefixed run in well under 100ms (ReDoS bound)', () => {
+  // The LEADING QUOTE is load-bearing: the pre-existing SEC-3 linearity tests use
+  // quote-LESS payloads, which engage rules 142/154 but never enter rule 148 (it
+  // requires `["']` first). That blind spot is exactly why 148 stayed unbounded.
+  const hostile = '"' + 'token'.repeat(20_000); // ~100 KB; seconds-to-minutes unbounded
+  const started = process.hrtime.bigint();
+  maskSecrets(hostile);
+  const ms = Number(process.hrtime.bigint() - started) / 1e6;
+  assert.ok(ms < 100, `rule 148 took ${ms.toFixed(0)}ms on a 100KB quote-prefixed run — the ReDoS bound is gone`);
+});
+
+test('SEC-1: the bound preserves rule 148 masking of every real quoted secret key (equivalence)', () => {
+  // A real secret's key name never carries more than MAX_KEY_NAME_CHARS of word
+  // chars before/after the secret word, so bounding the two classes to {0,64} is
+  // behaviour-preserving. These are the shapes rule 148 exists to catch — each
+  // must still redact after the bound.
+  const redacts = [
+    '{"api_key": "sk-ant-supersecretvalue123"}', // the brief's literal case
+    '{"apiKey":"abcdefghijklmnop1234"}',         // prefix-free value → rule 148 alone
+    "{'client_secret':'sekrit1234567890abcd'}",  // single-quoted, case-insensitive
+    '"my_token": "abcdefghij0123456789"',        // quoted `token` key
+    '{"private_key": "MIIEpAIBAAKCAQEA1234"}',   // private_key alternation
+  ];
+  for (const c of redacts) {
+    assert.ok(maskSecrets(c).includes('…redacted'), `rule 148 stopped redacting: ${c}`);
+  }
+  // And the bound must not have widened into prose: a quoted NON-secret key and
+  // ordinary token-count talk stay verbatim (no over-masking).
+  assert.equal(maskSecrets('{"note": "just a normal value here"}'), '{"note": "just a normal value here"}');
+  assert.equal(maskSecrets('we spent 500000 tokens on that run'), 'we spent 500000 tokens on that run');
+});

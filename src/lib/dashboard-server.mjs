@@ -64,7 +64,7 @@ import { renderPage } from './dashboard/page.mjs';
 // is a static import where usage-index.mjs is deliberately lazy (see
 // lazyUsage): the reason for that laziness is the transcript walk, which this
 // module does not do.
-import { BASELINE_TRAILING_DAYS, PROMPT_CLUSTER_JACCARD } from './usage-aggregate.mjs';
+import { BASELINE_TRAILING_DAYS, PROMPT_CLUSTER_JACCARD, MAX_TURN_CHARS } from './usage-aggregate.mjs';
 // Pure repetition analysis (no I/O) — the SAME clustering buildPromptPatterns
 // runs, re-derived over the deep-pass fingerprints so the masked-samples
 // endpoint can resolve a cluster key to its member hashes (§4.2). Static import
@@ -645,7 +645,12 @@ function clusterSampleTexts(cluster, textMap, maskFn) {
   for (const h of cluster.hashes) {
     const raw = textMap.get(h);
     if (typeof raw !== 'string') continue;
-    const masked = maskFn(raw);
+    // Defense-in-depth (SEC-1): cap the input the masker sees BEFORE masking.
+    // The rule-148 bound restores linearity, but a hard character ceiling here
+    // guarantees this endpoint can never hand an unbounded attacker blob to any
+    // regex — the same MAX_TURN_CHARS ceiling the transcript reader applies. A
+    // genuine phrasing is far under it, so this never truncates a real sample.
+    const masked = maskFn(raw.length > MAX_TURN_CHARS ? raw.slice(0, MAX_TURN_CHARS) : raw);
     if (seen.has(masked)) continue;
     seen.add(masked);
     out.push(masked);
