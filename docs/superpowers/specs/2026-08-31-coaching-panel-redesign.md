@@ -110,6 +110,31 @@ The occurrence links target `#usage/<sessionId>` and must actually open that ses
 transcript. Fix the client link format against the router's real contract
 (`bootstrap.mjs`) — the earlier bug shipped links the router could not resolve.
 
+### 4.5 Cluster → coaching-card association (the pattern-centric join)
+
+The expanded panel's **Recommendation / Draft / Dismiss** come from a coaching **card**, but
+cards are a separate unit (6 rules, keyed by id — and dismiss operates on a card id). A
+pattern row therefore needs to know which card, if any, addresses it. The signal already
+exists: cluster-targeting rules carry `evidence.clusterKey` (via `findSeedCluster`, matched
+on the published seed label). The backend publishes two fields on each coaching card:
+
+- `clusterKey` (string | null) — the specific cluster this card is about (from evidence).
+- `targetKind` (string | null) — the derived `kind` a card addresses when it is
+  kind-level rather than cluster-specific (static per rule: `reask-delta → reask`,
+  `progress-report-taps → tap`, `codex-role-library → persona`).
+
+**Client association, per cluster row (first match):** (1) a card with
+`card.clusterKey === cluster.key`; else (2) a card with `card.targetKind === cluster.kind`;
+else (3) none. When associated, the panel renders that card's recommendation, draft, source,
+and a **Dismiss** bound to the card id (§4.3). When not, the panel shows **Seen in** +
+**What you typed** only, with a neutral "No specific coaching for this pattern yet." — never
+a force-fit recommendation (evidence-honesty).
+
+**Host-level cards** that map to neither a cluster nor a kind (`codex-completion-criteria` —
+host asymmetry) do **not** appear in the pattern table in v1; they are host-level and are
+deferred from this pattern-centric surface (recorded in the ADR §6). No prompt text is added
+to any card by this association; `clusterKey`/`targetKind` are ids and enum values only.
+
 ## 5. Privacy & security posture (what changed, and why it's safe)
 
 - **Prompt text now appears in the browser by default** (masked), where before the view
