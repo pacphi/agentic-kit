@@ -526,31 +526,26 @@ export function renderPage({ name, version }) {
       </section>
       <section class="strip">
         <div class="sh"><h2>How you steer</h2><span class="n mono" id="u-pr-steer-note"></span></div>
-        <div class="two">
-          <div>
-            <div id="u-pr-steer"></div>
-            <h3 class="pr-sub">Supervision taps by length</h3>
-            <div id="u-pr-taps"></div>
-          </div>
-          <div id="u-pr-taxonomy"></div>
-        </div>
+        <div id="u-pr-steer"></div>
+        <h3 class="pr-sub">Supervision taps by length</h3>
+        <div id="u-pr-taps"></div>
       </section>
       <section class="strip">
-        <div class="sh"><h2>Host interplay</h2><span class="n mono" id="u-pr-hosts-note"></span></div>
+        <div class="sh"><h2>Host interplay</h2>
+          <span class="pr-infodot" tabindex="0" role="note" aria-label="About the host interplay figures">?
+            <span class="pr-tip"><b>Where you over-steer.</b> <b>Tap share</b> &mdash; how often you nudge
+              (&ldquo;done?&rdquo;) instead of writing a full instruction. <b>p90 length</b> &mdash; how long
+              your prompts run on that host. <b>Role openers</b> &mdash; how often you re-type a persona.
+              <br><br>Histories are unequal: a host adopted recently has fewer days behind its numbers, so
+              read each host against itself, not the other.</span>
+          </span>
+          <span class="n mono" id="u-pr-hosts-note"></span></div>
         <div id="u-pr-hosts"></div>
       </section>
       <section class="strip">
-        <div class="sh"><h2>Repeated patterns</h2><span class="n mono" id="u-pr-patterns-note"></span></div>
-        <div id="u-pr-reasks"></div>
-        <div id="u-pr-patterns"></div>
-      </section>
-      <section class="strip">
-        <div class="sh"><h2>Coaching</h2><span class="n mono">not built yet</span></div>
+        <div class="sh"><h2>Coaching</h2><span class="n mono" id="u-pr-coaching-note"></span></div>
         <div id="u-pr-coaching"></div>
       </section>
-      <div class="foot">clustering is deliberately loose &mdash; eleven wordings of one request outrank
-        eleven identical ones, because eleven wordings mean there is no canonical form to point at &middot;
-        pattern names come from a fixed curated vocabulary, never from what you typed</div>
     </section>
 
     <section class="view" id="v-sessions" role="tabpanel" aria-labelledby="usage-tab-sessions" hidden>

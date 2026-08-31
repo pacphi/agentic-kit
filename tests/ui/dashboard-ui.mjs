@@ -2745,24 +2745,23 @@ async function main() {
     await page.waitForTimeout(2500);
     check('selecting All switches the window to 365 and marks the chip',
       await page.evaluate(() => document.getElementById('usage-days-all')?.classList.contains('on'))
-        && (await visibleText(page, '#u-pr-patterns-note')).includes('all history'),
-      `All did not take effect; caption read ${JSON.stringify(await visibleText(page, '#u-pr-patterns-note'))}`);
+        && (await visibleText(page, '#u-pr-coaching-note')).includes('all history'),
+      `All did not take effect; caption read ${JSON.stringify(await visibleText(page, '#u-pr-coaching-note'))}`);
 
-    // The Coaching section (spec §5): the fixture corpus carries no prompt
-    // fingerprints at all, so every one of the six v1 cards structurally
-    // cannot fire — the section is expected to render its honest "no card
-    // met its evidence bar" state, never blank and never the old
-    // "arrives with the outcome ledger" placeholder text it shipped with
-    // before this wave built the real thing.
+    // The Coaching panel (redesign §2): the fixture corpus carries no prompt
+    // fingerprints at all, so the panel has no clusters to table — it is
+    // expected to render its honest NAMED empty state (a clean "nothing
+    // repeated" or "not computed for this window"), never blank and never the
+    // old "not built yet" / card-wall placeholder copy it shipped with before.
     const coachingText = await visibleText(page, '#u-pr-coaching');
     check('the Coaching section renders content, not an empty container',
       coachingText.trim().length > 0, 'u-pr-coaching was empty after switching to Prompts');
-    check('the Coaching section no longer shows the pre-ledger placeholder copy',
-      !coachingText.includes('arrives with the outcome ledger'),
+    check('the Coaching section no longer shows the pre-redesign placeholder copy',
+      !coachingText.includes('arrives with the outcome ledger') && !coachingText.includes('not built yet'),
       `Coaching still reads as the unbuilt shell: ${JSON.stringify(coachingText)}`);
-    check('a fingerprint-free fixture corpus renders Coaching\'s honest empty state',
-      coachingText.includes('no coaching card met its evidence bar'),
-      `expected the evidence-bar empty state; got ${JSON.stringify(coachingText)}`);
+    check('a fingerprint-free fixture corpus renders the Coaching panel\'s honest empty state',
+      /clean result, not a missing one|were not computed/.test(coachingText),
+      `expected a named empty state; got ${JSON.stringify(coachingText)}`);
 
     // NOT covered here: renderPrompts' no-fingerprint-layer branch. The bundle
     // is wrapped in an IIFE, so the renderer is not addressable from

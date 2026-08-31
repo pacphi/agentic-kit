@@ -5,11 +5,18 @@ import { VIEWS, authHeaders, esc, setTab, syncHash } from './bootstrap.mjs';
 import { ago } from './intelligence.mjs';
 import { renderModelFacets, renderModelInventory, renderModelLifecycle } from './model-lifecycle.mjs';
 import { bucketPercentile, bucketPositionPct, deltaChip, donut2, histogram, rankedRows, sparklineSvg, stackedDays } from './usage-rhythm.mjs';
-import { coachingPanel, hostInterplay, patternsTable, promptKpis, provenancePanel, reAskPanel, steerPanel, tapLengthPanel, taxonomyPlaceholder } from './usage-prompts.mjs';
+import { coachingPanel, hostInterplay, promptKpis, provenancePanel, steerPanel, tapLengthPanel } from './usage-prompts.mjs';
 import { renderUsage } from './usage-orchestrators.mjs';
 
   // ══ Usage tab ══════════════════════════════════════════════════════════════
   export var USAGE=null, usageLoaded=false, usageBusy=false, TRANSCRIPT=null;
+  // Coaching panel (Prompts view) interaction state — owned here, passed into
+  // the pure builder so a re-render is idempotent (usage-prompts.mjs). `filter`
+  // is a kind or 'all'; `sort` a {key,dir}; `openKey` the one expanded cluster;
+  // `posture` the shown/hidden prompt-text toggle; `samples` a per-cluster fetch
+  // cache; `dismissed` the optimistic per-card dismissal map.
+  var promptFilter="all", promptSort={key:"count",dir:"desc"}, promptOpenKey=null,
+    promptPosture="shown", promptSamples={}, promptDismissed={};
   export var MODELS=null,MODEL_PAGE=null,modelRows=[],modelSnapshotId=null,modelsBusy=false,modelRequestSeq=0,modelSearchTimer=null;
   export var MODEL_LIMIT=50,modelSort="lifecycle",modelDirection="asc",modelRouteSort="model",modelRouteDirection="asc";
 
@@ -296,6 +303,29 @@ import { renderUsage } from './usage-orchestrators.mjs';
     setUsageView("transcript",id);
     return true;
   };
+
+  // Toggle the sort column/direction: same column flips asc/desc, a new column
+  // starts descending for a numeric field and ascending for the name.
+  function sortCoaching(key){
+    if(promptSort.key===key){promptSort={key:key,dir:promptSort.dir==="asc"?"desc":"asc"};}
+    else{promptSort={key:key,dir:key==="name"?"asc":"desc"};}
+    renderCoaching();
+  }
+  // One delegated listener on the static Coaching container (its innerHTML is
+  // rewritten every re-render, but the container itself is stable, so the
+  // listener is attached once). Each interactive control carries a data-pr-*
+  // attribute; this dispatches on it. Filter + sort land here now; the expand,
+  // copy, dismiss and seen-in handlers are added with the expand panel.
+  (function wireCoaching(){
+    var host=document.getElementById("u-pr-coaching");
+    if(!host)return;
+    host.addEventListener("click",function(e){
+      var t=e.target.closest?e.target.closest("[data-pr-filter],[data-pr-sort]"):null;
+      if(!t)return;
+      if(t.hasAttribute("data-pr-filter")){promptFilter=t.getAttribute("data-pr-filter");renderCoaching();return;}
+      if(t.hasAttribute("data-pr-sort")){sortCoaching(t.getAttribute("data-pr-sort"));}
+    });
+  })();
 
   // titleTxt is optional and goes on the OUTER .kpi, so the whole card is the
   // hover target — a tooltip anchored to the number alone would be a 40px
@@ -1192,27 +1222,31 @@ import { renderUsage } from './usage-orchestrators.mjs';
     setText("u-pr-steer-note",win+" · typed prompts only");
     document.getElementById("u-pr-steer").innerHTML=steerPanel(p);
     document.getElementById("u-pr-taps").innerHTML=tapLengthPanel(p);
-    document.getElementById("u-pr-taxonomy").innerHTML=taxonomyPlaceholder();
-    setText("u-pr-hosts-note",win+" · per host, unequal histories");
+    setText("u-pr-hosts-note",win+" · per host");
     document.getElementById("u-pr-hosts").innerHTML=hostInterplay(p);
-    setText("u-pr-patterns-note",patternsNote(p,win));
-    document.getElementById("u-pr-reasks").innerHTML=reAskPanel(p);
-    document.getElementById("u-pr-patterns").innerHTML=patternsTable(p);
-    document.getElementById("u-pr-coaching").innerHTML=coachingPanel(p);
+    setText("u-pr-coaching-note",coachingNote(p,win));
+    renderCoaching();
+  }
+  // The Coaching panel owns interaction state (filter, sort, open row, prompt-
+  // text posture, the per-cluster samples cache, optimistic dismissals). A
+  // re-render is idempotent from `p` + that state, so every pill click, header
+  // sort, expand and dismiss is just `renderCoaching()` again.
+  function coachState(){
+    return {filter:promptFilter,sort:promptSort,openKey:promptOpenKey,
+      posture:promptPosture,samples:promptSamples,dismissed:promptDismissed};
+  }
+  function renderCoaching(){
+    var host=document.getElementById("u-pr-coaching");
+    if(!host||!USAGE||!USAGE.prompts)return;
+    host.innerHTML=coachingPanel(USAGE.prompts,coachState());
+  }
+  function coachingNote(p,win){
+    var pat=p.patterns;
+    var n=pat&&pat.clusters?pat.clusters.length:0;
+    return win+" · "+n+" recurring pattern"+(n===1?"":"s")+" · click one for coaching";
   }
   function setText(id,txt){var el=document.getElementById(id);if(el)el.textContent=txt;}
   function windowLabel(){return usageDays>=365?"all history":"last "+usageDays+"d";}
-  // The projection ships EVERY recurring cluster; the table draws a slice and
-  // says so in its own overflow line. This caption reports the true total, so
-  // the header and the table can never tell two different stories about how
-  // much repetition was found.
-  function patternsNote(p,win){
-    var pat=p.patterns;
-    if(!pat)return win;
-    var n=(pat.clusters||[]).length;
-    return win+" · "+n+" recurring cluster"+(n===1?"":"s")
-      +" · no prompt text on this surface";
-  }
 
   export function renderFindings(d){
     var ins=Array.isArray(d.insights)?d.insights:[];

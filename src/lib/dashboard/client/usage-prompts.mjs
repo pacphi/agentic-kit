@@ -66,14 +66,6 @@ function plural(n, word) {
  *  Every panel gates on this rather than reaching into a missing object. */
 function pat(p) { return (p && p.patterns) || null; }
 
-// How many cluster rows the table draws. The projection is UNCAPPED by ruling
-// — the "repeated share" KPI is a fact about the whole corpus and would shrink
-// the more patterns were found if the list were truncated upstream — so the
-// slicing is a DISPLAY decision made here, and the table says what it is not
-// showing rather than letting the visible rows read as the whole finding.
-var PATTERN_ROWS = 25;
-var EXACT_ROWS = 6;
-
 // ── the KPI strip (METRICS.md §21) ──────────────────────────────────────────
 
 // Each tile states its formula and, on the second line, what it does NOT
@@ -326,19 +318,6 @@ export function tapLengthPanel(p) {
   }));
 }
 
-// Not a card of fake data and not an empty div: a named gap, so a reader can
-// tell "we have not built this" apart from "you have none of these".
-export function taxonomyPlaceholder() {
-  return '<div class="pr-pending">'
-    + '<h4>Prompt-type taxonomy</h4>'
-    + '<p>The ranked breakdown by subject &mdash; release/git, explain, fix/debug, review &mdash; needs a '
-    + 'keyword lexicon that has not shipped. It arrives with the enrichment pass, together with the '
-    + 'first-class <b>Unclassified</b> share that says how much of the lexicon is still missing.</p>'
-    + '<p class="pr-pending-note">Deliberately blank rather than filled with a guess: a taxonomy that '
-    + 'force-fits every prompt into a bucket reads as coverage it does not have.</p>'
-    + '</div>';
-}
-
 // ── host interplay ──────────────────────────────────────────────────────────
 
 /** The per-day tap share for one host, oldest first — the series the trend
@@ -372,7 +351,7 @@ export function hostInterplay(p) {
   var maxP90 = hosts.reduce(function (m, h) { return Math.max(m, Number(by[h].p90TypedTokens) || 0); }, 0);
   return '<div class="pr-hosts">' + hosts.map(function (host) {
     return hostRow(host, by[host], p, maxP90);
-  }).join('') + '</div>' + hostCaveat(hosts, by);
+  }).join('') + '</div>' + hostRead(hosts, by);
 }
 
 function hostRow(host, row, p, maxP90) {
@@ -397,103 +376,36 @@ function hostRow(host, row, p, maxP90) {
     + '</div></div>';
 }
 
-// The comparison is only as good as the histories behind it. Hosts adopted at
-// different times give unequal windows, and saying so on the panel is cheaper
-// than a reader drawing a trend from four days of one host against thirty of
-// another.
-function hostCaveat(hosts, by) {
+/**
+ * A plain-language READ of the host asymmetry (§2), replacing the opaque
+ * "windows are unequal" caveat — that unequal-histories nuance moves into the
+ * panel's `?` tooltip (page.mjs) instead. Compares the two most-active hosts on
+ * the two figures the panel already shows: how often each is tapped, and how
+ * long its prompts run. States ONLY a comparison both sides actually carry, and
+ * says nothing when there is no asymmetry to read (a share tie, one host, or a
+ * host with no measured share/length).
+ */
+function hostRead(hosts, by) {
   if (hosts.length < 2) return '';
-  var thin = hosts.filter(function (h) { return (Number(by[h].typed) || 0) < 20; });
-  return '<div class="pr-caveat">Windows are not equal: each host is only as measured as its own '
-    + 'history on this machine, and a host adopted recently has fewer days behind its line.'
-    + (thin.length
-      ? ' <b>' + esc(thin.join(', ')) + '</b> carr' + (thin.length === 1 ? 'ies' : 'y')
-        + ' under 20 typed prompts here, which is a shape, not yet a trend.'
-      : '')
-    + '</div>';
+  var a = hosts[0], b = hosts[1]; // already sorted by typed, descending
+  var clauses = [];
+  var tapA = by[a].tapShare, tapB = by[b].tapShare;
+  if (tapA != null && tapB != null && tapA !== tapB) {
+    clauses.push('you tap <b>' + esc(tapA > tapB ? a : b) + '</b> more often than <b>'
+      + esc(tapA > tapB ? b : a) + '</b> (' + esc(share(Math.max(tapA, tapB))) + ' vs '
+      + esc(share(Math.min(tapA, tapB))) + ')');
+  }
+  var p90A = Number(by[a].p90TypedTokens) || 0, p90B = Number(by[b].p90TypedTokens) || 0;
+  if (p90A && p90B && p90A !== p90B) {
+    clauses.push('write <b>' + esc(p90A > p90B ? a : b) + '</b> longer (p90 '
+      + esc(num(Math.max(p90A, p90B))) + ' vs ' + esc(num(Math.min(p90A, p90B))) + ' tokens)');
+  }
+  if (!clauses.length) return '';
+  return '<div class="pr-host-read"><span class="tag mono">read</span>'
+    + clauses.join(' but ') + '.</div>';
 }
 
-// ── repeated patterns ───────────────────────────────────────────────────────
-
-/**
- * What a recurring cluster suggests doing about itself, keyed on its CLASS.
- *
- * A question re-asked across sessions is state the system could have
- * volunteered, which is a specific enough finding to name a specific move.
- * Everything else only gets the weaker one: the rules do not split imperative
- * from declarative (see CLASS_LABEL), so "this is worth writing down" is
- * supportable but "this belongs in CLAUDE.md" is not — that needs to know it
- * was a command rather than a statement. A cluster nobody could classify gets
- * no suggestion at all.
- */
-// Keyed on 'other' (RULING A, final-triage item 1) — the wire value
-// classifyCluster emits for "not a question" — not the library's old
-// 'instruction' name, which this table used to translate from.
-var MOVES = {
-  question: {
-    label: 'reporting gap', cls: 'gap',
-    tip: 'Asked again and again across sessions, so the answer is state the agent already has '
-      + 'and is not offering unprompted.',
-  },
-  other: {
-    label: 'encode candidate', cls: 'instr',
-    tip: 'Re-typed across sessions, so it is worth writing down somewhere. WHICH artifact — a skill, '
-      + 'a CLAUDE.md line, a role fragment — needs the imperative/declarative split that arrives '
-      + 'with enrichment.',
-  },
-  mixed: {
-    label: 'encode candidate', cls: 'instr',
-    tip: 'Re-typed across sessions in both question and non-question forms. Worth writing down; '
-      + 'which artifact needs the type split that arrives with enrichment.',
-  },
-};
-
-function moveChip(cls) {
-  var m = MOVES[cls];
-  if (!m) return '<span class="pr-move" data-kind="none">needs classification</span>';
-  return '<span class="pr-move" data-kind="' + esc(m.cls) + '" title="' + esc(m.tip) + '">'
-    + esc(m.label) + '</span>';
-}
-
-/**
- * How a cluster's class is NAMED on this surface.
- *
- * RULING A (final-triage item 1): this is the identity map now, for every
- * value the library can actually emit — `other` is the SOURCE's own wire
- * value (usage-prompt-patterns.mjs's `classifyCluster`) for a non-question
- * cluster, not something this file rewrites from a stored `instruction`. The
- * prompt-shape rules still detect the INTERROGATIVE case only, so "not a
- * question" still covers imperatives and declaratives alike — CLASS_CAPTION
- * prints beside the table so the word is never left to be guessed at.
- * `unknown` is the one genuine relabel left: "unclassified" reads better in a
- * chip than the internal name.
- */
-var CLASS_LABEL = { question: 'question', other: 'other', mixed: 'mixed', unknown: 'unclassified' };
-
-// Fix round 1, M-6: enrichment (--enrich) has arrived and NAMES clusters —
-// it does not reclassify this split, which the old wording implied.
-var CLASS_CAPTION = 'other = imperative or declarative, undifferentiated — the shape rules test only '
-  + 'for a question; enrichment (--enrich) names clusters, it does not reclassify them into this split';
-
-function classChip(cls) {
-  var known = Object.prototype.hasOwnProperty.call(CLASS_LABEL, cls);
-  return '<span class="pr-cat"' + (known && cls !== 'unknown' ? ' data-on="1"' : '') + '>'
-    + esc(known ? CLASS_LABEL[cls] : cls) + '</span>';
-}
-
-// Up to three masked-session links, then a count. The links go through the
-// existing #usage/<id> route, which is the server-masked transcript reader —
-// this table never holds transcript content of its own. Three is the
-// projection's own cap: a link affordance, not a membership dump.
-function sessionLinks(c) {
-  var ids = Array.isArray(c.sampleSessionIds) ? c.sampleSessionIds : [];
-  var shown = ids.map(function (id, i) {
-    return '<a class="pr-sess mono" href="#usage/' + encodeURIComponent(id) + '">'
-      + esc('#' + (i + 1)) + '</a>';
-  }).join('');
-  var more = (Number(c.sessions) || 0) - ids.length;
-  return shown + (more > 0 ? '<span class="pr-more mono">+' + esc(num(more)) + '</span>' : '');
-}
+// ── the Coaching panel: pattern name ────────────────────────────────────────
 
 /**
  * What the Pattern column shows. A CURATED or SEEDED name is shown whole. A
@@ -559,275 +471,173 @@ function patternName(label) {
   return '<span class="pr-name" title="' + esc(neutralFull) + '">' + esc(neutralLead) + '</span>';
 }
 
-export function patternsTable(p) {
-  var pp = pat(p);
-  if (!pp) return '<div class="empty">patterns were not computed for this window.</div>';
-  var all = Array.isArray(pp.clusters) ? pp.clusters : [];
-  if (!all.length) {
-    return '<div class="empty">no prompt repeated across enough sessions or days to cluster. '
-      + 'That is a clean result, not a missing one.</div>';
-  }
-  var rows = all.slice(0, PATTERN_ROWS);
-  return '<div class="pr-tablewrap" role="region" aria-label="Repeated prompt patterns" tabindex="0">'
-    + '<table class="pr-table"><caption class="sr-only">Recurring prompt clusters, their span, and '
-    + 'the change each one suggests.</caption>'
-    + '<thead><tr><th scope="col">Pattern</th><th scope="col">Type</th><th scope="col">n</th>'
-    + '<th scope="col">Sessions</th><th scope="col">Days</th><th scope="col">Hosts</th>'
-    + '<th scope="col">Suggested move</th><th scope="col">Open</th></tr></thead><tbody>'
-    + rows.map(patternRow).join('')
-    + '</tbody></table></div>'
-    + '<div class="pr-caveat">' + esc(CLASS_CAPTION) + '</div>'
-    + countNote(all.length, rows.length, 'recurring cluster')
-    + exactRepeatsBlock(pp);
-}
+// ── the Coaching panel: filters, sortable table, expand (spec §2) ────────────
+//
+// One sortable, filterable table where each pattern row expands to what you
+// typed, where, and what to change. Renders from `p.patterns.clusters` (each
+// carries a derived `kind`, §3), with the re-ask summary as the lead insight.
+// PURE: state (filter, sort, open row, posture, samples cache, dismissals) is
+// owned by usage.mjs and passed in, so every interaction is a re-render from
+// `p` + `state` and the panel is idempotent.
 
-/**
- * A sliced list ALWAYS prints its denominator, whether or not it was cut.
- *
- * "Showing 6 of 6" costs a line and tells a reader they are looking at the
- * whole thing; a line that appears only when something is hidden leaves them
- * to infer completeness from silence, which is the same misreading a display
- * cap creates in the first place. The projection carries the total, so this is
- * never an estimate.
- */
-function countNote(total, shown, noun) {
-  var more = total - shown;
-  return '<div class="pr-more-note">Showing <b>' + esc(num(shown)) + '</b> of <b>'
-    + esc(num(total)) + '</b> ' + esc(noun) + (total === 1 ? '' : 's')
-    + (more > 0
-      ? ' &mdash; the ' + esc(num(shown)) + ' largest. Every figure above counts all '
-        + esc(num(total)) + '.'
-      : ' &mdash; all of them.')
-    + '</div>';
-}
+// The five derived kinds → the pill label the operator reads. Client display
+// map only (§3): the projection ships the raw enum, the words live here.
+var PR_KIND_LABEL = {
+  reask: 'Re-asks', persona: 'Role preambles', tap: 'Taps',
+  question: 'Questions', instruction: 'Instructions',
+};
+// Pill order — most actionable first, matching the kind precedence (§3).
+var PR_KIND_ORDER = ['reask', 'persona', 'tap', 'question', 'instruction'];
 
-function patternRow(c) {
-  var label = c.label || {};
-  return '<tr>'
-    + '<th scope="row">' + patternName(label)
-    + '<span class="pr-src mono">' + esc(label.source) + '</span></th>'
-    + '<td>' + classChip(c.class) + '</td>'
-    + '<td class="tnum">' + esc(num(c.count)) + '</td>'
-    + '<td class="tnum">' + esc(num(c.sessions)) + '</td>'
-    + '<td class="tnum">' + esc(num(c.days)) + '</td>'
-    + '<td>' + (Array.isArray(c.hosts) ? c.hosts.map(function (h) {
-      return '<span class="pr-hostchip">' + esc(h) + '</span>';
-    }).join('') : '') + '</td>'
-    + '<td>' + moveChip(c.class) + '</td>'
-    + '<td>' + sessionLinks(c) + '</td>'
-    + '</tr>';
-}
+// The sortable columns, in render order. `num` right-aligns and defaults to a
+// descending first click; `tip` is the header's precise-definition tooltip.
+var COACH_COLS = [
+  { key: 'name', label: 'Pattern', num: false, tip: 'The recurring prompt cluster.' },
+  { key: 'count', label: 'Times typed', num: true, tip: 'How many times this pattern was typed in the window.' },
+  { key: 'sessions', label: 'Sessions', num: true, tip: 'How many separate sessions it appeared in.' },
+  { key: 'days', label: 'Days seen', num: true, tip: 'How many distinct days it appeared on.' },
+  { key: 'hosts', label: 'Hosts', num: false, tip: 'Which agents you typed it to.' },
+];
 
-/**
- * The identical-text half, beside the loose-cluster half.
- *
- * They answer different questions and the panel keeps them apart on purpose:
- * a cluster of eleven wordings says there is no canonical form for a request,
- * where an exact repeat says the same sentence was typed verbatim N times. The
- * second is the weaker signal — the research measured it finding far less — so
- * it renders as a compact tail rather than a second table.
- */
-function exactRepeatsBlock(pp) {
-  var all = Array.isArray(pp.exactRepeats) ? pp.exactRepeats : [];
-  if (!all.length) return '';
-  var rows = all.slice(0, EXACT_ROWS);
-  return '<div class="pr-exact"><h4>Typed verbatim, more than once</h4>'
-    + '<div class="pr-exact-rows">' + rows.map(function (r) {
-      return '<span class="pr-exact-row">'
-        + '<b class="tnum">' + esc(num(r.count)) + '&times;</b> '
-        + esc(num(r.tokens)) + '-token prompt <i>' + esc(plural(r.sessions, 'session')) + ' · '
-        + esc(plural(r.days, 'day')) + '</i></span>';
-    }).join('') + '</div>'
-    + countNote(all.length, rows.length, 'exact repeat')
-    + '<p class="pr-exact-note">Identical normalized text, so these are exact by construction &mdash; '
-    + 'the loose clusters above are where phrasing variance shows up. Exemplar text lives in '
-    + '<code>ak usage prompts</code>, never here.</p></div>';
-}
+var COACH_DEFAULT_SORT = { key: 'count', dir: 'desc' };
 
-// ── re-asks and coaching ────────────────────────────────────────────────────
+// A cluster's kind, folded to the catch-all when the projection shipped one
+// this display map does not name (older cache, or a value added server-side
+// before the labels caught up) — so a row is always filterable, never dropped.
+function clusterKind(c) { return PR_KIND_LABEL[c.kind] ? c.kind : 'instruction'; }
 
-/**
- * Re-asks as aggregates. `gapHist` counts how many turns apart a repeat landed,
- * and gap 1 is the load-bearing bucket: a re-ask on the very next turn means
- * the model's previous answer is what failed, not a thread that drifted.
- */
-export function reAskPanel(p) {
-  var pp = pat(p);
+/** The re-ask summary as the panel's lead insight (was reAskPanel). A window
+ *  with no re-ask reads as a neutral prompt to explore the table, never a
+ *  fabricated statistic. */
+function coachingInsight(pp) {
   var r = pp && pp.reAsks;
-  if (!r) return '';
-  if (!r.pairCount) {
-    return '<div class="pr-reask">No prompt was asked twice inside one session this window.</div>';
+  var tail = ' Click a pattern to see what you typed and what to change.';
+  if (!r || !r.pairCount) {
+    return '<p class="pr-insight">Every pattern below is one you typed more than once across your '
+      + 'sessions.' + tail + '</p>';
   }
   var gaps = r.gapHist || {}, immediate = Number(gaps[1]) || 0;
-  return '<div class="pr-reask"><b>' + esc(num(r.pairCount)) + '</b> re-ask'
+  return '<p class="pr-insight"><b>' + esc(num(r.pairCount)) + '</b> re-ask'
     + (r.pairCount === 1 ? '' : 's') + ' across <b>' + esc(num(r.sessionCount)) + '</b> session'
     + (r.sessionCount === 1 ? '' : 's')
     + (immediate
       ? ' &middot; <b>' + esc(share(ratio(immediate, r.pairCount)))
-        + '</b> landed on the very next turn, which points at the answer rather than the thread'
+        + '</b> landed on the very next turn, pointing at the answer rather than the thread'
       : '')
-    + '.</div>';
+    + '.' + tail + '</p>';
 }
 
-/** The status chip: one of the ledger's five states, `adopted` decorated with
- *  a check plus its outcome line once measured, `retired` with its refutation.
- *  This renders `card.status` — the ledger's own enum, which has never had a
- *  `'stale'` value. Fix round 1, M-5: this comment used to claim "stale never
- *  appears in v1", true only of `status` itself; an enriched card's real
- *  staleness (`card.stale`, a separate boolean) is live today and rendered by
- *  its own chip+hint below (`coachingStaleHint`), independent of this one. */
-/** Every value interpolated here — including `status` itself, which
- *  originates in the on-disk ledger JSON — is escaped (Fix round 1, I-5): the
- *  attribute copy was already escaped, but the text-node copy was not, so a
- *  hostile `status` value (reachable only with write access to
- *  `~/.config/agentic-kit`, but still) rendered as live markup rather than
- *  text. `30d basis` mirrors the CLI's suffix (Fix round 1, C-1) — both
- *  numbers in `deltaText`/`refutation` always come from the canonical 30-day
- *  aggregate, never whatever window the dashboard is currently showing. */
-function coachingStatusChip(card) {
-  var status = card.status || 'proposed';
-  var label = esc(status);
-  if (status === 'adopted') {
-    label = 'adopted ✓';
-    if (card.outcome) {
-      // QE review F-1: an unmeasurable outcome is a "cannot", not a "not yet"
-      // — "too early to tell" would promise a verdict a zero baseline can
-      // never deliver. Mirrors usage/coaching.mjs's coachingStatusLine.
-      if (card.outcome.improved) label += ' — ' + esc(card.outcome.deltaText) + ' (30d basis)';
-      else if (card.outcome.measurable === false) label += ' — ' + esc(card.outcome.deltaText);
-      else label += ' — too early to tell (' + esc(card.outcome.deltaText) + ' (30d basis))';
-    }
-  } else if (status === 'retired' && card.refutation) {
-    label = 'retired — did not improve: ' + esc(card.refutation) + ' (30d basis)';
-  }
-  return '<span class="pr-card-status" data-status="' + esc(status) + '">' + label + '</span>';
+/** Clusters per present kind — the filter pills' counts. */
+function kindCounts(clusters) {
+  var c = {};
+  clusters.forEach(function (row) { var k = clusterKind(row); c[k] = (c[k] || 0) + 1; });
+  return c;
 }
 
-/** `generatedAt` + the first 8 hex chars of `evidenceHash`, as a dim trailing
- *  line (Fix round 1, M-3) — METRICS.md §22 makes a point of every card carrying
- *  both; before this fix they existed on the object and in the payload but
- *  reached no rendered card on either surface. */
-function coachingAsOfLine(card) {
-  var hash = typeof card.evidenceHash === 'string' ? card.evidenceHash.slice(0, 8) : '';
-  return '<p class="pr-card-asof mono">as of ' + esc(card.generatedAt) + ' · ' + esc(hash) + '</p>';
+/** The filter pills: `All` + one per kind PRESENT, each a swatch + count. The
+ *  active pill is marked; clicking re-filters (wired in usage.mjs). An empty
+ *  filter result is handled by the table body, not by hiding the pills. */
+function coachingFilters(clusters, filter) {
+  var counts = kindCounts(clusters);
+  var all = '<button type="button" class="fpill' + (filter === 'all' ? ' on' : '') + '" '
+    + 'data-pr-filter="all" aria-pressed="' + (filter === 'all') + '">All '
+    + '<span class="fc mono">' + esc(num(clusters.length)) + '</span></button>';
+  var pills = PR_KIND_ORDER.filter(function (k) { return counts[k]; }).map(function (k) {
+    return '<button type="button" class="fpill' + (filter === k ? ' on' : '') + '" '
+      + 'data-pr-filter="' + esc(k) + '" aria-pressed="' + (filter === k) + '">'
+      + '<span class="sw k-' + esc(k) + '"></span>' + esc(PR_KIND_LABEL[k])
+      + ' <span class="fc mono">' + esc(num(counts[k])) + '</span></button>';
+  }).join('');
+  return '<div class="pr-filters" role="group" aria-label="Filter patterns by kind">' + all + pills + '</div>';
 }
 
-/** The draft affordance: rendered text in a `<pre>`, never a clipboard API —
- *  METRICS.md §22's "Draft → produces a suggestion the operator edits and
- *  applies themselves. Nothing writes ... unprompted." A title attribute
- *  doubles the copy hint for a mouse user; the caption above the block is the
- *  one a screen reader announces. */
-function coachingDraftBlock(draft) {
-  if (!draft) return '';
-  return '<div class="pr-card-draft">'
-    + '<p class="pr-card-draft-hint">Draft — select and copy:</p>'
-    + '<pre class="pr-card-draft-pre" title="Select and copy">' + esc(draft.text) + '</pre>'
-    + '</div>';
+/** The value a column sorts on for one cluster row — a string for the name, a
+ *  number for the count columns, the host count for the Hosts column. */
+function coachSortValue(c, key) {
+  if (key === 'hosts') return Array.isArray(c.hosts) ? c.hosts.length : 0;
+  if (key === 'name') return String((c.label && c.label.name) || '');
+  return Number(c[key]) || 0;
 }
 
-/** Dismissal is CLI-only (ADR-0039's privacy split) — the dashboard never
- *  writes the ledger, so a proposed card renders the CLI command as a hint
- *  rather than a button that would have nothing to call. */
-function coachingDismissHint(card) {
-  if (card.status !== 'proposed') return '';
-  return '<p class="pr-card-dismiss-hint">Dismiss (CLI-only): '
-    + '<code>ak usage prompts --dismiss ' + esc(card.id) + '</code></p>';
+/** The clusters after filter + sort. STABLE: a name tiebreak keeps equal-value
+ *  rows in a deterministic order across re-renders, so a re-sort never shuffles
+ *  ties and the expanded row stays where the reader left it. */
+function coachingRows(clusters, state) {
+  var filter = state.filter || 'all';
+  var sort = state.sort || COACH_DEFAULT_SORT;
+  var dir = sort.dir === 'asc' ? 1 : -1;
+  var rows = clusters.filter(function (c) { return filter === 'all' || clusterKind(c) === filter; });
+  return rows.slice().sort(function (a, b) {
+    if (sort.key === 'name') return dir * coachSortValue(a, 'name').localeCompare(coachSortValue(b, 'name'));
+    var d = coachSortValue(a, sort.key) - coachSortValue(b, sort.key);
+    return d ? dir * d : coachSortValue(a, 'name').localeCompare(coachSortValue(b, 'name'));
+  });
 }
 
-/** W5 enrichment (METRICS.md §23): ONLY an enriched card's cached evidence
- *  can drift out from under it — a rule card's `stale` is always `false`
- *  (usage-outcome-ledger.mjs's `annotate`; recomputing one costs nothing, so
- *  there is nothing to go stale), so this chip+hint only ever appears on a
- *  `source: 'enriched'` card. NO LIVE RECOMPUTE BUTTON IN V1 — a button here
- *  would trigger inference from the dashboard, and ADR-0039's privacy split
- *  keeps inference CLI-only; the hint points at the command that does the same thing today. */
-function coachingStaleHint(card) {
-  if (!card.stale) return '';
-  return '<p class="pr-card-stale-hint"><span class="pr-card-stale-chip">stale</span> '
-    + 'this card\'s evidence has moved since it was generated — recompute with '
-    + '<code>ak usage prompts --enrich</code>.</p>';
+/** One header cell — a sort button carrying the arrow indicator, the aria-sort
+ *  state, and the precise-definition tooltip (§2). */
+function coachHeadCell(col, sort) {
+  var active = sort.key === col.key;
+  var arrow = active ? (sort.dir === 'asc' ? '▲' : '▼') : '⇅';
+  var sortAttr = active ? ' aria-sort="' + (sort.dir === 'asc' ? 'ascending' : 'descending') + '"' : '';
+  return '<th scope="col" class="' + (col.num ? 'tnum' : '') + '"' + sortAttr + '>'
+    + '<button type="button" data-pr-sort="' + esc(col.key) + '" title="' + esc(col.tip) + '">'
+    + esc(col.label) + '<span class="arw mono" aria-hidden="true">' + arrow + '</span></button></th>';
 }
 
-/** QE review F-9: `source` renders UNCONDITIONALLY, beside the status chip.
- *  The caption used to point at "its own marker", but the only marker drawn
- *  was the STALE chip, and `coachingStaleHint` returns nothing unless the card
- *  IS stale — so a FRESH enriched card, the state right after --enrich and the
- *  one an operator sees most, was byte-for-byte indistinguishable from a
- *  rule-derived card. That distinction is the operator's only defense against
- *  F-3 and F-4. Mirrors the CLI's own `source:` line. */
-function coachingSourceChip(card) {
-  // Three-valued, not two: anything that is neither known source reads as
-  // UNKNOWN rather than silently as "rule". Only a corrupted path produces
-  // one, and the wrong failure here would be presenting model-authored text as
-  // machine-derived.
-  var source = card.source === 'enriched' || card.source === 'rule' ? card.source : 'unknown';
-  var TITLES = {
-    enriched: 'Written by a model from your aggregate; every number it states is bound to a dimension of that aggregate.',
-    rule: 'Computed from your aggregate by a fixed rule.',
-    unknown: 'This card does not say where it came from.',
-  };
-  return '<span class="pr-card-source" data-source="' + esc(source) + '" title="'
-    + esc(TITLES[source]) + '">' + esc(source) + '</span>';
+function coachHostChips(hosts) {
+  return (Array.isArray(hosts) ? hosts : []).map(function (h) {
+    return '<span class="pr-hostchip">' + esc(h) + '</span>';
+  }).join('');
 }
 
-function coachingCard(card) {
-  return '<div class="pr-card" data-status="' + esc(card.status || 'proposed') + '"'
-    + (card.stale ? ' data-stale="1"' : '') + '>'
-    + '<div class="pr-card-head"><h4>' + esc(card.title) + '</h4>' + coachingStatusChip(card)
-    + coachingSourceChip(card) + '</div>'
-    + '<p class="pr-card-finding">' + esc(card.finding) + '</p>'
-    + '<p class="pr-card-try"><b>Try:</b> ' + esc(card.try) + '</p>'
-    + '<p class="pr-card-basis">' + esc(card.basis) + '</p>'
-    + coachingDraftBlock(card.draft)
-    + coachingStaleHint(card)
-    + coachingDismissHint(card)
-    + coachingAsOfLine(card)
-    + '</div>';
-}
-
-function coachingSummaryLine(s) {
-  if (!s) return '';
-  return '<p class="pr-card-ledger mono">ledger &middot; ' + num(s.proposed) + ' proposed &middot; '
-    + num(s.adopted) + ' adopted &middot; ' + num(s.dismissed) + ' dismissed &middot; '
-    + num(s.expired) + ' expired &middot; ' + num(s.retired) + ' retired</p>';
+/** One collapsed data row. The Pattern cell is the expand control (a button
+ *  toggling this row's coaching panel); NO source sublabel and NO kind dot on
+ *  the row — the kind colour lives in the filter pills (§2). The detail row is
+ *  appended by `coachingPanel` when this pattern is open. */
+function coachRow(c, state) {
+  var open = state.openKey === c.key;
+  return '<tr class="prow' + (open ? ' open' : '') + '" data-pr-row="' + esc(c.key) + '">'
+    + '<th scope="row"><button type="button" class="pname-btn" data-pr-open="' + esc(c.key) + '" '
+    + 'aria-expanded="' + open + '"><span class="chev mono" aria-hidden="true">▶</span>'
+    + patternName(c.label || {}) + '</button></th>'
+    + '<td class="tnum">' + esc(num(c.count)) + '</td>'
+    + '<td class="tnum">' + esc(num(c.sessions)) + '</td>'
+    + '<td class="tnum">' + esc(num(c.days)) + '</td>'
+    + '<td>' + coachHostChips(c.hosts) + '</td></tr>';
 }
 
 /**
- * The Coaching section (METRICS.md §22): cards rendered finding → Try →
- * basis → status chip, a draft affordance where the card carries one, and
- * a dismiss hint pointing at the CLI (the one place a dismissal can actually
- * be persisted). `p.coaching` is `{ cards, summary }` from the SAME lib +
- * ledger `ak usage prompts` reads, reconciled read-only server-side
- * (dashboard-server.mjs's dashboardCoachingPayload) — the two surfaces cannot
- * disagree about a card's status any more than they can about a cluster's
- * count.
+ * The Coaching panel (§2): the re-ask insight, the kind filter pills, and the
+ * sortable table (Pattern · Times typed · Sessions · Days seen · Hosts). The
+ * table caps at ~5 rows then scrolls with a pinned header (CSS); each pattern
+ * expands to its coaching panel (the detail row, built in the expand commit).
  *
- * Rule-derived cards recompute free every scan (METRICS.md §22), so `stale` is
- * always `false` for one and the caption below still calls that out. An
- * ENRICHED card (W5) is the one real exception — its cache can drift out
- * from under it, and `coachingCard`'s own stale hint is where that renders
- * per-card, not here on the section caption.
+ * Absent states are NAMED, never blank: no projection, no clusters, and an
+ * empty filter each read differently, so a clean "nothing repeated" is never
+ * confused with "not computed" or "nothing matches this pill".
  */
-export function coachingPanel(p) {
-  var c = p && p.coaching;
-  if (!c) {
-    return '<div class="empty">coaching needs a rescan to compute &mdash; it will appear once the '
-      + 'server has re-derived this window.</div>';
+export function coachingPanel(p, state) {
+  state = state || {};
+  var pp = pat(p);
+  if (!pp) return '<div class="empty">patterns were not computed for this window.</div>';
+  var clusters = Array.isArray(pp.clusters) ? pp.clusters : [];
+  if (!clusters.length) {
+    return coachingInsight(pp)
+      + '<div class="empty">no prompt repeated across enough sessions or days to cluster. '
+      + 'That is a clean result, not a missing one.</div>';
   }
-  if (c.unavailable) {
-    return '<div class="empty">coaching is unavailable this poll &mdash; ' + esc(c.reason || 'unknown reason')
-      + '.</div>';
-  }
-  var cards = Array.isArray(c.cards) ? c.cards : [];
-  if (!cards.length) {
-    return '<div class="empty">no coaching card met its evidence bar this window. That is a clean '
-      + 'result, not a missing one.</div>';
-  }
-  return '<div class="pr-cards">' + cards.map(coachingCard).join('') + '</div>'
-    + '<div class="pr-caveat">Every card names its own source in the chip beside its status: a '
-    + '<b>rule</b> card is computed from your aggregate and recomputes free every scan, an '
-    + '<b>enriched</b> card was written by a model from that same aggregate and is cached, so only '
-    + 'it can go stale. '
-    + 'Dismissal is CLI-only: <code>ak usage prompts --dismiss &lt;id&gt;</code>.</div>'
-    + coachingSummaryLine(c.summary);
+  var sort = state.sort || COACH_DEFAULT_SORT;
+  var rows = coachingRows(clusters, state);
+  var body = rows.length
+    ? rows.map(function (c) { return coachRow(c, state); }).join('')
+    : '<tr><td colspan="' + COACH_COLS.length + '" class="pr-empty">no patterns of this kind in '
+      + 'this window &mdash; clear the filter to see the rest.</td></tr>';
+  return coachingInsight(pp)
+    + coachingFilters(clusters, state.filter || 'all')
+    + '<div class="pr-tablewrap" role="region" aria-label="Recurring prompt patterns" tabindex="0">'
+    + '<table class="pr-coach"><caption class="sr-only">Recurring prompt clusters; each row expands '
+    + 'to its coaching panel.</caption>'
+    + '<thead><tr>' + COACH_COLS.map(function (col) { return coachHeadCell(col, sort); }).join('') + '</tr></thead>'
+    + '<tbody>' + body + '</tbody></table></div>';
 }

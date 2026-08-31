@@ -732,146 +732,113 @@ export const USAGE_CSS = `
 }
 .pr-caveat b{color:var(--ink)}
 
-/* patterns table. Scrolls inside its own region rather than widening the page:
-   seven columns do not fit a narrow window, and a horizontally scrolling BODY
-   would take the whole dashboard with it. */
-.pr-tablewrap{overflow-x:auto}
-.pr-tablewrap:focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:8px}
-.pr-table{border-collapse:collapse; width:100%; font-size:12.5px}
-.pr-table th[scope=col]{
-  text-align:left; font-family:var(--mono); font-size:10px; font-weight:600; letter-spacing:.08em;
-  text-transform:uppercase; color:var(--ink-dim); padding:7px 10px; border-bottom:1px solid var(--line-2);
-  white-space:nowrap;
+/* the plain-language READ under the host cards (replaces the opaque caveat):
+   an accent-ruled line stating the asymmetry the panel measured. */
+.pr-host-read{
+  margin-top:14px; padding:10px 13px; border-left:2px solid var(--accent);
+  border-radius:0 var(--r-sm) var(--r-sm) 0; background:var(--panel-2);
+  font-size:12.5px; color:var(--ink-2); line-height:1.55;
 }
-.pr-table td,.pr-table th[scope=row]{
-  padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:top; text-align:left;
-  font-weight:400;
+.pr-host-read b{color:var(--ink); font-weight:600}
+.pr-host-read .tag{
+  margin-right:8px; font-size:9.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-dim);
 }
-.pr-table tr:last-child td,.pr-table tr:last-child th[scope=row]{border-bottom:0}
-.pr-table td.tnum{font-variant-numeric:tabular-nums; white-space:nowrap}
-.pr-name{display:block; color:var(--ink)}
-/* The label's provenance rides under the name at all times: "characterized"
-   means the vocabulary could not name this cluster and the row is showing a
-   generic descriptor, which a reader must be able to tell from a curated name
-   at a glance. */
-.pr-src{display:block; font-size:10px; color:var(--ink-dim); margin-top:2px}
+
+/* the ? info-dot in a strip header — carries the nuance the header body no
+   longer states inline, on hover/focus. margin-right:auto keeps the header's
+   note pushed to the far right, with the dot next to the title. */
+.pr-infodot{
+  position:relative; display:inline-grid; place-items:center; width:16px; height:16px;
+  margin-right:auto; border-radius:50%; border:1px solid var(--line-2); color:var(--ink-dim);
+  font-family:var(--mono); font-size:10px; font-weight:700; cursor:help;
+}
+.pr-infodot:hover,.pr-infodot:focus-visible{color:var(--accent); border-color:var(--accent); outline:none}
+.pr-tip{
+  position:absolute; top:135%; left:0; z-index:30; width:300px; padding:11px 13px;
+  background:var(--panel-2); border:1px solid var(--line-2); border-radius:var(--r-sm);
+  box-shadow:var(--shadow); font-family:var(--sans); font-size:12px; font-weight:400;
+  line-height:1.5; color:var(--ink-2); text-align:left; opacity:0; pointer-events:none;
+  transition:opacity .14s;
+}
+.pr-infodot:hover .pr-tip,.pr-infodot:focus .pr-tip,.pr-infodot:focus-visible .pr-tip{opacity:1}
+.pr-tip b{color:var(--ink)}
+
+/* ── the Coaching panel (§2): re-ask insight, kind filters, sortable table ── */
+
+/* the re-ask insight line above the filters */
+.pr-insight{margin:0 0 14px; font-size:12.5px; color:var(--ink-2); line-height:1.5}
+.pr-insight b{color:var(--ink)}
+
+/* kind filter pills — the kind colour lives HERE (a swatch), never on a row */
+.pr-filters{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:0 0 14px}
+.fpill{
+  display:inline-flex; align-items:center; gap:7px; padding:5px 12px; border-radius:100px;
+  border:1px solid var(--line); background:var(--panel); color:var(--ink-2);
+  font:inherit; font-size:12px; cursor:pointer;
+}
+.fpill:hover{border-color:var(--accent); color:var(--ink)}
+.fpill.on{background:var(--accent-soft); border-color:var(--accent); color:var(--ink)}
+.fpill:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+.fpill .sw{width:8px; height:8px; border-radius:50%; flex:none}
+.fpill .fc{color:var(--ink-dim); font-size:11px}
+.fpill.on .fc{color:var(--accent)}
+.k-instruction{background:var(--accent)}
+.k-tap{background:var(--warn)}
+.k-persona{background:var(--purple)}
+.k-reask{background:var(--fail)}
+.k-question{background:var(--ok)}
+
+/* the sortable table. Caps at ~5 rows then scrolls, with a pinned header — the
+   BODY scrolls inside its own region rather than taking the whole page with it. */
+.pr-tablewrap{
+  overflow:auto; max-height:322px; border:1px solid var(--line); border-radius:var(--r-sm);
+  overscroll-behavior:contain;
+}
+.pr-tablewrap:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+.pr-coach{border-collapse:collapse; width:100%; font-size:13px}
+.pr-coach thead th{
+  position:sticky; top:0; z-index:1; text-align:left; padding:0;
+  background:var(--panel-2); border-bottom:1px solid var(--line-2);
+}
+.pr-coach thead th.tnum{text-align:right}
+.pr-coach thead th button{
+  width:100%; display:flex; align-items:center; gap:6px; padding:11px 12px;
+  background:none; border:0; cursor:pointer; text-align:inherit; justify-content:inherit;
+  font-family:var(--mono); font-size:10px; font-weight:600; letter-spacing:.07em;
+  text-transform:uppercase; color:var(--ink-dim);
+}
+.pr-coach thead th.tnum button{justify-content:flex-end}
+.pr-coach thead th button:hover{color:var(--ink)}
+.pr-coach thead th[aria-sort] button{color:var(--accent)}
+.pr-coach thead th button .arw{font-size:9px; opacity:.5}
+.pr-coach thead th[aria-sort] button .arw{opacity:1}
+.pr-coach tbody td,.pr-coach tbody th[scope=row]{
+  padding:0 12px; height:52px; border-bottom:1px solid var(--line); vertical-align:middle;
+  text-align:left; font-weight:400;
+}
+.pr-coach tbody tr:last-child td,.pr-coach tbody tr:last-child th[scope=row]{border-bottom:0}
+.pr-coach td.tnum{text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; color:var(--ink-2)}
+.prow.open{background:var(--accent-soft)}
+.pname-btn{
+  display:flex; align-items:center; gap:9px; width:100%; padding:8px 0;
+  background:none; border:0; cursor:pointer; text-align:left; color:var(--ink); font:inherit;
+}
+.pname-btn:hover .pr-name{color:var(--accent)}
+.pname-btn .chev{flex:none; width:9px; font-size:10px; color:var(--ink-dim); transition:transform .15s}
+.prow.open .pname-btn .chev{transform:rotate(90deg); color:var(--accent)}
+.pr-name{display:block; color:inherit; font-size:13px}
 .pr-hostchip{
-  display:inline-block; margin:0 4px 2px 0; padding:1px 6px; border-radius:5px;
-  background:var(--panel-2); font-family:var(--mono); font-size:10px; color:var(--ink-2);
+  display:inline-block; margin:0 4px 0 0; padding:1px 6px; border-radius:5px;
+  background:var(--panel); border:1px solid var(--line); font-family:var(--mono);
+  font-size:10.5px; color:var(--ink-2);
 }
-.pr-move{
-  display:inline-block; padding:2.5px 8px; border-radius:6px; white-space:nowrap;
-  font-family:var(--mono); font-size:10.5px; font-weight:600;
-}
-.pr-move[data-kind="skill"]{background:var(--ok-soft); color:var(--ok)}
-.pr-move[data-kind="instr"]{background:var(--accent-soft); color:var(--accent)}
-.pr-move[data-kind="gap"]{background:color-mix(in srgb,var(--warn) 15%,transparent); color:var(--warn)}
-.pr-move[data-kind="none"]{background:var(--panel-2); color:var(--ink-dim); font-weight:400}
-.pr-sess{
-  display:inline-block; margin-right:5px; font-family:var(--mono); font-size:11px;
-  color:var(--accent); text-decoration:none;
-}
-.pr-sess:hover{text-decoration:underline}
-.pr-more{font-size:10.5px; color:var(--ink-dim)}
+.pr-empty{padding:22px 12px; text-align:center; color:var(--ink-dim); font-size:12.5px}
 
 /* A sub-heading inside a strip column, for a second ranked list under the
-   first. Sized between .sh h2 and body text so it reads as subordinate to the
-   strip's own title rather than competing with it. */
+   first. Sized between .sh h2 and body text so it reads as subordinate. */
 .pr-sub{
   margin:18px 0 8px; font-size:12px; font-weight:600; letter-spacing:.04em;
   text-transform:uppercase; color:var(--ink-dim);
 }
-
-/* class chip in the patterns table. An UNCLASSIFIED cluster is deliberately
-   quiet: it carries no suggested move either, and the two must look like the
-   same absence rather than one looking like a category. */
-.pr-cat{
-  display:inline-block; padding:1.5px 7px; border-radius:5px; white-space:nowrap;
-  background:var(--panel-2); color:var(--ink-dim); font-family:var(--mono); font-size:10px;
-}
-.pr-cat[data-on="1"]{color:var(--ink-2)}
-
-/* What the table is not showing. Sits under the table at full width, in body
-   ink rather than de-emphasis ink: a reader who misses this line misreads the
-   panel, so it is not a footnote. */
-.pr-more-note{
-  margin-top:12px; padding-top:10px; border-top:1px solid var(--line);
-  font-size:12px; color:var(--ink-2);
-}
-.pr-more-note b{color:var(--ink)}
-
-/* re-ask summary, above the patterns table */
-.pr-reask{margin-bottom:14px; font-size:12.5px; color:var(--ink-2)}
-.pr-reask b{color:var(--ink)}
-
-/* exact repeats — the identical-text tail under the loose-cluster table */
-.pr-exact{margin-top:18px; padding-top:14px; border-top:1px dashed var(--line)}
-.pr-exact h4{margin:0 0 9px; font-size:12px; font-weight:600; letter-spacing:.04em;
-  text-transform:uppercase; color:var(--ink-dim)}
-.pr-exact-rows{display:flex; flex-wrap:wrap; gap:8px}
-.pr-exact-row{
-  background:var(--panel-2); border-radius:var(--r-sm); padding:6px 10px; font-size:12px;
-  color:var(--ink-2);
-}
-.pr-exact-row b{color:var(--ink); font-family:var(--mono); font-size:11.5px}
-.pr-exact-row i{font-style:normal; color:var(--ink-dim); font-size:11px}
-.pr-exact-note{margin:10px 0 0; font-size:11.5px; color:var(--ink-dim)}
-.pr-exact-note code{font-family:var(--mono); font-size:11px; color:var(--ink-2)}
-
-/* "not built yet" panels. Deliberately quiet and deliberately NOT card-shaped:
-   a dashed, unfilled block reads as a gap in the design, where a filled card
-   would read as content that failed to load. */
-.pr-pending{
-  border:1px dashed var(--line-2); border-radius:var(--r-sm); padding:14px 16px;
-  background:transparent;
-}
-.pr-pending h4{margin:0 0 7px; font-size:13px; font-weight:600; color:var(--ink-2)}
-.pr-pending p{margin:0 0 8px; font-size:12.5px; color:var(--ink-2); line-height:1.55}
-.pr-pending p:last-child{margin-bottom:0}
-.pr-pending b{color:var(--ink)}
-.pr-pending-note{color:var(--ink-dim) !important; font-size:11.5px !important}
-
-/* Coaching cards (METRICS.md §22). One card per finding — the same visual
-   weight as a .kpi tile, not a table row, because a card carries a Try and a
-   basis a row has no place for. */
-.pr-cards{display:flex; flex-direction:column; gap:12px; margin-bottom:12px}
-.pr-card{
-  background:var(--panel-2); border-radius:var(--r-sm); padding:13px 14px;
-  border-left:3px solid var(--line-2);
-}
-.pr-card[data-status="adopted"]{border-left-color:var(--ok)}
-.pr-card[data-status="retired"]{border-left-color:var(--warn)}
-.pr-card[data-status="dismissed"],.pr-card[data-status="expired"]{opacity:.62}
-.pr-card-head{display:flex; align-items:baseline; justify-content:space-between; gap:10px; flex-wrap:wrap}
-.pr-card-head h4{margin:0; font-size:13.5px; font-weight:600; color:var(--ink)}
-.pr-card-status{
-  flex:none; font-size:10.5px; font-weight:600; letter-spacing:.03em; color:var(--ink-2);
-  text-transform:uppercase;
-}
-.pr-card-status[data-status="adopted"]{color:var(--ok)}
-.pr-card-status[data-status="retired"]{color:var(--warn); text-transform:none; font-weight:400}
-/* F-9: every card names its own source, unconditionally. Deliberately quieter
-   than the status chip — this is provenance, not state, and it must be
-   readable without competing with the verdict beside it. */
-.pr-card-source{
-  flex:none; padding:1px 6px; border:1px solid var(--line); border-radius:9px;
-  font-size:10px; font-weight:600; letter-spacing:.03em; color:var(--ink-dim);
-}
-.pr-card-source[data-source="enriched"]{color:var(--ink-2); border-color:var(--line-2)}
-.pr-card-finding{margin:7px 0 0; font-size:12.5px; color:var(--ink-2); line-height:1.5}
-.pr-card-try{margin:7px 0 0; font-size:12.5px; color:var(--ink)}
-.pr-card-try b{font-weight:600}
-.pr-card-basis{margin:5px 0 0; font-size:11.5px; color:var(--ink-dim)}
-.pr-card-draft{margin-top:10px}
-.pr-card-draft-hint{margin:0 0 4px; font-size:10.5px; color:var(--ink-dim); text-transform:uppercase; letter-spacing:.04em}
-.pr-card-draft-pre{
-  margin:0; padding:9px 11px; background:var(--panel); border:1px solid var(--line);
-  border-radius:var(--r-sm); font-family:var(--mono); font-size:11.5px; color:var(--ink-2);
-  white-space:pre-wrap; word-break:break-word; max-height:220px; overflow-y:auto; cursor:text;
-}
-.pr-card-dismiss-hint{margin:8px 0 0; font-size:11px; color:var(--ink-dim)}
-.pr-card-dismiss-hint code{font-family:var(--mono); font-size:10.5px; color:var(--ink-2)}
-.pr-card-asof{margin:8px 0 0; font-size:10px; color:var(--ink-dim)}
-.pr-card-ledger{margin:2px 0 0; font-size:11px; color:var(--ink-dim)}
 
 `;
