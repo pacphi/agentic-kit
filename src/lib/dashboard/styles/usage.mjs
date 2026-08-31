@@ -841,4 +841,87 @@ export const USAGE_CSS = `
   text-transform:uppercase; color:var(--ink-dim);
 }
 
+
+/* ── the expanded coaching panel (§2.3–2.5) ─────────────────────────────── */
+.detail-row td{padding:0; background:var(--panel-2); border-bottom:1px solid var(--line-2)}
+.coach{display:grid; gap:16px; max-width:860px; padding:6px 18px 20px 34px}
+.coach-sec h5,.coach .pr-seen{margin:0}
+.coach h5{
+  margin:0 0 8px; font-family:var(--mono); font-size:10px; font-weight:600;
+  letter-spacing:.09em; text-transform:uppercase; color:var(--ink-dim);
+}
+/* seen-in occurrence strip */
+.pr-seen{display:flex; gap:7px; flex-wrap:wrap; align-items:center}
+.occ-lab{font-size:9.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-dim); margin-right:3px}
+.occ-link{
+  padding:3px 9px; border:1px solid var(--line); border-radius:6px; background:var(--panel);
+  font-size:11px; color:var(--accent); text-decoration:none;
+}
+.occ-link:hover{border-color:var(--accent); background:var(--accent-soft)}
+.occ-more{font-size:10.5px; color:var(--ink-dim)}
+/* what you typed — masked, inline */
+.typed-load,.typed-empty,.typed-hidden{font-size:12px; color:var(--ink-dim)}
+.typed-hidden code,.typed-cap code{font-family:var(--mono); font-size:11px; color:var(--ink-2)}
+.verbatim{
+  margin-bottom:6px; padding:10px 12px; background:var(--bg); border:1px solid var(--line);
+  border-left:2px solid var(--accent); border-radius:6px; font-family:var(--mono); font-size:12px;
+  color:var(--ink); line-height:1.55; white-space:pre-wrap; word-break:break-word;
+}
+.typed-cap{margin-top:6px; font-size:10px; color:var(--ink-dim)}
+.typed-cap .lock{color:var(--ok); margin-right:5px}
+/* recommendation */
+.rec-title{font-size:14px; font-weight:600; color:var(--ink); line-height:1.4}
+.rec-why{margin:6px 0 0; font-size:12.5px; color:var(--ink-2); line-height:1.5}
+/* draft + copy */
+.draft-wrap{position:relative}
+.draft-pre{
+  margin:0; padding:12px 14px; background:var(--bg); border:1px solid var(--line);
+  border-radius:var(--r-sm); font-family:var(--mono); font-size:11.5px; color:var(--ink-2);
+  line-height:1.6; white-space:pre-wrap; word-break:break-word; overflow-x:auto;
+}
+.pr-copy{
+  position:absolute; top:8px; right:8px; display:inline-grid; place-items:center; width:30px; height:30px;
+  border:1px solid var(--line); border-radius:7px; background:var(--panel); color:var(--ink-dim); cursor:pointer;
+}
+.pr-copy:hover{border-color:var(--accent); color:var(--accent); background:var(--accent-soft)}
+.pr-copy:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+.pr-copy.copied{border-color:var(--ok); color:var(--ok)}
+.pr-copy .ic-copy,.pr-copy .ic-check{display:inline-grid; place-items:center}
+.pr-copy .ic-check{display:none}
+.pr-copy.copied .ic-copy{display:none}
+.pr-copy.copied .ic-check{display:inline-grid}
+/* dismiss + source foot */
+.coach-foot{
+  display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+  padding-top:14px; border-top:1px dashed var(--line);
+}
+.pr-dismiss{
+  padding:6px 13px; border:1px solid var(--line); border-radius:8px; background:var(--panel);
+  color:var(--ink-2); font:inherit; font-size:11.5px; cursor:pointer;
+}
+.pr-dismiss:hover{border-color:var(--fail); color:var(--fail)}
+.pr-dismiss:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+.dismiss-wrap{position:relative; display:inline-block}
+.dismiss-tip{
+  position:absolute; bottom:130%; left:0; z-index:30; width:290px; padding:11px 13px;
+  background:var(--panel); border:1px solid var(--line-2); border-radius:var(--r-sm);
+  box-shadow:var(--shadow); font-size:12px; line-height:1.5; color:var(--ink-2);
+  opacity:0; pointer-events:none; transition:opacity .14s;
+}
+.dismiss-wrap:hover .dismiss-tip,.dismiss-wrap:focus-within .dismiss-tip{opacity:1}
+.dismissed-note{display:none; align-items:center; gap:9px; font-size:12px; color:var(--ink-2)}
+.dismissed-note .undo{
+  padding:0; border:0; background:none; color:var(--accent); font:inherit; font-size:11.5px;
+  cursor:pointer; text-decoration:underline;
+}
+.coach-foot.done .dismiss-wrap{display:none}
+.coach-foot.done .dismissed-note{display:inline-flex}
+.coach-none{margin:0; font-size:12.5px; color:var(--ink-dim); font-style:italic}
+/* the card's source chip, right-aligned in the foot */
+.pr-card-source{
+  margin-left:auto; padding:1px 8px; border:1px solid var(--line); border-radius:20px;
+  font-family:var(--mono); font-size:10px; letter-spacing:.03em; color:var(--ink-dim);
+}
+.pr-card-source[data-source="enriched"]{color:var(--purple); border-color:color-mix(in srgb,var(--purple) 40%,var(--line))}
+.pr-card-source[data-source="rule"]{color:var(--accent); border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
 `;

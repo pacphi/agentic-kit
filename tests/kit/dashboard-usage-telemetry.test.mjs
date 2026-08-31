@@ -1178,9 +1178,163 @@ test('nothing typed leaves the steer split unclassified rather than zeroed', () 
   assert.doesNotMatch(html, /0%/, 'a split of nothing is not a split into zeroes');
 });
 
-// ── the expanded coaching panel (Seen in / What you typed / Recommendation /
-// Draft / Dismiss) and its cluster→card association are exercised in the
-// expand-commit tests appended below.
+// ── the expanded coaching panel (§2.3–2.5, §4.5) ────────────────────────────
+//
+// Opening a pattern renders the accordion detail row: Seen in · What you typed ·
+// Recommendation · Draft · Dismiss. The last three come from the coaching card
+// this pattern joins to (§4.5); What-you-typed is filled from the samples cache
+// the client owns, and never shows unmasked text or fetches in the hidden
+// posture. These drive the pure builder with an `openKey` + a samples/dismissed
+// state, the same object usage.mjs passes at runtime.
+
+// A coaching card carrying the §4.5 association keys, joined to cluster `aaaa`.
+function coachCardFx(over = {}) {
+  return {
+    id: 'commit-push-claude-md', clusterKey: 'aaaa', targetKind: null,
+    title: 'Commit-and-push is retyped, not remembered', try: 'Add one line to CLAUDE.md.',
+    finding: 'recurred 12 times across 8 sessions.', basis: '12 recurrences.',
+    source: 'rule', status: 'proposed', stale: false,
+    generatedAt: '2026-08-29T00:00:00.000Z', evidenceHash: 'a'.repeat(16),
+    draft: { kind: 'claude-md-line', text: 'Commit and push once verified.' },
+    ...over,
+  };
+}
+const promptsWithCoaching = (cards) => ({ ...PANEL_PROMPTS, coaching: { cards, summary: null } });
+
+test('expanding a pattern renders one accordion detail row, with Seen in and What you typed', () => {
+  const open = coachingPanel(PANEL_PROMPTS, { openKey: 'aaaa' });
+  assert.equal((open.match(/class="detail-row"/g) || []).length, 1, 'one open at a time');
+  assert.match(open, /<td colspan="5"><div class="coach">/);
+  assert.match(open, />seen in</);
+  assert.match(open, />What you typed</);
+  assert.doesNotMatch(coachingPanel(PANEL_PROMPTS, {}), /class="detail-row"/, 'a collapsed panel has no detail row');
+});
+
+test('Seen in links target the real transcript route AND carry the nav hook (§4.4)', () => {
+  const html = coachingPanel(PANEL_PROMPTS, { openKey: 'aaaa' });
+  // cluster aaaa carries sampleSessionIds ['s1','s2','s3']; the links resolve
+  // through AKDashboardOpenTranscript (data-pr-session), not a bare hash.
+  assert.match(html, /class="occ-link mono" href="#usage\/s1" data-pr-session="s1"/);
+  assert.match(html, /data-pr-session="s2"/);
+  assert.match(html, /\+6 more/, '9 sessions, 3 shown → +6 more');
+});
+
+test('Seen in shows session·date once the samples fetch resolves, formatted without a timezone shift', () => {
+  const html = coachingPanel(PANEL_PROMPTS, {
+    openKey: 'aaaa',
+    samples: { aaaa: { state: 'ok', samples: ['yes'], occurrences: [
+      { sessionId: 's1', day: '2026-07-24' }, { sessionId: 's2', day: '2026-07-23' }] } },
+  });
+  assert.match(html, /s\.s1 · Jul 24/);
+  assert.match(html, /s\.s2 · Jul 23/);
+});
+
+test('the §4.5 join: clusterKey first, then targetKind, else the neutral note (never force-fit)', () => {
+  const byKey = coachingPanel(promptsWithCoaching([coachCardFx()]), { openKey: 'aaaa' });
+  assert.match(byKey, /Add one line to CLAUDE\.md\./, 'a cluster-specific card supplies the recommendation');
+
+  const byKind = coachingPanel(promptsWithCoaching([
+    coachCardFx({ id: 'reask-delta', clusterKey: null, targetKind: 'reask', try: 'State the acceptance criteria up front.' }),
+  ]), { openKey: 'cccc' }); // cccc has kind 'reask'
+  assert.match(byKind, /State the acceptance criteria up front\./, 'a kind-level card joins by targetKind');
+
+  const none = coachingPanel(promptsWithCoaching([coachCardFx({ clusterKey: 'zzzz', targetKind: 'persona' })]), { openKey: 'aaaa' });
+  assert.match(none, /No specific coaching for this pattern yet\./);
+  assert.doesNotMatch(none, /Add one line to CLAUDE\.md/, "another cluster's card is not shown here");
+});
+
+test('clusterKey outranks a competing targetKind match on the same row', () => {
+  const html = coachingPanel(promptsWithCoaching([
+    coachCardFx({ id: 'kind-card', clusterKey: null, targetKind: 'instruction', try: 'KIND ADVICE' }),
+    coachCardFx({ id: 'key-card', clusterKey: 'aaaa', targetKind: null, try: 'KEY ADVICE' }),
+  ]), { openKey: 'aaaa' }); // aaaa is kind 'instruction' AND has a clusterKey card
+  assert.match(html, /KEY ADVICE/);
+  assert.doesNotMatch(html, /KIND ADVICE/);
+});
+
+test('the recommendation is the action without a Try: prefix, with the finding as the why', () => {
+  const html = coachingPanel(promptsWithCoaching([coachCardFx()]), { openKey: 'aaaa' });
+  assert.match(html, /class="rec-title">Add one line to CLAUDE\.md\.</);
+  assert.doesNotMatch(html, /Try:/, 'the old Try: prefix is gone');
+  assert.match(html, /class="rec-why">recurred 12 times across 8 sessions\.</);
+});
+
+test('the draft renders in a <pre> with a copy button keyed by the OPEN CLUSTER, omitted when absent', () => {
+  const html = coachingPanel(promptsWithCoaching([coachCardFx()]), { openKey: 'aaaa' });
+  assert.match(html, /<pre class="draft-pre mono" id="pr-draft-aaaa">Commit and push once verified\.<\/pre>/);
+  assert.match(html, /data-pr-copy="aaaa"/, 'keyed by the open cluster, not the card id (one card, many clusters)');
+  const noDraft = coachingPanel(promptsWithCoaching([coachCardFx({ draft: undefined })]), { openKey: 'aaaa' });
+  assert.doesNotMatch(noDraft, /draft-pre/);
+});
+
+test('Dismiss carries the card id + a HOVER explanation; the dismissed state flips to Undo', () => {
+  const proposed = coachingPanel(promptsWithCoaching([coachCardFx()]), { openKey: 'aaaa' });
+  assert.match(proposed, /data-pr-dismiss="commit-push-claude-md"/);
+  assert.match(proposed, /class="dismiss-tip"/, 'the explanation is a hover tooltip, not standing text');
+  assert.doesNotMatch(proposed, /coach-foot done/);
+
+  const optimistic = coachingPanel(promptsWithCoaching([coachCardFx()]), { openKey: 'aaaa', dismissed: { 'commit-push-claude-md': true } });
+  assert.match(optimistic, /class="coach-foot done"/, 'the optimistic client flag shows the dismissed state');
+  assert.match(optimistic, /data-pr-undismiss="commit-push-claude-md"/);
+
+  const persisted = coachingPanel(promptsWithCoaching([coachCardFx({ status: 'dismissed' })]), { openKey: 'aaaa' });
+  assert.match(persisted, /class="coach-foot done"/, 'a persisted ledger dismissal shows it too');
+});
+
+test('the card source chip is three-valued: rule / enriched / unknown (F-9, re-pointed at the expand panel)', () => {
+  assert.match(coachingPanel(promptsWithCoaching([coachCardFx({ source: 'rule' })]), { openKey: 'aaaa' }), /class="pr-card-source" data-source="rule"/);
+  assert.match(coachingPanel(promptsWithCoaching([coachCardFx({ source: 'enriched' })]), { openKey: 'aaaa' }), /data-source="enriched"/);
+  assert.match(coachingPanel(promptsWithCoaching([coachCardFx({ source: undefined })]), { openKey: 'aaaa' }), /data-source="unknown"/);
+});
+
+test('What you typed shows masked samples when the fetch has resolved (shown posture)', () => {
+  const html = coachingPanel(PANEL_PROMPTS, {
+    openKey: 'aaaa', posture: 'shown',
+    samples: { aaaa: { state: 'ok', samples: ['yes', 'yep'], occurrences: [] } },
+  });
+  assert.match(html, /class="verbatim">yes<\/div>/);
+  assert.match(html, /class="verbatim">yep<\/div>/);
+  assert.match(html, /secrets redacted server-side/);
+});
+
+test('What you typed shows loading, an honest empty, and an honest error from the samples cache', () => {
+  const loading = coachingPanel(PANEL_PROMPTS, { openKey: 'aaaa', posture: 'shown', samples: { aaaa: { state: 'loading' } } });
+  assert.match(loading, /loading your masked prompts/);
+  const empty = coachingPanel(PANEL_PROMPTS, { openKey: 'aaaa', posture: 'shown', samples: { aaaa: { state: 'empty', occurrences: [] } } });
+  assert.match(empty, /no readable sample survived masking/);
+  const err = coachingPanel(PANEL_PROMPTS, { openKey: 'aaaa', posture: 'shown', samples: { aaaa: { state: 'error' } } });
+  assert.match(err, /couldn&rsquo;t load this pattern&rsquo;s text/);
+});
+
+test('the hidden posture shows a terminal pointer and renders NO verbatim text, even with samples cached', () => {
+  const html = coachingPanel(PANEL_PROMPTS, {
+    openKey: 'aaaa', posture: 'hidden',
+    samples: { aaaa: { state: 'ok', samples: ['yes'], occurrences: [] } },
+  });
+  assert.match(html, /Prompt text is hidden/);
+  assert.match(html, /ak usage prompts --deep/);
+  assert.doesNotMatch(html, /class="verbatim"/, 'the hidden posture never renders a sample, cached or not');
+});
+
+test('a masked sample is still escaped — the panel never emits raw markup from the endpoint', () => {
+  const html = coachingPanel(PANEL_PROMPTS, {
+    openKey: 'aaaa', posture: 'shown',
+    samples: { aaaa: { state: 'ok', samples: ['<img src=x onerror=alert(1)>'], occurrences: [] } },
+  });
+  assert.doesNotMatch(html, /<img/);
+  assert.match(html, /&lt;img/);
+});
+
+test('SEC-9: hostile coaching-card prose puts zero control or bidi codepoints in the expanded panel', () => {
+  const html = coachingPanel(promptsWithCoaching([coachCardFx({
+    title: DOM_HOSTILE, try: DOM_HOSTILE, finding: DOM_HOSTILE,
+    draft: { kind: 'claude-md-line', text: DOM_HOSTILE },
+  })]), { openKey: 'aaaa' });
+  assert.match(html, /class="rec-title"/, 'guard: the card block rendered, so this is not a vacuous pass');
+  const hit = html.match(DOM_FORBIDDEN);
+  assert.equal(hit, null, `rendered HTML carries U+${hit ? hit[0].charCodeAt(0).toString(16).padStart(4, '0') : ''}`);
+});
+
 
 // Structural by necessity: these assert what the SERVED DOCUMENT contains, so
 // there is no behaviour to exercise instead — the panels cannot render into

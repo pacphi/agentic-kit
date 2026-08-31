@@ -630,7 +630,7 @@ export function coachingPanel(p, state) {
   var sort = state.sort || COACH_DEFAULT_SORT;
   var rows = coachingRows(clusters, state);
   var body = rows.length
-    ? rows.map(function (c) { return coachRow(c, state); }).join('')
+    ? rows.map(function (c) { return coachRow(c, state) + coachDetailRow(c, p, state); }).join('')
     : '<tr><td colspan="' + COACH_COLS.length + '" class="pr-empty">no patterns of this kind in '
       + 'this window &mdash; clear the filter to see the rest.</td></tr>';
   return coachingInsight(pp)
@@ -640,4 +640,170 @@ export function coachingPanel(p, state) {
     + 'to its coaching panel.</caption>'
     + '<thead><tr>' + COACH_COLS.map(function (col) { return coachHeadCell(col, sort); }).join('') + '</tr></thead>'
     + '<tbody>' + body + '</tbody></table></div>';
+}
+
+// ── the expanded coaching panel (§2.3–2.5, §4.5) ─────────────────────────────
+//
+// One open at a time. Order: Seen in · What you typed · Recommendation · Draft ·
+// Dismiss. Recommendation/Draft/Dismiss come from the coaching card this pattern
+// joins to (§4.5); a pattern with no card shows Seen-in + What-you-typed and a
+// neutral note. No unmasked prompt text is ever built here — What-you-typed is
+// filled from the masked verbatim endpoint (usage.mjs), and only when the prompt-
+// text posture is `shown`.
+
+var COACH_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** `YYYY-MM-DD` → `Mon D`, parsed by PARTS (never `new Date(str)`, which is
+ *  UTC-parsed and shifts the day across a timezone). Anything else passes
+ *  through untouched. */
+function fmtDay(d) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d == null ? '' : d));
+  if (!m) return String(d == null ? '' : d);
+  return (COACH_MONTHS[Number(m[2]) - 1] || m[2]) + ' ' + Number(m[3]);
+}
+
+/** A short, stable session handle for a link label (`s.1d8a`). The full id is
+ *  what the link actually navigates to. */
+function shortSession(id) {
+  id = String(id == null ? '' : id);
+  return 's.' + (id.length > 4 ? id.slice(0, 4) : id);
+}
+
+/** The §4.5 client join, first match: (1) a card ABOUT this exact cluster
+ *  (`clusterKey`), else (2) a card addressing this cluster's derived KIND
+ *  (`targetKind`), else none. Never force-fits — a pattern with no match
+ *  renders the neutral note, not someone else's advice. */
+function cardForCluster(cards, c) {
+  if (!Array.isArray(cards)) return null;
+  var byKey = null, byKind = null;
+  for (var i = 0; i < cards.length; i++) {
+    var card = cards[i];
+    if (!byKey && card.clusterKey && card.clusterKey === c.key) byKey = card;
+    if (!byKind && card.targetKind && card.targetKind === clusterKind(c)) byKind = card;
+  }
+  return byKey || byKind || null;
+}
+
+// Both icons ship in the copy button; CSS shows one at a time by the `.copied`
+// class, so the visual feedback needs no innerHTML swap (usage.mjs only toggles
+// the class). aria-hidden — the button's aria-label carries the meaning.
+var COACH_COPY_ICON = '<span class="ic-copy" aria-hidden="true">'
+  + '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" '
+  + 'stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/>'
+  + '<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span>'
+  + '<span class="ic-check" aria-hidden="true">'
+  + '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" '
+  + 'stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>';
+
+/** Up to three `session · date` links to each session's masked transcript
+ *  (§2.1). Prefers the fetched occurrences (they carry the date); before the
+ *  fetch lands, or in the hidden posture, falls back to the projection's own
+ *  `sampleSessionIds` (session links, no date) — both always resolve through the
+ *  real transcript route (usage.mjs's data-pr-session handler → the validated
+ *  AKDashboardOpenTranscript bridge, fixing §4.4's dead links). */
+function coachSeenIn(c, state) {
+  var sk = state.samples && state.samples[c.key];
+  var occ = sk && Array.isArray(sk.occurrences) && sk.occurrences.length
+    ? sk.occurrences
+    : (Array.isArray(c.sampleSessionIds) ? c.sampleSessionIds : []).map(function (id) {
+      return { sessionId: id, day: null };
+    });
+  var links = occ.slice(0, 3).map(function (o) {
+    var lab = o.day ? esc(shortSession(o.sessionId)) + ' · ' + esc(fmtDay(o.day)) : esc(shortSession(o.sessionId));
+    return '<a class="occ-link mono" href="#usage/' + encodeURIComponent(o.sessionId) + '" '
+      + 'data-pr-session="' + esc(o.sessionId) + '" title="Open this session&rsquo;s masked transcript">'
+      + lab + '</a>';
+  }).join('');
+  var more = (Number(c.sessions) || 0) - Math.min(3, occ.length);
+  return '<div class="pr-seen"><span class="occ-lab mono">seen in</span>' + links
+    + (more > 0 ? '<span class="occ-more mono">+' + esc(num(more)) + ' more</span>' : '') + '</div>';
+}
+
+/** The masked "What you typed" block, keyed by cluster so usage.mjs can patch
+ *  it when the fetch resolves. `hidden` posture shows the terminal pointer and
+ *  triggers NO fetch (the fetch gate is in usage.mjs); `shown` renders the
+ *  loading / masked-text / honest-empty states from the samples cache. */
+function coachTyped(c, state) {
+  var inner = state.posture === 'hidden'
+    ? '<div class="typed-hidden">Prompt text is hidden. Run <code>ak usage prompts --deep</code> in the '
+      + 'terminal to read this pattern&rsquo;s redacted text.</div>'
+    : coachTypedInner(c, state);
+  return '<div class="pr-typed" id="pr-typed-' + esc(c.key) + '">' + inner + '</div>';
+}
+
+function coachTypedInner(c, state) {
+  var sk = state.samples && state.samples[c.key];
+  if (!sk || sk.state === 'loading') return '<div class="typed-load">loading your masked prompts&hellip;</div>';
+  if (sk.state === 'error') return '<div class="typed-empty">couldn&rsquo;t load this pattern&rsquo;s text right now.</div>';
+  if (sk.state === 'empty' || !Array.isArray(sk.samples) || !sk.samples.length) {
+    return '<div class="typed-empty">no readable sample survived masking for this pattern.</div>';
+  }
+  return sk.samples.map(function (s) { return '<div class="verbatim">' + esc(s) + '</div>'; }).join('')
+    + '<div class="typed-cap mono"><span class="lock">&#9679;</span> secrets redacted server-side · '
+    + 'masked the same way <code>--deep</code> masks the terminal · nothing stored</div>';
+}
+
+/** rule / enriched / unknown — three-valued, so a card that does not say where
+ *  it came from reads as UNKNOWN, never silently as a fixed rule (F-9). */
+function coachSourceChip(card) {
+  var source = card.source === 'enriched' || card.source === 'rule' ? card.source : 'unknown';
+  var titles = {
+    enriched: 'Written by a model from your aggregate; every number it states is bound to a dimension of that aggregate.',
+    rule: 'Computed from your aggregate by a fixed rule.',
+    unknown: 'This card does not say where it came from.',
+  };
+  return '<span class="pr-card-source" data-source="' + esc(source) + '" title="' + esc(titles[source]) + '">'
+    + esc(source) + '</span>';
+}
+
+/** The draft, in a <pre> with a copy button top-right (§2.4). The copy id is
+ *  keyed by the OPEN CLUSTER, not the card id: one kind-level card can address
+ *  several clusters, but only one row is open, so the cluster key is the unique
+ *  DOM handle. */
+function coachDraft(card, key) {
+  if (!card.draft || !card.draft.text) return '';
+  return '<section class="coach-sec"><h5>Draft</h5><div class="draft-wrap">'
+    + '<button type="button" class="pr-copy" data-pr-copy="' + esc(key) + '" title="Copy to clipboard" '
+    + 'aria-label="Copy the draft to the clipboard">' + COACH_COPY_ICON + '</button>'
+    + '<pre class="draft-pre mono" id="pr-draft-' + esc(key) + '">' + esc(card.draft.text) + '</pre></div></section>';
+}
+
+/** Dismiss + its hover explanation, the source chip, and the post-dismiss
+ *  "Dismissed … Undo" inline (§2.5, §4.3). A card is shown as dismissed if the
+ *  optimistic client flag is set OR its persisted ledger status already is. */
+function coachFoot(card, state) {
+  var dismissed = (state.dismissed && state.dismissed[card.id]) || card.status === 'dismissed';
+  return '<div class="coach-foot' + (dismissed ? ' done' : '') + '">'
+    + '<span class="dismiss-wrap"><button type="button" class="pr-dismiss" data-pr-dismiss="' + esc(card.id) + '">'
+    + 'Dismiss</button><span class="dismiss-tip">Tells the tool you&rsquo;ve got this &mdash; it stops being '
+    + 'proposed and won&rsquo;t come back unless the pattern gets materially worse. Your prompts are '
+    + 'untouched.</span></span>'
+    + '<span class="dismissed-note">Dismissed &mdash; won&rsquo;t resurface unless it gets materially worse. '
+    + '<button type="button" class="undo" data-pr-undismiss="' + esc(card.id) + '">Undo</button></span>'
+    + coachSourceChip(card) + '</div>';
+}
+
+/** Recommendation → Draft → Dismiss, from the joined card. The recommendation
+ *  is the card's action (no "Try:" prefix) with its finding as the rationale. */
+function coachCardBlock(card, key, state) {
+  return '<section class="coach-sec"><h5>Recommendation</h5>'
+    + '<div class="rec-title">' + esc(card.try || card.title) + '</div>'
+    + (card.finding ? '<p class="rec-why">' + esc(card.finding) + '</p>' : '') + '</section>'
+    + coachDraft(card, key)
+    + coachFoot(card, state);
+}
+
+/** The expanded coaching panel for one open pattern — the accordion detail row.
+ *  Renders nothing unless this cluster is the open one. */
+function coachDetailRow(c, p, state) {
+  if (state.openKey !== c.key) return '';
+  var cards = p && p.coaching && Array.isArray(p.coaching.cards) ? p.coaching.cards : [];
+  var card = cardForCluster(cards, c);
+  var body = coachSeenIn(c, state)
+    + '<section class="coach-sec"><h5>What you typed</h5>' + coachTyped(c, state) + '</section>'
+    + (card
+      ? coachCardBlock(card, c.key, state)
+      : '<p class="coach-none">No specific coaching for this pattern yet.</p>');
+  return '<tr class="detail-row"><td colspan="' + COACH_COLS.length + '"><div class="coach">'
+    + body + '</div></td></tr>';
 }

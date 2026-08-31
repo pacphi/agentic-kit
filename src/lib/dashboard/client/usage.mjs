@@ -311,19 +311,109 @@ import { renderUsage } from './usage-orchestrators.mjs';
     else{promptSort={key:key,dir:key==="name"?"asc":"desc"};}
     renderCoaching();
   }
+  // Expand/collapse one pattern (one open at a time). On open, bring the row to
+  // the top of the capped scroll window so its panel is not stranded below the
+  // fold, then fetch its masked samples if the posture allows.
+  function toggleCoachRow(key){
+    promptOpenKey=promptOpenKey===key?null:key;
+    renderCoaching();
+    if(promptOpenKey){scrollOpenRowToTop();maybeFetchSamples(promptOpenKey);}
+  }
+  function scrollOpenRowToTop(){
+    var host=document.getElementById("u-pr-coaching");
+    var wrap=host&&host.querySelector(".pr-tablewrap");
+    var row=host&&host.querySelector('.prow[data-pr-row="'+cssAttr(promptOpenKey)+'"]');
+    if(!wrap||!row)return;
+    // 44px ≈ the sticky header, so the opened row clears it rather than hiding under it.
+    wrap.scrollTop+=(row.getBoundingClientRect().top-wrap.getBoundingClientRect().top)-44;
+  }
+  // Escape a cluster key for use inside a "..." attribute selector. Keys are
+  // 16-hex in production and short slugs in tests, but a quote/backslash must
+  // never break the selector regardless.
+  function cssAttr(v){return String(v==null?"":v).replace(/["\\]/g,"\\$&");}
+
+  // Fetch this cluster's masked samples on demand (§4.2, I-3). Gated on the
+  // SHOWN posture (hidden makes NO request); the SAME `usageDays` window as
+  // /api/usage, or the cluster key set will not resolve. Cached per key for the
+  // session (loading/ok/empty/error), so re-expanding never refetches; one
+  // in-flight fetch per row. A late response is ignored if the row has since
+  // collapsed or another opened (the openKey guard), but the result is still
+  // cached for a later re-expand.
+  function maybeFetchSamples(key){
+    if(promptPosture!=="shown")return;
+    if(promptSamples[key])return;
+    promptSamples[key]={state:"loading"};
+    renderCoaching(true);
+    var url="/api/prompts/samples?key="+encodeURIComponent(key)+"&window="+usageDays;
+    fetch(url,{cache:"no-store",headers:authHeaders()})
+      .then(function(r){return r.ok?r.json():null;})
+      .then(function(d){
+        if(!d||!Array.isArray(d.samples)){promptSamples[key]={state:"error"};}
+        else if(!d.samples.length){promptSamples[key]={state:"empty",occurrences:d.occurrences||[]};}
+        else{promptSamples[key]={state:"ok",samples:d.samples,occurrences:d.occurrences||[]};}
+        if(promptOpenKey===key)renderCoaching(true);
+      })
+      .catch(function(){promptSamples[key]={state:"error"}; if(promptOpenKey===key)renderCoaching(true);});
+  }
+
+  // Copy the open draft to the clipboard, flipping the button to a checkmark
+  // (CSS, via the `copied` class). Falls back to selecting the <pre> text when
+  // the clipboard API is unavailable or refused.
+  function copyDraft(key){
+    var pre=document.getElementById("pr-draft-"+key);
+    var btn=document.querySelector('[data-pr-copy="'+cssAttr(key)+'"]');
+    if(!pre)return;
+    function ok(){ if(!btn)return; btn.classList.add("copied"); btn.setAttribute("title","Copied");
+      setTimeout(function(){btn.classList.remove("copied"); btn.setAttribute("title","Copy to clipboard");},1400); }
+    try{
+      if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(pre.textContent).then(ok,function(){selectPre(pre);});}
+      else{selectPre(pre);}
+    }catch(e){selectPre(pre);}
+  }
+  function selectPre(pre){
+    try{var rg=document.createRange(); rg.selectNodeContents(pre); var s=window.getSelection();
+      s.removeAllRanges(); s.addRange(rg);}catch(e){}
+  }
+
+  // Dismiss / undo — the dashboard's one non-inference write (§4.3). Optimistic:
+  // the row reflects the new state immediately; a failed POST reverts it. Undo
+  // deletes the record server-side so the card is re-proposed next scan.
+  function postCoaching(path,id){
+    return fetch(path,{method:"POST",cache:"no-store",
+      headers:Object.assign({"content-type":"application/json"},authHeaders()),
+      body:JSON.stringify({id:id})}).then(function(r){return r.ok;});
+  }
+  function doDismiss(id){
+    promptDismissed[id]=true; renderCoaching(true);
+    postCoaching("/api/prompts/dismiss",id).then(function(okv){
+      if(!okv){promptDismissed[id]=false; renderCoaching(true);}
+    }).catch(function(){promptDismissed[id]=false; renderCoaching(true);});
+  }
+  function doUndismiss(id){
+    promptDismissed[id]=false; renderCoaching(true);
+    postCoaching("/api/prompts/undismiss",id).then(function(okv){
+      if(!okv){promptDismissed[id]=true; renderCoaching(true);}
+    }).catch(function(){promptDismissed[id]=true; renderCoaching(true);});
+  }
+
   // One delegated listener on the static Coaching container (its innerHTML is
   // rewritten every re-render, but the container itself is stable, so the
-  // listener is attached once). Each interactive control carries a data-pr-*
-  // attribute; this dispatches on it. Filter + sort land here now; the expand,
-  // copy, dismiss and seen-in handlers are added with the expand panel.
+  // listener attaches once). Each interactive control carries a data-pr-*
+  // attribute; this dispatches on it.
   (function wireCoaching(){
     var host=document.getElementById("u-pr-coaching");
     if(!host)return;
     host.addEventListener("click",function(e){
-      var t=e.target.closest?e.target.closest("[data-pr-filter],[data-pr-sort]"):null;
+      var sel="[data-pr-filter],[data-pr-sort],[data-pr-open],[data-pr-copy],[data-pr-dismiss],[data-pr-undismiss],[data-pr-session]";
+      var t=e.target.closest?e.target.closest(sel):null;
       if(!t)return;
-      if(t.hasAttribute("data-pr-filter")){promptFilter=t.getAttribute("data-pr-filter");renderCoaching();return;}
-      if(t.hasAttribute("data-pr-sort")){sortCoaching(t.getAttribute("data-pr-sort"));}
+      if(t.hasAttribute("data-pr-session")){e.preventDefault(); window.AKDashboardOpenTranscript(t.getAttribute("data-pr-session")); return;}
+      if(t.hasAttribute("data-pr-filter")){promptFilter=t.getAttribute("data-pr-filter"); renderCoaching(); return;}
+      if(t.hasAttribute("data-pr-sort")){sortCoaching(t.getAttribute("data-pr-sort")); return;}
+      if(t.hasAttribute("data-pr-open")){toggleCoachRow(t.getAttribute("data-pr-open")); return;}
+      if(t.hasAttribute("data-pr-copy")){copyDraft(t.getAttribute("data-pr-copy")); return;}
+      if(t.hasAttribute("data-pr-dismiss")){doDismiss(t.getAttribute("data-pr-dismiss")); return;}
+      if(t.hasAttribute("data-pr-undismiss")){doUndismiss(t.getAttribute("data-pr-undismiss"));}
     });
   })();
 
@@ -1235,10 +1325,16 @@ import { renderUsage } from './usage-orchestrators.mjs';
     return {filter:promptFilter,sort:promptSort,openKey:promptOpenKey,
       posture:promptPosture,samples:promptSamples,dismissed:promptDismissed};
   }
-  function renderCoaching(){
+  // `preserveScroll` holds the capped table's scroll position across a
+  // re-render — used when samples land under an already-open row, so the row
+  // does not jump. Expand/filter/sort re-render WITHOUT it (expand does its own
+  // scroll-to-top; filter/sort start from the top intentionally).
+  function renderCoaching(preserveScroll){
     var host=document.getElementById("u-pr-coaching");
     if(!host||!USAGE||!USAGE.prompts)return;
+    var wrap=host.querySelector(".pr-tablewrap"), top=wrap?wrap.scrollTop:0;
     host.innerHTML=coachingPanel(USAGE.prompts,coachState());
+    if(preserveScroll){var w2=host.querySelector(".pr-tablewrap"); if(w2)w2.scrollTop=top;}
   }
   function coachingNote(p,win){
     var pat=p.patterns;
