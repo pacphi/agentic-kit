@@ -2059,34 +2059,45 @@ test('F-9: the caption points at the chip every card carries, not at the stale m
   assert.doesNotMatch(html, /see its own marker/, 'the old promise pointed at a marker a fresh card did not have');
 });
 
-// ── QE review F-5 (MEDIUM): the dashboard's read-only ledger contract ──────
-// Asserted in three separate places in the source — "Read-only — see
-// dashboardCoachingPayload's doc for why this must never call saveLedger",
-// "a dashboard poll can never mutate what `ak usage prompts --dismiss` owns",
-// and "the dashboard never writes the ledger" — and held by no test. The
-// review injected a real `saveLedger(ledgerPath, ledger)` into that function
-// and NOTHING failed; a coverage probe confirmed the path IS exercised, so the
-// survival was real rather than vacuous. The existing byte-comparison test
-// cannot see it: reconcile hands back an equivalent ledger, so re-serializing
-// it produces the same bytes.
-//
-// A regression here silently resurrects every dismissed card an operator
-// suppressed via the CLI, on the next dashboard poll.
+// ── QE review F-5 (MEDIUM): the dashboard's ledger-write contract ──────────
+// Originally "the dashboard NEVER writes the ledger" — the review injected a
+// real `saveLedger(ledgerPath, ledger)` into dashboardCoachingPayload and
+// nothing failed, so the contract was pinned by keeping the writers out of
+// scope entirely. ADR-0039 amendment 3 (Coaching redesign §4.3) relaxes that
+// for ONE non-inference, non-sensitive local write: the dismiss endpoint. So
+// `saveLedger` is now in scope — but ONLY on the dismiss write path, never in
+// the READ path a /api/usage poll runs. The label-store writer and the raw
+// atomic writer stay entirely out of this file (the store is CLI-only; the one
+// sanctioned write goes through the ledger module's own saveLedger). A read-path
+// regression here silently resurrects every CLI-dismissed card on the next poll,
+// and is caught behaviorally by the poll test directly below.
 
-test('F-5: dashboard-server never references a ledger or store WRITER outside a comment', async () => {
-  // The strongest available statement of the contract, and the one that cannot
-  // rot: the writers are not in scope at all, so no edit inside
-  // dashboardCoachingPayload can reach one without failing here.
+test('F-5: the label-store/atomic writers never appear, and saveLedger only on the §4.3 dismiss path', async () => {
   const { fileURLToPath } = await import('node:url');
   const src = fs.readFileSync(
     fileURLToPath(new URL('../../src/lib/dashboard-server.mjs', import.meta.url)), 'utf8');
-  for (const writer of ['saveLedger', 'saveLabelStore', 'writePrivateFileAtomic']) {
+  // These two never belong in this file at all — unchanged from the original
+  // read-only contract.
+  for (const writer of ['saveLabelStore', 'writePrivateFileAtomic']) {
     const uses = src.split('\n')
       .map((line, i) => [i + 1, line.trim()])
       .filter(([, line]) => line.includes(writer) && !line.startsWith('//') && !line.startsWith('*'));
     assert.deepEqual(uses, [],
       `${writer} is referenced in dashboard-server.mjs outside a comment: ${JSON.stringify(uses)}`);
   }
+  // saveLedger is permitted, but every non-comment reference must be a SANCTIONED
+  // one: the import, or the write path's injectable-override default. Anything
+  // else (e.g. a saveLedger call smuggled into dashboardCoachingPayload) fails.
+  const saveLedgerLines = src.split('\n')
+    .map((line, i) => [i + 1, line.trim()])
+    .filter(([, line]) => line.includes('saveLedger') && !line.startsWith('//') && !line.startsWith('*'));
+  const sanctioned = saveLedgerLines.filter(([, line]) =>
+    line.startsWith('loadLedger, saveLedger,') // the import
+    || line.includes('coachingLedger?.saveLedger ?? saveLedger')); // the write-path override default
+  assert.deepEqual(saveLedgerLines, sanctioned,
+    `saveLedger is used outside the sanctioned §4.3 dismiss path: ${
+      JSON.stringify(saveLedgerLines.filter((l) => !sanctioned.includes(l)))}`);
+  assert.ok(sanctioned.length >= 1, 'guard: the check is not vacuous — the dismiss path really binds saveLedger');
 });
 
 test('F-5: no number of /api/usage polls creates the ledger file the dashboard was pointed at', () => {

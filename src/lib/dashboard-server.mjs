@@ -74,7 +74,8 @@ import { nearDupClusters, crossSessionClusters } from './usage-prompt-patterns.m
 // Coaching (METRICS.md §22) — static import, same reasoning as above.
 import { deriveCards } from './usage-coaching.mjs';
 import {
-  loadLedger, reconcile, defaultLedgerPath, summarizeLedger, gatherAdoptionInputs, CANONICAL_WINDOW_DAYS,
+  loadLedger, saveLedger, dismissCard, reconcile, defaultLedgerPath, summarizeLedger,
+  gatherAdoptionInputs, CANONICAL_WINDOW_DAYS,
 } from './usage-outcome-ledger.mjs';
 // W5 enrichment (METRICS.md §23) — READ-ONLY here, same discipline as the ledger
 // above: this server applies a persisted store, it never writes one (that
@@ -83,7 +84,7 @@ import {
 import {
   applyLabelStoreToPatterns, hydrateStoredCards, applyCardStaleness, buildFindingsSummary,
 } from './usage-enrich.mjs';
-import { loadLabelStore, defaultLabelStorePath } from './usage-label-store.mjs';
+import { loadLabelStore, defaultLabelStorePath, CARD_ID_RE } from './usage-label-store.mjs';
 import { requestRejection } from './dashboard/request-security.mjs';
 import {
   readJsonSafe, mintToken, tokenMatches, sendJson, sendUnauthorized, sendNotFound, listenLoopback,
@@ -701,6 +702,74 @@ async function resolveClusterSamples(key, { cacheFile, roots, now, days, maskFn 
   return { samples: clusterSampleTexts(cluster, text, maskFn), occurrences: clusterOccurrences(wanted, typed) };
 }
 
+// ── coaching dismissal — the dashboard's ONE non-inference write (§4.3) ───────
+//
+// ADR-0039's privacy split keeps the dashboard READ-ONLY for inference; this
+// relaxes it for a single, local, loopback, token-gated write of one enum-shaped
+// flag (spec §4.3 / §6 amendment 3): a dismissal is not inference and not prompt
+// text. Every OTHER ledger write stays CLI-only. No prompt text touches this path.
+
+/** Cap on the request body: a `{ id }` object is a few dozen bytes, so anything
+ *  past this is not a legitimate dismissal and is refused before it is parsed. */
+const COACHING_BODY_MAX_BYTES = 4096;
+
+/** Read a small JSON request body, or `null` for anything unparseable or past
+ *  the size cap — the handler treats `null` as a bad request, never a throw. */
+function readJsonBody(req, maxBytes = COACHING_BODY_MAX_BYTES) {
+  return new Promise((resolve) => {
+    let body = '';
+    let over = false;
+    req.setEncoding('utf8');
+    req.on('data', (chunk) => {
+      if (over) return;
+      body += chunk;
+      if (body.length > maxBytes) { over = true; body = ''; }
+    });
+    req.on('end', () => {
+      if (over) { resolve(null); return; }
+      try { resolve(JSON.parse(body)); } catch { resolve(null); }
+    });
+    req.on('error', () => resolve(null));
+  });
+}
+
+/** The canonical-window DISMISSED record for `id`, if any — the pivot for both
+ *  idempotent dismiss (already dismissed ⇒ no-op) and undo (reverse it). */
+function findDismissed(ledger, id) {
+  return (ledger?.records ?? []).find(
+    (r) => r?.id === id && r.status === 'dismissed' && r.windowDays === CANONICAL_WINDOW_DAYS);
+}
+
+/**
+ * The canonical 30-day proposable-card set plus the evidence context a
+ * dismissal snapshots against — derived exactly the way `dashboardCoachingPayload`
+ * does (readIndex at the fixed canonical window, label store applied read-only,
+ * `deriveCards` + `hydrateStoredCards`, `gatherAdoptionInputs`), so a dismiss
+ * validates an id against the SAME cards the read path proposes. `currentPatterns`
+ * MUST be the canonical window (Fix round 1, C-1) — that is what a baseline is
+ * commensurable against.
+ */
+async function canonicalCoachingContext({ readIndex, loadStore, labelStorePath, cwd, now }) {
+  const agg = await readIndex({
+    days: CANONICAL_WINDOW_DAYS, lookbackDays: CANONICAL_WINDOW_DAYS + BASELINE_TRAILING_DAYS, prompts: true,
+  });
+  const store = loadStore(labelStorePath);
+  const labels = store.future ? {} : store.labels;
+  const patterns = agg?.promptPatterns ? applyLabelStoreToPatterns(agg.promptPatterns, labels) : agg?.promptPatterns;
+  const cards = deriveCards({
+    promptPatterns: patterns, promptBaselines: agg?.promptBaselines,
+    promptsByHost: agg?.promptsByHost, insights: agg?.insights, now,
+  });
+  const currentPatterns = {
+    promptPatterns: patterns, promptsByHost: agg?.promptsByHost,
+    promptBaselines: agg?.promptBaselines, insights: agg?.insights,
+  };
+  return {
+    allCards: [...cards, ...hydrateStoredCards(store.future ? {} : store.cards)],
+    adoptionInputs: { ...gatherAdoptionInputs(cwd), currentPatterns },
+  };
+}
+
 /** Lazily bind usage-index.mjs. Deliberately NOT a static import: the module
  *  walks two transcript stores, and the panel must boot (and serve /api/status)
  *  without paying for that until the Usage tab is actually opened. Same named
@@ -1152,11 +1221,24 @@ export function startDashboard({
     const qi = raw.indexOf('?');
     const url = qi < 0 ? raw : raw.slice(0, qi);
     const query = new URLSearchParams(qi < 0 ? '' : raw.slice(qi + 1));
-    if (req.method !== 'GET') { res.writeHead(405).end('method not allowed'); return; }
+    // GET serves the whole read-only panel; POST is ONLY ever a coaching write
+    // (§4.3) — every other method, and any other POST target, is refused.
+    if (req.method !== 'GET' && req.method !== 'POST') { res.writeHead(405).end('method not allowed'); return; }
     const rejected = requestRejection(req.headers);
     if (rejected) {
       res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
       res.end(rejected);
+      return;
+    }
+
+    // Handle POST entirely here and return, so none of the GET-only flow below
+    // (the HTML route, the exact/param GET dispatch) ever sees a write request.
+    // Same global token gate and requestRejection guards as every /api/ route.
+    if (req.method === 'POST') {
+      if (!checkToken(req, query)) { sendUnauthorized(res, 'Wrong or missing dashboard token.'); return; }
+      if (url === '/api/prompts/dismiss') { await handleDismiss(req, res); return; }
+      if (url === '/api/prompts/undismiss') { await handleUndismiss(req, res); return; }
+      res.writeHead(405).end('method not allowed');
       return;
     }
 
@@ -1779,6 +1861,67 @@ export function startDashboard({
         sendJson(res, 200, { samples: [], occurrences: [] });
       }
       return;
+    }
+
+    // POST /api/prompts/dismiss — persist a coaching dismissal (§4.3). POST
+    // /api/prompts/undismiss reverses it. Both are token-gated + loopback-only
+    // (guarded above), validate the id BEFORE any read/write, and never carry
+    // prompt text. Two endpoints, not one `{ id, undo }` body: cleaner REST and
+    // undo needs no canonical read (see coachingUndismiss).
+    async function handleDismiss(req, res) { await coachingWrite(req, res, false); }
+    async function handleUndismiss(req, res) { await coachingWrite(req, res, true); }
+
+    async function coachingWrite(req, res, undo) {
+      const parsed = await readJsonBody(req);
+      const id = parsed && typeof parsed === 'object' ? parsed.id : undefined;
+      // Validate the id charset BEFORE touching the ledger — CARD_ID_RE rejects
+      // path separators, `..`, whitespace and uppercase, so a card id is never a
+      // path and a malformed request never reaches a read or a write.
+      if (typeof id !== 'string' || !CARD_ID_RE.test(id)) {
+        sendJson(res, 400, { error: 'invalid card id' });
+        return;
+      }
+      const load = coachingLedger?.loadLedger ?? loadLedger;
+      const save = coachingLedger?.saveLedger ?? saveLedger;
+      const ledgerPath = coachingLedger?.ledgerPath ?? defaultLedgerPath();
+      try {
+        const ledger = load(ledgerPath);
+        // A newer-schema ledger must never be overwritten by this build (I-2) —
+        // that would silently resurrect every dismissal a future ak suppressed.
+        if (ledger.future) { sendJson(res, 409, { error: 'ledger schema is newer than this build' }); return; }
+        if (undo) { coachingUndismiss(res, ledger, id, ledgerPath, save); return; }
+        await coachingDismiss(res, ledger, id, ledgerPath, save);
+      } catch (e) {
+        serverFault(res, `/api/prompts/${undo ? 'undismiss' : 'dismiss'}`, e, 'coaching ledger unavailable');
+      }
+    }
+
+    async function coachingDismiss(res, ledger, id, ledgerPath, save) {
+      // Idempotent: an already-dismissed card is a 200 no-op — no canonical read,
+      // no write, no dismissCount bump (so a double-click cannot drive a card to
+      // a permanent dismissal, which is a real state transition in the ledger).
+      if (findDismissed(ledger, id)) { sendJson(res, 200, { id, status: 'dismissed' }); return; }
+      const { allCards, adoptionInputs } = await canonicalCoachingContext({
+        readIndex: usageApi.readIndex,
+        loadStore: labelStoreOverride?.loadLabelStore ?? loadLabelStore,
+        labelStorePath: labelStoreOverride?.labelStorePath ?? defaultLabelStorePath(),
+        cwd, now: Date.now(),
+      });
+      const { ledger: next, found } = dismissCard(ledger, id, allCards, { adoptionInputs, now: Date.now() });
+      // An id that names no card this canonical pass derives → 404, no write.
+      if (!found) { sendJson(res, 404, { error: 'unknown card' }); return; }
+      save(ledgerPath, next);
+      sendJson(res, 200, { id, status: 'dismissed' });
+    }
+
+    function coachingUndismiss(res, ledger, id, ledgerPath, save) {
+      // Reversing a recorded dismissal needs no canonical derivation: a card
+      // dismissed and then undone must reappear even if its evidence has since
+      // collapsed. Removing the record is "as if never dismissed" — the next
+      // reconcile re-proposes it fresh. Nothing to undo → 404, no write.
+      if (!findDismissed(ledger, id)) { sendJson(res, 404, { error: 'no dismissal to undo' }); return; }
+      save(ledgerPath, { version: ledger.version, records: ledger.records.filter((r) => r.id !== id) });
+      sendJson(res, 200, { id, status: 'active' });
     }
 
     // Exact-path routes (O(1) lookup) win first, then the parametrized ones —
