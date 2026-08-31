@@ -563,7 +563,12 @@ test('SEC-6: the tmp path is unpredictable and never left behind', () => {
   assert.deepEqual(leftovers, [], 'no tmp file survives a successful write');
   assert.ok(!fs.existsSync(`${file}.${process.pid}.tmp`),
     'and the PID-derived name is not the one used');
-  assert.equal(fs.statSync(file).mode & 0o777, 0o600, 'the store stays 0600');
+  // POSIX permission bits only — Windows models owner-only access through ACLs,
+  // not `mode`, so this asserts on POSIX exactly as the sibling store/quota/
+  // model-inventory tests already guard it.
+  if (process.platform !== 'win32') {
+    assert.equal(fs.statSync(file).mode & 0o777, 0o600, 'the store stays 0600 on POSIX');
+  }
 });
 
 // ── QE review F-10 (LOW): the module's stated invariant, made true on disk ──

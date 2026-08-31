@@ -784,7 +784,7 @@ time as **local calendar day**, not UTC
 (`usage-parsers.mjs:583`/`usage-parsers.mjs:957` call `localDay(at)`) — so a
 session that runs from 23:58 local to 00:05 local is billed to the day its
 *first* row landed on (test:
-`tests/kit/usage-index.test.mjs:727`, "a session that opens before midnight
+`tests/kit/usage-index.test.mjs:738`, "a session that opens before midnight
 is counted on its first billed day"). Accumulation, at this call: `dayBucket(byDay,
 row.day)` then `d.cost = round(d.cost + rowCost)` (`usage-aggregate.mjs:822-827`). Bar height:
 `h = maxDay ? max(2, cost/maxDay*100) : 2` (`dashboard/client.mjs`) —

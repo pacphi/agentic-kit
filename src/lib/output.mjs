@@ -150,10 +150,16 @@ const FLUSH_TIMEOUT_MS = 2000;
 export function exitWhenFlushed(code) {
   const fallback = setTimeout(() => process.exit(code), FLUSH_TIMEOUT_MS);
   fallback.unref?.();
-  process.stdout.write('', () => {
-    process.stderr.write('', () => {
-      clearTimeout(fallback);
-      process.exit(code);
-    });
-  });
+  // Wait on the stream's ACTUAL buffer, not a zero-length `write('', cb)`: on
+  // Windows that callback can fire before a large buffered payload has drained
+  // (the empty write is a no-op that calls back immediately rather than queuing
+  // behind the pending bytes), so `ak … | jq` truncated past the pipe buffer.
+  // `writableLength === 0` means the Node buffer is empty (handed to the OS);
+  // otherwise `drain` fires exactly when it empties. Both are true only after
+  // the bytes are with the kernel, so the reader still gets them after exit.
+  let pending = 2;
+  const done = () => { if (--pending === 0) { clearTimeout(fallback); process.exit(code); } };
+  const flush = (s) => { if (s.writableLength === 0) done(); else s.once('drain', done); };
+  flush(process.stdout);
+  flush(process.stderr);
 }

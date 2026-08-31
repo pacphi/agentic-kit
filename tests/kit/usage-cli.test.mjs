@@ -994,6 +994,16 @@ if (prompt.includes('naming recurring prompt clusters')) {
   process.stdout.write(${JSON.stringify(cardsJson)});
 }
 `, { mode: 0o755 });
+  // Windows cannot spawn a bare shebang script, and `resolveShim` (exec.mjs)
+  // finds a shim by PATHEXT (.CMD) and then runs its sibling .ps1 through
+  // PowerShell — the same contract the real `claude.cmd` install satisfies. So
+  // give the shim both: a .cmd marker for discovery and a .ps1 that just runs
+  // node on the SAME shim body above (no logic duplicated). Harmless on POSIX,
+  // where the executable `claude` file is used directly.
+  fs.writeFileSync(`${bin}.cmd`, `@node "%~dp0claude" %*\r\n`);
+  fs.writeFileSync(`${bin}.ps1`,
+    `& ${JSON.stringify(process.execPath)} (Join-Path $PSScriptRoot 'claude') @args\r\n`
+    + 'exit $LASTEXITCODE\r\n');
   return bin;
 }
 
