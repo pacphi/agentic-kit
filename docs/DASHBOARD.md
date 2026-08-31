@@ -40,7 +40,7 @@ permanent.
 | Usage | Scorecard | `#usage/score` | Usage scorecard | Token consumption, API-equivalent cost, efficiency, and trends |
 | Usage | Limits | `#usage/limits` | Provider limits | Current provider windows, reset timing, and available capacity |
 | Usage | Findings | `#usage/findings` | Usage findings | Actionable anomalies, efficiency opportunities, and evidence-backed recommendations |
-| Usage | Prompts | `#usage/prompts` | What you actually type | Prompt repetition, tap habits, and provenance by host, from prompt fingerprints — no prompt text; rule-derived coaching cards |
+| Usage | Prompts | `#usage/prompts` | What you actually type | Prompt repetition, tap habits, and provenance by host from prompt fingerprints; a coaching table where each pattern expands to its masked prompt text, a recommendation, and a copyable draft |
 | Usage | Models | `#usage/models` | Model lifecycle | Host inventory, lifecycle changes, consumers, swap impact, and evidence sources |
 | Usage | Sessions | `#usage/sessions` | Session usage | Retained sessions grouped by project, category, duration, tokens, and cost |
 | Usage | Transcript | `#usage/transcript` | Transcript detail | The selected session's locally retained, server-masked evidence |
@@ -234,22 +234,28 @@ The legend appears only when at least one row actually carries a tick.
 
 Prompts turns what you actually typed — never what the harness or a delegated agent produced —
 into repetition, habit, and coaching signal, host by host. Every figure derives from prompt
-**fingerprints** (a hash, a token count, a provenance tag recorded at scan time); no prompt text
-reaches the index or this page. The **KPI strip** reads Typed prompts (share of every
-fingerprinted turn), Questions, Supervision taps (against your own trailing-90d normal per host,
-where you have one), Repeated share, and Headless share. Below it, **Who is typing** shows the
-provenance split behind that Typed-prompts figure — most user-role turns are not typed by you at
-all — and **Host interplay** compares hosts on tap-share trend, typed length, and how much role
-scaffolding gets retyped by hand on each. **Repeated patterns** is the cluster table: a pattern's
-span, whether it reads as a question or something else, and — where the shape supports one — a
-suggested move. **Coaching** shows the same rule-derived suggestion cards `ak usage prompts`
-prints, read-only: a finding, a Try, a status chip, and a draft you can select and copy. Dismissal
-is CLI-only, so a proposed card carries a hint with the exact command rather than a button; a
-cached suggestion whose evidence has since moved carries a **stale** chip pointing at the CLI
-command that refreshes it, rather than a button here — inference stays off the dashboard by
-design. An **All** chip, offered on this view alone, widens the window to the full retained
-history; leaving Prompts drops it back to 30 days. Full formulas, thresholds, and sources:
-[Usage scorecard metrics](USAGE-SCORECARD-METRICS.md) §2a, §2b, §20–§23.
+**fingerprints** (a hash, a token count, a provenance tag recorded at scan time); no prompt text is
+stored in the index. The **KPI strip** reads Typed prompts (share of every fingerprinted turn),
+Questions, Supervision taps (against your own trailing-90d normal per host, where you have one),
+Repeated share, and Headless share. Below it, **Who is typing** shows the provenance split behind
+that Typed-prompts figure — most user-role turns are not typed by you at all — and **Host
+interplay** reads the asymmetry between hosts in plain language (how much more often you tap one,
+how much longer you write on the other, how much role scaffolding each gets retyped by hand), with
+the unequal-histories nuance in its own tooltip rather than a standing caveat.
+
+The **Coaching** panel is a kind-filterable, sortable pattern table — columns **Pattern · Times
+typed · Sessions · Days seen · Hosts**. Filter pills above the table slice by pattern kind and stack
+with the column sort; every header sorts; the table scrolls once it passes a handful of rows, with
+its header pinned. Expanding a pattern opens its coaching panel: where it was **seen** (up to three
+sessions, each a link to that session's masked transcript), **what you typed** (the pattern's own
+prompt text, shown inline and masked, fetched on demand — a **prompt text · shown / hidden** toggle
+at the top of the view suppresses it for screen-sharing and makes no fetch), a **recommendation**, a
+**draft** you can copy, and a **Dismiss** with an inline Undo. A pattern with no matching
+recommendation shows only where it was seen and what you typed, never a forced suggestion. Writing a
+recommendation is still CLI-only (`ak usage prompts --enrich`); the dashboard shows, dismisses,
+and reads, but runs no inference of its own. An **All** chip, offered on this view alone, widens the
+window to the full retained history; leaving Prompts drops it back to 30 days. Full formulas,
+thresholds, and sources: [Usage scorecard metrics](USAGE-SCORECARD-METRICS.md) §2a, §2b, §20–§23.
 
 ### Reading a session row
 
