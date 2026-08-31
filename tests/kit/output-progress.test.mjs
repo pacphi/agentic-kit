@@ -146,7 +146,19 @@ test('exitWhenFlushed propagates a nonzero exit code', () => {
 // previously could not hang: before the drain fix the bin called
 // process.exit(code) directly and returned immediately.
 
-test('SEC-5: a consumer that opens the pipe and never reads it still exits, bounded', () => {
+// POSIX-only by OS design, not by omission: `process.stdout` writes to a pipe
+// are ASYNCHRONOUS on POSIX but SYNCHRONOUS on Windows (Node's documented
+// platform behavior). On Windows the `write(200 KB)` to a non-reading consumer
+// blocks INSIDE the write syscall — it fills the pipe buffer and waits for a
+// reader — so control never reaches exitWhenFlushed, and no timer can fire
+// while the event loop is blocked in that write. The bounded-exit-despite-a-
+// stalled-consumer guarantee is therefore a POSIX async-pipe property that
+// cannot be provided at this layer on Windows (the same is true of any program
+// writing to a stalled Windows pipe). The two tests above — where the consumer
+// DOES drain — cover exitWhenFlushed's flush-then-exit path on every OS,
+// Windows included; only this stalled-consumer bound is POSIX-specific.
+test('SEC-5: a consumer that opens the pipe and never reads it still exits, bounded',
+  { skip: process.platform === 'win32' }, () => {
   // The parent holds the read end open without reading, exactly as the review
   // did. Without the bounded fallback this never resolves.
   const child = spawn(process.execPath, ['--input-type=module', '-e',
