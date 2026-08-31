@@ -2258,7 +2258,7 @@ its formula and a "what this does not model" line in its own tooltip:
 | Typed prompts | `patterns.corpus.typed` over `patterns.corpus.fingerprints` — the provenance-filtered share (§2b), not `totals.prompts` (§2) |
 | Questions | the per-host `questionShare` figures, typed-weighted into one window share |
 | Supervision taps | `taps` / `typed`, with a per-host chip comparing that host's share to its own trailing-90d p75 (§2b) or naming the absence of one |
-| Repeated share | the sum of every cluster's `count` (the FULL list, never the table's slice) over `typed` |
+| Repeated share | the sum of every cluster's `count` (the FULL list, independent of the active kind filter) over `typed` |
 | Headless share | `headless.share`, absent-safe on an empty denominator |
 
 **Who is typing** (`provenancePanel`, `usage-prompts.mjs:275`) reads
@@ -2276,8 +2276,7 @@ instructions" (the residue — the shape rules do not split imperative from
 declarative), and beside it, taps by exact token length
 (`patterns.tapLengths`, §2a's per-length grouping) — there is no text at this
 layer, so a length distribution is the honest shape of "your top short
-prompts". A third slot names the missing subject-matter taxonomy rather than
-filling it with a guess (`taxonomyPlaceholder`).
+prompts".
 
 **Host interplay** (`hostInterplay`, `usage-prompts.mjs:346`) — one row per host: a tap-share
 sparkline built from `statsByDay` (a day the host did not type on breaks the
@@ -2316,19 +2315,18 @@ card's status any more than they can about a cluster's count.
 - **No live Recompute button.** A button here would trigger inference FROM
   the dashboard, and the privacy split (§23) keeps inference CLI-only. The
   stale hint points at the command that does the same thing today.
-- **The uncapped cluster list is exact; the table is a display slice.** The
-  Repeated-share KPI and the "showing N of K" line both read the full list;
-  only the visible 25 rows are a cut, and the table says so rather than
-  letting a partial view read as the whole finding.
+- **A kind filter narrows the table, never the KPI.** The Coaching table
+  renders every cluster (scrolling once it passes a handful of rows), so no
+  finding sits below an invisible cut; the Repeated-share KPI always reads the
+  whole cluster list, so filtering by kind changes what you see, not what the
+  KPI counts.
 - **Windows are unequal per host**, by construction — a host adopted recently
-  has fewer days behind its trend line, and the panel's own caveat names any
-  host under 20 typed prompts rather than drawing a trend line through noise.
-- **The taxonomy placeholder is a named gap, not a guess.** Subject-matter
-  classification (release/git, explain, fix/debug, review…) needs a lexicon
-  that has not shipped; forcing every prompt into one of these buckets today
-  would read as coverage this view does not have.
+  has fewer days behind its trend line, so a host with too few days shows "too
+  few days to trend" instead of a sparkline drawn through noise, and the
+  unequal-histories nuance lives in the panel's `?` tooltip rather than a
+  standing caveat.
 - **The three prompt detectors render in the Findings tab, not here.**
-  `tap-supervision-load`, `headless-share` and `host-prompt-asymmetry` reach
+  `supervision-tap-share`, `headless-share` and `host-prompt-asymmetry` reach
   the reader through the standard `DETECTORS` registry and the standard card
   grammar, alongside every other finding. This view deliberately carries no
   duplicate panel for them: the spec sketched an "Also in Findings" cross-link
@@ -2347,9 +2345,10 @@ card's status any more than they can about a cluster's count.
 ## 22. Coaching cards and the outcome ledger
 
 **Displayed as:** the `Coaching` section of `ak usage prompts` (§20) and the
-dashboard's read-only Coaching panel (§21) — one card set, one ledger, two
-renderers. `--draft <id>` (CLI-only) prints a card's draft text; `--dismiss
-<id>` (CLI-only) is the one operator action this feature takes.
+dashboard's Coaching panel (§21) — one card set, one ledger, two renderers.
+`--draft <id>` (CLI-only) prints a card's draft text; dismissal is the one
+operator action this feature takes, now on BOTH surfaces — `--dismiss <id>` on
+the CLI, `POST /api/prompts/dismiss` (with an Undo) on the dashboard.
 
 **The six v1 rules,** each a `{evidence, meetsBar, card}` triple
 (`RULES`, `src/lib/usage-coaching-rules.mjs:346`) evaluated by `deriveCards`
@@ -2449,10 +2448,11 @@ expires, never silently marked adopted.
 **Draft-only, always.** A `Draft →` affordance produces text the operator
 edits and applies themselves — a CLAUDE.md line, a skill skeleton, a pointer
 to a sibling effort. Nothing on either surface writes to CLAUDE.md, creates a
-skill, or changes any configuration unprompted; the dashboard cannot even
-reach the write path (`dashboardCoachingPayload` has no `saveLedger` call in
-its whole call graph — a structural guarantee, not a convention someone could
-accidentally violate in a later diff).
+skill, or changes any configuration unprompted. The dashboard's one ledger
+write is a dismissal (§21) — a token-gated `POST /api/prompts/dismiss` through a
+handler of its own; the card-rendering read path stays write-free
+(`dashboardCoachingPayload` has no `saveLedger` call in its whole call graph — a
+structural guarantee, not a convention a later diff could quietly violate).
 
 **Source:** `usage-coaching.mjs` (the engine — `deriveCards`,
 `currentEvidenceFor`, `detectAdoption`, `measureOutcome`),
