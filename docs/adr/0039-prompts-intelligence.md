@@ -237,6 +237,85 @@ everything queued ahead of it has actually reached the OS; hard-exit semantics f
 handle are preserved. This is a kit-wide correctness fix that this build's own `--json` output
 size was what exposed.
 
+## Amendment — Coaching panel redesign (2026-08-31)
+
+The Prompts view this ADR records (§7, §21) split recurring patterns and coaching into two panels
+and showed no prompt text at all. A follow-on redesign (spec
+`docs/superpowers/specs/2026-08-31-coaching-panel-redesign.md`, archived on completion) folds both
+into ONE pattern-centric **Coaching** panel and shifts three postures the Decision above had fixed.
+Each shift and its reasoning is recorded here; the living per-metric record stays
+`USAGE-SCORECARD-METRICS.md` §21/§22.
+
+### A. A derived five-kind `kind`, projected — not a new classifier
+
+`deriveKind` (`usage-aggregate.mjs`) labels every cluster with exactly one of
+`reask | persona | tap | question | instruction`, first match wins in that order: a member hash on
+the "asked-again" side of `reAskPairs` is `reask` (the most actionable, so it wins); else a persona
+majority (`cluster.personas / cluster.size ≥ PERSONA_KIND_SHARE`, the one new constant, `= 0.5`) is
+`persona`; else a short median (`cluster.tokens.median ≤ TAP_MAX_TOKENS`) is `tap`; else
+`class === 'question'` is `question`; else `instruction`. It is a PURE projection field added by
+`promptClusterRow` from signals the cluster already carries — the shipped `classifyCluster` (§11) is
+untouched, still emits `question/other/mixed/unknown`, and still underlies the `question` kind. WHY
+this does not reopen §11's confidence over-claim: `instruction` here is the residue label of a
+filter dimension the operator toggles, recomputed every scan — not a wire assertion that a
+non-question prompt is a directive. No new fingerprint data. Powers the filter pills.
+
+### B. Masked prompt text shown by default, superseding reveal-on-request
+
+§7's dashboard boundary was "aggregates and masked session links only — never exemplar text." The
+view now shows a pattern's OWN masked prompt text inline, fetched on demand from
+`GET /api/prompts/samples` (`handleSamples` → `resolveClusterSamples`, `dashboard-server.mjs`), with
+a per-viewer `shown/hidden` toggle (default shown; `hidden` makes NO fetch) that preserves a
+text-free posture for screen-sharing. WHY it is safe, and continuous with §7's intent rather than a
+break from it: the samples path re-reads transcripts through the SAME deep-pass machinery the CLI
+`--deep` uses (`readPromptEntries → deepFingerprints → collectExemplars`), applies `maskSecrets` to
+every returned string, and the browser ALREADY served masked transcript text through
+`/api/session/:id` — this is a cluster-scoped instance of that same masked reader, on the operator's
+own transcripts, on their own loopback-bound, per-session-token-gated machine. Nothing is persisted.
+
+Security contract (the endpoint takes the security seat in the final review): masking runs before
+every egress, INCLUDING error paths — `clusterSampleTexts` fails closed with no masker, and a
+resolution failure returns an honest empty `{ samples: [], occurrences: [] }`, never a stack trace
+or a path. The cluster `key` is validated against the window's OWN re-derived cluster key set
+(`resolveClusterSamples` resolves `c.key === key` in the real set) and is NEVER a filesystem path;
+the 16-hex `CLUSTER_KEY_RE` charset check is **defense-in-depth, not the load-bearing guard** (W1
+review) — path safety is architectural: equality against the real key set. Every transcript path is
+guarded by `resolvesWithinRoot` (`session-security.mjs`) — containment at ANY depth, the correct
+guard for the nested `<root>/<project>/<file>` and opencode-`db` paths the deep-pass reader opens,
+ADDITIVE to the existing direct-child `resolvesInsideRoot` whose callers (`/api/session/:id`,
+playback, SSE) are unchanged. `MAX_DEEP_FILE_BYTES` (`deep-pass.mjs`) is enforced before any read.
+
+### C. Dismiss is now a dashboard write — the one relaxation of the read-only-ledger rule
+
+§7/§9's split kept the dashboard read-only for the ledger: "the coaching payload builder has no
+`saveLedger` in its call graph." That still holds for the card-RENDERING path
+(`dashboardCoachingPayload`). But dismissal is now a dashboard action: `POST /api/prompts/dismiss`
+(and `/undismiss`), token-gated and loopback-only, validates the card `id` against `CARD_ID_RE`
+(aliased `CARD_ID_SLUG_RE`) BEFORE any read or write, then persists through `dismissCard` + atomic
+`saveLedger`. WHY it does not reopen the inference boundary: a dismissal is one enum-shaped flag,
+not inference and not prompt text — the read-only-FOR-INFERENCE rule stands (no `--enrich` from the
+dashboard; §7's Recompute deferral is unchanged), and only this single local write is exempted.
+Idempotent (a re-dismiss is a 200 no-op); an unknown id is a 404 with no write.
+
+**Undo = DELETE the record, stated honestly (W1 review I-1).** `POST /api/prompts/undismiss`
+reverses a dismissal by REMOVING its ledger record (`coachingUndismiss` filters it out), so the next
+`reconcile` re-proposes the card fresh. This is a deliberate choice with a consequence a future
+reader must know: a re-proposed card starts clean — the dismissal's `dismissCount` and the anti-nag
+materiality decay (§8) do NOT survive an undo. A re-proposed card is treated as never-dismissed, not
+as a dismissal continued.
+
+### D. Cluster → coaching-card association (the pattern-centric join)
+
+The Recommendation / Draft / Dismiss inside an expanded pattern come from a coaching CARD, but cards
+are a separate unit keyed by id. Each card now publishes two join fields (`usage-coaching-rules.mjs`):
+`clusterKey` — the specific cluster from `evidence.clusterKey` via `findSeedCluster`, else null — and
+`targetKind` — the derived kind a kind-level card addresses, static per rule (`reask-delta → reask`,
+`progress-report-taps → tap`, `codex-role-library → persona`), else null. The client
+(`cardForCluster`) joins a pattern row to a card by `clusterKey === cluster.key` first, then
+`targetKind === cluster.kind`, else none — an unmatched cluster shows Seen-in + masked text only, with
+a neutral note, never a force-fit recommendation (evidence-honesty). No prompt text is added to any
+card by this join; the two fields are ids and enum values only.
+
 ## Consequences
 
 ### Positive
@@ -289,6 +368,13 @@ size was what exposed.
   comparison and instead fires on the same two signals `host-prompt-asymmetry` already computes.
   Adding a per-host breakdown to the published aggregate is a deliberate, separate wire-shape
   decision, not made in-band by a card that merely wanted to consume it.
+- **Host-level coaching cards in the pattern-centric table** (Amendment D). The Coaching table
+  joins each pattern to a card by `clusterKey` then `targetKind` (`cardForCluster`).
+  `codex-completion-criteria` (host asymmetry) maps to neither — it publishes
+  `clusterKey: null, targetKind: null`, so the join can never bind it to a pattern row, by
+  construction. It is a host-level card and is deliberately absent from the pattern table in v1
+  (spec §4.5), not force-fit onto an unrelated pattern. Promoting host-level cards into the
+  pattern surface is a separate design question, not answered here.
 - **The dashboard Recompute affordance.** No live button triggers `--enrich` from the dashboard —
   the privacy split (§7) keeps inference CLI-only by design, and the stale-card hint points at the
   CLI instead. Not a missing feature; a boundary.
