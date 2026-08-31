@@ -1427,7 +1427,7 @@ p(q), over N samples, landing in bucket i (count n_i, running total `cum` before
 - Percentiles: `percentileFromBuckets` (`usage-aggregate.mjs:240-257`). The
   browser re-implementation `bucketPercentile` (`usage-rhythm.mjs:106-126`) is
   pinned to byte-identical output, and the browser's edge copies to the server
-  constants, by `tests/kit/dashboard-usage-telemetry.test.mjs:1525-1543` and
+  constants, by `tests/kit/dashboard-usage-telemetry.test.mjs:1640-1655` and
   `:1623-1631`.
 - Render: `lengthCard`/`latencyCard` and the `≥` prefix helper `fmtAtLeast` in
   `src/lib/dashboard/client/usage.mjs` (that bundle shares a basename with the
@@ -2308,18 +2308,18 @@ table IS the coaching surface (the old split Repeated-patterns + Coaching
 card-wall are retired into it). Columns are Pattern · Times typed · Sessions ·
 Days seen · Hosts, every header sortable (`coachHeadCell`,
 `usage-prompts.mjs:579`); kind filter pills above the table (`coachingFilters`,
-`usage-prompts.mjs:540`) slice by the derived kind (§20) and stack with the
+`usage-prompts.mjs:550`) slice by the derived kind (§20) and stack with the
 sort; the table caps at ~5 rows then scrolls with a pinned header. Clicking a
-pattern opens an inline coaching panel (`coachDetailRow`, `usage-prompts.mjs:798`):
+pattern opens an inline coaching panel (`coachDetailRow`, `usage-prompts.mjs:857`):
 **Seen in** — up to three `session · date` links through the existing
-`#usage/<id>` masked transcript reader (`coachSeenIn`, `usage-prompts.mjs:704`);
+`#usage/<id>` masked transcript reader (`coachSeenIn`, `usage-prompts.mjs:736`);
 **What you typed** — the pattern's own prompts, MASKED and fetched on demand
 from `GET /api/prompts/samples`, rendered inline and suppressed by a per-viewer
 shown/hidden toggle that also stops the fetch (`coachTyped`,
-`usage-prompts.mjs:726`); and, from the coaching card this pattern joins to (by
-`clusterKey` then `targetKind` — `cardForCluster`, `usage-prompts.mjs:676`) a
+`usage-prompts.mjs:758`); and, from the coaching card this pattern joins to (by
+`clusterKey` then `targetKind` — `cardForCluster`, `usage-prompts.mjs:696`) a
 **Recommendation**, a **Draft** with a copy button (`coachDraft`,
-`usage-prompts.mjs:763`), and a **Dismiss** that persists to `POST /api/prompts/dismiss` with an inline Undo (`coachFoot`, `usage-prompts.mjs:774`). A
+`usage-prompts.mjs:795`), and a **Dismiss** that persists to `POST /api/prompts/dismiss` with an inline Undo (`coachFoot`, `usage-prompts.mjs:810`). A
 pattern with no matching card shows Seen-in + What-you-typed and a neutral note
 — never a force-fit recommendation. The cards, their source chip and ledger
 status are the same §22 defines, reconciled server-side from the same lib and

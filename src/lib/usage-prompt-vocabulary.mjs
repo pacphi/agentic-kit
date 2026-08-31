@@ -1,10 +1,13 @@
 // usage-prompt-vocabulary.mjs — what a prompt cluster is CALLED.
 //
-// The Prompts view renders pattern names, never prompt text (ADR-0039 "The
-// privacy split: three surfaces, three different trust boundaries"): the
-// dashboard's whole privacy split rests on names being drawn from a curated
-// vocabulary rather than lifted from what the operator typed. This module is
-// that vocabulary, and the resolution order behind it.
+// A cluster's NAME is drawn from a curated/derived vocabulary, never lifted
+// from what the operator typed (ADR-0039 "The privacy split: three surfaces,
+// three different trust boundaries"). The Coaching panel can show a pattern's
+// own MASKED prompt text on demand (the samples endpoint, secrets redacted
+// server-side), but a cluster's name — this module's job — is always a
+// curated, seeded, enriched, or shape-characterized label, never the typed
+// text itself. This module is that vocabulary, and the resolution order
+// behind it.
 //
 // ── v1 DESIGN ───────────────────────────────────────────────────────────────
 //
