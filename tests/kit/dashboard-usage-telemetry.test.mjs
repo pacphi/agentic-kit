@@ -643,7 +643,7 @@ test('the prompts payload carries no fixture prompt text, at any depth', async (
 // past the word scan above. Cluster entries are the only place a name string
 // reaches this payload, and that name comes from the curated vocabulary.
 const CLUSTER_KEYS = new Set(['key', 'label', 'class', 'count', 'sessions', 'days', 'hosts',
-  'medianTokens', 'sampleSessionIds']);
+  'medianTokens', 'sampleSessionIds', 'kind']);
 // `descriptor` (RULING B, final-triage item 2) rides beside `name` only on a
 // CHARACTERIZED label — the full "Recurring N-token X · N sessions · N hosts"
 // string, still machine-assembled from counts/bands, never prompt text. The
