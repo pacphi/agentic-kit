@@ -48,6 +48,7 @@
 // close() on SIGINT.
 import http from 'node:http';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
@@ -63,7 +64,13 @@ import { renderPage } from './dashboard/page.mjs';
 // is a static import where usage-index.mjs is deliberately lazy (see
 // lazyUsage): the reason for that laziness is the transcript walk, which this
 // module does not do.
-import { BASELINE_TRAILING_DAYS } from './usage-aggregate.mjs';
+import { BASELINE_TRAILING_DAYS, PROMPT_CLUSTER_JACCARD } from './usage-aggregate.mjs';
+// Pure repetition analysis (no I/O) — the SAME clustering buildPromptPatterns
+// runs, re-derived over the deep-pass fingerprints so the masked-samples
+// endpoint can resolve a cluster key to its member hashes (§4.2). Static import
+// because these functions never touch disk; the transcript walk they feed is
+// what stays lazy (the deep-pass module, dynamically imported in the handler).
+import { nearDupClusters, crossSessionClusters } from './usage-prompt-patterns.mjs';
 // Coaching (METRICS.md §22) — static import, same reasoning as above.
 import { deriveCards } from './usage-coaching.mjs';
 import {
@@ -95,6 +102,7 @@ import {
   maskTurns,
   parseSessionId,
   resolvesInsideRoot,
+  resolvesWithinRoot,
   parseNamespacedSessionId,
   resolvesNamespacedInsideRoot,
 } from './dashboard/session-security.mjs';
@@ -585,6 +593,114 @@ function promptsPayload(agg) {
   };
 }
 
+// ── masked verbatim samples for one cluster (Coaching redesign §4.2) ─────────
+//
+// A cluster-scoped instance of the SAME masked reader `/api/session/:id`
+// already is (spec §5): the cluster key selects which member hashes to resolve,
+// the deep-pass machinery re-reads the transcripts that hold them, and
+// `maskSecrets` is applied to every string before it leaves the process. No
+// unmasked text ever leaves; nothing is persisted.
+
+/** A cluster key is `sha256(normalizedText).slice(0,16)` — sixteen lowercase
+ *  hex chars, nothing else. Validated BEFORE any read, so a key carrying a path
+ *  separator, `..`, or any other shape is rejected outright and is never, under
+ *  any branch, treated as a filesystem path (§4.2 security (b)). */
+const CLUSTER_KEY_RE = /^[0-9a-f]{16}$/;
+
+/** How many DISTINCT masked phrasings one cluster's "what you typed" shows, and
+ *  how many `session · date` occurrences the "Seen in" strip lists — a link/
+ *  read affordance, capped so the response cannot become a membership dump. */
+const SAMPLES_PER_CLUSTER = 3;
+const CLUSTER_SAMPLE_SESSIONS = 3;
+const SAMPLE_DAY_MS = 86_400_000;
+
+/** The roots a transcript path must sit inside for the samples endpoint to open
+ *  it (§4.2 security (c)) — the claude/codex file trees `/api/session/:id`
+ *  already serves, plus opencode's single SQLite store. A cache entry whose path
+ *  falls outside all of these is dropped before any read. */
+const SAMPLE_READ_ROOTS = [
+  ...TRANSCRIPT_ROOTS,
+  path.join(os.homedir(), '.local', 'share', 'opencode'),
+];
+
+/** True only when the on-disk path a deep-pass entry will actually open is
+ *  contained within an allowed root. opencode entries carry a pseudo `file`
+ *  (`opencode://…`) and a real `dbFile`; claude/codex carry a real transcript
+ *  `file` — guard whichever will be read. */
+function entryInsideRoots(entry, roots) {
+  const p = typeof entry.file === 'string' && entry.file.startsWith('opencode://')
+    ? entry.dbFile : entry.file;
+  return roots.some((root) => resolvesWithinRoot(root, p));
+}
+
+/** The cluster's masked, distinct phrasings — key (hashes[0]) first, then the
+ *  rest in sorted order — capped at SAMPLES_PER_CLUSTER. Fails CLOSED: with no
+ *  masker there is no text, never raw text. `maskSecrets` runs on every string
+ *  (§4.2: masking before every egress). */
+function clusterSampleTexts(cluster, textMap, maskFn) {
+  if (typeof maskFn !== 'function') return [];
+  const out = [];
+  const seen = new Set();
+  for (const h of cluster.hashes) {
+    const raw = textMap.get(h);
+    if (typeof raw !== 'string') continue;
+    const masked = maskFn(raw);
+    if (seen.has(masked)) continue;
+    seen.add(masked);
+    out.push(masked);
+    if (out.length >= SAMPLES_PER_CLUSTER) break;
+  }
+  return out;
+}
+
+/** The `{ sessionId, day }` occurrences — the same shape the projection's
+ *  `sampleSessionIds` already publishes, one day per session (a record's
+ *  fingerprints all share its first-billed day). Sorted, capped, no text. */
+function clusterOccurrences(wanted, typed) {
+  const bySession = new Map();
+  for (const fp of typed) {
+    if (!wanted.has(fp.h) || !fp.sessionId || bySession.has(fp.sessionId)) continue;
+    bySession.set(fp.sessionId, fp.day ?? null);
+  }
+  return [...bySession.keys()].sort().slice(0, CLUSTER_SAMPLE_SESSIONS)
+    .map((sessionId) => ({ sessionId, day: bySession.get(sessionId) }));
+}
+
+/**
+ * Resolve one cluster key to its masked verbatim samples + occurrences, or
+ * `null` when the key names no cluster in this window (→ an honest 404, and no
+ * transcript is ever opened for it).
+ *
+ * The window's clusters are RE-DERIVED here from the deep-pass fingerprints with
+ * the SAME clustering `buildPromptPatterns` runs (`nearDupClusters` at
+ * `PROMPT_CLUSTER_JACCARD`, then `crossSessionClusters`). This is deliberately
+ * the validation set AND the hash source in one: the key is checked against a
+ * closed set of real 16-hex cluster keys (never a path), and the member hashes
+ * it resolves come from that very set — so "validated" and "resolvable" cannot
+ * diverge. It equals the `/api/usage` projection's key set by construction (same
+ * cache, same typed population, same params), so a key the client holds resolves.
+ */
+async function resolveClusterSamples(key, { cacheFile, roots, now, days, maskFn }) {
+  const { readPromptEntries, deepFingerprints, exemplarCandidates, collectExemplars, promptCacheFile } =
+    await import('../commands/usage/deep-pass.mjs');
+  // Guard every transcript path against the roots BEFORE anything is opened
+  // (§4.2 security (c)): a poisoned/out-of-root entry is dropped here, so it
+  // never joins the clustering and is never read.
+  const entries = readPromptEntries(cacheFile ?? promptCacheFile()).filter((e) => entryInsideRoots(e, roots));
+  const cutoffMs = now - days * SAMPLE_DAY_MS;
+  const typed = deepFingerprints(entries, cutoffMs);
+  const clusters = crossSessionClusters(nearDupClusters(typed, { jaccard: PROMPT_CLUSTER_JACCARD }));
+  const cluster = clusters.find((c) => c.key === key);
+  if (!cluster) return null;
+  const wanted = new Set(cluster.hashes);
+  const { text } = collectExemplars({
+    entries, cutoffMs, wanted,
+    candidates: exemplarCandidates(typed, wanted),
+    reAskSessions: new Set(),
+  });
+  return { samples: clusterSampleTexts(cluster, text, maskFn), occurrences: clusterOccurrences(wanted, typed) };
+}
+
 /** Lazily bind usage-index.mjs. Deliberately NOT a static import: the module
  *  walks two transcript stores, and the panel must boot (and serve /api/status)
  *  without paying for that until the Usage tab is actually opened. Same named
@@ -813,7 +929,7 @@ export function startDashboard({
   transcriptClientBuffer = 64, transcriptMaxClients = 16,
   intelWatch, intelClientBuffer = 256, intelMaxClients = 32,
   discoverProjects, machineWideIntel, models, modelScopeKey, system, systemOptions = {},
-  coachingLedger, labelStore: labelStoreOverride,
+  coachingLedger, labelStore: labelStoreOverride, promptSamples: promptSamplesOverride,
 } = {}) {
   const provide = fetchStatus || shellOutStatus(cwd);
   const usageApi = usage || lazyUsage();
@@ -1637,6 +1753,34 @@ export function startDashboard({
       return;
     }
 
+    // Masked verbatim samples for ONE cluster (Coaching redesign §4.2). Token-
+    // gated (the global gate above) and loopback-only, like every /api/ route.
+    // The cluster key is validated as a 16-hex sketch hash and then against this
+    // window's own cluster set BEFORE any transcript is read — it is never a
+    // path. A resolution failure degrades to an honest empty result, never a
+    // stack trace or an absolute path (§4.2 security (a)–(f)).
+    async function handleSamples(req, res, query) {
+      const key = String(query.get('key') ?? '');
+      if (!CLUSTER_KEY_RE.test(key)) { sendJson(res, 404, { error: 'unknown cluster' }); return; }
+      const days = clampDays(query.get('window'));
+      try {
+        const maskFn = typeof usageApi.masker === 'function' ? await usageApi.masker() : usageApi.maskSecrets;
+        const resolved = await resolveClusterSamples(key, {
+          cacheFile: promptSamplesOverride?.cacheFile,
+          roots: promptSamplesOverride?.roots ?? SAMPLE_READ_ROOTS,
+          now: promptSamplesOverride?.now ?? Date.now(),
+          days, maskFn,
+        });
+        if (!resolved) { sendJson(res, 404, { error: 'unknown cluster' }); return; }
+        sendJson(res, 200, resolved);
+      } catch {
+        // Honest empty — a vanished/oversized transcript or an unreadable cache
+        // costs its samples and nothing else; the error itself never egresses.
+        sendJson(res, 200, { samples: [], occurrences: [] });
+      }
+      return;
+    }
+
     // Exact-path routes (O(1) lookup) win first, then the parametrized ones —
     // mirrors the original if-chain's ordering, though none of these patterns
     // can collide with an exact path above. Splitting the 15-route if-chain
@@ -1655,6 +1799,7 @@ export function startDashboard({
       '/api/limits': handleLimits,
       '/api/system': handleSystem,
       '/api/sessions': handleSessions,
+      '/api/prompts/samples': handleSamples,
     };
     /** @type {Array<[RegExp, (req: any, res: any, query: any, match: RegExpExecArray) => Promise<void>]>} */
     const PARAM_ROUTES = [
