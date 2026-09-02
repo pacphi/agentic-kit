@@ -13,6 +13,8 @@ import { verifyAdapterContent } from './integrity.mjs';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const OUTPUT_CAP_BYTES = 256 * 1024;
+const BYTE_COUNT_SATURATION = OUTPUT_CAP_BYTES + 1;
+const MAX_RECEIPT_DURATION_MS = 24 * 60 * 60 * 1000;
 const TRUNCATION_MARKER = `\n…[truncated: adapter hook output exceeded ${OUTPUT_CAP_BYTES} bytes]`;
 const STDERR_SEPARATOR = '\n--- stderr ---\n';
 // Bounded wait for the process to actually report closed after a kill signal
@@ -55,13 +57,16 @@ function minimalEnv(extra) {
 function boundedCollector(capBytes) {
   let buffer = Buffer.alloc(0);
   let truncated = false;
+  let bytesSeen = 0;
   return {
     write(chunk) {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      bytesSeen = Math.min(BYTE_COUNT_SATURATION, bytesSeen + bytes.length);
       if (buffer.length >= capBytes) {
-        if (chunk.length > 0) truncated = true;
+        if (bytes.length > 0) truncated = true;
         return;
       }
-      const next = Buffer.concat([buffer, chunk]);
+      const next = Buffer.concat([buffer, bytes]);
       if (next.length > capBytes) {
         truncated = true;
         buffer = next.subarray(0, capBytes);
@@ -71,6 +76,29 @@ function boundedCollector(capBytes) {
     },
     text() { return buffer.toString('utf8'); },
     wasTruncated() { return truncated; },
+    bytesSeen() { return bytesSeen; },
+  };
+}
+
+function monotonicNowMs() {
+  return Number(process.hrtime.bigint()) / 1_000_000;
+}
+
+/** Add a sanitized, bounded execution receipt to every process-level result.
+ * Byte counts saturate one byte above the capture ceiling: callers can tell
+ * that output exceeded the cap without retaining an attacker-controlled
+ * unbounded count. Duration is likewise finite, integral, and capped. */
+function withReceipt(result, {
+  startedAtMs, effectiveTimeoutMs, stdoutCollector = null, stderrCollector = null,
+}) {
+  const rawDurationMs = Math.max(0, Math.ceil(monotonicNowMs() - startedAtMs));
+  return {
+    ...result,
+    timeoutMs: effectiveTimeoutMs,
+    durationMs: Math.min(rawDurationMs, MAX_RECEIPT_DURATION_MS),
+    durationTruncated: rawDurationMs > MAX_RECEIPT_DURATION_MS,
+    stdoutBytes: stdoutCollector?.bytesSeen() ?? 0,
+    stderrBytes: stderrCollector?.bytesSeen() ?? 0,
   };
 }
 
@@ -186,6 +214,7 @@ function verifyHookIntegrityOrFailure(manifest, integrity, baseDir, hostId, verb
   } catch (error) {
     return {
       ok: false, ...EMPTY_HOOK_RESULT, exitCode: null,
+      outcome: 'integrity-rejected', timedOut: false,
       detail: `${hostId}:${verb} adapter hook integrity check failed: ${error?.message ?? String(error)}`,
     };
   }
@@ -209,7 +238,11 @@ function spawnAdapterChild({
     });
     return { child };
   } catch (error) {
-    return { failure: { ok: false, ...EMPTY_HOOK_RESULT, exitCode: null, detail: describeFailure(hostId, verb, error) } };
+    return { failure: {
+      ok: false, ...EMPTY_HOOK_RESULT, exitCode: null,
+      outcome: 'spawn-failed', timedOut: false,
+      detail: describeFailure(hostId, verb, error),
+    } };
   }
 }
 
@@ -260,6 +293,8 @@ async function buildAdapterTimeoutResult({
   return {
     ok: false,
     exitCode: null,
+    outcome: 'timed-out',
+    timedOut: true,
     stdout: mergeCapture(stdoutCaptured, stderrCaptured),
     stdoutText: boundedText(stdoutCaptured),
     stderrText: boundedText(stderrCaptured),
@@ -275,7 +310,7 @@ async function buildAdapterTimeoutResult({
  * execution adapter) must read stdoutText instead — stdout has stderr
  * folded in after a separator, which breaks JSON.parse the instant the
  * hook writes anything to stderr at all. stderrText is diagnostics-only. */
-function buildAdapterCloseResult(code, stdoutCollector, stderrCollector, hostId, verb) {
+function buildAdapterCloseResult(code, signal, stdoutCollector, stderrCollector, hostId, verb) {
   const stdoutCaptured = { text: stdoutCollector.text(), truncated: stdoutCollector.wasTruncated() };
   const stderrCaptured = { text: stderrCollector.text(), truncated: stderrCollector.wasTruncated() };
   const stdout = mergeCapture(stdoutCaptured, stderrCaptured);
@@ -286,13 +321,20 @@ function buildAdapterCloseResult(code, stdoutCollector, stderrCollector, hostId,
       ok: true, stdout, stdoutText, stderrText,
       stdoutTruncated: stdoutCaptured.truncated,
       stderrTruncated: stderrCaptured.truncated,
-      exitCode: 0, detail: null,
+      exitCode: 0, outcome: 'success', timedOut: false, detail: null,
     }
-    : {
+    : Number.isInteger(code) ? {
       ok: false, stdout, stdoutText, stderrText,
       stdoutTruncated: stdoutCaptured.truncated,
       stderrTruncated: stderrCaptured.truncated,
-      exitCode: code, detail: `${hostId}:${verb} adapter hook exited with code ${code}`,
+      exitCode: code, outcome: 'nonzero-exit', timedOut: false,
+      detail: `${hostId}:${verb} adapter hook exited with code ${code}`,
+    } : {
+      ok: false, stdout, stdoutText, stderrText,
+      stdoutTruncated: stdoutCaptured.truncated,
+      stderrTruncated: stderrCaptured.truncated,
+      exitCode: null, outcome: 'signal-exit', timedOut: false,
+      detail: `${hostId}:${verb} adapter hook exited after signal ${signal ?? 'unknown'}`,
     };
 }
 
@@ -306,7 +348,9 @@ function buildAdapterCloseResult(code, stdoutCollector, stderrCollector, hostId,
  *   verb:string, timeoutMs?:number, env?:Record<string,string>, stdin?:string,
  *   cwd?:string, manifest?:object, integrity?:{hash:string}, baseDir?:string|null}} options
  * @returns {Promise<{ok:boolean, stdout:string, stdoutText:string, stderrText:string,
- *   stdoutTruncated:boolean, stderrTruncated:boolean, exitCode:number|null, detail:string|null}>}
+ *   stdoutTruncated:boolean, stderrTruncated:boolean, stdoutBytes:number, stderrBytes:number,
+ *   durationMs:number, durationTruncated:boolean, timeoutMs:number, timedOut:boolean,
+ *   outcome:string, exitCode:number|null, detail:string|null}>}
  */
 export async function runAdapterHook({
   hook, hostId, verb, timeoutMs, env, stdin, cwd, manifest, integrity, baseDir,
@@ -316,17 +360,18 @@ export async function runAdapterHook({
   });
 
   const effectiveTimeoutMs = resolveTimeout(timeoutMs, hook.timeoutMs);
+  const startedAtMs = monotonicNowMs();
   const [argv0, ...args] = hook.command;
   const childEnv = minimalEnv(env);
 
   const integrityFailure = verifyHookIntegrityOrFailure(manifest, integrity, baseDir, hostId, verb);
-  if (integrityFailure) return integrityFailure;
+  if (integrityFailure) return withReceipt(integrityFailure, { startedAtMs, effectiveTimeoutMs });
 
   const wantsStdin = typeof stdin === 'string';
   const spawned = spawnAdapterChild({
     argv0, args, childEnv, cwd, wantsStdin, hostId, verb,
   });
-  if (spawned.failure) return spawned.failure;
+  if (spawned.failure) return withReceipt(spawned.failure, { startedAtMs, effectiveTimeoutMs });
   const { child } = spawned;
 
   const stdoutCollector = boundedCollector(OUTPUT_CAP_BYTES);
@@ -339,15 +384,25 @@ export async function runAdapterHook({
   const { closeResult, getSpawnError } = awaitAdapterClose(child);
   const raced = await raceTimeout(closeResult, effectiveTimeoutMs);
   if (raced === TIMEOUT_SENTINEL) {
-    return buildAdapterTimeoutResult({
+    const result = await buildAdapterTimeoutResult({
       child, effectiveTimeoutMs, stdoutCollector, stderrCollector, closeResult, hostId, verb,
+    });
+    return withReceipt(result, {
+      startedAtMs, effectiveTimeoutMs, stdoutCollector, stderrCollector,
     });
   }
 
   const spawnError = getSpawnError();
   if (spawnError) {
-    return { ok: false, ...EMPTY_HOOK_RESULT, exitCode: null, detail: describeFailure(hostId, verb, spawnError) };
+    return withReceipt({
+      ok: false, ...EMPTY_HOOK_RESULT, exitCode: null,
+      outcome: 'spawn-failed', timedOut: false,
+      detail: describeFailure(hostId, verb, spawnError),
+    }, { startedAtMs, effectiveTimeoutMs, stdoutCollector, stderrCollector });
   }
 
-  return buildAdapterCloseResult(raced.code, stdoutCollector, stderrCollector, hostId, verb);
+  return withReceipt(
+    buildAdapterCloseResult(raced.code, raced.signal, stdoutCollector, stderrCollector, hostId, verb),
+    { startedAtMs, effectiveTimeoutMs, stdoutCollector, stderrCollector },
+  );
 }
