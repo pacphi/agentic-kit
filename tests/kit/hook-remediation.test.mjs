@@ -13,6 +13,10 @@ import { inspectHookTarget } from '../../src/lib/hook-remediation/fs-port.mjs';
 import { replaceJsonNumbers } from '../../src/lib/hook-remediation/json-scalar-edit.mjs';
 import { hookRemediationFixture as fixture } from './hook-remediation-fixture.mjs';
 
+function assertModeWhenSupported(file, expected) {
+  if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, expected);
+}
+
 test('dry-run plan is deterministic, content-bound, redacted, and leaves no transaction state', () => {
   const fx = fixture();
   try {
@@ -83,7 +87,7 @@ test('authorized heal changes only the selected target and commits one verified 
     assert.equal(result.ok, true);
     assert.equal(result.status, 'committed');
     assert.equal(JSON.parse(fs.readFileSync(fx.target, 'utf8')).hooks.SessionEnd[0].hooks[0].timeout, 3);
-    assert.equal(fs.statSync(fx.target).mode & 0o777, 0o640);
+    assertModeWhenSupported(fx.target, 0o640);
     const receipt = JSON.parse(fs.readFileSync(result.receiptFile, 'utf8'));
     assert.equal(receipt.status, 'committed');
     assert.equal(receipt.actions.length, 1);
@@ -117,7 +121,7 @@ test('receipt undo restores exact bytes and mode while refusing later user drift
     assert.equal(undone.ok, true);
     assert.equal(undone.status, 'rolled-back');
     assert.deepEqual(fs.readFileSync(fx.target), original);
-    assert.equal(fs.statSync(fx.target).mode & 0o777, 0o640);
+    assertModeWhenSupported(fx.target, 0o640);
   } finally { fs.rmSync(fx.root, { recursive: true, force: true }); }
 });
 
@@ -170,22 +174,28 @@ test('tampered candidate bytes are refused before transaction state exists', () 
   } finally { fs.rmSync(fx.root, { recursive: true, force: true }); }
 });
 
-test('non-executable actions and changed modes fail before transaction creation', () => {
+test('non-executable actions fail before transaction creation', () => {
   const fx = fixture();
   try {
-    let plan = fx.plan();
+    const plan = fx.plan();
     plan.actions[0].executable = false;
     plan.planDigest = hookHealingPlanDigest(plan);
-    let result = applyHookHealingPlan({
+    const result = applyHookHealingPlan({
       plan, actionIds: [plan.actions[0].id], expectedPlanDigest: plan.planDigest,
       transactionsRoot: fx.transactionsRoot, auditFn: fx.audit,
     });
     assert.equal(result.status, 'preflight-refused');
     assert.match(result.error, /not executable/);
+    assert.equal(fs.existsSync(fx.transactionsRoot), false);
+  } finally { fs.rmSync(fx.root, { recursive: true, force: true }); }
+});
 
-    plan = fx.plan();
+test('POSIX mode drift fails before transaction creation', { skip: process.platform === 'win32' }, () => {
+  const fx = fixture();
+  try {
+    const plan = fx.plan();
     fs.chmodSync(fx.target, 0o600);
-    result = applyHookHealingPlan({
+    const result = applyHookHealingPlan({
       plan, actionIds: [plan.actions[0].id], expectedPlanDigest: plan.planDigest,
       transactionsRoot: fx.transactionsRoot, auditFn: fx.audit,
     });
@@ -308,7 +318,7 @@ test('verification failure automatically restores exact preimage bytes and mode'
     assert.equal(result.ok, false);
     assert.equal(result.status, 'rolled-back');
     assert.deepEqual(fs.readFileSync(fx.target), before);
-    assert.equal(fs.statSync(fx.target).mode & 0o777, 0o640);
+    assertModeWhenSupported(fx.target, 0o640);
   } finally { fs.rmSync(fx.root, { recursive: true, force: true }); }
 });
 

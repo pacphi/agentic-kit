@@ -11,6 +11,7 @@ import {
 } from '../../src/lib/hook-remediation/engine.mjs';
 import {
   createHookTransactionDir, lastHookReceiptId, readHookReceipt, unfinishedHookReceipts,
+  writeHookReceipt,
 } from '../../src/lib/hook-remediation/store.mjs';
 import { captureConsole, hookRemediationFixture as fixture } from './hook-remediation-fixture.mjs';
 
@@ -142,6 +143,26 @@ test('transaction store refuses a symlinked root', (t) => {
       throw error;
     }
     assert.throws(() => createHookTransactionDir(linked), /non-symlink directory/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('receipt durability does not require fsync on a read-only file descriptor', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-hook-heal-fsync-'));
+  try {
+    const transaction = createHookTransactionDir(path.join(root, 'transactions'));
+    const windowsLikeFs = Object.create(fs);
+    windowsLikeFs.openSync = (file, flags, ...args) => {
+      if (file === transaction.receiptFile && flags === 'r') {
+        const error = new Error('simulated Windows EPERM for read-only fsync');
+        error.code = 'EPERM';
+        throw error;
+      }
+      return fs.openSync(file, flags, ...args);
+    };
+    assert.doesNotThrow(() => writeHookReceipt(transaction.receiptFile, {
+      schemaVersion: 'hook-heal-receipt/v1', id: transaction.id,
+      createdAt: '2026-09-01T00:00:00.000Z', status: 'prepared', actions: [],
+    }, { fsImpl: windowsLikeFs }));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 

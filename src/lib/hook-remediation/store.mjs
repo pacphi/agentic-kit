@@ -19,7 +19,7 @@ function syncFileAndParent(file, fsImpl) {
   if (typeof fsImpl.fsyncSync !== 'function') return;
   let descriptor;
   try {
-    descriptor = fsImpl.openSync(file, 'r');
+    descriptor = fsImpl.openSync(file, 'r+');
     fsImpl.fsyncSync(descriptor);
   } finally {
     if (descriptor !== undefined) fsImpl.closeSync(descriptor);
