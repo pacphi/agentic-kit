@@ -181,6 +181,7 @@ test('skill metadata census is bounded, symlink-safe, and returns counts without
 
 test('MCP config inspection reports only bounded counts/bytes and never names, commands, or secrets', () => {
   const claudeRaw = JSON.stringify({
+    unrelatedHistory: 'NOT MCP CONFIG',
     mcpServers: {
       privateServer: { command: 'SECRET_COMMAND', env: { TOKEN: 'SECRET_TOKEN' } },
       second: { command: 'node' },
@@ -188,13 +189,18 @@ test('MCP config inspection reports only bounded counts/bytes and never names, c
   });
   const claude = inspectMcpConfig('claude', claudeRaw);
   assert.deepEqual(claude, {
-    status: 'partial', registrations: 2, configBytes: Buffer.byteLength(claudeRaw),
+    status: 'partial', registrations: 2,
+    configBytes: Buffer.byteLength(JSON.stringify(JSON.parse(claudeRaw).mcpServers)),
     schemaBytes: null, reason: 'tool-schemas-not-recorded',
   });
   assert.doesNotMatch(JSON.stringify(claude), /privateServer|SECRET|node/);
 
-  const codexRaw = '[mcp_servers.ruflo]\ncommand = "SECRET"\n\n[mcp_servers.aqe]\ncommand = "SECRET"\n';
-  assert.equal(inspectMcpConfig('codex', codexRaw).registrations, 2);
+  const codexRaw = 'model = "unrelated"\n\n[mcp_servers.ruflo]\ncommand = "SECRET"\n\n'
+    + '[mcp_servers.ruflo.env]\nTOKEN = "SECRET"\n\n[mcp_servers.aqe]\ncommand = "SECRET"\n\n'
+    + '[profiles.work]\nmodel = "also-unrelated"\n';
+  const codex = inspectMcpConfig('codex', codexRaw);
+  assert.equal(codex.registrations, 2);
+  assert.ok(codex.configBytes < Buffer.byteLength(codexRaw), 'unrelated TOML is not counted as MCP config');
   assert.equal(inspectMcpConfig('external', '').status, 'unsupported');
   assert.equal(inspectMcpConfig('opencode', '{not-json').status, 'unavailable');
 });

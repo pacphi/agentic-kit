@@ -138,8 +138,21 @@ export function boundedSkillMetadata({
   };
 }
 
-/** Parse only registration cardinality. Configuration bytes are measurable;
- * tool schema bytes are not present in these host config documents. */
+function codexMcpConfig(text) {
+  const chunks = [];
+  let inMcpTable = false;
+  for (const line of text.match(/.*(?:\n|$)/g) ?? []) {
+    const header = line.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?(?:\n|$)/);
+    if (header) inMcpTable = /^mcp_servers\./.test(header[1]);
+    if (inMcpTable) chunks.push(line);
+  }
+  return chunks.join('').trim();
+}
+
+/** Parse only registration cardinality and the serialized registration table.
+ * A host's entire settings/config file is not injected into model context, so
+ * unrelated preferences, project history, and caches must not inflate this
+ * number. Tool schema bytes are not present in these host config documents. */
 export function inspectMcpConfig(host, raw) {
   if (host === 'external') return {
     status: 'unsupported', registrations: null, configBytes: null, schemaBytes: null,
@@ -150,28 +163,36 @@ export function inspectMcpConfig(host, raw) {
     reason: 'mcp-config-not-recorded',
   };
   const text = String(raw);
-  const configBytes = Buffer.byteLength(text);
-  if (configBytes > MAX_CONFIG_BYTES) return {
+  const sourceBytes = Buffer.byteLength(text);
+  if (sourceBytes > MAX_CONFIG_BYTES) return {
     status: 'unavailable', registrations: null, configBytes: null, schemaBytes: null,
     reason: 'mcp-config-size-cap',
   };
   try {
     let registrations;
+    let registrationConfig;
     if (host === 'codex') {
       registrations = [...text.matchAll(/^\s*\[mcp_servers\.(?:"[^"\n]+"|[A-Za-z0-9_-]+)\]\s*$/gm)].length;
+      registrationConfig = codexMcpConfig(text);
     } else {
       const document = JSON.parse(text);
       const table = host === 'claude' ? document?.mcpServers : document?.mcp;
-      if (!table || typeof table !== 'object' || Array.isArray(table)) registrations = 0;
-      else registrations = Object.keys(table).length;
+      if (!table || typeof table !== 'object' || Array.isArray(table)) {
+        registrations = 0;
+        registrationConfig = '';
+      } else {
+        registrations = Object.keys(table).length;
+        registrationConfig = JSON.stringify(table);
+      }
     }
     return {
-      status: 'partial', registrations, configBytes, schemaBytes: null,
+      status: 'partial', registrations,
+      configBytes: Buffer.byteLength(registrationConfig), schemaBytes: null,
       reason: 'tool-schemas-not-recorded',
     };
   } catch {
     return {
-      status: 'unavailable', registrations: null, configBytes, schemaBytes: null,
+      status: 'unavailable', registrations: null, configBytes: null, schemaBytes: null,
       reason: 'mcp-config-format-unsupported',
     };
   }
