@@ -308,14 +308,19 @@ The view deliberately separates four questions:
   internally scrollable viewport shows five collapsed definitions at a time and keeps the header
   visible. Expand a definition to inspect its host, lifecycle point, handler kind, timeout,
   placement, owner/authority, selection evidence and source reference.
-- **Findings needing attention** uses allowlisted plain-language titles and explanations, while
-  retaining the stable code as secondary support text.
+- **Findings needing attention** groups the same normalized finding across hosts and lifecycle
+  points. Importance is a sort/filter dimension, not the group identity. Expand a finding to see
+  the affected definitions under explicit Lifecycle point, Host, Configured in, Evidence and
+  Action headers. Stable codes remain secondary support text, and an action stays on the exact
+  placement that proved it.
+- **Observations, not actions** holds informational or unknown diagnostics that have neither a
+  remediation proposal nor a verified action.
 - **Runtime outcomes** is a separate table of bounded receipts. With no receipts it says outcomes
   are unknown and renders no zero-valued scorecard.
 
 Evidence limits stay beside the affected measurement instead of repeating in a generic panel:
 unreadable sources remain in configuration evidence, missing receipts remain in Runtime outcomes,
-and a finding without an exact safe next step says so in its Next step cell.
+and a finding placement without an exact safe next step says so in its Action cell.
 
 A finding receives a call to action only when the current healing plan contains an exact executable
 action bound to the affected occurrence and plan digest, or when a verified published upstream issue

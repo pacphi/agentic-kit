@@ -12,6 +12,12 @@
 - **DDD:** [Hook configuration assurance](../ddd/hook-configuration-assurance.md)
 - **Evidence:** [Host-neutral follow-up](../audits/host-neutral-hooks-follow-up-2026-09-01.md)
 
+**Implementation note (2026-09-02):** Hook read-model v3 groups repeated diagnostics by finding
+identity across hosts and lifecycle points, keeps evidence and actions on physical placements, and
+separates non-actionable observations. The Codex provider also detects the exact signed Ruflo
+3.38.20 AutoMemory Stop-output incompatibility and routes it upstream without patching generated
+state.
+
 ## Context
 
 ADR-0040 proved the Codex problem but left the abstraction named and shaped around one
@@ -173,6 +179,12 @@ commands, source paths, stdout/stderr, failure detail, diagnostic prose and mess
 host-neutral definition groups, ownership evidence, stable diagnostic codes, allowlisted
 explanations, and opaque short-lived source references. Labels are control-stripped and capped at
 64 characters; runtime input is capped to the last 1,000 receipts and the recent list to 50.
+Read-model v3 groups attention by normalized finding identity rather than host or lifecycle point.
+Each group carries deduplicated physical placements; host, lifecycle, source, ownership,
+selection evidence, disposition and any exact action stay on the placement that proved them.
+Groups sort by importance, then affected-definition count, and can be filtered by importance.
+Informational or unknown diagnostics without a proposal or action are observations, not findings
+needing attention.
 Dashboard Delivery exposes that model through authenticated, no-store
 `/api/hooks?host=all`, collected lazily only when the Hooks view opens. The server reuses one
 30-second bounded cache and one in-flight collection. The default collector supplies the static
@@ -201,7 +213,7 @@ separately verified published upstream issue joined to that diagnostic. A provid
 authority classification alone is not actionability; healthy, informational, unknown, prohibited,
 and unproven rows have no call to action.
 
-### 9. Exact Agentic-QE Stop risks are upstream-only
+### 9. Exact generated Stop risks are upstream-only
 
 Claude audit recognizes an Agentic-QE runner only when bounded source inspection proves all three
 parts of the generated shape: the AQE hook command, both local bundle candidates, and the exact
@@ -214,6 +226,17 @@ Both actions are always `upstream-required`, name `proffesor-for-testing/agentic
 explicit user approval before issue publication. A modified helper, refused path, unknown host
 version or ambiguous local bundle state produces no ownership inference. Agentic-kit does not
 rewrite the generated project settings, generated helper or plugin cache.
+
+Codex audit recognizes the Ruflo 3.38.20 AutoMemory incompatibility only under the exact verified
+Codex CLI `0.152.1` profile, for a project `Stop` command that invokes the `sync` path, when bounded
+source proves that path writes status through `console.log`, and when the helper digest matches a
+manifest whose Ed25519 signature verifies against Ruflo's pinned public key. Codex treats exit zero
+with no output as success and otherwise expects event-valid JSON; the signed helper writes
+human-readable status to stdout. The resulting proposal is `upstream-required`, points to
+`ruvnet/ruflo`, and never rewrites `.codex/hooks.json`, the helper, or its manifest. An invalid
+signature, digest mismatch, unknown Codex version, non-Stop event, or different helper shape makes
+no Ruflo ownership inference. Current evidence proves a Codex failure, not a Claude failure;
+OpenCode and external adapters have no observed equivalent Stop registration.
 
 ## Consequences
 
@@ -228,6 +251,10 @@ rewrite the generated project settings, generated helper or plugin cache.
   sanitized read model.
 - Exact AQE generator defects are actionable without turning their generated copies into
   agentic-kit write authority.
+- Repeated diagnostics are legible as one finding with exact affected placements, without
+  promoting one placement's action to its siblings.
+- Signed Ruflo ownership makes the Codex Stop defect actionable upstream without granting
+  agentic-kit authority over generated files.
 
 ### Negative
 
@@ -272,6 +299,10 @@ Implemented in this decision:
 - authenticated, lazy, no-store Hooks dashboard delivery with a bounded cache, single-flight
   collection, and explicit unknown runtime state;
 - exact AQE `npx` hot-path and Claude timeout-unit diagnostics with upstream-only proposals;
+- exact Ed25519-verified Ruflo AutoMemory/Codex Stop-output diagnostic with an upstream-only
+  proposal;
+- finding-first Hook read model v3 with per-placement evidence/actions, importance sorting and
+  filtering, and separate non-actionable observations;
 - negative ownership tests proving generated and cache findings never become automatic.
 
 Still deferred:

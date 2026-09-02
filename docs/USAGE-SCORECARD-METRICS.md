@@ -2182,7 +2182,9 @@ provider diagnostic prose stay server-side.
 | --- | --- |
 | Configured entries / distinct behaviors / repeated placements | Normalized static occurrences and behavior fingerprints |
 | Sources inspected / unreadable sources | Read-only source discovery; not diagnostic-warning counts |
-| Findings needing attention | Allowlisted presentation joined to exact diagnostic occurrences |
+| Findings needing attention | Allowlisted presentation grouped by normalized finding identity, with deduplicated physical placements |
+| Importance | Deterministic sort/filter dimension; never a substitute for finding identity or actionability |
+| Observations, not actions | Informational/unknown diagnostics with no proposal and no exact action |
 | Executions / failures / timeouts | Typed bounded supervised-adapter receipts, when supplied |
 | Next step | Present only for an exact executable healing action or a separately verified published upstream URL |
 
@@ -2191,6 +2193,13 @@ source. In that state, runtime outcomes are **unknown**. A configured Stop risk 
 execution; no Stop diagnostic is not proof of runtime success; no receipt is not zero failures.
 Native Claude, Codex and OpenCode hooks do not currently emit into the supervised external-adapter
 receipt stream. Informational trust findings are consolidated into an evidence-limit statement.
+
+Hook read-model schema v3 keeps actionability occurrence-bound. A finding group may span hosts and
+lifecycle points, but every expanded placement retains its own source, owner, evidence,
+disposition, and optional action. A sibling with no exact executable plan join or verified
+published upstream URL never inherits another placement's CTA. Groups sort by importance, then
+affected-definition count, and title; the client filter hides groups without changing their native
+disclosure state.
 
 Selecting **Inspect source** calls authenticated, no-store
 `/api/hooks/source/<opaque-reference>`. The reference resolves only inside the live Hook cache. The

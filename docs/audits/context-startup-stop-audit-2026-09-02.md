@@ -115,10 +115,11 @@ distribution was:
 | Safe automatic | 0 |
 | Approval required | 17 |
 | Never automatic | 7 |
-| Upstream required | 24 |
+| Upstream required | 25 |
 
-The 24 upstream actions are occurrence-level AQE lifecycle findings, not 24 independent defects.
-They resolve to Agentic-QE's generated-runner hot-path fallback and Claude timeout-unit mismatch.
+The 25 upstream actions are occurrence-level dependency findings, not 25 independent defects.
+Twenty-four are the previously audited Claude-side generated/plugin findings. One is the exact
+signed Ruflo AutoMemory incompatibility in Codex described below.
 The exact Claude Stop-family observations were:
 
 | Hook | Declared timeout | Static diagnostics |
@@ -132,6 +133,21 @@ Claude Code 2.1.258 interprets those native hook timeout fields as seconds. The 
 tries two local bundle candidates and then falls back to
 `npx -y --prefer-offline agentic-qe hooks`; the audited project did not have a local Agentic-QE
 package candidate, so the Stop hot path could reach npx.
+
+The recurring visible `hook returned invalid stop hook JSON output` failure is a separate Codex
+`0.152.1` contract mismatch. The project Codex `Stop` definition invokes the Ruflo 3.38.20
+AutoMemory helper's `sync` path. That helper's SHA-256 matches its manifest, the manifest's Ed25519
+signature verifies against Ruflo's pinned key, and the sync path writes human-readable ANSI status
+to stdout before exiting zero. Codex documents empty stdout as successful continuation and parses
+non-empty Stop output as event JSON, so the prose produces the observed failure. An existing Claude
+receipt for the same helper path records success; this is not evidence of a Claude failure.
+OpenCode and Hermes/external had no observed equivalent Stop registration.
+
+Agentic-kit now emits `ruflo-codex-stop-output-not-json` only for that exact verified Codex profile,
+signed manifest, matching helper digest, sync output shape and Stop event. Invalid signatures,
+digest mismatch, unknown versions and other lifecycle events do not establish Ruflo ownership.
+The resulting action links [Ruflo #3163](https://github.com/ruvnet/ruflo/issues/3163); it never edits
+the generated `.codex/hooks.json`, helper or manifest.
 
 Historical `.agentic-qe/hooks-health.log` entries recorded `ETIMEDOUT` for `post-route` and
 `session-end` at lines 13, 24, 26 and 42. That is genuine historical runtime evidence and supports
@@ -151,7 +167,10 @@ checks one audited source, returning its location and masked selected JSON defin
 path or editor launch exists. The default collector exposes the static audit only; runtime outcomes
 say unknown until the process is explicitly supplied bounded receipts. A Stop configuration finding
 therefore never renders as a Stop execution failure or success. Provider classifications do not
-become dashboard actions without an exact executable plan/action join.
+become dashboard actions without an exact executable plan/action join. Read-model v3 groups the
+same finding across host/lifecycle placements, sorts and filters by importance, keeps evidence and
+actions on each placement, and moves non-actionable informational diagnostics into **Observations,
+not actions**.
 
 ## Setup precedence and idempotency
 
@@ -181,7 +200,7 @@ control over future upstream output.
 | Versioned Codex plugin caches | Codex/plugin owner. Never automatic. |
 | Hermes/external adapter v1 context declaration | Unsupported by the current hash-bound contract; do not trust worker output as authority. |
 
-Four evidence-bound notifications are published:
+Five evidence-bound notifications are published:
 
 - [Agentic-QE #654](https://github.com/proffesor-for-testing/agentic-qe/issues/654) tracks the 3.14.0
   Stop generator's npx fallback and timeout-unit mismatch. The historical ETIMEDOUT is detected and
@@ -195,9 +214,13 @@ Four evidence-bound notifications are published:
 - [Agentic-QE #655](https://github.com/proffesor-for-testing/agentic-qe/issues/655) requests a compact
   upstream-owned guidance projection. Agentic-QE's sentinel remains foreign to agentic-kit's block
   writer while that issue is open.
+- [Ruflo #3163](https://github.com/ruvnet/ruflo/issues/3163) records the signed 3.38.20 AutoMemory
+  helper's Codex Stop stdout mismatch and host-aware removal proof. Generated project hooks and
+  helpers were not patched.
 
-No Ruflo/Brain issue was opened from the generic timeout-shape diagnostic alone. A notification
-requires a current reproducible failure, exact producing source/version and bounded removal proof.
+No Brain issue was opened from the generic timeout-shape diagnostic alone. The Ruflo notification
+was published only after a current reproducible failure, exact producing source/version, verified
+ownership and bounded removal proof were established.
 
 ## Limitations and follow-up
 
@@ -223,6 +246,7 @@ requires a current reproducible failure, exact producing source/version and boun
 | `c78e943` / `a526ce3` / `af203be` | bounded receipts, AQE diagnostics, sanitized Hook read model |
 | `6b746e8` | managed-guidance reduction and byte-budget gates |
 | `b0874e8` | accessible Context/Hooks dashboard delivery |
+| `195520f` | finding-first Hook projection and signed Ruflo/Codex Stop-output diagnosis |
 | `7f8e5e0` | published upstream constraints and notification receipts |
 | `00e7317` / `f1a8d47` | privacy-safe context audit and registration-only MCP byte accounting |
 | `3382308` | target-aware, idempotent `ak x reference` reconciliation |

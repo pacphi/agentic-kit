@@ -122,6 +122,26 @@
       }
     },
     {
+      "id": "ruflo-3.38.20-stop-output-contract",
+      "dependency": "ruflo",
+      "kind": "upstream-defect",
+      "affected": ["3.38.20"],
+      "issue": "https://github.com/ruvnet/ruflo/issues/3163",
+      "issueState": "open-at-last-verification",
+      "primaryEvidence": "Codex 0.152.1 failure, exact project hook/helper/manifest digests, and a Ruflo Ed25519-verified helper manifest",
+      "strategy": "detect only the signed generated helper shape, keep remediation upstream-required, and never patch generated project hooks or helpers",
+      "versionGate": "apply only to Ruflo 3.38.20 under the exact verified Codex 0.152.1 profile while the helper manifest signature and digest match",
+      "expiryPolicy": "retest within 14 days and on every Ruflo or Codex release",
+      "nextRetestAt": "2026-09-09",
+      "sunsetWhen": "a released Ruflo Codex projection emits empty or valid event-specific Stop output and passes Codex Stop conformance without changing Claude behavior",
+      "notification": {
+        "status": "published",
+        "publishedAt": "2026-09-02T18:52:08Z",
+        "publishedUrl": "https://github.com/ruvnet/ruflo/issues/3163",
+        "requiredFields": ["minimalReproduction", "expected", "observed", "hostVersions", "dependencyVersion", "evidenceDigests", "boundedWorkaround", "expiry", "removalProof"]
+      }
+    },
+    {
       "id": "agentic-qe-3.13-external-provider-contract",
       "dependency": "agentic-qe",
       "kind": "upstream-capability-gap",
