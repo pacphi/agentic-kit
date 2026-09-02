@@ -122,8 +122,11 @@ independent package/data removal scopes.
 command always works.)
 
 Hook healing never edits trust state, plugin caches, generated runtime copies, opaque
-OpenCode modules, or unsupported schemas. See the [hook assurance runbook](docs/HOOKS.md)
-for the preview/authorize/apply/verify/undo journey and current platform limits.
+OpenCode modules, or unsupported schemas. For exact verified profiles it can also retire
+the frozen incompatible Ruflo Claude-hook projection one reviewed project at a time,
+with an estate-wide transactional apply and guarded undo. See the
+[hook assurance runbook](docs/HOOKS.md) for the preview/authorize/apply/verify/undo journey
+and current platform limits.
 
 <details>
 <summary>What the verbs cover</summary>

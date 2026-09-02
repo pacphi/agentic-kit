@@ -7,35 +7,55 @@ import { createHash } from 'node:crypto';
 
 import { inspectCodexPlugins } from '../codex-plugins.mjs';
 import { readBoundedFile, redactCommand, stableJson } from './common.mjs';
+import { legacyRufloProjectHookSignature } from './codex-legacy.mjs';
 import { readCodexInlineHooks } from './codex-toml.mjs';
 
-const SCHEMA = Object.freeze({
+const CODEX_EVENTS_0151 = Object.freeze([
+  'PreToolUse', 'PermissionRequest', 'PostToolUse', 'PreCompact', 'PostCompact',
+  'UserPromptSubmit', 'SubagentStop', 'Stop', 'SessionStart', 'SubagentStart', 'SessionEnd',
+]);
+
+const SCHEMA_0151 = Object.freeze({
   id: 'codex-hooks-2026-09-01',
   timeoutUnits: 'seconds',
   sessionEnd: { default: 1, maximum: 3 },
   evidence: 'https://developers.openai.com/codex/hooks',
   verifiedAt: '2026-09-01',
   confidence: 'verified',
+  supportedEvents: CODEX_EVENTS_0151,
+  eventTimeouts: Object.freeze({ SessionEnd: Object.freeze({ default: 1, maximum: 3 }) }),
 });
 
-const VERIFIED_CODEX_VERSION = '0.151.0';
-const CODEX_EVENTS = new Set([
-  'PreToolUse', 'PermissionRequest', 'PostToolUse', 'PreCompact', 'PostCompact',
-  'UserPromptSubmit', 'SubagentStop', 'Stop', 'SessionStart', 'SubagentStart', 'SessionEnd',
-]);
+const SCHEMA_01521 = Object.freeze({
+  ...SCHEMA_0151,
+  id: 'codex-hooks-0.152.1-2026-09-02',
+  verifiedAt: '2026-09-02',
+  implementationEvidence: 'https://github.com/openai/codex/tree/rust-v0.152.1/codex-rs/hooks',
+  supportedEvents: Object.freeze([...CODEX_EVENTS_0151, 'Interrupt']),
+  eventTimeouts: Object.freeze({
+    SessionEnd: Object.freeze({ default: 1, maximum: 3 }),
+    Interrupt: Object.freeze({ default: 1, maximum: 3 }),
+  }),
+});
+
+/** @type {Map<string, typeof SCHEMA_0151 | typeof SCHEMA_01521>} */
+const CODEX_PROFILES = new Map();
+CODEX_PROFILES.set('0.151.0', SCHEMA_0151);
+CODEX_PROFILES.set('0.152.1', SCHEMA_01521);
 const CODEX_HANDLER_TYPES = new Set(['command', 'mcp_tool', 'prompt', 'agent']);
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 const pointerPart = (value) => String(value).replaceAll('~', '~0').replaceAll('/', '~1');
 
 function schemaFor(codexVersion) {
-  if (codexVersion === VERIFIED_CODEX_VERSION) return SCHEMA;
+  const verified = CODEX_PROFILES.get(codexVersion);
+  if (verified) return verified;
   return Object.freeze({
     id: 'codex-hooks-syntax-only',
     timeoutUnits: 'unknown',
     sessionEnd: { default: null, maximum: null },
-    evidence: SCHEMA.evidence,
-    verifiedAt: SCHEMA.verifiedAt,
+    evidence: SCHEMA_0151.evidence,
+    verifiedAt: SCHEMA_01521.verifiedAt,
     confidence: 'syntax-only',
   });
 }
@@ -103,7 +123,7 @@ function validateHookDocument(document, schema) {
     return 'hook JSON requires a top-level hooks object';
   }
   for (const [event, groups] of Object.entries(document.hooks)) {
-    if (schema.confidence === 'verified' && !CODEX_EVENTS.has(event)) return `unsupported Codex hook event ${event}`;
+    if (schema.confidence === 'verified' && !schema.supportedEvents.includes(event)) return `unsupported Codex hook event ${event}`;
     if (!Array.isArray(groups)) return `${event} hook groups must be an array`;
     for (const [groupIndex, group] of groups.entries()) {
       const error = validateHookGroup(group, event, groupIndex, schema.confidence === 'verified');
@@ -181,8 +201,9 @@ function sourcePosture(source) {
 
 function timeoutFacts(event, hook, schema) {
   const declared = typeof hook.timeout === 'number' ? hook.timeout : null;
-  const maximum = event === 'SessionEnd' ? schema.sessionEnd.maximum : null;
-  const defaultValue = event === 'SessionEnd' ? schema.sessionEnd.default : 600;
+  const eventTimeout = schema.eventTimeouts?.[event];
+  const maximum = eventTimeout?.maximum ?? null;
+  const defaultValue = eventTimeout?.default ?? 600;
   const effective = schema.confidence === 'verified'
     ? maximum !== null ? Math.min(declared ?? defaultValue, maximum) : (declared ?? defaultValue)
     : null;
@@ -199,15 +220,16 @@ function timeoutFacts(event, hook, schema) {
   };
 }
 
-function diagnosticsFor(event, hook, source, command, schema) {
+function diagnosticsFor(event, matcher, hook, source, command, schema) {
   const diagnostics = [];
-  if (event === 'SessionEnd' && typeof hook.timeout === 'number'
-      && schema.sessionEnd.maximum !== null && hook.timeout > schema.sessionEnd.maximum) {
+  const maximum = schema.eventTimeouts?.[event]?.maximum ?? null;
+  if (typeof hook.timeout === 'number' && maximum !== null && hook.timeout > maximum) {
+    const diagnostic = event === 'SessionEnd' ? 'session-end-timeout-clamped' : 'interrupt-timeout-clamped';
     diagnostics.push({
       category: 'compatibility',
       severity: 'warning',
-      code: 'session-end-timeout-clamped',
-      message: `SessionEnd timeout ${hook.timeout}s exceeds Codex's ${schema.sessionEnd.maximum}s maximum and is clamped at runtime`,
+      code: diagnostic,
+      message: `${event} timeout ${hook.timeout}s exceeds Codex's ${maximum}s maximum and is clamped at runtime`,
     });
   }
   if (source.kind === 'project' && command.includes('.claude/')) {
@@ -216,6 +238,14 @@ function diagnosticsFor(event, hook, source, command, schema) {
       severity: 'warning',
       code: 'claude-projection-in-codex',
       message: 'Codex hook invokes a Claude-oriented project helper; generator provenance must be resolved before healing',
+    });
+  }
+  if (source.kind === 'project' && legacyRufloProjectHookSignature(event, matcher, hook)) {
+    diagnostics.push({
+      category: 'compatibility',
+      severity: 'warning',
+      code: 'legacy-ruflo-project-hook',
+      message: 'Recognized legacy Ruflo Claude hook projection is incompatible with Codex',
     });
   }
   if (commandFacts(command).shell) {
@@ -304,7 +334,10 @@ function recordsFromSource(source, codexVersion, schema) {
           behaviorFingerprint: sha256(behaviorInput),
           duplicateGroupId: sha256(behaviorInput),
           occurrenceId,
-          diagnostics: diagnosticsFor(event, hook, source, rawCommand, schema),
+          diagnostics: diagnosticsFor(
+            event, Object.hasOwn(group, 'matcher') ? group.matcher : undefined,
+            hook, source, rawCommand, schema,
+          ),
         });
       });
     });
@@ -313,22 +346,42 @@ function recordsFromSource(source, codexVersion, schema) {
 }
 
 function planFor(records) {
-  return records
+  const actions = records
     .filter((record) => record.timeout.status === 'clamped')
     .map((record) => ({
       id: `codex-hook-timeout-${record.behaviorFingerprint.slice(0, 12)}-${sha256(`${record.source.file}\0${record.source.jsonPointer}`).slice(0, 12)}`,
-      diagnostic: 'session-end-timeout-clamped',
+      diagnostic: record.event === 'SessionEnd' ? 'session-end-timeout-clamped' : 'interrupt-timeout-clamped',
       target: record.source.file,
       sourceDigest: record.source.digest,
       classification: record.scope.kind === 'global' ? 'approval-required' : 'never-automatic',
-      reason: record.scope.kind.startsWith('plugin-cache')
+      reason: record.event !== 'SessionEnd'
+        ? 'the exact profile proves the runtime clamp, but no semantics-preserving mutation recipe is implemented for this event'
+        : record.scope.kind.startsWith('plugin-cache')
         ? 'repair the authoritative plugin source and reinstall; never edit the cache generation'
         : record.scope.kind.startsWith('project')
           ? 'project generator/authority is unresolved; repair the proven canonical source first'
           : 'user-owned direct hook changes require an explicit per-action approval',
-      trustImpact: 'none; Codex will separately require review if a definition changes',
-    }))
-    .sort((a, b) => a.id.localeCompare(b.id));
+      trustImpact: 'agentic-kit does not mutate trust, but changed bytes and shifted handler indexes may invalidate Codex review state and require re-review',
+    }));
+  const legacyFiles = new Map();
+  for (const record of records.filter((candidate) => (
+    candidate.diagnostics.some((diagnostic) => diagnostic.code === 'legacy-ruflo-project-hook')
+  ))) {
+    legacyFiles.set(record.source.file, record.source.digest);
+  }
+  for (const [target, sourceDigest] of legacyFiles) {
+    actions.push({
+      id: `codex-hook-legacy-${sha256(`${target}\0${sourceDigest}`).slice(0, 24)}`,
+      diagnostic: 'legacy-ruflo-project-hook',
+      target,
+      sourceDigest,
+      classification: 'approval-required',
+      reason: 'retirement requires an exact verified Codex profile, a selected Ruflo replacement plugin, and explicit project-owner approval',
+      behaviorImpact: 'Retire only the recognized incompatible legacy Ruflo helper projection while preserving unrelated project hooks.',
+      trustImpact: 'agentic-kit does not mutate trust, but changed bytes and shifted handler indexes may invalidate Codex review state and require re-review',
+    });
+  }
+  return actions.sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** Produce a deterministic, read-only hook inventory and remediation plan. */

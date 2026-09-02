@@ -67,8 +67,10 @@ Profiles name the exact locally verified host versions and a primary documentati
 source. Unknown versions receive syntax-only validation and no automatic compatibility
 repair. A newer version does not inherit a prior profile by optimistic range matching.
 
-The initial profiles are Codex CLI `0.151.0`, Claude Code `2.1.258` and OpenCode
-`1.18.25`. The profile registry is updated only after source or authoritative docs and
+The verified profiles are Codex CLI `0.151.0` and `0.152.1`, Claude Code `2.1.258`, and
+OpenCode `1.18.25`. Codex `0.152.1` adds the `Interrupt` event; both `SessionEnd` and
+`Interrupt` default to one second and clamp at three seconds. The profile registry is
+updated only after source or authoritative docs and
 fixtures agree. Host releases trigger the conformance suite before widening a range or
 adding a new exact profile.
 
@@ -86,8 +88,18 @@ adding a new exact profile.
 the exact plan digest, `--apply`, and `--yes`. Only compiled `safe-automatic` and
 `approval-required` recipes can reach the mutation port. The first recipes normalize
 the already-clamped `SessionEnd` timeout in canonical user-owned JSON for exact Codex
-`0.151.0` and Claude Code `2.1.258` profiles. The writer never approves or bypasses
-host trust.
+`0.151.0`/`0.152.1` and Claude Code `2.1.258` profiles. An approval-required Codex
+`0.152.1` recipe also retires only an exact allowlist of legacy Ruflo Claude-helper
+projections from canonical project JSON when the selected `ruflo-core@ruflo` plugin is
+present. It preserves unrelated and AutoMemory hooks and refuses near-matches, ambiguous
+helper occurrences, and noncanonical files. The writer never approves or bypasses host
+trust.
+
+The retirement is behavior-changing: the selected Ruflo plugin is evidence for the
+lifecycle events it actually covers, not a feature-for-feature replacement for removed
+session-start, prompt-routing, or subagent side effects. Removing an earlier handler can
+also shift retained handler indexes, so Codex may require definition re-review. Both
+impacts are bound into the preview and receipt.
 
 ### 5a. The mutation port is transactional and recovery is explicit
 
@@ -164,6 +176,8 @@ Implemented in this decision:
 - adversarial cross-host fixtures and read-only tests.
 - post-open inode/path verification for every bounded source read;
 - Claude optional-manifest plugin provenance and host-specific `SessionEnd` budget rules.
+- exact Codex `0.152.1` event/timeout semantics and legacy Ruflo projection diagnostics;
+- approval-required, per-project legacy Ruflo retirement with selected-plugin evidence;
 - deterministic public plans with content-bound private candidates;
 - explicit `ak heal hooks` apply, undo and interrupted-transaction recovery;
 - private backups, strict durability ordering, atomic replacement, guarded rollback,

@@ -3,6 +3,9 @@
 import path from 'node:path';
 
 import { sha256, stableJson, stableValue } from '../hook-audit/common.mjs';
+import {
+  legacyRufloProjectHookSignature, retireLegacyRufloProjectHooks,
+} from '../hook-audit/codex-legacy.mjs';
 import { inspectHookTarget } from './fs-port.mjs';
 
 export const HOOK_HEAL_PLAN_SCHEMA = 'hook-heal-plan/v1';
@@ -12,7 +15,7 @@ export const HOOK_HEAL_CLASSES = Object.freeze([
 
 const PROVIDER_POLICIES = Object.freeze({
   codex: Object.freeze({
-    version: '0.151.0', sourceKind: 'global', authority: 'user-owned',
+    sourceKind: 'global', authority: 'user-owned',
     diagnostic: 'session-end-timeout-clamped', maximum: 3,
     recipeId: 'codex/global-json/session-end-timeout/v1', activation: 'new-session',
     behaviorImpact: 'No effective runtime change: Codex already clamps each selected SessionEnd timeout to 3 seconds under the exact verified profile.',
@@ -69,7 +72,6 @@ function jsonPointerFor(record) {
 
 function recordsForPolicy(hostReport, policy) {
   if (hostReport.hostSchema?.confidence !== 'verified') return [];
-  if (hostReport.observedVersion !== policy.version) return [];
   return hostReport.records.filter((record) => (
     record.source?.sourceKind === policy.sourceKind
     && record.source?.authority === policy.authority
@@ -77,6 +79,142 @@ function recordsForPolicy(hostReport, policy) {
     && record.diagnostics?.some((diagnostic) => diagnostic.code === policy.diagnostic)
     && record.timeout?.status === 'clamped'
   ));
+}
+
+function selectedRufloReplacement(hostReport) {
+  const sources = (hostReport.sources ?? []).filter((source) => (
+    source.status === 'valid'
+    && source.kind.startsWith('plugin-cache')
+    && source.pluginRef === 'ruflo-core@ruflo'
+  ));
+  const sourceFiles = new Set(sources.map((source) => source.file));
+  const selectedRecords = (hostReport.records ?? []).filter((record) => (
+    record.scope?.pluginRef === 'ruflo-core@ruflo'
+    && sourceFiles.has(record.source?.file)
+  ));
+  if (!sources.length || !selectedRecords.length) return null;
+  return {
+    pluginRef: 'ruflo-core@ruflo',
+    pluginVersions: [...new Set(selectedRecords.map((record) => record.scope.pluginVersion).filter(Boolean))].sort(),
+    sourceDigests: [...new Set(sources.map((source) => source.digest).filter(Boolean))].sort(),
+    coveredEvents: [...new Set(selectedRecords.map((record) => record.event))].sort(),
+  };
+}
+
+function hasAmbiguousLegacyHelper(document) {
+  for (const [event, groups] of Object.entries(document?.hooks ?? {})) {
+    if (!Array.isArray(groups)) continue;
+    for (const group of groups) {
+      if (!group || typeof group !== 'object' || !Array.isArray(group.hooks)) continue;
+      const matcher = Object.hasOwn(group, 'matcher') ? group.matcher : undefined;
+      for (const hook of group.hooks) {
+        if (typeof hook?.command !== 'string' || !hook.command.includes('.claude/helpers/hook-handler.cjs')) continue;
+        if (!legacyRufloProjectHookSignature(event, matcher, hook)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function compileLegacyRufloRetirementAction(hostReport, records, options) {
+  if (options.platform === 'win32') return null;
+  const replacementEvidence = selectedRufloReplacement(hostReport);
+  if (!replacementEvidence) return null;
+  const first = records[0];
+  const target = path.resolve(first.source.file);
+  const source = hostReport.sources.find((candidate) => path.resolve(candidate.file) === target);
+  if (!source || source.status !== 'valid' || source.kind !== 'project'
+      || path.extname(target).toLowerCase() !== '.json') return null;
+  if (!records.every((record) => record.source.digest === first.source.digest)) return null;
+  const containmentRoot = path.resolve(first.scope?.projectPath ?? first.source.baseDir);
+  let snapshot;
+  try { snapshot = inspectHookTarget(target, containmentRoot, options); } catch { return null; }
+  if (snapshot.sha256 !== first.source.digest) return null;
+  let document;
+  try { document = JSON.parse(snapshot.bytes.toString('utf8')); } catch { return null; }
+  if (hasAmbiguousLegacyHelper(document)) return null;
+  const retirement = retireLegacyRufloProjectHooks(document);
+  if (!retirement.removed.length || retirement.removed.length !== records.length) return null;
+  const expectedPointers = records.map(jsonPointerFor).sort();
+  const removedPointers = retirement.removed.map((item) => item.pointer).sort();
+  if (stableJson(expectedPointers) !== stableJson(removedPointers)) return null;
+  const candidateBytes = Buffer.from(`${JSON.stringify(retirement.document, null, 2)}\n`);
+  const canonicalPreimage = Buffer.from(`${JSON.stringify(document, null, 2)}\n`);
+  if (!snapshot.bytes.equals(canonicalPreimage) || snapshot.sha256 === sha256(candidateBytes)) return null;
+  const ownershipProven = snapshot.specialMode === 0
+    && (typeof process.getuid !== 'function' || snapshot.uid === process.getuid());
+  if (!ownershipProven) return null;
+  const providerActions = (hostReport.plan ?? []).filter((proposal) => (
+    path.resolve(proposal.target) === target
+    && ['legacy-ruflo-project-hook', 'session-end-timeout-clamped'].includes(proposal.diagnostic)
+  )).map((proposal) => proposal.id).sort();
+  const diagnostic = 'legacy-ruflo-project-hook';
+  return withActionId({
+    host: 'codex',
+    recipeId: 'codex/project-json/legacy-ruflo-claude-projection-retirement/v1',
+    exactProfileId: hostReport.hostSchema.id,
+    hostVersion: hostReport.observedVersion,
+    classification: 'approval-required',
+    executable: true,
+    canonicalOwnership: {
+      status: 'proven',
+      ownerId: 'current-user-project',
+      evidence: 'direct-project-source-and-filesystem-owner; generator provenance remains unresolved',
+    },
+    replacementEvidence,
+    consumedProviderActionIds: providerActions,
+    observedProjection: {
+      file: target,
+      sourceKind: first.source.sourceKind,
+      occurrenceIds: records.map((record) => record.occurrenceId ?? record.rawFingerprint).sort(),
+      pointers: expectedPointers,
+    },
+    canonicalTarget: { file: target, containmentRoot },
+    expectedPreimage: {
+      sha256: snapshot.sha256, size: snapshot.size,
+      mode: snapshot.mode, modeSupported: snapshot.modeSupported,
+      uid: snapshot.uid, gid: snapshot.gid, specialMode: snapshot.specialMode,
+      parent: snapshot.parent,
+    },
+    desiredPostimage: {
+      sha256: sha256(candidateBytes), size: candidateBytes.length,
+      mode: snapshot.mode, modeSupported: snapshot.modeSupported,
+    },
+    behaviorImpact: `Retire ${retirement.removed.length} recognized incompatible legacy Ruflo project hook occurrence(s); preserve AutoMemory, unrelated hook groups, and top-level project data. The selected Ruflo plugin covers only ${replacementEvidence.coveredEvents.join(', ')}; removed SessionStart, prompt-routing, and subagent side effects are not asserted to have feature-for-feature replacements.`,
+    trustImpact: 'Codex definition review remains user-owned. Changed bytes and shifted handler indexes may require re-review; agentic-kit does not change trust state.',
+    activation: { restart: 'new-session', evidence: hostReport.hostSchema.evidence },
+    rollback: 'Restore the transaction-specific exact project preimage only while the current digest still equals this action postimage.',
+    verification: {
+      provider: 'codex', diagnosticCodes: [diagnostic], sourceFile: target,
+      findingKeys: records.map((record) => sha256(stableJson({
+        host: 'codex', diagnostic, target, pointer: jsonPointerFor(record),
+      }))).sort(),
+      method: 'exact-profile re-audit, second-plan no-op, then byte/mtime-stable repeat',
+      trustState: 'not-mutated-by-agentic-kit; resulting host trust state is unobserved',
+    },
+    diff: [
+      `--- ${target}`, `+++ ${target}`,
+      ...retirement.removed.flatMap((item) => [
+        `@@ ${item.pointer} @@`, `-recognized legacy Ruflo Claude helper (${item.action})`,
+      ]),
+    ].join('\n'),
+    candidateBytes,
+  });
+}
+
+function compileLegacyRufloActions(hostReport, options) {
+  if (hostReport.hostSchema?.confidence !== 'verified') return [];
+  const eligible = (hostReport.records ?? []).filter((record) => (
+    record.source?.sourceKind === 'project'
+    && record.diagnostics?.some((diagnostic) => diagnostic.code === 'legacy-ruflo-project-hook')
+  ));
+  const groups = new Map();
+  for (const record of eligible) {
+    groups.set(record.source.file, [...(groups.get(record.source.file) ?? []), record]);
+  }
+  return [...groups.values()]
+    .map((group) => compileLegacyRufloRetirementAction(hostReport, group, options))
+    .filter(Boolean);
 }
 
 function compileJsonTimeoutAction(host, hostReport, records, policy, options) {
@@ -169,9 +307,12 @@ function compileProvider(host, hostReport, options) {
     const key = record.source.file;
     groups.set(key, [...(groups.get(key) ?? []), record]);
   }
-  return [...groups.values()]
+  const timeoutActions = [...groups.values()]
     .map((records) => compileJsonTimeoutAction(host, hostReport, records, policy, options))
     .filter(Boolean);
+  return host === 'codex'
+    ? [...timeoutActions, ...compileLegacyRufloActions(hostReport, options)]
+    : timeoutActions;
 }
 
 function healingClassification(classification) {
