@@ -50,6 +50,22 @@ function externalManifest() {
   };
 }
 
+function aqeShimSource() {
+  return `
+const path = require('node:path');
+const PROJECT = process.env.CLAUDE_PROJECT_DIR || '.';
+const args = process.argv.slice(2);
+const candidates = [
+  path.join(PROJECT, 'node_modules', 'agentic-qe', 'dist', 'cli', 'bundle.js'),
+  path.join(PROJECT, 'dist', 'cli', 'bundle.js'),
+];
+let cmdArgs;
+if (!candidates.some(() => false)) {
+  cmdArgs = ['-y', '--prefer-offline', 'agentic-qe', 'hooks', ...args];
+}
+`;
+}
+
 test('host-neutral audit reports each provider and never proposes automatic trust or execution', () => {
   const fx = fixture();
   try {
@@ -409,6 +425,102 @@ test('Claude SessionEnd reports settings clamping and plugin budget dependence s
     assert.equal(pluginHook.timeout.status, 'plugin-session-budget-dependent');
     assert.ok(pluginHook.diagnostics.some((item) => item.code === 'plugin-sessionend-budget-not-raised'));
     assert.equal(report.plan.length, 2);
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('exact AQE Stop projections report npx hot-path and millisecond-authored timeout upstream actions', () => {
+  const fx = fixture();
+  try {
+    write(path.join(fx.project, '.claude', 'settings.json'), {
+      hooks: { Stop: [{ hooks: [
+        {
+          type: 'command',
+          command: 'node "${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/aqe-hook.cjs" session-end --save-state --json',
+          timeout: 5000,
+          continueOnError: true,
+        },
+        {
+          type: 'command',
+          command: 'node "${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/aqe-hook.cjs" post-route --success true --json',
+          timeout: 5000,
+          continueOnError: true,
+        },
+      ] }] },
+    });
+    write(path.join(fx.project, '.claude', 'hooks', 'aqe-hook.cjs'), aqeShimSource());
+
+    const report = auditClaudeHooks({
+      claudeRoot: fx.claude,
+      projectRoots: [fx.project],
+      managedSettingsFile: null,
+      claudeVersion: '2.1.258',
+    });
+
+    assert.equal(report.records.length, 2);
+    for (const record of report.records) {
+      assert.ok(record.diagnostics.some((item) => item.code === 'aqe-npx-hot-path-fallback'));
+      assert.ok(record.diagnostics.some((item) => item.code === 'aqe-claude-timeout-unit-mismatch'));
+    }
+    assert.equal(report.plan.length, 4);
+    assert.ok(report.plan.every((action) => action.classification === 'upstream-required'));
+    assert.ok(report.plan.every((action) => action.upstream?.dependency === 'agentic-qe'));
+    assert.ok(report.plan.every((action) => action.upstream?.owner === 'proffesor-for-testing/agentic-qe'));
+    assert.ok(report.plan.every((action) => action.upstream?.publication === 'explicit-user-approval-required'));
+    assert.equal(report.summary.automaticActions, 0);
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('AQE Stop signatures without the exact helper fallback do not invent npx ownership', () => {
+  const fx = fixture();
+  try {
+    write(path.join(fx.project, '.claude', 'settings.json'), {
+      hooks: { Stop: [{ hooks: [{
+        type: 'command',
+        command: 'node "${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/aqe-hook.cjs" session-end --json',
+        timeout: 30,
+      }] }] },
+    });
+    write(path.join(fx.project, '.claude', 'hooks', 'aqe-hook.cjs'), 'process.exit(0);\n');
+    const report = auditClaudeHooks({
+      claudeRoot: fx.claude, projectRoots: [fx.project], managedSettingsFile: null,
+      claudeVersion: '2.1.258',
+    });
+    assert.ok(report.records.every((record) => !record.diagnostics.some(
+      (item) => item.code === 'aqe-npx-hot-path-fallback',
+    )));
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('generated AQE plugin cache findings are upstream-only and never automatic', () => {
+  const fx = fixture();
+  try {
+    const plugin = path.join(fx.claude, 'plugins', 'cache', 'market', 'aqe', '3.14.0');
+    write(path.join(fx.claude, 'plugins', 'installed_plugins.json'), {
+      plugins: { 'aqe@market': [{ installPath: plugin, version: '3.14.0' }] },
+    });
+    write(path.join(plugin, 'hooks', 'hooks.json'), {
+      hooks: { Stop: [{ hooks: [{
+        type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/.claude/hooks/aqe-hook.cjs" session-end --json', timeout: 5000,
+      }] }] },
+    });
+    write(path.join(plugin, '.claude', 'hooks', 'aqe-hook.cjs'), aqeShimSource());
+
+    const report = auditClaudeHooks({
+      claudeRoot: fx.claude, projectRoots: [], managedSettingsFile: null,
+      claudeVersion: '2.1.258',
+    });
+    assert.ok(report.records[0].diagnostics.some(
+      (item) => item.code === 'aqe-claude-timeout-unit-mismatch',
+    ));
+    assert.ok(report.plan.length >= 1);
+    assert.ok(report.plan.every((action) => action.classification === 'upstream-required'));
+    assert.equal(report.summary.automaticActions, 0);
   } finally {
     fs.rmSync(fx.root, { recursive: true, force: true });
   }
