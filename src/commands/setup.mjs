@@ -71,8 +71,9 @@ export const help = `ak setup — first-time setup (machine and/or this project)
 Machine scope always runs: installs ruflo + agentic-qe globally, deploys the
 token-audit skill, merges the CLAUDE.md managed blocks, and offers MCP. Project
 scope auto-runs when .git exists in the current directory. Project setup runs
-Ruflo and AQE initializers while preserving user-authored CLAUDE.md/AGENTS.md
-content and reconciling only sentinel-owned guidance. Details: docs/SETUP.md
+\`ruflo init --full --force --no-global --no-codex-detect --no-skills-sh\` and
+the AQE initializer while preserving user-authored CLAUDE.md/AGENTS.md content
+and reconciling only sentinel-owned guidance. Details: docs/SETUP.md
 
 Usage: ak setup [options]
 
