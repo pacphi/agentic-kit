@@ -92,7 +92,7 @@ docs/
 ```
 
 **Published tarball** = the `files` whitelist in `package.json`:
-`bin/agentic-kit.mjs`, `src/`, `claude/`, `docs/DEJA-VU.md`, `docs/HOST-SUPPORT.md`,
+`bin/agentic-kit.mjs`, `src/`, `claude/`, `docs/DEJA-VU.md`, `docs/HOST-SUPPORT.md`, `docs/HOOKS.md`,
 `docs/INSTALLATION.md`, `docs/MODELS.md`, `docs/PROVIDERS.md`, `docs/SETUP.md`,
 `docs/TROUBLESHOOTING.md`, `docs/UPGRADING.md`, `docs/CODEX-STATUSLINE.md`,
 `docs/adr/0015-managed-codex-native-statusline.md`,

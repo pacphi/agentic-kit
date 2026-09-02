@@ -62,6 +62,21 @@ test('hashAdapterContent combines the validated manifest with sorted per-file di
   }
 });
 
+test('v1 file-backed consent identity remains stable while read hardening evolves', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-adapter-integrity-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'detect-hook.mjs'), 'process.stdout.write("one");\n');
+    const manifest = structuredClone(fileManifest());
+    manifest.lifecycle.detect.hook.command[0] = 'node';
+    assert.equal(
+      hashAdapterContent(manifest, { baseDir: dir }).hash,
+      'fb9e3a3e91d6f82ac7d90858ba54ed62fe0da38f91fca219ed68d4440ee54e37',
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('path-backed hooks without an explicit inventory are refused before consent can admit them', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-adapter-integrity-'));
   try {
@@ -133,6 +148,41 @@ test('admission marks consent stale when only a declared hook file changes', asy
     });
     assert.equal(result[0].admitted, false);
     assert.equal(result[0].reason, 'consent-stale');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('declared hook files cannot escape through a symlinked ancestor', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-adapter-integrity-'));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-adapter-outside-'));
+  try {
+    fs.writeFileSync(path.join(outside, 'hook.mjs'), 'process.stdout.write("outside");\n');
+    try { fs.symlinkSync(outside, path.join(dir, 'sub'), 'dir'); } catch (error) {
+      if (error.code === 'EPERM') { t.skip('directory symlinks unavailable'); return; }
+      throw error;
+    }
+    const raw = structuredClone(fileManifest());
+    raw.lifecycle.detect.hook.command = [process.execPath, 'sub/hook.mjs'];
+    raw.lifecycle.detect.hook.files = ['sub/hook.mjs'];
+    assert.throws(
+      () => hashAdapterContent(validateAdapterManifest(raw), { baseDir: dir }),
+      (error) => error.reason === 'invalid-hook-file' && /real adapter directory/.test(error.message),
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('declared hook files and bundles have explicit byte limits', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-adapter-integrity-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'detect-hook.mjs'), '0123456789');
+    assert.throws(
+      () => hashAdapterContent(fileManifest(), { baseDir: dir, maxFileBytes: 4 }),
+      (error) => error.reason === 'hook-file-too-large',
+    );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

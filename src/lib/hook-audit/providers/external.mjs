@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { validateAdapterManifest } from '../../adapters/manifest.mjs';
+import { SUPPORTED_CONTRACT, validateAdapterEntryForInspection } from '../../adapters/admission.mjs';
 import { hashAdapterContent, baseDirForSource } from '../../adapters/integrity.mjs';
 import {
   normalizedOccurrence, publicSource, readJsonSource, summarizeHostReport,
@@ -73,13 +73,17 @@ export function auditExternalHooks({ config = {}, cwd = process.cwd() } = /** @t
     sources.push(source);
     if (source.status !== 'valid') continue;
     try {
-      const manifest = validateAdapterManifest(source.document);
+      const inspected = validateAdapterEntryForInspection(entry, source.document);
+      if (!inspected.ok) {
+        source.status = 'inadmissible';
+        source.error = `${inspected.failure.reason}: ${inspected.failure.detail}`;
+        issues.push(`${name}: ${source.error}`);
+        continue;
+      }
+      const { manifest } = inspected;
       const baseDir = baseDirForSource(file);
       const integrity = hashAdapterContent(manifest, { baseDir });
       records.push(...recordsFrom({ ...source, baseDir }, manifest, integrity));
-      if (entry.contract !== undefined && entry.contract !== manifest.contract) {
-        issues.push(`${name}: configured contract ${entry.contract} does not match manifest contract ${manifest.contract}`);
-      }
     } catch (error) {
       source.status = 'invalid';
       source.error = error?.message ?? String(error);
@@ -87,11 +91,11 @@ export function auditExternalHooks({ config = {}, cwd = process.cwd() } = /** @t
   }
   records.sort((a, b) => a.host.localeCompare(b.host) || a.event.localeCompare(b.event));
   const plan = records.map((record) => ({
-    id: `external-review-${record.behaviorFingerprint.slice(0, 16)}`,
+    id: `external-review-${record.occurrenceId.slice(0, 16)}`,
     host: record.host, diagnostic: 'target-host-compatibility-unproven', target: record.source.file,
     classification: 'approval-required',
     reason: 'An operator must verify host/version compatibility, consent, grants, and the pinned hook-file identity before activation',
-    trustImpact: 'no admission, consent, grant, or execution state was changed',
+    trustImpact: 'Any manifest or declared-hook-file change would produce a new content hash and require fresh admission, consent, and grants; this audit changed none of those states',
   }));
   const gaps = [
     'Remote HTTPS and npm adapter sources are reported but never fetched during the default offline audit',
@@ -100,7 +104,7 @@ export function auditExternalHooks({ config = {}, cwd = process.cwd() } = /** @t
   ];
   const coverage = { status: 'partial', gaps };
   return {
-    schemaVersion: 2, host: 'external', mode: 'read-only', hostSchema: {
+    schemaVersion: 2, host: 'external', mode: 'read-only', observedVersion: `contract-${SUPPORTED_CONTRACT}`, hostSchema: {
       id: 'agentic-kit-host-adapter-v1', confidence: 'manifest-validated',
       evidence: 'docs/adr/0031-capability-graduation-and-upstream-requests.md', verifiedAt: '2026-09-01',
     },

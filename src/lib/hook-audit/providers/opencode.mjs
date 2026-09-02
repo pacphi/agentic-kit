@@ -98,7 +98,7 @@ export function auditOpenCodeHooks({
   const sources = [];
   for (const name of ['opencode.json', 'opencode.jsonc']) {
     const source = readConfig(path.join(opencodeRoot, name), opencodeRoot, {
-      kind: 'global', authority: ownership?.mcp === 'ak' ? 'mixed-receipt-owned' : 'user-owned',
+      kind: 'global', authority: ownership?.mcp === 'ak' ? 'mixed-user-and-receipt-evidence' : 'user-owned',
       generatedStatus: ownership?.mcp === 'ak' ? 'partially-generated' : 'direct', baseDir: opencodeRoot,
     });
     if (source) sources.push(source);
@@ -120,9 +120,10 @@ export function auditOpenCodeHooks({
   const records = sources.flatMap((source) => [...configRecords(source), ...moduleRecords(source)])
     .sort((a, b) => a.source.file.localeCompare(b.source.file) || a.event.localeCompare(b.event));
   const plan = records.map((record) => ({
-    id: `opencode-review-${record.behaviorFingerprint.slice(0, 16)}`,
+    id: `opencode-review-${record.occurrenceId.slice(0, 16)}`,
     host: 'opencode', diagnostic: record.diagnostics[0]?.code ?? 'plugin-review', target: record.source.file,
-    classification: record.source.generatedStatus === 'partially-generated' ? 'approval-required' : 'approval-required',
+    classification: record.type === 'module-plugin' || record.source.generatedStatus === 'partially-generated'
+      ? 'prohibited' : 'approval-required',
     reason: 'OpenCode plugins execute with host-process authority; remediation requires source-owner review and a restart',
     trustImpact: 'OpenCode does not expose a Codex-style hook trust hash; OS and OpenCode permissions remain separate controls',
   }));
@@ -133,7 +134,7 @@ export function auditOpenCodeHooks({
   ];
   const coverage = { status: 'partial', gaps };
   return {
-    schemaVersion: 2, host: 'opencode', mode: 'read-only',
+    schemaVersion: 2, host: 'opencode', mode: 'read-only', observedVersion: opencodeVersion,
     hostSchema: { ...SCHEMA, confidence: SCHEMA.verifiedVersions.includes(opencodeVersion) ? 'verified' : 'syntax-only' },
     sources: sources.map(publicSource), records, plan, issues: [], coverage,
     summary: summarizeHostReport({ sources, records, plan, coverage: coverage.status }),

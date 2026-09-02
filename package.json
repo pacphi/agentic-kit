@@ -22,6 +22,7 @@
     "!claude/**/.claude-flow/**",
     "docs/DEJA-VU.md",
     "docs/HOST-SUPPORT.md",
+    "docs/HOOKS.md",
     "docs/INSTALLATION.md",
     "docs/MODELS.md",
     "docs/PROVIDERS.md",

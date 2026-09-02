@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/pacphi/agentic-kit/docs/schemas/hook-healing-receipt.schema.json",
+  "title": "agentic-kit hook healing transaction receipt",
+  "type": "object",
+  "required": ["schemaVersion", "id", "createdAt", "status", "planDigest", "auditId", "authorization", "actions", "receiptDigest"],
+  "properties": {
+    "schemaVersion": { "const": "hook-heal-receipt/v1" },
+    "id": { "type": "string", "pattern": "^tx-[0-9TZ.-]+-[a-f0-9]{16}$" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "status": { "enum": ["prepared", "applying", "verifying", "committed", "undoing", "rolled-back", "failed", "failed-before-write", "failed-before-prepared-receipt", "partial", "partial-recovery-required"] },
+    "planDigest": { "$ref": "#/$defs/sha256" },
+    "auditId": { "type": "string", "minLength": 1 },
+    "authorization": {
+      "type": "object",
+      "required": ["actionIds"],
+      "properties": { "actionIds": { "type": "array", "uniqueItems": true, "items": { "type": "string" } } }
+    },
+    "actions": { "type": "array", "items": { "$ref": "#/$defs/action" } },
+    "verification": { "type": ["object", "null"] },
+    "receiptDigest": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "image": {
+      "type": "object",
+      "required": ["sha256", "size", "mode", "modeSupported"],
+      "properties": {
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "size": { "type": "integer", "minimum": 0 },
+        "mode": { "type": ["integer", "null"], "minimum": 0, "maximum": 511 },
+        "modeSupported": { "type": "boolean" }
+      }
+    },
+    "action": {
+      "type": "object",
+      "required": ["id", "host", "hostVersion", "recipeId", "target", "containmentRoot", "classification", "profileId", "preimage", "postimage", "backup", "state"],
+      "properties": {
+        "id": { "type": "string" },
+        "host": { "type": "string" },
+        "hostVersion": { "type": "string" },
+        "recipeId": { "type": "string" },
+        "target": { "type": "string" },
+        "containmentRoot": { "type": "string" },
+        "classification": { "enum": ["safe-automatic", "approval-required"] },
+        "profileId": { "type": "string" },
+        "preimage": { "$ref": "#/$defs/image" },
+        "postimage": { "$ref": "#/$defs/image" },
+        "backup": {
+          "type": "object",
+          "required": ["relative", "sha256", "size"],
+          "properties": {
+            "relative": { "type": "string", "pattern": "^backups[/\\\\][0-9]{4}\\.bin$" },
+            "sha256": { "$ref": "#/$defs/sha256" },
+            "size": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "state": { "enum": ["prepared", "applied", "verified", "rolled-back", "rollback-drift-refused", "rollback-failed"] }
+      }
+    }
+  }
+}

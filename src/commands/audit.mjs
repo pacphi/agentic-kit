@@ -6,6 +6,7 @@ import path from 'node:path';
 import { auditHooks, BUILTIN_HOOK_AUDIT_HOSTS } from '../lib/hook-audit/orchestrator.mjs';
 import { loadKitConfig } from '../lib/config.mjs';
 import { projectCensus, projectsInScope } from '../lib/project-census.mjs';
+import { installedVersion } from '../lib/versions.mjs';
 
 export const options = {
   json: { type: 'boolean', default: false },
@@ -33,7 +34,7 @@ Examples:
   ak audit hooks --host all --project ../another-repo --json
   ak audit hooks --all-projects --json`;
 
-function detectedVersion(binary, pattern = /(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/) {
+export function detectedVersion(binary, pattern = /(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/) {
   try {
     const result = spawnSync(binary, ['--version'], {
       encoding: 'utf8', timeout: 3_000, stdio: ['ignore', 'pipe', 'ignore'],
@@ -44,7 +45,7 @@ function detectedVersion(binary, pattern = /(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/
   }
 }
 
-function selectedHosts(flags) {
+export function selectedHosts(flags) {
   const hosts = flags.host?.length ? flags.host : ['codex'];
   const unknown = hosts.filter((host) => host !== 'all' && !BUILTIN_HOOK_AUDIT_HOSTS.includes(host));
   if (unknown.length) throw new TypeError(`unknown --host value(s): ${unknown.join(', ')}`);
@@ -55,7 +56,7 @@ function includesHost(hosts, host) {
   return hosts.includes('all') || hosts.includes(host);
 }
 
-function projectRoots(flags) {
+export function projectRoots(flags) {
   const roots = new Set([process.cwd()]);
   for (const project of flags.project ?? []) roots.add(path.resolve(project));
   if (flags['all-projects']) {
@@ -64,12 +65,30 @@ function projectRoots(flags) {
   return [...roots].sort();
 }
 
-export async function run({
+export function collectHookAudit({
   flags,
-  positionals,
   detectVersionFn = detectedVersion,
   loadConfigFn = loadKitConfig,
+  dependencyVersionFn = installedVersion,
 }) {
+  const hosts = selectedHosts(flags);
+  return auditHooks({
+    hosts,
+    projectRoots: projectRoots(flags),
+    versions: {
+      ...(includesHost(hosts, 'codex') ? { codex: detectVersionFn('codex') } : {}),
+      ...(includesHost(hosts, 'claude') ? { claude: detectVersionFn('claude') } : {}),
+      ...(includesHost(hosts, 'opencode') ? { opencode: detectVersionFn('opencode') } : {}),
+    },
+    config: includesHost(hosts, 'external') ? loadConfigFn() : {},
+    upstream: { observedVersions: Object.fromEntries([
+      ['ruflo', 'ruflo'], ['agentic-qe', 'agentic-qe'], ['ruvnet-brain', 'ruvnet-brain'],
+      ['ruvector', 'ruvector'], ['agentic-flow', 'agentic-flow'],
+    ].map(([dependency, pkg]) => [dependency, dependencyVersionFn(pkg) ?? 'unknown'])) },
+  });
+}
+
+export async function run({ flags, positionals, detectVersionFn = detectedVersion, loadConfigFn = loadKitConfig }) {
   if (positionals.length !== 1 || positionals[0] !== 'hooks') {
     console.error('ak audit requires the hooks subcommand');
     console.log(help);
@@ -77,17 +96,7 @@ export async function run({
   }
   let report;
   try {
-    const hosts = selectedHosts(flags);
-    report = auditHooks({
-      hosts,
-      projectRoots: projectRoots(flags),
-      versions: {
-        ...(includesHost(hosts, 'codex') ? { codex: detectVersionFn('codex') } : {}),
-        ...(includesHost(hosts, 'claude') ? { claude: detectVersionFn('claude') } : {}),
-        ...(includesHost(hosts, 'opencode') ? { opencode: detectVersionFn('opencode') } : {}),
-      },
-      config: includesHost(hosts, 'external') ? loadConfigFn() : {},
-    });
+    report = collectHookAudit({ flags, detectVersionFn, loadConfigFn });
   } catch (error) {
     console.error(`hook audit failed: ${error.message}`);
     return 2;

@@ -20,20 +20,20 @@ const MANAGED = Object.freeze({
   win32: 'C:\\Program Files\\ClaudeCode\\managed-settings.json',
 });
 
-function validateDocument(document) {
+function validateDocument(document, { strict = true } = {}) {
   if (!isRecord(document)) return 'settings must be an object';
   if (document.hooks !== undefined && !isRecord(document.hooks)) return 'settings hooks must be an object';
   for (const [event, groups] of Object.entries(document.hooks ?? {})) {
     if (!Array.isArray(groups)) return `${event} hook groups must be an array`;
     for (const [groupIndex, group] of groups.entries()) {
       if (!isRecord(group) || !Array.isArray(group.hooks)) return `${event} hook group ${groupIndex} requires a hooks array`;
-      if (group.matcher !== undefined && typeof group.matcher !== 'string') return `${event} hook group ${groupIndex} matcher must be a string`;
+      if (strict && group.matcher !== undefined && typeof group.matcher !== 'string') return `${event} hook group ${groupIndex} matcher must be a string`;
       for (const [hookIndex, hook] of group.hooks.entries()) {
-        if (!isRecord(hook) || typeof hook.type !== 'string') return `${event} hook ${groupIndex}/${hookIndex} requires a type`;
-        if (hook.timeout !== undefined && (!Number.isFinite(hook.timeout) || hook.timeout < 0)) {
+        if (!isRecord(hook) || (strict && typeof hook.type !== 'string')) return `${event} hook ${groupIndex}/${hookIndex} requires an object${strict ? ' with a type' : ''}`;
+        if (strict && hook.timeout !== undefined && (!Number.isFinite(hook.timeout) || hook.timeout < 0)) {
           return `${event} hook ${groupIndex}/${hookIndex} timeout must be a nonnegative number`;
         }
-        if (hook.type === 'command' && (typeof hook.command !== 'string' || !hook.command.trim())) {
+        if (strict && hook.type === 'command' && (typeof hook.command !== 'string' || !hook.command.trim())) {
           return `${event} command hook ${groupIndex}/${hookIndex} requires a command`;
         }
       }
@@ -42,14 +42,14 @@ function validateDocument(document) {
   return null;
 }
 
-function readSettings(file, metadata, root) {
+function readSettings(file, metadata, root, strict = true) {
   const source = readJsonSource(file, root, metadata);
   if (!source || source.status !== 'valid') return source;
-  const error = validateDocument(source.document);
+  const error = validateDocument(source.document, { strict });
   return error ? { ...source, status: 'invalid', error: `hook schema failed: ${error}` } : source;
 }
 
-function sourcesForPluginInstall(ref, install) {
+function sourcesForPluginInstall(ref, install, strict) {
   const sources = [];
   if (!isRecord(install) || typeof install.installPath !== 'string') return sources;
   const root = path.resolve(install.installPath);
@@ -69,10 +69,10 @@ function sourcesForPluginInstall(ref, install) {
     for (const value of declared) {
       if (typeof value === 'string' && value.startsWith('./')) targets.push(path.resolve(root, value));
       else if (isRecord(value)) {
-        const error = validateDocument(value);
+        const error = validateDocument(value, { strict });
         sources.push(error
-          ? { kind: 'plugin-cache-inline', pluginRef: ref, pluginVersion: install.version ?? null, file: `${manifest.file}#hooks`, status: 'invalid', error }
-          : { kind: 'plugin-cache-inline', pluginRef: ref, pluginVersion: install.version ?? null, file: `${manifest.file}#hooks`, status: 'valid', digest: sha256(stableJson(value)), document: value, baseDir: root });
+          ? { kind: 'plugin-cache-inline', pluginRef: ref, pluginVersion: install.version ?? null, authority: 'generated-runtime-copy', generatedStatus: 'generated', file: `${manifest.file}#hooks`, status: 'invalid', error }
+          : { kind: 'plugin-cache-inline', pluginRef: ref, pluginVersion: install.version ?? null, authority: 'generated-runtime-copy', generatedStatus: 'generated', file: `${manifest.file}#hooks`, status: 'valid', digest: sha256(stableJson(value)), document: value, baseDir: root });
       }
     }
   } else {
@@ -84,13 +84,13 @@ function sourcesForPluginInstall(ref, install) {
     const source = readSettings(file, {
       kind: 'plugin-cache', pluginRef: ref, pluginVersion: install.version ?? null,
       authority: 'generated-runtime-copy', generatedStatus: 'generated', baseDir: root,
-    }, root);
+    }, root, strict);
     if (source) sources.push(source);
   }
   return sources;
 }
 
-function pluginSources(claudeRoot) {
+function pluginSources(claudeRoot, strict) {
   let registry = readJsonSource(path.join(claudeRoot, 'plugins', 'installed_plugins.json'), claudeRoot, {
     kind: 'plugin-registry', authority: 'claude-managed-registry', generatedStatus: 'generated',
   });
@@ -101,7 +101,7 @@ function pluginSources(claudeRoot) {
   const sources = [];
   for (const [ref, installs] of Object.entries(registry.document.plugins)) {
     if (!Array.isArray(installs)) continue;
-    for (const install of installs) sources.push(...sourcesForPluginInstall(ref, install));
+    for (const install of installs) sources.push(...sourcesForPluginInstall(ref, install, strict));
   }
   return { registry, sources };
 }
@@ -182,15 +182,19 @@ function recordsFrom(source, version) {
 }
 
 function remediation(records) {
-  return records.filter((record) => record.diagnostics.some((item) => [
-    'probable-timeout-unit-mismatch', 'sessionend-timeout-clamped', 'plugin-sessionend-budget-not-raised',
-  ].includes(item.code))).map((record) => ({
-    id: `claude-timeout-review-${record.behaviorFingerprint.slice(0, 16)}`,
-    host: 'claude', diagnostic: 'probable-timeout-unit-mismatch', target: record.source.file,
+  return records.flatMap((record) => {
+    const diagnostic = record.diagnostics.find((item) => [
+      'probable-timeout-unit-mismatch', 'sessionend-timeout-clamped', 'plugin-sessionend-budget-not-raised',
+    ].includes(item.code));
+    if (!diagnostic) return [];
+    return [{
+    id: `claude-timeout-review-${record.occurrenceId.slice(0, 16)}`,
+    host: 'claude', diagnostic: diagnostic.code, target: record.source.file,
     classification: record.source.generatedStatus === 'generated' ? 'upstream-required' : 'approval-required',
     reason: 'Timeout units require source-owner confirmation; changing the definition can change behavior and trust state',
     trustImpact: 'definition changes require the host to re-evaluate trust or managed policy',
-  }));
+    }];
+  });
 }
 
 export function auditClaudeHooks({
@@ -199,26 +203,27 @@ export function auditClaudeHooks({
   managedSettingsFile = MANAGED[process.platform] ?? null,
   claudeVersion = 'unknown',
 } = {}) {
+  const verified = SCHEMA.verifiedVersions.includes(claudeVersion);
   const sources = [];
   const global = readSettings(path.join(claudeRoot, 'settings.json'), {
     kind: 'global', authority: 'user-owned', generatedStatus: 'direct', baseDir: claudeRoot,
-  }, claudeRoot);
+  }, claudeRoot, verified);
   if (global) sources.push(global);
   if (managedSettingsFile) {
     const managed = readSettings(managedSettingsFile, {
       kind: 'managed', authority: 'administrator-managed', generatedStatus: 'direct', baseDir: path.dirname(managedSettingsFile), selected: true,
-    }, path.dirname(managedSettingsFile));
+    }, path.dirname(managedSettingsFile), verified);
     if (managed) sources.push(managed);
   }
   for (const root of [...new Set(projectRoots.map((item) => path.resolve(item)))].sort()) {
     for (const name of ['settings.json', 'settings.local.json']) {
       const source = readSettings(path.join(root, '.claude', name), {
         kind: 'project', authority: 'project-or-user-owned', generatedStatus: 'unknown', baseDir: root,
-      }, root);
+      }, root, verified);
       if (source) sources.push(source);
     }
   }
-  const plugins = pluginSources(claudeRoot);
+  const plugins = pluginSources(claudeRoot, verified);
   if (plugins.registry) sources.push(plugins.registry);
   sources.push(...plugins.sources);
   const records = sources.flatMap((source) => recordsFrom(source, claudeVersion)).sort((a, b) => a.source.file.localeCompare(b.source.file) || a.event.localeCompare(b.event));
@@ -229,8 +234,8 @@ export function auditClaudeHooks({
   ];
   const coverage = { status: 'partial', gaps };
   return {
-    schemaVersion: 2, host: 'claude', mode: 'read-only',
-    hostSchema: { ...SCHEMA, confidence: SCHEMA.verifiedVersions.includes(claudeVersion) ? 'verified' : 'syntax-only' },
+    schemaVersion: 2, host: 'claude', mode: 'read-only', observedVersion: claudeVersion,
+    hostSchema: { ...SCHEMA, confidence: verified ? 'verified' : 'syntax-only' },
     sources: sources.map(publicSource), records, plan, issues: [], coverage,
     summary: summarizeHostReport({ sources, records, plan, coverage: coverage.status }),
   };

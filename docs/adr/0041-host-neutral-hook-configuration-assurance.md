@@ -1,7 +1,8 @@
 # ADR-0041 — Host-neutral hook configuration assurance
 
-- **Status:** Accepted; read-only implementation complete
+- **Status:** Accepted; transactional Wave 2 implemented
 - **Date:** 2026-09-01
+- **Updated:** 2026-09-02
 - **Deciders:** agentic-kit maintainers
 - **Extends:** [ADR-0040](0040-codex-hook-audit-and-conservative-remediation.md)
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md),
@@ -71,24 +72,47 @@ The initial profiles are Codex CLI `0.151.0`, Claude Code `2.1.258` and OpenCode
 fixtures agree. Host releases trigger the conformance suite before widening a range or
 adding a new exact profile.
 
-### 5. Remediation authority has four classes
+### 5. Remediation authority has four classes and an explicit writer
 
-- `automatic-eligible`: proven agentic-kit ownership, exact schema, semantics-preserving
-  change and matching preimage; still only a proposal in this read-only wave.
+- `safe-automatic`: proven agentic-kit ownership, exact schema, semantics-preserving
+  change and matching preimage.
 - `approval-required`: user/project sources or any behavioral change.
-- `prohibited`: trust bypasses, generated/cache targets, unsafe files, unknown schemas or
-  unproven canonical ownership.
 - `upstream-required`: generated dependency behavior whose authoritative repair belongs
   in the producing project.
+- `never-automatic`: trust bypasses, generated/cache targets, unsafe files, unknown
+  schemas, opaque modules or unproven canonical ownership.
 
-The implemented command has no apply flag. A future writer must satisfy ADR-0040's
-backup, preimage, rollback, receipt and idempotency contract. It may never programmatically
-approve or bypass host trust.
+`ak heal hooks` is dry-run by default. Apply requires the exact displayed action IDs,
+the exact plan digest, `--apply`, and `--yes`. Only compiled `safe-automatic` and
+`approval-required` recipes can reach the mutation port. The first recipes normalize
+the already-clamped `SessionEnd` timeout in canonical user-owned JSON for exact Codex
+`0.151.0` and Claude Code `2.1.258` profiles. The writer never approves or bypasses
+host trust.
+
+### 5a. The mutation port is transactional and recovery is explicit
+
+Before writing, the engine re-audits, rebuilds the plan, verifies exact versions and
+profiles, and checks digest, size, mode, owner, special bits, parent inode and containment
+for every selected target. It creates private transaction-specific backups, persists a
+state journal, uses same-directory atomic replacement, re-audits the result, and proves a
+second plan plus third no-op pass. A multi-target failure conditionally restores only
+targets whose bytes still equal the recorded postimage.
+
+`--undo RECEIPT` is for committed transactions. `--recover RECEIPT` is a separate,
+explicit path for interrupted journals; both are dry-run first and validate every target
+and backup before writing. Receipt hashes detect accidental corruption and unsealed
+editing, but they are not signatures or an authenticity boundary against the same user.
+Filesystem durability requires file and directory `fsync`; a failure is reported rather
+than silently called committed. Mutation is currently supported on POSIX. Windows retains
+the complete audit and plan, but replacement stays non-executable until replace-existing
+atomicity has a proven platform port.
 
 ### 6. External adapters stay declarative and independently authorized
 
 Local external manifests are validated through the existing adapter contract and their
-declared hook files are content-hashed. The audit does not import adapter code, admit the
+declared hook files are content-hashed through bounded descriptor reads with real-path,
+inode and path rechecks. Contract pins, host identity and built-in shadowing are refused
+before a normalized occurrence exists. The audit does not import adapter code, admit the
 adapter, grant capabilities or run a hook. Because the current contract does not declare
 a target host-version compatibility range, every external hook carries an explicit
 human-review proposal until a later contract version adds and validates that evidence.
@@ -99,7 +123,8 @@ human-review proposal until a later contract version adds and validates that evi
 primary issue, independently tracked issue state, bounded strategy, verification date
 and an objective sunset condition. It is not a grant store and never authorizes a patch.
 
-Constraints are rechecked weekly, before a managed upgrade, and when host/dependency
+Registry validity, evidence freshness and installed-version applicability are distinct
+fields. Constraints are rechecked weekly, before a managed upgrade, and when host/dependency
 release automation observes a new version. A workaround is removed only after a released
 artifact passes the relevant host-neutral audit and conformance tests. Issue closure alone
 does not prove a fix; an open issue does not by itself prove the installed version is
@@ -122,6 +147,8 @@ affected.
 - Exact profiles require maintenance when hosts release.
 - External adapter compatibility cannot be complete until its versioned contract grows a
   target-host range.
+- A same-user receipt digest is integrity evidence, not third-party authenticity.
+- Windows healing remains a visible non-executable plan until atomic replacement is proven.
 
 ## Implementation status
 
@@ -137,10 +164,15 @@ Implemented in this decision:
 - adversarial cross-host fixtures and read-only tests.
 - post-open inode/path verification for every bounded source read;
 - Claude optional-manifest plugin provenance and host-specific `SessionEnd` budget rules.
+- deterministic public plans with content-bound private candidates;
+- explicit `ak heal hooks` apply, undo and interrupted-transaction recovery;
+- private backups, strict durability ordering, atomic replacement, guarded rollback,
+  re-audit and idempotency proof;
+- plan and receipt schemas plus tamper, drift, partial-failure and platform refusal tests;
+- bounded real-path-confined external adapter hook-file hashing.
 
-Deferred behind a separate decision and explicit approval design:
+Still deferred:
 
-- transactional apply/rollback;
 - host trust inspection or mutation;
 - JSONC normalization;
 - network retrieval of remote adapter manifests;

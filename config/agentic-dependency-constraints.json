@@ -1,38 +1,114 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "lastVerifiedAt": "2026-09-01",
   "recheckPolicy": {
     "cadence": "weekly-and-before-upgrade",
     "staleAfterDays": 14,
-    "requirePrimarySource": true
+    "requirePrimarySource": true,
+    "onObservedRelease": true,
+    "beforeManagedUpgrade": true
   },
+  "dependencyPolicies": [
+    {
+      "dependency": "ruflo",
+      "owner": "ruvnet",
+      "issuePublication": "explicit-user-approval-required",
+      "evidenceRequired": ["installed-version", "affected-range", "minimal-reproduction", "expected-versus-observed", "artifact-digest"],
+      "workaroundPolicy": "bounded, receipt-owned, version-gated, and never applied to generated runtime caches",
+      "retestPolicy": "weekly, on observed release, and before managed upgrade",
+      "removalProof": "released artifact passes the host-neutral hook and lifecycle conformance suite"
+    },
+    {
+      "dependency": "agentic-qe",
+      "owner": "proffesor-for-testing",
+      "issuePublication": "explicit-user-approval-required",
+      "evidenceRequired": ["installed-version", "affected-range", "minimal-reproduction", "expected-versus-observed", "test-receipt"],
+      "workaroundPolicy": "qualify evidence honestly; no simulated QE verdict and no provider-backed fallback without authorization",
+      "retestPolicy": "weekly, on observed release, and before managed upgrade",
+      "removalProof": "released host-neutral runner passes participant and provider conformance"
+    },
+    {
+      "dependency": "ruvnet-brain",
+      "owner": "ruvnet",
+      "issuePublication": "explicit-user-approval-required",
+      "evidenceRequired": ["installed-version", "brain-version", "doctor-output", "source-reference", "artifact-digest"],
+      "workaroundPolicy": "retain source-grounded read-only evidence; never patch versioned cache copies as authoritative source",
+      "retestPolicy": "on brain update, observed release, and before managed upgrade",
+      "removalProof": "updated brain passes doctor plus exact source-reference conformance"
+    },
+    {
+      "dependency": "ruvector",
+      "owner": "ruvnet",
+      "issuePublication": "explicit-user-approval-required",
+      "evidenceRequired": ["installed-version", "store-format", "minimal-reproduction", "artifact-digest"],
+      "workaroundPolicy": "use isolated state and bounded migration gates; never reinterpret store health as authorization",
+      "retestPolicy": "on store migration, observed release, and before managed upgrade",
+      "removalProof": "released artifact passes store integrity and migration conformance"
+    },
+    {
+      "dependency": "agentic-flow",
+      "owner": "ruvnet",
+      "issuePublication": "explicit-user-approval-required",
+      "evidenceRequired": ["installed-version", "routing-input", "selected-provider", "authorization-boundary"],
+      "workaroundPolicy": "subscription execution stays default; separately billed provider routing requires explicit opt-in",
+      "retestPolicy": "on routing-policy change, observed release, and before managed upgrade",
+      "removalProof": "released router passes authorization and routing conformance"
+    }
+  ],
   "constraints": [
     {
+      "id": "ruflo-3.38.17-3.38.18-block",
       "dependency": "ruflo",
       "kind": "blocked-version",
       "affected": ["3.38.17", "3.38.18"],
       "issue": "https://github.com/ruvnet/ruflo/issues/2885",
       "issueState": "open-at-last-verification",
+      "primaryEvidence": "upstream issue plus local host conformance failure",
       "strategy": "retain the last proven version and re-run host conformance before removing the block",
-      "sunsetWhen": "an upstream release closes the issue and passes agentic-kit's host-neutral hook and lifecycle conformance suite"
+      "versionGate": "apply only when the installed version exactly matches an affected entry",
+      "expiryPolicy": "retest within 14 days; do not silently extend stale evidence",
+      "nextRetestAt": "2026-09-08",
+      "sunsetWhen": "an upstream release closes the issue and passes agentic-kit's host-neutral hook and lifecycle conformance suite",
+      "notification": {
+        "status": "draft-only",
+        "requiredFields": ["minimalReproduction", "expected", "observed", "hostVersions", "dependencyVersion", "evidenceDigests", "boundedWorkaround", "expiry", "removalProof"]
+      }
     },
     {
+      "id": "ruflo-3x-capability-gap",
       "dependency": "ruflo",
       "kind": "upstream-capability-gap",
       "affected": ["3.x"],
       "issue": "https://github.com/ruvnet/ruflo/issues/3046",
       "issueState": "open-at-last-verification",
+      "primaryEvidence": "upstream issue plus local capability evidence",
       "strategy": "keep agentic-kit detection read-only and treat registration, health, reachability, and authorization as separate facts",
-      "sunsetWhen": "upstream exposes the required evidence and agentic-kit verifies it against a released artifact"
+      "versionGate": "treat every 3.x version as observation-only until independently verified",
+      "expiryPolicy": "retest within 14 days; do not silently extend stale evidence",
+      "nextRetestAt": "2026-09-08",
+      "sunsetWhen": "upstream exposes the required evidence and agentic-kit verifies it against a released artifact",
+      "notification": {
+        "status": "draft-only",
+        "requiredFields": ["minimalReproduction", "expected", "observed", "hostVersions", "dependencyVersion", "evidenceDigests", "boundedWorkaround", "expiry", "removalProof"]
+      }
     },
     {
+      "id": "agentic-qe-3x-host-neutral-runner-gap",
       "dependency": "agentic-qe",
       "kind": "upstream-capability-gap",
       "affected": ["3.x"],
       "issue": "https://github.com/ruvnet/agentic-qe/issues/628",
       "issueState": "open-at-last-verification",
+      "primaryEvidence": "upstream issue plus live participant/provider transport tests",
       "strategy": "qualify external-provider and cross-host results as transport evidence rather than a host-neutral QE verdict",
-      "sunsetWhen": "a released host-neutral runner passes the live participant and provider conformance tests"
+      "versionGate": "applies to 3.x until a released host-neutral runner is proven",
+      "expiryPolicy": "retest within 14 days; do not silently extend stale evidence",
+      "nextRetestAt": "2026-09-08",
+      "sunsetWhen": "a released host-neutral runner passes the live participant and provider conformance tests",
+      "notification": {
+        "status": "draft-only",
+        "requiredFields": ["minimalReproduction", "expected", "observed", "hostVersions", "dependencyVersion", "evidenceDigests", "boundedWorkaround", "expiry", "removalProof"]
+      }
     }
   ]
 }

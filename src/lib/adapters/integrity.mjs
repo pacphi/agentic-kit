@@ -11,6 +11,8 @@ import path from 'node:path';
 
 const SCRIPT_LIKE_RE = /\.(?:mjs|cjs|js|ts|py|rb|sh|pl|exe|bat|cmd|com|ps1)$/i;
 const SCRIPT_SOURCE_RE = /\.(?:mjs|cjs|js|ts|py|rb|sh|pl|ps1)$/i;
+export const MAX_ADAPTER_HOOK_FILE_BYTES = 2 * 1024 * 1024;
+export const MAX_ADAPTER_HOOK_BUNDLE_BYTES = 8 * 1024 * 1024;
 
 export class AdapterIntegrityError extends Error {
   constructor(reason, detail) {
@@ -151,28 +153,72 @@ function adapterFilePath(baseDir, relative) {
   return candidate;
 }
 
-function digestFile(baseDir, relative) {
+function isContained(root, file) {
+  const relative = path.relative(root, file);
+  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+}
+
+function digestFile(baseDir, relative, { fsImpl, maxFileBytes }) {
   const filename = adapterFilePath(baseDir, relative);
   let stat;
+  let realRoot;
+  let realFile;
   try {
-    stat = fs.lstatSync(filename);
+    stat = fsImpl.lstatSync(filename);
+    realRoot = fsImpl.realpathSync(baseDir);
+    realFile = fsImpl.realpathSync(filename);
   } catch (error) {
     throw new AdapterIntegrityError('hook-file-unreadable', `'${relative}' could not be read: ${error?.message ?? String(error)}`);
   }
-  if (!stat.isFile()) {
+  if (!stat.isFile() || stat.isSymbolicLink()) {
     throw new AdapterIntegrityError('hook-file-not-regular', `'${relative}' is not a regular file`);
   }
+  if (!isContained(realRoot, realFile)) {
+    throw new AdapterIntegrityError('invalid-hook-file', `'${relative}' escapes the real adapter directory`);
+  }
+  if (stat.size > maxFileBytes) {
+    throw new AdapterIntegrityError('hook-file-too-large', `'${relative}' exceeds the ${maxFileBytes} byte limit`);
+  }
+  let descriptor;
   try {
-    const bytes = fs.readFileSync(filename);
-    return createHash('sha256').update(bytes).digest('hex');
+    descriptor = fsImpl.openSync(filename, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+    const opened = fsImpl.fstatSync(descriptor);
+    if (!opened.isFile() || opened.size > maxFileBytes) {
+      throw new AdapterIntegrityError('hook-file-not-regular', `'${relative}' is not a bounded regular file`);
+    }
+    if (opened.dev !== stat.dev || opened.ino !== stat.ino) {
+      throw new AdapterIntegrityError('hook-file-changed', `'${relative}' changed between inspection and open`);
+    }
+    if (fsImpl.realpathSync(filename) !== realFile) {
+      throw new AdapterIntegrityError('hook-file-changed', `'${relative}' changed path between inspection and open`);
+    }
+    const bytes = Buffer.alloc(opened.size);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const count = fsImpl.readSync(descriptor, bytes, offset, bytes.length - offset, offset);
+      if (count === 0) break;
+      offset += count;
+    }
+    const after = fsImpl.fstatSync(descriptor);
+    if (offset !== bytes.length || after.size !== opened.size || after.dev !== opened.dev
+        || after.ino !== opened.ino || after.mtimeMs !== opened.mtimeMs) {
+      throw new AdapterIntegrityError('hook-file-changed', `'${relative}' changed while it was read`);
+    }
+    return { sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length };
   } catch (error) {
+    if (error instanceof AdapterIntegrityError) throw error;
     throw new AdapterIntegrityError('hook-file-unreadable', `'${relative}' could not be read: ${error?.message ?? String(error)}`);
+  } finally {
+    if (descriptor !== undefined) fsImpl.closeSync(descriptor);
   }
 }
 
 /** Compute the content identity used by consent and grants. */
-/** @param {any} manifest @param {{baseDir?: string|null}} [options] */
-export function hashAdapterContent(manifest, { baseDir } = {}) {
+/** @param {any} manifest @param {{baseDir?: string|null,fsImpl?:typeof fs,maxFileBytes?:number,maxTotalBytes?:number}} [options] */
+export function hashAdapterContent(manifest, {
+  baseDir, fsImpl = fs, maxFileBytes = MAX_ADAPTER_HOOK_FILE_BYTES,
+  maxTotalBytes = MAX_ADAPTER_HOOK_BUNDLE_BYTES,
+} = {}) {
   const manifestHash = hashManifest(manifest);
   const files = declaredHookFiles(manifest);
   const commandFiles = commandFileTokens(manifest, baseDir);
@@ -195,9 +241,19 @@ export function hashAdapterContent(manifest, { baseDir } = {}) {
     }
   }
 
-  const hookFiles = files.map((relative) => ({ path: relative, sha256: digestFile(baseDir, relative) }));
+  let totalBytes = 0;
+  const hookFiles = files.map((relative) => {
+    const digest = digestFile(baseDir, relative, { fsImpl, maxFileBytes });
+    totalBytes += digest.size;
+    if (totalBytes > maxTotalBytes) {
+      throw new AdapterIntegrityError('hook-bundle-too-large', `declared hook files exceed the ${maxTotalBytes} byte bundle limit`);
+    }
+    return { path: relative, sha256: digest.sha256, size: digest.size };
+  });
   const hash = hookFiles.length
-    ? hashManifest({ manifest, hookFiles })
+    // Preserve the v1 consent identity. Size is enforcement evidence, not a
+    // hash-shape migration that would silently invalidate existing consent.
+    ? hashManifest({ manifest, hookFiles: hookFiles.map(({ path: file, sha256 }) => ({ path: file, sha256 })) })
     : manifestHash;
   return { hash, manifestHash, hookFiles };
 }

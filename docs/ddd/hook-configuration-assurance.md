@@ -2,12 +2,13 @@
 
 ## Purpose
 
-Answer four questions without running hook code or changing trust:
+Answer five questions without running hook code or changing trust:
 
 1. Which lifecycle behaviors can each host discover?
 2. Which exact source and owner produced every occurrence?
 3. Which compatibility, security, ownership and duplication findings are proven?
 4. Which remediation authority class applies, if any?
+5. Can an explicitly selected, exact-profile repair be applied and reversed safely?
 
 ## Boundary
 
@@ -17,9 +18,10 @@ consent, capability grant or trust decision.
 
 ```text
 Project Census ────────┐
-Integration Management ├──> Hook Configuration Assurance ──> audit report / proposal
-Host binaries + files ─┘                 │
-                                        └──> no execution, no trust, no write
+Integration Management ├──> Hook Configuration Assurance ──> audit / deterministic plan
+Host binaries + files ─┘                 │                         │
+                                        │                         └──> explicit mutation port
+                                        └──> no hook execution, trust, consent, or grants
 ```
 
 ## Aggregate and value objects
@@ -38,6 +40,10 @@ host set plus source digests and exact version facts.
 - `Diagnostic`: category, severity, stable code, evidence and message.
 - `RemediationProposal`: target, expected source digest, authority class, rationale,
   behavior impact and trust impact.
+- `HealingPlan`: exact audit identity, runtime profiles, selected source preimages,
+  candidate postimages and stable action identities.
+- `HealingTransaction`: private backups, explicit authorization, action journal,
+  verification evidence and guarded rollback state.
 - `UpstreamConstraint`: dependency range, issue state, local strategy and sunset proof.
 
 ## Provider contract
@@ -67,7 +73,12 @@ manifests, not imported implementation modules.
    diagnostic dimensions.
 8. Plugin caches and generated projections are never direct healing targets.
 9. Audit results never confer trust, consent, grants, reachability or health.
-10. The read-only wave has no mutation port.
+10. Only exact action IDs bound to an exact plan digest can reach the mutation port.
+11. Every selected target passes a complete preflight and live re-audit before the first
+    backup or target write.
+12. Mutation cannot change trust, consent, grants, generated copies, caches, opaque
+    modules, JSONC, unsupported schemas or Windows targets.
+13. Receipt digests prove internal consistency, not authenticity against the same user.
 
 ## Host anti-corruption layers
 
@@ -96,8 +107,16 @@ Translates validated manifest lifecycle, execution and Agentic-QE provider subpr
 hooks. Content identity includes declared hook files. Admission, consent and grants stay
 owned by Integration Management.
 
-## Future remediation process
+## Remediation process
 
-A future command may add `plan -> apply -> verify -> undo` only through a separate
-mutation port with exact preimages, backups, atomic replacement, receipts and guarded
-rollback. The domain rejects trust bypasses and cache writes before the port is reached.
+`ak heal hooks` implements `audit -> plan -> authorize -> preflight -> backup -> apply ->
+verify -> commit`, with dry-run as the default. Undo and interrupted recovery are separate
+explicit flows. The mutation port requires exact preimages, private backups, strict
+file/directory durability, atomic same-directory replacement, per-action journal updates,
+guarded rollback, an exact-profile second audit and a byte/mode/mtime no-op proof. The
+domain rejects trust bypasses and cache writes before the port is reached.
+
+Transactions use `prepared`, `applying`, `verifying`, `committed`, `undoing`,
+`rolled-back`, and explicit failure/recovery states. A new apply refuses while an
+unfinished transaction exists. Recovery never guesses: each target must equal its
+recorded preimage or postimage, and every backup must match the receipt.

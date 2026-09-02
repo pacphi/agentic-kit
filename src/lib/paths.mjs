@@ -13,7 +13,12 @@ function configBase() {
   if (isWindows) return process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
   return process.env.XDG_CONFIG_HOME || path.join(home, '.config');
 }
+function stateBase() {
+  if (isWindows) return process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+  return process.env.XDG_STATE_HOME || path.join(home, '.local', 'state');
+}
 export const configDir = () => path.join(configBase(), 'agentic-kit');
+export const hookHealingTransactionsDir = () => path.join(stateBase(), 'agentic-kit', 'hook-healing');
 /** The ruflo-era config dir — read-fallback for kit.json migration and the
  *  target of uninstall's legacy shell-kit cleanup. */
 export const legacyConfigDir = () => path.join(configBase(), 'ruflo');
