@@ -62,6 +62,22 @@ jobs:
           APPDATA: ${{ runner.temp }}/kit-home/AppData/Roaming
         run: node bin/agentic-kit.mjs x verify security
 
+      - name: Host-neutral hook contract fixtures
+        run: node --test tests/kit/hook-audit.test.mjs tests/kit/hook-audit-hosts.test.mjs
+
+      - name: Report current host releases for schema review
+        shell: bash
+        run: |
+          {
+            echo "### Host hook schema release watch"
+            echo
+            echo "- Codex: $(npm view @openai/codex version 2>/dev/null || echo unavailable)"
+            echo "- Claude Code: $(npm view @anthropic-ai/claude-code version 2>/dev/null || echo unavailable)"
+            echo "- OpenCode: $(npm view opencode-ai version 2>/dev/null || echo unavailable)"
+            echo
+            echo "Compare these versions with ADR-0041's evidence profiles before widening compatibility."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # Non-blocking: a native libc++abi mutex abort on macos-latest poisons ruflo
       # exit codes, tracked upstream at ruvnet/ruflo#2885 (open as of 2026-08-13).
       # Scope is NOT neural-train-specific: upstream evidence (2026-08-12) shows the

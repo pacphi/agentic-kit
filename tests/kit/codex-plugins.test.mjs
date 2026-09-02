@@ -100,6 +100,19 @@ test('a manifest hook override wins over an incompatible conventional file', () 
   assert.match(result.plugins[0].hookFiles[0], /codex-hooks\.json$/);
 });
 
+test('an explicit empty Codex manifest hook object disables conventional hooks', () => {
+  fs.rmSync(cacheDir, { recursive: true, force: true });
+  fs.writeFileSync(configFile, '[plugins."skills-only@local"]\nenabled = true\n');
+  const root = seedPlugin({
+    marketplace: 'local', plugin: 'skills-only', version: '1.0.0', manifest: { hooks: {} },
+  });
+  fs.mkdirSync(path.join(root, 'hooks'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'hooks', 'hooks.json'), JSON.stringify({ hooks: { Stop: [] } }));
+  const result = inspect();
+  assert.deepEqual(result.hookIssues, []);
+  assert.deepEqual(result.plugins[0].hookFiles, []);
+});
+
 test('missing cache and unsafe manifest paths produce actionable facts', () => {
   fs.rmSync(cacheDir, { recursive: true, force: true });
   fs.writeFileSync(configFile, '[plugins."missing@market"]\nenabled = true\n');
@@ -115,6 +128,36 @@ test('missing cache and unsafe manifest paths produce actionable facts', () => {
   assert.match(inspect().issues[0], /must start with "\.\/"/);
 });
 
+test('plugin cache discovery rejects traversal refs and symlinked marketplace escapes', (t) => {
+  fs.rmSync(cacheDir, { recursive: true, force: true });
+  fs.writeFileSync(configFile, '[plugins."p@../../outside-market"]\nenabled = true\n');
+  const traversalRoot = path.resolve(cacheDir, '..', '..', 'outside-market', 'p', '1.0.0');
+  fs.mkdirSync(path.join(traversalRoot, '.codex-plugin'), { recursive: true });
+  fs.writeFileSync(path.join(traversalRoot, '.codex-plugin', 'plugin.json'), JSON.stringify({ name: 'p', version: '1.0.0' }));
+  assert.match(inspect().hookIssues[0], /invalid plugin reference/);
+
+  fs.rmSync(cacheDir, { recursive: true, force: true });
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-plugin-outside-'));
+  try {
+    seedPlugin({ marketplace: 'linked', plugin: 'p', version: '1.0.0' });
+    const seeded = path.join(cacheDir, 'linked');
+    fs.cpSync(seeded, outside, { recursive: true });
+    fs.rmSync(seeded, { recursive: true, force: true });
+    try {
+      fs.symlinkSync(outside, seeded, 'dir');
+    } catch (error) {
+      if (error.code === 'EPERM') { t.skip('directory symlinks unavailable'); return; }
+      throw error;
+    }
+    fs.writeFileSync(configFile, '[plugins."p@linked"]\nenabled = true\n');
+    const result = inspect();
+    assert.match(result.hookIssues[0], /escapes.*cache/i);
+    assert.deepEqual(result.plugins[0].hookFiles, []);
+  } finally {
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
 test('skills without portable YAML frontmatter are reported', () => {
   fs.rmSync(cacheDir, { recursive: true, force: true });
   fs.writeFileSync(configFile, '[plugins."spring-m11n@market"]\nenabled = true\n');
@@ -128,6 +171,8 @@ test('skills without portable YAML frontmatter are reported', () => {
   const result = inspect();
   assert.equal(result.plugins[0].skillFiles.length, 2);
   assert.equal(result.issues.length, 1);
+  assert.deepEqual(result.hookIssues, []);
+  assert.equal(result.skillIssues.length, 1);
   assert.match(result.issues[0], /missing-frontmatter[\\/]SKILL\.md: missing YAML frontmatter/);
 });
 

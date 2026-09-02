@@ -25,6 +25,13 @@ contradictory meaning.
 | Companion fact | Content-free observation of companion package ownership, target wiring, plugin/trust state, schema compatibility, and data health |
 | Companion projection | Exact host-native wiring by which a companion exposes MCP or consented automatic events to one enabled host |
 | Auto-recall | Explicitly consented injection of untrusted historical context at a named host event; not a uniform session-start capability |
+| Hook source | One host-native settings, TOML, JSON, plugin or adapter-manifest origin inspected without executing its contents |
+| Hook occurrence | One physical event/matcher/handler definition retained with its source pointer and digest |
+| Hook behavior | Material execution identity used to link only genuinely equivalent occurrences |
+| Schema profile | Exact host-version rules plus evidence and verification date; unknown versions fall back to syntax-only validation |
+| Coverage statement | `complete`, `partial`, or `unsupported` audit reach plus concrete gaps; it is not a health or trust verdict |
+| Remediation proposal | Read-only action description classified as automatic-eligible, approval-required, prohibited, or upstream-required |
+| Upstream constraint | Versioned dependency issue, affected range, bounded local strategy, verification date, and objective sunset condition |
 
 ## State and evidence language
 
@@ -195,6 +202,8 @@ runtime state is a chip word, never a prose word. See
 - Do not call a managed companion a host, memory authority, or observability source. Name the exact
   companion projection or automatic event when injection behavior matters.
 - Do not replace an unknown fact with a convenient default.
+- Do not call a hook configured, selected, trusted, reachable, healthy, or authorized unless the
+  evidence establishes that exact dimension. A coverage statement never upgrades those facts.
 - Say **System** for the dashboard area and the command; say **Machine footprint** only for the
   bounded context and its module directory. No user-facing string says "footprint".
 - Say **About** for the dashboard area and the command; say **Component directory** only for the

@@ -17,7 +17,7 @@ import { readJson } from '../settings.mjs';
 const MANAGED_SETTINGS = {
   darwin: '/Library/Application Support/ClaudeCode/managed-settings.json',
   linux: '/etc/claude-code/managed-settings.json',
-  win32: 'C:\\ProgramData\\ClaudeCode\\managed-settings.json',
+  win32: 'C:\\Program Files\\ClaudeCode\\managed-settings.json',
 };
 
 const plainEnv = (value) => value && typeof value === 'object' && !Array.isArray(value)
