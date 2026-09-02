@@ -237,14 +237,18 @@ The legend appears only when at least one row actually carries a tick.
 
 Prompts turns what you actually typed — never what the harness or a delegated agent produced —
 into repetition and habit signal, host by host. Every figure derives from prompt
-**fingerprints** (a hash, a token count, a provenance tag recorded at scan time); no prompt text is
-stored in the index. The **KPI strip** reads Typed prompts (share of every fingerprinted turn),
+**fingerprints** (a hash, token/count evidence, provenance, and optional controlled intent/topic
+codes recorded at scan time); no prompt text is stored in the index. A recurring cluster receives a
+contextual name only when one controlled intent or topic has at least two supporting prompts, covers
+at least 60% of the cluster, and is not tied. Otherwise it remains honestly unclassified. The
+visible **Intent** column replaces the former binary `question`/`other` class; the legacy class stays
+in compatibility JSON only. The **KPI strip** reads Typed prompts (share of every fingerprinted turn),
 Questions, Supervision taps (against your own trailing-90d normal per host, where you have one),
 Repeated share, and Headless share. Below it, **Who is typing** shows the provenance split behind
 that Typed-prompts figure — most user-role turns are not typed by you at all — and **Host
 interplay** reads the asymmetry between hosts in plain language (how much more often you tap one,
-how much longer you write on the other, how much role scaffolding each gets retyped by hand), with
-the unequal-histories nuance in its own tooltip rather than a standing caveat.
+how much longer you write on the other, how much role scaffolding each gets retyped by hand). The
+definitions and unequal-history warning are persistent copy, not hover-only help.
 
 Below the KPIs, **Who is typing**, **Steering mix**, **Tap habits**, **Recurring patterns**,
 **Re-asks**, and **Host interplay** explain the same deterministic evidence without serving prompt
@@ -263,8 +267,12 @@ count, p90 peak input and median observed window.
 A percentage is rendered only when input and window were observed together for that session.
 Claude and OpenCode commonly carry input-only evidence, so they may read **Partial evidence** while
 Codex is observed. Missing evidence renders `unknown`; an unknown ARIA meter omits `aria-valuenow`
-rather than announcing zero. Attention rows are capped and show only host, bounded project label,
-pressure and token/window figures. Prompt text, tool payloads, commands and raw paths never enter the
+rather than announcing zero. The attention projection is capped to the top 20 sessions before
+presentation. The browser groups those rows by bounded project and sanitized conversation labels,
+then exposes explicit column headers, an opaque session reference, host, policy-derived
+recommendation, pressure/input/window, and start date. The session reference links to that retained
+local transcript. A recommendation means a policy threshold was crossed; it is not evidence that a
+handoff or compaction occurred. Prompt bodies, tool payloads, commands and raw paths never enter the
 projection.
 
 Context rides the existing authenticated `/api/usage` aggregate and follows the selected Usage day
@@ -280,18 +288,31 @@ tool schema bytes remain unknown when the host config does not expose them.
 
 Hooks is a read-only assurance view. Opening it lazily requests authenticated, no-store
 `/api/hooks?host=all`; the server shares one in-flight collection and a 30-second in-memory result.
-It does not execute, edit, heal, enable or disable a hook. Before delivery the server removes raw
-commands, source paths, hook output, detail and diagnostic prose.
+It does not execute, edit, heal, enable or disable a hook. The summary removes raw commands, source
+paths, hook output, detail and diagnostic prose. Each audited physical placement receives an opaque,
+short-lived source reference. Only an explicit **Inspect source** action resolves that reference,
+rechecks the bounded regular file and original digest, and returns its physical location plus a
+server-masked selected JSON definition. The route accepts no client path, never imports a module or
+launches an editor, and returns location-only for formats it cannot safely normalize.
 
 The view deliberately separates four questions:
 
-- **Configuration** counts hook occurrences, normalized behaviors and static issues.
-- **Stop configuration** lists sanitized Stop-specific diagnostic codes and host counts. No
-  diagnostic does not prove runtime success.
-- **Runtime outcomes** summarizes bounded receipts only when the dashboard process was explicitly
-  supplied them. The default collector has none and says outcomes are unknown.
-- **Ownership actions** separates automatic eligibility, approval-required work, prohibited
-  generated/cache changes and upstream-required owner action.
+- **What is configured** distinguishes physical entries, distinct normalized behaviors, repeated
+  placements, inspected sources, and unreadable sources. Unreadable sources are not warning counts.
+- **Hook definitions** is a semantic table grouped by normalized behavior. Expand a definition to
+  inspect its host, lifecycle point, handler kind, timeout, placement, owner/authority, selection
+  evidence and source reference.
+- **Findings needing attention** uses allowlisted plain-language titles and explanations, while
+  retaining the stable code as secondary support text. Informational `trust-independent` repetition
+  becomes one evidence-limit statement.
+- **Runtime outcomes** is a separate table of bounded receipts. With no receipts it says outcomes
+  are unknown and renders no zero-valued scorecard.
+- **Evidence limits** states what static inspection cannot prove.
+
+A finding receives a call to action only when the current healing plan contains an exact executable
+action bound to the affected occurrence and plan digest, or when a verified published upstream issue
+is joined explicitly. A generic `approval-required`, `upstream-required`, or `prohibited`
+classification is explanation, not actionability.
 
 A configured Stop risk is not a failed Stop execution. Conversely, an absent receipt is not a
 successful execution or zero failures. Native Claude, Codex and OpenCode hooks do not currently feed

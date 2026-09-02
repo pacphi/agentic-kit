@@ -138,6 +138,8 @@ before a normalized occurrence exists. The audit does not import adapter code, a
 adapter, grant capabilities or run a hook. Because the current contract does not declare
 a target host-version compatibility range, every external hook carries an explicit
 human-review proposal until a later contract version adds and validates that evidence.
+That proposal records uncertainty and authority; it is not, by itself, a dashboard call
+to action.
 
 ### 7. Upstream constraints are lifecycle data
 
@@ -166,14 +168,34 @@ runtime outcome: their host processes do not currently feed this receipt stream.
 occurrence is configured evidence; a timeout receipt is execution evidence. Neither substitutes
 for the other.
 
-`buildHookDashboardReadModel` may join a static audit with those typed receipts, but it strips
-commands, source paths, stdout/stderr, failure detail, diagnostic prose and messages. Labels are
-control-stripped and capped at 64 characters; runtime input is capped to the last 1,000 receipts
-and the recent list to 50. Dashboard Delivery exposes that model through authenticated, no-store
+`buildHookDashboardReadModel` may join a static audit with those typed receipts. Its summary strips
+commands, source paths, stdout/stderr, failure detail, diagnostic prose and messages while retaining
+host-neutral definition groups, ownership evidence, stable diagnostic codes, allowlisted
+explanations, and opaque short-lived source references. Labels are control-stripped and capped at
+64 characters; runtime input is capped to the last 1,000 receipts and the recent list to 50.
+Dashboard Delivery exposes that model through authenticated, no-store
 `/api/hooks?host=all`, collected lazily only when the Hooks view opens. The server reuses one
 30-second bounded cache and one in-flight collection. The default collector supplies the static
 audit only; runtime remains `not-recorded` unless the dashboard process is explicitly given a
 bounded receipt source. Durable native-host receipt storage is still a separate decision.
+
+### 8a. Source navigation is explicit, bounded and independent of remediation
+
+Dashboard Delivery keeps each physical source locator in that in-memory cache and publishes only
+an HMAC-derived reference in the summary. Authenticated
+`GET /api/hooks/source/<opaque-reference>` resolves only a live cached locator; it accepts no path
+parameter. The server rereads the audited bounded regular file beneath its original containment
+root, verifies the original digest, and returns the physical location plus a recursively masked
+selected JSON definition. An unknown or expired reference is 404; digest drift is 409. Composite,
+opaque, JSONC, TOML and module sources may return location-only rather than weakly parse or execute
+content. The route never imports modules, fetches remote/npm sources, launches an editor, emits a
+`file://` URI, or grants write authority.
+
+Source inspection is navigation, not remediation. The dashboard renders a next step only for an
+exact executable healing-plan action joined to the affected occurrence and plan digest, or for a
+separately verified published upstream issue joined to that diagnostic. A provider proposal or
+authority classification alone is not actionability; healthy, informational, unknown, prohibited,
+and unproven rows have no call to action.
 
 ### 9. Exact Agentic-QE Stop risks are upstream-only
 

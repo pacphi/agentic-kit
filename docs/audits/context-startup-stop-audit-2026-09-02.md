@@ -90,11 +90,14 @@ that missing schema evidence explicit instead of treating config size as total M
 
 ## Context evidence shipped
 
-Usage cache schema v17 retains bounded first/last/peak/count input evidence, bounded window
+Usage cache schema v17 introduced bounded first/last/peak/count input evidence, bounded window
 evidence and a fixed pressure histogram. Codex pairs `last_token_usage.input_tokens` with
 `model_context_window` from the same token-count observation; cached input is a subset of gross
 input and is not added twice. Claude and OpenCode can currently provide input evidence but usually
 not a runtime window, so their state is partial rather than a fabricated percentage.
+
+Current cache schema v18 reparses the same Context evidence while adding controlled Prompt
+intent/topic facets.
 
 **Usage → Context** renders the canonical policy, counted coverage, three host cards and at most 20
 attention rows. An unknown meter has no `aria-valuenow`; missing evidence is not announced as zero.
@@ -141,10 +144,14 @@ timeout state, stdout/stderr byte counts saturated at 262,145 bytes, and truncat
 Claude, Codex and OpenCode processes do not yet feed that receipt stream.
 
 **Usage → Hooks** calls authenticated, no-store `/api/hooks?host=all` only when opened. Collection is
-single-flight and cached in memory for 30 seconds. The server removes commands, paths, output and
-diagnostic prose. The default collector exposes the static audit only; runtime outcomes say unknown
-until the process is explicitly supplied bounded receipts. A Stop configuration finding therefore
-never renders as a Stop execution failure or success.
+single-flight and cached in memory for 30 seconds. The summary removes commands, physical paths,
+output and provider diagnostic prose while retaining definition groups, plain-language findings,
+ownership evidence and opaque source references. Explicit source inspection rereads and digest-
+checks one audited source, returning its location and masked selected JSON definition; no client
+path or editor launch exists. The default collector exposes the static audit only; runtime outcomes
+say unknown until the process is explicitly supplied bounded receipts. A Stop configuration finding
+therefore never renders as a Stop execution failure or success. Provider classifications do not
+become dashboard actions without an exact executable plan/action join.
 
 ## Setup precedence and idempotency
 

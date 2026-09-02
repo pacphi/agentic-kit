@@ -92,6 +92,13 @@ Owns transcript indexing, session history, token and cost aggregation, classific
 findings. It may share a host-qualified session identity with Observability, but its aggregate and
 cache are separate from the live event store.
 
+Prompt Telemetry is a Historical Usage subdomain. It owns privacy-bounded prompt fingerprints,
+controlled semantic facets, recurring-cluster evidence and deterministic presentation names. It
+does not own prompt text, coaching, model enrichment or mutable labels.
+
+See [Prompt telemetry](prompt-telemetry.md) and
+[ADR-0039](../adr/0039-prompts-intelligence.md).
+
 ### Context budget intelligence
 
 Owns compatible context-window evidence resolution, conservative startup/dynamic policy, context

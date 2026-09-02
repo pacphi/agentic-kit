@@ -295,15 +295,15 @@ same sentence fingerprints identically whichever host recorded it:
 
 | Symbol | Location | Notes |
 |---|---|---|
-| `normalizePromptText` | `src/lib/usage-parsers.mjs:238` | lowercased, whitespace-collapsed, trailing punctuation stripped |
-| `promptFingerprint` | `src/lib/usage-parsers.mjs:273` | the `{h, t, th}` hash/count/token-hash triple |
-| `promptShape` | `src/lib/usage-parsers.mjs:319` | the `q`/`o` flags, anchored on the question and persona-opener rules below |
-| `QUESTION_WH_RE` | `src/lib/usage-parsers.mjs:288` | one of two rules the `q` flag checks |
-| `QUESTION_AUX_RE` | `src/lib/usage-parsers.mjs:289` | the other |
-| `PERSONA_OPENER_RE` | `src/lib/usage-parsers.mjs:295` | what the `o` flag checks |
-| `notePromptFingerprint` | `src/lib/usage-parsers.mjs:336` | records one fingerprint, or counts overflow past the caps below |
-| `MAX_PROMPT_FPS` | `src/lib/usage-parsers.mjs:217` | the per-session fingerprint cap |
-| `MAX_TOKEN_HASHES` | `src/lib/usage-parsers.mjs:232` | the per-fingerprint token-hash cap |
+| `normalizePromptText` | `src/lib/usage-parsers.mjs:251` | lowercased, whitespace-collapsed, trailing punctuation stripped |
+| `promptFingerprint` | `src/lib/usage-parsers.mjs:286` | the `{h, t, th}` hash/count/token-hash triple |
+| `promptShape` | `src/lib/usage-parsers.mjs:332` | the `q`/`o` flags, anchored on the question and persona-opener rules below |
+| `QUESTION_WH_RE` | `src/lib/usage-parsers.mjs:301` | one of two rules the `q` flag checks |
+| `QUESTION_AUX_RE` | `src/lib/usage-parsers.mjs:302` | the other |
+| `PERSONA_OPENER_RE` | `src/lib/usage-parsers.mjs:308` | what the `o` flag checks |
+| `notePromptFingerprint` | `src/lib/usage-parsers.mjs:349` | records one fingerprint, or counts overflow past the caps below |
+| `MAX_PROMPT_FPS` | `src/lib/usage-parsers.mjs:230` | the per-session fingerprint cap |
+| `MAX_TOKEN_HASHES` | `src/lib/usage-parsers.mjs:245` | the per-fingerprint token-hash cap |
 | `PROVENANCE_TAGS` | `src/lib/usage-provenance.mjs:21` | the closed four-tag vocabulary |
 | the ordered provenance rules | `src/lib/usage-provenance.mjs:33-77` | matched against, in order, to resolve a tag |
 | `provenanceOf` | `src/lib/usage-provenance.mjs:93` | resolves one turn's provenance tag |
@@ -608,7 +608,7 @@ tokens = input + output + cacheRead + cacheWrite   (summed across all rows in wi
 ```
 
 **Source:** `t.tokens` from `totals`, accumulated per row at
-`usage-aggregate.mjs:750` (`rowTokens = row.input + row.output + row.cacheRead +
+`usage-aggregate.mjs:761` (`rowTokens = row.input + row.output + row.cacheRead +
 row.cacheWrite`) and rolled into `totals.tokens` via `addTo`
 (`usage-aggregate.mjs:655-664`). Rendered with `fmtTok()`
 (`dashboard/client.mjs`): `≥1e9` → `"X.XB"`, `≥1e6` → `"X.XM"`,
@@ -1408,7 +1408,7 @@ p(q), over N samples, landing in bucket i (count n_i, running total `cum` before
   The parsers carry their own copies (`usage-parsers.mjs:355-360`) and the
   browser bundle a third pair (`LAT_EDGES`/`LEN_EDGES`), because the payload
   ships bucket *counts* and never the edges they were binned on.
-- Slotting: `bucketIndex` (`usage-parsers.mjs:353-356`) — one definition of a
+- Slotting: `bucketIndex` (`usage-parsers.mjs:369-371`) — one definition of a
   boundary, shared by every histogram built on these edges.
 - Sampling: `noteLatencySample` (`usage-parsers.mjs:362-367`) allocates
   `latHist` lazily, so a session that never observed a latency keeps
@@ -1534,7 +1534,7 @@ Neither transcript store records it, so no panel here may borrow the name.
   means a window dominated by one host is really reporting that host's
   instrument;
 - the bucketing *function* is implemented twice: the parsers export
-  `bucketIndex` (`usage-parsers.mjs:353-356`) and the aggregate keeps a private
+  `bucketIndex` (`usage-parsers.mjs:369-371`) and the aggregate keeps a private
   copy of the same loop (`usage-aggregate.mjs:221-224`), because the dependency
   between the two modules is deliberately one-way. The *edges* they run on are
   pinned equal by test — `AGG_LAT_EDGES` against `LAT_BUCKET_EDGES`
@@ -1831,7 +1831,7 @@ aggregated here, and deriving the baseline from a widened bound would silently
 stretch it to whatever lookback the caller happened to pass. The dashboard route widens it to
 the depth the personal tap-share baseline needs rather than to the previous
 window alone: `days + BASELINE_TRAILING_DAYS` (`lookbackDays`,
-`src/lib/dashboard-server.mjs:1478`); `ak usage score` applies the same rule
+`src/lib/dashboard-server.mjs:1622`); `ak usage score` applies the same rule
 (`src/commands/usage.mjs:317`). One extra window would be a strict
 subset — too shallow for `promptBaselines`, which needs
 BASELINE_MIN_ACTIVE_DAYS of history BEFORE the displayed window and returns
@@ -1851,7 +1851,7 @@ arrow the printed number does not support (`deltaChip`,
 
 **Engaged time by day is a sibling map, not a `byDay` field.** `byDay`'s
 presence contract is **billed days only** — a key exists exactly when tokens
-landed on that day (`dayBucket`, `usage-aggregate.mjs:666-679`) — and that is
+landed on that day (`dayBucket`, `usage-aggregate.mjs:697-704`) — and that is
 what the active-day count and the streak above are counted from. Engaged time
 does not share that key set: a session that runs past midnight, or a day spent
 reading, produces worked time on a day that billed nothing. So
@@ -1980,7 +1980,7 @@ byDay[day].byModelFamily[fam] += rowCost                  fam = modelFamily(row.
 
 **Source:** the tool tally is folded into `byTool` at `usage-aggregate.mjs:939-998`;
 the per-day family split is this call: `addCost(d.byModelFamily, modelFamily(row.model),
-rowCost)` (`usage-aggregate.mjs:757`), inside the usage-row pass because only a
+rowCost)` (`usage-aggregate.mjs:772`), inside the usage-row pass because only a
 row knows its day. Render is `toolRows`/`modelMix` in
 `src/lib/dashboard/client/usage.mjs`.
 
@@ -2052,7 +2052,8 @@ The retired `--enrich`, `--draft`, and `--dismiss` options are rejected.
 
 A prompt fingerprint is the only prompt-derived record stored in the usage index. It
 contains a normalized-text hash, token count, bounded token-hash sketch, provenance,
-and optional question/persona shape flags. It contains no prompt text.
+optional question/persona shape flags, and optional codes from closed intent/topic
+vocabularies. It contains no prompt text, excerpt, proper noun, or unbounded extracted term.
 
 The recurring-pattern projection publishes:
 
@@ -2060,14 +2061,17 @@ The recurring-pattern projection publishes:
 - `provenance`: counts for the closed four-tag vocabulary;
 - `tapLengths`: deterministic short-prompt distributions;
 - `exactRepeats`: hash-group counts and spans;
-- `clusters`: key, deterministic label, class, count, session/day spans, median
-  tokens, and hosts;
+- `clusters`: key, deterministic label, legacy class, controlled intent/topic when
+  established, count, session/day spans, median tokens, and hosts;
 - `reAsks`: pair count, session count, and the prompt-gap histogram;
 - `computedAt`: the aggregate clock.
 
 Cluster rows deliberately omit prompt text, sample session identifiers, coaching
-kind, recommendations, and mutable state. Labels come only from the precision-first
-seed registry or a shape-based characterization.
+kind, recommendations, and mutable state. A semantic facet needs at least two supporting
+members, 60% cluster coverage, and no tie; an intent/topic composition must itself clear
+that rule. Persona evidence retains precedence. Otherwise the label falls back to an
+honest shape characterization and Intent displays `Unclassified`. The legacy binary
+`class` remains in JSON for compatibility but is not a user-facing taxonomy.
 
 ### 20.2 Repetition and re-ask rules
 
@@ -2138,11 +2142,14 @@ Context occupancy is reported only from paired evidence:
 pressure basis points = round(gross input tokens × 10,000 / runtime-observed window tokens)
 ```
 
-Schema v17 retains bounded first, last and peak input samples; first, last, minimum and maximum
+Schema v17 introduced bounded first, last and peak input samples; first, last, minimum and maximum
 window samples; sample counts; and a fixed pressure histogram. It does not retain prompt text or an
 unbounded observation list. Codex reads the gross `last_token_usage.input_tokens` value and does
 not add its cached-input subset again. Claude and OpenCode sum their split fresh/cache fields but
 usually have no runtime window, so their coverage is commonly partial.
+
+The current cache schema is v18 because controlled prompt intent/topic facets also require parser
+output. A v17 cache is reparsed; the context evidence contract itself is unchanged.
 
 The Context view contains:
 
@@ -2150,7 +2157,10 @@ The Context view contains:
 - counted coverage, including paired samples and sessions missing a window;
 - one host card each for Claude, Codex and OpenCode;
 - p90 peak pressure/input and median observed window where supported; and
-- at most 20 attention rows with bounded project labels and no session id or content.
+- at most 20 attention rows carrying a deterministic opaque session reference plus bounded project
+  and sanitized conversation labels, grouped client-side for display. Each row links to the same
+  authenticated local transcript reader and shows host, policy recommendation, peak pressure,
+  input, window and start date. No prompt body or transcript turn enters this projection.
 
 An absent denominator yields `unknown`, never zero percent and never a catalogue-derived guess. A
 1M published capacity does not override a smaller runtime-effective session window. The dashboard
@@ -2163,22 +2173,32 @@ shape. Policy and evidence precedence are defined in
 **Displayed as:** `Usage → Hooks`, loaded separately from the Usage transcript aggregate.
 
 The browser requests authenticated, no-store `/api/hooks?host=all` only when the view opens. The
-server shares a single in-flight collection and a 30-second in-memory result. It sends counts,
-stable codes and bounded labels; raw commands, paths, hook output, failure detail and diagnostic
-prose stay server-side.
+server shares a single in-flight collection and a 30-second in-memory result. The summary sends
+counts, definition groups, stable codes, allowlisted explanations, ownership evidence, and opaque
+short-lived source references; raw commands, physical paths, hook output, failure detail and
+provider diagnostic prose stay server-side.
 
 | Measure | Evidence |
 | --- | --- |
-| Configured hooks / unique behavior | Normalized static occurrences and behavior fingerprints |
-| Configuration issues / Stop diagnostics | Read-only host-profile and source inspection |
+| Configured entries / distinct behaviors / repeated placements | Normalized static occurrences and behavior fingerprints |
+| Sources inspected / unreadable sources | Read-only source discovery; not diagnostic-warning counts |
+| Findings needing attention | Allowlisted presentation joined to exact diagnostic occurrences |
 | Executions / failures / timeouts | Typed bounded supervised-adapter receipts, when supplied |
-| Automatic / approval / prohibited / upstream | Remediation authority classification, not execution status |
+| Next step | Present only for an exact executable healing action or a separately verified published upstream URL |
 
 The default dashboard collector has static audit evidence and no durable native-host receipt
 source. In that state, runtime outcomes are **unknown**. A configured Stop risk is not a failed
 execution; no Stop diagnostic is not proof of runtime success; no receipt is not zero failures.
 Native Claude, Codex and OpenCode hooks do not currently emit into the supervised external-adapter
-receipt stream. See [ADR-0041](adr/0041-host-neutral-hook-configuration-assurance.md).
+receipt stream. Informational trust findings are consolidated into an evidence-limit statement.
+
+Selecting **Inspect source** calls authenticated, no-store
+`/api/hooks/source/<opaque-reference>`. The reference resolves only inside the live Hook cache. The
+server rereads the previously audited bounded regular file beneath its proven containment root,
+checks the digest, and returns the explicit physical location plus a recursively masked selected
+JSON definition. Unknown/expired references return 404 and source drift returns 409. No client path
+parameter, module import, remote fetch, `file://` link, editor launch, or write capability exists.
+See [ADR-0041](adr/0041-host-neutral-hook-configuration-assurance.md).
 
 ---
 

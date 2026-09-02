@@ -95,19 +95,24 @@ compaction.
 Persisted usage schema changes force a reparse. The legacy `ctxWindow` and `ctxLastTokens` fields
 may remain temporarily for compatibility, but the normalized evidence is authoritative.
 
-The implemented cache schema is **v17**. Its normalized session evidence stores bounded
+Cache schema **v17** introduced the normalized session evidence: bounded
 first/last/peak/count input summaries, first/last/min/max/count window summaries and a fixed
 pressure histogram. A compatibility-only row may expose a numerator or denominator, but never a
 pressure ratio. The Usage projection reports coverage, distributions, policy counts, host splits
 and at most 20 attention rows.
+
+The current cache schema is **v18** because parser-time controlled Prompt facets cannot be
+reconstructed from the text-free cache. Reparse preserves the v17 Context evidence contract.
 
 ### 5. Context and Hooks are sibling Usage views
 
 The dashboard adds **Usage → Context** and **Usage → Hooks**.
 
 - Context reports first/last/peak input, effective-window evidence, pressure, policy bands,
-  coverage and capped attention rows. It never serves prompt text, tool payloads, commands or raw
-  paths.
+  coverage and capped attention rows. Those rows carry opaque session references plus sanitized
+  local labels, group client-side, and link to the existing authenticated transcript reader. A
+  recommendation is a policy result, not proof of a handoff or compaction. Context never serves
+  prompt bodies, tool payloads, commands or raw paths.
 - Hooks reports static configuration assurance separately from typed runtime outcomes. A configured
   Stop risk is not a failed Stop run; an absent outcome stream is `not-recorded`, never zero
   failures. Raw commands, stdout/stderr, hook context and secrets never reach the browser.
@@ -160,7 +165,8 @@ receipts remain separate evidence classes.
 Implemented:
 
 - canonical context budget policy and conservative ceiling resolver;
-- usage cache schema v17 with paired, bounded context evidence for Claude, Codex and OpenCode;
+- usage cache schema v17 context evidence, retained under current schema v18, with paired bounded
+  observations for Claude, Codex and OpenCode;
 - privacy-preserving Usage context projection with coverage, host splits and capped attention;
 - config-aware managed-guidance selection, exact byte accounting and per-target regression gates;
 - privacy-safe `ak audit context` coverage for managed guidance, skill metadata, MCP registration

@@ -34,6 +34,8 @@ host set plus source digests and exact version facts.
 - `HookOccurrence`: one event/matcher/handler at one source pointer.
 - `HookBehavior`: material execution identity shared only by genuinely equivalent
   occurrences.
+- `HookSourceReference`: opaque, short-lived Dashboard Delivery reference to one audited
+  physical locator; it is neither a filesystem path nor an authorization token.
 - `SchemaProfile`: exact host version, supported shape, units, defaults, limits, evidence
   and verification date.
 - `CoverageStatement`: complete/partial/unsupported plus concrete gaps.
@@ -79,6 +81,30 @@ manifests, not imported implementation modules.
 12. Mutation cannot change trust, consent, grants, generated copies, caches, opaque
     modules, JSONC, unsupported schemas or Windows targets.
 13. Receipt digests prove internal consistency, not authenticity against the same user.
+14. A dashboard action requires an exact executable healing action or a separately
+    verified published upstream URL; an authority class or review proposal alone is not
+    actionability.
+15. Source navigation resolves only a cached audited locator, rechecks containment and
+    digest, masks selected content server-side, and grants no edit or healing authority.
+
+## Dashboard read model
+
+The browser projection separates four evidence classes:
+
+- configured entries, distinct behaviors, repeated placements and source readability;
+- host-neutral definition groups with their physical placements and ownership evidence;
+- plain-language findings joined back to affected occurrences;
+- typed runtime receipts, or explicit `not-recorded` state.
+
+Repeated informational trust diagnostics collapse into one evidence-limit statement. A source
+reference is safe to show in the summary because it is HMAC-derived and expires with the in-memory
+audit cache. Resolving it is a separate authenticated read: the source is reopened through the
+bounded-file port, its digest must still match, and only a masked selected JSON definition is
+returned. Opaque formats are location-only. The client cannot supply a path or launch an editor.
+
+The read model keeps source navigation independent from remediation. It may describe why a finding
+is non-automatic, but it shows a next step only when the plan proves an executable occurrence-bound
+action or an independently verified published upstream issue.
 
 ## Host anti-corruption layers
 

@@ -51,14 +51,19 @@ outcome is not a context-window fact.
 The implemented projection is intentionally smaller than the conceptual aggregate:
 
 - `context-budget.mjs` owns the canonical thresholds and conservative ceiling resolver;
-- usage cache schema v17 owns bounded, paired per-session context evidence;
+- usage cache schema v17 introduced bounded, paired per-session context evidence; current schema
+  v18 reparses the same evidence while adding controlled Prompt telemetry facets;
 - `usage-context.mjs` owns the privacy-preserving Historical Usage projection;
 - `blocks.mjs` owns exact managed-guidance byte accounting and conservative estimates;
 - the supervised adapter runner owns typed runtime hook receipts;
 - `hook-read-model.mjs` joins static hook assurance and typed receipts without exposing their raw
   content.
 
-The Context projection is present in the Usage aggregate. Dashboard Delivery renders it directly
+The Context projection is present in the Usage aggregate. Its capped attention rows carry a
+deterministic opaque session reference and sanitized local project/conversation labels, then group
+client-side without changing the top-20 cap. The reference opens the existing authenticated local
+transcript reader. Policy recommendations name the threshold-derived next step; they do not claim a
+handoff or compaction event occurred. Dashboard Delivery renders the projection directly
 and exposes the sanitized Hook read model through a lazy, authenticated, 30-second cached,
 single-flight endpoint. That route does not create native runtime evidence: durable native-host
 outcome acquisition remains outside the implemented boundary.

@@ -88,7 +88,7 @@ An assistant entry with `isApiErrorMessage: true` is a **local placeholder**
 Claude Code writes when a request dies before a real completion (connection
 drop, rate limit, auth failure — `model: "<synthetic>"`, all-zero usage). It
 is real engaged time but not a model attempt: counted as an *exception*, never
-pushed into `models` or priced (`usage-parsers.mjs:626-647`; the full story is
+pushed into `models` or priced (`usage-parsers.mjs:623-662`; the full story is
 [`USAGE-SCORECARD-METRICS.md`](USAGE-SCORECARD-METRICS.md) §10). It is not a
 latency sample either — the pending window is deliberately left open, so the
 first *real* completion that eventually follows is what gets timed.
@@ -202,13 +202,18 @@ them (`usage-index.mjs:100-105`). v14 is the plain form of the rule once more �
 would read them as `undefined` for exactly the sessions already on disk
 (`usage-index.mjs:121-127`).
 
-Schema v17 applies the rule to context evidence. It retains bounded first/last/peak/count input
+Schema v17 applied the rule to context evidence. It retains bounded first/last/peak/count input
 summaries, bounded window summaries and a fixed pressure histogram. Codex decodes the compatible
 `last_token_usage` + `model_context_window` pair from each `token_count` observation; older cache
 rows cannot reconstruct snapshots the earlier parser discarded, so they reparse. Claude and
 OpenCode retain numerator-only evidence when no runtime window exists. The legacy
 `ctxLastTokens`/`ctxWindow` fields remain compatibility facts but do not establish pressure unless
 the normalized v17 evidence proves a pair.
+
+Schema v18 applies the rule to controlled Prompt telemetry facets. Earlier cache rows contain no
+parser-time intent/topic codes, and the aggregate cannot reconstruct them because it retains no
+prompt text. The reparse preserves the v17 context evidence contract while adding only optional
+closed-vocabulary facet codes to prompt fingerprints.
 
 ---
 
@@ -347,8 +352,8 @@ transcript content leaves the module, and every step is a gate:
 ### 4.2 Parse and price
 
 The file is parsed with `withTurns: true` by the provider's parser
-(`usage-index.mjs:929-934`), and `meta` is assembled by `sessionPayload`
-(`usage-aggregate.mjs:1256-1283`) with the same fields the Sessions view rows
+(`usage-index.mjs:1020-1027`), and `meta` is assembled by `sessionPayload`
+(`usage-aggregate.mjs:1309-1335`) with the same fields the Sessions view rows
 carry — `prompts`, `responses`, `exceptions`, `sidechain`, `threadSource`,
 `models`, `tools`, `skill`/`plugin`, worktree — plus a `cost` priced from the
 same per-model usage rows `aggregate()` uses.

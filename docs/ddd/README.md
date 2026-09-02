@@ -14,6 +14,7 @@ describe the current system unless a section is explicitly marked as future work
 | [Model lifecycle intelligence](model-lifecycle-intelligence.md) | Model identities, evidence dimensions, catalogue snapshots, lifecycle diff, and read-only impact plans |
 | [Hook configuration assurance](hook-configuration-assurance.md) | Host-neutral lifecycle source discovery, behavior identity, coverage, diagnostics, and remediation authority |
 | [Context budget intelligence](context-budget-intelligence.md) | Effective ceilings, pressure evidence, managed startup footprints, policy, and sanitized delivery |
+| [Prompt telemetry](prompt-telemetry.md) | Privacy-bounded prompt fingerprints, controlled semantic facets, recurring-cluster naming, and presentation rules |
 | [Observability](observability.md) | Evidence acquisition, observed-session aggregates, replay, and dashboard delivery |
 | [Project intelligence](project-intelligence.md) | Pattern store, learning counters, reasoning-graph size, and live delivery for Overview's Intelligence view |
 

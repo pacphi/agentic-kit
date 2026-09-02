@@ -35,8 +35,9 @@ second supported runtime line.
 ### 1. Main retains deterministic prompt evidence
 
 The scan path may retain only the prompt fingerprint contract: a normalized-text hash,
-token count, bounded token-hash sketch, provenance tag, and optional question/persona
-shape flags. It does not persist prompt text.
+token count, bounded token-hash sketch, provenance tag, optional question/persona shape
+flags, and optional codes from release-versioned controlled intent/topic vocabularies. It
+does not persist prompt text, excerpts, proper nouns, or unbounded extracted terms.
 
 The aggregate may derive:
 
@@ -44,7 +45,8 @@ The aggregate may derive:
 - per-host tap, question, persona, and length distributions;
 - trailing-history personal baselines;
 - exact repeats, near-duplicate recurring clusters, and re-asks;
-- deterministic seed or shape-characterized cluster labels;
+- deterministic persona labels, controlled semantic-majority labels, or honest
+  shape-characterized fallbacks;
 - the existing evidence-backed Prompts findings detectors.
 
 The dashboard keeps the Prompts tab for those read-only metrics. The CLI keeps
@@ -79,6 +81,26 @@ The only prompt-text path retained on main is the local, explicit `--deep` CLI p
 Removing `sampleSessionIds` also prevents the recurring-cluster projection from
 becoming a session-membership link surface. Aggregate rows retain counts, spans, host
 names, hashes, and deterministic labels needed to explain the metrics.
+
+### 3a. Contextual names require cluster evidence
+
+The parser assigns at most one controlled intent and one controlled topic code to a
+fingerprint. Cluster aggregation may publish a semantic facet only when it has at least
+two supporting members, covers at least 60% of the cluster, and has no tied alternative.
+An intent/topic composition is allowed only when that exact pair also clears the same
+support rule; independently common facets are never cross-composed into a phrase no
+member supported.
+
+Persona evidence retains precedence because the existing `o` flag is direct evidence.
+Broad token-shape seeds such as “release” or “commit and push” are retired: token length
+and punctuation do not establish subject matter. Unknown vocabulary remains
+`Unclassified`. The legacy binary `class` field is retained in JSON for compatibility,
+but the dashboard and CLI display the controlled **Intent** instead of presenting
+`other` as if it were a meaningful category.
+
+This changes cached parser output, so usage cache schema v18 forces a reparse. The
+semantic vocabulary is local, deterministic, closed, and network-free; it does not
+reintroduce model enrichment or mutable labeling.
 
 ### 4. The archive branch is immutable provenance
 
@@ -118,6 +140,8 @@ Tests pin the boundary at three levels:
   containers;
 - the CLI JSON payload contains deterministic telemetry and no coaching/enrichment
   projections;
+- cluster semantic labels require repeated, untied majority evidence and never expose
+  prompt text;
 - retired CLI flags are rejected.
 
 The existing parser, aggregate, clustering, detector, CLI, dashboard, privacy, and
