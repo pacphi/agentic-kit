@@ -18,10 +18,12 @@ Native Evidence ----> Evidence Acquisition ----> Canonical Evidence
                          |                         |                      |
                          v                         v                      v
                   Observability        Model Lifecycle Intelligence  Historical Usage
-                    |         |                    |                      |
-                    |         +----> Workspace     +----------------------+
+                    |         |                    |               \      |
+                    |         +----> Workspace     +------> Context Budget Intelligence
                     |                Snapshot Cache                       |
                     +-----------------------+----> Dashboard Delivery <----+
+                                                          ^
+                                      Hook Configuration Assurance -------+
                                                           ^
 Project State (.claude-flow/*) ----> Project Intelligence-+
 Local filesystem + process table ---> Machine Footprint --+
@@ -84,6 +86,17 @@ See [Observability](observability.md).
 Owns transcript indexing, session history, token and cost aggregation, classification, and usage
 findings. It may share a host-qualified session identity with Observability, but its aggregate and
 cache are separate from the live event store.
+
+### Context budget intelligence
+
+Owns compatible context-window evidence resolution, conservative startup/dynamic policy, context
+pressure decisions, and bounded context read models. It consumes runtime session evidence from
+Historical Usage and capacity candidates from Model Lifecycle Intelligence. It does not parse
+transcripts, publish model catalogues, execute hooks, mutate routes, or treat byte counts as
+observed tokens.
+
+See [Context budget intelligence](context-budget-intelligence.md) and
+[ADR-0042](../adr/0042-capability-aware-context-budget-intelligence.md).
 
 ### Model lifecycle intelligence
 
@@ -166,6 +179,11 @@ and credential policy is distinct from the offline-first dashboard and integrati
 | Integration management | Hook configuration assurance | Host identity and validated external adapter data; admission, consent, grants and execution stay upstream |
 | Project census | Hook configuration assurance | Explicit project roots for bounded source discovery; no project trust is inferred |
 | Native hook configuration | Hook configuration assurance | Host-specific anti-corruption providers produce normalized sources, occurrences, diagnostics and gaps |
+| Historical usage | Context budget intelligence | Bounded per-session first/last/peak token and runtime-window evidence; transcript ownership stays upstream |
+| Model lifecycle intelligence | Context budget intelligence | Capacity candidates with provenance; catalogue maximum is not active-session pressure |
+| Context budget intelligence | Routing and orchestration | Read-only budget decision for each materialized route attempt; launch authority stays downstream |
+| Context budget intelligence | Dashboard delivery | Sanitized bounded coverage, pressure, policy and attention read model |
+| Hook configuration assurance | Dashboard delivery | Sanitized static assurance and separately typed runtime outcomes; no hook execution |
 | Native evidence | Evidence acquisition | Source-specific anti-corruption adapters |
 | Evidence acquisition | Observability | Versioned canonical events |
 | Evidence acquisition | Historical usage | Normalized transcript and provider evidence |
@@ -217,6 +235,8 @@ observed before the split was made explicit.
 - Snapshot comparison requires stable scope and sufficient source completeness; degraded evidence
   never creates removal.
 - Historical usage and live topology share identifiers, not aggregate ownership.
+- Context pressure requires a token-compatible numerator and denominator. Unknown capacity, bytes,
+  stale evidence and external self-assertions never become a percentage or a zero.
 - Network egress occurs only in commands and contexts whose contract explicitly permits it.
 - Every project count is rendered with the scope that produced it; two contexts may report
   different totals, but neither may report an unexplained one.
