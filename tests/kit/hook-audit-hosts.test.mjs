@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash, generateKeyPairSync, sign as signEd25519 } from 'node:crypto';
 
 import { run as runAuditCommand } from '../../src/commands/audit.mjs';
 import { auditCodexHooks } from '../../src/lib/hook-audit/index.mjs';
@@ -64,6 +65,34 @@ if (!candidates.some(() => false)) {
   cmdArgs = ['-y', '--prefer-offline', 'agentic-qe', 'hooks', ...args];
 }
 `;
+}
+
+function rufloAutoMemorySource() {
+  return `
+const log = (msg) => console.log('[AutoMemory] ' + msg);
+const success = (msg) => console.log('[AutoMemory] ' + msg);
+async function doSync() { log('Syncing insights to auto memory files...'); success('Synced'); }
+const command = process.argv[2] || 'status';
+switch (command) { case 'sync': await doSync(); break; }
+process.exit(0);
+`;
+}
+
+function signedRufloManifest(helper, { digest = null, signature = null } = {}) {
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+  const manifest = {
+    version: '3.38.20',
+    files: { 'auto-memory-hook.mjs': digest ?? createHash('sha256').update(helper).digest('hex') },
+  };
+  const bytes = Buffer.from(JSON.stringify({ version: manifest.version, files: manifest.files }), 'utf8');
+  return {
+    document: {
+      manifest,
+      signature: signature ?? signEd25519(null, bytes, privateKey).toString('base64'),
+      algorithm: 'ed25519',
+    },
+    publicKey: publicKey.export({ type: 'spki', format: 'pem' }),
+  };
 }
 
 test('host-neutral audit reports each provider and never proposes automatic trust or execution', () => {
@@ -199,6 +228,122 @@ test('Codex profiles are exact and future syntax remains observable without opti
     assert.equal(report.records.length, 2);
     assert.equal(report.plan.length, 0);
     assert.ok(report.records.every((record) => record.timeout.effective === null));
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('Codex attributes exact Ruflo AutoMemory Stop stdout incompatibility without patch authority', () => {
+  const fx = fixture();
+  try {
+    const helper = rufloAutoMemorySource();
+    const helperDigest = createHash('sha256').update(helper).digest('hex');
+    const signed = signedRufloManifest(helper);
+    write(path.join(fx.project, '.codex', 'hooks.json'), {
+      hooks: { Stop: [{ hooks: [{
+        type: 'command',
+        command: 'sh -c \'D="${CLAUDE_PROJECT_DIR:-.}"; exec node "$D/.claude/helpers/auto-memory-hook.mjs" sync\'',
+        timeout: 10000,
+      }] }] },
+    });
+    write(path.join(fx.project, '.claude', 'helpers', 'auto-memory-hook.mjs'), helper);
+    write(path.join(fx.project, '.claude', 'helpers', 'helpers.manifest.json'), signed.document);
+
+    const report = auditCodexHooks({
+      codexHome: fx.codex, projectRoots: [fx.project],
+      pluginCacheDir: path.join(fx.codex, 'plugins', 'cache'), codexVersion: '0.152.1',
+      rufloHelpersPublicKey: signed.publicKey,
+    });
+    assert.equal(report.records.length, 1);
+    const diagnostic = report.records[0].diagnostics.find(
+      (item) => item.code === 'ruflo-codex-stop-output-not-json',
+    );
+    assert.equal(diagnostic.evidence.generatorVersion, '3.38.20');
+    assert.equal(diagnostic.evidence.helperDigest, helperDigest);
+    assert.equal(diagnostic.evidence.signatureVerified, true);
+    const action = report.plan.find((item) => item.diagnostic === diagnostic.code);
+    assert.equal(action.classification, 'upstream-required');
+    assert.equal(action.upstream.dependency, 'ruflo');
+    assert.equal(action.upstream.owner, 'ruvnet/ruflo');
+    assert.equal(report.summary.automaticActions, 0);
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('Codex does not infer Ruflo ownership when the helper manifest digest does not match', () => {
+  const fx = fixture();
+  try {
+    const helper = rufloAutoMemorySource();
+    const signed = signedRufloManifest(helper, { digest: '0'.repeat(64) });
+    write(path.join(fx.project, '.codex', 'hooks.json'), {
+      hooks: { Stop: [{ hooks: [{
+        type: 'command', command: 'node .claude/helpers/auto-memory-hook.mjs sync', timeout: 10,
+      }] }] },
+    });
+    write(path.join(fx.project, '.claude', 'helpers', 'auto-memory-hook.mjs'), helper);
+    write(path.join(fx.project, '.claude', 'helpers', 'helpers.manifest.json'), signed.document);
+    const report = auditCodexHooks({
+      codexHome: fx.codex, projectRoots: [fx.project],
+      pluginCacheDir: path.join(fx.codex, 'plugins', 'cache'), codexVersion: '0.152.1',
+      rufloHelpersPublicKey: signed.publicKey,
+    });
+    assert.ok(report.records[0].diagnostics.every(
+      (item) => item.code !== 'ruflo-codex-stop-output-not-json',
+    ));
+    assert.ok(report.plan.every((item) => item.upstream?.dependency !== 'ruflo'));
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('Codex does not infer Ruflo ownership from an invalid helper manifest signature', () => {
+  const fx = fixture();
+  try {
+    const helper = rufloAutoMemorySource();
+    const signed = signedRufloManifest(helper, { signature: Buffer.alloc(64).toString('base64') });
+    write(path.join(fx.project, '.codex', 'hooks.json'), {
+      hooks: { Stop: [{ hooks: [{
+        type: 'command', command: 'node .claude/helpers/auto-memory-hook.mjs sync', timeout: 10,
+      }] }] },
+    });
+    write(path.join(fx.project, '.claude', 'helpers', 'auto-memory-hook.mjs'), helper);
+    write(path.join(fx.project, '.claude', 'helpers', 'helpers.manifest.json'), signed.document);
+    const report = auditCodexHooks({
+      codexHome: fx.codex, projectRoots: [fx.project],
+      pluginCacheDir: path.join(fx.codex, 'plugins', 'cache'), codexVersion: '0.152.1',
+      rufloHelpersPublicKey: signed.publicKey,
+    });
+    assert.ok(report.records[0].diagnostics.every(
+      (item) => item.code !== 'ruflo-codex-stop-output-not-json',
+    ));
+    assert.ok(report.plan.every((item) => item.upstream?.dependency !== 'ruflo'));
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('Codex does not apply the Stop output contract to another lifecycle event', () => {
+  const fx = fixture();
+  try {
+    const helper = rufloAutoMemorySource();
+    const signed = signedRufloManifest(helper);
+    write(path.join(fx.project, '.codex', 'hooks.json'), {
+      hooks: { PostToolUse: [{ hooks: [{
+        type: 'command', command: 'node .claude/helpers/auto-memory-hook.mjs sync', timeout: 10,
+      }] }] },
+    });
+    write(path.join(fx.project, '.claude', 'helpers', 'auto-memory-hook.mjs'), helper);
+    write(path.join(fx.project, '.claude', 'helpers', 'helpers.manifest.json'), signed.document);
+    const report = auditCodexHooks({
+      codexHome: fx.codex, projectRoots: [fx.project],
+      pluginCacheDir: path.join(fx.codex, 'plugins', 'cache'), codexVersion: '0.152.1',
+      rufloHelpersPublicKey: signed.publicKey,
+    });
+    assert.ok(report.records[0].diagnostics.every(
+      (item) => item.code !== 'ruflo-codex-stop-output-not-json',
+    ));
+    assert.ok(report.plan.every((item) => item.upstream?.dependency !== 'ruflo'));
   } finally {
     fs.rmSync(fx.root, { recursive: true, force: true });
   }

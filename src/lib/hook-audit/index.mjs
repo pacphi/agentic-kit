@@ -3,7 +3,7 @@
 // plugin-cache generations are outside agentic-kit's automatic authority.
 import path from 'node:path';
 import os from 'node:os';
-import { createHash } from 'node:crypto';
+import { createHash, verify as verifySignature } from 'node:crypto';
 
 import { inspectCodexPlugins } from '../codex-plugins.mjs';
 import { readBoundedFile, redactCommand, stableJson } from './common.mjs';
@@ -44,6 +44,17 @@ const CODEX_PROFILES = new Map();
 CODEX_PROFILES.set('0.151.0', SCHEMA_0151);
 CODEX_PROFILES.set('0.152.1', SCHEMA_01521);
 const CODEX_HANDLER_TYPES = new Set(['command', 'mcp_tool', 'prompt', 'agent']);
+const RUFLO_AUTO_MEMORY_RELATIVE = path.join('.claude', 'helpers', 'auto-memory-hook.mjs');
+const RUFLO_HELPERS_MANIFEST_RELATIVE = path.join('.claude', 'helpers', 'helpers.manifest.json');
+const RUFLO_AUTO_MEMORY_COMMAND = /\.claude[\\/]helpers[\\/]auto-memory-hook\.mjs(?:["']|\s|$)/;
+// Ruflo helper-signing trust root, rotated in v3.29.0. Keep this pin aligned
+// with upstream helper-signing.js; a version/digest match is not provenance.
+const RUFLO_HELPERS_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAyLl9cG+V/C+ffKWaSwvOsHdXSWmB5e3x1z9NUNvq6Ys=
+-----END PUBLIC KEY-----`;
+const RUFLO_UPSTREAM = Object.freeze({
+  dependency: 'ruflo', owner: 'ruvnet/ruflo', publication: 'explicit-user-approval-required',
+});
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 const pointerPart = (value) => String(value).replaceAll('~', '~0').replaceAll('/', '~1');
@@ -221,7 +232,58 @@ function timeoutFacts(event, hook, schema) {
   };
 }
 
-function diagnosticsFor(event, matcher, hook, source, command, schema) {
+function canonicalRufloManifestBytes(manifest) {
+  if (!isRecord(manifest) || typeof manifest.version !== 'string' || !isRecord(manifest.files)) {
+    return null;
+  }
+  const files = {};
+  for (const key of Object.keys(manifest.files).sort()) {
+    if (typeof manifest.files[key] !== 'string') return null;
+    files[key] = manifest.files[key];
+  }
+  return Buffer.from(JSON.stringify({ version: manifest.version, files }), 'utf8');
+}
+
+function verifiedRufloManifest(text, publicKey) {
+  try {
+    const signed = JSON.parse(text);
+    if (signed?.algorithm !== 'ed25519' || typeof signed.signature !== 'string') return null;
+    const bytes = canonicalRufloManifestBytes(signed.manifest);
+    if (!bytes) return null;
+    const signature = Buffer.from(signed.signature, 'base64');
+    if (signature.length !== 64 || !verifySignature(null, bytes, publicKey, signature)) return null;
+    return signed.manifest;
+  } catch {
+    return null;
+  }
+}
+
+function inspectRufloAutoMemoryStop(source, command, schema, helpersPublicKey) {
+  if (schema.confidence !== 'verified' || !RUFLO_AUTO_MEMORY_COMMAND.test(command)
+      || !/\bsync\b/.test(command)) return null;
+  const root = source.baseDir ?? source.projectPath;
+  if (typeof root !== 'string') return null;
+  const helperFile = path.join(root, RUFLO_AUTO_MEMORY_RELATIVE);
+  const helper = readBoundedFile(helperFile, root);
+  if (helper.status !== 'valid') return null;
+  const exactOutputShape = /const\s+log\s*=\s*\(msg\)\s*=>\s*console\.log/.test(helper.text)
+    && /async\s+function\s+doSync\(\)\s*\{\s*log\(/.test(helper.text)
+    && helper.text.includes("case 'sync': await doSync()")
+    && helper.text.includes('process.exit(0)');
+  if (!exactOutputShape) return null;
+  const manifestFile = path.join(root, RUFLO_HELPERS_MANIFEST_RELATIVE);
+  const manifestRead = readBoundedFile(manifestFile, root);
+  if (manifestRead.status !== 'valid') return null;
+  const manifest = verifiedRufloManifest(manifestRead.text, helpersPublicKey);
+  const declaredDigest = manifest?.files?.['auto-memory-hook.mjs'];
+  if (declaredDigest !== helper.digest) return null;
+  return {
+    helperFile, helperDigest: helper.digest, manifestDigest: manifestRead.digest,
+    generatorVersion: manifest.version, signatureVerified: true,
+  };
+}
+
+function diagnosticsFor(event, matcher, hook, source, command, schema, helpersPublicKey) {
   const diagnostics = [];
   const maximum = schema.eventTimeouts?.[event]?.maximum ?? null;
   if (typeof hook.timeout === 'number' && maximum !== null && hook.timeout > maximum) {
@@ -255,6 +317,22 @@ function diagnosticsFor(event, matcher, hook, source, command, schema) {
       message: 'Command uses a shell wrapper and requires human review of expansion, cwd, and environment behavior',
     });
   }
+  if (event === 'Stop') {
+    const autoMemory = inspectRufloAutoMemoryStop(source, command, schema, helpersPublicKey);
+    if (autoMemory) diagnostics.push({
+      category: 'compatibility', severity: 'warning',
+      code: 'ruflo-codex-stop-output-not-json',
+      message: 'Ruflo AutoMemory writes human-readable status lines where Codex Stop accepts only an empty response or valid hook JSON',
+      target: autoMemory.helperFile,
+      evidence: {
+        helperDigest: autoMemory.helperDigest,
+        manifestDigest: autoMemory.manifestDigest,
+        generatorVersion: autoMemory.generatorVersion,
+        signatureVerified: autoMemory.signatureVerified,
+        outputMode: 'human-readable-stdout',
+      },
+    });
+  }
   diagnostics.push({
     category: 'trust', severity: 'info', code: 'trust-independent',
     message: 'Compatibility and security findings do not establish Codex hook trust',
@@ -262,7 +340,7 @@ function diagnosticsFor(event, matcher, hook, source, command, schema) {
   return diagnostics;
 }
 
-function recordsFromSource(source, codexVersion, schema) {
+function recordsFromSource(source, codexVersion, schema, helpersPublicKey) {
   if (source.status !== 'valid') return [];
   const posture = sourcePosture(source);
   const records = [];
@@ -337,7 +415,7 @@ function recordsFromSource(source, codexVersion, schema) {
           occurrenceId,
           diagnostics: diagnosticsFor(
             event, Object.hasOwn(group, 'matcher') ? group.matcher : undefined,
-            hook, source, rawCommand, schema,
+            hook, source, rawCommand, schema, helpersPublicKey,
           ),
         });
       });
@@ -382,6 +460,25 @@ function planFor(records) {
       trustImpact: 'agentic-kit does not mutate trust, but changed bytes and shifted handler indexes may invalidate Codex review state and require re-review',
     });
   }
+  for (const record of records.filter((candidate) => candidate.diagnostics.some(
+    (diagnostic) => diagnostic.code === 'ruflo-codex-stop-output-not-json',
+  ))) {
+    const diagnostic = record.diagnostics.find(
+      (candidate) => candidate.code === 'ruflo-codex-stop-output-not-json',
+    );
+    actions.push({
+      id: `codex-hook-ruflo-stop-output-${record.occurrenceId.slice(0, 24)}`,
+      diagnostic: diagnostic.code,
+      target: diagnostic.target,
+      sourceDigest: diagnostic.evidence.helperDigest,
+      configurationSourceDigest: record.source.digest,
+      classification: 'upstream-required',
+      reason: 'The exact Ruflo-generated helper and manifest prove canonical generator ownership; agentic-kit must not rewrite generated project hook state.',
+      behaviorImpact: 'The generator must keep diagnostics off Codex Stop stdout and emit only a host-valid response.',
+      trustImpact: 'A regenerated project hook requires Codex to re-evaluate the changed definition.',
+      upstream: RUFLO_UPSTREAM,
+    });
+  }
   return actions.sort((a, b) => a.id.localeCompare(b.id));
 }
 
@@ -391,6 +488,7 @@ export function auditCodexHooks({
   projectRoots = [process.cwd()],
   pluginCacheDir = path.join(codexHome, 'plugins', 'cache'),
   codexVersion = 'unknown',
+  rufloHelpersPublicKey = RUFLO_HELPERS_PUBLIC_KEY,
 } = {}) {
   const schema = schemaFor(codexVersion);
   const sources = [];
@@ -441,7 +539,9 @@ export function auditCodexHooks({
   }
 
   sources.sort((a, b) => a.file.localeCompare(b.file));
-  const records = sources.flatMap((source) => recordsFromSource(source, codexVersion, schema))
+  const records = sources.flatMap((source) => recordsFromSource(
+    source, codexVersion, schema, rufloHelpersPublicKey,
+  ))
     .sort((a, b) => a.source.file.localeCompare(b.source.file)
       || a.event.localeCompare(b.event)
       || a.indices.group - b.indices.group
@@ -481,6 +581,7 @@ export function auditCodexHooks({
       automaticActions: plan.filter((action) => action.classification === 'automatic').length,
       approvalRequiredActions: plan.filter((action) => action.classification === 'approval-required').length,
       neverAutomaticActions: plan.filter((action) => action.classification === 'never-automatic').length,
+      upstreamRequiredActions: plan.filter((action) => action.classification === 'upstream-required').length,
     },
   };
 }

@@ -67,17 +67,21 @@ test('Hooks uses semantic tables, visible definitions, and evidence-gated action
   for (const heading of ['Lifecycle point', 'Definition', 'Host', 'Configured in', 'Placements', 'Findings']) {
     assert.match(JS, new RegExp(`<th scope="col">${heading}<\\/th>`));
   }
-  for (const heading of ['Importance', 'Finding', 'Lifecycle point', 'Host', 'Affected definitions', 'Owner', 'Next step']) {
+  for (const heading of ['Lifecycle point', 'Host', 'Configured in', 'Evidence', 'Action']) {
     assert.match(JS, new RegExp(`<th scope="col">${heading}<\\/th>`));
   }
+  assert.match(JS, /<details class="hook-finding-group"/);
+  assert.match(JS, /<span>Importance<\/span><span>Finding<\/span><span>Affected definitions<\/span>/);
+  assert.match(JS, /data-hook-importance="all"[^>]*aria-pressed="true"/);
+  assert.match(JS, /role="status" aria-live="polite"/);
   assert.match(PAGE, /What is configured/);
   assert.match(PAGE, /Hook definitions/);
   assert.match(PAGE, /Findings needing attention/);
   assert.doesNotMatch(PAGE, /<h2>Evidence limits<\/h2>/,
     'generic evidence limits belong beside the affected measurement, not in a filler panel');
   assert.match(JS, /Preview repair/);
-  assert.match(JS, /finding\.action\?/,
-    'the renderer must not fabricate an action for every finding');
+  assert.match(JS, /var action=placement\.action/,
+    'actions remain joined to exact affected placements, never promoted to an entire finding');
   assert.doesNotMatch(JS, /host\|\|"unknown"\)\+' × '/,
     'host × count is not meaningful occurrence language');
   assert.match(CSS, /\.hook-table-wrap[^}]*overflow-x:auto/);
@@ -172,13 +176,13 @@ test('/api/hooks is authenticated, lazy, sanitized, cached, single-flight, and h
     assert.deepEqual(JSON.parse(first.body), JSON.parse(second.body));
 
     const payload = JSON.parse(first.body);
-    assert.equal(payload.schemaVersion, 2);
+    assert.equal(payload.schemaVersion, 3);
     assert.equal(payload.summary.configuredEntries, 1);
     assert.equal(payload.summary.distinctBehaviors, 1);
     assert.equal(payload.summary.executions, 1);
     assert.equal(payload.summary.failures, 1);
-    assert.equal(payload.findings[0].lifecyclePoint, 'Stop');
-    assert.equal(payload.findings[0].action, null,
+    assert.equal(payload.findings[0].placements[0].lifecyclePoint, 'Stop');
+    assert.equal(payload.findings[0].placements[0].action, null,
       'a provider proposal is not presented as an action without an executable healing plan');
     assert.equal(payload.runtime.recent[0].verb, 'Stop');
     assert.equal(first.body.includes(secret), false, 'paths, commands, output, and diagnostic prose stay server-side');

@@ -43,6 +43,11 @@ const FINDINGS = Object.freeze({
     title: 'Timeout units may be incorrect',
     explanation: 'The declared Claude timeout is unusually high and may have been authored as milliseconds instead of seconds.',
   }),
+  'ruflo-codex-stop-output-not-json': Object.freeze({
+    groupId: 'codex-stop-output-contract',
+    title: 'Stop output is not host-compatible',
+    explanation: 'This generated Ruflo AutoMemory handler writes human-readable status lines to Codex Stop stdout, where the host requires an empty response or one valid hook JSON object.',
+  }),
   'session-end-timeout-clamped': Object.freeze({
     title: 'Declared timeout exceeds the host limit',
     explanation: 'Codex applies a lower effective timeout than this SessionEnd definition declares.',
@@ -54,6 +59,10 @@ const FINDINGS = Object.freeze({
   'target-host-compatibility-unproven': Object.freeze({
     title: 'Target-host compatibility is not proven',
     explanation: 'The external adapter contract does not establish a compatible target host and version for this definition.',
+  }),
+  'trust-independent': Object.freeze({
+    title: 'Runtime selection and trust are not established',
+    explanation: 'Static configuration inspection does not prove that the host selected, trusted, or executed this definition.',
   }),
 });
 
@@ -67,8 +76,11 @@ export function presentHookFinding(code) {
 }
 
 export function upstreamConstraintIdFor(code) {
-  return ['aqe-npx-hot-path-fallback', 'aqe-claude-timeout-unit-mismatch'].includes(code)
-    ? 'agentic-qe-3.14.0-stop-hook-generator' : null;
+  if ([
+    'aqe-npx-hot-path-fallback', 'aqe-claude-timeout-unit-mismatch',
+  ].includes(code)) return 'agentic-qe-3.14.0-stop-hook-generator';
+  if (code === 'ruflo-codex-stop-output-not-json') return 'ruflo-3.38.20-stop-output-contract';
+  return null;
 }
 
 export function hookSourceLabel(source = {}) {

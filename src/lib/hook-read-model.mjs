@@ -15,6 +15,10 @@ const OUTCOMES = new Set([
   'success', 'nonzero-exit', 'signal-exit', 'spawn-failed', 'timed-out', 'integrity-rejected',
 ]);
 
+const IMPORTANCE = Object.freeze({
+  critical: 0, error: 0, fail: 0, warning: 1, warn: 1, review: 2, info: 3, unknown: 4,
+});
+
 function safeLabel(value, fallback = 'unknown') {
   if (typeof value !== 'string') return fallback;
   const cleaned = [...value].filter((character) => {
@@ -123,33 +127,65 @@ function dispositionFor(proposal) {
   return 'No evidence-backed action';
 }
 
+function importanceRank(value) {
+  return IMPORTANCE[String(value ?? 'unknown').toLowerCase()] ?? IMPORTANCE.unknown;
+}
+
+function findingPlacement({ record, host, occurrenceId, placement, code, presentation, proposal, action }) {
+  return {
+    occurrenceId,
+    lifecyclePoint: safeLabel(record?.event),
+    host,
+    source: placement.source,
+    owner: proposal?.upstream?.owner ? safeLabel(proposal.upstream.owner) : placement.owner,
+    authority: placement.authority,
+    selectionState: placement.selectionState,
+    generatedStatus: placement.generatedStatus,
+    code,
+    evidence: presentation.explanation,
+    disposition: action ? null : dispositionFor(proposal),
+    action,
+  };
+}
+
 function addRecordDiagnostics({
-  record, report, host, occurrenceId, group, placement, findingGroups, actions, healingPlan,
+  record, report, host, occurrenceId, group, placement, findingGroups, observationGroups,
+  actions, healingPlan,
 }) {
   for (const diagnostic of Array.isArray(record?.diagnostics) ? record.diagnostics : []) {
     const code = safeLabel(diagnostic?.code);
-    if (code === 'trust-independent') continue;
-    const findingId = `${host}:${safeLabel(record?.event)}:${code}`;
     const proposal = proposalFor(report, record, diagnostic);
-    let finding = findingGroups.get(findingId);
-    if (!finding) {
-      const presentation = presentHookFinding(code);
-      finding = {
-        findingId, code, title: presentation.title, explanation: presentation.explanation,
-        severity: safeLabel(diagnostic?.severity), category: safeLabel(diagnostic?.category),
-        host, lifecyclePoint: safeLabel(record?.event), affectedOccurrenceIds: [],
-        affectedDefinitions: 0,
-        owner: proposal?.upstream?.owner ? safeLabel(proposal.upstream.owner) : hookOwnerLabel(record?.source),
-        disposition: dispositionFor(proposal), action: null,
-      };
-      findingGroups.set(findingId, finding);
-    }
-    finding.affectedOccurrenceIds.push(occurrenceId);
-    finding.affectedDefinitions += 1;
-    finding.action ??= actions.get(record?.occurrenceId)
+    const presentation = presentHookFinding(code);
+    const findingId = safeLabel(presentation.groupId, code);
+    const severity = safeLabel(diagnostic?.severity);
+    const action = actions.get(record?.occurrenceId)
       ?? publishedUpstreamAction(healingPlan, proposal, code) ?? null;
-    placement.findingIds.push(findingId);
-    if (!group.findingIds.includes(findingId)) group.findingIds.push(findingId);
+    const observationsOnly = ['info', 'unknown'].includes(severity.toLowerCase()) && !proposal && !action;
+    const target = observationsOnly ? observationGroups : findingGroups;
+    let finding = target.get(findingId);
+    if (!finding) {
+      finding = {
+        findingId, code, codes: [], title: presentation.title, explanation: presentation.explanation,
+        severity, categories: [], affectedOccurrenceIds: [], affectedDefinitions: 0,
+        placements: [],
+      };
+      target.set(findingId, finding);
+    }
+    if (importanceRank(severity) < importanceRank(finding.severity)) finding.severity = severity;
+    if (!finding.codes.includes(code)) finding.codes.push(code);
+    const category = safeLabel(diagnostic?.category);
+    if (!finding.categories.includes(category)) finding.categories.push(category);
+    if (!finding.affectedOccurrenceIds.includes(occurrenceId)) {
+      finding.affectedOccurrenceIds.push(occurrenceId);
+      finding.placements.push(findingPlacement({
+        record, host, occurrenceId, placement, code, presentation, proposal, action,
+      }));
+      finding.affectedDefinitions = finding.affectedOccurrenceIds.length;
+    }
+    const placementIds = observationsOnly ? placement.observationIds : placement.findingIds;
+    const groupIds = observationsOnly ? group.observationIds : group.findingIds;
+    placementIds.push(findingId);
+    if (!groupIds.includes(findingId)) groupIds.push(findingId);
   }
 }
 
@@ -159,6 +195,7 @@ function staticFacts(audit, options = {}) {
   const reports = audit?.reports && typeof audit.reports === 'object' ? audit.reports : {};
   const groups = new Map();
   const findingGroups = new Map();
+  const observationGroups = new Map();
   const actions = executableActions(healingPlan);
   let sourcesInspected = 0;
   let unreadableSources = 0;
@@ -184,7 +221,7 @@ function staticFacts(audit, options = {}) {
             async: record?.handler?.async === true,
             sideEffectSignals: (Array.isArray(record?.sideEffects) ? record.sideEffects : []).slice(0, 8).map((item) => safeLabel(item)),
           },
-          placements: [], findingIds: [],
+          placements: [], findingIds: [], observationIds: [],
         };
         groups.set(behaviorId, group);
       }
@@ -196,10 +233,11 @@ function staticFacts(audit, options = {}) {
         source: { ref, label: hookSourceLabel(record?.source), kind: safeLabel(record?.source?.sourceKind) },
         owner: hookOwnerLabel(record?.source), authority: safeLabel(record?.source?.authority, 'not established'),
         generatedStatus: safeLabel(record?.source?.generatedStatus, 'unknown'),
-        selectionState: selectionState(record?.selected), findingIds: [],
+        selectionState: selectionState(record?.selected), findingIds: [], observationIds: [],
       };
       addRecordDiagnostics({
-        record, report, host, occurrenceId, group, placement, findingGroups, actions, healingPlan,
+        record, report, host, occurrenceId, group, placement, findingGroups, observationGroups,
+        actions, healingPlan,
       });
       group.placements.push(placement);
     }
@@ -208,9 +246,25 @@ function staticFacts(audit, options = {}) {
   const definitionGroups = [...groups.values()].sort((a, b) => (
     a.host.localeCompare(b.host) || a.lifecyclePoint.localeCompare(b.lifecyclePoint) || a.behaviorId.localeCompare(b.behaviorId)
   ));
-  const findings = [...findingGroups.values()].sort((a, b) => (
-    a.host.localeCompare(b.host) || a.lifecyclePoint.localeCompare(b.lifecyclePoint) || a.code.localeCompare(b.code)
-  ));
+  const finalizeFinding = (finding) => ({
+    ...finding,
+    codes: [...finding.codes].sort(),
+    categories: [...finding.categories].sort(),
+    affectedOccurrenceIds: [...finding.affectedOccurrenceIds].sort(),
+    placements: [...finding.placements].sort((a, b) => (
+      a.host.localeCompare(b.host)
+      || a.lifecyclePoint.localeCompare(b.lifecyclePoint)
+      || a.occurrenceId.localeCompare(b.occurrenceId)
+    )),
+  });
+  const sortFindings = (a, b) => (
+    importanceRank(a.severity) - importanceRank(b.severity)
+    || b.affectedDefinitions - a.affectedDefinitions
+    || a.title.localeCompare(b.title)
+    || a.findingId.localeCompare(b.findingId)
+  );
+  const findings = [...findingGroups.values()].map(finalizeFinding).sort(sortFindings);
+  const observations = [...observationGroups.values()].map(finalizeFinding).sort(sortFindings);
   const configuredEntries = definitionGroups.reduce((count, group) => count + group.placements.length, 0);
   const evidenceLimits = [{
     code: 'static-not-runtime',
@@ -221,9 +275,10 @@ function staticFacts(audit, options = {}) {
       sourcesInspected, unreadableSources, configuredEntries,
       distinctBehaviors: definitionGroups.length,
       repeatedPlacements: Math.max(0, configuredEntries - definitionGroups.length),
-      findingsNeedingAttention: findings.length, evidenceLimits: evidenceLimits.length,
+      findingsNeedingAttention: findings.length, observations: observations.length,
+      evidenceLimits: evidenceLimits.length,
     },
-    definitionGroups, findings, coverageByHost, evidenceLimits,
+    definitionGroups, findings, observations, coverageByHost, evidenceLimits,
   };
 }
 
@@ -268,11 +323,11 @@ export function buildHookDashboardReadModel({
   const facts = staticFacts(audit, { healingPlan, sourceRef });
   const runtime = runtimeFacts(receipts);
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     summary: {
       ...facts.summary, executions: runtime.executions, failures: runtime.failures, timeouts: runtime.timeouts,
     },
-    definitionGroups: facts.definitionGroups, findings: facts.findings,
+    definitionGroups: facts.definitionGroups, findings: facts.findings, observations: facts.observations,
     coverageByHost: facts.coverageByHost, evidenceLimits: facts.evidenceLimits,
     runtime: runtime.model,
   };

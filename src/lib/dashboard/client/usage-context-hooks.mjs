@@ -176,25 +176,56 @@ import { authHeaders, esc } from './bootstrap.mjs';
       +'</tr></thead><tbody>'+rows+'</tbody></table></div>';
   }
 
-  function hookFindingTable(findings){
-    if(!findings.length)return '<div class="empty">No actionable configuration finding was recorded. This does not prove runtime success.</div>';
-    var rows=findings.map(function(finding){
-      var action=finding.action?(finding.action.href
-        ?'<a class="hook-upstream-link" href="'+esc(finding.action.href)+'" target="_blank" rel="noreferrer">'+esc(finding.action.label||"View upstream issue")+'</a>'
-        :'<span class="hook-action"><b>'+esc(finding.action.label||"Preview repair")+'</b>'
-          +'<code>ak heal hooks --host '+esc(finding.host||"all")+'</code></span>')
-        :'<span class="hook-no-action">'+esc(finding.disposition||"No evidence-backed action")+'</span>';
-      return '<tr><td><span class="hook-sev">'+esc(finding.severity||"unknown")+'</span></td>'
-        +'<th scope="row"><b>'+esc(finding.title||"Finding")+'</b><small>'+esc(finding.explanation||"")
-        +' · code '+esc(finding.code||"unknown")+'</small></th><td>'+esc(finding.lifecyclePoint||"unknown")+'</td>'
-        +'<td>'+esc(finding.host||"unknown")+'</td><td class="tnum">'+esc(finding.affectedDefinitions||0)
-        +' definition'+(finding.affectedDefinitions===1?'':'s')+'</td><td>'+esc(finding.owner||"Not established")+'</td><td>'+action+'</td></tr>';
+  function hookFindingAction(placement){
+    var action=placement.action;
+    if(action&&action.href)return '<a class="hook-upstream-link" href="'+esc(action.href)+'" target="_blank" rel="noreferrer">'+esc(action.label||"View upstream issue")+'</a>';
+    if(action)return '<span class="hook-action"><b>'+esc(action.label||"Preview repair")+'</b>'
+      +'<code>ak heal hooks --host '+esc(placement.host||"all")+'</code></span>';
+    return '<span class="hook-no-action">'+esc(placement.disposition||"No evidence-backed action")+'</span>';
+  }
+
+  function hookFindingPlacementTable(finding){
+    var placements=Array.isArray(finding.placements)?finding.placements:[];
+    var rows=placements.map(function(placement){
+      var source=placement.source||{},sourceControl=source.ref
+        ?'<button type="button" class="hook-source-button" data-hook-source="'+esc(source.ref)+'">Inspect source</button>'
+        :'<span class="hook-no-source">Location unavailable</span>';
+      return '<tr><th scope="row">'+esc(placement.lifecyclePoint||"unknown")+'</th><td>'+esc(placement.host||"unknown")+'</td>'
+        +'<td><b>'+esc(source.label||"Configuration source")+'</b><small>'+sourceControl+'</small></td>'
+        +'<td>'+esc(placement.evidence||finding.explanation||"Evidence recorded")+'<small>Owner: '+esc(placement.owner||"Not established")
+        +' · selection: '+esc(placement.selectionState||"not determined")+'</small></td><td>'+hookFindingAction(placement)+'</td></tr>';
     }).join("");
-    return '<div class="hook-table-wrap" role="region" aria-label="Hook findings needing attention" tabindex="0"><table class="hook-table hook-findings-table">'
-      +'<caption class="sr-only">Static hook configuration findings and evidence-bound next steps.</caption><thead><tr>'
-      +'<th scope="col">Importance</th><th scope="col">Finding</th><th scope="col">Lifecycle point</th><th scope="col">Host</th>'
-      +'<th scope="col">Affected definitions</th><th scope="col">Owner</th><th scope="col">Next step</th>'
+    return '<div class="hook-table-wrap hook-finding-placement-wrap" role="region" aria-label="Affected definitions for '+esc(finding.title||"hook finding")+'" tabindex="0">'
+      +'<table class="hook-table hook-finding-placement-table"><caption class="sr-only">Physical hook placements affected by this finding.</caption><thead><tr>'
+      +'<th scope="col">Lifecycle point</th><th scope="col">Host</th><th scope="col">Configured in</th><th scope="col">Evidence</th><th scope="col">Action</th>'
       +'</tr></thead><tbody>'+rows+'</tbody></table></div>';
+  }
+
+  function hookObservationMarkup(observations){
+    observations=Array.isArray(observations)?observations:[];
+    return observations.length?'<details class="hook-observations"><summary>Observations, not actions ('+esc(observations.length)+')</summary><ul>'
+      +observations.map(function(observation){return '<li><b>'+esc(observation.title||"Observation")+'</b><span>'+esc(observation.explanation||"")
+        +' · '+esc(observation.affectedDefinitions||0)+' affected definition'+(observation.affectedDefinitions===1?'':'s')+'</span></li>';}).join("")+'</ul></details>':'';
+  }
+
+  function hookFindingTable(findings,observations){
+    observations=Array.isArray(observations)?observations:[];
+    if(!findings.length)return '<div class="empty">No configuration finding needing attention was recorded. This does not prove runtime success.</div>'+hookObservationMarkup(observations);
+    var severities=[];findings.forEach(function(finding){var severity=String(finding.severity||"unknown").toLowerCase();if(severities.indexOf(severity)<0)severities.push(severity);});
+    var filters=severities.length>1?'<div class="hook-finding-filters" role="group" aria-label="Filter hook findings by importance">'
+      +'<button type="button" class="chipf on" data-hook-importance="all" aria-pressed="true">All</button>'
+      +severities.map(function(severity){return '<button type="button" class="chipf" data-hook-importance="'+esc(severity)+'" aria-pressed="false">'+esc(severity)+'</button>';}).join("")+'</div>':'';
+    var groups=findings.map(function(finding){
+      var count=Number(finding.affectedDefinitions)||0,codes=Array.isArray(finding.codes)?finding.codes:[finding.code||"unknown"];
+      return '<details class="hook-finding-group" data-hook-finding-importance="'+esc(String(finding.severity||"unknown").toLowerCase())+'"><summary>'
+        +'<span class="chev hook-finding-chevron" aria-hidden="true">&rsaquo;</span><span class="hook-sev">'+esc(finding.severity||"unknown")+'</span>'
+        +'<span class="hook-finding-copy"><b>'+esc(finding.title||"Finding")+'</b><small>'+esc(finding.explanation||"")
+        +' · code'+(codes.length===1?' ':'s ')+esc(codes.join(", "))+'</small></span><span class="hook-finding-count tnum">'
+        +esc(count)+' affected definition'+(count===1?'':'s')+'</span></summary>'+hookFindingPlacementTable(finding)+'</details>';
+    }).join("");
+    return filters+'<p class="hook-finding-filter-status" role="status" aria-live="polite">Showing all '+esc(findings.length)+' findings.</p>'
+      +'<div class="hook-finding-head" aria-hidden="true"><span></span><span>Importance</span><span>Finding</span><span>Affected definitions</span></div>'
+      +'<div class="hook-finding-groups">'+groups+'</div>'+hookObservationMarkup(observations);
   }
 
   function hookRuntimeTable(runtime){
@@ -281,6 +312,17 @@ import { authHeaders, esc } from './bootstrap.mjs';
     if(elements.panel.getAttribute("data-hook-source-wired")==="true")return;
     elements.panel.setAttribute("data-hook-source-wired","true");
     elements.panel.addEventListener("click",function(event){
+      var filter=event.target&&event.target.closest?event.target.closest("[data-hook-importance]"):null;
+      if(filter){
+        event.preventDefault();
+        var importance=filter.getAttribute("data-hook-importance")||"all";
+        var buttons=elements.panel.querySelectorAll("[data-hook-importance]");
+        for(var i=0;i<buttons.length;i++){var selected=buttons[i].getAttribute("data-hook-importance")===importance;buttons[i].setAttribute("aria-pressed",selected?"true":"false");buttons[i].classList.toggle("on",selected);}
+        var groups=elements.panel.querySelectorAll("[data-hook-finding-importance]"),shown=0;
+        for(var j=0;j<groups.length;j++){var visible=importance==="all"||groups[j].getAttribute("data-hook-finding-importance")===importance;groups[j].hidden=!visible;if(visible)shown++;}
+        var status=elements.panel.querySelector(".hook-finding-filter-status");if(status)status.textContent=importance==="all"?"Showing all "+shown+" findings.":"Showing "+shown+" "+importance+" finding"+(shown===1?".":"s.");
+        return;
+      }
       var button=event.target&&event.target.closest?event.target.closest("[data-hook-source]"):null;
       if(button){event.preventDefault();showHookSource(button.getAttribute("data-hook-source")||"");}
     });
@@ -308,7 +350,7 @@ import { authHeaders, esc } from './bootstrap.mjs';
       +hookKpi("unreadable sources",summary.unreadableSources||0,(summary.sourcesInspected||0)+" inspected")+'</div>';
     elements.stop.innerHTML=hookDefinitionTable(groups);
     elements.runtime.innerHTML=hookRuntimeTable(model.runtime||null);
-    elements.diagnostics.innerHTML=hookFindingTable(findings);
+    elements.diagnostics.innerHTML=hookFindingTable(findings,Array.isArray(model.observations)?model.observations:[]);
     if(elements.status)elements.status.textContent="Hook configuration evidence loaded. Runtime outcomes are reported separately.";
   }
 

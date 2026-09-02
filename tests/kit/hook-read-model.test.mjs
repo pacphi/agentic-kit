@@ -34,11 +34,11 @@ test('hook read model aggregates audit and runtime receipts without exposing com
     }],
   });
 
-  assert.equal(model.schemaVersion, 2);
+  assert.equal(model.schemaVersion, 3);
   assert.deepEqual(model.summary, {
     sourcesInspected: 1, unreadableSources: 0,
     configuredEntries: 1, distinctBehaviors: 1, repeatedPlacements: 0,
-    findingsNeedingAttention: 1, evidenceLimits: 1,
+    findingsNeedingAttention: 1, observations: 0, evidenceLimits: 1,
     executions: 1, failures: 1, timeouts: 1,
   });
   assert.equal(model.runtime.byHost[0].host, 'hermes[31m');
@@ -52,7 +52,7 @@ test('hook read model aggregates audit and runtime receipts without exposing com
   assert.equal(model.definitionGroups[0].placements[0].source.label, 'Project configuration');
   assert.equal(model.findings[0].title, 'Hook may resolve a package when it runs');
   assert.equal(model.findings[0].affectedDefinitions, 1);
-  assert.equal(model.findings[0].action, null,
+  assert.equal(model.findings[0].placements[0].action, null,
     'an upstream-required proposal without a verified published issue is not a CTA');
   const serialized = JSON.stringify(model);
   assert.doesNotMatch(serialized, /super-secret|private-token|\/private\/secret|Bearer|hook payload/);
@@ -88,8 +88,45 @@ test('hook read model groups repeated placements and only exposes proven executa
   assert.equal(model.definitionGroups.length, 1);
   assert.equal(model.definitionGroups[0].placements.length, 2);
   assert.equal(model.definitionGroups[0].placements[0].source.ref, 'ref-one');
-  assert.equal(model.findings[0].action.label, 'Preview repair');
-  assert.equal(model.findings[0].action.planDigest, 'plan-123');
+  assert.equal(model.findings[0].placements[0].action.label, 'Preview repair');
+  assert.equal(model.findings[0].placements[0].action.planDigest, 'plan-123');
+  assert.equal(model.findings[0].placements[1].action, null,
+    'an action joined to one occurrence must not be promoted to its sibling placement');
+});
+
+test('hook findings group across hosts and lifecycle points, then sort by importance and count', () => {
+  const record = ({ occurrenceId, behaviorFingerprint, host, event, code, severity, category = 'reliability' }) => ({
+    occurrenceId, behaviorFingerprint, host, event, type: 'command', matcher: '', handler: {},
+    source: { file: `/workspace/${host}.json`, sourceKind: 'project', owner: `${host}-owner` },
+    diagnostics: [{ code, severity, category }],
+  });
+  const model = buildHookDashboardReadModel({ audit: { reports: {
+    claude: {
+      records: [
+        record({ occurrenceId: 'c-stop', behaviorFingerprint: 'c-stop-b', host: 'claude', event: 'Stop',
+          code: 'probable-timeout-unit-mismatch', severity: 'warning' }),
+        record({ occurrenceId: 'c-post', behaviorFingerprint: 'c-post-b', host: 'claude', event: 'PostToolUse',
+          code: 'probable-timeout-unit-mismatch', severity: 'warning' }),
+      ], summary: {}, coverage: { status: 'partial', gaps: [] }, plan: [],
+    },
+    external: {
+      records: [
+        record({ occurrenceId: 'h-stop', behaviorFingerprint: 'h-stop-b', host: 'hermes', event: 'lifecycle.stop',
+          code: 'probable-timeout-unit-mismatch', severity: 'warning' }),
+        record({ occurrenceId: 'h-review', behaviorFingerprint: 'h-review-b', host: 'hermes', event: 'lifecycle.stop',
+          code: 'dynamic-shell', severity: 'review', category: 'security' }),
+      ], summary: {}, coverage: { status: 'partial', gaps: [] }, plan: [],
+    },
+  } } });
+
+  assert.equal(model.findings.length, 2);
+  assert.equal(model.findings[0].code, 'probable-timeout-unit-mismatch');
+  assert.equal(model.findings[0].affectedDefinitions, 3);
+  assert.deepEqual(model.findings[0].placements.map((placement) => placement.lifecyclePoint),
+    ['PostToolUse', 'Stop', 'lifecycle.stop']);
+  assert.deepEqual(model.findings[0].placements.map((placement) => placement.host),
+    ['claude', 'claude', 'hermes']);
+  assert.equal(model.findings[1].severity, 'review');
 });
 
 test('hook read model never fabricates an inspectable source reference', () => {
@@ -143,8 +180,8 @@ test('upstream findings get a link only from the exact published constraint', ()
     }] } },
   });
 
-  assert.equal(model.findings[0].owner, 'proffesor-for-testing/agentic-qe');
-  assert.deepEqual(model.findings[0].action, {
+  assert.equal(model.findings[0].placements[0].owner, 'proffesor-for-testing/agentic-qe');
+  assert.deepEqual(model.findings[0].placements[0].action, {
     actionId: 'agentic-qe-3.14.0-stop-hook-generator', classification: 'upstream-required',
     label: 'View upstream issue', href: 'https://github.com/proffesor-for-testing/agentic-qe/issues/654',
   });

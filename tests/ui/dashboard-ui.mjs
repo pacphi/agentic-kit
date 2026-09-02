@@ -350,12 +350,19 @@ const hooksStub = ({ file, digest }) => async () => ({
         }, ...Array.from({ length: 6 }, (_, index) => ({
           occurrenceId: `ui-hook-occurrence-${index + 2}`,
           behaviorFingerprint: `ui-hook-behavior-${index + 2}`, host: 'codex',
-          event: 'Stop', matcher: `fixture-${index + 2}`,
+          event: index === 0 ? 'PostToolUse' : 'Stop', matcher: `fixture-${index + 2}`,
           type: 'command', indices: { group: 0, hook: 0 }, handler: { async: false },
           source: { file, baseDir: path.dirname(file), digest, sourceKind: 'project',
             authority: 'project-owned', generatedStatus: 'direct', owner: 'project-owner' },
           timeout: { declared: 5, effective: 5, units: 'seconds', status: 'valid' },
-          sideEffects: [], selected: true, diagnostics: [],
+          sideEffects: [], selected: true, diagnostics: index === 0 ? [{
+            code: 'aqe-npx-hot-path-fallback', severity: 'warning', category: 'reliability',
+            message: HOOKS_SECRET,
+          }] : index === 1 ? [{
+            code: 'dynamic-shell', severity: 'review', category: 'security', message: HOOKS_SECRET,
+          }] : index === 2 ? [{
+            code: 'trust-independent', severity: 'info', category: 'trust', message: HOOKS_SECRET,
+          }] : [],
         }))],
         plan: [{ classification: 'upstream-required', target: 'agentic-qe', reason: HOOKS_SECRET }],
         coverage: { status: 'partial', gaps: ['runtime trust not observed'] },
@@ -2485,7 +2492,16 @@ async function main() {
           stopParent: document.getElementById('u-hook-stop')?.closest('.strip')?.querySelector('h2')?.textContent,
           runtimeParent: document.getElementById('u-hook-runtime')?.closest('.strip')?.querySelector('h2')?.textContent,
           definitionHeaders: [...document.querySelectorAll('#u-hook-stop thead th')].map((node) => node.textContent.trim()),
-          findingHeaders: [...document.querySelectorAll('#u-hook-diagnostics thead th')].map((node) => node.textContent.trim()),
+          findingHeaders: [...(document.querySelector('#u-hook-diagnostics .hook-finding-group thead')
+            ?.querySelectorAll('th') ?? [])].map((node) => node.textContent.trim()),
+          findingGroups: [...document.querySelectorAll('#u-hook-diagnostics .hook-finding-group')].map((node) => ({
+            open: node.open, importance: node.dataset.hookFindingImportance,
+            chevrons: node.querySelectorAll('.hook-finding-chevron').length,
+            summary: node.querySelector('summary')?.textContent?.trim(),
+          })),
+          findingFilters: [...document.querySelectorAll('#u-hook-diagnostics [data-hook-importance]')]
+            .map((node) => ({ value: node.dataset.hookImportance, pressed: node.getAttribute('aria-pressed') })),
+          observations: document.querySelector('#u-hook-diagnostics .hook-observations')?.textContent,
           definitionViewport: (() => {
             const wrap = document.querySelector('#u-hook-stop .hook-definition-wrap');
             const rows = [...document.querySelectorAll('#u-hook-stop tbody > tr')];
@@ -2513,8 +2529,35 @@ async function main() {
           JSON.stringify(hookView.definitionHeaders) === JSON.stringify([
             'Lifecycle point', 'Definition', 'Host', 'Configured in', 'Placements', 'Findings',
           ]) && JSON.stringify(hookView.findingHeaders) === JSON.stringify([
-            'Importance', 'Finding', 'Lifecycle point', 'Host', 'Affected definitions', 'Owner', 'Next step',
+            'Lifecycle point', 'Host', 'Configured in', 'Evidence', 'Action',
           ]), `Hook headers were ${JSON.stringify(hookView)}`);
+        check('Hook findings group repeated placements with explicit disclosure affordances',
+          hookView.findingGroups.length === 2 && hookView.findingGroups.every((group) => !group.open && group.chevrons === 1)
+            && /2 affected definitions/.test(hookView.findingGroups[0].summary),
+          `Hook finding groups were ${JSON.stringify(hookView.findingGroups)}`);
+        check('Hook importance is a filter and informational evidence is separated from actions',
+          JSON.stringify(hookView.findingFilters) === JSON.stringify([
+            { value: 'all', pressed: 'true' }, { value: 'warning', pressed: 'false' }, { value: 'review', pressed: 'false' },
+          ]) && /Observations, not actions/.test(hookView.observations),
+          `Hook filters/observations were ${JSON.stringify({ filters: hookView.findingFilters, observations: hookView.observations })}`);
+        const hookFindingSummary = page.locator('#u-hook-diagnostics .hook-finding-group').first().locator('summary');
+        await hookFindingSummary.focus();
+        await page.keyboard.press('Enter');
+        check('Enter opens a focused Hook finding disclosure',
+          await page.locator('#u-hook-diagnostics .hook-finding-group').first().evaluate((node) => node.open),
+          'Hook finding disclosure did not open with Enter');
+        await page.click('#u-hook-diagnostics [data-hook-importance="review"]');
+        const filteredHookFindings = await page.evaluate(() => ({
+          visible: [...document.querySelectorAll('#u-hook-diagnostics .hook-finding-group')]
+            .filter((node) => !node.hidden).map((node) => node.dataset.hookFindingImportance),
+          warningOpen: document.querySelector('#u-hook-diagnostics .hook-finding-group[data-hook-finding-importance="warning"]')?.open,
+          status: document.querySelector('#u-hook-diagnostics .hook-finding-filter-status')?.textContent,
+        }));
+        check('Hook importance filtering preserves disclosure state and announces the result count',
+          JSON.stringify(filteredHookFindings.visible) === JSON.stringify(['review'])
+            && filteredHookFindings.warningOpen === true && /Showing 1 review finding\./.test(filteredHookFindings.status),
+          `Filtered Hook findings were ${JSON.stringify(filteredHookFindings)}`);
+        await page.click('#u-hook-diagnostics [data-hook-importance="all"]');
         const visibleDefinitionRows = (hookView.definitionViewport.clientHeight
           - hookView.definitionViewport.headerHeight) / hookView.definitionViewport.rowHeight;
         check('Hook definitions shows five collapsed rows in a keyboard-scrollable viewport',
@@ -2540,8 +2583,9 @@ async function main() {
           `Hooks action text was ${JSON.stringify(hookView.text)}`);
         check('Hooks never renders raw commands, paths, output, or diagnostic prose',
           !hookView.text.includes(HOOKS_SECRET), 'sanitized Hook delivery leaked its sentinel secret');
-        await page.locator('#u-hook-stop details summary').first().click();
-        await page.locator('[data-hook-source]').first().click();
+        const stopDefinitionRow = page.locator('#u-hook-stop tbody > tr').filter({ hasText: 'Stop' }).first();
+        await stopDefinitionRow.locator('details summary').click();
+        await stopDefinitionRow.locator('[data-hook-source]').click();
         await page.waitForFunction(() => document.querySelector('#u-hook-source-detail pre'));
         const sourceView = await page.evaluate(() => ({
           open: document.getElementById('u-hook-source-dialog')?.open,
