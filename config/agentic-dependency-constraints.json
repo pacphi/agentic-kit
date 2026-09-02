@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 2,
-  "lastVerifiedAt": "2026-09-01",
+  "schemaVersion": 3,
+  "lastVerifiedAt": "2026-09-02",
   "recheckPolicy": {
     "cadence": "weekly-and-before-upgrade",
     "staleAfterDays": 14,
@@ -26,6 +26,15 @@
       "workaroundPolicy": "qualify evidence honestly; no simulated QE verdict and no provider-backed fallback without authorization",
       "retestPolicy": "weekly, on observed release, and before managed upgrade",
       "removalProof": "released host-neutral runner passes participant and provider conformance"
+    },
+    {
+      "dependency": "codex",
+      "owner": "openai",
+      "issuePublication": "explicit-user-approval-required",
+      "evidenceRequired": ["installed-version", "runtime-context-window", "warning-text", "included-omitted-counts", "owned-guidance-measurement"],
+      "workaroundPolicy": "bound agentic-kit-owned guidance and configuration; never patch host skill enumeration or plugin caches",
+      "retestPolicy": "on Codex release, skill-catalog change, or context-window profile change",
+      "removalProof": "released Codex exposes configurable skill metadata budgeting, effective enablement filtering, and included/omitted telemetry"
     },
     {
       "dependency": "ruvnet-brain",
@@ -67,7 +76,7 @@
       "strategy": "retain the last proven version and re-run host conformance before removing the block",
       "versionGate": "apply only when the installed version exactly matches an affected entry",
       "expiryPolicy": "retest within 14 days; do not silently extend stale evidence",
-      "nextRetestAt": "2026-09-08",
+      "nextRetestAt": "2026-09-09",
       "sunsetWhen": "an upstream release closes the issue and passes agentic-kit's host-neutral hook and lifecycle conformance suite",
       "notification": {
         "status": "draft-only",
@@ -85,7 +94,7 @@
       "strategy": "keep agentic-kit detection read-only and treat registration, health, reachability, and authorization as separate facts",
       "versionGate": "treat every 3.x version as observation-only until independently verified",
       "expiryPolicy": "retest within 14 days; do not silently extend stale evidence",
-      "nextRetestAt": "2026-09-08",
+      "nextRetestAt": "2026-09-09",
       "sunsetWhen": "upstream exposes the required evidence and agentic-kit verifies it against a released artifact",
       "notification": {
         "status": "draft-only",
@@ -93,20 +102,62 @@
       }
     },
     {
-      "id": "agentic-qe-3x-host-neutral-runner-gap",
+      "id": "agentic-qe-3.13-external-provider-contract",
       "dependency": "agentic-qe",
       "kind": "upstream-capability-gap",
-      "affected": ["3.x"],
-      "issue": "https://github.com/ruvnet/agentic-qe/issues/628",
-      "issueState": "open-at-last-verification",
-      "primaryEvidence": "upstream issue plus live participant/provider transport tests",
-      "strategy": "qualify external-provider and cross-host results as transport evidence rather than a host-neutral QE verdict",
-      "versionGate": "applies to 3.x until a released host-neutral runner is proven",
+      "affected": ["3.13.10", "3.13.11", "3.13.12"],
+      "issue": "https://github.com/proffesor-for-testing/agentic-qe/issues/628",
+      "issueState": "closed-at-last-verification",
+      "primaryEvidence": "upstream issue, v3.14.0 release receipt, and local external-provider conformance",
+      "strategy": "retain honest external-provider attribution and use the released declarative provider contract only after local conformance",
+      "versionGate": "applies only to the listed pre-3.14 releases; 3.14.0 requires its own conformance rather than inheriting closure",
       "expiryPolicy": "retest within 14 days; do not silently extend stale evidence",
-      "nextRetestAt": "2026-09-08",
-      "sunsetWhen": "a released host-neutral runner passes the live participant and provider conformance tests",
+      "nextRetestAt": "2026-09-09",
+      "sunsetWhen": "v3.14.0 or later passes the live external-provider participant and advisor conformance tests",
       "notification": {
-        "status": "draft-only",
+        "status": "published",
+        "publishedAt": "2026-08-21T08:25:12Z",
+        "publishedUrl": "https://github.com/proffesor-for-testing/agentic-qe/issues/628",
+        "requiredFields": ["minimalReproduction", "expected", "observed", "hostVersions", "dependencyVersion", "evidenceDigests", "boundedWorkaround", "expiry", "removalProof"]
+      }
+    },
+    {
+      "id": "agentic-qe-3.14.0-stop-hook-generator",
+      "dependency": "agentic-qe",
+      "kind": "upstream-defect",
+      "affected": ["3.14.0"],
+      "issue": "https://github.com/proffesor-for-testing/agentic-qe/issues/654",
+      "issueState": "open-at-last-verification",
+      "primaryEvidence": "generated helper/generator digests plus historical session-end and post-route npx ETIMEDOUT receipts",
+      "strategy": "detect exact generated shapes, keep remediation upstream-required, and never patch generated project files or installed caches",
+      "versionGate": "apply only to 3.14.0 while the exact AQE helper/generator shapes match",
+      "expiryPolicy": "retest within 14 days and on every Agentic-QE release",
+      "nextRetestAt": "2026-09-09",
+      "sunsetWhen": "a released Agentic-QE generator uses a deterministic runner, correct host-native timeout units, and passes offline Stop conformance",
+      "notification": {
+        "status": "published",
+        "publishedAt": "2026-09-02T15:21:20Z",
+        "publishedUrl": "https://github.com/proffesor-for-testing/agentic-qe/issues/654",
+        "requiredFields": ["minimalReproduction", "expected", "observed", "hostVersions", "dependencyVersion", "evidenceDigests", "boundedWorkaround", "expiry", "removalProof"]
+      }
+    },
+    {
+      "id": "codex-0.152.1-skill-context-budget",
+      "dependency": "codex",
+      "kind": "upstream-capability-gap",
+      "affected": ["0.152.1"],
+      "issue": "https://github.com/openai/codex/issues/19679",
+      "issueState": "open-at-last-verification",
+      "primaryEvidence": "Codex warning, runtime-observed 258400-token effective window, and measured agentic-kit-owned guidance reduction",
+      "strategy": "keep owned guidance within per-host budgets and expose omitted/unknown state; do not patch host skill enumeration or plugin caches",
+      "versionGate": "apply to Codex 0.152.1; re-audit later releases before carrying it forward",
+      "expiryPolicy": "retest on every Codex release or skill/plugin catalogue change",
+      "nextRetestAt": "2026-09-09",
+      "sunsetWhen": "Codex releases configurable skill metadata budgeting plus effective enablement filtering and included/omitted telemetry",
+      "notification": {
+        "status": "published",
+        "publishedAt": "2026-09-02T15:20:46Z",
+        "publishedUrl": "https://github.com/openai/codex/issues/19679#issuecomment-5511921501",
         "requiredFields": ["minimalReproduction", "expected", "observed", "hostVersions", "dependencyVersion", "evidenceDigests", "boundedWorkaround", "expiry", "removalProof"]
       }
     }
