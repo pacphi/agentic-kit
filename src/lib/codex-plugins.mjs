@@ -1,9 +1,10 @@
-// Read-only Codex plugin compatibility inspection. Codex owns config.toml and
-// its plugin cache; agentic-kit observes them but never refreshes, rewrites, or
-// adopts either surface.
+// Read-only Codex plugin compatibility inspection. Mutation is owned by the
+// separately authorized hook-healing transaction boundary.
 import fs from 'node:fs';
 import path from 'node:path';
 import * as paths from './paths.mjs';
+import { readBoundedFile } from './hook-audit/common.mjs';
+import { inspectCodexTomlStructure, isTomlTableLine } from './codex-toml-safety.mjs';
 import { cmpVersions } from './versions.mjs';
 
 const HOOK_KEYS = new Set(['description', 'hooks']);
@@ -13,6 +14,14 @@ const ADVISORIES = [{
   through: '2.0.7',
   message: 'Stop hook can emit a top-level "metrics" field that Codex rejects; disable it in /plugins and restart Codex',
 }];
+const CLAUDE_COMPANION_REF = 'codex@openai-codex';
+const CLAUDE_COMPANION_POLICY = Object.freeze({
+  id: 'codex-plugin-placement/claude-companion/v1',
+  verifiedVersion: '1.0.6',
+  verifiedAt: '2026-09-02',
+  revision: 'db52e28f4d9ded852ab3942cea316258ae4ef346',
+  evidence: 'https://github.com/openai/codex-plugin-cc/commit/db52e28f4d9ded852ab3942cea316258ae4ef346',
+});
 
 function readJson(file) {
   try {
@@ -25,20 +34,73 @@ function readJson(file) {
   }
 }
 
-/** Explicitly enabled `plugin@marketplace` refs from Codex's TOML. */
+const PLUGIN_TABLE = /^[\t ]*\[[\t ]*plugins[\t ]*\.[\t ]*(?:"((?:[^"\\]|\\.)+)"|'([^']+)')[\t ]*\][\t ]*(?:#[^\r\n]*)?$/;
+const ENABLED_TRUE = /^[\t ]*enabled[\t ]*=[\t ]*true[\t ]*(?:#[^\r\n]*)?$/;
+
+function decodedRef(match) {
+  if (match[2] !== undefined) return match[2];
+  try { return JSON.parse(`"${match[1]}"`); } catch { return null; }
+}
+
+function pluginTables(source) {
+  const scan = inspectCodexTomlStructure(source);
+  const headers = scan.lines.filter((line) => line.live && isTomlTableLine(line.text));
+  const tables = headers.map((header, index) => ({
+    header,
+    end: headers[index + 1]?.start ?? source.length,
+    match: PLUGIN_TABLE.exec(header.text),
+  }));
+  return { scan, tables };
+}
+
+/** Explicitly enabled `plugin@marketplace` refs from live Codex TOML tables. */
 export function enabledPluginRefs(source) {
+  const { scan, tables } = pluginTables(source);
   const refs = [];
-  const table = /^\[\s*plugins\s*\.\s*(?:"((?:[^"\\]|\\.)+)"|'([^']+)')\s*\]\s*$/gm;
-  let match;
-  while ((match = table.exec(source)) !== null) {
-    const next = source.slice(table.lastIndex).search(/^\[/m);
-    const body = source.slice(table.lastIndex, next < 0 ? source.length : table.lastIndex + next);
-    if (/^\s*enabled\s*=\s*true(?:\s*#.*)?$/m.test(body)) {
-      const ref = match[1] ?? match[2];
-      refs.push(match[1] ? ref.replace(/\\"/g, '"').replace(/\\\\/g, '\\') : ref);
-    }
+  for (const table of tables.filter((candidate) => candidate.match)) {
+    const ref = decodedRef(table.match);
+    const enabled = scan.lines.some((line) => line.live
+      && line.start >= table.header.end && line.start < table.end
+      && ENABLED_TRUE.test(line.text));
+    if (enabled && ref !== null) refs.push(ref);
   }
   return refs;
+}
+
+function pluginPlacementFindings(enabled, plugins, configFile, configDigest) {
+  const companion = plugins.find((plugin) => plugin.ref === CLAUDE_COMPANION_REF);
+  return enabled.includes(CLAUDE_COMPANION_REF) ? [{
+    code: 'claude-companion-enabled-in-codex',
+    ref: CLAUDE_COMPANION_REF,
+    policyId: CLAUDE_COMPANION_POLICY.id,
+    policyVersion: CLAUDE_COMPANION_POLICY.verifiedVersion,
+    policyRevision: CLAUDE_COMPANION_POLICY.revision,
+    policyVerifiedAt: CLAUDE_COMPANION_POLICY.verifiedAt,
+    pluginVersion: companion?.version ?? null,
+    evidence: CLAUDE_COMPANION_POLICY.evidence,
+    configFile,
+    configDigest,
+    message: `${CLAUDE_COMPANION_REF} is the Codex companion for Claude Code and should not be enabled as a Codex plugin`,
+  }] : [];
+}
+
+function readCodexConfig(configFile) {
+  try {
+    const entry = fs.lstatSync(configFile);
+    if (!entry.isSymbolicLink()) {
+      return { ...readBoundedFile(configFile, path.dirname(configFile)), viaSymlink: false };
+    }
+    const resolvedFile = fs.realpathSync(configFile);
+    const read = readBoundedFile(resolvedFile, path.dirname(resolvedFile));
+    if (read.status !== 'valid') return { ...read, viaSymlink: true, resolvedFile };
+    if (fs.realpathSync(configFile) !== resolvedFile) {
+      return { status: 'invalid', error: 'config symlink changed during inspection', viaSymlink: true };
+    }
+    return { ...read, viaSymlink: true, resolvedFile };
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { status: 'absent', viaSymlink: false };
+    return { status: 'invalid', error: error?.message ?? String(error), viaSymlink: false };
+  }
 }
 
 function splitRef(ref) {
@@ -271,20 +333,53 @@ export function inspectCodexPlugins({
   configFile = paths.codexConfigPath(),
   cacheDir = paths.codexPluginCacheDir(),
 } = {}) {
-  let source;
-  try {
-    source = fs.readFileSync(configFile, 'utf8');
-  } catch {
-    return { configPresent: false, enabled: [], plugins: [], hookIssues: [], skillIssues: [], issues: [] };
+  const config = readCodexConfig(configFile);
+  if (config.status !== 'valid') {
+    const configIssues = ['absent'].includes(config.status) ? []
+      : [`${configFile}: ${config.error}`];
+    return {
+      configPresent: config.status !== 'absent', configFile, configDigest: null,
+      configViaSymlink: config.viaSymlink,
+      configStatus: config.status, configIssues,
+      enabled: [], plugins: [], pluginFindings: [], placementIssues: [],
+      hookIssues: [], skillIssues: [], issues: configIssues,
+    };
   }
+  const source = config.text;
+  const configDigest = config.digest;
+  const utf8Valid = config.bytes.equals(Buffer.from(source));
+  const structure = inspectCodexTomlStructure(source);
   const enabled = enabledPluginRefs(source);
   const plugins = enabled.map((ref) => inspectPlugin(ref, cacheDir));
+  const pluginFindings = pluginPlacementFindings(enabled, plugins, configFile, configDigest);
+  const placementIssues = pluginFindings.map((finding) => finding.message);
+  const decoratedPlugins = plugins.map((inspected) => {
+    const findings = pluginFindings.filter((finding) => finding.ref === inspected.ref);
+    const issues = findings.map((finding) => finding.message);
+    return {
+      ...inspected,
+      pluginFindings: findings,
+      placementIssues: issues,
+      issues: [...issues, ...inspected.issues],
+    };
+  });
+  const configStatus = utf8Valid && structure.valid ? 'valid' : 'invalid';
+  const configIssues = configStatus === 'valid' ? [] : [
+    `${configFile}: ${utf8Valid ? structure.error : 'config is not valid UTF-8'}`,
+  ];
   return {
     configPresent: true,
+    configFile,
+    configDigest,
+    configStatus,
+    configViaSymlink: config.viaSymlink,
+    configIssues,
     enabled,
-    plugins,
-    hookIssues: plugins.flatMap((plugin) => plugin.hookIssues),
-    skillIssues: plugins.flatMap((plugin) => plugin.skillIssues),
-    issues: plugins.flatMap((plugin) => plugin.issues),
+    plugins: decoratedPlugins,
+    pluginFindings,
+    placementIssues,
+    hookIssues: decoratedPlugins.flatMap((plugin) => plugin.hookIssues),
+    skillIssues: decoratedPlugins.flatMap((plugin) => plugin.skillIssues),
+    issues: [...configIssues, ...decoratedPlugins.flatMap((plugin) => plugin.issues)],
   };
 }

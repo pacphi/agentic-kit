@@ -462,6 +462,36 @@ test('an incompatible enabled Codex plugin warns without offering a sync mutatio
   assert.equal(plugin.fix, null, 'sync must never rewrite Codex-owned plugin cache');
 });
 
+test('status identifies the Claude companion when it is enabled inside Codex', async () => {
+  seedHome();
+  fs.mkdirSync(paths.codexDir(), { recursive: true });
+  fs.writeFileSync(paths.codexConfigPath(),
+    '[plugins."codex@openai-codex"]\nenabled = true\n');
+  const root = path.join(paths.codexPluginCacheDir(), 'openai-codex', 'codex', '1.0.6');
+  fs.mkdirSync(path.join(root, '.claude-plugin'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'codex', version: '1.0.6', hooks: {} }));
+  const plugin = one(await collect(), 'codex-plugins');
+  assert.equal(plugin.level, 'warn');
+  assert.match(plugin.message, /Claude Code/);
+  assert.match(plugin.message, /ak heal hooks --host codex/);
+  assert.doesNotMatch(plugin.message, /refresh/);
+  assert.equal(plugin.fix, null, 'sync must never change user-owned Codex plugin enablement');
+});
+
+test('status reports malformed Codex config separately from plugin compatibility', async () => {
+  seedHome();
+  fs.mkdirSync(paths.codexDir(), { recursive: true });
+  fs.writeFileSync(paths.codexConfigPath(),
+    'broken = ???\n[plugins."codex@openai-codex"]\nenabled = true\n');
+  const plugin = one(await collect(), 'codex-plugins');
+  assert.equal(plugin.level, 'warn');
+  assert.match(plugin.message, /Codex config inspection issue/);
+  assert.match(plugin.message, /repair config\.toml/);
+  assert.doesNotMatch(plugin.message, /Codex \/plugins|plugin compatibility/);
+  assert.equal(plugin.fix, null);
+});
+
 test('status identifies the native project-memory writer when both stores exist', async () => {
   seedHome();
   const swarm = path.join(PROJECT, '.swarm');

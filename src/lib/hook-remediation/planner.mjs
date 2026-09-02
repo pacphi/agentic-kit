@@ -7,6 +7,7 @@ import {
   legacyRufloProjectHookSignature, retireLegacyRufloProjectHooks,
 } from '../hook-audit/codex-legacy.mjs';
 import { inspectHookTarget } from './fs-port.mjs';
+import { compileCodexPluginActions } from './codex-plugin.mjs';
 
 export const HOOK_HEAL_PLAN_SCHEMA = 'hook-heal-plan/v1';
 export const HOOK_HEAL_CLASSES = Object.freeze([
@@ -311,7 +312,11 @@ function compileProvider(host, hostReport, options) {
     .map((records) => compileJsonTimeoutAction(host, hostReport, records, policy, options))
     .filter(Boolean);
   return host === 'codex'
-    ? [...timeoutActions, ...compileLegacyRufloActions(hostReport, options)]
+    ? [
+      ...timeoutActions,
+      ...compileLegacyRufloActions(hostReport, options),
+      ...compileCodexPluginActions(hostReport, options).map(withActionId),
+    ]
     : timeoutActions;
 }
 

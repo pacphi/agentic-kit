@@ -95,6 +95,16 @@ present. It preserves unrelated and AutoMemory hooks and refuses near-matches, a
 helper occurrences, and noncanonical files. The writer never approves or bypasses host
 trust.
 
+Those exact Codex profiles also support one user-owned TOML recipe for the verified
+`codex@openai-codex` 1.0.6 placement error. The package is Claude Code's companion for invoking
+Codex, not a Codex-host plugin; that policy is bound to OpenAI's signed 1.0.6 release
+revision `db52e28f4d9ded852ab3942cea316258ae4ef346`. The recipe replaces only its unambiguous
+`enabled = true` scalar with `false`; it preserves all sibling bytes and never changes
+the installed package, plugin cache, Claude Code enablement, or trust state. Table-shaped
+multiline-string content is ignored. Malformed TOML, duplicate tables or assignments,
+unverified versions, symlink-managed or otherwise unsafe files, and Windows fail closed
+to a visible non-executable action.
+
 The retirement is behavior-changing: the selected Ruflo plugin is evidence for the
 lifecycle events it actually covers, not a feature-for-feature replacement for removed
 session-start, prompt-routing, or subagent side effects. Removing an earlier handler can
@@ -178,6 +188,7 @@ Implemented in this decision:
 - Claude optional-manifest plugin provenance and host-specific `SessionEnd` budget rules.
 - exact Codex `0.152.1` event/timeout semantics and legacy Ruflo projection diagnostics;
 - approval-required, per-project legacy Ruflo retirement with selected-plugin evidence;
+- exact-identity Claude companion placement detection and approval-required Codex-only disablement;
 - deterministic public plans with content-bound private candidates;
 - explicit `ak heal hooks` apply, undo and interrupted-transaction recovery;
 - private backups, strict durability ordering, atomic replacement, guarded rollback,

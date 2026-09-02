@@ -86,7 +86,9 @@ manifests, not imported implementation modules.
 
 Translates `hooks.json`, documented inline TOML and enabled plugin manifests. It preserves
 Codex's merge semantics, seconds-based timeout rules, MCP-tool handlers and independent
-definition trust.
+definition trust. It also emits an exact-identity placement finding when the
+`codex@openai-codex` Claude companion is enabled inside Codex; no manifest-directory
+heuristic is used.
 
 ### Claude Code
 
@@ -115,6 +117,14 @@ explicit flows. The mutation port requires exact preimages, private backups, str
 file/directory durability, atomic same-directory replacement, per-action journal updates,
 guarded rollback, an exact-profile second audit and a byte/mode/mtime no-op proof. The
 domain rejects trust bypasses and cache writes before the port is reached.
+
+The only plugin-table recipe targets that exact placement finding in user-owned
+`config.toml`, with its policy pinned to the inspected OpenAI 1.0.6 release revision. It
+requires conservative whole-document TOML validation, then byte-splices one unambiguous
+live `enabled = true` scalar to `false`. It preserves the installation, cache, Claude Code
+configuration, sibling TOML bytes, and trust state. Read-only discovery can safely follow
+a bounded config symlink; the mutation port cannot. The ordinary setup/sync lifecycle
+never enters this port.
 
 Transactions use `prepared`, `applying`, `verifying`, `committed`, `undoing`,
 `rolled-back`, and explicit failure/recovery states. A new apply refuses while an

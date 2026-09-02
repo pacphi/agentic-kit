@@ -7,12 +7,14 @@ hooks` is dry-run by default and can mutate only an exact, previewed, content-bo
 after the operator repeats the action id and plan digest with `--apply --yes`. The same
 authorization model applies to undo and interrupted-transaction recovery.
 
-Executable healing is limited to verified Codex 0.151.0 and Claude Code 2.1.258
-user-owned canonical JSON `SessionEnd` timeout normalization on POSIX. OpenCode 1.18.25,
-external adapters, unknown or future versions, generated/plugin caches, JSONC, TOML,
-noncanonical JSON, Windows replacement, trust state and executable plugin modules remain
-observable but non-executable. No cache edit, trust bypass or optimistic future-version
-inheritance is permitted.
+Executable healing is limited to verified Codex 0.151.0/0.152.1 and Claude Code 2.1.258
+user-owned canonical JSON `SessionEnd` timeout normalization on POSIX, exact legacy Ruflo
+project-hook retirement, and one exact Codex TOML placement repair. That repair disables
+`codex@openai-codex` only in Codex while preserving Claude Code enablement and the plugin
+cache. OpenCode 1.18.25, external adapters, unknown or future versions, generated/plugin
+caches, JSONC, general TOML rewriting, noncanonical JSON, Windows replacement, trust state
+and executable plugin modules remain observable but non-executable. No cache edit, trust
+bypass or optimistic future-version inheritance is permitted.
 
 ## Assurance boundary
 
@@ -37,13 +39,18 @@ eliminate a malicious same-user directory race without native directory-fd opera
 - `npm run lint`: pass with warnings only; no errors.
 - `npm run lint:cc`: pass; the two reported file-length warnings predate this change.
 - `npm run lint:md`: pass across 80 Markdown files.
-- `npm run build`: pass, including syntax checks for 266 shipped files and a 300-file
+- `npm run build`: pass, including syntax checks for 260 shipped files and a 294-file
   package inspection.
 - `npm test`: pass with exit code 0 in the repository's loopback-enabled test environment.
-- Focused Node suite: 90 tests passed, 0 failed.
+- Initial focused Node suite: 90 tests passed, 0 failed. The hardened Claude-companion
+  follow-up suite passes 102 tests with 0 failures.
 - Measured focused coverage for the new remediation boundary: `engine.mjs` 87.22% line,
   `fs-port.mjs` 88.39%, `planner.mjs` 98.36% and `store.mjs` 86.85%. The same run measured
   `hook-audit` files from 85.96% to 100% line coverage and `integrity.mjs` at 83.81%.
+- The follow-up coverage run measures both new plugin-placement modules at 100% line and
+  function coverage, the zero-dependency TOML safety scanner at 84.92% line/81.58%
+  branch, `codex-plugins.mjs` at 90.13% line, the Codex hook provider at 91.77%, and the
+  transaction engine at 87.77%.
 - `git diff --check`: pass.
 
 The adversarial fixtures exercise stale plans, action substitution, duplicate actions,
@@ -57,6 +64,11 @@ Windows non-executability and a second-run no-op proof.
 The real Agentic-QE fleet was used after implementation:
 
 - Defect prediction found no file above its defect threshold (`riskScore: 0`).
+- The focused companion-remediation scan found zero vulnerabilities and its defect
+  prediction returned risk score 0.
+- The TOML scanner defect prediction also returned risk score 0. Its focused SAST result
+  was one lexical false positive: `RegExp.exec()` was classified as dangerous process or
+  code execution; line 65 only matches an in-memory assignment string.
 - Narrow SAST scans found zero findings in `hook-remediation`, `adapters/integrity.mjs`
   and `adapters/admission.mjs`.
 - The hook-audit scan produced three lexical false positives: `RegExp.exec()` was labeled

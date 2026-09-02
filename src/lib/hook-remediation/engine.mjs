@@ -60,12 +60,32 @@ function preflight(plan, actionIds, expectedPlanDigest, options) {
   });
 }
 
+function pluginPlacementCleared(hostReport, action) {
+  const configuration = hostReport.pluginConfiguration;
+  if (configuration?.present !== true || configuration.status !== 'valid') return false;
+  if (typeof configuration.file !== 'string' || !Array.isArray(configuration.enabled)) return false;
+  if (!Array.isArray(hostReport.pluginFindings) || !Array.isArray(hostReport.records)) return false;
+  if (path.resolve(configuration.file) !== path.resolve(action.verification.sourceFile)) return false;
+  if (configuration.digest !== action.desiredPostimage.sha256) return false;
+  if (configuration.enabled.includes(action.verification.pluginRef)) return false;
+  if (hostReport.pluginFindings.some((finding) => (
+    finding.ref === action.verification.pluginRef
+    && action.verification.diagnosticCodes.includes(finding.code)
+  ))) return false;
+  return !hostReport.records.some((record) => (
+    record.scope?.pluginRef === action.verification.pluginRef
+  ));
+}
+
 function findingCleared(report, action) {
   const hostReport = report.reports?.[action.host];
   if (!hostReport
       || hostReport.observedVersion !== action.hostVersion
       || hostReport.hostSchema?.confidence !== 'verified'
       || hostReport.hostSchema?.id !== action.exactProfileId) return false;
+  if (action.verification.kind === 'codex-plugin-placement') {
+    return pluginPlacementCleared(hostReport, action);
+  }
   const source = hostReport.sources?.find((candidate) => (
     path.resolve(candidate.file) === path.resolve(action.verification.sourceFile)
   ));

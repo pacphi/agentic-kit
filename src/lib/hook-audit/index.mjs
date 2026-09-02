@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 
 import { inspectCodexPlugins } from '../codex-plugins.mjs';
 import { readBoundedFile, redactCommand, stableJson } from './common.mjs';
+import { pluginAuditFacts, pluginPlacementPlan } from './codex-plugin-placement.mjs';
 import { legacyRufloProjectHookSignature } from './codex-legacy.mjs';
 import { readCodexInlineHooks } from './codex-toml.mjs';
 
@@ -445,8 +446,9 @@ export function auditCodexHooks({
       || a.event.localeCompare(b.event)
       || a.indices.group - b.indices.group
       || a.indices.hook - b.indices.hook);
-  const plan = planFor(records);
-  const pluginIssues = plugins.hookIssues ?? plugins.issues;
+  const plan = [...planFor(records), ...pluginPlacementPlan(plugins)]
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const pluginFacts = pluginAuditFacts(plugins);
   const publicSources = sources.map((source) => {
     const result = { ...source };
     delete result.document;
@@ -460,7 +462,8 @@ export function auditCodexHooks({
     sources: publicSources,
     records,
     plan,
-    pluginIssues,
+    ...pluginFacts,
+    issues: pluginFacts.pluginIssues,
     coverage: {
       status: 'partial',
       gaps: [
@@ -471,7 +474,7 @@ export function auditCodexHooks({
     summary: {
       sources: sources.length,
       invalidSources: sources.filter((source) => source.status !== 'valid').length,
-      configurationIssues: pluginIssues.length,
+      configurationIssues: pluginFacts.pluginIssues.length,
       hookOccurrences: records.length,
       uniqueBehaviors: new Set(records.map((record) => record.behaviorFingerprint)).size,
       compatibilityWarnings: records.filter((record) => record.diagnostics.some((d) => d.category === 'compatibility')).length,

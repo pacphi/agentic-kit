@@ -16,7 +16,7 @@ authoritative source from a generated copy, or run an uninspected hook command.
 |---|---:|---|---|---|---|
 | H01 | P0 | Add manifest/action compatibility preflight so every Brain manifest action exists in the selected active runtime | RuvNet Brain installer/runtime | approval required upstream | 4.2.2 manifest + active runtime agree; unknown action fails visibly; decision-gate/snapshot integration tests pass |
 | H02 | P0 | Stop describing project `pre-bash` as enforcement; replace with a Codex-native fail-closed result only if a reviewed owner still needs it | historic Ruflo generator/current canonical owner | approval required | malicious fixture is blocked using documented contract; advisory failures cannot claim enforcement |
-| H03 | P1 | Change OpenAI Companion SessionEnd timeout from 5 to at most 3 in authoritative plugin source and upgrade/reinstall | openai/codex-plugin-cc | approval required upstream; cache never automatic | selected installed generation no longer emits clamp; cache equals source artifact |
+| H03 | P1 | Keep the OpenAI Companion SessionEnd timeout fix in its authoritative Claude Code plugin source; locally disable that companion if it is mistakenly enabled inside Codex | openai/codex-plugin-cc / machine owner | upstream fix plus approval-required local placement repair; cache never automatic | Claude Code keeps the companion; Codex config says `enabled = false`; fresh Codex session emits no clamp |
 | H04 | P1 | Resolve the historical project copier, then preview retirement of obsolete Ruflo project groups in nine projects | Ruflo/AQE generator and each project owner | approval required per project | transaction backup, exact diff, current plugin behavior retained, second audit removes duplication/clamp |
 | H05 | P1 | Remove Emailibrium's local Beads projection or disable the plugin for that project, after choosing one owner | Emailibrium owner / Beads | approval required | one occurrence per Beads lifecycle event; behavior smoke test passes |
 | H06 | P1 | Replace `CLAUDE_PROJECT_DIR`/`$HOME` shell fallback with a stable validated repository-root contract | authoritative generator | approval required | subdirectory fixture resolves the same regular in-repo helper; path escape/symlink tests fail closed |
@@ -70,5 +70,8 @@ Wave 1 adds only the read-only `ak audit hooks` command and durable baseline art
 It never executes a hook or exposes an apply flag. It validates version confidence,
 nested syntax, exact occurrence IDs, plugin-cache containment, and symlink boundaries;
 hook-discovery failures are distinct from unrelated plugin skill diagnostics.
-Transactional apply/rollback remains a later wave after the proposed ADR receives
-independent architecture review and the canonical owners for H01–H10 are resolved.
+At publication on 2026-09-01, transactional apply/rollback was deferred pending
+independent architecture review and resolution of the canonical owners for H01–H10.
+The 2026-09-02 follow-up implements that bounded transaction engine and adds an
+exact-identity H03 placement repair. It mutates only the reviewed Codex `config.toml`
+scalar, never the companion's cache, installation, Claude Code state, or upstream source.
