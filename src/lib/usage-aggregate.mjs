@@ -15,6 +15,7 @@
 // none of them can close a cycle through here. They are pure arithmetic over
 // already-decoded fingerprints, which is exactly this module's own subject.
 import { PROVENANCE_TAGS } from './usage-provenance.mjs';
+import { buildContextProjection } from './usage-context.mjs';
 import {
   crossSessionClusters, exactRepeatGroups, nearDupClusters, reAskPairs,
 } from './usage-prompt-patterns.mjs';
@@ -802,6 +803,19 @@ function foldSessionUsageRows(rec, deps, byDay, byModel, rates) {
  * repo's complexity ceiling.
  */
 function v11Projection(rec) {
+  const evidence = rec.contextEvidence && typeof rec.contextEvidence === 'object'
+    ? {
+        schemaVersion: rec.contextEvidence.schemaVersion ?? 1,
+        state: rec.contextEvidence.state ?? 'not-recorded',
+        input: rec.contextEvidence.input ? { ...rec.contextEvidence.input } : null,
+        window: rec.contextEvidence.window ? { ...rec.contextEvidence.window } : null,
+        pressure: rec.contextEvidence.pressure ? {
+          ...rec.contextEvidence.pressure,
+          hist: Array.isArray(rec.contextEvidence.pressure.hist)
+            ? rec.contextEvidence.pressure.hist.slice() : [],
+        } : null,
+      }
+    : null;
   return {
     mode: rec.mode ?? null,
     modeRaw: rec.modeRaw ?? null,
@@ -810,6 +824,7 @@ function v11Projection(rec) {
     lenSeconds: rec.lenSeconds ?? 0,
     ctxWindow: rec.ctxWindow ?? null,
     ctxLastTokens: rec.ctxLastTokens ?? null,
+    contextEvidence: evidence,
     aborts: rec.aborts ?? 0,
   };
 }
@@ -1216,6 +1231,8 @@ export function aggregate(records, { days, now, cutoff, deps, previous = false, 
   finishTotals(totals, sessions, folded);
   const engagedByDay = buildEngagedByDay(sessions);
   const rhythm = buildRhythm(sessions);
+  const generatedAt = new Date(now).toISOString();
+  const context = buildContextProjection(sessions, { generatedAt, windowDays: days });
 
   const projectTree = buildProjectTree(tree);
   for (const s of sessions) {
@@ -1225,7 +1242,7 @@ export function aggregate(records, { days, now, cutoff, deps, previous = false, 
   const codexRateLimits = buildCodexRateLimits(sessions);
 
   const agg = {
-    generatedAt: new Date(now).toISOString(),
+    generatedAt,
     windowDays: days,
     pricesAsOf: deps.pricesAsOf ?? null,
     totals, byDay, engagedByDay, byModel, byHost, byProvider,
@@ -1243,7 +1260,7 @@ export function aggregate(records, { days, now, cutoff, deps, previous = false, 
     // promptBaselines above, which deliberately reads the trailing window
     // BEFORE it. Same records, two different questions.
     promptPatterns: prompts ? buildPromptPatterns(records, { cutoff, now }) : null,
-    punchcard, projectTree, sessions, codexRateLimits, rhythm,
+    punchcard, projectTree, sessions, codexRateLimits, rhythm, context,
     previous: previous ? previousWindow(records, { days, now, deps, rates }) : null,
     insights: [],
   };
