@@ -84,13 +84,16 @@ export function redactCommand(value) {
 }
 
 export function commandFacts(command) {
-  const normalized = typeof command === 'string' ? command.trim() : '';
-  const redacted = redactCommand(normalized);
+  const argv = Array.isArray(command) ? command.map((value) => String(value)) : null;
+  const normalized = argv ? stableJson(argv) : typeof command === 'string' ? command.trim() : '';
+  const redacted = argv ? stableJson(argv.map((value) => redactCommand(value))) : redactCommand(normalized);
+  const scanText = argv ? argv.join(' ') : normalized;
   return {
     normalized: redacted,
     digest: sha256(normalized),
-    shell: /(?:^|[\s/])(?:env\s+)?(?:sh|bash|zsh|fish|cmd(?:\.exe)?|powershell|pwsh)(?:\s|$)|(?:&&|\|\||[|;<>`])/i.test(normalized),
-    projectDirReferences: [...new Set(normalized.match(/\$\{?[A-Z][A-Z0-9_]+/g) ?? [])].sort(),
+    kind: argv ? 'argv' : 'string',
+    shell: /(?:^|[\s/])(?:env\s+)?(?:sh|bash|zsh|fish|cmd(?:\.exe)?|powershell|pwsh)(?:\s|$)|(?:&&|\|\||[|;<>`])/i.test(scanText),
+    projectDirReferences: [...new Set(scanText.match(/\$\{?[A-Z][A-Z0-9_]+/g) ?? [])].sort(),
     redacted: redacted !== normalized,
   };
 }
@@ -128,8 +131,10 @@ export function summarizeHostReport({ sources, records, plan, issues = [], cover
 }
 
 function materialHandler(handler, command, source) {
+  const commandIdentity = commandFacts(command);
   return stableValue({
-    commandDigest: command ? sha256(command) : null,
+    commandDigest: commandIdentity.digest,
+    commandKind: commandIdentity.kind,
     commandWindowsDigest: handler.commandWindows ? sha256(handler.commandWindows) : null,
     server: handler.server ?? null,
     tool: handler.tool ?? null,
@@ -161,13 +166,18 @@ export function normalizedOccurrence({
   host, event, matcher = '', type = 'command', handler = {}, source, indices = {},
   timeout = null, diagnostics = [], selected = null, risk = 'HUMAN REVIEW REQUIRED',
 } = /** @type {any} */ ({})) {
-  const command = Array.isArray(handler.command) ? handler.command.join(' ') : handler.command ?? '';
+  const command = handler.command ?? '';
   const material = {
     host, event, matcher, type,
     handler: materialHandler(handler, command, source),
     timeout,
   };
   const behaviorFingerprint = sha256(stableJson(material));
+  const rawFingerprint = sha256(stableJson(handler));
+  const occurrenceId = sha256(stableJson({
+    host, event, matcher, type, indices,
+    source: { file: source.file, digest: source.digest ?? null }, rawFingerprint,
+  }));
   return {
     schemaVersion: 2,
     host,
@@ -187,9 +197,10 @@ export function normalizedOccurrence({
       recommendation: 'HUMAN REVIEW REQUIRED',
       evidence: 'Audit evidence never establishes host trust or approval state',
     },
-    rawFingerprint: sha256(stableJson(handler)),
+    rawFingerprint,
     behaviorFingerprint,
     duplicateGroupId: behaviorFingerprint,
+    occurrenceId,
     diagnostics,
   };
 }

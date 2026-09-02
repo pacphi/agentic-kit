@@ -87,7 +87,7 @@ export function auditExternalHooks({ config = {}, cwd = process.cwd() } = /** @t
   }
   records.sort((a, b) => a.host.localeCompare(b.host) || a.event.localeCompare(b.event));
   const plan = records.map((record) => ({
-    id: `external-review-${record.behaviorFingerprint.slice(0, 16)}`,
+    id: `external-review-${record.occurrenceId.slice(0, 16)}`,
     host: record.host, diagnostic: 'target-host-compatibility-unproven', target: record.source.file,
     classification: 'approval-required',
     reason: 'An operator must verify host/version compatibility, consent, grants, and the pinned hook-file identity before activation',

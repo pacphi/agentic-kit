@@ -7,7 +7,8 @@ import path from 'node:path';
 import { run as runAuditCommand } from '../../src/commands/audit.mjs';
 import { auditCodexHooks } from '../../src/lib/hook-audit/index.mjs';
 import { auditHooks } from '../../src/lib/hook-audit/orchestrator.mjs';
-import { readBoundedFile } from '../../src/lib/hook-audit/common.mjs';
+import { normalizedOccurrence, readBoundedFile } from '../../src/lib/hook-audit/common.mjs';
+import { auditClaudeHooks } from '../../src/lib/hook-audit/providers/claude.mjs';
 
 function write(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -154,12 +155,89 @@ test('unverified newer Codex versions do not inherit the 0.151 timeout profile',
   try {
     write(path.join(fx.codex, 'hooks.json'), { hooks: { SessionEnd: [{ hooks: [{ type: 'command', command: 'node end.cjs', timeout: 5 }] }] } });
     const report = auditCodexHooks({ codexHome: fx.codex, projectRoots: [], pluginCacheDir: path.join(fx.codex, 'plugins', 'cache'), codexVersion: '0.152.0' });
-    assert.equal(report.hostSchema.confidence, 'unknown');
+    assert.equal(report.hostSchema.confidence, 'syntax-only');
     assert.equal(report.records[0].timeout.effective, null);
     assert.equal(report.plan.length, 0);
   } finally {
     fs.rmSync(fx.root, { recursive: true, force: true });
   }
+});
+
+test('Codex profiles are exact and future syntax remains observable without optimistic validation', () => {
+  const fx = fixture();
+  try {
+    write(path.join(fx.codex, 'hooks.json'), { hooks: {
+      FutureEvent: [{ hooks: [{ type: 'future_handler', futureField: true }] }],
+      SessionEnd: [{ hooks: [{ type: 'command', command: 'node end.cjs', timeout: 5 }] }],
+    } });
+    const report = auditCodexHooks({
+      codexHome: fx.codex, projectRoots: [],
+      pluginCacheDir: path.join(fx.codex, 'plugins', 'cache'), codexVersion: '0.151.999',
+    });
+    assert.equal(report.hostSchema.confidence, 'syntax-only');
+    assert.equal(report.summary.invalidSources, 0);
+    assert.equal(report.records.length, 2);
+    assert.equal(report.plan.length, 0);
+    assert.ok(report.records.every((record) => record.timeout.effective === null));
+  } finally { fs.rmSync(fx.root, { recursive: true, force: true }); }
+});
+
+test('structured argv boundaries remain material to occurrence identity', () => {
+  const source = {
+    file: '/fixture/adapter.json', digest: 'a'.repeat(64), sourceKind: 'external-adapter-manifest',
+    authority: 'operator-configured', generatedStatus: 'direct', owner: 'fixture', baseDir: '/fixture',
+  };
+  const first = normalizedOccurrence({
+    host: 'fixture', event: 'execution.run', type: 'argv-subprocess',
+    handler: { command: ['node', 'a b'] }, source,
+  });
+  const second = normalizedOccurrence({
+    host: 'fixture', event: 'execution.run', type: 'argv-subprocess',
+    handler: { command: ['node a', 'b'] }, source,
+  });
+  assert.notEqual(first.behaviorFingerprint, second.behaviorFingerprint);
+  assert.notEqual(first.command.digest, second.command.digest);
+});
+
+test('Codex duplicate occurrences retain stable unique occurrence ids', () => {
+  const fx = fixture();
+  try {
+    write(path.join(fx.codex, 'hooks.json'), { hooks: { SessionEnd: [{ hooks: [
+      { type: 'command', command: 'node end.cjs', timeout: 5 },
+      { type: 'command', command: 'node end.cjs', timeout: 5 },
+    ] }] } });
+    const report = auditCodexHooks({
+      codexHome: fx.codex, projectRoots: [],
+      pluginCacheDir: path.join(fx.codex, 'plugins', 'cache'), codexVersion: '0.151.0',
+    });
+    assert.equal(report.records.length, 2);
+    assert.equal(new Set(report.records.map((record) => record.occurrenceId)).size, 2);
+    assert.ok(report.records.every((record) => /^[a-f0-9]{64}$/.test(record.occurrenceId)));
+  } finally { fs.rmSync(fx.root, { recursive: true, force: true }); }
+});
+
+test('duplicate Claude occurrences retain unique action ids and inline plugin ownership', () => {
+  const fx = fixture();
+  try {
+    const plugin = path.join(fx.root, 'plugin');
+    write(path.join(fx.claude, 'plugins', 'installed_plugins.json'), {
+      plugins: { 'fixture@test': [{ installPath: plugin, version: '1.0.0' }] },
+    });
+    write(path.join(plugin, '.claude-plugin', 'plugin.json'), {
+      name: 'fixture', version: '1.0.0', hooks: { hooks: { SessionEnd: [{ hooks: [
+        { type: 'command', command: 'node end.cjs', timeout: 5 },
+        { type: 'command', command: 'node end.cjs', timeout: 5 },
+      ] }] } },
+    });
+    const report = auditClaudeHooks({
+      claudeRoot: fx.claude, projectRoots: [], managedSettingsFile: null, claudeVersion: '2.1.258',
+    });
+    assert.equal(report.records.length, 2);
+    assert.equal(new Set(report.plan.map((action) => action.id)).size, 2);
+    assert.ok(report.records.every((record) => record.source.generatedStatus === 'generated'));
+    assert.ok(report.records.every((record) => record.source.authority === 'generated-runtime-copy'));
+    assert.ok(report.plan.every((action) => action.classification === 'upstream-required'));
+  } finally { fs.rmSync(fx.root, { recursive: true, force: true }); }
 });
 
 test('bounded reads reject a source replaced between inspection and open', () => {

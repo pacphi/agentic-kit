@@ -120,7 +120,7 @@ export function auditOpenCodeHooks({
   const records = sources.flatMap((source) => [...configRecords(source), ...moduleRecords(source)])
     .sort((a, b) => a.source.file.localeCompare(b.source.file) || a.event.localeCompare(b.event));
   const plan = records.map((record) => ({
-    id: `opencode-review-${record.behaviorFingerprint.slice(0, 16)}`,
+    id: `opencode-review-${record.occurrenceId.slice(0, 16)}`,
     host: 'opencode', diagnostic: record.diagnostics[0]?.code ?? 'plugin-review', target: record.source.file,
     classification: record.source.generatedStatus === 'partially-generated' ? 'approval-required' : 'approval-required',
     reason: 'OpenCode plugins execute with host-process authority; remediation requires source-owner review and a restart',

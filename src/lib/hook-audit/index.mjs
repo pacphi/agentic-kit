@@ -18,7 +18,7 @@ const SCHEMA = Object.freeze({
   confidence: 'verified',
 });
 
-const VERIFIED_CODEX_VERSION = /^0\.151(?:\.|$)/;
+const VERIFIED_CODEX_VERSION = '0.151.0';
 const CODEX_EVENTS = new Set([
   'PreToolUse', 'PermissionRequest', 'PostToolUse', 'PreCompact', 'PostCompact',
   'UserPromptSubmit', 'SubagentStop', 'Stop', 'SessionStart', 'SubagentStart', 'SessionEnd',
@@ -29,14 +29,14 @@ const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 const pointerPart = (value) => String(value).replaceAll('~', '~0').replaceAll('/', '~1');
 
 function schemaFor(codexVersion) {
-  if (VERIFIED_CODEX_VERSION.test(codexVersion)) return SCHEMA;
+  if (codexVersion === VERIFIED_CODEX_VERSION) return SCHEMA;
   return Object.freeze({
     id: 'codex-hooks-syntax-only',
     timeoutUnits: 'unknown',
     sessionEnd: { default: null, maximum: null },
     evidence: SCHEMA.evidence,
     verifiedAt: SCHEMA.verifiedAt,
-    confidence: 'unknown',
+    confidence: 'syntax-only',
   });
 }
 
@@ -61,14 +61,14 @@ function validateCommonHookFields(hook, location) {
   return null;
 }
 
-function validateHook(hook, event, groupIndex, hookIndex) {
+function validateHook(hook, event, groupIndex, hookIndex, strictProfile) {
   const location = `${event} hook ${groupIndex}/${hookIndex}`;
   if (!isRecord(hook)) return `${location} must be an object`;
   if (hook.type !== undefined && typeof hook.type !== 'string') {
     return `${location} type must be a string`;
   }
   const type = hook.type ?? 'command';
-  if (!CODEX_HANDLER_TYPES.has(type)) return `${location} has unsupported type ${type}`;
+  if (strictProfile && !CODEX_HANDLER_TYPES.has(type)) return `${location} has unsupported type ${type}`;
   if (hook.timeout !== undefined
       && (typeof hook.timeout !== 'number' || !Number.isFinite(hook.timeout) || hook.timeout < 0)) {
     return `${location} timeout must be a finite nonnegative number`;
@@ -77,45 +77,48 @@ function validateHook(hook, event, groupIndex, hookIndex) {
       && (typeof hook.command !== 'string' || hook.command.trim() === '')) {
     return `${event} command hook ${groupIndex}/${hookIndex} requires a non-empty command`;
   }
-  if (type === 'mcp_tool') return validateMcpHook(hook, event, location);
+  if (type === 'mcp_tool') {
+    const mcpError = validateMcpHook(hook, event, location);
+    if (mcpError) return mcpError;
+  }
   return validateCommonHookFields(hook, location);
 }
 
-function validateHookGroup(group, event, groupIndex) {
+function validateHookGroup(group, event, groupIndex, strictProfile) {
   if (!isRecord(group)) return `${event} hook group ${groupIndex} must be an object`;
   if (group.matcher !== undefined && typeof group.matcher !== 'string') {
     return `${event} hook group ${groupIndex} matcher must be a string`;
   }
   if (!Array.isArray(group.hooks)) return `${event} hook group ${groupIndex} hooks must be an array`;
   for (const [hookIndex, hook] of group.hooks.entries()) {
-    const error = validateHook(hook, event, groupIndex, hookIndex);
+    const error = validateHook(hook, event, groupIndex, hookIndex, strictProfile);
     if (error) return error;
   }
   return null;
 }
 
-function validateHookDocument(document) {
+function validateHookDocument(document, schema) {
   if (!isRecord(document) || !isRecord(document.hooks)) {
     return 'hook JSON requires a top-level hooks object';
   }
   for (const [event, groups] of Object.entries(document.hooks)) {
-    if (!CODEX_EVENTS.has(event)) return `unsupported Codex hook event ${event}`;
+    if (schema.confidence === 'verified' && !CODEX_EVENTS.has(event)) return `unsupported Codex hook event ${event}`;
     if (!Array.isArray(groups)) return `${event} hook groups must be an array`;
     for (const [groupIndex, group] of groups.entries()) {
-      const error = validateHookGroup(group, event, groupIndex);
+      const error = validateHookGroup(group, event, groupIndex, schema.confidence === 'verified');
       if (error) return error;
     }
   }
   return null;
 }
 
-function readHookSource(file, metadata, containmentRoot) {
+function readHookSource(file, metadata, containmentRoot, schema) {
   const read = readBoundedFile(file, containmentRoot);
   if (read.status === 'absent') return null;
   if (read.status !== 'valid') return { ...metadata, file, ...read };
   try {
     const document = JSON.parse(read.text);
-    const schemaError = validateHookDocument(document);
+    const schemaError = validateHookDocument(document, schema);
     if (schemaError) return { ...metadata, file, status: 'invalid', digest: read.digest, error: `hook schema failed: ${schemaError}` };
     return { ...metadata, file, status: 'valid', digest: read.digest, document };
   } catch (error) {
@@ -254,6 +257,11 @@ function recordsFromSource(source, codexVersion, schema) {
           timeout: typeof hook.timeout === 'number' ? hook.timeout : null,
           cwd: source.baseDir ?? source.projectPath ?? path.dirname(source.file),
         });
+        const rawFingerprint = sha256(JSON.stringify(hook));
+        const occurrenceId = sha256(stableJson({
+          host: 'codex', event, matcher, indices: { group: groupIndex, hook: hookIndex },
+          source: { file: source.file, digest: source.digest }, rawFingerprint,
+        }));
         records.push({
           schemaVersion: 1,
           host: 'codex',
@@ -289,9 +297,10 @@ function recordsFromSource(source, codexVersion, schema) {
             recommendation: 'HUMAN REVIEW REQUIRED',
             evidence: 'Trust hashes are intentionally not inferred from project trust or compatibility state',
           },
-          rawFingerprint: sha256(JSON.stringify(hook)),
+          rawFingerprint,
           behaviorFingerprint: sha256(behaviorInput),
           duplicateGroupId: sha256(behaviorInput),
+          occurrenceId,
           diagnostics: diagnosticsFor(event, hook, source, rawCommand, schema),
         });
       });
@@ -328,23 +337,23 @@ export function auditCodexHooks({
 } = {}) {
   const schema = schemaFor(codexVersion);
   const sources = [];
-  const globalSource = readHookSource(path.join(codexHome, 'hooks.json'), { kind: 'global' }, codexHome);
+  const globalSource = readHookSource(path.join(codexHome, 'hooks.json'), { kind: 'global' }, codexHome, schema);
   if (globalSource) sources.push(globalSource);
   const globalInline = readCodexInlineHooks(path.join(codexHome, 'config.toml'), codexHome, {
     kind: 'global-inline', authority: 'user-owned', generatedStatus: 'direct', baseDir: codexHome,
   });
   if (globalInline) {
-    const error = globalInline.status === 'valid' ? validateHookDocument(globalInline.document) : null;
+    const error = globalInline.status === 'valid' ? validateHookDocument(globalInline.document, schema) : null;
     sources.push(error ? { ...globalInline, status: 'invalid', error: `hook schema failed: ${error}` } : globalInline);
   }
   for (const projectPath of [...new Set(projectRoots.map((root) => path.resolve(root)))].sort()) {
-    const source = readHookSource(path.join(projectPath, '.codex', 'hooks.json'), { kind: 'project', projectPath }, projectPath);
+    const source = readHookSource(path.join(projectPath, '.codex', 'hooks.json'), { kind: 'project', projectPath }, projectPath, schema);
     if (source) sources.push(source);
     const inline = readCodexInlineHooks(path.join(projectPath, '.codex', 'config.toml'), projectPath, {
       kind: 'project-inline', projectPath, authority: 'project-owned', generatedStatus: 'unknown', baseDir: projectPath,
     });
     if (inline) {
-      const error = inline.status === 'valid' ? validateHookDocument(inline.document) : null;
+      const error = inline.status === 'valid' ? validateHookDocument(inline.document, schema) : null;
       sources.push(error ? { ...inline, status: 'invalid', error: `hook schema failed: ${error}` } : inline);
     }
   }
@@ -356,11 +365,11 @@ export function auditCodexHooks({
     for (const file of plugin.hookFiles) {
       const source = readHookSource(file, {
         kind: 'plugin-cache', pluginRef: plugin.ref, pluginVersion: plugin.version,
-      }, plugin.root);
+      }, plugin.root, schema);
       if (source) sources.push(source);
     }
     for (const [index, document] of (plugin.inlineHookDocuments ?? []).entries()) {
-      const schemaError = validateHookDocument(document);
+      const schemaError = validateHookDocument(document, schema);
       sources.push(schemaError ? {
         kind: 'plugin-cache-inline', pluginRef: plugin.ref, pluginVersion: plugin.version,
         file: `${plugin.manifestFile ?? `${plugin.root}/.codex-plugin/plugin.json`}#hooks/${index}`, status: 'invalid', error: schemaError,

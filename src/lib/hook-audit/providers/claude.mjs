@@ -71,8 +71,8 @@ function sourcesForPluginInstall(ref, install) {
       else if (isRecord(value)) {
         const error = validateDocument(value);
         sources.push(error
-          ? { kind: 'plugin-cache-inline', pluginRef: ref, pluginVersion: install.version ?? null, file: `${manifest.file}#hooks`, status: 'invalid', error }
-          : { kind: 'plugin-cache-inline', pluginRef: ref, pluginVersion: install.version ?? null, file: `${manifest.file}#hooks`, status: 'valid', digest: sha256(stableJson(value)), document: value, baseDir: root });
+          ? { kind: 'plugin-cache-inline', pluginRef: ref, pluginVersion: install.version ?? null, authority: 'generated-runtime-copy', generatedStatus: 'generated', file: `${manifest.file}#hooks`, status: 'invalid', error }
+          : { kind: 'plugin-cache-inline', pluginRef: ref, pluginVersion: install.version ?? null, authority: 'generated-runtime-copy', generatedStatus: 'generated', file: `${manifest.file}#hooks`, status: 'valid', digest: sha256(stableJson(value)), document: value, baseDir: root });
       }
     }
   } else {
@@ -185,7 +185,7 @@ function remediation(records) {
   return records.filter((record) => record.diagnostics.some((item) => [
     'probable-timeout-unit-mismatch', 'sessionend-timeout-clamped', 'plugin-sessionend-budget-not-raised',
   ].includes(item.code))).map((record) => ({
-    id: `claude-timeout-review-${record.behaviorFingerprint.slice(0, 16)}`,
+    id: `claude-timeout-review-${record.occurrenceId.slice(0, 16)}`,
     host: 'claude', diagnostic: 'probable-timeout-unit-mismatch', target: record.source.file,
     classification: record.source.generatedStatus === 'generated' ? 'upstream-required' : 'approval-required',
     reason: 'Timeout units require source-owner confirmation; changing the definition can change behavior and trust state',

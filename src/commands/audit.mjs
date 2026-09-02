@@ -33,7 +33,7 @@ Examples:
   ak audit hooks --host all --project ../another-repo --json
   ak audit hooks --all-projects --json`;
 
-function detectedVersion(binary, pattern = /(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/) {
+export function detectedVersion(binary, pattern = /(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/) {
   try {
     const result = spawnSync(binary, ['--version'], {
       encoding: 'utf8', timeout: 3_000, stdio: ['ignore', 'pipe', 'ignore'],
@@ -44,7 +44,7 @@ function detectedVersion(binary, pattern = /(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/
   }
 }
 
-function selectedHosts(flags) {
+export function selectedHookAuditHosts(flags) {
   const hosts = flags.host?.length ? flags.host : ['codex'];
   const unknown = hosts.filter((host) => host !== 'all' && !BUILTIN_HOOK_AUDIT_HOSTS.includes(host));
   if (unknown.length) throw new TypeError(`unknown --host value(s): ${unknown.join(', ')}`);
@@ -55,13 +55,32 @@ function includesHost(hosts, host) {
   return hosts.includes('all') || hosts.includes(host);
 }
 
-function projectRoots(flags) {
+export function hookAuditProjectRoots(flags) {
   const roots = new Set([process.cwd()]);
   for (const project of flags.project ?? []) roots.add(path.resolve(project));
   if (flags['all-projects']) {
     for (const project of projectsInScope(projectCensus(), 'gitRepos')) roots.add(project.path);
   }
   return [...roots].sort();
+}
+
+/** @param {any} options */
+export function buildHookAudit({
+  flags,
+  detectVersionFn = detectedVersion,
+  loadConfigFn = loadKitConfig,
+} = {}) {
+  const hosts = selectedHookAuditHosts(flags);
+  return auditHooks({
+    hosts,
+    projectRoots: hookAuditProjectRoots(flags),
+    versions: {
+      ...(includesHost(hosts, 'codex') ? { codex: detectVersionFn('codex') } : {}),
+      ...(includesHost(hosts, 'claude') ? { claude: detectVersionFn('claude') } : {}),
+      ...(includesHost(hosts, 'opencode') ? { opencode: detectVersionFn('opencode') } : {}),
+    },
+    config: includesHost(hosts, 'external') ? loadConfigFn() : {},
+  });
 }
 
 export async function run({
@@ -77,17 +96,7 @@ export async function run({
   }
   let report;
   try {
-    const hosts = selectedHosts(flags);
-    report = auditHooks({
-      hosts,
-      projectRoots: projectRoots(flags),
-      versions: {
-        ...(includesHost(hosts, 'codex') ? { codex: detectVersionFn('codex') } : {}),
-        ...(includesHost(hosts, 'claude') ? { claude: detectVersionFn('claude') } : {}),
-        ...(includesHost(hosts, 'opencode') ? { opencode: detectVersionFn('opencode') } : {}),
-      },
-      config: includesHost(hosts, 'external') ? loadConfigFn() : {},
-    });
+    report = buildHookAudit({ flags, detectVersionFn, loadConfigFn });
   } catch (error) {
     console.error(`hook audit failed: ${error.message}`);
     return 2;
