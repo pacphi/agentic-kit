@@ -93,6 +93,8 @@ function dynamicAction(tokens, ceilingTokens, policy) {
   return 'continue';
 }
 
+/** @param {{ceilingTokens?: number|null, startupTokens?: number|null,
+ * currentTokens?: number|null, policy?: typeof CONTEXT_BUDGET_POLICY}} [input] */
 export function evaluateContextBudget({
   ceilingTokens, startupTokens = null, currentTokens = null, policy = CONTEXT_BUDGET_POLICY,
 } = {}) {

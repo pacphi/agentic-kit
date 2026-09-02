@@ -15,7 +15,10 @@ const OUTCOMES = new Set([
 
 function safeLabel(value, fallback = 'unknown') {
   if (typeof value !== 'string') return fallback;
-  const cleaned = value.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim();
+  const cleaned = [...value].filter((character) => {
+    const code = character.charCodeAt(0);
+    return code >= 32 && (code < 127 || code > 159);
+  }).join('').trim();
   return cleaned ? cleaned.slice(0, MAX_LABEL) : fallback;
 }
 

@@ -325,8 +325,11 @@ function modelEvidence(host, environment) {
 
 /** Acquire every non-hook source locally. The hook audit is passed in by the
  * command so the canonical static collector runs only once. */
+/** @param {{hosts?: string[], cfg?: any, pkgRoot?: string, cwd?: string,
+ * hookAudit?: any, environment?: NodeJS.ProcessEnv}} [input] */
 export async function collectContextEvidence({
-  hosts, cfg, pkgRoot, cwd = process.cwd(), hookAudit, environment = process.env,
+  hosts = [], cfg = {}, pkgRoot = process.cwd(), cwd = process.cwd(),
+  hookAudit = null, environment = process.env,
 } = {}) {
   const guidance = {};
   const windows = {};

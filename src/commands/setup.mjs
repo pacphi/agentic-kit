@@ -455,7 +455,7 @@ export const RUFLO_PROJECT_INIT_ARGS = Object.freeze([
  *  machine guidance, Codex adapter, or explicit skill projections. The caller
  *  restores/reconciles project guidance from its pre-init snapshot. */
 async function rufloProjectInit(root, permCtx) {
-  const init = await runCmd('ruflo', RUFLO_PROJECT_INIT_ARGS, { cwd: root, timeout: 300_000 });
+  const init = await runCmd('ruflo', [...RUFLO_PROJECT_INIT_ARGS], { cwd: root, timeout: 300_000 });
   (init.code === 0 ? ok : fail)('ruflo init --full');
   if (init.code !== 0) return false;
   const rufloUnexpected = removeUndisclosedPermissions(

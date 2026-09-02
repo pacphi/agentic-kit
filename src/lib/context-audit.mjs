@@ -179,9 +179,15 @@ function windowProjection(value) {
   const host = safeFact(value?.host);
   const effective = safeFact(value?.effective);
   const autoCompact = safeFact(value?.autoCompact);
-  const facts = [
+  /** @type {Array<any>} */
+  const facts = [];
+  /** @type {Array<[string, any]>} */
+  const candidates = [
     ['advertised', advertised], ['host', host], ['effective', effective], ['auto-compact', autoCompact],
-  ].filter(([, fact]) => fact).map(([kind, fact]) => ({ ...fact, kind }));
+  ];
+  for (const [kind, fact] of candidates) {
+    if (fact) facts.push({ ...fact, kind });
+  }
   return {
     status,
     model: safeText(value?.model, null, 256),
@@ -291,6 +297,7 @@ function hostReport(host, evidence) {
   };
 }
 
+/** @param {{hosts?: string[], evidence?: any}} [input] */
 export function buildContextAudit({ hosts, evidence = {} } = {}) {
   const selected = selectedContextHosts(hosts);
   const reports = Object.fromEntries(selected.map((host) => [host, hostReport(host, evidence)]));
