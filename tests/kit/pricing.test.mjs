@@ -38,6 +38,9 @@ test('every PRICES entry carries finite in/out rates, a provider, and asOf', () 
 });
 
 test('the table carries the ADR-0009 §3 rates for each Anthropic tier', () => {
+  assert.deepEqual([priceFor('claude-fable-5-1').in, priceFor('claude-fable-5-1').out], [10, 50]);
+  assert.equal(priceFor('claude-fable-5-1').key, 'claude-fable-5-1', 'resolves to its own explicit row, not a prefix fallthrough');
+  assert.deepEqual([priceFor('claude-mythos-5-1').in, priceFor('claude-mythos-5-1').out], [10, 50]);
   assert.deepEqual([priceFor('claude-fable-5').in, priceFor('claude-fable-5').out], [10, 50]);
   assert.deepEqual([priceFor('claude-opus-5').in, priceFor('claude-opus-5').out], [5, 25]);
   assert.deepEqual([priceFor('claude-opus-4-8').in, priceFor('claude-opus-4-8').out], [5, 25]);
@@ -91,6 +94,38 @@ test('provider disambiguates when given, and is reported back', () => {
   assert.equal(priceFor('gpt-5.5', 'openai').matched, true);
   // A provider that contradicts the only match does not veto it — the id wins.
   assert.equal(priceFor('claude-opus-5', 'openai').in, 5);
+});
+
+// ── priceFor / costOf: per-model cacheReadMultiplier override ───────────────
+// Anthropic prices cache-read hits on Fable 5.1 / Mythos 5.1 at 0.025x base
+// input — every other current model (Anthropic and OpenAI) uses 0.1x. Before
+// the per-entry override existed, costOf() applied the global 0.1x uniformly,
+// which would have overstated Fable 5.1's cache-read-heavy cost by 4x.
+
+test('cacheReadMultiplier defaults to 0.1 for models with no published exception', () => {
+  assert.equal(priceFor('claude-opus-5').cacheReadMultiplier, 0.1);
+  assert.equal(priceFor('claude-fable-5').cacheReadMultiplier, 0.1);
+  assert.equal(priceFor('gpt-5.6-sol').cacheReadMultiplier, 0.1);
+  assert.equal(priceFor('an-unknown-model').cacheReadMultiplier, 0.1, 'fallback also defaults to 0.1');
+});
+
+test('Fable 5.1 and Mythos 5.1 override cacheReadMultiplier to 0.025', () => {
+  assert.equal(priceFor('claude-fable-5-1').cacheReadMultiplier, 0.025);
+  assert.equal(priceFor('claude-mythos-5-1').cacheReadMultiplier, 0.025);
+  // The override travels through a dated id too, same as the base rate does.
+  assert.equal(priceFor('claude-fable-5-1-20260901').cacheReadMultiplier, 0.025);
+});
+
+test('costOf actually applies the override — a cache-read-heavy Fable 5.1 row costs 1/4 of the default-multiplier price', () => {
+  const usage = { model: 'claude-fable-5-1', cacheRead: 1_000_000 };
+  const withOverride = costOf(usage);
+  const withDefaultMultiplier = (1_000_000 * 0.1 * 10) / 1e6; // what the old, pre-fix behavior computed
+  assert.equal(withOverride, (1_000_000 * 0.025 * 10) / 1e6);
+  assert.equal(withOverride, 0.25);
+  assert.equal(withOverride * 4, withDefaultMultiplier, 'the bug this override fixes was a flat 4x overstatement');
+  // Fable 5 (no override) still prices the same cache-read volume at the
+  // default 0.1x, so the two models diverge only on this one axis.
+  assert.equal(costOf({ model: 'claude-fable-5', cacheRead: 1_000_000 }), 1);
 });
 
 // ── priceFor: unknown models never throw ─────────────────────────────────────
