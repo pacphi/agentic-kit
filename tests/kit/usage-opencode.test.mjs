@@ -210,7 +210,7 @@ test('assistant messages: mode (last wins), user→assistant latency gap, error 
     sessions: [{ id: 'ses_1', directory: '/x', title: 't', timeCreated: T }],
     messages: [
       userMsg('u1', 'ses_1', T, 'fix the auth flow'),
-      assistantMsg('a1', 'ses_1', T + 4_000, { mode: 'build', tokens: { input: 900, cache: { read: 20000 }, output: 10 } }),
+      assistantMsg('a1', 'ses_1', T + 4_000, { mode: 'build', tokens: { input: 900, cache: { read: 20000, write: 3000 }, output: 10 } }),
       // token-LESS: the error row must never overwrite ctxLastTokens with a
       // fabricated 0 (evidence-gated — see recordAssistantUsage).
       assistantMsg('a2', 'ses_1', T + 8_000, { error: { name: 'ProviderAuthError' }, tokens: null }),
@@ -221,7 +221,11 @@ test('assistant messages: mode (last wins), user→assistant latency gap, error 
   assert.equal(session.modeRaw, 'build');
   assert.equal(session.latHist[1], 1);        // 4s → 2-5s bucket
   assert.equal(session.exceptions, 1);
-  assert.equal(session.ctxLastTokens, 20900);
+  assert.equal(session.ctxLastTokens, 23900);
+  assert.deepEqual(session.contextEvidence.input, {
+    first: 23900, last: 23900, peak: 23900, samples: 1,
+  });
+  assert.equal(session.contextEvidence.state, 'partial');
   rm(d);
 });
 

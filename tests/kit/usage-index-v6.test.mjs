@@ -280,7 +280,16 @@ test('parseCodex v11: mode, duration, aborts, ctx window, typed tools', () => {
     JSON.stringify({ type: 'event_msg', payload: { type: 'item_completed', item: { type: 'CommandExecution' } }, timestamp: plusSec(T0, 7) }),
     JSON.stringify({ type: 'event_msg', payload: { type: 'task_complete', duration_ms: 9000, error: null, turn_id: 't1' }, timestamp: plusSec(T0, 9) }),
     JSON.stringify({ type: 'event_msg', payload: { type: 'turn_aborted', reason: 'user_interrupt', turn_id: 't2' }, timestamp: plusSec(T0, 20) }),
-    JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 5000, cached_input_tokens: 4000, output_tokens: 300 } } }, timestamp: plusSec(T0, 21) }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: {
+      total_token_usage: { input_tokens: 4000, cached_input_tokens: 3000, output_tokens: 200 },
+      last_token_usage: { input_tokens: 70000, cached_input_tokens: 60000, output_tokens: 200 },
+      model_context_window: 258400,
+    } }, timestamp: plusSec(T0, 21) }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: {
+      total_token_usage: { input_tokens: 5000, cached_input_tokens: 4000, output_tokens: 300 },
+      last_token_usage: { input_tokens: 60000, cached_input_tokens: 50000, output_tokens: 100 },
+      model_context_window: 258400,
+    } }, timestamp: plusSec(T0, 22) }),
   ].join('\n');
   const { session: rec } = parseCodex(lines, { id: 'cx1' });
   assert.equal(rec.mode, 'auto-edit');
@@ -288,7 +297,19 @@ test('parseCodex v11: mode, duration, aborts, ctx window, typed tools', () => {
   assert.equal(rec.latCount, 1);
   assert.equal(rec.latHist[2], 1);           // 6s prompt→agent gap
   assert.equal(rec.aborts, 1);
-  assert.equal(rec.ctxWindow, 272000);
+  assert.equal(rec.ctxWindow, 258400, 'same token snapshot window supersedes task_started fallback');
+  assert.equal(rec.ctxLastTokens, 60000,
+    'Codex last_token_usage.input_tokens is already gross and must not add cached_input_tokens again');
+  assert.deepEqual(rec.contextEvidence.input, {
+    first: 70000, last: 60000, peak: 70000, samples: 2,
+  });
+  assert.deepEqual(rec.contextEvidence.window, {
+    first: 272000, last: 258400, min: 258400, max: 272000,
+    samples: 3, provenance: 'runtime-observed',
+  });
+  assert.equal(rec.contextEvidence.pressure.firstBps, Math.round(70000 * 10000 / 258400));
+  assert.equal(rec.contextEvidence.pressure.lastBps, Math.round(60000 * 10000 / 258400));
+  assert.equal(rec.contextEvidence.pressure.samples, 2);
   assert.equal(rec.tools.CommandExecution, 1);
 });
 

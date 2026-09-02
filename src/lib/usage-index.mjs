@@ -138,8 +138,12 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
  *       last moment it exists. A v15 record cannot be corrected in place
  *       because the text is gone by then; the flags are only derivable on a
  *       re-parse. Absent keys mean "not that shape" and are omitted rather
- *       than stored as 0 — see usage-parsers.promptShape. */
-export const SCHEMA_VERSION = 16;
+ *       than stored as 0 — see usage-parsers.promptShape.
+ *  v17: per-session context evidence retains bounded first/last/peak/count
+ *       summaries and a fixed pressure histogram. Codex also decodes the
+ *       last_token_usage + model_context_window pair from token_count. Cached
+ *       v16 records cannot recover those discarded snapshots, so re-parse. */
+export const SCHEMA_VERSION = 17;
 
 const DAY_MS = 86_400_000;
 // One day of slack past dashboard-server.mjs's 365-day clampDays ceiling —

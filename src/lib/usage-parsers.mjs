@@ -199,6 +199,16 @@ export function blankSession(id, provider) {
     latHist: null, latCount: 0,
     lenSeconds: 0,
     ctxWindow: null, ctxLastTokens: null,
+    // v17: bounded context evidence. No prompt text and no unbounded sample
+    // list survives parsing: only first/last/peak/count plus a fixed histogram.
+    // The ctx* siblings remain as compatibility fields for existing clients.
+    contextEvidence: {
+      schemaVersion: 1,
+      state: 'not-recorded',
+      input: null,
+      window: null,
+      pressure: null,
+    },
     aborts: 0,
     // v14: one fingerprint per prompt-kind turn, and the count of any that
     // exceeded MAX_PROMPT_FPS. Prompt TEXT is never stored — see
@@ -355,6 +365,71 @@ export const LEN_BUCKET_EDGES = [300, 900, 2700, 7200];
 export function bucketIndex(edges, v) {
   for (let i = 0; i < edges.length; i++) if (v <= edges[i]) return i;
   return edges.length;
+}
+
+/** Fixed pressure buckets, in basis points of the observed context window.
+ *  Values above 100% land in the final overflow bucket instead of being
+ *  clamped, preserving the evidence that a reported window was exceeded. */
+export const CONTEXT_PRESSURE_BPS_EDGES = [500, 700, 1000, 2500, 5000, 6500, 7500, 9000, 10000];
+
+/**
+ * Retain one privacy-preserving context observation on a session record.
+ * Input and window evidence may arrive independently (Claude/OpenCode do not
+ * currently persist a runtime window; older Codex task_started rows do). A
+ * pressure observation is made only when both values share this call/snapshot.
+ */
+export function noteContextSample(rec, inputTokens, windowTokens = null) {
+  const input = Number(inputTokens);
+  const window = Number(windowTokens);
+  const hasInput = inputTokens !== null && inputTokens !== undefined
+    && Number.isFinite(input) && input > 0;
+  const hasWindow = windowTokens !== null && windowTokens !== undefined
+    && Number.isFinite(window) && window > 0;
+  if (!hasInput && !hasWindow) return;
+
+  rec.contextEvidence ??= {
+    schemaVersion: 1, state: 'not-recorded', input: null, window: null, pressure: null,
+  };
+  const evidence = rec.contextEvidence;
+
+  if (hasInput) {
+    const prior = evidence.input;
+    evidence.input = prior
+      ? { ...prior, last: input, peak: Math.max(prior.peak, input), samples: prior.samples + 1 }
+      : { first: input, last: input, peak: input, samples: 1 };
+    rec.ctxLastTokens = input;
+  }
+
+  if (hasWindow) {
+    const prior = evidence.window;
+    evidence.window = prior
+      ? {
+          ...prior, last: window, min: Math.min(prior.min, window),
+          max: Math.max(prior.max, window), samples: prior.samples + 1,
+        }
+      : {
+          first: window, last: window, min: window, max: window,
+          samples: 1, provenance: 'runtime-observed',
+        };
+    rec.ctxWindow = window;
+  }
+
+  if (hasInput && hasWindow) {
+    const bps = Math.round(input * 10000 / window);
+    const prior = evidence.pressure;
+    if (prior) {
+      prior.lastBps = bps;
+      prior.peakBps = Math.max(prior.peakBps, bps);
+      prior.samples++;
+      prior.hist[bucketIndex(CONTEXT_PRESSURE_BPS_EDGES, bps)]++;
+    } else {
+      const hist = new Array(CONTEXT_PRESSURE_BPS_EDGES.length + 1).fill(0);
+      hist[bucketIndex(CONTEXT_PRESSURE_BPS_EDGES, bps)] = 1;
+      evidence.pressure = { firstBps: bps, lastBps: bps, peakBps: bps, samples: 1, hist };
+    }
+  }
+
+  evidence.state = evidence.pressure ? 'observed' : 'partial';
 }
 
 /** Record one response-latency sample onto `rec.latHist`, allocating the
@@ -589,8 +664,8 @@ function recordClaudeAssistantTurn(rec, turns, latState, ms, decoded, withTurns)
   // so writing unconditionally let a token-less entry overwrite real context
   // pressure with a fabricated 0. A completion with neither fresh input nor a
   // cache read carried no context evidence to record.
-  const ctxTokens = decoded.usage.input + decoded.usage.cacheRead;
-  if (ctxTokens > 0) rec.ctxLastTokens = ctxTokens;
+  const ctxTokens = decoded.usage.input + decoded.usage.cacheRead + decoded.usage.cacheWrite;
+  if (ctxTokens > 0) noteContextSample(rec, ctxTokens);
 
   const tools = collectClaudeToolNames(rec, decoded.toolUses);
   if (withTurns) {
@@ -757,6 +832,9 @@ function handleCodexTokenCount(rec, stats, usageState, decoded, ms) {
   stats.tokenCountEvents++;
   const t = decoded.usage.total;
   if (t) { usageState.lastUsage = t; usageState.lastUsageAt = ms; }
+  // last.input_tokens is already gross prompt input. cached_input_tokens is a
+  // subset, not an additional amount (unlike Claude/OpenCode's split fields).
+  noteContextSample(rec, decoded.usage.last?.input_tokens, decoded.usage.contextWindow);
   const rl = decoded.usage.rateLimits;
   if (rl) applyCodexRateLimit(rec, rl, ms);
 }
@@ -768,7 +846,7 @@ function handleCodexTokenCount(rec, stats, usageState, decoded, ms) {
  *  own host-measured duration (see handleCodexTaskComplete). */
 function handleCodexTaskStarted(rec, latState, payload) {
   const w = Number(payload.model_context_window);
-  if (Number.isFinite(w)) rec.ctxWindow = w;
+  if (Number.isFinite(w) && w > 0) noteContextSample(rec, null, w);
   const startedMs = toMs(payload.started_at);
   latState.turnStartedAt = Number.isFinite(startedMs) ? startedMs : null;
 }

@@ -10,7 +10,7 @@ import {
   SCHEMA_VERSION, IDLE_GAP_MS, _resetForTest,
 } from '../../src/lib/usage-index.mjs';
 import {
-  addUsage, blankSession, noteLatencySample, parseClaude,
+  addUsage, blankSession, noteContextSample, noteLatencySample, parseClaude,
   normalizePromptText, promptFingerprint, promptShape,
   LAT_BUCKET_EDGES, LEN_BUCKET_EDGES, MAX_PROMPT_FPS, MAX_TOKEN_HASHES,
 } from '../../src/lib/usage-parsers.mjs';
@@ -1532,6 +1532,37 @@ test('blankSession v11 fields default honest-absent', () => {
   assert.equal(rec.mode, null);
   assert.equal(rec.ctxWindow, null);
   assert.equal(rec.aborts, 0);
+  assert.deepEqual(rec.contextEvidence, {
+    schemaVersion: 1,
+    state: 'not-recorded',
+    input: null,
+    window: null,
+    pressure: null,
+  });
+});
+
+test('noteContextSample keeps bounded first/last/peak evidence and compatibility fields', () => {
+  const rec = blankSession('s-context', 'codex');
+  noteContextSample(rec, 10_000, 100_000);
+  noteContextSample(rec, 120_000, 100_000);
+  noteContextSample(rec, null, 80_000);
+
+  assert.deepEqual(rec.contextEvidence.input, {
+    first: 10_000, last: 120_000, peak: 120_000, samples: 2,
+  });
+  assert.deepEqual(rec.contextEvidence.window, {
+    first: 100_000, last: 80_000, min: 80_000, max: 100_000,
+    samples: 3, provenance: 'runtime-observed',
+  });
+  assert.equal(rec.contextEvidence.pressure.firstBps, 1_000);
+  assert.equal(rec.contextEvidence.pressure.lastBps, 12_000,
+    'over-window pressure remains visible instead of being clamped to 100%');
+  assert.equal(rec.contextEvidence.pressure.peakBps, 12_000);
+  assert.equal(rec.contextEvidence.pressure.hist.reduce((a, n) => a + n, 0), 2,
+    'the fixed histogram stores counts, never an unbounded sample list');
+  assert.equal(rec.contextEvidence.state, 'observed');
+  assert.equal(rec.ctxLastTokens, 120_000);
+  assert.equal(rec.ctxWindow, 80_000);
 });
 
 test('parseClaude derives latency, mode, ctx from entries', () => {
@@ -1539,14 +1570,18 @@ test('parseClaude derives latency, mode, ctx from entries', () => {
   const plusSec = (t, s) => new Date(Date.parse(t) + s * 1000).toISOString();
   const lines = [
     JSON.stringify({ type: 'user', timestamp: T0, permissionMode: 'acceptEdits', message: { role: 'user', content: 'do it' } }),
-    JSON.stringify({ type: 'assistant', timestamp: plusSec(T0, 8), message: { role: 'assistant', model: 'claude-opus-5', usage: { input_tokens: 1000, cache_read_input_tokens: 150000, output_tokens: 50 }, content: [] } }),
+    JSON.stringify({ type: 'assistant', timestamp: plusSec(T0, 8), message: { role: 'assistant', model: 'claude-opus-5', usage: { input_tokens: 1000, cache_read_input_tokens: 150000, cache_creation_input_tokens: 20000, output_tokens: 50 }, content: [] } }),
   ].join('\n');
   const { session: rec } = parseClaude(lines, { id: 'sess-lat' });
   assert.equal(rec.mode, 'auto-edit');
   assert.equal(rec.modeRaw, 'acceptEdits');
   assert.equal(rec.latCount, 1);
   assert.equal(rec.latHist[2], 1);            // 8s → 5-10s bucket
-  assert.equal(rec.ctxLastTokens, 151000);    // input + cacheRead of last turn
+  assert.equal(rec.ctxLastTokens, 171000);    // input + cacheRead + cacheWrite of last turn
+  assert.deepEqual(rec.contextEvidence.input, {
+    first: 171000, last: 171000, peak: 171000, samples: 1,
+  });
+  assert.equal(rec.contextEvidence.state, 'partial', 'Claude has input evidence but no observed window');
 });
 
 // The same evidence gate opencode's parser was ruled to need. decodeClaudeRecord
@@ -1565,6 +1600,7 @@ test('parseClaude: a token-less assistant entry does not zero a real ctxLastToke
   const { session: rec } = parseClaude(lines, { id: 'sess-ctx-gate' });
   assert.equal(rec.ctxLastTokens, 151000,
     'the last turn that actually recorded context wins; a token-less one carries no evidence to overwrite it with');
+  assert.equal(rec.contextEvidence.input.samples, 1);
 });
 
 test('parseClaude: a session whose only assistant entry is token-less records no context at all', () => {
@@ -1575,6 +1611,7 @@ test('parseClaude: a session whose only assistant entry is token-less records no
   ].join('\n');
   const { session: rec } = parseClaude(lines, { id: 'sess-ctx-none' });
   assert.equal(rec.ctxLastTokens, null, 'honest-absent, not a measured zero');
+  assert.equal(rec.contextEvidence.state, 'not-recorded');
 });
 
 // ── v14 prompt fingerprints (Prompts view spec §2.2) ────────────────────────

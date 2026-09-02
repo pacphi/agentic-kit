@@ -122,11 +122,21 @@ function decodeTurnContext(payload) {
 /** `event_msg` → `token_count`: a CUMULATIVE usage snapshot, so only the last
  *  one a caller sees should be kept. */
 function decodeTokenCount(payload) {
+  const info = payload.info && typeof payload.info === 'object' ? payload.info : {};
   return {
     type: 'tokenCount',
     usage: {
-      total: payload.info?.total_token_usage && typeof payload.info.total_token_usage === 'object'
-        ? payload.info.total_token_usage : null,
+      total: info.total_token_usage && typeof info.total_token_usage === 'object'
+        ? info.total_token_usage : null,
+      // Unlike total_token_usage, this is one turn's prompt snapshot. Codex
+      // reports input_tokens as the gross model input (cached_input_tokens is
+      // its subset), so callers must not add the two fields together.
+      last: info.last_token_usage && typeof info.last_token_usage === 'object'
+        ? info.last_token_usage : null,
+      // Keep the window from the SAME token-count envelope as `last`; a
+      // task_started window remains a compatibility fallback for older hosts.
+      contextWindow: Number.isFinite(Number(info.model_context_window))
+        ? Number(info.model_context_window) : null,
       rateLimits: payload.rate_limits && typeof payload.rate_limits === 'object'
         ? payload.rate_limits : null,
     },

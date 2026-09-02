@@ -29,7 +29,9 @@ import { withDb } from './sqlite.mjs';
 // definitions in usage-parsers.mjs. usage-index.mjs imports FROM this module
 // (defaultOpencodeDbPath, parseSession, …), but that is no longer a cycle:
 // this module depends only on usage-parsers.mjs, not on usage-index.mjs.
-import { addUsage, blankSession, noteLatencySample, notePromptFingerprint } from './usage-parsers.mjs';
+import {
+  addUsage, blankSession, noteContextSample, noteLatencySample, notePromptFingerprint,
+} from './usage-parsers.mjs';
 import { normalizeMode } from './usage-modes.mjs';
 
 /** The live opencode store. Overridable via roots in tests. */
@@ -204,7 +206,7 @@ function recordAssistantUsage(rec, data, at) {
   // Overwritten every qualifying message so the field reflects the LAST
   // completion, not a running total.
   if (data.tokens !== null && typeof data.tokens === 'object') {
-    rec.ctxLastTokens = num(t.input) + num(cache.read);
+    noteContextSample(rec, num(t.input) + num(cache.read) + num(cache.write));
   }
   return model;
 }
