@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/pacphi/agentic-kit/docs/schemas/hook-healing-plan.schema.json",
+  "title": "agentic-kit public hook healing plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "auditId", "planDigest", "hosts", "runtimeVersions", "actions", "summary", "upstream"],
+  "properties": {
+    "schemaVersion": { "const": "hook-heal-plan/v1" },
+    "auditId": { "type": "string", "minLength": 1 },
+    "planDigest": { "$ref": "#/$defs/sha256" },
+    "hosts": { "type": "array", "uniqueItems": true, "items": { "enum": ["codex", "claude", "opencode", "external"] } },
+    "runtimeVersions": { "type": "object", "additionalProperties": { "type": "string" } },
+    "actions": { "type": "array", "items": { "$ref": "#/$defs/action" } },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "executable", "safeAutomatic", "approvalRequired", "upstreamRequired", "neverAutomatic"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "executable": { "type": "integer", "minimum": 0 },
+        "safeAutomatic": { "type": "integer", "minimum": 0 },
+        "approvalRequired": { "type": "integer", "minimum": 0 },
+        "upstreamRequired": { "type": "integer", "minimum": 0 },
+        "neverAutomatic": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "upstream": { "type": "object" },
+    "unfinishedTransactions": { "type": "array", "items": { "type": "object" } }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "image": {
+      "type": "object",
+      "required": ["sha256", "size", "mode", "modeSupported"],
+      "properties": {
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "size": { "type": "integer", "minimum": 0 },
+        "mode": { "type": ["integer", "null"], "minimum": 0, "maximum": 511 },
+        "modeSupported": { "type": "boolean" }
+      }
+    },
+    "action": {
+      "type": "object",
+      "required": ["id", "host", "hostVersion", "classification", "executable", "canonicalOwnership", "behaviorImpact", "trustImpact"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^hook-(heal|review)-[a-f0-9]{24}$" },
+        "host": { "type": "string", "minLength": 1 },
+        "hostVersion": { "type": "string", "minLength": 1 },
+        "classification": { "enum": ["safe-automatic", "approval-required", "upstream-required", "never-automatic"] },
+        "executable": { "type": "boolean" },
+        "canonicalOwnership": { "type": "object" },
+        "behaviorImpact": { "type": "string" },
+        "trustImpact": { "type": "string" },
+        "expectedPreimage": { "$ref": "#/$defs/image" },
+        "desiredPostimage": { "$ref": "#/$defs/image" },
+        "diff": { "type": ["string", "null"] },
+        "rollback": { "type": ["string", "null"] }
+      },
+      "allOf": [{
+        "if": { "properties": { "executable": { "const": true } }, "required": ["executable"] },
+        "then": { "required": ["recipeId", "exactProfileId", "canonicalTarget", "expectedPreimage", "desiredPostimage", "verification", "rollback", "diff"] }
+      }]
+    }
+  }
+}

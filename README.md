@@ -100,6 +100,8 @@ ak models       inspect model lifecycle evidence and swap impact
                 status | refresh | diff | explain | plan
 ak host         manage execution hosts, routing, and provider bindings
                 status | pick | refresh | off
+ak audit hooks  read-only hook inventory across Codex, Claude, OpenCode, and adapters
+ak heal hooks   deterministic dry-run repair plan; explicit apply, verify, undo, recover
 ak run          execute a host-neutral activity pipeline (including explicit OpenCode routes)
                 <template> "<task>"  [--dry-run] [--route ...] [--max-concurrent N] [--timeout ms] [--json]
 ak uninstall    leave cleanly                [--dry-run] [--this-project] [--remove-ruflo]
@@ -118,6 +120,10 @@ independent package/data removal scopes.
 `ak` is the daily-driver alias; the full `agentic-kit` command is identical.
 (Heads-up if you also use AutoKitteh: its CLI is also named `ak` — the full
 command always works.)
+
+Hook healing never edits trust state, plugin caches, generated runtime copies, opaque
+OpenCode modules, or unsupported schemas. See the [hook assurance runbook](docs/HOOKS.md)
+for the preview/authorize/apply/verify/undo journey and current platform limits.
 
 <details>
 <summary>What the verbs cover</summary>

@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/pacphi/agentic-kit/docs/schemas/agentic-dependency-constraints.schema.json",
+  "title": "agentic-kit upstream dependency constraints",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "lastVerifiedAt", "recheckPolicy", "dependencyPolicies", "constraints"],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "lastVerifiedAt": { "type": "string", "format": "date" },
+    "recheckPolicy": {
+      "type": "object",
+      "required": ["cadence", "staleAfterDays", "requirePrimarySource", "onObservedRelease", "beforeManagedUpgrade"],
+      "properties": {
+        "cadence": { "type": "string" },
+        "staleAfterDays": { "type": "integer", "minimum": 1 },
+        "requirePrimarySource": { "const": true },
+        "onObservedRelease": { "type": "boolean" },
+        "beforeManagedUpgrade": { "type": "boolean" }
+      }
+    },
+    "dependencyPolicies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["dependency", "owner", "issuePublication", "evidenceRequired", "workaroundPolicy", "retestPolicy", "removalProof"],
+        "properties": {
+          "dependency": { "type": "string" },
+          "owner": { "type": "string" },
+          "issuePublication": { "const": "explicit-user-approval-required" },
+          "evidenceRequired": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
+          "workaroundPolicy": { "type": "string" },
+          "retestPolicy": { "type": "string" },
+          "removalProof": { "type": "string" }
+        }
+      }
+    },
+    "constraints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "dependency", "kind", "affected", "issue", "issueState", "primaryEvidence", "strategy", "versionGate", "expiryPolicy", "nextRetestAt", "sunsetWhen", "notification"],
+        "properties": {
+          "id": { "type": "string" },
+          "dependency": { "type": "string" },
+          "kind": { "type": "string" },
+          "affected": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
+          "issue": { "type": "string", "pattern": "^https://github\\.com/[^/]+/[^/]+/issues/[0-9]+$" },
+          "issueState": { "enum": ["open-at-last-verification", "closed-at-last-verification"] },
+          "primaryEvidence": { "type": "string" },
+          "strategy": { "type": "string" },
+          "versionGate": { "type": "string" },
+          "expiryPolicy": { "type": "string" },
+          "nextRetestAt": { "type": "string", "format": "date" },
+          "sunsetWhen": { "type": "string" },
+          "notification": {
+            "type": "object",
+            "required": ["status", "requiredFields"],
+            "properties": {
+              "status": { "const": "draft-only" },
+              "requiredFields": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    }
+  }
+}
