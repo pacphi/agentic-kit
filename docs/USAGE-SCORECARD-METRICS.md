@@ -479,38 +479,42 @@ price · not plan billing`.
 **Formula**, per `(session, day, model)` usage row:
 
 ```text
-inputUnits = input + cacheWrite × 1.25 + cacheRead × 0.1
+inputUnits = input + cacheWrite × 1.25 + cacheRead × cacheReadMultiplier
 cost = (inputUnits × rate_in + output × rate_out) / 1,000,000
 ```
 
-summed across every row in the window.
+`cacheReadMultiplier` is 0.1 for every model except Claude Fable 5.1 / Claude
+Mythos 5.1, which resolve to 0.025 (§13.1). Summed across every row in the
+window.
 
-**Source:** `costOf()`, `src/lib/pricing.mjs:262-268`, reproduced verbatim:
+**Source:** `costOf()`, `src/lib/pricing.mjs:298-305`, reproduced verbatim:
 
 ```js
 export function costOf(usage) {
   const { model, provider, input, output, cacheRead, cacheWrite, day } = usage ?? {};
-  const { in: rin, out: rout } = priceFor(model, provider, day);
+  const { in: rin, out: rout, cacheReadMultiplier } = priceFor(model, provider, day);
   const inputUnits = tokens(input)
     + tokens(cacheWrite) * CACHE_WRITE_MULTIPLIER
-    + tokens(cacheRead) * CACHE_READ_MULTIPLIER;
+    + tokens(cacheRead) * cacheReadMultiplier;
   return (inputUnits * rin + tokens(output) * rout) / 1e6;
 }
 ```
 
-`CACHE_READ_MULTIPLIER = 0.1`, `CACHE_WRITE_MULTIPLIER = 1.25`
-(`pricing.mjs:169-170`) — see §13 for why these two numbers are correct for
-**both** Anthropic and OpenAI, which is why `costOf` needs no per-provider
-branch on the multiplier (only on the base `rate_in`/`rate_out`, resolved by
-`priceFor`, `pricing.mjs:229-242`).
+`CACHE_READ_MULTIPLIER = 0.1` is the default `cacheReadMultiplier` `priceFor`
+resolves for a matched entry; `CACHE_WRITE_MULTIPLIER = 1.25` is applied
+uniformly, no per-model override (`pricing.mjs:193-194`) — see §13 for why
+these two numbers are correct for **both** Anthropic and OpenAI (excepting
+the one documented cache-read exception), which is why `costOf` needs no
+per-provider branch on either multiplier (only on the base
+`rate_in`/`rate_out`, resolved by `priceFor`, `pricing.mjs:258-273`).
 
 Rate resolution is **longest-prefix match** (`isPrefixOf`, `KEYS_BY_LENGTH`)
-on a normalized model id (`pricing.mjs:178-187`), so a dated release
+on a normalized model id (`pricing.mjs:202-211`), so a dated release
 (`claude-haiku-4-5-20251001`)
 resolves to the same entry as its bare alias, and a more specific entry
 (`gpt-5.6-sol`) is never shadowed by a shorter one (`gpt-5.6`). An id matching
 nothing gets `FALLBACK_PRICE` — Sonnet-class rate, `$3`/`$15`
-(`pricing.mjs:166`) — rather than `$0`, so an unrecognized model can never be
+(`pricing.mjs:190`) — rather than `$0`, so an unrecognized model can never be
 silently free; `matched: false` travels with the result so a maintainer can
 find fallback-priced rows if the table needs a new entry.
 
@@ -520,7 +524,7 @@ Each table entry is a **schedule** — an ordered list of periods, each with the
 day it takes effect. Nearly every entry has exactly one period that has always
 applied (`anthropic(5, 25)` builds that shape); an entry whose rate the vendor
 has *published* a change to carries more than one (`schedule`,
-`pricing.mjs:41-55`). `periodOn` (`pricing.mjs:202`) picks the last period
+`pricing.mjs:44-67`). `periodOn` (`pricing.mjs:226`) picks the last period
 already in effect on the given day, comparing ISO date strings
 lexicographically so no `Date` parsing is involved and the module stays
 clock-free.
@@ -548,7 +552,7 @@ Two rules bound the mechanism:
   Codex promo would be a one-line edit rather than new machinery. Rates that
   vary by *how* a request was served — regional uplift, large-prompt surcharge,
   service tiers — are a different axis, are deliberately **not** expressible
-  here, and remain in `UNMODELLED_PRICING_FACTORS` (`pricing.mjs:157-159`)
+  here, and remain in `UNMODELLED_PRICING_FACTORS` (`pricing.mjs:181-183`)
   because a transcript does not record the endpoint or tier.
 
 A `priceFor` call with no day prices as of `PRICES_AS_OF`, the table's
@@ -666,7 +670,7 @@ t.tokens)`), rendered `dashboard/client.mjs`.
 **Why this number matters more than it looks like it should.** On the
 reference corpus, 96.3% of tokens were cache reads — pricing them as fresh
 input (rather than at the 0.1× multiplier) would overstate cost by roughly
-10× (`pricing.mjs:8-9`). A cache-read share this high is not an anomaly to be
+10× (`pricing.mjs:7-10`). A cache-read share this high is not an anomaly to be
 suspicious of on its own — it is the expected steady state for any
 long-running agentic session that resends a large, mostly-unchanged system
 prompt and tool-result history on every turn, which both Claude Code and
@@ -1095,14 +1099,14 @@ path, opt-in or otherwise, anywhere in this codebase.
 
 ## 13. Provider pricing tables — verified rates
 
-Every rate lives in the `PRICES` table (`src/lib/pricing.mjs:65-125`) and carries
+Every rate lives in the `PRICES` table (`src/lib/pricing.mjs:78-149`) and carries
 the table's own last-verified date, `PRICES_AS_OF = '2026-08-25'`
-(`pricing.mjs:18`). Each subsection below dates its own source check separately.
+(`pricing.mjs:21`). Each subsection below dates its own source check separately.
 
 **The code is the authority for a rate; this section is a reading of it.** The
-Anthropic transcription in §13.1 matches `pricing.mjs:67-89` value for value.
+Anthropic transcription in §13.1 matches `pricing.mjs:79-113` value for value.
 The OpenAI transcription in §13.2 does **not** currently match
-`pricing.mjs:112-124`, and the sourcing note there is likewise out of step with
+`pricing.mjs:136-148`, and the sourcing note there is likewise out of step with
 the file's own comment. Price a row from `pricing.mjs`, not from §13.2's table,
 until the two are reconciled.
 
@@ -1113,6 +1117,7 @@ own published table, not a transcription from a secondary source:
 
 | Model | Base input | 5m cache write | 1h cache write | Cache read (hit) | Output |
 |---|---|---|---|---|---|
+| Claude Fable 5.1 / Mythos 5.1 | $10/MTok | $12.50/MTok | $20/MTok | $0.25/MTok¹ | $50/MTok |
 | Claude Fable 5 / Mythos 5 | $10/MTok | $12.50/MTok | $20/MTok | $1/MTok | $50/MTok |
 | Claude Opus 5 | $5/MTok | $6.25/MTok | $10/MTok | $0.50/MTok | $25/MTok |
 | Claude Opus 4.8 / 4.7 / 4.6 / 4.5 | $5/MTok | $6.25/MTok | $10/MTok | $0.50/MTok | $25/MTok |
@@ -1121,32 +1126,48 @@ own published table, not a transcription from a secondary source:
 | Claude Sonnet 4.6 / 4.5 | $3/MTok | $3.75/MTok | $6/MTok | $0.30/MTok | $15/MTok |
 | Claude Haiku 4.5 | $1/MTok | $1.25/MTok | $2/MTok | $0.10/MTok | $5/MTok |
 
-Every value in `pricing.mjs`'s Anthropic entries (`pricing.mjs:67-89`) matches
+¹ Cache hits on Claude Fable 5.1 and Claude Mythos 5.1 price at **0.025×** base
+input — every other current Anthropic model uses 0.1×. Verified 2026-09-02
+against **[C1]**'s live pricing page.
+
+Every value in `pricing.mjs`'s Anthropic entries (`pricing.mjs:79-113`) matches
 this table's Base-input and Output columns exactly. Note that the two Sonnet
 5 rows above are not a documentation convenience — they are exactly what the
 code encodes, as the two periods of that entry's schedule (§3a), so the table
 and the implementation state the same published change in the same shape. The cache-write and
 cache-read *columns* in this table are provider-published absolute rates; the
-kit's `pricing.mjs` instead stores the two **multipliers** (0.1× and 1.25×,
-5-minute TTL only — the kit does not currently distinguish 5-minute from
-1-hour cache TTL, since Claude Code transcripts do not record which TTL a
-given cache write used) and applies them to the base input rate at cost-compute
-time (`costOf()`, §3). Cross-checking one row: Opus 5's published $6.25
-5-minute cache-write rate is exactly *$5 × 1.25*; its published $0.50 cache-read
-rate is exactly *$5 × 0.1*. Every row in Anthropic's own table satisfies
-`cache_write_5m = input × 1.25` and `cache_read = input × 0.1` — confirming
-the multiplier approach is arithmetically identical to using the provider's
-published absolute cache rates directly, for every current Anthropic model.
+kit's `pricing.mjs` instead stores **multipliers** — 1.25× for a 5-minute cache
+write (uniform, no published per-model exception) and, for cache reads, 0.1×
+for every model *except* Fable 5.1 / Mythos 5.1, which carry their own
+0.025× cache-read override on that catalog entry (`pricing.mjs:89-90`)
+instead of the module-wide default multiplier.
+
+`priceFor()` (`pricing.mjs:258-273`) is what resolves that: it returns a
+`cacheReadMultiplier` field taken from the matched entry, falling back to
+`CACHE_READ_MULTIPLIER` (`pricing.mjs:193-194`) when the entry carries none.
+
+`costOf()` (`pricing.mjs:298-305`) then multiplies cache-read tokens by
+that resolved value rather than a hardcoded constant.
+
+5-minute TTL only: the kit does not currently distinguish 5-minute from 1-hour cache TTL,
+since Claude Code transcripts do not record which TTL a given cache write
+used. Cross-checking one row: Opus 5's published $6.25 5-minute cache-write
+rate is exactly *$5 × 1.25*; its published $0.50 cache-read rate is exactly
+*$5 × 0.1*. Every row in Anthropic's own table satisfies
+`cache_write_5m = input × 1.25` and, except for the Fable 5.1 / Mythos 5.1
+row noted above, `cache_read = input × 0.1` — confirming the multiplier
+approach is arithmetically identical to using the provider's published
+absolute cache rates directly.
 
 Anthropic's own prompt-caching documentation **[C2]** states the multipliers
 in prose, independent of the pricing table: *"5-minute cache write tokens are
 1.25 times the base input tokens price... Cache read tokens are 0.1 times the
 base input tokens price."* This is the second, independent confirmation of
-`CACHE_READ_MULTIPLIER`/`CACHE_WRITE_MULTIPLIER` (`pricing.mjs:169-170`).
+`CACHE_READ_MULTIPLIER`/`CACHE_WRITE_MULTIPLIER` (`pricing.mjs:193-194`).
 
 ### 13.2 OpenAI (Codex) — hand-maintained, no canonical machine-readable source
 
-`pricing.mjs`'s own comment (`pricing.mjs:91-94`) records that
+`pricing.mjs`'s own comment (`pricing.mjs:115-118`) records that
 `~/.codex/models_cache.json` was checked directly and contains **zero**
 price-related keys — Codex CLI does not ship pricing data locally, unlike
 Anthropic which publishes a fetchable pricing document. OpenAI's rates in
@@ -1191,8 +1212,8 @@ hand-maintained and drift-prone, not vendor-confirmed via automated fetch.
 
 ### 13.3 What the pricing table deliberately does not model
 
-Recorded verbatim from `pricing.mjs:127-156` (`UNMODELLED_PRICING_FACTORS`,
-`pricing.mjs:157-159`) because listing known gaps is what makes the
+Recorded verbatim from `pricing.mjs:152-180` (`UNMODELLED_PRICING_FACTORS`,
+`pricing.mjs:181-183`) because listing known gaps is what makes the
 *modelled* factors credible:
 
 - **Regional-processing uplift.** OpenAI charges +10% on data-residency

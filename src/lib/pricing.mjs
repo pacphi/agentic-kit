@@ -5,8 +5,11 @@
 // as such and never as plan billing.
 //
 // The cache multipliers are the whole point of this module. On a real corpus
-// ~96% of tokens are cache reads, which bill at 0.1× input; pricing them as
-// fresh input overstates cost by roughly 10×. Cache writes bill at 1.25×.
+// ~96% of tokens are cache reads, which bill at 0.1× input for nearly every
+// model (0.025× on Fable 5.1 / Mythos 5.1 — a per-entry override, see below);
+// pricing them as fresh input overstates cost by roughly 10×, or 40× on those
+// two. Cache writes bill at 1.25× uniformly (no published per-model exception
+// as of this writing).
 //
 // Rates drift and are maintained BY HAND (OpenAI publishes nothing
 // machine-readable in ~/.codex/models_cache.json, verified). PRICES_AS_OF is
@@ -41,14 +44,24 @@ export const PRICES_AS_OF = '2026-08-25';
 const schedule = (provider) => {
   // `from` absent on the first period = "has always applied". Periods are kept
   // sorted so selection is a scan for the last one already in effect.
-  const build = (periods) => ({
+  //
+  // `cacheReadMultiplier` is a per-MODEL override, not per-period — it lives
+  // on the built entry itself, not inside `periods`. Every entry defaults to
+  // the module-wide CACHE_READ_MULTIPLIER; Fable 5.1 / Mythos 5.1 are, as of
+  // this writing, the only published exception (§ PRICES).
+  /**
+   * @param {{in: number, out: number, from?: string}[]} periods
+   * @param {{cacheReadMultiplier?: number}} [extra]
+   */
+  const build = (periods, { cacheReadMultiplier } = {}) => ({
     provider,
     asOf: PRICES_AS_OF,
     periods: [...periods]
       .map((p) => ({ from: p.from ?? null, in: p.in, out: p.out }))
       .sort((a, b) => String(a.from ?? '').localeCompare(String(b.from ?? ''))),
+    ...(cacheReadMultiplier !== undefined ? { cacheReadMultiplier } : {}),
   });
-  const make = (i, o) => build([{ in: i, out: o }]);
+  const make = (i, o, extra) => build([{ in: i, out: o }], extra);
   make.dated = build;
   return make;
 };
@@ -64,6 +77,17 @@ const openai = schedule('openai');
  */
 export const PRICES = {
   // Anthropic — flagship (Fable/Mythos class)
+  // Fable 5.1 / Mythos 5.1 launched at the same base $10/$50 rate as 5 — an
+  // explicit entry (rather than relying on the longest-prefix matcher falling
+  // through to 'claude-fable-5' on the '-1' token boundary) so a future
+  // divergence in Anthropic's published rate is a one-line diff, not a silent
+  // mis-price. They DO already diverge on one axis: Anthropic prices cache
+  // reads on these two at 0.025x base input, not the standard 0.1x every
+  // other current model uses (platform.claude.com/docs/en/about-claude/pricing,
+  // verified 2026-09-02) — hence the per-entry override below rather than
+  // relying on the module-wide default.
+  'claude-fable-5-1': anthropic(10, 50, { cacheReadMultiplier: 0.025 }),
+  'claude-mythos-5-1': anthropic(10, 50, { cacheReadMultiplier: 0.025 }),
   'claude-fable-5': anthropic(10, 50),
   'claude-mythos-5': anthropic(10, 50),
   // Anthropic — Opus line (5 and the prior generations share a price)
@@ -211,13 +235,18 @@ function periodOn(periods, day) {
 }
 
 /**
- * Resolve a model id to its rates: `{ in, out, provider, key, matched }`.
+ * Resolve a model id to its rates:
+ * `{ in, out, provider, key, matched, cacheReadMultiplier }`.
  *
  * Longest-prefix match over `PRICES`. `provider` is a HINT used only to break a
  * tie between equally-specific entries — it never vetoes an unambiguous id match,
  * because the id is the stronger signal. An unrecognised (or absent, or
  * non-string) model yields `FALLBACK_PRICE` with `matched:false`; this function
  * never throws.
+ *
+ * `cacheReadMultiplier` defaults to the module-wide `CACHE_READ_MULTIPLIER`
+ * unless the matched entry carries its own (Fable 5.1 / Mythos 5.1 today) —
+ * see the `schedule()` comment in the table above.
  *
  * `day` (ISO `YYYY-MM-DD`) selects the rate IN EFFECT ON THAT DAY. Cost
  * attribution is historical: tokens spent in August were metered at August's
@@ -234,10 +263,13 @@ export function priceFor(model, provider, day) {
       const best = (provider && hits.find(({ key }) => PRICES[key].provider === provider)) || hits[0];
       const p = PRICES[best.key];
       const r = periodOn(p.periods, day);
-      return { in: r.in, out: r.out, provider: p.provider, key: best.key, matched: true };
+      return {
+        in: r.in, out: r.out, provider: p.provider, key: best.key, matched: true,
+        cacheReadMultiplier: p.cacheReadMultiplier ?? CACHE_READ_MULTIPLIER,
+      };
     }
   }
-  return { ...FALLBACK_PRICE, key: null, matched: false };
+  return { ...FALLBACK_PRICE, key: null, matched: false, cacheReadMultiplier: CACHE_READ_MULTIPLIER };
 }
 
 // ── Cost ─────────────────────────────────────────────────────────────────────
@@ -248,7 +280,11 @@ const tokens = (v) => (Number.isFinite(v) && v > 0 ? v : 0);
 /**
  * API-equivalent cost in USD for one model's token usage:
  *
- *   (input·in + cacheWrite·in·1.25 + cacheRead·in·0.1 + output·out) / 1e6
+ *   (input·in + cacheWrite·in·1.25 + cacheRead·in·cacheReadMultiplier + output·out) / 1e6
+ *
+ * `cacheReadMultiplier` is 0.1 for nearly every model but is resolved per-model
+ * via `priceFor` (Fable 5.1 / Mythos 5.1 price cache reads at 0.025x — see the
+ * `PRICES` table comment), so this is never hardcoded here.
  *
  * All counters are optional and default to 0, so all-zero usage returns exactly
  * `0`. An unknown model is priced at the fallback rate rather than zeroed, and
@@ -261,9 +297,9 @@ const tokens = (v) => (Number.isFinite(v) && v > 0 ? v : 0);
  */
 export function costOf(usage) {
   const { model, provider, input, output, cacheRead, cacheWrite, day } = usage ?? {};
-  const { in: rin, out: rout } = priceFor(model, provider, day);
+  const { in: rin, out: rout, cacheReadMultiplier } = priceFor(model, provider, day);
   const inputUnits = tokens(input)
     + tokens(cacheWrite) * CACHE_WRITE_MULTIPLIER
-    + tokens(cacheRead) * CACHE_READ_MULTIPLIER;
+    + tokens(cacheRead) * cacheReadMultiplier;
   return (inputUnits * rin + tokens(output) * rout) / 1e6;
 }

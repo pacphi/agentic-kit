@@ -1,7 +1,7 @@
 import { PRICES_AS_OF, priceFor } from '../../pricing.mjs';
 import { modelRecord, sourceRecord } from './index.mjs';
 
-export const ANTHROPIC_PUBLIC_CATALOG_AS_OF = '2026-08-25';
+export const ANTHROPIC_PUBLIC_CATALOG_AS_OF = '2026-09-02';
 export const ANTHROPIC_MODELS_URL =
   'https://platform.claude.com/docs/en/about-claude/models/overview';
 export const ANTHROPIC_LIFECYCLE_URL =
@@ -49,6 +49,12 @@ const removed = (id, displayName, retiredAt, replacement, aliases = []) => ({
  * @type {readonly AnthropicPublicModel[]}
  */
 export const ANTHROPIC_PUBLIC_MODELS = Object.freeze([
+  active('claude-fable-5-1', 'Claude Fable 5.1', {
+    contextLimit: 1_000_000, outputLimit: 128_000, retirementNotBefore: '2027-09-01',
+  }),
+  active('claude-mythos-5-1', 'Claude Mythos 5.1', {
+    contextLimit: 1_000_000, outputLimit: 128_000, availability: 'limited',
+  }),
   active('claude-fable-5', 'Claude Fable 5', {
     contextLimit: 1_000_000, outputLimit: 128_000, retirementNotBefore: '2027-06-09',
   }),

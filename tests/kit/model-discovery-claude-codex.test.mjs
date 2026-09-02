@@ -54,11 +54,11 @@ test('Claude keeps the 1M selector as a variant instead of a duplicate base mode
 
 test('Claude public facts retain first-party lifecycle, discovery, limits, and scope', () => {
   const result = discoverAnthropicPublicCatalog({
-    capturedAt: '2026-08-25T13:00:00.000Z', scope: { profile: 'default' }, scopeKey: SCOPE_KEY,
+    capturedAt: '2026-09-02T13:00:00.000Z', scope: { profile: 'default' }, scopeKey: SCOPE_KEY,
   });
   assert.equal(result.source.id, 'anthropic-docs');
   assert.equal(result.source.ownerType, 'provider');
-  assert.equal(result.source.sourceVersion, '2026-08-25');
+  assert.equal(result.source.sourceVersion, '2026-09-02');
   assert.equal(result.models.length, ANTHROPIC_PUBLIC_MODELS.length);
 
   const fable = result.models.find((model) => model.identity.modelId === 'claude-fable-5');
@@ -97,9 +97,33 @@ test('Claude public facts retain first-party lifecycle, discovery, limits, and s
   assert.doesNotThrow(() => normalizeSourceResult(result.source));
 });
 
+test('Claude public facts include Fable 5.1 and Mythos 5.1 as active, priced entries', () => {
+  const result = discoverAnthropicPublicCatalog({
+    capturedAt: '2026-09-02T13:00:00.000Z', scopeKey: SCOPE_KEY,
+  });
+  const fable51 = result.models.find((model) => model.identity.modelId === 'claude-fable-5-1');
+  assert.equal(fable51.lifecycle.state, 'active');
+  assert.equal(fable51.dimensions.discoverable.value, true);
+  assert.equal(fable51.capabilities.contextLimit, 1_000_000);
+  assert.equal(fable51.capabilities.outputLimit, 128_000);
+  assert.equal(fable51.pricing.basis, 'per-million-tokens');
+  assert.equal(fable51.pricing.input, 10);
+  assert.equal(fable51.pricing.output, 50);
+  assert.equal(fable51.pricing.currency, 'USD');
+
+  const mythos51 = result.models.find((model) => model.identity.modelId === 'claude-mythos-5-1');
+  assert.equal(mythos51.lifecycle.state, 'active');
+  assert.equal(mythos51.variant.availability, 'limited');
+  assert.equal(mythos51.capabilities.contextLimit, 1_000_000);
+
+  // Fable 5 stays a distinct, still-active entry — 5.1 is additive, not a rename.
+  const fable5 = result.models.find((model) => model.identity.modelId === 'claude-fable-5');
+  assert.equal(fable5.lifecycle.state, 'active');
+});
+
 test('Claude bundled public facts become explicitly stale instead of silently aging', () => {
   const result = discoverAnthropicPublicCatalog({
-    capturedAt: '2026-12-01T00:00:00.000Z', scopeKey: SCOPE_KEY,
+    capturedAt: '2026-12-09T00:00:00.000Z', scopeKey: SCOPE_KEY,
   });
   assert.equal(result.source.status, 'stale');
   assert.equal(result.models[0].evidence.every(({ freshness }) => freshness === 'stale'), true);

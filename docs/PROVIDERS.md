@@ -524,7 +524,7 @@ a user-pinned route is reported, never rewritten (still routed to the replacemen
 merely no longer the default, which `ak status` reports as routing *divergence*: a trade for you to
 weigh, cleared with `ak x host refresh` if you want the newer default.
 
-**Known-good model choices** (verified 2026-08; any model your host CLI accepts also works):
+**Known-good model choices** (verified 2026-09; any model your host CLI accepts also works):
 
 > **Per-token price ≠ per-task cost.** A model that needs more agentic turns costs more
 > per task at the same per-token price. On subscription (`claude-code` oauth) billing the
@@ -535,9 +535,10 @@ weigh, cleared with `ak x host refresh` if you want the newer default.
 |---|---|---|
 | claude | `claude-opus-5` | top Opus — the deepest reasoning, at ~2–3× the agentic turns of a balanced model on routine work; earns it at the hard end |
 | claude | `claude-sonnet-5` | near-Opus capability at a lower per-token price — review, spec, release |
-| claude | `claude-fable-5` | top capability (Mythos-class, above Opus 5) — hardest problems |
+| claude | `claude-fable-5-1` | top capability (Mythos-class, above Opus 5) — successor to Fable 5 at the same per-token price — hardest problems |
 | claude | `claude-haiku-4-5-20251001` | cheap/fast — high-volume mechanical work |
 | claude | `claude-opus-4-8` | prior Opus generation — same per-token price as Opus 5, roughly half the agentic turns on routine work |
+| claude | `claude-fable-5` | prior Fable generation — same per-token price as Fable 5.1, superseded as the flagship pick |
 | codex | `gpt-5.6-sol` | flagship 5.6 — strongest on complex coding, computer use and security work; first-class max reasoning effort |
 | codex | `gpt-5.6-terra` | balanced 5.6 — everyday implementation and testing at a materially lower per-token price than sol; the gpt-5.4 replacement |
 | codex | `gpt-5.6-luna` | fastest/cheapest 5.6 — mechanical implementation, docs and packaging; the gpt-5.4-mini replacement |
@@ -546,11 +547,12 @@ weigh, cleared with `ak x host refresh` if you want the newer default.
 > same $5/$25 per-Mtok pricing as Opus 4.8 with roughly double the Frontier-Bench
 > performance, which is why it is the reasoning-tier default. That parity is **per token**:
 > measured end-to-end it takes 2–3.4× the agentic turns on routine work, so per task it is
-> the more expensive arm there and 4.8 remains a defensible pin. It is **not** Mythos-class: `claude-fable-5`
+> the more expensive arm there and 4.8 remains a defensible pin. It is **not** Mythos-class: `claude-fable-5-1`
 > remains the flagship tier. Opus 5 lands within ~0.5% of Fable on coding/agentic
 > benchmarks at about half the cost per task, but stays behind the Mythos-class models on
 > frontier domains. Rule of thumb: `claude-opus-5` is the premium default;
-> `claude-fable-5` is the escalation ceiling.
+> `claude-fable-5-1` is the escalation ceiling. `claude-fable-5` remains pinnable at the
+> same per-token price but is no longer the default flagship pick.
 
 `ak host pick --help` prints this list too. Tuning is per-route and reversible: hand-edit
 `kit.json` `routing.routes`, pass `--route`, or use `ak host off` to clear it entirely.
