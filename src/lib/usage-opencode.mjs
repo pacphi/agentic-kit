@@ -29,7 +29,7 @@ import { withDb } from './sqlite.mjs';
 // definitions in usage-parsers.mjs. usage-index.mjs imports FROM this module
 // (defaultOpencodeDbPath, parseSession, …), but that is no longer a cycle:
 // this module depends only on usage-parsers.mjs, not on usage-index.mjs.
-import { addUsage, blankSession, noteLatencySample, notePromptFingerprint } from './usage-parsers.mjs';
+import { addUsage, blankSession, noteLatencySample } from './usage-parsers.mjs';
 import { normalizeMode } from './usage-modes.mjs';
 
 /** The live opencode store. Overridable via roots in tests. */
@@ -39,7 +39,6 @@ export function defaultOpencodeDbPath() {
     ? `${home}/opencode/opencode.db`
     : `${process.env.HOME ?? process.env.USERPROFILE}/.local/share/opencode/opencode.db`;
 }
-
 /** YYYY-MM-DD in LOCAL time (same convention as usage-index's localDay). */
 function localDay(ms) {
   const d = new Date(ms);
@@ -159,16 +158,8 @@ function recordUserMessage(rec, turns, { rowId, at, withTurns, partsByMessage })
   // Opens the prompt→assistant-message latency window; closed by the next
   // recordAssistantMessage (mirrors parseClaude/parseCodex's latState).
   rec.pendingPromptMs = at;
-  // Every opencode user message IS a prompt-kind turn (this source carries no
-  // harness-injected user rows), so it always fingerprints — on BOTH paths,
-  // which is why the scan path now loads user text parts (see loadTextParts).
-  // I1: that makes this the WIDEST of the three fingerprinted populations —
-  // claude gates on userTurnKind, codex additionally on
-  // CODEX_MACHINE_ENVELOPE_RE, opencode on nothing. Compare per provenance tag,
-  // never in total.
-  const text = messagePartsText(partsByMessage, rowId, ['text']);
-  notePromptFingerprint(rec, text, 'prompt');
   if (!withTurns) return;
+  const text = messagePartsText(partsByMessage, rowId, ['text']);
   turns.push({ role: 'user', at: new Date(at).toISOString(), text, prompt: true, kind: 'prompt' });
 }
 
@@ -257,40 +248,6 @@ function processMessageRow(rec, turns, row, { withTurns, partsByMessage }) {
   recordAssistantMessage(rec, turns, { data, rowId: row.id, at, withTurns, partsByMessage });
 }
 
-/** The `part` rows a parse needs. `withTurns` wants every part (text, tool and
- *  reasoning, for both roles) to build turn rows; the scan path wants only the
- *  USER text parts, which is all a prompt fingerprint reads — the assistant
- *  bodies it would otherwise pull in are the bulk of the store and are never
- *  looked at there.
- *
- *  This is the one place the scan path reads message BODIES at all, so its cost
- *  was measured rather than assumed. The live store on this machine is too
- *  small to time (2 sessions, 2 parts; ~5 µs/session, where the two
- *  `json_extract` predicates cannot pay for themselves because there is nothing
- *  to exclude). Benchmarked instead against a synthetic store at realistic scale
- *  — 300 sessions, 18k messages, 63k parts, 75 MB — the filtered query runs
- *  **45 µs/session and materializes 0.6 MB**, against 125 µs/session and 61 MB
- *  for the unfiltered join the reader path uses: 2.8x faster, and ~100x less
- *  text pulled into memory. Only the fingerprints are retained; the text itself
- *  is discarded with the row. */
-function loadTextParts(db, id, withTurns) {
-  if (withTurns) {
-    return db.prepare(`
-      SELECT p.message_id AS message_id, p.data AS data
-      FROM part p JOIN message m ON m.id = p.message_id
-      WHERE m.session_id = ? ORDER BY p.rowid ASC
-    `).all(id);
-  }
-  return db.prepare(`
-    SELECT p.message_id AS message_id, p.data AS data
-    FROM part p JOIN message m ON m.id = p.message_id
-    WHERE m.session_id = ?
-      AND json_extract(m.data, '$.role') = 'user'
-      AND json_extract(p.data, '$.type') = 'text'
-    ORDER BY p.rowid ASC
-  `).all(id);
-}
-
 /** Tool counts without the full turn payload: one lean query on the scan path. */
 function collectScanToolCounts(db, id, rec) {
   const toolRows = db.prepare(`
@@ -332,7 +289,14 @@ export function parseSession({ dbFile, id, withTurns = false }) {
     const srow = db.prepare('SELECT * FROM session WHERE id = ?').get(id);
     if (!srow) return null;
     const msgRows = db.prepare('SELECT id, time_created, data FROM message WHERE session_id = ? ORDER BY time_created ASC, id ASC').all(id);
-    const partsByMessage = buildPartsIndex(loadTextParts(db, id, withTurns));
+    const partRows = withTurns
+      ? db.prepare(`
+          SELECT p.message_id AS message_id, p.data AS data
+          FROM part p JOIN message m ON m.id = p.message_id
+          WHERE m.session_id = ? ORDER BY p.rowid ASC
+        `).all(id)
+      : [];
+    const partsByMessage = buildPartsIndex(partRows);
 
     const rec = initSessionRecord(srow);
     const turns = [];

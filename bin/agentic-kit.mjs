@@ -54,7 +54,7 @@ Usage (ak = alias of agentic-kit):
   ak sync            converge to good: upgrade + heal + verify          [--dry-run] [--no-upgrade]
   ak dashboard       open the local web dashboard (localhost; auto-opens browser)  [--port N] [--no-open]
   ak admin           maintainer-only telemetry admin (localhost; GitHub/npm egress)  [--port N] [--no-open]
-  ak usage           offline scorecard, prompt patterns, provider cache  [status|score|prompts|refresh openrouter]
+  ak usage           offline scorecard and provider cache  [status|score|refresh openrouter]
   ak models          inspect/refresh model lifecycle evidence  [status|refresh|diff|explain|plan]
   ak system          what this stack occupies on your machine   [--deep] [--json]
   ak about           what agentic-kit installs and configures, and why  [--category N]
@@ -145,14 +145,10 @@ async function main() {
   }
 
   // strict:true — security review SEC-10. Under `strict:false` an option
-  // declared as taking a value swallows whatever follows it, flag or not:
-  // `ak usage prompts --draft --json` consumed `--json` AS THE DRAFT ID and
-  // then exited 2 in HUMAN format, so a script doing
-  // `ak usage prompts --draft "$ID" --json | jq` with `$ID` unset silently got
-  // prose instead of JSON. `--dismiss --window 30` likewise ate `--window`,
-  // leaving it defaulted to 365 days. Strict mode refuses all three (and the
-  // no-value-at-all case, which used to yield the string "true"), plus an
-  // unknown flag — which is a real behavior change, and the right one: a
+  // declared as taking a value swallows whatever follows it, flag or not.
+  // Strict mode refuses a missing value and unknown flags instead of letting
+  // one option consume the next option token — a real behavior change, and
+  // the right one: a
   // mistyped flag that silently does nothing is worse than one that says so.
   let parsed;
   try {

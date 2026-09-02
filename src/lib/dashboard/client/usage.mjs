@@ -5,21 +5,10 @@ import { VIEWS, authHeaders, esc, setTab, syncHash } from './bootstrap.mjs';
 import { ago } from './intelligence.mjs';
 import { renderModelFacets, renderModelInventory, renderModelLifecycle } from './model-lifecycle.mjs';
 import { bucketPercentile, bucketPositionPct, deltaChip, donut2, histogram, rankedRows, sparklineSvg, stackedDays } from './usage-rhythm.mjs';
-import { advisedClusters, coachingPanel, hostInterplay, promptKpis, provenancePanel, steerPanel, tapLengthPanel } from './usage-prompts.mjs';
 import { renderUsage } from './usage-orchestrators.mjs';
 
   // ══ Usage tab ══════════════════════════════════════════════════════════════
   export var USAGE=null, usageLoaded=false, usageBusy=false, TRANSCRIPT=null;
-  // Coaching panel (Prompts view) interaction state — owned here, passed into
-  // the pure builder so a re-render is idempotent (usage-prompts.mjs). `filter`
-  // is a kind or 'all'; `sort` a {key,dir}; `openKey` the one expanded cluster;
-  // `posture` the shown/hidden prompt-text toggle; `samples` a per-cluster fetch
-  // cache; `dismissed` the optimistic per-card dismissal map. `promptSamplesWindow`
-  // remembers which `usageDays` window the cache was filled under, so a window
-  // change can drop it rather than render stale samples (fable F3).
-  var promptFilter="all", promptSort={key:"count",dir:"desc"}, promptOpenKey=null,
-    promptPosture="shown", promptSamples={}, promptDismissed={}, promptSamplesWindow=null,
-    promptDismissError={};
   export var MODELS=null,MODEL_PAGE=null,modelRows=[],modelSnapshotId=null,modelsBusy=false,modelRequestSeq=0,modelSearchTimer=null;
   export var MODEL_LIMIT=50,modelSort="lifecycle",modelDirection="asc",modelRouteSort="model",modelRouteDirection="asc";
 
@@ -128,14 +117,6 @@ import { renderUsage } from './usage-orchestrators.mjs';
   export function loadUsage(force){
     if(usageBusy)return Promise.resolve();
     usageBusy=true;
-    // The per-cluster samples cache is window-scoped: its keys resolve only
-    // against the window they were fetched under, so a window change must drop it
-    // (and collapse the open row, whose key may not exist in the new window)
-    // rather than render the prior window's masked text under the new one — a
-    // same-window poll leaves it untouched (fable F3 / I-3).
-    if(promptSamplesWindow!=null&&promptSamplesWindow!==usageDays){
-      promptSamples={}; promptOpenKey=null; promptSamplesWindow=null;
-    }
     var jobs=[fetch("/api/usage?days="+usageDays,{cache:"no-store",headers:authHeaders()}).then(function(r){return r.json();})
       .then(function(d){USAGE=d; usageLoaded=true;})];
     if(usageView==="transcript"&&usageSession&&(force||!TRANSCRIPT||TRANSCRIPT.id!==usageSession))
@@ -245,9 +226,10 @@ import { renderUsage } from './usage-orchestrators.mjs';
   }
 
   export function setUsageView(v,session){
+    if(VIEWS.indexOf(v)<0)v="score";
     usageView=v;
     if(session!==undefined)usageSession=session;
-    var headings={score:["Usage scorecard","Token consumption, API-equivalent cost, efficiency, and trends."],limits:["Provider limits","Current provider windows, reset timing, and available capacity."],findings:["Usage findings","Actionable anomalies, efficiency opportunities, and evidence-backed recommendations."],prompts:["Prompt patterns","What you type across every host, which patterns repeat, and what to change — from fingerprints, with masked prompt text on demand."],sessions:["Session usage","Browse retained sessions by project, category, duration, tokens, and cost."],models:["Models","Observed models in this window, configured routes, and the separate provider/local catalogue."],transcript:["Transcript detail","Inspect the selected session's locally retained, server-masked evidence."]},heading=headings[v]||headings.score;
+    var headings={score:["Usage scorecard","Token consumption, API-equivalent cost, efficiency, and trends."],limits:["Provider limits","Current provider windows, reset timing, and available capacity."],findings:["Usage findings","Actionable anomalies, efficiency opportunities, and evidence-backed recommendations."],sessions:["Session usage","Browse retained sessions by project, category, duration, tokens, and cost."],models:["Models","Observed models in this window, configured routes, and the separate provider/local catalogue."],transcript:["Transcript detail","Inspect the selected session's locally retained, server-masked evidence."]},heading=headings[v]||headings.score;
     document.getElementById("usage-view-title").textContent=heading[0];document.getElementById("usage-view-description").textContent=heading[1];
     var btns=document.querySelectorAll("#usage-seg [data-view]");
     for(var i=0;i<btns.length;i++){var on=btns[i].getAttribute("data-view")===v;btns[i].setAttribute("aria-selected",on?"true":"false");btns[i].tabIndex=on?0:-1;}
@@ -269,39 +251,11 @@ import { renderUsage } from './usage-orchestrators.mjs';
     if(v==="transcript"&&usageSession&&(!TRANSCRIPT||TRANSCRIPT.id!==usageSession)){
       loadTranscript(usageSession).then(renderTranscript);
     }
-    var days=document.getElementById("usage-days");if(days)days.hidden=(v==="transcript");
-    // BEFORE the per-view loaders, not after. Leaving Prompts with All (365)
-    // selected resets the window to 30, and a loader that ran first would have
-    // already fetched at 365: two requests in flight for different windows with
-    // no ordering guarantee, so a late 365 response paints year-wide figures
-    // under a chip row reading 30d. Settling the window first means each loader
-    // below fires once, at the window the reader can actually see.
-    syncAllHistoryChip(v);
     // Limits is LAZY like the tab itself: the Codex side may spawn one vendor
     // subprocess server-side, so it runs when the view is opened, not on poll.
     if(v==="limits"&&!LIMITS)loadLimits();
     if(v==="models"){loadModelLifecycle();if(!LIMITS)loadLimits();}
-    // Prompts renders from the payload the poll already holds, so opening the
-    // tab is a re-render rather than a fetch — cheap enough to run on entry so
-    // the view is populated before the next poll, even though page.mjs ships
-    // every u-pr-* container statically and renderUsage also calls this.
-    if(v==="prompts"&&USAGE&&!USAGE.error)renderPrompts(USAGE);
-  }
-
-  // Whole-history is offered on the Prompts view alone: patterns are lifetime
-  // phenomena, where every other view's figures are about a recent window.
-  // Leaving Prompts with it selected drops back to 30d rather than carrying a
-  // 365-day window into a view whose chip row no longer shows it — a selected
-  // window the reader cannot see is worse than a narrower one they can.
-  function syncAllHistoryChip(v){
-    var all=document.getElementById("usage-days-all");
-    if(!all)return;
-    var on=(v==="prompts");
-    all.hidden=!on;
-    if(!on&&usageDays>=365){
-      var fallback=document.querySelector('#usage-days [data-days="30"]');
-      if(fallback)fallback.click();
-    }
+    var days=document.getElementById("usage-days");if(days)days.hidden=(v==="transcript");
   }
 
   // Explicit bridge from Observability metadata to the separately fetched,
@@ -314,154 +268,6 @@ import { renderUsage } from './usage-orchestrators.mjs';
     setUsageView("transcript",id);
     return true;
   };
-
-  // Toggle the sort column/direction: same column flips asc/desc, a new column
-  // starts descending for a numeric field and ascending for the name.
-  function sortCoaching(key){
-    if(promptSort.key===key){promptSort={key:key,dir:promptSort.dir==="asc"?"desc":"asc"};}
-    else{promptSort={key:key,dir:key==="name"?"asc":"desc"};}
-    renderCoaching();
-  }
-  // Expand/collapse one pattern (one open at a time). On open, bring the row to
-  // the top of the capped scroll window so its panel is not stranded below the
-  // fold, then fetch its masked samples if the posture allows.
-  function toggleCoachRow(key){
-    promptOpenKey=promptOpenKey===key?null:key;
-    renderCoaching();
-    if(promptOpenKey){scrollOpenRowToTop();maybeFetchSamples(promptOpenKey);}
-  }
-  function scrollOpenRowToTop(){
-    var host=document.getElementById("u-pr-coaching");
-    var wrap=host&&host.querySelector(".pr-tablewrap");
-    var row=host&&host.querySelector('.prow[data-pr-row="'+cssAttr(promptOpenKey)+'"]');
-    if(!wrap||!row)return;
-    // 44px ≈ the sticky header, so the opened row clears it rather than hiding under it.
-    wrap.scrollTop+=(row.getBoundingClientRect().top-wrap.getBoundingClientRect().top)-44;
-  }
-  // Escape a cluster key for use inside a "..." attribute selector. Keys are
-  // 16-hex in production and short slugs in tests, but a quote/backslash must
-  // never break the selector regardless.
-  function cssAttr(v){return String(v==null?"":v).replace(/["\\]/g,"\\$&");}
-
-  // Fetch this cluster's masked samples on demand (§4.2, I-3). Gated on the
-  // SHOWN posture (hidden makes NO request); the SAME `usageDays` window as
-  // /api/usage, or the cluster key set will not resolve. Cached per key for the
-  // session (loading/ok/empty/error), so re-expanding never refetches; one
-  // in-flight fetch per row.
-  //
-  // The per-KEY cache is what keeps a late response from ever crossing rows:
-  // each response writes promptSamples[itsOwnKey], and the panel only ever reads
-  // promptSamples[openKey], so a late A cannot land in an open B regardless of
-  // arrival order. The `promptOpenKey===key` check below is therefore an
-  // OPTIMIZATION — it skips a wasted re-render when the row has since collapsed
-  // or another opened — not the safety property (QE F-2).
-  function maybeFetchSamples(key){
-    if(promptPosture!=="shown")return;
-    if(promptSamples[key])return;
-    promptSamplesWindow=usageDays;   // the window this cache belongs to (fable F3)
-    promptSamples[key]={state:"loading"};
-    renderCoaching(true);
-    var url="/api/prompts/samples?key="+encodeURIComponent(key)+"&window="+usageDays;
-    fetch(url,{cache:"no-store",headers:authHeaders()})
-      .then(function(r){return r.ok?r.json():null;})
-      .then(function(d){
-        if(!d||!Array.isArray(d.samples)){promptSamples[key]={state:"error"};}
-        else if(!d.samples.length){promptSamples[key]={state:"empty",occurrences:d.occurrences||[]};}
-        else{promptSamples[key]={state:"ok",samples:d.samples,occurrences:d.occurrences||[]};}
-        if(promptOpenKey===key)renderCoaching(true);
-      })
-      .catch(function(){promptSamples[key]={state:"error"}; if(promptOpenKey===key)renderCoaching(true);});
-  }
-
-  // Copy the open draft to the clipboard, flipping the button to a checkmark
-  // (CSS, via the `copied` class). Falls back to selecting the <pre> text when
-  // the clipboard API is unavailable or refused.
-  function copyDraft(key){
-    var pre=document.getElementById("pr-draft-"+key);
-    var btn=document.querySelector('[data-pr-copy="'+cssAttr(key)+'"]');
-    if(!pre)return;
-    function ok(){ if(!btn)return; btn.classList.add("copied"); btn.setAttribute("title","Copied");
-      setTimeout(function(){btn.classList.remove("copied"); btn.setAttribute("title","Copy to clipboard");},1400); }
-    try{
-      if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(pre.textContent).then(ok,function(){selectPre(pre);});}
-      else{selectPre(pre);}
-    }catch(e){selectPre(pre);}
-  }
-  function selectPre(pre){
-    try{var rg=document.createRange(); rg.selectNodeContents(pre); var s=window.getSelection();
-      s.removeAllRanges(); s.addRange(rg);}catch(e){}
-  }
-
-  // Dismiss / undo — the dashboard's one non-inference write (§4.3). Optimistic:
-  // the row reflects the new state immediately; a failed POST reverts it. Undo
-  // deletes the record server-side so the card is re-proposed next scan.
-  function postCoaching(path,id){
-    return fetch(path,{method:"POST",cache:"no-store",
-      headers:Object.assign({"content-type":"application/json"},authHeaders()),
-      body:JSON.stringify({id:id})}).then(function(r){return r.ok;});
-  }
-  // On a failed write the optimistic state reverts AND a brief inline "couldn't
-  // save" hint is surfaced (P6) instead of a silent no-op — a retry clears it.
-  function doDismiss(id){
-    promptDismissed[id]=true; promptDismissError[id]=false; renderCoaching(true);
-    postCoaching("/api/prompts/dismiss",id).then(function(okv){
-      if(!okv){promptDismissed[id]=false; promptDismissError[id]=true; renderCoaching(true);}
-    }).catch(function(){promptDismissed[id]=false; promptDismissError[id]=true; renderCoaching(true);});
-  }
-  function doUndismiss(id){
-    promptDismissed[id]=false; promptDismissError[id]=false; renderCoaching(true);
-    postCoaching("/api/prompts/undismiss",id).then(function(okv){
-      if(!okv){promptDismissed[id]=true; promptDismissError[id]=true; renderCoaching(true);}
-    }).catch(function(){promptDismissed[id]=true; promptDismissError[id]=true; renderCoaching(true);});
-  }
-
-  // One delegated listener on the static Coaching container (its innerHTML is
-  // rewritten every re-render, but the container itself is stable, so the
-  // listener attaches once). Each interactive control carries a data-pr-*
-  // attribute; this dispatches on it.
-  (function wireCoaching(){
-    var host=document.getElementById("u-pr-coaching");
-    if(!host)return;
-    host.addEventListener("click",function(e){
-      var sel="[data-pr-filter],[data-pr-sort],[data-pr-open],[data-pr-copy],[data-pr-dismiss],[data-pr-undismiss],[data-pr-session]";
-      var t=e.target.closest?e.target.closest(sel):null;
-      if(!t)return;
-      if(t.hasAttribute("data-pr-session")){e.preventDefault(); window.AKDashboardOpenTranscript(t.getAttribute("data-pr-session")); return;}
-      if(t.hasAttribute("data-pr-filter")){promptFilter=t.getAttribute("data-pr-filter"); renderCoaching(); return;}
-      if(t.hasAttribute("data-pr-sort")){sortCoaching(t.getAttribute("data-pr-sort")); return;}
-      if(t.hasAttribute("data-pr-open")){toggleCoachRow(t.getAttribute("data-pr-open")); return;}
-      if(t.hasAttribute("data-pr-copy")){copyDraft(t.getAttribute("data-pr-copy")); return;}
-      if(t.hasAttribute("data-pr-dismiss")){doDismiss(t.getAttribute("data-pr-dismiss")); return;}
-      if(t.hasAttribute("data-pr-undismiss")){doUndismiss(t.getAttribute("data-pr-undismiss"));}
-    });
-  })();
-
-  // Prompt-text posture (§2.2, §4): a per-viewer shown/hidden toggle, remembered
-  // in localStorage (default shown). `hidden` suppresses the masked What-you-
-  // typed view-wide AND makes no samples fetch; switching back to `shown` on an
-  // open row fetches it then (if not already cached).
-  function setPosture(mode){
-    promptPosture=mode==="hidden"?"hidden":"shown";
-    try{localStorage.setItem("pt-posture",promptPosture);}catch(e){}
-    syncPostureButtons();
-    renderCoaching(true);
-    if(promptPosture==="shown"&&promptOpenKey)maybeFetchSamples(promptOpenKey);
-  }
-  function syncPostureButtons(){
-    var btns=document.querySelectorAll("[data-pr-posture]");
-    for(var i=0;i<btns.length;i++){
-      btns[i].setAttribute("aria-pressed",btns[i].getAttribute("data-pr-posture")===promptPosture?"true":"false");
-    }
-  }
-  (function wirePosture(){
-    try{var v=localStorage.getItem("pt-posture"); if(v==="hidden"||v==="shown")promptPosture=v;}catch(e){}
-    var group=document.getElementById("u-pr-posture");
-    if(group)group.addEventListener("click",function(e){
-      var b=e.target.closest?e.target.closest("[data-pr-posture]"):null;
-      if(b)setPosture(b.getAttribute("data-pr-posture"));
-    });
-    syncPostureButtons();
-  })();
 
   // titleTxt is optional and goes on the OUTER .kpi, so the whole card is the
   // hover target — a tooltip anchored to the number alone would be a 40px
@@ -1334,64 +1140,6 @@ import { renderUsage } from './usage-orchestrators.mjs';
     renderLimitsInsights();
   }
 
-  // ══ Prompts view (METRICS.md §21) ══════════════════════════════════════════
-  // Panels are built by usage-prompts.mjs (pure string builders); this function
-  // owns only the DOM writes and the captions, which name the window every
-  // figure was computed over — a figure whose window is not stated is a figure
-  // a reader will attach to the wrong span.
-  export function renderPrompts(d){
-    var p=d&&d.prompts;
-    var kpis=document.getElementById("u-pr-kpis");
-    if(!kpis)return;
-    if(!p){
-      kpis.innerHTML='<div class="empty">this window carries no prompt-fingerprint layer &mdash; '
-        +'the sessions in it were parsed before prompt fingerprints shipped. Re-scan to populate it.</div>';
-      var coachEl=document.getElementById("u-pr-coaching");
-      if(coachEl)coachEl.innerHTML='<div class="empty">coaching needs the prompt-fingerprint layer, '
-        +'same as the rest of this view &mdash; nothing to show until a re-scan populates it.</div>';
-      return;
-    }
-    var win=windowLabel();
-    kpis.innerHTML=promptKpis(p);
-    setText("u-pr-prov-note",win+" · every fingerprinted user-role turn");
-    document.getElementById("u-pr-provenance").innerHTML=provenancePanel(p);
-    setText("u-pr-steer-note",win+" · typed prompts only");
-    document.getElementById("u-pr-steer").innerHTML=steerPanel(p);
-    document.getElementById("u-pr-taps").innerHTML=tapLengthPanel(p);
-    setText("u-pr-hosts-note",win+" · per host");
-    document.getElementById("u-pr-hosts").innerHTML=hostInterplay(p);
-    setText("u-pr-coaching-note",coachingNote(p,win));
-    renderCoaching();
-  }
-  // The Coaching panel owns interaction state (filter, sort, open row, prompt-
-  // text posture, the per-cluster samples cache, optimistic dismissals). A
-  // re-render is idempotent from `p` + that state, so every pill click, header
-  // sort, expand and dismiss is just `renderCoaching()` again.
-  function coachState(){
-    return {filter:promptFilter,sort:promptSort,openKey:promptOpenKey,
-      posture:promptPosture,samples:promptSamples,dismissed:promptDismissed,
-      dismissError:promptDismissError};
-  }
-  // `preserveScroll` holds the capped table's scroll position across a
-  // re-render — used when samples land under an already-open row, so the row
-  // does not jump. Expand/filter/sort re-render WITHOUT it (expand does its own
-  // scroll-to-top; filter/sort start from the top intentionally).
-  function renderCoaching(preserveScroll){
-    var host=document.getElementById("u-pr-coaching");
-    if(!host||!USAGE||!USAGE.prompts)return;
-    var wrap=host.querySelector(".pr-tablewrap"), top=wrap?wrap.scrollTop:0;
-    host.innerHTML=coachingPanel(USAGE.prompts,coachState());
-    if(preserveScroll){var w2=host.querySelector(".pr-tablewrap"); if(w2)w2.scrollTop=top;}
-  }
-  // The subtitle counts the ADVISED set the table actually draws (P15), not
-  // every recurring cluster — so the header and the rows below it agree.
-  function coachingNote(p,win){
-    var n=advisedClusters(p).length;
-    return win+" · "+n+" pattern"+(n===1?"":"s")+" with advice · click one for coaching";
-  }
-  function setText(id,txt){var el=document.getElementById(id);if(el)el.textContent=txt;}
-  function windowLabel(){return usageDays>=365?"all history":"last "+usageDays+"d";}
-
   export function renderFindings(d){
     var ins=Array.isArray(d.insights)?d.insights:[];
     var badge=document.getElementById("u-findings-n");
@@ -1418,19 +1166,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
       src='<details class="i-src"><summary>grounding &mdash; '+f.sources.length+" source"
         +(f.sources.length===1?"":"s")+"</summary><ul>"
         +f.sources.map(function(sc){
-          // Security review SEC-12: scheme-allowlist the href. `esc` does not
-          // touch ':', so `javascript:alert(1)` survived it intact. The only
-          // producer today is a hardcoded constant (MODEL_ROUTING_SOURCES),
-          // which is why the review ranked it LOW and called it latent — but
-          // the neighbouring prompts surface already gets this right with
-          // encodeURIComponent into a '#' fragment, and this one becomes live
-          // XSS the day a detector cites a data-derived URL. A source that is
-          // not plainly http(s) renders as TEXT, so it is still visible and
-          // still auditable; it just is not clickable.
-          var url=String(sc&&sc.url||"");
-          var label=esc(sc&&sc.label);
-          if(!/^https?:\/\//.test(url)) return "<li>"+label+" <span class=\"soft mono\">"+esc(url)+"</span></li>";
-          return "<li><a href=\""+esc(url)+"\" target=\"_blank\" rel=\"noreferrer noopener\">"+label+"</a></li>";
+          return "<li><a href=\""+esc(sc.url)+"\" target=\"_blank\" rel=\"noreferrer noopener\">"+esc(sc.label)+"</a></li>";
         }).join("")+"</ul></details>";
     }
     return '<article class="icard" data-sev="'+esc(f.severity||"info")+'">'

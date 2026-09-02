@@ -1,10 +1,20 @@
 # ADR-0039 — Prompts intelligence: fingerprints, coaching, and layer-3 enrichment
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-0042](0042-retire-prompts-capability-from-mainline.md)
 - **Date:** 2026-08-30
+- **Updated:** 2026-09-01
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0009](0009-usage-scorecard-local-transcript-analytics.md),
   [ADR-0038](0038-consistent-cross-host-session-metrics.md)
+
+## Lifecycle note
+
+This decision was implemented in PR #187 and shipped on main. ADR-0042 removed
+the capability from the supported mainline product on 2026-09-01. The complete
+implementation is preserved at commit
+`91e892f523f307ecb29271cb0e370b538115a2c0` on branch
+`archive/prompts-capability-main-2026-09-01`. The remainder of this ADR records
+the historical implementation and is not current mainline behavior.
 
 ## Context
 

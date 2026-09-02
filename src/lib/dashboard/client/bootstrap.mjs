@@ -86,7 +86,7 @@ import { loadUsage } from './usage.mjs';
   var OVERVIEW_VIEWS=["summary","hosts","providers","runtime","intel"];
   var SYSTEM_VIEWS=["summary","advisory","sessions","storage","runtime","catalog","projects"];
   export var ABOUT_SECTIONS=["hosts","engine","quality","kit","configured"];
-  export var VIEWS=["score","limits","findings","prompts","models","sessions","transcript"];
+  export var VIEWS=["score","limits","findings","models","sessions","transcript"];
   var CAT = {}; // PLACEHOLDER:CAT_JS
   export function catOf(s) { return CAT[s] || 'runtime'; } // PLACEHOLDER:catOf
 
@@ -109,7 +109,11 @@ import { loadUsage } from './usage.mjs';
       if(OVERVIEW_VIEWS.indexOf(requestedOverview)>=0)overviewView=requestedOverview;
     }
     if(parts[0]==="usage"&&parts[1]){
-      if(VIEWS.indexOf(parts[1])>=0){usageView=parts[1];}
+      // ADR-0042 retires the former Prompts view. Preserve old bookmarks by
+      // landing them on the scorecard; all other unknown segments remain
+      // opaque session ids for the transcript reader.
+      if(parts[1]==="prompts"){usageView="score";}
+      else if(VIEWS.indexOf(parts[1])>=0){usageView=parts[1];}
       else{usageView="transcript"; usageSession=decodeURIComponent(parts[1]);}
     }
     if(parts[0]==="observability"&&parts[1]==="history")initialLiveScope="history";
@@ -292,4 +296,3 @@ import { loadUsage } from './usage.mjs';
     var cards=el.querySelectorAll(".card");
     for(var i=0;i<cards.length;i++){cards[i].style.animationDelay=(i*40)+"ms";}
   }
-

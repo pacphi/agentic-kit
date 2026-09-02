@@ -159,7 +159,6 @@ export function renderPage({ name, version }) {
         <button class="seg-btn" role="tab" id="usage-tab-score" data-view="score" aria-selected="true" aria-controls="v-score" type="button">Scorecard</button>
         <button class="seg-btn" role="tab" id="usage-tab-limits" data-view="limits" aria-selected="false" aria-controls="v-limits" tabindex="-1" type="button">Limits</button>
         <button class="seg-btn" role="tab" id="usage-tab-findings" data-view="findings" aria-selected="false" aria-controls="v-findings" tabindex="-1" type="button">Findings<span class="segbadge" id="u-findings-n" hidden></span></button>
-        <button class="seg-btn" role="tab" id="usage-tab-prompts" data-view="prompts" aria-selected="false" aria-controls="v-prompts" tabindex="-1" type="button">Prompts</button>
         <button class="seg-btn" role="tab" id="usage-tab-models" data-view="models" aria-selected="false" aria-controls="v-models" tabindex="-1" type="button">Models<span class="segbadge" id="mli-attention-n" hidden></span></button>
         <button class="seg-btn" role="tab" id="usage-tab-sessions" data-view="sessions" aria-selected="false" aria-controls="v-sessions" tabindex="-1" type="button">Sessions<span class="mono seg-n" id="u-sessions-n"></span></button>
         <button class="seg-btn" role="tab" id="usage-tab-transcript" data-view="transcript" aria-selected="false" aria-controls="v-transcript" tabindex="-1" type="button">Transcript</button>
@@ -168,12 +167,6 @@ export function renderPage({ name, version }) {
         <button class="chipf" type="button" data-days="7">7d</button>
         <button class="chipf on" type="button" data-days="14">14d</button>
         <button class="chipf" type="button" data-days="30">30d</button>
-        <!-- Patterns are lifetime phenomena, so the Prompts view alone offers a
-             whole-history window; setUsageView shows and hides this chip, and
-             drops back to 30d when a view that has no use for it is opened. 365
-             is the widest window clampDays will accept, so "All" is a real
-             ceiling rather than an unbounded promise. -->
-        <button class="chipf" type="button" id="usage-days-all" data-days="365" hidden>All</button>
       </div>
     </div>
     <div class="secondary-group" id="secondary-system" hidden>
@@ -510,48 +503,6 @@ export function renderPage({ name, version }) {
       <div class="ins-grid" id="u-insights"></div>
       <div class="foot">grounded in local measurement first; vendor benchmarks are labelled as such &middot;
         third-party &ldquo;model X vs Y&rdquo; blog comparisons are deliberately not used as evidence</div>
-    </section>
-
-    <section class="view" id="v-prompts" role="tabpanel" aria-labelledby="usage-tab-prompts" hidden>
-      <div class="note"><span class="i">&#8505;</span><span>What you actually type, across every host.
-        Every figure here is computed from prompt <b>fingerprints</b> &mdash; a hash, a token count, and a
-        provenance tag recorded at scan time. <b>No prompt text is stored in the index.</b> The Coaching
-        panel can show a pattern&rsquo;s own prompts back to you on demand &mdash; masked, with secrets
-        redacted server-side, from your local transcripts. Only turns a person typed are counted; agent
-        deliveries, tool templates and slash records are filtered out before anything below is measured.</span></div>
-      <div class="hero" id="u-pr-kpis"></div>
-      <section class="strip">
-        <div class="sh"><h2>Who is typing</h2><span class="n mono" id="u-pr-prov-note"></span></div>
-        <div id="u-pr-provenance"></div>
-      </section>
-      <section class="strip">
-        <div class="sh"><h2>How you steer</h2><span class="n mono" id="u-pr-steer-note"></span></div>
-        <div id="u-pr-steer"></div>
-        <h3 class="pr-sub">Supervision taps by length</h3>
-        <div id="u-pr-taps"></div>
-      </section>
-      <section class="strip">
-        <div class="sh"><h2>Host interplay</h2>
-          <span class="pr-infodot" tabindex="0" role="note" aria-label="About the host interplay figures">?
-            <span class="pr-tip"><b>Where you over-steer.</b> <b>Tap share</b> &mdash; how often you nudge
-              (&ldquo;done?&rdquo;) instead of writing a full instruction. <b>p90 length</b> &mdash; how long
-              your prompts run on that host. <b>Role openers</b> &mdash; how often you re-type a persona.
-              <br><br>Histories are unequal: a host adopted recently has fewer days behind its numbers, so
-              read each host against itself, not the other.</span>
-          </span>
-          <span class="n mono" id="u-pr-hosts-note"></span></div>
-        <div id="u-pr-hosts"></div>
-      </section>
-      <section class="strip">
-        <div class="sh sh-coach"><h2>Coaching</h2><span class="n mono" id="u-pr-coaching-note"></span>
-          <div class="pr-posture" id="u-pr-posture" role="group" aria-label="Prompt text visibility">
-            <span class="pt-lbl mono">prompt text</span>
-            <button type="button" class="pt-btn" data-pr-posture="shown" aria-pressed="true">shown</button>
-            <button type="button" class="pt-btn" data-pr-posture="hidden" aria-pressed="false">hidden</button>
-          </div>
-        </div>
-        <div id="u-pr-coaching"></div>
-      </section>
     </section>
 
     <section class="view" id="v-sessions" role="tabpanel" aria-labelledby="usage-tab-sessions" hidden>

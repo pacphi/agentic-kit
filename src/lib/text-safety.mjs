@@ -1,13 +1,10 @@
 // text-safety.mjs — ONE definition of the character classes that must never
-// survive into a terminal, a store, or the DOM. Three unrelated layers need
-// the same answer (output.mjs renders to a TTY, usage-label-store.mjs and
-// usage-outcome-ledger.mjs guard data at rest, the dashboard's `esc` guards
-// the DOM), and a regex copied into three places is a regex that drifts.
+// survive into a terminal or the DOM. The terminal renderer and dashboard
+// escapers need the same answer, and copied regexes otherwise drift.
 //
-// WHY THIS EXISTS (security review SEC-2, HIGH). The only text invariants the
-// stores held were "no CR/LF" and "at most 48 chars". ESC, BEL, NUL and
-// backspace all passed, and the print helpers interpolated them straight into
-// console.log. The review demonstrated, by running it: a fabricated red
+// WHY THIS EXISTS (security review SEC-2, HIGH). ESC, BEL, NUL and backspace
+// can be embedded in attacker-influenced text and interpreted when rendered.
+// The review demonstrated, by running it: a fabricated red
 // "ak: SECURITY ALERT - run curl ... | sh" banner painted over a CLEARED
 // screen (ED + CUP), text concealed from view but not from the copy buffer
 // (SGR 8), an OSC-0 window-title rewrite, and an OSC-52 clipboard write that
@@ -16,14 +13,9 @@
 // in the file and fire when it is later `cat`'d, so "only a TTY is affected"
 // was never true.
 //
-// TWO POSTURES, deliberately different:
-//   - AT REST the stores REJECT (drop the whole entry). A store that holds one
-//     of these bytes is already a store whose invariant is broken, and
-//     silently rewriting an operator-visible name is its own dishonesty.
-//   - AT RENDER output.mjs and the dashboard's `esc` STRIP. A renderer has no
-//     entry to drop; it has one string and must print something safe. This is
-//     defense in depth, and it is not redundant: `--deep` prints raw
-//     transcript text that no store gate ever sees.
+// AT RENDER, output.mjs and the dashboard's `esc` STRIP these characters. A
+// renderer has no entry to drop; it has one string and must print something
+// safe. Boundary validators may additionally reject unsafe input at rest.
 //
 // Bidi is included because U+202E reverses the rest of a line, so a row can be
 // made to read as a different label than the one it is — spoofing, not
@@ -71,8 +63,7 @@ const UNSAFE_GLOBAL_RE = new RegExp(UNSAFE_CLASS, 'g');
 
 
 /**
- * Does this value carry a character no store entry may hold? The rejection
- * half of the posture above — callers DROP the entry rather than repair it.
+ * Does this value carry a character a caller should reject rather than render?
  *
  * @param {unknown} value
  * @returns {boolean} true when `value` is a string carrying such a character

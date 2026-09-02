@@ -32,7 +32,6 @@ const COPIES = [
   ['src/lib/dashboard/groups.mjs', 'the real escaper, injected into the bundle'],
   ['src/lib/dashboard/client.mjs', "RHYTHM_ESC — the strip-target for the two on-disk copies"],
   ['src/lib/dashboard/client/usage-rhythm.mjs', 'on-disk copy, for the direct-import tests'],
-  ['src/lib/dashboard/client/usage-prompts.mjs', 'on-disk copy, for the direct-import tests'],
   ['src/lib/dashboard/live/client.mjs', 'the live view escaper (SEC-15)'],
 ];
 

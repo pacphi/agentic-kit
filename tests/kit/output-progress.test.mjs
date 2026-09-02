@@ -103,7 +103,7 @@ test('managed outcomes render degraded and failed states without green success',
 
 // exitWhenFlushed — the pipe-safe exit for the bin entry. process.exit() kills
 // the process before a piped stdout drains, so any command whose output tops
-// the ~64KB pipe buffer (ak usage prompts --json is ~268KB on the reference
+// the ~64KB pipe buffer (large machine-readable reports can exceed it on the reference
 // corpus) truncates for every `| jq` consumer. The fix defers the hard exit
 // until stdout and stderr report their queues flushed. Tested end-to-end
 // through a real child process and a real pipe — the buffer behavior being

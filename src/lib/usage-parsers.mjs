@@ -9,13 +9,11 @@
 //
 // A malformed line is skipped, never fatal — one corrupt line must not cost
 // a whole file, and no input here may throw.
-import { createHash } from 'node:crypto';
 import { repoRoot } from './paths.mjs';
 import { MAX_TELEMETRY_UNKNOWN_KINDS } from './usage-telemetry.mjs';
 import { decodeClaudeRecord, decodeCodexRecord } from './telemetry-records.mjs';
 import { toMs, maskSecrets } from './usage-aggregate.mjs';
 import { normalizeMode } from './usage-modes.mjs';
-import { provenanceOf } from './usage-provenance.mjs';
 
 /** Silence longer than this ends a stretch of engagement. A session is split
  *  into active sub-intervals at gaps ABOVE this bound (exactly this much is not
@@ -200,146 +198,7 @@ export function blankSession(id, provider) {
     lenSeconds: 0,
     ctxWindow: null, ctxLastTokens: null,
     aborts: 0,
-    // v14: one fingerprint per prompt-kind turn, and the count of any that
-    // exceeded MAX_PROMPT_FPS. Prompt TEXT is never stored — see
-    // promptFingerprint.
-    promptFPs: [], promptFPOverflow: 0,
   };
-}
-
-// ── prompt fingerprints (ADR-0039 "F1 fingerprints: the entry shape, the
-// bottom-64 sketch, and what it actually costs") ───────────────────────────
-
-/** Per-session cap on stored fingerprints. The corpus's busiest session
- *  carries a few hundred; 2,000 leaves an order of magnitude of headroom while
- *  bounding what one pathological transcript can add to the index. Anything
- *  past it is COUNTED (promptFPOverflow), never silently dropped. */
-export const MAX_PROMPT_FPS = 2000;
-
-/** How many token hashes one fingerprint keeps. Because the hashes are sorted
- *  and a hash is uniform with respect to its token, the first `k` of them are a
- *  BOTTOM-K SKETCH: a deterministic, unbiased sample of the token set, and the
- *  standard estimator for set similarity between two such sketches. Measured on
- *  this machine's corpus (2026-08-29): unique-token counts run p50 60, p95
- *  1,035, max 7,873, and storing all of them cost 15 MB — 88% of the whole
- *  index, against a 2.1 MB index without them. At 64 the median prompt is still
- *  stored COMPLETE, the tail costs a bounded ~700 bytes instead of ~86 KB, and
- *  Jaccard over the sketch carries a standard error near 0.06 at J≈0.6 — the
- *  threshold the clustering is specified at, where the prompt-type filter is
- *  what supplies precision. Capping the ENTRY count (MAX_PROMPT_FPS) without
- *  capping this would have been no bound at all: one pasted document outweighs
- *  a hundred real instructions. */
-export const MAX_TOKEN_HASHES = 64;
-
-/** The form repetition analysis compares on: lowercased, whitespace collapsed,
- *  trailing punctuation stripped. "Yes." and "yes" are the same instruction
- *  asked twice, and a view that reported them as two distinct prompts would
- *  understate every repetition figure it renders. */
-export function normalizePromptText(text) {
-  return String(text ?? '')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/[.!?,;:\s]+$/, '');
-}
-
-/** Tokens of an ALREADY-normalized prompt: split on everything outside the
- *  word charset, which deliberately KEEPS the characters that carry meaning in
- *  this corpus — `#` (issues), `/` (paths, slash commands), `.` `-` `_` `+`
- *  (filenames, flags, versions). Splitting those apart would make `src/lib/x.mjs`
- *  four common tokens instead of one distinctive one. */
-function promptTokens(norm) {
-  return norm.split(/[^a-z0-9#/_.+-]+/).filter(Boolean);
-}
-
-const sha = (s, n) => createHash('sha256').update(s).digest('hex').slice(0, n);
-
-/**
- * The stored form of a prompt: a hash of its normalized text, its token count,
- * and a bounded sample of its token hashes. This is the whole privacy
- * contract — exact repeats, near-duplicate clustering (token-set Jaccard over
- * `th`), tap detection and length stats all compute from these three fields,
- * so the text itself never has to reach the index or a wire.
- *
- * `th` is a SET (deduplicated), sorted, and bounded at MAX_TOKEN_HASHES — see
- * there for why the bound is a bottom-k sketch rather than a truncation. `t`
- * keeps repeats, because a prompt that says the same word four times is longer
- * than one that says it once, and it is the honest length even when `th` is a
- * sketch of the token set rather than all of it.
- *
- * @param {string} text
- * @returns {{ h: string, t: number, th: string[] }}
- */
-export function promptFingerprint(text) {
-  const norm = normalizePromptText(text);
-  const tokens = promptTokens(norm);
-  return {
-    h: sha(norm, 16),
-    t: tokens.length,
-    th: [...new Set(tokens.map((tok) => sha(tok, 8)))].sort().slice(0, MAX_TOKEN_HASHES),
-  };
-}
-
-/** Question shape, in the two forms the corpus actually carries. The wh-word
- *  opener is admitted WITHOUT a mark ("why is the build failing") because
- *  dropping the '?' is ordinary in a chat transcript; the auxiliary opener is
- *  not, because "can you run the tests" is a politeness form of an instruction
- *  and only becomes a question when the turn actually asks one. */
-const QUESTION_WH_RE = /^(?:who|whom|whose|what|when|where|why|which|how)\b/;
-const QUESTION_AUX_RE = /^(?:is|are|was|were|am|do|does|did|have|has|had|can|could|shall|should|will|would|may|might|must)\b/;
-
-/** Role-assignment opener — the "you are a senior release engineer" scaffold
- *  and the "# Instructions (read first)" heading a managed worker template
- *  starts with. The article in `you are (a|an|the)` is load-bearing: without it
- *  "you are right, revert it" would read as a persona. */
-const PERSONA_OPENER_RE = /^(#\s*)?(instructions \(read first\)|you are (a|an|the)\b)/i;
-
-/**
- * The two SHAPE flags a fingerprint carries, decided here because this is the
- * last moment the text exists — nothing downstream can re-derive them, since
- * the text never reaches the index (see promptFingerprint).
- *
- * Both are omitted when false rather than stored as 0: the flags ride on every
- * fingerprint in the corpus, and an absent key is both smaller and honest —
- * "not this shape", never a measurement that happened to come out zero.
- *
- * Deliberately shape-only, and deliberately NOT provenance: a machine-authored
- * template that opens with a persona is still RECORDED with `o`. That is a
- * recording choice, not a counting one — every shipped consumer filters to
- * `p === 'human'` before counting personas, because ADR-0039's provenance
- * ruling makes provenance filtering load-bearing for every figure in the
- * Prompts view, so nothing today
- * reads a non-human `o`. Recording it blind is what would let a future consumer
- * ask for machine-authored persona counts by reading the raw fingerprints,
- * instead of needing a re-scan to get a flag that was never written.
- *
- * @param {string} text
- * @returns {{ q?: 1, o?: 1 }}
- */
-export function promptShape(text) {
-  // Whitespace-collapsed but NOT punctuation-stripped: normalizePromptText
-  // removes the trailing '?' that half of this rule keys on.
-  const s = String(text ?? '').replace(/\s+/g, ' ').trim();
-  const lower = s.toLowerCase();
-  const asks = lower.endsWith('?')
-    || QUESTION_WH_RE.test(lower)
-    || (QUESTION_AUX_RE.test(lower) && lower.includes('?'));
-  return { ...(asks ? { q: 1 } : {}), ...(PERSONA_OPENER_RE.test(s) ? { o: 1 } : {}) };
-}
-
-/** Record one prompt-kind turn's fingerprint on a session record, or count it
- *  as overflow. Exported for the same reason blankSession/addUsage are: shared
- *  by all three transcript sources so the hashing, normalization and shape
- *  rules have exactly ONE implementation — a per-host copy would let the same
- *  sentence fingerprint differently depending on where it was typed, which is
- *  precisely the comparison the Prompts view exists to make. */
-export function notePromptFingerprint(rec, text, kind) {
-  if (rec.promptFPs.length >= MAX_PROMPT_FPS) { rec.promptFPOverflow++; return; }
-  rec.promptFPs.push({
-    ...promptFingerprint(text),
-    p: provenanceOf(text, { kind }),
-    ...promptShape(text),
-  });
 }
 
 /** Response-latency histogram edges, in seconds; the 6th bucket (index 5)
@@ -428,24 +287,17 @@ export function addUsage(rec, day, model, u) {
 /**
  * Harness-output envelopes: user-role entries whose text the HARNESS wrote —
  * background-task notifications, command stdout/stderr dumps, local-command
- * caveats, and the ambient browser-state block. They carry neither `isMeta` nor
- * a tool_result block, so text shape is the only signal. Measured on the real
- * corpus (envelope at start of user text): task-notification 831,
- * local-command-stdout 132, local-command-caveat 87, bash-stdout 53; the stderr
- * variants are the symmetric error-path siblings. NOT here: bash-input (the
- * person typed that `! cmd`) and the command-name/-message triple (the person
- * invoked that slash command).
- *
- * `in-app-browser-context` joined the list once the provenance work measured it:
- * 33 such turns reached kind 'prompt' (all on codex; 0 on claude today, but the
- * regex is shared so both hosts are covered), where they inflated `prompts` and
- * were then tagged 'human' by provenanceOf — the harness writing in the
- * operator's name. It is also the ONLY one of these names that carries
- * attributes (`source="ambient-ui-state"`), which is why the terminator is
- * `[\s>]` rather than `>`. That relaxation is behaviour-preserving on measured
- * data: across 1,103 occurrences of the other six names, ZERO carried an
- * attribute, and `[\s>]` still refuses a longer name (`<task-notification-x>`).
+ * caveats. They carry neither `isMeta` nor a tool_result block, so text shape
+ * is the only signal. Measured on the real corpus (envelope at start of user
+ * text): task-notification 550, bash-stdout 85, local-command-stdout 60,
+ * local-command-caveat 183; the stderr variants are the symmetric error-path
+ * siblings. NOT here: bash-input (the person typed that `! cmd`) and the
+ * command-name/-message/-args triple (the person invoked that slash command).
  */
+// Ambient browser state is harness-authored context, not a human prompt. It is
+// the only observed envelope in this family that carries attributes, so the
+// terminator accepts whitespace as well as `>` while still refusing longer
+// element names. This correctness fix remains after prompt fingerprints retire.
 const HARNESS_OUTPUT_RE = /^\s*<(task-notification|bash-stdout|bash-stderr|local-command-stdout|local-command-stderr|local-command-caveat|in-app-browser-context)[\s>]/;
 
 function entryText(entry) {
@@ -508,20 +360,8 @@ function recordClaudeUserTurn(rec, turns, titleState, latState, e, ms, decoded, 
     const m = normalizeMode({ host: 'claude', permissionMode: e.permissionMode });
     if (m.raw) { rec.mode = m.mode; rec.modeRaw = m.raw; }
   }
-  // Now computed on BOTH paths, not just withTurns: the fingerprint layer keys
-  // on the turn KIND, which is deliberately broader than isHumanPrompt — an
-  // interrupt, a slash-command record and a bash-input are all prompt-kind
-  // turns the person initiated, and provenanceOf is what separates them from
-  // typed instructions.
-  // I1: the fingerprinted POPULATION is not identical across hosts — claude
-  // fingerprints everything userTurnKind calls 'prompt', while codex sits
-  // additionally behind CODEX_MACHINE_ENVELOPE_RE, so agent-delivered turns are
-  // visible as `p: 'agent'` here and simply absent there. Cross-host prompt
-  // counts must be compared per tag, not in total.
-  const kind = userTurnKind(e);
-  if (kind === 'prompt') notePromptFingerprint(rec, decoded.text, kind);
   if (withTurns && decoded.text) {
-    turns.push({ role: 'user', at: new Date(ms).toISOString(), text: decoded.text, prompt: human, kind });
+    turns.push({ role: 'user', at: new Date(ms).toISOString(), text: decoded.text, prompt: human, kind: userTurnKind(e) });
   }
 }
 
@@ -832,13 +672,6 @@ function handleCodexUserMessage(rec, turns, stats, titleState, latState, decoded
     // Opens the prompt→agent-message latency window; closed by the first
     // following handleCodexAssistantMessage (mirrors Claude's latState, Task 3).
     latState.pendingPromptMs = ms;
-    // Codex's kind is exactly this gate's verdict (see the turn row below), so
-    // a gated message contributes no fingerprint — the layer sits behind the
-    // harness/mirror gate rather than re-litigating it.
-    // I1: that makes codex's fingerprinted population NARROWER than claude's —
-    // CODEX_MACHINE_ENVELOPE_RE removes agent deliveries here, whereas claude
-    // records them as `p: 'agent'`. Compare hosts per tag, never in total.
-    notePromptFingerprint(rec, text, 'prompt');
   }
   if (withTurns && text) {
     turns.push({ role: 'user', at: new Date(ms).toISOString(), text, prompt: human, kind: human ? 'prompt' : 'context' });

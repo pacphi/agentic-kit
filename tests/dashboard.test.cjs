@@ -100,6 +100,18 @@ function getRaw(port, rawPath, token) {
   });
 }
 
+function requestMethod(port, method, rawPath, token) {
+  return new Promise((resolve, reject) => {
+    const headers = token ? { 'x-dash-token': token } : {};
+    http.request({ host: '127.0.0.1', port, path: rawPath, method, headers }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => { body += c; });
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body }));
+    }).on('error', reject).end();
+  });
+}
+
 function openSse(port, { headers = {}, onChunk = () => {}, path: route = '/api/live/events', token } = {}) {
   let req;
   const authHeaders = token ? { 'x-dash-token': token } : {};
@@ -131,30 +143,7 @@ function eventually(predicate, message, timeout = 1500) {
 }
 
 async function main() {
-  const { startDashboard: realStartDashboard } = await import('file://' + MOD);
-  // Fix round 1, I-6: every /api/usage route now also computes coaching
-  // (dashboard-server.mjs's dashboardCoachingPayload), which by default
-  // reads the REAL ~/.config/agentic-kit ledger — the exact hazard `usage`/
-  // `limits` are already injected against throughout this file. A blank
-  // in-memory ledger keeps every call in this suite hermetic; wrapping
-  // startDashboard itself (rather than editing ~26 call sites) means no
-  // future call site can reintroduce the gap by omission.
-  const NULL_COACHING_LEDGER = { loadLedger: () => ({ version: 1, records: [] }), ledgerPath: '/dev/null/unused' };
-  // Fix round 1, I-3: the SAME hazard, one file over (review-confirmed live
-  // with repro/probe-leak.mjs) — dashboard-server.mjs also reads the
-  // persisted label/card store unconditionally on every /api/usage poll and
-  // feeds it to dashboardCoachingPayload, regardless of the `usage`
-  // override above. `tests/ui/dashboard-ui.mjs` and dashboard-usage-
-  // telemetry.test.mjs both already wrap this; this file only had the
-  // ledger half wrapped, leaving every one of its ~25 startDashboard call
-  // sites able to serve this developer's REAL enriched cards to a
-  // fixture-only test.
-  const NULL_LABEL_STORE = {
-    loadLabelStore: () => ({ version: 1, labels: {}, cards: {} }), labelStorePath: '/dev/null/unused',
-  };
-  const startDashboard = (opts = {}) => realStartDashboard({
-    coachingLedger: NULL_COACHING_LEDGER, labelStore: NULL_LABEL_STORE, ...opts,
-  });
+  const { startDashboard } = await import('file://' + MOD);
 
   const STUB_STATUS = {
     overall: 'warn',
@@ -669,6 +658,7 @@ async function main() {
       contains(r.headers['content-type'] || '', 'application/json');
       const j = JSON.parse(r.body);
       assert(!('sessions' in j), 'sessions[] must be stripped — that is what /api/sessions is for');
+      assert(!('prompts' in j), 'the retired Prompts projection must not survive in /api/usage');
       assert(j.totals && j.totals.cost === 12.5, 'totals must survive');
       assert(j.providerAnalytics.openrouter.totals.requests === 3,
         'provider analytics must travel in its own top-level block');
@@ -681,6 +671,15 @@ async function main() {
       assert(j.sourceHealth.opencode.diagnostics.common.warnings[0] === 'corrupt',
         'common telemetry diagnostics must survive the dashboard route');
       assert(spy.calls.readIndex.some((o) => o && o.days === 7), 'days must reach readIndex, got ' + JSON.stringify(spy.calls.readIndex));
+      assert(spy.calls.readIndex.some((o) => o && o.lookbackDays === 14 && o.previous === true),
+        'the prior equal-length comparison window must still be requested');
+    });
+
+    await test('retired Prompts endpoints are unavailable and POST remains disabled', async () => {
+      const oldGet = await get(usageSrv.url + 'api/prompts/samples?key=0000000000000000', usageSrv.token);
+      assert(oldGet.status === 404, 'the removed GET endpoint must be 404');
+      const oldPost = await requestMethod(usageSrv.port, 'POST', '/api/prompts/dismiss', usageSrv.token);
+      assert(oldPost.status === 405, 'the observation-only server must reject POST with 405');
     });
 
     await test('GET /api/sessions → { sessions }, filtered by project/category and paginated', async () => {
@@ -2086,7 +2085,7 @@ async function main() {
   // is the suite where it matters most — the traversal-guard and credential-
   // leak tests live here and were the reviewer's cited example of a block
   // that could silently vanish with the old harness never noticing.
-  const EXPECTED = 83;
+  const EXPECTED = 84;
   if (passed + failed !== EXPECTED) {
     console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
     process.exit(1);

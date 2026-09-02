@@ -7,18 +7,9 @@
 // do these already-decoded records add up to", nothing about how they got
 // decoded.
 //
-// The dependency rule, stated precisely because this file used to claim zero
-// sibling imports: usage-parsers.mjs imports `toMs`/`maskSecrets` FROM here, so
-// this file must never import back from it (or from usage-index.mjs). The three
-// modules it does import — usage-provenance, usage-prompt-patterns,
-// usage-prompt-vocabulary — are LEAVES: each has zero imports of its own, so
-// none of them can close a cycle through here. They are pure arithmetic over
-// already-decoded fingerprints, which is exactly this module's own subject.
-import { PROVENANCE_TAGS } from './usage-provenance.mjs';
-import {
-  crossSessionClusters, exactRepeatGroups, nearDupClusters, reAskPairs,
-} from './usage-prompt-patterns.mjs';
-import { labelFor } from './usage-prompt-vocabulary.mjs';
+// Zero imports from sibling usage-* modules by design: usage-parsers.mjs
+// imports `toMs`/`maskSecrets` FROM here, so this file must not import back
+// from it (or from usage-index.mjs) to keep that a one-way dependency.
 
 /** Milliseconds from an epoch number, Date, or ISO string; NaN when unusable.
  *  Exported only for usage-parsers.mjs's own timestamp parsing — not part of
@@ -74,25 +65,9 @@ export const MAX_TURN_CHARS = 40_000;
 // Each replacement keeps the human-readable prefix and drops the payload. The
 // replacement text cannot re-match its own pattern (the '…' is outside every
 // character class), which is what makes masking idempotent.
-/** How far the two CONTEXT rules below will look on either side of the word
- *  that makes a key name secret-shaped — `MY_` in `MY_SECRET_KEY`, `_FIELD` in
- *  `db_password_field`.
- *
- *  Security review SEC-3 (MEDIUM): those two rules used an UNBOUNDED greedy
- *  class on both sides of the alternation, which is quadratic — for every
- *  place the alternation matched, the trailing class rescanned the entire
- *  remaining input. Measured here before the fix, on a run of secret-shaped
- *  words: 40 KB in 137 ms, 200 KB in 3.4 s, 400 KB in 13.8 s. `maskSecrets`
- *  runs on the FULL untruncated turn body, so a single planted transcript turn
- *  of a few hundred KB hung `ak usage prompts --deep`, and opening that
- *  session in the dashboard hung the server's request handler. Bounded, the
- *  same 400 KB masks in well under a millisecond.
- *
- *  64 is a real ceiling, not a formality: a key name with more than 64
- *  characters of prefix or suffix around its secret-shaped word no longer
- *  matches these two rules. No environment variable, YAML key or TOML key in
- *  practice comes close, and the shape-based rules above (which carry their
- *  own prefixes and are already linear) are unaffected either way. */
+// Secret-shaped key names are bounded so adversarial transcript text cannot
+// make the context rules rescan an unbounded tail. Real environment, JSON,
+// YAML, TOML, and ini keys remain comfortably inside this ceiling.
 const MAX_KEY_NAME_CHARS = 64;
 
 /** @type {[RegExp, string][]} */
@@ -135,22 +110,12 @@ const SECRET_PATTERNS = [
   // Deliberately case-SENSITIVE: with /i this matches prose like
   // "tokens used = 10028979467", and these transcripts discuss token counts
   // constantly. Uppercase-only tracks the actual env-var convention instead.
-  // The {0,MAX_KEY_NAME_CHARS} bounds are the SEC-3 fix, not cosmetic: an
-  // unbounded greedy class on BOTH sides of the alternation made this
-  // quadratic, because every alternation hit rescanned the whole tail. See
-  // MAX_KEY_NAME_CHARS.
   [new RegExp(`\\b([A-Z][A-Z0-9_]{0,${MAX_KEY_NAME_CHARS}}(?:SECRET|TOKEN|PASSWORD|PASSWD|API_?KEY|PRIVATE_KEY)[A-Z0-9_]{0,${MAX_KEY_NAME_CHARS}})(\\s*[:=]\\s*)("?)[^\\s"']{8,}\\3`, 'g'),
     '$1$2$3…redacted$3'],
   // Quoted JSON/JS object key whose name says secret — "apiKey": "…", 'client_secret': '…'.
   // Case-insensitive is safe here: the quote delimiters are a shape prose never
   // has, so this cannot widen into "tokens used" the way the assignment rule's
   // /i would (that rule stays case-sensitive above for exactly that reason).
-  // The {0,MAX_KEY_NAME_CHARS} bounds on BOTH classes are the SEC-1 fix — the
-  // same narrowing rules 142/154 already carry. Unbounded, a quote followed by a
-  // long secret-word run (never closing the quote) drove O(n^2) backtracking, and
-  // the masked-samples endpoint routes attacker-authored prompt text through here
-  // by default. A real key name never runs to hundreds of chars, so the bound
-  // costs nothing a caller would notice.
   [new RegExp(`(["'][A-Za-z0-9_-]{0,${MAX_KEY_NAME_CHARS}}(?:secret|token|password|passwd|api_?key|private_?key)[A-Za-z0-9_-]{0,${MAX_KEY_NAME_CHARS}}["']\\s*:\\s*)(["'])[^"']{8,}\\2`, 'gi'),
     '$1$2…redacted$2'],
   // Line-anchored YAML/TOML/ini assignment — api_key = …, password: … — with no
@@ -281,421 +246,6 @@ export function modelFamily(id) {
   for (const f of CLAUDE_FAMILIES) if (tail.includes(f)) return f;
   const gpt = /gpt-(\d+)/.exec(tail);
   return gpt ? `gpt-${gpt[1]}` : 'other';
-}
-
-// ── prompt fingerprints: taps, shapes, and the operator's own baseline ──────
-
-/** Tokens at or below which a typed prompt reads as a supervision TAP — "yes",
- *  "go ahead", "lgtm ship it" — rather than an instruction (METRICS.md §2b). Named
- *  so the detector, the CLI and the view all quote ONE number. What it does not
- *  model: whether the tap was necessary. Some taps are legitimate approvals. */
-export const TAP_MAX_TOKENS = 4;
-
-/** The share of a cluster's members that must be typed persona openers
- *  (`o === true`) for its derived `kind` to read as a role-preamble (Coaching
- *  redesign §3, ADR-0039 amendment). A simple majority: a cluster whose members
- *  are MOSTLY "you are a …" openers is scaffolding the operator retypes by hand
- *  and could lift into a managed library, which is the coaching move this kind
- *  points at. The bar is `>=` a majority rather than a super-majority because
- *  role-preamble already sits BELOW re-ask in the precedence — a repeated ask
- *  that happens to open with a persona is still handled as the re-ask it is —
- *  so this only ever decides clusters no stronger signal has claimed, where an
- *  even split of openers to non-openers is better read as scaffolding than as a
- *  bare instruction. Pure function of the corpus; no new fingerprint field. */
-export const PERSONA_KIND_SHARE = 0.5;
-
-/** How far back the personal baseline looks, and how many days with at least
- *  one typed prompt it needs before it will claim a normal. Under the floor the
- *  baseline is `null` and the detector falls back to an absolute threshold: an
- *  invented personal normal is worse than admitting there isn't one yet. */
-export const BASELINE_TRAILING_DAYS = 90;
-export const BASELINE_MIN_ACTIVE_DAYS = 30;
-
-/** The provenance gate every figure in the Prompts view sits behind (spec
- *  §2.1): agent deliveries, adapter templates and control records all reach
- *  kind 'prompt', and counting them would report the operator as having asked
- *  for work nobody typed. */
-const isTypedFP = (fp) => fp?.p === 'human';
-/** ...and short enough to be a tap. `t` is the honest token count including
- *  repeats, so this is a length question, never a similarity one. */
-const isTapFP = (fp) => (Number(fp?.t) || 0) <= TAP_MAX_TOKENS;
-
-/** The day a record's tokens FIRST billed on — the attribution `byDay.sessions`
- *  and `byDay.exceptions` already use, and (for want of any per-fingerprint
- *  timestamp) the one the prompt series uses too. `null` when the record never
- *  billed: no day to attribute to, so it contributes to nothing. */
-function firstBilledDay(rec) {
-  let first = null;
-  for (const row of rec.usage ?? []) if (first === null || row.day < first) first = row.day;
-  return first;
-}
-
-/**
- * The v16 prompt-fingerprint projection for one record: what the operator
- * typed, how much of it was a tap, and the raw material the per-host figures
- * need (typed lengths, question count, persona-opener count).
- *
- * `typedPrompts`/`tapPrompts` are `null` — not 0 — when the record carries no
- * fingerprint layer at all. "Nothing was measured" and "measured nothing" are
- * different claims, and only the second supports a headless reading of the
- * session.
- *
- * `personaOpeners` counts only TYPED persona openers. The shape flag itself is
- * provenance-blind (a tool's own template still carries `o`), but the coaching
- * move it feeds — lift the role text into a managed library — is about what the
- * operator retypes by hand; a tool's template is already a managed artifact.
- */
-function v16Projection(rec) {
-  const fps = rec.promptFPs;
-  if (!Array.isArray(fps)) {
-    return { typedPrompts: null, tapPrompts: null, _typedTokens: [], _questions: 0, _personas: 0 };
-  }
-  const out = { typedPrompts: 0, tapPrompts: 0, _typedTokens: [], _questions: 0, _personas: 0 };
-  for (const fp of fps) {
-    if (!isTypedFP(fp)) continue;
-    out.typedPrompts++;
-    if (isTapFP(fp)) out.tapPrompts++;
-    out._typedTokens.push(Number(fp.t) || 0);
-    if (fp.q === 1) out._questions++;
-    if (fp.o === 1) out._personas++;
-  }
-  return out;
-}
-
-/** One host's running prompt bucket. Same null-prototype reasoning as
- *  `bucket()`: the key is a transcript-derived host name. */
-function promptHostBucket(map, key) {
-  if (!Object.prototype.hasOwnProperty.call(map, key)) {
-    map[key] = { typed: 0, taps: 0, questions: 0, personaOpeners: 0, typedTokens: [] };
-  }
-  return map[key];
-}
-
-/** One day's prompt row and the per-host row inside it, both created on first
- *  touch. Unlike `byDay` (billed days only) a key here means "a session
- *  attributed to this day carried the fingerprint layer" — so a zero is a
- *  measurement, not a missing day. */
-function promptDayRows(byDay, day, host) {
-  const d = (byDay[day] ??= { typed: 0, taps: 0, byHost: Object.create(null) });
-  const h = (d.byHost[host] ??= { typed: 0, taps: 0 });
-  return [d, h];
-}
-
-/** Fold one session row's already-projected prompt counts into the window
- *  totals, the per-host buckets and the per-day series. Pure summation — the
- *  fingerprint rules live in v16Projection and are not restated here. */
-function foldSessionPrompts(s, totals, promptsByHost, promptStatsByDay) {
-  if (s.typedPrompts === null) return;          // no fingerprint layer: absent, not zero
-  const host = s.host ?? 'unknown';
-  const h = promptHostBucket(promptsByHost, host);
-  totals.typedPrompts += s.typedPrompts;
-  totals.tapCount += s.tapPrompts;
-  h.typed += s.typedPrompts; h.taps += s.tapPrompts;
-  h.questions += s._questions; h.personaOpeners += s._personas;
-  for (const t of s._typedTokens) h.typedTokens.push(t);
-  if (!s._day) return;
-  const [d, dh] = promptDayRows(promptStatsByDay, s._day, host);
-  d.typed += s.typedPrompts; d.taps += s.tapPrompts;
-  dh.typed += s.typedPrompts; dh.taps += s.tapPrompts;
-}
-
-/** Turn the running per-host buckets into the published shape. Every share is
- *  `null` rather than 0 when its denominator is empty, and `p90TypedTokens`
- *  likewise: a host with no typed prompt has no length to report. */
-function sealPromptHosts(map) {
-  for (const host of Object.keys(map)) {
-    const b = map[host];
-    map[host] = {
-      typed: b.typed,
-      taps: b.taps,
-      tapShare: b.typed ? round(b.taps / b.typed) : null,
-      p90TypedTokens: percentile(b.typedTokens, 0.9),
-      personaOpeners: b.personaOpeners,
-      questionShare: b.typed ? round(b.questions / b.typed) : null,
-    };
-  }
-}
-
-/**
- * The operator's own tap-share normal, per host: the p75 of the DAILY tap
- * shares over the BASELINE_TRAILING_DAYS immediately before the displayed
- * window. Deliberately excludes the displayed window — that is what the
- * baseline is compared against, and a window that fed its own threshold could
- * never look unusual.
- *
- * Pure, and computed from `records` rather than from the window's session rows,
- * because those are filtered at the display cutoff. It therefore only sees the
- * history the caller's `lookbackDays` actually pulled in; a host with no
- * trailing record simply has no entry, which reads the same as `null` to a
- * detector and is the honest shape for "never measured".
- *
- * Under BASELINE_MIN_ACTIVE_DAYS days of history the value is `null`: a p75
- * over a handful of days is a number, not a normal.
- */
-function buildPromptBaselines(records, { days, now }) {
-  const startDay = localDay(now - (days + BASELINE_TRAILING_DAYS) * DAY_MS);
-  const endDay = localDay(now - days * DAY_MS);
-  const perHost = Object.create(null);
-  for (const rec of records) {
-    if (!rec || !Array.isArray(rec.promptFPs)) continue;
-    const day = firstBilledDay(rec);
-    if (day === null || day < startDay || day >= endDay) continue;
-    const byDay = (perHost[rec.host ?? rec.provider ?? 'unknown'] ??= Object.create(null));
-    const row = (byDay[day] ??= { typed: 0, taps: 0 });
-    for (const fp of rec.promptFPs) {
-      if (!isTypedFP(fp)) continue;
-      row.typed++;
-      if (isTapFP(fp)) row.taps++;
-    }
-  }
-  const out = Object.create(null);
-  for (const host of Object.keys(perHost)) {
-    const shares = Object.values(perHost[host])
-      .filter((r) => r.typed > 0)
-      .map((r) => r.taps / r.typed);
-    out[host] = {
-      tapShareP75_trailing90d:
-        shares.length >= BASELINE_MIN_ACTIVE_DAYS ? percentile(shares, 0.75) : null,
-    };
-  }
-  return out;
-}
-
-// ── promptPatterns: the opt-in repetition projection ───────────────────────
-// Built HERE, beside buildPromptBaselines (ADR-0039 "The opt-in
-// `promptPatterns` projection"), because this is the layer that already
-// reads `records` — and built only when a caller asks (`prompts: true`),
-// exactly as `previous` is.
-//
-// RAW FINGERPRINTS NEVER GET A PUBLIC ACCESSOR. The fingerprint layer is 2.8 MB
-// on the reference corpus, so shipping it would put it on every dashboard poll,
-// and it would put decoration semantics in every consumer. Only this projection
-// ships: aggregates, plus a capped list of session ids per cluster so a view can
-// link to the existing masked session surface. No prompt text exists here to
-// leak, which the tests pin structurally.
-
-/** The clustering threshold the Prompts view ships at (the Repeated-patterns
- *  panel, METRICS.md §21), looser than the pattern library's own 0.8 default
- *  on purpose: phrasing
- *  variance is the signal. Eleven wordings of one request outrank eleven
- *  identical ones, because eleven wordings prove there is no canonical form to
- *  point at; precision comes from the type filter, not from tightening this. */
-export const PROMPT_CLUSTER_JACCARD = 0.6;
-
-/** Re-asks keep the research's tighter 0.8 (findings §5.1). A re-ask is "that
- *  didn't work, so I said it again", which is a claim about near sameness; the
- *  looser threshold above would count an ordinary follow-up as a repeat. */
-export const PROMPT_REASK_JACCARD = 0.8;
-
-/** Session ids attached to a cluster so a view can link to the masked
- *  `GET /api/session/:id` surface. A LINK AFFORDANCE, not a session list —
- *  three is enough to click through and few enough that the projection cannot
- *  become a membership dump. */
-const CLUSTER_SAMPLE_SESSIONS = 3;
-
-/**
- * One stored fingerprint, decorated with WHERE it happened — the input shape
- * usage-prompt-patterns.mjs documents. THIS IS THE ONLY PLACE THE DECORATION
- * SEMANTICS LIVE; a second copy in a consumer is how the two surfaces drift.
- *
- * `q` and `o` are ALWAYS SET as booleans, and that is load-bearing twice over.
- * The scan path stores them as the number 1 and OMITS them when false
- * (usage-parsers.promptShape), while the clustering library reads `m.q === true`
- * / `m.q === false` and treats an absent flag as "nobody classified this". Passed
- * through raw, `1 !== true` made every cluster report `unknown`; and even mapped
- * for truthiness, a never-written `false` left the `instruction` class
- * unreachable, so an instruction cluster was indistinguishable from an
- * unclassified one and three of the four seed patterns could never match.
- *
- * AN ABSENT FLAG THEREFORE MEANS "MEASURED, AND NOT THAT SHAPE" — not
- * "unclassified". That reading is only sound because the parser decides both
- * flags for every fingerprint it writes and the index cache is schema-gated, so
- * every record reaching here was written by a parser that made both decisions.
- *
- * @param {{h: string, t: number, th: string[], p?: string, q?: 1, o?: 1}} fp
- * @param {{id: string, host?: string, provider?: string}} rec the record the
- *   fingerprint was stored on
- * @param {string|null} day its first-billed day (promptStatsByDay's convention)
- */
-function decoratePromptFP(fp, rec, day) {
-  return {
-    ...fp,
-    q: fp.q === 1,
-    o: fp.o === 1,
-    sessionId: rec.id,
-    day,
-    host: rec.host ?? rec.provider ?? 'unknown',
-  };
-}
-
-/** Every in-window fingerprint, decorated. The record gate matches
- *  buildSessionRows' (no assistant turn is not a session; `end < cutoff` is
- *  outside the window) so this projection and the window's own totals are taken
- *  over one population. */
-function windowFingerprints(records, cutoff) {
-  const out = [];
-  for (const rec of records) {
-    if (!rec?.responses || !Array.isArray(rec.promptFPs)) continue;
-    if (rec.end == null || rec.end < cutoff) continue;
-    const day = firstBilledDay(rec);
-    for (const fp of rec.promptFPs) out.push(decoratePromptFP(fp, rec, day));
-  }
-  return out;
-}
-
-/**
- * The single derived filter label per cluster (Coaching redesign §3, ADR-0039
- * amendment). A PURE function of signals the cluster already carries, computed
- * at projection-build time — no new fingerprint data, recomputed every scan.
- * FIRST-MATCH-WINS over a fixed precedence, most-actionable first:
- *
- *   1. `reask`       — a member hash is on the "asked-again" side of a re-ask
- *                      pair (`reaskHashes`). A repeated ask that keeps coming
- *                      back is the most actionable, so it wins even over a short
- *                      or persona-shaped phrasing.
- *   2. `persona`     — a majority of members are typed persona openers
- *                      (`personas / size >= PERSONA_KIND_SHARE`) — role scaffolding.
- *   3. `tap`         — the cluster's median length is a supervision tap
- *                      (`tokens.median <= TAP_MAX_TOKENS`).
- *   4. `question`    — the shipped classifier read it as questions.
- *   5. `instruction` — everything else (`other`/`mixed`/`unknown`, non-short,
- *                      non-persona).
- *
- * `reaskHashes` is the set of asked-again member hashes `buildPromptPatterns`
- * derives from `reAskPairs` (the `b` side of each pair); an absent/empty set
- * simply never matches, which is the honest reading of a corpus with no re-asks.
- *
- * @param {{ hashes: string[], personas: number, size: number,
- *   tokens: { median: number }, class: string }} cluster
- * @param {Set<string>} [reaskHashes]
- * @returns {'reask'|'persona'|'tap'|'question'|'instruction'}
- */
-export function deriveKind(cluster, reaskHashes) {
-  const asked = reaskHashes ?? new Set();
-  if ((cluster.hashes ?? []).some((h) => asked.has(h))) return 'reask';
-  if (cluster.size > 0 && cluster.personas / cluster.size >= PERSONA_KIND_SHARE) return 'persona';
-  if ((cluster.tokens?.median ?? Infinity) <= TAP_MAX_TOKENS) return 'tap';
-  if (cluster.class === 'question') return 'question';
-  return 'instruction';
-}
-
-/** A cluster reduced to its published row. Sets become counts, except `hosts`,
- *  which stays a sorted name list because a host chip is what a reader acts on
- *  and the host set is small, closed and already public in `byHost`. `kind` is
- *  the single derived filter label (§3); `reaskHashes` is threaded in from
- *  `buildPromptPatterns` because the re-ask join lives one scope up. */
-function promptClusterRow(cluster, reaskHashes) {
-  const label = labelFor(cluster, {});
-  return {
-    key: cluster.key,
-    kind: deriveKind(cluster, reaskHashes),
-    // RULING B (final-triage item 2): `descriptor` rides along only for a
-    // characterized row (the full "Recurring N-token X · N sessions · N
-    // hosts" string) — a curated/seeded/enriched `name` already IS the whole
-    // thing, so there is no second string to publish. Left off rather than
-    // set to `undefined` so a consumer's `'descriptor' in label` reads true
-    // only when there is something there.
-    label: {
-      name: label.name, source: label.source,
-      ...(typeof label.descriptor === 'string' ? { descriptor: label.descriptor } : {}),
-    },
-    class: cluster.class,
-    count: cluster.size,
-    sessions: cluster.sessions.size,
-    days: cluster.days.size,
-    hosts: [...cluster.hosts],
-    medianTokens: cluster.tokens.median,
-    sampleSessionIds: [...cluster.sessions].slice(0, CLUSTER_SAMPLE_SESSIONS),
-  };
-}
-
-/** Counts per provenance tag over the WHOLE fingerprinted population — the
- *  denominator every typed figure sits behind (ADR-0039's provenance ruling).
- *  Every tag in the
- *  vocabulary gets a row, including ones this corpus never produced: a missing
- *  tag is evidence about the corpus, not a row to drop. */
-function promptProvenance(fps) {
-  const counts = Object.create(null);
-  for (const tag of PROVENANCE_TAGS) counts[tag] = 0;
-  let unrecognized = 0;
-  for (const fp of fps) {
-    if (Object.hasOwn(counts, fp.p)) counts[fp.p]++;
-    else unrecognized++;
-  }
-  return unrecognized ? { ...counts, unrecognized } : { ...counts };
-}
-
-/** Typed taps grouped by TOKEN LENGTH. No text exists at this layer, so "the
- *  top taps" can only be a length distribution — which is the honest shape of
- *  the question here; a verbatim table needs a transcript re-read. */
-function promptTapLengths(typed) {
-  const byLen = new Map();
-  for (const fp of typed) {
-    if (!isTapFP(fp)) continue;
-    const t = Number(fp.t) || 0;
-    const row = byLen.get(t)
-      ?? { tokens: t, prompts: 0, sessions: new Set(), days: new Set(), hosts: new Set() };
-    row.prompts++;
-    if (fp.sessionId) row.sessions.add(fp.sessionId);
-    if (fp.day) row.days.add(fp.day);
-    if (fp.host) row.hosts.add(fp.host);
-    byLen.set(t, row);
-  }
-  return [...byLen.values()]
-    .sort((a, b) => b.prompts - a.prompts || a.tokens - b.tokens)
-    .map((r) => ({
-      tokens: r.tokens, prompts: r.prompts,
-      sessions: r.sessions.size, days: r.days.size, hosts: [...r.hosts].sort(),
-    }));
-}
-
-/**
- * The published repetition projection: which requests recur, which were asked
- * twice in one sitting, and which are typed identically over and over.
- *
- * Ordering is deterministic throughout — the clustering library sorts by size
- * then key, `exactRepeatGroups` by count then hash, and every Set it hands back
- * iterates sorted — so a rescan over an unchanged corpus reproduces this object
- * byte for byte, which is what the evidence-hash contract (coaching cards,
- * METRICS.md §22) rests on.
- *
- * `labelFor` is applied with an EMPTY label store HERE — every name below
- * resolves to a seed pattern or to `characterize`, never a persisted one, and
- * each row says which via `label.source`. That is not a v1 limitation left
- * unfixed: `usage-prompt-vocabulary.mjs`'s `labelFor` store branch depends on
- * nothing but a cluster's `key`, so re-checking the REAL persisted store
- * (W5, layer-3 enrichment — METRICS.md §23) against these already-published rows afterward —
- * see that module's `withStoreLabel`, applied by `ak usage prompts`/the
- * dashboard — is exactly equivalent to having threaded it through from here.
- * Doing it post-hoc keeps this function, and `aggregate()`'s signature, free
- * of a disk read.
- */
-function buildPromptPatterns(records, { cutoff, now }) {
-  const fps = windowFingerprints(records, cutoff);
-  const typed = fps.filter(isTypedFP);
-  const clusters = crossSessionClusters(nearDupClusters(typed, { jaccard: PROMPT_CLUSTER_JACCARD }));
-  const reAsks = reAskPairs(typed, { jaccard: PROMPT_REASK_JACCARD });
-  // The "asked-again" side of every re-ask pair — the RE-ask's hash (`b`,
-  // turns[j], the later of the two) — is what the derived `reask` kind joins a
-  // cluster against (§3.1). Built here because `reAsks` and `clusters` share
-  // this one scope; `promptClusterRow` never re-runs the pairing.
-  const reaskHashes = new Set(reAsks.pairs.map((p) => p.b));
-  return {
-    corpus: { fingerprints: fps.length, typed: typed.length },
-    provenance: promptProvenance(fps),
-    tapLengths: promptTapLengths(typed),
-    clusters: clusters.map((c) => promptClusterRow(c, reaskHashes)),
-    reAsks: {
-      pairCount: reAsks.pairs.length,
-      sessionCount: reAsks.sessions,
-      gapHist: { ...reAsks.gaps },
-    },
-    exactRepeats: exactRepeatGroups(typed).map((g) => ({
-      key: g.h, count: g.count, tokens: g.t,
-      sessions: g.sessions.size, days: g.days.size, hosts: [...g.hosts],
-    })),
-    computedAt: new Date(now).toISOString(),
-  };
 }
 
 /** Sum a record's per-model usage rows into one API-equivalent cost. Rows with
@@ -855,13 +405,15 @@ function foldSessionUsageRow(row, rec, deps, acc, byDay, byModel, activeDays) {
  *  usable: it can open at 23:58 and only bill after midnight). */
 function foldSessionUsageRows(rec, deps, byDay, byModel, rates) {
   const acc = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, cacheSaved: 0 };
+  let firstDay = null;
   const activeDays = new Set();
   for (const row of rec.usage) {
+    if (firstDay === null || row.day < firstDay) firstDay = row.day;
     acc.cacheSaved += cacheSavedFor(row, rec, deps, rates);
     foldSessionUsageRow(row, rec, deps, acc, byDay, byModel, activeDays);
   }
   for (const day of activeDays) byDay[day].sessionsActive++;
-  return { ...acc, firstDay: firstBilledDay(rec) };
+  return { ...acc, firstDay };
 }
 
 /**
@@ -921,10 +473,6 @@ function buildSessionRow(rec, usage, verdict) {
     reasoningOutput: rec.reasoningOutput ?? 0,
     rateLimits: rec.rateLimits ?? null,
     ...v11Projection(rec),
-    // v16: what this session's operator actually typed. The underscore-prefixed
-    // members are working material for the window fold (per-host lengths and
-    // shape counts) and are stripped alongside `_span` once it is done.
-    ...v16Projection(rec),
     _span: [rec.start ?? rec.end, rec.end],
     // Did this session carry ANY token evidence? A session with no usage rows
     // costs $0 structurally — nothing was measured — rather than because the
@@ -1002,18 +550,12 @@ function foldSessionTotals(sessions, byDay, byModel) {
     exceptions: 0, aborts: 0,
     input: 0, output: 0, cacheRead: 0, cacheWrite: 0, tokens: 0, cost: 0,
     cacheSavedUsd: 0, spanMinutes: 0, spanUnionSeconds: 0, engagedSeconds: 0,
-    // v16. `humanPrompts` above is main-thread PROMPT COUNTS; these two are the
-    // narrower fingerprint-derived figures — turns whose provenance says a
-    // person typed them, and the short ones among those. They are different
-    // denominators on purpose and neither replaces the other.
-    typedPrompts: 0, tapCount: 0,
   };
   const byHost = Object.create(null), byProvider = Object.create(null);
   const byMode = Object.create(null);
   const bySource = Object.create(null), byTool = Object.create(null);
   const byProject = Object.create(null);
   const byCategory = Object.create(null), punchcard = Object.create(null);
-  const promptsByHost = Object.create(null), promptStatsByDay = Object.create(null);
   const tree = new Map();
   const pricedCosts = [];
   let spanMs = 0;
@@ -1053,17 +595,14 @@ function foldSessionTotals(sessions, byDay, byModel) {
       byDay[s._day].sessions++;
       byDay[s._day].exceptions += s.exceptions;
     }
-    foldSessionPrompts(s, totals, promptsByHost, promptStatsByDay);
     for (const [k, n] of Object.entries(s._punchcard)) punchcard[k] = (punchcard[k] ?? 0) + n;
     for (const [k, n] of Object.entries(s.tools)) byTool[k] = (byTool[k] ?? 0) + n;
     foldSessionIntoTree(tree, s);
   }
-  sealPromptHosts(promptsByHost);
 
   return {
     totals, byHost, byProvider, byMode, bySource, byTool,
-    byProject, byCategory, punchcard, promptsByHost, promptStatsByDay,
-    tree, spanMs, pricedCosts,
+    byProject, byCategory, punchcard, tree, spanMs, pricedCosts,
   };
 }
 
@@ -1126,10 +665,6 @@ function finishTotals(totals, sessions, { spanMs, pricedCosts }) {
   totals.costPerEngagedHour = hours ? round(totals.cost / hours) : null;
   totals.costPerSessionMedian = median(pricedCosts);
   totals.costPerSessionP90 = percentile(pricedCosts, 0.9);
-  // Null, not 0, when nothing was typed: a window with no typed prompt has no
-  // tap share to report, and "0% of your prompts were taps" is a claim the
-  // absence of data does not support.
-  totals.tapShare = totals.typedPrompts ? round(totals.tapCount / totals.typedPrompts) : null;
 }
 
 /** The window's response-latency and session-length distributions. Latency
@@ -1258,17 +793,8 @@ function buildCodexRateLimits(sessions) {
  *  DISPLAYED one — `[now − 2·days, now − days)`, derived from `now`/`days` and
  *  not from `cutoff` (see previousWindow). Left off, `agg.previous` is `null` —
  *  "not requested", which a zeroed totals object would misreport as "measured
- *  nothing".
- *
- *  `prompts: true` is the same pattern for the repetition projection
- *  (`agg.promptPatterns`, see buildPromptPatterns): opt-in because clustering
- *  the corpus costs real time on every scan and no default consumer needs it,
- *  and `null` rather than an empty projection when it was not asked for. Any
- *  caller adding an option here must also fold it into usage-index.mjs's
- *  `scanKey` — it decides both the single-flight identity and readIndex's memo,
- *  so an unfolded option lets a `{prompts:true}` caller be served an answer
- *  built without it. */
-export function aggregate(records, { days, now, cutoff, deps, previous = false, prompts = false }) {
+ *  nothing". */
+export function aggregate(records, { days, now, cutoff, deps, previous = false }) {
   // Null-prototype: these are keyed by transcript-derived strings (day, model id,
   // provider, project, category, tool name), so `__proto__` as a key must be an
   // ordinary bucket, not a prototype write that silently discards the data.
@@ -1284,7 +810,7 @@ export function aggregate(records, { days, now, cutoff, deps, previous = false, 
 
   const folded = foldSessionTotals(sessions, byDay, byModel);
   const { totals, byHost, byProvider, byMode, bySource, byTool,
-    byProject, byCategory, punchcard, promptsByHost, promptStatsByDay, tree } = folded;
+    byProject, byCategory, punchcard, tree } = folded;
 
   sealBuckets(byHost, byProvider, byProject, byCategory, byModel,
     byMode, bySource);
@@ -1295,7 +821,6 @@ export function aggregate(records, { days, now, cutoff, deps, previous = false, 
   const projectTree = buildProjectTree(tree);
   for (const s of sessions) {
     delete s._span; delete s._active; delete s._punchcard; delete s._day; delete s._priced;
-    delete s._typedTokens; delete s._questions; delete s._personas;
   }
   const codexRateLimits = buildCodexRateLimits(sessions);
 
@@ -1306,18 +831,6 @@ export function aggregate(records, { days, now, cutoff, deps, previous = false, 
     totals, byDay, engagedByDay, byModel, byHost, byProvider,
     byMode, bySource, byTool,
     byProject, byCategory,
-    // v16 prompt layer. `promptStatsByDay` is a SIBLING of byDay for the same
-    // reason engagedByDay is: byDay's keys are billed days, and a prompt series
-    // keyed on them would have to invent zero-token rows or drop real prompts.
-    // `promptBaselines` reads `records` rather than `sessions` — it is about the
-    // history BEFORE this window, which the display cutoff has already filtered
-    // out of the rows.
-    promptsByHost, promptStatsByDay,
-    promptBaselines: buildPromptBaselines(records, { days, now }),
-    // The repetition projection reads the DISPLAY window (`cutoff`), unlike
-    // promptBaselines above, which deliberately reads the trailing window
-    // BEFORE it. Same records, two different questions.
-    promptPatterns: prompts ? buildPromptPatterns(records, { cutoff, now }) : null,
     punchcard, projectTree, sessions, codexRateLimits, rhythm,
     previous: previous ? previousWindow(records, { days, now, deps, rates }) : null,
     insights: [],

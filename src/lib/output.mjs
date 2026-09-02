@@ -37,11 +37,8 @@ const OWN_SGR_RE = new RegExp(
  * those six color codes and render itself, say, red. It could not move the
  * cursor, clear the screen, conceal text, ring the bell, or emit an OSC
  * title/clipboard sequence — the primitives the review actually demonstrated.
- * And in practice it cannot even do that much, because both routes that carry
- * attacker-chosen text into these helpers strip it earlier: the stores REJECT
- * such an entry outright (usage-label-store.mjs, usage-outcome-ledger.mjs) and
- * `--deep`'s raw transcript text is stripped at `clipText`. This is the last
- * line, not the only one.
+ * And in practice most attacker-chosen strings are also stripped or validated
+ * at their source boundary. This sanitizer is the last line, not the only one.
  *
  * @param {unknown} value
  * @returns {string}
@@ -137,8 +134,7 @@ const FLUSH_TIMEOUT_MS = 2000;
 
 /** Exit once stdout and stderr have drained. `process.exit()` kills the
  *  process with piped output still queued — a pipe consumer sees at most one
- *  ~64KB buffer of any larger payload (`ak usage prompts --json | jq` loses
- *  three quarters of its document). A zero-length write's callback fires only
+ *  ~64KB buffer of any larger JSON payload. A zero-length write's callback fires only
  *  after everything queued before it has been handed to the OS, so exiting
  *  from the second callback preserves hard-exit semantics (lingering timers
  *  or handles still can't keep the process alive) without the truncation.

@@ -40,9 +40,8 @@ permanent.
 | Usage | Scorecard | `#usage/score` | Usage scorecard | Token consumption, API-equivalent cost, efficiency, and trends |
 | Usage | Limits | `#usage/limits` | Provider limits | Current provider windows, reset timing, and available capacity |
 | Usage | Findings | `#usage/findings` | Usage findings | Actionable anomalies, efficiency opportunities, and evidence-backed recommendations |
-| Usage | Prompts | `#usage/prompts` | What you actually type | Prompt repetition, tap habits, and provenance by host from prompt fingerprints; a coaching table where each pattern expands to its masked prompt text, a recommendation, and a copyable draft |
-| Usage | Models | `#usage/models` | Model lifecycle | Host inventory, lifecycle changes, consumers, swap impact, and evidence sources |
 | Usage | Sessions | `#usage/sessions` | Session usage | Retained sessions grouped by project, category, duration, tokens, and cost |
+| Usage | Models | `#usage/models` | Model lifecycle | Host inventory, lifecycle changes, consumers, swap impact, and evidence sources |
 | Usage | Transcript | `#usage/transcript` | Transcript detail | The selected session's locally retained, server-masked evidence |
 | Observability | Live | `#observability/live` | Observability · Live | Projects and roots with current presence or fresh meaningful activity |
 | Observability | History | `#observability/history` | Observability · History | Retained roots that are not currently Live |
@@ -159,8 +158,8 @@ Each count carries the sentence explaining what it counted; on Intelligence it i
 
 ## Usage
 
-Usage loads lazily when first opened. Scorecard, Limits, Findings, Prompts, Models, Sessions, and
-Transcript share the same secondary rail; the 7/14/30-day filters remain aligned to its right.
+Usage loads lazily when first opened. Scorecard, Limits, Findings, Sessions, Models, and Transcript share the
+same secondary rail; the 7/14/30-day filters remain aligned to its right.
 
 ### Scorecard
 
@@ -229,33 +228,6 @@ fetched to draw it. When the arithmetic falls outside the window — a snapshot 
 it describes, or a browser clock that disagrees with the vendor's — the tick is omitted rather than
 pinned to either end, because a mark at 0% or 100% would state a position the data cannot support.
 The legend appears only when at least one row actually carries a tick.
-
-### Prompts
-
-Prompts turns what you actually typed — never what the harness or a delegated agent produced —
-into repetition, habit, and coaching signal, host by host. Every figure derives from prompt
-**fingerprints** (a hash, a token count, a provenance tag recorded at scan time); no prompt text is
-stored in the index. The **KPI strip** reads Typed prompts (share of every fingerprinted turn),
-Questions, Supervision taps (against your own trailing-90d normal per host, where you have one),
-Repeated share, and Headless share. Below it, **Who is typing** shows the provenance split behind
-that Typed-prompts figure — most user-role turns are not typed by you at all — and **Host
-interplay** reads the asymmetry between hosts in plain language (how much more often you tap one,
-how much longer you write on the other, how much role scaffolding each gets retyped by hand), with
-the unequal-histories nuance in its own tooltip rather than a standing caveat.
-
-The **Coaching** panel is a kind-filterable, sortable pattern table — columns **Pattern · Times
-typed · Sessions · Days seen · Hosts**. Filter pills above the table slice by pattern kind and stack
-with the column sort; every header sorts; the table scrolls once it passes a handful of rows, with
-its header pinned. Expanding a pattern opens its coaching panel: where it was **seen** (up to three
-sessions, each a link to that session's masked transcript), **what you typed** (the pattern's own
-prompt text, shown inline and masked, fetched on demand — a **prompt text · shown / hidden** toggle
-at the top of the view suppresses it for screen-sharing and makes no fetch), a **recommendation**, a
-**draft** you can copy, and a **Dismiss** with an inline Undo. A pattern with no matching
-recommendation shows only where it was seen and what you typed, never a forced suggestion. Writing a
-recommendation is still CLI-only (`ak usage prompts --enrich`); the dashboard shows, dismisses,
-and reads, but runs no inference of its own. An **All** chip, offered on this view alone, widens the
-window to the full retained history; leaving Prompts drops it back to 30 days. Full formulas,
-thresholds, and sources: [Usage scorecard metrics](USAGE-SCORECARD-METRICS.md) §2a, §2b, §20–§23.
 
 ### Reading a session row
 

@@ -37,7 +37,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { configDir, claudeDir, codexDir } from './paths.mjs';
-import { writePrivateFileAtomic } from './file-write.mjs';
 import { readCodexStateResult } from './codex-state.mjs';
 import {
   defaultOpencodeDbPath, listSessionsResult as listOpencodeSessionsResult,
@@ -49,6 +48,7 @@ import {
 } from './usage-telemetry.mjs';
 import { parseClaude, parseCodex } from './usage-parsers.mjs';
 import { maskSecrets, applyCodexLedger, aggregate, sessionPayload } from './usage-aggregate.mjs';
+import { writePrivateFileAtomic } from './file-write.mjs';
 
 export { IDLE_GAP_MS, projectLabel } from './usage-parsers.mjs';
 export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, applyCodexLedger } from './usage-aggregate.mjs';
@@ -118,28 +118,14 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
  *       deliveries) inflated Codex prompt counts. A v12-cached Codex record
  *       carries the old (possibly relabeled, possibly inflated) figures and
  *       must be re-derived rather than trusted as-is.
- *  v14: every session record grows `promptFPs` (one privacy-preserving
- *       fingerprint per prompt-kind turn — normalized-text hash, token count,
- *       bounded token-hash sketch, and a provenance tag saying who WROTE it) and
- *       `promptFPOverflow`. A v13-cached record carries neither, so the
- *       Prompts view would read an empty corpus for exactly the sessions
- *       already on disk. Prompt TEXT is not part of this (or any) bump — see
- *       usage-parsers.promptFingerprint.
- *  v15: `in-app-browser-context` joins HARNESS_OUTPUT_RE. Measured: 33 such
- *       turns reached kind 'prompt', so a v14 record counts them in `prompts`
- *       (the harness writing in the operator's name) AND carries a `human`
- *       fingerprint for each. Both figures change for an affected session, so
- *       every record must be re-derived rather than corrected in place. The
- *       provenance rules move with it — session-continuation prose is now
- *       `control`, and the unevidenced `<command-args>` opener is gone — which
- *       also re-tags cached fingerprints.
- *  v16: fingerprints grow two optional SHAPE flags — `q` (question-shaped) and
- *       `o` (persona opener) — decided from the text at fingerprint time, the
- *       last moment it exists. A v15 record cannot be corrected in place
- *       because the text is gone by then; the flags are only derivable on a
- *       re-parse. Absent keys mean "not that shape" and are omitted rather
- *       than stored as 0 — see usage-parsers.promptShape. */
-export const SCHEMA_VERSION = 16;
+ *  v14-v16: the retired Prompts capability added prompt fingerprints,
+ *       provenance, and shape flags to every record. Those versions remain
+ *       reserved in the schema history even though the feature now lives only
+ *       on archive/prompts-capability-main-2026-09-01.
+ *  v17: prompt intelligence is no longer part of the default release. Every
+ *       cached record is re-derived without promptFPs/promptFPOverflow so the
+ *       shared index does not retain feature-only hashes after upgrade. */
+export const SCHEMA_VERSION = 17;
 
 const DAY_MS = 86_400_000;
 // One day of slack past dashboard-server.mjs's 365-day clampDays ceiling —
@@ -497,17 +483,15 @@ let _memo = null;
  *  case still changes the key instead of colliding with every other scan. */
 function scanKey(o = {}) {
   const roots = Object.entries(o.roots || {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  // lookbackDays, previous and prompts all change the RESULT — lookbackDays
-  // widens what scan() parses/returns, previous turns on aggregate's
-  // previous-window projection (agg.previous), prompts turns on the repetition
-  // projection (agg.promptPatterns) — exactly like days/force/roots/cachePath
-  // already do, so every one must be folded into the single-flight/memo
-  // identity too: two calls differing only by one of these must never coalesce
-  // into one answer (a {previous:true} caller must never be served a memoized
-  // {previous:false} answer, or vice versa; likewise {prompts:true}).
+  // lookbackDays and previous both change the RESULT — lookbackDays widens
+  // what scan() parses/returns, previous turns on aggregate's previous-window
+  // projection (agg.previous) — exactly like days/force/roots/cachePath
+  // already do, so both must be folded into the single-flight/memo identity
+  // too: two calls differing only by one of these must never coalesce into
+  // one answer (a {previous:true} caller must never be served a memoized
+  // {previous:false} answer, or vice versa).
   return JSON.stringify([
-    Number(o.days) || 14, Number(o.lookbackDays) || 0,
-    !!o.previous, !!o.prompts, !!o.force, roots, o.cachePath || '',
+    Number(o.days) || 14, Number(o.lookbackDays) || 0, !!o.previous, !!o.force, roots, o.cachePath || '',
   ]);
 }
 
@@ -537,14 +521,6 @@ function notify(onProgress, payload) {
  *           usage-aggregate.mjs's `previousWindow`); needs `lookbackDays` set
  *           wide enough for those older records to have been read at all.
  *           Forwarded to `aggregate`'s own `previous` option unchanged.
- * @property {boolean} [prompts]    also have `aggregate` build the prompt
- *           repetition projection (`agg.promptPatterns` — recurring clusters,
- *           intra-session re-asks, exact repeats; see
- *           usage-aggregate.mjs's `buildPromptPatterns`). Off by default
- *           because clustering the corpus costs real time on every scan and
- *           no default consumer reads it; `agg.promptPatterns` is `null` when
- *           not requested. Forwarded to `aggregate`'s own `prompts` option
- *           unchanged, and folded into `scanKey` like `previous` is.
  * @property {boolean} [force]      ignore cached per-file entries
  * @property {Function} [onProgress] called with { scanned, total, phase }
  * @property {{claude?: string, codex?: string, opencode?: string}} [roots] override transcript roots (tests; opencode = the SQLite store path)
@@ -722,7 +698,7 @@ function resolveCodexLedger(o, rawRoots) {
 async function scan(o = {}) {
   const {
     days = 14, lookbackDays, force = false, onProgress, roots, cachePath, now = Date.now(), deps: injected,
-    previous = false, prompts = false,
+    previous = false,
   } = o;
   const deps = await loadDeps(injected);
   const r = { ...defaultRoots(), ...(roots ?? {}) };
@@ -797,7 +773,7 @@ async function scan(o = {}) {
   // absorbing what should have been the previous window (the bug this fixes).
   const displayCutoff = now - days * DAY_MS;
   const result = aggregate(applyCodexLedger(records, ledger), {
-    days, now, cutoff: displayCutoff, deps, previous, prompts,
+    days, now, cutoff: displayCutoff, deps, previous,
   });
   const codexSourceHealth = finalizeCodexHealth(codexHealth, codexDiagnostics);
   addTelemetryDiagnostics(commonDiagnostics.codex, {

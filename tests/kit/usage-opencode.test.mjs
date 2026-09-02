@@ -9,7 +9,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { listSessions, parseSession, sessionExists } from '../../src/lib/usage-opencode.mjs';
-import { promptFingerprint } from '../../src/lib/usage-parsers.mjs';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ak-uo-'));
 const rm = (d) => fs.rmSync(d, { recursive: true, force: true });
@@ -265,53 +264,5 @@ test('an absent db reads as no source, never a throw', () => {
   assert.deepEqual(listSessions({ dbFile: missing }), []);
   assert.equal(parseSession({ dbFile: missing, id: 'x' }), null);
   assert.equal(sessionExists({ dbFile: missing, id: 'x' }), false);
-  rm(d);
-});
-
-// ── v14 prompt fingerprints ─────────────────────────────────────────────────
-
-// The scan path is the one that matters here: it never loaded message PARTS
-// before (only turns did), so a fingerprint over an empty string would look
-// exactly like a session of attachment-only prompts. Asserting a real token
-// count and a 'human' tag is what makes a silently-broken text read fail loudly
-// rather than mislabelling every opencode prompt as 'control'.
-test('parseSession fingerprints user messages on the scan path, not only withTurns', () => {
-  const d = tmp();
-  const dbFile = buildDb(path.join(d, 'opencode.db'), {
-    sessions: [{ id: 'ses_fp', directory: '/x', title: 't', timeCreated: T }],
-    messages: [
-      userMsg('u1', 'ses_fp', T),
-      userMsg('u2', 'ses_fp', T + 2000),
-      assistantMsg('a1', 'ses_fp', T + 3000),
-    ],
-    parts: [
-      { id: 'p1', messageId: 'u1', sessionId: 'ses_fp', at: T, data: { type: 'text', text: 'Run the tests.' } },
-      { id: 'p2', messageId: 'u2', sessionId: 'ses_fp', at: T + 2000, data: { type: 'text', text: '<!-- generated-by: agentic-kit -->\n\nYou are an agentic-kit managed OpenCode execution worker.' } },
-      { id: 'p3', messageId: 'a1', sessionId: 'ses_fp', at: T + 3000, data: { type: 'text', text: 'done' } },
-    ],
-  });
-  const { session: lean } = parseSession({ dbFile, id: 'ses_fp' });
-  assert.deepEqual(lean.promptFPs.map((f) => f.p), ['human', 'adapter']);
-  assert.equal(lean.promptFPs[0].t, 3, 'the scan path really read the message text');
-  assert.deepEqual(lean.promptFPs[0], { ...promptFingerprint('Run the tests.'), p: 'human' });
-  assert.equal(lean.promptFPOverflow, 0);
-  assert.equal(JSON.stringify(lean.promptFPs).includes('Run the tests'), false, 'no prompt text on the record');
-
-  // withTurns must agree with it exactly — one text source, two read paths.
-  const { session: full } = parseSession({ dbFile, id: 'ses_fp', withTurns: true });
-  assert.deepEqual(full.promptFPs, lean.promptFPs);
-  rm(d);
-});
-
-test('a user message with no text part fingerprints as an attachment-only control turn', () => {
-  const d = tmp();
-  const dbFile = buildDb(path.join(d, 'opencode.db'), {
-    sessions: [{ id: 'ses_att', directory: '/x', title: 't', timeCreated: T }],
-    messages: [userMsg('u1', 'ses_att', T)],
-  });
-  const { session: rec } = parseSession({ dbFile, id: 'ses_att' });
-  assert.equal(rec.prompts, 1, 'it is still a prompt turn');
-  assert.deepEqual(rec.promptFPs.map((f) => f.p), ['control']);
-  assert.equal(rec.promptFPs[0].t, 0);
   rm(d);
 });

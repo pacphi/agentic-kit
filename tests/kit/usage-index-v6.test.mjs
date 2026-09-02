@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { buildIndex, readSession, _resetForTest } from '../../src/lib/usage-index.mjs';
-import { parseClaude, parseCodex, promptFingerprint } from '../../src/lib/usage-parsers.mjs';
+import { parseCodex } from '../../src/lib/usage-parsers.mjs';
 
 const NOW = Date.parse('2026-07-25T12:00:00.000Z');
 const T0 = '2026-07-24T09:00:00.000Z';
@@ -482,88 +482,4 @@ test('parseCodex: harness output and mirrored cross-host envelopes are excluded 
   ].join('\n');
   const { session: item } = parseCodex(itemLines, { id: 'cxh2' });
   assert.equal(item.prompts, 1);
-});
-
-// ── v14 prompt fingerprints on the Codex path ───────────────────────────────
-
-// Codex's own gate (isCodexHumanMessage) already keeps harness output and
-// mirrored Claude envelopes out of kind 'prompt', so those turns must
-// contribute NO fingerprint — the fingerprint layer sits behind that gate, it
-// does not re-litigate it. What DOES reach it is codex's own share of typed
-// prompts and the ak-authored headless templates its workers are spawned with.
-test('parseCodex fingerprints prompt-kind turns only, and tags their provenance', () => {
-  const lines = [
-    JSON.stringify({ type: 'session_meta', payload: { id: 'cxfp1', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
-    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'why is the build failing on macos?' }, timestamp: T0 }),
-    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'Read the dependency handoff only. Make no tool calls.' }, timestamp: T0 }),
-    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: '<task-notification>background task finished</task-notification>' }, timestamp: T0 }),
-    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'Another Claude session sent a message: hello' }, timestamp: T0 }),
-  ].join('\n');
-  const { session: rec } = parseCodex(lines, { id: 'cxfp1' });
-  assert.equal(rec.prompts, 2);
-  assert.deepEqual(rec.promptFPs.map((f) => f.p), ['human', 'adapter']);
-  assert.equal(rec.promptFPs[0].t, 7);
-  assert.equal(rec.promptFPOverflow, 0);
-  assert.equal(JSON.stringify(rec.promptFPs).includes('macos'), false, 'no prompt text on the record');
-});
-
-// v16, on the Codex read path. The shape flags come from the SAME shared
-// implementation the Claude path uses (parseClaude has the mirror of this
-// test), which is the whole point: the Prompts view's host-asymmetry panel
-// compares persona-opener counts BETWEEN hosts, and two per-host copies of the
-// rule would make that comparison meaningless.
-test('parseCodex carries the v16 shape flags, omitted when the shape is absent', () => {
-  const msg = (text) => JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: text }, timestamp: T0 });
-  const lines = [
-    JSON.stringify({ type: 'session_meta', payload: { id: 'cxshape', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
-    msg('why is the build failing on macos?'),
-    msg('You are a senior release engineer. Cut the tag.'),
-    msg('run the full check and report the exit code'),
-  ].join('\n');
-  const { session: rec } = parseCodex(lines, { id: 'cxshape' });
-  assert.deepEqual(rec.promptFPs.map((f) => f.q), [1, undefined, undefined]);
-  assert.deepEqual(rec.promptFPs.map((f) => f.o), [undefined, 1, undefined]);
-  assert.deepEqual(Object.keys(rec.promptFPs[2]).sort(), ['h', 'p', 't', 'th'],
-    'a plain instruction stores no flag keys at all');
-});
-
-// The token hashing/normalization is ONE implementation shared by every host —
-// the same sentence typed in Codex and in Claude must fingerprint identically,
-// or cross-host repetition analysis compares two different alphabets.
-test('a prompt fingerprints identically whichever host recorded it', () => {
-  const text = 'Run the full check and report the exit code.';
-  const codexLines = [
-    JSON.stringify({ type: 'session_meta', payload: { id: 'cxfp2', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
-    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: text }, timestamp: T0 }),
-  ].join('\n');
-  const { session: codex } = parseCodex(codexLines, { id: 'cxfp2' });
-  const { session: claude } = parseClaude(
-    JSON.stringify({ type: 'user', timestamp: T0, message: { role: 'user', content: text } }),
-    { id: 'clfp2' },
-  );
-  assert.deepEqual(codex.promptFPs, claude.promptFPs);
-  assert.deepEqual(codex.promptFPs, [{ ...promptFingerprint(text), p: 'human' }]);
-});
-
-// v15. The ambient browser-state block is harness output, but it carries
-// ATTRIBUTES (`source="ambient-ui-state"`), which the old `>` terminator could
-// not match. All 33 measured occurrences are on this host, where they counted
-// toward `prompts` and were then fingerprinted as `human` — the harness writing
-// in the operator's name. Both effects have to disappear, which is why this
-// asserts the count as well as the fingerprint. The regex is shared, so
-// parseClaude has the mirror of this test.
-test('parseCodex: an in-app-browser-context block is harness output, not a prompt', () => {
-  const msg = (text) => JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: text }, timestamp: T0 });
-  const lines = [
-    JSON.stringify({ type: 'session_meta', payload: { id: 'cxbc', cwd: '/tmp/p', thread_source: 'user' }, timestamp: T0 }),
-    msg('run the tests'),
-    msg(' <in-app-browser-context source="ambient-ui-state">\nambient state\n</in-app-browser-context>'),
-    msg('<in-app-browser-context>bare</in-app-browser-context>'),
-    // Session-continuation prose still reaches kind 'prompt' — it is the person
-    // resuming — so it fingerprints, as control rather than as something typed.
-    msg('This session is being continued from a previous conversation that ran out of context.'),
-  ].join('\n');
-  const { session: rec } = parseCodex(lines, { id: 'cxbc' });
-  assert.equal(rec.prompts, 2, 'neither browser-context block counts as a prompt');
-  assert.deepEqual(rec.promptFPs.map((f) => f.p), ['human', 'control']);
 });

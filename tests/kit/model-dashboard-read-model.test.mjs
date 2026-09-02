@@ -8,26 +8,10 @@ import {
 } from '../../src/lib/model-inventory/read-model.mjs';
 import { modelIdentityKey } from '../../src/lib/model-inventory/contracts.mjs';
 import { discoverAnthropicPublicCatalog } from '../../src/lib/model-inventory/discovery/anthropic-catalog.mjs';
-import { startDashboard as realStartDashboard } from '../../src/lib/dashboard-server.mjs';
+import { startDashboard } from '../../src/lib/dashboard-server.mjs';
 
 const AT = '2026-08-25T12:00:00.000Z';
 const KEY = 'cd'.repeat(32);
-
-// Fix round 1, I-3: every dashboard-server.mjs route computes coaching
-// (dashboardCoachingPayload) and reads the persisted label store,
-// unconditionally, regardless of what a given test actually asserts on —
-// the same hazard tests/dashboard.test.cjs and dashboard-usage-
-// telemetry.test.mjs already guard against. This file's suites only touch
-// /api/models today (latent, per the review), but wrapping startDashboard
-// here too means no future call site can reintroduce a real-~/.config leak
-// into this file by omission.
-const NULL_COACHING_LEDGER = { loadLedger: () => ({ version: 1, records: [] }), ledgerPath: '/dev/null/unused' };
-const NULL_LABEL_STORE = {
-  loadLabelStore: () => ({ version: 1, labels: {}, cards: {} }), labelStorePath: '/dev/null/unused',
-};
-function startDashboard(opts = {}) {
-  return realStartDashboard({ coachingLedger: NULL_COACHING_LEDGER, labelStore: NULL_LABEL_STORE, ...opts });
-}
 
 function evidence(id, field, source, klass = 'catalog') {
   return {

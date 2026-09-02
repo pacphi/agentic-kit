@@ -53,8 +53,8 @@ export function writeFileWithBackup(file, content, { fsImpl = fs } = {}) {
 
 /**
  * Atomic replacement for a PRIVATE, kit-owned store: no backup, no mode
- * preservation, 0600 throughout. The three usage stores (label store, outcome
- * ledger, index cache) all wrote this shape by hand; this is the one copy.
+ * preservation, 0600 throughout. Private kit-owned stores, including the usage
+ * index cache, share this implementation.
  *
  * Security review SEC-6 (LOW): those hand copies used
  * `fs.writeFileSync(tmp, …, { mode: 0o600 })`, whose implicit `'w'` flag

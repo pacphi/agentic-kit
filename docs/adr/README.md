@@ -46,9 +46,10 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0036](0036-dashboard-client-modularization-and-shared-loopback-server.md) | Dashboard client modularization and shared loopback server | Implemented |
 | [0037](0037-complexity-program-structural-patterns.md) | Complexity program: structural patterns and gates | Implemented |
 | [0038](0038-consistent-cross-host-session-metrics.md) | Consistent cross-host session metrics | Accepted |
-| [0039](0039-prompts-intelligence.md) | Prompts intelligence: fingerprints, coaching, and layer-3 enrichment | Accepted |
+| [0039](0039-prompts-intelligence.md) | Prompts intelligence: fingerprints, coaching, and layer-3 enrichment | Superseded by 0042 |
 | [0040](0040-codex-hook-audit-and-conservative-remediation.md) | Codex hook audit and conservative remediation | Implemented (Codex Wave 1) |
 | [0041](0041-host-neutral-hook-configuration-assurance.md) | Host-neutral hook configuration assurance | Accepted; read-only implementation complete |
+| [0042](0042-retire-prompts-capability-from-mainline.md) | Retire Prompts capability from the mainline product | Accepted; implementation in progress |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -298,10 +299,11 @@ transcripts, whose absence had made a quarter of the sessions and 39% of the cos
 window invisible — behind a namespaced id grammar that narrows the traversal guard rather than
 loosening it.
 
-**0039** adds privacy-preserving prompts intelligence to the usage scorecard. It separates human
-prompts from control/agent/adapter turns, retains bounded fingerprints rather than text, uses
-history-backed baselines where evidence permits, and keeps model enrichment opt-in and
-receipt-bound.
+**0039** records the Prompts intelligence capability implemented in PR #187. **0042** supersedes it
+on the supported mainline product while preserving the complete implementation at a pinned commit
+and archive branch. Main advances the usage cache to schema 17, removes feature-only fingerprints,
+CLI/dashboard/coaching/enrichment behavior, and leaves the two owner-only compatibility stores inert
+rather than deleting user state automatically.
 
 **0040** proposes a separate hook-audit bounded context. It discovers direct, project, and
 selected-plugin Codex lifecycle hooks without executing them; preserves every occurrence while

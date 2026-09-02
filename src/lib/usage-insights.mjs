@@ -22,12 +22,7 @@
 // Bucket-percentile math is shared with the window-level rhythm this same
 // histogram data feeds (usage-aggregate.mjs's buildRhythm) — reused here, not
 // reimplemented, so the two never drift on what "p50" means.
-// TAP_MAX_TOKENS and BASELINE_TRAILING_DAYS come from the same module that
-// COMPUTES the figures these detectors read, so a printed threshold can never
-// describe a different rule than the one the aggregate applied.
-import {
-  percentileFromBuckets, LAT_BUCKET_EDGES, TAP_MAX_TOKENS, BASELINE_TRAILING_DAYS,
-} from './usage-aggregate.mjs';
+import { percentileFromBuckets, LAT_BUCKET_EDGES } from './usage-aggregate.mjs';
 
 // ── Pricing structure (multipliers, not rates) ───────────────────────────────
 // `pricing.mjs` owns the per-model $ rates. What we need here is only the SHAPE
@@ -130,33 +125,7 @@ export const THRESHOLDS = {
   // unrestricted-mode: an approval-posture nudge, not a spend-share one — it
   // fires on any recorded use, so the only floor is "at least one".
   unrestrictedMinSessions: 1,
-
-  // supervision-tap-share: the evidence floor a tap share needs before it is a
-  // pattern rather than a handful of turns, and the ABSOLUTE share used only
-  // for a host with no personal baseline yet. Rule 2 bans absolute DOLLAR
-  // thresholds; this is a share, and it is a stated fallback rather than the
-  // rule — a host with history is judged against its own trailing p75.
-  tapMinCount: 20,
-  tapAbsoluteFloorShare: 0.10,
-
-  // headless-share: responses belonging to sessions that typed nothing, as a
-  // share of the responses that could be classified at all.
-  headlessMinShare: 0.25,
-
-  // host-prompt-asymmetry: the p90 typed-length ratio between two hosts, the
-  // typed-prompt count each needs before its p90 is worth comparing, and the
-  // persona-opener count that fires on its own.
-  asymmetryMinRatio: 1.5,
-  asymmetryMinTypedPerHost: 50,
-  personaOpenerMinCount: 10,
 };
-
-/** The tap-cost model's caveat, quoted VERBATIM wherever a tap volume is
- *  stated. A tap is a cheap prompt and an expensive context re-read, and the
- *  re-read is mostly served from cache — so the figure is an order of
- *  magnitude, never a bill. Exported so the view and the CLI print the same
- *  sentence rather than three paraphrases of it. */
-export const TAP_COST_CAVEAT = 'count × median session context; order-of-magnitude, mostly cache-priced';
 
 // ── Grounding for `model-routing` (ADR-0009 §6) ──────────────────────────────
 // Two findings that look contradictory, plus the literature that reconciles them:
@@ -198,7 +167,6 @@ function median(values) {
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.floor(sorted.length / 2)];
 }
-
 function sumBy(rows, key) {
   return rows.reduce((acc, r) => acc + num(r?.[key]), 0);
 }
@@ -269,7 +237,7 @@ function withDefaults(insight) {
   return { command: null, impact: null, ...insight };
 }
 
-// ── The 18 detectInsights heuristics ─────────────────────────────────────────
+// ── The 15 detectInsights heuristics ─────────────────────────────────────────
 // Each detector is independent, sharing only the `ctx` prelude detectInsights
 // computes once (a/totals/sessions/windowCost/sessionCount). `detect(ctx)`
 // returns zero or one insight, wrapped in an array so DETECTORS.flatMap below
@@ -718,168 +686,6 @@ function detectUnrestrictedMode({ sessions, windowCost }) {
   })];
 }
 
-// ── v16 prompt detectors (ADR-0039 "Three prompt detectors, on the existing
-// adaptive-thresholds discipline"; formulas at METRICS.md §2b) ─────────────
-// All three read fingerprint-derived aggregates only — counts, shares and
-// length percentiles. No prompt text is stored by the index, so none of them
-// can read one, and each says so where the claim would otherwise be unfalsifiable.
-
-/** One host's tap row rendered with the threshold it was actually judged
- *  against, because a fired finding that hides its threshold is not evidence. */
-function tapRowText(r) {
-  const against = r.baseline === null
-    ? `the ${pct(THRESHOLDS.tapAbsoluteFloorShare)} floor used while there is no personal baseline yet`
-    : `your own trailing-${BASELINE_TRAILING_DAYS}d p75 of ${pct(r.baseline)}`;
-  return `${r.host} ${pct(r.share)} vs ${against} (${count(r.taps)} taps)`;
-}
-
-/** Hosts whose current tap share clears BOTH gates: above the threshold, and
- *  backed by enough taps to be a pattern. A host with a personal baseline is
- *  compared against it; one without falls back to the absolute floor, and
- *  carries `baseline: null` so the evidence can say which rule applied. */
-export function tapRowsOverThreshold(a) {
-  const byHost = a?.promptsByHost;
-  if (!byHost || typeof byHost !== 'object') return [];
-  const baselines = a?.promptBaselines ?? {};
-  const rows = [];
-  for (const [host, s] of Object.entries(byHost)) {
-    const share = s?.tapShare;
-    const taps = num(s?.taps);
-    if (!Number.isFinite(share) || taps < THRESHOLDS.tapMinCount) continue;
-    const baseline = baselines?.[host]?.tapShareP75_trailing90d ?? null;
-    if (share > (baseline === null ? THRESHOLDS.tapAbsoluteFloorShare : baseline)) {
-      rows.push({ host, share, taps, baseline });
-    }
-  }
-  return rows.sort((x, y) => y.taps - x.taps);
-}
-
-/** What the finding sentence can honestly say the taps rose above. The evidence
- *  line already names the rule per host; this is the one-clause summary above
- *  it, and it must not out-claim that line. A card whose evidence says it used a
- *  fallback floor cannot tell the reader in the same breath that they exceeded
- *  their own history — and while no personal baseline is loaded, the floor is
- *  the ONLY path that runs, so the unconditional phrasing would be wrong every
- *  time rather than in an edge case. Mixed hosts defer to the split. */
-export function tapComparisonClause(rows) {
-  const withBaseline = rows.filter((r) => r.baseline !== null).length;
-  if (withBaseline === rows.length) return 'above your own recent normal';
-  if (withBaseline === 0) {
-    return `above the ${pct(THRESHOLDS.tapAbsoluteFloorShare)} floor used while there is `
-      + 'no personal baseline yet';
-  }
-  return 'above the threshold each was judged against';
-}
-
-// 16 ── supervision-tap-share. Very short prompts ("yes", "go ahead") are the
-// shape of WATCHING a run rather than directing it. There is no universal right
-// number, so the threshold is the operator's own trailing-p75 for that host and
-// every firing prints it. What this does NOT model: whether the tap was
-// necessary — some taps are legitimate approvals, which is why it names a
-// pattern and not a mistake.
-function detectSupervisionTapShare({ a, sessions }) {
-  const rows = tapRowsOverThreshold(a);
-  if (!rows.length) return [];
-  const taps = rows.reduce((n, r) => n + r.taps, 0);
-  const lead = rows[0];
-  // Priced in TOKENS, never dollars: this is a re-read volume, and rule 1 keeps
-  // `impact` for arithmetic the aggregate actually supports.
-  const ctx = median(sessions.map((s) => num(s.ctxLastTokens)).filter((n) => n > 0));
-  const modelled = ctx > 0
-    ? ` Modelled re-read: ${count(taps)} × ${kTok(ctx)} ≈ ${kTok(taps * ctx)} tokens — ${TAP_COST_CAVEAT}.`
-    : '';
-  return [withDefaults({
-    id: 'supervision-tap-share', kind: 'trend', severity: 'warn',
-    title: `Supervision taps are ${pct(lead.share)} of what you type on ${lead.host}`,
-    finding: `${count(taps)} of your typed prompts ran to ${TAP_MAX_TOKENS} tokens or fewer — `
-      + `approvals and nudges rather than instructions — which is ${tapComparisonClause(rows)} on `
-      + `${rows.length === 1 ? `${lead.host}` : `${count(rows.length)} hosts`}.`,
-    evidence: `Per host: ${rows.map(tapRowText).join('; ')}.${modelled}`,
-    action: 'Front-load the acceptance criteria so a run can finish unattended: say what "done" '
-      + 'looks like in the first prompt instead of steering it one approval at a time.',
-  })];
-}
-
-// 17 ── headless-share. Sessions that typed nothing at all are subagents,
-// hooks and scheduled work — real output nobody sat through. An INFORMATIONAL
-// reframe, not a criticism: the point is that a share of the bill belongs to
-// work the operator never watched. Sessions with no fingerprint layer are
-// excluded from both halves of the fraction — "unknowable" is not "headless".
-function detectHeadlessShare({ sessions }) {
-  const classified = sessions.filter((s) => Number.isFinite(s.typedPrompts));
-  const responses = sumBy(classified, 'responses');
-  if (responses <= 0) return [];
-  const headless = classified.filter((s) => num(s.typedPrompts) === 0);
-  const headlessResponses = sumBy(headless, 'responses');
-  const share = headlessResponses / responses;
-  if (share <= THRESHOLDS.headlessMinShare) return [];
-  return [withDefaults({
-    id: 'headless-share', kind: 'coach', severity: 'info',
-    title: `${pct(share)} of responses came from sessions you never typed in`,
-    finding: `${count(headless.length)} session${headless.length === 1 ? '' : 's'} carried `
-      + `${count(headlessResponses)} of the ${count(responses)} responses this window, with zero `
-      + 'human-typed prompts between them.',
-    evidence: 'Counted from prompt provenance, over the sessions that carry the fingerprint '
-      + 'layer; a session with no layer is excluded from both the numerator and the denominator '
-      + 'rather than assumed headless.',
-    action: 'This is a reframe, not a problem: delegated work is the point. Read it as the share '
-      + 'of the bill that rides on briefs rather than on steering, and brief accordingly.',
-  })];
-}
-
-/** The two hosts whose typed-length p90s bound the window, plus the raw ratio
- *  between them — `null` unless at least two hosts clear the typed-prompt floor
- *  that makes a p90 worth comparing at all. */
-function p90Spread(hosts) {
-  const ranked = hosts
-    .filter((h) => num(h.typed) >= THRESHOLDS.asymmetryMinTypedPerHost && num(h.p90TypedTokens) > 0)
-    .sort((x, y) => num(y.p90TypedTokens) - num(x.p90TypedTokens));
-  if (ranked.length < 2) return null;
-  const [high, low] = [ranked[0], ranked[ranked.length - 1]];
-  return { high, low, ratio: num(high.p90TypedTokens) / num(low.p90TypedTokens) };
-}
-
-// 18 ── host-prompt-asymmetry. The same operator writes differently to
-// different hosts: longer briefs to one, retyped role assignments to another.
-// Both readings point at the same move — lift what is being retyped into
-// something managed — so they share one finding. Fires on either signal.
-function detectHostPromptAsymmetry({ a }) {
-  const hosts = Object.entries(a?.promptsByHost ?? {}).map(([host, s]) => ({ host, ...s }));
-  const spread = p90Spread(hosts);
-  const ratioFires = spread !== null && spread.ratio >= THRESHOLDS.asymmetryMinRatio;
-  const persona = hosts
-    .filter((h) => num(h.personaOpeners) >= THRESHOLDS.personaOpenerMinCount)
-    .sort((x, y) => num(y.personaOpeners) - num(x.personaOpeners));
-  if (!ratioFires && !persona.length) return [];
-
-  const ratioText = ratioFires
-    ? `p90 typed length is ${count(spread.high.p90TypedTokens)} tokens on ${spread.high.host} `
-      + `against ${count(spread.low.p90TypedTokens)} on ${spread.low.host} — ${round2(spread.ratio)}× — `
-      + `over ${count(spread.high.typed)} and ${count(spread.low.typed)} typed prompts. `
-    : '';
-  const personaText = persona.length
-    ? `${count(persona[0].personaOpeners)} persona openers ("you are a…") were retyped on `
-      + `${persona[0].host}. `
-    : '';
-  return [withDefaults({
-    id: 'host-prompt-asymmetry', kind: 'coach', severity: 'info',
-    title: ratioFires
-      ? `You write ${round2(spread.ratio)}× longer prompts to ${spread.high.host}`
-      : `${count(persona[0].personaOpeners)} role assignments retyped on ${persona[0].host}`,
-    finding: ratioFires
-      ? `Typed prompts to ${spread.high.host} run much longer than the ones to ${spread.low.host}, `
-        + 'which usually means one host is being handed context the other already has.'
-      : `The same role assignment is being typed again and again on ${persona[0].host}, which is a `
-        + 'reusable prompt fragment living in your muscle memory instead of on disk.',
-    evidence: `${ratioText}${personaText}All of it counted from prompt fingerprints — lengths, `
-      + 'counts and opening shape. No prompt text is stored, read, or compared.',
-    action: 'Move the repeated scaffolding into something the host loads for you — a managed '
-      + 'prompt-fragment directory for Codex workers, or the agent definitions Claude already '
-      + 'reads — so the brief is configuration rather than typing.',
-    command: 'ak host pick',
-  })];
-}
-
 /** @type {Array<{id: string, detect: (ctx: object) => Insight[]}>} */
 const DETECTORS = [
   { id: 'context-tax', detect: detectContextTax },
@@ -897,9 +703,6 @@ const DETECTORS = [
   { id: 'long-session-share', detect: detectLongSessionShare },
   { id: 'latency-regression', detect: detectLatencyRegression },
   { id: 'unrestricted-mode', detect: detectUnrestrictedMode },
-  { id: 'supervision-tap-share', detect: detectSupervisionTapShare },
-  { id: 'headless-share', detect: detectHeadlessShare },
-  { id: 'host-prompt-asymmetry', detect: detectHostPromptAsymmetry },
 ];
 
 /** Exposed only for direct per-detector unit tests; not part of the public API. */

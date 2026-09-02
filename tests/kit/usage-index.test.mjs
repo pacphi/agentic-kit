@@ -1,6 +1,5 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,11 +10,10 @@ import {
 } from '../../src/lib/usage-index.mjs';
 import {
   addUsage, blankSession, noteLatencySample, parseClaude,
-  normalizePromptText, promptFingerprint, promptShape,
-  LAT_BUCKET_EDGES, LEN_BUCKET_EDGES, MAX_PROMPT_FPS, MAX_TOKEN_HASHES,
+  LAT_BUCKET_EDGES, LEN_BUCKET_EDGES,
 } from '../../src/lib/usage-parsers.mjs';
 import {
-  aggregate, percentileFromBuckets, modelFamily, deriveKind, PERSONA_KIND_SHARE, TAP_MAX_TOKENS,
+  aggregate, percentileFromBuckets, modelFamily,
   LAT_BUCKET_EDGES as AGG_LAT_EDGES, LEN_BUCKET_EDGES as AGG_LEN_EDGES,
 } from '../../src/lib/usage-aggregate.mjs';
 
@@ -279,91 +277,6 @@ test('maskSecrets tolerates non-string input', () => {
   assert.equal(maskSecrets(null), '');
   assert.equal(maskSecrets(undefined), '');
   assert.equal(maskSecrets(42), '42');
-});
-
-// ── SEC-3: the masking rules must be linear in input size ──────────────────
-// Security review SEC-3 (MEDIUM). Two of the SECRET_PATTERNS were quadratic:
-// a greedy character class both PRECEDED and FOLLOWED an alternation drawn
-// from the same character set, so a long run of secret-shaped words made the
-// engine rescan the tail once per alternation hit. Measured on this machine
-// before the fix: 40 KB in 137 ms, 200 KB in 3.4 s, 400 KB in 13.8 s — clean
-// O(n^2), 4x the cost for 2x the input.
-//
-// Reachable because `maskSecrets` runs on the FULL, untruncated turn body:
-// the parsers do not cap turn text, and MAX_TURN_CHARS is applied after the
-// mask, not before. A single planted prompt turn of a few hundred KB of
-// token-like text hung `ak usage prompts --deep`, and opening that session in
-// the dashboard hung the server's request handler.
-//
-// The fix bounds the key-NAME runs on either side of the alternation. A real
-// environment-variable name does not run to hundreds of kilobytes, so the
-// bound costs nothing a caller would notice — but it is a real narrowing, and
-// the ceiling test below states exactly where it now stops.
-
-test('SEC-3: masking a 200 KB run of secret-shaped words stays well under 100ms', () => {
-  for (const run of ['TOKEN', 'token', 'SECRET', 'password']) {
-    const payload = run.repeat(Math.ceil(200_000 / run.length));
-    const started = process.hrtime.bigint();
-    maskSecrets(payload);
-    const ms = Number(process.hrtime.bigint() - started) / 1e6;
-    assert.ok(ms < 100,
-      `a 200 KB run of "${run}" took ${ms.toFixed(0)}ms — the quadratic backtracking is back`);
-  }
-});
-
-test('SEC-3: cost grows about linearly, not quadratically, with input size', () => {
-  // The MIN over several trials, not a single sample: one wall-clock read is
-  // spiked by GC or scheduler jitter — a shared CI runner once timed the large
-  // pass at 6ms against a ~2ms norm, an artefact that a single-sample ratio
-  // read as 21x "growth" — and the minimum is the closest estimate of the
-  // actual compute cost, immune to those spikes. The ratio is also independent
-  // of how fast the runner is: both sizes scale together, so only a change in
-  // complexity CLASS moves it. 8x the input is ~7x the min time when linear,
-  // ~64x when quadratic; a <20x gate separates the two with wide margin.
-  const minTime = (chars) => {
-    const payload = 'TOKEN'.repeat(chars / 5);
-    let best = Infinity;
-    for (let i = 0; i < 7; i++) {
-      const started = process.hrtime.bigint();
-      maskSecrets(payload);
-      best = Math.min(best, Number(process.hrtime.bigint() - started) / 1e6);
-    }
-    return Math.max(best, 0.05);
-  };
-  minTime(100_000); // warm the JIT before either measured size
-  const small = minTime(100_000);
-  const large = minTime(800_000); // 8x the input
-  assert.ok(large / small < 20,
-    `8x the input cost ${(large / small).toFixed(1)}x the min time `
-    + `(${small.toFixed(2)}ms -> ${large.toFixed(2)}ms) — expected ~7x if linear`);
-});
-
-test('SEC-3: every secret shape the bounded rules must still catch is still caught', () => {
-  // The exact strings the pre-fix rules masked. If bounding the key-name runs
-  // had narrowed real behavior, one of these would stop being redacted.
-  const cases = [
-    'MY_SECRET_KEY = abcdefghij',
-    'AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCY',
-    'SOME_TOKEN_VALUE_X=abcdefghij',
-    'GITHUB_TOKEN=ghp_abcdefghijklmnop',
-    'DATABASE_PASSWORD="hunter2hunter2"',
-    'api_key = 9f8a7b6c5d4e3f2a1b0c',
-    '  client_secret: sekrit1234567890abcd',
-    'my_password_field = abcdefghij',
-    'private_key: MIIEpAIBAAKCAQEA1234',
-  ];
-  for (const line of cases) {
-    const out = maskSecrets(line);
-    assert.match(out, /redacted/, `${JSON.stringify(line)} must still be masked`);
-  }
-  // And the false-positive guard the case-sensitivity exists for still holds.
-  assert.equal(maskSecrets('tokens used = 10028979467'), 'tokens used = 10028979467');
-});
-
-test('SEC-3: the key-name bound is stated, not silent — a 64-char run still masks', () => {
-  const key = `${'A'.repeat(60)}_SECRET_${'B'.repeat(60)}`;
-  assert.match(maskSecrets(`${key}=abcdefghij`), /redacted/,
-    'ordinary environment-variable names, however verbose, are still covered');
 });
 
 // ── parsing ─────────────────────────────────────────────────────────────────
@@ -1048,6 +961,38 @@ test('a schemaVersion mismatch invalidates the cache wholesale', async () => {
   assert.equal(byId(agg, 'aaaa1111').title, 'Add rate limiting to the API');
 });
 
+test('schema 16 is replaced by schema 17 without retired prompt fingerprint fields, then reused', async () => {
+  _resetForTest();
+  const sb = sandbox();
+  const file = path.join(sb.roots.claude, '-Users-me-proj', 'aaaa1111.jsonl');
+  await buildIndex(opts(sb));
+
+  const old = stampCache(sb.cachePath, file, 'SENTINEL-FROM-SCHEMA-16');
+  old.schemaVersion = 16;
+  for (const entry of Object.values(old.entries)) {
+    entry.session.promptFPs = [{ h: 'deadbeefdeadbeef', p: 'human', t: 4 }];
+    entry.session.promptFPOverflow = 2;
+  }
+  fs.writeFileSync(sb.cachePath, JSON.stringify(old));
+
+  _resetForTest();
+  const reparsed = await buildIndex(opts(sb));
+  assert.equal(byId(reparsed, 'aaaa1111').title, 'Add rate limiting to the API',
+    'a schema-16 row is reparsed rather than trusted');
+  const migrated = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+  assert.equal(migrated.schemaVersion, 17);
+  for (const entry of Object.values(migrated.entries)) {
+    assert.equal(Object.hasOwn(entry.session, 'promptFPs'), false);
+    assert.equal(Object.hasOwn(entry.session, 'promptFPOverflow'), false);
+  }
+
+  stampCache(sb.cachePath, file, 'SENTINEL-FROM-SCHEMA-17');
+  _resetForTest();
+  const warm = await buildIndex(opts(sb));
+  assert.equal(byId(warm, 'aaaa1111').title, 'SENTINEL-FROM-SCHEMA-17',
+    'the rewritten schema-17 row is a warm-cache hit');
+});
+
 test('a pre-idle-split cache record is re-parsed, not trusted', async () => {
   _resetForTest();
   const sb = soloSandbox();
@@ -1577,236 +1522,9 @@ test('parseClaude: a session whose only assistant entry is token-less records no
   assert.equal(rec.ctxLastTokens, null, 'honest-absent, not a measured zero');
 });
 
-// ── v14 prompt fingerprints (Prompts view spec §2.2) ────────────────────────
-
-test('normalizePromptText collapses the differences repetition analysis must ignore', () => {
-  assert.equal(normalizePromptText('Yes.'), 'yes');
-  assert.equal(normalizePromptText('  Do   the\n\tthing.  '), 'do the thing');
-  assert.equal(normalizePromptText('Ship it!!!'), 'ship it');
-  assert.equal(normalizePromptText('why?'), 'why');
-  assert.equal(normalizePromptText(''), '');
-  assert.equal(normalizePromptText(null), '', 'no input is empty text, never the string "null"');
-});
-
-test('promptFingerprint is deterministic across calls and normalization-equivalent variants', () => {
-  const a = promptFingerprint('Run the tests.');
-  const b = promptFingerprint('Run the tests.');
-  assert.deepEqual(a, b, 'the same input must fingerprint identically every time');
-
-  const variant = promptFingerprint('  run   the tests  ');
-  assert.equal(variant.h, a.h, 'case/whitespace/trailing-punctuation variants share one hash');
-  assert.deepEqual(variant.th, a.th);
-
-  assert.equal(promptFingerprint('Yes.').h, promptFingerprint('yes').h);
-  assert.notEqual(promptFingerprint('run the tests').h, promptFingerprint('run the build').h);
-});
-
-test('promptFingerprint shape: 16-hex text hash, token count, sorted unique 8-hex token hashes', () => {
-  const fp = promptFingerprint('Run the tests, run the build.');
-  assert.deepEqual(Object.keys(fp).sort(), ['h', 't', 'th']);
-  assert.match(fp.h, /^[0-9a-f]{16}$/);
-  assert.equal(fp.t, 6, 'token COUNT keeps repeats — "run" and "the" each occur twice');
-  assert.equal(fp.th.length, 4, 'the token-hash SET does not');
-  for (const h of fp.th) assert.match(h, /^[0-9a-f]{8}$/);
-  assert.deepEqual(fp.th, [...fp.th].sort(), 'sorted, so two prompts compare without re-sorting');
-
-  const empty = promptFingerprint('');
-  assert.equal(empty.t, 0);
-  assert.deepEqual(empty.th, []);
-});
-
-test('the token-hash set is a bounded bottom-k sketch, not an unbounded list', () => {
-  const words = Array.from({ length: 400 }, (_, i) => `token${i}`);
-  const fp = promptFingerprint(words.join(' '));
-  assert.equal(fp.t, 400, 'the token COUNT is never sketched — it is the honest length');
-  assert.equal(fp.th.length, MAX_TOKEN_HASHES);
-
-  // Bottom-k, not "the first 64 words": the kept hashes must be the 64
-  // smallest of the whole set, which is what makes the sample unbiased (and
-  // makes two sketches comparable) rather than an arbitrary prefix of the text.
-  const all = [...new Set(words.map((w) => createHash('sha256').update(w).digest('hex').slice(0, 8)))].sort();
-  assert.deepEqual(fp.th, all.slice(0, MAX_TOKEN_HASHES));
-
-  // Order of the text does not change the sketch — a set is a set.
-  assert.deepEqual(promptFingerprint([...words].reverse().join(' ')).th, fp.th);
-  // A prompt whose token set fits under the bound is stored complete.
-  assert.equal(promptFingerprint(words.slice(0, 10).join(' ')).th.length, 10);
-});
-
-// v16. Two shape flags decided at fingerprint time, while the text is still in
-// hand — the only moment they CAN be decided, since the text never reaches the
-// index. Both are omitted when false, so the stored record stays small and an
-// absent key reads as "not this shape" rather than as a missing measurement.
-/** The stored-entry key contract, in ONE place so every pin below moves
- *  together. `h`/`t`/`th`/`p` are always present; `q`/`o` are the v16 shape
- *  flags, written only when the shape is there. Nothing else may ever appear —
- *  which is what keeps a text field from arriving by accident. */
-const FP_REQUIRED_KEYS = ['h', 'p', 't', 'th'];
-const FP_ALLOWED_KEYS = new Set([...FP_REQUIRED_KEYS, 'q', 'o']);
-function assertFingerprintKeys(fp) {
-  const keys = Object.keys(fp);
-  for (const k of FP_REQUIRED_KEYS) {
-    assert.ok(keys.includes(k), `a fingerprint entry must carry ${k}`);
-  }
-  for (const k of keys) {
-    assert.ok(FP_ALLOWED_KEYS.has(k), `unexpected key ${k} on a fingerprint entry`);
-  }
-}
-
-test('promptShape flags question-shaped prompts', () => {
-  const q = (t) => promptShape(t).q;
-  assert.equal(q('does the build pass?'), 1, 'a trailing ? is the plainest question there is');
-  assert.equal(q('why is the build failing on macos'), 1, 'a wh-word opener asks even without the mark');
-  assert.equal(q('How do I wire this up'), 1, 'case does not decide grammar');
-  assert.equal(q('can you check the lockfile, and then tell me what changed?'),
-    1, 'an auxiliary opener counts when the turn actually asks');
-
-  assert.equal(q('run the tests'), undefined, 'a bare imperative is not a question');
-  assert.equal(q('can you run the tests'), undefined,
-    'an auxiliary opener with no ? anywhere is a politeness form of an instruction');
-  assert.equal(q('however you want to do it'), undefined, '"how" inside a word is not a wh-opener');
-  assert.equal(q(''), undefined);
-  assert.equal(q(null), undefined, 'no input is not a question');
-});
-
-test('promptShape flags persona-opening prompts', () => {
-  const o = (t) => promptShape(t).o;
-  assert.equal(o('You are a senior release engineer. Ship the tag.'), 1);
-  assert.equal(o('you are an expert reviewer'), 1);
-  assert.equal(o('You are the operator of this fleet'), 1);
-  assert.equal(o('# Instructions (read first)\n\nDo the thing.'), 1,
-    'the heading form opens the same scaffold; the newline collapses like any whitespace');
-  assert.equal(o('Instructions (read first): do the thing'), 1, 'the heading marker is optional');
-
-  assert.equal(o('you are right, revert it'), undefined,
-    'agreement is not a role assignment — the article is what makes it one');
-  assert.equal(o('remind me what you are running'), undefined, 'mid-sentence never opens');
-  assert.equal(o('run the tests'), undefined);
-});
-
-test('promptShape omits both keys rather than storing zeroes', () => {
-  assert.deepEqual(promptShape('run the tests'), {},
-    'a plain instruction adds NOTHING to the stored record');
-  assert.deepEqual(Object.keys(promptShape('You are a reviewer. What changed?')).sort(), ['o', 'q']);
-});
-
-test('parseClaude records one fingerprint per prompt-kind turn, tagged with its provenance', () => {
-  const T0 = '2026-08-20T10:00:00.000Z';
-  const at = (s) => new Date(Date.parse(T0) + s * 1000).toISOString();
-  const user = (t, text) => JSON.stringify({ type: 'user', timestamp: at(t), message: { role: 'user', content: text } });
-  const lines = [
-    user(0, 'why is the build failing on macos?'),
-    user(1, 'Another Claude session sent a message: <teammate-message teammate_id="coder">go</teammate-message>'),
-    user(2, 'Review this change for security vulnerabilities.\n\nChanged files:\n- src/a.mjs'),
-    user(3, '<command-name>/clear</command-name>\n<command-message>clear</command-message>'),
-    // Harness output and tool results are NOT prompt-kind turns, so they
-    // contribute no fingerprint at all — the gate the parser already applies.
-    user(4, '<task-notification> <task-id>x</task-id> </task-notification>'),
-    JSON.stringify({ type: 'user', timestamp: at(5), message: { role: 'user', content: [{ type: 'tool_result', content: 'out' }] } }),
-  ].join('\n');
-  const { session: rec } = parseClaude(lines, { id: 'sess-fp-claude' });
-  assert.deepEqual(rec.promptFPs.map((f) => f.p), ['human', 'agent', 'adapter', 'control']);
-  assert.equal(rec.promptFPOverflow, 0);
-  assert.equal(rec.promptFPs[0].t, 7, 'the human prompt tokenizes to its seven words');
-});
-
-// v16, on the Claude read path. The flags are decided by the SHAPE of the turn,
-// independently of who wrote it, so a machine-authored persona template is
-// still RECORDED with `o`. Counting is a separate decision made downstream:
-// every shipped consumer filters to `p === 'human'` first, so no non-human `o`
-// is read today. The provenance-blind recording is what would let one be,
-// without a re-scan.
-test('parseClaude carries the v16 shape flags, omitted when the shape is absent', () => {
-  const T0 = '2026-08-20T10:00:00.000Z';
-  const at = (s) => new Date(Date.parse(T0) + s * 1000).toISOString();
-  const user = (t, text) => JSON.stringify({ type: 'user', timestamp: at(t), message: { role: 'user', content: text } });
-  const lines = [
-    user(0, 'why is the build failing on macos?'),
-    user(1, 'You are a senior release engineer. Cut the tag.'),
-    user(2, 'run the full check and report the exit code'),
-  ].join('\n');
-  const { session: rec } = parseClaude(lines, { id: 'sess-fp-shape' });
-  assert.deepEqual(rec.promptFPs.map((f) => f.q), [1, undefined, undefined]);
-  assert.deepEqual(rec.promptFPs.map((f) => f.o), [undefined, 1, undefined]);
-  assert.deepEqual(Object.keys(rec.promptFPs[2]).sort(), ['h', 'p', 't', 'th'],
-    'the plain instruction stores no flag keys at all');
-});
-
-test('a parsed session record carries no prompt TEXT — only fingerprints', () => {
-  const T0 = '2026-08-20T10:00:00.000Z';
-  const SECRET = 'zarquon-plinth-flumox';
-  const lines = [
-    // An ai-title so the record's own title is not the first prompt: the title
-    // field is a SEPARATE (masked, clipped) surface with its own contract, and
-    // this test is about the fingerprint layer never adding a second one.
-    JSON.stringify({ type: 'ai-title', aiTitle: 'A titled session' }),
-    JSON.stringify({ type: 'user', timestamp: T0, message: { role: 'user', content: `please handle the ${SECRET} case` } }),
-    JSON.stringify({ type: 'assistant', timestamp: T0, message: { role: 'assistant', model: 'claude-opus-5', usage: { input_tokens: 1, output_tokens: 1 }, content: [] } }),
-  ].join('\n');
-  const { session: rec } = parseClaude(lines, { id: 'sess-fp-privacy' });
-  const serialized = JSON.stringify(rec);
-  assert.equal(serialized.includes(SECRET), false, 'the raw prompt text must not appear anywhere on the record');
-  assert.equal(serialized.includes('plinth'), false, 'nor any fragment of it');
-  assert.equal(rec.promptFPs.length, 1);
-  assertFingerprintKeys(rec.promptFPs[0]);
-});
-
-test('promptFPs are bounded per session, with the drop counted rather than silent', () => {
-  const T0 = Date.parse('2026-08-20T10:00:00.000Z');
-  const lines = [];
-  for (let i = 0; i < 2001; i++) {
-    lines.push(JSON.stringify({
-      type: 'user', timestamp: new Date(T0 + i * 1000).toISOString(),
-      message: { role: 'user', content: `prompt number ${i}` },
-    }));
-  }
-  const { session: rec } = parseClaude(lines.join('\n'), { id: 'sess-fp-cap' });
-  assert.equal(rec.prompts, 2001, 'the COUNT is unbounded — only the fingerprint list is capped');
-  assert.equal(rec.promptFPs.length, MAX_PROMPT_FPS);
-  assert.equal(rec.promptFPOverflow, 1);
-});
-
-// v15. The ambient browser-state block is harness output, but it carries
-// ATTRIBUTES (`source="ambient-ui-state"`), which the old `>` terminator could
-// not match — so 33 measured turns counted toward `prompts` and were then
-// fingerprinted as `human`: the harness writing in the operator's name. Both
-// effects have to disappear, which is why this asserts the count as well as the
-// fingerprint.
-test('parseClaude: an in-app-browser-context block is harness output, not a prompt', () => {
-  const T0 = '2026-08-20T10:00:00.000Z';
-  const at = (s) => new Date(Date.parse(T0) + s * 1000).toISOString();
-  const user = (t, text) => JSON.stringify({ type: 'user', timestamp: at(t), message: { role: 'user', content: text } });
-  const lines = [
-    user(0, 'why is the build failing?'),
-    user(1, ' <in-app-browser-context source="ambient-ui-state">\nThis block is automatic.\n</in-app-browser-context>'),
-    // The attribute-less form must gate too — the terminator accepts both.
-    user(2, '<in-app-browser-context>bare</in-app-browser-context>'),
-    // Session-continuation prose still reaches kind 'prompt'; it is the person
-    // resuming, so it fingerprints — as control, never as something they typed.
-    user(3, 'This session is being continued from a previous conversation that ran out of context.'),
-  ].join('\n');
-  const { session: rec, turns } = parseClaude(lines, { id: 'sess-browser-ctx', withTurns: true });
-  assert.equal(rec.prompts, 2, 'neither browser-context block counts as a prompt');
-  assert.deepEqual(turns.filter((t) => t.role === 'user').map((t) => t.kind),
-    ['prompt', 'context', 'context', 'prompt']);
-  assert.deepEqual(rec.promptFPs.map((f) => f.p), ['human', 'control'],
-    'the gated blocks contribute no fingerprint at all');
-});
-
-test('blankSession v14 fingerprint fields default honest-empty', () => {
-  const rec = blankSession('s1', 'claude');
-  assert.deepEqual(rec.promptFPs, []);
-  assert.equal(rec.promptFPOverflow, 0);
-});
-
 // ── v11 index carry-through + lookback (Task 5) ─────────────────────────────
 
-/** Carries BOTH v16 shape flags: it opens with a persona assignment and it ends
- *  with a question mark. Shared by the fixture and its assertions so the two
- *  cannot drift into testing different text. */
-const EVIDENCE_PROMPT = 'You are the release engineer. What changed?';
-
-test('cached session entries round-trip the v11 and v14 fields across a cache hit', async () => {
+test('cached session entries round-trip the v11 fields across a cache hit', async () => {
   _resetForTest();
   const sb = soloSandbox();
   const T0 = '2026-08-20T10:00:00.000Z';
@@ -1815,16 +1533,13 @@ test('cached session entries round-trip the v11 and v14 fields across a cache hi
   // "Evidence" session: the same shape as the parseClaude unit test above (a
   // permissionMode-carrying prompt, a cache-heavy reply) so mode/modeRaw/
   // latHist/latCount/lenSeconds/ctxLastTokens land on real, non-default
-  // values to round-trip through the cache. The prompt text is deliberately
-  // BOTH a persona opener and a question, so the v16 flags are actually SET
-  // here — a fixture carrying neither would prove only that absent keys stay
-  // absent, which a serialization bug would also satisfy.
+  // values to round-trip through the cache.
   const evidenceFile = path.join(sb.claude, 'sess-evidence.jsonl');
   fs.writeFileSync(evidenceFile, `${[
     JSON.stringify({
       type: 'user', sessionId: 'sess-evidence', cwd: '/Users/me/proj',
       timestamp: T0, permissionMode: 'acceptEdits',
-      message: { role: 'user', content: EVIDENCE_PROMPT },
+      message: { role: 'user', content: 'do it' },
     }),
     JSON.stringify({
       type: 'assistant', sessionId: 'sess-evidence', cwd: '/Users/me/proj',
@@ -1858,24 +1573,6 @@ test('cached session entries round-trip the v11 and v14 fields across a cache hi
     assert.equal(evidence.ctxLastTokens, 151000);           // input + cacheRead of last turn
     assert.equal(evidence.ctxWindow, null, 'ctxWindow is codex-only evidence');
     assert.equal(evidence.aborts, 0, 'aborts is codex-only evidence');
-    // v14: the fingerprint layer survives the JSON round trip intact — the
-    // token-hash ARRAY included, which is the field most likely to be lost or
-    // reordered by a serialization change.
-    assert.equal(evidence.promptFPs.length, 1);
-    assertFingerprintKeys(evidence.promptFPs[0]);
-    // v16: the two shape flags are SET on this fixture, so this pins that a set
-    // flag survives the round trip — not merely that an absent one stays absent.
-    assert.equal(evidence.promptFPs[0].q, 1, 'the question flag survives the cache round trip');
-    assert.equal(evidence.promptFPs[0].o, 1, 'and so does the persona flag');
-    assert.deepEqual(evidence.promptFPs[0],
-      { ...promptFingerprint(EVIDENCE_PROMPT), p: 'human', q: 1, o: 1 });
-    assert.equal(evidence.promptFPOverflow, 0);
-    // `title` is a separate, pre-existing surface (masked + clipped, and here
-    // derived from the first prompt), so the no-text claim is made about the
-    // fingerprint layer itself — the thing this schema bump adds.
-    assert.equal(JSON.stringify(evidence.promptFPs).includes(EVIDENCE_PROMPT), false);
-    assert.equal(JSON.stringify(evidence.promptFPs).includes('release engineer'), false,
-      'nor any fragment of it');
 
     const blank = cache.entries[blankFile].session;
     assert.equal(blank.mode, null);
@@ -1886,9 +1583,6 @@ test('cached session entries round-trip the v11 and v14 fields across a cache hi
     assert.equal(blank.ctxWindow, null);
     assert.equal(blank.ctxLastTokens, null);
     assert.equal(blank.aborts, 0);
-    assert.deepEqual(blank.promptFPs, [{ ...promptFingerprint('hi'), p: 'human' }],
-      'a prompt with no reply still fingerprints — the layer keys on the TURN, not on a completed exchange');
-    assert.equal(blank.promptFPOverflow, 0);
   };
 
   await buildIndex(opts(sb));
@@ -2355,249 +2049,6 @@ test('the midnight split follows the local clock across a DST transition', () =>
   }
 });
 
-// ── aggregate: prompt stats, per-day series, personal baselines (v16) ───────
-//
-// Fixtures build fingerprints through the parsers' OWN hasher and shape rules
-// (`fp` below), never as record literals, so a fixture cannot claim a token
-// count or a shape the real pipeline would not produce.
-
-/** Local calendar day of an instant — the same convention `addUsage` keys
- *  usage rows on, restated here because it is not exported. */
-const dayOf = (ms) => {
-  const d = new Date(ms);
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-};
-
-const fp = (text, p = 'human') => ({ ...promptFingerprint(text), p, ...promptShape(text) });
-
-/** One promptStatsByDay row with its null-prototype maps flattened, so a
- *  deepEqual against an object literal compares the DATA and not the fact that
- *  the aggregate builds `__proto__`-safe buckets. */
-const dayRow = (a, day) => {
-  const d = a.promptStatsByDay[day];
-  return d && { ...d, byHost: { ...d.byHost } };
-};
-
-/** A four-token prompt is the tap boundary; five tokens is an instruction. */
-const TAP = 'yes go ahead now';                 // 4 tokens
-const INSTRUCTION = 'run the whole check twice';  // 5 tokens
-
-test('promptStatsByDay folds typed prompts and taps, per day and per host', () => {
-  const a = aggregate([
-    record('c1', {
-      usage: [usageRow('2026-07-24', 'claude-opus-5', { input: 10 })],
-      promptFPs: [fp(TAP), fp(TAP), fp(INSTRUCTION)],
-    }),
-    record('x1', {
-      provider: 'codex', host: 'codex',
-      usage: [usageRow('2026-07-24', 'gpt-5.6', { input: 10 })],
-      promptFPs: [fp(TAP), fp(INSTRUCTION), fp(INSTRUCTION)],
-    }),
-    record('c2', {
-      end: NOW - 2 * DAY,
-      usage: [usageRow('2026-07-23', 'claude-opus-5', { input: 10 })],
-      promptFPs: [fp(INSTRUCTION)],
-    }),
-  ], aggOpts());
-
-  assert.deepEqual(a.promptStatsByDay['2026-07-24'].byHost.claude, { typed: 3, taps: 2 });
-  assert.deepEqual(a.promptStatsByDay['2026-07-24'].byHost.codex, { typed: 3, taps: 1 });
-  assert.equal(a.promptStatsByDay['2026-07-24'].typed, 6, 'the day row is the sum of its hosts');
-  assert.equal(a.promptStatsByDay['2026-07-24'].taps, 3);
-  assert.deepEqual(dayRow(a, '2026-07-23'), {
-    typed: 1, taps: 0, byHost: { claude: { typed: 1, taps: 0 } },
-  });
-});
-
-test('only human-typed fingerprints reach the prompt stats', () => {
-  // Provenance filtering is the load-bearing gate (spec §2.1): agent
-  // deliveries, adapter templates and control records all reach kind 'prompt'
-  // and would otherwise be counted as things the operator asked for.
-  const a = aggregate([record('mixed', {
-    usage: [usageRow('2026-07-24', 'claude-opus-5', { input: 10 })],
-    promptFPs: [
-      fp(TAP), fp(TAP, 'agent'), fp(TAP, 'adapter'), fp(TAP, 'control'),
-      fp(INSTRUCTION, 'agent'),
-    ],
-  })], aggOpts());
-
-  assert.equal(a.totals.typedPrompts, 1, 'four of the five were written by a machine');
-  assert.equal(a.totals.tapCount, 1);
-  assert.deepEqual(a.promptStatsByDay['2026-07-24'].byHost.claude, { typed: 1, taps: 1 });
-});
-
-test('prompt stats attribute a session to its FIRST BILLED day, like sessions and exceptions', () => {
-  // Fingerprints carry no timestamp, so per-prompt day attribution does not
-  // exist to be had. A session that ran across midnight files ALL of its
-  // prompts on the day its tokens first billed — coarse, documented, and the
-  // same convention byDay.sessions and byDay.exceptions already follow.
-  const start = new Date(2026, 6, 23, 23, 30).getTime();
-  const end = new Date(2026, 6, 24, 0, 30).getTime();
-  const a = aggregate([record('mid', {
-    start, end,
-    usage: [
-      usageRow('2026-07-24', 'claude-opus-5', { input: 10 }),
-      usageRow('2026-07-23', 'claude-opus-5', { input: 10 }),
-    ],
-    promptFPs: [fp(TAP), fp(INSTRUCTION)],
-  })], aggOpts());
-
-  assert.deepEqual(Object.keys(a.promptStatsByDay), ['2026-07-23'],
-    'the earlier billed day takes the whole session, including prompts typed after midnight');
-  assert.equal(a.promptStatsByDay['2026-07-23'].typed, 2);
-});
-
-test('a session with the fingerprint layer but no typed prompts is a measured zero', () => {
-  const a = aggregate([record('headless', {
-    usage: [usageRow('2026-07-24', 'claude-opus-5', { input: 10 })],
-    promptFPs: [fp(INSTRUCTION, 'adapter')],
-  })], aggOpts());
-
-  assert.deepEqual(dayRow(a, '2026-07-24'), {
-    typed: 0, taps: 0, byHost: { claude: { typed: 0, taps: 0 } },
-  }, 'the day was measured and had no typed prompts — that is not the same as an absent day');
-  assert.equal(a.sessions[0].typedPrompts, 0);
-});
-
-test('a record with no fingerprint layer at all reads absent, never zero', () => {
-  const rec = record('legacy', { usage: [usageRow('2026-07-24', 'claude-opus-5', { input: 10 })] });
-  delete rec.promptFPs;                       // a hand-built or pre-v16 record
-  const a = aggregate([rec], aggOpts());
-
-  assert.equal(a.sessions[0].typedPrompts, null);
-  assert.equal(a.sessions[0].tapPrompts, null);
-  assert.deepEqual(Object.keys(a.promptStatsByDay), [], 'it contributes no day row to disagree with');
-  assert.equal(a.totals.tapShare, null, 'and no share, because nothing was measured');
-});
-
-test('totals and promptsByHost carry the window\'s typed/tap/shape figures', () => {
-  const a = aggregate([
-    record('c', {
-      usage: [usageRow('2026-07-24', 'claude-opus-5', { input: 10 })],
-      promptFPs: [
-        fp(TAP), fp('why is the build failing on macos?'),
-        fp('You are a senior release engineer. Cut the tag.'),
-        fp(INSTRUCTION),
-      ],
-    }),
-    record('x', {
-      provider: 'codex', host: 'codex',
-      usage: [usageRow('2026-07-24', 'gpt-5.6', { input: 10 })],
-      promptFPs: [fp(INSTRUCTION), fp(INSTRUCTION)],
-    }),
-  ], aggOpts());
-
-  assert.equal(a.totals.typedPrompts, 6);
-  assert.equal(a.totals.tapCount, 1);
-  assert.equal(a.totals.tapShare, 0.166667, 'rounded to six places, like every other share here');
-
-  assert.equal(a.promptsByHost.claude.typed, 4);
-  assert.equal(a.promptsByHost.claude.taps, 1);
-  assert.equal(a.promptsByHost.claude.tapShare, 0.25);
-  assert.equal(a.promptsByHost.claude.personaOpeners, 1);
-  assert.equal(a.promptsByHost.claude.questionShare, 0.25);
-  assert.equal(a.promptsByHost.codex.tapShare, 0);
-  assert.equal(a.promptsByHost.codex.personaOpeners, 0);
-  assert.equal(a.promptsByHost.codex.questionShare, 0);
-});
-
-test('p90TypedTokens is per host, over typed prompts only, and null with none', () => {
-  // Ten typed prompts of 1..10 tokens: nearest-rank p90 is the 9th smallest.
-  const lengths = Array.from({ length: 10 }, (_, i) => Array.from({ length: i + 1 }, (_, k) => `w${k}`).join(' '));
-  const a = aggregate([
-    record('c', {
-      usage: [usageRow('2026-07-24', 'claude-opus-5', { input: 10 })],
-      promptFPs: [
-        ...lengths.map((t) => fp(t)),
-        fp('a machine wrote this much longer template than any of them', 'adapter'),
-      ],
-    }),
-    record('x', {
-      provider: 'codex', host: 'codex',
-      usage: [usageRow('2026-07-24', 'gpt-5.6', { input: 10 })],
-      promptFPs: [fp(INSTRUCTION, 'agent')],
-    }),
-  ], aggOpts());
-
-  assert.equal(a.promptsByHost.claude.p90TypedTokens, 9);
-  assert.equal(a.promptsByHost.codex.p90TypedTokens, null,
-    'a host with no typed prompt has no length to report — never a 0');
-  assert.equal(a.promptsByHost.codex.tapShare, null);
-});
-
-/** One session per day in the trailing baseline window (older than the display
- *  window), each with four typed prompts of which `tapDays` days carry one tap. */
-function baselineRecords(nDays, tapDays) {
-  return Array.from({ length: nDays }, (_, i) => {
-    const end = NOW - (15 + i) * DAY;
-    const taps = i < tapDays ? 1 : 0;
-    return record(`b${i}`, {
-      end,
-      usage: [usageRow(dayOf(end), 'claude-opus-5', { input: 10 })],
-      promptFPs: [
-        ...Array.from({ length: taps }, () => fp(TAP)),
-        ...Array.from({ length: 4 - taps }, () => fp(INSTRUCTION)),
-      ],
-    });
-  });
-}
-
-test('promptBaselines is null until the operator has enough history to have one', () => {
-  const thin = aggregate(baselineRecords(29, 12), aggOpts());
-  assert.equal(thin.promptBaselines.claude.tapShareP75_trailing90d, null,
-    '29 active days is not a personal normal — an invented threshold is worse than none');
-
-  const enough = aggregate(baselineRecords(30, 12), aggOpts());
-  assert.notEqual(enough.promptBaselines.claude.tapShareP75_trailing90d, null);
-});
-
-test('promptBaselines takes the p75 of the TRAILING window, not the displayed one', () => {
-  // 32 trailing days: 12 at a 0.25 tap share, 20 at 0. Nearest-rank p75 over
-  // 32 sorted values is the 24th smallest, which sits in the 0.25 block.
-  const current = record('now', {
-    usage: [usageRow('2026-07-24', 'claude-opus-5', { input: 10 })],
-    promptFPs: [fp(TAP), fp(TAP), fp(TAP), fp(TAP)],   // a 1.00 share, in-window
-  });
-  const a = aggregate([...baselineRecords(32, 12), current], aggOpts());
-
-  assert.equal(a.promptBaselines.claude.tapShareP75_trailing90d, 0.25);
-  assert.equal(a.promptsByHost.claude.tapShare, 1,
-    'the current window is what the baseline is compared AGAINST — it never feeds it');
-});
-
-test('the prompt slices are deterministic across two runs of the same corpus', () => {
-  const records = () => [
-    ...baselineRecords(31, 9),
-    record('c', {
-      usage: [usageRow('2026-07-24', 'claude-opus-5', { input: 10 })],
-      promptFPs: [fp(TAP), fp('why did that fail?'), fp(INSTRUCTION)],
-    }),
-  ];
-  const a = aggregate(records(), aggOpts());
-  const b = aggregate(records(), aggOpts());
-
-  assert.equal(typeof a.promptBaselines.claude.tapShareP75_trailing90d, 'number',
-    'the fixture really produced a baseline — the comparisons below are not two nulls');
-  assert.deepEqual(a.promptStatsByDay, b.promptStatsByDay);
-  assert.deepEqual(a.promptsByHost, b.promptsByHost);
-  assert.deepEqual(a.promptBaselines, b.promptBaselines);
-  assert.equal(a.totals.tapShare, b.totals.tapShare);
-});
-
-test('the previous-window projection derives its prompt totals the same way', () => {
-  const inPrev = record('prev', {
-    end: NOW - 20 * DAY,
-    usage: [usageRow(dayOf(NOW - 20 * DAY), 'claude-opus-5', { input: 10 })],
-    promptFPs: [fp(TAP), fp(INSTRUCTION)],
-  });
-  const a = aggregate([inPrev], aggOpts({ previous: true }));
-
-  assert.equal(a.totals.typedPrompts, 0, 'it is outside the displayed window');
-  assert.equal(a.previous.totals.typedPrompts, 2);
-  assert.equal(a.previous.totals.tapShare, 0.5);
-});
-
 test('the session row projects the v11 posture and context-window evidence', () => {
   const a = aggregate([record('ctx', {
     mode: 'auto-edit', modeRaw: 'acceptEdits', ctxWindow: 200_000, ctxLastTokens: 151_000,
@@ -2906,280 +2357,4 @@ test('a plain id is byte-identical to before namespaced ids existed', async () =
   const found = await readSession('aaaa1111', opts(sb));
   assert.equal(found.meta.id, 'aaaa1111');
   assert.equal(found.meta.host, 'claude');
-});
-
-// ── promptPatterns: the opt-in repetition projection (spec §3.2 panel 3) ────
-// Computed FROM RECORDS inside the aggregate, exactly where buildPromptBaselines
-// already reads them, and shipped only when the caller asks. Raw fingerprints
-// never leave this module; the projection is the whole public surface.
-
-const QUESTION_A = 'why is the release build failing on macos?';
-const QUESTION_B = 'why is the release build failing on macos now?';
-const ORDER_A = 'run the whole verification suite twice';
-const ORDER_B = 'run the whole verification suite twice please';
-const PERSONA_A = 'You are a senior release engineer. Cut the tag.';
-const PERSONA_B = 'You are a senior release engineer. Cut the tag now.';
-
-/** Three families, each a near-duplicate pair spanning enough sessions or days
- *  to survive the recurring filter: a question family, an instruction family
- *  (nothing about it carries a `q` flag, which is the half that used to be
- *  unreachable), and a hand-typed persona family. `q1` types the same question
- *  twice in a row, which is simultaneously the third exact repeat and the one
- *  intra-session re-ask. */
-function patternRecords() {
-  const billed = (day) => [usageRow(day, 'claude-opus-5', { input: 10 })];
-  return [
-    record('q1', { usage: billed('2026-07-24'), promptFPs: [fp(QUESTION_A), fp(QUESTION_A)] }),
-    record('q2', { usage: billed('2026-07-24'), promptFPs: [fp(QUESTION_B)] }),
-    record('q3', { end: NOW - 2 * DAY, usage: billed('2026-07-23'), promptFPs: [fp(QUESTION_A)] }),
-    record('i1', { usage: billed('2026-07-24'), promptFPs: [fp(ORDER_A)] }),
-    record('i2', { usage: billed('2026-07-24'), promptFPs: [fp(ORDER_B)] }),
-    record('i3', { end: NOW - 2 * DAY, usage: billed('2026-07-23'), promptFPs: [fp(ORDER_A)] }),
-    record('p1', { usage: billed('2026-07-24'), promptFPs: [fp(PERSONA_A)] }),
-    record('p2', { end: NOW - 2 * DAY, usage: billed('2026-07-23'), promptFPs: [fp(PERSONA_B)] }),
-  ];
-}
-
-const clusterFor = (a, cls) => a.promptPatterns.clusters.find((c) => c.class === cls);
-
-test('promptPatterns is absent unless the caller asks for it', () => {
-  const a = aggregate(patternRecords(), aggOpts());
-  assert.equal(a.promptPatterns, null,
-    'not requested is null, the same shape `previous` uses — never an empty projection');
-});
-
-test('promptPatterns ships the frozen projection shape and nothing else', () => {
-  const a = aggregate(patternRecords(), aggOpts({ prompts: true }));
-  assert.deepEqual(Object.keys(a.promptPatterns).sort(),
-    ['clusters', 'computedAt', 'corpus', 'exactRepeats', 'provenance', 'reAsks', 'tapLengths']);
-  assert.deepEqual(Object.keys(a.promptPatterns.clusters[0]).sort(),
-    ['class', 'count', 'days', 'hosts', 'key', 'kind', 'label', 'medianTokens', 'sampleSessionIds', 'sessions']);
-  assert.deepEqual(Object.keys(a.promptPatterns.reAsks).sort(),
-    ['gapHist', 'pairCount', 'sessionCount']);
-  assert.equal(a.promptPatterns.computedAt, a.generatedAt,
-    'the projection is computed on the aggregate\'s own clock, so a rescan reproduces it');
-});
-
-// The defect this pins has two halves and needs both fixtures to prove. The
-// scan path stores `q: 1` and OMITS it when false; the clustering library reads
-// `m.q === true` / `m.q === false`. Passed through raw, `1 !== true` made every
-// cluster 'unknown', and even after mapping truthiness, a never-written `false`
-// left the non-question class unreachable — so a cluster of instructions
-// looked exactly like an unclassified one, and three of the four seed
-// patterns could never match. Always-set booleans fix both halves at once.
-// (The non-question class was called 'instruction' at the time this defect
-// was fixed; Ruling A — final-triage item 1 — later renamed it 'other' on the
-// wire, unrelated to the boolean-coercion story this test pins.)
-test('promptPatterns classifies questions AND instructions, never a blanket unknown', () => {
-  const a = aggregate(patternRecords(), aggOpts({ prompts: true }));
-  const classes = a.promptPatterns.clusters.map((c) => c.class);
-  assert.equal(classes.includes('unknown'), false, `every cluster must be classified: ${classes}`);
-
-  const question = clusterFor(a, 'question');
-  assert.ok(question, `no question cluster in ${JSON.stringify(classes)}`);
-  assert.equal(question.count, 4, 'three asks of A plus one of B');
-  assert.equal(question.sessions, 3);
-  assert.equal(question.days, 2);
-
-  const instruction = clusterFor(a, 'other');
-  assert.ok(instruction, 'an instruction carries no q flag at all — absent must read as measured-false');
-  assert.equal(instruction.count, 3);
-});
-
-test('promptPatterns counts hand-typed personas, so the persona seed can fire', () => {
-  const a = aggregate(patternRecords(), aggOpts({ prompts: true }));
-  const persona = a.promptPatterns.clusters.find((c) => c.label.name === 'Persona scaffolding');
-  assert.ok(persona, `the persona family must reach its seed: ${
-    JSON.stringify(a.promptPatterns.clusters.map((c) => c.label))}`);
-  assert.equal(persona.label.source, 'seed');
-  assert.equal(persona.count, 2);
-});
-
-test('promptPatterns carries the re-ask and exact-repeat evidence', () => {
-  const a = aggregate(patternRecords(), aggOpts({ prompts: true }));
-  assert.deepEqual(a.promptPatterns.reAsks,
-    { pairCount: 1, sessionCount: 1, gapHist: { 1: 1 } },
-    'q1 asks the same thing twice in a row and nothing else does');
-  const repeat = a.promptPatterns.exactRepeats.find((r) => r.count === 3);
-  assert.ok(repeat, 'the thrice-typed question is an exact repeat');
-  assert.deepEqual(repeat.hosts, ['claude']);
-  assert.equal(repeat.sessions, 2);
-});
-
-// The privacy pin, asserted structurally rather than argued for: this
-// projection is built from hashes, counts, token counts and session ids.
-test('promptPatterns carries no prompt text', () => {
-  const a = aggregate(patternRecords(), aggOpts({ prompts: true }));
-  const wire = JSON.stringify(a.promptPatterns);
-  for (const text of [QUESTION_A, QUESTION_B, ORDER_A, ORDER_B, PERSONA_A, PERSONA_B]) {
-    assert.equal(wire.includes(text), false, `verbatim prompt text reached the projection: ${text}`);
-  }
-  for (const fragment of ['macos', 'verification', 'senior release engineer']) {
-    assert.equal(wire.includes(fragment), false, `a fragment of a prompt reached the projection: ${fragment}`);
-  }
-  assert.deepEqual(a.promptPatterns.clusters[0].sampleSessionIds.length <= 3, true,
-    'session links are capped at three — a link surface, not a session list');
-});
-
-test('promptPatterns is deterministic over an unchanged corpus', () => {
-  const records = patternRecords();
-  assert.deepEqual(
-    aggregate(records, aggOpts({ prompts: true })).promptPatterns,
-    aggregate(records, aggOpts({ prompts: true })).promptPatterns,
-  );
-});
-
-test('promptPatterns counts the whole fingerprinted corpus by provenance, taps by length', () => {
-  const a = aggregate([
-    record('mixed', {
-      usage: [usageRow('2026-07-24', 'claude-opus-5', { input: 10 })],
-      promptFPs: [fp(TAP), fp(TAP), fp(ORDER_A), fp(TAP, 'agent'), fp(ORDER_A, 'adapter')],
-    }),
-  ], aggOpts({ prompts: true }));
-  assert.deepEqual(a.promptPatterns.corpus, { fingerprints: 5, typed: 3 });
-  assert.deepEqual(a.promptPatterns.provenance, { human: 3, control: 0, agent: 1, adapter: 1 },
-    'every tag in the vocabulary gets a row, including the ones this corpus never produced');
-  assert.deepEqual(a.promptPatterns.tapLengths,
-    [{ tokens: 4, prompts: 2, sessions: 1, days: 1, hosts: ['claude'] }],
-    'the agent-authored tap is not the operator tapping');
-});
-
-// ── deriveKind: the derived filter label per cluster (Coaching redesign §3) ──
-//
-// A PURE function of signals the cluster already carries, first-match-wins over
-// the five-kind precedence: reask > persona(role-preamble) > tap > question >
-// instruction. Unit-pinned at every boundary here; the real producer test below
-// proves it is actually threaded through promptClusterRow (a hand-built cluster
-// fixture can validate a dead interface — the W2 q/o-seam lesson).
-const clusterLike = (over = {}) => ({
-  hashes: ['aaaaaaaaaaaaaaaa'], personas: 0, size: 4,
-  tokens: { min: 10, median: 10, max: 10 }, class: 'other', ...over,
-});
-
-test('deriveKind: reask wins over every other signal it also matches', () => {
-  const asked = new Set(['dead0000dead0000']);
-  // Simultaneously a persona-majority, a tap, and a question — reask still wins.
-  const cluster = clusterLike({
-    hashes: ['dead0000dead0000'], personas: 4, size: 4, tokens: { median: 2 }, class: 'question',
-  });
-  assert.equal(deriveKind(cluster, asked), 'reask');
-});
-
-test('deriveKind: reask needs at least one member hash on the asked-again side', () => {
-  const asked = new Set(['dead0000dead0000']);
-  assert.equal(deriveKind(clusterLike({ hashes: ['aaaa1111aaaa1111'] }), asked), 'instruction',
-    'no intersecting hash → not a reask');
-  assert.equal(deriveKind(clusterLike({ hashes: ['aaaa1111aaaa1111', 'dead0000dead0000'] }), asked), 'reask',
-    'one intersecting hash out of several qualifies');
-  assert.equal(deriveKind(clusterLike(), new Set()), 'instruction', 'an empty reask set never matches');
-  assert.equal(deriveKind(clusterLike(), undefined), 'instruction', 'a missing reask set is treated as empty');
-});
-
-test('deriveKind: role-preamble fires at/above PERSONA_KIND_SHARE and not below', () => {
-  assert.equal(PERSONA_KIND_SHARE, 0.5, 'a simple majority of typed persona openers');
-  const asked = new Set();
-  // At the threshold exactly (2/4 = 0.5) → persona.
-  assert.equal(deriveKind(clusterLike({ personas: 2, size: 4, tokens: { median: 40 } }), asked), 'persona');
-  // Just below (1/4 = 0.25) → falls through to a weaker kind.
-  assert.equal(deriveKind(clusterLike({ personas: 1, size: 4, tokens: { median: 40 } }), asked), 'instruction');
-  // Persona outranks tap: a SHORT persona-majority cluster is still a persona.
-  assert.equal(deriveKind(clusterLike({ personas: 3, size: 4, tokens: { median: 2 } }), asked), 'persona');
-});
-
-test('deriveKind: tap fires at the token ceiling and not one over, and outranks question', () => {
-  const asked = new Set();
-  assert.equal(deriveKind(clusterLike({ tokens: { median: TAP_MAX_TOKENS }, class: 'other' }), asked), 'tap',
-    'median exactly at the ceiling is a tap');
-  assert.equal(deriveKind(clusterLike({ tokens: { median: TAP_MAX_TOKENS + 1 }, class: 'other' }), asked), 'instruction',
-    'one token over the ceiling is not a tap');
-  // Tap outranks question: a short question cluster is a tap.
-  assert.equal(deriveKind(clusterLike({ tokens: { median: 2 }, class: 'question' }), asked), 'tap');
-});
-
-test('deriveKind: question vs instruction comes from the cluster class, last', () => {
-  const asked = new Set();
-  assert.equal(deriveKind(clusterLike({ class: 'question', tokens: { median: 40 } }), asked), 'question');
-  for (const cls of ['other', 'mixed', 'unknown']) {
-    assert.equal(deriveKind(clusterLike({ class: cls, tokens: { median: 40 } }), asked), 'instruction',
-      `${cls} with no stronger signal is an instruction`);
-  }
-});
-
-// MANDATORY real-producer pin: drive aggregate(records,{prompts:true}) and prove
-// every published cluster row carries a valid kind AND that the three kinds this
-// fixture actually contains land where the precedence says. patternRecords()'s
-// q-family repeats one question in-session (a re-ask), the order family is a
-// multi-token instruction, and the persona family is all persona openers.
-test('kind is threaded through the real projection and honours precedence', () => {
-  const a = aggregate(patternRecords(), aggOpts({ prompts: true }));
-  const VALID = new Set(['reask', 'persona', 'tap', 'question', 'instruction']);
-  for (const c of a.promptPatterns.clusters) {
-    assert.ok(VALID.has(c.kind), `cluster ${c.key} carries an invalid kind ${JSON.stringify(c.kind)}`);
-  }
-  // The question-class family repeats QUESTION_A in one session → asked-again →
-  // reask outranks its question class.
-  const q = clusterFor(a, 'question');
-  assert.equal(q.kind, 'reask', 'the in-session repeat makes the question family a reask');
-  // The order family carries no q flag, no persona, >4 tokens, never re-asked.
-  const order = a.promptPatterns.clusters.find((c) => c.class === 'other' && c.label.name !== 'Persona scaffolding');
-  assert.equal(order.kind, 'instruction');
-  // The hand-typed persona family is a role-preamble.
-  const persona = a.promptPatterns.clusters.find((c) => c.label.name === 'Persona scaffolding');
-  assert.equal(persona.kind, 'persona');
-});
-
-// scanKey decides both the single-flight identity and readIndex's memo, so an
-// option that changes the RESULT must be folded into it — the same lesson
-// `force`, `lookbackDays` and `previous` each cost once. Without the fold a
-// {prompts:true} caller inside the TTL is served the projection-less answer.
-test('readIndex does not serve a promptPatterns caller a memoized answer without it', async () => {
-  _resetForTest();
-  const sb = sandbox();
-  const plain = await readIndex(opts(sb));
-  assert.equal(plain.promptPatterns, null, 'sanity: the default carries no projection');
-  const withPatterns = await readIndex(opts(sb, { prompts: true }));
-  assert.notEqual(withPatterns, plain, 'the two must not coalesce into one answer');
-  assert.ok(withPatterns.promptPatterns, 'the projection must actually be built');
-});
-
-// ── QE review F-8 (MEDIUM): the sampleSessionIds privacy bound, pinned ──────
-// The comment states the rationale — "A LINK AFFORDANCE, not a session list —
-// three is enough to click through and few enough that the projection cannot
-// become a membership dump" — and session ids are identifiers that ship on
-// every dashboard poll. Neither half was asserted: raising the cap from 3 to
-// 300 survived the suite, and so did replacing the field with `[]` outright.
-// The existing shape test asserts `length <= 3` over a fixture whose clusters
-// have three or fewer sessions, so it can never see either mutation.
-
-test('F-8: a cluster spanning MORE than three sessions publishes exactly three ids', () => {
-  const billed = (day) => [usageRow(day, 'claude-opus-5', { input: 10 })];
-  // Six sessions all typing the SAME prompt: one cluster, six sessions.
-  const records = ['s1', 's2', 's3', 's4', 's5', 's6'].map((id) => record(id, {
-    usage: billed('2026-07-24'), promptFPs: [fp(QUESTION_A)],
-  }));
-  const a = aggregate(records, aggOpts({ prompts: true }));
-  const cluster = a.promptPatterns.clusters.find((c) => c.sessions > 3);
-  assert.ok(cluster, 'guard: the fixture must actually produce a cluster with more than three sessions');
-  assert.equal(cluster.sampleSessionIds.length, 3,
-    'exactly three — not fewer (the field must not be emptied) and not more (not a membership dump)');
-});
-
-test('F-8: the published ids are drawn from that cluster\'s OWN sessions', () => {
-  const billed = (day) => [usageRow(day, 'claude-opus-5', { input: 10 })];
-  const own = ['own1', 'own2', 'own3', 'own4', 'own5'];
-  const records = [
-    ...own.map((id) => record(id, { usage: billed('2026-07-24'), promptFPs: [fp(QUESTION_A)] })),
-    // A different recurring prompt in unrelated sessions, so a bug that
-    // published ids from the wrong cluster has somewhere wrong to draw from.
-    ...['other1', 'other2', 'other3', 'other4'].map((id) => record(id, {
-      usage: billed('2026-07-24'), promptFPs: [fp(ORDER_A)],
-    })),
-  ];
-  const a = aggregate(records, aggOpts({ prompts: true }));
-  const cluster = a.promptPatterns.clusters.find((c) => c.sessions === own.length);
-  assert.ok(cluster, 'guard: the five-session cluster must exist');
-  assert.equal(cluster.sampleSessionIds.length, 3);
-  for (const id of cluster.sampleSessionIds) {
-    assert.ok(own.includes(id), `${id} is not one of this cluster's own sessions`);
-  }
 });
