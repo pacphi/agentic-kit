@@ -643,11 +643,14 @@ function hookSourceLocator(record) {
     file: rawFile, containmentRoot: root, digest,
     pointer: hookJsonPointer(record), host: record?.host ?? 'unknown', event: record?.event ?? 'unknown',
     sourceKind: record?.source?.sourceKind ?? 'unknown', owner: record?.source?.owner ?? 'unknown',
+    format: ({ '.json': 'json', '.jsonc': 'jsonc', '.yaml': 'yaml', '.yml': 'yaml', '.toml': 'toml' })[
+      path.extname(rawFile).toLowerCase()] ?? 'text',
   };
 }
 
 function pointerValue(document, pointer) {
-  if (!pointer || pointer === '/') return document;
+  if (pointer === '') return document;
+  if (typeof pointer !== 'string' || !pointer.startsWith('/')) return undefined;
   let value = document;
   for (const part of pointer.split('/').slice(1).map((item) => item.replaceAll('~1', '/').replaceAll('~0', '~'))) {
     if (value === null || typeof value !== 'object' || !Object.hasOwn(value, part)) return undefined;
@@ -688,6 +691,11 @@ function createHookDashboardReader({ hooks, cacheMs }) {
     const active = inflight.get(host);
     if (active) return active;
     const pending = Promise.resolve().then(() => provide({ host })).then(async (raw) => {
+      const generationAt = Date.now();
+      const expiresAt = generationAt + ttlMs;
+      for (const [ref, locator] of locators) {
+        if (locator.expiresAt <= generationAt) locators.delete(ref);
+      }
       const { buildHookDashboardReadModel } = await import('./hook-read-model.mjs');
       let healingPlan = null;
       try {
@@ -704,7 +712,7 @@ function createHookDashboardReader({ hooks, cacheMs }) {
             locator.pointer ?? '', locator.digest ?? '',
           ].join('\0')).digest('hex').slice(0, 32);
           refs.set(record?.occurrenceId, ref);
-          locators.set(ref, { ...locator, expiresAt: Date.now() + ttlMs });
+          locators.set(ref, { ...locator, expiresAt });
         }
       }
       const payload = buildHookDashboardReadModel({
@@ -713,7 +721,7 @@ function createHookDashboardReader({ hooks, cacheMs }) {
         healingPlan,
         sourceRef: (record) => refs.get(record?.occurrenceId) ?? null,
       });
-      cache.set(host, { at: Date.now(), payload });
+      cache.set(host, { at: generationAt, payload });
       return payload;
     }).finally(() => inflight.delete(host));
     inflight.set(host, pending);
@@ -739,27 +747,51 @@ function createHookDashboardReader({ hooks, cacheMs }) {
       error.code = 'HOOK_SOURCE_CHANGED';
       throw error;
     }
-    let definition = null;
+    let definitionValue = null;
+    let definitionAvailable = false;
+    let unavailableCode = null;
     let unavailableReason = null;
-    if (locator.pointer && path.extname(locator.file).toLowerCase() === '.json') {
+    if (locator.pointer && !locator.pointer.startsWith('/')) {
+      unavailableCode = 'selector-invalid';
+      unavailableReason = 'The audited selector is not a valid JSON Pointer, so no source content was disclosed.';
+    } else if (locator.pointer && path.extname(locator.file).toLowerCase() === '.json') {
       try {
-        definition = maskHookDefinition(pointerValue(JSON.parse(current.text), locator.pointer), mask);
-        if (definition === undefined) unavailableReason = 'The audited definition selector is no longer present.';
-      } catch { unavailableReason = 'This JSON source could not be normalized for display.'; }
+        const selected = pointerValue(JSON.parse(current.text), locator.pointer);
+        if (selected === undefined) {
+          unavailableCode = 'selector-not-found';
+          unavailableReason = 'The audited definition selector is not present in this source. Refresh the hook audit before inspecting it again.';
+        } else {
+          definitionValue = maskHookDefinition(selected, mask);
+          definitionAvailable = true;
+        }
+      } catch {
+        unavailableCode = 'parse-failed';
+        unavailableReason = 'This JSON source could not be normalized for display.';
+      }
     } else {
+      unavailableCode = locator.pointer ? 'unsupported-format' : 'selector-unavailable';
       unavailableReason = 'This source format is location-only; the dashboard does not parse or execute it.';
     }
-    if (definition !== null && Buffer.byteLength(JSON.stringify(definition)) > HOOK_DETAIL_MAX_BYTES) {
-      definition = null;
+    if (definitionAvailable && Buffer.byteLength(JSON.stringify(definitionValue)) > HOOK_DETAIL_MAX_BYTES) {
+      definitionValue = null;
+      definitionAvailable = false;
+      unavailableCode = 'display-limit';
       unavailableReason = 'The selected definition exceeds the bounded display limit.';
     }
+    const definition = definitionAvailable
+      ? { status: 'available', format: locator.format, value: definitionValue }
+      : { status: 'location-only', format: locator.format, reason: unavailableCode };
     return {
+      schemaVersion: 1,
       location: {
         displayPath: displayHookPath(locator.file), absolutePath: locator.file,
         selector: locator.pointer, digest: locator.digest,
       },
-      host: locator.host, lifecyclePoint: locator.event, sourceKind: locator.sourceKind,
-      owner: locator.owner, definition, unavailableReason, redacted: true,
+      host: locator.host, hostId: locator.host, lifecyclePoint: locator.event, sourceKind: locator.sourceKind,
+      owner: locator.owner, format: locator.format, definition, unavailableReason, redacted: true,
+      explanation: definition.status === 'available'
+        ? `This is the ${locator.event} hook definition selected from the audited ${locator.format.toUpperCase()} source. Secret-shaped values are masked, and the dashboard does not execute this configuration.`
+        : 'The physical source was verified, but this definition could not be translated safely into a bounded code presentation.',
     };
   };
   return { read, source };
@@ -1689,15 +1721,24 @@ export function startDashboard({
       }
       const ref = match?.[1] ?? '';
       if (!/^[a-f0-9]{32}$/.test(ref)) {
-        sendJson(res, 404, { error: 'hook source reference not found' });
+        sendJson(res, 404, {
+          error: 'Hook source reference is invalid.', code: 'HOOK_SOURCE_NOT_FOUND',
+          recovery: 'Refresh Hooks and inspect the current definition again.',
+        });
         return;
       }
       try {
         const maskFn = typeof usageApi.masker === 'function' ? await usageApi.masker() : usageApi.maskSecrets;
         sendJson(res, 200, await getHooks.source(ref, maskFn));
       } catch (error) {
-        if (error?.code === 'HOOK_SOURCE_NOT_FOUND') sendJson(res, 404, { error: 'hook source reference not found' });
-        else if (error?.code === 'HOOK_SOURCE_CHANGED') sendJson(res, 409, { error: 'hook source changed; refresh the audit' });
+        if (error?.code === 'HOOK_SOURCE_NOT_FOUND') sendJson(res, 404, {
+          error: 'The audited source reference expired.', code: error.code,
+          recovery: 'Refresh Hooks and inspect the current definition again.',
+        });
+        else if (error?.code === 'HOOK_SOURCE_CHANGED') sendJson(res, 409, {
+          error: 'The hook source changed after this audit.', code: error.code,
+          recovery: 'The Hooks list must be refreshed before the current definition can be inspected.',
+        });
         else serverFault(res, '/api/hooks/source/:ref', error, 'hook source unavailable');
       }
       return;

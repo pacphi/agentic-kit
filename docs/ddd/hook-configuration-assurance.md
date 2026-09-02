@@ -100,7 +100,12 @@ Repeated informational trust diagnostics collapse into one evidence-limit statem
 reference is safe to show in the summary because it is HMAC-derived and expires with the in-memory
 audit cache. Resolving it is a separate authenticated read: the source is reopened through the
 bounded-file port, its digest must still match, and only a masked selected JSON definition is
-returned. Opaque formats are location-only. The client cannot supply a path or launch an editor.
+returned in a versioned `available | location-only` presentation. Missing locators remain `null`, so
+the browser cannot manufacture a broken Inspect control from placeholder text. Opaque formats,
+invalid or missing selectors, parse failures and bounded-display overruns are location-only with
+distinct reasons. An expired reference causes one audit refresh and one retry; digest drift requires
+a fresh explicit selection and never substitutes changed content. The client cannot supply a path
+or launch an editor.
 
 The read model keeps source navigation independent from remediation. It may describe why a finding
 is non-automatic, but it shows a next step only when the plan proves an executable occurrence-bound

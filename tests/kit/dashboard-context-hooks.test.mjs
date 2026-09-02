@@ -25,11 +25,14 @@ function get(url, token) {
   });
 }
 
-test('Usage rail and tabpanels expose Score, Limits, Findings, Prompts, Context, Hooks, Models, Sessions, Transcript', () => {
+test('Usage rail exposes navigable views and Transcript only as a current-session indicator', () => {
   const order = [...PAGE.matchAll(/data-view="(\w+)"/g)].map((match) => match[1]);
-  assert.deepEqual(order.slice(0, 9), [
-    'score', 'limits', 'findings', 'prompts', 'context', 'hooks', 'models', 'sessions', 'transcript',
+  assert.deepEqual(order.slice(0, 8), [
+    'score', 'limits', 'findings', 'prompts', 'context', 'hooks', 'models', 'sessions',
   ]);
+  assert.doesNotMatch(PAGE, /data-view="transcript"|usage-tab-transcript/);
+  assert.match(PAGE, /id="usage-transcript-indicator"[^>]*aria-current="page"[^>]*hidden/);
+  assert.match(PAGE, /id="v-transcript"[^>]*role="region"[^>]*aria-labelledby="usage-transcript-indicator"/);
   assert.match(PAGE, /id="usage-tab-score"[^>]*>Score<\/button>/);
   for (const view of ['context', 'hooks']) {
     assert.match(PAGE, new RegExp(`id="usage-tab-${view}"[^>]*aria-controls="v-${view}"`));
@@ -70,13 +73,19 @@ test('Hooks uses semantic tables, visible definitions, and evidence-gated action
   assert.match(PAGE, /What is configured/);
   assert.match(PAGE, /Hook definitions/);
   assert.match(PAGE, /Findings needing attention/);
-  assert.match(PAGE, /Evidence limits/);
+  assert.doesNotMatch(PAGE, /<h2>Evidence limits<\/h2>/,
+    'generic evidence limits belong beside the affected measurement, not in a filler panel');
   assert.match(JS, /Preview repair/);
   assert.match(JS, /finding\.action\?/,
     'the renderer must not fabricate an action for every finding');
   assert.doesNotMatch(JS, /host\|\|"unknown"\)\+' × '/,
     'host × count is not meaningful occurrence language');
   assert.match(CSS, /\.hook-table-wrap[^}]*overflow-x:auto/);
+  assert.match(CSS, /\.hook-definition-wrap\{[^}]*max-height:256px;[^}]*overflow:auto/);
+  assert.match(CSS, /\.hook-definition-wrap \.hook-table thead th\{[^}]*position:sticky/);
+  assert.match(JS, /error\.code==="HOOK_SOURCE_NOT_FOUND"/);
+  assert.match(JS, /loadHooks\(true\).*requestHookSource\(ref\)/s,
+    'an expired source reference gets one evidence refresh and retry');
 });
 
 test('Context attention uses grouped semantic tables, actionable policy labels, and direct session links', () => {
@@ -84,8 +93,9 @@ test('Context attention uses grouped semantic tables, actionable policy labels, 
   assert.match(PAGE, /id="u-ctx-attention"[^>]*role="region"[^>]*aria-labelledby="u-ctx-attention-title"[^>]*tabindex="0"/);
   assert.match(JS, /<details class="ctx-att-group"/);
   assert.match(JS, /<summary/);
+  assert.match(JS, /chev ctx-att-chevron" aria-hidden="true">&rsaquo;/);
   for (const heading of [
-    'Session', 'Host', 'Recommended action', 'Peak pressure', 'Peak input', 'Context window', 'Started',
+    'Conversation', 'Session', 'Host', 'Recommended action', 'Peak pressure', 'Peak input', 'Context window', 'Started',
   ]) assert.match(JS, new RegExp(`<th scope="col">${heading}<\\/th>`));
   assert.match(JS, /href="#usage\//);
   assert.match(JS, /encodeURIComponent\(id\)/);
@@ -93,7 +103,11 @@ test('Context attention uses grouped semantic tables, actionable policy labels, 
   assert.doesNotMatch(JS, /ctx-att-state[^\n]+esc\(row\.state/,
     'raw policy codes such as handoff are not presented as events that happened');
   assert.match(CSS, /\.ctx-att-group summary:focus-visible/);
+  assert.match(CSS, /\.ctx-att-group\[open\]>summary \.ctx-att-chevron[^}]*rotate\(90deg\)/);
   assert.match(CSS, /\.ctx-att-table-wrap[^}]*overflow-x:auto/);
+  assert.match(JS, /class="ctx-att-table-wrap" role="region" tabindex="0" aria-label="Sessions needing attention for project/);
+  assert.match(JS, /row\.projectKey/);
+  assert.doesNotMatch(JS, /sessions? shown|highest\.toFixed/);
 });
 
 test('/api/hooks is authenticated, lazy, sanitized, cached, single-flight, and host-bounded', async () => {
@@ -227,12 +241,60 @@ test('/api/hooks/source resolves only audited opaque refs, masks definitions, an
     const payload = JSON.parse(detail.body);
     assert.equal(payload.location.absolutePath, file);
     assert.equal(payload.location.selector, '/hooks/Stop/0/hooks/0');
-    assert.equal(payload.definition.command.includes('super-secret'), false);
+    assert.equal(payload.schemaVersion, 1);
+    assert.equal(payload.definition.status, 'available');
+    assert.equal(payload.definition.value.command.includes('super-secret'), false);
+    assert.equal(payload.format, 'json');
+    assert.match(payload.explanation, /Stop hook definition selected.*JSON source/);
     assert.equal(payload.redacted, true);
 
     fs.writeFileSync(file, JSON.stringify({ changed: true }));
     const drift = await get(`${server.url}api/hooks/source/${ref}`, server.token);
     assert.equal(drift.status, 409);
+    assert.equal(JSON.parse(drift.body).code, 'HOOK_SOURCE_CHANGED');
+    assert.match(JSON.parse(drift.body).recovery, /refreshed/);
+  } finally {
+    await server.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('/api/hooks/source reports expiry and remints the same unchanged audited reference after refresh', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-hook-expiry-'));
+  const file = path.join(root, 'settings.json');
+  fs.writeFileSync(file, JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command' }] }] } }));
+  const digest = createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+  const record = {
+    occurrenceId: 'expiry-occurrence', behaviorFingerprint: 'expiry-behavior', host: 'codex',
+    event: 'Stop', matcher: '', type: 'command', indices: { group: 0, hook: 0 }, handler: {},
+    source: { file, baseDir: root, digest, sourceKind: 'project', owner: 'project-owner' },
+    diagnostics: [], sideEffects: [], selected: true,
+  };
+  const hooks = async () => ({ audit: {
+    auditId: 'expiry-audit', reports: { codex: {
+      sources: [{ file, status: 'valid', digest }], records: [record], plan: [],
+      summary: { sources: 1, hookOccurrences: 1, uniqueBehaviors: 1 },
+      coverage: { status: 'partial', gaps: [] },
+    } },
+  }, receipts: [] });
+  const usage = {
+    readIndex: async () => ({ context: null, sessions: [], projectTree: [], totals: {} }),
+    readProviderAnalytics: async () => ({ openrouter: null }), maskSecrets: String,
+  };
+  const server = await startDashboard({
+    port: 0, fetchStatus: async () => ({ rows: [] }), hooks, usage, hookCacheMs: 1_000,
+  });
+  try {
+    const summary = JSON.parse((await get(`${server.url}api/hooks?host=all`, server.token)).body);
+    const ref = summary.definitionGroups[0].placements[0].source.ref;
+    await new Promise((resolve) => setTimeout(resolve, 1_050));
+    const expired = await get(`${server.url}api/hooks/source/${ref}`, server.token);
+    assert.equal(expired.status, 404);
+    assert.equal(JSON.parse(expired.body).code, 'HOOK_SOURCE_NOT_FOUND');
+    const refreshed = JSON.parse((await get(`${server.url}api/hooks?host=all`, server.token)).body);
+    assert.equal(refreshed.definitionGroups[0].placements[0].source.ref, ref,
+      'unchanged audited content remints the same opaque reference');
+    assert.equal((await get(`${server.url}api/hooks/source/${ref}`, server.token)).status, 200);
   } finally {
     await server.close();
     fs.rmSync(root, { recursive: true, force: true });

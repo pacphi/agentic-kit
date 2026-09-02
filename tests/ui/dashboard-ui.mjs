@@ -272,7 +272,6 @@ const USAGE_VIEWS = [
   ['hooks', '#v-hooks'],
   ['models', '#v-models'],
   ['sessions', '#v-sessions'],
-  ['transcript', '#v-transcript'],
 ];
 // Seven sub-views, in order. Asserting the list here means a merge would fail
 // loudly instead of quietly reducing the area. Advisory is deliberately its own
@@ -336,7 +335,7 @@ const hooksStub = ({ file, digest }) => async () => ({
       codex: {
         hostSchema: { confidence: 'syntax-only' },
         sources: [{ file, status: 'valid', digest }],
-        summary: { sources: 1, invalidSources: 0, hookOccurrences: 1, uniqueBehaviors: 1, configurationIssues: 0 },
+        summary: { sources: 1, invalidSources: 0, hookOccurrences: 7, uniqueBehaviors: 7, configurationIssues: 0 },
         records: [{
           occurrenceId: 'ui-hook-occurrence', behaviorFingerprint: 'ui-hook-behavior', host: 'codex',
           event: 'Stop', matcher: '', type: 'command', indices: { group: 0, hook: 0 }, handler: { async: false },
@@ -348,7 +347,16 @@ const hooksStub = ({ file, digest }) => async () => ({
             code: 'aqe-npx-hot-path-fallback', severity: 'warning', category: 'reliability',
             message: HOOKS_SECRET,
           }],
-        }],
+        }, ...Array.from({ length: 6 }, (_, index) => ({
+          occurrenceId: `ui-hook-occurrence-${index + 2}`,
+          behaviorFingerprint: `ui-hook-behavior-${index + 2}`, host: 'codex',
+          event: 'Stop', matcher: `fixture-${index + 2}`,
+          type: 'command', indices: { group: 0, hook: 0 }, handler: { async: false },
+          source: { file, baseDir: path.dirname(file), digest, sourceKind: 'project',
+            authority: 'project-owned', generatedStatus: 'direct', owner: 'project-owner' },
+          timeout: { declared: 5, effective: 5, units: 'seconds', status: 'valid' },
+          sideEffects: [], selected: true, diagnostics: [],
+        }))],
         plan: [{ classification: 'upstream-required', target: 'agentic-qe', reason: HOOKS_SECRET }],
         coverage: { status: 'partial', gaps: ['runtime trust not observed'] },
       },
@@ -921,15 +929,18 @@ async function main() {
     readIndex: async (o = {}) => {
       const value = await readIndex({ ...o, ...(roots ? { roots } : {}), cachePath });
       if (!REAL && value.context) value.context.attention = [{
-        id: 'aaaa1111', sessionRef: 'claude-111111111111', host: 'claude', project: 'proj',
+        id: 'aaaa1111', sessionRef: 'claude-111111111111', host: 'claude', project: ' proj ',
+        projectKey: 'project:1111111111111111',
         title: 'Context audit', start: '2026-07-24T10:00:00.000Z', state: 'handoff',
         peakBps: 9860, peakInputTokens: 255000, windowTokens: 258000,
       }, {
-        id: 'bbbb2222', sessionRef: 'claude-222222222222', host: 'claude', project: 'proj',
-        title: 'Context audit', start: '2026-07-24T11:00:00.000Z', state: 'compact',
+        id: 'bbbb2222', sessionRef: 'claude-222222222222', host: 'claude', project: 'PROJ',
+        projectKey: 'project:1111111111111111',
+        title: 'Performance review', start: '2026-07-24T11:00:00.000Z', state: 'compact',
         peakBps: 7200, peakInputTokens: 180000, windowTokens: 250000,
       }, {
         id: 'dddd4444', sessionRef: 'codex-444444444444', host: 'codex', project: 'other',
+        projectKey: 'project:2222222222222222',
         title: 'Release review', start: '2026-07-24T09:00:00.000Z', state: 'warn',
         peakBps: 6400, peakInputTokens: 160000, windowTokens: 250000,
       }];
@@ -2303,8 +2314,19 @@ async function main() {
     // decision this check was written to defend — is unchanged and still
     // asserted, alongside the full order so a future insertion is deliberate.
     check('Usage submenu puts Context and Hooks between Prompts and Models',
-      JSON.stringify(usageSubmenu) === JSON.stringify(['score', 'limits', 'findings', 'prompts', 'context', 'hooks', 'models', 'sessions', 'transcript']),
+      JSON.stringify(usageSubmenu) === JSON.stringify(['score', 'limits', 'findings', 'prompts', 'context', 'hooks', 'models', 'sessions']),
       `Usage submenu was ${JSON.stringify(usageSubmenu)}`);
+    const transcriptIndicatorAtRest = await page.evaluate(() => {
+      const indicator = document.getElementById('usage-transcript-indicator');
+      return {
+        hidden: indicator?.hidden, tag: indicator?.tagName,
+        dataView: indicator?.getAttribute('data-view'), role: indicator?.getAttribute('role'),
+      };
+    });
+    check('Transcript is absent from navigation until a session is open',
+      transcriptIndicatorAtRest.hidden === true && transcriptIndicatorAtRest.tag === 'SPAN'
+        && transcriptIndicatorAtRest.dataView === null && transcriptIndicatorAtRest.role === null,
+      `Transcript indicator at rest was ${JSON.stringify(transcriptIndicatorAtRest)}`);
     const modelPanelOwnership = await page.evaluate(() => [
       '#mli-observed-panel', '.mli-routes-panel', '#mli-catalog-explorer', '#mli-history', '#mli-consumers', '#mli-impact',
     ].map((selector) => ({ selector, owner: document.querySelector(selector)?.closest('.view')?.id ?? null })));
@@ -2374,9 +2396,14 @@ async function main() {
             min: node.getAttribute('aria-valuemin'), max: node.getAttribute('aria-valuemax'),
           })),
           groups: [...document.querySelectorAll('#u-ctx-attention details')].map((node) => ({
-            summary: node.querySelector('summary')?.textContent?.trim(), open: node.open,
+            summary: node.querySelector('.ctx-att-project')?.textContent?.trim(), open: node.open,
+            chevrons: node.querySelectorAll(':scope > summary > .ctx-att-chevron').length,
+            firstChild: node.querySelector('summary')?.firstElementChild?.className,
           })),
           headers: [...document.querySelectorAll('#u-ctx-attention thead th')].map((node) => node.textContent.trim()),
+          tableRegions: [...document.querySelectorAll('#u-ctx-attention .ctx-att-table-wrap')].map((node) => ({
+            tabIndex: node.getAttribute('tabindex'), role: node.getAttribute('role'), label: node.getAttribute('aria-label'),
+          })),
         }));
         check('Context shows the canonical 5/7/10, 60/70/75, and 25 percent policy',
           /5%.*7%.*10%/.test(contextView.policy) && /60%.*70%.*75%/.test(contextView.policy)
@@ -2389,16 +2416,34 @@ async function main() {
           contextView.meters.every((meter) => meter.min === '0' && meter.max === '100'
             && (/unknown/i.test(meter.text) ? meter.now === null : meter.now !== null)),
           `Context meters were ${JSON.stringify(contextView.meters)}`);
-        check('Context groups repeated project/conversation occurrences and starts collapsed',
-          contextView.groups.length === 2 && contextView.groups[0].summary.includes('proj · Context audit')
-            && contextView.groups[0].summary.includes('2 sessions shown')
+        check('Context normalizes repeated project occurrences into collapsed project rows',
+          contextView.groups.length === 2 && contextView.groups[0].summary === 'proj'
             && contextView.groups.every((group) => group.open === false),
           `Context groups were ${JSON.stringify(contextView.groups)}`);
+        check('every Context project row has an explicit disclosure chevron and no summary metrics',
+          contextView.groups.every((group) => group.chevrons === 1
+            && /chev ctx-att-chevron/.test(group.firstChild)
+            && !/sessions? shown|peak/i.test(group.summary)),
+          `Context group affordances were ${JSON.stringify(contextView.groups)}`);
+        check('Context session tables are labelled keyboard-focusable scroll regions',
+          contextView.tableRegions.every((region) => region.tabIndex === '0' && region.role === 'region'
+            && /Sessions needing attention for project/.test(region.label)),
+          `Context table regions were ${JSON.stringify(contextView.tableRegions)}`);
         check('Context measurements sit under explicit semantic column headers',
-          JSON.stringify(contextView.headers.slice(0, 7)) === JSON.stringify([
-            'Session', 'Host', 'Recommended action', 'Peak pressure', 'Peak input', 'Context window', 'Started',
+          JSON.stringify(contextView.headers.slice(0, 8)) === JSON.stringify([
+            'Conversation', 'Session', 'Host', 'Recommended action', 'Peak pressure', 'Peak input', 'Context window', 'Started',
           ]), `Context headers were ${JSON.stringify(contextView.headers)}`);
-        await page.locator('#u-ctx-attention details').first().locator('summary').click();
+        const contextSummary = page.locator('#u-ctx-attention details').first().locator('summary');
+        await contextSummary.focus();
+        await page.keyboard.press('Enter');
+        check('Enter opens a focused Context project disclosure',
+          await page.locator('#u-ctx-attention details').first().evaluate((node) => node.open),
+          'Context disclosure did not open with Enter');
+        await page.keyboard.press('Space');
+        check('Space closes a focused Context project disclosure',
+          !(await page.locator('#u-ctx-attention details').first().evaluate((node) => node.open)),
+          'Context disclosure did not close with Space');
+        await contextSummary.click();
         const contextRows = await page.evaluate(() => ({
           rows: [...document.querySelectorAll('#u-ctx-attention details:first-child tbody tr')].map((row) =>
             [...row.children].map((cell) => cell.textContent.trim())),
@@ -2406,18 +2451,32 @@ async function main() {
           rawHandoff: document.getElementById('u-ctx-attention')?.textContent?.includes('handoff'),
         }));
         check('expanded Context sessions expose aligned values and actionable wording',
-          contextRows.rows.length === 2 && contextRows.rows[0][2] === 'Start a new session'
-            && contextRows.rows[0][3] === '98.6%' && contextRows.rows[0][4] === '255K'
-            && contextRows.rows[0][5] === '258K' && contextRows.rawHandoff === false,
+          contextRows.rows.length === 2 && contextRows.rows[0][0] === 'Context audit'
+            && contextRows.rows[1][0] === 'Performance review'
+            && contextRows.rows[0][3] === 'Start a new session'
+            && contextRows.rows[0][4] === '98.6%' && contextRows.rows[0][5] === '255K'
+            && contextRows.rows[0][6] === '258K' && contextRows.rawHandoff === false,
           `Context rows were ${JSON.stringify(contextRows)}`);
         check('Context session references are real deep links',
           contextRows.href === '#usage/aaaa1111', `Context href was ${JSON.stringify(contextRows.href)}`);
         await page.locator('#u-ctx-attention details:first-child .ctx-session-link').first().click();
         await page.waitForSelector('#v-transcript:not([hidden])');
+        const transcriptIndicatorOpen = await page.evaluate(() => {
+          const indicator = document.getElementById('usage-transcript-indicator');
+          return {
+            visible: !!indicator && !indicator.hidden && indicator.getClientRects().length > 0,
+            current: indicator?.getAttribute('aria-current'), dataView: indicator?.getAttribute('data-view'),
+            transcriptTabs: document.querySelectorAll('#usage-seg [data-view="transcript"]').length,
+          };
+        });
         check('a Context session reference opens the reported transcript',
           await page.evaluate(() => location.hash) === '#usage/aaaa1111'
             && /Add rate limiting to the API/.test(await visibleText(page, '#v-transcript')),
           `Context link navigated to ${await page.evaluate(() => location.hash)}`);
+        check('Transcript appears only as a non-interactive current-view indicator',
+          transcriptIndicatorOpen.visible && transcriptIndicatorOpen.current === 'page'
+            && transcriptIndicatorOpen.dataView === null && transcriptIndicatorOpen.transcriptTabs === 0,
+          `Transcript indicator was ${JSON.stringify(transcriptIndicatorOpen)}`);
         await page.click('[data-view="context"]');
       }
       if (view === 'hooks') {
@@ -2427,6 +2486,20 @@ async function main() {
           runtimeParent: document.getElementById('u-hook-runtime')?.closest('.strip')?.querySelector('h2')?.textContent,
           definitionHeaders: [...document.querySelectorAll('#u-hook-stop thead th')].map((node) => node.textContent.trim()),
           findingHeaders: [...document.querySelectorAll('#u-hook-diagnostics thead th')].map((node) => node.textContent.trim()),
+          definitionViewport: (() => {
+            const wrap = document.querySelector('#u-hook-stop .hook-definition-wrap');
+            const rows = [...document.querySelectorAll('#u-hook-stop tbody > tr')];
+            const header = document.querySelector('#u-hook-stop thead');
+            return {
+              clientHeight: wrap?.clientHeight, scrollHeight: wrap?.scrollHeight,
+              rowCount: rows.length, rowHeight: rows[0]?.getBoundingClientRect().height,
+              headerHeight: header?.getBoundingClientRect().height,
+              tabIndex: wrap?.getAttribute('tabindex'),
+              collapsed: rows.every((row) => !row.querySelector('details')?.open),
+            };
+          })(),
+          evidencePanel: [...document.querySelectorAll('#v-hooks h2')]
+            .some((heading) => heading.textContent.trim() === 'Evidence limits'),
           busy: document.getElementById('v-hooks')?.getAttribute('aria-busy'),
         }));
         check('Hooks fetches exactly once when first opened and settles its live status',
@@ -2442,13 +2515,33 @@ async function main() {
           ]) && JSON.stringify(hookView.findingHeaders) === JSON.stringify([
             'Importance', 'Finding', 'Lifecycle point', 'Host', 'Affected definitions', 'Owner', 'Next step',
           ]), `Hook headers were ${JSON.stringify(hookView)}`);
+        const visibleDefinitionRows = (hookView.definitionViewport.clientHeight
+          - hookView.definitionViewport.headerHeight) / hookView.definitionViewport.rowHeight;
+        check('Hook definitions shows five collapsed rows in a keyboard-scrollable viewport',
+          hookView.definitionViewport.rowCount === 7 && hookView.definitionViewport.collapsed
+            && hookView.definitionViewport.tabIndex === '0'
+            && hookView.definitionViewport.scrollHeight > hookView.definitionViewport.clientHeight
+            && visibleDefinitionRows >= 4.8 && visibleDefinitionRows <= 5.2,
+          `Hook definition viewport was ${JSON.stringify({ ...hookView.definitionViewport, visibleDefinitionRows })}`);
+        check('Hooks keeps evidence limits beside affected measurements instead of a filler panel',
+          hookView.evidencePanel === false && !/Evidence limits/.test(hookView.text),
+          `Hooks evidence panel state was ${JSON.stringify(hookView)}`);
+        await page.locator('#u-hook-stop .hook-definition-wrap').evaluate((node) => { node.scrollTop = 80; });
+        const hookHeaderSticky = await page.evaluate(() => {
+          const wrap = document.querySelector('#u-hook-stop .hook-definition-wrap');
+          const header = document.querySelector('#u-hook-stop thead th');
+          if (!wrap || !header) return null;
+          return Math.abs(header.getBoundingClientRect().top - wrap.getBoundingClientRect().top) <= 1;
+        });
+        check('Hook definition headers stay visible while its internal viewport scrolls',
+          hookHeaderSticky === true, `Hook sticky header state was ${hookHeaderSticky}`);
         check('Hooks does not turn an upstream classification into a fabricated call to action',
           /No evidence-backed action/.test(hookView.text) && !/Preview repair/.test(hookView.text),
           `Hooks action text was ${JSON.stringify(hookView.text)}`);
         check('Hooks never renders raw commands, paths, output, or diagnostic prose',
           !hookView.text.includes(HOOKS_SECRET), 'sanitized Hook delivery leaked its sentinel secret');
-        await page.locator('#u-hook-stop details summary').click();
-        await page.locator('[data-hook-source]').click();
+        await page.locator('#u-hook-stop details summary').first().click();
+        await page.locator('[data-hook-source]').first().click();
         await page.waitForFunction(() => document.querySelector('#u-hook-source-detail pre'));
         const sourceView = await page.evaluate(() => ({
           open: document.getElementById('u-hook-source-dialog')?.open,
@@ -2457,7 +2550,7 @@ async function main() {
         }));
         check('Hooks opens the explicitly requested audited physical source in a read-only dialog',
           sourceView.open === true && sourceView.path === hookSourceFile
-            && /Masked definition/.test(sourceView.text) && !sourceView.text.includes('ui-secret-value'),
+            && /Masked JSON definition/.test(sourceView.text) && !sourceView.text.includes('ui-secret-value'),
           `Hook source dialog was ${JSON.stringify(sourceView)}`);
         await page.locator('#u-hook-source-close').click();
       }

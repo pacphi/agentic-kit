@@ -60,8 +60,11 @@ The implemented projection is intentionally smaller than the conceptual aggregat
   content.
 
 The Context projection is present in the Usage aggregate. Its capped attention rows carry a
-deterministic opaque session reference and sanitized local project/conversation labels, then group
-client-side without changing the top-20 cap. The reference opens the existing authenticated local
+deterministic opaque session reference, an opaque normalized project key, and sanitized local
+project/conversation labels, then render one client-side outer disclosure per project without
+changing the top-20 cap. A canonical upstream project key wins; fallback identity applies NFKC,
+whitespace normalization and case folding before hashing. Conversation identity remains in each
+expanded session row. The reference opens the existing authenticated local
 transcript reader. Policy recommendations name the threshold-derived next step; they do not claim a
 handoff or compaction event occurred. Dashboard Delivery renders the projection directly
 and exposes the sanitized Hook read model through a lazy, authenticated, 30-second cached,

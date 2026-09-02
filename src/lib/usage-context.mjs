@@ -6,6 +6,7 @@
 // runtime decisions and historical projections cannot drift.
 import { createHash } from 'node:crypto';
 import { CONTEXT_BUDGET_POLICY } from './context-budget.mjs';
+import { safeProjectKey } from './live/project-label.mjs';
 import { stripUnsafeChars } from './text-safety.mjs';
 
 export const CONTEXT_POLICY = CONTEXT_BUDGET_POLICY;
@@ -137,10 +138,13 @@ function attentionRow(session) {
   const evidence = evidenceOf(session);
   const state = attentionState(evidence);
   if (!state) return null;
+  const project = stripUnsafeChars(session.project ?? 'unknown').normalize('NFKC')
+    .trim().replace(/\s+/gu, ' ').slice(0, 128) || 'unknown';
   return {
     id: String(session.id ?? ''),
     host: HOSTS.includes(session.host) ? session.host : 'unknown',
-    project: stripUnsafeChars(session.project ?? 'unknown').slice(0, 128),
+    project,
+    projectKey: safeProjectKey(session.projectKey, project),
     title: stripUnsafeChars(session.title ?? '').slice(0, 100) || '(untitled conversation)',
     sessionRef: `${HOSTS.includes(session.host) ? session.host : 'session'}-${createHash('sha256')
       .update(`${session.host ?? 'unknown'}\0${session.id ?? ''}`).digest('hex').slice(0, 12)}`,

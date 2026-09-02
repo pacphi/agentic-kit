@@ -1,7 +1,7 @@
 // @ts-nocheck — browser bundle source (never node-imported; client.mjs
 // reads it as text). See src/lib/dashboard/client/**'s eslint.config.mjs
 // override comment for why this directory isn't run through the node lib.
-import { VIEWS, authHeaders, esc, setTab } from './bootstrap.mjs';
+import { USAGE_NAV_VIEWS, authHeaders, esc, setTab } from './bootstrap.mjs';
 import { mliDetail, mliRouteRows, renderModelFacets, renderModelRouteSort, renderModelSort } from './model-lifecycle.mjs';
 import { HOOKS, renderContext, renderHooks } from './usage-context-hooks.mjs';
 import { MODEL_PAGE, USAGE, fmtNum, loadLimits, loadModelInventory, loadModelLifecycle, loadUsage, modelRows, renderFindings, renderPrompts, renderScore, renderSessions, renderSourceHealth, renderTranscript, sessionRow, setUsageView } from './usage.mjs';
@@ -29,7 +29,7 @@ import { MODEL_PAGE, USAGE, fmtNum, loadLimits, loadModelInventory, loadModelLif
       var b=e.target.closest?e.target.closest("[data-view]"):null;
       if(b)setUsageView(b.getAttribute("data-view"));
     });
-    if(seg)seg.addEventListener("keydown",function(e){if(!/^(ArrowLeft|ArrowRight|Home|End)$/.test(e.key))return;var i=VIEWS.indexOf(usageView);i=e.key==="Home"?0:e.key==="End"?VIEWS.length-1:(i+(e.key==="ArrowRight"?1:VIEWS.length-1))%VIEWS.length;setUsageView(VIEWS[i]);var b=seg.querySelector('[data-view="'+VIEWS[i]+'"]');if(b)b.focus();e.preventDefault();});
+    if(seg)seg.addEventListener("keydown",function(e){if(!/^(ArrowLeft|ArrowRight|Home|End)$/.test(e.key))return;var i=USAGE_NAV_VIEWS.indexOf(usageView);if(i<0)i=USAGE_NAV_VIEWS.indexOf("sessions");i=e.key==="Home"?0:e.key==="End"?USAGE_NAV_VIEWS.length-1:(i+(e.key==="ArrowRight"?1:USAGE_NAV_VIEWS.length-1))%USAGE_NAV_VIEWS.length;setUsageView(USAGE_NAV_VIEWS[i]);var b=seg.querySelector('[data-view="'+USAGE_NAV_VIEWS[i]+'"]');if(b)b.focus();e.preventDefault();});
     var summary=document.getElementById("mli-summary");
     if(summary)summary.addEventListener("click",function(e){e.preventDefault();setTab("usage");setUsageView("models");});
     function resetModelPage(){

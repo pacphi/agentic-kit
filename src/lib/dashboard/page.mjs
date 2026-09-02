@@ -164,8 +164,8 @@ export function renderPage({ name, version }) {
         <button class="seg-btn" role="tab" id="usage-tab-hooks" data-view="hooks" aria-selected="false" aria-controls="v-hooks" tabindex="-1" type="button">Hooks</button>
         <button class="seg-btn" role="tab" id="usage-tab-models" data-view="models" aria-selected="false" aria-controls="v-models" tabindex="-1" type="button">Models<span class="segbadge" id="mli-attention-n" hidden></span></button>
         <button class="seg-btn" role="tab" id="usage-tab-sessions" data-view="sessions" aria-selected="false" aria-controls="v-sessions" tabindex="-1" type="button">Sessions<span class="mono seg-n" id="u-sessions-n"></span></button>
-        <button class="seg-btn" role="tab" id="usage-tab-transcript" data-view="transcript" aria-selected="false" aria-controls="v-transcript" tabindex="-1" type="button">Transcript</button>
       </div>
+      <span class="transcript-view-indicator" id="usage-transcript-indicator" aria-current="page" hidden>Transcript</span>
       <div class="filters secondary-actions" id="usage-days" role="group" aria-label="Usage window">
         <button class="chipf" type="button" data-days="7">7d</button>
         <button class="chipf on" type="button" data-days="14">14d</button>
@@ -558,7 +558,7 @@ export function renderPage({ name, version }) {
       <div class="ctx-grid" id="u-ctx-hosts"></div>
       <section class="strip">
         <div class="sh"><h2 id="u-ctx-attention-title">Sessions needing attention</h2><span class="n mono">top 20 sessions &middot; local labels</span></div>
-        <p class="strip-copy">Groups use project and conversation labels. Recommendations name the action for the highest policy threshold crossed; they do not prove a handoff or compaction occurred.</p>
+        <p class="strip-copy">Projects appear once; expand one to compare its conversation labels and sessions. Recommendations name the action for the highest policy threshold crossed; they do not prove a handoff or compaction occurred.</p>
         <div class="ctx-attention" id="u-ctx-attention" role="region" aria-labelledby="u-ctx-attention-title" tabindex="0"></div>
       </section>
       <div class="foot">evidence: runtime-observed input/window pairs from retained local session telemetry &middot; policy: agentic-kit context budget v1</div>
@@ -576,7 +576,7 @@ export function renderPage({ name, version }) {
       </section>
       <section class="strip">
         <div class="sh"><h2 id="u-hook-definitions-title">Hook definitions</h2><span class="n mono">grouped behavior &middot; physical placements</span></div>
-        <p class="strip-copy">Expand a definition to see where each placement is configured, who owns it, and whether selection was established. Source inspection is navigation, not permission to edit.</p>
+        <p class="strip-copy">Five collapsed definitions fit in the table viewport; scroll for the rest. Expand one to see where each placement is configured, who owns it, and whether selection was established. Source inspection is navigation, not permission to edit.</p>
         <div id="u-hook-stop"></div>
       </section>
       <section class="strip">
@@ -587,13 +587,9 @@ export function renderPage({ name, version }) {
         <div class="sh"><h2>Findings needing attention</h2><span class="n mono">plain language &middot; evidence-bound next steps</span></div>
         <div id="u-hook-diagnostics"></div>
       </section>
-      <section class="strip">
-        <div class="sh"><h2>Evidence limits</h2><span class="n mono">unknown stays unknown</span></div>
-        <div id="u-hook-limits"></div>
-      </section>
       <dialog class="hook-source-dialog" id="u-hook-source-dialog" aria-labelledby="u-hook-source-title">
-        <div class="hook-source-head"><h2 id="u-hook-source-title">Audited hook source</h2><button type="button" id="u-hook-source-close" aria-label="Close hook source">Close</button></div>
-        <p class="strip-copy">This is a read-only, server-masked view of the exact source that was audited. Viewing it does not grant permission to edit or heal it.</p>
+        <div class="hook-source-head"><h2 id="u-hook-source-title">Audited hook definition</h2><button type="button" id="u-hook-source-close" aria-label="Close hook definition">Close</button></div>
+        <p class="strip-copy">This view translates the selected audited configuration into masked JSON when the source can be parsed safely. It also identifies the host, lifecycle point, owner evidence, format, selector, and physical location. Viewing it does not grant permission to edit or heal it.</p>
         <div id="u-hook-source-detail" aria-live="polite"></div>
       </dialog>
       <div class="foot">evidence: read-only normalized hook audit plus any bounded runtime receipts available to this process</div>
@@ -676,7 +672,7 @@ export function renderPage({ name, version }) {
       <dialog class="mli-detail-dialog" id="mli-detail" aria-labelledby="mli-detail-title"><div class="mli-detail-head"><h2 id="mli-detail-title">Model details</h2><button type="button" id="mli-detail-close" aria-label="Close model details">Close</button></div><div id="mli-detail-body"></div></dialog>
     </section>
 
-    <section class="view" id="v-transcript" role="tabpanel" aria-labelledby="usage-tab-transcript" hidden>
+    <section class="view" id="v-transcript" role="region" aria-labelledby="usage-transcript-indicator" hidden>
       <div class="tcrumb" id="u-crumb"></div>
       <section class="strip" id="u-turns"></section>
       <div class="foot">secret-shaped strings are masked server-side &mdash; the original never reaches this page &middot; no export button by design</div>

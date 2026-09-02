@@ -186,10 +186,14 @@ an HMAC-derived reference in the summary. Authenticated
 `GET /api/hooks/source/<opaque-reference>` resolves only a live cached locator; it accepts no path
 parameter. The server rereads the audited bounded regular file beneath its original containment
 root, verifies the original digest, and returns the physical location plus a recursively masked
-selected JSON definition. An unknown or expired reference is 404; digest drift is 409. Composite,
-opaque, JSONC, TOML and module sources may return location-only rather than weakly parse or execute
-content. The route never imports modules, fetches remote/npm sources, launches an editor, emits a
-`file://` URI, or grants write authority.
+selected JSON definition in a versioned `available | location-only` presentation. A record with no
+resolvable locator projects `ref: null`; placeholder text must never become an inspectable reference.
+An unknown or expired reference is 404 and permits one audit refresh plus one retry; digest drift is
+409, refreshes the list and requires a fresh explicit selection. Invalid or absent JSON Pointers,
+composite, opaque, JSONC, TOML and module sources return a specific location-only reason rather than
+falling back to whole-file disclosure or weakly parsing/executing content. The route never imports
+modules, fetches remote/npm sources, launches an editor, emits a `file://` URI, or grants write
+authority.
 
 Source inspection is navigation, not remediation. The dashboard renders a next step only for an
 exact executable healing-plan action joined to the affected occurrence and plan digest, or for a

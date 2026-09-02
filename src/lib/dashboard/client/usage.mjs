@@ -233,7 +233,9 @@ import { renderUsage } from './usage-orchestrators.mjs';
     var headings={score:["Usage scorecard","Token consumption, API-equivalent cost, efficiency, and trends."],limits:["Provider limits","Current provider windows, reset timing, and available capacity."],findings:["Usage findings","Actionable anomalies, efficiency opportunities, and evidence-backed recommendations."],prompts:["Prompt patterns","What you type across every host, which patterns repeat, and what to change — from fingerprints, with masked prompt text on demand."],context:["Context","Runtime-observed context pressure, conservative policy thresholds, and evidence coverage by host."],hooks:["Hooks","Read-only configuration assurance and separately evidenced runtime outcomes."],sessions:["Session usage","Browse retained sessions by project, category, duration, tokens, and cost."],models:["Models","Observed models in this window, configured routes, and the separate provider/local catalogue."],transcript:["Transcript detail","Inspect the selected session's locally retained, server-masked evidence."]},heading=headings[v]||headings.score;
     document.getElementById("usage-view-title").textContent=heading[0];document.getElementById("usage-view-description").textContent=heading[1];
     var btns=document.querySelectorAll("#usage-seg [data-view]");
-    for(var i=0;i<btns.length;i++){var on=btns[i].getAttribute("data-view")===v;btns[i].setAttribute("aria-selected",on?"true":"false");btns[i].tabIndex=on?0:-1;}
+    for(var i=0;i<btns.length;i++){var on=btns[i].getAttribute("data-view")===v;btns[i].setAttribute("aria-selected",on?"true":"false");btns[i].tabIndex=on||v==="transcript"&&btns[i].getAttribute("data-view")==="sessions"?0:-1;}
+    var transcriptIndicator=document.getElementById("usage-transcript-indicator");
+    if(transcriptIndicator)transcriptIndicator.hidden=v!=="transcript";
     for(var j=0;j<VIEWS.length;j++){
       var el=document.getElementById("v-"+VIEWS[j]);
       if(el){

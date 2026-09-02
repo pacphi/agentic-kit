@@ -92,6 +92,21 @@ test('hook read model groups repeated placements and only exposes proven executa
   assert.equal(model.findings[0].action.planDigest, 'plan-123');
 });
 
+test('hook read model never fabricates an inspectable source reference', () => {
+  const model = buildHookDashboardReadModel({
+    audit: { reports: { codex: {
+      records: [{
+        occurrenceId: 'missing-source', behaviorFingerprint: 'missing-source', host: 'codex',
+        event: 'Stop', type: 'command', source: { sourceKind: 'project' }, diagnostics: [],
+      }],
+      summary: { hookOccurrences: 1, uniqueBehaviors: 1 }, coverage: { status: 'partial', gaps: [] },
+    } } },
+    sourceRef: () => null,
+  });
+  assert.equal(model.definitionGroups[0].placements[0].source.ref, null,
+    'an unresolvable placement must render Location unavailable, never a broken Inspect source button');
+});
+
 test('adapter records retain their concrete host identity and unknown runtime stays unknown', () => {
   const model = buildHookDashboardReadModel({ audit: { reports: { external: {
     sources: [], plan: [], summary: { sources: 0, invalidSources: 0, hookOccurrences: 1, uniqueBehaviors: 1 },

@@ -189,7 +189,8 @@ function staticFacts(audit, options = {}) {
         groups.set(behaviorId, group);
       }
       const occurrenceId = safeLabel(record?.occurrenceId, `${behaviorId}-${group.placements.length + 1}`);
-      const ref = typeof sourceRef === 'function' ? safeLabel(sourceRef(record), 'unavailable') : null;
+      const rawRef = typeof sourceRef === 'function' ? sourceRef(record) : null;
+      const ref = typeof rawRef === 'string' && rawRef.trim() ? safeLabel(rawRef) : null;
       const placement = {
         occurrenceId,
         source: { ref, label: hookSourceLabel(record?.source), kind: safeLabel(record?.source?.sourceKind) },

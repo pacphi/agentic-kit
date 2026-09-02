@@ -74,7 +74,7 @@ test('buildContextProjection folds evidence and publishes bounded local navigati
   assert.equal(projection.attention.length, 1);
   assert.deepEqual(Object.keys(projection.attention[0]).sort(), [
     'firstBps', 'firstInputTokens', 'host', 'id', 'lastBps', 'lastInputTokens',
-    'peakBps', 'peakInputTokens', 'project', 'sessionRef', 'start', 'state', 'title',
+    'peakBps', 'peakInputTokens', 'project', 'projectKey', 'sessionRef', 'start', 'state', 'title',
     'windowTokens',
   ]);
   assert.equal(projection.attention[0].title, 'Context audit conversation',
@@ -84,6 +84,29 @@ test('buildContextProjection folds evidence and publishes bounded local navigati
     'the visible reference is deterministic and does not expose the raw route id');
   assert.equal(JSON.stringify(projection).includes('prompt text'), false,
     'the projection adds bounded session labels, never prompt bodies or transcript turns');
+});
+
+test('Context attention assigns normalized opaque project identity independent of conversation title', () => {
+  const make = (id, project, title) => ({
+    id, host: 'codex', project, title,
+    contextEvidence: observed({
+      first: 10_000, last: 80_000, peak: 90_000, window: 100_000,
+      firstBps: 1_000, lastBps: 8_000, peakBps: 9_000,
+    }),
+  });
+  const projection = buildContextProjection([
+    make('one', ' proj ', 'Context audit'),
+    make('two', 'PROJ', 'Performance review'),
+    make('three', '\uff30\uff32\uff2f\uff2a', 'Release review'),
+    make('unknown', '\u0000\u0008', 'Unknown project'),
+  ]);
+  const [first, second, third] = projection.attention.filter((row) => row.project !== 'unknown');
+  assert.equal(first.projectKey, second.projectKey);
+  assert.equal(second.projectKey, third.projectKey,
+    'case, surrounding space, and compatibility-equivalent Unicode do not split one project');
+  assert.notEqual(first.title, second.title, 'conversation labels do not participate in project identity');
+  assert.equal(projection.attention.find((row) => row.id === 'unknown').project, 'unknown');
+  assert.match(first.projectKey, /^project:[a-f0-9]{16}$/);
 });
 
 test('Context attention is deterministic, severity-sorted, and hard bounded', () => {

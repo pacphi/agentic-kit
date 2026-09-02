@@ -45,7 +45,6 @@ permanent.
 | Usage | Hooks | `#usage/hooks` | Hook assurance | Read-only hook configuration diagnostics, ownership actions, and separately reported bounded runtime receipts |
 | Usage | Models | `#usage/models` | Model lifecycle | Host inventory, lifecycle changes, consumers, swap impact, and evidence sources |
 | Usage | Sessions | `#usage/sessions` | Session usage | Retained sessions grouped by project, category, duration, tokens, and cost |
-| Usage | Transcript | `#usage/transcript` | Transcript detail | The selected session's locally retained, server-masked evidence |
 | Observability | Live | `#observability/live` | Observability · Live | Projects and roots with current presence or fresh meaningful activity |
 | Observability | History | `#observability/history` | Observability · History | Retained roots that are not currently Live |
 | System | Summary | `#system/summary` | Summary | Install size, retained data, live resource use, deployed inventory, and the machine's largest storage consumers in one glance |
@@ -59,9 +58,11 @@ permanent.
 About is one scrolling page, so its hashes scroll to a section rather than swapping panels; `#about`
 alone opens the page at the top.
 
-Opening a transcript replaces `transcript` with the URL-encoded session ID:
-`#usage/<session-id>`. These hashes select state inside the one page; they do not create separate
-servers or weaken the dashboard token boundary.
+Opening a session uses `#usage/<session-id>`. **Transcript** is not a navigable Usage tab: it appears
+only as a non-interactive current-view indicator while a selected session's locally retained,
+server-masked evidence is open. A bare `#usage/transcript` returns to Sessions. These hashes select
+state inside the one page; they do not create separate servers or weaken the dashboard token
+boundary.
 
 ### Keyboard behavior
 
@@ -268,8 +269,8 @@ A percentage is rendered only when input and window were observed together for t
 Claude and OpenCode commonly carry input-only evidence, so they may read **Partial evidence** while
 Codex is observed. Missing evidence renders `unknown`; an unknown ARIA meter omits `aria-valuenow`
 rather than announcing zero. The attention projection is capped to the top 20 sessions before
-presentation. The browser groups those rows by bounded project and sanitized conversation labels,
-then exposes explicit column headers, an opaque session reference, host, policy-derived
+presentation. The browser renders one disclosure row per bounded project and keeps each sanitized
+conversation label inside the expanded session table, then exposes explicit column headers, an opaque session reference, host, policy-derived
 recommendation, pressure/input/window, and start date. The session reference links to that retained
 local transcript. A recommendation means a policy threshold was crossed; it is not evidence that a
 handoff or compaction occurred. Prompt bodies, tool payloads, commands and raw paths never enter the
@@ -292,22 +293,29 @@ It does not execute, edit, heal, enable or disable a hook. The summary removes r
 paths, hook output, detail and diagnostic prose. Each audited physical placement receives an opaque,
 short-lived source reference. Only an explicit **Inspect source** action resolves that reference,
 rechecks the bounded regular file and original digest, and returns its physical location plus a
-server-masked selected JSON definition. The route accepts no client path, never imports a module or
-launches an editor, and returns location-only for formats it cannot safely normalize.
+server-masked selected JSON definition with format, host, lifecycle, source-kind, owner and selector
+facts. A placement without a resolvable locator has no Inspect control. If a live reference expires,
+the browser refreshes Hooks and retries once; digest drift refreshes the list but never substitutes
+changed content silently. Invalid or missing selectors and formats that cannot be parsed safely
+return an explicit location-only reason. The route accepts no client path, never imports a module or
+launches an editor.
 
 The view deliberately separates four questions:
 
 - **What is configured** distinguishes physical entries, distinct normalized behaviors, repeated
   placements, inspected sources, and unreadable sources. Unreadable sources are not warning counts.
-- **Hook definitions** is a semantic table grouped by normalized behavior. Expand a definition to
-  inspect its host, lifecycle point, handler kind, timeout, placement, owner/authority, selection
-  evidence and source reference.
+- **Hook definitions** is a semantic table grouped by normalized behavior. Its keyboard-focusable,
+  internally scrollable viewport shows five collapsed definitions at a time and keeps the header
+  visible. Expand a definition to inspect its host, lifecycle point, handler kind, timeout,
+  placement, owner/authority, selection evidence and source reference.
 - **Findings needing attention** uses allowlisted plain-language titles and explanations, while
-  retaining the stable code as secondary support text. Informational `trust-independent` repetition
-  becomes one evidence-limit statement.
+  retaining the stable code as secondary support text.
 - **Runtime outcomes** is a separate table of bounded receipts. With no receipts it says outcomes
   are unknown and renders no zero-valued scorecard.
-- **Evidence limits** states what static inspection cannot prove.
+
+Evidence limits stay beside the affected measurement instead of repeating in a generic panel:
+unreadable sources remain in configuration evidence, missing receipts remain in Runtime outcomes,
+and a finding without an exact safe next step says so in its Next step cell.
 
 A finding receives a call to action only when the current healing plan contains an exact executable
 action bound to the affected occurrence and plan digest, or when a verified published upstream issue
