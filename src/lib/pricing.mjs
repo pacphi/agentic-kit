@@ -49,6 +49,10 @@ const schedule = (provider) => {
   // on the built entry itself, not inside `periods`. Every entry defaults to
   // the module-wide CACHE_READ_MULTIPLIER; Fable 5.1 / Mythos 5.1 are, as of
   // this writing, the only published exception (§ PRICES).
+  /**
+   * @param {{in: number, out: number, from?: string}[]} periods
+   * @param {{cacheReadMultiplier?: number}} [extra]
+   */
   const build = (periods, { cacheReadMultiplier } = {}) => ({
     provider,
     asOf: PRICES_AS_OF,
