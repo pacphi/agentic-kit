@@ -4,6 +4,8 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 
 import { auditHooks, BUILTIN_HOOK_AUDIT_HOSTS } from '../lib/hook-audit/orchestrator.mjs';
+import { buildContextAudit, selectedContextHosts } from '../lib/context-audit.mjs';
+import { collectContextEvidence } from '../lib/context-audit-sources.mjs';
 import { loadKitConfig } from '../lib/config.mjs';
 import { projectCensus, projectsInScope } from '../lib/project-census.mjs';
 import { installedVersion } from '../lib/versions.mjs';
@@ -15,24 +17,27 @@ export const options = {
   'all-projects': { type: 'boolean', default: false },
 };
 
-export const help = `ak audit hooks — read-only host-neutral hook inventory and remediation plan
+export const help = `ak audit — read-only hook and startup-context evidence
 
-Discovers Codex, Claude, OpenCode, and external-adapter hook definitions; normalizes
-behavior; keeps compatibility separate from trust; and classifies possible
-repairs. It never executes hooks, changes trust, or writes hook files.
+The hooks audit inventories static hook definitions and remediation authority. The
+context audit measures agentic-kit guidance, bounded skill/MCP metadata, model-window
+facts, and static hook counts without exposing raw content or executing hooks.
 
-Usage: ak audit hooks [options]
+Usage:
+  ak audit hooks [options]
+  ak audit context [options]
 
 Options:
   --project PATH   add an explicit project (repeatable)
-  --host HOST      audit codex, claude, opencode, external, or all (repeatable; default: codex)
+  --host HOST      audit codex, claude, opencode, external, or all (repeatable)
   --all-projects   include Git projects in agentic-kit's bounded project census
   --json           emit the deterministic machine-readable report
 
 Examples:
   ak audit hooks
   ak audit hooks --host all --project ../another-repo --json
-  ak audit hooks --all-projects --json`;
+  ak audit hooks --all-projects --json
+  ak audit context --host all --json`;
 
 export function detectedVersion(binary, pattern = /(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/) {
   try {
@@ -88,11 +93,80 @@ export function collectHookAudit({
   });
 }
 
-export async function run({ flags, positionals, detectVersionFn = detectedVersion, loadConfigFn = loadKitConfig }) {
-  if (positionals.length !== 1 || positionals[0] !== 'hooks') {
-    console.error('ak audit requires the hooks subcommand');
+export async function collectContextAudit({
+  flags,
+  pkgRoot,
+  cwd = process.cwd(),
+  loadConfigFn = loadKitConfig,
+  hookCollectorFn = collectHookAudit,
+  evidenceCollectorFn = collectContextEvidence,
+}) {
+  const hosts = selectedContextHosts(flags.host);
+  const cfg = loadConfigFn();
+  const hookAudit = hookCollectorFn({
+    flags: { ...flags, host: hosts },
+    loadConfigFn: () => cfg,
+  });
+  const evidence = await evidenceCollectorFn({ hosts, cfg, pkgRoot, cwd, hookAudit });
+  return buildContextAudit({ hosts, evidence });
+}
+
+function contextExitCode(report) {
+  return Object.values(report.reports).some((host) =>
+    host.guidance.withinBudget === false
+    || host.guidance.installations.some((entry) =>
+      entry.state === 'duplicate-managed' || entry.state === 'stale-managed'
+      || entry.upstreamOwned.some((upstream) => upstream.state !== 'single-managed'))) ? 1 : 0;
+}
+
+function tokenValue(fact) {
+  return fact?.tokens ?? 'unknown';
+}
+
+function renderContextText(report) {
+  console.log(`ak audit context (read-only: ${report.hosts.join(', ')})`);
+  for (const host of report.hosts) {
+    const item = report.reports[host];
+    const guidanceBytes = item.guidance.bytes ?? 'unknown';
+    const guidanceTokens = item.guidance.estimatedTokens?.tokens ?? 'unknown';
+    console.log(`  ${host}: guidance ${guidanceBytes} B · ~${guidanceTokens} estimated tokens · ${item.guidance.status}`);
+    console.log(`    window advertised ${tokenValue(item.modelWindow.advertised)} · host ${tokenValue(item.modelWindow.host)} · effective ${tokenValue(item.modelWindow.effective)} · compact ${tokenValue(item.modelWindow.autoCompact)}`);
+    console.log(`    startup ${item.startup.state}${item.startup.startup?.level ? ` (${item.startup.startup.level})` : ''}`);
+    console.log(`    skills ${item.skills.count ?? 'unknown'} · metadata bytes ${item.skills.metadataBytes ?? 'unknown'} · ${item.skills.status}`);
+    console.log(`    MCP ${item.mcp.registrations ?? 'unknown'} registration(s) · config ${item.mcp.configBytes ?? 'unknown'} B · schemas ${item.mcp.schemaBytes ?? 'unknown'} B`);
+    console.log(`    hooks ${item.hooks.occurrences ?? 'unknown'} occurrence(s), ${item.hooks.stopOccurrences ?? 'unknown'} Stop`);
+    for (const installation of item.guidance.installations) {
+      console.log(`    guidance ${installation.scope}: ${installation.state}`);
+      for (const upstream of installation.upstreamOwned) {
+        console.log(`      upstream ${upstream.owner}: ${upstream.blocks} block(s) · ${upstream.bytes ?? 'unknown'} B · ~${upstream.estimatedTokens?.tokens ?? 'unknown'} estimated tokens · ${upstream.state}`);
+      }
+    }
+    console.log(`    source health: ${item.sourceHealth.overall}`);
+  }
+}
+
+export async function run({
+  flags, positionals, pkgRoot,
+  detectVersionFn = detectedVersion,
+  loadConfigFn = loadKitConfig,
+  contextCollectorFn = collectContextAudit,
+}) {
+  if (positionals.length !== 1 || !['hooks', 'context'].includes(positionals[0])) {
+    console.error('ak audit requires the hooks or context subcommand');
     console.log(help);
     return 2;
+  }
+  if (positionals[0] === 'context') {
+    let report;
+    try {
+      report = await contextCollectorFn({ flags, pkgRoot, loadConfigFn });
+    } catch (error) {
+      console.error(`context audit failed: ${error.message}`);
+      return 2;
+    }
+    if (flags.json) console.log(JSON.stringify(report, null, 2));
+    else renderContextText(report);
+    return contextExitCode(report);
   }
   let report;
   try {
