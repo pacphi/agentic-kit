@@ -102,6 +102,26 @@
       }
     },
     {
+      "id": "ruflo-3.38.20-project-guidance-selector",
+      "dependency": "ruflo",
+      "kind": "upstream-capability-gap",
+      "affected": ["3.38.20"],
+      "issue": "https://github.com/ruvnet/ruflo/issues/3153",
+      "issueState": "open-at-last-verification",
+      "primaryEvidence": "published init help, installed generator source, and project-guidance rerun fixtures",
+      "strategy": "use supported no-global/no-codex-detect/no-skills-sh boundaries, restore the captured project guidance source of truth, and never patch installed Ruflo generators or caches",
+      "versionGate": "apply to 3.38.20; re-audit later releases for a project-guidance component selector before carrying it forward",
+      "expiryPolicy": "retest within 14 days and on every Ruflo release",
+      "nextRetestAt": "2026-09-09",
+      "sunsetWhen": "a released Ruflo build exposes and proves a project-guidance-only skip while retaining requested project assets",
+      "notification": {
+        "status": "published",
+        "publishedAt": "2026-09-02T15:41:49Z",
+        "publishedUrl": "https://github.com/ruvnet/ruflo/issues/3153#issuecomment-5512219386",
+        "requiredFields": ["minimalReproduction", "expected", "observed", "hostVersions", "dependencyVersion", "evidenceDigests", "boundedWorkaround", "expiry", "removalProof"]
+      }
+    },
+    {
       "id": "agentic-qe-3.13-external-provider-contract",
       "dependency": "agentic-qe",
       "kind": "upstream-capability-gap",
@@ -138,6 +158,26 @@
         "status": "published",
         "publishedAt": "2026-09-02T15:21:20Z",
         "publishedUrl": "https://github.com/proffesor-for-testing/agentic-qe/issues/654",
+        "requiredFields": ["minimalReproduction", "expected", "observed", "hostVersions", "dependencyVersion", "evidenceDigests", "boundedWorkaround", "expiry", "removalProof"]
+      }
+    },
+    {
+      "id": "agentic-qe-3.14.0-codex-guidance-policy",
+      "dependency": "agentic-qe",
+      "kind": "upstream-capability-gap",
+      "affected": ["3.14.0"],
+      "issue": "https://github.com/proffesor-for-testing/agentic-qe/issues/655",
+      "issueState": "open-at-last-verification",
+      "primaryEvidence": "published Codex initializer source and a measured 1775-byte AQE-owned AGENTS block",
+      "strategy": "preserve AQE ownership and report its project guidance cost; do not strip the sentinel or patch installed/generated AQE artifacts",
+      "versionGate": "apply to 3.14.0; re-audit later releases for an explicit compact or none guidance policy",
+      "expiryPolicy": "retest within 14 days and on every Agentic-QE release",
+      "nextRetestAt": "2026-09-09",
+      "sunsetWhen": "a released Agentic-QE build independently selects full/compact/none Codex guidance and passes preservation, idempotency, and receipt conformance",
+      "notification": {
+        "status": "published",
+        "publishedAt": "2026-09-02T15:42:26Z",
+        "publishedUrl": "https://github.com/proffesor-for-testing/agentic-qe/issues/655",
         "requiredFields": ["minimalReproduction", "expected", "observed", "hostVersions", "dependencyVersion", "evidenceDigests", "boundedWorkaround", "expiry", "removalProof"]
       }
     },
