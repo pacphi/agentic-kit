@@ -1,6 +1,6 @@
 # ADR-0042 — Capability-aware context budget intelligence
 
-- **Status:** Accepted; implementation in progress
+- **Status:** Implemented; evidence, policy, guidance budgets, hook assurance, and dashboard delivery
 - **Date:** 2026-09-02
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0008](0008-guidance-target-scope-split.md),
@@ -95,6 +95,12 @@ compaction.
 Persisted usage schema changes force a reparse. The legacy `ctxWindow` and `ctxLastTokens` fields
 may remain temporarily for compatibility, but the normalized evidence is authoritative.
 
+The implemented cache schema is **v17**. Its normalized session evidence stores bounded
+first/last/peak/count input summaries, first/last/min/max/count window summaries and a fixed
+pressure histogram. A compatibility-only row may expose a numerator or denominator, but never a
+pressure ratio. The Usage projection reports coverage, distributions, policy counts, host splits
+and at most 20 attention rows.
+
 ### 5. Context and Hooks are sibling Usage views
 
 The dashboard adds **Usage → Context** and **Usage → Hooks**.
@@ -106,8 +112,11 @@ The dashboard adds **Usage → Context** and **Usage → Hooks**.
   Stop risk is not a failed Stop run; an absent outcome stream is `not-recorded`, never zero
   failures. Raw commands, stdout/stderr, hook context and secrets never reach the browser.
 
-Context rides the already-lazy Usage payload. Hook assurance uses a separate lazy, TTL-cached,
-single-flight, read-only endpoint and does not execute hooks or scan all projects implicitly.
+Context is a sibling projection on the existing Usage aggregate. Hooks loads through an
+authenticated, no-store endpoint only when that view opens; its server collector is single-flight
+and cached for 30 seconds. The default collector performs a read-only static audit. Runtime remains
+`not-recorded` unless the process receives a bounded receipt source. Neither view executes or edits
+a hook.
 
 ### 6. Reduce owned startup projections; notify foreign owners
 
@@ -121,12 +130,51 @@ host skill enumeration. Evidence-bound upstream reports name the owner, affected
 reproduction, bounded workaround and removal proof. Existing upstream issues are updated rather
 than duplicated.
 
+The implemented managed-only guidance budgets are 12,000 bytes for Claude machine guidance,
+2,200 bytes for machine Codex guidance, 6,000 bytes for OpenCode guidance, zero agentic-kit bytes
+for project `AGENTS.md`, and a 2,048-byte unknown-external fallback. The conservative estimate is
+three UTF-8 bytes per token and is labelled an estimate, not a tokenizer observation. Enabled host
+and integration intent now gates managed blocks before legacy executable/directory probes.
+
+Project guidance follows the scope-precedence rules of ADR-0008. Setup preserves user text outside
+complete agentic-kit sentinels, replaces or removes only sentinel-owned content, collapses duplicate
+owned blocks, and migrates only the exact old unsentineled lean stub. An AGENTS-only repository gets
+the one-line `@AGENTS.md` Claude reference instead of a redundant copy. Agentic-QE's own sentinel
+remains upstream-owned. These rules apply to a first setup and every re-run; an incomplete sentinel
+or near-match stays foreign and requires review.
+
 ### 7. External adapters degrade honestly
 
 Contract-v1 external adapters, including Hermes fixtures, have no trusted custom context
 descriptor or durable hook-outcome stream. Their context and Stop outcome state is therefore
 `unsupported` or `not-recorded` until a consent/hash-bound contract extension is accepted. An
 adapter cannot self-upgrade trust through its execution output.
+
+Supervised external-adapter hooks do produce bounded execution receipts, but contract v1 does not
+provide a durable native-host outcome feed. The receipt vocabulary is success, nonzero exit,
+signal exit, spawn failure, timeout and integrity rejection. Static hook findings and runtime
+receipts remain separate evidence classes.
+
+## Implementation status
+
+Implemented:
+
+- canonical context budget policy and conservative ceiling resolver;
+- usage cache schema v17 with paired, bounded context evidence for Claude, Codex and OpenCode;
+- privacy-preserving Usage context projection with coverage, host splits and capped attention;
+- config-aware managed-guidance selection, exact byte accounting and per-target regression gates;
+- privacy-safe `ak audit context` coverage for managed guidance, skill metadata, MCP registration
+  tables and runtime-effective window facts;
+- bounded supervised adapter-hook receipts and sanitized Hook read-model seam;
+- exact AQE hot-path/timeout diagnostics and upstream-only ownership proposals;
+- accessible Usage Context and Hooks views plus authenticated, lazy, sanitized Hooks delivery;
+- project-guidance create/preserve/migrate/re-run convergence with duplicate-block collapse.
+
+Still pending:
+
+- durable native-host hook outcome acquisition and receipt retention;
+- exact per-route prompt materialization preflight and launch enforcement;
+- a consent/hash-bound external adapter context-capability contract.
 
 ## Consequences
 
@@ -148,5 +196,10 @@ adapter cannot self-upgrade trust through its execution output.
 - Context and Hooks payloads are bounded, private, accessible and explicit about source health.
 - Stop diagnostics link to exact source ownership; generated/cache sources are never automatic.
 - Managed guidance fits tested per-host budgets and preserves authority/safety invariants.
+- Project setup covers absent guidance, foreign prose, exact prior managed content and repeated runs;
+  it preserves user bytes and removes/replaces only complete agentic-kit sentinel spans.
 - Claude, Codex, OpenCode and external/Hermes unknown-state fixtures pass focused conformance tests.
 
+The implemented dashboard acceptance suite covers tab order, tabpanel relationships, keyboard
+navigation, explicit unknown meters, responsive layouts, authentication, sanitization, lazy
+collection, bounded caching and single-flight behavior.

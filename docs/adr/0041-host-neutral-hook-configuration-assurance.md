@@ -1,6 +1,6 @@
 # ADR-0041 — Host-neutral hook configuration assurance
 
-- **Status:** Accepted; transactional Wave 2 implemented
+- **Status:** Accepted; static assurance, transactional healing, bounded receipts, and read model implemented
 - **Date:** 2026-09-01
 - **Updated:** 2026-09-02
 - **Deciders:** agentic-kit maintainers
@@ -152,6 +152,43 @@ artifact passes the relevant host-neutral audit and conformance tests. Issue clo
 does not prove a fix; an open issue does not by itself prove the installed version is
 affected.
 
+### 8. Runtime receipts are sibling evidence, not static audit proof
+
+The supervised external-adapter hook runner now returns a bounded receipt for every process-level
+outcome. It records host, verb, effective timeout, monotonic duration, exit code, typed outcome,
+timeout state, captured stdout/stderr byte counts, and truncation state. Duration is capped at 24
+hours. Each byte count saturates at 262,145 bytes—one byte above the 256 KiB capture ceiling—so a
+consumer can distinguish overflow without retaining an attacker-controlled unbounded count.
+
+The outcome vocabulary is `success`, `nonzero-exit`, `signal-exit`, `spawn-failed`, `timed-out`,
+and `integrity-rejected`. It does not claim that native Claude, Codex or OpenCode hooks emitted a
+runtime outcome: their host processes do not currently feed this receipt stream. A static `Stop`
+occurrence is configured evidence; a timeout receipt is execution evidence. Neither substitutes
+for the other.
+
+`buildHookDashboardReadModel` may join a static audit with those typed receipts, but it strips
+commands, source paths, stdout/stderr, failure detail, diagnostic prose and messages. Labels are
+control-stripped and capped at 64 characters; runtime input is capped to the last 1,000 receipts
+and the recent list to 50. Dashboard Delivery exposes that model through authenticated, no-store
+`/api/hooks?host=all`, collected lazily only when the Hooks view opens. The server reuses one
+30-second bounded cache and one in-flight collection. The default collector supplies the static
+audit only; runtime remains `not-recorded` unless the dashboard process is explicitly given a
+bounded receipt source. Durable native-host receipt storage is still a separate decision.
+
+### 9. Exact Agentic-QE Stop risks are upstream-only
+
+Claude audit recognizes an Agentic-QE runner only when bounded source inspection proves all three
+parts of the generated shape: the AQE hook command, both local bundle candidates, and the exact
+`npx -y --prefer-offline agentic-qe hooks` fallback. It emits
+`aqe-npx-hot-path-fallback` only when both local candidates are absent. It emits
+`aqe-claude-timeout-unit-mismatch` only for the exact verified Claude Code `2.1.258` seconds
+profile and millisecond-shaped AQE timeout values.
+
+Both actions are always `upstream-required`, name `proffesor-for-testing/agentic-qe`, and require
+explicit user approval before issue publication. A modified helper, refused path, unknown host
+version or ambiguous local bundle state produces no ownership inference. Agentic-kit does not
+rewrite the generated project settings, generated helper or plugin cache.
+
 ## Consequences
 
 ### Positive
@@ -161,6 +198,10 @@ affected.
 - Releases fail safely into syntax-only/partial coverage.
 - Generated dependency defects have a durable notification, workaround and sunset path.
 - No audit path executes hooks, changes trust, imports plugins or fetches remote manifests.
+- Supervised adapter executions now produce finite, typed, output-bounded receipts suitable for a
+  sanitized read model.
+- Exact AQE generator defects are actionable without turning their generated copies into
+  agentic-kit write authority.
 
 ### Negative
 
@@ -171,6 +212,10 @@ affected.
   target-host range.
 - A same-user receipt digest is integrity evidence, not third-party authenticity.
 - Windows healing remains a visible non-executable plan until atomic replacement is proven.
+- Native-host runtime outcomes remain `not-recorded`; only supervised external-adapter hook
+  executions currently produce the bounded receipt contract.
+- The dashboard route is observation-only and cached in memory for 30 seconds; it is not a durable
+  event store or a native-host receipt collector.
 
 ## Implementation status
 
@@ -195,6 +240,13 @@ Implemented in this decision:
   re-audit and idempotency proof;
 - plan and receipt schemas plus tamper, drift, partial-failure and platform refusal tests;
 - bounded real-path-confined external adapter hook-file hashing.
+- bounded external-adapter execution receipts with stable outcomes, duration, byte counts,
+  truncation and timeout state;
+- a sanitized static-plus-runtime Hook read-model seam;
+- authenticated, lazy, no-store Hooks dashboard delivery with a bounded cache, single-flight
+  collection, and explicit unknown runtime state;
+- exact AQE `npx` hot-path and Claude timeout-unit diagnostics with upstream-only proposals;
+- negative ownership tests proving generated and cache findings never become automatic.
 
 Still deferred:
 
@@ -203,3 +255,4 @@ Still deferred:
 - network retrieval of remote adapter manifests;
 - automatic upstream issue creation;
 - external adapter target-version declarations.
+- durable native-host hook outcome acquisition and receipt retention.

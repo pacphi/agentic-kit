@@ -41,6 +41,8 @@ permanent.
 | Usage | Limits | `#usage/limits` | Provider limits | Current provider windows, reset timing, and available capacity |
 | Usage | Findings | `#usage/findings` | Usage findings | Actionable anomalies, efficiency opportunities, and evidence-backed recommendations |
 | Usage | Prompts | `#usage/prompts` | What you actually type | Prompt repetition, tap habits, provenance, recurring patterns, re-asks, and host interplay from prompt fingerprints |
+| Usage | Context | `#usage/context` | Context budget | Runtime-observed input/window pressure, evidence coverage, policy bands, and capped attention rows |
+| Usage | Hooks | `#usage/hooks` | Hook assurance | Read-only hook configuration diagnostics, ownership actions, and separately reported bounded runtime receipts |
 | Usage | Models | `#usage/models` | Model lifecycle | Host inventory, lifecycle changes, consumers, swap impact, and evidence sources |
 | Usage | Sessions | `#usage/sessions` | Session usage | Retained sessions grouped by project, category, duration, tokens, and cost |
 | Usage | Transcript | `#usage/transcript` | Transcript detail | The selected session's locally retained, server-masked evidence |
@@ -159,8 +161,9 @@ Each count carries the sentence explaining what it counted; on Intelligence it i
 
 ## Usage
 
-Usage loads lazily when first opened. Scorecard, Limits, Findings, Prompts, Models, Sessions, and
-Transcript share the same secondary rail; the 7/14/30-day filters remain aligned to its right.
+Usage loads lazily when first opened. Scorecard, Limits, Findings, Prompts, Context, Hooks, Models,
+Sessions, and Transcript share the same secondary rail; the 7/14/30-day filters remain aligned to
+its right.
 
 ### Scorecard
 
@@ -248,6 +251,53 @@ Below the KPIs, **Who is typing**, **Steering mix**, **Tap habits**, **Recurring
 text or mutable coaching state. An **All** chip, offered on this view alone, widens the window to the
 full retained history; leaving Prompts drops it back to 30 days. Full formulas, thresholds, and
 sources: [Usage scorecard metrics](USAGE-SCORECARD-METRICS.md) §2a, §2b, §20–§22.
+
+### Context
+
+Context answers how much of a runtime-observed window the retained sessions used. The policy strip
+shows the canonical startup, dynamic and reserve bands. The summary reports exactly how many
+sessions have a paired input/window pressure observation and how many lack a denominator. Claude,
+Codex and OpenCode each keep their own card with evidence state, p90 peak pressure, paired-sample
+count, p90 peak input and median observed window.
+
+A percentage is rendered only when input and window were observed together for that session.
+Claude and OpenCode commonly carry input-only evidence, so they may read **Partial evidence** while
+Codex is observed. Missing evidence renders `unknown`; an unknown ARIA meter omits `aria-valuenow`
+rather than announcing zero. Attention rows are capped and show only host, bounded project label,
+pressure and token/window figures. Prompt text, tool payloads, commands and raw paths never enter the
+projection.
+
+Context rides the existing authenticated `/api/usage` aggregate and follows the selected Usage day
+window. Its percentages use runtime-effective denominators where the transcript supplied them; a
+published 1M maximum never overrides a smaller 258.4K session window. Full evidence and threshold
+rules: [ADR-0042](adr/0042-capability-aware-context-budget-intelligence.md).
+Run `ak audit context --host all` for the companion read-only startup report: managed guidance
+bytes/state, bounded skill-metadata counts, MCP registration-table bytes, schema availability and
+effective-window evidence. MCP configuration bytes do not include unrelated host preferences, and
+tool schema bytes remain unknown when the host config does not expose them.
+
+### Hooks
+
+Hooks is a read-only assurance view. Opening it lazily requests authenticated, no-store
+`/api/hooks?host=all`; the server shares one in-flight collection and a 30-second in-memory result.
+It does not execute, edit, heal, enable or disable a hook. Before delivery the server removes raw
+commands, source paths, hook output, detail and diagnostic prose.
+
+The view deliberately separates four questions:
+
+- **Configuration** counts hook occurrences, normalized behaviors and static issues.
+- **Stop configuration** lists sanitized Stop-specific diagnostic codes and host counts. No
+  diagnostic does not prove runtime success.
+- **Runtime outcomes** summarizes bounded receipts only when the dashboard process was explicitly
+  supplied them. The default collector has none and says outcomes are unknown.
+- **Ownership actions** separates automatic eligibility, approval-required work, prohibited
+  generated/cache changes and upstream-required owner action.
+
+A configured Stop risk is not a failed Stop execution. Conversely, an absent receipt is not a
+successful execution or zero failures. Native Claude, Codex and OpenCode hooks do not currently feed
+the bounded supervised-adapter receipt stream, so runtime is normally unknown. See
+[ADR-0041](adr/0041-host-neutral-hook-configuration-assurance.md) for the audit, receipt and
+ownership contracts.
 
 ### Reading a session row
 

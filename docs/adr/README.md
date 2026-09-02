@@ -48,7 +48,8 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0038](0038-consistent-cross-host-session-metrics.md) | Consistent cross-host session metrics | Accepted |
 | [0039](0039-prompts-intelligence.md) | Deterministic Prompts telemetry on main | Accepted |
 | [0040](0040-codex-hook-audit-and-conservative-remediation.md) | Codex hook audit and conservative remediation | Implemented (Codex Wave 1) |
-| [0041](0041-host-neutral-hook-configuration-assurance.md) | Host-neutral hook configuration assurance | Accepted; transactional Wave 2 implemented |
+| [0041](0041-host-neutral-hook-configuration-assurance.md) | Host-neutral hook configuration assurance | Implemented; native runtime receipt acquisition deferred |
+| [0042](0042-capability-aware-context-budget-intelligence.md) | Capability-aware context budget intelligence | Implemented |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude

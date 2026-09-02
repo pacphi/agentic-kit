@@ -2,9 +2,10 @@
 
 - **Status:** Implemented
 - **Date:** 2026-07-24
-- **Updated:** 2026-08-04
-- **Update note:** ADR-0023 made the promised guidance backup fail-closed and the replacement atomic;
-  an unusable `.bak` now aborts before the machine guidance file changes.
+- **Updated:** 2026-09-02
+- **Update note:** ADR-0023 made machine-guidance backups fail-closed and replacement atomic. Project
+  setup now also preserves user-authored guidance, migrates the old unsentineled lean stub, and
+  converges duplicate agentic-kit sentinels idempotently.
 - **Deciders:** agentic-kit maintainers
 
 ## Context
@@ -74,6 +75,33 @@ single-host codex machine (dual block not wanted, nothing present) yields **no f
 backup** — the target is discovered but nothing is written. Replacements use a same-directory
 temporary file plus atomic rename; a missing backup must be created successfully before replacement.
 
+### 5. Project setup preserves foreign guidance and converges owned blocks
+
+`ak setup --project` applies the same scope rule to project guidance that sync applies to machine
+guidance: prose outside an agentic-kit sentinel is foreign content. Setup captures pre-init
+`CLAUDE.md` and `AGENTS.md` bytes before Ruflo runs, then reconciles the owned projection twice—once
+before Agentic-QE compatibility work and once after it—so an upstream initializer cannot silently
+become the last writer.
+
+| Prior project state | Result |
+| --- | --- |
+| Neither guidance file exists | Create the bounded project guidance required by the enabled integrations. |
+| User-authored `CLAUDE.md` exists | Preserve that prose byte-for-byte outside sentinels and reconcile only agentic-kit-owned blocks. |
+| Only user-authored `AGENTS.md` exists | Preserve it and create a one-line `CLAUDE.md` containing `@AGENTS.md`, avoiding a second equivalent instruction body. |
+| Previous agentic-kit managed block exists | Replace its complete sentinel span in place; a second run is byte-idempotent. |
+| Duplicate complete agentic-kit blocks exist | Collapse them to one canonical block; never delete text outside complete matching sentinels. |
+| Old unsentineled agentic-kit lean stub exists | Recognize that exact prior-art shape and migrate it to the managed form. A near-match remains user-owned. |
+
+Removal follows the same authority boundary: disabling an integration removes only its complete
+sentinel-owned content. A missing end sentinel is not repair authority. Agentic-QE's distinct
+`BEGIN AGENTIC-QE CODEX` block remains upstream-owned, and the bounded compatibility guard around
+it is not permission to rewrite arbitrary AQE guidance.
+
+Ruflo setup is invoked with supported suppression flags (`--no-global`, `--no-codex-detect`, and
+`--no-skills-sh`) so project setup does not recreate redundant machine guidance or unrelated skill
+shell projections. This reduces overlap where the upstream CLI provides a supported switch; it
+cannot prevent every future upstream version from introducing a new, differently owned projection.
+
 ## Consequences
 
 - Machine truths stop leaking into shared git history. A dual-host machine writes the
@@ -85,6 +113,8 @@ temporary file plus atomic rename; a missing backup must be created successfully
   carry. No cross-repo migration tooling is needed.
 - `sync` and `status` can no longer disagree about targets — they read the same helper.
 - No behavior change on machines without `~/.codex`: same rows, same files, zero new writes.
+- Project setup no longer treats an upstream force-init result as authority to discard pre-existing
+  user guidance; re-runs converge owned blocks and preserve foreign text.
 - Out of scope: aqe-init's own `AGENTS.md` sentinel (a different manager) and any
   `~/.codex/config.toml` changes — this ADR is only about the guidance-block registry.
 

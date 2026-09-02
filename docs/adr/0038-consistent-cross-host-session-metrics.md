@@ -7,7 +7,8 @@
   [ADR-0010](0010-provider-mediated-quota-reads.md),
   [ADR-0016](0016-capability-driven-integration-adapters.md),
   [ADR-0017](0017-opencode-host.md),
-  [ADR-0021](0021-inference-provider-provenance.md)
+  [ADR-0021](0021-inference-provider-provenance.md),
+  [ADR-0042](0042-capability-aware-context-budget-intelligence.md)
 
 ## Context
 
@@ -24,9 +25,12 @@ things asymmetrically, and with different strength of evidence**:
 
 - Claude Code writes a `permissionMode` on user entries but no turn timing and no context-window
   size; latency and context pressure have to be *derived* from the entries themselves.
-- Codex writes `approval_policy`/`sandbox_policy` per `turn_context`, a `model_context_window` on
-  `task_started`, and its own host-measured `duration_ms` on `task_complete` — the only
-  host-measured turn duration and the only recorded context-window denominator in the corpus.
+- Codex writes `approval_policy`/`sandbox_policy` per `turn_context`, its own host-measured
+  `duration_ms` on `task_complete`, and context snapshots that pair `last_token_usage` with
+  `model_context_window`. It is the only host with both a host-measured turn duration and a
+  recorded runtime context-window denominator in this corpus. Older `task_started` rows may also
+  carry the window alone, but a denominator without a compatible numerator cannot establish
+  pressure.
 - OpenCode writes a `mode` per assistant message and enough per-message timing to derive a latency,
   but no window size.
 
@@ -216,7 +220,7 @@ cannot drift out of step with the pricing table the day that multiplier changes.
 the row's own model, provider, and **day**, so a saving is priced from the same table at the same
 date as the cost sitting beside it; the result is memoised per `(model, provider, day)`.
 
-### 11. Schema v11 (then v12, then v13), and nested subagent transcripts are ingested
+### 11. Schema evolution reaches v17, and nested subagent transcripts are ingested
 
 `SCHEMA_VERSION` moves to 11 in one bump, adding `mode`/`modeRaw`, `latHist`/`latCount`,
 `lenSeconds`, `ctxWindow`/`ctxLastTokens`, and `aborts` to every session record. A v10-cached record
@@ -237,6 +241,21 @@ counted every `user_message`/`UserMessage` regardless of origin, with no Codex-s
 the harness/mirror gate Claude has had since v5. Both are corrected in `parseCodex`
 (`usage-parsers.mjs:493-513`, `:637-638`); the schema bump forces every cached Codex record to
 re-derive rather than keep the inflated counts.
+
+Subsequent prompt-provenance work moved the cache through v14–v16. Context Budget Intelligence
+then moves it to **v17** because older cached rows cannot recover context snapshots the parsers had
+discarded. Every session now carries bounded `contextEvidence`: first/last/peak/count input-token
+summaries, first/last/min/max/count window summaries, and a fixed pressure histogram. The legacy
+`ctxWindow` and `ctxLastTokens` fields remain compatibility fields, but they do not establish a
+pressure ratio unless the normalized v17 evidence proves the numerator and denominator came from
+the same sample.
+
+For Codex, `token_count.info.last_token_usage.input_tokens` is paired with
+`model_context_window`. `cached_input_tokens` is not added again because the host's input figure is
+already the gross input occupying the window. Claude and OpenCode retain gross input evidence but
+no runtime denominator, so their normalized state is `partial`, not a fabricated percentage. The
+bounded Usage context projection reports evidence coverage, distributions, policy thresholds and
+at most 20 attention rows; it carries no prompt text, tool payload, raw path or hook output.
 
 Discovery gains exactly one nested shape: `listClaudeSubagents` reads
 `<projectDir>/<sessionId>/subagents/*.jsonl` and nothing else. It is deliberately not a recursive
@@ -280,6 +299,9 @@ session id touches the transcript reader's path-traversal guard, so the gate is 
   honest direction, and delegation stopped being a metric the pipeline could not produce.
 - Because posture, latency, and context are per-session record fields, the Sessions view gets them
   for free as row chips and detail lines, with no new route and no second fetch.
+- Schema v17 makes context coverage and pressure auditable without retaining per-turn text or an
+  unbounded sample series. A missing denominator remains visible as missing evidence rather than
+  reading as 0% pressure.
 
 ### Negative, and honestly stated
 
@@ -373,6 +395,11 @@ each carry their own regression test. The nested-ingestion change is covered by 
 uniqueness, an integration test asserting non-zero subagent cost, degrade-alone behavior, and
 both-tier traversal rejection at the id gate.
 
+Schema v17 is pinned with real Codex `token_count` fixtures, cached-input non-double-counting,
+Claude/OpenCode partial-evidence cases, negative growth, over-window pressure, fixed-histogram
+counts, and a whole-cache invalidation test. `usage-context.test.mjs` separately pins coverage,
+host splits, policy bands, privacy bounds and the 20-row attention cap.
+
 Both citation-bearing reference documents are machine-checked: every `file:line` citation in
 `USAGE-SCORECARD-METRICS.md` and `TRANSCRIPTS.md` is verified against the current source on every
 test run by `tests/kit/doc-citations.test.mjs`.
@@ -387,7 +414,8 @@ test run by `tests/kit/doc-citations.test.mjs`.
 - `src/lib/usage-modes.mjs` (the taxonomy), `src/lib/usage-parsers.mjs` and
   `src/lib/usage-opencode.mjs` (per-host evidence), `src/lib/usage-aggregate.mjs` (percentiles,
   buckets, window arithmetic, cache differencing), `src/lib/usage-index.mjs` (`SCHEMA_VERSION`,
-  nested discovery, the id gates)
+  nested discovery, the id gates), `src/lib/usage-context.mjs` (bounded Context projection), and
+  `src/lib/context-budget.mjs` (shared policy)
 - `src/lib/dashboard/client/usage.mjs` and `src/lib/dashboard/client/usage-rhythm.mjs` (render),
   `src/commands/usage.mjs` (`ak usage score`)
 - [Usage scorecard metrics](../USAGE-SCORECARD-METRICS.md) §15–§19 —

@@ -10,6 +10,7 @@ Configuration Intent
         |                 |       |
         |                 |       +----> Managed Companion Surfaces
         |                 +----> Hook Configuration Assurance
+        |                 +----> Supervised Hook Execution ----> Hook Runtime Receipts
         |                 +----> Routing and Orchestration
         |
 Native Evidence ----> Evidence Acquisition ----> Canonical Evidence
@@ -24,6 +25,7 @@ Native Evidence ----> Evidence Acquisition ----> Canonical Evidence
                     +-----------------------+----> Dashboard Delivery <----+
                                                           ^
                                       Hook Configuration Assurance -------+
+                                      Hook Runtime Receipts --------------+
                                                           ^
 Project State (.claude-flow/*) ----> Project Intelligence-+
 Local filesystem + process table ---> Machine Footprint --+
@@ -57,6 +59,9 @@ material behavior identity; coverage gaps; diagnostics; and remediation authorit
 proposals. It consumes host identity, project scope and validated external adapter
 manifests. It never executes hook or plugin code and owns no host trust, consent, grant,
 installation, route or configuration write.
+
+It may contribute the static half of a sanitized Hook read model. It does not own supervised
+execution receipts and cannot reinterpret an absent runtime stream as zero failures.
 
 See [Hook configuration assurance](hook-configuration-assurance.md).
 
@@ -183,7 +188,8 @@ and credential policy is distinct from the offline-first dashboard and integrati
 | Model lifecycle intelligence | Context budget intelligence | Capacity candidates with provenance; catalogue maximum is not active-session pressure |
 | Context budget intelligence | Routing and orchestration | Read-only budget decision for each materialized route attempt; launch authority stays downstream |
 | Context budget intelligence | Dashboard delivery | Sanitized bounded coverage, pressure, policy and attention read model |
-| Hook configuration assurance | Dashboard delivery | Sanitized static assurance and separately typed runtime outcomes; no hook execution |
+| Hook configuration assurance | Dashboard delivery | Lazy sanitized static sources, occurrences, diagnostics, coverage and proposals; runtime remains a separate receipt-backed field |
+| Integration management / supervised adapter runner | Dashboard delivery | Bounded typed hook receipts for executions agentic-kit actually supervised; no native-host outcome inference |
 | Native evidence | Evidence acquisition | Source-specific anti-corruption adapters |
 | Evidence acquisition | Observability | Versioned canonical events |
 | Evidence acquisition | Historical usage | Normalized transcript and provider evidence |
@@ -254,3 +260,5 @@ observed before the split was made explicit.
   authorities; consent, content-free observation, and ownership-safe teardown remain upstream.
 - Hook configuration assurance is read-only. It never imports an OpenCode plugin, executes a hook,
   fetches a remote adapter by default, changes trust, or treats a diagnostic as write authority.
+- A static hook occurrence is not a runtime outcome. A supervised receipt does not prove native
+  Claude, Codex or OpenCode lifecycle behavior, and an absent receipt stream is `not-recorded`.
