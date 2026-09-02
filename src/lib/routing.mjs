@@ -77,7 +77,7 @@ export const SUBSCRIPTION_PROVIDERS = new Set(['claude-code', 'codex', 'ollama',
 // WITHOUT saying "per-token" gets read as cost-per-task, which is the axis users
 // actually pay on (a model needing 2-3x the agentic turns costs more per task at
 // identical per-token price). Measured end-to-end in pacphi/retort versions-blog.
-export const MODEL_CATALOG_VERIFIED = '2026-08-07';
+export const MODEL_CATALOG_VERIFIED = '2026-09-02';
 export const COST_AXIS_NOTE = 'per-token price ≠ per-task cost — a model that needs more agentic turns costs more per task at the same per-token price';
 // Tier names are the pairing key for swapHostModel(): a codex tier only mirrors
 // to a claude model (and back) when BOTH catalogs use the same tier string.
@@ -87,12 +87,13 @@ export const MODEL_CATALOG = {
   claude: [
     { id: 'claude-opus-5', tier: 'reasoning', note: 'top Opus — the deepest reasoning, at ~2–3× the agentic turns of a balanced model on routine work; earns it at the hard end' },
     { id: 'claude-sonnet-5', tier: 'balanced', note: 'near-Opus capability at a lower per-token price — review, spec, release' },
-    { id: 'claude-fable-5', tier: 'flagship', note: 'top capability (Mythos-class, above Opus 5) — hardest problems' },
+    { id: 'claude-fable-5-1', tier: 'flagship', note: 'top capability (Mythos-class, above Opus 5) — successor to Fable 5 at the same per-token price — hardest problems' },
     { id: 'claude-haiku-4-5-20251001', tier: 'fast', note: 'cheap/fast — high-volume mechanical work' },
     // Still current (no deprecation notice) and still pinnable — it is simply no
     // longer what ak routes to by default. Kept listed so divergedRoutes can name
     // its cost-per-task trade when a policy is still pointing at it.
     { id: 'claude-opus-4-8', tier: 'prior', note: 'prior Opus generation — same per-token price as Opus 5, roughly half the agentic turns on routine work' },
+    { id: 'claude-fable-5', tier: 'prior', note: 'prior Fable generation — same per-token price as Fable 5.1, superseded as the flagship pick' },
   ],
   codex: [
     { id: 'gpt-5.6-sol', tier: 'flagship', note: 'flagship 5.6 — strongest on complex coding, computer use and security work; first-class max reasoning effort' },
