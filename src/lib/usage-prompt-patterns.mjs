@@ -22,7 +22,7 @@
 //
 // `q` and `o` are optional throughout and absent is never guessed into a value:
 // a corpus decorated by an older scan simply reports `unknown`, which is the
-// honest answer and the one the coaching layer can act on safely.
+// honest answer for the deterministic Prompts view.
 //
 // NO PROMPT TEXT EXISTS HERE TO LEAK. The fingerprint layer is the privacy
 // contract (ADR-0039 "F1 fingerprints"); this module consumes it and emits only hashes, ids,
@@ -248,8 +248,8 @@ export function exactRepeatGroups(fps, { min = 3 } = {}) {
  * turn — it has told us it does not know, and `''` is not an answer. Counting
  * it fabricates a span: an unattributed turn becomes one more session, one more
  * day or one more host than really exist, and every figure keyed on those
- * counts (the recurring-cluster filter, the per-host split, the coaching card's
- * "21 sessions") inherits the invention. Same failure class as the pseudo-session
+ * counts (the recurring-cluster filter and per-host split) inherits the
+ * invention. Same failure class as the pseudo-session
  * grouping in `reAskPairs`, which shares this predicate.
  *
  * @param {unknown} value

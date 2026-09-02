@@ -3,8 +3,8 @@
 // FINGERPRINTS: no prompt text exists to test with, which is the point. The
 // two load-bearing pins are (a) the bottom-k Jaccard estimator, checked against
 // exact Jaccard on synthetic full sets, and (b) determinism — the same corpus
-// must produce identical cluster keys and identical ordering on every scan,
-// because the coaching cards hash these outputs (spec §6.2).
+// must produce identical cluster keys and identical ordering on every scan so
+// the deterministic Prompts view is stable across unchanged rescans.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -352,7 +352,7 @@ test('addSpan: an empty-string session, day or host does not inflate a span', ()
   // Same fabrication class as the pseudo-session grouping in reAskPairs: `''` is
   // what a parser writes when it could NOT attribute a turn, and counting it
   // invents one more session (or day, or host) than exist. The spans feed the
-  // recurring-cluster filter and every "21 sessions" a coaching card prints.
+  // recurring-cluster filter and every session count the Prompts view prints.
   const tokens = ['e1', 'e2', 'e3', 'e4'];
   const [cl] = nearDupClusters([
     withTokens('a', tokens, { sessionId: 's1', day: '2026-08-01', host: 'claude' }),
@@ -412,8 +412,7 @@ test('determinism: identical input reproduces identical keys and ordering', () =
 
 test('determinism: input order does not move a cluster key or the ordering', () => {
   // Scan order is an accident of the filesystem walk. If it changed cluster
-  // identity, every coaching card's evidence hash would drift on rescan for no
-  // reason (spec §6.2, §10).
+  // identity, the Prompts view would drift on rescan for no reason.
   const fps = corpus(mulberry32(3));
   const rnd = mulberry32(99);
   const shuffled = [...fps];
@@ -838,49 +837,35 @@ test('characterize survives a cluster with no token stats at all', () => {
   assert.equal(characterize(undefined), 'Recurring 0-token prompt');
 });
 
-test('labelFor resolves store → seed → characterize, in that order', () => {
+test('labelFor resolves seed → characterize, in that order', () => {
   const hit = cluster({
     class: 'other', tokens: { min: 3, median: 3, max: 4 },
     sessions: spanning(11, 's'), days: spanning(9, 'd'), size: 13, instructions: 13, qKnown: 13,
   });
-  // 3. no store, no seed → characterized
+  // No seed → characterized.
   const plain = cluster({ class: 'unknown', questions: 0, instructions: 0, qKnown: 0, sessions: spanning(2, 's') });
   assert.equal(labelFor(plain).source, 'characterized');
-  // 2. no store entry, seed matches → seed
+  // A seed match wins over the generic characterization.
   const seeded = labelFor(hit);
   assert.equal(seeded.source, 'seed');
   assert.equal(seeded.name, 'Commit-and-push instruction');
   assert.equal(seeded.seed, 'commit-and-push');
-  // 1. a store entry outranks the seed, and carries its own provenance
-  const store = { [hit.key]: { name: 'Push ritual (renamed)', source: 'enriched', firstSeen: '2026-08-01' } };
-  assert.deepEqual(labelFor(hit, store), {
-    name: 'Push ritual (renamed)', source: 'enriched', firstSeen: '2026-08-01', seed: null,
-  });
 });
 
-test('labelFor tolerates a missing, empty or malformed store entry', () => {
+test('labelFor tolerates a missing cluster', () => {
   const c = cluster({ class: 'unknown', questions: 0, instructions: 0, qKnown: 0, sessions: spanning(2, 's') });
-  assert.equal(labelFor(c, undefined).source, 'characterized');
-  assert.equal(labelFor(c, {}).source, 'characterized');
-  assert.equal(labelFor(c, { k0: {} }).source, 'characterized');
-  assert.equal(labelFor(c, { k0: { name: '   ' } }).source, 'characterized');
-  // An unrecognized source reads as `curated`: a name in the store was put
-  // there by someone, and the conservative reading is that it was a person.
-  assert.equal(labelFor(c, { k0: { name: 'Hand-named', source: 'whatever' } }).source, 'curated');
-  assert.equal(labelFor(c, { k0: { name: 'Hand-named' } }).firstSeen, null);
+  assert.equal(labelFor(c).source, 'characterized');
   assert.equal(labelFor(undefined).source, 'characterized');
 });
 
 test('LABEL_SOURCES is the closed vocabulary labelFor can return', () => {
-  assert.deepEqual(LABEL_SOURCES, ['curated', 'enriched', 'seed', 'characterized']);
+  assert.deepEqual(LABEL_SOURCES, ['seed', 'characterized']);
   const seen = new Set();
   const c = cluster({ class: 'unknown', questions: 0, instructions: 0, qKnown: 0 });
   seen.add(labelFor(c).source);
   seen.add(labelFor(cluster({ personas: 4 })).source);
-  seen.add(labelFor(c, { k0: { name: 'x', source: 'curated' } }).source);
-  seen.add(labelFor(c, { k0: { name: 'x', source: 'enriched' } }).source);
   for (const s of seen) assert.ok(LABEL_SOURCES.includes(s), `${s} is outside the vocabulary`);
-  assert.equal(seen.size, 4);
+  assert.equal(seen.size, 2);
 });
 
 // ── the precision-first audit ───────────────────────────────────────────────

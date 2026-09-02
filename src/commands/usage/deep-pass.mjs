@@ -1,11 +1,4 @@
-// Shared exemplar-gathering machinery for `ak usage prompts`'s two text-
-// bearing passes: `--deep` (usage.mjs's own deepPass/printDeepPass) and
-// `--enrich` (usage/enrich.mjs's runEnrichPass). Extracted into its own leaf
-// so usage/enrich.mjs never imports from usage.mjs — closing the larger arc
-// of a known, accepted three-way cycle (usage.mjs -> usage/coaching.mjs ->
-// usage/enrich.mjs -> usage.mjs); usage.mjs and usage/enrich.mjs both import
-// this file instead. No behavior changed by this split — every function
-// below is verbatim from usage.mjs, moved as a unit.
+// Exemplar-gathering machinery for `ak usage prompts --deep`.
 //
 // The CLI half of the privacy split (ADR-0039 "The privacy split"). The
 // aggregate tier knows THAT a request was retyped in 22 sessions; it cannot say what
@@ -14,9 +7,8 @@
 // parsers the scan path uses, so a turn re-fingerprints to the identical `h`
 // and joins back to the findings exactly.
 //
-// THE BOUNDARY, which is the whole point of both callers being opt-in: the
-// text goes to the caller (stdout for --deep, a masked model prompt for
-// --enrich) and nowhere else. Nothing here writes a file.
+// THE BOUNDARY: the text goes to stdout for the explicit `--deep` request and
+// nowhere else. Nothing here writes a file.
 //
 // WHY THIS READS THE INDEX CACHE AND `agg.promptPatterns` DOES NOT. The
 // aggregate is deliberately aggregates only. This machinery needs two things

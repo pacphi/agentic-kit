@@ -676,9 +676,8 @@ export const USAGE_CSS = `
 /* ── Prompts view (METRICS.md §21) ──────────────────────────────────────────
    Reuses the scorecard's own grammar wherever one exists — .kpi for the strip,
    .mbar for magnitude, .strip/.sh for section chrome — so a panel here is the
-   same object a reader already knows from Scorecard. Only the shapes with no
-   existing equivalent are new: the per-host interplay row, the sortable Coaching
-   table, and its expanded coaching panel.
+   same object a reader already knows from Scorecard. The per-host interplay row
+   is the only shape with no existing equivalent.
    Every colour is a token; nothing below hardcodes a hue, so the view follows
    the viewer's theme with the rest of the panel. */
 
@@ -732,6 +731,19 @@ export const USAGE_CSS = `
 }
 .pr-caveat b{color:var(--ink)}
 
+/* deterministic recurring-pattern table — intentionally static. The archive's
+   filters, expanders, prompt samples, and coaching actions are not present. */
+.pr-pattern-summary{margin:0 0 12px; color:var(--ink-2); font-size:12.5px}
+.pr-pattern-wrap{overflow:auto; max-height:330px; border:1px solid var(--line); border-radius:var(--r-sm)}
+.pr-pattern-table{width:100%; border-collapse:collapse; min-width:660px; font-size:12px}
+.pr-pattern-table th,.pr-pattern-table td{padding:9px 11px; border-bottom:1px solid var(--line); text-align:left}
+.pr-pattern-table thead th{position:sticky; top:0; z-index:1; background:var(--panel-2); color:var(--ink-dim); font-size:10px; letter-spacing:.05em; text-transform:uppercase}
+.pr-pattern-table tbody th{font-weight:600; color:var(--ink)}
+.pr-pattern-table tbody tr:last-child th,.pr-pattern-table tbody tr:last-child td{border-bottom:0}
+.pr-pattern-table .tnum{text-align:right; font-family:var(--mono)}
+.pr-pattern-name{display:block; max-width:330px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.pr-pattern-host{display:inline-block; margin:1px 4px 1px 0; padding:1px 6px; border-radius:999px; background:var(--panel-2); color:var(--ink-2); font-family:var(--mono); font-size:10px}
+
 /* the plain-language READ under the host cards (replaces the opaque caveat):
    an accent-ruled line stating the asymmetry the panel measured. */
 .pr-host-read{
@@ -763,77 +775,6 @@ export const USAGE_CSS = `
 .pr-infodot:hover .pr-tip,.pr-infodot:focus .pr-tip,.pr-infodot:focus-visible .pr-tip{opacity:1}
 .pr-tip b{color:var(--ink)}
 
-/* ── the Coaching panel (§2): re-ask insight, kind filters, sortable table ── */
-
-/* the re-ask insight line above the filters */
-.pr-insight{margin:0 0 14px; font-size:12.5px; color:var(--ink-2); line-height:1.5}
-.pr-insight b{color:var(--ink)}
-
-/* kind filter pills — the kind colour lives HERE (a swatch), never on a row */
-.pr-filters{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:0 0 14px}
-.fpill{
-  display:inline-flex; align-items:center; gap:7px; padding:5px 12px; border-radius:100px;
-  border:1px solid var(--line); background:var(--panel); color:var(--ink-2);
-  font:inherit; font-size:12px; cursor:pointer;
-}
-.fpill:hover{border-color:var(--accent); color:var(--ink)}
-.fpill.on{background:var(--accent-soft); border-color:var(--accent); color:var(--ink)}
-.fpill:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
-.fpill .sw{width:8px; height:8px; border-radius:50%; flex:none}
-.fpill .fc{color:var(--ink-dim); font-size:11px}
-.fpill.on .fc{color:var(--accent)}
-.k-instruction{background:var(--accent)}
-.k-tap{background:var(--warn)}
-.k-persona{background:var(--purple)}
-.k-reask{background:var(--fail)}
-.k-question{background:var(--ok)}
-
-/* the sortable table. Caps at ~5 rows then scrolls, with a pinned header — the
-   BODY scrolls inside its own region rather than taking the whole page with it. */
-.pr-tablewrap{
-  overflow:auto; max-height:322px; border:1px solid var(--line); border-radius:var(--r-sm);
-  overscroll-behavior:contain;
-}
-.pr-tablewrap:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
-.pr-coach{border-collapse:collapse; width:100%; font-size:13px}
-.pr-coach thead th{
-  position:sticky; top:0; z-index:1; text-align:left; padding:0;
-  background:var(--panel-2); border-bottom:1px solid var(--line-2);
-}
-.pr-coach thead th.tnum{text-align:right}
-.pr-coach thead th button{
-  width:100%; display:flex; align-items:center; gap:6px; padding:11px 12px;
-  background:none; border:0; cursor:pointer; text-align:inherit; justify-content:inherit;
-  font-family:var(--mono); font-size:10px; font-weight:600; letter-spacing:.07em;
-  text-transform:uppercase; color:var(--ink-dim);
-}
-.pr-coach thead th.tnum button{justify-content:flex-end}
-.pr-coach thead th button:hover{color:var(--ink)}
-.pr-coach thead th[aria-sort] button{color:var(--accent)}
-.pr-coach thead th button .arw{font-size:9px; opacity:.5}
-.pr-coach thead th[aria-sort] button .arw{opacity:1}
-.pr-coach tbody td,.pr-coach tbody th[scope=row]{
-  padding:0 12px; height:52px; border-bottom:1px solid var(--line); vertical-align:middle;
-  text-align:left; font-weight:400;
-}
-.pr-coach tbody tr:last-child td,.pr-coach tbody tr:last-child th[scope=row]{border-bottom:0}
-.pr-coach td.tnum{text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; color:var(--ink-2)}
-.prow.open{background:var(--accent-soft)}
-.pname-btn{
-  display:flex; align-items:center; gap:9px; width:100%; padding:8px 0;
-  background:none; border:0; cursor:pointer; text-align:left; color:var(--ink); font:inherit;
-}
-.pname-btn:hover .pr-name{color:var(--accent)}
-.pname-btn .chev{flex:none; width:9px; font-size:10px; color:var(--ink-dim); transition:transform .15s}
-.prow.open .pname-btn .chev{transform:rotate(90deg); color:var(--accent)}
-.pr-name{display:block; color:inherit; font-size:13px}
-.pr-hostchip{
-  display:inline-block; margin:0 4px 0 0; padding:1px 6px; border-radius:5px;
-  background:var(--panel); border:1px solid var(--line); font-family:var(--mono);
-  font-size:10.5px; color:var(--ink-2);
-}
-.pr-empty{padding:22px 12px; text-align:center; color:var(--ink-dim); font-size:12.5px}
-
 /* A sub-heading inside a strip column, for a second ranked list under the
    first. Sized between .sh h2 and body text so it reads as subordinate. */
 .pr-sub{
@@ -841,108 +782,4 @@ export const USAGE_CSS = `
   text-transform:uppercase; color:var(--ink-dim);
 }
 
-
-/* ── the expanded coaching panel (§2.3–2.5) ─────────────────────────────── */
-.detail-row td{padding:0; background:var(--panel-2); border-bottom:1px solid var(--line-2)}
-.coach{display:grid; gap:16px; max-width:860px; padding:6px 18px 20px 34px}
-.coach-sec h5,.coach .pr-seen{margin:0}
-.coach h5{
-  margin:0 0 8px; font-family:var(--mono); font-size:10px; font-weight:600;
-  letter-spacing:.09em; text-transform:uppercase; color:var(--ink-dim);
-}
-/* seen-in occurrence strip */
-.pr-seen{display:flex; gap:7px; flex-wrap:wrap; align-items:center}
-.occ-lab{font-size:9.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-dim); margin-right:3px}
-.occ-link{
-  padding:3px 9px; border:1px solid var(--line); border-radius:6px; background:var(--panel);
-  font-size:11px; color:var(--accent); text-decoration:none;
-}
-.occ-link:hover{border-color:var(--accent); background:var(--accent-soft)}
-.occ-more{font-size:10.5px; color:var(--ink-dim)}
-/* what you typed — masked, inline */
-.typed-load,.typed-empty,.typed-hidden{font-size:12px; color:var(--ink-dim)}
-.typed-hidden code,.typed-cap code{font-family:var(--mono); font-size:11px; color:var(--ink-2)}
-/* the command pointer in the advice-less Coaching empty state (P15) */
-.empty code{font-family:var(--mono); font-size:.92em; color:var(--accent)}
-.verbatim{
-  margin-bottom:6px; padding:10px 12px; background:var(--bg); border:1px solid var(--line);
-  border-left:2px solid var(--accent); border-radius:6px; font-family:var(--mono); font-size:12px;
-  color:var(--ink); line-height:1.55; white-space:pre-wrap; word-break:break-word;
-}
-.typed-cap{margin-top:6px; font-size:10px; color:var(--ink-dim)}
-.typed-cap .lock{color:var(--ok); margin-right:5px}
-/* recommendation */
-.rec-title{font-size:14px; font-weight:600; color:var(--ink); line-height:1.4}
-.rec-why{margin:6px 0 0; font-size:12.5px; color:var(--ink-2); line-height:1.5}
-/* the window-scope label on a kind-level card's rationale (QE F-1): brighter
-   and bolder than the finding it prefixes, so the two scopes read apart. */
-.rec-scope{font-weight:600; color:var(--ink)}
-/* draft + copy */
-.draft-wrap{position:relative}
-.draft-pre{
-  margin:0; padding:12px 14px; background:var(--bg); border:1px solid var(--line);
-  border-radius:var(--r-sm); font-family:var(--mono); font-size:11.5px; color:var(--ink-2);
-  line-height:1.6; white-space:pre-wrap; word-break:break-word; overflow-x:auto;
-}
-.pr-copy{
-  position:absolute; top:8px; right:8px; display:inline-grid; place-items:center; width:30px; height:30px;
-  border:1px solid var(--line); border-radius:7px; background:var(--panel); color:var(--ink-dim); cursor:pointer;
-}
-.pr-copy:hover{border-color:var(--accent); color:var(--accent); background:var(--accent-soft)}
-.pr-copy:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
-.pr-copy.copied{border-color:var(--ok); color:var(--ok)}
-.pr-copy .ic-copy,.pr-copy .ic-check{display:inline-grid; place-items:center}
-.pr-copy .ic-check{display:none}
-.pr-copy.copied .ic-copy{display:none}
-.pr-copy.copied .ic-check{display:inline-grid}
-/* dismiss + source foot */
-.coach-foot{
-  display:flex; align-items:center; gap:14px; flex-wrap:wrap;
-  padding-top:14px; border-top:1px dashed var(--line);
-}
-.pr-dismiss{
-  padding:6px 13px; border:1px solid var(--line); border-radius:8px; background:var(--panel);
-  color:var(--ink-2); font:inherit; font-size:11.5px; cursor:pointer;
-}
-.pr-dismiss:hover{border-color:var(--fail); color:var(--fail)}
-.pr-dismiss:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
-.dismiss-wrap{position:relative; display:inline-block}
-.dismiss-tip{
-  position:absolute; bottom:130%; left:0; z-index:30; width:290px; padding:11px 13px;
-  background:var(--panel); border:1px solid var(--line-2); border-radius:var(--r-sm);
-  box-shadow:var(--shadow); font-size:12px; line-height:1.5; color:var(--ink-2);
-  opacity:0; pointer-events:none; transition:opacity .14s;
-}
-.dismiss-wrap:hover .dismiss-tip,.dismiss-wrap:focus-within .dismiss-tip{opacity:1}
-.dismissed-note{display:none; align-items:center; gap:9px; font-size:12px; color:var(--ink-2)}
-.dismissed-note .undo{
-  padding:0; border:0; background:none; color:var(--accent); font:inherit; font-size:11.5px;
-  cursor:pointer; text-decoration:underline;
-}
-.coach-foot.done .dismiss-wrap{display:none}
-.coach-foot.done .dismissed-note{display:inline-flex}
-/* the inline "couldn't save" hint after a failed dismiss/undo POST (P6) */
-.dismiss-err{font-size:11.5px; color:var(--fail)}
-.coach-none{margin:0; font-size:12.5px; color:var(--ink-dim); font-style:italic}
-/* the card's source chip, right-aligned in the foot */
-.pr-card-source{
-  margin-left:auto; padding:1px 8px; border:1px solid var(--line); border-radius:20px;
-  font-family:var(--mono); font-size:10px; letter-spacing:.03em; color:var(--ink-dim);
-}
-.pr-card-source[data-source="enriched"]{color:var(--purple); border-color:color-mix(in srgb,var(--purple) 40%,var(--line))}
-.pr-card-source[data-source="rule"]{color:var(--accent); border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
-
-/* prompt-text posture toggle — right-aligned in the Coaching panel header, next
-   to its subtitle (§2.2, P16). The header centres (not baselines) so the
-   bordered toggle sits level with the heading, and the note takes the auto
-   margin so it and the toggle group to the right; the row wraps on narrow
-   widths rather than overflowing. */
-.sh-coach{align-items:center; flex-wrap:wrap}
-.sh-coach .n{margin-left:auto}
-.pr-posture{display:inline-flex; align-items:center; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:var(--panel)}
-.pt-lbl{padding:0 9px 0 12px; font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-dim)}
-.pt-btn{padding:6px 12px; border:0; background:none; color:var(--ink-2); font:inherit; font-size:11.5px; cursor:pointer}
-.pt-btn:hover{color:var(--ink)}
-.pt-btn[aria-pressed="true"]{background:var(--accent-soft); color:var(--accent)}
-.pt-btn:focus-visible{outline:2px solid var(--accent); outline-offset:-2px}
 `;

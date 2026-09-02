@@ -46,7 +46,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0036](0036-dashboard-client-modularization-and-shared-loopback-server.md) | Dashboard client modularization and shared loopback server | Implemented |
 | [0037](0037-complexity-program-structural-patterns.md) | Complexity program: structural patterns and gates | Implemented |
 | [0038](0038-consistent-cross-host-session-metrics.md) | Consistent cross-host session metrics | Accepted |
-| [0039](0039-prompts-intelligence.md) | Prompts intelligence: fingerprints, coaching, and layer-3 enrichment | Accepted |
+| [0039](0039-prompts-intelligence.md) | Deterministic Prompts telemetry on main | Accepted |
 | [0040](0040-codex-hook-audit-and-conservative-remediation.md) | Codex hook audit and conservative remediation | Implemented (Codex Wave 1) |
 | [0041](0041-host-neutral-hook-configuration-assurance.md) | Host-neutral hook configuration assurance | Accepted; transactional Wave 2 implemented |
 

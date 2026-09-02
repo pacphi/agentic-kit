@@ -1,8 +1,6 @@
 // text-safety.mjs — ONE definition of the character classes that must never
-// survive into a terminal, a store, or the DOM. Three unrelated layers need
-// the same answer (output.mjs renders to a TTY, usage-label-store.mjs and
-// usage-outcome-ledger.mjs guard data at rest, the dashboard's `esc` guards
-// the DOM), and a regex copied into three places is a regex that drifts.
+// survive into a terminal or the DOM. The terminal renderer and dashboard
+// escaping need the same answer, and a regex copied into two places drifts.
 //
 // WHY THIS EXISTS (security review SEC-2, HIGH). The only text invariants the
 // stores held were "no CR/LF" and "at most 48 chars". ESC, BEL, NUL and

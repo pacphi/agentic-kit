@@ -15,8 +15,7 @@
  *  control/bidi codepoints into the DOM — one of them inside a `title=`
  *  attribute — where the override reverses the rest of the cell and a row can
  *  be made to read as a different label than the one it is. Spoofing, not
- *  execution; the store gate (usage-label-store.mjs) is the primary fix and
- *  this is the boundary that must not depend on it.
+ *  execution; this rendering boundary must reject the characters directly.
  *
  *  Strip BEFORE escaping: the passes are independent, and in this order no
  *  stripped character can be reintroduced by an entity.

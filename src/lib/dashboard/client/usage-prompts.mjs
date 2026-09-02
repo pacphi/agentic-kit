@@ -15,9 +15,9 @@
 // is or how many there are.
 //
 // THE PRIVACY CONTRACT IS UPSTREAM OF THIS FILE. Nothing here could render
-// prompt text if it wanted to: the projection carries counts, hashes, session
-// ids and names drawn from a curated vocabulary, and no field on it holds
-// anything a person typed. `esc` is applied to every interpolated value
+// prompt text if it wanted to: the projection carries counts, hashes, spans,
+// hosts, and names drawn from a deterministic vocabulary, and no field on it
+// holds anything a person typed. `esc` is applied to every interpolated value
 // anyway — the payload is server-shaped, not server-trusted.
 //
 // `esc` is copied from ./groups.mjs's real implementation rather than
@@ -170,7 +170,7 @@ export function promptKpis(p) {
     promptKpiCard('Questions', share(q), TIP_QUESTIONS,
       q == null
         ? { detail: 'no host reported a share' }
-        : { note: 'instruction / feedback split arrives with enrichment' }),
+        : { note: 'fingerprints do not infer an instruction / feedback split' }),
     promptKpiCard('Supervision taps', share(p.tapShare), TIP_TAPS,
       { detail: num(p.taps) + ' of ' + num(typed) + ' typed', chips: hostChips(p) }),
     promptKpiCard('Repeated share', recurring == null ? '—' : share(ratio(recurring, typed)),
@@ -318,6 +318,52 @@ export function tapLengthPanel(p) {
   }));
 }
 
+// ── recurring patterns and re-asks ─────────────────────────────────────────
+
+function patternLabel(label) {
+  var name = String(label && label.name || 'Recurring prompt');
+  var descriptor = String(label && label.descriptor || name);
+  return '<span class="pr-pattern-name" title="' + esc(descriptor) + '">' + esc(name) + '</span>';
+}
+
+function patternHosts(hosts) {
+  return (Array.isArray(hosts) ? hosts : []).map(function (host) {
+    return '<span class="pr-pattern-host">' + esc(host) + '</span>';
+  }).join('') || '<span class="pr-none">not attributed</span>';
+}
+
+/** A read-only rendering of deterministic cluster and re-ask evidence. It has
+ *  no expansion state, prompt-text fetch, recommendation, draft, or mutation. */
+export function patternsPanel(p) {
+  var pp = pat(p);
+  if (!pp) return '<div class="empty">patterns were not computed for this window.</div>';
+  var re = pp.reAsks || {}, pairs = Number(re.pairCount) || 0, sessions = Number(re.sessionCount) || 0;
+  var summary = pairs
+    ? pairs + ' re-ask' + (pairs === 1 ? '' : 's') + ' across ' + sessions + ' session' + (sessions === 1 ? '' : 's') + '.'
+    : 'No in-session re-asks were measured in this window.';
+  var clusters = Array.isArray(pp.clusters) ? pp.clusters : [];
+  if (!clusters.length) {
+    return '<p class="pr-pattern-summary">' + esc(summary) + '</p>'
+      + '<div class="empty">no prompt repeated across enough sessions or days to cluster.</div>';
+  }
+  var rows = clusters.slice(0, 25).map(function (c) {
+    return '<tr><th scope="row">' + patternLabel(c.label) + '</th>'
+      + '<td>' + esc(c.class || 'unknown') + '</td>'
+      + '<td class="tnum">' + esc(num(c.count)) + '</td>'
+      + '<td class="tnum">' + esc(num(c.sessions)) + '</td>'
+      + '<td class="tnum">' + esc(num(c.days)) + '</td>'
+      + '<td>' + patternHosts(c.hosts) + '</td></tr>';
+  }).join('');
+  return '<p class="pr-pattern-summary">' + esc(summary) + '</p>'
+    + '<div class="pr-pattern-wrap" role="region" aria-label="Recurring prompt patterns" tabindex="0">'
+    + '<table class="pr-pattern-table"><caption class="sr-only">Deterministic recurring prompt clusters.</caption>'
+    + '<thead><tr><th scope="col">Pattern</th><th scope="col">Class</th><th scope="col">Times typed</th>'
+    + '<th scope="col">Sessions</th><th scope="col">Days seen</th><th scope="col">Hosts</th></tr></thead>'
+    + '<tbody>' + rows + '</tbody></table></div>'
+    + (clusters.length > 25 ? '<p class="pr-caveat">Showing 25 of ' + esc(num(clusters.length))
+      + ' recurring clusters. Use <code>ak usage prompts</code> for the full report.</p>' : '');
+}
+
 // ── host interplay ──────────────────────────────────────────────────────────
 
 /** The per-day tap share for one host, oldest first — the series the trend
@@ -403,468 +449,4 @@ function hostRead(hosts, by) {
   if (!clauses.length) return '';
   return '<div class="pr-host-read"><span class="tag mono">read</span>'
     + clauses.join(' but ') + '.</div>';
-}
-
-// ── the Coaching panel: pattern name ────────────────────────────────────────
-
-/**
- * What the Pattern column shows. A CURATED or SEEDED name is shown whole. A
- * CHARACTERIZED name is the bare lead clause, because the rest of it —
- * "· 6 sessions · both hosts" — is exactly what the Sessions and Hosts columns
- * beside it already say, and a table that prints the same fact twice trains
- * the reader to skip the column that matters.
- *
- * The full descriptor stays as the row's tooltip: it is the string the CLI
- * prints, where there are no columns to carry those numbers.
- *
- * RULING B (final-triage item 2): a well-formed characterized label already
- * arrives split — `label.name` is the bare lead, `label.descriptor` the full
- * string (usage-prompt-vocabulary.mjs's `labelFor`) — so this file no longer
- * has to parse a session/host tail out of `name` itself for the common case.
- */
-/**
- * A characterized lead ends in the class NOUN the vocabulary picked —
- * "Recurring 3-token prompt", never "instruction" as of RULING A (the SOURCE
- * emits the honest `other`/`prompt` pairing on the wire now — see
- * usage-prompt-vocabulary.mjs's CLASS_NOUNS). `neutralizeLead` stays as a
- * BELT, redundant by construction against a well-formed payload: this file
- * does not trust the payload's shape absolutely, and a label that still
- * arrives in the pre-Ruling-B form — the full descriptor packed into `name`,
- * no separate `descriptor` field — is still neutralised rather than shown
- * verbatim. The Type column beside it carries the class either way; neither
- * repeats the other, and neither over-states.
- *
- * Only the known shape is rewritten. Anything else passes through untouched
- * rather than being pattern-matched into something this does not recognise.
- */
-var CHARACTERIZED_LEAD = /^(Recurring \d+-token )(question|instruction|mixed prompt|prompt)$/;
-
-function neutralizeLead(lead) {
-  return CHARACTERIZED_LEAD.test(lead) ? lead.replace(CHARACTERIZED_LEAD, '$1prompt') : lead;
-}
-
-function patternName(label) {
-  var full = String(label.name == null ? '' : label.name);
-  // A curated or seeded name is a HUMAN-authored string — a person or an
-  // enrichment pass chose those words — so it is shown whole and its title is
-  // the same string, whatever it contains.
-  if (label.source !== 'characterized') {
-    return '<span class="pr-name" title="' + esc(full) + '">' + esc(full) + '</span>';
-  }
-  // A characterized name is MACHINE-generated, so the class noun is
-  // neutralised in the title as well as in the cell. A tooltip is a DOM
-  // surface: a cell reading "prompt" whose hover reads "instruction" makes the
-  // same over-claim the cell was cleaned of, and hides it where a reader is
-  // less likely to challenge it.
-  //
-  // `descriptor` is read defensively, not trusted absolutely (the belt this
-  // function's doc comment describes): when present (the well-formed, post-
-  // Ruling-B shape), `full` IS the bare lead already, so `descriptor` supplies
-  // only the tail. When absent, this falls back to the pre-Ruling-B behaviour
-  // — splitting the tail out of `full` itself — so an out-of-band label that
-  // still arrives in the old shape is neutralised exactly as it always was.
-  var hasDescriptor = typeof label.descriptor === 'string';
-  var lead = hasDescriptor ? full : full.split(' · ')[0];
-  var tail = hasDescriptor ? label.descriptor.slice(lead.length) : full.slice(lead.length);
-  var neutralLead = neutralizeLead(lead);
-  var neutralFull = neutralLead + tail;
-  return '<span class="pr-name" title="' + esc(neutralFull) + '">' + esc(neutralLead) + '</span>';
-}
-
-// ── the Coaching panel: filters, sortable table, expand (spec §2) ────────────
-//
-// One sortable, filterable table where each pattern row expands to what you
-// typed, where, and what to change. Renders from `p.patterns.clusters` (each
-// carries a derived `kind`, §3), with the re-ask summary as the lead insight.
-// PURE: state (filter, sort, open row, posture, samples cache, dismissals) is
-// owned by usage.mjs and passed in, so every interaction is a re-render from
-// `p` + `state` and the panel is idempotent.
-
-// The five derived kinds → the pill label the operator reads. Client display
-// map only (§3): the projection ships the raw enum, the words live here.
-var PR_KIND_LABEL = {
-  reask: 'Re-asks', persona: 'Role preambles', tap: 'Taps',
-  question: 'Questions', instruction: 'Instructions',
-};
-// Pill order — the locked mockup's order (Taps first): the reading order the
-// user hand-designed for the panel, NOT the §3 kind precedence.
-var PR_KIND_ORDER = ['tap', 'question', 'instruction', 'persona', 'reask'];
-
-// The whole-KIND phrase used when a kind-level card's rationale is shown inside
-// a single cluster's panel — it names the window-wide span so the aggregate
-// numbers in the finding are not read as this one row's (QE F-1). Lower-case so
-// it reads inside the "Across all … this window:" sentence.
-var PR_KIND_SCOPE = {
-  tap: 'supervision taps', question: 'question patterns', instruction: 'instruction patterns',
-  persona: 'role-preamble patterns', reask: 're-ask patterns',
-};
-
-// The sortable columns, in render order. `num` right-aligns and defaults to a
-// descending first click; `tip` is the header's precise-definition tooltip.
-var COACH_COLS = [
-  { key: 'name', label: 'Pattern', num: false, tip: 'The recurring prompt cluster.' },
-  { key: 'count', label: 'Times typed', num: true, tip: 'How many times this pattern was typed in the window.' },
-  { key: 'sessions', label: 'Sessions', num: true, tip: 'How many separate sessions it appeared in.' },
-  { key: 'days', label: 'Days seen', num: true, tip: 'How many distinct days it appeared on.' },
-  { key: 'hosts', label: 'Hosts', num: false, tip: 'Which agents you typed it to.' },
-];
-
-var COACH_DEFAULT_SORT = { key: 'count', dir: 'desc' };
-
-// A cluster's kind, folded to the catch-all when the projection shipped one
-// this display map does not name (older cache, or a value added server-side
-// before the labels caught up) — so a row is always filterable, never dropped.
-function clusterKind(c) { return PR_KIND_LABEL[c.kind] ? c.kind : 'instruction'; }
-
-/** The re-ask summary as the panel's lead insight (was reAskPanel). A window
- *  with no re-ask reads as a neutral prompt to explore the table, never a
- *  fabricated statistic. */
-function coachingInsight(pp) {
-  var r = pp && pp.reAsks;
-  var tail = ' Click a pattern to see what you typed and what to change.';
-  if (!r || !r.pairCount) {
-    return '<p class="pr-insight">Every pattern below is one you typed more than once across your '
-      + 'sessions.' + tail + '</p>';
-  }
-  var gaps = r.gapHist || {}, immediate = Number(gaps[1]) || 0;
-  return '<p class="pr-insight"><b>' + esc(num(r.pairCount)) + '</b> re-ask'
-    + (r.pairCount === 1 ? '' : 's') + ' across <b>' + esc(num(r.sessionCount)) + '</b> session'
-    + (r.sessionCount === 1 ? '' : 's')
-    + (immediate
-      ? ' &middot; <b>' + esc(share(ratio(immediate, r.pairCount)))
-        + '</b> landed on the very next turn, pointing at the answer rather than the thread'
-      : '')
-    + '.' + tail + '</p>';
-}
-
-/** Clusters per present kind — the filter pills' counts. */
-function kindCounts(clusters) {
-  var c = {};
-  clusters.forEach(function (row) { var k = clusterKind(row); c[k] = (c[k] || 0) + 1; });
-  return c;
-}
-
-/** The filter pills: `All` + one per kind PRESENT, each a swatch + count. The
- *  active pill is marked; clicking re-filters (wired in usage.mjs). An empty
- *  filter result is handled by the table body, not by hiding the pills. */
-function coachingFilters(clusters, filter) {
-  var counts = kindCounts(clusters);
-  var all = '<button type="button" class="fpill' + (filter === 'all' ? ' on' : '') + '" '
-    + 'data-pr-filter="all" aria-pressed="' + (filter === 'all') + '">All '
-    + '<span class="fc mono">' + esc(num(clusters.length)) + '</span></button>';
-  var pills = PR_KIND_ORDER.filter(function (k) { return counts[k]; }).map(function (k) {
-    return '<button type="button" class="fpill' + (filter === k ? ' on' : '') + '" '
-      + 'data-pr-filter="' + esc(k) + '" aria-pressed="' + (filter === k) + '">'
-      + '<span class="sw k-' + esc(k) + '"></span>' + esc(PR_KIND_LABEL[k])
-      + ' <span class="fc mono">' + esc(num(counts[k])) + '</span></button>';
-  }).join('');
-  return '<div class="pr-filters" role="group" aria-label="Filter patterns by kind">' + all + pills + '</div>';
-}
-
-/** The value a column sorts on for one cluster row — a string for the name, a
- *  number for the count columns, the host count for the Hosts column. */
-function coachSortValue(c, key) {
-  if (key === 'hosts') return Array.isArray(c.hosts) ? c.hosts.length : 0;
-  if (key === 'name') return String((c.label && c.label.name) || '');
-  return Number(c[key]) || 0;
-}
-
-/** The clusters after filter + sort. STABLE: a name tiebreak keeps equal-value
- *  rows in a deterministic order across re-renders, so a re-sort never shuffles
- *  ties and the expanded row stays where the reader left it. */
-function coachingRows(clusters, state) {
-  var filter = state.filter || 'all';
-  var sort = state.sort || COACH_DEFAULT_SORT;
-  var dir = sort.dir === 'asc' ? 1 : -1;
-  var rows = clusters.filter(function (c) { return filter === 'all' || clusterKind(c) === filter; });
-  return rows.slice().sort(function (a, b) {
-    if (sort.key === 'name') return dir * coachSortValue(a, 'name').localeCompare(coachSortValue(b, 'name'));
-    var d = coachSortValue(a, sort.key) - coachSortValue(b, sort.key);
-    return d ? dir * d : coachSortValue(a, 'name').localeCompare(coachSortValue(b, 'name'));
-  });
-}
-
-/** One header cell — a sort button carrying the arrow indicator, the aria-sort
- *  state, and the precise-definition tooltip (§2). */
-function coachHeadCell(col, sort) {
-  var active = sort.key === col.key;
-  var arrow = active ? (sort.dir === 'asc' ? '▲' : '▼') : '⇅';
-  var sortAttr = active ? ' aria-sort="' + (sort.dir === 'asc' ? 'ascending' : 'descending') + '"' : '';
-  return '<th scope="col" class="' + (col.num ? 'tnum' : '') + '"' + sortAttr + '>'
-    + '<button type="button" data-pr-sort="' + esc(col.key) + '" title="' + esc(col.tip) + '">'
-    + esc(col.label) + '<span class="arw mono" aria-hidden="true">' + arrow + '</span></button></th>';
-}
-
-function coachHostChips(hosts) {
-  return (Array.isArray(hosts) ? hosts : []).map(function (h) {
-    return '<span class="pr-hostchip">' + esc(h) + '</span>';
-  }).join('');
-}
-
-/** One collapsed data row. The Pattern cell is the expand control (a button
- *  toggling this row's coaching panel); NO source sublabel and NO kind dot on
- *  the row — the kind colour lives in the filter pills (§2). The detail row is
- *  appended by `coachingPanel` when this pattern is open. */
-function coachRow(c, state) {
-  var open = state.openKey === c.key;
-  return '<tr class="prow' + (open ? ' open' : '') + '" data-pr-row="' + esc(c.key) + '">'
-    + '<th scope="row"><button type="button" class="pname-btn" data-pr-open="' + esc(c.key) + '" '
-    + 'aria-expanded="' + open + '"><span class="chev mono" aria-hidden="true">▶</span>'
-    + patternName(c.label || {}) + '</button></th>'
-    + '<td class="tnum">' + esc(num(c.count)) + '</td>'
-    + '<td class="tnum">' + esc(num(c.sessions)) + '</td>'
-    + '<td class="tnum">' + esc(num(c.days)) + '</td>'
-    + '<td>' + coachHostChips(c.hosts) + '</td></tr>';
-}
-
-/**
- * The Coaching panel (§2): the re-ask insight, the kind filter pills, and the
- * sortable table (Pattern · Times typed · Sessions · Days seen · Hosts). The
- * table caps at ~5 rows then scrolls with a pinned header (CSS); each pattern
- * expands to its coaching panel (the detail row, built in the expand commit).
- *
- * Absent states are NAMED, never blank: no projection, no clusters, and an
- * empty filter each read differently, so a clean "nothing repeated" is never
- * confused with "not computed" or "nothing matches this pill".
- */
-export function coachingPanel(p, state) {
-  state = state || {};
-  var pp = pat(p);
-  if (!pp) return '<div class="empty">patterns were not computed for this window.</div>';
-  var clusters = Array.isArray(pp.clusters) ? pp.clusters : [];
-  if (!clusters.length) {
-    return coachingInsight(pp)
-      + '<div class="empty">no prompt repeated across enough sessions or days to cluster. '
-      + 'That is a clean result, not a missing one.</div>';
-  }
-  // P15: the table shows ONLY patterns that have advice — a cluster with no
-  // joined coaching card (§4.5) is hidden here (it still counts in the
-  // provenance / steer panels and `ak usage prompts --deep`), so a row never
-  // promises coaching it has none of. Pills, counts and the table all draw from
-  // this advised set, not the full cluster list.
-  var advised = advisedClusters(p);
-  if (!advised.length) {
-    return coachingInsight(pp)
-      + '<div class="empty">No repeated pattern has coaching advice yet &mdash; that&rsquo;s a clean '
-      + 'result, not a missing one. Keep working, or run <code>ak usage prompts --enrich</code> to have '
-      + 'your own recurring patterns named.</div>';
-  }
-  var sort = state.sort || COACH_DEFAULT_SORT;
-  var rows = coachingRows(advised, state);
-  var body = rows.length
-    ? rows.map(function (c) { return coachRow(c, state) + coachDetailRow(c, p, state); }).join('')
-    : '<tr><td colspan="' + COACH_COLS.length + '" class="pr-empty">no patterns of this kind in '
-      + 'this window &mdash; clear the filter to see the rest.</td></tr>';
-  return coachingInsight(pp)
-    + coachingFilters(advised, state.filter || 'all')
-    + '<div class="pr-tablewrap" role="region" aria-label="Recurring prompt patterns" tabindex="0">'
-    + '<table class="pr-coach"><caption class="sr-only">Recurring prompt clusters; each row expands '
-    + 'to its coaching panel.</caption>'
-    + '<thead><tr>' + COACH_COLS.map(function (col) { return coachHeadCell(col, sort); }).join('') + '</tr></thead>'
-    + '<tbody>' + body + '</tbody></table></div>';
-}
-
-// ── the expanded coaching panel (§2.3–2.5, §4.5) ─────────────────────────────
-//
-// One open at a time. Order: Seen in · What you typed · Recommendation · Draft ·
-// Dismiss. Recommendation/Draft/Dismiss come from the coaching card this pattern
-// joins to (§4.5); a pattern with no card shows Seen-in + What-you-typed and a
-// neutral note. No unmasked prompt text is ever built here — What-you-typed is
-// filled from the masked verbatim endpoint (usage.mjs), and only when the prompt-
-// text posture is `shown`.
-
-var COACH_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-/** `YYYY-MM-DD` → `Mon D`, parsed by PARTS (never `new Date(str)`, which is
- *  UTC-parsed and shifts the day across a timezone). Anything else passes
- *  through untouched. */
-function fmtDay(d) {
-  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d == null ? '' : d));
-  if (!m) return String(d == null ? '' : d);
-  return (COACH_MONTHS[Number(m[2]) - 1] || m[2]) + ' ' + Number(m[3]);
-}
-
-/** A short, stable session handle for a link label (`s.1d8a`). The full id is
- *  what the link actually navigates to. */
-function shortSession(id) {
-  id = String(id == null ? '' : id);
-  return 's.' + (id.length > 4 ? id.slice(0, 4) : id);
-}
-
-/** The §4.5 client join, first match: (1) a card ABOUT this exact cluster
- *  (`clusterKey`), else (2) a card addressing this cluster's derived KIND
- *  (`targetKind`), else none. Never force-fits — a pattern with no match
- *  renders the neutral note, not someone else's advice. */
-function cardForCluster(cards, c) {
-  if (!Array.isArray(cards)) return null;
-  var byKey = null, byKind = null;
-  for (var i = 0; i < cards.length; i++) {
-    var card = cards[i];
-    if (!byKey && card.clusterKey && card.clusterKey === c.key) byKey = card;
-    if (!byKind && card.targetKind && card.targetKind === clusterKind(c)) byKind = card;
-  }
-  return byKey || byKind || null;
-}
-
-/** The advice-bearing clusters — those a coaching card joins (§4.5). The
- *  Coaching table draws ONLY these (P15): a recurring pattern with no proposed
- *  card is real, but it has nothing to advise, so it belongs in the provenance /
- *  steer panels and `--deep`, not in a table that promises coaching. Exported so
- *  usage.mjs's panel subtitle counts the same set the table shows. */
-export function advisedClusters(p) {
-  var pp = pat(p);
-  var clusters = pp && Array.isArray(pp.clusters) ? pp.clusters : [];
-  var cards = p && p.coaching && Array.isArray(p.coaching.cards) ? p.coaching.cards : [];
-  return clusters.filter(function (c) { return cardForCluster(cards, c); });
-}
-
-// Both icons ship in the copy button; CSS shows one at a time by the `.copied`
-// class, so the visual feedback needs no innerHTML swap (usage.mjs only toggles
-// the class). aria-hidden — the button's aria-label carries the meaning.
-var COACH_COPY_ICON = '<span class="ic-copy" aria-hidden="true">'
-  + '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" '
-  + 'stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/>'
-  + '<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span>'
-  + '<span class="ic-check" aria-hidden="true">'
-  + '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" '
-  + 'stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>';
-
-/** Up to three `session · date` links to each session's masked transcript
- *  (§2.1). Prefers the fetched occurrences (they carry the date); before the
- *  fetch lands, or in the hidden posture, falls back to the projection's own
- *  `sampleSessionIds` (session links, no date) — both always resolve through the
- *  real transcript route (usage.mjs's data-pr-session handler → the validated
- *  AKDashboardOpenTranscript bridge, fixing §4.4's dead links). */
-function coachSeenIn(c, state) {
-  var sk = state.samples && state.samples[c.key];
-  var occ = sk && Array.isArray(sk.occurrences) && sk.occurrences.length
-    ? sk.occurrences
-    : (Array.isArray(c.sampleSessionIds) ? c.sampleSessionIds : []).map(function (id) {
-      return { sessionId: id, day: null };
-    });
-  var links = occ.slice(0, 3).map(function (o) {
-    var lab = o.day ? esc(shortSession(o.sessionId)) + ' · ' + esc(fmtDay(o.day)) : esc(shortSession(o.sessionId));
-    return '<a class="occ-link mono" href="#usage/' + encodeURIComponent(o.sessionId) + '" '
-      + 'data-pr-session="' + esc(o.sessionId) + '" title="Open this session&rsquo;s masked transcript">'
-      + lab + '</a>';
-  }).join('');
-  var more = (Number(c.sessions) || 0) - Math.min(3, occ.length);
-  return '<div class="pr-seen"><span class="occ-lab mono">seen in</span>' + links
-    + (more > 0 ? '<span class="occ-more mono">+' + esc(num(more)) + ' more</span>' : '') + '</div>';
-}
-
-/** The masked "What you typed" block, keyed by cluster so usage.mjs can patch
- *  it when the fetch resolves. `hidden` posture shows the terminal pointer and
- *  triggers NO fetch (the fetch gate is in usage.mjs); `shown` renders the
- *  loading / masked-text / honest-empty states from the samples cache. */
-function coachTyped(c, state) {
-  var inner = state.posture === 'hidden'
-    ? '<div class="typed-hidden">Prompt text is hidden. Run <code>ak usage prompts --deep</code> in the '
-      + 'terminal to read this pattern&rsquo;s redacted text.</div>'
-    : coachTypedInner(c, state);
-  return '<div class="pr-typed" id="pr-typed-' + esc(c.key) + '">' + inner + '</div>';
-}
-
-function coachTypedInner(c, state) {
-  var sk = state.samples && state.samples[c.key];
-  if (!sk || sk.state === 'loading') return '<div class="typed-load">loading your masked prompts&hellip;</div>';
-  if (sk.state === 'error') return '<div class="typed-empty">couldn&rsquo;t load this pattern&rsquo;s text right now.</div>';
-  if (sk.state === 'empty' || !Array.isArray(sk.samples) || !sk.samples.length) {
-    return '<div class="typed-empty">no readable sample survived masking for this pattern.</div>';
-  }
-  return sk.samples.map(function (s) { return '<div class="verbatim">' + esc(s) + '</div>'; }).join('')
-    + '<div class="typed-cap mono"><span class="lock">&#9679;</span> secrets redacted server-side · '
-    + 'masked the same way <code>--deep</code> masks the terminal · nothing stored</div>';
-}
-
-/** rule / enriched / unknown — three-valued, so a card that does not say where
- *  it came from reads as UNKNOWN, never silently as a fixed rule (F-9). */
-function coachSourceChip(card) {
-  var source = card.source === 'enriched' || card.source === 'rule' ? card.source : 'unknown';
-  var titles = {
-    enriched: 'Written by a model from your aggregate; every number it states is bound to a dimension of that aggregate.',
-    rule: 'Computed from your aggregate by a fixed rule.',
-    unknown: 'This card does not say where it came from.',
-  };
-  return '<span class="pr-card-source" data-source="' + esc(source) + '" title="' + esc(titles[source]) + '">'
-    + esc(source) + '</span>';
-}
-
-/** The draft, in a <pre> with a copy button top-right (§2.4). The copy id is
- *  keyed by the OPEN CLUSTER, not the card id: one kind-level card can address
- *  several clusters, but only one row is open, so the cluster key is the unique
- *  DOM handle. */
-function coachDraft(card, key) {
-  if (!card.draft || !card.draft.text) return '';
-  return '<section class="coach-sec"><h5>Draft</h5><div class="draft-wrap">'
-    + '<button type="button" class="pr-copy" data-pr-copy="' + esc(key) + '" title="Copy to clipboard" '
-    + 'aria-label="Copy the draft to the clipboard">' + COACH_COPY_ICON + '</button>'
-    + '<pre class="draft-pre mono" id="pr-draft-' + esc(key) + '">' + esc(card.draft.text) + '</pre></div></section>';
-}
-
-/** Dismiss + its hover explanation, the source chip, and the post-dismiss
- *  "Dismissed … Undo" inline (§2.5, §4.3). Three-valued (F1): an EXPLICIT client
- *  flag — set by either a Dismiss or an Undo — wins over the persisted ledger
- *  `status`; only when the client has said nothing does the persisted status
- *  decide. Without this, an Undo of a page-load-persisted dismissal (which sets
- *  the flag to false) is masked by the stale `status:'dismissed'` and the row
- *  stays "Dismissed" until the next data refresh. */
-function coachFoot(card, state) {
-  var dismissed = state.dismissed && (card.id in state.dismissed)
-    ? !!state.dismissed[card.id]
-    : card.status === 'dismissed';
-  // P6: when the last dismiss/undo POST failed, the optimistic state has already
-  // reverted (usage.mjs) — surface a brief inline hint here so the no-op is not
-  // silent; a retry clears it.
-  var failed = state.dismissError && state.dismissError[card.id];
-  return '<div class="coach-foot' + (dismissed ? ' done' : '') + '">'
-    + '<span class="dismiss-wrap"><button type="button" class="pr-dismiss" data-pr-dismiss="' + esc(card.id) + '">'
-    + 'Dismiss</button><span class="dismiss-tip">Tells the tool you&rsquo;ve got this &mdash; it stops being '
-    + 'proposed and won&rsquo;t come back unless the pattern gets materially worse. Your prompts are '
-    + 'untouched.</span></span>'
-    + '<span class="dismissed-note">Dismissed &mdash; won&rsquo;t resurface unless it gets materially worse. '
-    + '<button type="button" class="undo" data-pr-undismiss="' + esc(card.id) + '">Undo</button></span>'
-    + (failed ? '<span class="dismiss-err" role="status">Couldn&rsquo;t save that &mdash; try again.</span>' : '')
-    + coachSourceChip(card) + '</div>';
-}
-
-function kindScopeLabel(kind) { return PR_KIND_SCOPE[kind] || 'patterns of this kind'; }
-
-/** The rationale line under the recommendation. A KIND-level card (targetKind,
- *  no clusterKey) states WINDOW-aggregate numbers — the whole re-ask phenomenon,
- *  not this one cluster — so it is prefixed with a scope label naming that span,
- *  keeping "107 across 29 sessions" from being read as this count-11 row's
- *  (QE F-1). A cluster-specific card needs no prefix: its numbers already are
- *  this cluster's. */
-function coachWhy(card) {
-  if (!card.finding) return '';
-  var scope = card.targetKind && !card.clusterKey
-    ? '<span class="rec-scope">Across all ' + esc(kindScopeLabel(card.targetKind)) + ' this window:</span> '
-    : '';
-  return '<p class="rec-why">' + scope + esc(card.finding) + '</p>';
-}
-
-/** Recommendation → Draft → Dismiss, from the joined card. The recommendation
- *  is the card's action (no "Try:" prefix) with its finding as the rationale. */
-function coachCardBlock(card, key, state) {
-  return '<section class="coach-sec"><h5>Recommendation</h5>'
-    + '<div class="rec-title">' + esc(card.try || card.title) + '</div>'
-    + coachWhy(card) + '</section>'
-    + coachDraft(card, key)
-    + coachFoot(card, state);
-}
-
-/** The expanded coaching panel for one open pattern — the accordion detail row.
- *  Renders nothing unless this cluster is the open one. */
-function coachDetailRow(c, p, state) {
-  if (state.openKey !== c.key) return '';
-  var cards = p && p.coaching && Array.isArray(p.coaching.cards) ? p.coaching.cards : [];
-  var card = cardForCluster(cards, c);
-  var body = coachSeenIn(c, state)
-    + '<section class="coach-sec"><h5>What you typed</h5>' + coachTyped(c, state) + '</section>'
-    + (card
-      ? coachCardBlock(card, c.key, state)
-      : '<p class="coach-none">No specific coaching for this pattern yet.</p>');
-  return '<tr class="detail-row"><td colspan="' + COACH_COLS.length + '"><div class="coach">'
-    + body + '</div></td></tr>';
 }

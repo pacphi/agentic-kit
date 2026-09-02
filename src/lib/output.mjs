@@ -37,11 +37,8 @@ const OWN_SGR_RE = new RegExp(
  * those six color codes and render itself, say, red. It could not move the
  * cursor, clear the screen, conceal text, ring the bell, or emit an OSC
  * title/clipboard sequence — the primitives the review actually demonstrated.
- * And in practice it cannot even do that much, because both routes that carry
- * attacker-chosen text into these helpers strip it earlier: the stores REJECT
- * such an entry outright (usage-label-store.mjs, usage-outcome-ledger.mjs) and
- * `--deep`'s raw transcript text is stripped at `clipText`. This is the last
- * line, not the only one.
+ * `--deep`'s raw transcript text is also stripped at `clipText`. This is the
+ * last line, not the only one.
  *
  * @param {unknown} value
  * @returns {string}

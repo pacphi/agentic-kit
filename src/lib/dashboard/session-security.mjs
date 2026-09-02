@@ -31,22 +31,6 @@ export function resolvesInsideRoot(root, id) {
     && path.dirname(resolved) === base;
 }
 
-/** Containment at ANY depth: is the already-absolute `absPath` somewhere inside
- *  `root`? `resolvesInsideRoot` above requires a DIRECT child — the shape a
- *  session id takes — but the deep-pass exemplar reader opens transcripts
- *  several levels down (`<root>/<project>/<file>.jsonl`, and opencode's single
- *  `<store>/opencode.db`), so the masked-samples endpoint guards those paths
- *  with this containment form instead. It is defense in depth on a boundary the
- *  CLI does not need (the CLI already has more access than a fingerprint): a
- *  cache entry whose path points OUTSIDE every known transcript root is dropped
- *  before the endpoint ever opens it, so a poisoned cache cannot turn a loopback
- *  GET into an arbitrary file read. */
-export function resolvesWithinRoot(root, absPath) {
-  if (typeof absPath !== 'string' || !absPath) return false;
-  const base = path.resolve(root);
-  return path.resolve(absPath).startsWith(base + path.sep);
-}
-
 /** A nested Claude subagent transcript's own filename stem (no `.jsonl`):
  *  Claude Code writes every one as `agent-<hex>`, or `agent-<name>-<hex>`
  *  when the Task tool call carried a name (the Agent tool's own `name`

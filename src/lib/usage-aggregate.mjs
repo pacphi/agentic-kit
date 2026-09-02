@@ -291,19 +291,6 @@ export function modelFamily(id) {
  *  model: whether the tap was necessary. Some taps are legitimate approvals. */
 export const TAP_MAX_TOKENS = 4;
 
-/** The share of a cluster's members that must be typed persona openers
- *  (`o === true`) for its derived `kind` to read as a role-preamble (Coaching
- *  redesign §3, ADR-0039 amendment). A simple majority: a cluster whose members
- *  are MOSTLY "you are a …" openers is scaffolding the operator retypes by hand
- *  and could lift into a managed library, which is the coaching move this kind
- *  points at. The bar is `>=` a majority rather than a super-majority because
- *  role-preamble already sits BELOW re-ask in the precedence — a repeated ask
- *  that happens to open with a persona is still handled as the re-ask it is —
- *  so this only ever decides clusters no stronger signal has claimed, where an
- *  even split of openers to non-openers is better read as scaffolding than as a
- *  bare instruction. Pure function of the corpus; no new fingerprint field. */
-export const PERSONA_KIND_SHARE = 0.5;
-
 /** How far back the personal baseline looks, and how many days with at least
  *  one typed prompt it needs before it will claim a normal. Under the floor the
  *  baseline is `null` and the detector falls back to an absolute threshold: an
@@ -341,9 +328,9 @@ function firstBilledDay(rec) {
  * session.
  *
  * `personaOpeners` counts only TYPED persona openers. The shape flag itself is
- * provenance-blind (a tool's own template still carries `o`), but the coaching
- * move it feeds — lift the role text into a managed library — is about what the
- * operator retypes by hand; a tool's template is already a managed artifact.
+ * provenance-blind (a tool's own template still carries `o`), but this
+ * projection describes what the operator retypes by hand; a tool's template is
+ * already a managed artifact.
  */
 function v16Projection(rec) {
   const fps = rec.promptFPs;
@@ -487,12 +474,6 @@ export const PROMPT_CLUSTER_JACCARD = 0.6;
  *  looser threshold above would count an ordinary follow-up as a repeat. */
 export const PROMPT_REASK_JACCARD = 0.8;
 
-/** Session ids attached to a cluster so a view can link to the masked
- *  `GET /api/session/:id` surface. A LINK AFFORDANCE, not a session list —
- *  three is enough to click through and few enough that the projection cannot
- *  become a membership dump. */
-const CLUSTER_SAMPLE_SESSIONS = 3;
-
 /**
  * One stored fingerprint, decorated with WHERE it happened — the input shape
  * usage-prompt-patterns.mjs documents. THIS IS THE ONLY PLACE THE DECORATION
@@ -543,55 +524,16 @@ function windowFingerprints(records, cutoff) {
   return out;
 }
 
-/**
- * The single derived filter label per cluster (Coaching redesign §3, ADR-0039
- * amendment). A PURE function of signals the cluster already carries, computed
- * at projection-build time — no new fingerprint data, recomputed every scan.
- * FIRST-MATCH-WINS over a fixed precedence, most-actionable first:
- *
- *   1. `reask`       — a member hash is on the "asked-again" side of a re-ask
- *                      pair (`reaskHashes`). A repeated ask that keeps coming
- *                      back is the most actionable, so it wins even over a short
- *                      or persona-shaped phrasing.
- *   2. `persona`     — a majority of members are typed persona openers
- *                      (`personas / size >= PERSONA_KIND_SHARE`) — role scaffolding.
- *   3. `tap`         — the cluster's median length is a supervision tap
- *                      (`tokens.median <= TAP_MAX_TOKENS`).
- *   4. `question`    — the shipped classifier read it as questions.
- *   5. `instruction` — everything else (`other`/`mixed`/`unknown`, non-short,
- *                      non-persona).
- *
- * `reaskHashes` is the set of asked-again member hashes `buildPromptPatterns`
- * derives from `reAskPairs` (the `b` side of each pair); an absent/empty set
- * simply never matches, which is the honest reading of a corpus with no re-asks.
- *
- * @param {{ hashes: string[], personas: number, size: number,
- *   tokens: { median: number }, class: string }} cluster
- * @param {Set<string>} [reaskHashes]
- * @returns {'reask'|'persona'|'tap'|'question'|'instruction'}
- */
-export function deriveKind(cluster, reaskHashes) {
-  const asked = reaskHashes ?? new Set();
-  if ((cluster.hashes ?? []).some((h) => asked.has(h))) return 'reask';
-  if (cluster.size > 0 && cluster.personas / cluster.size >= PERSONA_KIND_SHARE) return 'persona';
-  if ((cluster.tokens?.median ?? Infinity) <= TAP_MAX_TOKENS) return 'tap';
-  if (cluster.class === 'question') return 'question';
-  return 'instruction';
-}
-
 /** A cluster reduced to its published row. Sets become counts, except `hosts`,
  *  which stays a sorted name list because a host chip is what a reader acts on
- *  and the host set is small, closed and already public in `byHost`. `kind` is
- *  the single derived filter label (§3); `reaskHashes` is threaded in from
- *  `buildPromptPatterns` because the re-ask join lives one scope up. */
-function promptClusterRow(cluster, reaskHashes) {
-  const label = labelFor(cluster, {});
+ *  and the host set is small, closed and already public in `byHost`. */
+function promptClusterRow(cluster) {
+  const label = labelFor(cluster);
   return {
     key: cluster.key,
-    kind: deriveKind(cluster, reaskHashes),
     // RULING B (final-triage item 2): `descriptor` rides along only for a
     // characterized row (the full "Recurring N-token X · N sessions · N
-    // hosts" string) — a curated/seeded/enriched `name` already IS the whole
+    // hosts" string) — a seeded `name` already IS the whole
     // thing, so there is no second string to publish. Left off rather than
     // set to `undefined` so a consumer's `'descriptor' in label` reads true
     // only when there is something there.
@@ -605,7 +547,6 @@ function promptClusterRow(cluster, reaskHashes) {
     days: cluster.days.size,
     hosts: [...cluster.hosts],
     medianTokens: cluster.tokens.median,
-    sampleSessionIds: [...cluster.sessions].slice(0, CLUSTER_SAMPLE_SESSIONS),
   };
 }
 
@@ -656,35 +597,19 @@ function promptTapLengths(typed) {
  * Ordering is deterministic throughout — the clustering library sorts by size
  * then key, `exactRepeatGroups` by count then hash, and every Set it hands back
  * iterates sorted — so a rescan over an unchanged corpus reproduces this object
- * byte for byte, which is what the evidence-hash contract (coaching cards,
- * METRICS.md §22) rests on.
- *
- * `labelFor` is applied with an EMPTY label store HERE — every name below
- * resolves to a seed pattern or to `characterize`, never a persisted one, and
- * each row says which via `label.source`. That is not a v1 limitation left
- * unfixed: `usage-prompt-vocabulary.mjs`'s `labelFor` store branch depends on
- * nothing but a cluster's `key`, so re-checking the REAL persisted store
- * (W5, layer-3 enrichment — METRICS.md §23) against these already-published rows afterward —
- * see that module's `withStoreLabel`, applied by `ak usage prompts`/the
- * dashboard — is exactly equivalent to having threaded it through from here.
- * Doing it post-hoc keeps this function, and `aggregate()`'s signature, free
- * of a disk read.
+ * byte for byte. `labelFor` resolves each row deterministically to a seed or
+ * shape characterization and each row says which via `label.source`.
  */
 function buildPromptPatterns(records, { cutoff, now }) {
   const fps = windowFingerprints(records, cutoff);
   const typed = fps.filter(isTypedFP);
   const clusters = crossSessionClusters(nearDupClusters(typed, { jaccard: PROMPT_CLUSTER_JACCARD }));
   const reAsks = reAskPairs(typed, { jaccard: PROMPT_REASK_JACCARD });
-  // The "asked-again" side of every re-ask pair — the RE-ask's hash (`b`,
-  // turns[j], the later of the two) — is what the derived `reask` kind joins a
-  // cluster against (§3.1). Built here because `reAsks` and `clusters` share
-  // this one scope; `promptClusterRow` never re-runs the pairing.
-  const reaskHashes = new Set(reAsks.pairs.map((p) => p.b));
   return {
     corpus: { fingerprints: fps.length, typed: typed.length },
     provenance: promptProvenance(fps),
     tapLengths: promptTapLengths(typed),
-    clusters: clusters.map((c) => promptClusterRow(c, reaskHashes)),
+    clusters: clusters.map(promptClusterRow),
     reAsks: {
       pairCount: reAsks.pairs.length,
       sessionCount: reAsks.sessions,
