@@ -30,6 +30,22 @@ compatibility separate from trust, consent, grants, reachability, and organizati
    performs a fresh audit and refuses version, profile, source, owner, parent, mode, or
    content drift before it writes a target.
 
+   One Codex recipe handles the exact `codex@openai-codex` placement error. That
+   package is the Codex companion for Claude Code, so the recipe changes only its
+   user-scoped Codex `config.toml` entry from `enabled = true` to `enabled = false`.
+   It does not uninstall the package, edit Codex's plugin cache, or change Claude
+   Code's plugin enablement.
+
+   For an estate-wide preview, include only projects from agentic-kit's bounded census:
+
+   ```bash
+   ak heal hooks --host codex --all-projects --json
+   ```
+
+   Legacy Ruflo retirement remains one explicit action per project. Pass every reviewed
+   action with a repeated `--action`; the engine commits all selected files in one
+   transaction or conditionally restores the files it changed.
+
 3. Verify and retain the receipt. A successful apply already performs an exact-profile
    re-audit, confirms the targeted finding cleared, rebuilds a no-action plan, and proves
    a repeat audit/plan did not change bytes, mode, or modification time.
@@ -61,11 +77,29 @@ compatibility separate from trust, consent, grants, reachability, and organizati
 - `never-automatic`: generated/cache targets, opaque modules, trust bypasses, unsupported
   schemas, unsafe files, or unproven ownership.
 
-The initial executable recipes cover only canonical user-owned JSON for exact Codex CLI
-`0.151.0` and Claude Code `2.1.258` `SessionEnd` timeout normalization. OpenCode,
-external adapters, JSONC, plugin caches, generated copies, unknown versions, and remote
-sources remain observable but non-executable. Windows receives the full plan but no
-mutation until atomic replace-existing behavior has a proven platform port.
+Executable recipes cover canonical user-owned JSON for exact Codex CLI `0.151.0` and
+`0.152.1`, plus Claude Code `2.1.258`, `SessionEnd` timeout normalization. Under the exact
+Codex `0.152.1` profile, the planner can also retire the frozen legacy Ruflo
+Claude-helper projection from a project when a selected, valid `ruflo-core@ruflo` plugin
+is proven. It removes only exact event/matcher/command/timeout/key-set matches, preserves
+unrelated and AutoMemory hooks, and refuses ambiguous or noncanonical inputs.
+
+The exact Codex profiles can also disable `codex@openai-codex` 1.0.6 in user-owned
+`config.toml`. Detection is identity-based rather than a heuristic over all Claude
+manifests. The byte-preserving recipe requires conservative whole-document TOML
+validation, one unambiguous live table, and one canonical true scalar. Table-shaped text
+inside multiline strings is ignored; malformed TOML, duplicate tables or assignments,
+symlink-managed or otherwise unsafe targets, unverified plugin/host versions, and Windows
+remain visible but non-executable.
+
+That retirement stops legacy session-start, prompt-routing, and subagent side effects
+that the selected plugin does not necessarily replace. Retained handler indexes may
+shift and require Codex review. The preview discloses both facts. A fresh Codex session
+is required after apply because hook definitions are loaded at session start.
+
+OpenCode, external adapters, JSONC, plugin caches, generated copies, unknown versions,
+and remote sources remain observable but non-executable. Windows receives the full plan
+but no mutation until atomic replace-existing behavior has a proven platform port.
 
 ## Transactions and receipts
 

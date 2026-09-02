@@ -252,10 +252,18 @@ weakening it.
 Codex plugin configuration and `~/.codex/plugins/cache` are externally owned. Agentic-kit installs
 or enables no Codex plugin. It reads every explicitly enabled plugin's newest cached manifest,
 follows its declared hook paths (or the default `hooks/hooks.json`), validates the Codex hook-file
-contract and portable skill frontmatter, and applies version-bounded runtime-output advisories. It
+contract and portable skill frontmatter, applies version-bounded runtime-output advisories, and
+flags the exact `codex@openai-codex` Claude companion when it is enabled in the wrong host. It
 does not refresh, rewrite, delete, or adopt any plugin cache entry. An invalid newest cached bundle is a diagnostic fact
 with native remediation: open Codex `/plugins` to refresh or disable the plugin, then start a new
 session. The row has no `sync` fix.
+
+The sole plugin-table writer is an explicit `ak heal hooks` transaction for that exact
+placement error. It requires a content-bound preview, exact action selection, plan digest,
+`--apply --yes`, filesystem ownership proof, and a verified Codex profile. It changes only the
+matching user-scoped `enabled = true` scalar, retains an exact undo image, and never touches the
+cache, installation, Claude Code configuration, or trust state. Setup and sync remain read-only
+for all Codex plugin tables.
 
 Project memory is also detected at fact level rather than inferred from package presence or a
 single historical filename. Current native Ruflo bridges can preserve a compatibility/sql.js (or

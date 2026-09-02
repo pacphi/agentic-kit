@@ -51,10 +51,81 @@ enabled = true
 enabled = false
 [plugins.'three@market']
 enabled = true
+[plugins . "four@market"] # spaced header
+  enabled = true # trailing comment
 [hooks.state."one@market:hooks/hooks.json:stop:0:0"]
 trusted_hash = "sha256:x"
 `);
-  assert.deepEqual(refs, ['one@market', 'three@market']);
+  assert.deepEqual(refs, ['one@market', 'three@market', 'four@market']);
+});
+
+test('Claude companion placement is detected from exact enabled config identity', () => {
+  fs.rmSync(cacheDir, { recursive: true, force: true });
+  fs.writeFileSync(configFile,
+    '[plugins."codex@openai-codex"]\nenabled = true\n');
+  let result = inspect();
+  assert.equal(result.pluginFindings.length, 1);
+  assert.equal(result.pluginFindings[0].code, 'claude-companion-enabled-in-codex');
+  assert.equal(result.pluginFindings[0].ref, 'codex@openai-codex');
+  assert.match(result.placementIssues[0], /Claude Code/);
+  assert.deepEqual(result.plugins[0].placementIssues, result.placementIssues);
+  assert.match(result.hookIssues[0], /enabled but no cached version/);
+  assert.equal(result.issues.length, 2);
+  assert.match(result.configDigest, /^[a-f0-9]{64}$/);
+
+  fs.writeFileSync(configFile, [
+    '[plugins."codex@local"]', 'enabled = true',
+    '[plugins."another@openai-codex"]', 'enabled = true', '',
+  ].join('\n'));
+  result = inspect();
+  assert.deepEqual(result.pluginFindings, [], 'the placement rule is exact, not heuristic');
+
+  fs.writeFileSync(configFile,
+    '[plugins."codex@openai-codex"]\nenabled = false\n');
+  result = inspect();
+  assert.deepEqual(result.pluginFindings, []);
+  assert.deepEqual(result.enabled, []);
+});
+
+test('Claude companion placement detection fails closed on multiline TOML strings', () => {
+  fs.rmSync(cacheDir, { recursive: true, force: true });
+  fs.writeFileSync(configFile, `notes = """
+[plugins."codex@openai-codex"]
+enabled = true
+"""
+`);
+  let result = inspect();
+  assert.deepEqual(result.pluginFindings, []);
+  assert.deepEqual(result.placementIssues, []);
+
+  fs.writeFileSync(configFile, `notes = """
+[plugins."codex@openai-codex"]
+enabled = true
+"""
+
+  [plugins . "codex@openai-codex"] # live table
+  enabled = true # live assignment
+`);
+  result = inspect();
+  assert.equal(result.pluginFindings.length, 1, 'an unrelated multiline value must not hide a live table');
+});
+
+test('Codex plugin inspection follows a bounded symlink read-only and marks it non-owned', (t) => {
+  const outside = path.join(ROOT, 'outside-config.toml');
+  const linked = path.join(ROOT, 'linked-config.toml');
+  fs.writeFileSync(outside,
+    '[plugins."codex@openai-codex"]\nenabled = true\n');
+  try {
+    fs.symlinkSync(outside, linked);
+  } catch (error) {
+    if (error.code === 'EPERM') { t.skip('file symlinks unavailable'); return; }
+    throw error;
+  }
+  const result = inspectCodexPlugins({ configFile: linked, cacheDir });
+  assert.equal(result.configStatus, 'valid');
+  assert.equal(result.configViaSymlink, true);
+  assert.equal(result.pluginFindings.length, 1);
+  assert.deepEqual(result.enabled, ['codex@openai-codex']);
 });
 
 test('the newest cached generation is the compatibility target', () => {

@@ -62,6 +62,35 @@ test('audit keeps SessionEnd compatibility separate from trust and never propose
   }
 });
 
+test('audit reports the Claude companion as misplaced without requiring a cache generation', () => {
+  const fx = fixture();
+  try {
+    fs.mkdirSync(fx.codexHome, { recursive: true });
+    const configFile = path.join(fx.codexHome, 'config.toml');
+    fs.writeFileSync(configFile,
+      '[plugins."codex@openai-codex"]\nenabled = true\n');
+    const report = auditCodexHooks({
+      codexHome: fx.codexHome,
+      projectRoots: [],
+      pluginCacheDir: fx.cache,
+      codexVersion: '0.152.1',
+    });
+    assert.equal(report.pluginFindings.length, 1);
+    assert.equal(report.pluginConfiguration.file, configFile);
+    assert.deepEqual(report.pluginConfiguration.enabled, ['codex@openai-codex']);
+    const action = report.plan.find((candidate) => (
+      candidate.diagnostic === 'claude-companion-enabled-in-codex'
+    ));
+    assert.ok(action);
+    assert.equal(action.classification, 'approval-required');
+    assert.equal(action.target, configFile);
+    assert.match(action.sourceDigest, /^[a-f0-9]{64}$/);
+    assert.match(action.behaviorImpact, /separate Claude Code enablement/);
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
 test('audit keeps cwd-sensitive occurrences behaviorally distinct', () => {
   const fx = fixture();
   try {

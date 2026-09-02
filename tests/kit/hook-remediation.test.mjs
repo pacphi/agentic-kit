@@ -15,6 +15,7 @@ import {
 import {
   createHookTransactionDir, unfinishedHookReceipts, writeHookReceipt,
 } from '../../src/lib/hook-remediation/store.mjs';
+import { disableClaudeCompanionInCodexToml } from '../../src/lib/hook-remediation/codex-plugin.mjs';
 
 const POSIX_MUTATION_ONLY = process.platform === 'win32'
   ? { skip: 'executable hook healing is intentionally unavailable on Windows' }
@@ -96,6 +97,212 @@ test('authorized heal changes only the selected target and commits one verified 
     assert.match(receipt.receiptDigest, /^[a-f0-9]{64}$/);
   } finally {
     fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('authorized companion repair disables only its Codex entry and preserves Claude plus cache state', POSIX_MUTATION_ONLY, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-hook-plugin-heal-'));
+  try {
+    const codexHome = path.join(root, 'codex');
+    const target = path.join(codexHome, 'config.toml');
+    const transactionsRoot = path.join(root, 'transactions');
+    const cacheSentinel = path.join(codexHome, 'plugins', 'cache', 'openai-codex', 'codex', '1.0.6', 'sentinel');
+    const claudeConfig = path.join(root, 'claude', 'plugins.json');
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.mkdirSync(path.dirname(cacheSentinel), { recursive: true });
+    fs.mkdirSync(path.dirname(claudeConfig), { recursive: true });
+    const original = Buffer.from([
+      'model = "gpt-5.6-sol"',
+      '[plugins."codex@openai-codex"]',
+      'enabled = true # Claude companion must not run inside Codex',
+      '[plugins."other@market"]',
+      'enabled = false',
+      '',
+    ].join('\n'));
+    fs.writeFileSync(target, original, { mode: 0o640 });
+    fs.writeFileSync(cacheSentinel, 'cache-owned-by-codex\n');
+    fs.writeFileSync(claudeConfig, '{"codex-companion":"enabled"}\n');
+    const untouchedMtimes = {
+      cache: fs.statSync(cacheSentinel).mtimeMs,
+      claude: fs.statSync(claudeConfig).mtimeMs,
+    };
+    const expected = Buffer.from(original.toString('utf8').replace('enabled = true', 'enabled = false'));
+    const audit = () => auditHooks({
+      hosts: ['codex'], versions: { codex: '0.152.1' }, projectRoots: [],
+      codex: { codexHome, pluginCacheDir: path.join(codexHome, 'plugins', 'cache') },
+      upstream: { file: path.join(root, 'missing.json') },
+    });
+    const plan = buildHookHealingPlan({ report: audit() });
+    const action = plan.actions.find((candidate) => candidate.recipeId === 'codex/user-toml/claude-companion-disable/v1');
+    assert.ok(action);
+    assert.equal(action.classification, 'approval-required');
+    assert.equal(action.executable, true);
+    assert.deepEqual(action.candidateBytes, expected);
+    assert.match(action.behaviorImpact, /separate Claude Code enablement/);
+
+    const applied = applyHookHealingPlan({
+      plan, actionIds: [action.id], expectedPlanDigest: plan.planDigest,
+      transactionsRoot, auditFn: audit,
+    });
+    assert.equal(applied.ok, true);
+    assert.equal(applied.status, 'committed');
+    assert.deepEqual(fs.readFileSync(target), expected);
+    assert.equal(fs.readFileSync(cacheSentinel, 'utf8'), 'cache-owned-by-codex\n');
+    assert.equal(fs.readFileSync(claudeConfig, 'utf8'), '{"codex-companion":"enabled"}\n');
+    assert.equal(fs.statSync(cacheSentinel).mtimeMs, untouchedMtimes.cache);
+    assert.equal(fs.statSync(claudeConfig).mtimeMs, untouchedMtimes.claude);
+    assert.equal(audit().reports.codex.pluginFindings.length, 0);
+
+    const undone = undoHookHealing({ transactionsRoot, receiptId: applied.receiptId });
+    assert.equal(undone.ok, true);
+    assert.deepEqual(fs.readFileSync(target), original);
+    assert.equal(fs.readFileSync(cacheSentinel, 'utf8'), 'cache-owned-by-codex\n');
+    assert.equal(fs.readFileSync(claudeConfig, 'utf8'), '{"codex-companion":"enabled"}\n');
+    assert.equal(fs.statSync(cacheSentinel).mtimeMs, untouchedMtimes.cache);
+    assert.equal(fs.statSync(claudeConfig).mtimeMs, untouchedMtimes.claude);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('companion repair rolls back when the verification audit omits placement evidence', POSIX_MUTATION_ONLY, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-hook-plugin-verify-'));
+  try {
+    const codexHome = path.join(root, 'codex');
+    const target = path.join(codexHome, 'config.toml');
+    const transactionsRoot = path.join(root, 'transactions');
+    fs.mkdirSync(codexHome, { recursive: true });
+    const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'openai-codex', 'codex', '1.0.6');
+    writeJson(path.join(pluginRoot, '.claude-plugin', 'plugin.json'), {
+      name: 'codex', version: '1.0.6', hooks: {},
+    });
+    const original = Buffer.from('[plugins."codex@openai-codex"]\nenabled = true\n');
+    fs.writeFileSync(target, original, { mode: 0o640 });
+    const audit = () => auditHooks({
+      hosts: ['codex'], versions: { codex: '0.152.1' }, projectRoots: [],
+      codex: { codexHome, pluginCacheDir: path.join(codexHome, 'plugins', 'cache') },
+      upstream: { file: path.join(root, 'missing.json') },
+    });
+    const plan = buildHookHealingPlan({ report: audit() });
+    const action = plan.actions.find((candidate) => candidate.executable);
+    let audits = 0;
+    const result = applyHookHealingPlan({
+      plan, actionIds: [action.id], expectedPlanDigest: plan.planDigest,
+      transactionsRoot,
+      auditFn: () => {
+        const report = audit();
+        audits += 1;
+        if (audits === 2) delete report.reports.codex.pluginFindings;
+        return report;
+      },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 'rolled-back');
+    assert.match(result.error, /second audit did not prove/);
+    assert.deepEqual(fs.readFileSync(target), original);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('companion TOML repair fails closed on multiline strings and duplicate target tables', () => {
+  const crlf = '[plugins."codex@openai-codex"]\r\nenabled = true # keep\r\nmodel = "x"\r\n';
+  assert.equal(
+    disableClaudeCompanionInCodexToml(crlf).candidate,
+    '[plugins."codex@openai-codex"]\r\nenabled = false # keep\r\nmodel = "x"\r\n',
+  );
+  assert.equal(disableClaudeCompanionInCodexToml(`notes = """
+[plugins."codex@openai-codex"]
+enabled = true
+"""
+`), null);
+  assert.match(disableClaudeCompanionInCodexToml(`notes = """
+[plugins."codex@openai-codex"]
+enabled = true
+"""
+[plugins."codex@openai-codex"]
+enabled = true
+`).candidate, /\n\[plugins\."codex@openai-codex"\]\nenabled = false\n$/);
+  assert.equal(disableClaudeCompanionInCodexToml(`
+[plugins."codex@openai-codex"]
+enabled = true
+[plugins.'codex@openai-codex']
+enabled = false
+`), null);
+  assert.equal(disableClaudeCompanionInCodexToml(`
+[plugins."codex@openai-codex"]
+enabled = true
+enabled = true
+`), null);
+});
+
+test('companion placement stays visible but non-executable for unsafe bytes, unknown versions, and Windows', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-hook-plugin-closed-'));
+  try {
+    const codexHome = path.join(root, 'codex');
+    const target = path.join(codexHome, 'config.toml');
+    fs.mkdirSync(codexHome, { recursive: true });
+    const audit = (version) => auditHooks({
+      hosts: ['codex'], versions: { codex: version }, projectRoots: [],
+      codex: { codexHome, pluginCacheDir: path.join(codexHome, 'plugins', 'cache') },
+      upstream: { file: path.join(root, 'missing.json') },
+    });
+
+    fs.writeFileSync(target, Buffer.concat([
+      Buffer.from('[plugins."codex@openai-codex"]\nenabled = true\n'), Buffer.from([0xff]),
+    ]));
+    let plan = buildHookHealingPlan({ report: audit('0.152.1') });
+    assert.ok(plan.actions.some((action) => action.providerActionId));
+    assert.equal(plan.summary.executable, 0);
+
+    fs.writeFileSync(target,
+      'broken = ???\n[plugins."codex@openai-codex"]\nenabled = true\n');
+    plan = buildHookHealingPlan({ report: audit('0.152.1') });
+    assert.ok(plan.actions.some((action) => action.providerActionId));
+    assert.equal(plan.summary.executable, 0, 'malformed unrelated TOML blocks the scalar splice');
+
+    fs.writeFileSync(target,
+      '[plugins."codex@openai-codex"]\nenabled = true\n');
+    plan = buildHookHealingPlan({ report: audit('future') });
+    assert.ok(plan.actions.some((action) => action.providerActionId));
+    assert.equal(plan.summary.executable, 0);
+
+    plan = buildHookHealingPlan({ report: audit('0.152.1'), platform: 'win32' });
+    assert.ok(plan.actions.some((action) => action.providerActionId));
+    assert.equal(plan.summary.executable, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('symlink-managed Codex config stays visible but is never an executable target', POSIX_MUTATION_ONLY, (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-hook-plugin-symlink-'));
+  try {
+    const codexHome = path.join(root, 'codex');
+    const target = path.join(codexHome, 'config.toml');
+    const actual = path.join(root, 'managed-config.toml');
+    fs.mkdirSync(codexHome, { recursive: true });
+    fs.writeFileSync(actual, '[plugins."codex@openai-codex"]\nenabled = true\n');
+    try { fs.symlinkSync(actual, target); } catch (error) {
+      if (error.code === 'EPERM') { t.skip('file symlinks unavailable'); return; }
+      throw error;
+    }
+    const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'openai-codex', 'codex', '1.0.6');
+    writeJson(path.join(pluginRoot, '.claude-plugin', 'plugin.json'), {
+      name: 'codex', version: '1.0.6', hooks: {},
+    });
+    const report = auditHooks({
+      hosts: ['codex'], versions: { codex: '0.152.1' }, projectRoots: [],
+      codex: { codexHome, pluginCacheDir: path.join(codexHome, 'plugins', 'cache') },
+      upstream: { file: path.join(root, 'missing.json') },
+    });
+    const plan = buildHookHealingPlan({ report });
+    assert.equal(report.reports.codex.pluginFindings.length, 1);
+    assert.equal(report.reports.codex.pluginConfiguration.viaSymlink, true);
+    assert.ok(plan.actions.some((action) => action.providerActionId));
+    assert.equal(plan.summary.executable, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 

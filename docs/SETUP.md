@@ -146,11 +146,15 @@ Agentic-kit does not alter Codex's sandbox or approval policy.
 
 OpenAI's Claude Code plugin for Codex is an optional App Server-based interactive
 path. It is user-owned: setup and sync never install, enable, update, or remove it.
+If that exact companion is accidentally enabled as a Codex plugin, `ak status` and
+`ak audit hooks` report the placement error. `ak heal hooks` can prepare an
+approval-required, receipt-backed change that disables only its Codex entry.
 
 Codex also retains exclusive ownership of third-party plugins. Agentic-kit never
 installs or enables a Codex plugin (including `security-guidance`), and setup/sync
-never rewrites Codex's plugin tables or cache. `ak status` only reads enabled
-bundles to report known hook and skill portability problems.
+never rewrites Codex's plugin tables or cache. The explicit healer exception above
+never touches the plugin cache or Claude Code's plugin state. `ak status` reads
+enabled bundles to report known placement, hook, and skill portability problems.
 
 All enabled hosts converge on the same project-scoped Ruflo memory contract.
 Claude receives the absolute `CLAUDE_FLOW_DB_PATH` in project settings. Codex's
