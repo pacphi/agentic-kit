@@ -1,464 +1,136 @@
-# ADR-0039 — Prompts intelligence: fingerprints, coaching, and layer-3 enrichment
+# ADR-0039 — Deterministic Prompts telemetry on main
 
 - **Status:** Accepted
 - **Date:** 2026-08-30
+- **Updated:** 2026-09-02
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0009](0009-usage-scorecard-local-transcript-analytics.md),
   [ADR-0038](0038-consistent-cross-host-session-metrics.md)
+- **Full capability snapshot:** `archive/prompts-capability-main-2026-09-01` at
+  `91e892f523f307ecb29271cb0e370b538115a2c0`
 
 ## Context
 
-ADR-0009 established the usage scorecard as local transcript analytics answering what a window
-cost. ADR-0038 answered how the work was run. Neither answers a third question the scan path was
-already positioned to see: what the operator actually *typed*, as distinct from what a session's
-turns collectively contain — tool results, agent-to-agent deliveries, headless adapter templates,
-and slash-command records all reach a `user`-role entry without a person typing anything.
+ADR-0009 established local transcript analytics. ADR-0038 made the session metrics
+consistent across hosts. The Prompts work added a third view: what the operator
+actually typed, separated from tool output, adapter templates, agent-to-agent
+messages, and control records that can all appear as user-role turns.
 
-A prior research pass over a reference corpus (600 Claude transcripts, 900 Codex rollouts)
-measured that only 27.6% of parser-visible user-role turns were typed by the operator, and found
-recurring shapes in that 27.6% worth surfacing: short "supervision taps" (`yes`, `go ahead`) that
-are the shape of watching a run rather than directing it; near-duplicate clusters that recur
-across sessions because there is no canonical form to point at instead of retyping; and a
-consistent asymmetry in how much gets retyped per host. None of that is visible to a
-percentile-over-tokens metric, and none of it can be answered by re-reading prompt text into the
-index — the masking contract this scorecard has kept since ADR-0009 forbids that outright.
+The original ADR bundled two different capabilities:
 
-The build this ADR records answers all of it from a *fingerprint*, not a copy: a hash, a token
-count, a bounded sample of token hashes, and a provenance tag, computed once at scan time and
-never a text a person typed. Three layers sit on top of that fingerprint — deterministic
-detectors and a repetition projection (free, every scan), personal baselines (statistics, no
-inference), and an opt-in model-invoked layer that names clusters and proposes coaching cards
-(the first inference path this codebase has ever had). This is the first build in the kit to
-spawn a subprocess specifically to read a model's answer, which is why its privacy and
-anti-fabrication boundaries are described in more operational detail below than a typical
-metrics decision needs.
+1. deterministic, privacy-preserving telemetry derived from prompt fingerprints;
+2. a coaching product built on top of those aggregates: recommendations, drafts,
+   dismissal state, masked prompt samples, saved labels, and opt-in model inference.
+
+Before subtracting the second capability from main, the complete implementation was
+preserved on the archive branch named above. Git history shows that snapshot contains
+the dashboard Coaching panel, its mutation and masked-sample endpoints, the outcome
+ledger, the label store, and model enrichment. Main keeps only the first capability.
+
+This amendment records that boundary. The archive is a preserved reference, not a
+second supported runtime line.
 
 ## Decision
 
-### 1. Provenance is a closed four-tag vocabulary, one-directional by design
+### 1. Main retains deterministic prompt evidence
 
-`usage-provenance.mjs`'s `provenanceOf(text, {kind})` classifies every turn the scan path already
-marks `kind: 'prompt'` into exactly one of `human | control | agent | adapter` — never a fifth
-tag, and never a guess. Every rule is anchored at the start of the turn and carries its own
-measured count in a comment; an unmatched shape reads as `human`, deliberately, because
-over-stating what the operator typed is visible and self-correcting while silently attributing a
-typed prompt to a machine is not. Two research-proposed `ak-adapter` rules
-(`You are (?:a|the) (?:qe-court|court) (?:seat|reviewer)`, `<qe-court\b`) were measured against
-the full corpus and dropped: neither matched anything, and admitting an unevidenced rule risks
-the one error direction this taxonomy forbids. The measured residual — 51 harness turns
-misrouted to `human` in schema 14 — was closed at the source in schema 15, not papered over with
-a fifth tag: 33 `<in-app-browser-context>` blocks joined the harness gate outright (no longer
-prompts at all) and 18 continuation-prose turns moved to `control`.
+The scan path may retain only the prompt fingerprint contract: a normalized-text hash,
+token count, bounded token-hash sketch, provenance tag, and optional question/persona
+shape flags. It does not persist prompt text.
 
-### 2. F1 fingerprints: the entry shape, the bottom-64 sketch, and what it actually costs
+The aggregate may derive:
 
-An entry is `{h, t, th, p}` plus two optional shape flags, `q`/`o`, added in schema 16 and
-omitted (not written as `0`) when false. `th` — a bounded, sorted sample of token hashes — is
-capped at 64 (`MAX_TOKEN_HASHES`). That number is not a tidiness constant: storing every token
-hash, unbounded, cost 15 MB against a 2.1 MB base index on the reference corpus (a 68× overshoot
-of the design estimate), because one pasted document outweighs a hundred real instructions. Kept
-sorted, the retained 64 are a **bottom-k (KMV) sketch** — a deterministic, unbiased sample and
-the standard input to a Jaccard estimate, not a truncation of the prompt's first 64 words — so
-the median prompt on this corpus is stored complete and the tail costs a bounded ~700 bytes
-instead of ~86 KB. Measured cost after the bound: the fingerprint layer runs ≈2.8 MB within a
-5.1 MB index (60-day window) — 13× the original spec estimate, corrected in the spec rather than
-left to contradict it, and a real, disclosed cost of the feature, not hidden in a rounding error.
-Re-confirmed live on this machine (2026-08-30, all-history scan): the fingerprint layer holds
-essentially the same share of a larger index (2.83 MB of 5.33 MB, ≈53%, against the original
-measurement's ≈55%) — the proportion, not just the absolute figure, holds as the corpus grows.
-Schema moved 14 → 15 (the harness-gate correction above) → 16 (the `q`/`o` shape flags), each
-bump forcing a full re-derive rather than letting a partial-schema record read new fields as
-`undefined`, the same discipline every prior schema bump in this kit has followed.
+- typed-prompt and provenance counts;
+- per-host tap, question, persona, and length distributions;
+- trailing-history personal baselines;
+- exact repeats, near-duplicate recurring clusters, and re-asks;
+- deterministic seed or shape-characterized cluster labels;
+- the existing evidence-backed Prompts findings detectors.
 
-### 3. Personal baselines replace fixed percentages wherever history allows
+The dashboard keeps the Prompts tab for those read-only metrics. The CLI keeps
+`ak usage prompts`, its supported windows, `--json`, and the explicit `--deep`
+terminal pass. The deep pass rereads local transcripts only on request, masks its
+output, writes nothing, and does not place prompt text in the index or dashboard API.
 
-`buildPromptBaselines` computes, per host, the p75 of the DAILY tap share over the
-`BASELINE_TRAILING_DAYS` (90) days immediately BEFORE the displayed window — deliberately
-excluding the displayed window itself, because a window that fed its own threshold could never
-read as unusual. Under `BASELINE_MIN_ACTIVE_DAYS` (30) days of history it is `null`, not a
-default: a p75 over a handful of days is a number, not a normal, and the detector's own evidence
-names the fallback (a stated 10% absolute floor) rather than passing it off as a personal one. A
-real gap was found and fixed mid-build: both production call sites (the dashboard's `/api/usage`
-handler and `ak usage score`/`ak usage prompts`) originally requested only `windowDays * 2` of
-lookback, which for a 7-day report reaches 14 days back — structurally under the 30-day floor no
-matter how long the corpus has run. Both now request `windowDays + BASELINE_TRAILING_DAYS`. The
-fix makes the baseline *reachable*; it does not make it *populated* — on this machine's own
-corpus the baseline is still `null` for most window/host combinations today, which is the honest
-state of a machine still building history, and is stated as measured fact rather than implied
-success (§2b).
+### 2. Main excludes the coaching and layer-3 product
 
-### 4. Three prompt detectors, on the existing adaptive-thresholds discipline
+The following belong solely to the preserved archive snapshot and are not supported on
+main:
 
-`supervision-tap-share` (trend/warn), `headless-share` (coach/info), and `host-prompt-asymmetry`
-(coach/info) join the existing `DETECTORS` registry, all computed from fingerprint-derived
-aggregates only. Every firing prints the threshold it was judged against, per ADR-0009's rule 2
-("no fixed percentages where a personal baseline can exist") and rule 1 (a modelled token volume,
-never a dollar figure, for the tap-cost caveat). `host-prompt-asymmetry`'s p90-length arm requires
-**≥50 typed prompts on each host** before comparing them at all (`asymmetryMinTypedPerHost`) — a
-gate the original design spec's own §4 table omitted and this build's own spec amendment restored
-before the spec was archived (see below).
+- Coaching cards, recommendations, drafts, dismiss/undo state, and adoption tracking;
+- the outcome ledger and the dashboard write endpoints that mutate it;
+- saved or hand-curated cluster labels and model-enriched labels;
+- model invocation, enrichment prompts, fabrication gates, and synthesized cards;
+- the dashboard's Coaching table, filters, details, prompt-text posture control, and
+  masked prompt-sample endpoint;
+- coaching-only cluster projection fields such as derived `kind` and
+  `sampleSessionIds`;
+- CLI flags `--enrich`, `--draft`, and `--dismiss`.
 
-### 5. The pattern-clustering library: deterministic ordering, precision-first seeds
+Those options now fail as unknown rather than silently doing nothing. The dashboard
+remains observation-only and has no Prompts mutation route.
 
-`usage-prompt-patterns.mjs` clusters near-duplicate fingerprints via a bottom-k Jaccard estimator
-over the SAME 64-entry sketch F1 already stores — not a second, independently-tuned sketch — with
-a rare-token-bucket comparison bound that cut candidate pairs from 379,146 to 902 on the
-reference corpus (114 identical clusters found either way, proving the bound exact rather than
-lossy) plus one additional filter: a prompt sharing no token with any other prompt is dropped from
-comparison outright, since its Jaccard with everything is exactly 0. Every function orders its
-output deterministically (size then key, never insertion order) so a rescan over an unchanged
-corpus reproduces byte-identical evidence hashes — load-bearing for the outcome ledger's staleness
-detection (§8 below). `usage-prompt-vocabulary.mjs`'s four seed patterns are keyed on shape (token
-band, class, span) rather than on a fingerprint's `h`, because a hash is corpus-specific and would
-match nothing on another machine; a mid-build audit against the research's own measured cluster
-tables found and fixed one seed (`commit-and-push`) that would have mislabeled a real cluster,
-narrowed another (`progress-check-in`) that was reading as "any recurring short question" rather
-than the actual evidence, and widened a third (`release-ritual`) whose own predicate could not
-match the very cluster it was cut from — the corrected rule is **a seed must be precise or
-silent**: 5 of 39 measured clusters resolve to a seed name, 34 fall through to the generic,
-honest `characterize()` descriptor, and 0 mislabel.
+### 3. Privacy boundaries are structural
 
-### 6. The opt-in `promptPatterns` projection: an aggregate seam, not a CLI-only cache read
+The default index and `/api/usage` projection contain no prompt text. The dashboard
+does not serve prompt samples, read a label store, or read/write a coaching ledger.
+The only prompt-text path retained on main is the local, explicit `--deep` CLI pass.
 
-An earlier draft of this build had the CLI open the raw index cache directly to build its
-repetition tables — a coupling to an internal file format the dashboard would have inherited too.
-The shipped design instead threads `prompts: true` through `aggregate()`/`readIndex()` the same
-way the existing `previous` (previous-window) flag already works: `null` when not requested, and
-folded into `scanKey` so the single-flight cache and its memo cannot serve a `{prompts:true}`
-caller an answer built without the projection. `ak usage prompts` and the dashboard's Prompts view
-(§21) therefore read the identical `agg.promptPatterns` object and cannot disagree about what a
-cluster is — the coupling this ruling was written to prevent never ships.
+Removing `sampleSessionIds` also prevents the recurring-cluster projection from
+becoming a session-membership link surface. Aggregate rows retain counts, spans, host
+names, hashes, and deterministic labels needed to explain the metrics.
 
-### 7. The privacy split: three surfaces, three different trust boundaries
+### 4. The archive branch is immutable provenance
 
-- **Dashboard**: aggregates and masked session links only. `agg.promptPatterns` carries counts,
-  curated names, and at most three session ids per cluster into the existing masked `#usage/<id>`
-  transcript route — never a fourth accessor onto raw fingerprints, and never exemplar text.
-- **CLI deep pass** (`--deep`): terminal-only. Re-reads transcripts through the SAME per-host
-  parsers the scan path uses, so a re-read turn re-fingerprints to the identical hash and joins
-  back to the findings exactly; every exemplar is masked before it is printed. The text goes to
-  stdout and is written nowhere — except under `--json`, which the help text states explicitly.
-- **Inference** (`--enrich`): CLI-only, and this is why the dashboard's Coaching panel has **no
-  live Recompute affordance** — a button there would trigger inference from a surface this split
-  keeps read-only by design (§9 below). The stale-card hint points at the CLI command instead.
+`archive/prompts-capability-main-2026-09-01` remains pinned at
+`91e892f523f307ecb29271cb0e370b538115a2c0`. It is the exact full-capability
+reference for the removed implementation and its tests. Main documentation links to
+that snapshot instead of describing the archived behavior as current.
 
-### 8. The outcome ledger: canonical-30d basis, the transition matrix, the materiality gate
-
-Every ledger-facing evidence read — a new record's baseline, adoption-by-collapse's "current
-count", and outcome measurement — is pinned to a FIXED 30-day aggregate
-(`CANONICAL_WINDOW_DAYS`), independent of whatever window the operator's `--window` or the
-dashboard's day selector is showing. This was not the original design: a review-caught defect
-demonstrated that switching `--window` alone, with the corpus otherwise unchanged, could
-fabricate an adoption, an outcome delta, and — 14 days later — a permanent retirement verdict,
-none of it backed by anything the operator did. The fix makes every record carry `windowDays:
-CANONICAL_WINDOW_DAYS`; a record loaded without it is discarded rather than migrated, a
-legitimate simplification because this ledger had not shipped to a user. The transition matrix —
-`proposed → adopted → retired`, `proposed → expired → proposed`, `dismissed →` (unchanged, or
-re-proposed once, or permanent) — is documented in full at §22. The re-proposal path itself
-needed a second fix: gating re-proposal on "the evidence hash changed" alone made a dismissal
-survive only until the pattern's very next occurrence, since any one additional instance changes
-the hash. The materiality gate (`DISMISS_MATERIALITY_RATIO = 0.5`) requires the canonical count to
-have worsened by at least 50% relative to the count recorded AT DISMISSAL TIME, measured against
-that frozen reference every pass rather than a creeping one.
-
-### 9. The anti-fabrication gate
-
-A layer-3 model call is reserved for two jobs deterministic rules cannot do: naming a cluster and
-proposing a coaching card. Neither may state a number the aggregate did not produce. Every number
-in a synthesized card's `finding`/`try`/`basis` text, and every entry in its own `basisNumbers`,
-must be traceable to a number ACTUALLY present in the findings summary the model was shown; one
-unmatched number voids the whole card. This is enforced against a summary that is itself
-counts/labels/shares only — no exemplar text is present in it to leak, by construction, so there
-is no path by which the gate could be satisfied by something other than genuine grounding. Live
-verification on a real 30-day corpus (53 distinct numbers across 458 clusters) confirmed the gate
-reliably rejects invented large/specific numbers; it is measurably weaker against a small integer
-that happens to coincide with an unrelated field elsewhere in the same summary — recorded as a
-disclosed limitation (§23) rather than an unproven "holds against genuine model output" claim.
-
-### 10. The invocation seam: the first inference path in this kit
-
-`llm-invoke.mjs` is deliberately small: it detects the `claude` binary through the kit's own host
-registry (`HOST_REGISTRY`, never a hardcoded literal — a test proves this by swapping in a fake
-registry entry with a different bin name), spawns it once per call with the prompt as a single
-argv element (no shell, matching this kit's existing exec discipline), and states its billing
-line plainly — `"Claude Code CLI — your subscription"`. No scheduling machinery lives here or
-anywhere in this build; a periodic digest is documented as an opt-in recipe (§20) against the
-kit's EXISTING governed scheduling surfaces, not shipped as code. This is v1: exactly one host,
-`claude`, is wired. A provider-diverse invocation chain is explicitly out of scope here (see
-Deferred).
-
-### 11. The class-taxonomy ruling: `instruction` never reaches the wire
-
-The prompt-shape rules can detect only one distinction with any confidence — interrogative or
-not. An earlier iteration published the non-question side as `'instruction'`, which asserts a
-confidence (that a non-question prompt is a directive rather than a declarative statement) the
-rules do not support. The ruling: `classifyCluster` emits `'question' | 'other' | 'mixed' |
-'unknown'` on the wire — `'instruction'` no longer exists as a value anywhere a client can read
-it, in the library, the CLI, or the dashboard. `CLASS_NOUNS` maps `other` to the same noun,
-`'prompt'`, that `'unknown'` already used, because the two are honestly indistinguishable at the
-noun level. Both surfaces' render-time neutralization regexes are kept as a belt against a
-label arriving in the pre-ruling shape from an out-of-band source, with a dedicated test proving
-they still catch it — redundant by construction against a well-formed payload, not vestigial.
-
-### 12. `labelFor`'s `{name, descriptor}` split
-
-A characterized cluster's label used to be one string carrying both the identifying lead ("
-Recurring 3-token prompt") and a descriptive tail ("· 21 sessions · both hosts"). The CLI's
-cluster table only ever needed the lead; the dashboard's table needed both, and had to parse the
-tail back out of the combined string to render its own columns without repeating them. `labelFor`
-now returns `{name, source, firstSeen, seed, descriptor?}` — `name` is the bare lead, `descriptor`
-(present only for a characterized result) carries the full string — both built once, from a
-shared `characterizeParts` helper, so `characterize()` (used directly by 20+ pre-existing tests)
-and `labelFor` can never independently drift on the same input. The CLI needed zero changes: it
-already printed `label.name`, which is now naturally bare.
-
-### 13. The `stripDisplayNames` hash trap — a lesson worth keeping on record
-
-`findingsSummaryHash` — the signal that decides whether a second `--enrich` pass needs to spend a
-synthesis call at all — originally hashed the WHOLE findings summary, including a cluster's
-display `name`. Because a settled label is re-applied to `promptPatterns` before the summary is
-rebuilt on every pass, the hash moved on a name-only change with nothing new to synthesize about —
-meaning the pass immediately after ANY labeling round would always see "evidence changed", every
-time, defeating the two-consecutive-runs delta-only guarantee this mechanism exists to provide.
-The fix strips display names before hashing (`stripDisplayNames`), mirroring the anti-fabrication
-gate's own established posture that a name is not evidence. Recorded here because the shape of
-the bug — a cosmetic field silently entering a hash meant to answer "did evidence move" — is
-exactly the kind of mistake a future cache-invalidation key on this codebase could reintroduce
-without the reasoning attached.
-
-### 14. The pipe-drain exit fix, found along the way
-
-`ak usage prompts --json` on the reference corpus is 268 KB. `process.exit()` kills a process with
-piped stdout still queued, and any payload over the OS pipe buffer (65,536 bytes for a non-TTY
-consumer) was silently truncated for every command in this kit, not only this one — three
-quarters of this particular document was lost to `| jq` before the fix. `bin/agentic-kit.mjs` now
-exits from a zero-length `write()` callback on stdout, then stderr, which only fires after
-everything queued ahead of it has actually reached the OS; hard-exit semantics for any lingering
-handle are preserved. This is a kit-wide correctness fix that this build's own `--json` output
-size was what exposed.
-
-## Amendment — Coaching panel redesign (2026-08-31)
-
-The Prompts view this ADR records (§7, §21) split recurring patterns and coaching into two panels
-and showed no prompt text at all. A follow-on redesign (spec
-[`docs/archive/2026-08-31-superpowers-spec-coaching-panel-redesign.md`](../archive/2026-08-31-superpowers-spec-coaching-panel-redesign.md))
-folds both into ONE pattern-centric **Coaching** panel and shifts three postures the Decision above had fixed.
-Each shift and its reasoning is recorded here; the living per-metric record stays
-`USAGE-SCORECARD-METRICS.md` §21/§22.
-
-### A. A derived five-kind `kind`, projected — not a new classifier
-
-`deriveKind` (`usage-aggregate.mjs`) labels every cluster with exactly one of
-`reask | persona | tap | question | instruction`, first match wins in that order: a member hash on
-the "asked-again" side of `reAskPairs` is `reask` (the most actionable, so it wins); else a persona
-majority (`cluster.personas / cluster.size ≥ PERSONA_KIND_SHARE`, the one new constant, `= 0.5`) is
-`persona`; else a short median (`cluster.tokens.median ≤ TAP_MAX_TOKENS`) is `tap`; else
-`class === 'question'` is `question`; else `instruction`. It is a PURE projection field added by
-`promptClusterRow` from signals the cluster already carries — the shipped `classifyCluster` (§11) is
-untouched, still emits `question/other/mixed/unknown`, and still underlies the `question` kind. WHY
-this does not reopen §11's confidence over-claim: `instruction` here is the residue label of a
-filter dimension the operator toggles, recomputed every scan — not a wire assertion that a
-non-question prompt is a directive. No new fingerprint data. Powers the filter pills.
-
-### B. Masked prompt text shown by default, superseding reveal-on-request
-
-§7's dashboard boundary was "aggregates and masked session links only — never exemplar text." The
-view now shows a pattern's OWN masked prompt text inline, fetched on demand from
-`GET /api/prompts/samples` (`handleSamples` → `resolveClusterSamples`, `dashboard-server.mjs`), with
-a per-viewer `shown/hidden` toggle (default shown; `hidden` makes NO fetch) that preserves a
-text-free posture for screen-sharing. WHY it is safe, and continuous with §7's intent rather than a
-break from it: the samples path re-reads transcripts through the SAME deep-pass machinery the CLI
-`--deep` uses (`readPromptEntries → deepFingerprints → collectExemplars`), applies `maskSecrets` to
-every returned string, and the browser ALREADY served masked transcript text through
-`/api/session/:id` — this is a cluster-scoped instance of that same masked reader, on the operator's
-own transcripts, on their own loopback-bound, per-session-token-gated machine. Nothing is persisted.
-
-Security contract (the endpoint takes the security seat in the final review): masking runs before
-every egress, INCLUDING error paths — `clusterSampleTexts` fails closed with no masker, and a
-resolution failure returns an honest empty `{ samples: [], occurrences: [] }`, never a stack trace
-or a path. The cluster `key` is validated against the window's OWN re-derived cluster key set
-(`resolveClusterSamples` resolves `c.key === key` in the real set) and is NEVER a filesystem path;
-the 16-hex `CLUSTER_KEY_RE` charset check is **defense-in-depth, not the load-bearing guard** (W1
-review) — path safety is architectural: equality against the real key set. Every transcript path is
-guarded by `resolvesWithinRoot` (`session-security.mjs`) — containment at ANY depth, the correct
-guard for the nested `<root>/<project>/<file>` and opencode-`db` paths the deep-pass reader opens,
-ADDITIVE to the existing direct-child `resolvesInsideRoot` whose callers (`/api/session/:id`,
-playback, SSE) are unchanged. `MAX_DEEP_FILE_BYTES` (`deep-pass.mjs`) is enforced before any read.
-
-### C. Dismiss is now a dashboard write — the one relaxation of the read-only-ledger rule
-
-§7/§9's split kept the dashboard read-only for the ledger: "the coaching payload builder has no
-`saveLedger` in its call graph." That still holds for the card-RENDERING path
-(`dashboardCoachingPayload`). But dismissal is now a dashboard action: `POST /api/prompts/dismiss`
-(and `/undismiss`), token-gated and loopback-only, validates the card `id` against `CARD_ID_RE`
-(aliased `CARD_ID_SLUG_RE`) BEFORE any read or write, then persists through `dismissCard` + atomic
-`saveLedger`. WHY it does not reopen the inference boundary: a dismissal is one enum-shaped flag,
-not inference and not prompt text — the read-only-FOR-INFERENCE rule stands (no `--enrich` from the
-dashboard; §7's Recompute deferral is unchanged), and only this single local write is exempted.
-Idempotent (a re-dismiss is a 200 no-op); an unknown id is a 404 with no write.
-
-**Undo = DELETE the record, stated honestly (W1 review I-1).** `POST /api/prompts/undismiss`
-reverses a dismissal by REMOVING its ledger record (`coachingUndismiss` filters it out), so the next
-`reconcile` re-proposes the card fresh. This is a deliberate choice with a consequence a future
-reader must know: a re-proposed card starts clean — the dismissal's `dismissCount` and the anti-nag
-materiality decay (§8) do NOT survive an undo. A re-proposed card is treated as never-dismissed, not
-as a dismissal continued.
-
-### D. Cluster → coaching-card association (the pattern-centric join)
-
-The Recommendation / Draft / Dismiss inside an expanded pattern come from a coaching CARD, but cards
-are a separate unit keyed by id. Each card now publishes two join fields (`usage-coaching-rules.mjs`):
-`clusterKey` — the specific cluster from `evidence.clusterKey` via `findSeedCluster`, else null — and
-`targetKind` — the derived kind a kind-level card addresses, static per rule (`reask-delta → reask`,
-`progress-report-taps → tap`, `codex-role-library → persona`), else null. The client
-(`cardForCluster`) joins a pattern row to a card by `clusterKey === cluster.key` first, then
-`targetKind === cluster.kind`, else none — an unmatched cluster shows Seen-in + masked text only, with
-a neutral note, never a force-fit recommendation (evidence-honesty). No prompt text is added to any
-card by this join; the two fields are ids and enum values only.
+Future work must not merge or rebase that archive branch onto main. Reintroducing any
+archived capability requires a new ADR and an explicit privacy, mutation, and
+maintenance decision.
 
 ## Consequences
 
 ### Positive
 
-- The scorecard can now answer a third question — what the operator actually typed, and what
-  they retype — with the same graded-evidence discipline ADR-0009/0038 established: every figure
-  traces to a fingerprint or a curated label, never to stored prompt text.
-- The class-taxonomy and `labelFor` rulings (§11, §12) removed a real confidence over-claim from
-  every surface that had shipped it, at the render layer, without touching the seed predicates or
-  the library's own classification logic.
-- The privacy split (§7) is structural in two of its three surfaces: the dashboard's coaching
-  payload builder has no `saveLedger`/inference call anywhere in its call graph, so "read-only"
-  and "CLI-only inference" are not conventions a future diff could silently violate.
-- The pipe-drain fix (§14) is a genuine kit-wide correctness improvement that a narrower feature
-  would not have surfaced.
+- The mainline Prompts feature is deterministic, local, read-only, and explainable.
+- No model is invoked and no prompt-derived label or coaching state is written.
+- Dashboard behavior matches its observation-only product contract.
+- The full historical implementation remains recoverable without carrying its runtime
+  and maintenance surface on main.
 
-### Negative, and honestly stated
+### Costs
 
-- The fingerprint layer costs 13× its original design estimate (≈2.8 MB of a 5.1 MB 60-day
-  index) — bounded and disclosed, but real weight on every scan and on `readCache`'s synchronous
-  parse.
-- The personal baseline is reachable in principle (§3) but is `null` for most host/window
-  combinations on this machine today; the detectors that key on it fall back to their absolute
-  floor far more often than the "no fixed percentages" design goal implies in practice, on a
-  corpus this young.
-- The anti-fabrication gate proves grounding, not provenance (§9): it cannot distinguish a
-  genuinely-cited number from a coincidental match against an unrelated field, and is measurably
-  weaker on small integers than on large, specific ones.
-- `--enrich`'s consent-line exemplar count is ≤1 per cluster in practice, not the ≤2 the engine's
-  own privacy cap allows for — today's exemplar-gathering can only produce one real exemplar per
-  cluster without extending the deep-pass machinery, which this build's own brief said not to
-  re-derive.
-- A three-way import cycle (`usage.mjs → usage/coaching.mjs → usage/enrich.mjs → usage.mjs`) was
-  introduced by a complexity-driven refactor mid-build and later closed on its larger arc (this
-  wave: `usage/deep-pass.mjs` is now a shared leaf both `usage.mjs` and `usage/enrich.mjs` import,
-  so `enrich.mjs` no longer imports from `usage.mjs`). The smaller arc — `usage.mjs ↔ usage/
-  coaching.mjs`, via `promptReport` — remains, resolves cleanly today (every crossing binding is a
-  hoisted function declaration), and is recorded here as a structural pattern worth a lint rule if
-  it recurs elsewhere.
-- The archive move (item 7) takes both moved docs permanently outside markdownlint's and lychee's
-  coverage — `docs/archive` is excluded from both by pre-existing repo policy, so nothing enforces
-  internal-link or markdown hygiene on them from this point on. A real coverage loss the move
-  caused, not merely a lint technicality; the exclusion itself predates this build and is left
-  unchanged here.
+- Main no longer recommends a response to a repeated pattern or drafts configuration
+  text.
+- The dashboard cannot reveal even masked prompt samples; exact wording is available
+  only through the explicit local deep pass.
+- Archived designs and screenshots describe a capability that is intentionally absent
+  from main and must be read as historical evidence.
 
-### Deferred, deliberately
+## Validation contract
 
-- **Per-host re-ask split.** `promptPatterns.reAsks` publishes only window-wide `pairCount`/
-  `sessionCount`; the `codex-completion-criteria` coaching card wanted a literal per-host re-ask
-  comparison and instead fires on the same two signals `host-prompt-asymmetry` already computes.
-  Adding a per-host breakdown to the published aggregate is a deliberate, separate wire-shape
-  decision, not made in-band by a card that merely wanted to consume it.
-- **Host-level coaching cards in the pattern-centric table** (Amendment D). The Coaching table
-  joins each pattern to a card by `clusterKey` then `targetKind` (`cardForCluster`).
-  `codex-completion-criteria` (host asymmetry) maps to neither — it publishes
-  `clusterKey: null, targetKind: null`, so the join can never bind it to a pattern row, by
-  construction. It is a host-level card and is deliberately absent from the pattern table in v1
-  (spec §4.5), not force-fit onto an unrelated pattern. Promoting host-level cards into the
-  pattern surface is a separate design question, not answered here.
-- **The dashboard Recompute affordance.** No live button triggers `--enrich` from the dashboard —
-  the privacy split (§7) keeps inference CLI-only by design, and the stale-card hint points at the
-  CLI instead. Not a missing feature; a boundary.
-- **M-9: `medianTokens` is invisible to the anti-fabrication gate.** `buildFindingsSummary` does
-  not carry a cluster's median token length, so that genuine evidence dimension cannot be cited
-  (or checked for fabrication, or tracked for staleness) by any layer-3 output today. Pre-existing
-  before this wave's own changes; carrying it as a numeric field would close the gap in one edit.
-- **Session-classification `--enrich`.** No such layer exists, and none was built — a stale claim
-  to that effect in this document (§12) is corrected in place rather than a feature being added
-  to make it true.
-- **Cross-host mirror dedup.** Already tracked in ADR-0038's own deferred list; this build did not
-  narrow it further. A genuinely human prompt mirrored verbatim from one host's transcript into
-  another's can still be counted as typed on both.
-- **The dashboard client split, and the two pre-existing `dashboard-server.mjs` complexity
-  warnings.** Also already named in ADR-0038's deferred list (`client/usage.mjs` past the
-  file-size point where its panel builders belong in one file — now 1,181 lines, one `max-lines`
-  warning). This build added a NEW file (`usage-prompts.mjs`) for its own panels rather than
-  growing the existing one further, but did not perform the split ADR-0038 already deferred.
-  `dashboard-server.mjs`'s two pre-existing `complexity` warnings (`collectData`, `startDashboard`)
-  are unrelated to this build and were left untouched by every wave that touched that file.
-- **A provider-diverse invocation chain.** `llm-invoke.mjs` wires exactly one host (`claude`) in
-  v1. Whether a future wave should extend it toward the kit's broader multi-provider fallback
-  pattern (as `agentic-qe`'s own LLM router already does) is an open question this build does not
-  answer.
-- **Learned recommendation ranking.** The spec's §6.4 asked that "adopted-and-worked raises the
-  ranking of similar future recommendations", and §6.3 for "plus a learned ranking". Neither is
-  built. Outcomes render on the card they belong to and reorder nothing. With six FIXED rules
-  there is nothing to rank yet, so the honest resolution is a recorded deferral rather than a
-  ranking layer built to satisfy a sentence; the day the rule set is open-ended, this becomes a
-  real question about what "similar" means across rules.
-- **Multi-project semantics of the adoption inputs' explicit-cwd contract.** `gatherAdoptionInputs`
-  reads CLAUDE.md and `.claude/skills/` from an EXPLICIT working directory (M-6 made that
-  explicit rather than ambient), and the CLI and the dashboard legitimately pass different ones:
-  the CLI reads where the operator invoked it, the dashboard reads where the server was started.
-  So the same card can read `adopted` on one surface and `proposed` on the other, correctly, for
-  an operator working across several projects. v1 discloses that at the code level and does not
-  attempt a cross-project notion of adoption — deciding whose CLAUDE.md counts is a design
-  question, not a defect to patch.
+Tests pin the boundary at three levels:
 
-## Verification
+- the served Prompts page contains deterministic panels and no Coaching/posture
+  containers;
+- the CLI JSON payload contains deterministic telemetry and no coaching/enrichment
+  projections;
+- retired CLI flags are rejected.
 
-Every rule change is pinned by a mutation check (the source reverted in isolation, the suite
-re-run, the file restored and diff-verified byte-identical) rather than a passing-test claim
-alone — the bottom-k sketch bound, the estimator's both-complete branch, the re-ask size gate, the
-class-taxonomy booleans, the anti-fabrication gate's per-field coverage, the materiality gate, and
-the `stripDisplayNames` fix all carry a named mutant and a named killer test. Two integration
-regression pins drive the REAL `aggregate()`/`nearDupClusters()`/`reconcile()` pipeline end to end
-— never a hand-built fixture standing in for the real one — through `deriveCards` and the real
-CLI/dashboard printers. The `--enrich` flow's every documented behavior (delta-only labeling,
-synthesis skip on an unchanged corpus, the consent preamble, honest-unavailable, honest-failure,
-output masking) was additionally verified against the real `claude` CLI on this machine's own
-corpus, not only against a scripted shim, with the transcript retained as evidence.
-
-Both citation-bearing reference documents are machine-checked: every `file:line` citation in
-`USAGE-SCORECARD-METRICS.md` and `TRANSCRIPTS.md` is verified against the current source on every
-test run by `tests/kit/doc-citations.test.mjs`, tightened during this build (word-boundary
-identifier matching, then — fix round 1 — a definition-site rule requiring a named symbol's
-citation to contain its one resolvable declaration, not merely a call site or passing mention,
-plus same-row anchor scoping for table citations whose own cell names nothing).
+The existing parser, aggregate, clustering, detector, CLI, dashboard, privacy, and
+cross-platform suites continue to validate the retained telemetry.
 
 ## References
 
-- Research: prompt-repetition and provenance findings underlying this build's F1 layer and its
-  three coaching-relevant detectors — the reference-corpus measurements quoted throughout §2a/§2b/
-  §20–§23 of `USAGE-SCORECARD-METRICS.md`.
-- Spec: `docs/archive/2026-08-29-superpowers-spec-prompts-view-design.md` (archived; the build-time
-  interface contract — evidence contract, panel layout, the six coaching rules, the three-layer
-  adaptive architecture, the outcome ledger) and
-  `docs/archive/2026-08-28-superpowers-plan-scorecard-matrix-a.md` (archived; the originating
-  plan). Both shipped on this branch; this ADR and `USAGE-SCORECARD-METRICS.md` are the living
-  record — see `docs/archive/README.md` for why they are historical.
-- `src/lib/usage-parsers.mjs`, `src/lib/usage-provenance.mjs` (fingerprints, provenance),
-  `src/lib/usage-aggregate.mjs` (prompt stats, personal baselines, the `promptPatterns`
-  projection), `src/lib/usage-insights.mjs` (the three detectors),
-  `src/lib/usage-prompt-patterns.mjs`, `src/lib/usage-prompt-vocabulary.mjs` (clustering,
-  seeds, `labelFor`)
-- `src/lib/usage-coaching.mjs`, `src/lib/usage-coaching-rules.mjs`, `src/lib/usage-evidence-hash.mjs`,
-  `src/lib/usage-outcome-ledger.mjs` (coaching cards and the outcome ledger)
-- `src/lib/usage-enrich.mjs`, `src/lib/llm-invoke.mjs`, `src/lib/usage-label-store.mjs` (layer-3
-  enrichment and its invocation seam)
-- `src/commands/usage.mjs`, `src/commands/usage/coaching.mjs`, `src/commands/usage/enrich.mjs`,
-  `src/commands/usage/deep-pass.mjs` (`ak usage prompts`)
+- [Usage scorecard metrics](../USAGE-SCORECARD-METRICS.md) §2a, §2b, §20–§22
+- [Dashboard guide](../DASHBOARD.md) — Prompts
+- [Archived documents index](../archive/README.md)
+- `src/lib/usage-parsers.mjs`, `src/lib/usage-provenance.mjs`
+- `src/lib/usage-aggregate.mjs`, `src/lib/usage-insights.mjs`
+- `src/lib/usage-prompt-patterns.mjs`, `src/lib/usage-prompt-vocabulary.mjs`
+- `src/commands/usage.mjs`, `src/commands/usage/deep-pass.mjs`
 - `src/lib/dashboard-server.mjs`, `src/lib/dashboard/client/usage.mjs`,
-  `src/lib/dashboard/client/usage-prompts.mjs`, `src/lib/dashboard/page.mjs` (the Prompts
-  dashboard view)
-- [Usage scorecard metrics](../USAGE-SCORECARD-METRICS.md) §2a, §2b, §20–§23 — the per-metric
-  formulas and sources
+  `src/lib/dashboard/client/usage-prompts.mjs`, `src/lib/dashboard/page.mjs`

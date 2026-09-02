@@ -245,8 +245,8 @@ Measured signal coverage on the reference corpus: `ai-title` **93%**, tool mix *
 - **Layer 2 — rules.** Weighted keywords over the title plus a tool-mix prior (Edit/Write-heavy →
   building; Read/Grep-heavy → reviewing; Agent-heavy → orchestration). Deterministic, offline,
   explainable. Emits a **confidence**, and confidence is *displayed*, not hidden.
-- **Layer 3 — optional LLM labelling.** Opt-in (`--enrich`), applied only to the low-confidence
-  residue, cached permanently per session id per §2. Off by default so the panel stays offline-first.
+- **Layer 3 — not implemented.** Main keeps classification deterministic; no model-invoked
+  session-labelling path or persisted inference cache is supported.
 
 Sessions below the confidence floor stay **Unclassified** and are shown as such. Force-fitting a label
 to reach 100% coverage would make the categories untrustworthy everywhere, not just on the residue.

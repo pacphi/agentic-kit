@@ -16,22 +16,6 @@ import {
   readOpenRouterActivity,
   refreshOpenRouterActivity,
 } from '../lib/usage-openrouter.mjs';
-import { deriveCards } from '../lib/usage-coaching.mjs';
-import {
-  loadLedger, saveLedger, defaultLedgerPath, gatherAdoptionInputs,
-} from '../lib/usage-outcome-ledger.mjs';
-// The ledger reconcile, --enrich (METRICS.md §23), and --dismiss are ONE
-// orchestration (resolveCoachingAndEnrichment) — split out of runPrompts on
-// the repo's complexity ceiling; it in turn imports usage/enrich.mjs's
-// runEnrichPass (the --enrich flow: consent preamble, exemplar gathering,
-// persistence), which reuses the SAME shared deep-pass machinery this file
-// does — both import it from ./usage/deep-pass.mjs, so neither imports the
-// other for it.
-import {
-  printCoaching, runDraftFlag, resolveCoachingAndEnrichment,
-} from './usage/coaching.mjs';
-import { applyLabelStoreToPatterns } from '../lib/usage-enrich.mjs';
-import { loadLabelStore, defaultLabelStorePath } from '../lib/usage-label-store.mjs';
 import {
   promptCacheFile, readPromptEntries, deepFingerprints, exemplarCandidates, collectExemplars,
   MAX_DEEP_FILE_BYTES,
@@ -45,12 +29,6 @@ export const options = {
   // would make "the user asked for 14" indistinguishable from "nobody asked".
   window: { type: 'string' },
   deep: { type: 'boolean', default: false },
-  // Coaching (METRICS.md §22), prompts-only: print one card's draft verbatim, or
-  // persist a dismissal. Both take a card id, so both are strings, not flags.
-  draft: { type: 'string' },
-  dismiss: { type: 'string' },
-  // Layer-3 enrichment (METRICS.md §23), prompts-only, opt-in, CLI-only inference.
-  enrich: { type: 'boolean', default: false },
 };
 
 export const help = `ak usage — provider account analytics cache + offline scorecard summary
@@ -65,7 +43,7 @@ Usage:
   ak usage status
   ak usage refresh openrouter
   ak usage score [--window 7|14|30] [--json]
-  ak usage prompts [--window 7|14|30|all] [--deep] [--enrich] [--json] [--draft ID] [--dismiss ID]
+  ak usage prompts [--window 7|14|30|all] [--deep] [--json]
 
 \`ak usage prompts\` reads the prompt FINGERPRINTS the transcript scan already
 stores — a hash, a token count, a bounded token-hash sketch, and who wrote the
@@ -73,15 +51,9 @@ turn. No prompt text is stored by it and none is printed. \`--deep\` is the
 exception, and is opt-in for exactly that reason: it re-reads the transcripts
 to print the text behind each finding. That text goes to your terminal and is
 written nowhere — but with --json it is in the payload, so redirect that to a
-file only if you mean to.
-
-\`--enrich\` is a SEPARATE opt-in: a delta-only model call (the Claude Code
-CLI, your subscription) that names still-unnamed recurring clusters and
-proposes up to three coaching cards, grounded ONLY in masked exemplar
-snippets and aggregate counts — never a full prompt. It prints exactly what
-it is about to send before sending it. Settled labels are never re-judged.
-Without the Claude Code CLI on PATH, it prints one line and exits 0 — every
-deterministic tier of this report is unaffected.
+file only if you mean to. The archived coaching and model-enrichment capability
+is preserved on \`archive/prompts-capability-main-2026-09-01\`; main publishes
+deterministic prompt telemetry only.
 
 Environment:
   OPENROUTER_MANAGEMENT_KEY   required only for refresh; an inference key is
@@ -97,10 +69,6 @@ Options:
               behind each finding. Costs a few seconds; the report states how
               many it opened and how long it took. With --json the exemplars
               (which CONTAIN PROMPT TEXT) ride under an \`exemplars\` key.
-  --draft ID    prompts only: print that card's draft verbatim; --dismiss ID persists a dismissal
-  --enrich    prompts only: run the delta-inference labeling/coaching pass. Needs the Claude
-              Code CLI; prints what will be sent before it sends anything. With --json the
-              result rides under an \`enrichment\` key (counts only — never text).
 
 Examples:
   ak usage status                    inspect the offline cache; no network
@@ -629,9 +597,7 @@ function printClusters(clusters, totals) {
     ]));
   }
   info(dim('  other = imperative or declarative, undifferentiated — the shape rules test only for a'));
-  // Fix round 1, M-6: enrichment (--enrich) has arrived and NAMES clusters —
-  // it does not reclassify this split, which the old wording implied.
-  info(dim('  question; enrichment (--enrich) names clusters, it does not reclassify them into this split.'));
+  info(dim('  question; deterministic labels describe shape only and do not reclassify this split.'));
 }
 
 /** The stricter subset of the same phenomenon: identical normalized text, not
@@ -702,10 +668,8 @@ function printHeadless(h) {
 
 /** The aggregate tier, assembled: the shared projection plus the one figure it
  *  does not carry (headless share, which is a property of the session rows
- *  rather than of the prompts). Exported solely so usage/coaching.mjs's
- *  `resolveCoachingAndEnrichment` can recompute it after a --enrich pass
- *  changes `agg.promptPatterns` — not part of this command's own contract. */
-export function promptReport(agg, win) {
+ *  rather than of the prompts). */
+function promptReport(agg, win) {
   return {
     win,
     patterns: agg.promptPatterns,
@@ -721,9 +685,7 @@ export function promptReport(agg, win) {
 // exemplar-gathering machinery in ./usage/deep-pass.mjs (promptCacheFile,
 // readPromptEntries, deepFingerprints, exemplarCandidates, collectExemplars —
 // see that file's own header for the privacy-boundary reasoning and why it
-// reads the index cache the tier above never does). `--enrich`
-// (usage/enrich.mjs) reuses the identical machinery for its own,
-// scoped-to-candidate-clusters pass rather than a second copy of it.
+// reads the index cache the tier above never does).
 //
 // Every exemplar collected is run through `maskSecrets` before it is printed
 // or serialized below — the join is computed on the raw text so the hash
@@ -1003,45 +965,10 @@ function printDeepPass(deep) {
   printPersonas(deep.personas, deep.totals.personas);
 }
 
-// Coaching section rendering, --json shapes, and --draft/--dismiss handling
-// (METRICS.md §22) live in ./usage/coaching.mjs (imported above) — split out
-// on the status.mjs/status/*.mjs precedent once this file crossed the
-// repo's max-lines threshold. The --enrich flow itself lives in
-// ./usage/enrich.mjs for the same reason. runPrompts below is the only
-// caller of either.
-
-/** The --json `enrichment` key: counts only, never text (spec: "--enrich
- *  --json: enriched data included, still no text"). `null` when --enrich
- *  was never able to run at all (no invocation path, or a future-schema
- *  label store) — distinguished from "ran and did nothing" the same way
- *  every other absent-vs-zero field on this payload is. */
-function enrichmentProjection(enrichment) {
-  if (!enrichment) return { ran: false };
-  return {
-    ran: true,
-    labels: {
-      candidates: enrichment.labelResult.candidates.length,
-      labeled: enrichment.labelResult.labeled,
-      dropped: enrichment.labelResult.dropped,
-    },
-    cards: {
-      proposed: enrichment.cardResult.proposed,
-      accepted: enrichment.cardResult.accepted,
-      dropped: enrichment.cardResult.dropped,
-    },
-  };
-}
-
 async function runPrompts({ flags, deps }) {
   const win = parsePromptWindow(flags.window);
   if (win == null) {
     warn(`ak usage prompts: --window must be 7, 14, 30, or all (got ${JSON.stringify(flags.window)})`);
-    return 2;
-  }
-  // Fix round 1, M-7: rejected before any I/O — neither flag's write can
-  // silently win over the other.
-  if (flags.draft != null && flags.dismiss != null) {
-    warn('ak usage prompts: --draft and --dismiss cannot be combined in one run.');
     return 2;
   }
   const readAgg = deps.readIndex ?? readIndex;
@@ -1065,96 +992,15 @@ async function runPrompts({ flags, deps }) {
     return 1;
   }
 
-  // W5 enrichment (METRICS.md §23): the persisted label store applies to EVERY
-  // pass, --enrich or not — a settled label is a fact about the corpus, not
-  // a one-time render. A newer-schema store reads as "no store" for THIS
-  // pass (same I-2 rule the outcome ledger already follows below); the
-  // write-refusal half of that rule is enforced inside runEnrichPass.
-  const labelStorePath = deps.labelStorePath ?? defaultLabelStorePath();
-  const labelStore = loadLabelStore(labelStorePath);
-  if (labelStore.future) {
-    // Fix round 1, I-4: guarded on `!flags.json` — this fires on EVERY pass
-    // (not only `--enrich`), and `warn` writes to stdout (output.mjs); an
-    // unguarded call here corrupts the `--json` document this function
-    // prints later, exactly the hazard the implementer already reasoned
-    // about and guarded for runEnrichPass's own copy of this same warning.
-    if (!flags.json) {
-      warn(`ak usage prompts: the label store at ${labelStorePath} is a newer schema `
-        + `(v${labelStore.version}) this build does not understand — enriched labels/cards are `
-        + 'unavailable this run, and the file was left untouched.');
-    }
-  }
-  // Security review, re-verification round (transparency): `loadLabelStore`
-  // has always counted the entries its read-side validation dropped, and
-  // nothing ever read that count — so a store edited out of band lost entries
-  // silently, and the operator saw a shorter list with no explanation.
-  // Failing closed is right; failing closed QUIETLY is not. Guarded on
-  // `!flags.json` for the same reason as the future-schema warning above:
-  // `warn` writes to stdout, and an unguarded call corrupts the JSON document
-  // this function prints later.
-  if (labelStore.dropped && !flags.json) {
-    const { labels: droppedLabels = 0, cards: droppedCards = 0 } = labelStore.dropped;
-    const parts = [
-      droppedLabels ? `${droppedLabels} label${droppedLabels === 1 ? '' : 's'}` : null,
-      droppedCards ? `${droppedCards} card${droppedCards === 1 ? '' : 's'}` : null,
-    ].filter(Boolean);
-    if (parts.length) {
-      warn(`ak usage prompts: dropped ${parts.join(' and ')} from the label store at `
-        + `${labelStorePath} — the entries did not pass this build's validation and were ignored, `
-        + 'not repaired. Re-run with --enrich to re-derive anything still missing.');
-    }
-  }
-  const activeLabels = labelStore.future ? {} : labelStore.labels;
-  agg.promptPatterns = applyLabelStoreToPatterns(agg.promptPatterns, activeLabels);
-
-  // Coaching cards (METRICS.md §22) derive from the OPERATOR'S window, for display —
-  // `agg.insights` is populated unconditionally by aggregate()
-  // (usage-aggregate.mjs), not only when `prompts: true`, so it needs no
-  // separate read here.
-  const ruleCards = deriveCards({
-    promptPatterns: agg.promptPatterns, promptBaselines: agg.promptBaselines,
-    promptsByHost: agg.promptsByHost, insights: agg.insights, now: Date.now(),
-  });
-
-  // --draft is a pure read over the RULE cards alone — no ledger, no
-  // canonical fetch, no write (Fix round 1, M-7). Enriched cards carry no
-  // draft (the synthesis contract, METRICS.md §23, has none), so this stays scoped.
-  if (flags.draft != null) return runDraftFlag(ruleCards, flags.draft, flags.json);
-
-  let report = promptReport(agg, win);
+  const report = promptReport(agg, win);
   const deep = flags.deep ? runDeepPass(agg, report, win, deps) : null;
 
-  const ledgerPath = deps.ledgerPath ?? defaultLedgerPath();
-  const loadLedgerFn = deps.loadLedger ?? loadLedger;
-  const saveLedgerFn = deps.saveLedger ?? saveLedger;
-  const cwd = deps.cwd ?? process.cwd();
-  const adoptionInputs = deps.adoptionInputs ?? gatherAdoptionInputs(cwd);
-  const now = Date.now();
-
-  // The ledger reconcile, --enrich (METRICS.md §23), and --dismiss all live in ONE
-  // orchestration (usage/coaching.mjs's resolveCoachingAndEnrichment) — split
-  // out on the repo's complexity ceiling, since this was the single largest
-  // branch runPrompts carried. `report` may come back reassigned (a --enrich
-  // pass that actually changed a label re-renders it); `agg.promptPatterns`
-  // may be mutated in place for the same reason.
-  const resolved = await resolveCoachingAndEnrichment({
-    agg, report, win, ruleCards, activeLabels, labelStore, labelStorePath,
-    ledgerPath, loadLedgerFn, saveLedgerFn, readAgg, adoptionInputs, now, flags, deps,
-  });
-  if ('earlyReturn' in resolved) return resolved.earlyReturn;
-  const { coaching, enrichment } = resolved;
-  report = resolved.report;
-
   if (flags.json) {
-    const projection = {
-      ...promptProjection(agg, report), coaching,
-      ...(flags.enrich ? { enrichment: enrichmentProjection(enrichment) } : {}),
-    };
+    const projection = promptProjection(agg, report);
     console.log(JSON.stringify(deep ? { ...projection, exemplars: deep } : projection, null, 2));
     return 0;
   }
   printPromptReport(agg, report);
-  printCoaching(coaching);
   if (deep) printDeepPass(deep);
   return 0;
 }
@@ -1176,12 +1022,9 @@ function runDeepPass(agg, report, win, deps) {
 // SECOND fixture transcript whose priced total is exactly zero is
 // disproportionate, since a session prices to exactly $0 only by carrying no
 // usage rows at all, which the aggregate's own cost distribution already
-// excludes — see usage-aggregate.mjs's `_priced`) and
-// tests/kit/usage-coaching.test.mjs (the INTEGRATION REGRESSION PIN, which
-// renders the coaching section through the real CLI printer rather than a
-// hand-rolled restatement of it). Neither is part of this command's CLI
-// contract.
-export const __test = { fmtUsdMin, printCoaching };
+// excludes — see usage-aggregate.mjs's `_priced`). It is not part of this
+// command's CLI contract.
+export const __test = { fmtUsdMin };
 
 /** `ak usage status` — a pure offline read of the OpenRouter activity cache. */
 function runOpenRouterStatus({ flags, cacheFile, read }) {

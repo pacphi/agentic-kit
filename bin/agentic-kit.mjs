@@ -146,16 +146,9 @@ async function main() {
     return 0;
   }
 
-  // strict:true — security review SEC-10. Under `strict:false` an option
-  // declared as taking a value swallows whatever follows it, flag or not:
-  // `ak usage prompts --draft --json` consumed `--json` AS THE DRAFT ID and
-  // then exited 2 in HUMAN format, so a script doing
-  // `ak usage prompts --draft "$ID" --json | jq` with `$ID` unset silently got
-  // prose instead of JSON. `--dismiss --window 30` likewise ate `--window`,
-  // leaving it defaulted to 365 days. Strict mode refuses all three (and the
-  // no-value-at-all case, which used to yield the string "true"), plus an
-  // unknown flag — which is a real behavior change, and the right one: a
-  // mistyped flag that silently does nothing is worse than one that says so.
+  // strict:true — a value-taking option must never swallow a following flag,
+  // and unknown flags must fail loudly. A mistyped option that silently does
+  // nothing is worse than one that says so.
   let parsed;
   try {
     parsed = parseArgs({

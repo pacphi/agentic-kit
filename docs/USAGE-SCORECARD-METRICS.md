@@ -36,8 +36,8 @@ Your rhythm, How you run, When you work, Models in play, Tool mix, Model mix
 over time, Reliability, Projects, What you worked on. Three adjacent surfaces
 are documented here because they answer questions the Scorecard raises: the
 Limits view (§13b), the Codex thread ledger (§13c), and the **Prompts** tab
-in full (§2a, §2b, §20–§23) — its own dedicated `ak usage prompts` command,
-dashboard view, coaching cards, and opt-in layer-3 enrichment. The
+in full (§2a, §2b, §20–§22) — its dedicated `ak usage prompts` command and
+deterministic dashboard view. The
 **Findings** and **Sessions** tabs are governed by separate rules and are out
 of scope here except where they share a data source with a Scorecard or
 Prompts metric — the three Prompts-derived Findings cards (§2b) are the one
@@ -185,14 +185,14 @@ responses = Σ over included sessions of session.responses
 **Source:**
 
 - Filter: a parsed record with zero assistant turns is dropped entirely — "no
-  assistant turn → not a session" (`usage-aggregate.mjs:943`) — and a record whose
+  assistant turn → not a session" (`usage-aggregate.mjs:868`) — and a record whose
   last activity falls outside the requested window is dropped too
-  (`usage-aggregate.mjs:944`).
+  (`usage-aggregate.mjs:869`).
 - `responses` accumulation: Claude increments per assistant message
 (`usage-parsers.mjs:542-547`); Codex increments per `agent_message` event
 (`usage-parsers.mjs:846-851`).
 - Totals: `totals.responses += s.responses` per included session
-(`usage-aggregate.mjs:999`).
+(`usage-aggregate.mjs:924`).
 - Render: `kpi("sessions", fmtNum(t.sessions), fmtNum(t.responses)+" assistant
   turns", "")` (`dashboard/client.mjs`).
 
@@ -274,10 +274,8 @@ that shape", never a measurement that came out zero, and the corpus carries
 exactly `{h, t, th, p}` plus the two optional flags — nothing else, ever. No
 parser writes prompt text to a session record and the index cache therefore
 carries none. (`session.title` is a separate, pre-existing surface — masked
-and clipped — with its own contract, §1.) This is a claim about
-`usage-index.json` specifically, not about the system as a whole: §23
-documents a SECOND on-disk store, populated only when the operator opts into
-layer-3 enrichment, that does carry a bounded, masked, prompt-derived string.
+and clipped — with its own contract, §1.) No second prompt-derived label or
+coaching store exists on main.
 
 **Provenance** answers *who wrote this*, which is not the same question as the
 prompt gate's *did the harness write this*. Measured on the reference corpus
@@ -421,11 +419,11 @@ this day carried the fingerprint layer", so a zero here is *measured*.
 | Symbol | Location |
 |---|---|
 | `TAP_MAX_TOKENS` | `src/lib/usage-aggregate.mjs:286` |
-| the baseline window and floor | `src/lib/usage-aggregate.mjs:305-306` |
-| `v16Projection` (per session) | `src/lib/usage-aggregate.mjs:342` |
-| `foldSessionPrompts` | `src/lib/usage-aggregate.mjs:381` |
-| `sealPromptHosts` | `src/lib/usage-aggregate.mjs:399` |
-| `buildPromptBaselines` | `src/lib/usage-aggregate.mjs:429` |
+| the baseline window and floor | `src/lib/usage-aggregate.mjs:293-293` |
+| `v16Projection` (per session) | `src/lib/usage-aggregate.mjs:329` |
+| `foldSessionPrompts` | `src/lib/usage-aggregate.mjs:368` |
+| `sealPromptHosts` | `src/lib/usage-aggregate.mjs:386` |
+| `buildPromptBaselines` | `src/lib/usage-aggregate.mjs:416` |
 | `detectSupervisionTapShare` | `src/lib/usage-insights.mjs:780` |
 | `detectHeadlessShare` | `src/lib/usage-insights.mjs:808` |
 | `detectHostPromptAsymmetry` | `src/lib/usage-insights.mjs:845` |
@@ -469,7 +467,7 @@ this day carried the fingerprint layer", so a zero here is *measured*.
 - **`personaOpeners` counts only typed (`p === 'human'`) openers**, though the
   `o` flag itself is provenance-blind — a tool's own template still carries
   `o`, and the aggregate filters it out before it reaches this figure, because
-  the coaching move here is about what the *operator* retypes by hand.
+  this metric is about what the *operator* retypes by hand.
 
 ---
 
@@ -528,7 +526,7 @@ lexicographically so no `Date` parsing is involved and the module stays
 clock-free.
 
 `foldSessionUsageRow` passes each usage row's own `day` to `costOf`
-(`usage-aggregate.mjs:813-815`), which
+(`usage-aggregate.mjs:738-740`), which
 it already has because rows are keyed by `(day, model)`. **This is the whole
 point:** tokens metered in August must still read as August's rate when the
 panel is opened in December. Pricing by *today's* date instead would restate a
@@ -610,9 +608,9 @@ tokens = input + output + cacheRead + cacheWrite   (summed across all rows in wi
 ```
 
 **Source:** `t.tokens` from `totals`, accumulated per row at
-`usage-aggregate.mjs:825` (`rowTokens = row.input + row.output + row.cacheRead +
+`usage-aggregate.mjs:750` (`rowTokens = row.input + row.output + row.cacheRead +
 row.cacheWrite`) and rolled into `totals.tokens` via `addTo`
-(`usage-aggregate.mjs:730-739`). Rendered with `fmtTok()`
+(`usage-aggregate.mjs:655-664`). Rendered with `fmtTok()`
 (`dashboard/client.mjs`): `≥1e9` → `"X.XB"`, `≥1e6` → `"X.XM"`,
 `≥1e3` → `"X.XK"`, else the rounded integer.
 
@@ -726,11 +724,11 @@ session data, and each needs its own fix:
   IDLE_GAP_MS; "a run of one timestamp yields a zero-length interval and so
   contributes nothing" (comment, `usage-parsers.mjs:382-387`).
 - Aggregation, each its own call to `mergeIntervals`: `engagedSeconds` over
-  every session's active sub-intervals (`usage-aggregate.mjs:1114`);
+  every session's active sub-intervals (`usage-aggregate.mjs:1039`);
   `spanUnionSeconds` over whole spans instead
-  (`usage-aggregate.mjs:1113`); spanMs is a running sum of
-  "s._span[1] - s._span[0]" across the loop (`usage-aggregate.mjs:1030`),
-  finalized into `spanMinutes` (`usage-aggregate.mjs:1108`).
+  (`usage-aggregate.mjs:1038`); spanMs is a running sum of
+  "s._span[1] - s._span[0]" across the loop (`usage-aggregate.mjs:955`),
+  finalized into `spanMinutes` (`usage-aggregate.mjs:1033`).
 - Render: `fmtHours()` (`dashboard/client.mjs`, `≥10h` rounds to the
   nearest hour, else one decimal place) and `fmtMins()`
   (`dashboard/client.mjs`, `≥60min` rounds to hours, else whole
@@ -786,7 +784,7 @@ session that runs from 23:58 local to 00:05 local is billed to the day its
 *first* row landed on (test:
 `tests/kit/usage-index.test.mjs:738`, "a session that opens before midnight
 is counted on its first billed day"). Accumulation, at this call: `dayBucket(byDay,
-row.day)` then `d.cost = round(d.cost + rowCost)` (`usage-aggregate.mjs:822-827`). Bar height:
+row.day)` then `d.cost = round(d.cost + rowCost)` (`usage-aggregate.mjs:747-752`). Bar height:
 `h = maxDay ? max(2, cost/maxDay*100) : 2` (`dashboard/client.mjs`) —
 every non-empty day gets a visually nonzero bar (floor of 2%), so a very
 cheap day is never rendered as invisible.
@@ -813,8 +811,8 @@ renders "no sessions in window" instead of zeroed figures
 (`dashboard/client.mjs`).
 
 **Formula:** identical aggregation to every other bucket
-(`byHost[s.host]`, populated via `addTo()` (`usage-aggregate.mjs:730-739`),
-  called once per session at this call: `usage-aggregate.mjs:1033`), keyed by the literal string
+(`byHost[s.host]`, populated via `addTo()` (`usage-aggregate.mjs:655-664`),
+  called once per session at this call: `usage-aggregate.mjs:958`), keyed by the literal string
 `"claude"` or `"codex"` assigned at parse time
 (this call: `blankSession(id, 'claude')` / `blankSession(id, 'codex')`,
 `usage-parsers.mjs:610`, `:986`, `parseClaude`/`parseCodex` entry points).
@@ -834,8 +832,8 @@ of exactly that kind, both in `parseCodex`.
 
 **Two identity maps, and the axis that is deliberately not one.** The aggregate
 buckets window spend by two identities, and reading one as the other is the
-mistake this split exists to prevent (`usage-aggregate.mjs:984`,
-`usage-aggregate.mjs:1012-1013`):
+mistake this split exists to prevent (`usage-aggregate.mjs:909`,
+`usage-aggregate.mjs:937-938`):
 
 - **`byHost`** — the execution host: which CLI wrote the transcript
   (`claude`, `codex`, `opencode`). This is what the two cards above render.
@@ -878,7 +876,7 @@ punchcard[dow + "-" + hour] += 1   per assistant/agent_message response, at its 
 **Source:** incremented once per Claude assistant turn
 (`usage-parsers.mjs:545-547`, keyed by this call: `punchKey(at)`) and once per Codex
 `agent_message` (`usage-parsers.mjs:846-851`), merged into the window-level
-`punchcard` object per session (`usage-aggregate.mjs:1052`). Cell intensity is
+`punchcard` object per session (`usage-aggregate.mjs:977`). Cell intensity is
 linear against the single busiest cell in the window:
 `v = pcMax ? n/pcMax : 0` (`dashboard/client.mjs`) — this is a
 **relative**, not absolute, scale, so the heatmap's brightest cell is always
@@ -920,9 +918,9 @@ byModel[model].sessions  = count of DISTINCT sessions whose s.models includes th
 ```
 
 **Source:** cost/tokens/responses accumulate inside the usage-row loop
-(`usage-aggregate.mjs:817-844`); the `sessions` count is deliberately computed
+(`usage-aggregate.mjs:742-769`); the `sessions` count is deliberately computed
 **separately**, once per session over its `s.models` array
-(`usage-aggregate.mjs:941-948`) rather than inside the cost loop, precisely
+(`usage-aggregate.mjs:866-873`) rather than inside the cost loop, precisely
 **so that a model can appear in `byModel` — with a nonzero session count —
 even in a session that contributed zero cost/tokens/responses for that
 model.** This is not an edge case invented for this document: it is the
@@ -932,7 +930,7 @@ excluded subagent-replay session still shows up as "used," at zero cost,
 rather than vanishing.
 
 `byModel[...].responses` is populated from `row.responses`
-(`usage-aggregate.mjs:835-836`), which in turn comes from the `responses` field
+(`usage-aggregate.mjs:760-761`), which in turn comes from the `responses` field
 passed into `addUsage()` at the call site — `1` per Claude assistant turn
 (`usage-parsers.mjs:583`), or `rec.responses` (the session's whole response
 count) once per Codex session, passed at the single point Codex's
@@ -958,8 +956,8 @@ time, someone was genuinely waiting on it — but it is never pushed into
 `rec.models` and `addUsage()` is never called for it, so it can no longer
 create a `byModel` row of any kind. It increments the record's own
 `exceptions` count instead (`usage-parsers.mjs:562`), rolled up into
-`totals.exceptions` (`usage-aggregate.mjs:1025`) and surfaced per-session
-(`usage-aggregate.mjs:896`, alongside the existing `sidechain`/`threadSource`
+`totals.exceptions` (`usage-aggregate.mjs:950`) and surfaced per-session
+(`usage-aggregate.mjs:821`, alongside the existing `sidechain`/`threadSource`
 flags — inspectable in the Sessions tab, never hidden). When
 `totals.exceptions > 0`, the panel header shows a small `"· N
 dropped/errored turns excluded"` note (`dashboard/client.mjs`);
@@ -1090,12 +1088,7 @@ happened rather than trusting the category blindly.
 No LLM-labelling layer exists for this classifier, for the `Unclassified`
 residue or otherwise — every category shown here comes from the three
 deterministic layers above; there is no session-classification inference
-path, opt-in or otherwise, anywhere in this codebase. The `--enrich` flag on
-`ak usage prompts` is a **different, unrelated** feature: it names recurring
-*prompt clusters* and synthesizes coaching cards from prompt-repetition
-findings — never a session's What-you-worked-on category, and never applied
-"below the confidence floor" or "cached permanently per session". See §23 for
-what `--enrich` actually does.
+path, opt-in or otherwise, anywhere in this codebase.
 
 ---
 
@@ -1324,12 +1317,12 @@ Codex ≥0.140 maintains its own SQLite thread ledger (`~/.codex/state_N.sqlite`
 globs and takes the newest). `readCodexState` (`:62`, whose own delegate
 call reads the db file) reads per-thread
 `thread_source` (`user` vs `subagent`) plus `thread_spawn_edges`, and
-`applyCodexLedger` (`usage-aggregate.mjs:1315-1327`) overlays that onto parsed
+`applyCodexLedger` (`usage-aggregate.mjs:1240-1252`) overlays that onto parsed
 sessions: a ledger-identified subagent has its token usage stripped — its
 rollout replays the parent's entire token history (ccusage/ccusage#950
 measured up to 91× inflation) — while the session record stays visible.
 **The parser is primary, the ledger is the fallback**: `rec.threadSource ??
-t?.threadSource ?? fromEdges` (`usage-aggregate.mjs:1346`) reads the rollout's
+t?.threadSource ?? fromEdges` (`usage-aggregate.mjs:1271`) reads the rollout's
 own `session_meta.thread_source` first, and only consults the ledger when
 that line is missing entirely. This is sound because `thread_source` is now
 the FIRST session_meta line's value (§1.2) rather than whichever meta
@@ -1422,19 +1415,19 @@ p(q), over N samples, landing in bucket i (count n_i, running total `cum` before
 - Session length: `seal` derives each session's `lenSeconds` from its own
   active intervals (`usage-parsers.mjs:405-410`) — the §6 engaged figure for
   one session, never its first-to-last span.
-- Window merge: `buildRhythm` (`usage-aggregate.mjs:1113-1133`) adds the
+- Window merge: `buildRhythm` (`usage-aggregate.mjs:1038-1058`) adds the
   per-session `latHist` slot-wise and buckets each session's `lenSeconds`.
 - Percentiles: `percentileFromBuckets` (`usage-aggregate.mjs:240-257`). The
   browser re-implementation `bucketPercentile` (`usage-rhythm.mjs:106-126`) is
   pinned to byte-identical output, and the browser's edge copies to the server
-  constants, by `tests/kit/dashboard-usage-telemetry.test.mjs:1640-1655` and
-  `:1623-1631`.
+  constants, by `tests/kit/dashboard-usage-telemetry.test.mjs:924-942` and
+  `:944-955`.
 - Render: `lengthCard`/`latencyCard` and the `≥` prefix helper `fmtAtLeast` in
   `src/lib/dashboard/client/usage.mjs` (that bundle shares a basename with the
   CLI command module, so its render sites are cited by function name rather
-  than by line); the CLI's own `fmtAtLeast` is `src/commands/usage.mjs:211-214`
+  than by line); the CLI's own `fmtAtLeast` is `src/commands/usage.mjs:179-182`
   and `printScoreRhythm`, which makes that call,
-  (`src/commands/usage.mjs:276-283`) prints the pair.
+  (`src/commands/usage.mjs:244-251`) prints the pair.
 
 **Worked example**, latency, computable by hand. `latHist = [10, 30, 20, 25,
 10, 5]`, so N = 100.
@@ -1569,16 +1562,16 @@ mode                      = normalizeMode(host, raw evidence)  or 'not-recorded'
 **Source:** `normalizeMode` (`usage-modes.mjs:23-35`) is the whole taxonomy;
 `MODES` (`usage-modes.mjs:4`) is the closed four-value vocabulary. Per-day
 folding is "addCost(d.byMode, rec.mode ?? 'not-recorded', rowCost)"
-(`usage-aggregate.mjs:831`) — in the usage-row pass, because only a row knows
+(`usage-aggregate.mjs:756`) — in the usage-row pass, because only a row knows
 which day its dollars landed on. The window bucket is
-this call: `addTo(bucket(byMode, s.mode ?? 'not-recorded'), s)` (`usage-aggregate.mjs:1037`).
+this call: `addTo(bucket(byMode, s.mode ?? 'not-recorded'), s)` (`usage-aggregate.mjs:962`).
 The evidence each parser reads: Claude's `permissionMode`, off the human prompt
 only (`usage-parsers.mjs:506-507`); Codex's `approval_policy`/`sandbox_policy`
 off each `turn_context`, last one wins since a session may renegotiate mid-run
 (`usage-parsers.mjs:697-702`); OpenCode's `mode` off each assistant message
 (`usage-opencode.mjs:240-241`). Render is `modeChart` in
 `src/lib/dashboard/client/usage.mjs`; the CLI table is `printScoreModeTable`
-(`src/commands/usage.mjs:302-304`).
+(`src/commands/usage.mjs:270-272`).
 
 **The mapping table**, in full (`usage-modes.mjs:6-17`), pinned value-by-value
 by `normalizeMode` assertions in `tests/kit/usage-modes.test.mjs:9-52`, and the
@@ -1634,8 +1627,8 @@ The raw string is kept beside the normalized one as `modeRaw`
 a reader checking it needs the evidence it was made from. `not-recorded` is a
 first-class bucket key rather than a display fallback, folded at this call:
 `addTo(bucket(byMode, s.mode ?? 'not-recorded'), s)`
-(`usage-aggregate.mjs:1033-1040`), it is always offered as a row by the CLI table
-even at zero (`printBucketTable`, `src/commands/usage.mjs:289-296`), and
+(`usage-aggregate.mjs:958-965`), it is always offered as a row by the CLI table
+even at zero (`printBucketTable`, `src/commands/usage.mjs:257-264`), and
 `segColor` (`src/lib/dashboard/client/usage-rhythm.mjs:191-192`) forces it to
 the de-emphasis ink rather than letting a palette give
 it a series colour — spend with no posture
@@ -1652,9 +1645,9 @@ bySource[k].cost    = Σ over sessions with that source of session.cost
 centre of the donut = round(main / (main + subagent) × 100) %
 ```
 
-**Source:** `sourceKey` (`usage-aggregate.mjs:979-981`). Both rows are created,
+**Source:** `sourceKey` (`usage-aggregate.mjs:904-906`). Both rows are created,
 at this call to it, before the fold
-("Both source rows always exist", `usage-aggregate.mjs:1011`) so "no subagent sessions" renders
+("Both source rows always exist", `usage-aggregate.mjs:936`) so "no subagent sessions" renders
 as a zero rather than a row the UI silently drops. Claude's evidence is the
 `isSidechain` flag on any entry in the file (`usage-parsers.mjs:616`, decoded at
 `telemetry-records.mjs:244`); Codex's is the ledger-backed `thread_source`
@@ -1675,7 +1668,7 @@ not delegated work that was free.
 
 **Codex — structurally `$0`, by ledger design.** A ledger-identified subagent
 has its usage rows removed outright (`applyCodexLedger`,
-`usage-aggregate.mjs:1328-1331`) and `finalizeCodexUsage` never writes one in the
+`usage-aggregate.mjs:1253-1256`) and `finalizeCodexUsage` never writes one in the
 first place (`usage-parsers.mjs:949`), because a subagent rollout replays its
 parent's entire cumulative token history and keeping it would bill the parent
 twice (§13c, **[C7]**). The record stays visible and auditable; its cost is zero
@@ -1747,23 +1740,23 @@ costPerSessionP90    = nearest-rank P90 of the same set
 cacheSavedUsd        = Σ rows  (costOf(1M as input) - costOf(1M as cacheRead)) × cacheRead / 1e6
 ```
 
-**Source:** the derived block is `finishTotals` (`usage-aggregate.mjs:1088-1106`),
+**Source:** the derived block is `finishTotals` (`usage-aggregate.mjs:1013-1031`),
 which the previous-window projection calls too so a baseline is never derived a
 second, drifting way. `median` and `percentile` are exact over the values
-(`usage-aggregate.mjs:1073`, `:1083`), unlike §15's bucketed percentiles.
+(`usage-aggregate.mjs:998-1009`), unlike §15's bucketed percentiles.
 Active days come from `byDay`'s key count and the streak from `activeStreak` in
 `src/lib/dashboard/client/usage.mjs`; the tiles are `cadenceCells` there, and
-`printScoreCadence` (`src/commands/usage.mjs:251-274`) in the CLI.
+`printScoreCadence` (`src/commands/usage.mjs:219-242`) in the CLI.
 
 **Autonomy divides by prompts a human typed, and only those.** The denominator
 is `totals.humanPrompts`, accumulated under an explicit main-thread guard
-(`usage-aggregate.mjs:1024`): a subagent's prompts are written by the harness,
+(`usage-aggregate.mjs:949`): a subagent's prompts are written by the harness,
 so counting them would report a person as having typed work nobody asked for by
 hand — and would grow the denominator exactly in the windows where delegation
 was heaviest, making autonomy fall as automation rose. `totals.prompts` still
-records every prompt beside it (`usage-aggregate.mjs:999`); the two are
+records every prompt beside it (`usage-aggregate.mjs:924`); the two are
 different questions and both are on the wire. Touch rate is those same human
-prompts per engaged hour (`usage-aggregate.mjs:1096`), so both per-prompt figures
+prompts per engaged hour (`usage-aggregate.mjs:1021`), so both per-prompt figures
 share one denominator. A rate whose denominator is zero is `null`, never `0`
 — no engaged time means the rate was never measured, which is not what "zero
 per hour" claims.
@@ -1784,8 +1777,8 @@ browser in the tile's tooltip, `ak usage score` inline, since a terminal
 reader has nothing to hover.
 
 **Cost per session is a median over priced sessions only.** A session carries
-`_priced` when it had any usage rows at all (`usage-aggregate.mjs:930`), and
-only those costs enter the distribution (`usage-aggregate.mjs:1031`). A session
+`_priced` when it had any usage rows at all (`usage-aggregate.mjs:855`), and
+only those costs enter the distribution (`usage-aggregate.mjs:956`). A session
 with no usage rows costs `$0` *structurally* — nothing was ever measured for it,
 the common case being a Codex subagent rollout whose tokens were stripped as a
 double-count (§16.2) — and letting those in would report "the typical session
@@ -1795,13 +1788,13 @@ refactor can outweigh forty short sessions, and a mean would describe that one
 session rather than the run of them. P90 rides beside it precisely so the tail
 stays visible instead of being hidden by the choice of a robust centre. A
 positive figure that rounds away at two decimals prints `<$0.01`, never
-`$0.00` (`fmtUsdMin`, `src/commands/usage.mjs:160-164`) — "less than a cent" and
+`$0.00` (`fmtUsdMin`, `src/commands/usage.mjs:128-132`) — "less than a cent" and
 "nothing" are different claims.
 
 **What the cache saved, asked as a difference.** `cacheSavingPerMillion`
-(`usage-aggregate.mjs:793-802`) prices one million tokens twice through the
+(`usage-aggregate.mjs:718-727`) prices one million tokens twice through the
 *injected* pricer — once as fresh input, once as cache reads — and takes the
-gap; `cacheSavedFor` (`usage-aggregate.mjs:792-795`) scales that to the tokens
+gap; `cacheSavedFor` (`usage-aggregate.mjs:717-720`) scales that to the tokens
 a row actually read from cache. Nothing in that path knows what the cache
 multiplier is, so the saving cannot drift out of step with §3's table the way a
 hard-coded "0.9 × input" would the day the multiplier changed. Both probes
@@ -1820,48 +1813,48 @@ this row              =  $4.50 × 2,000,000 / 1e6       = $9.00
 ```
 
 The window total is the sum of those per-row figures
-(`usage-aggregate.mjs:1030`), carried on each session row as `cacheSavedUsd`
-(`usage-aggregate.mjs:908`) so it is auditable a row at a time rather than only
+(`usage-aggregate.mjs:955`), carried on each session row as `cacheSavedUsd`
+(`usage-aggregate.mjs:833`) so it is auditable a row at a time rather than only
 in aggregate, and rendered in the cache tile's subtitle as `saved ≈ $X vs
 uncached`.
 
 **Deltas: what "the previous window" is, exactly.** For a displayed window of
 `d` days ending at `now`, the baseline is the equal-length window immediately
 before it — the half-open interval `[now − 2d, now − d)`
-(`previousWindow`, `usage-aggregate.mjs:1216-1225`). Both bounds are derived from
+(`previousWindow`, `usage-aggregate.mjs:1141-1150`). Both bounds are derived from
 `now` and `d`, the window the UI is *showing*, and never from the parse cutoff:
 the caller widens that cutoff on purpose so older records survive to be
 aggregated here, and deriving the baseline from a widened bound would silently
 stretch it to whatever lookback the caller happened to pass. The dashboard route widens it to
 the depth the personal tap-share baseline needs rather than to the previous
 window alone: `days + BASELINE_TRAILING_DAYS` (`lookbackDays`,
-`src/lib/dashboard-server.mjs:1641`); `ak usage score` applies the same rule
-(`src/commands/usage.mjs:349`). One extra window would be a strict
+`src/lib/dashboard-server.mjs:1419`); `ak usage score` applies the same rule
+(`src/commands/usage.mjs:317`). One extra window would be a strict
 subset — too shallow for `promptBaselines`, which needs
 BASELINE_MIN_ACTIVE_DAYS of history BEFORE the displayed window and returns
 null without it — while this depth is a strict superset of the previous window
 at every supported width. A delta against an unknown-length window is not a delta. The upper bound
 is exclusive so a session ending exactly at the boundary belongs to the current
-window and is not counted in both (`endMs`, `usage-aggregate.mjs:948`). Asking for
+window and is not counted in both (`endMs`, `usage-aggregate.mjs:873`). Asking for
 `previous` without widening the lookback yields an all-zero baseline — the
 older records were never read off disk — and every chip self-suppresses
 against it rather than claiming a change it cannot measure. Leaving `previous`
 off entirely leaves `agg.previous` as `null` — "not requested",
 which a zeroed totals object would misreport as "measured nothing"
-(`usage-aggregate.mjs:1295`). A chip self-suppresses when the baseline is null
+(`usage-aggregate.mjs:1220`). A chip self-suppresses when the baseline is null
 or zero, and a magnitude that rounds to zero prints flat rather than drawing an
 arrow the printed number does not support (`deltaChip`,
-`usage-rhythm.mjs:36-53`; `fmtDelta`, `src/commands/usage.mjs:216-227`).
+`usage-rhythm.mjs:36-53`; `fmtDelta`, `src/commands/usage.mjs:184-195`).
 
 **Engaged time by day is a sibling map, not a `byDay` field.** `byDay`'s
 presence contract is **billed days only** — a key exists exactly when tokens
-landed on that day (`dayBucket`, `usage-aggregate.mjs:741-754`) — and that is
+landed on that day (`dayBucket`, `usage-aggregate.mjs:666-679`) — and that is
 what the active-day count and the streak above are counted from. Engaged time
 does not share that key set: a session that runs past midnight, or a day spent
 reading, produces worked time on a day that billed nothing. So
-`buildEngagedByDay` (`usage-aggregate.mjs:1189-1196`) keys its own map, cutting
+`buildEngagedByDay` (`usage-aggregate.mjs:1114-1121`) keys its own map, cutting
 each active interval at every local midnight it crosses
-(`splitAtLocalMidnight`, `usage-aggregate.mjs:1167-1175`) and unioning the pieces
+(`splitAtLocalMidnight`, `usage-aggregate.mjs:1092-1100`) and unioning the pieces
 per day, which makes the map sum exactly to `totals.engagedSeconds`. Folding it
 into `byDay` would have forced one of two lies: inventing zero-token `byDay`
 rows, or dropping real worked time. The consequence is visible on the tiles —
@@ -1897,11 +1890,11 @@ byDay[day].exceptions += session.exceptions   attributed to the session's FIRST 
 ```
 
 **Source:** `exceptions` and `aborts` accumulate together onto totals
-(`totals.exceptions += s.exceptions`, `usage-aggregate.mjs:1025`); the per-day series lands on `byDay` itself —
-`byDay[s._day].exceptions` (`usage-aggregate.mjs:1048`). Render is
+(`totals.exceptions += s.exceptions`, `usage-aggregate.mjs:950`); the per-day series lands on `byDay` itself —
+`byDay[s._day].exceptions` (`usage-aggregate.mjs:973`). Render is
 `relRate`/`relStat`/`relTrend` in `src/lib/dashboard/client/usage.mjs` (that
 bundle shares a basename with the CLI command module, so cited here by name,
-no line); `printScoreReliability` (`src/commands/usage.mjs:302-328`) prints
+no line); `printScoreReliability` (`src/commands/usage.mjs:270-296`) prints
 the CLI pair.
 
 **Evidence, per host.** An "exception" is a turn that never resolved to a
@@ -1918,7 +1911,7 @@ model, and each host signals that differently:
 person pressing stop; an exception is the turn failing. Summing them would
 report a deliberate interruption as a reliability problem and move a number
 that is supposed to mean "how often did this break". They are counted, carried
-(`aborts`, `usage-aggregate.mjs:883`) and displayed side by side, with the
+(`aborts`, `usage-aggregate.mjs:808`) and displayed side by side, with the
 distinction stated on the tile rather than left to the label.
 
 **Aborts are CODEX-ONLY evidence, and both surfaces say so.** `turn_aborted` is
@@ -1937,7 +1930,7 @@ treatment `latHist` (§15) and the context chip (§16) already get.
 
 **Exceptions ride the session's first-billed day.** The per-day series uses the
 same attribution as the session count — `byDay[s._day].exceptions += s.exceptions`
-(`usage-aggregate.mjs:1025-1028`) — which is *not* the moment a turn dropped: a session spanning midnight lands all of its
+(`usage-aggregate.mjs:950-953`) — which is *not* the moment a turn dropped: a session spanning midnight lands all of its
 exceptions on the day its tokens first billed. That keeps the reliability trend
 and the session trend drawn on one convention — the alternative, attributing
 each exception to its own timestamp, would have made the two lines disagree
@@ -1982,9 +1975,9 @@ byTool[name]                  += session.tools[name]      summed across sessions
 byDay[day].byModelFamily[fam] += rowCost                  fam = modelFamily(row.model)
 ```
 
-**Source:** the tool tally is folded into `byTool` at `usage-aggregate.mjs:1053`;
+**Source:** the tool tally is folded into `byTool` at `usage-aggregate.mjs:978`;
 the per-day family split is this call: `addCost(d.byModelFamily, modelFamily(row.model),
-rowCost)` (`usage-aggregate.mjs:832`), inside the usage-row pass because only a
+rowCost)` (`usage-aggregate.mjs:757`), inside the usage-row pass because only a
 row knows its day. Render is `toolRows`/`modelMix` in
 `src/lib/dashboard/client/usage.mjs`.
 
@@ -2035,688 +2028,101 @@ the full id.
 
 ## 20. Prompt patterns (`ak usage prompts`)
 
-**Displayed as:** a terminal-only report in eight sections — `Typed prompts`
-(count, provenance split, questions, persona openers), `Supervision taps`
-(count, share, and a by-token-length table), `Host interplay` (per-host typed /
-taps / tap share / p90 typed tokens / personas / the operator's own trailing
-p75, then a per-host monthly tap-share series), `Recurring clusters`,
-`Exact repeats` (identical-text groups, a compact tail beside the looser
-cluster table), `Re-asks`, `Headless share`, and `Coaching` (rule-derived
-suggestion cards — §22). `--deep` appends four exemplar tables that carry
-verbatim prompt text; `--enrich` sends masked exemplars and aggregate findings
-to a locally-invoked model to name clusters and propose additional coaching
-cards (§23) before the report renders. `--draft <id>` prints one card's draft
-text; `--dismiss <id>` persists a dismissal to the outcome ledger. `--json`
-emits the same numbers, plus `coaching` and (with `--enrich`) `enrichment`
-keys, counts only; `--deep --json` adds an `exemplars` key that **contains
-prompt text**.
+**Displayed as:** the deterministic Prompts report, available for 7, 14, 30, or
+all retained days. The report contains:
 
-**Formula:**
+1. the typed-prompt KPI strip;
+2. provenance: human, control, agent, and adapter;
+3. supervision taps, overall and by host;
+4. recurring patterns with deterministic labels;
+5. re-asks;
+6. headless share and host interplay.
 
-```text
-typedShare      = |{fp : fp.p = 'human'}| / |fingerprints|
-tapLength[t]    = |{fp : fp.p = 'human' ∧ fp.t = t}|             for t ≤ TAP_MAX_TOKENS
-monthTap[h][m]  = Σ promptStatsByDay[d].byHost[h].taps / Σ …typed   over d in month m
-clusters        = crossSessionClusters(nearDupClusters(typed, J ≥ 0.6))
-reAsks          = reAskPairs(typed, J ≥ 0.8, window ≤ 6 turns)
-headlessShare   = Σ responses[typedPrompts = 0] / Σ responses[typedPrompts ≠ null]
-```
+The default command is offline and read-only. `--json` emits the same
+deterministic payload. `--deep` is the one explicit text-bearing mode: it rereads
+local transcripts, joins matching prompt hashes, masks the excerpts, writes nothing,
+and prints them only to the terminal or the command's JSON result.
 
-**Source:** the repetition half of this report is not computed by the CLI at
-all. "aggregate(records, { prompts: true })" builds `agg.promptPatterns`
-(`buildPromptPatterns`, `usage-aggregate.mjs:663`) from the same records
-`buildPromptBaselines` reads, and `ak usage prompts` renders it — so this
-command and the dashboard's Prompts view cannot disagree about what a cluster
-is. Raw fingerprints have no public accessor: the layer is 2.8 MB on the
-reference corpus, and only aggregates ship, plus at most three session ids per
-cluster as a link into the masked session surface.
+The retired `--enrich`, `--draft`, and `--dismiss` options are rejected.
 
-`decoratePromptFP` (`usage-aggregate.mjs:514`) is the single place the
-decoration semantics live — session id, first-billed day, host, and the
-question/persona flags mapped to ALWAYS-SET booleans. That mapping is
-load-bearing twice: the scan path stores them as the number 1 and omits them
-when false, while the clustering library reads `=== true` / `=== false` and
-treats absent as unclassified, so `1 !== true` made every cluster report
-`unknown` and a never-written `false` left the `instruction` class unreachable.
-Thresholds are named exports beside it — `PROMPT_CLUSTER_JACCARD`
-(`usage-aggregate.mjs:483`) and `PROMPT_REASK_JACCARD` (`:488`) — so the panel,
-the CLI captions and the arithmetic quote one number each.
+### 20.1 Fingerprint and projection contract
 
-**The derived `kind`.** Each published cluster also carries one derived filter
-label, the single axis the dashboard's pills and the CLI's Coaching table slice
-by. It is a pure function of signals the cluster already holds, recomputed every
-scan with no new fingerprint data (`deriveKind`,
-`usage-aggregate.mjs:573`) — so the projection is the sole authority and the
-client only folds an unknown value in, never re-derives one. Precedence is
-FIRST-MATCH-WINS over a fixed order, most-actionable first: `reask` (a member
-hash is on the asked-again side of a re-ask pair) beats `persona`
-(`personas / size >= PERSONA_KIND_SHARE`, 0.5) beats `tap`
-(`tokens.median <= TAP_MAX_TOKENS`, 4) beats `question` (the shipped classifier
-read it as questions) beats `instruction` (everything else). A request that keeps
-coming back is the most actionable, so a re-ask wins even over a short or
-persona-shaped phrasing; the persona-share and tap-length thresholds are the very
-constants the persona and tap detectors read, so a cluster's label and those
-detectors' counts can never disagree.
+A prompt fingerprint is the only prompt-derived record stored in the usage index. It
+contains a normalized-text hash, token count, bounded token-hash sketch, provenance,
+and optional question/persona shape flags. It contains no prompt text.
 
-The projection is OPT-IN and `null` when not requested, the same shape
-`previous` uses. `usage-index.mjs` forwards the flag (`:753`) and folds it into
-`scanKey` (`:526`), which decides both the single-flight identity and
-readIndex's memo — without the fold a `{prompts:true}` caller inside the memo
-TTL would be served an answer built without the projection.
+The recurring-pattern projection publishes:
 
-The CLI adds the window (`ALL_WINDOW_DAYS`, `src/commands/usage.mjs:426` — 365
-days, all the index can hold, since `KEEP_MS` prunes a cache entry at 366), the
-per-host and monthly folds off `promptsByHost` / `promptStatsByDay`
-(`monthlyTapShare`, `src/commands/usage.mjs:523`), and the headless share,
-which is a property of the session rows rather than of the prompts
-(`headlessShare`, `src/commands/usage.mjs:678`).
+- `corpus`: total fingerprint and human-typed counts;
+- `provenance`: counts for the closed four-tag vocabulary;
+- `tapLengths`: deterministic short-prompt distributions;
+- `exactRepeats`: hash-group counts and spans;
+- `clusters`: key, deterministic label, class, count, session/day spans, median
+  tokens, and hosts;
+- `reAsks`: pair count, session count, and the prompt-gap histogram;
+- `computedAt`: the aggregate clock.
 
-The deep pass is the one tier that reads the index cache directly
-(`readPromptEntries`, `src/commands/usage/deep-pass.mjs:69`): it needs the
-HASHES it owes an exemplar for and the transcript PATH of a session holding
-one, and the cache is the only place both exist together. That coupling is
-confined to this text-bearing, CLI-only tier — a pass about to open the
-transcripts and print what was typed already has strictly more access than a
-fingerprint. This exemplar-gathering machinery is shared: `ak usage prompts
---deep` (usage.mjs) and `--enrich` (usage/enrich.mjs) both import it from
-`usage/deep-pass.mjs` rather than one importing it from the other. It
-re-reads through the same per-host parsers the scan path uses
-(`reReadTurns`, `deep-pass.mjs:139`) and re-derives each turn's hash under
-the scan path's own two gates — `kind === 'prompt'` and `provenanceOf` on
-the same text (`humanPromptTurns`, `deep-pass.mjs:124`) — which is what
-makes the join exact. `exemplarCandidates` (`deep-pass.mjs:170`) orders
-sessions by how many wanted exemplars each covers and `collectExemplars`
-(`deep-pass.mjs:190`) opens them only while something is unresolved, falling
-through to a smaller sibling transcript when one is past
-`MAX_DEEP_FILE_BYTES` (`deep-pass.mjs:53`).
+Cluster rows deliberately omit prompt text, sample session identifiers, coaching
+kind, recommendations, and mutable state. Labels come only from the precision-first
+seed registry or a shape-based characterization.
 
-**Worked example:** on the reference corpus at the all-history window, 5,684
-fingerprinted prompt turns carry 2,656 tagged `human` — a typed share of 46.7%
-— of which 322 run to `TAP_MAX_TOKENS` (4) tokens or fewer, a 12.1% tap share.
-Per host that is 11.6% on Claude against 12.3% on Codex, and the monthly series
-separates them: Claude 14.6% → 10.9% across 2026-07 → 2026-08 while Codex runs
-7.7% → 15.5%. A `--deep` run over the same corpus opened 51 transcripts in
-0.6 s and resolved 61 of the 62 exemplars it wanted; the one it did not, and
-why, is printed rather than left blank.
+### 20.2 Repetition and re-ask rules
 
-**What this does not model:**
+Exact repeats group identical normalized-text hashes. Near-duplicate clusters use the
+bounded token-hash sketches and deterministic Jaccard/candidate-pair machinery.
+Recurring clusters must cross the configured session or day threshold. Re-asks are
+near-duplicate human prompts inside the same session and the bounded gap window.
 
-- **The typed share here is not the research's 27.6%.** That figure was
-  measured over every parser-visible user-role turn; a fingerprint exists only
-  for a turn the parsers already classed `kind: 'prompt'`, so this denominator
-  excludes tool results and harness envelopes before the provenance split even
-  runs. The two answer different questions and must not be compared.
-- **Provenance error is one-directional by design** (ADR-0039 "Provenance is
-  a closed four-tag vocabulary, one-directional by design"): an unrecognized
-  machine template counts as `human`, so the typed figure is an
-  over-statement, never an under-statement.
-- **The personal baseline is `n/a` at the all-history window**, not zero and not
-  missing: a trailing 90-day baseline needs a window before the displayed one,
-  and all history has none. At a bounded window it is still `null` until the
-  corpus carries `BASELINE_MIN_ACTIVE_DAYS` (30) days of typed prompts in that
-  trailing span — measured here, this machine has 22 before a 7-day report
-  (16 before a 14-day one, and 1 Claude / 6 Codex before a 30-day one), so the
-  honest answer is that there is not yet a personal normal to compare against.
-- **Cluster names are provisional.** A seed is a shape predicate, not a
-  reading of the text, so two different clusters can resolve to the same seed
-  name; `source` on each row says whether the name came from a seed or from
-  `characterize`, and a characterized row asserts only what its own counts say.
-- **`--deep` prints whatever was typed.** Exemplars are run through
-  `maskSecrets`, which catches key-shaped strings and not everything a person
-  might have pasted — an address or a file path typed into a prompt is printed
-  as typed. It is opt-in for that reason, it writes nothing, and with `--json`
-  the text is in the payload.
-- **The deep pass cost is measured, not estimated.** The header states the
-  transcripts opened and the wall time for that run; another corpus will differ.
-- **A cluster exemplar is the member its `key` names**, which is the
-  lexicographically smallest hash in the cluster — a real member, stable across
-  scans, and reachable without a membership list. It is not necessarily the
-  most frequent phrasing, which is the cost of not re-running the clustering
-  the projection already did.
-- **The projection is opt-in because it is not free.** Measured on the
-  reference corpus against a ~90 ms warm scan: +199 ms at 14 days (145
-  clusters), +616 ms at 30 (483), +901 ms over all history (561).
+Input order does not change cluster keys or ordering. Missing classification evidence
+remains `unknown`; it is never guessed into a question or instruction.
 
-**Coaching** (`Draft →`/`Dismiss →` hints on each card) and **`--enrich`**
-(cluster naming + coaching-card synthesis) have their own full treatment —
-the six rules, the outcome ledger's transition matrix, the anti-fabrication
-gate, and the one inference path — in §22 and §23. What belongs here is only
-what is specific to this CLI's own rendering:
+### 20.3 Personal baselines and detectors
 
-- The Coaching section prints after the seven deterministic ones, always —
-  reconciling against the outcome ledger and (unless the ledger is a newer
-  schema this build cannot read) **persisting the result on every invocation**,
-  not only when `--enrich` or `--dismiss` is passed. A plain `ak usage
-  prompts` run still advances a card from `proposed` to `expired` if its
-  evidence has vanished, or measures an `adopted` card's outcome.
-- `--draft <id>` is a pure read: it prints one card's draft text (a
-  CLAUDE.md line, a skill skeleton, or a pointer to a sibling effort) and
-  touches no file. `--dismiss <id>` is the one CLI-only write this command
-  makes beyond the ledger's own per-pass reconcile — the dashboard never
-  calls it (§22's read-only contract).
-- `--enrich` runs before the report renders, so an enriched cluster's real
-  name and any newly-synthesized cards appear in the SAME render — not a
-  second pass appended after the deterministic one.
+Per-host tap baselines use the p75 of daily tap share over the trailing 90 days before
+the displayed window and require 30 active days. Until enough history exists, the
+baseline is absent and the detector names its fixed fallback rather than presenting
+it as personal.
 
-### The scheduled digest recipe (opt-in, documentation only)
-
-This is a periodic digest recipe: layers 1–2 (fingerprints, baselines,
-detectors) are free and recompute on every scan, but layer 3 (`--enrich`)
-spends a model call, so it is on-demand by default — the view has no
-Recompute button (§21), and there is no scheduling code anywhere in this
-kit for it (`llm-invoke.mjs`'s own header states it plainly: "NO SCHEDULED
-MACHINERY LIVES HERE"). An operator who wants a standing weekly digest has to
-opt into that themselves, through the kit's existing, already-governed
-scheduling surface — this is a **recipe**, not a shipped feature, and running
-it means accepting unattended token spend, which stays opt-in on this
-machine class by standing policy.
-
-launchd (macOS), a `LaunchAgent` plist that runs weekly:
-
-```xml
-<!-- ~/Library/LaunchAgents/com.example.ak-usage-enrich.plist -->
-<plist version="1.0"><dict>
-  <key>Label</key><string>com.example.ak-usage-enrich</string>
-  <key>ProgramArguments</key>
-  <array><string>/usr/bin/env</string><string>ak</string><string>usage</string>
-    <string>prompts</string><string>--enrich</string><string>--json</string></array>
-  <key>StartCalendarInterval</key>
-  <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>9</integer></dict>
-</dict></plist>
-```
-
-cron (Linux), the equivalent weekly line:
-
-```cron
-0 9 * * 1  cd /path/to/project && ak usage prompts --enrich --json >> ~/ak-usage-enrich.log 2>&1
-```
-
-Both examples run unattended and therefore spend tokens unattended (§23's
-billing line — the Claude Code CLI, under the operator's own subscription)
-exactly once a week, no more: `--enrich`'s own delta-only gate (§23) makes a
-second run over an unchanged corpus a zero-invocation no-op, so scheduling it
-more often than the corpus actually changes costs nothing extra, but the
-opt-in decision to run it AT ALL is the operator's alone — `ak` does not
-install, suggest, or enable either of the above.
-
----
+The Prompts-derived Findings detectors remain deterministic. They operate on counts,
+ratios, baselines, and cross-host distributions already in the aggregate. They do not
+read prompt text or invoke a model.
 
 ## 21. The Prompts dashboard view
 
-**Displayed as:** a `Prompts` tab on the Usage rail, between `Findings` and
-`Models` (`VIEWS`, `src/lib/dashboard/client/bootstrap.mjs:89`; the tab button,
-`usage-tab-prompts`, `src/lib/dashboard/page.mjs:162`; its panel shell,
-id "v-prompts", `src/lib/dashboard/page.mjs:515`). It reads the SAME
-`agg.promptPatterns` projection §20 renders — one aggregate, two surfaces,
-never two answers about what a cluster is. Six panels, top to bottom, plus a
-whole-history chip offered on this view alone.
+**Displayed as:** `Usage → Prompts`, a read-only view over the same aggregate used by
+the CLI.
 
-**Payload source:** `/api/usage`'s `prompts` key — `{typed, taps, tapShare,
-byHost, statsByDay, baselines, patterns, headless, coaching}`. The first
-eight keys come from promptsPayload
-(`promptsPayload`, `src/lib/dashboard-server.mjs:570`);
-`coaching` is merged in at the call site
-("...promptsPayload(agg || {}), coaching", `dashboard-server.mjs:1702`) since
-it is a second, independent read (`dashboardCoachingPayload`,
-`dashboard-server.mjs:2058` — §22). `patterns` is `agg.promptPatterns` (§20's
-`buildPromptPatterns`) verbatim, already re-resolved against the persisted
-label store on every poll (§23). The client renders the whole block in one
-pass (`renderPrompts` in `src/lib/dashboard/client/usage.mjs` — that bundle
-shares a basename with the CLI command module, so cited here by name, no
-line) from the poll it already holds — opening the tab re-renders, it does
-not fetch.
+The view contains:
 
-**KPI strip** (`promptKpis`, `usage-prompts.mjs:159`) — five tiles, each with
-its formula and a "what this does not model" line in its own tooltip:
+- **What you actually type** — typed prompts, questions, supervision taps, repeated
+  share, and headless share;
+- **Who is typing** — the four provenance classes;
+- **Steering mix** and **Tap habits** — deterministic prompt-shape distributions;
+- **Recurring patterns** and **Re-asks** — counts and spans without prompt text;
+- **Host interplay** — grounded differences between hosts.
 
-| Tile | Reads |
-|---|---|
-| Typed prompts | `patterns.corpus.typed` over `patterns.corpus.fingerprints` — the provenance-filtered share (§2b), not `totals.prompts` (§2) |
-| Questions | the per-host `questionShare` figures, typed-weighted into one window share |
-| Supervision taps | `taps` / `typed`, with a per-host chip comparing that host's share to its own trailing-90d p75 (§2b) or naming the absence of one |
-| Repeated share | the sum of every cluster's `count` (the FULL list, independent of the active kind filter) over `typed` |
-| Headless share | `headless.share`, absent-safe on an empty denominator |
+The **All** chip widens this view to the retained history and leaving Prompts restores
+the ordinary 30-day default. Every other dashboard control remains a read-only
+selection, filter, or navigation action.
 
-**Who is typing** (`provenancePanel`, `usage-prompts.mjs:275`) reads
-`patterns.provenance` — a
-row per tag in the closed vocabulary (§2a), including one this corpus never
-produced, at zero, so an empty row reads as "you have none of these" rather
-than "we did not look". Placed first, because every panel below it sits
-behind the `human` slice and a reader who does not know how thin that slice
-is will read the rest as though it described all their traffic.
+The dashboard does not contain a Coaching panel, prompt-text posture toggle, masked
+sample fetch, recommendation, draft, dismiss/undo control, label store, outcome
+ledger, or model inference path. `/api/usage` publishes only the deterministic
+Prompts projection.
 
-**How you steer** (`steerPanel`, `usage-prompts.mjs:224`; `tapLengthPanel`,
-`usage-prompts.mjs:305`) splits
-typed prompts into questions / supervision taps / "statements and
-instructions" (the residue — the shape rules do not split imperative from
-declarative), and beside it, taps by exact token length
-(`patterns.tapLengths`, §2a's per-length grouping) — there is no text at this
-layer, so a length distribution is the honest shape of "your top short
-prompts".
+## 22. Archived capability boundary
 
-**Host interplay** (`hostInterplay`, `usage-prompts.mjs:346`) — one row per host: a tap-share
-sparkline built from `statsByDay` (a day the host did not type on breaks the
-line rather than reading as zero), a p90-typed-length bar scaled against the
-longest host, and the typed persona-opener count. Below the rows, a
-plain-language **read** of the asymmetry (`hostRead`, `usage-prompts.mjs:388`) —
-e.g. "you tap codex more often but write claude longer" — stated only where
-both hosts carry the comparison; the unequal-histories nuance moves into the
-panel's `?` tooltip rather than a standing caveat.
+The complete coaching and layer-3 implementation is preserved for provenance on
+`archive/prompts-capability-main-2026-09-01` at
+`91e892f523f307ecb29271cb0e370b538115a2c0`.
 
-**Coaching** (`coachingPanel`, `usage-prompts.mjs:620`) — the recurring-patterns
-table IS the coaching surface (the old split Repeated-patterns + Coaching
-card-wall are retired into it). Columns are Pattern · Times typed · Sessions ·
-Days seen · Hosts, every header sortable (`coachHeadCell`,
-`usage-prompts.mjs:579`); kind filter pills above the table (`coachingFilters`,
-`usage-prompts.mjs:550`) slice by the derived kind (§20) and stack with the
-sort; the table caps at ~5 rows then scrolls with a pinned header. Clicking a
-pattern opens an inline coaching panel (`coachDetailRow`, `usage-prompts.mjs:859`):
-**Seen in** — up to three `session · date` links through the existing
-`#usage/<id>` masked transcript reader (`coachSeenIn`, `usage-prompts.mjs:738`);
-**What you typed** — the pattern's own prompts, MASKED and fetched on demand
-from `GET /api/prompts/samples`, rendered inline and suppressed by a per-viewer
-shown/hidden toggle that also stops the fetch (`coachTyped`,
-`usage-prompts.mjs:760`); and, from the coaching card this pattern joins to (by
-`clusterKey` then `targetKind` — `cardForCluster`, `usage-prompts.mjs:698`) a
-**Recommendation**, a **Draft** with a copy button (`coachDraft`,
-`usage-prompts.mjs:797`), and a **Dismiss** that persists to `POST /api/prompts/dismiss` with an inline Undo (`coachFoot`, `usage-prompts.mjs:812`). A
-pattern with no matching card shows Seen-in + What-you-typed and a neutral note
-— never a force-fit recommendation. The cards, their source chip and ledger
-status are the same §22 defines, reconciled server-side from the same lib and
-ledger `ak usage prompts` uses, so the two surfaces cannot disagree about a
-card's status any more than they can about a cluster's count.
+That snapshot includes the Coaching table and details, masked prompt-sample endpoint,
+dismiss/undo mutations, outcome ledger, saved labels, model invocation, enrichment,
+fabrication gates, synthesized coaching cards, and their dedicated tests. Those
+surfaces are intentionally absent from main.
 
-**What this does not model:**
-
-- **No live Recompute button.** A button here would trigger inference FROM
-  the dashboard, and the privacy split (§23) keeps inference CLI-only. The
-  stale hint points at the command that does the same thing today.
-- **A kind filter narrows the table, never the KPI.** The Coaching table
-  renders every cluster (scrolling once it passes a handful of rows), so no
-  finding sits below an invisible cut; the Repeated-share KPI always reads the
-  whole cluster list, so filtering by kind changes what you see, not what the
-  KPI counts.
-- **Windows are unequal per host**, by construction — a host adopted recently
-  has fewer days behind its trend line, so a host with too few days shows "too
-  few days to trend" instead of a sparkline drawn through noise, and the
-  unequal-histories nuance lives in the panel's `?` tooltip rather than a
-  standing caveat.
-- **The three prompt detectors render in the Findings tab, not here.**
-  `supervision-tap-share`, `headless-share` and `host-prompt-asymmetry` reach
-  the reader through the standard `DETECTORS` registry and the standard card
-  grammar, alongside every other finding. This view deliberately carries no
-  duplicate panel for them: the spec sketched an "Also in Findings" cross-link
-  affordance, and the disclosure here is what shipped in its place — one
-  reading of a detector, in the tab whose job is detectors.
-- **The How-you-steer split does not sum, and its last row is a floor.** A
-  prompt can be both a question and a supervision tap ("done?"), and the
-  residue subtracts BOTH counts in full, so every prompt that is both is
-  removed twice. "Statements and instructions (at least)" is therefore a lower
-  bound, labelled and captioned as one. Computing the exact split needs an
-  overlap count the projection does not carry, and inventing one to make three
-  numbers add up would be the kind of tidiness this panel exists to refuse.
-
----
-
-## 22. Coaching cards and the outcome ledger
-
-**Displayed as:** the `Coaching` section of `ak usage prompts` (§20) and the
-dashboard's Coaching panel (§21) — one card set, one ledger, two renderers.
-`--draft <id>` (CLI-only) prints a card's draft text; dismissal is the one
-operator action this feature takes, now on BOTH surfaces — `--dismiss <id>` on
-the CLI, `POST /api/prompts/dismiss` (with an Undo) on the dashboard.
-
-**The six v1 rules,** each a `{evidence, meetsBar, card}` triple
-(`RULES`, `src/lib/usage-coaching-rules.mjs:346`) evaluated by `deriveCards`
-(`src/lib/usage-coaching.mjs:69`) against the SAME `promptPatterns` /
-`promptsByHost` / `insights` inputs §2b's detectors already computed — no
-rule invents a number `aggregate()` did not already produce:
-
-| id | Fires when | Draft |
-|---|---|---|
-| `release-ritual-skill` | the seed-named `Release ritual` cluster recurs ≥5 times (`RELEASE_RITUAL_MIN_COUNT`) | a skill skeleton |
-| `commit-push-claude-md` | the seed-named `Commit-and-push instruction` cluster recurs ≥5 times (`COMMIT_PUSH_MIN_COUNT`) | one CLAUDE.md line |
-| `reask-delta` | `promptPatterns.reAsks.pairCount` ≥ 10 this window (`REASK_DELTA_MIN_PAIRS`) | none |
-| `codex-completion-criteria` | the `host-prompt-asymmetry` insight fired AND Codex's persona-opener count exceeds Claude's, or its p90 typed length is ≥1.5× Claude's | none |
-| `progress-report-taps` | the `supervision-tap-share` insight fired (its own presence is the whole gate) | none |
-| `codex-role-library` | Codex's `personaOpeners` ≥ 10 (`PERSONA_LIBRARY_MIN_COUNT`), independent of which host is doing more of the typing overall — the card exists because Claude already has `.claude/agents/` and Codex has no analogue yet | a pointer to a tracked sibling effort, not an instruction |
-
-A rule whose input structure is entirely absent (no `promptPatterns` at all)
-yields no card — absent is not a claim of zero. A rule whose input is
-present but empty legitimately measures zero, which matters for outcome
-tracking below: a recommendation that fully worked collapses its own
-evidence to 0, and that has to read as "0", not as "unmeasured". Two of the
-cluster-named rules key off `usage-prompt-vocabulary.mjs`'s own
-`SEED_PATTERNS` registry (never a hand-copied string), so a seed rename there
-renames the rule with it.
-
-**Every card carries an `evidenceHash`** — a sha256-16 over a canonicalized,
-sorted-key serialization of its evidence (`evidenceHash`,
-`src/lib/usage-evidence-hash.mjs`) — and a `generatedAt` stamp, rendered as
-`as of <timestamp> · <hash prefix>` on every card, on both surfaces.
-
-**The outcome ledger** (`src/lib/usage-outcome-ledger.mjs`) is the
-`measure → recommend → adopt/dismiss → measure outcome → recalibrate` loop,
-persisted beside the index (`usage-outcome-ledger.json`, mode 0600, atomic
-tmp+rename write; no field on a record ever holds prompt text — ids, hashes,
-counts, and host names only). `reconcile`
-(`usage-outcome-ledger.mjs:291`) is the pure transition function:
-
-```text
-new card                      → proposed         (baseline snapshotted now)
-dismissed, unchanged hash     → unchanged         (suppressed)
-dismissed, hash changed AND
-  worsened ≥50% vs the count
-  at dismissal time           → re-proposed once  (fresh baseline)
-dismissed, ≥2 dismissals      → dismissed         permanently
-proposed, adoption detected   → adopted           (baseline re-anchored)
-adopted, not improved past
-  14 days (OUTCOME_MIN_DAYS)  → retired           (refutation shown)
-proposed, card absent 1 pass  → expired
-expired, card fires again     → proposed          (generatedAt/dismissCount survive)
-retired / permanently
-  dismissed                   → (terminal in v1 — never resurrected)
-```
-
-**Why the ledger is CANONICAL-30d, never the operator's displayed window**
-(`CANONICAL_WINDOW_DAYS = 30`, `usage-outcome-ledger.mjs:49`): every
-baseline snapshot, adoption-by-collapse comparison, and outcome measurement
-reads through a FIXED 30-day aggregate, independent of what `--window`/the
-dashboard's day selector is currently showing. A baseline captured under one
-window and compared against a count read under another are not commensurable
-— switching `--window` alone could otherwise fabricate an adoption, an
-outcome delta, and, 14 days later, a permanent retirement, none of it backed
-by anything the operator actually did. Every ledger record carries
-`windowDays: CANONICAL_WINDOW_DAYS`; a record loaded without it is discarded
-rather than migrated (`loadRecordsMap`, `usage-outcome-ledger.mjs:126`) — a legitimate simplification
-because this ledger has never shipped to a user. The rendered `finding`/
-`basis` text still reads from the operator's own displayed window; only the
-ledger's own bookkeeping — and every `(30d basis)`-suffixed outcome/
-refutation line — is pinned to the canonical one.
-
-**The materiality gate on re-proposal** (`DISMISS_MATERIALITY_RATIO = 0.5`,
-`usage-outcome-ledger.mjs:61`): a dismissed card's hash changing is not
-enough to re-propose it — the canonical count must have worsened by at least
-50% relative to the count recorded AT DISMISSAL TIME (`hasWorsenedMaterially`,
-`usage-outcome-ledger.mjs:182`), measured against
-that frozen reference every pass, never a creeping one. Any single additional
-occurrence changes the evidence hash (it is one more instance of the exact
-thing being hashed), so gating on hash-change alone would have made a
-dismissal survive only until the pattern's very next occurrence.
-
-**Adoption routes,** checked in order (`detectAdoption`,
-`usage-coaching.mjs:140`): a CLAUDE.md line matching the card's draft
-verbatim; a `.claude/skills/<slug>/` directory matching the card's id; or —
-**collapse, opt-in per rule** (`collapseIsAdoption`,
-`usage-coaching-rules.mjs:346`) — the current count falling to ≤20% of the
-count at proposal (`ADOPTION_COLLAPSE_RATIO`). Collapse is the adoption
-signal only
-for the two seed-cluster cards and `reask-delta`, where the recommendation's
-whole POINT is that the target pattern stops recurring. The three
-statistic-backed cards (`codex-completion-criteria`, `progress-report-taps`,
-`codex-role-library`) keep the CLAUDE.md/skill-dir routes only — their
-counts can drop for reasons unrelated to the recommendation, and recording
-that as "adopted" would be a fabricated causal claim. `codex-role-library`
-has neither route available to it (its draft is a `link`, matching nothing)
-and so has NO adoption route at all: it stays `proposed` until dismissed or
-expires, never silently marked adopted.
-
-**Draft-only, always.** A `Draft →` affordance produces text the operator
-edits and applies themselves — a CLAUDE.md line, a skill skeleton, a pointer
-to a sibling effort. Nothing on either surface writes to CLAUDE.md, creates a
-skill, or changes any configuration unprompted. The dashboard's one ledger
-write is a dismissal (§21) — a token-gated `POST /api/prompts/dismiss` through a
-handler of its own; the card-rendering read path stays write-free
-(`dashboardCoachingPayload` has no `saveLedger` call in its whole call graph — a
-structural guarantee, not a convention a later diff could quietly violate).
-
-**Source:** `usage-coaching.mjs` (the engine — `deriveCards`,
-`currentEvidenceFor`, `detectAdoption`, `measureOutcome`),
-`usage-coaching-rules.mjs` (the six rules), `usage-outcome-ledger.mjs` (the
-store + `reconcile`), `usage-evidence-hash.mjs` (the shared hash). CLI wiring:
-`src/commands/usage/coaching.mjs`. Dashboard wiring:
-`dashboardCoachingPayload`, `dashboard-server.mjs:2058`.
-
-**What this does not model:**
-
-- **Adoption is deterministic, not inferred.** No model call decides whether
-  a recommendation was followed — a matching line, a matching directory, or a
-  measured collapse, nothing softer.
-- **A dismissal is not permanent evidence the pattern was wrong** — it decays
-  once the underlying count worsens materially, per the gate above, up to
-  twice; a third occurrence past that stays suppressed.
-- **`codex-completion-criteria`'s evidence is not literally "re-ask share".**
-  It fires on the SAME two signals `host-prompt-asymmetry` (§2b) already
-  computes — persona-opener count and p90 typed length — because a per-host
-  re-ask breakdown is not published on the aggregate; the card's numbers are
-  real and traceable, just not the specific comparison its title might
-  suggest to a reader expecting a re-ask count.
-- **Retired and permanently-dismissed are terminal in v1.** A card whose
-  evidence reappears after either status does not resurrect — treated as a
-  considered verdict rather than something to keep re-litigating.
-- **Outcomes render; they do not RANK.** Adoption and outcome history is shown
-  on the card it belongs to and nowhere else. Nothing reorders, weights, or
-  suppresses future recommendations because a similar one was adopted and
-  worked. With six fixed rules there is nothing to rank yet, so this is a
-  documented deferral rather than a half-built feature — see ADR-0039's
-  Deferred list.
-- **A zero canonical baseline is not a refutation.** `improved` is a strict
-  decrease and a count cannot fall below zero, so a card adopted when the
-  canonical 30-day window held no occurrences could never improve on that
-  baseline. Such a card is NOT retired: it renders "no occurrences in the
-  canonical 30-day window — nothing to measure" and stays adopted. This is
-  reachable on the default path, where `--window` is `all`: a habit adopted
-  months ago fires on all-time evidence and has zero recent occurrences.
-- **Looking at a narrower window does not expire a card.** Which cards FIRE is
-  a function of the operator's displayed window, while every ledger-facing
-  read is canonical — so a card that stops firing at `--window 7` is not
-  evidence of anything. `reconcile` performs the `proposed → expired`
-  transition ONLY when its caller states that the pass was derived on the
-  canonical window — the guard is opt-IN, so a caller that says nothing gets no
-  expiry. That direction is deliberate: forgetting to opt in costs a card that
-  lingers one pass longer, which the next canonical pass corrects, while
-  forgetting to opt out wrote a false verdict to disk that nothing later
-  revisited. Nothing about a display choice is written to the ledger.
-
----
-
-## 23. Enrichment (layer 3)
-
-**Displayed as:** `ak usage prompts --enrich` (§20) — a delta-only, opt-in,
-CLI-only inference pass that (1) names still-unnamed recurring clusters and
-(2) proposes additional coaching cards, grounded only in masked exemplar
-text and aggregate counts. The dashboard reads whatever this pass already
-persisted, read-only, on every poll; it has no affordance to trigger one
-itself.
-
-**The one inference path in this kit.** `src/lib/llm-invoke.mjs`'s
-`makeInvoke` is the FIRST invocation seam this codebase has ever had — before
-it, nothing here spawned a process to read a model's answer. It detects the
-`claude` binary through the kit's own host registry (never a hardcoded
-literal), spawns it once per call — `claude -p --output-format text
---strict-mcp-config --permission-mode plan --allowedTools ''`, the prompt on
-**stdin**, a scratch working directory, 120s timeout — and `describe()` states
-the **billing line** plainly: `"Claude Code CLI — your subscription"`. Without
-the binary on PATH, or a fatal invocation failure, `--enrich` prints one
-honest line and exits 0; every deterministic tier renders exactly as if
-`--enrich` had not been passed.
-
-**The child is confined, because the prompt is untrusted.** Exemplar text is
-transcript-derived, and anything that can write a transcript chooses it
-verbatim; masking covers secret *shapes*, not *instructions*. So the seam
-does not try to clean the text — it removes what an injection could reach.
-The child gets no tools (`--allowedTools ''`), no MCP servers at all
-(`--strict-mcp-config` with no `--mcp-config`, which drops every ambient
-server the operator has configured), a non-mutating session
-(`--permission-mode plan`), and a scratch working directory rather than the
-operator's repo — the last of which is what keeps the project's
-`.claude/settings.local.json` pre-approved allowlist and its `CLAUDE.md` out
-of the child's session. A timeout reaps the child's whole process group, so
-no subprocess outlives the call. These flags are pinned by an exact-argv
-test (`tests/kit/llm-invoke.test.mjs`), because a containment flag dropped
-while debugging and never restored is the realistic way this regresses.
-
-**Delta-only labeling.** A candidate cluster is one whose label is still the
-honest fallback — `characterized`, never `curated`/`enriched`/`seed` — with
-at least 3 recurrences (`MIN_CANDIDATE_COUNT`, `usage-enrich.mjs:55`). A
-settled label (from a prior `--enrich` run, or hand-curated) is never
-re-sent for judging: `labelCandidates` (`usage-enrich.mjs:126`, reading that
-same floor again on each call) checks the store on BOTH
-sides of the boundary — the caller's own re-resolution against the store,
-AND a second, independent check inside the engine itself, so a caller
-skipping the first step still cannot re-ask about a settled cluster. The
-model returns `{key, name}` pairs; a name is accepted only if it validates
-(`isValidLabelName` — 1–48 trimmed characters, no newline, key must be one
-actually asked about) and is masked (`maskSecrets`) BEFORE that validation —
-the model's OUTPUT is treated with the same suspicion as any other untrusted
-text, because a model asked to name a cluster from its exemplar can echo that
-exemplar back.
-
-**The synthesis gate.** Coaching-card synthesis is skipped entirely on a
-second consecutive `--enrich` run over an unchanged corpus:
-`lastSynthesis.findingsHash` (persisted in the label store) is compared
-against a fresh hash of the CURRENT findings summary
-(`findingsSummaryHash`, `usage-enrich.mjs:337`), and synthesis runs only when
-that hash has moved OR a stored card reads stale (below). The hash is
-deliberately insensitive to a cluster's display NAME alone
-(`stripDisplayNames`, `usage-enrich.mjs:314`) — otherwise the very pass
-immediately after any labeling round would see the hash move on cosmetics
-only and re-spend a call for no new evidence. The prompt shows at most the
-top 40 clusters by count (`MAX_SYNTHESIS_CLUSTERS`, `usage-enrich.mjs:406`) —
-a display cap only; validation
-below still reads the FULL, uncapped summary, so a card citing a number from
-cluster #41 is still checked for truth. Already-stored cards are named
-explicitly as a do-not-duplicate list (`existingCards`), with a returned id
-colliding with one on disk dropped as `duplicateOfExisting` — a mechanical
-backstop behind the steer.
-
-**The anti-fabrication gate is not optional.** Every number a candidate
-card's `finding`/`try`/`basis` text states — and every entry in its own
-`basisNumbers` — must be traceable to a number ACTUALLY present in the
-findings summary the model was shown (`numbersInSummary` /
-`CARD_FABRICATION_FIELDS`, `usage-enrich.mjs:86`). One unmatched number voids
-the WHOLE card, not just the offending field; `title` is exempt (a stylistic
-number there asserts no evidence). `findingsSummary` itself
-(`buildFindingsSummary`, `usage-enrich.mjs:256`) carries counts, cluster
-names, and shares only — no exemplar text exists in it to leak, by
-construction. Measured on
-this machine's real corpus (2026-08-30): the gate is set-membership over
-every number ANYWHERE in a 458-cluster, 53-distinct-number summary — it
-reliably catches invented large/specific numbers, and is weaker on small
-ones that coincide with an unrelated field, a known, disclosed limitation
-rather than a proof of provenance.
-
-**Consent preamble, printed before any invocation:** the candidate-cluster
-count, the masked-snippet count, whether a second (coaching-synthesis) call
-will run this pass, and the billing line — every time, unconditionally, in
-human-readable mode. Under `--json`, no human-readable status text prints AT
-ALL (`info`/`warn`/`heading` all write to stdout via `console.log`, and prose
-mixed into a JSON stream breaks a consumer piping into `jq`); the explicit
-`--enrich` flag is itself the consent in that mode, and the outcome rides in
-the JSON payload's own `enrichment` key (counts only — `{ran, labels:
-{candidates, labeled, dropped}, cards: {proposed, accepted, dropped}}`,
-never text).
-
-**Honest-unavailable and honest-failure, not a stack trace.** No `claude`
-binary on PATH: one dim line
-(`llm-invoke.mjs`'s `UNAVAILABLE_MESSAGE`), exit 0, deterministic tiers
-unaffected, nothing written. An AVAILABLE but FAILING CLI (usage limit,
-expired auth, the 120s timeout): one honest line naming the bounded stderr
-tail, exit 0, no stack trace — and labels a first invocation already paid for
-are persisted immediately, before the second (synthesis) call even starts,
-so a failure on the second call can never discard work the first genuinely
-completed.
-
-**The label store** (`src/lib/usage-label-store.mjs`,
-`usage-prompt-labels.json`, beside the index, mode 0600, atomic tmp+rename):
-one versioned file, two maps — `labels` (`{name, source: 'enriched',
-firstSeen}`, the vocabulary's own store contract) and `cards` (synthesized
-card CONTENT: title/finding/try/basis/basisNumbers/evidenceHash/generatedAt —
-the outcome ledger, §22, tracks a card's LIFECYCLE, never its prose). Every
-entry is re-validated on both write AND read (`sanitizedEntries`,
-`usage-label-store.mjs:210`) — a malformed entry is dropped, never resurrected, rather than
-crashing the whole command or permanently excluding its cluster from future
-candidacy.
-
-**Stale semantics apply to CARDS, never to labels.** A settled label is
-never re-judged — there is no staleness concept for it at all. A synthesized
-card's `evidenceHash` is frozen at synthesis time (no model call refreshes it);
-`isCardStale`
-(`usage-enrich.mjs:379`) recomputes, purely arithmetically, whether every
-number it cited is still present in CURRENT findings — if the corpus has
-moved enough that one has vanished, the card reads `stale`, rendered as a
-chip pointing back at `--enrich` on both surfaces (§20, §21). This is
-orthogonal to the outcome ledger's own `evidenceHash` bookkeeping (which
-governs adoption/dismissal transitions, §22, and is always kept current for
-a rule card because recomputing it is free) — an enriched card's staleness
-is a genuinely NEW concept, because nothing refreshes its hash for free.
-
-**The disclosure this section widens.** §2a states that no fingerprint entry
-ever carries prompt text, and that `session.title` (masked, ≤100 characters)
-is a separate, pre-existing surface with its own contract. That remains true
-of the fingerprint INDEX specifically. It is incomplete as a claim about the
-system as a whole: **the label store is a second on-disk surface that does
-carry prompt-derived text at rest** — an enriched label's `name` is a
-model-authored, secret-masked string of at most 48 characters, produced from
-having seen a masked prompt exemplar. It is not a verbatim quote, it is
-capped and masked, and it exists only for clusters an operator explicitly
-ran `--enrich` against — but it is not nothing, and a reader relying on "the
-index carries no prompt text" to mean "nothing prompt-derived is ever
-written to this machine" would be misled by omission. This section states it
-plainly: `usage-index.json` (the fingerprint index) and
-`usage-prompt-labels.json` (this store) are the two places, and only these
-two, where anything prompt-derived ever reaches disk in this kit.
-
-**Source:** `src/lib/usage-enrich.mjs` (the engine — `enrichLabels`,
-`synthesizeCards`, the anti-fabrication gate, `buildFindingsSummary`,
-`citedEvidenceHash`/`isCardStale`), `src/lib/llm-invoke.mjs` (the invocation
-seam), `src/lib/usage-label-store.mjs` (persistence), `src/commands/usage/
-enrich.mjs` (CLI orchestration — the consent preamble, exemplar gathering
-through the SAME `usage/deep-pass.mjs` machinery §20's `--deep` uses,
-persistence, the result summary).
-
-**What this does not model:**
-
-- **No live Recompute affordance on the dashboard, deliberately.** A button
-  there would trigger inference from a read-only surface the privacy split
-  (ADR-0039 "The privacy split") keeps CLI-only — deferred, not merely
-  unbuilt; see §21.
-- **The anti-fabrication gate binds numbers to DIMENSIONS, not to sentences.**
-  A cited number must both appear in the summary AND be reachable under the
-  dimension the prose attaches it to, so "across 13 projects" is rejected on a
-  summary that carries no project data — even though 13 is a real number in it
-  (`usage-fabrication-gate.mjs`). What the gate still cannot tell you is
-  whether the SENTENCE is true: "3 sessions waiting on releases" binds fine if
-  3 is a real session count somewhere, because nothing here knows what
-  "waiting on releases" means. That is why `source` renders on every card.
-- **Every card names its source, unconditionally.** A `rule` card is computed
-  from your aggregate; an `enriched` card was written by a model from that same
-  aggregate. Both surfaces show it — a dim line on the CLI, a chip beside the
-  status chip on the dashboard — because the marker that used to be pointed at
-  (the stale chip) only ever appeared once a card HAD gone stale, leaving a
-  fresh enriched card indistinguishable from a rule-derived one.
-- **A cluster with no readable sample text is never named by the model.** If
-  the transcript holding a cluster's exemplar is missing, too large, or written
-  at a different index schema, the cluster keeps its honest generated name
-  ("Recurring 9-token question") rather than being sent for naming with nothing
-  to name it from. Exclusions are counted (`dropped.noExemplar`) and disclosed
-  in the consent preamble, not silent.
-- **Label-store keys are the cluster's minimum member hash, and can churn.** A
-  cluster's key is the lexicographically smallest fingerprint hash in it
-  (`usage-prompt-patterns.mjs`), so a NEW member hashing below the current
-  minimum re-keys the cluster. Its settled label is then orphaned, the cluster
-  re-offers as a candidate and costs one further invocation, and the orphaned
-  entry is never pruned. "Settled labels are never re-judged" is therefore true
-  of a stable corpus and bounded by this on a growing one; v1 does not prune
-  orphans, because no cheap stable cluster identity exists to key them by
-  instead.
-- **A consent-line exemplar count is real but ≤1 per cluster in practice**,
-  not the ≤2/cluster the engine's own cap allows — today's exemplar-gathering
-  can only produce one real exemplar per cluster (a published cluster's `key`
-  is a single representative hash), which the engine's own privacy cap does
-  not relax; only the count actually gathered is ever shown or sent.
-- **The scheduled digest is documentation, not shipped machinery** — see
-  §20. Nothing in this pass assumes or half-builds toward a scheduler.
+ADR-0039 defines the maintained boundary. The archived specifications remain frozen
+historical evidence; they are not a contract for current mainline behavior.
 
 ---
 
@@ -2740,7 +2146,7 @@ commit `540be18` on this branch.
 Claude's parser passes `responses: 1` per assistant turn at this call:
 `usage-parsers.mjs:583` (the current equivalent), but Codex's call
 passed no such field at all. Because `byModel[model].responses` is summed
-directly from each usage row's `responses` field (`usage-aggregate.mjs:835-836`,
+directly from each usage row's `responses` field (`usage-aggregate.mjs:760-761`,
 `m.responses += row.responses`), **every** Codex model in §10's Models-in-Play
 list displayed `0 resp` regardless of real token/cost volume or actual
 `agent_message` count. **Fix:** parseCodex now passes `responses:
@@ -2891,7 +2297,7 @@ Where a main-body section implements a recorded decision:
 | Findings / Sessions / Transcript tab rules (out of scope here) | ADR-0009 §6, §8 |
 | Hand-maintained, date-stamped price tables (§13) | ADR-0009 "Costs and risks" |
 | Reference-corpus figures quoted throughout (582–584 sessions, 96.3% cache share, the engaged-time ladder, signal coverage) | ADR-0009 |
-| Prompt fingerprints and provenance, personal baselines and prompt detectors, the Prompts dashboard view, coaching cards and the outcome ledger, and layer-3 enrichment (§2a, §2b, §20–§23) | [ADR-0039](adr/0039-prompts-intelligence.md) |
+| Prompt fingerprints and provenance, personal baselines and prompt detectors, the deterministic Prompts dashboard view, and the archived coaching boundary (§2a, §2b, §20–§22) | [ADR-0039](adr/0039-prompts-intelligence.md) |
 
 ---
 

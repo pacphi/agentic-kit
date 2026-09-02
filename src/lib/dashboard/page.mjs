@@ -515,10 +515,9 @@ export function renderPage({ name, version }) {
     <section class="view" id="v-prompts" role="tabpanel" aria-labelledby="usage-tab-prompts" hidden>
       <div class="note"><span class="i">&#8505;</span><span>What you actually type, across every host.
         Every figure here is computed from prompt <b>fingerprints</b> &mdash; a hash, a token count, and a
-        provenance tag recorded at scan time. <b>No prompt text is stored in the index.</b> The Coaching
-        panel can show a pattern&rsquo;s own prompts back to you on demand &mdash; masked, with secrets
-        redacted server-side, from your local transcripts. Only turns a person typed are counted; agent
-        deliveries, tool templates and slash records are filtered out before anything below is measured.</span></div>
+        provenance tag recorded at scan time. <b>No prompt text is stored in the index or served by this
+        view.</b> Only turns a person typed are counted; agent deliveries, tool templates and slash records
+        are filtered out before anything below is measured.</span></div>
       <div class="hero" id="u-pr-kpis"></div>
       <section class="strip">
         <div class="sh"><h2>Who is typing</h2><span class="n mono" id="u-pr-prov-note"></span></div>
@@ -531,6 +530,11 @@ export function renderPage({ name, version }) {
         <div id="u-pr-taps"></div>
       </section>
       <section class="strip">
+        <div class="sh"><h2>Recurring patterns &amp; re-asks</h2>
+          <span class="n mono" id="u-pr-patterns-note"></span></div>
+        <div id="u-pr-patterns"></div>
+      </section>
+      <section class="strip">
         <div class="sh"><h2>Host interplay</h2>
           <span class="pr-infodot" tabindex="0" role="note" aria-label="About the host interplay figures">?
             <span class="pr-tip"><b>Where you over-steer.</b> <b>Tap share</b> &mdash; how often you nudge
@@ -541,16 +545,6 @@ export function renderPage({ name, version }) {
           </span>
           <span class="n mono" id="u-pr-hosts-note"></span></div>
         <div id="u-pr-hosts"></div>
-      </section>
-      <section class="strip">
-        <div class="sh sh-coach"><h2>Coaching</h2><span class="n mono" id="u-pr-coaching-note"></span>
-          <div class="pr-posture" id="u-pr-posture" role="group" aria-label="Prompt text visibility">
-            <span class="pt-lbl mono">prompt text</span>
-            <button type="button" class="pt-btn" data-pr-posture="shown" aria-pressed="true">shown</button>
-            <button type="button" class="pt-btn" data-pr-posture="hidden" aria-pressed="false">hidden</button>
-          </div>
-        </div>
-        <div id="u-pr-coaching"></div>
       </section>
     </section>
 

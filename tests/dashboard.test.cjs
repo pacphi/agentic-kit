@@ -132,29 +132,7 @@ function eventually(predicate, message, timeout = 1500) {
 
 async function main() {
   const { startDashboard: realStartDashboard } = await import('file://' + MOD);
-  // Fix round 1, I-6: every /api/usage route now also computes coaching
-  // (dashboard-server.mjs's dashboardCoachingPayload), which by default
-  // reads the REAL ~/.config/agentic-kit ledger — the exact hazard `usage`/
-  // `limits` are already injected against throughout this file. A blank
-  // in-memory ledger keeps every call in this suite hermetic; wrapping
-  // startDashboard itself (rather than editing ~26 call sites) means no
-  // future call site can reintroduce the gap by omission.
-  const NULL_COACHING_LEDGER = { loadLedger: () => ({ version: 1, records: [] }), ledgerPath: '/dev/null/unused' };
-  // Fix round 1, I-3: the SAME hazard, one file over (review-confirmed live
-  // with repro/probe-leak.mjs) — dashboard-server.mjs also reads the
-  // persisted label/card store unconditionally on every /api/usage poll and
-  // feeds it to dashboardCoachingPayload, regardless of the `usage`
-  // override above. `tests/ui/dashboard-ui.mjs` and dashboard-usage-
-  // telemetry.test.mjs both already wrap this; this file only had the
-  // ledger half wrapped, leaving every one of its ~25 startDashboard call
-  // sites able to serve this developer's REAL enriched cards to a
-  // fixture-only test.
-  const NULL_LABEL_STORE = {
-    loadLabelStore: () => ({ version: 1, labels: {}, cards: {} }), labelStorePath: '/dev/null/unused',
-  };
-  const startDashboard = (opts = {}) => realStartDashboard({
-    coachingLedger: NULL_COACHING_LEDGER, labelStore: NULL_LABEL_STORE, ...opts,
-  });
+  const startDashboard = (opts = {}) => realStartDashboard(opts);
 
   const STUB_STATUS = {
     overall: 'warn',

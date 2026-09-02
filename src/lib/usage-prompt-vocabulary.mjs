@@ -1,34 +1,15 @@
 // usage-prompt-vocabulary.mjs — what a prompt cluster is CALLED.
 //
-// A cluster's NAME is drawn from a curated/derived vocabulary, never lifted
-// from what the operator typed (ADR-0039 "The privacy split: three surfaces,
-// three different trust boundaries"). The Coaching panel can show a pattern's
-// own MASKED prompt text on demand (the samples endpoint, secrets redacted
-// server-side), but a cluster's name — this module's job — is always a
-// curated, seeded, enriched, or shape-characterized label, never the typed
-// text itself. This module is that vocabulary, and the resolution order
-// behind it.
+// A cluster's name is drawn from a deterministic vocabulary, never lifted
+// from what the operator typed. It is always a seeded or shape-characterized
+// label, never prompt text.
 //
-// ── v1 DESIGN ───────────────────────────────────────────────────────────────
+// A name comes from one of two places, in decreasing order of authority:
 //
-// A name comes from one of three places, in strictly decreasing order of
-// authority:
-//
-//   1. THE LABEL STORE — a caller-supplied map the kit owns beside the index:
-//
-//        { [clusterKey]: { name, source: 'curated'|'enriched', firstSeen } }
-//
-//      `curated` is a name a person wrote; `enriched` is one layer-3 inference
-//      produced (METRICS.md §23) and then settled — settled labels are never
-//      re-judged. This module never reads or writes the store; it is handed in,
-//      which keeps this file pure and keeps the storage decision with the
-//      caller.
-//
-//   2. A SEED PATTERN — the small registry below, for the handful of clusters
-//      the 2026-08-29 research measured by name before any store exists.
-//
-//   3. `characterize` — a generic descriptor assembled from the cluster's own
-//      metadata, which asserts nothing the numbers do not already say.
+//   1. A SEED PATTERN — the small registry below, for clusters measured by
+//      name in the 2026-08-29 research.
+//   2. `characterize` — a generic descriptor assembled from the cluster's
+//      own metadata, asserting nothing the numbers do not already say.
 //
 // ── WHY SEEDS ARE NOT KEYED ON HASHES ───────────────────────────────────────
 //
@@ -46,9 +27,7 @@
 // sessions" is what the release ritual looked like in one corpus; it is not
 // what a release ritual IS. Each seed records the measured cluster it was cut
 // from in its `basis`, and every seed match reports `source: 'seed'` so the
-// view can render it as the provisional reading it is. Layer-3 enrichment
-// overwrites any of them with a real label the moment it produces one — that is
-// the point of the store outranking this list.
+// view can render it as the provisional reading it is.
 //
 // ── THE PRECISION-FIRST RULE (governs every seed here) ──────────────────────
 //
@@ -57,8 +36,7 @@
 // numbers say and can embarrass nobody, whereas "Commit-and-push instruction"
 // printed over a 24-prompt cluster of the word "Continue" is the analysis
 // asserting something false, on the row the operator is most likely to read.
-// Enrichment supplies real labels later; a gap costs a generic descriptor for
-// one release, a mislabel costs trust in the panel.
+// A gap costs a generic descriptor; a mislabel costs trust in the panel.
 //
 // So a predicate is admitted only if it can be shown NOT to fire on any cluster
 // it would misname. Concretely: every predicate below is probed against the
@@ -84,12 +62,8 @@
  */
 export const TOKEN_BANDS = ['tap', 'short', 'medium', 'long', 'xlong'];
 
-/** Every provenance `labelFor` can report. The first two come from the store,
- *  the third from this file's registry, the fourth from `characterize`. */
-export const LABEL_SOURCES = ['curated', 'enriched', 'seed', 'characterized'];
-
-/** Store sources a caller's entry may declare; anything else reads as curated. */
-const STORE_SOURCES = new Set(['curated', 'enriched']);
+/** Every provenance `labelFor` can report. */
+export const LABEL_SOURCES = ['seed', 'characterized'];
 
 /** The cluster shape this module names. Imported as a TYPE only — nothing here
  *  takes a runtime dependency on the clustering library.
@@ -271,82 +245,21 @@ export function characterize(cluster) {
 // ── resolution ──────────────────────────────────────────────────────────────
 
 /**
- * What to call this cluster: the label store first, then a seed pattern, then a
- * characterization.
+ * What to call this cluster: a seed pattern first, then a characterization.
  *
- * The store wins unconditionally, including over a seed that also matches. That
- * is the mechanism by which the provisional shape heuristics above get
- * replaced: a person renaming a cluster, or a layer-3 pass settling a label on
- * it, permanently outranks the guess without anyone having to edit this file.
- *
- * RULING B (final-triage item 2): for a `characterized` result, `name` is the
- * BARE lead clause ("Recurring 1-token prompt") rather than the full
- * descriptor — a CLI table already carries sessions/days/hosts in their own
- * columns, and appending the same numbers inside the name cell was a
- * truncated, duplicated "· 24 sessio…" beside them. `descriptor` carries the
- * full string (lead + span/host tail) for a surface with no columns to spare
- * (the dashboard's row title). Only a characterized result sets `descriptor`
- * at all — a curated, seeded or enriched `name` is already the whole thing a
- * person (or a layer-3 pass) chose to say, so there is no second string to
- * carry.
+ * For a characterized result, `name` is the bare lead clause while
+ * `descriptor` carries the full string (lead plus span/host tail) for a
+ * surface with no columns to spare. A seeded name is already the whole phrase.
  *
  * @param {Partial<PromptCluster>} [cluster] A cluster from `nearDupClusters`.
- * @param {Record<string, { name?: string, source?: string, firstSeen?: string }>} [store]
- * @returns {{ name: string, source: 'curated'|'enriched'|'seed'|'characterized',
+ * @returns {{ name: string, source: 'seed'|'characterized',
  *   firstSeen: string|null, seed: string|null, descriptor?: string }}
  */
-export function labelFor(cluster, store) {
-  const entry = typeof cluster?.key === 'string' ? store?.[cluster.key] : null;
-  const stored = typeof entry?.name === 'string' ? entry.name.trim() : '';
-  if (stored) {
-    return {
-      name: stored,
-      source: STORE_SOURCES.has(entry.source) ? /** @type {'curated'|'enriched'} */ (entry.source) : 'curated',
-      firstSeen: typeof entry.firstSeen === 'string' ? entry.firstSeen : null,
-      seed: null,
-    };
-  }
+export function labelFor(cluster) {
   const seed = matchSeed(cluster);
   if (seed) return { name: seed.name, source: 'seed', firstSeen: null, seed: seed.id };
   const { lead, full } = characterizeParts(cluster);
   return {
     name: lead, source: 'characterized', firstSeen: null, seed: null, descriptor: full,
-  };
-}
-
-// ── re-resolving a PUBLISHED row against a real store (W5 enrichment) ──────
-
-/**
- * Re-checks one already-published cluster ROW (`promptClusterRow`'s output,
- * not a raw `nearDupClusters` cluster) against a real label store, and
- * returns the row unchanged unless the store actually names this key.
- *
- * WHY THIS IS EXACT, NOT AN APPROXIMATION: `labelFor`'s store branch depends
- * on nothing but `cluster.key` — it never reads the shape fields (tokens,
- * class, sessions, hosts, personas) a seed/characterize match would need. So
- * re-checking the store after the row has already been reduced (aggregate
- * time, `usage-aggregate.mjs`'s `buildPromptPatterns`, historically built
- * with an empty `{}` store) is equivalent to having threaded the real store
- * through from the start — a seed or characterized row the store does not
- * cover is returned byte-for-byte identical, and a row the store DOES cover
- * resolves exactly as `labelFor` would have resolved it at construction time.
- * This is the seam `ak usage prompts`/the dashboard use to apply the
- * persisted `usage-label-store.mjs` file without re-threading it through
- * `aggregate()`/`usage-index.mjs`.
- *
- * @param {{ key: string, label: { name?: string, source?: string } }} row
- * @param {Record<string, { name?: string, source?: string, firstSeen?: string }>} [store]
- * @returns {{ key: string, label: { name?: string, source?: string } }}
- */
-export function withStoreLabel(row, store) {
-  const entry = typeof row?.key === 'string' ? store?.[row.key] : null;
-  const stored = typeof entry?.name === 'string' ? entry.name.trim() : '';
-  if (!stored) return row;
-  return {
-    ...row,
-    label: {
-      name: stored,
-      source: STORE_SOURCES.has(entry.source) ? /** @type {'curated'|'enriched'} */ (entry.source) : 'curated',
-    },
   };
 }

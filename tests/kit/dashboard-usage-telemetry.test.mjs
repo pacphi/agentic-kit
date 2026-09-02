@@ -1,9 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { JS } from '../../src/lib/dashboard/client.mjs';
 import { renderPage } from '../../src/lib/dashboard/page.mjs';
 import { CSS } from '../../src/lib/dashboard/styles.mjs';
@@ -12,18 +9,13 @@ import { startDashboard } from '../../src/lib/dashboard-server.mjs';
 import { aggregate } from '../../src/lib/usage-aggregate.mjs';
 import { blankSession, addUsage, notePromptFingerprint } from '../../src/lib/usage-parsers.mjs';
 import { MODES } from '../../src/lib/usage-modes.mjs';
-import { loadLedger as realLoadLedger, saveLedger as realSaveLedger } from '../../src/lib/usage-outcome-ledger.mjs';
-import {
-  loadLabelStore as realLoadLabelStore, saveLabelStore as realSaveLabelStore,
-} from '../../src/lib/usage-label-store.mjs';
-import { citedEvidenceHash } from '../../src/lib/usage-enrich.mjs';
 import {
   deltaChip, sparklineSvg, histogram, stackedDays, donut2, rankedRows,
   bucketPercentile, bucketPositionPct,
 } from '../../src/lib/dashboard/client/usage-rhythm.mjs';
 import {
-  coachingPanel, hostInterplay, hostTapSeries, promptKpis,
-  provenancePanel, steerPanel, tapLengthPanel,
+  hostInterplay, hostTapSeries, promptKpis,
+  patternsPanel, provenancePanel, steerPanel, tapLengthPanel,
 } from '../../src/lib/dashboard/client/usage-prompts.mjs';
 import {
   percentileFromBuckets, LAT_BUCKET_EDGES, LEN_BUCKET_EDGES,
@@ -124,21 +116,6 @@ const FIXTURE_DEPS = {
   detectInsights: () => [],
 };
 
-// Every /api/usage route now also computes coaching (dashboard-server.mjs's
-// dashboardCoachingPayload), which by default reads the REAL
-// ~/.config/agentic-kit ledger — exactly the "tests must never read the real
-// ~/.config" hazard `usage`/`limits` are already injected to avoid here. A
-// blank in-memory ledger keeps every /api/usage test in this file hermetic.
-const NULL_COACHING_LEDGER = { loadLedger: () => ({ version: 1, records: [] }), ledgerPath: '/dev/null/unused' };
-
-// W5 enrichment (spec §6.3): the SAME hazard, one file over — dashboard-
-// server.mjs now also reads the persisted label/card store on every
-// /api/usage poll (read-only). A blank in-memory store keeps every test in
-// this file hermetic against the real ~/.config/agentic-kit label store too.
-const NULL_LABEL_STORE = {
-  loadLabelStore: () => ({ version: 1, labels: {}, cards: {} }), labelStorePath: '/dev/null/unused',
-};
-
 function get(url, token) {
   return new Promise((resolve, reject) => {
     http.get(url, { headers: { 'x-dash-token': token } }, (res) => {
@@ -187,7 +164,7 @@ test('/api/usage payload carries rhythm, mode, provider and a previous-window pr
   // rides through from the caller's own options unchanged.
   const usage = { readIndex: spyReadIndex(FIXTURE_RECORDS, calls) };
   const srv = await startDashboard({
-    port: 0, fetchStatus: async () => ({ overall: 'ok', rows: [] }), usage, coachingLedger: NULL_COACHING_LEDGER, labelStore: NULL_LABEL_STORE,
+    port: 0, fetchStatus: async () => ({ overall: 'ok', rows: [] }), usage,
   });
   try {
     const r = await get(`${srv.url}api/usage?days=7`, srv.token);
@@ -270,7 +247,7 @@ test('the baseline lookback reaches far enough back for promptBaselines to exist
   const calls = [];
   const srv = await startDashboard({
     port: 0, fetchStatus: async () => ({ overall: 'ok', rows: [] }),
-    usage: { readIndex: spyReadIndex(trailing, calls) }, coachingLedger: NULL_COACHING_LEDGER, labelStore: NULL_LABEL_STORE,
+    usage: { readIndex: spyReadIndex(trailing, calls) },
   });
   try {
     const r = await get(`${srv.url}api/usage?days=7`, srv.token);
@@ -357,7 +334,7 @@ async function promptsPayload(days = 7) {
   const calls = [];
   const srv = await startDashboard({
     port: 0, fetchStatus: async () => ({ overall: 'ok', rows: [] }),
-    usage: { readIndex: spyReadIndex(PROMPT_RECORDS, calls) }, coachingLedger: NULL_COACHING_LEDGER, labelStore: NULL_LABEL_STORE,
+    usage: { readIndex: spyReadIndex(PROMPT_RECORDS, calls) },
   });
   try {
     const r = await get(`${srv.url}api/usage?days=${days}`, srv.token);
@@ -395,178 +372,6 @@ test('/api/usage asks for the prompt projection and ships it intact', async () =
   }
 });
 
-test('/api/usage carries a coaching payload shaped {cards, summary}, computed read-only', async () => {
-  const { prompts } = await promptsPayload();
-  assert.ok(prompts.coaching, 'the prompts payload must carry a coaching key');
-  assert.deepEqual(Object.keys(prompts.coaching).sort(), ['cards', 'summary']);
-  assert.ok(Array.isArray(prompts.coaching.cards));
-  assert.deepEqual(prompts.coaching.summary, { proposed: 0, adopted: 0, dismissed: 0, expired: 0, retired: 0 },
-    'PROMPT_RECORDS fires none of the six v1 rules, so the ledger summary must be all zeros, not absent');
-});
-
-// Fix round 1, M-8: dashboardCoachingPayload genuinely cannot save (it never
-// imports saveLedger) — this pins the READ-ONLY CONTRACT directly, on a REAL
-// ledger file with a REAL record, across several polls, rather than only
-// incidentally via a bogus ledgerPath that would throw if ever written to.
-test('M-8: the ledger file\'s bytes are byte-for-byte unchanged after several /api/usage polls', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-dash-m8-'));
-  const ledgerPath = path.join(dir, 'usage-outcome-ledger.json');
-  realSaveLedger(ledgerPath, {
-    version: 1,
-    records: [{
-      id: 'commit-push-claude-md', evidenceHash: 'a'.repeat(16), status: 'dismissed',
-      generatedAt: '2026-08-01T00:00:00.000Z', statusAt: '2026-08-01T00:00:00.000Z',
-      baseline: { count: 12, clusterKey: 'k', sessions: 8, days: 4 }, windowDays: 30, dismissCount: 1,
-    }],
-  });
-  const before = fs.readFileSync(ledgerPath);
-
-  const calls = [];
-  const srv = await startDashboard({
-    port: 0, fetchStatus: async () => ({ overall: 'ok', rows: [] }),
-    usage: { readIndex: spyReadIndex(PROMPT_RECORDS, calls) },
-    coachingLedger: { loadLedger: realLoadLedger, ledgerPath }, labelStore: NULL_LABEL_STORE,
-  });
-  try {
-    for (let i = 0; i < 3; i++) {
-      const r = await get(`${srv.url}api/usage?days=7`, srv.token);
-      assert.equal(r.status, 200, `expected 200, got ${r.status}`);
-      const { coaching } = JSON.parse(r.body).prompts;
-      // PROMPT_RECORDS fires none of the six v1 rules (see the payload-shape
-      // test above), so the dismissed record has no live card to annotate
-      // this pass — but it survives untouched in the ledger the summary
-      // counts, which is what proves the poll actually READ the real file
-      // rather than a stub that returns an empty ledger.
-      assert.equal(coaching.summary.dismissed, 1, 'the poll must read the REAL ledger, not a no-op stub');
-    }
-  } finally {
-    await srv.close();
-  }
-
-  const after = fs.readFileSync(ledgerPath);
-  assert.ok(before.equals(after), 'the ledger file must be byte-for-byte unchanged after multiple dashboard polls');
-  fs.rmSync(dir, { recursive: true, force: true });
-});
-
-// ── W5 enrichment (spec §6.3/§6.4, deliverable §5): the dashboard applies a
-// PERSISTED store read-only — it never calls makeInvoke/enrichLabels/
-// synthesizeCards/saveLabelStore (none of those are even imported into
-// dashboard-server.mjs). These tests write the store directly with the real
-// usage-label-store.mjs module, the same way the M-8 test above writes a
-// real ledger, and prove the dashboard reads it without ever mutating it.
-
-test('a persisted enriched label applies to its cluster in the /api/usage payload, and the store file is untouched', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-dash-labels-'));
-  const labelStorePath = path.join(dir, 'usage-prompt-labels.json');
-
-  // Discover the real cluster key PROMPT_RECORDS produces, the same way a
-  // real `--enrich` pass would have — never a hand-guessed hash.
-  const before = await promptsPayload();
-  const cluster = before.prompts.patterns.clusters[0];
-  assert.ok(cluster, 'the fixture must produce at least one cluster to label');
-
-  realSaveLabelStore(labelStorePath, {
-    version: 1,
-    labels: { [cluster.key]: { name: 'Dashboard-enriched name', source: 'enriched', firstSeen: '2026-08-01T00:00:00.000Z' } },
-    cards: {},
-  });
-  const beforeBytes = fs.readFileSync(labelStorePath);
-
-  const calls = [];
-  const srv = await startDashboard({
-    port: 0, fetchStatus: async () => ({ overall: 'ok', rows: [] }),
-    usage: { readIndex: spyReadIndex(PROMPT_RECORDS, calls) }, coachingLedger: NULL_COACHING_LEDGER,
-    labelStore: { loadLabelStore: realLoadLabelStore, labelStorePath },
-  });
-  try {
-    for (let i = 0; i < 2; i++) {
-      const r = await get(`${srv.url}api/usage?days=7`, srv.token);
-      assert.equal(r.status, 200, `expected 200, got ${r.status}`);
-      const { patterns } = JSON.parse(r.body).prompts;
-      const labeled = patterns.clusters.find((c) => c.key === cluster.key);
-      assert.equal(labeled.label.name, 'Dashboard-enriched name');
-      assert.equal(labeled.label.source, 'enriched');
-    }
-  } finally {
-    await srv.close();
-  }
-
-  assert.ok(beforeBytes.equals(fs.readFileSync(labelStorePath)),
-    'the label store file must be byte-for-byte unchanged after multiple dashboard polls — read-only');
-  fs.rmSync(dir, { recursive: true, force: true });
-});
-
-test('a persisted enriched card rejoins coaching every poll, exactly like a rule card, and a stale one is marked stale', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-dash-cards-'));
-  const labelStorePath = path.join(dir, 'usage-prompt-labels.json');
-
-  const freshCard = {
-    title: 'A dashboard-visible enriched suggestion', finding: 'This recurred 6 times.',
-    try: 'Try the obvious thing.', basis: '6 recurrences.', basisNumbers: [6],
-    evidenceHash: 'will-be-replaced', generatedAt: '2026-08-01T00:00:00.000Z',
-  };
-  const staleCard = {
-    title: 'A stale suggestion', finding: 'This once recurred 999 times.',
-    try: 'Try something else.', basis: '999 recurrences.', basisNumbers: [999],
-    // Hashed against a summary that DID contain 999 — simulating "999 was
-    // real at synthesis time" — so the drift is genuine: the REAL current
-    // findingsSummary (built below) does not contain 999, so citedEvidenceHash
-    // recomputes a SMALLER present-set and the hash moves. Hashing against an
-    // empty/non-matching summary here would make both computations agree on
-    // "nothing present" and never trip staleness at all — not what this test
-    // means to prove.
-    evidenceHash: citedEvidenceHash({ onceTrue: 999 }, [999]), generatedAt: '2026-08-01T00:00:00.000Z',
-  };
-
-  // Compute the fresh card's REAL evidenceHash against what the fixture's
-  // own canonical findingsSummary will actually contain (6 typed prompts per
-  // typing session — see promptRecord/PROMPT_RECORDS above), so it reads as
-  // genuinely fresh rather than stale-by-construction.
-  const probe = await promptsPayload(30);
-  const summaryNumbers = new Set();
-  const walk = (v) => {
-    if (typeof v === 'number' && Number.isFinite(v)) summaryNumbers.add(v);
-    else if (Array.isArray(v)) v.forEach(walk);
-    else if (v && typeof v === 'object') Object.values(v).forEach(walk);
-  };
-  walk(probe.prompts.patterns);
-  walk(probe.prompts.byHost);
-  const realNumber = [...summaryNumbers].find((n) => Number.isInteger(n) && n > 0);
-  assert.ok(realNumber !== undefined, 'the fixture must carry at least one real positive integer to ground a card in');
-  freshCard.finding = `This recurred ${realNumber} times.`;
-  freshCard.basis = `${realNumber} recurrences.`;
-  freshCard.basisNumbers = [realNumber];
-  freshCard.evidenceHash = citedEvidenceHash(
-    { clusters: probe.prompts.patterns.clusters, byHost: probe.prompts.byHost }, [realNumber],
-  );
-
-  realSaveLabelStore(labelStorePath, {
-    version: 1, labels: {}, cards: { 'enriched-fresh': freshCard, 'enriched-stale': staleCard },
-  });
-
-  const calls = [];
-  const srv = await startDashboard({
-    port: 0, fetchStatus: async () => ({ overall: 'ok', rows: [] }),
-    usage: { readIndex: spyReadIndex(PROMPT_RECORDS, calls) }, coachingLedger: NULL_COACHING_LEDGER,
-    labelStore: { loadLabelStore: realLoadLabelStore, labelStorePath },
-  });
-  try {
-    const r = await get(`${srv.url}api/usage?days=30`, srv.token);
-    assert.equal(r.status, 200, r.body);
-    const { coaching } = JSON.parse(r.body).prompts;
-    const fresh = coaching.cards.find((c) => c.id === 'enriched-fresh');
-    const stale = coaching.cards.find((c) => c.id === 'enriched-stale');
-    assert.ok(fresh, `enriched-fresh must reconcile like a rule card: ${JSON.stringify(coaching.cards.map((c) => c.id))}`);
-    assert.equal(fresh.status, 'proposed');
-    assert.equal(fresh.stale, false);
-    assert.ok(stale, 'enriched-stale must also reconcile');
-    assert.equal(stale.stale, true, '999 does not appear anywhere in this fixture\'s findings — must read as stale');
-  } finally {
-    await srv.close();
-  }
-  fs.rmSync(dir, { recursive: true, force: true });
-});
-
 test('the projection reaches the payload with its published shape', async () => {
   const { prompts } = await promptsPayload();
   const pat = prompts.patterns;
@@ -586,7 +391,6 @@ test('the projection reaches the payload with its published shape', async () => 
   assert.equal(lead.sessions, 6, 'sessions is a COUNT, not a list');
   assert.ok(lead.days >= 2, 'the cluster spans days, which is half of the recurrence disjunction');
   assert.deepEqual(lead.hosts, ['claude', 'codex'], 'hosts is a sorted array of names');
-  assert.ok(lead.sampleSessionIds.length <= 3, 'at most three link ids, never a membership dump');
   assert.equal(typeof lead.medianTokens, 'number');
   assert.ok(lead.label.name.length > 0, 'every cluster is named');
 
@@ -643,7 +447,7 @@ test('the prompts payload carries no fixture prompt text, at any depth', async (
 // past the word scan above. Cluster entries are the only place a name string
 // reaches this payload, and that name comes from the curated vocabulary.
 const CLUSTER_KEYS = new Set(['key', 'label', 'class', 'count', 'sessions', 'days', 'hosts',
-  'medianTokens', 'sampleSessionIds', 'kind']);
+  'medianTokens']);
 // `descriptor` (RULING B, final-triage item 2) rides beside `name` only on a
 // CHARACTERIZED label — the full "Recurring N-token X · N sessions · N hosts"
 // string, still machine-assembled from counts/bands, never prompt text. The
@@ -656,8 +460,6 @@ test('every prompt-pattern entry carries only keys from the allowed set', async 
   for (const c of prompts.patterns.clusters) {
     for (const k of Object.keys(c)) assert.ok(CLUSTER_KEYS.has(k), `unexpected cluster key ${JSON.stringify(k)}`);
     for (const k of Object.keys(c.label)) assert.ok(LABEL_KEYS.has(k), `unexpected label key ${JSON.stringify(k)}`);
-    assert.ok(c.sampleSessionIds.every((id) => typeof id === 'string'),
-      'session links are ids, which the masked /api/session route already governs');
   }
 });
 
@@ -762,64 +564,34 @@ const PANEL_PROMPTS = {
     // `cccc` carry both.
     clusters: [
       {
-        key: 'aaaa', kind: 'instruction', label: { name: 'Commit-and-push instruction', source: 'seed' },
+        key: 'aaaa', label: { name: 'Commit-and-push instruction', source: 'seed' },
         class: 'other', count: 12, sessions: 9, days: 5, hosts: ['claude', 'codex'],
-        medianTokens: 3, sampleSessionIds: ['s1', 's2', 's3'],
+        medianTokens: 3,
       },
       {
-        key: 'bbbb', kind: 'question',
+        key: 'bbbb',
         label: {
           name: 'Recurring 44-token prompt', source: 'characterized',
           descriptor: 'Recurring 44-token prompt · 4 sessions · 1 host',
         },
         class: 'question', count: 5, sessions: 4, days: 2, hosts: ['codex'],
-        medianTokens: 44, sampleSessionIds: ['s5'],
+        medianTokens: 44,
       },
       {
-        key: 'cccc', kind: 'reask',
+        key: 'cccc',
         label: {
           name: 'Recurring 9-token prompt', source: 'characterized',
           descriptor: 'Recurring 9-token prompt · 3 sessions · 1 host',
         },
         class: 'unknown', count: 3, sessions: 3, days: 2, hosts: ['claude'],
-        medianTokens: 9, sampleSessionIds: ['s7'],
+        medianTokens: 9,
       },
     ],
     reAsks: { pairCount: 7, sessionCount: 3, gapHist: { 1: 4, 2: 3 } },
     exactRepeats: [{ key: 'dddd', count: 9, tokens: 2, sessions: 7, days: 4, hosts: ['claude'] }],
     computedAt: '2026-08-20T12:00:00.000Z',
   },
-  // P15: the Coaching table shows ONLY patterns that have advice, so the base
-  // fixture gives each of its three clusters a clusterKey card. Tests that
-  // exercise a SPECIFIC card build their own payload via promptsWithCoaching,
-  // which replaces this block wholesale.
-  coaching: {
-    cards: [
-      { id: 'aaaa-card', clusterKey: 'aaaa', targetKind: null, title: 'Commit-and-push retyped',
-        try: 'Add a commit-and-push rule to CLAUDE.md.', finding: 'typed 12 times across 9 sessions.',
-        source: 'rule', status: 'proposed', draft: { text: 'Commit and push once verified.' } },
-      { id: 'bbbb-card', clusterKey: 'bbbb', targetKind: null, title: 'A recurring question',
-        try: 'Capture this as a repo skill.', finding: 'asked 5 times across 4 sessions.',
-        source: 'rule', status: 'proposed', draft: { text: 'Skill draft.' } },
-      { id: 'cccc-card', clusterKey: 'cccc', targetKind: null, title: 'A re-ask pattern',
-        try: 'State acceptance criteria up front.', finding: 'recurred 3 times across 3 sessions.',
-        source: 'rule', status: 'proposed', draft: { text: 'Done when: <criteria>.' } },
-    ],
-    summary: null,
-  },
 };
-
-/** A minimal proposed clusterKey card per cluster. Under P15 the Coaching table
- *  hides any cluster without a joined card, so a fixture that means to render
- *  rows carries one per cluster; fields are kept minimal because these tests
- *  assert row/pill/sort behaviour, not card content. */
-function keyCards(clusters) {
-  return (clusters || []).map((c) => ({
-    id: `${c.key}-card`, clusterKey: c.key, targetKind: null,
-    title: `${c.key} advice`, try: `${c.key} advice`, finding: '',
-    source: 'rule', status: 'proposed', draft: { text: `${c.key} draft` },
-  }));
-}
 
 test('the KPI strip renders five tiles, each stating what it does not model', () => {
   const html = promptKpis(PANEL_PROMPTS);
@@ -874,13 +646,22 @@ test('the repeated share counts every cluster, not the slice the table draws', (
       clusters: Array.from({ length: 40 }, (_v, i) => ({
         key: `k${i}`, label: { name: `Recurring ${i}-token prompt`, source: 'characterized' },
         class: 'other', count: 2, sessions: 3, days: 2, hosts: ['claude'],
-        medianTokens: i, sampleSessionIds: ['s1'],
+        medianTokens: i,
       })),
     },
   };
   // 40 clusters × 2 = 80 of 100 typed, even though the table draws 25 rows.
   assert.match(promptKpis(many), />80%</, 'the KPI sums the whole uncapped list');
   assert.match(promptKpis(many), /40 recurring clusters/);
+});
+
+test('recurring patterns remain deterministic dashboard telemetry without coaching controls', () => {
+  const html = patternsPanel(PANEL_PROMPTS);
+  assert.match(html, /Commit-and-push instruction/);
+  assert.match(html, /Recurring 44-token prompt/);
+  assert.match(html, /7 re-asks across 3 sessions/);
+  assert.match(html, /Times typed/);
+  assert.doesNotMatch(html, /Recommendation|Draft|Dismiss|What you typed|data-pr-open|data-pr-filter/);
 });
 
 test('the provenance panel names every tag and says which slice the page uses', () => {
@@ -980,497 +761,16 @@ test('the host read states only a comparison both sides carry, and nothing on a 
   assert.doesNotMatch(flat, /class="pr-host-read"/, 'no asymmetry means no read, not a blank one');
 });
 
-// ── the Coaching panel: filters + sortable table (spec §2) ──────────────────
-//
-// The recurring-patterns table IS the coaching surface now: five columns, kind
-// filter pills, and sortable headers, with each row expanding to its coaching
-// panel (the expand half is exercised separately, below). These pin the
-// collapsed table on the pure builder's output, `coachingPanel(prompts, state)`.
-
-test('the coaching table draws exactly the five spec columns, and none of the retired ones', () => {
-  const html = coachingPanel(PANEL_PROMPTS, {});
-  const heads = [...html.matchAll(/data-pr-sort="\w+"[^>]*>([^<]*)<span/g)].map((m) => m[1].trim());
-  assert.deepEqual(heads, ['Pattern', 'Times typed', 'Sessions', 'Days seen', 'Hosts'],
-    'the header is Pattern · Times typed · Sessions · Days seen · Hosts, in order');
-  assert.doesNotMatch(html, />Suggested move<|>Open<\/th>/, 'the Suggested-move and Open columns are gone');
-  assert.doesNotMatch(html, /pr-src|pr-move|pr-cat/, 'no source sublabel, no move chip, no class chip on a row');
-});
-
-test('the coaching table shows a pattern name and its host chips per row', () => {
-  const html = coachingPanel(PANEL_PROMPTS, {});
-  assert.match(html, /Commit-and-push instruction/, 'a seeded cluster shows its curated name');
-  assert.match(html, /<span class="pr-hostchip">claude<\/span>/);
-  assert.match(html, /data-pr-open="aaaa"/, 'the pattern name is the expand control, keyed by cluster key');
-});
-
-test('the re-ask insight leads the panel, and reads its immediate-repeat share', () => {
-  const html = coachingPanel(PANEL_PROMPTS, {});
-  assert.match(html, /class="pr-insight"/);
-  assert.match(html, /7<\/b> re-asks/);
-  assert.match(html, /3<\/b> sessions/);
-  assert.match(html, /57%.*?very next turn/s, '4 of 7 pairs landed at gap 1');
-  const none = coachingPanel({ ...PANEL_PROMPTS, patterns: { ...PANEL_PROMPTS.patterns, reAsks: { pairCount: 0, sessionCount: 0, gapHist: {} } } }, {});
-  assert.match(none, /Every pattern below is one you typed more than once/,
-    'no re-ask reads as a neutral prompt to explore, not a fabricated zero');
-});
-
-// ── kind filter pills ───────────────────────────────────────────────────────
-
-test('the filter pills list All plus one pill per kind PRESENT, each with its count', () => {
-  const html = coachingPanel(PANEL_PROMPTS, {});
-  assert.match(html, /data-pr-filter="all"[^>]*>All <span class="fc mono">3</, 'All carries the full count');
-  assert.match(html, /data-pr-filter="instruction"[^>]*><span class="sw k-instruction"><\/span>Instructions <span class="fc mono">1</);
-  assert.match(html, /data-pr-filter="question"[^>]*>.*?Questions <span class="fc mono">1</s);
-  assert.match(html, /data-pr-filter="reask"[^>]*>.*?Re-asks <span class="fc mono">1</s);
-  assert.doesNotMatch(html, /data-pr-filter="persona"/, 'no pill for a kind that is not present');
-  assert.doesNotMatch(html, /data-pr-filter="tap"/);
-});
-
-test('a filter slices the table to its kind, and stacks with the active sort', () => {
-  const filtered = coachingPanel(PANEL_PROMPTS, { filter: 'question' });
-  assert.deepEqual([...filtered.matchAll(/data-pr-row="(\w+)"/g)].map((m) => m[1]), ['bbbb'],
-    'only the question-kind cluster survives the filter');
-  assert.match(filtered, /class="fpill on" data-pr-filter="question"/, 'the active pill is marked');
-  // The stack: filter to one kind, then sort within it — the sort must apply
-  // AFTER the filter, and a higher-count row of another kind must not leak in.
-  const manyClusters = [
-    { key: 'i1', kind: 'instruction', label: { name: 'A instr', source: 'seed' }, class: 'other', count: 3, sessions: 2, days: 1, hosts: ['claude'], medianTokens: 8, sampleSessionIds: [] },
-    { key: 'i2', kind: 'instruction', label: { name: 'B instr', source: 'seed' }, class: 'other', count: 9, sessions: 5, days: 3, hosts: ['claude'], medianTokens: 8, sampleSessionIds: [] },
-    { key: 'q1', kind: 'question', label: { name: 'Q', source: 'seed' }, class: 'question', count: 20, sessions: 9, days: 6, hosts: ['claude'], medianTokens: 8, sampleSessionIds: [] },
-  ];
-  const many = { ...PANEL_PROMPTS, patterns: { ...PANEL_PROMPTS.patterns, clusters: manyClusters },
-    coaching: { cards: keyCards(manyClusters), summary: null } };
-  const stacked = coachingPanel(many, { filter: 'instruction', sort: { key: 'count', dir: 'desc' } });
-  assert.deepEqual([...stacked.matchAll(/data-pr-row="(\w+)"/g)].map((m) => m[1]), ['i2', 'i1'],
-    'only instruction rows, ordered by the active count-desc sort');
-  assert.doesNotMatch(stacked, /data-pr-row="q1"/, 'the higher-count question row is filtered out, not floated to the top');
-});
-
-test('a filter that matches nothing names the empty state rather than drawing a blank grid', () => {
-  const html = coachingPanel(PANEL_PROMPTS, { filter: 'persona' });
-  assert.match(html, /no patterns of this kind in this window/);
-  assert.doesNotMatch(html, /data-pr-row=/, 'no rows are drawn behind the empty message');
-});
-
-// ── sortable headers ────────────────────────────────────────────────────────
-
-test('every header is a sort button with a title tooltip and an arrow indicator', () => {
-  const html = coachingPanel(PANEL_PROMPTS, {});
-  assert.match(html, /data-pr-sort="name"[^>]*title="The recurring prompt cluster\."/);
-  assert.match(html, /data-pr-sort="count"[^>]*title="How many times this pattern was typed in the window\."/);
-  assert.match(html, /data-pr-sort="sessions"[^>]*title="How many separate sessions/);
-  assert.match(html, /data-pr-sort="days"[^>]*title="How many distinct days/);
-  assert.match(html, /data-pr-sort="hosts"[^>]*title="Which agents you typed it to\."/);
-  assert.match(html, /<span class="arw mono" aria-hidden="true">/, 'each header carries an arrow indicator');
-});
-
-test('the default sort is Times typed, descending, and marks the active column', () => {
-  const html = coachingPanel(PANEL_PROMPTS, {});
-  assert.deepEqual([...html.matchAll(/data-pr-row="(\w+)"/g)].map((m) => m[1]), ['aaaa', 'bbbb', 'cccc'],
-    'counts 12 > 5 > 3, descending by default');
-  assert.match(html, /aria-sort="descending"><button type="button" data-pr-sort="count"/,
-    'the count header carries the descending aria-sort state');
-});
-
-test('a numeric sort ascending reverses the order; a name sort orders alphabetically', () => {
-  const asc = coachingPanel(PANEL_PROMPTS, { sort: { key: 'count', dir: 'asc' } });
-  assert.deepEqual([...asc.matchAll(/data-pr-row="(\w+)"/g)].map((m) => m[1]), ['cccc', 'bbbb', 'aaaa'],
-    'ascending count is 3 < 5 < 12');
-  assert.match(asc, /aria-sort="ascending"><button type="button" data-pr-sort="count"/);
-  const byName = coachingPanel(PANEL_PROMPTS, { sort: { key: 'name', dir: 'asc' } });
-  assert.deepEqual([...byName.matchAll(/data-pr-row="(\w+)"/g)].map((m) => m[1]), ['aaaa', 'bbbb', 'cccc'],
-    'name sort is alphabetical: "Commit…" before "Recurring 44…" before "Recurring 9…"');
-});
-
-test('the Hosts column sorts by how many hosts a pattern spans', () => {
-  const html = coachingPanel(PANEL_PROMPTS, { sort: { key: 'hosts', dir: 'desc' } });
-  assert.equal([...html.matchAll(/data-pr-row="(\w+)"/g)].map((m) => m[1])[0], 'aaaa',
-    'the two-host pattern sorts to the top on a hosts-desc sort');
-});
-
-// ── name honesty (kept from the retired table, re-pointed at the panel) ──────
-//
-// The Type column is gone, so the pattern NAME is the only place a class could
-// be over-claimed — neutralising a machine-generated "Recurring N-token
-// instruction" lead matters MORE now, not less.
-
-test('a characterized name does not assert a class the rules never split (belt)', () => {
-  const html = coachingPanel({
-    ...PANEL_PROMPTS,
-    patterns: {
-      ...PANEL_PROMPTS.patterns,
-      clusters: [
-        { ...PANEL_PROMPTS.patterns.clusters[0], class: 'other', kind: 'instruction',
-          label: { name: 'Recurring 3-token instruction · 9 sessions · both hosts', source: 'characterized' } },
-        { ...PANEL_PROMPTS.patterns.clusters[1], class: 'question', kind: 'question',
-          label: { name: 'Recurring 44-token question · 4 sessions · 1 host', source: 'characterized' } },
-      ],
-    },
-  }, {});
-  assert.match(html, />Recurring 3-token prompt</, 'the class noun is neutralised in the cell');
-  assert.match(html, />Recurring 44-token prompt</);
-  assert.doesNotMatch(html, />Recurring \d+-token (instruction|question)</, 'no class noun survives into a rendered name');
-  assert.match(html, /title="Recurring 3-token prompt · 9 sessions · both hosts"/, 'the title is neutralised alongside the cell');
-});
-
-test('a curated name is never rewritten, whatever words it contains', () => {
-  const html = coachingPanel({
-    ...PANEL_PROMPTS,
-    patterns: {
-      ...PANEL_PROMPTS.patterns,
-      clusters: [{ ...PANEL_PROMPTS.patterns.clusters[0],
-        label: { name: 'Recurring 3-token instruction', source: 'curated' } }],
-    },
-  }, {});
-  assert.match(html, />Recurring 3-token instruction</,
-    'a person or an enrichment pass wrote this name; the render layer does not second-guess it');
-  assert.match(html, /title="Recurring 3-token instruction"/);
-});
-
-test('a characterized descriptor is trimmed to its lead, a curated name is not', () => {
-  const html = coachingPanel(PANEL_PROMPTS, {});
-  assert.match(html, />Recurring 44-token prompt</, 'the redundant span tail is dropped from the cell');
-  assert.match(html, /title="Recurring 44-token prompt · 4 sessions · 1 host"/, 'and kept as the tooltip');
-  assert.match(html, />Commit-and-push instruction</, 'a curated/seeded name is shown whole');
-});
-
-test('a hostile cluster label cannot inject markup into a row', () => {
-  const html = coachingPanel({
-    ...PANEL_PROMPTS,
-    patterns: {
-      ...PANEL_PROMPTS.patterns,
-      clusters: [{
-        ...PANEL_PROMPTS.patterns.clusters[0],
-        hosts: ['<img src=x onerror=alert(1)>'],
-        label: { name: '<script>alert(1)</script>', source: 'curated' },
-      }],
-    },
-  }, {});
-  assert.doesNotMatch(html, /<script/, 'no script element survives the label');
-  assert.doesNotMatch(html, /<img/, 'no img element survives a host chip');
-  assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/, 'the label is escaped, not dropped');
-  assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/, 'and so is the host chip');
-});
-
-// ── absent states ──────────────────────────────────────────────────────────
-//
-// Every panel has a branch for "this window measured nothing", and the copy in
-// those branches is the whole point of the view: it is where a zero would
-// otherwise be invented. The KPI strip's branch was pinned from the start;
-// these are the rest, so the absent path is held to the same standard as the
-// populated one.
-
-/** The projection with one field emptied, so each absent branch is reached
- *  without disturbing the others. */
-function withPatterns(over) {
-  return { ...PANEL_PROMPTS, patterns: { ...PANEL_PROMPTS.patterns, ...over } };
-}
-
-test('zero clusters reads as a clean result, not a missing measurement', () => {
-  const html = coachingPanel(withPatterns({ clusters: [] }), {});
-  assert.match(html, /clean result, not a missing one/,
-    'no repetition found is an ANSWER; a bare empty table reads as a failure to look');
-  assert.doesNotMatch(html, /<table/, 'and no empty table shell is drawn around it');
-});
-
-test('a projection that was never computed says so, differently', () => {
-  const html = coachingPanel({ ...PANEL_PROMPTS, patterns: null }, {});
-  assert.match(html, /were not computed/);
-  assert.doesNotMatch(html, /clean result/,
-    '"not computed" and "none found" are different claims and must not share copy');
-});
-
-test('a single-host corpus draws no cross-host read', () => {
-  const html = hostInterplay({ ...PANEL_PROMPTS, byHost: { claude: PANEL_PROMPTS.byHost.claude } });
-  assert.match(html, /claude/);
-  assert.doesNotMatch(html, /class="pr-host-read"/,
-    'the read compares two hosts; with one host there is no comparison to draw');
-});
-
-test('no host at all is named as such, not drawn as an empty grid', () => {
-  assert.match(hostInterplay({ ...PANEL_PROMPTS, byHost: {} }),
-    /no host carried a typed prompt in this window/);
-});
-
-test('the KPI tap chips say when there is no per-host split to show', () => {
-  const html = promptKpis({ ...PANEL_PROMPTS, byHost: {} });
-  assert.match(html, /no per-host split/);
-  assert.doesNotMatch(html, /your p75/, 'and compares against no baseline it does not have');
-});
-
-test('an absent provenance split is named, and an all-zero one is not divided by', () => {
-  assert.match(provenancePanel(withPatterns({ provenance: null })), /no provenance split/);
-  assert.match(provenancePanel(withPatterns({ provenance: { human: 0, control: 0, agent: 0, adapter: 0 } })),
-    /no fingerprinted turns in this window/);
-});
-
-test('nothing typed leaves the steer split unclassified rather than zeroed', () => {
-  const html = steerPanel(withPatterns({ corpus: { fingerprints: 40, typed: 0 } }));
-  assert.match(html, /nothing typed in this window to classify/);
-  assert.doesNotMatch(html, /0%/, 'a split of nothing is not a split into zeroes');
-});
-
-// ── the expanded coaching panel (§2.3–2.5, §4.5) ────────────────────────────
-//
-// Opening a pattern renders the accordion detail row: Seen in · What you typed ·
-// Recommendation · Draft · Dismiss. The last three come from the coaching card
-// this pattern joins to (§4.5); What-you-typed is filled from the samples cache
-// the client owns, and never shows unmasked text or fetches in the hidden
-// posture. These drive the pure builder with an `openKey` + a samples/dismissed
-// state, the same object usage.mjs passes at runtime.
-
-// A coaching card carrying the §4.5 association keys, joined to cluster `aaaa`.
-function coachCardFx(over = {}) {
-  return {
-    id: 'commit-push-claude-md', clusterKey: 'aaaa', targetKind: null,
-    title: 'Commit-and-push is retyped, not remembered', try: 'Add one line to CLAUDE.md.',
-    finding: 'recurred 12 times across 8 sessions.', basis: '12 recurrences.',
-    source: 'rule', status: 'proposed', stale: false,
-    generatedAt: '2026-08-29T00:00:00.000Z', evidenceHash: 'a'.repeat(16),
-    draft: { kind: 'claude-md-line', text: 'Commit and push once verified.' },
-    ...over,
-  };
-}
-const promptsWithCoaching = (cards) => ({ ...PANEL_PROMPTS, coaching: { cards, summary: null } });
-
-test('expanding a pattern renders one accordion detail row, with Seen in and What you typed', () => {
-  const open = coachingPanel(PANEL_PROMPTS, { openKey: 'aaaa' });
-  assert.equal((open.match(/class="detail-row"/g) || []).length, 1, 'one open at a time');
-  assert.match(open, /<td colspan="5"><div class="coach">/);
-  assert.match(open, />seen in</);
-  assert.match(open, />What you typed</);
-  assert.doesNotMatch(coachingPanel(PANEL_PROMPTS, {}), /class="detail-row"/, 'a collapsed panel has no detail row');
-});
-
-test('Seen in links target the real transcript route AND carry the nav hook (§4.4)', () => {
-  const html = coachingPanel(PANEL_PROMPTS, { openKey: 'aaaa' });
-  // cluster aaaa carries sampleSessionIds ['s1','s2','s3']; the links resolve
-  // through AKDashboardOpenTranscript (data-pr-session), not a bare hash.
-  assert.match(html, /class="occ-link mono" href="#usage\/s1" data-pr-session="s1"/);
-  assert.match(html, /data-pr-session="s2"/);
-  assert.match(html, /\+6 more/, '9 sessions, 3 shown → +6 more');
-});
-
-test('Seen in shows session·date once the samples fetch resolves, formatted without a timezone shift', () => {
-  const html = coachingPanel(PANEL_PROMPTS, {
-    openKey: 'aaaa',
-    samples: { aaaa: { state: 'ok', samples: ['yes'], occurrences: [
-      { sessionId: 's1', day: '2026-07-24' }, { sessionId: 's2', day: '2026-07-23' }] } },
-  });
-  assert.match(html, /s\.s1 · Jul 24/);
-  assert.match(html, /s\.s2 · Jul 23/);
-});
-
-test('the §4.5 join: clusterKey first, then targetKind, else the cluster is hidden (never force-fit)', () => {
-  const byKey = coachingPanel(promptsWithCoaching([coachCardFx()]), { openKey: 'aaaa' });
-  assert.match(byKey, /Add one line to CLAUDE\.md\./, 'a cluster-specific card supplies the recommendation');
-  assert.match(byKey, /data-pr-row="aaaa"/, 'and its cluster is the advised row shown');
-
-  const byKind = coachingPanel(promptsWithCoaching([
-    coachCardFx({ id: 'reask-delta', clusterKey: null, targetKind: 'reask', try: 'State the acceptance criteria up front.' }),
-  ]), { openKey: 'cccc' }); // cccc has kind 'reask'
-  assert.match(byKind, /State the acceptance criteria up front\./, 'a kind-level card joins by targetKind');
-  assert.match(byKind, /data-pr-row="cccc"/);
-
-  // A card that matches no cluster leaves every cluster advice-less: under P15
-  // the table hides them all and names the clean empty state, never a neutral
-  // "no coaching" note behind a still-shown row.
-  const none = coachingPanel(promptsWithCoaching([coachCardFx({ clusterKey: 'zzzz', targetKind: 'persona' })]), {});
-  assert.doesNotMatch(none, /data-pr-row=/, 'a cluster with no matching card is hidden, not shown blank');
-  assert.match(none, /No repeated pattern has coaching advice yet/);
-  assert.doesNotMatch(none, /Add one line to CLAUDE\.md/, "another cluster's card is not shown here");
-});
-
-test('clusterKey outranks a competing targetKind match on the same row', () => {
-  const html = coachingPanel(promptsWithCoaching([
-    coachCardFx({ id: 'kind-card', clusterKey: null, targetKind: 'instruction', try: 'KIND ADVICE' }),
-    coachCardFx({ id: 'key-card', clusterKey: 'aaaa', targetKind: null, try: 'KEY ADVICE' }),
-  ]), { openKey: 'aaaa' }); // aaaa is kind 'instruction' AND has a clusterKey card
-  assert.match(html, /KEY ADVICE/);
-  assert.doesNotMatch(html, /KIND ADVICE/);
-});
-
-test('the recommendation is the action without a Try: prefix, with the finding as the why', () => {
-  const html = coachingPanel(promptsWithCoaching([coachCardFx()]), { openKey: 'aaaa' });
-  assert.match(html, /class="rec-title">Add one line to CLAUDE\.md\.</);
-  assert.doesNotMatch(html, /Try:/, 'the old Try: prefix is gone');
-  assert.match(html, /class="rec-why">recurred 12 times across 8 sessions\.</);
-});
-
-test('the draft renders in a <pre> with a copy button keyed by the OPEN CLUSTER, omitted when absent', () => {
-  const html = coachingPanel(promptsWithCoaching([coachCardFx()]), { openKey: 'aaaa' });
-  assert.match(html, /<pre class="draft-pre mono" id="pr-draft-aaaa">Commit and push once verified\.<\/pre>/);
-  assert.match(html, /data-pr-copy="aaaa"/, 'keyed by the open cluster, not the card id (one card, many clusters)');
-  const noDraft = coachingPanel(promptsWithCoaching([coachCardFx({ draft: undefined })]), { openKey: 'aaaa' });
-  assert.doesNotMatch(noDraft, /draft-pre/);
-});
-
-test('Dismiss carries the card id + a HOVER explanation; the dismissed state flips to Undo', () => {
-  const proposed = coachingPanel(promptsWithCoaching([coachCardFx()]), { openKey: 'aaaa' });
-  assert.match(proposed, /data-pr-dismiss="commit-push-claude-md"/);
-  assert.match(proposed, /class="dismiss-tip"/, 'the explanation is a hover tooltip, not standing text');
-  assert.doesNotMatch(proposed, /coach-foot done/);
-
-  const optimistic = coachingPanel(promptsWithCoaching([coachCardFx()]), { openKey: 'aaaa', dismissed: { 'commit-push-claude-md': true } });
-  assert.match(optimistic, /class="coach-foot done"/, 'the optimistic client flag shows the dismissed state');
-  assert.match(optimistic, /data-pr-undismiss="commit-push-claude-md"/);
-
-  const persisted = coachingPanel(promptsWithCoaching([coachCardFx({ status: 'dismissed' })]), { openKey: 'aaaa' });
-  assert.match(persisted, /class="coach-foot done"/, 'a persisted ledger dismissal shows it too');
-
-  // F1: after a page-load-persisted dismissal, an Undo sets the client flag to
-  // false; that EXPLICIT false must override the stale card.status so the row
-  // re-renders un-dismissed live, without waiting for the next /api/usage load.
-  const undone = coachingPanel(promptsWithCoaching([coachCardFx({ status: 'dismissed' })]),
-    { openKey: 'aaaa', dismissed: { 'commit-push-claude-md': false } });
-  assert.doesNotMatch(undone, /coach-foot done/, 'an explicit client un-dismiss overrides the persisted status');
-  assert.match(undone, /data-pr-dismiss="commit-push-claude-md"/, 'the Dismiss control is back, live');
-});
-
-test('P6: a failed dismiss surfaces an inline "couldn\'t save" hint, not a silent no-op', () => {
-  const failed = coachingPanel(promptsWithCoaching([coachCardFx()]),
-    { openKey: 'aaaa', dismissError: { 'commit-push-claude-md': true } });
-  assert.match(failed, /class="dismiss-err"[^>]*>Couldn&rsquo;t save that/, 'the failure is surfaced inline');
-  const clean = coachingPanel(promptsWithCoaching([coachCardFx()]), { openKey: 'aaaa' });
-  assert.doesNotMatch(clean, /dismiss-err/, 'no hint when nothing failed');
-});
-
-// ── P15: the table shows ONLY patterns that have advice ──────────────────────
-
-test('P15: a cluster with no coaching card is hidden from the table, whatever its count', () => {
-  const prompts = {
-    ...PANEL_PROMPTS,
-    patterns: { ...PANEL_PROMPTS.patterns, clusters: [
-      PANEL_PROMPTS.patterns.clusters[0], // aaaa (instruction) — advised
-      { key: 'noadv', kind: 'tap', label: { name: 'Bare tap', source: 'seed' }, class: 'other',
-        count: 99, sessions: 40, days: 20, hosts: ['claude'], medianTokens: 1, sampleSessionIds: [] },
-    ] },
-    coaching: { cards: keyCards([PANEL_PROMPTS.patterns.clusters[0]]), summary: null },
-  };
-  const html = coachingPanel(prompts, {});
-  assert.match(html, /data-pr-row="aaaa"/, 'the advised cluster is shown');
-  assert.doesNotMatch(html, /data-pr-row="noadv"/, 'the advice-less cluster is hidden even at the highest count');
-  assert.doesNotMatch(html, /data-pr-filter="tap"/, 'no pill for a kind with no advice-bearing pattern');
-  assert.match(html, /data-pr-filter="all"[^>]*>All <span class="fc mono">1</, 'All counts only the advised set');
-});
-
-test('P15: no advice-bearing pattern names the clean empty state and points forward, not a blank grid', () => {
-  const html = coachingPanel({ ...PANEL_PROMPTS, coaching: { cards: [], summary: null } }, {});
-  assert.match(html, /No repeated pattern has coaching advice yet/, 'the named clean-result empty state');
-  assert.match(html, /that&rsquo;s a clean result, not a missing one/, 'it frames the absence as clean, not missing');
-  assert.match(html, /<code>ak usage prompts --enrich<\/code>/, 'it points forward to --enrich, rendered as a command');
-  assert.doesNotMatch(html, /data-pr-row=/, 'no rows behind the message');
-  assert.doesNotMatch(html, /class="pr-filters"/, 'and no pills when nothing is advised');
-  assert.match(html, /class="pr-insight"/, 'the re-ask insight still leads, so the panel is never truly blank');
-});
-
-// ── QE F-1: a kind-level card names its window scope inside a cluster panel ───
-
-test('QE F-1: a kind-level card labels its rationale window-scope; a clusterKey card does not', () => {
-  // cccc (kind reask, count 3) joins a kind-level reask card whose finding is a
-  // WINDOW aggregate; the panel must name that scope so "107 across 29 sessions"
-  // is not read as this count-3 row's.
-  const kindJoined = coachingPanel(promptsWithCoaching([
-    coachCardFx({ id: 'reask-delta', clusterKey: null, targetKind: 'reask',
-      try: 'State the acceptance criteria up front.', finding: '107 re-asks across 29 sessions.' }),
-  ]), { openKey: 'cccc' });
-  assert.match(kindJoined,
-    /class="rec-scope">Across all re-ask patterns this window:<\/span> 107 re-asks across 29 sessions\./,
-    'the kind-level finding is prefixed with its window-scope label');
-
-  // A clusterKey card's numbers already are this cluster's, so no scope prefix.
-  const keyJoined = coachingPanel(promptsWithCoaching([coachCardFx()]), { openKey: 'aaaa' });
-  assert.match(keyJoined, /class="rec-why">recurred 12 times across 8 sessions\.</, 'the finding renders plainly');
-  assert.doesNotMatch(keyJoined, /rec-scope/, 'a cluster-specific card gets no window-scope prefix');
-});
-
-// ── F-5: the sort is stable across ties ──────────────────────────────────────
-
-test('F-5: equal-value rows keep a deterministic order across a re-sort (name tiebreak)', () => {
-  const tied = [
-    { key: 't-b', kind: 'instruction', label: { name: 'Bravo', source: 'seed' }, class: 'other', count: 5, sessions: 3, days: 2, hosts: ['claude'], medianTokens: 8, sampleSessionIds: [] },
-    { key: 't-a', kind: 'instruction', label: { name: 'Alpha', source: 'seed' }, class: 'other', count: 5, sessions: 3, days: 2, hosts: ['claude'], medianTokens: 8, sampleSessionIds: [] },
-  ];
-  const prompts = { ...PANEL_PROMPTS, patterns: { ...PANEL_PROMPTS.patterns, clusters: tied },
-    coaching: { cards: keyCards(tied), summary: null } };
-  const rowsOf = (h) => [...h.matchAll(/data-pr-row="([\w-]+)"/g)].map((m) => m[1]);
-  const desc = rowsOf(coachingPanel(prompts, { sort: { key: 'count', dir: 'desc' } }));
-  const asc = rowsOf(coachingPanel(prompts, { sort: { key: 'count', dir: 'asc' } }));
-  assert.deepEqual(desc, ['t-a', 't-b'], 'a count tie breaks on the name, Alpha before Bravo');
-  assert.deepEqual(asc, ['t-a', 't-b'], 'and the tiebreak is direction-stable, so a re-sort never shuffles ties');
-});
-
-test('the card source chip is three-valued: rule / enriched / unknown (F-9, re-pointed at the expand panel)', () => {
-  assert.match(coachingPanel(promptsWithCoaching([coachCardFx({ source: 'rule' })]), { openKey: 'aaaa' }), /class="pr-card-source" data-source="rule"/);
-  assert.match(coachingPanel(promptsWithCoaching([coachCardFx({ source: 'enriched' })]), { openKey: 'aaaa' }), /data-source="enriched"/);
-  assert.match(coachingPanel(promptsWithCoaching([coachCardFx({ source: undefined })]), { openKey: 'aaaa' }), /data-source="unknown"/);
-});
-
-test('What you typed shows masked samples when the fetch has resolved (shown posture)', () => {
-  const html = coachingPanel(PANEL_PROMPTS, {
-    openKey: 'aaaa', posture: 'shown',
-    samples: { aaaa: { state: 'ok', samples: ['yes', 'yep'], occurrences: [] } },
-  });
-  assert.match(html, /class="verbatim">yes<\/div>/);
-  assert.match(html, /class="verbatim">yep<\/div>/);
-  assert.match(html, /secrets redacted server-side/);
-});
-
-test('What you typed shows loading, an honest empty, and an honest error from the samples cache', () => {
-  const loading = coachingPanel(PANEL_PROMPTS, { openKey: 'aaaa', posture: 'shown', samples: { aaaa: { state: 'loading' } } });
-  assert.match(loading, /loading your masked prompts/);
-  const empty = coachingPanel(PANEL_PROMPTS, { openKey: 'aaaa', posture: 'shown', samples: { aaaa: { state: 'empty', occurrences: [] } } });
-  assert.match(empty, /no readable sample survived masking/);
-  const err = coachingPanel(PANEL_PROMPTS, { openKey: 'aaaa', posture: 'shown', samples: { aaaa: { state: 'error' } } });
-  assert.match(err, /couldn&rsquo;t load this pattern&rsquo;s text/);
-});
-
-test('the hidden posture shows a terminal pointer and renders NO verbatim text, even with samples cached', () => {
-  const html = coachingPanel(PANEL_PROMPTS, {
-    openKey: 'aaaa', posture: 'hidden',
-    samples: { aaaa: { state: 'ok', samples: ['yes'], occurrences: [] } },
-  });
-  assert.match(html, /Prompt text is hidden/);
-  assert.match(html, /ak usage prompts --deep/);
-  assert.doesNotMatch(html, /class="verbatim"/, 'the hidden posture never renders a sample, cached or not');
-});
-
-test('a masked sample is still escaped — the panel never emits raw markup from the endpoint', () => {
-  const html = coachingPanel(PANEL_PROMPTS, {
-    openKey: 'aaaa', posture: 'shown',
-    samples: { aaaa: { state: 'ok', samples: ['<img src=x onerror=alert(1)>'], occurrences: [] } },
-  });
-  assert.doesNotMatch(html, /<img/);
-  assert.match(html, /&lt;img/);
-});
-
-test('SEC-9: hostile coaching-card prose puts zero control or bidi codepoints in the expanded panel', () => {
-  const html = coachingPanel(promptsWithCoaching([coachCardFx({
-    title: DOM_HOSTILE, try: DOM_HOSTILE, finding: DOM_HOSTILE,
-    draft: { kind: 'claude-md-line', text: DOM_HOSTILE },
-  })]), { openKey: 'aaaa' });
-  assert.match(html, /class="rec-title"/, 'guard: the card block rendered, so this is not a vacuous pass');
-  const hit = html.match(DOM_FORBIDDEN);
-  assert.equal(hit, null, `rendered HTML carries U+${hit ? hit[0].charCodeAt(0).toString(16).padStart(4, '0') : ''}`);
-});
-
-
-// Structural by necessity: these assert what the SERVED DOCUMENT contains, so
-// there is no behaviour to exercise instead — the panels cannot render into
-// containers the page never shipped, and the tab cannot route to a panel with
-// no ARIA relationship to it.
 test('the served page ships the Prompts rail entry and its panel containers', () => {
   assert.match(PAGE, /id="usage-tab-prompts"[^>]*data-view="prompts"[^>]*aria-controls="v-prompts"/,
     'the rail button must point at the view it opens');
   assert.match(PAGE, /id="v-prompts"[^>]*role="tabpanel"[^>]*aria-labelledby="usage-tab-prompts"/,
     'and the view must point back, or the tab relationship is one-way');
   for (const id of ['u-pr-kpis', 'u-pr-provenance', 'u-pr-steer', 'u-pr-taps',
-    'u-pr-hosts', 'u-pr-coaching']) {
+    'u-pr-patterns', 'u-pr-hosts']) {
     assert.match(PAGE, new RegExp(`id="${id}"`), `panel container ${id} is missing from the served page`);
   }
-  // The retired containers (the taxonomy box and the split re-asks/patterns
-  // tables) are gone — the Coaching panel absorbed them (§2).
-  for (const id of ['u-pr-taxonomy', 'u-pr-reasks', 'u-pr-patterns']) {
+  for (const id of ['u-pr-taxonomy', 'u-pr-reasks', 'u-pr-coaching', 'u-pr-posture']) {
     assert.doesNotMatch(PAGE, new RegExp(`id="${id}"`), `retired container ${id} still ships`);
   }
   // Rail placement, spec §3: between Findings and Sessions.
@@ -1478,19 +778,6 @@ test('the served page ships the Prompts rail entry and its panel containers', ()
   assert.ok(order.indexOf('prompts') > order.indexOf('findings')
     && order.indexOf('prompts') < order.indexOf('sessions'),
   `Prompts must sit between Findings and Sessions, order was ${JSON.stringify(order)}`);
-});
-
-test('the served page ships the prompt-text posture toggle, and its note no longer over-promises', () => {
-  assert.match(PAGE, /id="u-pr-posture"[^>]*role="group"/, 'the shown/hidden toggle ships in the Prompts view');
-  assert.match(PAGE, /data-pr-posture="shown"[^>]*aria-pressed="true"/, 'default is shown');
-  assert.match(PAGE, /data-pr-posture="hidden"[^>]*aria-pressed="false"/);
-  assert.match(JS, /pt-posture/, 'the client persists the posture to localStorage');
-  // §5: prompt text now DOES reach the page (masked) — the note must not claim
-  // otherwise, or it lies about the very thing the Coaching panel does.
-  assert.doesNotMatch(PAGE, /No prompt text is stored in the index or sent to this page/,
-    'the stale "nothing sent to this page" promise is gone now that masked exemplars are fetched');
-  assert.match(PAGE, /masked, with secrets\s+redacted server-side/,
-    'the note states the new masked-on-demand reality instead');
 });
 
 test('the whole-history chip ships hidden, for the one view that needs it', () => {
@@ -2030,57 +1317,8 @@ test('the scorecard panel grafts are idempotent — a re-render reuses its conta
   assert.match(JS, /function ensureBlock\(probeId,html,afterId\)\{\s*var existing=document\.getElementById\(probeId\);\s*if\(existing\)return existing;/);
 });
 
-// ── SEC-9: control and bidi characters never reach the DOM ─────────────────
-// The security review's LOW finding, and the DOM half of SEC-2's HIGH. `esc`
-// replaced only [&<>"'], so a 24-character label carrying U+202E and a raw ESC
-// cleared `isValidLabelName` and rendered six control/bidi codepoints into the
-// page — one of them INSIDE a title= attribute, where U+202E reverses the rest
-// of the cell and a row reads as a different label than the one it is.
-//
-// This drives the render functions DIRECTLY with hostile values rather than
-// through the store, on purpose: the store gate is the primary fix, and this
-// boundary must hold without depending on it.
-
-const DOM_FORBIDDEN = new RegExp(`[${[
-  [0x00, 0x08], [0x0b, 0x1f], [0x7f, 0x9f],
-  [0x200b, 0x200f], [0x202a, 0x202e], [0x2066, 0x2069],
-].map(([lo, hi]) => `${String.fromCharCode(lo)}-${String.fromCharCode(hi)}`).join('')}]`);
-
-const DOM_HOSTILE = `RLO${String.fromCharCode(0x202e)}drowssap `
-  + `${String.fromCharCode(0x1b)}[31mESC${String.fromCharCode(0x07)}`
-  + `${String.fromCharCode(0x1b)}]52;c;cm0gLXJmIH4=${String.fromCharCode(0x07)}`
-  + `${String.fromCharCode(0x00)}${String.fromCharCode(0x9b)}${String.fromCharCode(0x200b)}`;
-
-test('SEC-9: a hostile cluster label puts zero control or bidi codepoints in the coaching table (text OR title attribute)', () => {
-  const html = coachingPanel({
-    ...PANEL_PROMPTS,
-    patterns: {
-      ...PANEL_PROMPTS.patterns,
-      clusters: [{
-        ...PANEL_PROMPTS.patterns.clusters[0],
-        label: { name: DOM_HOSTILE, source: 'enriched', descriptor: DOM_HOSTILE },
-      }],
-    },
-  }, {});
-  assert.match(html, /<table class="pr-coach"/, 'guard: the table actually rendered, so this is not a vacuous pass');
-  const hit = html.match(DOM_FORBIDDEN);
-  assert.equal(hit, null,
-    `rendered HTML carries U+${hit ? hit[0].charCodeAt(0).toString(16).padStart(4, '0') : ''}`);
-  assert.ok(html.includes('drowssap'),
-    'the LETTERS are ordinary text and stay; it is the U+202E that reversed the cell that must not');
-});
-
 test('SEC-9: esc still escapes the five HTML metacharacters it always did', () => {
-  const html = coachingPanel({
-    ...PANEL_PROMPTS,
-    patterns: {
-      ...PANEL_PROMPTS.patterns,
-      clusters: [{
-        ...PANEL_PROMPTS.patterns.clusters[0],
-        label: { name: '<img src=x onerror=alert(1)> & "q" \'s\'', source: 'curated' },
-      }],
-    },
-  }, {});
+  const html = groupsEsc('<img src=x onerror=alert(1)> & "q" \'s\'');
   assert.ok(!html.includes('<img src=x'), 'the tag must not survive as markup');
   assert.ok(html.includes('&lt;img src=x'), 'it survives as escaped text, as before');
   assert.ok(html.includes('&quot;') && html.includes('&#39;') && html.includes('&amp;'));
@@ -2103,171 +1341,4 @@ test('SEC-9: the escaper actually SHIPPED to the browser is the stripping one, n
   assert.equal(groupsEsc('<b>&"\'</b>'), '&lt;b&gt;&amp;&quot;&#39;&lt;/b&gt;', 'and still escape');
   assert.match(JS, /function esc\(s\) \{[\s\S]{0,600}?0x202e/,
     'the bundle\'s one esc must be the stripping implementation, not the five-character escaper');
-});
-
-// The card `source` chip (rule / enriched / unknown) now renders inside the
-// EXPANDED coaching panel (§4.5), not a standalone card wall — its F-9
-// coverage moves to the expand-commit tests appended below.
-
-// ── QE review F-5 (MEDIUM): the dashboard's ledger-write contract ──────────
-// Originally "the dashboard NEVER writes the ledger" — the review injected a
-// real `saveLedger(ledgerPath, ledger)` into dashboardCoachingPayload and
-// nothing failed, so the contract was pinned by keeping the writers out of
-// scope entirely. ADR-0039 amendment 3 (Coaching redesign §4.3) relaxes that
-// for ONE non-inference, non-sensitive local write: the dismiss endpoint. So
-// `saveLedger` is now in scope — but ONLY on the dismiss write path, never in
-// the READ path a /api/usage poll runs. The label-store writer and the raw
-// atomic writer stay entirely out of this file (the store is CLI-only; the one
-// sanctioned write goes through the ledger module's own saveLedger). A read-path
-// regression here silently resurrects every CLI-dismissed card on the next poll,
-// and is caught behaviorally by the poll test directly below.
-
-test('F-5: the label-store/atomic writers never appear, and saveLedger only on the §4.3 dismiss path', async () => {
-  const { fileURLToPath } = await import('node:url');
-  const src = fs.readFileSync(
-    fileURLToPath(new URL('../../src/lib/dashboard-server.mjs', import.meta.url)), 'utf8');
-  // These two never belong in this file at all — unchanged from the original
-  // read-only contract.
-  for (const writer of ['saveLabelStore', 'writePrivateFileAtomic']) {
-    const uses = src.split('\n')
-      .map((line, i) => [i + 1, line.trim()])
-      .filter(([, line]) => line.includes(writer) && !line.startsWith('//') && !line.startsWith('*'));
-    assert.deepEqual(uses, [],
-      `${writer} is referenced in dashboard-server.mjs outside a comment: ${JSON.stringify(uses)}`);
-  }
-  // saveLedger is permitted, but every non-comment reference must be a SANCTIONED
-  // one: the import, or the write path's injectable-override default. Anything
-  // else (e.g. a saveLedger call smuggled into dashboardCoachingPayload) fails.
-  const saveLedgerLines = src.split('\n')
-    .map((line, i) => [i + 1, line.trim()])
-    .filter(([, line]) => line.includes('saveLedger') && !line.startsWith('//') && !line.startsWith('*'));
-  const sanctioned = saveLedgerLines.filter(([, line]) =>
-    line.startsWith('loadLedger, saveLedger,') // the import
-    || line.includes('coachingLedger?.saveLedger ?? saveLedger')); // the write-path override default
-  assert.deepEqual(saveLedgerLines, sanctioned,
-    `saveLedger is used outside the sanctioned §4.3 dismiss path: ${
-      JSON.stringify(saveLedgerLines.filter((l) => !sanctioned.includes(l)))}`);
-  assert.ok(sanctioned.length >= 1, 'guard: the check is not vacuous — the dismiss path really binds saveLedger');
-});
-
-test('F-5: no number of /api/usage polls creates the ledger file the dashboard was pointed at', () => {
-  // Behavioral half. `loadLedger` is overridden, so nothing reads from disk —
-  // which means the ONLY thing that could bring this path into existence is a
-  // write. Pointing it at a directory that does not exist makes the proof
-  // unambiguous: `writePrivateFileAtomic` mkdirs recursively, so if any poll
-  // wrote, the directory would be there.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-dash-f5-'));
-  const neverWritten = path.join(dir, 'never-written');
-  const ledgerPath = path.join(neverWritten, 'usage-outcome-ledger.json');
-  const dismissed = {
-    version: 1,
-    records: [{
-      id: 'commit-push-claude-md', evidenceHash: 'a'.repeat(16), status: 'dismissed',
-      generatedAt: '2026-08-01T00:00:00.000Z', statusAt: '2026-08-01T00:00:00.000Z',
-      baseline: { count: 12, clusterKey: 'k', sessions: 8, days: 4 }, windowDays: 30, dismissCount: 1,
-    }],
-  };
-  return (async () => {
-    const calls = [];
-    let loads = 0;
-    const srv = await startDashboard({
-      port: 0,
-      fetchStatus: async () => ({ overall: 'ok', rows: [] }),
-      usage: { readIndex: spyReadIndex(PROMPT_RECORDS, calls) },
-      coachingLedger: {
-        loadLedger: () => { loads++; return JSON.parse(JSON.stringify(dismissed)); },
-        ledgerPath,
-      },
-      labelStore: NULL_LABEL_STORE,
-    });
-    try {
-      for (let i = 0; i < 3; i++) {
-        const r = await get(`${srv.url}api/usage?days=7`, srv.token);
-        assert.equal(r.status, 200, `expected 200, got ${r.status}`);
-        assert.equal(JSON.parse(r.body).prompts.coaching.summary.dismissed, 1,
-          'guard: the poll really did reconcile against the injected ledger');
-      }
-    } finally {
-      await srv.close();
-    }
-    assert.ok(loads >= 3, 'guard: the ledger was read on every poll, so the write path was reachable');
-    assert.equal(fs.existsSync(neverWritten), false,
-      'a poll wrote the ledger — every CLI dismissal would be resurrected on the next one');
-    fs.rmSync(dir, { recursive: true, force: true });
-  })();
-});
-
-// ── QE re-verification R-1: F-2's WIRING, pinned at the DASHBOARD call site ─
-// Probe N7 flipped `canonicalBasis: days === CANONICAL_WINDOW_DAYS` to a bare
-// `true` here and survived. This payload is read-only so it can never PERSIST
-// an expiry — but both surfaces reconcile through one function precisely so
-// they cannot disagree about a card's status, and a dashboard that renders
-// "expired — evidence no longer present" over evidence that is entirely
-// present is telling the operator something false.
-
-test('R-1: a non-canonical dashboard poll does not report a proposed card as expired', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-dash-r1-'));
-  const ledgerPath = path.join(dir, 'usage-outcome-ledger.json');
-  const proposedRecord = {
-    version: 1,
-    records: [{
-      id: 'commit-push-claude-md', evidenceHash: 'a'.repeat(16), status: 'proposed',
-      generatedAt: '2026-08-01T00:00:00.000Z', statusAt: '2026-08-01T00:00:00.000Z',
-      baseline: { count: 12, clusterKey: 'k', sessions: 8, days: 4 }, windowDays: 30, dismissCount: 0,
-    }],
-  };
-  const calls = [];
-  const srv = await startDashboard({
-    port: 0,
-    fetchStatus: async () => ({ overall: 'ok', rows: [] }),
-    // PROMPT_RECORDS fires none of the six v1 rules, so NO card is derived on
-    // any poll — which is the "card did not fire this pass" condition, and the
-    // whole question is whether a NON-canonical poll may call that expiry.
-    usage: { readIndex: spyReadIndex(PROMPT_RECORDS, calls) },
-    coachingLedger: { loadLedger: () => JSON.parse(JSON.stringify(proposedRecord)), ledgerPath },
-    labelStore: NULL_LABEL_STORE,
-  });
-  try {
-    const narrow = await get(`${srv.url}api/usage?days=7`, srv.token);
-    assert.equal(narrow.status, 200, `expected 200, got ${narrow.status}`);
-    const summary = JSON.parse(narrow.body).prompts.coaching.summary;
-    assert.equal(summary.expired, 0,
-      'a 7-day view must not report a card expired on evidence it never looked at');
-    assert.equal(summary.proposed, 1);
-  } finally {
-    await srv.close();
-  }
-  fs.rmSync(dir, { recursive: true, force: true });
-});
-
-test('R-1: a CANONICAL dashboard poll still reports a genuinely unseen card as expired', async () => {
-  // The other half: the fail-safe default must not disarm real expiry at the
-  // one window where the ledger is entitled to draw that conclusion.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-dash-r1b-'));
-  const ledgerPath = path.join(dir, 'usage-outcome-ledger.json');
-  const proposedRecord = {
-    version: 1,
-    records: [{
-      id: 'commit-push-claude-md', evidenceHash: 'a'.repeat(16), status: 'proposed',
-      generatedAt: '2026-08-01T00:00:00.000Z', statusAt: '2026-08-01T00:00:00.000Z',
-      baseline: { count: 12, clusterKey: 'k', sessions: 8, days: 4 }, windowDays: 30, dismissCount: 0,
-    }],
-  };
-  const calls = [];
-  const srv = await startDashboard({
-    port: 0,
-    fetchStatus: async () => ({ overall: 'ok', rows: [] }),
-    usage: { readIndex: spyReadIndex(PROMPT_RECORDS, calls) },
-    coachingLedger: { loadLedger: () => JSON.parse(JSON.stringify(proposedRecord)), ledgerPath },
-    labelStore: NULL_LABEL_STORE,
-  });
-  try {
-    const canonical = await get(`${srv.url}api/usage?days=30`, srv.token);
-    assert.equal(canonical.status, 200);
-    assert.equal(JSON.parse(canonical.body).prompts.coaching.summary.expired, 1,
-      'at the canonical window, a card that did not fire IS expired — the fix must not disarm that');
-  } finally {
-    await srv.close();
-  }
-  fs.rmSync(dir, { recursive: true, force: true });
 });

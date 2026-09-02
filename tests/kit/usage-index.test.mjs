@@ -15,7 +15,7 @@ import {
   LAT_BUCKET_EDGES, LEN_BUCKET_EDGES, MAX_PROMPT_FPS, MAX_TOKEN_HASHES,
 } from '../../src/lib/usage-parsers.mjs';
 import {
-  aggregate, percentileFromBuckets, modelFamily, deriveKind, PERSONA_KIND_SHARE, TAP_MAX_TOKENS,
+  aggregate, percentileFromBuckets, modelFamily,
   LAT_BUCKET_EDGES as AGG_LAT_EDGES, LEN_BUCKET_EDGES as AGG_LEN_EDGES,
 } from '../../src/lib/usage-aggregate.mjs';
 
@@ -2953,7 +2953,7 @@ test('promptPatterns ships the frozen projection shape and nothing else', () => 
   assert.deepEqual(Object.keys(a.promptPatterns).sort(),
     ['clusters', 'computedAt', 'corpus', 'exactRepeats', 'provenance', 'reAsks', 'tapLengths']);
   assert.deepEqual(Object.keys(a.promptPatterns.clusters[0]).sort(),
-    ['class', 'count', 'days', 'hosts', 'key', 'kind', 'label', 'medianTokens', 'sampleSessionIds', 'sessions']);
+    ['class', 'count', 'days', 'hosts', 'key', 'label', 'medianTokens', 'sessions']);
   assert.deepEqual(Object.keys(a.promptPatterns.reAsks).sort(),
     ['gapHist', 'pairCount', 'sessionCount']);
   assert.equal(a.promptPatterns.computedAt, a.generatedAt,
@@ -3007,7 +3007,7 @@ test('promptPatterns carries the re-ask and exact-repeat evidence', () => {
 });
 
 // The privacy pin, asserted structurally rather than argued for: this
-// projection is built from hashes, counts, token counts and session ids.
+// projection is built from hashes, counts and token counts.
 test('promptPatterns carries no prompt text', () => {
   const a = aggregate(patternRecords(), aggOpts({ prompts: true }));
   const wire = JSON.stringify(a.promptPatterns);
@@ -3017,8 +3017,6 @@ test('promptPatterns carries no prompt text', () => {
   for (const fragment of ['macos', 'verification', 'senior release engineer']) {
     assert.equal(wire.includes(fragment), false, `a fragment of a prompt reached the projection: ${fragment}`);
   }
-  assert.deepEqual(a.promptPatterns.clusters[0].sampleSessionIds.length <= 3, true,
-    'session links are capped at three — a link surface, not a session list');
 });
 
 test('promptPatterns is deterministic over an unchanged corpus', () => {
@@ -3044,90 +3042,6 @@ test('promptPatterns counts the whole fingerprinted corpus by provenance, taps b
     'the agent-authored tap is not the operator tapping');
 });
 
-// ── deriveKind: the derived filter label per cluster (Coaching redesign §3) ──
-//
-// A PURE function of signals the cluster already carries, first-match-wins over
-// the five-kind precedence: reask > persona(role-preamble) > tap > question >
-// instruction. Unit-pinned at every boundary here; the real producer test below
-// proves it is actually threaded through promptClusterRow (a hand-built cluster
-// fixture can validate a dead interface — the W2 q/o-seam lesson).
-const clusterLike = (over = {}) => ({
-  hashes: ['aaaaaaaaaaaaaaaa'], personas: 0, size: 4,
-  tokens: { min: 10, median: 10, max: 10 }, class: 'other', ...over,
-});
-
-test('deriveKind: reask wins over every other signal it also matches', () => {
-  const asked = new Set(['dead0000dead0000']);
-  // Simultaneously a persona-majority, a tap, and a question — reask still wins.
-  const cluster = clusterLike({
-    hashes: ['dead0000dead0000'], personas: 4, size: 4, tokens: { median: 2 }, class: 'question',
-  });
-  assert.equal(deriveKind(cluster, asked), 'reask');
-});
-
-test('deriveKind: reask needs at least one member hash on the asked-again side', () => {
-  const asked = new Set(['dead0000dead0000']);
-  assert.equal(deriveKind(clusterLike({ hashes: ['aaaa1111aaaa1111'] }), asked), 'instruction',
-    'no intersecting hash → not a reask');
-  assert.equal(deriveKind(clusterLike({ hashes: ['aaaa1111aaaa1111', 'dead0000dead0000'] }), asked), 'reask',
-    'one intersecting hash out of several qualifies');
-  assert.equal(deriveKind(clusterLike(), new Set()), 'instruction', 'an empty reask set never matches');
-  assert.equal(deriveKind(clusterLike(), undefined), 'instruction', 'a missing reask set is treated as empty');
-});
-
-test('deriveKind: role-preamble fires at/above PERSONA_KIND_SHARE and not below', () => {
-  assert.equal(PERSONA_KIND_SHARE, 0.5, 'a simple majority of typed persona openers');
-  const asked = new Set();
-  // At the threshold exactly (2/4 = 0.5) → persona.
-  assert.equal(deriveKind(clusterLike({ personas: 2, size: 4, tokens: { median: 40 } }), asked), 'persona');
-  // Just below (1/4 = 0.25) → falls through to a weaker kind.
-  assert.equal(deriveKind(clusterLike({ personas: 1, size: 4, tokens: { median: 40 } }), asked), 'instruction');
-  // Persona outranks tap: a SHORT persona-majority cluster is still a persona.
-  assert.equal(deriveKind(clusterLike({ personas: 3, size: 4, tokens: { median: 2 } }), asked), 'persona');
-});
-
-test('deriveKind: tap fires at the token ceiling and not one over, and outranks question', () => {
-  const asked = new Set();
-  assert.equal(deriveKind(clusterLike({ tokens: { median: TAP_MAX_TOKENS }, class: 'other' }), asked), 'tap',
-    'median exactly at the ceiling is a tap');
-  assert.equal(deriveKind(clusterLike({ tokens: { median: TAP_MAX_TOKENS + 1 }, class: 'other' }), asked), 'instruction',
-    'one token over the ceiling is not a tap');
-  // Tap outranks question: a short question cluster is a tap.
-  assert.equal(deriveKind(clusterLike({ tokens: { median: 2 }, class: 'question' }), asked), 'tap');
-});
-
-test('deriveKind: question vs instruction comes from the cluster class, last', () => {
-  const asked = new Set();
-  assert.equal(deriveKind(clusterLike({ class: 'question', tokens: { median: 40 } }), asked), 'question');
-  for (const cls of ['other', 'mixed', 'unknown']) {
-    assert.equal(deriveKind(clusterLike({ class: cls, tokens: { median: 40 } }), asked), 'instruction',
-      `${cls} with no stronger signal is an instruction`);
-  }
-});
-
-// MANDATORY real-producer pin: drive aggregate(records,{prompts:true}) and prove
-// every published cluster row carries a valid kind AND that the three kinds this
-// fixture actually contains land where the precedence says. patternRecords()'s
-// q-family repeats one question in-session (a re-ask), the order family is a
-// multi-token instruction, and the persona family is all persona openers.
-test('kind is threaded through the real projection and honours precedence', () => {
-  const a = aggregate(patternRecords(), aggOpts({ prompts: true }));
-  const VALID = new Set(['reask', 'persona', 'tap', 'question', 'instruction']);
-  for (const c of a.promptPatterns.clusters) {
-    assert.ok(VALID.has(c.kind), `cluster ${c.key} carries an invalid kind ${JSON.stringify(c.kind)}`);
-  }
-  // The question-class family repeats QUESTION_A in one session → asked-again →
-  // reask outranks its question class.
-  const q = clusterFor(a, 'question');
-  assert.equal(q.kind, 'reask', 'the in-session repeat makes the question family a reask');
-  // The order family carries no q flag, no persona, >4 tokens, never re-asked.
-  const order = a.promptPatterns.clusters.find((c) => c.class === 'other' && c.label.name !== 'Persona scaffolding');
-  assert.equal(order.kind, 'instruction');
-  // The hand-typed persona family is a role-preamble.
-  const persona = a.promptPatterns.clusters.find((c) => c.label.name === 'Persona scaffolding');
-  assert.equal(persona.kind, 'persona');
-});
-
 // scanKey decides both the single-flight identity and readIndex's memo, so an
 // option that changes the RESULT must be folded into it — the same lesson
 // `force`, `lookbackDays` and `previous` each cost once. Without the fold a
@@ -3140,46 +3054,4 @@ test('readIndex does not serve a promptPatterns caller a memoized answer without
   const withPatterns = await readIndex(opts(sb, { prompts: true }));
   assert.notEqual(withPatterns, plain, 'the two must not coalesce into one answer');
   assert.ok(withPatterns.promptPatterns, 'the projection must actually be built');
-});
-
-// ── QE review F-8 (MEDIUM): the sampleSessionIds privacy bound, pinned ──────
-// The comment states the rationale — "A LINK AFFORDANCE, not a session list —
-// three is enough to click through and few enough that the projection cannot
-// become a membership dump" — and session ids are identifiers that ship on
-// every dashboard poll. Neither half was asserted: raising the cap from 3 to
-// 300 survived the suite, and so did replacing the field with `[]` outright.
-// The existing shape test asserts `length <= 3` over a fixture whose clusters
-// have three or fewer sessions, so it can never see either mutation.
-
-test('F-8: a cluster spanning MORE than three sessions publishes exactly three ids', () => {
-  const billed = (day) => [usageRow(day, 'claude-opus-5', { input: 10 })];
-  // Six sessions all typing the SAME prompt: one cluster, six sessions.
-  const records = ['s1', 's2', 's3', 's4', 's5', 's6'].map((id) => record(id, {
-    usage: billed('2026-07-24'), promptFPs: [fp(QUESTION_A)],
-  }));
-  const a = aggregate(records, aggOpts({ prompts: true }));
-  const cluster = a.promptPatterns.clusters.find((c) => c.sessions > 3);
-  assert.ok(cluster, 'guard: the fixture must actually produce a cluster with more than three sessions');
-  assert.equal(cluster.sampleSessionIds.length, 3,
-    'exactly three — not fewer (the field must not be emptied) and not more (not a membership dump)');
-});
-
-test('F-8: the published ids are drawn from that cluster\'s OWN sessions', () => {
-  const billed = (day) => [usageRow(day, 'claude-opus-5', { input: 10 })];
-  const own = ['own1', 'own2', 'own3', 'own4', 'own5'];
-  const records = [
-    ...own.map((id) => record(id, { usage: billed('2026-07-24'), promptFPs: [fp(QUESTION_A)] })),
-    // A different recurring prompt in unrelated sessions, so a bug that
-    // published ids from the wrong cluster has somewhere wrong to draw from.
-    ...['other1', 'other2', 'other3', 'other4'].map((id) => record(id, {
-      usage: billed('2026-07-24'), promptFPs: [fp(ORDER_A)],
-    })),
-  ];
-  const a = aggregate(records, aggOpts({ prompts: true }));
-  const cluster = a.promptPatterns.clusters.find((c) => c.sessions === own.length);
-  assert.ok(cluster, 'guard: the five-session cluster must exist');
-  assert.equal(cluster.sampleSessionIds.length, 3);
-  for (const id of cluster.sampleSessionIds) {
-    assert.ok(own.includes(id), `${id} is not one of this cluster's own sessions`);
-  }
 });
