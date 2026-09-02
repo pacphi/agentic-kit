@@ -2113,7 +2113,7 @@ Prompts projection.
 ## 22. Archived capability boundary
 
 The complete coaching and layer-3 implementation is preserved for provenance on
-`archive/prompts-capability-main-2026-09-01` at
+`archive/prompts-capability-main` at
 `91e892f523f307ecb29271cb0e370b538115a2c0`.
 
 That snapshot includes the Coaching table and details, masked prompt-sample endpoint,

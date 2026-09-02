@@ -52,7 +52,7 @@ exception, and is opt-in for exactly that reason: it re-reads the transcripts
 to print the text behind each finding. That text goes to your terminal and is
 written nowhere — but with --json it is in the payload, so redirect that to a
 file only if you mean to. The archived coaching and model-enrichment capability
-is preserved on \`archive/prompts-capability-main-2026-09-01\`; main publishes
+is preserved on \`archive/prompts-capability-main\`; main publishes
 deterministic prompt telemetry only.
 
 Environment:

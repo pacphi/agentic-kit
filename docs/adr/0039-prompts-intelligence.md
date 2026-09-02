@@ -6,7 +6,7 @@
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0009](0009-usage-scorecard-local-transcript-analytics.md),
   [ADR-0038](0038-consistent-cross-host-session-metrics.md)
-- **Full capability snapshot:** `archive/prompts-capability-main-2026-09-01` at
+- **Full capability snapshot:** `archive/prompts-capability-main` at
   `91e892f523f307ecb29271cb0e370b538115a2c0`
 
 ## Context
@@ -82,7 +82,7 @@ names, hashes, and deterministic labels needed to explain the metrics.
 
 ### 4. The archive branch is immutable provenance
 
-`archive/prompts-capability-main-2026-09-01` remains pinned at
+`archive/prompts-capability-main` remains pinned at
 `91e892f523f307ecb29271cb0e370b538115a2c0`. It is the exact full-capability
 reference for the removed implementation and its tests. Main documentation links to
 that snapshot instead of describing the archived behavior as current.
