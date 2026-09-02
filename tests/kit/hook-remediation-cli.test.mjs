@@ -6,6 +6,10 @@ import path from 'node:path';
 
 import { run } from '../../src/commands/heal.mjs';
 
+const POSIX_MUTATION_ONLY = process.platform === 'win32'
+  ? { skip: 'executable hook healing is intentionally unavailable on Windows' }
+  : {};
+
 function captureConsole() {
   const output = [];
   const errors = [];
@@ -19,7 +23,7 @@ function captureConsole() {
   };
 }
 
-test('ak heal hooks requires exact preview authorization and supports previewed undo', async () => {
+test('ak heal hooks requires exact preview authorization and supports previewed undo', POSIX_MUTATION_ONLY, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-hook-cli-'));
   const codexHome = path.join(root, 'codex');
   const target = path.join(codexHome, 'hooks.json');

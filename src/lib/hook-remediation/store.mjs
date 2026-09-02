@@ -48,14 +48,16 @@ function ensureTransactionsRoot(transactionsRoot, fsImpl) {
       try {
         const ancestor = fsImpl.lstatSync(cursor);
         if (!ancestor.isDirectory() || ancestor.isSymbolicLink()) {
-          throw new Error(`transactions root ancestor is unsafe: ${cursor}`);
+          throw new Error(`transactions root ancestor is unsafe: ${cursor}`, { cause: error });
         }
         break;
       } catch (ancestorError) {
         if (ancestorError?.code !== 'ENOENT') throw ancestorError;
         missing.push(cursor);
         const parent = path.dirname(cursor);
-        if (parent === cursor) throw new Error('could not find a safe transactions root ancestor');
+        if (parent === cursor) {
+          throw new Error('could not find a safe transactions root ancestor', { cause: ancestorError });
+        }
         cursor = parent;
       }
     }

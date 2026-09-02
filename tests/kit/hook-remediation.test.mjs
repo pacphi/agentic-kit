@@ -16,6 +16,10 @@ import {
   createHookTransactionDir, unfinishedHookReceipts, writeHookReceipt,
 } from '../../src/lib/hook-remediation/store.mjs';
 
+const POSIX_MUTATION_ONLY = process.platform === 'win32'
+  ? { skip: 'executable hook healing is intentionally unavailable on Windows' }
+  : {};
+
 function writeJson(file, value, mode = 0o640) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, { mode });
@@ -43,7 +47,7 @@ function fixture() {
   return { root, codexHome, transactionsRoot, target, audit, plan };
 }
 
-test('dry-run plan is deterministic, content-bound, redacted, and leaves no transaction state', () => {
+test('dry-run plan is deterministic, content-bound, redacted, and leaves no transaction state', POSIX_MUTATION_ONLY, () => {
   const fx = fixture();
   try {
     const before = fs.statSync(fx.target);
@@ -65,7 +69,7 @@ test('dry-run plan is deterministic, content-bound, redacted, and leaves no tran
   }
 });
 
-test('authorized heal changes only the selected target and commits one verified receipt', () => {
+test('authorized heal changes only the selected target and commits one verified receipt', POSIX_MUTATION_ONLY, () => {
   const fx = fixture();
   try {
     const plan = fx.plan();
@@ -95,7 +99,7 @@ test('authorized heal changes only the selected target and commits one verified 
   }
 });
 
-test('receipt undo restores exact bytes and mode while refusing later user drift', () => {
+test('receipt undo restores exact bytes and mode while refusing later user drift', POSIX_MUTATION_ONLY, () => {
   const fx = fixture();
   try {
     const original = fs.readFileSync(fx.target);
@@ -155,7 +159,7 @@ test('stale plan preimage is refused before the transaction directory or any tar
   }
 });
 
-test('plan and private candidate tampering are refused before transaction state', () => {
+test('plan and private candidate tampering are refused before transaction state', POSIX_MUTATION_ONLY, () => {
   const fx = fixture();
   try {
     const plan = fx.plan();
@@ -217,7 +221,7 @@ test('noncanonical JSON is observed but not rewritten behind a scalar-only diff'
   }
 });
 
-test('exact Claude settings repair stays distinct from plugin upstream work', () => {
+test('exact Claude settings repair stays distinct from plugin upstream work', POSIX_MUTATION_ONLY, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-hook-claude-heal-'));
   try {
     const claudeRoot = path.join(root, 'claude');
@@ -266,7 +270,7 @@ test('host profile drift between preview and apply refuses before backups', () =
   }
 });
 
-test('second-target failure conditionally restores the first target', () => {
+test('second-target failure conditionally restores the first target', POSIX_MUTATION_ONLY, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-hook-multi-heal-'));
   try {
     const codexHome = path.join(root, 'codex');
@@ -296,7 +300,7 @@ test('second-target failure conditionally restores the first target', () => {
   }
 });
 
-test('receipt tampering is detected before rollback touches the target', () => {
+test('receipt tampering is detected before rollback touches the target', POSIX_MUTATION_ONLY, () => {
   const fx = fixture();
   try {
     const plan = fx.plan();
@@ -316,7 +320,7 @@ test('receipt tampering is detected before rollback touches the target', () => {
   }
 });
 
-test('caller-supplied transaction roots are never silently re-permissioned', () => {
+test('caller-supplied transaction roots are never silently re-permissioned', POSIX_MUTATION_ONLY, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-hook-root-'));
   try {
     fs.chmodSync(root, 0o755);
@@ -343,7 +347,7 @@ test('missing or corrupt transaction journals block new apply as recovery-requir
   }
 });
 
-test('undo preview verifies backup bytes before reporting ready', () => {
+test('undo preview verifies backup bytes before reporting ready', POSIX_MUTATION_ONLY, () => {
   const fx = fixture();
   try {
     const plan = fx.plan();
@@ -363,7 +367,7 @@ test('undo preview verifies backup bytes before reporting ready', () => {
   }
 });
 
-test('unfinished applied receipts require explicit previewed recovery and restore exact bytes', () => {
+test('unfinished applied receipts require explicit previewed recovery and restore exact bytes', POSIX_MUTATION_ONLY, () => {
   const fx = fixture();
   try {
     const original = fs.readFileSync(fx.target);
