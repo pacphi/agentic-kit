@@ -449,7 +449,9 @@ export function foldBrainDrift(drift, b) {
     pkg: 'ruvnet-brain',
     installed: b.installedRelease ?? '(unversioned)',
     latest: b.latest,
-    outdated: !!b.outdated,
+    // A tag without the installer's required bundle is visible on the status
+    // card, but must not become an actionable dashboard update banner.
+    outdated: !!b.outdated && b.releaseAssetAvailable === true,
   }];
 }
 

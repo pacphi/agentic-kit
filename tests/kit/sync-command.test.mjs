@@ -24,7 +24,7 @@ assertSandboxed(paths, HOME);
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const PROJECT = sandboxProject('ak-sync');
-const FLAGS = (over = {}) => ({ 'dry-run': false, 'no-upgrade': false, json: false, ...over });
+const FLAGS = (over = {}) => ({ 'dry-run': false, 'no-upgrade': false, yes: false, json: false, ...over });
 
 function seedHome(cfg = offlineKitConfig(), pkgs = {}) {
   rmrf(paths.claudeDir(), paths.configDir(), path.join(HOME, '.config', 'opencode'));
@@ -330,10 +330,45 @@ test('an oversized RVF store is planned as a quarantine', async () => {
 });
 
 test('every documented flag is declared in the parser options', () => {
-  for (const flag of ['dry-run', 'no-upgrade', 'json']) {
+  for (const flag of ['dry-run', 'no-upgrade', 'yes', 'json']) {
     assert.ok(flag in sync.options, `--${flag} is documented in help but not parseable`);
     assert.match(sync.help, new RegExp(`--${flag}\\b`), `--${flag} is parseable but undocumented`);
   }
+});
+
+test('a noninteractive Codex repair is disclosed but not applied without --yes', async () => {
+  seedHome(offlineKitConfig({
+    integrations: {
+      version: 2, hosts: { claude: true, codex: true, opencode: false }, bindings: [], ownership: {},
+    },
+  }));
+  fs.mkdirSync(paths.codexDir(), { recursive: true });
+  fs.writeFileSync(paths.codexConfigPath(), [
+    '[mcp_servers.codex]', 'command = "codex"', 'args = ["mcp-server"]',
+  ].join('\n'));
+  const before = snapshot(HOME);
+  const prior = process.cwd();
+  process.chdir(PROJECT);
+  let result;
+  try {
+    result = await captureLog(() => sync.run({
+      flags: FLAGS({ 'no-upgrade': true }), pkgRoot: PKG_ROOT,
+      collectFn: async () => [{
+        subsystem: 'codex-mcp', level: 'fail', message: 'recursive Codex registration',
+        fix: 'remove the recursive Codex MCP registration',
+      }],
+    }));
+  } finally { process.chdir(prior); }
+  assert.equal(result.result, 1);
+  assert.match(result.out, /Codex repairs need confirmation/);
+  assertUnchanged(before, HOME, 'unapproved Codex repair must not mutate the sandbox');
+});
+
+test('failed heal results are retained for the final convergence proof', () => {
+  const state = { applyFailures: [] };
+  sync.recordApplyFailure(state, 'ruvnet-brain', { ok: false, status: 'failed', detail: 'network unavailable' });
+  sync.recordApplyFailure(state, 'natives', { ok: true, detail: 'healthy' });
+  assert.deepEqual(state.applyFailures, [{ name: 'ruvnet-brain', detail: 'network unavailable' }]);
 });
 
 // ── opencode convergence through a REAL sync ─────────────────────────────────

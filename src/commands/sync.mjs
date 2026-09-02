@@ -2,12 +2,16 @@
 // uses; --dry-run prints it and stops. Apply order: upgrades first (they wipe
 // natives), then heals, then re-collect to prove convergence.
 import path from 'node:path';
+import readline from 'node:readline/promises';
 import { collect } from './status.mjs';
 import * as heal from '../lib/heal.mjs';
 import { have } from '../lib/exec.mjs';
 import { fixStatusline, helperStampStale } from '../lib/statusline.mjs';
 import { reconcileGuidance } from '../lib/blocks.mjs';
-import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
+import {
+  register as mcpRegister, applyExclusions, codexMcpTopology, codexMcpRepairPlan,
+  repairCodexMcpTopology,
+} from '../lib/mcp.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
 import { hostsWithLifecycle, lifecycleAdapterFor, lifecycleExecutionEnabled, detectionBinFor } from '../lib/adapters/lifecycle-registry.mjs';
 import { companionLifecycleFor } from '../lib/adapters/companion-lifecycle-registry.mjs';
@@ -16,6 +20,7 @@ import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { commandHosts, hostInstallState, installHost, convergeProviderStack, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
 import { driftReport, selfDrift } from '../lib/versions.mjs';
+import { drift as ruvnetBrainDrift } from '../lib/ruvnet-brain.mjs';
 import { RUVECTOR_PKG, managed as ruvectorManaged } from '../lib/ruvector.mjs';
 import { pruneNpxStale } from '../lib/npx.mjs';
 import { runScaffoldAgentsFix } from '../lib/scaffold.mjs';
@@ -37,9 +42,28 @@ function printReportLine(line) {
   else info(line.text);
 }
 
+/** Preserve a failed mutation for the final convergence proof. A failed heal
+ * may leave an existing but stale capability on disk, so post-heal presence
+ * alone is not success evidence. */
+export function recordApplyFailure(state, name, result) {
+  if (result?.ok === false) state.applyFailures.push({ name, detail: result.detail || `exit ${result.status || 'failed'}` });
+}
+
+/** Refresh every network-backed fact that can open an upgrade gate. Kept out
+ *  of run() so adding one release boundary does not grow the command's already
+ *  broad orchestration complexity. Sequential: both probes persist kit.json. */
+async function refreshPlanDrift(flags, fetchLatest) {
+  if (flags['dry-run'] || flags['no-upgrade']) return;
+  await driftReport({ force: true, ...(fetchLatest ? { fetchLatest } : {}) });
+  // Brain releases have a second executability fact beyond the tag: the
+  // required ruvnet-brain.zip asset. A tag-only release is not actionable.
+  if (loadKitConfig().ruvnetBrain) await ruvnetBrainDrift({ force: true });
+}
+
 export const options = {
   'dry-run': { type: 'boolean', default: false },
   'no-upgrade': { type: 'boolean', default: false },
+  yes: { type: 'boolean', default: false },
   json: { type: 'boolean', default: false },
 };
 
@@ -54,6 +78,7 @@ Usage: ak sync [options]
 Options:
   --dry-run       print the plan and stop; change nothing
   --no-upgrade    heal only; don't upgrade ruflo/aqe/kit versions
+  --yes           approve disclosed repairs without prompting
   --json          emit results as JSON
 
 Examples:
@@ -76,6 +101,15 @@ Examples:
 // (`dejaVuApplyFailed`, `aqeRouterApplyFailure`) the final convergence check
 // needs — the only state that survives past its own step.
 export const SYNC_STEPS = [
+  {
+    id: 'codex-mcp-repair',
+    when: (subs) => subs.has('codex-mcp'),
+    run: async (ctx) => {
+      if (!ctx.codexRepairPlan.length) return;
+      const result = await ctx.step('codex MCP repair', () => repairCodexMcpTopology(ctx.codexRepairPlan, ctx.cwd));
+      if (!result.ok) ctx.state.codexRepairFailure = result.detail;
+    },
+  },
   {
     id: 'codex-statusline',
     when: (subs, flags, cfg) => subs.has('codex-statusline') && !!cfg.statusline?.codex?.preset,
@@ -401,9 +435,7 @@ export async function run({
   // versions gate it needed to open). Dry-runs skip the refresh: it writes
   // kit.json, and --dry-run is pinned to touch nothing — so a dry-run
   // preview may be cache-stale by up to one TTL window.
-  if (!flags['dry-run'] && !flags['no-upgrade']) {
-    await driftReport({ force: true, ...(fetchLatest ? { fetchLatest } : {}) });
-  }
+  await refreshPlanDrift(flags, fetchLatest);
   const rows = await collectFn({ pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions });
   const plan = rows.filter((r) => r.fix)
     // Model lifecycle actions are explicit advisory commands. `ak status` must
@@ -420,14 +452,47 @@ export async function run({
 
   const cfg = loadKitConfig();
   const subsystems = new Set(plan.map((p) => p.subsystem));
+  const codexRepairPlan = plan.some((p) => p.subsystem === 'codex-mcp')
+    ? codexMcpRepairPlan(codexMcpTopology({ cwd })) : [];
+  if (codexRepairPlan.length) {
+    console.log(bold(`Codex repair plan (${codexRepairPlan.length} action(s)):`));
+    for (const action of codexRepairPlan) {
+      console.log(`  • remove ${action.file} → [mcp_servers.${action.name}] — ${action.reason}`);
+    }
+    let confirmed = flags.yes;
+    if (!confirmed) {
+      if (!process.stdin.isTTY) {
+        fail('Codex repairs need confirmation; re-run with --yes in a non-interactive session');
+        return 1;
+      }
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      const answer = await rl.question('Apply these Codex repairs? [y/N] ');
+      rl.close();
+      confirmed = /^y(?:es)?$/i.test(answer.trim());
+    }
+    if (!confirmed) {
+      info('Codex configuration was left unchanged; no sync actions were applied');
+      return 1;
+    }
+  }
   const report = reportOutcome;
+  const state = {
+    dejaVuApplyFailed: false,
+    aqeRouterApplyFailure: null,
+    codexRepairFailure: null,
+    applyFailures: [],
+  };
   // Run a managed heal under a live elapsed-time ticker, then print its result.
   // Keeps every slow tool (npm upgrades, brain KB download, native rebuild)
   // visibly alive instead of freezing the prompt; fast/local steps clear in <1s.
-  const step = async (name, thunk) => { const r = await withProgress(name, thunk); report(name, r); return r; };
-  const state = { dejaVuApplyFailed: false, aqeRouterApplyFailure: null };
+  const step = async (name, thunk) => {
+    const r = await withProgress(name, thunk);
+    report(name, r);
+    recordApplyFailure(state, name, r);
+    return r;
+  };
   const ctx = {
-    cfg, cwd, pkgRoot, flags, dejaVuAdapter, subsystems, report, step, state,
+    cfg, cwd, pkgRoot, flags, dejaVuAdapter, codexRepairPlan, subsystems, report, step, state,
   };
 
   for (const s of SYNC_STEPS) {
@@ -476,6 +541,14 @@ export async function run({
   }
   if (state.dejaVuApplyFailed && !remaining.some((r) => r.subsystem === 'deja-vu')) {
     remaining.push({ subsystem: 'deja-vu', message: 'companion lifecycle apply failed' });
+  }
+  if (state.codexRepairFailure && !remaining.some((r) => r.subsystem === 'codex-mcp')) {
+    remaining.push({ subsystem: 'codex-mcp', message: state.codexRepairFailure });
+  }
+  for (const failure of state.applyFailures) {
+    if (!remaining.some((r) => r.message === `${failure.name}: ${failure.detail}`)) {
+      remaining.push({ subsystem: failure.name, message: `${failure.name}: ${failure.detail}` });
+    }
   }
   if (remaining.length === 0) {
     ok(bold('converged — no failing subsystems'));

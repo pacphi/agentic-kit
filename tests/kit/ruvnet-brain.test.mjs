@@ -5,8 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   kbDir, present, installedVersion, installedReleaseOnDisk, classifyDrift,
-  INSTALL_SPEC, INSTALL_ARGS, REPO, NIGHTLY_LABEL, nightlyAgentPlist, nightlyAgentPresent,
+  INSTALL_SPEC, INSTALL_ARGS, REPO, RELEASE_ASSET, releaseMetadata,
+  NIGHTLY_LABEL, nightlyAgentPlist, nightlyAgentPresent,
 } from '../../src/lib/ruvnet-brain.mjs';
+import { brainReleaseRow } from '../../src/commands/status/sections/ruvnet-brain.mjs';
 import { BUILTIN_BLOCKS, detect } from '../../src/lib/blocks.mjs';
 import { loadKitConfig, saveKitConfig } from '../../src/lib/config.mjs';
 
@@ -38,12 +40,45 @@ test('install spec/args stay pinned to the PUBLISHED installer with the four sup
   //   optional offer, silently enabling the 03:47 self-update LaunchAgent (macOS)
   //   and telemetry consent. ak owns updates, so these MUST persist.
   assert.equal(REPO, 'stuinfla/ruvnet-brain');
+  assert.equal(RELEASE_ASSET, 'ruvnet-brain.zip');
   assert.equal(INSTALL_SPEC, 'ruvnet-brain@latest');
   assert.ok(INSTALL_ARGS.includes('--no-stack'));
   assert.ok(INSTALL_ARGS.includes('--no-enhance'));
   assert.ok(INSTALL_ARGS.includes('--no-nightly-prompt'));
   assert.ok(INSTALL_ARGS.includes('--no-telemetry'));
   assert.ok(INSTALL_ARGS.includes('--yes'));
+});
+
+test('release metadata requires the exact bundle asset consumed by the installer', () => {
+  assert.deepEqual(releaseMetadata({
+    tag_name: 'v4.3.2',
+    assets: [{ name: 'ruvnet-brain.zip', browser_download_url: 'https://example.test/brain.zip' }],
+  }), { version: '4.3.2', releaseAssetAvailable: true });
+  assert.deepEqual(releaseMetadata({ tag_name: 'v4.3.1', assets: [] }), {
+    version: '4.3.1', releaseAssetAvailable: false,
+  });
+  assert.deepEqual(releaseMetadata({
+    tag_name: 'v4.3.1',
+    assets: [{ name: 'source.zip', browser_download_url: 'https://example.test/source.zip' }],
+  }), { version: '4.3.1', releaseAssetAvailable: false });
+  assert.equal(releaseMetadata({ assets: [] }), null);
+});
+
+test('an announced release without a bundle stays visible but is not an ak sync action', () => {
+  const retained = brainReleaseRow({
+    present: true, outdated: true, installedRelease: '4.2.2-dev', latest: '4.3.1',
+    releaseAssetAvailable: false,
+  });
+  assert.equal(retained.level, 'info');
+  assert.equal(retained.fix, null, 'sync must not prescribe a download known to return 404');
+  assert.match(retained.message, /release v4\.2\.2-dev retained/);
+  assert.match(retained.message, /update deferred upstream/);
+
+  const actionable = brainReleaseRow({
+    present: true, outdated: true, installedRelease: '4.2.2-dev', latest: '4.3.2',
+    releaseAssetAvailable: true,
+  });
+  assert.equal(actionable.fix, 'sync refreshes the KB');
 });
 
 test('installedReleaseOnDisk reads SOURCE.json releaseTag — validated, v-stripped, null-safe', () => {

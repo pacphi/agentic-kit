@@ -8,6 +8,7 @@ import path from 'node:path';
 import { rufloNodeModules, claudeUserMcpPath, claudeSettingsPath, repoRoot } from './paths.mjs';
 import { run } from './exec.mjs';
 import { readJson, addDenyRules, removeDenyRules } from './settings.mjs';
+import { writeFileWithBackup } from './file-write.mjs';
 
 /** Enumerate MCP tool names from the installed package's mcp-tools modules,
  *  grouped by name prefix (family). Returns Map<family, string[]>. */
@@ -119,6 +120,65 @@ export function codexMcpTopology({ cwd = process.cwd(), home = os.homedir() } = 
     rufloRegistrations,
     duplicateRuflo: rufloRegistrations.length > 1,
   };
+}
+
+/** Return the user-owned Codex MCP entries that ak can repair safely after an
+ * explicit sync confirmation. The canonical workspace-aware `ruflo` entry is
+ * deliberately never included. */
+export function codexMcpRepairPlan(topology) {
+  const targets = [];
+  const seen = new Set();
+  const add = (entry, reason) => {
+    const key = `${entry.file}\0${entry.scope}\0${entry.name}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    targets.push({ ...entry, reason });
+  };
+  for (const entry of topology.selfRegistrations) {
+    add(entry, 'recursively launches Codex through the deprecated mcp-server transport');
+  }
+  for (const entry of topology.rufloRegistrations) {
+    if (entry.name !== 'ruflo') {
+      add(entry, 'duplicates the canonical workspace-aware [mcp_servers.ruflo] registration');
+    }
+  }
+  return targets;
+}
+
+/** Apply a previously disclosed repair plan through Codex's supported command,
+ * then verify every target disappeared from the effective topology. */
+export async function repairCodexMcpTopology(targets, cwd = process.cwd(), {
+  runner = run, inspect = codexMcpTopology,
+} = {}) {
+  const backedUp = new Set();
+  for (const target of targets) {
+    if (!backedUp.has(target.file)) {
+      try {
+        writeFileWithBackup(target.file, fs.readFileSync(target.file, 'utf8'));
+        backedUp.add(target.file);
+      } catch (error) {
+        return { ok: false, changed: false, detail: `could not back up ${target.file}: ${error.message}` };
+      }
+    }
+    const result = await runner('codex', ['mcp', 'remove', target.name], { cwd });
+    if (result.code !== 0) {
+      return {
+        ok: false,
+        changed: false,
+        detail: `could not remove [mcp_servers.${target.name}] from ${target.file}: ${(result.stderr || result.stdout || `exit ${result.code}`).split('\n')[0].slice(0, 160)}`,
+      };
+    }
+  }
+  const remaining = inspect({ cwd }).registrations.filter((entry) =>
+    targets.some((target) => target.file === entry.file && target.scope === entry.scope && target.name === entry.name));
+  if (remaining.length) {
+    return {
+      ok: false,
+      changed: targets.length > 0,
+      detail: `Codex MCP repair could not be verified; remaining entries: ${remaining.map((entry) => `[mcp_servers.${entry.name}]`).join(', ')}`,
+    };
+  }
+  return { ok: true, changed: targets.length > 0, detail: `removed ${targets.map((target) => `[mcp_servers.${target.name}]`).join(', ')}` };
 }
 
 /**

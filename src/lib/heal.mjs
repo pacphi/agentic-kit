@@ -12,7 +12,7 @@ import { rufloRoot, aqeRoot } from './paths.mjs';
 import { agentdbLocations, bsq3IsNative, bsq3Root, deriveBsq3Spec, selfSpecConflicts, rufloMemoryContexts, aidefencePresent } from './natives.mjs';
 import { KIT_PKG } from './versions.mjs';
 import { scanRvf, quarantine } from './rvf.mjs';
-import { INSTALL_SPEC, INSTALL_ARGS, NIGHTLY_LABEL as RB_NIGHTLY_LABEL, nightlyAgentPlist as rbNightlyPlist, present as rbPresent, latestVersion as rbLatest, recordInstalledRelease as rbRecord } from './ruvnet-brain.mjs';
+import { INSTALL_SPEC, INSTALL_ARGS, RELEASE_ASSET as RB_RELEASE_ASSET, NIGHTLY_LABEL as RB_NIGHTLY_LABEL, nightlyAgentPlist as rbNightlyPlist, present as rbPresent, latestRelease as rbLatestRelease, recordInstalledRelease as rbRecord } from './ruvnet-brain.mjs';
 import { PKG as ADB_PKG, present as adbPresent, coherence as adbCoherence } from './agentdb.mjs';
 
 // Packages whose install scripts must run for natives to build (npm >=11.17
@@ -187,7 +187,7 @@ export async function selfUpdate(version) {
  *  check saw a newer release). Runs `--no-stack --no-enhance`: ak already
  *  manages ruflo/RuVector and owns the CLAUDE.md grounding block. */
 export async function installRuvnetBrain({
-  force = false, runner = run, latestVersion = rbLatest,
+  force = false, runner = run, latestRelease = rbLatestRelease,
   present = rbPresent, recordRelease = rbRecord,
 } = {}) {
   // Resolve the release tag FIRST and pin the installer to it (--version v<tag>),
@@ -195,7 +195,18 @@ export async function installRuvnetBrain({
   // install-then-stamp order left a window where a release published mid-install
   // made the stamp disagree with disk. Offline (tag null): the installer's own
   // latest logic applies and the stamp is best-effort afterwards, as before.
-  const tag = await latestVersion();
+  const release = await latestRelease();
+  const tag = release?.version ?? null;
+  // Do not launch the installer for a release that cannot possibly land. Its
+  // own fallback constructs the same absent /ruvnet-brain.zip URL, waits for
+  // that 404, then emits a generic half-install footer. Preserve the existing
+  // install and surface the upstream publishing defect directly.
+  if (release?.releaseAssetAvailable === false) {
+    return {
+      ok: false, status: 'failed', usable: present(),
+      detail: `release v${tag} is missing ${RB_RELEASE_ASSET}; automatic update is blocked upstream and the existing Brain was left unchanged`,
+    };
+  }
   const args = ['-y', INSTALL_SPEC, ...INSTALL_ARGS,
     ...(tag ? ['--version', `v${tag}`] : []),
     ...(force ? ['--force'] : [])];
@@ -203,7 +214,7 @@ export async function installRuvnetBrain({
   if (r.code === 0) {
     // Stamp the release-tag namespace so drift converges — the plugin's own
     // semver never tracks the KB release, so we can't use it.
-    const stamped = tag ?? await latestVersion();
+    const stamped = tag ?? (await latestRelease())?.version ?? null;
     if (stamped) recordRelease(stamped);
     return {
       ok: true, status: 'ok', usable: true,
@@ -214,8 +225,19 @@ export async function installRuvnetBrain({
   // is useful evidence for `usable`, never proof that this install succeeded.
   return {
     ok: false, status: 'failed', usable: present(),
-    detail: (r.stderr || `exit ${r.code}`).trim().split('\n').slice(-2).join(' ').slice(0, 200),
+    detail: brainInstallFailure(r),
   };
+}
+
+/** Prefer the installer's causal error over its generic closing reassurance.
+ *  Newer updater failures write the release-asset error to stdout while the
+ *  final "Nothing is left half-installed" footer lands on stderr. */
+export function brainInstallFailure(result) {
+  const lines = `${result?.stdout ?? ''}\n${result?.stderr ?? ''}`
+    .split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const causal = lines.filter((line) => /\[forge-update\]\s*ERROR:|install stopped:|HTTP\s+\d{3}|no matching .*\.zip asset/i.test(line));
+  const chosen = causal.slice(-2).join(' | ') || lines.slice(-2).join(' ') || `exit ${result?.code ?? 1}`;
+  return chosen.slice(0, 320);
 }
 
 /** Disable the brain installer's nightly self-update LaunchAgent (macOS-only —

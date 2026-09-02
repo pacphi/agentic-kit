@@ -422,12 +422,23 @@ async function main() {
   const npmDrift = [{ pkg: 'ruflo', installed: '4.0.0', latest: '4.1.0', outdated: true }];
 
   await test('foldBrainDrift appends an outdated brain in renderDrift shape', async () => {
-    const out = foldBrainDrift(npmDrift, { present: true, installedRelease: '3.3.1', latest: '3.4.0', outdated: true });
+    const out = foldBrainDrift(npmDrift, {
+      present: true, installedRelease: '3.3.1', latest: '3.4.0', outdated: true,
+      releaseAssetAvailable: true,
+    });
     assert(out.length === 2, 'brain entry must be appended');
     const b = out[1];
     assert(b.pkg === 'ruvnet-brain' && b.installed === '3.3.1' && b.latest === '3.4.0' && b.outdated === true,
       'entry must carry {pkg, installed, latest, outdated}: ' + JSON.stringify(b));
     assert(out[0] === npmDrift[0], 'npm entries pass through untouched');
+  });
+
+  await test('foldBrainDrift does not advertise an update whose bundle asset is absent', async () => {
+    const out = foldBrainDrift([], {
+      present: true, installedRelease: '4.2.2-dev', latest: '4.3.1', outdated: true,
+      releaseAssetAvailable: false,
+    });
+    assert(out[0].outdated === false, 'an un-downloadable release must not become an update banner');
   });
 
   await test('foldBrainDrift: absent brain → array unchanged; null drift → brain-only array', async () => {
@@ -2075,7 +2086,7 @@ async function main() {
   // is the suite where it matters most — the traversal-guard and credential-
   // leak tests live here and were the reviewer's cited example of a block
   // that could silently vanish with the old harness never noticing.
-  const EXPECTED = 82;
+  const EXPECTED = 83;
   if (passed + failed !== EXPECTED) {
     console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
     process.exit(1);

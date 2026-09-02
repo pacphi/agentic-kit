@@ -15,6 +15,11 @@ import { cmpVersions } from './versions.mjs';
 import { loadKitConfig, saveKitConfig } from './config.mjs';
 
 export const REPO = 'stuinfla/ruvnet-brain';
+// The published installer resolves this exact Release asset name. A newer tag
+// without this asset is an announcement, not an installable Brain update: the
+// installer's conventional fallback URL points at the same absent asset and
+// returns 404. Keep the release probe aligned with that executable contract.
+export const RELEASE_ASSET = 'ruvnet-brain.zip';
 /** npx spec + flags. The PUBLISHED npm installer, not `github:` — a github: spec
  *  runs the default-branch HEAD (an unreleased -dev installer, audited live
  *  2026-07-17: HEAD was 3.4.5-dev while releases/latest was v3.3.1), which is
@@ -93,24 +98,43 @@ export function installedReleaseOnDisk() {
   return null;
 }
 
-/** Latest release tag from GitHub, best-effort (null on any failure or rate
- *  limit — callers must treat null as "unknown", never as "up to date"). */
-export async function latestVersion({ timeout = 8000 } = {}) {
+/** Reduce GitHub's latest-release payload to the two facts ak needs. Pure so
+ *  missing-asset behavior is testable without a network dependency. */
+export function releaseMetadata(payload) {
+  const tag = payload?.tag_name;
+  if (!tag) return null;
+  const asset = Array.isArray(payload.assets)
+    ? payload.assets.find((candidate) => candidate?.name === RELEASE_ASSET
+      && candidate?.browser_download_url)
+    : null;
+  return {
+    version: String(tag).replace(/^v/, ''),
+    releaseAssetAvailable: !!asset,
+  };
+}
+
+/** Latest release metadata from GitHub, best-effort (null on any failure or
+ *  rate limit — callers must treat null as "unknown", never as "up to date"). */
+export async function latestRelease({ timeout = 8000, fetchImpl = fetch } = {}) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeout);
   try {
-    const res = await fetch(
+    const res = await fetchImpl(
       `https://api.github.com/repos/${REPO}/releases/latest`,
       { headers: { 'User-Agent': 'agentic-kit', Accept: 'application/vnd.github+json' },
         signal: ctl.signal });
     if (!res.ok) return null;
-    const tag = (await res.json())?.tag_name;
-    return tag ? String(tag).replace(/^v/, '') : null;
+    return releaseMetadata(await res.json());
   } catch {
     return null;
   } finally {
     clearTimeout(t);
   }
+}
+
+/** Compatibility helper for callers that only need the release tag. */
+export async function latestVersion(options) {
+  return (await latestRelease(options))?.version ?? null;
 }
 
 /** Record the release tag ak just pulled, so future drift compares like-for-like.
@@ -150,17 +174,27 @@ export async function drift({ force = false } = {}) {
   const cfg = loadKitConfig();
   const ttlMs = (cfg.versionCheck?.ttlHours ?? 24) * 3600_000;
   const cached = cfg.versionCheck?.ruvnetBrain ?? {};
+  // Do not invalidate a pre-asset-probe cache here: `ak sync --dry-run` reaches
+  // this collector and is forbidden to write. A real sync force-refreshes this
+  // metadata before collection; ordinary status waits for the normal TTL.
   const fresh = !force && cached.last && Date.now() - cached.last < ttlMs;
   let latest = fresh ? cached.latest ?? null : null;
+  let releaseAssetAvailable = fresh ? cached.releaseAssetAvailable ?? null : null;
   if (!fresh) {
-    latest = await latestVersion();
+    const release = await latestRelease();
+    latest = release?.version ?? null;
+    releaseAssetAvailable = release?.releaseAssetAvailable ?? null;
     // Preserve installedRelease across the cache write.
-    cfg.versionCheck = { ...cfg.versionCheck, ruvnetBrain: { ...cached, last: Date.now(), latest } };
+    cfg.versionCheck = {
+      ...cfg.versionCheck,
+      ruvnetBrain: { ...cached, last: Date.now(), latest, releaseAssetAvailable },
+    };
     try { saveKitConfig(cfg); } catch { /* read-only envs: next call re-fetches */ }
   }
   const installedRelease = installedReleaseOnDisk() ?? cached.installedRelease ?? null;
   return {
     ...classifyDrift({ present: present(), installedRelease, latest }),
+    releaseAssetAvailable,
     pluginVersion: installedVersion(),
   };
 }
