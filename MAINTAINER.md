@@ -93,14 +93,21 @@ docs/
 
 **Published tarball** = the `files` whitelist in `package.json`:
 `bin/agentic-kit.mjs`, `src/`, `claude/`, `docs/DEJA-VU.md`, `docs/HOST-SUPPORT.md`,
+`docs/HOOKS.md`,
 `docs/INSTALLATION.md`, `docs/MODELS.md`, `docs/PROVIDERS.md`, `docs/SETUP.md`,
 `docs/TROUBLESHOOTING.md`, `docs/UPGRADING.md`, `docs/CODEX-STATUSLINE.md`,
 `docs/adr/0015-managed-codex-native-statusline.md`,
 `docs/adr/0032-model-lifecycle-intelligence.md`,
 `docs/adr/0033-retire-codex-mcp-and-bound-qe-court-participants.md`,
+`docs/adr/0040-codex-hook-audit-and-conservative-remediation.md`,
+`docs/adr/0041-host-neutral-hook-configuration-assurance.md`,
+`docs/adr/0042-transactional-hook-healing.md`,
 `tests/live/aqe-external-provider-transport.test.mjs`,
 `tests/live/qe-court-participant-transport.test.mjs`, and
-`docs/ddd/model-lifecycle-intelligence.md`. Generated workspace state under
+`docs/ddd/model-lifecycle-intelligence.md`,
+`docs/ddd/hook-configuration-assurance.md`,
+`docs/audits/codex-hooks-remediation-2026-09-01.md`, and
+`docs/audits/host-neutral-hooks-follow-up-2026-09-01.md`. Generated workspace state under
 the shipped source trees is explicitly excluded. Nothing else ships — verify with
 `npm pack --dry-run` before a release if you touch `files`.
 

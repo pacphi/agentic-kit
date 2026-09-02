@@ -49,6 +49,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0039](0039-prompts-intelligence.md) | Prompts intelligence: fingerprints, coaching, and layer-3 enrichment | Accepted |
 | [0040](0040-codex-hook-audit-and-conservative-remediation.md) | Codex hook audit and conservative remediation | Implemented (Codex Wave 1) |
 | [0041](0041-host-neutral-hook-configuration-assurance.md) | Host-neutral hook configuration assurance | Accepted; read-only implementation complete |
+| [0042](0042-transactional-hook-healing.md) | Transactional host-neutral hook healing | Implemented for narrow Codex recipe; cross-host acceptance pending |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude

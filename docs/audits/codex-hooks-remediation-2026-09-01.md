@@ -64,11 +64,23 @@ exclusive temporary files and atomic rename, then verify schema/effective behavi
 Rollback is allowed only when the current digest still equals the transaction postimage.
 If a user or another generator changed the file afterward, preserve that drift and stop.
 
-## Implemented wave
+## Implemented waves
 
-Wave 1 adds only the read-only `ak audit hooks` command and durable baseline artifacts.
-It never executes a hook or exposes an apply flag. It validates version confidence,
-nested syntax, exact occurrence IDs, plugin-cache containment, and symlink boundaries;
-hook-discovery failures are distinct from unrelated plugin skill diagnostics.
-Transactional apply/rollback remains a later wave after the proposed ADR receives
-independent architecture review and the canonical owners for H01–H10 are resolved.
+Wave 1 added the read-only `ak audit hooks` command and durable baseline artifacts. It
+never executes a hook. It validates exact version confidence, syntax, occurrence IDs,
+plugin-cache containment, and symlink boundaries; hook-discovery failures remain distinct
+from unrelated plugin skill diagnostics.
+
+Wave 2 adds a separate `ak hooks doctor|heal|undo` surface under ADR-0042. The doctor JSON
+is byte-compatible with the audit report. Dry-run is write-free and produces a
+content-bound plan. Apply requires exact action IDs, the exact plan digest, and
+confirmation; backups and a durable integrity-sealed receipt precede atomic replacement,
+and repeated audits prove the finding cleared and the next plan is an mtime-preserving
+no-op. Undo is permitted only while the current target still equals the transaction
+postimage.
+
+The only executable recipe is direct user-owned global JSON on exact Codex `0.151.0`,
+normalizing a `SessionEnd` timeout already clamped to three seconds by that runtime.
+It remains approval-required and does not change trust. H01–H11 otherwise remain
+upstream-, project-, owner-, or human-review work; no hook action is integrated into
+`ak sync`.

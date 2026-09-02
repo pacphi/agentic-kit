@@ -31,6 +31,10 @@ contradictory meaning.
 | Schema profile | Exact host-version rules plus evidence and verification date; unknown versions fall back to syntax-only validation |
 | Coverage statement | `complete`, `partial`, or `unsupported` audit reach plus concrete gaps; it is not a health or trust verdict |
 | Remediation proposal | Read-only action description classified as automatic-eligible, approval-required, prohibited, or upstream-required |
+| Hook healing plan | Immutable, deterministic set of provider-compiled actions bound to one audit and exact runtime/source facts by a plan digest |
+| Hook healing action | Exact provider recipe with canonical target/owner, pre/postimage, mode, impact, activation, verification and rollback |
+| Hook transaction | Private backup-first journal for explicitly authorized healing actions |
+| Hook receipt | Integrity-sealed transaction record used for verification, interruption recovery and postimage-guarded undo |
 | Upstream constraint | Versioned dependency issue, affected range, bounded local strategy, verification date, and objective sunset condition |
 
 ## State and evidence language
@@ -204,6 +208,9 @@ runtime state is a chip word, never a prose word. See
 - Do not replace an unknown fact with a convenient default.
 - Do not call a hook configured, selected, trusted, reachable, healthy, or authorized unless the
   evidence establishes that exact dimension. A coverage statement never upgrades those facts.
+- Do not call a remediation executable merely because a diagnostic exists. Execution authority
+  requires a provider recipe, exact profile, proven canonical ownership, preimage and explicit
+  action/plan approval.
 - Say **System** for the dashboard area and the command; say **Machine footprint** only for the
   bounded context and its module directory. No user-facing string says "footprint".
 - Say **About** for the dashboard area and the command; say **Component directory** only for the

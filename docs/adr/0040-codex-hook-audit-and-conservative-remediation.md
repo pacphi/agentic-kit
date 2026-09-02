@@ -1,14 +1,16 @@
 # ADR-0040 — Codex hook audit and conservative remediation
 
-- **Status:** Implemented (Codex Wave 1); extended by ADR-0041
+- **Status:** Implemented (Codex Wave 1); extended by ADR-0041 and ADR-0042
 - **Date:** 2026-09-01
+- **Updated:** 2026-09-01
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md),
   [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),
   [ADR-0027](0027-shared-project-census.md),
   [ADR-0029](0029-host-adapter-extension-point.md)
 - **Evidence:** [2026-09-01 hook audit](../audits/codex-hooks-audit-2026-09-01.md)
-- **Extended by:** [ADR-0041](0041-host-neutral-hook-configuration-assurance.md)
+- **Extended by:** [ADR-0041](0041-host-neutral-hook-configuration-assurance.md),
+  [ADR-0042](0042-transactional-hook-healing.md)
 
 ## Context
 
@@ -146,10 +148,9 @@ Those are review recommendations, not authorization. Agentic-kit will not set
 `trusted_hash`, modify project `trust_level`, invoke a bypass, or equate a successful
 benchmark with trust.
 
-### 6. Future apply is transactional
+### 6. Apply is transactional
 
-The current command intentionally exposes no apply surface. A later wave may add it only
-with these invariants:
+ADR-0042 adds one approval-required apply surface and implements these invariants:
 
 1. plan includes canonical owner, action ID, target, expected preimage digest, desired
    digest, mode, unified diff, behavior impact, trust impact, and rollback description;
@@ -201,7 +202,7 @@ refusals are first-class results.
 
 ### Deferred
 
-- transactional apply and rollback;
+- additional provider apply recipes beyond ADR-0042's narrow Codex exact-profile action;
 - safe benchmark execution;
 - declarative external hook providers;
 - cheap status summary;
@@ -217,3 +218,7 @@ broken symlinks, malformed nested groups, non-string matchers, and invalid timeo
 It does not modify setup/sync, current hooks, trust, plugin cache, or user state. This
 preserves existing dirty work in integration modules and keeps the behavioral repair gate
 explicit.
+
+ADR-0042 preserves this read-only audit while adding a separate planner and transaction
+port. It does not retroactively authorize cache, project, generated-source, or trust
+mutation.

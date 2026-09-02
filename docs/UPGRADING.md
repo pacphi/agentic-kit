@@ -46,6 +46,11 @@ tarball, Git, source-link, multi-user, and CI guidance.
 
 ## Running `ak sync` while sessions are live
 
+Hook healing is not part of `ak sync`. The current hook remediation recipe is
+approval-required and changes a user-owned definition, so use `ak hooks heal --dry-run`
+and authorize exact action IDs separately. Upgrades may change a host version and make
+an older schema profile syntax-only; always generate a fresh plan after upgrading.
+
 `ak sync` is plan-based: on a converged machine it prints "nothing to do" and touches
 nothing. The blast radius comes entirely from what's in the plan — and the widest heals are
 the ones a **`versions`** row triggers. If you have Claude Code, Codex, or OpenCode sessions

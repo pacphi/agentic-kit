@@ -50,11 +50,12 @@ See [Integration management](integration-management.md).
 
 ### Hook configuration assurance
 
-Owns read-only, host-neutral discovery of lifecycle sources; normalized occurrences and
-material behavior identity; coverage gaps; diagnostics; and remediation authority
-proposals. It consumes host identity, project scope and validated external adapter
-manifests. It never executes hook or plugin code and owns no host trust, consent, grant,
-installation, route or configuration write.
+Owns host-neutral discovery of lifecycle sources; normalized occurrences and material
+behavior identity; coverage gaps; diagnostics; remediation authority proposals; and the
+immutable input to a sibling transaction port. It consumes host identity, project scope
+and validated external adapter manifests. It never executes hook or plugin code and owns
+no host trust, consent, grant, installation, or route. The write port can modify only an
+exact provider recipe selected by action ID and bound plan digest.
 
 See [Hook configuration assurance](hook-configuration-assurance.md).
 
@@ -166,6 +167,8 @@ and credential policy is distinct from the offline-first dashboard and integrati
 | Integration management | Hook configuration assurance | Host identity and validated external adapter data; admission, consent, grants and execution stay upstream |
 | Project census | Hook configuration assurance | Explicit project roots for bounded source discovery; no project trust is inferred |
 | Native hook configuration | Hook configuration assurance | Host-specific anti-corruption providers produce normalized sources, occurrences, diagnostics and gaps |
+| Hook configuration assurance | Hook remediation | Immutable audit and content-bound plan; discovery supplies evidence but never grants write authority |
+| Hook remediation | Native hook configuration | Exact provider recipe through backup-first transaction/receipt; no trust mutation or hook execution |
 | Native evidence | Evidence acquisition | Source-specific anti-corruption adapters |
 | Evidence acquisition | Observability | Versioned canonical events |
 | Evidence acquisition | Historical usage | Normalized transcript and provider evidence |
@@ -232,5 +235,7 @@ observed before the split was made explicit.
 - Managed companion surfaces stay downstream of Integration management. Their ability to read host
   history or inject recalled context does not make them hosts, evidence owners, or policy
   authorities; consent, content-free observation, and ownership-safe teardown remain upstream.
-- Hook configuration assurance is read-only. It never imports an OpenCode plugin, executes a hook,
-  fetches a remote adapter by default, changes trust, or treats a diagnostic as write authority.
+- Hook discovery and doctor are read-only. The sibling remediation port never imports an
+  OpenCode plugin, executes a hook, fetches a remote adapter by default, changes trust, or
+  treats a diagnostic as write authority; its only implemented recipe is exact Codex
+  `0.151.0` user-global timeout normalization.

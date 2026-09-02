@@ -1,7 +1,8 @@
 # ADR-0041 — Host-neutral hook configuration assurance
 
-- **Status:** Accepted; read-only implementation complete
+- **Status:** Accepted; read-only implementation complete; remediation extended by ADR-0042
 - **Date:** 2026-09-01
+- **Updated:** 2026-09-01
 - **Deciders:** agentic-kit maintainers
 - **Extends:** [ADR-0040](0040-codex-hook-audit-and-conservative-remediation.md)
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md),
@@ -10,6 +11,7 @@
   [ADR-0032](0032-model-lifecycle-intelligence.md)
 - **DDD:** [Hook configuration assurance](../ddd/hook-configuration-assurance.md)
 - **Evidence:** [Host-neutral follow-up](../audits/host-neutral-hooks-follow-up-2026-09-01.md)
+- **Extended by:** [ADR-0042](0042-transactional-hook-healing.md)
 
 ## Context
 
@@ -81,7 +83,7 @@ adding a new exact profile.
 - `upstream-required`: generated dependency behavior whose authoritative repair belongs
   in the producing project.
 
-The implemented command has no apply flag. A future writer must satisfy ADR-0040's
+The audit command has no apply flag. ADR-0042's separate writer satisfies ADR-0040's
 backup, preimage, rollback, receipt and idempotency contract. It may never programmatically
 approve or bypass host trust.
 
@@ -138,9 +140,13 @@ Implemented in this decision:
 - post-open inode/path verification for every bounded source read;
 - Claude optional-manifest plugin provenance and host-specific `SessionEnd` budget rules.
 
-Deferred behind a separate decision and explicit approval design:
+Implemented by the separate ADR-0042 approval design:
 
-- transactional apply/rollback;
+- transactional plan/apply/verify/undo for the exact Codex 0.151.0 global JSON recipe.
+
+Still deferred:
+
+- additional provider/project/generated-source remediation recipes;
 - host trust inspection or mutation;
 - JSONC normalization;
 - network retrieval of remote adapter manifests;

@@ -6,8 +6,10 @@ The Codex audit is now a host-neutral, read-only assurance capability. The imple
 supports Codex, Claude Code, OpenCode and declarative external host adapters without
 pretending those hosts share one hook format or one trust mechanism.
 
-No active hook behavior, trust decision, plugin cache generation or project configuration
-was changed. The new remediation output is a proposal only; the CLI has no apply flag.
+The host-neutral audit remains read-only. ADR-0042 adds a separate transactional writer,
+but its only executable recipe is exact Codex `0.151.0` direct global JSON
+`SessionEnd` timeout normalization. Claude, OpenCode, external adapters, generated
+projections, plugin caches, project configuration, and trust stay proposal-only.
 
 A live `--host all` run after implementation and adversarial remediation found 37 bounded sources and 100 physical
 occurrences: Codex 47, Claude Code 46, OpenCode 7 and no configured external adapter
@@ -51,7 +53,8 @@ evidence into a false green check.
   sources.
 - Cache edits, trust bypasses, unknown schemas, unsafe files and unproven ownership are
   prohibited.
-- The current implementation performs none of the proposed writes.
+- No action is automatic-eligible. The separate writer requires exact action/plan approval
+  and is not called by `ak sync`.
 
 ## Release and dependency maintenance
 
@@ -101,6 +104,18 @@ Codex parser, TOML parser and bounded reader at 96.79–100%. QE test generation
 prediction were not retried after the execution policy rejected transmitting nonpublic
 source/history to a service boundary.
 
+The transactional follow-up found and closed additional defects before commit: an exact
+Codex profile had been expressed as an optimistic patch range; unknown versions inherited
+older event/type allowlists instead of syntax-only parsing; structured argv boundaries
+could collide; duplicate provider proposals could reuse IDs; inline Claude plugin
+ownership lost generated-copy provenance; and backup failure before receipt assembly could
+enter rollback without a receipt action. Exact-profile, identity, provenance, tamper,
+backup, rollback and CLI compatibility fixtures now cover those paths.
+
+The reciprocal Claude-led architecture gate could not run because Claude Code was not
+authenticated. Ruflo architecture/provider/QE lanes and Codex review were completed, so
+the implemented recipe was narrowed rather than claiming full cross-host acceptance.
+
 ## Verification added
 
 Adversarial fixtures cover:
@@ -119,8 +134,15 @@ Adversarial fixtures cover:
 - deterministic read-only output across repeated runs.
 - source replacement between inspection and open;
 - provider-scoped version probes and adapter-config loading.
+- deterministic write-free healing plans and plan-integrity refusal;
+- exact action approval and non-interactive confirmation;
+- backup failure and verification-triggered rollback;
+- target symlink, receipt tamper and later-drift refusal;
+- exact bytes/mode undo and idempotent repeated audit/plan;
+- byte-compatible `ak hooks doctor --json` output.
 
-See [ADR-0041](../adr/0041-host-neutral-hook-configuration-assurance.md) and the
+See [ADR-0041](../adr/0041-host-neutral-hook-configuration-assurance.md),
+[ADR-0042](../adr/0042-transactional-hook-healing.md), and the
 [DDD boundary](../ddd/hook-configuration-assurance.md) for the permanent contracts. A
 sanitized [machine-readable audit receipt](host-neutral-hooks-report-2026-09-01.json)
 records the post-implementation run; the CLI emits the complete reusable inventory.

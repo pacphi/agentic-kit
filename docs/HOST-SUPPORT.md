@@ -26,6 +26,13 @@ Claude Code `2.1.222`, Codex CLI `0.146.0`, and OpenCode `1.18.x`. Host and
 upstream behavior changes quickly; open issues below are a risk snapshot, not a
 promise that an issue remains open forever.
 
+Hook assurance has a newer evidence cutoff of **2026-09-01**: exact profiles are
+Codex `0.151.0`, Claude Code `2.1.258`, and OpenCode `1.18.25`. Other versions fall
+back to syntax-only audit until their contracts are re-proven. The only writable
+recipe is exact Codex `0.151.0` user-global JSON `SessionEnd` timeout normalization;
+Claude, OpenCode, external adapters, generated/project sources, caches, and trust
+remain read-only. See [Hook assurance and healing](HOOKS.md).
+
 The stock OpenCode gateway acceptance test currently covers the stable compatibility
 window **`>=1.18.18 <1.19.0`**. This is a tested release-line window, not a claim
 that every future OpenCode release is compatible and not a target for `ak sync` to

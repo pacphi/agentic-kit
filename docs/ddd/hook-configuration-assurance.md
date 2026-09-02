@@ -2,7 +2,8 @@
 
 ## Purpose
 
-Answer four questions without running hook code or changing trust:
+Answer four questions without running hook code or changing trust, then permit a
+separate, explicit write model to apply only independently proven recipes:
 
 1. Which lifecycle behaviors can each host discover?
 2. Which exact source and owner produced every occurrence?
@@ -17,9 +18,10 @@ consent, capability grant or trust decision.
 
 ```text
 Project Census ────────┐
-Integration Management ├──> Hook Configuration Assurance ──> audit report / proposal
+Integration Management ├──> Hook Configuration Assurance ──> audit / healing plan
 Host binaries + files ─┘                 │
-                                        └──> no execution, no trust, no write
+                                        └──> Hook Remediation transaction port
+                                             (no execution or trust mutation)
 ```
 
 ## Aggregate and value objects
@@ -39,6 +41,16 @@ host set plus source digests and exact version facts.
 - `RemediationProposal`: target, expected source digest, authority class, rationale,
   behavior impact and trust impact.
 - `UpstreamConstraint`: dependency range, issue state, local strategy and sunset proof.
+
+`HookHealingPlan` is the immutable write-model input. Its digest binds the audit identity,
+exact runtime facts, public action content and classification. A provider compiler may
+produce candidate bytes in memory, but planning never creates transaction state.
+
+- `HookHealingAction`: exact action ID, provider recipe, canonical target/owner,
+  preimage/postimage, mode, impact, activation, verification and rollback.
+- `HookTransaction`: private backup-first journal for one explicitly selected plan.
+- `HookReceipt`: integrity-sealed record of action state, exact digests, backup references,
+  mode, verification and guarded undo.
 
 ## Provider contract
 
@@ -67,7 +79,12 @@ manifests, not imported implementation modules.
    diagnostic dimensions.
 8. Plugin caches and generated projections are never direct healing targets.
 9. Audit results never confer trust, consent, grants, reachability or health.
-10. The read-only wave has no mutation port.
+10. Mutation exists only through the ADR-0042 transaction port; provider discovery cannot
+    invoke it or grant itself authority.
+11. Every selected preimage is checked before transaction creation; every backup exists
+    and verifies before the first target write.
+12. Undo restores only while current bytes equal the recorded postimage, preserving later
+    user or generator drift.
 
 ## Host anti-corruption layers
 
@@ -96,8 +113,11 @@ Translates validated manifest lifecycle, execution and Agentic-QE provider subpr
 hooks. Content identity includes declared hook files. Admission, consent and grants stay
 owned by Integration Management.
 
-## Future remediation process
+## Remediation process
 
-A future command may add `plan -> apply -> verify -> undo` only through a separate
-mutation port with exact preimages, backups, atomic replacement, receipts and guarded
-rollback. The domain rejects trust bypasses and cache writes before the port is reached.
+ADR-0042 implements `plan -> apply -> verify -> undo` through a separate mutation port
+with exact preimages, verified backups, durable receipts, atomic replacement, repeated
+audits and guarded rollback. The domain rejects trust bypasses, cache writes, generated
+copies, project targets, unknown schemas and unproven ownership before the port is
+reached. The first executable recipe is limited to Codex `0.151.0` direct global JSON
+`SessionEnd` timeout normalization; all other current provider proposals remain read-only.
