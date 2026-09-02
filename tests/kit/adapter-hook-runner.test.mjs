@@ -20,6 +20,8 @@ test('happy path: an echo script runs and returns ok with captured stdout', asyn
   assert.equal(result.detail, null);
   assert.ok(result.stdout.includes('hello-hook'), result.stdout);
   assert.equal(result.outcome, 'success');
+  assert.equal(result.hostId, 'claude');
+  assert.equal(result.verb, 'discover');
   assert.equal(result.timedOut, false);
   assert.equal(result.timeoutMs, 30_000);
   assert.ok(Number.isInteger(result.durationMs) && result.durationMs >= 0);

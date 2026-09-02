@@ -89,11 +89,14 @@ function monotonicNowMs() {
  * that output exceeded the cap without retaining an attacker-controlled
  * unbounded count. Duration is likewise finite, integral, and capped. */
 function withReceipt(result, {
-  startedAtMs, effectiveTimeoutMs, stdoutCollector = null, stderrCollector = null,
+  startedAtMs, effectiveTimeoutMs, hostId, verb,
+  stdoutCollector = null, stderrCollector = null,
 }) {
   const rawDurationMs = Math.max(0, Math.ceil(monotonicNowMs() - startedAtMs));
   return {
     ...result,
+    hostId,
+    verb,
     timeoutMs: effectiveTimeoutMs,
     durationMs: Math.min(rawDurationMs, MAX_RECEIPT_DURATION_MS),
     durationTruncated: rawDurationMs > MAX_RECEIPT_DURATION_MS,
@@ -347,7 +350,8 @@ function buildAdapterCloseResult(code, signal, stdoutCollector, stderrCollector,
  * @param {{hook:{command:string[], timeoutMs?:number}, hostId:string,
  *   verb:string, timeoutMs?:number, env?:Record<string,string>, stdin?:string,
  *   cwd?:string, manifest?:object, integrity?:{hash:string}, baseDir?:string|null}} options
- * @returns {Promise<{ok:boolean, stdout:string, stdoutText:string, stderrText:string,
+ * @returns {Promise<{ok:boolean, hostId:string, verb:string,
+ *   stdout:string, stdoutText:string, stderrText:string,
  *   stdoutTruncated:boolean, stderrTruncated:boolean, stdoutBytes:number, stderrBytes:number,
  *   durationMs:number, durationTruncated:boolean, timeoutMs:number, timedOut:boolean,
  *   outcome:string, exitCode:number|null, detail:string|null}>}
@@ -365,13 +369,17 @@ export async function runAdapterHook({
   const childEnv = minimalEnv(env);
 
   const integrityFailure = verifyHookIntegrityOrFailure(manifest, integrity, baseDir, hostId, verb);
-  if (integrityFailure) return withReceipt(integrityFailure, { startedAtMs, effectiveTimeoutMs });
+  if (integrityFailure) return withReceipt(integrityFailure, {
+    startedAtMs, effectiveTimeoutMs, hostId, verb,
+  });
 
   const wantsStdin = typeof stdin === 'string';
   const spawned = spawnAdapterChild({
     argv0, args, childEnv, cwd, wantsStdin, hostId, verb,
   });
-  if (spawned.failure) return withReceipt(spawned.failure, { startedAtMs, effectiveTimeoutMs });
+  if (spawned.failure) return withReceipt(spawned.failure, {
+    startedAtMs, effectiveTimeoutMs, hostId, verb,
+  });
   const { child } = spawned;
 
   const stdoutCollector = boundedCollector(OUTPUT_CAP_BYTES);
@@ -388,7 +396,7 @@ export async function runAdapterHook({
       child, effectiveTimeoutMs, stdoutCollector, stderrCollector, closeResult, hostId, verb,
     });
     return withReceipt(result, {
-      startedAtMs, effectiveTimeoutMs, stdoutCollector, stderrCollector,
+      startedAtMs, effectiveTimeoutMs, hostId, verb, stdoutCollector, stderrCollector,
     });
   }
 
@@ -398,11 +406,13 @@ export async function runAdapterHook({
       ok: false, ...EMPTY_HOOK_RESULT, exitCode: null,
       outcome: 'spawn-failed', timedOut: false,
       detail: describeFailure(hostId, verb, spawnError),
-    }, { startedAtMs, effectiveTimeoutMs, stdoutCollector, stderrCollector });
+    }, {
+      startedAtMs, effectiveTimeoutMs, hostId, verb, stdoutCollector, stderrCollector,
+    });
   }
 
   return withReceipt(
     buildAdapterCloseResult(raced.code, raced.signal, stdoutCollector, stderrCollector, hostId, verb),
-    { startedAtMs, effectiveTimeoutMs, stdoutCollector, stderrCollector },
+    { startedAtMs, effectiveTimeoutMs, hostId, verb, stdoutCollector, stderrCollector },
   );
 }
