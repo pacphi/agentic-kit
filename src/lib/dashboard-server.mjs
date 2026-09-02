@@ -29,6 +29,7 @@
 //                      keyed by resolved project path keeps at most one
 //                      watcher per distinct project actually being watched.
 //   GET /api/usage    → the usage Aggregate MINUS sessions[] (ADR-0009)
+//   GET /api/hooks    → cached, sanitized hook configuration/runtime read model
 //   GET /api/sessions → the session list, filtered + paginated
 //   GET /api/session/:id → one transcript, secrets masked SERVER-side
 //   GET /api/system   → the machine-footprint payload (ADR-0025): the cheap
@@ -592,6 +593,51 @@ function lazyUsage() {
   };
 }
 
+const DASHBOARD_HOOK_HOSTS = new Set(['all', 'claude', 'codex', 'opencode', 'external']);
+const DEFAULT_HOOK_CACHE_MS = 30_000;
+
+/** Default Hook source: the same explicit, read-only audit used by
+ * `ak audit hooks`, loaded only when the Hooks view asks for it. Runtime
+ * receipts are empty until a caller injects a bounded receipt source; absence
+ * is rendered as unknown, never as a fabricated clean run. */
+async function collectDashboardHooks({ host }) {
+  const { collectHookAudit } = await import('../commands/audit.mjs');
+  return {
+    audit: collectHookAudit({
+      flags: { host: [host], project: [], 'all-projects': false },
+    }),
+    receipts: [],
+  };
+}
+
+/** Per-server Hook cache. One promise per host is both the single-flight slot
+ * and the only route to a cached sanitized payload. Failures clear the slot
+ * and are never cached. */
+function createHookDashboardReader({ hooks, cacheMs }) {
+  const provide = typeof hooks === 'function'
+    ? hooks : hooks ? async () => hooks : collectDashboardHooks;
+  const cache = new Map();
+  const inflight = new Map();
+  const ttlMs = clampInt(cacheMs, DEFAULT_HOOK_CACHE_MS, 1_000, 300_000);
+  return (host) => {
+    const cached = cache.get(host);
+    if (cached && Date.now() - cached.at < ttlMs) return Promise.resolve(cached.payload);
+    const active = inflight.get(host);
+    if (active) return active;
+    const pending = Promise.resolve().then(() => provide({ host })).then(async (raw) => {
+      const { buildHookDashboardReadModel } = await import('./hook-read-model.mjs');
+      const payload = buildHookDashboardReadModel({
+        audit: raw?.audit ?? null,
+        receipts: Array.isArray(raw?.receipts) ? raw.receipts : [],
+      });
+      cache.set(host, { at: Date.now(), payload });
+      return payload;
+    }).finally(() => inflight.delete(host));
+    inflight.set(host, pending);
+    return pending;
+  };
+}
+
 /** ?days=N → a sane window. Junk falls back to the 14-day default rather than
  *  reaching the indexer as NaN. */
 function clampDays(raw, fallback = 14) {
@@ -777,7 +823,8 @@ function lazyLive(liveOptions = {}) {
 /**
  * Start the dashboard HTTP server, bound to loopback only.
  * @param {{ port?: number, cwd?: string, fetchStatus?: () => Promise<any>, usage?: any,
- *           limits?: () => Promise<any>, live?: any, liveHeartbeatMs?: number,
+ *           limits?: () => Promise<any>, hooks?: any, hookCacheMs?: number,
+ *           live?: any, liveHeartbeatMs?: number,
  *           liveClientBuffer?: number, liveMaxClients?: number, liveOptions?: any,
  *           liveIdleMs?: number, transcripts?: any, transcriptOptions?: any,
  *           transcriptClientBuffer?: number, transcriptMaxClients?: number,
@@ -790,7 +837,8 @@ function lazyLive(liveOptions = {}) {
  * @returns {Promise<{ url: string, urlWithToken: string, port: number, token: string, close: () => Promise<void> }>}
  */
 export function startDashboard({
-  port = 7431, cwd = process.cwd(), fetchStatus, usage, limits, live,
+  port = 7431, cwd = process.cwd(), fetchStatus, usage, limits, hooks,
+  hookCacheMs = DEFAULT_HOOK_CACHE_MS, live,
   liveHeartbeatMs = 15_000, liveClientBuffer = 256, liveMaxClients = 32,
   liveOptions = {}, liveIdleMs = 30_000, transcripts, transcriptOptions = {},
   transcriptClientBuffer = 64, transcriptMaxClients = 16,
@@ -799,6 +847,7 @@ export function startDashboard({
 } = {}) {
   const provide = fetchStatus || shellOutStatus(cwd);
   const usageApi = usage || lazyUsage();
+  const getHooks = createHookDashboardReader({ hooks, cacheMs: hookCacheMs });
   // Cache-only and lazy: model discovery is exclusively owned by
   // `ak models refresh`; opening the dashboard never contacts a host/catalog.
   const provideModels = typeof models === 'function' ? models : models ? async () => models : async () => {
@@ -1489,6 +1538,23 @@ export function startDashboard({
       return;
     }
 
+    // Hook assurance is LAZY and read-only. The source audit only inspects
+    // configuration; buildHookDashboardReadModel then drops commands, paths,
+    // output and diagnostic prose before anything crosses the HTTP boundary.
+    async function handleHooks(req, res, query) {
+      const host = query.get('host') || 'all';
+      if (!DASHBOARD_HOOK_HOSTS.has(host)) {
+        sendJson(res, 400, { error: 'invalid hook host' });
+        return;
+      }
+      try {
+        sendJson(res, 200, await getHooks(host));
+      } catch (e) {
+        serverFault(res, '/api/hooks', e, 'hook audit unavailable');
+      }
+      return;
+    }
+
     // ── System / machine footprint (ADR-0025). Lazy, like Usage above. ──────
     //
     // DELIBERATE DIVERGENCE from publicLivePayload, documented in ADR-0025 §7
@@ -1614,6 +1680,7 @@ export function startDashboard({
       '/api/live/intelligence': handleLiveIntelligence,
       '/api/models': handleModels,
       '/api/usage': handleUsage,
+      '/api/hooks': handleHooks,
       '/api/limits': handleLimits,
       '/api/system': handleSystem,
       '/api/sessions': handleSessions,

@@ -3,6 +3,7 @@
 // override comment for why this directory isn't run through the node lib.
 import { VIEWS, authHeaders, esc, setTab } from './bootstrap.mjs';
 import { mliDetail, mliRouteRows, renderModelFacets, renderModelRouteSort, renderModelSort } from './model-lifecycle.mjs';
+import { HOOKS, renderContext, renderHooks } from './usage-context-hooks.mjs';
 import { MODEL_PAGE, USAGE, fmtNum, loadLimits, loadModelInventory, loadModelLifecycle, loadUsage, modelRows, renderFindings, renderPrompts, renderScore, renderSessions, renderSourceHealth, renderTranscript, sessionRow, setUsageView } from './usage.mjs';
 
   export function renderUsage(){
@@ -16,6 +17,8 @@ import { MODEL_PAGE, USAGE, fmtNum, loadLimits, loadModelInventory, loadModelLif
     renderScore(USAGE);
     renderFindings(USAGE);
     renderPrompts(USAGE);
+    renderContext(USAGE.context||null);
+    renderHooks(HOOKS);
     renderSessions(USAGE);
     if(usageView==="transcript")renderTranscript();
   }
@@ -161,4 +164,3 @@ import { MODEL_PAGE, USAGE, fmtNum, loadLimits, loadModelInventory, loadModelLif
             ||'<div class="smore">no sessions in this category.</div>')+"</div></div>";
       }).catch(function(){});
   }
-

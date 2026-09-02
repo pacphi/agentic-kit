@@ -86,7 +86,7 @@ import { loadUsage } from './usage.mjs';
   var OVERVIEW_VIEWS=["summary","hosts","providers","runtime","intel"];
   var SYSTEM_VIEWS=["summary","advisory","sessions","storage","runtime","catalog","projects"];
   export var ABOUT_SECTIONS=["hosts","engine","quality","kit","configured"];
-  export var VIEWS=["score","limits","findings","prompts","models","sessions","transcript"];
+  export var VIEWS=["score","limits","findings","prompts","context","hooks","models","sessions","transcript"];
   var CAT = {}; // PLACEHOLDER:CAT_JS
   export function catOf(s) { return CAT[s] || 'runtime'; } // PLACEHOLDER:catOf
 
@@ -292,4 +292,3 @@ import { loadUsage } from './usage.mjs';
     var cards=el.querySelectorAll(".card");
     for(var i=0;i<cards.length;i++){cards[i].style.animationDelay=(i*40)+"ms";}
   }
-

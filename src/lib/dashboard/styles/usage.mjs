@@ -782,4 +782,54 @@ export const USAGE_CSS = `
   text-transform:uppercase; color:var(--ink-dim);
 }
 
+/* Context budget evidence — three fixed host cards plus a bounded attention
+   list. Unknown uses an empty track and visible text; no CSS width suggests a
+   measurement where the DOM deliberately omits aria-valuenow. */
+.ctx-policy{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px}
+.ctx-policy span{border:1px solid var(--line); border-radius:999px; padding:5px 10px; color:var(--ink-2); background:var(--panel-2); font-size:11px}
+.ctx-policy b{color:var(--ink); font-weight:600}
+.ctx-summary{margin:0 0 12px; color:var(--ink-2); font-size:12.5px}
+.ctx-summary p{margin:0}
+.ctx-grid{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:11px; margin-bottom:12px}
+.ctx-card{border:1px solid var(--line); border-radius:var(--r-sm); padding:13px 14px; background:var(--panel)}
+.ctx-card[data-state="partial"]{border-color:color-mix(in srgb,var(--warn) 45%,var(--line))}
+.ctx-card[data-state="not-recorded"],.ctx-card[data-state="not-observed"]{opacity:.78}
+.ctx-card-head{display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px}
+.ctx-card-head h2{margin:0; font-size:14px; text-transform:capitalize}
+.ctx-state{font-size:10px; color:var(--ink-dim); border:1px solid var(--line); border-radius:999px; padding:2px 7px}
+.ctx-meter{display:grid; grid-template-columns:1fr auto; gap:9px; align-items:center}
+.ctx-meter-track{height:9px; overflow:hidden; border-radius:999px; background:var(--panel-2)}
+.ctx-meter-track i{display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg,var(--ok),var(--warn),var(--fail))}
+.ctx-meter-value{min-width:52px; text-align:right; color:var(--ink-2); font-size:11px}
+.ctx-facts{display:grid; grid-template-columns:1fr 1fr; gap:7px 11px; margin:12px 0 0}
+.ctx-facts div{min-width:0}
+.ctx-facts dt{font-size:9px; color:var(--ink-dim); text-transform:uppercase; letter-spacing:.05em}
+.ctx-facts dd{margin:2px 0 0; font-family:var(--mono); font-size:11.5px; color:var(--ink)}
+.ctx-caveat{margin:11px 0 0; padding-top:9px; border-top:1px solid var(--line); color:var(--ink-dim); font-size:10.5px; line-height:1.45}
+.ctx-attention{max-height:330px; overflow:auto; scrollbar-width:thin}
+.ctx-att-row{display:grid; grid-template-columns:96px 1fr auto; gap:10px; align-items:center; padding:9px 0; border-bottom:1px solid var(--line); color:var(--ink-2); font-size:11.5px}
+.ctx-att-row:last-child{border-bottom:0}
+.ctx-att-state{color:var(--warn); text-transform:uppercase; font-size:9px; letter-spacing:.06em}
+
+/* Hooks keeps configuration and runtime evidence in separate blocks. The
+   read model is already bounded; these containers bound visual growth too. */
+.hook-grid{display:grid; grid-template-columns:1fr 1fr; gap:11px}
+.hook-kpis,.hook-actions{display:grid; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); gap:8px}
+.hook-actions{margin-bottom:12px}
+.hook-kpi{display:grid; gap:2px; padding:10px; border:1px solid var(--line); border-radius:var(--r-sm); background:var(--panel-2)}
+.hook-kpi span{font-size:9.5px; color:var(--ink-dim); text-transform:uppercase; letter-spacing:.05em}
+.hook-kpi b{font-size:18px; color:var(--ink)}
+.hook-kpi small{font-size:10px; color:var(--ink-dim)}
+.hook-row{display:grid; grid-template-columns:74px 1fr auto; gap:9px; padding:8px 0; border-bottom:1px solid var(--line); align-items:center; font-size:11.5px; color:var(--ink-2)}
+.hook-row:last-child{border-bottom:0}
+.hook-sev{font-size:9px; color:var(--warn); text-transform:uppercase; letter-spacing:.06em}
+.hook-runtime-note{margin-top:10px; color:var(--ink-2); font-size:11.5px}
+#u-hook-diagnostics{max-height:360px; overflow:auto; scrollbar-width:thin}
+
+@media(max-width:720px){
+  .ctx-grid,.hook-grid{grid-template-columns:1fr}
+  .ctx-att-row,.hook-row{grid-template-columns:1fr; gap:4px}
+  .ctx-att-row .mono,.hook-row .mono{text-align:left}
+}
+
 `;

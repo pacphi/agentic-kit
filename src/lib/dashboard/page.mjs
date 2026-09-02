@@ -156,10 +156,12 @@ export function renderPage({ name, version }) {
     </div>
     <div class="secondary-group" id="secondary-usage" hidden>
       <div class="seg subseg" role="tablist" aria-label="Usage views" id="usage-seg">
-        <button class="seg-btn" role="tab" id="usage-tab-score" data-view="score" aria-selected="true" aria-controls="v-score" type="button">Scorecard</button>
+        <button class="seg-btn" role="tab" id="usage-tab-score" data-view="score" aria-selected="true" aria-controls="v-score" type="button">Score</button>
         <button class="seg-btn" role="tab" id="usage-tab-limits" data-view="limits" aria-selected="false" aria-controls="v-limits" tabindex="-1" type="button">Limits</button>
         <button class="seg-btn" role="tab" id="usage-tab-findings" data-view="findings" aria-selected="false" aria-controls="v-findings" tabindex="-1" type="button">Findings<span class="segbadge" id="u-findings-n" hidden></span></button>
         <button class="seg-btn" role="tab" id="usage-tab-prompts" data-view="prompts" aria-selected="false" aria-controls="v-prompts" tabindex="-1" type="button">Prompts</button>
+        <button class="seg-btn" role="tab" id="usage-tab-context" data-view="context" aria-selected="false" aria-controls="v-context" tabindex="-1" type="button">Context</button>
+        <button class="seg-btn" role="tab" id="usage-tab-hooks" data-view="hooks" aria-selected="false" aria-controls="v-hooks" tabindex="-1" type="button">Hooks</button>
         <button class="seg-btn" role="tab" id="usage-tab-models" data-view="models" aria-selected="false" aria-controls="v-models" tabindex="-1" type="button">Models<span class="segbadge" id="mli-attention-n" hidden></span></button>
         <button class="seg-btn" role="tab" id="usage-tab-sessions" data-view="sessions" aria-selected="false" aria-controls="v-sessions" tabindex="-1" type="button">Sessions<span class="mono seg-n" id="u-sessions-n"></span></button>
         <button class="seg-btn" role="tab" id="usage-tab-transcript" data-view="transcript" aria-selected="false" aria-controls="v-transcript" tabindex="-1" type="button">Transcript</button>
@@ -546,6 +548,47 @@ export function renderPage({ name, version }) {
           <span class="n mono" id="u-pr-hosts-note"></span></div>
         <div id="u-pr-hosts"></div>
       </section>
+    </section>
+
+    <section class="view" id="v-context" role="tabpanel" aria-labelledby="usage-tab-context" hidden>
+      <div class="note"><span class="i">&#8505;</span><span><b>Runtime-observed transcript snapshots.</b>
+        Context pressure is shown only when a host recorded prompt input and its context window together.
+        Partial and not-recorded states stay explicit; published catalogue maxima are never substituted for missing runtime evidence.
+        This projection keeps counts and bounded distributions only &mdash; no prompt or transcript text.</span></div>
+      <div class="ctx-policy" id="u-ctx-policy" aria-label="Context budget policy"></div>
+      <div class="ctx-summary" id="u-ctx-summary" role="status" aria-live="polite"></div>
+      <div class="ctx-grid" id="u-ctx-hosts"></div>
+      <section class="strip">
+        <div class="sh"><h2>Sessions needing attention</h2><span class="n mono">bounded to 20 &middot; privacy-safe identifiers</span></div>
+        <div class="ctx-attention" id="u-ctx-attention"></div>
+      </section>
+      <div class="foot">evidence: runtime-observed input/window pairs from retained local session telemetry &middot; policy: agentic-kit context budget v1</div>
+    </section>
+
+    <section class="view" id="v-hooks" role="tabpanel" aria-labelledby="usage-tab-hooks" aria-busy="false" hidden>
+      <div class="sr-only" id="u-hook-status" role="status" aria-live="polite" aria-atomic="true"></div>
+      <div class="note"><span class="i">&#8505;</span><span><b>Read-only configuration audit.</b>
+        Opening this view inspects configured hooks but never executes, edits, heals, enables, or disables one.
+        Commands, source paths, hook output, and diagnostic prose are removed server-side before delivery.</span></div>
+      <div class="hook-grid">
+        <section class="strip">
+          <div class="sh"><h2>Configuration evidence</h2><span class="n mono">static audit &middot; host=all</span></div>
+          <div id="u-hook-config"></div>
+        </section>
+        <section class="strip">
+          <div class="sh"><h2>Stop configuration</h2><span class="n mono">definition diagnostics only</span></div>
+          <div id="u-hook-stop"></div>
+        </section>
+      </div>
+      <section class="strip">
+        <div class="sh"><h2>Runtime outcomes</h2><span class="n mono">bounded execution receipts &middot; separate from configuration</span></div>
+        <div id="u-hook-runtime"></div>
+      </section>
+      <section class="strip">
+        <div class="sh"><h2>Diagnostics &amp; ownership</h2><span class="n mono">sanitized codes &middot; remediation authority</span></div>
+        <div id="u-hook-diagnostics"></div>
+      </section>
+      <div class="foot">evidence: read-only normalized hook audit plus any bounded runtime receipts available to this process</div>
     </section>
 
     <section class="view" id="v-sessions" role="tabpanel" aria-labelledby="usage-tab-sessions" hidden>

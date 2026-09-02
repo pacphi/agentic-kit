@@ -118,6 +118,7 @@ let usagePromptsSrc = readSplit('usage-prompts.mjs');
 usagePromptsSrc = inject(usagePromptsSrc, RHYTHM_ESC,
   '// esc: the bundle\'s single injected groups.mjs escaper (client.mjs strips\n'
   + "// this file's on-disk copy — see RHYTHM_ESC there).");
+const usageContextHooksSrc = readSplit('usage-context-hooks.mjs');
 const usageSrc = readSplit('usage.mjs');
 const modelLifecycleSrc = readSplit('model-lifecycle.mjs');
 const usageOrchestratorsSrc = readSplit('usage-orchestrators.mjs');
@@ -132,5 +133,5 @@ const bootSrc = readSplit('boot.mjs');
 // sequence) running in the same relative order it always has.
 export const JS = `
 (function(){
-${bootstrapSrc}${overviewSrc}${intelligenceSrc}${pollSrc}${usageRhythmSrc}${usagePromptsSrc}${usageSrc}${modelLifecycleSrc}${usageOrchestratorsSrc}${aboutSrc}${systemReadoutSrc}${systemProjectsSrc}${bootSrc}})();
+${bootstrapSrc}${overviewSrc}${intelligenceSrc}${pollSrc}${usageRhythmSrc}${usagePromptsSrc}${usageContextHooksSrc}${usageSrc}${modelLifecycleSrc}${usageOrchestratorsSrc}${aboutSrc}${systemReadoutSrc}${systemProjectsSrc}${bootSrc}})();
 `;

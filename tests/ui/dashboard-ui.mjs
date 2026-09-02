@@ -267,6 +267,8 @@ const USAGE_VIEWS = [
   ['limits', '#v-limits'],
   ['findings', '#v-findings'],
   ['prompts', '#v-prompts'],
+  ['context', '#v-context'],
+  ['hooks', '#v-hooks'],
   ['models', '#v-models'],
   ['sessions', '#v-sessions'],
   ['transcript', '#v-transcript'],
@@ -320,6 +322,32 @@ const LIMITS_STUB = async () => ({
     ],
     resetCredits: { availableCount: 2, credits: [{ status: 'available', title: 'Full reset', expiresAt: null }] },
   },
+});
+
+// /api/hooks stub: raw audit + bounded receipts. Dashboard Delivery must run
+// this through buildHookDashboardReadModel before the browser sees it. The
+// sentinel path/prose makes accidental raw forwarding visible.
+const HOOKS_SECRET = '/Users/private/project/.claude/settings.json::TOKEN=ui-secret';
+const HOOKS_STUB = async () => ({
+  audit: {
+    reports: {
+      codex: {
+        summary: { hookOccurrences: 3, uniqueBehaviors: 2, configurationIssues: 1 },
+        records: [{
+          event: 'Stop', sourcePath: HOOKS_SECRET, command: HOOKS_SECRET,
+          diagnostics: [{
+            code: 'AQE_STOP_UNSUPPORTED_FLAG', severity: 'warning', category: 'upstream',
+            message: HOOKS_SECRET,
+          }],
+        }],
+        plan: [{ classification: 'upstream-required', target: 'agentic-qe', reason: HOOKS_SECRET }],
+      },
+    },
+  },
+  receipts: [{
+    hostId: 'codex', verb: 'Stop', outcome: 'nonzero-exit', durationMs: 42,
+    command: HOOKS_SECRET, stdout: HOOKS_SECRET, stderr: HOOKS_SECRET,
+  }],
 });
 
 // /api/status stub. Status is stubbed so the panel never shells out or hits the
@@ -885,6 +913,7 @@ async function main() {
     port: 0,
     fetchStatus: STATUS_STUB,
     usage,
+    hooks: HOOKS_STUB,
     limits: LIMITS_STUB,
     live: LIVE_STUB,
     transcripts: TRANSCRIPT_STUB,
@@ -909,6 +938,7 @@ async function main() {
   const consoleErrors = [];
   const failedRequests = [];
   const modelRequests = [];
+  const hookRequests = [];
   // Every /api/limits call, with its window. Leaving Prompts resets a 365-day
   // selection, and the Limits loader must not have already fetched at the old
   // window — two in-flight requests for different spans would let a late
@@ -932,6 +962,7 @@ async function main() {
   page.on('request', (r) => {
     const u = r.url();
     if (/\/api\/models(?:\?|$)/.test(u)) modelRequests.push(u);
+    if (/\/api\/hooks(?:\?|$)/.test(u)) hookRequests.push(u);
     if (/\/api\/limits(?:\?|$)/.test(u)) limitsRequests.push(u);
     if (u.startsWith(ORIGIN) || /^(data|blob|about|chrome-extension):/.test(u)) return;
     offOriginRequests.push(`${r.resourceType()} ${u}`);
@@ -2231,14 +2262,16 @@ async function main() {
     await page.waitForTimeout(800);
     check('model inventory stays network-lazy until its tab opens', modelRequests.length === 0,
       `Models made ${modelRequests.length} request(s) before its tab opened: ${modelRequests.join(', ')}`);
+    check('hook audit stays network-lazy until its tab opens', hookRequests.length === 0,
+      `Hooks made ${hookRequests.length} request(s) before its tab opened: ${hookRequests.join(', ')}`);
     const usageSubmenu = await page.evaluate(() => [...document.querySelectorAll('#usage-seg [data-view]')]
       .map((button) => button.dataset.view));
     // Prompts sits between Findings and Sessions (spec §3 rail placement), so
     // the shipped order gained an entry. Models-before-Sessions — the ordering
     // decision this check was written to defend — is unchanged and still
     // asserted, alongside the full order so a future insertion is deliberate.
-    check('Usage submenu puts Prompts after Findings, and Models before Sessions',
-      JSON.stringify(usageSubmenu) === JSON.stringify(['score', 'limits', 'findings', 'prompts', 'models', 'sessions', 'transcript']),
+    check('Usage submenu puts Context and Hooks between Prompts and Models',
+      JSON.stringify(usageSubmenu) === JSON.stringify(['score', 'limits', 'findings', 'prompts', 'context', 'hooks', 'models', 'sessions', 'transcript']),
       `Usage submenu was ${JSON.stringify(usageSubmenu)}`);
     const modelPanelOwnership = await page.evaluate(() => [
       '#mli-observed-panel', '.mli-routes-panel', '#mli-catalog-explorer', '#mli-history', '#mli-consumers', '#mli-impact',
@@ -2284,6 +2317,44 @@ async function main() {
           `labels were ${JSON.stringify(rows.labels)}`);
         check('limits meters all start at the same x',
           rows.barLefts.length === 1, `bar left edges were ${JSON.stringify(rows.barLefts)}`);
+      }
+      if (view === 'context') {
+        const contextView = await page.evaluate(() => ({
+          policy: document.getElementById('u-ctx-policy')?.textContent,
+          states: [...document.querySelectorAll('#u-ctx-hosts .ctx-state')].map((node) => node.textContent),
+          meters: [...document.querySelectorAll('#u-ctx-hosts [role="meter"]')].map((node) => ({
+            text: node.textContent.trim(), now: node.getAttribute('aria-valuenow'),
+            min: node.getAttribute('aria-valuemin'), max: node.getAttribute('aria-valuemax'),
+          })),
+        }));
+        check('Context shows the canonical 5/7/10, 60/70/75, and 25 percent policy',
+          /5%.*7%.*10%/.test(contextView.policy) && /60%.*70%.*75%/.test(contextView.policy)
+            && /25%/.test(contextView.policy),
+          `Context policy was ${JSON.stringify(contextView.policy)}`);
+        check('Context exposes one evidence state and one semantic meter per supported host',
+          contextView.states.length === 3 && contextView.meters.length === 3,
+          `Context evidence was ${JSON.stringify(contextView)}`);
+        check('unknown Context meters omit aria-valuenow while observed meters include it',
+          contextView.meters.every((meter) => meter.min === '0' && meter.max === '100'
+            && (/unknown/i.test(meter.text) ? meter.now === null : meter.now !== null)),
+          `Context meters were ${JSON.stringify(contextView.meters)}`);
+      }
+      if (view === 'hooks') {
+        const hookView = await page.evaluate(() => ({
+          text: document.getElementById('v-hooks')?.textContent,
+          stopParent: document.getElementById('u-hook-stop')?.closest('.strip')?.querySelector('h2')?.textContent,
+          runtimeParent: document.getElementById('u-hook-runtime')?.closest('.strip')?.querySelector('h2')?.textContent,
+          busy: document.getElementById('v-hooks')?.getAttribute('aria-busy'),
+        }));
+        check('Hooks fetches exactly once when first opened and settles its live status',
+          hookRequests.length === 1 && hookView.busy === 'false',
+          `Hook requests/state were ${JSON.stringify({ hookRequests, hookView })}`);
+        check('Hooks keeps Stop configuration separate from runtime outcomes',
+          hookView.stopParent === 'Stop configuration' && hookView.runtimeParent === 'Runtime outcomes'
+            && /AQE_STOP_UNSUPPORTED_FLAG/.test(hookView.text) && /Stop runtime receipts/.test(hookView.text),
+          `Hooks content was ${JSON.stringify(hookView)}`);
+        check('Hooks never renders raw commands, paths, output, or diagnostic prose',
+          !hookView.text.includes(HOOKS_SECRET), 'sanitized Hook delivery leaked its sentinel secret');
       }
       if (view !== 'models') {
         const modelBoundary = await page.evaluate(() => {
@@ -2694,10 +2765,8 @@ async function main() {
       horizontal.scroll > horizontal.client && horizontal.left > 0,
       `table scroll state was ${JSON.stringify(horizontal)}`);
     await page.setViewportSize({ width: 1440, height: 900 });
-    // Arrow-key navigation walks the rail in its rendered order, so inserting
-    // Prompts between Findings and Models moved Models one press further out.
-    // Both hops are asserted: the new neighbour, and that Models is still
-    // reachable by the keyboard — the property this check was defending.
+    // Arrow-key navigation walks the rail in rendered order. Every newly
+    // inserted neighbour is asserted before Models remains reachable.
     await page.click('#usage-tab-findings');
     await page.focus('#usage-tab-findings');
     await page.keyboard.press('ArrowRight');
@@ -2706,10 +2775,20 @@ async function main() {
         && await page.evaluate(() => document.activeElement?.id) === 'usage-tab-prompts',
       'Prompts tab did not receive selection and focus after ArrowRight');
     await page.keyboard.press('ArrowRight');
-    check('usage/models follows Prompts in arrow-key tab navigation',
+    check('usage/context follows Prompts in arrow-key tab navigation',
+      await page.getAttribute('#usage-tab-context', 'aria-selected') === 'true'
+        && await page.evaluate(() => document.activeElement?.id) === 'usage-tab-context',
+      'Context tab did not receive selection and focus');
+    await page.keyboard.press('ArrowRight');
+    check('usage/hooks follows Context in arrow-key tab navigation',
+      await page.getAttribute('#usage-tab-hooks', 'aria-selected') === 'true'
+        && await page.evaluate(() => document.activeElement?.id) === 'usage-tab-hooks',
+      'Hooks tab did not receive selection and focus');
+    await page.keyboard.press('ArrowRight');
+    check('usage/models follows Hooks in arrow-key tab navigation',
       await page.getAttribute('#usage-tab-models', 'aria-selected') === 'true'
         && await page.evaluate(() => document.activeElement?.id) === 'usage-tab-models',
-      'Models tab did not receive selection and focus after a second ArrowRight');
+      'Models tab did not receive selection and focus');
 
     // ── the whole-history chip, which only one view offers ──
     //
