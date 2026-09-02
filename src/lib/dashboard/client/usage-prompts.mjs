@@ -348,7 +348,7 @@ export function patternsPanel(p) {
   }
   var rows = clusters.slice(0, 25).map(function (c) {
     return '<tr><th scope="row">' + patternLabel(c.label) + '</th>'
-      + '<td>' + esc(c.class || 'unknown') + '</td>'
+      + '<td>' + esc(c.intent || (c.class === 'question' ? 'Question' : 'Unclassified')) + '</td>'
       + '<td class="tnum">' + esc(num(c.count)) + '</td>'
       + '<td class="tnum">' + esc(num(c.sessions)) + '</td>'
       + '<td class="tnum">' + esc(num(c.days)) + '</td>'
@@ -357,7 +357,7 @@ export function patternsPanel(p) {
   return '<p class="pr-pattern-summary">' + esc(summary) + '</p>'
     + '<div class="pr-pattern-wrap" role="region" aria-label="Recurring prompt patterns" tabindex="0">'
     + '<table class="pr-pattern-table"><caption class="sr-only">Deterministic recurring prompt clusters.</caption>'
-    + '<thead><tr><th scope="col">Pattern</th><th scope="col">Class</th><th scope="col">Times typed</th>'
+    + '<thead><tr><th scope="col">Pattern</th><th scope="col">Intent</th><th scope="col">Times typed</th>'
     + '<th scope="col">Sessions</th><th scope="col">Days seen</th><th scope="col">Hosts</th></tr></thead>'
     + '<tbody>' + rows + '</tbody></table></div>'
     + (clusters.length > 25 ? '<p class="pr-caveat">Showing 25 of ' + esc(num(clusters.length))
@@ -424,8 +424,8 @@ function hostRow(host, row, p, maxP90) {
 
 /**
  * A plain-language READ of the host asymmetry (§2), replacing the opaque
- * "windows are unequal" caveat — that unequal-histories nuance moves into the
- * panel's `?` tooltip (page.mjs) instead. Compares the two most-active hosts on
+ * "windows are unequal" caveat — the persistent panel copy in page.mjs carries
+ * that interpretation boundary. Compares the two most-active hosts on
  * the two figures the panel already shows: how often each is tapped, and how
  * long its prompts run. States ONLY a comparison both sides actually carry, and
  * says nothing when there is no asymmetry to read (a share tie, one host, or a

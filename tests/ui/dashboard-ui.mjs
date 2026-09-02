@@ -31,6 +31,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
+import { createHash } from 'node:crypto';
 import { chromium } from 'playwright';
 import { startDashboard } from '../../src/lib/dashboard-server.mjs';
 import { readIndex, readSession, maskSecrets } from '../../src/lib/usage-index.mjs';
@@ -327,20 +328,29 @@ const LIMITS_STUB = async () => ({
 // /api/hooks stub: raw audit + bounded receipts. Dashboard Delivery must run
 // this through buildHookDashboardReadModel before the browser sees it. The
 // sentinel path/prose makes accidental raw forwarding visible.
-const HOOKS_SECRET = '/Users/private/project/.claude/settings.json::TOKEN=ui-secret';
-const HOOKS_STUB = async () => ({
+const HOOKS_SECRET = 'TOKEN=ui-secret-value';
+const hooksStub = ({ file, digest }) => async () => ({
   audit: {
+    auditId: 'ui-hook-audit', mode: 'read-only', hosts: ['codex'], runtimeVersions: { codex: 'test' },
     reports: {
       codex: {
-        summary: { hookOccurrences: 3, uniqueBehaviors: 2, configurationIssues: 1 },
+        hostSchema: { confidence: 'syntax-only' },
+        sources: [{ file, status: 'valid', digest }],
+        summary: { sources: 1, invalidSources: 0, hookOccurrences: 1, uniqueBehaviors: 1, configurationIssues: 0 },
         records: [{
-          event: 'Stop', sourcePath: HOOKS_SECRET, command: HOOKS_SECRET,
+          occurrenceId: 'ui-hook-occurrence', behaviorFingerprint: 'ui-hook-behavior', host: 'codex',
+          event: 'Stop', matcher: '', type: 'command', indices: { group: 0, hook: 0 }, handler: { async: false },
+          source: { file, baseDir: path.dirname(file), digest, sourceKind: 'project', authority: 'project-owned', generatedStatus: 'direct', owner: 'project-owner' },
+          command: { normalized: 'TOKEN=<redacted> node stop.cjs', redacted: true },
+          timeout: { declared: 5, effective: 3, units: 'seconds', status: 'clamped' },
+          sideEffects: ['state-write-possible'], selected: true,
           diagnostics: [{
-            code: 'AQE_STOP_UNSUPPORTED_FLAG', severity: 'warning', category: 'upstream',
+            code: 'aqe-npx-hot-path-fallback', severity: 'warning', category: 'reliability',
             message: HOOKS_SECRET,
           }],
         }],
         plan: [{ classification: 'upstream-required', target: 'agentic-qe', reason: HOOKS_SECRET }],
+        coverage: { status: 'partial', gaps: ['runtime trust not observed'] },
       },
     },
   },
@@ -901,8 +911,30 @@ async function main() {
   // default run is deterministic AND cannot touch the user's live index cache.
   const roots = REAL ? undefined : extendedCorpus();
   const cachePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ak-ui-')), 'usage-index.json');
+  const hookRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-ui-hooks-'));
+  const hookSourceFile = path.join(hookRoot, 'settings.json');
+  fs.writeFileSync(hookSourceFile, JSON.stringify({
+    hooks: { Stop: [{ hooks: [{ type: 'command', command: `${HOOKS_SECRET} node stop.cjs`, timeout: 5 }] }] },
+  }));
+  const hookSourceDigest = createHash('sha256').update(fs.readFileSync(hookSourceFile)).digest('hex');
   const usage = {
-    readIndex: (o = {}) => readIndex({ ...o, ...(roots ? { roots } : {}), cachePath }),
+    readIndex: async (o = {}) => {
+      const value = await readIndex({ ...o, ...(roots ? { roots } : {}), cachePath });
+      if (!REAL && value.context) value.context.attention = [{
+        id: 'aaaa1111', sessionRef: 'claude-111111111111', host: 'claude', project: 'proj',
+        title: 'Context audit', start: '2026-07-24T10:00:00.000Z', state: 'handoff',
+        peakBps: 9860, peakInputTokens: 255000, windowTokens: 258000,
+      }, {
+        id: 'bbbb2222', sessionRef: 'claude-222222222222', host: 'claude', project: 'proj',
+        title: 'Context audit', start: '2026-07-24T11:00:00.000Z', state: 'compact',
+        peakBps: 7200, peakInputTokens: 180000, windowTokens: 250000,
+      }, {
+        id: 'dddd4444', sessionRef: 'codex-444444444444', host: 'codex', project: 'other',
+        title: 'Release review', start: '2026-07-24T09:00:00.000Z', state: 'warn',
+        peakBps: 6400, peakInputTokens: 160000, windowTokens: 250000,
+      }];
+      return value;
+    },
     readSession: (id, o = {}) => readSession(id, { ...o, ...(roots ? { roots } : {}), cachePath }),
     maskSecrets,
   };
@@ -913,7 +945,7 @@ async function main() {
     port: 0,
     fetchStatus: STATUS_STUB,
     usage,
-    hooks: HOOKS_STUB,
+    hooks: hooksStub({ file: hookSourceFile, digest: hookSourceDigest }),
     limits: LIMITS_STUB,
     live: LIVE_STUB,
     transcripts: TRANSCRIPT_STUB,
@@ -2318,6 +2350,21 @@ async function main() {
         check('limits meters all start at the same x',
           rows.barLefts.length === 1, `bar left edges were ${JSON.stringify(rows.barLefts)}`);
       }
+      if (view === 'prompts') {
+        const hostHelp = await page.evaluate(() => {
+          const copy = document.getElementById('u-pr-hosts-copy');
+          return {
+            text: copy?.textContent?.replace(/\s+/g, ' ').trim(),
+            visible: !!copy && copy.getClientRects().length > 0,
+            tag: copy?.tagName, tabIndex: copy?.getAttribute('tabindex'),
+            iconCount: document.querySelectorAll('.pr-infodot,.pr-tip').length,
+          };
+        });
+        check('Host interplay uses visible explanatory copy instead of icon-only help',
+          hostHelp.visible && hostHelp.tag === 'P' && hostHelp.tabIndex === null && hostHelp.iconCount === 0
+            && /Tap share.*p90 length.*role openers.*Compare each host with itself/i.test(hostHelp.text),
+          `Host interplay help was ${JSON.stringify(hostHelp)}`);
+      }
       if (view === 'context') {
         const contextView = await page.evaluate(() => ({
           policy: document.getElementById('u-ctx-policy')?.textContent,
@@ -2326,6 +2373,10 @@ async function main() {
             text: node.textContent.trim(), now: node.getAttribute('aria-valuenow'),
             min: node.getAttribute('aria-valuemin'), max: node.getAttribute('aria-valuemax'),
           })),
+          groups: [...document.querySelectorAll('#u-ctx-attention details')].map((node) => ({
+            summary: node.querySelector('summary')?.textContent?.trim(), open: node.open,
+          })),
+          headers: [...document.querySelectorAll('#u-ctx-attention thead th')].map((node) => node.textContent.trim()),
         }));
         check('Context shows the canonical 5/7/10, 60/70/75, and 25 percent policy',
           /5%.*7%.*10%/.test(contextView.policy) && /60%.*70%.*75%/.test(contextView.policy)
@@ -2338,23 +2389,77 @@ async function main() {
           contextView.meters.every((meter) => meter.min === '0' && meter.max === '100'
             && (/unknown/i.test(meter.text) ? meter.now === null : meter.now !== null)),
           `Context meters were ${JSON.stringify(contextView.meters)}`);
+        check('Context groups repeated project/conversation occurrences and starts collapsed',
+          contextView.groups.length === 2 && contextView.groups[0].summary.includes('proj · Context audit')
+            && contextView.groups[0].summary.includes('2 sessions shown')
+            && contextView.groups.every((group) => group.open === false),
+          `Context groups were ${JSON.stringify(contextView.groups)}`);
+        check('Context measurements sit under explicit semantic column headers',
+          JSON.stringify(contextView.headers.slice(0, 7)) === JSON.stringify([
+            'Session', 'Host', 'Recommended action', 'Peak pressure', 'Peak input', 'Context window', 'Started',
+          ]), `Context headers were ${JSON.stringify(contextView.headers)}`);
+        await page.locator('#u-ctx-attention details').first().locator('summary').click();
+        const contextRows = await page.evaluate(() => ({
+          rows: [...document.querySelectorAll('#u-ctx-attention details:first-child tbody tr')].map((row) =>
+            [...row.children].map((cell) => cell.textContent.trim())),
+          href: document.querySelector('#u-ctx-attention details:first-child .ctx-session-link')?.getAttribute('href'),
+          rawHandoff: document.getElementById('u-ctx-attention')?.textContent?.includes('handoff'),
+        }));
+        check('expanded Context sessions expose aligned values and actionable wording',
+          contextRows.rows.length === 2 && contextRows.rows[0][2] === 'Start a new session'
+            && contextRows.rows[0][3] === '98.6%' && contextRows.rows[0][4] === '255K'
+            && contextRows.rows[0][5] === '258K' && contextRows.rawHandoff === false,
+          `Context rows were ${JSON.stringify(contextRows)}`);
+        check('Context session references are real deep links',
+          contextRows.href === '#usage/aaaa1111', `Context href was ${JSON.stringify(contextRows.href)}`);
+        await page.locator('#u-ctx-attention details:first-child .ctx-session-link').first().click();
+        await page.waitForSelector('#v-transcript:not([hidden])');
+        check('a Context session reference opens the reported transcript',
+          await page.evaluate(() => location.hash) === '#usage/aaaa1111'
+            && /Add rate limiting to the API/.test(await visibleText(page, '#v-transcript')),
+          `Context link navigated to ${await page.evaluate(() => location.hash)}`);
+        await page.click('[data-view="context"]');
       }
       if (view === 'hooks') {
         const hookView = await page.evaluate(() => ({
           text: document.getElementById('v-hooks')?.textContent,
           stopParent: document.getElementById('u-hook-stop')?.closest('.strip')?.querySelector('h2')?.textContent,
           runtimeParent: document.getElementById('u-hook-runtime')?.closest('.strip')?.querySelector('h2')?.textContent,
+          definitionHeaders: [...document.querySelectorAll('#u-hook-stop thead th')].map((node) => node.textContent.trim()),
+          findingHeaders: [...document.querySelectorAll('#u-hook-diagnostics thead th')].map((node) => node.textContent.trim()),
           busy: document.getElementById('v-hooks')?.getAttribute('aria-busy'),
         }));
         check('Hooks fetches exactly once when first opened and settles its live status',
           hookRequests.length === 1 && hookView.busy === 'false',
           `Hook requests/state were ${JSON.stringify({ hookRequests, hookView })}`);
-        check('Hooks keeps Stop configuration separate from runtime outcomes',
-          hookView.stopParent === 'Stop configuration' && hookView.runtimeParent === 'Runtime outcomes'
-            && /AQE_STOP_UNSUPPORTED_FLAG/.test(hookView.text) && /Stop runtime receipts/.test(hookView.text),
+        check('Hooks separates definitions, findings, and runtime outcomes in user-facing language',
+          hookView.stopParent === 'Hook definitions' && hookView.runtimeParent === 'Runtime outcomes'
+            && /Hook may resolve a package when it runs/.test(hookView.text) && /1 retained receipt/.test(hookView.text),
           `Hooks content was ${JSON.stringify(hookView)}`);
+        check('Hooks measurements sit under explicit semantic column headers',
+          JSON.stringify(hookView.definitionHeaders) === JSON.stringify([
+            'Lifecycle point', 'Definition', 'Host', 'Configured in', 'Placements', 'Findings',
+          ]) && JSON.stringify(hookView.findingHeaders) === JSON.stringify([
+            'Importance', 'Finding', 'Lifecycle point', 'Host', 'Affected definitions', 'Owner', 'Next step',
+          ]), `Hook headers were ${JSON.stringify(hookView)}`);
+        check('Hooks does not turn an upstream classification into a fabricated call to action',
+          /No evidence-backed action/.test(hookView.text) && !/Preview repair/.test(hookView.text),
+          `Hooks action text was ${JSON.stringify(hookView.text)}`);
         check('Hooks never renders raw commands, paths, output, or diagnostic prose',
           !hookView.text.includes(HOOKS_SECRET), 'sanitized Hook delivery leaked its sentinel secret');
+        await page.locator('#u-hook-stop details summary').click();
+        await page.locator('[data-hook-source]').click();
+        await page.waitForFunction(() => document.querySelector('#u-hook-source-detail pre'));
+        const sourceView = await page.evaluate(() => ({
+          open: document.getElementById('u-hook-source-dialog')?.open,
+          text: document.getElementById('u-hook-source-dialog')?.textContent,
+          path: document.querySelector('#u-hook-source-detail .hook-source-facts code')?.textContent,
+        }));
+        check('Hooks opens the explicitly requested audited physical source in a read-only dialog',
+          sourceView.open === true && sourceView.path === hookSourceFile
+            && /Masked definition/.test(sourceView.text) && !sourceView.text.includes('ui-secret-value'),
+          `Hook source dialog was ${JSON.stringify(sourceView)}`);
+        await page.locator('#u-hook-source-close').click();
       }
       if (view !== 'models') {
         const modelBoundary = await page.evaluate(() => {

@@ -47,6 +47,69 @@ import { authHeaders, esc } from './bootstrap.mjs';
           :'No paired runtime context evidence was recorded for this host in the selected window.')+'</p></article>';
   }
 
+  function contextAttentionAction(state){
+    if(state==="over-window")return "Start a new session now";
+    if(state==="handoff")return "Start a new session";
+    if(state==="compact")return "Compact context";
+    if(state==="warn")return "Monitor context";
+    if(state==="startup-critical")return "Reduce startup context";
+    return "Review context";
+  }
+
+  function contextStarted(value){
+    if(!value)return "unknown";
+    var d=new Date(value);
+    if(!Number.isFinite(d.getTime()))return "unknown";
+    return d.toISOString().slice(0,10);
+  }
+
+  function contextAttentionGroups(rows){
+    var groups=[],byKey=Object.create(null);
+    for(var i=0;i<rows.length;i++){
+      var row=rows[i]||{},project=String(row.project||"unknown");
+      var title=String(row.title||"(untitled conversation)");
+      var key=project+"\u0000"+title,group=byKey[key];
+      if(!group){group={key:key,project:project,title:title,rows:[]};byKey[key]=group;groups.push(group);}
+      group.rows.push(row);
+    }
+    return groups;
+  }
+
+  function contextAttentionTable(group){
+    var rows=group.rows.map(function(row){
+      var id=String(row.id||"");
+      var pressure=row.peakBps==null?"unknown":(Number(row.peakBps)/100).toFixed(1)+"%";
+      var started=contextStarted(row.start);
+      return '<tr><th scope="row"><a class="ctx-session-link mono" href="#usage/'+encodeURIComponent(id)
+        +'" data-id="'+esc(id)+'" aria-label="Open session '+esc(row.sessionRef||"reference")+'">'
+        +esc(row.sessionRef||"unavailable")+'</a></th>'
+        +'<td>'+esc(row.host||"unknown")+'</td>'
+        +'<td>'+esc(contextAttentionAction(row.state))+'</td>'
+        +'<td class="mono tnum">'+esc(pressure)+'</td>'
+        +'<td class="mono tnum">'+esc(ctxTokens(row.peakInputTokens))+'</td>'
+        +'<td class="mono tnum">'+esc(ctxTokens(row.windowTokens))+'</td>'
+        +'<td><time'+(started!=="unknown"?' datetime="'+esc(row.start)+'"':'')+'>'+esc(started)+'</time></td></tr>';
+    }).join("");
+    return '<div class="ctx-att-table-wrap"><table class="ctx-att-table">'
+      +'<caption class="sr-only">Sessions needing attention for '+esc(group.project)+' — '+esc(group.title)+'</caption>'
+      +'<thead><tr><th scope="col">Session</th><th scope="col">Host</th>'
+      +'<th scope="col">Recommended action</th><th scope="col">Peak pressure</th>'
+      +'<th scope="col">Peak input</th><th scope="col">Context window</th><th scope="col">Started</th>'
+      +'</tr></thead><tbody>'+rows+'</tbody></table></div>';
+  }
+
+  function contextAttentionMarkup(attention,openGroups){
+    return contextAttentionGroups(attention).map(function(group){
+      var highest=group.rows.reduce(function(n,row){return Math.max(n,Number(row.peakBps)||0);},0);
+      var open=openGroups[group.key]?' open':'';
+      return '<details class="ctx-att-group" data-context-group="'+esc(group.key)+'"'+open+'><summary>'
+        +'<span><b>'+esc(group.project)+'</b> · '+esc(group.title)+'</span>'
+        +'<span class="mono">'+esc(group.rows.length)+' session'+(group.rows.length===1?'':'s')+' shown · peak '
+        +esc(highest?(highest/100).toFixed(1)+'%':'unknown')+'</span></summary>'
+        +contextAttentionTable(group)+'</details>';
+    }).join("");
+  }
+
   export function renderContext(context){
     var policyEl=document.getElementById("u-ctx-policy"),summaryEl=document.getElementById("u-ctx-summary");
     var hostsEl=document.getElementById("u-ctx-hosts"),attentionEl=document.getElementById("u-ctx-attention");
@@ -68,74 +131,165 @@ import { authHeaders, esc } from './bootstrap.mjs';
     var byHost=context.byHost||{};
     hostsEl.innerHTML=["claude","codex","opencode"].map(function(host){return contextHostCard(host,byHost[host]);}).join("");
     var attention=Array.isArray(context.attention)?context.attention:[];
-    attentionEl.innerHTML=attention.length?attention.map(function(row){
-      return '<div class="ctx-att-row"><span class="ctx-att-state">'+esc(row.state||"attention")+'</span>'
-        +'<span><b>'+esc(row.host||"unknown")+'</b> · '+esc(row.project||"unknown")+'</span>'
-        +'<span class="mono">peak '+esc(row.peakBps==null?"unknown":(Number(row.peakBps)/100).toFixed(1)+"%")
-        +' · '+esc(ctxTokens(row.peakInputTokens))+' / '+esc(ctxTokens(row.windowTokens))+'</span></div>';
-    }).join(""):'<div class="empty">No session crossed a configured attention threshold in this window.</div>';
+    var openGroups=Object.create(null),open=attentionEl.querySelectorAll("details[data-context-group][open]");
+    for(var i=0;i<open.length;i++)openGroups[open[i].getAttribute("data-context-group")]=true;
+    attentionEl.innerHTML=attention.length?contextAttentionMarkup(attention,openGroups)
+      :'<div class="empty">No session crossed a configured attention threshold in this window.</div>';
   }
 
   function hookKpi(label,value,detail){
     return '<div class="hook-kpi"><span>'+esc(label)+'</span><b class="mono">'+esc(value)+'</b><small>'+esc(detail)+'</small></div>';
   }
 
-  function hookDiagnosticRows(rows){
-    return rows.length?rows.map(function(row){
-      return '<div class="hook-row"><span class="hook-sev">'+esc(row.severity||"unknown")+'</span>'
-        +'<span><b>'+esc(row.event||"unknown")+'</b> · '+esc(row.code||"unknown")+'</span>'
-        +'<span class="mono">'+esc(row.host||"unknown")+' × '+esc(row.count||0)+'</span></div>';
-    }).join(""):'<div class="empty">No sanitized diagnostic codes were recorded.</div>';
+  function hookTimeout(definition){
+    var timeout=definition&&definition.timeout;
+    if(!timeout)return "Not declared";
+    var declared=timeout.declared==null?"default":String(timeout.declared);
+    var effective=timeout.effective==null?"not established":String(timeout.effective);
+    return declared+" "+(timeout.units||"")+" declared · "+effective+" effective";
+  }
+
+  function hookPlacementMarkup(placement,group){
+    var source=placement.source||{},button=source.ref
+      ?'<button type="button" class="hook-source-button" data-hook-source="'+esc(source.ref)
+        +'" aria-label="Inspect '+esc(group.lifecyclePoint||"hook")+' definition in '+esc(source.label||"configuration source")+'">Inspect source</button>'
+      :'<span class="hook-no-source">Location unavailable</span>';
+    return '<li><span><b>'+esc(source.label||"Configuration source")+'</b><small>'+esc(placement.owner||"Not established")
+      +' · '+esc(placement.authority||"not established")+' · '+esc(placement.selectionState||"not determined")+'</small></span>'+button+'</li>';
+  }
+
+  function hookDefinitionTable(groups){
+    if(!groups.length)return '<div class="empty">No hook definitions were found in the inspected sources.</div>';
+    var rows=groups.map(function(group){
+      var placements=Array.isArray(group.placements)?group.placements:[],findingCount=(group.findingIds||[]).length;
+      var sources=[];for(var i=0;i<placements.length;i++){var label=placements[i].source&&placements[i].source.label||"Configuration source";if(sources.indexOf(label)<0)sources.push(label);}
+      return '<tr><th scope="row">'+esc(group.lifecyclePoint||"unknown")+'</th>'
+        +'<td><details class="hook-definition"><summary>'+esc(group.handlerKind||"unknown")+'</summary>'
+        +'<div class="hook-definition-body"><p>'+esc(hookTimeout(group.definition))+'</p><ul>'
+        +placements.map(function(placement){return hookPlacementMarkup(placement,group);}).join("")+'</ul></div></details></td>'
+        +'<td>'+esc(group.host||"unknown")+'</td><td>'+esc(sources.join(", ")||"unknown")+'</td>'
+        +'<td class="tnum">'+esc(placements.length)+' placement'+(placements.length===1?'':'s')+'</td>'
+        +'<td class="tnum">'+esc(findingCount||"None")+'</td></tr>';
+    }).join("");
+    return '<div class="hook-table-wrap" role="region" aria-label="Configured hook definitions" tabindex="0"><table class="hook-table">'
+      +'<caption class="sr-only">Configured hooks grouped by distinct normalized behavior.</caption><thead><tr>'
+      +'<th scope="col">Lifecycle point</th><th scope="col">Definition</th><th scope="col">Host</th>'
+      +'<th scope="col">Configured in</th><th scope="col">Placements</th><th scope="col">Findings</th>'
+      +'</tr></thead><tbody>'+rows+'</tbody></table></div>';
+  }
+
+  function hookFindingTable(findings){
+    if(!findings.length)return '<div class="empty">No actionable configuration finding was recorded. This does not prove runtime success.</div>';
+    var rows=findings.map(function(finding){
+      var action=finding.action?(finding.action.href
+        ?'<a class="hook-upstream-link" href="'+esc(finding.action.href)+'" target="_blank" rel="noreferrer">'+esc(finding.action.label||"View upstream issue")+'</a>'
+        :'<span class="hook-action"><b>'+esc(finding.action.label||"Preview repair")+'</b>'
+          +'<code>ak heal hooks --host '+esc(finding.host||"all")+'</code></span>')
+        :'<span class="hook-no-action">'+esc(finding.disposition||"No evidence-backed action")+'</span>';
+      return '<tr><td><span class="hook-sev">'+esc(finding.severity||"unknown")+'</span></td>'
+        +'<th scope="row"><b>'+esc(finding.title||"Finding")+'</b><small>'+esc(finding.explanation||"")
+        +' · code '+esc(finding.code||"unknown")+'</small></th><td>'+esc(finding.lifecyclePoint||"unknown")+'</td>'
+        +'<td>'+esc(finding.host||"unknown")+'</td><td class="tnum">'+esc(finding.affectedDefinitions||0)
+        +' definition'+(finding.affectedDefinitions===1?'':'s')+'</td><td>'+esc(finding.owner||"Not established")+'</td><td>'+action+'</td></tr>';
+    }).join("");
+    return '<div class="hook-table-wrap" role="region" aria-label="Hook findings needing attention" tabindex="0"><table class="hook-table hook-findings-table">'
+      +'<caption class="sr-only">Static hook configuration findings and evidence-bound next steps.</caption><thead><tr>'
+      +'<th scope="col">Importance</th><th scope="col">Finding</th><th scope="col">Lifecycle point</th><th scope="col">Host</th>'
+      +'<th scope="col">Affected definitions</th><th scope="col">Owner</th><th scope="col">Next step</th>'
+      +'</tr></thead><tbody>'+rows+'</tbody></table></div>';
+  }
+
+  function hookRuntimeTable(runtime){
+    var rows=runtime&&Array.isArray(runtime.byHost)?runtime.byHost:[];
+    if(!runtime||runtime.state!=="observed"||!rows.length)return '<div class="empty">No execution receipts were supplied to this dashboard. Hook successes, failures, and timeouts are therefore unknown.</div>';
+    return '<div class="hook-table-wrap" role="region" aria-label="Observed hook runtime outcomes" tabindex="0"><table class="hook-table">'
+      +'<caption class="sr-only">Bounded hook execution receipts by host and lifecycle point.</caption><thead><tr>'
+      +'<th scope="col">Host</th><th scope="col">Lifecycle point</th><th scope="col">Runs observed</th>'
+      +'<th scope="col">Successful</th><th scope="col">Failed</th><th scope="col">Timed out</th></tr></thead><tbody>'
+      +rows.map(function(row){return '<tr><th scope="row">'+esc(row.host||"unknown")+'</th><td>'+esc(row.lifecyclePoint||"unknown")
+        +'</td><td class="tnum">'+esc(row.executions||0)+'</td><td class="tnum">'+esc(row.successes||0)
+        +'</td><td class="tnum">'+esc(row.failures||0)+'</td><td class="tnum">'+esc(row.timeouts||0)+'</td></tr>';}).join("")
+      +'</tbody></table></div><p class="hook-runtime-note">'+esc(runtime.receiptsInspected||0)+' retained receipt'
+      +(runtime.receiptsInspected===1?'':'s')+(runtime.receiptsTruncated?' · older receipts omitted':'')+'. Configuration findings above are separate evidence.</p>';
   }
 
   function hookElements(){
     return {
       panel:document.getElementById("v-hooks"),status:document.getElementById("u-hook-status"),
       config:document.getElementById("u-hook-config"),stop:document.getElementById("u-hook-stop"),
-      runtime:document.getElementById("u-hook-runtime"),diagnostics:document.getElementById("u-hook-diagnostics")
+      runtime:document.getElementById("u-hook-runtime"),diagnostics:document.getElementById("u-hook-diagnostics"),
+      limits:document.getElementById("u-hook-limits")
     };
+  }
+
+  function closeHookSourceDialog(){
+    var dialog=document.getElementById("u-hook-source-dialog");
+    if(!dialog)return;
+    if(typeof dialog.close==="function"&&dialog.open)dialog.close();else dialog.removeAttribute("open");
+  }
+
+  function showHookSource(ref){
+    var dialog=document.getElementById("u-hook-source-dialog"),detail=document.getElementById("u-hook-source-detail");
+    if(!dialog||!detail)return;
+    detail.innerHTML='<div class="empty">Loading the audited source.</div>';
+    if(typeof dialog.showModal==="function")dialog.showModal();else dialog.setAttribute("open","");
+    fetch("/api/hooks/source/"+encodeURIComponent(ref),{cache:"no-store",headers:authHeaders()}).then(function(response){
+      return response.json().then(function(body){if(!response.ok)throw new Error(body&&body.error||"unavailable");return body;});
+    }).then(function(body){
+      var location=body.location||{},definition=body.definition;
+      detail.innerHTML='<dl class="hook-source-facts"><div><dt>Host</dt><dd>'+esc(body.host||"unknown")+'</dd></div>'
+        +'<div><dt>Lifecycle point</dt><dd>'+esc(body.lifecyclePoint||"unknown")+'</dd></div>'
+        +'<div><dt>Physical location</dt><dd><code>'+esc(location.absolutePath||location.displayPath||"unavailable")+'</code></dd></div>'
+        +'<div><dt>Definition selector</dt><dd><code>'+esc(location.selector||"whole file")+'</code></dd></div>'
+        +'<div><dt>Owner evidence</dt><dd>'+esc(body.owner||"not established")+'</dd></div></dl>'
+        +(definition!=null?'<h3>Masked definition</h3><pre>'+esc(JSON.stringify(definition,null,2))+'</pre>'
+          :'<div class="empty">'+esc(body.unavailableReason||"A normalized definition is unavailable for this source format.")+'</div>');
+    }).catch(function(error){detail.innerHTML='<div class="empty">'+esc(error&&error.message||"Hook source unavailable.")+'</div>';});
+  }
+
+  function wireHookSources(elements){
+    if(elements.panel.getAttribute("data-hook-source-wired")==="true")return;
+    elements.panel.setAttribute("data-hook-source-wired","true");
+    elements.panel.addEventListener("click",function(event){
+      var button=event.target&&event.target.closest?event.target.closest("[data-hook-source]"):null;
+      if(button){event.preventDefault();showHookSource(button.getAttribute("data-hook-source")||"");}
+    });
+    var close=document.getElementById("u-hook-source-close");if(close)close.addEventListener("click",closeHookSourceDialog);
   }
 
   function renderHookUnknown(elements,model){
     elements.panel.setAttribute("aria-busy",hooksBusy?"true":"false");
     var reason=model&&model.error?"Hook audit unavailable.":"Hook audit not loaded. Runtime outcomes are unknown.";
     elements.config.innerHTML='<div class="empty">'+esc(reason)+'</div>';
-    elements.stop.innerHTML='<div class="empty">Stop configuration is unknown.</div>';
+    elements.stop.innerHTML='<div class="empty">Hook definitions are unknown.</div>';
     elements.runtime.innerHTML='<div class="empty">Runtime outcomes are unknown; no bounded receipts are available.</div>';
     elements.diagnostics.innerHTML='<div class="empty">Diagnostic ownership is unknown.</div>';
+    if(elements.limits)elements.limits.innerHTML='<div class="empty">Evidence limits are unknown.</div>';
     if(elements.status)elements.status.textContent=reason;
   }
 
   function renderHookEvidence(elements,model){
     elements.panel.setAttribute("aria-busy","false");
-    var summary=model.summary||{},actions=model.actions||{},rows=Array.isArray(model.diagnostics)?model.diagnostics:[];
+    var summary=model.summary||{},groups=Array.isArray(model.definitionGroups)?model.definitionGroups:[];
+    var findings=Array.isArray(model.findings)?model.findings:[],limits=Array.isArray(model.evidenceLimits)?model.evidenceLimits:[];
     elements.config.innerHTML='<div class="hook-kpis">'
-      +hookKpi("configured hooks",summary.configuredHooks||0,"occurrences")
-      +hookKpi("unique behavior",summary.uniqueBehaviors||0,"normalized definitions")
-      +hookKpi("configuration issues",summary.configurationIssues||0,"static evidence")+'</div>';
-    var stopRows=rows.filter(function(row){return String(row.event||"").toLowerCase()==="stop";});
-    elements.stop.innerHTML=stopRows.length?hookDiagnosticRows(stopRows)
-      :'<div class="empty">No Stop-specific diagnostic code was recorded. This does not prove runtime success.</div>';
-    var receipts=model.runtime&&Array.isArray(model.runtime.recent)?model.runtime.recent:[];
-    var stopReceipts=receipts.filter(function(row){return String(row.verb||"").toLowerCase()==="stop";});
-    elements.runtime.innerHTML=receipts.length?'<div class="hook-kpis">'
-      +hookKpi("executions",summary.executions||0,"bounded receipts")
-      +hookKpi("failures",summary.failures||0,"all hook verbs")
-      +hookKpi("timeouts",summary.timeouts||0,"all hook verbs")+'</div>'
-      +'<div class="hook-runtime-note">Stop runtime receipts: <b>'+esc(stopReceipts.length)+'</b> of '+esc(receipts.length)
-      +' retained. Configuration findings above are not runtime outcomes.</div>'
-      :'<div class="empty">Runtime outcomes are unknown; no bounded execution receipts were available.</div>';
-    elements.diagnostics.innerHTML='<div class="hook-actions">'
-      +hookKpi("automatic",actions.automaticEligible||0,"eligible")
-      +hookKpi("approval",actions.approvalRequired||0,"required")
-      +hookKpi("prohibited",actions.prohibited||0,"never automatic")
-      +hookKpi("upstream",actions.upstreamRequired||0,"owner action")+'</div>'+hookDiagnosticRows(rows);
+      +hookKpi("configured entries",summary.configuredEntries||0,"physical placements")
+      +hookKpi("distinct behaviors",summary.distinctBehaviors||0,"normalized definitions")
+      +hookKpi("repeated placements",summary.repeatedPlacements||0,"additional equivalent entries")
+      +hookKpi("unreadable sources",summary.unreadableSources||0,(summary.sourcesInspected||0)+" inspected")+'</div>';
+    elements.stop.innerHTML=hookDefinitionTable(groups);
+    elements.runtime.innerHTML=hookRuntimeTable(model.runtime||null);
+    elements.diagnostics.innerHTML=hookFindingTable(findings);
+    if(elements.limits)elements.limits.innerHTML=limits.length?'<ul class="hook-limits">'
+      +limits.map(function(limit){return '<li>'+esc(limit.text||"Unknown evidence limit")+'</li>';}).join("")+'</ul>'
+      :'<div class="empty">No additional evidence limit was reported.</div>';
     if(elements.status)elements.status.textContent="Hook configuration evidence loaded. Runtime outcomes are reported separately.";
   }
 
   export function renderHooks(model){
     var elements=hookElements();
     if(!elements.panel||!elements.config||!elements.stop||!elements.runtime||!elements.diagnostics)return;
+    wireHookSources(elements);
     if(!model||model.error)renderHookUnknown(elements,model);else renderHookEvidence(elements,model);
   }
 

@@ -43,7 +43,8 @@ export const USAGE_CSS = `
 .mli-summary:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
 .mli-summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .mli-summary span:first-child{display:flex;flex-direction:column;gap:3px}.mli-summary small{color:var(--mli-muted)}
-.mli-copy{margin:0 0 12px;color:var(--mli-muted);font-size:12px}.mli-ledger>summary{display:flex;justify-content:space-between;align-items:center;gap:12px;cursor:pointer;list-style:none}.mli-ledger>summary::-webkit-details-marker{display:none}.mli-ledger-title{display:flex;align-items:baseline;gap:8px}.mli-ledger>summary:hover .chev{color:var(--accent)}.mli-ledger[open]>summary .chev{transform:rotate(90deg);color:var(--accent)}.mli-ledger>summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}.mli-ledger>summary small{display:block;margin-top:3px;color:var(--mli-muted);font-size:11px}.mli-catalog-body{padding-top:14px}
+.strip-copy{margin:0 0 12px;color:var(--mli-muted);font-size:12px;line-height:1.5}
+.mli-ledger>summary{display:flex;justify-content:space-between;align-items:center;gap:12px;cursor:pointer;list-style:none}.mli-ledger>summary::-webkit-details-marker{display:none}.mli-ledger-title{display:flex;align-items:baseline;gap:8px}.mli-ledger>summary:hover .chev{color:var(--accent)}.mli-ledger[open]>summary .chev{transform:rotate(90deg);color:var(--accent)}.mli-ledger>summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}.mli-ledger>summary small{display:block;margin-top:3px;color:var(--mli-muted);font-size:11px}.mli-catalog-body{padding-top:14px}
 .mli-attention{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;margin-bottom:16px}
 .mli-alert{padding:10px 12px;border-left:3px solid var(--warn);border-radius:0 var(--r-sm) var(--r-sm) 0;
   background:color-mix(in srgb,var(--warn) 9%,var(--panel));font-size:12px;color:var(--ink)}
@@ -756,25 +757,6 @@ export const USAGE_CSS = `
   margin-right:8px; font-size:9.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-dim);
 }
 
-/* the ? info-dot in a strip header — carries the nuance the header body no
-   longer states inline, on hover/focus. margin-right:auto keeps the header's
-   note pushed to the far right, with the dot next to the title. */
-.pr-infodot{
-  position:relative; display:inline-grid; place-items:center; width:16px; height:16px;
-  margin-right:auto; border-radius:50%; border:1px solid var(--line-2); color:var(--ink-dim);
-  font-family:var(--mono); font-size:10px; font-weight:700; cursor:help;
-}
-.pr-infodot:hover,.pr-infodot:focus-visible{color:var(--accent); border-color:var(--accent); outline:none}
-.pr-tip{
-  position:absolute; top:135%; left:0; z-index:30; width:300px; padding:11px 13px;
-  background:var(--panel-2); border:1px solid var(--line-2); border-radius:var(--r-sm);
-  box-shadow:var(--shadow); font-family:var(--sans); font-size:12px; font-weight:400;
-  line-height:1.5; color:var(--ink-2); text-align:left; opacity:0; pointer-events:none;
-  transition:opacity .14s;
-}
-.pr-infodot:hover .pr-tip,.pr-infodot:focus .pr-tip,.pr-infodot:focus-visible .pr-tip{opacity:1}
-.pr-tip b{color:var(--ink)}
-
 /* A sub-heading inside a strip column, for a second ranked list under the
    first. Sized between .sh h2 and body text so it reads as subordinate. */
 .pr-sub{
@@ -806,10 +788,21 @@ export const USAGE_CSS = `
 .ctx-facts dt{font-size:9px; color:var(--ink-dim); text-transform:uppercase; letter-spacing:.05em}
 .ctx-facts dd{margin:2px 0 0; font-family:var(--mono); font-size:11.5px; color:var(--ink)}
 .ctx-caveat{margin:11px 0 0; padding-top:9px; border-top:1px solid var(--line); color:var(--ink-dim); font-size:10.5px; line-height:1.45}
-.ctx-attention{max-height:330px; overflow:auto; scrollbar-width:thin}
-.ctx-att-row{display:grid; grid-template-columns:96px 1fr auto; gap:10px; align-items:center; padding:9px 0; border-bottom:1px solid var(--line); color:var(--ink-2); font-size:11.5px}
-.ctx-att-row:last-child{border-bottom:0}
-.ctx-att-state{color:var(--warn); text-transform:uppercase; font-size:9px; letter-spacing:.06em}
+.ctx-attention{max-height:420px; overflow:auto; scrollbar-width:thin}
+.ctx-att-group{border-top:1px solid var(--line)}
+.ctx-att-group:last-child{border-bottom:1px solid var(--line)}
+.ctx-att-group>summary{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:11px 8px;cursor:pointer;color:var(--ink-2);font-size:11.5px}
+.ctx-att-group>summary:hover{background:var(--panel-2)}
+.ctx-att-group summary:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:4px}
+.ctx-att-group>summary b{color:var(--ink)}
+.ctx-att-table-wrap{overflow-x:auto;scrollbar-width:thin;padding:0 0 8px}
+.ctx-att-table{width:100%;min-width:760px;border-collapse:collapse;font-size:11.5px}
+.ctx-att-table th,.ctx-att-table td{padding:8px 10px;border-top:1px solid var(--line);text-align:left;white-space:nowrap;color:var(--ink-2)}
+.ctx-att-table thead th{color:var(--ink-dim);font-size:9px;text-transform:uppercase;letter-spacing:.05em;background:var(--panel-2)}
+.ctx-att-table tbody th{font-weight:500}
+.ctx-session-link{color:var(--accent);text-decoration:none}
+.ctx-session-link:hover{text-decoration:underline}
+.ctx-session-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
 
 /* Hooks keeps configuration and runtime evidence in separate blocks. The
    read model is already bounded; these containers bound visual growth too. */
@@ -824,12 +817,33 @@ export const USAGE_CSS = `
 .hook-row:last-child{border-bottom:0}
 .hook-sev{font-size:9px; color:var(--warn); text-transform:uppercase; letter-spacing:.06em}
 .hook-runtime-note{margin-top:10px; color:var(--ink-2); font-size:11.5px}
+.hook-table-wrap{overflow-x:auto;scrollbar-width:thin}
+.hook-table{width:100%;min-width:760px;border-collapse:collapse;font-size:11.5px}
+.hook-table th,.hook-table td{padding:9px 10px;border-top:1px solid var(--line);text-align:left;vertical-align:top;color:var(--ink-2)}
+.hook-table thead th{border-top:0;color:var(--ink-dim);font-size:9px;text-transform:uppercase;letter-spacing:.05em;background:var(--panel-2);white-space:nowrap}
+.hook-table tbody th{font-weight:500;color:var(--ink)}
+.hook-definition>summary{cursor:pointer;color:var(--accent);font-weight:600}
+.hook-definition>summary:focus-visible,.hook-source-button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
+.hook-definition-body{min-width:280px;padding:8px 0 2px}.hook-definition-body p{margin:0 0 7px;color:var(--ink-dim)}
+.hook-definition-body ul,.hook-limits{margin:0;padding-left:18px}.hook-definition-body li{margin:6px 0;display:flex;gap:12px;align-items:flex-start;justify-content:space-between}
+.hook-definition-body small,.hook-findings-table small{display:block;margin-top:3px;color:var(--ink-dim);line-height:1.4}
+.hook-source-button{border:1px solid var(--line-2);border-radius:4px;background:transparent;color:var(--accent);padding:4px 7px;cursor:pointer;white-space:nowrap}
+.hook-no-source,.hook-no-action{color:var(--ink-dim);font-size:10.5px}.hook-action{display:grid;gap:4px;color:var(--ink)}.hook-action code{font-size:10px;white-space:nowrap}
+.hook-upstream-link{color:var(--accent);text-decoration:none}.hook-upstream-link:hover{text-decoration:underline}.hook-upstream-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+.hook-limits{color:var(--ink-2);font-size:11.5px;line-height:1.6}
+.hook-source-dialog{width:min(760px,calc(100vw - 32px));max-height:calc(100vh - 48px);overflow:auto;border:1px solid var(--line-2);border-radius:var(--r);background:var(--panel);color:var(--ink);box-shadow:var(--shadow);padding:18px}
+.hook-source-dialog::backdrop{background:rgba(0,0,0,.68)}
+.hook-source-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.hook-source-head h2{margin:0;font-size:17px}
+.hook-source-head button{border:1px solid var(--line-2);border-radius:5px;background:var(--panel-2);color:var(--ink);padding:6px 9px;cursor:pointer}
+.hook-source-head button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hook-source-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:14px 0}.hook-source-facts div{min-width:0}.hook-source-facts dt{color:var(--ink-dim);font-size:9px;text-transform:uppercase;letter-spacing:.05em}.hook-source-facts dd{margin:3px 0 0;overflow-wrap:anywhere}.hook-source-dialog pre{max-height:340px;overflow:auto;padding:12px;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--r-sm);font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere}
 #u-hook-diagnostics{max-height:360px; overflow:auto; scrollbar-width:thin}
 
 @media(max-width:720px){
   .ctx-grid,.hook-grid{grid-template-columns:1fr}
-  .ctx-att-row,.hook-row{grid-template-columns:1fr; gap:4px}
-  .ctx-att-row .mono,.hook-row .mono{text-align:left}
+  .ctx-att-group>summary{align-items:flex-start;flex-direction:column;gap:3px}
+  .hook-row{grid-template-columns:1fr; gap:4px}
+  .hook-row .mono{text-align:left}
 }
 
 `;

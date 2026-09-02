@@ -113,6 +113,13 @@ import { MODEL_PAGE, USAGE, fmtNum, loadLimits, loadModelInventory, loadModelLif
       }
       var more=tgt.closest?tgt.closest("[data-more]"):null;
       if(more){loadProjectSessions(more.getAttribute("data-more")); return;}
+      var contextLink=tgt.closest?tgt.closest(".ctx-session-link"):null;
+      if(contextLink){
+        if(e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return;
+        e.preventDefault();
+        setUsageView("transcript",contextLink.getAttribute("data-id"));
+        return;
+      }
       // MUST come before the [data-id] branch below: the caret lives INSIDE the
       // row, so closest("[data-id]") matches it too. stopPropagation() first,
       // then toggle — the row's click-to-open-transcript path is shipped

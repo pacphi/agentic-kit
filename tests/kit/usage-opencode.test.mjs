@@ -297,7 +297,8 @@ test('parseSession fingerprints user messages on the scan path, not only withTur
   const { session: lean } = parseSession({ dbFile, id: 'ses_fp' });
   assert.deepEqual(lean.promptFPs.map((f) => f.p), ['human', 'adapter']);
   assert.equal(lean.promptFPs[0].t, 3, 'the scan path really read the message text');
-  assert.deepEqual(lean.promptFPs[0], { ...promptFingerprint('Run the tests.'), p: 'human' });
+  assert.deepEqual(lean.promptFPs[0], { ...promptFingerprint('Run the tests.'), p: 'human',
+    i: 'verify', d: 'tests' });
   assert.equal(lean.promptFPOverflow, 0);
   assert.equal(JSON.stringify(lean.promptFPs).includes('Run the tests'), false, 'no prompt text on the record');
 

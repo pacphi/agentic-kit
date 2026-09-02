@@ -11,7 +11,7 @@ import {
 } from '../../src/lib/usage-index.mjs';
 import {
   addUsage, blankSession, noteContextSample, noteLatencySample, parseClaude,
-  normalizePromptText, promptFingerprint, promptShape,
+  normalizePromptText, promptFingerprint, promptShape, promptSemantics,
   LAT_BUCKET_EDGES, LEN_BUCKET_EDGES, MAX_PROMPT_FPS, MAX_TOKEN_HASHES,
 } from '../../src/lib/usage-parsers.mjs';
 import {
@@ -1679,7 +1679,7 @@ test('the token-hash set is a bounded bottom-k sketch, not an unbounded list', (
  *  flags, written only when the shape is there. Nothing else may ever appear —
  *  which is what keeps a text field from arriving by accident. */
 const FP_REQUIRED_KEYS = ['h', 'p', 't', 'th'];
-const FP_ALLOWED_KEYS = new Set([...FP_REQUIRED_KEYS, 'q', 'o']);
+const FP_ALLOWED_KEYS = new Set([...FP_REQUIRED_KEYS, 'q', 'o', 'i', 'd']);
 function assertFingerprintKeys(fp) {
   const keys = Object.keys(fp);
   for (const k of FP_REQUIRED_KEYS) {
@@ -1727,6 +1727,22 @@ test('promptShape omits both keys rather than storing zeroes', () => {
   assert.deepEqual(Object.keys(promptShape('You are a reviewer. What changed?')).sort(), ['o', 'q']);
 });
 
+test('promptSemantics reduces transient text to bounded intent and topic enums', () => {
+  assert.deepEqual(promptSemantics('Please fix the failing GitHub Actions workflow.'),
+    { i: 'fix', d: 'ci' });
+  assert.deepEqual(promptSemantics('Can you review the authentication middleware for vulnerabilities?'),
+    { i: 'review', d: 'security' });
+  assert.deepEqual(promptSemantics('why is context usage so high?'),
+    { i: 'explain', d: 'context' });
+  assert.deepEqual(promptSemantics('yes'), { i: 'approve' });
+  assert.deepEqual(promptSemantics('continue'), { i: 'continue' });
+  assert.deepEqual(promptSemantics('zarquon-plinth-flumox'), {},
+    'unknown operator vocabulary is discarded rather than copied');
+  for (const value of Object.values(promptSemantics('fix secret-project-name database migration'))) {
+    assert.equal(String(value).includes('secret-project-name'), false);
+  }
+});
+
 test('parseClaude records one fingerprint per prompt-kind turn, tagged with its provenance', () => {
   const T0 = '2026-08-20T10:00:00.000Z';
   const at = (s) => new Date(Date.parse(T0) + s * 1000).toISOString();
@@ -1753,7 +1769,7 @@ test('parseClaude records one fingerprint per prompt-kind turn, tagged with its 
 // every shipped consumer filters to `p === 'human'` first, so no non-human `o`
 // is read today. The provenance-blind recording is what would let one be,
 // without a re-scan.
-test('parseClaude carries the v16 shape flags, omitted when the shape is absent', () => {
+test('parseClaude carries bounded shape and semantic facets, omitted when absent', () => {
   const T0 = '2026-08-20T10:00:00.000Z';
   const at = (s) => new Date(Date.parse(T0) + s * 1000).toISOString();
   const user = (t, text) => JSON.stringify({ type: 'user', timestamp: at(t), message: { role: 'user', content: text } });
@@ -1765,8 +1781,12 @@ test('parseClaude carries the v16 shape flags, omitted when the shape is absent'
   const { session: rec } = parseClaude(lines, { id: 'sess-fp-shape' });
   assert.deepEqual(rec.promptFPs.map((f) => f.q), [1, undefined, undefined]);
   assert.deepEqual(rec.promptFPs.map((f) => f.o), [undefined, 1, undefined]);
-  assert.deepEqual(Object.keys(rec.promptFPs[2]).sort(), ['h', 'p', 't', 'th'],
-    'the plain instruction stores no flag keys at all');
+  assert.equal(rec.promptFPs[0].i, 'fix');
+  assert.equal(rec.promptFPs[0].d, 'build');
+  assert.equal(rec.promptFPs[1].i, 'release');
+  assert.equal(rec.promptFPs[1].d, 'release');
+  assert.deepEqual(Object.keys(rec.promptFPs[2]).sort(), ['d', 'h', 'i', 'p', 't', 'th'],
+    'a known task stores only controlled semantic enum codes');
 });
 
 test('a parsed session record carries no prompt TEXT — only fingerprints', () => {
@@ -1905,7 +1925,8 @@ test('cached session entries round-trip the v11 and v14 fields across a cache hi
     assert.equal(evidence.promptFPs[0].q, 1, 'the question flag survives the cache round trip');
     assert.equal(evidence.promptFPs[0].o, 1, 'and so does the persona flag');
     assert.deepEqual(evidence.promptFPs[0],
-      { ...promptFingerprint(EVIDENCE_PROMPT), p: 'human', q: 1, o: 1 });
+      { ...promptFingerprint(EVIDENCE_PROMPT), p: 'human', q: 1, o: 1,
+        ...promptSemantics(EVIDENCE_PROMPT) });
     assert.equal(evidence.promptFPOverflow, 0);
     // `title` is a separate, pre-existing surface (masked + clipped, and here
     // derived from the first prompt), so the no-text claim is made about the
@@ -2990,7 +3011,7 @@ test('promptPatterns ships the frozen projection shape and nothing else', () => 
   assert.deepEqual(Object.keys(a.promptPatterns).sort(),
     ['clusters', 'computedAt', 'corpus', 'exactRepeats', 'provenance', 'reAsks', 'tapLengths']);
   assert.deepEqual(Object.keys(a.promptPatterns.clusters[0]).sort(),
-    ['class', 'count', 'days', 'hosts', 'key', 'label', 'medianTokens', 'sessions']);
+    ['class', 'count', 'days', 'hosts', 'intent', 'key', 'label', 'medianTokens', 'sessions', 'topic']);
   assert.deepEqual(Object.keys(a.promptPatterns.reAsks).sort(),
     ['gapHist', 'pairCount', 'sessionCount']);
   assert.equal(a.promptPatterns.computedAt, a.generatedAt,

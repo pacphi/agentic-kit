@@ -52,6 +52,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
+import { createHmac } from 'node:crypto';
 import { driftReport, selfDrift, installedVersion } from './versions.mjs';
 import { HOSTS, collectIntegrationFacts } from './providers.mjs';
 import { globalRoot } from './paths.mjs';
@@ -613,22 +614,104 @@ async function collectDashboardHooks({ host }) {
 /** Per-server Hook cache. One promise per host is both the single-flight slot
  * and the only route to a cached sanitized payload. Failures clear the slot
  * and are never cached. */
+function hookJsonPointer(record) {
+  if (typeof record?.source?.jsonPointer === 'string') return record.source.jsonPointer;
+  if (Number.isInteger(record?.indices?.group) && Number.isInteger(record?.indices?.hook)) {
+    const event = String(record.event ?? '').replaceAll('~', '~0').replaceAll('/', '~1');
+    return `/hooks/${event}/${record.indices.group}/hooks/${record.indices.hook}`;
+  }
+  if (record?.type === 'package-plugin' && Number.isInteger(record?.indices?.plugin)) {
+    return `/plugin/${record.indices.plugin}`;
+  }
+  if (record?.source?.sourceKind === 'external-adapter-manifest') {
+    const event = String(record.event ?? '');
+    if (event.startsWith('lifecycle.')) return `/lifecycle/${event.slice(10).replaceAll('~', '~0').replaceAll('/', '~1')}/hook`;
+    if (event === 'execution.run') return '/execution/run/hook';
+    if (event === 'aqe.provider') return '/aqe/provider/hook';
+  }
+  return null;
+}
+
+function hookSourceLocator(record) {
+  const rawFile = record?.source?.file;
+  const root = record?.source?.baseDir;
+  const digest = record?.source?.digest;
+  if (typeof rawFile !== 'string' || typeof root !== 'string' || rawFile.includes('#')) return null;
+  if (typeof digest !== 'string' || !/^[a-f0-9]{64}$/i.test(digest)) return null;
+  if (!path.isAbsolute(rawFile) || !path.isAbsolute(root) || /^https?:|^npm:/.test(rawFile)) return null;
+  return {
+    file: rawFile, containmentRoot: root, digest,
+    pointer: hookJsonPointer(record), host: record?.host ?? 'unknown', event: record?.event ?? 'unknown',
+    sourceKind: record?.source?.sourceKind ?? 'unknown', owner: record?.source?.owner ?? 'unknown',
+  };
+}
+
+function pointerValue(document, pointer) {
+  if (!pointer || pointer === '/') return document;
+  let value = document;
+  for (const part of pointer.split('/').slice(1).map((item) => item.replaceAll('~1', '/').replaceAll('~0', '~'))) {
+    if (value === null || typeof value !== 'object' || !Object.hasOwn(value, part)) return undefined;
+    value = value[part];
+  }
+  return value;
+}
+
+const HOOK_DETAIL_MAX_BYTES = 64 * 1024;
+const HOOK_SENSITIVE_KEY = /(?:secret|token|password|passwd|api_?key|private_?key|credential)/i;
+
+function maskHookDefinition(value, mask, depth = 0) {
+  if (depth > 12) return '[depth limit]';
+  if (typeof value === 'string') return mask(value).slice(0, HOOK_DETAIL_MAX_BYTES);
+  if (value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.slice(0, 128).map((item) => maskHookDefinition(item, mask, depth + 1));
+  return Object.fromEntries(Object.entries(value).slice(0, 128).map(([key, item]) => [
+    key.slice(0, 128), HOOK_SENSITIVE_KEY.test(key) ? '<redacted>' : maskHookDefinition(item, mask, depth + 1),
+  ]));
+}
+
+function displayHookPath(file) {
+  const home = process.env.HOME;
+  return home && (file === home || file.startsWith(`${home}${path.sep}`)) ? `~${file.slice(home.length)}` : file;
+}
+
 function createHookDashboardReader({ hooks, cacheMs }) {
   const provide = typeof hooks === 'function'
     ? hooks : hooks ? async () => hooks : collectDashboardHooks;
   const cache = new Map();
   const inflight = new Map();
+  const locators = new Map();
+  const referenceKey = mintToken();
   const ttlMs = clampInt(cacheMs, DEFAULT_HOOK_CACHE_MS, 1_000, 300_000);
-  return (host) => {
+  const read = (host) => {
     const cached = cache.get(host);
     if (cached && Date.now() - cached.at < ttlMs) return Promise.resolve(cached.payload);
     const active = inflight.get(host);
     if (active) return active;
     const pending = Promise.resolve().then(() => provide({ host })).then(async (raw) => {
       const { buildHookDashboardReadModel } = await import('./hook-read-model.mjs');
+      let healingPlan = null;
+      try {
+        const { buildHookHealingPlan, publicHookHealingPlan } = await import('./hook-remediation/planner.mjs');
+        healingPlan = publicHookHealingPlan(buildHookHealingPlan({ report: raw?.audit }));
+      } catch { /* a failed plan compilation is not evidence for an action */ }
+      const refs = new Map();
+      for (const report of Object.values(raw?.audit?.reports ?? {})) {
+        for (const record of report?.records ?? []) {
+          const locator = hookSourceLocator(record);
+          if (!locator) continue;
+          const ref = createHmac('sha256', referenceKey).update([
+            raw?.audit?.auditId ?? 'audit', record?.occurrenceId ?? '', locator.file,
+            locator.pointer ?? '', locator.digest ?? '',
+          ].join('\0')).digest('hex').slice(0, 32);
+          refs.set(record?.occurrenceId, ref);
+          locators.set(ref, { ...locator, expiresAt: Date.now() + ttlMs });
+        }
+      }
       const payload = buildHookDashboardReadModel({
         audit: raw?.audit ?? null,
         receipts: Array.isArray(raw?.receipts) ? raw.receipts : [],
+        healingPlan,
+        sourceRef: (record) => refs.get(record?.occurrenceId) ?? null,
       });
       cache.set(host, { at: Date.now(), payload });
       return payload;
@@ -636,6 +719,50 @@ function createHookDashboardReader({ hooks, cacheMs }) {
     inflight.set(host, pending);
     return pending;
   };
+  const source = async (ref, mask) => {
+    const locator = locators.get(ref);
+    if (!locator || locator.expiresAt < Date.now()) {
+      locators.delete(ref);
+      const error = /** @type {Error & { code: string }} */ (new Error('hook source reference is unknown or expired'));
+      error.code = 'HOOK_SOURCE_NOT_FOUND';
+      throw error;
+    }
+    if (typeof mask !== 'function') {
+      const error = /** @type {Error & { code: string }} */ (new Error('hook source masking is unavailable'));
+      error.code = 'HOOK_SOURCE_MASK_UNAVAILABLE';
+      throw error;
+    }
+    const { readBoundedFile, sha256 } = await import('./hook-audit/common.mjs');
+    const current = readBoundedFile(locator.file, locator.containmentRoot, 2 * 1024 * 1024);
+    if (current.status !== 'valid' || (locator.digest && sha256(current.bytes) !== locator.digest)) {
+      const error = /** @type {Error & { code: string }} */ (new Error('hook source changed; refresh the audit'));
+      error.code = 'HOOK_SOURCE_CHANGED';
+      throw error;
+    }
+    let definition = null;
+    let unavailableReason = null;
+    if (locator.pointer && path.extname(locator.file).toLowerCase() === '.json') {
+      try {
+        definition = maskHookDefinition(pointerValue(JSON.parse(current.text), locator.pointer), mask);
+        if (definition === undefined) unavailableReason = 'The audited definition selector is no longer present.';
+      } catch { unavailableReason = 'This JSON source could not be normalized for display.'; }
+    } else {
+      unavailableReason = 'This source format is location-only; the dashboard does not parse or execute it.';
+    }
+    if (definition !== null && Buffer.byteLength(JSON.stringify(definition)) > HOOK_DETAIL_MAX_BYTES) {
+      definition = null;
+      unavailableReason = 'The selected definition exceeds the bounded display limit.';
+    }
+    return {
+      location: {
+        displayPath: displayHookPath(locator.file), absolutePath: locator.file,
+        selector: locator.pointer, digest: locator.digest,
+      },
+      host: locator.host, lifecyclePoint: locator.event, sourceKind: locator.sourceKind,
+      owner: locator.owner, definition, unavailableReason, redacted: true,
+    };
+  };
+  return { read, source };
 }
 
 /** ?days=N → a sane window. Junk falls back to the 14-day default rather than
@@ -1548,9 +1675,30 @@ export function startDashboard({
         return;
       }
       try {
-        sendJson(res, 200, await getHooks(host));
+        sendJson(res, 200, await getHooks.read(host));
       } catch (e) {
         serverFault(res, '/api/hooks', e, 'hook audit unavailable');
+      }
+      return;
+    }
+
+    async function handleHookSource(req, res, query, match) {
+      if (query.has('path')) {
+        sendJson(res, 400, { error: 'path parameters are not accepted' });
+        return;
+      }
+      const ref = match?.[1] ?? '';
+      if (!/^[a-f0-9]{32}$/.test(ref)) {
+        sendJson(res, 404, { error: 'hook source reference not found' });
+        return;
+      }
+      try {
+        const maskFn = typeof usageApi.masker === 'function' ? await usageApi.masker() : usageApi.maskSecrets;
+        sendJson(res, 200, await getHooks.source(ref, maskFn));
+      } catch (error) {
+        if (error?.code === 'HOOK_SOURCE_NOT_FOUND') sendJson(res, 404, { error: 'hook source reference not found' });
+        else if (error?.code === 'HOOK_SOURCE_CHANGED') sendJson(res, 409, { error: 'hook source changed; refresh the audit' });
+        else serverFault(res, '/api/hooks/source/:ref', error, 'hook source unavailable');
       }
       return;
     }
@@ -1687,6 +1835,7 @@ export function startDashboard({
     };
     /** @type {Array<[RegExp, (req: any, res: any, query: any, match: RegExpExecArray) => Promise<void>]>} */
     const PARAM_ROUTES = [
+      [/^\/api\/hooks\/source\/([^/]+)$/, handleHookSource],
       [/^\/api\/live\/playback\/([^/]+)\/([^/]+)$/, handlePlayback],
       [/^\/api\/live\/transcripts\/([^/]+)\/([^/]+)\/events$/, handleTranscriptEvents],
       // (.*) not (.+): the original startsWith('/api/session/') matched a

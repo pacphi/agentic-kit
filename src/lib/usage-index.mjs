@@ -142,8 +142,12 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
  *  v17: per-session context evidence retains bounded first/last/peak/count
  *       summaries and a fixed pressure histogram. Codex also decodes the
  *       last_token_usage + model_context_window pair from token_count. Cached
- *       v16 records cannot recover those discarded snapshots, so re-parse. */
-export const SCHEMA_VERSION = 17;
+ *       v16 records cannot recover those discarded snapshots, so re-parse.
+ *  v18: prompt fingerprints grow optional controlled intent/topic enum codes
+ *       (`i`/`d`) derived while prompt text is transient. Cached v17 records
+ *       cannot recover those facets because raw prompt text was correctly not
+ *       retained, so they must be reparsed. */
+export const SCHEMA_VERSION = 18;
 
 const DAY_MS = 86_400_000;
 // One day of slack past dashboard-server.mjs's 365-day clampDays ceiling —

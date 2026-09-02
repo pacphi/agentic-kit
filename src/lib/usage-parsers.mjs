@@ -16,6 +16,9 @@ import { decodeClaudeRecord, decodeCodexRecord } from './telemetry-records.mjs';
 import { toMs, maskSecrets } from './usage-aggregate.mjs';
 import { normalizeMode } from './usage-modes.mjs';
 import { provenanceOf } from './usage-provenance.mjs';
+import { promptSemantics } from './usage-prompt-semantics.mjs';
+
+export { promptSemantics } from './usage-prompt-semantics.mjs';
 
 /** Silence longer than this ends a stretch of engagement. A session is split
  *  into active sub-intervals at gaps ABOVE this bound (exactly this much is not
@@ -349,6 +352,7 @@ export function notePromptFingerprint(rec, text, kind) {
     ...promptFingerprint(text),
     p: provenanceOf(text, { kind }),
     ...promptShape(text),
+    ...promptSemantics(text),
   });
 }
 

@@ -8,7 +8,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { buildIndex, readSession, _resetForTest } from '../../src/lib/usage-index.mjs';
-import { parseClaude, parseCodex, promptFingerprint } from '../../src/lib/usage-parsers.mjs';
+import {
+  parseClaude, parseCodex, promptFingerprint, promptSemantics,
+} from '../../src/lib/usage-parsers.mjs';
 
 const NOW = Date.parse('2026-07-25T12:00:00.000Z');
 const T0 = '2026-07-24T09:00:00.000Z';
@@ -544,8 +546,8 @@ test('parseCodex carries the v16 shape flags, omitted when the shape is absent',
   const { session: rec } = parseCodex(lines, { id: 'cxshape' });
   assert.deepEqual(rec.promptFPs.map((f) => f.q), [1, undefined, undefined]);
   assert.deepEqual(rec.promptFPs.map((f) => f.o), [undefined, 1, undefined]);
-  assert.deepEqual(Object.keys(rec.promptFPs[2]).sort(), ['h', 'p', 't', 'th'],
-    'a plain instruction stores no flag keys at all');
+  assert.deepEqual(Object.keys(rec.promptFPs[2]).sort(), ['d', 'h', 'i', 'p', 't', 'th'],
+    'a known task stores controlled semantic facets and no prompt text');
 });
 
 // The token hashing/normalization is ONE implementation shared by every host —
@@ -563,7 +565,8 @@ test('a prompt fingerprints identically whichever host recorded it', () => {
     { id: 'clfp2' },
   );
   assert.deepEqual(codex.promptFPs, claude.promptFPs);
-  assert.deepEqual(codex.promptFPs, [{ ...promptFingerprint(text), p: 'human' }]);
+  assert.deepEqual(codex.promptFPs, [{ ...promptFingerprint(text), p: 'human',
+    ...promptSemantics(text) }]);
 });
 
 // v15. The ambient browser-state block is harness output, but it carries

@@ -541,7 +541,11 @@ function promptClusterRow(cluster) {
     label: {
       name: label.name, source: label.source,
       ...(typeof label.descriptor === 'string' ? { descriptor: label.descriptor } : {}),
+      ...(typeof label.intent === 'string' ? { intent: label.intent } : {}),
+      ...(typeof label.topic === 'string' ? { topic: label.topic } : {}),
     },
+    intent: label.intent ?? (cluster.class === 'question' ? 'Question' : 'Unclassified'),
+    topic: label.topic ?? null,
     class: cluster.class,
     count: cluster.size,
     sessions: cluster.sessions.size,

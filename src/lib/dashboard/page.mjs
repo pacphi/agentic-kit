@@ -516,9 +516,10 @@ export function renderPage({ name, version }) {
 
     <section class="view" id="v-prompts" role="tabpanel" aria-labelledby="usage-tab-prompts" hidden>
       <div class="note"><span class="i">&#8505;</span><span>What you actually type, across every host.
-        Every figure here is computed from prompt <b>fingerprints</b> &mdash; a hash, a token count, and a
-        provenance tag recorded at scan time. <b>No prompt text is stored in the index or served by this
-        view.</b> Only turns a person typed are counted; agent deliveries, tool templates and slash records
+        Every figure here is computed from prompt <b>fingerprints</b> &mdash; hashes, counts, provenance, and
+        bounded intent/topic codes recorded at scan time. <b>No prompt text is stored in the index or served by this
+        view.</b> Semantic names require repeated majority evidence; unknown vocabulary stays unclassified.
+        Only turns a person typed are counted; agent deliveries, tool templates and slash records
         are filtered out before anything below is measured.</span></div>
       <div class="hero" id="u-pr-kpis"></div>
       <section class="strip">
@@ -538,14 +539,10 @@ export function renderPage({ name, version }) {
       </section>
       <section class="strip">
         <div class="sh"><h2>Host interplay</h2>
-          <span class="pr-infodot" tabindex="0" role="note" aria-label="About the host interplay figures">?
-            <span class="pr-tip"><b>Where you over-steer.</b> <b>Tap share</b> &mdash; how often you nudge
-              (&ldquo;done?&rdquo;) instead of writing a full instruction. <b>p90 length</b> &mdash; how long
-              your prompts run on that host. <b>Role openers</b> &mdash; how often you re-type a persona.
-              <br><br>Histories are unequal: a host adopted recently has fewer days behind its numbers, so
-              read each host against itself, not the other.</span>
-          </span>
           <span class="n mono" id="u-pr-hosts-note"></span></div>
+        <p class="strip-copy" id="u-pr-hosts-copy"><b>How to read this:</b> Tap share is how often you nudge
+          with a short follow-up; p90 length is the 90th-percentile prompt length; role openers count prompts
+          that begin by assigning a persona. Compare each host with itself because retained histories may cover different dates.</p>
         <div id="u-pr-hosts"></div>
       </section>
     </section>
@@ -554,13 +551,15 @@ export function renderPage({ name, version }) {
       <div class="note"><span class="i">&#8505;</span><span><b>Runtime-observed transcript snapshots.</b>
         Context pressure is shown only when a host recorded prompt input and its context window together.
         Partial and not-recorded states stay explicit; published catalogue maxima are never substituted for missing runtime evidence.
-        This projection keeps counts and bounded distributions only &mdash; no prompt or transcript text.</span></div>
+        This projection keeps counts, bounded distributions, and the same sanitized session labels used by the local Sessions view
+        &mdash; no prompt bodies or transcript turns.</span></div>
       <div class="ctx-policy" id="u-ctx-policy" aria-label="Context budget policy"></div>
       <div class="ctx-summary" id="u-ctx-summary" role="status" aria-live="polite"></div>
       <div class="ctx-grid" id="u-ctx-hosts"></div>
       <section class="strip">
-        <div class="sh"><h2>Sessions needing attention</h2><span class="n mono">bounded to 20 &middot; privacy-safe identifiers</span></div>
-        <div class="ctx-attention" id="u-ctx-attention"></div>
+        <div class="sh"><h2 id="u-ctx-attention-title">Sessions needing attention</h2><span class="n mono">top 20 sessions &middot; local labels</span></div>
+        <p class="strip-copy">Groups use project and conversation labels. Recommendations name the action for the highest policy threshold crossed; they do not prove a handoff or compaction occurred.</p>
+        <div class="ctx-attention" id="u-ctx-attention" role="region" aria-labelledby="u-ctx-attention-title" tabindex="0"></div>
       </section>
       <div class="foot">evidence: runtime-observed input/window pairs from retained local session telemetry &middot; policy: agentic-kit context budget v1</div>
     </section>
@@ -569,25 +568,34 @@ export function renderPage({ name, version }) {
       <div class="sr-only" id="u-hook-status" role="status" aria-live="polite" aria-atomic="true"></div>
       <div class="note"><span class="i">&#8505;</span><span><b>Read-only configuration audit.</b>
         Opening this view inspects configured hooks but never executes, edits, heals, enables, or disables one.
-        Commands, source paths, hook output, and diagnostic prose are removed server-side before delivery.</span></div>
-      <div class="hook-grid">
-        <section class="strip">
-          <div class="sh"><h2>Configuration evidence</h2><span class="n mono">static audit &middot; host=all</span></div>
-          <div id="u-hook-config"></div>
-        </section>
-        <section class="strip">
-          <div class="sh"><h2>Stop configuration</h2><span class="n mono">definition diagnostics only</span></div>
-          <div id="u-hook-stop"></div>
-        </section>
-      </div>
+        The summary contains no commands or physical paths. A source location and masked definition are fetched only when you explicitly inspect an audited placement.</span></div>
+      <section class="strip">
+        <div class="sh"><h2>What is configured</h2><span class="n mono">static audit &middot; host=all</span></div>
+        <p class="strip-copy">An entry is one configured placement. Distinct behaviors normalize equivalent definitions; repeated placements are additional entries with the same behavior. Unreadable sources could not be inspected.</p>
+        <div id="u-hook-config"></div>
+      </section>
+      <section class="strip">
+        <div class="sh"><h2 id="u-hook-definitions-title">Hook definitions</h2><span class="n mono">grouped behavior &middot; physical placements</span></div>
+        <p class="strip-copy">Expand a definition to see where each placement is configured, who owns it, and whether selection was established. Source inspection is navigation, not permission to edit.</p>
+        <div id="u-hook-stop"></div>
+      </section>
       <section class="strip">
         <div class="sh"><h2>Runtime outcomes</h2><span class="n mono">bounded execution receipts &middot; separate from configuration</span></div>
         <div id="u-hook-runtime"></div>
       </section>
       <section class="strip">
-        <div class="sh"><h2>Diagnostics &amp; ownership</h2><span class="n mono">sanitized codes &middot; remediation authority</span></div>
+        <div class="sh"><h2>Findings needing attention</h2><span class="n mono">plain language &middot; evidence-bound next steps</span></div>
         <div id="u-hook-diagnostics"></div>
       </section>
+      <section class="strip">
+        <div class="sh"><h2>Evidence limits</h2><span class="n mono">unknown stays unknown</span></div>
+        <div id="u-hook-limits"></div>
+      </section>
+      <dialog class="hook-source-dialog" id="u-hook-source-dialog" aria-labelledby="u-hook-source-title">
+        <div class="hook-source-head"><h2 id="u-hook-source-title">Audited hook source</h2><button type="button" id="u-hook-source-close" aria-label="Close hook source">Close</button></div>
+        <p class="strip-copy">This is a read-only, server-masked view of the exact source that was audited. Viewing it does not grant permission to edit or heal it.</p>
+        <div id="u-hook-source-detail" aria-live="polite"></div>
+      </dialog>
       <div class="foot">evidence: read-only normalized hook audit plus any bounded runtime receipts available to this process</div>
     </section>
 
@@ -607,7 +615,7 @@ export function renderPage({ name, version }) {
       <div class="mli-attention" id="mli-attention" role="status" aria-live="polite"></div>
       <section class="strip" id="mli-observed-panel">
         <div class="sh"><h2>Observed in this window</h2><span class="n mono" id="mli-observed-note"></span></div>
-        <p class="mli-copy">Successful local transcript evidence for the selected Usage window. This is actual use, whether or not the model is pinned to a route.</p>
+        <p class="strip-copy">Successful local transcript evidence for the selected Usage window. This is actual use, whether or not the model is pinned to a route.</p>
         <div class="mli-table-wrap" role="region" aria-label="Models observed in the selected Usage window" tabindex="0"><table class="mli-table mli-observed-table">
           <caption class="sr-only">Models observed in retained sessions for the selected Usage window.</caption>
           <thead><tr><th scope="col">Model</th><th scope="col">Model provider</th><th scope="col">Used via</th><th scope="col">Sessions</th><th scope="col">Last used</th></tr></thead>
@@ -616,7 +624,7 @@ export function renderPage({ name, version }) {
       </section>
       <section class="strip mli-routes-panel">
         <div class="sh"><h2>Your routes</h2><span class="n mono" id="mli-asof"></span></div>
-        <p class="mli-copy">Configured routes and fallbacks. Last used comes from the selected Usage window; catalogue-only models are kept below.</p>
+        <p class="strip-copy">Configured routes and fallbacks. Last used comes from the selected Usage window; catalogue-only models are kept below.</p>
         <div class="mli-table-wrap" role="region" aria-label="Your model routes; scroll in either direction for every route" tabindex="0"><table class="mli-table mli-routes-table">
           <caption class="sr-only">Configured model routes, providers, observed use, and API-equivalent pricing.</caption>
           <thead><tr>

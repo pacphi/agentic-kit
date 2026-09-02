@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { createHash } from 'node:crypto';
 
 import { startDashboard } from '../../src/lib/dashboard-server.mjs';
 import { JS } from '../../src/lib/dashboard/client.mjs';
@@ -35,7 +39,7 @@ test('Usage rail and tabpanels expose Score, Limits, Findings, Prompts, Context,
     'Context visibly labels the evidence it can and cannot claim');
   assert.match(PAGE, /Read-only configuration audit/,
     'Hooks visibly labels its read-only evidence boundary');
-  assert.match(PAGE, /Stop configuration/);
+  assert.match(PAGE, /Hook definitions/);
   assert.match(PAGE, /Runtime outcomes/);
 });
 
@@ -54,6 +58,42 @@ test('Context and Hooks ship lazy renderers, explicit unknown meters, and respon
   assert.match(CSS, /\.ctx-grid/);
   assert.match(CSS, /\.hook-grid/);
   assert.match(CSS, /@media\(max-width:720px\)[^{]*\{[^}]*\.ctx-grid/s);
+});
+
+test('Hooks uses semantic tables, visible definitions, and evidence-gated actions', () => {
+  for (const heading of ['Lifecycle point', 'Definition', 'Host', 'Configured in', 'Placements', 'Findings']) {
+    assert.match(JS, new RegExp(`<th scope="col">${heading}<\\/th>`));
+  }
+  for (const heading of ['Importance', 'Finding', 'Lifecycle point', 'Host', 'Affected definitions', 'Owner', 'Next step']) {
+    assert.match(JS, new RegExp(`<th scope="col">${heading}<\\/th>`));
+  }
+  assert.match(PAGE, /What is configured/);
+  assert.match(PAGE, /Hook definitions/);
+  assert.match(PAGE, /Findings needing attention/);
+  assert.match(PAGE, /Evidence limits/);
+  assert.match(JS, /Preview repair/);
+  assert.match(JS, /finding\.action\?/,
+    'the renderer must not fabricate an action for every finding');
+  assert.doesNotMatch(JS, /host\|\|"unknown"\)\+' × '/,
+    'host × count is not meaningful occurrence language');
+  assert.match(CSS, /\.hook-table-wrap[^}]*overflow-x:auto/);
+});
+
+test('Context attention uses grouped semantic tables, actionable policy labels, and direct session links', () => {
+  assert.match(PAGE, /<h2 id="u-ctx-attention-title">Sessions needing attention<\/h2>/);
+  assert.match(PAGE, /id="u-ctx-attention"[^>]*role="region"[^>]*aria-labelledby="u-ctx-attention-title"[^>]*tabindex="0"/);
+  assert.match(JS, /<details class="ctx-att-group"/);
+  assert.match(JS, /<summary/);
+  for (const heading of [
+    'Session', 'Host', 'Recommended action', 'Peak pressure', 'Peak input', 'Context window', 'Started',
+  ]) assert.match(JS, new RegExp(`<th scope="col">${heading}<\\/th>`));
+  assert.match(JS, /href="#usage\//);
+  assert.match(JS, /encodeURIComponent\(id\)/);
+  assert.match(JS, /Start a new session/);
+  assert.doesNotMatch(JS, /ctx-att-state[^\n]+esc\(row\.state/,
+    'raw policy codes such as handoff are not presented as events that happened');
+  assert.match(CSS, /\.ctx-att-group summary:focus-visible/);
+  assert.match(CSS, /\.ctx-att-table-wrap[^}]*overflow-x:auto/);
 });
 
 test('/api/hooks is authenticated, lazy, sanitized, cached, single-flight, and host-bounded', async () => {
@@ -118,11 +158,14 @@ test('/api/hooks is authenticated, lazy, sanitized, cached, single-flight, and h
     assert.deepEqual(JSON.parse(first.body), JSON.parse(second.body));
 
     const payload = JSON.parse(first.body);
-    assert.equal(payload.summary.configuredHooks, 2);
+    assert.equal(payload.schemaVersion, 2);
+    assert.equal(payload.summary.configuredEntries, 1);
+    assert.equal(payload.summary.distinctBehaviors, 1);
     assert.equal(payload.summary.executions, 1);
     assert.equal(payload.summary.failures, 1);
-    assert.equal(payload.actions.upstreamRequired, 1);
-    assert.equal(payload.diagnostics[0].event, 'Stop');
+    assert.equal(payload.findings[0].lifecyclePoint, 'Stop');
+    assert.equal(payload.findings[0].action, null,
+      'a provider proposal is not presented as an action without an executable healing plan');
     assert.equal(payload.runtime.recent[0].verb, 'Stop');
     assert.equal(first.body.includes(secret), false, 'paths, commands, output, and diagnostic prose stay server-side');
 
@@ -135,5 +178,63 @@ test('/api/hooks is authenticated, lazy, sanitized, cached, single-flight, and h
       'Context rides the existing Usage aggregate; it does not need another endpoint or collector');
   } finally {
     await server.close();
+  }
+});
+
+test('/api/hooks/source resolves only audited opaque refs, masks definitions, and rejects drift', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-hook-source-'));
+  const file = path.join(root, 'settings.json');
+  const document = { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'TOKEN=super-secret node stop.cjs', timeout: 5 }] }] } };
+  fs.writeFileSync(file, JSON.stringify(document));
+  const digest = createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+  const record = {
+    occurrenceId: 'source-occurrence', behaviorFingerprint: 'source-behavior', host: 'claude',
+    event: 'Stop', matcher: '', type: 'command', indices: { group: 0, hook: 0 }, handler: {},
+    command: { normalized: 'TOKEN=<redacted> node stop.cjs', redacted: true },
+    timeout: { declared: 5, effective: 5, units: 'seconds', status: 'valid-or-default' },
+    source: { file, baseDir: root, digest, sourceKind: 'global', authority: 'user-owned', generatedStatus: 'direct', owner: 'user' },
+    diagnostics: [], sideEffects: [], selected: true,
+  };
+  const hooks = async () => ({ audit: {
+    auditId: 'audit-source', mode: 'read-only', hosts: ['claude'], runtimeVersions: { claude: 'test' },
+    reports: { claude: {
+      hostSchema: { confidence: 'syntax-only' }, sources: [{ file, status: 'valid', digest }], records: [record], plan: [],
+      summary: { sources: 1, invalidSources: 0, hookOccurrences: 1, uniqueBehaviors: 1 },
+      coverage: { status: 'partial', gaps: [] },
+    } },
+  }, receipts: [] });
+  const usage = {
+    readIndex: async () => ({ context: null, sessions: [], projectTree: [], totals: {} }),
+    readProviderAnalytics: async () => ({ openrouter: null }),
+    maskSecrets: (value) => String(value).replace(/super-secret/g, '…redacted'),
+  };
+  const server = await startDashboard({ port: 0, fetchStatus: async () => ({ rows: [] }), hooks, usage });
+  try {
+    const summary = await get(`${server.url}api/hooks?host=all`, server.token);
+    const ref = JSON.parse(summary.body).definitionGroups[0].placements[0].source.ref;
+    assert.match(ref, /^[a-f0-9]{32}$/);
+    assert.equal(summary.body.includes(file), false, 'the summary does not expose the physical path');
+
+    const denied = await get(`${server.url}api/hooks/source/${ref}`);
+    assert.equal(denied.status, 401);
+    const arbitrary = await get(`${server.url}api/hooks/source/${ref}?path=/etc/passwd`, server.token);
+    assert.equal(arbitrary.status, 400);
+    const missing = await get(`${server.url}api/hooks/source/${'a'.repeat(32)}`, server.token);
+    assert.equal(missing.status, 404);
+
+    const detail = await get(`${server.url}api/hooks/source/${ref}`, server.token);
+    assert.equal(detail.status, 200);
+    const payload = JSON.parse(detail.body);
+    assert.equal(payload.location.absolutePath, file);
+    assert.equal(payload.location.selector, '/hooks/Stop/0/hooks/0');
+    assert.equal(payload.definition.command.includes('super-secret'), false);
+    assert.equal(payload.redacted, true);
+
+    fs.writeFileSync(file, JSON.stringify({ changed: true }));
+    const drift = await get(`${server.url}api/hooks/source/${ref}`, server.token);
+    assert.equal(drift.status, 409);
+  } finally {
+    await server.close();
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });

@@ -20,11 +20,11 @@ const observed = ({ first, last, peak, window, firstBps, lastBps, peakBps }) => 
   },
 });
 
-test('buildContextProjection folds evidence without retaining prompt or transcript content', () => {
+test('buildContextProjection folds evidence and publishes bounded local navigation labels', () => {
   const sessions = [
     {
       id: 'cx', host: 'codex', project: 'agentic-kit', start: '2026-09-01T00:00:00.000Z',
-      title: 'secret title',
+      title: 'Context audit\u202e conversation',
       contextEvidence: observed({
         first: 10_000, last: 80_000, peak: 90_000, window: 100_000,
         firstBps: 1_000, lastBps: 8_000, peakBps: 9_000,
@@ -50,7 +50,7 @@ test('buildContextProjection folds evidence without retaining prompt or transcri
     generatedAt: '2026-09-02T00:00:00.000Z', windowDays: 7,
   });
 
-  assert.equal(projection.schemaVersion, 1);
+  assert.equal(projection.schemaVersion, 2);
   assert.equal(projection.generatedAt, '2026-09-02T00:00:00.000Z');
   assert.equal(projection.windowDays, 7);
   assert.deepEqual(projection.policy, CONTEXT_POLICY);
@@ -74,10 +74,16 @@ test('buildContextProjection folds evidence without retaining prompt or transcri
   assert.equal(projection.attention.length, 1);
   assert.deepEqual(Object.keys(projection.attention[0]).sort(), [
     'firstBps', 'firstInputTokens', 'host', 'id', 'lastBps', 'lastInputTokens',
-    'peakBps', 'peakInputTokens', 'project', 'start', 'state', 'windowTokens',
+    'peakBps', 'peakInputTokens', 'project', 'sessionRef', 'start', 'state', 'title',
+    'windowTokens',
   ]);
-  assert.equal(JSON.stringify(projection).includes('secret title'), false,
-    'the Context projection contains no title, prompt, turn, or transcript content');
+  assert.equal(projection.attention[0].title, 'Context audit conversation',
+    'display labels strip unsafe controls before reaching the dashboard');
+  assert.match(projection.attention[0].sessionRef, /^codex-[0-9a-f]{12}$/);
+  assert.equal(projection.attention[0].sessionRef.includes('cx'), false,
+    'the visible reference is deterministic and does not expose the raw route id');
+  assert.equal(JSON.stringify(projection).includes('prompt text'), false,
+    'the projection adds bounded session labels, never prompt bodies or transcript turns');
 });
 
 test('Context attention is deterministic, severity-sorted, and hard bounded', () => {

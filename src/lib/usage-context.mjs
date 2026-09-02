@@ -1,8 +1,12 @@
 // usage-context.mjs — a bounded, privacy-preserving projection over normalized
 // per-session context evidence. It contains no transcript parsing and retains
-// no prompt/title/turn text. Policy comes from the Context Budget domain so
+// no prompt/turn bodies. It carries the same bounded, sanitized local session
+// labels already exposed by the authenticated Sessions view so attention rows
+// can be grouped and opened. Policy comes from the Context Budget domain so
 // runtime decisions and historical projections cannot drift.
+import { createHash } from 'node:crypto';
 import { CONTEXT_BUDGET_POLICY } from './context-budget.mjs';
+import { stripUnsafeChars } from './text-safety.mjs';
 
 export const CONTEXT_POLICY = CONTEXT_BUDGET_POLICY;
 
@@ -136,7 +140,10 @@ function attentionRow(session) {
   return {
     id: String(session.id ?? ''),
     host: HOSTS.includes(session.host) ? session.host : 'unknown',
-    project: String(session.project ?? 'unknown').slice(0, 128),
+    project: stripUnsafeChars(session.project ?? 'unknown').slice(0, 128),
+    title: stripUnsafeChars(session.title ?? '').slice(0, 100) || '(untitled conversation)',
+    sessionRef: `${HOSTS.includes(session.host) ? session.host : 'session'}-${createHash('sha256')
+      .update(`${session.host ?? 'unknown'}\0${session.id ?? ''}`).digest('hex').slice(0, 12)}`,
     start: typeof session.start === 'string' ? session.start : null,
     firstInputTokens: numberOrNull(evidence.input?.first),
     lastInputTokens: numberOrNull(evidence.input?.last),
@@ -158,7 +165,7 @@ export function buildContextProjection(sessions, { generatedAt = null, windowDay
       || (b.firstBps ?? -1) - (a.firstBps ?? -1)
       || a.id.localeCompare(b.id)).slice(0, CONTEXT_ATTENTION_LIMIT);
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt: typeof generatedAt === 'string' ? generatedAt : null,
     windowDays: windowDays !== null && windowDays !== undefined && Number.isFinite(Number(windowDays))
       ? Number(windowDays) : null,

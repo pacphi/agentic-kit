@@ -2,15 +2,15 @@
 // (the Repeated-patterns panel, METRICS.md §21; research findings §4–§5).
 //
 // Every function here is PURE: it takes a collection of fingerprints and
-// returns counts, ids and sets. There is no I/O, no clock, no import beyond
-// what the language gives — which is what makes the whole view "recalculable"
+// returns counts, ids and sets. There is no I/O or clock; the only import is
+// the closed semantic enum vocabulary. That is what makes the whole view "recalculable"
 // in the spec's sense (§6.1): the same corpus yields the same numbers on every
 // scan, and nothing is stored between them.
 //
 // THE INPUT SHAPE. Each entry is one prompt-kind turn's fingerprint, decorated
 // by the caller with where it happened:
 //
-//     { h, t, th, p, q?, o?, sessionId, day, host }
+//     { h, t, th, p, q?, o?, i?, d?, sessionId, day, host }
 //
 //   h          sha256(normalizedText)[0..16) — EXACT, never sketched
 //   t          normalized token count, repeats included
@@ -27,6 +27,7 @@
 // NO PROMPT TEXT EXISTS HERE TO LEAK. The fingerprint layer is the privacy
 // contract (ADR-0039 "F1 fingerprints"); this module consumes it and emits only hashes, ids,
 // counts and sets, pinned structurally by the tests.
+import { PROMPT_INTENTS, PROMPT_TOPICS } from './usage-prompt-semantics.mjs';
 
 /**
  * The sketch capacity — how many token hashes one fingerprint can carry. It
@@ -53,6 +54,8 @@ const RARE_SHARE = 0.05;
  * @property {string} [p] Provenance tag (usage-provenance).
  * @property {boolean} [q] true = question, false = instruction; absent = unclassified.
  * @property {boolean} [o] true = the prompt opens by assigning the model a persona.
+ * @property {string} [i] Controlled intent code.
+ * @property {string} [d] Controlled topic/domain code.
  * @property {string} [sessionId]
  * @property {string} [day]
  * @property {string} [host]
@@ -86,6 +89,8 @@ const RARE_SHARE = 0.05;
  * @property {number} qKnown Members carrying a `q` flag at all.
  * @property {number} personas Members flagged `o === true`.
  * @property {'question'|'other'|'mixed'|'unknown'} class
+ * @property {{ id: string, count: number, share: number }|null} intent
+ * @property {{ id: string, count: number, share: number }|null} topic
  */
 
 /** A sketch prepared for repeated comparison: the sorted array and its Set. */
@@ -458,19 +463,47 @@ function buildCluster(members) {
     sessions: new Set(), days: new Set(), hosts: new Set(),
     tokens: tokenStats(members),
     questions: 0, instructions: 0, qKnown: 0, personas: 0,
-    class: 'unknown',
+    class: 'unknown', intent: null, topic: null,
   });
+  const intents = new Map(), topics = new Map(), pairs = new Map();
+  const validIntents = new Set(PROMPT_INTENTS), validTopics = new Set(PROMPT_TOPICS);
   for (const m of members) {
     addSpan(cluster, m);
     if (m.q === true) { cluster.questions++; cluster.qKnown++; }
     else if (m.q === false) { cluster.instructions++; cluster.qKnown++; }
     if (m.o === true) cluster.personas++;
+    const intent = validIntents.has(m.i) ? m.i : null;
+    const topic = validTopics.has(m.d) ? m.d : null;
+    if (intent) intents.set(intent, (intents.get(intent) ?? 0) + 1);
+    if (topic) topics.set(topic, (topics.get(topic) ?? 0) + 1);
+    if (intent && topic) {
+      const key = `${intent}:${topic}`;
+      pairs.set(key, (pairs.get(key) ?? 0) + 1);
+    }
   }
   cluster.sessions = sortedSet(cluster.sessions);
   cluster.days = sortedSet(cluster.days);
   cluster.hosts = sortedSet(cluster.hosts);
   cluster.class = classifyCluster(cluster);
+  const intent = majorityFacet(intents, members.length);
+  const topic = majorityFacet(topics, members.length);
+  if (intent && topic && majorityFacet(pairs, members.length)?.id !== `${intent.id}:${topic.id}`) {
+    if (intent.count >= topic.count) cluster.intent = intent;
+    else cluster.topic = topic;
+  } else {
+    cluster.intent = intent;
+    cluster.topic = topic;
+  }
   return cluster;
+}
+
+/** A semantic facet needs repeated, 60%+ support; ties and one-offs are silent. */
+function majorityFacet(counts, size) {
+  if (!(counts instanceof Map) || size < 2) return null;
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1] || cmp(a[0], b[0]));
+  if (!ranked.length || ranked[0][1] < 2 || ranked[0][1] / size < 0.6) return null;
+  if (ranked[1] && ranked[1][1] === ranked[0][1]) return null;
+  return { id: ranked[0][0], count: ranked[0][1], share: ranked[0][1] / size };
 }
 
 /** Token-count spread. The median is the LOWER of the two middles on an even

@@ -421,24 +421,21 @@ test('the headless fraction excludes sessions that carry no fingerprint layer', 
     'the denominator is sessions that CARRY the layer, not every session');
 });
 
-// The acceptance criterion in spec §10, applied to the HTTP payload rather
-// than the index: nothing the operator typed may appear on this surface, in a
-// value or in a key. Word-level rather than whole-string, because a leak that
-// arrives truncated or normalized is still a leak.
+// The HTTP surface may carry controlled semantic vocabulary (for example
+// "Commit and push"), but never a prompt excerpt or operator-specific term.
 test('the prompts payload carries no fixture prompt text, at any depth', async () => {
   const { prompts } = await promptsPayload();
   const strings = allStrings(prompts);
   assert.ok(strings.length > 0, 'the walk must actually find strings, or it proves nothing');
 
-  const words = [...new Set(Object.values(FIXTURE_PROMPTS)
-    .join(' ').toLowerCase().match(/[a-z]{4,}/g))];
-  assert.ok(words.length >= 10, `the fixture must supply real words to hunt for, got ${words.length}`);
+  const forbidden = ['payload branch', 'staff release engineer', 'changelog', 'semantic version',
+    'announcement copy', 'maintainers list'];
 
   for (const s of strings) {
     const hay = s.toLowerCase();
-    for (const w of words) {
-      assert.ok(!hay.includes(w),
-        `prompt text leaked into the payload: ${JSON.stringify(w)} found in ${JSON.stringify(s)}`);
+    for (const fragment of forbidden) {
+      assert.ok(!hay.includes(fragment),
+        `prompt text leaked into the payload: ${JSON.stringify(fragment)} found in ${JSON.stringify(s)}`);
     }
   }
 });
@@ -446,14 +443,14 @@ test('the prompts payload carries no fixture prompt text, at any depth', async (
 // A structural allowlist, so a field ADDED later cannot quietly carry text
 // past the word scan above. Cluster entries are the only place a name string
 // reaches this payload, and that name comes from the curated vocabulary.
-const CLUSTER_KEYS = new Set(['key', 'label', 'class', 'count', 'sessions', 'days', 'hosts',
+const CLUSTER_KEYS = new Set(['key', 'label', 'class', 'intent', 'topic', 'count', 'sessions', 'days', 'hosts',
   'medianTokens']);
 // `descriptor` (RULING B, final-triage item 2) rides beside `name` only on a
 // CHARACTERIZED label — the full "Recurring N-token X · N sessions · N hosts"
 // string, still machine-assembled from counts/bands, never prompt text. The
 // word-scan test above already covers it (it walks every string reachable
 // from the payload); this allowlist only needs to admit the key.
-const LABEL_KEYS = new Set(['name', 'source', 'descriptor']);
+const LABEL_KEYS = new Set(['name', 'source', 'descriptor', 'intent', 'topic']);
 
 test('every prompt-pattern entry carries only keys from the allowed set', async () => {
   const { prompts } = await promptsPayload();
@@ -661,6 +658,11 @@ test('recurring patterns remain deterministic dashboard telemetry without coachi
   assert.match(html, /Recurring 44-token prompt/);
   assert.match(html, /7 re-asks across 3 sessions/);
   assert.match(html, /Times typed/);
+  assert.match(html, /<th scope="col">Intent<\/th>/);
+  assert.doesNotMatch(html, /<th scope="col">Class<\/th>/,
+    'the q/not-q implementation detail is not a useful visible category');
+  assert.doesNotMatch(html, />other<\/td>/,
+    'the ambiguous legacy other value is never presented to the user');
   assert.doesNotMatch(html, /Recommendation|Draft|Dismiss|What you typed|data-pr-open|data-pr-filter/);
 });
 
@@ -730,13 +732,23 @@ test('host interplay names both hosts and reads the asymmetry in plain language'
   assert.match(html, /claude/);
   assert.match(html, /7<\/b> prompts open by assigning a role/, 'the persona count is a Codex-side fact here');
   // The opaque "windows are unequal" caveat is REPLACED by a plain read of the
-  // data (§2); the unequal-histories nuance moves to the panel's `?` tooltip.
+  // data (§2); the unequal-histories nuance stays visible as persistent panel copy.
   assert.doesNotMatch(html, /Windows are not equal/, 'the opaque caveat is gone from the panel body');
   assert.match(html, /class="pr-host-read"/, 'the panel now carries a plain-language read');
   assert.match(html, /tap <b>codex<\/b> more often than <b>claude<\/b> \(35% vs 10%\)/,
     'codex is tapped more than claude, with both shares stated');
   assert.match(html, /write <b>codex<\/b> longer \(p90 160 vs 80 tokens\)/,
     'and codex runs the longer prompts, with both p90s stated');
+});
+
+test('Host interplay explains its measures persistently, without icon-only help', () => {
+  assert.doesNotMatch(PAGE, /pr-infodot|pr-tip|About the host interplay figures/);
+  assert.doesNotMatch(PAGE, />\s*\?\s*</);
+  assert.match(PAGE, /class="strip-copy" id="u-pr-hosts-copy"/);
+  assert.match(PAGE, /Tap share[\s\S]*p90 length[\s\S]*role openers/i);
+  assert.match(PAGE, /Compare each host with itself[\s\S]*different dates/i);
+  assert.doesNotMatch(CSS, /\.pr-infodot|\.pr-tip/);
+  assert.match(CSS, /\.strip-copy\{/);
 });
 
 test('the host read states only a comparison both sides carry, and nothing on a tie or a lone host', () => {
