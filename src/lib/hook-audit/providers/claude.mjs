@@ -2,7 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
-  isRecord, normalizedOccurrence, publicSource, readJsonSource, sha256,
+  isRecord, normalizedOccurrence, publicSource, readBoundedFile, readJsonSource, sha256,
   stableJson, summarizeHostReport,
 } from '../common.mjs';
 
@@ -19,6 +19,14 @@ const MANAGED = Object.freeze({
   linux: '/etc/claude-code/managed-settings.json',
   win32: 'C:\\Program Files\\ClaudeCode\\managed-settings.json',
 });
+
+const AQE_UPSTREAM = Object.freeze({
+  dependency: 'agentic-qe',
+  owner: 'proffesor-for-testing/agentic-qe',
+  publication: 'explicit-user-approval-required',
+});
+const AQE_SHIM_RELATIVE = path.join('.claude', 'hooks', 'aqe-hook.cjs');
+const AQE_SHIM_COMMAND = /\.claude[\\/]hooks[\\/]aqe-hook\.cjs(?:["']|\s|$)/;
 
 function validateDocument(document, { strict = true } = {}) {
   if (!isRecord(document)) return 'settings must be an object';
@@ -141,6 +149,52 @@ function timeoutFor(hook, verified, event, sourceKind) {
   };
 }
 
+/** Recognize only the Agentic-QE-generated runner shape that declares both
+ * project-local bundle candidates and the npx fallback. Merely naming a file
+ * `aqe-hook.cjs` is not ownership proof. The fallback is considered active
+ * only when both local candidates are absent; refused/invalid paths remain
+ * unknown and produce no hot-path finding. */
+function inspectAqeShim(source, command) {
+  if (!AQE_SHIM_COMMAND.test(command) || typeof source.baseDir !== 'string') return null;
+  const helperFile = path.join(source.baseDir, AQE_SHIM_RELATIVE);
+  const helper = readBoundedFile(helperFile, source.baseDir);
+  if (helper.status !== 'valid') return null;
+  const exactGeneratorShape = helper.text.includes("'node_modules', 'agentic-qe', 'dist', 'cli', 'bundle.js'")
+    && helper.text.includes("'dist', 'cli', 'bundle.js'")
+    && helper.text.includes("['-y', '--prefer-offline', 'agentic-qe', 'hooks'");
+  if (!exactGeneratorShape) return null;
+  const localCandidates = [
+    path.join(source.baseDir, 'node_modules', 'agentic-qe', 'dist', 'cli', 'bundle.js'),
+    path.join(source.baseDir, 'dist', 'cli', 'bundle.js'),
+  ].map((file) => readBoundedFile(file, source.baseDir, 1).status);
+  return {
+    helperFile,
+    helperDigest: helper.digest,
+    npxFallbackActive: localCandidates.every((status) => status === 'absent'),
+  };
+}
+
+function aqeDiagnostics(hook, source, command, verified) {
+  const integration = inspectAqeShim(source, command);
+  if (!integration) return [];
+  const diagnostics = [];
+  if (integration.npxFallbackActive) diagnostics.push({
+    category: 'reliability', severity: 'warning', code: 'aqe-npx-hot-path-fallback',
+    message: 'Agentic-QE lifecycle hook has no local bundle and resolves through npx on the hook hot path',
+    target: integration.helperFile,
+    evidence: { helperDigest: integration.helperDigest, localBundle: 'absent' },
+  });
+  if (verified && Number.isInteger(hook.timeout) && hook.timeout >= 1000 && hook.timeout % 1000 === 0) {
+    diagnostics.push({
+      category: 'compatibility', severity: 'warning', code: 'aqe-claude-timeout-unit-mismatch',
+      message: `Agentic-QE hook timeout ${hook.timeout} is authored in a millisecond-shaped value, but Claude interprets it as seconds`,
+      target: source.file,
+      evidence: { declared: hook.timeout, hostUnits: 'seconds', helperDigest: integration.helperDigest },
+    });
+  }
+  return diagnostics;
+}
+
 function recordsFrom(source, version) {
   if (source.status !== 'valid') return [];
   if (source.kind === 'plugin-registry' || source.kind === 'plugin-manifest') return [];
@@ -148,11 +202,14 @@ function recordsFrom(source, version) {
   const records = [];
   for (const [event, groups] of Object.entries(source.document.hooks ?? {})) {
     groups.forEach((group, groupIndex) => group.hooks.forEach((hook, hookIndex) => {
+      const command = typeof hook.command === 'string' ? hook.command : '';
+      const aqe = aqeDiagnostics(hook, source, command, verified);
       const diagnostics = [{
         category: 'trust', severity: 'info', code: 'trust-independent',
         message: 'Static audit findings do not establish Claude permission or managed-policy state',
-      }];
-      if (verified && typeof hook.timeout === 'number' && hook.timeout > 600) diagnostics.push({
+      }, ...aqe];
+      if (verified && typeof hook.timeout === 'number' && hook.timeout > 600
+          && !aqe.some((item) => item.code === 'aqe-claude-timeout-unit-mismatch')) diagnostics.push({
         category: 'performance', severity: 'warning', code: 'probable-timeout-unit-mismatch',
         message: `Claude hook timeout ${hook.timeout}s is unusually high; confirm it was not authored as milliseconds`,
       });
@@ -183,17 +240,24 @@ function recordsFrom(source, version) {
 
 function remediation(records) {
   return records.flatMap((record) => {
-    const diagnostic = record.diagnostics.find((item) => [
+    const diagnostics = record.diagnostics.filter((item) => [
       'probable-timeout-unit-mismatch', 'sessionend-timeout-clamped', 'plugin-sessionend-budget-not-raised',
+      'aqe-npx-hot-path-fallback', 'aqe-claude-timeout-unit-mismatch',
     ].includes(item.code));
-    if (!diagnostic) return [];
-    return [{
-    id: `claude-timeout-review-${record.occurrenceId.slice(0, 16)}`,
-    host: 'claude', diagnostic: diagnostic.code, target: record.source.file,
-    classification: record.source.generatedStatus === 'generated' ? 'upstream-required' : 'approval-required',
-    reason: 'Timeout units require source-owner confirmation; changing the definition can change behavior and trust state',
-    trustImpact: 'definition changes require the host to re-evaluate trust or managed policy',
-    }];
+    return diagnostics.map((diagnostic) => {
+      const aqe = diagnostic.code.startsWith('aqe-');
+      return {
+        id: `claude-hook-review-${diagnostic.code}-${record.occurrenceId.slice(0, 16)}`,
+        host: 'claude', diagnostic: diagnostic.code, target: diagnostic.target ?? record.source.file,
+        classification: aqe || record.source.generatedStatus === 'generated'
+          ? 'upstream-required' : 'approval-required',
+        reason: aqe
+          ? 'Exact Agentic-QE integration evidence requires repair in the canonical generator; agentic-kit must not patch generated project files or plugin caches'
+          : 'Timeout units require source-owner confirmation; changing the definition can change behavior and trust state',
+        trustImpact: 'definition changes require the host to re-evaluate trust or managed policy',
+        ...(aqe ? { upstream: AQE_UPSTREAM } : {}),
+      };
+    });
   });
 }
 

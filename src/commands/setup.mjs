@@ -11,6 +11,7 @@ import { run as runCmd, have } from '../lib/exec.mjs';
 import * as heal from '../lib/heal.mjs';
 import { fixStatusline } from '../lib/statusline.mjs';
 import { reconcileGuidance } from '../lib/blocks.mjs';
+import { captureProjectGuidance, reconcileProjectGuidance } from '../lib/project-guidance.mjs';
 import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
 import { reconcileOpencodeGuidance } from '../lib/opencode.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
@@ -70,8 +71,9 @@ export const help = `ak setup — first-time setup (machine and/or this project)
 Machine scope always runs: installs ruflo + agentic-qe globally, deploys the
 token-audit skill, merges the CLAUDE.md managed blocks, and offers MCP. Project
 scope auto-runs when .git exists in the current directory. Project setup runs
-ruflo init --full --force and may replace existing agent configuration; commit
-or back up first. Details: docs/SETUP.md
+\`ruflo init --full --force --no-global --no-codex-detect --no-skills-sh\` and
+the AQE initializer while preserving user-authored CLAUDE.md/AGENTS.md content
+and reconciling only sentinel-owned guidance. Details: docs/SETUP.md
 
 Usage: ak setup [options]
 
@@ -443,11 +445,18 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
   return true;
 }
 
-/** Step 1: `ruflo init --full --force` (--force regenerates; CLAUDE.md
- *  backed up upstream, #2208), then verify it introduced no undisclosed
- *  auto-approve rules. Returns false when run_project must abort. */
+export const RUFLO_PROJECT_INIT_ARGS = Object.freeze([
+  'init', '--full', '--force',
+  // Agentic-kit owns machine guidance and Codex host selection. These Ruflo
+  // escape hatches prevent a project init from creating overlapping surfaces.
+  '--no-global', '--no-codex-detect', '--no-skills-sh',
+]);
+
+/** Step 1: initialize Ruflo project assets without overlapping agentic-kit's
+ *  machine guidance, Codex adapter, or explicit skill projections. The caller
+ *  restores/reconciles project guidance from its pre-init snapshot. */
 async function rufloProjectInit(root, permCtx) {
-  const init = await runCmd('ruflo', ['init', '--full', '--force'], { cwd: root, timeout: 300_000 });
+  const init = await runCmd('ruflo', [...RUFLO_PROJECT_INIT_ARGS], { cwd: root, timeout: 300_000 });
   (init.code === 0 ? ok : fail)('ruflo init --full');
   if (init.code !== 0) return false;
   const rufloUnexpected = removeUndisclosedPermissions(
@@ -538,24 +547,19 @@ async function verifyProjectMemoryWrite(root, env) {
   }
 }
 
-/** Step 8: lean project CLAUDE.md (generic guidance lives machine-wide). */
-function writeLeanProjectClaudeMd(root, flags) {
-  const projectMd = path.join(root, 'CLAUDE.md');
-  if (fs.existsSync(projectMd) && !flags.minimal) {
-    fs.writeFileSync(projectMd, leanStub(path.basename(root)));
-    ok('project CLAUDE.md → lean stub (machine-wide reference carries the rest)');
+function reportProjectGuidance(result) {
+  if (result.action === 'removed-generated') {
+    ok('project guidance: removed initializer-only CLAUDE.md (machine guidance remains authoritative)');
+  } else if (result.action !== 'unchanged') {
+    ok(`project guidance: ${result.action} (${result.bytes} bounded bytes)`);
   }
 }
 
-/** Step 9: agentic-qe in this repo (sentinel first so aqe init skips
- *  duplicate guidance). Returns false when run_project must abort. */
+/** Step 9: agentic-qe in this repo. project-guidance.mjs installs a bounded
+ *  compatibility guard before this call and reconciles again afterward. AQE
+ *  retains ownership of its sentineled Codex block in AGENTS.md. */
 async function initProjectAgenticQe(root, cfg, flags, permCtx) {
   if (!(cfg.aqe && !flags['no-aqe'] && await have('aqe'))) return true;
-  const projectMd = path.join(root, 'CLAUDE.md');
-  const md = fs.existsSync(projectMd) ? fs.readFileSync(projectMd, 'utf8') : '';
-  if (!md.includes('## Agentic QE v3')) {
-    fs.appendFileSync(projectMd, '\n## Agentic QE v3\n<!-- managed by agentic-kit — aqe init skips regeneration when this sentinel is present -->\n');
-  }
   heal.healRvf(paths.projectAqeDir(root));
   // aqe ≥ 3.13.1 with codex enabled → install the Codex-native QE skills too.
   const withCodex = !!cfg.integrations?.hosts?.codex && aqeSupportsAgentOverrides();
@@ -663,6 +667,7 @@ export async function run_project({
     permissionsBefore: new Set(allowRules(permissionsFile)),
     authorizedPermissions: new Set(projectPermissionManifest(cfg).map((entry) => entry.rule)),
   };
+  const priorGuidance = captureProjectGuidance(root);
 
   if (!(await rufloProjectInit(root, permCtx))) return false;
   await sanitizeProjectMcpConfig(root);
@@ -671,27 +676,17 @@ export async function run_project({
   await activateProjectMemoryAndSwarm(root, env);
   await startProjectDaemon(root);
   await verifyProjectMemoryWrite(root, env);
-  writeLeanProjectClaudeMd(root, flags);
-  if (!(await initProjectAgenticQe(root, cfg, flags, permCtx))) return false;
+  const aqeEnabled = !!(cfg.aqe && !flags['no-aqe']);
+  reportProjectGuidance(reconcileProjectGuidance({ root, prior: priorGuidance, aqeEnabled }));
+  const aqeOk = await initProjectAgenticQe(root, cfg, flags, permCtx);
+  // Reassert the pre-init source of truth even if an upstream initializer did
+  // not honor its compatibility guard. This never rewrites AQE's AGENTS block.
+  reportProjectGuidance(reconcileProjectGuidance({ root, prior: priorGuidance, aqeEnabled }));
+  if (!aqeOk) return false;
   await applyProjectProviderStack(cfg, root, migrateRoutes);
   healProjectStatusline(root);
   return true;
 }
-
-const leanStub = (name) => `<!-- Full ruflo reference: machine-wide ~/.claude/CLAUDE.md (managed by agentic-kit) -->
-
-# ${name}
-
-## Swarm Config
-
-- **Topology**: hierarchical-mesh (anti-drift)
-- **Max Agents**: 15
-- **Memory**: hybrid
-
-\`\`\`bash
-ruflo swarm init --topology hierarchical --max-agents 15 --strategy specialized
-\`\`\`
-`;
 
 /** Preflight the deja-vu companion and disclose the full setup trust
  *  manifest (host + project + companion changes), honoring a declined

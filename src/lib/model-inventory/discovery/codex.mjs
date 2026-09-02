@@ -5,6 +5,24 @@ import {
 const VISIBILITY = new Set(['list', 'visible', 'hide', 'hidden']);
 const REASONING = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
 const bounded = (value, max = 256) => typeof value === 'string' && value.length > 0 && value.length <= max ? value : null;
+const positiveSafeInteger = (value) => Number.isSafeInteger(value) && value > 0 ? value : null;
+
+function codexContextVariant(raw) {
+  const contextWindow = positiveSafeInteger(raw.context_window);
+  const maximumContextWindow = positiveSafeInteger(raw.max_context_window);
+  const effectiveContextWindowPercent = Number.isSafeInteger(raw.effective_context_window_percent)
+    && raw.effective_context_window_percent > 0 && raw.effective_context_window_percent <= 100
+    ? raw.effective_context_window_percent : null;
+  return {
+    contextWindow,
+    maximumContextWindow,
+    effectiveContextWindowPercent,
+    effectiveContextWindow: contextWindow !== null && effectiveContextWindowPercent !== null
+      ? Math.floor(contextWindow * effectiveContextWindowPercent / 100) : contextWindow,
+    autoCompactTokenLimit: positiveSafeInteger(raw.auto_compact_token_limit),
+    maxOutputTokens: positiveSafeInteger(raw.max_output_tokens),
+  };
+}
 
 function parseCache(raw) {
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) return structuredClone(raw);
@@ -68,7 +86,7 @@ function codexModelFromCacheEntry(raw, index, config, source) {
       displayName: bounded(raw.display_name) ?? modelId, source,
       variant: {
         reasoningEfforts: codexReasoningEfforts(raw),
-        contextWindow: Number.isInteger(raw.context_window) && raw.context_window > 0 ? raw.context_window : null,
+        ...codexContextVariant(raw),
       },
       // `upgrade` is a local client hint, not a public retirement notice. It
       // must never promote a target model into a lifecycle warning or cause a

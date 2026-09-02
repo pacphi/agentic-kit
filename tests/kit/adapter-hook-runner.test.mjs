@@ -19,6 +19,14 @@ test('happy path: an echo script runs and returns ok with captured stdout', asyn
   assert.equal(result.exitCode, 0);
   assert.equal(result.detail, null);
   assert.ok(result.stdout.includes('hello-hook'), result.stdout);
+  assert.equal(result.outcome, 'success');
+  assert.equal(result.hostId, 'claude');
+  assert.equal(result.verb, 'discover');
+  assert.equal(result.timedOut, false);
+  assert.equal(result.timeoutMs, 30_000);
+  assert.ok(Number.isInteger(result.durationMs) && result.durationMs >= 0);
+  assert.equal(result.stdoutBytes, Buffer.byteLength('hello-hook\n'));
+  assert.equal(result.stderrBytes, 0);
 });
 
 test('argv arrives literally — no shell, so shell metacharacters never execute', async () => {
@@ -46,6 +54,11 @@ test('a nonexistent binary reports ok:false without throwing', async () => {
   assert.equal(result.exitCode, null);
   assert.equal(result.stdout, '');
   assert.ok(typeof result.detail === 'string' && result.detail.length > 0);
+  assert.equal(result.outcome, 'spawn-failed');
+  assert.equal(result.timedOut, false);
+  assert.equal(result.stdoutBytes, 0);
+  assert.equal(result.stderrBytes, 0);
+  assert.ok(Number.isInteger(result.durationMs) && result.durationMs >= 0);
 });
 
 test('a hook that outlives its timeout is killed and reports ok:false with captured-so-far output', async () => {
@@ -59,6 +72,12 @@ test('a hook that outlives its timeout is killed and reports ok:false with captu
   assert.equal(result.exitCode, null);
   assert.ok(result.stdout.includes('before-sleep'), result.stdout);
   assert.ok(/timed out/i.test(result.detail ?? ''), result.detail);
+  assert.equal(result.outcome, 'timed-out');
+  assert.equal(result.timedOut, true);
+  assert.equal(result.timeoutMs, 200);
+  assert.equal(result.stdoutBytes, Buffer.byteLength('before-sleep\n'));
+  assert.equal(result.stderrBytes, 0);
+  assert.ok(result.durationMs >= 150 && result.durationMs < 5_000, result.durationMs);
 });
 
 test('hook.timeoutMs and the caller timeoutMs both apply — the tighter one wins', async () => {
@@ -89,6 +108,9 @@ test('combined stdout+stderr output is capped at 256KB with a truncation marker'
   assert.equal(result.stderrTruncated, false);
   assert.ok(Buffer.byteLength(result.stdout, 'utf8') <= 256 * 1024 + 200);
   assert.ok(/truncated/i.test(result.stdout));
+  assert.equal(result.stdoutBytes, 256 * 1024 + 1,
+    'receipt byte counts saturate one byte above the capture cap instead of growing without bound');
+  assert.equal(result.stderrBytes, 0);
 });
 
 test('env is minimal: PATH is present, an unrelated process.env canary is not', async () => {
@@ -127,6 +149,8 @@ test('a non-zero exit is reported as ok:false with the exit code preserved', asy
   });
   assert.equal(result.ok, false);
   assert.equal(result.exitCode, 7);
+  assert.equal(result.outcome, 'nonzero-exit');
+  assert.equal(result.timedOut, false);
 });
 
 // --- stdin (P2, ADR-0031: worker prompt delivery) ---------------------------

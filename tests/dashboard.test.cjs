@@ -1221,17 +1221,20 @@ async function main() {
   // ── the served page: five primary areas, hierarchical views, poll control ──
   const uiSrv = await startDashboard({ port: 0, cwd: fixture, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api });
   try {
-    await test('served HTML carries the Usage primary area and its six accessible sub-views', async () => {
+    await test('served HTML carries eight Usage views and a session-only Transcript indicator', async () => {
       const r = await get(uiSrv.url);
       contains(r.body, 'data-tab="usage"');
       contains(r.body, '>Usage<');
       contains(r.body, 'id="panel-usage"');
-      for (const v of ['score', 'limits', 'findings', 'sessions', 'models', 'transcript']) {
+      for (const v of ['score', 'limits', 'findings', 'prompts', 'context', 'hooks', 'models', 'sessions']) {
         contains(r.body, 'id="v-' + v + '"');
         contains(r.body, 'data-view="' + v + '"');
         contains(r.body, 'aria-controls="v-' + v + '"');
         contains(r.body, 'aria-labelledby="usage-tab-' + v + '"');
       }
+      contains(r.body, 'id="usage-transcript-indicator" aria-current="page" hidden');
+      contains(r.body, 'id="v-transcript" role="region" aria-labelledby="usage-transcript-indicator"');
+      assert(!r.body.includes('data-view="transcript"'), 'Transcript is current-session state, not navigation');
       contains(r.body, 'id="mli-models"');
       contains(r.body, 'mli-history-scroll');
       contains(r.body, 'mli-history-table');

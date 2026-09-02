@@ -6,7 +6,11 @@
       "slug": "gpt-5.6-terra",
       "display_name": "GPT-5.6 Terra",
       "visibility": "list",
-      "context_window": 1050000,
+      "context_window": 272000,
+      "max_context_window": 872000,
+      "effective_context_window_percent": 95,
+      "auto_compact_token_limit": 240000,
+      "max_output_tokens": 128000,
       "supported_reasoning_levels": [{"effort": "none"}, {"effort": "low"}, {"effort": "medium"}, {"effort": "high"}, {"effort": "xhigh"}, {"effort": "max"}]
     },
     {

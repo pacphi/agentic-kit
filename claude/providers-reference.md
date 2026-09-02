@@ -1,94 +1,29 @@
 <!-- BEGIN ruflo-providers-reference -->
-<!-- ruflo-providers-reference: merged into ~/.claude/CLAUDE.md ONLY when the `codex` CLI
-     is on PATH. Managed by agentic-kit / `ak x reference sync` — stripped automatically
-     when codex is uninstalled. Do not hand-edit between the sentinels. -->
+<!-- Included when Codex is enabled; PATH detection is a legacy fallback. -->
+<!-- Machine-scoped and managed by agentic-kit; do not edit within sentinels. -->
 
-## Frontier hosts & LLM providers (claude / codex)
+## Hosts and inference providers
 
-This machine has **both** frontier-agent CLIs installed. `ak` detects them and wires ruflo +
-agentic-qe to use one or both. Two independent axes:
+Execution host and inference provider are independent facts. `claude`, `codex`,
+`opencode`, and admitted external adapters run work; configured model providers serve
+inference. A host/model route is intent, not proof of the vendor or live capability.
 
-- **Host axis** — which agent CLI runs the *ruflo* loop: `claude` (Claude Code) and/or `codex`
-  (OpenAI Codex). ruflo can run **both at once** in ambidextrous dual-host mode.
-- **Provider axis** — which LLM the *routers* use, independent of the host:
-  - **agentic-qe** — `AQE_LLM_PROVIDER=<type>` selects any of `claude-code` (subscription),
-    `claude` / `openai` / `gemini` / `openrouter` / `azure-openai` / `bedrock` / `cognitum`
-    (metered API key), or `ollama` / `onnx` (local). codex the CLI isn't a provider type, but its
-    OpenAI models are reachable via `openai`; GLM models are reachable via `openrouter`
-    (e.g. `z-ai/glm-5.2`).
-  - **ruflo** — `anthropic` / `openai` / `google` / `ollama` via `ruflo providers configure`.
-  - API keys live in the environment; they are never persisted to `kit.json`.
-
-`ak host` is the namespace for execution-host lifecycle and selection; `ak x host` is its
-plumbing spelling. This does not rename inference providers or bindings into hosts; provider
-controls remain co-located on this workflow while the axes stay distinct.
-
-**One or several — you're never forced to pick just one.** All three surfaces run multiple
-providers concurrently:
-
-- **ruflo hosts** — enable `claude` *and* `codex` together (ambidextrous dual-host mode); ruflo runs both.
-- **ruflo LLM providers** — a list, with load-balancing + automatic failover.
-- **agentic-qe** — its `HybridRouter` **auto-enables every provider that has an API key in the
-  env** and fails over across an ordered chain. `AQE_LLM_PROVIDER` only pins the *default* (the
-  primary) — the others stay enabled. So `ak host` sets aqe's primary; adding
-  `OPENAI_API_KEY` / `GEMINI_API_KEY` to the env brings those online as fallbacks automatically.
-
-### aqe fallback chain — managed from `kit.json`
-
-For **deterministic** ordering (rather than relying on env auto-enable), `ak` writes aqe's
-`.agentic-qe/llm-config.json` from `kit.json`:
+`ak host` persists host, provider, routing, and fallback intent in `kit.json`; `ak sync`
+reconciles owned projections and `ak status` reports evidence and drift. API keys remain
+in the environment and are never written to `kit.json`.
 
 ```bash
-ak host pick --aqe-provider claude-code \
-  --aqe-fallback 'claude-code:claude-opus-5; openai:gpt-5.6; gemini:gemini-3.5-flash'
+ak host status
+ak host pick
+ak host off
+ak run feature "task" --dry-run
 ```
 
-Each `provider:model,model` entry becomes an ordered `fallbackChain` entry (first = highest
-priority; model IDs are examples current as of July 2026 — use what your provider offers).
-ak writes a **complete** chain (aqe merges it shallowly, so partial chains would drop
-defaults), sets each provider `enabled`, and tags the file `_managedBy: agentic-kit`. **API keys
-are never written** — they stay in the env (aqe refuses to persist them anyway). `ak sync`
-reapplies the chain; `ak status` flags drift; `ak host off` restores the pre-ak file from
-its one-time `.bak` (or removes an ak-created file). Entries need populated models — aqe's router
-skips an entry with none. For lower-level edits, `aqe llm-router config` still works.
+Agentic-kit may install an enabled host only when absent and may update installations it
+owns. Homebrew, mise, native-installer, plugin, and other user-owned installations remain
+self-managed. Preserve user-owned MCP entries and optional interactive plugins.
 
-### Managing it (prompts-once, reversible)
-
-```bash
-ak host status   # detected CLIs + versions, what's enabled, what's wired
-ak host pick     # choose ruflo hosts / aqe provider / ruflo API providers → persist → apply
-ak host off      # reset to claude-only default; strip managed env keys
-```
-
-`pick` persists your choice to `kit.json` and applies it: it writes the ruflo backend flags
-(`ENABLE_CLAUDE_CODE` / `ENABLE_CODEX`) and `AQE_LLM_PROVIDER` into
-`.claude/settings.local.json` `env` (merge-not-clobber, backup-first), maintains Codex's
-independent Ruflo integration, and registers any API-key providers with ruflo.
-`ak sync` reapplies the same choice idempotently; `ak status` shows **hosts** and
-**providers** rows and flags drift. At the claude-only default nothing is written — behavior
-is unchanged until you opt in.
-
-When **both** hosts are enabled, `ak` also seeds a **per-activity routing policy** and gives Codex
-Ruflo access via `[mcp_servers.ruflo]`. `--primary-host claude|codex` chooses which host leads
-bounded `ak run` pipelines. OpenAI deprecated the former Claude→`codex mcp-server` projection;
-its Claude Code plugin is an optional user-owned interactive path. See the ambidextrous dual-host
-reference block and `docs/PROVIDERS.md` §3.5.
-
-### Install & update (install-method-aware)
-
-- **First install** — `ak setup` (and `ak host pick`) installs any *enabled* host that
-  is entirely **absent**: `npm i -g @anthropic-ai/claude-code` / `@openai/codex`.
-- **Updates** — `ak sync` keeps **npm-managed** hosts current (drift is detected on the same
-  cached TTL as ruflo/aqe, and surfaces in the bin nudge + `ak status`).
-- **Externally-installed CLIs are never touched.** If a host was installed by mise, the
-  native installer, or Homebrew, ak reports its version and marks it *self-managed* — it will
-  not shadow it with an npm copy or try to update it. Update those with your own tool.
-
-### Grounding (rUv source)
-
-- ruflo **ADR-034 Optional MCP Backends** (accepted): Claude Code / Gemini / OpenAI Codex
-  backends enabled via `ENABLE_CLAUDE_CODE` / `ENABLE_GEMINI_MCP` / `ENABLE_CODEX`.
-- Ruflo's supported Claude Code and OpenAI Codex host backends.
-- `ruflo providers list|configure|test` — the API-key provider matrix.
-
+For fallbacks, budgets, provider IDs, and current models, inspect `ak host status` and the
+project documentation rather than relying on this compact block. Vendor-diverse review
+requires independently evidenced providers; multiple hosts alone are insufficient.
 <!-- END ruflo-providers-reference -->

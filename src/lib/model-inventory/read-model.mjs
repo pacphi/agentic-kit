@@ -134,6 +134,8 @@ const publicSchema = (value) => PUBLIC_SOURCE_SCHEMAS.has(value)
 
 const SAFE_VARIANT_FIELDS = new Set([
   'digest', 'reasoningEffort', 'reasoningEfforts', 'serviceTier', 'contextWindow',
+  'maximumContextWindow', 'effectiveContextWindowPercent', 'effectiveContextWindow',
+  'autoCompactTokenLimit', 'maxOutputTokens',
   'configuredVariants', 'availableVariants', 'modalities', 'input', 'output',
   'text', 'audio', 'image', 'video', 'pdf', 'sizeBytes', 'modifiedAt', 'format',
   'family', 'families', 'parameterSize', 'quantizationLevel', 'loaded', 'memoryBytes',

@@ -398,14 +398,16 @@ test('ak usage prompts reports every section from fingerprints alone', () => {
 // authored) and legitimately contains the substring, so this pins the class
 // COLUMN specifically (the release cluster's row, identified the same way
 // the --json test locates it) rather than a blanket string search.
-test('ak usage prompts renders the class column as "other", never "instruction"', () => {
+test('ak usage prompts renders grounded intent instead of the ambiguous class column', () => {
   const sb = sandbox();
   writePromptsCorpus(sb);
   const result = ak(['usage', 'prompts'], sb);
   assert.equal(result.status, 0, result.stderr);
-  const releaseRow = result.stdout.split('\n').find((l) => /\bother\s+characterized\b/.test(l));
-  assert.ok(releaseRow, `expected a characterized "other" row in:\n${result.stdout}`);
-  assert.match(result.stdout, /other = imperative or declarative, undifferentiated/);
+  assert.match(result.stdout, /\bintent\b/i);
+  assert.doesNotMatch(result.stdout, /\bclass\s+source\b/i);
+  assert.doesNotMatch(result.stdout, /other = imperative or declarative/);
+  assert.match(result.stdout, /Release|Unclassified|Question/,
+    'the visible category is a grounded intent or an explicit fallback');
   fs.rmSync(sb.home, { recursive: true, force: true });
 });
 

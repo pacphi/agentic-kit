@@ -1,6 +1,6 @@
 # ADR-0041 — Host-neutral hook configuration assurance
 
-- **Status:** Accepted; transactional Wave 2 implemented
+- **Status:** Accepted; static assurance, transactional healing, bounded receipts, and read model implemented
 - **Date:** 2026-09-01
 - **Updated:** 2026-09-02
 - **Deciders:** agentic-kit maintainers
@@ -11,6 +11,12 @@
   [ADR-0032](0032-model-lifecycle-intelligence.md)
 - **DDD:** [Hook configuration assurance](../ddd/hook-configuration-assurance.md)
 - **Evidence:** [Host-neutral follow-up](../audits/host-neutral-hooks-follow-up-2026-09-01.md)
+
+**Implementation note (2026-09-02):** Hook read-model v3 groups repeated diagnostics by finding
+identity across hosts and lifecycle points, keeps evidence and actions on physical placements, and
+separates non-actionable observations. The Codex provider also detects the exact signed Ruflo
+3.38.20 AutoMemory Stop-output incompatibility and routes it upstream without patching generated
+state.
 
 ## Context
 
@@ -138,6 +144,8 @@ before a normalized occurrence exists. The audit does not import adapter code, a
 adapter, grant capabilities or run a hook. Because the current contract does not declare
 a target host-version compatibility range, every external hook carries an explicit
 human-review proposal until a later contract version adds and validates that evidence.
+That proposal records uncertainty and authority; it is not, by itself, a dashboard call
+to action.
 
 ### 7. Upstream constraints are lifecycle data
 
@@ -152,6 +160,84 @@ artifact passes the relevant host-neutral audit and conformance tests. Issue clo
 does not prove a fix; an open issue does not by itself prove the installed version is
 affected.
 
+### 8. Runtime receipts are sibling evidence, not static audit proof
+
+The supervised external-adapter hook runner now returns a bounded receipt for every process-level
+outcome. It records host, verb, effective timeout, monotonic duration, exit code, typed outcome,
+timeout state, captured stdout/stderr byte counts, and truncation state. Duration is capped at 24
+hours. Each byte count saturates at 262,145 bytes—one byte above the 256 KiB capture ceiling—so a
+consumer can distinguish overflow without retaining an attacker-controlled unbounded count.
+
+The outcome vocabulary is `success`, `nonzero-exit`, `signal-exit`, `spawn-failed`, `timed-out`,
+and `integrity-rejected`. It does not claim that native Claude, Codex or OpenCode hooks emitted a
+runtime outcome: their host processes do not currently feed this receipt stream. A static `Stop`
+occurrence is configured evidence; a timeout receipt is execution evidence. Neither substitutes
+for the other.
+
+`buildHookDashboardReadModel` may join a static audit with those typed receipts. Its summary strips
+commands, source paths, stdout/stderr, failure detail, diagnostic prose and messages while retaining
+host-neutral definition groups, ownership evidence, stable diagnostic codes, allowlisted
+explanations, and opaque short-lived source references. Labels are control-stripped and capped at
+64 characters; runtime input is capped to the last 1,000 receipts and the recent list to 50.
+Read-model v3 groups attention by normalized finding identity rather than host or lifecycle point.
+Each group carries deduplicated physical placements; host, lifecycle, source, ownership,
+selection evidence, disposition and any exact action stay on the placement that proved them.
+Groups sort by importance, then affected-definition count, and can be filtered by importance.
+Informational or unknown diagnostics without a proposal or action are observations, not findings
+needing attention.
+Dashboard Delivery exposes that model through authenticated, no-store
+`/api/hooks?host=all`, collected lazily only when the Hooks view opens. The server reuses one
+30-second bounded cache and one in-flight collection. The default collector supplies the static
+audit only; runtime remains `not-recorded` unless the dashboard process is explicitly given a
+bounded receipt source. Durable native-host receipt storage is still a separate decision.
+
+### 8a. Source navigation is explicit, bounded and independent of remediation
+
+Dashboard Delivery keeps each physical source locator in that in-memory cache and publishes only
+an HMAC-derived reference in the summary. Authenticated
+`GET /api/hooks/source/<opaque-reference>` resolves only a live cached locator; it accepts no path
+parameter. The server rereads the audited bounded regular file beneath its original containment
+root, verifies the original digest, and returns the physical location plus a recursively masked
+selected JSON definition in a versioned `available | location-only` presentation. A record with no
+resolvable locator projects `ref: null`; placeholder text must never become an inspectable reference.
+An unknown or expired reference is 404 and permits one audit refresh plus one retry; digest drift is
+409, refreshes the list and requires a fresh explicit selection. Invalid or absent JSON Pointers,
+composite, opaque, JSONC, TOML and module sources return a specific location-only reason rather than
+falling back to whole-file disclosure or weakly parsing/executing content. The route never imports
+modules, fetches remote/npm sources, launches an editor, emits a `file://` URI, or grants write
+authority.
+
+Source inspection is navigation, not remediation. The dashboard renders a next step only for an
+exact executable healing-plan action joined to the affected occurrence and plan digest, or for a
+separately verified published upstream issue joined to that diagnostic. A provider proposal or
+authority classification alone is not actionability; healthy, informational, unknown, prohibited,
+and unproven rows have no call to action.
+
+### 9. Exact generated Stop risks are upstream-only
+
+Claude audit recognizes an Agentic-QE runner only when bounded source inspection proves all three
+parts of the generated shape: the AQE hook command, both local bundle candidates, and the exact
+`npx -y --prefer-offline agentic-qe hooks` fallback. It emits
+`aqe-npx-hot-path-fallback` only when both local candidates are absent. It emits
+`aqe-claude-timeout-unit-mismatch` only for the exact verified Claude Code `2.1.258` seconds
+profile and millisecond-shaped AQE timeout values.
+
+Both actions are always `upstream-required`, name `proffesor-for-testing/agentic-qe`, and require
+explicit user approval before issue publication. A modified helper, refused path, unknown host
+version or ambiguous local bundle state produces no ownership inference. Agentic-kit does not
+rewrite the generated project settings, generated helper or plugin cache.
+
+Codex audit recognizes the Ruflo 3.38.20 AutoMemory incompatibility only under the exact verified
+Codex CLI `0.152.1` profile, for a project `Stop` command that invokes the `sync` path, when bounded
+source proves that path writes status through `console.log`, and when the helper digest matches a
+manifest whose Ed25519 signature verifies against Ruflo's pinned public key. Codex treats exit zero
+with no output as success and otherwise expects event-valid JSON; the signed helper writes
+human-readable status to stdout. The resulting proposal is `upstream-required`, points to
+`ruvnet/ruflo`, and never rewrites `.codex/hooks.json`, the helper, or its manifest. An invalid
+signature, digest mismatch, unknown Codex version, non-Stop event, or different helper shape makes
+no Ruflo ownership inference. Current evidence proves a Codex failure, not a Claude failure;
+OpenCode and external adapters have no observed equivalent Stop registration.
+
 ## Consequences
 
 ### Positive
@@ -161,6 +247,14 @@ affected.
 - Releases fail safely into syntax-only/partial coverage.
 - Generated dependency defects have a durable notification, workaround and sunset path.
 - No audit path executes hooks, changes trust, imports plugins or fetches remote manifests.
+- Supervised adapter executions now produce finite, typed, output-bounded receipts suitable for a
+  sanitized read model.
+- Exact AQE generator defects are actionable without turning their generated copies into
+  agentic-kit write authority.
+- Repeated diagnostics are legible as one finding with exact affected placements, without
+  promoting one placement's action to its siblings.
+- Signed Ruflo ownership makes the Codex Stop defect actionable upstream without granting
+  agentic-kit authority over generated files.
 
 ### Negative
 
@@ -171,6 +265,10 @@ affected.
   target-host range.
 - A same-user receipt digest is integrity evidence, not third-party authenticity.
 - Windows healing remains a visible non-executable plan until atomic replacement is proven.
+- Native-host runtime outcomes remain `not-recorded`; only supervised external-adapter hook
+  executions currently produce the bounded receipt contract.
+- The dashboard route is observation-only and cached in memory for 30 seconds; it is not a durable
+  event store or a native-host receipt collector.
 
 ## Implementation status
 
@@ -195,6 +293,17 @@ Implemented in this decision:
   re-audit and idempotency proof;
 - plan and receipt schemas plus tamper, drift, partial-failure and platform refusal tests;
 - bounded real-path-confined external adapter hook-file hashing.
+- bounded external-adapter execution receipts with stable outcomes, duration, byte counts,
+  truncation and timeout state;
+- a sanitized static-plus-runtime Hook read-model seam;
+- authenticated, lazy, no-store Hooks dashboard delivery with a bounded cache, single-flight
+  collection, and explicit unknown runtime state;
+- exact AQE `npx` hot-path and Claude timeout-unit diagnostics with upstream-only proposals;
+- exact Ed25519-verified Ruflo AutoMemory/Codex Stop-output diagnostic with an upstream-only
+  proposal;
+- finding-first Hook read model v3 with per-placement evidence/actions, importance sorting and
+  filtering, and separate non-actionable observations;
+- negative ownership tests proving generated and cache findings never become automatic.
 
 Still deferred:
 
@@ -203,3 +312,4 @@ Still deferred:
 - network retrieval of remote adapter manifests;
 - automatic upstream issue creation;
 - external adapter target-version declarations.
+- durable native-host hook outcome acquisition and receipt retention.

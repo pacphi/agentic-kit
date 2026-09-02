@@ -25,6 +25,7 @@ import {
   tokenBand,
   characterize,
   labelFor,
+  INTENT_LABELS,
 } from '../../src/lib/usage-prompt-vocabulary.mjs';
 import { MAX_TOKEN_HASHES } from '../../src/lib/usage-parsers.mjs';
 
@@ -437,7 +438,8 @@ test('privacy: outputs carry only known keys and only input-supplied strings', (
   const KEYS = new Set([
     'h', 't', 'count', 'sessions', 'days', 'hosts',
     'key', 'size', 'hashes', 'tokens', 'min', 'median', 'max',
-    'questions', 'instructions', 'qKnown', 'personas', 'class',
+    'questions', 'instructions', 'qKnown', 'personas', 'class', 'intent', 'topic',
+    'id', 'share',
     'pairs', 'gaps', 'sessionId', 'gap', 'a', 'b', 'jaccard', 'host', 'day',
     'prompts', 'taps', 'share', 'maxTokens', 'byHost',
   ]);
@@ -715,7 +717,8 @@ test('TOKEN_BANDS and tokenBand cut at the documented boundaries', () => {
 });
 
 test('SEED_PATTERNS is a small, well-formed, documented registry', () => {
-  assert.ok(SEED_PATTERNS.length >= 4 && SEED_PATTERNS.length <= 12, 'the seed list is curated, not a lexicon');
+  assert.equal(SEED_PATTERNS.length, 1,
+    'only persona scaffolding remains: its parser flag is direct evidence, unlike the retired shape guesses');
   const ids = SEED_PATTERNS.map((s) => s.id);
   const names = SEED_PATTERNS.map((s) => s.name);
   assert.equal(new Set(ids).size, ids.length, 'ids are unique');
@@ -724,10 +727,7 @@ test('SEED_PATTERNS is a small, well-formed, documented registry', () => {
     assert.equal(typeof seed.match, 'function');
     assert.ok(seed.basis.length > 20, `${seed.id} must record the evidence it was cut from`);
   }
-  // The mockup's four names must all still exist — the view renders them.
-  for (const name of ['Release ritual', 'Commit-and-push instruction', 'Progress check-in', 'Persona scaffolding']) {
-    assert.ok(names.includes(name), `missing seed ${name}`);
-  }
+  assert.deepEqual(names, ['Persona scaffolding']);
 });
 
 test('seed: Persona scaffolding fires on a majority of persona-opening members', () => {
@@ -745,7 +745,7 @@ test('seed: Persona scaffolding needs no class, because the flag IS the evidence
   assert.equal(labelFor(hit).name, 'Persona scaffolding');
 });
 
-test('seed: Release ritual needs a classified cluster, a short band and a wide span', () => {
+test('release naming requires semantic evidence, never only a short wide shape', () => {
   const hit = cluster({
     class: 'question', tokens: { min: 8, median: 9, max: 13 },
     sessions: spanning(13, 's'), days: spanning(9, 'd'), size: 13, questions: 13, instructions: 0, qKnown: 13,
@@ -754,23 +754,21 @@ test('seed: Release ritual needs a classified cluster, a short band and a wide s
   // exemplar ("…of agentic-kit?") as a question because it ends in a question
   // mark, and the family is spelled both ways. A predicate that demanded
   // `instruction` could never match its own evidence.
-  assert.equal(labelFor(hit).name, 'Release ritual');
-  assert.equal(labelFor({ ...hit, class: 'other' }).name, 'Release ritual');
-  assert.equal(labelFor({ ...hit, class: 'mixed' }).name, 'Release ritual');
-  // Same shape, one session: a procedure typed once is not a ritual.
-  assert.notEqual(labelFor({ ...hit, sessions: spanning(1, 's') }).name, 'Release ritual');
-  // Unclassified is still out — that is the floor the widening kept.
-  assert.notEqual(labelFor({ ...hit, class: 'unknown' }).name, 'Release ritual');
-  // A tap-band recurring request is not a release ritual.
-  assert.notEqual(labelFor({ ...hit, tokens: { min: 1, median: 2, max: 4 } }).name, 'Release ritual');
+  assert.equal(labelFor(hit).source, 'characterized');
+  const grounded = { ...hit, intent: { id: 'release', count: 13, share: 1 },
+    topic: { id: 'release', count: 13, share: 1 } };
+  assert.equal(labelFor(grounded).name, 'Release and deploy');
+  assert.equal(labelFor(grounded).source, 'semantic');
 });
 
-test('seed: Commit-and-push refuses bare acknowledgements and at-threshold spans', () => {
+test('commit-and-push naming requires semantic evidence, not token/span shape', () => {
   const hit = cluster({
     class: 'other', tokens: { min: 3, median: 3, max: 4 },
     sessions: spanning(11, 's'), days: spanning(9, 'd'), size: 13, instructions: 13, qKnown: 13,
   });
-  assert.equal(labelFor(hit).name, 'Commit-and-push instruction');
+  assert.equal(labelFor(hit).source, 'characterized');
+  assert.equal(labelFor({ ...hit, intent: { id: 'git', count: 13, share: 1 },
+    topic: { id: 'git', count: 13, share: 1 } }).name, 'Commit and push');
   // `Continue.` — an imperative verb, so the research rule calls it an
   // instruction, and it spans MORE sessions than the real cluster. Only the
   // median-token floor keeps a commit label off the corpus's second-largest row.
@@ -784,12 +782,14 @@ test('seed: Commit-and-push refuses bare acknowledgements and at-threshold spans
   assert.notEqual(labelFor({ ...hit, class: 'question' }).name, 'Commit-and-push instruction');
 });
 
-test('seed: Progress check-in is the question-side twin of the same shape', () => {
+test('progress naming requires a measured monitoring intent', () => {
   const hit = cluster({
     class: 'question', tokens: { min: 2, median: 4, max: 6 },
     sessions: spanning(9, 's'), days: spanning(8, 'd'), size: 9, questions: 9, instructions: 0, qKnown: 9,
   });
-  assert.equal(labelFor(hit).name, 'Progress check-in');
+  assert.equal(labelFor(hit).source, 'characterized');
+  assert.equal(labelFor({ ...hit, intent: { id: 'monitor', count: 9, share: 1 } }).name,
+    'Progress check-in');
   // The band is what separates it from a long question.
   assert.notEqual(labelFor({ ...hit, tokens: { min: 40, median: 64, max: 90 } }).name, 'Progress check-in');
   // `Try again?` and `Did we push?` are two-session questions of exactly this
@@ -837,19 +837,15 @@ test('characterize survives a cluster with no token stats at all', () => {
   assert.equal(characterize(undefined), 'Recurring 0-token prompt');
 });
 
-test('labelFor resolves seed → characterize, in that order', () => {
-  const hit = cluster({
-    class: 'other', tokens: { min: 3, median: 3, max: 4 },
-    sessions: spanning(11, 's'), days: spanning(9, 'd'), size: 13, instructions: 13, qKnown: 13,
-  });
-  // No seed → characterized.
+test('labelFor resolves direct persona evidence → semantic consensus → characterize', () => {
   const plain = cluster({ class: 'unknown', questions: 0, instructions: 0, qKnown: 0, sessions: spanning(2, 's') });
   assert.equal(labelFor(plain).source, 'characterized');
-  // A seed match wins over the generic characterization.
-  const seeded = labelFor(hit);
+  assert.equal(labelFor({ ...plain, intent: { id: 'review', count: 2, share: 1 },
+    topic: { id: 'security', count: 2, share: 1 } }).source, 'semantic');
+  const seeded = labelFor({ ...plain, size: 3, personas: 3 });
   assert.equal(seeded.source, 'seed');
-  assert.equal(seeded.name, 'Commit-and-push instruction');
-  assert.equal(seeded.seed, 'commit-and-push');
+  assert.equal(seeded.name, 'Persona scaffolding');
+  assert.equal(seeded.seed, 'persona-scaffolding');
 });
 
 test('labelFor tolerates a missing cluster', () => {
@@ -859,13 +855,48 @@ test('labelFor tolerates a missing cluster', () => {
 });
 
 test('LABEL_SOURCES is the closed vocabulary labelFor can return', () => {
-  assert.deepEqual(LABEL_SOURCES, ['seed', 'characterized']);
+  assert.deepEqual(LABEL_SOURCES, ['seed', 'semantic', 'characterized']);
   const seen = new Set();
   const c = cluster({ class: 'unknown', questions: 0, instructions: 0, qKnown: 0 });
   seen.add(labelFor(c).source);
   seen.add(labelFor(cluster({ personas: 4 })).source);
   for (const s of seen) assert.ok(LABEL_SOURCES.includes(s), `${s} is outside the vocabulary`);
   assert.equal(seen.size, 2);
+});
+
+test('semantic labels are dynamically composed only from strict-majority cluster evidence', () => {
+  const semantic = nearDupClusters([
+    fp({ h: 'a', th: ['1', '2', '3'], t: 6, i: 'fix', d: 'ci', sessionId: 's1' }),
+    fp({ h: 'b', th: ['1', '2', '3', '4'], t: 7, i: 'fix', d: 'ci', sessionId: 's2' }),
+    fp({ h: 'c', th: ['1', '2', '3', '5'], t: 7, i: 'review', d: 'security', sessionId: 's3' }),
+  ], { jaccard: 0.6 })[0];
+  assert.deepEqual(semantic.intent, { id: 'fix', count: 2, share: 2 / 3 });
+  assert.deepEqual(semantic.topic, { id: 'ci', count: 2, share: 2 / 3 });
+  assert.deepEqual(labelFor(semantic), {
+    name: 'Fix CI failures', source: 'semantic', firstSeen: null, seed: null,
+    intent: 'Fix', topic: 'CI',
+  });
+
+  const incidental = cluster({
+    size: 3, class: 'unknown', intents: new Map([['review', 1]]), topics: new Map([['security', 1]]),
+  });
+  assert.equal(labelFor(incidental).source, 'characterized',
+    'one incidental facet cannot name a recurring cluster');
+  assert.equal(INTENT_LABELS.fix, 'Fix');
+});
+
+test('semantic cluster naming is stable under member order and differs by grounded topic', () => {
+  const members = [
+    fp({ h: 'a', th: ['1', '2'], i: 'review', d: 'security', sessionId: 's1' }),
+    fp({ h: 'b', th: ['1', '2', '3'], i: 'review', d: 'security', sessionId: 's2' }),
+  ];
+  const forward = nearDupClusters(members, { jaccard: 0.6 })[0];
+  const reverse = nearDupClusters([...members].reverse(), { jaccard: 0.6 })[0];
+  assert.deepEqual(labelFor(forward), labelFor(reverse));
+  assert.equal(labelFor(forward).name, 'Review security');
+
+  const tests = { ...forward, topic: { id: 'tests', count: 2, share: 1 } };
+  assert.equal(labelFor(tests).name, 'Review tests');
 });
 
 // ── the precision-first audit ───────────────────────────────────────────────
@@ -970,7 +1001,8 @@ test('precision-first: no seed mislabels any cluster the research measured', () 
   for (const [source, exemplar, shape, expected] of MEASURED_CLUSTERS) {
     const label = labelFor(measured(shape));
     const got = label.source === 'seed' ? label.name : null;
-    if (got !== expected) misses.push(`${source} "${exemplar}" → ${got ?? 'generic'} (expected ${expected ?? 'generic'})`);
+    const expectedSeed = expected === 'Persona scaffolding' ? expected : null;
+    if (got !== expectedSeed) misses.push(`${source} "${exemplar}" → ${got ?? 'generic'} (expected ${expectedSeed ?? 'generic'})`);
   }
   assert.deepEqual(misses, [], `seed audit failures:\n  ${misses.join('\n  ')}`);
 });
@@ -982,11 +1014,11 @@ test('precision-first: the audit is not vacuous — every seed is exercised by i
   const claimed = new Set();
   for (const [, , shape, expected] of MEASURED_CLUSTERS) {
     const label = labelFor(measured(shape));
-    if (expected === null) continue;
+    if (expected !== 'Persona scaffolding') continue;
     assert.equal(label.source, 'seed');
     claimed.add(label.seed);
   }
-  assert.deepEqual([...claimed].sort(), ['commit-and-push', 'persona-scaffolding', 'progress-check-in', 'release-ritual']);
+  assert.deepEqual([...claimed].sort(), ['persona-scaffolding']);
   assert.equal(claimed.size, SEED_PATTERNS.length, 'every seed must be exercised by the audit table');
 });
 

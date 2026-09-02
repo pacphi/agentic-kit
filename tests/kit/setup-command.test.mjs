@@ -100,6 +100,12 @@ test('run_project --dry-run announces the plan and touches neither home nor proj
   rmrf(project);
 });
 
+test('project init delegates without overlapping machine guidance, Codex, or skill registration', () => {
+  assert.deepEqual(setup.RUFLO_PROJECT_INIT_ARGS, [
+    'init', '--full', '--force', '--no-global', '--no-codex-detect', '--no-skills-sh',
+  ]);
+});
+
 test('project permission manifest omits AQE grants when AQE is disabled', () => {
   assert.equal(setup.projectPermissionManifest({ aqe: true }).length, 7);
   assert.deepEqual(setup.projectPermissionManifest({ aqe: false }).map((entry) => entry.owner),

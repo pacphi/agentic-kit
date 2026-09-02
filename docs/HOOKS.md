@@ -115,7 +115,10 @@ consent, capability grants, and host permission state are never inferred or muta
 
 ## Upstream work
 
-The audit reports registry validity, evidence freshness, and installed-version
-applicability separately. Notification payloads are drafts only. Opening or updating an
-upstream issue always requires explicit user approval, and a workaround is retired only
-after a released artifact passes the relevant conformance suite.
+The audit reports registry validity, evidence freshness, and installed-version applicability
+separately. Opening or updating an upstream issue always requires explicit user approval. The
+constraint registry may retain either a draft or the published URL/time receipt after that
+approval. Agentic-QE's 3.14.0 Stop generator is tracked in
+[AQE #654](https://github.com/proffesor-for-testing/agentic-qe/issues/654); historical ETIMEDOUT is
+detected and attributed, but generated copies are not patched and no released fix is claimed. A
+workaround is retired only after a released artifact passes the relevant conformance suite.

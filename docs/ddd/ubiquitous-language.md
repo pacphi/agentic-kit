@@ -33,6 +33,32 @@ contradictory meaning.
 | Remediation proposal | Read-only action description classified as automatic-eligible, approval-required, prohibited, or upstream-required |
 | Upstream constraint | Versioned dependency issue, affected range, bounded local strategy, verification date, and objective sunset condition |
 
+## Context budget language
+
+| Term | Meaning |
+|------|---------|
+| Context envelope | Host/model/session-or-attempt scope within which compatible capacity and contribution facts are evaluated |
+| Advertised maximum | Provider or catalogue capacity claim; not automatically an active-session denominator |
+| Host nominal window | Context allocation selected by the active host/model profile |
+| Runtime-effective window | Session/turn context ceiling reported by the host; preferred active denominator when compatible |
+| Context contribution | One measured or estimated input to occupancy, retaining its native unit and method |
+| Startup share | First token-bearing gross input divided by the compatible effective context window |
+| Context pressure | Gross input tokens divided by a compatible effective window, stored in basis points |
+| Context evidence coverage | Counts of eligible, measured and missing sessions plus source health; not a quality score |
+| Reserve breach | Current input has consumed more than the policy's non-reserved share of the effective ceiling |
+| Rematerialization | Rebuilding a prompt/context envelope for a different host/model or after compaction |
+| Hook runtime receipt | Bounded supervised-execution evidence recording host, verb, effective timeout, duration, byte counts, truncation, exit code and typed outcome; it contains no authority to repair a definition |
+| Hook outcome | One of `success`, `nonzero-exit`, `signal-exit`, `spawn-failed`, `timed-out`, or `integrity-rejected`; distinct from a static hook diagnostic |
+| Hook read model | Sanitized join of static assurance aggregates and available typed runtime receipts; it excludes commands, paths, output and diagnostic prose |
+| Managed guidance footprint | Exact UTF-8 bytes selected from agentic-kit-owned managed sentinel blocks for one host guidance target |
+| Conservative token estimate | `ceil(bytes / 3)` planning estimate attached to a byte measurement; never observed tokenizer usage |
+| Context audit | Read-only, privacy-safe CLI projection of managed guidance state/bytes, bounded skill metadata, MCP registration-table bytes, schema availability and effective-window evidence |
+| MCP registration config bytes | UTF-8 bytes of serialized MCP registration tables only; excludes unrelated host preferences and does not measure tool schemas |
+
+Cached input is cheaper billing evidence, not smaller context occupancy. Byte counts and conservative
+token estimates never become observed token evidence. An absent or incompatible denominator is
+`unknown`, never 0% pressure.
+
 ## State and evidence language
 
 | Term | Meaning |

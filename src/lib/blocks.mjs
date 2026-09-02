@@ -3,6 +3,8 @@
 // UNCHANGED (`<!-- BEGIN <slug> -->` … `<!-- END <slug> -->`) so files written by
 // the shell kit upgrade in place. Detectors are declarative (no eval'd shell —
 // Windows-safe): {type: 'always'|'command'|'dir'|'file'|'glob-dir', target}.
+// Built-ins may additionally compose those primitives with `enabled` (persisted
+// flag first, legacy detector fallback) and `all` (logical conjunction).
 // Built-in rows ship here; custom rows come from kit.json `customBlocks`.
 //
 // A `flag` detector ({type:'flag', target:'dualMode'}) gates a block on a
@@ -24,6 +26,22 @@ import { HOST_REGISTRY } from './adapters/index.mjs';
 export const BEGIN = (slug) => `<!-- BEGIN ${slug} -->`;
 export const END = (slug) => `<!-- END ${slug} -->`;
 
+// A deliberately pessimistic planning estimate. English prose often averages
+// closer to four UTF-8 bytes/token, but three keeps the budget conservative
+// without pretending that byte counts are tokenizer observations.
+export const CONSERVATIVE_BYTES_PER_TOKEN = 3;
+
+// Budgets cover agentic-kit-owned managed blocks only. User/project text and
+// custom blocks remain visible in the footprint report but are not silently
+// truncated. Unknown external guidance targets use the small fallback budget.
+export const GUIDANCE_TARGET_BUDGETS = Object.freeze({
+  claude: Object.freeze({ maxBytes: 12_000, maxConservativeTokens: 4_000 }),
+  agents: Object.freeze({ maxBytes: 0, maxConservativeTokens: 0 }),
+  'agents-user': Object.freeze({ maxBytes: 2_200, maxConservativeTokens: 734 }),
+  'agents-opencode': Object.freeze({ maxBytes: 6_000, maxConservativeTokens: 2_000 }),
+  external: Object.freeze({ maxBytes: 2_048, maxConservativeTokens: 683 }),
+});
+
 /** Built-in registry. templatePath is package-relative (resolved by caller
  *  against the kit's own claude/ dir or the staged config dir). `position` is
  *  where the block lands when it is NOT already present in the file. */
@@ -42,7 +60,9 @@ export const BUILTIN_BLOCKS = [
     slug: 'ruflo-reference',
     template: 'ruflo-reference.md',
     position: 'append',
-    detector: { type: 'always' },
+    detector: {
+      type: 'enabled', target: 'claudeEnabled', fallback: { type: 'always' },
+    },
   },
   {
     // opencode's ruflo surface: MCP tools are `claude-flow_*` (not
@@ -66,29 +86,61 @@ export const BUILTIN_BLOCKS = [
     slug: 'ruvnet-brain-opencode-reference',
     template: 'ruvnet-brain-opencode-reference.md',
     position: 'append',
-    detector: { type: 'flag', target: 'opencodeEnabled' },
+    detector: {
+      type: 'all', detectors: [
+        { type: 'flag', target: 'opencodeEnabled' },
+        {
+          type: 'enabled', target: 'ruvnetBrainEnabled',
+          fallback: { type: 'dir', target: '~/.cache/ruvnet-brain/kb' },
+        },
+      ],
+    },
     guidanceFiles: ['agents-opencode'],
   },
   {
     slug: 'ruflo-aqe-reference',
     template: 'aqe-reference.md',
     position: 'append',
-    detector: { type: 'command', target: 'aqe' },
+    detector: {
+      type: 'all', detectors: [
+        { type: 'enabled', target: 'claudeEnabled', fallback: { type: 'always' } },
+        {
+          type: 'enabled', target: 'aqeEnabled',
+          fallback: { type: 'command', target: 'aqe' },
+        },
+      ],
+    },
   },
   {
     slug: 'ruflo-superpowers-reference',
     template: 'superpowers-reference.md',
     position: 'append',
     // shell impl: find ~/.claude/plugins/cache -maxdepth 4 -type d -name superpowers
-    detector: { type: 'glob-dir', target: 'superpowers', root: 'plugins/cache', maxDepth: 4 },
+    detector: {
+      type: 'all', detectors: [
+        { type: 'enabled', target: 'claudeEnabled', fallback: { type: 'always' } },
+        {
+          type: 'enabled', target: 'superpowersEnabled',
+          fallback: { type: 'glob-dir', target: 'superpowers', root: 'plugins/cache', maxDepth: 4 },
+        },
+      ],
+    },
   },
   {
-    // Only surfaces once the codex CLI is on PATH — mirrors the aqe block gated on
-    // `command: aqe`. Documents the claude/codex host axis + `ak x host`.
+    // Persisted host intent is authoritative during setup/sync. PATH is only a
+    // compatibility fallback for legacy direct callers that have no kit config.
     slug: 'ruflo-providers-reference',
     template: 'providers-reference.md',
     position: 'append',
-    detector: { type: 'command', target: 'codex' },
+    detector: {
+      type: 'all', detectors: [
+        { type: 'enabled', target: 'claudeEnabled', fallback: { type: 'always' } },
+        {
+          type: 'enabled', target: 'codexEnabled',
+          fallback: { type: 'command', target: 'codex' },
+        },
+      ],
+    },
   },
   {
     // Surfaces only when BOTH hosts are enabled in kit.json (dual mode) — gated
@@ -105,13 +157,20 @@ export const BUILTIN_BLOCKS = [
     guidanceFiles: ['claude', 'agents-user'],
   },
   {
-    // Surfaces once the RuvNet Brain KB is on disk. `dir` supports ~/ expansion;
-    // uses the default KB path (honoring $RUVNET_BRAIN_KB in the detector is a
-    // minor follow-up — the override is rare).
+    // Persisted management intent is authoritative during setup/sync. The KB
+    // directory remains a compatibility fallback for direct legacy callers.
     slug: 'ruvnet-brain-reference',
     template: 'ruvnet-brain-reference.md',
     position: 'append',
-    detector: { type: 'dir', target: '~/.cache/ruvnet-brain/kb' },
+    detector: {
+      type: 'all', detectors: [
+        { type: 'enabled', target: 'claudeEnabled', fallback: { type: 'always' } },
+        {
+          type: 'enabled', target: 'ruvnetBrainEnabled',
+          fallback: { type: 'dir', target: '~/.cache/ruvnet-brain/kb' },
+        },
+      ],
+    },
   },
 ];
 
@@ -124,6 +183,18 @@ export async function detect(detector, context = {}) {
     case 'always': return true;
     case 'command': return have(detector.target);
     case 'flag': return !!context?.flags?.[detector.target];
+    case 'enabled': {
+      if (Object.hasOwn(context?.flags ?? {}, detector.target)) {
+        return context.flags[detector.target] === true;
+      }
+      return detector.fallback ? detect(detector.fallback, context) : false;
+    }
+    case 'all': {
+      for (const part of detector.detectors ?? []) {
+        if (!await detect(part, context)) return false;
+      }
+      return true;
+    }
     case 'file': return fs.existsSync(expand(detector.target));
     case 'dir': {
       const p = expand(detector.target);
@@ -164,6 +235,32 @@ export function hasBlock(content, slug) {
   return normalize(content ?? '').includes(BEGIN(slug));
 }
 
+/** Locate well-formed occurrences without letting an orphaned BEGIN consume a
+ * later valid block. A repeated BEGIN before the next END makes the earlier
+ * marker orphaned; scanning resumes at the repeated marker. */
+function blockRanges(text, slug) {
+  const b = BEGIN(slug);
+  const e = END(slug);
+  const ranges = [];
+  let cursor = 0;
+  while (cursor < text.length) {
+    const begin = text.indexOf(b, cursor);
+    if (begin === -1) break;
+    const end = text.indexOf(e, begin + b.length);
+    if (end === -1) break;
+    const repeatedBegin = text.indexOf(b, begin + b.length);
+    if (repeatedBegin !== -1 && repeatedBegin < end) {
+      cursor = repeatedBegin;
+      continue;
+    }
+    const afterEndLine = endOfSentinelLine(text, e, begin);
+    if (afterEndLine === null) break;
+    ranges.push({ start: lineStart(text, begin), end: afterEndLine });
+    cursor = afterEndLine;
+  }
+  return ranges;
+}
+
 /** Upsert: replace in place when present (preserving everything outside the
  *  sentinels); otherwise append (or prepend, for position:'prepend') — exact
  *  port of _ruflo_block_upsert/_ruflo_block_prepend. Pure function on strings. */
@@ -172,14 +269,22 @@ export function upsertBlock(content, slug, blockText, position = 'append') {
   if (content == null || content === '') return block;
   const ending = eol(content);
   const text = normalize(content);
-  const b = BEGIN(slug);
-  const e = END(slug);
+  const ranges = blockRanges(text, slug);
   let out;
-  const bi = text.indexOf(b);
-  const afterEndLine = bi !== -1 ? endOfSentinelLine(text, e, bi) : null;
-  if (bi !== -1 && afterEndLine !== null) {
-    out = text.slice(0, lineStart(text, bi)) + block + text.slice(afterEndLine);
-  } else if (bi !== -1) {
+  if (ranges.length > 0) {
+    // Replace the first valid occurrence and drop any later duplicates. Text
+    // outside the owned sentinel ranges remains byte-for-byte present.
+    const chunks = [];
+    let cursor = 0;
+    for (let index = 0; index < ranges.length; index++) {
+      const range = ranges[index];
+      chunks.push(text.slice(cursor, range.start));
+      if (index === 0) chunks.push(block);
+      cursor = range.end;
+    }
+    chunks.push(text.slice(cursor));
+    out = chunks.join('');
+  } else if (text.includes(BEGIN(slug))) {
     // Orphaned BEGIN (no END): append a fresh block instead of replacing "to
     // end-of-file" — the orphan stays visible for the user to clean up, and
     // nothing below it is destroyed.
@@ -196,17 +301,17 @@ export function upsertBlock(content, slug, blockText, position = 'append') {
 export function stripBlock(content, slug) {
   if (content == null) return content;
   const ending = eol(content);
-  const text = normalize(content);
-  const b = BEGIN(slug);
-  const e = END(slug);
-  const bi = text.indexOf(b);
-  if (bi === -1) return content;
-  const afterEndLine = endOfSentinelLine(text, e, bi);
-  if (afterEndLine === null) return content; // orphaned BEGIN — never strip to EOF
-  const tail = text.slice(afterEndLine).replace(/^\n/, '');
-  // Collapse the blank separator line upsert added before the block.
-  const head = text.slice(0, lineStart(text, bi)).replace(/\n+$/, '\n');
-  return denormalize(head + tail, ending);
+  let text = normalize(content);
+  const ranges = blockRanges(text, slug);
+  if (ranges.length === 0) return content;
+  // Reverse order keeps every earlier range index stable. Collapse only the
+  // separator blank line owned by the merger around each removed occurrence.
+  for (const range of ranges.reverse()) {
+    const tail = text.slice(range.end).replace(/^\n/, '');
+    const head = text.slice(0, range.start).replace(/\n+$/, '\n');
+    text = head + tail;
+  }
+  return denormalize(text, ending);
 }
 
 function lineStart(text, index) {
@@ -247,6 +352,63 @@ export function registry(customBlocks = []) {
  *  without hardcoding paths in this module. */
 export function blocksForTarget(rows, targetName) {
   return rows.filter((r) => (r.guidanceFiles ?? ['claude']).includes(targetName));
+}
+
+/** Merge persisted agentic-kit intent into detector context. Explicit kit
+ *  configuration wins over incidental executable/directory presence; caller
+ *  flags unrelated to these managed selectors are preserved. */
+export function guidanceContextFromConfig(cfg, context = {}) {
+  if (!cfg || typeof cfg !== 'object') return context;
+  const hosts = cfg.integrations?.hosts ?? {};
+  const derived = {
+    claudeEnabled: hosts.claude === true,
+    codexEnabled: hosts.codex === true,
+    opencodeEnabled: hosts.opencode === true,
+    dualMode: hosts.claude === true && hosts.codex === true,
+    aqeEnabled: cfg.aqe !== false,
+    ruvnetBrainEnabled: cfg.ruvnetBrain !== false,
+  };
+  return { ...context, flags: { ...(context.flags ?? {}), ...derived } };
+}
+
+/** Measure the exact managed-only text assembled by the block merger. Missing
+ *  templates are reported as unknown and make compliance indeterminate; false
+ *  detectors are explicit omissions rather than zero-cost observations. */
+export async function guidanceFootprint(rows, targetName, resolveTemplate, { context = {} } = {}) {
+  const included = [];
+  const omitted = [];
+  const unknown = [];
+  let assembled = '';
+
+  for (const row of blocksForTarget(rows, targetName)) {
+    if (!await detect(row.detector, context)) {
+      omitted.push({ slug: row.slug, reason: 'detector-false' });
+      continue;
+    }
+    const template = resolveTemplate(row);
+    if (!template || !fs.existsSync(template)) {
+      unknown.push({ slug: row.slug, reason: 'missing-template' });
+      continue;
+    }
+    const text = fs.readFileSync(template, 'utf8');
+    included.push({ slug: row.slug, bytes: Buffer.byteLength(text, 'utf8') });
+    assembled = upsertBlock(assembled, row.slug, text, row.position);
+  }
+
+  const bytes = Buffer.byteLength(assembled, 'utf8');
+  const conservativeTokens = Math.ceil(bytes / CONSERVATIVE_BYTES_PER_TOKEN);
+  const budget = GUIDANCE_TARGET_BUDGETS[targetName] ?? GUIDANCE_TARGET_BUDGETS.external;
+  return {
+    target: targetName,
+    bytes,
+    conservativeTokens,
+    budget,
+    withinBudget: unknown.length > 0 ? null
+      : bytes <= budget.maxBytes && conservativeTokens <= budget.maxConservativeTokens,
+    included,
+    omitted,
+    unknown,
+  };
 }
 
 /** Registry rows whose sentinel might linger in a target's file but which no
@@ -377,12 +539,13 @@ export function templateResolver(pkgRoot) {
 export async function reconcileGuidance({ cwd, cfg, pkgRoot, context = {}, dryRun = false }) {
   const rows = registry(cfg.customBlocks);
   const resolve = templateResolver(pkgRoot);
+  const selectionContext = guidanceContextFromConfig(cfg, context);
   const out = [];
   const targets = guidanceTargets({ cwd, cfg });
   const knownTargets = targets.map((t) => t.name);
   for (const t of targets) {
     const treg = [...blocksForTarget(rows, t.name), ...retiredForTarget(rows, t.name, knownTargets)];
-    const res = await syncBlocks(t.file, treg, resolve, { context, dryRun });
+    const res = await syncBlocks(t.file, treg, resolve, { context: selectionContext, dryRun });
     const changed = res.filter((r) => r.action !== 'unchanged' && r.action !== 'skipped')
       .map((r) => `${r.slug} ${r.action}`).join(', ');
     out.push({ name: t.name, label: t.label, changed });

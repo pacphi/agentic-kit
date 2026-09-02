@@ -21,6 +21,17 @@ test('upstream registry separates valid shape, current evidence, and version app
   assert.equal(blocked.evidence.applicability, 'affected');
   const brain = result.constraints.find((entry) => entry.dependency === 'ruvnet-brain');
   assert.equal(brain, undefined);
+  const stop = result.constraints.find((entry) => entry.id === 'agentic-qe-3.14.0-stop-hook-generator');
+  assert.equal(stop.notification.status, 'published');
+  assert.equal(stop.notification.approvalRequired, false);
+  assert.match(stop.notification.publishedUrl, /issues\/654$/);
+  assert.equal(stop.notificationDraft, null);
+  const guidance = result.constraints.find((entry) => entry.id === 'agentic-qe-3.14.0-codex-guidance-policy');
+  assert.equal(guidance.notification.status, 'published');
+  assert.match(guidance.notification.publishedUrl, /issues\/655$/);
+  const rufloGuidance = result.constraints.find((entry) => entry.id === 'ruflo-3.38.20-project-guidance-selector');
+  assert.equal(rufloGuidance.notification.status, 'published');
+  assert.match(rufloGuidance.notification.publishedUrl, /issues\/3153#issuecomment-5512219386$/);
 });
 
 test('future verification dates are invalid rather than falsely current', () => {

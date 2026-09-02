@@ -1,8 +1,9 @@
 // @ts-nocheck — browser bundle source (never node-imported; client.mjs
 // reads it as text). See src/lib/dashboard/client/**'s eslint.config.mjs
 // override comment for why this directory isn't run through the node lib.
-import { VIEWS, authHeaders, esc, setTab } from './bootstrap.mjs';
+import { USAGE_NAV_VIEWS, authHeaders, esc, setTab } from './bootstrap.mjs';
 import { mliDetail, mliRouteRows, renderModelFacets, renderModelRouteSort, renderModelSort } from './model-lifecycle.mjs';
+import { HOOKS, renderContext, renderHooks } from './usage-context-hooks.mjs';
 import { MODEL_PAGE, USAGE, fmtNum, loadLimits, loadModelInventory, loadModelLifecycle, loadUsage, modelRows, renderFindings, renderPrompts, renderScore, renderSessions, renderSourceHealth, renderTranscript, sessionRow, setUsageView } from './usage.mjs';
 
   export function renderUsage(){
@@ -16,6 +17,8 @@ import { MODEL_PAGE, USAGE, fmtNum, loadLimits, loadModelInventory, loadModelLif
     renderScore(USAGE);
     renderFindings(USAGE);
     renderPrompts(USAGE);
+    renderContext(USAGE.context||null);
+    renderHooks(HOOKS);
     renderSessions(USAGE);
     if(usageView==="transcript")renderTranscript();
   }
@@ -26,7 +29,7 @@ import { MODEL_PAGE, USAGE, fmtNum, loadLimits, loadModelInventory, loadModelLif
       var b=e.target.closest?e.target.closest("[data-view]"):null;
       if(b)setUsageView(b.getAttribute("data-view"));
     });
-    if(seg)seg.addEventListener("keydown",function(e){if(!/^(ArrowLeft|ArrowRight|Home|End)$/.test(e.key))return;var i=VIEWS.indexOf(usageView);i=e.key==="Home"?0:e.key==="End"?VIEWS.length-1:(i+(e.key==="ArrowRight"?1:VIEWS.length-1))%VIEWS.length;setUsageView(VIEWS[i]);var b=seg.querySelector('[data-view="'+VIEWS[i]+'"]');if(b)b.focus();e.preventDefault();});
+    if(seg)seg.addEventListener("keydown",function(e){if(!/^(ArrowLeft|ArrowRight|Home|End)$/.test(e.key))return;var i=USAGE_NAV_VIEWS.indexOf(usageView);if(i<0)i=USAGE_NAV_VIEWS.indexOf("sessions");i=e.key==="Home"?0:e.key==="End"?USAGE_NAV_VIEWS.length-1:(i+(e.key==="ArrowRight"?1:USAGE_NAV_VIEWS.length-1))%USAGE_NAV_VIEWS.length;setUsageView(USAGE_NAV_VIEWS[i]);var b=seg.querySelector('[data-view="'+USAGE_NAV_VIEWS[i]+'"]');if(b)b.focus();e.preventDefault();});
     var summary=document.getElementById("mli-summary");
     if(summary)summary.addEventListener("click",function(e){e.preventDefault();setTab("usage");setUsageView("models");});
     function resetModelPage(){
@@ -110,6 +113,13 @@ import { MODEL_PAGE, USAGE, fmtNum, loadLimits, loadModelInventory, loadModelLif
       }
       var more=tgt.closest?tgt.closest("[data-more]"):null;
       if(more){loadProjectSessions(more.getAttribute("data-more")); return;}
+      var contextLink=tgt.closest?tgt.closest(".ctx-session-link"):null;
+      if(contextLink){
+        if(e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return;
+        e.preventDefault();
+        setUsageView("transcript",contextLink.getAttribute("data-id"));
+        return;
+      }
       // MUST come before the [data-id] branch below: the caret lives INSIDE the
       // row, so closest("[data-id]") matches it too. stopPropagation() first,
       // then toggle — the row's click-to-open-transcript path is shipped
@@ -161,4 +171,3 @@ import { MODEL_PAGE, USAGE, fmtNum, loadLimits, loadModelInventory, loadModelLif
             ||'<div class="smore">no sessions in this category.</div>')+"</div></div>";
       }).catch(function(){});
   }
-

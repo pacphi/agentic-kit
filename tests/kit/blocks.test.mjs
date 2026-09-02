@@ -26,6 +26,16 @@ test('upsertBlock is idempotent', () => {
   assert.equal(twice, once);
 });
 
+test('upsertBlock converges duplicate managed blocks to one canonical copy', () => {
+  const initial = `user before\n${block('s1', 'old one')}user middle\n${block('s1', 'old two')}user after\n`;
+  const out = upsertBlock(initial, 's1', block('s1', 'canonical'));
+  assert.equal((out.match(/<!-- BEGIN s1 -->/g) ?? []).length, 1);
+  assert.match(out, /canonical/);
+  assert.match(out, /user before/);
+  assert.match(out, /user middle/);
+  assert.match(out, /user after/);
+});
+
 test('upsertBlock prepend leads the file when block absent', () => {
   const out = upsertBlock('existing\n', 'pre', block('pre', 'rules'), 'prepend');
   assert.ok(out.startsWith('<!-- BEGIN pre -->'));
@@ -45,6 +55,15 @@ test('upsertBlock creates content when file empty', () => {
 test('stripBlock removes block inclusive and leaves the rest', () => {
   const initial = `top\n${block('s1', 'b')}\nbottom\n`;
   assert.equal(stripBlock(initial, 's1'), 'top\nbottom\n');
+});
+
+test('stripBlock removes every duplicate managed block while preserving user text', () => {
+  const initial = `top\n${block('s1', 'one')}middle\n${block('s1', 'two')}bottom\n`;
+  const out = stripBlock(initial, 's1');
+  assert.doesNotMatch(out, /BEGIN s1|END s1|one|two/);
+  assert.match(out, /top/);
+  assert.match(out, /middle/);
+  assert.match(out, /bottom/);
 });
 
 test('stripBlock is a no-op when block absent', () => {
@@ -138,6 +157,16 @@ test('an orphaned BEGIN (no END) never truncates content below it', () => {
   assert.ok(out.includes('# User content that must survive'), 'content below the orphan survives');
   assert.ok(out.includes('fresh'), 'a fresh block was appended');
   assert.ok(out.includes('<!-- END s1 -->'), 'the appended block is well-formed');
+});
+
+test('an orphaned BEGIN before a valid block never captures user text or the valid block', () => {
+  const initial = `above\n<!-- BEGIN s1 -->\norphan body\nuser text\n${block('s1', 'stale valid')}below\n`;
+  const out = upsertBlock(initial, 's1', block('s1', 'fresh'));
+  assert.match(out, /orphan body/);
+  assert.match(out, /user text/);
+  assert.match(out, /fresh/);
+  assert.doesNotMatch(out, /stale valid/);
+  assert.match(out, /below/);
 });
 
 test('stripBlock leaves content untouched when the END sentinel is missing', () => {

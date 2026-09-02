@@ -1,8 +1,14 @@
 // usage-prompt-vocabulary.mjs — what a prompt cluster is CALLED.
 //
-// A cluster's name is drawn from a deterministic vocabulary, never lifted
-// from what the operator typed. It is always a seeded or shape-characterized
-// label, never prompt text.
+// A cluster's name is drawn from a deterministic controlled vocabulary, never
+// lifted from what the operator typed. Parser-produced enum facets can compose
+// a semantic label; otherwise the result is directly evidenced persona
+// scaffolding or an honest shape characterization.
+import {
+  intentLabel, semanticName, topicLabel,
+} from './usage-prompt-semantics.mjs';
+
+export { INTENT_LABELS, TOPIC_LABELS } from './usage-prompt-semantics.mjs';
 //
 // A name comes from one of two places, in decreasing order of authority:
 //
@@ -63,7 +69,7 @@
 export const TOKEN_BANDS = ['tap', 'short', 'medium', 'long', 'xlong'];
 
 /** Every provenance `labelFor` can report. */
-export const LABEL_SOURCES = ['seed', 'characterized'];
+export const LABEL_SOURCES = ['seed', 'semantic', 'characterized'];
 
 /** The cluster shape this module names. Imported as a TYPE only — nothing here
  *  takes a runtime dependency on the clustering library.
@@ -129,54 +135,6 @@ export const SEED_PATTERNS = [
       + 'this family at all; the `o` flag is the only thing that identifies it, which is why this '
       + 'predicate reads the flag and nothing else.',
     match: (s) => s.personas > 0 && s.personas * 2 > s.size,
-  },
-  {
-    id: 'release-ritual',
-    name: 'Release ritual',
-    basis:
-      'Findings §5.2: `Help me release and deploy the next semantic version of agentic-kit?` — 13 '
-      + 'prompts, 13 sessions, 9 days, median 9 tokens; the wider family reaches 23 prompts across 22 '
-      + 'sessions and 14 days in ELEVEN distinct phrasings. Eleven phrasings for one procedure is the '
-      + 'tell that there is no skill holding it. WIDENED on the audit: this predicate originally '
-      + 'required an instruction class and could therefore never match its own evidence — the '
-      + 'research rule classifies the exemplar as a QUESTION, because it ends in a question mark, and '
-      + 'the family is spelled both ways, so the cluster can land on question, instruction or mixed '
-      + 'depending on which phrasings it absorbs. It now asks only that the cluster was classified at '
-      + 'all, which keeps statements and undecorated clusters out. On the measured tables the band '
-      + 'plus an 8-session span is enough on its own: exactly one cluster qualifies, and it is this '
-      + 'one.',
-    match: (s) => s.cls !== 'unknown' && s.band === 'short' && s.sessions >= 8,
-  },
-  {
-    id: 'commit-and-push',
-    name: 'Commit-and-push instruction',
-    basis:
-      'Findings §5.2: `Commit and push.` — 13 prompts, 11 sessions, 9 days, median 3 tokens; the '
-      + 'commit-or-push family is 24 prompts over 21 sessions, 15 days and 6 projects in 6 phrasings. '
-      + 'NARROWED on the audit: at `tap band + 4 sessions + 3 days` this also caught `Continue.` '
-      + '(24 prompts, 16 sessions, 10 days — an imperative verb, so the research rule calls it an '
-      + 'instruction) and `Let\'s go` (4 sessions, 3 days — exactly at both old thresholds), which '
-      + 'would have printed a commit instruction over the corpus\'s second-largest cluster. The '
-      + 'median-token floor separates a real two-word command from a bare acknowledgement, and the '
-      + '6-session floor clears the at-threshold case. The band supplies the upper bound the floor '
-      + 'implies. Cost, accepted: `Push to remote` (4 sessions) is released to the generic descriptor. '
-      + 'RULING A (final-triage item 1): matches `other`, the wire value classifyCluster now emits for '
-      + 'this shape — the predicate used to read the library\'s old `instruction` value; the library '
-      + 'itself was renamed, not this seed\'s intent.',
-    match: (s) => s.cls === 'other' && s.band === 'tap' && s.tokens >= 3 && s.sessions >= 6,
-  },
-  {
-    id: 'progress-check-in',
-    name: 'Progress check-in',
-    basis:
-      'Findings §5.2: `How are we doing? Progress?` — 9 prompts, 9 sessions, 8 days, median 4 tokens; '
-      + '17 in the wider family across 14 sessions and 11 days. The question-side twin of the '
-      + 'commit-and-push shape, and a reporting gap rather than a knowledge gap: the agent has the '
-      + 'answer and is not offering it. NARROWED on the audit to the same 6-session floor as its '
-      + 'twin: no measured cluster misfired at 4, but the predicate reads as "any recurring short '
-      + 'question", and `Try again?` and `Did we push?` sit two sessions under the old floor with '
-      + 'nothing but their span keeping them out. The measured cluster has 9.',
-    match: (s) => s.cls === 'question' && s.band === 'tap' && s.sessions >= 6,
   },
 ];
 
@@ -245,19 +203,31 @@ export function characterize(cluster) {
 // ── resolution ──────────────────────────────────────────────────────────────
 
 /**
- * What to call this cluster: a seed pattern first, then a characterization.
+ * What to call this cluster: direct persona evidence, then consensus semantic
+ * facets, then a characterization.
  *
  * For a characterized result, `name` is the bare lead clause while
  * `descriptor` carries the full string (lead plus span/host tail) for a
  * surface with no columns to spare. A seeded name is already the whole phrase.
  *
  * @param {Partial<PromptCluster>} [cluster] A cluster from `nearDupClusters`.
- * @returns {{ name: string, source: 'seed'|'characterized',
- *   firstSeen: string|null, seed: string|null, descriptor?: string }}
+ * @returns {{ name: string, source: 'seed'|'semantic'|'characterized',
+ *   firstSeen: string|null, seed: string|null, descriptor?: string,
+ *   intent?: string, topic?: string }}
  */
 export function labelFor(cluster) {
   const seed = matchSeed(cluster);
   if (seed) return { name: seed.name, source: 'seed', firstSeen: null, seed: seed.id };
+  const intent = cluster?.intent?.id;
+  const topic = cluster?.topic?.id;
+  const semantic = semanticName(intent, topic, cluster?.class);
+  if (semantic) {
+    return {
+      name: semantic, source: 'semantic', firstSeen: null, seed: null,
+      intent: intentLabel(intent) ?? (cluster?.class === 'question' ? 'Question' : 'Unclassified'),
+      ...(topicLabel(topic) ? { topic: topicLabel(topic) } : {}),
+    };
+  }
   const { lead, full } = characterizeParts(cluster);
   return {
     name: lead, source: 'characterized', firstSeen: null, seed: null, descriptor: full,

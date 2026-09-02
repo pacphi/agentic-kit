@@ -10,6 +10,7 @@ Configuration Intent
         |                 |       |
         |                 |       +----> Managed Companion Surfaces
         |                 +----> Hook Configuration Assurance
+        |                 +----> Supervised Hook Execution ----> Hook Runtime Receipts
         |                 +----> Routing and Orchestration
         |
 Native Evidence ----> Evidence Acquisition ----> Canonical Evidence
@@ -18,10 +19,13 @@ Native Evidence ----> Evidence Acquisition ----> Canonical Evidence
                          |                         |                      |
                          v                         v                      v
                   Observability        Model Lifecycle Intelligence  Historical Usage
-                    |         |                    |                      |
-                    |         +----> Workspace     +----------------------+
+                    |         |                    |               \      |
+                    |         +----> Workspace     +------> Context Budget Intelligence
                     |                Snapshot Cache                       |
                     +-----------------------+----> Dashboard Delivery <----+
+                                                          ^
+                                      Hook Configuration Assurance -------+
+                                      Hook Runtime Receipts --------------+
                                                           ^
 Project State (.claude-flow/*) ----> Project Intelligence-+
 Local filesystem + process table ---> Machine Footprint --+
@@ -56,6 +60,9 @@ proposals. It consumes host identity, project scope and validated external adapt
 manifests. It never executes hook or plugin code and owns no host trust, consent, grant,
 installation, route or configuration write.
 
+It may contribute the static half of a sanitized Hook read model. It does not own supervised
+execution receipts and cannot reinterpret an absent runtime stream as zero failures.
+
 See [Hook configuration assurance](hook-configuration-assurance.md).
 
 ### Routing and orchestration
@@ -84,6 +91,24 @@ See [Observability](observability.md).
 Owns transcript indexing, session history, token and cost aggregation, classification, and usage
 findings. It may share a host-qualified session identity with Observability, but its aggregate and
 cache are separate from the live event store.
+
+Prompt Telemetry is a Historical Usage subdomain. It owns privacy-bounded prompt fingerprints,
+controlled semantic facets, recurring-cluster evidence and deterministic presentation names. It
+does not own prompt text, coaching, model enrichment or mutable labels.
+
+See [Prompt telemetry](prompt-telemetry.md) and
+[ADR-0039](../adr/0039-prompts-intelligence.md).
+
+### Context budget intelligence
+
+Owns compatible context-window evidence resolution, conservative startup/dynamic policy, context
+pressure decisions, and bounded context read models. It consumes runtime session evidence from
+Historical Usage and capacity candidates from Model Lifecycle Intelligence. It does not parse
+transcripts, publish model catalogues, execute hooks, mutate routes, or treat byte counts as
+observed tokens.
+
+See [Context budget intelligence](context-budget-intelligence.md) and
+[ADR-0042](../adr/0042-capability-aware-context-budget-intelligence.md).
 
 ### Model lifecycle intelligence
 
@@ -166,6 +191,12 @@ and credential policy is distinct from the offline-first dashboard and integrati
 | Integration management | Hook configuration assurance | Host identity and validated external adapter data; admission, consent, grants and execution stay upstream |
 | Project census | Hook configuration assurance | Explicit project roots for bounded source discovery; no project trust is inferred |
 | Native hook configuration | Hook configuration assurance | Host-specific anti-corruption providers produce normalized sources, occurrences, diagnostics and gaps |
+| Historical usage | Context budget intelligence | Bounded per-session first/last/peak token and runtime-window evidence; transcript ownership stays upstream |
+| Model lifecycle intelligence | Context budget intelligence | Capacity candidates with provenance; catalogue maximum is not active-session pressure |
+| Context budget intelligence | Routing and orchestration | Read-only budget decision for each materialized route attempt; launch authority stays downstream |
+| Context budget intelligence | Dashboard delivery | Sanitized bounded coverage, pressure, policy and attention read model |
+| Hook configuration assurance | Dashboard delivery | Lazy sanitized static sources, occurrences, diagnostics, coverage and proposals; runtime remains a separate receipt-backed field |
+| Integration management / supervised adapter runner | Dashboard delivery | Bounded typed hook receipts for executions agentic-kit actually supervised; no native-host outcome inference |
 | Native evidence | Evidence acquisition | Source-specific anti-corruption adapters |
 | Evidence acquisition | Observability | Versioned canonical events |
 | Evidence acquisition | Historical usage | Normalized transcript and provider evidence |
@@ -217,6 +248,8 @@ observed before the split was made explicit.
 - Snapshot comparison requires stable scope and sufficient source completeness; degraded evidence
   never creates removal.
 - Historical usage and live topology share identifiers, not aggregate ownership.
+- Context pressure requires a token-compatible numerator and denominator. Unknown capacity, bytes,
+  stale evidence and external self-assertions never become a percentage or a zero.
 - Network egress occurs only in commands and contexts whose contract explicitly permits it.
 - Every project count is rendered with the scope that produced it; two contexts may report
   different totals, but neither may report an unexplained one.
@@ -234,3 +267,5 @@ observed before the split was made explicit.
   authorities; consent, content-free observation, and ownership-safe teardown remain upstream.
 - Hook configuration assurance is read-only. It never imports an OpenCode plugin, executes a hook,
   fetches a remote adapter by default, changes trust, or treats a diagnostic as write authority.
+- A static hook occurrence is not a runtime outcome. A supervised receipt does not prove native
+  Claude, Codex or OpenCode lifecycle behavior, and an absent receipt stream is `not-recorded`.

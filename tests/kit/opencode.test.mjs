@@ -780,7 +780,7 @@ test('a pre-existing {"*":"ask"} permission OBJECT survives undo as an object (n
   rm(d);
 });
 
-test('opencode guidance blocks are enablement-gated (flag): absent when disabled, stripped on disable', async () => {
+test('opencode guidance blocks respect host enablement when Brain is enabled', async () => {
   const { registry, syncBlocks, blocksForTarget, retiredForTarget } = await import('../../src/lib/blocks.mjs');
   const d = tmp('ak-oc-flag-');
   const file = path.join(d, 'AGENTS.md');
@@ -795,18 +795,21 @@ test('opencode guidance blocks are enablement-gated (flag): absent when disabled
     return p;
   };
   const treg = [...blocksForTarget(rows, 'agents-opencode'), ...retiredForTarget(rows, 'agents-opencode')];
+  const context = (opencodeEnabled) => ({
+    context: { flags: { opencodeEnabled, ruvnetBrainEnabled: true } },
+  });
   // disabled → the enablement-gated blocks do NOT upsert (the host-agnostic
   // preamble legitimately still can — it asserts no wiring)
-  const off = await syncBlocks(file, treg, resolve, { context: { flags: { opencodeEnabled: false } } });
+  const off = await syncBlocks(file, treg, resolve, context(false));
   for (const slug of ['ruflo-opencode-reference', 'ruvnet-brain-opencode-reference']) {
     assert.ok(!off.some((r) => r.slug === slug && r.action === 'upserted'), `${slug} must not upsert while disabled`);
   }
   // enabled → upserted
-  const on = await syncBlocks(file, treg, resolve, { context: { flags: { opencodeEnabled: true } } });
+  const on = await syncBlocks(file, treg, resolve, context(true));
   assert.ok(on.some((r) => r.slug === 'ruflo-opencode-reference' && r.action === 'upserted'));
   assert.ok(on.some((r) => r.slug === 'ruvnet-brain-opencode-reference' && r.action === 'upserted'));
   // disabled again → stripped
-  const off2 = await syncBlocks(file, treg, resolve, { context: { flags: { opencodeEnabled: false } } });
+  const off2 = await syncBlocks(file, treg, resolve, context(false));
   assert.ok(off2.some((r) => r.slug === 'ruflo-opencode-reference' && r.action === 'stripped'));
   assert.ok(!fs.readFileSync(file, 'utf8').includes('BEGIN ruflo-opencode-reference'));
   rm(d);

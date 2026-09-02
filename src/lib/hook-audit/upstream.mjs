@@ -5,6 +5,7 @@ import { publicSource, readJsonSource } from './common.mjs';
 
 const defaultFile = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'config', 'agentic-dependency-constraints.json');
 const ISSUE_STATES = new Set(['open-at-last-verification', 'closed-at-last-verification']);
+const NOTIFICATION_STATES = new Set(['draft-only', 'published']);
 
 function validDate(value) {
   return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
@@ -28,7 +29,7 @@ export function loadUpstreamConstraints({
   const document = source.document;
   const errors = [];
   const asOf = now();
-  if (document?.schemaVersion !== 2) errors.push('unsupported upstream constraint schema');
+  if (![2, 3].includes(document?.schemaVersion)) errors.push('unsupported upstream constraint schema');
   if (!Array.isArray(document?.constraints)) errors.push('constraints must be an array');
   if (!Array.isArray(document?.dependencyPolicies)) errors.push('dependencyPolicies must be an array');
   if (!validDate(document?.lastVerifiedAt)) errors.push('lastVerifiedAt must be an ISO date');
@@ -64,8 +65,13 @@ export function loadUpstreamConstraints({
       && ISSUE_STATES.has(entry.issueState)
       && typeof entry.expiryPolicy === 'string' && validDate(entry.nextRetestAt)
       && typeof entry.sunsetWhen === 'string'
-      && entry.notification?.status === 'draft-only'
-      && Array.isArray(entry.notification?.requiredFields);
+      && NOTIFICATION_STATES.has(entry.notification?.status)
+      && Array.isArray(entry.notification?.requiredFields)
+      && (entry.notification.status !== 'published'
+        || (typeof entry.notification.publishedAt === 'string'
+          && Number.isFinite(Date.parse(entry.notification.publishedAt))
+          && typeof entry.notification.publishedUrl === 'string'
+          && /^https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/\d+(?:#issuecomment-\d+)?$/.test(entry.notification.publishedUrl)));
     if (valid && constraintIds.has(entry.id)) errors.push(`constraint ${index} duplicates ${entry.id}`);
     if (valid) constraintIds.add(entry.id);
     if (valid && !policyNames.has(entry.dependency)) errors.push(`constraint ${index} has no dependency policy for ${entry.dependency}`);
@@ -94,10 +100,19 @@ export function loadUpstreamConstraints({
           ? 'No installed dependency version was supplied; registry shape is not applicability proof.'
           : 'Applicability is bound to the supplied installed version and the declared affected range.',
       },
-      notificationDraft: {
+      notification: {
+        status: entry.notification.status,
+        approvalRequired: entry.notification.status !== 'published',
+        dependency: entry.dependency,
+        constraintId: entry.id,
+        requiredFields: entry.notification.requiredFields,
+        publishedAt: entry.notification.publishedAt ?? null,
+        publishedUrl: entry.notification.publishedUrl ?? null,
+      },
+      notificationDraft: entry.notification.status === 'draft-only' ? {
         status: 'draft-only', approvalRequired: true, dependency: entry.dependency,
         constraintId: entry.id, requiredFields: entry.notification.requiredFields,
-      },
+      } : null,
     };
   });
   const evidenceStatus = projected.some((entry) => entry.evidence.status === 'stale') ? 'stale' : 'current';

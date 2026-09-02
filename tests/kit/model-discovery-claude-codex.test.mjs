@@ -126,7 +126,12 @@ test('Codex parses visibility and reasoning variants without treating a local up
   assert.equal(result.models.length, 2);
   const terra = result.models.find((model) => model.identity.modelId === 'gpt-5.6-terra');
   assert.deepEqual(terra.variant.reasoningEfforts, ['none', 'low', 'medium', 'high', 'xhigh', 'max']);
-  assert.equal(terra.variant.contextWindow, 1050000);
+  assert.equal(terra.variant.contextWindow, 272000);
+  assert.equal(terra.variant.maximumContextWindow, 872000);
+  assert.equal(terra.variant.effectiveContextWindowPercent, 95);
+  assert.equal(terra.variant.effectiveContextWindow, 258400);
+  assert.equal(terra.variant.autoCompactTokenLimit, 240000);
+  assert.equal(terra.variant.maxOutputTokens, 128000);
   assert.equal(terra.states.entitled, 'unknown');
   assert.equal(terra.states.configured, 'unknown');
   assert.equal(terra.states.observed, 'unknown');

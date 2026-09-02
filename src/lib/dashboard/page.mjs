@@ -156,14 +156,16 @@ export function renderPage({ name, version }) {
     </div>
     <div class="secondary-group" id="secondary-usage" hidden>
       <div class="seg subseg" role="tablist" aria-label="Usage views" id="usage-seg">
-        <button class="seg-btn" role="tab" id="usage-tab-score" data-view="score" aria-selected="true" aria-controls="v-score" type="button">Scorecard</button>
+        <button class="seg-btn" role="tab" id="usage-tab-score" data-view="score" aria-selected="true" aria-controls="v-score" type="button">Score</button>
         <button class="seg-btn" role="tab" id="usage-tab-limits" data-view="limits" aria-selected="false" aria-controls="v-limits" tabindex="-1" type="button">Limits</button>
         <button class="seg-btn" role="tab" id="usage-tab-findings" data-view="findings" aria-selected="false" aria-controls="v-findings" tabindex="-1" type="button">Findings<span class="segbadge" id="u-findings-n" hidden></span></button>
         <button class="seg-btn" role="tab" id="usage-tab-prompts" data-view="prompts" aria-selected="false" aria-controls="v-prompts" tabindex="-1" type="button">Prompts</button>
+        <button class="seg-btn" role="tab" id="usage-tab-context" data-view="context" aria-selected="false" aria-controls="v-context" tabindex="-1" type="button">Context</button>
+        <button class="seg-btn" role="tab" id="usage-tab-hooks" data-view="hooks" aria-selected="false" aria-controls="v-hooks" tabindex="-1" type="button">Hooks</button>
         <button class="seg-btn" role="tab" id="usage-tab-models" data-view="models" aria-selected="false" aria-controls="v-models" tabindex="-1" type="button">Models<span class="segbadge" id="mli-attention-n" hidden></span></button>
         <button class="seg-btn" role="tab" id="usage-tab-sessions" data-view="sessions" aria-selected="false" aria-controls="v-sessions" tabindex="-1" type="button">Sessions<span class="mono seg-n" id="u-sessions-n"></span></button>
-        <button class="seg-btn" role="tab" id="usage-tab-transcript" data-view="transcript" aria-selected="false" aria-controls="v-transcript" tabindex="-1" type="button">Transcript</button>
       </div>
+      <span class="transcript-view-indicator" id="usage-transcript-indicator" aria-current="page" hidden>Transcript</span>
       <div class="filters secondary-actions" id="usage-days" role="group" aria-label="Usage window">
         <button class="chipf" type="button" data-days="7">7d</button>
         <button class="chipf on" type="button" data-days="14">14d</button>
@@ -514,9 +516,10 @@ export function renderPage({ name, version }) {
 
     <section class="view" id="v-prompts" role="tabpanel" aria-labelledby="usage-tab-prompts" hidden>
       <div class="note"><span class="i">&#8505;</span><span>What you actually type, across every host.
-        Every figure here is computed from prompt <b>fingerprints</b> &mdash; a hash, a token count, and a
-        provenance tag recorded at scan time. <b>No prompt text is stored in the index or served by this
-        view.</b> Only turns a person typed are counted; agent deliveries, tool templates and slash records
+        Every figure here is computed from prompt <b>fingerprints</b> &mdash; hashes, counts, provenance, and
+        bounded intent/topic codes recorded at scan time. <b>No prompt text is stored in the index or served by this
+        view.</b> Semantic names require repeated majority evidence; unknown vocabulary stays unclassified.
+        Only turns a person typed are counted; agent deliveries, tool templates and slash records
         are filtered out before anything below is measured.</span></div>
       <div class="hero" id="u-pr-kpis"></div>
       <section class="strip">
@@ -536,16 +539,60 @@ export function renderPage({ name, version }) {
       </section>
       <section class="strip">
         <div class="sh"><h2>Host interplay</h2>
-          <span class="pr-infodot" tabindex="0" role="note" aria-label="About the host interplay figures">?
-            <span class="pr-tip"><b>Where you over-steer.</b> <b>Tap share</b> &mdash; how often you nudge
-              (&ldquo;done?&rdquo;) instead of writing a full instruction. <b>p90 length</b> &mdash; how long
-              your prompts run on that host. <b>Role openers</b> &mdash; how often you re-type a persona.
-              <br><br>Histories are unequal: a host adopted recently has fewer days behind its numbers, so
-              read each host against itself, not the other.</span>
-          </span>
           <span class="n mono" id="u-pr-hosts-note"></span></div>
+        <p class="strip-copy" id="u-pr-hosts-copy"><b>How to read this:</b> Tap share is how often you nudge
+          with a short follow-up; p90 length is the 90th-percentile prompt length; role openers count prompts
+          that begin by assigning a persona. Compare each host with itself because retained histories may cover different dates.</p>
         <div id="u-pr-hosts"></div>
       </section>
+    </section>
+
+    <section class="view" id="v-context" role="tabpanel" aria-labelledby="usage-tab-context" hidden>
+      <div class="note"><span class="i">&#8505;</span><span><b>Runtime-observed transcript snapshots.</b>
+        Context pressure is shown only when a host recorded prompt input and its context window together.
+        Partial and not-recorded states stay explicit; published catalogue maxima are never substituted for missing runtime evidence.
+        This projection keeps counts, bounded distributions, and the same sanitized session labels used by the local Sessions view
+        &mdash; no prompt bodies or transcript turns.</span></div>
+      <div class="ctx-policy" id="u-ctx-policy" aria-label="Context budget policy"></div>
+      <div class="ctx-summary" id="u-ctx-summary" role="status" aria-live="polite"></div>
+      <div class="ctx-grid" id="u-ctx-hosts"></div>
+      <section class="strip">
+        <div class="sh"><h2 id="u-ctx-attention-title">Sessions needing attention</h2><span class="n mono">top 20 sessions &middot; local labels</span></div>
+        <p class="strip-copy">Projects appear once; expand one to compare its conversation labels and sessions. Recommendations name the action for the highest policy threshold crossed; they do not prove a handoff or compaction occurred.</p>
+        <div class="ctx-attention" id="u-ctx-attention" role="region" aria-labelledby="u-ctx-attention-title" tabindex="0"></div>
+      </section>
+      <div class="foot">evidence: runtime-observed input/window pairs from retained local session telemetry &middot; policy: agentic-kit context budget v1</div>
+    </section>
+
+    <section class="view" id="v-hooks" role="tabpanel" aria-labelledby="usage-tab-hooks" aria-busy="false" hidden>
+      <div class="sr-only" id="u-hook-status" role="status" aria-live="polite" aria-atomic="true"></div>
+      <div class="note"><span class="i">&#8505;</span><span><b>Read-only configuration audit.</b>
+        Opening this view inspects configured hooks but never executes, edits, heals, enables, or disables one.
+        The summary contains no commands or physical paths. A source location and masked definition are fetched only when you explicitly inspect an audited placement.</span></div>
+      <section class="strip">
+        <div class="sh"><h2>What is configured</h2><span class="n mono">static audit &middot; host=all</span></div>
+        <p class="strip-copy">An entry is one configured placement. Distinct behaviors normalize equivalent definitions; repeated placements are additional entries with the same behavior. Unreadable sources could not be inspected.</p>
+        <div id="u-hook-config"></div>
+      </section>
+      <section class="strip">
+        <div class="sh"><h2 id="u-hook-definitions-title">Hook definitions</h2><span class="n mono">grouped behavior &middot; physical placements</span></div>
+        <p class="strip-copy">Five collapsed definitions fit in the table viewport; scroll for the rest. Expand one to see where each placement is configured, who owns it, and whether selection was established. Source inspection is navigation, not permission to edit.</p>
+        <div id="u-hook-stop"></div>
+      </section>
+      <section class="strip">
+        <div class="sh"><h2>Runtime outcomes</h2><span class="n mono">bounded execution receipts &middot; separate from configuration</span></div>
+        <div id="u-hook-runtime"></div>
+      </section>
+      <section class="strip">
+        <div class="sh"><h2>Findings needing attention</h2><span class="n mono">plain language &middot; evidence-bound next steps</span></div>
+        <div id="u-hook-diagnostics"></div>
+      </section>
+      <dialog class="hook-source-dialog" id="u-hook-source-dialog" aria-labelledby="u-hook-source-title">
+        <div class="hook-source-head"><h2 id="u-hook-source-title">Audited hook definition</h2><button type="button" id="u-hook-source-close" aria-label="Close hook definition">Close</button></div>
+        <p class="strip-copy">This view translates the selected audited configuration into masked JSON when the source can be parsed safely. It also identifies the host, lifecycle point, owner evidence, format, selector, and physical location. Viewing it does not grant permission to edit or heal it.</p>
+        <div id="u-hook-source-detail" aria-live="polite"></div>
+      </dialog>
+      <div class="foot">evidence: read-only normalized hook audit plus any bounded runtime receipts available to this process</div>
     </section>
 
     <section class="view" id="v-sessions" role="tabpanel" aria-labelledby="usage-tab-sessions" hidden>
@@ -564,7 +611,7 @@ export function renderPage({ name, version }) {
       <div class="mli-attention" id="mli-attention" role="status" aria-live="polite"></div>
       <section class="strip" id="mli-observed-panel">
         <div class="sh"><h2>Observed in this window</h2><span class="n mono" id="mli-observed-note"></span></div>
-        <p class="mli-copy">Successful local transcript evidence for the selected Usage window. This is actual use, whether or not the model is pinned to a route.</p>
+        <p class="strip-copy">Successful local transcript evidence for the selected Usage window. This is actual use, whether or not the model is pinned to a route.</p>
         <div class="mli-table-wrap" role="region" aria-label="Models observed in the selected Usage window" tabindex="0"><table class="mli-table mli-observed-table">
           <caption class="sr-only">Models observed in retained sessions for the selected Usage window.</caption>
           <thead><tr><th scope="col">Model</th><th scope="col">Model provider</th><th scope="col">Used via</th><th scope="col">Sessions</th><th scope="col">Last used</th></tr></thead>
@@ -573,7 +620,7 @@ export function renderPage({ name, version }) {
       </section>
       <section class="strip mli-routes-panel">
         <div class="sh"><h2>Your routes</h2><span class="n mono" id="mli-asof"></span></div>
-        <p class="mli-copy">Configured routes and fallbacks. Last used comes from the selected Usage window; catalogue-only models are kept below.</p>
+        <p class="strip-copy">Configured routes and fallbacks. Last used comes from the selected Usage window; catalogue-only models are kept below.</p>
         <div class="mli-table-wrap" role="region" aria-label="Your model routes; scroll in either direction for every route" tabindex="0"><table class="mli-table mli-routes-table">
           <caption class="sr-only">Configured model routes, providers, observed use, and API-equivalent pricing.</caption>
           <thead><tr>
@@ -625,7 +672,7 @@ export function renderPage({ name, version }) {
       <dialog class="mli-detail-dialog" id="mli-detail" aria-labelledby="mli-detail-title"><div class="mli-detail-head"><h2 id="mli-detail-title">Model details</h2><button type="button" id="mli-detail-close" aria-label="Close model details">Close</button></div><div id="mli-detail-body"></div></dialog>
     </section>
 
-    <section class="view" id="v-transcript" role="tabpanel" aria-labelledby="usage-tab-transcript" hidden>
+    <section class="view" id="v-transcript" role="region" aria-labelledby="usage-transcript-indicator" hidden>
       <div class="tcrumb" id="u-crumb"></div>
       <section class="strip" id="u-turns"></section>
       <div class="foot">secret-shaped strings are masked server-side &mdash; the original never reaches this page &middot; no export button by design</div>

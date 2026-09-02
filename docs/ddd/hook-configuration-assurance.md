@@ -34,10 +34,16 @@ host set plus source digests and exact version facts.
 - `HookOccurrence`: one event/matcher/handler at one source pointer.
 - `HookBehavior`: material execution identity shared only by genuinely equivalent
   occurrences.
+- `HookSourceReference`: opaque, short-lived Dashboard Delivery reference to one audited
+  physical locator; it is neither a filesystem path nor an authorization token.
 - `SchemaProfile`: exact host version, supported shape, units, defaults, limits, evidence
   and verification date.
 - `CoverageStatement`: complete/partial/unsupported plus concrete gaps.
 - `Diagnostic`: category, severity, stable code, evidence and message.
+- `FindingGroup`: normalized diagnostic identity, allowlisted presentation, importance, and the
+  deduplicated physical placements it affects.
+- `FindingPlacement`: occurrence-bound host, lifecycle, source, ownership, selection evidence,
+  disposition, and optional exact action. Actions never belong to the group as a whole.
 - `RemediationProposal`: target, expected source digest, authority class, rationale,
   behavior impact and trust impact.
 - `HealingPlan`: exact audit identity, runtime profiles, selected source preimages,
@@ -79,6 +85,41 @@ manifests, not imported implementation modules.
 12. Mutation cannot change trust, consent, grants, generated copies, caches, opaque
     modules, JSONC, unsupported schemas or Windows targets.
 13. Receipt digests prove internal consistency, not authenticity against the same user.
+14. A dashboard action requires an exact executable healing action or a separately
+    verified published upstream URL; an authority class or review proposal alone is not
+    actionability.
+15. Source navigation resolves only a cached audited locator, rechecks containment and
+    digest, masks selected content server-side, and grants no edit or healing authority.
+16. Dependency ownership requires a cryptographic signature or a repository-pinned release
+    identity; a self-consistent manifest hash alone cannot establish an upstream owner.
+
+## Dashboard read model
+
+The browser projection separates four evidence classes:
+
+- configured entries, distinct behaviors, repeated placements and source readability;
+- host-neutral definition groups with their physical placements and ownership evidence;
+- plain-language finding groups joined back to affected physical placements, sorted by importance
+  and affected-definition count;
+- informational and unknown diagnostics without a proposal/action, presented separately as
+  observations rather than attention items;
+- typed runtime receipts, or explicit `not-recorded` state.
+
+Repeated informational trust diagnostics collapse into one evidence-limit statement. A source
+reference is safe to show in the summary because it is HMAC-derived and expires with the in-memory
+audit cache. Resolving it is a separate authenticated read: the source is reopened through the
+bounded-file port, its digest must still match, and only a masked selected JSON definition is
+returned in a versioned `available | location-only` presentation. Missing locators remain `null`, so
+the browser cannot manufacture a broken Inspect control from placeholder text. Opaque formats,
+invalid or missing selectors, parse failures and bounded-display overruns are location-only with
+distinct reasons. An expired reference causes one audit refresh and one retry; digest drift requires
+a fresh explicit selection and never substitutes changed content. The client cannot supply a path
+or launch an editor.
+
+The read model keeps source navigation independent from remediation. It may describe why a finding
+is non-automatic, but it shows a next step only when the plan proves an executable occurrence-bound
+action or an independently verified published upstream issue. The action stays on the placement
+that proved it; sibling placements in the same finding group never inherit it.
 
 ## Host anti-corruption layers
 
@@ -88,7 +129,10 @@ Translates `hooks.json`, documented inline TOML and enabled plugin manifests. It
 Codex's merge semantics, seconds-based timeout rules, MCP-tool handlers and independent
 definition trust. It also emits an exact-identity placement finding when the
 `codex@openai-codex` Claude companion is enabled inside Codex; no manifest-directory
-heuristic is used.
+heuristic is used. Under the exact Codex `0.152.1` profile it also recognizes the signed Ruflo
+3.38.20 AutoMemory `Stop` shape only after Ed25519 manifest verification and matching helper
+digest/output-path evidence. That compatibility proposal is upstream-only; generated project
+hooks and helpers remain outside the mutation port.
 
 ### Claude Code
 

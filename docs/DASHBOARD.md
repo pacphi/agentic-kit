@@ -41,9 +41,10 @@ permanent.
 | Usage | Limits | `#usage/limits` | Provider limits | Current provider windows, reset timing, and available capacity |
 | Usage | Findings | `#usage/findings` | Usage findings | Actionable anomalies, efficiency opportunities, and evidence-backed recommendations |
 | Usage | Prompts | `#usage/prompts` | What you actually type | Prompt repetition, tap habits, provenance, recurring patterns, re-asks, and host interplay from prompt fingerprints |
+| Usage | Context | `#usage/context` | Context budget | Runtime-observed input/window pressure, evidence coverage, policy bands, and capped attention rows |
+| Usage | Hooks | `#usage/hooks` | Hook assurance | Read-only hook configuration diagnostics, ownership actions, and separately reported bounded runtime receipts |
 | Usage | Models | `#usage/models` | Model lifecycle | Host inventory, lifecycle changes, consumers, swap impact, and evidence sources |
 | Usage | Sessions | `#usage/sessions` | Session usage | Retained sessions grouped by project, category, duration, tokens, and cost |
-| Usage | Transcript | `#usage/transcript` | Transcript detail | The selected session's locally retained, server-masked evidence |
 | Observability | Live | `#observability/live` | Observability · Live | Projects and roots with current presence or fresh meaningful activity |
 | Observability | History | `#observability/history` | Observability · History | Retained roots that are not currently Live |
 | System | Summary | `#system/summary` | Summary | Install size, retained data, live resource use, deployed inventory, and the machine's largest storage consumers in one glance |
@@ -57,9 +58,11 @@ permanent.
 About is one scrolling page, so its hashes scroll to a section rather than swapping panels; `#about`
 alone opens the page at the top.
 
-Opening a transcript replaces `transcript` with the URL-encoded session ID:
-`#usage/<session-id>`. These hashes select state inside the one page; they do not create separate
-servers or weaken the dashboard token boundary.
+Opening a session uses `#usage/<session-id>`. **Transcript** is not a navigable Usage tab: it appears
+only as a non-interactive current-view indicator while a selected session's locally retained,
+server-masked evidence is open. A bare `#usage/transcript` returns to Sessions. These hashes select
+state inside the one page; they do not create separate servers or weaken the dashboard token
+boundary.
 
 ### Keyboard behavior
 
@@ -159,8 +162,9 @@ Each count carries the sentence explaining what it counted; on Intelligence it i
 
 ## Usage
 
-Usage loads lazily when first opened. Scorecard, Limits, Findings, Prompts, Models, Sessions, and
-Transcript share the same secondary rail; the 7/14/30-day filters remain aligned to its right.
+Usage loads lazily when first opened. Scorecard, Limits, Findings, Prompts, Context, Hooks, Models,
+Sessions, and Transcript share the same secondary rail; the 7/14/30-day filters remain aligned to
+its right.
 
 ### Scorecard
 
@@ -234,20 +238,100 @@ The legend appears only when at least one row actually carries a tick.
 
 Prompts turns what you actually typed — never what the harness or a delegated agent produced —
 into repetition and habit signal, host by host. Every figure derives from prompt
-**fingerprints** (a hash, a token count, a provenance tag recorded at scan time); no prompt text is
-stored in the index. The **KPI strip** reads Typed prompts (share of every fingerprinted turn),
+**fingerprints** (a hash, token/count evidence, provenance, and optional controlled intent/topic
+codes recorded at scan time); no prompt text is stored in the index. A recurring cluster receives a
+contextual name only when one controlled intent or topic has at least two supporting prompts, covers
+at least 60% of the cluster, and is not tied. Otherwise it remains honestly unclassified. The
+visible **Intent** column replaces the former binary `question`/`other` class; the legacy class stays
+in compatibility JSON only. The **KPI strip** reads Typed prompts (share of every fingerprinted turn),
 Questions, Supervision taps (against your own trailing-90d normal per host, where you have one),
 Repeated share, and Headless share. Below it, **Who is typing** shows the provenance split behind
 that Typed-prompts figure — most user-role turns are not typed by you at all — and **Host
 interplay** reads the asymmetry between hosts in plain language (how much more often you tap one,
-how much longer you write on the other, how much role scaffolding each gets retyped by hand), with
-the unequal-histories nuance in its own tooltip rather than a standing caveat.
+how much longer you write on the other, how much role scaffolding each gets retyped by hand). The
+definitions and unequal-history warning are persistent copy, not hover-only help.
 
 Below the KPIs, **Who is typing**, **Steering mix**, **Tap habits**, **Recurring patterns**,
 **Re-asks**, and **Host interplay** explain the same deterministic evidence without serving prompt
 text or mutable coaching state. An **All** chip, offered on this view alone, widens the window to the
 full retained history; leaving Prompts drops it back to 30 days. Full formulas, thresholds, and
 sources: [Usage scorecard metrics](USAGE-SCORECARD-METRICS.md) §2a, §2b, §20–§22.
+
+### Context
+
+Context answers how much of a runtime-observed window the retained sessions used. The policy strip
+shows the canonical startup, dynamic and reserve bands. The summary reports exactly how many
+sessions have a paired input/window pressure observation and how many lack a denominator. Claude,
+Codex and OpenCode each keep their own card with evidence state, p90 peak pressure, paired-sample
+count, p90 peak input and median observed window.
+
+A percentage is rendered only when input and window were observed together for that session.
+Claude and OpenCode commonly carry input-only evidence, so they may read **Partial evidence** while
+Codex is observed. Missing evidence renders `unknown`; an unknown ARIA meter omits `aria-valuenow`
+rather than announcing zero. The attention projection is capped to the top 20 sessions before
+presentation. The browser renders one disclosure row per bounded project and keeps each sanitized
+conversation label inside the expanded session table, then exposes explicit column headers, an opaque session reference, host, policy-derived
+recommendation, pressure/input/window, and start date. The session reference links to that retained
+local transcript. A recommendation means a policy threshold was crossed; it is not evidence that a
+handoff or compaction occurred. Prompt bodies, tool payloads, commands and raw paths never enter the
+projection.
+
+Context rides the existing authenticated `/api/usage` aggregate and follows the selected Usage day
+window. Its percentages use runtime-effective denominators where the transcript supplied them; a
+published 1M maximum never overrides a smaller 258.4K session window. Full evidence and threshold
+rules: [ADR-0042](adr/0042-capability-aware-context-budget-intelligence.md).
+Run `ak audit context --host all` for the companion read-only startup report: managed guidance
+bytes/state, bounded skill-metadata counts, MCP registration-table bytes, schema availability and
+effective-window evidence. MCP configuration bytes do not include unrelated host preferences, and
+tool schema bytes remain unknown when the host config does not expose them.
+
+### Hooks
+
+Hooks is a read-only assurance view. Opening it lazily requests authenticated, no-store
+`/api/hooks?host=all`; the server shares one in-flight collection and a 30-second in-memory result.
+It does not execute, edit, heal, enable or disable a hook. The summary removes raw commands, source
+paths, hook output, detail and diagnostic prose. Each audited physical placement receives an opaque,
+short-lived source reference. Only an explicit **Inspect source** action resolves that reference,
+rechecks the bounded regular file and original digest, and returns its physical location plus a
+server-masked selected JSON definition with format, host, lifecycle, source-kind, owner and selector
+facts. A placement without a resolvable locator has no Inspect control. If a live reference expires,
+the browser refreshes Hooks and retries once; digest drift refreshes the list but never substitutes
+changed content silently. Invalid or missing selectors and formats that cannot be parsed safely
+return an explicit location-only reason. The route accepts no client path, never imports a module or
+launches an editor.
+
+The view deliberately separates four questions:
+
+- **What is configured** distinguishes physical entries, distinct normalized behaviors, repeated
+  placements, inspected sources, and unreadable sources. Unreadable sources are not warning counts.
+- **Hook definitions** is a semantic table grouped by normalized behavior. Its keyboard-focusable,
+  internally scrollable viewport shows five collapsed definitions at a time and keeps the header
+  visible. Expand a definition to inspect its host, lifecycle point, handler kind, timeout,
+  placement, owner/authority, selection evidence and source reference.
+- **Findings needing attention** groups the same normalized finding across hosts and lifecycle
+  points. Importance is a sort/filter dimension, not the group identity. Expand a finding to see
+  the affected definitions under explicit Lifecycle point, Host, Configured in, Evidence and
+  Action headers. Stable codes remain secondary support text, and an action stays on the exact
+  placement that proved it.
+- **Observations, not actions** holds informational or unknown diagnostics that have neither a
+  remediation proposal nor a verified action.
+- **Runtime outcomes** is a separate table of bounded receipts. With no receipts it says outcomes
+  are unknown and renders no zero-valued scorecard.
+
+Evidence limits stay beside the affected measurement instead of repeating in a generic panel:
+unreadable sources remain in configuration evidence, missing receipts remain in Runtime outcomes,
+and a finding placement without an exact safe next step says so in its Action cell.
+
+A finding receives a call to action only when the current healing plan contains an exact executable
+action bound to the affected occurrence and plan digest, or when a verified published upstream issue
+is joined explicitly. A generic `approval-required`, `upstream-required`, or `prohibited`
+classification is explanation, not actionability.
+
+A configured Stop risk is not a failed Stop execution. Conversely, an absent receipt is not a
+successful execution or zero failures. Native Claude, Codex and OpenCode hooks do not currently feed
+the bounded supervised-adapter receipt stream, so runtime is normally unknown. See
+[ADR-0041](adr/0041-host-neutral-hook-configuration-assurance.md) for the audit, receipt and
+ownership contracts.
 
 ### Reading a session row
 

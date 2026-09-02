@@ -549,21 +549,6 @@ function printHostInterplay(agg, win) {
   }
 }
 
-/**
- * What the `class` column PRINTS. As of RULING A (final-triage item 1), this
- * is the identity map for every value the library can actually emit —
- * `promptShape` decides one thing (is this interrogative) and everything else
- * reads as `other` ON THE WIRE now (usage-prompt-patterns.mjs's
- * `classifyCluster`), not as a render-layer rewrite of a stored `instruction`
- * value. Printing it would still assert imperativeness the rules never
- * tested: the corpus's declarative feedback ("One thing I feel that's
- * missing is…") lands there too, and so does a bare `Yes` — which is exactly
- * why the SOURCE was renamed rather than leaving this table to keep
- * translating it. `unknown` is the one genuine relabel left: "unclassified"
- * reads better in a table cell than the internal name.
- */
-const CLASS_LABELS = { question: 'question', other: 'other', mixed: 'mixed', unknown: 'unclassified' };
-
 /** The "Repeated share" KPI (METRICS.md §21): the share of typed prompts
  *  sitting inside a cluster that recurs. `crossSessionClusters` has already
  *  applied the ≥3-sessions-or-≥2-days filter, so this is a straight sum over
@@ -588,16 +573,17 @@ function printClusters(clusters, totals) {
   info(dim('  what this does not model: whether the repetition was deliberate.'));
   showingNote(Math.min(TOP_CLUSTERS, clusters.length), clusters.length);
   info(dim(tableRow([['pattern', 42], ['n', 4, true], ['sess', 5, true], ['days', 5, true],
-    ['tok', 5, true], ['class', 12], ['source', 14]])));
+    ['tok', 5, true], ['intent', 14], ['source', 14]])));
   for (const r of clusters.slice(0, TOP_CLUSTERS)) {
+    const intent = r.intent ?? (r.class === 'question' ? 'Question' : 'Unclassified');
     info(tableRow([
       [r.label.name.length > 42 ? `${r.label.name.slice(0, 41)}…` : r.label.name, 42],
       [fmtNum(r.count), 4, true], [fmtNum(r.sessions), 5, true], [fmtNum(r.days), 5, true],
-      [fmtMaybe(r.medianTokens), 5, true], [CLASS_LABELS[r.class] ?? r.class, 12], [r.label.source, 14],
+      [fmtMaybe(r.medianTokens), 5, true], [intent, 14], [r.label.source, 14],
     ]));
   }
-  info(dim('  other = imperative or declarative, undifferentiated — the shape rules test only for a'));
-  info(dim('  question; deterministic labels describe shape only and do not reclassify this split.'));
+  info(dim('  intent comes from controlled parser-time facets with repeated majority support;'));
+  info(dim('  Question is shape evidence, and Unclassified means the evidence did not clear that bar.'));
 }
 
 /** The stricter subset of the same phenomenon: identical normalized text, not
