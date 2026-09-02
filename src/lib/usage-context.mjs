@@ -1,19 +1,10 @@
 // usage-context.mjs — a bounded, privacy-preserving projection over normalized
 // per-session context evidence. It contains no transcript parsing and retains
-// no prompt/title/turn text. The policy shape deliberately mirrors the Context
-// Budget domain contract so the integration layer can replace this local
-// constant with its canonical import without changing the API payload.
+// no prompt/title/turn text. Policy comes from the Context Budget domain so
+// runtime decisions and historical projections cannot drift.
+import { CONTEXT_BUDGET_POLICY } from './context-budget.mjs';
 
-export const CONTEXT_POLICY = Object.freeze({
-  schemaVersion: 1,
-  startupTargetBps: 500,
-  startupWarningBps: 700,
-  startupCriticalBps: 1_000,
-  dynamicWarningBps: 6_000,
-  dynamicCompactBps: 7_000,
-  dynamicHandoffBps: 7_500,
-  reserveBps: 2_500,
-});
+export const CONTEXT_POLICY = CONTEXT_BUDGET_POLICY;
 
 export const CONTEXT_ATTENTION_LIMIT = 20;
 const HOSTS = Object.freeze(['claude', 'codex', 'opencode']);
