@@ -6,7 +6,7 @@
 - **Supersedes:** [ADR-0039](0039-prompts-intelligence.md) on the mainline release
 - **Related:** [ADR-0009](0009-usage-scorecard-local-transcript-analytics.md),
   [ADR-0038](0038-consistent-cross-host-session-metrics.md)
-- **Preservation ref:** `archive/prompts-capability-main-2026-09-01`
+- **Preservation ref:** `archive/prompts-capability-main`
 - **Pinned implementation:** `91e892f523f307ecb29271cb0e370b538115a2c0`
 
 ## Context
