@@ -327,11 +327,11 @@ ak setup          # force reinitialize (aqe init --auto --upgrade)
 
 Opt-in only — `ak setup` does NOT run it.
 
-When agentic-qe **is** installed, the kit also merges a conditional **`ruflo-aqe-reference`**
-block (AQE operating guidance — policies + MCP tool usage + QE-agent patterns) into this same
-`~/.claude/CLAUDE.md`, just below this `ruflo-reference` block. It is added when `aqe` is on
-PATH and **stripped automatically when agentic-qe is absent**. Source: `claude/aqe-reference.md`;
-applied by `ak setup` and re-asserted by `ak x reference sync` / `ak sync`.
+When agentic-qe is enabled in `kit.json`, the kit merges the compact
+**`ruflo-aqe-reference`** block into `~/.claude/CLAUDE.md`; disabling AQE strips it.
+Executable detection remains a compatibility fallback for legacy reference commands that
+do not load kit configuration. Source: `claude/aqe-reference.md`; applied by `ak setup` and
+reconciled by `ak sync`.
 
 ### Security surface (verify + activate)
 

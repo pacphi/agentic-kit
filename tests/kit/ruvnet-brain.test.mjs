@@ -163,12 +163,19 @@ test('disableRuvnetBrainNightly no-ops cleanly when nothing is scheduled', async
   assert.match(r.detail, /not macOS|already off/);
 });
 
-test('BUILTIN_BLOCKS carries the ruvnet-brain-reference row gated on the KB dir', async () => {
+test('BUILTIN_BLOCKS prefers managed Brain intent and keeps the KB probe as fallback', async () => {
   const row = BUILTIN_BLOCKS.find((b) => b.slug === 'ruvnet-brain-reference');
   assert.ok(row, 'row must be registered');
   assert.equal(row.template, 'ruvnet-brain-reference.md');
-  assert.equal(row.detector.type, 'dir');
-  assert.equal(row.detector.target, '~/.cache/ruvnet-brain/kb');
+  assert.equal(row.detector.type, 'all');
+  const managed = row.detector.detectors.find((part) => part.target === 'ruvnetBrainEnabled');
+  assert.deepEqual(managed, {
+    type: 'enabled', target: 'ruvnetBrainEnabled',
+    fallback: { type: 'dir', target: '~/.cache/ruvnet-brain/kb' },
+  });
+  assert.equal(await detect(row.detector, {
+    flags: { claudeEnabled: true, ruvnetBrainEnabled: false },
+  }), false, 'persisted opt-out wins over filesystem presence');
   // dir detector: true when the target exists, false when absent
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rb-det-'));
   assert.equal(await detect({ type: 'dir', target: tmp }), true);
