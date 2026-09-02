@@ -3,12 +3,19 @@
 - **Status:** Implemented; handoff transport amended by
   [ADR-0034](0034-schema-native-handoffs-and-hermetic-seats.md)
 - **Date:** 2026-08-25
-- **Updated:** 2026-08-26
+- **Updated:** 2026-08-31
 - **Update note:** Initial implementation retires only receipt-owned legacy MCP state,
   diagnoses effective Codex MCP topology, extends POSIX cleanup to process groups, and adds
   fail-closed QE-Court readiness plus a reciprocal live participant-transport regression.
   2026-08-26: the soak exposed the free-text handoff as the weak link; ADR-0034 moves
   handoff-bearing seats to schema-native output and hermetic isolation.
+  2026-08-31: `ak sync` now discloses and confirmation-gates repair of user-owned recursive
+  Codex and legacy duplicate Ruflo entries, using Codex's supported removal command and
+  verifying the resulting topology. Sync also carries failed mutation results into its final
+  convergence proof so stale on-disk presence cannot be reported as success. RuvNet Brain
+  release drift is now actionable only when GitHub publishes the exact bundle asset consumed
+  by the installer; tag-only releases remain visible but are deferred without touching the
+  healthy installed Brain.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0001](0001-one-routing-policy-many-projections.md),
   [ADR-0006](0006-primary-host-and-ambidextrous-mirroring.md),
@@ -42,8 +49,9 @@ seats. A successful Claude/Codex transport check therefore cannot be called a co
    Codex-primary policies select leadership without changing the transport contract.
 2. Setup, sync, and host selection stop creating `codex mcp-server`. They remove a legacy project
    registration only when `integrations.ownership.codex.mcp === "ak"`, confirm its absence, and
-   clear the receipt only after confirmation. User-owned entries are preserved with a deprecation
-   warning and an exact manual remedy.
+   clear the receipt only after confirmation. User-owned recursive and legacy duplicate entries
+   are disclosed by `ak sync`, removed only after explicit confirmation (or `--yes`), and verified;
+   unrelated user-owned entries remain preserved.
 3. Codex keeps one independent, workspace-aware Ruflo MCP registration. Agentic-QE continues to
    own its Codex platform/MCP integration. Agentic-kit detects recursive Codex self-registration,
    missing concrete Agentic-QE registration, and duplicate Ruflo transports without rewriting
@@ -66,6 +74,10 @@ seats. A successful Claude/Codex transport check therefore cannot be called a co
    store→retrieve proofs in validated handoffs, independently confirms the project-memory values,
    rejects repository mutation and orphaned state, and never substitutes for Agentic-QE's court
    protocol.
+8. Sync distinguishes advertised RuvNet Brain tags from installable releases. Its release probe
+   requires the installer's exact `ruvnet-brain.zip` asset before prescribing a KB refresh. A
+   missing asset is reported as an upstream deferral with no automatic action; an installer that
+   was already launched still fails closed and preserves its causal error in convergence output.
 
 ## Consequences
 
@@ -77,6 +89,9 @@ seats. A successful Claude/Codex transport check therefore cannot be called a co
 - A transport regression can prove bounded participant lifecycle in both leadership directions,
   but full QE-Court parity remains blocked on an upstream Agentic-QE execution surface and complete
   Codex projection.
+- A malformed upstream Brain release no longer creates an endless `ak sync` retry loop or rewrites
+  a usable local Brain; the update becomes actionable automatically after a later release check sees
+  the required bundle asset.
 - ADR-0001's MCP projection is historical. ADR-0006's leadership decision, ADR-0016's ownership
   boundary, ADR-0018's worker lifecycle, and ADR-0020's stable execution surface remain in force.
 

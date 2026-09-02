@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { codexMcpStatus, codexMcpTopology } from '../../src/lib/mcp.mjs';
+import {
+  codexMcpStatus, codexMcpTopology, codexMcpRepairPlan, repairCodexMcpTopology,
+} from '../../src/lib/mcp.mjs';
 
 // A tmp dir with a .git marker → repoRoot() resolves to it, so codexMcpStatus reads
 // the .mcp.json we write here (not the real repo's).
@@ -114,5 +116,39 @@ test('Codex MCP topology treats absent and malformed files as empty', () => {
       rufloRegistrations: [],
       duplicateRuflo: false,
     });
+  } finally { rm(dir); rm(home); }
+});
+
+test('Codex MCP repair plans only remove recursive and legacy duplicate entries', async () => {
+  const dir = tmpProject();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-codexmcp-home-'));
+  try {
+    fs.mkdirSync(path.join(home, '.codex'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.codex', 'config.toml'), [
+      '[mcp_servers.codex]', 'command = "codex"', 'args = ["mcp-server"]', '',
+      '[mcp_servers.claude-flow]', 'command = "ruflo"', 'args = ["mcp", "start"]', '',
+      '[mcp_servers.ruflo]', 'command = "ak"', 'args = ["x", "ruflo-mcp"]',
+    ].join('\n'));
+    const topology = codexMcpTopology({ cwd: dir, home });
+    const plan = codexMcpRepairPlan(topology);
+    assert.deepEqual(plan.map(({ name, reason }) => ({ name, reason })), [
+      { name: 'codex', reason: 'recursively launches Codex through the deprecated mcp-server transport' },
+      { name: 'claude-flow', reason: 'duplicates the canonical workspace-aware [mcp_servers.ruflo] registration' },
+    ]);
+    const calls = [];
+    const result = await repairCodexMcpTopology(plan, dir, {
+      runner: async (command, args, options) => {
+        calls.push({ command, args, options });
+        return { code: 0, stdout: '', stderr: '' };
+      },
+      inspect: () => ({ registrations: [] }),
+    });
+    assert.equal(result.ok, true);
+    assert.ok(fs.existsSync(path.join(home, '.codex', 'config.toml.bak')),
+      'repair must preserve a recovery copy before changing user-owned config');
+    assert.deepEqual(calls.map(({ command, args }) => [command, args]), [
+      ['codex', ['mcp', 'remove', 'codex']],
+      ['codex', ['mcp', 'remove', 'claude-flow']],
+    ]);
   } finally { rm(dir); rm(home); }
 });

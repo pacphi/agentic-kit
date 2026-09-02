@@ -16,6 +16,9 @@ const ADVISORIES = [{
 
 function readJson(file) {
   try {
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.isSymbolicLink()) return { value: null, error: 'must be a regular non-symlink file' };
+    if (stat.size > 2 * 1024 * 1024) return { value: null, error: 'exceeds 2097152 byte inspection limit' };
     return { value: JSON.parse(fs.readFileSync(file, 'utf8')), error: null };
   } catch (error) {
     return { value: null, error: error.message };
@@ -40,9 +43,20 @@ export function enabledPluginRefs(source) {
 
 function splitRef(ref) {
   const at = ref.lastIndexOf('@');
-  return at > 0 && at < ref.length - 1
-    ? { plugin: ref.slice(0, at), marketplace: ref.slice(at + 1) }
-    : null;
+  if (at <= 0 || at >= ref.length - 1) return null;
+  const parsed = { plugin: ref.slice(0, at), marketplace: ref.slice(at + 1) };
+  const safeSegment = (value) => value !== '.' && value !== '..' && !/[\\/\0]/.test(value);
+  return safeSegment(parsed.plugin) && safeSegment(parsed.marketplace) ? parsed : null;
+}
+
+function canonicallyContained(root, target) {
+  try {
+    const realRoot = fs.realpathSync(root);
+    const realTarget = fs.realpathSync(target);
+    return realTarget === realRoot || realTarget.startsWith(`${realRoot}${path.sep}`);
+  } catch {
+    return false;
+  }
 }
 
 function newestVersionDir(base) {
@@ -149,8 +163,15 @@ function advisoryIssues(ref, version) {
 function hookTargets(hooks, root) {
   if (hooks === undefined) {
     const conventional = path.join(root, 'hooks', 'hooks.json');
-    return fs.existsSync(conventional) ? [{ kind: 'file', value: conventional }] : [];
+    try {
+      fs.lstatSync(conventional);
+      return [{ kind: 'file', value: conventional }];
+    } catch (error) {
+      return error.code === 'ENOENT' ? [] : [{ kind: 'file', value: conventional }];
+    }
   }
+  if (hooks && !Array.isArray(hooks) && typeof hooks === 'object'
+      && Object.keys(hooks).length === 0) return [];
   const values = Array.isArray(hooks) ? hooks : [hooks];
   return values.map((value) => {
     if (typeof value !== 'string') return { kind: 'inline', value };
@@ -163,52 +184,86 @@ function hookTargets(hooks, root) {
 
 function inspectPlugin(ref, cacheDir) {
   const parsed = splitRef(ref);
-  if (!parsed) return { ref, version: null, root: null, hookFiles: [], skillFiles: [], issues: [`invalid plugin reference "${ref}"`] };
+  if (!parsed) {
+    const hookIssues = [`invalid plugin reference "${ref}"`];
+    return { ref, version: null, root: null, hookFiles: [], inlineHookDocuments: [], skillFiles: [], hookIssues, skillIssues: [], issues: hookIssues };
+  }
   const base = path.join(cacheDir, parsed.marketplace, parsed.plugin);
   const version = newestVersionDir(base);
   if (!version) {
-    return { ref, version: null, root: null, hookFiles: [], skillFiles: [], issues: [`${ref}: enabled but no cached version is installed`] };
+    const hookIssues = [`${ref}: enabled but no cached version is installed`];
+    return { ref, version: null, root: null, hookFiles: [], inlineHookDocuments: [], skillFiles: [], hookIssues, skillIssues: [], issues: hookIssues };
   }
   const root = path.join(base, version);
-  const manifestFile = [
+  if (!canonicallyContained(cacheDir, root)) {
+    const hookIssues = [`${ref}: cached generation escapes the plugin cache root`];
+    return { ref, version, root: null, hookFiles: [], inlineHookDocuments: [], skillFiles: [], hookIssues, skillIssues: [], issues: hookIssues };
+  }
+  const manifestCandidates = [
     path.join(root, '.codex-plugin', 'plugin.json'),
     path.join(root, '.agent-plugin', 'plugin.json'),
     path.join(root, '.claude-plugin', 'plugin.json'),
-  ].find((file) => fs.existsSync(file));
+  ];
+  let manifestFile = null;
+  let unsafeManifest = null;
+  for (const file of manifestCandidates) {
+    try {
+      const stat = fs.lstatSync(file);
+      if (!stat.isFile() || stat.isSymbolicLink() || !canonicallyContained(root, file)) {
+        unsafeManifest = file;
+        break;
+      }
+      manifestFile = file;
+      break;
+    } catch (error) {
+      if (error.code !== 'ENOENT') { unsafeManifest = file; break; }
+    }
+  }
+  if (unsafeManifest) {
+    const hookIssues = [`${ref}: plugin manifest must be a contained regular non-symlink file: ${unsafeManifest}`];
+    return { ref, version, root, hookFiles: [], inlineHookDocuments: [], skillFiles: [], hookIssues, skillIssues: [], issues: hookIssues };
+  }
   if (!manifestFile) {
+    const hookIssues = [`${ref}: cached generation ${version} has no supported plugin manifest`];
     return {
-      ref, version, root, hookFiles: [], skillFiles: [],
-      issues: [`${ref}: cached generation ${version} has no supported plugin manifest`],
+      ref, version, root, hookFiles: [], inlineHookDocuments: [], skillFiles: [], hookIssues, skillIssues: [], issues: hookIssues,
     };
   }
   const manifest = readJson(manifestFile);
   if (manifest.error) {
-    return { ref, version, root, hookFiles: [], skillFiles: [], issues: [`${manifestFile}: ${manifest.error}`] };
+    const hookIssues = [`${manifestFile}: ${manifest.error}`];
+    return { ref, version, root, hookFiles: [], inlineHookDocuments: [], skillFiles: [], hookIssues, skillIssues: [], issues: hookIssues };
   }
 
   const hookFiles = [];
-  const issues = advisoryIssues(ref, version);
+  const inlineHookDocuments = [];
+  const hookIssues = advisoryIssues(ref, version);
   for (const target of hookTargets(manifest.value?.hooks, root)) {
     if (target.kind === 'outside') {
-      issues.push(`${ref}: hook path escapes the plugin root: ${target.value}`);
+      hookIssues.push(`${ref}: hook path escapes the plugin root: ${target.value}`);
       continue;
     }
     if (target.kind === 'invalid-path') {
-      issues.push(`${ref}: hook path must start with "./": ${target.value}`);
+      hookIssues.push(`${ref}: hook path must start with "./": ${target.value}`);
       continue;
     }
     if (target.kind === 'inline') {
-      issues.push(...validateHookDocument(target.value, `${ref} inline hooks`));
+      const inlineIssues = validateHookDocument(target.value, `${ref} inline hooks`);
+      hookIssues.push(...inlineIssues);
+      if (inlineIssues.length === 0) inlineHookDocuments.push(target.value);
       continue;
     }
     hookFiles.push(target.value);
     const hook = readJson(target.value);
-    if (hook.error) issues.push(`${target.value}: ${hook.error}`);
-    else issues.push(...validateHookDocument(hook.value, target.value));
+    if (hook.error) hookIssues.push(`${target.value}: ${hook.error}`);
+    else hookIssues.push(...validateHookDocument(hook.value, target.value));
   }
   const skills = inspectSkills(root);
-  issues.push(...skills.issues);
-  return { ref, version, root, hookFiles, skillFiles: skills.files, issues };
+  const skillIssues = skills.issues;
+  return {
+    ref, version, root, manifestFile, hookFiles, inlineHookDocuments, skillFiles: skills.files,
+    hookIssues, skillIssues, issues: [...hookIssues, ...skillIssues],
+  };
 }
 
 /** Inspect every explicitly enabled plugin's newest cached generation. */
@@ -220,7 +275,7 @@ export function inspectCodexPlugins({
   try {
     source = fs.readFileSync(configFile, 'utf8');
   } catch {
-    return { configPresent: false, enabled: [], plugins: [], issues: [] };
+    return { configPresent: false, enabled: [], plugins: [], hookIssues: [], skillIssues: [], issues: [] };
   }
   const enabled = enabledPluginRefs(source);
   const plugins = enabled.map((ref) => inspectPlugin(ref, cacheDir));
@@ -228,6 +283,8 @@ export function inspectCodexPlugins({
     configPresent: true,
     enabled,
     plugins,
+    hookIssues: plugins.flatMap((plugin) => plugin.hookIssues),
+    skillIssues: plugins.flatMap((plugin) => plugin.skillIssues),
     issues: plugins.flatMap((plugin) => plugin.issues),
   };
 }

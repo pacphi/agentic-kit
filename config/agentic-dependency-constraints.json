@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "lastVerifiedAt": "2026-09-01",
+  "recheckPolicy": {
+    "cadence": "weekly-and-before-upgrade",
+    "staleAfterDays": 14,
+    "requirePrimarySource": true
+  },
+  "constraints": [
+    {
+      "dependency": "ruflo",
+      "kind": "blocked-version",
+      "affected": ["3.38.17", "3.38.18"],
+      "issue": "https://github.com/ruvnet/ruflo/issues/2885",
+      "issueState": "open-at-last-verification",
+      "strategy": "retain the last proven version and re-run host conformance before removing the block",
+      "sunsetWhen": "an upstream release closes the issue and passes agentic-kit's host-neutral hook and lifecycle conformance suite"
+    },
+    {
+      "dependency": "ruflo",
+      "kind": "upstream-capability-gap",
+      "affected": ["3.x"],
+      "issue": "https://github.com/ruvnet/ruflo/issues/3046",
+      "issueState": "open-at-last-verification",
+      "strategy": "keep agentic-kit detection read-only and treat registration, health, reachability, and authorization as separate facts",
+      "sunsetWhen": "upstream exposes the required evidence and agentic-kit verifies it against a released artifact"
+    },
+    {
+      "dependency": "agentic-qe",
+      "kind": "upstream-capability-gap",
+      "affected": ["3.x"],
+      "issue": "https://github.com/ruvnet/agentic-qe/issues/628",
+      "issueState": "open-at-last-verification",
+      "strategy": "qualify external-provider and cross-host results as transport evidence rather than a host-neutral QE verdict",
+      "sunsetWhen": "a released host-neutral runner passes the live participant and provider conformance tests"
+    }
+  ]
+}

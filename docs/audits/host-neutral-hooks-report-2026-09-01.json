@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 2,
+  "mode": "read-only",
+  "capturedAt": "2026-09-01",
+  "command": "ak audit hooks --host all --json",
+  "hosts": ["codex", "claude", "opencode", "external"],
+  "summary": {
+    "sources": 37,
+    "invalidSources": 0,
+    "configurationIssues": 0,
+    "hookOccurrences": 100,
+    "uniqueBehaviors": 96,
+    "automaticActions": 0,
+    "approvalRequiredActions": 34,
+    "neverAutomaticActions": 2,
+    "upstreamRequiredActions": 2
+  },
+  "providers": {
+    "codex": {
+      "profile": "codex-hooks-2026-09-01",
+      "coverage": "partial",
+      "sources": 27,
+      "hookOccurrences": 47,
+      "uniqueBehaviors": 47,
+      "compatibilityWarnings": 2
+    },
+    "claude": {
+      "profile": "claude-hooks-2.1.258",
+      "coverage": "partial",
+      "sources": 7,
+      "hookOccurrences": 46,
+      "uniqueBehaviors": 42
+    },
+    "opencode": {
+      "profile": "opencode-plugins-1.18.25",
+      "coverage": "partial",
+      "sources": 3,
+      "hookOccurrences": 7,
+      "uniqueBehaviors": 7
+    },
+    "external": {
+      "profile": "agentic-kit-host-adapter-v1",
+      "coverage": "partial",
+      "sources": 0,
+      "hookOccurrences": 0,
+      "uniqueBehaviors": 0
+    }
+  },
+  "notes": [
+    "The full reusable inventory is emitted by the command; this checked-in receipt omits command text and user paths.",
+    "Trust, consent, grants, reachability, health, and authorization remain separate evidence dimensions.",
+    "No hook, trust state, plugin cache generation, or project configuration was modified."
+  ]
+}

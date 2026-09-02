@@ -317,7 +317,7 @@ test('brain installer exit failure is failed even when an old or partial KB is p
   let stamped = false;
   const r = await installRuvnetBrain({
     runner: async () => ({ code: 1, stdout: '', stderr: 'installer failed after partial copy\n' }),
-    latestVersion: async () => '4.0.12',
+    latestRelease: async () => ({ version: '4.0.12', releaseAssetAvailable: true }),
     present: () => true,
     recordRelease: () => { stamped = true; },
   });
@@ -332,12 +332,40 @@ test('brain installer stamps only a zero-exit installation', async () => {
   let stamped = null;
   const r = await installRuvnetBrain({
     runner: async () => ({ code: 0, stdout: '', stderr: '' }),
-    latestVersion: async () => '4.0.12',
+    latestRelease: async () => ({ version: '4.0.12', releaseAssetAvailable: true }),
     present: () => false,
     recordRelease: (version) => { stamped = version; },
   });
   assert.equal(r.status, 'ok');
   assert.equal(stamped, '4.0.12');
+});
+
+test('brain installer refuses a release tag whose required bundle asset is absent', async () => {
+  let ran = false;
+  const r = await installRuvnetBrain({
+    runner: async () => { ran = true; return { code: 0, stdout: '', stderr: '' }; },
+    latestRelease: async () => ({ version: '4.3.1', releaseAssetAvailable: false }),
+    present: () => true,
+  });
+  assert.equal(r.ok, false);
+  assert.equal(r.usable, true);
+  assert.equal(ran, false, 'a release known to lack ruvnet-brain.zip must never launch npx');
+  assert.match(r.detail, /v4\.3\.1 is missing ruvnet-brain\.zip/);
+  assert.match(r.detail, /existing Brain was left unchanged/);
+});
+
+test('brain installer failure selects the causal updater error across stdout and stderr', async () => {
+  const r = await installRuvnetBrain({
+    runner: async () => ({
+      code: 1,
+      stdout: '[forge-update] ERROR: v4.3.1 has no matching .zip asset\n',
+      stderr: "Nothing is left half-installed — fix the above and re-run.\n",
+    }),
+    latestRelease: async () => ({ version: '4.3.1', releaseAssetAvailable: true }),
+    present: () => true,
+  });
+  assert.match(r.detail, /no matching \.zip asset/);
+  assert.doesNotMatch(r.detail, /Nothing is left half-installed/);
 });
 
 test('AQE solver: the unpublished native is never install-attempted and the TS fallback is reported as the implementation (#135)', async () => {

@@ -12,6 +12,7 @@ describe the current system unless a section is explicitly marked as future work
 | [Integration management](integration-management.md) | Hosts, inference providers, bindings, capabilities, lifecycle, facts, and ownership |
 | [Routing and orchestration](routing-and-orchestration.md) | Activities, routes, leadership, escalation, projections, and canonical `ak run` execution |
 | [Model lifecycle intelligence](model-lifecycle-intelligence.md) | Model identities, evidence dimensions, catalogue snapshots, lifecycle diff, and read-only impact plans |
+| [Hook configuration assurance](hook-configuration-assurance.md) | Host-neutral lifecycle source discovery, behavior identity, coverage, diagnostics, and remediation authority |
 | [Observability](observability.md) | Evidence acquisition, observed-session aggregates, replay, and dashboard delivery |
 | [Project intelligence](project-intelligence.md) | Pattern store, learning counters, reasoning-graph size, and live delivery for Overview's Intelligence view |
 

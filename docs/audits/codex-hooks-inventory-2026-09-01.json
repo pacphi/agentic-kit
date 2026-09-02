@@ -1,0 +1,383 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-09-01T23:00:00-07:00",
+  "mode": "read-only",
+  "scope": {
+    "codexHome": "/Users/cphillipson/.codex",
+    "currentProject": "/Users/cphillipson/Development/active/ai/agentic-kit",
+    "projectDiscovery": "agentic-kit bounded git-project census plus explicit development roots",
+    "credentialsIncluded": false,
+    "hookCommandsExecutedDuringDiscovery": false
+  },
+  "runtime": {
+    "desktop": {
+      "version": "26.831.20005",
+      "build": "7524",
+      "bundledCodexCli": "0.152.0"
+    },
+    "pathCodexCli": "0.151.0",
+    "node": "26.4.0",
+    "agenticKit": "4.0.0-alpha.44",
+    "ruflo": "3.38.20",
+    "agenticQe": "3.14.0"
+  },
+  "summary": {
+    "selectedSourceFiles": 14,
+    "projectHookFiles": 10,
+    "enabledPluginHookFiles": 4,
+    "invalidSourceFiles": 0,
+    "hookDiscoveryConfigurationIssues": 0,
+    "hookOccurrences": 161,
+    "uniqueBehaviorFingerprints": 45,
+    "sessionEndWarningFiles": 10,
+    "automaticRemediations": 0,
+    "approvalRequiredOrNeverAutomaticRemediations": 10
+  },
+  "schemaProfile": {
+    "id": "codex-hooks-2026-09-01",
+    "confidence": "verified",
+    "verifiedCodexCliVersions": ["0.151.x", "0.152.x"],
+    "unknownOrFutureVersionPolicy": "syntax-only; no compatibility rewrite plan",
+    "timeoutUnits": "seconds",
+    "sessionEndDefaultSeconds": 1,
+    "sessionEndMaximumSeconds": 3,
+    "documentation": "https://developers.openai.com/codex/hooks",
+    "source": "https://github.com/openai/codex/blob/main/codex-rs/hooks/src/events/session_end.rs",
+    "verifiedAt": "2026-09-01"
+  },
+  "sources": [
+    {
+      "id": "project-agentic-kit",
+      "kind": "project",
+      "file": "/Users/cphillipson/Development/active/ai/agentic-kit/.codex/hooks.json",
+      "status": "active-if-project-layer-and-definition-are-trusted",
+      "authority": "unknown",
+      "generatedStatus": "suspected-generated",
+      "owner": "historic-ruflo-projection",
+      "digest": "53398d1ac227a34cf3e9ee466f327cfbacf9464bfec55b4f3588b4a644576d3",
+      "occurrences": 15
+    },
+    {
+      "id": "project-java-spring-modernization-marketplace",
+      "kind": "project",
+      "file": "/Users/cphillipson/Development/active/agentic-incubator/java-spring-modernization-marketplace/.codex/hooks.json",
+      "status": "active-if-project-layer-and-definition-are-trusted",
+      "authority": "unknown",
+      "generatedStatus": "suspected-generated",
+      "owner": "historic-ruflo-projection",
+      "digest": "53398d1ac227a34cf3e9ee466f327cfbacf9464bfec55b4f3588b4a644576d3",
+      "occurrences": 15
+    },
+    {
+      "id": "project-finima",
+      "kind": "project",
+      "file": "/Users/cphillipson/Development/active/ai/finima/.codex/hooks.json",
+      "status": "active-if-project-layer-and-definition-are-trusted",
+      "authority": "unknown",
+      "generatedStatus": "suspected-generated",
+      "owner": "historic-ruflo-projection",
+      "digest": "53398d1ac227a34cf3e9ee466f327cfbacf9464bfec55b4f3588b4a644576d3",
+      "occurrences": 15
+    },
+    {
+      "id": "project-keel",
+      "kind": "project",
+      "file": "/Users/cphillipson/Development/active/ai/keel/.codex/hooks.json",
+      "status": "active-if-project-layer-and-definition-are-trusted",
+      "authority": "unknown",
+      "generatedStatus": "suspected-generated",
+      "owner": "historic-ruflo-projection",
+      "digest": "53398d1ac227a34cf3e9ee466f327cfbacf9464bfec55b4f3588b4a644576d3",
+      "occurrences": 15
+    },
+    {
+      "id": "project-prompt-genie",
+      "kind": "project",
+      "file": "/Users/cphillipson/Development/active/ai/prompt-genie/.codex/hooks.json",
+      "status": "active-if-project-layer-and-definition-are-trusted",
+      "authority": "unknown",
+      "generatedStatus": "suspected-generated",
+      "owner": "historic-ruflo-projection",
+      "digest": "53398d1ac227a34cf3e9ee466f327cfbacf9464bfec55b4f3588b4a644576d3",
+      "occurrences": 15
+    },
+    {
+      "id": "project-reelbox-cli",
+      "kind": "project",
+      "file": "/Users/cphillipson/Development/active/ai/reelbox-cli/.codex/hooks.json",
+      "status": "active-if-project-layer-and-definition-are-trusted",
+      "authority": "unknown",
+      "generatedStatus": "suspected-generated",
+      "owner": "historic-ruflo-projection",
+      "digest": "53398d1ac227a34cf3e9ee466f327cfbacf9464bfec55b4f3588b4a644576d3",
+      "occurrences": 15
+    },
+    {
+      "id": "project-tub-vault",
+      "kind": "project",
+      "file": "/Users/cphillipson/Development/active/ai/tub-vault/.codex/hooks.json",
+      "status": "active-if-project-layer-and-definition-are-trusted",
+      "authority": "unknown",
+      "generatedStatus": "suspected-generated",
+      "owner": "historic-ruflo-projection",
+      "digest": "53398d1ac227a34cf3e9ee466f327cfbacf9464bfec55b4f3588b4a644576d3",
+      "occurrences": 15
+    },
+    {
+      "id": "project-site",
+      "kind": "project",
+      "file": "/Users/cphillipson/Documents/professional/2026/chrisphillipson.me/site/.codex/hooks.json",
+      "status": "active-if-project-layer-and-definition-are-trusted",
+      "authority": "unknown",
+      "generatedStatus": "suspected-generated",
+      "owner": "historic-ruflo-projection",
+      "digest": "53398d1ac227a34cf3e9ee466f327cfbacf9464bfec55b4f3588b4a644576d3",
+      "occurrences": 15
+    },
+    {
+      "id": "project-ampel",
+      "kind": "project",
+      "file": "/Users/cphillipson/Development/active/ai/ampel/.codex/hooks.json",
+      "status": "active-if-project-layer-and-definition-are-trusted",
+      "authority": "unknown",
+      "generatedStatus": "suspected-generated",
+      "owner": "historic-ruflo-projection",
+      "occurrences": 7
+    },
+    {
+      "id": "project-emailibrium",
+      "kind": "project",
+      "file": "/Users/cphillipson/Development/active/ai/emailibrium/.codex/hooks.json",
+      "status": "active-if-project-layer-and-definition-are-trusted",
+      "authority": "unknown",
+      "generatedStatus": "suspected-generated",
+      "owner": "beads-projection",
+      "occurrences": 4
+    },
+    {
+      "id": "plugin-ruvnet-brain",
+      "kind": "plugin-cache",
+      "file": "/Users/cphillipson/.codex/plugins/cache/ruvnet-brain/ruvnet-brain/4.2.2-dev/hooks/codex-hooks.json",
+      "status": "selected-enabled-generation",
+      "authority": "generated-runtime-copy",
+      "canonicalOwner": "stuinfla/ruvnet-brain marketplace source",
+      "version": "4.2.2-dev",
+      "occurrences": 16
+    },
+    {
+      "id": "plugin-ruflo-core",
+      "kind": "plugin-cache",
+      "file": "/Users/cphillipson/.codex/plugins/cache/ruflo/ruflo-core/0.2.6/hooks/hooks.json",
+      "status": "selected-enabled-generation",
+      "authority": "generated-runtime-copy",
+      "canonicalOwner": "ruvnet/ruflo marketplace source",
+      "version": "0.2.6",
+      "occurrences": 7
+    },
+    {
+      "id": "plugin-beads",
+      "kind": "plugin-cache",
+      "file": "/Users/cphillipson/.codex/plugins/cache/beads-marketplace/beads/1.2.2/.codex-plugin/hooks/hooks.json",
+      "status": "selected-enabled-generation",
+      "authority": "generated-runtime-copy",
+      "canonicalOwner": "steveyegge/beads marketplace source",
+      "version": "1.2.2",
+      "occurrences": 4
+    },
+    {
+      "id": "plugin-openai-codex",
+      "kind": "plugin-cache",
+      "file": "/Users/cphillipson/.codex/plugins/cache/openai-codex/codex/1.0.6/hooks/hooks.json",
+      "status": "selected-enabled-generation",
+      "authority": "generated-runtime-copy",
+      "canonicalOwner": "openai/codex-plugin-cc marketplace source",
+      "version": "1.0.6",
+      "occurrences": 3
+    }
+  ],
+  "behaviorSets": [
+    {
+      "id": "historic-ruflo-project-projection",
+      "occurrences": 127,
+      "uniqueActions": 15,
+      "implementationTargets": [
+        ".claude/helpers/hook-handler.cjs pre-bash",
+        ".claude/helpers/hook-handler.cjs pre-edit",
+        ".claude/helpers/hook-handler.cjs post-edit",
+        ".claude/helpers/hook-handler.cjs post-bash",
+        ".claude/helpers/hook-handler.cjs compact-manual",
+        ".claude/helpers/hook-handler.cjs compact-auto",
+        ".claude/helpers/hook-handler.cjs session-restore",
+        ".claude/helpers/hook-handler.cjs session-end",
+        ".claude/helpers/hook-handler.cjs route",
+        ".claude/helpers/hook-handler.cjs status",
+        ".claude/helpers/hook-handler.cjs post-task",
+        ".claude/helpers/auto-memory-hook.mjs import",
+        ".claude/helpers/auto-memory-hook.mjs sync"
+      ],
+      "canonicalOwner": "ruflo-core@ruflo plugin for current Codex lifecycle ownership",
+      "diagnostics": [
+        "Claude millisecond-style timeout values interpreted by Codex as seconds",
+        "SessionEnd 10000s is clamped to 3s",
+        "dynamic sh -c and undocumented CLAUDE_PROJECT_DIR fallback",
+        "pre-edit, post-bash, compact-manual, compact-auto, and status are unknown-success no-ops",
+        "pre-bash exit 1 is not Codex's blocking contract",
+        "stale duplicate of current ruflo-core plugin ownership"
+      ],
+      "risk": "HIGH",
+      "trustRecommendation": "TRUST AFTER CHANGE; pre-bash enforcement DO NOT TRUST"
+    },
+    {
+      "id": "beads-lifecycle",
+      "occurrences": 8,
+      "uniqueActions": 4,
+      "implementationTargets": [
+        "bd codex-hook SessionStart",
+        "bd codex-hook PreCompact",
+        "bd codex-hook PostCompact",
+        "bd codex-hook UserPromptSubmit"
+      ],
+      "duplicate": "emailibrium local projection duplicates enabled Beads plugin",
+      "canonicalOwner": "beads@beads-marketplace",
+      "risk": "MEDIUM",
+      "trustRecommendation": "HUMAN REVIEW REQUIRED"
+    },
+    {
+      "id": "ruflo-core-plugin",
+      "occurrences": 7,
+      "uniqueActions": 7,
+      "canonicalOwner": "ruflo-core@ruflo",
+      "sideEffects": [
+        "project and user telemetry/state",
+        "child CLI invocation",
+        "npx --prefer-offline --yes ruflo@latest fallback when no local CLI is found"
+      ],
+      "risk": "HIGH",
+      "trustRecommendation": "HUMAN REVIEW REQUIRED"
+    },
+    {
+      "id": "ruvnet-brain-plugin",
+      "occurrences": 16,
+      "uniqueActions": 16,
+      "canonicalOwner": "ruvnet-brain@ruvnet-brain",
+      "runtimeCompatibility": "manifest 4.2.2-dev invokes active 4.0.1 adapter",
+      "silentMissingActions": ["decision-gate", "session-snapshot"],
+      "sideEffects": [
+        "project and user learning/cache writes",
+        "detached update and learn-flush jobs",
+        "possible gh network/credential use in signal-watch",
+        "routing and continuation advisories"
+      ],
+      "risk": "HIGH",
+      "trustRecommendation": "DO NOT TRUST decision-gate as enforcement; plugin HUMAN REVIEW REQUIRED"
+    },
+    {
+      "id": "openai-codex-companion-plugin",
+      "occurrences": 3,
+      "uniqueActions": 3,
+      "canonicalOwner": "codex@openai-codex",
+      "diagnostics": ["SessionEnd 5s is clamped to 3s"],
+      "sideEffects": [
+        "session environment propagation",
+        "broker IPC and process-tree termination",
+        "pid/log/socket/session cleanup",
+        "optional nested Codex Stop review lasting up to 15 minutes"
+      ],
+      "risk": "HIGH",
+      "trustRecommendation": "HUMAN REVIEW REQUIRED"
+    }
+  ],
+  "sessionEndWarnings": [
+    {
+      "source": "openai-codex plugin 1.0.6",
+      "declaredSeconds": 5,
+      "effectiveSeconds": 3,
+      "remediationClass": "never-automatic",
+      "implementationTarget": "openai/codex-plugin-cc source or a corrected plugin upgrade"
+    },
+    {
+      "source": "nine historic Ruflo project projections",
+      "declaredSeconds": 10000,
+      "effectiveSeconds": 3,
+      "remediationClass": "never-automatic-until-authority-proven",
+      "implementationTarget": "historic copier/generator, then approved retirement of generated projections"
+    }
+  ],
+  "benchmarkSummary": [
+    {
+      "candidate": "project session-end",
+      "samples": 10,
+      "minMs": 62.776,
+      "medianMs": 64.797,
+      "maxMs": 68.078,
+      "exitStatuses": [0],
+      "signalStatuses": [],
+      "stderr": "",
+      "stdout": "[INTELLIGENCE] Consolidated: 189 entries, 6079 edges, 34 new, PageRank recomputed\n[OK] Session ended\n"
+    },
+    {
+      "candidate": "project pre-bash",
+      "samples": 10,
+      "minMs": 20.504,
+      "medianMs": 21.308,
+      "maxMs": 22.714,
+      "exitStatuses": [0],
+      "stdout": "[OK] Command validated\n"
+    },
+    {
+      "candidate": "project pre-edit unknown/no-op",
+      "samples": 10,
+      "minMs": 20.441,
+      "medianMs": 20.918,
+      "maxMs": 21.686,
+      "exitStatuses": [0],
+      "stdout": "[OK] Hook: pre-edit\n"
+    },
+    {
+      "candidate": "project post-bash unknown/no-op",
+      "samples": 10,
+      "minMs": 20.777,
+      "medianMs": 21.469,
+      "maxMs": 22.534,
+      "exitStatuses": [0],
+      "stdout": "[OK] Hook: post-bash\n"
+    },
+    {
+      "candidate": "project post-edit",
+      "samples": 10,
+      "minMs": 20.779,
+      "medianMs": 22.39,
+      "maxMs": 26.743,
+      "exitStatuses": [0],
+      "stdout": "[OK] Edit recorded\n"
+    },
+    {
+      "candidate": "current Brain wrapper session-snapshot",
+      "samples": 10,
+      "minMs": 59.857,
+      "medianMs": 62.475,
+      "maxMs": 66.515,
+      "exitStatuses": [0],
+      "stdout": "",
+      "stderr": "",
+      "receiptWritten": false,
+      "interpretation": "active 4.0.1 runtime silently accepts the unknown 4.2.2 manifest action"
+    }
+  ],
+  "trust": {
+    "projectLayerTrust": "selects whether the project .codex layer loads",
+    "hookDefinitionTrust": "exact current definition hash; new or changed hooks are skipped pending review",
+    "relationshipToCompatibility": "none",
+    "programmaticChangesMade": false,
+    "bypassUsed": false
+  },
+  "notes": [
+    "No global executable hook definition exists at ~/.codex/hooks.json.",
+    "Stale trusted-hash keys are bookkeeping residue and were not counted as active hook definitions.",
+    "RuvNet Brain hooks/hooks.json is not selected; hooks/codex-hooks.json is the active manifest.",
+    "No current scripts project hook file was found in the bounded roots; the prior UI path may be stale or outside scope.",
+    "Plugin references and canonical roots are containment-checked against the plugin cache; unrelated skill metadata issues do not fail hook discovery.",
+    "Malformed nested groups, matchers, hooks, timeout values, symlink ancestors, and broken hook symlinks fail closed.",
+    "The complete occurrence-level inventory can be regenerated with: ak audit hooks --all-projects --json."
+  ]
+}
