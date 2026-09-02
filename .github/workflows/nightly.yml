@@ -63,7 +63,7 @@ jobs:
         run: node bin/agentic-kit.mjs x verify security
 
       - name: Host-neutral hook contract fixtures
-        run: node --test tests/kit/hook-audit.test.mjs tests/kit/hook-audit-hosts.test.mjs
+        run: node --test tests/kit/hook-audit.test.mjs tests/kit/hook-audit-hosts.test.mjs tests/kit/hook-remediation.test.mjs tests/kit/hook-remediation-recovery.test.mjs
 
       - name: Report current host releases for schema review
         shell: bash

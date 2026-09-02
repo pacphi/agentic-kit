@@ -21,6 +21,8 @@ export const legacyConfigDir = () => path.join(configBase(), 'ruflo');
 export const kitConfigPath = () => path.join(configDir(), 'kit.json');
 export const observabilityWorkspacePath = () =>
   path.join(configDir(), 'observability-workspaces.json');
+/** Private hook-healing journal. Created only by an authorized heal. */
+export const hookTransactionsDir = () => path.join(configDir(), 'hook-heal', 'transactions');
 export const legacyKitConfigPath = () => path.join(legacyConfigDir(), 'kit.json');
 
 /** Claude Code user-level locations (same shape on all platforms). */
