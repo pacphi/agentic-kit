@@ -121,7 +121,7 @@ test('unknown Codex versions receive syntax-only validation and no timeout rewri
       pluginCacheDir: fx.cache,
       codexVersion: 'unknown',
     });
-    assert.equal(report.hostSchema.confidence, 'unknown');
+    assert.equal(report.hostSchema.confidence, 'syntax-only');
     assert.equal(report.summary.compatibilityWarnings, 0);
     assert.equal(report.plan.length, 0);
     assert.equal(report.records[0].timeout.effective, null);

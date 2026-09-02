@@ -3,6 +3,7 @@ import { auditClaudeHooks } from './providers/claude.mjs';
 import { auditOpenCodeHooks } from './providers/opencode.mjs';
 import { auditExternalHooks } from './providers/external.mjs';
 import { loadUpstreamConstraints } from './upstream.mjs';
+import { sha256, stableJson, stableValue } from './common.mjs';
 
 export const BUILTIN_HOOK_AUDIT_HOSTS = Object.freeze(['codex', 'claude', 'opencode', 'external']);
 
@@ -55,6 +56,9 @@ export function auditHooks({
   });
   if (selected.includes('external')) reports.external = auditExternalHooks({ ...external, config });
   const constraints = loadUpstreamConstraints(upstream);
+  const runtimeVersions = stableValue(Object.fromEntries(selected.map((host) => [
+    host, reports[host]?.observedVersion ?? versions[host] ?? 'unknown',
+  ])));
   const totals = Object.values(reports).reduce((summary, report) => ({
     sources: summary.sources + report.summary.sources,
     invalidSources: summary.invalidSources + report.summary.invalidSources,
@@ -70,13 +74,27 @@ export function auditHooks({
     uniqueBehaviors: 0, automaticActions: 0, approvalRequiredActions: 0,
     neverAutomaticActions: 0, upstreamRequiredActions: 0,
   });
+  const auditId = `hook-audit-${sha256(stableJson({
+    hosts: selected,
+    runtimeVersions,
+    reports: Object.fromEntries(Object.entries(reports).map(([host, report]) => [host, {
+      hostSchema: report.hostSchema,
+      sources: report.sources,
+      records: report.records,
+      plan: report.plan,
+      issues: report.issues,
+      coverage: report.coverage,
+    }])),
+    upstream: constraints,
+  })).slice(0, 32)}`;
   return {
     schemaVersion: 2, mode: 'read-only', hosts: selected, reports,
+    auditId, runtimeVersions,
     upstream: constraints,
     maintenance: {
       schemaStrategy: 'exact-version evidence profiles; unknown versions receive syntax-only validation and no automatic healing',
       releaseStrategy: 're-audit on host or dependency release, weekly for open constraints, and before every managed upgrade',
-      notificationStrategy: 'open or refresh upstream issues with minimal reproductions; retain bounded workarounds until a released artifact passes conformance',
+      notificationStrategy: 'prepare minimal upstream issue payloads; publish only after explicit user approval; retain bounded workarounds until a released artifact passes conformance',
     },
     summary: totals,
   };

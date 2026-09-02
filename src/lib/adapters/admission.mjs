@@ -81,6 +81,19 @@ function checkHostIdentity(name, manifest, builtins) {
   return null;
 }
 
+/** Pure pre-consent validation shared by admission and read-only audit. */
+export function validateAdapterEntryForInspection(entry, raw, { builtins = builtinIds() } = {}) {
+  const shapeFailure = validateEntryShape(entry);
+  if (shapeFailure) return { ok: false, failure: shapeFailure };
+  const contractPinFailure = checkContractPin(entry.name, entry, raw);
+  if (contractPinFailure) return { ok: false, failure: contractPinFailure };
+  const manifestParsed = parseEntryManifest(entry.name, raw);
+  if (!manifestParsed.ok) return manifestParsed;
+  const identityFailure = checkHostIdentity(entry.name, manifestParsed.manifest, builtins);
+  if (identityFailure) return { ok: false, failure: identityFailure };
+  return { ok: true, manifest: manifestParsed.manifest };
+}
+
 function computeEntryIntegrity(name, manifest, source) {
   try {
     return { ok: true, integrity: hashAdapterContent(manifest, { baseDir: baseDirForSource(source) }) };
@@ -123,15 +136,9 @@ async function admitOne(entry, { readManifest, consent, builtins }) {
   if (!manifestRead.ok) return manifestRead.failure;
   const { raw } = manifestRead;
 
-  const contractPinFailure = checkContractPin(name, entry, raw);
-  if (contractPinFailure) return contractPinFailure;
-
-  const manifestParsed = parseEntryManifest(name, raw);
-  if (!manifestParsed.ok) return manifestParsed.failure;
-  const { manifest } = manifestParsed;
-
-  const identityFailure = checkHostIdentity(name, manifest, builtins);
-  if (identityFailure) return identityFailure;
+  const inspected = validateAdapterEntryForInspection(entry, raw, { builtins });
+  if (!inspected.ok) return inspected.failure;
+  const { manifest } = inspected;
 
   const integrityComputed = computeEntryIntegrity(name, manifest, entry.source);
   if (!integrityComputed.ok) return integrityComputed.failure;
