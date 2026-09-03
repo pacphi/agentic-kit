@@ -880,7 +880,8 @@ ${LIVE_HTML}
         <span class="view-eyebrow">SYSTEM</span>
         <h2>Maintenance</h2>
         <p>What needs attention, why it matters, and what Agentic Kit can change safely.
-          Findings stay separate from authority; nothing runs from this reporting view.</p>
+          Findings stay separate from authority; executable changes require a fresh preview,
+          explicit confirmation, and a retained receipt.</p>
       </header>
       <div class="sy-grid">
         <div class="sy-card mt-card" id="sys-maintenance" aria-busy="false">
@@ -913,6 +914,18 @@ ${LIVE_HTML}
               <div class="mt-detail-empty"><b>Select a finding</b><span>Its ownership, impact, evidence, and next step will appear here.</span></div>
             </section>
           </div>
+          <dialog class="mt-confirm" id="sys-maint-confirm" aria-labelledby="sys-maint-confirm-title" aria-describedby="sys-maint-confirm-status" aria-busy="false">
+            <div class="mt-confirm-head">
+              <h2 id="sys-maint-confirm-title">Maintenance preview</h2>
+              <button type="button" id="sys-maint-confirm-close" aria-label="Close maintenance preview">Close</button>
+            </div>
+            <div class="mt-confirm-body" id="sys-maint-confirm-body"></div>
+            <p class="mt-confirm-status" id="sys-maint-confirm-status" role="status" aria-live="polite" aria-atomic="true"></p>
+            <div class="mt-confirm-actions">
+              <button type="button" class="mt-action" id="sys-maint-confirm-cancel">Cancel</button>
+              <button type="button" class="mt-action primary" id="sys-maint-confirm-apply" disabled>Apply change</button>
+            </div>
+          </dialog>
         </div>
       </div>
     </section>

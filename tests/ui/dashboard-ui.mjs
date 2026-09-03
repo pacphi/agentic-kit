@@ -650,8 +650,8 @@ const SYSTEM_STUB = {
 
 const MAINTENANCE_PAYLOAD = {
   schemaVersion: 1,
-  mode: 'read-only',
-  capabilities: { plan: true, apply: false, undo: false },
+  mode: 'supervised',
+  capabilities: { plan: true, apply: true, undo: true },
   asOf: new Date(Date.now() - 6 * 60_000).toISOString(),
   freshness: { stale: false, complete: false },
   summary: {
@@ -659,7 +659,7 @@ const MAINTENANCE_PAYLOAD = {
     recentChanges: 0, incompleteSources: 1, actionable: 2,
   },
   findings: [{
-    id: 'plugin-update', bucket: 'updates-ready', statusLabel: 'Ready to apply',
+    id: 'plugin-update', bucket: 'updatesReady', statusLabel: 'Ready to apply',
     headline: '0.2.0 → 0.3.1',
     explanation: 'A compatible version is available from the same marketplace source.',
     resource: {
@@ -678,9 +678,12 @@ const MAINTENANCE_PAYLOAD = {
       preserved: ['standalone skill-creator'],
     },
     nextAction: { guidance: 'Review the provider-owned update plan.', command: 'ak maintain plan --finding plugin-update' },
-    action: { safetyClass: 'safe-automatic eligible', restartRequired: true, rollback: 'compensating reinstall of 0.2.0' },
+    action: {
+      executable: true, safetyClass: 'safe-automatic eligible', restartRequired: true,
+      rollback: 'compensating reinstall of 0.2.0',
+    },
   }, {
-    id: 'cache-cleanup', bucket: 'safe-cleanup', statusLabel: 'Ready to apply',
+    id: 'cache-cleanup', bucket: 'safeCleanup', statusLabel: 'Ready to apply',
     headline: 'Owner-native cache cleanup is available',
     explanation: 'This cache is reproducible and its owner reports a bounded cleanup operation.',
     resource: { kind: 'storage', name: 'Codex plugin download cache', host: 'codex', scope: 'user', providerRef: 'codex' },
@@ -689,7 +692,7 @@ const MAINTENANCE_PAYLOAD = {
     versions: {}, impact: { summary: 'Reproducible downloads would be removed and fetched again on demand.', preserved: ['installed plugins'] },
     nextAction: 'Review the owner-native cleanup plan.', action: { safetyClass: 'safe-automatic eligible', rollback: 're-fetch' },
   }, {
-    id: 'modified-skill', bucket: 'needs-review', statusLabel: 'Evidence incomplete',
+    id: 'modified-skill', bucket: 'needsReview', statusLabel: 'Evidence incomplete',
     headline: 'Content changed after projection',
     explanation: '<img src=x onerror="globalThis.__maintXss=1"> is evidence text, not markup.',
     resource: { kind: 'skill', name: 'skill-creator', host: 'codex', scope: 'user', providerRef: 'agentic-kit projection' },
@@ -702,7 +705,7 @@ const MAINTENANCE_PAYLOAD = {
     impact: { summary: 'The skill is preserved while ownership is unresolved.', preserved: ['current modified content'] },
     nextAction: 'Review the differences. No removal is recommended.', action: { safetyClass: 'approval-required' },
   }, {
-    id: 'mcp-blocked', bucket: 'blocked', statusLabel: 'Cannot safely automate',
+    id: 'mcp-blocked', bucket: 'unsupportedOrBlocked', statusLabel: 'Cannot safely automate',
     headline: 'No host-native removal provider',
     explanation: 'Registration is observed, but the host does not expose a safe native lifecycle operation.',
     resource: { kind: 'mcp-server', name: 'legacy-tools', host: 'opencode', scope: 'user', providerRef: 'opencode config' },
@@ -1086,6 +1089,9 @@ async function main() {
   // window — two in-flight requests for different spans would let a late
   // response paint year-wide figures under a chip row reading 30d.
   const limitsRequests = [];
+  const maintenancePlanRequests = [];
+  const maintenanceApplyRequests = [];
+  const maintenanceUndoRequests = [];
   // Capture the LOCATION too. A bare "Failed to load resource" is
   // undiagnosable, and a console listener that records only the message makes
   // the harness's own failures impossible to act on.
@@ -1117,9 +1123,73 @@ async function main() {
       && r.failure()?.errorText === 'net::ERR_ABORTED') return;
     failedRequests.push(`${r.url()} — ${r.failure()?.errorText}`);
   });
-  await page.route(/\/api\/maintenance(?:\?|$)/, (route) => route.fulfill({
-    status: 200, contentType: 'application/json', body: JSON.stringify(MAINTENANCE_PAYLOAD),
-  }));
+  await page.route(/\/api\/maintenance(?:\/(?:plans|apply|undo))?(?:\?|$)/, async (route) => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    const reply = (status, body) => route.fulfill({
+      status, contentType: 'application/json', body: JSON.stringify(body),
+    });
+    if (request.method() === 'GET' && pathname === '/api/maintenance') {
+      return reply(200, MAINTENANCE_PAYLOAD);
+    }
+    const body = request.postDataJSON();
+    if (pathname === '/api/maintenance/plans') {
+      maintenancePlanRequests.push(body);
+      if (maintenancePlanRequests.length > 2) {
+        return reply(200, { ok: false, code: 'PLAN_DRIFT', error: '<b>cap-ui-plan-secret</b>' });
+      }
+      return reply(200, {
+        plan: {
+          planId: `ui-plan-${maintenancePlanRequests.length}`, planDigest: 'a'.repeat(64),
+          expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+          actions: [{ id: 'provider-update', label: 'Update rust-optimizer' }],
+        },
+        capability: 'cap-ui-plan-secret',
+        confirmation: {
+          title: '<img src=x onerror="globalThis.__maintConfirmXss=1"> Update rust-optimizer?',
+          summary: 'Install the compatible provider release and refresh its projected capabilities.',
+          willChange: ['rust-optimizer 0.2.0 to 0.3.1', '<svg onload="globalThis.__maintConfirmXss=2">'],
+          preserved: ['Standalone skill-creator', 'Project configuration'],
+          restart: 'Restart Codex after the provider update.',
+          rollback: 'Reinstall rust-optimizer 0.2.0 from the same provider.',
+          actionLabel: 'Apply update', typedPhrase: 'APPLY rust-optimizer',
+        },
+      });
+    }
+    if (pathname === '/api/maintenance/apply') {
+      maintenanceApplyRequests.push(body);
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      return reply(200, {
+        ok: true, status: 'applied', receipt: {
+          id: 'receipt-update-ui', status: 'applied', statusLabel: 'Applied',
+          headline: 'rust-optimizer updated', summary: 'rust-optimizer was updated to 0.3.1.',
+          completedAt: new Date().toISOString(), verification: 'Provider reports 0.3.1 active.',
+          undoEligible: true, undo: { eligible: true, status: 'Eligible' },
+        },
+      });
+    }
+    if (pathname === '/api/maintenance/undo') {
+      maintenanceUndoRequests.push(body);
+      if (body.preview === true) {
+        return reply(200, {
+          capability: 'cap-ui-undo-secret', confirmation: {
+            title: 'Undo rust-optimizer update?', summary: 'Restore the provider release recorded before this change.',
+            willChange: ['rust-optimizer 0.3.1 to 0.2.0'], preserved: ['Standalone skill-creator'],
+            restart: true, rollback: 'Reapply 0.3.1 with a new maintenance plan.', actionLabel: 'Undo change',
+          },
+        });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      return reply(200, {
+        ok: true, status: 'undone', receipt: {
+          id: 'receipt-undo-ui', status: 'undone', statusLabel: 'Undone',
+          headline: 'rust-optimizer update undone', summary: 'rust-optimizer was restored to 0.2.0.',
+          completedAt: new Date().toISOString(), verification: 'Provider reports 0.2.0 active.', undoEligible: false,
+        },
+      });
+    }
+    return reply(404, { code: 'NOT_FOUND' });
+  });
   await page.route(/\/api\/live\/playback\/(?:claude\/ui-review-session|codex\/ui-live-session)/, (route) => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({
@@ -1451,10 +1521,9 @@ async function main() {
         `found ${arts.join(', ')} in visible text`);
     }
 
-    // Maintenance is a reporting workbench, not a collection of action cards.
-    // The fixture advertises a plan capability deliberately: the browser must
-    // still refuse to invent Apply/Undo controls while this slice has no POST
-    // boundary or action capability exchange.
+    // Maintenance remains a reporting workbench even when its separate action
+    // contract is enabled. One provider-owned finding gets one Preview control;
+    // there is no bulk selection or eager mutation affordance.
     await page.click('[data-system-view="maintenance"]');
     await page.waitForSelector('#sys-maint-list [data-maint-key]');
     const maintenanceNav = await page.$$eval('#system-seg [data-system-view]', (buttons) => ({
@@ -1468,43 +1537,44 @@ async function main() {
         && JSON.stringify(maintenanceNav.tabStops) === JSON.stringify(['maintenance']),
       `System navigation was ${JSON.stringify(maintenanceNav)}`);
 
-    const maintenanceReadOnly = await page.evaluate(() => ({
+    const maintenanceReady = await page.evaluate(() => ({
       banner: document.getElementById('sys-maint-banner')?.innerText,
       findings: document.querySelectorAll('#sys-maint-list [data-maint-key]').length,
       checkboxes: document.querySelectorAll('#sys-maintenance input[type="checkbox"]').length,
       actionControls: document.querySelectorAll('#sys-maintenance [data-maint-action]').length,
-      posts: document.querySelectorAll('#sys-maintenance form').length,
+      cleanAll: document.getElementById('sys-maintenance')?.innerText.includes('Clean all'),
       summary: document.getElementById('sys-maint-summary')?.innerText,
     }));
-    check('Maintenance states the report-only boundary and exposes no fake mutation controls',
-      /Actions are not enabled/.test(String(maintenanceReadOnly.banner))
-        && /cannot change your machine/.test(String(maintenanceReadOnly.banner))
-        && maintenanceReadOnly.findings === 4
-        && maintenanceReadOnly.checkboxes === 0
-        && maintenanceReadOnly.actionControls === 0
-        && maintenanceReadOnly.posts === 0,
-      `Maintenance boundary was ${JSON.stringify(maintenanceReadOnly)}`);
+    check('Maintenance exposes only a provider-gated single-finding preview control',
+      /Preview before changing/.test(String(maintenanceReady.banner))
+        && /Authorization expires/.test(String(maintenanceReady.banner))
+        && maintenanceReady.findings === 4
+        && maintenanceReady.checkboxes === 0
+        && maintenanceReady.actionControls === 1
+        && maintenanceReady.cleanAll === false,
+      `Maintenance boundary was ${JSON.stringify(maintenanceReady)}`);
     check('Maintenance summarizes findings, action eligibility, incomplete evidence, and age without a hygiene score',
-      /4\s+findings/.test(String(maintenanceReadOnly.summary))
-        && /2\s+provider-actionable/.test(String(maintenanceReadOnly.summary))
-        && /1\s+incomplete sources/.test(String(maintenanceReadOnly.summary))
-        && /evidence age/.test(String(maintenanceReadOnly.summary))
-        && !/score/i.test(String(maintenanceReadOnly.summary)),
-      `Maintenance summary was ${JSON.stringify(maintenanceReadOnly.summary)}`);
+      /4\s+findings/.test(String(maintenanceReady.summary))
+        && /2\s+provider-actionable/.test(String(maintenanceReady.summary))
+        && /1\s+incomplete sources/.test(String(maintenanceReady.summary))
+        && /evidence age/.test(String(maintenanceReady.summary))
+        && !/score/i.test(String(maintenanceReady.summary)),
+      `Maintenance summary was ${JSON.stringify(maintenanceReady.summary)}`);
 
     const firstMaintenance = await page.$eval('#sys-maint-list [data-maint-key]', (button) => ({
       expanded: button.getAttribute('aria-expanded'), current: button.getAttribute('aria-current'),
       controls: button.getAttribute('aria-controls'), text: button.innerText,
     }));
     const firstMaintenanceDetail = await visibleText(page, '#sys-maint-detail');
-    check('the ledger selects one finding and explains ownership, versions, impact, preservation, and read-only next step',
+    check('the ledger selects one finding and explains ownership, versions, impact, preservation, and the preview boundary',
       firstMaintenance.expanded === 'true' && firstMaintenance.current === 'true'
         && firstMaintenance.controls === 'sys-maint-detail'
         && /rust-optimizer/.test(firstMaintenance.text)
         && /Codex plugin manager/.test(firstMaintenanceDetail)
         && /0\.2\.0/.test(firstMaintenanceDetail) && /0\.3\.1/.test(firstMaintenanceDetail)
         && /standalone skill-creator/.test(firstMaintenanceDetail)
-        && /No action runs from this view/.test(firstMaintenanceDetail),
+        && /Preview change/.test(firstMaintenanceDetail)
+        && /Nothing runs until you confirm/.test(firstMaintenanceDetail),
       `first finding was ${JSON.stringify(firstMaintenance)}; detail read ${JSON.stringify(firstMaintenanceDetail)}`);
 
     await page.click('#sys-maint-buckets [data-maint-bucket="needs-review"]');
@@ -1553,7 +1623,7 @@ async function main() {
         return style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) >= 2;
       }) && await page.getAttribute('#sys-maint-list', 'tabindex') === '0',
       'the Maintenance ledger accepted keyboard focus without a visible indicator');
-    await shoot(page, 'system-maintenance-readonly');
+    await shoot(page, 'system-maintenance-ready');
     await page.setViewportSize({ width: 560, height: 780 });
     const maintenanceMobile = await page.evaluate(() => {
       const ledger = document.getElementById('sys-maint-list')?.getBoundingClientRect();
@@ -1570,6 +1640,151 @@ async function main() {
       `narrow Maintenance layout was ${JSON.stringify(maintenanceMobile)}`);
     await shoot(page, 'system-maintenance-mobile');
     await page.setViewportSize({ width: 1440, height: 900 });
+
+    // Preview is a real server round trip, but it is still not an action. The
+    // short-lived capability is intentionally asserted absent from every
+    // browser-persistent or user-visible surface.
+    await page.click('#sys-maint-detail [data-maint-action="preview"]');
+    await page.waitForSelector('#sys-maint-confirm[open] #sys-maint-typed');
+    const firstPreview = await page.evaluate(() => ({
+      title: document.getElementById('sys-maint-confirm-title')?.textContent,
+      body: document.getElementById('sys-maint-confirm-body')?.innerText,
+      applyLabel: document.getElementById('sys-maint-confirm-apply')?.textContent,
+      disabled: document.getElementById('sys-maint-confirm-apply')?.disabled,
+      xss: globalThis.__maintConfirmXss,
+      secretInDom: document.documentElement.innerHTML.includes('cap-ui-plan-secret'),
+      secretInUrl: location.href.includes('cap-ui-plan-secret'),
+      secretInStorage: Object.values(localStorage).some((value) => value.includes('cap-ui-plan-secret')),
+    }));
+    check('Preview posts exactly one finding and renders hostile confirmation copy as text',
+      JSON.stringify(maintenancePlanRequests) === JSON.stringify([{ findingIds: ['plugin-update'] }])
+        && /<img src=x onerror=/.test(String(firstPreview.title))
+        && /<svg onload=/.test(String(firstPreview.body))
+        && /Standalone skill-creator/.test(String(firstPreview.body))
+        && firstPreview.applyLabel === 'Apply update'
+        && firstPreview.disabled === true
+        && firstPreview.xss === undefined,
+      `first preview was ${JSON.stringify(firstPreview)}; requests ${JSON.stringify(maintenancePlanRequests)}`);
+    check('the plan capability stays out of DOM, URL, and browser storage',
+      !firstPreview.secretInDom && !firstPreview.secretInUrl && !firstPreview.secretInStorage,
+      `capability exposure was ${JSON.stringify(firstPreview)}`);
+
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.getElementById('sys-maint-confirm')?.open);
+    check('Escape closes the native confirmation sheet and returns focus to Preview change',
+      await page.evaluate(() => document.activeElement?.getAttribute('data-maint-action') === 'preview'),
+      'confirmation focus did not return to its invoking control');
+
+    await page.click('#sys-maint-detail [data-maint-action="preview"]');
+    await page.waitForSelector('#sys-maint-confirm[open] #sys-maint-typed');
+    await page.fill('#sys-maint-typed', 'APPLY rust');
+    check('typed confirmation is exact before the provider action is enabled',
+      await page.$eval('#sys-maint-confirm-apply', (button) => button.disabled),
+      'a partial typed phrase enabled Apply');
+    await page.fill('#sys-maint-typed', 'APPLY rust-optimizer');
+    check('the exact typed phrase enables the named provider action',
+      !(await page.$eval('#sys-maint-confirm-apply', (button) => button.disabled)),
+      'the exact phrase did not enable Apply');
+    await shoot(page, 'system-maintenance-confirmation');
+
+    await page.click('#sys-maint-confirm-apply');
+    const applyingState = await page.evaluate(() => ({
+      dialogBusy: document.getElementById('sys-maint-confirm')?.getAttribute('aria-busy'),
+      rootBusy: document.getElementById('sys-maintenance')?.getAttribute('aria-busy'),
+      disabled: document.getElementById('sys-maint-confirm-apply')?.disabled,
+      status: document.getElementById('sys-maint-confirm-status')?.textContent,
+    }));
+    check('an in-flight apply is announced and cannot be submitted twice',
+      applyingState.dialogBusy === 'true' && applyingState.rootBusy === 'true'
+        && applyingState.disabled === true && /Applying change/.test(String(applyingState.status)),
+      `in-flight state was ${JSON.stringify(applyingState)}`);
+    await page.evaluate(() => {
+      document.getElementById('sys-maint-confirm-apply')?.click();
+      document.getElementById('sys-maint-confirm-apply')?.click();
+    });
+    await page.waitForFunction(() => document.getElementById('sys-maint-confirm-title')?.textContent === 'Change recorded');
+    check('Apply sends only the ephemeral capability, explicit confirmation, and typed phrase once',
+      maintenanceApplyRequests.length === 1
+        && maintenanceApplyRequests[0].capability === 'cap-ui-plan-secret'
+        && maintenanceApplyRequests[0].confirm === true
+        && maintenanceApplyRequests[0].typedPhrase === 'APPLY rust-optimizer'
+        && Object.keys(maintenanceApplyRequests[0]).length === 3,
+      `Apply requests were ${JSON.stringify(maintenanceApplyRequests)}`);
+    check('a successful action becomes a retained receipt instead of a transient toast',
+      /receipt-update-ui/.test(await visibleText(page, '#sys-maint-confirm'))
+        && /Recent changes/.test(await visibleText(page, '#sys-maintenance')),
+      `receipt sheet read ${JSON.stringify(await visibleText(page, '#sys-maint-confirm'))}`);
+    await shoot(page, 'system-maintenance-receipt');
+    await page.click('#sys-maint-confirm-apply');
+    await page.waitForFunction(() => !document.getElementById('sys-maint-confirm')?.open);
+    const retainedReceipt = await page.evaluate(() => ({
+      recentPressed: document.querySelector('[data-maint-bucket="recent-changes"]')?.getAttribute('aria-pressed'),
+      rows: document.querySelectorAll('#sys-maint-list [data-maint-key]').length,
+      detail: document.getElementById('sys-maint-detail')?.innerText,
+      undoControls: document.querySelectorAll('#sys-maint-detail [data-maint-action="undo"]').length,
+    }));
+    check('closing the receipt leaves it selected under Recent changes with Undo only when eligible',
+      retainedReceipt.recentPressed === 'true' && retainedReceipt.rows === 1
+        && /receipt-update-ui/.test(String(retainedReceipt.detail))
+        && retainedReceipt.undoControls === 1,
+      `retained receipt was ${JSON.stringify(retainedReceipt)}`);
+
+    await page.click('#sys-maint-detail [data-maint-action="undo"]');
+    await page.waitForFunction(() => document.getElementById('sys-maint-confirm-title')?.textContent === 'Undo rust-optimizer update?');
+    check('Undo first previews one explicitly eligible receipt',
+      JSON.stringify(maintenanceUndoRequests) === JSON.stringify([{ receiptId: 'receipt-update-ui', preview: true }])
+        && /Standalone skill-creator/.test(await visibleText(page, '#sys-maint-confirm')),
+      `Undo preview requests were ${JSON.stringify(maintenanceUndoRequests)}`);
+    await page.click('#sys-maint-confirm-apply');
+    await page.waitForFunction(() => document.getElementById('sys-maint-confirm-title')?.textContent === 'Undo recorded');
+    check('confirmed Undo uses only its ephemeral capability and retains a second receipt',
+      maintenanceUndoRequests.length === 2
+        && JSON.stringify(maintenanceUndoRequests[1]) === JSON.stringify({ capability: 'cap-ui-undo-secret', confirm: true })
+        && /receipt-undo-ui/.test(await visibleText(page, '#sys-maint-confirm')),
+      `Undo flow was ${JSON.stringify(maintenanceUndoRequests)}`);
+    await page.click('#sys-maint-confirm-apply');
+    await page.waitForFunction(() => !document.getElementById('sys-maint-confirm')?.open);
+    check('a receipt not marked undo-eligible exposes no Undo control',
+      await page.$$eval('#sys-maint-detail [data-maint-action="undo"]', (buttons) => buttons.length) === 0,
+      'the non-eligible undo receipt exposed another Undo');
+
+    // A third preview deliberately receives drift after the original change.
+    // Its server error body contains the old capability as hostile text; the
+    // UI must use fixed recovery copy and never echo that body.
+    await page.click('#sys-maint-buckets [data-maint-bucket="all"]');
+    await page.click('#sys-maint-detail [data-maint-action="preview"]');
+    await page.waitForFunction(() => document.getElementById('sys-maint-confirm-title')?.textContent === 'Evidence changed');
+    const driftCopy = await visibleText(page, '#sys-maint-confirm');
+    check('drift fails closed with specific recovery copy and no capability echo',
+      /no longer matches this preview/i.test(driftCopy) && /Nothing changed/.test(driftCopy)
+        && /preview current evidence again/.test(driftCopy) && !/cap-ui-plan-secret/.test(driftCopy),
+      `drift copy was ${JSON.stringify(driftCopy)}`);
+    await page.click('#sys-maint-confirm-apply');
+    await page.waitForFunction(() => !document.getElementById('sys-maint-confirm')?.open);
+
+    const readOnlyPage = await browser.newPage({ viewport: { width: 900, height: 700 } });
+    await readOnlyPage.route(/\/api\/maintenance(?:\?|$)/, (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({
+        ...MAINTENANCE_PAYLOAD, mode: 'read-only',
+        capabilities: { plan: true, apply: false, undo: false },
+      }),
+    }));
+    await readOnlyPage.goto(srv.urlWithToken, { waitUntil: 'domcontentloaded' });
+    await readOnlyPage.click('[data-tab="system"]');
+    await readOnlyPage.click('[data-system-view="maintenance"]');
+    await readOnlyPage.waitForFunction(() => /Actions are not enabled/.test(
+      document.getElementById('sys-maint-banner')?.textContent || '',
+    ));
+    const readOnlyBoundary = await readOnlyPage.evaluate(() => ({
+      banner: document.getElementById('sys-maint-banner')?.innerText,
+      controls: document.querySelectorAll('#sys-maintenance [data-maint-action]').length,
+    }));
+    check('the same findings stay strictly report-only when apply capability is absent',
+      /no change capability is available/.test(String(readOnlyBoundary.banner))
+        && readOnlyBoundary.controls === 0,
+      `read-only Maintenance was ${JSON.stringify(readOnlyBoundary)}`);
+    await readOnlyPage.close();
 
     // ── the fail-closed rule, where it is easiest to break (ADR-0023) ─────────
     // The catalog section has never been deep-scanned and one install figure was

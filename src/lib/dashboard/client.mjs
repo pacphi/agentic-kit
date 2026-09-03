@@ -124,6 +124,7 @@ const modelLifecycleSrc = readSplit('model-lifecycle.mjs');
 const usageOrchestratorsSrc = readSplit('usage-orchestrators.mjs');
 const systemReadoutSrc = readSplit('system-readout.mjs');
 const systemProjectsSrc = readSplit('system-projects.mjs');
+const systemMaintenanceActionsSrc = readSplit('system-maintenance-actions.mjs');
 const systemMaintenanceSrc = readSplit('system-maintenance.mjs');
 const bootSrc = readSplit('boot.mjs');
 
@@ -134,5 +135,5 @@ const bootSrc = readSplit('boot.mjs');
 // sequence) running in the same relative order it always has.
 export const JS = `
 (function(){
-${bootstrapSrc}${overviewSrc}${intelligenceSrc}${pollSrc}${usageRhythmSrc}${usagePromptsSrc}${usageContextHooksSrc}${usageSrc}${modelLifecycleSrc}${usageOrchestratorsSrc}${aboutSrc}${systemReadoutSrc}${systemProjectsSrc}${systemMaintenanceSrc}${bootSrc}})();
+${bootstrapSrc}${overviewSrc}${intelligenceSrc}${pollSrc}${usageRhythmSrc}${usagePromptsSrc}${usageContextHooksSrc}${usageSrc}${modelLifecycleSrc}${usageOrchestratorsSrc}${aboutSrc}${systemReadoutSrc}${systemProjectsSrc}${systemMaintenanceActionsSrc}${systemMaintenanceSrc}${bootSrc}})();
 `;

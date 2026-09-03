@@ -3,13 +3,15 @@
 // override comment for why this directory isn't run through the node lib.
 import { authHeaders, esc } from './bootstrap.mjs';
 import { ago } from './intelligence.mjs';
+import { maintActionActive, maintActionBusy, wireMaintActions } from './system-maintenance-actions.mjs';
 
-  // Maintenance is a separate, report-only read model. System owns the
-  // observation; this view helps a person triage it without turning a finding
-  // into authority. The server may advertise future plan/apply/undo
-  // capabilities, but this client deliberately offers no mutation control.
+  // Maintenance is a separate evidence-bound workflow. System owns the
+  // observation; a provider-issued capability, preview, explicit confirmation,
+  // and durable receipt are all required before this client can request a
+  // change. Capabilities remain only in this closure's memory.
   export var MAINTENANCE=null,maintenanceBusy=false;
   var maintenanceWired=false,maintBucket="all",maintKind="",maintHost="",maintQuery="",maintSelected=null;
+  var maintTransientReceipts=[];
 
   var MAINT_BUCKETS=[
     {id:"all",label:"All",field:"total"},
@@ -21,18 +23,35 @@ import { ago } from './intelligence.mjs';
   ];
   var MAINT_KIND_LABEL={plugin:"Plugins",skill:"Skills",mcp:"MCP servers","mcp-server":"MCP servers",storage:"Storage",runtime:"Runtime"};
 
-  function maintText(value){
+  export function maintText(value){
     return typeof value==="string"||typeof value==="number"?String(value):"";
   }
-  function maintCount(value){
-    var n=Number(value);return Number.isFinite(n)&&n>=0?Math.round(n):0;
+  function maintDerivedCount(field){
+    var findings=MAINTENANCE&&Array.isArray(MAINTENANCE.findings)?MAINTENANCE.findings:[];
+    if(field==="total")return findings.length;
+    if(field==="recentChanges")return MAINTENANCE&&Array.isArray(MAINTENANCE.receipts)?MAINTENANCE.receipts.length:0;
+    if(field==="actionable")return findings.filter(function(finding){return finding&&finding.action&&finding.action.executable===true;}).length;
+    if(field==="incompleteSources"){
+      var sources={};findings.forEach(function(finding){
+        var evidence=finding&&finding.evidence||{};
+        if(maintText(evidence.completeness).toLowerCase()!=="complete")sources[maintText(evidence.source)||maintText(finding&&finding.id)||"unknown"]=true;
+      });
+      return Object.keys(sources).length;
+    }
+    var bucket={updatesReady:"updates-ready",safeCleanup:"safe-cleanup",needsReview:"needs-review",blocked:"blocked"}[field];
+    return bucket?findings.filter(function(finding){return maintBucketOf(finding&&finding.bucket)===bucket;}).length:0;
+  }
+  function maintSummaryCount(summary,field){
+    var value=summary&&summary[field],number=Number(value);
+    return Number.isFinite(number)&&number>=0?Math.round(number):maintDerivedCount(field);
   }
   function maintBucketOf(value){
     var key=maintText(value).toLowerCase().replace(/[_ ]+/g,"-");
-    if(key==="updateready"||key==="update-ready"||key==="update-available")return "updates-ready";
+    if(key==="updatesready"||key==="updateready"||key==="update-ready"||key==="update-available")return "updates-ready";
     if(key==="safecleanup"||key==="safe-automatic"||key==="cleanup")return "safe-cleanup";
     if(key==="needsreview"||key==="review"||key==="ambiguous"||key==="modified")return "needs-review";
-    if(key==="unsupported"||key==="cannot-automate"||key==="never-automatic"||key==="upstream-required")return "blocked";
+    if(key==="unsupportedorblocked"||key==="unsupported"||key==="cannot-automate"||key==="never-automatic"||key==="upstream-required")return "blocked";
+    if(key==="recentchanges")return "recent-changes";
     return MAINT_BUCKETS.some(function(x){return x.id===key;})?key:"needs-review";
   }
   function maintState(finding){
@@ -56,16 +75,48 @@ import { ago } from './intelligence.mjs';
     if(!Array.isArray(value))return [];
     return value.map(maintText).filter(Boolean);
   }
-  function maintValue(value){
+  export function maintValue(value){
     if(Array.isArray(value))return maintList(value).join(", ");
     if(value&&typeof value==="object")return maintText(value.label)||maintText(value.summary)
       ||maintText(value.status)||maintText(value.value);
     return maintText(value);
   }
   function maintFindingKey(finding,index){return "finding:"+(maintText(finding&&finding.id)||index);}
-  function maintReceiptKey(receipt,index){return "receipt:"+(maintText(receipt&&receipt.id)||index);}
+  export function maintReceiptId(receipt){return maintText(receipt&&receipt.id)||maintText(receipt&&receipt.receiptId);}
+  function maintReceiptKey(receipt,index){return "receipt:"+(maintReceiptId(receipt)||index);}
+  function maintCapabilities(){
+    return MAINTENANCE&&MAINTENANCE.capabilities&&typeof MAINTENANCE.capabilities==="object"?MAINTENANCE.capabilities:{};
+  }
+  export function maintCanPreview(finding){
+    var caps=maintCapabilities();
+    return caps.plan===true&&caps.apply===true&&finding&&finding.action&&finding.action.executable===true;
+  }
+  export function maintCanUndo(receipt){
+    var undo=receipt&&receipt.undo;
+    return maintCapabilities().undo===true&&!!receipt&&(receipt.undoEligible===true
+      ||(undo&&typeof undo==="object"&&undo.eligible===true));
+  }
+  function maintMergeReceipts(data){
+    if(!data||typeof data!=="object")return data;
+    var seen={},merged=[];
+    (Array.isArray(data.receipts)?data.receipts:[]).concat(maintTransientReceipts).forEach(function(receipt){
+      var id=maintReceiptId(receipt),key=id||"anonymous:"+merged.length;
+      if(seen[key])return;seen[key]=true;merged.push(receipt);
+    });
+    data.receipts=merged;
+    if(data.summary&&typeof data.summary==="object")data.summary.recentChanges=merged.length;
+    return data;
+  }
+  export function maintRememberReceipt(receipt){
+    if(!receipt||typeof receipt!=="object")return null;
+    var id=maintReceiptId(receipt);
+    maintTransientReceipts=maintTransientReceipts.filter(function(item){return !id||maintReceiptId(item)!==id;});
+    maintTransientReceipts.unshift(receipt);
+    maintMergeReceipts(MAINTENANCE);
+    return maintReceiptKey(receipt,0);
+  }
 
-  function maintRecords(){
+  export function maintRecords(){
     if(!MAINTENANCE||MAINTENANCE.error)return [];
     if(maintBucket==="recent-changes")return (Array.isArray(MAINTENANCE.receipts)?MAINTENANCE.receipts:[]).map(function(receipt,index){
       return {key:maintReceiptKey(receipt,index),kind:"receipt",value:receipt};
@@ -85,15 +136,21 @@ import { ago } from './intelligence.mjs';
       return true;
     });
   }
+  export function maintCurrentRecord(kind){
+    return maintRecords().find(function(item){return item.kind===kind&&item.key===maintSelected;});
+  }
+  export function maintShowReceipt(key){
+    maintBucket="recent-changes";maintSelected=key;
+  }
 
   function maintSummary(){
     if(!MAINTENANCE||MAINTENANCE.error)return [["\u2014","findings"],["\u2014","provider-actionable"],["\u2014","incomplete sources"],["unknown","evidence age"]]
       .map(function(item){return '<div><dd>'+esc(item[0])+'</dd><dt>'+esc(item[1])+"</dt></div>";}).join("");
     var summary=MAINTENANCE&&MAINTENANCE.summary||{},asOf=MAINTENANCE&&MAINTENANCE.asOf;
     var values=[
-      [maintCount(summary.total),"findings"],
-      [maintCount(summary.actionable),"provider-actionable"],
-      [maintCount(summary.incompleteSources),"incomplete sources"],
+      [maintSummaryCount(summary,"total"),"findings"],
+      [maintSummaryCount(summary,"actionable"),"provider-actionable"],
+      [maintSummaryCount(summary,"incompleteSources"),"incomplete sources"],
       [maintAge(asOf),"evidence age"]
     ];
     return values.map(function(item){return '<div><dd>'+esc(item[0])+'</dd><dt>'+esc(item[1])+"</dt></div>";}).join("");
@@ -114,9 +171,17 @@ import { ago } from './intelligence.mjs';
         +esc(MAINTENANCE&&MAINTENANCE.error||"No maintenance read model has been loaded.")+" No actions are available.</span>";
       return;
     }
+    var caps=maintCapabilities(),hasExecutable=(MAINTENANCE.findings||[]).some(maintCanPreview);
+    var hasUndo=(MAINTENANCE.receipts||[]).some(maintCanUndo);
+    if(hasExecutable||hasUndo){
+      banner.className="mt-banner enabled";
+      banner.innerHTML='<b>Preview before changing</b><span>Each provider-owned change is reviewed and confirmed alone. '
+        +"Authorization expires and stays only in this tab.</span>";
+      return;
+    }
     banner.className="mt-banner readonly";
-    banner.innerHTML='<b>Actions are not enabled</b><span>This dashboard can inspect maintenance findings, '
-      +"but this reporting view cannot change your machine.</span>";
+    banner.innerHTML='<b>Actions are not enabled</b><span>This dashboard can inspect maintenance findings, but no '
+      +(caps.apply===true?"finding has an executable provider action.":"change capability is available.")+"</span>";
   }
 
   function renderMaintBuckets(){
@@ -125,7 +190,7 @@ import { ago } from './intelligence.mjs';
     for(var i=0;i<MAINT_BUCKETS.length;i++){
       var spec=MAINT_BUCKETS[i],button=el.querySelector('[data-maint-bucket="'+spec.id+'"]');
       if(!button)continue;
-      var count=maintCount(summary[spec.field]);
+      var count=maintSummaryCount(summary,spec.field);
       button.setAttribute("aria-pressed",maintBucket===spec.id?"true":"false");
       button.classList.toggle("on",maintBucket===spec.id);
       button.innerHTML=esc(spec.label)+' <span class="mono">'+esc(count)+"</span>";
@@ -187,7 +252,7 @@ import { ago } from './intelligence.mjs';
       var text=maintBucket==="recent-changes"?"No maintenance changes have receipts yet."
         :MAINTENANCE&&MAINTENANCE.error?"Maintenance reporting is unavailable. No actions are available."
           :maintQuery||maintKind||maintHost||maintBucket!=="all"?"No findings match these filters."
-            :maintCount(MAINTENANCE&&MAINTENANCE.summary&&MAINTENANCE.summary.incompleteSources)>0
+            :maintSummaryCount(MAINTENANCE&&MAINTENANCE.summary||{},"incompleteSources")>0
               ?"No recommendations yet. Some resources could not be fully evaluated."
               :"Nothing needs attention in this scan.";
       el.innerHTML='<div class="mt-empty">'+esc(text)+"</div>";return;
@@ -195,7 +260,7 @@ import { ago } from './intelligence.mjs';
     el.innerHTML='<ul>'+records.map(function(record,index){return record.kind==="receipt"?maintReceiptRow(record):maintFindingRow(record,index);}).join("")+"</ul>";
   }
 
-  function maintFact(label,value){
+  export function maintFact(label,value){
     value=maintValue(value);return value?'<div><dt>'+esc(label)+'</dt><dd>'+esc(value)+"</dd></div>":"";
   }
   function maintNamedValues(value,names){
@@ -214,6 +279,11 @@ import { ago } from './intelligence.mjs';
     return '<section class="mt-detail-section"><h4>What changes</h4>'+(summary?"<p>"+esc(summary)+"</p>":"")
       +(facts?'<dl class="mt-facts compact">'+facts+"</dl>":"")+"</section>";
   }
+  function maintFindingActionHtml(finding){
+    if(!maintCanPreview(finding))return '<small>Reporting only. No action runs from this view.</small>';
+    return '<div class="mt-action-bar"><button type="button" class="mt-action primary" data-maint-action="preview">Preview change</button>'
+      +'<small>Reviews this one provider-owned change. Nothing runs until you confirm.</small></div>';
+  }
   function maintNextHtml(finding){
     var next=finding&&finding.nextAction,action=finding&&finding.action||{};
     var text=maintText(next)||maintText(next&&next.summary)||maintText(next&&next.guidance)
@@ -223,11 +293,11 @@ import { ago } from './intelligence.mjs';
     facts+=maintFact("Safety",action.safetyClass);
     facts+=maintFact("Restart",action.restartRequired===true?"Required":action.restartRequired===false?"Not reported as required":"");
     facts+=maintFact("Rollback",action.rollback);
-    if(!text&&!command&&!facts)return "";
+    if(!text&&!command&&!facts&&!maintCanPreview(finding))return "";
     return '<section class="mt-detail-section mt-next"><h4>Next step</h4>'+(text?"<p>"+esc(text)+"</p>":"")
       +(facts?'<dl class="mt-facts compact">'+facts+"</dl>":"")
       +(command?'<code>'+esc(command)+"</code>":"")
-      +'<small>Reporting only. No action runs from this view.</small></section>';
+      +maintFindingActionHtml(finding)+"</section>";
   }
 
   function maintFindingDetail(finding){
@@ -260,12 +330,18 @@ import { ago } from './intelligence.mjs';
 
   function maintReceiptDetail(receipt){
     var title=maintText(receipt.headline)||maintText(receipt.label)||"Maintenance change";
+    var undo=receipt&&receipt.undo,undoStatus=maintText(receipt.undoStatus)
+      ||maintText(undo&&typeof undo==="object"&&(undo.status||undo.label||undo.summary))
+      ||maintText(typeof undo==="string"?undo:"");
+    var undoAction=maintCanUndo(receipt)
+      ?'<div class="mt-action-bar"><button type="button" class="mt-action" data-maint-action="undo">Preview undo</button>'
+        +'<small>The server marked this receipt eligible. Undo is previewed and confirmed separately.</small></div>'
+      :'<p class="mt-report-only">No eligible undo is available for this receipt.</p>';
     return '<div class="mt-detail-head"><span class="mt-state" data-tone="ready">'
       +esc(maintText(receipt.statusLabel)||maintText(receipt.status)||"Receipt retained")+'</span><h3 id="sys-maint-detail-title" tabindex="-1">'
       +esc(title)+"</h3></div>"+(maintText(receipt.summary)?'<p class="mt-explanation">'+esc(maintText(receipt.summary))+"</p>":"")
-      +'<dl class="mt-facts">'+maintFact("Receipt",receipt.id)+maintFact("Completed",receipt.completedAt||receipt.at)
-      +maintFact("Verification",receipt.verification)+maintFact("Undo",receipt.undoStatus||receipt.undo)+"</dl>"
-      +'<p class="mt-report-only">Reporting only. Receipt details do not authorize an undo from this view.</p>';
+      +'<dl class="mt-facts">'+maintFact("Receipt",maintReceiptId(receipt))+maintFact("Completed",receipt.completedAt||receipt.at)
+      +maintFact("Verification",receipt.verification)+maintFact("Undo",undoStatus)+"</dl>"+undoAction;
   }
 
   function renderMaintDetail(records){
@@ -280,17 +356,17 @@ import { ago } from './intelligence.mjs';
     var records=maintRecords();
     if(!records.some(function(record){return record.key===maintSelected;}))maintSelected=records.length?records[0].key:null;
     renderMaintList(records);renderMaintDetail(records);
-    var root=document.getElementById("sys-maintenance");if(root)root.setAttribute("aria-busy",maintenanceBusy?"true":"false");
+    var root=document.getElementById("sys-maintenance");if(root)root.setAttribute("aria-busy",maintenanceBusy||maintActionBusy?"true":"false");
   }
 
   export function loadMaintenance(force){
-    if(maintenanceBusy)return Promise.resolve();
+    if(maintenanceBusy||maintActionBusy||maintActionActive())return Promise.resolve();
     if(MAINTENANCE&&!force){renderMaintenance();return Promise.resolve();}
     maintenanceBusy=true;renderMaintenance();
     return fetch("/api/maintenance",{cache:"no-store",headers:authHeaders()}).then(function(response){
       if(!response.ok)throw Error(response.status===404?"Maintenance reporting is not available in this build.":"Maintenance findings could not be read.");
       return response.json();
-    }).then(function(data){MAINTENANCE=data&&typeof data==="object"?data:{error:"The maintenance response was empty."};})
+    }).then(function(data){MAINTENANCE=data&&typeof data==="object"?maintMergeReceipts(data):{error:"The maintenance response was empty."};})
       .catch(function(error){MAINTENANCE={error:error&&error.message||"Maintenance findings could not be read."};})
       .then(function(){maintenanceBusy=false;renderMaintenance();});
   }
@@ -313,4 +389,5 @@ import { ago } from './intelligence.mjs';
       var button=event.target.closest?event.target.closest("[data-maint-key]"):null;if(!button)return;
       maintSelected=button.getAttribute("data-maint-key");var records=maintRecords();renderMaintList(records);renderMaintDetail(records);
     });
+    wireMaintActions(document.getElementById("sys-maintenance"));
   }
