@@ -67,6 +67,10 @@ import { renderPage } from './dashboard/page.mjs';
 // module does not do.
 import { BASELINE_TRAILING_DAYS } from './usage-aggregate.mjs';
 import { requestRejection } from './dashboard/request-security.mjs';
+import { createMaintenanceDashboardApi } from './dashboard/maintenance-api.mjs';
+import {
+  MAINTENANCE_MUTATION_ROUTES, maintenanceMutationRejection,
+} from './dashboard/maintenance-security.mjs';
 import {
   readJsonSafe, mintToken, tokenMatches, sendJson, sendUnauthorized, sendNotFound, listenLoopback,
 } from './loopback-server.mjs';
@@ -996,7 +1000,8 @@ function lazyLive(liveOptions = {}) {
  *           intelClientBuffer?: number, intelMaxClients?: number,
  *           discoverProjects?: () => Array<{ path: string, label: string, source?: string }>,
  *           machineWideIntel?: (projects: Array<any>) => any,
- *           models?: any, modelScopeKey?: string, system?: any, systemOptions?: any }} [opts]
+ *           models?: any, modelScopeKey?: string, system?: any, systemOptions?: any,
+ *           maintenance?: any, maintenanceOptions?: any }} [opts]
  * @returns {Promise<{ url: string, urlWithToken: string, port: number, token: string, close: () => Promise<void> }>}
  */
 export function startDashboard({
@@ -1007,6 +1012,7 @@ export function startDashboard({
   transcriptClientBuffer = 64, transcriptMaxClients = 16,
   intelWatch, intelClientBuffer = 256, intelMaxClients = 32,
   discoverProjects, machineWideIntel, models, modelScopeKey, system, systemOptions = {},
+  maintenance, maintenanceOptions = {},
 } = {}) {
   const provide = fetchStatus || shellOutStatus(cwd);
   const usageApi = usage || lazyUsage();
@@ -1057,6 +1063,25 @@ export function startDashboard({
       throw new TypeError('system collector must implement read and refreshDeep');
     }
     return collector;
+  };
+  // Maintenance consumes the SAME collector instance as System. This preserves
+  // the bounded-context split (System measures; Maintenance plans/acts) without
+  // letting two dashboard routes independently walk or disagree about the
+  // machine. Like every expensive panel, construction remains lazy.
+  const provideMaintenance = typeof maintenance === 'function'
+    ? maintenance : maintenance ? async () => maintenance : async () => {
+      const [{ createMaintenanceService }, collector] = await Promise.all([
+        import('./maintenance/service.mjs'), getSystem(),
+      ]);
+      return createMaintenanceService({ collector, ...maintenanceOptions });
+    };
+  let maintenancePromise;
+  const getMaintenance = async () => {
+    const service = await (maintenancePromise ||= Promise.resolve().then(provideMaintenance));
+    if (!service || typeof service.scan !== 'function' || typeof service.plan !== 'function') {
+      throw new TypeError('maintenance service must implement scan and plan');
+    }
+    return service;
   };
   let transcriptServicePromise;
   const provideTranscripts = typeof transcripts === 'function'
@@ -1224,15 +1249,23 @@ export function startDashboard({
   // also accept the token as a query param (see client.mjs's dashSseUrl).
   const token = mintToken();
   const checkToken = (req, query) => tokenMatches(req.headers['x-dash-token'] || query.get('token'), token);
+  let maintenanceApiPromise;
+  const getMaintenanceApi = async () => (maintenanceApiPromise ||= getMaintenance()
+    .then((service) => createMaintenanceDashboardApi({ service, sessionToken: token })));
 
   const server = http.createServer(async (req, res) => {
     const raw = req.url || '/';
     const qi = raw.indexOf('?');
     const url = qi < 0 ? raw : raw.slice(0, qi);
     const query = new URLSearchParams(qi < 0 ? '' : raw.slice(qi + 1));
-    // The dashboard is read-only. Reject every mutating method before route
-    // dispatch so a new GET endpoint cannot accidentally create a write path.
-    if (req.method !== 'GET') { res.writeHead(405).end('method not allowed'); return; }
+    // Maintenance has the only mutation allowlist. Every other route remains
+    // GET-only, so adding a new read endpoint cannot accidentally create a
+    // write path.
+    const maintenanceMutation = req.method === 'POST' && MAINTENANCE_MUTATION_ROUTES.has(url);
+    if (req.method !== 'GET' && !maintenanceMutation) {
+      res.writeHead(405).end('method not allowed');
+      return;
+    }
     const rejected = requestRejection(req.headers);
     if (rejected) {
       res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
@@ -1254,8 +1287,24 @@ export function startDashboard({
 
     // Every route below serves data — none of it is safe to hand to any
     // process that can merely reach this loopback port (Security Finding 1).
-    if (url.startsWith('/api/') && !checkToken(req, query)) {
+    // Query tokens remain an SSE compatibility exception for GET. Mutation
+    // capability can only be reached with the explicit header; it never rides
+    // in a URL, browser history, referrer or server log.
+    const authorized = maintenanceMutation
+      ? tokenMatches(req.headers['x-dash-token'], token) : checkToken(req, query);
+    if (url.startsWith('/api/') && !authorized) {
       sendUnauthorized(res, 'Wrong or missing dashboard token.');
+      return;
+    }
+    if (maintenanceMutation) {
+      const mutationRejection = maintenanceMutationRejection(req.headers);
+      if (mutationRejection) {
+        res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
+        res.end(mutationRejection);
+        return;
+      }
+      try { await (await getMaintenanceApi()).mutate(url, req, res); }
+      catch { sendJson(res, 503, { error: 'maintenance operation unavailable' }); }
       return;
     }
 
@@ -1797,6 +1846,12 @@ export function startDashboard({
       return;
     }
 
+    async function handleMaintenance(req, res) {
+      try { await (await getMaintenanceApi()).scan(req, res); }
+      catch { sendJson(res, 503, { error: 'maintenance evidence unavailable' }); }
+      return;
+    }
+
     async function handleSessions(req, res, query) {
       try {
         const agg = await usageApi.readIndex({ days: clampDays(query.get('days')) });
@@ -1876,6 +1931,7 @@ export function startDashboard({
       '/api/hooks': handleHooks,
       '/api/limits': handleLimits,
       '/api/system': handleSystem,
+      '/api/maintenance': handleMaintenance,
       '/api/sessions': handleSessions,
     };
     /** @type {Array<[RegExp, (req: any, res: any, query: any, match: RegExpExecArray) => Promise<void>]>} */
