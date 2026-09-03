@@ -43,7 +43,11 @@ function fixtureService() {
         schemaVersion: 1, mode: 'control-plane', asOf: '2026-09-03T00:00:00.000Z', sourceFingerprint: 'source-a',
         capabilities: { plan: true, apply: true, undo: true },
         freshness: { completeness: 'complete', gaps: [] },
-        summary: { total: 1, actionable: 1, updatesReady: 1 }, findings: [finding], receipts: [],
+        summary: { total: 1, actionable: 1, updatesReady: 1 }, findings: [finding],
+        receipts: [
+          { id: 'durable-no-change', status: 'aborted-no-change', updatedAt: '2026-09-03T00:03:00.000Z' },
+          { id: 'durable-recovery', status: 'partial-recovery-required', updatedAt: '2026-09-03T00:04:00.000Z' },
+        ],
       };
     },
     async plan({ findingIds, executable }) {
@@ -109,6 +113,44 @@ test('maintenance dashboard projection derives human summary fields without inve
   assert.deepEqual(projected.findings[0].evidence.reasons, ['gap-a']);
   assert.equal(projected.findings[0].evidence.source, 'native');
   assert.equal(projected.receipts[0].completedAt, '2026-09-03T00:00:00.000Z');
+  assert.equal(projected.receipts[0].statusLabel, 'Change recorded');
+  assert.equal(projected.receipts[0].timestampLabel, 'Recorded');
+});
+
+test('maintenance dashboard projection gives every durable receipt a human status, tone, and time meaning', () => {
+  const updatedAt = '2026-09-03T00:04:00.000Z';
+  const cases = [
+    ['committed', 'Change recorded', 'ready', 'Recorded', false, true],
+    ['rolled-back', 'Change rolled back', 'ready', 'Recorded', false, false],
+    ['aborted-no-change', 'No change made', 'ready', 'Recorded', false, false],
+    ['recovered-no-change', 'No change observed', 'ready', 'Recorded', false, false],
+    ['partial-recovery-required', 'Recovery required', 'blocked', 'Updated', true, false],
+    ['unknown-recovery-required', 'Recovery required', 'blocked', 'Updated', true, false],
+    ['applying', 'Apply interrupted', 'blocked', 'Updated', true, false],
+    ['verifying', 'Verification interrupted', 'blocked', 'Updated', true, false],
+    ['refreshing-catalog', 'Catalog refresh interrupted', 'blocked', 'Updated', true, false],
+    ['undoing', 'Undo interrupted', 'blocked', 'Updated', true, false],
+  ];
+  const projected = publicMaintenanceModel({
+    findings: [],
+    receipts: cases.map(([status], index) => ({
+      id: `receipt-${index}`, status, updatedAt, actionCount: 1,
+      undoEligible: true, undo: { eligible: true },
+    })),
+  });
+
+  for (const [index, expected] of cases.entries()) {
+    const [status, statusLabel, statusTone, timestampLabel, recoveryRequired, undoEligible] = expected;
+    const receipt = projected.receipts[index];
+    assert.deepEqual({
+      status: receipt.status, statusLabel: receipt.statusLabel, statusTone: receipt.statusTone,
+      timestampLabel: receipt.timestampLabel, recoveryRequired: receipt.recoveryRequired,
+      undoEligible: receipt.undoEligible,
+    }, { status, statusLabel, statusTone, timestampLabel, recoveryRequired, undoEligible });
+    assert.equal(receipt.updatedAt, updatedAt);
+    assert.equal(receipt.summary.length > 20, true);
+    assert.equal(receipt.undo.eligible, undoEligible);
+  }
 });
 
 test('maintenance dashboard projection removes local paths from public evidence while retaining its diagnosis', () => {
@@ -158,7 +200,15 @@ test('dashboard Maintenance API keeps GET lazy and mutation paths exact', async 
   const report = await request(server, '/api/maintenance', { origin: false, fetchSite: null });
   assert.equal(report.status, 200);
   assert.equal(report.headers['cache-control'], 'no-store');
-  assert.equal(JSON.parse(report.body).findings[0].resource.name, '<hostile>');
+  const reportBody = JSON.parse(report.body);
+  assert.equal(reportBody.findings[0].resource.name, '<hostile>');
+  assert.deepEqual(reportBody.receipts.map((receipt) => ({
+    statusLabel: receipt.statusLabel, statusTone: receipt.statusTone,
+    timestampLabel: receipt.timestampLabel, updatedAt: receipt.updatedAt,
+  })), [
+    { statusLabel: 'No change made', statusTone: 'ready', timestampLabel: 'Recorded', updatedAt: '2026-09-03T00:03:00.000Z' },
+    { statusLabel: 'Recovery required', statusTone: 'blocked', timestampLabel: 'Updated', updatedAt: '2026-09-03T00:04:00.000Z' },
+  ]);
 
   const wrongMethod = await request(server, '/api/status', { method: 'POST', body: {} });
   assert.equal(wrongMethod.status, 405);

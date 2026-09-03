@@ -18,6 +18,7 @@ import {
 import {
   createDefaultMaintenanceProviderRegistry, publicMaintenanceProviders,
 } from './provider-registry.mjs';
+import { maintenanceReceiptPresentation } from './receipt-presentation.mjs';
 import { buildMaintenanceReadModel } from './read-model.mjs';
 import {
   listMaintenanceReceiptsReadOnly, readMaintenanceReceipt,
@@ -94,7 +95,6 @@ async function publicReceipts(transactionsRoot, providers, options = {}) {
   return Promise.all(receipts.map(async (receipt) => {
     const status = RECEIPT_STATUSES.has(receipt.status)
       ? receipt.status : 'unknown-recovery-required';
-    const recoveryRequired = RECOVERY_STATUSES.has(status);
     let undoEligible = false;
     if (status === 'committed' && Array.isArray(receipt.actions) && receipt.actions.length) {
       try {
@@ -112,17 +112,14 @@ async function publicReceipts(transactionsRoot, providers, options = {}) {
       }
     }
     const actionCount = Array.isArray(receipt.actions) ? receipt.actions.length : 0;
+    const presentation = maintenanceReceiptPresentation(status, actionCount);
     return {
       id: receipt.id,
-      status,
+      ...presentation,
       createdAt: publicTimestamp(receipt.createdAt),
       updatedAt: publicTimestamp(receipt.updatedAt),
       actionCount,
-      summary: recoveryRequired
-        ? 'Maintenance recovery or inspection is required.'
-        : `${actionCount} maintenance action(s) recorded.`,
       undoEligible,
-      recoveryRequired,
     };
   }));
 }

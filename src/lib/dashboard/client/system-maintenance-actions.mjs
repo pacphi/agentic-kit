@@ -3,8 +3,8 @@
 // override comment for why this directory isn't run through the node lib.
 import { authHeaders, esc } from './bootstrap.mjs';
 import {
-  maintCanPreview, maintCanUndo, maintCurrentRecord, maintFact, maintReceiptId,
-  maintRememberReceipt, maintShowReceipt, maintText, maintValue, renderMaintenance,
+  maintAge, maintCanPreview, maintCanUndo, maintCurrentRecord, maintFact, maintReceiptId,
+  maintReceiptPresentation, maintRememberReceipt, maintShowReceipt, maintText, maintValue, renderMaintenance,
 } from './system-maintenance.mjs';
 
   // Authorization is intentionally closure-local and short-lived. Never add a
@@ -65,11 +65,10 @@ import {
         +esc(phrase)+'</code><input id="sys-maint-typed" autocomplete="off" spellcheck="false" data-maint-typed></label>':"");
   }
   function maintReceiptResultHtml(operation){
-    var receipt=operation.receipt||{};
-    return '<p class="mt-confirm-summary">'+esc(maintText(receipt.summary)
-      ||(operation.kind==="undo-result"?"The undo completed.":"The maintenance change completed."))+"</p>"
+    var receipt=operation.receipt||{},state=maintReceiptPresentation(receipt);
+    return '<p class="mt-confirm-summary">'+esc(state.summary)+"</p>"
       +'<dl class="mt-facts compact mt-confirm-facts">'+maintFact("Receipt",maintReceiptId(receipt))
-      +maintFact("Status",receipt.statusLabel||receipt.status)+maintFact("Completed",receipt.completedAt||receipt.at)
+      +maintFact("Status",state.label)+maintFact(state.timeLabel,maintAge(state.at))
       +maintFact("Verification",receipt.verification)+"</dl>"
       +'<p class="mt-expiry">This receipt remains available under Recent changes.</p>';
   }
@@ -121,11 +120,11 @@ import {
     };
   }
   function maintRecoveryHtml(operation){
-    var receipt=operation.receipt||{},summary=maintText(receipt.summary);
+    var receipt=operation.receipt||{},state=maintReceiptPresentation(receipt),summary=state.summary;
     return '<div class="mt-confirm-error" role="alert">'+esc(operation.error.message)+"</div>"
       +(summary&&summary!==operation.error.message?'<p class="mt-confirm-summary">'+esc(summary)+"</p>":"")
       +'<dl class="mt-facts compact mt-confirm-facts">'+maintFact("Receipt",maintReceiptId(receipt))
-      +maintFact("Status",receipt.statusLabel||receipt.status)+maintFact("Recorded",receipt.completedAt||receipt.at)
+      +maintFact("Status",state.label)+maintFact(state.timeLabel,maintAge(state.at))
       +maintFact("Verification",receipt.verification)+"</dl>"
       +'<p class="mt-expiry">This receipt remains available under Recent changes.</p>';
   }

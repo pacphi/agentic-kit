@@ -344,10 +344,25 @@ test('service persists explicit preimages, exposes recovery history, and require
   });
   const before = await service.scan();
   assert.equal(before.receipts[0].recoveryRequired, true);
+  assert.deepEqual({
+    status: before.receipts[0].status,
+    statusLabel: before.receipts[0].statusLabel,
+    statusTone: before.receipts[0].statusTone,
+    timestampLabel: before.receipts[0].timestampLabel,
+    updatedAt: before.receipts[0].updatedAt,
+  }, {
+    status: 'applying', statusLabel: 'Apply interrupted', statusTone: 'blocked',
+    timestampLabel: 'Updated', updatedAt: new Date(NOW).toISOString(),
+  });
   await assert.rejects(() => service.recover({ receiptId: tx.id }), /confirmation/i);
   const result = await service.recover({ receiptId: tx.id, confirmed: true });
   assert.equal(result.status, 'recovered-no-change');
   const after = await service.scan();
   assert.equal(after.receipts[0].status, 'recovered-no-change');
   assert.equal(after.receipts[0].recoveryRequired, false);
+  assert.equal(after.receipts[0].statusLabel, 'No change observed');
+  assert.equal(after.receipts[0].statusTone, 'ready');
+  assert.equal(after.receipts[0].timestampLabel, 'Recorded');
+  assert.equal(after.receipts[0].updatedAt, new Date(NOW + 1).toISOString());
+  assert.match(after.receipts[0].summary, /confirmed the recorded pre-change state/i);
 });

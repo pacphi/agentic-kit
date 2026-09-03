@@ -1,4 +1,5 @@
 import { sendJson } from '../loopback-server.mjs';
+import { maintenanceReceiptPresentation } from '../maintenance/receipt-presentation.mjs';
 import {
   createMaintenanceCapabilityStore, readMaintenanceJson, validateMaintenanceBody,
 } from './maintenance-security.mjs';
@@ -110,11 +111,16 @@ function publicReceipt(receipt) {
     verification: picked(action.verification, ['verified', 'postFingerprint']),
     recovery: picked(action.recovery, ['status', 'verified']),
   })) : [];
+  const actionCount = Number.isFinite(value.actionCount) ? Math.max(0, Math.round(value.actionCount)) : actions.length;
+  const presentation = maintenanceReceiptPresentation(value.status, actionCount);
   const projected = /** @type {Record<string, any>} */ ({
     ...picked(value, [
-      'id', 'status', 'planId', 'planDigest', 'sourceFingerprint', 'createdAt', 'updatedAt',
-      'completedAt', 'headline', 'label', 'summary', 'statusLabel', 'undoStatus', 'undoEligible',
+      'id', 'planId', 'planDigest', 'sourceFingerprint', 'createdAt', 'updatedAt', 'at',
+      'completedAt', 'headline', 'label', 'undoStatus',
     ]),
+    ...presentation,
+    actionCount,
+    summary: text(value.summary) ?? presentation.summary,
     actions,
     verification: picked(value.verification, [
       'nativeStateVerified', 'affectedCatalogRefreshed', 'affectedCatalogRescanned', 'affectedCatalogRescanRequired',
@@ -123,6 +129,10 @@ function publicReceipt(receipt) {
   });
   if (!projected.completedAt && ['committed', 'rolled-back'].includes(projected.status)) {
     projected.completedAt = projected.updatedAt ?? projected.createdAt;
+  }
+  projected.undoEligible = projected.status === 'committed' && value.undoEligible === true;
+  if (Object.keys(projected.undo).length) {
+    projected.undo.eligible = projected.undoEligible && value.undo?.eligible === true;
   }
   return projected;
 }

@@ -63,9 +63,35 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
     if(/incomplete|unknown|partial/i.test(label))tone="incomplete";
     return {bucket:bucket,label:label,tone:tone};
   }
-  function maintAge(value){
+  export function maintAge(value){
     var at=Date.parse(maintText(value));
     return Number.isFinite(at)?ago(Math.max(0,Math.round((Date.now()-at)/1000))):"time unknown";
+  }
+  var MAINT_RECEIPT_STATE={
+    prepared:{label:"Prepared action interrupted",tone:"blocked",timeLabel:"Updated",summary:"The action was prepared, but the journal has not been reconciled. Recover this receipt before another change."},
+    applying:{label:"Apply interrupted",tone:"blocked",timeLabel:"Updated",summary:"A provider action may have started. Recover this receipt before another maintenance change."},
+    verifying:{label:"Verification interrupted",tone:"blocked",timeLabel:"Updated",summary:"A provider action was recorded, but native verification did not finish. Recovery is required."},
+    "refreshing-catalog":{label:"Catalog refresh interrupted",tone:"blocked",timeLabel:"Updated",summary:"The native outcome was recorded, but the Catalog refresh did not finish. Recovery is required."},
+    undoing:{label:"Undo interrupted",tone:"blocked",timeLabel:"Updated",summary:"Undo started, but the restored state was not proven. Recover this receipt before another change."},
+    committed:{label:"Change recorded",tone:"ready",timeLabel:"Recorded",summary:"The maintenance change completed and was verified."},
+    applied:{label:"Change recorded",tone:"ready",timeLabel:"Recorded",summary:"The maintenance change completed and was verified."},
+    "rolled-back":{label:"Change rolled back",tone:"ready",timeLabel:"Recorded",summary:"The recorded pre-change state was restored and verified."},
+    undone:{label:"Undo recorded",tone:"ready",timeLabel:"Recorded",summary:"The maintenance change was restored and verified."},
+    "already-rolled-back":{label:"Already rolled back",tone:"ready",timeLabel:"Recorded",summary:"The recorded maintenance change had already been restored."},
+    "aborted-no-change":{label:"No change made",tone:"ready",timeLabel:"Recorded",summary:"The journal proves that no provider action started."},
+    "recovered-no-change":{label:"No change observed",tone:"ready",timeLabel:"Recorded",summary:"Recovery inspected the provider and confirmed the recorded pre-change state."},
+    "already-reconciled":{label:"Already reconciled",tone:"ready",timeLabel:"Recorded",summary:"This receipt had already been reconciled against current provider state."}
+  };
+  var MAINT_RECOVERY_STATE={label:"Recovery required",tone:"blocked",timeLabel:"Updated",summary:"Maintenance could not prove a complete outcome. Inspect or recover this receipt before another change."};
+  export function maintReceiptPresentation(receipt){
+    receipt=receipt&&typeof receipt==="object"?receipt:{};
+    var status=maintText(receipt.status).toLowerCase();
+    var state=MAINT_RECEIPT_STATE[status]||MAINT_RECOVERY_STATE;
+    return {
+      status:status,label:state.label,tone:state.tone,
+      summary:maintText(receipt.summary)||state.summary,timeLabel:state.timeLabel,
+      at:receipt.completedAt||receipt.updatedAt||receipt.createdAt||receipt.at
+    };
   }
   function maintOptionLabel(kind){
     var key=maintText(kind).toLowerCase();
@@ -98,8 +124,8 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
     return caps.plan===true&&caps.apply===true&&action&&action.executable===true;
   }
   export function maintCanUndo(receipt){
-    var undo=receipt&&receipt.undo;
-    return maintCapabilities().undo===true&&!!receipt&&(receipt.undoEligible===true
+    var undo=receipt&&receipt.undo,status=maintText(receipt&&receipt.status).toLowerCase();
+    return maintCapabilities().undo===true&&!!receipt&&(status==="committed"||status==="applied")&&(receipt.undoEligible===true
       ||(undo&&typeof undo==="object"&&undo.eligible===true));
   }
   function maintMergeReceipts(data){
@@ -243,15 +269,14 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
 
   function maintReceiptRow(record){
     var receipt=record.value||{},selected=record.key===maintSelected;
+    var state=maintReceiptPresentation(receipt);
     var name=maintText(receipt.headline)||maintText(receipt.label)||"Maintenance change";
-    var status=maintText(receipt.statusLabel)||maintText(receipt.status)||"Receipt retained";
-    var tone=/partial|recovery|unknown|failed/i.test(maintText(receipt.status))?"blocked":"ready";
-    return '<li><button type="button" class="mt-row receipt" data-maint-key="'+esc(record.key)+'" data-tone="'+tone+'"'
+    return '<li><button type="button" class="mt-row receipt" data-maint-key="'+esc(record.key)+'" data-tone="'+state.tone+'"'
       +' aria-controls="sys-maint-detail" aria-expanded="'+(selected?"true":"false")+'"'+(selected?' aria-current="true"':"")+">"
-      +'<span class="mt-state">'+esc(status)+"</span>"
+      +'<span class="mt-state">'+esc(state.label)+"</span>"
       +'<span class="mt-identity"><b>'+esc(name)+"</b><small>Receipt</small></span>"
-      +'<span class="mt-change">'+esc(maintText(receipt.summary)||"Recorded maintenance outcome")+"</span>"
-      +'<span class="mt-owner">'+esc(maintAge(receipt.completedAt||receipt.at))+"</span>"
+      +'<span class="mt-change">'+esc(state.summary)+"</span>"
+      +'<span class="mt-owner">'+esc(state.timeLabel+" "+maintAge(state.at))+"</span>"
       +"</button></li>";
   }
 
@@ -341,7 +366,7 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
 
   function maintReceiptDetail(receipt){
     var title=maintText(receipt.headline)||maintText(receipt.label)||"Maintenance change";
-    var tone=/partial|recovery|unknown|failed/i.test(maintText(receipt.status))?"blocked":"ready";
+    var state=maintReceiptPresentation(receipt);
     var undo=receipt&&receipt.undo,undoStatus=maintText(receipt.undoStatus)
       ||maintText(undo&&typeof undo==="object"&&(undo.status||undo.label||undo.summary))
       ||maintText(typeof undo==="string"?undo:"");
@@ -349,10 +374,10 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
       ?'<div class="mt-action-bar"><button type="button" class="mt-action" data-maint-action="undo">Preview undo</button>'
         +'<small>The server marked this receipt eligible. Undo is previewed and confirmed separately.</small></div>'
       :'<p class="mt-report-only">No eligible undo is available for this receipt.</p>';
-    return '<div class="mt-detail-head"><span class="mt-state" data-tone="'+tone+'">'
-      +esc(maintText(receipt.statusLabel)||maintText(receipt.status)||"Receipt retained")+'</span><h3 id="sys-maint-detail-title" tabindex="-1">'
-      +esc(title)+"</h3></div>"+(maintText(receipt.summary)?'<p class="mt-explanation">'+esc(maintText(receipt.summary))+"</p>":"")
-      +'<dl class="mt-facts">'+maintFact("Receipt",maintReceiptId(receipt))+maintFact("Completed",receipt.completedAt||receipt.at)
+    return '<div class="mt-detail-head"><span class="mt-state" data-tone="'+state.tone+'">'
+      +esc(state.label)+'</span><h3 id="sys-maint-detail-title" tabindex="-1">'
+      +esc(title)+"</h3></div>"+'<p class="mt-explanation">'+esc(state.summary)+"</p>"
+      +'<dl class="mt-facts">'+maintFact("Receipt",maintReceiptId(receipt))+maintFact(state.timeLabel,maintAge(state.at))
       +maintFact("Verification",receipt.verification)+maintFact("Undo",undoStatus)+"</dl>"+undoAction;
   }
 

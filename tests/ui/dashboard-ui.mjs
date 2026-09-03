@@ -717,6 +717,19 @@ const MAINTENANCE_PAYLOAD = {
   receipts: [],
 };
 
+const MAINTENANCE_HISTORY = [
+  'committed', 'rolled-back', 'aborted-no-change', 'recovered-no-change',
+  'partial-recovery-required', 'unknown-recovery-required', 'applying',
+  'verifying', 'refreshing-catalog', 'undoing',
+].map((status, index) => ({
+  id: `receipt-${status}`, status, headline: `Maintenance receipt ${index + 1}`,
+  updatedAt: new Date(Date.now() - ((index + 1) * 60_000)).toISOString(),
+  actionCount: 1,
+  // Deliberately hostile eligibility proves that recovery and settled no-change
+  // statuses cannot surface Undo merely because one boolean is malformed.
+  undoEligible: true, undo: { eligible: true },
+}));
+
 const LIVE_SNAPSHOT = {
   schemaVersion: 1,
   cursor: 'live:3',
@@ -1836,6 +1849,74 @@ async function main() {
         && readOnlyBoundary.controls === 0,
       `read-only Maintenance was ${JSON.stringify(readOnlyBoundary)}`);
     await readOnlyPage.close();
+
+    const historyPage = await browser.newPage({ viewport: { width: 1080, height: 760 } });
+    await historyPage.route(/\/api\/maintenance(?:\?|$)/, (route) => route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({
+        ...MAINTENANCE_PAYLOAD,
+        findings: [], receipts: MAINTENANCE_HISTORY,
+        summary: {
+          total: 0, updatesReady: 0, safeCleanup: 0, needsReview: 0, blocked: 0,
+          recentChanges: MAINTENANCE_HISTORY.length, incompleteSources: 0, actionable: 0,
+        },
+      }),
+    }));
+    await historyPage.goto(srv.urlWithToken, { waitUntil: 'domcontentloaded' });
+    await historyPage.click('[data-tab="system"]');
+    await historyPage.click('[data-system-view="maintenance"]');
+    await historyPage.click('#sys-maint-buckets [data-maint-bucket="recent-changes"]');
+    await historyPage.waitForSelector('#sys-maint-list [data-maint-key]');
+    const durableLedger = await visibleText(historyPage, '#sys-maint-list');
+    const humanStatuses = [
+      'Change recorded', 'Change rolled back', 'No change made', 'No change observed',
+      'Recovery required', 'Apply interrupted', 'Verification interrupted',
+      'Catalog refresh interrupted', 'Undo interrupted',
+    ];
+    check('durable terminal and recovery receipts use human labels and updatedAt ages',
+      humanStatuses.every((label) => durableLedger.includes(label))
+        && /Recorded \d+m ago/.test(durableLedger)
+        && /Updated \d+m ago/.test(durableLedger)
+        && !/time unknown/.test(durableLedger)
+        && !/(aborted-no-change|recovered-no-change|partial-recovery-required|refreshing-catalog)/.test(durableLedger),
+      `durable receipt ledger read ${JSON.stringify(durableLedger)}`);
+
+    await historyPage.click('[data-maint-key="receipt:receipt-partial-recovery-required"]');
+    const recoveryDetail = await historyPage.evaluate(() => ({
+      text: document.getElementById('sys-maint-detail')?.innerText,
+      undoControls: document.querySelectorAll('#sys-maint-detail [data-maint-action="undo"]').length,
+    }));
+    check('recovery-required history stays blocked and never exposes Undo',
+      /Recovery required/.test(String(recoveryDetail.text))
+        && /could not prove a complete outcome/.test(String(recoveryDetail.text))
+        && /Updated\s+\d+m ago/.test(String(recoveryDetail.text))
+        && recoveryDetail.undoControls === 0,
+      `recovery receipt detail was ${JSON.stringify(recoveryDetail)}`);
+
+    await historyPage.click('[data-maint-key="receipt:receipt-aborted-no-change"]');
+    const noChangeDetail = await historyPage.evaluate(() => ({
+      text: document.getElementById('sys-maint-detail')?.innerText,
+      undoControls: document.querySelectorAll('#sys-maint-detail [data-maint-action="undo"]').length,
+    }));
+    check('a journal-proven no-change receipt is recorded without implying an undoable mutation',
+      /No change made/.test(String(noChangeDetail.text))
+        && /no provider action started/.test(String(noChangeDetail.text))
+        && /Recorded\s+\d+m ago/.test(String(noChangeDetail.text))
+        && noChangeDetail.undoControls === 0,
+      `no-change receipt detail was ${JSON.stringify(noChangeDetail)}`);
+
+    await historyPage.click('[data-maint-key="receipt:receipt-committed"]');
+    const committedDetail = await historyPage.evaluate(() => ({
+      text: document.getElementById('sys-maint-detail')?.innerText,
+      undoControls: document.querySelectorAll('#sys-maint-detail [data-maint-action="undo"]').length,
+    }));
+    check('only a committed server-eligible receipt exposes guarded Undo',
+      /Change recorded/.test(String(committedDetail.text))
+        && /Recorded\s+\d+m ago/.test(String(committedDetail.text))
+        && committedDetail.undoControls === 1,
+      `committed receipt detail was ${JSON.stringify(committedDetail)}`);
+    await shoot(historyPage, 'system-maintenance-recovery-history');
+    await historyPage.close();
 
     // ── the fail-closed rule, where it is easiest to break (ADR-0023) ─────────
     // The catalog section has never been deep-scanned and one install figure was
