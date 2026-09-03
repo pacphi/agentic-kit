@@ -52,7 +52,7 @@ permanent.
 | System | Sessions | `#system/sessions` | Sessions | The largest individual session files, the project each belongs to, and its share of that host's retained bytes |
 | System | Storage | `#system/storage` | Storage | Where the retained bytes are, by category and host — learning stores counted separately because they dwarf everything else — plus per-series growth |
 | System | Runtime | `#system/runtime` | Runtime | Live host processes, their CPU and memory, background daemons, and machine denominators — refreshed on the header's poll clock while open |
-| System | Catalog | `#system/catalog` | Catalog | Every deduplicated skill, agent, command, plugin and MCP server across user scope and all projects on disk, with a per-host presence matrix and kind/host filters |
+| System | Catalog | `#system/catalog` | Catalog | Summary-first project skill pressure with per-project host disclosure; standalone and plugin-qualified skills, agents, commands, plugins and MCP servers across user/project/plugin scope; provider/version and entrypoint-digest evidence; per-host matrix with kind/host/source filters |
 | System | Projects | `#system/projects` | Projects | Every repository with a remote that a host has recorded a session in — its approximate lines of code, language mix, total disk size and last activity. Worktrees, sub-folders and remote-less repositories are counted below the table, not listed |
 
 About is one scrolling page, so its hashes scroll to a section rather than swapping panels; `#about`
@@ -94,7 +94,10 @@ separate from Vibium's Agentic-QE-owned cache visibility in System.
 System's capability catalog counts both user/plugin surfaces and the project
 surfaces discovered by the host census. In particular, Codex project skills in
 `.agents/skills` are distinct evidence from user `~/.codex/skills` and enabled
-plugin caches; their presence matrix keeps the source visible after deduplication.
+plugin caches; their presence matrix keeps the source visible after deduplication. Full
+`plugin@marketplace` and version/state evidence stays attached to plugin contributions, and a
+standalone skill with the same logical name remains a distinct identity joined by an explicit
+name/digest relationship.
 
 Each card carries an icon, the component name with a state chip, a plain-language tagline, one
 short paragraph explaining what the thing does for you, and a row of link pills — source (GitHub),
@@ -484,9 +487,29 @@ you started is still running.
 
 The trade is stated rather than hidden. Deep-tier figures always render with when they were
 measured, and once a snapshot passes seven days the freshness label turns amber and reads
-`stale, rescan`. A scan writes one file — its own snapshot — and nothing else; the reclaimable-space
+`stale, rescan`. Catalog snapshots also retain bounded stat-only source probes; if a watched plugin,
+surface, or entrypoint changes first, the label immediately reads `catalog changed, rescan`.
+An unchanged probe is not full content validation, and says so in the JSON evidence.
+A scan writes one file — its own snapshot — and nothing else; the reclaimable-space
 rows are advisory, with their rationale and their path, and there is no delete button anywhere in
 this area.
+
+### Catalog evidence and project pressure
+
+Catalog starts with a project-by-host pressure table. Project, user, and enabled-plugin
+contributions are separate columns; exact skill-name and bounded entrypoint-body overlaps are
+separate evidence. The table always says that context inclusion and cutoff are host-owned and
+unknown. Filesystem presence must not be read as “loaded into this session.”
+
+The presence matrix can be filtered independently by kind, host, and source scope. Rows name their
+provider/version and body variants where known. Plugin inventory prefers the hosts' native list
+commands and labels manifest/config/cache fallback as partial; installed-disabled plugins stay in
+inventory without contributing enabled capabilities.
+
+The dashboard remains read-only. `ak x skills plan --project <path>` emits the corresponding
+receipt-aware classification, git state, affected paths, projected result, and stable plan ID; it
+writes nothing. Future remediation belongs to the [Maintenance capability](ddd/maintenance.md)
+tracked by issue #200.
 
 ### Largest consumers, and the project-trees toggle
 

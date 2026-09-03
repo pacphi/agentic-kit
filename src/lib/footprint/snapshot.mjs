@@ -27,7 +27,7 @@ import { CARRIED_FORWARD, MEASURED } from './walk.mjs';
  *  written by a different version is not migrated and not guessed at — it
  *  reads as never-measured with an explicit reason, and the next deep scan
  *  replaces it. */
-export const SNAPSHOT_SCHEMA_VERSION = 1;
+export const SNAPSHOT_SCHEMA_VERSION = 2;
 
 /** The deep-tier sections, in collection order. This list is also the write
  *  filter — see the header note on the runtime census. A section absent from a

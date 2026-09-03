@@ -819,7 +819,8 @@ ${LIVE_HTML}
       <header class="view-heading">
         <span class="view-eyebrow">SYSTEM</span>
         <h2>Catalog</h2>
-        <p>What is actually deployed, deduplicated across hosts &mdash; and which host carries what.</p>
+        <p>What is actually deployed, where it came from, and how project-local capabilities overlap
+          user and plugin sources. Inventory is not proof that a host loaded an item into context.</p>
       </header>
       <div class="sy-grid">
         <div class="sy-card sy-5">
@@ -842,8 +843,17 @@ ${LIVE_HTML}
               <span class="sy-filter-l" id="sys-cat-host-l">carried by</span>
               <div class="sy-ctl" id="sys-cat-hosts" role="group" aria-labelledby="sys-cat-host-l"></div>
             </div>
+            <div class="sy-filter-row">
+              <span class="sy-filter-l" id="sys-cat-scope-l">source</span>
+              <div class="sy-ctl" id="sys-cat-scopes" role="group" aria-labelledby="sys-cat-scope-l"></div>
+            </div>
           </div>
+          <div class="sr-only" id="sys-cat-status" role="status" aria-live="polite" aria-atomic="true"></div>
           <div id="sys-matrix"></div>
+        </div>
+        <div class="sy-card">
+          <div class="sy-head"><h3>Project skill pressure</h3><span class="n mono">read-only evidence</span></div>
+          <div id="sys-pressure"></div>
         </div>
       </div>
     </section>

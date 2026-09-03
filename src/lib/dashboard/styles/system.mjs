@@ -244,13 +244,16 @@ export const SYSTEM_CSS = `
 }
 .sy-link:hover{text-decoration:underline}
 .sy-link:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
-/* The presence matrix is a real table now, and scrolls: it lists EVERY
-   deduplicated item rather than the first fourteen, and a full inventory is
-   several hundred rows on a working machine. The sticky header keeps the host
-   columns meaningful once you are 200 rows down. */
-.sy-catalog-scroll{max-height:420px; overflow-y:auto}
+/* The presence matrix is a real table and retains EVERY deduplicated item, but
+   its viewport is deliberately one header plus no more than five records. The
+   44px minimum accounts for the name and source lines; a wrapped record may
+   make fewer than five visible, never more. The sticky header keeps the host
+   columns meaningful while the remaining inventory scrolls beneath it. */
+.sy-catalog-scroll{max-height:280px; overflow-y:auto}
+.sy-catalog-scroll tbody tr{height:44px}
 .sy-catalog-scroll thead th{position:sticky; top:0; background:var(--panel); z-index:1}
 .sy-matrix-t .nm{font-family:var(--mono); font-size:11.5px; color:var(--ink); word-break:break-all}
+.sy-catmeta{margin-top:3px; font-family:var(--sans); font-size:10px; color:var(--ink-dim)}
 .sy-matrix-t .cell{text-align:center; width:74px}
 .sy-matrix-t th.cell{text-transform:uppercase; letter-spacing:.04em}
 .sy-matrix-t .on{display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--accent)}
@@ -270,6 +273,50 @@ export const SYSTEM_CSS = `
   margin-left:8px; font-family:var(--sans); font-size:9.5px; color:var(--ink-dim);
   text-transform:uppercase; letter-spacing:.05em;
 }
+.sy-pressure-overview{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; margin-bottom:10px}
+.sy-pressure-overview span{padding:10px 12px; border:1px solid var(--line); border-radius:9px; color:var(--ink-dim); font-size:11px}
+.sy-pressure-overview b{display:block; color:var(--ink); font-family:var(--mono); font-size:18px; line-height:1.2; margin-bottom:2px}
+.sy-pressure-context,.sy-pressure-foot{color:var(--ink-dim); font-size:11.5px; line-height:1.5}
+.sy-pressure-context{padding:9px 11px; border-left:2px solid var(--s1); background:color-mix(in srgb,var(--s1) 7%,transparent); margin-bottom:10px}
+.sy-pressure-context b,.sy-pressure-foot b{color:var(--ink-2)}
+.sy-pressure-list{max-height:520px; overflow:auto; display:flex; flex-direction:column; gap:6px; padding:1px}
+.sy-pressure-list:focus-visible,.sy-pressure-project>summary:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+.sy-pressure-project{border:1px solid var(--line); border-radius:9px; background:color-mix(in srgb,var(--panel) 92%,var(--ink) 8%)}
+.sy-pressure-project>summary{position:relative; display:grid; grid-template-columns:minmax(180px,.8fr) minmax(0,2fr); gap:12px; align-items:center; min-height:48px; padding:10px 34px 10px 13px; cursor:pointer; list-style:none}
+.sy-pressure-project>summary::-webkit-details-marker{display:none}
+.sy-pressure-project>summary::after{content:'›'; position:absolute; right:14px; top:50%; color:var(--ink-dim); font-size:20px; transform:translateY(-50%); transition:transform .15s ease}
+.sy-pressure-project[open]>summary::after{transform:translateY(-50%) rotate(90deg)}
+.sy-pressure-project[open]>summary{border-bottom:1px solid var(--line)}
+.sy-pressure-project-id{display:flex; flex-direction:column; min-width:0; gap:3px}
+.sy-pressure-project-id>span:first-child{display:flex; align-items:center; gap:7px; min-width:0}
+.sy-pressure-project-id b{color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.sy-current{padding:2px 6px; border-radius:999px; background:color-mix(in srgb,var(--accent) 15%,transparent); color:var(--accent); font-size:9px; text-transform:uppercase; letter-spacing:.04em; white-space:nowrap}
+.sy-pressure-path{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink-dim); font-family:var(--mono); font-size:10.5px}
+.sy-pressure-meta{display:flex; justify-content:flex-end; align-items:center; gap:6px; flex-wrap:wrap}
+.sy-pressure-chip,.sy-pressure-state{padding:3px 7px; border:1px solid var(--line); border-radius:999px; color:var(--ink-2); font-size:10.5px; white-space:nowrap}
+.sy-pressure-chip b{color:var(--ink); font-weight:600}
+.sy-pressure-detail{padding:11px 13px 13px}
+.sy-pressure-detail>.sy-path{margin-bottom:9px; word-break:break-word}
+.sy-pressure-t{min-width:720px}
+.sy-pressure-t th,.sy-pressure-t td{vertical-align:top; font-size:11.5px; line-height:1.4}
+.sy-pressure-t tbody th{color:var(--ink-2); font-weight:500}
+.sy-pressure-n{color:var(--ink)}
+.sy-pressure-reason{display:block; max-width:170px; margin-top:2px; color:var(--ink-dim); font-size:9.5px; line-height:1.35}
+.sy-pressure-action{display:grid; grid-template-columns:auto minmax(0,1fr); gap:12px; align-items:center; padding-top:10px}
+.sy-pressure-action>span{display:flex; flex-direction:column; color:var(--ink-2); white-space:nowrap}
+.sy-pressure-action small{color:var(--ink-dim); font-size:10px}
+.sy-pressure-action code{display:block; min-width:0; padding:7px 9px; border-radius:6px; background:var(--bg); color:var(--accent); overflow:auto; white-space:nowrap}
+.sy-pressure-foot{margin-top:10px}
+@media(max-width:900px){
+  .sy-pressure-overview{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .sy-pressure-project>summary{grid-template-columns:1fr}
+  .sy-pressure-meta{justify-content:flex-start}
+}
+@media(max-width:600px){
+  .sy-pressure-overview{grid-template-columns:1fr 1fr}
+  .sy-pressure-action{grid-template-columns:1fr}
+}
+.sy-good{color:var(--ok)}.sy-warn{color:var(--warn)}.sy-zero{color:var(--ink-dim)}
 /* Inline SVG charts share one type treatment with the rest of the page. */
 .sy-card svg{display:block; max-width:100%}
 .sy-card svg text{font-family:var(--sans); fill:var(--ink-2); font-size:11px}

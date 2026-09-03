@@ -5,6 +5,29 @@ latest capability is *two* motions, not one: get the newer code, then turn the f
 This page exists because those two are easy to conflate — and `ak sync`, despite its name,
 only does the first.
 
+## 2026-09-03: System Catalog snapshot v2
+
+Catalog identity now preserves full plugin marketplace/version provenance and separates
+standalone capability identities from plugin-contributed identities. The Footprint snapshot schema
+therefore advances from v1 to v2; an older snapshot is reported as unreadable-by-this-build until
+you run `ak system --deep`. It is not migrated or silently shown under the new semantics.
+
+JSON consumers should treat `catalog.items[].key` as an opaque canonical identifier. The additive
+fields `canonicalId`, `capabilityName`, `pluginRef`, `sourceScopes`, occurrence evidence,
+`overlaps`, `projects`, `pluginSources`, and `sourceStamps` provide relationships previously
+flattened into a display name. Skill/command entrypoint bodies remain absent; only bounded SHA-256
+evidence is emitted.
+
+For a read-only project review, run:
+
+```bash
+ak system --deep
+ak x skills plan --project /absolute/path/to/project
+```
+
+The plan does not remove anything. Mutating upgrade/cleanup remediation is tracked separately in
+issue #200.
+
 ## The one rule
 
 > **`ak sync` converges to the choices already recorded in `kit.json`.** It updates the

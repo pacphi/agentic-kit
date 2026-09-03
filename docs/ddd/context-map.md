@@ -29,6 +29,8 @@ Native Evidence ----> Evidence Acquisition ----> Canonical Evidence
                                                           ^
 Project State (.claude-flow/*) ----> Project Intelligence-+
 Local filesystem + process table ---> Machine Footprint --+
+                                           |
+                                           +----> Maintenance (proposed control plane)
 Curated editorial content ----------> Component Directory-+
 
 Maintainer Administration is a separate, deliberately-egressing context.
@@ -51,6 +53,16 @@ representations. A managed companion consumes enabled-host identity but gains no
 routing, observability, or curated-memory authority.
 
 See [Integration management](integration-management.md).
+
+### Maintenance
+
+Maintenance is the proposed human-guided control plane for upgrades, stale/unsupported resource
+cleanup, lifecycle remediation, verification, rollback, and receipts. It consumes observed facts
+from Machine Footprint and ownership/lifecycle facts from Integration Management. It does not own
+those facts and cannot promote disk presence, age, or digest equality into mutation authority.
+
+Issue #198 delivers the read-only catalog and planning seam. Mutating behavior remains proposed in
+issue #200 and is specified in [Maintenance](maintenance.md).
 
 ### Hook configuration assurance
 
