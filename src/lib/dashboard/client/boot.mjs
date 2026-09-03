@@ -6,6 +6,7 @@ import { activeTab, initialLiveScope, setSystemView, setTab, syncHash, systemVie
 import { tickClock, wireIntelPicker } from './intelligence.mjs';
 import { pollStatus, schedulePoll, wirePoll, wireStripCollapse } from './poll.mjs';
 import { renderSystemFreshness, wireCatalogFilters, wireSystem } from './system-projects.mjs';
+import { wireMaintenance } from './system-maintenance.mjs';
 import { wireUsage } from './usage-orchestrators.mjs';
 import { loadUsage, setUsageView } from './usage.mjs';
 
@@ -23,6 +24,7 @@ import { loadUsage, setUsageView } from './usage.mjs';
   wireIntelPicker();
   wireAboutNudge();
   wireSystem();
+  wireMaintenance();
   wireStripCollapse();
   wireCatalogFilters();
   schedulePoll();

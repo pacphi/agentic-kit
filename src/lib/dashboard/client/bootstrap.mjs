@@ -2,6 +2,7 @@
 // reads it as text). See src/lib/dashboard/client/**'s eslint.config.mjs
 // override comment for why this directory isn't run through the node lib.
 import { render, syncIntelStream } from './intelligence.mjs';
+import { loadMaintenance } from './system-maintenance.mjs';
 import { loadSystem } from './system-projects.mjs';
 import { loadUsage } from './usage.mjs';
 
@@ -84,7 +85,7 @@ import { loadUsage } from './usage.mjs';
   var AREAS={about:"panel-about",overview:"area-overview",usage:"panel-usage",
     observability:"panel-observability",system:"area-system"};
   var OVERVIEW_VIEWS=["summary","hosts","providers","runtime","intel"];
-  var SYSTEM_VIEWS=["summary","advisory","sessions","storage","runtime","catalog","projects"];
+  var SYSTEM_VIEWS=["summary","advisory","sessions","storage","runtime","catalog","projects","maintenance"];
   export var ABOUT_SECTIONS=["hosts","engine","quality","kit","configured"];
   export var USAGE_NAV_VIEWS=["score","limits","findings","prompts","context","hooks","models","sessions"];
   export var VIEWS=USAGE_NAV_VIEWS.concat(["transcript"]);
@@ -154,10 +155,10 @@ import { loadUsage } from './usage.mjs';
     if(!skipHash&&activeTab==="overview")syncHash();
     syncIntelStream();
   }
-  // System's five sub-views ride the same secondary rail as Overview's, with
-  // the same persistence and the same aria wiring. Switching a view NEVER
-  // fetches: the whole payload is one document, so a sub-view is a filter on
-  // data already in hand, and a deep scan is only ever the Rescan button.
+  // System's sub-views ride the same secondary rail as Overview's, with the
+  // same persistence and aria wiring. Footprint views filter one shared
+  // /api/system document. Maintenance alone lazily reads its separate bounded
+  // context when selected; it never triggers the deep scan behind Rescan.
   export function setSystemView(id,focus,skipHash){
     if(SYSTEM_VIEWS.indexOf(id)<0)return;
     systemView=id;
@@ -168,6 +169,7 @@ import { loadUsage } from './usage.mjs';
       var panel=document.getElementById("panel-sys-"+view);
       if(button){button.setAttribute("aria-selected",on?"true":"false");button.tabIndex=on?0:-1;if(on&&focus)button.focus();}
       if(panel)panel.hidden=!on;
+      if(on&&view==="maintenance"&&activeTab==="system")loadMaintenance();
     }
     if(!skipHash&&activeTab==="system")syncHash();
   }

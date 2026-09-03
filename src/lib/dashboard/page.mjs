@@ -54,7 +54,7 @@ const INTEL_CSS = `
 // Layout: five primary areas — About, Overview, Usage, Observability, and
 // System — share one left-aligned secondary-navigation rail. Overview owns
 // Summary, Hosts & Routing, Providers, Runtime, and Intelligence; System owns
-// Summary, Advisory, Sessions, Storage, Runtime, Catalog, and Projects. Problems never hide:
+// Summary, Advisory, Sessions, Storage, Runtime, Catalog, Projects, and Maintenance. Problems never hide:
 // Overview's Summary aggregates attention and child tabs retain their scoped
 // badges.
 //
@@ -187,6 +187,7 @@ export function renderPage({ name, version }) {
         <button class="seg-btn" role="tab" data-system-view="runtime" aria-selected="false" aria-controls="panel-sys-runtime" type="button">Runtime</button>
         <button class="seg-btn" role="tab" data-system-view="catalog" aria-selected="false" aria-controls="panel-sys-catalog" type="button">Catalog</button>
         <button class="seg-btn" role="tab" data-system-view="projects" aria-selected="false" aria-controls="panel-sys-projects" type="button">Projects</button>
+        <button class="seg-btn" role="tab" data-system-view="maintenance" aria-selected="false" aria-controls="panel-sys-maintenance" type="button">Maintenance</button>
       </div>
       <div class="secondary-actions sy-freshness" id="system-freshness">
         <span class="sy-asof" id="sys-asof">deep scan &mdash; not run yet</span>
@@ -681,10 +682,10 @@ export function renderPage({ name, version }) {
 
 ${LIVE_HTML}
 
-  <!-- SYSTEM (ADR-0025). Five sub-views on the shared secondary rail; every
-       card's body is rendered by the client from GET /api/system. The deep tier
-       is NEVER scanned on open — the rail's Rescan button is the only trigger,
-       and the freshness label states how old the figures are. -->
+  <!-- SYSTEM (ADR-0025). Footprint views render from GET /api/system;
+       Maintenance lazily reads its own report. The deep tier is NEVER scanned
+       on open — the rail's Rescan button is the only trigger, and the freshness
+       label states how old the figures are. -->
   <section class="primary-area" id="area-system" role="tabpanel" aria-labelledby="tab-system" hidden>
     <section class="panel" id="panel-sys-summary" role="tabpanel" hidden>
       <header class="view-heading">
@@ -757,11 +758,11 @@ ${LIVE_HTML}
       </div>
     </section>
 
-    <!-- Advisory is its own area, not a card under a measurement. Everything
-         else in System reports what IS; this is the only place that suggests
-         what you might DO, and it still has no delete control and may never
-         gain one (ADR-0025 §6). Giving it a tab is what keeps that distinction
-         legible instead of burying it under a byte chart. -->
+    <!-- Advisory is its own area, not a card under a measurement. It remains
+         the storage-specific evidence source and has no delete control
+         (ADR-0025 §6); Maintenance is the separate cross-resource reporting
+         context. Keeping the source view intact prevents a recommendation from
+         masquerading as the observation that produced it. -->
     <section class="panel" id="panel-sys-advisory" role="tabpanel" hidden>
       <header class="view-heading">
         <span class="view-eyebrow">SYSTEM</span>
@@ -870,6 +871,48 @@ ${LIVE_HTML}
         <div class="sy-card">
           <div class="sy-head"><h3>Project footprints</h3></div>
           <div id="sys-projects"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-sys-maintenance" role="tabpanel" hidden>
+      <header class="view-heading">
+        <span class="view-eyebrow">SYSTEM</span>
+        <h2>Maintenance</h2>
+        <p>What needs attention, why it matters, and what Agentic Kit can change safely.
+          Findings stay separate from authority; nothing runs from this reporting view.</p>
+      </header>
+      <div class="sy-grid">
+        <div class="sy-card mt-card" id="sys-maintenance" aria-busy="false">
+          <div class="mt-banner unavailable" id="sys-maint-banner" role="status">
+            <b>Maintenance reporting not loaded</b><span>Open this view to inspect current findings.</span>
+          </div>
+          <dl class="mt-summary" id="sys-maint-summary" aria-label="Maintenance summary"></dl>
+          <div class="mt-buckets" id="sys-maint-buckets" role="group" aria-label="Finding state">
+            <button class="chipf on" type="button" data-maint-bucket="all" aria-pressed="true">All <span class="mono">0</span></button>
+            <button class="chipf" type="button" data-maint-bucket="updates-ready" aria-pressed="false">Updates ready <span class="mono">0</span></button>
+            <button class="chipf" type="button" data-maint-bucket="safe-cleanup" aria-pressed="false">Safe cleanup <span class="mono">0</span></button>
+            <button class="chipf" type="button" data-maint-bucket="needs-review" aria-pressed="false">Needs review <span class="mono">0</span></button>
+            <button class="chipf" type="button" data-maint-bucket="blocked" aria-pressed="false">Cannot automate <span class="mono">0</span></button>
+            <button class="chipf" type="button" data-maint-bucket="recent-changes" aria-pressed="false">Recent changes <span class="mono">0</span></button>
+          </div>
+          <div class="mt-toolbar">
+            <label class="sr-only" for="sys-maint-search">Find by name or owner</label>
+            <input id="sys-maint-search" type="search" placeholder="Find by name or owner" autocomplete="off" spellcheck="false">
+            <label class="sr-only" for="sys-maint-kind">Resource kind</label>
+            <select id="sys-maint-kind"><option value="">All resources</option></select>
+            <label class="sr-only" for="sys-maint-host">Host</label>
+            <select id="sys-maint-host"><option value="">All hosts</option></select>
+            <span class="mt-results" id="sys-maint-results" role="status" aria-live="polite" aria-atomic="true">Open Maintenance to load findings.</span>
+          </div>
+          <div class="mt-workbench">
+            <div class="mt-ledger" id="sys-maint-list" role="region" aria-label="Maintenance findings" tabindex="0">
+              <div class="mt-empty">Maintenance findings have not been loaded.</div>
+            </div>
+            <section class="mt-detail" id="sys-maint-detail" aria-label="Selected maintenance finding">
+              <div class="mt-detail-empty"><b>Select a finding</b><span>Its ownership, impact, evidence, and next step will appear here.</span></div>
+            </section>
+          </div>
         </div>
       </div>
     </section>

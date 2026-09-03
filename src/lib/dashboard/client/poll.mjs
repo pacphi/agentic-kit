@@ -4,6 +4,7 @@
 import { renderAbout } from './about.mjs';
 import { DASH_TOKEN_KEY, activeTab, authHeaders, hideGate, showGate, systemView } from './bootstrap.mjs';
 import { render, tickClock } from './intelligence.mjs';
+import { loadMaintenance, maintenanceBusy } from './system-maintenance.mjs';
 import { PROJ_SORT, loadSystem, renderSysProjects } from './system-projects.mjs';
 import { loadModelLifecycle, loadUsage } from './usage.mjs';
 
@@ -147,6 +148,7 @@ import { loadModelLifecycle, loadUsage } from './usage.mjs';
     // behind Rescan (?refresh=deep) — putting a multi-minute walk on a 30s
     // timer would be a different feature and a much worse one.
     if(activeTab==="system"&&systemView==="runtime"&&!systemBusy)jobs.push(loadSystem());
+    if(activeTab==="system"&&systemView==="maintenance"&&!maintenanceBusy)jobs.push(loadMaintenance(true));
     Promise.all(jobs).catch(function(){}).then(function(){
       inflight=false;
       if(btn)btn.classList.remove("spin");
@@ -209,4 +211,3 @@ import { loadModelLifecycle, loadUsage } from './usage.mjs';
       menu.hidden=true; if(ivl)ivl.setAttribute("aria-expanded","false");
     });
   }
-

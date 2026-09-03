@@ -273,7 +273,7 @@ const USAGE_VIEWS = [
   ['models', '#v-models'],
   ['sessions', '#v-sessions'],
 ];
-// Seven sub-views, in order. Asserting the list here means a merge would fail
+// Eight sub-views, in order. Asserting the list here means a merge would fail
 // loudly instead of quietly reducing the area. Advisory is deliberately its own
 // area rather than a card: it is the only part of System that suggests an
 // action, and everything else reports what is. Sessions owns the session-level
@@ -286,6 +286,7 @@ const SYSTEM_VIEWS = [
   ['runtime', '#panel-sys-runtime'],
   ['catalog', '#panel-sys-catalog'],
   ['projects', '#panel-sys-projects'],
+  ['maintenance', '#panel-sys-maintenance'],
 ];
 
 // /api/limits stub (ADR-0010): injected so the harness never spawns a real
@@ -645,6 +646,72 @@ const SYSTEM_STUB = {
   read: async () => JSON.parse(JSON.stringify(SYSTEM_PAYLOAD)),
   refreshDeep: async () => { systemDeepScans += 1; return { ok: true }; },
   scanState: () => ({ ...SYSTEM_PAYLOAD.scan }),
+};
+
+const MAINTENANCE_PAYLOAD = {
+  schemaVersion: 1,
+  mode: 'read-only',
+  capabilities: { plan: true, apply: false, undo: false },
+  asOf: new Date(Date.now() - 6 * 60_000).toISOString(),
+  freshness: { stale: false, complete: false },
+  summary: {
+    total: 4, updatesReady: 1, safeCleanup: 1, needsReview: 1, blocked: 1,
+    recentChanges: 0, incompleteSources: 1, actionable: 2,
+  },
+  findings: [{
+    id: 'plugin-update', bucket: 'updates-ready', statusLabel: 'Ready to apply',
+    headline: '0.2.0 → 0.3.1',
+    explanation: 'A compatible version is available from the same marketplace source.',
+    resource: {
+      kind: 'plugin', name: 'rust-optimizer', host: 'codex', scope: 'user',
+      providerRef: 'rust-optimizer@rust-optimizer',
+    },
+    owner: 'Codex plugin manager',
+    evidence: {
+      source: 'codex plugin list --json', authority: 'host-native',
+      asOf: new Date(Date.now() - 6 * 60_000).toISOString(), completeness: 'complete', health: 'healthy', reasons: [],
+    },
+    versions: { installed: '0.2.0', effective: '0.2.0', recommended: '0.3.1', producer: '0.2.0' },
+    impact: {
+      summary: 'The owning plugin and its contributed capabilities would change.',
+      capabilities: ['4 skills', '2 commands'], projects: ['agentic-kit', 'finima'],
+      preserved: ['standalone skill-creator'],
+    },
+    nextAction: { guidance: 'Review the provider-owned update plan.', command: 'ak maintain plan --finding plugin-update' },
+    action: { safetyClass: 'safe-automatic eligible', restartRequired: true, rollback: 'compensating reinstall of 0.2.0' },
+  }, {
+    id: 'cache-cleanup', bucket: 'safe-cleanup', statusLabel: 'Ready to apply',
+    headline: 'Owner-native cache cleanup is available',
+    explanation: 'This cache is reproducible and its owner reports a bounded cleanup operation.',
+    resource: { kind: 'storage', name: 'Codex plugin download cache', host: 'codex', scope: 'user', providerRef: 'codex' },
+    owner: 'Codex plugin manager',
+    evidence: { source: 'deep scan', authority: 'agentic-kit observation', completeness: 'complete', health: 'healthy', reasons: [] },
+    versions: {}, impact: { summary: 'Reproducible downloads would be removed and fetched again on demand.', preserved: ['installed plugins'] },
+    nextAction: 'Review the owner-native cleanup plan.', action: { safetyClass: 'safe-automatic eligible', rollback: 're-fetch' },
+  }, {
+    id: 'modified-skill', bucket: 'needs-review', statusLabel: 'Evidence incomplete',
+    headline: 'Content changed after projection',
+    explanation: '<img src=x onerror="globalThis.__maintXss=1"> is evidence text, not markup.',
+    resource: { kind: 'skill', name: 'skill-creator', host: 'codex', scope: 'user', providerRef: 'agentic-kit projection' },
+    owner: 'Ownership not proven',
+    evidence: {
+      source: 'bounded entrypoint digest', authority: 'local observation', completeness: 'partial', health: 'modified',
+      reasons: ['The current digest does not match the receipt.', 'Supporting files were not fully readable.'],
+    },
+    versions: { installed: 'modified', contentDigest: 'sha256:ui-fixture' },
+    impact: { summary: 'The skill is preserved while ownership is unresolved.', preserved: ['current modified content'] },
+    nextAction: 'Review the differences. No removal is recommended.', action: { safetyClass: 'approval-required' },
+  }, {
+    id: 'mcp-blocked', bucket: 'blocked', statusLabel: 'Cannot safely automate',
+    headline: 'No host-native removal provider',
+    explanation: 'Registration is observed, but the host does not expose a safe native lifecycle operation.',
+    resource: { kind: 'mcp-server', name: 'legacy-tools', host: 'opencode', scope: 'user', providerRef: 'opencode config' },
+    owner: 'OpenCode',
+    evidence: { source: 'host config', authority: 'configuration', completeness: 'complete', health: 'unsupported', reasons: [] },
+    versions: {}, impact: { summary: 'No automated change is proposed.', preserved: ['current registration'] },
+    nextAction: 'Use the provider documented workflow.', action: { safetyClass: 'upstream-required', reason: 'No safe provider is registered.' },
+  }],
+  receipts: [],
 };
 
 const LIVE_SNAPSHOT = {
@@ -1050,6 +1117,9 @@ async function main() {
       && r.failure()?.errorText === 'net::ERR_ABORTED') return;
     failedRequests.push(`${r.url()} — ${r.failure()?.errorText}`);
   });
+  await page.route(/\/api\/maintenance(?:\?|$)/, (route) => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify(MAINTENANCE_PAYLOAD),
+  }));
   await page.route(/\/api\/live\/playback\/(?:claude\/ui-review-session|codex\/ui-live-session)/, (route) => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({
@@ -1380,6 +1450,126 @@ async function main() {
       check(`System view "${view}" is free of rendering artifacts`, arts.length === 0,
         `found ${arts.join(', ')} in visible text`);
     }
+
+    // Maintenance is a reporting workbench, not a collection of action cards.
+    // The fixture advertises a plan capability deliberately: the browser must
+    // still refuse to invent Apply/Undo controls while this slice has no POST
+    // boundary or action capability exchange.
+    await page.click('[data-system-view="maintenance"]');
+    await page.waitForSelector('#sys-maint-list [data-maint-key]');
+    const maintenanceNav = await page.$$eval('#system-seg [data-system-view]', (buttons) => ({
+      ids: buttons.map((button) => button.dataset.systemView),
+      selected: buttons.filter((button) => button.getAttribute('aria-selected') === 'true').map((button) => button.dataset.systemView),
+      tabStops: buttons.filter((button) => button.tabIndex === 0).map((button) => button.dataset.systemView),
+    }));
+    check('Maintenance is the last System sub-menu and owns the one roving tab stop',
+      maintenanceNav.ids.at(-1) === 'maintenance'
+        && JSON.stringify(maintenanceNav.selected) === JSON.stringify(['maintenance'])
+        && JSON.stringify(maintenanceNav.tabStops) === JSON.stringify(['maintenance']),
+      `System navigation was ${JSON.stringify(maintenanceNav)}`);
+
+    const maintenanceReadOnly = await page.evaluate(() => ({
+      banner: document.getElementById('sys-maint-banner')?.innerText,
+      findings: document.querySelectorAll('#sys-maint-list [data-maint-key]').length,
+      checkboxes: document.querySelectorAll('#sys-maintenance input[type="checkbox"]').length,
+      actionControls: document.querySelectorAll('#sys-maintenance [data-maint-action]').length,
+      posts: document.querySelectorAll('#sys-maintenance form').length,
+      summary: document.getElementById('sys-maint-summary')?.innerText,
+    }));
+    check('Maintenance states the report-only boundary and exposes no fake mutation controls',
+      /Actions are not enabled/.test(String(maintenanceReadOnly.banner))
+        && /cannot change your machine/.test(String(maintenanceReadOnly.banner))
+        && maintenanceReadOnly.findings === 4
+        && maintenanceReadOnly.checkboxes === 0
+        && maintenanceReadOnly.actionControls === 0
+        && maintenanceReadOnly.posts === 0,
+      `Maintenance boundary was ${JSON.stringify(maintenanceReadOnly)}`);
+    check('Maintenance summarizes findings, action eligibility, incomplete evidence, and age without a hygiene score',
+      /4\s+findings/.test(String(maintenanceReadOnly.summary))
+        && /2\s+provider-actionable/.test(String(maintenanceReadOnly.summary))
+        && /1\s+incomplete sources/.test(String(maintenanceReadOnly.summary))
+        && /evidence age/.test(String(maintenanceReadOnly.summary))
+        && !/score/i.test(String(maintenanceReadOnly.summary)),
+      `Maintenance summary was ${JSON.stringify(maintenanceReadOnly.summary)}`);
+
+    const firstMaintenance = await page.$eval('#sys-maint-list [data-maint-key]', (button) => ({
+      expanded: button.getAttribute('aria-expanded'), current: button.getAttribute('aria-current'),
+      controls: button.getAttribute('aria-controls'), text: button.innerText,
+    }));
+    const firstMaintenanceDetail = await visibleText(page, '#sys-maint-detail');
+    check('the ledger selects one finding and explains ownership, versions, impact, preservation, and read-only next step',
+      firstMaintenance.expanded === 'true' && firstMaintenance.current === 'true'
+        && firstMaintenance.controls === 'sys-maint-detail'
+        && /rust-optimizer/.test(firstMaintenance.text)
+        && /Codex plugin manager/.test(firstMaintenanceDetail)
+        && /0\.2\.0/.test(firstMaintenanceDetail) && /0\.3\.1/.test(firstMaintenanceDetail)
+        && /standalone skill-creator/.test(firstMaintenanceDetail)
+        && /No action runs from this view/.test(firstMaintenanceDetail),
+      `first finding was ${JSON.stringify(firstMaintenance)}; detail read ${JSON.stringify(firstMaintenanceDetail)}`);
+
+    await page.click('#sys-maint-buckets [data-maint-bucket="needs-review"]');
+    const reviewMaintenance = await page.evaluate(() => ({
+      count: document.querySelectorAll('#sys-maint-list [data-maint-key]').length,
+      status: document.getElementById('sys-maint-results')?.textContent,
+      detail: document.getElementById('sys-maint-detail')?.innerText,
+      active: document.querySelector('[data-maint-bucket="needs-review"]')?.getAttribute('aria-pressed'),
+      xss: globalThis.__maintXss,
+    }));
+    check('finding-state filters are pressed buttons and announce the narrowed result count',
+      reviewMaintenance.count === 1 && reviewMaintenance.active === 'true'
+        && /Showing 1 finding/.test(String(reviewMaintenance.status)),
+      `filtered Maintenance was ${JSON.stringify(reviewMaintenance)}`);
+    check('partial evidence gives visible reasons and hostile evidence remains text',
+      /Evidence needs attention/.test(String(reviewMaintenance.detail))
+        && /current digest does not match/.test(String(reviewMaintenance.detail))
+        && /<img src=x onerror=/.test(String(reviewMaintenance.detail))
+        && reviewMaintenance.xss === undefined,
+      `partial finding rendered ${JSON.stringify(reviewMaintenance)}`);
+
+    await page.fill('#sys-maint-search', 'legacy-tools');
+    check('search composes with category filters instead of silently resetting them',
+      await page.$$eval('#sys-maint-list [data-maint-key]', (rows) => rows.length) === 0
+        && /No findings match these filters/.test(await visibleText(page, '#sys-maint-list')),
+      'a blocked MCP incorrectly survived the active Needs review filter');
+    await page.click('#sys-maint-buckets [data-maint-bucket="blocked"]');
+    const blockedMaintenance = await visibleText(page, '#sys-maintenance');
+    check('unsupported resources say why they cannot be automated and preserve current state',
+      /Cannot safely automate/.test(blockedMaintenance)
+        && /No host-native removal provider/.test(blockedMaintenance)
+        && /No automated change is proposed/.test(blockedMaintenance)
+        && /current registration/.test(blockedMaintenance),
+      `blocked finding read ${JSON.stringify(blockedMaintenance)}`);
+
+    await page.fill('#sys-maint-search', '');
+    await page.click('#sys-maint-buckets [data-maint-bucket="recent-changes"]');
+    check('empty receipt history is directional rather than a blank pane',
+      /No maintenance changes have receipts yet/.test(await visibleText(page, '#sys-maint-list')),
+      'empty Recent changes did not explain what was absent');
+    await page.click('#sys-maint-buckets [data-maint-bucket="all"]');
+    await page.focus('#sys-maint-list [data-maint-key]');
+    check('Maintenance rows and the overflow ledger retain visible keyboard focus',
+      await page.$eval('#sys-maint-list [data-maint-key]', (button) => {
+        const style = getComputedStyle(button);
+        return style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) >= 2;
+      }) && await page.getAttribute('#sys-maint-list', 'tabindex') === '0',
+      'the Maintenance ledger accepted keyboard focus without a visible indicator');
+    await shoot(page, 'system-maintenance-readonly');
+    await page.setViewportSize({ width: 560, height: 780 });
+    const maintenanceMobile = await page.evaluate(() => {
+      const ledger = document.getElementById('sys-maint-list')?.getBoundingClientRect();
+      const detail = document.getElementById('sys-maint-detail')?.getBoundingClientRect();
+      return {
+        columns: getComputedStyle(document.querySelector('.mt-workbench')).gridTemplateColumns,
+        detailBelow: !!ledger && !!detail && detail.top >= ledger.bottom - 1,
+        pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      };
+    });
+    check('Maintenance stacks ledger and detail without page overflow on a narrow screen',
+      maintenanceMobile.columns.trim().split(/\s+/).length === 1
+        && maintenanceMobile.detailBelow && maintenanceMobile.pageOverflow === false,
+      `narrow Maintenance layout was ${JSON.stringify(maintenanceMobile)}`);
+    await shoot(page, 'system-maintenance-mobile');
+    await page.setViewportSize({ width: 1440, height: 900 });
 
     // ── the fail-closed rule, where it is easiest to break (ADR-0023) ─────────
     // The catalog section has never been deep-scanned and one install figure was
