@@ -6,7 +6,9 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 
 function digestOf(presence) {
-  return presence?.digest?.status === 'measured' ? presence.digest.value : null;
+  return presence?.digest?.status === 'measured' && presence.digest.partial !== true
+    ? presence.digest.value
+    : null;
 }
 
 function normalizeReceipt(receipt) {
@@ -126,10 +128,21 @@ export function buildSkillMaintenancePlan({
   const artifacts = projectSkillArtifacts(catalog, projectPath, receiptByPath);
   artifacts.sort((a, b) => a.path.localeCompare(b.path));
   const gitByPath = gitProjectFacts(projectPath, artifacts, run);
+  const projectEvidence = catalog?.projects?.find((row) => path.resolve(row.project ?? '') === projectPath);
   for (const artifact of artifacts) {
     const relative = gitPath(projectPath, artifact.path);
     artifact.git = gitByPath.get(relative)
       ?? { repository: false, tracked: null, dirty: null, reason: 'artifact is outside project' };
+    if (artifact.safeToPrune && (catalog?.complete !== true
+        || projectEvidence?.complete !== true
+        || artifact.git.repository !== true
+        || artifact.git.dirty !== false
+        || artifact.git.tracked === null
+        || artifact.git.reason !== null)) {
+      artifact.classification = 'receipt-owned-evidence-incomplete';
+      artifact.recommendation = 'preserve-and-review';
+      artifact.safeToPrune = false;
+    }
   }
   const uniquePaths = [...new Set(artifacts.map((artifact) => artifact.path))];
   const prunePaths = [...new Set(artifacts.filter((artifact) => artifact.safeToPrune)
