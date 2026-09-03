@@ -103,7 +103,9 @@ test('run_project --dry-run announces the plan and touches neither home nor proj
 test('project init delegates without overlapping machine guidance, Codex, or skill registration', () => {
   assert.deepEqual(setup.RUFLO_PROJECT_INIT_ARGS, [
     'init', '--full', '--force', '--no-global', '--no-codex-detect', '--no-skills-sh',
+    '--format', 'json',
   ]);
+  assert.deepEqual(setup.RUFLO_PROJECT_INIT_ENV, { RUFLO_NO_SKILLS_SH: '1' });
 });
 
 test('project permission manifest omits AQE grants when AQE is disabled', () => {
@@ -482,7 +484,7 @@ test('--project forces project scope outside a git repo', async () => {
 
 test('every documented flag is declared in the parser options', () => {
   for (const flag of ['dry-run', 'yes', 'minimal', 'project', 'no-aqe', 'no-ruvnet-brain',
-    'no-security', 'codex', 'opencode', 'with-deja-vu', 'deja-vu-mode', 'no-deja-vu',
+    'no-agent-browser', 'no-security', 'codex', 'opencode', 'with-deja-vu', 'deja-vu-mode', 'no-deja-vu',
     'primary-host', 'reconfigure']) {
     assert.ok(flag in setup.options, `--${flag} is documented in help but not parseable`);
     assert.match(setup.help, new RegExp(`--${flag}\\b`), `--${flag} is parseable but undocumented`);

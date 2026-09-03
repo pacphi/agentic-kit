@@ -232,7 +232,7 @@ export function renderPage({ name, version }) {
           <div class="ab-relmap">
             <div class="ab-relbox"><b>Coding agents</b>Claude Code &middot; Codex &middot; OpenCode</div>
             <span class="ab-relarrow">&#8646;</span>
-            <div class="ab-relbox"><b>Engine + memory</b>ruflo &middot; agentdb</div>
+            <div class="ab-relbox"><b>Engine + memory</b>ruflo &middot; agent-browser &middot; agentdb</div>
             <span class="ab-relarrow">&#8646;</span>
             <div class="ab-relbox"><b>Quality &middot; Safety &middot; Knowledge</b>agentic-qe &middot; aidefence &middot; Brain</div>
             <span class="ab-relarrow">&#10554;</span>
@@ -698,6 +698,11 @@ ${LIVE_HTML}
         <div class="sy-liner" id="sys-kpis-note"></div>
         <div class="sy-card sy-band">
           <div id="sys-gauge"></div>
+        </div>
+        <div class="sy-card">
+          <div class="sy-head"><h3>Browser runtimes</h3><span class="n mono">dependency-owned · local checks only</span></div>
+          <div class="sy-liner">Install ownership, browser-payload readiness and cache cost. Refresh never launches a browser or runs a third-party doctor.</div>
+          <div id="sys-browser-runtimes"></div>
         </div>
         <div class="sy-card">
           <div class="sy-head">

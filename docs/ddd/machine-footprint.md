@@ -182,14 +182,23 @@ as a total would be the honest-degradation contract broken at the last mile.
 
 ### Install footprint
 
-One `HostInstallation` per managed tool (ruflo, agentic-qe, Claude Code, Codex, OpenCode,
+One `HostInstallation` per managed tool (ruflo, agent-browser, agentic-qe, Claude Code, Codex, OpenCode,
 agentic-kit itself, the brain KB), carrying the version and install method the kit's existing
 detection already knows (npm/mise/brew/self-managed), the resolved root path, tree bytes from
 the deep walk, and a native-addon inventory — including the *duplicate-builds* view (the same
-native module compiled into multiple trees), which is sprawl the user cannot see today. Shared
-caches (npx envs, browser binaries) are install-adjacent nodes with their own rows, not smeared
-into a tool's tree. The machine's free-space figure is the section's denominator, so "the
-install is X GB" always has a "of Y free" next to it.
+native module compiled into multiple trees), which is sprawl the user cannot see today.
+
+An `ObservedRuntimeInstallation` represents a dependency-owned executor the kit can inspect but
+does not manage; Vibium names Agentic QE as its update owner. Agent-browser is instead a managed
+Ruflo executor whose package and config ownership are receipt-backed under ADR-0043. Each browser
+row carries CLI presence plus a `BrowserPayloadReadiness` derived from the cache filesystem;
+Vibium is ready only when browser and driver payloads share a revision. No readiness check runs
+the executor, launches a browser, or downloads a payload.
+
+Shared caches (npx envs, Playwright, Puppeteer, agent-browser, and Vibium browser binaries) are
+install-adjacent nodes with their own rows, not smeared into a tool's tree. The machine's
+free-space figure is the section's denominator, so "the install is X GB" always has a "of Y
+free" next to it.
 
 Two of those roots were measured at the wrong place, and the corrections are recorded here
 because both changed a headline figure rather than a detail.
@@ -399,11 +408,12 @@ Deduplicated `CatalogItem`s across hosts — skills, agents, commands, plugins, 
 keyed by normalized name, each with a per-host presence matrix (which hosts carry it, from which
 surface it was observed). Counting is by manifest/directory-entry **names** on the host catalog
 surfaces Integration management already projects into; item file contents are not parsed beyond
-what naming requires. Scope is **user plus every project on disk**, not user plus the launching
-repo: a skill defined in a repository is as deployed as one in `~/.claude`, and the question this
-inventory answers is what the machine carries. Deduplication by `(kind, name)` means a name
-defined in five projects is still one row, so the inventory grows with distinct names rather than
-with project count.
+what naming requires. Scope is **user plus the launching repository plus every observed project
+still on disk**. The launching root is included explicitly because a fresh repository has no
+transcript yet; a skill defined in any observed repository is as deployed as one in `~/.claude`,
+and the question this inventory answers is what the machine carries. Deduplication by `(kind,
+name)` means a name defined in five projects is still one row, so the inventory grows with distinct
+names rather than with project count.
 
 The presence matrix carries two independent multi-select filters — by kind and by host — with every
 option selected at first paint, so the default remains the whole inventory. The host filter matches
@@ -603,6 +613,8 @@ normative and this table restates it for readers of this document.
 | Measurement | A value plus provenance: measured (with `asOf`), carried forward, or unknown-with-reason — unknown is never zero |
 | Partial measurement | A measured value known to be a lower bound because a contributing subtree was unreadable or capped; rendered as "≥ N" |
 | HostInstallation | One managed tool's install facts: version, install method, root, tree bytes, native addons |
+| ObservedRuntimeInstallation | A dependency-owned executor's observed CLI and payload facts, with `managed: false` and an explicit upstream update owner |
+| BrowserPayloadReadiness | Filesystem-derived browser payload status, revision, cache path, and reason; it never launches or installs the runtime |
 | RuntimeCensus | The ephemeral point-in-time table of live host processes, daemons, and machine denominators |
 | StorageNode | One node in the category → host → project → session breakdown: bytes + file count |
 | ReclaimableCandidate | An advisory row naming reclaimable space, its path, and its rationale — never an action |
@@ -612,7 +624,7 @@ normative and this table restates it for readers of this document.
 | Ever seen / on disk | `everSeen` is every project any host ever recorded a session in, deletions included; `onDisk` is the measurable subset. Different questions, never one number |
 | Unresolved project | A transcript directory whose project path neither a declared `cwd` nor a filesystem-verified decode can name. Reported as such, never given a fabricated path; it makes `everSeen` a lower bound |
 | Stack detection | Per-project `languages` (which carry lines) and `stack` — frameworks, SDKs, tools — which carry presence only, plus the unrecognized tail of extensions and dependency names the registry could not name |
-| CatalogItem | A deduplicated deployed artifact (skill, agent, command, plugin, MCP server) with a per-host presence matrix |
+| CatalogItem | A deduplicated deployed artifact (skill, agent, command, plugin, MCP server) with a per-host presence matrix; Codex project `.agents/skills` stays attributable separately from user/plugin surfaces |
 | ProjectFootprint | One project's size facts: approximate LOC by language, tree/`.git`/`node_modules` bytes, last activity, and an optional git-remote web link ("local only" when absent) |
 | Deep scan | The explicit, user-triggered, single-flight full measurement pass that produces a FootprintSnapshot |
 | Cheap tier | The per-request census + known-file stats + snapshot carry-forward served on every read |

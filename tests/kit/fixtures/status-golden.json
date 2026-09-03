@@ -72,6 +72,12 @@
     "fix": "setup/sync installs it (pinned to ruflo's bundled agentdb)"
   },
   {
+    "subsystem": "agent-browser",
+    "level": "info",
+    "message": "managed Ruflo browser executor disabled in kit.json",
+    "fix": null
+  },
+  {
     "subsystem": "mcp",
     "level": "warn",
     "message": "ruflo MCP not registered",

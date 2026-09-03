@@ -102,7 +102,7 @@ async function detectPackaged({ pkgRoot }) {
   }
 
   const { installedVersion, KIT_PKG } = await import('../lib/versions.mjs');
-  for (const [key, pkg] of [['ruflo', 'ruflo'], ['agentic-qe', 'agentic-qe']]) {
+  for (const [key, pkg] of [['ruflo', 'ruflo'], ['agent-browser', 'agent-browser'], ['agentic-qe', 'agentic-qe']]) {
     try {
       const version = installedVersion(pkg);
       states.set(key, version ? installed(version) : absent());

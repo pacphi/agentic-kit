@@ -146,6 +146,7 @@ export function fakeGlobalRoot(home, pkgs = {}) {
  *  selfDrift never reach the network (and never rewrite the file). */
 export function offlineKitConfig(extra = {}) {
   return {
+    agentBrowser: false, // avoid global installs/browser downloads in unrelated hermetic tests
     ruvnetBrain: false, // its drift probe hits the GitHub releases API
     versionCheck: {
       ttlHours: 24,

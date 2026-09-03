@@ -3,8 +3,8 @@
 // ok|degraded|failed|skipped; callers must not infer subsystem health from
 // mere on-disk presence after a failed operation. Ports of: ruflo-patch-native,
 // _ruflo_ensure_aidefence, _ruflo_aqe_ensure_native, _ruflo_aqe_ensure_ruvector_native,
-// the package-upgrade step (with the npm >=11.17 allow-scripts handling verified
-// on the 2026-07-14 upgrade), and the RVF quarantine.
+// the package-upgrade step (with explicit npm global lifecycle policy), and the
+// RVF quarantine.
 import fs from 'node:fs';
 import path from 'node:path';
 import { run } from './exec.mjs';
@@ -14,14 +14,7 @@ import { KIT_PKG } from './versions.mjs';
 import { scanRvf, quarantine } from './rvf.mjs';
 import { INSTALL_SPEC, INSTALL_ARGS, RELEASE_ASSET as RB_RELEASE_ASSET, NIGHTLY_LABEL as RB_NIGHTLY_LABEL, nightlyAgentPlist as rbNightlyPlist, present as rbPresent, latestRelease as rbLatestRelease, recordInstalledRelease as rbRecord } from './ruvnet-brain.mjs';
 import { PKG as ADB_PKG, present as adbPresent, coherence as adbCoherence } from './agentdb.mjs';
-
-// Packages whose install scripts must run for natives to build (npm >=11.17
-// blocks them by default). Curated on the live 3.28/3.12.2 upgrade.
-const ALLOW_SCRIPTS = [
-  'ruflo', 'agentic-qe', '@claude-flow/cli', 'better-sqlite3', 'hnswlib-node',
-  'agentdb', 'agentic-flow', 'argon2', 'onnxruntime-node', 'sharp', 'protobufjs',
-  '@google/genai', 'tldjs', 'vibium',
-].join(',');
+import { globalInstallArgs } from './npm-global-install.mjs';
 
 // NB: `--allow-scripts` is rejected for project-scoped installs (EALLOWSCRIPTS,
 // npm >=11.17) — it is a global-install flag only. Plain installs still get
@@ -162,7 +155,7 @@ export function healRvf(projectAqeDir) {
 
 /** Upgrade a global package to latest (with allow-scripts). */
 export async function upgradePackage(pkg) {
-  const r = await run('npm', ['install', '-g', `--allow-scripts=${ALLOW_SCRIPTS}`, `${pkg}@latest`],
+  const r = await run('npm', globalInstallArgs(`${pkg}@latest`),
     { timeout: 600_000 });
   return { ok: r.code === 0, detail: r.code === 0 ? 'upgraded' : r.stderr.split('\n').slice(-3).join(' ') };
 }
@@ -171,8 +164,8 @@ export async function upgradePackage(pkg) {
  *  replaces the kit's files on disk, so the new code applies from the next
  *  ak invocation — never mid-run. Pinning the exact version (not a dist-tag)
  *  installs precisely what the drift check saw. */
-export async function selfUpdate(version) {
-  const r = await run('npm', ['install', '-g', `${KIT_PKG}@${version}`], { timeout: 300_000 });
+export async function selfUpdate(version, { runner = run } = {}) {
+  const r = await runner('npm', globalInstallArgs(`${KIT_PKG}@${version}`), { timeout: 300_000 });
   return {
     ok: r.code === 0,
     detail: r.code === 0
@@ -278,7 +271,7 @@ export async function healAgentdb({
   }
   // Pin to ruflo's bundled version; fall back to latest only when unknown.
   const spec = c.target ? `${ADB_PKG}@${c.target}` : `${ADB_PKG}@latest`;
-  const r = await runner('npm', ['install', '-g', `--allow-scripts=${ALLOW_SCRIPTS}`, spec], { timeout: 600_000 });
+  const r = await runner('npm', globalInstallArgs(spec), { timeout: 600_000 });
   if (r.code !== 0) {
     return {
       ok: false, status: 'failed', usable: present(),

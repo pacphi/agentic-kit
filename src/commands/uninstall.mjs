@@ -20,6 +20,7 @@ import * as paths from '../lib/paths.mjs';
 import { ok, warn, fail, info } from '../lib/output.mjs';
 import { removeCodexStatusline } from '../lib/codex-statusline.mjs';
 import { modelInventoryPath, modelScopeKeyPath } from '../lib/model-inventory/store.mjs';
+import { removeManagedAgentBrowser, removeManagedAgentBrowserConfig } from '../lib/agent-browser.mjs';
 
 /** Prints one lifecycle-render.mjs report line at its own level — mirrors
  *  setup.mjs/sync.mjs's own printReportLine (N-2, Wave C security review
@@ -38,6 +39,7 @@ export const options = {
   'this-project': { type: 'boolean', default: false },
   'remove-ruflo': { type: 'boolean', default: false },
   'remove-aqe': { type: 'boolean', default: false },
+  'remove-agent-browser': { type: 'boolean', default: false },
   'remove-deja-vu': { type: 'boolean', default: false },
   'purge-deja-vu-data': { type: 'boolean', default: false },
   purge: { type: 'boolean', default: false },
@@ -57,9 +59,11 @@ Options:
   --this-project   also remove this project's patches (settings, .claude-flow)
   --remove-ruflo   uninstall the global ruflo package (confirmed)
   --remove-aqe     uninstall the global agentic-qe package (confirmed)
+  --remove-agent-browser  uninstall only a receipt-owned agent-browser package
   --remove-deja-vu uninstall the Kit-owned deja-vu package (confirmed)
   --purge-deja-vu-data delete only the derived deja-vu index (confirmed)
-  --purge          remove Kit footprint + ruflo/aqe; preserve deja-vu package/data
+  --purge          remove Kit footprint + ruflo/aqe and receipt-owned agent-browser;
+                   preserve all browser/session/profile data and deja-vu package/data
   --yes            skip confirmation prompts
   --dry-run        print what would be removed; change nothing
 
@@ -438,6 +442,37 @@ async function stepMcp(ctx) {
   ok(`MCP unregistered (deny rules cleaned: ${removed})`);
 }
 
+async function stepAgentBrowser(ctx) {
+  const removePackage = ctx.flags['remove-agent-browser'] || ctx.flags.purge;
+  if (ctx.dry) {
+    info(`[dry-run] remove receipt-owned agent-browser MCP config${removePackage ? ' and package' : ''}; preserve browser/session/profile data`);
+    return;
+  }
+  if (removePackage) {
+    const approved = await confirm(
+      'Remove the Kit-owned global agent-browser package for ALL projects (browser/session/profile data stays)?',
+      ctx.flags.yes,
+    );
+    if (!approved) {
+      info('kept agent-browser package');
+      const configOnly = removeManagedAgentBrowserConfig(ctx.cfg);
+      (configOnly.ok ? ok : warn)(`agent-browser: ${configOnly.detail}`);
+      if (!configOnly.ok) ctx.state.ownershipTeardownOk = false;
+      saveKitConfig(ctx.cfg);
+      return;
+    }
+    const removed = await removeManagedAgentBrowser(ctx.cfg);
+    (removed.ok ? ok : warn)(`agent-browser: ${removed.detail}`);
+    if (!removed.ok) ctx.state.ownershipTeardownOk = false;
+    saveKitConfig(ctx.cfg);
+    return;
+  }
+  const configOnly = removeManagedAgentBrowserConfig(ctx.cfg);
+  (configOnly.ok ? ok : warn)(`agent-browser: ${configOnly.detail}`);
+  if (!configOnly.ok) ctx.state.ownershipTeardownOk = false;
+  saveKitConfig(ctx.cfg);
+}
+
 // 4. legacy shell-kit remnants
 function stepLegacyShellKit(ctx) {
   for (const rc of ['.zshrc', '.bashrc'].map((f) => path.join(paths.home, f))) {
@@ -509,6 +544,7 @@ export const UNINSTALL_STEPS = [
   { id: 'opencode-agents-md', when: () => true, run: stepOpencodeAgentsMd },
   { id: 'deja-vu', when: () => true, run: stepDejaVu },
   { id: 'host-lifecycles', when: () => true, run: stepHostLifecycles },
+  { id: 'agent-browser', when: () => true, run: stepAgentBrowser },
   { id: 'purge-artifacts', when: (ctx) => ctx.flags.purge, run: stepPurgeArtifacts },
   {
     id: 'purge-kit-config',

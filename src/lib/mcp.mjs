@@ -9,6 +9,7 @@ import { rufloNodeModules, claudeUserMcpPath, claudeSettingsPath, repoRoot } fro
 import { run } from './exec.mjs';
 import { readJson, addDenyRules, removeDenyRules } from './settings.mjs';
 import { writeFileWithBackup } from './file-write.mjs';
+import { managedAgentBrowserEnv } from './agent-browser.mjs';
 
 /** Enumerate MCP tool names from the installed package's mcp-tools modules,
  *  grouped by name prefix (family). Returns Map<family, string[]>. */
@@ -31,16 +32,108 @@ export function toolFamilies() {
   return families;
 }
 
-/** Registration state from ~/.claude.json (user scope). */
-export function registrationStatus() {
-  const cfg = readJson(claudeUserMcpPath(), {});
-  const servers = cfg?.mcpServers ?? {};
+const CLAUDE_SCOPE_PRECEDENCE = Object.freeze(['local', 'project', 'user']);
+
+function claudeMcpRegistrations(servers, { scope, file }) {
+  return Object.entries(servers ?? {}).map(([name, definition]) => ({
+    name,
+    scope,
+    file,
+    command: typeof definition?.command === 'string' ? definition.command : null,
+    args: Array.isArray(definition?.args) ? definition.args : null,
+    env: definition?.env && typeof definition.env === 'object' ? definition.env : {},
+  }));
+}
+
+/** Spawn-free Claude MCP topology across the three documented scopes.
+ *
+ * `local` is Claude's machine-local entry for this project under
+ * ~/.claude.json.projects[root].mcpServers; `project` is the repository's
+ * .mcp.json; `user` is ~/.claude.json.mcpServers. The precedence is whole-entry
+ * local > project > user. Files remain host/user-owned: observation here never
+ * implies permission to rewrite a project or local registration. */
+export function claudeMcpTopology({
+  cwd = process.cwd(), home = os.homedir(), userConfigFile = null, projectConfigFile = null,
+} = {}) {
+  const root = path.resolve(repoRoot(cwd) ?? cwd);
+  const userFile = userConfigFile ?? path.join(home, '.claude.json');
+  const projectFile = projectConfigFile ?? path.join(root, '.mcp.json');
+  const userConfig = readJson(userFile, {}) ?? {};
+  const localProject = Object.entries(userConfig.projects ?? {}).find(([projectRoot]) =>
+    path.resolve(projectRoot) === root)?.[1] ?? {};
+  const projectConfig = readJson(projectFile, {}) ?? {};
+  const registrations = [
+    ...claudeMcpRegistrations(localProject.mcpServers, { scope: 'local', file: userFile }),
+    ...claudeMcpRegistrations(projectConfig.mcpServers, { scope: 'project', file: projectFile }),
+    ...claudeMcpRegistrations(userConfig.mcpServers, { scope: 'user', file: userFile }),
+  ];
+  const scopesFor = (name) => CLAUDE_SCOPE_PRECEDENCE
+    .filter((scope) => registrations.some((entry) => entry.name === name && entry.scope === scope));
+  const effectiveFor = (name) => registrations.find((entry) => entry.name === name) ?? null;
+  const claudeFlowScopes = scopesFor('claude-flow');
+  const legacyRufloScopes = scopesFor('ruflo');
   return {
-    claudeFlow: 'claude-flow' in servers,
-    legacyRuflo: 'ruflo' in servers,
-    denyCount: (readJson(claudeSettingsPath(), {})?.permissions?.deny ?? [])
+    root,
+    files: { user: userFile, project: projectFile },
+    registrations,
+    claudeFlowScopes,
+    legacyRufloScopes,
+    effective: {
+      claudeFlow: effectiveFor('claude-flow'),
+      legacyRuflo: effectiveFor('ruflo'),
+    },
+  };
+}
+
+/** Registration state across Claude's local/project/user scopes. Only a legacy
+ * USER registration is automatically migrated by register(); local and project
+ * files may be user/team-owned and are disclosed but preserved. */
+export function registrationStatus({
+  cwd = process.cwd(), home = os.homedir(), settingsFile = claudeSettingsPath(),
+  userConfigFile = null, projectConfigFile = null,
+} = {}) {
+  const topology = claudeMcpTopology({ cwd, home, userConfigFile, projectConfigFile });
+  const autoMigratableLegacyScopes = topology.legacyRufloScopes.filter((scope) => scope === 'user');
+  const preservedLegacyScopes = topology.legacyRufloScopes.filter((scope) => scope !== 'user');
+  return {
+    claudeFlow: topology.claudeFlowScopes.length > 0,
+    legacyRuflo: topology.legacyRufloScopes.length > 0,
+    claudeFlowScopes: topology.claudeFlowScopes,
+    legacyRufloScopes: topology.legacyRufloScopes,
+    effective: topology.effective,
+    autoMigratableLegacyScopes,
+    preservedLegacyScopes,
+    denyCount: (readJson(settingsFile, {})?.permissions?.deny ?? [])
       .filter((r) => r.startsWith('mcp__claude-flow__')).length,
   };
+}
+
+export function agentBrowserMcpConfigured(registration, enabled = true) {
+  if (!enabled) return true;
+  const expected = managedAgentBrowserEnv();
+  return Object.entries(expected).every(([key, value]) => registration?.env?.[key] === value);
+}
+
+const canonicalRufloRegistration = (entry) => entry?.command === 'ruflo'
+  && JSON.stringify(entry.args) === JSON.stringify(['mcp', 'start']);
+
+function replaceableRufloRegistration(entry) {
+  if (!canonicalRufloRegistration(entry) || entry.scope !== 'user') return false;
+  return Object.keys(entry.env ?? {}).every((key) => key === 'AGENT_BROWSER_CONFIG');
+}
+
+function mcpAddArgs(name, entry) {
+  const envArgs = Object.entries(entry.env ?? {}).flatMap(([key, value]) => ['-e', `${key}=${value}`]);
+  return ['mcp', 'add', name, '-s', 'user', ...envArgs, '--', entry.command, ...entry.args];
+}
+
+async function removeUserRegistration(entry, runner) {
+  const result = await runner('claude', ['mcp', 'remove', entry.name, '-s', 'user']);
+  return result.code === 0;
+}
+
+async function restoreRegistrations(entries, runner) {
+  for (const entry of entries) await runner('claude', mcpAddArgs(entry.name, entry));
 }
 
 /** Is the standalone ruvector MCP server registered at user scope? Spawn-free
@@ -217,10 +310,33 @@ export function rufloCodexMcpStatus(cfg, { home = os.homedir() } = {}) {
   };
 }
 
-export async function register() {
-  await run('claude', ['mcp', 'remove', 'ruflo', '-s', 'user']); // migrate legacy key
-  const r = await run('claude', ['mcp', 'add', 'claude-flow', '-s', 'user', '--', 'ruflo', 'mcp', 'start']);
-  return r.code === 0;
+export async function register(cfg = { agentBrowser: true }, {
+  runner = run, inspect = claudeMcpTopology,
+} = {}) {
+  const desired = {
+    command: 'ruflo', args: ['mcp', 'start'],
+    env: managedAgentBrowserEnv({ enabled: cfg?.agentBrowser !== false }),
+  };
+  const userEntries = inspect().registrations.filter((entry) => entry.scope === 'user');
+  const current = userEntries.find((entry) => entry.name === 'claude-flow');
+  if (current && !replaceableRufloRegistration(current)) return false;
+  const legacy = userEntries.find((entry) => entry.name === 'ruflo');
+  const removableLegacy = legacy && replaceableRufloRegistration(legacy) ? legacy : null;
+  const alreadyDesired = current && canonicalRufloRegistration(current)
+    && JSON.stringify(current.env ?? {}) === JSON.stringify(desired.env);
+  const removed = [];
+  for (const entry of [removableLegacy, alreadyDesired ? null : current].filter(Boolean)) {
+    if (!await removeUserRegistration(entry, runner)) {
+      await restoreRegistrations(removed, runner);
+      return false;
+    }
+    removed.push(entry);
+  }
+  if (alreadyDesired) return true;
+  const added = await runner('claude', mcpAddArgs('claude-flow', desired));
+  if (added.code === 0) return true;
+  await restoreRegistrations(removed, runner);
+  return false;
 }
 
 export async function unregister() {

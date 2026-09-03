@@ -12,7 +12,7 @@ import * as heal from '../lib/heal.mjs';
 import { fixStatusline } from '../lib/statusline.mjs';
 import { reconcileGuidance } from '../lib/blocks.mjs';
 import { captureProjectGuidance, reconcileProjectGuidance } from '../lib/project-guidance.mjs';
-import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
+import { register as mcpRegister, applyExclusions, registrationStatus, agentBrowserMcpConfigured } from '../lib/mcp.mjs';
 import { reconcileOpencodeGuidance } from '../lib/opencode.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
 import { hostsWithLifecycle, lifecycleAdapterFor, lifecycleExecutionEnabled, detectionBinFor } from '../lib/adapters/lifecycle-registry.mjs';
@@ -25,6 +25,7 @@ import { HOSTS, hostInstallState, installHost, migrateRetiredRoutesInConfig, pri
 import { installedVersion } from '../lib/versions.mjs';
 import * as rb from '../lib/ruvnet-brain.mjs';
 import * as adb from '../lib/agentdb.mjs';
+import { ensureAgentBrowser } from '../lib/agent-browser.mjs';
 import { readJson, writeJsonWithBackup } from '../lib/settings.mjs';
 import { withDb } from '../lib/sqlite.mjs';
 import { findMemoryEntry } from '../lib/project-memory.mjs';
@@ -55,6 +56,7 @@ export const options = {
   minimal: { type: 'boolean', default: false },
   project: { type: 'boolean', default: false },
   'no-aqe': { type: 'boolean', default: false },
+  'no-agent-browser': { type: 'boolean', default: false },
   'no-ruvnet-brain': { type: 'boolean', default: false },
   'no-security': { type: 'boolean', default: false },
   codex: { type: 'boolean', default: false },
@@ -81,6 +83,7 @@ Options:
   --project        force project setup in cwd even without .git; same mutations
   --minimal        machine scope only; skip project setup
   --no-aqe         skip agentic-qe install + configuration
+  --no-agent-browser  skip the managed Ruflo browser executor
   --no-ruvnet-brain  skip the RuvNet Brain (~2 GB offline KB) setup step
   --no-security    skip the security-surface verification
   --codex          enable + install the OpenAI Codex host during setup (dual-mode;
@@ -289,6 +292,17 @@ export function removeUndisclosedPermissions(file, before, authorized) {
 /** Step 1: global packages (ruflo/agentic-qe/agentdb/ruvnet-brain). Returns
  *  false only when the mandatory ruflo install itself fails. */
 async function installMachinePackages(cfg, flags) {
+  // Ruflo's published browser package tries to install agent-browser itself
+  // when the CLI is absent, using @latest. Pre-converge the exact compatible
+  // release so Ruflo never becomes a competing global-package installer.
+  if (cfg.agentBrowser !== false) {
+    info('ensuring Ruflo-compatible agent-browser executor…');
+    const browser = await ensureAgentBrowser(cfg);
+    reportOutcome('agent-browser', browser);
+    if (!browser.ok && (!('usable' in browser) || !browser.usable)) {
+      warn('Ruflo browser tools will remain degraded; core orchestration can continue');
+    }
+  }
   if (!installedVersion('ruflo')) {
     info('installing ruflo globally (native build scripts allowed)…');
     const r = await heal.upgradePackage('ruflo');
@@ -429,7 +443,7 @@ async function printUndetectedHostHints(cfg) {
 
 export async function run_machine({ flags, pkgRoot, cfg }) {
   heading('machine setup');
-  if (flags['dry-run']) { info('dry-run: would ensure packages (incl. ruvnet-brain), deploy skill (blocks + MCP land in the final pass)'); return true; }
+  if (flags['dry-run']) { info('dry-run: would ensure packages (incl. agent-browser and ruvnet-brain), deploy skill (blocks + MCP land in the final pass)'); return true; }
 
   if (!(await installMachinePackages(cfg, flags))) return false;
   await healMachineSecuritySurface(cfg);
@@ -448,15 +462,24 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
 export const RUFLO_PROJECT_INIT_ARGS = Object.freeze([
   'init', '--full', '--force',
   // Agentic-kit owns machine guidance and Codex host selection. These Ruflo
-  // escape hatches prevent a project init from creating overlapping surfaces.
+  // escape hatches declare that boundary. --format json is also required on
+  // Ruflo 3.38.21 because its hyphenated boolean flags are registered but not
+  // observed by the init handler; scripted mode independently suppresses the
+  // two optional projections. The env is the second, documented skills.sh
+  // guard and keeps the boundary explicit when upstream fixes flag parsing.
   '--no-global', '--no-codex-detect', '--no-skills-sh',
+  '--format', 'json',
 ]);
+
+export const RUFLO_PROJECT_INIT_ENV = Object.freeze({ RUFLO_NO_SKILLS_SH: '1' });
 
 /** Step 1: initialize Ruflo project assets without overlapping agentic-kit's
  *  machine guidance, Codex adapter, or explicit skill projections. The caller
  *  restores/reconciles project guidance from its pre-init snapshot. */
 async function rufloProjectInit(root, permCtx) {
-  const init = await runCmd('ruflo', [...RUFLO_PROJECT_INIT_ARGS], { cwd: root, timeout: 300_000 });
+  const init = await runCmd('ruflo', [...RUFLO_PROJECT_INIT_ARGS], {
+    cwd: root, timeout: 300_000, env: RUFLO_PROJECT_INIT_ENV,
+  });
   (init.code === 0 ? ok : fail)('ruflo init --full');
   if (init.code !== 0) return false;
   const rufloUnexpected = removeUndisclosedPermissions(
@@ -759,9 +782,14 @@ async function finalizeSetupGuidanceAndMcp(cfg, pkgRoot, flags) {
   for (const t of await reconcileGuidance({ cwd: process.cwd(), cfg, pkgRoot, context: guidanceContext(cfg) })) {
     if (t.name === 'claude' || t.changed) ok(`blocks(${t.label}): ${t.changed || 'in sync'}`);
   }
-  const wantMcp = cfg.mcp.register && (flags.reconfigure || !(readJson(paths.claudeUserMcpPath(), {})?.mcpServers?.['claude-flow']));
+  const existingMcp = registrationStatus();
+  const wantMcp = cfg.mcp.register && (
+    flags.reconfigure
+    || !existingMcp.claudeFlow
+    || !agentBrowserMcpConfigured(existingMcp.effective.claudeFlow, cfg.agentBrowser !== false)
+  );
   if (wantMcp && await ask('Register the ruflo MCP server at user scope (schemas load on demand)?', true, flags.yes)) {
-    if (await mcpRegister()) {
+    if (await mcpRegister(cfg)) {
       const { denied } = applyExclusions(cfg.mcp.excludeFamilies ?? []);
       ok(`MCP registered${denied ? ` (${denied} tool(s) denied per kit.json)` : ''} — exclude families anytime: ak x mcp pick`);
     } else warn('claude mcp add failed — run: ak x mcp pick');
@@ -776,6 +804,7 @@ export async function run({ flags, pkgRoot, confirm = ask, dejaVuLifecycle = DEF
   }
   const cfg = loadKitConfig();
   if (flags['no-aqe']) cfg.aqe = false;
+  if (flags['no-agent-browser']) cfg.agentBrowser = false;
   if (flags['no-ruvnet-brain']) cfg.ruvnetBrain = false;
   if (flags['no-security']) cfg.security = false;
 

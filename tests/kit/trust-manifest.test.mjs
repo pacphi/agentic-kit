@@ -20,6 +20,18 @@ test('every host adapter must declare an explicit setup trust posture', () => {
   } })), /host\.trust\.changes\[0\]\.features must be one of/);
 });
 
+test('managed browser disclosure does not imply a host approval-policy change', () => {
+  const manifest = setupTrustManifest({
+    agentBrowser: true,
+    integrations: { hosts: {}, tools: {} },
+  }, { hosts: [] });
+  const browser = manifest.find((group) => group.componentId === 'agent-browser');
+  assert.ok(browser);
+  const rendered = trustManifestLines([browser]).join('\n');
+  assert.match(rendered, /managed component changes disclosed; host approval\/sandbox policy unchanged/);
+  assert.doesNotMatch(rendered, /receives the listed grants/);
+});
+
 test('deja-vu setup disclosure is a companion group with exact v0.19 boundaries', () => {
   const cfg = {
     integrations: {
@@ -31,7 +43,8 @@ test('deja-vu setup disclosure is a companion group with exact v0.19 boundaries'
     facts: { install: { version: null } },
     plan: { operations: [{ kind: 'package-install', version: '0.19.0' }] },
   };
-  const companion = setupTrustManifest(cfg, { hosts: [], companionPreflight: preflight })[0];
+  const companion = setupTrustManifest(cfg, { hosts: [], companionPreflight: preflight })
+    .find((group) => group.companionId === 'deja-vu');
   assert.equal(companion.companionId, 'deja-vu');
   assert.equal(companion.hostId, undefined, 'managed companion must not masquerade as a host');
   assert.equal(companion.approvalPolicy, 'explicit-opt-in');
@@ -77,7 +90,7 @@ test('deja-vu trust observes but never adopts a compatible external npm install'
       plan: { operations: [] },
     },
   });
-  const packageFact = manifest[0].changes[0];
+  const packageFact = manifest.find((group) => group.companionId === 'deja-vu').changes[0];
   assert.equal(packageFact.kind, 'npm-package-observation');
   assert.equal(packageFact.owner, 'user/external');
   assert.match(packageFact.effect, /without adopting, updating, or removing/);
@@ -96,7 +109,8 @@ test('deja-vu mode changes disclose the exact receipt-owned prior target removal
       plan: { operations: [{ kind: 'target-remove', host: 'claude', mode: 'auto' }] },
     },
   });
-  const removal = manifest[0].changes.find((change) => change.kind === 'companion-target-removal');
+  const removal = manifest.find((group) => group.companionId === 'deja-vu').changes
+    .find((change) => change.kind === 'companion-target-removal');
   assert.equal(removal.value, 'claude-auto');
   assert.match(removal.effect, /receipt-owned prior claude wiring/);
 });
@@ -141,7 +155,7 @@ test('a future enabled host joins setup disclosure without a setup command branc
     },
   };
   const manifest = setupTrustManifest({
-    integrations: { hosts: { grok: true } }, aqe: true, ruvnetBrain: true,
+    agentBrowser: false, integrations: { hosts: { grok: true } }, aqe: true, ruvnetBrain: true,
   }, { hosts: [future] });
   assert.equal(manifest.length, 1);
   assert.equal(manifest[0].hostId, 'grok');

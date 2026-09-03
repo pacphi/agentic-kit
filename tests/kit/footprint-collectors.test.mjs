@@ -27,7 +27,10 @@ import {
 } from '../../src/lib/footprint/projects.mjs';
 import { collectCatalog, tomlTableNames } from '../../src/lib/footprint/catalog.mjs';
 import { collectConsumers } from '../../src/lib/footprint/consumers.mjs';
-import { npmPackageRoot, managedTools } from '../../src/lib/footprint/install.mjs';
+import {
+  npmPackageRoot, managedTools, observedRuntimeTools, sharedCacheRoots,
+  browserPayloadReadiness,
+} from '../../src/lib/footprint/install.mjs';
 import { MANAGED_COMPANION_REGISTRY } from '../../src/lib/adapters/index.mjs';
 
 const DAY = 86_400_000;
@@ -900,6 +903,26 @@ test('catalog dedups by normalized name and keeps a per-host presence matrix', (
   assert.deepEqual(result.degraded, []);
 });
 
+test('catalog includes project-scoped Codex skills from .agents/skills', (t) => {
+  const fixtureRoots = catalogFixture(t);
+  const { root, ...roots } = fixtureRoots;
+  const project = path.join(root, 'project');
+  write(path.join(project, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+  write(path.join(project, '.agents', 'skills', 'project-only', 'SKILL.md'),
+    '---\nname: project-only\n---\nSECRET BODY\n');
+
+  const result = collectCatalog({
+    ...roots, cwd: project, projects: [], now: () => 1_700_000_000_000,
+    includePluginSurfaces: false, fsImpl: fixtureFs(root),
+  });
+
+  const skill = result.items.find((item) => item.kind === 'skill' && item.name === 'project-only');
+  assert.deepEqual(skill?.hosts, ['codex']);
+  assert.equal(skill?.presence[0]?.surface, `codex-project-skills:${project}`);
+  assert.equal(result.perHost.codex.skill.value, 2);
+  assert.equal(result.surfaces.find((surface) => surface.id === `codex-project-skills:${project}`)?.count, 1);
+});
+
 test('catalog counting reads names only — item bodies are never opened', (t) => {
   const fixtureRoots = catalogFixture(t);
   const { root, ...roots } = fixtureRoots;
@@ -1177,4 +1200,64 @@ test('managedTools derives npm-only companion footprints from the companion regi
   assert.doesNotMatch(JSON.stringify(dejaVu),
     /\.cache[/\\]deja|\.claude|\.codex|\.jsonl\b|index\.db\b/,
     'the footprint measures the npm tree, never deja-vu data or source histories');
+});
+
+test('agent-browser is Kit-managed while Vibium remains an observed AQE-owned runtime', () => {
+  const globalRootDir = '/opt/npm/global/node_modules';
+  assert.deepEqual(observedRuntimeTools({ globalRootDir }), [
+    {
+      id: 'vibium', label: 'Vibium', pkg: 'vibium', bin: 'vibium', kind: 'npm',
+      root: path.join(globalRootDir, 'vibium'), managed: false, updateOwner: 'agentic-qe',
+    },
+  ]);
+  const managed = managedTools({ globalRootDir }).find((tool) => tool.id === 'agent-browser');
+  assert.deepEqual(managed, {
+    id: 'agent-browser', label: 'agent-browser', pkg: 'agent-browser', bin: 'agent-browser',
+    kind: 'npm', root: path.join(globalRootDir, 'agent-browser'), updateOwner: 'agentic-kit',
+    consumer: 'ruflo', upstreamOwner: 'vercel-labs',
+  });
+});
+
+test('browser cache roots honor the two upstream platform contracts without running either CLI', () => {
+  const mac = sharedCacheRoots({ env: {}, platform: 'darwin', fsImpl: fs });
+  assert.equal(mac.find((row) => row.id === 'agent-browser')?.path,
+    path.join(os.homedir(), '.agent-browser', 'browsers'));
+  assert.equal(mac.find((row) => row.id === 'vibium')?.path,
+    path.join(os.homedir(), 'Library', 'Caches', 'vibium'));
+
+  const linux = sharedCacheRoots({
+    env: { XDG_CACHE_HOME: '/cache', VIBIUM_CACHE_DIR: '/vibium-override' },
+    platform: 'linux', fsImpl: fs,
+  });
+  assert.equal(linux.find((row) => row.id === 'vibium')?.path, '/vibium-override');
+});
+
+test('browser payload readiness is filesystem-only and Vibium requires a same-revision pair', (t) => {
+  const root = fixture(t, 'browser-readiness');
+  const fsImpl = fixtureFs(root);
+  const agentCache = path.join(root, 'agent-browser');
+  const vibiumCache = path.join(root, 'vibium');
+  write(path.join(agentCache, 'chrome-152.0.1', 'chrome-linux64', 'chrome'), 'bin');
+  write(path.join(vibiumCache, 'chrome-for-testing', '151.0.1', 'chrome'), 'bin');
+  write(path.join(vibiumCache, 'chrome-for-testing', '152.0.1', 'chromedriver'), 'driver');
+
+  const agent = browserPayloadReadiness({
+    runtime: 'agent-browser', path: agentCache,
+  }, { platform: 'linux', fsImpl });
+  assert.equal(agent.status, 'ready');
+  assert.equal(agent.revision, '152.0.1');
+
+  const incomplete = browserPayloadReadiness({
+    runtime: 'vibium', path: vibiumCache,
+  }, { platform: 'linux', fsImpl });
+  assert.equal(incomplete.status, 'incomplete');
+  assert.match(incomplete.reason, /both Chrome and chromedriver/);
+
+  write(path.join(vibiumCache, 'chrome-for-testing', '152.0.1', 'chrome'), 'bin');
+  const ready = browserPayloadReadiness({
+    runtime: 'vibium', path: vibiumCache,
+  }, { platform: 'linux', fsImpl });
+  assert.equal(ready.status, 'ready');
+  assert.equal(ready.revision, '152.0.1');
+  assert.match(ready.driverPath, /chromedriver$/);
 });

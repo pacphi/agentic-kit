@@ -4,6 +4,7 @@
 import { HOST_REGISTRY } from './adapters/index.mjs';
 import { managedCompanionFor } from './adapters/companion-registry.mjs';
 import { DEJA_VU_TARGETS } from './deja-vu.mjs';
+import { targetAgentBrowserVersion } from './agent-browser.mjs';
 
 const DEJA_VU = managedCompanionFor('deja-vu');
 const AUTO_EVENTS = Object.freeze({
@@ -130,6 +131,28 @@ export function dejaVuSetupTrustManifest(cfg, preflight) {
 export function setupTrustManifest(cfg, { companionPreflight, ...options } = {}) {
   return [
     ...trustManifestForOperation(cfg, { ...options, operation: 'setup' }),
+    ...(cfg?.agentBrowser === false ? [] : [{
+      componentId: 'agent-browser',
+      label: 'Managed Ruflo browser executor',
+      approvalPolicy: 'managed',
+      changes: [
+        {
+          id: 'agent-browser-package', kind: 'npm-package', scope: 'global', owner: 'agentic-kit',
+          value: `agent-browser@${targetAgentBrowserVersion() ?? 'unsupported'}`,
+          effect: 'install the exact Ruflo-compatible native CLI with its reviewed postinstall and verify the package-owned executable',
+        },
+        {
+          id: 'agent-browser-config', kind: 'runtime-config', scope: 'user', owner: 'agentic-kit',
+          value: '~/.config/agentic-kit/agent-browser.json',
+          effect: 'give only managed Ruflo MCP children a trusted headless config, bypassing repository config discovery',
+        },
+        {
+          id: 'agent-browser-payload', kind: 'browser-download', scope: 'user', owner: 'agent-browser',
+          value: '~/.agent-browser/browsers (only when no local Chrome is available)',
+          effect: 'download Chrome for Testing without privileged --with-deps; preserve browser/session/profile data on uninstall',
+        },
+      ],
+    }]),
     ...dejaVuSetupTrustManifest(cfg, companionPreflight),
   ];
 }
@@ -172,7 +195,9 @@ export function trustManifestLines(manifest) {
       ? 'approval/sandbox policy unchanged'
       : group.approvalPolicy === 'explicit-opt-in'
         ? 'explicit companion consent required; host approval/sandbox policy unchanged'
-        : 'approval policy receives the listed grants';
+        : group.componentId
+          ? 'managed component changes disclosed; host approval/sandbox policy unchanged'
+          : 'approval policy receives the listed grants';
     return [
       `${group.label} — ${posture}`,
       ...group.changes.map((change) => (

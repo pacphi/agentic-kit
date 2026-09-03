@@ -33,6 +33,7 @@ import { sourceHostIcon } from './usage.mjs';
     "hosts.codex":{host:"codex"},
     "hosts.opencode":{host:"opencode"},
     "ruflo":{versions:"ruflo"},
+    "agent-browser":{subs:["agent-browser"]},
     "agentdb":{subs:["agentdb"]},
     "deja-vu":{subs:["deja-vu"]},
     "agentic-qe":{subs:["aqe"],versions:"agentic-qe"},
@@ -205,4 +206,3 @@ import { sourceHostIcon } from './usage.mjs';
     var x=document.getElementById("about-nudge-x");
     if(x)x.addEventListener("click",dismissAboutNudge);
   }
-

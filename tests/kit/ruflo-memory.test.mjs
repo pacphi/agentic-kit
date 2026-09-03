@@ -19,11 +19,14 @@ test('every host launch resolves one absolute memory pin from the repository roo
       KEEP: 'yes',
       CLAUDE_FLOW_DB_PATH: path.join(canonical, '.swarm', 'memory.db'),
     });
-    const launch = rufloMcpLaunch(nested, { KEEP: 'yes' });
+    const launch = rufloMcpLaunch(nested, { KEEP: 'yes' }, { cfg: { agentBrowser: false } });
     assert.deepEqual({ command: launch.command, args: launch.args, cwd: launch.cwd }, {
       command: 'ruflo', args: ['mcp', 'start'], cwd: canonical,
     });
     assert.equal(launch.env.CLAUDE_FLOW_DB_PATH, path.join(canonical, '.swarm', 'memory.db'));
+    assert.equal(launch.env.AGENT_BROWSER_CONFIG, undefined);
+    const browserLaunch = rufloMcpLaunch(nested, { KEEP: 'yes' }, { cfg: { agentBrowser: true } });
+    assert.ok(path.isAbsolute(browserLaunch.env.AGENT_BROWSER_CONFIG));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

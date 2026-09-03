@@ -48,6 +48,7 @@ import { CURRENT_INTEGRATIONS_VERSION } from './adapters/config.mjs';
 import * as paths from './paths.mjs';
 import { deepEqual, hasReceiptValue } from './opencode-receipts.mjs';
 import { catalogSource, skillPathsFor } from './opencode-agents.mjs';
+import { managedAgentBrowserEnv } from './agent-browser.mjs';
 
 export const opencodeOwnership = (cfg) => cfg?.integrations?.ownership?.opencode ?? {};
 export function mutableOpencodeOwnership(cfg) {
@@ -118,9 +119,11 @@ export function mcpCommandFor({ binPresent, nestedPath }) {
  *  (bin on PATH → nested mcp-server.js → `ruflo mcp start`). Agentic QE is
  *  included by default because machine setup installs it; `--no-aqe` disables
  *  that projection. ruvnet-brain is included only when its shim is on disk.
- *  @param {{ brainShim?: string, nestedPath?: string, includeAqe?: boolean }} [opts] */
+ *  @param {{ brainShim?: string, nestedPath?: string, includeAqe?: boolean,
+ *            agentBrowserEnabled?: boolean }} [opts] */
 export async function mcpEntriesFor({
   brainShim = brainShimPath(), nestedPath = nestedMcpServerPath(), includeAqe = true,
+  agentBrowserEnabled = true,
 } = {}) {
   const entries = {
     'claude-flow': {
@@ -128,7 +131,10 @@ export async function mcpEntriesFor({
       command: mcpCommandFor({ binPresent: await have('claude-flow-mcp'), nestedPath }),
       enabled: true,
       timeout: 30000,
-      environment: { ...RUFLO_MCP_ENV },
+      environment: {
+        ...RUFLO_MCP_ENV,
+        ...managedAgentBrowserEnv({ enabled: agentBrowserEnabled }),
+      },
     },
   };
   if (includeAqe) {
@@ -246,7 +252,9 @@ export async function opencodeConverged(cfg, { configFile = paths.opencodeConfig
     };
   }
   const doc = readJsonStrict(configFile).doc;
-  const entries = await mcpEntriesFor({ brainShim, includeAqe: cfg.aqe !== false });
+  const entries = await mcpEntriesFor({
+    brainShim, includeAqe: cfg.aqe !== false, agentBrowserEnabled: cfg.agentBrowser !== false,
+  });
   const managed = normalizeManaged(opencodeOwnership(cfg).managed);
   const ownedEntries = Object.fromEntries(Object.entries(entries).filter(
     ([name]) => managed.mcp[name]?.written != null,
@@ -519,7 +527,9 @@ export async function applyOpencode(cfg, { dryRun = false, configFile = paths.op
       detail: `${configFile} is not plain JSON (JSONC comments?) — refusing to touch it; merge manually`,
     };
   }
-  const entries = await mcpEntriesFor({ brainShim, includeAqe: cfg.aqe !== false });
+  const entries = await mcpEntriesFor({
+    brainShim, includeAqe: cfg.aqe !== false, agentBrowserEnabled: cfg.agentBrowser !== false,
+  });
   const source = catalogSource({ override: opencodeOwnership(cfg).catalogDir });
   const skillPaths = skillPathsFor(source);
   const prevManaged = normalizeManaged(opencodeOwnership(cfg).managed);
@@ -690,4 +700,3 @@ export function undoOpencode(cfg, { configFile = paths.opencodeConfigPath() } = 
   ].filter(Boolean).join(' — ');
   return { ok: true, changed, detail };
 }
-

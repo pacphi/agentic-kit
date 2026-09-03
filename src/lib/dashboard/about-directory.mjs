@@ -131,6 +131,25 @@ const ENTRIES = Object.freeze([
     npmPackage: 'ruflo',
   }),
   Object.freeze({
+    id: 'agent-browser',
+    category: 'engine-memory',
+    name: 'agent-browser',
+    tagline: 'Ruflo browser automation without another plugin catalog.',
+    paragraph:
+      'Ruflo\'s shipped browser tools use this native command to open pages, inspect them, '
+      + 'and run browser actions. agentic-kit pins the Ruflo-compatible release, verifies '
+      + 'its native executable, and confines its configuration to managed MCP processes. '
+      + 'It will be retired only when a released Ruflo build actually switches to Servo.',
+    links: Object.freeze([
+      link('github', 'GitHub', 'https://github.com/vercel-labs/agent-browser'),
+      link('npm', 'npm', 'https://www.npmjs.com/package/agent-browser'),
+      link('docs', 'Docs', 'https://agent-browser.dev/'),
+    ]),
+    icon: MONOGRAM('ab', '--hue-engine'),
+    detectionKey: 'agent-browser',
+    npmPackage: 'agent-browser',
+  }),
+  Object.freeze({
     id: 'agentdb',
     category: 'engine-memory',
     name: 'agentdb',

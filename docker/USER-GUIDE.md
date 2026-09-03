@@ -37,7 +37,8 @@ everything by design (only the image build itself is cached):
 1. Ubuntu 26.04 + Node image builds (cached on later runs).
 2. The container installs `@pacphi/agentic-kit@next` — the real first-install
    path, against whatever `next` currently is.
-3. `ak setup --codex --opencode --yes` runs: installs ruflo, agentic-qe, and
+3. `ak setup --codex --opencode --yes` runs: installs ruflo, its compatible
+   agent-browser executor, agentic-qe, and
    the claude/codex/opencode CLIs inside the container, wires everything.
 4. The dashboard starts. **Watch the logs for a URL like:**
 
@@ -102,9 +103,11 @@ a login, `docker cp` the specific file in, deliberately.
 - **Port 7431 busy on the host** — another dashboard (maybe your host ak!) is
   using it. Edit the left side of the port mapping in `compose.yaml`.
 - **Apple Silicon vs Intel** — the image builds for your machine's native
-  architecture automatically. Don't force `--platform linux/amd64` on an
-  arm64 Mac; emulation breaks native Node modules and produces false
-  failures.
+  architecture automatically. A native ARM run is the right clean-room control
+  for skills/plugins/MCP state. Chrome for Testing does not publish Linux ARM64
+  builds, so agent-browser will report a compatible external Chromium/Chrome
+  requirement there; use a native Linux x64 runner for the browser-payload
+  smoke rather than treating emulated native-module failures as product evidence.
 - **`artifacts/` permission errors (Linux)** — if Docker created the dir
   root-owned, `sudo chown $USER docker/artifacts`.
 

@@ -3,6 +3,8 @@
 // may derive and write the sibling agentdb-memory.db from that same project.
 import fs from 'node:fs';
 import * as paths from './paths.mjs';
+import { loadKitConfig } from './config.mjs';
+import { managedAgentBrowserEnv } from './agent-browser.mjs';
 
 export function memoryProjectRoot(cwd = process.cwd()) {
   return fs.realpathSync(paths.repoRoot(cwd) ?? cwd);
@@ -13,12 +15,15 @@ export function projectMemoryEnv(cwd = process.cwd(), env = {}) {
   return { ...env, CLAUDE_FLOW_DB_PATH: paths.projectMemoryDb(root) };
 }
 
-export function rufloMcpLaunch(cwd = process.cwd(), env = process.env) {
+export function rufloMcpLaunch(cwd = process.cwd(), env = process.env, { cfg = loadKitConfig() } = {}) {
   const root = memoryProjectRoot(cwd);
   return {
     command: 'ruflo',
     args: ['mcp', 'start'],
     cwd: root,
-    env: projectMemoryEnv(root, env),
+    env: projectMemoryEnv(root, {
+      ...env,
+      ...managedAgentBrowserEnv({ enabled: cfg.agentBrowser !== false }),
+    }),
   };
 }

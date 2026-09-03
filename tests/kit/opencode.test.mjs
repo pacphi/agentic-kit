@@ -92,6 +92,9 @@ test('mcpEntriesFor includes ruvnet-brain only when the shim exists', async () =
   assert.equal(withBrain['ruvnet-brain'].timeout, 30000);
   assert.equal(withBrain['claude-flow'].enabled, true);
   assert.equal(withBrain['claude-flow'].environment.CLAUDE_FLOW_MODE, 'v3');
+  assert.ok(path.isAbsolute(withBrain['claude-flow'].environment.AGENT_BROWSER_CONFIG));
+  const browserOff = await mcpEntriesFor({ brainShim: shim, agentBrowserEnabled: false });
+  assert.equal(browserOff['claude-flow'].environment.AGENT_BROWSER_CONFIG, undefined);
   assert.ok(Array.isArray(withBrain['claude-flow'].command));
   rm(d);
 });

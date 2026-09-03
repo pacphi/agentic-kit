@@ -74,6 +74,100 @@ async function processSweep() {
   return found;
 }
 
+/** Match only executable shapes that directly launch Ruflo's stdio MCP
+ * transport. A shell whose payload merely contains the words is deliberately
+ * excluded: cleanup must identify the process itself, not a descendant or a
+ * diagnostic command such as grep/echo. */
+export function isRufloMcpCommand(command) {
+  const text = String(command ?? '').trim();
+  if (!text || /^(?:sh|bash|zsh|fish|cmd|powershell)(?:\.exe)?\s/i.test(text)) return false;
+  return /^(?:node(?:\.exe)?\s+\S*(?:cli|ruflo)(?:\.m?js)?|\S*[\\/]?ruflo(?:\.cmd|\.exe)?|npx(?:\.cmd)?(?:\s+-\S+)*\s+ruflo(?:@\S+)?|npm(?:\.cmd)?\s+exec(?:\s+-\S+)*\s+ruflo(?:@\S+)?)\s+mcp\s+start(?:\s|$)/i.test(text);
+}
+
+/** Parse `uid pid ppid args` process output into an MCP transport row. A `-`
+ * uid is accepted for Windows visibility, but can never pass orphan cleanup's
+ * same-user proof. */
+export function parseMcpTransportLine(line, found) {
+  const match = String(line).trim().match(/^(\d+|-)\s+(\d+)\s+(\d+)\s+(.+)$/);
+  if (!match || !isRufloMcpCommand(match[4])) return;
+  found.push({
+    uid: match[1] === '-' ? null : Number(match[1]),
+    pid: Number(match[2]),
+    ppid: Number(match[3]),
+    command: match[4],
+  });
+}
+
+/** Running Ruflo MCP stdio transports. This is visibility only: ordinary
+ * parented transports are legitimate (one per active host/session) and are
+ * never classified as stale by age, count, or workspace. */
+export async function listMcpTransports({ runner = run } = {}) {
+  const found = [];
+  if (isWindows) {
+    const result = await runner('powershell', ['-NoProfile', '-Command',
+      "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'mcp start' } | ForEach-Object { \"-`t$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.CommandLine)\" }"]);
+    for (const line of result.stdout.split('\n')) parseMcpTransportLine(line, found);
+  } else {
+    const result = await runner('ps', ['-eo', 'uid=,pid=,ppid=,args=']);
+    for (const line of result.stdout.split('\n')) parseMcpTransportLine(line, found);
+  }
+  return found;
+}
+
+/** A stdio MCP server is provably orphaned only after its parent disappeared
+ * and init adopted it (PPID 1), and only when its OS uid is this user. Unknown
+ * ownership (notably Windows' basic CIM census) fails closed to no candidates. */
+export function orphanedMcpTransports(transports, {
+  uid = typeof process.getuid === 'function' ? process.getuid() : null,
+} = {}) {
+  if (!Number.isInteger(uid)) return [];
+  return (transports ?? []).filter((entry) =>
+    entry?.uid === uid && entry?.ppid === 1 && isRufloMcpCommand(entry.command));
+}
+
+function inspectMcpTransport(pid) {
+  if (!Number.isFinite(pid) || isWindows) return null;
+  try {
+    const line = execFileSync('ps', ['-p', String(pid), '-o', 'uid=,pid=,ppid=,args='], {
+      encoding: 'utf8', timeout: 10_000,
+    });
+    const found = [];
+    parseMcpTransportLine(line, found);
+    return found[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Reap only previously disclosed MCP orphans, re-probing immediately before
+ * SIGTERM to defend against PID reuse and a transport gaining a real parent.
+ * No age/count/workspace heuristic is accepted as kill authority. */
+export function reapMcpTransports(transports, {
+  uid = typeof process.getuid === 'function' ? process.getuid() : null,
+  inspect = inspectMcpTransport,
+  kill = (pid, signal) => process.kill(pid, signal),
+} = {}) {
+  const results = [];
+  for (const candidate of orphanedMcpTransports(transports, { uid })) {
+    const current = inspect(candidate.pid);
+    const verified = current
+      && orphanedMcpTransports([current], { uid }).length === 1
+      && current.pid === candidate.pid
+      && current.command === candidate.command;
+    if (!verified) {
+      results.push({ ...candidate, killed: false, identityChanged: true });
+      continue;
+    }
+    try {
+      kill(candidate.pid, 'SIGTERM');
+      results.push({ ...candidate, killed: true });
+    } catch {
+      results.push({ ...candidate, killed: false });
+    }
+  }
+  return results;
+}
+
 export function parseSweepLine(line, found) {
   const m = line.trim().match(/^(\d+)[\s\t]+(.*)$/);
   if (!m) return;

@@ -30,6 +30,7 @@ import { appendToConfig } from '../lib/health-history.mjs';
 import * as paths from '../lib/paths.mjs';
 import { ok, warn, fail, info, bold, dim, withProgress, reportOutcome } from '../lib/output.mjs';
 import { applyCodexStatusline, projectionFor } from '../lib/codex-statusline.mjs';
+import { ensureAgentBrowser } from '../lib/agent-browser.mjs';
 
 /** Prints one lifecycle-render.mjs report line at its own level — 'fail'
  *  (F5, Wave C security review) reaches `fail()`, not a fallback `info()`,
@@ -101,6 +102,20 @@ Examples:
 // (`dejaVuApplyFailed`, `aqeRouterApplyFailure`) the final convergence check
 // needs — the only state that survives past its own step.
 export const SYNC_STEPS = [
+  {
+    id: 'agent-browser',
+    when: (subs, flags, cfg) => subs.has('agent-browser') && cfg.agentBrowser !== false,
+    run: async (ctx) => {
+      const result = await ctx.step('agent-browser', () => ensureAgentBrowser(ctx.cfg, {
+        installBrowser: true,
+        allowUpgrade: !ctx.flags['no-upgrade'],
+      }));
+      // Package/config receipts must survive even when the optional Chrome
+      // download fails after the native CLI verified successfully.
+      saveKitConfig(ctx.cfg);
+      return result;
+    },
+  },
   {
     id: 'codex-mcp-repair',
     when: (subs) => subs.has('codex-mcp'),
@@ -222,11 +237,14 @@ export const SYNC_STEPS = [
     id: 'mcp',
     when: (subs, flags, cfg) => subs.has('mcp') && cfg.mcp.register,
     run: async (ctx) => {
-      const okReg = await withProgress('mcp', () => mcpRegister());
-      if (okReg) {
+      await ctx.step('mcp', async () => {
+        const okReg = await mcpRegister(ctx.cfg);
+        if (!okReg) {
+          return { ok: false, detail: 'claude mcp registration failed; prior compatible registration was restored when possible' };
+        }
         const { denied } = applyExclusions(ctx.cfg.mcp.excludeFamilies ?? []);
-        ok(`mcp: claude-flow registered (user scope), ${denied} tool(s) denied per kit.json`);
-      } else warn('mcp: claude mcp add failed — run: ak x mcp pick');
+        return { ok: true, detail: `claude-flow registered (user scope), ${denied} tool(s) denied per kit.json` };
+      });
     },
   },
   {
