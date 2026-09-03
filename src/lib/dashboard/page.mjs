@@ -853,7 +853,7 @@ ${LIVE_HTML}
           <div id="sys-matrix"></div>
         </div>
         <div class="sy-card">
-          <div class="sy-head"><h3>Project skill pressure</h3><span class="n mono">read-only evidence</span></div>
+          <div class="sy-head"><h3>Project skill pressure</h3></div>
           <div id="sys-pressure"></div>
         </div>
       </div>

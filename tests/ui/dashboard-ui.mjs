@@ -2102,6 +2102,10 @@ async function main() {
           && pressureBox.top >= Math.max(profileBox.bottom, uniqueBox.bottom)
           && Math.abs(pressureBox.width - grid.getBoundingClientRect().width) < 2;
       }), 'project pressure did not render beneath both inventory cards at full width');
+    check('Project skill pressure does not repeat its read-only boundary in the card header',
+      await page.$eval('#sys-pressure', (el) => !/read-only evidence/i.test(
+        el.closest('.sy-card')?.querySelector('.sy-head')?.innerText || '',
+      )), 'the panel header still carries redundant read-only evidence chrome');
     const catalogViewport = await page.$eval('#sys-matrix .sy-catalog-scroll', (viewport) => {
       const body = viewport.querySelector('tbody');
       const originalCount = body.rows.length;
