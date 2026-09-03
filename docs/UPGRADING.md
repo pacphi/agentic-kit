@@ -12,6 +12,12 @@ standalone capability identities from plugin-contributed identities. The Footpri
 therefore advances from v1 to v2; an older snapshot is reported as unreadable-by-this-build until
 you run `ak system --deep`. It is not migrated or silently shown under the new semantics.
 
+This issue #198 prerequisite closed through
+[PR #201](https://github.com/pacphi/agentic-kit/pull/201), merge `1bf0a5b`. Its identity,
+snapshot, preview, and bounded-dashboard regressions are locked by
+`tests/kit/footprint-collectors.test.mjs`, `tests/kit/footprint-snapshot-v2.test.mjs`,
+`tests/kit/skill-maintenance-plan.test.mjs`, and `tests/ui/dashboard-ui.mjs`.
+
 JSON consumers should treat `catalog.items[].key` as an opaque canonical identifier. The additive
 fields `canonicalId`, `capabilityName`, `pluginRef`, `sourceScopes`, occurrence evidence,
 `overlaps`, `projects`, `pluginSources`, and `sourceStamps` provide relationships previously
@@ -25,8 +31,44 @@ ak system --deep
 ak x skills plan --project /absolute/path/to/project
 ```
 
-The plan does not remove anything. Mutating upgrade/cleanup remediation is tracked separately in
-issue #200.
+The plan does not remove anything. Use the separate Maintenance workflow below for provider-backed
+remediation.
+
+## 2026-09-03: Maintenance control plane
+
+The upgrade adds `ak maintain` and **System > Maintenance**. No configuration opt-in is required,
+but no operation runs automatically: ordinary scan/plan are read-only, executable plans expire
+after five minutes, and apply requires the exact plan ID, digest, selected action IDs, and `--yes`.
+
+```bash
+ak maintain scan --deep
+ak maintain plan --findings FINDING_ID --executable
+ak maintain apply --plan PLAN_ID --digest SHA256 --actions ACTION_ID --yes
+```
+
+Maintenance stores private, integrity-sealed plans and receipts under the current user's
+agentic-kit state directory. Existing System snapshot files remain read-only evidence inputs;
+Catalog schema v2 is still refreshed with `ak system --deep`. `ak sync` neither selects nor
+executes Maintenance findings.
+
+The first provider set is intentionally narrower than the inventory. Claude plugin disable,
+update, and remove; exact Codex plugin/MCP removal; exact receipt-owned skill archive; one bounded
+owned stale-npx cleanup; and identity-proven Ruflo MCP orphan termination can be executable when
+their provider and evidence are present. OpenCode plugin/MCP, Codex per-plugin update, Claude
+plugin prune, unreceipted skills, other caches, transcripts, and ambiguous resources remain
+report-only.
+
+If an older or interrupted transaction is recovery-required, new Maintenance changes stop. The
+only recovery command is:
+
+```bash
+ak maintain recover --receipt RECEIPT_ID --yes
+```
+
+It reconciles every entry against its recorded preimage or verified postimage. It never retries,
+applies, undoes, or compensates an uncertain operation. A mixed, drifting, or uninspectable state
+remains blocked. See the [Maintenance runbook](MAINTENANCE.md) before acting on an interrupted
+receipt.
 
 ## The one rule
 

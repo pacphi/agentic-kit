@@ -1,8 +1,8 @@
 # Dashboard
 
-`ak dashboard` opens an observation-only local diagnostic workspace. It binds to loopback, requires
-the per-session dashboard token for every API route, and does not mutate configuration, agents, or
-repositories.
+`ak dashboard` opens a local diagnostic workspace. It binds to loopback and requires the
+per-session dashboard token for every API route. Ordinary views are observation-only;
+**System > Maintenance** is the sole receipt-aware action surface.
 
 ```bash
 ak dashboard
@@ -54,6 +54,7 @@ permanent.
 | System | Runtime | `#system/runtime` | Runtime | Live host processes, their CPU and memory, background daemons, and machine denominators — refreshed on the header's poll clock while open |
 | System | Catalog | `#system/catalog` | Catalog | Summary-first project skill pressure with per-project host disclosure; standalone and plugin-qualified skills, agents, commands, plugins and MCP servers across user/project/plugin scope; provider/version and entrypoint-digest evidence; per-host matrix with kind/host/source filters |
 | System | Projects | `#system/projects` | Projects | Every repository with a remote that a host has recorded a session in — its approximate lines of code, language mix, total disk size and last activity. Worktrees, sub-folders and remote-less repositories are counted below the table, not listed |
+| System | Maintenance | `#system/maintenance` | Maintenance | Evidence-backed upgrade and cleanup findings, one-finding action previews, explicit confirmation, receipts, and guarded undo |
 
 About is one scrolling page, so its hashes scroll to a section rather than swapping panels; `#about`
 alone opens the page at the top.
@@ -469,8 +470,9 @@ History/Review semantics, privacy limits, and troubleshooting.
 ## System
 
 System answers what this toolchain costs the machine itself — a different question from health
-(Overview), spend (Usage), or activity (Observability). Its seven views are Summary, Advisory,
-Sessions, Storage, Runtime, Catalog, and Projects. Projects stays separate from Storage on purpose:
+(Overview), spend (Usage), or activity (Observability). Seven measurement views cover Summary,
+Advisory, Sessions, Storage, Runtime, Catalog, and Projects. Maintenance is an eighth navigation
+destination and a separate control-plane context. Projects stays separate from Storage on purpose:
 lines of code and a git remote answer "what have I built here", not "where are my bytes".
 
 ### Two tiers, and why nothing scans on open
@@ -482,8 +484,9 @@ cached briefly.
 Everything else comes from a **deep scan**, which walks the install trees, the retained-data roots,
 every host's catalog surfaces, and every known project. That is real I/O and takes tens of seconds
 on a large machine, so it runs **only when you press Rescan** (or run `ak system --deep`). Opening
-the tab never triggers it, and System does not poll: it fetches once, then again only while a scan
-you started is still running.
+the tab never triggers it. Measurement views fetch once, then again only while a scan you started
+is running. Maintenance refreshes its own read model on the header poll clock while open; that poll
+does not execute an action.
 
 The trade is stated rather than hidden. Deep-tier figures always render with when they were
 measured, and once a snapshot passes seven days the freshness label turns amber and reads
@@ -491,8 +494,8 @@ measured, and once a snapshot passes seven days the freshness label turns amber 
 surface, or entrypoint changes first, the label immediately reads `catalog changed, rescan`.
 An unchanged probe is not full content validation, and says so in the JSON evidence.
 A scan writes one file — its own snapshot — and nothing else; the reclaimable-space
-rows are advisory, with their rationale and their path, and there is no delete button anywhere in
-this area.
+rows are advisory, with their rationale and their path. Catalog and Advisory have no action
+controls; provider-backed actions live only in Maintenance.
 
 ### Catalog evidence and project pressure
 
@@ -506,10 +509,40 @@ provider/version and body variants where known. Plugin inventory prefers the hos
 commands and labels manifest/config/cache fallback as partial; installed-disabled plugins stay in
 inventory without contributing enabled capabilities.
 
-The dashboard remains read-only. `ak x skills plan --project <path>` emits the corresponding
+Catalog remains read-only. `ak x skills plan --project <path>` emits the corresponding
 receipt-aware classification, git state, affected paths, projected result, and stable plan ID; it
-writes nothing. Future remediation belongs to the [Maintenance capability](ddd/maintenance.md)
-tracked by issue #200.
+writes nothing. That preview is evidence for the separate
+[Maintenance capability](ddd/maintenance.md), not an executable plan or authorization.
+
+### Maintenance actions and receipts
+
+Maintenance groups findings into **Updates ready**, **Safe cleanup**, **Needs review**,
+**Unsupported or blocked**, and **Recent changes / Undo**. Each row explains the resource owner,
+evidence health, impact, restart requirement, rollback class, and missing authority. A missing
+button means the current service did not advertise an executable provider action; the browser does
+not derive capabilities from labels.
+
+Selecting one finding requests a fresh five-minute server-derived plan. The confirmation sheet
+shows the exact operation and consequences. Confirming consumes a session- and plan-bound one-use
+capability before provider work begins. The browser sends opaque IDs only—never a command, path,
+provider implementation, or action definition. There are no checkboxes, mixed-safety batches, or
+“Clean all”.
+
+After an operation, the provider verifies its postcondition and Maintenance refreshes the full deep
+System/Footprint snapshot. The result sheet links the durable receipt and offers Undo only when the
+committed action declared rollback and current state still matches its recorded postimage. External
+provider effects are not presented as atomic.
+
+An interrupted or uncertain outcome appears as recovery-required and blocks later Maintenance
+mutations. The dashboard preserves and displays that evidence but has no recovery endpoint. Use:
+
+```bash
+ak maintain recover --receipt RECEIPT_ID --yes
+```
+
+Recovery inspects current state and reconciles the receipt. It never retries, reapplies, undoes, or
+compensates an uncertain operation. See the [Maintenance runbook](MAINTENANCE.md) for the provider
+matrix, CLI workflow, ownership rules, and fail-closed recovery limits.
 
 ### Largest consumers, and the project-trees toggle
 
@@ -583,10 +616,14 @@ removes anything; where a CLI already owns the cleanup, the row names it.
 
 ### Platforms
 
-All seven views work on macOS, Linux, and Windows. On Windows the process census (host, pid, CPU,
+All seven Machine Footprint views work on macOS, Linux, and Windows. On Windows the process census (host, pid, CPU,
 memory, uptime) is always available; the bound project is a best-effort read that can be blocked by
 antivirus, execution policy, or permissions, in which case that one column reads
 "not attributable on Windows" with the reason and every other figure in the row still renders.
+
+Maintenance itself remains available on Windows, but the Ruflo MCP orphan action requires a
+numeric POSIX UID and therefore stays report-only there. Every other provider is advertised only
+when its native operation and evidence are available on the current machine.
 
 One field is honestly missing everywhere: the ruflo daemon budget has no local source this
 collector can read, so it reports unknown rather than a number inferred from nothing.
@@ -604,7 +641,9 @@ Canonical hashes make views linkable without putting the dashboard token in the 
 string.
 
 The launch token initially arrives in the URL fragment and is then stored locally for authenticated
-API requests. The dashboard remains localhost-only and offline-first. Usage, Models, Observability, and
+API requests. The dashboard remains localhost-only and offline-first. Maintenance POST requests
+add same-origin fetch metadata, exact JSON schemas, a 64 KiB body limit, and one-use action
+capabilities; every other route retains default non-GET rejection. Usage, Models, Observability, and
 System may show sensitive local project, transcript, or filesystem-path information; use them only
 where that local information may be viewed. System deliberately shows absolute paths — a storage
 breakdown that hides where the bytes live answers nothing — behind the same token-gated loopback

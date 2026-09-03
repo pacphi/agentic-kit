@@ -13,15 +13,14 @@
   on-disk projects and attributes Codex `.agents/skills` separately
 - **Updated:** 2026-09-03 — CatalogInventory v2 preserves plugin marketplace/version relationships,
   separates user/project/plugin occurrences, hashes bounded capability entrypoints, reports
-  project pressure and source-probe drift, and feeds a read-only skill maintenance plan. Mutating
-  remediation is explicitly deferred to issue #200.
+  project pressure and source-probe drift, and feeds a read-only skill maintenance preview.
 - **Updated:** 2026-09-03 — the Catalog leads with the host profile and a five-record cross-host
   viewport, then gives Project skill pressure a full-width row; pressure groups one disclosure per
   relevant project, keeps the launching project first, omits measured-zero project rows, and moves
   per-host source evidence plus one deduplicated plan command behind progressive disclosure.
-- **Updated:** 2026-09-03 — ADR-0044 accepts Maintenance as a separate future control plane under
-  the System shell. Machine Footprint collectors, Catalog, pressure, and existing System routes
-  remain read-only measurement surfaces.
+- **Updated:** 2026-09-03 — ADR-0044 implements Maintenance as a separate control plane under the
+  System shell. Machine Footprint collectors, Catalog, pressure, and System measurement routes
+  remain read-only.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0005](0005-dashboard-in-page-routing-reveal.md),
   [ADR-0007](0007-maintainer-admin-local-telemetry.md),
@@ -37,14 +36,15 @@
 > identities joined by explicit exact-name and exact-entrypoint-digest relationships. Full
 > `plugin@marketplace` identity, installed version, enabled state, scope, and evidence authority are
 > retained per host occurrence. The deep snapshot schema advances to v2 so old flattened identities
-> cannot render as current. System remains read-only; `ak x skills plan` classifies and previews,
-> while [Maintenance](../ddd/maintenance.md) / issue #200 owns future mutation and receipts.
+> cannot render as current. Machine Footprint and its System measurement views remain read-only;
+> `ak x skills plan` classifies and previews, while [Maintenance](../ddd/maintenance.md) owns
+> mutation and receipts.
 > The pressure view is summary-first: it counts projects with local skills and projects carrying
 > same-name or matching-entrypoint relationships, then groups host evidence beneath one native
 > disclosure per project. Inventory completeness and model-context inclusion are separate facts;
 > hosts do not currently report the latter, so that caveat appears once rather than as a repeated
 > `complete · context unknown` row label. The all-kind detail remains in the Catalog matrix.
-> ADR-0044 now accepts the future Maintenance control-plane contract; its placement under System
+> ADR-0044 implements the Maintenance control-plane contract; its placement under System
 > does not add mutation to this context's collectors or routes.
 
 <!-- amendment boundary -->

@@ -30,7 +30,7 @@ Native Evidence ----> Evidence Acquisition ----> Canonical Evidence
 Project State (.claude-flow/*) ----> Project Intelligence-+
 Local filesystem + process table ---> Machine Footprint --+
                                            |               |
-Integration Management -------------------+----> Maintenance (accepted target)
+Integration Management -------------------+----> Maintenance
                                                            |
                                                            +----> Dashboard Delivery
 Curated editorial content ----------> Component Directory-+
@@ -58,16 +58,16 @@ See [Integration management](integration-management.md).
 
 ### Maintenance
 
-Maintenance is the accepted, not-yet-implemented human-guided control plane for upgrades,
-stale/unsupported resource cleanup, lifecycle remediation, verification, rollback, and receipts.
+Maintenance is the implemented human-guided control plane for upgrades, stale/unsupported resource
+cleanup, lifecycle remediation, verification, guarded undo, recovery, and receipts.
 It consumes observed facts from Machine Footprint and ownership/lifecycle facts from Integration
 Management. It does not own those facts and cannot promote disk presence, age, digest equality, or
 a read-only plan into mutation authority.
 
-Issue #198 delivered the read-only catalog and preview seam. ADR-0044 accepts the separate
-control-plane architecture; issue #200 tracks its implementation. Maintenance will appear as a
-secondary destination under System, but Machine Footprint collectors and existing System routes
-remain non-mutating. See [Maintenance](maintenance.md).
+Issue #198 delivered the read-only Catalog and preview seam. ADR-0044 implements the separate
+control-plane architecture as a secondary destination under System. Machine Footprint collectors,
+Catalog, Advisory, and other System measurement routes remain non-mutating. See
+[Maintenance](maintenance.md).
 
 ### Hook configuration assurance
 
@@ -192,10 +192,10 @@ may combine read models from Observability, Historical Usage, Project Intelligen
 Footprint, Component Directory, routing, and integration facts. It cannot manufacture or strengthen
 domain facts.
 
-When ADR-0044 is implemented, Dashboard Delivery will also own the narrowly allowlisted
-Maintenance POST boundary and accessible confirmation/progress/receipt interaction. Maintenance,
-not the browser, will still own policy, fixed operations, verification, and receipts. Every other
-dashboard route retains the non-GET rejection by default.
+Dashboard Delivery owns ADR-0044's narrowly allowlisted Maintenance POST boundary and accessible
+confirmation/progress/receipt interaction. Maintenance, not the browser, owns policy, fixed
+operations, verification, and receipts. Every other dashboard route retains default non-GET
+rejection. Interrupted-receipt recovery is CLI-only.
 
 ### Maintainer administration
 
@@ -242,8 +242,8 @@ and credential policy is distinct from the offline-first dashboard and integrati
 | Machine footprint | Dashboard delivery | Two-tier measurement read model over `GET /api/system`, and the same collector behind `ak system` |
 | Machine footprint | Maintenance | Observed inventory, pressure, freshness, and advisory facts only; no ownership or mutation authority crosses the boundary |
 | Integration management | Maintenance | Provider capabilities, native lifecycle facts, desired state, and exact ownership receipts |
-| Maintenance | Native configuration and lifecycle surfaces | Planned fixed provider operations with preflight, verification, and explicit unsupported results; no generic shell or delete adapter |
-| Maintenance | Dashboard delivery | Planned findings, source-bound plans, one-use action capability exchange, progress, receipts, and guarded undo |
+| Maintenance | Native configuration and lifecycle surfaces | Fixed provider operations with preflight, verification, current-state inspection, and explicit unsupported results; no generic shell or delete adapter |
+| Maintenance | Dashboard delivery | Findings, source-bound plans, one-use action capability exchange, progress, receipts, and guarded undo; recovery evidence is read-only in the browser |
 | Integration management | Component directory | Registry consumed only as a parity gate; no editorial content flows either way |
 | Detection facts (`/api/status`, managed-tools) | Component directory | Read-only join at render; a failed join degrades chips to unknown, never hides cards |
 | Component directory | Dashboard delivery | Versioned editorial entries imported by the page; no endpoint, no probe, no cache |
@@ -289,7 +289,7 @@ observed before the split was made explicit.
   capability-advertising provider, a current source-bound plan, explicit confirmation, live
   preflight, verification, and a durable receipt. Unsupported operations stay report-only.
 - Dashboard placement does not merge contexts: System measurement routes remain read-only, and
-  only the exact ADR-0044 Maintenance routes may become non-GET exceptions when implemented.
+  only the exact ADR-0044 Maintenance routes are non-GET exceptions.
 - Component directory authors identity, it does not observe it. Editorial prose never asserts
   runtime state; installed, version, and configured render exclusively as chips fed by detection
   facts borrowed from existing collectors.

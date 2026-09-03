@@ -51,7 +51,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0041](0041-host-neutral-hook-configuration-assurance.md) | Host-neutral hook configuration assurance | Implemented; native runtime receipt acquisition deferred |
 | [0042](0042-capability-aware-context-budget-intelligence.md) | Capability-aware context budget intelligence | Implemented |
 | [0043](0043-managed-ruflo-browser-executor.md) | Manage Ruflo's browser executor behind a replaceable boundary | Accepted |
-| [0044](0044-receipt-aware-maintenance-control-plane.md) | Receipt-aware Maintenance control plane | Accepted |
+| [0044](0044-receipt-aware-maintenance-control-plane.md) | Receipt-aware Maintenance control plane | Implemented |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -315,12 +315,13 @@ apply wave requires exact preimages, transaction-specific backups/receipts, guar
 clean second audit, and a byte/mtime no-op proof. The ADR remains Proposed pending independent
 dual-host review.
 
-**0044** accepts Maintenance as a separate control-plane bounded context and places its future UI
-under System without giving Machine Footprint mutation authority. It separates evidence-backed
+**0044** implements Maintenance as a separate control-plane bounded context under System without
+giving Machine Footprint mutation authority. It separates evidence-backed
 findings, immutable source-bound plans, one-use action capabilities, provider-owned operations,
-verification, durable receipts, and guarded undo. The accepted provider boundary exposes only
+verification, durable receipts, guarded undo, and observation-only receipt recovery. Its provider boundary exposes only
 host-native lifecycle verbs or exact agentic-kit-owned procedures; plugin cache children, incomplete
-skill receipts, unsupported host verbs, and uncertain evidence remain report-only. The existing
-dashboard stays GET-only except for four future, explicitly allowlisted Maintenance route shapes,
+skill receipts, unsupported host verbs, and uncertain evidence remain report-only. The dashboard
+stays read-only except for four explicitly allowlisted Maintenance route shapes,
 each retaining ADR-0014's loopback protections and adding bounded JSON, fixed server-side actions,
-explicit confirmation, and one-use authorization. Issue #200 tracks implementation.
+explicit confirmation, and one-use authorization. Interrupted outcomes require explicit CLI
+reconciliation; recovery never retries or rolls back an uncertain provider effect.

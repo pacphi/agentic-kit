@@ -3,7 +3,7 @@
 - **Status:** Implemented
 - **Updated:** 2026-08-26 — ADR-0035 applies fail-closed preflight, bounded evidence, and
   content-free degradation to the opt-in deja-vu companion
-- **Updated:** 2026-09-03 — ADR-0044 adopts these fail-closed principles for a future Maintenance
+- **Updated:** 2026-09-03 — ADR-0044 implements these fail-closed principles in the Maintenance
   coordinator while explicitly refusing to claim filesystem atomicity for native lifecycle,
   network, package, or process operations
 - **Date:** 2026-08-04

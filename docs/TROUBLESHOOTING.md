@@ -10,8 +10,9 @@ ak sync             # apply it
 ```
 
 > [!TIP]
-> The rule: **`status` to look, `sync` to fix.** Every ⚠/✗ row in `status` names the
-> fix; `sync` applies them in the right order and re-checks afterward.
+> The rule for managed configuration is **`status` to look, `sync` to fix**. Maintenance findings
+> use their own scan → short-lived plan → explicit apply/undo/recover workflow; `sync` never selects
+> or executes them.
 
 ## Common situations
 
@@ -20,6 +21,13 @@ ak sync             # apply it
 | `npm install @pacphi/agentic-kit` succeeded but `ak` is not found | A local install links the binary into the package root's `node_modules/.bin`, not the general shell `PATH` | run `npm exec -- ak status`, add an npm script, or use the recommended global install; see [Installation](INSTALLATION.md) |
 | A global install exists but this shell cannot find it | The active Node/npm prefix changed, or its binary directory is not on `PATH` | compare `npm prefix -g`, `npm root -g`, and `command -v ak` (`where ak` on Windows); activate the intended Node toolchain before reinstalling |
 | A one-shot/local `ak setup` changed global tools or project files | npm package scope does not constrain an `ak` command's operational scope | review [Installation scope](INSTALLATION.md#the-two-independent-scope-decisions) and [Setup scope](SETUP.md); use `--dry-run` before setup/sync/uninstall |
+| Maintenance shows a finding but no action | The live service has no provider for that owner/operation, or evidence is incomplete, ambiguous, modified, unreceipted, or unsupported | Read the finding's evidence gap and provider limitation. Refresh with `ak maintain scan --deep`; if it remains blocked, use the named upstream workflow or preserve it. Do not delete a cache or skill tree based only on age, name, or entrypoint digest. See [Maintenance](MAINTENANCE.md). |
+| `ak maintain apply` says the plan expired or evidence changed | Executable plans last five minutes and are bound to an exact source fingerprint | Run `ak maintain scan`, create a new `ak maintain plan --findings ID --executable`, review the new digest/action IDs, and confirm that plan. Do not reuse the old authorization. |
+| Maintenance says a provider is unavailable or changed | The provider was absent, its version changed, or current probing no longer advertises the recorded operation | Restore/update the owning host through its supported lifecycle, rescan, and create a new plan. Unsupported OpenCode plugin/MCP and Codex per-plugin update findings are intentionally report-only. |
+| Maintenance says another mutation is busy | A live transaction owns the serial lock, or the old lock cannot be proven safe to reclaim | Let the live action finish. Automatic reclaim requires a sealed same-machine/current-numeric-UID owner and a PID proven dead twice; remote, tampered, unknown-UID, and liveness-unknown locks stay busy. Do not remove the lock manually. |
+| Undo is unavailable or refuses current state | The receipt is irreversible, its provider/version is missing, or the target no longer matches the recorded postimage | Preserve the current state and inspect the receipt. Undo is deliberately unavailable when it could overwrite later changes; use the provider's documented manual workflow if one exists. |
+| An owned skill remains report-only | Catalog identity is weaker than removal authority; the tree lacks a complete current `agentic-kit.skill-tree-ownership/v1` receipt or contains drift, symlinks, special files, or a plugin-cache path | Preserve it. Only a complete recursive manifest, exact allowed root/current owner, and exact current shape/digest can authorize archive. Never promote an issue #198 entrypoint digest into tree ownership. |
+| Maintenance reports `partial-recovery-required` and blocks new changes | A provider effect may have happened, but the durable receipt cannot yet prove wholly preimage or wholly verified postimage | Run `ak maintain recover --receipt RECEIPT_ID --yes`. Recovery only inspects and reconciles; it never retries or rolls back. If state is mixed/drifted, a provider is missing, or refresh fails, repair that evidence problem and retry recovery. |
 | `ak sync` launched from a checkout/local dependency created a global `ak` | The self-update step deliberately installs the resolved replacement globally and runs last | use `ak sync --no-upgrade` when the checkout or lockfile must remain authoritative |
 | Different users or Node versions see different global stacks | npm `-g` means the active prefix, which can be per-user and per-Node-version | standardize the Node manager/prefix per user; do not repair this with `sudo ak setup` |
 | `status` shows a deja-vu schema or capability warning | The CLI is older than 0.19.0, doctor JSON is missing/malformed/newer than schema 2, or an explicit enabled-host target is absent | update the owned installation with `ak sync`; update an external installation with its owner. Agentic Kit fails closed instead of guessing; see the [deja-vu runbook](DEJA-VU.md) |

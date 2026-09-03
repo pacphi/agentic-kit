@@ -196,9 +196,8 @@ transcript and never substitute for each other. See [Machine footprint](machine-
 
 ## Maintenance language
 
-These terms describe the accepted target architecture in
-[ADR-0044](../adr/0044-receipt-aware-maintenance-control-plane.md). They are not claims that the
-control plane is implemented.
+These terms describe the implemented architecture in
+[ADR-0044](../adr/0044-receipt-aware-maintenance-control-plane.md).
 
 | Term | Meaning |
 |------|---------|
@@ -206,16 +205,20 @@ control plane is implemented.
 | MaintenanceFinding | An evidence-backed resource condition with source, freshness, completeness, ownership, impact, and missing evidence; never itself an action |
 | MaintenanceAction | One exact ActionProvider operation with target, projected result, safety class, rollback class, restart requirement, and verification contract |
 | MaintenancePlan | An immutable, short-lived selection of MaintenanceActions bound to exact source state, scope, safety class, expiry, and content-derived digest; evidence identity, not authorization |
-| ActionProvider | A resource-owner-specific lifecycle port that advertises only proven operations and implements detect, propose, preflight, apply, verify, and guarded undo |
+| ActionProvider | A resource-owner-specific lifecycle port that advertises only proven operations and implements detect, findings/actionFor, preflight, apply, verify, current-state inspection, and guarded undo where supported |
 | ActionCapability | Ephemeral one-use authorization bound to a dashboard session, current plan digest, selected action IDs, source fingerprint, scope, safety class, and expiry |
 | TransactionReceipt | Private durable evidence binding intent, policy decision, exact inputs, before-state, fixed operation, result, verification, after-state, rollback, and compensation |
 | Source fingerprint | A digest over the complete bounded evidence set a plan depends on; a mismatch or incomplete reacquisition expires the plan |
-| Safety class | One of safe-automatic eligible, approval-required, upstream-required, or never-automatic; eligibility still requires explicit human confirmation |
+| Safety class | One of `safe-automatic`, `approval-required`, `upstream-required`, or `never-automatic`; an executable class still requires explicit human confirmation |
 | Rollback class | Reversible, compensating, or irreversible; independent of action safety and disclosed before confirmation |
+| Recovery-required receipt | Durable evidence that provider dispatch may have occurred but the exact outcome was not proven; it blocks later mutations until reconciled |
+| Receipt reconciliation | Observation-only comparison of every receipt entry with its recorded preimage and verified postimage; never a replay, retry, undo, or compensation |
+| Maintenance mutation lock | Private integrity-sealed serialization record; reclaimable only on the same machine and numeric UID when the recorded PID is provably dead and a second guarded check agrees |
 
 A plan identifier is not an ActionCapability, and an ActionCapability is not a
 TransactionReceipt. A successful native command without a verified postcondition is not a
-successful Maintenance transaction. See [Maintenance](maintenance.md).
+successful Maintenance transaction. A receipt records non-atomic effects; it does not make them
+atomic. See [Maintenance](maintenance.md).
 
 ## Component directory language
 
