@@ -220,6 +220,7 @@ export function createMaintenanceDashboardApi({ service, sessionToken, now = Dat
       plan: authority.plan,
       actionIds: authority.actionIds,
       expectedPlanDigest: authority.expectedPlanDigest,
+      confirmed: true,
     });
     const payload = publicOutcome(result);
     sendJson(res, payload.ok ? 200 : 409, payload);
@@ -257,7 +258,7 @@ export function createMaintenanceDashboardApi({ service, sessionToken, now = Dat
       return;
     }
     if (typeof service.undo !== 'function') throw new Error('maintenance undo is unavailable');
-    const result = await service.undo({ receiptId: authority.receiptId });
+    const result = await service.undo({ receiptId: authority.receiptId, confirmed: true });
     const payload = publicOutcome(result);
     sendJson(res, payload.ok ? 200 : 409, payload);
   }

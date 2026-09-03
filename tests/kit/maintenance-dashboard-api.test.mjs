@@ -66,6 +66,7 @@ function fixtureService() {
       calls.apply++;
       assert.deepEqual(input.actionIds, ['action-a']);
       assert.equal(input.expectedPlanDigest, 'digest-a');
+      assert.equal(input.confirmed, true);
       return {
         ok: true, status: 'committed', receipt: {
           id: 'receipt-a', status: 'committed', receiptFile: '/private/must-not-leak',
@@ -78,8 +79,9 @@ function fixtureService() {
       calls.preview++;
       return { receiptId, undoable: true, actionCount: 1, summary: 'Restore the recorded preimage.' };
     },
-    async undo({ receiptId }) {
+    async undo({ receiptId, confirmed }) {
       calls.undo++;
+      assert.equal(confirmed, true);
       return { ok: true, status: 'rolled-back', receipt: { id: receiptId, status: 'rolled-back' } };
     },
   };
