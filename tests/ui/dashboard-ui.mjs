@@ -1481,14 +1481,49 @@ async function main() {
       asOf: SYS_DEEP_ASOF,
       hosts: ['claude', 'codex', 'opencode'],
       kinds: ['skill', 'agent', 'command'],
+      scopes: ['user', 'project', 'plugin'],
       counts: { skill: meas(2), agent: meas(1), command: meas(1) },
       perHost: {},
       items: [
-        { kind: 'skill', name: 'alpha-skill', hosts: ['claude'] },
-        { kind: 'skill', name: 'beta-skill', hosts: ['claude', 'codex'] },
-        { kind: 'agent', name: 'gamma-agent', hosts: ['opencode'] },
-        { kind: 'command', name: 'delta-command', hosts: ['codex'] },
+        { kind: 'skill', name: 'alpha-skill', hosts: ['claude'], sourceScopes: ['user'], presence: [] },
+        { kind: 'skill', name: 'beta-skill', hosts: ['claude', 'codex'], sourceScopes: ['project', 'user'], presence: [], digestCoverage: { unique: 2 } },
+        { kind: 'agent', name: 'gamma-agent', hosts: ['opencode'], sourceScopes: ['plugin'], presence: [{ provider: { ref: 'gamma@market', version: '1.2.3' } }] },
+        { kind: 'command', name: 'delta-command', hosts: ['codex'], sourceScopes: ['user'], presence: [] },
       ],
+      projects: [{
+        project: '/repo/example', label: 'example', complete: true, launching: true,
+        contextInclusion: { status: 'unknown', reason: 'host-owned' },
+        guidance: [{ host: 'codex', message: '1 project-scoped skill observed', nextCommand: 'ak x skills plan --project "/repo/example"' }],
+        byHost: Object.fromEntries(['claude', 'codex', 'opencode'].map((host) => [host, {
+          sources: {
+            project: { skill: meas(host === 'codex' ? 1 : 0), agent: meas(0), command: meas(0) },
+            user: { skill: meas(2), agent: meas(0), command: meas(1) },
+            plugin: { skill: meas(0), agent: meas(host === 'opencode' ? 1 : 0), command: meas(0) },
+          },
+          overlaps: { skillNames: meas(host === 'codex' ? 1 : 0), skillDigests: meas(0) },
+        }])),
+      }, {
+        project: '/repo/secondary', label: 'secondary', complete: false, launching: false,
+        contextInclusion: { status: 'unknown', reason: 'host-owned' },
+        guidance: [{ host: 'codex', message: '4 project-scoped skills observed', nextCommand: 'ak x skills plan --project "/repo/secondary"' }],
+        byHost: Object.fromEntries(['claude', 'codex', 'opencode'].map((host) => [host, {
+          sources: {
+            project: { skill: meas(host === 'codex' ? 4 : 0) },
+            user: { skill: meas(2) },
+            plugin: { skill: host === 'codex'
+              ? { value: null, status: 'unknown', reason: 'native inventory unavailable', asOf: null, partial: false }
+              : meas(0) },
+          },
+          overlaps: { skillNames: meas(host === 'codex' ? 1 : 0), skillDigests: meas(0) },
+        }])),
+      }, {
+        project: '/repo/no-local-skills', label: 'no-local-skills', complete: true, launching: false,
+        contextInclusion: { status: 'unknown', reason: 'host-owned' }, guidance: [],
+        byHost: Object.fromEntries(['claude', 'codex', 'opencode'].map((host) => [host, {
+          sources: { project: { skill: meas(0) }, user: { skill: meas(2) }, plugin: { skill: meas(3) } },
+          overlaps: { skillNames: meas(0), skillDigests: meas(0) },
+        }])),
+      }],
       complete: true,
     };
     await page.route(/\/api\/system(\?|$)/, (route) => route.fulfill({
@@ -1515,6 +1550,84 @@ async function main() {
       await page.$$eval('#sys-matrix tbody tr', (els) => els.every((e) => !!e.querySelector('.sy-kindtag'))),
       'a filtered list must never leave a name unexplained');
     check('unfiltered shows every item', await rowCount() === 4, `saw ${await rowCount()} of 4`);
+    check('project pressure follows the two inventory panels as a full-width second row',
+      await page.$eval('#panel-sys-catalog .sy-grid', (grid) => {
+        const cards = [...grid.querySelectorAll(':scope > .sy-card')];
+        const pressure = document.querySelector('#sys-pressure')?.closest('.sy-card');
+        const profile = document.querySelector('#sys-radar')?.closest('.sy-card');
+        const unique = document.querySelector('#sys-matrix')?.closest('.sy-card');
+        if (!pressure || !profile || !unique) return false;
+        const pressureBox = pressure.getBoundingClientRect();
+        const profileBox = profile.getBoundingClientRect();
+        const uniqueBox = unique.getBoundingClientRect();
+        return cards.indexOf(pressure) > cards.indexOf(profile)
+          && cards.indexOf(pressure) > cards.indexOf(unique)
+          && pressureBox.top >= Math.max(profileBox.bottom, uniqueBox.bottom)
+          && Math.abs(pressureBox.width - grid.getBoundingClientRect().width) < 2;
+      }), 'project pressure did not render beneath both inventory cards at full width');
+    const catalogViewport = await page.$eval('#sys-matrix .sy-catalog-scroll', (viewport) => {
+      const body = viewport.querySelector('tbody');
+      const originalCount = body.rows.length;
+      while (body.rows.length < 8) body.append(body.rows[0].cloneNode(true));
+      const box = viewport.getBoundingClientRect();
+      const fullyVisible = [...body.rows].filter((row) => {
+        const rowBox = row.getBoundingClientRect();
+        return rowBox.top >= box.top && rowBox.bottom <= box.bottom + 0.5;
+      });
+      const result = {
+        fullyVisible: fullyVisible.length,
+        clientHeight: viewport.clientHeight,
+        scrollHeight: viewport.scrollHeight,
+        rowHeights: [...body.rows].slice(0, 6).map((row) => row.getBoundingClientRect().height),
+        headerHeight: viewport.querySelector('thead').getBoundingClientRect().height,
+      };
+      while (body.rows.length > originalCount) body.deleteRow(-1);
+      return result;
+    });
+    check('the Unique across hosts viewport shows no more than five records before scrolling',
+      catalogViewport.fullyVisible === 5
+        && catalogViewport.scrollHeight > catalogViewport.clientHeight,
+      `catalog viewport measured ${JSON.stringify(catalogViewport)}`);
+    const pressureText = await visibleText(page, '#sys-pressure');
+    const pressureProjects = await page.$$('#sys-pressure details.sy-pressure-project');
+    check('project pressure groups once per relevant project instead of repeating project × host',
+      pressureProjects.length === 2 && !/no-local-skills/.test(pressureText),
+      `pressure rendered ${pressureProjects.length} disclosures and read ${JSON.stringify(pressureText)}`);
+    check('the launching project is first and open while other projects stay summary-only',
+      await page.$eval('#sys-pressure details:first-of-type', (d) => d.open && d.dataset.launching === 'true')
+        && !(await page.$eval('#sys-pressure details:nth-of-type(2)', (d) => d.open)),
+      'progressive disclosure did not prioritize the current project');
+    check('inventory completeness and host-owned context are separate, non-contradictory facts',
+      /Inventory complete/.test(pressureText)
+        && (pressureText.match(/Context inclusion is not reported by these hosts/g) || []).length === 1
+        && !/complete\s*[·-]\s*context unknown/i.test(pressureText),
+      `pressure read ${JSON.stringify(pressureText)}`);
+    check('collapsed projects hide full paths and repeated plan commands',
+      !(await page.$eval('#sys-pressure details:nth-of-type(2)', (d) => d.innerText.includes('/repo/secondary')))
+        && await page.$$eval('#sys-pressure details:nth-of-type(2) code', (els) => els.length) === 1,
+      'a collapsed disclosure leaked its detailed path or repeated its command');
+    await page.focus('#sys-pressure details:nth-of-type(2) summary');
+    await page.keyboard.press('Enter');
+    const secondaryText = await visibleText(page, '#sys-pressure details:nth-of-type(2)');
+    check('expanding one project reveals source counts, visible unknown reason, and one read-only command',
+      /Project skills|User skills|Plugin skills|native inventory unavailable|Read-only plan/.test(secondaryText)
+        && await page.$$eval('#sys-pressure details:nth-of-type(2) code', (els) => els.length) === 1,
+      `secondary project read ${JSON.stringify(secondaryText)}`);
+    check('keyboard focus on a project disclosure remains visibly outlined',
+      await page.$eval('#sys-pressure details:nth-of-type(2) summary', (summary) => {
+        const style = getComputedStyle(summary);
+        return style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) >= 2;
+      }), 'the summary accepted keyboard input but had no visible focus indicator');
+    check('pressure disclosures use native accessible structure and scoped table headers',
+      await page.$eval('#sys-pressure details:nth-of-type(2)', (d) => !!d.querySelector(':scope > summary'))
+        && await page.$$eval('#sys-pressure details:nth-of-type(2) thead th[scope="col"]', (els) => els.length) === 6
+        && await page.$$eval('#sys-pressure details:nth-of-type(2) tbody th[scope="row"]', (els) => els.length) === 1
+        && await page.getAttribute('#sys-pressure .sy-pressure-list', 'tabindex') === '0',
+      'native disclosure, headers, or focusable overflow region is missing');
+    check('project pressure remains read-only with no destructive control labels',
+      !/(apply|delete|remove|prune|upgrade)/i.test(await visibleText(page, '#sys-pressure button')),
+      'the System view exposed a mutating action');
+    await shoot(page, 'system-catalog-pressure');
 
     await page.click('#sys-cat-kinds .chipf:nth-child(2)'); // drop agents
     await page.click('#sys-cat-kinds .chipf:nth-child(3)'); // drop commands
@@ -1536,6 +1649,15 @@ async function main() {
     check('re-selecting everything restores the full inventory',
       await rowCount() === 4 && (await chipStates()).every((s) => s === 'true'),
       `saw ${await rowCount()} rows and ${JSON.stringify(await chipStates())}`);
+
+    await page.click('#sys-cat-scopes .chipf:nth-child(1)'); // drop user
+    await page.click('#sys-cat-scopes .chipf:nth-child(2)'); // drop project
+    check('source scope filter isolates plugin-contributed capabilities',
+      await rowCount() === 1 && /gamma@market v1\.2\.3/.test(await visibleText(page, '#sys-matrix')),
+      `source-filtered matrix read ${JSON.stringify(await visibleText(page, '#sys-matrix'))}`);
+    check('catalog filter changes are announced',
+      /1 of 4/.test(await page.$eval('#sys-cat-status', (e) => e.textContent)),
+      'the live filter result count was not updated');
 
     await page.click('[data-system-view="projects"]');
     await page.waitForSelector('#sys-projects table');

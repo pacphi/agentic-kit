@@ -26,6 +26,9 @@ import {
   parseGitRemote, projectRemote, LOC_EXCLUSIONS,
 } from '../../src/lib/footprint/projects.mjs';
 import { collectCatalog, tomlTableNames } from '../../src/lib/footprint/catalog.mjs';
+import {
+  buildCatalogSourceStamps, collectNativePluginInventory, probeCatalogDrift,
+} from '../../src/lib/footprint/catalog-evidence.mjs';
 import { collectConsumers } from '../../src/lib/footprint/consumers.mjs';
 import {
   npmPackageRoot, managedTools, observedRuntimeTools, sharedCacheRoots,
@@ -858,7 +861,8 @@ function catalogFixture(t) {
   write(opencodeConfigFile, JSON.stringify({ mcp: { ruflo: {} } }));
 
   return {
-    root, claudeRoot, codexRoot, opencodeRoot, claudeMcpFile, codexConfigFile, opencodeConfigFile,
+    root, claudeRoot, codexRoot, opencodeRoot, agentsRoot: path.join(root, 'agents'),
+    claudeMcpFile, codexConfigFile, opencodeConfigFile,
   };
 }
 
@@ -899,8 +903,9 @@ test('catalog dedups by normalized name and keeps a per-host presence matrix', (
   assert.equal(result.perHost.opencode.agent.value, 1);
   assert.equal(result.perHost.codex.agent.value, 0);
   assert.equal(result.perHost.codex.mcpServer.value, 2);
-  assert.equal(result.complete, true);
+  assert.equal(result.complete, false, 'fallback plugin inventories keep overall evidence partial');
   assert.deepEqual(result.degraded, []);
+  assert.deepEqual(result.partial.sort(), ['claude-plugins', 'codex-plugins']);
 });
 
 test('catalog includes project-scoped Codex skills from .agents/skills', (t) => {
@@ -917,13 +922,13 @@ test('catalog includes project-scoped Codex skills from .agents/skills', (t) => 
   });
 
   const skill = result.items.find((item) => item.kind === 'skill' && item.name === 'project-only');
-  assert.deepEqual(skill?.hosts, ['codex']);
+  assert.deepEqual(skill?.hosts, ['codex', 'opencode']);
   assert.equal(skill?.presence[0]?.surface, `codex-project-skills:${project}`);
   assert.equal(result.perHost.codex.skill.value, 2);
   assert.equal(result.surfaces.find((surface) => surface.id === `codex-project-skills:${project}`)?.count, 1);
 });
 
-test('catalog counting reads names only — item bodies are never opened', (t) => {
+test('catalog hashes bounded entrypoints but never returns their bodies', (t) => {
   const fixtureRoots = catalogFixture(t);
   const { root, ...roots } = fixtureRoots;
   const reads = [];
@@ -936,14 +941,12 @@ test('catalog counting reads names only — item bodies are never opened', (t) =
     },
   };
 
-  collectCatalog({
+  const result = collectCatalog({
     ...roots, cwd: root, now: () => 1_700_000_000_000,
     includePluginSurfaces: false, fsImpl: spy,
   });
-  for (const file of reads) {
-    assert.doesNotMatch(file, /SKILL\.md$/, `${file} was opened; a name is all the catalog counts`);
-    assert.doesNotMatch(file, /(agents|commands)[\\/].*\.md$/, `${file} was opened`);
-  }
+  assert.ok(reads.some((file) => /SKILL\.md$/.test(file)), 'skill entrypoints are hashed');
+  assert.doesNotMatch(JSON.stringify(result), /SECRET BODY/, 'artifact prose must not leave the collector');
 });
 
 test('an unreadable catalog surface has no count, and the total it feeds is a floor', (t) => {
@@ -997,7 +1000,7 @@ test('plugin-contributed entries are namespaced to the plugin that carries them'
   assert.ok(names.includes('skill:ruvnet-brain:grounding'));
   // A host's plugin inventory is its enabled refs, kept whole.
   assert.deepEqual(result.items.filter((item) => item.kind === 'plugin').map((item) => item.name),
-    ['beads', 'ruvnet-brain@store']);
+    ['beads@marketplace', 'ruvnet-brain@store']);
   assert.equal(result.perHost.codex.skill.value, 2,
     'a plugin skill joins the host that carries it');
 
@@ -1008,6 +1011,131 @@ test('plugin-contributed entries are namespaced to the plugin that carries them'
     inspectCodexPlugins: () => { throw new Error('codex config unreadable'); },
   });
   assert.equal(survived.counts.skill.value >= 2, true);
+});
+
+test('standalone and plugin skills stay distinct while exact-name and digest overlap is explicit', (t) => {
+  const fixtureRoots = catalogFixture(t);
+  const { root, ...roots } = fixtureRoots;
+  const body = '---\nname: shared\nversion: 1.0.0\n---\nBOUNDED BODY\n';
+  write(path.join(roots.claudeRoot, 'skills', 'shared', 'SKILL.md'), body);
+  write(path.join(root, 'p', 'skills', 'shared', 'SKILL.md'), body);
+
+  const result = collectCatalog({
+    ...roots, cwd: root, now: () => 1_700_000_000_000, fsImpl: fixtureFs(root),
+  });
+  const standalone = result.items.find((item) => item.kind === 'skill' && item.name === 'shared');
+  const contributed = result.items.find((item) => item.kind === 'skill' && item.name === 'beads:shared');
+
+  assert.ok(standalone);
+  assert.equal(contributed?.pluginRef, 'beads@marketplace');
+  assert.equal(contributed?.presence[0]?.provider?.ref, 'beads@marketplace');
+  assert.notEqual(standalone.key, contributed.key, 'producer is part of capability identity');
+  assert.ok(result.overlaps.exactName.some((group) => group.name === 'shared'
+    && group.itemKeys.includes(standalone.key) && group.itemKeys.includes(contributed.key)));
+  assert.ok(result.overlaps.exactEntrypointDigest.some((group) => group.itemKeys.includes(standalone.key)
+    && group.itemKeys.includes(contributed.key)));
+  assert.doesNotMatch(JSON.stringify(result), /BOUNDED BODY/);
+});
+
+test('project pressure separates project, user and plugin skill contributions', (t) => {
+  const fixtureRoots = catalogFixture(t);
+  const { root, ...roots } = fixtureRoots;
+  const project = path.join(root, 'project-pressure');
+  const body = 'same bytes\n';
+  write(path.join(project, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+  write(path.join(project, '.agents', 'skills', 'shared', 'SKILL.md'), body);
+  write(path.join(roots.agentsRoot, 'skills', 'shared', 'SKILL.md'), body);
+  write(path.join(root, 'p', 'skills', 'plugin-only', 'SKILL.md'), 'plugin\n');
+
+  const result = collectCatalog({
+    ...roots, cwd: project, now: () => 1_700_000_000_000, fsImpl: fixtureFs(root),
+  });
+  const pressure = result.projects.find((row) => row.project === project);
+  assert.equal(pressure.byHost.codex.sources.project.skill.value, 1);
+  assert.equal(pressure.byHost.codex.sources.user.skill.value >= 1, true);
+  assert.equal(pressure.byHost.claude.sources.plugin.skill.value >= 1, true);
+  assert.equal(pressure.byHost.codex.overlaps.skillNames.value, 1);
+  assert.equal(pressure.byHost.codex.overlaps.skillDigests.value, 1);
+  assert.equal(pressure.launching, true, 'launching project is explicit for summary-first rendering');
+  assert.equal(pressure.contextInclusion.status, 'unknown');
+  assert.match(pressure.guidance[0].nextCommand, /^ak x skills plan --project /);
+});
+
+test('native plugin inventory whitelists lifecycle evidence and drops sensitive fields', () => {
+  const run = (binary) => ({
+    status: 0,
+    stdout: binary === 'claude'
+      ? JSON.stringify([{ id: 'safe@market', version: '1.2.3', enabled: false,
+        scope: 'user', installPath: '/plugins/safe', mcpServers: { secret: { headers: { authorization: 'nope' } } } }])
+      : JSON.stringify({ installed: [{ pluginId: 'safe@market', version: '1.2.3', enabled: true,
+        installPolicy: 'prompt', source: { source: 'marketplace', document: 'private' }, headers: { token: 'nope' } }] }),
+  });
+  const result = collectNativePluginInventory({ run });
+  assert.equal(result.claude.plugins[0].enabled, false, 'installed-disabled state survives');
+  assert.equal(result.codex.plugins[0].sourceKind, 'marketplace');
+  const serialized = JSON.stringify(result);
+  assert.doesNotMatch(serialized, /authorization|private|token|mcpServers|headers/);
+});
+
+test('native plugin command/schema failures degrade instead of becoming an empty success', () => {
+  const result = collectNativePluginInventory({
+    run: (binary) => (binary === 'claude'
+      ? { status: 1, stdout: '', stderr: 'failed' }
+      : { status: 0, stdout: '{"unexpected":true}' }),
+  });
+  assert.equal(result.claude.status, 'degraded');
+  assert.match(result.claude.reason, /exited 1/);
+  assert.equal(result.codex.status, 'degraded');
+  assert.match(result.codex.reason, /schema/);
+});
+
+test('installed-disabled plugins remain inventory but contribute no capabilities', (t) => {
+  const fixtureRoots = catalogFixture(t);
+  const { root, ...roots } = fixtureRoots;
+  write(path.join(root, 'disabled', 'skills', 'hidden', 'SKILL.md'), 'hidden\n');
+  const nativePlugins = {
+    claude: { status: 'ok', source: 'fixture', plugins: [{
+      ...{ ref: 'disabled@market', name: 'disabled', marketplace: 'market' },
+      version: '1.0.0', enabled: false, root: path.join(root, 'disabled'), evidence: 'native',
+    }] },
+    codex: { status: 'ok', source: 'fixture', plugins: [] },
+  };
+  const result = collectCatalog({
+    ...roots, cwd: root, nativePlugins, fsImpl: fixtureFs(root),
+  });
+  assert.ok(result.items.some((item) => item.kind === 'plugin' && item.name === 'disabled@market'));
+  assert.equal(result.items.some((item) => item.kind === 'skill' && item.name === 'disabled:hidden'), false);
+});
+
+test('oversized skill entrypoints remain visible with unknown digest evidence', (t) => {
+  const fixtureRoots = catalogFixture(t);
+  const { root, ...roots } = fixtureRoots;
+  write(path.join(roots.claudeRoot, 'skills', 'large', 'SKILL.md'), Buffer.alloc(1024 * 1024 + 1, 65));
+  const result = collectCatalog({
+    ...roots, cwd: root, includePluginSurfaces: false, fsImpl: fixtureFs(root),
+  });
+  const large = result.items.find((item) => item.kind === 'skill' && item.name === 'large');
+  assert.ok(large, 'oversize is not omission');
+  assert.equal(large.presence[0].digest.status, 'unknown');
+  assert.match(large.presence[0].digest.reason, /exceeds/);
+});
+
+test('catalog source stamps expose likely cache drift without claiming nested content freshness', (t) => {
+  const root = fixture(t, 'catalog-drift');
+  const file = path.join(root, 'plugins.json');
+  write(file, '{}\n');
+  const baseline = buildCatalogSourceStamps({
+    surfaces: [{ status: 'ok', path: file }], items: [], fsImpl: fixtureFs(root),
+  });
+  const unchanged = probeCatalogDrift(baseline, { fsImpl: fixtureFs(root), asOf: 10 });
+  assert.equal(unchanged.status, 'unchanged-at-probes');
+  assert.match(unchanged.reason, /nested content|deep rescan/);
+
+  write(file, '{"plugin":true}\n');
+  const changed = probeCatalogDrift(baseline, { fsImpl: fixtureFs(root), asOf: 20 });
+  assert.equal(changed.status, 'changed');
+  assert.deepEqual(changed.changed.map((entry) => entry.path), [file]);
+  assert.match(changed.reason, /changed since the deep scan/);
 });
 
 test('codex MCP table names are read from config.toml without parsing values', () => {

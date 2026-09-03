@@ -260,6 +260,43 @@ function renderStorage(storage) {
   }
 }
 
+function renderCatalogEvidence(catalog) {
+  const digestCoverage = catalog.overlaps?.digestCoverage;
+  if (digestCoverage) {
+    field('skill entrypoint evidence', `${fmtCount(digestCoverage.measured)} hashed · `
+      + `${fmtCount(digestCoverage.unknown)} unknown · `
+      + `${fmtCount(catalog.overlaps?.exactName?.length ?? 0)} exact-name overlap group(s)`);
+  }
+  for (const [host, source] of Object.entries(catalog.pluginSources ?? {})) {
+    field(`${host} plugin inventory`, `${source.status} · ${source.authority}${source.reason ? ` · ${source.reason}` : ''}`);
+  }
+}
+
+function renderCatalogPressure(catalog) {
+  const sink = reasonSink();
+  const pressureRows = [];
+  for (const project of catalog.projects ?? []) {
+    for (const host of catalog.hosts ?? []) {
+      const facts = project.byHost?.[host];
+      pressureRows.push([
+        project.label, host,
+        sink.cell(facts?.sources?.project?.skill),
+        sink.cell(facts?.sources?.user?.skill),
+        sink.cell(facts?.sources?.plugin?.skill),
+        sink.cell(facts?.overlaps?.skillNames),
+        sink.cell(facts?.overlaps?.skillDigests),
+      ]);
+    }
+  }
+  if (pressureRows.length) {
+    console.log('');
+    info(dim('project capability pressure (inventory only; context inclusion is host-owned and unknown)'));
+    table(['PROJECT', 'HOST', 'PROJECT SKILLS', 'USER SKILLS', 'PLUGIN SKILLS', 'NAME OVERLAP', 'BODY OVERLAP'], pressureRows);
+    sink.report();
+    info(dim('read-only remediation: ak x skills plan --project <path>'));
+  }
+}
+
 function renderCatalog(catalog) {
   deepHeading('Catalog', catalog);
   if (!catalog) {
@@ -275,6 +312,8 @@ function renderCatalog(catalog) {
     host, ...kinds.map((kind) => sink.cell(catalog.perHost?.[host]?.[kind])),
   ]));
   sink.report();
+  renderCatalogEvidence(catalog);
+  renderCatalogPressure(catalog);
   if (catalog.degraded?.length) info(dim(`unreadable surfaces: ${catalog.degraded.join(', ')}`));
   if (catalog.truncated?.length) {
     info(dim(`capped surfaces (counts are floors): ${catalog.truncated.join(', ')}`));

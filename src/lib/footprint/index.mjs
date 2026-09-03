@@ -39,6 +39,7 @@ import { collectRuntimeCensus } from './runtime.mjs';
 import { collectInstall } from './install.mjs';
 import { collectStorage } from './storage.mjs';
 import { collectCatalog } from './catalog.mjs';
+import { probeCatalogDrift } from './catalog-evidence.mjs';
 import { collectProjects } from './projects.mjs';
 import { collectConsumers } from './consumers.mjs';
 import { discoverProjectSources } from './project-sources.mjs';
@@ -237,8 +238,8 @@ export function createSystemCollector({
   const snapshotOpts = { ...(snapshotFile ? { file: snapshotFile } : {}), fsImpl };
 
   /** @type {{ at: number, runtime: any, knownFiles: object,
-   *           snapshot: ReturnType<typeof readSnapshot>,
-   *           sections: Record<string, any>, freshness: object }|null} */
+ *           snapshot: ReturnType<typeof readSnapshot>,
+ *           sections: Record<string, any>, freshness: object, catalogDrift: object }|null} */
   let cheap = null;
   /** @type {Promise<object>|null} — the single-flight slot (invariant 7). */
   let inFlight = null;
@@ -270,6 +271,7 @@ export function createSystemCollector({
 
     const persisted = readSnapshotImpl(snapshotOpts);
     const freshness = snapshotFreshness(persisted, { now: at, staleAfterMs });
+    const catalogDrift = probeCatalogDrift(persisted.sections?.['catalog']?.sourceStamps, { fsImpl, asOf: at });
     // Carried forward, not re-stamped as current: a figure measured last week
     // is presented with last week's asOf (invariant 3).
     const sections = persisted.present
@@ -285,6 +287,7 @@ export function createSystemCollector({
       snapshot: persisted,
       sections,
       freshness,
+      catalogDrift,
     };
     return cheap;
   }
@@ -309,6 +312,7 @@ export function createSystemCollector({
         reason,
         completeness,
         ...tier.freshness,
+        catalogDrift: tier.catalogDrift,
       },
       cheapTier: { asOf: tier.at, ttlMs },
       scan: { ...scan },

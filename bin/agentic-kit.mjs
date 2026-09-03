@@ -42,6 +42,7 @@ const PLUMBING = Object.assign(Object.create(null), {
   'host': () => import('../src/commands/x/host.mjs'),
   'reference': () => import('../src/commands/x/reference.mjs'),
   'ruflo-mcp': () => import('../src/commands/x/ruflo-mcp.mjs'),
+  'skills': () => import('../src/commands/x/skills.mjs'),
   'statusline': () => import('../src/commands/x/statusline.mjs'),
   'verify': () => import('../src/commands/x/verify.mjs'),
 });
@@ -85,6 +86,7 @@ Plumbing (power users) — each takes --help:
   ak x mcp [status|pick|off]   MCP registration + tool-family deny rules
   ak x host [status|pick|refresh|off]   manage hosts, routing, and provider bindings
   ak x reference [diff|sync]   CLAUDE.md managed-block inspection/reconcile
+  ak x skills plan             read-only project skill evidence + remediation plan
   ak x statusline [status|codex native|codex extended|codex off]   manage Codex's native user status line
   ak x verify [learning|security|aqe|providers|harvest|all]   deep proofs (slow, spawns real CLIs)
   ak x improvement-eval [...]  causal self-improvement eval (route Q-learner)`;

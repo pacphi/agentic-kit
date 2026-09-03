@@ -181,7 +181,12 @@ is what a user selects.
 | RuntimeCensus | The ephemeral point-in-time table of live host processes, daemons, and machine denominators |
 | StorageNode | One node in the category → host → project → session breakdown: bytes + file count |
 | ReclaimableCandidate | An advisory row naming reclaimable space, its path, and its rationale — never an action |
-| CatalogItem | A deduplicated deployed artifact (skill, agent, command, plugin, MCP server) with a per-host presence matrix |
+| CatalogItem | A canonical standalone or plugin-qualified capability identity with per-host/source occurrences; logical-name and entrypoint-digest overlap are relationships, not identity |
+| Catalog occurrence | One observed capability placement: host, source scope, project, artifact path, producer/version/state, digest status, and evidence authority |
+| Project capability pressure | Per-project/per-host inventory of project, user, and enabled-plugin contributions plus exact-name/body overlap; never a claim about host context inclusion |
+| Entrypoint digest | SHA-256 of one bounded regular capability entrypoint; equality proves only those bytes, not supporting files, ownership, safety, or context loading |
+| Maintenance plan | A content-derived, read-only classification and projected change set; it is evidence for a human decision, not authorization to mutate |
+| Maintenance receipt | Proposed durable evidence binding intent, authority, exact inputs, action, result, verification, and rollback for a Maintenance transaction |
 | ProjectFootprint | One project's size facts: approximate LOC by language, tree/`.git`/`node_modules` bytes, last activity, and an optional git-remote web link ("local only" when absent) |
 | Deep scan | The explicit, user-triggered, single-flight full measurement pass that produces a FootprintSnapshot |
 | Cheap tier | The per-request census + known-file stats + snapshot carry-forward served on every read |

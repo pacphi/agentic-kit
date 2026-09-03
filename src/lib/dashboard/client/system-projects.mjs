@@ -368,11 +368,127 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     countsEl.innerHTML='<div class="sy-tiles">'+tiles+"</div>";
   }
 
+  function pressureSkill(project,host,scope){
+    return project.byHost&&project.byHost[host]&&project.byHost[host].sources
+      &&project.byHost[host].sources[scope]&&project.byHost[host].sources[scope].skill;
+  }
+
+  function pressureSkillHtml(value){
+    var count=mval(value);
+    if(count==null)return '<span class="sy-unk">unknown</span><small class="sy-pressure-reason">'
+      +esc(value&&value.reason||"skill source was not measured")+'</small>';
+    return '<span class="sy-pressure-n">'+(value.partial?"at least ":"")+fmtNum(count)+"</span>";
+  }
+
+  function pressureRelationHtml(value){
+    var count=mval(value);
+    if(count==null)return '<span class="sy-unk">unknown</span><small class="sy-pressure-reason">'
+      +esc(value&&value.reason||"relationship was not measured")+'</small>';
+    return '<span class="sy-pressure-n">'+(value.partial?"at least ":"")+fmtNum(count)+"</span>";
+  }
+
+  function pressureHostIsRelevant(project,host){
+    var value=pressureSkill(project,host,"project"),count=mval(value),reason=value&&value.reason||"";
+    return count>0||(count==null&&!/not supported/.test(reason));
+  }
+
+  function pressureHosts(project,hosts){
+    return hosts.filter(function(host){return pressureHostIsRelevant(project,host);});
+  }
+
+  function pressureOverlap(project,hosts,key){
+    var highest=0,known=false;
+    for(var i=0;i<hosts.length;i++){
+      var value=project.byHost&&project.byHost[hosts[i]]&&project.byHost[hosts[i]].overlaps
+        &&project.byHost[hosts[i]].overlaps[key],count=mval(value);
+      if(count!=null){known=true;highest=Math.max(highest,count);}
+    }
+    return known?highest:null;
+  }
+
+  function pressurePath(project){
+    var parts=String(project.project||"").split(/[\\/]/).filter(Boolean);
+    return parts.slice(-3).join("/")||project.project||"unknown path";
+  }
+
+  function pressureProjectHtml(project,hosts){
+    var relevant=pressureHosts(project,hosts),rows="",chips="",i;
+    for(i=0;i<relevant.length;i++){
+      var host=relevant[i],view=project.byHost&&project.byHost[host],over=view&&view.overlaps;
+      rows+='<tr><th scope="row" class="mono">'+esc(host)+'</th>'
+        +'<td>'+pressureSkillHtml(pressureSkill(project,host,"project"))+'</td>'
+        +'<td>'+pressureSkillHtml(pressureSkill(project,host,"user"))+'</td>'
+        +'<td>'+pressureSkillHtml(pressureSkill(project,host,"plugin"))+'</td>'
+        +'<td>'+pressureRelationHtml(over&&over.skillNames)+'</td>'
+        +'<td>'+pressureRelationHtml(over&&over.skillDigests)+'</td></tr>';
+      var projectCount=mval(pressureSkill(project,host,"project"));
+      chips+='<span class="sy-pressure-chip"><b>'+esc(host)+'</b> '
+        +(projectCount==null?"unknown":fmtNum(projectCount))+' skills</span>';
+    }
+    var names=pressureOverlap(project,relevant,"skillNames");
+    var entries=pressureOverlap(project,relevant,"skillDigests");
+    var command=(project.guidance||[]).map(function(row){return row.nextCommand;}).filter(Boolean)[0]||null;
+    var status=project.complete
+      ?'<span class="sy-pressure-state sy-good">Inventory complete</span>'
+      :'<span class="sy-pressure-state sy-warn">Partial inventory</span>';
+    var signals=(names?'<span class="sy-pressure-state sy-warn">'+fmtNum(names)+' name overlap'+(names===1?"":"s")+'</span>':"")
+      +(entries?'<span class="sy-pressure-state">'+fmtNum(entries)+' matching entrypoint'+(entries===1?"":"s")+'</span>':"");
+    return '<details class="sy-pressure-project"'+(project.launching?' open data-launching="true"':"")+'>'
+      +'<summary><span class="sy-pressure-project-id"><span><b>'+esc(project.label)+'</b>'
+      +(project.launching?'<span class="sy-current">current project</span>':"")+'</span>'
+      +'<span class="sy-pressure-path" title="'+esc(project.project)+'">'+esc(pressurePath(project))+'</span></span>'
+      +'<span class="sy-pressure-meta">'+chips+status+signals+'</span></summary>'
+      +'<div class="sy-pressure-detail"><div class="sy-path">'+esc(project.project)+'</div>'
+      +'<div class="sy-tblwrap" tabindex="0" aria-label="'+esc(project.label)+' skill pressure by host">'
+      +'<table class="sy-table sy-pressure-t"><caption class="sr-only">Project, user, and plugin skill counts for '+esc(project.label)+'.</caption>'
+      +'<thead><tr><th scope="col">Host</th><th scope="col">Project skills</th><th scope="col">User skills</th>'
+      +'<th scope="col">Plugin skills</th><th scope="col">Name overlaps</th><th scope="col">Matching entrypoints</th></tr></thead>'
+      +'<tbody>'+rows+'</tbody></table></div>'
+      +(command?'<div class="sy-pressure-action"><span><b>Inspect safely</b><small>Read-only plan; changes nothing.</small></span>'
+        +'<code>'+esc(command)+'</code></div>':"")+'</div></details>';
+  }
+
+  function renderProjectPressure(c){
+    var el=document.getElementById("sys-pressure");
+    if(!el)return;
+    if(!c){el.innerHTML=sysEmpty(NOT_SCANNED);return;}
+    var all=c.projects||[],hosts=c.hosts||[];
+    var projects=all.filter(function(project){return pressureHosts(project,hosts).length;});
+    if(!projects.length){el.innerHTML=sysEmpty("no project-local skill surface was observed.");return;}
+    projects.sort(function(a,b){
+      if(Boolean(a.launching)!==Boolean(b.launching))return a.launching?-1:1;
+      var aOverlap=pressureOverlap(a,pressureHosts(a,hosts),"skillNames")||0;
+      var bOverlap=pressureOverlap(b,pressureHosts(b,hosts),"skillNames")||0;
+      if(aOverlap!==bOverlap)return bOverlap-aOverlap;
+      return String(a.label).localeCompare(String(b.label));
+    });
+    var nameProjects=0,entryProjects=0,partialProjects=0,html="";
+    for(var i=0;i<projects.length;i++){
+      var relevant=pressureHosts(projects[i],hosts);
+      if(pressureOverlap(projects[i],relevant,"skillNames"))nameProjects++;
+      if(pressureOverlap(projects[i],relevant,"skillDigests"))entryProjects++;
+      if(!projects[i].complete)partialProjects++;
+      html+=pressureProjectHtml(projects[i],hosts);
+    }
+    var omitted=all.length-projects.length;
+    el.innerHTML='<div class="sy-pressure-overview" aria-label="Project skill pressure summary">'
+      +'<span><b>'+fmtNum(projects.length)+'</b> project'+(projects.length===1?"":"s")+' with local skills</span>'
+      +'<span><b>'+fmtNum(nameProjects)+'</b> with same-name overlap</span>'
+      +'<span><b>'+fmtNum(entryProjects)+'</b> with matching entrypoints</span>'
+      +'<span><b>'+fmtNum(partialProjects)+'</b> partial</span></div>'
+      +'<div class="sy-pressure-context"><b>Inventory</b> reports installed or discoverable sources. '
+      +'<b>Context inclusion is not reported by these hosts.</b>'
+      +(omitted?' '+fmtNum(omitted)+' project'+(omitted===1?" has":"s have")+' no local skill contribution and '+(omitted===1?"is":"are")+' omitted.':"")+'</div>'
+      +'<div class="sy-pressure-list" tabindex="0" aria-label="Projects with local skill pressure">'+html+'</div>'
+      +'<div class="sy-pressure-foot"><b>System measures; Maintenance acts.</b> Expand one project for source counts and its read-only plan command.</div>';
+  }
+
   function renderSysCatalog(d){
     var c=d.catalog;
     var radar=document.getElementById("sys-radar");
     var countsEl=document.getElementById("sys-catcounts");
     var matrix=document.getElementById("sys-matrix");
+    renderProjectPressure(c);
     if(!c){
       if(radar)radar.innerHTML=sysEmpty(NOT_SCANNED);
       if(countsEl)countsEl.innerHTML="";
@@ -396,7 +512,7 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
   // so the default survives a payload that grows a new kind or host: an unknown
   // option is INCLUDED until the user has expressed an opinion, never silently
   // filtered out.
-  var catKinds=null,catHosts=null;
+  var catKinds=null,catHosts=null,catScopes=null;
 
   function catalogChip(group,value,label,on){
     return '<button class="chipf'+(on?" on":"")+'" type="button" data-cat-'+group+'="'+esc(value)
@@ -422,6 +538,14 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
       }
       hostsEl.innerHTML=html;
     }
+    var scopes=c.scopes||[],scopesEl=document.getElementById("sys-cat-scopes");
+    if(scopesEl){
+      html="";
+      for(i=0;i<scopes.length;i++){
+        html+=catalogChip("scope",scopes[i],scopes[i],!catScopes||catScopes.indexOf(scopes[i])>=0);
+      }
+      scopesEl.innerHTML=html;
+    }
   }
 
   function paintCatalogMatrix(c){
@@ -440,19 +564,31 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
         for(j=0;j<ih.length&&!carried;j++)if(catHosts.indexOf(ih[j])>=0)carried=true;
         if(!carried)continue;
       }
+      if(catScopes){
+        var scoped=false,itemScopes=it.sourceScopes||[];
+        for(j=0;j<itemScopes.length&&!scoped;j++)if(catScopes.indexOf(itemScopes[j])>=0)scoped=true;
+        if(!scoped)continue;
+      }
       items.push(it);
     }
     var head="",body="";
-    for(i=0;i<hosts.length;i++)head+='<th class="cell">'+esc(hosts[i])+"</th>";
+    for(i=0;i<hosts.length;i++)head+='<th class="cell" scope="col">'+esc(hosts[i])+"</th>";
     for(i=0;i<items.length;i++){
       // The kind rides on the row now that the heading rows are gone, so a
       // filtered view never leaves a name unexplained.
+      var provider=null,presences=items[i].presence||[];
+      for(j=0;j<presences.length&&!provider;j++)provider=presences[j].provider;
+      var meta=(items[i].sourceScopes||[]).join(" / ");
+      if(provider)meta+=" \u00b7 "+provider.ref+(provider.version?" v"+provider.version:"");
+      if(items[i].digestCoverage&&items[i].digestCoverage.unique>1)meta+=" \u00b7 "+items[i].digestCoverage.unique+" body variants";
       body+='<tr><td class="nm" title="'+esc(items[i].kind+" \u00b7 "+items[i].name)+'">'
-        +esc(items[i].name)+'<span class="sy-kindtag">'+esc(KIND_LABEL[items[i].kind]||items[i].kind)+"</span></td>";
+        +esc(items[i].name)+'<span class="sy-kindtag">'+esc(KIND_LABEL[items[i].kind]||items[i].kind)+'</span>'
+        +'<div class="sy-catmeta">'+esc(meta)+"</div></td>";
       for(j=0;j<hosts.length;j++){
         var on=(items[i].hosts||[]).indexOf(hosts[j])>=0;
         body+='<td class="cell"><i class="'+(on?"on":"off")+'" title="'
-          +esc(hosts[j]+(on?" carries":" does not carry")+" "+items[i].name)+'"></i></td>';
+          +esc(hosts[j]+(on?" carries":" does not carry")+" "+items[i].name)+'"></i>'
+          +'<span class="sr-only">'+esc(hosts[j]+(on?" carries ":" does not carry ")+items[i].name)+"</span></td>";
       }
       body+="</tr>";
     }
@@ -463,34 +599,38 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
       return;
     }
     var filtered=items.length!==all.length;
-    matrix.innerHTML='<div class="sy-tblwrap sy-catalog-scroll"><table class="sy-table sy-matrix-t">'
-      +"<thead><tr><th>Name</th>"+head+"</tr></thead><tbody>"+body+"</tbody></table></div>"
+    matrix.innerHTML='<div class="sy-tblwrap sy-catalog-scroll" tabindex="0" aria-label="Catalog presence matrix"><table class="sy-table sy-matrix-t">'
+      +'<caption class="sr-only">Capabilities and the hosts that carry them.</caption>'
+      +"<thead><tr><th scope=\"col\">Name and source</th>"+head+"</tr></thead><tbody>"+body+"</tbody></table></div>"
       +'<div class="sy-liner">'
       +(filtered
         ?esc(fmtNum(items.length))+" of "+esc(fmtNum(all.length))+" deduplicated items shown"
         :esc(fmtNum(all.length))+" deduplicated item"+(all.length===1?"":"s")
           +" across user scope and every project on disk")
-      +". A dot means that host carries the name.</div>";
+      +". A dot means that host carries this catalog identity. Inventory does not prove context inclusion.</div>";
+    var status=document.getElementById("sys-cat-status");
+    if(status)status.textContent=fmtNum(items.length)+" of "+fmtNum(all.length)+" catalog items shown";
   }
 
   export function wireCatalogFilters(){
     document.addEventListener("click",function(e){
       var t=e.target;
       if(!t||!t.closest)return;
-      var btn=t.closest("[data-cat-kind],[data-cat-host]");
+      var btn=t.closest("[data-cat-kind],[data-cat-host],[data-cat-scope]");
       if(!btn)return;
       var isKind=btn.hasAttribute("data-cat-kind");
-      var group=isKind?"kind":"host";
+      var isHost=btn.hasAttribute("data-cat-host");
+      var group=isKind?"kind":(isHost?"host":"scope");
       var value=btn.getAttribute("data-cat-"+group);
-      var all=(SYSTEM&&SYSTEM.catalog&&(isKind?SYSTEM.catalog.kinds:SYSTEM.catalog.hosts))||[];
-      var cur=(isKind?catKinds:catHosts)||all.slice();
+      var all=(SYSTEM&&SYSTEM.catalog&&(isKind?SYSTEM.catalog.kinds:(isHost?SYSTEM.catalog.hosts:SYSTEM.catalog.scopes)))||[];
+      var cur=(isKind?catKinds:(isHost?catHosts:catScopes))||all.slice();
       var at=cur.indexOf(value);
       if(at>=0)cur=cur.slice(0,at).concat(cur.slice(at+1));else cur=cur.concat([value]);
       // Turning the last one back on is "no filter", not "a filter that happens
       // to match everything" — so a later payload with a new option still
       // includes it.
       var next=cur.length===all.length?null:cur;
-      if(isKind)catKinds=next;else catHosts=next;
+      if(isKind)catKinds=next;else if(isHost)catHosts=next;else catScopes=next;
       if(SYSTEM&&SYSTEM.catalog){renderCatalogFilters(SYSTEM.catalog);paintCatalogMatrix(SYSTEM.catalog);}
     });
   }
@@ -746,11 +886,12 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     // has to make "older than seven days" obvious. Reusing the Limits view's
     // formatter keeps one vocabulary for "how old is this figure".
     var age=limAge(Date.now()-Math.max(0,Number(snap.ageMs)||0));
-    el.textContent="deep scan \u00b7 "+age+(snap.stale?" \u00b7 stale, rescan":"")
+    var drift=snap.catalogDrift,changed=drift&&drift.status==="changed";
+    el.textContent="deep scan \u00b7 "+age+(changed?" \u00b7 catalog changed, rescan":(snap.stale?" \u00b7 stale, rescan":""))
       +(scan&&scan.error?" \u00b7 last scan reported a problem":"");
     el.title=(scan&&scan.error?scan.error+" \u2014 ":"")
       +"deep-tier figures were measured "+age+"; nothing rescans on its own";
-    if(snap.stale)el.setAttribute("data-stale","1");
+    if(snap.stale||changed)el.setAttribute("data-stale","1");
   }
 
   function renderSystem(){
@@ -758,7 +899,7 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     if(SYSTEM.error){
       var ids=["sys-kpis","sys-gauge","sys-consumers","sys-donut","sys-hostsplit","sys-growth",
         "sys-learning","sys-reclaim","sys-topsessions","sys-procs","sys-mem","sys-daemons","sys-radar",
-        "sys-catcounts","sys-matrix","sys-projects"];
+        "sys-catcounts","sys-pressure","sys-matrix","sys-projects"];
       var msg=sysEmpty(SYSTEM.error+(SYSTEM.reason?" \u2014 "+SYSTEM.reason:""));
       for(var i=0;i<ids.length;i++){
         var el=document.getElementById(ids[i]);
@@ -836,4 +977,3 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
       loadSystem(true,t.getAttribute("aria-pressed")!=="true");
     });
   }
-

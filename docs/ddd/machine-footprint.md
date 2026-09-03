@@ -73,6 +73,8 @@ read not on this list is a defect, and adding one is an amendment to this docume
 | OpenCode's session store | `project-sources.mjs` | the `directory` column, read-only | every other column, and every message row |
 | A project's own manifests | `stack-detect.mjs` | dependency **keys** (and, for `path:`/`workspace:` entries, enough of the value to reject them) | manifest values, scripts, and anything executable |
 | A project's own source files | `stack-detect.mjs` | the count of `\n` bytes, and whether byte 0 of the first chunk region is NUL | the text — each 64 KB chunk is counted and immediately overwritten |
+| Skill/command entrypoints | `catalog.mjs` | SHA-256 of a regular, non-symlink file up to 1 MiB | descriptions or body text; only the digest leaves the read |
+| Host-native plugin inventory | `claude plugin list --json`, `codex plugin list --json` | whitelisted identity, version, scope, enabled state, install/cache location, lifecycle policy | MCP definitions, headers, credentials, arbitrary source documents, unknown fields |
 
 Three of those rows are new since the first draft of this document, and they are the reason this
 section exists rather than a one-line invariant.
@@ -142,8 +144,8 @@ FootprintSnapshot  { asOf, completeness, install, runtime, storage, catalog, pro
                                                                              persisted)
   storage:   StorageBreakdown     { nodes: category → host → project → session, growth, topN,
                                     reclaimables[], reclaimSummary: { tiers[], combined: null } }
-  catalog:   CatalogInventory     { skills[], agents[], commands[], plugins[], mcpServers[],
-                                    each with per-host presence }
+  catalog:   CatalogInventory v2  { items[], occurrences, scopes, providers/versions, overlaps,
+                                    project pressure, source stamps }
   projects:  ProjectFootprint[]   { path, label, remote?: {host, slug, webUrl}, stack: {languages,
                                     stack, unrecognized}, treeBytes, gitBytes, nodeModulesBytes,
                                     lastActivity }
@@ -404,24 +406,50 @@ promises less — never in the one that reads as free space.
 
 ### Catalog inventory
 
-Deduplicated `CatalogItem`s across hosts — skills, agents, commands, plugins, MCP servers —
-keyed by normalized name, each with a per-host presence matrix (which hosts carry it, from which
-surface it was observed). Counting is by manifest/directory-entry **names** on the host catalog
-surfaces Integration management already projects into; item file contents are not parsed beyond
-what naming requires. Scope is **user plus the launching repository plus every observed project
-still on disk**. The launching root is included explicitly because a fresh repository has no
-transcript yet; a skill defined in any observed repository is as deployed as one in `~/.claude`,
-and the question this inventory answers is what the machine carries. Deduplication by `(kind,
-name)` means a name defined in five projects is still one row, so the inventory grows with distinct
-names rather than with project count.
+`CatalogInventory v2` separates identity from relationship. Standalone artifacts still deduplicate
+by `(kind, normalized logical name)`, but a plugin contribution is keyed by kind, full
+`plugin@marketplace` producer identity, and logical name. Thus standalone `skill-creator` and
+`skill-creator@claude-plugins-official`'s contribution remain separate rows; explicit overlap
+groups report that their logical names or bounded entrypoint digests match.
 
-The presence matrix carries two independent multi-select filters — by kind and by host — with every
+Every occurrence retains host, surface, source scope (`user`, `project`, or `plugin`), project
+path, exact artifact path, plugin provider/version/enabled state, evidence authority, and bounded
+entrypoint digest status. Digest equality is evidence, not ownership: it says the entrypoint bytes
+match, not that supporting scripts/references match or that either copy is safe to delete.
+
+Scope is **user plus the launching repository plus every observed project still on disk**,
+including `~/.agents/skills`, project `.agents/skills`, and plugin
+`.codex-plugin/migrated-command-skills`. Native plugin inventory is authoritative when available;
+manifest/config/cache fallback stays visible as partial evidence. Installed-disabled plugins remain
+inventory rows but do not contribute enabled plugin capabilities.
+
+The project-pressure projection separates project, user, and enabled-plugin skill contributions
+per host and reports exact skill-name and matching-entrypoint relationships. Its summary groups
+one native disclosure per project, keeps the launching project first, and omits projects whose
+supported local skill surfaces measured zero. Expanding a project reveals the host breakdown and
+one deduplicated read-only plan command. Inventory completeness is distinct from model-context
+inclusion: hosts do not report the latter, so the dashboard states that limitation once instead of
+repeating a contradictory-looking `complete · context unknown` label.
+
+The presence matrix carries three independent multi-select filters — by kind, host, and source
+scope — with every
 option selected at first paint, so the default remains the whole inventory. The host filter matches
 **any** selected host rather than all of them: "carried by codex" is the question a reader is
 asking, and intersecting would answer a different one. A filtered view states how much it is
 hiding, and each row carries its own kind, because a filtered list must never leave a name
 unexplained. The config-surface row (managed CLAUDE.md/AGENTS.md block count, settings
 file sizes) lives here because it answers the same "what is deployed" question.
+
+A deep scan persists bounded stat stamps for active surfaces and entrypoints. The cheap tier
+re-probes them and marks `catalog changed, rescan` immediately when a watched path changes, rather
+than relying only on the seven-day age threshold. An unchanged probe is labelled
+`unchanged-at-probes`, never “fresh”: unobserved nested content still requires a deep rescan.
+
+`ak x skills plan --project <path>` consumes this inventory to classify project skills as current
+desired, receipt-owned-and-unchanged, exact known upstream, receipt-drifted/modified, unmeasured,
+or ambiguous/unreceipted. It reports git state, affected paths, projected counts, and a
+content-derived plan ID but performs no mutation. [Maintenance](maintenance.md) and issue #200 own
+future apply/verify/undo behavior.
 
 ### Project accounting
 
@@ -624,7 +652,9 @@ normative and this table restates it for readers of this document.
 | Ever seen / on disk | `everSeen` is every project any host ever recorded a session in, deletions included; `onDisk` is the measurable subset. Different questions, never one number |
 | Unresolved project | A transcript directory whose project path neither a declared `cwd` nor a filesystem-verified decode can name. Reported as such, never given a fabricated path; it makes `everSeen` a lower bound |
 | Stack detection | Per-project `languages` (which carry lines) and `stack` — frameworks, SDKs, tools — which carry presence only, plus the unrecognized tail of extensions and dependency names the registry could not name |
-| CatalogItem | A deduplicated deployed artifact (skill, agent, command, plugin, MCP server) with a per-host presence matrix; Codex project `.agents/skills` stays attributable separately from user/plugin surfaces |
+| CatalogItem | A canonical standalone or plugin-qualified identity with per-host/source occurrences and explicit name/digest relationships |
+| CatalogOccurrence | One host/source/project placement with provider/version/state, artifact path, and bounded digest evidence |
+| ProjectCapabilityPressure | Project/user/plugin contributions and exact overlap per project and host; context inclusion remains unknown |
 | ProjectFootprint | One project's size facts: approximate LOC by language, tree/`.git`/`node_modules` bytes, last activity, and an optional git-remote web link ("local only" when absent) |
 | Deep scan | The explicit, user-triggered, single-flight full measurement pass that produces a FootprintSnapshot |
 | Cheap tier | The per-request census + known-file stats + snapshot carry-forward served on every read |
