@@ -19,6 +19,7 @@ const HOME = sandboxHome('ak-setup');
 const paths = await import('../../src/lib/paths.mjs');
 const setup = await import('../../src/commands/setup.mjs');
 const { loadKitConfig } = await import('../../src/lib/config.mjs');
+const { codexMcpTopology, repairCodexMcpTopology } = await import('../../src/lib/mcp.mjs');
 assertSandboxed(paths, HOME);
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -28,6 +29,8 @@ const FLAGS = (over = {}) => ({
   codex: false, opencode: false, reconfigure: false,
   'with-deja-vu': false, 'deja-vu-mode': undefined, 'no-deja-vu': false, ...over,
 });
+const repairBackups = (file) => fs.readdirSync(path.dirname(file))
+  .filter((name) => name.startsWith(`${path.basename(file)}.ak-mcp-repair-`) && name.endsWith('.bak'));
 
 const dejaVuPlan = ({ mode = 'mcp', hosts = ['claude'] } = {}) => ({
   changed: true,
@@ -434,6 +437,110 @@ test('--codex project dry-run discloses current registrations while preserving C
     assert.match(out, /OpenAI Codex — approval\/sandbox policy unchanged/);
     assert.doesNotMatch(out, /codex mcp-server|mcp__codex__codex/);
     assert.match(out, /\[user\] mcp-registration: ak x ruflo-mcp/);
+  } finally { process.chdir(cwd); rmrf(project); }
+});
+
+test('--codex project setup discloses repair of a pre-existing recursive user registration', async () => {
+  seedHome();
+  const project = sandboxProject('ak-setup-codex-repair');
+  fs.mkdirSync(paths.codexDir(), { recursive: true });
+  fs.writeFileSync(paths.codexConfigPath(), [
+    '[mcp_servers.codex]', 'command = "codex"', 'args = ["mcp-server"]', '',
+  ].join('\n'));
+  const before = snapshot(HOME);
+  const cwd = process.cwd();
+  process.chdir(project);
+  try {
+    const { result, out } = await captureLog(() => setup.run({
+      flags: FLAGS({ 'dry-run': true, codex: true }), pkgRoot: PKG_ROOT,
+    }));
+    assert.equal(result, 0);
+    assert.match(out, /Codex MCP topology repair/);
+    assert.match(out, /\[user\] mcp-registration-removal: \[mcp_servers\.codex\]/);
+    assert.match(out, /deprecated recursive Codex transport/);
+    assert.doesNotMatch(out, new RegExp(HOME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  } finally { process.chdir(cwd); rmrf(project); }
+  assertUnchanged(before, HOME, 'a dry-run Codex repair must not mutate user configuration');
+});
+
+test('--codex --yes executes the disclosed repair before project wiring and verifies removal', async () => {
+  seedHome();
+  const project = sandboxProject('ak-setup-codex-repair-apply');
+  fs.mkdirSync(paths.codexDir(), { recursive: true });
+  const configFile = paths.codexConfigPath();
+  fs.writeFileSync(configFile, [
+    '[mcp_servers.codex]', 'command = "codex"', 'args = ["mcp-server"]', '',
+  ].join('\n'));
+  const events = [];
+  const cwd = process.cwd();
+  process.chdir(project);
+  try {
+    const { result, out } = await captureLog(() => setup.run({
+      flags: FLAGS({ yes: true, codex: true }), pkgRoot: PKG_ROOT,
+      machineSetup: async () => { events.push('machine'); return true; },
+      repairCodexTopology: (plan, repairCwd) => repairCodexMcpTopology(plan, repairCwd, {
+        runner: async (command, args) => {
+          events.push(`remove:${command}:${args.at(-1)}`);
+          fs.writeFileSync(configFile, '');
+          return { code: 0, stdout: '', stderr: '' };
+        },
+        inspect: () => codexMcpTopology({ cwd: project, home: HOME }),
+      }),
+      projectSetup: async () => { events.push('project'); return true; },
+      finalizeSetup: async () => { events.push('finalize'); },
+    }));
+    assert.equal(result, 0, out);
+    assert.deepEqual(events, ['machine', 'remove:codex:codex', 'project', 'finalize']);
+    assert.match(out, /codex MCP repair: removed \[mcp_servers\.codex\]/);
+    assert.equal(codexMcpTopology({ cwd: project, home: HOME }).selfRegistrations.length, 0);
+    assert.equal(repairBackups(configFile).length, 1);
+  } finally { process.chdir(cwd); rmrf(project); }
+});
+
+test('--codex --minimal repairs user scope but leaves project Codex MCP configuration untouched', async () => {
+  seedHome();
+  const project = sandboxProject('ak-setup-codex-repair-minimal');
+  fs.mkdirSync(paths.codexDir(), { recursive: true });
+  const userFile = paths.codexConfigPath();
+  const projectCodexDir = path.join(project, '.codex');
+  const projectFile = path.join(projectCodexDir, 'config.toml');
+  fs.mkdirSync(projectCodexDir, { recursive: true });
+  const recursiveEntry = [
+    '[mcp_servers.codex]', 'command = "codex"', 'args = ["mcp-server"]', '',
+  ].join('\n');
+  const legacyEntry = '[mcp_servers.claude-flow]\ncommand = "ruflo"\nargs = ["mcp", "start"]\n';
+  fs.writeFileSync(userFile, `${recursiveEntry}${legacyEntry}`);
+  fs.writeFileSync(projectFile, recursiveEntry);
+  const events = [];
+  const cwd = process.cwd();
+  process.chdir(project);
+  try {
+    const { result, out } = await captureLog(() => setup.run({
+      flags: FLAGS({ yes: true, codex: true, minimal: true }), pkgRoot: PKG_ROOT,
+      machineSetup: async () => { events.push('machine'); return true; },
+      repairCodexTopology: (plan, repairCwd) => {
+        assert.deepEqual(plan.map((entry) => [entry.scope, entry.repairKind]),
+          [['user', 'recursive-codex']]);
+        return repairCodexMcpTopology(plan, repairCwd, {
+          runner: async () => {
+            events.push('remove-user');
+            fs.writeFileSync(userFile, legacyEntry);
+            return { code: 0, stdout: '', stderr: '' };
+          },
+          inspect: () => codexMcpTopology({ cwd: project, home: HOME }),
+        });
+      },
+      projectSetup: async () => { events.push('project'); return true; },
+      finalizeSetup: async () => { events.push('finalize'); },
+    }));
+    assert.equal(result, 0, out);
+    assert.deepEqual(events, ['machine', 'remove-user', 'finalize']);
+    assert.equal(codexMcpTopology({ cwd: project, home: HOME }).selfRegistrations.length, 1,
+      'only the intentionally out-of-scope project entry remains');
+    assert.equal(codexMcpTopology({ cwd: project, home: HOME }).rufloRegistrations.length, 1,
+      'machine-only setup keeps legacy Ruflo until project convergence can replace it');
+    assert.equal(fs.readFileSync(projectFile, 'utf8'), recursiveEntry);
+    assert.equal(fs.existsSync(`${projectFile}.bak`), false);
   } finally { process.chdir(cwd); rmrf(project); }
 });
 

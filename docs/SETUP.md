@@ -115,10 +115,21 @@ versions. The table below describes the current contract.
 | `.agents/skills/` | Ruflo's auto-detected Codex and skills.sh projections are suppressed. Existing unreceipted skills are preserved for review; agentic-kit never infers deletion ownership from a familiar name. AQE may install its current curated Codex skills when that integration is enabled. | Only the explicitly enabled host integration may populate this root. |
 | Project `AGENTS.md` | Arbitrary project content and upstream-owned sentinels are preserved. Agentic-kit replaces/removes only its own complete sentinel-delimited blocks and collapses duplicate owned blocks. | Created only when a selected integration needs project-scoped managed guidance. |
 
-Project setup also reapplies enabled host/provider wiring and seeds the default
-per-activity routing policy in dual-host mode. With Codex enabled, it registers
-the workspace-aware Ruflo MCP in Codex and retires only agentic-kit-owned legacy
-`codex mcp-server` project entries.
+Setup with Codex enabled inventories the effective user Codex MCP configuration
+even in machine-only mode. When project setup is active it inventories that
+project's Codex MCP configuration too. An exact recursive
+`[mcp_servers.codex]` entry and the exact deprecated `claude-flow` Ruflo
+transport are listed in the setup trust manifest, backed up, removed only after
+the setup confirmation (or `--yes`), and re-probed before setup may report
+success. A fresh recovery copy captures the immediate pre-repair bytes; symlinked
+or otherwise non-regular config files remain report-only. Project files and the
+legacy Ruflo replacement stay outside this repair scope under `--minimal` or
+when setup is run outside a project.
+
+Project setup also reapplies enabled host/provider wiring, seeds the default
+per-activity routing policy in dual-host mode, registers the workspace-aware
+Ruflo MCP in Codex, and retires agentic-kit-owned legacy Claude-to-Codex project
+entries.
 
 ### Guidance precedence and repeatability
 

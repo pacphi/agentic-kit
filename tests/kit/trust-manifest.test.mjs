@@ -32,6 +32,39 @@ test('managed browser disclosure does not imply a host approval-policy change', 
   assert.doesNotMatch(rendered, /receives the listed grants/);
 });
 
+test('setup discloses bounded Codex MCP removals without leaking machine paths', () => {
+  const manifest = setupTrustManifest({
+    agentBrowser: false, integrations: { hosts: { codex: true } },
+  }, {
+    hosts: [], project: true,
+    codexRepairPlan: [
+      { name: 'codex', scope: 'user', repairKind: 'recursive-codex', file: '/Users/alice/.codex/config.toml' },
+      { name: 'claude-flow', scope: 'user', repairKind: 'legacy-ruflo', file: '/Users/alice/.codex/config.toml' },
+    ],
+  });
+  const repair = manifest.find((group) => group.componentId === 'codex-mcp-repair');
+  const rendered = trustManifestLines([repair]).join('\n');
+  assert.match(rendered, /\[user\] mcp-registration-removal: \[mcp_servers\.codex\]/);
+  assert.match(rendered, /\[user\] mcp-registration-removal: \[mcp_servers\.claude-flow\]/);
+  assert.match(rendered, /create a current-state recovery copy/);
+  assert.match(rendered, /through `codex mcp`/);
+  assert.match(rendered, /approval\/sandbox policy unchanged/);
+  assert.doesNotMatch(rendered, /\/Users\/alice/);
+});
+
+test('project Codex MCP repair disclosure names its bounded edit mechanism', () => {
+  const manifest = setupTrustManifest({ agentBrowser: false }, {
+    hosts: [], project: true,
+    codexRepairPlan: [{
+      name: 'codex', scope: 'project', repairKind: 'recursive-codex',
+      file: '/work/project/.codex/config.toml',
+    }],
+  });
+  const rendered = trustManifestLines(manifest).join('\n');
+  assert.match(rendered, /with a bounded exact-table edit/);
+  assert.doesNotMatch(rendered, /\/work\/project/);
+});
+
 test('deja-vu setup disclosure is a companion group with exact v0.19 boundaries', () => {
   const cfg = {
     integrations: {

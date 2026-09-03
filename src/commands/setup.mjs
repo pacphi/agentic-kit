@@ -12,7 +12,10 @@ import * as heal from '../lib/heal.mjs';
 import { fixStatusline } from '../lib/statusline.mjs';
 import { reconcileGuidance } from '../lib/blocks.mjs';
 import { captureProjectGuidance, reconcileProjectGuidance } from '../lib/project-guidance.mjs';
-import { register as mcpRegister, applyExclusions, registrationStatus, agentBrowserMcpConfigured } from '../lib/mcp.mjs';
+import {
+  register as mcpRegister, applyExclusions, registrationStatus, agentBrowserMcpConfigured,
+  codexMcpTopology, codexMcpRepairPlan, repairCodexMcpTopology,
+} from '../lib/mcp.mjs';
 import { reconcileOpencodeGuidance } from '../lib/opencode.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
 import { hostsWithLifecycle, lifecycleAdapterFor, lifecycleExecutionEnabled, detectionBinFor } from '../lib/adapters/lifecycle-registry.mjs';
@@ -147,9 +150,13 @@ export function projectPermissionManifest(cfg, /** @type {{hosts?: any[]}} */ { 
 export const PROJECT_PERMISSION_MANIFEST = Object.freeze(projectPermissionManifest({}));
 
 /** @param {any} cfg
- * @param {{project?: boolean, companionPreflight?: any}} [options] */
-export function discloseSetupTrust(cfg, { project = false, companionPreflight } = {}) {
-  const manifest = setupTrustManifest(cfg, { project, companionPreflight });
+ * @param {{project?: boolean, companionPreflight?: any, codexRepairPlan?: any[]}} [options] */
+export function discloseSetupTrust(cfg, {
+  project = false, companionPreflight, codexRepairPlan: repairPlan,
+} = {}) {
+  const manifest = setupTrustManifest(cfg, {
+    project, companionPreflight, codexRepairPlan: repairPlan,
+  });
   if (!manifest.length) return manifest;
   info('setup trust manifest (evaluated before any machine, user, or project changes):');
   for (const line of trustManifestLines(manifest)) console.log(`  ${line}`);
@@ -715,7 +722,9 @@ export async function run_project({
  *  manifest (host + project + companion changes), honoring a declined
  *  confirmation. Returns `{code}` when `run()` must return immediately, or
  *  `{companionPreflight}` to continue. */
-async function resolveSetupTrust(cfg, flags, dejaVuLifecycle, confirm, willConfigureProject) {
+async function resolveSetupTrust(
+  cfg, flags, dejaVuLifecycle, confirm, willConfigureProject, repairPlan,
+) {
   let companionPreflight;
   try {
     companionPreflight = await preflightSetupDejaVu(cfg, dejaVuLifecycle, {
@@ -726,7 +735,7 @@ async function resolveSetupTrust(cfg, flags, dejaVuLifecycle, confirm, willConfi
     return { code: 1 };
   }
   const trustManifest = discloseSetupTrust(cfg, {
-    project: willConfigureProject, companionPreflight,
+    project: willConfigureProject, companionPreflight, codexRepairPlan: repairPlan,
   });
   if (companionPreflight?.error) {
     fail(`deja-vu preflight refused the plan (${safeCompanionCode(companionPreflight.error)})`);
@@ -796,7 +805,34 @@ async function finalizeSetupGuidanceAndMcp(cfg, pkgRoot, flags) {
   }
 }
 
-export async function run({ flags, pkgRoot, confirm = ask, dejaVuLifecycle = DEFAULT_DEJA_VU_LIFECYCLE }) {
+const DEFAULT_SETUP_RUNTIME = Object.freeze({
+  inspectCodexTopology: codexMcpTopology,
+  repairCodexTopology: repairCodexMcpTopology,
+  machineSetup: run_machine,
+  projectSetup: run_project,
+  finalizeSetup: finalizeSetupGuidanceAndMcp,
+});
+
+function setupCodexRepairPlan(cfg, cwd, willConfigureProject, inspectTopology) {
+  if (!cfg.integrations?.hosts?.codex) return [];
+  const plan = codexMcpRepairPlan(inspectTopology({ cwd }));
+  if (willConfigureProject) return plan;
+  return plan.filter((target) =>
+    target.scope === 'user' && target.repairKind === 'recursive-codex');
+}
+
+async function applySetupCodexRepairs(flags, repairPlan, cwd, repairTopology) {
+  if (flags['dry-run'] || !repairPlan.length) return true;
+  const repaired = await repairTopology(repairPlan, cwd);
+  reportOutcome('codex MCP repair', repaired);
+  return repaired.ok;
+}
+
+export async function run({
+  flags, pkgRoot, confirm = ask, dejaVuLifecycle = DEFAULT_DEJA_VU_LIFECYCLE,
+  ...runtimeOverrides
+}) {
+  const runtime = { ...DEFAULT_SETUP_RUNTIME, ...runtimeOverrides };
   const dejaVuFlags = validateDejaVuSetupFlags(flags);
   if (!dejaVuFlags.ok) {
     fail(dejaVuFlags.error);
@@ -817,7 +853,12 @@ export async function run({ flags, pkgRoot, confirm = ask, dejaVuLifecycle = DEF
   // persists this object; a declined confirmation returns before saveKitConfig.
   const hostFlags = applySetupHostFlags(cfg, flags);
   const dejaVuFlagsResult = applySetupDejaVuFlags(cfg, flags);
-  const trust = await resolveSetupTrust(cfg, flags, dejaVuLifecycle, confirm, willConfigureProject);
+  const repairPlan = setupCodexRepairPlan(
+    cfg, process.cwd(), willConfigureProject, runtime.inspectCodexTopology,
+  );
+  const trust = await resolveSetupTrust(
+    cfg, flags, dejaVuLifecycle, confirm, willConfigureProject, repairPlan,
+  );
   if (trust.code !== undefined) return trust.code;
   const { companionPreflight } = trust;
 
@@ -825,7 +866,10 @@ export async function run({ flags, pkgRoot, confirm = ask, dejaVuLifecycle = DEF
     flags, cfg, hostFlags, companionPreflight, dejaVuFlagsResult,
   });
 
-  if (!(await run_machine({ flags, pkgRoot, cfg }))) return 1;
+  if (!(await runtime.machineSetup({ flags, pkgRoot, cfg }))) return 1;
+  if (!(await applySetupCodexRepairs(
+    flags, repairPlan, process.cwd(), runtime.repairCodexTopology,
+  ))) return 1;
   // Companion execution is deliberately sequenced after every enabled host is
   // installed and its lifecycle wiring has converged. It never uses upstream
   // aggregate/warmup/update commands; the preflight accepts only exact targets
@@ -842,11 +886,11 @@ export async function run({ flags, pkgRoot, confirm = ask, dejaVuLifecycle = DEF
   if (!flags['dry-run']) saveKitConfig(cfg);
 
   if (inProject && !flags.minimal) {
-    if (!(await run_project({ flags, cfg, trustDisclosed: true }))) return 1;
+    if (!(await runtime.projectSetup({ flags, cfg, trustDisclosed: true }))) return 1;
   } else if (!flags.minimal) {
     info('not inside a project (no .git here) — run `ak setup` from a repo to set one up');
   }
-  if (!flags['dry-run']) await finalizeSetupGuidanceAndMcp(cfg, pkgRoot, flags);
+  if (!flags['dry-run']) await runtime.finalizeSetup(cfg, pkgRoot, flags);
 
   console.log('');
   ok(bold('setup complete — `agentic-kit` anytime for status, `ak sync` after upgrades'));

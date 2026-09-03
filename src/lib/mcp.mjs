@@ -5,6 +5,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { rufloNodeModules, claudeUserMcpPath, claudeSettingsPath, repoRoot } from './paths.mjs';
 import { run } from './exec.mjs';
 import { readJson, addDenyRules, removeDenyRules } from './settings.mjs';
@@ -171,21 +172,59 @@ function tomlStringArray(value) {
   } catch { return null; }
 }
 
-/** Read only Codex MCP table identity/command/argv facts. This deliberately is
- * not a general TOML parser: status needs a spawn-free, fail-closed topology
- * check and never rewrites these host-owned files. */
-function codexMcpRegistrations(file, scope) {
+const sameArgs = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+const fingerprint = (value) => createHash('sha256').update(value).digest('hex');
+
+function mcpTableName(table) {
+  const match = /^mcp_servers\.(?:"([^"\n]+)"|([A-Za-z0-9_-]+))$/.exec(table.trim());
+  return match ? (match[1] ?? match[2]) : null;
+}
+
+/** Read the bounded base-table sections behind Codex MCP registrations. This
+ * is deliberately not a general TOML parser: only a base
+ * `[mcp_servers.<name>]` table with single-line string command/args facts is
+ * observed. Any extra field or child table makes the entry ineligible for
+ * automatic repair, while status can still report a suspicious topology. */
+function codexMcpSections(file, scope) {
   let source;
-  try { source = fs.readFileSync(file, 'utf8'); } catch { return []; }
-  const headers = [...source.matchAll(/^\s*\[mcp_servers\.(?:"([^"\n]+)"|([A-Za-z0-9_-]+))\]\s*$/gm)];
-  return headers.map((header, index) => {
+  let regularFile = false;
+  try {
+    const stat = fs.lstatSync(file);
+    regularFile = stat.isFile() && !stat.isSymbolicLink();
+    source = fs.readFileSync(file, 'utf8');
+  } catch { return []; }
+  const headers = [...source.matchAll(/^[ \t]*\[(?!\[)([^\]\n]+)\][ \t]*(?:#.*)?$/gm)];
+  return headers.flatMap((header, index) => {
+    const name = mcpTableName(header[1]);
+    if (!name) return [];
     const bodyStart = header.index + header[0].length;
     const bodyEnd = headers[index + 1]?.index ?? source.length;
     const body = source.slice(bodyStart, bodyEnd);
     const command = tomlString(/^\s*command\s*=\s*("(?:[^"\\]|\\.)*")\s*$/m.exec(body)?.[1]);
     const args = tomlStringArray(/^\s*args\s*=\s*(\[[^\n]*\])\s*$/m.exec(body)?.[1]);
-    return { name: header[1] ?? header[2], scope, file, command, args };
+    const meaningful = body.split(/\r?\n/).map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('#'));
+    const exactFields = meaningful.length === 2
+      && meaningful.some((line) => /^command\s*=/.test(line))
+      && meaningful.some((line) => /^args\s*=/.test(line));
+    const childPrefixes = [`mcp_servers.${name}.`, `mcp_servers."${name}".`];
+    const hasChildren = headers.some((candidate) =>
+      childPrefixes.some((prefix) => candidate[1].trim().startsWith(prefix)));
+    let repairKind = null;
+    if (exactFields && !hasChildren && name === 'codex' && command === 'codex'
+      && sameArgs(args, ['mcp-server'])) repairKind = 'recursive-codex';
+    if (exactFields && !hasChildren && name === 'claude-flow' && command === 'ruflo'
+      && sameArgs(args, ['mcp', 'start'])) repairKind = 'legacy-ruflo';
+    return [{
+      name, scope, file, command, args, repairKind, regularFile,
+      fingerprint: fingerprint(source.slice(header.index, bodyEnd)),
+      start: header.index, end: bodyEnd, source,
+    }];
   });
+}
+
+function codexMcpRegistrations(file, scope) {
+  return codexMcpSections(file, scope).map(({ start: _start, end: _end, source: _source, ...entry }) => entry);
 }
 
 /** Effective Codex MCP topology across project and user configuration.
@@ -202,9 +241,9 @@ export function codexMcpTopology({ cwd = process.cwd(), home = os.homedir() } = 
     entry.name === 'codex' && entry.command === 'codex' && entry.args?.includes('mcp-server'));
   const agenticQeRegistrations = registrations.filter((entry) => entry.name === 'agentic-qe');
   const rufloRegistrations = registrations.filter((entry) =>
-    entry.name === 'ruflo' || entry.name === 'claude-flow'
-    || entry.command === 'ruflo'
-    || (entry.command === 'ak' && JSON.stringify(entry.args) === JSON.stringify(['x', 'ruflo-mcp'])));
+    (entry.name === 'ruflo' && (entry.command === 'ruflo'
+      || (entry.command === 'ak' && sameArgs(entry.args, ['x', 'ruflo-mcp']))))
+    || entry.repairKind === 'legacy-ruflo');
   return {
     files,
     registrations,
@@ -227,51 +266,125 @@ export function codexMcpRepairPlan(topology) {
     seen.add(key);
     targets.push({ ...entry, reason });
   };
-  for (const entry of topology.selfRegistrations) {
+  for (const entry of topology.selfRegistrations.filter((candidate) =>
+    candidate.regularFile && candidate.repairKind === 'recursive-codex')) {
     add(entry, 'recursively launches Codex through the deprecated mcp-server transport');
   }
-  for (const entry of topology.rufloRegistrations) {
-    if (entry.name !== 'ruflo') {
-      add(entry, 'duplicates the canonical workspace-aware [mcp_servers.ruflo] registration');
-    }
+  for (const entry of topology.rufloRegistrations.filter((candidate) =>
+    candidate.regularFile && candidate.repairKind === 'legacy-ruflo')) {
+    add(entry, 'replaces the deprecated legacy Ruflo transport with canonical workspace-aware [mcp_servers.ruflo]');
   }
   return targets;
 }
 
-/** Apply a previously disclosed repair plan through Codex's supported command,
- * then verify every target disappeared from the effective topology. */
+function sameRepairIdentity(left, right) {
+  return left?.file === right?.file && left?.scope === right?.scope
+    && left?.name === right?.name && left?.command === right?.command
+    && sameArgs(left?.args, right?.args) && left?.repairKind === right?.repairKind
+    && left?.fingerprint === right?.fingerprint;
+}
+
+function validRepairTarget(target) {
+  if (!path.isAbsolute(target?.file ?? '') || !/^[a-f0-9]{64}$/.test(target?.fingerprint ?? '')) return false;
+  if (target.regularFile !== true) return false;
+  if (target.scope !== 'project' && target.scope !== 'user') return false;
+  if (target.repairKind === 'recursive-codex') {
+    return target.name === 'codex' && target.command === 'codex'
+      && sameArgs(target.args, ['mcp-server']);
+  }
+  if (target.repairKind === 'legacy-ruflo') {
+    return target.name === 'claude-flow' && target.command === 'ruflo'
+      && sameArgs(target.args, ['mcp', 'start']);
+  }
+  return false;
+}
+
+function removeProjectCodexMcpTarget(target) {
+  const current = codexMcpSections(target.file, target.scope)
+    .find((entry) => sameRepairIdentity(entry, target));
+  if (!current) return false;
+  writeFileWithBackup(target.file, current.source.slice(0, current.start) + current.source.slice(current.end));
+  return true;
+}
+
+function createCurrentRepairBackup(file) {
+  const stat = fs.lstatSync(file);
+  if (stat.isSymbolicLink() || !stat.isFile()) {
+    throw new Error('refusing a non-regular or symlinked Codex config');
+  }
+  const source = fs.readFileSync(file);
+  const backup = `${file}.ak-mcp-repair-${process.pid}-${Date.now()}.bak`;
+  const handle = fs.openSync(backup, 'wx', stat.mode & 0o777);
+  try {
+    fs.writeFileSync(handle, source);
+  } finally {
+    fs.closeSync(handle);
+  }
+  return backup;
+}
+
+/** Apply a previously disclosed repair plan. Project-scoped tables are edited
+ * through a bounded, backup-first exact-section removal because Codex's MCP
+ * command writes only the user config. User-scoped tables go through Codex's
+ * supported command. Every target is identity-checked immediately before its
+ * mutation and re-probed immediately after it. */
 export async function repairCodexMcpTopology(targets, cwd = process.cwd(), {
   runner = run, inspect = codexMcpTopology,
 } = {}) {
   const backedUp = new Set();
+  const removed = [];
   for (const target of targets) {
-    if (!backedUp.has(target.file)) {
-      try {
-        writeFileWithBackup(target.file, fs.readFileSync(target.file, 'utf8'));
-        backedUp.add(target.file);
-      } catch (error) {
-        return { ok: false, changed: false, detail: `could not back up ${target.file}: ${error.message}` };
-      }
+    if (!validRepairTarget(target)) {
+      return { ok: false, changed: removed.length > 0, detail: 'Codex MCP repair target was not a recognized disclosed legacy shape' };
     }
-    const result = await runner('codex', ['mcp', 'remove', target.name], { cwd });
-    if (result.code !== 0) {
+    const live = inspect({ cwd }).registrations.find((entry) =>
+      entry.file === target.file && entry.scope === target.scope && entry.name === target.name);
+    if (!sameRepairIdentity(live, target)) {
       return {
-        ok: false,
-        changed: false,
-        detail: `could not remove [mcp_servers.${target.name}] from ${target.file}: ${(result.stderr || result.stdout || `exit ${result.code}`).split('\n')[0].slice(0, 160)}`,
+        ok: false, changed: removed.length > 0,
+        detail: `[mcp_servers.${target.name}] changed after confirmation; Codex MCP repair aborted`,
       };
     }
+    if (!backedUp.has(target.file)) {
+      try {
+        createCurrentRepairBackup(target.file);
+        backedUp.add(target.file);
+      } catch (error) {
+        return {
+          ok: false, changed: removed.length > 0,
+          detail: `could not create a current-state recovery copy for ${target.file}: ${error.message}`,
+        };
+      }
+    }
+    if (target.scope === 'project') {
+      try {
+        if (!removeProjectCodexMcpTarget(live)) throw new Error('exact confirmed table was not found');
+      } catch (error) {
+        return {
+          ok: false, changed: removed.length > 0,
+          detail: `could not remove [mcp_servers.${target.name}] from ${target.file}: ${error.message}`,
+        };
+      }
+    } else {
+      const result = await runner('codex', ['mcp', 'remove', target.name], { cwd });
+      if (result.code !== 0) {
+        return {
+          ok: false, changed: removed.length > 0,
+          detail: `could not remove [mcp_servers.${target.name}] from ${target.file}: ${(result.stderr || result.stdout || `exit ${result.code}`).split('\n')[0].slice(0, 160)}`,
+        };
+      }
+    }
+    const remaining = inspect({ cwd }).registrations.find((entry) =>
+      entry.file === target.file && entry.scope === target.scope && entry.name === target.name);
+    if (remaining) {
+      return {
+        ok: false, changed: true,
+        detail: `Codex MCP repair could not be verified; [mcp_servers.${target.name}] remains`,
+      };
+    }
+    removed.push(target);
   }
-  const remaining = inspect({ cwd }).registrations.filter((entry) =>
-    targets.some((target) => target.file === entry.file && target.scope === entry.scope && target.name === entry.name));
-  if (remaining.length) {
-    return {
-      ok: false,
-      changed: targets.length > 0,
-      detail: `Codex MCP repair could not be verified; remaining entries: ${remaining.map((entry) => `[mcp_servers.${entry.name}]`).join(', ')}`,
-    };
-  }
-  return { ok: true, changed: targets.length > 0, detail: `removed ${targets.map((target) => `[mcp_servers.${target.name}]`).join(', ')}` };
+  return { ok: true, changed: removed.length > 0, detail: `removed ${removed.map((target) => `[mcp_servers.${target.name}]`).join(', ')}` };
 }
 
 /**
