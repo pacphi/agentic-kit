@@ -6,6 +6,7 @@ import { maintenanceControlDir } from '../paths.mjs';
 import { applyMaintenancePlan, undoMaintenanceReceipt } from './coordinator.mjs';
 import { projectReference } from './evidence.mjs';
 import { deepFreeze } from './model.mjs';
+import { projectProviderFindings } from './provider-findings.mjs';
 import {
   ensurePrivateMaintenanceRoot, readMaintenancePlanEnvelope, writeMaintenancePlanEnvelope,
 } from './plan-store.mjs';
@@ -16,9 +17,24 @@ import {
   createDefaultMaintenanceProviderRegistry, publicMaintenanceProviders,
 } from './provider-registry.mjs';
 import { buildMaintenanceReadModel } from './read-model.mjs';
-import { readMaintenanceReceipt } from './transaction-store.mjs';
+import {
+  listMaintenanceReceiptsReadOnly, readMaintenanceReceipt,
+} from './transaction-store.mjs';
 
 const EXECUTABLE_CLASSES = new Set(['safe-automatic', 'approval-required']);
+const CONTROL_CAPABILITIES = Object.freeze({ plan: true, apply: true, undo: true });
+const RECOVERY_STATUSES = new Set([
+  'prepared', 'applying', 'verifying', 'refreshing-catalog', 'undoing', 'failed', 'partial',
+  'partial-recovery-required', 'outcome-unknown', 'unknown-recovery-required',
+]);
+const RECEIPT_STATUSES = new Set([
+  ...RECOVERY_STATUSES, 'committed', 'rolled-back', 'already-rolled-back',
+]);
+
+function publicTimestamp(value) {
+  if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) return null;
+  try { return new Date(value).toISOString(); } catch { return null; }
+}
 
 function exactFindings(model, { findingIds = null, safetyClass = null, project = null } = {}) {
   const requested = findingIds ? new Set(findingIds) : null;
@@ -35,8 +51,7 @@ function exactFindings(model, { findingIds = null, safetyClass = null, project =
   return findings;
 }
 
-async function providerActions(findings, providers) {
-  const detections = new Map();
+async function providerActions(findings, providers, detections = new Map()) {
   const actions = [];
   for (const finding of findings) {
     if (!EXECUTABLE_CLASSES.has(finding.safetyClass)) {
@@ -55,8 +70,9 @@ async function providerActions(findings, providers) {
         detections.set(provider.id, facts);
       }
       const facts = detections.get(provider.id);
+      const authority = provider.authority ?? 'native-inventory';
       if (facts?.status !== 'available' || facts.complete !== true
-          || facts.authority !== 'native-inventory') continue;
+          || facts.authority !== authority) continue;
       let action;
       try { action = provider.actionFor(finding, facts); } catch { action = null; }
       if (action) derived.push(action);
@@ -66,6 +82,46 @@ async function providerActions(findings, providers) {
     actions.push(derived[0]);
   }
   return actions;
+}
+
+/** @param {any} options */
+async function publicReceipts(transactionsRoot, providers, options = {}) {
+  const { fsImpl, limit = 20 } = options;
+  const receipts = listMaintenanceReceiptsReadOnly(transactionsRoot, { fsImpl }).slice(0, limit);
+  return Promise.all(receipts.map(async (receipt) => {
+    const status = RECEIPT_STATUSES.has(receipt.status)
+      ? receipt.status : 'unknown-recovery-required';
+    const recoveryRequired = RECOVERY_STATUSES.has(status);
+    let undoEligible = false;
+    if (status === 'committed' && Array.isArray(receipt.actions) && receipt.actions.length) {
+      try {
+        undoEligible = (await Promise.all(receipt.actions.map(async (entry) => {
+          const provider = providers.get(entry.providerId);
+          if (!provider || provider.version !== entry.providerVersion
+              || !['reversible', 'compensating'].includes(entry.rollback)
+              || typeof provider.inspectCurrent !== 'function'
+              || typeof provider.undo !== 'function' || typeof provider.verifyUndo !== 'function') return false;
+          const current = await provider.inspectCurrent(entry);
+          return current?.postFingerprint === entry.outcome?.postFingerprint;
+        }))).every(Boolean);
+      } catch {
+        undoEligible = false;
+      }
+    }
+    const actionCount = Array.isArray(receipt.actions) ? receipt.actions.length : 0;
+    return {
+      id: receipt.id,
+      status,
+      createdAt: publicTimestamp(receipt.createdAt),
+      updatedAt: publicTimestamp(receipt.updatedAt),
+      actionCount,
+      summary: recoveryRequired
+        ? 'Maintenance recovery or inspection is required.'
+        : `${actionCount} maintenance action(s) recorded.`,
+      undoEligible,
+      recoveryRequired,
+    };
+  }));
 }
 
 function publicResult(result) {
@@ -88,7 +144,8 @@ function undoPreview(receiptId, undoable, actionCount, summary, reason = null) {
 export function createMaintenanceService({
   collector = createSystemCollector(),
   now = Date.now,
-  providers = createDefaultMaintenanceProviderRegistry(),
+  providers = null,
+  providerOptions = {},
   controlRoot = maintenanceControlDir(),
   fsImpl = fs,
   nonce,
@@ -96,27 +153,46 @@ export function createMaintenanceService({
   const plansRoot = path.join(controlRoot, 'plans');
   const transactionsRoot = path.join(controlRoot, 'transactions');
 
-  async function scan({ deep = false } = {}) {
+  const resolveProviders = (footprint) => providers
+    ?? createDefaultMaintenanceProviderRegistry({ ...providerOptions, footprint });
+
+  async function collect({ deep = false } = {}) {
     if (deep) await collector.refreshDeep();
     const footprint = await collector.read();
-    const model = buildMaintenanceReadModel({ footprint, now });
-    return deepFreeze({
-      ...model,
-      providers: publicMaintenanceProviders(providers, { includeUnsupported: true }),
+    const registry = resolveProviders(footprint);
+    const base = buildMaintenanceReadModel({ footprint, now });
+    const projected = await projectProviderFindings({ providers: registry, footprint, model: base });
+    const receipts = await publicReceipts(transactionsRoot, registry, { fsImpl });
+    const summary = { ...projected.summary, recentChanges: receipts.length };
+    const model = deepFreeze({
+      ...base,
+      mode: 'control-plane',
+      capabilities: CONTROL_CAPABILITIES,
+      sourceFingerprint: projected.sourceFingerprint,
+      summary,
+      findings: projected.findings,
+      receipts,
+      providers: publicMaintenanceProviders(registry, { includeUnsupported: true }),
     });
+    return { footprint, providers: registry, detections: projected.detections, model };
+  }
+
+  async function scan({ deep = false } = {}) {
+    return (await collect({ deep })).model;
   }
 
   async function createPlan({
     findingIds = null, safetyClass = null, project = null, deep = false,
     executable = false, persist = false, generatedAt = null,
   } = {}) {
-    const model = await scan({ deep });
+    const collected = await collect({ deep });
+    const { model } = collected;
     const findings = exactFindings(model, { findingIds, safetyClass, project });
     if (!executable) {
       if (persist) throw new Error('Only executable maintenance plans may be persisted.');
       return buildMaintenancePlan({ findings, sourceFingerprint: model.sourceFingerprint, now });
     }
-    const actions = await providerActions(findings, providers);
+    const actions = await providerActions(findings, collected.providers, collected.detections);
     const result = buildExecutableMaintenancePlan({
       findings,
       actions,
@@ -153,11 +229,13 @@ export function createMaintenanceService({
     if (planId && selectedPlan.planId !== planId) throw new Error('Maintenance plan ID does not match the supplied plan.');
     assertExecutableMaintenancePlanIntegrity(selectedPlan, { now });
     const generatedAt = Date.parse(selectedPlan.generatedAt);
+    const liveFootprint = await collector.read();
+    const liveProviders = resolveProviders(liveFootprint);
     const result = await applyMaintenancePlan({
       plan: selectedPlan,
       actionIds,
       expectedPlanDigest,
-      providers,
+      providers: liveProviders,
       transactionsRoot,
       refreshPlan: () => createPlan({
         findingIds: selectedPlan.findingIds,
@@ -179,6 +257,7 @@ export function createMaintenanceService({
   /** @param {any} input */
   async function prepareUndo({ receiptId } = {}) {
     ensurePrivateMaintenanceRoot(controlRoot, { fsImpl });
+    const providerRegistry = resolveProviders(await collector.read());
     let receipt;
     try { ({ receipt } = readMaintenanceReceipt(transactionsRoot, receiptId, { fsImpl })); } catch {
       return undoPreview(receiptId, false, 0, 'Undo is unavailable.', 'receipt-refused');
@@ -191,7 +270,7 @@ export function createMaintenanceService({
     }
     const actions = [];
     for (const entry of [...receipt.actions].reverse()) {
-      const provider = providers.get(entry.providerId);
+      const provider = providerRegistry.get(entry.providerId);
       if (!provider || provider.version !== entry.providerVersion
           || !['reversible', 'compensating'].includes(entry.rollback)
           || typeof provider.inspectCurrent !== 'function'
@@ -216,10 +295,11 @@ export function createMaintenanceService({
   async function undo({ receiptId, confirmed = false } = {}) {
     if (confirmed !== true) throw new Error('Explicit confirmation is required for maintenance undo.');
     ensurePrivateMaintenanceRoot(controlRoot, { fsImpl });
+    const providerRegistry = resolveProviders(await collector.read());
     const result = await undoMaintenanceReceipt({
       transactionsRoot,
       receiptId,
-      providers,
+      providers: providerRegistry,
       inspectCurrent: (entry, provider) => provider.inspectCurrent(entry),
       fsImpl,
       now,

@@ -19,7 +19,7 @@ function withoutIntegrity(receipt) {
   return payload;
 }
 
-function assertSafeRoot(root, fsImpl) {
+function assertSafeRoot(root, fsImpl, { create = true } = {}) {
   if (typeof root !== 'string' || !path.isAbsolute(root)) {
     throw new TypeError('maintenance transaction root must be a dedicated absolute directory');
   }
@@ -27,10 +27,14 @@ function assertSafeRoot(root, fsImpl) {
   if (path.dirname(resolved) === resolved) {
     throw new TypeError('maintenance transaction root must be a dedicated absolute directory');
   }
-  fsImpl.mkdirSync(resolved, { recursive: true, mode: 0o700 });
+  if (create) fsImpl.mkdirSync(resolved, { recursive: true, mode: 0o700 });
+  else if (!fsImpl.existsSync(resolved)) return null;
   const stat = fsImpl.lstatSync(resolved);
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('maintenance transaction root is unsafe');
-  fsImpl.chmodSync?.(resolved, 0o700);
+  if (!create && process.platform !== 'win32' && (stat.mode & 0o077) !== 0) {
+    throw new Error('maintenance transaction root is not private');
+  }
+  if (create) fsImpl.chmodSync?.(resolved, 0o700);
   return resolved;
 }
 
@@ -89,9 +93,10 @@ export function writeMaintenanceReceipt(file, receipt, { fsImpl = fs } = {}) {
   return sealed;
 }
 
-export function readMaintenanceReceipt(transactionsRoot, id, { fsImpl = fs } = {}) {
+export function readMaintenanceReceipt(transactionsRoot, id, { fsImpl = fs, createRoot = true } = {}) {
   assertReceiptId(id);
-  const root = assertSafeRoot(transactionsRoot, fsImpl);
+  const root = assertSafeRoot(transactionsRoot, fsImpl, { create: createRoot });
+  if (!root) throw new Error('maintenance transaction root is absent');
   const dir = path.join(root, id);
   const file = path.join(dir, 'receipt.json');
   const dirStat = fsImpl.lstatSync(dir);
@@ -116,13 +121,37 @@ export function listMaintenanceReceipts(transactionsRoot, { fsImpl = fs } = {}) 
     .filter((entry) => entry.isDirectory() && RECEIPT_ID.test(entry.name))
     .flatMap((entry) => {
       try {
-        const { receipt } = readMaintenanceReceipt(root, entry.name, { fsImpl });
+        const { receipt } = readMaintenanceReceipt(root, entry.name, { fsImpl, createRoot: false });
         return [receipt];
       } catch (error) {
         return [{ id: entry.name, status: 'unknown-recovery-required', error: error.message }];
       }
     })
     .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/** Read existing journals without materializing the control plane. Integrity
+ * failures are returned as recovery state; their raw errors never leave the
+ * application service. */
+export function listMaintenanceReceiptsReadOnly(transactionsRoot, { fsImpl = fs } = {}) {
+  let root;
+  try {
+    root = assertSafeRoot(transactionsRoot, fsImpl, { create: false });
+  } catch {
+    return [{ id: 'mnt-state-recovery-required', status: 'unknown-recovery-required' }];
+  }
+  if (!root) return [];
+  return fsImpl.readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && RECEIPT_ID.test(entry.name))
+    .flatMap((entry) => {
+      try {
+        const { receipt } = readMaintenanceReceipt(root, entry.name, { fsImpl, createRoot: false });
+        return [receipt];
+      } catch {
+        return [{ id: entry.name, status: 'unknown-recovery-required' }];
+      }
+    })
+    .sort((a, b) => b.id.localeCompare(a.id));
 }
 
 export function listUnfinishedMaintenanceReceipts(transactionsRoot, { fsImpl = fs } = {}) {

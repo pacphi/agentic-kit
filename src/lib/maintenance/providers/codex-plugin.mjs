@@ -1,6 +1,7 @@
 import { runNativeCommand } from '../native-command.mjs';
 import {
-  baseAction, commandFailure, executableSafetyClass, parseNativeJson, sha256, unavailable, validPluginRef,
+  baseAction, catalogDependencyCount, commandFailure, executableSafetyClass,
+  parseNativeJson, providerFinding, sha256, unavailable, validPluginRef,
 } from './shared.mjs';
 
 function fingerprint(plugin) {
@@ -8,13 +9,19 @@ function fingerprint(plugin) {
 }
 
 function normalize(raw) {
-  if (!raw || !Array.isArray(raw.installed)) return null;
+  if (!raw || !Array.isArray(raw.installed) || !Array.isArray(raw.available)) return null;
+  const available = [];
+  for (const item of raw.available) {
+    if (!validPluginRef(item?.pluginId) || typeof item.version !== 'string' || !item.version) return null;
+    available.push({ ref: item.pluginId, version: item.version });
+  }
   const plugins = [];
   for (const item of raw.installed) {
     if (!validPluginRef(item?.pluginId) || typeof item.version !== 'string') return null;
     plugins.push({
       ref: item.pluginId, version: item.version,
       installed: item.installed === true, enabled: item.enabled === true,
+      candidates: available.filter((row) => row.ref === item.pluginId).map((row) => row.version),
     });
   }
   return plugins.sort((a, b) => a.ref.localeCompare(b.ref));
@@ -22,11 +29,42 @@ function normalize(raw) {
 
 export function createCodexPluginProvider({ run = runNativeCommand } = {}) {
   async function detect() {
-    const parsed = parseNativeJson(await run('codex', ['plugin', 'list', '--json']));
+    const parsed = parseNativeJson(await run('codex', ['plugin', 'list', '--available', '--json']));
     if (!parsed.ok) return { ...unavailable(parsed.reason), plugins: [] };
     const plugins = normalize(parsed.value);
     if (!plugins) return { ...unavailable('native-inventory-invalid-shape'), plugins: [] };
     return { status: 'available', complete: true, authority: 'native-inventory', asOf: new Date().toISOString(), plugins };
+  }
+
+  /** @param {any} facts @param {any} context */
+  function findings(facts, context = {}) {
+    const { footprint } = context;
+    if (facts?.status !== 'available' || facts.complete !== true) return [];
+    return facts.plugins.flatMap((plugin) => {
+      if (!plugin.installed || plugin.candidates.length === 0
+          || (plugin.candidates.length === 1 && plugin.candidates[0] === plugin.version)) return [];
+      const ambiguous = plugin.candidates.length !== 1;
+      return [providerFinding({
+        providerId: 'codex-plugin', stableKey: `${plugin.ref}:update-candidate`,
+        state: ambiguous ? 'ambiguous' : 'update-available',
+        bucket: ambiguous ? 'needsReview' : 'unsupportedOrBlocked',
+        classification: ambiguous ? 'host-candidate-ambiguous' : 'host-reported-update-candidate',
+        safetyClass: ambiguous ? 'never-automatic' : 'upstream-required',
+        resource: {
+          id: `plugin:codex:${plugin.ref}`, kind: 'plugin', name: plugin.ref,
+          host: 'codex', scope: 'user', providerRef: plugin.ref,
+        },
+        versions: { installed: plugin.version,
+          recommended: ambiguous ? null : plugin.candidates[0], producer: plugin.version },
+        ownership: { owner: plugin.ref, authority: 'native-inventory', managed: true },
+        evidence: { sources: ['codex-plugin-native-inventory'], asOf: facts.asOf,
+          freshness: 'fresh', completeness: 'complete', gaps: [] },
+        impact: { summary: 'Codex reports a candidate, but no exact per-plugin update verb is available.',
+          dependencies: catalogDependencyCount(footprint, plugin.ref, 'codex') },
+        operation: 'review', label: 'Review upstream Codex plugin update support',
+        rollback: 'irreversible', restart: 'unknown', executable: false,
+      })];
+    });
   }
 
   function actionFor(finding, facts) {
@@ -80,6 +118,6 @@ export function createCodexPluginProvider({ run = runNativeCommand } = {}) {
   return {
     id: 'codex-plugin', version: 'v1', host: 'codex', status: 'native-detection-required',
     resourceKinds: ['plugin'], operations: ['remove'],
-    rollback: ['irreversible'], detect, actionFor, preflight, apply, verify, inspectCurrent,
+    rollback: ['irreversible'], detect, findings, actionFor, preflight, apply, verify, inspectCurrent,
   };
 }

@@ -145,6 +145,10 @@ test('skill provider preserves legacy, partial, modified, duplicate, and unrecei
   const facts = await provider.detect();
   assert.ok(facts.skills.find((row) => row.resourceId === partial.resourceId), JSON.stringify(facts));
   assert.equal(facts.receiptLimitations.some((row) => row.reason === 'complete-tree-manifest-required'), true);
+  const legacyFinding = provider.findings(facts)
+    .find((row) => row.classification === 'legacy-skill-receipt-report-only');
+  assert.equal(legacyFinding.nextAction.executable, false);
+  assert.equal(legacyFinding.safetyClass, 'never-automatic');
   assert.equal(facts.skills.find((row) => row.resourceId === partial.resourceId).executable, false);
   assert.equal(facts.skills.find((row) => row.resourceId === exact.resourceId).reason, 'ambiguous-ownership-receipts');
   assert.equal(provider.actionFor(skillFinding(exact), facts), null);
@@ -178,6 +182,32 @@ test('skill provider preserves legacy, partial, modified, duplicate, and unrecei
   const unreadableFacts = await unreadableProvider.detect();
   assert.equal(unreadableFacts.skills[0].reason, 'unreadable-tree');
   assert.equal(unreadableProvider.actionFor(skillFinding(unreadable), unreadableFacts), null);
+});
+
+test('skill ownership fails closed when filesystem owner identity is unavailable', async (t) => {
+  const root = fixture(t);
+  const { allowedRoot, target } = makeSkill(root);
+  const receipt = skillReceipt(target, allowedRoot);
+  const fsImpl = {
+    ...fs,
+    lstatSync(file) {
+      const stat = fs.lstatSync(file);
+      return new Proxy(stat, {
+        get(value, key) {
+          if (key === 'uid') return undefined;
+          const property = Reflect.get(value, key);
+          return typeof property === 'function' ? property.bind(value) : property;
+        },
+      });
+    },
+  };
+  const provider = createOwnedSkillProvider({
+    receipts: [receipt], allowedRoots: [allowedRoot], archiveRoot: path.join(root, 'archive'), fsImpl,
+  });
+  const facts = await provider.detect();
+  assert.equal(facts.skills[0].executable, false);
+  assert.equal(facts.skills[0].status, 'modified-or-shape-drift');
+  assert.equal(provider.actionFor(skillFinding(receipt), facts), null);
 });
 
 test('skill provider rejects traversal, symlink targets, plugin-cache roots, and incomplete shape', async (t) => {

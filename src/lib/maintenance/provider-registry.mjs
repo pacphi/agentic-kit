@@ -1,6 +1,11 @@
 import { createClaudePluginProvider } from './providers/claude-plugin.mjs';
 import { createCodexMcpProvider } from './providers/codex-mcp.mjs';
 import { createCodexPluginProvider } from './providers/codex-plugin.mjs';
+import { createOwnedNpxCacheProvider } from './providers/owned-storage.mjs';
+import { createOwnedSkillProvider } from './providers/owned-skill.mjs';
+import { createRufloMcpOrphanProvider } from './providers/ruflo-mcp-orphan.mjs';
+import { managedBaseline } from '../npx.mjs';
+import { npxCacheDir } from '../paths.mjs';
 
 const ID = /^[a-z][a-z0-9.-]{1,63}$/;
 const VERSION = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -22,9 +27,10 @@ function validateProvider(provider) {
   for (const method of ['detect', 'actionFor', 'preflight', 'apply', 'verify']) {
     if (typeof provider[method] !== 'function') throw new TypeError(`maintenance provider lacks ${method}: ${provider.id}`);
   }
-  if (provider.rollback?.includes('reversible')
-      && (typeof provider.undo !== 'function' || typeof provider.verifyUndo !== 'function')) {
-    throw new TypeError(`reversible maintenance provider lacks undo verification: ${provider.id}`);
+  if (provider.rollback?.some((value) => ['reversible', 'compensating'].includes(value))
+      && (typeof provider.inspectCurrent !== 'function'
+        || typeof provider.undo !== 'function' || typeof provider.verifyUndo !== 'function')) {
+    throw new TypeError(`rollback-capable maintenance provider lacks inspectCurrent or undo verification: ${provider.id}`);
   }
 }
 
@@ -52,11 +58,25 @@ const UNSUPPORTED = Object.freeze([
 ]);
 
 export function createDefaultMaintenanceProviderRegistry(options = {}) {
-  return createMaintenanceProviderRegistry([
+  /** @type {any[]} */
+  const providers = [
     createClaudePluginProvider(options.claudePlugin),
     createCodexPluginProvider(options.codexPlugin),
     createCodexMcpProvider(options.codexMcp),
-  ]);
+    createRufloMcpOrphanProvider(options.rufloMcpOrphan),
+  ];
+  const candidates = (options.footprint?.storage?.reclaimables ?? [])
+    .filter((row) => row?.kind === 'stale-npx-env');
+  if (candidates.length) {
+    providers.push(createOwnedNpxCacheProvider({
+      ...(options.npxCache ?? {}),
+      candidates,
+      root: options.npxCache?.root ?? npxCacheDir(),
+      baseline: options.npxCache?.baseline ?? managedBaseline,
+    }));
+  }
+  if (options.ownedSkill) providers.push(createOwnedSkillProvider(options.ownedSkill));
+  return createMaintenanceProviderRegistry(providers);
 }
 
 export function publicMaintenanceProviders(registry, { includeUnsupported = false } = {}) {
@@ -68,6 +88,7 @@ export function publicMaintenanceProviders(registry, { includeUnsupported = fals
     operations: [...provider.operations],
     rollback: [...(provider.rollback ?? [])],
     status: provider.status ?? 'available',
+    ...(provider.limitations ? { limitations: provider.limitations.map((item) => ({ ...item })) } : {}),
   }));
   return [
     ...available,

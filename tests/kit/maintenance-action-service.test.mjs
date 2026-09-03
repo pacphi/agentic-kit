@@ -205,7 +205,7 @@ test('stale or partial catalog evidence is never promoted into a provider action
     const model = await service.scan();
     const target = model.findings.find((item) => item.resource.id === 'plugin:demo@market');
     await assert.rejects(() => service.plan({ findingIds: [target.id], executable: true }), /not executable/i);
-    assert.deepEqual(events, []);
+    assert.equal(events.some((event) => event === 'preflight' || event === 'apply'), false);
   }
 });
 
@@ -300,6 +300,8 @@ test('default registry reports unsupported OpenCode surfaces without fabricating
   const registry = createDefaultMaintenanceProviderRegistry();
   assert.equal(registry.has('opencode-plugin'), false);
   assert.equal(registry.has('opencode-mcp'), false);
+  assert.equal(registry.has('agentic-kit-owned-skill'), false);
+  assert.equal(registry.has('agentic-kit-npx-cache'), false);
   const capabilities = publicMaintenanceProviders(registry, { includeUnsupported: true });
   assert.equal(capabilities.some((item) => item.host === 'opencode' && item.status === 'unsupported'), true);
 });

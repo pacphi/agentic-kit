@@ -49,3 +49,60 @@ export function baseAction(finding, {
   };
   return { id: `maintenance-action-${sha256(action).slice(0, 20)}`, ...action };
 }
+
+const VERSION_KEYS = [
+  'installed', 'recommended', 'producer', 'sourceRevision', 'cacheGeneration', 'contentDigest',
+];
+
+/** Construct the public, content-free finding contract from provider-owned facts. */
+export function providerFinding({
+  providerId, providerVersion = 'v1', stableKey, state, bucket, classification, safetyClass,
+  resource, versions = {}, ownership, evidence, impact, operation, label,
+  rollback = 'irreversible', restart = 'unknown', executable = false,
+}) {
+  const normalizedVersions = Object.fromEntries(VERSION_KEYS.map((key) => [key,
+    typeof versions[key] === 'string' && versions[key] ? versions[key] : null]));
+  const nextAction = {
+    operation, label, providerId, providerVersion, safetyClass,
+    rollback, restart, executable: executable === true,
+  };
+  const stable = {
+    providerId, stableKey, state, classification, safetyClass, resource,
+    versions: normalizedVersions, ownership, operation,
+  };
+  return {
+    id: `maintenance-finding-${sha256(stable).slice(0, 20)}`,
+    state, bucket, classification, safetyClass, resource,
+    versions: normalizedVersions,
+    ownership,
+    evidence: {
+      sources: [...new Set(evidence?.sources ?? [`maintenance-provider:${providerId}`])].sort(),
+      asOf: evidence?.asOf ?? null,
+      freshness: evidence?.freshness ?? 'fresh',
+      completeness: evidence?.completeness ?? 'complete',
+      gaps: [...new Set(evidence?.gaps ?? [])].sort(),
+    },
+    observedUsage: {
+      status: 'not-measured', statement: 'Usage was not used as action authority.',
+    },
+    impact: {
+      summary: impact?.summary ?? 'Dependent capabilities require review before change.',
+      bytes: Number.isFinite(impact?.bytes) ? impact.bytes : null,
+      files: Number.isFinite(impact?.files) ? impact.files : null,
+      dependencies: Number.isInteger(impact?.dependencies) ? impact.dependencies : 'unknown',
+    },
+    nextAction,
+  };
+}
+
+export function catalogDependencyCount(footprint, providerRef, host = null) {
+  const counts = [];
+  for (const item of Array.isArray(footprint?.catalog?.items) ? footprint.catalog.items : []) {
+    const exact = item?.pluginRef === providerRef
+      || (Array.isArray(item?.presence) && item.presence.some((presence) => (
+        (!host || presence?.host === host) && presence?.provider?.ref === providerRef
+      )));
+    if (exact) counts.push(Array.isArray(item.components) ? item.components.length : 0);
+  }
+  return counts.length ? Math.max(...counts) : 'unknown';
+}

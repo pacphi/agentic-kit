@@ -2,18 +2,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 
-import { baseAction, executableSafetyClass, sha256 } from './shared.mjs';
+import { baseAction, executableSafetyClass, providerFinding, sha256 } from './shared.mjs';
 
 const SCHEMA = 'agentic-kit.skill-tree-ownership/v1';
 const RECEIPT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{1,127}$/;
-const RESOURCE_ID = /^[A-Za-z0-9][A-Za-z0-9:._@/-]{1,255}$/;
+const RESOURCE_ID = /^[A-Za-z0-9][A-Za-z0-9:._@-]{1,255}$/;
 const DIGEST = /^[a-f0-9]{64}$/;
 const MAX_ENTRIES = 2_048;
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 const CURRENT_UID = typeof process.getuid === 'function' ? process.getuid() : null;
 
-const ownerMatches = (stat) => !Number.isInteger(CURRENT_UID)
-  || !Number.isInteger(stat?.uid) || stat.uid === CURRENT_UID;
+const ownerMatches = (stat) => Number.isInteger(CURRENT_UID) && CURRENT_UID >= 0
+  && Number.isInteger(stat?.uid) && stat.uid === CURRENT_UID;
 
 const resolved = (value) => (typeof value === 'string' && path.isAbsolute(value)
   ? path.resolve(value) : null);
@@ -256,6 +256,7 @@ function actionRequest(finding) {
   return eligible ? { resource, operation } : null;
 }
 
+/** @param {any} options */
 export function createOwnedSkillProvider({
   receipts = [], allowedRoots = [], pluginCacheRoots = [], archiveRoot, fsImpl = fs,
 } = {}) {
@@ -302,12 +303,61 @@ export function createOwnedSkillProvider({
         skills.push({ resourceId, status: 'unsupported', executable: false, reason: values[0].reason });
         continue;
       }
-      skills.push({ resourceId, ...inspectReceipt(values[0].value, archive, fsImpl) });
+      skills.push({ resourceId, scope: values[0].value.scope,
+        ...inspectReceipt(values[0].value, archive, fsImpl) });
     }
     return {
       status: 'available', complete: limitations.length === 0,
-      authority: 'agentic-kit-receipt', skills, receiptLimitations: limitations,
+      authority: 'agentic-kit-receipt', asOf: new Date().toISOString(),
+      skills, receiptLimitations: limitations,
     };
+  }
+
+  function findings(facts) {
+    const rows = (facts?.skills ?? []).map((skill) => {
+      const owned = facts?.status === 'available' && facts.complete === true
+        && skill.status === 'owned-current' && skill.executable === true;
+      return providerFinding({
+        providerId: 'agentic-kit-owned-skill', stableKey: skill.resourceId,
+        state: owned ? 'stale-configuration'
+          : (skill.status === 'modified-or-shape-drift' ? 'modified' : 'ambiguous'),
+        bucket: 'needsReview',
+        classification: owned ? 'complete-tree-receipt-owned'
+          : `owned-skill-${skill.status ?? 'unavailable'}`,
+        safetyClass: owned ? 'approval-required' : 'never-automatic',
+        resource: {
+          id: skill.resourceId, kind: 'skill', name: skill.resourceId,
+          host: 'agentic-kit', scope: skill.scope ?? 'unknown',
+        },
+        versions: {},
+        ownership: { owner: 'agentic-kit', authority: 'agentic-kit-receipt', managed: owned },
+        evidence: { sources: ['agentic-kit-complete-tree-receipt'], asOf: facts.asOf,
+          freshness: 'fresh', completeness: owned ? 'complete' : 'partial',
+          gaps: owned ? [] : ['Ownership or complete-tree postimage is not exact.'] },
+        impact: { summary: owned
+          ? 'The exact unchanged skill tree can be archived and restored.'
+          : 'The skill tree is preserved because exact ownership is not proven.' },
+        operation: owned ? 'archive' : 'review',
+        label: owned ? 'Archive exact receipt-owned skill tree' : 'Review ownership evidence',
+        rollback: owned ? 'reversible' : 'irreversible', restart: 'required', executable: owned,
+      });
+    });
+    if ((facts?.receiptLimitations ?? []).length) {
+      rows.push(providerFinding({
+        providerId: 'agentic-kit-owned-skill', stableKey: 'legacy-or-partial-receipts',
+        state: 'unreadable-partial', bucket: 'needsReview',
+        classification: 'legacy-skill-receipt-report-only', safetyClass: 'never-automatic',
+        resource: { id: 'skill:ownership-receipt-limitations', kind: 'skill',
+          name: 'Legacy or partial skill ownership receipts', host: 'agentic-kit', scope: 'machine' },
+        versions: {}, ownership: { owner: 'agentic-kit', authority: 'legacy-receipt', managed: false },
+        evidence: { sources: ['agentic-kit-legacy-receipt'], asOf: facts.asOf,
+          freshness: 'fresh', completeness: 'partial', gaps: ['Complete-tree ownership is not proven.'] },
+        impact: { summary: 'Legacy entrypoint-only receipts remain report-only and are preserved.' },
+        operation: 'review', label: 'Review and migrate ownership evidence',
+        rollback: 'irreversible', restart: 'not-required', executable: false,
+      }));
+    }
+    return rows;
   }
 
   function actionFor(finding, facts) {
@@ -317,15 +367,12 @@ export function createOwnedSkillProvider({
     const receipt = exactReceipt(request.resource.id);
     if (!receipt || fact?.status !== 'owned-current' || fact.executable !== true
         || fact.sourceFingerprint !== sourceFingerprint(receipt)) return null;
-    return {
-      ...baseAction(finding, {
-        providerId: 'agentic-kit-owned-skill', providerVersion: 'v1', operation: request.operation,
-        sourceFingerprint: fact.sourceFingerprint,
-        rollback: request.operation === 'archive' ? 'reversible' : 'irreversible',
-        restart: 'required',
-      }),
-      manifestDigest: receipt.manifest.digest,
-    };
+    return baseAction(finding, {
+      providerId: 'agentic-kit-owned-skill', providerVersion: 'v1', operation: request.operation,
+      sourceFingerprint: fact.sourceFingerprint,
+      rollback: request.operation === 'archive' ? 'reversible' : 'irreversible',
+      restart: 'required',
+    });
   }
 
   async function preflight(action) {
@@ -394,6 +441,8 @@ export function createOwnedSkillProvider({
     return { postFingerprint: state.status === 'archived' ? postFingerprint(receipt, 'archive') : null };
   }
 
+  const inspectCurrent = inspectPostimage;
+
   async function undo(entry) {
     const receipt = exactReceipt(entry?.resourceIdentity?.id);
     if (!receipt || entry?.operation !== 'archive') {
@@ -428,8 +477,9 @@ export function createOwnedSkillProvider({
   }
 
   return {
-    id: 'agentic-kit-owned-skill', version: 'v1', resourceKinds: ['skill'],
+    id: 'agentic-kit-owned-skill', version: 'v1', authority: 'agentic-kit-receipt', resourceKinds: ['skill'],
     operations: ['archive', 'prune'], rollback: ['reversible', 'irreversible'],
-    detect, actionFor, preflight, apply, verify, inspectPostimage, undo, verifyUndo,
+    detect, findings, actionFor, preflight, apply, verify,
+    inspectPostimage, inspectCurrent, undo, verifyUndo,
   };
 }

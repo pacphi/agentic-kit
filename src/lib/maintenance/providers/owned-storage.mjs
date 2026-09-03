@@ -2,29 +2,29 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { scanNpxStale } from '../../npx.mjs';
-import { baseAction, executableSafetyClass, sha256 } from './shared.mjs';
+import { baseAction, executableSafetyClass, providerFinding, sha256 } from './shared.mjs';
 
 const CANDIDATE_ID = /^stale-npx-env:([A-Za-z0-9][A-Za-z0-9._-]{0,127})$/;
-const CURRENT_UID = typeof process.getuid === 'function' ? process.getuid() : null;
+function ownerMatches(stat, currentUid) {
+  return Number.isInteger(currentUid) && currentUid >= 0
+    && Number.isInteger(stat?.uid) && stat.uid === currentUid;
+}
 
-const ownerMatches = (stat) => !Number.isInteger(CURRENT_UID)
-  || !Number.isInteger(stat?.uid) || stat.uid === CURRENT_UID;
-
-function safeRoot(root, fsImpl) {
+function safeRoot(root, fsImpl, currentUid) {
   try {
     const stat = fsImpl.lstatSync(root);
-    return stat.isDirectory() && !stat.isSymbolicLink() && ownerMatches(stat);
+    return stat.isDirectory() && !stat.isSymbolicLink() && ownerMatches(stat, currentUid);
   } catch {
     return false;
   }
 }
 
-function targetState(target, root, fsImpl) {
+function targetState(target, root, fsImpl, currentUid) {
   try {
     const stat = fsImpl.lstatSync(target);
     if (stat.isSymbolicLink()) return { status: 'unsafe', reason: 'target-is-symlink' };
     if (!stat.isDirectory()) return { status: 'unsafe', reason: 'target-is-not-directory' };
-    if (!ownerMatches(stat)) return { status: 'unsafe', reason: 'target-owner-mismatch' };
+    if (!ownerMatches(stat, currentUid)) return { status: 'unsafe', reason: 'target-owner-mismatch' };
     const actualRoot = fsImpl.realpathSync(root);
     const actualTarget = fsImpl.realpathSync(target);
     if (path.dirname(actualTarget) !== actualRoot) {
@@ -78,8 +78,10 @@ function actionRequest(finding) {
   return eligible ? resource : null;
 }
 
+/** @param {any} options */
 export function createOwnedNpxCacheProvider({
   candidates = [], root, baseline, fsImpl = fs, scan = scanNpxStale,
+  currentUid = typeof process.getuid === 'function' ? process.getuid() : null,
 } = {}) {
   const cacheRoot = typeof root === 'string' && path.isAbsolute(root) ? path.resolve(root) : null;
   if (!cacheRoot || path.dirname(cacheRoot) === cacheRoot
@@ -101,10 +103,10 @@ export function createOwnedNpxCacheProvider({
   }
 
   function inspect(definition) {
-    if (!safeRoot(cacheRoot, fsImpl)) {
+    if (!safeRoot(cacheRoot, fsImpl, currentUid)) {
       return { status: 'unsupported', executable: false, reason: 'cache-root-unsafe-or-unreadable' };
     }
-    const state = targetState(definition.target, cacheRoot, fsImpl);
+    const state = targetState(definition.target, cacheRoot, fsImpl, currentUid);
     if (state.status === 'absent') return { status: 'absent', executable: false };
     if (state.status !== 'present') return { ...state, executable: false };
     let stale;
@@ -136,8 +138,32 @@ export function createOwnedNpxCacheProvider({
     }
     return {
       status: 'available', complete: facts.every((fact) => fact.status !== 'unsupported'),
-      authority: 'agentic-kit-procedure', candidates: facts,
+      authority: 'agentic-kit-procedure', asOf: new Date().toISOString(), candidates: facts,
     };
+  }
+
+  /** @param {any} facts @param {any} context */
+  function findings(facts, context = {}) {
+    const { baseFindings } = context;
+    if (facts?.status !== 'available' || facts.complete !== true) return [];
+    return (facts?.candidates ?? []).flatMap((fact) => {
+      if (fact.status !== 'owned-procedure-current' || fact.executable !== true) return [];
+      const base = (baseFindings ?? []).find((row) => row?.resource?.id === fact.resourceId);
+      if (!base) return [];
+      return [providerFinding({
+        providerId: 'agentic-kit-npx-cache', stableKey: fact.resourceId,
+        state: 'orphaned-cache', bucket: 'safeCleanup',
+        classification: 'version-stale-owned-npx-environment', safetyClass: 'safe-automatic',
+        resource: base.resource,
+        versions: base.versions,
+        ownership: { owner: 'agentic-kit', authority: 'agentic-kit-procedure', managed: true },
+        evidence: { sources: ['system-footprint', 'agentic-kit-npx-stale-procedure'],
+          asOf: facts.asOf, freshness: 'fresh', completeness: 'complete', gaps: [] },
+        impact: base.impact,
+        operation: 'clean', label: 'Remove exact reproducible stale npx environment',
+        rollback: 'irreversible', restart: 'not-required', executable: true,
+      })];
+    });
   }
 
   function actionFor(finding, facts) {
@@ -191,7 +217,7 @@ export function createOwnedNpxCacheProvider({
   async function verify(action, outcome) {
     const definition = exactDefinition(action?.resourceIdentity?.id);
     if (!definition) return { ok: false, postFingerprint: null };
-    const state = targetState(definition.target, cacheRoot, fsImpl);
+    const state = targetState(definition.target, cacheRoot, fsImpl, currentUid);
     const expected = absentFingerprint(definition.resourceId);
     return {
       ok: state.status === 'absent' && outcome?.postFingerprint === expected,
@@ -200,8 +226,9 @@ export function createOwnedNpxCacheProvider({
   }
 
   return {
-    id: 'agentic-kit-npx-cache', version: 'v1', resourceKinds: ['stale-npx-env'],
+    id: 'agentic-kit-npx-cache', version: 'v1', authority: 'agentic-kit-procedure',
+    resourceKinds: ['stale-npx-env'],
     operations: ['clean'], rollback: ['irreversible'],
-    detect, actionFor, preflight, apply, verify,
+    detect, findings, actionFor, preflight, apply, verify,
   };
 }

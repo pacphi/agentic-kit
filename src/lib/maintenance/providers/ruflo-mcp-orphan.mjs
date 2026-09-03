@@ -1,7 +1,7 @@
 import {
   listMcpTransports, orphanedMcpTransports, reapMcpTransports,
 } from '../../daemons.mjs';
-import { baseAction, executableSafetyClass, sha256 } from './shared.mjs';
+import { baseAction, executableSafetyClass, providerFinding, sha256 } from './shared.mjs';
 
 const RESOURCE_ID = /^ruflo-mcp-orphan:(\d{1,10})$/;
 
@@ -63,7 +63,7 @@ export function createRufloMcpOrphanProvider({
       }));
       return {
         status: 'available', complete: true, authority: 'live-process-identity',
-        capability: { status: 'available', reason: null }, orphans,
+        asOf: new Date().toISOString(), capability: { status: 'available', reason: null }, orphans,
       };
     } catch {
       return {
@@ -72,6 +72,27 @@ export function createRufloMcpOrphanProvider({
         orphans: [],
       };
     }
+  }
+
+  function findings(facts) {
+    if (facts?.status !== 'available' || facts.complete !== true
+        || facts.capability?.status !== 'available') return [];
+    return facts.orphans.map((orphan) => providerFinding({
+      providerId: 'ruflo-mcp-orphan', stableKey: orphan.resourceId,
+      state: 'stale-configuration', bucket: 'needsReview',
+      classification: 'identity-proven-ruflo-mcp-orphan', safetyClass: 'approval-required',
+      resource: {
+        id: orphan.resourceId, kind: 'daemon', name: `Ruflo MCP transport ${orphan.pid}`,
+        host: 'ruflo', scope: 'machine',
+      },
+      versions: {},
+      ownership: { owner: 'ruflo', authority: 'live-process-identity', managed: true },
+      evidence: { sources: ['ruflo-live-process-census'], asOf: facts.asOf,
+        freshness: 'fresh', completeness: 'complete', gaps: [] },
+      impact: { summary: 'An identity-proven orphaned MCP transport remains live.' },
+      operation: 'terminate', label: 'Terminate exact identity-proven orphan',
+      rollback: 'irreversible', restart: 'not-required', executable: true,
+    }));
   }
 
   function actionFor(finding, facts) {
@@ -152,8 +173,8 @@ export function createRufloMcpOrphanProvider({
   }
 
   return {
-    id: 'ruflo-mcp-orphan', version: 'v1', resourceKinds: ['daemon'],
+    id: 'ruflo-mcp-orphan', version: 'v1', authority: 'live-process-identity', resourceKinds: ['daemon'],
     operations: ['terminate'], rollback: ['irreversible'],
-    detect, actionFor, preflight, apply, verify,
+    detect, findings, actionFor, preflight, apply, verify,
   };
 }
