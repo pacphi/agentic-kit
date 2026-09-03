@@ -46,14 +46,23 @@ function publicFinding(finding) {
   const evidence = value.evidence && typeof value.evidence === 'object' ? value.evidence : {};
   const impact = value.impact && typeof value.impact === 'object' ? value.impact : {};
   const next = value.nextAction && typeof value.nextAction === 'object' ? value.nextAction : {};
+  const gaps = textList(evidence.gaps);
+  const reasons = textList(evidence.reasons);
+  const sources = textList(evidence.sources);
+  const owner = text(value.owner) ?? text(value.ownership?.owner);
   return {
     ...picked(value, ['id', 'state', 'bucket', 'classification', 'safetyClass', 'headline', 'explanation', 'owner']),
+    ...(owner ? { owner } : {}),
     resource: publicResource(value.resource),
     versions: picked(value.versions, VERSION_KEYS),
     ownership: picked(value.ownership, ['owner', 'authority', 'managed']),
     evidence: {
       ...picked(evidence, ['asOf', 'freshness', 'completeness', 'status', 'source', 'authority', 'health']),
-      sources: textList(evidence.sources), gaps: textList(evidence.gaps), reasons: textList(evidence.reasons),
+      sources,
+      gaps,
+      reasons: reasons.length ? reasons : gaps,
+      ...(!evidence.source && sources.length ? { source: sources.join(', ') } : {}),
+      ...(!evidence.health && evidence.freshness ? { health: text(evidence.freshness, 100) } : {}),
     },
     observedUsage: picked(value.observedUsage, ['status', 'statement']),
     impact: {
@@ -78,7 +87,7 @@ function publicReceipt(receipt) {
     verification: picked(action.verification, ['verified', 'postFingerprint']),
     recovery: picked(action.recovery, ['status', 'verified']),
   })) : [];
-  return {
+  const projected = {
     ...picked(value, [
       'id', 'status', 'planId', 'planDigest', 'sourceFingerprint', 'createdAt', 'updatedAt',
       'completedAt', 'headline', 'label', 'summary', 'statusLabel', 'undoStatus', 'undoEligible',
@@ -89,6 +98,10 @@ function publicReceipt(receipt) {
     ]),
     undo: picked(value.undo, ['completedAt', 'guardedByPostimage', 'eligible', 'status', 'summary']),
   };
+  if (!projected.completedAt && ['committed', 'rolled-back'].includes(projected.status)) {
+    projected.completedAt = projected.updatedAt ?? projected.createdAt;
+  }
+  return projected;
 }
 
 export function publicMaintenanceModel(model) {
@@ -118,7 +131,7 @@ export function publicMaintenanceModel(model) {
     findings,
     receipts,
     providers: Array.isArray(value.providers) ? value.providers.slice(0, 100).map((provider) => ({
-      ...picked(provider, ['id', 'version', 'status', 'reason']),
+      ...picked(provider, ['id', 'version', 'host', 'status', 'reason']),
       resourceKinds: textList(provider.resourceKinds), operations: textList(provider.operations),
       rollback: textList(provider.rollback),
     })) : [],

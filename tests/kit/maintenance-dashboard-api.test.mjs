@@ -91,10 +91,12 @@ test('maintenance dashboard projection derives human summary fields without inve
   const projected = publicMaintenanceModel({
     summary: { updatesReady: 1, unsupportedOrBlocked: 1 },
     findings: [
-      { id: 'a', bucket: 'updatesReady', evidence: { completeness: 'complete' }, nextAction: { executable: true } },
+      { id: 'a', bucket: 'updatesReady', ownership: { owner: 'native owner' },
+        evidence: { completeness: 'complete', freshness: 'fresh', sources: ['native'], gaps: ['gap-a'] },
+        nextAction: { executable: true } },
       { id: 'b', bucket: 'unsupportedOrBlocked', evidence: { completeness: 'partial' }, nextAction: { executable: false } },
     ],
-    receipts: [{ id: 'r1', status: 'committed' }],
+    receipts: [{ id: 'r1', status: 'committed', updatedAt: '2026-09-03T00:00:00.000Z' }],
   });
   assert.deepEqual({
     total: projected.summary.total,
@@ -103,6 +105,10 @@ test('maintenance dashboard projection derives human summary fields without inve
     blocked: projected.summary.blocked,
     recentChanges: projected.summary.recentChanges,
   }, { total: 2, actionable: 1, incompleteSources: 1, blocked: 1, recentChanges: 1 });
+  assert.equal(projected.findings[0].owner, 'native owner');
+  assert.deepEqual(projected.findings[0].evidence.reasons, ['gap-a']);
+  assert.equal(projected.findings[0].evidence.source, 'native');
+  assert.equal(projected.receipts[0].completedAt, '2026-09-03T00:00:00.000Z');
 });
 
 test('dashboard Maintenance API keeps GET lazy and mutation paths exact', async (t) => {
