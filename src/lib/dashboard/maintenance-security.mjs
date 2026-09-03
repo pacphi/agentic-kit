@@ -101,10 +101,12 @@ export function validateMaintenanceBody(route, value) {
 export function readMaintenanceJson(req, { maxBytes = MAX_MAINTENANCE_BODY_BYTES } = {}) {
   const type = String(req.headers?.['content-type'] || '').toLowerCase();
   if (!/^application\/json(?:\s*;\s*charset=utf-8)?$/.test(type)) {
+    req.resume?.();
     return Promise.reject(Object.assign(new TypeError('content type must be application/json'), { statusCode: 415 }));
   }
   const declared = String(req.headers?.['content-length'] || '');
   if (declared && (!/^\d+$/.test(declared) || Number(declared) > maxBytes)) {
+    req.resume?.();
     return Promise.reject(Object.assign(new TypeError('maintenance request body is too large'), { statusCode: 413 }));
   }
   return new Promise((resolve, reject) => {
@@ -161,12 +163,17 @@ export function createMaintenanceCapabilityStore({
       throw new TypeError('invalid maintenance capability authority');
     }
     prune();
+    const current = now();
+    const deadline = Math.min(Number(expiresAt), current + ttlMs);
+    if (!Number.isFinite(deadline) || deadline <= current) {
+      throw new Error('maintenance capability expiry is invalid');
+    }
     const capability = random();
     if (!CAPABILITY.test(capability)) throw new Error('maintenance capability source is invalid');
     const key = sha256(capability);
     if (entries.has(key)) throw new Error('maintenance capability collision');
     entries.set(key, {
-      sessionDigest: sha256(sessionToken), verb, authority, expiresAt: Math.min(expiresAt, now() + ttlMs),
+      sessionDigest: sha256(sessionToken), verb, authority, expiresAt: deadline,
     });
     return capability;
   };

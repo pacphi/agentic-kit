@@ -74,4 +74,7 @@ test('maintenance capabilities are session-bound, expiring, exact-verb and one-u
   clock += 101;
   assert.throws(() => store.consume({ capability: undo, sessionToken: 'session-a', verb: 'undo' }), /absent|expired/);
   assert.equal(store.size(), 0);
+  assert.throws(() => store.mint({
+    sessionToken: 'session-a', verb: 'apply', authority: { planId: 'bad' }, expiresAt: Number.NaN,
+  }), /expiry/);
 });
