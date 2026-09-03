@@ -39,6 +39,7 @@ test('maintain is porcelain and its help advertises exact guarded actions', () =
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /ak maintain scan/);
   assert.match(help.stdout, /apply.*--plan.*--digest.*--actions.*--yes/i);
+  assert.match(help.stdout, /recover.*--receipt.*--yes/i);
   const rootHelp = spawnSync(process.execPath, [BIN, '--help'], { encoding: 'utf8' });
   assert.match(rootHelp.stdout, /ak maintain/);
 });
@@ -109,6 +110,24 @@ test('undo requires a receipt and explicit confirmation', async () => {
   assert.match(missing.text, /--receipt.*--yes/i);
   const result = await captureLogs(() => run({
     flags: { json: true, receipt: 'mnt-a', yes: true }, positionals: ['undo'], deps: { service },
+  }));
+  assert.equal(result.code, 0);
+  assert.deepEqual(calls, [{ receiptId: 'mnt-a', confirmed: true }]);
+});
+
+test('recover requires a receipt and explicit confirmation', async () => {
+  const calls = [];
+  const service = { async recover(options) {
+    calls.push(options);
+    return { ok: true, status: 'recovered-no-change', receiptId: 'mnt-a' };
+  } };
+  const missing = await captureLogs(() => run({
+    flags: { receipt: 'mnt-a' }, positionals: ['recover'], deps: { service },
+  }));
+  assert.equal(missing.code, 2);
+  assert.match(missing.text, /--receipt.*--yes/i);
+  const result = await captureLogs(() => run({
+    flags: { json: true, receipt: 'mnt-a', yes: true }, positionals: ['recover'], deps: { service },
   }));
   assert.equal(result.code, 0);
   assert.deepEqual(calls, [{ receiptId: 'mnt-a', confirmed: true }]);

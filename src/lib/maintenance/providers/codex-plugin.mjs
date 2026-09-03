@@ -112,7 +112,10 @@ export function createCodexPluginProvider({ run = runNativeCommand } = {}) {
     const facts = await detect();
     const ref = entry?.resourceIdentity?.providerRef;
     const plugin = facts.complete && facts.plugins.find((item) => item.ref === ref && item.installed);
-    return { postFingerprint: plugin ? fingerprint(plugin) : `absent:${sha256(ref)}` };
+    return {
+      complete: facts.complete === true,
+      postFingerprint: plugin ? fingerprint(plugin) : `absent:${sha256(ref)}`,
+    };
   }
 
   return {

@@ -436,9 +436,21 @@ export function createOwnedSkillProvider({
 
   async function inspectPostimage(entry) {
     const receipt = exactReceipt(entry?.resourceIdentity?.id);
-    if (!receipt || entry?.operation !== 'archive') return { postFingerprint: null };
+    if (!receipt || !['archive', 'prune'].includes(entry?.operation)) {
+      return { complete: false, postFingerprint: null };
+    }
     const state = inspectReceipt(receipt, archive, fsImpl);
-    return { postFingerprint: state.status === 'archived' ? postFingerprint(receipt, 'archive') : null };
+    if (state.status === 'owned-current') {
+      return { complete: true, postFingerprint: sourceFingerprint(receipt) };
+    }
+    if (state.status === 'absent') {
+      return { complete: true, postFingerprint: postFingerprint(receipt, entry.operation) };
+    }
+    return {
+      complete: true,
+      postFingerprint: state.status === 'archived' && entry.operation === 'archive'
+        ? postFingerprint(receipt, 'archive') : null,
+    };
   }
 
   const inspectCurrent = inspectPostimage;

@@ -109,6 +109,9 @@ test('exact recursive skill receipt archives, verifies, and restores without exp
   assert.equal(action.rollback, 'reversible');
   assert.equal(JSON.stringify(action).includes(root), false);
   assert.equal((await provider.preflight(action)).ok, true);
+  assert.deepEqual(await provider.inspectCurrent(action), {
+    complete: true, postFingerprint: action.sourceFingerprint,
+  });
 
   const outcome = await provider.apply(action);
   assert.equal(outcome.status, 'applied');
@@ -122,7 +125,9 @@ test('exact recursive skill receipt archives, verifies, and restores without exp
     sourceFingerprint: action.sourceFingerprint,
     outcome,
   };
-  assert.equal((await provider.inspectPostimage(entry)).postFingerprint, outcome.postFingerprint);
+  assert.deepEqual(await provider.inspectPostimage(entry), {
+    complete: true, postFingerprint: outcome.postFingerprint,
+  });
   assert.equal((await provider.undo(entry)).status, 'restored');
   assert.equal((await provider.verifyUndo(entry)).ok, true);
   assert.equal(fs.readFileSync(path.join(target, 'references', 'notes.md'), 'utf8'), 'owned notes\n');
@@ -333,9 +338,15 @@ test('owned npx provider cleans only an exact freshly stale collector candidate'
   assert.equal(action.rollback, 'irreversible');
   assert.equal(JSON.stringify(action).includes(root), false);
   assert.equal((await provider.preflight(action)).ok, true);
+  assert.deepEqual(await provider.inspectCurrent(action), {
+    complete: true, postFingerprint: action.sourceFingerprint,
+  });
   const outcome = await provider.apply(action);
   assert.equal(outcome.status, 'applied');
   assert.equal((await provider.verify(action, outcome)).ok, true);
+  assert.deepEqual(await provider.inspectCurrent(action), {
+    complete: true, postFingerprint: outcome.postFingerprint,
+  });
   assert.equal((await provider.apply(action)).status, 'unchanged');
 });
 
@@ -400,10 +411,16 @@ test('Ruflo MCP orphan provider rechecks live owner and identity before terminat
   assert.equal(facts.capability.status, 'available');
   const action = provider.actionFor(orphanFinding(4321), facts);
   assert.equal((await provider.preflight(action)).ok, true);
+  assert.deepEqual(await provider.inspectCurrent(action), {
+    complete: true, postFingerprint: action.sourceFingerprint,
+  });
   const outcome = await provider.apply(action);
   assert.equal(outcome.status, 'applied');
   assert.equal(killed, 1);
   assert.equal((await provider.verify(action, outcome)).ok, true);
+  assert.deepEqual(await provider.inspectCurrent(action), {
+    complete: true, postFingerprint: outcome.postFingerprint,
+  });
   assert.equal((await provider.apply(action)).status, 'unchanged');
 });
 

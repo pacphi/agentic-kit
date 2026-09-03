@@ -83,7 +83,10 @@ export function createCodexMcpProvider({ run = runNativeCommand } = {}) {
     const facts = await detect();
     const name = entry?.resourceIdentity?.name;
     const server = facts.complete && facts.servers.find((item) => item.name === name);
-    return { postFingerprint: server?.configurationFingerprint ?? `absent:${sha256(name)}` };
+    return {
+      complete: facts.complete === true,
+      postFingerprint: server?.configurationFingerprint ?? `absent:${sha256(name)}`,
+    };
   }
 
   return {

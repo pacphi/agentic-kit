@@ -18,13 +18,14 @@ export const options = {
 export const help = `ak maintain — evidence, immutable plans, and guarded provider actions
 
 System measures; Maintenance explains what needs attention and prepares exact,
-short-lived plans. Apply and undo require explicit, exact confirmation.
+short-lived plans. Apply, undo, and recovery require explicit, exact confirmation.
 
 Usage:
   ak maintain scan [--deep] [--json]
   ak maintain plan [--findings ID,...] [--safety-class CLASS] [--project PATH] [--executable] [--json]
   ak maintain apply --plan ID --digest SHA256 --actions ID,... --yes [--json]
   ak maintain undo --receipt ID --yes [--json]
+  ak maintain recover --receipt ID --yes [--json]
 
 Options:
   --deep                explicitly refresh the System deep scan before reading
@@ -35,8 +36,8 @@ Options:
   --plan ID             exact persisted executable plan ID
   --digest SHA256       exact executable plan digest shown at preview
   --actions ID,...      exact action IDs shown at preview
-  --receipt ID          exact receipt ID to undo
-  --yes                 explicit confirmation for apply or undo
+  --receipt ID          exact receipt ID to undo or reconcile
+  --yes                 explicit confirmation for apply, undo, or recovery
   --json                emit the complete content-free DTO or plan
 
 Examples:
@@ -44,7 +45,8 @@ Examples:
   ak maintain scan --deep --json
   ak maintain plan --findings maintenance-finding-abc --executable --json
   ak maintain apply --plan maintenance-plan-abc --digest SHA256 --actions maintenance-action-abc --yes
-  ak maintain undo --receipt mnt-receipt --yes`;
+  ak maintain undo --receipt mnt-receipt --yes
+  ak maintain recover --receipt mnt-receipt --yes`;
 
 const findingIds = (raw) => raw
   ? [...new Set(raw.split(',').map((value) => value.trim()).filter(Boolean))].sort()
@@ -78,14 +80,17 @@ function renderMutation(result, verb) {
 }
 
 function inputError(verb, flags, positionals) {
-  if (positionals.length > 1 || !['scan', 'plan', 'apply', 'undo'].includes(verb)) {
-    return 'usage: ak maintain scan|plan|apply|undo [options]';
+  if (positionals.length > 1 || !['scan', 'plan', 'apply', 'undo', 'recover'].includes(verb)) {
+    return 'usage: ak maintain scan|plan|apply|undo|recover [options]';
   }
   if (verb === 'apply' && (!flags.plan || !flags.digest || !flags.actions || flags.yes !== true)) {
     return 'Maintenance apply requires --plan, --digest, --actions, and --yes.';
   }
   if (verb === 'undo' && (!flags.receipt || flags.yes !== true)) {
     return 'Maintenance undo requires --receipt and --yes.';
+  }
+  if (verb === 'recover' && (!flags.receipt || flags.yes !== true)) {
+    return 'Maintenance recovery requires --receipt and --yes.';
   }
   return null;
 }
@@ -105,7 +110,8 @@ async function dispatch(service, verb, flags) {
     actionIds: actionIds(flags.actions),
     confirmed: true,
   });
-  return service.undo({ receiptId: flags.receipt, confirmed: true });
+  if (verb === 'undo') return service.undo({ receiptId: flags.receipt, confirmed: true });
+  return service.recover({ receiptId: flags.receipt, confirmed: true });
 }
 
 function renderResult(result, verb, json) {

@@ -3,7 +3,9 @@ import path from 'node:path';
 
 import { createSystemCollector } from '../footprint/index.mjs';
 import { maintenanceControlDir } from '../paths.mjs';
-import { applyMaintenancePlan, undoMaintenanceReceipt } from './coordinator.mjs';
+import {
+  applyMaintenancePlan, recoverMaintenanceReceipt, undoMaintenanceReceipt,
+} from './coordinator.mjs';
 import { projectReference } from './evidence.mjs';
 import { deepFreeze } from './model.mjs';
 import { projectProviderFindings } from './provider-findings.mjs';
@@ -29,6 +31,7 @@ const RECOVERY_STATUSES = new Set([
 ]);
 const RECEIPT_STATUSES = new Set([
   ...RECOVERY_STATUSES, 'committed', 'rolled-back', 'already-rolled-back',
+  'aborted-no-change', 'recovered-no-change', 'already-reconciled',
 ]);
 
 function publicTimestamp(value) {
@@ -308,5 +311,22 @@ export function createMaintenanceService({
     return publicResult(result);
   }
 
-  return Object.freeze({ scan, plan, apply, prepareUndo, undo });
+  /** Reconcile journal state without replaying an action or invoking undo.
+   * @param {any} input */
+  async function recover({ receiptId, confirmed = false } = {}) {
+    if (confirmed !== true) throw new Error('Explicit confirmation is required for maintenance recovery.');
+    ensurePrivateMaintenanceRoot(controlRoot, { fsImpl });
+    const providerRegistry = resolveProviders(await collector.read());
+    const result = await recoverMaintenanceReceipt({
+      transactionsRoot,
+      receiptId,
+      providers: providerRegistry,
+      refreshAffectedCatalog: async () => collector.refreshDeep(),
+      fsImpl,
+      now,
+    });
+    return publicResult(result);
+  }
+
+  return Object.freeze({ scan, plan, apply, prepareUndo, undo, recover });
 }

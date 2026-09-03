@@ -225,10 +225,23 @@ export function createOwnedNpxCacheProvider({
     };
   }
 
+  async function inspectCurrent(entry) {
+    const definition = exactDefinition(entry?.resourceIdentity?.id);
+    if (!definition || entry?.operation !== 'clean') return { complete: false, postFingerprint: null };
+    const current = inspect(definition);
+    if (current.status === 'owned-procedure-current') {
+      return { complete: true, postFingerprint: current.sourceFingerprint };
+    }
+    if (current.status === 'absent') {
+      return { complete: true, postFingerprint: absentFingerprint(definition.resourceId) };
+    }
+    return { complete: false, postFingerprint: null };
+  }
+
   return {
     id: 'agentic-kit-npx-cache', version: 'v1', authority: 'agentic-kit-procedure',
     resourceKinds: ['stale-npx-env'],
     operations: ['clean'], rollback: ['irreversible'],
-    detect, findings, actionFor, preflight, apply, verify,
+    detect, findings, actionFor, preflight, apply, verify, inspectCurrent,
   };
 }

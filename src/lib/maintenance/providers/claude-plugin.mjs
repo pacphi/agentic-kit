@@ -217,7 +217,7 @@ export function createClaudePluginProvider({ run = runNativeCommand } = {}) {
     const postFingerprint = entry?.operation === 'remove'
       ? (plugin ? installedFingerprint(plugin) : `absent:${sha256(ref)}`)
       : (plugin ? installedFingerprint(plugin) : null);
-    return { postFingerprint };
+    return { complete: facts.complete === true, postFingerprint };
   }
 
   return {

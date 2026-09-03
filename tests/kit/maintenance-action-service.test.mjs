@@ -98,7 +98,7 @@ function provider(state, events = []) {
       events.push('verify');
       return { ok: !state.enabled, postFingerprint: outcome.postFingerprint };
     },
-    async inspectCurrent() { return { postFingerprint: fingerprint() }; },
+    async inspectCurrent() { return { complete: true, postFingerprint: fingerprint() }; },
     async undo(entry) {
       events.push('undo'); state.enabled = true;
       return { status: 'restored', sourceFingerprint: entry.sourceFingerprint };
@@ -232,6 +232,7 @@ test('service applies exact confirmed selection, refreshes catalog before succes
     planId: plan.planId, actionIds: [plan.actions[0].id], expectedPlanDigest: plan.planDigest, confirmed: true,
   });
   assert.equal(result.ok, true);
+  assert.equal(result.receipt.actions[0].preimageFingerprint, 'native-source-a');
   assert.equal(events.indexOf('catalog-refresh') > events.indexOf('verify'), true);
   assert.equal(result.receipt.verification.affectedCatalogRefreshed, true);
   assert.equal('receiptFile' in result, false);

@@ -172,9 +172,20 @@ export function createRufloMcpOrphanProvider({
     };
   }
 
+  async function inspectCurrent(entry) {
+    const current = await liveIdentity(entry);
+    if (current.status === 'orphan') {
+      return { complete: true, postFingerprint: current.sourceFingerprint };
+    }
+    if (current.status === 'absent' && current.pid) {
+      return { complete: true, postFingerprint: absentFingerprint(current.pid) };
+    }
+    return { complete: false, postFingerprint: null };
+  }
+
   return {
     id: 'ruflo-mcp-orphan', version: 'v1', authority: 'live-process-identity', resourceKinds: ['daemon'],
     operations: ['terminate'], rollback: ['irreversible'],
-    detect, findings, actionFor, preflight, apply, verify,
+    detect, findings, actionFor, preflight, apply, verify, inspectCurrent,
   };
 }

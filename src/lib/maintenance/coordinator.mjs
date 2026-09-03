@@ -70,7 +70,7 @@ function selectedActions(plan, actionIds, expectedPlanDigest, providers, now, va
   return actions;
 }
 
-function receiptEntry(action) {
+function receiptEntry(action, preimageFingerprint = null) {
   return {
     actionId: action.id,
     providerId: action.providerId,
@@ -81,6 +81,7 @@ function receiptEntry(action) {
     rollback: action.rollback,
     restart: action.restart ?? 'unknown',
     sourceFingerprint: safeText(action.sourceFingerprint, 256),
+    ...(preimageFingerprint ? { preimageFingerprint: safeText(preimageFingerprint, 256) } : {}),
     state: 'prepared',
     outcome: null,
     verification: null,
@@ -137,6 +138,13 @@ async function revalidateBeforeMutation(selected, plan, refreshPlan, validatePla
     if (check?.ok !== true || check.sourceFingerprint !== item.action.sourceFingerprint) {
       throw new Error(`source state changed for action: ${item.action.id}`);
     }
+    if (typeof item.provider.inspectCurrent === 'function') {
+      const current = await item.provider.inspectCurrent(item.action);
+      const fingerprint = current?.postFingerprint ?? current?.currentFingerprint;
+      if (current?.complete === true && typeof fingerprint === 'string' && fingerprint) {
+        item.preimageFingerprint = safeText(fingerprint, 256);
+      }
+    }
   }
   const livePlan = await refreshPlan();
   validatePlan?.(livePlan, { now: now(), sourceFingerprint: plan.sourceFingerprint });
@@ -159,7 +167,7 @@ function initialReceipt(transaction, plan, selected, now) {
     planDigest: safeText(plan.planDigest, 256),
     sourceFingerprint: safeText(plan.sourceFingerprint, 256),
     authorization: { mechanism: 'exact-plan-selection', actionIds: selected.map((item) => item.action.id) },
-    actions: selected.map((item) => receiptEntry(item.action)),
+    actions: selected.map((item) => receiptEntry(item.action, item.preimageFingerprint)),
     verification: null,
   };
 }
@@ -376,3 +384,5 @@ export async function undoMaintenanceReceipt({
     try { lock.release(); } catch { /* fail closed */ }
   }
 }
+
+export { recoverMaintenanceReceipt } from './recovery-coordinator.mjs';
