@@ -22,7 +22,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0011](0011-local-model-provenance-zero-cost-and-transcript-fidelity.md) | Local models: provenance out-of-band, $0 per model, stated transcript fidelity | Proposed |
 | [0012](0012-observability.md) | Evidence-graded session observability | Implemented |
 | [0013](0013-admin-build-security-signals-and-honest-reach.md) | Admin: build/security signals, an honest Reach panel, and a pagination fix | Accepted |
-| [0014](0014-dashboard-auth-and-remediation.md) | Dashboard auth token, plus a security/quality remediation pass | Accepted |
+| [0014](0014-dashboard-auth-and-remediation.md) | Dashboard auth token, plus a security/quality remediation pass | Implemented |
 | [0015](0015-managed-codex-native-statusline.md) | Manage Codex's native user-wide status line without claiming rich-renderer parity | Accepted |
 | [0016](0016-capability-driven-integration-adapters.md) | Capability-driven host, provider, binding, projection, and observability adapters | Accepted; compatibility amended; closed-registry clause superseded by 0029 |
 | [0017](0017-opencode-host.md) | OpenCode as a managed, observable host through native surfaces | Accepted; compatibility amended |
@@ -51,6 +51,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0041](0041-host-neutral-hook-configuration-assurance.md) | Host-neutral hook configuration assurance | Implemented; native runtime receipt acquisition deferred |
 | [0042](0042-capability-aware-context-budget-intelligence.md) | Capability-aware context budget intelligence | Implemented |
 | [0043](0043-managed-ruflo-browser-executor.md) | Manage Ruflo's browser executor behind a replaceable boundary | Accepted |
+| [0044](0044-receipt-aware-maintenance-control-plane.md) | Receipt-aware Maintenance control plane | Accepted |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -313,3 +314,13 @@ approval-required, or never-automatic. Plugin caches and trust state remain unwr
 apply wave requires exact preimages, transaction-specific backups/receipts, guarded rollback, a
 clean second audit, and a byte/mtime no-op proof. The ADR remains Proposed pending independent
 dual-host review.
+
+**0044** accepts Maintenance as a separate control-plane bounded context and places its future UI
+under System without giving Machine Footprint mutation authority. It separates evidence-backed
+findings, immutable source-bound plans, one-use action capabilities, provider-owned operations,
+verification, durable receipts, and guarded undo. The accepted provider boundary exposes only
+host-native lifecycle verbs or exact agentic-kit-owned procedures; plugin cache children, incomplete
+skill receipts, unsupported host verbs, and uncertain evidence remain report-only. The existing
+dashboard stays GET-only except for four future, explicitly allowlisted Maintenance route shapes,
+each retaining ADR-0014's loopback protections and adding bounded JSON, fixed server-side actions,
+explicit confirmation, and one-use authorization. Issue #200 tracks implementation.

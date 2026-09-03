@@ -3,6 +3,8 @@
 - **Status:** Implemented
 - **Date:** 2026-07-28
 - **Updated:** 2026-08-04
+- **Updated:** 2026-09-03 — ADR-0044 accepts a future Maintenance-only POST extension with
+  one-use, plan-bound action capabilities; the implemented dashboard remains GET-only.
 - **Update note:** ADR-0023 completed the settings-writer contract: a promised `.bak` is now
   fail-closed, validated as a regular non-symlink file, and required before atomic replacement.
 - **Deciders:** agentic-kit maintainers
@@ -179,6 +181,8 @@ Found by the same audit, fixed in the same remediation pass:
 - ADR-0007 (admin's token/fragment/header-only auth contract, which this ADR extends
   to the dashboard).
 - ADR-0013 (the prior admin remediation pass — same review lineage, different surface).
+- [ADR-0044](0044-receipt-aware-maintenance-control-plane.md) (accepted future mutation routes;
+  existing token and request-origin protections remain mandatory).
 - `src/lib/dashboard-server.mjs`, `src/lib/dashboard/sse.mjs`,
   `src/lib/dashboard/client.mjs`, `src/lib/dashboard/live/client.mjs`,
   `src/lib/dashboard/page.mjs`, `src/lib/dashboard/styles.mjs`,

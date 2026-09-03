@@ -17,6 +17,9 @@ describe the current system unless a section is explicitly marked as future work
 | [Prompt telemetry](prompt-telemetry.md) | Privacy-bounded prompt fingerprints, controlled semantic facets, recurring-cluster naming, and presentation rules |
 | [Observability](observability.md) | Evidence acquisition, observed-session aggregates, replay, and dashboard delivery |
 | [Project intelligence](project-intelligence.md) | Pattern store, learning counters, reasoning-graph size, and live delivery for Overview's Intelligence view |
+| [Machine footprint](machine-footprint.md) | Read-only install, runtime, storage, catalog, and project measurement for System |
+| [Maintenance](maintenance.md) | Accepted future control plane for findings, source-bound plans, provider actions, verification, receipts, and guarded undo |
+| [Component directory](component-directory.md) | Curated identity for the components agentic-kit installs or configures |
 
 ## Relationship to other documentation
 

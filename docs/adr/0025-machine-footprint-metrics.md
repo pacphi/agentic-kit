@@ -19,6 +19,9 @@
   viewport, then gives Project skill pressure a full-width row; pressure groups one disclosure per
   relevant project, keeps the launching project first, omits measured-zero project rows, and moves
   per-host source evidence plus one deduplicated plan command behind progressive disclosure.
+- **Updated:** 2026-09-03 — ADR-0044 accepts Maintenance as a separate future control plane under
+  the System shell. Machine Footprint collectors, Catalog, pressure, and existing System routes
+  remain read-only measurement surfaces.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0005](0005-dashboard-in-page-routing-reveal.md),
   [ADR-0007](0007-maintainer-admin-local-telemetry.md),
@@ -26,7 +29,8 @@
   [ADR-0012](0012-observability.md),
   [ADR-0014](0014-dashboard-auth-and-remediation.md),
   [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),
-  [ADR-0024](0024-project-intelligence-telemetry.md)
+  [ADR-0024](0024-project-intelligence-telemetry.md),
+  [ADR-0044](0044-receipt-aware-maintenance-control-plane.md)
 
 > **2026-09-03 amendment.** Catalog identity is no longer only `(kind, normalized name)`: a
 > standalone skill and a plugin-contributed skill with the same logical name are distinct catalog
@@ -40,6 +44,8 @@
 > disclosure per project. Inventory completeness and model-context inclusion are separate facts;
 > hosts do not currently report the latter, so that caveat appears once rather than as a repeated
 > `complete · context unknown` row label. The all-kind detail remains in the Catalog matrix.
+> ADR-0044 now accepts the future Maintenance control-plane contract; its placement under System
+> does not add mutation to this context's collectors or routes.
 
 <!-- amendment boundary -->
 

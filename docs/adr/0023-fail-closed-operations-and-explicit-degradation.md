@@ -3,6 +3,9 @@
 - **Status:** Implemented
 - **Updated:** 2026-08-26 — ADR-0035 applies fail-closed preflight, bounded evidence, and
   content-free degradation to the opt-in deja-vu companion
+- **Updated:** 2026-09-03 — ADR-0044 adopts these fail-closed principles for a future Maintenance
+  coordinator while explicitly refusing to claim filesystem atomicity for native lifecycle,
+  network, package, or process operations
 - **Date:** 2026-08-04
 - **Previous updates:** 2026-08-24 — issue #170 parser-yield diagnostics distinguish readable Codex
   roots from readable roots whose transcript schema produces no normalized responses; 2026-08-06
@@ -23,9 +26,10 @@
   [ADR-0009](0009-usage-scorecard-local-transcript-analytics.md),
   [ADR-0012](0012-observability.md),
   [ADR-0014](0014-dashboard-auth-and-remediation.md),
-  [ADR-0016](0016-capability-driven-integration-adapters.md), and
+  [ADR-0016](0016-capability-driven-integration-adapters.md),
   [ADR-0017](0017-opencode-host.md),
-  [ADR-0035](0035-managed-deja-vu-companion.md), and
+  [ADR-0035](0035-managed-deja-vu-companion.md),
+  [ADR-0044](0044-receipt-aware-maintenance-control-plane.md), and
   [issue #114](https://github.com/pacphi/agentic-kit/issues/114)
 
 ## Context

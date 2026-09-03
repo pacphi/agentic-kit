@@ -19,6 +19,11 @@ to. It renders in the dashboard's **System** primary area and through a CLI twin
 and it mutates nothing — including the reclaimable-space candidates it computes, which are
 advisory rows with rationale, never delete actions.
 
+[ADR-0044](../adr/0044-receipt-aware-maintenance-control-plane.md) accepts a future
+**Maintenance** secondary destination under the same System shell. That context consumes this
+domain's evidence and owns its own action service; its placement does not add mutations to a
+Footprint collector, `ak system`, or `GET /api/system`.
+
 **Footprint** is the name of this context, not of a user-facing surface: every surface a user
 touches — the tab, the command, the route — is called *System*.
 
@@ -50,6 +55,9 @@ boundaries are what keep all four honest:
 - **[Integration management](integration-management.md)** owns what *should* be deployed
   (bindings, projections, ownership). Machine footprint reports what *is* on disk and how big it
   is; catalog counts here are observed inventory, never desired state.
+- **[Maintenance](maintenance.md)** owns future provider-backed actions, verification, receipts,
+  and guarded undo. Machine footprint contributes observations and advisory candidates only; it
+  cannot authorize an action even when a name, digest, age, or path appears conclusive.
 
 Because every source is the local filesystem and the current-user process table — the same trust
 boundary `ak status` and the runtime survey already cross — no anti-corruption adapter guards
@@ -160,7 +168,11 @@ Delivery
   ak system [--deep] [--json]  → the same collector, CLI-rendered
         |
         v
-  System primary area: Summary | Storage | Runtime | Catalog | Projects
+  Current Machine Footprint destinations under System:
+    Summary | Advisory | Sessions | Storage | Runtime | Catalog | Projects
+
+  Accepted future sibling destination:
+    Maintenance (separate bounded context; not a Footprint mutation path)
 ```
 
 ### Measurement semantics
@@ -449,7 +461,9 @@ than relying only on the seven-day age threshold. An unchanged probe is labelled
 desired, receipt-owned-and-unchanged, exact known upstream, receipt-drifted/modified, unmeasured,
 or ambiguous/unreceipted. It reports git state, affected paths, projected counts, and a
 content-derived plan ID but performs no mutation. [Maintenance](maintenance.md) and issue #200 own
-future apply/verify/undo behavior.
+future apply/verify/undo behavior under the architecture accepted by
+[ADR-0044](../adr/0044-receipt-aware-maintenance-control-plane.md). The preview is evidence for a
+future MaintenancePlan, not that plan or an authorization capability.
 
 ### Project accounting
 
@@ -594,7 +608,8 @@ payload verbatim, following the one-collector-two-surfaces precedent of the usag
    surfaced as a nudge, not silently repaired.
 4. **This context mutates nothing.** No delete, prune, or cleanup verb exists here; reclaimable
    candidates are advisory rows with rationale, each carrying a `safety` tier and a
-   `bytesMeaning`. (The snapshot file it owns is the sole write.)
+   `bytesMeaning`. (The snapshot file it owns is the sole write.) A future Maintenance view under
+   the same System shell remains a separate bounded context and application service.
 5. **The runtime census is ephemeral.** It is computed per request and never persisted; a stale
    process table is never replayed as liveness.
 6. **Bounded walkers.** Symlinks are never followed; depth and entry caps apply; one unreadable

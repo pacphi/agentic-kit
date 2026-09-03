@@ -3,6 +3,9 @@
 - **Status:** Implemented
 - **Date:** 2026-07-23
 - **Updated:** 2026-08-25
+- **Updated:** 2026-09-03 — ADR-0044 accepts a future, narrowly allowlisted Maintenance action
+  boundary under System; the implemented dashboard remains read-only until that control plane
+  ships.
 - **Update note:** Reconciled the implemented five-area shell introduced by ADR-0025 and ADR-0026.
   ADR-0032 adds Models as a secondary Usage destination and a compact Overview summary while
   preserving read-only, network-silent ordinary Dashboard reads. Model identifiers use a fail-closed
@@ -10,9 +13,11 @@
   field-evidence disclosures. ADR-0032 release proof remains pending.
 - **Deciders:** agentic-kit maintainers
 
-> **GA amendment:** the read-only dashboard decision remains. References below to compatibility
-> configuration names and projections describe the implementation at adoption time only;
-> [ADR-0020](0020-ga-stable-surfaces.md) defines the canonical GA surface.
+> **GA amendment:** the implemented dashboard remains read-only. ADR-0044 accepts a future,
+> narrowly scoped exception for receipt-aware Maintenance actions; it does not relax ordinary
+> dashboard routes. References below to compatibility configuration names and projections describe
+> the implementation at adoption time only; [ADR-0020](0020-ga-stable-surfaces.md) defines the
+> canonical GA surface.
 
 ## Context
 
@@ -77,4 +82,6 @@ Surface routing via **in-page reveal**, not a new page or tab:
 - `src/lib/dashboard/page.mjs` and `src/lib/dashboard/client.mjs` (five-area shell, shared secondary
   rail, canonical hashes, headings, and keyboard semantics)
 - [Dashboard user guide](../DASHBOARD.md)
+- [ADR-0044](0044-receipt-aware-maintenance-control-plane.md) (accepted future Maintenance action
+  boundary)
 - Mockup: ak dashboard — Routing panel; ADR-0001, ADR-0003

@@ -183,10 +183,9 @@ is what a user selects.
 | ReclaimableCandidate | An advisory row naming reclaimable space, its path, and its rationale — never an action |
 | CatalogItem | A canonical standalone or plugin-qualified capability identity with per-host/source occurrences; logical-name and entrypoint-digest overlap are relationships, not identity |
 | Catalog occurrence | One observed capability placement: host, source scope, project, artifact path, producer/version/state, digest status, and evidence authority |
-| Project capability pressure | Per-project/per-host inventory of project, user, and enabled-plugin contributions plus exact-name/body overlap; never a claim about host context inclusion |
+| Project capability pressure | Per-project/per-host inventory of project, user, and enabled-plugin contributions plus exact-name/entrypoint overlap; never a claim about host context inclusion |
 | Entrypoint digest | SHA-256 of one bounded regular capability entrypoint; equality proves only those bytes, not supporting files, ownership, safety, or context loading |
-| Maintenance plan | A content-derived, read-only classification and projected change set; it is evidence for a human decision, not authorization to mutate |
-| Maintenance receipt | Proposed durable evidence binding intent, authority, exact inputs, action, result, verification, and rollback for a Maintenance transaction |
+| Skill maintenance preview | The implemented `ak x skills plan` content-derived classification and projected change set; read-only evidence for a human decision, not a MaintenancePlan or authorization to mutate |
 | ProjectFootprint | One project's size facts: approximate LOC by language, tree/`.git`/`node_modules` bytes, last activity, and an optional git-remote web link ("local only" when absent) |
 | Deep scan | The explicit, user-triggered, single-flight full measurement pass that produces a FootprintSnapshot |
 | Cheap tier | The per-request census + known-file stats + snapshot carry-forward served on every read |
@@ -194,6 +193,29 @@ is what a user selects.
 A measured zero is a real zero and renders as one; an unmeasured or failed figure renders as
 unknown with its reason. Storage bytes and Usage tokens are different facts about the same
 transcript and never substitute for each other. See [Machine footprint](machine-footprint.md).
+
+## Maintenance language
+
+These terms describe the accepted target architecture in
+[ADR-0044](../adr/0044-receipt-aware-maintenance-control-plane.md). They are not claims that the
+control plane is implemented.
+
+| Term | Meaning |
+|------|---------|
+| Maintenance | The human-guided control-plane bounded context for evidence-backed lifecycle recommendations and provider-owned, verified, receipted actions; exposed beneath System without becoming part of Machine Footprint |
+| MaintenanceFinding | An evidence-backed resource condition with source, freshness, completeness, ownership, impact, and missing evidence; never itself an action |
+| MaintenanceAction | One exact ActionProvider operation with target, projected result, safety class, rollback class, restart requirement, and verification contract |
+| MaintenancePlan | An immutable, short-lived selection of MaintenanceActions bound to exact source state, scope, safety class, expiry, and content-derived digest; evidence identity, not authorization |
+| ActionProvider | A resource-owner-specific lifecycle port that advertises only proven operations and implements detect, propose, preflight, apply, verify, and guarded undo |
+| ActionCapability | Ephemeral one-use authorization bound to a dashboard session, current plan digest, selected action IDs, source fingerprint, scope, safety class, and expiry |
+| TransactionReceipt | Private durable evidence binding intent, policy decision, exact inputs, before-state, fixed operation, result, verification, after-state, rollback, and compensation |
+| Source fingerprint | A digest over the complete bounded evidence set a plan depends on; a mismatch or incomplete reacquisition expires the plan |
+| Safety class | One of safe-automatic eligible, approval-required, upstream-required, or never-automatic; eligibility still requires explicit human confirmation |
+| Rollback class | Reversible, compensating, or irreversible; independent of action safety and disclosed before confirmation |
+
+A plan identifier is not an ActionCapability, and an ActionCapability is not a
+TransactionReceipt. A successful native command without a verified postcondition is not a
+successful Maintenance transaction. See [Maintenance](maintenance.md).
 
 ## Component directory language
 
