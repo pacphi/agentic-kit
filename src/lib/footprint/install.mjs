@@ -171,8 +171,14 @@ export function npmPackageRoot(globalRootDir, pkg) {
  *  root is found, not how it was installed. */
 export function managedTools({ pkgRoot = null, globalRootDir = null } = {}) {
   const npmRoot = (pkg) => npmPackageRoot(globalRootDir, pkg);
+  /** @type {Array<Record<string, any>>} */
   const tools = [
     { id: 'ruflo', label: 'ruflo', pkg: 'ruflo', bin: 'ruflo', kind: 'npm', root: npmRoot('ruflo') },
+    {
+      id: 'agent-browser', label: 'agent-browser', pkg: 'agent-browser', bin: 'agent-browser',
+      kind: 'npm', root: npmRoot('agent-browser'), updateOwner: 'agentic-kit',
+      consumer: 'ruflo', upstreamOwner: 'vercel-labs',
+    },
     {
       id: 'agentic-qe', label: 'agentic-qe', pkg: 'agentic-qe', bin: 'aqe',
       kind: 'npm', root: npmRoot('agentic-qe'),
@@ -212,6 +218,20 @@ export function managedTools({ pkgRoot = null, globalRootDir = null } = {}) {
     kind: 'kb', root: brainRoot(), components: BRAIN_COMPONENTS,
   });
   return tools;
+}
+
+/** Upstream-owned executors that this stack uses but agentic-kit does not
+ * install/update as companions. They share HostInstallation's measurement
+ * shape so System can expose their version/method/bytes, while `managed:false`
+ * and updateOwner keep lifecycle ownership honest. */
+export function observedRuntimeTools({ globalRootDir = null } = {}) {
+  const npmRoot = (pkg) => npmPackageRoot(globalRootDir, pkg);
+  return [
+    {
+      id: 'vibium', label: 'Vibium', pkg: 'vibium', bin: 'vibium', kind: 'npm',
+      root: npmRoot('vibium'), managed: false, updateOwner: 'agentic-qe',
+    },
+  ];
 }
 
 function toolVersion(desc) {
@@ -332,6 +352,10 @@ function collectTool(desc, ctx) {
     nativeAddonsTruncated: false,
     newestMtimeMs: null,
     degraded: [],
+    managed: desc.managed !== false,
+    updateOwner: desc.updateOwner ?? 'agentic-kit',
+    consumer: desc.consumer ?? null,
+    upstreamOwner: desc.upstreamOwner ?? null,
   };
 
   if (!present) {
@@ -509,6 +533,103 @@ function playwrightCacheRoot({ env, platform, fsImpl }) {
   };
 }
 
+function vibiumCachePath({ env, platform }) {
+  if (env.VIBIUM_CACHE_DIR) return env.VIBIUM_CACHE_DIR;
+  if (platform === 'darwin') return path.join(home, 'Library', 'Caches', 'vibium');
+  if (platform === 'win32') {
+    return path.join(env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'vibium');
+  }
+  return path.join(env.XDG_CACHE_HOME || path.join(home, '.cache'), 'vibium');
+}
+
+const presentFile = (file, fsImpl) => {
+  const node = statNode(file, { fsImpl });
+  return node.status === 'measured' && node.kind === 'file';
+};
+
+function cacheEntries(root, fsImpl) {
+  try {
+    return {
+      status: 'present', reason: null,
+      entries: fsImpl.readdirSync(root, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink()),
+    };
+  } catch (error) {
+    const reason = error?.code || 'io';
+    return { status: reason === 'ENOENT' ? 'absent' : 'unknown', reason, entries: [] };
+  }
+}
+
+function agentBrowserExecutable(versionDir, platform, fsImpl) {
+  const candidates = platform === 'darwin'
+    ? [
+      'Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
+      'chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
+      'chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
+    ]
+    : platform === 'win32'
+      ? ['chrome.exe', 'chrome-win64/chrome.exe']
+      : ['chrome', 'chrome-linux64/chrome'];
+  return candidates.map((candidate) => path.join(versionDir, candidate))
+    .find((candidate) => presentFile(candidate, fsImpl)) ?? null;
+}
+
+function vibiumExecutables(versionDir, platform, fsImpl) {
+  const chrome = path.join(versionDir, ...(platform === 'darwin'
+    ? ['Google Chrome for Testing.app', 'Contents', 'MacOS', 'Google Chrome for Testing']
+    : [platform === 'win32' ? 'chrome.exe' : 'chrome']));
+  const driver = path.join(versionDir, platform === 'win32' ? 'chromedriver.exe' : 'chromedriver');
+  return presentFile(chrome, fsImpl) && presentFile(driver, fsImpl) ? { chrome, driver } : null;
+}
+
+/** Filesystem-only browser payload readiness. This intentionally does not call
+ * `agent-browser doctor`: even offline/quick doctor removes stale daemon
+ * sidecars, while System's collector is contractually read-only. */
+export function browserPayloadReadiness(cache, {
+  platform = process.platform, fsImpl = fs,
+} = {}) {
+  if (!cache?.runtime) return null;
+  const revisionRoot = cache.runtime === 'vibium'
+    ? path.join(cache.path, 'chrome-for-testing') : cache.path;
+  const listing = cacheEntries(revisionRoot, fsImpl);
+  if (listing.status !== 'present') {
+    return {
+      status: listing.status, revision: null, browserPath: null, driverPath: null,
+      reason: listing.status === 'absent' ? 'browser payload cache absent' : listing.reason,
+    };
+  }
+  const candidates = listing.entries
+    .filter((entry) => cache.runtime === 'agent-browser'
+      ? entry.name.startsWith('chrome-') : /^\d+(?:\.\d+)+/.test(entry.name))
+    .sort((a, b) => b.name.localeCompare(a.name, undefined, { numeric: true }));
+  for (const entry of candidates) {
+    const versionDir = path.join(revisionRoot, entry.name);
+    if (cache.runtime === 'agent-browser') {
+      const browserPath = agentBrowserExecutable(versionDir, platform, fsImpl);
+      if (browserPath) {
+        return {
+          status: 'ready', revision: entry.name.slice('chrome-'.length),
+          browserPath, driverPath: null, reason: null,
+        };
+      }
+    } else {
+      const pair = vibiumExecutables(versionDir, platform, fsImpl);
+      if (pair) {
+        return {
+          status: 'ready', revision: entry.name, browserPath: pair.chrome,
+          driverPath: pair.driver, reason: null,
+        };
+      }
+    }
+  }
+  return {
+    status: 'incomplete', revision: null, browserPath: null, driverPath: null,
+    reason: cache.runtime === 'vibium'
+      ? 'no revision contains both Chrome and chromedriver'
+      : 'no cached revision contains a Chrome executable',
+  };
+}
+
 /** Install-adjacent shared caches. Deliberately their OWN rows rather than
  *  smeared into a tool's tree: npx envs and browser binaries belong to no
  *  single tool, and hiding them inside one would misattribute the bytes. The
@@ -527,6 +648,15 @@ export function sharedCacheRoots({
     single('codex-plugins', 'Codex plugin cache', codexPluginCacheDir()),
     playwrightCacheRoot({ env, platform, fsImpl }),
     single('puppeteer', 'Puppeteer browsers', path.join(home, '.cache', 'puppeteer')),
+    {
+      ...single('agent-browser', 'agent-browser Chrome for Testing',
+        path.join(home, '.agent-browser', 'browsers')),
+      runtime: 'agent-browser', updateOwner: 'agentic-kit',
+    },
+    {
+      ...single('vibium', 'Vibium Chrome for Testing', vibiumCachePath({ env, platform })),
+      runtime: 'vibium', updateOwner: 'agentic-qe',
+    },
   ];
 }
 
@@ -607,13 +737,21 @@ export function collectInstall({
   const { root: globalRootDir, reason: globalRootReason } = safeGlobalRoot();
   const ctx = { asOf, walk, limits, fsImpl, maxNativeAddons, globalRootDir, globalRootReason };
 
-  const tools = managedTools({ pkgRoot, globalRootDir }).map((desc) => collectTool(desc, ctx));
+  const toolDescriptors = [
+    ...managedTools({ pkgRoot, globalRootDir }),
+    ...observedRuntimeTools({ globalRootDir }),
+  ];
+  const tools = toolDescriptors.map((desc) => collectTool(desc, ctx));
 
   const sharedCaches = [];
   let npxEnvs = { root: npxCacheDir(), presence: 'unknown', reason: 'not collected', envs: [] };
   if (includeCaches) {
     for (const cache of sharedCacheRoots({ fsImpl })) {
-      sharedCaches.push({ ...cache, ...measureCacheRoot(cache, { walk, limits, fsImpl, asOf }) });
+      sharedCaches.push({
+        ...cache,
+        ...measureCacheRoot(cache, { walk, limits, fsImpl, asOf }),
+        payload: browserPayloadReadiness(cache, { fsImpl }),
+      });
     }
     npxEnvs = npxEnvNodes({ walk, limits, asOf, fsImpl });
   }

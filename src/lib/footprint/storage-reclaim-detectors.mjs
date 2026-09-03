@@ -289,7 +289,7 @@ export function browserRevisionRoots({ env = process.env } = {}) {
     depth: 1,
     installer: 'npx playwright install',
   };
-  return [
+  const roots = [
     { ...playwright, id: 'playwright-mac', path: path.join(macCache(), 'ms-playwright') },
     { ...playwright, id: 'playwright-xdg', path: path.join(cache, 'ms-playwright') },
     { ...playwright, id: 'playwright-win', path: path.join(winLocalAppData(env), 'ms-playwright') },
@@ -301,7 +301,57 @@ export function browserRevisionRoots({ env = process.env } = {}) {
       depth: 2,
       installer: 'npx puppeteer browsers install',
     },
+    {
+      kind: 'superseded-browser-revisions',
+      id: 'agent-browser',
+      label: 'agent-browser Chrome builds',
+      path: path.join(home, '.agent-browser', 'browsers'),
+      depth: 1,
+      installer: 'agent-browser install',
+    },
+    {
+      kind: 'superseded-browser-revisions',
+      id: 'vibium-mac',
+      label: 'Vibium Chrome builds',
+      path: path.join(macCache(), 'vibium', 'chrome-for-testing'),
+      depth: 1,
+      revisionShape: 'bare-version',
+      installer: 'vibium install',
+    },
+    {
+      kind: 'superseded-browser-revisions',
+      id: 'vibium-xdg',
+      label: 'Vibium Chrome builds',
+      path: path.join(cache, 'vibium', 'chrome-for-testing'),
+      depth: 1,
+      revisionShape: 'bare-version',
+      installer: 'vibium install',
+    },
+    {
+      kind: 'superseded-browser-revisions',
+      id: 'vibium-win',
+      label: 'Vibium Chrome builds',
+      path: path.join(winLocalAppData(env), 'vibium', 'chrome-for-testing'),
+      depth: 1,
+      revisionShape: 'bare-version',
+      installer: 'vibium install',
+    },
   ];
+  if (env.VIBIUM_CACHE_DIR) {
+    const override = path.join(env.VIBIUM_CACHE_DIR, 'chrome-for-testing');
+    if (!roots.some((root) => root.path === override)) {
+      roots.push({
+        kind: 'superseded-browser-revisions',
+        id: 'vibium-override',
+        label: 'Vibium Chrome builds',
+        path: override,
+        depth: 1,
+        revisionShape: 'bare-version',
+        installer: 'vibium install',
+      });
+    }
+  }
+  return roots;
 }
 
 /** Split `chromium_headless_shell-1223` into its family and its revision. The
@@ -332,7 +382,10 @@ function revisionMembers(root, ctx) {
     if (inner.status !== 'ok') continue;
     for (const entry of inner.entries) {
       if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
-      const split = splitRevision(entry.name);
+      const split = root.revisionShape === 'bare-version'
+        ? (/^\d+(?:\.\d+)+/.test(entry.name)
+          ? { family: 'chrome-for-testing', revision: entry.name } : null)
+        : splitRevision(entry.name);
       if (!split) continue;
       const target = path.join(holder.dir, entry.name);
       members.push({

@@ -165,11 +165,26 @@ function renderInstall(install) {
     tool.present ? (tool.version ? `v${tool.version}` : 'present') : 'absent',
     tool.installMethod,
     sink.cell(tool.bytes, fmtBytes),
-    tool.rootReason ?? '',
+    tool.managed === false
+      ? `observed; updates via ${tool.updateOwner}${tool.rootReason ? ` · ${tool.rootReason}` : ''}`
+      : (tool.rootReason ?? ''),
   ]);
   console.log('');
   table(['TOOL', 'VERSION', 'METHOD', 'SIZE', 'NOTE'], rows);
   sink.report();
+  const browserCaches = (install.sharedCaches ?? []).filter((cache) => cache.runtime);
+  if (browserCaches.length) {
+    console.log('');
+    const browserSink = reasonSink();
+    table(['BROWSER PAYLOAD', 'READINESS', 'REVISION', 'CACHE', 'OWNER'], browserCaches.map((cache) => [
+      cache.label,
+      cache.payload?.status ?? 'unknown',
+      cache.payload?.revision ?? cache.payload?.reason ?? '—',
+      browserSink.cell(cache.bytes, fmtBytes),
+      cache.updateOwner ?? 'upstream',
+    ]));
+    browserSink.report();
+  }
   const dupes = install.duplicateNatives ?? [];
   if (dupes.length) info(`${dupes.length} native module(s) compiled into more than one tree`);
 }

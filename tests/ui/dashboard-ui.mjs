@@ -399,6 +399,7 @@ const STATUS_STUB = async () => ({
     { subsystem: 'hosts', level: 'fail', message: 'codex enabled but not installed', fix: 'ak setup' },
     { subsystem: 'hosts', level: 'ok', message: 'opencode enabled and installed', fix: null },
     { subsystem: 'agentdb', level: 'ok', message: 'store reachable', fix: null },
+    { subsystem: 'agent-browser', level: 'ok', message: 'agent-browser 0.27.3 ready for Ruflo', fix: null },
     { subsystem: 'aqe', level: 'warn', message: 'fleet has never been initialized', fix: 'aqe init' },
     { subsystem: 'security', level: 'ok', message: 'scan clean', fix: null },
     { subsystem: 'ruvnet-brain', level: 'ok', message: 'knowledge base present', fix: null },
@@ -410,7 +411,10 @@ const STATUS_STUB = async () => ({
     { subsystem: 'routing', level: 'ok', message: 'per-activity policy applied', fix: null },
     { subsystem: 'daemons', level: 'ok', message: '1 daemon running', fix: null },
   ],
-  drift: [{ pkg: 'ruflo', installed: '4.0.0', latest: '4.0.1', outdated: true }],
+  drift: [
+    { pkg: 'ruflo', installed: '4.0.0', latest: '4.0.1', outdated: true },
+    { pkg: 'agent-browser', installed: '0.27.3', latest: null, outdated: false },
+  ],
 });
 
 // ── /api/system stub (ADR-0025) ──────────────────────────────────────────────
@@ -481,8 +485,29 @@ const SYSTEM_PAYLOAD = {
       { label: 'ruflo', bytes: meas(612_000_000) },
       { label: 'agentic-qe', bytes: meas(318_000_000) },
       { label: 'agentic-kit', bytes: meas(96_000_000) },
+      {
+        tool: 'agent-browser', label: 'agent-browser', present: false, version: null,
+        installMethod: 'absent', managed: true, updateOwner: 'agentic-kit', bytes: meas(0),
+      },
+      {
+        tool: 'vibium', label: 'Vibium', present: true, version: '26.5.31',
+        installMethod: 'npm', managed: false, updateOwner: 'agentic-qe',
+        root: '/opt/npm/node_modules/vibium', bytes: meas(48_000_000),
+      },
     ],
-    sharedCaches: [{ label: 'shared npm cache', bytes: meas(258_000_000) }],
+    sharedCaches: [
+      { label: 'shared npm cache', bytes: meas(258_000_000) },
+      {
+        id: 'agent-browser', runtime: 'agent-browser', label: 'agent-browser Chrome for Testing',
+        updateOwner: 'agentic-kit', path: '/Users/me/.agent-browser/browsers', bytes: meas(0),
+        payload: { status: 'absent', revision: null, reason: 'browser payload cache absent' },
+      },
+      {
+        id: 'vibium', runtime: 'vibium', label: 'Vibium Chrome for Testing',
+        updateOwner: 'agentic-qe', path: '/Users/me/Library/Caches/vibium', bytes: meas(392_000_000),
+        payload: { status: 'ready', revision: '148.0.7778.56', reason: null },
+      },
+    ],
   },
   storage: {
     totals: { bytes: meas(4_812_000_000) },
@@ -1303,6 +1328,9 @@ async function main() {
     check('a component whose version is known carries it on the chip',
       /v4\.0\.0/.test(String(aboutBy('ruflo')?.chip)),
       `the ruflo chip read ${JSON.stringify(aboutBy('ruflo')?.chip)}`);
+    check('the managed agent-browser card carries its observed compatible version',
+      /installed.*v0\.27\.3/i.test(String(aboutBy('agent-browser')?.chip)),
+      `the agent-browser chip read ${JSON.stringify(aboutBy('agent-browser')?.chip)}`);
     // One card, two status rows: the worst of the pair drives the chip, or
     // Codex's broken statusline would sit behind a green card.
     check('a card joining two subsystems takes the worse of the two',
@@ -1398,6 +1426,15 @@ async function main() {
     check('every unmeasured figure states why it is unmeasured',
       honesty.unknownCount > 0 && honesty.reasonless === 0,
       `${honesty.reasonless} of ${honesty.unknownCount} unknown markers carried no reason`);
+    const browserRuntimes = await page.$eval('#sys-browser-runtimes', (el) => ({
+      rows: [...el.querySelectorAll('tbody tr')].map((row) => row.innerText.trim()),
+      text: el.innerText,
+    }));
+    check('System exposes dependency ownership, install state, payload readiness, and cache cost for both browser runtimes',
+      browserRuntimes.rows.length === 2
+        && /agent-browser[\s\S]*agentic-kit[\s\S]*absent/i.test(browserRuntimes.rows[0])
+        && /Vibium[\s\S]*agentic-qe[\s\S]*ready[\s\S]*148\.0\.7778\.56[\s\S]*392(?:\.0)? MB/i.test(browserRuntimes.rows[1]),
+      `browser runtime rows were ${JSON.stringify(browserRuntimes.rows)}`);
 
     await page.click('[data-system-view="catalog"]');
     await page.waitForSelector('#panel-sys-catalog:not([hidden])');

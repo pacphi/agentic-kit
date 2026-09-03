@@ -82,6 +82,7 @@ test('loadKitConfig returns defaults when file missing and round-trips saves', (
   const f = tmpFile(tmp, 'kit.json');
   const cfg = loadKitConfig(f);
   assert.equal(cfg.aqe, true);
+  assert.equal(cfg.agentBrowser, true);
   assert.equal(cfg.mcp.register, true);
   assert.deepEqual(cfg.integrations.tools.dejaVu, {
     enabled: false,

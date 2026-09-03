@@ -24,6 +24,9 @@ export const hookHealingTransactionsDir = () => path.join(stateBase(), 'agentic-
 export const legacyConfigDir = () => path.join(configBase(), 'ruflo');
 
 export const kitConfigPath = () => path.join(configDir(), 'kit.json');
+/** Trusted process-scoped agent-browser config. Ruflo MCP children receive
+ * this absolute path; repository agent-browser.json discovery is bypassed. */
+export const agentBrowserConfigPath = () => path.join(configDir(), 'agent-browser.json');
 export const observabilityWorkspacePath = () =>
   path.join(configDir(), 'observability-workspaces.json');
 export const legacyKitConfigPath = () => path.join(legacyConfigDir(), 'kit.json');

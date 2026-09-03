@@ -7,6 +7,10 @@
   transcript head's `cwd` field and project manifests' dependency keys); §6 gains reclaimable
   safety tiers; §8 and §9 added for the widened scan surface, the corrected brain/Playwright
   figures, and project accounting
+- **Updated:** 2026-09-02 — Agentic Kit now manages the receipt-owned agent-browser executor while
+  Install observes AQE-owned Vibium and both payloads; daemon cleanup gains an opt-in,
+  identity-proven Ruflo MCP orphan path; Catalog covers the launching repository plus observed
+  on-disk projects and attributes Codex `.agents/skills` separately
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0005](0005-dashboard-in-page-routing-reveal.md),
   [ADR-0007](0007-maintainer-admin-local-telemetry.md),
@@ -165,9 +169,10 @@ Metrics marked ✚ are additions beyond the requesting examples; the taxonomy is
 
 | Section | Metric | Source |
 |---------|--------|--------|
-| Install | Per managed tool (ruflo, agentic-qe, claude, codex, opencode, ak, brain KB): version, install method, root path, tree bytes | managed-tools detection + walk |
+| Install | Per managed tool (ruflo, agent-browser, agentic-qe, claude, codex, opencode, ak, brain KB): version, install method, root path, tree bytes | managed-tools detection + walk |
+| Install | Observed dependency-owned browser executors (Vibium): CLI presence, update owner, payload readiness, revision, cache root and bytes ✚ | PATH detection + filesystem-only cache inspection |
 | Install | Native-addon inventory and duplicate builds across trees (better-sqlite3, hnswlib, onnxruntime) ✚ | walk |
-| Install | Shared caches: npx cache envs, brain KB, browser binaries ✚ | known roots |
+| Install | Shared caches: npx cache envs, brain KB, Playwright/Puppeteer/agent-browser/Vibium browser binaries ✚ | known roots |
 | Install | Total install bytes + machine free-space denominator ✚ | walk + `statfs` |
 | Runtime | Per live host process: pid, host, CPU%, RSS, uptime, bound project | existing runtime survey + `ps -o pcpu,rss` |
 | Runtime | Daemon census: count, age vs 12h TTL ✚ | existing daemon registry |
@@ -180,7 +185,7 @@ Metrics marked ✚ are additions beyond the requesting examples; the taxonomy is
 | Storage | Trailing-30d growth per host (from mtime + size) ✚ | walk metadata |
 | Storage | Advisory reclaimable candidates (stale npx envs, aged transcripts, superseded cache snapshots, regenerable package caches, redundant browser revisions, extra runtime versions, orphaned worktrees), each with a `safety` tier ✚ | walk + heuristics |
 | Storage | Ranked largest consumers across ~50 curated third-party cache roots, grouped by ecosystem, with containment/residual accounting ✚ | consumer registry + walk |
-| Catalog | Unique skills / agents / commands across hosts, per-host presence matrix | host catalog surfaces |
+| Catalog | Unique skills / agents / commands across hosts, per-host presence matrix, including project `.claude/skills` and Codex `.agents/skills` | host catalog surfaces |
 | Catalog | Plugins and registered MCP servers ✚ | settings surfaces |
 | Catalog | Config surface: managed CLAUDE.md/AGENTS.md block count, settings file sizes ✚ | managed-blocks registry |
 | Projects | Projects **ever seen** across hosts and the **on-disk** subset ✚; per on-disk project: LOC by language, detected frameworks/SDKs/tools by presence ✚, the unrecognized extension/dependency tail ✚, working-tree bytes, `.git` bytes ✚, `node_modules` bytes ✚, last activity | own cross-host discovery + walk |
@@ -214,6 +219,13 @@ silent "Other" slice into a to-do list a release can close.
 v1 computes reclaimable-space *candidates* and renders them with their rationale; it deletes
 nothing. Cleanup remains CLI-owned where it already lives (`ak x daemon-gc`, npx cache tooling).
 A future `ak system clean` would be its own decision with its own safety contract.
+
+Ruflo MCP transport cleanup remains outside the System read surface. `ak x daemon-gc` may report
+transport count and orphan candidates, but it sends no signal unless both `--mcp` and `--kill`
+are explicit. Eligibility requires the exact Ruflo MCP command shape, the current user, and PPID
+one. Immediately before `SIGTERM`, the command, owner, and PPID are read again; any identity drift
+preserves the process. Age, process count, and a different workspace are observations, never kill
+criteria, because concurrent host sessions are legitimate.
 
 Advisory is not enough on its own, because "advisory" is a tone of voice and users act on
 numbers. Safety is therefore a **field**. Every candidate carries `safety`:
@@ -317,6 +329,14 @@ Two individual figures were wrong at the source, and both changed a headline:
   mac holding 1.86 GB of browser builds reported a *measured zero* — honest about the XDG path
   that genuinely does not exist, wrong about the question the row asks. All three locations are
   now probed, realpath-collapsed (two can be real at once), and summed into one row.
+
+Browser executors are visible without conflating their owners. Agentic Kit manages Ruflo's current
+agent-browser compatibility package under ADR-0043; Agentic QE still owns Vibium. The install rows
+therefore name Agentic Kit and Agentic QE respectively, while the cache rows keep payload ownership
+separate from package ownership. Readiness is derived only from local layout: agent-browser needs a
+recognized executable and Vibium needs browser and driver payloads for the same revision. System
+never launches either tool, downloads a browser, or treats CLI presence as payload readiness. Both
+are deliberately excluded from doctor because that command also cleans stale daemon sidecars.
 
 The consumer walk carries raised caps of its own (depth 24, 2,000,000 entries) because the
 walker's defaults were sized for install trees: rustup exhausted the default entry cap at 9.4 of

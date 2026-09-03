@@ -467,11 +467,11 @@ async function cachedHostFacts(now) {
  * Fold in the installed versions `driftReport()` structurally cannot report, so
  * every About card states a version rather than some silently omitting one.
  *
- * driftReport only walks npm-managed globals. Two managed components are
- * knowable but sit outside it: a host installed by mise/brew/the native
- * installer (present and versioned, just not an npm global), and agentdb (a
- * real npm global, but deliberately pinned to ruflo's bundled version rather
- * than latest, so MANAGED-TOOLS.md excludes it from the update banner).
+ * driftReport only walks the globals whose upgrades are governed by npm-latest.
+ * Other managed components are still knowable but sit outside it: a host
+ * installed by mise/brew/the native installer; agent-browser and agentdb,
+ * whose exact versions are selected for compatibility rather than npm-latest;
+ * and aidefence, which ships inside ruflo's dependency tree.
  *
  * Both fold in with `outdated: false` and no `latest`, which is inert for the
  * banner — `noticeHtml` renders only entries where `outdated` is true — while
@@ -481,13 +481,16 @@ async function cachedHostFacts(now) {
  * @param {Array<{pkg:string, installed?:string|null, latest?:string|null,
  *   outdated?:boolean}>|null} drift the drift array, in the shape driftReport()
  *   and the selfDrift/brain/ruvector folds all already emit
- * @param {{ now?: number, hostFacts?: Record<string, {version?: string|null}> }} [deps] test seam
+ * @param {{ now?: number, hostFacts?: Record<string, {version?: string|null}>,
+ *   installedVersionFn?: (pkg:string)=>string|null }} [deps] test seam
  * @returns {Promise<Array<{pkg:string, installed?:string|null, latest?:string|null,
  *   outdated?:boolean}>>} the input array plus the folded entries; incoming
  *   entries are passed through untouched, so their fields stay as optional as
  *   whichever fold produced them
  */
-export async function foldKnownVersions(drift, { now = Date.now(), hostFacts } = {}) {
+export async function foldKnownVersions(drift, {
+  now = Date.now(), hostFacts, installedVersionFn = installedVersion,
+} = {}) {
   const out = [...(drift ?? [])];
   const seen = new Set(out.map((d) => d?.pkg).filter(Boolean));
   const add = (pkg, installed) => {
@@ -497,7 +500,8 @@ export async function foldKnownVersions(drift, { now = Date.now(), hostFacts } =
   };
   const hosts = hostFacts ?? await cachedHostFacts(now);
   for (const host of HOSTS) add(host.pkg, hosts?.[host.id]?.version);
-  add('agentdb', installedVersion('agentdb'));
+  add('agent-browser', installedVersionFn('agent-browser'));
+  add('agentdb', installedVersionFn('agentdb'));
   add('@claude-flow/aidefence', bundledVersion('ruflo', '@claude-flow/aidefence'));
   return out;
 }

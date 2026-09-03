@@ -19,6 +19,7 @@ import {
 
 const DEFAULTS = {
   aqe: true,            // manage agentic-qe alongside ruflo
+  agentBrowser: true,   // manage Ruflo's currently-shipped browser executor (disable with setup --no-agent-browser)
   agentdb: true,        // manage the standalone agentdb CLI (harvest's write path), pinned to ruflo's bundled version
   ruvnetBrain: true,    // install/manage the RuvNet Brain (offline KB + search_ruvnet MCP)
   ruvector: true,       // report drift for a globally-installed ruvector CLI (never installs it)

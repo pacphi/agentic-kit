@@ -12,7 +12,10 @@ import * as heal from '../lib/heal.mjs';
 import { fixStatusline } from '../lib/statusline.mjs';
 import { reconcileGuidance } from '../lib/blocks.mjs';
 import { captureProjectGuidance, reconcileProjectGuidance } from '../lib/project-guidance.mjs';
-import { register as mcpRegister, applyExclusions } from '../lib/mcp.mjs';
+import {
+  register as mcpRegister, applyExclusions, registrationStatus, agentBrowserMcpConfigured,
+  codexMcpTopology, codexMcpRepairPlan, repairCodexMcpTopology,
+} from '../lib/mcp.mjs';
 import { reconcileOpencodeGuidance } from '../lib/opencode.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
 import { hostsWithLifecycle, lifecycleAdapterFor, lifecycleExecutionEnabled, detectionBinFor } from '../lib/adapters/lifecycle-registry.mjs';
@@ -25,6 +28,7 @@ import { HOSTS, hostInstallState, installHost, migrateRetiredRoutesInConfig, pri
 import { installedVersion } from '../lib/versions.mjs';
 import * as rb from '../lib/ruvnet-brain.mjs';
 import * as adb from '../lib/agentdb.mjs';
+import { ensureAgentBrowser } from '../lib/agent-browser.mjs';
 import { readJson, writeJsonWithBackup } from '../lib/settings.mjs';
 import { withDb } from '../lib/sqlite.mjs';
 import { findMemoryEntry } from '../lib/project-memory.mjs';
@@ -55,6 +59,7 @@ export const options = {
   minimal: { type: 'boolean', default: false },
   project: { type: 'boolean', default: false },
   'no-aqe': { type: 'boolean', default: false },
+  'no-agent-browser': { type: 'boolean', default: false },
   'no-ruvnet-brain': { type: 'boolean', default: false },
   'no-security': { type: 'boolean', default: false },
   codex: { type: 'boolean', default: false },
@@ -81,6 +86,7 @@ Options:
   --project        force project setup in cwd even without .git; same mutations
   --minimal        machine scope only; skip project setup
   --no-aqe         skip agentic-qe install + configuration
+  --no-agent-browser  skip the managed Ruflo browser executor
   --no-ruvnet-brain  skip the RuvNet Brain (~2 GB offline KB) setup step
   --no-security    skip the security-surface verification
   --codex          enable + install the OpenAI Codex host during setup (dual-mode;
@@ -144,9 +150,13 @@ export function projectPermissionManifest(cfg, /** @type {{hosts?: any[]}} */ { 
 export const PROJECT_PERMISSION_MANIFEST = Object.freeze(projectPermissionManifest({}));
 
 /** @param {any} cfg
- * @param {{project?: boolean, companionPreflight?: any}} [options] */
-export function discloseSetupTrust(cfg, { project = false, companionPreflight } = {}) {
-  const manifest = setupTrustManifest(cfg, { project, companionPreflight });
+ * @param {{project?: boolean, companionPreflight?: any, codexRepairPlan?: any[]}} [options] */
+export function discloseSetupTrust(cfg, {
+  project = false, companionPreflight, codexRepairPlan: repairPlan,
+} = {}) {
+  const manifest = setupTrustManifest(cfg, {
+    project, companionPreflight, codexRepairPlan: repairPlan,
+  });
   if (!manifest.length) return manifest;
   info('setup trust manifest (evaluated before any machine, user, or project changes):');
   for (const line of trustManifestLines(manifest)) console.log(`  ${line}`);
@@ -289,6 +299,17 @@ export function removeUndisclosedPermissions(file, before, authorized) {
 /** Step 1: global packages (ruflo/agentic-qe/agentdb/ruvnet-brain). Returns
  *  false only when the mandatory ruflo install itself fails. */
 async function installMachinePackages(cfg, flags) {
+  // Ruflo's published browser package tries to install agent-browser itself
+  // when the CLI is absent, using @latest. Pre-converge the exact compatible
+  // release so Ruflo never becomes a competing global-package installer.
+  if (cfg.agentBrowser !== false) {
+    info('ensuring Ruflo-compatible agent-browser executor…');
+    const browser = await ensureAgentBrowser(cfg);
+    reportOutcome('agent-browser', browser);
+    if (!browser.ok && (!('usable' in browser) || !browser.usable)) {
+      warn('Ruflo browser tools will remain degraded; core orchestration can continue');
+    }
+  }
   if (!installedVersion('ruflo')) {
     info('installing ruflo globally (native build scripts allowed)…');
     const r = await heal.upgradePackage('ruflo');
@@ -429,7 +450,7 @@ async function printUndetectedHostHints(cfg) {
 
 export async function run_machine({ flags, pkgRoot, cfg }) {
   heading('machine setup');
-  if (flags['dry-run']) { info('dry-run: would ensure packages (incl. ruvnet-brain), deploy skill (blocks + MCP land in the final pass)'); return true; }
+  if (flags['dry-run']) { info('dry-run: would ensure packages (incl. agent-browser and ruvnet-brain), deploy skill (blocks + MCP land in the final pass)'); return true; }
 
   if (!(await installMachinePackages(cfg, flags))) return false;
   await healMachineSecuritySurface(cfg);
@@ -448,15 +469,24 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
 export const RUFLO_PROJECT_INIT_ARGS = Object.freeze([
   'init', '--full', '--force',
   // Agentic-kit owns machine guidance and Codex host selection. These Ruflo
-  // escape hatches prevent a project init from creating overlapping surfaces.
+  // escape hatches declare that boundary. --format json is also required on
+  // Ruflo 3.38.21 because its hyphenated boolean flags are registered but not
+  // observed by the init handler; scripted mode independently suppresses the
+  // two optional projections. The env is the second, documented skills.sh
+  // guard and keeps the boundary explicit when upstream fixes flag parsing.
   '--no-global', '--no-codex-detect', '--no-skills-sh',
+  '--format', 'json',
 ]);
+
+export const RUFLO_PROJECT_INIT_ENV = Object.freeze({ RUFLO_NO_SKILLS_SH: '1' });
 
 /** Step 1: initialize Ruflo project assets without overlapping agentic-kit's
  *  machine guidance, Codex adapter, or explicit skill projections. The caller
  *  restores/reconciles project guidance from its pre-init snapshot. */
 async function rufloProjectInit(root, permCtx) {
-  const init = await runCmd('ruflo', [...RUFLO_PROJECT_INIT_ARGS], { cwd: root, timeout: 300_000 });
+  const init = await runCmd('ruflo', [...RUFLO_PROJECT_INIT_ARGS], {
+    cwd: root, timeout: 300_000, env: RUFLO_PROJECT_INIT_ENV,
+  });
   (init.code === 0 ? ok : fail)('ruflo init --full');
   if (init.code !== 0) return false;
   const rufloUnexpected = removeUndisclosedPermissions(
@@ -692,7 +722,9 @@ export async function run_project({
  *  manifest (host + project + companion changes), honoring a declined
  *  confirmation. Returns `{code}` when `run()` must return immediately, or
  *  `{companionPreflight}` to continue. */
-async function resolveSetupTrust(cfg, flags, dejaVuLifecycle, confirm, willConfigureProject) {
+async function resolveSetupTrust(
+  cfg, flags, dejaVuLifecycle, confirm, willConfigureProject, repairPlan,
+) {
   let companionPreflight;
   try {
     companionPreflight = await preflightSetupDejaVu(cfg, dejaVuLifecycle, {
@@ -703,7 +735,7 @@ async function resolveSetupTrust(cfg, flags, dejaVuLifecycle, confirm, willConfi
     return { code: 1 };
   }
   const trustManifest = discloseSetupTrust(cfg, {
-    project: willConfigureProject, companionPreflight,
+    project: willConfigureProject, companionPreflight, codexRepairPlan: repairPlan,
   });
   if (companionPreflight?.error) {
     fail(`deja-vu preflight refused the plan (${safeCompanionCode(companionPreflight.error)})`);
@@ -759,16 +791,48 @@ async function finalizeSetupGuidanceAndMcp(cfg, pkgRoot, flags) {
   for (const t of await reconcileGuidance({ cwd: process.cwd(), cfg, pkgRoot, context: guidanceContext(cfg) })) {
     if (t.name === 'claude' || t.changed) ok(`blocks(${t.label}): ${t.changed || 'in sync'}`);
   }
-  const wantMcp = cfg.mcp.register && (flags.reconfigure || !(readJson(paths.claudeUserMcpPath(), {})?.mcpServers?.['claude-flow']));
+  const existingMcp = registrationStatus();
+  const wantMcp = cfg.mcp.register && (
+    flags.reconfigure
+    || !existingMcp.claudeFlow
+    || !agentBrowserMcpConfigured(existingMcp.effective.claudeFlow, cfg.agentBrowser !== false)
+  );
   if (wantMcp && await ask('Register the ruflo MCP server at user scope (schemas load on demand)?', true, flags.yes)) {
-    if (await mcpRegister()) {
+    if (await mcpRegister(cfg)) {
       const { denied } = applyExclusions(cfg.mcp.excludeFamilies ?? []);
       ok(`MCP registered${denied ? ` (${denied} tool(s) denied per kit.json)` : ''} — exclude families anytime: ak x mcp pick`);
     } else warn('claude mcp add failed — run: ak x mcp pick');
   }
 }
 
-export async function run({ flags, pkgRoot, confirm = ask, dejaVuLifecycle = DEFAULT_DEJA_VU_LIFECYCLE }) {
+const DEFAULT_SETUP_RUNTIME = Object.freeze({
+  inspectCodexTopology: codexMcpTopology,
+  repairCodexTopology: repairCodexMcpTopology,
+  machineSetup: run_machine,
+  projectSetup: run_project,
+  finalizeSetup: finalizeSetupGuidanceAndMcp,
+});
+
+function setupCodexRepairPlan(cfg, cwd, willConfigureProject, inspectTopology) {
+  if (!cfg.integrations?.hosts?.codex) return [];
+  const plan = codexMcpRepairPlan(inspectTopology({ cwd }));
+  if (willConfigureProject) return plan;
+  return plan.filter((target) =>
+    target.scope === 'user' && target.repairKind === 'recursive-codex');
+}
+
+async function applySetupCodexRepairs(flags, repairPlan, cwd, repairTopology) {
+  if (flags['dry-run'] || !repairPlan.length) return true;
+  const repaired = await repairTopology(repairPlan, cwd);
+  reportOutcome('codex MCP repair', repaired);
+  return repaired.ok;
+}
+
+export async function run({
+  flags, pkgRoot, confirm = ask, dejaVuLifecycle = DEFAULT_DEJA_VU_LIFECYCLE,
+  ...runtimeOverrides
+}) {
+  const runtime = { ...DEFAULT_SETUP_RUNTIME, ...runtimeOverrides };
   const dejaVuFlags = validateDejaVuSetupFlags(flags);
   if (!dejaVuFlags.ok) {
     fail(dejaVuFlags.error);
@@ -776,6 +840,7 @@ export async function run({ flags, pkgRoot, confirm = ask, dejaVuLifecycle = DEF
   }
   const cfg = loadKitConfig();
   if (flags['no-aqe']) cfg.aqe = false;
+  if (flags['no-agent-browser']) cfg.agentBrowser = false;
   if (flags['no-ruvnet-brain']) cfg.ruvnetBrain = false;
   if (flags['no-security']) cfg.security = false;
 
@@ -788,7 +853,12 @@ export async function run({ flags, pkgRoot, confirm = ask, dejaVuLifecycle = DEF
   // persists this object; a declined confirmation returns before saveKitConfig.
   const hostFlags = applySetupHostFlags(cfg, flags);
   const dejaVuFlagsResult = applySetupDejaVuFlags(cfg, flags);
-  const trust = await resolveSetupTrust(cfg, flags, dejaVuLifecycle, confirm, willConfigureProject);
+  const repairPlan = setupCodexRepairPlan(
+    cfg, process.cwd(), willConfigureProject, runtime.inspectCodexTopology,
+  );
+  const trust = await resolveSetupTrust(
+    cfg, flags, dejaVuLifecycle, confirm, willConfigureProject, repairPlan,
+  );
   if (trust.code !== undefined) return trust.code;
   const { companionPreflight } = trust;
 
@@ -796,7 +866,10 @@ export async function run({ flags, pkgRoot, confirm = ask, dejaVuLifecycle = DEF
     flags, cfg, hostFlags, companionPreflight, dejaVuFlagsResult,
   });
 
-  if (!(await run_machine({ flags, pkgRoot, cfg }))) return 1;
+  if (!(await runtime.machineSetup({ flags, pkgRoot, cfg }))) return 1;
+  if (!(await applySetupCodexRepairs(
+    flags, repairPlan, process.cwd(), runtime.repairCodexTopology,
+  ))) return 1;
   // Companion execution is deliberately sequenced after every enabled host is
   // installed and its lifecycle wiring has converged. It never uses upstream
   // aggregate/warmup/update commands; the preflight accepts only exact targets
@@ -813,11 +886,11 @@ export async function run({ flags, pkgRoot, confirm = ask, dejaVuLifecycle = DEF
   if (!flags['dry-run']) saveKitConfig(cfg);
 
   if (inProject && !flags.minimal) {
-    if (!(await run_project({ flags, cfg, trustDisclosed: true }))) return 1;
+    if (!(await runtime.projectSetup({ flags, cfg, trustDisclosed: true }))) return 1;
   } else if (!flags.minimal) {
     info('not inside a project (no .git here) — run `ak setup` from a repo to set one up');
   }
-  if (!flags['dry-run']) await finalizeSetupGuidanceAndMcp(cfg, pkgRoot, flags);
+  if (!flags['dry-run']) await runtime.finalizeSetup(cfg, pkgRoot, flags);
 
   console.log('');
   ok(bold('setup complete — `agentic-kit` anytime for status, `ak sync` after upgrades'));

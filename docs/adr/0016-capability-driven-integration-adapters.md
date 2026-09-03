@@ -4,7 +4,7 @@
   [ADR-0020](0020-ga-stable-surfaces.md); closed-registry clause superseded by
   [ADR-0029](0029-host-adapter-extension-point.md)
 - **Date:** 2026-07-28
-- **Updated:** 2026-08-26
+- **Updated:** 2026-09-02
 - **Update note:** Added read-only Codex plugin-hook compatibility facts,
   runtime-selected Ruflo project-memory store proofs, and the non-correlatable
   OpenRouter account-analytics boundary; removed the pre-GA compatibility command,
@@ -42,6 +42,12 @@
   ownership model to an opt-in managed companion. A companion consumes host capabilities and
   projects its own service into enabled hosts, but does not become a fifth adapter axis, a host,
   a provider, a binding, or an observability authority.
+  2026-09-02: Claude MCP inspection now models local, project, and user scopes explicitly;
+  agentic-kit migrates only its user-scoped legacy registration and preserves narrower scopes.
+  Global npm installs share one reviewed lifecycle-script policy and require a post-install CLI
+  version proof before the installed host is reported usable. Ruflo project initialization also
+  uses independent scripted/env suppression because published 3.38.21 ignores its documented
+  Codex/skills opt-out flags; pre-existing unreceipted skills remain preserved for review.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0001](0001-one-routing-policy-many-projections.md),
   [ADR-0003](0003-auto-seed-dual-host-provenance.md),
@@ -280,6 +286,18 @@ entries. OpenCode's receipt-owned gateway and lifecycle processes set their cwd 
 host-provided project directory. These are host projections of one project-memory contract, not
 separate stores.
 
+Claude's native MCP topology is read at all three supported scopes: local entries from the
+project record in `~/.claude.json`, project entries from `.mcp.json`, and user entries from the
+top-level `mcpServers` in `~/.claude.json`. Effective precedence is local, then project, then
+user. Registration status names every scope instead of flattening them. Agentic-kit owns and may
+auto-migrate only its legacy user-scoped registration; local and project registrations are
+observed and preserved because their authorship cannot be proven from presence alone.
+
+Global npm installation policy is likewise one contract rather than a setup/heal split. Every
+agentic-kit-owned global npm install uses the shared reviewed lifecycle-script allowlist (including
+Claude Code and OpenCode), then executes the installed CLI's `--version` command. A successful npm
+exit is installation evidence, not runtime-readiness evidence, until that postcondition succeeds.
+
 ### 5. Normalize field-level facts before rendering conclusions
 
 Detection and observation return facts, not pre-rendered status rows:
@@ -502,6 +520,8 @@ not write real home/global configuration.
 - It does not silently adopt or overwrite externally managed configuration.
 - It does not mutate Codex's plugin cache; plugin refresh and disable remain Codex-native actions.
 - It does not collapse Ruflo's compatibility and native project-memory stores into one database.
+- It does not classify Ruflo's browser executor as a host, provider, binding, or companion; ADR-0043
+  owns that replaceable managed-runtime boundary.
 - It does not implement or make unverified Ollama execution, usage-pricing, catalogue-metadata, or
   transcript-fidelity claims; those remain gated independently by ADR-0011.
 

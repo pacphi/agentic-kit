@@ -12,6 +12,8 @@ AK_DIST_TAG="${AK_DIST_TAG:-next}"
 AK_INSTALL_SPEC="${AK_INSTALL_SPEC:-@pacphi/agentic-kit@${AK_DIST_TAG}}"
 AK_SETUP_FLAGS="${AK_SETUP_FLAGS:---codex --opencode --yes}"
 AK_SKIP_SETUP="${AK_SKIP_SETUP:-0}"
+AK_SYNC_PASSES="${AK_SYNC_PASSES:-0}"
+AK_ARTIFACT_PREFIX="${AK_ARTIFACT_PREFIX:-first-use}"
 AK_DASHBOARD_PORT="${AK_DASHBOARD_PORT:-7431}" # container-loopback (ak's default)
 AK_BRIDGE_PORT="${AK_BRIDGE_PORT:-7432}"       # socat re-publish; the EXPOSEd port
 
@@ -40,10 +42,28 @@ if [ "${AK_SKIP_SETUP}" != "1" ]; then
     || echo "⚠ ak setup exited $? — continuing so the state stays inspectable"
 fi
 
-# Regression artifact: a machine-readable snapshot of what first-use produced.
+if ! [[ "${AK_SYNC_PASSES}" =~ ^[0-9]+$ ]]; then
+  echo "✗ AK_SYNC_PASSES must be a non-negative integer" >&2
+  exit 2
+fi
+if ! [[ "${AK_ARTIFACT_PREFIX}" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+  echo "✗ AK_ARTIFACT_PREFIX may contain only letters, numbers, dot, underscore, and dash" >&2
+  exit 2
+fi
+for ((pass = 1; pass <= AK_SYNC_PASSES; pass++)); do
+  echo "▶ ak sync --yes (idempotence pass ${pass}/${AK_SYNC_PASSES})"
+  ak sync --yes || echo "⚠ ak sync pass ${pass} exited $? — retaining evidence"
+done
+
+# Regression artifacts: health plus the deep capability/install catalogue. The
+# latter is the clean-room control for upgrade-cruft investigations: skill,
+# plugin, MCP, package, overlap, and path facts remain inside the container and
+# only the content-free metadata snapshot is exported.
 if [ -d /artifacts ] && [ -w /artifacts ]; then
-  ak status --json > /artifacts/first-use-status.json 2>/dev/null \
-    && echo "▶ wrote /artifacts/first-use-status.json"
+  ak status --json > "/artifacts/${AK_ARTIFACT_PREFIX}-status.json" 2>/dev/null \
+    && echo "▶ wrote /artifacts/${AK_ARTIFACT_PREFIX}-status.json"
+  ak system --deep --json > "/artifacts/${AK_ARTIFACT_PREFIX}-system.json" 2>/dev/null \
+    && echo "▶ wrote /artifacts/${AK_ARTIFACT_PREFIX}-system.json"
 fi
 
 case "${1:-dashboard}" in

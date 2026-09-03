@@ -23,6 +23,8 @@ services:
     environment:
       AK_DIST_TAG: ${AK_DIST_TAG:-next}
       AK_SETUP_FLAGS: ${AK_SETUP_FLAGS:---codex --opencode --yes}
+      AK_SYNC_PASSES: ${AK_SYNC_PASSES:-0}
+      AK_ARTIFACT_PREFIX: ${AK_ARTIFACT_PREFIX:-first-use}
     volumes:
       - ./artifacts:/artifacts
     healthcheck:

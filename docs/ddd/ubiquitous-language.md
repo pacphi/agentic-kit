@@ -175,6 +175,9 @@ is what a user selects.
 | Measurement | A value plus provenance: measured (with `asOf`), carried forward, or unknown-with-reason — unknown is never zero |
 | Partial measurement | A measured value known to be a lower bound because a contributing subtree was unreadable or capped; rendered as "≥ N", never as a total |
 | HostInstallation | One managed tool's install facts: version, install method, root, tree bytes, native addons |
+| ObservedRuntimeInstallation | A dependency-owned executor's observed CLI and payload facts, with `managed: false` and an explicit upstream update owner |
+| Managed browser executor | A receipt-owned, compatibility-pinned CLI consumed by Ruflo's browser MCP; not a host, provider, companion, plugin, or skill projection |
+| BrowserPayloadReadiness | Filesystem-derived browser payload status, revision, cache path, and reason; it never launches or installs the runtime |
 | RuntimeCensus | The ephemeral point-in-time table of live host processes, daemons, and machine denominators |
 | StorageNode | One node in the category → host → project → session breakdown: bytes + file count |
 | ReclaimableCandidate | An advisory row naming reclaimable space, its path, and its rationale — never an action |

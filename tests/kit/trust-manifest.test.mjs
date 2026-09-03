@@ -20,6 +20,51 @@ test('every host adapter must declare an explicit setup trust posture', () => {
   } })), /host\.trust\.changes\[0\]\.features must be one of/);
 });
 
+test('managed browser disclosure does not imply a host approval-policy change', () => {
+  const manifest = setupTrustManifest({
+    agentBrowser: true,
+    integrations: { hosts: {}, tools: {} },
+  }, { hosts: [] });
+  const browser = manifest.find((group) => group.componentId === 'agent-browser');
+  assert.ok(browser);
+  const rendered = trustManifestLines([browser]).join('\n');
+  assert.match(rendered, /managed component changes disclosed; host approval\/sandbox policy unchanged/);
+  assert.doesNotMatch(rendered, /receives the listed grants/);
+});
+
+test('setup discloses bounded Codex MCP removals without leaking machine paths', () => {
+  const manifest = setupTrustManifest({
+    agentBrowser: false, integrations: { hosts: { codex: true } },
+  }, {
+    hosts: [], project: true,
+    codexRepairPlan: [
+      { name: 'codex', scope: 'user', repairKind: 'recursive-codex', file: '/Users/alice/.codex/config.toml' },
+      { name: 'claude-flow', scope: 'user', repairKind: 'legacy-ruflo', file: '/Users/alice/.codex/config.toml' },
+    ],
+  });
+  const repair = manifest.find((group) => group.componentId === 'codex-mcp-repair');
+  const rendered = trustManifestLines([repair]).join('\n');
+  assert.match(rendered, /\[user\] mcp-registration-removal: \[mcp_servers\.codex\]/);
+  assert.match(rendered, /\[user\] mcp-registration-removal: \[mcp_servers\.claude-flow\]/);
+  assert.match(rendered, /create a current-state recovery copy/);
+  assert.match(rendered, /through `codex mcp`/);
+  assert.match(rendered, /approval\/sandbox policy unchanged/);
+  assert.doesNotMatch(rendered, /\/Users\/alice/);
+});
+
+test('project Codex MCP repair disclosure names its bounded edit mechanism', () => {
+  const manifest = setupTrustManifest({ agentBrowser: false }, {
+    hosts: [], project: true,
+    codexRepairPlan: [{
+      name: 'codex', scope: 'project', repairKind: 'recursive-codex',
+      file: '/work/project/.codex/config.toml',
+    }],
+  });
+  const rendered = trustManifestLines(manifest).join('\n');
+  assert.match(rendered, /with a bounded exact-table edit/);
+  assert.doesNotMatch(rendered, /\/work\/project/);
+});
+
 test('deja-vu setup disclosure is a companion group with exact v0.19 boundaries', () => {
   const cfg = {
     integrations: {
@@ -31,7 +76,8 @@ test('deja-vu setup disclosure is a companion group with exact v0.19 boundaries'
     facts: { install: { version: null } },
     plan: { operations: [{ kind: 'package-install', version: '0.19.0' }] },
   };
-  const companion = setupTrustManifest(cfg, { hosts: [], companionPreflight: preflight })[0];
+  const companion = setupTrustManifest(cfg, { hosts: [], companionPreflight: preflight })
+    .find((group) => group.companionId === 'deja-vu');
   assert.equal(companion.companionId, 'deja-vu');
   assert.equal(companion.hostId, undefined, 'managed companion must not masquerade as a host');
   assert.equal(companion.approvalPolicy, 'explicit-opt-in');
@@ -77,7 +123,7 @@ test('deja-vu trust observes but never adopts a compatible external npm install'
       plan: { operations: [] },
     },
   });
-  const packageFact = manifest[0].changes[0];
+  const packageFact = manifest.find((group) => group.companionId === 'deja-vu').changes[0];
   assert.equal(packageFact.kind, 'npm-package-observation');
   assert.equal(packageFact.owner, 'user/external');
   assert.match(packageFact.effect, /without adopting, updating, or removing/);
@@ -96,7 +142,8 @@ test('deja-vu mode changes disclose the exact receipt-owned prior target removal
       plan: { operations: [{ kind: 'target-remove', host: 'claude', mode: 'auto' }] },
     },
   });
-  const removal = manifest[0].changes.find((change) => change.kind === 'companion-target-removal');
+  const removal = manifest.find((group) => group.companionId === 'deja-vu').changes
+    .find((change) => change.kind === 'companion-target-removal');
   assert.equal(removal.value, 'claude-auto');
   assert.match(removal.effect, /receipt-owned prior claude wiring/);
 });
@@ -141,7 +188,7 @@ test('a future enabled host joins setup disclosure without a setup command branc
     },
   };
   const manifest = setupTrustManifest({
-    integrations: { hosts: { grok: true } }, aqe: true, ruvnetBrain: true,
+    agentBrowser: false, integrations: { hosts: { grok: true } }, aqe: true, ruvnetBrain: true,
   }, { hosts: [future] });
   assert.equal(manifest.length, 1);
   assert.equal(manifest[0].hostId, 'grok');

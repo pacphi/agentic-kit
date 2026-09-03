@@ -435,9 +435,41 @@ import { fmtNum, fmtTok } from './usage.mjs';
     }
   }
 
+  function renderSysBrowserRuntimes(d){
+    var target=document.getElementById("sys-browser-runtimes");
+    if(!target)return;
+    var install=d.install||null;
+    if(!install){target.innerHTML=sysEmpty(NOT_SCANNED);return;}
+    var tools=(install.tools||[]).filter(function(tool){
+      return tool&&(tool.tool==="agent-browser"||tool.tool==="vibium");
+    });
+    if(!tools.length){target.innerHTML=sysEmpty("this snapshot predates browser-runtime observation — press Rescan.");return;}
+    var caches=install.sharedCaches||[],body="",i;
+    for(i=0;i<tools.length;i++){
+      var tool=tools[i],cache=caches.find(function(row){return row.runtime===tool.tool;});
+      var payload=cache&&cache.payload;
+      var installState=tool.present?(tool.version?"v"+tool.version:"present"):"absent";
+      var ready=payload?(payload.status+(payload.revision?" · "+payload.revision:""))
+        :"not measured";
+      var readyTitle=payload&&payload.reason?payload.reason:"filesystem-derived; no launch or network probe";
+      body+="<tr>"
+        +"<td><b>"+esc(tool.label)+"</b><div class=\"sy-sub\">"+esc(tool.installMethod||"unknown")+"</div></td>"
+        +"<td>"+esc(tool.updateOwner||"upstream")+"</td>"
+        +"<td>"+esc(installState)+"</td>"
+        +'<td title="'+esc(readyTitle)+'">'+esc(ready)+"</td>"
+        +'<td class="num">'+(cache?mhtml(cache.bytes,fmtBytes):unkHtml("cache was not measured",false))+"</td>"
+        +'<td class="sy-path mono">'+esc((cache&&cache.path)||tool.root||"")+"</td>"
+      +"</tr>";
+    }
+    target.innerHTML='<div class="sy-tblwrap"><table class="sy-table">'
+      +"<thead><tr><th>Runtime</th><th>Updates via</th><th>Install</th><th>Payload</th>"
+      +'<th style="text-align:right">Cache</th><th>Path</th></tr></thead><tbody>'+body+"</tbody></table></div>";
+  }
+
   export function renderSysSummary(d){
     renderSysKpis(d);
     renderSysGaugeBand(d);
+    renderSysBrowserRuntimes(d);
     renderSysConsumers(d);
   }
 

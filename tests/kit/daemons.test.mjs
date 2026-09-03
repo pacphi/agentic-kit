@@ -9,7 +9,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { staleDaemons, reap, parseSweepLine } from '../../src/lib/daemons.mjs';
+import {
+  staleDaemons, reap, parseSweepLine, parseMcpTransportLine,
+  orphanedMcpTransports, reapMcpTransports,
+} from '../../src/lib/daemons.mjs';
 
 const DEAD_PID = 0x7ffffff0; // outside real pid ranges; kill(pid,0) → ESRCH
 
@@ -88,4 +91,57 @@ test('a garbage line yields nothing', () => {
   const found = [];
   parseSweepLine('not a ps line at all', found);
   assert.deepEqual(found, []);
+});
+
+// ── MCP stdio transports: visibility + proof-bound cleanup ──────────────────
+
+test('parses only Ruflo MCP start transports from a uid/pid/ppid process row', () => {
+  const found = [];
+  parseMcpTransportLine('501 123 1 node /opt/ruflo/bin/cli.js mcp start', found);
+  parseMcpTransportLine('501 124 99 ruflo mcp start --transport stdio', found);
+  parseMcpTransportLine('501 125 1 sh -c echo ruflo mcp start', found);
+  parseMcpTransportLine('501 126 1 node /opt/ruflo/bin/cli.js daemon start', found);
+  assert.deepEqual(found.map(({ uid, pid, ppid }) => ({ uid, pid, ppid })), [
+    { uid: 501, pid: 123, ppid: 1 },
+    { uid: 501, pid: 124, ppid: 99 },
+  ]);
+});
+
+test('MCP cleanup candidates require reparenting to init and same-user ownership', () => {
+  const transports = [
+    { uid: 501, pid: 10, ppid: 1, command: 'ruflo mcp start' },
+    { uid: 502, pid: 11, ppid: 1, command: 'ruflo mcp start' },
+    { uid: 501, pid: 12, ppid: 99, command: 'ruflo mcp start' },
+  ];
+  assert.deepEqual(orphanedMcpTransports(transports, { uid: 501 }).map((p) => p.pid), [10]);
+  assert.deepEqual(orphanedMcpTransports(transports, { uid: null }), []);
+});
+
+test('MCP reap re-verifies identity and orphanhood immediately before SIGTERM', () => {
+  const killed = [];
+  const command = 'node /x/cli.js mcp start';
+  const transports = [{ uid: 501, pid: 10, ppid: 1, command }];
+  const results = reapMcpTransports(transports, {
+    uid: 501,
+    inspect: () => ({ uid: 501, pid: 10, ppid: 1, command }),
+    kill: (pid, signal) => killed.push({ pid, signal }),
+  });
+  assert.deepEqual(killed, [{ pid: 10, signal: 'SIGTERM' }]);
+  assert.equal(results[0].killed, true);
+
+  const refused = reapMcpTransports(transports, {
+    uid: 501,
+    inspect: () => ({ uid: 501, pid: 10, ppid: 42, command: 'node /x/cli.js mcp start' }),
+    kill: () => assert.fail('reparented proof disappeared; process must not be killed'),
+  });
+  assert.equal(refused[0].killed, false);
+  assert.equal(refused[0].identityChanged, true);
+
+  const reused = reapMcpTransports(transports, {
+    uid: 501,
+    inspect: () => ({ uid: 501, pid: 10, ppid: 1, command: 'ruflo mcp start --different' }),
+    kill: () => assert.fail('changed argv could be PID reuse; process must not be killed'),
+  });
+  assert.equal(reused[0].killed, false);
+  assert.equal(reused[0].identityChanged, true);
 });

@@ -28,6 +28,15 @@
       "removalProof": "released host-neutral runner passes participant and provider conformance"
     },
     {
+      "dependency": "agent-browser",
+      "owner": "vercel-labs",
+      "issuePublication": "explicit-user-approval-required",
+      "evidenceRequired": ["installed-version", "ruflo-compatible-range", "native-executable", "browser-payload", "ownership-receipt"],
+      "workaroundPolicy": "pin exact Ruflo-compatible 0.27.x, pass only an agentic-kit-owned absolute config to Ruflo MCP children, and never trust repository browser config",
+      "retestPolicy": "on Ruflo browser dependency change, agent-browser release, Node floor change, or Servo backend release",
+      "removalProof": "a released Ruflo artifact selects a replacement backend and passes browser MCP conformance without invoking agent-browser"
+    },
+    {
       "dependency": "codex",
       "owner": "openai",
       "issuePublication": "explicit-user-approval-required",
@@ -118,6 +127,26 @@
         "status": "published",
         "publishedAt": "2026-09-02T15:41:49Z",
         "publishedUrl": "https://github.com/ruvnet/ruflo/issues/3153#issuecomment-5512219386",
+        "requiredFields": ["minimalReproduction", "expected", "observed", "hostVersions", "dependencyVersion", "evidenceDigests", "boundedWorkaround", "expiry", "removalProof"]
+      }
+    },
+    {
+      "id": "ruflo-3.38.21-init-suppression-flags",
+      "dependency": "ruflo",
+      "kind": "upstream-defect",
+      "affected": ["3.38.21"],
+      "issue": "https://github.com/ruvnet/ruflo/issues/3167",
+      "issueState": "open-at-last-verification",
+      "primaryEvidence": "fresh empty-directory reproduction plus installed wrapper/init-handler artifact digests",
+      "strategy": "retain the declared no-codex-detect/no-skills-sh flags and independently suppress optional projections with scripted format plus RUFLO_NO_SKILLS_SH=1; preserve unreceipted existing skills",
+      "versionGate": "apply to Ruflo 3.38.21; re-run the empty-directory filesystem proof for every later release",
+      "expiryPolicy": "retest within 14 days and on every Ruflo release",
+      "nextRetestAt": "2026-09-09",
+      "sunsetWhen": "a released Ruflo build honors both CLI flags independently and together through the public ruflo wrapper",
+      "notification": {
+        "status": "published",
+        "publishedAt": "2026-09-02",
+        "publishedUrl": "https://github.com/ruvnet/ruflo/issues/3167",
         "requiredFields": ["minimalReproduction", "expected", "observed", "hostVersions", "dependencyVersion", "evidenceDigests", "boundedWorkaround", "expiry", "removalProof"]
       }
     },
@@ -218,6 +247,26 @@
         "status": "published",
         "publishedAt": "2026-09-02T15:20:46Z",
         "publishedUrl": "https://github.com/openai/codex/issues/19679#issuecomment-5511921501",
+        "requiredFields": ["minimalReproduction", "expected", "observed", "hostVersions", "dependencyVersion", "evidenceDigests", "boundedWorkaround", "expiry", "removalProof"]
+      }
+    },
+    {
+      "id": "ruflo-agent-browser-compatibility-layer",
+      "dependency": "agent-browser",
+      "kind": "compatibility-pin-and-trust-boundary",
+      "affected": ["ruflo@3.38.21", "@claude-flow/browser@3.0.0-alpha.4", "agent-browser@0.27.x"],
+      "issue": "https://github.com/vercel-labs/agent-browser/issues/1679",
+      "issueState": "open-at-last-verification",
+      "primaryEvidence": "published Ruflo MCP source, @claude-flow/browser dependency manifest, agent-browser release manifests/postinstall, and local Node 22/26 install verification",
+      "strategy": "preinstall exact 0.27.0 on Node 22/23 or 0.27.3 on Node 24+, verify the package-owned native CLI, and set AGENT_BROWSER_CONFIG only on managed Ruflo MCP children",
+      "versionGate": "apply only while a released Ruflo build shells out to agent-browser and declares a compatible 0.27.x contract",
+      "expiryPolicy": "retest within 14 days and on every Ruflo or agent-browser release",
+      "nextRetestAt": "2026-09-09",
+      "sunsetWhen": "a released Ruflo build actually selects Servo or another backend and passes browser MCP conformance without agent-browser",
+      "notification": {
+        "status": "published",
+        "publishedAt": "2026-08-11T05:25:57Z",
+        "publishedUrl": "https://github.com/vercel-labs/agent-browser/issues/1679",
         "requiredFields": ["minimalReproduction", "expected", "observed", "hostVersions", "dependencyVersion", "evidenceDigests", "boundedWorkaround", "expiry", "removalProof"]
       }
     }

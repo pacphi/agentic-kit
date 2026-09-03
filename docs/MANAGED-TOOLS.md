@@ -58,6 +58,7 @@ them.
 | Tool | Install / update spec | Update owner | Installed version read from | Drift compared against | status / statusline / dashboard |
 | --- | --- | --- | --- | --- | --- |
 | **ruflo** | npm `ruflo@latest` | `ak sync` | disk: global `package.json` | npm `view latest` (TTL-cached) | row ✓ / upstream's own `RuFlo V<x>` header ✓ / card + banner ✓ |
+| **agent-browser** | exact npm `0.27.0` on Node 22/23; `0.27.3` on Node 24+ | `ak sync`, only when receipt-owned; compatible external installs are disowned | disk: global `package.json` plus package-owned native executable | Ruflo's `>=0.27.0 <0.28.0` contract, not npm latest | row ✓ / n/a / About + System ✓; generic update banner excluded |
 | **agentic-qe** | npm `agentic-qe@latest` | `ak sync` | disk: global `package.json` (project-local fallback) | npm `view latest` (TTL-cached) | row ✓ / `Agentic QE V<x>` chip ✓ / card + banner ✓ |
 | **hosts** (Claude, Codex, OpenCode; OpenCode routes explicitly through `ak run`) | npm `@latest` — only when npm-managed | `ak sync` if npm-installed; **explicitly disowned** if brew/mise/native | disk: global `package.json`, else `--version` probe | npm latest for npm-managed only; external → `outdated:false` | row ✓ (version + method) / n/a / card + banner (npm-managed only) ✓ |
 | **agentdb** | npm, **pinned to ruflo's bundled version** — deliberately not latest | `ak sync` (repins on core skew) | disk: global `package.json` | ruflo's **bundled** copy (coherence), not npm latest — by design | row ✓ / n/a / card ✓; banner excluded (its authority isn't "latest") |
@@ -93,7 +94,16 @@ presence:
 6. **Removal has three scopes.** Wiring removal is ordinary; owned package removal is explicit;
    data purge is separately previewed and confirmed. Source transcripts and primary notes,
    exclusions, tombstones, policy, peers, and imported history are preserved by default. An
-   explicit index purge can still destroy imported-only material whose sole copy is in that index.
+explicit index purge can still destroy imported-only material whose sole copy is in that index.
+
+## Managed Ruflo browser executor boundary
+
+[ADR-0043](adr/0043-managed-ruflo-browser-executor.md) applies the same ownership discipline to
+Ruflo's current browser executor without making it a companion or installing another plugin/skill
+catalog. Its exact compatible package, native binary, trusted MCP-only config, and browser payload
+are separate facts. Existing compatible packages stay external; incompatible external packages
+are preserved. Normal detection never runs `agent-browser doctor` or launches Chrome. Package
+removal is receipt-gated, while browser/session/profile data is always preserved.
 
 ## Where each piece lives
 
@@ -103,6 +113,9 @@ presence:
   `updateHost`, `hostDrift`).
 - **agentdb** — `src/lib/agentdb.mjs` (`coherence`), heal
   `healAgentdb` (pins to the bundled version).
+- **agent-browser** — `src/lib/agent-browser.mjs` (Node-aware exact version,
+  native verification, trusted MCP config, receipt-gated teardown); lifecycle
+  rationale in [ADR-0043](adr/0043-managed-ruflo-browser-executor.md).
 - **ruvnet-brain** — `src/lib/ruvnet-brain.mjs` (`installedReleaseOnDisk`,
   `latestVersion`, `classifyDrift`, `drift`, nightly-agent detection), heals
   `installRuvnetBrain` / `disableRuvnetBrainNightly`. Full background on its

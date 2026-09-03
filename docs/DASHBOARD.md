@@ -86,6 +86,16 @@ any of them. It opens with one orientation sentence and a short map of how the p
 one card per component grouped into sections: hosts, engine and memory, quality/safety/knowledge,
 the kit itself, and the surfaces ak configured for you.
 
+The engine group includes the currently active Ruflo browser executor. Its chip
+comes from the same read-only status facts as the terminal: compatible package,
+verified native executable, trusted MCP config, and local browser payload remain
+separate from Vibium's Agentic-QE-owned cache visibility in System.
+
+System's capability catalog counts both user/plugin surfaces and the project
+surfaces discovered by the host census. In particular, Codex project skills in
+`.agents/skills` are distinct evidence from user `~/.codex/skills` and enabled
+plugin caches; their presence matrix keeps the source visible after deduplication.
+
 Each card carries an icon, the component name with a state chip, a plain-language tagline, one
 short paragraph explaining what the thing does for you, and a row of link pills — source (GitHub),
 package (npm), and public docs. Configured surfaces use the same card shape but swap the link pills

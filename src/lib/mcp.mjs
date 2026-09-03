@@ -5,10 +5,12 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { rufloNodeModules, claudeUserMcpPath, claudeSettingsPath, repoRoot } from './paths.mjs';
 import { run } from './exec.mjs';
 import { readJson, addDenyRules, removeDenyRules } from './settings.mjs';
 import { writeFileWithBackup } from './file-write.mjs';
+import { managedAgentBrowserEnv } from './agent-browser.mjs';
 
 /** Enumerate MCP tool names from the installed package's mcp-tools modules,
  *  grouped by name prefix (family). Returns Map<family, string[]>. */
@@ -31,16 +33,108 @@ export function toolFamilies() {
   return families;
 }
 
-/** Registration state from ~/.claude.json (user scope). */
-export function registrationStatus() {
-  const cfg = readJson(claudeUserMcpPath(), {});
-  const servers = cfg?.mcpServers ?? {};
+const CLAUDE_SCOPE_PRECEDENCE = Object.freeze(['local', 'project', 'user']);
+
+function claudeMcpRegistrations(servers, { scope, file }) {
+  return Object.entries(servers ?? {}).map(([name, definition]) => ({
+    name,
+    scope,
+    file,
+    command: typeof definition?.command === 'string' ? definition.command : null,
+    args: Array.isArray(definition?.args) ? definition.args : null,
+    env: definition?.env && typeof definition.env === 'object' ? definition.env : {},
+  }));
+}
+
+/** Spawn-free Claude MCP topology across the three documented scopes.
+ *
+ * `local` is Claude's machine-local entry for this project under
+ * ~/.claude.json.projects[root].mcpServers; `project` is the repository's
+ * .mcp.json; `user` is ~/.claude.json.mcpServers. The precedence is whole-entry
+ * local > project > user. Files remain host/user-owned: observation here never
+ * implies permission to rewrite a project or local registration. */
+export function claudeMcpTopology({
+  cwd = process.cwd(), home = os.homedir(), userConfigFile = null, projectConfigFile = null,
+} = {}) {
+  const root = path.resolve(repoRoot(cwd) ?? cwd);
+  const userFile = userConfigFile ?? path.join(home, '.claude.json');
+  const projectFile = projectConfigFile ?? path.join(root, '.mcp.json');
+  const userConfig = readJson(userFile, {}) ?? {};
+  const localProject = Object.entries(userConfig.projects ?? {}).find(([projectRoot]) =>
+    path.resolve(projectRoot) === root)?.[1] ?? {};
+  const projectConfig = readJson(projectFile, {}) ?? {};
+  const registrations = [
+    ...claudeMcpRegistrations(localProject.mcpServers, { scope: 'local', file: userFile }),
+    ...claudeMcpRegistrations(projectConfig.mcpServers, { scope: 'project', file: projectFile }),
+    ...claudeMcpRegistrations(userConfig.mcpServers, { scope: 'user', file: userFile }),
+  ];
+  const scopesFor = (name) => CLAUDE_SCOPE_PRECEDENCE
+    .filter((scope) => registrations.some((entry) => entry.name === name && entry.scope === scope));
+  const effectiveFor = (name) => registrations.find((entry) => entry.name === name) ?? null;
+  const claudeFlowScopes = scopesFor('claude-flow');
+  const legacyRufloScopes = scopesFor('ruflo');
   return {
-    claudeFlow: 'claude-flow' in servers,
-    legacyRuflo: 'ruflo' in servers,
-    denyCount: (readJson(claudeSettingsPath(), {})?.permissions?.deny ?? [])
+    root,
+    files: { user: userFile, project: projectFile },
+    registrations,
+    claudeFlowScopes,
+    legacyRufloScopes,
+    effective: {
+      claudeFlow: effectiveFor('claude-flow'),
+      legacyRuflo: effectiveFor('ruflo'),
+    },
+  };
+}
+
+/** Registration state across Claude's local/project/user scopes. Only a legacy
+ * USER registration is automatically migrated by register(); local and project
+ * files may be user/team-owned and are disclosed but preserved. */
+export function registrationStatus({
+  cwd = process.cwd(), home = os.homedir(), settingsFile = claudeSettingsPath(),
+  userConfigFile = null, projectConfigFile = null,
+} = {}) {
+  const topology = claudeMcpTopology({ cwd, home, userConfigFile, projectConfigFile });
+  const autoMigratableLegacyScopes = topology.legacyRufloScopes.filter((scope) => scope === 'user');
+  const preservedLegacyScopes = topology.legacyRufloScopes.filter((scope) => scope !== 'user');
+  return {
+    claudeFlow: topology.claudeFlowScopes.length > 0,
+    legacyRuflo: topology.legacyRufloScopes.length > 0,
+    claudeFlowScopes: topology.claudeFlowScopes,
+    legacyRufloScopes: topology.legacyRufloScopes,
+    effective: topology.effective,
+    autoMigratableLegacyScopes,
+    preservedLegacyScopes,
+    denyCount: (readJson(settingsFile, {})?.permissions?.deny ?? [])
       .filter((r) => r.startsWith('mcp__claude-flow__')).length,
   };
+}
+
+export function agentBrowserMcpConfigured(registration, enabled = true) {
+  if (!enabled) return true;
+  const expected = managedAgentBrowserEnv();
+  return Object.entries(expected).every(([key, value]) => registration?.env?.[key] === value);
+}
+
+const canonicalRufloRegistration = (entry) => entry?.command === 'ruflo'
+  && JSON.stringify(entry.args) === JSON.stringify(['mcp', 'start']);
+
+function replaceableRufloRegistration(entry) {
+  if (!canonicalRufloRegistration(entry) || entry.scope !== 'user') return false;
+  return Object.keys(entry.env ?? {}).every((key) => key === 'AGENT_BROWSER_CONFIG');
+}
+
+function mcpAddArgs(name, entry) {
+  const envArgs = Object.entries(entry.env ?? {}).flatMap(([key, value]) => ['-e', `${key}=${value}`]);
+  return ['mcp', 'add', name, '-s', 'user', ...envArgs, '--', entry.command, ...entry.args];
+}
+
+async function removeUserRegistration(entry, runner) {
+  const result = await runner('claude', ['mcp', 'remove', entry.name, '-s', 'user']);
+  return result.code === 0;
+}
+
+async function restoreRegistrations(entries, runner) {
+  for (const entry of entries) await runner('claude', mcpAddArgs(entry.name, entry));
 }
 
 /** Is the standalone ruvector MCP server registered at user scope? Spawn-free
@@ -78,21 +172,59 @@ function tomlStringArray(value) {
   } catch { return null; }
 }
 
-/** Read only Codex MCP table identity/command/argv facts. This deliberately is
- * not a general TOML parser: status needs a spawn-free, fail-closed topology
- * check and never rewrites these host-owned files. */
-function codexMcpRegistrations(file, scope) {
+const sameArgs = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+const fingerprint = (value) => createHash('sha256').update(value).digest('hex');
+
+function mcpTableName(table) {
+  const match = /^mcp_servers\.(?:"([^"\n]+)"|([A-Za-z0-9_-]+))$/.exec(table.trim());
+  return match ? (match[1] ?? match[2]) : null;
+}
+
+/** Read the bounded base-table sections behind Codex MCP registrations. This
+ * is deliberately not a general TOML parser: only a base
+ * `[mcp_servers.<name>]` table with single-line string command/args facts is
+ * observed. Any extra field or child table makes the entry ineligible for
+ * automatic repair, while status can still report a suspicious topology. */
+function codexMcpSections(file, scope) {
   let source;
-  try { source = fs.readFileSync(file, 'utf8'); } catch { return []; }
-  const headers = [...source.matchAll(/^\s*\[mcp_servers\.(?:"([^"\n]+)"|([A-Za-z0-9_-]+))\]\s*$/gm)];
-  return headers.map((header, index) => {
+  let regularFile = false;
+  try {
+    const stat = fs.lstatSync(file);
+    regularFile = stat.isFile() && !stat.isSymbolicLink();
+    source = fs.readFileSync(file, 'utf8');
+  } catch { return []; }
+  const headers = [...source.matchAll(/^[ \t]*\[(?!\[)([^\]\n]+)\][ \t]*(?:#.*)?$/gm)];
+  return headers.flatMap((header, index) => {
+    const name = mcpTableName(header[1]);
+    if (!name) return [];
     const bodyStart = header.index + header[0].length;
     const bodyEnd = headers[index + 1]?.index ?? source.length;
     const body = source.slice(bodyStart, bodyEnd);
     const command = tomlString(/^\s*command\s*=\s*("(?:[^"\\]|\\.)*")\s*$/m.exec(body)?.[1]);
     const args = tomlStringArray(/^\s*args\s*=\s*(\[[^\n]*\])\s*$/m.exec(body)?.[1]);
-    return { name: header[1] ?? header[2], scope, file, command, args };
+    const meaningful = body.split(/\r?\n/).map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('#'));
+    const exactFields = meaningful.length === 2
+      && meaningful.some((line) => /^command\s*=/.test(line))
+      && meaningful.some((line) => /^args\s*=/.test(line));
+    const childPrefixes = [`mcp_servers.${name}.`, `mcp_servers."${name}".`];
+    const hasChildren = headers.some((candidate) =>
+      childPrefixes.some((prefix) => candidate[1].trim().startsWith(prefix)));
+    let repairKind = null;
+    if (exactFields && !hasChildren && name === 'codex' && command === 'codex'
+      && sameArgs(args, ['mcp-server'])) repairKind = 'recursive-codex';
+    if (exactFields && !hasChildren && name === 'claude-flow' && command === 'ruflo'
+      && sameArgs(args, ['mcp', 'start'])) repairKind = 'legacy-ruflo';
+    return [{
+      name, scope, file, command, args, repairKind, regularFile,
+      fingerprint: fingerprint(source.slice(header.index, bodyEnd)),
+      start: header.index, end: bodyEnd, source,
+    }];
   });
+}
+
+function codexMcpRegistrations(file, scope) {
+  return codexMcpSections(file, scope).map(({ start: _start, end: _end, source: _source, ...entry }) => entry);
 }
 
 /** Effective Codex MCP topology across project and user configuration.
@@ -109,9 +241,9 @@ export function codexMcpTopology({ cwd = process.cwd(), home = os.homedir() } = 
     entry.name === 'codex' && entry.command === 'codex' && entry.args?.includes('mcp-server'));
   const agenticQeRegistrations = registrations.filter((entry) => entry.name === 'agentic-qe');
   const rufloRegistrations = registrations.filter((entry) =>
-    entry.name === 'ruflo' || entry.name === 'claude-flow'
-    || entry.command === 'ruflo'
-    || (entry.command === 'ak' && JSON.stringify(entry.args) === JSON.stringify(['x', 'ruflo-mcp'])));
+    (entry.name === 'ruflo' && (entry.command === 'ruflo'
+      || (entry.command === 'ak' && sameArgs(entry.args, ['x', 'ruflo-mcp']))))
+    || entry.repairKind === 'legacy-ruflo');
   return {
     files,
     registrations,
@@ -134,51 +266,125 @@ export function codexMcpRepairPlan(topology) {
     seen.add(key);
     targets.push({ ...entry, reason });
   };
-  for (const entry of topology.selfRegistrations) {
+  for (const entry of topology.selfRegistrations.filter((candidate) =>
+    candidate.regularFile && candidate.repairKind === 'recursive-codex')) {
     add(entry, 'recursively launches Codex through the deprecated mcp-server transport');
   }
-  for (const entry of topology.rufloRegistrations) {
-    if (entry.name !== 'ruflo') {
-      add(entry, 'duplicates the canonical workspace-aware [mcp_servers.ruflo] registration');
-    }
+  for (const entry of topology.rufloRegistrations.filter((candidate) =>
+    candidate.regularFile && candidate.repairKind === 'legacy-ruflo')) {
+    add(entry, 'replaces the deprecated legacy Ruflo transport with canonical workspace-aware [mcp_servers.ruflo]');
   }
   return targets;
 }
 
-/** Apply a previously disclosed repair plan through Codex's supported command,
- * then verify every target disappeared from the effective topology. */
+function sameRepairIdentity(left, right) {
+  return left?.file === right?.file && left?.scope === right?.scope
+    && left?.name === right?.name && left?.command === right?.command
+    && sameArgs(left?.args, right?.args) && left?.repairKind === right?.repairKind
+    && left?.fingerprint === right?.fingerprint;
+}
+
+function validRepairTarget(target) {
+  if (!path.isAbsolute(target?.file ?? '') || !/^[a-f0-9]{64}$/.test(target?.fingerprint ?? '')) return false;
+  if (target.regularFile !== true) return false;
+  if (target.scope !== 'project' && target.scope !== 'user') return false;
+  if (target.repairKind === 'recursive-codex') {
+    return target.name === 'codex' && target.command === 'codex'
+      && sameArgs(target.args, ['mcp-server']);
+  }
+  if (target.repairKind === 'legacy-ruflo') {
+    return target.name === 'claude-flow' && target.command === 'ruflo'
+      && sameArgs(target.args, ['mcp', 'start']);
+  }
+  return false;
+}
+
+function removeProjectCodexMcpTarget(target) {
+  const current = codexMcpSections(target.file, target.scope)
+    .find((entry) => sameRepairIdentity(entry, target));
+  if (!current) return false;
+  writeFileWithBackup(target.file, current.source.slice(0, current.start) + current.source.slice(current.end));
+  return true;
+}
+
+function createCurrentRepairBackup(file) {
+  const stat = fs.lstatSync(file);
+  if (stat.isSymbolicLink() || !stat.isFile()) {
+    throw new Error('refusing a non-regular or symlinked Codex config');
+  }
+  const source = fs.readFileSync(file);
+  const backup = `${file}.ak-mcp-repair-${process.pid}-${Date.now()}.bak`;
+  const handle = fs.openSync(backup, 'wx', stat.mode & 0o777);
+  try {
+    fs.writeFileSync(handle, source);
+  } finally {
+    fs.closeSync(handle);
+  }
+  return backup;
+}
+
+/** Apply a previously disclosed repair plan. Project-scoped tables are edited
+ * through a bounded, backup-first exact-section removal because Codex's MCP
+ * command writes only the user config. User-scoped tables go through Codex's
+ * supported command. Every target is identity-checked immediately before its
+ * mutation and re-probed immediately after it. */
 export async function repairCodexMcpTopology(targets, cwd = process.cwd(), {
   runner = run, inspect = codexMcpTopology,
 } = {}) {
   const backedUp = new Set();
+  const removed = [];
   for (const target of targets) {
-    if (!backedUp.has(target.file)) {
-      try {
-        writeFileWithBackup(target.file, fs.readFileSync(target.file, 'utf8'));
-        backedUp.add(target.file);
-      } catch (error) {
-        return { ok: false, changed: false, detail: `could not back up ${target.file}: ${error.message}` };
-      }
+    if (!validRepairTarget(target)) {
+      return { ok: false, changed: removed.length > 0, detail: 'Codex MCP repair target was not a recognized disclosed legacy shape' };
     }
-    const result = await runner('codex', ['mcp', 'remove', target.name], { cwd });
-    if (result.code !== 0) {
+    const live = inspect({ cwd }).registrations.find((entry) =>
+      entry.file === target.file && entry.scope === target.scope && entry.name === target.name);
+    if (!sameRepairIdentity(live, target)) {
       return {
-        ok: false,
-        changed: false,
-        detail: `could not remove [mcp_servers.${target.name}] from ${target.file}: ${(result.stderr || result.stdout || `exit ${result.code}`).split('\n')[0].slice(0, 160)}`,
+        ok: false, changed: removed.length > 0,
+        detail: `[mcp_servers.${target.name}] changed after confirmation; Codex MCP repair aborted`,
       };
     }
+    if (!backedUp.has(target.file)) {
+      try {
+        createCurrentRepairBackup(target.file);
+        backedUp.add(target.file);
+      } catch (error) {
+        return {
+          ok: false, changed: removed.length > 0,
+          detail: `could not create a current-state recovery copy for ${target.file}: ${error.message}`,
+        };
+      }
+    }
+    if (target.scope === 'project') {
+      try {
+        if (!removeProjectCodexMcpTarget(live)) throw new Error('exact confirmed table was not found');
+      } catch (error) {
+        return {
+          ok: false, changed: removed.length > 0,
+          detail: `could not remove [mcp_servers.${target.name}] from ${target.file}: ${error.message}`,
+        };
+      }
+    } else {
+      const result = await runner('codex', ['mcp', 'remove', target.name], { cwd });
+      if (result.code !== 0) {
+        return {
+          ok: false, changed: removed.length > 0,
+          detail: `could not remove [mcp_servers.${target.name}] from ${target.file}: ${(result.stderr || result.stdout || `exit ${result.code}`).split('\n')[0].slice(0, 160)}`,
+        };
+      }
+    }
+    const remaining = inspect({ cwd }).registrations.find((entry) =>
+      entry.file === target.file && entry.scope === target.scope && entry.name === target.name);
+    if (remaining) {
+      return {
+        ok: false, changed: true,
+        detail: `Codex MCP repair could not be verified; [mcp_servers.${target.name}] remains`,
+      };
+    }
+    removed.push(target);
   }
-  const remaining = inspect({ cwd }).registrations.filter((entry) =>
-    targets.some((target) => target.file === entry.file && target.scope === entry.scope && target.name === entry.name));
-  if (remaining.length) {
-    return {
-      ok: false,
-      changed: targets.length > 0,
-      detail: `Codex MCP repair could not be verified; remaining entries: ${remaining.map((entry) => `[mcp_servers.${entry.name}]`).join(', ')}`,
-    };
-  }
-  return { ok: true, changed: targets.length > 0, detail: `removed ${targets.map((target) => `[mcp_servers.${target.name}]`).join(', ')}` };
+  return { ok: true, changed: removed.length > 0, detail: `removed ${removed.map((target) => `[mcp_servers.${target.name}]`).join(', ')}` };
 }
 
 /**
@@ -217,10 +423,33 @@ export function rufloCodexMcpStatus(cfg, { home = os.homedir() } = {}) {
   };
 }
 
-export async function register() {
-  await run('claude', ['mcp', 'remove', 'ruflo', '-s', 'user']); // migrate legacy key
-  const r = await run('claude', ['mcp', 'add', 'claude-flow', '-s', 'user', '--', 'ruflo', 'mcp', 'start']);
-  return r.code === 0;
+export async function register(cfg = { agentBrowser: true }, {
+  runner = run, inspect = claudeMcpTopology,
+} = {}) {
+  const desired = {
+    command: 'ruflo', args: ['mcp', 'start'],
+    env: managedAgentBrowserEnv({ enabled: cfg?.agentBrowser !== false }),
+  };
+  const userEntries = inspect().registrations.filter((entry) => entry.scope === 'user');
+  const current = userEntries.find((entry) => entry.name === 'claude-flow');
+  if (current && !replaceableRufloRegistration(current)) return false;
+  const legacy = userEntries.find((entry) => entry.name === 'ruflo');
+  const removableLegacy = legacy && replaceableRufloRegistration(legacy) ? legacy : null;
+  const alreadyDesired = current && canonicalRufloRegistration(current)
+    && JSON.stringify(current.env ?? {}) === JSON.stringify(desired.env);
+  const removed = [];
+  for (const entry of [removableLegacy, alreadyDesired ? null : current].filter(Boolean)) {
+    if (!await removeUserRegistration(entry, runner)) {
+      await restoreRegistrations(removed, runner);
+      return false;
+    }
+    removed.push(entry);
+  }
+  if (alreadyDesired) return true;
+  const added = await runner('claude', mcpAddArgs('claude-flow', desired));
+  if (added.code === 0) return true;
+  await restoreRegistrations(removed, runner);
+  return false;
 }
 
 export async function unregister() {

@@ -217,8 +217,9 @@ function surfaceSpecs(roots, io) {
       path: at(projectRoot, '.mcp.json'), read: (p) => readManifestKeys(p, (d) => d?.mcpServers, io) });
   }
 
-  // Project-scoped skills, agents and commands, across EVERY project on this
-  // machine — not only the one the dashboard happens to be launched from.
+  // Project-scoped skills, agents and commands, across the launching repository
+  // plus EVERY project the host census has observed on this machine. A fresh
+  // repository has no transcript yet, so the launching root is load-bearing.
   //
   // A catalog that reads user scope plus one repo answers "what can I use right
   // here", which is not the question this panel asks: it is the machine's
@@ -227,9 +228,14 @@ function surfaceSpecs(roots, io) {
   // projects is still one row, so the list grows with distinct NAMES rather
   // than with project count.
   //
-  // Costs three stats per project against an already-bounded project list; a
-  // project directory that is gone simply reads absent.
-  for (const project of projects ?? []) {
+  // Costs four stats per project against an already-bounded project list; a
+  // project directory that is gone simply reads absent. Resolve and deduplicate
+  // because the launching repository normally also appears in the census.
+  const catalogProjects = [...new Set([
+    projectRoot,
+    ...(projects ?? []),
+  ].filter(Boolean).map((project) => path.resolve(project)))];
+  for (const project of catalogProjects) {
     const root = at(project, '.claude');
     specs.push({ id: `claude-project-skills:${project}`, host: 'claude', kind: 'skill',
       path: at(root, 'skills'), read: (p) => readMarkerDirs(p, 'SKILL.md', io) });
@@ -237,6 +243,8 @@ function surfaceSpecs(roots, io) {
       path: at(root, 'agents'), read: (p) => readMarkdownNames(p, io) });
     specs.push({ id: `claude-project-commands:${project}`, host: 'claude', kind: 'command',
       path: at(root, 'commands'), read: (p) => readMarkdownNames(p, io) });
+    specs.push({ id: `codex-project-skills:${project}`, host: 'codex', kind: 'skill',
+      path: at(project, '.agents', 'skills'), read: (p) => readMarkerDirs(p, 'SKILL.md', io) });
   }
 
   // codex

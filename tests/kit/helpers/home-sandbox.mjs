@@ -33,6 +33,10 @@ export function sandboxHome(prefix) {
   process.env.USERPROFILE = home;
   process.env.XDG_CONFIG_HOME = cfg;
   process.env.APPDATA = cfg;
+  // npm injects its resolved cache path into lifecycle scripts. Without
+  // overriding it here, `npm test` lets otherwise-isolated status/setup tests
+  // inspect the developer's real `_npx` cache and vary with host upgrade cruft.
+  process.env.npm_config_cache = path.join(home, '.npm');
   process.env.NO_COLOR = '1';
   // Nothing invokable on PATH: every exec.run() spawn ENOENTs immediately, so
   // these tests never launch a real claude/npm/ruflo/aqe and never depend on
@@ -146,6 +150,7 @@ export function fakeGlobalRoot(home, pkgs = {}) {
  *  selfDrift never reach the network (and never rewrite the file). */
 export function offlineKitConfig(extra = {}) {
   return {
+    agentBrowser: false, // avoid global installs/browser downloads in unrelated hermetic tests
     ruvnetBrain: false, // its drift probe hits the GitHub releases API
     versionCheck: {
       ttlHours: 24,

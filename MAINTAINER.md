@@ -98,6 +98,7 @@ docs/
 `docs/adr/0015-managed-codex-native-statusline.md`,
 `docs/adr/0032-model-lifecycle-intelligence.md`,
 `docs/adr/0033-retire-codex-mcp-and-bound-qe-court-participants.md`,
+`docs/adr/0043-managed-ruflo-browser-executor.md`,
 `tests/live/aqe-external-provider-transport.test.mjs`,
 `tests/live/qe-court-participant-transport.test.mjs`, and
 `docs/ddd/model-lifecycle-intelligence.md`. Generated workspace state under

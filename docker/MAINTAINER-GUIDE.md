@@ -44,6 +44,8 @@ see [USER-GUIDE.md](USER-GUIDE.md); this page is the *why* and the knobs.
 | `AK_INSTALL_SPEC` (env) | `@pacphi/agentic-kit@$AK_DIST_TAG` | Full npm spec override — test an unpublished build: `npm pack` the checkout, drop the tarball in `./artifacts`, set `AK_INSTALL_SPEC=/artifacts/<name>.tgz` |
 | `AK_SETUP_FLAGS` (env) | `--codex --opencode --yes` | Full setup surface; add `--no-ruvnet-brain` to skip the ~2 GB KB, `--minimal` for the smallest footprint |
 | `AK_SKIP_SETUP` (env) | `0` | `1` = install the kit but stop before setup (bare-kit debugging) |
+| `AK_SYNC_PASSES` (env) | `0` | Run this many post-setup `ak sync --yes` passes; use `2` to prove convergence/idempotence |
+| `AK_ARTIFACT_PREFIX` (env) | `first-use` | Safe filename prefix for status/system evidence written under `/artifacts` |
 | `AK_DASHBOARD_PORT` / `AK_BRIDGE_PORT` (env) | `7431` / `7432` | Only needed if you change the compose port mapping too |
 | `UBUNTU_VERSION` (build arg) | `26.04` | OS matrix testing |
 | `NODE_MAJOR` (build arg) | `24` | Node matrix testing (kit engines: `>=22`) |
@@ -67,15 +69,40 @@ docker compose --profile persistent run --rm ak-persistent bash
 docker buildx build --platform linux/amd64,linux/arm64 .
 ```
 
+The Linux ARM64 image is valid for setup convergence and capability-catalog
+comparison, but Chrome for Testing has no ARM64 payload. Expect browser readiness
+to remain degraded with an explicit external Chromium/Chrome requirement; prove
+the downloadable browser path on a native Linux x64 runner.
+
 ## Regression artifacts
 
-Each run that completes setup writes `artifacts/first-use-status.json` —
-`ak status --json` as seen by a brand-new machine. Diff it across releases to
+Each run that completes setup writes `artifacts/first-use-status.json` and
+`artifacts/first-use-system.json` — `ak status --json` plus the deep, content-free
+install/catalogue snapshot seen by a brand-new machine. Diff them across releases to
 catch first-use regressions (a subsystem newly failing on clean install is
 exactly the class of bug maintainers' converged machines can't see). This is
 the seam for a future nightly job: GitHub Actions runs this same compose file
 natively on Linux; compare the JSON against the previous run and alert on new
 `fail` rows.
+
+For an upgrade-cruft control, pack the current checkout, run two convergence
+passes in an ephemeral container, and compare its catalogue with the host:
+
+```bash
+npm pack --pack-destination docker/artifacts
+AK_INSTALL_SPEC=/artifacts/pacphi-agentic-kit-<version>.tgz \
+AK_SYNC_PASSES=2 AK_ARTIFACT_PREFIX=clean-branch \
+  docker compose -f docker/compose.yaml run --rm ak true
+ak system --deep --json > docker/artifacts/upgraded-host-system.json
+```
+
+The difference is classification evidence, not deletion authority. A host-only
+skill/plugin/MCP/package remains untouched unless Agentic Kit can prove an exact
+receipt-owned path and unchanged digest.
+
+The deep catalog includes user/plugin skill surfaces and each on-disk project's
+Claude `.claude/skills` and Codex `.agents/skills` surfaces. This distinction is
+load-bearing when diagnosing a Codex context warning caused by project history.
 
 ## Maintenance duties
 

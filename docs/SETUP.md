@@ -40,6 +40,8 @@ The machine phase is the same with or without `--project`. It:
 - creates or updates the agentic-kit machine configuration;
 - ensures enabled global tools and hosts are installed, while generally
   retaining already-installed tool versions;
+- installs and verifies the exact Ruflo-compatible `agent-browser` executor,
+  unless `--no-agent-browser` is selected;
 - repairs required native packages and deploys the token-audit skill;
 - reconciles agentic-kit's managed guidance blocks in the user-level Claude
   and Codex files that exist on the machine;
@@ -50,6 +52,25 @@ The machine phase is the same with or without `--project`. It:
 
 `ak setup` is the first-time installer, not the routine upgrade command. Once
 the kit is installed, use `ak sync` to upgrade and reconverge it.
+
+### Ruflo browser executor
+
+Ruflo's released browser MCP currently shells out to `agent-browser`; it has not
+yet shipped the Servo backend described by its accepted design ADR. Setup pins a
+Node-compatible 0.27.x release, verifies the package-owned native executable,
+and passes `~/.config/agentic-kit/agent-browser.json` only to managed Ruflo MCP
+processes. This avoids repository config discovery and does not install the
+`@claude-flow/browser` plugin or another skill catalog.
+
+When neither system Chrome nor a prior agent-browser payload is present, setup
+downloads Chrome for Testing without privileged OS dependency installation.
+Chrome for Testing does not publish Linux ARM64 builds. On that architecture,
+setup converges with the executor installed but browser readiness degraded until
+a compatible system Chromium/Chrome executable is supplied; sync does not retry
+an impossible download.
+Use `--no-agent-browser` to disable the component. Restart or reconnect Claude,
+Codex, and OpenCode after setup so their stdio MCP process receives the new
+environment.
 
 ### Optional deja-vu companion
 
@@ -91,13 +112,24 @@ versions. The table below describes the current contract.
 | `.agentic-qe/` and AQE integration assets | With AQE enabled, `aqe init --auto` migrates or refreshes its database, configuration, workers, skills, agents, hooks, and platform integrations. Generated assets can change with the installed AQE version. | Created and initialized when AQE is enabled. |
 | Oversized `.agentic-qe/*.rvf` stores | An RVF file over 2 GiB and its `.lock`, `.idmap.json`, and `.manifest.json` sidecars are removed before AQE initialization. Normal-sized stores are left to AQE. | Normally not applicable. |
 | Root `.gitignore` | Ruflo appends missing runtime/local-secret exclusions while preserving existing entries. | Created or extended as needed. |
-| `.agents/skills/ruflo/` | Added or refreshed; a detected oversized/broken generated Ruflo skill installation may be replaced. | Created when supported by the installed Ruflo version. |
+| `.agents/skills/` | Ruflo's auto-detected Codex and skills.sh projections are suppressed. Existing unreceipted skills are preserved for review; agentic-kit never infers deletion ownership from a familiar name. AQE may install its current curated Codex skills when that integration is enabled. | Only the explicitly enabled host integration may populate this root. |
 | Project `AGENTS.md` | Arbitrary project content and upstream-owned sentinels are preserved. Agentic-kit replaces/removes only its own complete sentinel-delimited blocks and collapses duplicate owned blocks. | Created only when a selected integration needs project-scoped managed guidance. |
 
-Project setup also reapplies enabled host/provider wiring and seeds the default
-per-activity routing policy in dual-host mode. With Codex enabled, it registers
-the workspace-aware Ruflo MCP in Codex and retires only agentic-kit-owned legacy
-`codex mcp-server` project entries.
+Setup with Codex enabled inventories the effective user Codex MCP configuration
+even in machine-only mode. When project setup is active it inventories that
+project's Codex MCP configuration too. An exact recursive
+`[mcp_servers.codex]` entry and the exact deprecated `claude-flow` Ruflo
+transport are listed in the setup trust manifest, backed up, removed only after
+the setup confirmation (or `--yes`), and re-probed before setup may report
+success. A fresh recovery copy captures the immediate pre-repair bytes; symlinked
+or otherwise non-regular config files remain report-only. Project files and the
+legacy Ruflo replacement stay outside this repair scope under `--minimal` or
+when setup is run outside a project.
+
+Project setup also reapplies enabled host/provider wiring, seeds the default
+per-activity routing policy in dual-host mode, registers the workspace-aware
+Ruflo MCP in Codex, and retires agentic-kit-owned legacy Claude-to-Codex project
+entries.
 
 ### Guidance precedence and repeatability
 
@@ -114,10 +146,14 @@ The project guidance result is defined by ownership, not by which initializer ra
 
 Agentic-QE's `BEGIN AGENTIC-QE CODEX` block is owned by Agentic-QE, not by this merge engine. Setup
 uses a bounded compatibility guard and reconciles around AQE initialization, but does not claim
-arbitrary AQE content. Ruflo is called with its supported `--no-global`, `--no-codex-detect`, and
-`--no-skills-sh` flags to avoid equivalent machine/project projections where upstream provides a
-switch. Generated settings, skills, agents and hooks remain subject to the upstream ownership and
-overwrite warnings in the table above.
+arbitrary AQE content. Ruflo is called with `--no-global`, `--no-codex-detect`, and
+`--no-skills-sh` to declare the machine/Codex ownership boundary. Published Ruflo 3.38.21 does not
+honor the two hyphenated skill flags ([ruflo #3167](https://github.com/ruvnet/ruflo/issues/3167)),
+so agentic-kit additionally uses scripted `--format json` mode and `RUFLO_NO_SKILLS_SH=1`; both
+independently suppress the optional projections in that release. Existing unreceipted skills
+remain review-only. A future upgrade may remove a stale projection only when its path and
+last-written digest are receipt-owned and the file is still unchanged. Generated settings, skills,
+agents and hooks remain subject to the upstream ownership and overwrite warnings in the table above.
 
 `ak x reference diff` inspects every enabled host target with the same target-aware selection;
 `ak x reference sync` reconciles those targets and is byte-idempotent on the second run. On the

@@ -362,6 +362,15 @@ export function consumerRoots({ env = process.env } = {}) {
       'Browser builds downloaded by `playwright install` (Windows location).'),
     at('puppeteer', 'Puppeteer browsers', 'browsers', path.join(cache, 'puppeteer'),
       'Chrome builds downloaded by Puppeteer\'s installer.'),
+    at('agent-browser', 'agent-browser Chrome for Testing', 'browsers',
+      path.join(home, '.agent-browser', 'browsers'),
+      'Chrome-for-Testing revisions downloaded by agent-browser; Agentic Kit manages the package for Ruflo.'),
+    at('vibium-mac', 'Vibium Chrome for Testing', 'browsers', path.join(mac, 'vibium'),
+      'Vibium browser and chromedriver revisions (macOS location); Agentic QE owns the integration.'),
+    at('vibium-xdg', 'Vibium Chrome for Testing', 'browsers', path.join(cache, 'vibium'),
+      'Vibium browser and chromedriver revisions (Linux/XDG location); Agentic QE owns the integration.'),
+    at('vibium-win', 'Vibium Chrome for Testing', 'browsers', path.join(winCache, 'vibium'),
+      'Vibium browser and chromedriver revisions (Windows location); Agentic QE owns the integration.'),
 
     // ── system ──────────────────────────────────────────────────────────────
     at('mise-installs', 'mise toolchain installs', 'system', mise,
@@ -393,6 +402,11 @@ export function consumerRoots({ env = process.env } = {}) {
     rows.push(at('npm-cache-win', 'npm cache (Windows)', 'node',
       path.join(winCache, 'npm-cache', '_cacache'),
       'npm\'s content-addressable download cache. Safe to clear; npm refetches.'));
+  }
+  if (env.VIBIUM_CACHE_DIR) {
+    rows.push(at('vibium-override', 'Vibium Chrome for Testing', 'browsers',
+      env.VIBIUM_CACHE_DIR,
+      'Vibium browser and chromedriver revisions at the explicit VIBIUM_CACHE_DIR override.'));
   }
   return rows;
 }
@@ -640,6 +654,8 @@ const SHARED_CACHE_GROUPS = Object.freeze({
   'playwright-mac': 'browsers',
   'playwright-win': 'browsers',
   puppeteer: 'browsers',
+  'agent-browser': 'browsers',
+  vibium: 'browsers',
 });
 
 /** Descriptors adopted from the install section: managed-tool trees and the

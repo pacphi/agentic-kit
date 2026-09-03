@@ -35,9 +35,14 @@ export async function run({ flags, positionals }) {
   const families = toolFamilies();
 
   if (sub === 'status') {
-    const s = registrationStatus();
-    (s.claudeFlow ? ok : warn)(`claude-flow registration: ${s.claudeFlow ? 'user scope' : 'absent'}`);
-    if (s.legacyRuflo) warn("legacy 'ruflo' key also registered — `x mcp pick` migrates it");
+    const s = registrationStatus({ cwd: process.cwd() });
+    (s.claudeFlow ? ok : warn)(`claude-flow registration: ${s.claudeFlow ? `${s.claudeFlowScopes.join(', ')} scope` : 'absent'}`);
+    if (s.autoMigratableLegacyScopes.length) {
+      warn("legacy 'ruflo' key registered at user scope — `x mcp pick` migrates that owned scope");
+    }
+    if (s.preservedLegacyScopes.length) {
+      warn(`legacy 'ruflo' key also registered at ${s.preservedLegacyScopes.join(', ')} scope — preserved because that configuration is project/user-owned`);
+    }
     console.log(`${bold('families')} (${families.size}, ${[...families.values()].reduce((n, l) => n + l.length, 0)} tools) ${dim(`· ${s.denyCount} denied`)}`);
     for (const [fam, tools] of [...families].sort((a, b) => b[1].length - a[1].length)) {
       console.log(`  ${fam.padEnd(14)} ${String(tools.length).padStart(3)} tools`);
@@ -64,6 +69,10 @@ export async function run({ flags, positionals }) {
     }
     if (!(await register())) { fail('claude mcp add failed — is the claude CLI on PATH?'); return 1; }
     ok('claude-flow registered at user scope');
+    const scoped = registrationStatus({ cwd: process.cwd() });
+    if (scoped.preservedLegacyScopes.length) {
+      warn(`legacy 'ruflo' registration remains at ${scoped.preservedLegacyScopes.join(', ')} scope; inspect with \`claude mcp get ruflo\` before removing it explicitly`);
+    }
     const { denied, unknown } = applyExclusions(exclude);
     if (unknown.length) warn(`unknown families ignored: ${unknown.join(', ')}`);
     ok(denied ? `${denied} tool(s) denied across ${exclude.length - unknown.length} family(ies)` : 'all families allowed');
