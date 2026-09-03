@@ -161,6 +161,8 @@ test('dashboard Maintenance capabilities bind preview, confirmation, apply and g
   assert.equal(planned.status, 200, planned.body);
   const preview = JSON.parse(planned.body);
   assert.equal(preview.confirmation.typedPhrase, 'APPLY 1');
+  assert.deepEqual(preview.confirmation.willChange, ['update <hostile>']);
+  assert.equal(preview.confirmation.preserved.length, 2);
   assert.equal(preview.plan.actions[0].executable, true);
   assert.doesNotMatch(planned.body, /private\/must-not-leak|argv|command/);
 

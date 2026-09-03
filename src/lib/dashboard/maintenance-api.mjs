@@ -147,12 +147,22 @@ function publicPlan(plan) {
 function confirmationForPlan(plan) {
   const actions = Array.isArray(plan.actions) ? plan.actions : [];
   const rollback = [...new Set(actions.map((action) => action.rollback).filter(Boolean))];
+  const operations = [...new Set(actions.map((action) => text(action.operation, 80)).filter(Boolean))];
   const typedPhrase = actions.length > 1 || plan.safetyClass === 'approval-required'
     || rollback.includes('irreversible') ? `APPLY ${actions.length}` : null;
   return {
     title: actions.length === 1 ? 'Confirm maintenance action' : `Confirm ${actions.length} maintenance actions`,
     summary: 'The server will recheck native inventory and the exact plan before changing anything.',
     actionCount: actions.length,
+    actionLabel: operations.length === 1 ? `Apply ${operations[0]}` : 'Apply changes',
+    willChange: actions.map((action) => {
+      const identity = publicResource(action.resourceIdentity);
+      return `${text(action.operation, 80) ?? 'change'} ${identity.name ?? identity.id ?? 'selected resource'}`;
+    }),
+    preserved: [
+      'Resources outside this exact plan remain unchanged.',
+      'Plugin cache children and unreceipted user content are never direct targets.',
+    ],
     safetyClass: text(plan.safetyClass, 80),
     rollback: rollback.join(', ') || 'unknown',
     restart: [...new Set(actions.map((action) => action.restart).filter(Boolean))].join(', ') || 'unknown',
