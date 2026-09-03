@@ -19,7 +19,7 @@ export async function runNativeCommand(binary, args, {
   return {
     ok: result.status === 0 && !result.error && !result.signal,
     exitCode: Number.isInteger(result.status) ? result.status : null,
-    timedOut: result.error?.code === 'ETIMEDOUT',
+    timedOut: /** @type {NodeJS.ErrnoException|undefined} */ (result.error)?.code === 'ETIMEDOUT',
     signal: result.signal ?? null,
     stdout: String(result.stdout ?? '').slice(0, MAX_OUTPUT_BYTES),
     stderr: String(result.stderr ?? '').slice(0, MAX_OUTPUT_BYTES),

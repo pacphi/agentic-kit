@@ -6,7 +6,7 @@ export const MAINTENANCE_RECEIPT_SCHEMA = 'maintenance-receipt/v1';
 const RECEIPT_ID = /^mnt-[A-Za-z0-9._-]{1,120}$/;
 const MAX_RECEIPT_BYTES = 1024 * 1024;
 const UNFINISHED = new Set([
-  'prepared', 'applying', 'verifying', 'undoing', 'failed', 'partial',
+  'prepared', 'applying', 'verifying', 'refreshing-catalog', 'undoing', 'failed', 'partial',
   'partial-recovery-required', 'outcome-unknown',
 ]);
 
@@ -110,17 +110,22 @@ export function readMaintenanceReceipt(transactionsRoot, id, { fsImpl = fs } = {
   return { receipt, dir, file };
 }
 
-export function listUnfinishedMaintenanceReceipts(transactionsRoot, { fsImpl = fs } = {}) {
+export function listMaintenanceReceipts(transactionsRoot, { fsImpl = fs } = {}) {
   const root = assertSafeRoot(transactionsRoot, fsImpl);
   return fsImpl.readdirSync(root, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && RECEIPT_ID.test(entry.name))
     .flatMap((entry) => {
       try {
         const { receipt } = readMaintenanceReceipt(root, entry.name, { fsImpl });
-        return UNFINISHED.has(receipt.status) ? [receipt] : [];
+        return [receipt];
       } catch (error) {
         return [{ id: entry.name, status: 'unknown-recovery-required', error: error.message }];
       }
     })
     .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+export function listUnfinishedMaintenanceReceipts(transactionsRoot, { fsImpl = fs } = {}) {
+  return listMaintenanceReceipts(transactionsRoot, { fsImpl })
+    .filter((receipt) => UNFINISHED.has(receipt.status) || receipt.status === 'unknown-recovery-required');
 }

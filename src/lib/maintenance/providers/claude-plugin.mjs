@@ -4,7 +4,10 @@ import {
 } from './shared.mjs';
 
 function pluginFingerprint(plugin) {
-  return sha256({ ref: plugin.ref, version: plugin.version, scope: plugin.scope, enabled: plugin.enabled });
+  return sha256({
+    ref: plugin.ref, version: plugin.version, scope: plugin.scope, enabled: plugin.enabled,
+    availableVersion: plugin.availableVersion ?? null,
+  });
 }
 
 function normalize(raw) {
@@ -13,7 +16,11 @@ function normalize(raw) {
   for (const item of raw) {
     if (!validPluginRef(item?.id) || typeof item.version !== 'string'
         || !validScope(item.scope) || typeof item.enabled !== 'boolean') return null;
-    plugins.push({ ref: item.id, version: item.version, scope: item.scope, enabled: item.enabled });
+    plugins.push({
+      ref: item.id, version: item.version, scope: item.scope, enabled: item.enabled,
+      availableVersion: typeof item.availableVersion === 'string' && item.availableVersion
+        ? item.availableVersion : null,
+    });
   }
   return plugins.sort((a, b) => a.ref.localeCompare(b.ref));
 }
@@ -25,8 +32,6 @@ function actionableRequest(finding) {
     && resource.host === 'claude'
     && validPluginRef(resource.providerRef)
     && validScope(resource.scope)
-    && finding?.ownership?.authority === 'native-inventory'
-    && finding?.ownership?.managed === true
     && executableSafetyClass(finding?.safetyClass)
     && ['disable', 'update'].includes(operation);
   return eligible ? { resource, ref: resource.providerRef, operation } : null;
@@ -51,7 +56,8 @@ export function createClaudePluginProvider({ run = runNativeCommand } = {}) {
     const plugin = facts?.complete && facts.plugins?.find((item) => item.ref === ref && item.scope === resource.scope);
     if (!plugin || (operation === 'disable' && !plugin.enabled)) return null;
     const recommended = finding?.versions?.recommended;
-    if (operation === 'update' && (typeof recommended !== 'string' || !recommended || recommended === plugin.version)) return null;
+    if (operation === 'update' && (typeof recommended !== 'string' || !recommended
+        || recommended === plugin.version || plugin.availableVersion !== recommended)) return null;
     return {
       ...baseAction(finding, {
         providerId: 'claude-plugin', providerVersion: 'v1', operation,
@@ -118,9 +124,16 @@ export function createClaudePluginProvider({ run = runNativeCommand } = {}) {
     return { ok: Boolean(plugin) && sourceFingerprint === entry.sourceFingerprint, sourceFingerprint };
   }
 
+  async function inspectCurrent(entry) {
+    const facts = await detect();
+    const plugin = facts.complete && facts.plugins.find((item) => item.ref === entry.resourceIdentity?.providerRef
+      && item.scope === entry.resourceIdentity?.scope);
+    return { postFingerprint: plugin ? pluginFingerprint(plugin) : null };
+  }
+
   return {
-    id: 'claude-plugin', version: 'v1', resourceKinds: ['plugin'],
+    id: 'claude-plugin', version: 'v1', host: 'claude', status: 'native-detection-required', resourceKinds: ['plugin'],
     operations: ['disable', 'update'], rollback: ['reversible', 'irreversible'],
-    detect, actionFor, preflight, apply, verify, undo, verifyUndo,
+    detect, actionFor, preflight, apply, verify, undo, verifyUndo, inspectCurrent,
   };
 }

@@ -34,7 +34,6 @@ export function createCodexPluginProvider({ run = runNativeCommand } = {}) {
     const ref = resource?.providerRef;
     if (resource?.kind !== 'plugin' || resource.host !== 'codex' || !validPluginRef(ref)
         || finding?.nextAction?.operation !== 'remove'
-        || finding?.ownership?.authority !== 'native-inventory' || finding?.ownership?.managed !== true
         || !executableSafetyClass(finding?.safetyClass)) return null;
     const plugin = facts?.complete && facts.plugins?.find((item) => item.ref === ref && item.installed);
     if (!plugin) return null;
@@ -71,8 +70,16 @@ export function createCodexPluginProvider({ run = runNativeCommand } = {}) {
     return { ok: Boolean(absent) && postFingerprint === outcome?.postFingerprint, postFingerprint };
   }
 
+  async function inspectCurrent(entry) {
+    const facts = await detect();
+    const ref = entry?.resourceIdentity?.providerRef;
+    const plugin = facts.complete && facts.plugins.find((item) => item.ref === ref && item.installed);
+    return { postFingerprint: plugin ? fingerprint(plugin) : `absent:${sha256(ref)}` };
+  }
+
   return {
-    id: 'codex-plugin', version: 'v1', resourceKinds: ['plugin'], operations: ['remove'],
-    rollback: ['irreversible'], detect, actionFor, preflight, apply, verify,
+    id: 'codex-plugin', version: 'v1', host: 'codex', status: 'native-detection-required',
+    resourceKinds: ['plugin'], operations: ['remove'],
+    rollback: ['irreversible'], detect, actionFor, preflight, apply, verify, inspectCurrent,
   };
 }

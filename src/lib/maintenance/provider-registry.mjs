@@ -1,3 +1,7 @@
+import { createClaudePluginProvider } from './providers/claude-plugin.mjs';
+import { createCodexMcpProvider } from './providers/codex-mcp.mjs';
+import { createCodexPluginProvider } from './providers/codex-plugin.mjs';
+
 const ID = /^[a-z][a-z0-9.-]{1,63}$/;
 const VERSION = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const KIND = /^[A-Za-z][A-Za-z0-9.-]{0,63}$/;
@@ -34,13 +38,39 @@ export function createMaintenanceProviderRegistry(providers = []) {
   return registry;
 }
 
-export function publicMaintenanceProviders(registry) {
-  return [...(registry?.values?.() ?? [])].map((provider) => ({
+const UNSUPPORTED = Object.freeze([
+  Object.freeze({
+    id: 'opencode-mcp', version: null, host: 'opencode', resourceKinds: ['mcpServer'],
+    operations: [], rollback: [], status: 'unsupported',
+    reason: 'OpenCode does not expose a verified native maintenance adapter.',
+  }),
+  Object.freeze({
+    id: 'opencode-plugin', version: null, host: 'opencode', resourceKinds: ['plugin'],
+    operations: [], rollback: [], status: 'unsupported',
+    reason: 'OpenCode does not expose a verified native maintenance adapter.',
+  }),
+]);
+
+export function createDefaultMaintenanceProviderRegistry(options = {}) {
+  return createMaintenanceProviderRegistry([
+    createClaudePluginProvider(options.claudePlugin),
+    createCodexPluginProvider(options.codexPlugin),
+    createCodexMcpProvider(options.codexMcp),
+  ]);
+}
+
+export function publicMaintenanceProviders(registry, { includeUnsupported = false } = {}) {
+  const available = [...(registry?.values?.() ?? [])].map((provider) => ({
     id: provider.id,
     version: provider.version,
+    ...(provider.host ? { host: provider.host } : {}),
     resourceKinds: [...provider.resourceKinds],
     operations: [...provider.operations],
     rollback: [...(provider.rollback ?? [])],
-    status: 'available',
-  })).sort((a, b) => a.id.localeCompare(b.id));
+    status: provider.status ?? 'available',
+  }));
+  return [
+    ...available,
+    ...(includeUnsupported ? UNSUPPORTED.map((item) => ({ ...item })) : []),
+  ].sort((a, b) => a.id.localeCompare(b.id));
 }

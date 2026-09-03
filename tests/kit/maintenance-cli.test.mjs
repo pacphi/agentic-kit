@@ -34,11 +34,11 @@ const readModel = {
   receipts: [],
 };
 
-test('maintain is porcelain and its help advertises the read-only boundary', () => {
+test('maintain is porcelain and its help advertises exact guarded actions', () => {
   const help = spawnSync(process.execPath, [BIN, 'maintain', '--help'], { encoding: 'utf8' });
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /ak maintain scan/);
-  assert.match(help.stdout, /apply.*not enabled/i);
+  assert.match(help.stdout, /apply.*--plan.*--digest.*--actions.*--yes/i);
   const rootHelp = spawnSync(process.execPath, [BIN, '--help'], { encoding: 'utf8' });
   assert.match(rootHelp.stdout, /ak maintain/);
 });
@@ -70,12 +70,46 @@ test('plan passes exact finding selection and emits an immutable-plan envelope',
   assert.equal(JSON.parse(result.text).planId, 'plan-a');
 });
 
-for (const verb of ['apply', 'undo']) {
-  test(`${verb} fails clearly because mutation is not enabled`, async () => {
-    const result = await captureLogs(() => run({
-      flags: {}, positionals: [verb], deps: { service: {} },
-    }));
-    assert.equal(result.code, 2);
-    assert.match(result.text, /not enabled.*read-only/i);
-  });
-}
+test('executable plan persistence is explicit', async () => {
+  const calls = [];
+  const service = { async plan(options) {
+    calls.push(options);
+    return { mode: 'executable', planId: 'maintenance-plan-a', planDigest: 'digest-a',
+      sourceFingerprint: 'source-a', safetyClass: 'approval-required', actions: [] };
+  } };
+  const result = await captureLogs(() => run({
+    flags: { json: true, executable: true, findings: 'a' }, positionals: ['plan'], deps: { service },
+  }));
+  assert.equal(result.code, 0);
+  assert.deepEqual(calls, [{ deep: false, findingIds: ['a'], project: null, executable: true, persist: true }]);
+});
+
+test('apply requires and forwards exact plan, digest, actions, and confirmation', async () => {
+  const calls = [];
+  const service = { async apply(options) { calls.push(options); return { ok: true, status: 'committed', receiptId: 'mnt-a' }; } };
+  const missing = await captureLogs(() => run({ flags: {}, positionals: ['apply'], deps: { service } }));
+  assert.equal(missing.code, 2);
+  assert.match(missing.text, /--plan.*--digest.*--actions.*--yes/i);
+  const result = await captureLogs(() => run({
+    flags: { json: true, plan: 'maintenance-plan-a', digest: 'digest-a', actions: 'b,a', yes: true },
+    positionals: ['apply'], deps: { service },
+  }));
+  assert.equal(result.code, 0);
+  assert.deepEqual(calls, [{
+    planId: 'maintenance-plan-a', expectedPlanDigest: 'digest-a', actionIds: ['a', 'b'], confirmed: true,
+  }]);
+  assert.equal(JSON.parse(result.text).receiptId, 'mnt-a');
+});
+
+test('undo requires a receipt and explicit confirmation', async () => {
+  const calls = [];
+  const service = { async undo(options) { calls.push(options); return { ok: true, status: 'rolled-back', receiptId: 'mnt-a' }; } };
+  const missing = await captureLogs(() => run({ flags: { receipt: 'mnt-a' }, positionals: ['undo'], deps: { service } }));
+  assert.equal(missing.code, 2);
+  assert.match(missing.text, /--receipt.*--yes/i);
+  const result = await captureLogs(() => run({
+    flags: { json: true, receipt: 'mnt-a', yes: true }, positionals: ['undo'], deps: { service },
+  }));
+  assert.equal(result.code, 0);
+  assert.deepEqual(calls, [{ receiptId: 'mnt-a', confirmed: true }]);
+});

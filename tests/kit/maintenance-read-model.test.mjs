@@ -76,7 +76,7 @@ test('service invokes a deep System scan only when explicitly requested', async 
   assert.deepEqual(calls, ['deep', 'read']);
 });
 
-test('service produces selection-bound plans and has no enabled mutation methods', async () => {
+test('service produces selection-bound read-only plans that cannot cross the mutation boundary', async () => {
   const collector = { async read() { return footprint(); } };
   const service = createMaintenanceService({ collector, now: () => NOW });
   const scan = await service.scan();
@@ -84,8 +84,12 @@ test('service produces selection-bound plans and has no enabled mutation methods
 
   assert.deepEqual(plan.findingIds, [scan.findings[0].id]);
   assert.equal(plan.actions.length, 1);
-  await assert.rejects(() => service.apply({ planId: plan.planId }), /not enabled/i);
-  await assert.rejects(() => service.undo({ receiptId: 'receipt-1' }), /not enabled/i);
+  await assert.rejects(() => service.apply({
+    plan,
+    actionIds: [plan.actions[0].id],
+    expectedPlanDigest: plan.planDigest,
+    confirmed: true,
+  }), /executable.*capability boundary/i);
 });
 
 test('project selection uses an opaque project reference and never emits the project path', async () => {

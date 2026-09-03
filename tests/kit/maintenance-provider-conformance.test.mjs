@@ -53,7 +53,7 @@ test('registry admits explicit providers, publishes capability facts, and reject
 
 test('Claude plugin provider plans only exact native update/disable operations and never exposes argv or paths', async () => {
   const calls = [];
-  const installed = [{ id: 'demo@market', version: '1.0.0', scope: 'user', enabled: true,
+  const installed = [{ id: 'demo@market', version: '1.0.0', availableVersion: '1.1.0', scope: 'user', enabled: true,
     installPath: '/secret/cache', mcpServers: { demo: { headers: { Authorization: 'secret' } } } }];
   const updated = [{ id: 'demo@market', version: '1.1.0', scope: 'user', enabled: true }];
   const run = scriptedRun([
@@ -61,7 +61,9 @@ test('Claude plugin provider plans only exact native update/disable operations a
   ], calls);
   const provider = createClaudePluginProvider({ run });
   const facts = await provider.detect();
-  assert.deepEqual(facts.plugins, [{ ref: 'demo@market', version: '1.0.0', scope: 'user', enabled: true }]);
+  assert.deepEqual(facts.plugins, [{
+    ref: 'demo@market', version: '1.0.0', availableVersion: '1.1.0', scope: 'user', enabled: true,
+  }]);
   assert.equal(JSON.stringify(facts).includes('secret'), false);
   assert.equal(JSON.stringify(facts).includes('installPath'), false);
   const item = provider.actionFor(pluginFinding('claude', 'update'), facts);
@@ -83,6 +85,9 @@ test('Claude plugin provider plans only exact native update/disable operations a
     resource: { ...pluginFinding('claude', 'update').resource, providerRef: 'demo;rm@market' },
   }), facts), null);
   assert.equal(provider.actionFor(pluginFinding('codex', 'update'), facts), null);
+  assert.equal(provider.actionFor(pluginFinding('claude', 'update', {
+    versions: { installed: '1.0.0', recommended: '1.2.0' },
+  }), facts), null, 'a recommendation not reported by the native host is never executable');
 });
 
 test('Claude disable is reversible through fixed enable argv and verifies both sides', async () => {

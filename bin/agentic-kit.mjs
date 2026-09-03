@@ -60,7 +60,7 @@ Usage (ak = alias of agentic-kit):
   ak usage           offline scorecard, prompt patterns, provider cache  [status|score|prompts|refresh openrouter]
   ak models          inspect/refresh model lifecycle evidence  [status|refresh|diff|explain|plan]
   ak system          what this stack occupies on your machine   [--deep] [--json]
-  ak maintain        read-only maintenance findings and plans   [scan|plan] [--deep] [--json]
+  ak maintain        maintenance findings, plans, apply, undo   [scan|plan|apply|undo] [--json]
   ak about           what agentic-kit installs and configures, and why  [--category N]
   ak audit hooks     read-only host-neutral hook inventory + remediation plan [--host HOST] [--json]
   ak heal hooks      dry-run hook healing plan; explicit apply/verify/undo     [--host HOST] [--json]

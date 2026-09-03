@@ -45,7 +45,6 @@ export function createCodexMcpProvider({ run = runNativeCommand } = {}) {
     const resource = finding?.resource ?? finding?.resourceIdentity;
     if (resource?.kind !== 'mcpServer' || resource.host !== 'codex' || !validResourceName(resource.name)
         || finding?.nextAction?.operation !== 'remove'
-        || finding?.ownership?.authority !== 'native-inventory' || finding?.ownership?.managed !== true
         || !executableSafetyClass(finding?.safetyClass)) return null;
     const server = facts?.complete && facts.servers?.find((item) => item.name === resource.name);
     if (!server) return null;
@@ -80,8 +79,16 @@ export function createCodexMcpProvider({ run = runNativeCommand } = {}) {
     return { ok: Boolean(absent) && postFingerprint === outcome?.postFingerprint, postFingerprint };
   }
 
+  async function inspectCurrent(entry) {
+    const facts = await detect();
+    const name = entry?.resourceIdentity?.name;
+    const server = facts.complete && facts.servers.find((item) => item.name === name);
+    return { postFingerprint: server?.configurationFingerprint ?? `absent:${sha256(name)}` };
+  }
+
   return {
-    id: 'codex-mcp', version: 'v1', resourceKinds: ['mcpServer'], operations: ['remove'],
-    rollback: ['irreversible'], detect, actionFor, preflight, apply, verify,
+    id: 'codex-mcp', version: 'v1', host: 'codex', status: 'native-detection-required',
+    resourceKinds: ['mcpServer'], operations: ['remove'],
+    rollback: ['irreversible'], detect, actionFor, preflight, apply, verify, inspectCurrent,
   };
 }

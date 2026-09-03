@@ -141,15 +141,19 @@ function catalogDisposition(item, lifecycle, sharedEvidence) {
   if (!lifecycle && !ambiguous) return null;
   const partial = sharedEvidence.completeness !== 'complete'
     || itemPartial;
+  const stale = sharedEvidence.status !== 'fresh';
+  const unsafeEvidence = partial || stale;
   const state = partial ? 'unreadable-partial' : (lifecycle?.state ?? 'ambiguous');
   const unsupported = state === 'unsupported-incompatible';
   const update = state === 'update-available';
   return {
     state,
     partial,
+    stale,
     update,
-    bucket: unsupported ? 'unsupportedOrBlocked' : (update ? 'updatesReady' : 'needsReview'),
-    safetyClass: partial ? 'never-automatic'
+    bucket: unsafeEvidence ? 'needsReview'
+      : (unsupported ? 'unsupportedOrBlocked' : (update ? 'updatesReady' : 'needsReview')),
+    safetyClass: unsafeEvidence ? 'never-automatic'
       : (unsupported ? 'upstream-required' : 'approval-required'),
   };
 }
@@ -173,10 +177,15 @@ function catalogResource(item, presence, provider) {
     kind: text(item?.kind) ?? 'resource',
     name: text(item?.name) ?? String(resourceId),
     host: text(presence?.host),
-    scope: text(presence?.scope) ?? 'unknown',
-    providerId: text(provider?.ref),
+    scope: text(provider?.scope) ?? text(presence?.plugin?.scope) ?? text(presence?.scope) ?? 'unknown',
+    providerRef: text(provider?.ref),
     projectRef: projectReference(presence?.project),
   };
+}
+
+function lifecycleOperation(lifecycle, disposition) {
+  if (disposition.update) return 'update';
+  return ['disable', 'remove'].includes(lifecycle?.operation) ? lifecycle.operation : 'review';
 }
 
 function catalogFinding(item, sharedEvidence) {
@@ -185,12 +194,13 @@ function catalogFinding(item, sharedEvidence) {
   const disposition = catalogDisposition(item, lifecycle, sharedEvidence);
   if (!disposition) return null;
   const provider = presence?.provider;
+  const operation = lifecycleOperation(lifecycle, disposition);
   return makeFinding({
     state: disposition.state,
     bucket: disposition.bucket,
     classification: disposition.partial
       ? 'catalog-evidence-incomplete'
-      : (lifecycle?.state ?? 'multiple-observed-revisions'),
+      : (disposition.stale ? 'catalog-evidence-stale' : (lifecycle?.state ?? 'multiple-observed-revisions')),
     safetyClass: disposition.safetyClass,
     resource: catalogResource(item, presence, provider),
     versions: catalogVersions(provider, lifecycle, presence),
@@ -217,8 +227,9 @@ function catalogFinding(item, sharedEvidence) {
       dependencies: array(item?.components).length || 'unknown',
     },
     nextAction: nextAction({
-      operation: disposition.update ? 'update' : 'review',
-      label: disposition.update ? 'Review compatible update' : 'Review evidence with the owning provider',
+      operation,
+      label: disposition.update ? 'Review compatible update'
+        : (operation === 'review' ? 'Review evidence with the owning provider' : `Review ${operation} with the owning provider`),
       providerId: text(provider?.ref) ?? 'maintenance.read-only',
       safetyClass: disposition.safetyClass,
       rollback: 'compensating',

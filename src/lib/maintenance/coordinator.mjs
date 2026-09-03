@@ -4,6 +4,7 @@ import { acquireMaintenanceLock } from './mutation-lock.mjs';
 import {
   MAINTENANCE_RECEIPT_SCHEMA,
   createMaintenanceTransaction,
+  listMaintenanceReceipts,
   listUnfinishedMaintenanceReceipts,
   readMaintenanceReceipt,
   writeMaintenanceReceipt,
@@ -202,9 +203,19 @@ async function executeSelection(selected, receipt, transaction, options) {
     receipt = result.receipt;
     if (!result.conclusive) return { receipt, conclusive: false };
   }
+  if (typeof options.refreshAffectedCatalog === 'function') {
+    receipt.status = 'refreshing-catalog';
+    receipt = write(transaction, receipt, options.fsImpl);
+    const refreshed = await options.refreshAffectedCatalog(selected.map((item) => item.action.resourceIdentity));
+    if (refreshed?.ok === false) throw new Error('affected catalog refresh did not complete');
+  }
   receipt.status = 'committed';
   receipt.updatedAt = new Date(options.now()).toISOString();
-  receipt.verification = { nativeStateVerified: true, affectedCatalogRescanRequired: true };
+  receipt.verification = {
+    nativeStateVerified: true,
+    affectedCatalogRefreshed: typeof options.refreshAffectedCatalog === 'function',
+    affectedCatalogRescanRequired: typeof options.refreshAffectedCatalog !== 'function',
+  };
   return { receipt: write(transaction, receipt, options.fsImpl), conclusive: true };
 }
 
@@ -217,9 +228,10 @@ function recordUnknownDispatch(receipt, transaction, fsImpl, error) {
   return write(transaction, receipt, fsImpl);
 }
 
+/** @param {any} options */
 export async function applyMaintenancePlan({
   plan, actionIds, expectedPlanDigest, providers, transactionsRoot, refreshPlan,
-  validatePlan = null, fsImpl = fs, now = Date.now, nonce,
+  refreshAffectedCatalog = null, validatePlan = null, fsImpl = fs, now = Date.now, nonce,
 } = {}) {
   let selected;
   try {
@@ -227,6 +239,12 @@ export async function applyMaintenancePlan({
     if (typeof refreshPlan !== 'function') throw new Error('fresh maintenance planning is required');
     const unfinished = listUnfinishedMaintenanceReceipts(transactionsRoot, { fsImpl });
     if (unfinished.length) throw new Error(`unfinished maintenance transaction requires recovery: ${unfinished[0].id}`);
+    const selectionKey = [...actionIds].sort().join('\0');
+    const replay = listMaintenanceReceipts(transactionsRoot, { fsImpl }).find((receipt) => (
+      receipt.planDigest === expectedPlanDigest
+      && [...(receipt.authorization?.actionIds ?? [])].sort().join('\0') === selectionKey
+    ));
+    if (replay) throw new Error(`maintenance plan selection was already consumed by receipt: ${replay.id}`);
   } catch (error) {
     return refused(error);
   }
@@ -241,7 +259,9 @@ export async function applyMaintenancePlan({
       fsImpl, now: () => new Date(now()), ...(nonce ? { nonce } : {}),
     });
     receipt = write(transaction, initialReceipt(transaction, plan, selected, now), fsImpl);
-    const result = await executeSelection(selected, receipt, transaction, { fsImpl, now });
+    const result = await executeSelection(selected, receipt, transaction, {
+      fsImpl, now, refreshAffectedCatalog,
+    });
     receipt = result.receipt;
     if (!result.conclusive) {
       return { ok: false, status: receipt.status, receiptId: receipt.id, receiptFile: transaction.file };
@@ -269,9 +289,7 @@ export async function applyMaintenancePlan({
 }
 
 function undoError(status, message) {
-  const error = new Error(message);
-  error.maintenanceStatus = status;
-  return error;
+  return Object.assign(new Error(message), { maintenanceStatus: status });
 }
 
 function providerForUndo(entry, providers) {
@@ -315,6 +333,7 @@ async function executeUndo(prepared, receipt, file, { fsImpl }) {
   return receipt;
 }
 
+/** @param {any} options */
 export async function undoMaintenanceReceipt({
   transactionsRoot, receiptId, providers, inspectCurrent, fsImpl = fs, now = Date.now,
 } = {}) {
