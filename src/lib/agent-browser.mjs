@@ -313,9 +313,11 @@ function ensureTrustedConfig(cfg, { configFile, fsImpl }) {
 }
 
 async function ensureBrowserPayload(facts, {
-  homeDir, platform, arch, env, fsImpl, runner, installBrowser,
+  homeDir, platform, arch, env, fsImpl, runner, installBrowser, systemChromeCandidates,
 }) {
-  let browser = detectBrowser({ homeDir, platform, env, fsImpl });
+  let browser = detectBrowser({
+    homeDir, platform, env, fsImpl, candidates: systemChromeCandidates,
+  });
   if (!browser && installBrowser && !browserPayloadAutoInstallSupported(platform, arch)) {
     return {
       ok: true, changed: false, ready: false,
@@ -378,7 +380,7 @@ export async function ensureAgentBrowser(cfg, {
   runner = run, globalRootDir = paths.globalRoot(), configFile = paths.agentBrowserConfigPath(),
   homeDir = paths.home, nodeVersion = process.versions.node,
   platform = process.platform, arch = process.arch, env = process.env, fsImpl = fs,
-  installBrowser = true, allowUpgrade = true,
+  installBrowser = true, allowUpgrade = true, systemChromeCandidates = undefined,
 } = {}) {
   const activation = activationDecision(cfg, nodeVersion);
   if (activation.result) return activation.result;
@@ -391,7 +393,7 @@ export async function ensureAgentBrowser(cfg, {
     return { ...configured, changed: packageResult.changed || configured.changed };
   }
   const payload = await ensureBrowserPayload(packageResult.facts, {
-    homeDir, platform, arch, env, fsImpl, runner, installBrowser,
+    homeDir, platform, arch, env, fsImpl, runner, installBrowser, systemChromeCandidates,
   });
   return successfulEnsureResult(packageResult.facts.version, packageResult.changed, configured, payload);
 }

@@ -61,7 +61,7 @@ test('agent-browser postinstall is in the one reviewed global lifecycle policy',
 test('managed MCP env points only at the trusted Kit config and can be disabled', () => {
   assert.deepEqual(managedAgentBrowserEnv({ enabled: false, configFile: '/safe/config.json' }), {});
   assert.deepEqual(managedAgentBrowserEnv({ enabled: true, configFile: '/safe/config.json' }), {
-    AGENT_BROWSER_CONFIG: '/safe/config.json',
+    AGENT_BROWSER_CONFIG: path.resolve('/safe/config.json'),
   });
   assert.throws(() => managedAgentBrowserEnv({ enabled: true, configFile: 'relative.json' }), /absolute/);
 });
@@ -238,6 +238,7 @@ test('Linux ARM64 converges without retrying an unavailable Chrome for Testing p
   const result = await ensureAgentBrowser(cfg, {
     globalRootDir, configFile: path.join(root, 'config.json'), homeDir: path.join(root, 'home'),
     nodeVersion: '26.4.0', platform: 'linux', arch: 'arm64', installBrowser: true,
+    systemChromeCandidates: [],
     runner: async (bin, args) => {
       calls.push([bin, args]);
       return { code: 0, stdout: 'agent-browser 0.27.3\n', stderr: '' };
@@ -268,7 +269,7 @@ test('removal is receipt-gated and never deletes browser/session/profile data', 
   } } } } };
   const calls = [];
   const result = await removeManagedAgentBrowser(cfg, {
-    globalRootDir,
+    globalRootDir, platform: 'darwin', arch: 'arm64',
     runner: async (bin, args) => {
       calls.push([bin, args]);
       fs.rmSync(packageRoot, { recursive: true, force: true });
