@@ -221,6 +221,7 @@ test('guarded undo verifies current postimage and refuses drift without calling 
   const drifted = await undoMaintenanceReceipt({
     transactionsRoot: root, receiptId: applied.receiptId, providers: registry(p),
     inspectCurrent: async () => ({ postFingerprint: 'later-user-change' }),
+    refreshAffectedCatalog: async () => ({ ok: true }),
     now: () => NOW + 1,
   });
   assert.equal(drifted.status, 'drift-refused');
@@ -229,6 +230,7 @@ test('guarded undo verifies current postimage and refuses drift without calling 
   const undone = await undoMaintenanceReceipt({
     transactionsRoot: root, receiptId: applied.receiptId, providers: registry(p),
     inspectCurrent: async (entry) => ({ postFingerprint: entry.outcome.postFingerprint }),
+    refreshAffectedCatalog: async () => ({ ok: true }),
     now: () => NOW + 2,
   });
   assert.equal(undone.status, 'rolled-back');
@@ -346,6 +348,7 @@ test('undo rejects ineligible receipts, busy state, providers, outcomes, and ver
   const unavailable = await undoMaintenanceReceipt({
     transactionsRoot: path.join(root, 'unavailable'), receiptId: unavailableApplied.receiptId,
     providers: new Map(), inspectCurrent: async (entry) => ({ postFingerprint: entry.outcome.postFingerprint }),
+    refreshAffectedCatalog: async () => ({ ok: true }),
   });
   assert.equal(unavailable.status, 'preflight-refused');
 
@@ -366,6 +369,7 @@ test('undo rejects ineligible receipts, busy state, providers, outcomes, and ver
       transactionsRoot: path.join(root, name), receiptId: applied.receiptId,
       providers: registry(provider([], overrides)),
       inspectCurrent: async (entry) => ({ postFingerprint: entry.outcome.postFingerprint }),
+      refreshAffectedCatalog: async () => ({ ok: true }),
       now: () => NOW + 1,
     });
     assert.equal(result.status, 'partial-recovery-required');
@@ -478,8 +482,130 @@ test('undo refuses an unfinished receipt and recognizes an already rolled-back r
     transactionsRoot: doneRoot, receiptId: applied.receiptId,
     providers: registry(provider([])),
     inspectCurrent: async (entry) => ({ postFingerprint: entry.outcome.postFingerprint }),
+    refreshAffectedCatalog: async () => ({ ok: true }),
   });
   assert.equal(undone.status, 'rolled-back');
   const repeated = await undoMaintenanceReceipt({ transactionsRoot: doneRoot, receiptId: applied.receiptId });
   assert.equal(repeated.status, 'already-rolled-back');
+});
+
+function receiptDuringLock(root, makeReceipt) {
+  let injected = false;
+  return new Proxy(fs, {
+    get(target, key) {
+      if (key === 'mkdirSync') return (targetPath, options) => {
+        const result = target.mkdirSync(targetPath, options);
+        if (!injected && String(targetPath).endsWith('.mutation-lock')) {
+          injected = true;
+          makeReceipt();
+        }
+        return result;
+      };
+      return target[key];
+    },
+  });
+}
+
+function injectedReceipt(root, selectedPlan, status, nonce) {
+  const transaction = createMaintenanceTransaction(root, {
+    now: () => new Date(NOW), nonce: () => nonce,
+  });
+  const timestamp = new Date(NOW).toISOString();
+  return writeMaintenanceReceipt(transaction.file, {
+    schemaVersion: MAINTENANCE_RECEIPT_SCHEMA,
+    id: transaction.id,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    status,
+    planId: selectedPlan.planId,
+    planDigest: selectedPlan.planDigest,
+    sourceFingerprint: selectedPlan.sourceFingerprint,
+    authorization: { mechanism: 'exact-plan-selection', actionIds: ['a'] },
+    actions: [],
+    verification: null,
+  });
+}
+
+test('apply repeats unfinished and replay authorization reads under the acquired lock', async (t) => {
+  const root = fixture(t);
+  for (const [name, status, expected] of [
+    ['unfinished', 'prepared', /requires recovery/i],
+    ['replay', 'committed', /already consumed/i],
+  ]) {
+    const selectedPlan = plan([], {
+      planId: `plan-${name}`, planDigest: `digest-${name}`, actions: [action('a')],
+    });
+    const events = [];
+    const transactionsRoot = path.join(root, name);
+    const fsImpl = receiptDuringLock(transactionsRoot, () => {
+      injectedReceipt(transactionsRoot, selectedPlan, status, name);
+    });
+    const result = await applyMaintenancePlan({
+      plan: selectedPlan, actionIds: ['a'], expectedPlanDigest: selectedPlan.planDigest,
+      providers: registry(provider(events)), transactionsRoot,
+      refreshPlan: async () => selectedPlan, fsImpl, now: () => NOW, nonce: () => `new-${name}`,
+    });
+    assert.equal(result.status, 'preflight-refused');
+    assert.match(result.error, expected);
+    assert.deepEqual(events, []);
+  }
+});
+
+test('undo rereads receipt eligibility under lock before any current-state inspection', async (t) => {
+  const root = fixture(t);
+  const selectedPlan = plan();
+  const applied = await applyMaintenancePlan({
+    plan: selectedPlan, actionIds: ['a'], expectedPlanDigest: selectedPlan.planDigest,
+    providers: registry(provider([])), transactionsRoot: root,
+    refreshPlan: async () => selectedPlan, now: () => NOW, nonce: () => 'undo-race',
+  });
+  const loaded = readMaintenanceReceipt(root, applied.receiptId);
+  const fsImpl = receiptDuringLock(root, () => {
+    writeMaintenanceReceipt(loaded.file, {
+      ...loaded.receipt, status: 'partial-recovery-required',
+      error: 'another mutation changed eligibility',
+    });
+  });
+  const events = [];
+  const result = await undoMaintenanceReceipt({
+    transactionsRoot: root, receiptId: applied.receiptId,
+    providers: registry(provider(events)),
+    inspectCurrent: async () => { events.push('inspect'); return { postFingerprint: 'post-a' }; },
+    refreshAffectedCatalog: async () => { events.push('refresh'); return { ok: true }; },
+    fsImpl,
+  });
+  assert.equal(result.status, 'receipt-refused');
+  assert.deepEqual(events, []);
+});
+
+test('undo catalog refresh false or throw seals recovery-required without repeating provider undo', async (t) => {
+  const root = fixture(t);
+  for (const [name, refresh] of [
+    ['false-object', async () => ({ ok: false })],
+    ['false-primitive', async () => false],
+    ['throw', async () => { throw new Error('catalog unavailable'); }],
+  ]) {
+    const transactionsRoot = path.join(root, name);
+    const selectedPlan = plan([], {
+      planId: `plan-${name}`, planDigest: `digest-${name}`, actions: [action('a')],
+    });
+    const applied = await applyMaintenancePlan({
+      plan: selectedPlan, actionIds: ['a'], expectedPlanDigest: selectedPlan.planDigest,
+      providers: registry(provider([])), transactionsRoot,
+      refreshPlan: async () => selectedPlan, now: () => NOW, nonce: () => name,
+    });
+    const events = [];
+    const result = await undoMaintenanceReceipt({
+      transactionsRoot, receiptId: applied.receiptId, providers: registry(provider(events)),
+      inspectCurrent: async (entry) => ({ postFingerprint: entry.outcome.postFingerprint }),
+      refreshAffectedCatalog: refresh, now: () => NOW + 1,
+    });
+    assert.equal(result.status, 'partial-recovery-required');
+    assert.deepEqual(events, ['undo:a', 'verify-undo:a']);
+    const after = readMaintenanceReceipt(transactionsRoot, applied.receiptId).receipt;
+    assert.equal(after.status, 'partial-recovery-required');
+    assert.equal(after.actions[0].state, 'rolled-back');
+    assert.equal(after.recovery.interruptedStatus, 'undoing');
+    assert.match(after.error, /catalog/i);
+  }
 });

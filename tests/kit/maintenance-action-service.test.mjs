@@ -139,7 +139,7 @@ test('sealed plan envelopes are private, content-safe, expire, and detect tamper
   const plan = buildExecutableMaintenancePlan({
     findings: [finding()], actions: [nativeAction()], sourceFingerprint: 'catalog-source-a', now: () => NOW,
   });
-  const file = writeMaintenancePlanEnvelope(root, plan);
+  const file = writeMaintenancePlanEnvelope(root, plan, { now: () => NOW });
   assert.equal(fs.statSync(root).mode & 0o077, 0);
   assert.equal(fs.statSync(file).mode & 0o077, 0);
   assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /argv|command|\/private|secret/i);
@@ -295,6 +295,33 @@ test('service undo preview and execution guard the recorded postimage and are id
   assert.equal(undone.status, 'rolled-back');
   const repeat = await service.undo({ receiptId: applied.receiptId, confirmed: true });
   assert.equal(repeat.status, 'already-rolled-back');
+});
+
+test('service seals undo as recovery-required when post-undo Catalog refresh fails', async (t) => {
+  const root = fixture(t);
+  const state = { enabled: true };
+  const implementation = provider(state);
+  let allowRefresh = true;
+  const collector = {
+    async read() { return footprint(); },
+    async refreshDeep() { return { ok: allowRefresh }; },
+  };
+  const service = createMaintenanceService({
+    collector, providers: new Map([[implementation.id, implementation]]), now: () => NOW, controlRoot: root,
+  });
+  const model = await service.scan();
+  const selectedPlan = await service.plan({ findingIds: [model.findings[0].id], executable: true });
+  const applied = await service.apply({
+    plan: selectedPlan, actionIds: [selectedPlan.actions[0].id],
+    expectedPlanDigest: selectedPlan.planDigest, confirmed: true,
+  });
+  allowRefresh = false;
+  const undone = await service.undo({ receiptId: applied.receiptId, confirmed: true });
+  assert.equal(undone.ok, false);
+  assert.equal(undone.status, 'partial-recovery-required');
+  assert.equal(state.enabled, true, 'provider undo occurred but Catalog success was not fabricated');
+  const history = await service.scan();
+  assert.equal(history.receipts[0].recoveryRequired, true);
 });
 
 test('default registry reports unsupported OpenCode surfaces without fabricating a provider', () => {

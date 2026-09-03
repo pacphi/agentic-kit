@@ -304,10 +304,10 @@ export function createMaintenanceService({
       receiptId,
       providers: providerRegistry,
       inspectCurrent: (entry, provider) => provider.inspectCurrent(entry),
+      refreshAffectedCatalog: async () => collector.refreshDeep(),
       fsImpl,
       now,
     });
-    if (result.ok) await collector.refreshDeep();
     return publicResult(result);
   }
 

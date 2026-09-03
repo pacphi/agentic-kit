@@ -129,6 +129,19 @@ function refused(error) {
   return { ok: false, status: 'preflight-refused', error: safeText(error?.message ?? error) };
 }
 
+function assertApplyJournalAvailable(transactionsRoot, expectedPlanDigest, actionIds, fsImpl) {
+  const unfinished = listUnfinishedMaintenanceReceipts(transactionsRoot, { fsImpl });
+  if (unfinished.length) {
+    throw new Error(`unfinished maintenance transaction requires recovery: ${unfinished[0].id}`);
+  }
+  const selectionKey = [...actionIds].sort().join('\0');
+  const replay = listMaintenanceReceipts(transactionsRoot, { fsImpl }).find((receipt) => (
+    receipt.planDigest === expectedPlanDigest
+    && [...(receipt.authorization?.actionIds ?? [])].sort().join('\0') === selectionKey
+  ));
+  if (replay) throw new Error(`maintenance plan selection was already consumed by receipt: ${replay.id}`);
+}
+
 async function revalidateBeforeMutation(selected, plan, refreshPlan, validatePlan, now) {
   for (const item of selected) {
     if (typeof item.provider.preflight !== 'function') {
@@ -245,23 +258,19 @@ export async function applyMaintenancePlan({
   try {
     selected = selectedActions(plan, actionIds, expectedPlanDigest, providers, now, validatePlan);
     if (typeof refreshPlan !== 'function') throw new Error('fresh maintenance planning is required');
-    const unfinished = listUnfinishedMaintenanceReceipts(transactionsRoot, { fsImpl });
-    if (unfinished.length) throw new Error(`unfinished maintenance transaction requires recovery: ${unfinished[0].id}`);
-    const selectionKey = [...actionIds].sort().join('\0');
-    const replay = listMaintenanceReceipts(transactionsRoot, { fsImpl }).find((receipt) => (
-      receipt.planDigest === expectedPlanDigest
-      && [...(receipt.authorization?.actionIds ?? [])].sort().join('\0') === selectionKey
-    ));
-    if (replay) throw new Error(`maintenance plan selection was already consumed by receipt: ${replay.id}`);
   } catch (error) {
     return refused(error);
   }
 
-  const lock = acquireMaintenanceLock(transactionsRoot, { fsImpl });
+  let lock;
+  try { lock = acquireMaintenanceLock(transactionsRoot, { fsImpl }); } catch (error) {
+    return refused(error);
+  }
   if (!lock) return { ok: false, status: 'busy', error: 'another maintenance mutation is active' };
   let transaction = null;
   let receipt = null;
   try {
+    assertApplyJournalAvailable(transactionsRoot, expectedPlanDigest, actionIds, fsImpl);
     await revalidateBeforeMutation(selected, plan, refreshPlan, validatePlan, now);
     transaction = createMaintenanceTransaction(transactionsRoot, {
       fsImpl, now: () => new Date(now()), ...(nonce ? { nonce } : {}),
@@ -341,35 +350,59 @@ async function executeUndo(prepared, receipt, file, { fsImpl }) {
   return receipt;
 }
 
-/** @param {any} options */
-export async function undoMaintenanceReceipt({
-  transactionsRoot, receiptId, providers, inspectCurrent, fsImpl = fs, now = Date.now,
-} = {}) {
-  let loaded;
-  try { loaded = readMaintenanceReceipt(transactionsRoot, receiptId, { fsImpl }); } catch (error) {
-    return { ok: false, status: 'receipt-refused', error: safeText(error?.message ?? error) };
+function undoEligibility(receipt, receiptId, inspectCurrent, refreshAffectedCatalog) {
+  if (receipt.status === 'rolled-back') {
+    return { ok: true, status: 'already-rolled-back', receiptId };
   }
-  if (loaded.receipt.status === 'rolled-back') return { ok: true, status: 'already-rolled-back', receiptId };
-  if (loaded.receipt.status !== 'committed') {
-    return { ok: false, status: 'receipt-refused', error: `receipt is not undoable: ${loaded.receipt.status}` };
+  if (receipt.status !== 'committed') {
+    return { ok: false, status: 'receipt-refused', error: `receipt is not undoable: ${receipt.status}` };
   }
   if (typeof inspectCurrent !== 'function') {
     return { ok: false, status: 'preflight-refused', error: 'current-state inspection is required for undo' };
   }
-  const lock = acquireMaintenanceLock(transactionsRoot, { fsImpl });
+  if (typeof refreshAffectedCatalog !== 'function') {
+    return { ok: false, status: 'preflight-refused', error: 'affected Catalog refresh is required for undo' };
+  }
+  return null;
+}
+
+/** @param {any} options */
+export async function undoMaintenanceReceipt({
+  transactionsRoot, receiptId, providers, inspectCurrent, refreshAffectedCatalog = null,
+  fsImpl = fs, now = Date.now,
+} = {}) {
+  let lock;
+  try { lock = acquireMaintenanceLock(transactionsRoot, { fsImpl }); } catch (error) {
+    return refused(error);
+  }
   if (!lock) return { ok: false, status: 'busy', error: 'another maintenance mutation is active' };
-  let receipt = loaded.receipt;
+  let loaded;
+  let receipt = null;
   let mutationStarted = false;
   try {
+    try { loaded = readMaintenanceReceipt(transactionsRoot, receiptId, { fsImpl }); } catch (error) {
+      return { ok: false, status: 'receipt-refused', error: safeText(error?.message ?? error) };
+    }
+    const ineligible = undoEligibility(
+      loaded.receipt, receiptId, inspectCurrent, refreshAffectedCatalog,
+    );
+    if (ineligible) return ineligible;
+    receipt = loaded.receipt;
     const prepared = await prepareUndo(receipt, providers, inspectCurrent);
     receipt.status = 'undoing';
     receipt.updatedAt = new Date(now()).toISOString();
     receipt = writeMaintenanceReceipt(loaded.file, receipt, { fsImpl });
     mutationStarted = true;
     receipt = await executeUndo(prepared, receipt, loaded.file, { fsImpl });
+    const refreshed = await refreshAffectedCatalog(receipt.actions.map((entry) => entry.resourceIdentity));
+    if (refreshed === false || refreshed?.ok === false) {
+      throw new Error('affected Catalog refresh did not complete after undo');
+    }
     receipt.status = 'rolled-back';
     receipt.updatedAt = new Date(now()).toISOString();
-    receipt.undo = { completedAt: receipt.updatedAt, guardedByPostimage: true };
+    receipt.undo = {
+      completedAt: receipt.updatedAt, guardedByPostimage: true, affectedCatalogRefreshed: true,
+    };
     receipt = writeMaintenanceReceipt(loaded.file, receipt, { fsImpl });
     return { ok: true, status: receipt.status, receiptId, receiptFile: loaded.file, receipt };
   } catch (error) {
@@ -378,7 +411,22 @@ export async function undoMaintenanceReceipt({
     }
     receipt.status = 'partial-recovery-required';
     receipt.error = safeText(error?.message ?? error);
-    try { receipt = writeMaintenanceReceipt(loaded.file, receipt, { fsImpl }); } catch { /* original failure wins */ }
+    receipt.recovery = {
+      interruptedStatus: 'undoing',
+      outcome: 'recovery-required',
+      reason: 'undo-or-catalog-outcome-requires-reconciliation',
+      inspectedAt: new Date(now()).toISOString(),
+    };
+    try {
+      receipt = writeMaintenanceReceipt(loaded.file, receipt, { fsImpl });
+    } catch (journalError) {
+      return {
+        ok: false,
+        status: receipt.status,
+        receiptId,
+        error: `${receipt.error}; recovery journal failed: ${safeText(journalError?.message ?? journalError)}`,
+      };
+    }
     return { ok: false, status: receipt.status, receiptId, error: receipt.error };
   } finally {
     try { lock.release(); } catch { /* fail closed */ }
