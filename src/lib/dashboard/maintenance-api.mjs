@@ -87,7 +87,7 @@ function publicReceipt(receipt) {
     verification: picked(action.verification, ['verified', 'postFingerprint']),
     recovery: picked(action.recovery, ['status', 'verified']),
   })) : [];
-  const projected = {
+  const projected = /** @type {Record<string, any>} */ ({
     ...picked(value, [
       'id', 'status', 'planId', 'planDigest', 'sourceFingerprint', 'createdAt', 'updatedAt',
       'completedAt', 'headline', 'label', 'summary', 'statusLabel', 'undoStatus', 'undoEligible',
@@ -97,7 +97,7 @@ function publicReceipt(receipt) {
       'nativeStateVerified', 'affectedCatalogRefreshed', 'affectedCatalogRescanned', 'affectedCatalogRescanRequired',
     ]),
     undo: picked(value.undo, ['completedAt', 'guardedByPostimage', 'eligible', 'status', 'summary']),
-  };
+  });
   if (!projected.completedAt && ['committed', 'rolled-back'].includes(projected.status)) {
     projected.completedAt = projected.updatedAt ?? projected.createdAt;
   }
@@ -208,7 +208,14 @@ function typedPhraseMatches(body, required) {
 }
 
 /** Dashboard transport adapter. The application service owns plans and
- * provider execution; this boundary owns browser authority and projections. */
+ * provider execution; this boundary owns browser authority and projections.
+ * @param {{
+ *   service?: any,
+ *   sessionToken?: string,
+ *   now?: () => number,
+ *   capabilities?: ReturnType<typeof createMaintenanceCapabilityStore>,
+ * }} options
+ */
 export function createMaintenanceDashboardApi({ service, sessionToken, now = Date.now, capabilities } = {}) {
   if (!service || typeof service.scan !== 'function' || typeof service.plan !== 'function') {
     throw new TypeError('maintenance dashboard service must implement scan and plan');
@@ -305,7 +312,9 @@ export function createMaintenanceDashboardApi({ service, sessionToken, now = Dat
 
   async function mutate(route, req, res) {
     try {
-      const body = validateMaintenanceBody(route, await readMaintenanceJson(req));
+      const body = /** @type {Record<string, any>} */ (
+        validateMaintenanceBody(route, await readMaintenanceJson(req))
+      );
       if (route === '/api/maintenance/plans') await createPlan(body, res);
       else if (route === '/api/maintenance/apply') await apply(body, res);
       else if (body.preview) await previewUndo(body, res);
