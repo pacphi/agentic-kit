@@ -81,13 +81,13 @@ function publicReceipt(receipt) {
   return {
     ...picked(value, [
       'id', 'status', 'planId', 'planDigest', 'sourceFingerprint', 'createdAt', 'updatedAt',
-      'completedAt', 'headline', 'label', 'summary', 'statusLabel', 'undoStatus',
+      'completedAt', 'headline', 'label', 'summary', 'statusLabel', 'undoStatus', 'undoEligible',
     ]),
     actions,
     verification: picked(value.verification, [
-      'nativeStateVerified', 'affectedCatalogRescanned', 'affectedCatalogRescanRequired',
+      'nativeStateVerified', 'affectedCatalogRefreshed', 'affectedCatalogRescanned', 'affectedCatalogRescanRequired',
     ]),
-    undo: picked(value.undo, ['completedAt', 'guardedByPostimage']),
+    undo: picked(value.undo, ['completedAt', 'guardedByPostimage', 'eligible', 'status', 'summary']),
   };
 }
 
@@ -226,12 +226,29 @@ export function createMaintenanceDashboardApi({ service, sessionToken, now = Dat
       return;
     }
     if (typeof service.apply !== 'function') throw new Error('maintenance apply is unavailable');
-    const result = await service.apply({
+    let result = await service.apply({
       plan: authority.plan,
       actionIds: authority.actionIds,
       expectedPlanDigest: authority.expectedPlanDigest,
       confirmed: true,
     });
+    const receiptId = result?.receipt?.id ?? result?.receiptId;
+    if (result?.ok === true && receiptId && typeof service.prepareUndo === 'function') {
+      const preview = await service.prepareUndo({ receiptId });
+      const receipt = result.receipt ?? { id: receiptId, status: result.status };
+      result = {
+        ...result,
+        receipt: {
+          ...receipt,
+          undoEligible: preview?.undoable === true,
+          undo: {
+            eligible: preview?.undoable === true,
+            status: preview?.undoable === true ? 'Eligible' : 'Unavailable',
+            ...(preview?.summary ? { summary: preview.summary } : {}),
+          },
+        },
+      };
+    }
     const payload = publicOutcome(result);
     sendJson(res, payload.ok ? 200 : 409, payload);
   }

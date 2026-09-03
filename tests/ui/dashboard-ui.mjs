@@ -677,8 +677,8 @@ const MAINTENANCE_PAYLOAD = {
       capabilities: ['4 skills', '2 commands'], projects: ['agentic-kit', 'finima'],
       preserved: ['standalone skill-creator'],
     },
-    nextAction: { guidance: 'Review the provider-owned update plan.', command: 'ak maintain plan --finding plugin-update' },
-    action: {
+    nextAction: {
+      guidance: 'Review the provider-owned update plan.',
       executable: true, safetyClass: 'safe-automatic eligible', restartRequired: true,
       rollback: 'compensating reinstall of 0.2.0',
     },

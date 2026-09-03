@@ -184,6 +184,7 @@ test('dashboard Maintenance capabilities bind preview, confirmation, apply and g
   });
   assert.equal(applied.status, 200, applied.body);
   assert.equal(service.calls.apply, 1);
+  assert.equal(JSON.parse(applied.body).receipt.undoEligible, true);
   assert.doesNotMatch(applied.body, /receiptFile|private/);
   const replay = await request(server, '/api/maintenance/apply', {
     method: 'POST', body: { capability: plannedAgain.capability, confirm: true, typedPhrase: 'APPLY 1' },

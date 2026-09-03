@@ -77,8 +77,14 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
   }
   export function maintValue(value){
     if(Array.isArray(value))return maintList(value).join(", ");
-    if(value&&typeof value==="object")return maintText(value.label)||maintText(value.summary)
-      ||maintText(value.status)||maintText(value.value);
+    if(value&&typeof value==="object"){
+      var described=maintText(value.label)||maintText(value.summary)||maintText(value.status)||maintText(value.value);
+      if(described)return described;
+      if(value.nativeStateVerified===true&&(value.affectedCatalogRefreshed===true||value.affectedCatalogRescanned===true))
+        return "Native state verified; catalog refreshed";
+      if(value.nativeStateVerified===true)return "Native state verified";
+      return "";
+    }
     return maintText(value);
   }
   function maintFindingKey(finding,index){return "finding:"+(maintText(finding&&finding.id)||index);}
@@ -88,8 +94,8 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
     return MAINTENANCE&&MAINTENANCE.capabilities&&typeof MAINTENANCE.capabilities==="object"?MAINTENANCE.capabilities:{};
   }
   export function maintCanPreview(finding){
-    var caps=maintCapabilities();
-    return caps.plan===true&&caps.apply===true&&finding&&finding.action&&finding.action.executable===true;
+    var caps=maintCapabilities(),action=finding&&(finding.action||finding.nextAction);
+    return caps.plan===true&&caps.apply===true&&action&&action.executable===true;
   }
   export function maintCanUndo(receipt){
     var undo=receipt&&receipt.undo;
@@ -285,13 +291,13 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
       +'<small>Reviews this one provider-owned change. Nothing runs until you confirm.</small></div>';
   }
   function maintNextHtml(finding){
-    var next=finding&&finding.nextAction,action=finding&&finding.action||{};
-    var text=maintText(next)||maintText(next&&next.summary)||maintText(next&&next.guidance)
+    var next=finding&&finding.nextAction,action=finding&&(finding.action||finding.nextAction)||{};
+    var text=maintText(next)||maintText(next&&next.label)||maintText(next&&next.summary)||maintText(next&&next.guidance)
       ||maintText(action.summary)||maintText(action.reason);
     var command=maintText(next&&next.command)||maintText(action.command);
     var facts="";
     facts+=maintFact("Safety",action.safetyClass);
-    facts+=maintFact("Restart",action.restartRequired===true?"Required":action.restartRequired===false?"Not reported as required":"");
+    facts+=maintFact("Restart",action.restartRequired===true?"Required":action.restartRequired===false?"Not reported as required":action.restart);
     facts+=maintFact("Rollback",action.rollback);
     if(!text&&!command&&!facts&&!maintCanPreview(finding))return "";
     return '<section class="mt-detail-section mt-next"><h4>Next step</h4>'+(text?"<p>"+esc(text)+"</p>":"")
