@@ -27,6 +27,27 @@ function textList(value, maxItems = 100) {
   return Array.isArray(value) ? value.slice(0, maxItems).map((item) => text(item, 300)).filter(Boolean) : [];
 }
 
+// Evidence labels often prefix an absolute path with a useful surface and
+// category (for example, "catalog:degraded:claude-project-skills:"). Keep
+// that diagnosis while failing closed at the first local path. URLs are not
+// local paths and remain useful evidence sources.
+const LOCAL_PATH = /(^|[\s"'([{=:])(?:file:\/\/\/?|~[\\/]|[A-Za-z]:[\\/]|\\\\|\/(?!\/))/u;
+
+function evidenceText(value, max = 300) {
+  const safe = text(value, max);
+  if (safe === null) return null;
+  const match = LOCAL_PATH.exec(safe);
+  if (!match) return safe;
+  const boundary = match.index + match[1].length;
+  return `${safe.slice(0, boundary)}[local path omitted]`;
+}
+
+function evidenceTextList(value, maxItems = 100) {
+  return Array.isArray(value)
+    ? value.slice(0, maxItems).map((item) => evidenceText(item)).filter(Boolean)
+    : [];
+}
+
 function picked(source, keys, max = 300) {
   const value = source && typeof source === 'object' ? source : {};
   return Object.fromEntries(keys.flatMap((key) => {
@@ -46,9 +67,10 @@ function publicFinding(finding) {
   const evidence = value.evidence && typeof value.evidence === 'object' ? value.evidence : {};
   const impact = value.impact && typeof value.impact === 'object' ? value.impact : {};
   const next = value.nextAction && typeof value.nextAction === 'object' ? value.nextAction : {};
-  const gaps = textList(evidence.gaps);
-  const reasons = textList(evidence.reasons);
-  const sources = textList(evidence.sources);
+  const gaps = evidenceTextList(evidence.gaps);
+  const reasons = evidenceTextList(evidence.reasons);
+  const sources = evidenceTextList(evidence.sources);
+  const source = evidenceText(evidence.source);
   const owner = text(value.owner) ?? text(value.ownership?.owner);
   return {
     ...picked(value, ['id', 'state', 'bucket', 'classification', 'safetyClass', 'headline', 'explanation', 'owner']),
@@ -57,11 +79,12 @@ function publicFinding(finding) {
     versions: picked(value.versions, VERSION_KEYS),
     ownership: picked(value.ownership, ['owner', 'authority', 'managed']),
     evidence: {
-      ...picked(evidence, ['asOf', 'freshness', 'completeness', 'status', 'source', 'authority', 'health']),
+      ...picked(evidence, ['asOf', 'freshness', 'completeness', 'status', 'authority', 'health']),
+      ...(source ? { source } : {}),
       sources,
       gaps,
       reasons: reasons.length ? reasons : gaps,
-      ...(!evidence.source && sources.length ? { source: sources.join(', ') } : {}),
+      ...(!source && sources.length ? { source: sources.join(', ') } : {}),
       ...(!evidence.health && evidence.freshness ? { health: text(evidence.freshness, 100) } : {}),
     },
     observedUsage: picked(value.observedUsage, ['status', 'statement']),
@@ -116,7 +139,7 @@ export function publicMaintenanceModel(model) {
     capabilities: picked(value.capabilities, ['plan', 'apply', 'undo']),
     freshness: {
       ...picked(value.freshness, ['asOf', 'ageMs', 'status', 'completeness']),
-      gaps: textList(value.freshness?.gaps),
+      gaps: evidenceTextList(value.freshness?.gaps),
     },
     summary: {
       ...suppliedSummary,
@@ -194,10 +217,21 @@ function assertExecutablePlan(plan) {
 
 function publicOutcome(result) {
   const value = result && typeof result === 'object' ? result : {};
+  const status = text(value.status, 100) ?? (value.ok === true ? 'complete' : 'refused');
+  const hasReceipt = Boolean(value.receipt || value.receiptId);
+  const noMutationStatuses = new Set([
+    'busy', 'drift-refused', 'preflight-refused', 'receipt-refused',
+  ]);
+  const effect = value.ok === true ? 'verified'
+    : status === 'rolled-back' ? 'rolled-back'
+      : noMutationStatuses.has(status) ? 'not-started'
+        : hasReceipt || /recovery-required|outcome-unknown/.test(status) ? 'recovery-required'
+          : 'unknown';
   return {
     ok: value.ok === true,
-    status: text(value.status, 100) ?? (value.ok === true ? 'complete' : 'refused'),
-    ...(value.receipt || value.receiptId ? {
+    status,
+    effect,
+    ...(hasReceipt ? {
       receipt: publicReceipt(value.receipt ?? { id: value.receiptId, status: value.status }),
     } : {}),
   };
@@ -242,7 +276,9 @@ export function createMaintenanceDashboardApi({ service, sessionToken, now = Dat
   async function apply(body, res) {
     const authority = store.consume({ capability: body.capability, sessionToken, verb: 'apply' });
     if (!typedPhraseMatches(body, authority.confirmation.typedPhrase)) {
-      sendJson(res, 409, { error: 'confirmation phrase did not match the preview' });
+      sendJson(res, 409, {
+        error: 'confirmation phrase did not match the preview', effect: 'not-started',
+      });
       return;
     }
     if (typeof service.apply !== 'function') throw new Error('maintenance apply is unavailable');
@@ -280,6 +316,7 @@ export function createMaintenanceDashboardApi({ service, sessionToken, now = Dat
     if (!preview || preview.undoable !== true) {
       sendJson(res, 409, {
         error: 'maintenance receipt is not currently undoable',
+        effect: 'not-started',
         preview: picked(preview, ['receiptId', 'status', 'summary', 'reason', 'undoable', 'actionCount']),
       });
       return;
@@ -301,7 +338,9 @@ export function createMaintenanceDashboardApi({ service, sessionToken, now = Dat
   async function undo(body, res) {
     const authority = store.consume({ capability: body.capability, sessionToken, verb: 'undo' });
     if (!typedPhraseMatches(body, authority.confirmation.typedPhrase)) {
-      sendJson(res, 409, { error: 'confirmation phrase did not match the preview' });
+      sendJson(res, 409, {
+        error: 'confirmation phrase did not match the preview', effect: 'not-started',
+      });
       return;
     }
     if (typeof service.undo !== 'function') throw new Error('maintenance undo is unavailable');

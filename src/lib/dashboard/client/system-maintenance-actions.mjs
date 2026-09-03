@@ -22,7 +22,8 @@ import {
         if(response.ok&&(!body||body.ok!==false))return body;
         var requestError=new Error("maintenance request failed");
         requestError.code=maintText(body&&body.code)||maintText(body&&body.error&&body.error.code);
-        requestError.status=response.status;throw requestError;
+        requestError.status=response.status;requestError.effect=maintText(body&&body.effect);
+        requestError.payload=body;throw requestError;
       });
     });
   }
@@ -72,15 +73,61 @@ import {
       +maintFact("Verification",receipt.verification)+"</dl>"
       +'<p class="mt-expiry">This receipt remains available under Recent changes.</p>';
   }
-  function maintActionErrorCopy(error){
+  function maintRecoveryCopy(effect){
+    if(effect==="rolled-back")return {
+      title:"Change rolled back",
+      message:"The provider attempted this change, and Agentic Kit reports that the recorded pre-change state was restored. Review the retained receipt before trying again."
+    };
+    return {
+      title:"Recovery required",
+      message:"The provider may have changed this resource, but completion or recovery was not verified. Inspect the retained receipt before trying another change."
+    };
+  }
+  function maintActionErrorCopy(error,operation){
     var code=maintText(error&&error.code).toUpperCase(),status=Number(error&&error.status);
-    if(status===410||/EXPIRED/.test(code))return {
-      title:"Preview expired",message:"This authorization expired before confirmation. Nothing changed. Close this sheet and preview the finding again."
+    var effect=maintText(error&&error.effect);
+    if(operation&&operation.state==="loading"){
+      if(/DRIFT|STALE|MISMATCH/.test(code))return {
+        title:"Evidence changed",message:"The current evidence changed while the preview was being prepared. No change was requested. Close this sheet and preview current evidence again.",
+        status:"The preview did not authorize a change."
+      };
+      return {
+        title:"Preview unavailable",message:"The preview could not be prepared. No change was requested. Close this sheet and try again.",
+        status:"The preview did not authorize a change."
+      };
+    }
+    if(effect==="not-requested")return {
+      title:"Preview expired",message:"This preview expired before a maintenance request was sent. No change was requested. Close this sheet and preview the finding again.",
+      status:"The expired preview was not submitted."
     };
-    if(status===409||/DRIFT|STALE|MISMATCH/.test(code))return {
-      title:"Evidence changed",message:"The resource no longer matches this preview. Nothing changed. Close this sheet and preview current evidence again."
+    if(effect==="not-started"){
+      if(status===410||/EXPIRED/.test(code))return {
+        title:"Preview expired",message:"The server refused this request before starting a maintenance change. Nothing changed. Close this sheet and preview the finding again.",
+        status:"The server verified that no mutation started."
+      };
+      if(/DRIFT|STALE|MISMATCH/.test(code))return {
+        title:"Evidence changed",message:"The server refused this request before starting a maintenance change because the evidence changed. Nothing changed. Preview current evidence again.",
+        status:"The server verified that no mutation started."
+      };
+      return {
+        title:"Change refused",message:"The server refused this request before starting a maintenance change. Nothing changed. Close this sheet and preview the finding again.",
+        status:"The server verified that no mutation started."
+      };
+    }
+    return {
+      title:"Outcome needs verification",
+      message:"The request did not complete with a verified outcome. Do not assume the resource is unchanged. Refresh Maintenance and inspect Recent changes before trying again.",
+      status:"The outcome is not verified."
     };
-    return {title:"Change not completed",message:"The provider did not complete this request. Nothing changed. Close this sheet and try again."};
+  }
+  function maintRecoveryHtml(operation){
+    var receipt=operation.receipt||{},summary=maintText(receipt.summary);
+    return '<div class="mt-confirm-error" role="alert">'+esc(operation.error.message)+"</div>"
+      +(summary&&summary!==operation.error.message?'<p class="mt-confirm-summary">'+esc(summary)+"</p>":"")
+      +'<dl class="mt-facts compact mt-confirm-facts">'+maintFact("Receipt",maintReceiptId(receipt))
+      +maintFact("Status",receipt.statusLabel||receipt.status)+maintFact("Recorded",receipt.completedAt||receipt.at)
+      +maintFact("Verification",receipt.verification)+"</dl>"
+      +'<p class="mt-expiry">This receipt remains available under Recent changes.</p>';
   }
   function updateMaintConfirmEnabled(){
     var elements=maintDialogElements(),operation=maintOperation;if(!elements.confirm||!operation)return;
@@ -113,10 +160,15 @@ import {
       elements.body.innerHTML=maintReceiptResultHtml(operation);
       elements.status.textContent="The operation completed and its receipt was retained.";
       elements.cancel.hidden=true;elements.confirm.hidden=false;elements.confirm.textContent="Done";
+    }else if(operation.state==="recovery"){
+      elements.title.textContent=operation.error.title;
+      elements.body.innerHTML=maintRecoveryHtml(operation);
+      elements.status.textContent="The operation did not complete safely. Its receipt was retained under Recent changes.";
+      elements.cancel.hidden=true;elements.confirm.hidden=false;elements.confirm.textContent="Review receipt";
     }else{
       elements.title.textContent=operation.error.title;
       elements.body.innerHTML='<div class="mt-confirm-error" role="alert">'+esc(operation.error.message)+"</div>";
-      elements.status.textContent="No change was applied.";
+      elements.status.textContent=operation.error.status||"The outcome is not verified.";
       elements.cancel.hidden=true;elements.confirm.hidden=false;elements.confirm.textContent="Close";
     }
     updateMaintConfirmEnabled();
@@ -143,8 +195,19 @@ import {
     var root=document.getElementById("sys-maintenance");if(root)root.setAttribute("aria-busy",value?"true":"false");
   }
   function maintActionFailed(error){
+    var previous=maintOperation||{},payload=error&&error.payload&&typeof error.payload==="object"?error.payload:{};
+    var returned=payload.receipt&&typeof payload.receipt==="object"?payload.receipt:null;
+    var effect=maintText(error&&error.effect),copy=returned?maintRecoveryCopy(effect):maintActionErrorCopy(error,previous);
     maintActionBusy=false;maintCapability=null;
-    maintOperation={state:"error",error:maintActionErrorCopy(error)};
+    if(returned){
+      var receipt=Object.assign({},returned);
+      if(!maintText(receipt.status))receipt.status=maintText(payload.status)||"recovery-required";
+      if(!maintText(receipt.statusLabel))receipt.statusLabel=copy.title;
+      if(!maintText(receipt.summary))receipt.summary=copy.message;
+      var key=maintRememberReceipt(receipt);maintShowReceipt(key);
+      maintOperation={state:"recovery",kind:previous.kind,receipt:receipt,error:copy};
+      renderMaintenance();
+    }else maintOperation={state:"error",error:copy};
     setMaintRootBusy(false);renderMaintDialog();
   }
   function beginMaintPreview(trigger){
@@ -190,14 +253,14 @@ import {
   }
   function submitMaintAction(){
     var operation=maintOperation;if(maintActionBusy||!operation)return;
-    if(operation.state==="receipt"||operation.state==="error"){closeMaintDialog();return;}
+    if(operation.state==="receipt"||operation.state==="recovery"||operation.state==="error"){closeMaintDialog();return;}
     if(operation.state!=="confirm"||maintCapability==null)return;
     var phrase=maintText(operation.confirmation&&operation.confirmation.typedPhrase);
     var input=document.getElementById("sys-maint-typed");
     if(phrase&&(!input||input.value!==phrase)){updateMaintConfirmEnabled();return;}
     if(operation.kind==="apply"&&Number.isFinite(Date.parse(maintText(operation.plan&&operation.plan.expiresAt)))
       &&Date.parse(operation.plan.expiresAt)<=Date.now()){
-      maintActionFailed({code:"PLAN_EXPIRED",status:410});return;
+      maintActionFailed({code:"PLAN_EXPIRED",status:410,effect:"not-requested"});return;
     }
     var capability=maintCapability,kind=operation.kind,originalReceipt=operation.originalReceipt;
     maintActionBusy=true;renderMaintDialog();setMaintRootBusy(true);

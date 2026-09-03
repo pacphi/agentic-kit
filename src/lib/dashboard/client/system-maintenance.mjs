@@ -118,6 +118,10 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
     var id=maintReceiptId(receipt);
     maintTransientReceipts=maintTransientReceipts.filter(function(item){return !id||maintReceiptId(item)!==id;});
     maintTransientReceipts.unshift(receipt);
+    if(MAINTENANCE&&typeof MAINTENANCE==="object"){
+      var current=Array.isArray(MAINTENANCE.receipts)?MAINTENANCE.receipts:[];
+      MAINTENANCE.receipts=[receipt].concat(current.filter(function(item){return !id||maintReceiptId(item)!==id;}));
+    }
     maintMergeReceipts(MAINTENANCE);
     return maintReceiptKey(receipt,0);
   }
@@ -241,7 +245,8 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
     var receipt=record.value||{},selected=record.key===maintSelected;
     var name=maintText(receipt.headline)||maintText(receipt.label)||"Maintenance change";
     var status=maintText(receipt.statusLabel)||maintText(receipt.status)||"Receipt retained";
-    return '<li><button type="button" class="mt-row receipt" data-maint-key="'+esc(record.key)+'" data-tone="ready"'
+    var tone=/partial|recovery|unknown|failed/i.test(maintText(receipt.status))?"blocked":"ready";
+    return '<li><button type="button" class="mt-row receipt" data-maint-key="'+esc(record.key)+'" data-tone="'+tone+'"'
       +' aria-controls="sys-maint-detail" aria-expanded="'+(selected?"true":"false")+'"'+(selected?' aria-current="true"':"")+">"
       +'<span class="mt-state">'+esc(status)+"</span>"
       +'<span class="mt-identity"><b>'+esc(name)+"</b><small>Receipt</small></span>"
@@ -336,6 +341,7 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
 
   function maintReceiptDetail(receipt){
     var title=maintText(receipt.headline)||maintText(receipt.label)||"Maintenance change";
+    var tone=/partial|recovery|unknown|failed/i.test(maintText(receipt.status))?"blocked":"ready";
     var undo=receipt&&receipt.undo,undoStatus=maintText(receipt.undoStatus)
       ||maintText(undo&&typeof undo==="object"&&(undo.status||undo.label||undo.summary))
       ||maintText(typeof undo==="string"?undo:"");
@@ -343,7 +349,7 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
       ?'<div class="mt-action-bar"><button type="button" class="mt-action" data-maint-action="undo">Preview undo</button>'
         +'<small>The server marked this receipt eligible. Undo is previewed and confirmed separately.</small></div>'
       :'<p class="mt-report-only">No eligible undo is available for this receipt.</p>';
-    return '<div class="mt-detail-head"><span class="mt-state" data-tone="ready">'
+    return '<div class="mt-detail-head"><span class="mt-state" data-tone="'+tone+'">'
       +esc(maintText(receipt.statusLabel)||maintText(receipt.status)||"Receipt retained")+'</span><h3 id="sys-maint-detail-title" tabindex="-1">'
       +esc(title)+"</h3></div>"+(maintText(receipt.summary)?'<p class="mt-explanation">'+esc(maintText(receipt.summary))+"</p>":"")
       +'<dl class="mt-facts">'+maintFact("Receipt",maintReceiptId(receipt))+maintFact("Completed",receipt.completedAt||receipt.at)

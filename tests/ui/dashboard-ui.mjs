@@ -1092,12 +1092,14 @@ async function main() {
   const maintenancePlanRequests = [];
   const maintenanceApplyRequests = [];
   const maintenanceUndoRequests = [];
+  const expectedHttpConsoleErrors = new Set();
   // Capture the LOCATION too. A bare "Failed to load resource" is
   // undiagnosable, and a console listener that records only the message makes
   // the harness's own failures impossible to act on.
   page.on('console', (m) => {
     if (m.type() !== 'error') return;
     const loc = m.location();
+    if (/status of 409 \(Conflict\)/.test(m.text()) && loc?.url && expectedHttpConsoleErrors.delete(loc.url)) return;
     const where = loc?.url ? ` @ ${loc.url}` : '';
     consoleErrors.push(`${m.text()}${where}`);
   });
@@ -1135,7 +1137,7 @@ async function main() {
     const body = request.postDataJSON();
     if (pathname === '/api/maintenance/plans') {
       maintenancePlanRequests.push(body);
-      if (maintenancePlanRequests.length > 2) {
+      if (maintenancePlanRequests.length === 3) {
         return reply(200, { ok: false, code: 'PLAN_DRIFT', error: '<b>cap-ui-plan-secret</b>' });
       }
       return reply(200, {
@@ -1159,6 +1161,19 @@ async function main() {
     if (pathname === '/api/maintenance/apply') {
       maintenanceApplyRequests.push(body);
       await new Promise((resolve) => setTimeout(resolve, 80));
+      if (maintenanceApplyRequests.length === 2) {
+        expectedHttpConsoleErrors.add(request.url());
+        return reply(409, {
+          ok: false, status: 'partial-recovery-required', effect: 'recovery-required',
+          error: '<img src=x onerror="globalThis.__maintRecoveryXss=1"> cap-ui-plan-secret',
+          receipt: {
+            id: 'receipt-recovery-ui', status: 'partial-recovery-required',
+            headline: 'rust-optimizer outcome needs recovery',
+            summary: 'Provider dispatch could not be verified; inspect the native resource.',
+            completedAt: new Date().toISOString(), undoEligible: false,
+          },
+        });
+      }
       return reply(200, {
         ok: true, status: 'applied', receipt: {
           id: 'receipt-update-ui', status: 'applied', statusLabel: 'Applied',
@@ -1756,11 +1771,47 @@ async function main() {
     await page.waitForFunction(() => document.getElementById('sys-maint-confirm-title')?.textContent === 'Evidence changed');
     const driftCopy = await visibleText(page, '#sys-maint-confirm');
     check('drift fails closed with specific recovery copy and no capability echo',
-      /no longer matches this preview/i.test(driftCopy) && /Nothing changed/.test(driftCopy)
+      /changed while the preview was being prepared/i.test(driftCopy) && /No change was requested/.test(driftCopy)
         && /preview current evidence again/.test(driftCopy) && !/cap-ui-plan-secret/.test(driftCopy),
       `drift copy was ${JSON.stringify(driftCopy)}`);
     await page.click('#sys-maint-confirm-apply');
     await page.waitForFunction(() => !document.getElementById('sys-maint-confirm')?.open);
+
+    // A post-dispatch 409 is not a safe refusal. Its receipt must survive the
+    // dialog and the UI must never replace uncertainty with "Nothing changed."
+    await page.click('#sys-maint-detail [data-maint-action="preview"]');
+    await page.waitForSelector('#sys-maint-confirm[open] #sys-maint-typed');
+    await page.fill('#sys-maint-typed', 'APPLY rust-optimizer');
+    await page.click('#sys-maint-confirm-apply');
+    await page.waitForFunction(() => document.getElementById('sys-maint-confirm-title')?.textContent === 'Recovery required');
+    const recoveryCopy = await page.evaluate(() => ({
+      text: document.getElementById('sys-maint-confirm')?.innerText,
+      xss: globalThis.__maintRecoveryXss,
+      recentPressed: document.querySelector('[data-maint-bucket="recent-changes"]')?.getAttribute('aria-pressed'),
+      selectedDetail: document.getElementById('sys-maint-detail')?.innerText,
+    }));
+    check('a recovery-required 409 retains its receipt and never claims the resource is unchanged',
+      /provider may have changed this resource/i.test(String(recoveryCopy.text))
+        && /receipt-recovery-ui/.test(String(recoveryCopy.text))
+        && /retained under Recent changes/i.test(String(recoveryCopy.text))
+        && !/Nothing changed/.test(String(recoveryCopy.text))
+        && !/cap-ui-plan-secret/.test(String(recoveryCopy.text))
+        && recoveryCopy.xss === undefined
+        && recoveryCopy.recentPressed === 'true'
+        && /receipt-recovery-ui/.test(String(recoveryCopy.selectedDetail)),
+      `recovery outcome was ${JSON.stringify(recoveryCopy)}`);
+    await page.click('#sys-maint-confirm-apply');
+    await page.waitForFunction(() => !document.getElementById('sys-maint-confirm')?.open);
+    const retainedRecovery = await page.evaluate(() => ({
+      selected: document.querySelector('#sys-maint-list [aria-current="true"]')?.innerText,
+      detail: document.getElementById('sys-maint-detail')?.innerText,
+      undoControls: document.querySelectorAll('#sys-maint-detail [data-maint-action="undo"]').length,
+    }));
+    check('closing a recovery outcome leaves its non-undoable receipt selected for follow-up',
+      /Recovery required/.test(String(retainedRecovery.selected))
+        && /Provider dispatch could not be verified/.test(String(retainedRecovery.detail))
+        && retainedRecovery.undoControls === 0,
+      `retained recovery receipt was ${JSON.stringify(retainedRecovery)}`);
 
     const readOnlyPage = await browser.newPage({ viewport: { width: 900, height: 700 } });
     await readOnlyPage.route(/\/api\/maintenance(?:\?|$)/, (route) => route.fulfill({

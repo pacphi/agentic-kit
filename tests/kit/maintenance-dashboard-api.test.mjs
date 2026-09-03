@@ -111,6 +111,37 @@ test('maintenance dashboard projection derives human summary fields without inve
   assert.equal(projected.receipts[0].completedAt, '2026-09-03T00:00:00.000Z');
 });
 
+test('maintenance dashboard projection removes local paths from public evidence while retaining its diagnosis', () => {
+  const localPath = '/Users/alice/private-repo';
+  const projected = publicMaintenanceModel({
+    freshness: {
+      gaps: [`catalog:degraded:claude-project-skills:${localPath}`],
+    },
+    findings: [{
+      id: 'private-evidence',
+      evidence: {
+        source: `native-scan:${localPath}/.claude/skills`,
+        sources: [`plugin-cache:${localPath}`, 'https://example.test/catalog'],
+        gaps: [`catalog:degraded:claude-project-skills:${localPath}`],
+        reasons: [`read failed for ${localPath}/SKILL.md`],
+      },
+    }],
+  });
+
+  assert.doesNotMatch(JSON.stringify(projected), /\/Users\/alice\/private-repo/);
+  assert.equal(projected.findings[0].evidence.source, 'native-scan:[local path omitted]');
+  assert.deepEqual(projected.findings[0].evidence.sources, [
+    'plugin-cache:[local path omitted]', 'https://example.test/catalog',
+  ]);
+  assert.deepEqual(projected.findings[0].evidence.gaps, [
+    'catalog:degraded:claude-project-skills:[local path omitted]',
+  ]);
+  assert.deepEqual(projected.findings[0].evidence.reasons, ['read failed for [local path omitted]']);
+  assert.deepEqual(projected.freshness.gaps, [
+    'catalog:degraded:claude-project-skills:[local path omitted]',
+  ]);
+});
+
 test('dashboard Maintenance API keeps GET lazy and mutation paths exact', async (t) => {
   const service = fixtureService();
   const server = await startDashboard({
@@ -176,6 +207,7 @@ test('dashboard Maintenance capabilities bind preview, confirmation, apply and g
     method: 'POST', body: { capability: preview.capability, confirm: true, typedPhrase: 'wrong' },
   });
   assert.equal(refusedPhrase.status, 409);
+  assert.equal(JSON.parse(refusedPhrase.body).effect, 'not-started');
   assert.equal(service.calls.apply, 0);
   const replayAfterRefusal = await request(server, '/api/maintenance/apply', {
     method: 'POST', body: { capability: preview.capability, confirm: true, typedPhrase: 'APPLY 1' },
@@ -207,4 +239,44 @@ test('dashboard Maintenance capabilities bind preview, confirmation, apply and g
   });
   assert.equal(undone.status, 200, undone.body);
   assert.equal(service.calls.undo, 1);
+});
+
+test('dashboard Maintenance API distinguishes pre-mutation refusal from a receipted recovery outcome', async (t) => {
+  const service = fixtureService();
+  service.apply = async () => ({
+    ok: false,
+    status: 'partial-recovery-required',
+    receipt: {
+      id: 'receipt-recovery', status: 'partial-recovery-required',
+      summary: 'Provider dispatch needs inspection.', receiptFile: '/Users/alice/private-repo/receipt.json',
+    },
+  });
+  const server = await startDashboard({ port: 0, maintenance: service, usage: {} });
+  t.after(() => server.close());
+
+  const recoveryPlan = JSON.parse((await request(server, '/api/maintenance/plans', {
+    method: 'POST', body: { findingIds: ['finding-a'] },
+  })).body);
+  const recovery = await request(server, '/api/maintenance/apply', {
+    method: 'POST',
+    body: { capability: recoveryPlan.capability, confirm: true, typedPhrase: 'APPLY 1' },
+  });
+  const recoveryBody = JSON.parse(recovery.body);
+  assert.equal(recovery.status, 409);
+  assert.equal(recoveryBody.effect, 'recovery-required');
+  assert.equal(recoveryBody.receipt.id, 'receipt-recovery');
+  assert.equal(recoveryBody.receipt.status, 'partial-recovery-required');
+  assert.doesNotMatch(recovery.body, /receiptFile|\/Users\/alice\/private-repo/);
+
+  service.apply = async () => ({ ok: false, status: 'preflight-refused' });
+  const refusalPlan = JSON.parse((await request(server, '/api/maintenance/plans', {
+    method: 'POST', body: { findingIds: ['finding-a'] },
+  })).body);
+  const refused = await request(server, '/api/maintenance/apply', {
+    method: 'POST',
+    body: { capability: refusalPlan.capability, confirm: true, typedPhrase: 'APPLY 1' },
+  });
+  assert.equal(refused.status, 409);
+  assert.equal(JSON.parse(refused.body).effect, 'not-started');
+  assert.equal(JSON.parse(refused.body).receipt, undefined);
 });
