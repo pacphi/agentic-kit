@@ -399,6 +399,7 @@ const STATUS_STUB = async () => ({
     { subsystem: 'hosts', level: 'fail', message: 'codex enabled but not installed', fix: 'ak setup' },
     { subsystem: 'hosts', level: 'ok', message: 'opencode enabled and installed', fix: null },
     { subsystem: 'agentdb', level: 'ok', message: 'store reachable', fix: null },
+    { subsystem: 'agent-browser', level: 'ok', message: 'agent-browser 0.27.3 ready for Ruflo', fix: null },
     { subsystem: 'aqe', level: 'warn', message: 'fleet has never been initialized', fix: 'aqe init' },
     { subsystem: 'security', level: 'ok', message: 'scan clean', fix: null },
     { subsystem: 'ruvnet-brain', level: 'ok', message: 'knowledge base present', fix: null },
@@ -410,7 +411,10 @@ const STATUS_STUB = async () => ({
     { subsystem: 'routing', level: 'ok', message: 'per-activity policy applied', fix: null },
     { subsystem: 'daemons', level: 'ok', message: '1 daemon running', fix: null },
   ],
-  drift: [{ pkg: 'ruflo', installed: '4.0.0', latest: '4.0.1', outdated: true }],
+  drift: [
+    { pkg: 'ruflo', installed: '4.0.0', latest: '4.0.1', outdated: true },
+    { pkg: 'agent-browser', installed: '0.27.3', latest: null, outdated: false },
+  ],
 });
 
 // ── /api/system stub (ADR-0025) ──────────────────────────────────────────────
@@ -1324,6 +1328,9 @@ async function main() {
     check('a component whose version is known carries it on the chip',
       /v4\.0\.0/.test(String(aboutBy('ruflo')?.chip)),
       `the ruflo chip read ${JSON.stringify(aboutBy('ruflo')?.chip)}`);
+    check('the managed agent-browser card carries its observed compatible version',
+      /installed.*v0\.27\.3/i.test(String(aboutBy('agent-browser')?.chip)),
+      `the agent-browser chip read ${JSON.stringify(aboutBy('agent-browser')?.chip)}`);
     // One card, two status rows: the worst of the pair drives the chip, or
     // Codex's broken statusline would sit behind a green card.
     check('a card joining two subsystems takes the worse of the two',

@@ -396,8 +396,31 @@ async function main() {
   }
 
   // ── foldBrainDrift: the brain joins the npm drift array (banner covers ALL managed tools) ──
-  const { foldBrainDrift } = await import('file://' + MOD);
+  const { foldBrainDrift, foldKnownVersions } = await import('file://' + MOD);
   const npmDrift = [{ pkg: 'ruflo', installed: '4.0.0', latest: '4.1.0', outdated: true }];
+
+  await test('foldKnownVersions exposes the installed agent-browser version without treating npm-latest as policy', async () => {
+    const installed = { 'agent-browser': '0.27.3', agentdb: '3.0.0-alpha.17' };
+    const out = await foldKnownVersions(npmDrift, {
+      hostFacts: {},
+      installedVersionFn: (pkg) => installed[pkg] ?? null,
+    });
+    const browser = out.find((entry) => entry.pkg === 'agent-browser');
+    assert(browser?.installed === '0.27.3', 'the observed agent-browser version must reach /api/status');
+    assert(browser?.latest === null && browser?.outdated === false,
+      'agent-browser compatibility is status policy, not an npm-latest update claim');
+  });
+
+  await test('foldKnownVersions preserves an existing agent-browser fact', async () => {
+    const existing = { pkg: 'agent-browser', installed: '0.27.0', latest: null, outdated: false };
+    const out = await foldKnownVersions([existing], {
+      hostFacts: {},
+      installedVersionFn: () => '0.27.3',
+    });
+    assert(out.filter((entry) => entry.pkg === 'agent-browser').length === 1,
+      'the fold must not duplicate an upstream fact');
+    assert(out[0] === existing, 'an upstream fact must remain authoritative');
+  });
 
   await test('foldBrainDrift appends an outdated brain in renderDrift shape', async () => {
     const out = foldBrainDrift(npmDrift, {
@@ -2067,7 +2090,7 @@ async function main() {
   // is the suite where it matters most — the traversal-guard and credential-
   // leak tests live here and were the reviewer's cited example of a block
   // that could silently vanish with the old harness never noticing.
-  const EXPECTED = 83;
+  const EXPECTED = 85;
   if (passed + failed !== EXPECTED) {
     console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
     process.exit(1);
