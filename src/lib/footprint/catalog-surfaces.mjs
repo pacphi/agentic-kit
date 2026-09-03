@@ -28,20 +28,27 @@ export function catalogSurfaceSpecs(roots, readers, io) {
     userSurfaceKeys.add(`${host}::skill::${path.resolve(at(agentsRoot, 'skills'))}`);
   }
   const launchingRoot = repoRoot(cwd);
-  if (launchingRoot) {
-    specs.push({ id: 'claude-project-mcp', host: 'claude', kind: 'mcpServer', scope: 'project', project: launchingRoot,
-      path: at(launchingRoot, '.mcp.json'), read: (p) => manifest(p, (d) => d?.mcpServers, io) });
-  }
+  const userHomes = new Set([claudeRoot, agentsRoot, codexRoot]
+    .filter(Boolean).map((root) => path.dirname(path.resolve(root))));
   const catalogProjects = [...new Set([launchingRoot, ...(projects ?? [])]
-    .filter(Boolean).map((project) => path.resolve(typeof project === 'string' ? project : project.path)))];
+    .filter(Boolean).map((project) => path.resolve(typeof project === 'string' ? project : project.path)))]
+    .filter((project) => !userHomes.has(project));
   for (const project of catalogProjects) {
     const claudeProject = at(project, '.claude');
     const projectSpecs = [
       { id: `claude-project-skills:${project}`, host: 'claude', kind: 'skill', scope: 'project', project, path: at(claudeProject, 'skills'), read: (p) => marker(p, 'SKILL.md', io) },
       { id: `claude-project-agents:${project}`, host: 'claude', kind: 'agent', scope: 'project', project, path: at(claudeProject, 'agents'), read: (p) => markdown(p, io) },
       { id: `claude-project-commands:${project}`, host: 'claude', kind: 'command', scope: 'project', project, path: at(claudeProject, 'commands'), read: (p) => markdown(p, io) },
+      { id: `claude-project-mcp:${project}`, host: 'claude', kind: 'mcpServer', scope: 'project', project, path: at(project, '.mcp.json'), read: (p) => manifest(p, (d) => d?.mcpServers, io) },
       { id: `codex-project-skills:${project}`, host: 'codex', kind: 'skill', scope: 'project', project, path: at(project, '.agents', 'skills'), read: (p) => marker(p, 'SKILL.md', io) },
+      { id: `codex-project-agents:${project}`, host: 'codex', kind: 'agent', scope: 'project', project, path: at(project, '.codex', 'agents'), read: (p) => stems(p, ['.toml', '.md'], io) },
+      { id: `codex-project-mcp:${project}`, host: 'codex', kind: 'mcpServer', scope: 'project', project, path: at(project, '.codex', 'config.toml'), read: (p) => toml(p, 'mcp_servers', io) },
       { id: `opencode-project-skills:${project}`, host: 'opencode', kind: 'skill', scope: 'project', project, path: at(project, '.agents', 'skills'), read: (p) => marker(p, 'SKILL.md', io) },
+      { id: `opencode-project-dot-skills:${project}`, host: 'opencode', kind: 'skill', scope: 'project', project, path: at(project, '.opencode', 'skills'), read: (p) => marker(p, 'SKILL.md', io) },
+      { id: `opencode-project-agents:${project}`, host: 'opencode', kind: 'agent', scope: 'project', project, path: at(project, '.opencode', 'agents'), read: (p) => markdown(p, io) },
+      { id: `opencode-project-commands:${project}`, host: 'opencode', kind: 'command', scope: 'project', project, path: at(project, '.opencode', 'commands'), read: (p) => markdown(p, io) },
+      { id: `opencode-project-mcp-json:${project}`, host: 'opencode', kind: 'mcpServer', scope: 'project', project, path: at(project, 'opencode.json'), read: (p) => manifest(p, (d) => d?.mcp, io) },
+      { id: `opencode-project-mcp-jsonc:${project}`, host: 'opencode', kind: 'mcpServer', scope: 'project', project, path: at(project, 'opencode.jsonc'), read: (p) => manifest(p, (d) => d?.mcp, io) },
     ];
     // A transcript cwd can be the user's home rather than a project. In that
     // case `<cwd>/.claude/*` and `<cwd>/.agents/skills` are the exact user
@@ -55,12 +62,14 @@ export function catalogSurfaceSpecs(roots, readers, io) {
   specs.push(
     { id: 'codex-skills', host: 'codex', kind: 'skill', scope: 'user', path: at(codexRoot, 'skills'), read: (p) => marker(p, 'SKILL.md', io) },
     { id: 'codex-agents-skills', host: 'codex', kind: 'skill', scope: 'user', path: at(agentsRoot, 'skills'), read: (p) => marker(p, 'SKILL.md', io) },
+    { id: 'codex-agents', host: 'codex', kind: 'agent', scope: 'user', path: at(codexRoot, 'agents'), read: (p) => stems(p, ['.toml', '.md'], io) },
     { id: 'codex-prompts', host: 'codex', kind: 'command', scope: 'user', path: at(codexRoot, 'prompts'), read: (p) => markdown(p, io) },
     { id: 'codex-mcp', host: 'codex', kind: 'mcpServer', scope: 'user', path: codexConfigFile, read: (p) => toml(p, 'mcp_servers', io) },
     { id: 'opencode-agents', host: 'opencode', kind: 'agent', scope: 'user', path: at(opencodeRoot, 'agents'), read: (p) => markdown(p, io) },
     { id: 'opencode-skills', host: 'opencode', kind: 'skill', scope: 'user', path: at(opencodeRoot, 'skills'), read: (p) => marker(p, 'SKILL.md', io) },
     { id: 'opencode-agents-skills', host: 'opencode', kind: 'skill', scope: 'user', path: at(agentsRoot, 'skills'), read: (p) => marker(p, 'SKILL.md', io) },
-    { id: 'opencode-commands', host: 'opencode', kind: 'command', scope: 'user', path: at(opencodeRoot, 'command'), read: (p) => markdown(p, io) },
+    { id: 'opencode-commands', host: 'opencode', kind: 'command', scope: 'user', path: at(opencodeRoot, 'commands'), read: (p) => markdown(p, io) },
+    { id: 'opencode-legacy-commands', host: 'opencode', kind: 'command', scope: 'user', path: at(opencodeRoot, 'command'), read: (p) => markdown(p, io) },
     { id: 'opencode-plugins', host: 'opencode', kind: 'plugin', scope: 'user', path: at(opencodeRoot, 'plugins'), read: (p) => stems(p, ['.js', '.mjs', '.cjs', '.ts'], io) },
     { id: 'opencode-mcp', host: 'opencode', kind: 'mcpServer', scope: 'user', path: opencodeConfigFile, read: (p) => manifest(p, (d) => d?.mcp, io) },
   );

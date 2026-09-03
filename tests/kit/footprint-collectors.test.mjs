@@ -27,7 +27,7 @@ import {
 } from '../../src/lib/footprint/projects.mjs';
 import { collectCatalog, tomlTableNames } from '../../src/lib/footprint/catalog.mjs';
 import {
-  buildCatalogSourceStamps, collectNativePluginInventory, probeCatalogDrift,
+  artifactTreeDigest, buildCatalogSourceStamps, collectNativePluginInventory, probeCatalogDrift,
 } from '../../src/lib/footprint/catalog-evidence.mjs';
 import { collectConsumers } from '../../src/lib/footprint/consumers.mjs';
 import {
@@ -928,6 +928,45 @@ test('catalog includes project-scoped Codex skills from .agents/skills', (t) => 
   assert.equal(result.surfaces.find((surface) => surface.id === `codex-project-skills:${project}`)?.count, 1);
 });
 
+test('catalog inventories project agents, commands and MCP registrations across supported host surfaces', (t) => {
+  const fixtureRoots = catalogFixture(t);
+  const { root, ...roots } = fixtureRoots;
+  const project = path.join(root, 'project-resources');
+  write(path.join(project, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+  write(path.join(project, '.claude', 'agents', 'reviewer.md'), 'same agent\n');
+  write(path.join(project, '.claude', 'commands', 'ship.md'), 'same command\n');
+  write(path.join(project, '.mcp.json'), JSON.stringify({ mcpServers: { ruflo: { command: 'ruflo', args: ['mcp', 'start'] } } }));
+  write(path.join(project, '.codex', 'agents', 'planner.toml'), 'name = "planner"\n');
+  write(path.join(project, '.codex', 'config.toml'), '[mcp_servers.ruflo]\ncommand = "ruflo"\nargs = ["mcp", "start"]\n');
+  write(path.join(project, '.opencode', 'agents', 'reviewer.md'), 'same agent\n');
+  write(path.join(project, '.opencode', 'commands', 'ship.md'), 'same command\n');
+  write(path.join(project, '.opencode', 'skills', 'project-open', 'SKILL.md'), 'open skill\n');
+  write(path.join(project, 'opencode.json'), JSON.stringify({ mcp: { ruflo: { type: 'local', command: ['ruflo', 'mcp', 'start'] } } }));
+
+  const result = collectCatalog({
+    ...roots, cwd: project, projects: [project], now: () => 1_700_000_000_000,
+    includePluginSurfaces: false, fsImpl: fixtureFs(root),
+    inspectProjectArtifacts: (_project, files) => new Map(files.map((file) => [file, {
+      repository: true, tracked: file.endsWith('reviewer.md'), workingTree: 'clean', reason: null,
+    }])),
+  });
+
+  for (const id of [
+    `claude-project-mcp:${project}`, `codex-project-mcp:${project}`,
+    `codex-project-agents:${project}`, `opencode-project-agents:${project}`,
+    `opencode-project-commands:${project}`, `opencode-project-dot-skills:${project}`,
+    `opencode-project-mcp-json:${project}`,
+  ]) assert.equal(result.surfaces.find((surface) => surface.id === id)?.status, 'ok', id);
+  const claudeAgent = result.items.find((item) => item.kind === 'agent' && item.name === 'reviewer');
+  const projectAgent = claudeAgent.presence.find((presence) => presence.host === 'claude' && presence.scope === 'project');
+  assert.equal(projectAgent.digest.status, 'measured');
+  assert.deepEqual(projectAgent.tracking, { repository: true, tracked: true, workingTree: 'clean', reason: null });
+  const mcp = result.items.find((item) => item.kind === 'mcpServer' && item.name === 'ruflo');
+  assert.equal(mcp.presence.filter((presence) => presence.scope === 'project').length, 3);
+  assert.equal(mcp.presence.filter((presence) => presence.scope === 'project')
+    .every((presence) => presence.digest?.status === 'measured'), true);
+});
+
 test('catalog never reclassifies a user capability root as project-local', (t) => {
   const fixtureRoots = catalogFixture(t);
   const { root, ...baseRoots } = fixtureRoots;
@@ -960,8 +999,8 @@ test('catalog never reclassifies a user capability root as project-local', (t) =
   'a census cwd whose project roots are the user roots contributes no project surfaces');
 
   const userPressure = result.projects.find((row) => row.project === userHome);
-  assert.equal(userPressure.guidance.length, 0,
-    'the user home must not produce project-skill remediation guidance');
+  assert.equal(userPressure, undefined,
+    'the user home must not produce a project-pressure record');
   assert.deepEqual(
     result.items.find((item) => item.name === 'shared-user')?.hosts.sort(),
     ['codex', 'opencode'],
@@ -988,6 +1027,33 @@ test('catalog hashes bounded entrypoints but never returns their bodies', (t) =>
   });
   assert.ok(reads.some((file) => /SKILL\.md$/.test(file)), 'skill entrypoints are hashed');
   assert.doesNotMatch(JSON.stringify(result), /SECRET BODY/, 'artifact prose must not leave the collector');
+});
+
+test('skill definition evidence covers the bounded tree and fails closed on symlinks or caps', (t) => {
+  const root = fixture(t, 'catalog-definition');
+  const skill = path.join(root, 'skill');
+  write(path.join(skill, 'SKILL.md'), 'same entrypoint\n');
+  write(path.join(skill, 'references', 'guide.md'), 'first supporting file\n');
+  const first = artifactTreeDigest(skill, { fsImpl: fixtureFs(root) });
+  assert.equal(first.status, 'measured');
+  assert.equal(first.files.length, 2);
+
+  write(path.join(skill, 'references', 'guide.md'), 'different supporting file\n');
+  const changed = artifactTreeDigest(skill, { fsImpl: fixtureFs(root) });
+  assert.notEqual(first.value, changed.value,
+    'matching SKILL.md entrypoints do not imply matching skill definitions');
+
+  const capped = artifactTreeDigest(skill, { fsImpl: fixtureFs(root), maxEntries: 1 });
+  assert.equal(capped.status, 'unknown');
+  assert.match(capped.reason, /entry limit/);
+
+  try { fs.symlinkSync(path.join(skill, 'SKILL.md'), path.join(skill, 'alias.md')); } catch {
+    t.diagnostic('symlink creation unavailable on this platform');
+    return;
+  }
+  const linked = artifactTreeDigest(skill, { fsImpl: fixtureFs(root) });
+  assert.equal(linked.status, 'unknown');
+  assert.match(linked.reason, /symlink/);
 });
 
 test('an unreadable catalog surface has no count, and the total it feeds is a floor', (t) => {

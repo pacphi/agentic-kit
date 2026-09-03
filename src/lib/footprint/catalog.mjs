@@ -2,6 +2,7 @@
 // per-source occurrences, and bounded entrypoint digests. Bodies never leave the
 // collector; traversal never follows a symlink or escapes a declared root.
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import {
   claudeDir, claudeUserMcpPath,
@@ -12,15 +13,22 @@ import { readJson } from '../settings.mjs';
 import { inspectCodexPlugins } from '../codex-plugins.mjs';
 import { walkTree, statNode, measured } from './walk.mjs';
 import {
-  artifactDigest, buildCatalogSourceStamps, buildProjectPressure, collectNativePluginInventory, pluginRefParts,
+  artifactDigest, artifactTreeDigest, buildCatalogSourceStamps, buildProjectPressure, collectNativePluginInventory, pluginRefParts,
 } from './catalog-evidence.mjs';
 import { collectConfigSurface } from './catalog-config.mjs';
+import { inspectProjectArtifacts, summarizeArtifactTracking } from './catalog-project-evidence.mjs';
 import { catalogSurfaceSpecs, pluginCapabilitySpecs } from './catalog-surfaces.mjs';
 
 export { collectConfigSurface } from './catalog-config.mjs';
 
 /** A capped surface reports a floor, never a total. */
 const MAX_NAMES = 4096;
+const ARTIFACT_FILES = Symbol('catalogArtifactFiles');
+const canonical = (value) => {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]));
+};
 
 export const CATALOG_KINDS = ['skill', 'agent', 'command', 'plugin', 'mcpServer'];
 export const CATALOG_HOSTS = ['claude', 'codex', 'opencode'];
@@ -86,10 +94,14 @@ const readMarkerDirs = (root, marker, opts = {}) => readNames(root, {
   dirDepth: 2,
   accept: (name) => name === marker,
   nameOf: (file) => relativeName(root, path.dirname(file)),
-  entryOf: (file) => ({
-    itemPath: path.dirname(file), sourceFile: file,
-    digest: artifactDigest(file, opts),
-  }),
+  entryOf: (file) => {
+    const definition = artifactTreeDigest(path.dirname(file), opts);
+    return {
+      itemPath: path.dirname(file), sourceFile: file,
+      digest: artifactDigest(file, opts), definition: { ...definition, files: undefined },
+      artifactFiles: definition.files ?? [],
+    };
+  },
   ...opts,
 });
 
@@ -98,7 +110,8 @@ const readMarkdownNames = (root, opts = {}) => readNames(root, {
   dirDepth: 3,
   accept: (name) => name.endsWith('.md') && !/^readme\.md$/i.test(name),
   nameOf: (file) => relativeName(root, file, { strip: '.md' }),
-  entryOf: (file) => ({ itemPath: file, sourceFile: file, digest: artifactDigest(file, opts) }),
+  entryOf: (file) => ({ itemPath: file, sourceFile: file, digest: artifactDigest(file, opts),
+    definition: artifactDigest(file, opts), artifactFiles: [file] }),
   ...opts,
 });
 
@@ -107,7 +120,8 @@ const readFileStems = (root, exts, opts = {}) => readNames(root, {
   dirDepth: 0,
   accept: (name) => exts.includes(path.extname(name)),
   nameOf: (file) => path.basename(file, path.extname(file)),
-  entryOf: (file) => ({ itemPath: file, sourceFile: file }),
+  entryOf: (file) => ({ itemPath: file, sourceFile: file, digest: artifactDigest(file, opts),
+    definition: artifactDigest(file, opts), artifactFiles: [file] }),
   ...opts,
 });
 
@@ -117,12 +131,19 @@ function readManifestKeys(file, pick, { fsImpl = fs } = {}) {
   if (head.status === 'unknown') {
     return emptyReading(head.reason === 'ENOENT' ? 'absent' : 'degraded', head.reason);
   }
-  const doc = readJson(file, null);
-  if (doc === null) return emptyReading('degraded', 'EPARSE');
+  let doc;
+  try { doc = JSON.parse(fsImpl.readFileSync(file, 'utf8')); }
+  catch { return emptyReading('degraded', 'EPARSE'); }
   const bag = pick(doc);
   if (!bag || typeof bag !== 'object') return { ...emptyReading('ok', null), names: [] };
   const names = Object.keys(bag);
-  return { status: 'ok', reason: null, names, entries: names.map((name) => ({ name })), partial: false, truncated: false };
+  const configDigest = (value) => measured(createHash('sha256')
+    .update(JSON.stringify(canonical(value)))
+    .digest('hex'));
+  return { status: 'ok', reason: null, names, entries: names.map((name) => ({
+    name, itemPath: file, sourceFile: file, digest: configDigest(bag[name]),
+    definition: configDigest(bag[name]), artifactFiles: [file],
+  })), partial: false, truncated: false };
 }
 
 /** TOML table names under `section`, exported for tests. */
@@ -146,7 +167,26 @@ function readTomlTables(file, section, { fsImpl = fs } = {}) {
     return emptyReading(error.code === 'ENOENT' ? 'absent' : 'degraded', error.code ?? 'io');
   }
   const names = tomlTableNames(source, section);
-  return { status: 'ok', reason: null, names, entries: names.map((name) => ({ name })), partial: false, truncated: false };
+  const headers = [...source.matchAll(/^[ \t]*\[(?!\[)([^\]\n]+)\][ \t]*(?:#.*)?$/gm)];
+  const digestFor = (name) => {
+    const quoted = `${section}."${name.replace(/"/g, '\\"')}"`;
+    const bare = `${section}.${name}`;
+    const blocks = headers.flatMap((header, index) => {
+      const table = header[1].trim();
+      const isBase = table === bare || table === quoted;
+      const isChild = table.startsWith(`${bare}.`) || table.startsWith(`${quoted}.`);
+      if (!isBase && !isChild) return [];
+      const body = source.slice(header.index + header[0].length, headers[index + 1]?.index ?? source.length);
+      const suffix = isBase ? '' : table.slice((table.startsWith(quoted) ? quoted : bare).length);
+      const lines = body.split(/\r?\n/).map((line) => line.trim())
+        .filter((line) => line && !line.startsWith('#')).sort();
+      return [{ suffix, lines }];
+    }).sort((a, b) => a.suffix.localeCompare(b.suffix));
+    return measured(createHash('sha256').update(JSON.stringify(blocks)).digest('hex'));
+  };
+  return { status: 'ok', reason: null, names, entries: names.map((name) => ({
+    name, itemPath: file, sourceFile: file, digest: digestFor(name), definition: digestFor(name), artifactFiles: [file],
+  })), partial: false, truncated: false };
 }
 
 /** Claude's installed-plugin manifest and newest install root per full ref. */
@@ -282,12 +322,34 @@ function mergeCatalogItem(items, spec, entry) {
     version: spec.provider.version ?? null, cacheGeneration: spec.provider.cacheGeneration ?? null,
     enabled: spec.provider.enabled ?? null, evidence: spec.provider.evidence ?? null,
   } : null;
-  item.presence.push({
+  const presence = {
     host: spec.host, surface: spec.id, path: spec.path,
     itemPath: entry.itemPath ?? null, sourceFile: entry.sourceFile ?? null,
     scope: spec.scope ?? 'unknown', project: spec.project ?? null,
     provider, plugin: entry.plugin ?? null, digest: entry.digest ?? null,
-  });
+    definition: entry.definition ?? entry.digest ?? null,
+  };
+  Object.defineProperty(presence, ARTIFACT_FILES, { value: entry.artifactFiles ?? [], enumerable: false });
+  item.presence.push(presence);
+}
+
+function addProjectTracking(items, inspect) {
+  const byProject = new Map();
+  for (const item of items.values()) for (const presence of item.presence) {
+    if (presence.scope !== 'project' || !presence.project) continue;
+    const files = presence[ARTIFACT_FILES];
+    if (!files.length) continue;
+    if (!byProject.has(presence.project)) byProject.set(presence.project, []);
+    byProject.get(presence.project).push({ presence, files });
+  }
+  for (const [project, occurrences] of byProject) {
+    const files = [...new Set(occurrences.flatMap((entry) => entry.files))];
+    let facts;
+    try { facts = inspect(project, files); } catch { facts = new Map(); }
+    for (const occurrence of occurrences) {
+      occurrence.presence.tracking = summarizeArtifactTracking(occurrence.files, facts);
+    }
+  }
 }
 
 /** Read every spec once, folding hits into deduplicated CatalogItems and
@@ -442,6 +504,7 @@ export function collectCatalog({
   collectNativePlugins = collectNativePluginInventory,
   nativePlugins = null,
   includePluginSurfaces = true,
+  inspectProjectArtifacts: inspectProjectArtifactsImpl = inspectProjectArtifacts,
 } = {}) {
   const asOf = now();
   const io = { walk, limits, fsImpl };
@@ -460,6 +523,7 @@ export function collectCatalog({
   const specs = [...base.specs, ...plugins.specs];
 
   const { items, surfaces } = readCatalogSurfaces(specs);
+  addProjectTracking(items, inspectProjectArtifactsImpl);
   const { incomplete, incompleteByHost } = trackIncompleteness(surfaces);
   const list = sortCatalogItems(items);
   const counts = tallyCatalogCounts(list, asOf, incomplete);
@@ -469,7 +533,7 @@ export function collectCatalog({
   const partial = surfaces.filter((surface) => surface.partial).map((surface) => surface.id);
 
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     asOf,
     hosts: CATALOG_HOSTS,
     kinds: CATALOG_KINDS,
