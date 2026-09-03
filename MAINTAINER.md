@@ -25,7 +25,7 @@ release this kit. User-facing docs live in [README.md](README.md); this file is 
 ### CLI shape (`bin/agentic-kit.mjs`)
 
 - **Porcelain** (daily): `setup`, `status`, `sync`, `dashboard`, `admin`, `usage`, `run`,
-  `host`, `uninstall`. Bare `ak` → `status --hint`. (`dashboard`, `admin`, and `host`
+  `host`, `maintain`, `uninstall`. Bare `ak` → `status --hint`. (`dashboard`, `admin`, and `host`
   are also reachable under `ak x`.)
 - **Plumbing** (power users): `ak x admin | daemon-gc | dashboard | harvest | host | mcp |
   reference | statusline | verify | improvement-eval`.
@@ -40,7 +40,7 @@ release this kit. User-facing docs live in [README.md](README.md); this file is 
 bin/agentic-kit.mjs      # single entrypoint — arg parse + command dispatch (PORCELAIN/PLUMBING maps)
 src/
   commands/              # porcelain verbs
-    setup.mjs  status.mjs  sync.mjs  run.mjs  uninstall.mjs
+    setup.mjs  status.mjs  sync.mjs  run.mjs  maintain.mjs  uninstall.mjs
     x/                   # plumbing verbs
       admin.mjs  daemon-gc.mjs  dashboard.mjs  harvest.mjs  host.mjs  mcp.mjs  reference.mjs  statusline.mjs  verify.mjs
   lib/                   # the engine — each file is one concern
@@ -67,6 +67,7 @@ src/
     browser.mjs          # openInBrowser — shared by dashboard + admin
     usage-index.mjs      # canonical usage aggregation by host, provider, model, project, and category
     model-inventory/     # model evidence contracts, source adapters, snapshots, diffs, impact, read models
+    maintenance/         # findings, sealed plans, exact providers, receipts, recovery, and transaction journal
     npx.mjs              # stale npx-cache detection/prune
     mcp.mjs  settings.mjs  config.mjs  paths.mjs  statusline.mjs
     rvf.mjs  daemons.mjs  exec.mjs  output.mjs
@@ -78,8 +79,10 @@ tests/
   statusline-segments.test.cjs      # statusline renderer suite
 docs/
   DEJA-VU.md             # managed companion lifecycle and privacy runbook (shipped)
+  DASHBOARD.md           # local dashboard navigation, evidence, and guarded action surfaces (shipped)
   HOST-SUPPORT.md        # canonical host/Ruflo/AQE/Brain compatibility matrix (shipped)
   INSTALLATION.md        # package scope versus machine/user/project effects (shipped)
+  MAINTENANCE.md         # operator workflow, provider matrix, receipts, and recovery runbook (shipped)
   MODELS.md              # model lifecycle inventory and read-only planning guide (shipped)
   PROVIDERS.md           # provider and routing guide (shipped)
   SETUP.md               # setup mutation contract (shipped)
@@ -92,16 +95,17 @@ docs/
 ```
 
 **Published tarball** = the `files` whitelist in `package.json`:
-`bin/agentic-kit.mjs`, `src/`, `claude/`, `docs/DEJA-VU.md`, `docs/HOST-SUPPORT.md`, `docs/HOOKS.md`,
+`bin/agentic-kit.mjs`, `src/`, `claude/`, `docs/DEJA-VU.md`, `docs/DASHBOARD.md`, `docs/HOST-SUPPORT.md`, `docs/HOOKS.md`,
 `docs/INSTALLATION.md`, `docs/MODELS.md`, `docs/PROVIDERS.md`, `docs/SETUP.md`,
-`docs/TROUBLESHOOTING.md`, `docs/UPGRADING.md`, `docs/CODEX-STATUSLINE.md`,
+`docs/MAINTENANCE.md`, `docs/TROUBLESHOOTING.md`, `docs/UPGRADING.md`, `docs/CODEX-STATUSLINE.md`,
 `docs/adr/0015-managed-codex-native-statusline.md`,
 `docs/adr/0032-model-lifecycle-intelligence.md`,
 `docs/adr/0033-retire-codex-mcp-and-bound-qe-court-participants.md`,
 `docs/adr/0043-managed-ruflo-browser-executor.md`,
+`docs/adr/0044-receipt-aware-maintenance-control-plane.md`,
 `tests/live/aqe-external-provider-transport.test.mjs`,
 `tests/live/qe-court-participant-transport.test.mjs`, and
-`docs/ddd/model-lifecycle-intelligence.md`. Generated workspace state under
+`docs/ddd/maintenance.md`, `docs/ddd/model-lifecycle-intelligence.md`. Generated workspace state under
 the shipped source trees is explicitly excluded. Nothing else ships — verify with
 `npm pack --dry-run` before a release if you touch `files`.
 
