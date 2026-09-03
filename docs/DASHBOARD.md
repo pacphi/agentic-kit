@@ -504,6 +504,12 @@ contributions are separate columns; exact skill-name and bounded entrypoint-body
 separate evidence. The table always says that context inclusion and cutoff are host-owned and
 unknown. Filesystem presence must not be read as “loaded into this session.”
 
+A session cwd is only a discovery candidate; it does not confer project scope. If that cwd makes a
+candidate surface resolve to the same host, kind, and path as a user surface—for example,
+`/Users/name/.agents/skills` beneath a home-directory session—the user occurrence wins and no
+project-pressure row is fabricated. One shared user surface carried by two hosts remains visible on
+both hosts.
+
 The presence matrix can be filtered independently by kind, host, and source scope. Rows name their
 provider/version and body variants where known. Plugin inventory prefers the hosts' native list
 commands and labels manifest/config/cache fallback as partial; installed-disabled plugins stay in

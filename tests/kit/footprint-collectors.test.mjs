@@ -928,6 +928,47 @@ test('catalog includes project-scoped Codex skills from .agents/skills', (t) => 
   assert.equal(result.surfaces.find((surface) => surface.id === `codex-project-skills:${project}`)?.count, 1);
 });
 
+test('catalog never reclassifies a user capability root as project-local', (t) => {
+  const fixtureRoots = catalogFixture(t);
+  const { root, ...baseRoots } = fixtureRoots;
+  const userHome = path.join(root, 'user-home');
+  const claudeRoot = path.join(userHome, '.claude');
+  const agentsRoot = path.join(userHome, '.agents');
+
+  write(path.join(claudeRoot, 'skills', 'claude-user', 'SKILL.md'), 'claude user skill\n');
+  write(path.join(claudeRoot, 'agents', 'reviewer.md'), 'claude user agent\n');
+  write(path.join(claudeRoot, 'commands', 'review.md'), 'claude user command\n');
+  write(path.join(agentsRoot, 'skills', 'shared-user', 'SKILL.md'), 'shared user skill\n');
+
+  const result = collectCatalog({
+    ...baseRoots, claudeRoot, agentsRoot, cwd: root, projects: [userHome],
+    now: () => 1_700_000_000_000, includePluginSurfaces: false, fsImpl: fixtureFs(root),
+  });
+
+  for (const item of result.items) {
+    const sameFileInTwoScopes = item.presence.some((left) => item.presence.some((right) => (
+      left.host === right.host
+      && left.sourceFile === right.sourceFile
+      && left.scope !== right.scope
+    )));
+    assert.equal(sameFileInTwoScopes, false,
+      `${item.kind}:${item.name} must not be both user- and project-scoped on one host`);
+  }
+
+  assert.equal(result.surfaces.some((surface) => surface.scope === 'project'
+    && surface.project === userHome), false,
+  'a census cwd whose project roots are the user roots contributes no project surfaces');
+
+  const userPressure = result.projects.find((row) => row.project === userHome);
+  assert.equal(userPressure.guidance.length, 0,
+    'the user home must not produce project-skill remediation guidance');
+  assert.deepEqual(
+    result.items.find((item) => item.name === 'shared-user')?.hosts.sort(),
+    ['codex', 'opencode'],
+    'one shared user skill can legitimately be carried by both hosts',
+  );
+});
+
 test('catalog hashes bounded entrypoints but never returns their bodies', (t) => {
   const fixtureRoots = catalogFixture(t);
   const { root, ...roots } = fixtureRoots;

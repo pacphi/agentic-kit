@@ -17,6 +17,16 @@ export function catalogSurfaceSpecs(roots, readers, io) {
     { id: 'claude-commands', host: 'claude', kind: 'command', scope: 'user', path: at(claudeRoot, 'commands'), read: (p) => markdown(p, io) },
     { id: 'claude-user-mcp', host: 'claude', kind: 'mcpServer', scope: 'user', path: claudeMcpFile, read: (p) => manifest(p, (d) => d?.mcpServers, io) },
   ];
+  const userSurfaceKeys = new Set(specs.map((spec) => (
+    `${spec.host}::${spec.kind}::${path.resolve(spec.path)}`
+  )));
+  // ~/.agents/skills is one user-level source shared by Codex and OpenCode.
+  // Its declarative specs are appended below to retain the established surface
+  // order, so register their identities here before project candidates are
+  // considered.
+  for (const host of ['codex', 'opencode']) {
+    userSurfaceKeys.add(`${host}::skill::${path.resolve(at(agentsRoot, 'skills'))}`);
+  }
   const launchingRoot = repoRoot(cwd);
   if (launchingRoot) {
     specs.push({ id: 'claude-project-mcp', host: 'claude', kind: 'mcpServer', scope: 'project', project: launchingRoot,
@@ -26,13 +36,21 @@ export function catalogSurfaceSpecs(roots, readers, io) {
     .filter(Boolean).map((project) => path.resolve(typeof project === 'string' ? project : project.path)))];
   for (const project of catalogProjects) {
     const claudeProject = at(project, '.claude');
-    specs.push(
+    const projectSpecs = [
       { id: `claude-project-skills:${project}`, host: 'claude', kind: 'skill', scope: 'project', project, path: at(claudeProject, 'skills'), read: (p) => marker(p, 'SKILL.md', io) },
       { id: `claude-project-agents:${project}`, host: 'claude', kind: 'agent', scope: 'project', project, path: at(claudeProject, 'agents'), read: (p) => markdown(p, io) },
       { id: `claude-project-commands:${project}`, host: 'claude', kind: 'command', scope: 'project', project, path: at(claudeProject, 'commands'), read: (p) => markdown(p, io) },
       { id: `codex-project-skills:${project}`, host: 'codex', kind: 'skill', scope: 'project', project, path: at(project, '.agents', 'skills'), read: (p) => marker(p, 'SKILL.md', io) },
       { id: `opencode-project-skills:${project}`, host: 'opencode', kind: 'skill', scope: 'project', project, path: at(project, '.agents', 'skills'), read: (p) => marker(p, 'SKILL.md', io) },
-    );
+    ];
+    // A transcript cwd can be the user's home rather than a project. In that
+    // case `<cwd>/.claude/*` and `<cwd>/.agents/skills` are the exact user
+    // surfaces above. Preserve cross-host sharing, but never assign the same
+    // host/kind/path both user and project scope: that fabricates project
+    // pressure and unsafe remediation context from one physical source.
+    specs.push(...projectSpecs.filter((spec) => !userSurfaceKeys.has(
+      `${spec.host}::${spec.kind}::${path.resolve(spec.path)}`,
+    )));
   }
   specs.push(
     { id: 'codex-skills', host: 'codex', kind: 'skill', scope: 'user', path: at(codexRoot, 'skills'), read: (p) => marker(p, 'SKILL.md', io) },

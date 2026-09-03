@@ -435,6 +435,12 @@ including `~/.agents/skills`, project `.agents/skills`, and plugin
 manifest/config/cache fallback stays visible as partial evidence. Installed-disabled plugins remain
 inventory rows but do not contribute enabled plugin capabilities.
 
+Project discovery does not confer project scope. A session may have used the user home as its cwd;
+in that case `<cwd>/.claude/*` and `<cwd>/.agents/skills` alias the declared user surfaces. Catalog
+rejects the project occurrence when host, kind, and resolved path match a user occurrence. The same
+user `~/.agents/skills` source may still appear on both Codex and OpenCode because that is a real
+cross-host availability relationship, not a second scope or physical copy.
+
 The project-pressure projection separates project, user, and enabled-plugin skill contributions
 per host and reports exact skill-name and matching-entrypoint relationships. Its summary groups
 one native disclosure per project, keeps the launching project first, and omits projects whose
@@ -624,21 +630,24 @@ payload verbatim, following the one-collector-two-surfaces precedent of the usag
    lower bound rather than a guess.
 10. **Catalog counts are observed inventory.** They state what is on disk per host surface,
     never desired state, and never upgrade Integration management's ownership facts.
-11. **LOC is approximate and says so.** Extension-bucketed line counts with stated exclusions;
+11. **One physical host surface has one scope.** A project candidate that resolves to the same
+    host, kind, and path as a user surface is not read a second time or projected as project-local.
+    Cross-host availability of one shared user surface remains explicit.
+12. **LOC is approximate and says so.** Extension-bucketed line counts with stated exclusions;
     no rendering presents them as authoritative. Lines belong to **languages** only: frameworks,
     SDKs and tools are detected by presence and carry no line count in the payload at all, so no
     surface can double-count the same bytes under a framework's name.
-12. **Same delivery protections as the rest of the dashboard.** Loopback, token auth, GET-only,
+13. **Same delivery protections as the rest of the dashboard.** Loopback, token auth, GET-only,
     zero egress; the absolute-path exception is deliberate, documented, and content-free.
-13. **Every platform reports what it can, and names what it cannot.** No section is switched off
+14. **Every platform reports what it can, and names what it cannot.** No section is switched off
     for a platform. Where a per-platform probe fails, that field alone degrades with its reason
     and the row keeps every other measurement; a row is never dropped for being unattributable.
-14. **Sizes are counted once, and every exclusion is stated.** In the largest-consumers ranking
+15. **Sizes are counted once, and every exclusion is stated.** In the largest-consumers ranking
     nested roots are counted at the outermost row only; enclosed rows are breakdowns that explain
     their parent rather than competing with it; a residual row makes every breakdown add up to
     its parent; absent roots are listed as absent rather than ranked as zero-byte consumers; and
     a category excluded by default — project working trees — states its exclusion in the payload.
-15. **Reclaimable tiers are never summed together.** `regenerable` and `review` are separate
+16. **Reclaimable tiers are never summed together.** `regenerable` and `review` are separate
     promises with separate totals; `combined` is `null` by design. Only `bytesMeaning:
     'candidate'` rows are summable, and a tier whose rows describe overlapping paths reports
     unknown-with-reason rather than counting the same bytes twice.

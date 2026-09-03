@@ -21,6 +21,10 @@
 - **Updated:** 2026-09-03 — ADR-0044 implements Maintenance as a separate control plane under the
   System shell. Machine Footprint collectors, Catalog, pressure, and System measurement routes
   remain read-only.
+- **Updated:** 2026-09-03 — a session cwd that aliases a host user root no longer creates a
+  project occurrence: one host/kind/path cannot be both user and project scope, while a shared
+  user root carried by different hosts remains explicit cross-host evidence. The FootprintSnapshot
+  schema advances to v3 so cached v2 scope aliases cannot be replayed.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0005](0005-dashboard-in-page-routing-reveal.md),
   [ADR-0007](0007-maintainer-admin-local-telemetry.md),
@@ -44,6 +48,10 @@
 > disclosure per project. Inventory completeness and model-context inclusion are separate facts;
 > hosts do not currently report the latter, so that caveat appears once rather than as a repeated
 > `complete · context unknown` row label. The all-kind detail remains in the Catalog matrix.
+> Project discovery may observe a user home as a session cwd, but discovery alone cannot change a
+> capability's scope. Catalog rejects any project candidate whose host, kind, and resolved surface
+> path equal an already declared user surface. This removes false home-directory pressure without
+> requiring Git and preserves legitimate non-repository project-local skills.
 > ADR-0044 implements the Maintenance control-plane contract; its placement under System
 > does not add mutation to this context's collectors or routes.
 
