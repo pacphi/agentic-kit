@@ -221,3 +221,90 @@ test('projects measure only hosted repositories with recorded sessions and count
     },
   });
 });
+
+test('project measurement reuses node_modules roots observed by its complete working-tree walk', (t) => {
+  const root = fixture(t, 'project-node-modules-reuse');
+  const project = path.join(root, 'repo');
+  fs.mkdirSync(path.join(project, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(project, 'index.mjs'), 'export default 1;\n');
+  fs.writeFileSync(path.join(project, '.git', 'config'),
+    '[remote "origin"]\n\turl = https://github.com/pacphi/repo.git\n');
+  fs.mkdirSync(path.join(project, 'node_modules', 'pkg'), { recursive: true });
+  fs.writeFileSync(path.join(project, 'node_modules', 'pkg', 'index.js'), 'module.exports = 1;\n');
+
+  const walked = [];
+  const result = collectProjects({
+    projects: [{ path: project, label: 'repo', hosts: ['codex'] }],
+    walk(target, options) {
+      walked.push(target);
+      return walkTree(target, options);
+    },
+    fsImpl: fs,
+    loc: true,
+    now: () => 1,
+  });
+
+  assert.equal(result.projects[0].nodeModulesBytes.value,
+    fs.statSync(path.join(project, 'node_modules', 'pkg', 'index.js')).size);
+  assert.equal(walked.filter((target) => target === project).length, 2,
+    'working-tree bytes and stack detection are the only full project-root walks');
+  assert.equal(walked.length, 4,
+    'tree, .git, one node_modules payload, and stack are the complete walk budget');
+});
+
+test('project measurement falls back to bounded dependency discovery after a degraded tree walk', (t) => {
+  const root = fixture(t, 'project-node-modules-fallback');
+  const project = path.join(root, 'repo');
+  const packages = path.join(project, 'packages');
+  const dependencyFile = path.join(packages, 'app', 'node_modules', 'pkg', 'index.js');
+  fs.mkdirSync(path.join(project, '.git'), { recursive: true });
+  fs.mkdirSync(path.dirname(dependencyFile), { recursive: true });
+  fs.writeFileSync(path.join(project, 'index.mjs'), 'export default 1;\n');
+  fs.writeFileSync(path.join(project, '.git', 'config'),
+    '[remote "origin"]\n\turl = https://github.com/pacphi/repo.git\n');
+  fs.writeFileSync(dependencyFile, 'module.exports = 1;\n');
+  let packagesReads = 0;
+  const fsImpl = {
+    ...fs,
+    readdirSync(target, options) {
+      if (path.resolve(target) === path.resolve(packages) && packagesReads++ === 0) {
+        throw Object.assign(new Error('transient fixture denial'), { code: 'EACCES' });
+      }
+      return fs.readdirSync(target, options);
+    },
+  };
+
+  const row = collectProjects({
+    projects: [{ path: project, label: 'repo', hosts: ['codex'] }],
+    fsImpl,
+    loc: false,
+    now: () => 1,
+  }).projects[0];
+
+  assert.equal(row.treeBytes.partial, true, 'the initial degradation remains disclosed');
+  assert.deepEqual(row.nodeModulesRoots, [path.join(packages, 'app', 'node_modules')]);
+  assert.equal(row.nodeModulesBytes.value, fs.statSync(dependencyFile).size,
+    'a degraded observation never authorizes treating unseen dependencies as absent');
+});
+
+test('project dependency reuse preserves the hidden-ancestor exclusion', (t) => {
+  const root = fixture(t, 'project-node-modules-hidden');
+  const project = path.join(root, 'repo');
+  const hiddenDependency = path.join(project, '.cache', 'node_modules', 'pkg', 'index.js');
+  fs.mkdirSync(path.join(project, '.git'), { recursive: true });
+  fs.mkdirSync(path.dirname(hiddenDependency), { recursive: true });
+  fs.writeFileSync(path.join(project, 'index.mjs'), 'export default 1;\n');
+  fs.writeFileSync(path.join(project, '.git', 'config'),
+    '[remote "origin"]\n\turl = https://github.com/pacphi/repo.git\n');
+  fs.writeFileSync(hiddenDependency, 'module.exports = 1;\n');
+
+  const row = collectProjects({
+    projects: [{ path: project, label: 'repo', hosts: ['codex'] }],
+    fsImpl: fs,
+    loc: false,
+    now: () => 1,
+  }).projects[0];
+
+  assert.deepEqual(row.nodeModulesRoots, []);
+  assert.equal(row.nodeModulesBytes.value, 0);
+});

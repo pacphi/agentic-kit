@@ -361,6 +361,29 @@ export function nodeModulesRoots(root, { walk = walkTree, maxDepth = NODE_MODULE
   return roots;
 }
 
+/** Observe the same top-most dependency roots while the working-tree byte walk
+ * is already visiting every directory. Hidden ancestors remain excluded from
+ * dependency attribution without excluding their ordinary files from the
+ * working-tree byte figure. The observation is reusable only when that walk is
+ * complete; a cap or unreadable subtree triggers the independent bounded search
+ * above so an optimization can never erase evidence. */
+function nodeModulesObserver(root) {
+  const roots = [];
+  return {
+    roots,
+    skipDir(dir, name, depth) {
+      if (name !== 'node_modules') return OVERHEAD_DIRS.has(name);
+      const relativeParent = path.relative(root, path.dirname(dir));
+      const belowHiddenDirectory = relativeParent.split(path.sep)
+        .some((part) => part && part.startsWith('.'));
+      if (depth <= NODE_MODULES_MAX_DEPTH && !belowHiddenDirectory && roots.length < 256) {
+        roots.push(dir);
+      }
+      return true;
+    },
+  };
+}
+
 // ── assembly ──────────────────────────────────────────────────────────────────
 
 /** The row for a project whose path could not be measured at all. Every figure is
@@ -412,7 +435,8 @@ export function measureProject(project, {
 } = {}) {
   const root = project.path;
   const common = { ...limits, fsImpl, asOf };
-  const tree = walkNode(walk, root, { ...common, skipDir: (dir, name) => OVERHEAD_DIRS.has(name) });
+  const observedModules = nodeModulesObserver(root);
+  const tree = walkNode(walk, root, { ...common, skipDir: observedModules.skipDir });
 
   // A project whose ROOT is gone or unreadable is not a project measuring zero
   // bytes — it is a project we could not measure. `rootMeasurements` turns an
@@ -429,7 +453,12 @@ export function measureProject(project, {
 
   const git = walkNode(walk, path.join(root, '.git'), common);
 
-  const moduleRoots = nodeModulesRoots(root, { walk, fsImpl });
+  // A complete tree walk has already observed every top-most dependency root.
+  // If it was capped or degraded, repeat the purpose-built search: its distinct
+  // limits may still recover evidence the byte walk could not reach.
+  const moduleRoots = tree.complete
+    ? observedModules.roots
+    : nodeModulesRoots(root, { walk, fsImpl });
   // An empty roots list is a real, measured zero — this project has no
   // node_modules — which is why it is stated explicitly rather than handed to
   // sumMeasurements, whose empty-list zero would mean the same thing by accident.
