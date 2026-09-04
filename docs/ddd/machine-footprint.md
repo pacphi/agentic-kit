@@ -391,6 +391,16 @@ captures exact immediate-child byte, file, and newest-mtime totals; environment 
 totals while reading only each environment manifest for package names. If the parent walk is
 partial, degraded, or differently rooted, every environment retains its original bounded walk.
 
+#### Accepted evolution: streaming observation forest
+
+[ADR-0047](../adr/0047-streaming-observation-forest.md) generalizes these local reuse seams into a
+scan planner. Collectors will declare bounded `ObservationSpec`s before acquisition; a lexical path
+trie will route one physical entry to each compatible semantic reducer. Each virtual walk keeps its
+own caps, pruning, acceptance, and degradation state, so fusion reduces physical I/O without merging
+the questions collectors answer. The forest is ephemeral and streaming—not a persisted file index.
+Until that planner lands, `walkTree()` and the existing complete-observation fallbacks remain the
+authoritative implementation.
+
 This is deep-tier work by construction — a 22 GB content-addressable cache is ~10⁵ files — and it
 carries its own raised walk caps (`CONSUMER_WALK_LIMITS`: depth 24, 2,000,000 entries) because
 the walker's defaults were sized for install trees and transcript roots. Measured: rustup
@@ -745,6 +755,8 @@ normative and this table restates it for readers of this document.
 | Bytes meaning | Whether a candidate's bytes are the `candidate` subset it is about, or the `installed` size at that path offered as context on a review row |
 | Consumer root | A ranked top-level storage root. Nested rows are `breakdown`s of it, plus a synthesized residual, so bytes are counted once |
 | Scan-local observation | Ephemeral evidence acquired once during one explicit scan and reused only when path, timestamp, completeness, and reader contract satisfy the receiving collector; never a cross-scan cache |
+| ObservationSpec | An accepted ADR-0047 declaration of one virtual walk's lexical root, contract version, budgets, pruning, accepted metadata, reducer, and scan timestamp |
+| Observation forest | The accepted scan-local planner that routes one physical traversal through a lexical trie to independent compatible ObservationSpecs; it streams bounded reducer state and is not yet the authoritative walker |
 | Ever seen / on disk | `everSeen` is every project any host ever recorded a session in, deletions included; `onDisk` is the present candidate subset. Only candidates with a recorded host session and proven HTTPS destination enter the measured population |
 | Unresolved project | A transcript directory whose project path neither a declared `cwd` nor a filesystem-verified decode can name. Reported as such, never given a fabricated path; it makes `everSeen` a lower bound |
 | Stack detection | Per-project `languages` (which carry lines) and `stack` — frameworks, SDKs, tools — which carry presence only, plus the unrecognized tail of extensions and dependency names the registry could not name |

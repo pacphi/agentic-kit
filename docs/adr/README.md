@@ -54,6 +54,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0044](0044-receipt-aware-maintenance-control-plane.md) | Receipt-aware Maintenance control plane | Implemented |
 | [0045](0045-artifact-consumer-bindings-and-explicit-maintenance-scans.md) | Physical artifacts, host consumers, and explicit Maintenance scans | Implemented |
 | [0046](0046-scan-local-observation-reuse-and-nonblocking-deep-scans.md) | Scan-local observation reuse and nonblocking deep scans | Accepted |
+| [0047](0047-streaming-observation-forest.md) | Streaming observation forest for deep scans | Accepted |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude

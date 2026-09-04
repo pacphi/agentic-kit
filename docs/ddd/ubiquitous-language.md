@@ -76,6 +76,8 @@ token estimates never become observed token evidence. An absent or incompatible 
 | Ownership receipt | Exact record of a value written by `ak`, permitting narrow undo only while that value is unchanged |
 | Drift | Current state differs from the last value written or expected by `ak` |
 | Companion data | User-owned index, notes, privacy state, imports, and source transcripts; invoking a managed companion does not transfer ownership to `ak` |
+| ObservationSpec | A bounded virtual-walk declaration: lexical root, contract version, budgets, pruning, accepted metadata, reducer, and one scan timestamp |
+| Observation forest | A scan-local lexical trie that routes each physical filesystem event to independent compatible ObservationSpecs without retaining a cross-scan file index |
 
 Billing is a fact about a credentialed access path or observed execution, not an immutable vendor
 identity. A vendor may support subscription-backed host login and metered API-key use. Local
