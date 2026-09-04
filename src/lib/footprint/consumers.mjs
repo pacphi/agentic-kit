@@ -549,8 +549,9 @@ function measureFamily(desc, { walk, limits, asOf, fsImpl }) {
  * actually written, which would not merely mis-order the ranking, it would put a
  * figure larger than the disk at the top of it.
  *
- * The walker still owns the traversal; the extra lstat per file is what buys
- * `blocks`, which `onFile` does not carry. A platform that reports no usable
+ * The walker still owns the traversal and carries `blocks` from the lstat it
+ * already performs. Reusing that value avoids a second filesystem call for
+ * every file in the largest consumer tree. A platform that reports no usable
  * block count (Windows) falls back to that file's apparent size, so the row
  * degrades to the ordinary basis rather than to zero.
  *
@@ -566,12 +567,10 @@ function measureAllocated(desc, { walk, limits, asOf, fsImpl, platform = process
   const result = walk(desc.path, {
     ...limits,
     fsImpl,
-    onFile: ({ file, bytes, mtimeMs }) => {
+    onFile: ({ bytes, blocks, mtimeMs }) => {
       apparent += bytes;
       files += 1;
       if (newest === null || mtimeMs > newest) newest = mtimeMs;
-      let blocks;
-      try { blocks = Number(fsImpl.lstatSync(file).blocks); } catch { blocks = null; }
       // Zero blocks is a valid answer (an empty file, or one held entirely in
       // an inode); only a platform that reports no block count at all falls
       // back to apparent size, and that fallback is counted so the row can say
@@ -582,8 +581,9 @@ function measureAllocated(desc, { walk, limits, asOf, fsImpl, platform = process
       // the allocated total came out as 0 bytes for an entire machine while the
       // apparent total was right beside it. Estimating from apparent size is
       // the honest degradation, and `estimated` is what makes the row say so.
-      const usable = Number.isFinite(blocks) && blocks >= 0 && platform !== 'win32';
-      if (usable) allocated += blocks * 512;
+      const blockCount = Number(blocks);
+      const usable = Number.isFinite(blockCount) && blockCount >= 0 && platform !== 'win32';
+      if (usable) allocated += blockCount * 512;
       else { allocated += bytes; estimated += 1; }
     },
   });
