@@ -160,11 +160,10 @@ export const isCloudPlaceholder = (bytes, blocks, platform = process.platform) =
  *  is binary (a NUL byte in the first chunk) or unreadable — never 0, which would
  *  claim an empty file. Each chunk is counted and immediately overwritten; no file
  *  content is retained past this function or emitted anywhere. */
-function countFileLines(file, size, fsImpl) {
+function countFileLines(file, size, fsImpl, buffer) {
   let fd;
   try { fd = fsImpl.openSync(file, 'r'); } catch { return null; }
   try {
-    const buffer = Buffer.allocUnsafe(READ_CHUNK);
     let lines = 0;
     let read = 0;
     let lastByte = 0;
@@ -478,6 +477,10 @@ export function createStackObserver(root, {
   let tailTruncated = false;
   let nonSourceFiles = 0;
   let nonSourceBytes = 0;
+  // Source reads are sequential inside one observer. Reusing one fixed buffer
+  // avoids allocating and collecting 64 KiB for every source file while
+  // retaining the same bounded, non-retained content contract.
+  const lineBuffer = Buffer.allocUnsafe(READ_CHUNK);
 
   const note = (set, value) => { if (set.size < MAX_SIGNATURE_PATHS) set.add(value); };
   const relativeParts = (target) => path.relative(root, target).split(path.sep).filter(Boolean);
@@ -539,7 +542,7 @@ export function createStackObserver(root, {
     }
     if (bytes > MAX_FILE_BYTES) { skipped++; return; }
     if (placeholder) { skipped++; return; }
-    const counted = countFileLines(file, bytes, fsImpl);
+    const counted = countFileLines(file, bytes, fsImpl, lineBuffer);
     if (counted === null) { skipped++; return; }
     const bucket = lines.get(entry.id);
     if (bucket) { bucket.lines += counted; bucket.files += 1; } else {

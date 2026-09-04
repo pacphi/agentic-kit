@@ -583,6 +583,26 @@ test('project stack fallback preserves traversal callbacks without filtering sta
     'custom traversal callbacks make the parent observation ineligible for reuse');
 });
 
+test('stack detection reuses one bounded source-read buffer per observation', (t) => {
+  const root = fixture(t, 'stack-read-buffer');
+  fs.writeFileSync(path.join(root, 'one.js'), 'one();\n');
+  fs.writeFileSync(path.join(root, 'two.mjs'), 'two();\n');
+  const buffers = new Set();
+  const fsImpl = {
+    ...fs,
+    readSync(fd, buffer, offset, length, position) {
+      buffers.add(buffer);
+      return fs.readSync(fd, buffer, offset, length, position);
+    },
+  };
+
+  const result = detectStack(root, { fsImpl, asOf: 1 });
+
+  assert.equal(result.totalLines.value, 2);
+  assert.equal(buffers.size, 1,
+    'sequential source reads share one 64 KiB buffer instead of allocating per file');
+});
+
 test('project measurement falls back to bounded dependency discovery after a degraded tree walk', (t) => {
   const root = fixture(t, 'project-node-modules-fallback');
   const project = path.join(root, 'repo');
