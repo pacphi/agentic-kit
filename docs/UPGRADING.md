@@ -5,11 +5,12 @@ latest capability is *two* motions, not one: get the newer code, then turn the f
 This page exists because those two are easy to conflate — and `ak sync`, despite its name,
 only does the first.
 
-## 2026-09-03: System Catalog snapshot v2
+## 2026-09-03: System Catalog snapshot v6
 
 Catalog identity now preserves full plugin marketplace/version provenance and separates
-standalone capability identities from plugin-contributed identities. The Footprint snapshot schema
-therefore advances from v1 to v2; an older snapshot is reported as unreadable-by-this-build until
+standalone capability identities from plugin-contributed identities. Catalog v4 now also separates
+one physical artifact from each host ConsumerBinding, and the Footprint snapshot schema advances to
+v6. An older snapshot is reported as unreadable-by-this-build until
 you run `ak system --deep`. It is not migrated or silently shown under the new semantics.
 
 This issue #198 prerequisite closed through
@@ -46,10 +47,14 @@ ak maintain plan --findings FINDING_ID --executable
 ak maintain apply --plan PLAN_ID --digest SHA256 --actions ACTION_ID --yes
 ```
 
-Maintenance stores private, integrity-sealed plans and receipts under the current user's
-agentic-kit state directory. Existing System snapshot files remain read-only evidence inputs;
-Catalog schema v2 is still refreshed with `ak system --deep`. `ak sync` neither selects nor
+Maintenance stores private, integrity-sealed scan reports, plans, and receipts under the current
+user's agentic-kit state directory. Existing System snapshot files remain read-only evidence inputs;
+Catalog schema v4 is still refreshed with `ak system --deep`. `ak sync` neither selects nor
 executes Maintenance findings.
+
+Browser refresh now reads the saved Maintenance report without polling providers. Use **Scan now**
+or `ak maintain scan` for current provider/version evidence. A successful System deep rescan also
+chains one Maintenance scan after the snapshot is persisted.
 
 The first provider set is intentionally narrower than the inventory. Claude plugin disable,
 update, and remove; exact Codex plugin/MCP removal; exact receipt-owned skill archive; one bounded

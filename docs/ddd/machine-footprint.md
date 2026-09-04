@@ -154,9 +154,9 @@ FootprintSnapshot  { asOf, completeness, install, runtime, storage, catalog, pro
                                                                              persisted)
   storage:   StorageBreakdown     { nodes: category → host → project → session, growth, topN,
                                     reclaimables[], reclaimSummary: { tiers[], combined: null } }
-  catalog:   CatalogInventory v3  { items[], occurrences, scopes, providers/versions,
-                                    entrypoint/full-definition evidence, relationships,
-                                    project pressure, source stamps }
+  catalog:   CatalogInventory v4  { items[], physical artifacts, consumer bindings,
+                                    scopes, providers/versions, entrypoint/full-definition
+                                    evidence, relationships, project pressure, source stamps }
   projects:  ProjectFootprint[]   { path, label, remote?: {host, slug, webUrl}, stack: {languages,
                                     stack, unrecognized}, treeBytes, gitBytes, nodeModulesBytes,
                                     lastActivity }
@@ -421,12 +421,14 @@ promises less — never in the one that reads as free space.
 
 ### Catalog inventory
 
-`CatalogInventory v3` separates identity from relationship. Standalone artifacts still deduplicate
-by `(kind, normalized logical name)`, but a plugin contribution is keyed by kind, full
+`CatalogInventory v4` separates logical identity, physical artifacts, consumer bindings, and
+relationships. Standalone logical items still deduplicate by `(kind, normalized logical name)`,
+but a plugin contribution is keyed by kind, full
 `plugin@marketplace` producer identity, and logical name. Thus standalone `skill-creator` and
 `skill-creator@claude-plugins-official`'s contribution remain separate rows; explicit overlap
 groups report that their logical names, bounded entrypoint digests, or complete bounded definitions
-match.
+match. A physical artifact is counted once even when several hosts discover it. Each host edge is a
+separate consumer binding carrying its discovery mechanism and enabled state.
 
 Every occurrence retains host, surface, source scope (`user`, `project`, or `plugin`), project
 path, exact artifact path, plugin provider/version/enabled state, evidence authority, and bounded
@@ -453,7 +455,15 @@ Project discovery does not confer project scope. A session may have used the use
 in that case `<cwd>/.claude/*` and `<cwd>/.agents/skills` alias the declared user surfaces. Catalog
 rejects the project occurrence when host, kind, and resolved path match a user occurrence. The same
 user `~/.agents/skills` source may still appear on both Codex and OpenCode because that is a real
-cross-host availability relationship, not a second scope or physical copy.
+cross-host consumer relationship, not a second scope or physical copy. A disabled OpenCode
+Claude-compatibility binding remains evidence but is excluded from enabled host counts and project
+pressure.
+
+Host conventions are evidence inputs, not interchangeable rules. Claude, Codex, and OpenCode each
+document different discovery, precedence, and permission behavior. OpenCode's compatibility roots
+can make one Claude or Agent Skills artifact consumable by another host; that does not make OpenCode
+its owner. The adapter reads its bounded v1 `skills.paths` form, but reports the v2 `skills` array,
+JSONC-only resolution, and HTTP catalogs as incomplete until a versioned collector supports them.
 
 The project-pressure projection separates project, user, and enabled-plugin skill contributions
 per host and reports exact skill-name and matching-entrypoint relationships. Its summary groups
@@ -644,24 +654,27 @@ payload verbatim, following the one-collector-two-surfaces precedent of the usag
    lower bound rather than a guess.
 10. **Catalog counts are observed inventory.** They state what is on disk per host surface,
     never desired state, and never upgrade Integration management's ownership facts.
-11. **One physical host surface has one scope.** A project candidate that resolves to the same
+11. **Artifacts and consumers are independent.** One physical artifact is counted once. Every
+    host discovery edge is retained as a ConsumerBinding with its own enablement and evidence. A
+    host edge never fabricates another copy.
+12. **One physical host surface has one scope.** A project candidate that resolves to the same
     host, kind, and path as a user surface is not read a second time or projected as project-local.
     Cross-host availability of one shared user surface remains explicit.
-12. **LOC is approximate and says so.** Extension-bucketed line counts with stated exclusions;
+13. **LOC is approximate and says so.** Extension-bucketed line counts with stated exclusions;
     no rendering presents them as authoritative. Lines belong to **languages** only: frameworks,
     SDKs and tools are detected by presence and carry no line count in the payload at all, so no
     surface can double-count the same bytes under a framework's name.
-13. **Same delivery protections as the rest of the dashboard.** Loopback, token auth, GET-only,
+14. **Same delivery protections as the rest of the dashboard.** Loopback, token auth, GET-only,
     zero egress; the absolute-path exception is deliberate, documented, and content-free.
-14. **Every platform reports what it can, and names what it cannot.** No section is switched off
+15. **Every platform reports what it can, and names what it cannot.** No section is switched off
     for a platform. Where a per-platform probe fails, that field alone degrades with its reason
     and the row keeps every other measurement; a row is never dropped for being unattributable.
-15. **Sizes are counted once, and every exclusion is stated.** In the largest-consumers ranking
+16. **Sizes are counted once, and every exclusion is stated.** In the largest-consumers ranking
     nested roots are counted at the outermost row only; enclosed rows are breakdowns that explain
     their parent rather than competing with it; a residual row makes every breakdown add up to
     its parent; absent roots are listed as absent rather than ranked as zero-byte consumers; and
     a category excluded by default — project working trees — states its exclusion in the payload.
-16. **Reclaimable tiers are never summed together.** `regenerable` and `review` are separate
+17. **Reclaimable tiers are never summed together.** `regenerable` and `review` are separate
     promises with separate totals; `combined` is `null` by design. Only `bytesMeaning:
     'candidate'` rows are summable, and a tier whose rows describe overlapping paths reports
     unknown-with-reason rather than counting the same bytes twice.
@@ -674,7 +687,7 @@ normative and this table restates it for readers of this document.
 | Term | Meaning |
 |------|---------|
 | Footprint | The machine-resource cost of the toolchain: install bytes, runtime CPU/RSS, retained-data bytes, deployed inventory. The context's name; the surface is **System** |
-| FootprintSnapshot | The persisted result of a deep scan: `asOf`, completeness, and the deep-tier section models (install, storage, catalog, projects, consumers) |
+| FootprintSnapshot | The schema-v6 persisted result of a deep scan: `asOf`, completeness, and the deep-tier section models (install, storage, catalog, projects, consumers) |
 | Measurement | A value plus provenance: measured (with `asOf`), carried forward, or unknown-with-reason — unknown is never zero |
 | Partial measurement | A measured value known to be a lower bound because a contributing subtree was unreadable or capped; rendered as "≥ N" |
 | HostInstallation | One managed tool's install facts: version, install method, root, tree bytes, native addons |
@@ -691,6 +704,8 @@ normative and this table restates it for readers of this document.
 | Stack detection | Per-project `languages` (which carry lines) and `stack` — frameworks, SDKs, tools — which carry presence only, plus the unrecognized tail of extensions and dependency names the registry could not name |
 | CatalogItem | A canonical standalone or plugin-qualified identity with per-host/source occurrences and explicit name/digest relationships |
 | CatalogOccurrence | One host/source/project placement with provider/version/state, artifact path, bounded entrypoint/full-definition evidence, and optional Git state |
+| PhysicalArtifact | One measured filesystem or configuration entry, counted independently from how many hosts discover it |
+| ConsumerBinding | One host's discovery edge to a PhysicalArtifact, with surface, scope, project, discovery mechanism, enablement, and evidence authority |
 | Definition digest | SHA-256 over one complete bounded observed capability definition; equality proves those files match, not host selection, ownership, usage, or removal safety |
 | ProjectCapabilityPressure | Project/user/plugin contributions and exact overlap per project and host; context inclusion remains unknown |
 | ProjectFootprint | One project's size facts: approximate LOC by language, tree/`.git`/`node_modules` bytes, last activity, and an optional git-remote web link ("local only" when absent) |

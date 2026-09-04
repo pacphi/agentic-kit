@@ -30,6 +30,9 @@
   surfaces across Claude, Codex, and OpenCode; Git tracking is observed without becoming ownership.
   CatalogInventory advances to v3 and FootprintSnapshot to v4 so older evidence cannot be replayed
   as complete relationship evidence.
+- **Updated:** 2026-09-03 — ADR-0045 separates physical artifacts from host consumer bindings,
+  applies host-specific discovery and enablement, groups cross-host relationships once, and
+  advances CatalogInventory to v4 and FootprintSnapshot to v6.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0005](0005-dashboard-in-page-routing-reveal.md),
   [ADR-0007](0007-maintainer-admin-local-telemetry.md),
@@ -38,7 +41,8 @@
   [ADR-0014](0014-dashboard-auth-and-remediation.md),
   [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),
   [ADR-0024](0024-project-intelligence-telemetry.md),
-  [ADR-0044](0044-receipt-aware-maintenance-control-plane.md)
+  [ADR-0044](0044-receipt-aware-maintenance-control-plane.md),
+  [ADR-0045](0045-artifact-consumer-bindings-and-explicit-maintenance-scans.md)
 
 > **2026-09-03 amendment.** Catalog identity is no longer only `(kind, normalized name)`: a
 > standalone skill and a plugin-contributed skill with the same logical name are distinct catalog

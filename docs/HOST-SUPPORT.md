@@ -203,6 +203,22 @@ pre-tool hook that may resolve too late to block subagent dispatch
 
 ## Host-specific limitations
 
+### Capability discovery is host-specific
+
+The three hosts can consume the same physical skill without owning three copies. Claude Code uses
+personal/project `.claude/skills` plus plugin skills, Codex discovers `.agents/skills` from the
+working directory through the repository root plus the user root, and OpenCode additionally treats
+`.claude/skills` and `.agents/skills` as compatibility sources. OpenCode can disable its Claude
+compatibility. The dashboard therefore reports one artifact and separate host ConsumerBindings.
+
+The common `SKILL.md` authoring format does not establish the same precedence, permissions, model
+advertisement, or runtime loading. MCP registrations are also per host; equal server configuration
+does not prove equal scope, health, authentication, or authorization. See
+[ADR-0045](adr/0045-artifact-consumer-bindings-and-explicit-maintenance-scans.md) and the official
+[Claude](https://code.claude.com/docs/en/slash-commands),
+[Codex](https://developers.openai.com/codex/skills/), and
+[OpenCode](https://opencode.ai/docs/skills) skill documentation.
+
 ### Claude Code
 
 Claude has the broadest native surface, but remote plugin sync can omit hooks

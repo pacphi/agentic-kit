@@ -12,7 +12,8 @@
   [ADR-0014](0014-dashboard-auth-and-remediation.md),
   [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),
   [ADR-0025](0025-machine-footprint-metrics.md), and
-  [ADR-0041](0041-host-neutral-hook-configuration-assurance.md)
+  [ADR-0041](0041-host-neutral-hook-configuration-assurance.md), and
+  [ADR-0045](0045-artifact-consumer-bindings-and-explicit-maintenance-scans.md)
 
 ## Context
 
@@ -34,7 +35,7 @@ Regression coverage is in:
 
 | Requirement | Verified result | Deliberate limit |
 |-------------|-----------------|------------------|
-| Separate standalone and plugin contributions | Catalog v3 keys plugin capabilities by kind, full plugin-at-marketplace producer, and logical name | Matching names do not prove ownership or equivalence |
+| Separate standalone and plugin contributions | Catalog keys plugin capabilities by kind, full plugin-at-marketplace producer, and logical name | Matching names do not prove ownership or equivalence |
 | Preserve provider, version, and source scope | Occurrences retain host, surface, scope, project, path, producer/version/state, digest status, and evidence authority | Fallback evidence stays qualified |
 | Relate overlaps | Exact logical-name, bounded entrypoint-digest, and bounded full-definition relationships are distinct from identity | Definition equality does not prove host selection, ownership, or safe removal |
 | Explain project pressure | Project, user, and enabled-plugin contributions are separated by project and host | Presence does not prove model-context inclusion |
@@ -192,6 +193,11 @@ Every other route retains default non-GET rejection. POST requests require the p
 token, valid Host/Origin/Sec-Fetch-Site evidence, <code>application/json</code>, an exact schema, and
 a body no larger than 64 KiB. The SSE query-token exception does not apply. The dashboard has no
 recovery endpoint: it displays recovery-required evidence and directs the operator to the CLI.
+
+Plain <code>GET /api/maintenance</code> reads the latest persisted scan report and never polls a
+provider. The exact <code>?refresh=scan</code> query performs and atomically persists a provider scan;
+other or duplicate query parameters are rejected. The global browser poll remains passive. A
+successful persisted System deep rescan chains exactly one Maintenance scan. See ADR-0045.
 
 The view groups **Updates ready**, **Safe cleanup**, **Needs review**, **Unsupported or blocked**,
 and **Recent changes / Undo**. Every row exposes a direct imperative; the selected finding adds its

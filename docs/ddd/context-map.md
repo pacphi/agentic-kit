@@ -71,6 +71,11 @@ control-plane architecture as a secondary destination under System. Machine Foot
 Catalog, Advisory, and other System measurement routes remain non-mutating. See
 [Maintenance](maintenance.md).
 
+ADR-0045 separates one physical artifact from its host ConsumerBindings. Machine Footprint owns
+those observations; Maintenance consumes the active bindings as blast-radius evidence. Maintenance
+also owns explicit provider scans and their persisted reports. Dashboard polling reads the report
+and cannot silently become provider discovery.
+
 ### Hook configuration assurance
 
 Owns read-only, host-neutral discovery of lifecycle sources; normalized occurrences and

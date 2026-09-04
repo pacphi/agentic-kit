@@ -52,6 +52,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0042](0042-capability-aware-context-budget-intelligence.md) | Capability-aware context budget intelligence | Implemented |
 | [0043](0043-managed-ruflo-browser-executor.md) | Manage Ruflo's browser executor behind a replaceable boundary | Accepted |
 | [0044](0044-receipt-aware-maintenance-control-plane.md) | Receipt-aware Maintenance control plane | Implemented |
+| [0045](0045-artifact-consumer-bindings-and-explicit-maintenance-scans.md) | Physical artifacts, host consumers, and explicit Maintenance scans | Implemented |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude

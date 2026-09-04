@@ -68,6 +68,10 @@ Every finding retains identity, owner, source, capture health, completeness, aff
 missing evidence, and a prescriptive action label. Missing provider authority leaves a finding
 visible but report-only with a resource-specific reason.
 
+Affected consumers are host bindings, not inferred copies. One shared physical artifact carried by
+Claude, Codex, and OpenCode remains one artifact with a three-host blast radius. A disabled binding
+is visible evidence but is not treated as affected by a proposed change.
+
 ### CapabilityRelationship
 
 A relationship is typed evidence joining observed project and shared occurrences for the same host,
@@ -142,11 +146,16 @@ Installed/effective version, compatible candidate, producer/plugin version, sour
 generation, content digest, and evidence health are independent. “Available” is not “latest”, and
 “latest” is not automatically “recommended”.
 
-An issue #198 entrypoint digest covers only one bounded capability entrypoint. Catalog v3 also
+An issue #198 entrypoint digest covers only one bounded capability entrypoint. Catalog v4 also
 records a bounded full-definition digest over the observed regular files in a skill tree. Equality
 can support a relationship classification, but it still does not prove host selection, ownership,
 context loading, compatibility, or safe deletion. A full skill archive requires the stronger
 <code>agentic-kit.skill-tree-ownership/v1</code> receipt and exact current tree match.
+
+Version and provider claims are acquired only during an explicit Maintenance scan. The latest report
+is persisted privately with its capture time, coverage, completeness, Catalog/source fingerprint,
+and provider-evidence fingerprint. Plain report reads never invoke a provider. A stale or drifted
+report cannot retain executable capabilities.
 
 ## Policy
 
@@ -233,6 +242,10 @@ relationship findings. Resource, host, relationship, and
 text filters compose. Failed reads remain visible with **Retry report**; they do not collapse into
 blank panels. The view acts on one finding at a time and offers neither “Clean all” nor an aggregate
 reclaimable claim across safety classes.
+
+**Browser refresh** rereads the saved report. **Scan now** performs the exact
+<code>?refresh=scan</code> provider measurement and replaces that report atomically. A successful
+persisted System deep rescan chains one Maintenance scan, shared by concurrent callers.
 
 The HTTP allowlist is exact:
 

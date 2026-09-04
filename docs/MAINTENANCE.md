@@ -9,7 +9,11 @@ explicit batches, or interrupted-receipt recovery.
 
 ## Start with a scan
 
-The ordinary scan uses current System evidence:
+The dashboard first reads the latest saved report. Browser refresh and the header poll do not call
+providers. Press **Scan now** when you want current installed-version, ownership, and action
+eligibility evidence. The summary states how many providers were checked and when.
+
+The CLI equivalent performs an explicit provider scan using current System evidence:
 
     ak maintain scan
 
@@ -18,6 +22,8 @@ Ask for a fresh deep System measurement when source state may have changed:
     ak maintain scan --deep
 
 Deep scanning measures. It does not apply maintenance. Catalog and Advisory remain read-only.
+A successful persisted System deep rescan also chains one Maintenance provider scan. Concurrent
+deep-rescan callers share that scan rather than multiplying provider work.
 
 The view and CLI group findings as:
 
@@ -181,6 +187,16 @@ root under the current owner. Plugin-cache children are never direct skill targe
 
 Legacy, partial, modified, unreadable, ambiguous, or unreceipted trees stay report-only.
 
+One skill tree may be discovered by several hosts. Catalog counts that tree once and records a
+ConsumerBinding per host. Maintenance shows those active hosts under **Carried by** and includes
+them in the preview blast radius. Removing one project copy is never described as removing several
+copies merely because Claude, Codex, or OpenCode can all discover it.
+
+Discovery rules differ. Claude applies personal/project precedence and namespaces plugin skills;
+Codex discovers repository and user `.agents/skills`; OpenCode also discovers compatible
+`.claude/skills` and `.agents/skills` roots unless that compatibility is disabled. A shared
+`SKILL.md` format does not prove identical precedence, permissions, advertisement, or runtime use.
+
 ## Mutation lock recovery
 
 Maintenance serializes effects with an owner-private, integrity-sealed lock. It reclaims an
@@ -199,7 +215,7 @@ Use <code>ak maintain recover</code> for the receipt.
 
 ## State and privacy
 
-Plans and receipts are stored under the current user's agentic-kit state directory:
+Scan reports, plans, and receipts are stored under the current user's agentic-kit state directory:
 
 - POSIX: <code>$XDG_STATE_HOME/agentic-kit/maintenance</code>, or
   <code>~/.local/state/agentic-kit/maintenance</code>; and
@@ -217,6 +233,9 @@ Maintenance is the only dashboard mutation surface. Its exact routes are:
     POST /api/maintenance/plans
     POST /api/maintenance/apply
     POST /api/maintenance/undo
+
+The exact <code>GET /api/maintenance?refresh=scan</code> query is the read-only provider scan path;
+plain GET only reads the latest report. Unknown or duplicate query parameters are rejected.
 
 POST requires the per-session token in its header form, same-origin Host/Origin/Sec-Fetch-Site
 evidence, <code>application/json</code>, an exact schema, and at most 64 KiB. Apply and undo consume

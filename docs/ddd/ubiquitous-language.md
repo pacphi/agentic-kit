@@ -182,6 +182,8 @@ is what a user selects.
 | StorageNode | One node in the category → host → project → session breakdown: bytes + file count |
 | ReclaimableCandidate | An advisory row naming reclaimable space, its path, and its rationale — never an action |
 | CatalogItem | A canonical standalone or plugin-qualified capability identity with per-host/source occurrences; logical-name and digest overlap are relationships, not identity |
+| PhysicalArtifact | One measured filesystem or configuration entry, counted once regardless of how many hosts discover it |
+| ConsumerBinding | One host's evidence-qualified discovery edge to a PhysicalArtifact, including surface, scope, project, enablement, and mechanism |
 | Catalog occurrence | One observed capability placement: host, source scope, project, artifact path, producer/version/state, entrypoint/full-definition evidence, optional Git state, and evidence authority |
 | Project capability pressure | Per-project/per-host inventory of project, user, and enabled-plugin contributions plus exact-name/entrypoint overlap; never a claim about host context inclusion |
 | Entrypoint digest | SHA-256 of one bounded regular capability entrypoint; equality proves only those bytes, not supporting files, ownership, safety, or context loading |
@@ -212,6 +214,7 @@ These terms describe the implemented architecture in
 | ActionCapability | Ephemeral one-use authorization bound to a dashboard session, current plan digest, selected action IDs, source fingerprint, scope, safety class, and expiry |
 | TransactionReceipt | Private durable evidence binding intent, policy decision, exact inputs, before-state, fixed operation, result, verification, after-state, rollback, and compensation |
 | Source fingerprint | A digest over the complete bounded evidence set a plan depends on; a mismatch or incomplete reacquisition expires the plan |
+| Maintenance scan report | Private persisted result of one explicit provider scan, including capture time, coverage, completeness, source fingerprint, and provider-evidence fingerprint |
 | Safety class | One of `safe-automatic`, `approval-required`, `upstream-required`, or `never-automatic`; an executable class still requires explicit human confirmation |
 | Rollback class | Reversible, compensating, or irreversible; independent of action safety and disclosed before confirmation |
 | Recovery-required receipt | Durable evidence that provider dispatch may have occurred but the exact outcome was not proven; it blocks later mutations until reconciled |

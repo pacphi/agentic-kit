@@ -485,8 +485,9 @@ Everything else comes from a **deep scan**, which walks the install trees, the r
 every host's catalog surfaces, and every known project. That is real I/O and takes tens of seconds
 on a large machine, so it runs **only when you press Rescan** (or run `ak system --deep`). Opening
 the tab never triggers it. Measurement views fetch once, then again only while a scan you started
-is running. Maintenance refreshes its own read model on the header poll clock while open; that poll
-does not execute an action.
+is running. Maintenance refreshes its saved read model on the header poll clock while open; that
+poll does not check host providers or versions and does not execute an action. Use **Scan now**
+inside Maintenance for that.
 
 The trade is stated rather than hidden. Deep-tier figures always render with when they were
 measured, and once a snapshot passes seven days the freshness label turns amber and reads
@@ -512,7 +513,8 @@ project-pressure row is fabricated. One shared user surface carried by two hosts
 both hosts.
 
 The presence matrix can be filtered independently by kind, host, and source scope. Rows name their
-provider/version and body variants where known. Catalog v3 also fingerprints complete bounded skill
+provider/version and body variants where known. Catalog v4 counts a physical artifact once and
+retains each host that discovers it as a separate ConsumerBinding. It also fingerprints bounded skill
 definitions and individual MCP configurations, covers supported project agent/command/MCP surfaces,
 and reports whether measured project artifacts are Git-tracked or changed. Plugin inventory prefers
 the hosts' native list commands and labels manifest/config/cache fallback as partial;
@@ -524,6 +526,12 @@ writes nothing. That preview is evidence for the separate
 [Maintenance capability](ddd/maintenance.md), not an executable plan or authorization.
 
 ### Maintenance actions and receipts
+
+Maintenance opens the latest saved scan report. Browser refresh and the header poll reread that
+report without calling providers. Press **Scan now** to recheck installed versions, provider
+ownership, and action eligibility. A successful System **Rescan** also refreshes Maintenance once
+after its deep snapshot is safely persisted. The summary reports provider coverage so “0 updates”
+cannot be mistaken for “all providers checked.”
 
 Maintenance groups findings into **Updates ready**, **Safe cleanup**, **Needs review**,
 **Unsupported or blocked**, and **Recent changes / Undo**. Every ledger row leads with a direct
