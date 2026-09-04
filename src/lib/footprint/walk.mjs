@@ -263,7 +263,7 @@ export function walkTree(root, options = {}) {
 // retaining its traversal contract. Keeping the witness in a module-local
 // WeakSet means an arbitrary injected walker cannot opt itself into evidence
 // reuse merely by returning `{ complete: true }` or attaching a public flag.
-const compatibleWalkTreeAdapters = new WeakSet();
+const compatibleWalkTreeAdapters = new WeakMap();
 
 /**
  * Wrap the built-in walker with observation hooks without changing what it
@@ -285,7 +285,7 @@ export function instrumentWalkTree({ before = null, after = null } = {}) {
     if (after) after({ root, options, result, context });
     return result;
   };
-  compatibleWalkTreeAdapters.add(instrumented);
+  compatibleWalkTreeAdapters.set(instrumented, { before, after });
   return instrumented;
 }
 
@@ -294,6 +294,30 @@ export function instrumentWalkTree({ before = null, after = null } = {}) {
  * @param {Function} walk */
 export function carriesWalkTreeContract(walk) {
   return walk === walkTree || compatibleWalkTreeAdapters.has(walk);
+}
+
+/**
+ * Let another module perform one contract-equivalent physical traversal while
+ * retaining the hooks attached by instrumentWalkTree. The operation returns
+ * its domain value separately from the WalkResult-shaped physical counters the
+ * instrumentation receives.
+ *
+ * @param {Function} walk
+ * @param {{ root: string, options?: object }} input
+ * @param {() => { value: any, result: any }} operation
+ */
+export function runWalkTreeInstrumentation(walk, input, operation) {
+  if (!carriesWalkTreeContract(walk)) {
+    throw new TypeError('walk does not carry the built-in traversal contract');
+  }
+  const hooks = compatibleWalkTreeAdapters.get(walk);
+  const options = input.options ?? {};
+  const context = hooks?.before ? hooks.before({ root: input.root, options }) : null;
+  const output = operation();
+  if (hooks?.after) {
+    hooks.after({ root: input.root, options, result: output.result, context });
+  }
+  return output.value;
 }
 
 /** A walk's byte/file figures as Measurements. An unreadable root yields

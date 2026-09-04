@@ -38,6 +38,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseRepoSlug } from '../admin-collect.mjs';
+import { observeWalkForest } from './observation-forest.mjs';
 import { discoverProjectSources } from './project-sources.mjs';
 import {
   createStackObserver, detectStack, isCloudPlaceholder, STACK_EXCLUSIONS,
@@ -353,18 +354,30 @@ function walkedNode(result, asOf = null) {
  * @returns {string[]}
  */
 export function nodeModulesRoots(root, { walk = walkTree, maxDepth = NODE_MODULES_MAX_DEPTH, fsImpl = fs } = {}) {
-  const roots = [];
+  const observation = nodeModulesWalk(maxDepth, fsImpl);
   // `skipDir` is the walker's directory hook: recording a hit and pruning it in
   // one step is what keeps the roots non-overlapping, so their bytes sum cleanly.
-  walk(root, {
-    maxDepth, fsImpl,
-    acceptFile: () => false, // directories are the subject here; no file work
-    skipDir: (dir, name) => {
-      if (name === 'node_modules') { if (roots.length < 256) roots.push(dir); return true; }
-      return OVERHEAD_DIRS.has(name) || name.startsWith('.');
+  walk(root, observation.options);
+  return observation.roots;
+}
+
+function nodeModulesWalk(maxDepth = NODE_MODULES_MAX_DEPTH, fsImpl = fs) {
+  const roots = [];
+  return {
+    roots,
+    options: {
+      maxDepth,
+      fsImpl,
+      acceptFile: () => false,
+      skipDir: (dir, name) => {
+        if (name === 'node_modules') {
+          if (roots.length < 256) roots.push(dir);
+          return true;
+        }
+        return OVERHEAD_DIRS.has(name) || name.startsWith('.');
+      },
     },
-  });
-  return roots;
+  };
 }
 
 /** Observe the same top-most dependency roots while the working-tree byte walk
@@ -457,15 +470,37 @@ export function measureProject(project, {
   const stackObserver = loc && detect === detectStack
     && carriesWalkTreeContract(walk) && !hasTraversalCallback
     ? createStackObserver(root, { limits, asOf, fsImpl }) : null;
-  const treeResult = walk(root, {
-    ...common,
-    skipDir(dir, name, depth) {
-      stackObserver?.onDirectory(dir, name, depth);
-      return observedModules.skipDir(dir, name, depth)
-        || Boolean(callerSkipDir?.(dir, name, depth));
-    },
-    onFile: stackObserver?.onFile ?? callerOnFile,
-  });
+  const moduleObservation = stackObserver ? nodeModulesWalk(NODE_MODULES_MAX_DEPTH, fsImpl) : null;
+  let stackResult = null;
+  let moduleResult = null;
+  let treeResult;
+  if (stackObserver && moduleObservation) {
+    [treeResult, stackResult, moduleResult] = observeWalkForest(root, [
+      {
+        ...common,
+        skipDir: observedModules.skipDir,
+        onFile: callerOnFile,
+      },
+      {
+        maxDepth: stackObserver.maxDepth,
+        ...limits,
+        fsImpl,
+        skipDir: stackObserver.onDirectory,
+        acceptFile: stackObserver.acceptFile,
+        onFile: stackObserver.onFile,
+      },
+      moduleObservation.options,
+    ], { walk, fsImpl });
+  } else {
+    treeResult = walk(root, {
+      ...common,
+      skipDir(dir, name, depth) {
+        return observedModules.skipDir(dir, name, depth)
+          || Boolean(callerSkipDir?.(dir, name, depth));
+      },
+      onFile: callerOnFile,
+    });
+  }
   const tree = walkedNode(treeResult, asOf);
 
   // A project whose ROOT is gone or unreadable is not a project measuring zero
@@ -486,9 +521,10 @@ export function measureProject(project, {
   // A complete tree walk has already observed every top-most dependency root.
   // If it was capped or degraded, repeat the purpose-built search: its distinct
   // limits may still recover evidence the byte walk could not reach.
-  const moduleRoots = tree.complete
-    ? observedModules.roots
-    : nodeModulesRoots(root, { walk, fsImpl });
+  const moduleRoots = moduleObservation
+    ? (moduleResult.degradedCount > 0
+      ? nodeModulesRoots(root, { walk, fsImpl }) : moduleObservation.roots)
+    : tree.complete ? observedModules.roots : nodeModulesRoots(root, { walk, fsImpl });
   // An empty roots list is a real, measured zero — this project has no
   // node_modules — which is why it is stated explicitly rather than handed to
   // sumMeasurements, whose empty-list zero would mean the same thing by accident.
@@ -509,11 +545,12 @@ export function measureProject(project, {
   // neither could claim.
   const detected = loc
     ? (stackObserver
-      && treeResult.status === MEASURED
-      && treeResult.complete === true
-      && typeof treeResult.root === 'string'
-      && path.resolve(treeResult.root) === path.resolve(root)
-      ? stackObserver.finalize(treeResult)
+      && stackResult
+      && stackResult.status === MEASURED
+      && typeof stackResult.root === 'string'
+      && path.resolve(stackResult.root) === path.resolve(root)
+      && stackResult.degradedCount === 0
+      ? stackObserver.finalize(stackResult)
       : detect(root, { walk, limits, asOf, fsImpl }))
     : null;
 
