@@ -200,8 +200,8 @@ test('default wiring promotes only an exact currently stale npx candidate', asyn
   const candidate = {
     id: 'stale-npx-env:abc', kind: 'stale-npx-env', label: 'npx abc', path: target,
     safety: 'regenerable', advisory: true,
-    bytes: { status: 'measured', value: 20, partial: false, asOf: NOW - 1000 },
-    files: { status: 'measured', value: 2, partial: false, asOf: NOW - 1000 },
+    bytes: { status: 'carried-forward', value: 20, partial: false, asOf: NOW - 1000 },
+    files: { status: 'carried-forward', value: 2, partial: false, asOf: NOW - 1000 },
   };
   const unavailable = { run: async () => ({ ok: false, exitCode: 1, stdout: '', stderr: '' }) };
   const service = createMaintenanceService({
@@ -217,6 +217,7 @@ test('default wiring promotes only an exact currently stale npx candidate', asyn
   const finding = model.findings.find((row) => row.resource.id === candidate.id);
   assert.equal(finding.ownership.authority, 'agentic-kit-procedure');
   assert.equal(finding.nextAction.executable, true);
+  assert.match(finding.nextAction.recommendation, /^Remove /);
   assert.equal((await service.plan({ findingIds: [finding.id], executable: true })).actions[0].providerId,
     'agentic-kit-npx-cache');
 

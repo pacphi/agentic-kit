@@ -43,9 +43,9 @@ function candidateDefinition(candidate, root) {
   const target = typeof candidate?.path === 'string' && path.isAbsolute(candidate.path)
     ? path.resolve(candidate.path) : null;
   const exact = match && target === path.join(root, match[1]);
-  const measured = candidate?.bytes?.status === 'measured'
+  const measured = ['measured', 'carried-forward'].includes(candidate?.bytes?.status)
     && candidate.bytes.partial !== true
-    && candidate?.files?.status === 'measured'
+    && ['measured', 'carried-forward'].includes(candidate?.files?.status)
     && candidate.files.partial !== true;
   if (!match || candidate?.kind !== 'stale-npx-env' || candidate?.safety !== 'regenerable'
       || candidate?.advisory !== true) {
