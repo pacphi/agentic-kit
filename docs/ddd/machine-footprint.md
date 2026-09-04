@@ -374,9 +374,22 @@ sparse file whose apparent size here is ~4 TB against ~15 GB actually written, s
 in **allocated blocks** and carries both figures plus a `basis` string; an apparent-size reading
 would put a number larger than the disk at the top of the ranking. The allocated-size collector
 uses the block count returned by the walker's existing `lstat`; it does not stat every file again.
-And figures the install or
-projects scan already measured for the same path are **adopted** rather than re-walked, which is
-why a row can name its `measuredBy`.
+For ordinary apparent-size roots, one complete parent walk also supplies exact nested breakdowns;
+a partial parent never substitutes for a narrower child walk. Figures the Install or Projects scan
+already measured for the same path are likewise **adopted** rather than re-walked, which is why a
+row can name its `measuredBy`.
+
+The deep runner orders Projects and Consumers before Storage so Storage can validate and adopt
+their exact same-scan observations. This avoids re-walking a version-stale npx environment, a
+whole cache used by a reclaim advisory, or a checkout used by worktree review. Project footprints
+therefore carry total file count and newest footprint mtime as well as bytes. An incomplete,
+partial, differently dated, or path-mismatched measurement is refused and the original Storage
+walk runs instead.
+
+Install applies the same containment rule inside the npx cache. Its complete parent-cache walk
+captures exact immediate-child byte, file, and newest-mtime totals; environment rows reuse those
+totals while reading only each environment manifest for package names. If the parent walk is
+partial, degraded, or differently rooted, every environment retains its original bounded walk.
 
 This is deep-tier work by construction — a 22 GB content-addressable cache is ~10⁵ files — and it
 carries its own raised walk caps (`CONSUMER_WALK_LIMITS`: depth 24, 2,000,000 entries) because
@@ -719,7 +732,7 @@ normative and this table restates it for readers of this document.
 | Term | Meaning |
 |------|---------|
 | Footprint | The machine-resource cost of the toolchain: install bytes, runtime CPU/RSS, retained-data bytes, deployed inventory. The context's name; the surface is **System** |
-| FootprintSnapshot | The schema-v6 persisted result of a deep scan: `asOf`, completeness, and the deep-tier section models (install, storage, catalog, projects, consumers) |
+| FootprintSnapshot | The schema-v7 persisted result of a deep scan: `asOf`, completeness, and the deep-tier section models (install, storage, catalog, projects, consumers) |
 | Measurement | A value plus provenance: measured (with `asOf`), carried forward, or unknown-with-reason — unknown is never zero |
 | Partial measurement | A measured value known to be a lower bound because a contributing subtree was unreadable or capped; rendered as "≥ N" |
 | HostInstallation | One managed tool's install facts: version, install method, root, tree bytes, native addons |
@@ -731,6 +744,7 @@ normative and this table restates it for readers of this document.
 | Safety tier | A candidate's `regenerable` (the owning tool refetches it) or `review` (plausible, not safe to call removable). The two are totalled separately and never combined |
 | Bytes meaning | Whether a candidate's bytes are the `candidate` subset it is about, or the `installed` size at that path offered as context on a review row |
 | Consumer root | A ranked top-level storage root. Nested rows are `breakdown`s of it, plus a synthesized residual, so bytes are counted once |
+| Scan-local observation | Ephemeral evidence acquired once during one explicit scan and reused only when path, timestamp, completeness, and reader contract satisfy the receiving collector; never a cross-scan cache |
 | Ever seen / on disk | `everSeen` is every project any host ever recorded a session in, deletions included; `onDisk` is the present candidate subset. Only candidates with a recorded host session and proven HTTPS destination enter the measured population |
 | Unresolved project | A transcript directory whose project path neither a declared `cwd` nor a filesystem-verified decode can name. Reported as such, never given a fabricated path; it makes `everSeen` a lower bound |
 | Stack detection | Per-project `languages` (which carry lines) and `stack` — frameworks, SDKs, tools — which carry presence only, plus the unrecognized tail of extensions and dependency names the registry could not name |

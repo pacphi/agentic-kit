@@ -491,10 +491,13 @@ Worker containment does not claim that the filesystem work itself completes fast
 
 One scan may reuse a complete physical observation when another section asks the same bounded
 question. Catalog reads one physical surface once per compatible reader contract even when several
-hosts consume it; Storage can adopt Install's exact same-scan npx-environment inventory; and an
-allocated-size consumer uses the block count from the walker's existing `lstat`. Reuse is confined
-to that scan. Incomplete, older, differently rooted, or differently scoped evidence falls back to a
-fresh bounded walk rather than being treated as equivalent.
+hosts consume it; Install derives npx-environment totals from its complete parent-cache walk;
+Storage can adopt that exact same-scan inventory; and an allocated-size consumer uses the block
+count from the walker's existing `lstat`. A complete Consumers parent supplies its exact nested
+breakdowns, and Storage can reuse exact Consumers cache or Projects worktree observations later in
+the same scan. Reuse is confined to that scan.
+Incomplete, older, differently rooted, or differently scoped evidence falls back to a fresh bounded
+walk rather than being treated as equivalent.
 
 Measurement views fetch once, then again only while a scan you started is running. Maintenance
 refreshes its saved read model on the header poll clock while open; that poll does not check host

@@ -171,7 +171,7 @@ is what a user selects.
 | Term | Meaning |
 |------|---------|
 | Footprint | The machine-resource cost of the toolchain: install bytes, runtime CPU/RSS, retained-data bytes, deployed inventory. The bounded context's name; the user-facing surface is called **System** |
-| FootprintSnapshot | The persisted result of a deep scan: `asOf`, completeness, and the five deep-tier section models (install, storage, catalog, projects, consumers) |
+| FootprintSnapshot | The schema-v7 persisted result of a deep scan: `asOf`, completeness, and the five deep-tier section models (install, storage, catalog, projects, consumers) |
 | Measurement | A value plus provenance: measured (with `asOf`), carried forward, or unknown-with-reason — unknown is never zero |
 | Partial measurement | A measured value known to be a lower bound because a contributing subtree was unreadable or capped; rendered as "≥ N", never as a total |
 | HostInstallation | One managed tool's install facts: version, install method, root, tree bytes, native addons |
@@ -191,6 +191,7 @@ is what a user selects.
 | Skill maintenance preview | The implemented `ak x skills plan` content-derived classification and projected change set; read-only evidence for a human decision, not a MaintenancePlan or authorization to mutate |
 | ProjectFootprint | One project's size facts: approximate LOC by language, tree/`.git`/`node_modules` bytes, last activity, and an optional git-remote web link ("local only" when absent) |
 | Deep scan | The explicit, user-triggered, single-flight full measurement pass that produces a FootprintSnapshot |
+| Scan-local observation | Ephemeral evidence acquired once during one explicit scan and reused only when path, timestamp, completeness, and reader contract satisfy the receiving collector; never a cross-scan cache |
 | Cheap tier | The per-request census + known-file stats + snapshot carry-forward served on every read |
 
 A measured zero is a real zero and renders as one; an unmeasured or failed figure renders as

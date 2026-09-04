@@ -58,8 +58,8 @@ A named symlink root is never realpath-collapsed merely to create a cache hit.
 
 Collectors continue to own their output models. The capture shares acquisition, not domain
 meaning. Examples are one physical Catalog read producing several ConsumerBindings, one project
-walk producing working-tree and stack projections, and one complete parent measurement producing
-contained Consumer rows.
+walk producing working-tree totals and dependency-root discovery, and one complete parent
+measurement producing contained Consumer or npx-environment rows.
 
 When a broad observation is incomplete, the collector keeps its lower-bound parent result and
 falls back to the existing narrower measurement for descendants. Optimization must not make an
@@ -85,9 +85,11 @@ process owns the single-flight activity, cheap reads, and final publication; the
 mixed synchronous walk, hashing, and LOC engine and sends bounded phase/progress events.
 
 Injected collectors and filesystem implementations remain inline for deterministic unit tests.
-The worker is terminated on dashboard shutdown. Failure or cancellation never replaces the last
-successful snapshot. A cancellation request is generation-bound and observed at safe traversal or
-phase checkpoints; persistence is not interrupted after its atomic replacement boundary begins.
+The production worker exits naturally after returning its result. Closing the dashboard does not
+claim cancellation: an in-flight worker may finish and persist the requested measurement before
+the process exits. Explicit mid-phase cancellation is deferred because the synchronous bounded
+walker has no honest checkpoint contract yet. A worker failure never replaces the last successful
+snapshot.
 
 Maintenance provider checks remain a separate application workflow. Their native probes move from
 `spawnSync` to bounded asynchronous process execution. Plain report reads remain passive, explicit
@@ -108,7 +110,7 @@ scan replay an old tree as newly measured.
 - Dashboard reads and progress polling remain responsive during deep collection.
 - The scan stops paying repeatedly for the same physical evidence within one capture.
 - Project and Catalog semantics align with their documented populations and identities.
-- Previous snapshots remain usable throughout long, failed, or cancelled scans.
+- Previous snapshots remain usable throughout long, running, or failed scans.
 - Work-count tests provide a deterministic performance gate alongside noisier wall-clock evidence.
 
 ### Negative
@@ -127,7 +129,7 @@ The implementation must prove:
 2. concurrent refreshes share one worker, one result, and one snapshot publication;
 3. optimized and reference collectors produce equal evidence, except for documented project
    eligibility and bounded diagnostics;
-4. partial, degraded, absent, symlink, cap, cancellation, worker-failure, and persistence-failure
+4. partial, degraded, absent, symlink, cap, worker-failure, and persistence-failure
    paths preserve their existing honesty rules and the previous snapshot;
 5. plain Maintenance reads invoke no provider and explicit scans invoke each provider once;
 6. the representative fixture's walk and entry counts cannot regress silently; and
