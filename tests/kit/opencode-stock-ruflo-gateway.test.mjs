@@ -116,6 +116,28 @@ function writeCatalog(root) {
   return root;
 }
 
+function seedStockPluginRuntime(configDir, cacheDir, version) {
+  // OpenCode reports /global/health before a fresh config's plugin dependency
+  // install finishes. Seed the exact SDK so /mcp measures instance readiness,
+  // not registry latency or a blocked background installer.
+  execFileSync('npm', [
+    'install', '--ignore-scripts', '--no-audit', '--no-fund', '--save-exact',
+    `@opencode-ai/plugin@${version}`,
+  ], {
+    cwd: configDir,
+    env: { ...process.env, npm_config_cache: cacheDir },
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 45_000,
+  });
+  const installed = JSON.parse(fs.readFileSync(
+    path.join(configDir, 'node_modules', '@opencode-ai', 'plugin', 'package.json'),
+    'utf8',
+  ));
+  assert.equal(installed.version, version,
+    'fixture plugin runtime must exactly match the stock OpenCode version');
+}
+
 function createProvider(requests, route, { agentProfile, skillName }) {
   let server;
   const ready = new Promise((resolve) => {
@@ -254,7 +276,7 @@ const acceptanceSkip = !opencode
 
 test(`stock OpenCode keeps Ruflo and Agentic QE connected with ${compactProjection ? `one compact lazy ${route} call path` : 'the eager direct catalogue'} (${installedRuv ? 'installed MCPs' : 'fixture MCPs'}, ${installedCatalog ? 'installed catalog' : 'fixture catalog'})`, {
   skip: acceptanceSkip,
-  timeout: 60_000,
+  timeout: 90_000,
 }, async (t) => {
   const root = tmp('ak-stock-opencode-ruflo-');
   const requests = [];
@@ -360,6 +382,9 @@ test(`stock OpenCode keeps Ruflo and Agentic QE connected with ${compactProjecti
   } finally {
     process.env.PATH = previousPath;
   }
+
+  phase = 'fixture dependency setup';
+  seedStockPluginRuntime(configDir, path.join(root, 'npm-cache'), version);
 
   phase = 'stock OpenCode startup';
   const port = await freePort();
