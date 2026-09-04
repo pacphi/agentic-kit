@@ -48,6 +48,7 @@ const relationshipCopy = Object.freeze({
     headline: 'Project and shared definitions are identical',
     explanation: 'The complete observed definitions match. Host selection and ownership are not proven, so both copies are preserved.',
     recommendation: 'If the project does not intentionally override the shared resource, archive or remove the project copy after confirming the host uses the shared source.',
+    impact: 'Only the project-local copy would be removed; the shared source, other projects, and repository history remain.',
     steps: [
       'Confirm the shared source is available to this host and project.',
       'Back up or commit the project copy before changing it.',
@@ -60,6 +61,7 @@ const relationshipCopy = Object.freeze({
     headline: 'Project and shared definitions differ',
     explanation: 'The resources share a name, but their complete observed definitions differ. Agentic Kit cannot infer which behavior you intend.',
     recommendation: 'Compare the project and shared definitions. Keep the intended source, or rename the project resource if both behaviors are required.',
+    impact: 'The unintended project definition would be removed or renamed only after you choose the source of truth; shared sources remain.',
     steps: [
       'Compare the project copy with each observed shared source.',
       'Choose the intended source of truth for this project.',
@@ -72,6 +74,7 @@ const relationshipCopy = Object.freeze({
     headline: 'An identical project copy is tracked by Git',
     explanation: 'The complete observed definition matches a shared source, but the project copy is repository content rather than disposable cache.',
     recommendation: 'If the repository should inherit the shared resource, remove the tracked project copy through the normal review and pull-request workflow.',
+    impact: 'The repository change would remove only the tracked project copy; shared sources, other projects, and Git history remain.',
     steps: [
       'Confirm contributors and automation can use the shared source.',
       'Create a repository change that removes only the tracked project copy.',
@@ -84,6 +87,7 @@ const relationshipCopy = Object.freeze({
     headline: 'A canonical and legacy transport have identical configuration',
     explanation: 'Both registrations reach the same observed transport. Scope and provider ownership still determine whether retirement is safe.',
     recommendation: 'Verify the canonical registration is healthy, then remove only the legacy registration with the host-native MCP workflow at its reported scope.',
+    impact: 'Only the legacy registration at the reported scope would be removed; the canonical registration and other scopes remain.',
     steps: [
       'Verify the canonical registration is present and healthy at an equal or broader scope.',
       'Use the host-native MCP command to remove only the legacy registration.',
@@ -148,7 +152,7 @@ function relationshipFinding({ classification, kind, name, host, project, projec
     },
     observedUsage: { status: 'not-measured', statement: 'Host selection and usage were not used as action authority.' },
     impact: {
-      summary: copy.recommendation, bytes: null, files: null,
+      summary: copy.impact, bytes: null, files: null,
       dependencies: 'unknown', preserved: action.preserved,
     },
     relationship: {

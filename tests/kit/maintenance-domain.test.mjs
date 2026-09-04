@@ -209,6 +209,9 @@ test('project and shared resources become one relationship finding per human dec
   assert.equal(relationships.every((finding) => finding.nextAction.recommendation
     && finding.nextAction.steps.length >= 2 && finding.nextAction.blockedReason), true,
   'each report-only finding still gives the user a concrete procedure');
+  assert.equal(relationships.every((finding) => finding.impact.summary
+    && finding.impact.summary !== finding.nextAction.recommendation), true,
+  'expected effect is distinct from the recommendation');
   assert.equal(findings.filter((finding) => finding.resource.name === 'project-mode').length, 1,
     'the grouped relationship replaces generic per-item ambiguity');
   assert.doesNotMatch(JSON.stringify(relationships), /\/private\//);
