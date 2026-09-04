@@ -60,6 +60,8 @@ export const MAINTENANCE_CSS = `
 .mt-steps{margin:7px 0 9px;padding-left:20px;color:var(--ink-2);font-size:11.5px;line-height:1.55}
 .mt-steps li+li{margin-top:3px}.mt-preserved,.mt-blocked-reason{font-size:10.5px!important;color:var(--ink-dim)!important}
 .mt-preserved b{color:var(--ok)}.mt-blocked-reason b{color:var(--warn)}
+.mt-action-title{color:var(--ink)!important;font-weight:650}.mt-action-reason{max-width:68ch}
+.mt-procedure{margin:8px 0;color:var(--ink-2);font-size:11px}.mt-procedure summary{width:max-content;cursor:pointer;color:var(--accent);font-weight:650}
 .mt-copy-scroll{max-width:100%;overflow-x:auto;outline:none}.mt-copy-scroll:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .mt-copy-table{width:100%;min-width:440px;border-collapse:collapse;text-align:left;font-size:10.5px}
 .mt-copy-table th,.mt-copy-table td{padding:6px 7px;border-bottom:1px solid var(--line);vertical-align:top}

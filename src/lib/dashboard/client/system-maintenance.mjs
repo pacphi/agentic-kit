@@ -274,9 +274,14 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
   function maintSuggestedAction(finding){
     var next=finding&&finding.nextAction,action=finding&&(finding.action||finding.nextAction)||{};
     if(typeof next==="string")return next;
-    return maintText(next&&next.recommendation)||maintText(next&&next.label)||maintText(next&&next.guidance)
+    return maintText(next&&next.label)||maintText(next&&next.recommendation)||maintText(next&&next.guidance)
       ||maintText(next&&next.summary)||maintText(action&&action.summary)
-      ||"Review the evidence and preserve the resource until its owner is confirmed.";
+      ||"Run a deep System rescan before changing this resource.";
+  }
+  function maintActionReason(finding){
+    var next=finding&&finding.nextAction;if(!next||typeof next!=="object")return "";
+    var label=maintText(next.label),reason=maintText(next.recommendation);
+    return reason&&reason!==label?reason:"";
   }
 
   function maintFindingRow(record){
@@ -289,7 +294,7 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
       +' aria-controls="sys-maint-detail" aria-expanded="'+(selected?"true":"false")+'"'+(selected?' aria-current="true"':"")+">"
       +'<span class="mt-state">'+esc(state.label)+"</span>"
       +'<span class="mt-identity"><b>'+esc(name)+'</b><small>'+esc(maintOptionLabel(resource.kind||"resource"))+"</small></span>"
-      +'<span class="mt-change"><span>'+esc(change)+'</span><small>Suggested action: '+esc(suggestion)+"</small></span>"
+      +'<span class="mt-change"><span>'+esc(change)+'</span><small>Action: '+esc(suggestion)+"</small></span>"
       +'<span class="mt-owner">'+esc(owner)+"</span>"
       +"</button></li>";
   }
@@ -332,34 +337,40 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
     Object.keys(names).forEach(function(key){if(value[key]!=null)out+=maintFact(names[key],value[key]);});
     return out;
   }
-  function maintImpactHtml(impact){
+  function maintImpactHtml(impact,finding){
     impact=impact&&typeof impact==="object"?impact:{};
     var summary=maintText(impact.summary),facts="";
     facts+=maintFact("Capabilities",impact.capabilities);
     facts+=maintFact("Projects",impact.projects);
-    facts+=maintFact("Preserved",impact.preserved);
     if(!summary&&!facts)return "";
-    return '<section class="mt-detail-section"><h4>What changes</h4>'+(summary?"<p>"+esc(summary)+"</p>":"")
+    return '<section class="mt-detail-section"><h4>'+(maintCanPreview(finding)?"Effect":"Potential effect")+'</h4>'+(summary?"<p>"+esc(summary)+"</p>":"")
       +(facts?'<dl class="mt-facts compact">'+facts+"</dl>":"")+"</section>";
   }
+  function maintPreviewLabel(finding){
+    var action=finding&&(finding.action||finding.nextAction)||{};
+    return {update:"Preview update",remove:"Preview uninstall",disable:"Preview disable",clean:"Preview cleanup",
+      archive:"Preview archive",terminate:"Preview termination"}[maintText(action.operation)]||"Preview action";
+  }
   function maintFindingActionHtml(finding){
-    if(!maintCanPreview(finding))return '<small>Reporting only. Agentic Kit will not run this procedure without a provider that proves ownership, verification, and rollback.</small>';
-    return '<div class="mt-action-bar"><button type="button" class="mt-action primary" data-maint-action="preview">Preview change</button>'
-      +'<small>Reviews this one provider-owned change. Nothing runs until you confirm.</small></div>';
+    if(!maintCanPreview(finding))return "";
+    return '<div class="mt-action-bar"><button type="button" class="mt-action primary" data-maint-action="preview">'+esc(maintPreviewLabel(finding))+"</button>"
+      +'<small>Nothing changes until you review and confirm this exact action.</small></div>';
   }
   function maintNextHtml(finding){
     var next=finding&&finding.nextAction,action=finding&&(finding.action||finding.nextAction)||{};
-    var text=maintSuggestedAction(finding),steps=maintList(next&&next.steps),preserved=maintList(next&&next.preserved);
+    var text=maintSuggestedAction(finding),reason=maintActionReason(finding),steps=maintList(next&&next.steps),preserved=maintList(next&&next.preserved);
     var blockedReason=maintText(next&&next.blockedReason)||maintText(action.reason);
     var command=maintText(next&&next.command)||maintText(action.command);
     var facts="";
-    facts+=maintFact("Safety",action.safetyClass);
-    facts+=maintFact("Restart",action.restartRequired===true?"Required":action.restartRequired===false?"Not reported as required":action.restart);
-    facts+=maintFact("Rollback",action.rollback);
-    return '<section class="mt-detail-section mt-next"><h4>Suggested action</h4>'+(text?"<p>"+esc(text)+"</p>":"")
-      +(steps.length?'<h5>Procedure</h5><ol class="mt-steps">'+steps.map(function(step){return "<li>"+esc(step)+"</li>";}).join("")+"</ol>":"")
+    if(maintCanPreview(finding)){
+      facts+=maintFact("Restart",action.restartRequired===true?"Required":action.restartRequired===false?"Not required":action.restart);
+      facts+=maintFact("Undo",action.rollback==="reversible"?"Available after apply":action.rollback);
+    }
+    return '<section class="mt-detail-section mt-next"><h4>Recommended action</h4>'+(text?'<p class="mt-action-title">'+esc(text)+"</p>":"")
+      +(reason?'<p class="mt-action-reason">'+esc(reason)+"</p>":"")
+      +(steps.length?'<details class="mt-procedure"><summary>How to resolve</summary><ol class="mt-steps">'+steps.map(function(step){return "<li>"+esc(step)+"</li>";}).join("")+"</ol></details>":"")
       +(preserved.length?'<p class="mt-preserved"><b>Preserved:</b> '+esc(preserved.join(", "))+".</p>":"")
-      +(blockedReason?'<p class="mt-blocked-reason"><b>Why this is not automated:</b> '+esc(blockedReason)+"</p>":"")
+      +(!maintCanPreview(finding)&&blockedReason?'<p class="mt-blocked-reason"><b>Not available here:</b> '+esc(blockedReason)+"</p>":"")
       +(facts?'<dl class="mt-facts compact">'+facts+"</dl>":"")
       +(command?'<code>'+esc(command)+"</code>":"")
       +maintFindingActionHtml(finding)+"</section>";
@@ -402,7 +413,7 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
       +(reasons.length?'<div class="mt-evidence-gap"><b>Evidence needs attention</b><ul>'+reasons.map(function(reason){return "<li>"+esc(reason)+"</li>";}).join("")+"</ul></div>":"")
       +maintRelationshipHtml(finding.relationship)
       +(versionFacts?'<section class="mt-detail-section"><h4>Versions and source</h4><dl class="mt-facts compact">'+versionFacts+"</dl></section>":"")
-      +maintImpactHtml(finding.impact)+maintNextHtml(finding)
+      +maintImpactHtml(finding.impact,finding)+maintNextHtml(finding)
       +'<details class="mt-technical"><summary>Technical evidence</summary><dl class="mt-facts compact">'
       +maintFact("Source",evidence.source)+maintFact("Authority",evidence.authority)+maintFact("Health",evidence.health)
       +maintFact("Provider reference",resource.providerRef)+"</dl></details>";

@@ -678,7 +678,10 @@ const MAINTENANCE_PAYLOAD = {
       preserved: ['standalone skill-creator'],
     },
     nextAction: {
-      guidance: 'Review the provider-owned update plan.',
+      operation: 'update', label: 'Upgrade rust-optimizer to 0.3.1',
+      recommendation: 'Codex will replace only this plugin after you confirm the preview.',
+      steps: ['Preview the update.', 'Confirm version 0.3.1 and the affected capabilities.', 'Apply the update and restart Codex.'],
+      preserved: ['standalone skill-creator'],
       executable: true, safetyClass: 'safe-automatic eligible', restartRequired: true,
       rollback: 'compensating reinstall of 0.2.0',
     },
@@ -690,7 +693,13 @@ const MAINTENANCE_PAYLOAD = {
     owner: 'Codex plugin manager',
     evidence: { source: 'deep scan', authority: 'agentic-kit observation', completeness: 'complete', health: 'healthy', reasons: [] },
     versions: {}, impact: { summary: 'Reproducible downloads would be removed and fetched again on demand.', preserved: ['installed plugins'] },
-    nextAction: 'Review the owner-native cleanup plan.', action: { safetyClass: 'safe-automatic eligible', rollback: 're-fetch' },
+    nextAction: {
+      operation: 'clean', label: 'Clear the Codex plugin download cache',
+      recommendation: 'Codex can recreate every download in this cache.',
+      steps: ['Preview the cleanup.', 'Confirm installed plugins are excluded.', 'Clear the cache and rescan.'],
+      preserved: ['installed plugins'], executable: true,
+      safetyClass: 'safe-automatic eligible', rollback: 're-fetch', restart: 'not-required',
+    },
   }, {
     id: 'modified-skill', bucket: 'needsReview', statusLabel: 'Evidence incomplete',
     headline: 'Content changed after projection',
@@ -711,8 +720,8 @@ const MAINTENANCE_PAYLOAD = {
       ],
     },
     nextAction: {
-      label: 'Choose which definition should be authoritative',
-      recommendation: 'Compare the project and shared definitions, then keep or rename the intended source.',
+      operation: 'review', label: 'Choose one definition, or rename the project copy',
+      recommendation: 'The project and shared skill implement different behavior.',
       steps: ['Compare both definitions.', 'Choose the source of truth.', 'Rename or remove the unintended copy, then rescan.'],
       preserved: ['both copies until you decide'],
       blockedReason: 'Agentic Kit cannot infer which behavior you intend.',
@@ -725,7 +734,13 @@ const MAINTENANCE_PAYLOAD = {
     owner: 'OpenCode',
     evidence: { source: 'host config', authority: 'configuration', completeness: 'complete', health: 'unsupported', reasons: [] },
     versions: {}, impact: { summary: 'No automated change is proposed.', preserved: ['current registration'] },
-    nextAction: 'Use the provider documented workflow.', action: { safetyClass: 'upstream-required', reason: 'No safe provider is registered.' },
+    nextAction: {
+      operation: 'remove', label: 'Remove legacy-tools with OpenCode’s MCP workflow',
+      recommendation: 'The current registration remains active until you remove it in OpenCode.',
+      steps: ['Open the OpenCode MCP configuration.', 'Remove only legacy-tools.', 'Restart OpenCode and run a deep System rescan.'],
+      preserved: ['other MCP registrations'],
+      blockedReason: 'OpenCode does not expose an exact removal action to this dashboard.',
+    }, action: { safetyClass: 'upstream-required', reason: 'OpenCode does not expose an exact removal action to this dashboard.' },
   }],
   receipts: [],
 };
@@ -1643,16 +1658,17 @@ async function main() {
         && /Codex plugin manager/.test(firstMaintenanceDetail)
         && /0\.2\.0/.test(firstMaintenanceDetail) && /0\.3\.1/.test(firstMaintenanceDetail)
         && /standalone skill-creator/.test(firstMaintenanceDetail)
-        && /Suggested action:/.test(firstMaintenance.text)
-        && /Suggested action/.test(firstMaintenanceDetail)
-        && /Preview change/.test(firstMaintenanceDetail)
-        && /Nothing runs until you confirm/.test(firstMaintenanceDetail),
+        && /Action: Upgrade rust-optimizer to 0\.3\.1/.test(firstMaintenance.text)
+        && /Recommended action/.test(firstMaintenanceDetail)
+        && /Preview update/.test(firstMaintenanceDetail)
+        && /Nothing changes until you review and confirm/.test(firstMaintenanceDetail),
       `first finding was ${JSON.stringify(firstMaintenance)}; detail read ${JSON.stringify(firstMaintenanceDetail)}`);
     const maintenanceRowSuggestions = await page.$$eval('#sys-maint-list [data-maint-key]',
       (rows) => rows.map((row) => row.innerText));
-    check('every Maintenance finding exposes a suggested action in the ledger',
+    check('every Maintenance finding exposes a distinct direct action in the ledger',
       maintenanceRowSuggestions.length === MAINTENANCE_PAYLOAD.findings.length
-        && maintenanceRowSuggestions.every((text) => /Suggested action:\s*\S/.test(text)),
+        && maintenanceRowSuggestions.every((text) => /Action:\s*(Upgrade|Clear|Choose|Remove)\b/.test(text))
+        && new Set(maintenanceRowSuggestions.map((text) => text.match(/Action:\s*(.*)/)?.[1])).size === maintenanceRowSuggestions.length,
       `row suggestions were ${JSON.stringify(maintenanceRowSuggestions)}`);
 
     await page.click('#sys-maint-buckets [data-maint-bucket="needs-review"]');
@@ -1677,8 +1693,9 @@ async function main() {
       /Observed copies/.test(String(reviewMaintenance.detail))
         && /Observed project copy/.test(String(reviewMaintenance.detail))
         && /Observed shared copy/.test(String(reviewMaintenance.detail))
-        && /Choose the source of truth/.test(String(reviewMaintenance.detail))
-        && /Why this is not automated/.test(String(reviewMaintenance.detail)),
+        && /Choose one definition, or rename the project copy/.test(String(reviewMaintenance.detail))
+        && /Not available here/.test(String(reviewMaintenance.detail))
+        && !/Reporting only|Resources outside this finding/.test(String(reviewMaintenance.detail)),
       `relationship guidance was ${JSON.stringify(reviewMaintenance.detail)}`);
 
     await page.fill('#sys-maint-search', 'legacy-tools');
@@ -1691,8 +1708,9 @@ async function main() {
     check('unsupported resources say why they cannot be automated and preserve current state',
       /Cannot safely automate/.test(blockedMaintenance)
         && /No host-native removal provider/.test(blockedMaintenance)
-        && /No automated change is proposed/.test(blockedMaintenance)
-        && /current registration/.test(blockedMaintenance),
+        && /Remove legacy-tools with OpenCode’s MCP workflow/.test(blockedMaintenance)
+        && /Not available here/.test(blockedMaintenance)
+        && /other MCP registrations/.test(blockedMaintenance),
       `blocked finding read ${JSON.stringify(blockedMaintenance)}`);
 
     await page.fill('#sys-maint-search', '');
