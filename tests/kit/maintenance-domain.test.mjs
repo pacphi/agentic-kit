@@ -51,11 +51,13 @@ test('scanner projects evidence-backed findings without content, credentials, pa
   const cache = result.findings.find((finding) => finding.resource.id === 'cache:demo');
 
   assert.equal(cache.state, 'orphaned-cache');
-  assert.equal(cache.bucket, 'safeCleanup');
-  assert.equal(cache.safetyClass, 'safe-automatic');
+  assert.equal(cache.bucket, 'needsReview');
+  assert.equal(cache.safetyClass, 'approval-required');
   assert.equal(cache.evidence.completeness, 'complete');
-  assert.equal(cache.nextAction.operation, 'clean');
+  assert.equal(cache.nextAction.operation, 'review');
   assert.equal(cache.nextAction.executable, false);
+  assert.equal(cache.nextAction.label, 'Clear this cache with its owning tool');
+  assert.doesNotMatch(JSON.stringify(cache.nextAction), /Prepare owner-managed cleanup|Resources outside this finding/);
 
   const wire = JSON.stringify(result);
   assert.doesNotMatch(wire, /\/private\//);
@@ -72,7 +74,29 @@ test('carried-forward measurements retain their original freshness instead of be
   const { findings } = scanMaintenanceFindings({ footprint: input, now: () => NOW });
   const cache = findings.find((finding) => finding.resource.id === 'cache:demo');
   assert.equal(cache.evidence.completeness, 'complete');
-  assert.equal(cache.bucket, 'safeCleanup');
+  assert.equal(cache.bucket, 'needsReview');
+});
+
+test('idle npx age produces a concrete report-only choice, never safe cleanup authority', () => {
+  const input = footprint();
+  input.storage.reclaimables = [{
+    id: 'stale-npx-env:idle', kind: 'stale-npx-env', label: 'npx cache env (flow-nexus)',
+    path: '/private/cache/_npx/idle',
+    bytes: { status: 'measured', value: 4096, partial: false, asOf: NOW - 60_000 },
+    files: { status: 'measured', value: 3, partial: false, asOf: NOW - 60_000 },
+    safety: 'regenerable', advisory: true,
+    basis: { versionStale: false, idle: true, idleDays: 99 },
+  }];
+
+  const { findings } = scanMaintenanceFindings({ footprint: input, now: () => NOW });
+  const idle = findings.find((finding) => finding.resource.id === 'stale-npx-env:idle');
+  assert.equal(idle.bucket, 'needsReview');
+  assert.equal(idle.safetyClass, 'approval-required');
+  assert.equal(idle.classification, 'idle-reproducible-cache');
+  assert.equal(idle.nextAction.executable, false);
+  assert.match(idle.nextAction.label, /^Clear this 99-day-idle npx environment/);
+  assert.match(idle.nextAction.blockedReason, /age alone does not prove/i);
+  assert.doesNotMatch(JSON.stringify(idle.nextAction), /Prepare owner-managed cleanup|Inspect the evidence and confirm/);
 });
 
 test('age and absence of observed usage remain review evidence, never action authority', () => {
@@ -240,9 +264,9 @@ test('maintenance plans are deeply immutable, five-minute, and source-bound', ()
   assert.equal(plan.mode, 'read-only');
   assert.deepEqual(plan.capabilities, { plan: true, apply: false, undo: false });
   assert.equal(plan.expiresAt, new Date(NOW + 300_000).toISOString());
-  assert.equal(plan.safetyClass, 'safe-automatic');
+  assert.equal(plan.safetyClass, 'approval-required');
   assert.equal(plan.actions[0].resourceIdentity.id, 'cache:demo');
-  assert.equal(plan.actions[0].classification, 'safe-automatic');
+  assert.equal(plan.actions[0].classification, 'approval-required');
   assert.equal(plan.actions[0].findingClassification, 'reproducible-storage-candidate');
   assert.equal(plan.actions[0].executable, false);
   assert.equal(Object.isFrozen(plan), true);
@@ -263,7 +287,7 @@ test('maintenance plans are deeply immutable, five-minute, and source-bound', ()
     sourceFingerprint: scan.sourceFingerprint, now: () => NOW,
   }), /digest/i);
   const mixedClass = structuredClone(plan);
-  mixedClass.actions[0].classification = 'approval-required';
+  mixedClass.actions[0].classification = 'never-automatic';
   assert.throws(() => assertMaintenancePlanIntegrity(mixedClass, {
     sourceFingerprint: scan.sourceFingerprint, now: () => NOW,
   }), /safety class/i);
@@ -275,7 +299,7 @@ test('planner is deterministic and rejects mixed safety classes', () => {
   const review = {
     ...safe,
     id: 'maintenance-finding-review',
-    safetyClass: 'approval-required',
+    safetyClass: 'never-automatic',
     resource: { ...safe.resource, id: 'history:one' },
   };
   const input = { findings: [safe], sourceFingerprint: scan.sourceFingerprint, now: () => NOW };

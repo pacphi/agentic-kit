@@ -1,10 +1,14 @@
-import {
-  FINDING_STATES, VERSION_AXES, deepFreeze,
-} from './model.mjs';
+import path from 'node:path';
+
 import {
   footprintEvidence, measurementEvidence, projectReference, sha256, sourceFingerprint,
 } from './evidence.mjs';
-import path from 'node:path';
+import {
+  catalogGuidance, incompleteEvidenceGuidance, relationshipGuidance, storageGuidance,
+} from './finding-guidance.mjs';
+import {
+  FINDING_STATES, VERSION_AXES, deepFreeze,
+} from './model.mjs';
 
 const array = (value) => (Array.isArray(value) ? value : []);
 const text = (value) => (typeof value === 'string' && value.trim() ? value.trim() : null);
@@ -21,7 +25,10 @@ function ownership({ owner = null, authority = 'observed', managed = false } = {
   return { owner: text(owner), authority, managed };
 }
 
-function nextAction({ operation, label, providerId, safetyClass, rollback = 'compensating' }) {
+function nextAction({
+  operation, label, providerId, safetyClass, rollback = 'compensating',
+  recommendation = label, steps = [], preserved = [], blockedReason = null,
+}) {
   return {
     operation,
     label,
@@ -31,71 +38,12 @@ function nextAction({ operation, label, providerId, safetyClass, rollback = 'com
     rollback,
     restart: 'unknown',
     executable: false,
-    recommendation: label,
-    steps: [
-      'Inspect the evidence and confirm the owning source.',
-      'Use the owning provider or project workflow for the proposed change.',
-      'Run a deep System rescan and verify the finding is resolved.',
-    ],
-    preserved: ['Resources outside this finding'],
-    blockedReason: 'No provider-authorized executable action is attached to this finding.',
+    recommendation,
+    steps,
+    preserved,
+    ...(blockedReason ? { blockedReason } : {}),
   };
 }
-
-const relationshipCopy = Object.freeze({
-  'redundant-project-override': {
-    label: 'Decide whether to archive the project copy',
-    headline: 'Project and shared definitions are identical',
-    explanation: 'The complete observed definitions match. Host selection and ownership are not proven, so both copies are preserved.',
-    recommendation: 'If the project does not intentionally override the shared resource, archive or remove the project copy after confirming the host uses the shared source.',
-    impact: 'Only the project-local copy would be removed; the shared source, other projects, and repository history remain.',
-    steps: [
-      'Confirm the shared source is available to this host and project.',
-      'Back up or commit the project copy before changing it.',
-      'Remove only the project copy, then run a deep System rescan.',
-    ],
-    blockedReason: 'Observed equality does not prove host selection, ownership, or rollback authority.',
-  },
-  'same-name-different-definition': {
-    label: 'Choose which definition should be authoritative',
-    headline: 'Project and shared definitions differ',
-    explanation: 'The resources share a name, but their complete observed definitions differ. Agentic Kit cannot infer which behavior you intend.',
-    recommendation: 'Compare the project and shared definitions. Keep the intended source, or rename the project resource if both behaviors are required.',
-    impact: 'The unintended project definition would be removed or renamed only after you choose the source of truth; shared sources remain.',
-    steps: [
-      'Compare the project copy with each observed shared source.',
-      'Choose the intended source of truth for this project.',
-      'Remove the unintended copy or rename the project copy, then rescan.',
-    ],
-    blockedReason: 'Choosing between different definitions is an intent decision, not a safe automatic cleanup.',
-  },
-  'tracked-source-copy': {
-    label: 'Resolve the tracked copy through a pull request',
-    headline: 'An identical project copy is tracked by Git',
-    explanation: 'The complete observed definition matches a shared source, but the project copy is repository content rather than disposable cache.',
-    recommendation: 'If the repository should inherit the shared resource, remove the tracked project copy through the normal review and pull-request workflow.',
-    impact: 'The repository change would remove only the tracked project copy; shared sources, other projects, and Git history remain.',
-    steps: [
-      'Confirm contributors and automation can use the shared source.',
-      'Create a repository change that removes only the tracked project copy.',
-      'Run project tests and a deep System rescan before merging.',
-    ],
-    blockedReason: 'Removing tracked source is a repository change and requires project review.',
-  },
-  'legacy-equivalent-transport': {
-    label: 'Retire the legacy transport after verifying the canonical one',
-    headline: 'A canonical and legacy transport have identical configuration',
-    explanation: 'Both registrations reach the same observed transport. Scope and provider ownership still determine whether retirement is safe.',
-    recommendation: 'Verify the canonical registration is healthy, then remove only the legacy registration with the host-native MCP workflow at its reported scope.',
-    impact: 'Only the legacy registration at the reported scope would be removed; the canonical registration and other scopes remain.',
-    steps: [
-      'Verify the canonical registration is present and healthy at an equal or broader scope.',
-      'Use the host-native MCP command to remove only the legacy registration.',
-      'Restart the affected host if required and run a deep System rescan.',
-    ],
-    blockedReason: 'No provider has yet proved scoped removal, canonical health, exact verification, and rollback for this finding.',
-  },
-});
 
 const definitionDigest = (presence) => ['measured', 'carried-forward'].includes(presence?.definition?.status)
   && presence?.definition?.partial !== true && presence?.definition?.value
@@ -119,7 +67,7 @@ function relationshipMember(presence, role) {
 }
 
 function relationshipFinding({ classification, kind, name, host, project, projectPresence, shared, evidence }) {
-  const copy = relationshipCopy[classification];
+  const copy = relationshipGuidance[classification];
   const members = [relationshipMember(projectPresence,
     classification === 'legacy-equivalent-transport' ? 'legacy' : 'project-copy')]
     .concat(shared.map((presence) => relationshipMember(presence,
@@ -128,12 +76,8 @@ function relationshipFinding({ classification, kind, name, host, project, projec
     definitions: [definitionDigest(projectPresence), ...shared.map(definitionDigest)].sort() };
   const action = nextAction({
     operation: 'review', label: copy.label, providerId: 'maintenance.read-only',
-    safetyClass: 'never-automatic', rollback: 'reversible',
-  });
-  Object.assign(action, {
-    recommendation: copy.recommendation, steps: copy.steps,
-    preserved: ['The shared source', 'Other projects', 'Current repository history'],
-    blockedReason: copy.blockedReason,
+    safetyClass: 'never-automatic', rollback: 'reversible', recommendation: copy.label,
+    steps: copy.steps, preserved: copy.preserved, blockedReason: copy.blockedReason,
   });
   return makeFinding({
     state: 'ambiguous', bucket: 'needsReview', classification, safetyClass: 'never-automatic',
@@ -272,21 +216,36 @@ function storageFinding(row, sharedEvidence) {
   const evidence = measurementEvidence(row.bytes, sharedEvidence);
   const ageOnly = ['aged-transcripts', 'orphaned-transcripts'].includes(row.kind);
   const usableEvidence = evidence.completeness === 'complete' && evidence.freshness === 'fresh';
-  const safe = row.safety === 'regenerable' && usableEvidence;
+  const reproducible = row.safety === 'regenerable' && usableEvidence;
+  const versionStale = row.kind === 'stale-npx-env' && row?.basis?.versionStale === true;
+  const idleOnly = row.kind === 'stale-npx-env' && row?.basis?.idle === true && !versionStale;
   const unusableEvidence = !usableEvidence;
   const state = unusableEvidence
     ? 'unreadable-partial'
-    : (safe ? 'orphaned-cache' : (row.kind === 'runtime-version' ? 'superseded-version' : 'ambiguous'));
+    : (versionStale ? 'superseded-version'
+      : (reproducible && !idleOnly ? 'orphaned-cache'
+        : (row.kind === 'installed-runtime-versions' ? 'superseded-version' : 'ambiguous')));
   const safetyClass = unusableEvidence
     ? 'never-automatic'
-    : (safe ? 'safe-automatic' : 'approval-required');
-  const bucket = safe ? 'safeCleanup' : 'needsReview';
-  const label = safe ? 'Prepare owner-managed cleanup' : 'Review and preserve unless explicitly approved';
+    : 'approval-required';
+  const guidance = storageGuidance(row.kind, {
+    usableEvidence, safe: reproducible, basis: row.basis,
+  });
+  const measuredValue = (measurement) => ['measured', 'carried-forward'].includes(measurement?.status)
+    ? measurement.value : null;
   return makeFinding({
     state,
-    bucket,
-    classification: safe ? 'reproducible-storage-candidate' : 'advisory-storage-candidate',
+    bucket: 'needsReview',
+    classification: unusableEvidence ? 'storage-evidence-incomplete'
+      : (versionStale ? 'version-stale-npx-environment'
+        : (idleOnly ? 'idle-reproducible-cache'
+          : (reproducible ? 'reproducible-storage-candidate' : 'advisory-storage-candidate'))),
     safetyClass,
+    statusLabel: unusableEvidence ? 'Rescan required'
+      : (versionStale ? 'Version-stale cache'
+        : (idleOnly ? 'Idle cache'
+          : (reproducible ? 'Cache can be cleared' : 'Review before removal'))),
+    headline: guidance.headline,
     resource: {
       id: String(row.id),
       kind: text(row.kind) ?? 'storage',
@@ -304,17 +263,20 @@ function storageFinding(row, sharedEvidence) {
         : 'Usage was not used as action authority.',
     },
     impact: {
-      summary: safe ? 'The owning tool can reproduce the measured data.' : 'Unique or live data may be affected.',
-      bytes: row.bytes?.status === 'measured' ? row.bytes.value : null,
-      files: row.files?.status === 'measured' ? row.files.value : null,
+      summary: guidance.impact,
+      bytes: measuredValue(row.bytes),
+      files: measuredValue(row.files),
       dependencies: 'unknown',
+      preserved: guidance.preserved,
     },
     nextAction: nextAction({
-      operation: safe ? 'clean' : 'review',
-      label,
+      operation: versionStale ? 'clean' : 'review',
+      label: guidance.label,
       providerId: 'maintenance.read-only',
       safetyClass,
-      rollback: safe ? 'compensating' : 'irreversible',
+      rollback: reproducible ? 'compensating' : 'irreversible',
+      recommendation: guidance.label, steps: guidance.steps,
+      preserved: guidance.preserved, blockedReason: guidance.blockedReason,
     }),
   });
 }
@@ -415,6 +377,11 @@ function catalogFinding(item, sharedEvidence) {
   if (!disposition) return null;
   const provider = presence?.provider;
   const operation = lifecycleOperation(lifecycle, disposition);
+  const guidance = catalogGuidance({
+    kind: item?.kind, operation, update: disposition.update,
+    partial: disposition.partial, stale: disposition.stale,
+    recommendedVersion: lifecycle?.recommendedVersion,
+  });
   return makeFinding({
     state: disposition.state,
     bucket: disposition.bucket,
@@ -422,6 +389,11 @@ function catalogFinding(item, sharedEvidence) {
       ? 'catalog-evidence-incomplete'
       : (disposition.stale ? 'catalog-evidence-stale' : (lifecycle?.state ?? 'multiple-observed-revisions')),
     safetyClass: disposition.safetyClass,
+    statusLabel: disposition.partial || disposition.stale ? 'Rescan required'
+      : (disposition.update ? 'Upgrade available'
+        : (operation === 'remove' ? 'Uninstall candidate'
+          : (operation === 'disable' ? 'Disable candidate' : 'Conflicting copies'))),
+    headline: guidance.headline,
     resource: catalogResource(item, presence, provider),
     versions: catalogVersions(provider, lifecycle, presence),
     ownership: ownership({
@@ -441,28 +413,33 @@ function catalogFinding(item, sharedEvidence) {
       statement: 'Usage was not used as action authority.',
     },
     impact: {
-      summary: 'Dependent capabilities require review before change.',
+      summary: guidance.impact,
       bytes: null,
       files: null,
       dependencies: array(item?.components).length || 'unknown',
+      preserved: guidance.preserved,
     },
     nextAction: nextAction({
       operation,
-      label: disposition.update ? 'Review compatible update'
-        : (operation === 'review' ? 'Review evidence with the owning provider' : `Review ${operation} with the owning provider`),
+      label: guidance.label,
       providerId: text(provider?.ref) ?? 'maintenance.read-only',
       safetyClass: disposition.safetyClass,
       rollback: 'compensating',
+      recommendation: guidance.label, steps: guidance.steps,
+      preserved: guidance.preserved, blockedReason: guidance.blockedReason,
     }),
   });
 }
 
 function missingEvidenceFinding(evidence) {
+  const guidance = incompleteEvidenceGuidance();
   return makeFinding({
     state: 'unreadable-partial',
     bucket: 'needsReview',
     classification: 'system-evidence-incomplete',
     safetyClass: 'never-automatic',
+    statusLabel: 'Rescan required',
+    headline: guidance.headline,
     resource: {
       id: 'system:maintenance-evidence', kind: 'system-evidence',
       name: 'Maintenance evidence', host: 'agentic-kit', scope: 'machine',
@@ -475,12 +452,15 @@ function missingEvidenceFinding(evidence) {
     },
     observedUsage: { status: 'not-measured', statement: 'Usage evidence is unavailable.' },
     impact: {
-      summary: 'No remediation can be classified safely until evidence is complete.',
+      summary: guidance.impact,
       bytes: null, files: null, dependencies: 'unknown',
+      preserved: guidance.preserved,
     },
     nextAction: nextAction({
-      operation: 'scan', label: 'Run an explicit deep scan',
+      operation: 'scan', label: guidance.label,
       providerId: 'system.deep-scan', safetyClass: 'never-automatic', rollback: 'reversible',
+      recommendation: guidance.label, steps: guidance.steps,
+      preserved: guidance.preserved, blockedReason: guidance.blockedReason,
     }),
   });
 }

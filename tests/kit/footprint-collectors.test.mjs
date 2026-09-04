@@ -598,9 +598,11 @@ test('an idle npx cache env is a candidate because the cache is reproducible', (
   assert.equal(rows[0].path, env);
   assert.equal(rows[0].label, 'npx cache env (some-tool)');
   assert.equal(rows[0].bytes.value, total);
+  assert.deepEqual(rows[0].basis, { versionStale: false, idle: true, idleDays: 120 });
   assert.match(rows[0].rationale, /untouched for 120d/);
   assert.match(rows[0].rationale, /re-fetches on demand/);
-  assert.match(rows[0].cleanupHint, /ak sync/, 'the hint names the CLI that owns removal');
+  assert.equal(rows[0].cleanupHint, null,
+    'idle age alone must not claim the version-stale pruning procedure applies');
   assert.equal(rows[0].advisory, true);
 });
 

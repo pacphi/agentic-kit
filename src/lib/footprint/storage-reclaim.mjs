@@ -204,13 +204,15 @@ export function npxReclaimables({ asOf, opts, walk, limits, fsImpl }) {
   for (const env of nodes.envs) {
     const stale = staleByVersion.get(env.path);
     const idle = env.newestMtimeMs !== null && env.newestMtimeMs < idleCutoff;
-    if (!stale && !idle) continue;
+    const versionStale = Array.isArray(stale) && stale.length > 0;
+    if (!versionStale && !idle) continue;
+    const idleDays = idle ? Math.floor((asOf - env.newestMtimeMs) / 86_400_000) : null;
     const why = [];
-    if (stale) {
+    if (versionStale) {
       why.push(`cached ${stale.map((s) => `${s.pkg}@${s.cached}`).join(', ')} `
         + `older than installed ${stale.map((s) => s.installed).join(', ')}`);
     }
-    if (idle) why.push(`untouched for ${Math.floor((asOf - env.newestMtimeMs) / 86_400_000)}d`);
+    if (idle) why.push(`untouched for ${idleDays}d`);
     rows.push(candidate({
       id: `stale-npx-env:${env.id}`,
       kind: 'stale-npx-env',
@@ -219,8 +221,9 @@ export function npxReclaimables({ asOf, opts, walk, limits, fsImpl }) {
       bytes: env.bytes,
       files: env.files,
       safety: 'regenerable',
+      basis: { versionStale, idle, idleDays },
       rationale: `${why.join('; ')}. npx re-fetches on demand, so the cache is reproducible.`,
-      cleanupHint: 'ak sync prunes version-stale envs (npx.pruneNpxStale)',
+      cleanupHint: versionStale ? 'ak sync prunes version-stale envs (npx.pruneNpxStale)' : null,
     }));
   }
   return rows;
