@@ -56,24 +56,46 @@ const VERSION_KEYS = [
 
 function providerNextAction({
   operation, label, providerId, providerVersion, safetyClass,
-  rollback, restart, executable,
+  rollback, restart, executable, recommendation, steps, preserved, blockedReason,
 }) {
+  const defaults = {
+    update: {
+      steps: ['Preview the update for this resource.', 'Confirm the target version and affected capabilities.', 'Apply the update, restart if required, then deep-rescan.'],
+      preserved: ['Other installed resources', 'Project files'],
+    },
+    remove: {
+      steps: ['Preview the uninstall for this resource.', 'Confirm the named resource and retained data.', 'Uninstall it, restart if required, then deep-rescan.'],
+      preserved: ['Other installed resources', 'Project files'],
+    },
+    disable: {
+      steps: ['Preview the disable operation.', 'Confirm the affected capabilities.', 'Disable the resource, restart if required, then deep-rescan.'],
+      preserved: ['Installed resource data', 'Other installed resources'],
+    },
+    clean: {
+      steps: ['Preview the cleanup for this cache.', 'Confirm no installed resource or project file is included.', 'Clear it, then deep-rescan.'],
+      preserved: ['Other cache environments', 'Installed resources', 'Project files'],
+    },
+    archive: {
+      steps: ['Preview the archive for this resource.', 'Confirm the archive can restore the complete resource.', 'Archive it, restart if required, then deep-rescan.'],
+      preserved: ['Restorable archive', 'Other resources', 'Project files'],
+    },
+    terminate: {
+      steps: ['Preview the exact process termination.', 'Confirm the process identity is still orphaned.', 'Stop it, then deep-rescan.'],
+      preserved: ['Other live processes', 'MCP configuration', 'Project files'],
+    },
+    review: {
+      steps: ['Follow the named corrective action in the owning host.', 'Run a deep System rescan and inspect the replacement finding.'],
+      preserved: ['Current resource until the host completes the change'],
+    },
+  }[operation] ?? { steps: ['Run a deep System rescan before changing this resource.'], preserved: ['Current resource'] };
   return {
     operation, label, providerId, providerVersion, safetyClass,
     rollback, restart, executable: executable === true,
-    recommendation: label,
-    steps: executable === true ? [
-      'Preview this one provider-owned change.',
-      'Review its effect, preservation boundary, restart requirement, and rollback class.',
-      'Confirm the exact plan, then verify the refreshed Catalog evidence.',
-    ] : [
-      'Inspect the provider evidence and confirm the intended resource state.',
-      'Use the owning provider workflow for the proposed change.',
-      'Run a deep System rescan and verify the finding is resolved.',
-    ],
-    preserved: ['Resources outside this finding'],
+    recommendation: recommendation ?? label,
+    steps: steps ?? defaults.steps,
+    preserved: preserved ?? defaults.preserved,
     ...(executable === true ? {} : {
-      blockedReason: 'The owning provider did not authorize an executable action for this finding.',
+      blockedReason: blockedReason ?? 'This dashboard has no exact provider action for the named change.',
     }),
   };
 }
@@ -83,12 +105,13 @@ export function providerFinding({
   providerId, providerVersion = 'v1', stableKey, state, bucket, classification, safetyClass,
   resource, versions = {}, ownership, evidence, impact, operation, label,
   rollback = 'irreversible', restart = 'unknown', executable = false,
+  recommendation, steps, preserved, blockedReason,
 }) {
   const normalizedVersions = Object.fromEntries(VERSION_KEYS.map((key) => [key,
     typeof versions[key] === 'string' && versions[key] ? versions[key] : null]));
   const nextAction = providerNextAction({
     operation, label, providerId, providerVersion, safetyClass,
-    rollback, restart, executable,
+    rollback, restart, executable, recommendation, steps, preserved, blockedReason,
   });
   const stable = {
     providerId, stableKey, state, classification, safetyClass, resource,

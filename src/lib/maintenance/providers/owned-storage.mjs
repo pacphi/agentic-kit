@@ -160,7 +160,8 @@ export function createOwnedNpxCacheProvider({
         evidence: { sources: ['system-footprint', 'agentic-kit-npx-stale-procedure'],
           asOf: facts.asOf, freshness: 'fresh', completeness: 'complete', gaps: [] },
         impact: base.impact,
-        operation: 'clean', label: 'Remove exact reproducible stale npx environment',
+        operation: 'clean', label: `Remove ${base.resource.name}`,
+        recommendation: 'This exact environment contains a package version older than the installed managed version.',
         rollback: 'irreversible', restart: 'not-required', executable: true,
       })];
     });

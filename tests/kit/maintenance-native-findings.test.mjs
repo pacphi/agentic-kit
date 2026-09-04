@@ -72,6 +72,9 @@ test('Claude joins exact host-native installed and available rows without lexica
   assert.equal(finding.impact.dependencies, 3);
   assert.equal(finding.nextAction.operation, 'update');
   assert.equal(finding.nextAction.executable, true);
+  assert.equal(finding.nextAction.label, 'Upgrade demo@market to 1.0.0');
+  assert.match(finding.nextAction.steps[0], /^Preview the update/);
+  assert.doesNotMatch(JSON.stringify(finding.nextAction), /Resources outside this finding|Review its effect, preservation boundary/);
   assert.deepEqual(calls[0], { binary: 'claude', args: ['plugin', 'list', '--available', '--json'] });
 
   const plan = await service.plan({ findingIds: [finding.id], executable: true });
@@ -112,6 +115,9 @@ test('Codex reports an exact available candidate as upstream-required and never 
   assert.equal(finding.safetyClass, 'upstream-required');
   assert.equal(finding.nextAction.operation, 'review');
   assert.equal(finding.nextAction.executable, false);
+  assert.equal(finding.nextAction.label, 'Upgrade demo@market to 1.1.0 with Codex');
+  assert.match(finding.nextAction.blockedReason, /per-plugin update action/i);
+  assert.doesNotMatch(JSON.stringify(finding.nextAction), /Use the owning provider workflow|Resources outside this finding/);
   assert.equal(model.findings.some((row) => row.nextAction.operation === 'remove'), false);
   assert.deepEqual(calls[0], { binary: 'codex', args: ['plugin', 'list', '--available', '--json'] });
 });
@@ -160,6 +166,7 @@ test('Claude uninstall is exact and fixed but only derives from an explicit life
   const model = await service.scan();
   const finding = model.findings.find((row) => row.nextAction.operation === 'remove');
   assert.equal(finding.nextAction.executable, true);
+  assert.equal(finding.nextAction.label, 'Uninstall demo@market and keep its data');
   const plan = await service.plan({ findingIds: [finding.id], executable: true });
   const outcome = await provider.apply(plan.actions[0]);
   assert.equal((await provider.verify(plan.actions[0], outcome)).ok, true);
@@ -217,7 +224,8 @@ test('default wiring promotes only an exact currently stale npx candidate', asyn
   const finding = model.findings.find((row) => row.resource.id === candidate.id);
   assert.equal(finding.ownership.authority, 'agentic-kit-procedure');
   assert.equal(finding.nextAction.executable, true);
-  assert.match(finding.nextAction.recommendation, /^Remove /);
+  assert.equal(finding.nextAction.label, 'Remove npx abc');
+  assert.match(finding.nextAction.steps[0], /^Preview the cleanup/);
   assert.equal((await service.plan({ findingIds: [finding.id], executable: true })).actions[0].providerId,
     'agentic-kit-npx-cache');
 

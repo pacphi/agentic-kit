@@ -91,17 +91,17 @@ export function createClaudePluginProvider({ run = runNativeCommand } = {}) {
         classification = `native-explicit-${operation}`;
         safetyClass = 'approval-required';
         selectedOperation = operation;
-        label = operation === 'remove' ? 'Uninstall exact plugin and preserve its data' : 'Disable exact plugin';
+        label = operation === 'remove' ? `Uninstall ${plugin.ref} and keep its data` : `Disable ${plugin.ref}`;
         rollback = operation === 'disable' ? 'reversible' : 'irreversible';
         executable = operation !== 'disable' || plugin.enabled;
       } else if (plugin.candidateStatus === 'ambiguous') {
         state = 'ambiguous'; bucket = 'needsReview'; classification = 'host-candidate-ambiguous';
         safetyClass = 'never-automatic'; selectedOperation = 'review';
-        label = 'Review ambiguous host-reported candidates'; rollback = 'irreversible'; executable = false;
+        label = `Compare the host candidates for ${plugin.ref}`; rollback = 'irreversible'; executable = false;
       } else if (plugin.candidateStatus === 'exact' && plugin.availableVersion !== plugin.version) {
         state = 'update-available'; bucket = 'updatesReady'; classification = 'host-reported-update-candidate';
         safetyClass = 'approval-required'; selectedOperation = 'update';
-        label = 'Update to the exact host-reported candidate'; rollback = 'irreversible'; executable = true;
+        label = `Upgrade ${plugin.ref} to ${plugin.availableVersion}`; rollback = 'irreversible'; executable = true;
         recommended = plugin.availableVersion;
       } else {
         continue;

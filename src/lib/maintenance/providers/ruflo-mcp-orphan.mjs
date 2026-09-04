@@ -90,7 +90,7 @@ export function createRufloMcpOrphanProvider({
       evidence: { sources: ['ruflo-live-process-census'], asOf: facts.asOf,
         freshness: 'fresh', completeness: 'complete', gaps: [] },
       impact: { summary: 'An identity-proven orphaned MCP transport remains live.' },
-      operation: 'terminate', label: 'Terminate exact identity-proven orphan',
+      operation: 'terminate', label: `Stop Ruflo MCP transport ${orphan.pid}`,
       rollback: 'irreversible', restart: 'not-required', executable: true,
     }));
   }

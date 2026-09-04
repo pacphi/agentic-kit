@@ -61,7 +61,14 @@ export function createCodexPluginProvider({ run = runNativeCommand } = {}) {
           freshness: 'fresh', completeness: 'complete', gaps: [] },
         impact: { summary: 'Codex reports a candidate, but no exact per-plugin update verb is available.',
           dependencies: catalogDependencyCount(footprint, plugin.ref, 'codex') },
-        operation: 'review', label: 'Review upstream Codex plugin update support',
+        operation: 'review', label: `Upgrade ${plugin.ref} to ${plugin.candidates[0]} with Codex`,
+        recommendation: 'Codex reports this version, but this dashboard cannot invoke a per-plugin update.',
+        steps: [
+          `Check Codex plugin help for an update or reinstall workflow for ${plugin.ref}.`,
+          `Use that workflow to select ${plugin.candidates[0]}, then restart Codex and deep-rescan.`,
+        ],
+        preserved: ['Current plugin until Codex completes the upgrade', 'Other Codex plugins'],
+        blockedReason: 'Codex does not expose an exact per-plugin update action to this dashboard.',
         rollback: 'irreversible', restart: 'unknown', executable: false,
       })];
     });
