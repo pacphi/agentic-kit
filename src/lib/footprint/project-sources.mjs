@@ -108,6 +108,11 @@ export function firstCwd(lines, host) {
   return null;
 }
 
+/** Read only the bounded transcript head and return its declared cwd. */
+export function transcriptCwd(file, host, options = {}) {
+  return firstCwd(readHeadLines(file, options), host);
+}
+
 // ── the encoded Claude project directory ──────────────────────────────────────
 
 /**

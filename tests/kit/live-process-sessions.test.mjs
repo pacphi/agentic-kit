@@ -6,6 +6,7 @@ import path from 'node:path';
 import {
   hostFromCommand, listActiveHostSessions, parseLsofCwds, parseProcessHeaders, parseProcessList,
 } from '../../src/lib/live/index.mjs';
+import { surveyHostProcesses } from '../../src/lib/live/process-sessions.mjs';
 
 test('host process detection recognizes controllers and rejects helpers', () => {
   assert.equal(hostFromCommand('claude'), 'claude');
@@ -54,6 +55,30 @@ test('runtime survey keeps top-level sessions and folds nested host workers into
     { pid: 200, startedAt, host: 'codex', cwd: '/repos/agentic-kit' },
     { pid: 300, startedAt, host: 'opencode', cwd: '/repos/emailibrium' },
   ]);
+});
+
+test('runtime survey classifies host services and desktop apps without retaining argv', async () => {
+  const startedAt = 'Mon Aug  3 12:00:00 2026';
+  const processRows = parseProcessList([
+    `100 1 ${startedAt} /Applications/ChatGPT.app/Contents/Resources/codex /Applications/ChatGPT.app/Contents/Resources/codex app-server`,
+    `200 1 ${startedAt} /Users/me/.codex/plugins/.plugin-appserver/codex /Users/me/.codex/plugins/.plugin-appserver/codex app-server`,
+    `300 1 ${startedAt} /Applications/Claude.app/Contents/MacOS/Claude /Applications/Claude.app/Contents/MacOS/Claude`,
+    `400 1 ${startedAt} /usr/local/bin/claude claude`,
+  ].join('\n'));
+  const survey = await surveyHostProcesses({
+    platform: 'darwin', processRows, now: Date.parse(startedAt) + 60_000,
+    cwdByPid: new Map([[100, '/'], [200, '/Users/me/.codex'], [300, '/'], [400, '/repos/keel']]),
+    metricsByPid: new Map(),
+  });
+
+  assert.deepEqual(survey.processes.map((entry) => ({ pid: entry.pid, kind: entry.controllerKind })), [
+    { pid: 100, kind: 'host-service' },
+    { pid: 200, kind: 'host-service' },
+    { pid: 300, kind: 'desktop-app' },
+    { pid: 400, kind: 'project-session' },
+  ]);
+  assert.equal(survey.processes.some((entry) => Object.hasOwn(entry, 'command')), false,
+    'classification emits an enum, never the potentially sensitive argv');
 });
 
 test('workspace inspection is shared consistently across Claude, Codex, and OpenCode', async () => {

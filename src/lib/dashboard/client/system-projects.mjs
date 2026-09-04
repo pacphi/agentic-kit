@@ -161,14 +161,6 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     }
   }
 
-  function sysTopSessionsAttributable(sess){
-    var attributable=[],unattributable=0,i;
-    for(i=0;i<sess.length;i++){
-      if(sess[i]&&sess[i].project)attributable.push(sess[i]);else unattributable++;
-    }
-    return {attributable:attributable,unattributable:unattributable};
-  }
-
   function sysTopSessionRowHtml(x,hostTotals){
     var ht=hostTotals[x.host],share=ht>0?(x.bytes/ht)*100:null;
     // Link to the transcript the same way Usage does, through the public
@@ -187,16 +179,18 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
       +(sid?'<button class="sy-link" type="button" data-transcript="'+esc(sid)+'" title="open transcript">'+cell+"</button>":cell)
       +"</td>"
       +'<td><span class="sy-dot" style="background:'+hostColor(x.host)+'"></span>'+esc(x.host||"\u2014")+"</td>"
-      // An undecoded name says WHICH reason. "deleted project" is a
-      // claim, and on Windows it would be a false one for every row: the
-      // encoding there carries a drive prefix that the decoder refuses by
-      // design, so nothing is decodable and nothing has been deleted.
-      +"<td>"+(x.projectResolved===false
+      // A bounded transcript-head read supplies the working context for Codex
+      // rows whose dated storage path carries no project. Older snapshots fall
+      // back to path-derived Claude evidence rather than inventing a name.
+      +'<td title="'+esc((x.context&&x.context.path)||x.projectPath||"")+'">'
+      +(x.context&&x.context.label
+        ?esc(x.context.label)
+        :x.projectResolved===false
         ?'<span class="sy-unk" title="'+esc(x.projectReason==="encoding"
           ? "this name is not a POSIX-rooted transcript directory, so it cannot be decoded to a project path: "+String(x.project||"")
           : "this project directory no longer exists, so its name cannot be decoded from "+String(x.project||""))
           +'">'+(x.projectReason==="encoding"?"name not decodable":"deleted project")+"</span>"
-        :esc(x.projectLabel||x.project))+"</td>"
+        :esc(x.projectLabel||x.project||((x.host||"Host")+" session store")))+"</td>"
       +'<td class="num">'+esc(fmtBytes(x.bytes))+"</td>"
       +"<td>"+(share==null
         ?unkHtml("this host's retained total was not measured",false)
@@ -211,19 +205,11 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     var sess=(s&&s.topSessions)||null;
     if(!s){top.innerHTML=sysEmpty(NOT_SCANNED);return;}
     if(!sess||!sess.length){top.innerHTML=sysEmpty("no session files were measured.");return;}
-    var attr=sysTopSessionsAttributable(sess),attributable=attr.attributable,unattributable=attr.unattributable;
-    if(!attributable.length){
-      top.innerHTML=sysEmpty("no session file could be attributed to a project.");
-      return;
-    }
     var hostTotals=storageHostTotals(s);
-    var body=attributable.map(function(x){return sysTopSessionRowHtml(x,hostTotals);}).join("");
+    var body=sess.map(function(x){return sysTopSessionRowHtml(x,hostTotals);}).join("");
     top.innerHTML='<div class="sy-tblwrap"><table class="sy-table"><thead><tr><th>Session</th><th>Host</th>'
-      +'<th>Project</th><th style="text-align:right">Size</th><th>Share of host</th></tr></thead><tbody>'
-      +body+"</tbody></table></div>"
-      +(unattributable?'<div class="sy-liner">'+esc(fmtNum(unattributable))
-        +" larger session file"+(unattributable===1?"":"s")+" could not be attributed to a project "
-        +"and "+(unattributable===1?"is":"are")+" not listed.</div>":"");
+      +'<th>Working context</th><th style="text-align:right">Size</th><th>Share of host</th></tr></thead><tbody>'
+      +body+"</tbody></table></div>";
   }
 
   function renderSysStorage(d){
@@ -254,13 +240,15 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
         for(i=0;i<rows.length;i++){var rv=mval(rows[i].rssBytes);if(rv!=null&&rv>maxRss)maxRss=rv;}
         for(i=0;i<rows.length;i++){
           var p=rows[i],rss=mval(p.rssBytes);
-          // The project cell is the honest-degradation surface: the census
+          // The working-context cell is the honest-degradation surface: the census
           // states WHY a process could not be attributed (including the Windows
           // reasons), and that sentence is what renders. Never blank, never a guess.
-          var proj=p.project&&p.project.status!=="unknown"&&p.project.value
-            ? esc(p.project.value.label||p.project.value.path)
-            : '<span class="sy-unk" title="'+esc((p.project&&p.project.reason)||"not attributable")+'">'
-              +esc(String((p.project&&p.project.reason)||"not attributable").split("\u2014")[0].trim())+"</span>";
+          var source=p.source||p.project;
+          var proj=source&&source.status!=="unknown"&&source.value
+            ? '<span title="'+esc(source.value.path||source.value.label||"")+'">'
+              +esc(source.value.label||source.value.path)+"</span>"
+            : '<span class="sy-unk" title="'+esc((source&&source.reason)||"not attributable")+'">'
+              +esc(String((source&&source.reason)||"not attributable").split("\u2014")[0].trim())+"</span>";
           body+='<tr><td><span class="sy-dot" style="background:'+hostColor(p.host)+'"></span>'+esc(p.host)+"</td>"
             +'<td class="num">'+esc(String(p.pid))+"</td>"
             +"<td>"+proj+"</td>"
@@ -274,7 +262,7 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
         // column whose header hangs off the far side reads as a different column.
         procs.innerHTML='<div class="sy-tblwrap"><table class="sy-table"><thead><tr><th>Host</th>'
           +'<th style="text-align:right">pid</th>'
-          +'<th>Project</th><th style="text-align:right">Uptime</th><th style="text-align:right">CPU</th>'
+          +'<th>Working context</th><th style="text-align:right">Uptime</th><th style="text-align:right">CPU</th>'
           +"<th>RSS</th></tr></thead><tbody>"+body+"</tbody></table></div>";
       }
     }

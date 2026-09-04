@@ -784,8 +784,8 @@ ${LIVE_HTML}
       <header class="view-heading">
         <span class="view-eyebrow">SYSTEM</span>
         <h2>Sessions</h2>
-        <p>The individual session files behind the retained bytes &mdash; which projects hold the
-          largest of them, and how much of a host's retained data each one accounts for.</p>
+        <p>The individual session files behind the retained bytes &mdash; the repository, workspace,
+          or host store each belongs to, and how much retained data each one accounts for.</p>
       </header>
       <div class="sy-grid">
         <div class="sy-card">

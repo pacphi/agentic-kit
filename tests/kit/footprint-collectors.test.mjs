@@ -367,7 +367,8 @@ function storageFixture(t) {
   const sizes = {
     recent: write(path.join(claudeProjects, '-repos-keel', 'recent.jsonl'), 'a'.repeat(100)),
     aged: write(path.join(claudeProjects, '-repos-keel', 'aged.jsonl'), 'b'.repeat(50)),
-    rollout: write(path.join(codexSessions, '2026', '08', '06', 'rollout.jsonl'), 'c'.repeat(30)),
+    rollout: write(path.join(codexSessions, '2026', '08', '06', 'rollout.jsonl'),
+      `${JSON.stringify({ type: 'session_meta', payload: { cwd: '/repos/agentic-kit' } })}\n`),
     index: write(path.join(akConfig, 'usage-index.json'), 'd'.repeat(10)),
   };
   touch(path.join(claudeProjects, '-repos-keel', 'recent.jsonl'), now - DAY);
@@ -1432,10 +1433,31 @@ test('an undecodable project is FLAGGED, never guessed at', () => {
   assert.equal(row.projectLabel, encoded, 'falling back to the encoded name beats inventing one');
 });
 
-test('labelSessions leaves an unattributed row alone', () => {
-  const [row] = labelSessions([{ session: 'rollout.jsonl', project: null }]);
+test('labelSessions identifies the host store when no working context is available', () => {
+  const [row] = labelSessions([{
+    session: 'rollout.jsonl', host: 'codex', project: null, path: '/sessions/rollout.jsonl',
+  }], { readCwd: () => null });
   assert.equal(Object.hasOwn(row, 'projectLabel'), false);
   assert.equal(Object.hasOwn(row, 'projectResolved'), false);
+  assert.deepEqual(row.context, {
+    kind: 'host-store', label: 'Codex session store', path: '/sessions',
+  });
+  assert.match(row.contextReason, /did not contain a working directory/);
+});
+
+test('labelSessions attributes a flat Codex rollout from its bounded header cwd', () => {
+  const [row] = labelSessions([{
+    session: 'rollout.jsonl', host: 'codex', project: null, path: '/sessions/rollout.jsonl',
+  }], {
+    readCwd: () => '/repos/agentic-kit',
+    classifyContext: (cwd) => ({
+      kind: 'repository', label: 'agentic-kit', path: cwd, projectKey: 'project:0123456789abcdef',
+    }),
+  });
+  assert.equal(row.attribution, 'transcript-cwd');
+  assert.equal(row.projectLabel, 'agentic-kit');
+  assert.equal(row.projectResolved, true);
+  assert.equal(row.context.kind, 'repository');
 });
 
 test('labelSessions decodes each distinct project once', () => {
@@ -1467,6 +1489,10 @@ test('collectStorage labels the sessions it returns', (t) => {
     assert.equal(s.projectLabel, 'keel', 'the wiring must reach topSessions, not just exist');
     assert.equal(s.projectResolved, true);
   }
+  const codex = result.topSessions.find((s) => s.host === 'codex');
+  assert.equal(codex.context.kind, 'directory');
+  assert.equal(codex.context.label, 'Folder · agentic-kit');
+  assert.equal(codex.attribution, 'transcript-cwd');
 });
 
 test('an undecodable name says WHICH reason — deleted, or never encodable', () => {

@@ -453,16 +453,24 @@ const SYSTEM_PAYLOAD = {
       {
         host: 'claude', pid: 4242,
         project: { value: { label: 'agentic-kit', path: '/Users/me/proj' }, status: 'measured', reason: null, asOf: SYS_NOW, partial: false },
+        source: meas({ kind: 'project', label: 'agentic-kit' }),
         uptimeMs: meas(5_400_000), cpuPercent: meas(3.5), rssBytes: meas(412_000_000),
       },
       {
         host: 'codex', pid: 4711,
-        project: unmeasured('not attributable on this platform — the working directory is not readable'),
+        project: unmeasured('this process is not a project session'),
+        source: meas({ kind: 'host-service', label: 'Codex app service' }),
         uptimeMs: meas(900_000), cpuPercent: meas(0.8), rssBytes: meas(180_000_000),
+      },
+      {
+        host: 'opencode', pid: 4812,
+        project: unmeasured('not attributable on this platform — the working directory is not readable'),
+        source: unmeasured('not attributable on this platform — the working directory is not readable'),
+        uptimeMs: meas(300_000), cpuPercent: meas(0.1), rssBytes: meas(64_000_000),
       },
     ]),
     childProcessCount: meas(3),
-    totals: { processCount: meas(2), rssBytes: meas(592_000_000), cpuPercent: meas(4.3) },
+    totals: { processCount: meas(3), rssBytes: meas(656_000_000), cpuPercent: meas(4.4) },
     machine: { physicalMemoryBytes: meas(34_359_738_368), cpuCount: meas(12) },
     daemons: {
       count: meas(1),
@@ -552,8 +560,8 @@ const SYSTEM_PAYLOAD = {
       cleanupHint: 'ak system --help',
     }],
     topSessions: [
-      { session: 'uitrunc01', host: 'claude', project: 'proj', bytes: 84_000_000, path: '/Users/me/.claude/projects/-Users-me-proj/uitrunc01.jsonl', attribution: 'cwd' },
-      { session: 'orphan0001', host: 'codex', project: null, bytes: 51_000_000, path: '/Users/me/.codex/sessions/orphan0001.jsonl', attribution: 'none' },
+      { session: 'uitrunc01', host: 'claude', project: 'proj', context: { kind: 'repository', label: 'proj', path: '/Users/me/proj' }, bytes: 84_000_000, path: '/Users/me/.claude/projects/-Users-me-proj/uitrunc01.jsonl', attribution: 'transcript-cwd' },
+      { session: 'orphan0001', host: 'codex', project: null, context: { kind: 'repository', label: 'agentic-kit', path: '/Users/me/agentic-kit' }, bytes: 51_000_000, path: '/Users/me/.codex/sessions/orphan0001.jsonl', attribution: 'transcript-cwd' },
     ],
   },
   // Never deep-scanned on this machine. The whole section is `null` rather than
@@ -1131,9 +1139,9 @@ async function main() {
 
   const browser = await chromium.launch({ channel: 'chrome', headless: !HEADED });
 
-  // A running full scan carries a long phase/count/elapsed sentence. It belongs
-  // on its own status row; squeezing it between eight System tabs and a second,
-  // redundant disabled label pushed both controls beyond the viewport.
+  // A running full scan carries a long phase/count/elapsed sentence. Wide
+  // screens have room for it beside the content-width menu; narrow screens
+  // give it a second row instead of stretching or squeezing the menu.
   const runningScanPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   await runningScanPage.route(/\/api\/system(\?|$)/, (route) => route.fulfill({
     status: 200,
@@ -1163,7 +1171,8 @@ async function main() {
       statusText: document.getElementById('sys-asof')?.innerText,
       running: document.getElementById('system-freshness')?.getAttribute('data-running'),
       buttonHidden: button?.hidden,
-      statusBelowTabs: !!status && !!tabs && status.top >= tabs.bottom - 1,
+      statusBesideTabs: !!status && !!tabs && status.top < tabs.bottom && status.bottom > tabs.top
+        && status.left >= tabs.right + 12,
       trailingSegmentSpace: Math.abs((tabs?.right ?? 0)
         - (document.querySelector('#system-seg [data-system-view]:last-of-type')
           ?.getBoundingClientRect().right ?? 0)),
@@ -1172,11 +1181,11 @@ async function main() {
       documentFits: document.documentElement.scrollWidth <= globalThis.innerWidth,
     };
   });
-  check('running full-scan progress gets a readable row without a duplicate action',
+  check('running full-scan progress sits beside a content-width System menu on wide screens',
     runningScanLayout.running === '1'
       && /Full scan running.*Ranking disk use.*15 of 15/.test(runningScanLayout.statusText ?? '')
       && runningScanLayout.buttonHidden === true
-      && runningScanLayout.statusBelowTabs
+      && runningScanLayout.statusBesideTabs
       && runningScanLayout.trailingSegmentSpace < 6
       && runningScanLayout.statusInsideGroup
       && runningScanLayout.documentFits,
@@ -1684,13 +1693,14 @@ async function main() {
         ?.getBoundingClientRect();
       const status = document.getElementById('system-freshness')?.getBoundingClientRect();
       return {
-        statusBelowTabs: !!status && !!tabs && status.top >= tabs.bottom - 1,
+        statusBesideTabs: !!status && !!tabs && status.top < tabs.bottom && status.bottom > tabs.top
+          && status.left >= tabs.right + 12,
         trailingSegmentSpace: Math.abs((tabs?.right ?? 0) - (lastTab?.right ?? 0)),
         documentFits: document.documentElement.scrollWidth <= globalThis.innerWidth,
       };
     });
     check('settled full-scan status cannot squeeze or visually extend the System menu',
-      settledScanLayout.statusBelowTabs
+      settledScanLayout.statusBesideTabs
         && settledScanLayout.trailingSegmentSpace < 6
         && settledScanLayout.documentFits,
       `settled scan layout was ${JSON.stringify(settledScanLayout)}`);
@@ -1719,6 +1729,17 @@ async function main() {
       check(`System view "${view}" is free of rendering artifacts`, arts.length === 0,
         `found ${arts.join(', ')} in visible text`);
     }
+
+    await page.click('[data-system-view="sessions"]');
+    await page.waitForSelector('#panel-sys-sessions:not([hidden])');
+    const largestSessions = await page.$eval('#sys-topsessions', (element) => ({
+      rows: [...element.querySelectorAll('tbody tr')].map((row) => row.innerText.trim()),
+      text: element.innerText,
+    }));
+    check('largest sessions keeps measured rows when a host did not record their project',
+      largestSessions.rows.length === 2
+        && largestSessions.rows.some((row) => /orphan0001[\s\S]*codex[\s\S]*agentic-kit/i.test(row)),
+      `largest session rows were ${JSON.stringify(largestSessions.rows)}`);
 
     // Maintenance remains a reporting workbench even when its separate action
     // contract is enabled. One provider-owned finding gets one Preview control;
@@ -2255,6 +2276,9 @@ async function main() {
     check('a process the census cannot attribute says so instead of blanking the cell',
       /not attributable/i.test(runtimeHonesty.procs),
       `the process census read ${JSON.stringify(runtimeHonesty.procs.slice(0, 240))}`);
+    check('host application processes are attributed to their source instead of a fake project',
+      /Codex app service/i.test(runtimeHonesty.procs),
+      `the process census read ${JSON.stringify(runtimeHonesty.procs.slice(0, 320))}`);
 
     check('the daemon panel no longer carries an AI-worker budget tile',
       !runtimeHonesty.tiles.some((tile) => /budget/i.test(tile.label)),
@@ -2263,6 +2287,9 @@ async function main() {
       '#sys-procs thead th:nth-child(2)',
       (th) => th.textContent.trim() === 'pid' && getComputedStyle(th).textAlign === 'right',
     ), 'a numeric column whose header hangs off the far side reads as a different column');
+    check('the runtime table calls the attribution column Working context, not Project', await page.$eval(
+      '#sys-procs thead th:nth-child(3)', (th) => th.textContent.trim() === 'Working context',
+    ), 'desktop apps and host services are not projects');
     check('the never-persisted child-process footer is gone',
       !/child & MCP/i.test(runtimeHonesty.procs), 'a bare count with no denominator and no action');
 

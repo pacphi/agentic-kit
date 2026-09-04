@@ -413,6 +413,47 @@ test('a blocked Windows cwd probe renders as an honest not-attributable project'
   assert.equal(census.machine.physicalMemoryBytes.value, 34359738368);
 });
 
+test('runtime census names the process source instead of treating every cwd as a project', async () => {
+  const census = await collectRuntimeCensus({
+    platform: 'darwin',
+    surveyImpl: async () => ({
+      observedAt: new Date(WIN_NOW).toISOString(), platform: 'darwin',
+      processes: [
+        { host: 'codex', pid: 10, ppid: 1, startedAt: new Date(WIN_NOW - 1000).toISOString(),
+          uptimeMs: 1000, cpuPercent: 0, rssBytes: 100, cwd: '/', cwdReason: null,
+          controllerKind: 'host-service' },
+        { host: 'claude', pid: 20, ppid: 1, startedAt: new Date(WIN_NOW - 1000).toISOString(),
+          uptimeMs: 1000, cpuPercent: 0, rssBytes: 100, cwd: '/', cwdReason: null,
+          controllerKind: 'desktop-app' },
+        { host: 'claude', pid: 30, ppid: 1, startedAt: new Date(WIN_NOW - 1000).toISOString(),
+          uptimeMs: 1000, cpuPercent: 0, rssBytes: 100, cwd: '/state/codex', cwdReason: null,
+          controllerKind: 'project-session' },
+        { host: 'claude', pid: 40, ppid: 1, startedAt: new Date(WIN_NOW - 1000).toISOString(),
+          uptimeMs: 1000, cpuPercent: 0, rssBytes: 100, cwd: null,
+          cwdReason: 'cwd-unavailable', controllerKind: 'project-session' },
+      ],
+    }),
+    listDaemonsImpl: async () => [],
+    osImpl: { totalmem: () => 1000, freemem: () => 500, cpus: () => [1] },
+    now: WIN_NOW,
+    classifyContext: (cwd) => (cwd === '/state/codex'
+      ? { kind: 'host-state', label: 'Codex state directory', path: cwd }
+      : { kind: 'system-root', label: 'System root', path: cwd }),
+  });
+
+  const rows = census.processes.value;
+  assert.deepEqual(rows.slice(0, 2).map((row) => row.source.value), [
+    { kind: 'host-service', label: 'Codex app service' },
+    { kind: 'desktop-app', label: 'Claude desktop app' },
+  ]);
+  assert.deepEqual(rows[2].source.value, {
+    kind: 'host-state', label: 'Codex state directory', path: '/state/codex',
+  });
+  assert.equal(rows[2].project.status, 'unknown', 'a host state directory is not a project');
+  assert.equal(rows[3].source.status, 'unknown');
+  assert.match(rows[3].source.reason, /reported no working directory/);
+});
+
 test('a Windows survey that cannot run at all leaves the machine facts standing', async () => {
   const census = await collectRuntimeCensus({
     platform: 'win32',

@@ -25,21 +25,27 @@ export const SYSTEM_CSS = `
    reason rides the title so a reader can find out why without leaving. */
 .sy-unk{color:var(--ink-dim); font-style:italic; cursor:help}
 .sy-approx{color:var(--ink-dim)}
-#secondary-system{align-items:flex-start;flex-wrap:wrap}
+#secondary-system{align-items:center;flex-wrap:nowrap}
 /* Scan state is information about every System view, not another segment in
-   the view picker. Give it a dedicated rail so a long status cannot squeeze
-   the tabs or leave a misleading stretch of empty segment after Maintenance. */
-#secondary-system>.subseg{flex:0 1 auto;min-width:0}
+   the view picker. The menu keeps its content width; status consumes only the
+   remaining rail. A breakpoint below gives status its own row only when both
+   controls genuinely cannot fit. */
+#secondary-system>.subseg{flex:0 1 auto;width:max-content;min-width:0}
 .sy-freshness{
-  display:flex;align-items:center;flex:1 0 100%;width:100%;margin-left:0;
-  justify-content:flex-end;flex-wrap:wrap;gap:9px;max-width:100%;min-width:0;
-  padding-top:2px;font-size:12px;color:var(--ink-2)
+  display:flex;align-items:center;flex:1 1 auto;width:auto;margin-left:0;
+  justify-content:flex-end;flex-wrap:nowrap;gap:9px;max-width:100%;min-width:0;
+  font-size:12px;color:var(--ink-2)
 }
 .sy-freshness[data-running="1"] .sy-asof{
   max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap
 }
-@media(max-width:720px){
-  .sy-freshness{position:static;padding-left:0;justify-content:flex-start}
+@media(max-width:980px){
+  #secondary-system{align-items:flex-start;flex-wrap:wrap;overflow-x:visible}
+  #secondary-system>.subseg{flex:1 1 100%;width:100%}
+  .sy-freshness{
+    position:static;flex:1 1 100%;width:100%;padding-left:0;
+    justify-content:flex-start;flex-wrap:wrap
+  }
   .sy-freshness[data-running="1"] .sy-asof{white-space:normal}
 }
 .sy-asof{font-family:var(--mono); font-size:11.5px}
