@@ -923,6 +923,30 @@ test('catalog dedups by normalized name and keeps a per-host presence matrix', (
   assert.deepEqual(result.partial.sort(), ['claude-plugins', 'codex-plugins']);
 });
 
+test('catalog observes one physical capability surface once per scan', (t) => {
+  const fixtureRoots = catalogFixture(t);
+  const { root, ...roots } = fixtureRoots;
+  const walked = [];
+  const walk = (surfaceRoot, options) => {
+    walked.push(path.resolve(surfaceRoot));
+    return walkTree(surfaceRoot, options);
+  };
+
+  const result = collectCatalog({
+    ...roots, cwd: root, now: () => 1_700_000_000_000,
+    includePluginSurfaces: false, fsImpl: fixtureFs(root), walk,
+  });
+
+  const sharedClaudeSkills = path.resolve(roots.claudeRoot, 'skills');
+  assert.equal(walked.filter((surface) => surface === sharedClaudeSkills).length, 1,
+    'Claude and OpenCode consumer bindings must reuse one physical directory observation');
+  assert.deepEqual(
+    result.items.find((item) => item.name === 'Deep-Research')?.hosts.sort(),
+    ['claude', 'codex', 'opencode'],
+    'reusing an observation must preserve every host consumer binding',
+  );
+});
+
 test('catalog includes project-scoped Codex skills from .agents/skills', (t) => {
   const fixtureRoots = catalogFixture(t);
   const { root, ...roots } = fixtureRoots;

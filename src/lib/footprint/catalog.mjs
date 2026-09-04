@@ -48,7 +48,12 @@ const emptyReading = (status, reason) => ({
 /** Read accepted names without descending into an item's reference material. */
 function readNames(root, {
   accept, nameOf, entryOf = null, dirDepth, walk = walkTree, limits = {}, fsImpl = fs,
+  observationCache = null, observationKey = null,
 }) {
+  const cacheKey = observationCache && observationKey
+    ? `${observationKey}\u0000${path.resolve(root)}`
+    : null;
+  if (cacheKey && observationCache.has(cacheKey)) return observationCache.get(cacheKey);
   const names = [];
   const entries = [];
   const result = walk(root, {
@@ -65,16 +70,20 @@ function readNames(root, {
     },
   });
   if (result.status === 'unknown') {
-    return emptyReading(result.reason === 'ENOENT' ? 'absent' : 'degraded', result.reason);
+    const reading = emptyReading(result.reason === 'ENOENT' ? 'absent' : 'degraded', result.reason);
+    if (cacheKey) observationCache.set(cacheKey, reading);
+    return reading;
   }
   const truncated = Boolean(result.truncated) || names.length >= MAX_NAMES;
-  return {
+  const reading = {
     status: 'ok',
     reason: result.degraded?.[0]?.reason ?? null,
     names, entries,
     partial: result.complete === false || truncated,
     truncated,
   };
+  if (cacheKey) observationCache.set(cacheKey, reading);
+  return reading;
 }
 
 /** ':'-joined path of `file` relative to `root`, minus a trailing extension. */
@@ -88,6 +97,7 @@ function relativeName(root, file, { strip = '' } = {}) {
 /** Directories carrying `marker` (SKILL.md), named by their path below `root`.
  *  Two directory levels: a bare `<skill>/` and a namespaced `<plugin>/<skill>/`. */
 const readMarkerDirs = (root, marker, opts = {}) => readNames(root, {
+  observationKey: `marker:${marker}`,
   dirDepth: 2,
   accept: (name) => name === marker,
   nameOf: (file) => relativeName(root, path.dirname(file)),
@@ -104,21 +114,29 @@ const readMarkerDirs = (root, marker, opts = {}) => readNames(root, {
 
 /** Markdown entries; README documents the surface and is not an entry. */
 const readMarkdownNames = (root, opts = {}) => readNames(root, {
+  observationKey: 'markdown',
   dirDepth: 3,
   accept: (name) => name.endsWith('.md') && !/^readme\.md$/i.test(name),
   nameOf: (file) => relativeName(root, file, { strip: '.md' }),
-  entryOf: (file) => ({ itemPath: file, sourceFile: file, digest: artifactDigest(file, opts),
-    definition: artifactDigest(file, opts), artifactFiles: [file], locatorKind: 'file' }),
+  entryOf: (file) => {
+    const digest = artifactDigest(file, opts);
+    return { itemPath: file, sourceFile: file, digest,
+      definition: digest, artifactFiles: [file], locatorKind: 'file' };
+  },
   ...opts,
 });
 
 /** Top-level files with one of `exts`, named by basename without the extension. */
 const readFileStems = (root, exts, opts = {}) => readNames(root, {
+  observationKey: `stems:${[...exts].sort().join(',')}`,
   dirDepth: 0,
   accept: (name) => exts.includes(path.extname(name)),
   nameOf: (file) => path.basename(file, path.extname(file)),
-  entryOf: (file) => ({ itemPath: file, sourceFile: file, digest: artifactDigest(file, opts),
-    definition: artifactDigest(file, opts), artifactFiles: [file], locatorKind: 'file' }),
+  entryOf: (file) => {
+    const digest = artifactDigest(file, opts);
+    return { itemPath: file, sourceFile: file, digest,
+      definition: digest, artifactFiles: [file], locatorKind: 'file' };
+  },
   ...opts,
 });
 
@@ -544,7 +562,12 @@ export function collectCatalog({
   env = process.env,
 } = {}) {
   const asOf = now();
-  const io = { walk, limits, fsImpl };
+  // One physical capability directory may feed several host consumer bindings
+  // (for example, OpenCode's documented Claude-compatible skill surface). Keep
+  // those bindings distinct while paying for one bounded observation. The
+  // cache lives for this collector call only; it is never persisted or reused
+  // across scans, so a rescan always observes current disk state.
+  const io = { walk, limits, fsImpl, observationCache: new Map() };
   const roots = { claudeRoot, claudeMcpFile, codexRoot, agentsRoot, codexConfigFile, opencodeRoot, opencodeConfigFile,
     cwd, projects, env };
   const readers = {
