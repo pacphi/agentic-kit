@@ -26,6 +26,10 @@
   project occurrence: one host/kind/path cannot be both user and project scope, while a shared
   user root carried by different hosts remains explicit cross-host evidence. The FootprintSnapshot
   schema advances to v3 so cached v2 scope aliases cannot be replayed.
+- **Updated:** 2026-09-04 — Runtime distinguishes proven repositories, host app services, desktop
+  apps, host state, user home, system root, and ordinary folders instead of calling every readable
+  working directory a project. Storage reads only the already-ranked top-N transcript heads to
+  attribute dated Codex rollouts from their `cwd` metadata.
 - **Updated:** 2026-09-03 — project inventory expands to supported agent, command, skill, and MCP
   surfaces across Claude, Codex, and OpenCode; Git tracking is observed without becoming ownership.
   CatalogInventory advances to v3 and FootprintSnapshot to v4 so older evidence cannot be replayed
@@ -174,7 +178,8 @@ left of Overview; the System area itself is unaffected):
 [ Overview | Usage | Observability | System ]
 
 System secondary rail:
-  [ Summary | Storage | Runtime | Catalog | Projects ]        [ as of 2h ago · ⟳ rescan ]
+  [ Summary | Advisory | Sessions | Storage | Runtime | Catalog | Projects | Maintenance ]
+                                                [ full scan · 2h ago ] [ ⟳ Full scan ]
 
 Summary   KPI band: install size · data size · live processes (combined RSS) · projects
           ("N ever · M on disk") · skills/agents/commands counts · machine free-space
@@ -183,7 +188,9 @@ Summary   KPI band: install size · data size · live processes (combined RSS) �
 Storage   Breakdown tree: category → host → project → session. Transcripts vs ledgers/logs vs
           learning stores vs kit caches. Trailing-30d growth sparkline per host. Top-N largest
           sessions/files. Advisory reclaimable candidates in two safety tiers, never one total.
-Runtime   Live process table (host, pid, CPU%, RSS, uptime, bound project) + combined totals.
+Runtime   Live process table (host, pid, CPU%, RSS, uptime, working context) + combined totals.
+          A project label requires a proven Git boundary; app services and desktop apps are named
+          as processes, while host state, home, root, and ordinary folders remain directories.
           Daemon census (count, age vs TTL).
 Catalog   Deduplicated skills / agents / commands / plugins / MCP servers, each with a per-host
           presence matrix (which hosts carry it).
@@ -225,14 +232,14 @@ Metrics marked ✚ are additions beyond the requesting examples; the taxonomy is
 | Install | Native-addon inventory and duplicate builds across trees (better-sqlite3, hnswlib, onnxruntime) ✚ | walk |
 | Install | Shared caches: npx cache envs, brain KB, Playwright/Puppeteer/agent-browser/Vibium browser binaries ✚ | known roots |
 | Install | Total install bytes + machine free-space denominator ✚ | walk + `statfs` |
-| Runtime | Per live host process: pid, host, CPU%, RSS, uptime, bound project | existing runtime survey + `ps -o pcpu,rss` |
+| Runtime | Per live host process: pid, host, CPU%, RSS, uptime, and working context (proven repository, app/service, host state, home/root, or folder) | existing runtime survey + bounded argv classification + `ps -o pcpu,rss` |
 | Runtime | Daemon census: count, age vs 12h TTL ✚ | existing daemon registry |
 | Runtime | Child / MCP-server process count ✚ | survey process tree |
 | Storage | Transcript bytes + file counts: host → project → session | transcript-root walk |
 | Storage | Host ledgers/logs: Codex `state_N.sqlite`, statusline tee, runtime-debug log, OpenCode store | known paths |
 | Storage | Learning/memory stores: per-project `.claude-flow`, `.agentic-qe`, agentdb/HNSW/RVF files ✚ | project catalog + walk |
 | Storage | ak's own caches: usage-index.json, observability-workspaces.json, footprint snapshot itself ✚ | known paths |
-| Storage | Top-N largest sessions / files ✚ | walk |
+| Storage | Top-N largest sessions / files, with working context from only those transcript heads ✚ | walk + bounded `cwd` metadata read |
 | Storage | Trailing-30d growth per host (from mtime + size) ✚ | walk metadata |
 | Storage | Advisory reclaimable candidates (stale npx envs, aged transcripts, superseded cache snapshots, regenerable package caches, redundant browser revisions, extra runtime versions, orphaned worktrees), each with a `safety` tier ✚ | walk + heuristics |
 | Storage | Ranked largest consumers across ~50 curated third-party cache roots, grouped by ecosystem, with containment/residual accounting ✚ | consumer registry + walk |
@@ -499,7 +506,7 @@ The draft left four points open. All four are decided; this section is the recor
      (`NtQueryInformationProcess` → PEB → `RTL_USER_PROCESS_PARAMETERS` → `CurrentDirectory`).
 
    If the P/Invoke path fails for any reason — antivirus block, execution policy, insufficient
-   rights, WOW64 bitness mismatch — every other field still returns and the Project column
+   rights, WOW64 bitness mismatch — every other field still returns and the Working context column
    degrades to an explicit "not attributable on Windows" carrying the failure reason. An empty
    census is treated as a broken survey, not an idle machine. This is genuinely verified rather
    than asserted: `windows-latest` is already in the CI matrix (`.github/workflows/ci.yml`), so

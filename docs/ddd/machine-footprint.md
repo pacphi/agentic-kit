@@ -77,7 +77,7 @@ read not on this list is a defect, and adding one is an amendment to this docume
 | Directory entries and `lstat` | `walk.mjs`, every collector | name, kind, size, mtime, block count | anything inside a file |
 | `.git/config` | `projects.mjs` | the origin remote URL | every other config key |
 | `.git/worktrees/<name>/gitdir` | `storage-reclaim-detectors.mjs` (re-exported from `storage.mjs`) | one filesystem path, bounded to 4 KB | — |
-| A transcript's **head** | `project-sources.mjs` | the session's `cwd` **field** | every message, prompt, tool call, tool result and model output in the file |
+| A transcript's **head** | `project-sources.mjs`, consumed by project discovery and top-N session attribution | the session's `cwd` **field** | every message, prompt, tool call, tool result and model output in the file |
 | OpenCode's session store | `project-sources.mjs` | the `directory` column, read-only | every other column, and every message row |
 | A project's own manifests | `stack-detect.mjs` | dependency **keys** (and, for `path:`/`workspace:` entries, enough of the value to reject them) | manifest values, scripts, and anything executable |
 | A project's own source files | `stack-detect.mjs` | the count of `\n` bytes, and whether byte 0 of the first chunk region is NUL | the text — each 64 KB chunk is counted and immediately overwritten |
@@ -97,6 +97,9 @@ the loop; nothing but the path string survives the function. This is the same re
 `native-transcript-discovery.mjs` already performs for Observability at the same trust boundary,
 and it is what makes discovery honest: the alternative is guessing the path from the directory
 name, which [Project accounting](#project-accounting) shows is wrong four times out of five.
+Storage reuses the same reader after ranking by size, for only the top-N session rows. That bounded
+second use is what lets a dated Codex rollout name its repository, host workspace, or folder in the
+Sessions view rather than disappearing or being shown as an unattributed project.
 
 The head bound is a correctness statement as much as a cost one. A session's `cwd` is declared in
 its opening records or nowhere, so reading further would cost the whole corpus (~2,700 files here)
@@ -151,7 +154,7 @@ Collectors (bounded walkers; two tiers — src/lib/footprint/)
         v
 FootprintSnapshot  { asOf, completeness, install, runtime, storage, catalog, projects, consumers }
   install:   HostInstallation[]   { tool, version, installMethod, root, bytes, nativeAddons[] }
-  runtime:   RuntimeCensus        { processes[], daemons[], totals }        (ephemeral, never
+  runtime:   RuntimeCensus        { processes[{source}], daemons[], totals } (ephemeral, never
                                                                              persisted)
   storage:   StorageBreakdown     { nodes: category → host → project → session, growth, topN,
                                     reclaimables[], reclaimSummary: { tiers[], combined: null } }
@@ -275,14 +278,21 @@ On **Windows** the census is real, not unsupported. `src/lib/live/win-process-su
 text script invoked the way the POSIX path already invokes `ps` and `lsof`, with no npm dependency
 and no compiled artifact — returns a guaranteed census (host, pid, ppid, start time, CPU, working
 set) from `Get-CimInstance Win32_Process`, and command lines only for processes `GetOwner` proves
-belong to the current user. The bound project comes from a **best-effort** P/Invoke read of the
+belong to the current user. The working context begins with a **best-effort** P/Invoke read of the
 process's own `CurrentDirectory` (`NtQueryInformationProcess` → PEB →
 `RTL_USER_PROCESS_PARAMETERS`). When that probe fails — antivirus block, execution policy,
-insufficient rights, WOW64 bitness mismatch — every other field still returns and the project
+insufficient rights, WOW64 bitness mismatch — every other field still returns and the context
 column degrades to an explicit "not attributable on Windows" carrying the reason. A row is never
 dropped for being unattributable: a process we can measure but not attribute still consumes RAM,
 and hiding it would understate the totals this whole area is denominated in. An empty census on
 Windows is treated as a broken survey, never as an idle machine.
+
+A readable directory is not automatically a project. The projection records a repository only
+when a Git boundary is proven; otherwise it classifies host app services and desktop apps from a
+non-sensitive enum derived during the already-bounded argv probe, then distinguishes known host
+state, user home, filesystem root, and ordinary folders. Raw argv is discarded before the survey
+returns. This is why a Codex plugin service no longer appears as a fictitious `.codex` project and
+a desktop host at `/` no longer appears as `unknown`.
 
 One field is honestly absent everywhere: the daemon **budget** state. `ruflo daemon budget` is a
 CLI with no local file this collector can read, so budget reports `unknown` with that reason
@@ -292,11 +302,16 @@ rather than a figure inferred from absence of evidence.
 
 A tree of `StorageNode`s: category (transcripts / ledgers-and-logs / learning stores / kit
 caches) → host → project → session leaf, each with bytes and file count. Derived views over the
-same walk: trailing-30d growth per host (from mtime + size — no content reads), top-N largest
+same walk: trailing-30d growth per host (from mtime + size), top-N largest
 sessions and files, and advisory `ReclaimableCandidate` rows (stale npx envs, transcripts beyond
 a stated age, superseded cache snapshots, regenerable package caches, redundant browser
 revisions, extra runtime versions, orphaned worktrees), each carrying its rationale and its path.
 Candidates are information, not actions — this context has no delete verb.
+
+After size ranking, only the top-N transcript rows reuse the bounded head reader to obtain the
+opening `cwd` metadata. That gives dated Codex rollouts an honest repository, workspace, folder,
+or host-store context without reading message bodies or multiplying the whole-corpus discovery
+cost.
 
 Install measures the npx environment inventory before Storage classifies version-stale cache
 candidates. Storage adopts those facts only when they carry the same scan time, the expected
@@ -316,10 +331,11 @@ bars still account for the whole of the donut beside them rather than silently d
 
 Two honest limits belong with the numbers. **Growth is approximate and says so**: a file
 contributes its whole size on its mtime day, which is exact for append-only transcripts and
-over-counts rewritten SQLite ledgers, so the figure carries its own `basis` string. And **Codex
-transcripts carry no project attribution**: rollout paths are dated, not project-scoped, and the
-project name lives inside the file, which this domain may not open. Those nodes are marked
-`attribution: 'none'` and render as "unattributable" — never blank, never zero.
+over-counts rewritten SQLite ledgers, so the figure carries its own `basis` string. Codex rollout
+paths themselves carry no project attribution because they are dated, not project-scoped. The
+storage tree therefore keeps `attribution: 'none'`; after ranking, the top-N presentation rows use
+the permitted transcript-head `cwd` read to add a separate working context without rewriting the
+path-derived tree evidence.
 
 ### Largest consumers
 

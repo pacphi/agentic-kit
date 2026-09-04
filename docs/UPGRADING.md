@@ -224,8 +224,13 @@ them defensively or drop them:
 | `runtime.daemons.budget` | daemon census | No local source exists for ruflo's launch budget — not circumstantially, structurally — so the field could only ever read `unknown`. A permanently unknowable quantity is removed rather than reported as degraded ([ADR-0023](adr/0023-fail-closed-operations-and-explicit-degradation.md) §9). `ruflo daemon budget` remains the way to ask. |
 | `runtime.childProcessCount` | runtime census | Still counted by the process survey — it is what makes the per-host rows correct — but no longer republished. As a rendered figure it was a bare number with no denominator, no history and no action attached. |
 
-Nothing else was removed. `storage.topSessions` rows **gained** `projectLabel` and
-`projectResolved`; the raw `project` key is unchanged. `catalog.items` now also covers
+Nothing else was removed. `storage.topSessions` rows **gained** `projectLabel`,
+`projectResolved`, and `context`; the raw `project` key is unchanged. The top-N rows now use the
+bounded transcript-head `cwd` metadata already allowed by ADR-0025, so dated Codex rollouts can be
+attributed without scanning their message bodies. `runtime.processes[]` gained `source`; its
+`project` measurement is now present only when a Git repository boundary is proven. Consumers
+should render `source` as the process working context and keep `project` only for repository joins.
+`catalog.items` now also covers
 project-scoped `.claude/skills|agents|commands` across every project on disk, so the list is
 longer — the shape is identical and deduplication by `(kind, name)` is unchanged.
 
