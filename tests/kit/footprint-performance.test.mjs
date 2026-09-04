@@ -312,6 +312,8 @@ test('worktree review reuses a complete same-scan Project footprint', (t) => {
   fs.mkdirSync(checkout, { recursive: true });
   fs.mkdirSync(record, { recursive: true });
   fs.writeFileSync(path.join(record, 'gitdir'), `${path.join(checkout, '.git')}\n`);
+  const old = new Date(now - 200 * 86_400_000);
+  fs.utimesSync(checkout, old, old);
   let walks = 0;
   const rows = worktreeReclaimables({
     asOf: now,
@@ -351,6 +353,30 @@ test('worktree review reuses a complete same-scan Project footprint', (t) => {
     fsImpl: fs,
   });
   assert.equal(walks, 1, 'partial Project evidence must fall back to the checkout walk');
+});
+
+test('worktree review skips recursive measurement when root activity disproves idleness', (t) => {
+  const root = fixture(t, 'worktree-recent-root');
+  const now = Date.now();
+  const project = path.join(root, 'repo');
+  const checkout = path.join(root, 'recent-checkout');
+  const record = path.join(project, '.git', 'worktrees', 'feature');
+  fs.mkdirSync(checkout, { recursive: true });
+  fs.mkdirSync(record, { recursive: true });
+  fs.writeFileSync(path.join(record, 'gitdir'), `${path.join(checkout, '.git')}\n`);
+  let walks = 0;
+
+  const rows = worktreeReclaimables({
+    asOf: now,
+    projects: [project],
+    opts: { ...STORAGE_DEFAULTS },
+    walk() { walks += 1; throw new Error('recent checkout must not be walked'); },
+    limits: {},
+    fsImpl: fs,
+  });
+
+  assert.equal(walks, 0);
+  assert.deepEqual(rows, [], 'a recent root can suppress, but never create, a cleanup finding');
 });
 
 test('projects measure only hosted repositories with recorded sessions and count every exclusion', (t) => {

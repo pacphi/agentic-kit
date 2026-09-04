@@ -620,6 +620,7 @@ test('worktree candidates state what they know and never guess a dead checkout',
   const size = write(path.join(idle, 'file.txt'), 'a'.repeat(48));
   write(path.join(admin, 'idle', 'gitdir'), `${path.join(idle, '.git')}\n`);
   touch(path.join(idle, 'file.txt'), now - 200 * DAY);
+  touch(idle, now - 200 * DAY);
 
   const rows = worktreeReclaimables({
     asOf: now, projects: [project], opts: { ...STORAGE_DEFAULTS },

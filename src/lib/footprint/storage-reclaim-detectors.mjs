@@ -742,6 +742,13 @@ export function worktreeReclaimables({
         }));
         continue;
       }
+      // A recent checkout-root mtime is sufficient evidence that this cannot
+      // satisfy the idle-window predicate: the directory was created or one of
+      // its direct entries changed inside the window. This is deliberately a
+      // one-way preflight. An old root says nothing about nested files, so only
+      // the existing complete recursive observation may create a candidate.
+      const idleWindowMs = opts.worktreeIdleDays * 86_400_000;
+      if (Number.isFinite(head.mtimeMs) && asOf - head.mtimeMs < idleWindowMs) continue;
       const observed = projectObservation(checkout);
       if (!observed && walks >= opts.maxWorktreeWalks) continue;
       if (!observed) walks += 1;
@@ -751,7 +758,7 @@ export function worktreeReclaimables({
         newestMtimeMs: result.newestMtimeMs,
       };
       const idleMs = newestMtimeMs === null ? null : asOf - newestMtimeMs;
-      if (idleMs === null || idleMs < opts.worktreeIdleDays * 86_400_000) continue;
+      if (idleMs === null || idleMs < idleWindowMs) continue;
       rows.push(candidate({
         id: `idle-worktree:${record}`,
         kind: 'orphaned-worktree',
