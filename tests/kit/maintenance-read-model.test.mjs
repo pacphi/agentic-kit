@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import { buildMaintenanceReadModel } from '../../src/lib/maintenance/read-model.mjs';
 import { createMaintenanceService } from '../../src/lib/maintenance/service.mjs';
@@ -63,13 +66,15 @@ test('missing footprint sections degrade to a review finding instead of throwing
   assert.match(model.findings[0].evidence.gaps.join(' '), /catalog|storage/i);
 });
 
-test('service invokes a deep System scan only when explicitly requested', async () => {
+test('service invokes a deep System scan only when explicitly requested', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-maint-deep-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const calls = [];
   const collector = {
     async refreshDeep() { calls.push('deep'); return { ok: true }; },
     async read() { calls.push('read'); return footprint(); },
   };
-  const service = createMaintenanceService({ collector, now: () => NOW });
+  const service = createMaintenanceService({ collector, providers: new Map(), controlRoot: root, now: () => NOW });
 
   await service.scan({ deep: false });
   assert.deepEqual(calls, ['read']);
@@ -78,9 +83,97 @@ test('service invokes a deep System scan only when explicitly requested', async 
   assert.deepEqual(calls, ['deep', 'read']);
 });
 
-test('service produces selection-bound read-only plans that cannot cross the mutation boundary', async () => {
+test('dashboard-style reports read the durable scan without rerunning collectors or providers', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-maint-scan-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const calls = [];
+  const provider = {
+    id: 'scan-provider', version: '1', host: 'claude', status: 'available',
+    resourceKinds: [], operations: [], rollback: [],
+    async detect() {
+      calls.push('detect');
+      return { status: 'available', complete: true, authority: 'native-inventory' };
+    },
+  };
+  const collector = {
+    async read() { calls.push('read'); return footprint(); },
+    async refreshDeep() { calls.push('deep'); return { ok: true }; },
+  };
+  const service = createMaintenanceService({
+    collector, providers: new Map([[provider.id, provider]]), controlRoot: root, now: () => NOW,
+  });
+
+  const before = await service.report();
+  assert.equal(before.scan.status, 'not-scanned');
+  assert.equal(before.findings[0].classification, 'maintenance-scan-required');
+  assert.deepEqual(calls, [], 'reading the report must not touch host or filesystem collectors');
+
+  const scanned = await service.scan();
+  assert.equal(scanned.scan.status, 'complete');
+  assert.deepEqual(calls, ['read', 'detect']);
+  calls.length = 0;
+  assert.deepEqual(await service.report(), scanned);
+  assert.deepEqual(await service.report(), scanned);
+  assert.deepEqual(calls, [], 'browser polling reads the saved report only');
+
+  const reloaded = createMaintenanceService({
+    collector, providers: new Map([[provider.id, provider]]), controlRoot: root, now: () => NOW,
+  });
+  assert.deepEqual(await reloaded.report(), scanned, 'the latest scan survives a dashboard restart');
+  assert.deepEqual(calls, []);
+});
+
+test('persisted reports age without rescanning and stale evidence loses action authority', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-maint-age-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  let at = NOW;
+  const calls = [];
+  const provider = {
+    id: 'scan-provider', version: '1', host: 'claude', status: 'available',
+    resourceKinds: [], operations: [], rollback: [],
+    async detect() {
+      calls.push('detect');
+      return { status: 'available', complete: true, authority: 'native-inventory' };
+    },
+  };
+  const service = createMaintenanceService({
+    collector: { async read() { calls.push('read'); return footprint(); } },
+    providers: new Map([[provider.id, provider]]), controlRoot: root, now: () => at,
+  });
+
+  await service.scan();
+  calls.length = 0;
+  at += 8 * 86_400_000;
+  const report = await service.report();
+
+  assert.equal(report.scan.status, 'stale');
+  assert.equal(report.freshness.status, 'stale');
+  assert.equal(report.freshness.ageMs, 8 * 86_400_000 + 1_000);
+  assert.deepEqual(report.capabilities, { plan: false, apply: false, undo: false });
+  assert.equal(report.findings.every((finding) => finding.nextAction?.executable !== true), true);
+  assert.deepEqual(calls, [], 'aging a report must not touch collectors or native providers');
+});
+
+test('missing and corrupt scan reports expose no mutation capability', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-maint-missing-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const service = createMaintenanceService({ controlRoot: root, providers: new Map(), now: () => NOW });
+
+  const missing = await service.report();
+  assert.deepEqual(missing.capabilities, { plan: false, apply: false, undo: false });
+  assert.equal(missing.findings[0].nextAction.operation, 'scan');
+
+  fs.writeFileSync(path.join(root, 'latest-scan.json'), '{"broken":true}\n');
+  const corrupt = await service.report();
+  assert.equal(corrupt.scan.status, 'unavailable');
+  assert.deepEqual(corrupt.capabilities, { plan: false, apply: false, undo: false });
+});
+
+test('service produces selection-bound read-only plans that cannot cross the mutation boundary', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-maint-plan-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const collector = { async read() { return footprint(); } };
-  const service = createMaintenanceService({ collector, now: () => NOW });
+  const service = createMaintenanceService({ collector, providers: new Map(), controlRoot: root, now: () => NOW });
   const scan = await service.scan();
   const plan = await service.plan({ findingIds: [scan.findings[0].id] });
 
@@ -94,7 +187,9 @@ test('service produces selection-bound read-only plans that cannot cross the mut
   }), /executable.*capability boundary/i);
 });
 
-test('project selection uses an opaque project reference and never emits the project path', async () => {
+test('project selection uses an opaque project reference and never emits the project path', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-maint-project-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const input = footprint();
   input.storage.reclaimables = [];
   input.catalog.items = [{
@@ -102,7 +197,7 @@ test('project selection uses an opaque project reference and never emits the pro
     presence: [{ host: 'codex', scope: 'project', project: '/private/project-a' }],
   }];
   const collector = { async read() { return input; } };
-  const service = createMaintenanceService({ collector, now: () => NOW });
+  const service = createMaintenanceService({ collector, providers: new Map(), controlRoot: root, now: () => NOW });
   const model = await service.scan();
 
   assert.match(model.findings[0].resource.projectRef, /^maintenance-project-/);

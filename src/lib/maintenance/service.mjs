@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { createSystemCollector } from '../footprint/index.mjs';
+import { SNAPSHOT_STALE_AFTER_MS } from '../footprint/snapshot.mjs';
 import { maintenanceControlDir } from '../paths.mjs';
 import {
   applyMaintenancePlan, recoverMaintenanceReceipt, undoMaintenanceReceipt,
@@ -20,12 +21,14 @@ import {
 } from './provider-registry.mjs';
 import { maintenanceReceiptPresentation } from './receipt-presentation.mjs';
 import { buildMaintenanceReadModel } from './read-model.mjs';
+import { readMaintenanceScan, writeMaintenanceScan } from './scan-store.mjs';
 import {
   listMaintenanceReceiptsReadOnly, readMaintenanceReceipt,
 } from './transaction-store.mjs';
 
 const EXECUTABLE_CLASSES = new Set(['safe-automatic', 'approval-required']);
 const CONTROL_CAPABILITIES = Object.freeze({ plan: true, apply: true, undo: true });
+const NO_CONTROL_CAPABILITIES = Object.freeze({ plan: false, apply: false, undo: false });
 const RECOVERY_STATUSES = new Set([
   'prepared', 'applying', 'verifying', 'refreshing-catalog', 'undoing', 'failed', 'partial',
   'partial-recovery-required', 'outcome-unknown', 'unknown-recovery-required',
@@ -34,6 +37,73 @@ const RECEIPT_STATUSES = new Set([
   ...RECOVERY_STATUSES, 'committed', 'rolled-back', 'already-rolled-back',
   'aborted-no-change', 'recovered-no-change', 'already-reconciled',
 ]);
+
+function scanRequiredModel({ status = 'not-scanned', now = Date.now } = {}) {
+  const asOf = new Date(now()).toISOString();
+  const unavailable = status === 'unavailable';
+  const label = unavailable ? 'Run Maintenance scan again' : 'Run Maintenance scan';
+  const finding = {
+    id: 'maintenance-finding-scan-required', state: 'unreadable-partial', bucket: 'needsReview',
+    classification: 'maintenance-scan-required', safetyClass: 'never-automatic',
+    statusLabel: unavailable ? 'Saved scan unavailable' : 'Not scanned',
+    headline: unavailable ? 'The saved Maintenance report could not be verified' : 'Maintenance has not measured this machine yet',
+    resource: { id: 'system:maintenance-scan', kind: 'system-evidence', name: 'Maintenance scan', host: 'agentic-kit', scope: 'machine' },
+    versions: { installed: null, recommended: null, producer: null, sourceRevision: null, cacheGeneration: null, contentDigest: null },
+    ownership: { owner: 'agentic-kit', authority: 'system', managed: true },
+    evidence: { sources: ['maintenance-scan-store'], asOf: null, freshness: 'unknown', completeness: 'partial', gaps: [unavailable ? 'Saved scan integrity or schema could not be verified.' : 'No Maintenance scan has been saved.'] },
+    observedUsage: { status: 'not-measured', statement: 'Usage evidence is unavailable.' },
+    consumerHosts: { basis: 'not-measured', hosts: [], count: 0, truncated: false },
+    impact: { summary: 'Scanning changes no installed resource.', bytes: null, files: null, dependencies: 'unknown', preserved: ['All installed resources'] },
+    nextAction: { operation: 'scan', label, providerId: 'system.deep-scan', providerVersion: '1', safetyClass: 'never-automatic', rollback: 'reversible', restart: 'not-required', executable: false, recommendation: label, steps: ['Use Rescan in System to measure files and native provider inventories.', 'Return to Maintenance when the scan completes.'], preserved: ['All installed resources'], blockedReason: 'A current saved scan is required before Maintenance can recommend changes.' },
+  };
+  return deepFreeze({
+    schemaVersion: 1, mode: 'control-plane', capabilities: NO_CONTROL_CAPABILITIES,
+    asOf: null, freshness: { asOf: null, ageMs: null, status: 'unknown', completeness: 'partial', gaps: finding.evidence.gaps },
+    sourceFingerprint: null,
+    scan: { status, checkedAt: asOf, deep: null, coverage: 'unknown', providersChecked: 0, providersTotal: 0 },
+    summary: { updatesReady: 0, safeCleanup: 0, needsReview: 1, unsupportedOrBlocked: 0, recentChanges: 0 },
+    findings: [finding], receipts: [], providers: [],
+  });
+}
+
+function ageSavedModel(model, now) {
+  const at = now();
+  const evidenceAt = Date.parse(model?.freshness?.asOf ?? model?.asOf ?? '');
+  const ageMs = Number.isFinite(evidenceAt) ? Math.max(0, at - evidenceAt) : null;
+  const stale = model?.freshness?.status === 'stale'
+    || (ageMs !== null && ageMs > SNAPSHOT_STALE_AFTER_MS);
+  if (!stale) {
+    if (ageMs === model?.freshness?.ageMs) return deepFreeze(model);
+    return deepFreeze({ ...model, freshness: { ...model.freshness, ageMs } });
+  }
+  const staleGap = 'Saved Maintenance evidence is older than the freshness window; run a new scan.';
+  const findings = Array.isArray(model?.findings) ? model.findings.map((finding) => ({
+    ...finding,
+    evidence: {
+      ...finding.evidence,
+      freshness: 'stale',
+      gaps: [...new Set([...(finding.evidence?.gaps ?? []), staleGap])],
+    },
+    nextAction: finding.nextAction ? {
+      ...finding.nextAction,
+      executable: false,
+      blockedReason: staleGap,
+    } : finding.nextAction,
+  })) : [];
+  return deepFreeze({
+    ...model,
+    capabilities: NO_CONTROL_CAPABILITIES,
+    freshness: {
+      ...model.freshness,
+      ageMs,
+      status: 'stale',
+      gaps: [...new Set([...(model.freshness?.gaps ?? []), staleGap])],
+    },
+    scan: { ...model.scan, status: 'stale' },
+    summary: { ...model.summary, actionable: 0 },
+    findings,
+  });
+}
 
 function publicTimestamp(value) {
   if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) return null;
@@ -157,7 +227,12 @@ export function createMaintenanceService({
     ?? createDefaultMaintenanceProviderRegistry({ ...providerOptions, footprint });
 
   async function collect({ deep = false } = {}) {
-    if (deep) await collector.refreshDeep();
+    if (deep) {
+      const refreshed = await collector.refreshDeep();
+      if (refreshed?.ok !== true || refreshed?.persisted?.ok === false) {
+        throw new Error('Deep System scan did not produce a reproducible persisted snapshot.');
+      }
+    }
     const footprint = await collector.read();
     const registry = resolveProviders(footprint);
     const base = buildMaintenanceReadModel({ footprint, now });
@@ -178,7 +253,26 @@ export function createMaintenanceService({
   }
 
   async function scan({ deep = false } = {}) {
-    return (await collect({ deep })).model;
+    const collected = await collect({ deep });
+    const providersTotal = collected.providers.size;
+    const providersChecked = collected.detections.size;
+    const providersComplete = [...collected.detections.values()]
+      .filter((facts) => facts?.status === 'available' && facts.complete === true).length;
+    const model = deepFreeze({
+      ...collected.model,
+      scan: {
+        status: 'complete', checkedAt: new Date(now()).toISOString(), deep,
+        coverage: providersComplete === providersTotal ? 'complete' : 'partial',
+        providersChecked, providersComplete, providersTotal,
+      },
+    });
+    writeMaintenanceScan(controlRoot, model, { fsImpl });
+    return model;
+  }
+
+  async function report() {
+    const saved = readMaintenanceScan(controlRoot, { fsImpl });
+    return saved.model ? ageSavedModel(saved.model, now) : scanRequiredModel({ status: saved.status, now });
   }
 
   async function createPlan({
@@ -251,6 +345,7 @@ export function createMaintenanceService({
       now,
       ...(nonce ? { nonce } : {}),
     });
+    try { await scan(); } catch { /* the durable transaction result remains authoritative */ }
     return publicResult(result);
   }
 
@@ -305,6 +400,7 @@ export function createMaintenanceService({
       fsImpl,
       now,
     });
+    try { await scan(); } catch { /* undo receipt remains authoritative */ }
     return publicResult(result);
   }
 
@@ -322,8 +418,9 @@ export function createMaintenanceService({
       fsImpl,
       now,
     });
+    try { await scan(); } catch { /* recovery receipt remains authoritative */ }
     return publicResult(result);
   }
 
-  return Object.freeze({ scan, plan, apply, prepareUndo, undo, recover });
+  return Object.freeze({ report, scan, plan, apply, prepareUndo, undo, recover });
 }

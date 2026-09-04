@@ -177,13 +177,18 @@ test('service derives actions only from complete native detection and rejects un
   }).plan({ findingIds: [model.findings[0].id], executable: true }), /ambiguous/i);
 });
 
-test('scan and read-only planning do not create the maintenance control root', async (t) => {
+test('report and read-only planning do not create mutation state while scan persists its report', async (t) => {
   const root = path.join(fixture(t), 'not-created');
   const collector = { async read() { return footprint(); } };
   const service = createMaintenanceService({ collector, providers: new Map(), now: () => NOW, controlRoot: root });
+  const initial = await service.report();
+  assert.equal(initial.scan.status, 'not-scanned');
+  assert.equal(fs.existsSync(root), false);
   const model = await service.scan();
   await service.plan({ findingIds: [model.findings[0].id] });
-  assert.equal(fs.existsSync(root), false);
+  assert.equal(fs.existsSync(path.join(root, 'latest-scan.json')), true);
+  assert.equal(fs.existsSync(path.join(root, 'plans')), false);
+  assert.equal(fs.existsSync(path.join(root, 'transactions')), false);
 });
 
 test('stale or partial catalog evidence is never promoted into a provider action', async (t) => {

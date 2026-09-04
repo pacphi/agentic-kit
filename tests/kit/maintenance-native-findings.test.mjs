@@ -307,12 +307,13 @@ test('scan reloads bounded sanitized receipt history and exposes corrupt recover
   assert.equal(unsafe.receipts[0].recoveryRequired, true);
   assert.equal(fs.statSync(transactionsRoot).mode & 0o077, 0o055, 'read-only history must not chmod existing state');
 
-  const absentRoot = path.join(fixture(t), 'absent-control');
+  const absentRoot = path.join(fixture(t), 'new-control');
   const empty = createMaintenanceService({
     collector: { async read() { return footprint(); } }, providers: new Map(), controlRoot: absentRoot,
   });
   await empty.scan();
-  assert.equal(fs.existsSync(absentRoot), false);
+  assert.equal(fs.existsSync(path.join(absentRoot, 'latest-scan.json')), true,
+    'an explicit scan persists a report even when it has no findings');
 });
 
 test('rollback-capable registries require guarded current inspection and verified undo', () => {

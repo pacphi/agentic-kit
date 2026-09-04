@@ -27,7 +27,7 @@ function request(server, route, {
 }
 
 function fixtureService() {
-  const calls = { scan: 0, plan: 0, apply: 0, preview: 0, undo: 0 };
+  const calls = { report: 0, scan: 0, plan: 0, apply: 0, preview: 0, undo: 0 };
   const finding = {
     id: 'finding-a', state: 'update-available', bucket: 'updatesReady',
     classification: 'native-update', safetyClass: 'approval-required',
@@ -35,12 +35,10 @@ function fixtureService() {
     evidence: { completeness: 'complete', sources: ['native-inventory'] },
     nextAction: { operation: 'update', executable: true },
   };
-  return {
-    calls,
-    async scan() {
-      calls.scan++;
-      return {
+  const report = () => ({
         schemaVersion: 1, mode: 'control-plane', asOf: '2026-09-03T00:00:00.000Z', sourceFingerprint: 'source-a',
+        scan: { status: 'complete', checkedAt: '2026-09-03T00:00:00.000Z', deep: true,
+          coverage: 'partial', providersChecked: 2, providersComplete: 1, providersTotal: 3 },
         capabilities: { plan: true, apply: true, undo: true },
         freshness: { completeness: 'complete', gaps: [] },
         summary: { total: 1, actionable: 1, updatesReady: 1 }, findings: [finding],
@@ -48,7 +46,11 @@ function fixtureService() {
           { id: 'durable-no-change', status: 'aborted-no-change', updatedAt: '2026-09-03T00:03:00.000Z' },
           { id: 'durable-recovery', status: 'partial-recovery-required', updatedAt: '2026-09-03T00:04:00.000Z' },
         ],
-      };
+      });
+  return {
+    calls,
+    async report() { calls.report++; return report(); },
+    async scan() { calls.scan++; return report();
     },
     async plan({ findingIds, executable }) {
       calls.plan++;
@@ -247,11 +249,18 @@ test('dashboard Maintenance API keeps GET lazy and mutation paths exact', async 
   const unauthenticated = await request(server, '/api/maintenance', { token: null, origin: false, fetchSite: null });
   assert.equal(unauthenticated.status, 401);
   assert.equal(service.calls.scan, 0);
+  assert.equal(service.calls.report, 0);
 
   const report = await request(server, '/api/maintenance', { origin: false, fetchSite: null });
   assert.equal(report.status, 200);
   assert.equal(report.headers['cache-control'], 'no-store');
   const reportBody = JSON.parse(report.body);
+  assert.equal(service.calls.report, 1);
+  assert.equal(service.calls.scan, 0, 'ordinary GET reads the persisted report without provider detection');
+  assert.deepEqual(reportBody.scan, {
+    status: 'complete', checkedAt: '2026-09-03T00:00:00.000Z', deep: true,
+    coverage: 'partial', providersChecked: 2, providersComplete: 1, providersTotal: 3,
+  });
   assert.equal(reportBody.findings[0].resource.name, '<hostile>');
   assert.deepEqual(reportBody.receipts.map((receipt) => ({
     statusLabel: receipt.statusLabel, statusTone: receipt.statusTone,
@@ -265,6 +274,16 @@ test('dashboard Maintenance API keeps GET lazy and mutation paths exact', async 
   assert.equal(wrongMethod.status, 405);
   const unknownMutation = await request(server, '/api/maintenance/other', { method: 'POST', body: {} });
   assert.equal(unknownMutation.status, 405);
+
+  const rescanned = await request(server, '/api/maintenance?refresh=scan', { origin: false, fetchSite: null });
+  assert.equal(rescanned.status, 200);
+  assert.equal(service.calls.scan, 1, 'only the explicit scan query invokes maintenance scanning');
+
+  const unknownRefresh = await request(server, '/api/maintenance?refresh=deep', { origin: false, fetchSite: null });
+  const duplicateRefresh = await request(server, '/api/maintenance?refresh=scan&refresh=scan', { origin: false, fetchSite: null });
+  const unknownQuery = await request(server, '/api/maintenance?extra=scan', { origin: false, fetchSite: null });
+  assert.deepEqual([unknownRefresh.status, duplicateRefresh.status, unknownQuery.status], [400, 400, 400]);
+  assert.equal(service.calls.scan, 1, 'ambiguous scan queries never invoke maintenance scanning');
 });
 
 test('dashboard Maintenance capabilities bind preview, confirmation, apply and guarded undo', async (t) => {

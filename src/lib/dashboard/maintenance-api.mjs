@@ -200,6 +200,9 @@ export function publicMaintenanceModel(model) {
   const unsupportedOrBlocked = suppliedSummary.unsupportedOrBlocked ?? suppliedSummary.blocked ?? 0;
   return {
     ...picked(value, ['schemaVersion', 'mode', 'asOf', 'sourceFingerprint']),
+    scan: picked(value.scan, [
+      'status', 'checkedAt', 'deep', 'coverage', 'providersChecked', 'providersComplete', 'providersTotal',
+    ]),
     capabilities: picked(value.capabilities, ['plan', 'apply', 'undo']),
     freshness: {
       ...picked(value.freshness, ['asOf', 'ageMs', 'status', 'completeness']),
@@ -315,13 +318,14 @@ function typedPhraseMatches(body, required) {
  * }} options
  */
 export function createMaintenanceDashboardApi({ service, sessionToken, now = Date.now, capabilities } = {}) {
-  if (!service || typeof service.scan !== 'function' || typeof service.plan !== 'function') {
-    throw new TypeError('maintenance dashboard service must implement scan and plan');
+  if (!service || typeof service.report !== 'function' || typeof service.scan !== 'function'
+      || typeof service.plan !== 'function') {
+    throw new TypeError('maintenance dashboard service must implement report, scan, and plan');
   }
   const store = capabilities ?? createMaintenanceCapabilityStore({ now });
 
-  async function scan(_req, res) {
-    try { sendJson(res, 200, publicMaintenanceModel(await service.scan())); }
+  async function report(_req, res, { refresh = false } = {}) {
+    try { sendJson(res, 200, publicMaintenanceModel(await (refresh ? service.scan() : service.report()))); }
     catch { sendJson(res, 503, { error: 'maintenance evidence unavailable' }); }
   }
 
@@ -435,5 +439,5 @@ export function createMaintenanceDashboardApi({ service, sessionToken, now = Dat
     }
   }
 
-  return Object.freeze({ scan, mutate, capabilityCount: store.size });
+  return Object.freeze({ report, mutate, capabilityCount: store.size });
 }

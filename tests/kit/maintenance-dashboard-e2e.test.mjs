@@ -179,7 +179,7 @@ test('dashboard HTTP executes and undoes one maintenance finding through the rea
   });
   t.after(() => server.close());
 
-  const report = await request(server, '/api/maintenance');
+  const report = await request(server, '/api/maintenance?refresh=scan');
   assert.equal(report.status, 200);
   assert.equal(report.headers['cache-control'], 'no-store');
   assertNoPrivateTransport(report.body);
@@ -187,6 +187,11 @@ test('dashboard HTTP executes and undoes one maintenance finding through the rea
   assert.ok(target, 'the real scanner should project the stale plugin');
   assert.equal(fixture.state.enabled, true);
   assert.equal(fixture.events.includes('native-apply'), false);
+  const detectCount = fixture.events.filter((event) => event === 'native-detect').length;
+  const passiveReport = await request(server, '/api/maintenance');
+  assert.equal(passiveReport.status, 200);
+  assert.equal(fixture.events.filter((event) => event === 'native-detect').length, detectCount,
+    'ordinary dashboard refresh must not rerun native provider detection');
 
   const planned = await request(server, '/api/maintenance/plans', {
     method: 'POST', body: { findingIds: [target.id] },
@@ -200,7 +205,10 @@ test('dashboard HTTP executes and undoes one maintenance finding through the rea
   assertNoPrivateTransport(planned.body.confirmation);
   assert.equal(fixture.state.enabled, true);
   assert.equal(fixture.events.includes('native-apply'), false);
-  assert.equal(fs.existsSync(controlRoot), false, 'preview must not create the mutation journal');
+  assert.equal(fs.existsSync(path.join(controlRoot, 'latest-scan.json')), true,
+    'the explicit scan persists its content-free report');
+  assert.equal(fs.existsSync(path.join(controlRoot, 'transactions')), false,
+    'preview must not create the mutation journal');
 
   const unconfirmed = await request(server, '/api/maintenance/apply', {
     method: 'POST',

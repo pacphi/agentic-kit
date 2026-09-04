@@ -1078,8 +1078,9 @@ export function startDashboard({
   let maintenancePromise;
   const getMaintenance = async () => {
     const service = await (maintenancePromise ||= Promise.resolve().then(provideMaintenance));
-    if (!service || typeof service.scan !== 'function' || typeof service.plan !== 'function') {
-      throw new TypeError('maintenance service must implement scan and plan');
+    if (!service || typeof service.report !== 'function' || typeof service.scan !== 'function'
+      || typeof service.plan !== 'function') {
+      throw new TypeError('maintenance service must implement report, scan, and plan');
     }
     return service;
   };
@@ -1846,8 +1847,14 @@ export function startDashboard({
       return;
     }
 
-    async function handleMaintenance(req, res) {
-      try { await (await getMaintenanceApi()).scan(req, res); }
+    async function handleMaintenance(req, res, query) {
+      const refresh = query.getAll('refresh');
+      if ([...query.keys()].some((key) => key !== 'refresh')
+          || refresh.length > 1 || (refresh.length === 1 && refresh[0] !== 'scan')) {
+        sendJson(res, 400, { error: 'invalid maintenance scan request' });
+        return;
+      }
+      try { await (await getMaintenanceApi()).report(req, res, { refresh: query.get('refresh') === 'scan' }); }
       catch { sendJson(res, 503, { error: 'maintenance evidence unavailable' }); }
       return;
     }
