@@ -192,6 +192,19 @@ export function candidate(row) {
  *  copy strictly older than its installed global baseline (npx.mjs's version
  *  verdict — the bug that kept a machine running a retired ruflo), and an env
  *  untouched for longer than the idle threshold. */
+function measurementMatchesScan(value, asOf) {
+  return Boolean(value) && (value.status === 'unknown' || value.asOf === asOf);
+}
+
+function validNpxEnvFact(env, root, asOf) {
+  if (!env || typeof env.id !== 'string' || !env.id || !path.isAbsolute(env.path ?? '')) return false;
+  if (path.resolve(path.dirname(env.path)) !== path.resolve(root)) return false;
+  if (path.basename(env.path) !== env.id || !Array.isArray(env.packages)) return false;
+  if (env.packages.some((pkg) => typeof pkg !== 'string')) return false;
+  if (!measurementMatchesScan(env.bytes, asOf) || !measurementMatchesScan(env.files, asOf)) return false;
+  return env.newestMtimeMs === null || Number.isFinite(env.newestMtimeMs);
+}
+
 function sameScanNpxFacts(install, asOf) {
   if (!install || install.asOf !== asOf) return null;
   const nodes = install.npxEnvs;
@@ -199,16 +212,7 @@ function sameScanNpxFacts(install, asOf) {
       || !['present', 'absent', 'degraded'].includes(nodes.presence)
       || !Array.isArray(nodes.envs)) return null;
   if (nodes.presence !== 'present') return nodes.envs.length === 0 ? nodes : null;
-  for (const env of nodes.envs) {
-    if (!env || typeof env.id !== 'string' || !env.id || !path.isAbsolute(env.path ?? '')
-        || path.resolve(path.dirname(env.path)) !== path.resolve(nodes.root)
-        || path.basename(env.path) !== env.id
-        || !Array.isArray(env.packages) || env.packages.some((pkg) => typeof pkg !== 'string')
-        || !env.bytes || !env.files
-        || (env.bytes.status !== 'unknown' && env.bytes.asOf !== asOf)
-        || (env.files.status !== 'unknown' && env.files.asOf !== asOf)
-        || (env.newestMtimeMs !== null && !Number.isFinite(env.newestMtimeMs))) return null;
-  }
+  if (nodes.envs.some((env) => !validNpxEnvFact(env, nodes.root, asOf))) return null;
   return nodes;
 }
 
