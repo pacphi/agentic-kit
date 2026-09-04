@@ -19,6 +19,7 @@ describe the current system unless a section is explicitly marked as future work
 | [Project intelligence](project-intelligence.md) | Pattern store, learning counters, reasoning-graph size, and live delivery for Overview's Intelligence view |
 | [Machine footprint](machine-footprint.md) | Read-only install, runtime, storage, catalog, and project measurement for System |
 | [Maintenance](maintenance.md) | Implemented control plane for findings, source-bound plans, provider actions, verification, receipts, guarded undo, and recovery |
+| [Proposed Maintenance overhaul](../design/maintenance-overhaul/README.md) | ADR-0048 target model for Inventory, Guidance, Discovery, Activity, and completion-oriented scans; not current behavior |
 | [Component directory](component-directory.md) | Curated identity for the components agentic-kit installs or configures |
 
 ## Relationship to other documentation

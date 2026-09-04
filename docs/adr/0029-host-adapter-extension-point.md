@@ -16,6 +16,9 @@
   command/relative-import bytes into a private per-call snapshot and rechecks host intent, consent,
   and the exact-hash grant immediately before spawn. This is byte pinning, not an OS sandbox;
   absolute file access by consented hook code remains outside the snapshot boundary.
+- **Updated:** 2026-09-04 — proposed ADR-0048 uses admitted adapter capabilities to populate the
+  Maintenance inventory, but leaves external-adapter actions unavailable until an independent
+  operation/scope conformance grant exists; the experimental contract is otherwise unchanged
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md) (closed-registry clause
   superseded — see [Supersession](#supersession-of-adr-0016s-closed-registry-clause)),

@@ -44,6 +44,9 @@
 - **Updated:** 2026-09-03 — ADR-0046 moves production deep collection to a worker, reuses compatible
   physical observations within one explicit scan, measures only the hosted-repository population
   the Projects table names, reports all exclusions, and advances FootprintSnapshot to v7.
+- **Updated:** 2026-09-04 — proposed ADR-0048 folds Catalog presentation into an inventory-led
+  Maintenance workspace while preserving this ADR's read-only measurement ownership; no current
+  collector or mutation boundary changes until that proposal is implemented
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0005](0005-dashboard-in-page-routing-reveal.md),
   [ADR-0007](0007-maintainer-admin-local-telemetry.md),

@@ -3,6 +3,9 @@
 - **Status:** Accepted; static assurance, transactional healing, bounded receipts, and read model implemented
 - **Date:** 2026-09-01
 - **Updated:** 2026-09-04
+- **Updated:** 2026-09-04 — proposed ADR-0048 groups hook findings under logical resources while
+  preserving exact placement rows, evidence grades, and this ADR's independent healing authority;
+  no implemented hook behavior changes yet
 - **Deciders:** agentic-kit maintainers
 - **Extends:** [ADR-0040](0040-codex-hook-audit-and-conservative-remediation.md)
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md),

@@ -2,6 +2,9 @@
 
 - **Status:** Implemented
 - **Date:** 2026-09-03
+- **Updated:** 2026-09-04 — proposed ADR-0048 adds completion-oriented work slicing and resumable
+  checkpoints over the accepted observation forest; the current non-checkpointed worker behavior
+  remains implemented until that proposal ships
 - **Deciders:** agentic-kit maintainers
 - **Related:** [issue #200](https://github.com/pacphi/agentic-kit/issues/200),
   [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),

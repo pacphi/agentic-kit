@@ -2,6 +2,9 @@
 
 - **Status:** Implemented
 - **Date:** 2026-09-03
+- **Updated:** 2026-09-04 — proposed ADR-0048 retains physical artifact and consumer-binding
+  identity, adds exact management placements, and plans configurable/resumable discovery; current
+  explicit provider-scan behavior remains authoritative until implementation
 - **Deciders:** agentic-kit maintainers
 - **Related:** [issue #198](https://github.com/pacphi/agentic-kit/issues/198),
   [issue #200](https://github.com/pacphi/agentic-kit/issues/200),

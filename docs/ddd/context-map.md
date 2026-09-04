@@ -3,6 +3,11 @@
 Agentic-kit is a zero-runtime-dependency CLI with several bounded contexts. The boundaries below
 identify who owns each decision and where translation is required.
 
+> **Proposed evolution:** ADR-0048 and the
+> [Maintenance overhaul package](../design/maintenance-overhaul/README.md) define a future
+> resource-management projection and scan journal. The map below remains the implemented context
+> map until those slices ship.
+
 ```text
 Configuration Intent
         |

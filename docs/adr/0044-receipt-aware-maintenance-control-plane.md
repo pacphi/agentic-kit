@@ -5,6 +5,9 @@
 - **Updated:** 2026-09-03 — issue #200 delivered the control plane, bounded providers, dashboard
   action boundary, durable receipts, guarded undo, fail-closed interruption recovery, prescriptive
   relationship findings, and resilient dashboard loading
+- **Updated:** 2026-09-04 — ADR-0048 is a Proposed successor for the findings-first product,
+  single-write contract, and interruption-audit surface; this ADR remains the implemented and
+  authoritative runtime contract until the successor is accepted and shipped
 - **Deciders:** agentic-kit maintainers
 - **Related:** [issue #198](https://github.com/pacphi/agentic-kit/issues/198),
   [issue #200](https://github.com/pacphi/agentic-kit/issues/200),

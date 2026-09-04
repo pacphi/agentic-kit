@@ -205,6 +205,9 @@ transcript and never substitute for each other. See [Machine footprint](machine-
 These terms describe the implemented architecture in
 [ADR-0044](../adr/0044-receipt-aware-maintenance-control-plane.md).
 
+ADR-0048's [proposed domain model](../design/maintenance-overhaul/domain-model.md) defines
+successor terms. They become normative here only as their implementation slices ship.
+
 | Term | Meaning |
 |------|---------|
 | Maintenance | The human-guided control-plane bounded context for evidence-backed lifecycle recommendations and provider-owned, verified, receipted actions; exposed beneath System without becoming part of Machine Footprint |

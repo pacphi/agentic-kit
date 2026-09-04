@@ -55,6 +55,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0045](0045-artifact-consumer-bindings-and-explicit-maintenance-scans.md) | Physical artifacts, host consumers, and explicit Maintenance scans | Implemented |
 | [0046](0046-scan-local-observation-reuse-and-nonblocking-deep-scans.md) | Scan-local observation reuse and nonblocking deep scans | Implemented |
 | [0047](0047-streaming-observation-forest.md) | Streaming observation forest for deep scans | Accepted; Projects pilot implemented |
+| [0048](0048-inventory-led-maintenance-resource-management.md) | Inventory-led Maintenance resource management | Proposed |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -328,3 +329,13 @@ stays read-only except for four explicitly allowlisted Maintenance route shapes,
 each retaining ADR-0014's loopback protections and adding bounded JSON, fixed server-side actions,
 explicit confirmation, and one-use authorization. Interrupted outcomes require explicit CLI
 reconciliation; recovery never retries or rolls back an uncertain provider effect.
+
+**0048** proposes the product successor to 0044's findings-first screen while preserving its
+transaction safety floor. It folds Catalog presentation into a four-destination Maintenance
+workspace—Inventory, Guidance, Discovery, and Activity—uses exact placement rows grouped under
+logical resources, removes alarmist or indeterminate user-facing labels, and admits only bounded
+outcomes into Guidance. It also defines capability-driven package procedures, exact Managed cache
+and model removal, Git-aware project patches, read-only interruption audit followed by individual
+receipt reconciliation, and completion-oriented resumable scans over 0047's observation forest.
+The decision is Proposed; current ADRs and code remain authoritative until its gated migration is
+implemented.

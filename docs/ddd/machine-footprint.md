@@ -5,6 +5,10 @@ This document specifies the domain decided by
 Its terms are merged into [Ubiquitous language](ubiquitous-language.md) and the context is on the
 [context map](context-map.md).
 
+> **Proposed evolution:** ADR-0048 folds Catalog presentation into Maintenance while leaving this
+> context's measurement ownership read-only. The current System and Catalog surfaces remain
+> implemented behavior until the proposed migration is delivered.
+
 ## Purpose
 
 Machine footprint answers **what this toolchain costs the machine itself**: how many bytes the

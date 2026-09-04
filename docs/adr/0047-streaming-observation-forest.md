@@ -2,6 +2,9 @@
 
 - **Status:** Accepted; Projects pilot implemented
 - **Date:** 2026-09-03
+- **Updated:** 2026-09-04 — proposed ADR-0048 supplies the separate journal-backed continuation
+  decision anticipated by this ADR; it must extend this forest rather than introduce a competing
+  walker or persistent per-file index
 - **Deciders:** agentic-kit maintainers
 - **Related:** [issue #200](https://github.com/pacphi/agentic-kit/issues/200),
   [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),

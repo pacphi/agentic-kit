@@ -16,6 +16,9 @@
   references, session identity, and history identifiers remain protected. Cited lifecycle alerts now
   name affected routes, current and recommended models, the provider notice, and a concrete planning
   action. The acceptance conditions and exact-head release proof are complete.
+- **Updated:** 2026-09-04 — proposed ADR-0048 makes installed models first-class Maintenance
+  resources and admits only an exact provider-owned removal operation after separate conformance;
+  this implemented context remains read-only until that proposal ships
 - **Deciders:** agentic-kit maintainers
 - **Related:** [issue #110](https://github.com/pacphi/agentic-kit/issues/110),
   [implementation PR #179](https://github.com/pacphi/agentic-kit/pull/179),

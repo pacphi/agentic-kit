@@ -5,6 +5,11 @@ Maintenance is the implemented human-guided control plane defined by
 pressure, then carries out only operations for which ownership, provider capability, verification,
 and recovery evidence are explicit.
 
+> **Proposed evolution:** [ADR-0048](../adr/0048-inventory-led-maintenance-resource-management.md)
+> and its [living design package](../design/maintenance-overhaul/README.md) plan an inventory-led
+> successor. This document continues to describe current implemented behavior until each migration
+> slice is proven and the ADR statuses are updated.
+
 Its promise is:
 
 > Tell me what needs attention, explain the impact, and help me change only what can be proven safe

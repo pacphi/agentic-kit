@@ -4,6 +4,10 @@ This document defines the bounded context accepted by
 [ADR-0032](../adr/0032-model-lifecycle-intelligence.md). The implementation and exact-head release
 proof are recorded by ADR-0032, whose current status is Implemented.
 
+> **Proposed evolution:** ADR-0048 projects installed models into Maintenance and permits only an
+> independently conformant provider-owned removal operation. Model download, update, migration,
+> and this context's current read-only behavior remain unchanged until that proposal is implemented.
+
 ## Purpose
 
 Model lifecycle intelligence answers which models are configured, selected, observed, discoverable,
