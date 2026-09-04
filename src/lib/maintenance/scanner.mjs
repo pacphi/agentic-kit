@@ -10,6 +10,19 @@ import {
 } from './model.mjs';
 const array = (value) => (Array.isArray(value) ? value : []);
 const text = (value) => (typeof value === 'string' && value.trim() ? value.trim() : null);
+const HOSTS = new Set(['claude', 'codex', 'opencode']);
+const notMeasuredConsumers = () => ({ basis: 'not-measured', hosts: [], count: 0, truncated: false });
+
+function catalogConsumers(item, fallbackHost = null) {
+  const bindings = array(item?.consumerBindings).filter((binding) => binding?.enabled !== false);
+  const candidates = bindings.length
+    ? bindings.map((binding) => binding?.host)
+    : [...array(item?.hosts), ...array(item?.presence).map((presence) => presence?.host), fallbackHost];
+  const hosts = [...new Set(candidates.filter((host) => HOSTS.has(host)))].sort();
+  return hosts.length
+    ? { basis: 'catalog-presence', hosts, count: hosts.length, truncated: false }
+    : notMeasuredConsumers();
+}
 function findingId(stable) {
   return `maintenance-finding-${sha256(stable).slice(0, 20)}`;
 }
@@ -92,6 +105,7 @@ function relationshipFinding({ classification, kind, name, host, project, projec
       completeness: 'complete', gaps: [],
     },
     observedUsage: { status: 'not-measured', statement: 'Host selection and usage were not used as action authority.' },
+    consumerHosts: catalogConsumers(null, host),
     impact: {
       summary: copy.impact, bytes: null, files: null,
       dependencies: 'unknown', preserved: action.preserved,
@@ -126,8 +140,13 @@ function sameNameRelationships(catalog, evidence) {
     const projects = occurrences.filter(({ presence }) => presence.scope === 'project' && presence.project);
     if (!shared.length || !projects.length) continue;
     for (const projectOccurrence of projects) {
+      const distinctShared = shared.filter(({ presence }) => (
+        !projectOccurrence.presence?.artifactId || !presence?.artifactId
+        || projectOccurrence.presence.artifactId !== presence.artifactId
+      ));
+      if (!distinctShared.length) continue;
       const projectDigest = definitionDigest(projectOccurrence.presence);
-      const sharedDigests = shared.map(({ presence }) => definitionDigest(presence));
+      const sharedDigests = distinctShared.map(({ presence }) => definitionDigest(presence));
       if (!projectDigest || sharedDigests.some((value) => !value)) continue;
       const allDigests = new Set([projectDigest, ...sharedDigests]);
       const classification = allDigests.size > 1 ? 'same-name-different-definition'
@@ -136,10 +155,10 @@ function sameNameRelationships(catalog, evidence) {
       findings.push(relationshipFinding({
         classification, kind: projectOccurrence.item.kind, name: projectOccurrence.logical,
         host: projectOccurrence.presence.host, project: projectOccurrence.presence.project,
-        projectPresence: projectOccurrence.presence, shared: shared.map(({ presence }) => presence), evidence,
+        projectPresence: projectOccurrence.presence, shared: distinctShared.map(({ presence }) => presence), evidence,
       }));
       coveredItems.add(projectOccurrence.item.key);
-      shared.forEach(({ item }) => coveredItems.add(item.key));
+      distinctShared.forEach(({ item }) => coveredItems.add(item.key));
     }
   }
   return { findings, coveredItems };
@@ -267,6 +286,7 @@ function storageFinding(row, sharedEvidence) {
         ? 'No observed activity is incomplete evidence and does not prove disuse.'
         : 'Usage was not used as action authority.',
     },
+    consumerHosts: notMeasuredConsumers(),
     impact: {
       summary: guidance.impact,
       bytes: measuredValue(row.bytes),
@@ -422,6 +442,7 @@ function catalogFinding(item, sharedEvidence) {
       status: 'not-measured',
       statement: 'Usage was not used as action authority.',
     },
+    consumerHosts: catalogConsumers(item, presence?.host),
     impact: {
       summary: guidance.impact,
       bytes: null,
@@ -461,6 +482,7 @@ function missingEvidenceFinding(evidence) {
       freshness: evidence.status, completeness: 'partial', gaps: evidence.gaps,
     },
     observedUsage: { status: 'not-measured', statement: 'Usage evidence is unavailable.' },
+    consumerHosts: notMeasuredConsumers(),
     impact: {
       summary: guidance.impact,
       bytes: null, files: null, dependencies: 'unknown',

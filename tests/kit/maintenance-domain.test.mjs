@@ -21,6 +21,7 @@ function footprint() {
         canonicalId: 'plugin:codex:demo@market',
         kind: 'plugin',
         name: 'demo@market',
+        hosts: ['codex'],
         presence: [{
           host: 'codex', scope: 'plugin', path: '/private/plugin-cache/demo',
           provider: {
@@ -57,6 +58,9 @@ test('scanner projects evidence-backed findings without content, credentials, pa
   assert.equal(cache.nextAction.operation, 'review');
   assert.equal(cache.nextAction.executable, false);
   assert.equal(cache.nextAction.label, 'Clear this cache with its owning tool');
+  assert.deepEqual(cache.consumerHosts, {
+    basis: 'not-measured', hosts: [], count: 0, truncated: false,
+  });
   assert.doesNotMatch(JSON.stringify(cache.nextAction), /Prepare owner-managed cleanup|Resources outside this finding/);
 
   const wire = JSON.stringify(result);
@@ -151,6 +155,9 @@ test('explicit lifecycle evidence keeps version axes separate and never promotes
   assert.equal(plugin.versions.recommended, null, 'latest is not automatically recommended');
   assert.equal(plugin.versions.sourceRevision, 'market-42');
   assert.equal(plugin.ownership.owner, 'demo@market');
+  assert.deepEqual(plugin.consumerHosts, {
+    basis: 'catalog-presence', hosts: ['codex'], count: 1, truncated: false,
+  });
   assert.equal(plugin.nextAction.executable, false);
 });
 
@@ -257,6 +264,25 @@ test('project and shared resources become one relationship finding per human dec
   assert.equal(findings.filter((finding) => finding.resource.name === 'project-mode').length, 1,
     'the grouped relationship replaces generic per-item ambiguity');
   assert.doesNotMatch(JSON.stringify(relationships), /\/private\//);
+});
+
+test('two bindings to one physical artifact are shared exposure, not a duplicate-copy finding', () => {
+  const input = footprint();
+  input.storage.reclaimables = [];
+  const digest = { status: 'measured', value: 'same', partial: false, asOf: NOW };
+  input.catalog.items = [{
+    canonicalId: 'skill:shared-source', kind: 'skill', name: 'shared-source', capabilityName: 'shared-source',
+    hosts: ['opencode'],
+    presence: [
+      { host: 'opencode', scope: 'user', artifactId: 'artifact-one', definition: digest, digest },
+      { host: 'opencode', scope: 'project', project: '/private/project-a', artifactId: 'artifact-one',
+        definition: digest, digest, tracking: { repository: true, tracked: false, workingTree: 'clean' } },
+    ],
+  }];
+
+  const { findings } = scanMaintenanceFindings({ footprint: input, now: () => NOW });
+  assert.deepEqual(findings, [],
+    'the same source discovered through two config scopes must not be described as a removable project copy');
 });
 
 test('stale evidence is visible and cannot produce a safe cleanup classification', () => {

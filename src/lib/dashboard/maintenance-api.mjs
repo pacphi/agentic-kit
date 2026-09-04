@@ -23,6 +23,7 @@ const RELATIONSHIP_ROLES = new Set(['project-copy', 'shared-copy', 'canonical', 
 const OWNERSHIP = new Set(['receipt-owned', 'plugin-owned', 'user-owned', 'unknown']);
 const TRACKING = new Set(['tracked', 'untracked', 'unknown']);
 const WORKING_TREE = new Set(['clean', 'changed', 'unknown']);
+const CONSUMER_HOSTS = new Set(['claude', 'codex', 'opencode']);
 
 function text(value, max = 500) {
   return typeof value === 'string'
@@ -70,6 +71,20 @@ function picked(source, keys, max = 300) {
 
 function publicResource(value) {
   return picked(value, RESOURCE_KEYS, 200);
+}
+
+function publicConsumerHosts(value) {
+  if (!value || typeof value !== 'object' || value.basis !== 'catalog-presence') {
+    return { basis: 'not-measured', hosts: [], count: 0, truncated: false };
+  }
+  const raw = Array.isArray(value.hosts) ? value.hosts : [];
+  const hosts = [...new Set(raw.filter((host) => CONSUMER_HOSTS.has(host)))].sort();
+  const supplied = Number.isFinite(value.count) ? Math.max(0, Math.round(value.count)) : raw.length;
+  const count = Math.max(hosts.length, supplied);
+  return {
+    basis: 'catalog-presence', hosts, count,
+    truncated: value.truncated === true || count > hosts.length || raw.length !== hosts.length,
+  };
 }
 
 function publicRelationship(value) {
@@ -123,6 +138,7 @@ function publicFinding(finding) {
       ...(!evidence.health && evidence.freshness ? { health: text(evidence.freshness, 100) } : {}),
     },
     observedUsage: picked(value.observedUsage, ['status', 'statement']),
+    consumerHosts: publicConsumerHosts(value.consumerHosts),
     impact: {
       ...picked(impact, ['summary', 'bytes', 'files', 'dependencies', 'capabilities', 'projects', 'preserved']),
     },

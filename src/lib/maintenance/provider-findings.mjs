@@ -2,6 +2,27 @@ import { emptySummary } from './model.mjs';
 import { sha256 } from './evidence.mjs';
 
 const array = (value) => (Array.isArray(value) ? value : []);
+const HOSTS = new Set(['claude', 'codex', 'opencode']);
+
+function catalogConsumerHosts(footprint, finding) {
+  const resource = finding?.resource ?? {};
+  const visibleToHost = (candidate) => array(candidate?.hosts).includes(resource.host)
+    || array(candidate?.presence).some((presence) => presence?.host === resource.host);
+  const item = array(footprint?.catalog?.items).find((candidate) => (
+    candidate?.canonicalId === resource.id
+    || (resource.providerRef && candidate?.pluginRef === resource.providerRef && visibleToHost(candidate))
+    || (resource.providerRef && candidate?.kind === 'plugin' && candidate?.name === resource.providerRef
+      && visibleToHost(candidate))
+  ));
+  if (!item) return null;
+  const bindings = array(item.consumerBindings).filter((binding) => binding?.enabled !== false);
+  const hosts = [...new Set((bindings.length ? bindings.map((binding) => binding?.host)
+    : [...array(item.hosts), ...array(item.presence).map((presence) => presence?.host)])
+    .filter((host) => HOSTS.has(host)))].sort();
+  return hosts.length
+    ? { basis: 'catalog-presence', hosts, count: hosts.length, truncated: false }
+    : null;
+}
 
 function unavailableFinding(providers, evidence) {
   const ids = [...new Set(providers)].sort();
@@ -80,20 +101,31 @@ export async function projectProviderFindings({ providers, footprint, model }) {
   }
   if (unavailable.length) derived.push(unavailableFinding(unavailable, model.freshness));
 
-  const replacement = new Map(derived
+  const enriched = derived.map((finding) => {
+    if (finding.consumerHosts) return finding;
+    const consumerHosts = catalogConsumerHosts(footprint, finding);
+    return consumerHosts ? { ...finding, consumerHosts } : finding;
+  });
+
+  const replacement = new Map(enriched
     .filter((finding) => model.findings.some((base) => base.resource.id === finding?.resource?.id))
     .map((finding) => [finding.resource.id, finding]));
-  const additions = derived.filter((finding) => !replacement.has(finding?.resource?.id))
+  const additions = enriched.filter((finding) => !replacement.has(finding?.resource?.id))
     .sort((a, b) => a.id.localeCompare(b.id));
   const findings = [
-    ...model.findings.map((finding) => replacement.get(finding.resource.id) ?? finding),
+    ...model.findings.map((finding) => {
+      const derivedFinding = replacement.get(finding.resource.id);
+      return derivedFinding && !derivedFinding.consumerHosts
+        ? { ...derivedFinding, consumerHosts: finding.consumerHosts }
+        : (derivedFinding ?? finding);
+    }),
     ...additions,
   ];
   const summary = emptySummary();
   for (const finding of findings) summary[finding.bucket] += 1;
   const sourceFingerprint = sha256({
     footprint: model.sourceFingerprint,
-    providers: derived.map(stableFinding).sort((a, b) => a.id.localeCompare(b.id)),
+    providers: enriched.map(stableFinding).sort((a, b) => a.id.localeCompare(b.id)),
   });
   return { findings, summary, sourceFingerprint, detections };
 }

@@ -59,7 +59,7 @@ test('Claude joins exact host-native installed and available rows without lexica
   } });
   const catalog = [{
     canonicalId: 'plugin:demo@market', kind: 'plugin', name: 'demo@market', pluginRef: 'demo@market',
-    components: ['skill:a', 'command:b', 'agent:c'], presence: [],
+    hosts: ['claude'], components: ['skill:a', 'command:b', 'agent:c'], presence: [],
   }];
   const service = serviceFor(t, provider, footprint(catalog));
   const model = await service.scan();
@@ -70,6 +70,9 @@ test('Claude joins exact host-native installed and available rows without lexica
   assert.equal(finding.versions.recommended, '1.0.0');
   assert.equal(finding.ownership.authority, 'native-inventory');
   assert.equal(finding.impact.dependencies, 3);
+  assert.deepEqual(finding.consumerHosts, {
+    basis: 'catalog-presence', hosts: ['claude'], count: 1, truncated: false,
+  }, 'provider replacement retains the Catalog consumer binding');
   assert.equal(finding.nextAction.operation, 'update');
   assert.equal(finding.nextAction.executable, true);
   assert.equal(finding.nextAction.label, 'Upgrade demo@market to 1.0.0');

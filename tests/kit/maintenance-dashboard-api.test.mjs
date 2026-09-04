@@ -211,6 +211,30 @@ test('maintenance dashboard projection bounds relationship evidence to typed, pa
   assert.doesNotMatch(JSON.stringify(projected), /\/Users\/alice|rm -rf|secret-/);
 });
 
+test('maintenance dashboard projects bounded consumer hosts without turning inventory into usage', () => {
+  const projected = publicMaintenanceModel({ findings: [{
+    id: 'consumer-a',
+    consumerHosts: {
+      basis: 'catalog-presence',
+      hosts: ['opencode', 'claude', 'codex', 'claude', '<hostile>'],
+      count: 9,
+      truncated: false,
+      path: '/Users/alice/private',
+    },
+  }, {
+    id: 'consumer-unknown',
+    consumerHosts: { basis: 'observed-use', hosts: ['claude'] },
+  }] });
+
+  assert.deepEqual(projected.findings[0].consumerHosts, {
+    basis: 'catalog-presence', hosts: ['claude', 'codex', 'opencode'], count: 9, truncated: true,
+  });
+  assert.deepEqual(projected.findings[1].consumerHosts, {
+    basis: 'not-measured', hosts: [], count: 0, truncated: false,
+  });
+  assert.doesNotMatch(JSON.stringify(projected), /hostile|\/Users\/alice/);
+});
+
 test('dashboard Maintenance API keeps GET lazy and mutation paths exact', async (t) => {
   const service = fixtureService();
   const server = await startDashboard({
