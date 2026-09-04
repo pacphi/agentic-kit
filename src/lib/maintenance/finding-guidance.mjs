@@ -152,7 +152,7 @@ export function catalogGuidance({ kind, operation, update, partial, stale, recom
     headline: 'The owning host reports an upgrade candidate',
     impact: `Changes this ${noun} and the capabilities it contributes.`,
     steps: ['Preview the host-owned upgrade.', 'Check the affected capabilities and rollback limit.', 'Apply the upgrade, restart if required, then deep-rescan.'],
-    preserved: ['Unrelated resources', 'Project files'],
+    preserved: ['Project files'],
     blockedReason: 'The owning host has not authorized an exact upgrade operation.',
   };
   if (operation === 'disable') return {
@@ -160,7 +160,7 @@ export function catalogGuidance({ kind, operation, update, partial, stale, recom
     headline: `The owning host marked this ${noun} as a disable candidate`,
     impact: `Stops this ${noun} from contributing capabilities until it is enabled again.`,
     steps: ['Preview the disable operation.', 'Check the affected capabilities.', 'Disable it, restart if required, then deep-rescan.'],
-    preserved: [`Installed ${noun} data`, 'Unrelated resources'],
+    preserved: [`Installed ${noun} data`],
     blockedReason: 'The owning host has not authorized an exact disable operation.',
   };
   if (operation === 'remove') return {
@@ -168,7 +168,7 @@ export function catalogGuidance({ kind, operation, update, partial, stale, recom
     headline: `The owning host marked this ${noun} as a removal candidate`,
     impact: `Removes this ${noun} and its contributed capabilities.`,
     steps: ['Preview the uninstall operation.', 'Check the affected capabilities and data-preservation rule.', 'Uninstall it, restart if required, then deep-rescan.'],
-    preserved: ['Unrelated resources', 'Project files'],
+    preserved: ['Project files'],
     blockedReason: 'The owning host has not authorized an exact uninstall operation.',
   };
   const variants = {
@@ -186,7 +186,7 @@ export function catalogGuidance({ kind, operation, update, partial, stale, recom
       `Choose the authoritative ${noun}; keep both only when their names and purpose are distinct.`,
       'Update, rename, or remove the other copies with their owning workflow, then deep-rescan.',
     ],
-    preserved: ['The selected authoritative copy', 'Unrelated resources'],
+    preserved: ['The selected authoritative copy'],
     blockedReason: 'Different observed definitions require a human choice of source of truth.',
   };
 }
