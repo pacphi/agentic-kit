@@ -21,7 +21,13 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
     {id:"blocked",label:"Cannot automate",field:"blocked"},
     {id:"recent-changes",label:"Recent changes",field:"recentChanges"}
   ];
-  var MAINT_KIND_LABEL={plugin:"Plugins",skill:"Skills",mcp:"MCP servers","mcp-server":"MCP servers",storage:"Storage",runtime:"Runtime"};
+  var MAINT_KIND_LABEL={
+    plugin:"Plugin",skill:"Skill",agent:"Agent",command:"Command",mcp:"MCP server",mcpServer:"MCP server","mcp-server":"MCP server",
+    storage:"Storage",runtime:"Runtime","stale-npx-env":"npx environment","regenerable-cache":"Cache",
+    "superseded-snapshots":"Snapshot","installed-runtime-versions":"Runtime version",
+    "superseded-browser-revisions":"Browser build","aged-transcripts":"Transcript history",
+    "orphaned-transcripts":"Transcript history","orphaned-worktree":"Worktree","system-evidence":"System evidence",daemon:"Background process"
+  };
   var MAINT_RELATION_LABEL={
     "redundant-project-override":"Identical project copies",
     "same-name-different-definition":"Different definitions",

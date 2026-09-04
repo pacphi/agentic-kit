@@ -95,7 +95,7 @@ test('maintenance dashboard projection derives human summary fields without inve
   const projected = publicMaintenanceModel({
     summary: { updatesReady: 1, unsupportedOrBlocked: 1 },
     findings: [
-      { id: 'a', bucket: 'updatesReady', ownership: { owner: 'native owner' },
+      { id: 'a', bucket: 'updatesReady', statusLabel: 'Upgrade available', ownership: { owner: 'native owner' },
         evidence: { completeness: 'complete', freshness: 'fresh', sources: ['native'], gaps: ['gap-a'] },
         nextAction: { executable: true } },
       { id: 'b', bucket: 'unsupportedOrBlocked', evidence: { completeness: 'partial' }, nextAction: { executable: false } },
@@ -110,6 +110,7 @@ test('maintenance dashboard projection derives human summary fields without inve
     recentChanges: projected.summary.recentChanges,
   }, { total: 2, actionable: 1, incompleteSources: 1, blocked: 1, recentChanges: 1 });
   assert.equal(projected.findings[0].owner, 'native owner');
+  assert.equal(projected.findings[0].statusLabel, 'Upgrade available');
   assert.deepEqual(projected.findings[0].evidence.reasons, ['gap-a']);
   assert.equal(projected.findings[0].evidence.source, 'native');
   assert.equal(projected.receipts[0].completedAt, '2026-09-03T00:00:00.000Z');

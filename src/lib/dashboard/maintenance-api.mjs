@@ -108,7 +108,7 @@ function publicFinding(finding) {
   const owner = text(value.owner) ?? text(value.ownership?.owner);
   const relationship = publicRelationship(value.relationship);
   return {
-    ...picked(value, ['id', 'state', 'bucket', 'classification', 'safetyClass', 'headline', 'explanation', 'owner']),
+    ...picked(value, ['id', 'state', 'bucket', 'classification', 'safetyClass', 'statusLabel', 'headline', 'explanation', 'owner']),
     ...(owner ? { owner } : {}),
     resource: publicResource(value.resource),
     versions: picked(value.versions, VERSION_KEYS),
