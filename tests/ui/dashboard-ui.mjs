@@ -2349,6 +2349,10 @@ async function main() {
       await page.$eval('#sys-pressure details:first-of-type', (d) => d.open && d.dataset.launching === 'true')
         && !(await page.$eval('#sys-pressure details:nth-of-type(2)', (d) => d.open)),
       'progressive disclosure did not prioritize the current project');
+    check('project pressure does not badge the dashboard launch directory',
+      !/current project/i.test(pressureText)
+        && await page.$$('#sys-pressure .sy-current').then((els) => els.length) === 0,
+      `pressure rendered an incidental launch-directory designation: ${JSON.stringify(pressureText)}`);
     check('inventory completeness and host-owned context are separate, non-contradictory facts',
       /Inventory complete/.test(pressureText)
         && (pressureText.match(/Context inclusion is not reported by these hosts/g) || []).length === 1

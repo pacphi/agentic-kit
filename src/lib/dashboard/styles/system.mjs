@@ -303,7 +303,6 @@ export const SYSTEM_CSS = `
 .sy-pressure-project-id{display:flex; flex-direction:column; min-width:0; gap:3px}
 .sy-pressure-project-id>span:first-child{display:flex; align-items:center; gap:7px; min-width:0}
 .sy-pressure-project-id b{color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
-.sy-current{padding:2px 6px; border-radius:999px; background:color-mix(in srgb,var(--accent) 15%,transparent); color:var(--accent); font-size:9px; text-transform:uppercase; letter-spacing:.04em; white-space:nowrap}
 .sy-pressure-path{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink-dim); font-family:var(--mono); font-size:10.5px}
 .sy-pressure-meta{display:flex; justify-content:flex-end; align-items:center; gap:6px; flex-wrap:wrap}
 .sy-pressure-chip,.sy-pressure-state{padding:3px 7px; border:1px solid var(--line); border-radius:999px; color:var(--ink-2); font-size:10.5px; white-space:nowrap}

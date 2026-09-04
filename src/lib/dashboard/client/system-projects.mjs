@@ -434,8 +434,7 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     var signals=(names?'<span class="sy-pressure-state sy-warn">'+fmtNum(names)+' name overlap'+(names===1?"":"s")+'</span>':"")
       +(entries?'<span class="sy-pressure-state">'+fmtNum(entries)+' matching entrypoint'+(entries===1?"":"s")+'</span>':"");
     return '<details class="sy-pressure-project"'+(project.launching?' open data-launching="true"':"")+'>'
-      +'<summary><span class="sy-pressure-project-id"><span><b>'+esc(project.label)+'</b>'
-      +(project.launching?'<span class="sy-current">current project</span>':"")+'</span>'
+      +'<summary><span class="sy-pressure-project-id"><span><b>'+esc(project.label)+'</b></span>'
       +'<span class="sy-pressure-path" title="'+esc(project.project)+'">'+esc(pressurePath(project))+'</span></span>'
       +'<span class="sy-pressure-meta">'+chips+status+signals+'</span></summary>'
       +'<div class="sy-pressure-detail"><div class="sy-path">'+esc(project.project)+'</div>'
