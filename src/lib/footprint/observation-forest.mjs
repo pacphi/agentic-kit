@@ -162,6 +162,78 @@ function physicalResult(root, physical, queries) {
   };
 }
 
+function walkForestDirectories(root, queries, physical, fsImpl) {
+  const stack = [{ dir: root, depth: 0, queries: queries.map((_, index) => index) }];
+  while (stack.length) {
+    const { dir, depth, queries: candidates } = stack.pop();
+    const active = activeAtDirectory(queries, candidates);
+    if (!active.length) continue;
+    let entries;
+    try { entries = fsImpl.readdirSync(dir, { withFileTypes: true }); }
+    catch (error) {
+      const reason = error?.code || 'io';
+      for (const index of active) {
+        if (dir === root) unknownRoot(queries[index], reason);
+        else degrade(queries[index], dir, reason);
+      }
+      continue;
+    }
+    physical.dirs += 1;
+    for (const index of active) queries[index].result.dirs += 1;
+    for (const entry of entries) {
+      const seeing = queriesSeeingEntry(queries, active);
+      if (!seeing.length) break;
+      physical.entriesSeen += 1;
+      const file = path.join(dir, entry.name);
+      if (entry.isSymbolicLink()) {
+        physical.symlinksSkipped += 1;
+        for (const index of seeing) queries[index].result.symlinksSkipped += 1;
+        continue;
+      }
+      if (entry.isDirectory()) {
+        const child = directoryQueries(queries, seeing, file, entry.name, depth + 1);
+        if (child.length) stack.push({ dir: file, depth: depth + 1, queries: child });
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const accepting = acceptedQueries(queries, seeing, entry.name, file, depth + 1);
+      if (!accepting.length) continue;
+      let stat;
+      try { stat = fsImpl.lstatSync(file); }
+      catch (error) {
+        for (const index of accepting) degrade(queries[index], file, error?.code || 'io');
+        continue;
+      }
+      physical.files += 1;
+      physical.bytes += stat.size;
+      if (physical.newestMtimeMs === null || stat.mtimeMs > physical.newestMtimeMs) {
+        physical.newestMtimeMs = stat.mtimeMs;
+      }
+      for (const index of accepting) countFile(queries[index], file, entry.name, stat, depth + 1);
+    }
+  }
+}
+
+function acquireForestRoot(root, queries, physical, fsImpl) {
+  const head = statNode(root, { fsImpl });
+  if (head.status === UNKNOWN) {
+    for (const query of queries) unknownRoot(query, head.reason);
+    return;
+  }
+  if (head.kind === 'symlink') {
+    for (const query of queries) unknownRoot(query, 'symlink (never followed)');
+    return;
+  }
+  if (head.kind === 'dir') {
+    walkForestDirectories(root, queries, physical, fsImpl);
+    return;
+  }
+  rootFile(queries, root, head);
+  physical.files = queries.some((query) => query.result.files > 0) ? 1 : 0;
+  physical.bytes = head.bytes ?? 0;
+  physical.newestMtimeMs = head.mtimeMs;
+}
+
 /**
  * Execute same-root virtual walks through one physical traversal.
  *
@@ -177,67 +249,7 @@ export function observeWalkForest(root, specs, { walk, fsImpl = fs }) {
     const physical = {
       bytes: 0, files: 0, dirs: 0, newestMtimeMs: null, entriesSeen: 0, symlinksSkipped: 0,
     };
-    const head = statNode(root, { fsImpl });
-    if (head.status === UNKNOWN) {
-      for (const query of queries) unknownRoot(query, head.reason);
-    } else if (head.kind === 'symlink') {
-      for (const query of queries) unknownRoot(query, 'symlink (never followed)');
-    } else if (head.kind !== 'dir') {
-      rootFile(queries, root, head);
-      physical.files = queries.some((query) => query.result.files > 0) ? 1 : 0;
-      physical.bytes = head.bytes ?? 0;
-      physical.newestMtimeMs = head.mtimeMs;
-    } else {
-      const stack = [{ dir: root, depth: 0, queries: queries.map((_, index) => index) }];
-      while (stack.length) {
-        const { dir, depth, queries: candidates } = stack.pop();
-        const active = activeAtDirectory(queries, candidates);
-        if (!active.length) continue;
-        let entries;
-        try { entries = fsImpl.readdirSync(dir, { withFileTypes: true }); }
-        catch (error) {
-          const reason = error?.code || 'io';
-          for (const index of active) {
-            if (dir === root) unknownRoot(queries[index], reason);
-            else degrade(queries[index], dir, reason);
-          }
-          continue;
-        }
-        physical.dirs += 1;
-        for (const index of active) queries[index].result.dirs += 1;
-        for (const entry of entries) {
-          const seeing = queriesSeeingEntry(queries, active);
-          if (!seeing.length) break;
-          physical.entriesSeen += 1;
-          const file = path.join(dir, entry.name);
-          if (entry.isSymbolicLink()) {
-            physical.symlinksSkipped += 1;
-            for (const index of seeing) queries[index].result.symlinksSkipped += 1;
-            continue;
-          }
-          if (entry.isDirectory()) {
-            const child = directoryQueries(queries, seeing, file, entry.name, depth + 1);
-            if (child.length) stack.push({ dir: file, depth: depth + 1, queries: child });
-            continue;
-          }
-          if (!entry.isFile()) continue;
-          const accepting = acceptedQueries(queries, seeing, entry.name, file, depth + 1);
-          if (!accepting.length) continue;
-          let stat;
-          try { stat = fsImpl.lstatSync(file); }
-          catch (error) {
-            for (const index of accepting) degrade(queries[index], file, error?.code || 'io');
-            continue;
-          }
-          physical.files += 1;
-          physical.bytes += stat.size;
-          if (physical.newestMtimeMs === null || stat.mtimeMs > physical.newestMtimeMs) {
-            physical.newestMtimeMs = stat.mtimeMs;
-          }
-          for (const index of accepting) countFile(queries[index], file, entry.name, stat, depth + 1);
-        }
-      }
-    }
+    acquireForestRoot(root, queries, physical, fsImpl);
     return {
       value: queries.map((query) => query.result),
       result: physicalResult(root, physical, queries),
