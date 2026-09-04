@@ -148,6 +148,8 @@ test('a project that no longer exists is counted in everSeen and never in the ta
   const root = fixture(t, 'vanished');
   const alive = path.join(root, 'alive');
   fs.mkdirSync(path.join(alive, '.git'), { recursive: true });
+  write(path.join(alive, '.git', 'config'),
+    '[remote "origin"]\n\turl = https://github.com/pacphi/alive.git\n');
   const gone = path.join(root, 'deleted-last-week');
 
   const claudeRoot = path.join(root, 'claude-projects');
@@ -314,26 +316,30 @@ test('an OpenCode-only project joins the same de-duplicated list', (t) => {
   assert.deepEqual(found.projects.find((p) => p.path === oc).hosts, ['opencode']);
 });
 
-test('an explicit catalog is measured exactly as given, existence and all', (t) => {
+test('an explicit catalog preserves discovery counts while measuring only its hosted session rows', (t) => {
   const root = fixture(t, 'explicit');
   const alive = path.join(root, 'alive');
   fs.mkdirSync(path.join(alive, '.git'), { recursive: true });
+  write(path.join(alive, '.git', 'config'),
+    '[remote "origin"]\n\turl = https://github.com/pacphi/alive.git\n');
 
   const section = collectProjects({
     projects: [
-      { path: alive, label: 'alive' },
-      { path: path.join(root, 'gone'), label: 'gone' },
+      { path: alive, label: 'alive', hosts: ['claude'] },
+      { path: path.join(root, 'gone'), label: 'gone', hosts: ['codex'] },
     ],
     loc: false,
     now: () => 1_700_000_000_000,
   });
-  // The caller — not discovery — chose these rows, so the on-disk filter does
-  // NOT apply and the missing one is reported as a missing row rather than
-  // silently dropped.
-  assert.equal(section.projects.length, 2);
+  // The caller still defines the KPI population, but a missing or unlinked
+  // directory is counted as an exclusion rather than receiving deep walks.
+  assert.equal(section.projects.length, 1);
+  assert.equal(section.projects[0].path, alive);
   assert.equal(section.everSeen.value, 2);
   assert.equal(section.onDisk.value, 1);
   assert.equal(section.gitRepos.value, 1);
+  assert.equal(section.population.excluded.total, 1);
+  assert.equal(section.population.excluded.byRemoteStatus.localOnly, 1);
   assert.equal(section.method, null, 'an explicit catalog has no discovery method to state');
 });
 

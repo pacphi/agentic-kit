@@ -808,10 +808,14 @@ test('a project path that vanished is unknown everywhere, never a zero-byte proj
 
 test('the projects section measures the supplied catalog and reports discovery failure', (t) => {
   const { root, project } = projectFixture(t);
+  const second = path.join(root, 'second');
+  write(path.join(second, 'index.js'), 'second\n');
+  write(path.join(second, '.git', 'config'),
+    '[remote "origin"]\n\turl = https://github.com/pacphi/second.git\n');
   const seen = [];
   const result = collectProjects({
-    projects: [{ path: project, label: 'repo' },
-      { path: path.join(root, 'second'), label: 'second' }],
+    projects: [{ path: project, label: 'repo', hosts: ['claude'] },
+      { path: second, label: 'second', hosts: ['codex'] }],
     loc: false, limit: 1, fsImpl: fixtureFs(root),
     onProgress: (payload) => seen.push(payload.phase),
   });

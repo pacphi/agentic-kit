@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import { collectConsumers } from '../../src/lib/footprint/consumers.mjs';
 import { npxEnvNodes } from '../../src/lib/footprint/install.mjs';
+import { collectProjects } from '../../src/lib/footprint/projects.mjs';
 import { collectStorage, STORAGE_DEFAULTS } from '../../src/lib/footprint/storage.mjs';
 import { walkTree } from '../../src/lib/footprint/walk.mjs';
 
@@ -136,4 +137,87 @@ test('storage rejects npx evidence that is stale or not rooted at an immediate c
 
   assert.equal(fallbackWalks, 1, 'untrusted reuse evidence must fall back to a fresh bounded walk');
   assert.equal(result.reclaimables[0].path, env);
+});
+
+test('projects measure only hosted repositories with recorded sessions and count every exclusion', (t) => {
+  const root = fixture(t, 'project-population');
+  const make = (name, remote) => {
+    const project = path.join(root, name);
+    fs.mkdirSync(path.join(project, '.git'), { recursive: true });
+    fs.writeFileSync(path.join(project, 'index.js'), 'export default 1;\n');
+    if (remote !== null) {
+      fs.writeFileSync(path.join(project, '.git', 'config'),
+        remote === '' ? '[core]\n\trepositoryformatversion = 0\n'
+          : `[remote "origin"]\n\turl = ${remote}\n`);
+    }
+    return project;
+  };
+  const eligible = make('eligible', 'git@github.com:pacphi/eligible.git');
+  const localOnly = make('local-only', '');
+  const insecure = make('http-only', 'http://git.example.test/team/repo.git');
+  const unrecognized = make('unrecognized', 'file:///srv/git/repo.git');
+  const unknown = make('unknown', null);
+  const noSession = make('no-session', 'https://gitlab.com/team/no-session.git');
+  const projects = [
+    { path: eligible, label: 'eligible', hosts: ['claude'], exists: true },
+    { path: localOnly, label: 'local-only', hosts: ['codex'], exists: true },
+    { path: insecure, label: 'http-only', hosts: ['claude'], exists: true },
+    { path: unrecognized, label: 'unrecognized', hosts: ['opencode'], exists: true },
+    { path: unknown, label: 'unknown', hosts: ['claude'], exists: true },
+    { path: noSession, label: 'no-session', hosts: [], exists: true },
+  ];
+  const walked = [];
+  const unknownConfig = path.join(unknown, '.git', 'config');
+  const fsImpl = {
+    ...fs,
+    lstatSync(target, options) {
+      if (path.resolve(target) === path.resolve(unknownConfig)) {
+        throw Object.assign(new Error('fixture permission denied'), { code: 'EACCES' });
+      }
+      return fs.lstatSync(target, options);
+    },
+    readFileSync(target, options) {
+      if (path.resolve(target) === path.resolve(unknownConfig)) {
+        throw Object.assign(new Error('fixture permission denied'), { code: 'EACCES' });
+      }
+      return fs.readFileSync(target, options);
+    },
+  };
+  const result = collectProjects({
+    sources: {
+      projects,
+      everSeen: projects.length,
+      onDisk: projects.length,
+      gitRepos: projects.length,
+      unresolved: 0,
+      complete: true,
+      method: 'fixture discovery',
+      sources: {},
+    },
+    loc: false,
+    walk(target, options) {
+      walked.push(target);
+      return walkTree(target, options);
+    },
+    fsImpl,
+    now: () => 1,
+  });
+
+  assert.deepEqual(result.projects.map((project) => project.path), [eligible]);
+  assert.equal(walked.some((target) => target.startsWith(localOnly)), false);
+  assert.equal(walked.some((target) => target.startsWith(insecure)), false);
+  assert.equal(result.everSeen.value, 6);
+  assert.equal(result.onDisk.value, 6);
+  assert.equal(result.gitRepos.value, 6);
+  assert.deepEqual(result.population, {
+    kind: 'hosted-repositories-with-recorded-session',
+    eligible: 1,
+    measured: 1,
+    excluded: {
+      total: 5,
+      noRecordedSession: 1,
+      noHttpsRemote: 4,
+      byRemoteStatus: { localOnly: 1, insecureHttp: 1, unrecognized: 1, unknown: 1 },
+    },
+  });
 });

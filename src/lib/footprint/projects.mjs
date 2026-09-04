@@ -447,7 +447,10 @@ export function measureProject(project, {
     label: project.label,
     source: project.source ?? null,
     hosts: Array.isArray(project.hosts) ? [...project.hosts] : null,
-    remote: projectRemote(root, { fsImpl }),
+    // collectProjects preflights the remote to choose the stated hosted-repo
+    // population. Reuse that exact evidence instead of opening .git/config a
+    // second time; direct measureProject callers retain the original probe.
+    remote: project.remote ?? projectRemote(root, { fsImpl }),
     loc: detected ? locFromStack(detected) : locNotMeasured('not measured'),
     stack: detected ? stackFromDetection(detected) : stackNotMeasured('not measured'),
     presence: tree.presence,
@@ -594,6 +597,46 @@ function resolveProjectCatalog({ projects, sources, discover, fsImpl }) {
   }
 }
 
+const HTTPS_REMOTE = /^https:/i;
+
+/** The Projects table is intentionally narrower than the discovery KPIs: only
+ * repositories with a proven HTTPS web destination and a recorded host session
+ * are expensive enough to measure. Everything else remains counted explicitly
+ * rather than disappearing behind the performance optimization. */
+function selectHostedPopulation(rows, fsImpl) {
+  const eligible = [];
+  const excluded = {
+    total: 0,
+    noRecordedSession: 0,
+    noHttpsRemote: 0,
+    byRemoteStatus: { localOnly: 0, insecureHttp: 0, unrecognized: 0, unknown: 0 },
+  };
+  for (const project of rows) {
+    if (!project?.path) continue;
+    const remote = projectRemote(project.path, { fsImpl });
+    const recorded = Array.isArray(project.hosts) && project.hosts.length > 0;
+    const linked = typeof remote.webUrl === 'string' && HTTPS_REMOTE.test(remote.webUrl);
+    if (recorded && linked) {
+      eligible.push({ ...project, remote });
+      continue;
+    }
+    excluded.total += 1;
+    if (!recorded) excluded.noRecordedSession += 1;
+    if (linked) continue;
+    excluded.noHttpsRemote += 1;
+    if (typeof remote.webUrl === 'string' && /^http:/i.test(remote.webUrl)) {
+      excluded.byRemoteStatus.insecureHttp += 1;
+    } else if (remote.status === 'local-only') {
+      excluded.byRemoteStatus.localOnly += 1;
+    } else if (remote.status === 'unknown') {
+      excluded.byRemoteStatus.unknown += 1;
+    } else {
+      excluded.byRemoteStatus.unrecognized += 1;
+    }
+  }
+  return { eligible, excluded };
+}
+
 /** Measure every selected project, reporting progress the same way the scan
  *  always has: one `project` callback per row, one `done` callback at the end. */
 function measureSelectedProjects(selected, { walk, limits, detect, loc, asOf, fsImpl, onProgress }) {
@@ -608,7 +651,7 @@ function measureSelectedProjects(selected, { walk, limits, detect, loc, asOf, fs
 }
 
 /** Assemble the ProjectFootprint section from a completed measurement pass. */
-function buildProjectsSection({ asOf, out, rows, selected, counts, discoveryReason, loc }) {
+function buildProjectsSection({ asOf, out, eligible, selected, excluded, counts, discoveryReason, loc }) {
   // A count whose sweep hit an unreadable transcript or an unrecoverable project
   // directory is a FLOOR, not a total — `partial` is what makes a surface render
   // it as "≥ N" instead of quietly overstating certainty.
@@ -628,7 +671,13 @@ function buildProjectsSection({ asOf, out, rows, selected, counts, discoveryReas
     method: counts?.method ?? null,
     sources: counts?.sources ?? null,
     scanned: out.length,
-    truncated: selected.length < rows.length,
+    truncated: selected.length < eligible.length,
+    population: {
+      kind: 'hosted-repositories-with-recorded-session',
+      eligible: eligible.length,
+      measured: out.length,
+      excluded,
+    },
     locMeasured: loc,
     // Which catalog produced the language and stack facts in every row above. A
     // figure that moves between releases can then be explained by the registry
@@ -638,7 +687,7 @@ function buildProjectsSection({ asOf, out, rows, selected, counts, discoveryReas
     // Stated as `null` when nothing was scanned, because an empty tail from an
     // unmeasured scan would read as "the registry knows everything here".
     unrecognized: loc ? aggregateUnrecognized(out) : null,
-    complete: !discoveryReason && !partial && selected.length === rows.length
+    complete: !discoveryReason && !partial && selected.length === eligible.length
       && out.every((row) => row.complete),
   };
 }
@@ -681,7 +730,12 @@ export function collectProjects({
   const asOf = now();
   const { catalog, counts, discoveryReason } = resolveProjectCatalog({ projects, sources, discover, fsImpl });
   const rows = Array.isArray(catalog) ? catalog : [];
-  const selected = typeof limit === 'number' && limit >= 0 ? rows.slice(0, limit) : rows;
+  const population = selectHostedPopulation(rows, fsImpl);
+  const selected = typeof limit === 'number' && limit >= 0
+    ? population.eligible.slice(0, limit) : population.eligible;
   const out = measureSelectedProjects(selected, { walk, limits, detect, loc, asOf, fsImpl, onProgress });
-  return buildProjectsSection({ asOf, out, rows, selected, counts, discoveryReason, loc });
+  return buildProjectsSection({
+    asOf, out, eligible: population.eligible, selected, excluded: population.excluded,
+    counts, discoveryReason, loc,
+  });
 }
