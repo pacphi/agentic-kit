@@ -86,10 +86,18 @@ function stableDetection(provider, facts) {
   };
 }
 
-export async function projectProviderFindings({ providers, footprint, model }) {
+function notify(onProgress, payload) {
+  if (typeof onProgress !== 'function') return;
+  try { onProgress(payload); } catch { /* progress observers cannot fail a scan */ }
+}
+
+export async function projectProviderFindings({ providers, footprint, model, onProgress }) {
   const derived = [];
   const unavailable = [];
   const detections = new Map();
+  const total = providers.size;
+  let done = 0;
+  notify(onProgress, { phase: 'providers', done, total, unit: 'providers' });
   for (const provider of providers.values()) {
     let facts;
     try {
@@ -109,6 +117,8 @@ export async function projectProviderFindings({ providers, footprint, model }) {
         if (!unavailable.includes(provider.id)) unavailable.push(provider.id);
       }
     }
+    done += 1;
+    notify(onProgress, { phase: 'providers', done, total, unit: 'providers' });
   }
   if (unavailable.length) derived.push(unavailableFinding(unavailable, model.freshness));
 

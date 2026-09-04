@@ -140,6 +140,49 @@ test('dashboard-style reports read the durable scan without rerunning collectors
   assert.deepEqual(calls, []);
 });
 
+test('provider scans are single-flight, observable, and block action planning until complete', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-maint-flight-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  let release;
+  let detections = 0;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const provider = {
+    id: 'slow-provider', version: '1', host: 'codex', status: 'available',
+    resourceKinds: [], operations: [], rollback: [],
+    async detect() {
+      detections += 1;
+      await gate;
+      return { status: 'available', complete: true, authority: 'native-inventory' };
+    },
+  };
+  const service = createMaintenanceService({
+    collector: { async read() { return footprint(); } },
+    providers: new Map([[provider.id, provider]]), controlRoot: root, now: () => NOW,
+  });
+
+  const first = service.scan();
+  const attached = service.scan();
+  assert.equal(first, attached, 'concurrent callers attach to the same provider scan');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(detections, 1);
+  assert.deepEqual(service.scanState(), {
+    kind: 'provider', status: 'running', phase: 'providers',
+    startedAt: new Date(NOW).toISOString(), updatedAt: new Date(NOW).toISOString(),
+    finishedAt: null, progress: { done: 0, total: 1, unit: 'providers' },
+  });
+  await assert.rejects(() => service.plan(), (error) => (
+    error?.code === 'MAINTENANCE_SCAN_IN_PROGRESS' && error?.statusCode === 409
+  ));
+
+  release();
+  const scanned = await first;
+  assert.equal(scanned.scan.status, 'complete');
+  assert.equal(service.scanState().status, 'complete');
+  assert.deepEqual(service.scanState().progress, { done: 1, total: 1, unit: 'providers' });
+  assert.equal((await service.report()).activity, undefined,
+    'ephemeral progress must not be persisted into the saved report');
+});
+
 test('persisted reports age without rescanning and stale evidence loses action authority', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-maint-age-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

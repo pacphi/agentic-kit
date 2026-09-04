@@ -124,6 +124,26 @@ test('maintenance dashboard projection derives human summary fields without inve
   assert.equal(projected.receipts[0].timestampLabel, 'Recorded');
 });
 
+test('maintenance dashboard projects bounded provider activity and withholds action capability while it runs', () => {
+  const projected = publicMaintenanceModel({
+    capabilities: { plan: true, apply: true, undo: true },
+    activity: {
+      kind: 'provider', status: 'running', phase: 'providers',
+      startedAt: '2026-09-03T00:00:00.000Z', updatedAt: '2026-09-03T00:00:01.000Z',
+      progress: { done: 2, total: 5, unit: 'providers', path: '/Users/alice/private' },
+      path: '/Users/alice/private', command: 'codex plugin list',
+    },
+  });
+
+  assert.deepEqual(projected.activity, {
+    kind: 'provider', status: 'running', phase: 'providers',
+    startedAt: '2026-09-03T00:00:00.000Z', updatedAt: '2026-09-03T00:00:01.000Z',
+    finishedAt: null, progress: { done: 2, total: 5, unit: 'providers' },
+  });
+  assert.deepEqual(projected.capabilities, { plan: false, apply: false, undo: false });
+  assert.doesNotMatch(JSON.stringify(projected), /Users\/alice|codex plugin list/);
+});
+
 test('maintenance dashboard projection gives every durable receipt a human status, tone, and time meaning', () => {
   const updatedAt = '2026-09-03T00:04:00.000Z';
   const cases = [
@@ -288,6 +308,39 @@ test('dashboard Maintenance API keeps GET lazy and mutation paths exact', async 
   const unknownQuery = await request(server, '/api/maintenance?extra=scan', { origin: false, fetchSite: null });
   assert.deepEqual([unknownRefresh.status, duplicateRefresh.status, unknownQuery.status], [400, 400, 400]);
   assert.equal(service.calls.scan, 1, 'ambiguous scan queries never invoke maintenance scanning');
+});
+
+test('dashboard Maintenance reports provider activity and refuses action requests during a scan', async (t) => {
+  const service = fixtureService();
+  service.scanState = () => ({
+    kind: 'provider', status: 'running', phase: 'providers',
+    startedAt: '2026-09-03T00:00:00.000Z', updatedAt: '2026-09-03T00:00:01.000Z',
+    finishedAt: null, progress: { done: 1, total: 4, unit: 'providers' },
+  });
+  service.plan = async () => {
+    const error = new Error('Maintenance provider scan is in progress.');
+    error.code = 'MAINTENANCE_SCAN_IN_PROGRESS';
+    error.statusCode = 409;
+    throw error;
+  };
+  const server = await startDashboard({ port: 0, maintenance: service, usage: {} });
+  t.after(() => server.close());
+
+  const report = await request(server, '/api/maintenance', { origin: false, fetchSite: null });
+  assert.equal(report.status, 200);
+  const body = JSON.parse(report.body);
+  assert.equal(body.activity.status, 'running');
+  assert.deepEqual(body.activity.progress, { done: 1, total: 4, unit: 'providers' });
+  assert.deepEqual(body.capabilities, { plan: false, apply: false, undo: false });
+
+  const preview = await request(server, '/api/maintenance/plans', {
+    method: 'POST', body: { findingIds: ['finding-a'] },
+  });
+  assert.equal(preview.status, 409);
+  assert.deepEqual(JSON.parse(preview.body), {
+    error: 'maintenance provider check is in progress',
+    code: 'MAINTENANCE_SCAN_IN_PROGRESS', effect: 'not-started',
+  });
 });
 
 test('dashboard Maintenance capabilities bind preview, confirmation, apply and guarded undo', async (t) => {

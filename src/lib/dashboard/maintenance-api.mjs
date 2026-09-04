@@ -24,6 +24,8 @@ const OWNERSHIP = new Set(['receipt-owned', 'plugin-owned', 'user-owned', 'unkno
 const TRACKING = new Set(['tracked', 'untracked', 'unknown']);
 const WORKING_TREE = new Set(['clean', 'changed', 'unknown']);
 const CONSUMER_HOSTS = new Set(['claude', 'codex', 'opencode']);
+const ACTIVITY_STATUSES = new Set(['idle', 'running', 'complete', 'failed']);
+const ACTIVITY_PHASES = new Set(['idle', 'system', 'providers', 'persist', 'done', 'failed']);
 
 function text(value, max = 500) {
   return typeof value === 'string'
@@ -84,6 +86,24 @@ function publicConsumerHosts(value) {
   return {
     basis: 'catalog-presence', hosts, count,
     truncated: value.truncated === true || count > hosts.length || raw.length !== hosts.length,
+  };
+}
+
+function publicScanActivity(value) {
+  const activity = value && typeof value === 'object' ? value : {};
+  const status = ACTIVITY_STATUSES.has(activity.status) ? activity.status : 'idle';
+  const phase = ACTIVITY_PHASES.has(activity.phase) ? activity.phase : 'idle';
+  const progress = activity.progress && typeof activity.progress === 'object'
+    && Number.isFinite(activity.progress.done) && Number.isFinite(activity.progress.total)
+    && activity.progress.unit === 'providers'
+    ? {
+      done: Math.max(0, Math.round(activity.progress.done)),
+      total: Math.max(0, Math.round(activity.progress.total)), unit: 'providers',
+    } : null;
+  return {
+    kind: 'provider', status, phase,
+    startedAt: text(activity.startedAt, 40), updatedAt: text(activity.updatedAt, 40),
+    finishedAt: text(activity.finishedAt, 40), progress,
   };
 }
 
@@ -203,6 +223,13 @@ export function publicMaintenanceModel(model) {
   const findings = Array.isArray(value.findings) ? value.findings.slice(0, 5_000).map(publicFinding) : [];
   const receipts = Array.isArray(value.receipts) ? value.receipts.slice(0, 100).map(publicReceipt) : [];
   const suppliedSummary = picked(value.summary, SUMMARY_KEYS);
+  const activity = publicScanActivity(value.activity);
+  const capabilities = picked(value.capabilities, ['plan', 'apply', 'undo']);
+  if (activity.status === 'running') {
+    capabilities.plan = false;
+    capabilities.apply = false;
+    capabilities.undo = false;
+  }
   const incompleteSources = findings.filter((finding) => finding.evidence?.completeness !== 'complete').length;
   const unsupportedOrBlocked = suppliedSummary.unsupportedOrBlocked ?? suppliedSummary.blocked ?? 0;
   return {
@@ -210,7 +237,8 @@ export function publicMaintenanceModel(model) {
     scan: picked(value.scan, [
       'status', 'checkedAt', 'deep', 'coverage', 'providersChecked', 'providersComplete', 'providersTotal',
     ]),
-    capabilities: picked(value.capabilities, ['plan', 'apply', 'undo']),
+    activity,
+    capabilities,
     freshness: {
       ...picked(value.freshness, ['asOf', 'ageMs', 'status', 'completeness']),
       gaps: evidenceTextList(value.freshness?.gaps),
@@ -337,8 +365,16 @@ export function createMaintenanceDashboardApi({ service, sessionToken, now = Dat
   }
   const store = capabilities ?? createMaintenanceCapabilityStore({ now });
 
+  const withActivity = (model) => ({
+    ...model,
+    activity: typeof service.scanState === 'function' ? service.scanState() : null,
+  });
+
   async function report(_req, res, { refresh = false } = {}) {
-    try { sendJson(res, 200, publicMaintenanceModel(await (refresh ? service.scan() : service.report()))); }
+    try {
+      const model = await (refresh ? service.scan() : service.report());
+      sendJson(res, 200, publicMaintenanceModel(withActivity(model)));
+    }
     catch { sendJson(res, 503, { error: 'maintenance evidence unavailable' }); }
   }
 
@@ -440,6 +476,13 @@ export function createMaintenanceDashboardApi({ service, sessionToken, now = Dat
       else if (body.preview) await previewUndo(body, res);
       else await undo(body, res);
     } catch (error) {
+      if (error?.code === 'MAINTENANCE_SCAN_IN_PROGRESS') {
+        sendJson(res, 409, {
+          error: 'maintenance provider check is in progress',
+          code: 'MAINTENANCE_SCAN_IN_PROGRESS', effect: 'not-started',
+        });
+        return;
+      }
       const status = error?.statusCode ?? (error instanceof TypeError ? 400
         : (/capability|expired|plan|confirmation|undoable/.test(error?.message ?? '') ? 409 : 503));
       sendJson(res, status, {

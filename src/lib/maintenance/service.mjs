@@ -222,11 +222,30 @@ export function createMaintenanceService({
 } = {}) {
   const plansRoot = path.join(controlRoot, 'plans');
   const transactionsRoot = path.join(controlRoot, 'transactions');
+  let scanFlight = null;
+  let scanActivity = {
+    kind: 'provider', status: 'idle', phase: 'idle', startedAt: null,
+    updatedAt: null, finishedAt: null, progress: null,
+  };
+
+  const scanState = () => deepFreeze(structuredClone(scanActivity));
+  const markScan = (status, phase, extra = {}) => {
+    scanActivity = {
+      ...scanActivity, status, phase, updatedAt: new Date(now()).toISOString(), ...extra,
+    };
+  };
+  const scanConflict = () => {
+    const error = new Error('Maintenance provider scan is in progress.');
+    error.code = 'MAINTENANCE_SCAN_IN_PROGRESS';
+    error.statusCode = 409;
+    return error;
+  };
+  const assertScanIdle = () => { if (scanFlight) throw scanConflict(); };
 
   const resolveProviders = (footprint) => providers
     ?? createDefaultMaintenanceProviderRegistry({ ...providerOptions, footprint });
 
-  async function collect({ deep = false } = {}) {
+  async function collect({ deep = false, onProgress } = {}) {
     if (deep) {
       const refreshed = await collector.refreshDeep();
       if (refreshed?.ok !== true || refreshed?.persisted?.ok === false) {
@@ -236,7 +255,9 @@ export function createMaintenanceService({
     const footprint = await collector.read();
     const registry = resolveProviders(footprint);
     const base = buildMaintenanceReadModel({ footprint, now });
-    const projected = await projectProviderFindings({ providers: registry, footprint, model: base });
+    const projected = await projectProviderFindings({
+      providers: registry, footprint, model: base, onProgress,
+    });
     const receipts = await publicReceipts(transactionsRoot, registry, { fsImpl });
     const summary = { ...projected.summary, recentChanges: receipts.length };
     const model = deepFreeze({
@@ -252,22 +273,51 @@ export function createMaintenanceService({
     return { footprint, providers: registry, detections: projected.detections, model };
   }
 
-  async function scan({ deep = false } = {}) {
-    const collected = await collect({ deep });
-    const providersTotal = collected.providers.size;
-    const providersChecked = collected.detections.size;
-    const providersComplete = [...collected.detections.values()]
-      .filter((facts) => facts?.status === 'available' && facts.complete === true).length;
-    const model = deepFreeze({
-      ...collected.model,
-      scan: {
-        status: 'complete', checkedAt: new Date(now()).toISOString(), deep,
-        coverage: providersComplete === providersTotal ? 'complete' : 'partial',
-        providersChecked, providersComplete, providersTotal,
-      },
-    });
-    writeMaintenanceScan(controlRoot, model, { fsImpl });
-    return model;
+  async function runScan({ deep = false } = {}) {
+    const startedAt = new Date(now()).toISOString();
+    scanActivity = {
+      kind: 'provider', status: 'running', phase: deep ? 'system' : 'providers',
+      startedAt, updatedAt: startedAt, finishedAt: null, progress: null,
+    };
+    const onProgress = ({ phase, done, total, unit }) => {
+      markScan('running', phase, { progress: { done, total, unit } });
+    };
+    try {
+      const collected = await collect({ deep, onProgress });
+      const providersTotal = collected.providers.size;
+      const providersChecked = collected.detections.size;
+      const providersComplete = [...collected.detections.values()]
+        .filter((facts) => facts?.status === 'available' && facts.complete === true).length;
+      const model = deepFreeze({
+        ...collected.model,
+        scan: {
+          status: 'complete', checkedAt: new Date(now()).toISOString(), deep,
+          coverage: providersComplete === providersTotal ? 'complete' : 'partial',
+          providersChecked, providersComplete, providersTotal,
+        },
+      });
+      markScan('running', 'persist', {
+        progress: { done: providersChecked, total: providersTotal, unit: 'providers' },
+      });
+      writeMaintenanceScan(controlRoot, model, { fsImpl });
+      markScan('complete', 'done', {
+        finishedAt: new Date(now()).toISOString(),
+        progress: { done: providersChecked, total: providersTotal, unit: 'providers' },
+      });
+      return model;
+    } catch (error) {
+      markScan('failed', 'failed', {
+        finishedAt: new Date(now()).toISOString(), progress: scanActivity.progress,
+      });
+      throw error;
+    }
+  }
+
+  function scan(options = {}) {
+    if (scanFlight) return scanFlight;
+    const operation = runScan(options);
+    scanFlight = operation.finally(() => { scanFlight = null; });
+    return scanFlight;
   }
 
   async function report() {
@@ -279,6 +329,7 @@ export function createMaintenanceService({
     findingIds = null, safetyClass = null, project = null, deep = false,
     executable = false, persist = false, generatedAt = null,
   } = {}) {
+    assertScanIdle();
     const collected = await collect({ deep });
     const { model } = collected;
     const findings = exactFindings(model, { findingIds, safetyClass, project });
@@ -313,6 +364,7 @@ export function createMaintenanceService({
   async function apply({
     plan: suppliedPlan = null, planId = null, actionIds, expectedPlanDigest, confirmed = false,
   } = {}) {
+    assertScanIdle();
     if (confirmed !== true) throw new Error('Explicit confirmation is required for maintenance apply.');
     if (typeof expectedPlanDigest !== 'string' || !expectedPlanDigest) {
       throw new Error('Exact maintenance plan digest is required.');
@@ -351,6 +403,7 @@ export function createMaintenanceService({
 
   /** @param {any} input */
   async function prepareUndo({ receiptId } = {}) {
+    assertScanIdle();
     ensurePrivateMaintenanceRoot(controlRoot, { fsImpl });
     const providerRegistry = resolveProviders(await collector.read());
     let receipt;
@@ -388,6 +441,7 @@ export function createMaintenanceService({
 
   /** @param {any} input */
   async function undo({ receiptId, confirmed = false } = {}) {
+    assertScanIdle();
     if (confirmed !== true) throw new Error('Explicit confirmation is required for maintenance undo.');
     ensurePrivateMaintenanceRoot(controlRoot, { fsImpl });
     const providerRegistry = resolveProviders(await collector.read());
@@ -407,6 +461,7 @@ export function createMaintenanceService({
   /** Reconcile journal state without replaying an action or invoking undo.
    * @param {any} input */
   async function recover({ receiptId, confirmed = false } = {}) {
+    assertScanIdle();
     if (confirmed !== true) throw new Error('Explicit confirmation is required for maintenance recovery.');
     ensurePrivateMaintenanceRoot(controlRoot, { fsImpl });
     const providerRegistry = resolveProviders(await collector.read());
@@ -422,5 +477,8 @@ export function createMaintenanceService({
     return publicResult(result);
   }
 
-  return Object.freeze({ report, scan, plan, apply, prepareUndo, undo, recover });
+  return Object.freeze({
+    report, scan, scanState, isScanning: () => scanFlight !== null,
+    plan, apply, prepareUndo, undo, recover,
+  });
 }
