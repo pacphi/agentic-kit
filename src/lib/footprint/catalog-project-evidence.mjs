@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 
+/** @type {import('node:child_process').SpawnSyncOptionsWithStringEncoding} */
 const options = {
   encoding: 'utf8', timeout: 5_000, maxBuffer: 4 * 1024 * 1024,
   stdio: ['ignore', 'pipe', 'pipe'],

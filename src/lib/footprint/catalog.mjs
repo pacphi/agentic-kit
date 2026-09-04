@@ -412,7 +412,8 @@ function tallyCatalogPerHost(list, asOf, incompleteByHost) {
  *           cwd?: string, projects?: string[], cfg?: object, now?: () => number, walk?: Function,
  *           limits?: object, fsImpl?: typeof fs,
  *           inspectCodexPlugins?: Function, collectNativePlugins?: Function,
- *           nativePlugins?: object, includePluginSurfaces?: boolean }} [options]
+ *           nativePlugins?: object, includePluginSurfaces?: boolean,
+ *           inspectProjectArtifacts?: Function }} [options]
  * @returns {object} CatalogInventory
  */
 export function collectCatalog({
