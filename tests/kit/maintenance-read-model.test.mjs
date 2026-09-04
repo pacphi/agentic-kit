@@ -40,7 +40,9 @@ test('read model exposes the versioned read-only contract and five honest bucket
   assert.deepEqual(Object.keys(model.summary), [
     'updatesReady', 'safeCleanup', 'needsReview', 'unsupportedOrBlocked', 'recentChanges',
   ]);
-  assert.equal(model.summary.safeCleanup, 1);
+  assert.equal(model.summary.safeCleanup, 0,
+    'reproducible storage without an exact action provider is not safe cleanup authority');
+  assert.equal(model.summary.needsReview, 1);
   assert.deepEqual(model.receipts, []);
 });
 

@@ -103,6 +103,9 @@ const evidenceFirst = (noun) => ({
   blockedReason: 'Current evidence is incomplete or stale.',
 });
 
+/** @param {string} kind
+ * @param {{usableEvidence: boolean, safe: boolean,
+ *   basis?: {versionStale?: boolean, idle?: boolean, idleDays?: number|null}}} options */
 export function storageGuidance(kind, { usableEvidence, safe, basis = {} }) {
   if (!usableEvidence) return evidenceFirst(kind === 'stale-npx-env' ? 'npx environment' : 'storage item');
   if (kind === 'stale-npx-env' && basis.versionStale !== true) {

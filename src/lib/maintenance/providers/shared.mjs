@@ -105,7 +105,7 @@ export function providerFinding({
   providerId, providerVersion = 'v1', stableKey, state, bucket, classification, safetyClass,
   resource, versions = {}, ownership, evidence, impact, operation, label,
   rollback = 'irreversible', restart = 'unknown', executable = false,
-  recommendation, steps, preserved, blockedReason,
+  recommendation = null, steps = null, preserved = null, blockedReason = null,
 }) {
   const normalizedVersions = Object.fromEntries(VERSION_KEYS.map((key) => [key,
     typeof versions[key] === 'string' && versions[key] ? versions[key] : null]));
