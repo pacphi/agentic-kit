@@ -1,6 +1,6 @@
 # ADR-0047 — Streaming observation forest for deep scans
 
-- **Status:** Accepted
+- **Status:** Accepted; Projects pilot implemented
 - **Date:** 2026-09-03
 - **Deciders:** agentic-kit maintainers
 - **Related:** [issue #200](https://github.com/pacphi/agentic-kit/issues/200),
@@ -111,6 +111,18 @@ The forest must prove:
    reported separately;
 6. bounded memory measured alongside median, range, p95, CPU, and peak concurrency; and
 7. no regression in ADR-0046's same-corpus wall-time gate or dashboard responsiveness.
+
+### Projects pilot evidence
+
+The pilot in `src/lib/footprint/observation-forest.mjs` fuses working-tree, Stack/LOC, and dependency
+discovery for compatible default Project measurements. Custom walkers, detectors, and traversal
+callbacks retain independent acquisition. A degraded shared query falls back; a query that reaches
+its own deterministic cap keeps that exact partial result without rereading the same prefix.
+
+At candidate `ad09c30`, the three-run Projects phase examined 1,731,134 physical entries per run,
+down from 2,536,701 immediately before the pilot. The whole deep scan produced a 138,561.30 ms
+median versus ADR-0046's 210,203 ms reference. Later static cross-collector, asynchronous, native,
+and journal-backed phases remain unimplemented.
 
 ## References
 

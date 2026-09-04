@@ -1,6 +1,6 @@
 # ADR-0046 — Scan-local observation reuse and nonblocking deep scans
 
-- **Status:** Accepted
+- **Status:** Implemented
 - **Date:** 2026-09-03
 - **Deciders:** agentic-kit maintainers
 - **Related:** [issue #200](https://github.com/pacphi/agentic-kit/issues/200),
@@ -135,6 +135,25 @@ The implementation must prove:
 6. the representative fixture's walk and entry counts cannot regress silently; and
 7. the same-corpus median deep-scan time improves by at least 30 percent before this ADR becomes
    Implemented.
+
+### Implementation evidence
+
+The source-bound reference at `ec7eac8` and candidate at `ad09c30` were each measured three times on
+the same machine and corpus window with `pnpm benchmark:footprint --runs 3 --json`:
+
+| Evidence | Reference | Candidate | Change |
+|---|---:|---:|---:|
+| Median deep scan | 210,203 ms | 138,561.30 ms | **-34.08%** |
+| Three-run range | 210,185–210,721 ms | 137,647.47–139,552.83 ms | — |
+| Physical walker calls | 1,395 | 813 | **-41.72%** |
+| Physical entries examined | 9,599,521 | 5,284,198 | **-44.95%** |
+
+The candidate's three work counts were identical. Focused oracle tests compare complete, capped,
+degraded, callback-bearing, and unproven-walker paths against independent `walkTree()` results.
+Production deep scans run in the supervised worker; injected collectors retain the inline path.
+The 30 percent status gate is therefore satisfied without treating worker isolation as an I/O
+speedup. [ADR-0047](0047-streaming-observation-forest.md) records the accepted continuation beyond
+this implementation.
 
 ## References
 

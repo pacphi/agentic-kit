@@ -398,8 +398,9 @@ scan planner. Collectors will declare bounded `ObservationSpec`s before acquisit
 trie will route one physical entry to each compatible semantic reducer. Each virtual walk keeps its
 own caps, pruning, acceptance, and degradation state, so fusion reduces physical I/O without merging
 the questions collectors answer. The forest is ephemeral and streaming—not a persisted file index.
-Until that planner lands, `walkTree()` and the existing complete-observation fallbacks remain the
-authoritative implementation.
+The Projects pilot now fuses compatible working-tree, Stack/LOC, and dependency-discovery queries;
+custom or degraded contracts retain their independent fallback. `walkTree()` remains the executable
+oracle and the authoritative path for collectors not yet migrated.
 
 This is deep-tier work by construction — a 22 GB content-addressable cache is ~10⁵ files — and it
 carries its own raised walk caps (`CONSUMER_WALK_LIMITS`: depth 24, 2,000,000 entries) because
@@ -756,7 +757,7 @@ normative and this table restates it for readers of this document.
 | Consumer root | A ranked top-level storage root. Nested rows are `breakdown`s of it, plus a synthesized residual, so bytes are counted once |
 | Scan-local observation | Ephemeral evidence acquired once during one explicit scan and reused only when path, timestamp, completeness, and reader contract satisfy the receiving collector; never a cross-scan cache |
 | ObservationSpec | An accepted ADR-0047 declaration of one virtual walk's lexical root, contract version, budgets, pruning, accepted metadata, reducer, and scan timestamp |
-| Observation forest | The accepted scan-local planner that routes one physical traversal through a lexical trie to independent compatible ObservationSpecs; it streams bounded reducer state and is not yet the authoritative walker |
+| Observation forest | The scan-local planner that routes one physical traversal through a lexical trie to independent compatible ObservationSpecs and streams bounded reducer state; its Projects pilot is implemented while cross-collector planning remains accepted work |
 | Ever seen / on disk | `everSeen` is every project any host ever recorded a session in, deletions included; `onDisk` is the present candidate subset. Only candidates with a recorded host session and proven HTTPS destination enter the measured population |
 | Unresolved project | A transcript directory whose project path neither a declared `cwd` nor a filesystem-verified decode can name. Reported as such, never given a fabricated path; it makes `everSeen` a lower bound |
 | Stack detection | Per-project `languages` (which carry lines) and `stack` — frameworks, SDKs, tools — which carry presence only, plus the unrecognized tail of extensions and dependency names the registry could not name |
