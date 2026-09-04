@@ -317,7 +317,19 @@ export const SYSTEM_CSS = `
 .sy-pressure-action{display:grid; grid-template-columns:auto minmax(0,1fr); gap:12px; align-items:center; padding-top:10px}
 .sy-pressure-action>span{display:flex; flex-direction:column; color:var(--ink-2); white-space:nowrap}
 .sy-pressure-action small{color:var(--ink-dim); font-size:10px}
-.sy-pressure-action code{display:block; min-width:0; padding:7px 9px; border-radius:6px; background:var(--bg); color:var(--accent); overflow:auto; white-space:nowrap}
+.sy-pressure-command{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:stretch;min-width:0;border-radius:6px;background:var(--bg);overflow:hidden}
+.sy-pressure-command code{display:block;min-width:0;padding:7px 9px;color:var(--accent);overflow:auto;white-space:nowrap}
+.sy-copy-command{display:inline-flex;align-items:center;justify-content:center;width:34px;padding:5px;border:0;border-left:1px solid var(--line);background:transparent;color:var(--ink-2);cursor:pointer}
+.sy-copy-command:hover{color:var(--accent);background:var(--accent-soft)}
+.sy-copy-command:focus-visible{outline:2px solid var(--accent);outline-offset:-3px}
+.sy-copy-command[data-copy-busy="1"]{cursor:wait;opacity:.7}
+.sy-copy-command svg{width:15px;height:15px;stroke:currentColor;stroke-width:1.4;fill:none}
+.sy-copy-command[data-copy-state="copied"]{color:var(--ok)}
+.sy-copy-command[data-copy-state="failed"]{color:var(--fail)}
+.sy-copy-command[data-copy-state] svg{display:none}
+.sy-copy-command[data-copy-state]::after{font:700 14px/1 var(--sans)}
+.sy-copy-command[data-copy-state="copied"]::after{content:'✓'}
+.sy-copy-command[data-copy-state="failed"]::after{content:'!'}
 .sy-pressure-foot{margin-top:10px}
 @media(max-width:900px){
   .sy-pressure-overview{grid-template-columns:repeat(2,minmax(0,1fr))}

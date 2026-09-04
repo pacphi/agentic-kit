@@ -2353,6 +2353,79 @@ async function main() {
       !/current project/i.test(pressureText)
         && await page.$$('#sys-pressure .sy-current').then((els) => els.length) === 0,
       `pressure rendered an incidental launch-directory designation: ${JSON.stringify(pressureText)}`);
+    const copyControls = await page.$$('#sys-pressure [data-copy-command]');
+    const commandRows = await page.$$('#sys-pressure .sy-pressure-command code');
+    check('every project plan command has a named copy control',
+      copyControls.length === commandRows.length
+        && await page.$$eval('#sys-pressure [data-copy-command]', (buttons) => buttons.every((button) => (
+          button.tagName === 'BUTTON'
+            && button.type === 'button'
+            && /^Copy skill plan command for /.test(button.getAttribute('aria-label') || '')
+            && !!button.querySelector('svg[aria-hidden="true"]')
+        ))),
+      `found ${copyControls.length} copy controls for ${commandRows.length} project commands`);
+    const copyPlacement = await page.$eval(
+      '#sys-pressure details:first-of-type .sy-pressure-command', (row) => {
+        const button = row.querySelector('[data-copy-command]');
+        const rowBox = row.getBoundingClientRect();
+        const buttonBox = button.getBoundingClientRect();
+        return { width: buttonBox.width, rightGap: Math.abs(rowBox.right - buttonBox.right) };
+      },
+    );
+    check('the copy icon stays fixed at the far right of its command row',
+      Math.abs(copyPlacement.width - 34) < 1 && copyPlacement.rightGap < 1,
+      `copy placement was ${JSON.stringify(copyPlacement)}`);
+    await page.evaluate(() => {
+      globalThis.__akCopiedCommand = null;
+      globalThis.__akOriginalExecCommand = document.execCommand;
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText: (text) => { globalThis.__akCopiedCommand = String(text); return Promise.resolve(); } },
+      });
+    });
+    const firstPlanCommand = await page.$eval(
+      '#sys-pressure details:first-of-type .sy-pressure-command code', (code) => code.textContent,
+    );
+    const firstPlanProject = await page.$eval(
+      '#sys-pressure details:first-of-type [data-copy-command]', (button) => button.dataset.copyProject,
+    );
+    await page.click('#sys-pressure details:first-of-type [data-copy-command]');
+    await page.waitForFunction(() => /copied/i.test(
+      document.getElementById('sys-pressure-copy-status')?.textContent || '',
+    ));
+    const copiedPlan = await page.evaluate(() => globalThis.__akCopiedCommand);
+    const copySuccess = await page.$eval(
+      '#sys-pressure details:first-of-type [data-copy-command]', (button) => ({
+        state: button.getAttribute('data-copy-state'),
+        label: button.getAttribute('aria-label'),
+      }),
+    );
+    check('copy command writes exactly the displayed plan and confirms success',
+      copiedPlan === firstPlanCommand
+        && copySuccess.state === 'copied'
+        && copySuccess.label === `Copy skill plan command for ${firstPlanProject}, copied`,
+      `clipboard held ${JSON.stringify(copiedPlan)} instead of ${JSON.stringify(firstPlanCommand)}`);
+    await page.evaluate(() => {
+      navigator.clipboard.writeText = () => Promise.reject(new Error('permission denied'));
+      document.execCommand = () => false;
+    });
+    await page.focus('#sys-pressure details:first-of-type [data-copy-command]');
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => /could not copy/i.test(
+      document.getElementById('sys-pressure-copy-status')?.textContent || '',
+    ));
+    const copyFailure = await page.$eval(
+      '#sys-pressure details:first-of-type [data-copy-command]', (button) => ({
+        focused: document.activeElement === button,
+        state: button.getAttribute('data-copy-state'),
+        label: button.getAttribute('aria-label'),
+      }),
+    );
+    check('clipboard denial preserves focus and gives project-specific recovery',
+      copyFailure.focused && copyFailure.state === 'failed'
+        && copyFailure.label === `Copy skill plan command for ${firstPlanProject}, copy failed`,
+      `copy failure state was ${JSON.stringify(copyFailure)}`);
+    await page.evaluate(() => { document.execCommand = globalThis.__akOriginalExecCommand; });
     check('inventory completeness and host-owned context are separate, non-contradictory facts',
       /Inventory complete/.test(pressureText)
         && (pressureText.match(/Context inclusion is not reported by these hosts/g) || []).length === 1

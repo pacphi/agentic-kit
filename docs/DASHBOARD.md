@@ -513,7 +513,8 @@ An unchanged probe is not full content validation, and says so in the JSON evide
 The System measurement writes one file—its own Footprint snapshot—and mutates no user data. The
 provider check that the dashboard chains afterward belongs to Maintenance; a successful check
 replaces Maintenance's private saved report. Reclaimable-space rows remain advisory, with their
-rationale and their path. Catalog and Advisory have no action controls; provider-backed actions
+rationale and their path. Catalog and Advisory have no machine-mutating controls; Catalog offers
+copy buttons for its read-only project inspection commands, while provider-backed actions
 live only in Maintenance.
 
 ### Catalog evidence and project pressure

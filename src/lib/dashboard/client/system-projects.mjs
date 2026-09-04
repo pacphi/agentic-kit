@@ -444,7 +444,11 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
       +'<th scope="col">Plugin skills</th><th scope="col">Name overlaps</th><th scope="col">Matching entrypoints</th></tr></thead>'
       +'<tbody>'+rows+'</tbody></table></div>'
       +(command?'<div class="sy-pressure-action"><span><b>Inspect safely</b><small>Read-only plan; changes nothing.</small></span>'
-        +'<code>'+esc(command)+'</code></div>':"")+'</div></details>';
+        +'<div class="sy-pressure-command"><code>'+esc(command)+'</code>'
+        +'<button class="sy-copy-command" type="button" data-copy-command data-copy-project="'+esc(project.label)+'" '
+        +'aria-label="Copy skill plan command for '+esc(project.label)+'" title="Copy command">'
+        +'<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="5" y="5" width="8" height="8" rx="1.5"></rect>'
+        +'<path d="M3 10.5H2.5A1.5 1.5 0 0 1 1 9V2.5A1.5 1.5 0 0 1 2.5 1H9a1.5 1.5 0 0 1 1.5 1.5V3"></path></svg></button></div></div>':"")+'</div></details>';
   }
 
   function renderProjectPressure(c){
@@ -479,6 +483,7 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
       +'<b>Context inclusion is not reported by these hosts.</b>'
       +(omitted?' '+fmtNum(omitted)+' project'+(omitted===1?" has":"s have")+' no local skill contribution and '+(omitted===1?"is":"are")+' omitted.':"")+'</div>'
       +'<div class="sy-pressure-list" tabindex="0" aria-label="Projects with local skill pressure">'+html+'</div>'
+      +'<span class="sr-only" id="sys-pressure-copy-status" role="status" aria-live="polite" aria-atomic="true"></span>'
       +'<div class="sy-pressure-foot"><b>System measures; Maintenance acts.</b> Expand one project for source counts and its read-only plan command.</div>';
   }
 
@@ -967,6 +972,46 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     // without any client-side deadline to get wrong.
     systemPollTimer=setTimeout(function(){loadSystem();},3000);
   }
+
+  function legacyClipboardWrite(text){
+    return new Promise(function(resolve,reject){
+      var active=document.activeElement,field=document.createElement("textarea"),copied=false;
+      field.value=text;field.setAttribute("readonly","");
+      field.style.position="fixed";field.style.opacity="0";field.style.pointerEvents="none";
+      document.body.appendChild(field);field.select();
+      try{copied=document.execCommand("copy");}catch(e){copied=false;}
+      field.remove();
+      if(active&&typeof active.focus==="function")active.focus();
+      if(copied)resolve();else reject(new Error("clipboard unavailable"));
+    });
+  }
+
+  function clipboardWrite(text){
+    if(navigator.clipboard&&typeof navigator.clipboard.writeText==="function"){
+      try{return Promise.resolve(navigator.clipboard.writeText(text)).catch(function(){return legacyClipboardWrite(text);});}
+      catch(e){return legacyClipboardWrite(text);}
+    }
+    return legacyClipboardWrite(text);
+  }
+
+  function reportPressureCopy(button,ok){
+    var status=document.getElementById("sys-pressure-copy-status"),
+      project=button.getAttribute("data-copy-project")||"this project",
+      original=button.getAttribute("data-copy-label")||button.getAttribute("aria-label")||"Copy command";
+    button.setAttribute("data-copy-label",original);
+    button.setAttribute("data-copy-state",ok?"copied":"failed");
+    button.removeAttribute("data-copy-busy");
+    button.setAttribute("aria-label",original+(ok?", copied":", copy failed"));
+    button.title=ok?"Copied":"Copy failed; select the command and copy it manually";
+    if(status)status.textContent=ok?"Skill plan command for "+project+" copied to clipboard."
+      :"Could not copy the skill plan command for "+project+". Select it and copy manually.";
+    setTimeout(function(){
+      if(!button.isConnected)return;
+      button.removeAttribute("data-copy-state");
+      button.setAttribute("aria-label",original);button.title="Copy command";
+    },1800);
+  }
+
   export function wireSystem(){
     var btn=document.getElementById("sys-rescan");
     if(btn)btn.addEventListener("click",function(){
@@ -989,5 +1034,17 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
       // Flipping the scope re-measures; the panel keeps showing the previous
       // scan's figures, correctly labelled, until the new one lands.
       loadSystem(true,t.getAttribute("aria-pressed")!=="true");
+    });
+    var pressure=document.getElementById("sys-pressure");
+    if(pressure)pressure.addEventListener("click",function(e){
+      var copy=e.target.closest?e.target.closest("[data-copy-command]"):null;
+      if(!copy||!pressure.contains(copy)||copy.getAttribute("data-copy-busy")==="1")return;
+      var row=copy.closest(".sy-pressure-command"),code=row&&row.querySelector("code"),
+        command=code&&code.textContent||"";
+      if(!command)return;
+      var status=document.getElementById("sys-pressure-copy-status");
+      if(status)status.textContent="";
+      copy.setAttribute("data-copy-busy","1");
+      clipboardWrite(command).then(function(){reportPressureCopy(copy,true);},function(){reportPressureCopy(copy,false);});
     });
   }
