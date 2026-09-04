@@ -5,6 +5,18 @@ latest capability is *two* motions, not one: get the newer code, then turn the f
 This page exists because those two are easy to conflate — and `ak sync`, despite its name,
 only does the first.
 
+## 2026-09-03: System Projects snapshot v7
+
+The Projects section now deep-measures only repositories with both a recorded host session and a
+proven HTTPS web destination. The lifetime census still reports every project-like session path,
+and the payload names how many paths were excluded for no session attribution, a local-only or
+unrecognized remote, an insecure HTTP remote, or unreadable evidence. This prevents a session cwd
+such as the user home from triggering several hundred thousand unrelated filesystem observations.
+
+Because that population is narrower than the v6 measurement contract, the Footprint snapshot
+schema advances to v7. A v6 snapshot is reported as unreadable by this build until the next explicit
+**Full scan** or `ak system --deep`; it is never silently reinterpreted.
+
 ## 2026-09-03: System Catalog snapshot v6
 
 Catalog identity now preserves full plugin marketplace/version provenance and separates
