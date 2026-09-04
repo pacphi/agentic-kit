@@ -112,7 +112,13 @@ export async function runDeepScan(options) {
 
     phase('storage');
     publish('storage', collectors.storage({
-      projects: projectPaths, now: () => startedAt, fsImpl, ...(collectorOptions.storage ?? {}),
+      projects: projectPaths,
+      // Install owns the npx environment observation. Storage can reuse it
+      // only because both sections share this scan's exact timestamp and
+      // collector invocation; its validator falls back to a fresh walk for
+      // malformed, stale, or differently rooted evidence.
+      install: sections.install,
+      now: () => startedAt, fsImpl, ...(collectorOptions.storage ?? {}),
     }));
     await breathe();
 

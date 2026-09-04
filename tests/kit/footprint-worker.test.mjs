@@ -72,9 +72,15 @@ test('production composition keeps one worker-backed deep scan single-flight', a
 test('an injected collector graph remains inline and preserves partial sections', async () => {
   const calls = [];
   let persisted = 0;
+  const installSection = section('install');
   const collectors = {
-    install() { calls.push('install'); return section('install'); },
-    storage() { calls.push('storage'); return section('storage'); },
+    install() { calls.push('install'); return installSection; },
+    storage(options) {
+      calls.push('storage');
+      assert.strictEqual(options.install, installSection,
+        'Storage receives the exact Install observation from this scan');
+      return section('storage');
+    },
     catalog() { calls.push('catalog'); throw new Error('catalog refused'); },
     projects() { calls.push('projects'); return section('projects'); },
     consumers() { calls.push('consumers'); return section('consumers'); },

@@ -92,7 +92,9 @@ function runBenchmark({ trees }) {
   let cfg = {};
   try { cfg = loadKitConfig() ?? {}; } catch { cfg = {}; }
   const install = measure('install', () => collectInstall({ walk }));
-  const storage = measure('storage', () => collectStorage({ projects: projectPaths, walk }));
+  const storage = measure('storage', () => collectStorage({
+    projects: projectPaths, install, now: () => install.asOf, walk,
+  }));
   const catalog = measure('catalog', () => collectCatalog({
     cwd: process.cwd(), cfg, projects: projectPaths, walk,
   }));
@@ -176,4 +178,3 @@ else if (options) {
   if (options.json) console.log(JSON.stringify(result, null, 2));
   else printHuman(result);
 }
-
