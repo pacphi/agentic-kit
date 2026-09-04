@@ -7,6 +7,19 @@ const emptyReading = (status, reason = null) => ({
 });
 const MAX_CONFIGURED_SKILL_PATHS = 128;
 
+/** @typedef {{
+ *   id: string,
+ *   host: string,
+ *   kind: string,
+ *   scope: string,
+ *   project?: string|null,
+ *   sourceScope?: string,
+ *   sourceProject?: string|null,
+ *   path: string,
+ *   read: (path: string) => object,
+ *   discovery?: { mechanism: string, configuredBy: string, enabled?: boolean }
+ * }} CatalogSurfaceSpec */
+
 function configuredSkillPath(pathValue, configFile, homeDir) {
   if (typeof pathValue !== 'string' || !pathValue.trim()) return null;
   const value = pathValue.trim();
@@ -24,7 +37,9 @@ function configuredSkillPath(pathValue, configFile, homeDir) {
  * The configuration file itself is a measured surface so an unreadable or
  * JSONC-only layer becomes explicit partial evidence instead of silently
  * disappearing from the inventory. Network catalogs are not fetched by this
- * filesystem collector and therefore remain degraded evidence. */
+ * filesystem collector and therefore remain degraded evidence.
+ * @returns {CatalogSurfaceSpec[]}
+ */
 function configuredOpenCodeSkillSpecs({ configFile, id, scope, project = null, homeDir }, readers, io) {
   const { marker } = readers;
   const { fsImpl } = io;
@@ -50,7 +65,7 @@ function configuredOpenCodeSkillSpecs({ configFile, id, scope, project = null, h
   }
   const specs = [{
     id: `${id}:config`, host: 'opencode', kind: 'skill', scope, project,
-    path: configFile, read: () => reading,
+    path: configFile, read: (_path) => reading,
     discovery: { mechanism: 'configured-path-list', configuredBy: path.basename(configFile) },
   }];
   const configured = values.slice(0, MAX_CONFIGURED_SKILL_PATHS).map((value) => (
@@ -87,6 +102,7 @@ export function catalogSurfaceSpecs(roots, readers, io) {
   } = roots;
   const { marker, markdown, stems, manifest, toml } = readers;
   const at = (base, ...rest) => path.join(base, ...rest);
+  /** @type {CatalogSurfaceSpec[]} */
   const specs = [
     { id: 'claude-skills', host: 'claude', kind: 'skill', scope: 'user', path: at(claudeRoot, 'skills'), read: (p) => marker(p, 'SKILL.md', io) },
     { id: 'opencode-claude-skills', host: 'opencode', kind: 'skill', scope: 'user', path: at(claudeRoot, 'skills'), read: (p) => marker(p, 'SKILL.md', io),
