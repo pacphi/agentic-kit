@@ -57,6 +57,7 @@
     "lint:links": "lychee --config lychee.toml README.md CLAUDE.md AGENTS.md 'docs/**/*.md'",
     "lint:links:internal": "lychee --offline --config lychee.toml README.md CLAUDE.md AGENTS.md 'docs/**/*.md'",
     "build": "node scripts/build-check.mjs",
+    "benchmark:footprint": "node scripts/benchmark-footprint.mjs",
     "audit": "pnpm audit --audit-level=moderate",
     "audit:fix": "pnpm audit --fix=override",
     "outdated": "pnpm outdated",
