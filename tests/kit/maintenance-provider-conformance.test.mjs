@@ -178,13 +178,13 @@ test('native failures and malformed inventory fail closed without fabricating st
   assert.equal((await malformed.detect()).complete, false);
 });
 
-test('native runner always uses fixed argv with shell disabled and bounded capture', async () => {
+test('native runner uses asynchronous fixed argv with shell disabled and bounded capture', async () => {
   let invocation;
   const result = await runNativeCommand('claude', ['plugin', 'list', '--json'], {
     timeoutMs: 1234,
-    spawnSyncImpl(binary, args, options) {
+    execFileImpl(binary, args, options, callback) {
       invocation = { binary, args, options };
-      return { status: 0, stdout: '[]', stderr: '', signal: null };
+      setImmediate(() => callback(null, '[]', ''));
     },
   });
   assert.equal(result.ok, true);
@@ -194,4 +194,51 @@ test('native runner always uses fixed argv with shell disabled and bounded captu
   assert.deepEqual(invocation.args, ['plugin', 'list', '--json']);
   await assert.rejects(() => runNativeCommand('../shell', []), /binary/);
   await assert.rejects(() => runNativeCommand('claude', ['bad\0arg']), /arguments/);
+});
+
+test('native runner does not monopolize the event loop while a host command is pending', async () => {
+  let release;
+  const pending = runNativeCommand('codex', ['plugin', 'list', '--json'], {
+    execFileImpl(_binary, _args, _options, callback) {
+      release = () => callback(null, '{"plugins":[]}', '');
+    },
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(typeof release, 'function', 'the asynchronous child command was started');
+  release();
+  assert.equal((await pending).ok, true);
+});
+
+test('native runner reports timeout, abort, and non-zero exit without leaking unbounded output', async () => {
+  const timeout = await runNativeCommand('claude', ['plugin', 'list'], {
+    timeoutMs: 5,
+    execFileImpl(_binary, _args, _options, callback) {
+      setTimeout(() => callback(Object.assign(new Error('timed out'), { code: 'ETIMEDOUT', signal: 'SIGTERM' }), 'x', 'y'), 10);
+    },
+  });
+  assert.equal(timeout.ok, false);
+  assert.equal(timeout.timedOut, true);
+  assert.equal(timeout.signal, 'SIGTERM');
+
+  const controller = new AbortController();
+  controller.abort();
+  const aborted = await runNativeCommand('codex', ['mcp', 'list'], {
+    signal: controller.signal,
+    execFileImpl(_binary, _args, options, callback) {
+      assert.equal(options.signal, controller.signal);
+      callback(Object.assign(new Error('aborted'), { code: 'ABORT_ERR' }), '', '');
+    },
+  });
+  assert.equal(aborted.aborted, true);
+
+  const large = 'x'.repeat(300 * 1024);
+  const failed = await runNativeCommand('codex', ['plugin', 'list'], {
+    execFileImpl(_binary, _args, _options, callback) {
+      callback(Object.assign(new Error('failed'), { code: 2 }), large, large);
+    },
+  });
+  assert.equal(failed.exitCode, 2);
+  assert.equal(failed.stdout.length, 256 * 1024);
+  assert.equal(failed.stderr.length, 256 * 1024);
 });
