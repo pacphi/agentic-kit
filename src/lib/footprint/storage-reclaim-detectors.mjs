@@ -536,8 +536,42 @@ export function runtimeVersionReclaimables(ctx, roots) {
       }
       // One installed version is the toolchain working as intended, not sprawl.
       if (versions.length < 2) continue;
-      const { walked, capped, bytes, files } = measureMembers(versions, ctx, budget);
-      budget -= walked.length;
+      // Consumers has already measured the whole tool directory. A shallow
+      // listing proves whether that aggregate can answer the narrower question:
+      // ordinary version directories are the subject, symlink aliases counted
+      // in neither measurement, and direct metadata files can be subtracted by
+      // their exact lstat size. A hidden/non-version directory cannot be
+      // subtracted without another tree walk, so it forces the original path.
+      let directFileBytes = 0;
+      let directFileCount = 0;
+      let aggregateCompatible = true;
+      for (const entry of inner.entries) {
+        if (entry.isSymbolicLink() || (entry.isDirectory() && !entry.name.startsWith('.'))) continue;
+        if (!entry.isFile()) {
+          if (entry.isDirectory()) aggregateCompatible = false;
+          continue;
+        }
+        try {
+          const stat = ctx.fsImpl.lstatSync(path.join(dir, entry.name));
+          directFileBytes += stat.size;
+          directFileCount += 1;
+        } catch { aggregateCompatible = false; }
+      }
+      const aggregate = aggregateCompatible ? ctx.adopt?.(dir) : null;
+      const adopted = aggregate && aggregate.bytes.value >= directFileBytes
+        && aggregate.files.value >= directFileCount ? {
+          ...aggregate,
+          bytes: measured(aggregate.bytes.value - directFileBytes, { asOf: ctx.asOf }),
+          files: measured(aggregate.files.value - directFileCount, { asOf: ctx.asOf }),
+        } : null;
+      const measuredVersions = adopted ? {
+        walked: versions,
+        capped: false,
+        bytes: adopted.bytes,
+        files: adopted.files,
+      } : measureMembers(versions, ctx, budget);
+      const { walked, capped, bytes, files } = measuredVersions;
+      if (!adopted) budget -= walked.length;
       if (!worthListing(bytes)) continue;
       rows.push(candidate({
         id: `${root.id}:${tool.name}`,
@@ -557,6 +591,7 @@ export function runtimeVersionReclaimables(ctx, roots) {
           + `and any ${root.manager} config on this machine can pin any of them. Review with `
           + `\`${root.manager} ls ${tool.name}\` before removing anything.`,
         cleanupHint: root.cleanupHint,
+        measuredBy: adopted ? 'consumers' : 'storage',
       }));
     }
   }

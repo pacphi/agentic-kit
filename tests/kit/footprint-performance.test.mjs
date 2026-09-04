@@ -7,7 +7,10 @@ import path from 'node:path';
 import { collectConsumers } from '../../src/lib/footprint/consumers.mjs';
 import { npxEnvNodes } from '../../src/lib/footprint/install.mjs';
 import { collectProjects } from '../../src/lib/footprint/projects.mjs';
-import { collectStorage, STORAGE_DEFAULTS, worktreeReclaimables } from '../../src/lib/footprint/storage.mjs';
+import {
+  adoptedConsumerFigures, collectStorage, STORAGE_DEFAULTS, worktreeReclaimables,
+} from '../../src/lib/footprint/storage.mjs';
+import { runtimeVersionReclaimables } from '../../src/lib/footprint/storage-reclaim-detectors.mjs';
 import { measured, walkTree } from '../../src/lib/footprint/walk.mjs';
 
 function fixture(t, name) {
@@ -244,6 +247,57 @@ test('storage rejects npx evidence that is stale or not rooted at an immediate c
 
   assert.equal(fallbackWalks, 1, 'untrusted reuse evidence must fall back to a fresh bounded walk');
   assert.equal(result.reclaimables[0].path, env);
+});
+
+test('runtime review reuses a complete same-scan Consumers tool aggregate', (t) => {
+  const root = fixture(t, 'runtime-consumer-adoption');
+  const installs = path.join(root, 'installs');
+  const tool = path.join(installs, 'node');
+  const first = path.join(tool, '20.0.0');
+  const second = path.join(tool, '22.0.0');
+  fs.mkdirSync(first, { recursive: true });
+  fs.mkdirSync(second, { recursive: true });
+  fs.writeFileSync(path.join(first, 'node'), 'first');
+  fs.writeFileSync(path.join(second, 'node'), 'second');
+  fs.writeFileSync(path.join(tool, '.backend'), 'meta');
+  const asOf = 11;
+  const consumers = {
+    asOf,
+    rows: [{
+      path: tool,
+      residual: false,
+      presence: 'present',
+      complete: true,
+      bytes: measured(15, { asOf }),
+      files: measured(3, { asOf }),
+      newestMtimeMs: 10,
+    }],
+  };
+  let walks = 0;
+  const ctx = {
+    asOf,
+    opts: { maxFamilyWalks: 8, samplePaths: 4 },
+    walk(target, options) { walks += 1; return walkTree(target, options); },
+    limits: {},
+    fsImpl: fs,
+    adopt: adoptedConsumerFigures(consumers),
+  };
+  const roots = [{
+    id: 'mise-installs', kind: 'installed-runtime-versions', label: 'mise',
+    path: installs, manager: 'mise', cleanupHint: 'review',
+  }];
+
+  const adopted = runtimeVersionReclaimables(ctx, roots);
+  assert.equal(walks, 0);
+  assert.equal(adopted[0]?.bytes.value, 11);
+  assert.equal(adopted[0]?.files.value, 2);
+  assert.equal(adopted[0]?.measuredBy, 'consumers');
+
+  fs.mkdirSync(path.join(tool, '.metadata'), { recursive: true });
+  fs.writeFileSync(path.join(tool, '.metadata', 'state'), 'not part of a version');
+  const fallback = runtimeVersionReclaimables(ctx, roots);
+  assert.equal(walks, 2, 'a hidden directory makes the aggregate scope incompatible');
+  assert.equal(fallback[0]?.measuredBy, 'storage');
 });
 
 test('worktree review reuses a complete same-scan Project footprint', (t) => {

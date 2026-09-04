@@ -266,19 +266,25 @@ export function npxReclaimables({ asOf, opts, walk, limits, fsImpl, install = nu
  * Exact paths only: a consumers row for a glob FAMILY carries one total for the
  * whole family and cannot answer for an individual member.
  *
- * @param {{ rows?: any[] }|null} consumers a collectConsumers payload
+ * @param {{ asOf?: number, rows?: any[] }|null} consumers a collectConsumers payload
  * @returns {(target: string) => ({ presence: string, bytes: Measurement,
  *   files: Measurement, newestMtimeMs: number|null })|null}
  */
 export function adoptedConsumerFigures(consumers) {
   const index = new Map();
   for (const row of consumers?.rows ?? []) {
-    if (!row?.path || row.residual || row.presence !== 'present' || !hasValue(row.bytes)) continue;
+    const sameScan = Number.isFinite(consumers?.asOf)
+      && row?.bytes?.asOf === consumers.asOf
+      && row?.files?.asOf === consumers.asOf;
+    if (!row?.path || row.residual || row.presence !== 'present'
+      || row.complete !== true || row.bytes?.partial === true || row.files?.partial === true
+      || !hasValue(row.bytes) || !hasValue(row.files) || !sameScan) continue;
     index.set(pathKey(row.path), {
       presence: 'present',
       bytes: row.bytes,
-      files: row.files ?? unknown('file count not carried by the adopted figure'),
+      files: row.files,
       newestMtimeMs: row.newestMtimeMs ?? null,
+      complete: true,
     });
   }
   return (target) => (target ? index.get(pathKey(target)) ?? null : null);
