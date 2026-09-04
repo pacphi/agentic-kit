@@ -81,7 +81,9 @@ read not on this list is a defect, and adding one is an amendment to this docume
 | OpenCode's session store | `project-sources.mjs` | the `directory` column, read-only | every other column, and every message row |
 | A project's own manifests | `stack-detect.mjs` | dependency **keys** (and, for `path:`/`workspace:` entries, enough of the value to reject them) | manifest values, scripts, and anything executable |
 | A project's own source files | `stack-detect.mjs` | the count of `\n` bytes, and whether byte 0 of the first chunk region is NUL | the text — each 64 KB chunk is counted and immediately overwritten |
-| Skill/command entrypoints | `catalog.mjs` | SHA-256 of a regular, non-symlink file up to 1 MiB | descriptions or body text; only the digest leaves the read |
+| Capability entrypoints and bounded skill trees | `catalog.mjs`, `catalog-evidence.mjs` | SHA-256 of regular, non-symlink files; full skill definitions are capped at 512 entries, 1 MiB per file, and 8 MiB total | descriptions or body text; only metadata and digests leave the read |
+| MCP/config capability tables | `catalog-config-readers.mjs` | named JSON values or bounded TOML table blocks, normalized into value-only fingerprints | credentials and raw configuration text |
+| Project artifact Git state | `catalog-project-evidence.mjs` | tracked/untracked and clean/changed state for the exact artifacts already measured | history, commit content, diffs, and ownership claims |
 | Host-native plugin inventory | `claude plugin list --json`, `codex plugin list --json` | whitelisted identity, version, scope, enabled state, install/cache location, lifecycle policy | MCP definitions, headers, credentials, arbitrary source documents, unknown fields |
 
 Three of those rows are new since the first draft of this document, and they are the reason this
@@ -152,7 +154,8 @@ FootprintSnapshot  { asOf, completeness, install, runtime, storage, catalog, pro
                                                                              persisted)
   storage:   StorageBreakdown     { nodes: category → host → project → session, growth, topN,
                                     reclaimables[], reclaimSummary: { tiers[], combined: null } }
-  catalog:   CatalogInventory v2  { items[], occurrences, scopes, providers/versions, overlaps,
+  catalog:   CatalogInventory v3  { items[], occurrences, scopes, providers/versions,
+                                    entrypoint/full-definition evidence, relationships,
                                     project pressure, source stamps }
   projects:  ProjectFootprint[]   { path, label, remote?: {host, slug, webUrl}, stack: {languages,
                                     stack, unrecognized}, treeBytes, gitBytes, nodeModulesBytes,
@@ -418,22 +421,33 @@ promises less — never in the one that reads as free space.
 
 ### Catalog inventory
 
-`CatalogInventory v2` separates identity from relationship. Standalone artifacts still deduplicate
+`CatalogInventory v3` separates identity from relationship. Standalone artifacts still deduplicate
 by `(kind, normalized logical name)`, but a plugin contribution is keyed by kind, full
 `plugin@marketplace` producer identity, and logical name. Thus standalone `skill-creator` and
 `skill-creator@claude-plugins-official`'s contribution remain separate rows; explicit overlap
-groups report that their logical names or bounded entrypoint digests match.
+groups report that their logical names, bounded entrypoint digests, or complete bounded definitions
+match.
 
 Every occurrence retains host, surface, source scope (`user`, `project`, or `plugin`), project
 path, exact artifact path, plugin provider/version/enabled state, evidence authority, and bounded
-entrypoint digest status. Digest equality is evidence, not ownership: it says the entrypoint bytes
-match, not that supporting scripts/references match or that either copy is safe to delete.
+entrypoint and full-definition digest status. The full-definition digest covers all observed
+regular files and their relative paths, kinds, modes, sizes, and file digests within strict limits;
+any symlink, special file, unreadable node, or cap makes equality unknown. MCP registrations carry
+per-entry normalized configuration fingerprints without exporting raw values. Equality is
+evidence, not ownership: even a complete definition match does not prove which copy a host uses,
+that a registration is healthy, or that either copy is safe to delete.
 
 Scope is **user plus the launching repository plus every observed project still on disk**,
-including `~/.agents/skills`, project `.agents/skills`, and plugin
-`.codex-plugin/migrated-command-skills`. Native plugin inventory is authoritative when available;
-manifest/config/cache fallback stays visible as partial evidence. Installed-disabled plugins remain
-inventory rows but do not contribute enabled plugin capabilities.
+including supported Claude, Codex, and OpenCode project skills, agents, commands, and MCP
+configuration. Shared `.agents/skills` and plugin `.codex-plugin/migrated-command-skills` remain
+explicit sources. Native plugin inventory is authoritative when available; manifest/config/cache
+fallback stays visible as partial evidence. Installed-disabled plugins remain inventory rows but do
+not contribute enabled plugin capabilities.
+
+For project artifacts, Catalog batches Git observation over the exact files already measured. A
+relationship may therefore state that every current file is tracked and whether its working tree is
+clean or changed. This is workflow evidence only: Git tracking does not prove ownership or grant a
+collector authority to modify repository content.
 
 Project discovery does not confer project scope. A session may have used the user home as its cwd;
 in that case `<cwd>/.claude/*` and `<cwd>/.agents/skills` alias the declared user surfaces. Catalog
@@ -676,7 +690,8 @@ normative and this table restates it for readers of this document.
 | Unresolved project | A transcript directory whose project path neither a declared `cwd` nor a filesystem-verified decode can name. Reported as such, never given a fabricated path; it makes `everSeen` a lower bound |
 | Stack detection | Per-project `languages` (which carry lines) and `stack` — frameworks, SDKs, tools — which carry presence only, plus the unrecognized tail of extensions and dependency names the registry could not name |
 | CatalogItem | A canonical standalone or plugin-qualified identity with per-host/source occurrences and explicit name/digest relationships |
-| CatalogOccurrence | One host/source/project placement with provider/version/state, artifact path, and bounded digest evidence |
+| CatalogOccurrence | One host/source/project placement with provider/version/state, artifact path, bounded entrypoint/full-definition evidence, and optional Git state |
+| Definition digest | SHA-256 over one complete bounded observed capability definition; equality proves those files match, not host selection, ownership, usage, or removal safety |
 | ProjectCapabilityPressure | Project/user/plugin contributions and exact overlap per project and host; context inclusion remains unknown |
 | ProjectFootprint | One project's size facts: approximate LOC by language, tree/`.git`/`node_modules` bytes, last activity, and an optional git-remote web link ("local only" when absent) |
 | Deep scan | The explicit, user-triggered, single-flight full measurement pass that produces a FootprintSnapshot |

@@ -65,8 +65,30 @@ A finding is an evidence-backed condition, never an instruction. The closed stat
 - <code>unreadable-partial</code>.
 
 Every finding retains identity, owner, source, capture health, completeness, affected consumers,
-missing evidence, and a candidate next step. Missing provider authority leaves a finding visible
-but report-only.
+missing evidence, and a prescriptive suggested action. Missing provider authority leaves a finding
+visible but report-only.
+
+### CapabilityRelationship
+
+A relationship is typed evidence joining observed project and shared occurrences for the same host,
+kind, and logical name. Maintenance currently classifies four human decisions:
+
+- <code>redundant-project-override</code> — complete bounded definitions are equal;
+- <code>same-name-different-definition</code> — complete bounded definitions differ;
+- <code>tracked-source-copy</code> — equal definitions are project source tracked by Git; and
+- <code>legacy-equivalent-transport</code> — canonical and legacy MCP registrations have equal
+  observed transport configuration.
+
+Relationship members expose bounded, path-free source, scope, ownership, and tracking labels to the
+dashboard. Equality does not prove host selection, ownership, health, intent, or removal authority.
+All four classifications are report-only in the current service registry.
+
+### SuggestedAction
+
+Every finding carries a recommendation, ordered procedure, expected impact, preservation boundary,
+and a reason when automation is blocked. This is human guidance, not a provider operation. An
+action becomes previewable only when a registered provider independently proves ownership, exact
+targeting, verification, and rollback behavior.
 
 ### MaintenanceAction
 
@@ -118,10 +140,11 @@ Installed/effective version, compatible candidate, producer/plugin version, sour
 generation, content digest, and evidence health are independent. “Available” is not “latest”, and
 “latest” is not automatically “recommended”.
 
-An issue #198 entrypoint digest covers only one bounded capability entrypoint. It does not prove a
-complete tree, ownership, context loading, compatibility, or safe deletion. A full skill archive
-requires the stronger <code>agentic-kit.skill-tree-ownership/v1</code> receipt and exact current
-tree match.
+An issue #198 entrypoint digest covers only one bounded capability entrypoint. Catalog v3 also
+records a bounded full-definition digest over the observed regular files in a skill tree. Equality
+can support a relationship classification, but it still does not prove host selection, ownership,
+context loading, compatibility, or safe deletion. A full skill archive requires the stronger
+<code>agentic-kit.skill-tree-ownership/v1</code> receipt and exact current tree match.
 
 ## Policy
 
@@ -149,7 +172,7 @@ before confirmation.
 |--------|---------------------|--------------------------------|
 | Claude plugins | Disable with native enable as undo; update; remove while keeping plugin data | Update needs one exact host-reported candidate. Prune has no exact target set. Update/remove are irreversible. Restart is required. |
 | Codex plugins | Remove an exact removal finding | Per-plugin update/disable and ambiguous candidates remain report-only. Restart is required. |
-| Codex MCP | Remove an exact registration | No Claude or OpenCode MCP remover is registered. Registration never proves health or authorization. |
+| Codex MCP | Remove an exact user-scope registration | Project-scope findings remain report-only. No Claude or OpenCode MCP remover is registered. Registration never proves health or authorization. |
 | Claude MCP | None | No provider is registered; findings remain report-only. |
 | OpenCode plugins/MCP | None | Explicit unsupported providers explain the missing safe native adapter. |
 | Owned skills | A conditionally composed adapter supports archive/prune; its projected finding offers archive only | The stock CLI/dashboard has no production receipt/root resolver and therefore does not register this adapter. When explicitly composed, modified, partial, symlinked, special-file, ambiguous, unreadable, unreceipted, user-owned, and plugin-cache trees are preserved. |
@@ -201,9 +224,12 @@ no recovery endpoint; the operator uses the CLI.
 ## Surfaces
 
 The Maintenance view groups **Updates ready**, **Safe cleanup**, **Needs review**, **Unsupported or
-blocked**, and **Recent changes / Undo**. Each row explains identity, owner, reason, impact,
-dependencies, freshness, restart, rollback, and missing evidence. It acts on one finding at a time
-and offers neither “Clean all” nor an aggregate reclaimable claim across safety classes.
+blocked**, and **Recent changes / Undo**. Each ledger row exposes its recommendation. Selection
+reveals the complete procedure, expected effect, preserved resources, blocked-automation reason,
+and a bounded observed-copies table for relationship findings. Resource, host, relationship, and
+text filters compose. Failed reads remain visible with **Retry report**; they do not collapse into
+blank panels. The view acts on one finding at a time and offers neither “Clean all” nor an aggregate
+reclaimable claim across safety classes.
 
 The HTTP allowlist is exact:
 
@@ -234,7 +260,8 @@ CLI batches must share provider, operation, safety class, and rollback class.
 - Installed does not mean enabled, effective, or loaded into model context.
 - Registration does not mean configured, reachable, healthy, authenticated, or authorized.
 - A source timestamp or unchanged cheap probe does not prove nested content unchanged.
-- Equal names or entrypoint digests do not prove equal trees, ownership, or safe deletion.
+- Equal full-definition digests prove only equality of the bounded observed files; they do not prove
+  host selection, ownership, usage, intent, or safe deletion.
 - Age or absence from observed usage does not prove stale, orphaned, or unused.
 - A machine-wide count is not a project-specific context budget.
 - Catalog and Advisory remain read-only even though Maintenance shares the System shell.

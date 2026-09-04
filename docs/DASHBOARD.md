@@ -48,13 +48,13 @@ permanent.
 | Observability | Live | `#observability/live` | Observability · Live | Projects and roots with current presence or fresh meaningful activity |
 | Observability | History | `#observability/history` | Observability · History | Retained roots that are not currently Live |
 | System | Summary | `#system/summary` | Summary | Install size, retained data, live resource use, deployed inventory, and the machine's largest storage consumers in one glance |
-| System | Advisory | `#system/advisory` | Advisory | What could be reclaimed, in two safety tiers reported separately and never added — the only System area that suggests an action, and it still has no delete control |
+| System | Advisory | `#system/advisory` | Advisory | What could be reclaimed, in two safety tiers reported separately and never added — the only measurement area that suggests an action, and it still has no delete control |
 | System | Sessions | `#system/sessions` | Sessions | The largest individual session files, the project each belongs to, and its share of that host's retained bytes |
 | System | Storage | `#system/storage` | Storage | Where the retained bytes are, by category and host — learning stores counted separately because they dwarf everything else — plus per-series growth |
 | System | Runtime | `#system/runtime` | Runtime | Live host processes, their CPU and memory, background daemons, and machine denominators — refreshed on the header's poll clock while open |
-| System | Catalog | `#system/catalog` | Catalog | Summary-first project skill pressure with per-project host disclosure; standalone and plugin-qualified skills, agents, commands, plugins and MCP servers across user/project/plugin scope; provider/version and entrypoint-digest evidence; per-host matrix with kind/host/source filters |
+| System | Catalog | `#system/catalog` | Catalog | Summary-first project skill pressure with per-project host disclosure; standalone and plugin-qualified skills, agents, commands, plugins and MCP servers across user/project/plugin scope; provider/version, entrypoint/full-definition, and Git-state evidence; per-host matrix with kind/host/source filters |
 | System | Projects | `#system/projects` | Projects | Every repository with a remote that a host has recorded a session in — its approximate lines of code, language mix, total disk size and last activity. Worktrees, sub-folders and remote-less repositories are counted below the table, not listed |
-| System | Maintenance | `#system/maintenance` | Maintenance | Evidence-backed upgrade and cleanup findings, one-finding action previews, explicit confirmation, receipts, and guarded undo |
+| System | Maintenance | `#system/maintenance` | Maintenance | Evidence-backed upgrade, cleanup, and project/shared relationship findings; prescriptive suggested actions; one-finding previews; explicit confirmation; receipts; and guarded undo |
 
 About is one scrolling page, so its hashes scroll to a section rather than swapping panels; `#about`
 alone opens the page at the top.
@@ -500,9 +500,10 @@ controls; provider-backed actions live only in Maintenance.
 ### Catalog evidence and project pressure
 
 Catalog starts with a project-by-host pressure table. Project, user, and enabled-plugin
-contributions are separate columns; exact skill-name and bounded entrypoint-body overlaps are
-separate evidence. The table always says that context inclusion and cutoff are host-owned and
-unknown. Filesystem presence must not be read as “loaded into this session.”
+contributions are separate columns; exact skill-name, bounded entrypoint-body, and complete bounded
+definition relationships are separate evidence. The table always says that context inclusion and
+cutoff are host-owned and unknown. Filesystem presence must not be read as “loaded into this
+session.”
 
 A session cwd is only a discovery candidate; it does not confer project scope. If that cwd makes a
 candidate surface resolve to the same host, kind, and path as a user surface—for example,
@@ -511,9 +512,11 @@ project-pressure row is fabricated. One shared user surface carried by two hosts
 both hosts.
 
 The presence matrix can be filtered independently by kind, host, and source scope. Rows name their
-provider/version and body variants where known. Plugin inventory prefers the hosts' native list
-commands and labels manifest/config/cache fallback as partial; installed-disabled plugins stay in
-inventory without contributing enabled capabilities.
+provider/version and body variants where known. Catalog v3 also fingerprints complete bounded skill
+definitions and individual MCP configurations, covers supported project agent/command/MCP surfaces,
+and reports whether measured project artifacts are Git-tracked or changed. Plugin inventory prefers
+the hosts' native list commands and labels manifest/config/cache fallback as partial;
+installed-disabled plugins stay in inventory without contributing enabled capabilities.
 
 Catalog remains read-only. `ak x skills plan --project <path>` emits the corresponding
 receipt-aware classification, git state, affected paths, projected result, and stable plan ID; it
@@ -524,9 +527,16 @@ writes nothing. That preview is evidence for the separate
 
 Maintenance groups findings into **Updates ready**, **Safe cleanup**, **Needs review**,
 **Unsupported or blocked**, and **Recent changes / Undo**. Each row explains the resource owner,
-evidence health, impact, restart requirement, rollback class, and missing authority. A missing
-button means the current service did not advertise an executable provider action; the browser does
-not derive capabilities from labels.
+evidence health, impact, restart requirement, rollback class, and missing authority. Every ledger
+row shows its recommendation. Selecting it reveals the ordered procedure, expected effect,
+preservation boundary, reason automation is unavailable, and a bounded observed-copies table for
+relationship findings. Resource, host, relationship, and text filters compose. A missing button
+means the current service did not advertise an executable provider action; the browser does not
+derive capabilities from labels.
+
+If a Maintenance read fails, the panel keeps the error visible and offers **Retry report**. If
+browser storage is blocked, dashboard bootstrap retains the authenticated fragment token in page
+memory so real panels can still load rather than degrading into a blank gated page.
 
 Selecting one finding requests a fresh five-minute server-derived plan. The confirmation sheet
 shows the exact operation and consequences. Confirming consumes a session- and plan-bound one-use

@@ -62,7 +62,9 @@ Maintenance is the implemented human-guided control plane for upgrades, stale/un
 cleanup, lifecycle remediation, verification, guarded undo, recovery, and receipts.
 It consumes observed facts from Machine Footprint and ownership/lifecycle facts from Integration
 Management. It does not own those facts and cannot promote disk presence, age, digest equality, or
-a read-only plan into mutation authority.
+a read-only plan into mutation authority. It projects typed project/shared capability relationships
+into prescriptive suggested actions, but those procedures remain report-only until an ActionProvider
+proves an exact executable operation.
 
 Issue #198 delivered the read-only Catalog and preview seam. ADR-0044 implements the separate
 control-plane architecture as a secondary destination under System. Machine Footprint collectors,

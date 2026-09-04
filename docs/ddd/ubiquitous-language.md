@@ -171,7 +171,7 @@ is what a user selects.
 | Term | Meaning |
 |------|---------|
 | Footprint | The machine-resource cost of the toolchain: install bytes, runtime CPU/RSS, retained-data bytes, deployed inventory. The bounded context's name; the user-facing surface is called **System** |
-| FootprintSnapshot | The persisted result of a deep scan: `asOf`, completeness, and the four deep-tier section models (install, storage, catalog, projects) |
+| FootprintSnapshot | The persisted result of a deep scan: `asOf`, completeness, and the five deep-tier section models (install, storage, catalog, projects, consumers) |
 | Measurement | A value plus provenance: measured (with `asOf`), carried forward, or unknown-with-reason — unknown is never zero |
 | Partial measurement | A measured value known to be a lower bound because a contributing subtree was unreadable or capped; rendered as "≥ N", never as a total |
 | HostInstallation | One managed tool's install facts: version, install method, root, tree bytes, native addons |
@@ -181,10 +181,11 @@ is what a user selects.
 | RuntimeCensus | The ephemeral point-in-time table of live host processes, daemons, and machine denominators |
 | StorageNode | One node in the category → host → project → session breakdown: bytes + file count |
 | ReclaimableCandidate | An advisory row naming reclaimable space, its path, and its rationale — never an action |
-| CatalogItem | A canonical standalone or plugin-qualified capability identity with per-host/source occurrences; logical-name and entrypoint-digest overlap are relationships, not identity |
-| Catalog occurrence | One observed capability placement: host, source scope, project, artifact path, producer/version/state, digest status, and evidence authority |
+| CatalogItem | A canonical standalone or plugin-qualified capability identity with per-host/source occurrences; logical-name and digest overlap are relationships, not identity |
+| Catalog occurrence | One observed capability placement: host, source scope, project, artifact path, producer/version/state, entrypoint/full-definition evidence, optional Git state, and evidence authority |
 | Project capability pressure | Per-project/per-host inventory of project, user, and enabled-plugin contributions plus exact-name/entrypoint overlap; never a claim about host context inclusion |
 | Entrypoint digest | SHA-256 of one bounded regular capability entrypoint; equality proves only those bytes, not supporting files, ownership, safety, or context loading |
+| Definition digest | SHA-256 over one complete bounded observed capability definition; equality proves those files match, not host selection, ownership, usage, intent, or removal safety |
 | Skill maintenance preview | The implemented `ak x skills plan` content-derived classification and projected change set; read-only evidence for a human decision, not a MaintenancePlan or authorization to mutate |
 | ProjectFootprint | One project's size facts: approximate LOC by language, tree/`.git`/`node_modules` bytes, last activity, and an optional git-remote web link ("local only" when absent) |
 | Deep scan | The explicit, user-triggered, single-flight full measurement pass that produces a FootprintSnapshot |
@@ -203,6 +204,8 @@ These terms describe the implemented architecture in
 |------|---------|
 | Maintenance | The human-guided control-plane bounded context for evidence-backed lifecycle recommendations and provider-owned, verified, receipted actions; exposed beneath System without becoming part of Machine Footprint |
 | MaintenanceFinding | An evidence-backed resource condition with source, freshness, completeness, ownership, impact, and missing evidence; never itself an action |
+| CapabilityRelationship | Typed project/shared evidence classified as an identical project copy, different definition, tracked project copy, or equivalent legacy transport; a relationship does not confer mutation authority |
+| SuggestedAction | A finding's recommendation, ordered procedure, expected effect, preservation boundary, and automation-blocking reason; human guidance until a provider authorizes an executable action |
 | MaintenanceAction | One exact ActionProvider operation with target, projected result, safety class, rollback class, restart requirement, and verification contract |
 | MaintenancePlan | An immutable, short-lived selection of MaintenanceActions bound to exact source state, scope, safety class, expiry, and content-derived digest; evidence identity, not authorization |
 | ActionProvider | A resource-owner-specific lifecycle port that advertises only proven operations and implements detect, findings/actionFor, preflight, apply, verify, current-state inspection, and guarded undo where supported |

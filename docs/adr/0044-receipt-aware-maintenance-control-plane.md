@@ -3,7 +3,8 @@
 - **Status:** Implemented
 - **Date:** 2026-09-03
 - **Updated:** 2026-09-03 — issue #200 delivered the control plane, bounded providers, dashboard
-  action boundary, durable receipts, guarded undo, and fail-closed interruption recovery
+  action boundary, durable receipts, guarded undo, fail-closed interruption recovery, prescriptive
+  relationship findings, and resilient dashboard loading
 - **Deciders:** agentic-kit maintainers
 - **Related:** [issue #198](https://github.com/pacphi/agentic-kit/issues/198),
   [issue #200](https://github.com/pacphi/agentic-kit/issues/200),
@@ -33,17 +34,17 @@ Regression coverage is in:
 
 | Requirement | Verified result | Deliberate limit |
 |-------------|-----------------|------------------|
-| Separate standalone and plugin contributions | Catalog v2 keys plugin capabilities by kind, full plugin-at-marketplace producer, and logical name | Matching names do not prove ownership or equivalence |
+| Separate standalone and plugin contributions | Catalog v3 keys plugin capabilities by kind, full plugin-at-marketplace producer, and logical name | Matching names do not prove ownership or equivalence |
 | Preserve provider, version, and source scope | Occurrences retain host, surface, scope, project, path, producer/version/state, digest status, and evidence authority | Fallback evidence stays qualified |
-| Relate overlaps | Exact logical-name and bounded entrypoint-digest relationships are distinct from identity | Entrypoint equality does not prove equal trees |
+| Relate overlaps | Exact logical-name, bounded entrypoint-digest, and bounded full-definition relationships are distinct from identity | Definition equality does not prove host selection, ownership, or safe removal |
 | Explain project pressure | Project, user, and enabled-plugin contributions are separated by project and host | Presence does not prove model-context inclusion |
 | Surface source drift | Deep snapshots retain bounded source stamps and cheap probes report changed sources | An unchanged probe is not a full-tree freshness proof |
 | Provide a safe planning seam | <code>ak x skills plan --project PATH</code> previews without writes | Its content-derived ID is not mutation authority |
 | Keep the dashboard consumable | Catalog uses bounded lists and a separate full-width project-pressure disclosure | Catalog remains a measurement view |
 
 Maintenance applies a stricter rule: incomplete, drifted, symlinked, ambiguous, or otherwise
-unprovable evidence cannot authorize an action. The bounded entrypoint digest from issue #198 is
-relationship evidence, not a complete ownership receipt.
+unprovable evidence cannot authorize an action. The bounded full-definition digest can classify a
+relationship, but neither it nor the issue #198 entrypoint digest is a complete ownership receipt.
 
 ## Decision
 
@@ -85,6 +86,12 @@ decision.
   <code>stale-configuration</code>, <code>orphaned-cache</code>,
   <code>superseded-version</code>, <code>unsupported-incompatible</code>,
   <code>modified</code>, <code>ambiguous</code>, and <code>unreadable-partial</code>.
+- **CapabilityRelationship** joins project and shared occurrences for one host, resource kind, and
+  logical name. The implemented classifications are identical project copy, different definition,
+  tracked project copy, and equivalent legacy transport. All are report-only in this decision.
+- **SuggestedAction** is the recommendation, ordered procedure, expected impact, preservation
+  boundary, and automation-blocking reason presented for every finding. It is guidance until a
+  provider independently authorizes an executable action.
 - **MaintenanceAction** binds one provider operation and target identity to impact, safety class,
   rollback class, restart requirement, and verification contract.
 - **MaintenancePlan** is an immutable selection bound to evidence, source fingerprint, scope,
@@ -124,7 +131,7 @@ filesystem-atomic.
 |----------|-----------------------|--------------------|
 | Claude plugin | Native disable, enable as undo, update, and remove with preserved data | Update needs one exact host-reported candidate. Prune is unsupported. Update/remove are irreversible; all actions require restart. |
 | Codex plugin | Native remove for an exact removal finding | No per-plugin update or disable verb is invented. Version candidates and ambiguous rows remain report-only. Removal is irreversible and requires restart. |
-| Codex MCP | Native remove for an exact registration | Registration is not configuration, reachability, health, authentication, or authorization. Removal is irreversible and requires restart. |
+| Codex MCP | Native remove for an exact user-scope registration | Project-scope findings remain report-only. Registration is not configuration, reachability, health, authentication, or authorization. Removal is irreversible and requires restart. |
 | Claude MCP | None | No Claude MCP provider is registered; findings remain report-only. |
 | OpenCode plugin and MCP | None | Explicit unsupported providers keep these findings report-only. |
 | Agentic-kit-owned skill | The conditional adapter can archive or prune under one exact ownership contract; its projected finding offers archive only | This adapter is not in the stock CLI/dashboard registry because no production receipt/root resolver supplies it yet. When composed explicitly, it requires exact roots and an <code>agentic-kit.skill-tree-ownership/v1</code> receipt covering the complete current tree. Symlinked, modified, partial, unreadable, ambiguous, unreceipted, user-owned, and plugin-cache targets are preserved. Archive is reversible and requires restart. |
@@ -187,9 +194,13 @@ a body no larger than 64 KiB. The SSE query-token exception does not apply. The 
 recovery endpoint: it displays recovery-required evidence and directs the operator to the CLI.
 
 The view groups **Updates ready**, **Safe cleanup**, **Needs review**, **Unsupported or blocked**,
-and **Recent changes / Undo**. It acts on one finding at a time, offers no cross-class batch or
-“Clean all”, presents unknown evidence textually, and makes confirmation, progress, receipt, and
-undo flows keyboard-accessible.
+and **Recent changes / Undo**. Every row exposes a suggested action; the selected finding adds its
+ordered procedure, expected effect, preservation boundary, blocked-automation reason, and bounded
+observed-copy evidence. It acts on one finding at a time, offers no cross-class batch or “Clean
+all”, presents unknown evidence textually, and makes confirmation, progress, receipt, and undo
+flows keyboard-accessible. A failed read keeps a visible **Retry report** recovery path. Dashboard
+bootstrap retains its fragment token in page memory when browser storage is unavailable, preventing
+authenticated content from degrading into blank panels.
 
 ## CLI contract
 
@@ -213,6 +224,8 @@ and rollback class.
   rollback material, and raw provider diagnostics.
 - Some obvious-looking cleanup remains report-only when the host lacks a safe verb or evidence
   cannot authorize a change.
+- Full-definition equality, Git tracking, and configuration equality support decision guidance but
+  do not grant mutation authority.
 - Apply and undo perform a full deep System/Footprint refresh, not the originally proposed
   smallest-slice refresh.
 - Missing usage does not prove “unused”; age does not prove stale; registration does not prove

@@ -11,9 +11,10 @@
   Install observes AQE-owned Vibium and both payloads; daemon cleanup gains an opt-in,
   identity-proven Ruflo MCP orphan path; Catalog covers the launching repository plus observed
   on-disk projects and attributes Codex `.agents/skills` separately
-- **Updated:** 2026-09-03 — CatalogInventory v2 preserves plugin marketplace/version relationships,
-  separates user/project/plugin occurrences, hashes bounded capability entrypoints, reports
-  project pressure and source-probe drift, and feeds a read-only skill maintenance preview.
+- **Updated:** 2026-09-03 — CatalogInventory v3 preserves plugin marketplace/version relationships,
+  separates user/project/plugin occurrences, hashes bounded capability entrypoints and complete
+  bounded skill definitions, reports project pressure and source-probe drift, and feeds read-only
+  relationship evidence to Maintenance.
 - **Updated:** 2026-09-03 — the Catalog leads with the host profile and a five-record cross-host
   viewport, then gives Project skill pressure a full-width row; pressure groups one disclosure per
   relevant project, keeps the launching project first, omits measured-zero project rows, and moves
@@ -25,6 +26,10 @@
   project occurrence: one host/kind/path cannot be both user and project scope, while a shared
   user root carried by different hosts remains explicit cross-host evidence. The FootprintSnapshot
   schema advances to v3 so cached v2 scope aliases cannot be replayed.
+- **Updated:** 2026-09-03 — project inventory expands to supported agent, command, skill, and MCP
+  surfaces across Claude, Codex, and OpenCode; Git tracking is observed without becoming ownership.
+  CatalogInventory advances to v3 and FootprintSnapshot to v4 so older evidence cannot be replayed
+  as complete relationship evidence.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0005](0005-dashboard-in-page-routing-reveal.md),
   [ADR-0007](0007-maintainer-admin-local-telemetry.md),
@@ -39,7 +44,9 @@
 > standalone skill and a plugin-contributed skill with the same logical name are distinct catalog
 > identities joined by explicit exact-name and exact-entrypoint-digest relationships. Full
 > `plugin@marketplace` identity, installed version, enabled state, scope, and evidence authority are
-> retained per host occurrence. The deep snapshot schema advances to v2 so old flattened identities
+> retained per host occurrence. Catalog v3 adds a bounded full-definition digest for skill trees,
+> per-entry MCP configuration fingerprints, broader project agent/command/MCP surfaces, and Git
+> tracking evidence. The deep snapshot schema is now v4 so old flattened or incomplete identities
 > cannot render as current. Machine Footprint and its System measurement views remain read-only;
 > `ak x skills plan` classifies and previews, while [Maintenance](../ddd/maintenance.md) owns
 > mutation and receipts.
@@ -222,8 +229,9 @@ Metrics marked ✚ are additions beyond the requesting examples; the taxonomy is
 | Storage | Trailing-30d growth per host (from mtime + size) ✚ | walk metadata |
 | Storage | Advisory reclaimable candidates (stale npx envs, aged transcripts, superseded cache snapshots, regenerable package caches, redundant browser revisions, extra runtime versions, orphaned worktrees), each with a `safety` tier ✚ | walk + heuristics |
 | Storage | Ranked largest consumers across ~50 curated third-party cache roots, grouped by ecosystem, with containment/residual accounting ✚ | consumer registry + walk |
-| Catalog | Unique skills / agents / commands across hosts, per-host presence matrix, including project `.claude/skills` and Codex `.agents/skills` | host catalog surfaces |
-| Catalog | Plugins and registered MCP servers ✚ | settings surfaces |
+| Catalog | Unique skills / agents / commands across hosts, per-host presence matrix, including supported Claude, Codex, and OpenCode user/project surfaces | host catalog surfaces |
+| Catalog | Plugins and registered MCP servers, with bounded per-registration configuration fingerprints ✚ | settings surfaces |
+| Catalog | Bounded skill entrypoint/full-definition digests and project Git-tracking evidence for relationship classification ✚ | filesystem + Git observation |
 | Catalog | Config surface: managed CLAUDE.md/AGENTS.md block count, settings file sizes ✚ | managed-blocks registry |
 | Projects | Projects **ever seen** across hosts and the **on-disk** subset ✚; per on-disk project: LOC by language, detected frameworks/SDKs/tools by presence ✚, the unrecognized extension/dependency tail ✚, working-tree bytes, `.git` bytes ✚, `node_modules` bytes ✚, last activity | own cross-host discovery + walk |
 | Projects | Git remote web link per project (origin URL → GitHub/GitLab/etc. page; "local only" when absent) ✚ | `.git/config` remote parse — the admin collector's `parseRepoSlug` shapes, reused |

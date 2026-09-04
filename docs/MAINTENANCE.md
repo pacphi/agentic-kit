@@ -30,6 +30,27 @@ The view and CLI group findings as:
 These groups do not form a hygiene score. Reclaimable amounts from unlike safety classes are not
 added, and there is no “Clean all”.
 
+## Follow the suggested action
+
+Every finding states a recommendation, the expected effect, a concrete procedure, what the
+procedure preserves, and—when no button is offered—why Agentic Kit cannot safely automate it.
+The ledger shows the recommendation without requiring selection; selecting the row reveals the
+complete procedure and the observed copies used to classify relationship findings.
+
+Project/shared relationships currently remain report-only:
+
+| Finding | Suggested action |
+|---------|------------------|
+| Identical project copy | Confirm the shared source is available to the project, back up or commit the project copy, remove only that project copy, and deep-rescan. |
+| Different definitions | Compare the complete definitions, choose the intended source of truth, then remove the unintended copy or rename the project copy when both behaviors are required. |
+| Tracked project copy | Make the removal through the repository's normal branch, test, review, and pull-request workflow, then deep-rescan before merging. |
+| Equivalent legacy transport | Prove the canonical registration is healthy at an equal or broader scope, use the host-native MCP workflow to remove only the legacy registration, restart if required, and deep-rescan. |
+
+These are procedures, not generic delete commands. Definition equality does not prove which source
+a host loads, Git tracking does not confer mutation authority, and equivalent configuration does
+not prove transport health. Maintenance offers **Preview change** only when the live provider can
+prove ownership, exact targeting, verification, and recovery behavior.
+
 ## Preview before applying
 
 An ordinary plan is read-only:
@@ -125,7 +146,7 @@ The dashboard displays recovery-required receipts but deliberately has no recove
 |----------------|---------|------------------|
 | Claude plugin CLI | Disable, update, and remove with data preserved; disable can be undone with native enable | Update needs one exact reported candidate. Prune is unsupported. Update/remove are irreversible. Restart required. |
 | Codex plugin CLI | Remove an exact removal candidate | No per-plugin update or disable. Ambiguous version candidates stay report-only. Restart required. |
-| Codex MCP CLI | Remove an exact registration | No claim about server health or authorization. Irreversible; restart required. |
+| Codex MCP CLI | Remove an exact user-scope registration | Project-scope findings remain report-only. No claim about server health or authorization. Irreversible; restart required. |
 | Claude MCP | None | No provider is registered; findings remain report-only. |
 | OpenCode plugin/MCP | None | No verified native Maintenance adapter; findings remain report-only. |
 | Agentic-kit-owned skill | Conditional adapter: archive/prune; its own projected finding offers archive only | The stock CLI/dashboard does not yet supply a production receipt/root resolver, so it does not register this adapter. Explicit compositions require a complete current tree receipt and exact root; plugin caches, changed trees, symlinks, special files, and unreceipted trees are preserved. |
@@ -139,9 +160,10 @@ correct result.
 
 ## Skill ownership is stricter than Catalog identity
 
-Catalog can relate a standalone skill and a plugin-contributed skill by exact name or bounded
-entrypoint digest. That helps a person understand overlap, but it does not prove that either tree is
-owned, equivalent, unused, or removable.
+Catalog can relate a standalone skill and a plugin-contributed skill by exact name, bounded
+entrypoint digest, or bounded full-definition digest. Full-definition equality includes the
+observed regular files in the bounded skill tree; it still does not prove which copy the host uses,
+that either tree is owned, unused, or safely removable.
 
 An owned skill action requires an <code>agentic-kit.skill-tree-ownership/v1</code> receipt that
 binds the complete recursive regular-file manifest, including <code>SKILL.md</code>, and matches
@@ -205,6 +227,10 @@ The plan and undo-preview responses mint different verb-bound capabilities. They
 between sessions, verbs, plans, or receipts, and consumption occurs before asynchronous provider
 work.
 
+If a Maintenance read fails, the panel keeps the failure visible and offers **Retry report** rather
+than rendering an empty workbench. The fragment token is also retained in page memory when browser
+storage is blocked, so authenticated panels can still finish bootstrap.
+
 ## What Maintenance does not claim
 
 - “Available” is not “latest” or “recommended”.
@@ -212,7 +238,8 @@ work.
 - Registered is not configured, reachable, healthy, authenticated, or authorized.
 - Missing usage does not prove unused.
 - Age or cache location does not prove stale or reproducible.
-- An entrypoint digest does not prove a complete tree or ownership.
+- A full-definition digest proves only equality of the bounded observed files. It does not prove
+  host selection, ownership, usage, or safe deletion.
 - A receipt makes non-atomic provider effects visible; it does not make them atomic.
 - Recovery reconciles provable current state; it does not finish an interrupted operation.
 
