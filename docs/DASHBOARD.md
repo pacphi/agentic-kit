@@ -49,7 +49,7 @@ permanent.
 | Observability | History | `#observability/history` | Observability · History | Retained roots that are not currently Live |
 | System | Summary | `#system/summary` | Summary | Install size, retained data, live resource use, deployed inventory, and the machine's largest storage consumers in one glance |
 | System | Advisory | `#system/advisory` | Advisory | What could be reclaimed, in two safety tiers reported separately and never added — the only measurement area that suggests an action, and it still has no delete control |
-| System | Sessions | `#system/sessions` | Sessions | The largest individual session files, the project each belongs to, and its share of that host's retained bytes |
+| System | Sessions | `#system/sessions` | Sessions | The largest retained sessions, with a localized two-line native identity, working context, and share of that host's retained bytes |
 | System | Storage | `#system/storage` | Storage | Where the retained bytes are, by category and host — learning stores counted separately because they dwarf everything else — plus per-series growth |
 | System | Runtime | `#system/runtime` | Runtime | Live host processes, their CPU and memory, background daemons, and machine denominators — refreshed on the header's poll clock while open |
 | System | Catalog | `#system/catalog` | Catalog | Summary-first project skill pressure with per-project host disclosure; standalone and plugin-qualified skills, agents, commands, plugins and MCP servers across user/project/plugin scope; provider/version, entrypoint/full-definition, and Git-state evidence; per-host matrix with kind/host/source filters |
@@ -503,6 +503,20 @@ Measurement views fetch once, then again only while a scan you started is runnin
 refreshes its saved read model on the header poll clock while open; that poll does not check host
 providers or versions and does not execute an action. Use **Check providers** inside Maintenance
 for that narrower check.
+
+### Session identity and local time
+
+Each **Largest sessions** identity is one link to the retained transcript. Its first line is the
+host-declared opening instant in the browser's locale and timezone; its second line is a shortened
+opaque host-native ID. Hover or keyboard focus reveals the original storage filename, full native
+ID, seconds, and timezone, while the machine-readable instant remains in a `<time datetime>`
+element. Claude's earliest timestamp is labeled **First recorded** because it is not a proven
+start. When no declared instant exists, measured file mtime is labeled **Last active** rather than
+presented as a session start. OpenCode remains unlinked until its shared SQLite store can supply a
+byte-attributable retained-session row.
+
+The dashboard-wide semantic and formatting audit is recorded in
+[Date and time presentation](DATE-TIME-PRESENTATION.md).
 
 The trade is stated rather than hidden. Deep-tier figures always render with when they were
 measured, and once a snapshot passes seven days the freshness label turns amber and reads

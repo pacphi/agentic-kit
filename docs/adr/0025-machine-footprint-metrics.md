@@ -30,6 +30,10 @@
   apps, host state, user home, system root, and ordinary folders instead of calling every readable
   working directory a project. Storage reads only the already-ranked top-N transcript heads to
   attribute dated Codex rollouts from their `cwd` metadata.
+- **Updated:** 2026-09-04 — that same bounded top-N head read now also retains the host's opaque
+  native session ID and timezone-bearing opening timestamp. Sessions presents a localized
+  two-line identity, exposes the original filename and exact time on focus or hover, and labels
+  file mtime fallback as last activity rather than a fabricated start.
 - **Updated:** 2026-09-03 — project inventory expands to supported agent, command, skill, and MCP
   surfaces across Claude, Codex, and OpenCode; Git tracking is observed without becoming ownership.
   CatalogInventory advances to v3 and FootprintSnapshot to v4 so older evidence cannot be replayed
@@ -239,7 +243,7 @@ Metrics marked ✚ are additions beyond the requesting examples; the taxonomy is
 | Storage | Host ledgers/logs: Codex `state_N.sqlite`, statusline tee, runtime-debug log, OpenCode store | known paths |
 | Storage | Learning/memory stores: per-project `.claude-flow`, `.agentic-qe`, agentdb/HNSW/RVF files ✚ | project catalog + walk |
 | Storage | ak's own caches: usage-index.json, observability-workspaces.json, footprint snapshot itself ✚ | known paths |
-| Storage | Top-N largest sessions / files, with working context from only those transcript heads ✚ | walk + bounded `cwd` metadata read |
+| Storage | Top-N largest sessions / files, with working context and native identity from only those transcript heads ✚ | walk + one bounded opening-metadata read |
 | Storage | Trailing-30d growth per host (from mtime + size) ✚ | walk metadata |
 | Storage | Advisory reclaimable candidates (stale npx envs, aged transcripts, superseded cache snapshots, regenerable package caches, redundant browser revisions, extra runtime versions, orphaned worktrees), each with a `safety` tier ✚ | walk + heuristics |
 | Storage | Ranked largest consumers across ~50 curated third-party cache roots, grouped by ecosystem, with containment/residual accounting ✚ | consumer registry + walk |
@@ -324,18 +328,23 @@ taken from it:
 | Directory entries, `lstat` | name, kind, size, mtime, blocks | anything inside a file |
 | `.git/config` | the origin remote URL | every other key |
 | `.git/worktrees/<name>/gitdir` | one path, bounded to 4 KB | — |
-| A transcript's head (≤256 KB, ≤40 parsed lines) | the session's `cwd` **field** | every message, prompt, tool call, tool result and model output |
+| A transcript's head (≤256 KB, ≤40 parsed lines) | opening `cwd`, opaque native session ID, and timezone-bearing timestamp fields | every message, prompt, generated title, tool call, tool result and model output |
 | OpenCode's session store (read-only) | the `directory` column | every other column and every message row |
 | A project's own manifests (≤3 deep, ≤64 files, ≤512 KB each) | dependency **keys** | values, scripts, anything executable — nothing is evaluated or resolved |
 | A project's own source files | the count of `\n` bytes | the text: each 64 KB chunk is counted and overwritten |
 
-Each of those yields a path, a name, or an integer. **No message body, prompt, tool call, tool
-result, model output, or manifest value enters this domain, in any tier, on any path.**
+Each of those yields a path, an opaque identifier, an instant, a name, or an integer. **No message
+body, prompt, generated title, tool call, tool result, model output, or manifest value enters this
+domain, in any tier, on any path.**
 
-Three of the rows are justifications rather than mere disclosures. The transcript `cwd` read is
-the *only* honest way to know which project a session belonged to — the alternative is decoding
+Three of the rows are justifications rather than mere disclosures. The transcript opening-metadata
+read is the *only* honest way to know which project a session belonged to and which host-native
+identity and start evidence it declared — the alternatives are decoding
 Claude's transcript-directory name, which is a lossy encoding that a naive decode gets wrong for
-85% of directories on a real corpus (§9). It is also the same read
+85% of directories on a real corpus (§9), or parsing a host-specific filename as if it were a
+stable public schema. Codex accepts only the first `session_meta`; Claude reports its first
+timezone-bearing event as **first recorded**, not necessarily started. A missing declared instant
+falls back to measured file mtime labeled **last active**. It is also the same read
 `native-transcript-discovery.mjs` already performs for Observability at the same trust boundary,
 and it is *discovery*, which supplies a candidate path and never a measurement. The manifest read
 is the same class of datum as `.git/config`'s remote: a bounded read of a declaration file, for

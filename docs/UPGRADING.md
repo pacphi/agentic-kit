@@ -5,6 +5,20 @@ latest capability is *two* motions, not one: get the newer code, then turn the f
 This page exists because those two are easy to conflate — and `ak sync`, despite its name,
 only does the first.
 
+## 2026-09-04: Human session identity in System
+
+`storage.topSessions[]` now carries an additive `identity` object with the original storage name,
+host-native ID when declared, declared opening instant when available, measured file mtime, the
+time basis, and per-field provenance. One bounded transcript-head read supplies identity and
+working context for the already-ranked top-N rows; it does not read prompts, titles, or messages.
+
+System > Sessions renders the identity as one two-line transcript link: localized date/time first,
+then a shortened opaque native ID. Focus or hover discloses the original filename, full native ID,
+and detailed localized time with timezone. If an older snapshot or host has no declared opening
+instant, the measured mtime is explicitly labeled **Last active**. Run **Full scan** or
+`ak system --deep` to populate native identity for an existing snapshot; no configuration or
+payload migration is required.
+
 ## 2026-09-03: System Projects snapshot v7
 
 The Projects section now deep-measures only repositories with both a recorded host session and a

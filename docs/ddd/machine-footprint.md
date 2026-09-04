@@ -77,7 +77,7 @@ read not on this list is a defect, and adding one is an amendment to this docume
 | Directory entries and `lstat` | `walk.mjs`, every collector | name, kind, size, mtime, block count | anything inside a file |
 | `.git/config` | `projects.mjs` | the origin remote URL | every other config key |
 | `.git/worktrees/<name>/gitdir` | `storage-reclaim-detectors.mjs` (re-exported from `storage.mjs`) | one filesystem path, bounded to 4 KB | — |
-| A transcript's **head** | `project-sources.mjs`, consumed by project discovery and top-N session attribution | the session's `cwd` **field** | every message, prompt, tool call, tool result and model output in the file |
+| A transcript's **head** | `project-sources.mjs`, consumed by project discovery and top-N session attribution | opening `cwd`, native session ID, and timezone-bearing timestamp fields | every message, prompt, title, tool call, tool result and model output in the file |
 | OpenCode's session store | `project-sources.mjs` | the `directory` column, read-only | every other column, and every message row |
 | A project's own manifests | `stack-detect.mjs` | dependency **keys** (and, for `path:`/`workspace:` entries, enough of the value to reject them) | manifest values, scripts, and anything executable |
 | A project's own source files | `stack-detect.mjs` | the count of `\n` bytes, and whether byte 0 of the first chunk region is NUL | the text — each 64 KB chunk is counted and immediately overwritten |
@@ -89,21 +89,28 @@ read not on this list is a defect, and adding one is an amendment to this docume
 Three of those rows are new since the first draft of this document, and they are the reason this
 section exists rather than a one-line invariant.
 
-**A transcript's `cwd` is a path, not content.** Project discovery opens each Claude and Codex
+**A transcript's opening metadata is identity, not content.** Project discovery opens each Claude and Codex
 transcript, reads at most its first 256 KB, JSON-parses at most its leading 40 non-blank lines,
-and takes exactly one field: `record.cwd` (Claude) or `record.payload.cwd` on the `session_meta` /
-`turn_context` records that open a rollout (Codex). The parsed records are discarded at the end of
-the loop; nothing but the path string survives the function. This is the same read
+and takes only declared opening fields: Claude's `cwd`, `sessionId`, and first timezone-bearing
+`timestamp`; or Codex's `payload.cwd` on `session_meta` / `turn_context` plus the first
+`session_meta` record's `payload.id` and timezone-bearing timestamp. Codex latches that first
+`session_meta` because later records may contain replayed parent metadata. The parsed records are
+discarded at the end of the loop; project discovery retains only the path, while Storage's
+already-ranked top-N rows may also retain the opaque ID and normalized instant. This is the same read
 `native-transcript-discovery.mjs` already performs for Observability at the same trust boundary,
 and it is what makes discovery honest: the alternative is guessing the path from the directory
 name, which [Project accounting](#project-accounting) shows is wrong four times out of five.
 Storage reuses the same reader after ranking by size, for only the top-N session rows. That bounded
-second use is what lets a dated Codex rollout name its repository, host workspace, or folder in the
-Sessions view rather than disappearing or being shown as an unattributed project.
+second use is what lets a dated Codex rollout name its repository, host workspace, or folder and
+lets the Sessions view present a human timestamp plus shortened native ID without parsing a
+filename or opening the file twice. Prompt-derived and generated titles are outside the contract.
 
-The head bound is a correctness statement as much as a cost one. A session's `cwd` is declared in
-its opening records or nowhere, so reading further would cost the whole corpus (~2,700 files here)
-to learn nothing — and it would put the collector's read window over message bodies for no gain.
+The head bound is a correctness statement as much as a cost one. The accepted identity fields are
+declared in opening records or nowhere, so reading further would cost the whole corpus (~2,700
+files here) to learn nothing — and it would put the collector's read window over message bodies for
+no gain. A timezone-less wall clock is not accepted as an instant. When no declared timestamp is
+available, the UI may use the already-measured file mtime only when it says **Last active**, never
+as an invented start time.
 
 **A manifest's dependency keys are names, not code.** Stack detection reads `package.json`,
 `Cargo.toml`, `go.mod`, `pyproject.toml`, `pom.xml`, `build.gradle`, `mix.exs`, `Gemfile`,
@@ -308,10 +315,11 @@ a stated age, superseded cache snapshots, regenerable package caches, redundant 
 revisions, extra runtime versions, orphaned worktrees), each carrying its rationale and its path.
 Candidates are information, not actions — this context has no delete verb.
 
-After size ranking, only the top-N transcript rows reuse the bounded head reader to obtain the
-opening `cwd` metadata. That gives dated Codex rollouts an honest repository, workspace, folder,
-or host-store context without reading message bodies or multiplying the whole-corpus discovery
-cost.
+After size ranking, only the top-N transcript rows reuse the bounded head reader to obtain opening
+`cwd`, opaque native ID, and timezone-bearing timestamp metadata. One read supplies all accepted
+fields. That gives dated Codex rollouts an honest repository, workspace, folder, or host-store
+context and a human session identity without reading message bodies or multiplying the
+whole-corpus discovery cost.
 
 Install measures the npx environment inventory before Storage classifies version-stale cache
 candidates. Storage adopts those facts only when they carry the same scan time, the expected
@@ -686,12 +694,14 @@ payload verbatim, following the one-collector-two-surfaces precedent of the usag
    [The read surface](#the-read-surface); it is normative, and a read not on it is a defect.
    Collectors read directory entries and `stat` results; `.git/config`'s remote URL;
    `.git/worktrees/<name>/gitdir` (bounded to 4 KB, validated as an absolute path) for the
-   orphaned-worktree candidate, which no `stat` can identify; a transcript head's `cwd` **field**
-   and OpenCode's session `directory` column, for project discovery; a project manifest's
+   orphaned-worktree candidate, which no `stat` can identify; a transcript head's opening `cwd`,
+   native ID, and timezone-bearing timestamp fields and OpenCode's session `directory` column,
+   for project discovery and top-N identity; a project manifest's
    dependency **keys**; and a source file's bytes streamed through a fixed buffer to count
-   newlines. Every one of those yields a path, a name, or an integer. **No message body, prompt,
-   tool call, tool result, model output, or manifest value enters this domain, in any tier, on
-   any path**, and nothing read is retained past the function that read it.
+   newlines. Every one of those yields a path, an opaque identifier, an instant, a name, or an
+   integer. **No message body, prompt, generated title, tool call, tool result, model output, or
+   manifest value enters this domain, in any tier, on any path**, and nothing read is retained
+   past the function that read it.
 2. **Unknown is never zero.** An unmeasured or failed measurement renders as unknown with a
    reason; a measured zero renders as zero. A total built over an unknown or capped input is
    `partial` and renders as a lower bound. No fabricated figures.
