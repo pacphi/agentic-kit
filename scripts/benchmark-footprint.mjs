@@ -94,17 +94,17 @@ function runBenchmark({ trees }) {
   let cfg = {};
   try { cfg = loadKitConfig() ?? {}; } catch { cfg = {}; }
   const install = measure('install', () => collectInstall({ walk }));
-  const storage = measure('storage', () => collectStorage({
-    projects: projectPaths, install, now: () => install.asOf, walk,
-  }));
-  const catalog = measure('catalog', () => collectCatalog({
-    cwd: process.cwd(), cfg, projects: projectPaths, walk,
-  }));
   const projects = measure('projects', () => collectProjects({
     sources: discovered, projects: discovered, walk,
   }));
-  measure('consumers', () => collectConsumers({
+  const consumers = measure('consumers', () => collectConsumers({
     install, projects: projects.projects, includeProjectTrees: trees, walk,
+  }));
+  const storage = measure('storage', () => collectStorage({
+    projects: projectPaths, install, consumers, now: () => install.asOf, walk,
+  }));
+  const catalog = measure('catalog', () => collectCatalog({
+    cwd: process.cwd(), cfg, projects: projectPaths, walk,
   }));
 
   const workByPhase = Object.fromEntries(phases.map(({ name }) => {

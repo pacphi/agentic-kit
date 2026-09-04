@@ -73,17 +73,25 @@ test('an injected collector graph remains inline and preserves partial sections'
   const calls = [];
   let persisted = 0;
   const installSection = section('install');
+  const projectsSection = { ...section('projects'), projects: [] };
+  const consumersSection = section('consumers');
   const collectors = {
     install() { calls.push('install'); return installSection; },
+    projects() { calls.push('projects'); return projectsSection; },
+    consumers(options) {
+      calls.push('consumers');
+      assert.strictEqual(options.install, installSection);
+      return consumersSection;
+    },
     storage(options) {
       calls.push('storage');
       assert.strictEqual(options.install, installSection,
         'Storage receives the exact Install observation from this scan');
+      assert.strictEqual(options.consumers, consumersSection,
+        'Storage receives the exact Consumers observation from this scan');
       return section('storage');
     },
     catalog() { calls.push('catalog'); throw new Error('catalog refused'); },
-    projects() { calls.push('projects'); return section('projects'); },
-    consumers() { calls.push('consumers'); return section('consumers'); },
   };
   const collector = createSystemCollector({
     now: () => AS_OF,
@@ -98,8 +106,8 @@ test('an injected collector graph remains inline and preserves partial sections'
   const result = await collector.refreshDeep();
   assert.equal(result.ok, false);
   assert.match(result.error, /catalog refused/);
-  assert.deepEqual(Object.keys(result.sections), ['install', 'storage']);
-  assert.deepEqual(calls, ['install', 'storage', 'catalog']);
+  assert.deepEqual(Object.keys(result.sections), ['install', 'projects', 'consumers', 'storage']);
+  assert.deepEqual(calls, ['install', 'projects', 'consumers', 'storage', 'catalog']);
   assert.equal(persisted, 0);
   assert.equal(collector.scanState().phase, 'failed');
 });

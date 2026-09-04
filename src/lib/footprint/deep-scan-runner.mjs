@@ -15,7 +15,7 @@ import { discoverProjectSources } from './project-sources.mjs';
 import { summarizeCompleteness, writeSnapshot } from './snapshot.mjs';
 
 export const DEEP_SCAN_PHASES = Object.freeze([
-  'idle', 'install', 'storage', 'catalog', 'projects', 'consumers', 'persist', 'done', 'failed',
+  'idle', 'install', 'projects', 'consumers', 'storage', 'catalog', 'persist', 'done', 'failed',
 ]);
 
 export const DEFAULT_DEEP_COLLECTORS = Object.freeze({
@@ -110,25 +110,6 @@ export async function runDeepScan(options) {
     }));
     await breathe();
 
-    phase('storage');
-    publish('storage', collectors.storage({
-      projects: projectPaths,
-      // Install owns the npx environment observation. Storage can reuse it
-      // only because both sections share this scan's exact timestamp and
-      // collector invocation; its validator falls back to a fresh walk for
-      // malformed, stale, or differently rooted evidence.
-      install: sections.install,
-      now: () => startedAt, fsImpl, ...(collectorOptions.storage ?? {}),
-    }));
-    await breathe();
-
-    phase('catalog');
-    publish('catalog', collectors.catalog({
-      cwd, cfg, projects: projectPaths ?? [], now: () => startedAt, fsImpl,
-      ...(collectorOptions.catalog ?? {}),
-    }));
-    await breathe();
-
     phase('projects', { scanned: 0, total: onDisk.length, path: null });
     publish('projects', collectors.projects({
       sources,
@@ -153,6 +134,26 @@ export async function runDeepScan(options) {
         : projectPaths,
       includeProjectTrees,
       ...(collectorOptions.consumers ?? {}),
+    }));
+    await breathe();
+
+    phase('storage');
+    publish('storage', collectors.storage({
+      projects: projectPaths,
+      // Install owns the npx environment observation, while Consumers owns
+      // exact whole-cache observations. Storage validates and reuses both from
+      // this scan; stale, partial, or differently rooted evidence falls back
+      // to its existing bounded measurements.
+      install: sections.install,
+      consumers: sections.consumers,
+      now: () => startedAt, fsImpl, ...(collectorOptions.storage ?? {}),
+    }));
+    await breathe();
+
+    phase('catalog');
+    publish('catalog', collectors.catalog({
+      cwd, cfg, projects: projectPaths ?? [], now: () => startedAt, fsImpl,
+      ...(collectorOptions.catalog ?? {}),
     }));
     await breathe();
 
