@@ -4,13 +4,15 @@
 import { authHeaders, esc } from './bootstrap.mjs';
 import { ago } from './intelligence.mjs';
 import { maintActionActive, maintActionBusy, wireMaintActions } from './system-maintenance-actions.mjs';
+import { SYSTEM } from './system-readout.mjs';
 
   // Maintenance is a separate evidence-bound workflow. System owns the
   // observation; a provider-issued capability, preview, explicit confirmation,
   // and durable receipt are all required before this client can request a
   // change. Capabilities remain only in this closure's memory.
   export var MAINTENANCE=null,maintenanceBusy=false;
-  var maintenanceScanBusy=false;
+  var maintenanceScanBusy=false,maintenanceScanStartedAt=null,maintenanceScanError="";
+  var maintenanceScanTicker=null,maintenanceScanPollTimer=null,maintenanceScanPollBusy=false;
   var maintenanceWired=false,maintBucket="all",maintKind="",maintHost="",maintRelation="",maintQuery="",maintSelected=null;
   var maintTransientReceipts=[];
 
@@ -143,14 +145,28 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
     var hosts=maintConsumerHosts(finding);
     return hosts.length?hosts.join(", "):"not measured";
   }
+  function maintProviderActivity(){
+    var activity=MAINTENANCE&&MAINTENANCE.activity;
+    return activity&&typeof activity==="object"?activity:{};
+  }
+  function maintProviderScanActive(){return maintenanceScanBusy||maintProviderActivity().status==="running";}
+  function maintSystemScanActive(){return !!(SYSTEM&&SYSTEM.scan&&SYSTEM.scan.running);}
+  export function maintScanActive(){return maintProviderScanActive()||maintSystemScanActive();}
+  function maintActionAdvertised(finding){
+    var action=finding&&(finding.action||finding.nextAction);
+    return !!(action&&action.executable===true);
+  }
+  function maintUndoAdvertised(receipt){
+    var undo=receipt&&receipt.undo,status=maintText(receipt&&receipt.status).toLowerCase();
+    return !!receipt&&(status==="committed"||status==="applied")&&(receipt.undoEligible===true
+      ||(undo&&typeof undo==="object"&&undo.eligible===true));
+  }
   export function maintCanPreview(finding){
     var caps=maintCapabilities(),action=finding&&(finding.action||finding.nextAction);
-    return caps.plan===true&&caps.apply===true&&action&&action.executable===true;
+    return !maintScanActive()&&caps.plan===true&&caps.apply===true&&action&&action.executable===true;
   }
   export function maintCanUndo(receipt){
-    var undo=receipt&&receipt.undo,status=maintText(receipt&&receipt.status).toLowerCase();
-    return maintCapabilities().undo===true&&!!receipt&&(status==="committed"||status==="applied")&&(receipt.undoEligible===true
-      ||(undo&&typeof undo==="object"&&undo.eligible===true));
+    return !maintScanActive()&&maintCapabilities().undo===true&&maintUndoAdvertised(receipt);
   }
   function maintMergeReceipts(data){
     if(!data||typeof data!=="object")return data;
@@ -223,22 +239,87 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
     return values.map(function(item){return '<div><dd>'+esc(item[0])+'</dd><dt>'+esc(item[1])+"</dt></div>";}).join("");
   }
 
+  function maintScanElapsed(value){
+    var at=typeof value==="number"?value:Date.parse(maintText(value));
+    if(!Number.isFinite(at))return "";
+    var seconds=Math.max(0,Math.floor((Date.now()-at)/1000));
+    return seconds<60?seconds+"s":Math.floor(seconds/60)+"m "+seconds%60+"s";
+  }
+  function maintScanStatus(node,text){
+    if(node&&node.textContent!==text)node.textContent=text;
+  }
+  function renderMaintScanBar(){
+    var bar=document.querySelector("#sys-maintenance .mt-scanbar"),status=document.getElementById("sys-maint-scan-status");
+    var elapsedNode=document.getElementById("sys-maint-scan-elapsed"),button=document.getElementById("sys-maint-scan");if(!bar||!status||!button)return;
+    var activity=maintProviderActivity(),providerRunning=maintProviderScanActive(),systemRunning=maintSystemScanActive();
+    var elapsed=maintScanElapsed(providerRunning?(activity.startedAt||maintenanceScanStartedAt):(SYSTEM&&SYSTEM.scan&&SYSTEM.scan.startedAt));
+    var progress=activity.progress&&typeof activity.progress==="object"?activity.progress:null;
+    var count=progress&&Number.isFinite(Number(progress.total))&&Number(progress.total)>0
+      ?" "+Math.max(0,Math.round(Number(progress.done)))+" of "+Math.max(0,Math.round(Number(progress.total))):"";
+    bar.setAttribute("aria-busy",providerRunning||systemRunning?"true":"false");
+    bar.setAttribute("data-state",providerRunning||systemRunning?"running":activity.status==="failed"||maintenanceScanError?"failed":"idle");
+    if(systemRunning){
+      maintScanStatus(status,"Full scan is refreshing the System inventory. A provider check follows automatically. The saved report remains available.");
+      if(elapsedNode)elapsedNode.textContent=elapsed?" \u00b7 "+elapsed+" elapsed":"";
+      button.disabled=true;button.textContent="Full scan running\u2026";return;
+    }
+    if(providerRunning){
+      var phase=activity.phase==="persist"?"Saving the checked report":activity.phase==="system"?"Waiting for the full System scan":"Checking providers";
+      maintScanStatus(status,phase+count+". The saved report remains available; actions return when the check finishes.");
+      if(elapsedNode)elapsedNode.textContent=elapsed?" \u00b7 "+elapsed+" elapsed":"";
+      button.disabled=true;button.textContent="Checking providers\u2026";return;
+    }
+    if(elapsedNode)elapsedNode.textContent="";
+    if(activity.status==="failed"||maintenanceScanError){
+      maintScanStatus(status,"The provider check did not finish. The previous saved report was kept.");
+    }else{
+      var scan=MAINTENANCE&&MAINTENANCE.scan||{},total=Number(scan.providersTotal),complete=Number(scan.providersComplete);
+      var coverage=Number.isFinite(total)&&total>0&&Number.isFinite(complete)?" \u00b7 "+Math.round(complete)+" of "+Math.round(total)+" providers":"";
+      var measured=scan.checkedAt||MAINTENANCE&&MAINTENANCE.asOf;
+      maintScanStatus(status,(measured?"Last checked "+maintAge(measured):"Not checked yet")+coverage+". Uses the saved System inventory; it does not walk projects.");
+    }
+    button.disabled=maintenanceBusy||maintActionBusy;
+    button.textContent="\u21bb Check providers";
+  }
+  function syncMaintScanTimers(){
+    var active=maintScanActive();
+    if(active&&!maintenanceScanTicker)maintenanceScanTicker=setInterval(renderMaintScanBar,1000);
+    if(!active&&maintenanceScanTicker){clearInterval(maintenanceScanTicker);maintenanceScanTicker=null;}
+    if(maintProviderScanActive()&&!maintenanceScanPollTimer)maintenanceScanPollTimer=setTimeout(pollMaintScanActivity,2000);
+    if(!maintProviderScanActive()&&maintenanceScanPollTimer){clearTimeout(maintenanceScanPollTimer);maintenanceScanPollTimer=null;}
+  }
+  function pollMaintScanActivity(){
+    maintenanceScanPollTimer=null;if(maintenanceScanPollBusy||!maintProviderScanActive())return;
+    maintenanceScanPollBusy=true;
+    fetch("/api/maintenance",{cache:"no-store",headers:authHeaders()}).then(function(response){if(!response.ok)throw Error("progress unavailable");return response.json();})
+      .then(function(data){
+        if(!maintProviderScanActive()||!data||typeof data!=="object")return;
+        if(maintenanceScanBusy&&MAINTENANCE)MAINTENANCE.activity=data.activity;
+        else MAINTENANCE=maintMergeReceipts(data);
+        renderMaintenance();
+      }).catch(function(){renderMaintScanBar();})
+      .then(function(){maintenanceScanPollBusy=false;syncMaintScanTimers();});
+  }
+
   function renderMaintHeader(){
     var banner=document.getElementById("sys-maint-banner"),summary=document.getElementById("sys-maint-summary");
     if(summary)summary.innerHTML=maintSummary();
     if(!banner)return;
+    if(maintScanActive()){
+      banner.className="mt-banner readonly";
+      banner.innerHTML='<b>'+(maintSystemScanActive()?"Full scan running":"Provider check running")+'</b><span>Showing the saved report. Preview and Undo return when current evidence is ready.</span>';
+      return;
+    }
     if(maintenanceBusy){
       banner.className="mt-banner readonly";
-      banner.innerHTML=maintenanceScanBusy
-        ?'<b>Scanning installed resources…</b><span>Checking native provider versions, ownership, and current Catalog evidence.</span>'
-        :'<b>Reading the latest saved report…</b><span>No providers or filesystem sources are being scanned.</span>';
+      banner.innerHTML='<b>Reading the latest saved report…</b><span>No providers or filesystem sources are being scanned.</span>';
       return;
     }
     var scan=MAINTENANCE&&MAINTENANCE.scan||{};
     if(scan.status==="not-scanned"||scan.status==="unavailable"||scan.status==="stale"){
       banner.className="mt-banner unavailable";
       banner.innerHTML='<b>'+esc(scan.status==="stale"?"Saved scan is stale":"Maintenance scan required")+'</b><span>'
-        +esc(scan.status==="unavailable"?"The saved report could not be verified. Run Scan now to replace it.":"Run Scan now before acting on recommendations.")+"</span>";
+        +esc(scan.status==="unavailable"?"The saved report could not be verified. Check providers to replace it.":"Check providers before acting on recommendations.")+"</span>";
       return;
     }
     if(!MAINTENANCE||MAINTENANCE.error){
@@ -382,6 +463,7 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
       archive:"Preview archive",terminate:"Preview termination"}[maintText(action.operation)]||"Preview action";
   }
   function maintFindingActionHtml(finding){
+    if(maintScanActive()&&maintActionAdvertised(finding))return '<button type="button" class="mt-action primary" disabled title="Available when the scan finishes">'+esc(maintPreviewLabel(finding))+"</button>";
     if(!maintCanPreview(finding))return "";
     return '<button type="button" class="mt-action primary" data-maint-action="preview">'+esc(maintPreviewLabel(finding))+"</button>";
   }
@@ -399,7 +481,8 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
       +(reason?'<p class="mt-action-reason">'+esc(reason)+"</p>":"")
       +(steps.length?'<details class="mt-procedure"><summary>How to resolve</summary><ol class="mt-steps">'+steps.map(function(step){return "<li>"+esc(step)+"</li>";}).join("")+"</ol></details>":"")
       +(preserved.length?'<p class="mt-preserved"><b>Preserved:</b> '+esc(preserved.join(", "))+".</p>":"")
-      +(!maintCanPreview(finding)&&blockedReason?'<p class="mt-blocked-reason"><b>Not available here:</b> '+esc(blockedReason)+"</p>":"")
+      +(maintScanActive()&&maintActionAdvertised(finding)?'<p class="mt-blocked-reason"><b>Temporarily unavailable:</b> Preview returns when the scan finishes.</p>'
+        :!maintCanPreview(finding)&&blockedReason?'<p class="mt-blocked-reason"><b>Not available here:</b> '+esc(blockedReason)+"</p>":"")
       +(facts?'<dl class="mt-facts compact">'+facts+"</dl>":"")
       +(command?'<code>'+esc(command)+"</code>":"")
       +(maintCanPreview(finding)?'<small>Nothing changes until you review and confirm this exact action.</small>':"")+"</section>";
@@ -453,7 +536,10 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
     var undo=receipt&&receipt.undo,undoStatus=maintText(receipt.undoStatus)
       ||maintText(undo&&typeof undo==="object"&&(undo.status||undo.label||undo.summary))
       ||maintText(typeof undo==="string"?undo:"");
-    var undoAction=maintCanUndo(receipt)
+    var undoAction=maintScanActive()&&maintUndoAdvertised(receipt)
+      ?'<div class="mt-action-bar"><button type="button" class="mt-action" disabled title="Available when the scan finishes">Preview undo</button>'
+        +'<small>Undo returns when the scan finishes.</small></div>'
+      :maintCanUndo(receipt)
       ?'<div class="mt-action-bar"><button type="button" class="mt-action" data-maint-action="undo">Preview undo</button>'
         +'<small>The server marked this receipt eligible. Undo is previewed and confirmed separately.</small></div>'
       :'<p class="mt-report-only">No eligible undo is available for this receipt.</p>';
@@ -476,20 +562,27 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
     var records=maintRecords();
     if(!records.some(function(record){return record.key===maintSelected;}))maintSelected=records.length?records[0].key:null;
     renderMaintList(records);renderMaintDetail(records);
-    var root=document.getElementById("sys-maintenance");if(root)root.setAttribute("aria-busy",maintenanceBusy||maintActionBusy?"true":"false");
-    var scan=document.getElementById("sys-maint-scan");if(scan){scan.disabled=maintenanceBusy||maintActionBusy;scan.textContent=maintenanceScanBusy?"Scanning…":"↻ Scan now";}
+    var root=document.getElementById("sys-maintenance");if(root)root.setAttribute("aria-busy",maintActionBusy||maintenanceBusy&&!MAINTENANCE?"true":"false");
+    renderMaintScanBar();syncMaintScanTimers();
   }
 
   export function loadMaintenance(force,scan){
-    if(maintenanceBusy||maintActionBusy||maintActionActive())return Promise.resolve();
+    if(maintenanceBusy||maintActionBusy||maintActionActive()||scan&&maintScanActive())return Promise.resolve();
     if(MAINTENANCE&&!force){renderMaintenance();return Promise.resolve();}
-    maintenanceBusy=true;maintenanceScanBusy=scan===true;renderMaintenance();
+    maintenanceBusy=true;maintenanceScanBusy=scan===true;
+    if(scan){maintenanceScanStartedAt=Date.now();maintenanceScanError="";}renderMaintenance();
     return fetch("/api/maintenance"+(scan?"?refresh=scan":""),{cache:"no-store",headers:authHeaders()}).then(function(response){
       if(!response.ok)throw Error(response.status===404?"Maintenance reporting is not available in this build.":"Maintenance findings could not be read.");
       return response.json();
-    }).then(function(data){MAINTENANCE=data&&typeof data==="object"?maintMergeReceipts(data):{error:"The maintenance response was empty."};})
-      .catch(function(error){MAINTENANCE={error:error&&error.message||"Maintenance findings could not be read."};})
-      .then(function(){maintenanceBusy=false;maintenanceScanBusy=false;renderMaintenance();});
+    }).then(function(data){
+      MAINTENANCE=data&&typeof data==="object"?maintMergeReceipts(data):{error:"The maintenance response was empty."};
+      if(MAINTENANCE.activity&&MAINTENANCE.activity.status==="complete")maintenanceScanError="";
+    })
+      .catch(function(error){
+        var message=error&&error.message||"Maintenance findings could not be read.";
+        if(scan&&MAINTENANCE)maintenanceScanError=message;else MAINTENANCE={error:message};
+      })
+      .then(function(){maintenanceBusy=false;maintenanceScanBusy=false;maintenanceScanStartedAt=null;renderMaintenance();});
   }
 
   export function wireMaintenance(){
@@ -513,6 +606,10 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
     });
     var scan=document.getElementById("sys-maint-scan");
     if(scan)scan.addEventListener("click",function(){if(!scan.disabled)loadMaintenance(true,true);});
+    document.addEventListener("ak-system-scan",function(){
+      var panel=document.getElementById("panel-sys-maintenance");
+      if(MAINTENANCE||panel&&!panel.hidden)renderMaintenance();
+    });
     var list=document.getElementById("sys-maint-list");
     if(list)list.addEventListener("click",function(event){
       var button=event.target.closest?event.target.closest("[data-maint-key]"):null;if(!button)return;

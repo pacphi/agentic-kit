@@ -234,17 +234,23 @@ export function createMaintenanceService({
       ...scanActivity, status, phase, updatedAt: new Date(now()).toISOString(), ...extra,
     };
   };
-  const scanConflict = () => {
-    const error = new Error('Maintenance provider scan is in progress.');
-    error.code = 'MAINTENANCE_SCAN_IN_PROGRESS';
-    error.statusCode = 409;
-    return error;
+  const systemScanning = () => typeof collector.isScanning === 'function' && collector.isScanning();
+  const scanConflict = (system = false) => {
+    return Object.assign(new Error(system
+      ? 'Full System scan is in progress.' : 'Maintenance provider scan is in progress.'), {
+      code: system ? 'SYSTEM_SCAN_IN_PROGRESS' : 'MAINTENANCE_SCAN_IN_PROGRESS',
+      statusCode: 409,
+    });
   };
-  const assertScanIdle = () => { if (scanFlight) throw scanConflict(); };
+  const assertScanIdle = () => {
+    if (scanFlight) throw scanConflict();
+    if (systemScanning()) throw scanConflict(true);
+  };
 
   const resolveProviders = (footprint) => providers
     ?? createDefaultMaintenanceProviderRegistry({ ...providerOptions, footprint });
 
+  /** @param {{deep?: boolean, onProgress?: (progress: any) => void}} [options] */
   async function collect({ deep = false, onProgress } = {}) {
     if (deep) {
       const refreshed = await collector.refreshDeep();
@@ -315,6 +321,7 @@ export function createMaintenanceService({
 
   function scan(options = {}) {
     if (scanFlight) return scanFlight;
+    if (options.deep !== true && systemScanning()) return Promise.reject(scanConflict(true));
     const operation = runScan(options);
     scanFlight = operation.finally(() => { scanFlight = null; });
     return scanFlight;

@@ -1217,7 +1217,10 @@ async function main() {
       status, contentType: 'application/json', body: JSON.stringify(body),
     });
     if (request.method() === 'GET' && pathname === '/api/maintenance') {
-      if (new URL(request.url()).searchParams.get('refresh') === 'scan') maintenanceScanRequests++;
+      if (new URL(request.url()).searchParams.get('refresh') === 'scan') {
+        maintenanceScanRequests++;
+        await new Promise((resolve) => setTimeout(resolve, 120));
+      }
       else maintenanceReportReads++;
       return reply(200, MAINTENANCE_PAYLOAD);
     }
@@ -1641,6 +1644,9 @@ async function main() {
 
     const maintenanceReady = await page.evaluate(() => ({
       banner: document.getElementById('sys-maint-banner')?.innerText,
+      scanStatus: document.getElementById('sys-maint-scan-status')?.innerText,
+      scanButton: document.getElementById('sys-maint-scan')?.innerText,
+      scanLive: document.getElementById('sys-maint-scan-status')?.getAttribute('aria-live'),
       findings: document.querySelectorAll('#sys-maint-list [data-maint-key]').length,
       checkboxes: document.querySelectorAll('#sys-maintenance input[type="checkbox"]').length,
       actionControls: document.querySelectorAll('#sys-maintenance [data-maint-action]').length,
@@ -1655,6 +1661,12 @@ async function main() {
         && maintenanceReady.actionControls === 1
         && maintenanceReady.cleanAll === false,
       `Maintenance boundary was ${JSON.stringify(maintenanceReady)}`);
+    check('Maintenance distinguishes a provider check from the full System scan',
+      /Uses the saved System inventory/.test(String(maintenanceReady.scanStatus))
+        && /does not walk projects/.test(String(maintenanceReady.scanStatus))
+        && /Check providers/.test(String(maintenanceReady.scanButton))
+        && maintenanceReady.scanLive === 'polite',
+      `Maintenance scan presentation was ${JSON.stringify(maintenanceReady)}`);
     check('Maintenance summarizes findings, action eligibility, incomplete evidence, and age without a hygiene score',
       /4\s+findings/.test(String(maintenanceReady.summary))
         && /2\s+actions ready/.test(String(maintenanceReady.summary))
@@ -1699,8 +1711,25 @@ async function main() {
       `report reads=${maintenanceReportReads}; scans=${maintenanceScanRequests}`);
     const explicitScan = page.waitForResponse((response) => response.url().includes('/api/maintenance?refresh=scan'));
     await page.click('#sys-maint-scan');
+    await page.waitForTimeout(30);
+    const maintenanceScanning = await page.evaluate(() => ({
+      banner: document.getElementById('sys-maint-banner')?.innerText,
+      status: document.getElementById('sys-maint-scan-status')?.innerText,
+      button: document.getElementById('sys-maint-scan')?.innerText,
+      disabled: document.getElementById('sys-maint-scan')?.disabled,
+      rows: document.querySelectorAll('#sys-maint-list [data-maint-key]').length,
+      previewDisabled: document.querySelector('#sys-maint-detail .mt-action.primary')?.disabled,
+      rootBusy: document.getElementById('sys-maintenance')?.getAttribute('aria-busy'),
+    }));
+    check('a provider check keeps the saved report readable while withholding stale actions',
+      /Provider check running/.test(String(maintenanceScanning.banner))
+        && /saved report remains available/.test(String(maintenanceScanning.status))
+        && /Checking providers/.test(String(maintenanceScanning.button))
+        && maintenanceScanning.disabled === true && maintenanceScanning.rows === 4
+        && maintenanceScanning.previewDisabled === true && maintenanceScanning.rootBusy === 'false',
+      `provider-check state was ${JSON.stringify(maintenanceScanning)}`);
     await explicitScan;
-    check('Scan now is the explicit provider-version measurement control',
+    check('Check providers is the explicit provider-version measurement control',
       maintenanceScanRequests === 1,
       `explicit Maintenance scans=${maintenanceScanRequests}`);
 
@@ -2422,6 +2451,8 @@ async function main() {
         stale: el?.getAttribute('data-stale'),
         title: el?.getAttribute('title'),
         rescanDisabled: document.getElementById('sys-rescan')?.disabled,
+        fullScanLabel: document.getElementById('sys-rescan')?.innerText,
+        live: el?.getAttribute('aria-live'),
       };
     });
     check('deep-tier figures are stamped with their own age, not presented as current',
@@ -2429,7 +2460,8 @@ async function main() {
       `the freshness label read ${JSON.stringify(freshness)} — the snapshot is nine days old`);
     check('past the staleness horizon the label nudges without scanning',
       freshness.stale === '1' && /stale/i.test(String(freshness.text))
-        && freshness.rescanDisabled === false,
+        && freshness.rescanDisabled === false && /Full scan/.test(String(freshness.fullScanLabel))
+        && freshness.live === 'polite',
       `staleness presentation was ${JSON.stringify(freshness)}`);
     check('opening System never starts a deep scan',
       systemDeepScans === 0,

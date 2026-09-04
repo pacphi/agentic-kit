@@ -190,8 +190,8 @@ export function renderPage({ name, version }) {
         <button class="seg-btn" role="tab" data-system-view="maintenance" aria-selected="false" aria-controls="panel-sys-maintenance" type="button">Maintenance</button>
       </div>
       <div class="secondary-actions sy-freshness" id="system-freshness">
-        <span class="sy-asof" id="sys-asof">deep scan &mdash; not run yet</span>
-        <button class="chipf" type="button" id="sys-rescan" title="re-measure the deep tier now">&#8635; Rescan</button>
+        <span class="sy-asof" id="sys-asof" role="status" aria-live="polite" aria-atomic="true">full scan &mdash; not run yet</span>
+        <button class="chipf" type="button" id="sys-rescan" title="re-measure installs, storage, catalog, and projects">&#8635; Full scan</button>
       </div>
     </div>
     <div class="secondary-group" id="secondary-observability" hidden>
@@ -886,8 +886,8 @@ ${LIVE_HTML}
       <div class="sy-grid">
         <div class="sy-card mt-card" id="sys-maintenance" aria-busy="false">
           <div class="mt-scanbar">
-            <span><b>Saved report</b> Browser refresh rereads it without checking providers. Scan now rechecks installed versions and ownership.</span>
-            <button class="mt-action" type="button" id="sys-maint-scan">&#8635; Scan now</button>
+            <div class="mt-scan-copy"><b>Provider check</b><span id="sys-maint-scan-status" role="status" aria-live="polite" aria-atomic="true">Uses the saved System inventory; it does not walk projects.</span><span class="mt-scan-elapsed" id="sys-maint-scan-elapsed" aria-hidden="true"></span></div>
+            <button class="mt-action" type="button" id="sys-maint-scan">&#8635; Check providers</button>
           </div>
           <div class="mt-banner unavailable" id="sys-maint-banner" role="status">
             <b>Maintenance reporting not loaded</b><span>Open this view to inspect current findings.</span>

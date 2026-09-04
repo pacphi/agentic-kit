@@ -375,7 +375,14 @@ export function createMaintenanceDashboardApi({ service, sessionToken, now = Dat
       const model = await (refresh ? service.scan() : service.report());
       sendJson(res, 200, publicMaintenanceModel(withActivity(model)));
     }
-    catch { sendJson(res, 503, { error: 'maintenance evidence unavailable' }); }
+    catch (error) {
+      if (error?.code === 'SYSTEM_SCAN_IN_PROGRESS') {
+        sendJson(res, 409, {
+          error: 'full System scan is in progress',
+          code: 'SYSTEM_SCAN_IN_PROGRESS', effect: 'not-started',
+        });
+      } else sendJson(res, 503, { error: 'maintenance evidence unavailable' });
+    }
   }
 
   async function createPlan(body, res) {
@@ -476,10 +483,12 @@ export function createMaintenanceDashboardApi({ service, sessionToken, now = Dat
       else if (body.preview) await previewUndo(body, res);
       else await undo(body, res);
     } catch (error) {
-      if (error?.code === 'MAINTENANCE_SCAN_IN_PROGRESS') {
+      if (error?.code === 'MAINTENANCE_SCAN_IN_PROGRESS'
+          || error?.code === 'SYSTEM_SCAN_IN_PROGRESS') {
+        const system = error.code === 'SYSTEM_SCAN_IN_PROGRESS';
         sendJson(res, 409, {
-          error: 'maintenance provider check is in progress',
-          code: 'MAINTENANCE_SCAN_IN_PROGRESS', effect: 'not-started',
+          error: system ? 'full System scan is in progress' : 'maintenance provider check is in progress',
+          code: error.code, effect: 'not-started',
         });
         return;
       }

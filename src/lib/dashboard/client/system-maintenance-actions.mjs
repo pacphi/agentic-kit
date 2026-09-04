@@ -85,6 +85,11 @@ import {
   function maintActionErrorCopy(error,operation){
     var code=maintText(error&&error.code).toUpperCase(),status=Number(error&&error.status);
     var effect=maintText(error&&error.effect);
+    if(code==="MAINTENANCE_SCAN_IN_PROGRESS"||code==="SYSTEM_SCAN_IN_PROGRESS")return {
+      title:code==="SYSTEM_SCAN_IN_PROGRESS"?"Full scan in progress":"Provider check in progress",
+      message:"The server did not start this change. Wait for current evidence to finish, then preview the finding again.",
+      status:"The server verified that no mutation started."
+    };
     if(operation&&operation.state==="loading"){
       if(/DRIFT|STALE|MISMATCH/.test(code))return {
         title:"Evidence changed",message:"The current evidence changed while the preview was being prepared. No change was requested. Close this sheet and preview current evidence again.",

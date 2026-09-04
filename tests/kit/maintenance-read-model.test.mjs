@@ -183,6 +183,24 @@ test('provider scans are single-flight, observable, and block action planning un
     'ephemeral progress must not be persisted into the saved report');
 });
 
+test('a full System scan blocks provider checks and action planning', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-maint-system-flight-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const collector = {
+    isScanning() { return true; },
+    async read() { throw new Error('must not read while the full scan is running'); },
+  };
+  const service = createMaintenanceService({
+    collector, providers: new Map(), controlRoot: root, now: () => NOW,
+  });
+
+  for (const operation of [() => service.scan(), () => service.plan()]) {
+    await assert.rejects(operation, (error) => (
+      error?.code === 'SYSTEM_SCAN_IN_PROGRESS' && error?.statusCode === 409
+    ));
+  }
+});
+
 test('persisted reports age without rescanning and stale evidence loses action authority', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-maint-age-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

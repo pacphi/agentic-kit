@@ -25,7 +25,7 @@ export const SYSTEM_CSS = `
    reason rides the title so a reader can find out why without leaving. */
 .sy-unk{color:var(--ink-dim); font-style:italic; cursor:help}
 .sy-approx{color:var(--ink-dim)}
-.sy-freshness{display:flex; align-items:center; gap:9px; font-size:12px; color:var(--ink-2)}
+.sy-freshness{display:flex; align-items:center; flex-wrap:wrap; gap:9px; font-size:12px; color:var(--ink-2)}
 .sy-asof{font-family:var(--mono); font-size:11.5px}
 .sy-asof[data-stale="1"]{color:var(--warn)}
 .sy-scan{color:var(--accent)}

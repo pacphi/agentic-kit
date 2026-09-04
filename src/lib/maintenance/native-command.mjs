@@ -4,6 +4,11 @@ const BINARY = /^[A-Za-z0-9._-]{1,64}$/;
 const MAX_ARG_BYTES = 4096;
 const MAX_OUTPUT_BYTES = 256 * 1024;
 
+/**
+ * @param {string} binary
+ * @param {string[]} args
+ * @param {{execFileImpl?: any, timeoutMs?: number, env?: NodeJS.ProcessEnv, signal?: AbortSignal}} [options]
+ */
 export async function runNativeCommand(binary, args, {
   execFileImpl = execFile, timeoutMs = 30_000, env = process.env, signal,
 } = {}) {

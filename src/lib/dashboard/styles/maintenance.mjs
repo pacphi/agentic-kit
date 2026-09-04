@@ -4,7 +4,8 @@ export const MAINTENANCE_CSS = `
    state carry the hierarchy within it. */
 .mt-card{gap:0;padding:0;overflow:hidden}
 .mt-scanbar{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 14px;border-bottom:1px solid var(--line);color:var(--ink-2);font-size:11.5px;line-height:1.45}
-.mt-scanbar b{color:var(--ink)}.mt-scanbar span{max-width:82ch}
+.mt-scan-copy{display:flex;align-items:baseline;gap:7px;min-width:0;max-width:82ch}.mt-scan-copy b{flex:none;color:var(--ink)}.mt-scan-copy span{color:var(--ink-2)}.mt-scan-elapsed{flex:none;font-family:var(--mono);color:var(--ink-dim)!important}
+.mt-scanbar[data-state="running"]{box-shadow:inset 2px 0 var(--accent)}.mt-scanbar[data-state="failed"]{box-shadow:inset 2px 0 var(--warn)}
 .mt-banner{display:flex;align-items:flex-start;gap:9px;padding:10px 14px;border-bottom:1px solid var(--line);font-size:11.5px;line-height:1.45}
 .mt-banner b{flex:none;color:var(--ink);font-weight:650}
 .mt-banner span{color:var(--ink-2)}
@@ -96,7 +97,7 @@ export const MAINTENANCE_CSS = `
   .mt-detail{max-height:none}.mt-row{grid-template-columns:minmax(112px,.7fr) minmax(140px,1fr) minmax(180px,1.3fr)}
 }
 @media(max-width:600px){
-  .mt-scanbar,.mt-banner{align-items:flex-start;flex-direction:column;gap:6px}.mt-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .mt-scanbar,.mt-banner,.mt-scan-copy{align-items:flex-start;flex-direction:column;gap:6px}.mt-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
   .mt-summary>div:nth-child(2){border-right:0}.mt-summary>div:nth-child(-n+2){border-bottom:1px solid var(--line)}
   .mt-toolbar{grid-template-columns:1fr 1fr}.mt-toolbar input{grid-column:1/-1}.mt-results{grid-column:1/-1}
   .mt-row{grid-template-columns:1fr;grid-template-areas:"state" "identity" "change" "owner";gap:5px;min-height:44px;padding:11px 13px}

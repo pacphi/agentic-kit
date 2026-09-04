@@ -866,17 +866,24 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     var el=document.getElementById("sys-asof"),btn=document.getElementById("sys-rescan");
     if(!el)return;
     var scan=(SYSTEM&&SYSTEM.scan)||null,snap=(SYSTEM&&SYSTEM.snapshot)||null;
+    try{document.dispatchEvent(new CustomEvent("ak-system-scan",{detail:{running:!!(scan&&scan.running)}}));}catch(e){}
     el.removeAttribute("data-stale");
     if(scan&&scan.running){
-      el.innerHTML='<span class="sy-scan">scanning\u2026 '+esc(scan.phase||"")
-        +(scan.total?" ("+fmtNum(scan.scanned)+"/"+fmtNum(scan.total)+")":"")+"</span>";
-      if(btn){btn.disabled=true;btn.title="a deep scan is already running";}
+      var phase={install:"Reading installed tools",storage:"Measuring retained data",catalog:"Comparing skills, plugins, and MCP servers",
+        projects:"Measuring projects",consumers:"Ranking disk use",persist:"Saving report"}[scan.phase]||"Preparing scan";
+      var started=Number(scan.startedAt),seconds=Number.isFinite(started)?Math.max(0,Math.floor((Date.now()-started)/1000)):null;
+      var elapsed=seconds==null?"":seconds<60?seconds+"s":Math.floor(seconds/60)+"m "+seconds%60+"s";
+      el.classList.add("sy-scan");
+      el.textContent="Full scan running \u00b7 "+phase+(scan.total?" "+fmtNum(scan.scanned)+" of "+fmtNum(scan.total):"");
+      if(elapsed){var clock=document.createElement("span");clock.setAttribute("aria-hidden","true");clock.textContent=" \u00b7 "+elapsed;el.appendChild(clock);}
+      if(btn){btn.disabled=true;btn.textContent="Full scan running\u2026";btn.title="the full scan is already running";}
       return;
     }
-    if(btn){btn.disabled=false;btn.title="re-measure the deep tier now";}
-    if(!SYSTEM){el.textContent="deep scan \u2014 not loaded";return;}
+    el.classList.remove("sy-scan");
+    if(btn){btn.disabled=false;btn.textContent="\u21bb Full scan";btn.title="re-measure installs, storage, catalog, and projects";}
+    if(!SYSTEM){el.textContent="full scan \u2014 not loaded";return;}
     if(!snap||!snap.measured||snap.asOf==null){
-      el.textContent="deep scan \u2014 never run on this machine";
+      el.textContent="full scan \u2014 never run on this machine";
       el.title=(snap&&snap.reason)||"no snapshot has been written yet";
       el.setAttribute("data-stale","1");
       return;
@@ -887,10 +894,10 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     // formatter keeps one vocabulary for "how old is this figure".
     var age=limAge(Date.now()-Math.max(0,Number(snap.ageMs)||0));
     var drift=snap.catalogDrift,changed=drift&&drift.status==="changed";
-    el.textContent="deep scan \u00b7 "+age+(changed?" \u00b7 catalog changed, rescan":(snap.stale?" \u00b7 stale, rescan":""))
+    el.textContent="full scan \u00b7 "+age+(changed?" \u00b7 catalog changed, scan again":(snap.stale?" \u00b7 stale, scan again":""))
       +(scan&&scan.error?" \u00b7 last scan reported a problem":"");
     el.title=(scan&&scan.error?scan.error+" \u2014 ":"")
-      +"deep-tier figures were measured "+age+"; nothing rescans on its own";
+      +"full-scan figures were measured "+age+"; browser refresh does not start a scan";
     if(snap.stale||changed)el.setAttribute("data-stale","1");
   }
 
