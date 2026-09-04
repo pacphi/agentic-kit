@@ -17,7 +17,9 @@ import { loadUsage } from './usage.mjs';
   export var DASH_TOKEN_KEY="ak-dash-token";
   export var DASH_TOKEN=(function(){
     var m=String(location.hash||"").match(/token=([A-Za-z0-9_-]+)/);
-    if(m){try{localStorage.setItem(DASH_TOKEN_KEY,m[1]);}catch(e){}try{history.replaceState(null,"",location.pathname+location.search);}catch(e){}}
+    var fragment=m&&m[1]||"";
+    if(fragment){window.__AK_DASH_TOKEN=fragment;try{localStorage.setItem(DASH_TOKEN_KEY,fragment);}catch(e){}try{history.replaceState(null,"",location.pathname+location.search);}catch(e){}}
+    if(fragment||window.__AK_DASH_TOKEN)return fragment||window.__AK_DASH_TOKEN;
     try{return localStorage.getItem(DASH_TOKEN_KEY)||"";}catch(e){return"";}
   })();
   export function authHeaders(){return{"x-dash-token":DASH_TOKEN};}
@@ -36,7 +38,9 @@ import { loadUsage } from './usage.mjs';
     if(go)go.addEventListener("click",function(){
       var v=input?input.value.trim():"";
       if(!v)return;
-      try{localStorage.setItem(DASH_TOKEN_KEY,v);}catch(e){}
+      var stored=false;try{localStorage.setItem(DASH_TOKEN_KEY,v);stored=true;}catch(e){}
+      window.__AK_DASH_TOKEN=v;
+      if(!stored)try{location.hash="token="+encodeURIComponent(v);}catch(e){}
       location.reload();
     });
     if(input)input.addEventListener("keydown",function(e){if(e.key==="Enter"&&go)go.click();});

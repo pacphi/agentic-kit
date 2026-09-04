@@ -904,6 +904,8 @@ ${LIVE_HTML}
             <select id="sys-maint-kind"><option value="">All resources</option></select>
             <label class="sr-only" for="sys-maint-host">Host</label>
             <select id="sys-maint-host"><option value="">All hosts</option></select>
+            <label class="sr-only" for="sys-maint-relation">Relationship</label>
+            <select id="sys-maint-relation"><option value="">All relationships</option></select>
             <span class="mt-results" id="sys-maint-results" role="status" aria-live="polite" aria-atomic="true">Open Maintenance to load findings.</span>
           </div>
           <div class="mt-workbench">

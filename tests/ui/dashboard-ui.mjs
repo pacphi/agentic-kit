@@ -703,7 +703,20 @@ const MAINTENANCE_PAYLOAD = {
     },
     versions: { installed: 'modified', contentDigest: 'sha256:ui-fixture' },
     impact: { summary: 'The skill is preserved while ownership is unresolved.', preserved: ['current modified content'] },
-    nextAction: 'Review the differences. No removal is recommended.', action: { safetyClass: 'approval-required' },
+    relationship: {
+      kind: 'same-name-different-definition', basis: 'different-definition', resolution: 'not-reported',
+      memberCount: 2, truncated: false, members: [
+        { role: 'project-copy', label: 'Observed project copy', host: 'codex', scope: 'project', projectLabel: 'agentic-kit', ownership: 'unknown', tracking: 'tracked', workingTree: 'clean' },
+        { role: 'shared-copy', label: 'Observed shared copy', host: 'codex', scope: 'user', providerRef: 'agentic-kit projection', ownership: 'user-owned', tracking: 'unknown', workingTree: 'unknown' },
+      ],
+    },
+    nextAction: {
+      label: 'Choose which definition should be authoritative',
+      recommendation: 'Compare the project and shared definitions, then keep or rename the intended source.',
+      steps: ['Compare both definitions.', 'Choose the source of truth.', 'Rename or remove the unintended copy, then rescan.'],
+      preserved: ['both copies until you decide'],
+      blockedReason: 'Agentic Kit cannot infer which behavior you intend.',
+    }, action: { safetyClass: 'approval-required' },
   }, {
     id: 'mcp-blocked', bucket: 'unsupportedOrBlocked', statusLabel: 'Cannot safely automate',
     headline: 'No host-native removal provider',
@@ -1089,6 +1102,35 @@ async function main() {
   { headers: modelHeaders }).then((response) => response.json());
 
   const browser = await chromium.launch({ channel: 'chrome', headless: !HEADED });
+
+  // A loopback dashboard token must survive in page memory even when browser
+  // storage is disabled. Otherwise the Live bootstrap strips the fragment and
+  // the main bootstrap silently sends 401s, leaving every real panel hidden
+  // behind the gate.
+  const storageBlockedPage = await browser.newPage({ viewport: { width: 1100, height: 760 } });
+  await storageBlockedPage.addInitScript(() => {
+    Storage.prototype.getItem = () => { throw new Error('storage blocked'); };
+    Storage.prototype.setItem = () => { throw new Error('storage blocked'); };
+    Storage.prototype.removeItem = () => { throw new Error('storage blocked'); };
+  });
+  const blockedStatus = [];
+  storageBlockedPage.on('response', (response) => {
+    if (new URL(response.url()).pathname === '/api/status') blockedStatus.push(response.status());
+  });
+  await storageBlockedPage.goto(srv.urlWithToken, { waitUntil: 'domcontentloaded' });
+  await storageBlockedPage.waitForSelector('#area-overview:not([hidden])');
+  await storageBlockedPage.waitForFunction(() => document.querySelectorAll('#area-overview .card').length > 0);
+  const blockedStorageStartup = await storageBlockedPage.evaluate(() => ({
+    gated: document.body.classList.contains('gated'),
+    cards: document.querySelectorAll('#area-overview .card').length,
+    visible: document.getElementById('area-overview')?.getBoundingClientRect().height > 0,
+  }));
+  check('a valid fragment token keeps the dashboard runnable when localStorage is blocked',
+    blockedStorageStartup.gated === false && blockedStorageStartup.visible
+      && blockedStorageStartup.cards > 0 && blockedStatus.includes(200),
+    `blocked-storage startup was ${JSON.stringify(blockedStorageStartup)} with status ${blockedStatus.join(',')}`);
+  await storageBlockedPage.close();
+
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 
   // Anything the page logs as an error, or any request it fails, is a defect —
@@ -1601,6 +1643,8 @@ async function main() {
         && /Codex plugin manager/.test(firstMaintenanceDetail)
         && /0\.2\.0/.test(firstMaintenanceDetail) && /0\.3\.1/.test(firstMaintenanceDetail)
         && /standalone skill-creator/.test(firstMaintenanceDetail)
+        && /Suggested action:/.test(firstMaintenance.text)
+        && /Suggested action/.test(firstMaintenanceDetail)
         && /Preview change/.test(firstMaintenanceDetail)
         && /Nothing runs until you confirm/.test(firstMaintenanceDetail),
       `first finding was ${JSON.stringify(firstMaintenance)}; detail read ${JSON.stringify(firstMaintenanceDetail)}`);
@@ -1623,6 +1667,13 @@ async function main() {
         && /<img src=x onerror=/.test(String(reviewMaintenance.detail))
         && reviewMaintenance.xss === undefined,
       `partial finding rendered ${JSON.stringify(reviewMaintenance)}`);
+    check('relationship findings show compared copies and a concrete human procedure',
+      /Observed copies/.test(String(reviewMaintenance.detail))
+        && /Observed project copy/.test(String(reviewMaintenance.detail))
+        && /Observed shared copy/.test(String(reviewMaintenance.detail))
+        && /Choose the source of truth/.test(String(reviewMaintenance.detail))
+        && /Why this is not automated/.test(String(reviewMaintenance.detail)),
+      `relationship guidance was ${JSON.stringify(reviewMaintenance.detail)}`);
 
     await page.fill('#sys-maint-search', 'legacy-tools');
     check('search composes with category filters instead of silently resetting them',
@@ -1849,6 +1900,32 @@ async function main() {
         && readOnlyBoundary.controls === 0,
       `read-only Maintenance was ${JSON.stringify(readOnlyBoundary)}`);
     await readOnlyPage.close();
+
+    const retryPage = await browser.newPage({ viewport: { width: 900, height: 700 } });
+    let maintenanceAttempts = 0;
+    await retryPage.route(/\/api\/maintenance(?:\?|$)/, (route) => {
+      maintenanceAttempts++;
+      return route.fulfill(maintenanceAttempts === 1 ? {
+        status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'temporary fixture failure' }),
+      } : {
+        status: 200, contentType: 'application/json', body: JSON.stringify(MAINTENANCE_PAYLOAD),
+      });
+    });
+    await retryPage.goto(srv.urlWithToken, { waitUntil: 'domcontentloaded' });
+    await retryPage.click('[data-tab="system"]');
+    await retryPage.click('[data-system-view="maintenance"]');
+    await retryPage.waitForSelector('[data-maint-retry]');
+    check('a failed Maintenance read renders recovery guidance instead of a blank panel',
+      /could not be read/i.test(await visibleText(retryPage, '#sys-maintenance'))
+        && /Retry report/.test(await visibleText(retryPage, '#sys-maintenance')),
+      'Maintenance failure did not expose its bounded retry');
+    await retryPage.click('[data-maint-retry]');
+    await retryPage.waitForSelector('#sys-maint-list [data-maint-key]');
+    check('Retry report recovers the panel without restarting the dashboard',
+      maintenanceAttempts === 2
+        && await retryPage.$$eval('#sys-maint-list [data-maint-key]', (rows) => rows.length) === 4,
+      `Maintenance retry made ${maintenanceAttempts} requests`);
+    await retryPage.close();
 
     const historyPage = await browser.newPage({ viewport: { width: 1080, height: 760 } });
     await historyPage.route(/\/api\/maintenance(?:\?|$)/, (route) => route.fulfill({
