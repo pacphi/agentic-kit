@@ -1,5 +1,4 @@
 import path from 'node:path';
-
 import {
   footprintEvidence, measurementEvidence, projectReference, sha256, sourceFingerprint,
 } from './evidence.mjs';
@@ -9,10 +8,8 @@ import {
 import {
   FINDING_STATES, VERSION_AXES, deepFreeze,
 } from './model.mjs';
-
 const array = (value) => (Array.isArray(value) ? value : []);
 const text = (value) => (typeof value === 'string' && value.trim() ? value.trim() : null);
-
 function findingId(stable) {
   return `maintenance-finding-${sha256(stable).slice(0, 20)}`;
 }
@@ -210,48 +207,49 @@ function makeFinding(fields) {
     ...fields,
   };
 }
+function storageEvidence(row, sharedEvidence) {
+  const evidence = measurementEvidence(row.bytes, sharedEvidence);
+  const missingNpxBasis = row.kind === 'stale-npx-env'
+    && (typeof row?.basis?.versionStale !== 'boolean' || typeof row?.basis?.idle !== 'boolean');
+  return missingNpxBasis ? { ...evidence, completeness: 'partial',
+    gaps: [...evidence.gaps, 'npx idle-versus-version basis requires a deep rescan'] } : evidence;
+}
+function storageDisposition(row, evidence) {
+  const usable = evidence.completeness === 'complete' && evidence.freshness === 'fresh';
+  const reproducible = row.safety === 'regenerable' && usable;
+  if (!usable) return { usable, reproducible, state: 'unreadable-partial', safety: 'never-automatic',
+    classification: 'storage-evidence-incomplete', status: 'Rescan required', operation: 'review' };
+  if (row.kind === 'stale-npx-env' && row.basis.versionStale === true) {
+    return { usable, reproducible, state: 'superseded-version', safety: 'approval-required',
+      classification: 'version-stale-npx-environment', status: 'Version-stale cache', operation: 'clean' };
+  }
+  if (row.kind === 'stale-npx-env' && row.basis.idle === true) {
+    return { usable, reproducible, state: 'ambiguous', safety: 'approval-required',
+      classification: 'idle-reproducible-cache', status: 'Idle cache', operation: 'review' };
+  }
+  if (reproducible) return { usable, reproducible, state: 'orphaned-cache', safety: 'approval-required',
+    classification: 'reproducible-storage-candidate', status: 'Cache can be cleared', operation: 'review' };
+  return { usable, reproducible, state: row.kind === 'installed-runtime-versions' ? 'superseded-version' : 'ambiguous',
+    safety: 'approval-required', classification: 'advisory-storage-candidate',
+    status: 'Review before removal', operation: 'review' };
+}
+const measuredValue = (measurement) => ['measured', 'carried-forward'].includes(measurement?.status)
+  ? measurement.value : null;
 
 function storageFinding(row, sharedEvidence) {
   if (!row?.id) return null;
-  const measuredEvidence = measurementEvidence(row.bytes, sharedEvidence);
-  const npxBasisMissing = row.kind === 'stale-npx-env'
-    && (typeof row?.basis?.versionStale !== 'boolean' || typeof row?.basis?.idle !== 'boolean');
-  const evidence = npxBasisMissing ? {
-    ...measuredEvidence,
-    completeness: 'partial',
-    gaps: [...measuredEvidence.gaps, 'npx idle-versus-version basis requires a deep rescan'],
-  } : measuredEvidence;
+  const evidence = storageEvidence(row, sharedEvidence);
+  const disposition = storageDisposition(row, evidence);
   const ageOnly = ['aged-transcripts', 'orphaned-transcripts'].includes(row.kind);
-  const usableEvidence = evidence.completeness === 'complete' && evidence.freshness === 'fresh';
-  const reproducible = row.safety === 'regenerable' && usableEvidence;
-  const versionStale = row.kind === 'stale-npx-env' && row?.basis?.versionStale === true;
-  const idleOnly = row.kind === 'stale-npx-env' && row?.basis?.idle === true && !versionStale;
-  const unusableEvidence = !usableEvidence;
-  const state = unusableEvidence
-    ? 'unreadable-partial'
-    : (versionStale ? 'superseded-version'
-      : (reproducible && !idleOnly ? 'orphaned-cache'
-        : (row.kind === 'installed-runtime-versions' ? 'superseded-version' : 'ambiguous')));
-  const safetyClass = unusableEvidence
-    ? 'never-automatic'
-    : 'approval-required';
   const guidance = storageGuidance(row.kind, {
-    usableEvidence, safe: reproducible, basis: row.basis,
+    usableEvidence: disposition.usable, safe: disposition.reproducible, basis: row.basis,
   });
-  const measuredValue = (measurement) => ['measured', 'carried-forward'].includes(measurement?.status)
-    ? measurement.value : null;
   return makeFinding({
-    state,
+    state: disposition.state,
     bucket: 'needsReview',
-    classification: unusableEvidence ? 'storage-evidence-incomplete'
-      : (versionStale ? 'version-stale-npx-environment'
-        : (idleOnly ? 'idle-reproducible-cache'
-          : (reproducible ? 'reproducible-storage-candidate' : 'advisory-storage-candidate'))),
-    safetyClass,
-    statusLabel: unusableEvidence ? 'Rescan required'
-      : (versionStale ? 'Version-stale cache'
-        : (idleOnly ? 'Idle cache'
-          : (reproducible ? 'Cache can be cleared' : 'Review before removal'))),
+    classification: disposition.classification,
+    safetyClass: disposition.safety,
+    statusLabel: disposition.status,
     headline: guidance.headline,
     resource: {
       id: String(row.id),
@@ -277,11 +275,11 @@ function storageFinding(row, sharedEvidence) {
       preserved: guidance.preserved,
     },
     nextAction: nextAction({
-      operation: versionStale ? 'clean' : 'review',
+      operation: disposition.operation,
       label: guidance.label,
       providerId: 'maintenance.read-only',
-      safetyClass,
-      rollback: reproducible ? 'compensating' : 'irreversible',
+      safetyClass: disposition.safety,
+      rollback: disposition.reproducible ? 'compensating' : 'irreversible',
       recommendation: guidance.label, steps: guidance.steps,
       preserved: guidance.preserved, blockedReason: guidance.blockedReason,
     }),
@@ -377,6 +375,14 @@ function lifecycleOperation(lifecycle, disposition) {
   return ['disable', 'remove'].includes(lifecycle?.operation) ? lifecycle.operation : 'review';
 }
 
+function catalogStatus(disposition, operation) {
+  if (disposition.partial || disposition.stale) return 'Rescan required';
+  if (disposition.update) return 'Upgrade available';
+  if (operation === 'remove') return 'Uninstall candidate';
+  if (operation === 'disable') return 'Disable candidate';
+  return 'Conflicting copies';
+}
+
 function catalogFinding(item, sharedEvidence) {
   const presence = array(item?.presence)[0];
   const lifecycle = lifecycleOf(item, presence);
@@ -396,10 +402,7 @@ function catalogFinding(item, sharedEvidence) {
       ? 'catalog-evidence-incomplete'
       : (disposition.stale ? 'catalog-evidence-stale' : (lifecycle?.state ?? 'multiple-observed-revisions')),
     safetyClass: disposition.safetyClass,
-    statusLabel: disposition.partial || disposition.stale ? 'Rescan required'
-      : (disposition.update ? 'Upgrade available'
-        : (operation === 'remove' ? 'Uninstall candidate'
-          : (operation === 'disable' ? 'Disable candidate' : 'Conflicting copies'))),
+    statusLabel: catalogStatus(disposition, operation),
     headline: guidance.headline,
     resource: catalogResource(item, presence, provider),
     versions: catalogVersions(provider, lifecycle, presence),

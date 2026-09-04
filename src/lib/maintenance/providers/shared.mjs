@@ -54,6 +54,28 @@ const VERSION_KEYS = [
   'installed', 'recommended', 'producer', 'sourceRevision', 'cacheGeneration', 'contentDigest',
 ];
 
+const normalizedVersions = (versions) => Object.fromEntries(VERSION_KEYS.map((key) => [key,
+  typeof versions[key] === 'string' && versions[key] ? versions[key] : null]));
+
+function normalizedEvidence(evidence, providerId) {
+  return {
+    sources: [...new Set(evidence?.sources ?? [`maintenance-provider:${providerId}`])].sort(),
+    asOf: evidence?.asOf ?? null,
+    freshness: evidence?.freshness ?? 'fresh',
+    completeness: evidence?.completeness ?? 'complete',
+    gaps: [...new Set(evidence?.gaps ?? [])].sort(),
+  };
+}
+
+function normalizedImpact(impact) {
+  return {
+    summary: impact?.summary ?? 'Dependent capabilities require review before change.',
+    bytes: Number.isFinite(impact?.bytes) ? impact.bytes : null,
+    files: Number.isFinite(impact?.files) ? impact.files : null,
+    dependencies: Number.isInteger(impact?.dependencies) ? impact.dependencies : 'unknown',
+  };
+}
+
 function providerNextAction({
   operation, label, providerId, providerVersion, safetyClass,
   rollback, restart, executable, recommendation, steps, preserved, blockedReason,
@@ -107,37 +129,25 @@ export function providerFinding({
   rollback = 'irreversible', restart = 'unknown', executable = false,
   recommendation = null, steps = null, preserved = null, blockedReason = null,
 }) {
-  const normalizedVersions = Object.fromEntries(VERSION_KEYS.map((key) => [key,
-    typeof versions[key] === 'string' && versions[key] ? versions[key] : null]));
+  const normalized = normalizedVersions(versions);
   const nextAction = providerNextAction({
     operation, label, providerId, providerVersion, safetyClass,
     rollback, restart, executable, recommendation, steps, preserved, blockedReason,
   });
   const stable = {
     providerId, stableKey, state, classification, safetyClass, resource,
-    versions: normalizedVersions, ownership, operation,
+    versions: normalized, ownership, operation,
   };
   return {
     id: `maintenance-finding-${sha256(stable).slice(0, 20)}`,
     state, bucket, classification, safetyClass, resource,
-    versions: normalizedVersions,
+    versions: normalized,
     ownership,
-    evidence: {
-      sources: [...new Set(evidence?.sources ?? [`maintenance-provider:${providerId}`])].sort(),
-      asOf: evidence?.asOf ?? null,
-      freshness: evidence?.freshness ?? 'fresh',
-      completeness: evidence?.completeness ?? 'complete',
-      gaps: [...new Set(evidence?.gaps ?? [])].sort(),
-    },
+    evidence: normalizedEvidence(evidence, providerId),
     observedUsage: {
       status: 'not-measured', statement: 'Usage was not used as action authority.',
     },
-    impact: {
-      summary: impact?.summary ?? 'Dependent capabilities require review before change.',
-      bytes: Number.isFinite(impact?.bytes) ? impact.bytes : null,
-      files: Number.isFinite(impact?.files) ? impact.files : null,
-      dependencies: Number.isInteger(impact?.dependencies) ? impact.dependencies : 'unknown',
-    },
+    impact: normalizedImpact(impact),
     nextAction,
   };
 }
