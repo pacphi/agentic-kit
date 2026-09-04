@@ -25,7 +25,20 @@ export const SYSTEM_CSS = `
    reason rides the title so a reader can find out why without leaving. */
 .sy-unk{color:var(--ink-dim); font-style:italic; cursor:help}
 .sy-approx{color:var(--ink-dim)}
-.sy-freshness{display:flex; align-items:center; flex-wrap:wrap; gap:9px; font-size:12px; color:var(--ink-2)}
+#secondary-system{flex-wrap:wrap}
+#secondary-system>.subseg{flex:1 1 auto;min-width:0}
+.sy-freshness{display:flex; align-items:center; flex-wrap:wrap; gap:9px; max-width:100%; font-size:12px; color:var(--ink-2)}
+.sy-freshness[data-running="1"]{
+  flex:1 0 100%;width:100%;margin-left:0;justify-content:flex-end;min-width:0;
+  padding-top:2px
+}
+.sy-freshness[data-running="1"] .sy-asof{
+  max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+}
+@media(max-width:720px){
+  .sy-freshness{flex:1 0 100%;width:100%;margin-left:0;justify-content:flex-start}
+  .sy-freshness[data-running="1"] .sy-asof{white-space:normal}
+}
 .sy-asof{font-family:var(--mono); font-size:11.5px}
 .sy-asof[data-stale="1"]{color:var(--warn)}
 .sy-scan{color:var(--accent)}

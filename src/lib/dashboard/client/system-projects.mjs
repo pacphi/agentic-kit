@@ -863,12 +863,14 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
   }
 
   export function renderSystemFreshness(){
-    var el=document.getElementById("sys-asof"),btn=document.getElementById("sys-rescan");
+    var el=document.getElementById("sys-asof"),btn=document.getElementById("sys-rescan"),
+      freshness=document.getElementById("system-freshness");
     if(!el)return;
     var scan=(SYSTEM&&SYSTEM.scan)||null,snap=(SYSTEM&&SYSTEM.snapshot)||null;
     try{document.dispatchEvent(new CustomEvent("ak-system-scan",{detail:{running:!!(scan&&scan.running)}}));}catch(e){}
     el.removeAttribute("data-stale");
     if(scan&&scan.running){
+      if(freshness)freshness.setAttribute("data-running","1");
       var phase={install:"Reading installed tools",storage:"Measuring retained data",catalog:"Comparing skills, plugins, and MCP servers",
         projects:"Measuring projects",consumers:"Ranking disk use",persist:"Saving report"}[scan.phase]||"Preparing scan";
       var started=Number(scan.startedAt),seconds=Number.isFinite(started)?Math.max(0,Math.floor((Date.now()-started)/1000)):null;
@@ -876,11 +878,17 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
       el.classList.add("sy-scan");
       el.textContent="Full scan running \u00b7 "+phase+(scan.total?" "+fmtNum(scan.scanned)+" of "+fmtNum(scan.total):"");
       if(elapsed){var clock=document.createElement("span");clock.setAttribute("aria-hidden","true");clock.textContent=" \u00b7 "+elapsed;el.appendChild(clock);}
-      if(btn){btn.disabled=true;btn.textContent="Full scan running\u2026";btn.title="the full scan is already running";}
+      // The status line already says what is running, how far it has progressed,
+      // and for how long. Repeating that sentence inside a disabled button made
+      // the System rail wider than the viewport precisely when the scan was
+      // active. There is no available action until it settles, so remove the
+      // button from both the visual and accessibility layouts for that state.
+      if(btn){btn.disabled=true;btn.hidden=true;btn.title="the full scan is already running";}
       return;
     }
+    if(freshness)freshness.removeAttribute("data-running");
     el.classList.remove("sy-scan");
-    if(btn){btn.disabled=false;btn.textContent="\u21bb Full scan";btn.title="re-measure installs, storage, catalog, and projects";}
+    if(btn){btn.hidden=false;btn.disabled=false;btn.textContent="\u21bb Full scan";btn.title="re-measure installs, storage, catalog, and projects";}
     if(!SYSTEM){el.textContent="full scan \u2014 not loaded";return;}
     if(!snap||!snap.measured||snap.asOf==null){
       el.textContent="full scan \u2014 never run on this machine";

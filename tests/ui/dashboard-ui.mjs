@@ -1131,6 +1131,54 @@ async function main() {
 
   const browser = await chromium.launch({ channel: 'chrome', headless: !HEADED });
 
+  // A running full scan carries a long phase/count/elapsed sentence. It belongs
+  // on its own status row; squeezing it between eight System tabs and a second,
+  // redundant disabled label pushed both controls beyond the viewport.
+  const runningScanPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await runningScanPage.route(/\/api\/system(\?|$)/, (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      ...SYSTEM_PAYLOAD,
+      scan: {
+        ...SYSTEM_PAYLOAD.scan,
+        running: true,
+        phase: 'consumers',
+        scanned: 15,
+        total: 15,
+        startedAt: Date.now() - 103_000,
+      },
+    }),
+  }));
+  await runningScanPage.goto(srv.urlWithToken, { waitUntil: 'domcontentloaded' });
+  await runningScanPage.click('#tab-system');
+  await runningScanPage.waitForFunction(() => document.getElementById('system-freshness')
+    ?.getAttribute('data-running') === '1');
+  const runningScanLayout = await runningScanPage.evaluate(() => {
+    const group = document.getElementById('secondary-system')?.getBoundingClientRect();
+    const tabs = document.getElementById('system-seg')?.getBoundingClientRect();
+    const status = document.getElementById('system-freshness')?.getBoundingClientRect();
+    const button = document.getElementById('sys-rescan');
+    return {
+      statusText: document.getElementById('sys-asof')?.innerText,
+      running: document.getElementById('system-freshness')?.getAttribute('data-running'),
+      buttonHidden: button?.hidden,
+      statusBelowTabs: !!status && !!tabs && status.top >= tabs.bottom - 1,
+      statusInsideGroup: !!status && !!group
+        && status.left >= group.left - 1 && status.right <= group.right + 1,
+      documentFits: document.documentElement.scrollWidth <= globalThis.innerWidth,
+    };
+  });
+  check('running full-scan progress gets a readable row without a duplicate action',
+    runningScanLayout.running === '1'
+      && /Full scan running.*Ranking disk use.*15 of 15/.test(runningScanLayout.statusText ?? '')
+      && runningScanLayout.buttonHidden === true
+      && runningScanLayout.statusBelowTabs
+      && runningScanLayout.statusInsideGroup
+      && runningScanLayout.documentFits,
+    `running scan layout was ${JSON.stringify(runningScanLayout)}`);
+  await runningScanPage.close();
+
   // A loopback dashboard token must survive in page memory even when browser
   // storage is disabled. Otherwise the Live bootstrap strips the fragment and
   // the main bootstrap silently sends 401s, leaving every real panel hidden
