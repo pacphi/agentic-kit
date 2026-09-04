@@ -26,6 +26,16 @@ function measurementIdentity(measurement) {
   };
 }
 
+function trackingIdentity(tracking) {
+  if (!tracking) return null;
+  return {
+    repository: tracking.repository === true,
+    tracked: typeof tracking.tracked === 'boolean' ? tracking.tracked : null,
+    workingTree: tracking.workingTree ?? 'unknown',
+    reason: tracking.reason ?? null,
+  };
+}
+
 /**
  * Hash the source facts needed to detect drift. Sensitive values are allowed
  * inside this one-way input, but only the digest leaves this module.
@@ -59,6 +69,8 @@ export function sourceFingerprint(footprint = {}) {
             enabled: presence.provider.enabled ?? null,
           } : null,
           digest: measurementIdentity(presence?.digest),
+          definition: measurementIdentity(presence?.definition),
+          tracking: trackingIdentity(presence?.tracking),
         })),
       })),
     } : null,

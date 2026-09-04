@@ -14,6 +14,15 @@ const VERSION_KEYS = [
   'sourceRevision', 'cacheGeneration', 'contentDigest',
 ];
 const RESOURCE_KEYS = ['kind', 'id', 'name', 'host', 'scope', 'providerId', 'providerRef', 'projectRef'];
+const RELATIONSHIP_KINDS = new Set([
+  'redundant-project-override', 'same-name-different-definition',
+  'tracked-source-copy', 'legacy-equivalent-transport',
+]);
+const RELATIONSHIP_BASES = new Set(['same-definition', 'different-definition', 'provider-equivalent', 'unknown']);
+const RELATIONSHIP_ROLES = new Set(['project-copy', 'shared-copy', 'canonical', 'legacy', 'candidate', 'preserved']);
+const OWNERSHIP = new Set(['receipt-owned', 'plugin-owned', 'user-owned', 'unknown']);
+const TRACKING = new Set(['tracked', 'untracked', 'unknown']);
+const WORKING_TREE = new Set(['clean', 'changed', 'unknown']);
 
 function text(value, max = 500) {
   return typeof value === 'string'
@@ -63,6 +72,30 @@ function publicResource(value) {
   return picked(value, RESOURCE_KEYS, 200);
 }
 
+function publicRelationship(value) {
+  if (!value || typeof value !== 'object' || !RELATIONSHIP_KINDS.has(value.kind)) return null;
+  const rawMembers = Array.isArray(value.members) ? value.members : [];
+  const members = rawMembers.slice(0, 8).flatMap((member) => {
+    if (!member || typeof member !== 'object' || !RELATIONSHIP_ROLES.has(member.role)) return [];
+    const projected = picked(member, ['label', 'host', 'scope', 'providerRef', 'projectRef', 'projectLabel'], 200);
+    return [{
+      role: member.role, ...projected,
+      ownership: OWNERSHIP.has(member.ownership) ? member.ownership : 'unknown',
+      tracking: TRACKING.has(member.tracking) ? member.tracking : 'unknown',
+      workingTree: WORKING_TREE.has(member.workingTree) ? member.workingTree : 'unknown',
+    }];
+  });
+  const memberCount = Number.isFinite(value.memberCount)
+    ? Math.max(members.length, Math.round(value.memberCount)) : rawMembers.length;
+  return {
+    kind: value.kind,
+    basis: RELATIONSHIP_BASES.has(value.basis) ? value.basis : 'unknown',
+    resolution: value.resolution === 'provider-observed' ? 'provider-observed' : 'not-reported',
+    memberCount, truncated: value.truncated === true || rawMembers.length > members.length,
+    members,
+  };
+}
+
 function publicFinding(finding) {
   const value = finding && typeof finding === 'object' ? finding : {};
   const evidence = value.evidence && typeof value.evidence === 'object' ? value.evidence : {};
@@ -73,6 +106,7 @@ function publicFinding(finding) {
   const sources = evidenceTextList(evidence.sources);
   const source = evidenceText(evidence.source);
   const owner = text(value.owner) ?? text(value.ownership?.owner);
+  const relationship = publicRelationship(value.relationship);
   return {
     ...picked(value, ['id', 'state', 'bucket', 'classification', 'safetyClass', 'headline', 'explanation', 'owner']),
     ...(owner ? { owner } : {}),
@@ -92,10 +126,14 @@ function publicFinding(finding) {
     impact: {
       ...picked(impact, ['summary', 'bytes', 'files', 'dependencies', 'capabilities', 'projects', 'preserved']),
     },
-    nextAction: picked(next, [
+    nextAction: {
+      ...picked(next, [
       'operation', 'label', 'providerId', 'providerVersion', 'safetyClass', 'rollback',
-      'restart', 'executable', 'summary', 'guidance',
-    ]),
+      'restart', 'executable', 'summary', 'guidance', 'recommendation', 'blockedReason',
+      ]),
+      steps: textList(next.steps, 6), preserved: textList(next.preserved, 8),
+    },
+    ...(relationship ? { relationship } : {}),
   };
 }
 

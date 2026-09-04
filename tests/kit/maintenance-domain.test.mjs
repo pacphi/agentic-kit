@@ -158,6 +158,61 @@ test('cross-project revision diversity is context, not hundreds of maintenance a
   assert.deepEqual(findings, []);
 });
 
+test('project and shared resources become one relationship finding per human decision', () => {
+  const input = footprint();
+  input.storage.reclaimables = [];
+  const digest = (value) => ({ status: 'measured', value, partial: false, asOf: NOW });
+  const observed = (value) => ({ digest: digest(value), definition: digest(value) });
+  input.catalog.items = [{
+    canonicalId: 'skill:shared', kind: 'skill', name: 'shared', capabilityName: 'shared',
+    presence: [
+      { host: 'codex', scope: 'user', sourceFile: '/private/user/shared/SKILL.md', ...observed('same') },
+      { host: 'codex', scope: 'project', project: '/private/project-a', sourceFile: '/private/project-a/.agents/skills/shared/SKILL.md',
+        ...observed('same'), tracking: { repository: true, tracked: false, workingTree: 'clean' } },
+    ],
+  }, {
+    canonicalId: 'skill:project-mode', kind: 'skill', name: 'project-mode', capabilityName: 'project-mode',
+    presence: [
+      { host: 'claude', scope: 'user', sourceFile: '/private/user/project-mode/SKILL.md', ...observed('user') },
+      { host: 'claude', scope: 'project', project: '/private/project-b', sourceFile: '/private/project-b/.claude/skills/project-mode/SKILL.md',
+        ...observed('project'), tracking: { repository: true, tracked: false, workingTree: 'clean' } },
+    ],
+  }, {
+    canonicalId: 'agent:reviewer', kind: 'agent', name: 'reviewer', capabilityName: 'reviewer',
+    presence: [
+      { host: 'claude', scope: 'plugin', sourceFile: '/private/plugin/agents/reviewer.md',
+        provider: { ref: 'review-tools@market' }, ...observed('agent-same') },
+      { host: 'claude', scope: 'project', project: '/private/project-c', sourceFile: '/private/project-c/.claude/agents/reviewer.md',
+        ...observed('agent-same'), tracking: { repository: true, tracked: true, workingTree: 'clean' } },
+    ],
+  }, {
+    canonicalId: 'mcpServer:claude-flow', kind: 'mcpServer', name: 'claude-flow', capabilityName: 'claude-flow',
+    presence: [{ host: 'claude', scope: 'user', sourceFile: '/private/user/.claude.json', ...observed('ruflo-transport') }],
+  }, {
+    canonicalId: 'mcpServer:ruflo', kind: 'mcpServer', name: 'ruflo', capabilityName: 'ruflo',
+    presence: [{ host: 'claude', scope: 'project', project: '/private/project-d', sourceFile: '/private/project-d/.mcp.json',
+      ...observed('ruflo-transport'), tracking: { repository: true, tracked: false, workingTree: 'clean' } }],
+  }];
+
+  const { findings } = scanMaintenanceFindings({ footprint: input, now: () => NOW });
+  const relationships = findings.filter((finding) => finding.relationship);
+  assert.deepEqual(relationships.map((finding) => finding.classification).sort(), [
+    'legacy-equivalent-transport',
+    'redundant-project-override',
+    'same-name-different-definition',
+    'tracked-source-copy',
+  ]);
+  assert.equal(relationships.every((finding) => finding.nextAction.executable === false), true);
+  assert.equal(relationships.every((finding) => finding.bucket === 'needsReview'), true);
+  assert.equal(relationships.every((finding) => finding.relationship.memberCount === 2), true);
+  assert.equal(relationships.every((finding) => finding.nextAction.recommendation
+    && finding.nextAction.steps.length >= 2 && finding.nextAction.blockedReason), true,
+  'each report-only finding still gives the user a concrete procedure');
+  assert.equal(findings.filter((finding) => finding.resource.name === 'project-mode').length, 1,
+    'the grouped relationship replaces generic per-item ambiguity');
+  assert.doesNotMatch(JSON.stringify(relationships), /\/private\//);
+});
+
 test('stale evidence is visible and cannot produce a safe cleanup classification', () => {
   const input = footprint();
   input.snapshot.stale = true;

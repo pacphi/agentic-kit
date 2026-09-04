@@ -184,6 +184,32 @@ test('maintenance dashboard projection removes local paths from public evidence 
   ]);
 });
 
+test('maintenance dashboard projection bounds relationship evidence to typed, path-free members', () => {
+  const members = Array.from({ length: 10 }, (_, index) => ({
+    role: index === 0 ? 'project-copy' : 'shared-copy',
+    label: `<copy-${index}>`, host: 'codex', scope: index === 0 ? 'project' : 'user',
+    projectRef: `maintenance-project-${index}`, projectLabel: `project-${index}`,
+    ownership: index === 0 ? 'unknown' : 'user-owned',
+    tracking: index === 0 ? 'untracked' : 'unknown', workingTree: 'clean',
+    path: `/Users/alice/private-${index}`, command: 'rm -rf /', digest: `secret-${index}`,
+  }));
+  const projected = publicMaintenanceModel({ findings: [{
+    id: 'relationship-a', classification: 'redundant-project-override',
+    relationship: {
+      kind: 'redundant-project-override', basis: 'same-entrypoint', resolution: 'not-reported',
+      memberCount: 10, truncated: false, members,
+      arbitrary: '/Users/alice/must-not-leak',
+    },
+  }] });
+
+  assert.deepEqual(projected.findings[0].relationship.members.length, 8);
+  assert.equal(projected.findings[0].relationship.memberCount, 10);
+  assert.equal(projected.findings[0].relationship.truncated, true);
+  assert.deepEqual(Object.keys(projected.findings[0].relationship).sort(),
+    ['basis', 'kind', 'memberCount', 'members', 'resolution', 'truncated']);
+  assert.doesNotMatch(JSON.stringify(projected), /\/Users\/alice|rm -rf|secret-/);
+});
+
 test('dashboard Maintenance API keeps GET lazy and mutation paths exact', async (t) => {
   const service = fixtureService();
   const server = await startDashboard({
