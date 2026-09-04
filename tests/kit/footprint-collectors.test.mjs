@@ -772,6 +772,8 @@ test('project git and node_modules bytes stay separate from the working tree', (
   assert.equal(row.gitBytes.value, gitBytes);
   assert.equal(row.nodeModulesBytes.value, moduleBytes);
   assert.equal(row.totalBytes.value, treeBytes + gitBytes + moduleBytes);
+  assert.equal(row.totalFiles.status, MEASURED);
+  assert.equal(row.footprintMtime.status, MEASURED);
   assert.deepEqual(row.treeExclusions, ['.git', 'node_modules']);
   assert.equal(row.presence, 'present');
   assert.equal(row.complete, true);
@@ -798,7 +800,7 @@ test('a project path that vanished is unknown everywhere, never a zero-byte proj
     { fsImpl: fixtureFs(root) });
   assert.equal(row.presence, 'absent');
   for (const figure of [row.treeBytes, row.gitBytes, row.nodeModulesBytes, row.totalBytes,
-    row.lastActivity, row.loc.total]) {
+    row.totalFiles, row.footprintMtime, row.lastActivity, row.loc.total]) {
     assert.equal(figure.status, UNKNOWN);
     assert.equal(figure.value, null);
   }

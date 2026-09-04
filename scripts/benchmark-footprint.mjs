@@ -101,7 +101,8 @@ function runBenchmark({ trees }) {
     install, projects: projects.projects, includeProjectTrees: trees, walk,
   }));
   const storage = measure('storage', () => collectStorage({
-    projects: projectPaths, install, consumers, now: () => install.asOf, walk,
+    projects: projectPaths, install, consumers, projectFootprints: projects.projects,
+    now: () => install.asOf, walk,
   }));
   const catalog = measure('catalog', () => collectCatalog({
     cwd: process.cwd(), cfg, projects: projectPaths, walk,

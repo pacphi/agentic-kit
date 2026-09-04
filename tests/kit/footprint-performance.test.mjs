@@ -7,8 +7,8 @@ import path from 'node:path';
 import { collectConsumers } from '../../src/lib/footprint/consumers.mjs';
 import { npxEnvNodes } from '../../src/lib/footprint/install.mjs';
 import { collectProjects } from '../../src/lib/footprint/projects.mjs';
-import { collectStorage, STORAGE_DEFAULTS } from '../../src/lib/footprint/storage.mjs';
-import { walkTree } from '../../src/lib/footprint/walk.mjs';
+import { collectStorage, STORAGE_DEFAULTS, worktreeReclaimables } from '../../src/lib/footprint/storage.mjs';
+import { measured, walkTree } from '../../src/lib/footprint/walk.mjs';
 
 function fixture(t, name) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `ak-footprint-perf-${name}-`));
@@ -193,6 +193,56 @@ test('storage rejects npx evidence that is stale or not rooted at an immediate c
 
   assert.equal(fallbackWalks, 1, 'untrusted reuse evidence must fall back to a fresh bounded walk');
   assert.equal(result.reclaimables[0].path, env);
+});
+
+test('worktree review reuses a complete same-scan Project footprint', (t) => {
+  const root = fixture(t, 'worktree-project-adoption');
+  const now = Date.now();
+  const project = path.join(root, 'repo');
+  const checkout = path.join(root, 'checkout');
+  const record = path.join(project, '.git', 'worktrees', 'feature');
+  fs.mkdirSync(checkout, { recursive: true });
+  fs.mkdirSync(record, { recursive: true });
+  fs.writeFileSync(path.join(record, 'gitdir'), `${path.join(checkout, '.git')}\n`);
+  let walks = 0;
+  const rows = worktreeReclaimables({
+    asOf: now,
+    projects: [project],
+    projectFootprints: [{
+      path: checkout,
+      totalBytes: measured(4096, { asOf: now }),
+      totalFiles: measured(3, { asOf: now }),
+      footprintMtime: measured(now - 200 * 86_400_000, { asOf: now }),
+      complete: true,
+    }],
+    opts: { ...STORAGE_DEFAULTS },
+    walk() { walks += 1; throw new Error('same-scan Project evidence should be reused'); },
+    limits: {},
+    fsImpl: fs,
+  });
+
+  assert.equal(walks, 0);
+  assert.equal(rows[0]?.bytes.value, 4096);
+  assert.equal(rows[0]?.files.value, 3);
+  assert.match(rows[0]?.rationale ?? '', /200d/);
+
+  walks = 0;
+  worktreeReclaimables({
+    asOf: now,
+    projects: [project],
+    projectFootprints: [{
+      path: checkout,
+      totalBytes: measured(4096, { asOf: now }),
+      totalFiles: measured(3, { asOf: now }),
+      footprintMtime: measured(now - 200 * 86_400_000, { asOf: now }),
+      complete: false,
+    }],
+    opts: { ...STORAGE_DEFAULTS },
+    walk(target, options) { walks += 1; return walkTree(target, options); },
+    limits: {},
+    fsImpl: fs,
+  });
+  assert.equal(walks, 1, 'partial Project evidence must fall back to the checkout walk');
 });
 
 test('projects measure only hosted repositories with recorded sessions and count every exclusion', (t) => {

@@ -89,6 +89,8 @@ test('an injected collector graph remains inline and preserves partial sections'
         'Storage receives the exact Install observation from this scan');
       assert.strictEqual(options.consumers, consumersSection,
         'Storage receives the exact Consumers observation from this scan');
+      assert.strictEqual(options.projectFootprints, projectsSection.projects,
+        'Storage receives the exact Project footprints from this scan');
       return section('storage');
     },
     catalog() { calls.push('catalog'); throw new Error('catalog refused'); },

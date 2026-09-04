@@ -638,9 +638,31 @@ export function orphanedTranscriptReclaimables({
  *  A record whose pointer cannot be read is reported as unverifiable rather
  *  than assumed dead. See storage.mjs's header for why the pointer read is in
  *  scope (the one deliberate content-read exception, bounded to 4 KB). */
-export function worktreeReclaimables({ asOf, projects, opts, walk, limits, fsImpl }) {
+function reusableProjectFootprints(rows, asOf) {
+  const index = new Map();
+  const keyOf = (target) => {
+    const resolved = path.resolve(target);
+    return process.platform === 'linux' ? resolved : resolved.toLowerCase();
+  };
+  for (const row of rows ?? []) {
+    const facts = [row?.totalBytes, row?.totalFiles, row?.footprintMtime];
+    if (!row?.path || row.complete === false
+        || facts.some((fact) => !hasValue(fact) || fact.partial === true || fact.asOf !== asOf)) continue;
+    index.set(keyOf(row.path), {
+      bytes: row.totalBytes,
+      files: row.totalFiles,
+      newestMtimeMs: row.footprintMtime.value,
+    });
+  }
+  return (target) => index.get(keyOf(target)) ?? null;
+}
+
+export function worktreeReclaimables({
+  asOf, projects, opts, walk, limits, fsImpl, projectFootprints = null,
+}) {
   const rows = [];
   let walks = 0;
+  const projectObservation = reusableProjectFootprints(projectFootprints, asOf);
   for (const project of projects) {
     const adminRoot = path.join(project, '.git', 'worktrees');
     let entries;
@@ -685,11 +707,15 @@ export function worktreeReclaimables({ asOf, projects, opts, walk, limits, fsImp
         }));
         continue;
       }
-      if (walks >= opts.maxWorktreeWalks) continue;
-      walks += 1;
-      const result = walk(checkout, { ...limits, fsImpl });
-      const { bytes, files } = rootMeasurements(result, { asOf });
-      const idleMs = result.newestMtimeMs === null ? null : asOf - result.newestMtimeMs;
+      const observed = projectObservation(checkout);
+      if (!observed && walks >= opts.maxWorktreeWalks) continue;
+      if (!observed) walks += 1;
+      const result = observed ? null : walk(checkout, { ...limits, fsImpl });
+      const { bytes, files, newestMtimeMs } = observed ?? {
+        ...rootMeasurements(result, { asOf }),
+        newestMtimeMs: result.newestMtimeMs,
+      };
+      const idleMs = newestMtimeMs === null ? null : asOf - newestMtimeMs;
       if (idleMs === null || idleMs < opts.worktreeIdleDays * 86_400_000) continue;
       rows.push(candidate({
         id: `idle-worktree:${record}`,

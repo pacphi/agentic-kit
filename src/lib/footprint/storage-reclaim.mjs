@@ -66,7 +66,8 @@ export const RECLAIM_SAFETY_MEANING = Object.freeze({
 export function collectReclaimables({
   asOf, agedTranscripts, transcriptProjects = new Map(), projects, opts, walk, limits,
   detectWorktrees, detectCaches = true, detectOrphanedTranscripts = true,
-  consumers = null, install = null, env = process.env, decodeDir = decodeClaudeProjectDir, fsImpl,
+  consumers = null, install = null, projectFootprints = null,
+  env = process.env, decodeDir = decodeClaudeProjectDir, fsImpl,
 }) {
   const rows = [];
   const days = (ms) => Math.floor((asOf - ms) / 86_400_000);
@@ -107,7 +108,9 @@ export function collectReclaimables({
     rows.push(...runtimeVersionReclaimables(ctx, runtimeVersionRoots({ env })));
   }
   if (detectWorktrees && Array.isArray(projects)) {
-    rows.push(...worktreeReclaimables({ asOf, projects, opts, walk, limits, fsImpl }));
+    rows.push(...worktreeReclaimables({
+      asOf, projects, opts, walk, limits, fsImpl, projectFootprints,
+    }));
   }
   return rows.sort((a, b) => (b.bytes.value ?? 0) - (a.bytes.value ?? 0));
 }

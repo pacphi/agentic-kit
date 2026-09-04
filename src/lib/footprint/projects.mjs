@@ -404,6 +404,8 @@ function missingProject(project, reason, presence = 'absent') {
     nodeModulesBytes: unknown(reason),
     nodeModulesRoots: [],
     totalBytes: unknown(reason),
+    totalFiles: unknown(reason),
+    footprintMtime: unknown(reason),
     lastActivity: unknown(reason),
     treeExclusions: [...OVERHEAD_DIRS],
     complete: false,
@@ -462,9 +464,17 @@ export function measureProject(project, {
   // An empty roots list is a real, measured zero — this project has no
   // node_modules — which is why it is stated explicitly rather than handed to
   // sumMeasurements, whose empty-list zero would mean the same thing by accident.
+  const moduleNodes = moduleRoots.map((dir) => walkNode(walk, dir, common));
   const nodeModulesBytes = moduleRoots.length === 0
     ? measured(0, { asOf })
-    : sumMeasurements(moduleRoots.map((dir) => walkNode(walk, dir, common).bytes), { asOf });
+    : sumMeasurements(moduleNodes.map((node) => node.bytes), { asOf });
+  const totalFiles = sumMeasurements([
+    tree.files, git.files, ...moduleNodes.map((node) => node.files),
+  ], { asOf });
+  const footprintMtimeMs = [tree, git, ...moduleNodes]
+    .map((node) => node.newestMtimeMs)
+    .filter(Number.isFinite)
+    .reduce((latest, value) => Math.max(latest, value), -Infinity);
 
   // ONE detection pass, split into its two projections below: lines belong to
   // languages, presence belongs to frameworks/SDKs/tools, and the tail names what
@@ -489,6 +499,10 @@ export function measureProject(project, {
     nodeModulesBytes,
     nodeModulesRoots: moduleRoots,
     totalBytes: sumMeasurements([tree.bytes, git.bytes, nodeModulesBytes], { asOf }),
+    totalFiles,
+    footprintMtime: Number.isFinite(footprintMtimeMs)
+      ? measured(footprintMtimeMs, { asOf })
+      : unknown('no readable file in project footprint'),
     // Working-tree mtime only: `.git` and `node_modules` churn on operations the
     // user did not perform, so including them would report a `pnpm install` as
     // "last active".
@@ -496,7 +510,7 @@ export function measureProject(project, {
       ? unknown('no readable working-tree entry')
       : measured(tree.newestMtimeMs, { asOf }),
     treeExclusions: [...OVERHEAD_DIRS],
-    complete: tree.complete && git.complete,
+    complete: tree.complete && git.complete && moduleNodes.every((node) => node.complete),
   };
 }
 

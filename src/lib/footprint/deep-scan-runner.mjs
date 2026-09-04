@@ -146,6 +146,7 @@ export async function runDeepScan(options) {
       // to its existing bounded measurements.
       install: sections.install,
       consumers: sections.consumers,
+      projectFootprints: sections.projects?.projects ?? null,
       now: () => startedAt, fsImpl, ...(collectorOptions.storage ?? {}),
     }));
     await breathe();
