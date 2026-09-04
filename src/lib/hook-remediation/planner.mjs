@@ -6,6 +6,7 @@ import { sha256, stableJson, stableValue } from '../hook-audit/common.mjs';
 import {
   legacyRufloProjectHookSignature, retireLegacyRufloProjectHooks,
 } from '../hook-audit/codex-legacy.mjs';
+import { compileCodexAutoMemoryActions } from './codex-auto-memory.mjs';
 import { inspectHookTarget } from './fs-port.mjs';
 import { compileCodexPluginActions } from './codex-plugin.mjs';
 
@@ -315,6 +316,7 @@ function compileProvider(host, hostReport, options) {
     ? [
       ...timeoutActions,
       ...compileLegacyRufloActions(hostReport, options),
+      ...compileCodexAutoMemoryActions(hostReport, options).map(withActionId),
       ...compileCodexPluginActions(hostReport, options).map(withActionId),
     ]
     : timeoutActions;

@@ -71,17 +71,26 @@ function rufloAutoMemorySource() {
   return `
 const log = (msg) => console.log('[AutoMemory] ' + msg);
 const success = (msg) => console.log('[AutoMemory] ' + msg);
+class JsonFileBackend {
+  async query(opts) {
+    let results = [];
+    if (opts?.namespace) results = results.filter(e => e.namespace === opts.namespace);
+    if (opts?.type) results = results.filter(e => e.type === opts.type);
+    return results;
+  }
+}
+async function doImport() { log('Importing auto memory files into bridge...'); success('Imported'); }
 async function doSync() { log('Syncing insights to auto memory files...'); success('Synced'); }
 const command = process.argv[2] || 'status';
-switch (command) { case 'sync': await doSync(); break; }
+switch (command) { case 'import': await doImport(); break; case 'sync': await doSync(); break; }
 process.exit(0);
 `;
 }
 
-function signedRufloManifest(helper, { digest = null, signature = null } = {}) {
+function signedRufloManifest(helper, { digest = null, signature = null, version = '3.38.20' } = {}) {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
   const manifest = {
-    version: '3.38.20',
+    version,
     files: { 'auto-memory-hook.mjs': digest ?? createHash('sha256').update(helper).digest('hex') },
   };
   const bytes = Buffer.from(JSON.stringify({ version: manifest.version, files: manifest.files }), 'utf8');
@@ -266,6 +275,52 @@ test('Codex attributes exact Ruflo AutoMemory Stop stdout incompatibility withou
     assert.equal(action.upstream.dependency, 'ruflo');
     assert.equal(action.upstream.owner, 'ruvnet/ruflo');
     assert.equal(report.summary.automaticActions, 0);
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('Codex 0.153.2 attributes the exact signed Ruflo AutoMemory idempotency defect', () => {
+  const fx = fixture();
+  try {
+    const helper = rufloAutoMemorySource();
+    const signed = signedRufloManifest(helper, { version: '3.38.21' });
+    const prefix = 'sh -c \'D="${CLAUDE_PROJECT_DIR:-.}"; [ -f "$D/.claude/helpers/auto-memory-hook.mjs" ] || D="${HOME}"; exec node "$D/.claude/helpers/auto-memory-hook.mjs"';
+    write(path.join(fx.project, '.codex', 'hooks.json'), {
+      hooks: {
+        SessionStart: [{ hooks: [{
+          type: 'command', command: `${prefix} import'`, timeout: 8000,
+        }] }],
+        Stop: [{ hooks: [{
+          type: 'command', command: `${prefix} sync'`, timeout: 10000,
+        }] }],
+      },
+    });
+    write(path.join(fx.project, '.claude', 'helpers', 'auto-memory-hook.mjs'), helper);
+    write(path.join(fx.project, '.claude', 'helpers', 'helpers.manifest.json'), signed.document);
+
+    const report = auditCodexHooks({
+      codexHome: fx.codex, projectRoots: [fx.project],
+      pluginCacheDir: path.join(fx.codex, 'plugins', 'cache'), codexVersion: '0.153.2',
+      rufloHelpersPublicKey: signed.publicKey,
+    });
+    assert.equal(report.hostSchema.confidence, 'verified');
+    const affected = report.records.filter((record) => record.diagnostics.some(
+      (item) => item.code === 'ruflo-auto-memory-import-not-idempotent',
+    ));
+    assert.equal(affected.length, 2);
+    assert.deepEqual(affected.map((record) => record.event).sort(), ['SessionStart', 'Stop']);
+    assert.ok(affected.every((record) => {
+      const diagnostic = record.diagnostics.find(
+        (item) => item.code === 'ruflo-auto-memory-import-not-idempotent',
+      );
+      return diagnostic.evidence.generatorVersion === '3.38.21'
+        && diagnostic.evidence.signatureVerified === true
+        && diagnostic.evidence.incorrectEntryTypeFilter === true;
+    }));
+    assert.equal(report.plan.filter(
+      (action) => action.diagnostic === 'ruflo-auto-memory-import-not-idempotent',
+    ).length, 2);
   } finally {
     fs.rmSync(fx.root, { recursive: true, force: true });
   }

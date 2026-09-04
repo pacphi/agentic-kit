@@ -134,6 +134,13 @@ heuristic is used. Under the exact Codex `0.152.1` profile it also recognizes th
 digest/output-path evidence. That compatibility proposal is upstream-only; generated project
 hooks and helpers remain outside the mutation port.
 
+Under the exact Codex `0.153.2` profile, the provider also recognizes the signed Ruflo `3.38.21`
+AutoMemory JSON-adapter query mismatch. The aggregate may offer one approval-required quarantine
+only when the canonical project hook source contains the complete exact import/sync pair. The
+transaction removes those two Codex occurrences together while preserving Claude settings, the
+signed helper, bridge data, native AgentDB, and unrelated hooks. Partial pairs, near matches, or
+unproven provenance remain observations without an executable action.
+
 ### Claude Code
 
 Translates user/project/managed settings and installed plugin registry, manifest and hook

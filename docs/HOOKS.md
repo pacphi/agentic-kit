@@ -77,12 +77,21 @@ compatibility separate from trust, consent, grants, reachability, and organizati
 - `never-automatic`: generated/cache targets, opaque modules, trust bypasses, unsupported
   schemas, unsafe files, or unproven ownership.
 
-Executable recipes cover canonical user-owned JSON for exact Codex CLI `0.151.0` and
-`0.152.1`, plus Claude Code `2.1.258`, `SessionEnd` timeout normalization. Under the exact
-Codex `0.152.1` profile, the planner can also retire the frozen legacy Ruflo
+Executable recipes cover canonical user-owned JSON for exact Codex CLI `0.151.0`,
+`0.152.1`, and `0.153.2`, plus Claude Code `2.1.258`, `SessionEnd` timeout normalization.
+Under the exact Codex `0.152.1` profile, the planner can also retire the frozen legacy Ruflo
 Claude-helper projection from a project when a selected, valid `ruflo-core@ruflo` plugin
-is proven. It removes only exact event/matcher/command/timeout/key-set matches, preserves
-unrelated and AutoMemory hooks, and refuses ambiguous or noncanonical inputs.
+is proven. That legacy-retirement recipe removes only exact
+event/matcher/command/timeout/key-set matches, preserves unrelated and all AutoMemory hooks,
+and refuses ambiguous or noncanonical inputs.
+
+For Codex `0.153.2`, a separate approval-required recipe quarantines Ruflo `3.38.21`'s
+exact AutoMemory `SessionStart import` and `Stop sync` pair when the provider helper and
+Ed25519 manifest match and the helper contains the proven non-idempotent query predicate.
+This prevents every new Codex session from appending another copy to
+`.claude-flow/data/auto-memory-store.json`. It does not edit Claude settings, the signed
+Ruflo helper, existing bridge rows, or the native `.swarm/agentdb-memory.db` writer. A new
+Codex session is required after apply.
 
 The exact Codex profiles can also disable `codex@openai-codex` 1.0.6 in user-owned
 `config.toml`. Detection is identity-based rather than a heuristic over all Claude

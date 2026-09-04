@@ -2,7 +2,7 @@
 
 - **Status:** Accepted; static assurance, transactional healing, bounded receipts, and read model implemented
 - **Date:** 2026-09-01
-- **Updated:** 2026-09-02
+- **Updated:** 2026-09-04
 - **Deciders:** agentic-kit maintainers
 - **Extends:** [ADR-0040](0040-codex-hook-audit-and-conservative-remediation.md)
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md),
@@ -17,6 +17,11 @@ identity across hosts and lifecycle points, keeps evidence and actions on physic
 separates non-actionable observations. The Codex provider also detects the exact signed Ruflo
 3.38.20 AutoMemory Stop-output incompatibility and routes it upstream without patching generated
 state.
+
+**Implementation note (2026-09-04):** The exact Codex `0.153.2` profile detects Ruflo
+`3.38.21`'s signed AutoMemory query-mode mismatch. A new approval-required transaction may
+quarantine only the exact Codex `SessionStart import` and `Stop sync` pair. Claude settings, the
+signed helper, existing bridge data, and native AgentDB are never targets of that action.
 
 ## Context
 
@@ -73,8 +78,8 @@ Profiles name the exact locally verified host versions and a primary documentati
 source. Unknown versions receive syntax-only validation and no automatic compatibility
 repair. A newer version does not inherit a prior profile by optimistic range matching.
 
-The verified profiles are Codex CLI `0.151.0` and `0.152.1`, Claude Code `2.1.258`, and
-OpenCode `1.18.25`. Codex `0.152.1` adds the `Interrupt` event; both `SessionEnd` and
+The verified profiles are Codex CLI `0.151.0`, `0.152.1`, and `0.153.2`, Claude Code `2.1.258`,
+and OpenCode `1.18.25`. Codex `0.152.1` adds the `Interrupt` event; both `SessionEnd` and
 `Interrupt` default to one second and clamp at three seconds. The profile registry is
 updated only after source or authoritative docs and
 fixtures agree. Host releases trigger the conformance suite before widening a range or
@@ -100,6 +105,14 @@ projections from canonical project JSON when the selected `ruflo-core@ruflo` plu
 present. It preserves unrelated and AutoMemory hooks and refuses near-matches, ambiguous
 helper occurrences, and noncanonical files. The writer never approves or bypasses host
 trust.
+
+The exact Codex `0.153.2` profile adds one narrow exception to AutoMemory preservation. When an
+Ed25519-verified Ruflo `3.38.21` helper contains the proven query-mode/entry-type mismatch and the
+project hook file contains the exact `SessionStart import` plus `Stop sync` pair, one
+approval-required action quarantines both occurrences together. A missing pair, altered command,
+timeout, extra field, invalid signature, digest drift, noncanonical file, unsupported version, or
+Windows target remains non-executable. This stops new duplicate bridge rows without editing the
+provider-owned helper or changing the separate native AgentDB writer.
 
 Those exact Codex profiles also support one user-owned TOML recipe for the verified
 `codex@openai-codex` 1.0.6 placement error. The package is Claude Code's companion for invoking
@@ -301,6 +314,8 @@ Implemented in this decision:
 - exact AQE `npx` hot-path and Claude timeout-unit diagnostics with upstream-only proposals;
 - exact Ed25519-verified Ruflo AutoMemory/Codex Stop-output diagnostic with an upstream-only
   proposal;
+- exact signed Ruflo `3.38.21` AutoMemory idempotency diagnosis and transactional Codex-only
+  quarantine under the verified Codex `0.153.2` profile;
 - finding-first Hook read model v3 with per-placement evidence/actions, importance sorting and
   filtering, and separate non-actionable observations;
 - negative ownership tests proving generated and cache findings never become automatic.

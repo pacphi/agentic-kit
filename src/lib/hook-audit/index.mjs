@@ -7,6 +7,7 @@ import { createHash, verify as verifySignature } from 'node:crypto';
 
 import { inspectCodexPlugins } from '../codex-plugins.mjs';
 import { readBoundedFile, redactCommand, stableJson } from './common.mjs';
+import { codexAutoMemoryHookSignature } from './codex-auto-memory.mjs';
 import { pluginAuditFacts, pluginPlacementPlan } from './codex-plugin-placement.mjs';
 import { legacyRufloProjectHookSignature } from './codex-legacy.mjs';
 import { readCodexInlineHooks } from './codex-toml.mjs';
@@ -39,10 +40,18 @@ const SCHEMA_01521 = Object.freeze({
   }),
 });
 
-/** @type {Map<string, typeof SCHEMA_0151 | typeof SCHEMA_01521>} */
+const SCHEMA_01532 = Object.freeze({
+  ...SCHEMA_01521,
+  id: 'codex-hooks-0.153.2-2026-09-04',
+  verifiedAt: '2026-09-04',
+  implementationEvidence: 'https://github.com/openai/codex/tree/rust-v0.153.2/codex-rs/hooks',
+});
+
+/** @type {Map<string, typeof SCHEMA_0151 | typeof SCHEMA_01521 | typeof SCHEMA_01532>} */
 const CODEX_PROFILES = new Map();
 CODEX_PROFILES.set('0.151.0', SCHEMA_0151);
 CODEX_PROFILES.set('0.152.1', SCHEMA_01521);
+CODEX_PROFILES.set('0.153.2', SCHEMA_01532);
 const CODEX_HANDLER_TYPES = new Set(['command', 'mcp_tool', 'prompt', 'agent']);
 const RUFLO_AUTO_MEMORY_RELATIVE = path.join('.claude', 'helpers', 'auto-memory-hook.mjs');
 const RUFLO_HELPERS_MANIFEST_RELATIVE = path.join('.claude', 'helpers', 'helpers.manifest.json');
@@ -258,9 +267,8 @@ function verifiedRufloManifest(text, publicKey) {
   }
 }
 
-function inspectRufloAutoMemoryStop(source, command, schema, helpersPublicKey) {
-  if (schema.confidence !== 'verified' || !RUFLO_AUTO_MEMORY_COMMAND.test(command)
-      || !/\bsync\b/.test(command)) return null;
+function inspectRufloAutoMemory(source, command, schema, helpersPublicKey) {
+  if (schema.confidence !== 'verified' || !RUFLO_AUTO_MEMORY_COMMAND.test(command)) return null;
   const root = source.baseDir ?? source.projectPath;
   if (typeof root !== 'string') return null;
   const helperFile = path.join(root, RUFLO_AUTO_MEMORY_RELATIVE);
@@ -280,11 +288,18 @@ function inspectRufloAutoMemoryStop(source, command, schema, helpersPublicKey) {
   return {
     helperFile, helperDigest: helper.digest, manifestDigest: manifestRead.digest,
     generatorVersion: manifest.version, signatureVerified: true,
+    queryModeMismatch: manifest.version === '3.38.21'
+      && /if\s*\(opts\?\.type\)\s*results\s*=\s*results\.filter\(e\s*=>\s*e\.type\s*===\s*opts\.type\)/.test(helper.text),
+    humanReadableSyncOutput: exactOutputShape,
   };
 }
 
 function diagnosticsFor(event, matcher, hook, source, command, schema, helpersPublicKey) {
   const diagnostics = [];
+  const autoMemorySignature = source.kind === 'project'
+    ? codexAutoMemoryHookSignature(event, matcher, hook) : null;
+  const autoMemory = autoMemorySignature || (event === 'Stop' && /\bsync\b/.test(command))
+    ? inspectRufloAutoMemory(source, command, schema, helpersPublicKey) : null;
   const maximum = schema.eventTimeouts?.[event]?.maximum ?? null;
   if (typeof hook.timeout === 'number' && maximum !== null && hook.timeout > maximum) {
     const diagnostic = event === 'SessionEnd' ? 'session-end-timeout-clamped' : 'interrupt-timeout-clamped';
@@ -311,15 +326,31 @@ function diagnosticsFor(event, matcher, hook, source, command, schema, helpersPu
       message: 'Recognized legacy Ruflo Claude hook projection is incompatible with Codex',
     });
   }
+  if (autoMemorySignature && autoMemory?.queryModeMismatch) {
+    diagnostics.push({
+      category: 'compatibility', severity: 'warning',
+      code: 'ruflo-auto-memory-import-not-idempotent',
+      message: 'Ruflo AutoMemory cannot see previously imported entries, so every Codex session start appends duplicate bridge records',
+      target: source.file,
+      evidence: {
+        action: autoMemorySignature.action,
+        helperDigest: autoMemory.helperDigest,
+        manifestDigest: autoMemory.manifestDigest,
+        generatorVersion: autoMemory.generatorVersion,
+        signatureVerified: autoMemory.signatureVerified,
+        queryMode: 'hybrid',
+        incorrectEntryTypeFilter: true,
+      },
+    });
+  }
   if (commandFacts(command).shell) {
     diagnostics.push({
       category: 'security', severity: 'review', code: 'dynamic-shell',
       message: 'Command uses a shell wrapper and requires human review of expansion, cwd, and environment behavior',
     });
   }
-  if (event === 'Stop') {
-    const autoMemory = inspectRufloAutoMemoryStop(source, command, schema, helpersPublicKey);
-    if (autoMemory) diagnostics.push({
+  if (event === 'Stop' && autoMemory?.humanReadableSyncOutput) {
+    diagnostics.push({
       category: 'compatibility', severity: 'warning',
       code: 'ruflo-codex-stop-output-not-json',
       message: 'Ruflo AutoMemory writes human-readable status lines where Codex Stop accepts only an empty response or valid hook JSON',
@@ -476,6 +507,21 @@ function planFor(records) {
       reason: 'The exact Ruflo-generated helper and manifest prove canonical generator ownership; agentic-kit must not rewrite generated project hook state.',
       behaviorImpact: 'The generator must keep diagnostics off Codex Stop stdout and emit only a host-valid response.',
       trustImpact: 'A regenerated project hook requires Codex to re-evaluate the changed definition.',
+      upstream: RUFLO_UPSTREAM,
+    });
+  }
+  for (const record of records.filter((candidate) => candidate.diagnostics.some(
+    (diagnostic) => diagnostic.code === 'ruflo-auto-memory-import-not-idempotent',
+  ))) {
+    actions.push({
+      id: `codex-hook-ruflo-auto-memory-${record.occurrenceId.slice(0, 24)}`,
+      diagnostic: 'ruflo-auto-memory-import-not-idempotent',
+      target: record.source.file,
+      sourceDigest: record.source.digest,
+      classification: 'approval-required',
+      reason: 'The exact signed Ruflo 3.38.21 helper is non-idempotent; quarantine requires explicit project-owner approval and an exact paired-handler transaction.',
+      behaviorImpact: 'Stop the broken Codex-only AutoMemory mirror from appending duplicate JSON bridge rows; native AgentDB project memory is separate and unchanged.',
+      trustImpact: 'Changed project hook bytes may require Codex to re-evaluate the definition on the next session.',
       upstream: RUFLO_UPSTREAM,
     });
   }
