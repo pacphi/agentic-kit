@@ -44,7 +44,8 @@ import {
 } from './stack-detect.mjs';
 import { STACK_REGISTRY_VERSION } from './stack-registry.mjs';
 import {
-  walkTree, rootMeasurements, measured, statNode, UNKNOWN, unknown, sumMeasurements,
+  carriesWalkTreeContract, walkTree, rootMeasurements, measured, statNode,
+  MEASURED, UNKNOWN, unknown, sumMeasurements,
 } from './walk.mjs';
 
 /** Directories that are never code and never the user's work. Excluded from the
@@ -443,20 +444,27 @@ export function measureProject(project, {
   const root = project.path;
   const common = { ...limits, fsImpl, asOf };
   const observedModules = nodeModulesObserver(root);
+  const traversalCallbacks = ['skipDir', 'acceptFile', 'onFile'];
+  const hasTraversalCallback = traversalCallbacks
+    .some((key) => Object.prototype.hasOwnProperty.call(limits, key));
+  const callerSkipDir = typeof limits['skipDir'] === 'function' ? limits['skipDir'] : null;
+  const callerOnFile = typeof limits['onFile'] === 'function' ? limits['onFile'] : null;
   // The ordinary footprint walk is a traversal superset of stack detection:
   // it excludes only .git/node_modules, while the stack scope excludes those
   // plus generated/vendor trees. The observer applies the narrower contract to
   // callbacks from the broad walk. Only the built-in detector participates;
   // injected detectors retain their independent invocation contract.
   const stackObserver = loc && detect === detectStack
+    && carriesWalkTreeContract(walk) && !hasTraversalCallback
     ? createStackObserver(root, { limits, asOf, fsImpl }) : null;
   const treeResult = walk(root, {
     ...common,
     skipDir(dir, name, depth) {
       stackObserver?.onDirectory(dir, name, depth);
-      return observedModules.skipDir(dir, name, depth);
+      return observedModules.skipDir(dir, name, depth)
+        || Boolean(callerSkipDir?.(dir, name, depth));
     },
-    onFile: stackObserver?.onFile ?? null,
+    onFile: stackObserver?.onFile ?? callerOnFile,
   });
   const tree = walkedNode(treeResult, asOf);
 
@@ -500,7 +508,11 @@ export function measureProject(project, {
   // languages, presence belongs to frameworks/SDKs/tools, and the tail names what
   // neither could claim.
   const detected = loc
-    ? (stackObserver && tree.complete
+    ? (stackObserver
+      && treeResult.status === MEASURED
+      && treeResult.complete === true
+      && typeof treeResult.root === 'string'
+      && path.resolve(treeResult.root) === path.resolve(root)
       ? stackObserver.finalize(treeResult)
       : detect(root, { walk, limits, asOf, fsImpl }))
     : null;

@@ -259,6 +259,43 @@ export function walkTree(root, options = {}) {
   return result;
 }
 
+// A wrapper created here is the only supported way to instrument walkTree while
+// retaining its traversal contract. Keeping the witness in a module-local
+// WeakSet means an arbitrary injected walker cannot opt itself into evidence
+// reuse merely by returning `{ complete: true }` or attaching a public flag.
+const compatibleWalkTreeAdapters = new WeakSet();
+
+/**
+ * Wrap the built-in walker with observation hooks without changing what it
+ * traverses or returns. `before` may return opaque context that is handed to
+ * `after`; this is enough for timers and work counters without reimplementing
+ * the safety-critical walker.
+ *
+ * @param {{
+ *   before?: ((input: { root: string, options: object }) => any) | null,
+ *   after?: ((input: { root: string, options: object, result: any,
+ *                      context: any }) => void) | null,
+ * }} [hooks]
+ * @returns {typeof walkTree}
+ */
+export function instrumentWalkTree({ before = null, after = null } = {}) {
+  const instrumented = (root, options = {}) => {
+    const context = before ? before({ root, options }) : null;
+    const result = walkTree(root, options);
+    if (after) after({ root, options, result, context });
+    return result;
+  };
+  compatibleWalkTreeAdapters.add(instrumented);
+  return instrumented;
+}
+
+/** Only the built-in walker or a wrapper constructed above proves that it
+ * honored the exact options and callbacks supplied by the collector.
+ * @param {Function} walk */
+export function carriesWalkTreeContract(walk) {
+  return walk === walkTree || compatibleWalkTreeAdapters.has(walk);
+}
+
 /** A walk's byte/file figures as Measurements. An unreadable root yields
  *  unknown-with-reason; a truncated or partially degraded walk yields
  *  `partial: true` so the UI can render "at least", never a bare total. */

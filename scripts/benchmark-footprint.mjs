@@ -12,7 +12,7 @@ import { collectInstall } from '../src/lib/footprint/install.mjs';
 import { discoverProjectSources } from '../src/lib/footprint/project-sources.mjs';
 import { collectProjects } from '../src/lib/footprint/projects.mjs';
 import { collectStorage } from '../src/lib/footprint/storage.mjs';
-import { walkTree } from '../src/lib/footprint/walk.mjs';
+import { instrumentWalkTree } from '../src/lib/footprint/walk.mjs';
 
 const usage = `Usage: node scripts/benchmark-footprint.mjs [options]
 
@@ -65,10 +65,9 @@ function runBenchmark({ trees }) {
   const walkRows = [];
   const phases = [];
   let phase = 'discovery';
-  const walk = (root, options) => {
-    const started = performance.now();
-    const result = walkTree(root, options);
-    walkRows.push({
+  const walk = instrumentWalkTree({
+    before: () => performance.now(),
+    after: ({ root, result, context: started }) => walkRows.push({
       phase,
       root,
       durationMs: performance.now() - started,
@@ -76,9 +75,8 @@ function runBenchmark({ trees }) {
       files: result.files,
       directories: result.dirs,
       complete: result.complete === true,
-    });
-    return result;
-  };
+    }),
+  });
   const measure = (name, operation) => {
     phase = name;
     const started = performance.now();

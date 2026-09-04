@@ -12,7 +12,9 @@ import {
   adoptedConsumerFigures, collectStorage, STORAGE_DEFAULTS, worktreeReclaimables,
 } from '../../src/lib/footprint/storage.mjs';
 import { runtimeVersionReclaimables } from '../../src/lib/footprint/storage-reclaim-detectors.mjs';
-import { measured, walkTree } from '../../src/lib/footprint/walk.mjs';
+import {
+  instrumentWalkTree, measured, walkTree,
+} from '../../src/lib/footprint/walk.mjs';
 
 function fixture(t, name) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `ak-footprint-perf-${name}-`));
@@ -446,17 +448,33 @@ test('project measurement reuses node_modules roots observed by its complete wor
   fs.writeFileSync(path.join(project, 'node_modules', 'pkg', 'index.js'), 'module.exports = 1;\n');
   fs.mkdirSync(path.join(project, 'dist'), { recursive: true });
   fs.writeFileSync(path.join(project, 'dist', 'generated.js'), 'generated();\n');
+  fs.mkdirSync(path.join(project, 'vendor'), { recursive: true });
+  fs.writeFileSync(path.join(project, 'vendor', 'vendored.js'), 'vendored();\n');
+  fs.mkdirSync(path.join(project, '.github', 'workflows'), { recursive: true });
+  fs.writeFileSync(path.join(project, '.github', 'workflows', 'test.yml'), 'jobs: {}\n');
+  fs.mkdirSync(path.join(project, '.terraform'), { recursive: true });
+  fs.writeFileSync(path.join(project, '.terraform', 'generated.tf'), 'resource "x" "y" {}\n');
+  fs.mkdirSync(path.join(project, 'packages', 'app'), { recursive: true });
+  fs.writeFileSync(path.join(project, 'packages', 'app', 'package.json'),
+    JSON.stringify({ dependencies: { 'unknown-fixture-package': '1' } }));
+  fs.writeFileSync(path.join(project, 'unknown.fixture-extension'), 'unknown\n');
+  fs.writeFileSync(path.join(project, 'image.png'), Buffer.from([0, 1, 2, 3]));
+  fs.writeFileSync(path.join(project, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
+  fs.writeFileSync(path.join(project, 'binary.js'), Buffer.from([0, 1, 2, 3]));
+  const boundary = path.join(project, ...Array.from({ length: 12 }, (_, index) => `b${index}`));
+  fs.mkdirSync(boundary, { recursive: true });
+  fs.writeFileSync(path.join(boundary, 'boundary.js'), 'atBoundary();\n');
   const tooDeep = path.join(project, ...Array.from({ length: 13 }, (_, index) => `d${index}`));
   fs.mkdirSync(tooDeep, { recursive: true });
   fs.writeFileSync(path.join(tooDeep, 'ignored.js'), 'tooDeep();\n');
 
   const walked = [];
+  const walk = instrumentWalkTree({
+    before: ({ root: target }) => walked.push(target),
+  });
   const result = collectProjects({
     projects: [{ path: project, label: 'repo', hosts: ['codex'] }],
-    walk(target, options) {
-      walked.push(target);
-      return walkTree(target, options);
-    },
+    walk,
     fsImpl: fs,
     loc: true,
     now: () => 1,
@@ -484,6 +502,61 @@ test('project measurement reuses node_modules roots observed by its complete wor
     'manifest, signature, and unrecognized evidence must remain byte-for-byte equivalent');
 });
 
+test('project stack reuse rejects an unproven injected walker', (t) => {
+  const root = fixture(t, 'project-stack-unproven-walk');
+  const project = path.join(root, 'repo');
+  fs.mkdirSync(path.join(project, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(project, '.git', 'config'),
+    '[remote "origin"]\n\turl = https://github.com/pacphi/repo.git\n');
+  fs.writeFileSync(path.join(project, 'index.mjs'), 'export default 1;\n');
+  const walked = [];
+
+  const row = collectProjects({
+    projects: [{ path: project, label: 'repo', hosts: ['codex'] }],
+    walk(target, options) {
+      walked.push(target);
+      return walkTree(target, options);
+    },
+    now: () => 1,
+  }).projects[0];
+
+  assert.equal(row.loc.total.value, 1);
+  assert.equal(walked.filter((target) => target === project).length, 2,
+    'a complete-looking custom result cannot authorize observation reuse');
+});
+
+test('project stack fallback preserves traversal callbacks without filtering stack evidence', (t) => {
+  const root = fixture(t, 'project-stack-callback-fallback');
+  const project = path.join(root, 'repo');
+  fs.mkdirSync(path.join(project, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(project, '.git', 'config'),
+    '[remote "origin"]\n\turl = https://github.com/pacphi/repo.git\n');
+  fs.writeFileSync(path.join(project, 'index.mjs'), 'export default 1;\n');
+  fs.writeFileSync(path.join(project, 'package.json'), '{}\n');
+  const observed = [];
+  const walked = [];
+  const walk = instrumentWalkTree({
+    before: ({ root: target }) => walked.push(target),
+  });
+
+  const row = collectProjects({
+    projects: [{ path: project, label: 'repo', hosts: ['codex'] }],
+    walk,
+    limits: {
+      acceptFile: (name) => name !== 'index.mjs',
+      onFile: ({ name }) => observed.push(name),
+    },
+    now: () => 1,
+  }).projects[0];
+
+  assert.equal(row.loc.byLanguage.javascript, 1,
+    'the independent Stack pass retains its own source-file acceptance contract');
+  assert.equal(observed.includes('package.json'), true,
+    'the project footprint still invokes its caller-provided onFile callback');
+  assert.equal(walked.filter((target) => target === project).length, 2,
+    'custom traversal callbacks make the parent observation ineligible for reuse');
+});
+
 test('project measurement falls back to bounded dependency discovery after a degraded tree walk', (t) => {
   const root = fixture(t, 'project-node-modules-fallback');
   const project = path.join(root, 'repo');
@@ -507,14 +580,14 @@ test('project measurement falls back to bounded dependency discovery after a deg
   };
 
   const walked = [];
+  const walk = instrumentWalkTree({
+    before: ({ root: target }) => walked.push(target),
+  });
   const row = collectProjects({
     projects: [{ path: project, label: 'repo', hosts: ['codex'] }],
     fsImpl,
     loc: true,
-    walk(target, options) {
-      walked.push(target);
-      return walkTree(target, options);
-    },
+    walk,
     now: () => 1,
   }).projects[0];
 
