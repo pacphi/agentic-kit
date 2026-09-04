@@ -93,8 +93,9 @@ const relationshipCopy = Object.freeze({
   },
 });
 
-const definitionDigest = (presence) => presence?.definition?.status === 'measured'
-  && presence.definition.partial !== true ? presence.definition.value : null;
+const definitionDigest = (presence) => ['measured', 'carried-forward'].includes(presence?.definition?.status)
+  && presence?.definition?.partial !== true && presence?.definition?.value
+  ? presence.definition.value : null;
 
 function relationshipMember(presence, role) {
   const tracking = presence?.tracking ?? {};

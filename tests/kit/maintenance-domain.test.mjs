@@ -166,7 +166,8 @@ test('project and shared resources become one relationship finding per human dec
   input.catalog.items = [{
     canonicalId: 'skill:shared', kind: 'skill', name: 'shared', capabilityName: 'shared',
     presence: [
-      { host: 'codex', scope: 'user', sourceFile: '/private/user/shared/SKILL.md', ...observed('same') },
+      { host: 'codex', scope: 'user', sourceFile: '/private/user/shared/SKILL.md',
+        ...observed('same'), definition: { ...digest('same'), status: 'carried-forward' } },
       { host: 'codex', scope: 'project', project: '/private/project-a', sourceFile: '/private/project-a/.agents/skills/shared/SKILL.md',
         ...observed('same'), tracking: { repository: true, tracked: false, workingTree: 'clean' } },
     ],
