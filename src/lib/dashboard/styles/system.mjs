@@ -25,18 +25,21 @@ export const SYSTEM_CSS = `
    reason rides the title so a reader can find out why without leaving. */
 .sy-unk{color:var(--ink-dim); font-style:italic; cursor:help}
 .sy-approx{color:var(--ink-dim)}
-#secondary-system{flex-wrap:wrap}
-#secondary-system>.subseg{flex:1 1 auto;min-width:0}
-.sy-freshness{display:flex; align-items:center; flex-wrap:wrap; gap:9px; max-width:100%; font-size:12px; color:var(--ink-2)}
-.sy-freshness[data-running="1"]{
-  flex:1 0 100%;width:100%;margin-left:0;justify-content:flex-end;min-width:0;
-  padding-top:2px
+#secondary-system{align-items:flex-start;flex-wrap:wrap}
+/* Scan state is information about every System view, not another segment in
+   the view picker. Give it a dedicated rail so a long status cannot squeeze
+   the tabs or leave a misleading stretch of empty segment after Maintenance. */
+#secondary-system>.subseg{flex:0 1 auto;min-width:0}
+.sy-freshness{
+  display:flex;align-items:center;flex:1 0 100%;width:100%;margin-left:0;
+  justify-content:flex-end;flex-wrap:wrap;gap:9px;max-width:100%;min-width:0;
+  padding-top:2px;font-size:12px;color:var(--ink-2)
 }
 .sy-freshness[data-running="1"] .sy-asof{
   max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap
 }
 @media(max-width:720px){
-  .sy-freshness{flex:1 0 100%;width:100%;margin-left:0;justify-content:flex-start}
+  .sy-freshness{position:static;padding-left:0;justify-content:flex-start}
   .sy-freshness[data-running="1"] .sy-asof{white-space:normal}
 }
 .sy-asof{font-family:var(--mono); font-size:11.5px}

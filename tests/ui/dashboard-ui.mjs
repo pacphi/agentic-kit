@@ -1164,6 +1164,9 @@ async function main() {
       running: document.getElementById('system-freshness')?.getAttribute('data-running'),
       buttonHidden: button?.hidden,
       statusBelowTabs: !!status && !!tabs && status.top >= tabs.bottom - 1,
+      trailingSegmentSpace: Math.abs((tabs?.right ?? 0)
+        - (document.querySelector('#system-seg [data-system-view]:last-of-type')
+          ?.getBoundingClientRect().right ?? 0)),
       statusInsideGroup: !!status && !!group
         && status.left >= group.left - 1 && status.right <= group.right + 1,
       documentFits: document.documentElement.scrollWidth <= globalThis.innerWidth,
@@ -1174,9 +1177,36 @@ async function main() {
       && /Full scan running.*Ranking disk use.*15 of 15/.test(runningScanLayout.statusText ?? '')
       && runningScanLayout.buttonHidden === true
       && runningScanLayout.statusBelowTabs
+      && runningScanLayout.trailingSegmentSpace < 6
       && runningScanLayout.statusInsideGroup
       && runningScanLayout.documentFits,
     `running scan layout was ${JSON.stringify(runningScanLayout)}`);
+  await runningScanPage.setViewportSize({ width: 360, height: 760 });
+  const narrowScanLayout = await runningScanPage.evaluate(() => {
+    const group = document.getElementById('secondary-system')?.getBoundingClientRect();
+    const tabsElement = document.getElementById('system-seg');
+    const tabs = tabsElement?.getBoundingClientRect();
+    const statusElement = document.getElementById('system-freshness');
+    const status = statusElement?.getBoundingClientRect();
+    return {
+      documentFits: document.documentElement.scrollWidth <= globalThis.innerWidth,
+      tabsScrollInternally: (tabsElement?.scrollWidth ?? 0) > (tabsElement?.clientWidth ?? 0),
+      statusBelowTabs: !!status && !!tabs && status.top >= tabs.bottom - 1,
+      statusInsideGroup: !!status && !!group
+        && status.left >= group.left - 1 && status.right <= group.right + 1,
+      statusPosition: statusElement ? getComputedStyle(statusElement).position : null,
+      statusWhiteSpace: document.getElementById('sys-asof')
+        ? getComputedStyle(document.getElementById('sys-asof')).whiteSpace : null,
+    };
+  });
+  check('narrow System navigation scrolls internally while scan status stays in its own rail',
+    narrowScanLayout.documentFits
+      && narrowScanLayout.tabsScrollInternally
+      && narrowScanLayout.statusBelowTabs
+      && narrowScanLayout.statusInsideGroup
+      && narrowScanLayout.statusPosition === 'static'
+      && narrowScanLayout.statusWhiteSpace === 'normal',
+    `narrow scan layout was ${JSON.stringify(narrowScanLayout)}`);
   await runningScanPage.close();
 
   // A loopback dashboard token must survive in page memory even when browser
@@ -1648,6 +1678,22 @@ async function main() {
     await page.click('[data-tab="system"]');
     await page.waitForSelector('#area-system:not([hidden])');
     await page.waitForSelector('#sys-kpis .sy-kpi', { timeout: 8000 });
+    const settledScanLayout = await page.evaluate(() => {
+      const tabs = document.getElementById('system-seg')?.getBoundingClientRect();
+      const lastTab = document.querySelector('#system-seg [data-system-view]:last-of-type')
+        ?.getBoundingClientRect();
+      const status = document.getElementById('system-freshness')?.getBoundingClientRect();
+      return {
+        statusBelowTabs: !!status && !!tabs && status.top >= tabs.bottom - 1,
+        trailingSegmentSpace: Math.abs((tabs?.right ?? 0) - (lastTab?.right ?? 0)),
+        documentFits: document.documentElement.scrollWidth <= globalThis.innerWidth,
+      };
+    });
+    check('settled full-scan status cannot squeeze or visually extend the System menu',
+      settledScanLayout.statusBelowTabs
+        && settledScanLayout.trailingSegmentSpace < 6
+        && settledScanLayout.documentFits,
+      `settled scan layout was ${JSON.stringify(settledScanLayout)}`);
     for (const [view, sel] of SYSTEM_VIEWS) {
       await page.click(`[data-system-view="${view}"]`);
       await page.waitForSelector(`${sel}:not([hidden])`);
