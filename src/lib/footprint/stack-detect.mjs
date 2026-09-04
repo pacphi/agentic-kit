@@ -167,18 +167,14 @@ function countFileLines(file, size, fsImpl, buffer) {
     let lines = 0;
     let read = 0;
     let lastByte = 0;
+    let offset = 0;
     let first = true;
-    // The descriptor is private and read strictly forward, so `position: null`
-    // lets the filesystem advance its offset without a positional read. Fold
-    // first-chunk binary detection into the newline pass instead of scanning
-    // the same buffer twice (and, for short files, inspecting unused capacity).
-    while ((read = fsImpl.readSync(fd, buffer, 0, READ_CHUNK, null)) > 0) {
-      for (let i = 0; i < read; i++) {
-        if (first && buffer[i] === 0) return null;
-        if (buffer[i] === 0x0a) lines++;
-      }
+    while ((read = fsImpl.readSync(fd, buffer, 0, READ_CHUNK, offset)) > 0) {
+      if (first) { const nul = buffer.indexOf(0); if (nul >= 0 && nul < read) return null; }
       first = false;
+      for (let i = 0; i < read; i++) if (buffer[i] === 0x0a) lines++;
       lastByte = buffer[read - 1];
+      offset += read;
     }
     // A final line with no trailing newline still counts as a line.
     if (size > 0 && lastByte !== 0x0a) lines++;
