@@ -65,8 +65,8 @@ A finding is an evidence-backed condition, never an instruction. The closed stat
 - <code>unreadable-partial</code>.
 
 Every finding retains identity, owner, source, capture health, completeness, affected consumers,
-missing evidence, and a prescriptive suggested action. Missing provider authority leaves a finding
-visible but report-only.
+missing evidence, and a prescriptive action label. Missing provider authority leaves a finding
+visible but report-only with a resource-specific reason.
 
 ### CapabilityRelationship
 
@@ -85,10 +85,12 @@ All four classifications are report-only in the current service registry.
 
 ### SuggestedAction
 
-Every finding carries a recommendation, ordered procedure, expected impact, preservation boundary,
-and a reason when automation is blocked. This is human guidance, not a provider operation. An
-action becomes previewable only when a registered provider independently proves ownership, exact
-targeting, verification, and rollback behavior.
+Every finding carries a direct imperative, ordered procedure, expected impact, preservation
+boundary, and a resource-specific reason when automation is blocked. The UI presents the imperative
+in the ledger, keeps the procedure under **How to resolve**, and does not repeat safety-class enums
+for report-only work. This is human guidance, not a provider operation. An action becomes
+previewable only when a registered provider independently proves ownership, exact targeting,
+verification, and rollback behavior.
 
 ### MaintenanceAction
 
@@ -224,9 +226,10 @@ no recovery endpoint; the operator uses the CLI.
 ## Surfaces
 
 The Maintenance view groups **Updates ready**, **Safe cleanup**, **Needs review**, **Unsupported or
-blocked**, and **Recent changes / Undo**. Each ledger row exposes its recommendation. Selection
-reveals the complete procedure, expected effect, preserved resources, blocked-automation reason,
-and a bounded observed-copies table for relationship findings. Resource, host, relationship, and
+blocked**, and **Recent changes / Undo**. Each ledger row exposes a direct action. Selection reveals
+the potential effect, an optional **How to resolve** procedure, concrete preserved resources, the
+resource-specific **Not available here** reason, and a bounded observed-copies table for
+relationship findings. Resource, host, relationship, and
 text filters compose. Failed reads remain visible with **Retry report**; they do not collapse into
 blank panels. The view acts on one finding at a time and offers neither “Clean all” nor an aggregate
 reclaimable claim across safety classes.

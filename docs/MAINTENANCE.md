@@ -30,16 +30,16 @@ The view and CLI group findings as:
 These groups do not form a hygiene score. Reclaimable amounts from unlike safety classes are not
 added, and there is no “Clean all”.
 
-## Follow the suggested action
+## Act on the recommendation
 
-Every finding states a recommendation, the expected effect, a concrete procedure, what the
-procedure preserves, and—when no button is offered—why Agentic Kit cannot safely automate it.
-The ledger shows the recommendation without requiring selection; selecting the row reveals the
-complete procedure and the observed copies used to classify relationship findings.
+Every ledger row leads with an imperative such as **Upgrade**, **Uninstall**, **Clear**, **Remove**,
+**Choose**, or **Rescan**. Selecting the row shows the potential effect and a collapsed **How to
+resolve** procedure. When the dashboard cannot perform the action, **Not available here** gives the
+resource-specific reason instead of repeating generic safety policy.
 
 Project/shared relationships currently remain report-only:
 
-| Finding | Suggested action |
+| Finding | Direct action |
 |---------|------------------|
 | Identical project copy | Confirm the shared source is available to the project, back up or commit the project copy, remove only that project copy, and deep-rescan. |
 | Different definitions | Compare the complete definitions, choose the intended source of truth, then remove the unintended copy or rename the project copy when both behaviors are required. |
@@ -48,8 +48,17 @@ Project/shared relationships currently remain report-only:
 
 These are procedures, not generic delete commands. Definition equality does not prove which source
 a host loads, Git tracking does not confer mutation authority, and equivalent configuration does
-not prove transport health. Maintenance offers **Preview change** only when the live provider can
-prove ownership, exact targeting, verification, and recovery behavior.
+not prove transport health. A live provider exposes an operation-specific control such as
+**Preview update**, **Preview uninstall**, or **Preview cleanup** only after it proves ownership,
+exact targeting, verification, and recovery behavior.
+
+An old npx environment is not automatically stale. Maintenance distinguishes:
+
+- **version-stale** — a managed cached package is older than the installed managed version; an exact
+  live provider match can offer **Preview cleanup**; and
+- **idle-only** — no activity was observed for the reported number of days. The row tells you to
+  clear it only if you accept a later redownload, remains under **Needs review**, and offers no
+  dashboard action because age does not prove disuse.
 
 ## Preview before applying
 

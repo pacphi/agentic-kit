@@ -526,13 +526,15 @@ writes nothing. That preview is evidence for the separate
 ### Maintenance actions and receipts
 
 Maintenance groups findings into **Updates ready**, **Safe cleanup**, **Needs review**,
-**Unsupported or blocked**, and **Recent changes / Undo**. Each row explains the resource owner,
-evidence health, impact, restart requirement, rollback class, and missing authority. Every ledger
-row shows its recommendation. Selecting it reveals the ordered procedure, expected effect,
-preservation boundary, reason automation is unavailable, and a bounded observed-copies table for
-relationship findings. Resource, host, relationship, and text filters compose. A missing button
-means the current service did not advertise an executable provider action; the browser does not
-derive capabilities from labels.
+**Unsupported or blocked**, and **Recent changes / Undo**. Every ledger row leads with a direct
+action. Selecting it reveals the potential effect, a collapsed **How to resolve** procedure,
+concrete preserved resources, a resource-specific **Not available here** reason, and a bounded
+observed-copies table for relationship findings. Executable findings say **Preview update**,
+**Preview uninstall**, **Preview cleanup**, or the matching operation instead of **Preview change**.
+Resource, host, relationship, and text filters compose. A missing button means the current service
+did not advertise an executable provider action; the browser does not derive capabilities from
+labels. Idle-only npx environments remain **Needs review** because age does not prove disuse; only
+an exact current version-stale match can become provider-actionable.
 
 If a Maintenance read fails, the panel keeps the error visible and offers **Retry report**. If
 browser storage is blocked, dashboard bootstrap retains the authenticated fragment token in page

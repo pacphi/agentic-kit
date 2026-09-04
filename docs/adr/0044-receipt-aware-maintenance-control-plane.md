@@ -89,8 +89,8 @@ decision.
 - **CapabilityRelationship** joins project and shared occurrences for one host, resource kind, and
   logical name. The implemented classifications are identical project copy, different definition,
   tracked project copy, and equivalent legacy transport. All are report-only in this decision.
-- **SuggestedAction** is the recommendation, ordered procedure, expected impact, preservation
-  boundary, and automation-blocking reason presented for every finding. It is guidance until a
+- **SuggestedAction** is a direct imperative, ordered procedure, expected impact, concrete
+  preservation boundary, and resource-specific automation-blocking reason. It is guidance until a
   provider independently authorizes an executable action.
 - **MaintenanceAction** binds one provider operation and target identity to impact, safety class,
   rollback class, restart requirement, and verification contract.
@@ -135,7 +135,7 @@ filesystem-atomic.
 | Claude MCP | None | No Claude MCP provider is registered; findings remain report-only. |
 | OpenCode plugin and MCP | None | Explicit unsupported providers keep these findings report-only. |
 | Agentic-kit-owned skill | The conditional adapter can archive or prune under one exact ownership contract; its projected finding offers archive only | This adapter is not in the stock CLI/dashboard registry because no production receipt/root resolver supplies it yet. When composed explicitly, it requires exact roots and an <code>agentic-kit.skill-tree-ownership/v1</code> receipt covering the complete current tree. Symlinked, modified, partial, unreadable, ambiguous, unreceipted, user-owned, and plugin-cache targets are preserved. Archive is reversible and requires restart. |
-| Agentic-kit stale npx environment | Clean | Offered only for a collector candidate tied to the bounded owned npx procedure, with complete bytes/files and exact root, owner, and shape checks. It is irreversible; transcripts and unrelated caches are not executable. |
+| Agentic-kit stale npx environment | Clean | Offered only for a version-stale collector candidate tied to the bounded owned npx procedure, with complete bytes/files and exact root, owner, and shape checks. Idle-only candidates remain report-only because age does not prove disuse. It is irreversible; transcripts and unrelated caches are not executable. |
 | Ruflo MCP orphan | Terminate | Only a same-user, PPID-1, exact Ruflo MCP transport whose identity is rechecked before signalling. Numeric UID is required; Windows and unknown-UID cases stay report-only. No generic daemon kill exists. |
 
 The default service registers Claude plugin, Codex plugin, Codex MCP, and Ruflo MCP orphan
@@ -194,10 +194,12 @@ a body no larger than 64 KiB. The SSE query-token exception does not apply. The 
 recovery endpoint: it displays recovery-required evidence and directs the operator to the CLI.
 
 The view groups **Updates ready**, **Safe cleanup**, **Needs review**, **Unsupported or blocked**,
-and **Recent changes / Undo**. Every row exposes a suggested action; the selected finding adds its
-ordered procedure, expected effect, preservation boundary, blocked-automation reason, and bounded
-observed-copy evidence. It acts on one finding at a time, offers no cross-class batch or “Clean
-all”, presents unknown evidence textually, and makes confirmation, progress, receipt, and undo
+and **Recent changes / Undo**. Every row exposes a direct imperative; the selected finding adds its
+potential effect, optional **How to resolve** procedure, concrete preservation boundary,
+resource-specific **Not available here** reason, and bounded observed-copy evidence. Executable
+findings use operation-specific preview labels. It acts on one finding at a time, offers no
+cross-class batch or “Clean all”, presents unknown evidence textually, and makes confirmation,
+progress, receipt, and undo
 flows keyboard-accessible. A failed read keeps a visible **Retry report** recovery path. Dashboard
 bootstrap retains its fragment token in page memory when browser storage is unavailable, preventing
 authenticated content from degrading into blank panels.
