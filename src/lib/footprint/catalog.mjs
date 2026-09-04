@@ -2,7 +2,6 @@
 // per-source occurrences, and bounded entrypoint digests. Bodies never leave the
 // collector; traversal never follows a symlink or escapes a declared root.
 import fs from 'node:fs';
-import { createHash } from 'node:crypto';
 import path from 'node:path';
 import {
   claudeDir, claudeUserMcpPath,
@@ -16,19 +15,16 @@ import {
   artifactDigest, artifactTreeDigest, buildCatalogSourceStamps, buildProjectPressure, collectNativePluginInventory, pluginRefParts,
 } from './catalog-evidence.mjs';
 import { collectConfigSurface } from './catalog-config.mjs';
+import { readManifestKeys, readTomlTables } from './catalog-config-readers.mjs';
 import { inspectProjectArtifacts, summarizeArtifactTracking } from './catalog-project-evidence.mjs';
 import { catalogSurfaceSpecs, pluginCapabilitySpecs } from './catalog-surfaces.mjs';
 
 export { collectConfigSurface } from './catalog-config.mjs';
+export { tomlTableNames } from './catalog-config-readers.mjs';
 
 /** A capped surface reports a floor, never a total. */
 const MAX_NAMES = 4096;
 const ARTIFACT_FILES = Symbol('catalogArtifactFiles');
-const canonical = (value) => {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (!value || typeof value !== 'object') return value;
-  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]));
-};
 
 export const CATALOG_KINDS = ['skill', 'agent', 'command', 'plugin', 'mcpServer'];
 export const CATALOG_HOSTS = ['claude', 'codex', 'opencode'];
@@ -124,70 +120,6 @@ const readFileStems = (root, exts, opts = {}) => readNames(root, {
     definition: artifactDigest(file, opts), artifactFiles: [file] }),
   ...opts,
 });
-
-/** Keys of one object inside a JSON manifest. */
-function readManifestKeys(file, pick, { fsImpl = fs } = {}) {
-  const head = statNode(file, { fsImpl });
-  if (head.status === 'unknown') {
-    return emptyReading(head.reason === 'ENOENT' ? 'absent' : 'degraded', head.reason);
-  }
-  let doc;
-  try { doc = JSON.parse(fsImpl.readFileSync(file, 'utf8')); }
-  catch { return emptyReading('degraded', 'EPARSE'); }
-  const bag = pick(doc);
-  if (!bag || typeof bag !== 'object') return { ...emptyReading('ok', null), names: [] };
-  const names = Object.keys(bag);
-  const configDigest = (value) => measured(createHash('sha256')
-    .update(JSON.stringify(canonical(value)))
-    .digest('hex'));
-  return { status: 'ok', reason: null, names, entries: names.map((name) => ({
-    name, itemPath: file, sourceFile: file, digest: configDigest(bag[name]),
-    definition: configDigest(bag[name]), artifactFiles: [file],
-  })), partial: false, truncated: false };
-}
-
-/** TOML table names under `section`, exported for tests. */
-export function tomlTableNames(source, section) {
-  const names = [];
-  const re = new RegExp(
-    `^\\[\\s*${section}\\s*\\.\\s*(?:"((?:[^"\\\\]|\\\\.)+)"|'([^']+)'|([A-Za-z0-9_.\\-]+))\\s*\\]\\s*$`,
-    'gm',
-  );
-  let match;
-  while ((match = re.exec(source)) !== null) {
-    const quoted = match[1];
-    names.push(quoted ? quoted.replace(/\\"/g, '"').replace(/\\\\/g, '\\') : (match[2] ?? match[3]));
-  }
-  return names;
-}
-
-function readTomlTables(file, section, { fsImpl = fs } = {}) {
-  let source;
-  try { source = fsImpl.readFileSync(file, 'utf8'); } catch (error) {
-    return emptyReading(error.code === 'ENOENT' ? 'absent' : 'degraded', error.code ?? 'io');
-  }
-  const names = tomlTableNames(source, section);
-  const headers = [...source.matchAll(/^[ \t]*\[(?!\[)([^\]\n]+)\][ \t]*(?:#.*)?$/gm)];
-  const digestFor = (name) => {
-    const quoted = `${section}."${name.replace(/"/g, '\\"')}"`;
-    const bare = `${section}.${name}`;
-    const blocks = headers.flatMap((header, index) => {
-      const table = header[1].trim();
-      const isBase = table === bare || table === quoted;
-      const isChild = table.startsWith(`${bare}.`) || table.startsWith(`${quoted}.`);
-      if (!isBase && !isChild) return [];
-      const body = source.slice(header.index + header[0].length, headers[index + 1]?.index ?? source.length);
-      const suffix = isBase ? '' : table.slice((table.startsWith(quoted) ? quoted : bare).length);
-      const lines = body.split(/\r?\n/).map((line) => line.trim())
-        .filter((line) => line && !line.startsWith('#')).sort();
-      return [{ suffix, lines }];
-    }).sort((a, b) => a.suffix.localeCompare(b.suffix));
-    return measured(createHash('sha256').update(JSON.stringify(blocks)).digest('hex'));
-  };
-  return { status: 'ok', reason: null, names, entries: names.map((name) => ({
-    name, itemPath: file, sourceFile: file, digest: digestFor(name), definition: digestFor(name), artifactFiles: [file],
-  })), partial: false, truncated: false };
-}
 
 /** Claude's installed-plugin manifest and newest install root per full ref. */
 function readClaudePlugins(file, { fsImpl = fs } = {}) {
