@@ -46,6 +46,62 @@ test('allocated-size consumers reuse the walker stat instead of lstatting every 
   assert.equal(lstats, 3, 'one root and two files should each be lstatted exactly once');
 });
 
+test('consumers derive exact nested rows from one complete parent observation', (t) => {
+  const root = fixture(t, 'consumer-containment');
+  const child = path.join(root, 'runtime');
+  const nested = path.join(child, 'lib', 'node_modules');
+  fs.mkdirSync(nested, { recursive: true });
+  fs.writeFileSync(path.join(root, 'root.txt'), 'root');
+  fs.writeFileSync(path.join(child, 'runtime.txt'), 'runtime');
+  fs.writeFileSync(path.join(nested, 'package.js'), 'package');
+  let walks = 0;
+
+  const result = collectConsumers({
+    roots: [
+      { id: 'root', label: 'root', group: 'system', path: root, note: 'fixture root' },
+      { id: 'runtime', label: 'runtime', group: 'system', path: child, note: 'fixture child' },
+      { id: 'packages', label: 'packages', group: 'system', path: nested, note: 'fixture grandchild' },
+    ],
+    walk(target, options) {
+      walks += 1;
+      return walkTree(target, options);
+    },
+    now: () => 1,
+  });
+
+  assert.equal(walks, 1, 'a complete root walk supplies every exact nested breakdown');
+  assert.equal(result.rows.find((row) => row.id === 'runtime')?.bytes.value,
+    Buffer.byteLength('runtime') + Buffer.byteLength('package'));
+  assert.equal(result.rows.find((row) => row.id === 'packages')?.bytes.value,
+    Buffer.byteLength('package'));
+  assert.equal(result.rows.find((row) => row.id === 'packages')?.measuredBy,
+    'parent-observation');
+});
+
+test('consumers remeasure nested rows when a parent observation is incomplete', (t) => {
+  const root = fixture(t, 'consumer-containment-fallback');
+  const child = path.join(root, 'child');
+  fs.mkdirSync(child, { recursive: true });
+  fs.writeFileSync(path.join(root, 'root.txt'), 'root');
+  fs.writeFileSync(path.join(child, 'child.txt'), 'child');
+  let walks = 0;
+
+  collectConsumers({
+    roots: [
+      { id: 'root', label: 'root', group: 'system', path: root, note: 'fixture root' },
+      { id: 'child', label: 'child', group: 'system', path: child, note: 'fixture child' },
+    ],
+    walk(target, options) {
+      walks += 1;
+      return walkTree(target, target === root ? { ...options, maxEntries: 1 } : options);
+    },
+    now: () => 1,
+  });
+
+  assert.equal(walks, 2,
+    'a partial parent is a lower bound and cannot replace the narrower child measurement');
+});
+
 test('storage reuses same-scan Install npx facts instead of walking every environment again', (t) => {
   const root = fixture(t, 'npx-adoption');
   const cache = path.join(root, 'npm-cache');
