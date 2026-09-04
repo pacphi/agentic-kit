@@ -99,6 +99,24 @@ test('idle npx age produces a concrete report-only choice, never safe cleanup au
   assert.doesNotMatch(JSON.stringify(idle.nextAction), /Prepare owner-managed cleanup|Inspect the evidence and confirm/);
 });
 
+test('an older npx snapshot without idle-versus-version basis asks for a rescan', () => {
+  const input = footprint();
+  input.storage.reclaimables = [{
+    id: 'stale-npx-env:legacy', kind: 'stale-npx-env', label: 'npx cache env (legacy)',
+    path: '/private/cache/_npx/legacy',
+    bytes: { status: 'carried-forward', value: 4096, partial: false, asOf: NOW - 60_000 },
+    files: { status: 'carried-forward', value: 3, partial: false, asOf: NOW - 60_000 },
+    safety: 'regenerable', advisory: true,
+  }];
+
+  const { findings } = scanMaintenanceFindings({ footprint: input, now: () => NOW });
+  const legacy = findings.find((finding) => finding.resource.id === 'stale-npx-env:legacy');
+  assert.equal(legacy.statusLabel, 'Rescan required');
+  assert.equal(legacy.evidence.completeness, 'partial');
+  assert.equal(legacy.safetyClass, 'never-automatic');
+  assert.equal(legacy.nextAction.label, 'Rescan before changing this npx environment');
+});
+
 test('age and absence of observed usage remain review evidence, never action authority', () => {
   const input = footprint();
   input.storage.reclaimables = [{

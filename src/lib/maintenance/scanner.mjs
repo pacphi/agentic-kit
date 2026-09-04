@@ -213,7 +213,14 @@ function makeFinding(fields) {
 
 function storageFinding(row, sharedEvidence) {
   if (!row?.id) return null;
-  const evidence = measurementEvidence(row.bytes, sharedEvidence);
+  const measuredEvidence = measurementEvidence(row.bytes, sharedEvidence);
+  const npxBasisMissing = row.kind === 'stale-npx-env'
+    && (typeof row?.basis?.versionStale !== 'boolean' || typeof row?.basis?.idle !== 'boolean');
+  const evidence = npxBasisMissing ? {
+    ...measuredEvidence,
+    completeness: 'partial',
+    gaps: [...measuredEvidence.gaps, 'npx idle-versus-version basis requires a deep rescan'],
+  } : measuredEvidence;
   const ageOnly = ['aged-transcripts', 'orphaned-transcripts'].includes(row.kind);
   const usableEvidence = evidence.completeness === 'complete' && evidence.freshness === 'fresh';
   const reproducible = row.safety === 'regenerable' && usableEvidence;

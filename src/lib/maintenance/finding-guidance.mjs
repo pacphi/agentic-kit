@@ -104,7 +104,7 @@ const evidenceFirst = (noun) => ({
 });
 
 export function storageGuidance(kind, { usableEvidence, safe, basis = {} }) {
-  if (!usableEvidence) return evidenceFirst('storage item');
+  if (!usableEvidence) return evidenceFirst(kind === 'stale-npx-env' ? 'npx environment' : 'storage item');
   if (kind === 'stale-npx-env' && basis.versionStale !== true) {
     if (basis.idle !== true) return evidenceFirst('npx environment');
     const age = Number.isInteger(basis.idleDays) && basis.idleDays >= 0
