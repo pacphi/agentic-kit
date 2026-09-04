@@ -157,6 +157,57 @@ test('storage reuses same-scan Install npx facts instead of walking every enviro
   assert.equal(result.reclaimables[0].basis.idle, true);
 });
 
+test('npx environments reuse one complete parent-cache observation', (t) => {
+  const root = fixture(t, 'npx-parent-observation');
+  const first = path.join(root, 'first');
+  const second = path.join(root, 'second');
+  fs.mkdirSync(first, { recursive: true });
+  fs.mkdirSync(second, { recursive: true });
+  fs.writeFileSync(path.join(first, 'package.json'), JSON.stringify({ dependencies: { alpha: '1' } }));
+  fs.writeFileSync(path.join(second, 'package.json'), JSON.stringify({ dependencies: { beta: '1' } }));
+
+  let walks = 0;
+  const result = npxEnvNodes({
+    root,
+    asOf: 7,
+    parentObservation: {
+      root,
+      complete: true,
+      children: new Map([
+        ['first', { bytes: 101, files: 3, newestMtimeMs: 5 }],
+        ['second', { bytes: 202, files: 4, newestMtimeMs: 6 }],
+      ]),
+    },
+    walk() { walks += 1; throw new Error('complete parent evidence should be reused'); },
+  });
+
+  assert.equal(walks, 0);
+  assert.deepEqual(result.envs.map((env) => ({
+    id: env.id, bytes: env.bytes.value, files: env.files.value, measuredBy: env.measuredBy,
+  })), [
+    { id: 'second', bytes: 202, files: 4, measuredBy: 'parent-observation' },
+    { id: 'first', bytes: 101, files: 3, measuredBy: 'parent-observation' },
+  ]);
+});
+
+test('npx environments reject an incomplete parent-cache observation', (t) => {
+  const root = fixture(t, 'npx-parent-fallback');
+  const env = path.join(root, 'env');
+  fs.mkdirSync(env, { recursive: true });
+  fs.writeFileSync(path.join(env, 'package.json'), JSON.stringify({ dependencies: { alpha: '1' } }));
+
+  let walks = 0;
+  const result = npxEnvNodes({
+    root,
+    parentObservation: { root, complete: false, children: new Map() },
+    walk(target, options) { walks += 1; return walkTree(target, options); },
+  });
+
+  assert.equal(walks, 1);
+  assert.equal(result.envs[0]?.measuredBy, 'direct');
+  assert.ok((result.envs[0]?.bytes.value ?? 0) > 0);
+});
+
 test('storage rejects npx evidence that is stale or not rooted at an immediate cache child', (t) => {
   const root = fixture(t, 'npx-fallback');
   const cache = path.join(root, 'npm-cache');

@@ -453,10 +453,14 @@ export function duplicateNativeBuilds(addons) {
 
 /** One node per npx cache env (`<npm-cache>/_npx/<hash>`). Exported because the
  *  storage collector's reclaimable rows need exactly these figures — walking
- *  the cache twice would double the I/O to answer one question. Package NAMES
- *  come from the env's own package.json manifest; nothing else is read. */
+ *  the cache twice would double the I/O to answer one question. A complete
+ *  parent-cache observation may provide exact child totals from the cache row's
+ *  own walk; incomplete or mismatched evidence falls back to one bounded walk
+ *  per environment. Package NAMES come from the env's own package.json
+ *  manifest; nothing else is read. */
 export function npxEnvNodes({
   root = npxCacheDir(), walk = walkTree, limits = {}, asOf = null, fsImpl = fs,
+  parentObservation = null,
 } = {}) {
   let entries;
   try {
@@ -471,10 +475,20 @@ export function npxEnvNodes({
     };
   }
   const envs = [];
+  const reusable = parentObservation?.complete === true
+    && path.resolve(parentObservation.root ?? '') === path.resolve(root)
+    && parentObservation.children instanceof Map;
   for (const entry of entries) {
     if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
     const dir = path.join(root, entry.name);
-    const result = walk(dir, { ...limits, fsImpl });
+    const observed = reusable ? parentObservation.children.get(entry.name) : null;
+    const result = reusable ? {
+      status: 'measured',
+      bytes: observed?.bytes ?? 0,
+      files: observed?.files ?? 0,
+      newestMtimeMs: observed?.newestMtimeMs ?? null,
+      complete: true,
+    } : walk(dir, { ...limits, fsImpl });
     const { bytes, files } = walkMeasurements(result, { asOf });
     const manifest = readJson(path.join(dir, 'package.json'), {}) ?? {};
     envs.push({
@@ -485,6 +499,7 @@ export function npxEnvNodes({
       files,
       newestMtimeMs: result.newestMtimeMs,
       complete: result.complete,
+      measuredBy: reusable ? 'parent-observation' : 'direct',
     });
   }
   envs.sort((a, b) => (b.bytes.value ?? 0) - (a.bytes.value ?? 0));
@@ -666,10 +681,27 @@ export function sharedCacheRoots({
  *  unmeasured". Only a genuinely multi-location cache merges, and it merges
  *  conservatively — present beats degraded beats absent, and an unreadable
  *  location makes the sum partial rather than silently dropping its bytes. */
-function measureCacheRoot(cache, { walk, limits, fsImpl, asOf }) {
+function measureCacheRoot(cache, {
+  walk, limits, fsImpl, asOf, captureImmediateChildren = false,
+}) {
   const locations = cache.paths?.length ? cache.paths : [cache.path];
+  const childObservations = new Map();
   const parts = locations.map((dir) => {
-    const result = walk(dir, { ...limits, fsImpl });
+    const result = walk(dir, {
+      ...limits,
+      fsImpl,
+      onFile: captureImmediateChildren && locations.length === 1 ? (entry) => {
+        const relative = path.relative(dir, entry.file);
+        const child = relative.split(path.sep)[0];
+        if (!child || child === '..' || path.isAbsolute(relative)) return;
+        const current = childObservations.get(child) ?? { bytes: 0, files: 0, newestMtimeMs: null };
+        current.bytes += entry.bytes;
+        current.files += 1;
+        current.newestMtimeMs = current.newestMtimeMs === null
+          ? entry.mtimeMs : Math.max(current.newestMtimeMs, entry.mtimeMs);
+        childObservations.set(child, current);
+      } : null,
+    });
     return { result, ...rootMeasurements(result, { asOf }) };
   });
   if (parts.length === 1) {
@@ -677,6 +709,7 @@ function measureCacheRoot(cache, { walk, limits, fsImpl, asOf }) {
     return {
       presence: only.presence, bytes: only.bytes, files: only.files,
       newestMtimeMs: only.result.newestMtimeMs, complete: only.result.complete,
+      childObservations,
     };
   }
   const presence = parts.some((p) => p.presence === 'present') ? 'present'
@@ -688,6 +721,7 @@ function measureCacheRoot(cache, { walk, limits, fsImpl, asOf }) {
     files: sumMeasurements(parts.map((p) => p.files), { asOf }),
     newestMtimeMs: mtimes.length ? Math.max(...mtimes) : null,
     complete: parts.every((p) => p.result.complete !== false),
+    childObservations,
   };
 }
 
@@ -746,14 +780,29 @@ export function collectInstall({
   const sharedCaches = [];
   let npxEnvs = { root: npxCacheDir(), presence: 'unknown', reason: 'not collected', envs: [] };
   if (includeCaches) {
+    let npxParentObservation = null;
     for (const cache of sharedCacheRoots({ fsImpl })) {
+      const measuredCache = measureCacheRoot(cache, {
+        walk, limits, fsImpl, asOf,
+        captureImmediateChildren: cache.id === 'npx-envs',
+      });
+      const { childObservations, ...cacheMeasurement } = measuredCache;
       sharedCaches.push({
         ...cache,
-        ...measureCacheRoot(cache, { walk, limits, fsImpl, asOf }),
+        ...cacheMeasurement,
         payload: browserPayloadReadiness(cache, { fsImpl }),
       });
+      if (cache.id === 'npx-envs') {
+        npxParentObservation = {
+          root: cache.path,
+          complete: cacheMeasurement.presence === 'present' && cacheMeasurement.complete === true,
+          children: childObservations,
+        };
+      }
     }
-    npxEnvs = npxEnvNodes({ walk, limits, asOf, fsImpl });
+    npxEnvs = npxEnvNodes({
+      walk, limits, asOf, fsImpl, parentObservation: npxParentObservation,
+    });
   }
 
   const allAddons = tools.flatMap((t) => t.nativeAddons);
