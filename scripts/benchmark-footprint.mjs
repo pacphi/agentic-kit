@@ -37,6 +37,7 @@ function parseArgs(argv) {
   const options = { runs: 1, warmups: 0, trees: false, json: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
+    if (arg === '--') continue;
     if (arg === '--help') return { ...options, help: true };
     if (arg === '--json') options.json = true;
     else if (arg === '--trees') options.trees = true;
@@ -69,6 +70,7 @@ function runBenchmark({ trees }) {
     const result = walkTree(root, options);
     walkRows.push({
       phase,
+      root,
       durationMs: performance.now() - started,
       entriesSeen: result.entriesSeen,
       files: result.files,
@@ -105,9 +107,21 @@ function runBenchmark({ trees }) {
     install, projects: projects.projects, includeProjectTrees: trees, walk,
   }));
 
-  const workByPhase = Object.fromEntries(phases.map(({ name }) => [
-    name, aggregateWork(walkRows.filter((row) => row.phase === name)),
-  ]));
+  const workByPhase = Object.fromEntries(phases.map(({ name }) => {
+    const rows = walkRows.filter((row) => row.phase === name);
+    return [name, {
+      ...aggregateWork(rows),
+      topWalks: [...rows]
+        .sort((left, right) => right.durationMs - left.durationMs)
+        .slice(0, 10)
+        .map((row) => ({
+          root: row.root,
+          durationMs: rounded(row.durationMs),
+          entriesSeen: row.entriesSeen,
+          complete: row.complete,
+        })),
+    }];
+  }));
   return {
     durationMs: performance.now() - started,
     phases: phases.map((entry) => ({
@@ -158,6 +172,10 @@ function printHuman(result) {
   for (const phase of result.samples.at(-1).phases) {
     console.log(`${phase.name.padEnd(10)} ${String(Math.round(phase.durationMs)).padStart(8)} ms  `
       + `${String(phase.walkCalls).padStart(4)} walks  ${String(phase.entriesSeen).padStart(9)} entries`);
+    for (const walk of phase.topWalks.slice(0, 3)) {
+      console.log(`  ${String(Math.round(walk.durationMs)).padStart(8)} ms  `
+        + `${String(walk.entriesSeen).padStart(9)} entries  ${walk.complete ? 'complete' : 'partial'}  ${walk.root}`);
+    }
   }
   const work = result.samples.at(-1).work;
   console.log(`total work ${work.walkCalls} walks · ${work.entriesSeen} entries · ${work.incompleteWalks} incomplete`);
