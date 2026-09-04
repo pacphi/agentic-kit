@@ -1084,6 +1084,22 @@ export function startDashboard({
     }
     return service;
   };
+  let maintenanceRefreshSource = null;
+  let maintenanceRefreshPromise = null;
+  function refreshMaintenanceAfterSystem(deepScan) {
+    if (maintenanceRefreshSource === deepScan) return maintenanceRefreshPromise;
+    maintenanceRefreshSource = deepScan;
+    maintenanceRefreshPromise = Promise.resolve(deepScan).then(async (result) => {
+      if (result?.ok !== true || result?.persisted?.ok === false) return null;
+      return (await getMaintenance()).scan({ deep: false });
+    }).catch(() => null).finally(() => {
+      if (maintenanceRefreshSource === deepScan) {
+        maintenanceRefreshSource = null;
+        maintenanceRefreshPromise = null;
+      }
+    });
+    return maintenanceRefreshPromise;
+  }
   let transcriptServicePromise;
   const provideTranscripts = typeof transcripts === 'function'
     ? transcripts : transcripts ? async () => transcripts : async () => {
@@ -1833,9 +1849,10 @@ export function startDashboard({
           // has to be re-measured, not re-sorted. Absent means "keep whatever
           // the collector already defaults to".
           const trees = query.get('trees');
-          Promise.resolve(collector.refreshDeep(
+          const deepScan = Promise.resolve(collector.refreshDeep(
             trees == null ? undefined : { includeProjectTrees: trees === '1' },
-          )).catch(() => {});
+          ));
+          refreshMaintenanceAfterSystem(deepScan);
           // The payload predates the start by microseconds; re-stamp the live
           // scan block so this response reads "running", not "idle".
           if (typeof collector.scanState === 'function') payload.scan = collector.scanState();

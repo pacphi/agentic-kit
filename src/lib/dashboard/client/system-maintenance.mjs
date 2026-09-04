@@ -10,6 +10,7 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
   // and durable receipt are all required before this client can request a
   // change. Capabilities remain only in this closure's memory.
   export var MAINTENANCE=null,maintenanceBusy=false;
+  var maintenanceScanBusy=false;
   var maintenanceWired=false,maintBucket="all",maintKind="",maintHost="",maintRelation="",maintQuery="",maintSelected=null;
   var maintTransientReceipts=[];
 
@@ -132,6 +133,16 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
   function maintCapabilities(){
     return MAINTENANCE&&MAINTENANCE.capabilities&&typeof MAINTENANCE.capabilities==="object"?MAINTENANCE.capabilities:{};
   }
+  function maintConsumerHosts(finding){
+    var resource=finding&&finding.resource||{},value=finding&&finding.consumerHosts;
+    var hosts=value&&value.basis==="catalog-presence"&&Array.isArray(value.hosts)?value.hosts:[];
+    if(!hosts.length&&maintText(resource.host)&&resource.host!=="multiple"&&resource.host!=="agentic-kit")hosts=[resource.host];
+    return hosts.map(maintText).filter(Boolean).filter(function(host,index,all){return all.indexOf(host)===index;}).sort();
+  }
+  function maintCarriedBy(finding){
+    var hosts=maintConsumerHosts(finding);
+    return hosts.length?hosts.join(", "):"not measured";
+  }
   export function maintCanPreview(finding){
     var caps=maintCapabilities(),action=finding&&(finding.action||finding.nextAction);
     return caps.plan===true&&caps.apply===true&&action&&action.executable===true;
@@ -176,11 +187,12 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
       var finding=record.value,resource=finding.resource||{};
       if(maintBucket!=="all"&&maintState(finding).bucket!==maintBucket)return false;
       if(maintKind&&maintText(resource.kind)!==maintKind)return false;
-      if(maintHost&&maintText(resource.host)!==maintHost)return false;
+      if(maintHost&&maintConsumerHosts(finding).indexOf(maintHost)<0)return false;
       if(maintRelation&&maintText(finding&&finding.relationship&&finding.relationship.kind)!==maintRelation)return false;
       if(maintQuery){
         var members=finding.relationship&&Array.isArray(finding.relationship.members)?finding.relationship.members:[];
         var hay=[finding.headline,finding.explanation,resource.name,resource.kind,resource.host,resource.providerRef,finding.owner,
+          maintCarriedBy(finding),
           maintSuggestedAction(finding)].concat(members.map(function(member){return [member.label,member.projectLabel,member.providerRef].join(" ");}))
           .map(maintText).join(" ").toLowerCase();
         if(hay.indexOf(maintQuery)<0)return false;
@@ -196,14 +208,17 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
   }
 
   function maintSummary(){
-    if(!MAINTENANCE||MAINTENANCE.error)return [["\u2014","findings"],["\u2014","provider-actionable"],["\u2014","incomplete sources"],["unknown","evidence age"]]
+    if(!MAINTENANCE||MAINTENANCE.error)return [["\u2014","findings"],["\u2014","actions ready"],["unknown","scan coverage"],["unknown","evidence measured"]]
       .map(function(item){return '<div><dd>'+esc(item[0])+'</dd><dt>'+esc(item[1])+"</dt></div>";}).join("");
-    var summary=MAINTENANCE&&MAINTENANCE.summary||{},asOf=MAINTENANCE&&MAINTENANCE.asOf;
+    var summary=MAINTENANCE&&MAINTENANCE.summary||{},scan=MAINTENANCE&&MAINTENANCE.scan||{};
+    var total=Number(scan.providersTotal),complete=Number(scan.providersComplete);
+    var coverage=Number.isFinite(total)&&total>=0&&Number.isFinite(complete)&&complete>=0
+      ?Math.round(complete)+" of "+Math.round(total)+" providers":maintText(scan.coverage)||"unknown";
     var values=[
       [maintSummaryCount(summary,"total"),"findings"],
-      [maintSummaryCount(summary,"actionable"),"provider-actionable"],
-      [maintSummaryCount(summary,"incompleteSources"),"incomplete sources"],
-      [maintAge(asOf),"evidence age"]
+      [maintSummaryCount(summary,"actionable"),"actions ready"],
+      [coverage,"scan coverage"],
+      [maintAge(scan.checkedAt||MAINTENANCE.asOf),"evidence measured"]
     ];
     return values.map(function(item){return '<div><dd>'+esc(item[0])+'</dd><dt>'+esc(item[1])+"</dt></div>";}).join("");
   }
@@ -212,9 +227,18 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
     var banner=document.getElementById("sys-maint-banner"),summary=document.getElementById("sys-maint-summary");
     if(summary)summary.innerHTML=maintSummary();
     if(!banner)return;
-    if(maintenanceBusy&&!MAINTENANCE){
+    if(maintenanceBusy){
       banner.className="mt-banner readonly";
-      banner.innerHTML='<b>Reading current copies and provider evidence…</b><span>Actions stay unavailable until the scan finishes.</span>';
+      banner.innerHTML=maintenanceScanBusy
+        ?'<b>Scanning installed resources…</b><span>Checking native provider versions, ownership, and current Catalog evidence.</span>'
+        :'<b>Reading the latest saved report…</b><span>No providers or filesystem sources are being scanned.</span>';
+      return;
+    }
+    var scan=MAINTENANCE&&MAINTENANCE.scan||{};
+    if(scan.status==="not-scanned"||scan.status==="unavailable"||scan.status==="stale"){
+      banner.className="mt-banner unavailable";
+      banner.innerHTML='<b>'+esc(scan.status==="stale"?"Saved scan is stale":"Maintenance scan required")+'</b><span>'
+        +esc(scan.status==="unavailable"?"The saved report could not be verified. Run Scan now to replace it.":"Run Scan now before acting on recommendations.")+"</span>";
       return;
     }
     if(!MAINTENANCE||MAINTENANCE.error){
@@ -254,8 +278,8 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
     var findings=MAINTENANCE&&Array.isArray(MAINTENANCE.findings)?MAINTENANCE.findings:[];
     var kinds={},hosts={},relations={};
     for(var i=0;i<findings.length;i++){
-      var resource=findings[i].resource||{},kind=maintText(resource.kind),host=maintText(resource.host);
-      if(kind)kinds[kind]=true;if(host)hosts[host]=true;
+      var resource=findings[i].resource||{},kind=maintText(resource.kind);
+      if(kind)kinds[kind]=true;maintConsumerHosts(findings[i]).forEach(function(host){hosts[host]=true;});
       var relation=maintText(findings[i].relationship&&findings[i].relationship.kind);if(relation)relations[relation]=true;
     }
     var kindEl=document.getElementById("sys-maint-kind"),hostEl=document.getElementById("sys-maint-host"),relationEl=document.getElementById("sys-maint-relation");
@@ -299,9 +323,9 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
     return '<li><button type="button" class="mt-row" data-maint-key="'+esc(record.key)+'" data-tone="'+state.tone+'"'
       +' aria-controls="sys-maint-detail" aria-expanded="'+(selected?"true":"false")+'"'+(selected?' aria-current="true"':"")+">"
       +'<span class="mt-state">'+esc(state.label)+"</span>"
-      +'<span class="mt-identity"><b>'+esc(name)+'</b><small>'+esc(maintOptionLabel(resource.kind||"resource"))+"</small></span>"
+      +'<span class="mt-identity"><b>'+esc(name)+'</b><small>'+esc(maintOptionLabel(resource.kind||"resource"))+" · Carried by "+esc(maintCarriedBy(finding))+"</small></span>"
       +'<span class="mt-change"><span>'+esc(change)+'</span><small>Action: '+esc(suggestion)+"</small></span>"
-      +'<span class="mt-owner">'+esc(owner)+"</span>"
+      +'<span class="mt-owner">Owner: '+esc(owner)+"</span>"
       +"</button></li>";
   }
 
@@ -359,8 +383,7 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
   }
   function maintFindingActionHtml(finding){
     if(!maintCanPreview(finding))return "";
-    return '<div class="mt-action-bar"><button type="button" class="mt-action primary" data-maint-action="preview">'+esc(maintPreviewLabel(finding))+"</button>"
-      +'<small>Nothing changes until you review and confirm this exact action.</small></div>';
+    return '<button type="button" class="mt-action primary" data-maint-action="preview">'+esc(maintPreviewLabel(finding))+"</button>";
   }
   function maintNextHtml(finding){
     var next=finding&&finding.nextAction,action=finding&&(finding.action||finding.nextAction)||{};
@@ -379,7 +402,7 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
       +(!maintCanPreview(finding)&&blockedReason?'<p class="mt-blocked-reason"><b>Not available here:</b> '+esc(blockedReason)+"</p>":"")
       +(facts?'<dl class="mt-facts compact">'+facts+"</dl>":"")
       +(command?'<code>'+esc(command)+"</code>":"")
-      +maintFindingActionHtml(finding)+"</section>";
+      +(maintCanPreview(finding)?'<small>Nothing changes until you review and confirm this exact action.</small>':"")+"</section>";
   }
 
   function maintRelationshipHtml(relationship){
@@ -401,11 +424,9 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
     var title=maintText(resource.name)||"Unnamed resource",reasons=maintList(evidence.reasons);
     var facts="";
     facts+=maintFact("Owner",finding.owner||resource.providerRef||"Owner unknown");
-    facts+=maintFact("Resource",maintOptionLabel(resource.kind||"resource"));
-    facts+=maintFact("Host",resource.host);
-    facts+=maintFact("Scope",resource.scope);
-    facts+=maintFact("Evidence",evidence.completeness||"Completeness unknown");
-    facts+=maintFact("Captured",evidence.asOf?maintAge(evidence.asOf):MAINTENANCE&&MAINTENANCE.asOf?maintAge(MAINTENANCE.asOf):"");
+    facts+=maintFact("Carried by",maintCarriedBy(finding));
+    facts+=maintFact("Coverage",evidence.completeness||"Completeness unknown");
+    facts+=maintFact("Measured",evidence.asOf?maintAge(evidence.asOf):MAINTENANCE&&MAINTENANCE.asOf?maintAge(MAINTENANCE.asOf):"");
     var versionFacts=maintNamedValues(versions,{
       installed:"Installed",installedVersion:"Installed",effective:"Effective",effectiveVersion:"Effective",
       recommended:"Recommended compatible",recommendedVersion:"Recommended compatible",
@@ -413,7 +434,7 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
       sourceRevision:"Source revision",cacheGeneration:"Cache generation",contentDigest:"Content digest"
     });
     return '<div class="mt-detail-head"><span class="mt-state" data-tone="'+state.tone+'">'+esc(state.label)+'</span>'
-      +'<h3 id="sys-maint-detail-title" tabindex="-1">'+esc(title)+"</h3></div>"
+      +'<h3 id="sys-maint-detail-title" tabindex="-1">'+esc(title)+"</h3>"+maintFindingActionHtml(finding)+"</div>"
       +(maintText(finding.explanation)?'<p class="mt-explanation">'+esc(maintText(finding.explanation))+"</p>":"")
       +'<dl class="mt-facts">'+facts+"</dl>"
       +(reasons.length?'<div class="mt-evidence-gap"><b>Evidence needs attention</b><ul>'+reasons.map(function(reason){return "<li>"+esc(reason)+"</li>";}).join("")+"</ul></div>":"")
@@ -421,6 +442,7 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
       +(versionFacts?'<section class="mt-detail-section"><h4>Versions and source</h4><dl class="mt-facts compact">'+versionFacts+"</dl></section>":"")
       +maintImpactHtml(finding.impact,finding)+maintNextHtml(finding)
       +'<details class="mt-technical"><summary>Technical evidence</summary><dl class="mt-facts compact">'
+      +maintFact("Resource",maintOptionLabel(resource.kind||"resource"))+maintFact("Owning host",resource.host)+maintFact("Scope",resource.scope)
       +maintFact("Source",evidence.source)+maintFact("Authority",evidence.authority)+maintFact("Health",evidence.health)
       +maintFact("Provider reference",resource.providerRef)+"</dl></details>";
   }
@@ -455,18 +477,19 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
     if(!records.some(function(record){return record.key===maintSelected;}))maintSelected=records.length?records[0].key:null;
     renderMaintList(records);renderMaintDetail(records);
     var root=document.getElementById("sys-maintenance");if(root)root.setAttribute("aria-busy",maintenanceBusy||maintActionBusy?"true":"false");
+    var scan=document.getElementById("sys-maint-scan");if(scan){scan.disabled=maintenanceBusy||maintActionBusy;scan.textContent=maintenanceScanBusy?"Scanning…":"↻ Scan now";}
   }
 
-  export function loadMaintenance(force){
+  export function loadMaintenance(force,scan){
     if(maintenanceBusy||maintActionBusy||maintActionActive())return Promise.resolve();
     if(MAINTENANCE&&!force){renderMaintenance();return Promise.resolve();}
-    maintenanceBusy=true;renderMaintenance();
-    return fetch("/api/maintenance",{cache:"no-store",headers:authHeaders()}).then(function(response){
+    maintenanceBusy=true;maintenanceScanBusy=scan===true;renderMaintenance();
+    return fetch("/api/maintenance"+(scan?"?refresh=scan":""),{cache:"no-store",headers:authHeaders()}).then(function(response){
       if(!response.ok)throw Error(response.status===404?"Maintenance reporting is not available in this build.":"Maintenance findings could not be read.");
       return response.json();
     }).then(function(data){MAINTENANCE=data&&typeof data==="object"?maintMergeReceipts(data):{error:"The maintenance response was empty."};})
       .catch(function(error){MAINTENANCE={error:error&&error.message||"Maintenance findings could not be read."};})
-      .then(function(){maintenanceBusy=false;renderMaintenance();});
+      .then(function(){maintenanceBusy=false;maintenanceScanBusy=false;renderMaintenance();});
   }
 
   export function wireMaintenance(){
@@ -488,6 +511,8 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
     if(banner)banner.addEventListener("click",function(event){
       var button=event.target.closest?event.target.closest("[data-maint-retry]"):null;if(button)loadMaintenance(true);
     });
+    var scan=document.getElementById("sys-maint-scan");
+    if(scan)scan.addEventListener("click",function(){if(!scan.disabled)loadMaintenance(true,true);});
     var list=document.getElementById("sys-maint-list");
     if(list)list.addEventListener("click",function(event){
       var button=event.target.closest?event.target.closest("[data-maint-key]"):null;if(!button)return;

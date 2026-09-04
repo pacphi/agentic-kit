@@ -885,6 +885,10 @@ ${LIVE_HTML}
       </header>
       <div class="sy-grid">
         <div class="sy-card mt-card" id="sys-maintenance" aria-busy="false">
+          <div class="mt-scanbar">
+            <span><b>Saved report</b> Browser refresh rereads it without checking providers. Scan now rechecks installed versions and ownership.</span>
+            <button class="mt-action" type="button" id="sys-maint-scan">&#8635; Scan now</button>
+          </div>
           <div class="mt-banner unavailable" id="sys-maint-banner" role="status">
             <b>Maintenance reporting not loaded</b><span>Open this view to inspect current findings.</span>
           </div>

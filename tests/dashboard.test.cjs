@@ -1120,9 +1120,15 @@ async function main() {
     // the first still holds the slot. Racing two bare HTTP requests would be
     // testing the scheduler, not the single-flight rule.
     const fx = systemFixture({ collectors: { runtime: async () => { await gate; return runtimeCensus(); } } });
+    let maintenanceScans = 0;
+    const maintenance = {
+      async report() { return {}; },
+      async scan() { maintenanceScans += 1; return {}; },
+      async plan() { return {}; },
+    };
     const srv = await startDashboard({
       port: 0, cwd: fixture, fetchStatus: async () => STUB_STATUS, usage: spyUsage().api,
-      system: fx.collector,
+      system: fx.collector, maintenance,
     });
     try {
       const both = Promise.all([
@@ -1137,10 +1143,12 @@ async function main() {
       assert(scanA.running === true && scanA.phase !== 'idle',
         'a refresh must report the scan it started, got ' + JSON.stringify(scanA));
       await eventually(() => fx.calls.persist === 1, 'the shared scan must run to completion');
+      await eventually(() => maintenanceScans === 1, 'the completed scan must refresh Maintenance evidence once');
       assert(fx.calls.install === 1 && fx.calls.storage === 1
         && fx.calls.catalog === 1 && fx.calls.projects === 1,
       'the deep collectors ran twice — the single-flight slot did not hold: ' + JSON.stringify(fx.calls));
       assert(fx.calls.persist === 1, 'a shared scan must write exactly one snapshot');
+      assert(maintenanceScans === 1, 'two attached System requests must not double-run Maintenance providers');
     } finally {
       await srv.close();
     }

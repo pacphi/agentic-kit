@@ -653,6 +653,10 @@ const MAINTENANCE_PAYLOAD = {
   mode: 'supervised',
   capabilities: { plan: true, apply: true, undo: true },
   asOf: new Date(Date.now() - 6 * 60_000).toISOString(),
+  scan: {
+    status: 'complete', checkedAt: new Date(Date.now() - 6 * 60_000).toISOString(),
+    coverage: 'partial', providersChecked: 3, providersComplete: 2, providersTotal: 3,
+  },
   freshness: { stale: false, complete: false },
   summary: {
     total: 4, updatesReady: 1, safeCleanup: 1, needsReview: 1, blocked: 1,
@@ -667,6 +671,7 @@ const MAINTENANCE_PAYLOAD = {
       providerRef: 'rust-optimizer@rust-optimizer',
     },
     owner: 'Codex plugin manager',
+    consumerHosts: { basis: 'catalog-presence', hosts: ['codex'], count: 1, truncated: false },
     evidence: {
       source: 'codex plugin list --json', authority: 'host-native',
       asOf: new Date(Date.now() - 6 * 60_000).toISOString(), completeness: 'complete', health: 'healthy', reasons: [],
@@ -743,6 +748,13 @@ const MAINTENANCE_PAYLOAD = {
     }, action: { safetyClass: 'upstream-required', reason: 'OpenCode does not expose an exact removal action to this dashboard.' },
   }],
   receipts: [],
+};
+
+let chainedMaintenanceScans = 0;
+const MAINTENANCE_STUB = {
+  async report() { return MAINTENANCE_PAYLOAD; },
+  async scan() { chainedMaintenanceScans += 1; return MAINTENANCE_PAYLOAD; },
+  async plan() { return {}; },
 };
 
 const MAINTENANCE_HISTORY = [
@@ -1106,6 +1118,7 @@ async function main() {
     models: MODELS_STUB,
     modelScopeKey: 'ab'.repeat(32),
     system: SYSTEM_STUB,
+    maintenance: MAINTENANCE_STUB,
   });
   const ORIGIN = new URL(srv.url).origin;
   const modelHeaders = { 'x-dash-token': srv.token };
@@ -1162,6 +1175,8 @@ async function main() {
   const maintenancePlanRequests = [];
   const maintenanceApplyRequests = [];
   const maintenanceUndoRequests = [];
+  let maintenanceReportReads = 0;
+  let maintenanceScanRequests = 0;
   const expectedHttpConsoleErrors = new Set();
   // Capture the LOCATION too. A bare "Failed to load resource" is
   // undiagnosable, and a console listener that records only the message makes
@@ -1202,6 +1217,8 @@ async function main() {
       status, contentType: 'application/json', body: JSON.stringify(body),
     });
     if (request.method() === 'GET' && pathname === '/api/maintenance') {
+      if (new URL(request.url()).searchParams.get('refresh') === 'scan') maintenanceScanRequests++;
+      else maintenanceReportReads++;
       return reply(200, MAINTENANCE_PAYLOAD);
     }
     const body = request.postDataJSON();
@@ -1640,9 +1657,9 @@ async function main() {
       `Maintenance boundary was ${JSON.stringify(maintenanceReady)}`);
     check('Maintenance summarizes findings, action eligibility, incomplete evidence, and age without a hygiene score',
       /4\s+findings/.test(String(maintenanceReady.summary))
-        && /2\s+provider-actionable/.test(String(maintenanceReady.summary))
-        && /1\s+incomplete sources/.test(String(maintenanceReady.summary))
-        && /evidence age/.test(String(maintenanceReady.summary))
+        && /2\s+actions ready/.test(String(maintenanceReady.summary))
+        && /2 of 3 providers\s+scan coverage/.test(String(maintenanceReady.summary))
+        && /evidence measured/.test(String(maintenanceReady.summary))
         && !/score/i.test(String(maintenanceReady.summary)),
       `Maintenance summary was ${JSON.stringify(maintenanceReady.summary)}`);
 
@@ -1655,6 +1672,8 @@ async function main() {
       firstMaintenance.expanded === 'true' && firstMaintenance.current === 'true'
         && firstMaintenance.controls === 'sys-maint-detail'
         && /rust-optimizer/.test(firstMaintenance.text)
+        && /Carried by codex/.test(firstMaintenance.text)
+        && /Owner: Codex plugin manager/.test(firstMaintenance.text)
         && /Codex plugin manager/.test(firstMaintenanceDetail)
         && /0\.2\.0/.test(firstMaintenanceDetail) && /0\.3\.1/.test(firstMaintenanceDetail)
         && /standalone skill-creator/.test(firstMaintenanceDetail)
@@ -1670,6 +1689,20 @@ async function main() {
         && maintenanceRowSuggestions.every((text) => /Action:\s*(Upgrade|Clear|Choose|Remove)\b/.test(text))
         && new Set(maintenanceRowSuggestions.map((text) => text.match(/Action:\s*(.*)/)?.[1])).size === maintenanceRowSuggestions.length,
       `row suggestions were ${JSON.stringify(maintenanceRowSuggestions)}`);
+
+    const reportsBeforeRefresh = maintenanceReportReads;
+    await page.waitForTimeout(1100);
+    await page.click('#poll-now');
+    await page.waitForTimeout(100);
+    check('browser refresh rereads the saved Maintenance report without scanning providers',
+      maintenanceReportReads === reportsBeforeRefresh + 1 && maintenanceScanRequests === 0,
+      `report reads=${maintenanceReportReads}; scans=${maintenanceScanRequests}`);
+    const explicitScan = page.waitForResponse((response) => response.url().includes('/api/maintenance?refresh=scan'));
+    await page.click('#sys-maint-scan');
+    await explicitScan;
+    check('Scan now is the explicit provider-version measurement control',
+      maintenanceScanRequests === 1,
+      `explicit Maintenance scans=${maintenanceScanRequests}`);
 
     await page.click('#sys-maint-buckets [data-maint-bucket="needs-review"]');
     const reviewMaintenance = await page.evaluate(() => ({
@@ -2412,6 +2445,10 @@ async function main() {
     check('Rescan is the only thing that starts a deep scan, and it starts exactly one',
       systemDeepScans === 1,
       `the collector saw ${systemDeepScans} deep scan(s) after one Rescan click`);
+    await page.waitForTimeout(50);
+    check('a successful deep System rescan refreshes Maintenance provider evidence once',
+      chainedMaintenanceScans === 1,
+      `the Maintenance service saw ${chainedMaintenanceScans} scan(s)`);
 
     // ── Observability: execution workspace + synchronized evidence ──
     await page.click('[data-tab="observability"]');

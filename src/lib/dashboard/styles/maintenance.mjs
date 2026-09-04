@@ -3,6 +3,8 @@ export const MAINTENANCE_CSS = `
    outer System card supplies the established surface; hairlines and selection
    state carry the hierarchy within it. */
 .mt-card{gap:0;padding:0;overflow:hidden}
+.mt-scanbar{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 14px;border-bottom:1px solid var(--line);color:var(--ink-2);font-size:11.5px;line-height:1.45}
+.mt-scanbar b{color:var(--ink)}.mt-scanbar span{max-width:82ch}
 .mt-banner{display:flex;align-items:flex-start;gap:9px;padding:10px 14px;border-bottom:1px solid var(--line);font-size:11.5px;line-height:1.45}
 .mt-banner b{flex:none;color:var(--ink);font-weight:650}
 .mt-banner span{color:var(--ink-2)}
@@ -45,6 +47,7 @@ export const MAINTENANCE_CSS = `
 .mt-change small{color:var(--ink-dim);font-size:10px;line-height:1.35}
 .mt-detail{max-height:min(62vh,620px);overflow:auto;padding:15px 16px;background:color-mix(in srgb,var(--panel) 96%,var(--ink) 4%)}
 .mt-detail-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.mt-detail-head .mt-state{grid-area:auto}
+.mt-detail-head>.mt-action{margin-left:auto}
 .mt-detail h3{flex:1 1 180px;margin:0;color:var(--ink);font-size:15px;letter-spacing:-.01em}
 .mt-detail h3:focus{outline:none}.mt-explanation{margin:10px 0 12px;color:var(--ink-2);font-size:12px;line-height:1.55;max-width:70ch}
 .mt-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;margin:0}
@@ -93,7 +96,7 @@ export const MAINTENANCE_CSS = `
   .mt-detail{max-height:none}.mt-row{grid-template-columns:minmax(112px,.7fr) minmax(140px,1fr) minmax(180px,1.3fr)}
 }
 @media(max-width:600px){
-  .mt-banner{flex-direction:column;gap:2px}.mt-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .mt-scanbar,.mt-banner{align-items:flex-start;flex-direction:column;gap:6px}.mt-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
   .mt-summary>div:nth-child(2){border-right:0}.mt-summary>div:nth-child(-n+2){border-bottom:1px solid var(--line)}
   .mt-toolbar{grid-template-columns:1fr 1fr}.mt-toolbar input{grid-column:1/-1}.mt-results{grid-column:1/-1}
   .mt-row{grid-template-columns:1fr;grid-template-areas:"state" "identity" "change" "owner";gap:5px;min-height:44px;padding:11px 13px}
