@@ -1,6 +1,7 @@
 // Read-only CatalogInventory v2 (ADR-0025): canonical standalone/plugin identity,
 // per-source occurrences, and bounded entrypoint digests. Bodies never leave the
 // collector; traversal never follows a symlink or escapes a declared root.
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
@@ -159,6 +160,14 @@ function readClaudePlugins(file, { fsImpl = fs } = {}) {
  *  different deployed things. */
 const itemKey = (kind, name) => `${kind}::${name.trim().toLowerCase()}`;
 const fallbackInventoryStatus = (configPresent) => (configPresent === false ? 'degraded' : 'partial');
+const opaqueArtifactId = (value) => `catalog-artifact-${createHash('sha256').update(value).digest('hex').slice(0, 24)}`;
+
+function discoveryFor(spec) {
+  if (spec.discovery) return spec.discovery;
+  if (spec.provider) return { mechanism: 'plugin-installation', configuredBy: spec.provider.ref, enabled: spec.provider.enabled };
+  if (spec.kind === 'mcpServer') return { mechanism: 'host-configuration', configuredBy: path.basename(spec.path) };
+  return { mechanism: 'host-convention', configuredBy: null, enabled: true };
+}
 
 /** Plugin inventories plus enabled plugins' capability surfaces. */
 function pluginSurfaceSpecs({
@@ -254,12 +263,22 @@ function mergeCatalogItem(items, spec, entry) {
     version: spec.provider.version ?? null, cacheGeneration: spec.provider.cacheGeneration ?? null,
     enabled: spec.provider.enabled ?? null, evidence: spec.provider.evidence ?? null,
   } : null;
+  const discovery = discoveryFor(spec);
+  const artifactId = opaqueArtifactId(path.resolve(entry.itemPath ?? `${spec.path}#${raw}`));
   const presence = {
     host: spec.host, surface: spec.id, path: spec.path,
     itemPath: entry.itemPath ?? null, sourceFile: entry.sourceFile ?? null,
     scope: spec.scope ?? 'unknown', project: spec.project ?? null,
     provider, plugin: entry.plugin ?? null, digest: entry.digest ?? null,
     definition: entry.definition ?? entry.digest ?? null,
+    artifactId,
+    consumer: {
+      host: spec.host,
+      mechanism: discovery.mechanism,
+      configuredBy: discovery.configuredBy ?? null,
+      enabled: typeof discovery.enabled === 'boolean' ? discovery.enabled : null,
+      resolution: 'not-reported',
+    },
   };
   Object.defineProperty(presence, ARTIFACT_FILES, { value: entry.artifactFiles ?? [], enumerable: false });
   item.presence.push(presence);
@@ -341,6 +360,40 @@ function sortCatalogItems(items) {
       exactMatch: digests.length > 1 && unique.length === 1,
     };
     item.variantCount = Math.max(unique.length, unique.length ? 1 : 0);
+    const artifacts = new Map();
+    item.consumerBindings = item.presence.map((presence) => ({
+      artifactId: presence.artifactId,
+      host: presence.consumer.host,
+      scope: presence.scope,
+      project: presence.project,
+      mechanism: presence.consumer.mechanism,
+      configuredBy: presence.consumer.configuredBy,
+      enabled: presence.consumer.enabled,
+      resolution: presence.consumer.resolution,
+    }));
+    for (const presence of item.presence) {
+      if (!artifacts.has(presence.artifactId)) {
+        artifacts.set(presence.artifactId, {
+          id: presence.artifactId,
+          definition: presence.definition ?? null,
+          entrypoint: presence.digest ?? null,
+          sourceScopes: [],
+          consumers: [],
+        });
+      }
+      const artifact = artifacts.get(presence.artifactId);
+      if (!artifact.sourceScopes.includes(presence.scope)) artifact.sourceScopes.push(presence.scope);
+      const consumer = item.consumerBindings.find((binding) => (
+        binding.artifactId === presence.artifactId
+        && binding.host === presence.host
+        && binding.mechanism === presence.consumer.mechanism
+        && binding.scope === presence.scope
+      ));
+      if (!artifact.consumers.some((row) => JSON.stringify(row) === JSON.stringify(consumer))) {
+        artifact.consumers.push(consumer);
+      }
+    }
+    item.artifacts = [...artifacts.values()];
   }
   return list.sort((a, b) => (a.kind === b.kind
     ? a.name.localeCompare(b.name)
@@ -438,11 +491,12 @@ export function collectCatalog({
   nativePlugins = null,
   includePluginSurfaces = true,
   inspectProjectArtifacts: inspectProjectArtifactsImpl = inspectProjectArtifacts,
+  env = process.env,
 } = {}) {
   const asOf = now();
   const io = { walk, limits, fsImpl };
   const roots = { claudeRoot, claudeMcpFile, codexRoot, agentsRoot, codexConfigFile, opencodeRoot, opencodeConfigFile,
-    cwd, projects };
+    cwd, projects, env };
   const readers = {
     marker: readMarkerDirs, markdown: readMarkdownNames, stems: readFileStems,
     manifest: readManifestKeys, toml: readTomlTables,

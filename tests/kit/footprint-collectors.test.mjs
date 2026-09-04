@@ -879,11 +879,16 @@ test('catalog dedups by normalized name and keeps a per-host presence matrix', (
   const skills = result.items.filter((item) => item.kind === 'skill');
   assert.deepEqual(skills.map((item) => item.name).sort(), ['Deep-Research', 'claude-only']);
   const shared = skills.find((item) => item.name === 'Deep-Research');
-  assert.deepEqual(shared.hosts.sort(), ['claude', 'codex'],
+  assert.deepEqual(shared.hosts.sort(), ['claude', 'codex', 'opencode'],
     'case and spacing are presentation; the deployed skill is one thing');
-  assert.equal(shared.presence.length, 2);
+  assert.equal(shared.presence.length, 3);
   assert.deepEqual(shared.presence.map((entry) => entry.surface).sort(),
-    ['claude-skills', 'codex-skills']);
+    ['claude-skills', 'codex-skills', 'opencode-claude-skills']);
+  const claudeArtifact = shared.artifacts.find((artifact) => artifact.consumers.some((row) => row.host === 'claude'));
+  assert.deepEqual(claudeArtifact.consumers.map((row) => row.host).sort(), ['claude', 'opencode'],
+    'one physical Claude-compatible skill is exposed to both documented consumers');
+  assert.deepEqual(new Set(shared.consumerBindings.map((row) => row.artifactId)).size, 2,
+    'consumer bindings preserve two installed copies instead of treating three host edges as three copies');
 
   // Kind is part of identity: a `reviewer` agent and a `reviewer` command are
   // two different deployed things.
@@ -901,7 +906,7 @@ test('catalog dedups by normalized name and keeps a per-host presence matrix', (
 
   assert.equal(result.perHost.claude.skill.value, 2);
   assert.equal(result.perHost.codex.skill.value, 1);
-  assert.equal(result.perHost.opencode.skill.value, 0);
+  assert.equal(result.perHost.opencode.skill.value, 2);
   assert.equal(result.perHost.opencode.agent.value, 1);
   assert.equal(result.perHost.codex.agent.value, 0);
   assert.equal(result.perHost.codex.mcpServer.value, 2);
@@ -928,6 +933,46 @@ test('catalog includes project-scoped Codex skills from .agents/skills', (t) => 
   assert.equal(skill?.presence[0]?.surface, `codex-project-skills:${project}`);
   assert.equal(result.perHost.codex.skill.value, 2);
   assert.equal(result.surfaces.find((surface) => surface.id === `codex-project-skills:${project}`)?.count, 1);
+});
+
+test('catalog exposes project Claude-compatible skills to Claude and OpenCode without duplicating the artifact', (t) => {
+  const fixtureRoots = catalogFixture(t);
+  const { root, ...roots } = fixtureRoots;
+  const project = path.join(root, 'claude-compatible-project');
+  write(path.join(project, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+  write(path.join(project, '.claude', 'skills', 'shared-project', 'SKILL.md'),
+    '---\nname: shared-project\n---\nshared project skill\n');
+
+  const result = collectCatalog({
+    ...roots, cwd: project, now: () => 1_700_000_000_000,
+    includePluginSurfaces: false, fsImpl: fixtureFs(root),
+  });
+  const skill = result.items.find((item) => item.kind === 'skill' && item.name === 'shared-project');
+  assert.deepEqual(skill.hosts.sort(), ['claude', 'opencode']);
+  assert.equal(skill.artifacts.length, 1);
+  assert.deepEqual(skill.artifacts[0].consumers.map((row) => row.host).sort(), ['claude', 'opencode']);
+  assert.equal(skill.consumerBindings.every((row) => row.resolution === 'not-reported'), true);
+  assert.equal(skill.consumerBindings.find((row) => row.host === 'opencode').mechanism,
+    'claude-compatible-directory');
+});
+
+test('catalog inventories OpenCode skills.paths as configured consumer bindings', (t) => {
+  const fixtureRoots = catalogFixture(t);
+  const { root, opencodeConfigFile, ...roots } = fixtureRoots;
+  const configured = path.join(root, 'shared-catalog');
+  write(path.join(configured, 'configured-skill', 'SKILL.md'), 'configured skill\n');
+  write(opencodeConfigFile, JSON.stringify({ mcp: { ruflo: {} }, skills: { paths: [configured] } }));
+
+  const result = collectCatalog({
+    ...roots, opencodeConfigFile, cwd: root, now: () => 1_700_000_000_000,
+    includePluginSurfaces: false, fsImpl: fixtureFs(root),
+  });
+  const skill = result.items.find((item) => item.kind === 'skill' && item.name === 'configured-skill');
+  assert.deepEqual(skill.hosts, ['opencode']);
+  assert.equal(skill.consumerBindings.length, 1);
+  assert.equal(skill.consumerBindings[0].mechanism, 'configured-path');
+  assert.equal(skill.consumerBindings[0].configuredBy, 'opencode.json');
+  assert.equal(skill.consumerBindings[0].resolution, 'not-reported');
 });
 
 test('catalog inventories project agents, commands and MCP registrations across supported host surfaces', (t) => {
