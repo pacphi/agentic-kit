@@ -19,7 +19,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   HEAD_MAX_LINES, PROJECT_SOURCE_HOSTS, PROJECT_SOURCE_METHOD,
-  decodeClaudeProjectDir, discoverProjectSources, firstCwd, scanOpencodeDirectories,
+  decodeClaudeProjectDir, discoverProjectSources, firstCwd, firstSessionMetadata, scanOpencodeDirectories,
   scanTranscriptCwds,
 } from '../../src/lib/footprint/project-sources.mjs';
 import { collectProjects } from '../../src/lib/footprint/projects.mjs';
@@ -81,6 +81,48 @@ test('a cwd is read from either host shape, and only from the head', () => {
   assert.equal(firstCwd([], 'claude'), null);
   assert.equal(firstCwd(null, 'claude'), null);
   assert.equal(firstCwd([JSON.stringify({ cwd: '' })], 'claude'), null);
+});
+
+test('bounded transcript metadata normalizes native identity and start time without prompt content', () => {
+  const codex = firstSessionMetadata([
+    '{"truncated":',
+    JSON.stringify({
+      timestamp: '2026-09-03T16:10:25.468Z', type: 'session_meta',
+      payload: {
+        id: '01a06808-ff7f-7ae1-96a1-510da7cf6277',
+        timestamp: '2026-09-03T16:10:15.342Z', cwd: '/repos/agentic-kit',
+      },
+    }),
+  ], 'codex');
+  assert.deepEqual(codex, {
+    cwd: '/repos/agentic-kit',
+    nativeId: '01a06808-ff7f-7ae1-96a1-510da7cf6277',
+    startedAt: '2026-09-03T16:10:15.342Z',
+    timeBasis: 'started',
+  });
+
+  const claude = firstSessionMetadata([
+    JSON.stringify({
+      type: 'queue-operation', sessionId: '8b5fdc77-788f-4857-9b16-1cbac2a717e9',
+      cwd: '/repos/boon-worthy', timestamp: '2026-09-03T06:57:27.087Z',
+    }),
+    JSON.stringify({ type: 'ai-title', aiTitle: 'sensitive conversation title' }),
+  ], 'claude');
+  assert.deepEqual(claude, {
+    cwd: '/repos/boon-worthy',
+    nativeId: '8b5fdc77-788f-4857-9b16-1cbac2a717e9',
+    startedAt: '2026-09-03T06:57:27.087Z',
+    timeBasis: 'first-event',
+  }, 'the System inventory must not surface a prompt-derived title');
+});
+
+test('Codex metadata latches its first session_meta and rejects timezone-less instants', () => {
+  const result = firstSessionMetadata([
+    JSON.stringify({ type: 'session_meta', payload: { id: 'own', timestamp: '2026-09-03T09:10:15' } }),
+    JSON.stringify({ type: 'session_meta', payload: { id: 'replayed-parent', timestamp: '2026-09-04T10:00:00Z' } }),
+  ], 'codex');
+  assert.equal(result.nativeId, 'own');
+  assert.equal(result.startedAt, null, 'a timezone-less wall clock is not an absolute instant');
 });
 
 test('the encoded Claude directory decodes only against the real filesystem', { skip: POSIX_ONLY }, (t) => {

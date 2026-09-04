@@ -2,6 +2,7 @@
 // reads it as text). See src/lib/dashboard/client/**'s eslint.config.mjs
 // override comment for why this directory isn't run through the node lib.
 import { authHeaders, esc } from './bootstrap.mjs';
+import { formatLocalDateTime, formatLocalDateTimeLong, shortSessionId } from './datetime.mjs';
 import { ago } from './intelligence.mjs';
 import { CHART_EXCLUDED_CATEGORIES, KIND_LABEL, KIND_PLURAL, NOT_SCANNED, SERIES, bytesPair, catColor, dayTick, fmtBytes, fmtDur, hostColor, mhtml, mval, renderSysConsumers, renderSysReclaim, renderSysSummary, storageHostTotals, svgArea, svgDonut, svgRadar, sysEmpty, transcriptIdOf, unkHtml } from './system-readout.mjs';
 import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
@@ -161,7 +162,33 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     }
   }
 
-  function sysTopSessionRowHtml(x,hostTotals){
+  function sysSessionIdentity(x,sid,index){
+    var identity=x.identity||{},started=identity.startedAt||null;
+    var last=identity.lastModifiedAt||(Number.isFinite(x.mtimeMs)?new Date(x.mtimeMs).toISOString():null);
+    var at=started||last,compact=formatLocalDateTime(at),detail=formatLocalDateTimeLong(at);
+    var basis=started?(identity.timeBasis||"started"):(last?"file-mtime":"unavailable");
+    var prefix=basis==="file-mtime"?"Last active ":"";
+    var primary=compact?prefix+compact:"Time not recorded";
+    var original=String(identity.original||x.session||"");
+    var nativeId=String(identity.nativeId||sid||original.replace(/\.jsonl$/,""));
+    var host=String(x.host||"host"),hostName=host.charAt(0).toUpperCase()+host.slice(1);
+    var timeLabel=basis==="first-event"?"First recorded":basis==="file-mtime"?"Last active":"Started";
+    var actionTime=compact?(timeLabel.toLowerCase()+" "+compact):("ID "+nativeId);
+    var disclosure="Original: "+original+"\nNative ID: "+nativeId;
+    if(detail)disclosure+="\n"+timeLabel+": "+detail;
+    var descId="sys-session-desc-"+index;
+    var timeHtml=at&&compact
+      ?'<time class="sy-session-primary" datetime="'+esc(new Date(Date.parse(at)).toISOString())+'">'+esc(primary)+"</time>"
+      :'<span class="sy-session-primary">'+esc(primary)+"</span>";
+    var contents=timeHtml+'<span class="sy-session-id">ID '+esc(shortSessionId(nativeId))+"</span>";
+    if(!sid)return '<span class="sy-session-link sy-session-static">'+contents+"</span>";
+    return '<a class="sy-link sy-session-link" href="#usage/'+encodeURIComponent(sid)+'" data-transcript="'+esc(sid)+'"'
+      +' data-tooltip="'+esc(disclosure)+'" aria-describedby="'+descId+'"'
+      +' aria-label="Open '+esc(hostName)+' session '+esc(actionTime)+'">'+contents+"</a>"
+      +'<span class="sr-only" id="'+descId+'">'+esc(disclosure)+"</span>";
+  }
+
+  function sysTopSessionRowHtml(x,hostTotals,index){
     var ht=hostTotals[x.host],share=ht>0?(x.bytes/ht)*100:null;
     // Link to the transcript the same way Usage does, through the public
     // bridge it already exposes. The id has to be normalised first:
@@ -169,15 +196,8 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     // Usage's form. A row we cannot address renders as plain text — a
     // dead link is worse than no link.
     var sid=transcriptIdOf(x);
-    // Strip the extension rather than truncating mid-id: a uuid cut at 34
-    // characters reads as a corrupted value.
-    var sname=String(x.session||"");
-    if(sname.slice(-6)===".jsonl")sname=sname.slice(0,-6);
-    var cell=esc(sname);
     return "<tr>"
-      +'<td class="mono" title="'+esc(x.path||"")+'">'
-      +(sid?'<button class="sy-link" type="button" data-transcript="'+esc(sid)+'" title="open transcript">'+cell+"</button>":cell)
-      +"</td>"
+      +'<td class="mono">'+sysSessionIdentity(x,sid,index)+"</td>"
       +'<td><span class="sy-dot" style="background:'+hostColor(x.host)+'"></span>'+esc(x.host||"\u2014")+"</td>"
       // A bounded transcript-head read supplies the working context for Codex
       // rows whose dated storage path carries no project. Older snapshots fall
@@ -206,8 +226,8 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     if(!s){top.innerHTML=sysEmpty(NOT_SCANNED);return;}
     if(!sess||!sess.length){top.innerHTML=sysEmpty("no session files were measured.");return;}
     var hostTotals=storageHostTotals(s);
-    var body=sess.map(function(x){return sysTopSessionRowHtml(x,hostTotals);}).join("");
-    top.innerHTML='<div class="sy-tblwrap"><table class="sy-table"><thead><tr><th>Session</th><th>Host</th>'
+    var body=sess.map(function(x,index){return sysTopSessionRowHtml(x,hostTotals,index);}).join("");
+    top.innerHTML='<div class="sy-tblwrap" role="region" aria-label="Largest retained sessions" tabindex="0"><table class="sy-table"><thead><tr><th>Session</th><th>Host</th>'
       +'<th>Working context</th><th style="text-align:right">Size</th><th>Share of host</th></tr></thead><tbody>'
       +body+"</tbody></table></div>";
   }
@@ -1001,6 +1021,42 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
   }
 
   export function wireSystem(){
+    var sessionTooltip=document.getElementById("sys-session-tooltip");
+    if(!sessionTooltip){
+      sessionTooltip=document.createElement("div");
+      sessionTooltip.id="sys-session-tooltip";sessionTooltip.className="sy-session-tooltip";
+      sessionTooltip.setAttribute("role","tooltip");sessionTooltip.hidden=true;
+      document.body.appendChild(sessionTooltip);
+    }
+    function hideSessionTooltip(){sessionTooltip.hidden=true;sessionTooltip.textContent="";}
+    function showSessionTooltip(link){
+      var text=link&&link.getAttribute("data-tooltip");if(!text)return;
+      sessionTooltip.textContent=text;sessionTooltip.hidden=false;
+      var rect=link.getBoundingClientRect(),tip=sessionTooltip.getBoundingClientRect();
+      var left=Math.max(8,Math.min(rect.left,window.innerWidth-tip.width-8));
+      var top=rect.bottom+7;
+      if(top+tip.height>window.innerHeight-8)top=Math.max(8,rect.top-tip.height-7);
+      sessionTooltip.style.left=left+"px";sessionTooltip.style.top=top+"px";
+    }
+    document.addEventListener("focusin",function(e){
+      var link=e.target&&e.target.closest?e.target.closest(".sy-session-link[data-tooltip]"):null;
+      if(link)showSessionTooltip(link);
+    });
+    document.addEventListener("focusout",function(e){
+      var link=e.target&&e.target.closest?e.target.closest(".sy-session-link[data-tooltip]"):null;
+      if(link&&(!e.relatedTarget||!link.contains(e.relatedTarget)))hideSessionTooltip();
+    });
+    document.addEventListener("pointerover",function(e){
+      var link=e.target&&e.target.closest?e.target.closest(".sy-session-link[data-tooltip]"):null;
+      if(link&&(!e.relatedTarget||!link.contains(e.relatedTarget)))showSessionTooltip(link);
+    });
+    document.addEventListener("pointerout",function(e){
+      var link=e.target&&e.target.closest?e.target.closest(".sy-session-link[data-tooltip]"):null;
+      if(link&&(!e.relatedTarget||!link.contains(e.relatedTarget))&&document.activeElement!==link)hideSessionTooltip();
+    });
+    document.addEventListener("keydown",function(e){
+      if(e.key==="Escape"&&!sessionTooltip.hidden)hideSessionTooltip();
+    });
     var btn=document.getElementById("sys-rescan");
     if(btn)btn.addEventListener("click",function(){
       if(btn.disabled)return;

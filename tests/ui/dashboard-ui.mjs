@@ -560,8 +560,8 @@ const SYSTEM_PAYLOAD = {
       cleanupHint: 'ak system --help',
     }],
     topSessions: [
-      { session: 'uitrunc01', host: 'claude', project: 'proj', context: { kind: 'repository', label: 'proj', path: '/Users/me/proj' }, bytes: 84_000_000, path: '/Users/me/.claude/projects/-Users-me-proj/uitrunc01.jsonl', attribution: 'transcript-cwd' },
-      { session: 'orphan0001', host: 'codex', project: null, context: { kind: 'repository', label: 'agentic-kit', path: '/Users/me/agentic-kit' }, bytes: 51_000_000, path: '/Users/me/.codex/sessions/orphan0001.jsonl', attribution: 'transcript-cwd' },
+      { session: 'uitrunc01.jsonl', host: 'claude', project: 'proj', context: { kind: 'repository', label: 'proj', path: '/Users/me/proj' }, bytes: 84_000_000, path: '/Users/me/.claude/projects/-Users-me-proj/uitrunc01.jsonl', attribution: 'transcript-cwd', identity: { original: 'uitrunc01.jsonl', nativeId: 'uitrunc01', startedAt: '2026-09-03T16:10:15.342Z', lastModifiedAt: '2026-09-03T17:12:00.000Z', timeBasis: 'first-event', provenance: { nativeId: 'transcript-head', startedAt: 'transcript-head', lastModifiedAt: 'file-mtime' } } },
+      { session: 'orphan0001.jsonl', host: 'codex', project: null, context: { kind: 'repository', label: 'agentic-kit', path: '/Users/me/agentic-kit' }, bytes: 51_000_000, path: '/Users/me/.codex/sessions/orphan0001.jsonl', attribution: 'transcript-cwd', identity: { original: 'orphan0001.jsonl', nativeId: 'orphan0001', lastModifiedAt: '2026-09-03T18:20:00.000Z', timeBasis: 'file-mtime', provenance: { nativeId: 'transcript-head', lastModifiedAt: 'file-mtime' } } },
     ],
   },
   // Never deep-scanned on this machine. The whole section is `null` rather than
@@ -1246,7 +1246,9 @@ async function main() {
     `blocked-storage startup was ${JSON.stringify(blockedStorageStartup)} with status ${blockedStatus.join(',')}`);
   await storageBlockedPage.close();
 
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const page = await browser.newPage({
+    viewport: { width: 1440, height: 900 }, locale: 'en-US', timezoneId: 'America/Los_Angeles',
+  });
 
   // Anything the page logs as an error, or any request it fails, is a defect —
   // collected globally so a failure in one view is not silently swallowed.
@@ -1732,14 +1734,75 @@ async function main() {
 
     await page.click('[data-system-view="sessions"]');
     await page.waitForSelector('#panel-sys-sessions:not([hidden])');
-    const largestSessions = await page.$eval('#sys-topsessions', (element) => ({
-      rows: [...element.querySelectorAll('tbody tr')].map((row) => row.innerText.trim()),
-      text: element.innerText,
-    }));
+    const largestSessions = await page.$eval('#sys-topsessions', (element) => {
+      const visibleClone = element.cloneNode(true);
+      visibleClone.querySelectorAll('.sr-only,[hidden]').forEach((node) => node.remove());
+      return {
+        rows: [...element.querySelectorAll('tbody tr')].map((row) => row.innerText.trim()),
+        visibleText: visibleClone.textContent,
+        links: [...element.querySelectorAll('.sy-session-link')].map((link) => ({
+          tag: link.tagName, href: link.getAttribute('href'), label: link.getAttribute('aria-label'),
+          describedBy: link.getAttribute('aria-describedby'), tooltip: link.getAttribute('data-tooltip'),
+          primary: link.querySelector('.sy-session-primary')?.textContent?.trim(),
+          secondary: link.querySelector('.sy-session-id')?.textContent?.trim(),
+          datetime: link.querySelector('time')?.getAttribute('datetime'),
+          sameLink: link.querySelector('.sy-session-id')?.closest('a') === link,
+        })),
+      };
+    });
     check('largest sessions keeps measured rows when a host did not record their project',
       largestSessions.rows.length === 2
-        && largestSessions.rows.some((row) => /orphan0001[\s\S]*codex[\s\S]*agentic-kit/i.test(row)),
+        && largestSessions.rows.some((row) => /Last active Sep 3, 2026 · 11:20 AM[\s\S]*ID orphan0001[\s\S]*codex[\s\S]*agentic-kit/i.test(row)),
       `largest session rows were ${JSON.stringify(largestSessions.rows)}`);
+    const [startedSession, fallbackSession] = largestSessions.links;
+    check('largest-session identity is one canonical two-line transcript link',
+      startedSession?.tag === 'A' && startedSession.href === '#usage/uitrunc01'
+        && startedSession.sameLink
+        && startedSession.primary === 'Sep 3, 2026 · 9:10 AM'
+        && startedSession.secondary === 'ID uitrunc01',
+      `session identity was ${JSON.stringify(startedSession)}`);
+    check('the primary session line carries the authoritative machine instant',
+      startedSession?.datetime === '2026-09-03T16:10:15.342Z',
+      `session datetime was ${JSON.stringify(startedSession?.datetime)}`);
+    check('the session link describes its action and full disclosure for assistive technology',
+      /Open Claude session first recorded Sep 3, 2026 · 9:10 AM/.test(startedSession?.label || '')
+        && startedSession?.describedBy
+        && /Original: uitrunc01\.jsonl/.test(startedSession?.tooltip || '')
+        && /Native ID: uitrunc01/.test(startedSession?.tooltip || '')
+        && /PDT/.test(startedSession?.tooltip || ''),
+      `session accessibility was ${JSON.stringify(startedSession)}`);
+    check('a session without a start instant labels its mtime as last activity',
+      fallbackSession?.primary === 'Last active Sep 3, 2026 · 11:20 AM'
+        && fallbackSession.datetime === '2026-09-03T18:20:00.000Z',
+      `fallback identity was ${JSON.stringify(fallbackSession)}`);
+    check('raw storage names and full native ids stay out of the visible table until disclosure',
+      !largestSessions.visibleText.includes('.jsonl') && !largestSessions.visibleText.includes('rollout-'),
+      `visible session text was ${JSON.stringify(largestSessions.visibleText)}`);
+
+    await page.focus('.sy-session-link');
+    await page.waitForFunction(() => !document.getElementById('sys-session-tooltip')?.hidden);
+    const focusedSession = await page.evaluate(() => ({
+      tooltip: document.getElementById('sys-session-tooltip')?.innerText,
+      outline: getComputedStyle(document.querySelector('.sy-session-link')).outlineWidth,
+    }));
+    check('keyboard focus reveals the complete localized session disclosure',
+      /Original: uitrunc01\.jsonl/.test(focusedSession.tooltip || '')
+        && /Native ID: uitrunc01/.test(focusedSession.tooltip || '')
+        && /PDT/.test(focusedSession.tooltip || '')
+        && parseFloat(focusedSession.outline) >= 2,
+      `focused disclosure was ${JSON.stringify(focusedSession)}`);
+    await page.keyboard.press('Escape');
+    check('Escape dismisses the session disclosure without moving focus',
+      await page.$eval('.sy-session-link', (link) => document.activeElement === link
+        && document.getElementById('sys-session-tooltip')?.hidden === true),
+      'tooltip remained visible or focus left the session link');
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => location.hash === '#usage/uitrunc01');
+    check('Enter on the combined identity opens the canonical transcript route',
+      await page.evaluate(() => location.hash) === '#usage/uitrunc01',
+      `session link navigated to ${await page.evaluate(() => location.hash)}`);
+    await page.click('#tab-system');
+    await page.click('[data-system-view="sessions"]');
 
     // Maintenance remains a reporting workbench even when its separate action
     // contract is enabled. One provider-owned finding gets one Preview control;

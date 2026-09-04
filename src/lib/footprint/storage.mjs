@@ -54,7 +54,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { home, claudeDir, codexDir, configDir } from '../paths.mjs';
 import { defaultOpencodeDbPath } from '../usage-opencode.mjs';
-import { decodeClaudeProjectDir, transcriptCwd } from './project-sources.mjs';
+import { decodeClaudeProjectDir, transcriptMetadata } from './project-sources.mjs';
 import { classifyWorkingContext } from './working-context.mjs';
 import {
   walkTree, rootMeasurements, measured, unknown, sumMeasurements,
@@ -563,8 +563,33 @@ export function collectStorage({
   };
 }
 
+function readTopSessionMetadata(row, { readMetadata, readCwd, fsImpl }) {
+  if (row.host !== 'claude' && row.host !== 'codex') return null;
+  try {
+    return typeof readCwd === 'function'
+      ? { cwd: readCwd(row.path, row.host, { fsImpl }) }
+      : readMetadata(row.path, row.host, { fsImpl });
+  } catch { return null; }
+}
+
+function topSessionIdentity(row, metadata) {
+  const lastModifiedAt = Number.isFinite(row.mtimeMs) ? new Date(row.mtimeMs).toISOString() : null;
+  return {
+    original: row.session,
+    ...(metadata?.nativeId ? { nativeId: metadata.nativeId } : {}),
+    ...(metadata?.startedAt ? { startedAt: metadata.startedAt } : {}),
+    ...(lastModifiedAt ? { lastModifiedAt } : {}),
+    timeBasis: metadata?.timeBasis ?? (lastModifiedAt ? 'file-mtime' : 'unavailable'),
+    provenance: {
+      ...(metadata?.nativeId ? { nativeId: 'transcript-head' } : {}),
+      ...(metadata?.startedAt ? { startedAt: 'transcript-head' } : {}),
+      ...(lastModifiedAt ? { lastModifiedAt: 'file-mtime' } : {}),
+    },
+  };
+}
+
 /**
- * Give each top session a human working context beside its raw tree key.
+ * Give each top session a human working context and identity beside its raw tree key.
  *
  * The raw key stays untouched — it is the tree key everything else joins on.
  * The label is the decoded directory's basename when the decode succeeds, and
@@ -578,12 +603,14 @@ export function collectStorage({
  *
  * @param {Array<Record<string, any>>} rows
  * @param {{ decodeDir?: typeof decodeClaudeProjectDir, fsImpl?: typeof fs,
- *   readCwd?: typeof transcriptCwd, classifyContext?: typeof classifyWorkingContext }} [opts]
+ *   readMetadata?: typeof transcriptMetadata, readCwd?: Function,
+ *   classifyContext?: typeof classifyWorkingContext }} [opts]
  */
 export function labelSessions(rows, {
   decodeDir = decodeClaudeProjectDir,
   fsImpl = fs,
-  readCwd = transcriptCwd,
+  readMetadata = transcriptMetadata,
+  readCwd,
   classifyContext = classifyWorkingContext,
 } = {}) {
   const cache = new Map();
@@ -613,15 +640,14 @@ export function labelSessions(rows, {
     return cache.get(key);
   };
   return rows.map((row) => {
-    let cwd = null;
-    if (row.host === 'claude' || row.host === 'codex') {
-      try { cwd = readCwd(row.path, row.host, { fsImpl }); } catch { /* row degrades alone */ }
-    }
+    const metadata = readTopSessionMetadata(row, { readMetadata, readCwd, fsImpl });
+    const base = { ...row, identity: topSessionIdentity(row, metadata) };
+    const cwd = metadata?.cwd ?? null;
     if (cwd) {
       const context = classifyContext(cwd, { fsImpl });
       if (context) {
         return {
-          ...row,
+          ...base,
           context,
           attribution: 'transcript-cwd',
           ...(context.kind === 'repository'
@@ -633,10 +659,10 @@ export function labelSessions(rows, {
       const decoded = decodedLabel(row.project);
       const context = decoded.projectResolved
         ? classifyContext(decoded.projectPath, { fsImpl }) : null;
-      return { ...row, ...decoded, ...(context ? { context } : {}) };
+      return { ...base, ...decoded, ...(context ? { context } : {}) };
     }
     return {
-      ...row,
+      ...base,
       context: {
         kind: 'host-store',
         label: `${row.host === 'opencode' ? 'OpenCode' : row.host === 'claude' ? 'Claude' : 'Codex'} session store`,

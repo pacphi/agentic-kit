@@ -96,21 +96,72 @@ function readHeadLines(file, { fsImpl = fs, headBytes = HEAD_BYTES, maxLines = H
  * a head window is expected, not a failure.
  */
 export function firstCwd(lines, host) {
+  return firstSessionMetadata(lines, host).cwd;
+}
+
+const normalizedInstant = (value) => {
+  if (typeof value !== 'string' || !/(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) return null;
+  const at = Date.parse(value);
+  return Number.isFinite(at) ? new Date(at).toISOString() : null;
+};
+
+function* parsedHeadRecords(lines) {
   for (const line of lines ?? []) {
     let record;
     try { record = JSON.parse(line); } catch { continue; }
-    if (!record || typeof record !== 'object') continue;
-    const cwd = host === 'claude'
-      ? record.cwd
-      : (['session_meta', 'turn_context'].includes(record.type) ? record.payload?.cwd : null);
-    if (typeof cwd === 'string' && cwd) return cwd;
+    if (record && typeof record === 'object') yield record;
   }
-  return null;
+}
+
+function firstClaudeSessionMetadata(lines) {
+  let cwd = null;
+  let nativeId = null;
+  let startedAt = null;
+  for (const record of parsedHeadRecords(lines)) {
+    if (!cwd && typeof record.cwd === 'string' && record.cwd) cwd = record.cwd;
+    if (!nativeId && typeof record.sessionId === 'string' && record.sessionId) nativeId = record.sessionId;
+    if (!startedAt) startedAt = normalizedInstant(record.timestamp);
+    if (cwd && nativeId && startedAt) break;
+  }
+  return { cwd, nativeId, startedAt, timeBasis: startedAt ? 'first-event' : null };
+}
+
+function firstCodexSessionMetadata(lines) {
+  let cwd = null;
+  let nativeId = null;
+  let startedAt = null;
+  let metaSeen = false;
+  for (const record of parsedHeadRecords(lines)) {
+    if (!cwd && ['session_meta', 'turn_context'].includes(record.type)
+      && typeof record.payload?.cwd === 'string' && record.payload.cwd) cwd = record.payload.cwd;
+    if (record.type === 'session_meta' && !metaSeen) {
+      metaSeen = true;
+      if (typeof record.payload?.id === 'string' && record.payload.id) nativeId = record.payload.id;
+      startedAt = normalizedInstant(record.payload?.timestamp ?? record.timestamp);
+    }
+    if (cwd && nativeId && startedAt) break;
+  }
+  return { cwd, nativeId, startedAt, timeBasis: startedAt ? 'started' : null };
+}
+
+/**
+ * Normalize privacy-safe identity fields from one bounded transcript head.
+ * Native ids stay opaque; prompt text and generated titles are never retained.
+ */
+export function firstSessionMetadata(lines, host) {
+  if (host === 'claude') return firstClaudeSessionMetadata(lines);
+  if (host === 'codex') return firstCodexSessionMetadata(lines);
+  return { cwd: null, nativeId: null, startedAt: null, timeBasis: null };
 }
 
 /** Read only the bounded transcript head and return its declared cwd. */
 export function transcriptCwd(file, host, options = {}) {
   return firstCwd(readHeadLines(file, options), host);
+}
+
+/** Read identity, start time, and cwd from the same bounded transcript head. */
+export function transcriptMetadata(file, host, options = {}) {
+  return firstSessionMetadata(readHeadLines(file, options), host);
 }
 
 // ── the encoded Claude project directory ──────────────────────────────────────

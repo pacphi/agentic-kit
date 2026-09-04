@@ -1445,6 +1445,16 @@ test('labelSessions identifies the host store when no working context is availab
   assert.match(row.contextReason, /did not contain a working directory/);
 });
 
+test('labelSessions does not line-parse OpenCode shared storage as a transcript', () => {
+  let metadataReads = 0;
+  const [row] = labelSessions([{
+    session: 'opencode.db', host: 'opencode', project: null, path: '/sessions/opencode.db',
+  }], { readMetadata: () => { metadataReads += 1; return {}; } });
+  assert.equal(metadataReads, 0);
+  assert.equal(row.context.label, 'OpenCode session store');
+  assert.equal(row.identity.timeBasis, 'unavailable');
+});
+
 test('labelSessions attributes a flat Codex rollout from its bounded header cwd', () => {
   const [row] = labelSessions([{
     session: 'rollout.jsonl', host: 'codex', project: null, path: '/sessions/rollout.jsonl',
@@ -1458,6 +1468,34 @@ test('labelSessions attributes a flat Codex rollout from its bounded header cwd'
   assert.equal(row.projectLabel, 'agentic-kit');
   assert.equal(row.projectResolved, true);
   assert.equal(row.context.kind, 'repository');
+});
+
+test('labelSessions carries native identity and authoritative start time from the same bounded read', () => {
+  let metadataReads = 0;
+  const [row] = labelSessions([{
+    session: 'rollout-2026-09-03T09-10-15-native.jsonl', host: 'codex', project: null,
+    path: '/sessions/rollout-2026-09-03T09-10-15-native.jsonl', mtimeMs: 1_788_460_000_000,
+  }], {
+    readMetadata: () => {
+      metadataReads += 1;
+      return {
+        cwd: '/repos/agentic-kit', nativeId: 'native-session-id',
+        startedAt: '2026-09-03T16:10:15.342Z', timeBasis: 'started',
+      };
+    },
+    classifyContext: (cwd) => ({ kind: 'repository', label: 'agentic-kit', path: cwd }),
+  });
+  assert.deepEqual(row.identity, {
+    original: 'rollout-2026-09-03T09-10-15-native.jsonl',
+    nativeId: 'native-session-id',
+    startedAt: '2026-09-03T16:10:15.342Z',
+    lastModifiedAt: new Date(1_788_460_000_000).toISOString(),
+    timeBasis: 'started',
+    provenance: {
+      nativeId: 'transcript-head', startedAt: 'transcript-head', lastModifiedAt: 'file-mtime',
+    },
+  });
+  assert.equal(metadataReads, 1, 'working context and identity must share one bounded head read');
 });
 
 test('labelSessions decodes each distinct project once', () => {

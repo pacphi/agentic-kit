@@ -90,6 +90,7 @@ import { loadModelLifecycle, loadUsage } from './usage.mjs';
     document.addEventListener("click",function(e){
       var link=e.target&&e.target.closest?e.target.closest("[data-transcript]"):null;
       if(!link)return;
+      if(link.tagName==="A")e.preventDefault();
       window.AKDashboardOpenTranscript(link.getAttribute("data-transcript"));
     });
     var btns=document.querySelectorAll(".strip-toggle");

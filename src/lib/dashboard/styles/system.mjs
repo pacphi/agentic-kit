@@ -262,10 +262,23 @@ export const SYSTEM_CSS = `
    as, so the affordance is visible without a second visual vocabulary. */
 .sy-link{
   background:none; border:0; padding:0; font:inherit; color:var(--accent);
-  cursor:pointer; text-align:left; border-radius:3px;
+  cursor:pointer; text-align:left; border-radius:3px; text-decoration:none;
 }
-.sy-link:hover{text-decoration:underline}
+.sy-link:hover .sy-session-primary{text-decoration:underline}
 .sy-link:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+.sy-session-link{
+  display:inline-flex; flex-direction:column; align-items:flex-start; justify-content:center;
+  gap:2px; min-height:32px; max-width:100%; line-height:1.2;
+}
+.sy-session-primary{color:var(--accent); font-family:var(--sans); font-size:12px; font-weight:600}
+.sy-session-id{color:var(--ink-dim); font-family:var(--mono); font-size:10.5px; font-weight:400}
+.sy-session-static .sy-session-primary{color:var(--ink-2)}
+.sy-session-tooltip{
+  position:fixed; z-index:1000; max-width:min(520px,calc(100vw - 16px));
+  padding:8px 10px; border:1px solid var(--line-2); border-radius:7px;
+  background:var(--panel); color:var(--ink); box-shadow:var(--shadow);
+  font:11px/1.5 var(--mono); white-space:pre-wrap; overflow-wrap:anywhere; pointer-events:none;
+}
 /* The presence matrix is a real table and retains EVERY deduplicated item, but
    its viewport is deliberately one header plus no more than five records. The
    44px minimum accounts for the name and source lines; a wrapped record may
