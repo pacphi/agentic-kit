@@ -488,7 +488,7 @@ function fillMissingStorageCategories(categories, projects) {
  *   roots?: StorageRoot[]|null, limits?: object, growthDays?: number, topN?: number,
  *   maxChildren?: number, reclaim?: object, detectWorktrees?: boolean,
  *   detectCaches?: boolean, detectOrphanedTranscripts?: boolean,
- *   consumers?: object|null, env?: NodeJS.ProcessEnv,
+ *   consumers?: object|null, install?: object|null, env?: NodeJS.ProcessEnv,
  *   decodeDir?: typeof decodeClaudeProjectDir,
  *   fsImpl?: typeof fs,
  * }} [options]
@@ -507,6 +507,7 @@ export function collectStorage({
   detectCaches = true,
   detectOrphanedTranscripts = true,
   consumers = null,
+  install = null,
   env = process.env,
   decodeDir = decodeClaudeProjectDir,
   fsImpl = fs,
@@ -532,7 +533,7 @@ export function collectStorage({
 
   const reclaimables = collectReclaimables({
     asOf, agedTranscripts, transcriptProjects, projects, opts, walk, limits,
-    detectWorktrees, detectCaches, detectOrphanedTranscripts, consumers, env, decodeDir, fsImpl,
+    detectWorktrees, detectCaches, detectOrphanedTranscripts, consumers, install, env, decodeDir, fsImpl,
   });
 
   return {

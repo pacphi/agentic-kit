@@ -66,7 +66,7 @@ export const RECLAIM_SAFETY_MEANING = Object.freeze({
 export function collectReclaimables({
   asOf, agedTranscripts, transcriptProjects = new Map(), projects, opts, walk, limits,
   detectWorktrees, detectCaches = true, detectOrphanedTranscripts = true,
-  consumers = null, env = process.env, decodeDir = decodeClaudeProjectDir, fsImpl,
+  consumers = null, install = null, env = process.env, decodeDir = decodeClaudeProjectDir, fsImpl,
 }) {
   const rows = [];
   const days = (ms) => Math.floor((asOf - ms) / 86_400_000);
@@ -94,7 +94,7 @@ export function collectReclaimables({
     }));
   }
 
-  rows.push(...npxReclaimables({ asOf, opts, walk, limits, fsImpl }));
+  rows.push(...npxReclaimables({ asOf, opts, walk, limits, fsImpl, install }));
   if (detectOrphanedTranscripts) {
     rows.push(...orphanedTranscriptReclaimables({
       asOf, opts, transcriptProjects, decodeDir, fsImpl,
@@ -192,12 +192,36 @@ export function candidate(row) {
  *  copy strictly older than its installed global baseline (npx.mjs's version
  *  verdict — the bug that kept a machine running a retired ruflo), and an env
  *  untouched for longer than the idle threshold. */
-export function npxReclaimables({ asOf, opts, walk, limits, fsImpl }) {
-  const nodes = npxEnvNodes({ walk, limits, asOf, fsImpl });
+function sameScanNpxFacts(install, asOf) {
+  if (!install || install.asOf !== asOf) return null;
+  const nodes = install.npxEnvs;
+  if (!nodes || typeof nodes !== 'object' || !path.isAbsolute(nodes.root ?? '')
+      || !['present', 'absent', 'degraded'].includes(nodes.presence)
+      || !Array.isArray(nodes.envs)) return null;
+  if (nodes.presence !== 'present') return nodes.envs.length === 0 ? nodes : null;
+  for (const env of nodes.envs) {
+    if (!env || typeof env.id !== 'string' || !env.id || !path.isAbsolute(env.path ?? '')
+        || path.resolve(path.dirname(env.path)) !== path.resolve(nodes.root)
+        || path.basename(env.path) !== env.id
+        || !Array.isArray(env.packages) || env.packages.some((pkg) => typeof pkg !== 'string')
+        || !env.bytes || !env.files
+        || (env.bytes.status !== 'unknown' && env.bytes.asOf !== asOf)
+        || (env.files.status !== 'unknown' && env.files.asOf !== asOf)
+        || (env.newestMtimeMs !== null && !Number.isFinite(env.newestMtimeMs))) return null;
+  }
+  return nodes;
+}
+
+export function npxReclaimables({ asOf, opts, walk, limits, fsImpl, install = null }) {
+  // Install runs earlier in the same deep scan and already measures every npx
+  // environment. Reuse only an exact, same-asOf, immediate-child inventory;
+  // malformed or older evidence falls back to the original bounded walk.
+  const nodes = sameScanNpxFacts(install, asOf)
+    ?? npxEnvNodes({ walk, limits, asOf, fsImpl });
   if (nodes.presence !== 'present') return [];
   let staleByVersion = new Map();
   try {
-    staleByVersion = new Map(scanNpxStale().map((entry) => [entry.dir, entry.stale]));
+    staleByVersion = new Map(scanNpxStale({ root: nodes.root }).map((entry) => [entry.dir, entry.stale]));
   } catch { /* an unreadable cache simply yields no version verdict */ }
   const idleCutoff = asOf - opts.npxEnvIdleDays * 86_400_000;
   const rows = [];
