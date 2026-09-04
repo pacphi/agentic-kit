@@ -7,23 +7,33 @@ calling the transaction complete.
 Use **System > Maintenance** for guided, one-finding-at-a-time work. Use the CLI for JSON output,
 explicit batches, or interrupted-receipt recovery.
 
-## Start with a scan
+## Choose the check you need
 
 The dashboard first reads the latest saved report. Browser refresh and the header poll do not call
-providers. Press **Scan now** when you want current installed-version, ownership, and action
-eligibility evidence. The summary states how many providers were checked and when.
+providers.
 
-The CLI equivalent performs an explicit provider scan using current System evidence:
+| Control | What it does |
+|---------|--------------|
+| **Check providers** | Uses the saved System inventory to recheck installed versions, provider ownership, and action eligibility. It does not walk projects. |
+| **Full scan** | Remeasures the System inventory—installs, storage, Catalog, eligible hosted repositories, and consumers—then checks providers after the Footprint snapshot is safely persisted. |
+
+Both controls are explicit and single-flight. While either is running, the dashboard keeps the
+previous saved report visible, reports the current phase, bounded count, and elapsed time, and
+temporarily disables Preview and Undo. Planning, apply, undo, and recovery also fail closed until
+the scan finishes. A failed provider check leaves the previous saved report in place.
+
+The CLI equivalent of **Check providers** is:
 
     ak maintain scan
 
-Ask for a fresh deep System measurement when source state may have changed:
+Ask for **Full scan** followed by the provider check when source state may have changed:
 
     ak maintain scan --deep
 
 Deep scanning measures. It does not apply maintenance. Catalog and Advisory remain read-only.
-A successful persisted System deep rescan also chains one Maintenance provider scan. Concurrent
-deep-rescan callers share that scan rather than multiplying provider work.
+Running **Full scan** from System also chains one Maintenance provider check after successful
+persistence. Concurrent callers attach to the in-flight System or provider scan rather than
+multiplying work.
 
 The view and CLI group findings as:
 
@@ -47,10 +57,10 @@ Project/shared relationships currently remain report-only:
 
 | Finding | Direct action |
 |---------|------------------|
-| Identical project copy | Confirm the shared source is available to the project, back up or commit the project copy, remove only that project copy, and deep-rescan. |
+| Identical project copy | Confirm the shared source is available to the project, back up or commit the project copy, remove only that project copy, and run Full scan. |
 | Different definitions | Compare the complete definitions, choose the intended source of truth, then remove the unintended copy or rename the project copy when both behaviors are required. |
-| Tracked project copy | Make the removal through the repository's normal branch, test, review, and pull-request workflow, then deep-rescan before merging. |
-| Equivalent legacy transport | Prove the canonical registration is healthy at an equal or broader scope, use the host-native MCP workflow to remove only the legacy registration, restart if required, and deep-rescan. |
+| Tracked project copy | Make the removal through the repository's normal branch, test, review, and pull-request workflow, then run Full scan before merging. |
+| Equivalent legacy transport | Prove the canonical registration is healthy at an equal or broader scope, use the host-native MCP workflow to remove only the legacy registration, restart if required, and run Full scan. |
 
 These are procedures, not generic delete commands. Definition equality does not prove which source
 a host loads, Git tracking does not confer mutation authority, and equivalent configuration does
@@ -234,8 +244,9 @@ Maintenance is the only dashboard mutation surface. Its exact routes are:
     POST /api/maintenance/apply
     POST /api/maintenance/undo
 
-The exact <code>GET /api/maintenance?refresh=scan</code> query is the read-only provider scan path;
-plain GET only reads the latest report. Unknown or duplicate query parameters are rejected.
+The exact <code>GET /api/maintenance?refresh=scan</code> query is the read-only **Check providers**
+path; plain GET reads the latest saved report and any transient in-process scan activity without
+starting provider work. Unknown or duplicate query parameters are rejected.
 
 POST requires the per-session token in its header form, same-origin Host/Origin/Sec-Fetch-Site
 evidence, <code>application/json</code>, an exact schema, and at most 64 KiB. Apply and undo consume

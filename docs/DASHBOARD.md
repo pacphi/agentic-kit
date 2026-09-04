@@ -478,25 +478,40 @@ lines of code and a git remote answer "what have I built here", not "where are m
 ### Two tiers, and why nothing scans on open
 
 Opening System costs almost nothing. The cheap tier — the live process census, individually known
-file sizes, and the figures carried forward from the last deep scan — is served on every read and
+file sizes, and the figures carried forward from the last full scan — is served on every read and
 cached briefly.
 
-Everything else comes from a **deep scan**, which walks the install trees, the retained-data roots,
-every host's catalog surfaces, and every known project. That is real I/O and takes tens of seconds
-on a large machine, so it runs **only when you press Rescan** (or run `ak system --deep`). Opening
-the tab never triggers it. Measurement views fetch once, then again only while a scan you started
-is running. Maintenance refreshes its saved read model on the header poll clock while open; that
-poll does not check host providers or versions and does not execute an action. Use **Scan now**
-inside Maintenance for that.
+Everything else comes from the **Full scan**—the dashboard name for the deep tier—which walks
+install trees, retained-data roots, host catalog surfaces, and the eligible hosted-repository
+population. That is real I/O and can take minutes on a large machine, so it runs **only when you
+press Full scan** (or run `ak system --deep`). Opening the tab never triggers it. Production runs
+the synchronous collectors in one worker thread so the page can report phases and remain usable
+while they run. Its status names the current phase, bounded count when available, and elapsed time.
+Worker containment does not claim that the filesystem work itself completes faster.
+
+One scan may reuse a complete physical observation when another section asks the same bounded
+question. Catalog reads one physical surface once per compatible reader contract even when several
+hosts consume it; Storage can adopt Install's exact same-scan npx-environment inventory; and an
+allocated-size consumer uses the block count from the walker's existing `lstat`. Reuse is confined
+to that scan. Incomplete, older, differently rooted, or differently scoped evidence falls back to a
+fresh bounded walk rather than being treated as equivalent.
+
+Measurement views fetch once, then again only while a scan you started is running. Maintenance
+refreshes its saved read model on the header poll clock while open; that poll does not check host
+providers or versions and does not execute an action. Use **Check providers** inside Maintenance
+for that narrower check.
 
 The trade is stated rather than hidden. Deep-tier figures always render with when they were
 measured, and once a snapshot passes seven days the freshness label turns amber and reads
-`stale, rescan`. Catalog snapshots also retain bounded stat-only source probes; if a watched plugin,
-surface, or entrypoint changes first, the label immediately reads `catalog changed, rescan`.
+`stale, scan again`. Catalog snapshots also retain bounded stat-only source probes; if a watched
+plugin, surface, or entrypoint changes first, the label immediately reads
+`catalog changed, scan again`.
 An unchanged probe is not full content validation, and says so in the JSON evidence.
-A scan writes one file — its own snapshot — and nothing else; the reclaimable-space
-rows are advisory, with their rationale and their path. Catalog and Advisory have no action
-controls; provider-backed actions live only in Maintenance.
+The System measurement writes one file—its own Footprint snapshot—and mutates no user data. The
+provider check that the dashboard chains afterward belongs to Maintenance; a successful check
+replaces Maintenance's private saved report. Reclaimable-space rows remain advisory, with their
+rationale and their path. Catalog and Advisory have no action controls; provider-backed actions
+live only in Maintenance.
 
 ### Catalog evidence and project pressure
 
@@ -527,11 +542,17 @@ writes nothing. That preview is evidence for the separate
 
 ### Maintenance actions and receipts
 
-Maintenance opens the latest saved scan report. Browser refresh and the header poll reread that
-report without calling providers. Press **Scan now** to recheck installed versions, provider
-ownership, and action eligibility. A successful System **Rescan** also refreshes Maintenance once
-after its deep snapshot is safely persisted. The summary reports provider coverage so “0 updates”
-cannot be mistaken for “all providers checked.”
+Maintenance opens the latest saved provider report. Browser refresh and the header poll reread that
+report without calling providers. Press **Check providers** to use the saved System inventory and
+recheck installed versions, provider ownership, and action eligibility; it does not walk projects.
+The panel reports provider progress and elapsed time while keeping the previous report visible. It
+temporarily disables Preview and Undo until the check completes, and a failed check preserves the
+previous saved report.
+
+**Full scan** is the broader System measurement. It disables Maintenance actions while source
+evidence is changing and, after the Footprint snapshot is safely persisted, chains one provider
+check. Concurrent callers attach to the relevant in-flight scan instead of multiplying work. The
+summary reports provider coverage so “0 updates” cannot be mistaken for “all providers checked.”
 
 Maintenance groups findings into **Updates ready**, **Safe cleanup**, **Needs review**,
 **Unsupported or blocked**, and **Recent changes / Undo**. Every ledger row leads with a direct
@@ -590,7 +611,7 @@ ranked at 0 B, and roots that could not be read say so with their reason.
 **Project trees** are excluded by default, and the chip that includes them is a *scan* control,
 not a filter. One large repository can outweigh every shared cache combined, and a chart
 containing it is a chart of one repository — so the ranking says, in the panel, that they were
-left out. Turning the chip on starts a new deep scan that walks them (and turning it off starts
+left out. Turning the chip on starts a new Full scan that walks them (and turning it off starts
 one that does not); it is disabled while a scan is running. `ak system --deep` scans without
 project trees.
 
@@ -614,7 +635,7 @@ removes anything; where a CLI already owns the cleanup, the row names it.
 
 ### Reading the numbers honestly
 
-- **A section that has never been scanned says so.** It reads "not measured yet — press Rescan",
+- **A section that has never been scanned says so.** It reads "not measured yet — run Full scan",
   never `0`. A zero here means a real, measured zero.
 - **A total whose inputs were incomplete renders as `≥ N`.** If one subtree could not be read or a
   walk hit its cap, the sum is a floor, not a total, and is labeled that way.
@@ -624,11 +645,13 @@ removes anything; where a CLI already owns the cleanup, the row names it.
   trees, and binary files excluded. Only *languages* carry lines. Frameworks, SDKs and tools are
   shown as present or not — React does not own lines, the `.tsx` files do — and what the registry
   could not name is listed by name rather than swept into an "Other" slice.
-- **Projects are counted twice, and the two numbers differ.** The KPI reads
+- **Project discovery and project measurement are different populations.** The KPI reads
   `N ever · M on disk`: *ever* is every project any host has ever recorded a session in, including
-  ones you have since deleted or moved; *on disk* is the subset that still exists, and only those
-  become rows in the Projects table — a deleted project has no bytes and no lines to measure.
-  A large gap is a fact about your history, not an error.
+  ones you have since deleted or moved; *on disk* is the subset that still exists. The Projects
+  table is narrower still: it measures only repositories with a recorded host session and a proven
+  HTTPS web destination. Local-only, insecure or unrecognized remotes, missing remote evidence,
+  and candidates without a recorded session remain counted in the exclusion summary instead of
+  being silently walked or discarded.
 - **A project whose path cannot be recovered is counted, not invented.** Claude stores transcripts
   in a directory name that encodes the project path lossily (`/`, `.` and `-` all become `-`), so
   it cannot simply be decoded back. The path is read from the session record instead; where no

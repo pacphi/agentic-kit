@@ -12,7 +12,7 @@ managed install occupies and where; how much CPU and RAM live host processes and
 consuming right now; how retained data (transcripts, ledgers, logs, learning stores, caches)
 breaks down by category, host, project, and session; and what is actually deployed — the
 deduplicated inventory of skills, agents, commands, plugins, and MCP servers across hosts, plus
-every known project's size in lines of code and disk.
+the size and stack of hosted repositories in the stated Projects population.
 
 It is a read-only measurement domain over local state the kit already has trust-boundary access
 to. It renders in the dashboard's **System** primary area and through a CLI twin (`ak system`),
@@ -143,9 +143,10 @@ Collectors (bounded walkers; two tiers — src/lib/footprint/)
   project-sources.mjs cross-host project discovery (everSeen / onDisk)
   stack-registry.mjs  + stack-detect.mjs — languages (lines) vs frameworks/SDKs/tools (presence)
   cheap tier:   runtime.mjs census + known-file stats + carry-forward of last deep scan (TTL 60s)
-  deep tier:    install.mjs + storage.mjs + catalog.mjs + projects.mjs + consumers.mjs
-                                                          (explicit, single-flight)
-  snapshot.mjs  persists the deep sections; index.mjs is the two-tier collector façade
+  deep tier:    deep-scan-runner.mjs sequences install + storage + catalog + projects + consumers
+                production: one deep-scan-worker.mjs worker (explicit, single-flight)
+                injected collaborators: the same runner inline for hermetic tests
+  snapshot.mjs  persists the deep sections; index.mjs owns cheap reads, progress, and single-flight
         |
         v
 FootprintSnapshot  { asOf, completeness, install, runtime, storage, catalog, projects, consumers }
@@ -157,10 +158,11 @@ FootprintSnapshot  { asOf, completeness, install, runtime, storage, catalog, pro
   catalog:   CatalogInventory v4  { items[], physical artifacts, consumer bindings,
                                     scopes, providers/versions, entrypoint/full-definition
                                     evidence, relationships, project pressure, source stamps }
-  projects:  ProjectFootprint[]   { path, label, remote?: {host, slug, webUrl}, stack: {languages,
-                                    stack, unrecognized}, treeBytes, gitBytes, nodeModulesBytes,
-                                    lastActivity }
+  projects:  ProjectFootprint[]   { path, label, remote: {host, slug, https webUrl},
+                                    stack: {languages, stack, unrecognized}, treeBytes, gitBytes,
+                                    nodeModulesBytes, lastActivity }
              + counts { everSeen, onDisk, gitRepos, unresolved }
+             + population { eligible, measured, excluded by reason }
   consumers: ConsumerRanking      { rows[] (root | breakdown | residual), top[], groups[],
                                     totals, absent[], unmeasured[], includeProjectTrees }
         |
@@ -296,6 +298,12 @@ a stated age, superseded cache snapshots, regenerable package caches, redundant 
 revisions, extra runtime versions, orphaned worktrees), each carrying its rationale and its path.
 Candidates are information, not actions — this context has no delete verb.
 
+Install measures the npx environment inventory before Storage classifies version-stale cache
+candidates. Storage adopts those facts only when they carry the same scan time, the expected
+absolute npx root, and a complete immediate-child shape. Older, malformed, partial, or differently
+rooted evidence triggers the original bounded Storage walk. This is observation reuse inside one
+scan, not a retained cache or an ownership claim.
+
 **Learning stores are reported on their own, not mixed into the shared charts.** On a real
 machine they are ~99% of retained bytes, so a donut that includes them renders as a solid ring
 and a per-host bar chart flattens every other series to a sliver — the chart stops being a
@@ -364,7 +372,9 @@ errno and make the affected group total `partial`; they are never a zero.
 Two roots need a basis other than apparent size, and say so. Docker Desktop's VM image is a
 sparse file whose apparent size here is ~4 TB against ~15 GB actually written, so it is measured
 in **allocated blocks** and carries both figures plus a `basis` string; an apparent-size reading
-would put a number larger than the disk at the top of the ranking. And figures the install or
+would put a number larger than the disk at the top of the ranking. The allocated-size collector
+uses the block count returned by the walker's existing `lstat`; it does not stat every file again.
+And figures the install or
 projects scan already measured for the same path are **adopted** rather than re-walked, which is
 why a row can name its `measuredBy`.
 
@@ -430,6 +440,13 @@ groups report that their logical names, bounded entrypoint digests, or complete 
 match. A physical artifact is counted once even when several hosts discover it. Each host edge is a
 separate consumer binding carrying its discovery mechanism and enabled state.
 
+That identity also governs acquisition cost inside one Catalog collection. Compatible reads are
+keyed by normalized physical path and reader contract, so Claude and OpenCode bindings to the same
+skill surface share one bounded observation while retaining two ConsumerBindings. Markdown and
+file-stem entrypoints likewise compute one digest per file. The observation map is created and
+discarded inside the collection; a later Full scan always observes the filesystem again. A path
+match under a different reader contract is not reusable evidence.
+
 Every occurrence retains host, surface, source scope (`user`, `project`, or `plugin`), project
 path, exact artifact path, plugin provider/version/enabled state, evidence authority, and bounded
 entrypoint and full-definition digest status. The full-definition digest covers all observed
@@ -483,7 +500,7 @@ unexplained. The config-surface row (managed CLAUDE.md/AGENTS.md block count, se
 file sizes) lives here because it answers the same "what is deployed" question.
 
 A deep scan persists bounded stat stamps for active surfaces and entrypoints. The cheap tier
-re-probes them and marks `catalog changed, rescan` immediately when a watched path changes, rather
+re-probes them and marks `catalog changed, scan again` immediately when a watched path changes, rather
 than relying only on the seven-day age threshold. An unchanged probe is labelled
 `unchanged-at-probes`, never “fresh”: unobserved nested content still requires a deep rescan.
 
@@ -496,22 +513,24 @@ The preview is evidence for a MaintenancePlan, not that plan or an authorization
 
 ### Project accounting
 
-**The Projects table lists repositories, not directories.** A row is rendered only when it has a
-remote and a host has recorded a session in it. Without that rule the table listed ephemeral
-`.claude/worktrees/agent-*` checkouts, sub-folders a session happened to run in, and home
-directories, each beside its own parent repository as though it were a peer with its own
-multi-gigabyte figure. The session test excludes an empty host list, never a missing one — a
-snapshot predating that field cannot answer the question, and reading absent as zero would blank
-the table. Excluded directories are counted and characterised beneath the table.
+**The Projects table lists hosted repositories, not every discovered directory.** A candidate is
+measured only when at least one host recorded a session in it and its Git evidence yields a proven
+HTTPS web destination. Without that rule the expensive pass walked ephemeral
+`.claude/worktrees/agent-*` checkouts, sub-folders a session happened to run in, home directories,
+and local-only trees, each beside its own parent repository as though it were a peer. Candidates
+outside the population are not silently discarded: `population.excluded` counts missing recorded
+sessions and missing HTTPS evidence, with the latter split into local-only, insecure HTTP,
+unrecognized, and unknown remote states.
 
 **Two numbers, not one.** `discoverProjectSources()` publishes `everSeen` and `onDisk`, and they
 are different questions:
 
 - **`everSeen`** — every distinct project any host has ever recorded a session in, *including*
   the ones since deleted or moved. The deletions are the point, so they are never dropped.
-- **`onDisk`** — the subset that still resolves to a directory, i.e. the only projects a byte or
-  line measurement can be taken of at all. Only these become table rows; the vanished ones
-  survive in `everSeen`, not as unmeasurable rows.
+- **`onDisk`** — the subset that still resolves to a directory, i.e. the candidate pool from which
+  byte or line measurements can be taken. Only the eligible hosted-repository population becomes
+  table rows; the remainder stays visible in the exclusion counts. Vanished projects survive in
+  `everSeen`, not as unmeasurable rows.
 
 On this machine: **50 ever seen, 25 still on disk, 21 of those git repositories.** The gap is the
 figure, not an error.
@@ -554,10 +573,11 @@ project-scoped, so there is nothing to decode.
 
 ### Project footprint
 
-One `ProjectFootprint` per **on-disk** project: working-tree bytes, `.git` bytes, `node_modules`
-bytes (kept separate precisely because it dominates and distorts), last activity, and a detected
-stack. LOC figures are labeled approximate wherever they render; this domain forbids presenting
-them as authoritative.
+One `ProjectFootprint` per **eligible hosted repository**: working-tree bytes, `.git` bytes,
+`node_modules` bytes (kept separate precisely because it dominates and distorts), last activity,
+and a detected stack. A lightweight Git-remote preflight happens before those walks, and its result
+is reused in the row. LOC figures are labeled approximate wherever they render; this domain
+forbids presenting them as authoritative.
 
 **Lines belong to languages; frameworks are presence only.** `stack-detect.mjs` returns
 `languages` with a line count, because a file extension is what a line belongs to — and `stack`
@@ -577,14 +597,12 @@ is a stated exclusion counted separately, and a key that is not shaped like an e
 single-file "extensions". `STACK_EXCLUSIONS` ships attached to the figure, so no surface can
 render a line count without being able to state what it left out.
 
-A project additionally carries an optional `remote` — host, slug, and derived web URL — parsed
-from `.git/config`'s origin remote through the same URL-shape handling the admin collector's
-`parseRepoSlug` already proves (git+https / ssh / scp / bare). In the Projects table the project
-name renders as a link to that page, with the raw remote in the tooltip; a recognized host
-(GitHub, GitLab, Bitbucket, or a self-hosted URL that is already web-shaped) yields a link, an
-unrecognized remote shape renders the remote name unlinked, and a project with no remote renders
-an explicit "local only" — absence stated, never guessed. The link is user-initiated browser
-navigation; the kit itself never fetches the remote.
+Every measured project carries `remote` host, slug, and derived HTTPS web URL, parsed from
+`.git/config`'s origin remote through the same URL-shape handling the admin collector's
+`parseRepoSlug` proves (git+https / ssh / scp / bare). The project name renders as a link to that
+page, with the raw remote in the tooltip. Unrecognized, local-only, insecure, or unreadable remote
+evidence remains in the population exclusion counts and is not deep-measured as a ProjectFootprint.
+The link is user-initiated browser navigation; the kit itself never fetches the remote.
 
 ## Delivery
 
@@ -592,17 +610,23 @@ navigation; the kit itself never fetches the remote.
 token auth ([ADR-0014](../adr/0014-dashboard-auth-and-remediation.md)), `no-store`, zero egress.
 The response is the cheap tier computed fresh (TTL ~60s, shared-cache pattern like the
 project-snapshot cache) merged with the persisted deep snapshot and its `asOf`.
-`?refresh=deep` starts the deep scan or attaches to the one in flight (single-flight, like the
-usage index's coalesced builds); progress is surfaced so a long scan reads as working, not hung.
-The server stays GET-only: a rescan re-measures local state and writes only this domain's own
+`?refresh=deep` starts the dashboard's **Full scan** or attaches to the one in flight
+(single-flight, like the usage index's coalesced builds). In production, `index.mjs` retains the
+single-flight promise and public activity state while `deep-scan-worker.mjs` runs the synchronous
+runner in one worker thread. Phase and Projects progress messages return to the main thread, so
+ordinary reads remain responsive while the worker is busy. Injected collectors and filesystem
+implementations run the same `deep-scan-runner.mjs` inline rather than attempting to serialize test
+functions. This containment is not evidence that total scan duration decreased.
+
+The server stays GET-only: a Full scan re-measures local state and writes only this domain's own
 snapshot file — it mutates no user data.
 
 **A deep scan never runs on its own.** Opening the System area issues a plain `GET /api/system`;
-only the Rescan control adds `?refresh=deep`. A deep scan costs tens of seconds of I/O on a large
-corpus, and making the act of *looking* cost that is a worse trade than a stale figure that states
+only **Full scan** adds `?refresh=deep`. A deep scan can cost minutes of I/O on a large corpus, and
+making the act of *looking* cost that is a worse trade than a stale figure that states
 how stale it is. Staleness is therefore surfaced rather than pre-empted: every deep-tier figure
 renders with its snapshot's `asOf`, and past `SNAPSHOT_STALE_AFTER_MS` (7 days) the freshness
-label turns amber and reads "stale, rescan". The client polls only while a user-started scan is
+label turns amber and reads "stale, scan again". The client polls only while a user-started scan is
 running, and stops when it finishes.
 
 One deliberate divergence from Observability's delivery: absolute paths are **part of this
@@ -614,7 +638,7 @@ nothing to leak.
 
 The CLI twin (`ak system`) renders the same collector output, `--json` emitting the collector's
 payload verbatim, following the one-collector-two-surfaces precedent of the usage scorecard.
-`ak system --deep` is the terminal spelling of the Rescan control and writes the same snapshot.
+`ak system --deep` is the terminal spelling of **Full scan** and writes the same snapshot.
 
 ## Invariants
 
@@ -678,6 +702,14 @@ payload verbatim, following the one-collector-two-surfaces precedent of the usag
     promises with separate totals; `combined` is `null` by design. Only `bytesMeaning:
     'candidate'` rows are summable, and a tier whose rows describe overlapping paths reports
     unknown-with-reason rather than counting the same bytes twice.
+18. **Observation reuse is scan-local and contract-exact.** A complete physical observation may
+    answer another consumer only when path, reader semantics, scope, shape, and `asOf` satisfy that
+    consumer's contract. Otherwise the collector performs its original bounded read. Nothing is
+    reused across explicit scans.
+19. **Execution transport does not change evidence.** Production contains synchronous deep work in
+    one worker while the main thread owns single-flight and activity. Injected collaborators run
+    inline through the same runner. Either transport returns the same completed sections,
+    completeness, persistence outcome, and fail-soft terminal state.
 
 ## Ubiquitous language additions
 
@@ -699,7 +731,7 @@ normative and this table restates it for readers of this document.
 | Safety tier | A candidate's `regenerable` (the owning tool refetches it) or `review` (plausible, not safe to call removable). The two are totalled separately and never combined |
 | Bytes meaning | Whether a candidate's bytes are the `candidate` subset it is about, or the `installed` size at that path offered as context on a review row |
 | Consumer root | A ranked top-level storage root. Nested rows are `breakdown`s of it, plus a synthesized residual, so bytes are counted once |
-| Ever seen / on disk | `everSeen` is every project any host ever recorded a session in, deletions included; `onDisk` is the measurable subset. Different questions, never one number |
+| Ever seen / on disk | `everSeen` is every project any host ever recorded a session in, deletions included; `onDisk` is the present candidate subset. Only candidates with a recorded host session and proven HTTPS destination enter the measured population |
 | Unresolved project | A transcript directory whose project path neither a declared `cwd` nor a filesystem-verified decode can name. Reported as such, never given a fabricated path; it makes `everSeen` a lower bound |
 | Stack detection | Per-project `languages` (which carry lines) and `stack` — frameworks, SDKs, tools — which carry presence only, plus the unrecognized tail of extensions and dependency names the registry could not name |
 | CatalogItem | A canonical standalone or plugin-qualified identity with per-host/source occurrences and explicit name/digest relationships |
@@ -708,8 +740,8 @@ normative and this table restates it for readers of this document.
 | ConsumerBinding | One host's discovery edge to a PhysicalArtifact, with surface, scope, project, discovery mechanism, enablement, and evidence authority |
 | Definition digest | SHA-256 over one complete bounded observed capability definition; equality proves those files match, not host selection, ownership, usage, or removal safety |
 | ProjectCapabilityPressure | Project/user/plugin contributions and exact overlap per project and host; context inclusion remains unknown |
-| ProjectFootprint | One project's size facts: approximate LOC by language, tree/`.git`/`node_modules` bytes, last activity, and an optional git-remote web link ("local only" when absent) |
-| Deep scan | The explicit, user-triggered, single-flight full measurement pass that produces a FootprintSnapshot |
+| ProjectFootprint | One eligible hosted repository's size facts: approximate LOC by language, tree/`.git`/`node_modules` bytes, last activity, and a proven HTTPS web link |
+| Deep scan | The explicit, user-triggered, single-flight measurement pass called **Full scan** in the dashboard; it produces a FootprintSnapshot over the stated bounded populations |
 | Cheap tier | The per-request census + known-file stats + snapshot carry-forward served on every read |
 
 ## References
@@ -723,6 +755,7 @@ normative and this table restates it for readers of this document.
   vocabulary), `install.mjs`, `storage.mjs`, `runtime.mjs`, `catalog.mjs`, `projects.mjs`,
   `consumers.mjs` (the ranked largest-consumers view), `project-sources.mjs` (cross-host project
   discovery), `stack-registry.mjs` + `stack-detect.mjs` (languages, frameworks and the
-  unrecognized tail), `snapshot.mjs`, `index.mjs`
+  unrecognized tail), `snapshot.mjs`, `deep-scan-engine.mjs`, `deep-scan-runner.mjs`,
+  `deep-scan-worker.mjs`, `index.mjs`
 - `src/commands/system.mjs` — the CLI twin; `src/lib/live/win-process-survey.ps1` — the Windows
   process survey

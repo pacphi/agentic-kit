@@ -140,6 +140,15 @@ not success.
 Receipts also provide the current durable history shown by Maintenance. Public projections remove
 paths, commands, diagnostics, and rollback material.
 
+### ScanActivity
+
+Provider checking has transient, process-local activity separate from the durable report. It names
+the provider scan, status (`idle`, `running`, `complete`, or `failed`), phase, timestamps, and a
+bounded provider-count progress value. It contains no paths. Dashboard reads may project this state
+while continuing to return the previous saved report; reading activity does not invoke a provider.
+A terminal `complete` or `failed` activity remains until the next provider check or service restart.
+Restarting the service loses the transient activity, while the last completed report remains.
+
 ## Evidence and version policy
 
 Installed/effective version, compatible candidate, producer/plugin version, source revision, cache
@@ -152,10 +161,17 @@ can support a relationship classification, but it still does not prove host sele
 context loading, compatibility, or safe deletion. A full skill archive requires the stronger
 <code>agentic-kit.skill-tree-ownership/v1</code> receipt and exact current tree match.
 
-Version and provider claims are acquired only during an explicit Maintenance scan. The latest report
-is persisted privately with its capture time, coverage, completeness, Catalog/source fingerprint,
-and provider-evidence fingerprint. Plain report reads never invoke a provider. A stale or drifted
-report cannot retain executable capabilities.
+Version and provider claims are acquired only during explicit **Check providers** work. That check
+uses the saved System/Footprint inventory and does not walk project trees. The latest completed
+report is persisted privately with its capture time, coverage, completeness, Catalog/source
+fingerprint, and provider-evidence fingerprint. Plain report reads never invoke a provider. A stale
+or drifted report cannot retain executable capabilities.
+
+The dashboard's **Full scan** is a separate Machine Footprint measurement. After that snapshot is
+successfully persisted, Dashboard Delivery requests one provider check. The CLI makes the same
+composition explicit as `ak maintain scan --deep`; `ak system --deep` remains System-only. While
+either activity is in flight, new plans, apply, undo, and recovery fail closed rather than binding
+to changing evidence.
 
 ## Policy
 
@@ -243,9 +259,11 @@ text filters compose. Failed reads remain visible with **Retry report**; they do
 blank panels. The view acts on one finding at a time and offers neither “Clean all” nor an aggregate
 reclaimable claim across safety classes.
 
-**Browser refresh** rereads the saved report. **Scan now** performs the exact
-<code>?refresh=scan</code> provider measurement and replaces that report atomically. A successful
-persisted System deep rescan chains one Maintenance scan, shared by concurrent callers.
+**Browser refresh** rereads the saved report. **Check providers** performs the exact
+<code>?refresh=scan</code> provider measurement and replaces that report only after the check
+completes. The prior report remains readable while activity shows provider progress, and it survives
+a failed check. The dashboard's **Full scan** first replaces the Footprint snapshot and then chains
+one provider check. Concurrent callers attach to the relevant in-flight scan.
 
 The HTTP allowlist is exact:
 
