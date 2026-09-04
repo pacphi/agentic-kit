@@ -39,7 +39,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseRepoSlug } from '../admin-collect.mjs';
 import { discoverProjectSources } from './project-sources.mjs';
-import { detectStack, isCloudPlaceholder, STACK_EXCLUSIONS } from './stack-detect.mjs';
+import {
+  createStackObserver, detectStack, isCloudPlaceholder, STACK_EXCLUSIONS,
+} from './stack-detect.mjs';
 import { STACK_REGISTRY_VERSION } from './stack-registry.mjs';
 import {
   walkTree, rootMeasurements, measured, statNode, UNKNOWN, unknown, sumMeasurements,
@@ -329,9 +331,12 @@ export function countLines(root, {
  *  already draws the absent-vs-degraded line: a directory that does not exist
  *  holds a real, measured zero; one that could not be read stays unknown. */
 function walkNode(walk, root, options) {
-  const result = walk(root, options);
+  return walkedNode(walk(root, options), options.asOf ?? null);
+}
+
+function walkedNode(result, asOf = null) {
   return {
-    ...rootMeasurements(result, { asOf: options.asOf ?? null }),
+    ...rootMeasurements(result, { asOf }),
     newestMtimeMs: Number.isFinite(result.newestMtimeMs) ? result.newestMtimeMs : null,
     complete: result.complete !== false,
   };
@@ -438,7 +443,22 @@ export function measureProject(project, {
   const root = project.path;
   const common = { ...limits, fsImpl, asOf };
   const observedModules = nodeModulesObserver(root);
-  const tree = walkNode(walk, root, { ...common, skipDir: observedModules.skipDir });
+  // The ordinary footprint walk is a traversal superset of stack detection:
+  // it excludes only .git/node_modules, while the stack scope excludes those
+  // plus generated/vendor trees. The observer applies the narrower contract to
+  // callbacks from the broad walk. Only the built-in detector participates;
+  // injected detectors retain their independent invocation contract.
+  const stackObserver = loc && detect === detectStack
+    ? createStackObserver(root, { limits, asOf, fsImpl }) : null;
+  const treeResult = walk(root, {
+    ...common,
+    skipDir(dir, name, depth) {
+      stackObserver?.onDirectory(dir, name, depth);
+      return observedModules.skipDir(dir, name, depth);
+    },
+    onFile: stackObserver?.onFile ?? null,
+  });
+  const tree = walkedNode(treeResult, asOf);
 
   // A project whose ROOT is gone or unreadable is not a project measuring zero
   // bytes — it is a project we could not measure. `rootMeasurements` turns an
@@ -479,7 +499,11 @@ export function measureProject(project, {
   // ONE detection pass, split into its two projections below: lines belong to
   // languages, presence belongs to frameworks/SDKs/tools, and the tail names what
   // neither could claim.
-  const detected = loc ? detect(root, { walk, limits, asOf, fsImpl }) : null;
+  const detected = loc
+    ? (stackObserver && tree.complete
+      ? stackObserver.finalize(treeResult)
+      : detect(root, { walk, limits, asOf, fsImpl }))
+    : null;
 
   return {
     path: root,

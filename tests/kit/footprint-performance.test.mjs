@@ -7,6 +7,7 @@ import path from 'node:path';
 import { collectConsumers } from '../../src/lib/footprint/consumers.mjs';
 import { npxEnvNodes } from '../../src/lib/footprint/install.mjs';
 import { collectProjects } from '../../src/lib/footprint/projects.mjs';
+import { detectStack } from '../../src/lib/footprint/stack-detect.mjs';
 import {
   adoptedConsumerFigures, collectStorage, STORAGE_DEFAULTS, worktreeReclaimables,
 } from '../../src/lib/footprint/storage.mjs';
@@ -438,10 +439,16 @@ test('project measurement reuses node_modules roots observed by its complete wor
   const project = path.join(root, 'repo');
   fs.mkdirSync(path.join(project, '.git'), { recursive: true });
   fs.writeFileSync(path.join(project, 'index.mjs'), 'export default 1;\n');
+  fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ dependencies: { react: '1' } }));
   fs.writeFileSync(path.join(project, '.git', 'config'),
     '[remote "origin"]\n\turl = https://github.com/pacphi/repo.git\n');
   fs.mkdirSync(path.join(project, 'node_modules', 'pkg'), { recursive: true });
   fs.writeFileSync(path.join(project, 'node_modules', 'pkg', 'index.js'), 'module.exports = 1;\n');
+  fs.mkdirSync(path.join(project, 'dist'), { recursive: true });
+  fs.writeFileSync(path.join(project, 'dist', 'generated.js'), 'generated();\n');
+  const tooDeep = path.join(project, ...Array.from({ length: 13 }, (_, index) => `d${index}`));
+  fs.mkdirSync(tooDeep, { recursive: true });
+  fs.writeFileSync(path.join(tooDeep, 'ignored.js'), 'tooDeep();\n');
 
   const walked = [];
   const result = collectProjects({
@@ -457,10 +464,24 @@ test('project measurement reuses node_modules roots observed by its complete wor
 
   assert.equal(result.projects[0].nodeModulesBytes.value,
     fs.statSync(path.join(project, 'node_modules', 'pkg', 'index.js')).size);
-  assert.equal(walked.filter((target) => target === project).length, 2,
-    'working-tree bytes and stack detection are the only full project-root walks');
-  assert.equal(walked.length, 4,
-    'tree, .git, one node_modules payload, and stack are the complete walk budget');
+  assert.equal(walked.filter((target) => target === project).length, 1,
+    'a complete working-tree observation also supplies stack detection');
+  assert.equal(walked.length, 3,
+    'tree/stack, .git, and one node_modules payload are the complete walk budget');
+
+  const reference = collectProjects({
+    projects: [{ path: project, label: 'repo', hosts: ['codex'] }],
+    // Wrapping the detector intentionally opts out of identity-based reuse and
+    // supplies the pre-optimization independent traversal as an oracle.
+    detect: (target, options) => detectStack(target, options),
+    fsImpl: fs,
+    loc: true,
+    now: () => 1,
+  }).projects[0];
+  assert.deepEqual(result.projects[0].loc, reference.loc,
+    'the traversal superset must preserve Stack depth and generated-tree exclusions');
+  assert.deepEqual(result.projects[0].stack, reference.stack,
+    'manifest, signature, and unrecognized evidence must remain byte-for-byte equivalent');
 });
 
 test('project measurement falls back to bounded dependency discovery after a degraded tree walk', (t) => {
@@ -485,10 +506,15 @@ test('project measurement falls back to bounded dependency discovery after a deg
     },
   };
 
+  const walked = [];
   const row = collectProjects({
     projects: [{ path: project, label: 'repo', hosts: ['codex'] }],
     fsImpl,
-    loc: false,
+    loc: true,
+    walk(target, options) {
+      walked.push(target);
+      return walkTree(target, options);
+    },
     now: () => 1,
   }).projects[0];
 
@@ -496,6 +522,9 @@ test('project measurement falls back to bounded dependency discovery after a deg
   assert.deepEqual(row.nodeModulesRoots, [path.join(packages, 'app', 'node_modules')]);
   assert.equal(row.nodeModulesBytes.value, fs.statSync(dependencyFile).size,
     'a degraded observation never authorizes treating unseen dependencies as absent');
+  assert.equal(walked.filter((target) => target === project).length, 3,
+    'partial tree evidence triggers both dependency-discovery and stack fallback walks');
+  assert.equal(row.loc.total.value, 1);
 });
 
 test('project dependency reuse preserves the hidden-ancestor exclusion', (t) => {
