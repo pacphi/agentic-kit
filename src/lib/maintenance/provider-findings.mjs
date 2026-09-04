@@ -34,6 +34,14 @@ function unavailableFinding(providers, evidence) {
       operation: 'scan', label: 'Restore provider availability and rescan',
       providerId: 'maintenance.read-only', providerVersion: '1',
       safetyClass: 'never-automatic', rollback: 'reversible', restart: 'not-required', executable: false,
+      recommendation: 'Restore the unavailable native provider, then run a deep System rescan.',
+      steps: [
+        'Check that the host CLI and its native inventory command are available.',
+        'Repair provider configuration or authentication without changing unrelated resources.',
+        'Run a deep System rescan and inspect the replacement findings.',
+      ],
+      preserved: ['All affected resources until provider evidence is complete'],
+      blockedReason: 'Native provider evidence is unavailable or incomplete.',
     },
   };
 }

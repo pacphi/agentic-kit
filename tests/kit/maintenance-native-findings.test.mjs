@@ -12,7 +12,7 @@ import { createCodexMcpProvider } from '../../src/lib/maintenance/providers/code
 import { createMaintenanceService } from '../../src/lib/maintenance/service.mjs';
 import { createOwnedNpxCacheProvider } from '../../src/lib/maintenance/providers/owned-storage.mjs';
 import { createRufloMcpOrphanProvider } from '../../src/lib/maintenance/providers/ruflo-mcp-orphan.mjs';
-import { sha256 } from '../../src/lib/maintenance/providers/shared.mjs';
+import { catalogDependencyCount, sha256 } from '../../src/lib/maintenance/providers/shared.mjs';
 import {
   createMaintenanceTransaction, writeMaintenanceReceipt,
 } from '../../src/lib/maintenance/transaction-store.mjs';
@@ -122,6 +122,21 @@ test('MCP registration alone creates no removal finding', async (t) => {
   }]) });
   const model = await serviceFor(t, provider).scan();
   assert.equal(model.findings.some((row) => row.resource.kind === 'mcpServer'), false);
+
+  const facts = await provider.detect();
+  assert.equal(provider.actionFor({
+    safetyClass: 'approval-required',
+    resource: { id: 'project-mcp', kind: 'mcpServer', name: 'registered-mcp', host: 'codex', scope: 'project' },
+    nextAction: { operation: 'remove' },
+  }, facts), null, 'Codex native remove must never turn a project-scoped finding into a user-scope mutation');
+});
+
+test('plugin impact counts contributed catalog items when no nested component list exists', () => {
+  const items = ['skill:a', 'command:b'].map((canonicalId) => ({
+    canonicalId, kind: canonicalId.split(':')[0], components: [],
+    presence: [{ host: 'claude', provider: { ref: 'demo@market' } }],
+  }));
+  assert.equal(catalogDependencyCount(footprint(items), 'demo@market', 'claude'), 2);
 });
 
 test('Claude uninstall is exact and fixed but only derives from an explicit lifecycle removal', async (t) => {

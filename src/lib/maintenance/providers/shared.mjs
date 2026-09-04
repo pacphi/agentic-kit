@@ -54,6 +54,30 @@ const VERSION_KEYS = [
   'installed', 'recommended', 'producer', 'sourceRevision', 'cacheGeneration', 'contentDigest',
 ];
 
+function providerNextAction({
+  operation, label, providerId, providerVersion, safetyClass,
+  rollback, restart, executable,
+}) {
+  return {
+    operation, label, providerId, providerVersion, safetyClass,
+    rollback, restart, executable: executable === true,
+    recommendation: label,
+    steps: executable === true ? [
+      'Preview this one provider-owned change.',
+      'Review its effect, preservation boundary, restart requirement, and rollback class.',
+      'Confirm the exact plan, then verify the refreshed Catalog evidence.',
+    ] : [
+      'Inspect the provider evidence and confirm the intended resource state.',
+      'Use the owning provider workflow for the proposed change.',
+      'Run a deep System rescan and verify the finding is resolved.',
+    ],
+    preserved: ['Resources outside this finding'],
+    ...(executable === true ? {} : {
+      blockedReason: 'The owning provider did not authorize an executable action for this finding.',
+    }),
+  };
+}
+
 /** Construct the public, content-free finding contract from provider-owned facts. */
 export function providerFinding({
   providerId, providerVersion = 'v1', stableKey, state, bucket, classification, safetyClass,
@@ -62,10 +86,10 @@ export function providerFinding({
 }) {
   const normalizedVersions = Object.fromEntries(VERSION_KEYS.map((key) => [key,
     typeof versions[key] === 'string' && versions[key] ? versions[key] : null]));
-  const nextAction = {
+  const nextAction = providerNextAction({
     operation, label, providerId, providerVersion, safetyClass,
-    rollback, restart, executable: executable === true,
-  };
+    rollback, restart, executable,
+  });
   const stable = {
     providerId, stableKey, state, classification, safetyClass, resource,
     versions: normalizedVersions, ownership, operation,
@@ -96,13 +120,18 @@ export function providerFinding({
 }
 
 export function catalogDependencyCount(footprint, providerRef, host = null) {
-  const counts = [];
+  const nestedCounts = [];
+  let contributed = 0;
   for (const item of Array.isArray(footprint?.catalog?.items) ? footprint.catalog.items : []) {
-    const exact = item?.pluginRef === providerRef
-      || (Array.isArray(item?.presence) && item.presence.some((presence) => (
+    const byIdentity = item?.pluginRef === providerRef;
+    const byPresence = Array.isArray(item?.presence) && item.presence.some((presence) => (
         (!host || presence?.host === host) && presence?.provider?.ref === providerRef
-      )));
-    if (exact) counts.push(Array.isArray(item.components) ? item.components.length : 0);
+      ));
+    if (!byIdentity && !byPresence) continue;
+    const nested = Array.isArray(item.components) ? item.components.length : 0;
+    if (nested) nestedCounts.push(nested);
+    if (byPresence && item.kind !== 'plugin') contributed++;
   }
-  return counts.length ? Math.max(...counts) : 'unknown';
+  const measured = Math.max(contributed, ...nestedCounts, 0);
+  return measured || 'unknown';
 }

@@ -43,7 +43,8 @@ export function createCodexMcpProvider({ run = runNativeCommand } = {}) {
 
   function actionFor(finding, facts) {
     const resource = finding?.resource ?? finding?.resourceIdentity;
-    if (resource?.kind !== 'mcpServer' || resource.host !== 'codex' || !validResourceName(resource.name)
+    if (resource?.kind !== 'mcpServer' || resource.host !== 'codex' || resource.scope !== 'user'
+        || !validResourceName(resource.name)
         || finding?.nextAction?.operation !== 'remove'
         || !executableSafetyClass(finding?.safetyClass)) return null;
     const server = facts?.complete && facts.servers?.find((item) => item.name === resource.name);
