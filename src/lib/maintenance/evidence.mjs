@@ -48,6 +48,15 @@ export function sourceFingerprint(footprint = {}) {
       present: footprint?.snapshot?.present === true,
       asOf: finite(footprint?.snapshot?.asOf),
       completeness: footprint?.snapshot?.completeness ?? null,
+      catalogDrift: {
+        status: footprint?.snapshot?.catalogDrift?.status ?? null,
+        checkedAt: finite(footprint?.snapshot?.catalogDrift?.checkedAt),
+        changed: array(footprint?.snapshot?.catalogDrift?.changed).map((change) => ({
+          path: change?.path ?? null,
+          before: change?.before ?? null,
+          after: change?.after ?? null,
+        })),
+      },
     },
     catalog: catalog ? {
       asOf: finite(catalog.asOf),
@@ -57,7 +66,25 @@ export function sourceFingerprint(footprint = {}) {
         id: item?.canonicalId ?? item?.key ?? item?.name ?? null,
         kind: item?.kind ?? null,
         lifecycle: item?.maintenance ?? item?.lifecycle ?? null,
+        artifacts: array(item?.artifacts).map((artifact) => ({
+          id: artifact?.id ?? null,
+          entrypoint: measurementIdentity(artifact?.entrypoint),
+          definition: measurementIdentity(artifact?.definition),
+        })),
+        consumerBindings: array(item?.consumerBindings).map((binding) => ({
+          artifactId: binding?.artifactId ?? null,
+          host: binding?.host ?? null,
+          scope: binding?.scope ?? null,
+          project: binding?.project ?? null,
+          configScope: binding?.configScope ?? null,
+          configProject: binding?.configProject ?? null,
+          mechanism: binding?.mechanism ?? null,
+          configuredBy: binding?.configuredBy ?? null,
+          enabled: binding?.enabled ?? null,
+          resolution: binding?.resolution ?? null,
+        })),
         presence: array(item?.presence).map((presence) => ({
+          artifactId: presence?.artifactId ?? null,
           host: presence?.host ?? null,
           scope: presence?.scope ?? null,
           project: presence?.project ?? null,
@@ -71,6 +98,15 @@ export function sourceFingerprint(footprint = {}) {
           digest: measurementIdentity(presence?.digest),
           definition: measurementIdentity(presence?.definition),
           tracking: trackingIdentity(presence?.tracking),
+          consumer: presence?.consumer ? {
+            host: presence.consumer.host ?? null,
+            mechanism: presence.consumer.mechanism ?? null,
+            configuredBy: presence.consumer.configuredBy ?? null,
+            configScope: presence.consumer.configScope ?? null,
+            configProject: presence.consumer.configProject ?? null,
+            enabled: presence.consumer.enabled ?? null,
+            resolution: presence.consumer.resolution ?? null,
+          } : null,
         })),
       })),
     } : null,
@@ -110,7 +146,9 @@ export function footprintEvidence(footprint = {}, now = Date.now()) {
     footprint?.storage?.asOf,
   ].filter(Number.isFinite);
   const asOf = times.length ? Math.min(...times) : null;
-  const stale = footprint?.snapshot?.stale === true;
+  const catalogChanged = footprint?.snapshot?.catalogDrift?.status === 'changed';
+  if (catalogChanged) gaps.push('catalog sources changed since the saved deep scan');
+  const stale = footprint?.snapshot?.stale === true || catalogChanged;
   return {
     status: asOf === null ? 'unknown' : (stale ? 'stale' : 'fresh'),
     asOf: asOf === null ? null : new Date(asOf).toISOString(),

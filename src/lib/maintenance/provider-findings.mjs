@@ -75,6 +75,17 @@ function stableFinding(finding) {
   };
 }
 
+function stableDetection(provider, facts) {
+  return {
+    id: provider.id,
+    version: provider.version ?? null,
+    host: provider.host ?? null,
+    status: facts?.status ?? 'unavailable',
+    complete: facts?.complete === true,
+    authority: facts?.authority ?? null,
+  };
+}
+
 export async function projectProviderFindings({ providers, footprint, model }) {
   const derived = [];
   const unavailable = [];
@@ -125,6 +136,9 @@ export async function projectProviderFindings({ providers, footprint, model }) {
   for (const finding of findings) summary[finding.bucket] += 1;
   const sourceFingerprint = sha256({
     footprint: model.sourceFingerprint,
+    providerEvidence: [...providers.values()].map((provider) => (
+      stableDetection(provider, detections.get(provider.id))
+    )).sort((a, b) => a.id.localeCompare(b.id)),
     providers: enriched.map(stableFinding).sort((a, b) => a.id.localeCompare(b.id)),
   });
   return { findings, summary, sourceFingerprint, detections };

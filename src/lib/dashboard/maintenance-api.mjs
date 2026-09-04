@@ -95,6 +95,10 @@ function publicRelationship(value) {
     const projected = picked(member, ['label', 'host', 'scope', 'providerRef', 'projectRef', 'projectLabel'], 200);
     return [{
       role: member.role, ...projected,
+      consumerHosts: publicConsumerHosts({
+        basis: 'catalog-presence', hosts: member.consumerHosts,
+        count: Array.isArray(member.consumerHosts) ? member.consumerHosts.length : 0,
+      }),
       ownership: OWNERSHIP.has(member.ownership) ? member.ownership : 'unknown',
       tracking: TRACKING.has(member.tracking) ? member.tracking : 'unknown',
       workingTree: WORKING_TREE.has(member.workingTree) ? member.workingTree : 'unknown',
@@ -141,6 +145,9 @@ function publicFinding(finding) {
     consumerHosts: publicConsumerHosts(value.consumerHosts),
     impact: {
       ...picked(impact, ['summary', 'bytes', 'files', 'dependencies', 'capabilities', 'projects', 'preserved']),
+      capabilities: textList(impact.capabilities, 12),
+      projects: textList(impact.projects, 12),
+      preserved: textList(impact.preserved, 12),
     },
     nextAction: {
       ...picked(next, [
@@ -243,6 +250,11 @@ function publicPlan(plan) {
         'findingClassification', 'rollback', 'restart', 'executable', 'sourceFingerprint',
       ]),
       resourceIdentity: publicResource(action.resourceIdentity),
+      impact: {
+        capabilities: textList(action.impact?.capabilities, 12),
+        projects: textList(action.impact?.projects, 12),
+        preserved: textList(action.impact?.preserved, 12),
+      },
     })) : [],
   };
 }
@@ -258,14 +270,15 @@ function confirmationForPlan(plan) {
     summary: 'The server will recheck native inventory and the exact plan before changing anything.',
     actionCount: actions.length,
     actionLabel: operations.length === 1 ? `Apply ${operations[0]}` : 'Apply changes',
-    willChange: actions.map((action) => {
+    willChange: actions.flatMap((action) => {
       const identity = publicResource(action.resourceIdentity);
-      return `${text(action.operation, 80) ?? 'change'} ${identity.name ?? identity.id ?? 'selected resource'}`;
+      const resource = `${text(action.operation, 80) ?? 'change'} ${identity.name ?? identity.id ?? 'selected resource'}`;
+      return [resource, ...textList(action.impact?.capabilities, 12).map((capability) => `Affected: ${capability}`)];
     }),
-    preserved: [
+    preserved: [...new Set(actions.flatMap((action) => textList(action.impact?.preserved, 12)).concat([
       'Resources outside this exact plan remain unchanged.',
       'Plugin cache children and unreceipted user content are never direct targets.',
-    ],
+    ]))],
     safetyClass: text(plan.safetyClass, 80),
     rollback: rollback.join(', ') || 'unknown',
     restart: [...new Set(actions.map((action) => action.restart).filter(Boolean))].join(', ') || 'unknown',

@@ -5,6 +5,7 @@ import { repoRoot } from '../paths.mjs';
 const emptyReading = (status, reason = null) => ({
   status, reason, names: [], entries: [], partial: false, truncated: false,
 });
+const MAX_CONFIGURED_SKILL_PATHS = 128;
 
 function configuredSkillPath(pathValue, configFile, homeDir) {
   if (typeof pathValue !== 'string' || !pathValue.trim()) return null;
@@ -30,9 +31,20 @@ function configuredOpenCodeSkillSpecs({ configFile, id, scope, project = null, h
   let reading = emptyReading('absent', 'ENOENT');
   let values = [];
   try {
-    const doc = JSON.parse(fsImpl.readFileSync(configFile, 'utf8'));
-    values = Array.isArray(doc?.skills?.paths) ? doc.skills.paths : [];
-    reading = emptyReading('ok');
+    const source = fsImpl.readFileSync(configFile, 'utf8');
+    if (path.extname(configFile).toLowerCase() === '.jsonc') {
+      reading = emptyReading('degraded', 'jsonc-skills-paths-not-resolved');
+    } else {
+      const doc = JSON.parse(source);
+      if (Array.isArray(doc?.skills)) {
+        reading = emptyReading('degraded', 'unsupported-skills-array-dialect');
+      } else if (doc?.skills && Object.hasOwn(doc.skills, 'paths') && !Array.isArray(doc.skills.paths)) {
+        reading = emptyReading('degraded', 'invalid-skills-paths');
+      } else {
+        values = Array.isArray(doc?.skills?.paths) ? doc.skills.paths : [];
+        reading = emptyReading('ok');
+      }
+    }
   } catch (error) {
     reading = emptyReading(error?.code === 'ENOENT' ? 'absent' : 'degraded', error?.code ?? 'EPARSE');
   }
@@ -41,16 +53,26 @@ function configuredOpenCodeSkillSpecs({ configFile, id, scope, project = null, h
     path: configFile, read: () => reading,
     discovery: { mechanism: 'configured-path-list', configuredBy: path.basename(configFile) },
   }];
-  values.forEach((value, index) => {
-    const source = configuredSkillPath(value, configFile, homeDir);
-    if (!source) return;
+  const configured = values.slice(0, MAX_CONFIGURED_SKILL_PATHS).map((value) => (
+    configuredSkillPath(value, configFile, homeDir)
+  ));
+  if (values.length > MAX_CONFIGURED_SKILL_PATHS) {
+    reading = { ...reading, partial: true, truncated: true, reason: 'configured-skill-path-limit' };
+  }
+  if (configured.some((source) => source?.kind === 'remote')) {
+    reading = { ...reading, partial: true, reason: 'remote-skill-source-not-measured' };
+  }
+  if (configured.some((source) => source === null)) {
+    reading = { ...reading, partial: true, reason: 'invalid-configured-skill-path' };
+  }
+  configured.forEach((source, index) => {
+    if (!source || source.kind === 'remote') return;
     const discovery = { mechanism: 'configured-path', configuredBy: path.basename(configFile) };
     specs.push({
       id: `${id}:${index}`, host: 'opencode', kind: 'skill', scope, project,
+      sourceScope: 'unknown', sourceProject: null,
       path: source.value, discovery,
-      read: source.kind === 'remote'
-        ? () => emptyReading('degraded', 'remote-skill-source-not-measured')
-        : (p) => marker(p, 'SKILL.md', io),
+      read: (p) => marker(p, 'SKILL.md', io),
     });
   });
   return specs;
@@ -123,6 +145,10 @@ export function catalogSurfaceSpecs(roots, readers, io) {
       configFile: at(project, 'opencode.json'), id: `opencode-project-skill-paths:${project}`,
       scope: 'project', project, homeDir: path.dirname(agentsRoot),
     }, readers, io));
+    specs.push(...configuredOpenCodeSkillSpecs({
+      configFile: at(project, 'opencode.jsonc'), id: `opencode-project-skill-paths-jsonc:${project}`,
+      scope: 'project', project, homeDir: path.dirname(agentsRoot),
+    }, readers, io));
   }
   specs.push(
     { id: 'codex-skills', host: 'codex', kind: 'skill', scope: 'user', path: at(codexRoot, 'skills'), read: (p) => marker(p, 'SKILL.md', io) },
@@ -142,6 +168,13 @@ export function catalogSurfaceSpecs(roots, readers, io) {
     configFile: opencodeConfigFile, id: 'opencode-skill-paths', scope: 'user',
     homeDir: path.dirname(agentsRoot),
   }, readers, io));
+  const opencodeJsoncFile = path.join(path.dirname(opencodeConfigFile), 'opencode.jsonc');
+  if (path.normalize(opencodeJsoncFile) !== path.normalize(opencodeConfigFile)) {
+    specs.push(...configuredOpenCodeSkillSpecs({
+      configFile: opencodeJsoncFile, id: 'opencode-skill-paths-jsonc', scope: 'user',
+      homeDir: path.dirname(agentsRoot),
+    }, readers, io));
+  }
   return { specs, catalogProjects, launchingProject: launchingRoot };
 }
 

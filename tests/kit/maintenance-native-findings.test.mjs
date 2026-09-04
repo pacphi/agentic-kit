@@ -148,6 +148,19 @@ test('plugin impact counts contributed catalog items when no nested component li
   assert.equal(catalogDependencyCount(footprint(items), 'demo@market', 'claude'), 2);
 });
 
+test('plugin dependency impact is qualified to the owning host', () => {
+  const items = [{
+    canonicalId: 'plugin:demo', kind: 'plugin', name: 'demo@market', pluginRef: 'demo@market',
+    components: ['skill:a', 'skill:b', 'agent:c', 'command:d'],
+    presence: [{ host: 'codex', provider: { ref: 'demo@market' } }],
+  }, {
+    canonicalId: 'skill:a', kind: 'skill', name: 'a', components: [],
+    presence: [{ host: 'claude', provider: { ref: 'demo@market' } }],
+  }];
+  assert.equal(catalogDependencyCount(footprint(items), 'demo@market', 'claude'), 1);
+  assert.equal(catalogDependencyCount(footprint(items), 'demo@market', 'codex'), 4);
+});
+
 test('Claude uninstall is exact and fixed but only derives from an explicit lifecycle removal', async (t) => {
   const calls = [];
   const installed = {

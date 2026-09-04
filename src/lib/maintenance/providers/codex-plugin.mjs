@@ -1,6 +1,6 @@
 import { runNativeCommand } from '../native-command.mjs';
 import {
-  baseAction, catalogDependencyCount, commandFailure, executableSafetyClass,
+  baseAction, catalogDependencyImpact, commandFailure, executableSafetyClass,
   parseNativeJson, providerFinding, sha256, unavailable, validPluginRef,
 } from './shared.mjs';
 
@@ -60,7 +60,7 @@ export function createCodexPluginProvider({ run = runNativeCommand } = {}) {
         evidence: { sources: ['codex-plugin-native-inventory'], asOf: facts.asOf,
           freshness: 'fresh', completeness: 'complete', gaps: [] },
         impact: { summary: 'Codex reports a candidate, but no exact per-plugin update verb is available.',
-          dependencies: catalogDependencyCount(footprint, plugin.ref, 'codex') },
+          ...catalogDependencyImpact(footprint, plugin.ref, 'codex') },
         operation: 'review', label: `Upgrade ${plugin.ref} to ${plugin.candidates[0]} with Codex`,
         recommendation: 'Codex reports this version, but this dashboard cannot invoke a per-plugin update.',
         steps: [

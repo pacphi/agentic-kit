@@ -889,6 +889,14 @@ test('catalog dedups by normalized name and keeps a per-host presence matrix', (
     'one physical Claude-compatible skill is exposed to both documented consumers');
   assert.deepEqual(new Set(shared.consumerBindings.map((row) => row.artifactId)).size, 2,
     'consumer bindings preserve two installed copies instead of treating three host edges as three copies');
+  assert.equal(shared.digestCoverage.measured, 2,
+    'digest coverage counts physical artifacts, not host consumer bindings');
+  assert.equal(result.overlaps.exactName.find((group) => group.name === 'deep-research')?.occurrences, 2);
+  const claudeMcpArtifacts = result.items.filter((item) => ['ruflo', 'lightpanda'].includes(item.name))
+    .flatMap((item) => item.presence.filter((presence) => presence.surface === 'claude-user-mcp'))
+    .map((presence) => presence.artifactId);
+  assert.equal(new Set(claudeMcpArtifacts).size, 2,
+    'separate config entries in one file retain separate artifact identities');
 
   // Kind is part of identity: a `reviewer` agent and a `reviewer` command are
   // two different deployed things.
@@ -973,6 +981,67 @@ test('catalog inventories OpenCode skills.paths as configured consumer bindings'
   assert.equal(skill.consumerBindings[0].mechanism, 'configured-path');
   assert.equal(skill.consumerBindings[0].configuredBy, 'opencode.json');
   assert.equal(skill.consumerBindings[0].resolution, 'not-reported');
+});
+
+test('OpenCode compatibility disablement preserves evidence but excludes the consumer', (t) => {
+  const fixtureRoots = catalogFixture(t);
+  const { root, ...roots } = fixtureRoots;
+  const result = collectCatalog({
+    ...roots, cwd: root, now: () => 1_700_000_000_000,
+    includePluginSurfaces: false, fsImpl: fixtureFs(root),
+    env: { OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: '1' },
+  });
+  const skill = result.items.find((item) => item.kind === 'skill' && item.name === 'claude-only');
+  assert.deepEqual(skill.hosts, ['claude']);
+  assert.equal(skill.consumerBindings.find((binding) => binding.host === 'opencode')?.enabled, false);
+  assert.equal(result.perHost.opencode.skill.value, 0);
+});
+
+test('configured and conventional views of one skill remain one physical artifact', (t) => {
+  const fixtureRoots = catalogFixture(t);
+  const { root, opencodeConfigFile, ...roots } = fixtureRoots;
+  write(opencodeConfigFile, JSON.stringify({ skills: { paths: [path.join(roots.claudeRoot, 'skills')] } }));
+  const result = collectCatalog({
+    ...roots, opencodeConfigFile, cwd: root, now: () => 1_700_000_000_000,
+    includePluginSurfaces: false, fsImpl: fixtureFs(root),
+  });
+  const skill = result.items.find((item) => item.kind === 'skill' && item.name === 'claude-only');
+  assert.equal(skill.artifacts.length, 1);
+  assert.equal(skill.consumerBindings.length, 3);
+  assert.equal(result.overlaps.exactName.some((group) => group.name === 'claude-only'), false,
+    'multiple discovery mechanisms do not manufacture a duplicate copy');
+});
+
+test('invalid, remote and JSONC-only OpenCode skill paths are explicit partial evidence', (t) => {
+  const fixtureRoots = catalogFixture(t);
+  const { root, opencodeConfigFile, ...roots } = fixtureRoots;
+  write(opencodeConfigFile, JSON.stringify({ skills: { paths: 'not-an-array' } }));
+  const invalid = collectCatalog({
+    ...roots, opencodeConfigFile, cwd: root, now: () => 1_700_000_000_000,
+    includePluginSurfaces: false, fsImpl: fixtureFs(root),
+  });
+  assert.equal(invalid.surfaces.find((surface) => surface.id === 'opencode-skill-paths:config')?.status, 'degraded');
+
+  write(opencodeConfigFile, JSON.stringify({ skills: { paths: ['https://example.test/skills'] } }));
+  const remote = collectCatalog({
+    ...roots, opencodeConfigFile, cwd: root, now: () => 1_700_000_000_000,
+    includePluginSurfaces: false, fsImpl: fixtureFs(root),
+  });
+  const remoteSurface = remote.surfaces.find((surface) => surface.id === 'opencode-skill-paths:config');
+  assert.equal(remoteSurface.partial, true);
+  assert.match(remoteSurface.reason, /remote/i);
+  assert.equal(remote.sourceStamps.entries.some((entry) => /^https?:/.test(entry.path)), false);
+
+  const project = path.join(root, 'jsonc-project');
+  write(path.join(project, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+  write(path.join(project, 'opencode.jsonc'), '{ // valid JSONC, deliberately not interpreted here\n "skills": {"paths": ["./skills"]}\n}\n');
+  const jsonc = collectCatalog({
+    ...roots, opencodeConfigFile, cwd: project, projects: [project], now: () => 1_700_000_000_000,
+    includePluginSurfaces: false, fsImpl: fixtureFs(root),
+  });
+  const jsoncSurface = jsonc.surfaces.find((surface) => surface.id === `opencode-project-skill-paths-jsonc:${project}:config`);
+  assert.equal(jsoncSurface.status, 'degraded');
+  assert.match(jsoncSurface.reason, /jsonc/i);
 });
 
 test('catalog inventories project agents, commands and MCP registrations across supported host surfaces', (t) => {

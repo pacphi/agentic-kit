@@ -1,6 +1,6 @@
 import { runNativeCommand } from '../native-command.mjs';
 import {
-  baseAction, catalogDependencyCount, commandFailure, executableSafetyClass,
+  baseAction, catalogDependencyImpact, commandFailure, executableSafetyClass,
   parseNativeJson, providerFinding, sha256, unavailable, validPluginRef, validScope,
 } from './shared.mjs';
 
@@ -118,7 +118,7 @@ export function createClaudePluginProvider({ run = runNativeCommand } = {}) {
         evidence: { sources: ['claude-plugin-native-inventory'], asOf: facts.asOf,
           freshness: 'fresh', completeness: 'complete', gaps: [] },
         impact: { summary: 'Exact plugin capabilities may change.',
-          dependencies: catalogDependencyCount(footprint, plugin.ref, 'claude') },
+          ...catalogDependencyImpact(footprint, plugin.ref, 'claude') },
         operation: selectedOperation, label, rollback, restart: 'required', executable,
       }));
     }

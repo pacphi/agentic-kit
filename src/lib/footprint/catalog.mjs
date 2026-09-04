@@ -96,7 +96,7 @@ const readMarkerDirs = (root, marker, opts = {}) => readNames(root, {
     return {
       itemPath: path.dirname(file), sourceFile: file,
       digest: artifactDigest(file, opts), definition: { ...definition, files: undefined },
-      artifactFiles: definition.files ?? [],
+      artifactFiles: definition.files ?? [], locatorKind: 'directory',
     };
   },
   ...opts,
@@ -108,7 +108,7 @@ const readMarkdownNames = (root, opts = {}) => readNames(root, {
   accept: (name) => name.endsWith('.md') && !/^readme\.md$/i.test(name),
   nameOf: (file) => relativeName(root, file, { strip: '.md' }),
   entryOf: (file) => ({ itemPath: file, sourceFile: file, digest: artifactDigest(file, opts),
-    definition: artifactDigest(file, opts), artifactFiles: [file] }),
+    definition: artifactDigest(file, opts), artifactFiles: [file], locatorKind: 'file' }),
   ...opts,
 });
 
@@ -118,7 +118,7 @@ const readFileStems = (root, exts, opts = {}) => readNames(root, {
   accept: (name) => exts.includes(path.extname(name)),
   nameOf: (file) => path.basename(file, path.extname(file)),
   entryOf: (file) => ({ itemPath: file, sourceFile: file, digest: artifactDigest(file, opts),
-    definition: artifactDigest(file, opts), artifactFiles: [file] }),
+    definition: artifactDigest(file, opts), artifactFiles: [file], locatorKind: 'file' }),
   ...opts,
 });
 
@@ -160,7 +160,8 @@ function readClaudePlugins(file, { fsImpl = fs } = {}) {
  *  different deployed things. */
 const itemKey = (kind, name) => `${kind}::${name.trim().toLowerCase()}`;
 const fallbackInventoryStatus = (configPresent) => (configPresent === false ? 'degraded' : 'partial');
-const opaqueArtifactId = (value) => `catalog-artifact-${createHash('sha256').update(value).digest('hex').slice(0, 24)}`;
+const opaqueArtifactId = (value) => `catalog-artifact-${createHash('sha256')
+  .update(JSON.stringify(value)).digest('hex').slice(0, 24)}`;
 
 function discoveryFor(spec) {
   if (spec.discovery) return spec.discovery;
@@ -256,19 +257,28 @@ function mergeCatalogItem(items, spec, entry) {
     };
     items.set(key, item);
   }
-  if (!item.hosts.includes(spec.host)) item.hosts.push(spec.host);
-  if (!item.sourceScopes.includes(spec.scope)) item.sourceScopes.push(spec.scope);
   const provider = spec.provider ? {
     ref: spec.provider.ref, name: spec.provider.name, marketplace: spec.provider.marketplace,
     version: spec.provider.version ?? null, cacheGeneration: spec.provider.cacheGeneration ?? null,
     enabled: spec.provider.enabled ?? null, evidence: spec.provider.evidence ?? null,
   } : null;
   const discovery = discoveryFor(spec);
-  const artifactId = opaqueArtifactId(path.resolve(entry.itemPath ?? `${spec.path}#${raw}`));
+  const activeConsumer = discovery.enabled !== false;
+  if (activeConsumer && !item.hosts.includes(spec.host)) item.hosts.push(spec.host);
+  if (activeConsumer && !item.sourceScopes.includes(spec.sourceScope ?? spec.scope)) {
+    item.sourceScopes.push(spec.sourceScope ?? spec.scope);
+  }
+  const locator = {
+    kind: spec.kind,
+    locatorKind: entry.locatorKind ?? (entry.itemPath ? 'file' : 'surface-entry'),
+    path: path.resolve(entry.itemPath ?? spec.path),
+    selector: entry.selector ?? (!entry.itemPath ? raw : null),
+  };
+  const artifactId = opaqueArtifactId(locator);
   const presence = {
     host: spec.host, surface: spec.id, path: spec.path,
     itemPath: entry.itemPath ?? null, sourceFile: entry.sourceFile ?? null,
-    scope: spec.scope ?? 'unknown', project: spec.project ?? null,
+    scope: spec.sourceScope ?? spec.scope ?? 'unknown', project: spec.sourceProject ?? spec.project ?? null,
     provider, plugin: entry.plugin ?? null, digest: entry.digest ?? null,
     definition: entry.definition ?? entry.digest ?? null,
     artifactId,
@@ -276,6 +286,8 @@ function mergeCatalogItem(items, spec, entry) {
       host: spec.host,
       mechanism: discovery.mechanism,
       configuredBy: discovery.configuredBy ?? null,
+      configScope: spec.scope ?? 'unknown',
+      configProject: spec.project ?? null,
       enabled: typeof discovery.enabled === 'boolean' ? discovery.enabled : null,
       resolution: 'not-reported',
     },
@@ -351,15 +363,6 @@ function trackIncompleteness(surfaces) {
 function sortCatalogItems(items) {
   const list = [...items.values()];
   for (const item of list) {
-    const digests = item.presence.map((presence) => presence.digest?.value).filter(Boolean);
-    const unique = [...new Set(digests)];
-    item.digestCoverage = {
-      measured: digests.length,
-      unknown: item.presence.length - digests.length,
-      unique: unique.length,
-      exactMatch: digests.length > 1 && unique.length === 1,
-    };
-    item.variantCount = Math.max(unique.length, unique.length ? 1 : 0);
     const artifacts = new Map();
     item.consumerBindings = item.presence.map((presence) => ({
       artifactId: presence.artifactId,
@@ -368,6 +371,8 @@ function sortCatalogItems(items) {
       project: presence.project,
       mechanism: presence.consumer.mechanism,
       configuredBy: presence.consumer.configuredBy,
+      configScope: presence.consumer.configScope,
+      configProject: presence.consumer.configProject,
       enabled: presence.consumer.enabled,
       resolution: presence.consumer.resolution,
     }));
@@ -394,6 +399,18 @@ function sortCatalogItems(items) {
       }
     }
     item.artifacts = [...artifacts.values()];
+    const activeArtifacts = item.artifacts.filter((artifact) => (
+      artifact.consumers.some((consumer) => consumer?.enabled !== false)
+    ));
+    const digests = activeArtifacts.map((artifact) => artifact.entrypoint?.value).filter(Boolean);
+    const unique = [...new Set(digests)];
+    item.digestCoverage = {
+      measured: digests.length,
+      unknown: activeArtifacts.length - digests.length,
+      unique: unique.length,
+      exactMatch: digests.length > 1 && unique.length === 1,
+    };
+    item.variantCount = Math.max(unique.length, unique.length ? 1 : 0);
   }
   return list.sort((a, b) => (a.kind === b.kind
     ? a.name.localeCompare(b.name)
@@ -406,26 +423,58 @@ function buildOverlapGroups(list) {
   for (const item of list.filter((candidate) => candidate.kind === 'skill')) {
     const name = item.capabilityName.trim().toLowerCase();
     if (!nameGroups.has(name)) nameGroups.set(name, []);
-    nameGroups.get(name).push(item);
-    for (const digest of new Set(item.presence.map((presence) => presence.digest?.value).filter(Boolean))) {
+    for (const artifact of item.artifacts.filter((candidate) => (
+      candidate.consumers.some((consumer) => consumer?.enabled !== false)
+    ))) nameGroups.get(name).push({ item, artifact });
+    for (const artifact of item.artifacts.filter((candidate) => (
+      candidate.consumers.some((consumer) => consumer?.enabled !== false)
+      && candidate.entrypoint?.value
+    ))) {
+      const digest = artifact.entrypoint.value;
       if (!digestGroups.has(digest)) digestGroups.set(digest, []);
-      digestGroups.get(digest).push(item);
+      digestGroups.get(digest).push({ item, artifact });
     }
   }
-  const mapGroups = (groups, field) => [...groups.entries()].flatMap(([value, items]) => {
-    const occurrences = items.reduce((sum, item) => sum + item.presence.length, 0);
-    if (items.length < 2 && occurrences < 2) return [];
-    return [{ [field]: value, itemKeys: items.map((item) => item.key), occurrences }];
+  const mapGroups = (groups, field) => [...groups.entries()].flatMap(([value, entries]) => {
+    const artifacts = new Set(entries.map((entry) => entry.artifact.id));
+    if (artifacts.size < 2) return [];
+    return [{
+      [field]: value,
+      itemKeys: [...new Set(entries.map((entry) => entry.item.key))],
+      occurrences: artifacts.size,
+    }];
   });
-  const measuredDigests = list.filter((item) => item.kind === 'skill')
-    .flatMap((item) => item.presence).filter((presence) => presence.digest?.value).length;
-  const total = list.filter((item) => item.kind === 'skill')
-    .reduce((sum, item) => sum + item.presence.length, 0);
+  const artifacts = new Map();
+  for (const item of list.filter((candidate) => candidate.kind === 'skill')) {
+    for (const artifact of item.artifacts.filter((candidate) => (
+      candidate.consumers.some((consumer) => consumer?.enabled !== false)
+    ))) if (!artifacts.has(artifact.id)) artifacts.set(artifact.id, artifact);
+  }
+  const measuredDigests = [...artifacts.values()].filter((artifact) => artifact.entrypoint?.value).length;
+  const total = artifacts.size;
   return {
     exactName: mapGroups(nameGroups, 'name'),
     exactEntrypointDigest: mapGroups(digestGroups, 'digest'),
     digestCoverage: { measured: measuredDigests, unknown: total - measuredDigests, partial: measuredDigests < total },
   };
+}
+
+function buildArtifactGraph(list) {
+  const graph = new Map();
+  for (const item of list) for (const artifact of item.artifacts) {
+    let node = graph.get(artifact.id);
+    if (!node) {
+      node = { ...artifact, logicalItemKeys: [], consumers: [] };
+      graph.set(artifact.id, node);
+    }
+    if (!node.logicalItemKeys.includes(item.key)) node.logicalItemKeys.push(item.key);
+    for (const consumer of artifact.consumers) {
+      if (!node.consumers.some((candidate) => JSON.stringify(candidate) === JSON.stringify(consumer))) {
+        node.consumers.push(consumer);
+      }
+    }
+  }
+  return [...graph.values()];
 }
 
 /** Total count per kind, `partial` when any surface feeding that kind was
@@ -520,11 +569,15 @@ export function collectCatalog({
   const partial = surfaces.filter((surface) => surface.partial).map((surface) => surface.id);
 
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     asOf,
     hosts: CATALOG_HOSTS,
     kinds: CATALOG_KINDS,
     items: list,
+    artifacts: buildArtifactGraph(list),
+    consumerBindings: list.flatMap((item) => item.consumerBindings.map((binding) => ({
+      ...binding, logicalItemKey: item.key,
+    }))),
     counts,
     perHost,
     surfaces,

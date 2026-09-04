@@ -33,6 +33,7 @@ export function readManifestKeys(file, pick, { fsImpl = fs } = {}) {
     entries: names.map((name) => ({
       name, itemPath: file, sourceFile: file, digest: configDigest(bag[name]),
       definition: configDigest(bag[name]), artifactFiles: [file],
+      locatorKind: 'config-entry', selector: name,
     })),
     partial: false, truncated: false,
   };
@@ -82,6 +83,7 @@ export function readTomlTables(file, section, { fsImpl = fs } = {}) {
     entries: names.map((name) => ({
       name, itemPath: file, sourceFile: file, digest: digestFor(name),
       definition: digestFor(name), artifactFiles: [file],
+      locatorKind: 'config-entry', selector: name,
     })),
     partial: false, truncated: false,
   };

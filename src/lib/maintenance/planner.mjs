@@ -13,8 +13,9 @@ const IDENTITY_KEYS = new Set(['id', 'kind', 'name', 'host', 'scope', 'providerR
 const ACTION_KEYS = new Set([
   'id', 'providerId', 'providerVersion', 'operation', 'resourceIdentity',
   'classification', 'findingClassification', 'rollback', 'restart', 'executable',
-  'sourceFingerprint', 'expectedVersion', 'recommendedVersion',
+  'sourceFingerprint', 'expectedVersion', 'recommendedVersion', 'impact',
 ]);
+const IMPACT_KEYS = new Set(['summary', 'bytes', 'files', 'dependencies', 'capabilities', 'projects', 'preserved']);
 
 function selectedFindings(findings) {
   if (!Array.isArray(findings) || !findings.length) {
@@ -80,6 +81,14 @@ function validExecutableAction(action) {
       || !['unknown', 'required', 'not-required'].includes(action.restart)) return false;
   if ([action.expectedVersion, action.recommendedVersion]
     .some((value) => value != null && !SAFE_VALUE.test(String(value)))) return false;
+  if (action.impact) {
+    if (typeof action.impact !== 'object' || Array.isArray(action.impact)
+        || Object.keys(action.impact).some((key) => !IMPACT_KEYS.has(key))) return false;
+    for (const key of ['capabilities', 'projects', 'preserved']) {
+      if (!Array.isArray(action.impact[key]) || action.impact[key].length > 12
+          || action.impact[key].some((value) => !SAFE_VALUE.test(String(value)))) return false;
+    }
+  }
   return validIdentity(action.resourceIdentity);
 }
 

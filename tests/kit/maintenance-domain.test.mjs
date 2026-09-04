@@ -285,6 +285,36 @@ test('two bindings to one physical artifact are shared exposure, not a duplicate
     'the same source discovered through two config scopes must not be described as a removable project copy');
 });
 
+test('cross-host views of the same project and shared artifacts produce one human decision', () => {
+  const input = footprint();
+  input.storage.reclaimables = [];
+  const digest = { status: 'measured', value: 'same', partial: false, asOf: NOW };
+  input.catalog.items = [{
+    canonicalId: 'skill:portable', kind: 'skill', name: 'portable', capabilityName: 'portable',
+    consumerBindings: [
+      { artifactId: 'shared-artifact', host: 'claude', enabled: true },
+      { artifactId: 'shared-artifact', host: 'opencode', enabled: true },
+      { artifactId: 'project-artifact', host: 'claude', enabled: true },
+      { artifactId: 'project-artifact', host: 'opencode', enabled: true },
+    ],
+    presence: [
+      { host: 'claude', scope: 'user', artifactId: 'shared-artifact', definition: digest, digest },
+      { host: 'opencode', scope: 'user', artifactId: 'shared-artifact', definition: digest, digest },
+      { host: 'claude', scope: 'project', project: '/private/project-a', artifactId: 'project-artifact',
+        definition: digest, digest, tracking: { repository: true, tracked: false, workingTree: 'clean' } },
+      { host: 'opencode', scope: 'project', project: '/private/project-a', artifactId: 'project-artifact',
+        definition: digest, digest, tracking: { repository: true, tracked: false, workingTree: 'clean' } },
+    ],
+  }];
+
+  const relationships = scanMaintenanceFindings({ footprint: input, now: () => NOW })
+    .findings.filter((finding) => finding.relationship);
+  assert.equal(relationships.length, 1);
+  assert.deepEqual(relationships[0].consumerHosts.hosts, ['claude', 'opencode']);
+  assert.equal(relationships[0].relationship.memberCount, 2);
+  assert.equal(relationships[0].resource.host, 'multiple');
+});
+
 test('stale evidence is visible and cannot produce a safe cleanup classification', () => {
   const input = footprint();
   input.snapshot.stale = true;

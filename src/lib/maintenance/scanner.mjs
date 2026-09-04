@@ -59,7 +59,20 @@ const definitionDigest = (presence) => ['measured', 'carried-forward'].includes(
   && presence?.definition?.partial !== true && presence?.definition?.value
   ? presence.definition.value : null;
 
-function relationshipMember(presence, role) {
+function occurrencePresence(occurrence) {
+  return occurrence?.presence ?? occurrence;
+}
+
+function occurrenceConsumers(occurrence) {
+  const presence = occurrencePresence(occurrence);
+  const hosts = array(occurrence?.consumerHosts).filter((host) => HOSTS.has(host));
+  return hosts.length ? [...new Set(hosts)].sort()
+    : (HOSTS.has(presence?.host) ? [presence.host] : []);
+}
+
+function relationshipMember(occurrence, role) {
+  const presence = occurrencePresence(occurrence);
+  const consumerHosts = occurrenceConsumers(occurrence);
   const tracking = presence?.tracking ?? {};
   const providerRef = text(presence?.provider?.ref) ?? text(presence?.plugin?.ref);
   return {
@@ -67,7 +80,8 @@ function relationshipMember(presence, role) {
     label: role === 'project-copy' ? 'Observed project copy'
       : (role === 'canonical' ? 'Canonical transport'
         : (role === 'legacy' ? 'Legacy transport' : 'Observed shared copy')),
-    host: text(presence?.host), scope: text(presence?.scope), providerRef,
+    host: consumerHosts.length > 1 ? 'multiple' : (consumerHosts[0] ?? text(presence?.host)),
+    consumerHosts, scope: text(presence?.scope), providerRef,
     projectRef: projectReference(presence?.project),
     projectLabel: text(presence?.project) ? path.basename(presence.project) : null,
     ownership: providerRef ? 'plugin-owned' : (presence?.scope === 'user' ? 'user-owned' : 'unknown'),
@@ -76,14 +90,16 @@ function relationshipMember(presence, role) {
   };
 }
 
-function relationshipFinding({ classification, kind, name, host, project, projectPresence, shared, evidence }) {
+function relationshipFinding({ classification, kind, name, host, consumerHosts = [], project, projectPresence, shared, evidence }) {
   const copy = relationshipGuidance[classification];
   const members = [relationshipMember(projectPresence,
     classification === 'legacy-equivalent-transport' ? 'legacy' : 'project-copy')]
     .concat(shared.map((presence) => relationshipMember(presence,
       classification === 'legacy-equivalent-transport' ? 'canonical' : 'shared-copy')));
   const stable = { classification, kind, name, host, projectRef: projectReference(project),
-    definitions: [definitionDigest(projectPresence), ...shared.map(definitionDigest)].sort() };
+    consumerHosts,
+    definitions: [definitionDigest(occurrencePresence(projectPresence)),
+      ...shared.map((entry) => definitionDigest(occurrencePresence(entry)))].sort() };
   const action = nextAction({
     operation: 'review', label: copy.label, providerId: 'maintenance.read-only',
     safetyClass: 'never-automatic', rollback: 'reversible', recommendation: copy.label,
@@ -105,7 +121,9 @@ function relationshipFinding({ classification, kind, name, host, project, projec
       completeness: 'complete', gaps: [],
     },
     observedUsage: { status: 'not-measured', statement: 'Host selection and usage were not used as action authority.' },
-    consumerHosts: catalogConsumers(null, host),
+    consumerHosts: consumerHosts.length ? {
+      basis: 'catalog-presence', hosts: consumerHosts, count: consumerHosts.length, truncated: false,
+    } : catalogConsumers(null, host),
     impact: {
       summary: copy.impact, bytes: null, files: null,
       dependencies: 'unknown', preserved: action.preserved,
@@ -122,14 +140,37 @@ function relationshipFinding({ classification, kind, name, host, project, projec
 
 function capabilityGroups(catalog) {
   const groups = new Map();
-  for (const item of array(catalog?.items)) for (const presence of array(item?.presence)) {
+  for (const item of array(catalog?.items)) {
     const logical = text(item?.capabilityName) ?? text(item?.name);
-    if (!logical || !text(presence?.host)) continue;
-    const key = `${presence.host}::${item.kind}::${logical.toLowerCase()}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push({ item, presence, logical });
+    if (!logical) continue;
+    const bindings = array(item?.consumerBindings).filter((binding) => binding?.enabled !== false);
+    const consumersByArtifact = new Map();
+    for (const binding of bindings) {
+      if (!binding?.artifactId || !HOSTS.has(binding.host)) continue;
+      if (!consumersByArtifact.has(binding.artifactId)) consumersByArtifact.set(binding.artifactId, new Set());
+      consumersByArtifact.get(binding.artifactId).add(binding.host);
+    }
+    const seen = new Set();
+    for (const presence of array(item?.presence)) {
+      if (presence?.consumer?.enabled === false) continue;
+      const artifactId = presence?.artifactId
+        ?? `${presence?.host ?? 'unknown'}::${presence?.scope ?? 'unknown'}::${presence?.project ?? ''}`;
+      if (seen.has(artifactId)) continue;
+      seen.add(artifactId);
+      const fallback = HOSTS.has(presence?.host) ? [presence.host] : [];
+      const consumerHosts = [...(consumersByArtifact.get(artifactId) ?? fallback)].sort();
+      if (!consumerHosts.length) continue;
+      const key = `${item.kind}::${logical.toLowerCase()}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push({ item, presence, logical, artifactId, consumerHosts });
+    }
   }
   return groups;
+}
+
+function intersectHosts(left, right) {
+  const rhs = new Set(right);
+  return left.filter((host) => rhs.has(host));
 }
 
 function sameNameRelationships(catalog, evidence) {
@@ -140,9 +181,9 @@ function sameNameRelationships(catalog, evidence) {
     const projects = occurrences.filter(({ presence }) => presence.scope === 'project' && presence.project);
     if (!shared.length || !projects.length) continue;
     for (const projectOccurrence of projects) {
-      const distinctShared = shared.filter(({ presence }) => (
-        !projectOccurrence.presence?.artifactId || !presence?.artifactId
-        || projectOccurrence.presence.artifactId !== presence.artifactId
+      const distinctShared = shared.filter((occurrence) => (
+        projectOccurrence.artifactId !== occurrence.artifactId
+        && intersectHosts(projectOccurrence.consumerHosts, occurrence.consumerHosts).length > 0
       ));
       if (!distinctShared.length) continue;
       const projectDigest = definitionDigest(projectOccurrence.presence);
@@ -152,10 +193,14 @@ function sameNameRelationships(catalog, evidence) {
       const classification = allDigests.size > 1 ? 'same-name-different-definition'
         : (projectOccurrence.presence?.tracking?.tracked === true
           ? 'tracked-source-copy' : 'redundant-project-override');
+      const consumers = [...new Set(distinctShared.flatMap((occurrence) => (
+        intersectHosts(projectOccurrence.consumerHosts, occurrence.consumerHosts)
+      )))].sort();
       findings.push(relationshipFinding({
         classification, kind: projectOccurrence.item.kind, name: projectOccurrence.logical,
-        host: projectOccurrence.presence.host, project: projectOccurrence.presence.project,
-        projectPresence: projectOccurrence.presence, shared: distinctShared.map(({ presence }) => presence), evidence,
+        host: consumers.length > 1 ? 'multiple' : consumers[0], consumerHosts: consumers,
+        project: projectOccurrence.presence.project,
+        projectPresence: projectOccurrence, shared: distinctShared, evidence,
       }));
       coveredItems.add(projectOccurrence.item.key);
       distinctShared.forEach(({ item }) => coveredItems.add(item.key));

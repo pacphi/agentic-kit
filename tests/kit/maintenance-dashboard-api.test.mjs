@@ -65,6 +65,10 @@ function fixtureService() {
           classification: 'approval-required', findingClassification: 'native-update', rollback: 'irreversible',
           restart: 'required', executable: true, sourceFingerprint: 'source-a',
           resourceIdentity: finding.resource,
+          impact: {
+            capabilities: ['skill reviewer', 'command ship'],
+            preserved: ['Standalone skill reviewer on Codex'],
+          },
         }],
       };
     },
@@ -318,10 +322,12 @@ test('dashboard Maintenance capabilities bind preview, confirmation, apply and g
   assert.equal(planned.status, 200, planned.body);
   const preview = JSON.parse(planned.body);
   assert.equal(preview.confirmation.typedPhrase, 'APPLY 1');
-  assert.deepEqual(preview.confirmation.willChange, ['update <hostile>']);
-  assert.equal(preview.confirmation.preserved.length, 2);
+  assert.deepEqual(preview.confirmation.willChange, [
+    'update <hostile>', 'Affected: skill reviewer', 'Affected: command ship',
+  ]);
+  assert.equal(preview.confirmation.preserved.includes('Standalone skill reviewer on Codex'), true);
   assert.equal(preview.plan.actions[0].executable, true);
-  assert.doesNotMatch(planned.body, /private\/must-not-leak|argv|command/);
+  assert.doesNotMatch(planned.body, /private\/must-not-leak|argv|"command"\s*:/);
 
   const refusedPhrase = await request(server, '/api/maintenance/apply', {
     method: 'POST', body: { capability: preview.capability, confirm: true, typedPhrase: 'wrong' },

@@ -46,6 +46,7 @@ export function baseAction(finding, {
     classification: finding.safetyClass,
     findingClassification: finding.classification ?? finding.state,
     rollback, restart, executable: true, sourceFingerprint,
+    impact: normalizedImpact(finding?.impact),
   };
   return { id: `maintenance-action-${sha256(action).slice(0, 20)}`, ...action };
 }
@@ -68,11 +69,17 @@ function normalizedEvidence(evidence, providerId) {
 }
 
 function normalizedImpact(impact) {
+  const labels = (value) => Array.isArray(value)
+    ? value.filter((item) => typeof item === 'string' && item && !/[\0\r\n]/.test(item)).slice(0, 12)
+    : [];
   return {
     summary: impact?.summary ?? 'Dependent capabilities require review before change.',
     bytes: Number.isFinite(impact?.bytes) ? impact.bytes : null,
     files: Number.isFinite(impact?.files) ? impact.files : null,
     dependencies: Number.isInteger(impact?.dependencies) ? impact.dependencies : 'unknown',
+    capabilities: labels(impact?.capabilities),
+    projects: labels(impact?.projects),
+    preserved: labels(impact?.preserved),
   };
 }
 
@@ -156,10 +163,15 @@ export function catalogDependencyCount(footprint, providerRef, host = null) {
   const nestedCounts = [];
   let contributed = 0;
   for (const item of Array.isArray(footprint?.catalog?.items) ? footprint.catalog.items : []) {
-    const byIdentity = item?.pluginRef === providerRef;
     const byPresence = Array.isArray(item?.presence) && item.presence.some((presence) => (
-        (!host || presence?.host === host) && presence?.provider?.ref === providerRef
+        presence?.consumer?.enabled !== false
+        && (!host || presence?.host === host) && presence?.provider?.ref === providerRef
       ));
+    const identityHost = !host || item?.hosts?.includes(host)
+      || (Array.isArray(item?.presence) && item.presence.some((presence) => (
+        presence?.consumer?.enabled !== false && presence?.host === host
+      )));
+    const byIdentity = item?.pluginRef === providerRef && identityHost;
     if (!byIdentity && !byPresence) continue;
     const nested = Array.isArray(item.components) ? item.components.length : 0;
     if (nested) nestedCounts.push(nested);
@@ -167,4 +179,30 @@ export function catalogDependencyCount(footprint, providerRef, host = null) {
   }
   const measured = Math.max(contributed, ...nestedCounts, 0);
   return measured || 'unknown';
+}
+
+/** Bounded, content-free removal/update blast radius for one provider-owned plugin. */
+export function catalogDependencyImpact(footprint, providerRef, host = null) {
+  const items = Array.isArray(footprint?.catalog?.items) ? footprint.catalog.items : [];
+  const belongs = (item) => Array.isArray(item?.presence) && item.presence.some((presence) => (
+    presence?.consumer?.enabled !== false && (!host || presence?.host === host)
+    && presence?.provider?.ref === providerRef
+  ));
+  const contributed = items.filter((item) => item?.kind !== 'plugin' && belongs(item));
+  const names = contributed.map((item) => `${item.kind} ${item.capabilityName ?? item.name}`);
+  const preserved = [];
+  for (const item of contributed) {
+    const logical = String(item.capabilityName ?? item.name ?? '').toLowerCase();
+    const alternatives = items.filter((candidate) => candidate !== item
+      && String(candidate?.capabilityName ?? candidate?.name ?? '').toLowerCase() === logical
+      && Array.isArray(candidate?.presence) && candidate.presence.some((presence) => (
+        presence?.consumer?.enabled !== false && presence?.provider?.ref !== providerRef
+      )));
+    if (alternatives.length) preserved.push(`Other installed ${item.kind} ${item.capabilityName ?? item.name}`);
+  }
+  return {
+    dependencies: catalogDependencyCount(footprint, providerRef, host),
+    capabilities: names.slice(0, 12),
+    preserved: [...new Set(preserved)].slice(0, 12),
+  };
 }

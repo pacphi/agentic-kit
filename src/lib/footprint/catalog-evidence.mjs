@@ -180,6 +180,7 @@ export function collectNativePluginInventory({ run = spawnSync } = {}) {
 
 function matchingPresence(item, { host, scope, project }) {
   return (item.presence ?? []).some((presence) => presence.host === host
+    && presence.consumer?.enabled !== false
     && presence.scope === scope
     && (scope !== 'project' || presence.project === project));
 }
@@ -212,10 +213,15 @@ function overlapMeasurement(projectItems, sharedItems, field, asOf) {
 
 function skillOccurrences(items, host, scopes, project) {
   const out = [];
+  const seen = new Set();
   for (const item of items.filter((candidate) => candidate.kind === 'skill')) {
     for (const presence of item.presence ?? []) {
       if (presence.host !== host || !scopes.includes(presence.scope)) continue;
+      if (presence.consumer?.enabled === false) continue;
       if (presence.scope === 'project' && presence.project !== project) continue;
+      const identity = presence.artifactId ?? `${presence.itemPath ?? presence.path}::${item.capabilityName ?? item.name}`;
+      if (seen.has(identity)) continue;
+      seen.add(identity);
       out.push({ name: item.capabilityName ?? item.name, digest: digestValue(presence) });
     }
   }

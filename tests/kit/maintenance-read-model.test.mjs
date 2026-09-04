@@ -57,6 +57,23 @@ test('source fingerprint is stable for identical evidence and changes on source 
   assert.notEqual(a.sourceFingerprint, b.sourceFingerprint);
 });
 
+test('catalog drift makes Maintenance evidence stale and changes its source fingerprint', () => {
+  const baseline = footprint('a');
+  baseline.snapshot.catalogDrift = { status: 'unchanged-at-probes', changed: [], checkedAt: NOW };
+  const changed = footprint('a');
+  changed.snapshot.catalogDrift = {
+    status: 'changed', checkedAt: NOW,
+    changed: [{ path: '/private/catalog', before: { mtimeMs: 1 }, after: { mtimeMs: 2 } }],
+  };
+  const before = buildMaintenanceReadModel({ footprint: baseline, now: () => NOW });
+  const after = buildMaintenanceReadModel({ footprint: changed, now: () => NOW });
+
+  assert.equal(after.freshness.status, 'stale');
+  assert.equal(after.freshness.completeness, 'partial');
+  assert.match(after.freshness.gaps.join(' '), /catalog sources changed/i);
+  assert.notEqual(after.sourceFingerprint, before.sourceFingerprint);
+});
+
 test('missing footprint sections degrade to a review finding instead of throwing or inventing zeroes', () => {
   const model = buildMaintenanceReadModel({ footprint: {}, now: () => NOW });
   assert.equal(model.freshness.status, 'unknown');
