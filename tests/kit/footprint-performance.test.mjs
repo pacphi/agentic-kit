@@ -646,6 +646,48 @@ test('project measurement falls back to bounded dependency discovery after a deg
   assert.equal(row.loc.total.value, 1);
 });
 
+test('fused project observations equal independent walkers when virtual caps fire', (t) => {
+  const root = fixture(t, 'project-forest-cap-equivalence');
+  const project = path.join(root, 'repo');
+  fs.mkdirSync(path.join(project, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(project, '.git', 'config'),
+    '[remote "origin"]\n\turl = https://github.com/pacphi/repo.git\n');
+  fs.writeFileSync(path.join(project, 'package.json'),
+    JSON.stringify({ dependencies: { react: '1' } }));
+  for (let index = 0; index < 12; index += 1) {
+    const dir = path.join(project, `part-${String(index).padStart(2, '0')}`);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `source-${index}.js`), `value(${index});\n`);
+  }
+  const dependency = path.join(project, 'workspace', 'node_modules', 'pkg');
+  fs.mkdirSync(dependency, { recursive: true });
+  fs.writeFileSync(path.join(dependency, 'index.js'), 'module.exports = 1;\n');
+  let physicalWalks = 0;
+  const fusedWalk = instrumentWalkTree({ before: () => { physicalWalks += 1; } });
+
+  const fused = collectProjects({
+    projects: [{ path: project, label: 'repo', hosts: ['codex'] }],
+    walk: fusedWalk,
+    limits: { maxEntries: 5 },
+    now: () => 1,
+  }).projects[0];
+  const reference = collectProjects({
+    projects: [{ path: project, label: 'repo', hosts: ['codex'] }],
+    walk(target, options) { return walkTree(target, options); },
+    limits: { maxEntries: 5 },
+    now: () => 1,
+  }).projects[0];
+
+  for (const field of [
+    'loc', 'stack', 'treeBytes', 'treeFiles', 'gitBytes', 'nodeModulesBytes',
+    'nodeModulesRoots', 'totalBytes', 'totalFiles', 'lastActivity', 'complete',
+  ]) {
+    assert.deepEqual(fused[field], reference[field], `${field} must retain its independent contract`);
+  }
+  assert.equal(physicalWalks, 3,
+    'one fused project root, one .git root, and one dependency payload are physically acquired');
+});
+
 test('project dependency reuse preserves the hidden-ancestor exclusion', (t) => {
   const root = fixture(t, 'project-node-modules-hidden');
   const project = path.join(root, 'repo');
