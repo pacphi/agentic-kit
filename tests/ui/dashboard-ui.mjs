@@ -1648,6 +1648,12 @@ async function main() {
         && /Preview change/.test(firstMaintenanceDetail)
         && /Nothing runs until you confirm/.test(firstMaintenanceDetail),
       `first finding was ${JSON.stringify(firstMaintenance)}; detail read ${JSON.stringify(firstMaintenanceDetail)}`);
+    const maintenanceRowSuggestions = await page.$$eval('#sys-maint-list [data-maint-key]',
+      (rows) => rows.map((row) => row.innerText));
+    check('every Maintenance finding exposes a suggested action in the ledger',
+      maintenanceRowSuggestions.length === MAINTENANCE_PAYLOAD.findings.length
+        && maintenanceRowSuggestions.every((text) => /Suggested action:\s*\S/.test(text)),
+      `row suggestions were ${JSON.stringify(maintenanceRowSuggestions)}`);
 
     await page.click('#sys-maint-buckets [data-maint-bucket="needs-review"]');
     const reviewMaintenance = await page.evaluate(() => ({
