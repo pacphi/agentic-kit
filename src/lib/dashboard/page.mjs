@@ -917,7 +917,7 @@ ${LIVE_HTML}
               <div class="mt-empty">Maintenance findings have not been loaded.</div>
             </div>
             <section class="mt-detail" id="sys-maint-detail" aria-label="Selected maintenance finding">
-              <div class="mt-detail-empty"><b>Select a finding</b><span>Its ownership, impact, evidence, and next step will appear here.</span></div>
+              <div class="mt-detail-empty"><b>Select a finding</b><span>Its ownership, impact, evidence, and recommended corrective action will appear here.</span></div>
             </section>
           </div>
           <dialog class="mt-confirm" id="sys-maint-confirm" aria-labelledby="sys-maint-confirm-title" aria-describedby="sys-maint-confirm-status" aria-busy="false">

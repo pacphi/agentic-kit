@@ -467,7 +467,7 @@ import { maintActionActive, maintActionBusy, wireMaintActions } from './system-m
   function renderMaintDetail(records){
     var el=document.getElementById("sys-maint-detail");if(!el)return;
     var record=records.find(function(item){return item.key===maintSelected;});
-    if(!record){el.innerHTML='<div class="mt-detail-empty"><b>Select a finding</b><span>Its ownership, impact, evidence, and next step will appear here.</span></div>';return;}
+    if(!record){el.innerHTML='<div class="mt-detail-empty"><b>Select a finding</b><span>Its ownership, impact, evidence, and recommended corrective action will appear here.</span></div>';return;}
     el.innerHTML=record.kind==="receipt"?maintReceiptDetail(record.value):maintFindingDetail(record.value);
   }
 
