@@ -5,6 +5,14 @@
 - **Updated:** 2026-09-04 — proposed ADR-0048 retains physical artifact and consumer-binding
   identity, adds exact management placements, and plans configurable/resumable discovery; current
   explicit provider-scan behavior remains authoritative until implementation
+- **Updated:** 2026-09-05 — ADR-0048 is now Accepted and implemented. This ADR's `PhysicalArtifact`
+  and `ConsumerBinding` identity is now projected, unchanged, as the management projection's own
+  `PhysicalArtifact` and `ConsumerBinding` rows (`src/lib/maintenance/management/
+  {identity,projection}.mjs`): one physical artifact used by several hosts still appears once with
+  several bindings. This ADR's explicit provider-scan behavior remains the evidence source; ADR-0048
+  adds configurable, resumable discovery scans over separate collection roots and exact projects
+  (`src/lib/maintenance/discovery/`) as an additional, independently configured scan surface, not a
+  replacement for this ADR's scan trigger.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [issue #198](https://github.com/pacphi/agentic-kit/issues/198),
   [issue #200](https://github.com/pacphi/agentic-kit/issues/200),

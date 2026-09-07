@@ -125,6 +125,22 @@ const modelLifecycleSrc = readSplit('model-lifecycle.mjs');
 const usageOrchestratorsSrc = readSplit('usage-orchestrators.mjs');
 const systemReadoutSrc = readSplit('system-readout.mjs');
 const systemProjectsSrc = readSplit('system-projects.mjs');
+// ADR-0048 Maintenance workspace: maintenanceWorkspaceSrc MUST precede the
+// four destination modules below — each registers itself with
+// mntRegisterDestination() at its own top level (see each file's matching
+// comment), which dereferences maintenance-workspace.mjs's own top-level
+// `var mntDestLoaders = {}`. Concatenation order is real execution order for
+// that one statement, unlike the function-hoisted cross-file calls
+// everywhere else in this bundle.
+const maintenanceWorkspaceSrc = readSplit('maintenance-workspace.mjs');
+const maintenanceFiltersSrc = readSplit('maintenance-filters.mjs');
+const maintenanceCardsSrc = readSplit('maintenance-cards.mjs');
+const maintenanceOperationSrc = readSplit('maintenance-operation.mjs');
+const maintenanceInventorySrc = readSplit('maintenance-inventory.mjs');
+const maintenanceInspectorSrc = readSplit('maintenance-inspector.mjs');
+const maintenanceGuidanceSrc = readSplit('maintenance-guidance.mjs');
+const maintenanceDiscoverySrc = readSplit('maintenance-discovery.mjs');
+const maintenanceActivitySrc = readSplit('maintenance-activity.mjs');
 const systemMaintenanceActionsSrc = readSplit('system-maintenance-actions.mjs');
 const systemMaintenanceSrc = readSplit('system-maintenance.mjs');
 const bootSrc = readSplit('boot.mjs');
@@ -136,5 +152,5 @@ const bootSrc = readSplit('boot.mjs');
 // sequence) running in the same relative order it always has.
 export const JS = `
 (function(){
-${bootstrapSrc}${overviewSrc}${datetimeSrc}${intelligenceSrc}${pollSrc}${usageRhythmSrc}${usagePromptsSrc}${usageContextHooksSrc}${usageSrc}${modelLifecycleSrc}${usageOrchestratorsSrc}${aboutSrc}${systemReadoutSrc}${systemProjectsSrc}${systemMaintenanceActionsSrc}${systemMaintenanceSrc}${bootSrc}})();
+${bootstrapSrc}${overviewSrc}${datetimeSrc}${intelligenceSrc}${pollSrc}${usageRhythmSrc}${usagePromptsSrc}${usageContextHooksSrc}${usageSrc}${modelLifecycleSrc}${usageOrchestratorsSrc}${aboutSrc}${systemReadoutSrc}${systemProjectsSrc}${maintenanceWorkspaceSrc}${maintenanceFiltersSrc}${maintenanceCardsSrc}${maintenanceOperationSrc}${maintenanceInventorySrc}${maintenanceInspectorSrc}${maintenanceGuidanceSrc}${maintenanceDiscoverySrc}${maintenanceActivitySrc}${systemMaintenanceActionsSrc}${systemMaintenanceSrc}${bootSrc}})();
 `;

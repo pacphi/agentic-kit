@@ -1,10 +1,26 @@
 # ADR-0048 — Inventory-led Maintenance resource management
 
-- **Status:** Proposed
+- **Status:** Accepted — implementation delivered 2026-09-05; Implemented withheld pending
+  human-evaluation and cross-platform gates
 - **Date:** 2026-09-04
 - **Updated:** 2026-09-04 — records the completed Maintenance overhaul decision interview and
   defines the proposed inventory, guidance, discovery, activity, recovery-audit, and action
   contracts; no implementation is claimed
+- **Updated:** 2026-09-05 — implementation delivered: the management projection schema v2 with
+  opaque ids and a privacy guard; Inventory/Guidance/Discovery/Activity queries; configurable
+  discovery with resumable checkpointed scans over the ADR-0047 forest; a one-write-action contract
+  enforced at the planner, coordinator, service, dashboard API, and CLI; a read-only interruption
+  audit split from single-receipt reconciliation with scoped mutation blocks; a Git-aware
+  project-patch provider and an exact Ollama model-removal provider; signed built-in recipes under
+  an N-3 package-manager policy; the v2 dashboard route allowlist; `ak maintain` v2 verbs; and
+  Catalog navigation redirected into Maintenance. See "Implementation status" below.
+- **Updated:** 2026-09-07 — approved Option A presentation: progressive filters, contextual
+  project/resource hierarchy, conditional inspector, one local measurement toolbar with phased
+  progress through inventory publication, and distinct filesystem/evidence coverage. See the
+  [experience specification](../design/maintenance-overhaul/experience-specification.md).
+- **Updated:** 2026-09-07 — Projects retain Git repositories and non-Git folders, with
+  Git/Folder/Worktree icons and labels plus a Project type facet; missing or unreadable evidence
+  remains Not checked. Classification is presentation metadata and never changes identity.
 - **Deciders:** agentic-kit maintainers
 - **Planned successor to:** [ADR-0044](0044-receipt-aware-maintenance-control-plane.md) for the
   findings-first product and surface contracts; ADR-0044 remains authoritative until this decision
@@ -20,14 +36,21 @@
 
 ## Status of the governed system
 
-ADR-0044 is Implemented as of 2026-09-03. Its findings-first Maintenance screen, provider
-registry, source-bound plans, one-use capabilities, verification, receipts, undo, and CLI-only
-receipt recovery describe the current product. ADR-0032 is Implemented as of 2026-08-25 and keeps
-model lifecycle operations read-only. ADR-0046 is Implemented, while ADR-0047 is Accepted with only
-its Projects observation-forest pilot implemented.
+ADR-0044 is Implemented as of 2026-09-03; its transaction engine, provider registry, source-bound
+plans, one-use capabilities, verification, receipts, and guarded undo remain the runtime safety
+floor this ADR builds on rather than replaces. ADR-0032 is Implemented as of 2026-08-25 and keeps
+model lifecycle operations read-only except for the one exact Ollama removal provider this ADR
+adds. ADR-0046 is Implemented, and ADR-0047 is Accepted with its Projects observation-forest pilot
+and this ADR's checkpointed continuation both implemented.
 
-This ADR proposes a successor product and the migration to it. Until the relevant implementation
-slice is proven and this record is updated, the existing ADRs and code remain authoritative.
+This ADR moved from Proposed to Accepted on 2026-09-05: every contract in the Decision below has a
+source implementation covered by named automated tests (see "Implementation status"). It is not
+yet Implemented in this record's own sense, because the
+[migration plan](../design/maintenance-overhaul/migration-plan.md)'s human-evaluation and
+cross-platform acceptance gates have not run on this machine. The dashboard's Maintenance panel now
+renders this ADR's Inventory/Guidance/Discovery/Activity workspace; ADR-0044's v1 HTTP routes and
+CLI verbs remain available as a documented compatibility surface until those gates pass and this
+record is updated again. ADR-0044 is not marked Superseded; see "Implementation status" for why.
 
 ## Context
 
@@ -335,6 +358,99 @@ matrix, privacy review, and acceptance suite are approved. It becomes Implemente
 legacy Catalog and findings-first Maintenance surfaces are retired or explicitly retained as
 documented compatibility routes and every acceptance gate passes. At that point ADR-0044 may be
 marked Superseded; not before.
+
+## Implementation status
+
+**Updated 2026-09-05.** Every phase the
+[migration plan](../design/maintenance-overhaul/migration-plan.md) defines has a source
+implementation and named automated tests. `node --test` over the files cited below reports 605
+passing tests and zero failures (run 2026-09-05).
+
+### Delivered and proven by automated tests
+
+- **Phase 1 — management projection.** `src/lib/maintenance/management/{model,identity,evidence,
+  environments,projection,projection-builder,projection-projects,dependency-probes,dependencies,
+  conflicts,correlation}.mjs` build the versioned, privacy-projected `ManagementInventory` (opaque
+  ids, evidence scorecards, dependency edges, conflict sets) over Catalog v4, the footprint
+  install/storage/runtime sections, the model-inventory snapshot, and the hook read model. Proven
+  by `tests/kit/maintenance-management-{model,projection,dependencies,parity,correlation}.test.mjs`;
+  the parity suite checks that every Catalog v4 artifact appears exactly once at the correct grain.
+- **Phase 2 — Discovery and resumable scans.** `src/lib/maintenance/discovery/{configuration,
+  preview,checkpoint,partitions,orchestrator,coverage,history,project-detection,
+  instruction-files}.mjs` add user `kit.json` discovery intent (`src/lib/config.mjs`'s
+  `maintenance.discovery` key), add-source preview, owner-private checkpoints, and a
+  work-slice/safety-ceiling scan state machine built over ADR-0047's `observeWalkForest`. Proven by
+  `tests/kit/maintenance-discovery-{configuration,preview,checkpoint,orchestrator,coverage}.test.mjs`.
+- **Phase 3 — Inventory workspace.** `src/lib/maintenance/management/query.mjs` supplies the
+  faceted, paged, opaque-cursor query engine; `src/lib/dashboard/client/{maintenance-workspace,
+  maintenance-inventory,maintenance-inspector}.mjs` and `src/lib/dashboard/page.mjs`'s Maintenance
+  panel render it as the four-destination workspace (Inventory, Guidance, Discovery, Activity) with
+  a side inspector. Proven by `tests/kit/maintenance-management-query.test.mjs` and the parity
+  suite; `tests/kit/maintenance-dashboard-client-labels.test.mjs` scans the shipped client source
+  for every prohibited label (MNT-EVD-006/007).
+- **Phase 4 — Guidance and dispositions.** `src/lib/maintenance/management/{guidance,dispositions,
+  procedures,recipes,package-managers}.mjs` implement the five-lane admission rule, the
+  Acknowledge/Snooze/Ignore-exact-candidate ledger, signed built-in recipes, and the N-3
+  package-manager matrix; `src/lib/dashboard/client/maintenance-guidance.mjs` renders lanes and
+  procedures. Proven by `tests/kit/maintenance-management-{guidance,procedures}.test.mjs`.
+- **Phase 5 — Existing Managed action migration.** `src/lib/maintenance/{planner,coordinator,
+  service}.mjs` refuse more than one finding or action per plan (`ONE_ACTION_PER_PLAN`) before any
+  provider call, lock, or journal write, at the planner, coordinator, service, dashboard API
+  (`src/lib/dashboard/maintenance-api.mjs`), and CLI (`src/commands/maintain.mjs`) boundaries.
+  Proven by `tests/kit/maintenance-one-action.test.mjs`, and the existing
+  `maintenance-{transaction,provider-conformance,owned-providers,native-findings,recovery}.test.mjs`
+  regression suite remains green.
+- **Phase 6 — Interruption audit and reconciliation.** `src/lib/maintenance/interruption-audit.mjs`
+  is the read-only comparison against a receipt's recorded preimage or verified postimage;
+  `src/lib/maintenance/recovery-coordinator.mjs`'s `reconcileMaintenanceReceipt` re-runs that audit
+  under the mutation lock as a separate single-receipt write, and its `mutationBlocks` scopes an
+  unresolved receipt's write block to its placement, environment, and dependents. Proven by
+  `tests/kit/maintenance-interruption-audit.test.mjs` and `maintenance-recovery.test.mjs`.
+- **Phase 7 — Exact provider-owned model removal and Git-aware project patches.**
+  `src/lib/maintenance/providers/ollama-model-remove.mjs` removes one provider-owned local Ollama
+  model per action over bounded loopback reads and the native `ollama rm` verb;
+  `src/lib/maintenance/providers/git-project-patch.mjs` applies one exact, previewed file
+  replacement inside a configured project root, refusing drift and never stashing, committing,
+  branching, pushing, or merging. Proven by `tests/kit/maintenance-model-removal.test.mjs` and
+  `maintenance-git-project-patch.test.mjs`.
+- **Phase 8 — Catalog transition.** `src/lib/dashboard/page.mjs` redirects `#system/catalog` into
+  the Maintenance Inventory route and folds the former standalone Catalog destination into it;
+  `src/lib/dashboard/maintenance-security.mjs`'s `MAINTENANCE_V2_ROUTES` is the exact v2 dashboard
+  allowlist; `src/commands/maintain.mjs` adds the v2 CLI verbs (`inventory`, `show`, `guidance`,
+  `procedure`, `discovery`, `sources`, `scans`, `activity`, `receipt`, `audit`, `reconcile`,
+  `disposition`, `recipes`, `preferences`) alongside the retained v1 verbs. Proven by
+  `tests/kit/maintenance-dashboard-v2-api.test.mjs`, `maintenance-dashboard-security.test.mjs`, and
+  `maintenance-cli.test.mjs`.
+
+The facade (`src/lib/maintenance/management/service.mjs` and its `service-*.mjs` helpers) composes
+all eight phases into the one object the dashboard API and CLI call against; proven end-to-end by
+`tests/kit/maintenance-management-service.test.mjs`.
+
+### Open gates that this machine cannot prove
+
+- **Task-based usability metrics.** The acceptance criteria's locate-the-dangling-registration,
+  shared-versus-duplicate, and candidate-versus-recommendation success rates require a study with
+  representative users; none has run.
+- **Assistive-technology and browser-journey signoff.** VoiceOver-with-Safari and
+  NVDA-with-Chrome-or-Edge task completion have not been performed. `tests/ui/dashboard-ui.mjs`,
+  the repository's browser test suite, has not yet been extended with the v2 workspace's
+  keyboard-focus, 320-CSS-pixel, forced-colors, or sentinel-journey (J1/J2/J9/J10) checks the
+  acceptance criteria require; only the static client-label scan cited above has run.
+- **Source-bound performance benchmarks.** The 100 ms/5,000-placement and 250 ms/50,000-placement
+  filter targets, and the discovery scan benchmarks, have not been measured on the agreed reference
+  machines.
+- **Cross-platform live integration.** Clean-machine Windows and WSL runs of the discovery
+  orchestrator and the Ollama and Git-project-patch providers have not been exercised; this machine
+  is macOS.
+- **Placement-to-finding correlation is a documented heuristic, not an exact match.**
+  `src/lib/maintenance/management/correlation.mjs` resolves `planAction`'s opaque `placementId` to
+  the transaction engine's `finding.id` by matching the strongest verified fields both sides
+  publish (kind, host, scope, project, display name) and refuses ambiguity, because the two
+  identity schemes are not guaranteed to compute the same id for every resource kind today. The
+  module's own header records this as a known integration gap pending a future exact-id match.
+
+Because these gates are unproven, ADR-0044 is not marked Superseded. Its v1 dashboard routes and
+CLI verbs remain the documented compatibility surface for the product contract this ADR replaces.
 
 ## Alternatives considered
 

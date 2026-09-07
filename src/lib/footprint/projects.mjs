@@ -35,6 +35,7 @@
 // than a shrug.
 //
 // Discovery supplies PATHS ONLY (invariant 9). Every figure below is measured here.
+import { measureProjectKind } from './project-kind.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseRepoSlug } from '../admin-collect.mjs';
@@ -410,6 +411,7 @@ function nodeModulesObserver(root) {
 function missingProject(project, reason, presence = 'absent') {
   return {
     path: project.path,
+    projectKind: 'unknown',
     label: project.label,
     source: project.source ?? null,
     hosts: Array.isArray(project.hosts) ? [...project.hosts] : null,
@@ -556,6 +558,7 @@ export function measureProject(project, {
 
   return {
     path: root,
+    projectKind: measureProjectKind(root, { fsImpl }),
     label: project.label,
     source: project.source ?? null,
     hosts: Array.isArray(project.hosts) ? [...project.hosts] : null,

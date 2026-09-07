@@ -19,6 +19,14 @@
 - **Updated:** 2026-09-04 — proposed ADR-0048 uses admitted adapter capabilities to populate the
   Maintenance inventory, but leaves external-adapter actions unavailable until an independent
   operation/scope conformance grant exists; the experimental contract is otherwise unchanged
+- **Updated:** 2026-09-05 — ADR-0048 is now Accepted and implemented, but it does not yet integrate
+  with this ADR's admission door. Its management projection can render a `host-adapter` resource
+  kind, but as shipped that kind is sourced only from Machine Footprint's install detection of the
+  built-in host CLIs (Claude, Codex, OpenCode, and Hermes by name); it does not read
+  `kit.json`'s `hostAdapters` list or any fact this ADR's manifest, consent, or grant machinery
+  produces. An externally admitted adapter's declared capabilities are therefore not yet visible in
+  the Maintenance inventory, and no external adapter gains visibility, recommendation, or mutation
+  authority there — consistent with this ADR's permanent caps, because none is granted at all yet.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md) (closed-registry clause
   superseded — see [Supersession](#supersession-of-adr-0016s-closed-registry-clause)),

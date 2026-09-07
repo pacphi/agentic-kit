@@ -1,6 +1,6 @@
 # Maintenance experience specification
 
-- **Design status:** Proposed
+- **Design status:** Accepted — implemented 2026-09-05; see ADR-0048 "Implementation status" for open gates
 - **Governing decision:** [ADR-0048](../../adr/0048-inventory-led-maintenance-resource-management.md)
 
 The experience is an administrative workspace, not an alert feed. It leads with outcomes, keeps
@@ -136,35 +136,27 @@ not one live-region message per chip.
 
 ### Logical group and placement row
 
-A group header shows logical resource name, resource type, placement count, consumer count, and the
-most useful bounded outcome. It never offers a write action.
+Option A (approved 2026-09-07) uses a compact filter rail and a full-width result area until a
+placement is selected. Common views and project, kind, and consumer facets are immediately
+available; More views and More filters retain the advanced controls. Active facets stay visible
+as removable chips. Long facet lists are searchable and scroll within their disclosure.
 
-Each selectable row is one exact placement and shows:
-
-1. placement display name;
-2. scope icon and text;
-3. short location breadcrumb;
-4. installed/effective version when verified;
-5. source carrier icon and text when verified;
-6. consumer-host labels;
-7. one Guidance lane label when admitted; and
-8. the contextually relevant row action or **Open details**.
-
-Placement and source use independent markers. Example:
-
-```text
-Lightpanda                         MCP registration
-User · Claude                     Claude configuration
-Command dependency: lightpanda    Steps available
-```
+Singleton resources render one compact card. Multiple installations share one resource heading;
+rows identify their context and verified version. Projects scope groups results under project
+headings, preserving separate resource and placement identities even when names match. The
+selected scope, project, and kind supply shared context, so rows omit redundant labels. Verified
+carrier and consumer differences remain visible. Rows use neutral **View details** controls;
+write actions are presented only with the selected placement's details and existing preview flow.
+Variant markers and content digests do not appear on cards. Digests remain in technical evidence.
 
 When project basenames collide, the breadcrumb adds the shortest distinguishing parent segments,
 for example `Development › ai › agentic-kit`. User-defined display names are deferred.
 
 ### Resource inspector
 
-Desktop opens a side inspector without losing the selected result or filter context. Narrow screens
-open a full-screen detail route headed **Back to N results**. The inspector answers questions in
+Desktop opens a side inspector only after selection, without losing result or filter context.
+Closing it restores the result width and originating row focus. Escape also closes it. Narrow
+screens use a full-screen inspector with an accessible **Close details** control. The inspector answers questions in
 this order:
 
 1. **What is this?** Logical identity, kind, exact placement, environment, condition.
@@ -340,3 +332,45 @@ choice. Informational evidence without requested action stays visually neutral.
   requires names to communicate function and distinguish controls.
 - [WCAG Label in Name](https://www.w3.org/WAI/WCAG22/Understanding/label-in-name.html) keeps visible
   and programmatic control labels aligned for speech and assistive-technology users.
+
+### Measurement feedback (Option A)
+
+The toolbar directly below Inventory, Guidance, Discovery, and Activity is the single location
+for Refresh evidence and Re-measure machine within Maintenance. Coverage notices are passive.
+Both controls are disabled during an operation. Local feedback shows elapsed time and the same
+measurement phases as Full scan, then evidence checking and inventory publication. Activity
+reflects the running operation. Completion requires fresh provider and inventory results;
+failures and remaining coverage gaps are explicit. The elapsed timer is not announced every second.
+Discovery reports filesystem coverage separately from non-filesystem evidence checks. Automatic
+project discovery is a policy toggle, not an extra filesystem root in the coverage denominator.
+
+### Hosts and external adapters (2026-09-07 correction)
+
+The filter rail keeps **Hosts** (Claude, Codex, OpenCode) separate from **Adapters**
+(external host integrations, including Hermes). This follows [Host support](../../HOST-SUPPORT.md)
+and the [Hermes external adapter guide](../../HERMES-HOST-ADAPTER.md). An adapter filter counts
+associated inventory resources; a zero count does not assert installation, admission, trust,
+or runtime health. Existing preview and capability gates continue to govern actions.
+
+Model host attribution comes from matching consumer bindings. Merely appearing in Agentic Kit's
+model inventory does not establish Agentic Kit as a consuming host. Known managed host-state
+roots are excluded from implicit catalog project candidates; explicitly designated project
+objects remain eligible. Version-like project names are not filtered by their spelling.
+
+
+### Project designations (approved 2026-09-07)
+
+Projects include repositories and ordinary project folders. A Git branch icon with **Git**,
+a folder icon with **Folder**, or a branch icon with **Worktree** appears beside each project
+filter option and once in the project's result heading. A **Project type** facet selects these
+categories. Shared context is not repeated on every resource card. Labels accompany icons.
+
+New catalog measurements retain classification for all project candidates, independently of
+the narrower hosted-repository disk measurement. A readable folder with no Git marker in its
+ancestry is Folder; verified Git markers identify Git, and linked metadata identifies Worktree.
+Unreadable, missing, malformed, or dangling evidence is **Not checked**. Old snapshots with no
+explicit negative evidence do not imply non-Git. A fresh measurement improves these labels.
+
+The classification is added after project identity assignment. It cannot change project IDs,
+placement IDs, receipt targets, or action authority. Installed tool caches remain excluded from
+implicit project candidates; a version-like name alone never excludes a genuine project folder.

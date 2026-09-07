@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import { startDashboard } from '../../src/lib/dashboard-server.mjs';
@@ -458,4 +461,168 @@ test('dashboard Maintenance API distinguishes pre-mutation refusal from a receip
   assert.equal(refused.status, 409);
   assert.equal(JSON.parse(refused.body).effect, 'not-started');
   assert.equal(JSON.parse(refused.body).receipt, undefined);
+});
+
+// ── ADR-0048: provider scans chain the inventory rebuild (QE defect D5) ─────
+
+function eventually(predicate, message, timeout = 1500) {
+  const started = Date.now();
+  return new Promise((resolve, reject) => {
+    const check = () => {
+      if (predicate()) return resolve(undefined);
+      if (Date.now() - started >= timeout) return reject(new Error(message));
+      setTimeout(check, 5);
+    };
+    check();
+  });
+}
+
+function recordingManagement({ refreshInventory, measured = true } = {}) {
+  const calls = [];
+  const rebuilt = { inventoryId: 'inv_refreshed', capturedAt: '2026-09-05T12:00:00.000Z' };
+  const facade = {
+    async refreshInventory(args) {
+      calls.push(args);
+      return refreshInventory ? refreshInventory(args) : rebuilt;
+    },
+    async inventory() { return { scanRequired: false, total: 0, groups: [], facetCounts: {}, sortGroups: [], partialSources: [], appliedFacets: {} }; },
+  };
+  // The measured rebuild (discovery walk + rebuild) is a separate facade
+  // method; `measured:false` models a facade that predates it.
+  if (measured) facade.rebuildAfterMeasurement = async () => { calls.push('rebuildAfterMeasurement'); return rebuilt; };
+  return { calls, facade };
+}
+
+test('GET /api/maintenance?refresh=scan chains exactly one management.refreshInventory({ deep:false }) without awaiting it', async (t) => {
+  const service = fixtureService();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const management = recordingManagement({ refreshInventory: () => gate });
+  const server = await startDashboard({ port: 0, maintenance: service, management: management.facade, usage: {} });
+  t.after(() => server.close());
+
+  const plain = await request(server, '/api/maintenance', { origin: false, fetchSite: null });
+  assert.equal(plain.status, 200);
+  assert.deepEqual(management.calls, [], 'a plain read never rebuilds the inventory');
+
+  const first = await request(server, '/api/maintenance?refresh=scan', { origin: false, fetchSite: null });
+  assert.equal(first.status, 200, 'the provider-scan response never waits for the inventory rebuild');
+  await eventually(() => management.calls.length === 1, 'the provider scan must chain one inventory rebuild');
+  assert.deepEqual(management.calls, [{ deep: false }], 'a cheap provider check rebuilds only; it never walks discovery sources');
+
+  const second = await request(server, '/api/maintenance?refresh=scan', { origin: false, fetchSite: null });
+  assert.equal(second.status, 200);
+  assert.equal(service.calls.scan, 2);
+  assert.equal(management.calls.length, 1, 'a rebuild still in flight is joined, not duplicated');
+  release();
+  await eventually(() => JSON.parse(JSON.stringify(management.calls)).length === 1, 'settled');
+  const third = await request(server, '/api/maintenance?refresh=scan', { origin: false, fetchSite: null });
+  assert.equal(third.status, 200);
+  await eventually(() => management.calls.length === 2, 'a later provider scan rebuilds again once the flight settled');
+});
+
+test('an inventory rebuild failure is logged and never turns the provider-scan response into an error', async (t) => {
+  const service = fixtureService();
+  const management = recordingManagement({ refreshInventory: async () => { throw new Error('inventory store unavailable'); } });
+  const logged = [];
+  const original = console.error;
+  console.error = (...args) => { logged.push(args.map(String).join(' ')); };
+  t.after(() => { console.error = original; });
+  const server = await startDashboard({ port: 0, maintenance: service, management: management.facade, usage: {} });
+  t.after(() => server.close());
+
+  const scanned = await request(server, '/api/maintenance?refresh=scan', { origin: false, fetchSite: null });
+  assert.equal(scanned.status, 200);
+  await eventually(() => logged.some((line) => /maintenance inventory refresh failed/.test(line)), 'the failure is logged');
+  assert.deepEqual(management.calls, [{ deep: false }]);
+  const again = await request(server, '/api/maintenance?refresh=scan', { origin: false, fetchSite: null });
+  assert.equal(again.status, 200);
+  await eventually(() => management.calls.length === 2, 'a failed rebuild does not wedge the single-flight slot');
+});
+
+test('a completed System deep scan chains one provider scan and then one inventory rebuild', async (t) => {
+  const service = fixtureService();
+  const management = recordingManagement();
+  const collector = {
+    async read() { return { scan: { running: false, phase: 'idle' }, generatedAt: '2026-09-05T12:00:00.000Z' }; },
+    async refreshDeep() { return { ok: true, persisted: { ok: true } }; },
+    scanState() { return { running: true, phase: 'system' }; },
+  };
+  const server = await startDashboard({ port: 0, system: collector, maintenance: service, management: management.facade, usage: {} });
+  t.after(() => server.close());
+
+  const started = await request(server, '/api/system?refresh=deep', { origin: false, fetchSite: null });
+  assert.equal(started.status, 200);
+  await eventually(() => service.calls.scan === 1, 'the completed System scan refreshes Maintenance evidence once');
+  await eventually(() => management.calls.length === 1, 'the provider scan then rebuilds the inventory once');
+  assert.deepEqual(management.calls, ['rebuildAfterMeasurement'],
+    'a machine measurement walks discovery sources and rebuilds, and never also runs the cheap rebuild');
+});
+
+test('a completed System deep scan falls back to the cheap rebuild when the facade has no measured rebuild', async (t) => {
+  const service = fixtureService();
+  const management = recordingManagement({ measured: false });
+  const collector = {
+    async read() { return { scan: { running: false, phase: 'idle' } }; },
+    async refreshDeep() { return { ok: true, persisted: { ok: true } }; },
+  };
+  const server = await startDashboard({ port: 0, system: collector, maintenance: service, management: management.facade, usage: {} });
+  t.after(() => server.close());
+  assert.equal((await request(server, '/api/system?refresh=deep', { origin: false, fetchSite: null })).status, 200);
+  await eventually(() => management.calls.length === 1, 'the chain still rebuilds');
+  assert.deepEqual(management.calls, [{ deep: false }]);
+});
+
+test('an injected maintenance service without an injected facade never composes the default facade (hermetic)', async (t) => {
+  const service = fixtureService();
+  const server = await startDashboard({ port: 0, maintenance: service, usage: {} });
+  t.after(() => server.close());
+  const scanned = await request(server, '/api/maintenance?refresh=scan', { origin: false, fetchSite: null });
+  assert.equal(scanned.status, 200);
+  assert.equal(service.calls.scan, 1);
+  const inventory = await request(server, '/api/maintenance/v2/inventory', { origin: false, fetchSite: null });
+  assert.equal(inventory.status, 503);
+  assert.deepEqual(JSON.parse(inventory.body), { error: 'maintenance management unavailable' });
+});
+
+test('an injected maintenance service with managementOptions but no control root is refused at composition time (hermetic)', () => {
+  for (const managementOptions of [{ providerOptions: { ollamaModel: { enabled: false } } }, { installationKey: 'k'.repeat(32) }]) {
+    // Composition happens synchronously inside startDashboard, before any
+    // socket is bound: the caller sees a thrown TypeError, never a server.
+    assert.throws(
+      () => startDashboard({ port: 0, maintenance: fixtureService(), managementOptions, usage: {} }),
+      { name: 'TypeError', message: /explicit managementOptions\.controlRoot/ },
+    );
+  }
+});
+
+test('an injected maintenance service with an explicit control root composes the facade under that root only', async (t) => {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-maint-root-'));
+  t.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
+  const controlRoot = path.join(scratch, 'control');
+  let config = { integrations: { hosts: [] }, maintenance: { discovery: { automaticSources: {}, exactProjects: [], collectionRoots: [], exclusions: [] } } };
+  const dirs = { claudeDir: () => path.join(scratch, 'claude'), codexDir: () => path.join(scratch, 'codex'), opencodeDir: () => path.join(scratch, 'opencode') };
+  const compose = (options) => startDashboard({
+    port: 0, maintenance: fixtureService(), usage: {},
+    managementOptions: {
+      installationKey: 'hermetic-installation-key-0123456789', loadConfig: () => config, saveConfig: (next) => { config = next; },
+      paths: dirs, env: {}, wslDistributions: [], ...options,
+    },
+  });
+  const server = await compose({ controlRoot });
+  t.after(() => server.close());
+  const saved = await request(server, '/api/maintenance/v2/preferences', { method: 'POST', body: { lastView: { scope: 'user' } } });
+  assert.equal(saved.status, 200, saved.body);
+  assert.equal(JSON.parse(saved.body).lastView.scope, 'user');
+  assert.equal(fs.existsSync(path.join(controlRoot, 'management', 'preferences.json')), true, 'owner-private state lands under the given root');
+  const read = await request(server, '/api/maintenance/v2/preferences', { origin: false, fetchSite: null });
+  assert.equal(JSON.parse(read.body).lastView.scope, 'user');
+
+  // maintenanceOptions.controlRoot is an equally explicit root for the facade.
+  const viaMaintenanceOptions = await startDashboard({
+    port: 0, maintenance: fixtureService(), usage: {}, maintenanceOptions: { controlRoot },
+    managementOptions: { installationKey: 'hermetic-installation-key-0123456789', loadConfig: () => config, saveConfig: () => {}, paths: dirs, env: {}, wslDistributions: [] },
+  });
+  t.after(() => viaMaintenanceOptions.close());
+  assert.equal((await request(viaMaintenanceOptions, '/api/maintenance/v2/preferences', { origin: false, fetchSite: null })).status, 200);
 });

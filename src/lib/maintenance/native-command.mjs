@@ -7,10 +7,10 @@ const MAX_OUTPUT_BYTES = 256 * 1024;
 /**
  * @param {string} binary
  * @param {string[]} args
- * @param {{execFileImpl?: any, timeoutMs?: number, env?: NodeJS.ProcessEnv, signal?: AbortSignal}} [options]
+ * @param {{execFileImpl?: any, timeoutMs?: number, env?: NodeJS.ProcessEnv, signal?: AbortSignal, cwd?: string}} [options]
  */
 export async function runNativeCommand(binary, args, {
-  execFileImpl = execFile, timeoutMs = 30_000, env = process.env, signal,
+  execFileImpl = execFile, timeoutMs = 30_000, env = process.env, signal, cwd,
 } = {}) {
   if (!BINARY.test(binary ?? '')) throw new TypeError('native command binary is invalid');
   if (!Array.isArray(args) || args.some((arg) => typeof arg !== 'string'
@@ -19,6 +19,9 @@ export async function runNativeCommand(binary, args, {
   }
   if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
     throw new TypeError('native command timeout must be a positive integer');
+  }
+  if (cwd !== undefined && typeof cwd !== 'string') {
+    throw new TypeError('native command cwd must be an absolute directory path');
   }
 
   // Host inventory commands are observation-only, but some take seconds to
@@ -52,7 +55,7 @@ export async function runNativeCommand(binary, args, {
     try {
       execFileImpl(binary, args, {
         encoding: 'utf8', shell: false, timeout: timeoutMs, maxBuffer: MAX_OUTPUT_BYTES,
-        env, windowsHide: true, ...(signal ? { signal } : {}),
+        env, windowsHide: true, ...(signal ? { signal } : {}), ...(cwd ? { cwd } : {}),
       }, finish);
     } catch (error) {
       finish(error);

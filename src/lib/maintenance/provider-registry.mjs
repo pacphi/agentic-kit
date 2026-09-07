@@ -1,6 +1,8 @@
 import { createClaudePluginProvider } from './providers/claude-plugin.mjs';
 import { createCodexMcpProvider } from './providers/codex-mcp.mjs';
 import { createCodexPluginProvider } from './providers/codex-plugin.mjs';
+import { createGitProjectPatchProvider } from './providers/git-project-patch.mjs';
+import { createOllamaModelRemoveProvider } from './providers/ollama-model-remove.mjs';
 import { createOwnedNpxCacheProvider } from './providers/owned-storage.mjs';
 import { createOwnedSkillProvider } from './providers/owned-skill.mjs';
 import { createRufloMcpOrphanProvider } from './providers/ruflo-mcp-orphan.mjs';
@@ -76,6 +78,16 @@ export function createDefaultMaintenanceProviderRegistry(options = {}) {
     }));
   }
   if (options.ownedSkill) providers.push(createOwnedSkillProvider(options.ownedSkill));
+  if (options.gitProjectPatch?.projectRoots) {
+    providers.push(createGitProjectPatchProvider(options.gitProjectPatch));
+  }
+  // Registered by default: detect() only probes bounded, loopback-only
+  // /api/tags + /api/ps and returns `unavailable` when Ollama is
+  // unreachable, so an absent daemon fails closed to no action rather than
+  // fabricating one. Set `ollamaModel: { enabled: false }` to opt out.
+  if (options.ollamaModel?.enabled !== false) {
+    providers.push(createOllamaModelRemoveProvider(options.ollamaModel));
+  }
   return createMaintenanceProviderRegistry(providers);
 }
 

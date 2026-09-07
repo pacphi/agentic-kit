@@ -49,6 +49,9 @@ export const claudeSkillsDir = () => path.join(claudeDir(), 'skills');
  *  guidance file is AGENTS.md (the codex analogue of ~/.claude/CLAUDE.md). ak
  *  reads/writes this dir but NEVER creates it — its existence is the signal that
  *  codex is installed on the machine (see blocks.guidanceTargets). */
+/** Hermes user-level configuration; keep discovery roots absolute. */
+export const hermesDir = () => path.resolve(process.env.HERMES_HOME || path.join(home, '.hermes'));
+
 export const codexDir = () => path.join(home, '.codex');
 export const codexAgentsMdPath = () => path.join(codexDir(), 'AGENTS.md');
 export const codexConfigPath = () => path.join(codexDir(), 'config.toml');

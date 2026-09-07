@@ -1,6 +1,6 @@
 # Provider and action policy
 
-- **Design status:** Proposed
+- **Design status:** Accepted — implemented 2026-09-05; see ADR-0048 "Implementation status" for open gates
 - **Governing decision:** [ADR-0048](../../adr/0048-inventory-led-maintenance-resource-management.md)
 - **Safety floor:** [ADR-0044](../../adr/0044-receipt-aware-maintenance-control-plane.md)
 

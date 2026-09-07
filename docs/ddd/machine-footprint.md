@@ -5,9 +5,9 @@ This document specifies the domain decided by
 Its terms are merged into [Ubiquitous language](ubiquitous-language.md) and the context is on the
 [context map](context-map.md).
 
-> **Proposed evolution:** ADR-0048 folds Catalog presentation into Maintenance while leaving this
-> context's measurement ownership read-only. The current System and Catalog surfaces remain
-> implemented behavior until the proposed migration is delivered.
+> **ADR-0048:** Catalog presentation has moved into Maintenance's Inventory (see "Catalog
+> inventory" below); this context's collectors and measurement ownership remain read-only and
+> unchanged.
 
 ## Purpose
 
@@ -482,6 +482,12 @@ here". A row from a snapshot predating the `safety` field lands in `review` — 
 promises less — never in the one that reads as free space.
 
 ### Catalog inventory
+
+Catalog is measurement evidence owned and collected here; it is consumed by the Maintenance
+management projection ([ADR-0048](../adr/0048-inventory-led-maintenance-resource-management.md))
+at exact placement grain and is no longer a separate dashboard destination — `#system/catalog`
+redirects into Maintenance's Inventory route. This section's collector, `ak system`, and
+`GET /api/system` are unchanged: Maintenance reads this evidence and mutates none of it.
 
 `CatalogInventory v4` separates logical identity, physical artifacts, consumer bindings, and
 relationships. Standalone logical items still deduplicate by `(kind, normalized logical name)`,

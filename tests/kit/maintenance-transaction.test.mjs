@@ -115,19 +115,17 @@ test('apply refuses stale, tampered, duplicate, mixed, and unavailable selection
   }
 });
 
-test('all actions preflight before the first effect and success is verified and receipted', async (t) => {
+test('a single selected action preflights before the first effect and success is verified and receipted', async (t) => {
   const root = fixture(t);
   const events = [];
-  const selectedPlan = plan([action('a'), action('b')]);
+  const selectedPlan = plan([action('a')]);
   const result = await applyMaintenancePlan({
-    plan: selectedPlan, actionIds: ['b', 'a'], expectedPlanDigest: selectedPlan.planDigest,
+    plan: selectedPlan, actionIds: ['a'], expectedPlanDigest: selectedPlan.planDigest,
     providers: registry(provider(events)), transactionsRoot: root,
     refreshPlan: async () => selectedPlan, now: () => NOW, nonce: () => 'success',
   });
   assert.equal(result.status, 'committed');
-  assert.deepEqual(events, [
-    'preflight:a', 'preflight:b', 'apply:a', 'verify:a', 'apply:b', 'verify:b',
-  ]);
+  assert.deepEqual(events, ['preflight:a', 'apply:a', 'verify:a']);
   const loaded = readMaintenanceReceipt(root, result.receiptId);
   assert.equal(loaded.receipt.status, 'committed');
   assert.equal(loaded.receipt.actions.every((entry) => entry.state === 'verified'), true);
@@ -136,6 +134,64 @@ test('all actions preflight before the first effect and success is verified and 
   assert.deepEqual(listUnfinishedMaintenanceReceipts(root), []);
   assert.equal(fs.statSync(root).mode & 0o077, 0);
   assert.equal(fs.statSync(loaded.file).mode & 0o077, 0);
+});
+
+test('MNT-ACT-001: a plan with more than one action refuses apply before any provider call, lock, or journal write', async (t) => {
+  const root = fixture(t);
+  const events = [];
+  const selectedPlan = plan([action('a'), action('b')]);
+  const result = await applyMaintenancePlan({
+    plan: selectedPlan, actionIds: ['b', 'a'], expectedPlanDigest: selectedPlan.planDigest,
+    providers: registry(provider(events)), transactionsRoot: root,
+    refreshPlan: async () => selectedPlan, now: () => NOW, nonce: () => 'multi-refused',
+  });
+  assert.equal(result.status, 'preflight-refused');
+  assert.match(result.error, /exactly one/i);
+  assert.deepEqual(events, []);
+  assert.deepEqual(fs.readdirSync(root), [], 'no lock or receipt directory is created before the one-action check');
+});
+
+test('an opaque placementId on the action rides through the plan digest into the sealed receipt entry', async (t) => {
+  const root = fixture(t);
+  const placementId = `plc_${'a'.repeat(20)}`;
+  const events = [];
+  const selectedPlan = plan([action('a', { placementId })]);
+  const result = await applyMaintenancePlan({
+    plan: selectedPlan, actionIds: ['a'], expectedPlanDigest: selectedPlan.planDigest,
+    providers: registry(provider(events)), transactionsRoot: root,
+    refreshPlan: async () => selectedPlan, now: () => NOW, nonce: () => 'placement',
+  });
+  assert.equal(result.status, 'committed');
+  const { receipt } = readMaintenanceReceipt(root, result.receiptId);
+  assert.equal(receipt.actions[0].placementId, placementId);
+});
+
+test('a legacy action with no placementId still applies exactly as before and the receipt omits the field', async (t) => {
+  const root = fixture(t);
+  const events = [];
+  const selectedPlan = plan([action('a')]);
+  const result = await applyMaintenancePlan({
+    plan: selectedPlan, actionIds: ['a'], expectedPlanDigest: selectedPlan.planDigest,
+    providers: registry(provider(events)), transactionsRoot: root,
+    refreshPlan: async () => selectedPlan, now: () => NOW, nonce: () => 'no-placement',
+  });
+  assert.equal(result.status, 'committed');
+  const { receipt } = readMaintenanceReceipt(root, result.receiptId);
+  assert.equal('placementId' in receipt.actions[0], false);
+});
+
+test('a malformed placementId on a receipt entry is never invented or passed through', async (t) => {
+  const root = fixture(t);
+  const events = [];
+  const selectedPlan = plan([action('a', { placementId: 'not-an-opaque-id' })]);
+  const result = await applyMaintenancePlan({
+    plan: selectedPlan, actionIds: ['a'], expectedPlanDigest: selectedPlan.planDigest,
+    providers: registry(provider(events)), transactionsRoot: root,
+    refreshPlan: async () => selectedPlan, now: () => NOW, nonce: () => 'bad-placement',
+  });
+  assert.equal(result.status, 'committed');
+  const { receipt } = readMaintenanceReceipt(root, result.receiptId);
+  assert.equal('placementId' in receipt.actions[0], false);
 });
 
 test('live plan drift refuses after preflight and before apply', async (t) => {
@@ -152,24 +208,24 @@ test('live plan drift refuses after preflight and before apply', async (t) => {
   assert.deepEqual(events, ['preflight:a']);
 });
 
-test('verified failures compensate in reverse order while uncertain outcomes require recovery', async (t) => {
+test('a refused apply after dispatch compensates the one applied action, while uncertain outcomes require recovery', async (t) => {
   const root = fixture(t);
   const events = [];
-  const selectedPlan = plan([action('a'), action('b'), action('c')]);
+  const selectedPlan = plan([action('a')]);
   const p = provider(events, {
     async apply(item) {
       events.push(`apply:${item.id}`);
-      if (item.id === 'c') return { status: 'refused', summary: 'native owner refused before changing state' };
       return { status: 'applied', postFingerprint: `post-${item.id}` };
     },
+    async verify() { return { ok: false }; },
   });
   const result = await applyMaintenancePlan({
-    plan: selectedPlan, actionIds: ['a', 'b', 'c'], expectedPlanDigest: selectedPlan.planDigest,
+    plan: selectedPlan, actionIds: ['a'], expectedPlanDigest: selectedPlan.planDigest,
     providers: registry(p), transactionsRoot: root,
     refreshPlan: async () => selectedPlan, now: () => NOW, nonce: () => 'rollback',
   });
   assert.equal(result.status, 'rolled-back');
-  assert.deepEqual(events.slice(-4), ['undo:b', 'verify-undo:b', 'undo:a', 'verify-undo:a']);
+  assert.deepEqual(events.slice(-2), ['undo:a', 'verify-undo:a']);
 
   const uncertainEvents = [];
   const uncertainPlan = plan([action('a')], { planId: 'uncertain', planDigest: 'uncertain-digest' });

@@ -1,6 +1,7 @@
 // Read-only CatalogInventory v2 (ADR-0025): canonical standalone/plugin identity,
 // per-source occurrences, and bounded entrypoint digests. Bodies never leave the
 // collector; traversal never follows a symlink or escapes a declared root.
+import { measureProjectKind } from './project-kind.mjs';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -607,6 +608,7 @@ export function collectCatalog({
     surfaces,
     scopes: ['user', 'project', 'plugin'],
     pluginSources: plugins.sources,
+    projectMetadata: base.catalogProjects.map((root) => ({ path: root, projectKind: measureProjectKind(root, { fsImpl }) })),
     sourceStamps: buildCatalogSourceStamps({ surfaces, items: list, fsImpl }),
     overlaps: buildOverlapGroups(list),
     projects: buildProjectPressure({

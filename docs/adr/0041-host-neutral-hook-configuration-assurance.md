@@ -6,6 +6,13 @@
 - **Updated:** 2026-09-04 — proposed ADR-0048 groups hook findings under logical resources while
   preserving exact placement rows, evidence grades, and this ADR's independent healing authority;
   no implemented hook behavior changes yet
+- **Updated:** 2026-09-05 — ADR-0048 is now Accepted and implemented. Its management projection's
+  `mapHooks` (`src/lib/maintenance/management/projection.mjs`) reads this ADR's sanitized hook read
+  model and renders each occurrence group as a `hook`-kind placement, scoped by host, with a
+  `verified` identity/placement evidence assertion and its behavior identity carried as a content
+  digest. This is a read-only join: it grants no new healing, remediation, or write authority
+  beyond this ADR's own approval-required transactional healing, and it never surfaces a command,
+  path, or diagnostic string this ADR's read model already excludes.
 - **Deciders:** agentic-kit maintainers
 - **Extends:** [ADR-0040](0040-codex-hook-audit-and-conservative-remediation.md)
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md),

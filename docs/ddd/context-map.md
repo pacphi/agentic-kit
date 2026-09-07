@@ -3,11 +3,6 @@
 Agentic-kit is a zero-runtime-dependency CLI with several bounded contexts. The boundaries below
 identify who owns each decision and where translation is required.
 
-> **Proposed evolution:** ADR-0048 and the
-> [Maintenance overhaul package](../design/maintenance-overhaul/README.md) define a future
-> resource-management projection and scan journal. The map below remains the implemented context
-> map until those slices ship.
-
 ```text
 Configuration Intent
         |
@@ -63,23 +58,40 @@ See [Integration management](integration-management.md).
 
 ### Maintenance
 
-Maintenance is the implemented human-guided control plane for upgrades, stale/unsupported resource
-cleanup, lifecycle remediation, verification, guarded undo, recovery, and receipts.
-It consumes observed facts from Machine Footprint and ownership/lifecycle facts from Integration
-Management. It does not own those facts and cannot promote disk presence, age, digest equality, or
-a read-only plan into mutation authority. It projects typed project/shared capability relationships
-into prescriptive suggested actions, but those procedures remain report-only until an ActionProvider
-proves an exact executable operation.
+Maintenance is the human-guided control plane for upgrades, stale/unsupported resource cleanup,
+lifecycle remediation, verification, guarded undo, recovery, and receipts. It does not own the
+facts it manages and cannot promote disk presence, age, digest equality, or a read-only plan into
+mutation authority.
 
-Issue #198 delivered the read-only Catalog and preview seam. ADR-0044 implements the separate
-control-plane architecture as a secondary destination under System. Machine Footprint collectors,
-Catalog, Advisory, and other System measurement routes remain non-mutating. See
-[Maintenance](maintenance.md).
+Issue #198 delivered the read-only Catalog and preview seam. ADR-0044 implements the control-plane
+architecture as a secondary destination under System. Machine Footprint collectors, Catalog,
+Advisory, and other System measurement routes remain non-mutating. See [Maintenance](maintenance.md).
 
 ADR-0045 separates one physical artifact from its host ConsumerBindings. Machine Footprint owns
-those observations; Maintenance consumes the active bindings as blast-radius evidence. Maintenance
-also owns explicit provider scans and their persisted reports. Dashboard polling reads the report
-and cannot silently become provider discovery.
+those observations; Maintenance consumes the active bindings as blast-radius evidence.
+
+ADR-0048 adds the **Maintenance Resource Management projection**: a versioned, privacy-projected
+`ManagementInventory` built over several upstream contexts without gaining any of their authority —
+
+- **Machine Footprint** — Catalog v4 items, install/storage/runtime sections, and explicit provider
+  scan reports, at exact placement grain;
+- **Project Census** — candidate project identities and observed paths, joined with Maintenance's
+  own Discovery source configuration to decide scan inclusion, which the census itself does not own;
+- **Integration Management** — provider bindings, credential-readiness presence facts, and desired
+  host state, never a credential value;
+- **Model Lifecycle Intelligence** — the model-inventory snapshot, consumed as `model`-kind
+  placements without duplicating that context's own diff/lifecycle ownership;
+- **Hook Configuration Assurance** — the sanitized hook read model, joined as `hook`-kind
+  placements with no new healing authority; and
+- **Configuration Intent** — `kit.json`'s `maintenance.discovery` key, the one piece of Discovery
+  source configuration that is genuinely user intent rather than observed evidence.
+
+Discovery's resumable scans are a journal-backed orchestration seam **over** ADR-0047's streaming
+observation forest (`src/lib/footprint/observation-forest.mjs`), not a second walker or a
+persistent per-file index: a scan partitions a source root into bounded units, executes each
+through the shared forest, and writes an owner-private, integrity-sealed checkpoint after every
+partition or work slice. Maintenance also owns explicit provider scans and their persisted reports;
+dashboard polling reads the report and cannot silently become provider discovery.
 
 ### Hook configuration assurance
 
@@ -254,8 +266,12 @@ and credential policy is distinct from the offline-first dashboard and integrati
 | Machine footprint | Dashboard delivery | Two-tier measurement read model over `GET /api/system`, and the same collector behind `ak system` |
 | Machine footprint | Maintenance | Observed inventory, pressure, freshness, and advisory facts only; no ownership or mutation authority crosses the boundary |
 | Integration management | Maintenance | Provider capabilities, native lifecycle facts, desired state, and exact ownership receipts |
+| Project census | Maintenance | Candidate project identities and paths only; Maintenance's own Discovery configuration decides scan inclusion |
+| Model lifecycle intelligence | Maintenance | The model-inventory snapshot only; lifecycle diffs, sources, and bindings stay owned upstream |
+| Hook configuration assurance | Maintenance | The sanitized hook read model only; healing authority and remediation proposals stay owned upstream |
+| Configuration intent | Maintenance | `kit.json`'s `maintenance.discovery` user intent for automatic sources, exact projects, collection roots, and exclusions |
 | Maintenance | Native configuration and lifecycle surfaces | Fixed provider operations with preflight, verification, current-state inspection, and explicit unsupported results; no generic shell or delete adapter |
-| Maintenance | Dashboard delivery | Findings, source-bound plans, one-use action capability exchange, progress, receipts, and guarded undo; recovery evidence is read-only in the browser |
+| Maintenance | Dashboard delivery | A privacy-projected management inventory, guidance, discovery, and activity read models; source-bound plans, one-use action capability exchange, progress, receipts, and guarded undo; interruption-audit reads are the only recovery evidence exposed in the browser |
 | Integration management | Component directory | Registry consumed only as a parity gate; no editorial content flows either way |
 | Detection facts (`/api/status`, managed-tools) | Component directory | Read-only join at render; a failed join degrades chips to unknown, never hides cards |
 | Component directory | Dashboard delivery | Versioned editorial entries imported by the page; no endpoint, no probe, no cache |
@@ -300,6 +316,10 @@ observed before the split was made explicit.
 - Maintenance cannot derive authority from a Machine Footprint observation. It acts only through a
   capability-advertising provider, a current source-bound plan, explicit confirmation, live
   preflight, verification, and a durable receipt. Unsupported operations stay report-only.
+- The Maintenance Resource Management projection reads Project Census, Model Lifecycle
+  Intelligence, and Hook Configuration Assurance evidence without acquiring any of their ownership:
+  it cannot decide scan inclusion for the census, diff or source a model for Model Lifecycle
+  Intelligence, or gain healing authority from a hook occurrence.
 - Dashboard placement does not merge contexts: System measurement routes remain read-only, and
   only the exact ADR-0044 Maintenance routes are non-GET exceptions.
 - Component directory authors identity, it does not observe it. Editorial prose never asserts

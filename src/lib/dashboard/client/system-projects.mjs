@@ -879,7 +879,7 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
       freshness=document.getElementById("system-freshness");
     if(!el)return;
     var scan=(SYSTEM&&SYSTEM.scan)||null,snap=(SYSTEM&&SYSTEM.snapshot)||null;
-    try{document.dispatchEvent(new CustomEvent("ak-system-scan",{detail:{running:!!(scan&&scan.running)}}));}catch(e){}
+    try{document.dispatchEvent(new CustomEvent("ak-system-scan",{detail:{running:!!(scan&&scan.running),scan:scan}}));}catch(e){}
     el.removeAttribute("data-stale");
     if(scan&&scan.running){
       if(freshness)freshness.setAttribute("data-running","1");

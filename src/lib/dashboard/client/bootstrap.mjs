@@ -2,6 +2,7 @@
 // reads it as text). See src/lib/dashboard/client/**'s eslint.config.mjs
 // override comment for why this directory isn't run through the node lib.
 import { render, syncIntelStream } from './intelligence.mjs';
+import { mntHash } from './maintenance-workspace.mjs';
 import { loadMaintenance } from './system-maintenance.mjs';
 import { loadSystem } from './system-projects.mjs';
 import { loadUsage } from './usage.mjs';
@@ -89,7 +90,11 @@ import { loadUsage } from './usage.mjs';
   var AREAS={about:"panel-about",overview:"area-overview",usage:"panel-usage",
     observability:"panel-observability",system:"area-system"};
   var OVERVIEW_VIEWS=["summary","hosts","providers","runtime","intel"];
-  var SYSTEM_VIEWS=["summary","advisory","sessions","storage","runtime","catalog","projects","maintenance"];
+  // "catalog" is deliberately absent: ADR-0048 retires it as a visible
+  // destination (its content folded into Summary; Maintenance Inventory is
+  // the deployed-resource browser now). A stale persisted or linked "catalog"
+  // value is remapped to "maintenance" below, never left to silently 404.
+  var SYSTEM_VIEWS=["summary","advisory","sessions","storage","runtime","projects","maintenance"];
   export var ABOUT_SECTIONS=["hosts","engine","quality","kit","configured"];
   export var USAGE_NAV_VIEWS=["score","limits","findings","prompts","context","hooks","models","sessions"];
   export var VIEWS=USAGE_NAV_VIEWS.concat(["transcript"]);
@@ -101,7 +106,11 @@ import { loadUsage } from './usage.mjs';
   export var systemView="summary", aboutSection=null;
   try{var st=localStorage.getItem(LS_TAB); if(st&&TABS.indexOf(st)>=0)activeTab=st;}catch(e){}
   try{var ov=localStorage.getItem(LS_OVERVIEW);if(ov&&OVERVIEW_VIEWS.indexOf(ov)>=0)overviewView=ov;}catch(e){}
-  try{var sv=localStorage.getItem(LS_SYSTEM);if(sv&&SYSTEM_VIEWS.indexOf(sv)>=0)systemView=sv;}catch(e){}
+  try{
+    var sv=localStorage.getItem(LS_SYSTEM);
+    if(sv==="catalog")systemView="maintenance";
+    else if(sv&&SYSTEM_VIEWS.indexOf(sv)>=0)systemView=sv;
+  }catch(e){}
   // Canonical hierarchical deep links: #overview/runtime, #usage/sessions,
   // #observability/history, #system/storage, and #about/configured. A Usage
   // segment that is not a known view is a session id and opens the masked
@@ -120,7 +129,13 @@ import { loadUsage } from './usage.mjs';
       else{usageView="transcript"; usageSession=decodeURIComponent(parts[1]);}
     }
     if(parts[0]==="observability"&&parts[1]==="history")initialLiveScope="history";
-    if(parts[0]==="system"&&parts[1]&&SYSTEM_VIEWS.indexOf(parts[1])>=0)systemView=parts[1];
+    // #system/catalog is a retired destination (ADR-0048): it redirects to
+    // the Maintenance workspace's Inventory destination, which
+    // maintenance-workspace.mjs's own hash parsing applies once Maintenance
+    // loads (see its mntApplyHashState). Here we only need the System
+    // sub-nav to land on the right tab.
+    if(parts[0]==="system"&&parts[1]==="catalog")systemView="maintenance";
+    else if(parts[0]==="system"&&parts[1]&&SYSTEM_VIEWS.indexOf(parts[1])>=0)systemView=parts[1];
     if(parts[0]==="about"&&parts[1]&&ABOUT_SECTIONS.indexOf(parts[1])>=0)aboutSection=parts[1];
   }catch(e){}
 
@@ -134,7 +149,7 @@ import { loadUsage } from './usage.mjs';
     if(activeTab==="about")hash=aboutSection?"#about/"+aboutSection:"#about";
     else if(activeTab==="overview")hash=overviewHash();
     else if(activeTab==="usage")hash=usageHash();
-    else if(activeTab==="system")hash="#system/"+systemView;
+    else if(activeTab==="system")hash=systemView==="maintenance"?mntHash():"#system/"+systemView;
     else hash="#observability/"+(window.AKLive&&window.AKLive.state.scope||initialLiveScope);
     try{if(history.replaceState)history.replaceState(null,"",hash);}catch(e){}
   }

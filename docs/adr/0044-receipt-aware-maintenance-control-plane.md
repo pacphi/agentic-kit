@@ -8,6 +8,18 @@
 - **Updated:** 2026-09-04 — ADR-0048 is a Proposed successor for the findings-first product,
   single-write contract, and interruption-audit surface; this ADR remains the implemented and
   authoritative runtime contract until the successor is accepted and shipped
+- **Updated:** 2026-09-05 — ADR-0048 is now Accepted and implemented. This ADR's transaction
+  engine (plan/apply/verify/receipt, mutation lock, provider registry) remains the authoritative
+  runtime floor underneath it, unchanged. Its one-use-capability contract is now enforced as a
+  one-write-action-per-plan rule at the planner, coordinator, service, dashboard API, and CLI. Its
+  single `recoverMaintenanceReceipt` recovery is now split into a read-only interruption audit
+  (`interruption-audit.mjs`) and a separate confirmed `reconcileMaintenanceReceipt` write, both
+  available from the CLI and, for audit, the dashboard; `recoverMaintenanceReceipt` remains as a
+  compatibility wrapper. Its findings-first Maintenance dashboard panel has been replaced by
+  ADR-0048's inventory workspace; this ADR's v1 HTTP routes (`GET /api/maintenance`,
+  `POST /api/maintenance/{plans,apply,undo}`) and CLI verbs remain as a documented compatibility
+  surface. This ADR is not marked Superseded: ADR-0048 stays Accepted, not Implemented, until its
+  human-evaluation and cross-platform gates pass.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [issue #198](https://github.com/pacphi/agentic-kit/issues/198),
   [issue #200](https://github.com/pacphi/agentic-kit/issues/200),

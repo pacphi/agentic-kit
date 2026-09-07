@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 
+import { isOpaqueId } from './management/model.mjs';
 import { acquireMaintenanceLock } from './mutation-lock.mjs';
 import {
   MAINTENANCE_RECEIPT_SCHEMA,
@@ -42,12 +43,18 @@ function safeOutcome(outcome) {
   };
 }
 
+function oneActionError(message) {
+  return Object.assign(new Error(message), { code: 'ONE_ACTION_PER_PLAN' });
+}
+
 function selectedActions(plan, actionIds, expectedPlanDigest, providers, now, validatePlan) {
+  if (!Array.isArray(actionIds) || actionIds.length !== 1) {
+    throw oneActionError('A maintenance apply request carries exactly one exact action id.');
+  }
   validatePlan?.(plan, { now: now() });
   if (!plan || plan.planDigest !== expectedPlanDigest) throw new Error('stale or mismatched plan digest');
   const expiry = Date.parse(plan.expiresAt);
   if (!Number.isFinite(expiry) || now() > expiry) throw new Error('maintenance plan expired');
-  if (!Array.isArray(actionIds) || actionIds.length === 0) throw new Error('at least one exact action id is required');
   if (new Set(actionIds).size !== actionIds.length) throw new Error('duplicate action ids are not allowed');
   const actions = [...actionIds].sort().map((id) => {
     const item = plan.actions?.find((candidate) => candidate.id === id);
@@ -71,6 +78,11 @@ function selectedActions(plan, actionIds, expectedPlanDigest, providers, now, va
 }
 
 function receiptEntry(action, preimageFingerprint = null) {
+  // Q's guidance module maps an unfinished receipt back onto its Inventory
+  // row via receipt.actions[].placementId. Only an exact opaque plc_ id is
+  // ever durable here; anything else (including a legacy action with no
+  // placementId at all) is simply omitted — never invented.
+  const placementId = isOpaqueId(action.placementId, 'plc') ? safeText(action.placementId, 96) : null;
   return {
     actionId: action.id,
     providerId: action.providerId,
@@ -82,6 +94,7 @@ function receiptEntry(action, preimageFingerprint = null) {
     restart: action.restart ?? 'unknown',
     sourceFingerprint: safeText(action.sourceFingerprint, 256),
     ...(preimageFingerprint ? { preimageFingerprint: safeText(preimageFingerprint, 256) } : {}),
+    ...(placementId ? { placementId } : {}),
     state: 'prepared',
     outcome: null,
     verification: null,
@@ -129,11 +142,64 @@ function refused(error) {
   return { ok: false, status: 'preflight-refused', error: safeText(error?.message ?? error) };
 }
 
-function assertApplyJournalAvailable(transactionsRoot, expectedPlanDigest, actionIds, fsImpl) {
-  const unfinished = listUnfinishedMaintenanceReceipts(transactionsRoot, { fsImpl });
-  if (unfinished.length) {
-    throw new Error(`unfinished maintenance transaction requires recovery: ${unfinished[0].id}`);
-  }
+function identityKey(identity) {
+  return {
+    kind: identity?.kind ?? null, id: identity?.id ?? null,
+    host: identity?.host ?? null, scope: identity?.scope ?? null,
+  };
+}
+
+function sameIdentityKey(a, b) {
+  return a.kind === b.kind && a.id === b.id && a.host === b.host && a.scope === b.scope;
+}
+
+/** ADR-0048 §10 / provider-and-action-policy.md "An unresolved receipt blocks
+ * writes to its affected placement, environment, and verified dependents, not
+ * unrelated environments. Receipt-integrity failure remains a broader
+ * fail-closed exception." Reads only; never mutates. `providers` is accepted
+ * for forward compatibility with a richer, provider-authored block
+ * description and is currently unused.
+ * @param {any} options `{ transactionsRoot: string, fsImpl?: any, providers?: Map<string, any> }`
+ * @returns {{ receiptId: string, status: string, placementKeys: Array<{kind:string|null,id:string|null,host:string|null,scope:string|null}>, placementIds: string[], environmentScope: string|null, broad: boolean }[]} */
+export function mutationBlocks({ transactionsRoot, fsImpl = fs } = {}) {
+  return listUnfinishedMaintenanceReceipts(transactionsRoot, { fsImpl }).map((receipt) => {
+    const noTrackedIdentity = !Array.isArray(receipt.actions) || receipt.actions.length === 0;
+    if (receipt.status === 'unknown-recovery-required' || noTrackedIdentity) {
+      // Integrity failure, or an unfinished receipt with no recorded action
+      // identity to scope against: fail closed rather than guess.
+      return {
+        receiptId: receipt.id, status: receipt.status, placementKeys: [], placementIds: [],
+        environmentScope: null, broad: true,
+      };
+    }
+    const placementIds = [...new Set((receipt.actions ?? [])
+      .map((entry) => entry.placementId)
+      .filter((value) => isOpaqueId(value, 'plc')))];
+    return {
+      receiptId: receipt.id,
+      status: receipt.status,
+      placementKeys: (receipt.actions ?? []).map((entry) => identityKey(entry.resourceIdentity)),
+      // Direct opaque-id match for a receipt whose actions carry one (Q's
+      // guidance maps a receipt onto its Inventory row this way); legacy
+      // receipts with no placementId fall back to placementKeys matching.
+      placementIds,
+      environmentScope: receipt.environment ?? 'current',
+      broad: false,
+    };
+  });
+}
+
+function assertNotBlocked(transactionsRoot, action, fsImpl) {
+  const blocks = mutationBlocks({ transactionsRoot, fsImpl });
+  const broad = blocks.find((block) => block.broad);
+  if (broad) throw new Error(`unfinished maintenance transaction requires recovery: ${broad.receiptId}`);
+  const key = identityKey(action.resourceIdentity);
+  const scoped = blocks.find((block) => block.placementKeys.some((candidate) => sameIdentityKey(candidate, key)));
+  if (scoped) throw new Error(`an unresolved maintenance receipt blocks this exact resource: ${scoped.receiptId}`);
+}
+
+function assertApplyJournalAvailable(transactionsRoot, expectedPlanDigest, actionIds, action, fsImpl) {
+  assertNotBlocked(transactionsRoot, action, fsImpl);
   const selectionKey = [...actionIds].sort().join('\0');
   const replay = listMaintenanceReceipts(transactionsRoot, { fsImpl }).find((receipt) => (
     receipt.planDigest === expectedPlanDigest
@@ -270,7 +336,7 @@ export async function applyMaintenancePlan({
   let transaction = null;
   let receipt = null;
   try {
-    assertApplyJournalAvailable(transactionsRoot, expectedPlanDigest, actionIds, fsImpl);
+    assertApplyJournalAvailable(transactionsRoot, expectedPlanDigest, actionIds, selected[0].action, fsImpl);
     await revalidateBeforeMutation(selected, plan, refreshPlan, validatePlan, now);
     transaction = createMaintenanceTransaction(transactionsRoot, {
       fsImpl, now: () => new Date(now()), ...(nonce ? { nonce } : {}),
@@ -433,4 +499,4 @@ export async function undoMaintenanceReceipt({
   }
 }
 
-export { recoverMaintenanceReceipt } from './recovery-coordinator.mjs';
+export { recoverMaintenanceReceipt, reconcileMaintenanceReceipt } from './recovery-coordinator.mjs';

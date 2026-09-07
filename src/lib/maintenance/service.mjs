@@ -5,9 +5,12 @@ import { createSystemCollector } from '../footprint/index.mjs';
 import { SNAPSHOT_STALE_AFTER_MS } from '../footprint/snapshot.mjs';
 import { maintenanceControlDir } from '../paths.mjs';
 import {
-  applyMaintenancePlan, recoverMaintenanceReceipt, undoMaintenanceReceipt,
+  applyMaintenancePlan, mutationBlocks as computeMutationBlocks, reconcileMaintenanceReceipt,
+  recoverMaintenanceReceipt, undoMaintenanceReceipt,
 } from './coordinator.mjs';
 import { projectReference } from './evidence.mjs';
+import { auditInterruptions } from './interruption-audit.mjs';
+import { isOpaqueId } from './management/model.mjs';
 import { deepFreeze } from './model.mjs';
 import { projectProviderFindings } from './provider-findings.mjs';
 import {
@@ -227,6 +230,15 @@ export function createMaintenanceService({
     kind: 'provider', status: 'idle', phase: 'idle', startedAt: null,
     updatedAt: null, finishedAt: null, progress: null,
   };
+  /** The registry/detections from the most recent `collect()` (scan or
+   * executable plan derivation) or provider-evidence cold path, for
+   * `providerEvidence()` to reuse read-only. Never itself mutated by
+   * anything but those two producers. */
+  let lastCollected = null;
+  /** True while this process holds the mutation lock inside apply/undo/
+   * recover/reconcile. `providerEvidence()`'s cold path waits it out before
+   * calling any provider's `detect()`, so it never races a live mutation. */
+  let mutationInFlight = false;
 
   const scanState = () => deepFreeze(structuredClone(scanActivity));
   const markScan = (status, phase, extra = {}) => {
@@ -276,6 +288,7 @@ export function createMaintenanceService({
       receipts,
       providers: publicMaintenanceProviders(registry, { includeUnsupported: true }),
     });
+    lastCollected = { providers: registry, detections: projected.detections };
     return { footprint, providers: registry, detections: projected.detections, model };
   }
 
@@ -334,7 +347,7 @@ export function createMaintenanceService({
 
   async function createPlan({
     findingIds = null, safetyClass = null, project = null, deep = false,
-    executable = false, persist = false, generatedAt = null,
+    executable = false, persist = false, generatedAt = null, placementId = null,
   } = {}) {
     assertScanIdle();
     const collected = await collect({ deep });
@@ -344,7 +357,20 @@ export function createMaintenanceService({
       if (persist) throw new Error('Only executable maintenance plans may be persisted.');
       return buildMaintenancePlan({ findings, sourceFingerprint: model.sourceFingerprint, now });
     }
-    const actions = await providerActions(findings, collected.providers, collected.detections);
+    if (findings.length !== 1) {
+      // MNT-ACT-001: refuse before any provider is even asked for an action.
+      throw Object.assign(
+        new Error('An executable maintenance plan requires exactly one exact finding.'),
+        { code: 'ONE_ACTION_PER_PLAN' },
+      );
+    }
+    const derivedActions = await providerActions(findings, collected.providers, collected.detections);
+    // Q's guidance module maps a receipt back onto its Inventory row via
+    // receipt.actions[].placementId; a placementId supplied here (from
+    // service.planAction) rides along with the single action it authorized.
+    const actions = placementId
+      ? derivedActions.map((action) => ({ ...action, placementId }))
+      : derivedActions;
     const result = buildExecutableMaintenancePlan({
       findings,
       actions,
@@ -377,6 +403,14 @@ export function createMaintenanceService({
       throw new Error('Exact maintenance plan digest is required.');
     }
     if (!Array.isArray(actionIds) || !actionIds.length) throw new Error('Exact maintenance action IDs are required.');
+    if (actionIds.length !== 1) {
+      // MNT-ACT-001: refuse before the plan is even loaded, let alone the
+      // mutation lock acquired or a journal written.
+      throw Object.assign(
+        new Error('A maintenance apply request carries exactly one exact action id.'),
+        { code: 'ONE_ACTION_PER_PLAN' },
+      );
+    }
     ensurePrivateMaintenanceRoot(controlRoot, { fsImpl });
     const selectedPlan = suppliedPlan ?? loadPlan(planId);
     if (planId && selectedPlan.planId !== planId) throw new Error('Maintenance plan ID does not match the supplied plan.');
@@ -394,6 +428,11 @@ export function createMaintenanceService({
         findingIds: selectedPlan.findingIds,
         executable: true,
         generatedAt,
+        // The freshly-derived plan must match the original byte-for-byte
+        // (including any placementId stamped by planAction) or the digest
+        // comparison below would spuriously refuse a plan that never
+        // actually drifted.
+        placementId: selectedPlan.actions?.[0]?.placementId ?? null,
       }),
       refreshAffectedCatalog: async () => collector.refreshDeep(),
       validatePlan: (candidate, options = {}) => assertExecutableMaintenancePlanIntegrity(candidate, {
@@ -484,8 +523,144 @@ export function createMaintenanceService({
     return publicResult(result);
   }
 
+  /** Read-only, batchable, ephemeral (MNT-RCV-001..005). It deliberately does
+   * not call `assertScanIdle()`: it never acquires the mutation lock and
+   * every receipt write is one atomic tmp+rename, so a concurrent audit read
+   * can only observe a prior or a next durable state, never a torn one. It is
+   * therefore safe to run while a scan or another mutation is in flight.
+   * @param {any} input `{ receiptIds: string[] }` */
+  async function auditInterruption({ receiptIds } = {}) {
+    ensurePrivateMaintenanceRoot(controlRoot, { fsImpl });
+    const providerRegistry = resolveProviders(await collector.read());
+    const results = await auditInterruptions({
+      transactionsRoot, receiptIds, providers: providerRegistry, fsImpl, now,
+    });
+    return results.map((entry) => publicResult(entry));
+  }
+
+  /** One confirmed receipt write, re-running the audit under the mutation
+   * lock and refusing unless it enables exactly the requested outcome
+   * (MNT-RCV-006). @param {any} input `{ receiptId: string, outcome: string, confirmed?: boolean }` */
+  async function reconcile({ receiptId, outcome, confirmed = false } = {}) {
+    assertScanIdle();
+    if (confirmed !== true) throw new Error('Explicit confirmation is required to reconcile a maintenance receipt.');
+    ensurePrivateMaintenanceRoot(controlRoot, { fsImpl });
+    const providerRegistry = resolveProviders(await collector.read());
+    const result = await reconcileMaintenanceReceipt({
+      transactionsRoot,
+      receiptId,
+      outcome,
+      confirmed,
+      providers: providerRegistry,
+      refreshAffectedCatalog: async () => collector.refreshDeep(),
+      fsImpl,
+      now,
+    });
+    try { await scan(); } catch { /* reconciled receipt remains authoritative */ }
+    return publicResult(result);
+  }
+
+  /** Read-only scoped/broad write-block report (ADR-0048 §10). */
+  function mutationBlocksReport() {
+    return deepFreeze(structuredClone(computeMutationBlocks({ transactionsRoot, fsImpl })));
+  }
+
+  async function waitOutMutation({ intervalMs = 20, timeoutMs = 5_000 } = {}) {
+    const deadline = Date.now() + timeoutMs;
+    while (mutationInFlight && Date.now() < deadline) {
+      await new Promise((resolve) => { setTimeout(resolve, intervalMs); });
+    }
+  }
+
+  async function detectOne(implementation) {
+    try {
+      return await implementation.detect();
+    } catch {
+      return null;
+    }
+  }
+
+  /** The minimal read-only pass `providerEvidence()` uses when nothing has
+   * scanned yet: resolve the registry from a fresh footprint read and call
+   * every provider's `detect()` exactly once, concurrently (single-flight
+   * per provider, no read-model/findings/receipts work — that is `collect()`'s
+   * heavier job, not this one). Never mutates. */
+  async function resolveProviderEvidence() {
+    const footprint = await collector.read();
+    const registry = resolveProviders(footprint);
+    const detections = new Map();
+    await Promise.all([...registry.entries()].map(async ([id, implementation]) => {
+      detections.set(id, await detectOne(implementation));
+    }));
+    return { providers: registry, detections };
+  }
+
+  /** The most recently collected provider registry and raw detection facts,
+   * so a caller (the facade's Guidance matchers) does not have to build a
+   * second registry or re-run `detect()` itself. Read-only: it never
+   * applies, undoes, plans, or writes anything, and carries no scan-idle
+   * gate — but if no scan/plan has run yet in this service instance, its
+   * cold path waits out any apply/undo/recover/reconcile this process
+   * currently has the mutation lock for, so it never calls a provider's
+   * `detect()` concurrently with a live mutation of that same provider's
+   * resource. `detections` and `registry` are defensive copies; the
+   * registry's provider objects are the live, callable implementations —
+   * nothing about them is redacted, unlike `providers`. */
+  async function providerEvidence() {
+    if (!lastCollected) {
+      await waitOutMutation();
+      lastCollected = await resolveProviderEvidence();
+    }
+    const { providers: registry, detections } = lastCollected;
+    return Object.freeze({
+      providers: publicMaintenanceProviders(registry, { includeUnsupported: true }),
+      detections: new Map(detections),
+      registry: new Map(registry),
+    });
+  }
+
+  /** One-action executable plan for exactly one finding, persisted so a
+   * subsequent `apply` can load it by planId. `guidanceId` is accepted for
+   * the eventual Guidance-driven call shape but is not yet resolved to
+   * anything — the caller must supply `findingId` directly until
+   * placement-to-finding mapping is wired (see ORCHESTRATION.md §T
+   * deliverable (a); the facade/CLI/API layers will need an interim finding
+   * lookup step, or this signature revisited, once Guidance exists).
+   * When `placementId` is supplied (an opaque `plc_…` id), it rides through
+   * onto the plan's single action and, on apply, onto the receipt entry, so
+   * Q's guidance module can map an unfinished receipt back onto its
+   * Inventory row via `receipt.actions[].placementId`.
+   * @param {any} input `{ placementId?: string, findingId: string, guidanceId?: string }` */
+  async function planAction({ placementId = null, findingId, guidanceId: _guidanceId = null } = {}) {
+    if (typeof findingId !== 'string' || !findingId) {
+      throw new TypeError('planAction requires an exact findingId (placementId/guidanceId resolution is not wired yet).');
+    }
+    if (placementId != null && !isOpaqueId(placementId, 'plc')) {
+      throw new TypeError('planAction requires an opaque plc_ placementId when supplied.');
+    }
+    return createPlan({
+      findingIds: [findingId], executable: true, persist: true, placementId,
+    });
+  }
+
+  /** Brackets the exact window this process holds the mutation lock for
+   * (apply/undo/recover/reconcile), so `providerEvidence()`'s cold path can
+   * wait it out rather than race a live provider mutation. */
+  function guarded(fn) {
+    return async (...args) => {
+      mutationInFlight = true;
+      try {
+        return await fn(...args);
+      } finally {
+        mutationInFlight = false;
+      }
+    };
+  }
+
   return Object.freeze({
     report, scan, scanState, isScanning: () => scanFlight !== null,
-    plan, apply, prepareUndo, undo, recover,
+    plan, apply: guarded(apply), prepareUndo, undo: guarded(undo), recover: guarded(recover),
+    auditInterruption, reconcile: guarded(reconcile), mutationBlocks: mutationBlocksReport,
+    planAction, providerEvidence,
   });
 }

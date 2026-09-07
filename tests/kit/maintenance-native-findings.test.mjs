@@ -234,6 +234,9 @@ test('default wiring promotes only an exact currently stale npx candidate', asyn
       claudePlugin: unavailable, codexPlugin: unavailable, codexMcp: unavailable,
       npxCache: { root: cacheRoot, baseline: () => '2.0.0' },
       rufloMcpOrphan: { uid: null, list: async () => [] },
+      // Registered by default now (provider-registry.mjs); keep this test
+      // hermetic so it never probes the real loopback Ollama endpoint.
+      ollamaModel: { enabled: false },
     },
   });
   const model = await service.scan();
@@ -385,6 +388,9 @@ test('explicit complete-tree ownership wiring archives and exposes guarded undo 
       claudePlugin: unavailable, codexPlugin: unavailable, codexMcp: unavailable,
       rufloMcpOrphan: { uid: null, list: async () => [] },
       ownedSkill: { receipts: [receipt], allowedRoots: [allowedRoot], archiveRoot: path.join(root, 'archive') },
+      // Registered by default now (provider-registry.mjs); keep this test
+      // hermetic so it never probes the real loopback Ollama endpoint.
+      ollamaModel: { enabled: false },
     },
   });
   const model = await service.scan();

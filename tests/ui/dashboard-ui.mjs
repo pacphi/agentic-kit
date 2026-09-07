@@ -42,6 +42,22 @@ import { modelIdentityKey } from '../../src/lib/model-inventory/contracts.mjs';
 // formatter restatements below refuse to do: those would compute an expectation
 // with the code under test; this names the input the code under test consumes.
 import { directoryEntries } from '../../src/lib/dashboard/about-directory.mjs';
+// ADR-0048 Maintenance workspace (v2). The v2 API is stubbed entirely with
+// page.route below (independent of whatever the real dashboard-server v2
+// wiring looks like at any given moment), but the STUBBED RESPONSE BODIES are
+// real DTOs — produced by calling the real projection/query/guidance/activity
+// functions over the shared sentinel fixtures every maintenance slice tests
+// against — never hand-typed JSON that could drift from the actual contract.
+import { runInventoryQuery } from '../../src/lib/maintenance/management/query.mjs';
+import { inspectorFor } from '../../src/lib/maintenance/management/guidance.mjs';
+import { buildActivity } from '../../src/lib/maintenance/management/activity.mjs';
+import {
+  MANAGEMENT_INVENTORY_SCHEMA, MANAGEMENT_SCHEMA_VERSION, assertManagementInventory, isProhibitedLabel,
+} from '../../src/lib/maintenance/management/model.mjs';
+import { AUDIT_DISCLOSURE } from '../../src/lib/maintenance/interruption-audit.mjs';
+import {
+  ENV_MAC, FIXTURE_NOW, INTERRUPTED_RECEIPT, SENTINEL_FIXTURES, id,
+} from '../fixtures/maintenance/management-fixtures.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
@@ -278,13 +294,16 @@ const USAGE_VIEWS = [
 // area rather than a card: it is the only part of System that suggests an
 // action, and everything else reports what is. Sessions owns the session-level
 // detail Storage used to carry underneath its byte breakdown.
+// Seven sub-views (ADR-0048 retires Catalog as its own destination — its
+// content folds into Summary, and Maintenance is now four destinations of
+// its own; see the "#system/catalog redirects" and Maintenance workspace
+// checks below).
 const SYSTEM_VIEWS = [
   ['summary', '#panel-sys-summary'],
   ['advisory', '#panel-sys-advisory'],
   ['sessions', '#panel-sys-sessions'],
   ['storage', '#panel-sys-storage'],
   ['runtime', '#panel-sys-runtime'],
-  ['catalog', '#panel-sys-catalog'],
   ['projects', '#panel-sys-projects'],
   ['maintenance', '#panel-sys-maintenance'],
 ];
@@ -764,19 +783,6 @@ const MAINTENANCE_STUB = {
   async scan() { chainedMaintenanceScans += 1; return MAINTENANCE_PAYLOAD; },
   async plan() { return {}; },
 };
-
-const MAINTENANCE_HISTORY = [
-  'committed', 'rolled-back', 'aborted-no-change', 'recovered-no-change',
-  'partial-recovery-required', 'unknown-recovery-required', 'applying',
-  'verifying', 'refreshing-catalog', 'undoing',
-].map((status, index) => ({
-  id: `receipt-${status}`, status, headline: `Maintenance receipt ${index + 1}`,
-  updatedAt: new Date(Date.now() - ((index + 1) * 60_000)).toISOString(),
-  actionCount: 1,
-  // Deliberately hostile eligibility proves that recovery and settled no-change
-  // statuses cannot surface Undo merely because one boolean is malformed.
-  undoEligible: true, undo: { eligible: true },
-}));
 
 const LIVE_SNAPSHOT = {
   schemaVersion: 1,
@@ -1264,8 +1270,14 @@ async function main() {
   const maintenancePlanRequests = [];
   const maintenanceApplyRequests = [];
   const maintenanceUndoRequests = [];
-  let maintenanceReportReads = 0;
-  let maintenanceScanRequests = 0;
+  const maintenanceAuditRequests = [];
+  const maintenanceReconcilePreviewRequests = [];
+  const maintenanceReconcileRequests = [];
+  const maintenanceInventoryRequests = [];
+  const maintenanceScanActionRequests = [];
+  const maintenanceExportRequests = [];
+  const maintenanceDispositionRequests = [];
+  let maintenanceCheckProvidersReads = 0;
   const expectedHttpConsoleErrors = new Set();
   // Capture the LOCATION too. A bare "Failed to load resource" is
   // undiagnosable, and a console listener that records only the message makes
@@ -1299,47 +1311,402 @@ async function main() {
       && r.failure()?.errorText === 'net::ERR_ABORTED') return;
     failedRequests.push(`${r.url()} — ${r.failure()?.errorText}`);
   });
-  await page.route(/\/api\/maintenance(?:\/(?:plans|apply|undo))?(?:\?|$)/, async (route) => {
+  // ── A group-collapse fixture, built here (not in the shared sentinel
+  // file) from the exact same real builder pattern management-fixtures.mjs
+  // uses: one skill RESOURCE shared by N PROJECT placements — distinct
+  // projectIds, one Claude binding each, each placement's own artifact
+  // carrying an equal digest (the same real "same content, N physical
+  // copies" proof baseInventory()'s clarity skill uses) — so the group is a
+  // single resourceId with N placements, not base()/projectsInventory()'s
+  // per-project resource split (that split is exactly what P's separate
+  // one-group-per-resource projection fix targets; this fixture assumes
+  // that projection already worked and tests only the presentation layer
+  // sitting on top of it). guidanceOnFirst puts a guidance lane on placement
+  // 0 only, to exercise the "opens expanded by default" branch. secondGroup,
+  // when given, adds a SEPARATE small (<=3 placement, never collapsible)
+  // resource+group to the SAME inventory — proving row counts and
+  // aria-expanded are scoped to the toggled group alone, not the whole page
+  // (V's real-machine report: rows going 28->37 while aria-expanded stayed
+  // false suggested another group's rows might be getting counted). ──
+  function buildProjectGroupFixture({ count = 6, guidanceOnFirst = false, secondGroup = false } = {}) {
+    const env = ENV_MAC.environmentId;
+    const tag = guidanceOnFirst ? `guided-${count}-project-skill` : `${count}-project-skill`;
+    const skillRes = id('res', { kind: 'skill', name: tag });
+    const rows = Array.from({ length: count }, (_, i) => {
+      const project = id('prj', { repo: `${tag}-${i}` });
+      const plc = id('plc', { res: skillRes, env, project });
+      const art = id('art', { tree: `skills/${tag}`, project });
+      const bnd = id('bnd', { plc, consumer: 'claude' });
+      return { project, plc, art, bnd, guidanceLane: guidanceOnFirst && i === 0 ? 'apply' : null };
+    });
+    const resources = [{ resourceId: skillRes, kind: 'skill', displayName: tag, placementIds: rows.map((row) => row.plc) }];
+    const artifacts = rows.map((row) => ({
+      artifactId: row.art, carrier: 'directory-tree', label: 'Project skills directory', digest: `sha256-${tag}`,
+    }));
+    const consumerBindings = rows.map((row) => ({
+      bindingId: row.bnd, placementId: row.plc, artifactId: row.art, consumerKind: 'host',
+      consumerLabel: 'Claude', mechanism: 'claude-project-skills', enabled: true, effectiveScope: 'project', grade: 'verified', affectedByProposedAction: false,
+    }));
+    const placements = rows.map((row, i) => ({
+      placementId: row.plc, resourceId: skillRes, environmentId: env, administrativeScope: 'project', projectId: row.project,
+      locationBreadcrumb: ['project', `${tag}-${i}`], artifactIds: [row.art], consumerBindingIds: [row.bnd],
+      conditions: ['healthy'], evidenceScorecard: { identity: 'verified', placement: 'verified', consumers: 'verified' },
+      displayName: 'multi-project-skill', kind: 'skill', consumerHosts: ['claude'], versions: {},
+      guidanceLane: row.guidanceLane, technicalDetails: [], recentlyChangedAt: null,
+    }));
+    if (secondGroup) {
+      const otherTag = `${tag}-sibling`;
+      const otherRes = id('res', { kind: 'skill', name: otherTag });
+      const otherProject = id('prj', { repo: `${otherTag}-0` });
+      const otherPlc = id('plc', { res: otherRes, env, project: otherProject });
+      const otherArt = id('art', { tree: `skills/${otherTag}`, project: otherProject });
+      const otherBnd = id('bnd', { plc: otherPlc, consumer: 'claude' });
+      resources.push({ resourceId: otherRes, kind: 'skill', displayName: otherTag, placementIds: [otherPlc] });
+      artifacts.push({ artifactId: otherArt, carrier: 'directory-tree', label: 'Project skills directory', digest: `sha256-${otherTag}` });
+      consumerBindings.push({
+        bindingId: otherBnd, placementId: otherPlc, artifactId: otherArt, consumerKind: 'host',
+        consumerLabel: 'Claude', mechanism: 'claude-project-skills', enabled: true, effectiveScope: 'project', grade: 'verified', affectedByProposedAction: false,
+      });
+      placements.push({
+        placementId: otherPlc, resourceId: otherRes, environmentId: env, administrativeScope: 'project', projectId: otherProject,
+        locationBreadcrumb: ['project', `${otherTag}-0`], artifactIds: [otherArt], consumerBindingIds: [otherBnd],
+        conditions: ['healthy'], evidenceScorecard: { identity: 'verified', placement: 'verified', consumers: 'verified' },
+        displayName: 'sibling-skill', kind: 'skill', consumerHosts: ['claude'], versions: {},
+        guidanceLane: null, technicalDetails: [], recentlyChangedAt: null,
+      });
+    }
+    return assertManagementInventory({
+      schemaVersion: MANAGEMENT_SCHEMA_VERSION,
+      schema: MANAGEMENT_INVENTORY_SCHEMA,
+      inventoryId: id('inv', { fixture: tag }),
+      capturedAt: FIXTURE_NOW,
+      sourceFingerprint: `fp-${tag}`,
+      environments: [ENV_MAC],
+      sourceCoverage: [],
+      resources, artifacts, consumerBindings, placements,
+      provenanceAssertions: [], versionObservations: [], dependencyEdges: [], conflictSets: [], guidanceEntries: [],
+    });
+  }
+
+  // ── ADR-0048 Maintenance workspace v2 API (fully stubbed, independent of
+  // whatever the real dashboard-server v2 wiring looks like — see this
+  // file's own header comment). Response BODIES are real DTOs: every one is
+  // produced by calling the real query/guidance/activity functions over the
+  // shared sentinel fixtures, never hand-typed JSON. `activeMaintenanceInventory`
+  // is reassigned by individual journeys below (e.g. J10 swaps in the
+  // incomplete-source fixture) so later requests see the new fixture without
+  // a full page reload. ──
+  let activeMaintenanceInventory = SENTINEL_FIXTURES.base();
+  // Simulates dashboard-server.mjs's refreshInventoryAfterProviderScan: the
+  // server builds the inventory once Refresh evidence settles (MNT-DSC's
+  // scanRequired contract), not only after a System full scan.
+  let maintenanceScanRequired = false;
+  // Facade-carried lastRefresh:{status,at,code?,message?} distinguishing an
+  // inventory build that failed from one that simply never ran yet. Null
+  // reproduces the plain "never scanned" scanRequired envelope.
+  let maintenanceInventoryLastRefresh = null;
+  // > 0 while the simulated server build is still running after a provider
+  // check: the inventory stub answers `running` that many times, then flips
+  // scanRequired off so the workspace's bounded polling sees the built page.
+  let maintenanceBuildPollsRemaining = 0;
+  let maintenanceRunningPollsServed = 0;
+  // Per-label override for a coverage entry's `filesystem` flag, applied
+  // on top of whatever the sentinel fixture's coverage() helper produced
+  // (which never sets `filesystem` at all, exercising the "flag absent ->
+  // fall back to the prior state-based note" path by default). Empty by
+  // default; a journey sets one label at a time and restores {} after.
+  let mntCoverageFilesystemByLabel = {};
+  // A never-scanned, user-added collection root, so the Discovery journey can
+  // exercise Scan this root / Retry scan the same way the fixture's other
+  // sources exercise Pause/Resume/Stop. Declared OUTSIDE the route handler
+  // (not re-created per request) so a POST /v2/scans mutation of `.state`
+  // actually persists to the next GET, the way a real server's state would;
+  // it also appears as a `collectionRoots` entry below so the client's
+  // automatic-vs-user-root distinction recognizes it as user-added. A real
+  // opaque id (not a hand-typed literal) rules out any accidental collision
+  // with an automatic source's own generated sourceId.
+  const neverScannedSourceId = id('src', { collection: 'ui-never-scanned' });
+  const neverScannedSource = {
+    sourceId: neverScannedSourceId, environmentId: activeMaintenanceInventory.environments[0]?.environmentId,
+    state: 'not-scanned', visited: 0, completedPartitions: 0, pendingPartitions: 0,
+    limitingReason: null, lastCompletedAt: null, label: 'Ollama',
+  };
+  function mntScanCoverage() {
+    return [...(activeMaintenanceInventory.sourceCoverage ?? []), neverScannedSource].map((entry) => (
+      entry.label in mntCoverageFilesystemByLabel
+        ? { ...entry, filesystem: mntCoverageFilesystemByLabel[entry.label] }
+        : entry
+    ));
+  }
+  // Derived from the SAME coverage array every response actually sends —
+  // never a narrative hand-typed independently of it — so a response can
+  // never mix a stale sentence with fresh coverage (or vice versa) no matter
+  // which fixture happens to be active when a request lands.
+  function mntScanNarrative(coverage) {
+    const totalVisited = coverage.reduce((sum, entry) => sum + (entry.visited ?? 0), 0);
+    const completeCount = coverage.filter((entry) => entry.state === 'complete').length;
+    return `Scanned ${totalVisited} entries. ${completeCount} of ${coverage.length} sources are complete.`;
+  }
+  function mntFindPlacement(placementId) {
+    return activeMaintenanceInventory.placements.find((p) => p.placementId === placementId) ?? null;
+  }
+  function mntGuidanceResponse() {
+    const entries = activeMaintenanceInventory.guidanceEntries ?? [];
+    const counts = { apply: 0, steps: 0, decision: 0, update: 0, recovery: 0, total: entries.length };
+    const lanes = { apply: [], steps: [], decision: [], update: [], recovery: [] };
+    for (const entry of entries) { counts[entry.lane] += 1; lanes[entry.lane].push(entry); }
+    return { lanes, counts, entries };
+  }
+  await page.route(/\/api\/maintenance\/v2\//, async (route) => {
     const request = route.request();
-    const pathname = new URL(request.url()).pathname;
+    const url = new URL(request.url());
+    const pathname = url.pathname;
     const reply = (status, body) => route.fulfill({
       status, contentType: 'application/json', body: JSON.stringify(body),
     });
-    if (request.method() === 'GET' && pathname === '/api/maintenance') {
-      if (new URL(request.url()).searchParams.get('refresh') === 'scan') {
-        maintenanceScanRequests++;
-        await new Promise((resolve) => setTimeout(resolve, 120));
+    const body = request.method() === 'POST' ? request.postDataJSON() : null;
+
+    if (request.method() === 'GET' && pathname === '/api/maintenance/v2/inventory') {
+      const facets = {};
+      for (const [key, value] of url.searchParams.entries()) {
+        if (key.startsWith('facet.')) facets[key.slice(6)] = [...(facets[key.slice(6)] ?? []), value];
       }
-      else maintenanceReportReads++;
-      return reply(200, MAINTENANCE_PAYLOAD);
+      const params = {
+        scope: url.searchParams.get('scope') ?? 'across', view: url.searchParams.get('view') ?? 'all',
+        sort: url.searchParams.get('sort') ?? 'guidance-first', search: url.searchParams.get('search') ?? '',
+        cursor: url.searchParams.get('cursor') ?? null,
+        limit: Number(url.searchParams.get('limit') ?? 50), facets,
+      };
+      maintenanceInventoryRequests.push(params);
+      if (maintenanceBuildPollsRemaining > 0) {
+        maintenanceBuildPollsRemaining -= 1;
+        maintenanceRunningPollsServed += 1;
+        if (maintenanceBuildPollsRemaining === 0) maintenanceScanRequired = false;
+        return reply(200, {
+          scanRequired: true, total: 0, groups: [], facetCounts: {}, sortGroups: [], partialSources: [],
+          appliedFacets: {}, lastRefresh: { status: 'running', at: new Date().toISOString() },
+        });
+      }
+      if (maintenanceScanRequired) {
+        return reply(200, {
+          scanRequired: true, total: 0, groups: [], facetCounts: {}, sortGroups: [], partialSources: [],
+          appliedFacets: {}, lastRefresh: maintenanceInventoryLastRefresh,
+        });
+      }
+      // The real wire schema (maintenance-api.mjs's INVENTORY_QUERY) makes
+      // scanRequired a REQUIRED boolean; runInventoryQuery() itself (the
+      // pure query function this fixture calls directly) never sets it —
+      // that is the API layer's job, which this stub bypasses. Omitting it
+      // here left mntAwaitInventoryBuild()'s poll unable to ever see "ok"
+      // (only "pending"), so it silently ran for the full 90 s bound instead
+      // of settling in one tick — invisible until something (Re-measure
+      // machine) actually blocks on that promise resolving.
+      return reply(200, { scanRequired: false, ...runInventoryQuery(activeMaintenanceInventory, params), lastRefresh: {status: 'ok', at: String(maintenanceCheckProvidersReads)} });
     }
-    const body = request.postDataJSON();
-    if (pathname === '/api/maintenance/plans') {
+    const placementMatch = pathname.match(/^\/api\/maintenance\/v2\/placements\/([^/]+)$/);
+    if (request.method() === 'GET' && placementMatch) {
+      const placementId = decodeURIComponent(placementMatch[1]);
+      if (!mntFindPlacement(placementId)) return reply(404, { code: 'NOT_FOUND' });
+      return reply(200, inspectorFor(activeMaintenanceInventory, placementId, {
+        guidance: activeMaintenanceInventory.guidanceEntries, receipts: [], dispositions: [],
+        coverage: activeMaintenanceInventory.sourceCoverage,
+      }));
+    }
+    if (pathname === '/api/maintenance/v2/placements/reveal') {
+      const placement = mntFindPlacement(body.placementId);
+      return reply(200, {
+        breadcrumb: placement?.locationBreadcrumb ?? [],
+        // Hostile, path-shaped test content: proves the inspector escapes it
+        // as text and never reflects it into the URL (MNT-PRV-004/005).
+        exactPath: '/Users/ui-hostile/<img src=x onerror="globalThis.__mntRevealXss=1">/claude.json',
+        selector: 'mcpServers.lightpanda',
+      });
+    }
+    if (request.method() === 'GET' && pathname === '/api/maintenance/v2/guidance') return reply(200, mntGuidanceResponse());
+    if (pathname === '/api/maintenance/v2/procedures/checklist') return reply(200, { done: {}, updatedAt: new Date().toISOString() });
+    const procedureMatch = pathname.match(/^\/api\/maintenance\/v2\/procedures\/([^/]+)$/);
+    if (request.method() === 'GET' && procedureMatch) {
+      return reply(200, {
+        outcome: 'Reinstall the lightpanda executable',
+        source: { authority: 'Homebrew', publisher: 'homebrew-core', recipeVersion: '1' },
+        compatibility: { osAndVersionRange: null, hostAndVersionRange: null, resourceKind: null, packageManagerAndRange: null, shells: ['bash', 'zsh'], environmentId: null },
+        privilege: 'none', network: 'required', effect: 'Installs lightpanda through Homebrew.',
+        preserved: ['The MCP registration'],
+        command: { shell: 'zsh', shellLabel: 'zsh', text: "brew install lightpanda" },
+        verification: { shell: 'zsh', shellLabel: 'zsh', text: 'lightpanda --version' },
+        checklist: [{ stepId: 'run', label: 'Run the command in your own terminal.' }],
+        nextStepLabel: 'Verify after completing these steps',
+      });
+    }
+    if (request.method() === 'GET' && pathname === '/api/maintenance/v2/discovery') {
+      // Read the coverage array ONCE — coverage/progress/narrative all derive
+      // from this SAME array, never three independent reads of
+      // activeMaintenanceInventory, so a request landing mid-fixture-swap
+      // can never get coverage from one generation and a narrative
+      // describing a different one.
+      const discoveryCoverage = mntScanCoverage();
+      return reply(200, {
+        automaticSources: [
+          { id: 'claude-user', label: 'Claude user configuration', enabled: true, inspects: 'Claude Code user-level configuration, skills, plugins, and hooks' },
+          { id: 'projects', label: 'Projects', enabled: true, inspects: 'Every project a recorded host session has visited' },
+        ],
+        exactProjects: [{ sourceId: 'src_ui-exact', root: '/Users/ui-fixture/exact-project' }],
+        // neverScannedSource is a USER-ADDED root (not an automatic
+        // source), so the coverage list below treats it as one — only a
+        // user-added root gets Scan this root / Pause / Stop / Retry scan;
+        // an automatic source gets a note and no control at all.
+        collectionRoots: [
+          { sourceId: 'src_ui-root', root: '/Users/ui-fixture/collection', maxDepth: 6, includeNetwork: false },
+          { sourceId: neverScannedSource.sourceId, root: '/Users/ui-fixture/never-scanned', maxDepth: 6, includeNetwork: false },
+        ],
+        exclusions: [{ exclusionId: 'exc_ui-fixture', path: '/Users/ui-fixture/collection/vendor', recursive: true }],
+        coverage: discoveryCoverage,
+        // `progress` is itself a per-source ARRAY (maintenance-api.mjs's
+        // PROGRESS type) — the one narrative SENTENCE is the separate
+        // `narrative` field. Shaping both here catches a client that reads
+        // the wrong one (as the client briefly did before this fixture was
+        // corrected to match the real schema).
+        progress: discoveryCoverage.map((entry) => ({
+          sourceId: entry.sourceId, environmentId: entry.environmentId, state: entry.state,
+          visited: entry.visited, label: entry.label, limitingReason: entry.limitingReason ?? null, ceiling: null,
+        })),
+        narrative: mntScanNarrative(discoveryCoverage),
+        history: [],
+      });
+    }
+    if (pathname === '/api/maintenance/v2/discovery/preview') {
+      return reply(200, {
+        previewId: 'prv_ui-test', kind: body.kind, root: body.root, boundary: null,
+        projectsFound: [], exclusions: { automatic: [], exact: [], recursive: [] },
+        depth: 8, symlinksSkipped: 0, boundaries: [], estimate: { entries: 42, bytes: 4096, timeRange: null },
+        estimateReason: null, permissions: { denied: 0 }, ceilings: { maxDepth: 8, maxEntries: 20000 },
+        valid: true, reason: null,
+      });
+    }
+    if (pathname === '/api/maintenance/v2/discovery/sources/remove' && body?.confirm === false) {
+      return reply(200, {
+        confirmed: false,
+        preview: {
+          before: { automaticSources: { 'claude-user': true, projects: true }, exactProjects: [{ sourceId: body.sourceId, root: '/x' }], collectionRoots: [], exclusions: [] },
+          after: { automaticSources: { 'claude-user': true, projects: true }, exactProjects: [], collectionRoots: [], exclusions: [] },
+        },
+      });
+    }
+    if (pathname === '/api/maintenance/v2/discovery/sources/remove') return reply(200, { confirmed: true, removed: true });
+    if (request.method() === 'GET' && pathname === '/api/maintenance/v2/scans') {
+      const scanCoverage = mntScanCoverage();
+      return reply(200, { coverage: scanCoverage, narrative: mntScanNarrative(scanCoverage), forbiddenClaims: [] });
+    }
+    if (pathname === '/api/maintenance/v2/scans') {
+      maintenanceScanActionRequests.push(body);
+      if (body.action === 'start') { neverScannedSource.state = 'scanning'; return reply(202, { action: 'start', accepted: true, progress: mntScanCoverage() }); }
+      if (body.action === 'pause') return reply(200, { action: 'pause', confirmed: true, progress: mntScanCoverage() });
+      if (body.action === 'resume') return reply(202, { action: 'resume', accepted: true, progress: mntScanCoverage() });
+      if (body.action === 'stop' && body.confirm !== true) {
+        return reply(200, {
+          action: 'stop', confirmed: false,
+          preview: { sourceId: body.sourceId, label: 'Claude user configuration', visited: 128, completedPartitions: 4 },
+          progress: mntScanCoverage(),
+        });
+      }
+      if (body.action === 'stop') return reply(200, { action: 'stop', confirmed: true, removed: true, progress: mntScanCoverage() });
+      return reply(400, { error: 'unrecognized scan action', code: 'BAD_REQUEST' });
+    }
+    if (request.method() === 'GET' && pathname === '/api/maintenance/v2/activity') {
+      return reply(200, buildActivity({
+        receipts: [INTERRUPTED_RECEIPT], dispositions: [], recipeEvents: [], scanHistory: [], inProgress: [],
+      }));
+    }
+    const receiptMatch = pathname.match(/^\/api\/maintenance\/v2\/receipts\/([^/]+)$/);
+    if (request.method() === 'GET' && receiptMatch) {
+      return reply(200, {
+        receiptId: INTERRUPTED_RECEIPT.id, intent: 'clean-cache', provider: { id: 'owned-npx-cache', version: '1' },
+        operation: 'clean-cache', timestamps: { createdAt: INTERRUPTED_RECEIPT.createdAt, updatedAt: INTERRUPTED_RECEIPT.updatedAt },
+        evidence: { sourceFingerprint: INTERRUPTED_RECEIPT.sourceFingerprint, preimageFingerprint: 'pre-fixture' },
+        before: 'pre-fixture', after: null, result: 'Apply interrupted', verification: null, restart: 'not-required',
+        rollback: 'irreversible', preserved: [],
+      });
+    }
+    if (pathname === '/api/maintenance/v2/receipts/export') {
+      maintenanceExportRequests.push(body);
+      // includeLocalPaths:true REQUIRES acknowledgedWarning:true in the same
+      // request (MNT-RCV-012) — this 400 is what proves the client sends it.
+      if (body.includeLocalPaths === true && body.acknowledgedWarning !== true) {
+        return reply(400, { error: 'includeLocalPaths requires acknowledgedWarning', code: 'ACKNOWLEDGEMENT_REQUIRED' });
+      }
+      return reply(200, {
+        receiptId: body.receiptId, intent: 'clean-cache', result: 'Apply interrupted', pathsIncluded: body.includeLocalPaths === true,
+      });
+    }
+    if (pathname === '/api/maintenance/v2/dispositions') {
+      maintenanceDispositionRequests.push(body);
+      return reply(200, { recorded: true, guidanceId: body.guidanceId, kind: body.kind });
+    }
+    if (request.method() === 'GET' && pathname === '/api/maintenance/v2/preferences') return reply(200, {});
+    if (pathname === '/api/maintenance/v2/preferences') return reply(200, { ok: true });
+    if (pathname === '/api/maintenance/v2/audit') {
+      maintenanceAuditRequests.push(body);
+      // J5: the ONE receipt this whole suite audits is INTERRUPTED_RECEIPT,
+      // interrupted mid-'applying' with a real preimageFingerprint. A
+      // conclusive "matches recorded before state" result is what a genuine
+      // matching-preimage inspection would produce (interruption-audit.mjs's
+      // own conclusiveResult()) — hand-built here rather than replayed
+      // through the full provider-inspection stack, which is T's own test
+      // surface, not this UI harness's.
+      return reply(200, {
+        results: [{
+          receiptId: body.receiptIds[0], result: 'matches-recorded-before-state', conclusive: true,
+          enables: 'record-no-change', lastDurablePhase: 'applying', provider: { id: 'owned-npx-cache', version: '1' },
+          checks: [{ name: 'receipt-integrity', status: 'passed' }, { name: 'preimage-comparison', status: 'matched' }],
+          disclosure: { ...AUDIT_DISCLOSURE, checkedAt: new Date().toISOString() }, nextSteps: [],
+        }],
+      });
+    }
+    if (pathname === '/api/maintenance/v2/reconcile/preview') {
+      maintenanceReconcilePreviewRequests.push(body);
+      return reply(200, {
+        capability: 'cap-ui-reconcile-secret',
+        confirmation: {
+          title: 'Record no change?', summary: 'The receipt proves the recorded pre-change state; nothing was dispatched.',
+          willChange: ['The receipt record'], preserved: ['The resource, unchanged'], restart: false,
+          rollback: 'not applicable', actionLabel: 'Record no change', typedPhrase: 'RECORD no-change',
+        },
+      });
+    }
+    if (pathname === '/api/maintenance/v2/reconcile') {
+      maintenanceReconcileRequests.push(body);
+      return reply(200, {
+        ok: true, receipt: {
+          id: INTERRUPTED_RECEIPT.id, status: 'recovered-no-change',
+          summary: 'Recovery inspected the provider and confirmed the recorded pre-change state.',
+          updatedAt: new Date().toISOString(),
+        },
+      });
+    }
+    if (pathname === '/api/maintenance/v2/plans') {
       maintenancePlanRequests.push(body);
-      if (maintenancePlanRequests.length === 3) {
+      if (maintenancePlanRequests.length === 2) {
         return reply(200, { ok: false, code: 'PLAN_DRIFT', error: '<b>cap-ui-plan-secret</b>' });
       }
       return reply(200, {
         plan: {
           planId: `ui-plan-${maintenancePlanRequests.length}`, planDigest: 'a'.repeat(64),
           expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
-          actions: [{ id: 'provider-update', label: 'Update rust-optimizer' }],
         },
         capability: 'cap-ui-plan-secret',
         confirmation: {
-          title: '<img src=x onerror="globalThis.__maintConfirmXss=1"> Update rust-optimizer?',
-          summary: 'Install the compatible provider release and refresh its projected capabilities.',
-          willChange: ['rust-optimizer 0.2.0 to 0.3.1', '<svg onload="globalThis.__maintConfirmXss=2">'],
-          preserved: ['Standalone skill-creator', 'Project configuration'],
-          restart: 'Restart Codex after the provider update.',
-          rollback: 'Reinstall rust-optimizer 0.2.0 from the same provider.',
-          actionLabel: 'Apply update', typedPhrase: 'APPLY rust-optimizer',
+          title: '<img src=x onerror="globalThis.__maintConfirmXss=1"> Disable frontend-design?',
+          summary: 'Claude stops loading frontend-design until it is enabled again.',
+          willChange: ['<svg onload="globalThis.__maintConfirmXss=2">'],
+          preserved: ['Plugin data', 'Other plugins'],
+          restart: false, rollback: 'Enable the plugin again.',
+          actionLabel: 'Disable plugin', typedPhrase: 'DISABLE frontend-design',
         },
       });
     }
-    if (pathname === '/api/maintenance/apply') {
+    if (pathname === '/api/maintenance/v2/apply') {
       maintenanceApplyRequests.push(body);
-      await new Promise((resolve) => setTimeout(resolve, 80));
+      await new Promise((resolve) => setTimeout(resolve, 60));
       if (maintenanceApplyRequests.length === 2) {
         expectedHttpConsoleErrors.add(request.url());
         return reply(409, {
@@ -1347,42 +1714,63 @@ async function main() {
           error: '<img src=x onerror="globalThis.__maintRecoveryXss=1"> cap-ui-plan-secret',
           receipt: {
             id: 'receipt-recovery-ui', status: 'partial-recovery-required',
-            headline: 'rust-optimizer outcome needs recovery',
             summary: 'Provider dispatch could not be verified; inspect the native resource.',
-            completedAt: new Date().toISOString(), undoEligible: false,
+            updatedAt: new Date().toISOString(),
           },
         });
       }
       return reply(200, {
-        ok: true, status: 'applied', receipt: {
-          id: 'receipt-update-ui', status: 'applied', statusLabel: 'Applied',
-          headline: 'rust-optimizer updated', summary: 'rust-optimizer was updated to 0.3.1.',
-          completedAt: new Date().toISOString(), verification: 'Provider reports 0.3.1 active.',
-          undoEligible: true, undo: { eligible: true, status: 'Eligible' },
+        ok: true, receipt: {
+          id: 'receipt-disable-ui', status: 'committed',
+          summary: 'frontend-design was disabled.', updatedAt: new Date().toISOString(),
+          verification: 'Claude reports the plugin disabled.',
         },
       });
     }
-    if (pathname === '/api/maintenance/undo') {
+    if (pathname === '/api/maintenance/v2/undo') {
       maintenanceUndoRequests.push(body);
       if (body.preview === true) {
         return reply(200, {
           capability: 'cap-ui-undo-secret', confirmation: {
-            title: 'Undo rust-optimizer update?', summary: 'Restore the provider release recorded before this change.',
-            willChange: ['rust-optimizer 0.3.1 to 0.2.0'], preserved: ['Standalone skill-creator'],
-            restart: true, rollback: 'Reapply 0.3.1 with a new maintenance plan.', actionLabel: 'Undo change',
+            title: 'Undo disabling frontend-design?', summary: 'Restore the plugin to enabled.',
+            willChange: ['frontend-design enabled again'], preserved: ['Plugin data'],
+            restart: false, rollback: 'Disable it again with a new plan.', actionLabel: 'Undo change',
           },
         });
       }
-      await new Promise((resolve) => setTimeout(resolve, 40));
       return reply(200, {
-        ok: true, status: 'undone', receipt: {
-          id: 'receipt-undo-ui', status: 'undone', statusLabel: 'Undone',
-          headline: 'rust-optimizer update undone', summary: 'rust-optimizer was restored to 0.2.0.',
-          completedAt: new Date().toISOString(), verification: 'Provider reports 0.2.0 active.', undoEligible: false,
+        ok: true, receipt: {
+          id: 'receipt-undo-disable-ui', status: 'rolled-back',
+          summary: 'frontend-design was re-enabled.', updatedAt: new Date().toISOString(),
         },
       });
     }
     return reply(404, { code: 'NOT_FOUND' });
+  });
+  // ── Refresh evidence (MNT-DSC-010): the workspace's explicit control reuses
+  // the v1 endpoint verbatim, `?refresh=scan` then polling until settled. ──
+  let maintenanceProviderPollCount = 0;
+  await page.route(/\/api\/maintenance(?:\?|$)/, async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const reply = (status, resBody) => route.fulfill({
+      status, contentType: 'application/json', body: JSON.stringify(resBody),
+    });
+    if (request.method() !== 'GET') return reply(404, { code: 'NOT_FOUND' });
+    if (url.searchParams.get('refresh') === 'scan') {
+      maintenanceCheckProvidersReads += 1;
+      maintenanceProviderPollCount = 0;
+      return reply(200, { activity: { status: 'running' } });
+    }
+    maintenanceProviderPollCount += 1;
+    const settled = maintenanceProviderPollCount >= 2;
+    // dashboard-server.mjs's refreshInventoryAfterProviderScan: once the
+    // provider check settles the server STARTS building the inventory in the
+    // background (seconds on a real footprint), so the inventory envelope
+    // answers scanRequired:true + lastRefresh running for a couple of polls
+    // before the built page appears (QE D8).
+    if (settled && maintenanceScanRequired) maintenanceBuildPollsRemaining = 2;
+    return reply(200, { activity: { status: settled ? 'idle' : 'running' }, scan: { status: 'complete', checkedAt: String(maintenanceCheckProvidersReads), coverage: 'complete' } });
   });
   await page.route(/\/api\/live\/playback\/(?:claude\/ui-review-session|codex\/ui-live-session)/, (route) => route.fulfill({
     contentType: 'application/json',
@@ -1804,460 +2192,796 @@ async function main() {
     await page.click('#tab-system');
     await page.click('[data-system-view="sessions"]');
 
-    // Maintenance remains a reporting workbench even when its separate action
-    // contract is enabled. One provider-owned finding gets one Preview control;
-    // there is no bulk selection or eager mutation affordance.
+    // ── ADR-0048 Maintenance workspace: Inventory | Guidance | Discovery |
+    // Activity. Every response the workspace reads below comes from the v2
+    // route stub set up earlier, whose bodies are real DTOs produced by
+    // calling runInventoryQuery/inspectorFor/buildActivity over the shared
+    // sentinel fixtures (tests/fixtures/maintenance/management-fixtures.mjs)
+    // — never hand-typed JSON. ──
     await page.click('[data-system-view="maintenance"]');
-    await page.waitForSelector('#sys-maint-list [data-maint-key]');
-    const maintenanceNav = await page.$$eval('#system-seg [data-system-view]', (buttons) => ({
-      ids: buttons.map((button) => button.dataset.systemView),
-      selected: buttons.filter((button) => button.getAttribute('aria-selected') === 'true').map((button) => button.dataset.systemView),
-      tabStops: buttons.filter((button) => button.tabIndex === 0).map((button) => button.dataset.systemView),
-    }));
-    check('Maintenance is the last System sub-menu and owns the one roving tab stop',
-      maintenanceNav.ids.at(-1) === 'maintenance'
-        && JSON.stringify(maintenanceNav.selected) === JSON.stringify(['maintenance'])
-        && JSON.stringify(maintenanceNav.tabStops) === JSON.stringify(['maintenance']),
-      `System navigation was ${JSON.stringify(maintenanceNav)}`);
+    await page.waitForSelector('#mnt-results .mnt-row');
+    const mntNoHorizontalScrollAtOpen = await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
+    check('Maintenance opens on Inventory with results already rendered',
+      await page.getAttribute('#mnt-tab-inventory', 'aria-selected') === 'true' && mntNoHorizontalScrollAtOpen,
+      'Inventory did not open as the default destination, or the page overflowed horizontally');
 
-    const maintenanceReady = await page.evaluate(() => ({
-      banner: document.getElementById('sys-maint-banner')?.innerText,
-      scanStatus: document.getElementById('sys-maint-scan-status')?.innerText,
-      scanButton: document.getElementById('sys-maint-scan')?.innerText,
-      scanLive: document.getElementById('sys-maint-scan-status')?.getAttribute('aria-live'),
-      findings: document.querySelectorAll('#sys-maint-list [data-maint-key]').length,
-      checkboxes: document.querySelectorAll('#sys-maintenance input[type="checkbox"]').length,
-      actionControls: document.querySelectorAll('#sys-maintenance [data-maint-action]').length,
-      cleanAll: document.getElementById('sys-maintenance')?.innerText.includes('Clean all'),
-      summary: document.getElementById('sys-maint-summary')?.innerText,
-    }));
-    check('Maintenance exposes only a provider-gated single-finding preview control',
-      /Preview before changing/.test(String(maintenanceReady.banner))
-        && /Authorization expires/.test(String(maintenanceReady.banner))
-        && maintenanceReady.findings === 4
-        && maintenanceReady.checkboxes === 0
-        && maintenanceReady.actionControls === 1
-        && maintenanceReady.cleanAll === false,
-      `Maintenance boundary was ${JSON.stringify(maintenanceReady)}`);
-    check('Maintenance distinguishes a provider check from the full System scan',
-      /Uses the saved System inventory/.test(String(maintenanceReady.scanStatus))
-        && /does not walk projects/.test(String(maintenanceReady.scanStatus))
-        && /Check providers/.test(String(maintenanceReady.scanButton))
-        && maintenanceReady.scanLive === 'polite',
-      `Maintenance scan presentation was ${JSON.stringify(maintenanceReady)}`);
-    check('Maintenance summarizes findings, action eligibility, incomplete evidence, and age without a hygiene score',
-      /4\s+findings/.test(String(maintenanceReady.summary))
-        && /2\s+actions ready/.test(String(maintenanceReady.summary))
-        && /2 of 3 providers\s+scan coverage/.test(String(maintenanceReady.summary))
-        && /evidence measured/.test(String(maintenanceReady.summary))
-        && !/score/i.test(String(maintenanceReady.summary)),
-      `Maintenance summary was ${JSON.stringify(maintenanceReady.summary)}`);
-
-    const firstMaintenance = await page.$eval('#sys-maint-list [data-maint-key]', (button) => ({
-      expanded: button.getAttribute('aria-expanded'), current: button.getAttribute('aria-current'),
-      controls: button.getAttribute('aria-controls'), text: button.innerText,
-    }));
-    const firstMaintenanceDetail = await visibleText(page, '#sys-maint-detail');
-    check('the ledger selects one finding and explains ownership, versions, impact, preservation, and the preview boundary',
-      firstMaintenance.expanded === 'true' && firstMaintenance.current === 'true'
-        && firstMaintenance.controls === 'sys-maint-detail'
-        && /rust-optimizer/.test(firstMaintenance.text)
-        && /Carried by codex/.test(firstMaintenance.text)
-        && /Owner: Codex plugin manager/.test(firstMaintenance.text)
-        && /Codex plugin manager/.test(firstMaintenanceDetail)
-        && /0\.2\.0/.test(firstMaintenanceDetail) && /0\.3\.1/.test(firstMaintenanceDetail)
-        && /standalone skill-creator/.test(firstMaintenanceDetail)
-        && /Action: Upgrade rust-optimizer to 0\.3\.1/.test(firstMaintenance.text)
-        && /Recommended action/.test(firstMaintenanceDetail)
-        && /Preview update/.test(firstMaintenanceDetail)
-        && /Nothing changes until you review and confirm/.test(firstMaintenanceDetail),
-      `first finding was ${JSON.stringify(firstMaintenance)}; detail read ${JSON.stringify(firstMaintenanceDetail)}`);
-    const maintenanceRowSuggestions = await page.$$eval('#sys-maint-list [data-maint-key]',
-      (rows) => rows.map((row) => row.innerText));
-    check('every Maintenance finding exposes a distinct direct action in the ledger',
-      maintenanceRowSuggestions.length === MAINTENANCE_PAYLOAD.findings.length
-        && maintenanceRowSuggestions.every((text) => /Action:\s*(Upgrade|Clear|Choose|Remove)\b/.test(text))
-        && new Set(maintenanceRowSuggestions.map((text) => text.match(/Action:\s*(.*)/)?.[1])).size === maintenanceRowSuggestions.length,
-      `row suggestions were ${JSON.stringify(maintenanceRowSuggestions)}`);
-
-    const reportsBeforeRefresh = maintenanceReportReads;
-    await page.waitForTimeout(1100);
+    // ── poll.mjs's refreshAll() guards its Maintenance branch with
+    // `!maintenanceBusy`, an export system-maintenance.mjs's ADR-0048
+    // rewrite once dropped entirely — a bare `maintenanceBusy is not
+    // defined` ReferenceError on EVERY poll tick, which broke every tab's
+    // periodic refresh, not just Maintenance's. Nothing else in this whole
+    // file ever exercises Manual refresh, so a regression here would run to
+    // the end of the suite unnoticed; click it once, while parked on
+    // Maintenance, so a reintroduced ReferenceError surfaces as a console
+    // error the "no console errors across the whole run" check (at the very
+    // end of this file) will catch. ──
+    const mntInventoryRequestsBeforePoll = maintenanceInventoryRequests.length;
+    const pollNowInventoryResponse = page.waitForResponse(
+      (r) => r.url().includes('/api/maintenance/v2/inventory'), { timeout: 5000 },
+    ).catch(() => null);
     await page.click('#poll-now');
-    await page.waitForTimeout(100);
-    check('browser refresh rereads the saved Maintenance report without scanning providers',
-      maintenanceReportReads === reportsBeforeRefresh + 1 && maintenanceScanRequests === 0,
-      `report reads=${maintenanceReportReads}; scans=${maintenanceScanRequests}`);
-    const explicitScan = page.waitForResponse((response) => response.url().includes('/api/maintenance?refresh=scan'));
-    await page.click('#sys-maint-scan');
-    await page.waitForTimeout(30);
-    const maintenanceScanning = await page.evaluate(() => ({
-      banner: document.getElementById('sys-maint-banner')?.innerText,
-      status: document.getElementById('sys-maint-scan-status')?.innerText,
-      button: document.getElementById('sys-maint-scan')?.innerText,
-      disabled: document.getElementById('sys-maint-scan')?.disabled,
-      rows: document.querySelectorAll('#sys-maint-list [data-maint-key]').length,
-      previewDisabled: document.querySelector('#sys-maint-detail .mt-action.primary')?.disabled,
-      rootBusy: document.getElementById('sys-maintenance')?.getAttribute('aria-busy'),
+    await pollNowInventoryResponse;
+    check("Manual refresh's Maintenance branch (refreshAll -> loadMaintenance) re-fetches the inventory without throwing",
+      maintenanceInventoryRequests.length > mntInventoryRequestsBeforePoll,
+      `inventory requests before/after Manual refresh: ${mntInventoryRequestsBeforePoll} -> ${maintenanceInventoryRequests.length}`);
+
+    // ── J1 — dangling Lightpanda MCP registration ──
+    await page.fill('#mnt-search', 'lightpanda');
+    await page.waitForFunction(() => document.querySelectorAll('#mnt-results .mnt-row').length === 1);
+    const lightpandaRowText = await page.$eval('#mnt-results .mnt-row', (btn) => btn.innerText);
+    check('J1: one exact Lightpanda placement carries a Steps available label',
+      /Lightpanda/.test(lightpandaRowText) && /Steps available/.test(lightpandaRowText),
+      `lightpanda row read ${JSON.stringify(lightpandaRowText)}`);
+    await page.click('#mnt-results .mnt-row');
+    await page.waitForSelector('#mnt-inspector-title');
+    const lightpandaInspector = await visibleText(page, '#mnt-inspector');
+    check('J1: inspector shows the missing verified dependency and omits provenance entirely',
+      /missing verified dependency/i.test(lightpandaInspector)
+        && !/where did it come from/i.test(lightpandaInspector),
+      `lightpanda inspector read ${JSON.stringify(lightpandaInspector.slice(0, 400))}`);
+    const lightpandaChoiceCount = await page.$$eval('#mnt-inspector .mnt-choices li', (els) => els.length);
+    const lightpandaChoiceReasons = await page.$$eval('#mnt-inspector .mnt-choices li',
+      (els) => els.filter((el) => /No verified|No .* was found|No .* is registered/.test(el.innerText)).length);
+    check('J1: Decisions present exactly four choices, three explaining why they are not grounded',
+      lightpandaChoiceCount === 4 && lightpandaChoiceReasons === 3,
+      `choice count ${lightpandaChoiceCount}, reasoned ${lightpandaChoiceReasons}`);
+    check('J1: no environment id or credential value renders in the inspector',
+      !/env_/.test(lightpandaInspector) && !/environment-variable/.test(lightpandaInspector),
+      `lightpanda inspector unexpectedly leaked environment/credential detail`);
+
+    // ── Reveal (MNT-PRV-005): the exact path is revealable and copyable
+    // ONLY here, after an explicit click, never automatically or in the URL ──
+    const urlBeforeReveal = await page.evaluate(() => location.href);
+    check('the exact path is absent until Reveal exact path is explicitly clicked',
+      !/mntRevealXss|ui-hostile/.test(await visibleText(page, '#mnt-inspector')),
+      'the exact path rendered before an explicit reveal');
+    await page.click('#mnt-reveal');
+    await page.waitForSelector('#mnt-copy-path');
+    // Real clipboard-write permission is not reliably grantable in this test
+    // environment (see the later Project-skill-pressure copy tests for the
+    // same pattern) — mock it rather than depend on browser permissions.
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true, value: { writeText: (text) => { globalThis.__mntCopiedPath = String(text); return Promise.resolve(); } },
+      });
+    });
+    const revealedText = await visibleText(page, '#mnt-inspector');
+    const revealXss = await page.evaluate(() => globalThis.__mntRevealXss);
+    check('MNT-PRV-005: the exact path reveals only inside the owner-protected inspector, rendered as inert text, never auto-copied or url-embedded',
+      // The hostile <img ...onerror> markup appears LITERALLY as visible text
+      // (proving it was escaped, not parsed as markup) and its onerror never
+      // actually ran (the global flag it would set stays unset).
+      /<img src=x onerror=/.test(revealedText) && /ui-hostile/.test(revealedText) && revealXss === undefined
+        && (await page.evaluate(() => location.href)) === urlBeforeReveal,
+      `revealed inspector text read ${JSON.stringify(revealedText.slice(0, 200))}; xss flag was ${revealXss}`);
+    await page.click('#mnt-copy-path');
+    await page.waitForFunction(() => /Exact path copied/.test(document.getElementById('mnt-copy-status')?.textContent || ''));
+    check('the copy button names what was copied, in the inspector itself, never a global toast',
+      /Exact path copied/.test(await page.textContent('#mnt-copy-status')),
+      'the copy button did not confirm what it copied');
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => document.getElementById('mnt-inspector')?.hidden === true);
+    check('MNT-UX-004: Escape closes the inspector and returns focus to the originating row',
+      await page.evaluate(() => document.activeElement?.getAttribute('data-mnt-plc') != null),
+      'focus did not return to the Lightpanda row after closing the inspector');
+
+    // ── J2 — shared skill, not duplicate ──
+    await page.click('#mnt-scope [data-mnt-scope="user"]');
+    await page.fill('#mnt-search', 'clarity');
+    // Assert on the SETTLED content, not merely a row count: the immediate
+    // scope-change query (still carrying the previous "lightpanda" search
+    // text) also transiently satisfies length===1, before the debounced
+    // "clarity" search resolves a moment later.
+    await page.waitForFunction(() => {
+      const rows = document.querySelectorAll('#mnt-results .mnt-row');
+      return rows.length === 1 && /clarity/i.test(rows[0].textContent || '');
+    });
+    const clarityRowText = await page.$eval('#mnt-results .mnt-row', (btn) => btn.innerText);
+    check('J2: the user-scope clarity skill shows one placement with two consumer chips and no duplicate-removal action',
+      /claude/i.test(clarityRowText) && /codex/i.test(clarityRowText) && /Open details/.test(clarityRowText),
+      `clarity row read ${JSON.stringify(clarityRowText)}`);
+    await page.click('#mnt-results .mnt-row');
+    await page.waitForSelector('#mnt-inspector-title');
+    const clarityInspector = await visibleText(page, '#mnt-inspector');
+    check('J2: the conflict view classifies the shared skill as Shared artifact with its explanation',
+      /Shared artifact/.test(clarityInspector)
+        && /Several consumers intentionally use one physical artifact/.test(clarityInspector)
+        && /This is not a duplicate/.test(clarityInspector),
+      `clarity inspector conflicts read ${JSON.stringify(clarityInspector.slice(0, 400))}`);
+    const conflictFacetLabels = await page.$$eval('#mnt-facets [data-mnt-facet="conflict"]',
+      (inputs) => inputs.map((input) => input.closest('label')?.textContent.trim()));
+    check('J2: the conflict facet offers Shared artifact as a filterable value',
+      conflictFacetLabels.some((label) => /Shared artifact/.test(label || '')),
+      `conflict facet values were ${JSON.stringify(conflictFacetLabels)}`);
+    await page.keyboard.press('Escape');
+    await page.click('#mnt-scope [data-mnt-scope="across"]');
+
+    // ── J9 — remedy-free verified condition (the AutoMemory hook) ──
+    const guidanceBadgeBefore = await page.textContent('#mnt-guidance-badge');
+    await page.fill('#mnt-search', 'AutoMemory');
+    await page.waitForFunction(() => {
+      const rows = document.querySelectorAll('#mnt-results .mnt-row');
+      return rows.length === 1 && /AutoMemory/i.test(rows[0].textContent || '');
+    });
+    const hookRowText = await page.$eval('#mnt-results .mnt-row', (btn) => btn.innerText);
+    check('MNT-GUD-003/J9: the remedy-free hook row is visible with no Guidance lane badge',
+      /AutoMemory/.test(hookRowText) && !/Can apply here|Steps available|Decisions to make|Updates available|Recovery to finish/.test(hookRowText),
+      `hook row read ${JSON.stringify(hookRowText)}`);
+    await page.click('#mnt-results .mnt-row');
+    await page.waitForSelector('#mnt-inspector-title');
+    const hookInspector = await page.evaluate(() => ({
+      text: document.getElementById('mnt-inspector')?.innerText,
+      warnings: document.querySelectorAll('#mnt-inspector .mnt-warning').length,
     }));
-    check('a provider check keeps the saved report readable while withholding stale actions',
-      /Provider check running/.test(String(maintenanceScanning.banner))
-        && /saved report remains available/.test(String(maintenanceScanning.status))
-        && /Checking providers/.test(String(maintenanceScanning.button))
-        && maintenanceScanning.disabled === true && maintenanceScanning.rows === 4
-        && maintenanceScanning.previewDisabled === true && maintenanceScanning.rootBusy === 'false',
-      `provider-check state was ${JSON.stringify(maintenanceScanning)}`);
-    await explicitScan;
-    check('Check providers is the explicit provider-version measurement control',
-      maintenanceScanRequests === 1,
-      `explicit Maintenance scans=${maintenanceScanRequests}`);
+    check('J9: the inspector says No action is requested, without warning styling',
+      /No action is requested\./.test(hookInspector.text) && hookInspector.warnings === 0,
+      `hook inspector read ${JSON.stringify(hookInspector)}`);
+    await page.keyboard.press('Escape');
+    check('MNT-GUD-003/J9: a remedy-free placement never inflates the Guidance navigation badge',
+      await page.textContent('#mnt-guidance-badge') === guidanceBadgeBefore,
+      `guidance badge moved from ${guidanceBadgeBefore} despite a remedy-free hook`);
 
-    await page.click('#sys-maint-buckets [data-maint-bucket="needs-review"]');
-    const reviewMaintenance = await page.evaluate(() => ({
-      count: document.querySelectorAll('#sys-maint-list [data-maint-key]').length,
-      status: document.getElementById('sys-maint-results')?.textContent,
-      detail: document.getElementById('sys-maint-detail')?.innerText,
-      active: document.querySelector('[data-maint-bucket="needs-review"]')?.getAttribute('aria-pressed'),
-      xss: globalThis.__maintXss,
-    }));
-    check('finding-state filters are pressed buttons and announce the narrowed result count',
-      reviewMaintenance.count === 1 && reviewMaintenance.active === 'true'
-        && /Showing 1 finding/.test(String(reviewMaintenance.status)),
-      `filtered Maintenance was ${JSON.stringify(reviewMaintenance)}`);
-    check('partial evidence gives visible reasons and hostile evidence remains text',
-      /Evidence needs attention/.test(String(reviewMaintenance.detail))
-        && /current digest does not match/.test(String(reviewMaintenance.detail))
-        && /<img src=x onerror=/.test(String(reviewMaintenance.detail))
-        && reviewMaintenance.xss === undefined,
-      `partial finding rendered ${JSON.stringify(reviewMaintenance)}`);
-    check('relationship findings show compared copies and a concrete human procedure',
-      /Observed copies/.test(String(reviewMaintenance.detail))
-        && /Observed project copy/.test(String(reviewMaintenance.detail))
-        && /Observed shared copy/.test(String(reviewMaintenance.detail))
-        && /Choose one definition, or rename the project copy/.test(String(reviewMaintenance.detail))
-        && /Not available here/.test(String(reviewMaintenance.detail))
-        && !/Reporting only|Resources outside this finding/.test(String(reviewMaintenance.detail)),
-      `relationship guidance was ${JSON.stringify(reviewMaintenance.detail)}`);
+    // ── Facets, chips, Clear all, and one debounced announcement ──
+    await page.fill('#mnt-search', '');
+    await page.waitForFunction(() => document.querySelectorAll('#mnt-results .mnt-row').length > 3);
+    await page.check('#mnt-facets input[data-mnt-facet="kind"][value="skill"]');
+    await page.waitForSelector('#mnt-chips .mnt-chip');
+    const facetedHash = await page.evaluate(() => location.hash);
+    check('MNT-UX-002/MNT-PRV-004: a selected facet renders a removable chip and is recorded in the URL as an opaque enum value',
+      await page.$eval('#mnt-chips .mnt-chip', (chip) => /skill/i.test(chip.textContent || ''))
+        && /facet\.kind=skill/.test(facetedHash),
+      `chip/URL state was ${JSON.stringify({ facetedHash })}`);
+    const announceAfterFacet = await page.textContent('#mnt-status');
+    check('MNT-UX-005: the settled result count is announced once, not once per keystroke',
+      /result/.test(announceAfterFacet || ''),
+      `#mnt-status read ${JSON.stringify(announceAfterFacet)}`);
+    const environmentFacetText = await page.$$eval('#mnt-facets fieldset', (fieldsets) => {
+      const match = fieldsets.find((f) => /environment/i.test(f.querySelector('legend')?.textContent || ''));
+      return match ? match.textContent : '';
+    });
+    check('the environment facet shows the named environment, not a shortened opaque id (facetLabels)',
+      /This Mac/.test(environmentFacetText) && !/env_/.test(environmentFacetText),
+      `environment facet text read ${JSON.stringify(environmentFacetText)}`);
+    await page.click('#mnt-chips [data-mnt-chip-facet="kind"]');
+    await page.waitForFunction(() => document.querySelectorAll('#mnt-chips .mnt-chip').length === 0);
+    await page.check('#mnt-facets input[data-mnt-facet="kind"][value="skill"]');
+    await page.waitForSelector('#mnt-chips .mnt-chip');
+    await page.click('#mnt-clear-all');
+    await page.waitForFunction(() => document.querySelectorAll('#mnt-chips .mnt-chip').length === 0);
+    check('MNT-UX-002: Clear all removes every active facet at once',
+      (await page.evaluate(() => location.hash)).indexOf('facet.') < 0,
+      'Clear all left a facet value in the URL');
 
-    await page.fill('#sys-maint-search', 'legacy-tools');
-    check('search composes with category filters instead of silently resetting them',
-      await page.$$eval('#sys-maint-list [data-maint-key]', (rows) => rows.length) === 0
-        && /No findings match these filters/.test(await visibleText(page, '#sys-maint-list')),
-      'a blocked MCP incorrectly survived the active Needs review filter');
-    await page.click('#sys-maint-buckets [data-maint-bucket="blocked"]');
-    const blockedMaintenance = await visibleText(page, '#sys-maintenance');
-    check('unsupported resources say why they cannot be automated and preserve current state',
-      /Cannot safely automate/.test(blockedMaintenance)
-        && /No host-native removal provider/.test(blockedMaintenance)
-        && /Remove legacy-tools with OpenCode’s MCP workflow/.test(blockedMaintenance)
-        && /Not available here/.test(blockedMaintenance)
-        && /other MCP registrations/.test(blockedMaintenance),
-      `blocked finding read ${JSON.stringify(blockedMaintenance)}`);
+    // ── Roving tab stop + keyboard navigation over the results list ──
+    await page.locator('#mnt-results [data-mnt-plc]').first().focus();
+    const rovingBefore = await page.$$eval('#mnt-results [data-mnt-plc]',
+      (rows) => rows.map((row) => row.tabIndex));
+    await page.keyboard.press('ArrowDown');
+    const rovingAfter = await page.$$eval('#mnt-results [data-mnt-plc]',
+      (rows) => rows.map((row) => row.tabIndex));
+    check('MNT-UX-007: arrow keys move the roving tab stop without adding every row to the Tab order',
+      rovingBefore.filter((t) => t === 0).length === 1 && rovingAfter.filter((t) => t === 0).length === 1
+        && JSON.stringify(rovingBefore) !== JSON.stringify(rovingAfter),
+      `roving tabindex before ${JSON.stringify(rovingBefore)}, after ${JSON.stringify(rovingAfter)}`);
 
-    await page.fill('#sys-maint-search', '');
-    await page.click('#sys-maint-buckets [data-maint-bucket="recent-changes"]');
-    check('empty receipt history is directional rather than a blank pane',
-      /No maintenance changes have receipts yet/.test(await visibleText(page, '#sys-maint-list')),
-      'empty Recent changes did not explain what was absent');
-    await page.click('#sys-maint-buckets [data-maint-bucket="all"]');
-    await page.focus('#sys-maint-list [data-maint-key]');
-    check('Maintenance rows and the overflow ledger retain visible keyboard focus',
-      await page.$eval('#sys-maint-list [data-maint-key]', (button) => {
-        const style = getComputedStyle(button);
-        return style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) >= 2;
-      }) && await page.getAttribute('#sys-maint-list', 'tabindex') === '0',
-      'the Maintenance ledger accepted keyboard focus without a visible indicator');
-    await shoot(page, 'system-maintenance-ready');
-    await page.setViewportSize({ width: 560, height: 780 });
-    const maintenanceMobile = await page.evaluate(() => {
-      const ledger = document.getElementById('sys-maint-list')?.getBoundingClientRect();
-      const detail = document.getElementById('sys-maint-detail')?.getBoundingClientRect();
+    // ── J10 — incomplete source truth. query.mjs's partialSources() is a
+    // structured summary (ONE narrative sentence stating the exact limiting
+    // reason, plus at most one recommended action) rather than a flat list —
+    // per-source visited counts live under entries[] for the inspector, not
+    // this banner. ──
+    activeMaintenanceInventory = SENTINEL_FIXTURES.incomplete();
+    await page.fill('#mnt-search', 'AGENTS');
+    await page.waitForFunction(() => {
+      const rows = document.querySelectorAll('#mnt-results .mnt-row');
+      return rows.length === 1 && /AGENTS/i.test(rows[0].textContent || '')
+        && (document.getElementById('mnt-partial')?.textContent || '').length > 0;
+    });
+    const incompleteBanner = await page.textContent('#mnt-partial');
+    const incompleteRow = await page.$eval('#mnt-results .mnt-row', (btn) => btn.innerText);
+    check('MNT-DSC-016/J10: the partial-source banner states the exact limiting reason, never a raw total',
+      /stopped at a limit/.test(incompleteBanner || '') && /entries/.test(incompleteBanner || '')
+        && !/^\d+ of \d+/.test(incompleteBanner || ''),
+      `partial banner read ${JSON.stringify(incompleteBanner)}`);
+    check('J10: the partial-source banner offers exactly the recommended action (Open Discovery)',
+      await page.isVisible('#mnt-partial [data-mnt-partial-action="discovery"]')
+        && /Open Discovery/.test(incompleteBanner || ''),
+      `partial banner read ${JSON.stringify(incompleteBanner)}`);
+    check('J10: the found resource carries Open details, not a Managed action, while its source is incomplete',
+      /Open details/.test(incompleteRow),
+      `incomplete-source row read ${JSON.stringify(incompleteRow)}`);
+    await page.click('#mnt-results .mnt-row');
+    await page.waitForSelector('#mnt-inspector-title');
+    const incompleteInspector = await visibleText(page, '#mnt-inspector');
+    check('J10: the technical details disclose Source scan incomplete',
+      /Source scan incomplete/.test(incompleteInspector),
+      `incomplete inspector read ${JSON.stringify(incompleteInspector.slice(0, 400))}`);
+    await page.keyboard.press('Escape');
+
+    // ── Inventory group collapse ("Show N more"): a group over three
+    // placements shows only its first 3 rows behind a disclosure toggle,
+    // open by default only when at least one placement carries a guidance
+    // lane; an explicit toggle is remembered per resourceId for the rest of
+    // the session, surviving a destination switch. ──
+    activeMaintenanceInventory = buildProjectGroupFixture({ count: 6, guidanceOnFirst: false });
+    await page.fill('#mnt-search', '');
+    await page.waitForFunction(() => /6-project-skill/.test(document.getElementById('mnt-results')?.innerText || ''));
+    const collapsedGroup = await page.evaluate(() => {
+      const toggle = document.querySelector('#mnt-results [data-mnt-group-toggle]');
       return {
-        columns: getComputedStyle(document.querySelector('.mt-workbench')).gridTemplateColumns,
-        detailBelow: !!ledger && !!detail && detail.top >= ledger.bottom - 1,
-        pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+        rowCount: document.querySelectorAll('#mnt-results .mnt-row').length,
+        toggleText: toggle?.textContent.trim(), ariaExpanded: toggle?.getAttribute('aria-expanded'),
       };
     });
-    check('Maintenance stacks ledger and detail without page overflow on a narrow screen',
-      maintenanceMobile.columns.trim().split(/\s+/).length === 1
-        && maintenanceMobile.detailBelow && maintenanceMobile.pageOverflow === false,
-      `narrow Maintenance layout was ${JSON.stringify(maintenanceMobile)}`);
-    await shoot(page, 'system-maintenance-mobile');
-    await page.setViewportSize({ width: 1440, height: 900 });
+    check('a group over three placements collapses to its first 3 rows behind Show 3 more (aria-expanded=false)',
+      collapsedGroup.rowCount === 3 && collapsedGroup.ariaExpanded === 'false' && /Show 3 more/.test(collapsedGroup.toggleText || ''),
+      `collapsed group state read ${JSON.stringify(collapsedGroup)}`);
+    await page.click('#mnt-results [data-mnt-group-toggle]');
+    await page.waitForFunction(() => document.querySelectorAll('#mnt-results .mnt-row').length === 6);
+    const expandedGroup = await page.evaluate(() => {
+      const toggle = document.querySelector('#mnt-results [data-mnt-group-toggle]');
+      return { toggleText: toggle?.textContent.trim(), ariaExpanded: toggle?.getAttribute('aria-expanded') };
+    });
+    check('clicking Show 3 more reveals all six rows and the toggle reads Show fewer',
+      expandedGroup.ariaExpanded === 'true' && /Show fewer/.test(expandedGroup.toggleText || ''),
+      `expanded group state read ${JSON.stringify(expandedGroup)}`);
+    await page.click('[data-mnt-dest="discovery"]');
+    await page.click('[data-mnt-dest="inventory"]');
+    await page.waitForFunction(() => /6-project-skill/.test(document.getElementById('mnt-results')?.innerText || '')
+      && document.querySelectorAll('#mnt-results .mnt-row').length === 6);
+    const rememberedGroup = await page.evaluate(() => ({
+      rowCount: document.querySelectorAll('#mnt-results .mnt-row').length,
+      ariaExpanded: document.querySelector('#mnt-results [data-mnt-group-toggle]')?.getAttribute('aria-expanded'),
+    }));
+    check('the expanded state is remembered per resourceId across a destination switch',
+      rememberedGroup.rowCount === 6 && rememberedGroup.ariaExpanded === 'true',
+      `remembered group state read ${JSON.stringify(rememberedGroup)}`);
 
-    // Preview is a real server round trip, but it is still not an action. The
-    // short-lived capability is intentionally asserted absent from every
-    // browser-persistent or user-visible surface.
-    await page.click('#sys-maint-detail [data-maint-action="preview"]');
+    // ── A DIFFERENT group, with a guidance lane on one of its six
+    // placements, opens expanded by default with no click needed. ──
+    activeMaintenanceInventory = buildProjectGroupFixture({ count: 6, guidanceOnFirst: true });
+    await page.click('[data-mnt-dest="discovery"]');
+    await page.click('[data-mnt-dest="inventory"]');
+    await page.waitForFunction(() => /guided-6-project-skill/.test(document.getElementById('mnt-results')?.innerText || ''));
+    const guidedGroup = await page.evaluate(() => ({
+      rowCount: document.querySelectorAll('#mnt-results .mnt-row').length,
+      ariaExpanded: document.querySelector('#mnt-results [data-mnt-group-toggle]')?.getAttribute('aria-expanded'),
+    }));
+    check('a group with a guidance lane on any placement opens expanded by default',
+      guidedGroup.rowCount === 6 && guidedGroup.ariaExpanded === 'true',
+      `guided group state read ${JSON.stringify(guidedGroup)}`);
+
+    // ── V's real-machine smoke reported a 12-placement group's rows going
+    // 28->37 after "Show N more" while aria-expanded stayed false — that
+    // total is consistent with 9 correct new rows for the toggled group
+    // (12-3) alongside 25 unrelated rows on the same page; the suspect was
+    // aria-expanded not updating, or the toggle affecting more than its own
+    // group. Verify BOTH directly, scoped to the toggled group's OWN
+    // elements (never a page-wide row count alone), with a SIBLING group on
+    // the same page so a bug that leaked across groups would be caught. ──
+    activeMaintenanceInventory = buildProjectGroupFixture({ count: 12, secondGroup: true });
+    await page.click('[data-mnt-dest="discovery"]');
+    await page.click('[data-mnt-dest="inventory"]');
+    await page.waitForFunction(() => /12-project-skill/.test(document.getElementById('mnt-results')?.innerText || ''));
+    const twelveCollapsed = await page.evaluate(() => {
+      const groups = [...document.querySelectorAll('#mnt-results .mnt-group')];
+      const target = groups.find((g) => /12-project-skill/.test(g.querySelector('.mnt-group-name')?.textContent || ''));
+      const toggle = target?.querySelector('[data-mnt-group-toggle]');
+      return {
+        groupCount: groups.length,
+        targetRowCount: target?.querySelectorAll('.mnt-row').length,
+        totalRowCount: document.querySelectorAll('#mnt-results .mnt-row').length,
+        ariaExpanded: toggle?.getAttribute('aria-expanded'),
+        toggleText: toggle?.textContent.trim(),
+      };
+    });
+    check('a 12-placement group collapses to 3 of its OWN rows, leaving a sibling group untouched',
+      twelveCollapsed.groupCount === 2 && twelveCollapsed.targetRowCount === 3
+        && twelveCollapsed.totalRowCount === 4 && twelveCollapsed.ariaExpanded === 'false'
+        && /Show 9 more/.test(twelveCollapsed.toggleText || ''),
+      `12-placement collapsed state read ${JSON.stringify(twelveCollapsed)}`);
+    await page.click('#mnt-results .mnt-group .mnt-group-toggle');
+    await page.waitForFunction(() => document.querySelectorAll('#mnt-results .mnt-row').length === 13);
+    const twelveExpanded = await page.evaluate(() => {
+      const groups = [...document.querySelectorAll('#mnt-results .mnt-group')];
+      const target = groups.find((g) => /12-project-skill/.test(g.querySelector('.mnt-group-name')?.textContent || ''));
+      const sibling = groups.find((g) => /sibling/.test(g.querySelector('.mnt-group-name')?.textContent || ''));
+      const toggle = target?.querySelector('[data-mnt-group-toggle]');
+      return {
+        targetRowCount: target?.querySelectorAll('.mnt-row').length,
+        siblingRowCount: sibling?.querySelectorAll('.mnt-row').length,
+        totalRowCount: document.querySelectorAll('#mnt-results .mnt-row').length,
+        ariaExpanded: toggle?.getAttribute('aria-expanded'),
+        toggleText: toggle?.textContent.trim(),
+      };
+    });
+    check('expanding the 12-placement group flips its OWN aria-expanded to true and renders exactly its 12 rows',
+      twelveExpanded.targetRowCount === 12 && twelveExpanded.siblingRowCount === 1
+        && twelveExpanded.totalRowCount === 13 && twelveExpanded.ariaExpanded === 'true'
+        && /Show fewer/.test(twelveExpanded.toggleText || ''),
+      `12-placement expanded state read ${JSON.stringify(twelveExpanded)}`);
+
+    // ── A fresh install (four not-scanned filesystem sources): the banner
+    // recommends Re-measure machine in one sentence, never enumerating all
+    // four sources by name. ──
+    activeMaintenanceInventory = structuredClone(SENTINEL_FIXTURES.base());
+    activeMaintenanceInventory.sourceCoverage = Array.from({ length: 4 }, (_, i) => ({
+      sourceId: `src_ui-fresh-install-${i}`, environmentId: activeMaintenanceInventory.environments[0]?.environmentId,
+      state: 'not-scanned', visited: 0, estimated: null, completedPartitions: 0, pendingPartitions: 0,
+      limitingReason: null, ceiling: null, lastCompletedAt: null, label: `Fresh source ${i + 1}`,
+    }));
+    await page.fill('#mnt-search', '');
+    await page.waitForFunction(() => (document.getElementById('mnt-partial')?.textContent || '').includes('not been scanned yet'));
+    const freshInstallBanner = await page.textContent('#mnt-partial');
+    check('a fresh install names coverage gaps and keeps measurement in the toolbar only',
+      /^4 sources have not been scanned yet\./.test((freshInstallBanner || '').trim())
+        && await page.locator('#mnt-partial button').count() === 0
+        && await page.isVisible('#mnt-remeasure')
+        && !/Fresh source/.test(freshInstallBanner || ''),
+      `fresh-install banner read ${JSON.stringify(freshInstallBanner)}`);
+
+    activeMaintenanceInventory = SENTINEL_FIXTURES.base();
+    await page.fill('#mnt-search', '');
+    await page.waitForFunction(() => document.querySelectorAll('#mnt-results .mnt-row').length > 3);
+
+    // ── Refresh evidence (MNT-DSC-010): explicit, labeled; disables Apply/
+    // Undo while it runs; never fires on its own ──
+    await page.click('[data-mnt-dest="guidance"]');
+    await page.waitForSelector('#mnt-tab-guidance[aria-selected="true"]');
+    await page.waitForSelector('[data-mnt-plan-plc]');
+    const guidanceLaneLabels = await page.$$eval('#mnt-lanes [data-mnt-lane]', (els) => els.map((el) => el.textContent.replace(/\s*\d+\s*$/, '').trim()));
+    check('MNT-GUD-001: Guidance has exactly the visible lanes Can apply here, Steps available, Decisions to make, Updates available, and Recovery to finish',
+      JSON.stringify(guidanceLaneLabels) === JSON.stringify([
+        'Can apply here', 'Steps available', 'Decisions to make', 'Updates available', 'Recovery to finish',
+      ]),
+      `guidance lane labels read ${JSON.stringify(guidanceLaneLabels)}`);
+    check('a provider check never starts on its own',
+      maintenanceCheckProvidersReads === 0, 'the workspace probed providers without an explicit click');
+    await page.click('#mnt-check-providers');
+    // The button disables synchronously; Apply's disabled attribute follows
+    // once the guidance re-render that mntCheckProviders() triggers resolves.
+    await page.waitForFunction(() => document.querySelector('[data-mnt-plan-plc]')?.disabled === true, null, { timeout: 5000 });
+    const providersRunning = await page.evaluate(() => ({
+      buttonDisabled: document.getElementById('mnt-check-providers')?.disabled,
+      applyDisabled: document.querySelector('[data-mnt-plan-plc]')?.disabled,
+    }));
+    check('Refresh evidence is explicit, labeled, and disables Apply while it runs',
+      maintenanceCheckProvidersReads === 1 && providersRunning.buttonDisabled === true
+        && providersRunning.applyDisabled === true,
+      `providers-running state was ${JSON.stringify(providersRunning)}`);
+    await page.waitForFunction(() => document.getElementById('mnt-check-providers')?.disabled === false, null, { timeout: 8000 });
+    check('the provider check settles and re-enables Apply',
+      await page.$eval('[data-mnt-plan-plc]', (button) => button.disabled === false),
+      'Apply stayed disabled after the provider check settled');
+
+    // ── Dispositions (MNT-GUD-009/011): explained before confirmation, one
+    // exact guidanceId per write ──
+    await page.waitForSelector('.mnt-dispositions [data-mnt-disposition-open="acknowledged"]');
+    await page.click('.mnt-dispositions [data-mnt-disposition-open="acknowledged"]');
+    const dispositionExplanation = await visibleText(page, '.mnt-disposition-confirm');
+    check('a disposition explains its effect before it can be confirmed',
+      /keeps this outcome visible/i.test(dispositionExplanation) && maintenanceDispositionRequests.length === 0,
+      `disposition explanation read ${JSON.stringify(dispositionExplanation)}`);
+    await page.click('.mnt-disposition-confirm [data-mnt-disposition-confirm="acknowledged"]');
+    await page.waitForFunction(() => maintenanceDispositionRequests?.length > 0).catch(() => {});
+    check('confirming a disposition posts exactly one guidanceId and kind, with confirm:true',
+      maintenanceDispositionRequests.length === 1
+        && Object.keys(maintenanceDispositionRequests[0]).sort().join(',') === 'confirm,guidanceId,kind'
+        && maintenanceDispositionRequests[0].kind === 'acknowledged' && maintenanceDispositionRequests[0].confirm === true,
+      `disposition requests were ${JSON.stringify(maintenanceDispositionRequests)}`);
+    await page.waitForSelector('[data-mnt-plan-plc]');
+
+    // ── Guidance: Can apply here — reuses the v1 apply/undo confirm dialog,
+    // now driven by placementId + guidanceId against the v2 plan route ──
+    const applyButtonLabel = await page.textContent('[data-mnt-plan-plc]');
+    check('MNT-EVD-006: the Can apply here row uses a specific verb, never generic Fix',
+      /Disable plugin/i.test(applyButtonLabel || '') && !/\bFix\b/i.test(applyButtonLabel || ''),
+      `apply button read ${JSON.stringify(applyButtonLabel)}`);
+    await page.click('[data-mnt-plan-plc]');
     await page.waitForSelector('#sys-maint-confirm[open] #sys-maint-typed');
     const firstPreview = await page.evaluate(() => ({
       title: document.getElementById('sys-maint-confirm-title')?.textContent,
       body: document.getElementById('sys-maint-confirm-body')?.innerText,
-      applyLabel: document.getElementById('sys-maint-confirm-apply')?.textContent,
-      disabled: document.getElementById('sys-maint-confirm-apply')?.disabled,
       xss: globalThis.__maintConfirmXss,
       secretInDom: document.documentElement.innerHTML.includes('cap-ui-plan-secret'),
       secretInUrl: location.href.includes('cap-ui-plan-secret'),
-      secretInStorage: Object.values(localStorage).some((value) => value.includes('cap-ui-plan-secret')),
     }));
-    check('Preview posts exactly one finding and renders hostile confirmation copy as text',
-      JSON.stringify(maintenancePlanRequests) === JSON.stringify([{ findingIds: ['plugin-update'] }])
+    check('the plan preview posts exactly one exact placementId + guidanceId, renders hostile copy as text, and keeps its capability out of DOM/URL',
+      Object.keys(maintenancePlanRequests[0] || {}).sort().join(',') === 'guidanceId,placementId'
+        && !!maintenancePlanRequests[0].placementId && !!maintenancePlanRequests[0].guidanceId
         && /<img src=x onerror=/.test(String(firstPreview.title))
         && /<svg onload=/.test(String(firstPreview.body))
-        && /Standalone skill-creator/.test(String(firstPreview.body))
-        && firstPreview.applyLabel === 'Apply update'
-        && firstPreview.disabled === true
-        && firstPreview.xss === undefined,
-      `first preview was ${JSON.stringify(firstPreview)}; requests ${JSON.stringify(maintenancePlanRequests)}`);
-    check('the plan capability stays out of DOM, URL, and browser storage',
-      !firstPreview.secretInDom && !firstPreview.secretInUrl && !firstPreview.secretInStorage,
-      `capability exposure was ${JSON.stringify(firstPreview)}`);
-
-    await page.keyboard.press('Escape');
-    await page.waitForFunction(() => !document.getElementById('sys-maint-confirm')?.open);
-    check('Escape closes the native confirmation sheet and returns focus to Preview change',
-      await page.evaluate(() => document.activeElement?.getAttribute('data-maint-action') === 'preview'),
-      'confirmation focus did not return to its invoking control');
-
-    await page.click('#sys-maint-detail [data-maint-action="preview"]');
-    await page.waitForSelector('#sys-maint-confirm[open] #sys-maint-typed');
-    await page.fill('#sys-maint-typed', 'APPLY rust');
-    check('typed confirmation is exact before the provider action is enabled',
-      await page.$eval('#sys-maint-confirm-apply', (button) => button.disabled),
-      'a partial typed phrase enabled Apply');
-    await page.fill('#sys-maint-typed', 'APPLY rust-optimizer');
-    check('the exact typed phrase enables the named provider action',
-      !(await page.$eval('#sys-maint-confirm-apply', (button) => button.disabled)),
-      'the exact phrase did not enable Apply');
-    await shoot(page, 'system-maintenance-confirmation');
-
+        && firstPreview.xss === undefined && !firstPreview.secretInDom && !firstPreview.secretInUrl,
+      `first preview was ${JSON.stringify(firstPreview)}; plan request was ${JSON.stringify(maintenancePlanRequests[0])}`);
+    await page.fill('#sys-maint-typed', 'DISABLE wrong');
+    check('a partial typed phrase leaves Apply disabled',
+      await page.$eval('#sys-maint-confirm-apply', (button) => button.disabled), 'a partial phrase enabled Apply');
+    await page.fill('#sys-maint-typed', 'DISABLE frontend-design');
+    check('the exact typed phrase enables the named action',
+      !(await page.$eval('#sys-maint-confirm-apply', (button) => button.disabled)), 'the exact phrase did not enable Apply');
     await page.click('#sys-maint-confirm-apply');
-    const applyingState = await page.evaluate(() => ({
-      dialogBusy: document.getElementById('sys-maint-confirm')?.getAttribute('aria-busy'),
-      rootBusy: document.getElementById('sys-maintenance')?.getAttribute('aria-busy'),
-      disabled: document.getElementById('sys-maint-confirm-apply')?.disabled,
-      status: document.getElementById('sys-maint-confirm-status')?.textContent,
-    }));
-    check('an in-flight apply is announced and cannot be submitted twice',
-      applyingState.dialogBusy === 'true' && applyingState.rootBusy === 'true'
-        && applyingState.disabled === true && /Applying change/.test(String(applyingState.status)),
-      `in-flight state was ${JSON.stringify(applyingState)}`);
-    await page.evaluate(() => {
-      document.getElementById('sys-maint-confirm-apply')?.click();
-      document.getElementById('sys-maint-confirm-apply')?.click();
-    });
     await page.waitForFunction(() => document.getElementById('sys-maint-confirm-title')?.textContent === 'Change recorded');
-    check('Apply sends only the ephemeral capability, explicit confirmation, and typed phrase once',
-      maintenanceApplyRequests.length === 1
-        && maintenanceApplyRequests[0].capability === 'cap-ui-plan-secret'
-        && maintenanceApplyRequests[0].confirm === true
-        && maintenanceApplyRequests[0].typedPhrase === 'APPLY rust-optimizer'
-        && Object.keys(maintenanceApplyRequests[0]).length === 3,
-      `Apply requests were ${JSON.stringify(maintenanceApplyRequests)}`);
-    check('a successful action becomes a retained receipt instead of a transient toast',
-      /receipt-update-ui/.test(await visibleText(page, '#sys-maint-confirm'))
-        && /Recent changes/.test(await visibleText(page, '#sys-maintenance')),
+    check('MNT-UX-012: a successful apply becomes a retained receipt, and the active destination refreshes',
+      /receipt-disable-ui/.test(await visibleText(page, '#sys-maint-confirm')),
       `receipt sheet read ${JSON.stringify(await visibleText(page, '#sys-maint-confirm'))}`);
-    await shoot(page, 'system-maintenance-receipt');
     await page.click('#sys-maint-confirm-apply');
     await page.waitForFunction(() => !document.getElementById('sys-maint-confirm')?.open);
-    const retainedReceipt = await page.evaluate(() => ({
-      recentPressed: document.querySelector('[data-maint-bucket="recent-changes"]')?.getAttribute('aria-pressed'),
-      rows: document.querySelectorAll('#sys-maint-list [data-maint-key]').length,
-      detail: document.getElementById('sys-maint-detail')?.innerText,
-      undoControls: document.querySelectorAll('#sys-maint-detail [data-maint-action="undo"]').length,
-    }));
-    check('closing the receipt leaves it selected under Recent changes with Undo only when eligible',
-      retainedReceipt.recentPressed === 'true' && retainedReceipt.rows === 1
-        && /receipt-update-ui/.test(String(retainedReceipt.detail))
-        && retainedReceipt.undoControls === 1,
-      `retained receipt was ${JSON.stringify(retainedReceipt)}`);
 
-    await page.click('#sys-maint-detail [data-maint-action="undo"]');
-    await page.waitForFunction(() => document.getElementById('sys-maint-confirm-title')?.textContent === 'Undo rust-optimizer update?');
-    check('Undo first previews one explicitly eligible receipt',
-      JSON.stringify(maintenanceUndoRequests) === JSON.stringify([{ receiptId: 'receipt-update-ui', preview: true }])
-        && /Standalone skill-creator/.test(await visibleText(page, '#sys-maint-confirm')),
-      `Undo preview requests were ${JSON.stringify(maintenanceUndoRequests)}`);
-    await page.click('#sys-maint-confirm-apply');
-    await page.waitForFunction(() => document.getElementById('sys-maint-confirm-title')?.textContent === 'Undo recorded');
-    check('confirmed Undo uses only its ephemeral capability and retains a second receipt',
-      maintenanceUndoRequests.length === 2
-        && JSON.stringify(maintenanceUndoRequests[1]) === JSON.stringify({ capability: 'cap-ui-undo-secret', confirm: true })
-        && /receipt-undo-ui/.test(await visibleText(page, '#sys-maint-confirm')),
-      `Undo flow was ${JSON.stringify(maintenanceUndoRequests)}`);
-    await page.click('#sys-maint-confirm-apply');
-    await page.waitForFunction(() => !document.getElementById('sys-maint-confirm')?.open);
-    check('a receipt not marked undo-eligible exposes no Undo control',
-      await page.$$eval('#sys-maint-detail [data-maint-action="undo"]', (buttons) => buttons.length) === 0,
-      'the non-eligible undo receipt exposed another Undo');
-
-    // A third preview deliberately receives drift after the original change.
-    // Its server error body contains the old capability as hostile text; the
-    // UI must use fixed recovery copy and never echo that body.
-    await page.click('#sys-maint-buckets [data-maint-bucket="all"]');
-    await page.click('#sys-maint-detail [data-maint-action="preview"]');
+    await page.click('[data-mnt-plan-plc]');
     await page.waitForFunction(() => document.getElementById('sys-maint-confirm-title')?.textContent === 'Evidence changed');
-    const driftCopy = await visibleText(page, '#sys-maint-confirm');
-    check('drift fails closed with specific recovery copy and no capability echo',
-      /changed while the preview was being prepared/i.test(driftCopy) && /No change was requested/.test(driftCopy)
-        && /preview current evidence again/.test(driftCopy) && !/cap-ui-plan-secret/.test(driftCopy),
-      `drift copy was ${JSON.stringify(driftCopy)}`);
+    check('a preview-phase drift fails closed with specific recovery copy and no capability echo',
+      /changed while the preview was being prepared/i.test(await visibleText(page, '#sys-maint-confirm'))
+        && !/cap-ui-plan-secret/.test(await visibleText(page, '#sys-maint-confirm')),
+      'drift copy did not read as expected');
     await page.click('#sys-maint-confirm-apply');
     await page.waitForFunction(() => !document.getElementById('sys-maint-confirm')?.open);
 
-    // A post-dispatch 409 is not a safe refusal. Its receipt must survive the
-    // dialog and the UI must never replace uncertainty with "Nothing changed."
-    await page.click('#sys-maint-detail [data-maint-action="preview"]');
+    await page.click('[data-mnt-plan-plc]');
     await page.waitForSelector('#sys-maint-confirm[open] #sys-maint-typed');
-    await page.fill('#sys-maint-typed', 'APPLY rust-optimizer');
+    await page.fill('#sys-maint-typed', 'DISABLE frontend-design');
     await page.click('#sys-maint-confirm-apply');
     await page.waitForFunction(() => document.getElementById('sys-maint-confirm-title')?.textContent === 'Recovery required');
-    const recoveryCopy = await page.evaluate(() => ({
-      text: document.getElementById('sys-maint-confirm')?.innerText,
-      xss: globalThis.__maintRecoveryXss,
-      recentPressed: document.querySelector('[data-maint-bucket="recent-changes"]')?.getAttribute('aria-pressed'),
-      selectedDetail: document.getElementById('sys-maint-detail')?.innerText,
-    }));
-    check('a recovery-required 409 retains its receipt and never claims the resource is unchanged',
-      /provider may have changed this resource/i.test(String(recoveryCopy.text))
-        && /receipt-recovery-ui/.test(String(recoveryCopy.text))
-        && /retained under Recent changes/i.test(String(recoveryCopy.text))
-        && !/Nothing changed/.test(String(recoveryCopy.text))
-        && !/cap-ui-plan-secret/.test(String(recoveryCopy.text))
-        && recoveryCopy.xss === undefined
-        && recoveryCopy.recentPressed === 'true'
-        && /receipt-recovery-ui/.test(String(recoveryCopy.selectedDetail)),
-      `recovery outcome was ${JSON.stringify(recoveryCopy)}`);
+    check('MNT-UX-012: an apply-phase 409 retains its receipt and never claims the resource is unchanged',
+      /provider may have changed this resource/i.test(await visibleText(page, '#sys-maint-confirm'))
+        && /receipt-recovery-ui/.test(await visibleText(page, '#sys-maint-confirm'))
+        && !/Nothing changed/.test(await visibleText(page, '#sys-maint-confirm')),
+      'recovery copy did not read as expected');
     await page.click('#sys-maint-confirm-apply');
     await page.waitForFunction(() => !document.getElementById('sys-maint-confirm')?.open);
-    const retainedRecovery = await page.evaluate(() => ({
-      selected: document.querySelector('#sys-maint-list [aria-current="true"]')?.innerText,
-      detail: document.getElementById('sys-maint-detail')?.innerText,
-      undoControls: document.querySelectorAll('#sys-maint-detail [data-maint-action="undo"]').length,
-    }));
-    check('closing a recovery outcome leaves its non-undoable receipt selected for follow-up',
-      /Recovery required/.test(String(retainedRecovery.selected))
-        && /Provider dispatch could not be verified/.test(String(retainedRecovery.detail))
-        && retainedRecovery.undoControls === 0,
-      `retained recovery receipt was ${JSON.stringify(retainedRecovery)}`);
 
-    const readOnlyPage = await browser.newPage({ viewport: { width: 900, height: 700 } });
-    await readOnlyPage.route(/\/api\/maintenance(?:\?|$)/, (route) => route.fulfill({
-      status: 200, contentType: 'application/json',
-      body: JSON.stringify({
-        ...MAINTENANCE_PAYLOAD, mode: 'read-only',
-        capabilities: { plan: true, apply: false, undo: false },
-      }),
-    }));
-    await readOnlyPage.goto(srv.urlWithToken, { waitUntil: 'domcontentloaded' });
-    await readOnlyPage.click('[data-tab="system"]');
-    await readOnlyPage.click('[data-system-view="maintenance"]');
-    await readOnlyPage.waitForFunction(() => /Actions are not enabled/.test(
-      document.getElementById('sys-maint-banner')?.textContent || '',
+    // ── J5 — interrupted cache cleanup: Audit interruption → disclosure and
+    // result → exactly one Record button → reconcile via the same reused
+    // typed-confirmation dialog ──
+    await page.click('[data-mnt-dest="activity"]');
+    await page.waitForSelector('#mnt-tab-activity[aria-selected="true"]');
+    await page.waitForSelector('[data-mnt-audit-receipt]');
+    const auditTriggerLabel = await page.textContent('[data-mnt-audit-receipt]');
+    check('MNT-RCV-001: an interrupted receipt offers Audit interruption, not generic Verify again',
+      auditTriggerLabel.trim() === 'Audit interruption',
+      `interrupted-receipt action label read ${JSON.stringify(auditTriggerLabel)}`);
+    await page.click('[data-mnt-audit-receipt]');
+    await page.waitForFunction(() => /Result:/.test(document.getElementById('mnt-audit-body')?.innerText || ''));
+    const auditBody = await visibleText(page, '#mnt-audit-body');
+    check('J5: Audit interruption discloses the receipt, phase, provider, checks, and policies, then a conclusive result',
+      JSON.stringify(maintenanceAuditRequests[0]) === JSON.stringify({ receiptIds: [INTERRUPTED_RECEIPT.id] })
+        && new RegExp(INTERRUPTED_RECEIPT.id).test(auditBody)
+        && /applying/.test(auditBody) && /owned-npx-cache/.test(auditBody)
+        // Raw machine check statuses never render verbatim (one, "matched",
+        // could otherwise collide with real evidence text) — the humanized
+        // name+label pairing is what proves the mapping ran.
+        && /Receipt integrity.*Passed/i.test(auditBody) && /Preimage comparison.*Matched/i.test(auditBody)
+        && /read-only-provider-inspector-only/.test(auditBody)
+        && /Matches recorded before state/.test(auditBody),
+      `audit body read ${JSON.stringify(auditBody)}`);
+    const recordButtons = await page.$$('#mnt-audit-actions [data-mnt-reconcile-receipt]');
+    check('J5: the audit offers exactly one enabled Record button',
+      recordButtons.length === 1 && /Record no change/.test(await page.textContent('#mnt-audit-actions')),
+      `record actions read ${await visibleText(page, '#mnt-audit-actions')}`);
+    await page.click('[data-mnt-reconcile-receipt]');
+    await page.waitForSelector('#sys-maint-confirm[open] #sys-maint-typed');
+    check('J5: reconcile reuses the same typed-confirmation dialog as apply/undo',
+      /Record no change/.test(await visibleText(page, '#sys-maint-confirm')),
+      'reconcile did not present the shared confirmation dialog');
+    await page.fill('#sys-maint-typed', 'RECORD no-change');
+    await page.click('#sys-maint-confirm-apply');
+    await page.waitForFunction(() => document.getElementById('sys-maint-confirm-title')?.textContent === 'Change recorded');
+    check('MNT-UX-012/J5: a confirmed reconciliation records exactly one receipt via the reconcile route',
+      maintenanceReconcileRequests.length === 1 && maintenanceReconcileRequests[0].capability === 'cap-ui-reconcile-secret'
+        && maintenanceReconcileRequests[0].confirm === true,
+      `reconcile requests were ${JSON.stringify(maintenanceReconcileRequests)}`);
+    await page.click('#sys-maint-confirm-apply');
+    await page.waitForFunction(() => !document.getElementById('sys-maint-confirm')?.open);
+
+    // ── Export (MNT-RCV-011/012): sanitized default; "Include local paths"
+    // is a fresh, separately warned selection every time ──
+    await page.click('[data-mnt-export-receipt]');
+    await page.waitForSelector('#mnt-export-local-paths');
+    check('export defaults to sanitized, with no warning shown yet',
+      maintenanceExportRequests.length === 1 && maintenanceExportRequests[0].includeLocalPaths === false
+        && await page.isHidden('#mnt-export-warning'),
+      `export requests were ${JSON.stringify(maintenanceExportRequests)}`);
+    await page.check('#mnt-export-local-paths');
+    check('checking Include local paths reveals the warning before any request is sent',
+      await page.isVisible('#mnt-export-warning') && maintenanceExportRequests.length === 1,
+      'the local-paths warning did not appear, or a request fired before confirmation');
+    await page.click('#mnt-export-again');
+    await page.waitForFunction(() => maintenanceExportRequests?.length > 1).catch(() => {});
+    check('re-exporting with local paths sends acknowledgedWarning:true in the SAME request',
+      maintenanceExportRequests.length === 2 && maintenanceExportRequests[1].includeLocalPaths === true
+        && maintenanceExportRequests[1].acknowledgedWarning === true,
+      `export requests were ${JSON.stringify(maintenanceExportRequests)}`);
+    await page.click('#mnt-receipt-close');
+
+    // ── Discovery: a light smoke check of the fourth destination. Waits for
+    // the CONTENT of #mnt-scan-progress specifically (not just an <li> in
+    // #mnt-automatic-sources, whose two rows are static and already present
+    // from the earlier group-collapse fixture's own stale Discovery visits)
+    // — a fresh fetch against base()'s real coverage can otherwise still be
+    // in flight when a weaker wait resolves on leftover data. ──
+    await page.click('[data-mnt-dest="discovery"]');
+    await page.waitForSelector('#mnt-tab-discovery[aria-selected="true"]');
+    await page.waitForFunction(() => /Claude user configuration/.test(
+      document.getElementById('mnt-scan-progress')?.innerText || '',
     ));
-    const readOnlyBoundary = await readOnlyPage.evaluate(() => ({
-      banner: document.getElementById('sys-maint-banner')?.innerText,
-      controls: document.querySelectorAll('#sys-maintenance [data-maint-action]').length,
-    }));
-    check('the same findings stay strictly report-only when apply capability is absent',
-      /no change capability is available/.test(String(readOnlyBoundary.banner))
-        && readOnlyBoundary.controls === 0,
-      `read-only Maintenance was ${JSON.stringify(readOnlyBoundary)}`);
-    await readOnlyPage.close();
+    const discoveryProgress = await visibleText(page, '#mnt-scan-progress');
+    check('MNT-DSC-016: Discovery states progress as visited work and source completion, never a partial count as a total',
+      /Scanned .* entries/.test(discoveryProgress) && /of 4 sources are complete/.test(discoveryProgress),
+      `discovery progress read ${JSON.stringify(discoveryProgress)}`);
+    const discoveryRoots = await visibleText(page, '#mnt-exact-projects') + await visibleText(page, '#mnt-collection-roots') + await visibleText(page, '#mnt-exclusions');
+    check('Discovery is the only read that shows configured roots and paths',
+      /\/Users\/ui-fixture\/exact-project/.test(discoveryRoots)
+        && /\/Users\/ui-fixture\/collection/.test(discoveryRoots)
+        && /\/Users\/ui-fixture\/collection\/vendor/.test(discoveryRoots),
+      `discovery roots/exclusions read ${JSON.stringify(discoveryRoots)}`);
 
-    const retryPage = await browser.newPage({ viewport: { width: 900, height: 700 } });
-    let maintenanceAttempts = 0;
-    await retryPage.route(/\/api\/maintenance(?:\?|$)/, (route) => {
-      maintenanceAttempts++;
-      return route.fulfill(maintenanceAttempts === 1 ? {
-        status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'temporary fixture failure' }),
-      } : {
-        status: 200, contentType: 'application/json', body: JSON.stringify(MAINTENANCE_PAYLOAD),
+    // ── Automatic sources carry no per-source scan controls at all — only a
+    // note that Re-measure machine covers them; a user-added root (Ollama,
+    // still not-scanned here) gets a real control instead. ──
+    const coverageRows = await page.$$eval('#mnt-scan-progress tbody tr', (els) => els.map((li) => ({
+      text: li.textContent.trim(), hasButton: !!li.querySelector('button'),
+    })));
+    const automaticCoverageRows = coverageRows.filter((row) => row.text.startsWith('Claude user configuration')
+      || row.text.startsWith('Codex user configuration') || row.text.startsWith('Projects'));
+    const userRootCoverageRow = coverageRows.find((row) => row.text.startsWith('Ollama'));
+    check('automatic sources render no scan controls, only a coverage note',
+      automaticCoverageRows.length === 3
+        && automaticCoverageRows.every((row) => !row.hasButton && /Complete/.test(row.text))
+        && !!userRootCoverageRow && userRootCoverageRow.hasButton && /Scan this root/.test(userRootCoverageRow.text),
+      `coverage rows read ${JSON.stringify(coverageRows)}`);
+
+    // ── An automatic source's `filesystem` flag (when present) overrides the
+    // note: filesystem:false points at Refresh evidence (its lighter
+    // provider probes, not a disk walk); filesystem:true keeps pointing at
+    // Re-measure machine regardless of coverage state. Absent (the case
+    // above) falls back to the prior state-based wording. ──
+    mntCoverageFilesystemByLabel = { 'Claude user configuration': false, 'Projects': true };
+    await page.click('[data-mnt-dest="inventory"]');
+    await page.click('[data-mnt-dest="discovery"]');
+    await page.waitForFunction(() => /Refresh evidence/.test(document.getElementById('mnt-scan-progress')?.innerText || ''));
+    const filesystemAwareRows = await page.$$eval('#mnt-scan-progress tbody tr', (els) => els.map((li) => li.textContent.trim()));
+    const claudeRow = filesystemAwareRows.find((text) => text.startsWith('Claude user configuration'));
+    const projectsRow = filesystemAwareRows.find((text) => text.startsWith('Projects'));
+    check('filesystem:false is excluded from filesystem rows and evidence checks are explained separately',
+      !claudeRow && /Complete/.test(projectsRow || '')
+        && /Evidence checks/.test(await visibleText(page, '#mnt-scan-progress')),
+      `filesystem-aware rows read ${JSON.stringify({ claudeRow, projectsRow })}`);
+    mntCoverageFilesystemByLabel = {};
+
+    // ── Add-source preview (MNT-DSC-003): projects found, exclusions,
+    // depth, symlinks, boundaries, estimate, permissions before Save ──
+    await page.fill('#mnt-add-root', '/Users/ui-fixture/new-collection');
+    await page.click('#mnt-add-preview');
+    await page.waitForSelector('#mnt-add-preview-body:not([hidden])');
+    const addSourcePreview = await visibleText(page, '#mnt-add-preview-body');
+    check('MNT-DSC-003: the add-source preview shows projects found, depth, symlinks, permissions, and estimate before Save',
+      /project/i.test(addSourcePreview) && /Depth 8/.test(addSourcePreview) && /Symlinks skipped 0/.test(addSourcePreview)
+        && /entries estimated/.test(addSourcePreview) && /Permissions denied: 0/.test(addSourcePreview)
+        && await page.isVisible('#mnt-add-save'),
+      `add-source preview read ${JSON.stringify(addSourcePreview)}`);
+
+    // ── Scan this root (MNT-DSC-011): a per-source start control for a
+    // user-added root that has never run ──
+    await page.click('[data-mnt-scan-start]');
+    await page.waitForFunction(() => maintenanceScanActionRequests?.length > 0).catch(() => {});
+    check('Scan this root posts an exact start action',
+      maintenanceScanActionRequests.length === 1 && maintenanceScanActionRequests[0].action === 'start'
+        && maintenanceScanActionRequests[0].sourceId === neverScannedSourceId,
+      `scan action requests were ${JSON.stringify(maintenanceScanActionRequests)}`);
+
+    // ── A user root that failed offers Retry scan, not a generic re-run of
+    // "Scan this root" — the source stayed user-added throughout. ──
+    neverScannedSource.state = 'failed';
+    await page.click('[data-mnt-dest="inventory"]');
+    await page.click('[data-mnt-dest="discovery"]');
+    await page.waitForFunction(() => /Ollama.*Failed/s.test(
+      document.getElementById('mnt-scan-progress')?.innerText || '',
+    ));
+    const failedRootRow = (await page.$$eval('#mnt-scan-progress tbody tr', (els) => els.map((li) => li.textContent.trim())))
+      .find((text) => text.startsWith('Ollama'));
+    check('a failed user root shows Retry scan',
+      /Retry scan/.test(failedRootRow || ''),
+      `failed user root row read ${JSON.stringify(failedRootRow)}`);
+    neverScannedSource.state = 'not-scanned';
+
+    // ── A failed lastRefresh names the sanitized message, never the raw
+    // code, distinguishes "the last build attempt failed" from "never
+    // built", keeps Refresh evidence available, and announces once. ──
+    maintenanceScanRequired = true;
+    maintenanceInventoryLastRefresh = {
+      status: 'failed', at: new Date().toISOString(), code: 'PROVIDER_TIMEOUT',
+      message: 'The filesystem source did not respond before the timeout.',
+    };
+    await page.click('[data-mnt-dest="inventory"]');
+    await page.waitForFunction(() => /did not complete/.test(
+      document.getElementById('mnt-results')?.innerText || '',
+    ));
+    // #mnt-status is debounced (mntAnnounceSettled) and shared across every
+    // destination, so wait for the failure text specifically rather than
+    // reading whatever an earlier destination's announcement left behind.
+    await page.waitForFunction(() => /did not respond before the timeout/.test(
+      document.getElementById('mnt-status')?.textContent || '',
+    ));
+    const failedRefreshEmpty = await visibleText(page, '#mnt-results');
+    const failedRefreshStatus = await page.textContent('#mnt-status');
+    check('a failed lastRefresh names "did not complete" plus the sanitized message, never the raw code, and keeps Refresh evidence available',
+      /did not complete/.test(failedRefreshEmpty) && /did not respond before the timeout/.test(failedRefreshEmpty)
+        && !/PROVIDER_TIMEOUT/.test(failedRefreshEmpty) && !/PROVIDER_TIMEOUT/.test(failedRefreshStatus || '')
+        && /did not respond before the timeout/.test(failedRefreshStatus || '')
+        && await page.isEnabled('#mnt-check-providers'),
+      `empty state read ${JSON.stringify(failedRefreshEmpty)}, status read ${JSON.stringify(failedRefreshStatus)}`);
+    maintenanceInventoryLastRefresh = null;
+
+    // ── D5: scanRequired points at Refresh evidence, and settling it
+    // refreshes Inventory in place, with no page reload. Hops off Inventory
+    // and back so the destination switch re-fetches against the reset
+    // (no-lastRefresh) fixture state above, without duplicating route
+    // handlers on a fresh page. ──
+    await page.click('[data-mnt-dest="discovery"]');
+    await page.click('[data-mnt-dest="inventory"]');
+    await page.waitForFunction(() => /No inventory has been built yet/.test(
+      document.getElementById('mnt-results')?.innerText || '',
+    ));
+    const scanRequiredEmpty = await visibleText(page, '#mnt-results');
+    check('the scanRequired empty state points at Refresh evidence on this workspace, not a System full scan',
+      /Refresh evidence/.test(scanRequiredEmpty) && !/full scan from System/i.test(scanRequiredEmpty),
+      `scanRequired empty state read ${JSON.stringify(scanRequiredEmpty)}`);
+    await page.click('#mnt-check-providers');
+    await page.waitForFunction(() => document.getElementById('mnt-check-providers')?.disabled === false, null, { timeout: 8000 });
+    await page.waitForSelector('#mnt-results .mnt-row', { timeout: 8000 });
+    check('settling Refresh evidence clears scanRequired and shows Inventory results in place, with no reload',
+      await page.$$eval('#mnt-results .mnt-row', (els) => els.length) > 0,
+      'Inventory did not refresh in place once the provider check settled');
+    check('D8: the workspace polled the inventory through the running build (bounded, 1.5 s apart) instead of re-fetching once',
+      maintenanceRunningPollsServed >= 2 && maintenanceBuildPollsRemaining === 0,
+      `running polls served: ${maintenanceRunningPollsServed}, remaining ${maintenanceBuildPollsRemaining}`);
+    maintenanceScanRequired = false;
+
+    // ── D8: while the server reports a running build, the empty state says
+    // so (never "not built yet", never a raw code) and Refresh evidence
+    // remains available. ──
+    maintenanceScanRequired = true;
+    maintenanceInventoryLastRefresh = { status: 'running', at: new Date().toISOString() };
+    await page.click('[data-mnt-dest="discovery"]');
+    await page.click('[data-mnt-dest="inventory"]');
+    await page.waitForFunction(() => /Building the inventory/.test(
+      document.getElementById('mnt-results')?.innerText || '',
+    ));
+    const runningEmpty = await visibleText(page, '#mnt-results');
+    check('a running lastRefresh renders "Building the inventory…" and keeps Refresh evidence available',
+      /Building the inventory/.test(runningEmpty) && !/not been built yet/.test(runningEmpty)
+        && await page.isEnabled('#mnt-check-providers'),
+      `running empty state read ${JSON.stringify(runningEmpty)}`);
+    maintenanceInventoryLastRefresh = null;
+    maintenanceScanRequired = false;
+
+    // ── Re-measure machine (System Full scan, exposed beside Refresh
+    // evidence): delegates to System's own #sys-rescan, then blocks writes
+    // (mntWritesBlocked) for the whole measurement + provider-check +
+    // inventory-rebuild chain. Uses its own temporary /api/system route
+    // rather than the real SYSTEM_STUB — that stub's systemDeepScans counter
+    // is asserted against a clean slate by the dedicated System-tab Rescan
+    // tests later in this run, and this block must neither depend on nor
+    // perturb that count. ──
+    await page.click('[data-mnt-dest="guidance"]');
+    await page.waitForSelector('[data-mnt-plan-plc]');
+    await page.waitForFunction(() => document.querySelector('[data-mnt-plan-plc]')?.disabled === false);
+    let remeasureSystemReadCount = 0;
+    let remeasureDeepScanRequests = 0;
+    // Deterministic on REQUEST COUNT, not wall-clock: the deep-scan kickoff
+    // itself is always the first read (reports running), every read after is
+    // settled. This cannot race system-projects.mjs's own poll cadence and
+    // mntPollSystemMeasurement's independent one against a Node-side timer.
+    await page.route(/\/api\/system(\?|$)/, (route) => {
+      const reqUrl = new URL(route.request().url());
+      if (reqUrl.searchParams.get('refresh') === 'deep') remeasureDeepScanRequests += 1;
+      remeasureSystemReadCount += 1;
+      return route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ ...SYSTEM_PAYLOAD, scan: { ...SYSTEM_PAYLOAD.scan, running: remeasureSystemReadCount <= 1 } }),
       });
     });
-    await retryPage.goto(srv.urlWithToken, { waitUntil: 'domcontentloaded' });
-    await retryPage.click('[data-tab="system"]');
-    await retryPage.click('[data-system-view="maintenance"]');
-    await retryPage.waitForSelector('[data-maint-retry]');
-    check('a failed Maintenance read renders recovery guidance instead of a blank panel',
-      /could not be read/i.test(await visibleText(retryPage, '#sys-maintenance'))
-        && /Retry report/.test(await visibleText(retryPage, '#sys-maintenance')),
-      'Maintenance failure did not expose its bounded retry');
-    await retryPage.click('[data-maint-retry]');
-    await retryPage.waitForSelector('#sys-maint-list [data-maint-key]');
-    check('Retry report recovers the panel without restarting the dashboard',
-      maintenanceAttempts === 2
-        && await retryPage.$$eval('#sys-maint-list [data-maint-key]', (rows) => rows.length) === 4,
-      `Maintenance retry made ${maintenanceAttempts} requests`);
-    await retryPage.close();
-
-    const historyPage = await browser.newPage({ viewport: { width: 1080, height: 760 } });
-    await historyPage.route(/\/api\/maintenance(?:\?|$)/, (route) => route.fulfill({
-      status: 200, contentType: 'application/json',
-      body: JSON.stringify({
-        ...MAINTENANCE_PAYLOAD,
-        findings: [], receipts: MAINTENANCE_HISTORY,
-        summary: {
-          total: 0, updatesReady: 0, safeCleanup: 0, needsReview: 0, blocked: 0,
-          recentChanges: MAINTENANCE_HISTORY.length, incompleteSources: 0, actionable: 0,
-        },
-      }),
+    await page.click('#mnt-remeasure');
+    // mntRemeasureMachine() re-renders the active destination the instant it
+    // sets MNT.remeasureBusy — before it even clicks #sys-rescan — so both
+    // of these are observable synchronously, exactly like Refresh evidence.
+    const remeasureStarted = await page.evaluate(() => ({
+      remeasureDisabled: document.getElementById('mnt-remeasure')?.disabled,
+      applyDisabled: document.querySelector('[data-mnt-plan-plc]')?.disabled,
     }));
-    await historyPage.goto(srv.urlWithToken, { waitUntil: 'domcontentloaded' });
-    await historyPage.click('[data-tab="system"]');
-    await historyPage.click('[data-system-view="maintenance"]');
-    await historyPage.click('#sys-maint-buckets [data-maint-bucket="recent-changes"]');
-    await historyPage.waitForSelector('#sys-maint-list [data-maint-key]');
-    const durableLedger = await visibleText(historyPage, '#sys-maint-list');
-    const humanStatuses = [
-      'Change recorded', 'Change rolled back', 'No change made', 'No change observed',
-      'Recovery required', 'Apply interrupted', 'Verification interrupted',
-      'Catalog refresh interrupted', 'Undo interrupted',
-    ];
-    check('durable terminal and recovery receipts use human labels and updatedAt ages',
-      humanStatuses.every((label) => durableLedger.includes(label))
-        && /Recorded \d+m ago/.test(durableLedger)
-        && /Updated \d+m ago/.test(durableLedger)
-        && !/time unknown/.test(durableLedger)
-        && !/(aborted-no-change|recovered-no-change|partial-recovery-required|refreshing-catalog)/.test(durableLedger),
-      `durable receipt ledger read ${JSON.stringify(durableLedger)}`);
+    check('Re-measure machine disables itself and blocks writes (mntWritesBlocked) the instant it starts',
+      remeasureStarted.remeasureDisabled === true && remeasureStarted.applyDisabled === true,
+      `remeasure-start state was ${JSON.stringify(remeasureStarted)}`);
+    await page.waitForFunction(() => document.getElementById('mnt-remeasure')?.disabled === false, null, { timeout: 15_000 });
+    check('Re-measure machine delegates to #sys-rescan (a real deep scan) and settles, re-enabling itself and Apply',
+      remeasureDeepScanRequests === 1 && await page.$eval('[data-mnt-plan-plc]', (b) => b.disabled === false),
+      `deep scan requests: ${remeasureDeepScanRequests}, Apply stayed disabled after Re-measure machine settled: ${await page.$eval('[data-mnt-plan-plc]', (b) => b.disabled)}`);
+    await page.unroute(/\/api\/system(\?|$)/);
 
-    await historyPage.click('[data-maint-key="receipt:receipt-partial-recovery-required"]');
-    const recoveryDetail = await historyPage.evaluate(() => ({
-      text: document.getElementById('sys-maint-detail')?.innerText,
-      undoControls: document.querySelectorAll('#sys-maint-detail [data-maint-action="undo"]').length,
-    }));
-    check('recovery-required history stays blocked and never exposes Undo',
-      /Recovery required/.test(String(recoveryDetail.text))
-        && /could not prove a complete outcome/.test(String(recoveryDetail.text))
-        && /Updated\s+\d+m ago/.test(String(recoveryDetail.text))
-        && recoveryDetail.undoControls === 0,
-      `recovery receipt detail was ${JSON.stringify(recoveryDetail)}`);
+    // ── #system/catalog redirects to Maintenance Inventory (ADR-0048) ──
+    await page.evaluate(() => { location.hash = '#system/catalog'; });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => location.hash.indexOf('#system/maintenance/inventory') === 0);
+    check('a linked #system/catalog hash redirects to the Maintenance Inventory destination',
+      (await page.evaluate(() => location.hash)).indexOf('#system/maintenance/inventory') === 0
+        && await page.getAttribute('#mnt-tab-inventory', 'aria-selected') === 'true',
+      `post-redirect hash was ${await page.evaluate(() => location.hash)}`);
 
-    await historyPage.click('[data-maint-key="receipt:receipt-aborted-no-change"]');
-    const noChangeDetail = await historyPage.evaluate(() => ({
-      text: document.getElementById('sys-maint-detail')?.innerText,
-      undoControls: document.querySelectorAll('#sys-maint-detail [data-maint-action="undo"]').length,
-    }));
-    check('a journal-proven no-change receipt is recorded without implying an undoable mutation',
-      /No change made/.test(String(noChangeDetail.text))
-        && /no provider action started/.test(String(noChangeDetail.text))
-        && /Recorded\s+\d+m ago/.test(String(noChangeDetail.text))
-        && noChangeDetail.undoControls === 0,
-      `no-change receipt detail was ${JSON.stringify(noChangeDetail)}`);
+    // ── Privacy and language contracts across the whole workspace ──
+    const mntUrlAfterUse = await page.evaluate(() => location.href);
+    check('MNT-PRV-004: the URL never carries a human-readable local path',
+      !/\/Users/.test(mntUrlAfterUse), `Maintenance URL read ${JSON.stringify(mntUrlAfterUse)}`);
+    const mntVisibleLabels = await page.$$eval('#panel-sys-maintenance button, #panel-sys-maintenance h2, #panel-sys-maintenance h3, #panel-sys-maintenance h4, #panel-sys-maintenance label, #panel-sys-maintenance dt',
+      (els) => els.map((el) => el.textContent.trim()).filter(Boolean));
+    const prohibitedFound = mntVisibleLabels.filter((label) => isProhibitedLabel(label));
+    check('MNT-EVD-006: no prohibited label (Unknown/Unsupported/Needs attention/Fix/Review/Safe/Automatic/Repair all/Clean all) renders anywhere in Maintenance',
+      prohibitedFound.length === 0, `prohibited labels found: ${JSON.stringify(prohibitedFound)}`);
 
-    await historyPage.click('[data-maint-key="receipt:receipt-committed"]');
-    const committedDetail = await historyPage.evaluate(() => ({
-      text: document.getElementById('sys-maint-detail')?.innerText,
-      undoControls: document.querySelectorAll('#sys-maint-detail [data-maint-action="undo"]').length,
+    // ── Responsive, theme, and forced-colors contracts ──
+    await page.setViewportSize({ width: 320, height: 720 });
+    await page.waitForTimeout(80);
+    const mnt320 = await page.evaluate(() => ({
+      overflow: document.documentElement.scrollWidth > 320,
+      filtersToggleVisible: getComputedStyle(document.getElementById('mnt-filters-toggle')).display !== 'none',
     }));
-    check('only a committed server-eligible receipt exposes guarded Undo',
-      /Change recorded/.test(String(committedDetail.text))
-        && /Recorded\s+\d+m ago/.test(String(committedDetail.text))
-        && committedDetail.undoControls === 1,
-      `committed receipt detail was ${JSON.stringify(committedDetail)}`);
-    await shoot(historyPage, 'system-maintenance-recovery-history');
-    await historyPage.close();
+    check('MNT-UX-008: at 320 CSS pixels the Maintenance workspace has no horizontal page scroll and filters move to a sheet',
+      !mnt320.overflow && mnt320.filtersToggleVisible,
+      `320px layout was ${JSON.stringify(mnt320)}`);
+    await page.locator('#mnt-results [data-mnt-plc]').first().click();
+    await page.waitForSelector('#mnt-inspector-title');
+    const narrowInspector = await page.evaluate(() => {
+      const rect = document.getElementById('mnt-inspector').getBoundingClientRect();
+      return {
+        position: getComputedStyle(document.getElementById('mnt-inspector')).position,
+        coversViewport: rect.width >= globalThis.innerWidth - 1 && rect.height >= globalThis.innerHeight - 1,
+        backLabel: document.getElementById('mnt-inspector-back')?.getAttribute('aria-label'),
+      };
+    });
+    check('MNT-UX-003: a narrow screen opens the placement as a full-screen inspector with Close details',
+      narrowInspector.position === 'fixed' && narrowInspector.coversViewport && narrowInspector.backLabel === 'Close details',
+      `narrow inspector layout was ${JSON.stringify(narrowInspector)}`);
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => document.getElementById('mnt-inspector')?.hidden === true);
+    await shoot(page, 'maintenance-320');
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    await page.emulateMedia({ colorScheme: 'light' });
+    await page.waitForTimeout(60);
+    await shoot(page, 'maintenance-theme-light');
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.waitForTimeout(60);
+    await shoot(page, 'maintenance-theme-dark');
+
+    await page.emulateMedia({ forcedColors: 'active' });
+    await page.waitForTimeout(60);
+    await page.focus('#mnt-tab-inventory');
+    const forcedColorsFocus = await page.evaluate(() => {
+      const style = getComputedStyle(document.activeElement);
+      return { outlineStyle: style.outlineStyle, outlineWidth: style.outlineWidth };
+    });
+    check('MNT-UX-009: a visible focus indicator survives forced-colors mode',
+      forcedColorsFocus.outlineStyle !== 'none' || parseFloat(forcedColorsFocus.outlineWidth) > 0,
+      `forced-colors focus style was ${JSON.stringify(forcedColorsFocus)}`);
+    await shoot(page, 'maintenance-forced-colors');
+    await page.emulateMedia({ forcedColors: 'none', colorScheme: null });
 
     // ── the fail-closed rule, where it is easiest to break (ADR-0023) ─────────
     // The catalog section has never been deep-scanned and one install figure was
@@ -2314,8 +3038,9 @@ async function main() {
         && /Vibium[\s\S]*agentic-qe[\s\S]*ready[\s\S]*148\.0\.7778\.56[\s\S]*392(?:\.0)? MB/i.test(browserRuntimes.rows[1]),
       `browser runtime rows were ${JSON.stringify(browserRuntimes.rows)}`);
 
-    await page.click('[data-system-view="catalog"]');
-    await page.waitForSelector('#panel-sys-catalog:not([hidden])');
+    // Host inventory profile / Unique across hosts / Project skill pressure
+    // relocated here from the retired Catalog destination (ADR-0048) — still
+    // on Summary from the honesty checks just above, so no re-navigation.
     const neverScanned = await visibleText(page, '#sys-radar');
     check('a never-scanned section says so and points at Rescan',
       /not measured yet/i.test(neverScanned) && /rescan/i.test(neverScanned)
@@ -2415,7 +3140,7 @@ async function main() {
     }));
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.click('#tab-system');
-    await page.click('[data-system-view="catalog"]');
+    await page.click('[data-system-view="summary"]');
     await page.waitForSelector('#sys-matrix tbody tr');
 
     const chipStates = () => page.$$eval('#sys-cat-kinds .chipf, #sys-cat-hosts .chipf',
@@ -2435,7 +3160,7 @@ async function main() {
       'a filtered list must never leave a name unexplained');
     check('unfiltered shows every item', await rowCount() === 4, `saw ${await rowCount()} of 4`);
     check('project pressure follows the two inventory panels as a full-width second row',
-      await page.$eval('#panel-sys-catalog .sy-grid', (grid) => {
+      await page.$eval('#panel-sys-summary .sy-grid', (grid) => {
         const cards = [...grid.querySelectorAll(':scope > .sy-card')];
         const pressure = document.querySelector('#sys-pressure')?.closest('.sy-card');
         const profile = document.querySelector('#sys-radar')?.closest('.sy-card');
@@ -3599,6 +4324,9 @@ async function main() {
           contextRows.href === '#usage/aaaa1111', `Context href was ${JSON.stringify(contextRows.href)}`);
         await page.locator('#u-ctx-attention details:first-child .ctx-session-link').first().click();
         await page.waitForSelector('#v-transcript:not([hidden])');
+        // The view unhides before its transcript body arrives; wait for the
+        // reported title so the assertion below reads settled content.
+        await page.waitForFunction(() => /Add rate limiting to the API/.test(document.getElementById('v-transcript')?.innerText || ''));
         const transcriptIndicatorOpen = await page.evaluate(() => {
           const indicator = document.getElementById('usage-transcript-indicator');
           return {

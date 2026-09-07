@@ -1,209 +1,428 @@
 # Maintenance
 
-Maintenance turns local inventory evidence into a small set of human-reviewed actions. It can
-apply only an operation advertised by the current resource owner, and it verifies the result before
-calling the transaction complete.
+Maintenance answers one question about the agent-related footprint on this machine:
 
-Use **System > Maintenance** for guided, one-finding-at-a-time work. Use the CLI for JSON output,
-explicit batches, or interrupted-receipt recovery.
+> Show me the verified agent-related resources on this environment, where each exact placement
+> came from when that can be established, what consumes it, what has changed, and only the actions
+> or decisions that Agentic Kit can ground.
 
-## Choose the check you need
+System measures. Maintenance explains what is verified about every resource placement and offers
+only bounded, exact operations. It is not a generic cleaner, installer, vulnerability scanner,
+package manager, or root administration console.
 
-The dashboard first reads the latest saved report. Browser refresh and the header poll do not call
-providers.
+Use **System > Maintenance** in the dashboard for browsing, guided work, and one-action changes.
+Use `ak maintain` for JSON output, discovery configuration, and scripted flows. Every write is one
+exact placement and one action, previewed first and confirmed explicitly, and it leaves a receipt.
 
-| Control | What it does |
-|---------|--------------|
-| **Check providers** | Uses the saved System inventory to recheck installed versions, provider ownership, and action eligibility. It does not walk projects. |
-| **Full scan** | Remeasures the System inventory—installs, storage, Catalog, eligible hosted repositories, and consumers—then checks providers after the Footprint snapshot is safely persisted. |
+## Four destinations
 
-Both controls are explicit and single-flight. While either is running, the dashboard keeps the
-previous saved report visible, reports the current phase, bounded count, and elapsed time, and
-temporarily disables Preview and Undo. Planning, apply, undo, and recovery also fail closed until
-the scan finishes. A failed provider check leaves the previous saved report in place.
+The dashboard workspace has four tabs. Each answers a different question.
 
-The CLI equivalent of **Check providers** is:
+| Destination | Question it answers |
+|-------------|---------------------|
+| **Inventory** | What exists? Every verified placement, healthy ones included, grouped by logical resource. |
+| **Guidance** | What can I accomplish? Only outcomes Agentic Kit can ground, in five lanes. |
+| **Discovery** | Where does Agentic Kit look? Automatic sources, your projects and collection roots, exclusions, and scan coverage. |
+| **Activity** | What changed? Receipts, undo, interruption audits, dispositions, recipe changes, and scan records. |
 
-    ak maintain scan
+Opening Maintenance reads the last complete inventory and opens **Inventory** across all scopes.
+Nothing scans on open. A fresh installation has no inventory yet; the empty state reads **No
+inventory has been built yet. Use Refresh evidence, above, to build it.** and every automatic source
+reads **Not scanned yet**. Two actions sit side by side above the tabs, each with its own helper
+text:
 
-Ask for **Full scan** followed by the provider check when source state may have changed:
+- **Refresh evidence** runs provider probes on the saved measurement and rebuilds the inventory.
+  It takes seconds. The CLI equivalent is `ak maintain scan --refresh-inventory`.
+- **Re-measure machine** walks the filesystem to re-measure installs, storage, projects, and every
+  discovery source, then refreshes evidence. It takes minutes. The CLI equivalent is
+  `ak maintain scan --deep --refresh-inventory`.
 
-    ak maintain scan --deep
+Refresh evidence is the only control that runs executable provider probes. While either action
+runs, both buttons are disabled, the status line says what is running ("Refreshing evidence…" or
+"Re-measuring the machine… this can take minutes."), and apply, undo, and record are refused. If
+the work does not finish, the previous evidence is kept. The inventory build runs after the probes
+settle and can take a few seconds on a large footprint; the empty state reads **Building the
+inventory…** until the rows appear, and **The last inventory build did not complete** with a short
+reason if it fails. The retired Catalog link (`#system/catalog`) redirects to Inventory.
 
-Deep scanning measures. It does not apply maintenance. Catalog and Advisory remain read-only.
-Running **Full scan** from System also chains one Maintenance provider check after successful
-persistence. Concurrent callers attach to the in-flight System or provider scan rather than
-multiplying work.
+## Inventory
 
-The view and CLI group findings as:
+### Rows are exact placements
 
-- **Updates ready** — a provider exposed one exact update candidate;
-- **Safe cleanup** — an exact owned and verifiable cleanup candidate;
-- **Needs review** — an action exists but its impact needs human judgment;
-- **Unsupported or blocked** — missing authority, incomplete evidence, or no native operation; and
-- **Recent changes / Undo** — durable receipt history and currently eligible undo.
+An Inventory row is **one exact placement** of a resource: one file, one config entry, one
+installed package, one cache object, one model revision. Rows are grouped under the logical
+resource they belong to, so a skill carried by three hosts shows one artifact with three consumers,
+never three copies. One logical resource groups every placement with the same name, namespace, and
+verified definition across user and project scopes: a skill installed in five projects is one group
+with one row per exact placement, each naming the hosts that carry it. Copies whose verified
+definitions differ stay separate groups, linked by a **Same name, different definition** conflict.
+A group with more than three placements collapses to three rows behind **Show N more** (**Show
+fewer** once opened); it opens expanded when any of its placements carries a Guidance lane, and a
+toggle you click is remembered for the rest of the browser session. A logical resource, its
+placement, its physical artifact, and the host bindings that consume it are always kept separate.
 
-These groups do not form a hygiene score. Reclaimable amounts from unlike safety classes are not
-added, and there is no “Clean all”.
+Resource kinds: Skill, MCP registration, Plugin, Hook, Instruction file, Agent, Command, Host
+adapter, Executable, Runtime, Model, Provider configuration, Cache, Credential, and Storage.
 
-## Act on the recommendation
+### Scope, views, facets, and search
 
-Every ledger row leads with an imperative such as **Upgrade**, **Uninstall**, **Clear**, **Remove**,
-**Choose**, or **Rescan**. Selecting the row shows the potential effect and a collapsed **How to
-resolve** procedure. When the dashboard cannot perform the action, **Not available here** gives the
-resource-specific reason instead of repeating generic safety policy.
+- **Scope lens**: System, Machine, User, Projects, or Across scopes (the default). Scope is an
+  administrative fact about where the placement lives; it is independent of who consumes it.
+- **Curated views**: All resources, Can apply here, Steps available, Decisions to make, Updates
+  available, Dependencies, Conflicts and overlaps, Duplicated placements, Disabled resources,
+  Credentials and providers, Models and runtimes, Storage and caches, Recently changed, and
+  Inventory evidence only.
+- **Facets** are multiselect and show counts for the current result set only: scope, environment,
+  project, kind, consumer, carrier, provenance, package manager, version state, guidance,
+  dependency role, conflict, credential readiness, channel, evidence fields, and recently changed.
+  Active facets appear as chips; **Clear all** removes every facet at once. On narrow screens the
+  facets open in a **Filters** sheet.
+- **Search** matches displayed names, locations, and consumers. It refuses anything shaped like a
+  local path.
+- **Sort**: guidance first (the default), name, recently changed, or kind. Guidance-first orders
+  groups as Recovery to finish, Can apply here, Steps available, Decisions to make, Updates
+  available, Inventory evidence only, then Healthy resources. This is a sort order, not a severity
+  ladder.
+- **Load more** appends the next page. Pages carry an opaque cursor bound to the inventory that
+  produced them; if a newer inventory replaced it, the request is refused with
+  `INVENTORY_GENERATION_MISMATCH` and the browser reloads page one instead of mixing two
+  inventories.
 
-Project/shared relationships currently remain report-only:
+Your last scope, view, sort, facets, and search are remembered privately. A link with state in the
+URL wins over the remembered view.
 
-| Finding | Direct action |
-|---------|------------------|
-| Identical project copy | Confirm the shared source is available to the project, back up or commit the project copy, remove only that project copy, and run Full scan. |
-| Different definitions | Compare the complete definitions, choose the intended source of truth, then remove the unintended copy or rename the project copy when both behaviors are required. |
-| Tracked project copy | Make the removal through the repository's normal branch, test, review, and pull-request workflow, then run Full scan before merging. |
-| Equivalent legacy transport | Prove the canonical registration is healthy at an equal or broader scope, use the host-native MCP workflow to remove only the legacy registration, restart if required, and run Full scan. |
+### The inspector
 
-These are procedures, not generic delete commands. Definition equality does not prove which source
-a host loads, Git tracking does not confer mutation authority, and equivalent configuration does
-not prove transport health. A live provider exposes an operation-specific control such as
-**Preview update**, **Preview uninstall**, or **Preview cleanup** only after it proves ownership,
-exact targeting, verification, and recovery behavior.
+Selecting a row opens the resource inspector. It answers, in order: what this is, **Where is it?**,
+**Where did it come from?**, **What version is here?**, **Who uses it?**, **What changed or
+conflicts?**, **What can I accomplish?**, **What proves this?**, and **What happened before?**. A
+question with no verified answer is omitted rather than filled with a placeholder. **Back to N
+results** restores your place in the list.
 
-An old npx environment is not automatically stale. Maintenance distinguishes:
+Locations render as breadcrumbs. The exact path is owner-private: press **Reveal exact path** to
+fetch it, then **Copy exact path**. Paths never appear in the inventory, links, exports, or toasts.
 
-- **version-stale** — a managed cached package is older than the installed managed version; an exact
-  live provider match can offer **Preview cleanup**; and
-- **idle-only** — no activity was observed for the reported number of days. The row tells you to
-  clear it only if you accept a later redownload, remains under **Needs review**, and offers no
-  dashboard action because age does not prove disuse.
+### Evidence grades in plain words
 
-## Preview before applying
+Every field the inspector shows carries one of three grades:
 
-An ordinary plan is read-only:
+- **Verified**: Agentic Kit observed it directly. Only verified evidence supplies a label or the
+  premise for an action.
+- **Provider-declared**: a host or provider reported it. It renders with that authority named.
+- **Technical details**: everything inferred. It never drives a label, a filter, or an action.
 
-    ak maintain plan --findings FINDING_ID
+Missing evidence omits the field; the workspace never fills a gap with a placeholder value.
 
-To ask the live provider registry for executable actions and persist a five-minute plan:
+Credentials are shown by mechanism only (environment variable, keychain entry, credentials file, or
+host login) and by readiness: Not configured, Configured but not checked, Ready, Check failed, or
+Expired or renewal needed. Values, token metadata, account emails, private registry URLs, and raw
+configuration never render.
 
-    ak maintain plan --findings FINDING_ID --executable
+### Conflicts say what they prove
 
-You can narrow planning:
+Each conflict names what the evidence proves and what it does not: Duplicate placement, Shadowed
+override, Same name but different definition, Equivalent MCP transport, Version requirement
+divergence, Dependency resolution collision, and Shared artifact. A shared artifact is not a
+duplicate and grants no removal authority.
 
-    ak maintain plan --project /absolute/project/path --executable
-    ak maintain plan --safety-class approval-required --executable
-    ak maintain plan --findings ID_1,ID_2 --executable --json
+## Guidance
 
-A CLI batch must share provider, operation, safety class, and rollback class. Split unlike work into
-separate plans. The browser intentionally handles one finding at a time.
+Guidance has five lanes: **Can apply here**, **Steps available**, **Decisions to make**, **Updates
+available**, and **Recovery to finish**. Each entry leads with the outcome, names the placement,
+states the verified premises, and describes the impact and what is preserved.
 
-Keep the returned plan ID, SHA-256 digest, and exact action IDs together. The plan ID identifies
-evidence; it does not authorize mutation.
+### What admits a row
 
-## Apply an exact plan
+A placement enters Guidance only when all of these hold: it is one exact placement, its condition
+is verified, the outcome is bounded, and the entry is grounded in one of a registered provider
+operation, a signed procedure, a set of decision choices, an exact update candidate, or a receipt.
 
-Apply requires every binding and explicit confirmation:
+- **Can apply here** needs a registered provider whose current, complete detection matches the
+  exact placement. A placement blocked by an unresolved receipt is not offered here.
+- **Steps available** needs an active signed recipe compatible with the placement's condition
+  (missing verified dependency or update candidate present).
+- **Decisions to make** appears for a missing verified dependency. It always offers four choices:
+  **Repair command path**, **Relink dependency**, **Reinstall dependency**, and **Remove
+  registration**. A choice that cannot be grounded stays visible with the reason.
+- **Updates available** needs a verified installed version, an observed candidate, and verified
+  compatibility. The word *recommended* appears only when a named authority is verified; otherwise
+  the entry says a candidate is available. Prerelease and nightly candidates appear only for
+  placements enrolled in that channel.
+- **Recovery to finish** comes from unfinished receipts.
 
-    ak maintain apply \
-      --plan PLAN_ID \
-      --digest PLAN_SHA256 \
-      --actions ACTION_ID_1,ACTION_ID_2 \
-      --yes
+Anything else stays in Inventory, and its inspector says:
+
+> No action is requested. Agentic Kit does not have a verified operation, procedure, or bounded
+> decision to offer for this condition in the current environment.
+
+That sentence is calm evidence, not a warning, and it never counts toward the Guidance badge.
+
+### Action vocabulary
+
+Actions use exact verbs: Update, Disable, Remove, Reinstall, Clean cache, Restore, Archive, Apply
+project patch, Relink dependency, and Repair registration. An irreversible outcome carries a
+warning and offers snooze as the containment choice. There is no catch-all verb and no batch button.
+
+### Dispositions
+
+You can record a disposition for a Guidance entry from the entry itself (**Acknowledge**, **Snooze
+until** a chosen date, or, for an update candidate, **Ignore this candidate**, each explained before
+you press **Confirm**), with `ak maintain disposition`, or through the dispositions route. The
+kinds are **Acknowledged**, **Snoozed** until a date at most 365 days ahead, and **Ignored exact
+candidate**. The dashboard shows recorded dispositions in the inspector's history and under
+Activity. Snoozed and ignored entries leave Guidance; acknowledged entries are recorded but stay
+visible. A disposition never removes anything from
+Inventory, and it is invalidated automatically by expiry, a candidate change, an installed-version
+change, a dependency change, source drift, or a security-severity increase.
+
+## Procedures
+
+**Open procedure** on a Steps entry renders a copyable panel: the outcome, the source (authority,
+publisher, recipe version), compatibility (OS and version range, architecture, host range, resource
+kind, package manager range), privilege, network need, effect, what is preserved, the command for
+your shell, a verification command, and a three-step checklist (review, run, verify) that is
+remembered per entry.
+
+- Shells: bash, zsh, PowerShell, cmd.exe, and a WSL shell. Your preferred shell is remembered per
+  environment.
+- **Copy command** copies text. Maintenance never runs a procedure for you.
+- An elevated procedure is still copy-only. You run it in your own elevated terminal, and
+  Maintenance never asks for a password.
+- Package managers Maintenance can describe: Homebrew, MacPorts, apt, dnf, pacman, zypper, snap,
+  npm, pnpm, yarn, bun, pip, pipx, uv, cargo, mise, asdf, winget, Chocolatey, and scoop. The matrix
+  states what each can prove (provenance, dependencies, candidates); it never grants install
+  authority. Support follows an N-3 policy: the current major plus three preceding majors for
+  semantic-versioned managers, the current release family plus three preceding for OS-coupled
+  managers, and a documented minimum tested version for rolling managers.
+
+### Recipe trust
+
+Procedures come from signed recipes. The built-in catalogue is signed with a bundled publisher key,
+which is tamper evidence for the local store rather than a secret.
+
+`recipes refresh` fetches a registry only when one is configured for the installation, and only
+over HTTPS from an allowlisted host. Redirects are bounded to three and must stay in the allowlist,
+the response must fit in 256 KiB, every recipe must match the expected publisher, and its digest and
+signature chain are verified. Refresh produces a diff and a pending queue; each recipe is accepted by
+id and version, and a withdrawn recipe creates no new Guidance. The stock CLI and dashboard have no
+registry configured, so refresh reports that plainly and the built-in catalogue is what you get.
+
+## Discovery
+
+Discovery is where you tell Agentic Kit where to look. Configuration is user intent and lives in
+`kit.json` under `maintenance.discovery`; scan state lives in owner-private storage.
+
+### Sources
+
+- **Automatic sources** are enabled on every installation and can be toggled: Claude user
+  configuration, Codex user configuration, OpenCode user configuration, Hermes user configuration,
+  Projects (every project a recorded host session has visited), Runtimes, Package managers, Ollama
+  (over loopback only), and Providers. Each states what it inspects, never a path. Automatic
+  sources have no per-source scan control: their coverage comes from **Re-measure machine**, and
+  the non-filesystem ones (Runtimes, Package managers, Ollama, Providers) are covered by the
+  provider check. Asking `ak maintain scans start` to walk one of those is refused with
+  `SOURCE_NOT_SCANNABLE`.
+- **Exact projects** and **collection roots** are folders you add. A collection root can carry a
+  depth limit. Roots must be absolute, lexically normalized, not symlinks, and real directories.
+  Network, removable, cloud-placeholder, and Windows-to-WSL boundaries are excluded by default and
+  need an explicit per-root opt-in.
+- **Exclusions** are exact or recursive paths that no source may enter.
+- Every source reports one coverage state: **Not scanned yet**, complete, scanning, paused,
+  stopped, or failed. A source that has never run reports no visited work at all.
+
+### Preview before save
+
+**Add a source** takes a path and a kind, and **Preview** shows what would happen: projects found
+with breadcrumbs, exclusions that apply, depth, symlinks skipped, filesystem boundaries, an estimate
+of entries, bytes, and time when measurable, permission denials, and the hard ceilings (depth 8,
+20,000 entries). Nothing is saved until you press **Save source**, and a saved root starts scanning
+at once. Removing a source or stopping its scan shows the affected resources first and asks
+**Remove this source?** or **Stop this source?**.
+
+### Work slices and safety ceilings
+
+Scans are resumable and completion-oriented.
+
+- A **work slice** (20,000 entries or 250 ms by default) checkpoints and yields. It never ends a
+  valid scan; the source resumes from its checkpoint.
+- A **safety ceiling** (depth, entries, file size, memory, output, process time, or response size)
+  stops the source and names the ceiling that was hit.
+- If a source changes during measurement, the smallest affected partition is invalidated and
+  requeued, up to three restarts, after which the source reports that it changed.
+- Roots you added carry the per-source controls: **Pause** and **Stop** while running, **Resume**
+  and **Stop** while paused, **Retry scan** after a failure, and **Scan this root** if it has never
+  run. A started root keeps running through its work slices until it completes, pauses, stops, or
+  fails; you never have to resume it yourself. `ak maintain scans start --source ID` does the same
+  from the CLI and waits for the final state. Automatic sources show instead whether they are
+  measured by Re-measure machine or covered by the last measurement.
+
+Progress is factual: "Scanned N entries. X of Y sources are complete. N sources have not been
+scanned yet." Counts are visited work, never totals.
+
+### Incomplete sources never overclaim
+
+The last complete snapshot stays authoritative; a partial or failed run never replaces it. A
+placement whose source is still scanning carries the condition **Source scan incomplete** in its
+technical details. Inventory shows a one-sentence banner, such as "4 sources have not been scanned
+yet." or "2 sources stopped at a limit (entries).", with at most one button: **Re-measure machine**
+when sources have never been scanned, **Open Discovery** when sources are paused, stopped, or
+failed, and none while sources are still scanning. The banner never lists every source; per-source
+detail stays under **What proves this?** in the inspector. The non-filesystem automatic sources
+(Runtimes, Package managers, Ollama, Providers) never appear in it, because their evidence comes
+from the provider check.
+While a source is incomplete, Maintenance makes no claim of absence, totals, uniqueness, complete
+conflicts, complete reverse dependencies, or reclaimable totals, and offers no action that depends
+on completeness.
+
+### Retention
+
+Checkpoints are bounded to 256 KiB, expire after 7 days, and are rejected if the source, environment,
+exclusions, or policy drifted. Scan history keeps at most 32 summaries per environment for at most
+90 days; you may lower either figure, never below one. Receipts, dispositions, and recipe acceptance
+records are never cleared by history retention.
+
+## Activity
+
+Activity has six groups: **Recovery to finish**, **In progress**, **Change receipts**,
+**Dispositions**, **Recipe changes**, and **Scan records**. A committed reversible receipt offers
+**Undo**; every receipt offers **Export**.
+
+An export is sanitized by default: secrets, credentials, tokens, private registry URLs, raw
+configuration, and rollback material are omitted, and absolute paths are redacted. Ticking
+**Include local paths** warns you and requires **Export again**. The CLI needs both
+`--include-local-paths` and `--acknowledge-warning`.
+
+## Audit an interruption, then record an outcome
+
+If an apply or undo was interrupted after dispatch but before verification, the receipt appears
+under Recovery to finish with one button: **Audit interruption**.
+
+The audit is read-only. Before it inspects anything it discloses what it will check (receipt
+integrity, last durable phase, recorded provider version, current state) and its policies:
+read-only provider inspectors only, and no network unless the recorded provider's inspector needs
+it. It never retries, replays, undoes, or completes the action, and it can audit several receipts at
+once.
+
+Each audit ends in one of seven results. Three are conclusive and enable exactly one **Record**
+button:
+
+| Audit result | Record button it enables |
+|--------------|--------------------------|
+| No action started | Record no change |
+| Matches recorded before state | Record no change after an interrupted apply; Record restored after an interrupted undo |
+| Matches verified after state | Record completed |
+
+The other four (Differs from both recorded states, Matching inspection provider is not present,
+Receipt integrity check failed, Affected catalog refresh did not complete) say **No corrective
+action is offered.** Resolve the named evidence problem and audit again.
+
+Recording is a separate, single-receipt write. The dashboard asks you to type `RECORD`; the server
+reruns the audit under the mutation lock and refuses with `RECONCILE_OUTCOME_NOT_ENABLED` if the
+audit no longer enables that outcome. From the CLI:
+
+```bash
+ak maintain audit --receipts mnt-receipt-a,mnt-receipt-b
+ak maintain reconcile --receipt mnt-receipt-a --outcome record-completed --yes
+```
+
+`ak maintain recover --receipt ID` is now a read-only alias for the audit. It records nothing.
+
+An unresolved receipt blocks writes to its own placement, environment, and dependents; unrelated
+environments stay writable. A receipt that fails its integrity check blocks all writes until you
+resolve it.
+
+## One action per write
+
+Every write plan carries exactly one action for one placement, in the dashboard, the API, and the
+CLI. Selecting a second candidate is refused before any effect with `ONE_ACTION_PER_PLAN`. The
+CLI refuses more than one id in `--actions`, and more than one id in `--findings` when
+`--executable` is set, before the request reaches the service. Reads (scans, queries, previews,
+audits) may batch.
+
+## Plan, apply, undo
+
+A read-only plan can list several findings:
+
+```bash
+ak maintain plan --findings FINDING_ID_1,FINDING_ID_2
+```
+
+An executable plan derives one action from fresh evidence and persists it for five minutes:
+
+```bash
+ak maintain plan --placement plc_ID --guidance gid_ID --executable --json
+ak maintain plan --findings FINDING_ID --executable --json
+```
+
+Keep the plan id, its SHA-256 digest, and the action id together. The plan id identifies evidence;
+it does not authorize anything. Apply requires every binding and explicit confirmation:
+
+```bash
+ak maintain apply --plan PLAN_ID --digest PLAN_SHA256 --actions ACTION_ID --yes
+```
 
 Before the first effect, Maintenance reloads the provider, replans, compares source state, and
-preflights every action. Evidence drift, expiry, provider changes, mixed safety classes, or an
-unfinished earlier receipt stop the transaction.
+preflights the action. Evidence drift, expiry, a changed provider, or an unfinished earlier receipt
+stops the transaction. After dispatch, the provider verifies its postcondition and Maintenance
+refreshes the deep System snapshot. The receipt records the outcome.
 
-After dispatch, the provider verifies its postcondition and Maintenance refreshes the full deep
-System/Footprint snapshot. This is not a claim that several external operations were atomic. The
-receipt records each outcome.
-
-## Understand the action label
-
-| Label | What it promises |
-|-------|------------------|
-| <code>safe-automatic</code> | Exact authority and verification support the proposal; you must still confirm it |
-| <code>approval-required</code> | The action is exact, but you must accept impact or preservation risk |
-| <code>upstream-required</code> | No safe local operation exists; use the displayed upstream workflow |
-| <code>never-automatic</code> | Authority or recovery is insufficient; preserve the resource |
-
-Rollback is separate:
-
-- **reversible** — the provider can restore and verify the recorded preimage;
-- **compensating** — a new provider operation can move toward the prior state; and
-- **irreversible** — automated recovery is unavailable.
-
-Read the restart and rollback labels before confirming.
-
-## Undo a verified reversible change
+In the dashboard, a Can apply here entry previews the exact operation and its consequences. An
+approval-required or irreversible action asks you to type `APPLY 1`.
 
 Only an eligible committed receipt can be undone:
 
-    ak maintain undo --receipt RECEIPT_ID --yes
+```bash
+ak maintain undo --receipt RECEIPT_ID --yes
+```
 
-Maintenance requires the recorded provider and version, a reversible or compensating operation, and
-an exact current postimage. If anything changed after apply, undo refuses instead of overwriting the
-new state. The provider verifies restoration and a deep Catalog refresh completes before the undo
-is reported as rolled back.
+Undo needs the recorded provider and version, a reversible or compensating operation, and an exact
+current postimage. If anything changed after apply, undo refuses instead of overwriting the new
+state. If no inventory has been built yet, plan and apply refuse with `SCAN_REQUIRED`; choose
+**Refresh evidence** or run `ak maintain scan --refresh-inventory` first. If a placement cannot be
+bound to an exact executable finding, they refuse with `PLACEMENT_FINDING_UNRESOLVED`.
 
-## Recover an interrupted receipt
-
-If dispatch may have happened but verification did not finish, the receipt becomes recovery
-required. New Maintenance mutations remain blocked until the uncertainty is reconciled:
-
-    ak maintain recover --receipt RECEIPT_ID --yes
-
-Recovery is observation-only. It never retries, reapplies, undoes, or compensates an action. Each
-recorded provider/version inspects current state:
-
-- all recorded preimages can prove no change;
-- all verified postimages can prove the apply committed;
-- restored preimages can prove an interrupted undo rolled back; and
-- a prepared journal with no dispatch evidence can prove an aborted no-change result.
-
-Mixed state, current drift, a missing or changed provider, incomplete inspection, or a failed
-Catalog refresh leaves the receipt recovery-required. Resolve the named evidence problem and run
-the same recovery command again. Do not delete the journal or guess which operation occurred.
-
-The dashboard displays recovery-required receipts but deliberately has no recovery action.
+Rollback classes are separate from safety: **reversible** (the provider restores and verifies the
+recorded preimage), **compensating** (a new operation moves toward the prior state), and
+**irreversible** (no automated recovery). Read the restart and rollback lines before confirming.
 
 ## What can act today
 
 | Resource owner | Actions | Important limits |
 |----------------|---------|------------------|
-| Claude plugin CLI | Disable, update, and remove with data preserved; disable can be undone with native enable | Update needs one exact reported candidate. Prune is unsupported. Update/remove are irreversible. Restart required. |
+| Claude plugin CLI | Disable, update, and remove with data preserved; disable can be undone with native enable | Update needs one exact reported candidate. Prune is not offered. Update and remove are irreversible. Restart required. |
 | Codex plugin CLI | Remove an exact removal candidate | No per-plugin update or disable. Ambiguous version candidates stay report-only. Restart required. |
-| Codex MCP CLI | Remove an exact user-scope registration | Project-scope findings remain report-only. No claim about server health or authorization. Irreversible; restart required. |
-| Claude MCP | None | No provider is registered; findings remain report-only. |
-| OpenCode plugin/MCP | None | No verified native Maintenance adapter; findings remain report-only. |
-| Agentic-kit-owned skill | Conditional adapter: archive/prune; its own projected finding offers archive only | The stock CLI/dashboard does not yet supply a production receipt/root resolver, so it does not register this adapter. Explicit compositions require a complete current tree receipt and exact root; plugin caches, changed trees, symlinks, special files, and unreceipted trees are preserved. |
+| Codex MCP CLI | Remove an exact user-scope registration | Project-scope registrations stay report-only. No claim about server health or authorization. Irreversible; restart required. |
+| Claude MCP | None | No provider is registered; registrations stay report-only. |
+| OpenCode plugin/MCP | None | No verified native adapter; placements stay report-only. |
+| Agentic-kit-owned skill | Conditional adapter: archive/prune; its own projected finding offers archive only | The stock CLI and dashboard do not supply a receipt/root resolver, so they do not register this adapter. Plugin caches, changed trees, symlinks, special files, and unreceipted trees are preserved. |
 | Agentic-kit-owned stale npx environment | Clean the one exact collector candidate | Other caches and transcripts are excluded. Irreversible. |
-| Ruflo MCP orphan | Terminate an exact same-user, PPID-1 orphan after identity recheck | Requires numeric UID and is unavailable on Windows. It is not a generic daemon kill. |
+| Ruflo MCP orphan | Terminate an exact same-user, PPID-1 orphan after an identity recheck | Requires a numeric UID and is unavailable on Windows. Not a generic daemon kill. |
+| Git project patch | Apply one exact server-authored file replacement inside a configured project root | Registered only when a composition supplies configured project roots; the stock CLI and dashboard do not. Refuses a target outside those roots, a symlink or submodule in the path, index or worktree drift on the affected path, or a preimage digest mismatch; unrelated dirty files are fine. Never runs stash, commit, branch, checkout, push, or merge. Content is bounded to 256 KiB and validated as JSON, TOML, or YAML when declared, plus up to five declared checks; a failed check restores the original bytes. The preview shows up to 100 changed lines per side. Reversible; no restart. |
+| Ollama model | Remove exactly one local Ollama model | Registered by default; Remove model appears only when Ollama is reachable and every premise is verified. Detection reads `/api/tags` and `/api/ps` over loopback only and reports the daemon unavailable when it cannot, so an absent Ollama yields no action; apply runs `ollama rm` with the exact name. Refuses when the tag or process list is incomplete, the model is currently loaded, its digest differs from the expected one, any route consumer is missing from the complete consumer list, or shared-blob accounting is unavailable. Physically reclaimed bytes are zero when the content is shared with another model. Irreversible; a redownload is required to use the model again. No elevation, no restart. Names containing a slash stay report-only. |
 
-The service registers only providers it can execute. Npx actions are conditional on current
-collector evidence. The owned-skill adapter additionally needs a composition root to supply exact
-receipts and roots; the stock CLI/dashboard does not do that yet. The absence of a button can be the
-correct result.
+The service registers only providers it can execute. Npx actions depend on current collector
+evidence. The absence of a button can be the correct result.
 
-## Skill ownership is stricter than Catalog identity
+## Skill ownership is stricter than inventory identity
 
-Catalog can relate a standalone skill and a plugin-contributed skill by exact name, bounded
+Inventory can relate a standalone skill and a plugin-contributed skill by exact name, bounded
 entrypoint digest, or bounded full-definition digest. Full-definition equality includes the
 observed regular files in the bounded skill tree; it still does not prove which copy the host uses,
-that either tree is owned, unused, or safely removable.
+or that either tree is owned, unused, or safely removable.
 
 An owned skill action requires an <code>agentic-kit.skill-tree-ownership/v1</code> receipt that
 binds the complete recursive regular-file manifest, including <code>SKILL.md</code>, and matches
 the current shape and digest. The target must be a non-symlink direct child of the exact allowed
-root under the current owner. Plugin-cache children are never direct skill targets.
+root under the current owner. Plugin-cache children are never direct skill targets. Legacy,
+partial, modified, unreadable, ambiguous, or unreceipted trees stay report-only.
 
-Legacy, partial, modified, unreadable, ambiguous, or unreceipted trees stay report-only.
+One skill tree may be discovered by several hosts. Inventory counts that tree once and records one
+consumer binding per host; those hosts appear under **Who uses it?** and in the preview's blast
+radius. Removing one project copy is never described as removing several copies merely because
+Claude, Codex, or OpenCode can all discover it.
 
-One skill tree may be discovered by several hosts. Catalog counts that tree once and records a
-ConsumerBinding per host. Maintenance shows those active hosts under **Carried by** and includes
-them in the preview blast radius. Removing one project copy is never described as removing several
-copies merely because Claude, Codex, or OpenCode can all discover it.
-
-Discovery rules differ. Claude applies personal/project precedence and namespaces plugin skills;
-Codex discovers repository and user `.agents/skills`; OpenCode also discovers compatible
+Discovery rules differ by host. Claude applies personal/project precedence and namespaces plugin
+skills; Codex discovers repository and user `.agents/skills`; OpenCode also discovers compatible
 `.claude/skills` and `.agents/skills` roots unless that compatibility is disabled. A shared
 `SKILL.md` format does not prove identical precedence, permissions, advertisement, or runtime use.
 
@@ -221,67 +440,204 @@ abandoned lock only when all of these are proven:
 
 A live, remote, tampered, malformed, wrong-owner, unknown-UID, or liveness-unknown lock stays busy.
 Lock recovery permits a new coordinator to start; it does not reconcile an interrupted receipt.
-Use <code>ak maintain recover</code> for the receipt.
+Use the audit and `ak maintain reconcile` for the receipt.
+
+## The `ak maintain` verbs
+
+Add `--json` to any verb for the complete DTO. Verbs that write require `--yes`.
+
+| Verb | What it does |
+|------|--------------|
+| `scan [--deep] [--refresh-inventory]` | Runs the provider check on the saved System inventory; `--refresh-inventory` rebuilds the Inventory afterwards (the dashboard's **Refresh evidence**). With `--deep` it re-measures System first and walks every discovery source to completion before rebuilding (the dashboard's **Re-measure machine**). |
+| `inventory [--scope S] [--view V] [--facet name=value ...] [--search TEXT] [--sort ORDER] [--cursor TOKEN] [--limit N]` | Queries placements. |
+| `show --placement ID [--reveal]` | Prints the inspector; `--reveal` prints the exact, owner-only path. |
+| `guidance [--lane LANE]` | Lists admitted Guidance entries and per-lane counts. |
+| `procedure --guidance ID [--shell SHELL]` | Renders a copyable procedure. |
+| `discovery` | Prints configured sources, coverage, progress, and history. This verb prints the roots you configured. |
+| `sources add --kind exact-project\|collection-root --root PATH [--yes]` | Previews a source; `--yes` saves it. |
+| `sources remove --source ID [--yes]` | Shows the affected resources; `--yes` removes the source. |
+| `sources enable\|disable --source ID` | Toggles an automatic source. |
+| `sources exclude --path PATH [--recursive]` | Adds an exclusion. |
+| `sources unexclude --exclusion ID` | Removes an exclusion. |
+| `scans` | Prints scan progress. |
+| `scans start [--source ID,...] [--deep]` | Starts scans for the named roots, or every filesystem source, and waits for their final state. A non-filesystem automatic source is refused with `SOURCE_NOT_SCANNABLE`. |
+| `scans pause\|resume --source ID` | Pauses or resumes one source. |
+| `scans stop --source ID [--yes]` | Shows the affected resources; `--yes` stops the source. |
+| `activity` | Prints the six Activity groups. |
+| `receipt --receipt ID [--export [--include-local-paths --acknowledge-warning]]` | Prints or exports one receipt. |
+| `audit --receipts ID,...` | Read-only interruption audit; may batch. |
+| `reconcile --receipt ID --outcome record-no-change\|record-completed\|record-restored --yes` | Records one audited outcome. |
+| `disposition --guidance ID --kind acknowledged\|snoozed\|ignored-exact-candidate [--until ISO] --yes` | Records a disposition. |
+| `plan [--findings ID,...] [--safety-class CLASS] [--project PATH] [--executable]` | Read-only plan, or one executable action with `--executable`. |
+| `plan --placement ID [--guidance ID] --executable` | One executable action for one placement. |
+| `apply --plan ID --digest SHA256 --actions ID --yes` | Applies exactly one action. |
+| `undo --receipt ID --yes` | Undoes one eligible receipt. |
+| `recover --receipt ID` | Read-only alias for `audit`. |
+| `recipes list\|refresh\|accept\|withdraw [--recipe ID --version V --yes]` | Manages the recipe catalogue. |
+| `preferences [--set key=value ...]` | Reads or saves owner-private preferences. |
+
+Two sentinel flows, end to end:
+
+```bash
+# A dangling MCP registration: find it, inspect it, read the steps.
+ak maintain inventory --search lightpanda --json
+ak maintain show --placement plc_lightpanda --json
+ak maintain guidance --lane steps
+ak maintain procedure --guidance gid_lightpanda_steps --shell zsh
+
+# An interrupted cache cleanup: audit, then record the one enabled outcome.
+ak maintain audit --receipts mnt-receipt-a,mnt-receipt-b
+ak maintain reconcile --receipt mnt-receipt-a --outcome record-completed --yes
+
+# A new collection root: preview, then save.
+ak maintain sources add --kind collection-root --root /path/to/projects
+ak maintain sources add --kind collection-root --root /path/to/projects --yes
+```
+
+Human output never prints a path except for `show --reveal` and `discovery`.
 
 ## State and privacy
 
-Scan reports, plans, and receipts are stored under the current user's agentic-kit state directory:
+Discovery intent lives in your kit configuration:
 
-- POSIX: <code>$XDG_STATE_HOME/agentic-kit/maintenance</code>, or
-  <code>~/.local/state/agentic-kit/maintenance</code>; and
-- Windows: <code>%LOCALAPPDATA%\agentic-kit\maintenance</code>.
+- POSIX: `~/.config/agentic-kit/kit.json` (or `$XDG_CONFIG_HOME/agentic-kit/kit.json`), and
+- Windows: `%APPDATA%\agentic-kit\kit.json`,
 
-Directories use owner-only mode 0700 and files use 0600 where the platform supports POSIX modes.
-Records are bounded and integrity-sealed. Dashboard projections omit filesystem paths, commands,
-rollback material, and raw provider diagnostics.
+under the `maintenance` key:
+
+```json
+{
+  "maintenance": {
+    "discovery": {
+      "automaticSources": { "hermes-user": false },
+      "exactProjects": [{ "root": "/absolute/project" }],
+      "collectionRoots": [{ "root": "/absolute/projects", "maxDepth": 4, "includeNetwork": false }],
+      "exclusions": [{ "path": "/absolute/projects/archive", "recursive": true }]
+    },
+    "retention": { "maxSummaries": 16, "maxAgeDays": 30 }
+  }
+}
+```
+
+Everything else is owner-private state under the current user's agentic-kit state directory:
+
+- POSIX: `$XDG_STATE_HOME/agentic-kit/maintenance`, or `~/.local/state/agentic-kit/maintenance`;
+- Windows: `%LOCALAPPDATA%\agentic-kit\maintenance`.
+
+Inside it: `latest-scan.json` (the provider report), `plans/`, `transactions/` (one `receipt.json`
+per receipt), and `management/` with the last complete inventory, exact locators, the last-good
+discovery snapshot, scan history, checkpoints, dispositions, preferences, recipes, and procedure
+checklists. Directories use owner-only mode 0700 and files 0600 where the platform supports POSIX
+modes. Records are bounded and integrity-sealed. Nothing in the inventory, a URL, a notification,
+or an export contains a local path unless you reveal or export it deliberately.
 
 ## Dashboard security boundary
 
-Maintenance is the only dashboard mutation surface. Its exact routes are:
+Maintenance is the only dashboard mutation surface. The v1 routes remain as compatibility:
 
-    GET  /api/maintenance
-    POST /api/maintenance/plans
-    POST /api/maintenance/apply
-    POST /api/maintenance/undo
+```text
+GET  /api/maintenance            (?refresh=scan runs the provider check, then rebuilds the Inventory)
+POST /api/maintenance/plans
+POST /api/maintenance/apply
+POST /api/maintenance/undo
+```
 
-The exact <code>GET /api/maintenance?refresh=scan</code> query is the read-only **Check providers**
-path; plain GET reads the latest saved report and any transient in-process scan activity without
-starting provider work. Unknown or duplicate query parameters are rejected.
+The v2 routes are exact. Path parameters must be opaque ids (`plc_`, `gid_`) or receipt ids
+(`mnt-`):
 
-POST requires the per-session token in its header form, same-origin Host/Origin/Sec-Fetch-Site
-evidence, <code>application/json</code>, an exact schema, and at most 64 KiB. Apply and undo consume
-a short-lived one-use capability before provider work starts. The browser never sends a command,
-path, provider ID, or action definition.
+```text
+GET  /api/maintenance/v2/inventory?scope&view&sort&search&cursor&limit&facet.<name>=value
+GET  /api/maintenance/v2/placements/{placementId}
+POST /api/maintenance/v2/placements/reveal
+GET  /api/maintenance/v2/guidance?lane
+GET  /api/maintenance/v2/procedures/{guidanceId}?shell
+POST /api/maintenance/v2/procedures/checklist
+GET  /api/maintenance/v2/discovery
+POST /api/maintenance/v2/discovery/preview
+POST /api/maintenance/v2/discovery/sources
+POST /api/maintenance/v2/discovery/sources/remove
+POST /api/maintenance/v2/discovery/automatic
+POST /api/maintenance/v2/discovery/exclusions
+POST /api/maintenance/v2/discovery/exclusions/remove
+GET  /api/maintenance/v2/scans
+POST /api/maintenance/v2/scans
+GET  /api/maintenance/v2/activity
+GET  /api/maintenance/v2/receipts/{receiptId}
+POST /api/maintenance/v2/receipts/export
+POST /api/maintenance/v2/dispositions
+POST /api/maintenance/v2/audit
+POST /api/maintenance/v2/reconcile/preview
+POST /api/maintenance/v2/reconcile
+POST /api/maintenance/v2/plans
+POST /api/maintenance/v2/apply
+POST /api/maintenance/v2/undo
+POST /api/maintenance/v2/recipes/refresh
+POST /api/maintenance/v2/recipes/accept
+POST /api/maintenance/v2/recipes/withdraw
+GET  /api/maintenance/v2/preferences
+POST /api/maintenance/v2/preferences
+```
 
-The accepted request bodies are exact—surplus keys are rejected:
+Every route sits behind the loopback bind and per-session token. GET queries reject unknown or
+duplicate parameters, bound `limit` to 1..200 and `search` to 200 path-free characters, allow at
+most 32 distinct values per facet, and refuse any value shaped like a local path. POST requires the
+token in its header form, same-origin Host/Origin/Sec-Fetch-Site evidence, `application/json`, an
+exact schema, and at most 64 KiB. Apply, undo, and reconcile consume a verb-bound, one-use
+capability that expires after five minutes and is consumed before provider work starts. The browser
+never sends a command, provider id, or action definition; the two Discovery routes that accept a
+path carry the root you typed, validated as an absolute traversal-free path and stored as intent.
+
+The accepted request bodies are exact; surplus keys are rejected:
 
 | Route | JSON body |
 |-------|-----------|
-| Create plan | <code>{"findingIds":["ID"]}</code>, with 1–100 unique public IDs |
-| Apply | <code>{"capability":"TOKEN","confirm":true,"typedPhrase":"SERVER_PHRASE"}</code>; omit <code>typedPhrase</code> only when the preview did not require one |
-| Preview undo | <code>{"receiptId":"ID","preview":true}</code> |
-| Confirm undo | <code>{"capability":"TOKEN","confirm":true,"typedPhrase":"UNDO"}</code> |
+| v1 plans | `{"findingIds":["ID"]}`, 1..100 unique public ids |
+| v1 and v2 apply | `{"capability":"TOKEN","confirm":true,"typedPhrase":"SERVER_PHRASE"}`; omit `typedPhrase` only when the preview did not require one |
+| v1 and v2 undo preview | `{"receiptId":"ID","preview":true}` |
+| v1 and v2 undo | `{"capability":"TOKEN","confirm":true,"typedPhrase":"UNDO"}` |
+| v2 plans | `{"placementId":"plc_…","guidanceId":"gid_…"}` |
+| placements/reveal | `{"placementId":"plc_…"}` |
+| procedures/checklist | `{"guidanceId":"gid_…","stepId":"review","done":true}` |
+| discovery/preview | `{"kind":"exact-project"\|"collection-root","root":"/absolute/path"}` |
+| discovery/sources | `{"previewId":"prv_…","confirm":true}` |
+| discovery/sources/remove | `{"sourceId":"src_…","confirm":false\|true}`; `false` returns the affected preview |
+| discovery/automatic | `{"sourceId":"claude-user","enabled":false}` |
+| discovery/exclusions | `{"path":"/absolute/path","recursive":true}` |
+| discovery/exclusions/remove | `{"exclusionId":"exc_…"}` |
+| scans | `{"action":"start"\|"pause"\|"resume"\|"stop","sourceId":"…","confirm":true}`; `sourceId` is required except for `start`, and `confirm` is accepted only with `stop` |
+| receipts/export | `{"receiptId":"mnt-…","includeLocalPaths":false}`; including paths also requires `"acknowledgedWarning":true` |
+| dispositions | `{"guidanceId":"gid_…","kind":"acknowledged"\|"snoozed"\|"ignored-exact-candidate","until":"ISO","confirm":true}`; `until` accompanies `snoozed` only and must be within 365 days |
+| audit | `{"receiptIds":["mnt-…"]}`, 1..20 unique ids |
+| reconcile/preview | `{"receiptId":"mnt-…","outcome":"record-no-change"\|"record-completed"\|"record-restored"}` |
+| reconcile | `{"capability":"TOKEN","confirm":true,"typedPhrase":"RECORD"}` |
+| recipes/refresh | `{"confirm":true}` |
+| recipes/accept | `{"recipeId":"ID","recipeVersion":"V","confirm":true}` |
+| recipes/withdraw | `{"recipeId":"ID","recipeVersion":"V","confirm":true}`; `recipeVersion` is optional |
+| preferences | `{"lastView":{…},"preferredShellByEnvironment":{"env_…":"zsh"},"retention":{…}}`; at least one key |
 
-The plan and undo-preview responses mint different verb-bound capabilities. They cannot be moved
-between sessions, verbs, plans, or receipts, and consumption occurs before asynchronous provider
-work.
+Plan, undo-preview, and reconcile-preview responses mint different verb-bound capabilities. They
+cannot be moved between sessions, verbs, plans, or receipts.
 
-If a Maintenance read fails, the panel keeps the failure visible and offers **Retry report** rather
-than rendering an empty workbench. The fragment token is also retained in page memory when browser
+If a Maintenance read fails, the panel keeps the failure visible and offers **Retry** rather than
+rendering an empty workspace. The fragment token is also retained in page memory when browser
 storage is blocked, so authenticated panels can still finish bootstrap.
 
 ## What Maintenance does not claim
 
-- “Available” is not “latest” or “recommended”.
+- Available is not latest or recommended.
 - Installed is not enabled, effective, or loaded into model context.
 - Registered is not configured, reachable, healthy, authenticated, or authorized.
 - Missing usage does not prove unused.
 - Age or cache location does not prove stale or reproducible.
-- A full-definition digest proves only equality of the bounded observed files. It does not prove
-  host selection, ownership, usage, or safe deletion.
+- Equal definitions prove equality of the bounded observed files only, never host selection,
+  ownership, usage, or safe deletion.
+- A shared artifact is not a duplicate and grants no removal authority.
+- An incomplete source supports no claim of absence, totals, uniqueness, or reclaimable space.
 - A receipt makes non-atomic provider effects visible; it does not make them atomic.
-- Recovery reconciles provable current state; it does not finish an interrupted operation.
+- An interruption audit observes provable current state; recording an outcome does not finish an
+  interrupted operation.
 
-For architecture and invariants, see
-[the Maintenance domain](ddd/maintenance.md) and
-[ADR-0044](adr/0044-receipt-aware-maintenance-control-plane.md).
+For architecture and invariants, see [the Maintenance domain](ddd/maintenance.md),
+[ADR-0048](adr/0048-inventory-led-maintenance-resource-management.md), the
+[design package](design/maintenance-overhaul/README.md), and
+[ADR-0044](adr/0044-receipt-aware-maintenance-control-plane.md) for the transaction engine.

@@ -68,10 +68,22 @@ function normalizedEvidence(evidence, providerId) {
   };
 }
 
+function cleanPreviewLine(value) {
+  if (typeof value !== 'string' || !value.length || value.length > 400) return null;
+  const clean = Array.from(value).every((character) => {
+    const code = character.codePointAt(0);
+    return code > 31 && code !== 127;
+  });
+  return clean ? value : null;
+}
+
 function normalizedImpact(impact) {
   const labels = (value) => Array.isArray(value)
     ? value.filter((item) => typeof item === 'string' && item && !/[\0\r\n]/.test(item)).slice(0, 12)
     : [];
+  const preview = Array.isArray(impact?.preview)
+    ? impact.preview.map(cleanPreviewLine).filter((line) => line != null).slice(0, 200)
+    : null;
   return {
     summary: impact?.summary ?? 'Dependent capabilities require review before change.',
     bytes: Number.isFinite(impact?.bytes) ? impact.bytes : null,
@@ -80,6 +92,7 @@ function normalizedImpact(impact) {
     capabilities: labels(impact?.capabilities),
     projects: labels(impact?.projects),
     preserved: labels(impact?.preserved),
+    ...(preview && preview.length ? { preview } : {}),
   };
 }
 

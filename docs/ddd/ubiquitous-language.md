@@ -202,20 +202,21 @@ transcript and never substitute for each other. See [Machine footprint](machine-
 
 ## Maintenance language
 
-These terms describe the implemented architecture in
-[ADR-0044](../adr/0044-receipt-aware-maintenance-control-plane.md).
-
-ADR-0048's [proposed domain model](../design/maintenance-overhaul/domain-model.md) defines
-successor terms. They become normative here only as their implementation slices ship.
+These terms describe [ADR-0044](../adr/0044-receipt-aware-maintenance-control-plane.md)'s
+implemented transaction engine and [ADR-0048](../adr/0048-inventory-led-maintenance-resource-management.md)'s
+implemented resource-management projection, guidance admission, discovery, and interruption-audit
+contracts. `MaintenanceFinding` and `MaintenancePlan` (marked below) are engine-level terms the
+transaction layer still uses internally; the user-facing product now speaks in `ResourcePlacement`
+and `GuidanceEntry` instead.
 
 | Term | Meaning |
 |------|---------|
 | Maintenance | The human-guided control-plane bounded context for evidence-backed lifecycle recommendations and provider-owned, verified, receipted actions; exposed beneath System without becoming part of Machine Footprint |
-| MaintenanceFinding | An evidence-backed resource condition with source, freshness, completeness, ownership, impact, and missing evidence; never itself an action |
+| MaintenanceFinding | *(engine-level)* An evidence-backed resource condition with source, freshness, completeness, ownership, impact, and missing evidence; never itself an action |
 | CapabilityRelationship | Typed project/shared evidence classified as an identical project copy, different definition, tracked project copy, or equivalent legacy transport; a relationship does not confer mutation authority |
 | SuggestedAction | A finding's recommendation, ordered procedure, expected effect, preservation boundary, and automation-blocking reason; human guidance until a provider authorizes an executable action |
 | MaintenanceAction | One exact ActionProvider operation with target, projected result, safety class, rollback class, restart requirement, and verification contract |
-| MaintenancePlan | An immutable, short-lived selection of MaintenanceActions bound to exact source state, scope, safety class, expiry, and content-derived digest; evidence identity, not authorization |
+| MaintenancePlan | *(engine-level)* An immutable, short-lived selection of MaintenanceActions bound to exact source state, scope, safety class, expiry, and content-derived digest; evidence identity, not authorization. Since ADR-0048, a plan holds exactly one action |
 | ActionProvider | A resource-owner-specific lifecycle port that advertises only proven operations and implements detect, findings/actionFor, preflight, apply, verify, current-state inspection, and guarded undo where supported |
 | ActionCapability | Ephemeral one-use authorization bound to a dashboard session, current plan digest, selected action IDs, source fingerprint, scope, safety class, and expiry |
 | TransactionReceipt | Private durable evidence binding intent, policy decision, exact inputs, before-state, fixed operation, result, verification, after-state, rollback, and compensation |
@@ -224,13 +225,32 @@ successor terms. They become normative here only as their implementation slices 
 | Safety class | One of `safe-automatic`, `approval-required`, `upstream-required`, or `never-automatic`; an executable class still requires explicit human confirmation |
 | Rollback class | Reversible, compensating, or irreversible; independent of action safety and disclosed before confirmation |
 | Recovery-required receipt | Durable evidence that provider dispatch may have occurred but the exact outcome was not proven; it blocks later mutations until reconciled |
-| Receipt reconciliation | Observation-only comparison of every receipt entry with its recorded preimage and verified postimage; never a replay, retry, undo, or compensation |
+| Receipt reconciliation | One individually confirmed write recording `record-no-change`, `record-completed`, or `record-restored` against exactly one receipt, after its interruption audit re-runs under the mutation lock; never a replay, retry, or blind compensation |
 | Maintenance mutation lock | Private integrity-sealed serialization record; reclaimable only on the same machine and numeric UID when the recorded PID is provably dead and a second guarded check agrees |
+| ManagedResource | ADR-0048's logical resource a person recognizes, grouping its placements without collapsing their scope, carrier, provenance, version, consumers, or actions |
+| ResourcePlacement | ADR-0048's exact selectable and actionable row: one resource, one environment, one administrative scope, one location breadcrumb; the browser-facing action target (`placementId`) |
+| PhysicalArtifact | One measured carrier — file, configuration selector, directory tree, package record, executable, runtime installation, cache object, model revision, or storage root — counted once regardless of how many hosts discover it |
+| ConsumerBinding | One typed edge from a placement or artifact to a host, adapter, project, route, provider, model-runtime, or tool consumer, carrying discovery mechanism and enabled state |
+| EvidenceAssertion | One field-local claim graded `verified`, `provider-declared`, or `inferred`, with a named authority, source reference, capture time, freshness, and completeness; there is no aggregate confidence score |
+| EvidenceScorecard | The strongest grade recorded per evidence field for one subject; a field nobody observed is omitted, never defaulted to a weaker grade |
+| SourceCoverage | One Discovery source's scan state, visited/estimated counts, completed/pending partitions, and factual limiting reason; never a resource disposition |
+| GuidanceEntry | One admitted, bounded outcome in exactly one of five lanes (Can apply here, Steps available, Decisions to make, Updates available, Recovery to finish), grounded by a provider capability, procedure, choice, candidate, or receipt audit |
+| RecommendationDisposition | Acknowledged, Snoozed, or Ignored exact candidate, recorded against one exact Guidance identity; invalidated by a stated premise change (expiry, candidate change, installed-version change, dependency change, source-fingerprint drift, or security-severity increase), never permanent |
+| InterruptionAudit | A read-only comparison of one receipt's recorded preimage or verified postimage with current provider evidence; may batch across receipts; never retries, replays, undoes, or mutates the resource |
+| ScanCheckpoint | A bounded (≤ 256 KiB), integrity-sealed, resumable continuation record for one Discovery scan partition or work slice; never a per-file index |
+| Work-slice budget | Bounds one scan's continuous run before yielding and checkpointing; pauses progress, and never abandons a valid scan |
+| Safety ceiling | A hard scan limit (depth, entries, file size, memory, output, process time, or response size) that stops a scan and names which ceiling ended it, distinct from a work-slice pause |
+| ProcedureRecipe | A signed, versioned, typed description of one guided operation for one exact OS/package-manager/shell/privilege/verification combination; renders as copyable text and is never executed by the procedure panel |
+| Managed | A verified, previewable operation a registered ActionProvider can execute end to end through the transaction engine |
+| Guided | A rendered, copyable procedure the user runs themselves; Agentic Kit never executes it |
+| Inventory evidence only | A verified placement condition with no grounded remedy or bounded decision; stays visible in Inventory and never enters Guidance, a navigation badge, or the action-priority sort |
+| Across scopes | The comparison query lens spanning System, Machine, User, and Projects; never a stored placement scope |
 
 A plan identifier is not an ActionCapability, and an ActionCapability is not a
 TransactionReceipt. A successful native command without a verified postcondition is not a
 successful Maintenance transaction. A receipt records non-atomic effects; it does not make them
-atomic. See [Maintenance](maintenance.md).
+atomic. A GuidanceEntry is not a MaintenanceAction: it names what is grounded, while the transaction
+engine still owns preflight, apply, verify, and receipt. See [Maintenance](maintenance.md).
 
 ## Component directory language
 

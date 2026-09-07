@@ -338,3 +338,194 @@ test('default registry reports unsupported OpenCode surfaces without fabricating
   const capabilities = publicMaintenanceProviders(registry, { includeUnsupported: true });
   assert.equal(capabilities.some((item) => item.host === 'opencode' && item.status === 'unsupported'), true);
 });
+
+test('ollama-model is registered by default (fail-closed on an absent daemon); git-project-patch stays conditional', () => {
+  const stock = createDefaultMaintenanceProviderRegistry();
+  assert.equal(stock.has('ollama-model'), true);
+  assert.equal(stock.has('git-project-patch'), false, 'no projectRoots were supplied');
+
+  const optedOut = createDefaultMaintenanceProviderRegistry({ ollamaModel: { enabled: false } });
+  assert.equal(optedOut.has('ollama-model'), false);
+
+  const withPatchRoots = createDefaultMaintenanceProviderRegistry({
+    gitProjectPatch: { projectRoots: () => ['/tmp/some-project-root'] },
+  });
+  assert.equal(withPatchRoots.has('git-project-patch'), true);
+  assert.equal(withPatchRoots.has('ollama-model'), true, 'still on by default alongside an opted-in provider');
+});
+
+test('a service built without an explicit providers Map (resolving the default registry) never issues a real fetch when ollamaModel.fetchImpl is injected', async (t) => {
+  const root = fixture(t);
+  const originalFetch = globalThis.fetch;
+  let realFetchCalled = false;
+  globalThis.fetch = async () => {
+    realFetchCalled = true;
+    throw new Error('a real network fetch must never happen in this hermetic test');
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  let injectedFetchCalls = 0;
+  const rejecting = async () => {
+    injectedFetchCalls += 1;
+    throw new Error('ECONNREFUSED');
+  };
+  const noop = { run: async () => ({ ok: false, exitCode: 1, stdout: '', stderr: '' }) };
+  const collector = { async read() { return footprint(); } };
+  // Deliberately no `providers:` — this is exactly the shape
+  // resolveProviders() falls through to createDefaultMaintenanceProviderRegistry() for.
+  const service = createMaintenanceService({
+    collector, now: () => NOW, controlRoot: root,
+    providerOptions: {
+      claudePlugin: noop, codexPlugin: noop, codexMcp: noop,
+      rufloMcpOrphan: { uid: null, list: async () => [] },
+      ollamaModel: { fetchImpl: rejecting },
+    },
+  });
+
+  await service.scan();
+  assert.equal(realFetchCalled, false, 'the default registry must use the injected fetchImpl, never globalThis.fetch');
+  assert.ok(injectedFetchCalls > 0, 'ollama-model.detect() actually ran, through the injected fetchImpl');
+});
+
+test('service.planAction carries an opaque placementId through to the receipt and rejects a malformed one', async (t) => {
+  const root = fixture(t);
+  const state = { enabled: true };
+  const implementation = provider(state);
+  const collector = { async read() { return footprint(); }, async refreshDeep() { return { ok: true }; } };
+  const service = createMaintenanceService({
+    collector, providers: new Map([[implementation.id, implementation]]), now: () => NOW, controlRoot: root,
+  });
+  const model = await service.scan();
+  const placementId = `plc_${'b'.repeat(20)}`;
+
+  await assert.rejects(
+    () => service.planAction({ findingId: model.findings[0].id, placementId: 'not-opaque' }),
+    /opaque plc_/i,
+  );
+  await assert.rejects(() => service.planAction({ placementId }), TypeError);
+
+  const plan = await service.planAction({ placementId, findingId: model.findings[0].id, guidanceId: 'gid_ignored' });
+  assert.equal(plan.actions[0].placementId, placementId);
+  const applied = await service.apply({
+    plan, actionIds: [plan.actions[0].id], expectedPlanDigest: plan.planDigest, confirmed: true,
+  });
+  assert.equal(applied.ok, true);
+  assert.equal(applied.receipt.actions[0].placementId, placementId);
+});
+
+test('service.mutationBlocks reports a broad block for an unfinished receipt with no tracked identity', async (t) => {
+  const root = fixture(t);
+  const collector = { async read() { return footprint(); } };
+  const service = createMaintenanceService({ collector, providers: new Map(), now: () => NOW, controlRoot: root });
+  assert.deepEqual(service.mutationBlocks(), []);
+});
+
+test('service.auditInterruption is read-only and never gated behind assertScanIdle', async (t) => {
+  const root = fixture(t);
+  const collector = { async read() { return footprint(); } };
+  const service = createMaintenanceService({ collector, providers: new Map(), now: () => NOW, controlRoot: root });
+  const results = await service.auditInterruption({ receiptIds: ['mnt-does-not-exist'] });
+  assert.equal(results.length, 1);
+  assert.equal(results[0].result, 'receipt-integrity-check-failed');
+});
+
+test('service.reconcile requires confirmation before touching the transaction store', async (t) => {
+  const root = fixture(t);
+  const collector = { async read() { return footprint(); } };
+  const service = createMaintenanceService({ collector, providers: new Map(), now: () => NOW, controlRoot: root });
+  await assert.rejects(
+    () => service.reconcile({ receiptId: 'mnt-x', outcome: 'record-no-change' }),
+    /confirmation/i,
+  );
+});
+
+test('service.providerEvidence reuses the most recent scan without a second detect(), and runs one read-only collect when nothing has scanned yet', async (t) => {
+  const root = fixture(t);
+  const state = { enabled: true };
+  const events = [];
+  const implementation = provider(state, events);
+  const collector = { async read() { return footprint(); }, async refreshDeep() { return { ok: true }; } };
+  const service = createMaintenanceService({
+    collector, providers: new Map([[implementation.id, implementation]]), now: () => NOW, controlRoot: root,
+  });
+
+  events.length = 0;
+  const cold = await service.providerEvidence();
+  assert.deepEqual(events, ['detect'], 'no prior scan/plan means exactly one read-only collect ran');
+  assert.equal(cold.registry.get(implementation.id), implementation);
+  assert.equal(cold.detections.get(implementation.id).status, 'available');
+  assert.ok(cold.providers.some((row) => row.id === implementation.id));
+
+  await service.scan();
+  events.length = 0;
+  const warm = await service.providerEvidence();
+  assert.deepEqual(events, [], 'a prior scan already populated the cache; providerEvidence reused it');
+  assert.equal(warm.registry.get(implementation.id), implementation);
+
+  // Defensive copies: mutating the returned containers must not corrupt the
+  // service's internal cache.
+  warm.registry.delete(implementation.id);
+  warm.detections.delete(implementation.id);
+  const again = await service.providerEvidence();
+  assert.equal(again.registry.has(implementation.id), true);
+  assert.equal(again.detections.has(implementation.id), true);
+});
+
+test('service.providerEvidence\'s cold path waits out an in-flight apply before calling detect()', async (t) => {
+  const root = fixture(t);
+  const state = { enabled: true };
+  const events = [];
+  let releaseApply;
+  const applyGate = new Promise((resolve) => { releaseApply = resolve; });
+  const base = provider(state, events);
+  const implementation = {
+    ...base,
+    async apply(action) {
+      events.push('apply-start');
+      await applyGate;
+      events.push('apply-end');
+      return base.apply(action);
+    },
+  };
+  const collector = { async read() { return footprint(); }, async refreshDeep() { return { ok: true }; } };
+  // A separate instance builds the plan, so the instance under test never
+  // calls scan/plan itself and providerEvidence() must take the cold path.
+  const planner = createMaintenanceService({
+    collector, providers: new Map([[implementation.id, implementation]]), now: () => NOW, controlRoot: root,
+  });
+  const model = await planner.scan();
+  const plan = await planner.plan({ findingIds: [model.findings[0].id], executable: true });
+
+  const service = createMaintenanceService({
+    collector, providers: new Map([[implementation.id, implementation]]), now: () => NOW, controlRoot: root,
+  });
+  events.length = 0;
+
+  const applyPromise = service.apply({
+    plan, actionIds: [plan.actions[0].id], expectedPlanDigest: plan.planDigest, confirmed: true,
+  });
+  while (!events.includes('apply-start')) {
+    await new Promise((resolve) => { setTimeout(resolve, 5); });
+  }
+  // apply() itself legitimately calls detect() earlier, while re-deriving a
+  // live plan for its own drift check — that already happened by now. What
+  // must NOT happen is a *new* detect() call (providerEvidence's cold path)
+  // while apply is still blocked mid-flight on the applyGate below.
+  const detectCallsAtGate = events.filter((event) => event === 'detect').length;
+
+  const evidencePromise = service.providerEvidence();
+  await new Promise((resolve) => { setTimeout(resolve, 30); });
+  const detectCallsWhileWaiting = events.filter((event) => event === 'detect').length;
+  assert.equal(
+    detectCallsWhileWaiting, detectCallsAtGate,
+    'no additional detect() call happened while this process holds the mutation lock',
+  );
+
+  releaseApply();
+  const applied = await applyPromise;
+  assert.equal(applied.ok, true);
+  const evidence = await evidencePromise;
+  assert.equal(evidence.registry.has(implementation.id), true);
+  const detectCallsAfter = events.filter((event) => event === 'detect').length;
+  assert.ok(detectCallsAfter > detectCallsAtGate, 'the cold-path detect() ran only after the mutation finished');
+});

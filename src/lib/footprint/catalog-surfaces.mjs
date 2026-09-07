@@ -126,9 +126,14 @@ export function catalogSurfaceSpecs(roots, readers, io) {
   const launchingRoot = repoRoot(cwd);
   const userHomes = new Set([claudeRoot, agentsRoot, codexRoot]
     .filter(Boolean).map((root) => path.dirname(path.resolve(root))));
+  // Retained session cwd is not project authority inside a host's managed state.
+  // Keep explicit project objects; installed plugins retain their own user surfaces.
+  const managedRoots=[claudeRoot,codexRoot,opencodeRoot,agentsRoot].filter(Boolean).map((root)=>path.resolve(root));
+  const explicitProjects=new Set((projects??[]).filter((entry)=>entry&&typeof entry==='object'&&entry.configured===true).map((entry)=>path.resolve(entry.path)));
   const catalogProjects = [...new Set([launchingRoot, ...(projects ?? [])]
     .filter(Boolean).map((project) => path.resolve(typeof project === 'string' ? project : project.path)))]
-    .filter((project) => !userHomes.has(project));
+    .filter((project) => !userHomes.has(project))
+    .filter((project) => explicitProjects.has(project)||!managedRoots.some((root)=>{const relative=path.relative(root,project);return relative===''||(!relative.startsWith('..'+path.sep)&&relative!=='..'&&!path.isAbsolute(relative));}));
   for (const project of catalogProjects) {
     const claudeProject = at(project, '.claude');
     const projectSpecs = [

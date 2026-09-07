@@ -5,6 +5,12 @@
 - **Updated:** 2026-09-04 — proposed ADR-0048 adds completion-oriented work slicing and resumable
   checkpoints over the accepted observation forest; the current non-checkpointed worker behavior
   remains implemented until that proposal ships
+- **Updated:** 2026-09-05 — ADR-0048 is now Accepted and implemented. This ADR's nonblocking
+  single-flight deep-scan worker is unchanged and remains the Machine Footprint scan path. ADR-0048
+  adds a separate, resumable checkpointed scan for its own Discovery sources
+  (`src/lib/maintenance/discovery/{orchestrator,checkpoint,partitions}.mjs`), which pauses at a
+  work-slice boundary and resumes rather than restarting, and stops only at a named safety ceiling;
+  it does not checkpoint this ADR's Footprint worker itself.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [issue #200](https://github.com/pacphi/agentic-kit/issues/200),
   [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),

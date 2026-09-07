@@ -1,14 +1,44 @@
 # Maintenance overhaul living design package
 
-- **Design status:** Proposed
+- **Design status:** Accepted — implemented 2026-09-05; see ADR-0048 "Implementation status" for open gates
 - **Date:** 2026-09-04
 - **Governing decision:** [ADR-0048](../../adr/0048-inventory-led-maintenance-resource-management.md)
 - **Current production decision:** [ADR-0044](../../adr/0044-receipt-aware-maintenance-control-plane.md)
 
 This package turns Maintenance into the place where a user can inventory and confidently manage
-the agent-related footprint across system, machine, user, and project/repository scopes. It is a
-plan, not a claim about shipped behavior. ADR-0044 and the current code remain authoritative until
-ADR-0048 is accepted and each implementation gate is proven.
+the agent-related footprint across system, machine, user, and project/repository scopes. It is the
+design of record for the shipped implementation summarized below. ADR-0044 remains the runtime
+safety floor and the v1 compatibility surface until ADR-0048's open gates pass.
+
+## Implementation status
+
+**Updated 2026-09-05.** Every phase below has a source implementation with named automated tests;
+ADR-0048's "Implementation status" section is the authoritative record and lists the exact test
+files. The package text that follows remains the design of record.
+
+| Phase | What shipped |
+|-------|--------------|
+| 0 — Accept and prototype | ADR-0048 and this package are Accepted. Realistic fixtures live in `tests/fixtures/maintenance/` (Lightpanda, shared skill, WSL, incomplete source, models, interrupted receipt). The clickable prototype and the task-based study did not run; see the open gates. |
+| 1 — Management projection | `src/lib/maintenance/management/` (model, identity, evidence, environments, projection, dependencies, conflicts, correlation). |
+| 2 — Discovery and resumable scans | `src/lib/maintenance/discovery/` (configuration, preview, checkpoint, partitions, orchestrator, coverage, history) and the `maintenance.discovery` key in `src/lib/config.mjs`. |
+| 3 — Inventory workspace | `src/lib/maintenance/management/query.mjs` and `src/lib/dashboard/client/maintenance-{workspace,inventory,inspector}.mjs` with the Maintenance panel in `src/lib/dashboard/page.mjs`. |
+| 4 — Guidance and dispositions | `src/lib/maintenance/management/{guidance,dispositions,procedures,recipes,package-managers,preferences,activity}.mjs` and `src/lib/dashboard/client/maintenance-guidance.mjs`. |
+| 5 — Managed action migration | One action per plan enforced in `src/lib/maintenance/{planner,coordinator,service}.mjs`, `src/lib/dashboard/maintenance-api.mjs`, and `src/commands/maintain.mjs`. |
+| 6 — Interruption audit and reconciliation | `src/lib/maintenance/interruption-audit.mjs` (read-only) and `src/lib/maintenance/recovery-coordinator.mjs` (single-receipt reconcile, scoped mutation blocks). |
+| 7 — Model removal and project patches | `src/lib/maintenance/providers/{ollama-model-remove,git-project-patch}.mjs`. `src/lib/maintenance/provider-registry.mjs` registers the Ollama provider by default (its loopback detection fails closed to no action when Ollama is unreachable) and the Git project patch provider only when a composition supplies project roots. |
+| 8 — Catalog transition | `#system/catalog` redirects to Maintenance Inventory; the former Catalog cards fold into System Summary; `src/lib/dashboard/maintenance-security.mjs` holds the exact v2 route allowlist; `src/commands/maintain.mjs` carries the v2 verbs beside the retained v1 verbs. |
+
+Open gates that automated tests on one machine cannot prove:
+
+- **Task-based usability study** with representative users against the acceptance criteria's
+  locate, shared-versus-duplicate, and candidate-versus-recommendation metrics.
+- **Assistive-technology signoff**: VoiceOver with Safari and NVDA with Chrome or Edge.
+- **Reference-machine benchmarks** for the 5,000 and 50,000-placement filter targets and the
+  discovery scan targets on macOS, Linux, Windows, and WSL.
+- **Clean-machine Windows and WSL live integration** of the discovery orchestrator and the Ollama
+  and Git-project-patch providers.
+
+Until those gates pass, ADR-0044 stays current for the v1 compatibility routes and verbs.
 
 ## Package map
 

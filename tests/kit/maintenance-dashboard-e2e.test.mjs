@@ -15,6 +15,11 @@ import {
 const PRIVATE_PATH = '/private/maintenance-e2e/provider-state.json';
 const PRIVATE_COMMAND = 'native-plugin disable demo@market';
 const PRIVATE_ARG = '--credential=e2e-secret';
+// Hermetic provider policy: the default registry registers the Ollama model
+// provider with a real loopback probe; every real-service composition in this
+// file opts out so no test ever touches 127.0.0.1:11434.
+const HERMETIC_PROVIDERS = Object.freeze({ ollamaModel: { enabled: false } });
+const HERMETIC_MAINTENANCE = Object.freeze({ providerOptions: HERMETIC_PROVIDERS });
 
 function request(server, route, { method = 'GET', body } = {}) {
   return new Promise((resolve, reject) => {
@@ -170,11 +175,11 @@ test('dashboard HTTP executes and undoes one maintenance finding through the rea
   const fixture = statefulFixture();
   const providers = createMaintenanceProviderRegistry([fixture.provider]);
   const service = createMaintenanceService({
-    collector: fixture.collector, providers, controlRoot,
+    collector: fixture.collector, providers, controlRoot, providerOptions: HERMETIC_PROVIDERS,
     now: Date.now, nonce: () => 'http-e2e',
   });
   const server = await startDashboard({
-    port: 0, maintenance: service, usage: {},
+    port: 0, maintenance: service, usage: {}, maintenanceOptions: HERMETIC_MAINTENANCE,
     fetchStatus: async () => ({ overall: 'ok', rows: [] }),
   });
   t.after(() => server.close());
@@ -299,4 +304,166 @@ test('dashboard HTTP executes and undoes one maintenance finding through the rea
   assert.equal(fixture.state.enabled, true);
   assert.equal(fixture.events.filter((event) => event === 'native-apply').length, 1);
   assert.equal(listMaintenanceReceipts(receiptsRoot).length, 1);
+});
+
+// ── ADR-0048 v2 over the real loopback server ──────────────────────────────
+
+function rawRequest(server, route, {
+  method = 'GET', token = server.token, body, origin = true, fetchSite = 'same-origin', contentType = 'application/json',
+} = {}) {
+  return new Promise((resolve, reject) => {
+    const headers = {};
+    if (token) headers['x-dash-token'] = token;
+    if (origin) headers.origin = `http://127.0.0.1:${server.port}`;
+    if (fetchSite) headers['sec-fetch-site'] = fetchSite;
+    if (body != null) headers['content-type'] = contentType;
+    const req = http.request({ host: '127.0.0.1', port: server.port, path: route, method, headers }, (res) => {
+      let data = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => resolve({
+        status: res.statusCode, headers: res.headers, raw: data,
+        body: data && res.headers['content-type']?.includes('json') ? JSON.parse(data) : null,
+      }));
+    });
+    req.on('error', reject);
+    req.end(body == null ? undefined : (typeof body === 'string' ? body : JSON.stringify(body)));
+  });
+}
+
+test('dashboard HTTP serves the ADR-0048 v2 routes behind the same loopback, token, origin, schema, and size boundary', async (t) => {
+  const [{ SENTINEL_FIXTURES, INTERRUPTED_RECEIPT }, { runInventoryQuery }, { inspectorFor }] = await Promise.all([
+    import('../fixtures/maintenance/management-fixtures.mjs'),
+    import('../../src/lib/maintenance/management/query.mjs'),
+    import('../../src/lib/maintenance/management/guidance.mjs'),
+  ]);
+  const inventory = SENTINEL_FIXTURES.base();
+  const applyEntry = inventory.guidanceEntries.find((entry) => entry.lane === 'apply');
+  const calls = [];
+  const management = {
+    async inventory(args) { calls.push(['inventory', args]); return runInventoryQuery(inventory, args); },
+    async placement({ placementId }) { calls.push(['placement', { placementId }]); return inspectorFor(inventory, placementId); },
+    async revealLocator({ placementId }) {
+      calls.push(['revealLocator', { placementId }]);
+      return { breadcrumb: ['Claude', 'Plugins'], exactPath: PRIVATE_PATH };
+    },
+    async auditInterruption({ receiptIds }) {
+      calls.push(['auditInterruption', { receiptIds }]);
+      return receiptIds.map((receiptId) => ({
+        receiptId, integrity: 'valid', result: 'no-action-started', conclusive: true, enables: 'record-no-change',
+        lastDurablePhase: 'prepared', provider: { id: 'owned-npx-cache', version: '1' },
+        checks: [{ name: 'receipt-integrity', status: 'passed' }], failedComparisons: [], nextSteps: [],
+        disclosure: { checks: ['receipt-integrity'], executableProbePolicy: 'read-only-provider-inspector-only', networkPolicy: 'none', checkedAt: '2026-09-05T12:00:00.000Z' },
+        receiptFile: PRIVATE_PATH,
+        exportable: { receiptId, result: 'no-action-started', conclusive: true, enables: 'record-no-change' },
+      }));
+    },
+    async planAction({ placementId, guidanceId }) {
+      calls.push(['planAction', { placementId, guidanceId }]);
+      return {
+        planId: 'plan-v2', planDigest: 'digest-v2', sourceFingerprint: 'fp-base', safetyClass: 'safe-automatic',
+        generatedAt: '2026-09-05T12:00:00.000Z', expiresAt: new Date(Date.now() + 60_000).toISOString(), findingIds: ['finding-plugin'],
+        actions: [{
+          id: 'action-disable', providerId: 'claude-plugin', providerVersion: '1', operation: 'disable', classification: 'safe-automatic',
+          rollback: 'reversible', restart: 'not-required', executable: true, sourceFingerprint: 'fp-base', placementId,
+          resourceIdentity: { kind: 'plugin', name: 'frontend-design', host: 'claude', scope: 'user', path: PRIVATE_PATH },
+          impact: { preserved: ['Plugin data'] },
+        }],
+      };
+    },
+    async apply({ plan, actionIds, expectedPlanDigest, confirmed }) {
+      calls.push(['apply', { planId: plan.planId, actionIds, expectedPlanDigest, confirmed }]);
+      return { ok: true, status: 'committed', receipt: { id: 'mnt-v2-applied', status: 'committed', actions: plan.actions, receiptFile: PRIVATE_PATH } };
+    },
+    async prepareUndo({ receiptId }) { return { receiptId, undoable: true, actionCount: 1, summary: 'Restore the recorded preimage.' }; },
+  };
+  const server = await startDashboard({
+    port: 0, management, usage: {}, fetchStatus: async () => ({ overall: 'ok', rows: [] }),
+    maintenance: { async report() { return {}; }, async scan() { return {}; }, async plan() { return {}; } },
+    maintenanceOptions: HERMETIC_MAINTENANCE,
+  });
+  t.after(() => server.close());
+  const V2 = '/api/maintenance/v2';
+
+  // Reads: token required, same-origin metadata optional (like every other GET), no-store, facets applied, no path.
+  assert.equal((await rawRequest(server, `${V2}/inventory`, { token: null, origin: false, fetchSite: null })).status, 401);
+  assert.deepEqual(calls, []);
+  const page = await rawRequest(server, `${V2}/inventory?scope=across&view=all&facet.kind=skill&sort=guidance-first&limit=50`, { origin: false, fetchSite: null });
+  assert.equal(page.status, 200, page.raw);
+  assert.equal(page.headers['cache-control'], 'no-store');
+  assert.deepEqual(calls.at(-1), ['inventory', { scope: 'across', view: 'all', facets: { kind: ['skill'] }, sort: 'guidance-first', limit: 50 }]);
+  assert.equal(page.body.total, 2);
+  assert.deepEqual(page.body.appliedFacets, { kind: ['skill'] });
+  assert.ok(page.body.facetCounts.kind.skill >= 2);
+  assert.equal(page.body.groups.every((group) => group.kind === 'skill'), true);
+  assertNoPrivateTransport(page.body, { capability: false });
+  assert.doesNotMatch(page.raw, /Users\/alice|exactLocatorRef/);
+  assert.equal((await rawRequest(server, `${V2}/inventory?scope=galaxy`)).status, 400);
+  assert.equal((await rawRequest(server, `${V2}/inventory?extra=1`)).status, 400);
+  const inspector = await rawRequest(server, `${V2}/placements/${applyEntry.placementId}`);
+  assert.equal(inspector.status, 200, inspector.raw);
+  assert.equal(inspector.body.whatIsThis.displayName, 'frontend-design');
+  assert.equal((await rawRequest(server, `${V2}/placements/not-an-id`)).status, 404);
+  assert.equal((await rawRequest(server, `${V2}/nope`)).status, 404, 'unknown v2 GET path');
+  assert.equal((await rawRequest(server, `${V2}/placements/reveal`)).status, 404, 'reveal is POST-only');
+
+  // Reveal: the only exact-path route; it requires POST + header token + same-origin like every mutation.
+  const reveal = { placementId: applyEntry.placementId };
+  assert.equal((await rawRequest(server, `${V2}/placements/reveal`, { method: 'POST', body: reveal, token: null })).status, 401);
+  assert.equal((await rawRequest(server, `${V2}/placements/reveal?token=${server.token}`, { method: 'POST', body: reveal, token: null })).status, 401);
+  assert.equal((await rawRequest(server, `${V2}/placements/reveal`, { method: 'POST', body: reveal, origin: false })).status, 403);
+  assert.equal((await rawRequest(server, `${V2}/placements/reveal`, { method: 'POST', body: reveal, fetchSite: 'cross-site' })).status, 403);
+  assert.equal(calls.some(([name]) => name === 'revealLocator'), false);
+  const revealed = await rawRequest(server, `${V2}/placements/reveal`, { method: 'POST', body: reveal });
+  assert.equal(revealed.status, 200, revealed.raw);
+  assert.equal(revealed.body.exactPath, PRIVATE_PATH);
+  assert.deepEqual(revealed.body.breadcrumb, ['Claude', 'Plugins']);
+
+  // Audit: read-only batch of ≤ 20 receipt ids, sanitized results, no capability.
+  const audited = await rawRequest(server, `${V2}/audit`, { method: 'POST', body: { receiptIds: [INTERRUPTED_RECEIPT.id, 'mnt-second'] } });
+  assert.equal(audited.status, 200, audited.raw);
+  assert.equal(audited.body.results.length, 2);
+  assert.equal(audited.body.results[0].resultLabel, 'No action started');
+  assertNoPrivateTransport(audited.body);
+  assert.equal((await rawRequest(server, `${V2}/audit`, { method: 'POST', body: { receiptIds: Array.from({ length: 21 }, (_, i) => `mnt-${i}`) } })).status, 400);
+
+  // Plans: one placement, one guidance entry, one action → apply capability.
+  const plan = { placementId: applyEntry.placementId, guidanceId: applyEntry.guidanceId };
+  assert.equal((await rawRequest(server, `${V2}/plans`, { method: 'POST', body: { ...plan, findingIds: ['x'] } })).status, 400, 'surplus key');
+  assert.equal((await rawRequest(server, `${V2}/plans`, { method: 'POST', body: plan, contentType: 'text/plain' })).status, 415, 'wrong content type');
+  assert.equal((await rawRequest(server, `${V2}/plans`, { method: 'POST', body: { ...plan, pad: 'x'.repeat(65_536) } })).status, 413, 'oversized body');
+  assert.equal(calls.some(([name]) => name === 'planAction'), false);
+  const planned = await rawRequest(server, `${V2}/plans`, { method: 'POST', body: plan });
+  assert.equal(planned.status, 200, planned.raw);
+  assert.deepEqual(calls.at(-1), ['planAction', plan]);
+  assert.match(planned.body.capability, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal(planned.body.plan.actions.length, 1);
+  assert.equal(planned.body.plan.actions[0].placementId, applyEntry.placementId);
+  assert.equal(planned.body.confirmation.typedPhrase, null);
+  assertNoPrivateTransport(planned.body.plan);
+  const applied = await rawRequest(server, `${V2}/apply`, { method: 'POST', body: { capability: planned.body.capability, confirm: true } });
+  assert.equal(applied.status, 200, applied.raw);
+  assert.deepEqual(calls.at(-1), ['apply', { planId: 'plan-v2', actionIds: ['action-disable'], expectedPlanDigest: 'digest-v2', confirmed: true }]);
+  assert.equal(applied.body.receipt.undoEligible, true);
+  assertNoPrivateTransport(applied.body);
+  assert.equal((await rawRequest(server, `${V2}/apply`, { method: 'POST', body: { capability: planned.body.capability, confirm: true } })).status, 409, 'one-use');
+
+  // Unknown v2 POST paths are not on the mutation allowlist at all.
+  assert.equal((await rawRequest(server, `${V2}/other`, { method: 'POST', body: {} })).status, 405);
+  assert.equal((await rawRequest(server, `${V2}/inventory`, { method: 'POST', body: {} })).status, 405);
+});
+
+test('dashboard HTTP answers 503 on every v2 route when no management facade can be composed, while v1 keeps working', async (t) => {
+  const server = await startDashboard({
+    port: 0, usage: {}, fetchStatus: async () => ({ overall: 'ok', rows: [] }),
+    maintenance: { async report() { return { findings: [] }; }, async scan() { return {}; }, async plan() { return {}; } },
+    management: async () => { throw new Error('facade unavailable'); },
+    maintenanceOptions: HERMETIC_MAINTENANCE,
+  });
+  t.after(() => server.close());
+  assert.equal((await rawRequest(server, '/api/maintenance')).status, 200);
+  const read = await rawRequest(server, '/api/maintenance/v2/activity');
+  assert.deepEqual([read.status, read.body], [503, { error: 'maintenance management unavailable' }]);
+  const written = await rawRequest(server, '/api/maintenance/v2/audit', { method: 'POST', body: { receiptIds: ['mnt-1'] } });
+  assert.deepEqual([written.status, written.body], [503, { error: 'maintenance management unavailable' }]);
 });

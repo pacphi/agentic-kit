@@ -47,6 +47,12 @@
 - **Updated:** 2026-09-04 — proposed ADR-0048 folds Catalog presentation into an inventory-led
   Maintenance workspace while preserving this ADR's read-only measurement ownership; no current
   collector or mutation boundary changes until that proposal is implemented
+- **Updated:** 2026-09-05 — ADR-0048 is now Accepted and implemented. Catalog is no longer a
+  visible dashboard destination: `src/lib/dashboard/page.mjs` redirects `#system/catalog` into
+  Maintenance's Inventory route, which presents this context's Catalog v4 evidence at placement
+  grain alongside installs, models, and provider configuration. This context's collectors, `ak
+  system`, and `GET /api/system` are unchanged and remain the sole source of that evidence; the
+  management projection reads it and mutates nothing here.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0005](0005-dashboard-in-page-routing-reveal.md),
   [ADR-0007](0007-maintainer-admin-local-telemetry.md),

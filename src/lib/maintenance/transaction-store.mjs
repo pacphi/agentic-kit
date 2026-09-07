@@ -5,10 +5,13 @@ import path from 'node:path';
 export const MAINTENANCE_RECEIPT_SCHEMA = 'maintenance-receipt/v1';
 const RECEIPT_ID = /^mnt-[A-Za-z0-9._-]{1,120}$/;
 const MAX_RECEIPT_BYTES = 1024 * 1024;
-const UNFINISHED = new Set([
+/** The single source of truth for "this receipt is not yet resolved" — a
+ * status that still needs recovery, reconciliation, or is mid-flight.
+ * Activity/guidance modules should import this rather than duplicate it. */
+export const UNFINISHED_MAINTENANCE_STATUSES = Object.freeze(new Set([
   'prepared', 'applying', 'verifying', 'refreshing-catalog', 'undoing', 'failed', 'partial',
   'partial-recovery-required', 'outcome-unknown',
-]);
+]));
 
 function digest(value) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -156,5 +159,5 @@ export function listMaintenanceReceiptsReadOnly(transactionsRoot, { fsImpl = fs 
 
 export function listUnfinishedMaintenanceReceipts(transactionsRoot, { fsImpl = fs } = {}) {
   return listMaintenanceReceipts(transactionsRoot, { fsImpl })
-    .filter((receipt) => UNFINISHED.has(receipt.status) || receipt.status === 'unknown-recovery-required');
+    .filter((receipt) => UNFINISHED_MAINTENANCE_STATUSES.has(receipt.status) || receipt.status === 'unknown-recovery-required');
 }

@@ -1,6 +1,6 @@
 # Discovery and scan policy
 
-- **Design status:** Proposed
+- **Design status:** Accepted — implemented 2026-09-05; see ADR-0048 "Implementation status" for open gates
 - **Governing decision:** [ADR-0048](../../adr/0048-inventory-led-maintenance-resource-management.md)
 - **Extends:** [ADR-0046](../../adr/0046-scan-local-observation-reuse-and-nonblocking-deep-scans.md)
   and [ADR-0047](../../adr/0047-streaming-observation-forest.md)

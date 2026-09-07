@@ -1,10 +1,20 @@
 # ADR-0047 — Streaming observation forest for deep scans
 
-- **Status:** Accepted; Projects pilot implemented
+- **Status:** Accepted; Projects pilot and ADR-0048 checkpointed continuation implemented
 - **Date:** 2026-09-03
 - **Updated:** 2026-09-04 — proposed ADR-0048 supplies the separate journal-backed continuation
   decision anticipated by this ADR; it must extend this forest rather than introduce a competing
   walker or persistent per-file index
+- **Updated:** 2026-09-05 — ADR-0048 is now Accepted and implemented, delivering the journal-backed
+  continuation this ADR anticipated as a checkpoint over partitions, not a per-file index. Its
+  discovery scan (`src/lib/maintenance/discovery/orchestrator.mjs`) partitions a source root
+  (`partitions.mjs`) into bounded, resumable units, executes each partition through this ADR's own
+  `observeWalkForest`, and writes an owner-private, integrity-sealed `ScanCheckpoint`
+  (`checkpoint.mjs`, bounded to 256 KiB) after every partition or work slice — never a retained
+  per-file record. Project detection (`discovery/project-detection.mjs`) runs as a second,
+  independent virtual query over the same forest rather than a separate walker. This ADR's Projects
+  pilot fusion of working-tree, Stack/LOC, and dependency-discovery queries for Machine Footprint's
+  own deep scan is unchanged; ADR-0048's checkpointing applies only to its own Discovery sources.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [issue #200](https://github.com/pacphi/agentic-kit/issues/200),
   [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),

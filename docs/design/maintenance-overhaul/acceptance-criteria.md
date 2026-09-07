@@ -1,6 +1,6 @@
 # Maintenance overhaul acceptance criteria
 
-- **Specification status:** Proposed
+- **Specification status:** Accepted — implemented 2026-09-05; see ADR-0048 "Implementation status" for open gates
 - **Governing decision:** [ADR-0048](../../adr/0048-inventory-led-maintenance-resource-management.md)
 
 These criteria convert the approved product decisions into release gates. IDs are stable and must
