@@ -25,6 +25,8 @@ import { test } from 'node:test';
 
 import { instrumentWalkTree } from '../../src/lib/footprint/walk.mjs';
 import { isOpaqueId, isProhibitedLabel, LIMITING_REASONS, opaqueId } from '../../src/lib/maintenance/management/model.mjs';
+import { procedure } from '../../src/lib/maintenance/management/service-actions.mjs';
+import { BUILTIN_RECIPES } from '../../src/lib/maintenance/management/recipes.mjs';
 import { createManagementService } from '../../src/lib/maintenance/management/service.mjs';
 import { createInventorySnapshotStore } from '../../src/lib/maintenance/management/service-store.mjs';
 import { createMaintenanceService } from '../../src/lib/maintenance/service.mjs';
@@ -1176,4 +1178,11 @@ test('D6b: lastRefresh reads running while a refresh is in flight and ok once it
   const after = await h.service.report();
   assert.equal(after.lastRefresh?.status, 'ok');
   assert.equal(after.scanRequired, false);
+});
+
+test('saved guidance cannot reopen an unbound or withdrawn procedure', () => {
+  const recipe = BUILTIN_RECIPES.find((r) => r.recipeId === 'claude-mcp-remove-registration');
+  const inventory = { guidanceEntries: [{ guidanceId: 'g', placementId: 'p', procedureId: recipe.recipeId }], placements: [{ placementId: 'p', kind: 'mcp-registration', consumerHosts: ['codex'], conditions: ['missing-verified-dependency'] }], environments: [] };
+  const ctx = { inventorySnapshotStore: { read: () => inventory }, allRecipes: () => [recipe] };
+  assert.throws(() => procedure(ctx)({ guidanceId: 'g' }), /no longer compatible/);
 });

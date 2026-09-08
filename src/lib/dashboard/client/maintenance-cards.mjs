@@ -46,7 +46,8 @@ import { MNT, mntKindLabel } from './maintenance-workspace.mjs';
   }
   function renderMntVersions(row){
     var v=row.versions||{},pieces=[];
-    if(v.installed)pieces.push('Installed '+v.installed);
+    if(v.installed)pieces.push(v.candidate?v.installed+' → '+v.candidate:'Installed '+v.installed);
+    else if(v.producer)pieces.push('Plugin '+v.producer+(v.candidate?' → '+v.candidate:''));
     if(v.effective&&v.effective!==v.installed)pieces.push('Effective '+v.effective);
     return pieces.join(' · ');
   }
@@ -101,7 +102,7 @@ import { MNT, mntKindLabel } from './maintenance-workspace.mjs';
     var visible=expanded?group.placements:group.placements.slice(0,MNT_GROUP_COLLAPSE_LIMIT);
     var carriers=new Set(group.placements.map(function(row){return row.carrier&&row.carrier.value;}));
     var rowsHtml=visible.map(function(row){
-      var html=renderMntPlacementRow(row,rowIndexRef.value,group.placements.length===1,carriers.size>1);
+      var html=renderMntPlacementRow(row,rowIndexRef.value,group.placements.length===1&&!(group.knownPlacementCount>1),carriers.size>1);
       rowIndexRef.value+=1;
       return html;
     }).join("");
@@ -110,12 +111,14 @@ import { MNT, mntKindLabel } from './maintenance-workspace.mjs';
         +'" aria-expanded="'+(expanded?"true":"false")+'">'
         +(expanded?"Show fewer":"Show "+esc(group.placements.length-visible.length)+" more")+"</button>"
       :"";
-    if(group.placements.length===1)return '<li class="mnt-group mnt-group-single"><ul class="mnt-placements">'+rowsHtml+'</ul></li>';
+    if(group.placements.length===1&&!(group.knownPlacementCount>1))return '<li class="mnt-group mnt-group-single"><ul class="mnt-placements">'+rowsHtml+'</ul></li>';
     var kindShown=!(MNT.facets.kind&&MNT.facets.kind.length===1);
     return '<li class="mnt-group"><div class="mnt-group-head">'+mntIcon(group.kind)
       +'<span class="mnt-group-name">'+esc(group.displayName)+'</span>'
       +(kindShown?'<span class="mnt-group-kind">'+esc(mntKindLabel(group.kind))+'</span>':'')
       +'<span class="mnt-group-counts">'+esc(group.placementCount)+' installations in these results</span>'
+      +(group.knownHosts&&group.knownHosts.length?'<span class="mnt-group-counts">Hosts: '+esc(group.knownHosts.map(function(h){return h==='claude'?'Claude':h==='codex'?'Codex':h==='opencode'?'OpenCode':h;}).join(', '))+(group.knownPlacementCount>group.placements.length?' · '+esc(group.knownPlacementCount)+' known installations':'')+'</span>':'')
+      +(group.knownPlacementCount>group.placements.length&&(MNT.view!=='all'||MNT.scope!=='across'||Object.keys(MNT.facets||{}).some(function(f){return f!=='family';}))?'<button type="button" class="mt-action" data-mnt-family="'+esc(group.presentationKey||group.resourceId)+'">Show all installations</button>':'')
       +'</div><ul class="mnt-placements">'+rowsHtml+'</ul>'+toggle+'</li>';
   }
 
@@ -128,7 +131,7 @@ import { MNT, mntKindLabel } from './maintenance-workspace.mjs';
       group.placements.forEach(function(row){var key=row.projectId||'';if(!rows.has(key))rows.set(key,[]);rows.get(key).push(row);});
       rows.forEach(function(placements,key){
         if(!projects.has(key))projects.set(key,[]);
-        projects.get(key).push(Object.assign({},group,{presentationKey:group.resourceId+':'+key,placements:placements,placementCount:placements.length}));
+        projects.get(key).push(Object.assign({},group,{presentationKey:(group.presentationKey||group.resourceId)+':'+key,placements:placements,placementCount:placements.length}));
       });
     });
     var html='';

@@ -1173,7 +1173,7 @@ test('D1(c): an absolute-path technical detail from any source is also dropped, 
 
 
 test('model Hosts come from observed route bindings, never the inventory owner', () => {
-  const modelSnapshot={models:[{key:{host:'ollama',provider:'ollama',modelId:'demo',scopeId:'user'},identity:'demo-id',displayName:'demo'}],bindings:[]};
+  const modelSnapshot={models:[{key:{host:'ollama',provider:'ollama',modelId:'demo',scopeId:'user',digest:'abc123'},identity:'demo-id',displayName:'demo'}],bindings:[]};
   assert.deepEqual(invoke({footprint:{},modelSnapshot}).inventory.placements[0].consumerHosts,[]);
   modelSnapshot.bindings=[{identity:'demo-id',consumer:'route:implementation',host:'codex',consumerState:'runtime-proven'},{identity:'demo-id',consumer:'integration:review',host:'claude',consumerState:'configured'}];
   assert.deepEqual(invoke({footprint:{},modelSnapshot}).inventory.placements[0].consumerHosts,['codex','claude']);
@@ -1189,4 +1189,21 @@ test('classification metadata preserves catalog-only project and placement ident
   const after=invoke({footprint}).inventory;
   assert.deepEqual(after.placements.map(p=>[p.projectId,p.placementId]),before.placements.map(p=>[p.projectId,p.placementId]));
   assert.ok(after.placements.every(p=>p.projectKind==='folder'));
+});
+
+test('Maintenance excludes provider catalog advertisements but retains configured remote models', () => {
+  const model = { key: { host: 'opencode', provider: 'openrouter', modelId: 'aion', scopeId: 'user' }, identity: 'remote', displayName: 'Aion', dimensions: { discoverable: { value: true }, configured: { value: false }, effective: { value: false } } };
+  assert.equal(invoke({ footprint: {}, modelSnapshot: { models: [model], bindings: [] } }).inventory.placements.length, 0);
+  model.dimensions.configured.value = true;
+  const result = invoke({ footprint: {}, modelSnapshot: { models: [model], bindings: [] } });
+  assert.equal(result.inventory.placements[0].modelLocation, 'remote');
+  assert.equal(result.inventory.artifacts[0].label, 'Configured remote model');
+  assert.equal(result.privateLocators.size, 0);
+});
+
+test('ranked local storage retains its measured path only in private locator evidence', () => {
+  const result = invoke({ footprint: { consumers: { rows: [{ id: 'huggingface', label: 'Hugging Face hub cache', path: '/private/cache/huggingface', group: 'ai-toolchain', kind: 'root', presence: 'present' }] } } });
+  const row = result.inventory.placements[0];
+  assert.equal(result.privateLocators.get(row.placementId).path, '/private/cache/huggingface');
+  assert.ok(!JSON.stringify(result.inventory).includes('/private/cache/huggingface'));
 });

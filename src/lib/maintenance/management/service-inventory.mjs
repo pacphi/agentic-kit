@@ -209,6 +209,7 @@ async function gatherAndProject(ctx, { deep }) {
     sourceCoverage,
     discovery: {
       instructionFiles, dependencyProbes, installResourceKinds: {}, modelStorage,
+      pluginEvidence: { claude: detections.get('claude-plugin'), codex: detections.get('codex-plugin') },
       projects: discoveryProjects,
     },
     environment: { platform: ctx.platform },
@@ -380,12 +381,14 @@ export function placement(ctx) {
     const inventory = loadLastGoodInventory(ctx);
     if (!inventory) return deepFreeze({ scanRequired: true });
     const receipts = loadReceipts(ctx);
-    return deepFreeze(inspectorFor(inventory, placementId, {
+    const inspector = inspectorFor(inventory, placementId, {
       guidance: inventory.guidanceEntries,
       receipts,
       dispositions: ctx.dispositionStore.activeDispositions(new Date(ctx.now())),
       coverage: inventory.sourceCoverage,
-    }));
+    });
+    const locator = ctx.state.privateLocators.get(placementId) ?? ctx.locatorStore.read().get(placementId);
+    return deepFreeze({ ...inspector, whereIsIt: { ...inspector.whereIsIt, revealAvailable: Boolean(locator?.path), locationNote: locator?.path ? null : 'No local file path was measured for this resource.' } });
   };
 }
 

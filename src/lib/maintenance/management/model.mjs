@@ -185,7 +185,7 @@ export const CURATED_VIEW_LABELS = Object.freeze({
   'evidence-only': 'Inventory evidence only',
 });
 export const FACETS = Object.freeze([
-  'scope', 'environment', 'project', 'projectType', 'kind', 'adapter', 'consumer', 'carrier', 'provenance',
+  'scope', 'environment', 'project', 'projectType', 'family', 'kind', 'adapter', 'consumer', 'carrier', 'provenance',
   'packageManager', 'versionState', 'guidance', 'dependencyRole', 'conflict',
   'credentialReadiness', 'channel', 'evidenceFields', 'recentlyChanged',
 ]);

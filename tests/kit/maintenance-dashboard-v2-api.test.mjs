@@ -728,7 +728,7 @@ test('v2 inventory projection carries row kind and opaque-id facet labels over e
       assert.equal(row.kind, placement.kind, `${name}: row kind`);
       if(placement.projectId)assert.equal(row.projectId, placement.projectId, `${name}: project identity reaches browser`);
     }
-    assert.deepEqual(Object.keys(page.facetLabels).sort(), ['environment', 'project'], name);
+    assert.deepEqual(Object.keys(page.facetLabels).sort(), ['environment', 'family', 'project'], name);
     for (const [environmentId, label] of Object.entries(page.facetLabels.environment)) {
       assert.match(environmentId, /^env_/, name);
       assert.equal(label, fixture.environments.find((entry) => entry.environmentId === environmentId).displayLabel, name);

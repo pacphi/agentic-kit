@@ -458,12 +458,12 @@ const COVERAGE = T.obj({
 const ROW = T.obj({
   placementId: ID, projectId: ID, projectKind: T.oneOf(['git','folder','worktree','unknown']), displayName: LABEL, kind: T.oneOf(RESOURCE_KINDS),
   scope: T.obj({ value: T.oneOf(SCOPE_LENSES), label: LABEL, icon: T.text(32) }),
-  breadcrumb: T.list(T.text(120), 16), versions: T.dict(T.text(120), 12),
+  breadcrumb: T.list(T.text(120), 16), versions: T.dict(T.text(120), 20),
   carrier: T.obj({ value: T.oneOf(CARRIER_KINDS), label: LABEL, icon: T.text(32) }), consumerHosts: T.list(T.text(32), 8),
   guidanceLane: T.obj({ value: T.oneOf(GUIDANCE_LANES), label: LABEL }), rowAction: T.obj({ verb: T.oneOf(ACTION_VERBS), label: LABEL }),
 });
 const GROUP = T.obj({
-  resourceId: ID, displayName: LABEL, kind: T.oneOf(RESOURCE_KINDS), placementCount: T.int, consumerCount: T.int, outcome: LABEL,
+  resourceId: ID, presentationKey: ID, knownPlacementCount: T.int, knownHosts: T.list(T.text(32), 8), displayName: LABEL, kind: T.oneOf(RESOURCE_KINDS), placementCount: T.int, consumerCount: T.int, outcome: LABEL,
   placements: T.list(ROW, MAX_PAGE_ROWS),
 });
 /** Outcome of the last chained inventory rebuild (QE D6b): a failed rebuild is visible on the wire. */
@@ -481,7 +481,7 @@ const INVENTORY_PAGE = T.obj({
   scanRequired: T.bool, lastRefresh: LAST_REFRESH, schema: T.text(80), inventoryId: ID, total: T.int, groups: T.list(GROUP, MAX_PAGE_ROWS),
   facetCounts: T.dict(T.dict(T.int, 500), 16), nextCursor: T.text(512),
   projectKinds: T.idDict('prj', T.oneOf(['git','folder','worktree','unknown']), 500),
-  facetLabels: T.obj({ environment: T.idDict('env', LABEL, 500), project: T.idDict('prj', LABEL, 500) }),
+  facetLabels: T.obj({ family: T.idDict('res', LABEL, 500), environment: T.idDict('env', LABEL, 500), project: T.idDict('prj', LABEL, 500) }),
   sortGroups: T.list(T.obj({ bucket: T.oneOf(INVENTORY_GROUP_ORDER), label: LABEL, count: T.int }), 8),
   partialSources: PARTIAL_SOURCES, appliedFacets: T.dict(T.list(T.text(64), 64), 16),
 });
@@ -507,10 +507,10 @@ const INSPECTOR = T.obj({
     conditions: T.list(T.oneOf(PLACEMENT_CONDITIONS), 12), conditionLabels: T.list(LABEL, 12),
   }),
   whereIsIt: T.obj({
-    scope: T.oneOf(ADMINISTRATIVE_SCOPES), breadcrumb: T.list(T.text(120), 16), carrier: T.obj({ value: T.oneOf(CARRIER_KINDS), label: LABEL }),
+    scope: T.oneOf(ADMINISTRATIVE_SCOPES), revealAvailable: T.bool, locationNote: LABEL, breadcrumb: T.list(T.text(120), 16), carrier: T.obj({ value: T.oneOf(CARRIER_KINDS), label: LABEL }),
   }),
   whereDidItComeFrom: T.obj({ kind: T.oneOf(PROVENANCE_KINDS), label: LABEL, authority: T.text(200), grade: T.oneOf(EVIDENCE_GRADES) }),
-  whatVersionIsHere: T.dict(T.text(120), 12),
+  whatVersionIsHere: T.dict(T.text(120), 20),
   whoUsesIt: T.obj({
     consumers: T.list(T.obj({ consumerKind: T.oneOf(CONSUMER_KINDS), consumerLabel: LABEL, enabled: T.bool }), 100),
     reverseDependencies: T.list(T.obj({ fromPlacementId: ID, kind: T.oneOf(DEPENDENCY_KINDS) }), 100),

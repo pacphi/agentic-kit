@@ -413,6 +413,11 @@ function channelAllowed(placement, ctx) {
 
 function computeUpdateEntries(placement, ctx) {
   const scorecard = placement.evidenceScorecard ?? {};
+  if (placement.versions?.candidate && placement.versions?.updateStatus === 'Update available' && scorecard.candidateSource === 'verified') {
+    return [{ lane: 'update', placementId: placement.placementId, outcome: 'Update available: '+placement.versions.candidate,
+      verifiedPremises: ['placement', 'candidateSource'], impact: { summary: 'Reported by '+placement.versions.source+'. Compatibility has not been verified.' }, preserved: ['Current installation until an exact update is selected'],
+      candidateId: placement.versions.candidate, dispositionIdentity: placement.placementId+':update:'+placement.versions.candidate }];
+  }
   if (scorecard.installedVersion !== 'verified' || scorecard.compatibility !== 'verified') return [];
   const candidateObs = (ctx.versionObsByPlacement.get(placement.placementId) ?? [])
     .find((observation) => observation.axis === 'candidate');

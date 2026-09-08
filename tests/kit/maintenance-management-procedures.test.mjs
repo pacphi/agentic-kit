@@ -89,7 +89,7 @@ test('a withdrawn recipe is excluded from findCompatibleRecipes (MNT-ACT-020)', 
 });
 
 test('host-scoped recipes only match a placement whose consumerHosts include that host', () => {
-  const codexOnly = BUILTIN_RECIPES.find((r) => r.recipeId === 'codex-plugin-update-steps');
+  const codexOnly = signRecipe({ ...BUILTIN_RECIPES[1], hostAndVersionRange: 'codex', resourceKind: 'plugin', triggerCondition: 'update-candidate-present', dependencyRequirement: null });
   const forCodex = findCompatibleRecipes([codexOnly], {
     placement: { kind: 'plugin', consumerHosts: ['codex'] }, resourceKind: 'plugin', condition: 'update-candidate-present',
   });
@@ -326,4 +326,12 @@ test('refreshRecipes rejects a recipe signed by a publisher other than the regis
     fetchImpl: fakeFetch([{ redirected: false, byteLength: 512, bodyText: JSON.stringify({ recipes: [wrongPublisher] }) }]),
     registry: { url: 'https://recipes.agentic-kit.dev/v1.json', allowlist: ['recipes.agentic-kit.dev'], publisherId: BUILTIN_PUBLISHER_ID }, current: [],
   }));
+});
+
+test('unbound removal and update templates are withheld from every host', () => {
+  for (const host of ['claude', 'codex', 'opencode']) {
+    for (const recipe of BUILTIN_RECIPES.filter((r) => ['update', 'remove-registration'].includes(r.operation))) {
+      assert.deepEqual(findCompatibleRecipes([recipe], { placement: { kind: recipe.resourceKind, consumerHosts: [host] }, condition: recipe.triggerCondition }), []);
+    }
+  }
 });

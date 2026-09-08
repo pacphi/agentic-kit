@@ -97,6 +97,7 @@
 // repository grouping, submodule-of derivation) lives in
 // projection-projects.mjs, split out to keep this file under the repo's
 // max-lines budget; it is not a separate public contract.
+import { catalogVersions, addReleaseObservations } from './catalog-versions.mjs';
 import { createHash } from 'node:crypto';
 import {
   MANAGEMENT_INVENTORY_SCHEMA, MANAGEMENT_SCHEMA_VERSION, assertManagementInventory, canonicalJson, sourceComplete,
@@ -314,6 +315,7 @@ function mapCatalogGroup(builder, item, group, ctx) {
   const digest = digestValue(first.digest);
   const resourceId = catalogResourceId(item, kind, digest, installationKey);
   builder.upsertResource(resourceId, {
+    presentationFamilyId: catalogResourceId(item, kind, null, installationKey),
     kind, displayName: item.name, namespace: item.pluginRef ?? null, publisher: item.pluginRef ?? null,
   });
   const placementId = placementIdentity({
@@ -325,13 +327,15 @@ function mapCatalogGroup(builder, item, group, ctx) {
   const { conditions, technicalDetails } = catalogConditionsFor(item, group, dependencyProbes);
   addCatalogEvidence(builder, { item, first, group, placementId, digest, now });
   const transportKey = catalogTransportKey(item, first);
+  const versions = /** @type {Record<string, any>} */ ({ ...(digest ? { contentDigest: digest } : {}), ...catalogVersions({ item, first, group, pluginEvidence: ctx.pluginEvidence, measuredAt: ctx.catalogMeasuredAt }) });
+  addReleaseObservations(builder, placementId, versions, { now, scope: group.scope });
   finalizePlacement(builder, {
     placementId, resourceId, environmentId, administrativeScope: group.scope,
     projectId: projectEntry?.projectId ?? null, locationBreadcrumb: catalogBreadcrumb(kind, first, projectEntry),
     artifactIds: [artifactId], consumerBindingIds: bindingIds, conditions,
-    evidenceScorecard: catalogScorecard(placementId, consumerHosts, now),
+    evidenceScorecard: { ...catalogScorecard(placementId, consumerHosts, now), ...(versions.installed ? { installedVersion: 'verified' } : {}), ...(versions.candidate ? { candidateSource: 'verified' } : {}) },
     displayName: item.name, kind, hostNamespace: item.pluginRef ?? undefined, consumerHosts,
-    versions: digest ? { contentDigest: digest } : {},
+    versions,
     technicalDetails, extra: { ...(projectEntry ? { projectKind: projectEntry.projectKind ?? 'unknown' } : {}), ...(transportKey ? { transportKey } : {}) },
   });
   if (first.itemPath || first.path) builder.locate(placementId, { path: first.itemPath ?? first.path });
@@ -341,7 +345,7 @@ function mapCatalogGroup(builder, item, group, ctx) {
 
 function mapCatalog(builder, catalog, ctx) {
   for (const item of catalog?.items ?? []) {
-    for (const group of groupCatalogPresence(item)) mapCatalogGroup(builder, item, group, ctx);
+    for (const group of groupCatalogPresence(item)) mapCatalogGroup(builder, item, group, { ...ctx, catalogMeasuredAt: catalog.asOf });
   }
 }
 
@@ -584,6 +588,7 @@ function emitConsumerStoragePlacement(builder, ctx, { row, resourceId, isRoot, r
   const placementId = placementIdentity({
     resourceId, environmentId, administrativeScope: 'machine', locationSelector: row.id,
   }, installationKey);
+  if (typeof row.path === 'string' && row.path) builder.locate(placementId, { path: row.path });
   const artifactId = artifactIdentity({ carrier: 'storage-root', locator: row.id }, installationKey);
   builder.upsertArtifact(artifactId, { carrier: 'storage-root', label: row.label });
   const bindingId = bindingIdentity({
@@ -703,7 +708,18 @@ function modelConsumers(bindings, identity) {
   return bindings.filter((binding) => binding.identity === identity || binding.modelIdentity === identity);
 }
 
+function configuredModel(model, consumers) {
+  return model.dimensions?.configured?.value === true || model.dimensions?.effective?.value === true
+    || consumers.some((c) => ['configured', 'reported', 'runtime-proven'].includes(c.consumerState));
+}
+
 function mapModel(builder, model, bindings, ctx) {
+  const consumers = modelConsumers(bindings, model.identity);
+  if (!consumers.length && configuredModel(model, []) && HOST_IDS.has(model.key.host)) {
+    consumers.push({ host: model.key.host, consumer: hostLabel(model.key.host)+' model configuration', consumerKind: 'host', consumerState: 'configured' });
+  }
+  const local = model.key.host === 'ollama' && model.key.provider === 'ollama' && Boolean(model.key.digest);
+  if (!local && !configuredModel(model, consumers)) return;
   const { installationKey, now, environmentId, modelStorage } = ctx;
   const resourceId = resourceIdentity({
     kind: 'model', hostNamespace: model.key.host, producer: model.key.provider,
@@ -716,22 +732,21 @@ function mapModel(builder, model, bindings, ctx) {
   const artifactId = artifactIdentity({ carrier: 'model-revision', locator: model.identity }, installationKey);
   const storage = modelStorage?.[model.identity] ?? null;
   builder.upsertArtifact(artifactId, {
-    carrier: 'model-revision', label: `${model.key.provider ?? model.key.host} model blob`,
+    carrier: 'model-revision', label: local ? 'Local Ollama model' : 'Configured remote model',
     ...(model.key.digest ? { digest: model.key.digest } : {}),
     ...(storage ? {
       logicalBytes: storage.logicalBytes ?? null, physicalBytes: storage.physicalBytes ?? null,
       sharedBlobs: storage.sharedBlobs ?? null,
     } : {}),
   });
-  const consumers = modelConsumers(bindings, model.identity);
   const bindingIds = [];
   for (const consumer of consumers) {
     const bindingId = bindingIdentity({
-      placementId, artifactId, consumerKind: 'route', consumerLabel: consumer.consumer,
+      placementId, artifactId, consumerKind: consumer.consumerKind ?? 'route', consumerLabel: consumer.consumer,
     }, installationKey);
     bindingIds.push(bindingId);
     builder.addBinding({
-      bindingId, placementId, artifactId, consumerKind: 'route', consumerLabel: consumer.consumer,
+      bindingId, placementId, artifactId, consumerKind: consumer.consumerKind ?? 'route', consumerLabel: consumer.consumer,
       mechanism: 'kit-routing', enabled: consumer.consumerState !== 'unknown',
       effectiveScope: 'user', grade: consumer.consumerState === 'runtime-proven' ? 'verified' : 'provider-declared',
       affectedByProposedAction: true,
@@ -755,7 +770,7 @@ function mapModel(builder, model, bindings, ctx) {
   }));
   finalizePlacement(builder, {
     placementId, resourceId, environmentId, administrativeScope: 'user',
-    locationBreadcrumb: [model.key.provider ?? model.key.host, 'Models'], artifactIds: [artifactId],
+    locationBreadcrumb: [model.key.provider ?? model.key.host, local ? 'Local models' : 'Configured remote models'], artifactIds: [artifactId],
     consumerBindingIds: bindingIds, conditions: ['healthy'],
     evidenceScorecard: scorecardFor([
       assertion({
@@ -773,7 +788,7 @@ function mapModel(builder, model, bindings, ctx) {
     ]),
     displayName: model.displayName, kind: 'model', consumerHosts: [...new Set(consumers.map((consumer) => consumer.host).filter((host) => HOST_IDS.has(host)))],
     versions: model.key.digest ? { contentDigest: model.key.digest } : {},
-    extra: { activeUse },
+    extra: { activeUse, modelLocation: local ? 'local' : 'remote' },
   });
 }
 
@@ -949,6 +964,7 @@ function resolveEnvironments(environment, installationKey) {
 function buildContext({ installationKey, now, environmentId, projects, discovery }) {
   return {
     installationKey, now, environmentId, projects,
+    pluginEvidence: discovery.pluginEvidence ?? {},
     dependencyProbes: discovery.dependencyProbes ?? [],
     installResourceKinds: discovery.installResourceKinds ?? {},
     modelStorage: discovery.modelStorage ?? {},

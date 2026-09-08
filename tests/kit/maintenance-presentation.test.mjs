@@ -207,3 +207,38 @@ test('path reveal failures show a recoverable message instead of silently doing 
   assert.match(api.mntRevealHtml(), /could not be revealed/);
   assert.match(api.mntRevealHtml(), /Reveal exact path/);
 });
+
+test('procedure opens outside hidden destination panels and reports request failures', async () => {
+  const panel = { open: false, innerHTML: '', showModal() { this.open = true; }, querySelector: () => ({ focus() {} }) };
+  const api = client('maintenance-guidance', { MNT: {}, mntRegisterDestination() {}, document: { getElementById: () => panel }, mntGet: () => Promise.reject(new Error('unavailable')) }, ['mntOpenProcedure']);
+  await api.mntOpenProcedure('g1');
+  assert.equal(panel.open, true);
+  assert.match(panel.innerHTML, /could not be loaded/);
+});
+test('closing a loading procedure discards its delayed response', async () => {
+  let finish;
+  const panel = { open: false, innerHTML: '', showModal() { this.open = true; }, close() { this.open = false; } };
+  const state = {};
+  const api = client('maintenance-guidance', { MNT: state, mntRegisterDestination() {}, document: { getElementById: () => panel }, mntGet: () => new Promise((resolve) => { finish = resolve; }) }, ['mntOpenProcedure', 'mntCloseProcedure']);
+  const pending = api.mntOpenProcedure('g1');
+  api.mntCloseProcedure();finish({ outcome: 'obsolete' });await pending;
+  assert.equal(panel.open, false);
+  assert.equal(state.procedure, null);
+});
+
+test('a valid procedure renders commands and verification inside the open dialog', async () => {
+  const panel = { open: false, innerHTML: '', showModal() { this.open = true; }, querySelector: () => ({ focus() {} }) };
+  const data = { outcome: 'Install a dependency', source: { publisher: 'fixture', recipeVersion: '1' }, command: { shell: 'bash', shellLabel: 'Bash', text: "'npm' 'install' '--global' 'lightpanda'" }, verification: { text: 'lightpanda --version' }, checklist: [], nextStepLabel: 'Verify installation' };
+  const api = client('maintenance-guidance', { MNT: {}, esc, mntRegisterDestination() {}, document: { getElementById: () => panel }, mntGet: () => Promise.resolve(data) }, ['mntOpenProcedure']);
+  await api.mntOpenProcedure('g1');
+  assert.equal(panel.open, true);
+  assert.match(panel.innerHTML, /Copy command/);
+  assert.match(panel.innerHTML, /lightpanda --version/);
+});
+
+test('loading another page extends a family without repeating its heading or placements', () => {
+  const api = client('maintenance-inventory', { mntRegisterDestination() {}, mntDebounce: (fn) => fn }, ['mntMergeGroups']);
+  const groups = api.mntMergeGroups([{ resourceId: 'r1', presentationKey: 'family', placements: [{ placementId: 'p1' }] }], [{ resourceId: 'r2', presentationKey: 'family', placements: [{ placementId: 'p1' }, { placementId: 'p2' }] }]);
+  assert.equal(groups.length, 1);
+  assert.deepEqual(groups[0].placements.map((p) => p.placementId), ['p1', 'p2']);
+});

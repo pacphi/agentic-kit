@@ -248,14 +248,18 @@ import { beginMaintPreview, beginMaintReconcile } from './system-maintenance-act
   }
 
   // ── Procedure panel ──────────────────────────────────────────────────────
+  var mntProcedureSeq=0;
+  function mntCloseProcedure(){
+    mntProcedureSeq++;MNT.procedure=null;
+    var el=document.getElementById("mnt-procedure");if(el&&el.open)el.close();
+  }
   function renderMntProcedure(procedure){
     var el=document.getElementById("mnt-procedure");if(!el)return;
-    if(!procedure){el.hidden=true;el.innerHTML="";return;}
-    el.hidden=false;
+    if(!procedure){mntCloseProcedure();return;}
     var checklist=(procedure.checklist||[]).map(function(step){
       return '<li><label><input type="checkbox" data-mnt-checklist-step="'+esc(step.stepId)+'"> '+esc(step.label)+"</label></li>";
     }).join("");
-    el.innerHTML='<button type="button" class="mt-action" id="mnt-procedure-close">Close</button>'
+    el.innerHTML='<button type="button" class="mt-action" id="mnt-procedure-close" autofocus>Close procedure</button>'
       +"<h4>"+esc(procedure.outcome)+"</h4>"
       +"<p>"+esc(procedure.source.publisher||procedure.source.authority)+" · v"+esc(procedure.source.recipeVersion)+"</p>"
       +'<label class="sr-only" for="mnt-procedure-shell">Shell</label>'
@@ -268,10 +272,20 @@ import { beginMaintPreview, beginMaintReconcile } from './system-maintenance-act
       +"<p>"+esc(procedure.nextStepLabel)+"</p>";
   }
   function mntOpenProcedure(guidanceId){
+    var el=document.getElementById("mnt-procedure");if(!el)return Promise.resolve();
+    var seq=++mntProcedureSeq;MNT.procedure=null;
+    el.innerHTML='<button type="button" class="mt-action" id="mnt-procedure-close" autofocus>Close procedure</button><p role="status">Loading procedure…</p>';
+    if(!el.open)el.showModal();
     return mntGet("/api/maintenance/v2/procedures/"+encodeURIComponent(guidanceId)).then(function(procedure){
+      if(seq!==mntProcedureSeq||!el.open)return;
       MNT.procedure={guidanceId:guidanceId,data:procedure};
       renderMntProcedure(procedure);
-    }).catch(function(){});
+      el.querySelector("#mnt-procedure-close").focus();
+    }).catch(function(){
+      if(seq!==mntProcedureSeq||!el.open)return;
+      el.innerHTML='<button type="button" class="mt-action" id="mnt-procedure-close" autofocus>Close procedure</button><p role="alert">This procedure could not be loaded. Refresh evidence and try again.</p>';
+      el.querySelector("#mnt-procedure-close").focus();
+    });
   }
 
   // ── Recovery: Audit interruption → disclosure/result → Record or export ──
@@ -387,9 +401,12 @@ import { beginMaintPreview, beginMaintReconcile } from './system-maintenance-act
     var list=document.getElementById("mnt-guidance-list");
     if(list)mntWireGuidanceActions(list);
     var procedure=document.getElementById("mnt-procedure");
-    if(procedure)procedure.addEventListener("click",function(event){
+    if(procedure){
+      procedure.addEventListener("keydown",function(event){if(event.key==="Escape")event.stopPropagation();});
+      procedure.addEventListener("close",function(){mntProcedureSeq++;MNT.procedure=null;});
+      procedure.addEventListener("click",function(event){
       var close=event.target.closest?event.target.closest("#mnt-procedure-close"):null;
-      if(close){procedure.hidden=true;procedure.innerHTML="";}
+      if(close){mntCloseProcedure();return;}
       var copy=event.target.closest?event.target.closest("#mnt-procedure-copy"):null;
       if(copy&&MNT.procedure&&navigator.clipboard){
         navigator.clipboard.writeText(MNT.procedure.data.command.text).then(function(){
@@ -404,6 +421,7 @@ import { beginMaintPreview, beginMaintReconcile } from './system-maintenance-act
         }).catch(function(){});
       }
     });
+    }
     var dialog=mntAuditDialogEl();
     if(dialog){
       var close=document.getElementById("mnt-audit-close");

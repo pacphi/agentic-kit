@@ -9,7 +9,7 @@ import { MNT, MNT_GUIDANCE_LANE_LABELS, MNT_CONFLICT_EXPLANATIONS, MNT_CREDENTIA
     "evidenceFields","recentlyChanged",
   ];
   var MNT_FACET_LABEL={
-    scope:"Scope",environment:"Environment",project:"Project",projectType:"Project type",kind:"Type",adapter:"Adapters",consumer:"Hosts",
+    family:"Resource",scope:"Scope",environment:"Environment",project:"Project",projectType:"Project type",kind:"Type",adapter:"Adapters",consumer:"Hosts",
     carrier:"Carrier",provenance:"Source",packageManager:"Package manager",versionState:"Version state",
     guidance:"Guidance",dependencyRole:"Dependency role",conflict:"Conflict",
     credentialReadiness:"Credential",channel:"Channel",evidenceFields:"Evidence available",

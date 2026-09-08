@@ -196,8 +196,10 @@ what changes and what remains.
 
 ### Updates available
 
-Contains only a source-bound candidate with verified compatibility. Candidate and compatibility
-sources are displayed separately. `Recommended` appears only with a named authority.
+Contains source-bound, demonstrably newer releases. Host-reported availability is visible even
+when compatibility is not verified; candidate source and compatibility status are displayed
+separately. This does not grant an update action. `Recommended` appears only with a named authority.
+Ambiguous candidates and versions whose ordering cannot be established remain detail evidence.
 
 ### Recovery to finish
 
@@ -374,3 +376,25 @@ explicit negative evidence do not imply non-Git. A fresh measurement improves th
 The classification is added after project identity assignment. It cannot change project IDs,
 placement IDs, receipt targets, or action authority. Installed tool caches remain excluded from
 implicit project candidates; a version-like name alone never excludes a genuine project folder.
+
+### Resource families and measured versions — approved 2026-09-08
+
+Across scopes presents one heading for a canonical resource family, excluding its definition
+digest from the presentation key while retaining every exact resource and placement identity.
+Grouping never relies on a display name alone. Installations beneath it carry scopes, hosts,
+projects, and measured versions. Filtered groups name all observed hosts and offer Show all
+installations; that action changes the query to the exact family. Bounded pages remain at most
+200 placements, and the client merges continuation rows into the existing family heading.
+
+Plugin release versions come from measured native inventory or installed manifests. Skills,
+agents, and commands may inherit a parent-plugin version, labelled separately from their own
+release. Content digests and cache generations remain separate evidence. Update candidates come
+from explicit provider refresh, never network work during inventory reads. Missing version or
+update sources remain explicit; an MCP registration does not establish the server package version.
+Native candidate probing currently covers Claude/Codex plugins; OpenCode and external adapters
+retain unknown status until their collectors provide equivalent evidence.
+
+Maintenance models are local Ollama inventory or configured/effective/bound remote models.
+Discoverable-only provider catalog entries stay in model discovery. Remote configurations are
+not labelled as local blobs. Reveal exact path is available only with a recorded private locator;
+local storage roots retain their measured paths in that locator store.

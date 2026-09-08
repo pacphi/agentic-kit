@@ -60,6 +60,7 @@ const KIND_SET_FOR_VIEW = Object.freeze({
 });
 
 const INDEX_CACHE = new WeakMap();
+function familyFor(placement, index) { return index.resourcesById.get(placement.resourceId)?.presentationFamilyId ?? placement.resourceId; }
 
 // ── Index construction (built once per inventory instance) ────────────────
 
@@ -127,6 +128,7 @@ function buildIndex(inventory) {
     versionObsByPlacement: groupByKey(inventory.versionObservations, (v) => v.subjectId),
     dependencyRoles: buildDependencyRoles(inventory, placementsById),
     placementsByProjectId,
+    placementsByFamily: groupByKey(inventory.placements, (p) => resourcesById.get(p.resourceId)?.presentationFamilyId ?? p.resourceId),
     facetCache: new Map(),
   };
 }
@@ -263,6 +265,7 @@ function channelValues(placement, index) {
 }
 
 const FACET_EXTRACTORS = Object.freeze({
+  family: (placement, index) => [familyFor(placement, index)],
   scope: (placement) => [placement.administrativeScope],
   environment: (placement) => [placement.environmentId],
   project: (placement) => (placement.projectId ? [placement.projectId] : []),
@@ -419,6 +422,8 @@ function bestOutcome(placements, index) {
 }
 
 function buildGroup(resource, placements, index) {
+  const familyId = resource.presentationFamilyId ?? resource.resourceId;
+  const all = index.placementsByFamily.get(familyId) ?? placements;
   const bindingIds = new Set();
   for (const placement of placements) {
     for (const id of placement.consumerBindingIds ?? []) bindingIds.add(id);
@@ -426,6 +431,9 @@ function buildGroup(resource, placements, index) {
   const outcome = bestOutcome(placements, index);
   return {
     resourceId: resource.resourceId,
+    presentationKey: familyId,
+    knownPlacementCount: all.length,
+    knownHosts: [...new Set(all.flatMap((p) => p.consumerHosts ?? []))],
     displayName: resource.displayName,
     kind: resource.kind,
     placementCount: placements.length,
@@ -440,11 +448,12 @@ function buildGroups(pageIds, index) {
   const byResource = new Map();
   for (const placementId of pageIds) {
     const placement = index.placementsById.get(placementId);
-    let entry = byResource.get(placement.resourceId);
+    const familyId = familyFor(placement, index);
+    let entry = byResource.get(familyId);
     if (!entry) {
       entry = { resource: index.resourcesById.get(placement.resourceId), placements: [] };
-      byResource.set(placement.resourceId, entry);
-      order.push(placement.resourceId);
+      byResource.set(familyId, entry);
+      order.push(familyId);
     }
     entry.placements.push(placement);
   }
@@ -507,6 +516,7 @@ function projectFacetLabels(index, projectIds) {
 
 function buildFacetLabels(index, facetCounts) {
   return {
+    family: Object.fromEntries(Object.keys(facetCounts.family ?? {}).map((id) => [id, index.placementsByFamily.get(id)?.[0]?.displayName ?? 'Resource'])),
     environment: environmentFacetLabels(index, Object.keys(facetCounts.environment ?? {})),
     project: projectFacetLabels(index, Object.keys(facetCounts.project ?? {})),
   };
@@ -571,7 +581,11 @@ export function runInventoryQuery(inventory, params = {}) {
   const baseMatches = computeBaseMatches(index, { scope, view, search });
   const facetCounts = computeFacetCounts(baseMatches, index, appliedFacets);
   const finalMatches = baseMatches.filter((id) => matchesFacets(id, index, appliedFacets, null));
-  const ordered = sortPlacementIds(finalMatches, index, sort);
+  const ranked = sortPlacementIds(finalMatches, index, sort);
+  // Keep families contiguous before bounded placement pagination. The client
+  // merges continuation rows by this stable family key, retaining every row.
+  const families = groupByKey(ranked, (id) => familyFor(index.placementsById.get(id), index));
+  const ordered = [...families.values()].flat();
   const total = ordered.length;
   const pageIds = ordered.slice(offset, offset + clampedLimit);
   const nextCursor = offset + pageIds.length < total

@@ -21,6 +21,17 @@ import { mntOpenInspector } from './maintenance-inspector.mjs';
   var mntInventoryWired=false,mntInventoryBusy=false,mntInventoryError=null,mntFocusPlacement=null;
 
   // ── Query params + fetch ─────────────────────────────────────────────────
+  function mntMergeGroups(existing,incoming){
+    var merged=new Map();
+    existing.concat(incoming).forEach(function(group){
+      var key=group.presentationKey||group.resourceId,prior=merged.get(key);
+      if(!prior){merged.set(key,Object.assign({},group,{placements:group.placements.slice()}));return;}
+      var ids=new Set(prior.placements.map(function(row){return row.placementId;}));
+      group.placements.forEach(function(row){if(!ids.has(row.placementId)){prior.placements.push(row);ids.add(row.placementId);}});
+      prior.placementCount=prior.placements.length;
+    });
+    return Array.from(merged.values());
+  }
   function mntInventoryUrl(cursor){
     var params=new URLSearchParams();
     params.set("scope",MNT.scope);params.set("view",MNT.view);params.set("sort",MNT.sort);
@@ -38,7 +49,7 @@ import { mntOpenInspector } from './maintenance-inspector.mjs';
     return mntGet(mntInventoryUrl(append?MNT.query&&MNT.query.nextCursor:null)).then(function(page){
       if(seq!==MNT.seq)return;
       if(append&&MNT.query){
-        page.groups=(MNT.query.groups||[]).concat(page.groups||[]);
+        page.groups=mntMergeGroups(MNT.query.groups||[],page.groups||[]);
       }
       MNT.query=page;
       mntInventoryBusy=false;
@@ -231,6 +242,8 @@ import { mntOpenInspector } from './maintenance-inspector.mjs';
     var results=document.getElementById("mnt-results");
     if(results){
       results.addEventListener("click",function(event){
+        var family=event.target.closest?event.target.closest("[data-mnt-family]"):null;
+        if(family){MNT.facets={family:[family.getAttribute("data-mnt-family")]};MNT.view="all";MNT.scope="across";MNT.search="";mntSyncHash();mntRunInventoryQuery(false);return;}
         var retry=event.target.closest?event.target.closest("#mnt-retry"):null;
         if(retry){mntRunInventoryQuery(false);return;}
         var groupToggle=event.target.closest?event.target.closest("[data-mnt-group-toggle]"):null;

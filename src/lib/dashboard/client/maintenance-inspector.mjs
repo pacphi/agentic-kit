@@ -44,10 +44,11 @@ import { mntRenderGuidanceEntry, mntWireGuidanceActions } from './maintenance-gu
   }
 
   function mntWhatVersion(versions){
+    var versionLabels={installed:'Installed version',producer:'Parent plugin version',providedBy:'Provided by',candidate:'Available release',cacheGeneration:'Cache generation',installedStatus:'Installed version',updateStatus:'Update check',source:'Update source',checkedAt:'Update check attempted',measuredAt:'Version measured',compatibility:'Compatibility'};
     var keys=Object.keys(versions||{}).filter(function(key){return key!=="contentDigest";});
     if(!keys.length)return "";
     return '<section class="mnt-q"><h4>What version is here?</h4><dl class="mt-facts compact">'
-      +keys.map(function(key){return "<div><dt>"+esc(mntKindLabel(key)||key)+"</dt><dd>"+esc(versions[key])+"</dd></div>";}).join("")
+      +keys.map(function(key){return "<div><dt>"+esc(versionLabels[key]||mntKindLabel(key)||key)+"</dt><dd>"+esc(versions[key])+"</dd></div>";}).join("")
       +"</dl></section>";
   }
 
@@ -120,7 +121,7 @@ import { mntRenderGuidanceEntry, mntWireGuidanceActions } from './maintenance-gu
       +'<p><span aria-hidden="true">○</span> '+esc(mntKindLabel(where.scope)||where.scope)+" · "
       +(where.breadcrumb||[]).map(esc).join(" › ")+"</p>"
       +(where.carrier?"<p>"+esc(where.carrier.label||where.carrier.value)+"</p>":"")
-      +'<div class="mnt-reveal">'+mntRevealHtml()+"</div></section>";
+      +(where.revealAvailable===false?'<p>'+esc(where.locationNote||'No local file path was measured for this resource.')+'</p>':'<div class="mnt-reveal">'+mntRevealHtml()+'</div>')+'</section>';
   }
 
   function renderMntInspector(){

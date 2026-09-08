@@ -930,9 +930,10 @@ ${LIVE_HTML}
             <p class="mnt-status" id="mnt-guidance-status" role="status" aria-live="polite" aria-atomic="true"></p>
             <div class="mnt-guidance-body">
               <div class="mnt-guidance-list" id="mnt-guidance-list"></div>
-              <aside class="mnt-procedure" id="mnt-procedure" aria-label="Procedure" hidden></aside>
             </div>
           </section>
+
+          <dialog class="mnt-procedure" id="mnt-procedure" aria-label="Procedure"></dialog>
 
           <section class="mnt-panel mnt-discovery" id="mnt-panel-discovery" role="tabpanel" aria-labelledby="mnt-tab-discovery" hidden>
             <div class="mnt-discovery-body">

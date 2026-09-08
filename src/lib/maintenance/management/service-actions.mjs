@@ -4,6 +4,7 @@
 // preference and checklist stores.
 import { resolvePlacementFinding } from './correlation.mjs';
 import { loadLastGoodInventory } from './service-inventory.mjs';
+import { findCompatibleRecipes } from './recipes.mjs';
 import { renderProcedure } from './procedures.mjs';
 import { resolveViewState } from './preferences.mjs';
 import { decodeQueryState } from './query.mjs';
@@ -122,6 +123,12 @@ export function procedure(ctx) {
     const recipe = ctx.allRecipes().find((candidate) => candidate.recipeId === entry.procedureId);
     if (!recipe) throw new TypeError(`no active recipe found for procedure: ${entry.procedureId}`);
     const environment = inventory.environments.find((candidate) => candidate.environmentId === ctx.environmentId);
+    const placement = inventory.placements.find((candidate) => candidate.placementId === entry.placementId);
+    const dependency = inventory.dependencyEdges?.find((edge) => edge.fromPlacementId === entry.placementId && edge.satisfied === false);
+    const compatible = placement?.conditions.some((condition) => findCompatibleRecipes([recipe], {
+      placement, environment, condition, dependencyRequirement: dependency?.requirement ?? null,
+    }).length > 0);
+    if (!compatible) throw new TypeError('procedure is no longer compatible; refresh inventory');
     const preferredShell = ctx.preferencesStore.getPreferences()
       .preferredShellByEnvironment?.[ctx.environmentId];
     return renderProcedure(recipe, { shell, environment, preferredShell });

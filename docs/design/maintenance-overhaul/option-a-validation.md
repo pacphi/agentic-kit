@@ -43,3 +43,41 @@ cached repository assessment, not a change-scoped score. No release or ADR statu
 is claimed; ADR-0048 retains its human and cross-platform evaluation gates.
 
 The user authorized committing and pushing this pass on the current feature branch.
+
+## Procedure follow-up — 2026-09-08
+
+Open procedure from Inventory previously rendered under the hidden Guidance tab. A shared
+native dialog now shows loading, the procedure, or a visible failure; closing restores focus,
+and delayed responses cannot reopen it. Escape does not close the underlying inspector.
+
+Review also found unbound removal/update templates, including a Claude command offered for
+a Codex placement. Admission now withholds targetless or unsplit multiword-verb templates;
+the procedure endpoint rechecks current admission even for saved guidance. Complete named
+installation recipes and verified native actions remain available.
+
+723 Maintenance tests passed, with TypeScript, focused lint, and build checks passing. In
+Brave, the saved invalid recipe displayed a visible failure dialog, and Close procedure
+restored the trigger while retaining the inspector. Refresh evidence removes obsolete guidance.
+Full browser-harness and cross-platform validation remain outstanding.
+
+## Version, grouping, and location follow-up — 2026-09-08
+
+734 Maintenance tests pass, including 205-placement family pagination, client continuation
+merging, release ordering, parent-plugin provenance, host/scope isolation, candidate visibility
+without apply authority, catalog-only model exclusion, and private storage locators. TypeScript
+and build checks pass; focused lint has no errors and a model-projection complexity warning.
+
+Live authenticated API checks on port 7431 after Refresh evidence returned:
+
+- One agentic-qe MCP family: 21 known installations, Claude/Codex/OpenCode consumers, 7 matching
+  the Dependencies view.
+- Models/runtimes: 21 relevant entries, replacing the previous 458-entry catalog-heavy view.
+- Hugging Face cache: revealAvailable true and successful owner-only reveal of its measured root.
+- Plugin releases including autopilot 0.12.0, with explicit unknown update-check states.
+- Provider scan complete with partial coverage; the chained inventory refresh succeeded.
+
+Brave disconnected before final visual revalidation. These last checks exercise the real API,
+not a claim of final browser validation. MCP package versions, native OpenCode/Hermes candidate
+probes, and cross-platform browser verification remain coverage limitations. AQE's repository
+assessment remains score 20 (coverage 19.41%, complexity 62.95, maintainability 35.37, security 85);
+this pass does not claim that gate passed or promote ADR-0048 to Implemented.

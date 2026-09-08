@@ -21,6 +21,11 @@
 - **Updated:** 2026-09-07 — Projects retain Git repositories and non-Git folders, with
   Git/Folder/Worktree icons and labels plus a Project type facet; missing or unreadable evidence
   remains Not checked. Classification is presentation metadata and never changes identity.
+- **Updated:** 2026-09-08 — procedures open in a shared dialog from Inventory or Guidance;
+  stale procedure requests recheck admission, and unbound removal/update templates are withheld.
+- **Updated:** 2026-09-08 — canonical presentation families preserve exact installation identities;
+  plugin release/candidate evidence is retained, compatibility-unknown availability is labelled,
+  catalog-only models are excluded, and path reveal follows recorded locators.
 - **Deciders:** agentic-kit maintainers
 - **Planned successor to:** [ADR-0044](0044-receipt-aware-maintenance-control-plane.md) for the
   findings-first product and surface contracts; ADR-0044 remains authoritative until this decision

@@ -215,6 +215,14 @@ function packageManagerCompatible(recipe, packageManagers) {
   return packageManagers.some((manager) => recipe.packageManagerAndRange.toLowerCase().includes(String(manager).toLowerCase()));
 }
 
+export function recipeCommandReady(recipe) {
+  const args = recipe.typedArguments ?? {};
+  // These templates have no source-bound target yet. Never offer a global
+  // update or removal while promising to preserve unrelated installations.
+  if (['update', 'remove-registration'].includes(recipe.operation) && !args.package) return false;
+  return !/\s/.test(args.verb ?? '');
+}
+
 /**
  * Find every active, verified, compatible recipe for one placement's
  * condition. `recipes` is the candidate catalogue (built-ins plus any
@@ -227,6 +235,7 @@ export function findCompatibleRecipes(recipes, {
   placement, environment, packageManagers = [], resourceKind, condition, dependencyRequirement = null,
 } = /** @type {any} */ ({})) {
   return (recipes ?? []).filter((recipe) => recipe.state === 'active'
+    && recipeCommandReady(recipe)
     && verifyRecipe(recipe).ok
     && resourceKindCompatible(recipe, resourceKind ?? placement?.kind)
     && conditionCompatible(recipe, condition)

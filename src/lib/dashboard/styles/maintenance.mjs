@@ -188,7 +188,8 @@ export const MAINTENANCE_CSS = `
 .mnt-guidance-rows{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
 .mnt-guidance-rows>li{border:1px solid var(--line);border-radius:10px;padding:10px 12px}
 .mnt-guidance-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,320px);gap:14px;align-items:start}
-.mnt-procedure{border:1px solid var(--line);border-radius:10px;padding:12px}
+.mnt-procedure{border:1px solid var(--line);border-radius:12px;padding:24px;background:var(--panel);color:var(--text);width:min(640px,calc(100vw - 48px));max-height:80vh;overflow:auto}
+.mnt-procedure::backdrop{background:rgba(0,0,0,.55)}
 .mnt-procedure pre{overflow-x:auto;padding:8px 9px;border-radius:6px;background:var(--bg);color:var(--accent);font-size:10.5px}
 .mnt-discovery-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,300px);gap:14px;align-items:start}
 .mnt-discovery-main section{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px}

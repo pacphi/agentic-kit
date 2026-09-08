@@ -50,6 +50,7 @@ export function createBuilder() {
       if (!resources.has(resourceId)) {
         resources.set(resourceId, {
           resourceId, kind: fields.kind, displayName: fields.displayName, placementIds: [],
+          ...(fields.presentationFamilyId ? { presentationFamilyId: fields.presentationFamilyId } : {}),
           ...(fields.namespace != null ? { namespace: fields.namespace } : {}),
           ...(fields.publisher != null ? { publisher: fields.publisher } : {}),
         });
