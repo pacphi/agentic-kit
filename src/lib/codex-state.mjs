@@ -83,8 +83,15 @@ export function readCodexStateResult(opts = {}) {
         'created_at', 'updated_at', 'recency_at',
         'created_at_ms', 'updated_at_ms', 'recency_at_ms',
       ].filter((c) => cols.has(c)));
+    // Defense in depth: `pick` is already built from a hardcoded literal
+    // allow-list intersected with the live schema, but re-validate every
+    // identifier against a strict pattern before it reaches the SQL text so
+    // a future edit to the allow-list can't smuggle in unsafe column names.
+    const SAFE_IDENTIFIER = /^[a-z_][a-z0-9_]*$/i;
+    if (!pick.every((c) => SAFE_IDENTIFIER.test(c))) return null;
+    const sql = `SELECT ${pick.join(', ')} FROM threads`;
     const threads = new Map();
-    for (const row of db.prepare(`SELECT ${pick.join(', ')} FROM threads`).all()) {
+    for (const row of db.prepare(sql).all()) {
       const project = typeof row.cwd === 'string' ? resolveProjectIdentity(row.cwd) : null;
       const createdAt = ledgerTimestamp(row, 'created_at_ms', 'created_at');
       const updatedAt = ledgerTimestamp(row, 'updated_at_ms', 'updated_at');
