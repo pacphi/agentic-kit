@@ -492,7 +492,7 @@ test('status reports malformed Codex config separately from plugin compatibility
   assert.equal(plugin.fix, null);
 });
 
-test('status identifies the native project-memory writer when both stores exist', async () => {
+test('status discloses both project-memory stores without asserting writer identity', async () => {
   seedHome();
   const swarm = path.join(PROJECT, '.swarm');
   fs.mkdirSync(swarm, { recursive: true });
@@ -505,10 +505,10 @@ test('status identifies the native project-memory writer when both stores exist'
     db.prepare('INSERT INTO memory_entries VALUES (?, ?, ?)').run(key, 'test', 'active');
     db.close();
   }
-  const memory = one(await collect(), 'memory');
-  assert.equal(memory.level, 'ok');
-  assert.match(memory.message, /native-agentdb active writer: 1 active entry/);
-  assert.match(memory.message, /sqljs compatibility store also present/);
+  const memory = (await collect()).filter((r) => r.subsystem === 'memory');
+  assert.ok(memory.some((r) => r.level === 'info' && /native-agentdb: 1 active entry observed/.test(r.message)));
+  assert.ok(memory.some((r) => r.level === 'info' && /sqljs: 1 active entry observed/.test(r.message)));
+  assert.ok(memory.some((r) => r.level === 'warn' && /two project memory stores/.test(r.message)));
   rmrf(swarm);
 });
 
