@@ -128,6 +128,29 @@ function fixtureProject(root, name, {
 
 const tempRoot = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ak-dash-intel-'));
 
+test('picker metadata survives the cached API catalog without changing selection or learning history', async (t) => {
+  const root = tempRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const newest = { ...fixtureProject(root, 'Zulu', { lastAdaptation: 5000, patternsLearned: 10, storeEntries: 2 }),
+    learningScope: 'repository', learningScopeEvidence: 'git-directory', learningObservedAt: 17,
+    learningOrigins: ['claude-desktop', 'codex-desktop'] };
+  const empty = { path: path.join(root, 'Alpha'), label: 'Alpha', learningScope: 'user', learningOrigins: [] };
+  let discoveries = 0;
+  const { url, close, token } = await startDashboard({ port: 0, cwd: root, fetchStatus: async () => STUB_STATUS,
+    discoverProjects: () => { discoveries++; return [newest, empty]; } });
+  try {
+    const first = JSON.parse((await get(`${url}api/status`, token)).body);
+    assert.deepEqual(first.intel.projects.map((entry) => entry.label), ['Zulu', 'Alpha']);
+    assert.equal(first.intel.selectedProjectLabel, 'Zulu');
+    assert.deepEqual(first.intel.projects[0].learningOrigins, ['claude-desktop', 'codex-desktop']);
+    assert.equal(first.intel.projects[0].learningObservedAt, 17);
+    const selected = JSON.parse((await get(`${url}api/status?project=${encodeURIComponent(first.intel.projects[1].key)}`, token)).body);
+    assert.equal(selected.intel.selectedProjectLabel, 'Alpha');
+    assert.deepEqual(selected.intel.patternStore, []);
+    assert.equal(discoveries, 1);
+  } finally { await close(); }
+});
+
 // ── default selection (no ?project=) ────────────────────────────────────
 
 test('GET /api/status with no ?project= defaults to the first discovered project (discoverRuvfloProjects\' own most-recently-active-first sort)', async () => {

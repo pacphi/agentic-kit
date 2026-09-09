@@ -18,7 +18,7 @@
 // ── The census ──────────────────────────────────────────────────────────────
 // The census itself is discoverProjectSources() (footprint/project-sources.mjs),
 // reused verbatim rather than reimplemented. It is already the widest and most
-// carefully bounded of the four: it reads exactly one field (the session `cwd`)
+// carefully bounded of the four: it reads cwd and explicit launch-origin metadata
 // out of the head of every Claude and Codex transcript plus the OpenCode session
 // store, dedupes by resolved real path, and reports three deliberately distinct
 // figures — everSeen / onDisk / gitRepos — instead of one lossy total.
@@ -39,8 +39,10 @@
 // count without one.
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { discoverProjectSources } from './footprint/project-sources.mjs';
 import { resolveProjectIdentity } from './live/project-label.mjs';
+import { claudeDir, codexDir, opencodeDir, configDir } from './paths.mjs';
 
 /** Directories that mean "memory/intelligence has been activated in this
  *  project". Deliberately the SAME list storage.mjs already treats as a
@@ -93,8 +95,10 @@ export function hasLearningState(projectPath, opts) {
  * @returns the discoverProjectSources payload, plus `learning` (a count) and a
  *   `learningState` array on every project row.
  */
-export function projectCensus({ discover = discoverProjectSources, fsImpl = fs, ...opts } = {}) {
+export function projectCensus({ discover = discoverProjectSources, fsImpl = fs,
+  userRoots = [os.homedir(), claudeDir(), codexDir(), opencodeDir(), configDir()], ...opts } = {}) {
   const census = discover({ fsImpl, ...opts });
+  const userRootSet = new Set(userRoots.map((root) => canonicalLearningPath(root, fsImpl)));
   const projects = census.projects.map((p) => {
     // A path that is gone cannot be probed; [] is the only honest reading, and
     // `exists` sits beside it so no consumer can confuse "no learning state"
@@ -103,7 +107,8 @@ export function projectCensus({ discover = discoverProjectSources, fsImpl = fs, 
     // The identity key groups every DIRECTORY that belongs to one project — a
     // sub-directory a session happened to run in, and an agent worktree under
     // .claude/worktrees/, are the same project as the repo root.
-    return { ...p, learningState, identityKey: identityKeyOf(p.path) };
+    return { ...p, learningState, identityKey: identityKeyOf(p.path),
+      ...learningPresentation(p, userRootSet, fsImpl), learningObservedAt: census.asOf ?? null };
   });
   return {
     ...census,
@@ -113,6 +118,28 @@ export function projectCensus({ discover = discoverProjectSources, fsImpl = fs, 
     // gitRepos above are left exactly as discoverProjectSources reports them —
     // the System area measures directories on purpose (ADR-0025).
     learning: mergeByIdentity(projects.filter((p) => p.learningState.length > 0)).length,
+  };
+}
+
+function canonicalLearningPath(candidate, fsImpl) {
+  let resolved;
+  try { resolved = (fsImpl.realpathSync.native ?? fsImpl.realpathSync)(candidate); }
+  catch { resolved = path.resolve(candidate); }
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+/** Scope and client origin are independent; only explicit recorded evidence is used. */
+function learningPresentation(project, userRoots, fsImpl) {
+  const repository = project.repository;
+  const verified = ['git-directory', 'git-pointer', 'git-common-directory-and-backlink'].includes(repository?.evidence);
+  const user = userRoots.has(canonicalLearningPath(project.path, fsImpl));
+  const learningScope = user ? 'user'
+    : verified && repository.kind === 'git' ? 'repository'
+      : verified && repository.kind === 'worktree' ? 'worktree' : 'unknown';
+  return { learningScope,
+    learningScopeEvidence: user ? 'exact-user-state-root' : verified ? repository.evidence : 'unclassified',
+    learningOrigins: ['claude-desktop', 'codex-desktop'].filter((origin) =>
+      project.sessionOrigins?.some((entry) => entry.origin === origin && entry.sessions > 0)),
   };
 }
 
@@ -144,13 +171,17 @@ function mergeByIdentity(rows) {
     existing.paths.push(row.path);
     existing.hosts = [...new Set([...(existing.hosts ?? []), ...(row.hosts ?? [])])];
     existing.learningState = [...new Set([...(existing.learningState ?? []), ...(row.learningState ?? [])])];
+    existing.learningOrigins = [...new Set([...(existing.learningOrigins ?? []), ...(row.learningOrigins ?? [])])].sort();
     existing.sessions = (existing.sessions ?? 0) + (row.sessions ?? 0);
     if ((row.lastSeenMs ?? -1) > (existing.lastSeenMs ?? -1)) existing.lastSeenMs = row.lastSeenMs;
     // Prefer the shallowest path that carries learning state: a repo root over
     // one of its sub-directories, and never an ephemeral agent worktree when a
     // real root is available.
     const better = row.learningState.length > 0 && row.path.length < existing.path.length;
-    if (better) { existing.path = row.path; existing.label = row.label; existing.isGitRepo = row.isGitRepo; }
+    if (better) {
+      existing.path = row.path; existing.label = row.label; existing.isGitRepo = row.isGitRepo;
+      existing.learningScope = row.learningScope; existing.learningScopeEvidence = row.learningScopeEvidence;
+    }
   }
   for (const row of byKey.values()) row.paths.sort();
   return [...byKey.values()];

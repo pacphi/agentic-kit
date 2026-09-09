@@ -119,9 +119,20 @@ import { fmtNum, kpi } from './usage.mjs';
       return;
     }
     sel.disabled=false;
-    sel.innerHTML=intelProjects.map(function(p){
-      return '<option value="'+esc(p.key)+'"'+(p.key===selectedProjectKey?" selected":"")+'>'+esc(p.label)+"</option>";
-    }).join("");
+    var groups=[['repository','Git repositories'],['worktree','Git worktrees'],['user','User-level learning'],['unknown','Other / unclassified']];
+    sel.innerHTML=groups.map(function(group){
+      var rows=intelProjects.filter(function(p){
+        var scope=['repository','worktree','user'].includes(p.learningScope)?p.learningScope:'unknown';
+        return scope===group[0];
+      }).sort(function(a,b){return String(a.label||'').localeCompare(String(b.label||''),undefined,{sensitivity:'base',numeric:true})||String(a.key).localeCompare(String(b.key));});
+      if(!rows.length)return '';
+      return '<optgroup label="'+esc(group[1])+'">'+rows.map(function(p){
+        var qualifiers=[];
+        if((p.learningOrigins||[]).includes('claude-desktop'))qualifiers.push('Claude Desktop');
+        if((p.learningOrigins||[]).includes('codex-desktop'))qualifiers.push('Codex Desktop');
+        return '<option value="'+esc(p.key)+'"'+(p.key===selectedProjectKey?" selected":"")+'>'+esc(p.label+(qualifiers.length?' · '+qualifiers.join(' · '):''))+"</option>";
+      }).join('')+'</optgroup>';
+    }).join('');
   }
 
   export function wireIntelPicker(){
@@ -299,4 +310,3 @@ import { fmtNum, kpi } from './usage.mjs';
     var btn=document.getElementById("poll-now");
     if(btn)btn.disabled=inflight||(Date.now()-lastAttempt)<POLL_COOLDOWN_MS;
   }
-
