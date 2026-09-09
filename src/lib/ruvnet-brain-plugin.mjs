@@ -75,7 +75,7 @@ export function inspectClaudeBrainPlugin({ claudeRoot = claudeDir() } = {}) {
     const hooks = readJson(payloadFile(root, 'hooks/hooks.json'))?.hooks;
     if (!object(hooks)) throw new Error('invalid hooks');
     result.hookEvents = Object.keys(hooks);
-    if (result.hookEvents.length) result.issues.push(`Selected payload declares retired automatic hooks: ${result.hookEvents.join(', ')}`);
+    if (result.hookEvents.length) result.issues.push(`Selected payload declares automatic hooks outside the audited 4.3.16 retirement baseline: ${result.hookEvents.join(', ')}`);
   } catch { result.issues.push('Automatic hook retirement is unverified: missing or invalid hook manifest'); }
   return result;
 }
