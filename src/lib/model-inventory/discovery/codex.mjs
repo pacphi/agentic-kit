@@ -1,3 +1,5 @@
+import { readContextConfig } from '../../codex-context-config.mjs';
+import { VERIFIED_CODEX_CONTEXT_VERSIONS, contextCapacity } from '../../codex-context.mjs';
 import {
   MAX_COMMAND_BYTES, MAX_MODELS, diagnostic, modelRecord, sourceRecord,
 } from './index.mjs';
@@ -7,18 +9,26 @@ const REASONING = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 
 const bounded = (value, max = 256) => typeof value === 'string' && value.length > 0 && value.length <= max ? value : null;
 const positiveSafeInteger = (value) => Number.isSafeInteger(value) && value > 0 ? value : null;
 
-function codexContextVariant(raw) {
+function codexContextVariant(raw, config, clientVersion) {
   const contextWindow = positiveSafeInteger(raw.context_window);
   const maximumContextWindow = positiveSafeInteger(raw.max_context_window);
   const effectiveContextWindowPercent = Number.isSafeInteger(raw.effective_context_window_percent)
     && raw.effective_context_window_percent > 0 && raw.effective_context_window_percent <= 100
     ? raw.effective_context_window_percent : null;
+  const requested = config.window;
+  const supported = VERIFIED_CODEX_CONTEXT_VERSIONS.includes(clientVersion);
+  const capacity = contextCapacity(raw, requested);
+  const configured = requested !== null && (!config.provider || config.provider === 'openai') && !config.catalog;
   return {
-    contextWindow,
+    nativeContextWindow: contextWindow,
+    configuredContextWindow: configured ? requested : null,
+    configuredAutoCompactTokenLimit: config.autoCompact,
+    contextWindow: configured ? (supported ? capacity.allocatedWindow : null) : contextWindow,
     maximumContextWindow,
     effectiveContextWindowPercent,
-    effectiveContextWindow: contextWindow !== null && effectiveContextWindowPercent !== null
-      ? Math.floor(contextWindow * effectiveContextWindowPercent / 100) : contextWindow,
+    effectiveContextWindow: configured ? (supported ? capacity.effectiveWindow : null)
+      : contextWindow !== null && effectiveContextWindowPercent !== null
+        ? Math.floor(contextWindow * effectiveContextWindowPercent / 100) : contextWindow,
     autoCompactTokenLimit: positiveSafeInteger(raw.auto_compact_token_limit),
     maxOutputTokens: positiveSafeInteger(raw.max_output_tokens),
   };
@@ -35,20 +45,8 @@ function parseCache(raw) {
 }
 
 function parseConfig(raw) {
-  if (raw === undefined || raw === null || raw === '') return {};
-  const text = String(raw);
-  if (Buffer.byteLength(text) > MAX_COMMAND_BYTES) throw new TypeError('config-too-large');
-  const result = {};
-  let topLevel = true;
-  for (const line of text.split(/\r?\n/)) {
-    const clean = line.replace(/\s+#.*$/, '').trim();
-    if (!clean) continue;
-    if (/^\[/.test(clean)) { topLevel = false; continue; }
-    if (!topLevel) continue;
-    const match = clean.match(/^(model|model_provider|model_reasoning_effort)\s*=\s*["']([^"']{1,256})["']\s*$/);
-    if (match) result[match[1]] = match[2];
-  }
-  return result;
+  const parsed = readContextConfig(String(raw ?? ''));
+  return { ...parsed, model_provider: parsed.provider };
 }
 
 function codexUnsupportedSchemaResult(scopeCtx, message) {
@@ -74,7 +72,7 @@ function codexModelStates(config, modelId, visibility) {
   };
 }
 
-function codexModelFromCacheEntry(raw, index, config, source) {
+function codexModelFromCacheEntry(raw, index, config, source, clientVersion) {
   const modelId = bounded(raw?.slug ?? raw?.id);
   const visibility = raw?.visibility ?? 'list';
   if (!modelId || !VISIBILITY.has(visibility)) {
@@ -86,7 +84,7 @@ function codexModelFromCacheEntry(raw, index, config, source) {
       displayName: bounded(raw.display_name) ?? modelId, source,
       variant: {
         reasoningEfforts: codexReasoningEfforts(raw),
-        ...codexContextVariant(raw),
+        ...codexContextVariant(raw, config, clientVersion),
       },
       // `upgrade` is a local client hint, not a public retirement notice. It
       // must never promote a target model into a lifecycle warning or cause a
@@ -98,12 +96,12 @@ function codexModelFromCacheEntry(raw, index, config, source) {
   };
 }
 
-function codexModelsFromCache(cacheModels, config, source) {
+function codexModelsFromCache(cacheModels, config, source, clientVersion) {
   const models = [];
   const diagnostics = [];
   let complete = true;
   for (const [index, raw] of cacheModels.slice(0, MAX_MODELS).entries()) {
-    const { model, diagnostic: rowDiagnostic } = codexModelFromCacheEntry(raw, index, config, source);
+    const { model, diagnostic: rowDiagnostic } = codexModelFromCacheEntry(raw, index, config, source, clientVersion);
     if (model) models.push(model);
     if (rowDiagnostic) { complete = false; diagnostics.push(rowDiagnostic); }
   }
@@ -119,7 +117,7 @@ function codexConfiguredFallbackModel(config, source) {
   return modelRecord({
     host: 'codex', provider: bounded(config.model_provider), modelId: config.model,
     scopeId: source.scopeId, source,
-    variant: { reasoningEffort: REASONING.has(config.model_reasoning_effort) ? config.model_reasoning_effort : null },
+    variant: { reasoningEffort: REASONING.has(config.reasoningEffort) ? config.reasoningEffort : null },
     states: { configured: true, effective: true, discoverable: 'unknown', entitled: 'unknown' },
   });
 }
@@ -143,7 +141,7 @@ export function discoverCodex({
     schema: `codex-model-cache-v1${bounded(cache.client_version, 32) ? `@${cache.client_version}` : ''}`,
     freshness: stale ? 'stale' : 'current',
   });
-  const { models, diagnostics, complete: rowsComplete } = codexModelsFromCache(cache.models, config, source);
+  const { models, diagnostics, complete: rowsComplete } = codexModelsFromCache(cache.models, config, source, cache.client_version);
   const complete = cache.models.length <= MAX_MODELS && rowsComplete;
   const fallback = codexConfiguredFallbackModel(config, source);
   if (fallback && !models.some((model) => model.identity.modelId === fallback.identity.modelId)) {

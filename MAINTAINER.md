@@ -27,7 +27,7 @@ release this kit. User-facing docs live in [README.md](README.md); this file is 
 - **Porcelain** (daily): `setup`, `status`, `sync`, `dashboard`, `admin`, `usage`, `run`,
   `host`, `maintain`, `uninstall`. Bare `ak` → `status --hint`. (`dashboard`, `admin`, and `host`
   are also reachable under `ak x`.)
-- **Plumbing** (power users): `ak x admin | daemon-gc | dashboard | harvest | host | mcp |
+- **Plumbing** (power users): `ak x admin | codex-context | daemon-gc | dashboard | harvest | host | mcp |
   reference | statusline | verify | improvement-eval`.
 - Each command module exports `options` (a `parseArgs` config) and `run({ flags, positionals, pkgRoot })`.
 - A best-effort drift nudge runs after non-`sync`, non-`--json` commands.
@@ -42,7 +42,7 @@ src/
   commands/              # porcelain verbs
     setup.mjs  status.mjs  sync.mjs  run.mjs  maintain.mjs  uninstall.mjs
     x/                   # plumbing verbs
-      admin.mjs  daemon-gc.mjs  dashboard.mjs  harvest.mjs  host.mjs  mcp.mjs  reference.mjs  statusline.mjs  verify.mjs
+      admin.mjs  codex-context.mjs  daemon-gc.mjs  dashboard.mjs  harvest.mjs  host.mjs  mcp.mjs  reference.mjs  statusline.mjs  verify.mjs
   lib/                   # the engine — each file is one concern
     heal.mjs             # the mutations sync/setup apply (idempotent, {ok,detail})
     natives.mjs          # better-sqlite3 / agentdb native detection
@@ -98,13 +98,15 @@ docs/
 `bin/agentic-kit.mjs`, `src/`, `claude/`, `docs/DEJA-VU.md`, `docs/DASHBOARD.md`, `docs/HOST-SUPPORT.md`, `docs/HOOKS.md`,
 `docs/INSTALLATION.md`, `docs/MODELS.md`, `docs/PROVIDERS.md`, `docs/SETUP.md`,
 `docs/MAINTENANCE.md`, `docs/TROUBLESHOOTING.md`, `docs/UPGRADING.md`, `docs/CODEX-STATUSLINE.md`,
+`docs/evidence/codex-context-0.153.4.md`,
 `docs/adr/0015-managed-codex-native-statusline.md`,
 `docs/adr/0032-model-lifecycle-intelligence.md`,
 `docs/adr/0033-retire-codex-mcp-and-bound-qe-court-participants.md`,
 `docs/adr/0043-managed-ruflo-browser-executor.md`,
 `docs/adr/0044-receipt-aware-maintenance-control-plane.md`,
 `tests/live/aqe-external-provider-transport.test.mjs`,
-`tests/live/qe-court-participant-transport.test.mjs`, and
+`tests/live/qe-court-participant-transport.test.mjs`,
+`tests/live/codex-context-contract.test.mjs`, and
 `docs/ddd/maintenance.md`, `docs/ddd/model-lifecycle-intelligence.md`. Generated workspace state under
 the shipped source trees is explicitly excluded. Nothing else ships — verify with
 `npm pack --dry-run` before a release if you touch `files`.

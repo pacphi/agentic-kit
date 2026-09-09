@@ -2,6 +2,7 @@
 // Prompts-once-config-forever: choices made during `setup` land here and
 // `sync`/`status` reapply them without re-asking.
 import fs from 'node:fs';
+import { validateCodexContextIntent } from './codex-context-config.mjs';
 import { validateAqeCodexGuidance } from './aqe-guidance.mjs';
 import path from 'node:path';
 import { kitConfigPath, legacyKitConfigPath } from './paths.mjs';
@@ -19,6 +20,7 @@ import {
 } from './routing-config.mjs';
 
 const DEFAULTS = {
+  codexContext: null, // opt-in native maximum with original scalar and ownership receipt
   aqeCodexGuidance: 'compact', // full | compact | none; AQE ≥3.14.1
   aqe: true,            // manage agentic-qe alongside ruflo
   agentBrowser: true,   // manage Ruflo's currently-shipped browser executor (disable with setup --no-agent-browser)
@@ -101,6 +103,7 @@ function warnUnknownTopLevelKeys(parsed) {
 }
 
 function assertLoadableEnvelopes(config) {
+  validateCodexContextIntent(config.codexContext);
   validateAqeCodexGuidance(config.aqeCodexGuidance);
   if (!plain(config.integrations)) {
     throw new TypeError(
@@ -230,6 +233,7 @@ export function loadKitConfig(file = kitConfigPath()) {
 }
 
 export function saveKitConfig(cfg, file = kitConfigPath()) {
+  validateCodexContextIntent(cfg.codexContext);
   validateAqeCodexGuidance(cfg.aqeCodexGuidance);
   const serialized = JSON.stringify(migrateKitConfig(cfg), null, 2) + '\n';
   try {

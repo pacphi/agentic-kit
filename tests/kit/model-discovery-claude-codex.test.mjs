@@ -190,3 +190,20 @@ test('Codex schema and enum guards degrade explicitly and never manufacture mode
   assert.deepEqual(badEnum.models, []);
   assert.equal(badEnum.source.complete, false);
 });
+
+test('Codex inventory applies configured capacity per model and preserves native defaults', () => {
+  const cache = JSON.parse(fixture('codex', 'models-cache.json'));
+  cache.client_version = '0.153.4';
+  const result = discoverCodex({ cacheRaw: cache, configRaw: 'model_context_window = 872_000\n', scopeKey: SCOPE_KEY });
+  const model = result.models[0];
+  assert.equal(model.variant.contextWindow, 872000);
+  assert.equal(model.variant.nativeContextWindow, 272000);
+  assert.equal(model.variant.configuredContextWindow, 872000);
+  assert.equal(model.variant.effectiveContextWindow, 828400);
+});
+
+test('Codex inventory never fabricates an effective override for an unverified client', () => {
+  const result = discoverCodex({ cacheRaw: fixture('codex', 'models-cache.json'),
+    configRaw: 'model_context_window = 872000\n', scopeKey: SCOPE_KEY });
+  assert.equal(result.models[0].variant.effectiveContextWindow, null);
+});

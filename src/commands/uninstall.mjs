@@ -4,6 +4,7 @@
 // LEGACY shell-kit install (rc source lines, ~/.local/bin/ruflo-*,
 // ~/.config/ruflo shell files) — the migration path off the bash era.
 import fs from 'node:fs';
+import { releaseCodexContext } from '../lib/codex-context.mjs';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import { run as runCmd } from '../lib/exec.mjs';
@@ -432,7 +433,8 @@ function stepPurgeKitConfig(ctx) {
     ctx.act('removed kit.json', () => fs.rmSync(paths.kitConfigPath()));
   } else if (!ctx.state.dejaVuTeardownOk) {
     warn('kit.json retained because deja-vu teardown is incomplete; it contains recovery ownership receipts');
-  } else warn('kit.json retained because OpenCode teardown is incomplete; it contains the recovery ownership receipt');
+  } else if (ctx.cfg.codexContext) warn('kit.json retained because Codex context teardown is incomplete; it contains the recovery ownership receipt');
+  else warn('kit.json retained because OpenCode teardown is incomplete; it contains the recovery ownership receipt');
 }
 
 // 3. MCP registration + deny rules
@@ -538,6 +540,14 @@ function stepRuvnetBrainNotice() {
 }
 
 export const UNINSTALL_STEPS = [
+  { id: 'codex-context', when: ctx => !!ctx.cfg.codexContext, run: async ctx => {
+    if (ctx.dry) { info('[dry-run] restore unchanged managed Codex context scalar'); return; }
+    try { await releaseCodexContext(ctx.cfg, { persist: saveKitConfig }); }
+    catch (error) {
+      ctx.state.ownershipTeardownOk = false;
+      warn(`Codex context ownership retained: ${error.message}`);
+    }
+  } },
   { id: 'codex-statusline', when: (ctx) => !!ctx.cfg.statusline?.codex, run: stepCodexStatusline },
   { id: 'claude-md-blocks', when: () => true, run: stepClaudeMdBlocks },
   { id: 'skill', when: () => true, run: stepSkill },
