@@ -14,6 +14,12 @@ Use **System > Maintenance** in the dashboard for browsing, guided work, and one
 Use `ak maintain` for JSON output, discovery configuration, and scripted flows. Every write is one
 exact placement and one action, previewed first and confirmed explicitly, and it leaves a receipt.
 
+Native Windows currently supports inventory, discovery, read-only proposals, and guided procedures.
+Persisted executable plans and journaled mutations refuse with `MAINTENANCE_PERSISTENCE_UNAVAILABLE`
+before provider effects: the default filesystem adapter does not establish the required private,
+durable storage on Windows. Directory-flush failures are not ignored. WSL uses its own Linux
+environment; native Windows mutation support remains an integration gate.
+
 ## Four destinations
 
 The dashboard workspace has four tabs. Each answers a different question.

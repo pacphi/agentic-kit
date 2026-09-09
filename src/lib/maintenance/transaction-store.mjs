@@ -1,3 +1,4 @@
+import { assertMaintenancePersistenceSupported } from './persistence-support.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,6 +24,7 @@ function withoutIntegrity(receipt) {
 }
 
 function assertSafeRoot(root, fsImpl, { create = true } = {}) {
+  if (create) assertMaintenancePersistenceSupported({ fsImpl });
   if (typeof root !== 'string' || !path.isAbsolute(root)) {
     throw new TypeError('maintenance transaction root must be a dedicated absolute directory');
   }

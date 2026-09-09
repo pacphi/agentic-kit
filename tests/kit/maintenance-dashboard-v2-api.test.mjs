@@ -880,3 +880,13 @@ test('public activity retains historical scans as well as latest source summarie
   assert.equal(payload.scans.length, 1);
   assert.equal(payload.scanHistory.length, 2);
 });
+
+test('v2 reports native persistence refusal without suggesting an action started', async () => {
+  const refusal = Object.assign(new Error('private adapter unavailable'), { code: 'MAINTENANCE_PERSISTENCE_UNAVAILABLE' });
+  const { post } = harness({ management: stubManagement({ planAction: async () => { throw refusal; } }).facade });
+  const response = await post('/plans', { placementId: APPLY_PLACEMENT, guidanceId: APPLY_GUIDANCE });
+  assert.equal(response.status, 503);
+  assert.equal(response.body.code, 'MAINTENANCE_PERSISTENCE_UNAVAILABLE');
+  assert.equal(response.body.effect, 'not-started');
+  assert.match(response.body.error, /Inventory and guided procedures remain available/);
+});

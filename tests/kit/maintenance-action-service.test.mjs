@@ -16,6 +16,9 @@ import {
 } from '../../src/lib/maintenance/provider-registry.mjs';
 import { createMaintenanceService } from '../../src/lib/maintenance/service.mjs';
 
+const POSIX_MUTATION_ONLY = process.platform === 'win32'
+  ? { skip: 'native Windows private durable mutation storage is not implemented' } : {};
+
 const NOW = Date.parse('2026-09-03T20:00:00.000Z');
 
 function fixture(t) {
@@ -134,7 +137,7 @@ test('executable plans are separately typed, immutable, source-bound, and reject
   }), /provider-native.*invalid/i);
 });
 
-test('sealed plan envelopes are private, content-safe, expire, and detect tampering', (t) => {
+test('sealed plan envelopes are private, content-safe, expire, and detect tampering', POSIX_MUTATION_ONLY, (t) => {
   const root = fixture(t);
   const plan = buildExecutableMaintenancePlan({
     findings: [finding()], actions: [nativeAction()], sourceFingerprint: 'catalog-source-a', now: () => NOW,
@@ -214,7 +217,7 @@ test('stale or partial catalog evidence is never promoted into a provider action
   }
 });
 
-test('service applies exact confirmed selection, refreshes catalog before success, sanitizes receipt, and refuses replay', async (t) => {
+test('service applies exact confirmed selection, refreshes catalog before success, sanitizes receipt, and refuses replay', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   fs.chmodSync(root, 0o755);
   const state = { enabled: true };
@@ -250,7 +253,7 @@ test('service applies exact confirmed selection, refreshes catalog before succes
   assert.match(replay.error, /consumed|replay/i);
 });
 
-test('catalog refresh failure cannot masquerade as success and triggers reversible compensation', async (t) => {
+test('catalog refresh failure cannot masquerade as success and triggers reversible compensation', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const state = { enabled: true };
   const implementation = provider(state);
@@ -271,7 +274,7 @@ test('catalog refresh failure cannot masquerade as success and triggers reversib
   assert.equal(state.enabled, true);
 });
 
-test('service undo preview and execution guard the recorded postimage and are idempotent', async (t) => {
+test('service undo preview and execution guard the recorded postimage and are idempotent', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const state = { enabled: true };
   const implementation = provider(state);
@@ -302,7 +305,7 @@ test('service undo preview and execution guard the recorded postimage and are id
   assert.equal(repeat.status, 'already-rolled-back');
 });
 
-test('service seals undo as recovery-required when post-undo Catalog refresh fails', async (t) => {
+test('service seals undo as recovery-required when post-undo Catalog refresh fails', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const state = { enabled: true };
   const implementation = provider(state);
@@ -387,7 +390,7 @@ test('a service built without an explicit providers Map (resolving the default r
   assert.ok(injectedFetchCalls > 0, 'ollama-model.detect() actually ran, through the injected fetchImpl');
 });
 
-test('service.planAction carries an opaque placementId through to the receipt and rejects a malformed one', async (t) => {
+test('service.planAction carries an opaque placementId through to the receipt and rejects a malformed one', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const state = { enabled: true };
   const implementation = provider(state);
@@ -471,17 +474,20 @@ test('service.providerEvidence reuses the most recent scan without a second dete
   assert.equal(again.detections.has(implementation.id), true);
 });
 
-test('service.providerEvidence\'s cold path waits out an in-flight apply before calling detect()', async (t) => {
+test('service.providerEvidence\'s cold path waits out an in-flight apply before calling detect()', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const state = { enabled: true };
   const events = [];
-  let releaseApply;
+  let releaseApply, signalApplyStarted;
+  const applyStarted = new Promise((resolve) => { signalApplyStarted = resolve; });
   const applyGate = new Promise((resolve) => { releaseApply = resolve; });
+  t.after(() => releaseApply());
   const base = provider(state, events);
   const implementation = {
     ...base,
     async apply(action) {
       events.push('apply-start');
+      signalApplyStarted();
       await applyGate;
       events.push('apply-end');
       return base.apply(action);
@@ -504,9 +510,14 @@ test('service.providerEvidence\'s cold path waits out an in-flight apply before 
   const applyPromise = service.apply({
     plan, actionIds: [plan.actions[0].id], expectedPlanDigest: plan.planDigest, confirmed: true,
   });
-  while (!events.includes('apply-start')) {
-    await new Promise((resolve) => { setTimeout(resolve, 5); });
-  }
+  let startTimer;
+  try {
+    await Promise.race([
+      applyStarted,
+      applyPromise.then((result) => { throw new Error('Apply settled before dispatch: ' + JSON.stringify(result)); }),
+      new Promise((_, reject) => { startTimer = setTimeout(() => reject(new Error('Apply did not reach the provider within 5 seconds')), 5000); }),
+    ]);
+  } finally { clearTimeout(startTimer); }
   // apply() itself legitimately calls detect() earlier, while re-deriving a
   // live plan for its own drift check — that already happened by now. What
   // must NOT happen is a *new* detect() call (providerEvidence's cold path)
@@ -528,4 +539,24 @@ test('service.providerEvidence\'s cold path waits out an in-flight apply before 
   assert.equal(evidence.registry.has(implementation.id), true);
   const detectCallsAfter = events.filter((event) => event === 'detect').length;
   assert.ok(detectCallsAfter > detectCallsAtGate, 'the cold-path detect() ran only after the mutation finished');
+});
+
+test('native Windows apply refuses before provider effects or mutation state', {
+  skip: process.platform !== 'win32' && 'native Windows integration boundary',
+}, async (t) => {
+  const root = fixture(t);
+  const events = [];
+  const implementation = provider({ enabled: true }, events);
+  const service = createMaintenanceService({
+    collector: { async read() { return footprint(); }, async refreshDeep() { return { ok: true }; } },
+    providers: new Map([[implementation.id, implementation]]), now: () => NOW, controlRoot: root,
+  });
+  const model = await service.scan();
+  const proposal = await service.plan({ findingIds: [model.findings[0].id], executable: true });
+  const before = fs.readdirSync(root);
+  events.length = 0;
+  await assert.rejects(() => service.apply({ plan: proposal, actionIds: [proposal.actions[0].id],
+    expectedPlanDigest: proposal.planDigest, confirmed: true }), { code: 'MAINTENANCE_PERSISTENCE_UNAVAILABLE' });
+  assert.deepEqual(events, []);
+  assert.deepEqual(fs.readdirSync(root), before);
 });

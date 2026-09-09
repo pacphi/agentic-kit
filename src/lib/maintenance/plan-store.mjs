@@ -1,3 +1,4 @@
+import { assertMaintenancePersistenceSupported } from './persistence-support.mjs';
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,6 +12,7 @@ const MAX_PLAN_BYTES = 512 * 1024;
 const FORBIDDEN_KEYS = /^(?:argv|command|cwd|env|headers|path|token|secret|credential)$/i;
 
 export function ensurePrivateMaintenanceRoot(root, { fsImpl = fs } = {}) {
+  assertMaintenancePersistenceSupported({ fsImpl });
   if (typeof root !== 'string' || !path.isAbsolute(root)) {
     throw new TypeError('maintenance plan root must be a dedicated absolute directory');
   }

@@ -751,6 +751,7 @@ export function publicAuditResults(results) {
 // factual sentence that never carries a prohibited label) ─────────────────
 const GENERATION_MISMATCH = 'The inventory changed since this page was requested. Reload the inventory to continue paging.';
 const V2_ERRORS = Object.freeze({
+  MAINTENANCE_PERSISTENCE_UNAVAILABLE: { status: 503, error: 'Native Windows maintenance mutations require verified private, durable storage. Inventory and guided procedures remain available.', effect: 'not-started' },
   ONE_ACTION_PER_PLAN: { status: 409, error: 'A maintenance plan carries exactly one action for one placement.', effect: 'not-started' },
   'inventory-generation-mismatch': { status: 409, code: 'INVENTORY_GENERATION_MISMATCH', error: GENERATION_MISMATCH },
   INVENTORY_GENERATION_MISMATCH: { status: 409, error: GENERATION_MISMATCH },

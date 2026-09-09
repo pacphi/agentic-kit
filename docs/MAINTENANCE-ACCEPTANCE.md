@@ -411,3 +411,14 @@ ADR-0048 remains Accepted. Focused automated evidence does not close these gates
 ADR-0044 remains the compatibility and transaction-safety floor until those gates
 pass. The archived migration plan records the original phase sequence; it is not
 an assertion that every release gate has passed.
+
+### Native Windows mutation persistence
+
+Native Windows journaled mutations remain unavailable pending a verified private storage and
+power-loss durability adapter. CI exercises the native refusal before provider effects and runs
+portable planning/discovery tests. POSIX permission, ownership, and directory-flush integration
+tests run on Linux/macOS; their Windows exclusions are not Windows mutation signoff.
+
+Node's [Windows mode limitations](https://nodejs.org/api/fs.html#fschmodpath-mode-callback) and
+libuv's [Windows flush implementation](https://github.com/libuv/libuv/blob/v1.x/src/win/fs.c)
+prevent assuming that POSIX private-directory and flush guarantees transfer unchanged.
