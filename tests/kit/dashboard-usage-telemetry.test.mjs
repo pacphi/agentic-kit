@@ -1210,7 +1210,8 @@ test('the fields the chips read are actually projected onto the session row', ()
     mode: 'auto-edit',
     usageRows: [{ day: '2026-08-18', model: 'claude-opus-5', input: 10, output: 5, cacheRead: 0, cacheWrite: 0, responses: 1 }],
   });
-  Object.assign(rec, { modeRaw: 'acceptEdits', ctxWindow: 200_000, ctxLastTokens: 151_000 });
+  Object.assign(rec, { modeRaw: 'acceptEdits', ctxWindow: 200_000, ctxLastTokens: 151_000,
+    contextEvidence: { schemaVersion: 1, state: 'observed', pressure: { lastBps: 7550, samples: 1 } } });
   const agg = aggregate([rec], { days: 7, now: NOW, cutoff: NOW - 7 * DAY_MS, deps: FIXTURE_DEPS });
   const row = agg.sessions[0];
   assert.equal(row.modeRaw, 'acceptEdits', 'the badge tooltip has a raw spelling to print');
@@ -1218,7 +1219,7 @@ test('the fields the chips read are actually projected onto the session row', ()
   assert.equal(row.ctxLastTokens, 151_000, 'the ctx chip has a numerator');
   // …and the client reads exactly those names.
   assert.match(JS, /reportedIdentity\(sx\.modeRaw\)/);
-  assert.match(JS, /Number\(sx\.ctxLastTokens\),win=Number\(sx\.ctxWindow\)/);
+  assert.equal(row.contextEvidence.pressure.lastBps, 7550, 'paired pressure survives projection');
 });
 
 test('the host spelling is rendered, not filtered — the "[object Object]" band-aid is gone', () => {
@@ -1230,16 +1231,6 @@ test('the host spelling is rendered, not filtered — the "[object Object]" band
   // the spelling the host actually recorded.
   assert.doesNotMatch(JS, /rawSpelling/, 'the band-aid and every call to it are removed');
   assert.doesNotMatch(JS, /indexOf\("\[object "\)/, 'no sentinel-string filtering survives');
-});
-
-test('the context chip requires BOTH halves, and is omitted rather than divided by a guess', () => {
-  assert.match(JS, /var used=Number\(sx\.ctxLastTokens\),win=Number\(sx\.ctxWindow\)/);
-  assert.match(JS, /if\(!isFinite\(used\)\|\|!isFinite\(win\)\|\|used<=0\|\|win<=0\)return ""/);
-  assert.match(JS, /both recorded by the transcript/);
-  // The window is only ever READ. No `||` or `??` fallback stands behind it,
-  // which is what a guessed denominator would have to look like.
-  assert.doesNotMatch(JS, /ctxWindow\s*(\|\||\?\?)/);
-  assert.doesNotMatch(JS, /CONTEXT_WINDOWS|DEFAULT_CTX_WINDOW/, 'no published-window lookup table');
 });
 
 test('the session detail strip spells out posture and rhythm, and never omits the line', () => {

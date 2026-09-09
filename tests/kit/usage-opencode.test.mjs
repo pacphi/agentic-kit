@@ -320,3 +320,46 @@ test('a user message with no text part fingerprints as an attachment-only contro
   assert.equal(rec.promptFPs[0].t, 0);
   rm(d);
 });
+
+test('selected SQLite session is refused before materialization when its byte or row budget is exceeded', () => {
+  const d = tmp();
+  try {
+    const dbFile = buildDb(path.join(d, 'opencode.db'), {
+      sessions: [{ id: 'bounded', directory: '/x', title: 'bounded' }],
+      messages: [assistantMsg('m1', 'bounded', T), assistantMsg('m2', 'bounded', T + 1000)],
+      parts: [{ id: 'p1', sessionId: 'bounded', messageId: 'm1', at: T, data: { type: 'text', text: 'x'.repeat(4096) } }],
+    });
+    for (const withTurns of [false, true]) {
+      const parsed = parseSession({ dbFile, id: 'bounded', withTurns, maxSessionBytes: 1024 });
+      assert.equal(parsed.session.acquisitionCoverage?.complete, false);
+      assert.equal(parsed.session.acquisitionCoverage.truncated, true);
+      assert.equal(parsed.session.acquisitionCoverage.reason, 'session-byte-limit');
+      assert.deepEqual(parsed.session.usage, []);
+      assert.deepEqual(parsed.turns, []);
+    }
+    const rows = parseSession({ dbFile, id: 'bounded', maxSessionRows: 2 });
+    assert.equal(rows.session.acquisitionCoverage.reason, 'session-row-limit');
+    const complete = parseSession({ dbFile, id: 'bounded' });
+    assert.equal(complete.session.acquisitionCoverage.complete, true);
+    assert.equal(complete.session.responses, 2);
+  } finally { rm(d); }
+});
+
+test('SQLite acquisition bounds cover single message and metadata bytes, including UTF-8', () => {
+  const d = tmp();
+  try {
+    const dbFile = buildDb(path.join(d, 'opencode.db'), {
+      sessions: [
+        { id: 'message-large', directory: '/x', title: 'message' },
+        { id: 'metadata-large', directory: '/x', title: 'é'.repeat(600) },
+      ],
+      messages: [{ id: 'm1', sessionId: 'message-large', at: T, data: { role: 'user', text: 'é'.repeat(600) } }],
+    });
+    for (const id of ['message-large', 'metadata-large']) {
+      const parsed = parseSession({ dbFile, id, maxSessionBytes: 1024 });
+      assert.equal(parsed.session.acquisitionCoverage.reason, 'session-byte-limit');
+      assert.ok(parsed.session.acquisitionCoverage.sourceBytes > 1024);
+      assert.deepEqual(parsed.session.usage, []);
+    }
+  } finally { rm(d); }
+});

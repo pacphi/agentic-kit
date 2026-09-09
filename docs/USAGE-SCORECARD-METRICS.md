@@ -517,11 +517,11 @@ export function costOf(usage) {
 }
 ```
 
-OpenCode rows with non-null `costObserved` use that recorded value instead of
-`costOf`; zero is retained as a recorded value. A `(day, model)` row with a mixture
-of priced and missing-cost messages currently retains only its recorded cost sum
-and does not estimate the missing messages separately. That can understate the row.
-The account invoice and subscription charge remain outside the estimator.
+OpenCode accepts finite nonnegative numeric costs, including zero. A `(day, model)`
+row retains reported costs and the tokens from missing/invalid-cost messages
+separately; only those missing portions use `costOf` at the row's model/day rate.
+Session payloads expose `costEvidence` with observed/estimated dollar sums and
+message counts. The account invoice and subscription charge remain outside the estimator.
 
 `priceFor` resolves both cache multipliers per model. Anthropic 5-minute
 writes and OpenAI GPT-5.6+ writes use 1.25×; older OpenAI models have no
@@ -2317,13 +2317,11 @@ describes.
 
 **Independent, third-party verification.**
 [`docs/CODEX-USAGE-DIAGNOSTIC.md`](CODEX-USAGE-DIAGNOSTIC.md) is a
-non-maintainer-facing companion to this section: a standalone, zero-dependency
-script plus instructions for anyone with real Codex usage to compute the
-same before/after comparison on their own machine, from a separate
-reimplementation of the parsing logic, and report back an aggregate-only
-result with no transcript content. Point anyone questioning their own
-Codex numbers there for the historical replay comparison only: its rate table and
-parser are older than the maintained dashboard, as its guide now explains.
+non-maintainer-facing companion to this section: a repository-local script with
+zero runtime dependencies and an independent cumulative-snapshot parser. It shares
+the maintained pricing module and preserves first-metadata precedence. Its
+aggregate-only report is an independent replay comparison, not full dashboard
+parity: it does not apply ledger fallback or allocate costs per turn/day/model.
 
 ### Smaller corrections
 

@@ -444,10 +444,9 @@ export function renderPage({ name, version }) {
 
     <section class="view" id="v-score" role="tabpanel" aria-labelledby="usage-tab-score">
       <div class="hero" id="u-hero"></div>
-      <div class="note"><span class="i">&#8505;</span><span>Dollar figures are <b>API list-price equivalents</b> &mdash;
-        what these tokens would cost metered. On a Max/Pro subscription you are not billed this.
-        Cache reads bill at 0.1&times; input and cache writes at 1.25&times;; ignoring that would overstate
-        a window by roughly <b>10&times;</b>. <span class="mono" id="u-asof"></span></span></div>
+      <div class="note"><span class="i">&#8505;</span><span>Dollar figures combine <b>reported costs and API list-price estimates</b>.
+        Subscription estimates are not your bill. Cache rates vary by model and date.
+        The timeframe selects sessions by their end and includes their whole retained usage. <span class="mono" id="u-asof"></span></span></div>
       <section class="strip">
         <div class="sh"><h2>Cost per day</h2><span class="n mono" id="u-days-note"></span></div>
         <div class="days" id="u-daybars"></div>
@@ -524,15 +523,15 @@ export function renderPage({ name, version }) {
     </section>
 
     <section class="view" id="v-prompts" role="tabpanel" aria-labelledby="usage-tab-prompts" hidden>
-      <div class="note"><span class="i">&#8505;</span><span>What you actually type, across every host.
+      <div class="note"><span class="i">&#8505;</span><span>Recorded prompt patterns, across every host.
         Every figure here is computed from prompt <b>fingerprints</b> &mdash; hashes, counts, provenance, and
         bounded intent/topic codes recorded at scan time. <b>No prompt text is stored in the index or served by this
         view.</b> Semantic names require repeated majority evidence; unknown vocabulary stays unclassified.
-        Only turns a person typed are counted; agent deliveries, tool templates and slash records
-        are filtered out before anything below is measured.</span></div>
+        Prompt-kind turns are selected using host-specific provenance filters; this does not
+        prove a person typed every turn. Filter coverage varies by host.</span></div>
       <div class="hero" id="u-pr-kpis"></div>
       <section class="strip">
-        <div class="sh"><h2>Who is typing</h2><span class="n mono" id="u-pr-prov-note"></span></div>
+        <div class="sh"><h2>Prompt provenance</h2><span class="n mono" id="u-pr-prov-note"></span></div>
         <div id="u-pr-provenance"></div>
       </section>
       <section class="strip">

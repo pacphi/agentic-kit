@@ -3,7 +3,7 @@ import { esc, rowLine } from './groups.mjs';
 // Also injected into the browser bundle: one tested formatter for both paths.
 export function contextCard(group) {
   const report = group.rows.find(row => row.contextReport)?.contextReport;
-  const tokens = value => Number.isFinite(value) && value >= 0 ? value.toLocaleString('en-US') : '—';
+  const tokens = value => Number.isFinite(value) && value >= 0 ? value.toLocaleString(undefined) : '—';
   const controls = {
     claude: ['Model & compaction', 'https://code.claude.com/docs/en/model-config'],
     codex: ['Model & compaction', 'https://learn.chatgpt.com/docs/config-file/config-reference'],
@@ -36,7 +36,7 @@ export function contextCard(group) {
     const compact = threshold != null ? '<p>Configured compaction: ' + tokens(threshold) + ' tokens</p>' : '';
     const freshness = codex ? host.cacheFetchedAt : host.inventoryCapturedAt;
     const basis = models.length && freshness ? '<p class="context-basis">Cache <time datetime="' + esc(freshness) + '">'
-      + esc(new Date(freshness).toLocaleString('en-US', {dateStyle:'medium',timeStyle:'short'})) + '</time></p>' : '';
+      + esc(new Date(freshness).toLocaleString(undefined, {dateStyle:'medium',timeStyle:'short'})) + '</time></p>' : '';
     return summary + compact + table.replace('</details>', basis + '</details>') + '</section>';
   };
   const warnings = group.rows.filter(row => row.level === 'warn' || row.level === 'fail');
