@@ -1,3 +1,4 @@
+import { assertMaintenancePersistenceSupported } from './persistence-support.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -415,6 +416,7 @@ export function createMaintenanceService({
     const selectedPlan = suppliedPlan ?? loadPlan(planId);
     if (planId && selectedPlan.planId !== planId) throw new Error('Maintenance plan ID does not match the supplied plan.');
     assertExecutableMaintenancePlanIntegrity(selectedPlan, { now });
+    assertMaintenancePersistenceSupported({ fsImpl });
     const generatedAt = Date.parse(selectedPlan.generatedAt);
     const liveFootprint = await collector.read();
     const liveProviders = resolveProviders(liveFootprint);

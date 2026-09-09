@@ -12,7 +12,6 @@ const MAX_PLAN_BYTES = 512 * 1024;
 const FORBIDDEN_KEYS = /^(?:argv|command|cwd|env|headers|path|token|secret|credential)$/i;
 
 export function ensurePrivateMaintenanceRoot(root, { fsImpl = fs } = {}) {
-  assertMaintenancePersistenceSupported({ fsImpl });
   if (typeof root !== 'string' || !path.isAbsolute(root)) {
     throw new TypeError('maintenance plan root must be a dedicated absolute directory');
   }
@@ -55,6 +54,7 @@ export function writeMaintenancePlanEnvelope(root, plan, {
 } = {}) {
   assertExecutableMaintenancePlanIntegrity(plan, { now });
   if (!contentSafe(plan)) throw new Error('maintenance plan contains unsafe content');
+  assertMaintenancePersistenceSupported({ fsImpl });
   const dir = ensurePrivateMaintenanceRoot(root, { fsImpl });
   const file = planFile(dir, plan.planId);
   const base = {

@@ -24,7 +24,6 @@ function withoutIntegrity(receipt) {
 }
 
 function assertSafeRoot(root, fsImpl, { create = true } = {}) {
-  if (create) assertMaintenancePersistenceSupported({ fsImpl });
   if (typeof root !== 'string' || !path.isAbsolute(root)) {
     throw new TypeError('maintenance transaction root must be a dedicated absolute directory');
   }
@@ -56,6 +55,7 @@ function syncDirectory(dir, fsImpl) {
 export function createMaintenanceTransaction(transactionsRoot, {
   fsImpl = fs, now = () => new Date(), nonce = () => randomBytes(12).toString('hex'),
 } = {}) {
+  assertMaintenancePersistenceSupported({ fsImpl });
   const root = assertSafeRoot(transactionsRoot, fsImpl);
   const stamp = now().toISOString().replace(/[-:.]/g, '');
   const id = `mnt-${stamp}-${String(nonce()).replace(/[^A-Za-z0-9._-]/g, '').slice(0, 32)}`;
@@ -68,6 +68,7 @@ export function createMaintenanceTransaction(transactionsRoot, {
 }
 
 export function writeMaintenanceReceipt(file, receipt, { fsImpl = fs } = {}) {
+  assertMaintenancePersistenceSupported({ fsImpl });
   if (!receipt || receipt.schemaVersion !== MAINTENANCE_RECEIPT_SCHEMA) {
     throw new TypeError('invalid maintenance receipt schema');
   }
