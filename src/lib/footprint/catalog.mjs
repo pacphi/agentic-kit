@@ -1,6 +1,7 @@
 // Read-only CatalogInventory v2 (ADR-0025): canonical standalone/plugin identity,
 // per-source occurrences, and bounded entrypoint digests. Bodies never leave the
 // collector; traversal never follows a symlink or escapes a declared root.
+import { readResourceDescription, readPluginDescription } from './catalog-descriptions.mjs';
 import { measureProjectKind } from './project-kind.mjs';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
@@ -105,7 +106,7 @@ const readMarkerDirs = (root, marker, opts = {}) => readNames(root, {
   entryOf: (file) => {
     const definition = artifactTreeDigest(path.dirname(file), opts);
     return {
-      itemPath: path.dirname(file), sourceFile: file,
+      itemPath: path.dirname(file), sourceFile: file, description: readResourceDescription(file, opts),
       digest: artifactDigest(file, opts), definition: { ...definition, files: undefined },
       artifactFiles: definition.files ?? [], locatorKind: 'directory',
     };
@@ -122,6 +123,7 @@ const readMarkdownNames = (root, opts = {}) => readNames(root, {
   entryOf: (file) => {
     const digest = artifactDigest(file, opts);
     return { itemPath: file, sourceFile: file, digest,
+      ...(file.endsWith('.md') ? { description: readResourceDescription(file, opts) } : {}),
       definition: digest, artifactFiles: [file], locatorKind: 'file' };
   },
   ...opts,
@@ -136,6 +138,7 @@ const readFileStems = (root, exts, opts = {}) => readNames(root, {
   entryOf: (file) => {
     const digest = artifactDigest(file, opts);
     return { itemPath: file, sourceFile: file, digest,
+      ...(file.endsWith('.md') ? { description: readResourceDescription(file, opts) } : {}),
       definition: digest, artifactFiles: [file], locatorKind: 'file' };
   },
   ...opts,
@@ -246,7 +249,7 @@ function pluginSurfaceSpecs({
       read: () => ({
         status: source.status === 'degraded' ? 'degraded' : 'ok', reason: source.reason,
         names: plugins.map((plugin) => plugin.ref),
-        entries: plugins.map((plugin) => ({ name: plugin.ref, plugin })),
+        entries: plugins.map((plugin) => ({ name: plugin.ref, plugin, description: readPluginDescription(plugin.root, host, io) })),
         partial: source.status === 'partial', truncated: false,
       }),
     });
@@ -298,6 +301,7 @@ function mergeCatalogItem(items, spec, entry) {
     host: spec.host, surface: spec.id, path: spec.path,
     itemPath: entry.itemPath ?? null, sourceFile: entry.sourceFile ?? null,
     scope: spec.sourceScope ?? spec.scope ?? 'unknown', project: spec.sourceProject ?? spec.project ?? null,
+    description: entry.description ?? null,
     provider, plugin: entry.plugin ?? null, digest: entry.digest ?? null,
     definition: entry.definition ?? entry.digest ?? null,
     artifactId,

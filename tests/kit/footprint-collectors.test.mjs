@@ -852,7 +852,7 @@ function catalogFixture(t) {
   // The same skill on two hosts, spelled differently: identity is the
   // normalized name, so this is ONE deployed skill present twice.
   write(path.join(claudeRoot, 'skills', 'Deep-Research', 'SKILL.md'),
-    '---\nname: x\n---\nSECRET BODY\n');
+    '---\nname: x\ndescription: Researches source documents\n---\nSECRET BODY\n');
   write(path.join(codexRoot, 'skills', 'deep-research', 'SKILL.md'), 'SECRET BODY\n');
   write(path.join(claudeRoot, 'skills', 'claude-only', 'SKILL.md'), 'SECRET BODY\n');
   write(path.join(claudeRoot, 'agents', 'reviewer.md'), 'SECRET BODY\n');
@@ -890,6 +890,8 @@ test('catalog dedups by normalized name and keeps a per-host presence matrix', (
   assert.deepEqual(shared.hosts.sort(), ['claude', 'codex', 'opencode'],
     'case and spacing are presentation; the deployed skill is one thing');
   assert.equal(shared.presence.length, 3);
+  assert.equal(shared.presence.find(row => row.host === 'claude').description, 'Researches source documents');
+  assert.equal(shared.presence.find(row => row.host === 'codex').description, null);
   assert.deepEqual(shared.presence.map((entry) => entry.surface).sort(),
     ['claude-skills', 'codex-skills', 'opencode-claude-skills']);
   const claudeArtifact = shared.artifacts.find((artifact) => artifact.consumers.some((row) => row.host === 'claude'));
@@ -1398,6 +1400,8 @@ test('codex MCP table names are read from config.toml without parsing values', (
     '[mcp_servers.ruflo]', 'command = "npx"',
     '[mcp_servers."with.dot"]',
     "[mcp_servers.'single']",
+    '[mcp_servers.ruvnet-brain.tools.search_ruvnet]',
+    '[mcp_servers.ruvnet-brain.tools.ruvnet_cli_run]',
     '[other.section]',
   ].join('\n');
   assert.deepEqual(tomlTableNames(source, 'mcp_servers'), ['ruflo', 'with.dot', 'single']);

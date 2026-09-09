@@ -43,7 +43,7 @@ export function readManifestKeys(file, pick, { fsImpl = fs } = {}) {
 export function tomlTableNames(source, section) {
   const names = [];
   const re = new RegExp(
-    `^\\[\\s*${section}\\s*\\.\\s*(?:"((?:[^"\\\\]|\\\\.)+)"|'([^']+)'|([A-Za-z0-9_.\\-]+))\\s*\\]\\s*$`,
+    `^\\[\\s*${section}\\s*\\.\\s*(?:"((?:[^"\\\\]|\\\\.)+)"|'([^']+)'|([A-Za-z0-9_\\-]+))\\s*\\]\\s*$`,
     'gm',
   );
   let match;
