@@ -1,8 +1,9 @@
 # Dashboard
 
 `ak dashboard` opens a local diagnostic workspace. It binds to loopback and requires the
-per-session dashboard token for every API route. Ordinary views are observation-only;
-**System > Maintenance** is the sole receipt-aware action surface.
+per-session dashboard token for every API route. Ordinary views do not apply repairs;
+**System > Maintenance** is the receipt-aware repair surface. Observation can still
+launch bounded collectors, consult version services, and update derived caches.
 
 ```bash
 ak dashboard
@@ -167,12 +168,12 @@ The totals still differ, because the tabs ask different questions:
 | Overview → Intelligence | projects with learning state | all time |
 | Observability → History | projects with retained sessions | the selected history window |
 | Usage → Scorecard | projects with recorded usage | the selected day window |
-| System → Projects | **directories** ever seen, and the subset still on disk | all time |
+| System → Projects | discovered directories, with a separately eligible hosted-repository table | all time |
 
-Two of those differences are structural rather than temporal. System counts **directories**, because
-only a directory has bytes and lines to measure; the other tabs count **projects**. And a windowed
-count is smaller than a lifetime one by exactly the projects you have not touched lately — a shorter
-window, not a missing project.
+Counts also differ by eligibility and retained evidence. System measures eligible
+directories; Intelligence includes project-like locations with learning state; Usage
+Score ranks only evidenced Git projects. A smaller count is not necessarily explained
+by timeframe alone.
 
 Each count carries the sentence explaining what it counted; on Intelligence it is behind
 **how these projects were counted**, next to the rollup.
@@ -186,8 +187,10 @@ its right.
 ### Scorecard
 
 Scorecard reads top to bottom as one argument: what the window cost, how you spent it, and what that
-says about the way you work. Every figure is derived from locally retained transcripts, so every
-dollar is API-equivalent list price and never plan billing.
+says about the way you work. Figures derive from locally retained transcripts. Claude/Codex cost uses the bundled
+rate table (including fallback rates for unknown models); OpenCode uses its recorded
+message cost when present and falls back to that table otherwise. None is an invoice
+or proof of subscription billing.
 
 **Two hero rows.** The first carries sessions, api-equivalent cost, tokens, engaged time, and cache
 read. Each tile pairs its figure with a change against the previous window of the same length and a
@@ -199,7 +202,7 @@ sparkline breaks there rather than carrying the previous value forward. **The en
 trends on a different set of days than its neighbours, and says so in its own tooltip:** its trend
 covers the days you worked, while every other trend covers the days that billed tokens. The second
 row answers unit economics — sessions per active day with its current streak, autonomy (responses
-per prompt you typed, and those same prompts per engaged hour), cost per session, and cost per
+per main-thread prompt, and those same prompts per engaged hour), cost per session, and cost per
 engaged hour. Session counts, the rhythm histograms and the punchcard all **include delegated
 subagent sessions**, which the harness dispatches rather than you; the how-you-run panel carries the
 main/subagent split, and autonomy is the exception — its denominator is main-thread prompts only. Cost per session is a median over *priced* sessions only; a session with no token
@@ -208,7 +211,8 @@ toward zero for a reason that is not about spend. A real figure under a cent ren
 `$0.00`.
 
 **Projects** ranks the top 10 discovered Git projects by spend in the selected
-timeframe. Verified worktree usage rolls into its parent project; standalone
+timeframe, using the aggregate's session-end selection. Whole retained sessions
+are included; individual usage rows are not clipped to the cutoff. Verified worktree usage rolls into its parent project; standalone
 worktrees, user-level locations, and unclassified directories are excluded from
 this panel. Overall Usage totals retain all activity, including usage outside
 these ten rows.
@@ -229,8 +233,9 @@ subagent work, and its two halves are honest in different ways: Claude writes de
 own nested transcript, so that cost is discovered, priced, and included, while a Codex subagent
 rollout reads `$0.00` by ledger design — its tokens replay the parent's and are stripped as a
 double-count, so the sessions stay visible and auditable at zero rather than billing the parent
-twice. The panel does not rank window cost by inference provider: a transcript host is not a vendor,
-and only Codex transcripts record who served the tokens, so that identity is reported per session on
+twice. The panel does not rank window cost by inference provider: a transcript host is not a vendor.
+Codex and OpenCode can record a serving provider, while Claude history lacks that field;
+identity is reported per session on
 the Sessions detail strip — beside the provenance backing it — rather than as a window axis.
 
 **Tool mix** ranks tool invocations, top eight with the tail folded into a dimmed `Other` row rather
@@ -241,7 +246,7 @@ families coloured and the rest folded into a de-emphasised band.
 
 **Reliability** reports turns that never landed: exceptions per thousand responses, aborted turns,
 and a per-day exceptions sparkline that names the worst single day. Aborted turns are **codex-only
-evidence** — no other host records an interrupt — so the count appears only when the window holds a
+normalized evidence** — the other parsers do not populate this counter — so the count appears only when the window holds a
 codex session, and otherwise reads `—` rather than a zero that would look measured.
 
 `ak usage score` prints the same scorecard figures in a terminal, offline, including the rhythm
@@ -259,8 +264,9 @@ The legend appears only when at least one row actually carries a tick.
 
 ### Prompts
 
-Prompts turns what you actually typed — never what the harness or a delegated agent produced —
-into repetition and habit signal, host by host. Every figure derives from prompt
+Prompts turns the entries classified as human-typed into repetition and habit signals,
+host by host. Unrecognized machine templates can still fall through to the human class;
+this deterministic classification is not verified authorship. Every figure derives from prompt
 **fingerprints** (a hash, token/count evidence, provenance, and optional controlled intent/topic
 codes recorded at scan time); no prompt text is stored in the index. A recurring cluster receives a
 contextual name only when one controlled intent or topic has at least two supporting prompts, covers
@@ -289,7 +295,8 @@ Codex and OpenCode each keep their own card with coverage state, p90 peak pressu
 sessions with pressure measurements, p90 peak input and median observed window.
 
 A percentage is rendered only when input and window were observed together for that session.
-The cards distinguish **Input only**, **Partial coverage**, **Not recorded**, and **No sessions**.
+The cards distinguish **Input only**, **Partial coverage**, **Unpaired data**,
+**Not recorded**, **Measured**, **Unavailable**, and **No sessions**.
 Missing token/window values render as an em dash. A pressure meter appears only for a measured
 value, and each card explains its coverage gap. Claude transcript input records do not include a
 paired window; older Codex records can contain only cumulative totals. OpenCode may have no
@@ -374,11 +381,11 @@ response latency, a **posture badge**, and a **context-fill chip**. Both of the 
 evidence-gated. The posture badge appears only when the transcript recorded a posture this taxonomy
 maps, and its tooltip carries the host's own spelling of that value where the transcript recorded
 one, because the mapping is a judgment call and a reader checking it needs the evidence it was made
-from. The `ctx N%` chip
-appears only when **both** halves were observed — the last turn's context tokens and that model's
-window. Codex records a window; Claude Code and OpenCode do not, and the dashboard carries no
-published-window table to fall back on, so the chip is omitted rather than divided by a guessed
-denominator that would render as a fabricated percentage.
+from. The legacy `ctx N%` chip uses positive `ctxLastTokens` and `ctxWindow` values and
+caps its display at 100%. Unlike Usage → Context, that helper does not check the
+paired `contextEvidence` contract. Separately recorded input/window values can therefore
+produce a chip without proving same-observation pressure; use the Context view for the
+paired measurement. Claude and OpenCode normally lack the legacy window field.
 
 Host, inference provider, provenance, and model are independent facts. The dashboard never derives a
 provider from a host name or model string. Codex `session_meta.model_provider` and equivalent
@@ -435,7 +442,7 @@ scopes, `aria-busy` loading state, result and load
 announcements, visible focus, and an explicit load control in addition to lazy fetching.
 
 Source-proven public catalogue records show readable names and trusted source links while private
-deployments remain keyed pseudonyms. OpenCode rows need an exact Models.dev join from explicit
+deployments show bounded exact names/selectors in the token-gated owner view. OpenCode rows need an exact Models.dev join from explicit
 online refresh; selector syntax or verbose metadata alone never makes a row public. Host, serving
 provider, publisher, model selector, catalogue source, and entitlement remain independent. Each
 state and lifecycle value expands to its source,
@@ -745,14 +752,15 @@ removes anything; where a CLI already owns the cleanup, the row names it.
   project is reported as unresolved and the *ever seen* count is shown as a floor. You will never
   see a guessed path here.
 - **Growth per day is approximate too** — a file counts its whole size on the day it was last
-  written, which is exact for append-only transcripts and over-counts rewritten databases.
+  written, which is an mtime-bucketed size estimate, not a byte-growth history. Even an append-only
+  transcript moves its entire retained size to its newest write day.
 - **Some things cannot be attributed, and say that instead of guessing.** Codex transcripts are
   stored by date rather than by project, so those bytes render as unattributable.
 
 ### Platforms
 
-All six Machine Footprint views work on macOS, Linux, and Windows. On Windows the process census (host, pid, CPU,
-memory, uptime) is always available; the bound project is a best-effort read that can be blocked by
+All six Machine Footprint views work on macOS, Linux, and Windows. On Windows the process census attempts host, PID, CPU,
+memory, and uptime observations; missing tooling or access can degrade collection, while the bound project is a best-effort read that can be blocked by
 antivirus, execution policy, or permissions, in which case that one column reads
 "not attributable on Windows" with the reason and every other figure in the row still renders.
 
@@ -763,8 +771,8 @@ provider is registered by default, and its Remove model action appears only when
 reachable over loopback and every premise is verified; the Git project patch provider is registered
 only when a composition supplies project roots.
 
-One field is honestly missing everywhere: the ruflo daemon budget has no local source this
-collector can read, so it reports unknown rather than a number inferred from nothing.
+The runtime census omits the Ruflo daemon-budget field because it has no supported
+local source. Use Ruflo's own budget command; no dashboard number is inferred.
 
 `ak system` prints the same collector output in a terminal, `ak system --deep` runs the scan, and
 `ak system --json` emits the payload verbatim. See
@@ -775,11 +783,17 @@ collector can read, so it reports unknown rather than a number inferred from not
 
 Theme, polling preference, the selected primary/Overview/System view, whether the About nudge has
 been dismissed, and the Session Stream collapse choice are stored in browser-local storage.
-Canonical hashes make views linkable without putting the dashboard token in the path or query
-string.
+Canonical navigation hashes identify views without a token in the path. The launch token
+arrives in the fragment; normal fetches use `X-Dash-Token`, and EventSource uses a token
+query parameter. The current server accepts that query-token fallback on every API GET,
+not only SSE. Treat a URL containing it as a credential.
 
 The launch token initially arrives in the URL fragment and is then stored locally for authenticated
-API requests. The dashboard remains localhost-only and offline-first. Maintenance POST requests,
+API requests. The browser uses same-origin local APIs, but the server's status collector
+can perform version-network lookups and write derived caches. Limits may launch a
+Codex app-server request using the host's authenticated environment. Local transcript
+analysis and cached model/account views have separate read contracts; localhost delivery
+is not a server-wide zero-network or zero-write guarantee. Maintenance POST requests,
 on the v1 routes and the exact v2 route allowlist, add same-origin fetch metadata, exact JSON
 schemas, a 64 KiB body limit, and one-use apply, undo, and reconcile capabilities; every other
 route retains default non-GET rejection. Maintenance never places a local path in a URL, export, or
@@ -806,9 +820,10 @@ it, you click it); a linked worktree's `gitdir` pointer; the `cwd` **field** rec
 of a session transcript, and OpenCode's per-session `directory` column, so a session can be
 attributed to the right project; your projects' manifest **dependency names**, which are neither
 evaluated nor resolved; and your source files' bytes, streamed through a fixed buffer purely to
-count newlines. Each of those yields a path, a name, or a number. **No message, prompt, tool call,
-tool result, or model output is ever read** — those stay in Usage and Observability, which have
-their own contracts for them. The full enumeration is
+count newlines. Each of those yields a path, a name, or a number. Bounded transcript-head reads can bring other JSONL bytes into process memory, but
+System selects identity/working-context fields rather than projecting message bodies.
+Catalog also reads bounded definitions and host configuration as described above. Usage
+and Observability have separate content-reading and masking contracts. The full enumeration is
 [Machine footprint § The read surface](ddd/machine-footprint.md#the-read-surface).
 
 ### Date and time display

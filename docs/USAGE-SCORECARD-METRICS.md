@@ -5,9 +5,9 @@
 `src/lib/dashboard-server.mjs`, and anyone auditing a specific number a user has
 questioned on the **Scorecard** tab of `ak x dashboard`'s Usage panel.
 
-**Purpose.** Every figure on the Scorecard tab is either (a) an exact, checkable
-arithmetic derivation from the user's own local transcripts, or (b) a published
-provider rate. This document states, for each figure, which of those two it is,
+**Purpose.** Scorecard figures combine recorded transcript fields, arithmetic,
+deterministic classification, and cost estimates. OpenCode can also supply recorded
+message cost; unknown models use a fallback rate. This document states each figure's basis,
 cites the exact source line, cites the external rate where one is used, and
 records what the figure deliberately does **not** model. The goal is that a
 skeptical reader — a user who thinks a number "looks questionable," or a
@@ -18,8 +18,8 @@ having to trust this document on faith.
 **Citations are machine-checked.** Every `file:line` citation below is
 verified against the current source by the test suite
 (`tests/kit/doc-citations.test.mjs`): an identifier named beside the citation
-must appear at the cited lines. A passing build means the citations match the
-code you have; upkeep is covered in
+must appear at the cited lines. These checks locate symbols and ranges; they do not validate the surrounding
+semantics, formulas, provider claims, or completeness. Upkeep is covered in
 [Appendix B](#appendix-b--verification-methodology). One file is cited by
 function name and no line number: the browser bundle
 `src/lib/dashboard/client/usage.mjs` shares a basename with the CLI command
@@ -70,7 +70,7 @@ Every metric section below follows the same shape:
 
 ## 1. Data provenance
 
-Two transcript stores, read-only, parsed at most once per file — the derived
+Two JSONL transcript stores plus OpenCode's SQLite store, read without source edits — the derived
 record is cached "keyed by (path, mtime, size)" (`src/lib/usage-index.mjs:10`),
 and the whole cache is invalidated on a `SCHEMA_VERSION` change
 (`usage-index.mjs:154`):
@@ -80,6 +80,7 @@ and the whole cache is invalidated on a `SCHEMA_VERSION` change
 | Claude Code | `~/.claude/projects/<project>/<sessionId>.jsonl` | one JSON object per line: `user`/`assistant` turns, each assistant turn carrying its own `usage` object |
 | Claude Code (subagent) | `~/.claude/projects/<project>/<sessionId>/subagents/agent-<hash>.jsonl` | the same per-line format. A session's own delegated work, written to its own file beside the parent — cost-bearing, and marked `sidechain` by its own entries |
 | Codex CLI | `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<sessionId>.jsonl` | one JSON object per line: `session_meta`, `turn_context`, and `event_msg` records; the latter carry **cumulative** `token_count` snapshots plus legacy messages or newer `item_completed` envelopes |
+| OpenCode | platform data root `opencode/opencode.db` | SQLite session/message/part rows; per-assistant token fields and optional recorded cost/provider identity |
 
 Discovery is **one level of project directories plus that one nested shape**,
 not a recursive walk: `listClaude` (`usage-index.mjs:338-352`) descends into a
@@ -97,12 +98,13 @@ reader opens the session, building the candidate path from the two validated
 capture groups rather than from raw request input.
 
 The parsers are `parseClaude` (`usage-parsers.mjs:679-712`) and `parseCodex`
-(`usage-parsers.mjs:1048-1085`). Both are pure functions over the raw file bytes —
-no network, no clock dependency beyond the transcript's own timestamps — so
-every downstream number traces back to bytes already on the user's disk.
+(`usage-parsers.mjs:1048-1085`). They normalize raw JSONL bytes; project evidence also consults the local filesystem.
+Missing-time fallback paths can consult the clock. Their output is local evidence,
+not a network response or an invoice.
 Nothing in this transcript pipeline calls a provider API or a billing endpoint; **no transcript
 metric is ever a copy of an actual invoice.** That is the whole reason every transcript-derived
-dollar figure is labelled "API-equivalent."
+dollar figure is labelled "API-equivalent." OpenCode's recorded message cost is an
+exception to table-derived arithmetic, but still is not independently verified billing.
 
 The built index also exposes `sourceHealth` for all four local sources: the
 Claude and Codex transcript roots themselves (`claude`, `codex`), plus the two
@@ -153,7 +155,7 @@ retains the number of additional occurrences without allowing transcript data
 to expand the diagnostics payload without limit.
 
 The current persisted field named `provider` identifies which host transcript parser produced a
-session row; it is not sufficient evidence of the inference provider. The Proposed model in
+raw parser record; it is not sufficient evidence of the inference provider. The accepted model in
 [ADR-0016](adr/0016-capability-driven-integration-adapters.md) separates host, provider,
 projection, observability source, and binding, with provenance attached per field. The migration is
 now implemented. The Scorecard must not invent an OpenRouter host, infer provider identity from a
@@ -161,7 +163,8 @@ Claude/Codex transcript alone, or turn unknown billing into subscription, metere
 
 OpenRouter account analytics is a separate evidence class. An explicit
 `ak usage refresh openrouter` fetches the supported 30-completed-UTC-day management view into a
-mode-`0600` local cache; normal dashboard reads remain offline. `/api/usage` exposes that cache only
+mode-`0600` local cache; dashboard reads of that account cache do not refresh it.
+The dashboard's separate status/version and Limits collectors can contact external services. `/api/usage` exposes that cache only
 as `providerAnalytics.openrouter`, never by adding it to `totals`, `byHost`, `byProvider`,
 `byModel`, projects, categories, findings, or sessions. The upstream response has no host/session/
 project/task correlation key, so no join is attempted. OpenRouter-credit usage and BYOK external
@@ -227,12 +230,26 @@ session sent a message:"` prefix — see [`TRANSCRIPTS.md`](TRANSCRIPTS.md)
 §1.2). (The correction this rule shipped with is recorded in
 [Appendix A](#appendix-a--fix-history).)
 
+### Window selection is by session end
+
+The current aggregate includes a session when it has a response and its final recorded
+activity falls inside the requested end-time bounds. It then folds **all retained usage
+rows, prompt fingerprints, responses, and active intervals from that session**, without
+clipping them to the window. A session spanning the cutoff can therefore contribute older
+usage and days outside the displayed range. The previous-window pass assigns the whole
+session by its end time too. Top Git projects and Context inherit this population.
+
+For Codex, one final cumulative usage row is attributed to the last recorded usage event's
+day and the last model in the record. It does not reconstruct daily or per-model deltas
+inside a long, resumed, or model-switched session. Those attribution limits are distinct
+from correctly avoiding a sum of cumulative snapshots. Exact per-request timeframe
+accounting would require additional parser/aggregation work.
+
 ### 2a. Prompt fingerprints and provenance (SCHEMA_VERSION 14, extended in 16)
 
-**Displayed as** — nothing yet. This is a recorded field, not a rendered
-number: the scan path derives it so the planned Usage → Prompts view can
-compute repetition, length and authorship statistics without re-reading the
-corpus. It is documented here because it lands on every cached session record.
+**Displayed as** — the shipped Usage → Prompts aggregates and related Findings.
+The scan path stores bounded fingerprints so these views can derive repetition,
+length, and classified provenance without retaining full prompt bodies.
 
 **Formula** — each turn the parsers classify as `kind: 'prompt'` contributes
 one entry to `session.promptFPs`:
@@ -271,9 +288,9 @@ that shape", never a measurement that came out zero, and the corpus carries
 5,635 entries where two extra keys each would not be free.
 
 **Prompt text is never stored in this index.** A fingerprint entry's keys are
-exactly `{h, t, th, p}` plus the two optional flags — nothing else, ever. No
-parser writes prompt text to a session record and the index cache therefore
-carries none. (`session.title` is a separate, pre-existing surface — masked
+`{h, t, th, p}` plus optional shape flags `q`/`o` and, since schema v18,
+controlled intent/topic codes `i`/`d`. Full prompt bodies are not retained in those
+fingerprints. (`session.title` is a separate, pre-existing surface — masked
 and clipped — with its own contract, §1.) No second prompt-derived label or
 coaching store exists on main.
 
@@ -476,7 +493,7 @@ this day carried the fingerprint layer", so a zero here is *measured*.
 **Displayed as:** `API-EQUIVALENT` hero tile — `$961,036`, subtitle `list
 price · not plan billing`.
 
-**Formula**, per `(session, day, model)` usage row:
+**Formula**, per `(session, day, model)` usage row when no recorded OpenCode cost is present:
 
 ```text
 inputUnits = input + cacheWrite × cacheWriteMultiplier + cacheRead × cacheReadMultiplier
@@ -499,6 +516,12 @@ export function costOf(usage) {
   return (inputUnits * rin + tokens(output) * rout) / 1e6;
 }
 ```
+
+OpenCode rows with non-null `costObserved` use that recorded value instead of
+`costOf`; zero is retained as a recorded value. A `(day, model)` row with a mixture
+of priced and missing-cost messages currently retains only its recorded cost sum
+and does not estimate the missing messages separately. That can understate the row.
+The account invoice and subscription charge remain outside the estimator.
 
 `priceFor` resolves both cache multipliers per model. Anthropic 5-minute
 writes and OpenAI GPT-5.6+ writes use 1.25×; older OpenAI models have no
@@ -561,10 +584,8 @@ Boundary behavior is pinned by `tests/kit/pricing-revert.test.mjs`, including
 the property that matters most: a finished window is not restated when a later
 rate change takes effect.
 
-**Worked example** (from the Anthropic pricing page's own published example,
-[C1] below — reproduced here because it is the cleanest independent check of
-the formula's arithmetic, not because it is agentic-kit's number): a Claude
-Opus 5 session with 10,000 uncached input tokens, 40,000 cache-read tokens,
+**Worked arithmetic example** using the retained $5/$25 input/output rates and
+0.1× cache-read multiplier: a Claude Opus 5 session with 10,000 uncached input tokens, 40,000 cache-read tokens,
 and 15,000 output tokens:
 
 ```text
@@ -574,19 +595,11 @@ cost       = (14,000 × $5 + 15,000 × $25) / 1e6
            = $0.445
 ```
 
-Anthropic's own worked example ([C1]) reports uncached-input $0.05 +
-cache-read $0.02 + output $0.375 = **$0.525** for a similar but not identical
-split (their example has 10,000 uncached / 40,000 cached / 15,000 output at
-the *same* per-token rate, computed line-by-line rather than via the combined
-formula above) — the two computations are the same formula applied to the
-same inputs; the $0.08 difference between $0.445 and $0.525 in this paragraph
-is **session-runtime billing** ($0.08/hour), which is a Claude *Managed
-Agents* billing dimension this scorecard does not model (see §14) — plain API
-usage has no runtime component, so `$0.445` is the correct API-equivalent
-figure for a plain Messages-API session with these token counts.
+The components are $0.05 fresh input + $0.02 cache reads + $0.375 output =
+**$0.445**. No session-runtime charge belongs in this token-only calculation.
 
-**What this does not model:** the panel prices every session as if it were
-metered per-token API usage. On a Claude Max/Pro subscription, or Codex via a
+**What this does not model:** table-derived cost models per-token API usage;
+OpenCode recorded costs follow the exception above. On a Claude Max/Pro subscription, or Codex via a
 ChatGPT plan, **the user is not billed this way at all** — this is why the
 subtitle says "list price · not plan billing" as a first-class UI element,
 not a footnote. See §14 for the full list of pricing factors
@@ -663,6 +676,10 @@ figures (`cacheRead = 1464.3B`, `tokens = 1495.2B`): `1464.3 / 1495.2 × 100 =
 **Source:** `dashboard/client.mjs` (`cacheShare = pct(t.cacheRead,
 t.tokens)`), rendered `dashboard/client.mjs`.
 
+The current cache tile says “priced at 0.1× input” even though Fable/Mythos 5.1
+and OpenAI Pro have different multipliers (§13). The formula uses model-specific
+rates; the subtitle is overgeneralized and needs a UI correction.
+
 **Why this number matters more than it looks like it should.** On the
 reference corpus, 96.3% of tokens were cache reads — pricing them as fresh
 input (rather than at the 0.1× multiplier) would overstate cost by roughly
@@ -689,7 +706,7 @@ separate interval-union operations:
 
 | Tier | Question it answers | Formula |
 |---|---|---|
-| `engagedSeconds` (**the headline figure**) | Time actually spent working, never double-counted, never inflated by idle time | union of every session's **active sub-intervals** |
+| `engagedSeconds` (**the headline figure**) | Recorded activity time, overlap collapsed and gaps over 15 minutes split | union of every session's **active sub-intervals** |
 | `spanUnionSeconds` (tooltip only) | Wall-clock time with *some* session open, overlap collapsed but idle time NOT split out | union of every session's **whole span** (first timestamp → last timestamp) |
 | `spanMinutes×60` (subtitle, labelled "summed") | The naive, double-counting sum — kept and clearly labelled as the dishonest one, not hidden | **sum** of every session's span, no union at all |
 
@@ -754,7 +771,9 @@ promoted to the hero tile; the other two are demoted to a subtitle and a
 tooltip respectively, never deleted, so the invariant chain stays checkable
 from the running panel.
 
-**What this does not model:** `IDLE_GAP_MS = 15 min` is a judgement call, not
+**What this does not model:** engaged time is not measured human labor or billable
+time. It includes agent/subagent activity; a pause under the threshold can still
+count, and unrecorded work cannot. `IDLE_GAP_MS = 15 min` is a judgement call, not
 a measured constant — a maintainer who believes work with 20-minute pauses
 should still count as one continuous stretch will get a lower
 `engagedSeconds` than they'd expect, and the constant is exported and named
@@ -780,8 +799,8 @@ byDay[day].sessionsActive = count of distinct sessions with any usage row that d
 **Source:** the day key is the row's own `row.day`, computed once at parse
 time as **local calendar day**, not UTC
 (`usage-parsers.mjs:30`/`usage-parsers.mjs:1034-1035` call `localDay(at)`) — so a
-session that runs from 23:58 local to 00:05 local is billed to the day its
-*first* row landed on (test:
+session that runs from 23:58 local to 00:05 local has its session count attributed
+to the day its *first* usage row landed on (test:
 `tests/kit/usage-index.test.mjs:738`, "a session that opens before midnight
 is counted on its first billed day"). Accumulation, at this call: `dayBucket(byDay,
 row.day)` then `d.cost = round(d.cost + rowCost)` (`usage-aggregate.mjs:760-767`). Bar height:
@@ -789,8 +808,9 @@ row.day)` then `d.cost = round(d.cost + rowCost)` (`usage-aggregate.mjs:760-767`
 every non-empty day gets a visually nonzero bar (floor of 2%), so a very
 cheap day is never rendered as invisible.
 
-The existing `sessions` field remains first-billed-day attribution so its sum
-continues to equal `totals.sessions`. `sessionsActive` is additive: a session
+The existing `sessions` field remains first-billed-day attribution. Its sum can
+be smaller than `totals.sessions` when included sessions have no usage rows, such
+as excluded Codex subagent replays. `sessionsActive` is additive: a session
 that has token-bearing rows on multiple days is counted once on each of those
 days. Neither field claims that the session was continuously active for the
 whole calendar day.
@@ -803,9 +823,9 @@ rather than a continuous 30-day series.
 
 ---
 
-## 8. By Host (Claude vs Codex)
+## 8. By Host (Claude, Codex, OpenCode)
 
-**Displayed as:** two cards, `claude` and `codex`, each showing cost,
+**Displayed as:** host cards for the reported host keys, each showing cost,
 session count, and total tokens; an idle host (`sessions == 0 && cost == 0`)
 renders "no sessions in window" instead of zeroed figures
 (`dashboard/client.mjs`).
@@ -819,24 +839,19 @@ renders "no sessions in window" instead of zeroed figures
 OpenCode's SQLite reader builds the same record shape and contributes a third
 host key.
 
-**Why this pairing is the one under the most scrutiny.** Both providers'
-tokens are summed into the *same* `tokens`/`cost` fields using the *same*
-formula (§3, §4) — the aggregation code has no branch that treats a Codex
-session differently from a Claude session once `costOf()` has priced its
-rows. Any divergence between the two hosts' per-session averages is
-therefore either (a) a genuine usage-pattern difference, or (b) a defect in
-how one provider's raw transcript is *parsed into rows* upstream of
-aggregation — never a defect in the aggregation itself, since both hosts
-share it. [Appendix A](#appendix-a--fix-history) documents two real defects
-of exactly that kind, both in `parseCodex`.
+**Interpreting host differences.** All hosts use shared aggregation helpers, but
+input quality, available fields, session bounds, recorded-cost precedence, and pricing
+coverage differ. A disagreement can arise in parsing, attribution, aggregation, or
+pricing; shared functions do not prove that a discrepancy must be a parser defect.
+The historical Codex incidents in Appendix A are examples, not an exhaustive diagnosis.
 
-**Two identity maps, and the axis that is deliberately not one.** The aggregate
+**Two identity maps, with separate evidence.** The aggregate
 buckets window spend by two identities, and reading one as the other is the
 mistake this split exists to prevent (`usage-aggregate.mjs:909`,
 `usage-aggregate.mjs:937-938`):
 
 - **`byHost`** — the execution host: which CLI wrote the transcript
-  (`claude`, `codex`, `opencode`). This is what the two cards above render.
+  (`claude`, `codex`, `opencode`). This is what the host cards render.
   It is a fact about the file's provenance on disk, and it proves nothing
   about which vendor served the tokens.
 - **`byProvider`** — the inference-provider string **as recorded**, ungated:
@@ -844,14 +859,11 @@ mistake this split exists to prevent (`usage-aggregate.mjs:909`,
   historical shape for callers that want the raw string, whatever its
   evidence. A session that recorded no provider keys to `'unknown'`.
 
-There is deliberately **no window bucket for the observed inference provider**.
-Only the Codex parser sets `rec.inferenceProvider` and `rec.providerProvenance`
-together (`usage-parsers.mjs:654-657`, `:663-665`); Claude and OpenCode
-transcripts name no provider at all. A window axis over that evidence would put
-most of its spend in a single unattributed row, which reads as a finding about
-providers rather than what it is — an absence of provider evidence in two of the
-three transcript formats. Provider identity is therefore reported per session,
-on the session row, beside the provenance that backs it (§16).
+`byProvider` uses the served session row's recorded inference provider, or `unknown`.
+Codex session metadata/turn context and OpenCode assistant `providerID` can establish
+that value with observed provenance; Claude history normally leaves it absent. The
+Scorecard UI does not rank this map, but session details expose provider/provenance.
+The source's former parser field is retained separately as `transcriptProvider`.
 
 **What this does not model:** a workflow that hands off between Claude and
 Codex mid-task (e.g. `ak run`) produces two separate session records, one per
@@ -1017,8 +1029,8 @@ procedure is reproduced here rather than summarized.
 1. **Provenance (confidence = 1.0, unconditional).** If the session carries
    an `attributionSkill` or `attributionPlugin` matching a known prefix in
    `SKILL_CAT` (`usage-classify.mjs:45-62`, e.g. `superpowers:brainstorming`
-   → `Design & planning`), that mapping **is** the category. This is not an
-   inference — it is a recorded fact about which skill actually ran, so it
+   → `Design & planning`), that mapping **is** the category. The skill/plugin identity is recorded, but its category is the kit's explicit
+   mapping policy, not independent proof of the work's purpose. It
    overrides every other signal outright, read again at this call:
    `SKILL_CAT[key]` (`usage-classify.mjs:203-207`).
 
@@ -1095,7 +1107,7 @@ path, opt-in or otherwise, anywhere in this codebase.
 
 ## 13. Provider pricing tables — verified rates
 
-Every rate lives in `PRICES` (`src/lib/pricing.mjs`) and carries an `asOf`
+Every bundled model-specific rate lives in `PRICES` (`src/lib/pricing.mjs`) and carries an `asOf`
 verification date. Entries default to `PRICES_AS_OF` and can carry a newer
 individual check date. The tables below cite the providers' authoritative
 public documentation; they are maintained data, not live quotes.
@@ -1350,8 +1362,8 @@ For a reviewer who wants the "does this number lie to me" answer without
 reading every section — the panels documented in §15–§19 below are covered by
 the same list:
 
-- [x] Cost is always an **API-list-price equivalent**, never a claim about
-  actual billing (§3, §14 pricing gaps above).
+- [x] Cost is labelled **API-equivalent**, never a claim about
+  actual billing; OpenCode recorded cost and unknown-model fallback remain explicit exceptions (§3).
 - [x] Engaged time leads with the most-corrected of three tiers; the other
   two remain visible (subtitle + tooltip), not deleted (§6).
 - [x] `Unclassified` is always shown, never hidden or force-fit (§12).
@@ -1361,20 +1373,16 @@ the same list:
   from its list — never rendered as a fabricated zero (§7, §11).
 - [x] Price tables are hand-maintained and date-stamped in the UI
   (`rates as of <PRICES_AS_OF>`) precisely because they *will* drift.
-- [x] The pricing formula applies identically to every provider; a
-  cross-provider discrepancy in the by-host breakdown (§8) is diagnostic
-  evidence of a **parsing** defect upstream, not a pricing defect — see
-  [Appendix A](#appendix-a--fix-history) for two real examples found via
-  this same reasoning.
+- [x] Shared aggregation does not rule out attribution/pricing defects; OpenCode
+  recorded-cost precedence and host parser differences must be considered (§8).
 - [x] A percentile taken from the overflow bucket of a histogram is printed
   with `≥`, and an unmeasured one is `null` rather than `0` (§15).
 - [x] A latency figure is never called TTFT: it is a prompt-to-answer gap or
   a host-measured turn duration, and neither transcript records TTFT (§15).
 - [x] Permission posture keeps `not-recorded` as a first-class bucket —
   unmapped evidence is never folded into a real posture — and the inference
-  provider gets no window bucket at all, because two of three transcript
-  formats never record one (§8, §16).
-- [x] Autonomy divides by prompts a human typed; the cost-per-session median
+  provider is separately reported when native evidence exists (§8, §16).
+- [x] Autonomy divides by main-thread prompt counts, not fingerprint-classified typed prompts; the cost-per-session median
   excludes sessions that are `$0` by construction rather than by cheapness
   (§17).
 - [x] Deltas compare equal-length adjacent windows, and a chip self-suppresses
@@ -1663,9 +1671,9 @@ as a zero rather than a row the UI silently drops. Claude's evidence is the
 `telemetry-records.mjs:244`); Codex's is the ledger-backed `thread_source`
 (§13c). Render is `sourceDonut` in `src/lib/dashboard/client/usage.mjs`.
 
-**The two hosts reach the `subagent` row by different routes, and only one of
-them arrives at `$0`.** They are worth reading apart, because the same donut
-slice is telling two different truths at once.
+**Delegation cost differs by source.** Claude sidechains and OpenCode sessions
+with `parent_id` retain their own recorded usage/cost. Codex replay-identified
+subagents have usage excluded. A zero cannot establish whether actual work was free.
 
 **Claude — real, priced, included.** A session's delegated work is written to
 its own transcript under `<project>/<sessionId>/subagents/`, and those files are
@@ -1673,8 +1681,8 @@ discovered by `listClaudeSubagents` (`usage-index.mjs:313-318`, §1) and parsed
 like any other. `parseClaude` already prices those bytes and marks the record
 `sidechain` from its own `isSidechain` entries, so the cost is real, is included
 in `totals.cost`, and the session opens in the Sessions tab like a main-thread
-one. A `$0` Claude subagent slice would mean no delegated work in the window,
-not delegated work that was free.
+one. A `$0` Claude subagent slice may also mean missing or zero-valued token evidence;
+check its session and response counts before concluding no work occurred.
 
 **Codex — structurally `$0`, by ledger design.** A ledger-identified subagent
 has its usage rows removed outright (`applyCodexLedger`,
@@ -1713,10 +1721,8 @@ sidechain-only (6,924 assistant turns), 150 were main-only (2,738 turns), and
 **none mixed the two** — which is what makes "any `isSidechain` entry marks the
 whole record" safe, since there is no parent's spend in the file to mis-attribute.
 
-**What §16 does not model:** who served the tokens. There is no window bucket
-for the inference provider — §8 says why: two of the three transcript formats
-record no provider at all, so an aggregate axis over that evidence would read
-as a claim about providers rather than as the absence it is. A session's
+**What §16 does not model:** the displayed posture/delegation panels do not rank
+serving-provider spend; the API retains the recorded-provider bucket (§8). A session's
 provider and the provenance backing it stay on its own row in the Sessions
 detail strip. Posture is likewise the last evidence a session recorded,
 not a timeline — a session that started in `plan` and ended in `auto-edit`
@@ -1758,8 +1764,10 @@ Active days come from `byDay`'s key count and the streak from `activeStreak` in
 `src/lib/dashboard/client/usage.mjs`; the tiles are `cadenceCells` there, and
 `printScoreCadence` (`src/commands/usage.mjs:219-242`) in the CLI.
 
-**Autonomy divides by prompts a human typed, and only those.** The denominator
-is `totals.humanPrompts`, accumulated under an explicit main-thread guard
+**Autonomy divides by main-thread prompt counts.** Despite its historical name,
+`totals.humanPrompts` is not the fingerprint-based `typedPrompts` count. It can
+include control records and unrecognized machine-authored prompts. It is accumulated
+under an explicit main-thread guard
 (`usage-aggregate.mjs:949`): a subagent's prompts are written by the harness,
 so counting them would report a person as having typed work nobody asked for by
 hand — and would grow the denominator exactly in the windows where delegation
@@ -1772,19 +1780,24 @@ share one denominator. A rate whose denominator is zero is `null`, never `0`
 per hour" claims.
 
 **Sessions per active day counts delegated subagent sessions too, and an
-"active day" is a day that BILLED.** The numerator is every session in the
+"active day" is a day with a retained usage row.** The numerator is every session in the
 window, harness-dispatched subagent transcripts included (§16.2) — on the
 reference corpus those are roughly a quarter of all sessions — so this is the
 run rate of the whole system working on your behalf, not a count of times you
 sat down. The `How you run` panel carries the main/subagent split. The
 denominator is `byDay`'s key count, and `byDay`'s presence contract is
-**days that billed tokens** — which is why the aggregate keeps a separate
+**days with retained usage rows** — which is why the aggregate keeps a separate
 `engagedByDay` map (§6): the two sets genuinely differ (a session running past
 midnight, a day spent reading, a day worked entirely in stripped Codex
 subagent sessions that billed nothing). A day worked but never billed is not
 an active day here, and it breaks the streak. Both surfaces say so: the
 browser in the tile's tooltip, `ak usage score` inline, since a terminal
 reader has nothing to hover.
+
+Zero-valued usage rows can still create a day bucket; the code does not require a
+positive token or cost sum. The UI's “billed days” terminology therefore means usage-row
+presence, not verified billing. A session with no usage rows contributes to neither
+that map nor its per-day session count.
 
 **Cost per session is a median over priced sessions only.** A session carries
 `_priced` when it had any usage rows at all (`usage-aggregate.mjs:869-875`), and
@@ -1857,7 +1870,7 @@ arrow the printed number does not support (`deltaChip`,
 `usage-rhythm.mjs:36-53`; `fmtDelta`, `src/commands/usage.mjs:184-195`).
 
 **Engaged time by day is a sibling map, not a `byDay` field.** `byDay`'s
-presence contract is **billed days only** — a key exists exactly when tokens
+presence contract is **days with retained usage rows** — a key exists exactly when tokens
 landed on that day (`dayBucket`, `usage-aggregate.mjs:697-704`) — and that is
 what the active-day count and the streak above are counted from. Engaged time
 does not share that key set: a session that runs past midnight, or a day spent
@@ -1871,7 +1884,7 @@ rows, or dropping real worked time. The consequence is visible on the tiles —
 the engaged-time sparkline is drawn from a different day set than every other
 trend, and the tile says so.
 
-**What this does not model:** an active day is a *billed* day, so a day spent
+**What this does not model:** an active day is a day represented in the usage-row map, so a day spent
 entirely on work that never billed a token breaks the streak even though the
 person worked. That follows from `byDay`'s contract rather than from a
 judgement about what counts as a day of work, and the tile's tooltip states it
@@ -1918,16 +1931,17 @@ model, and each host signals that differently:
 | opencode | An assistant message carrying a non-null `error` (`usage-opencode.mjs:232-234`). |
 
 **Aborts are held apart from exceptions on purpose.** An aborted turn is a
-person pressing stop; an exception is the turn failing. Summing them would
+recorded interruption; it does not independently prove who initiated it. An exception
+is the turn failing. Summing them would
 report a deliberate interruption as a reliability problem and move a number
 that is supposed to mean "how often did this break". They are counted, carried
 (`aborts`, `usage-aggregate.mjs:805-829`) and displayed side by side, with the
 distinction stated on the tile rather than left to the label.
 
-**Aborts are CODEX-ONLY evidence, and both surfaces say so.** `turn_aborted` is
-the only interrupt signal any transcript store writes: Claude Code and OpenCode
-record nothing when you stop a turn (see the capability matrix in
-`TRANSCRIPTS.md`). The field therefore defaults to `0` for those hosts, and a
+**Aborts are CODEX-ONLY normalized evidence.** This counter consumes Codex
+`turn_aborted`; the Claude and OpenCode parsers do not populate an equivalent
+abort field. That is a collector limitation, not a claim that the hosts expose no
+interrupt information (see `TRANSCRIPTS.md`). The field therefore defaults to `0` for those hosts, and a
 plain `0` on the tile would read as a measurement — "you never interrupted a
 turn" — when the truth is that nothing in the window could have recorded one.
 So the count is rendered only when the window contains at least one Codex
@@ -2230,7 +2244,7 @@ breakdown (§8) "looked questionable" compared to Claude's. Investigation
 traced two real defects — both in `parseCodex` specifically, neither in the
 shared aggregation or pricing logic those two parsers feed into (consistent
 with §8's claim that the aggregation code is provider-agnostic). Fixed in
-commit `540be18` on this branch.
+commit `540be18` in the historical fix.
 
 #### Bug A — Codex model rows always showed 0 responses
 
@@ -2293,9 +2307,10 @@ describes.
   rollout (thread_spawn replay) is excluded from cost/token aggregation") to
   contribute zero tokens/cost/responses while remaining visible as a
   session.
-- **This means Bug B's fix is grounded in cited public evidence and covered
-  by synthetic regression tests, but has not yet been validated against a
-  genuine `thread_source: "subagent"` file on real hardware.** Any
+- **At the July 25 verification cutoff, Bug B's fix had synthetic coverage but
+  no real replay file in that sample.** Later reference-corpus observations are
+  recorded in §16.2; this historical limitation does not describe all subsequent
+  verification. Any
   maintainer whose machine accumulates such a file (most likely from heavy
   `ak run` / hierarchical-mesh swarm usage routing through Codex) should
   re-run this verification and update this note.
@@ -2307,8 +2322,8 @@ script plus instructions for anyone with real Codex usage to compute the
 same before/after comparison on their own machine, from a separate
 reimplementation of the parsing logic, and report back an aggregate-only
 result with no transcript content. Point anyone questioning their own
-Codex numbers there first — it produces the real number instead of a
-promise.
+Codex numbers there for the historical replay comparison only: its rate table and
+parser are older than the maintained dashboard, as its guide now explains.
 
 ### Smaller corrections
 
@@ -2334,7 +2349,7 @@ promise.
   `byModel` on the first run after the change, purely because the cache
   predated it; every unit test still passed, since tests only exercise a
   fresh parse. `SCHEMA_VERSION` went to `4` specifically to force the one-time
-  re-parse; the constant now reads `17` (`usage-index.mjs:154`), each bump since
+  re-parse; the constant now reads `20` (`usage-index.mjs:154`), each bump since
   having forced its own re-parse the same way.
   Re-querying the same live server after the bump returned
   `totals.exceptions: 20` with `<synthetic>` absent from `byModel` —
@@ -2352,11 +2367,12 @@ Every code citation above is read directly from the source files in the working
 tree, and re-verified against them on every run of the suite (not recalled from
 memory or summarized secondhand — see "Citation upkeep" below); every
 external pricing claim was either fetched directly (Anthropic, §13.1) or
-corroborated across multiple independent third-party sources with the
-sourcing tier disclosed rather than implied (OpenAI, §13.2); every GitHub
+checked against provider-owned documentation in the dated pricing audit
+(OpenAI, §13.2); older third-party citations remain historical references, not
+current price authority; every GitHub
 issue cited (Appendix A) was located and its content quoted or paraphrased from the
-actual issue text, not inferred from its title. Where verification was
-incomplete (the OpenAI primary-source fetch, the Bug B real-data check),
+actual issue text, not inferred from its title. Where historical verification was
+incomplete (the original primary-source fetch or Bug B real-data sample),
 that incompleteness is stated in the relevant section rather than omitted —
 a maintainer-facing document that hides the edges of its own verification is
 exactly the failure mode this document exists to avoid in the metrics it
