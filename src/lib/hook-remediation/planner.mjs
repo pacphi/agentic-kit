@@ -1,6 +1,7 @@
 // Pure remediation planning. Provider policies may transform bytes in memory,
 // but this module never creates directories, receipts, backups, or target files.
 import path from 'node:path';
+import { compileAqeArtifactActions } from './aqe-artifacts.mjs';
 
 import { sha256, stableJson, stableValue } from '../hook-audit/common.mjs';
 import {
@@ -319,7 +320,7 @@ function compileProvider(host, hostReport, options) {
       ...compileCodexAutoMemoryActions(hostReport, options).map(withActionId),
       ...compileCodexPluginActions(hostReport, options).map(withActionId),
     ]
-    : timeoutActions;
+    : [...timeoutActions, ...compileAqeArtifactActions(hostReport, options).map(withActionId)];
 }
 
 function healingClassification(classification) {

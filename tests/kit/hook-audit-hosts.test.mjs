@@ -663,11 +663,14 @@ test('exact AQE Stop projections report npx hot-path and millisecond-authored ti
       assert.ok(record.diagnostics.some((item) => item.code === 'aqe-npx-hot-path-fallback'));
       assert.ok(record.diagnostics.some((item) => item.code === 'aqe-claude-timeout-unit-mismatch'));
     }
-    assert.equal(report.plan.length, 4);
-    assert.ok(report.plan.every((action) => action.classification === 'upstream-required'));
-    assert.ok(report.plan.every((action) => action.upstream?.dependency === 'agentic-qe'));
-    assert.ok(report.plan.every((action) => action.upstream?.owner === 'proffesor-for-testing/agentic-qe'));
-    assert.ok(report.plan.every((action) => action.upstream?.publication === 'explicit-user-approval-required'));
+    assert.equal(report.plan.length, 5);
+    const artifactReview = report.plan.find((action) => action.diagnostic === 'aqe-artifact-provenance-unverified');
+    assert.equal(artifactReview.classification, 'never-automatic');
+    const upstreamPlan = report.plan.filter((action) => action !== artifactReview);
+    assert.ok(upstreamPlan.every((action) => action.classification === 'upstream-required'));
+    assert.ok(upstreamPlan.every((action) => action.upstream?.dependency === 'agentic-qe'));
+    assert.ok(upstreamPlan.every((action) => action.upstream?.owner === 'proffesor-for-testing/agentic-qe'));
+    assert.ok(upstreamPlan.every((action) => action.upstream?.publication === 'explicit-user-approval-required'));
     assert.equal(report.summary.automaticActions, 0);
   } finally {
     fs.rmSync(fx.root, { recursive: true, force: true });
