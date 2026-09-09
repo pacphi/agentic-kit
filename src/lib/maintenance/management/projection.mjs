@@ -113,7 +113,7 @@ import { classifyConflicts } from './conflicts.mjs';
 import { createBuilder, finalizePlacement, hostLabel, scrubTechnicalDetails } from './projection-builder.mjs';
 import {
   deriveSubmoduleEdges, mapDiscoveryProjectInstructionFiles, mapInstructionFiles, mapProjects,
-  registerFallbackProjectPaths, projectInstallationLocation,
+  registerFallbackProjectPaths, projectInstallationLocation, enrichProjectPresentation, projectPresentation,
 } from './projection-projects.mjs';
 
 // ── small pure helpers ──────────────────────────────────────────────────────
@@ -343,7 +343,7 @@ function mapCatalogGroup(builder, item, group, ctx) {
     evidenceScorecard: { ...catalogScorecard(placementId, consumerHosts, now), ...(versions.installed ? { installedVersion: 'verified' } : {}), ...(versions.candidate ? { candidateSource: 'verified' } : {}) },
     displayName: item.name, kind, hostNamespace: item.pluginRef ?? undefined, consumerHosts,
     versions,
-    technicalDetails, extra: { description: scrubTechnicalDetails([first.description])[0] ?? null, ...(projectEntry ? { projectLanguages: projectEntry.projectLanguages ?? [], projectKind: projectEntry.projectKind ?? 'unknown', projectBreadcrumb: [...projectEntry.breadcrumb] } : {}), ...(transportKey ? { transportKey } : {}) },
+    technicalDetails, extra: { description: scrubTechnicalDetails([first.description])[0] ?? null, ...(projectEntry ? projectPresentation(projectEntry) : {}), ...(transportKey ? { transportKey } : {}) },
   });
   if (first.itemPath || first.path) builder.locate(placementId, { path: first.itemPath ?? first.path });
   const probeMatches = catalogDependencyProbeMatches(item, dependencyProbes, consumerHosts);
@@ -1077,6 +1077,8 @@ export function buildManagementInventory({
   // null one. Filled in from the presence's own lexical root before catalog
   // mapping runs, so mapCatalogGroup's ordinary registry lookup finds it.
   registerFallbackProjectPaths(projects, projectPathsIn(footprint.catalog), { installationKey });
+  enrichProjectPresentation(builder, projects,
+    [...(footprint?.projects?.projects ?? []), ...(footprint?.projects?.discoveryProjects ?? [])], { installationKey });
   // Add presentation evidence after identity assignment; a better label must
   // not change lexical project IDs or their action and receipt targets.
   for (const row of footprint?.catalog?.projectMetadata ?? []) {

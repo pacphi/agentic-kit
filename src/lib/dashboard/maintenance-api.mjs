@@ -449,6 +449,12 @@ function projectNode(node, value) {
 }
 
 const [ID, LABEL, STAMP] = [T.text(128), T.text(200), T.text(40)];
+const PROJECT_PRESENTATION = {
+  repositoryId: ID, repositoryLabel: LABEL, repositoryEvidence: T.oneOf(['git-directory', 'git-pointer', 'git-common-directory-and-backlink', 'project-discovery']),
+  repositoryObservedAt: T.int,
+  sessionOrigins: T.list(T.obj({ origin: T.oneOf(['claude-desktop', 'codex-desktop', 'unknown']), sessions: T.int,
+    countBasis: T.oneOf(['transcript-files', 'database-sessions', 'recovered-project-sighting', 'mixed-observations']) }), 3),
+};
 const PROVIDER = T.obj({ id: T.text(80), version: T.text(40) });
 const COVERAGE = T.obj({
   sourceId: ID, environmentId: ID, state: T.oneOf(SOURCE_COVERAGE_STATES), label: LABEL, visited: T.int, estimated: T.int,
@@ -456,6 +462,7 @@ const COVERAGE = T.obj({
   lastCompletedAt: STAMP, filesystem: T.bool,
 });
 const ROW = T.obj({
+  ...PROJECT_PRESENTATION,
   installationSource: LABEL, description: T.text(1024),
   placementId: ID, projectId: ID, projectKind: T.oneOf(['git','folder','worktree','unknown']), displayName: LABEL, kind: T.oneOf(RESOURCE_KINDS),
   scope: T.obj({ value: T.oneOf(SCOPE_LENSES), label: LABEL, icon: T.text(32) }),
@@ -480,7 +487,7 @@ const PARTIAL_SOURCES = T.either(T.list(COVERAGE, 100), T.obj({
 }));
 const INVENTORY_PAGE = T.obj({
   navigation: T.obj({ level: T.oneOf(['scope', 'project', 'kind', 'resource', 'installation']),
-    nodes: T.list(T.obj({ value: T.token(128), label: LABEL, installationSource: LABEL, description: T.text(1024), descriptionSource: LABEL, languages: T.list(T.obj({ id: T.token(64), name: LABEL, icon: T.text(8), evidence: T.oneOf(['source','artifact']) }), 100), count: T.int, kind: T.oneOf(RESOURCE_KINDS), projectKind: T.oneOf(['git', 'folder', 'worktree', 'unknown']) }), MAX_PAGE_ROWS),
+    nodes: T.list(T.obj({ ...PROJECT_PRESENTATION, value: T.token(128), label: LABEL, installationSource: LABEL, description: T.text(1024), descriptionSource: LABEL, languages: T.list(T.obj({ id: T.token(64), name: LABEL, icon: T.text(8), evidence: T.oneOf(['source','artifact']) }), 100), count: T.int, kind: T.oneOf(RESOURCE_KINDS), projectKind: T.oneOf(['git', 'folder', 'worktree', 'unknown']) }), MAX_PAGE_ROWS),
   }),
   scanRequired: T.bool, lastRefresh: LAST_REFRESH, schema: T.text(80), inventoryId: ID, total: T.int, groups: T.list(GROUP, MAX_PAGE_ROWS),
   facetCounts: T.dict(T.dict(T.int, 500), 16), nextCursor: T.text(512),

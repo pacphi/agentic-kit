@@ -470,10 +470,12 @@ export function discoverProjectSources({
         && declared.origin.startsWith(`${host}-`) ? declared.origin : 'unknown';
       let membership = row.sessionOrigins.get(origin);
       if (!membership) {
-        membership = { origin, sessions: 0, evidence: new Set() };
+        membership = { origin, sessions: 0, evidence: new Set(), countBases: new Set() };
         row.sessionOrigins.set(origin, membership);
       }
       membership.sessions += weight;
+      membership.countBases.add(sighting.origin === 'encoded-dir' ? 'recovered-project-sighting'
+        : host === 'opencode' ? 'database-sessions' : 'transcript-files');
       membership.evidence.add(origin === 'unknown' ? 'desktop-origin-not-declared' : declared.evidence);
       const at = sighting.mtimeMs;
       if (Number.isFinite(at) && (row.lastSeenMs === null || at > row.lastSeenMs)) row.lastSeenMs = at;
@@ -497,6 +499,7 @@ export function discoverProjectSources({
       sessions: row.sessions,
       sessionOrigins: [...row.sessionOrigins.values()].map((entry) => ({
         origin: entry.origin, sessions: entry.sessions, evidence: [...entry.evidence].filter(Boolean).sort(),
+        countBasis: entry.countBases.size === 1 ? [...entry.countBases][0] : 'mixed-observations',
       })).sort((a, b) => a.origin.localeCompare(b.origin)),
       repository: inspectProjectIdentity(row.path, { fsImpl, observedAt: asOf }),
     };

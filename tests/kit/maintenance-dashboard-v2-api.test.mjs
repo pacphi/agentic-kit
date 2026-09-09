@@ -597,7 +597,8 @@ test('v2 inventory projection keeps the nine inspector sections and the page env
   assert.equal(page.total, 2);
   assert.equal(page.groups.length, 1);
   assert.deepEqual(Object.keys(page.groups[0].placements[0]).sort(), [
-    'breadcrumb', 'carrier', 'consumerHosts', 'displayName', 'guidanceLane', 'kind', 'placementId', 'projectId', 'projectKind', 'rowAction', 'scope', 'versions',
+    'breadcrumb', 'carrier', 'consumerHosts', 'displayName', 'guidanceLane', 'kind', 'placementId', 'projectId', 'projectKind',
+    'repositoryEvidence', 'repositoryId', 'repositoryLabel', 'repositoryObservedAt', 'rowAction', 'scope', 'sessionOrigins', 'versions',
   ]);
   const inspector = publicInspector(inspectorFor(inventory, PLACEMENT));
   assert.deepEqual(Object.keys(inspector).sort(), [

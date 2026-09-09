@@ -139,3 +139,12 @@ test('should_expose_missing_and_unmeasured_catalog_without_changing_measurement_
   assert.deepEqual(result.discoveryProjects, catalog);
   assert.deepEqual([result.everSeen.value, result.onDisk.value, result.projects.length, result.population.excluded.total], [2, 1, 0, 1]);
 });
+test('should_qualify_encoded_directory_recovery_as_a_sighting_instead_of_a_verified_session', (t) => {
+  const root = fixture(t);
+  const result = discoverProjectSources({ scanTranscripts: (_root, host) => ({
+    complete: true, sightings: host === 'claude' ? [{ cwd: root, origin: 'encoded-dir' }] : [],
+  }), scanOpencode: () => ({ complete: true, sightings: [] }) });
+  assert.deepEqual({ sessions: result.projects[0].sessions, origin: result.projects[0].sessionOrigins[0].origin,
+    countBasis: result.projects[0].sessionOrigins[0].countBasis },
+  { sessions: 1, origin: 'unknown', countBasis: 'recovered-project-sighting' });
+});

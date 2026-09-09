@@ -10,7 +10,7 @@ import path from 'node:path';
 import { PROJECT_KINDS } from '../../footprint/project-kind.mjs';
 import { artifactIdentity, bindingIdentity, placementIdentity, projectIdentity, resourceIdentity } from './identity.mjs';
 import { assertion, scorecardFor } from './evidence.mjs';
-import { finalizePlacement, hostLabel } from './projection-builder.mjs';
+import { finalizePlacement, hostLabel, scrubTechnicalDetails } from './projection-builder.mjs';
 
 function segmentsOf(rawPath) {
   return String(rawPath ?? '').split(/[\\/]+/).filter(Boolean);
@@ -49,9 +49,47 @@ function computeBreadcrumbs(rows) {
 }
 
 function repositoryKeyFor(row) {
-  if (row.repositoryRoot) return `root:${row.repositoryRoot}`;
-  if (row.remote?.status === 'linked' && row.remote.webUrl) return `remote:${row.remote.webUrl}`;
+  if (['git', 'worktree'].includes(row.repository?.kind)
+    && /^repository:[a-f0-9]{20}$/.test(row.repository.repositoryId)
+    && ['git-directory', 'git-pointer', 'git-common-directory-and-backlink'].includes(row.repository.evidence)) {
+    return row.repository.repositoryId;
+  }
   return null;
+}
+
+/** Add display evidence after opaque action/project identities are assigned. */
+export function enrichProjectPresentation(builder, registry, rows, { installationKey }) {
+  for (const row of rows ?? []) {
+    const entry = registry.get(row.path);
+    if (!entry) continue;
+    const key = repositoryKeyFor(row);
+    if (key) {
+      entry.repositoryResourceId = resourceIdentity({ kind: 'related-storage', sourceSelector: `repository:${key}` }, installationKey);
+      entry.repositoryLabel = scrubTechnicalDetails([segmentsOf(row.repository.root ?? row.repository.commonDir).at(-1) ?? 'Repository'])[0] ?? 'Repository';
+      entry.repositoryEvidence = row.repository.evidence;
+      entry.repositoryObservedAt = Number.isFinite(row.repository.observedAt) ? row.repository.observedAt : null;
+      builder.upsertResource(entry.repositoryResourceId, { kind: 'related-storage', displayName: `${entry.repositoryLabel} repository` });
+    }
+    if (['git', 'worktree', 'folder'].includes(row.repository?.kind)) entry.projectKind = row.repository.kind;
+    if (Array.isArray(row.sessionOrigins)) entry.sessionOrigins = row.sessionOrigins
+      .filter((origin) => ['claude-desktop', 'codex-desktop', 'unknown'].includes(origin.origin)
+        && Number.isInteger(origin.sessions) && origin.sessions > 0)
+      .map(({ origin, sessions, countBasis }) => ({ origin, sessions,
+        ...(['transcript-files', 'database-sessions', 'recovered-project-sighting', 'mixed-observations'].includes(countBasis) ? { countBasis } : {}),
+      }));
+  }
+}
+
+export function projectPresentation(entry) {
+  return {
+    projectLanguages: entry?.projectLanguages ?? [], projectKind: entry?.projectKind ?? 'unknown',
+    projectBreadcrumb: [...(entry?.breadcrumb ?? [])],
+    ...(entry?.repositoryResourceId ? { repositoryId: entry.repositoryResourceId } : {}),
+    repositoryLabel: entry?.repositoryLabel ?? null,
+    repositoryEvidence: entry?.repositoryEvidence ?? (entry?.repositoryResourceId ? 'project-discovery' : null),
+    repositoryObservedAt: entry?.repositoryObservedAt ?? null,
+    sessionOrigins: entry?.sessionOrigins ?? [],
+  };
 }
 
 /** A placement-less `related-storage` resource id per repository key that
@@ -243,7 +281,7 @@ function emitInstructionFilePlacement(builder, ctx, { file, projectEntry, locato
     ]),
     displayName: file.name, kind: 'instruction-context-file', consumerHosts: [file.host], technicalDetails,
     versions: file.digest ? { contentDigest: file.digest } : {},
-    extra: { projectLanguages: projectEntry?.projectLanguages ?? [], projectKind: projectEntry?.projectKind ?? 'unknown', ...(projectEntry?.repositoryResourceId ? { repositoryId: projectEntry.repositoryResourceId } : {}) },
+    extra: projectPresentation(projectEntry),
   });
   if (typeof file.path === 'string' && (path.isAbsolute(file.path) || path.win32.isAbsolute(file.path))) builder.locate(placementId, { path: file.path });
   return placementId;

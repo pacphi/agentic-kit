@@ -448,7 +448,8 @@ function notify(onProgress, payload) {
  * the only thing discovery contributes (invariant 9) — `hosts` rides along as
  * attribution (which hosts saw this project), never as a measurement.
  *
- * @param {{ path: string, label: string, source?: string, hosts?: string[], remote?: object }} project
+ * @param {{ path: string, label: string, source?: string, hosts?: string[], remote?: object,
+ *   repository?: object, sessionOrigins?: Array<{origin:string,sessions:number,evidence?:string[]}> }} project
  * @param {{ walk?: Function, limits?: object, detect?: Function, loc?: boolean,
  *           asOf?: number|null, fsImpl?: typeof fs }} [options]
  *   `loc: false` skips the stack pass entirely — the expensive part of a project
