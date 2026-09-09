@@ -2,6 +2,7 @@
 
 - **Status:** Implemented; evidence, policy, guidance budgets, hook assurance, and dashboard delivery
 - **Date:** 2026-09-02
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0008](0008-guidance-target-scope-split.md),
   [ADR-0009](0009-usage-scorecard-local-transcript-analytics.md),
@@ -13,6 +14,19 @@
   [ADR-0038](0038-consistent-cross-host-session-metrics.md),
   [ADR-0041](0041-host-neutral-hook-configuration-assurance.md)
 - **DDD:** [Context budget intelligence](../ddd/context-budget-intelligence.md)
+
+## Current implementation boundary (2026-09-09)
+
+ADR-0050 separates Runtime's cached/configured context card from Usage → Context
+historical pressure. A model catalogue never supplies a missing runtime
+denominator. Current UI labels sessions with paired pressure and distinguishes
+input-only, partial, empty-window, and no-measurement cases; no numerical zero
+or meter is fabricated for missing pressure.
+[Context reporting](../../src/lib/context-report.mjs),
+[historical projection](../../src/lib/usage-context.mjs), and
+[coverage browser tests](../../tests/ui/context-coverage.mjs) govern those views.
+The policy resolver is implemented; exact per-route launch enforcement remains
+deferred as stated below.
 
 ## Context
 
@@ -101,8 +115,9 @@ pressure histogram. A compatibility-only row may expose a numerator or denominat
 pressure ratio. The Usage projection reports coverage, distributions, policy counts, host splits
 and at most 20 attention rows.
 
-The current cache schema is **v18** because parser-time controlled Prompt facets cannot be
-reconstructed from the text-free cache. Reparse preserves the v17 Context evidence contract.
+The current cache schema is **v20** under ADR-0050. v18 added controlled Prompt
+facets; v19/v20 added project-origin and verified Git-ranking eligibility facts.
+These reparses preserve the v17 Context evidence contract.
 
 ### 5. Context and Hooks are sibling Usage views
 
@@ -165,7 +180,7 @@ receipts remain separate evidence classes.
 Implemented:
 
 - canonical context budget policy and conservative ceiling resolver;
-- usage cache schema v17 context evidence, retained under current schema v18, with paired bounded
+- usage cache schema v17 context evidence, retained under current schema v20, with paired bounded
   observations for Claude, Codex and OpenCode;
 - privacy-preserving Usage context projection with coverage, host splits and capped attention;
 - config-aware managed-guidance selection, exact byte accounting and per-target regression gates;

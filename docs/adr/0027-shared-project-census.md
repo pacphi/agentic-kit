@@ -2,12 +2,30 @@
 
 - **Status:** Implemented
 - **Date:** 2026-08-07
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0012](0012-observability.md),
   [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),
   [ADR-0024](0024-project-intelligence-telemetry.md),
   [ADR-0025](0025-machine-footprint-metrics.md)
 - **Supersedes:** the machine-wide discovery amendment in ADR-0024 (`discoverRuvfloProjects`)
+
+## Current implementation boundary (2026-09-09)
+
+The shared census does not make every consumer's identity/aggregation identical.
+System counts canonical working paths; Intelligence retains its historical
+`resolveProjectIdentity` selection keys; Usage retains label-keyed compatibility
+aggregates and now adds a verified `gitProjects` ranking. ADR-0050's separate
+Git-metadata identity is the authority for new repository/worktree grouping;
+legacy layout/label heuristics are not evidence for those new associations.
+
+Launch-origin membership is independent of repository kind. Recovered encoded
+project-directory sightings retain their existing count contribution but carry
+`countBasis: recovered-project-sighting`; they are not verified session counts.
+Unknown origin and missing paths remain represented. See
+[discovery](../../src/lib/footprint/project-sources.mjs),
+[census](../../src/lib/project-census.mjs), and
+[identity tests](../../tests/kit/dashboard-project-identity.test.mjs).
 
 ## Context
 
@@ -35,8 +53,8 @@ projects where 17 had memory or intelligence active.
 
 `discoverProjectSources()` (`src/lib/footprint/project-sources.mjs`) becomes the single census,
 reused verbatim rather than reimplemented. It is already the widest and most carefully bounded of
-the four sources: it reads exactly one field — the session `cwd` — out of the head of every Claude
-and Codex transcript plus the OpenCode session store, dedupes by resolved real path, and reports
+the four sources: it reads bounded cwd and launch-origin metadata from Claude/Codex transcript heads
+plus directory/count/time metadata from the OpenCode session store, dedupes by resolved real path, and reports
 three deliberately distinct figures instead of one lossy total.
 
 `src/lib/project-census.mjs` wraps it with the scope vocabulary:

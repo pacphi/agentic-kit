@@ -2,6 +2,7 @@
 
 - **Status:** Implemented; discovery amended by [ADR-0027](0027-shared-project-census.md)
 - **Date:** 2026-08-05
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Updated:** 2026-08-07
 - **Update note:** Extended Intelligence from one project's telemetry, implicitly tied to the
   dashboard server's own launching cwd, to a machine-wide catalog of every ruflo-initialized
@@ -25,8 +26,8 @@
 > host; and the 150-transcript bound made discovery a function of recency. On the machine this
 > amendment was verified against, it found 4 projects where 17 had learning state. Project
 > discovery now comes from the shared census, which lists directories and folds them onto project
-> identity. Everything else in this ADR — the intel payload, the SSE pool, the panel itself —
-> stands unchanged.
+> identity. The selected-history and SSE ownership contracts remain; ADR-0050 and the
+> 2026-09-09 amendment below govern current panel presentation.
 
 **2026-08-05 machine-wide discovery amendment (superseded):** `src/lib/dashboard/project-discovery.mjs` adds
 `discoverRuvfloProjects()`, unioning three sources into one deduplicated, most-recently-active-first
@@ -99,6 +100,20 @@ clients watching different projects never cross-talk and an unwatched project's 
 unbounded. **"This project" as an implicit, unlabeled, cwd-bound default no longer exists anywhere
 in this contract** — the detail strip is always an explicitly selected, explicitly labeled project,
 defaulting to whichever discovered project was most recently active.
+
+## Current implementation boundary (2026-09-09)
+
+The current learning census is ADR-0027, and ADR-0050 governs alphabetical
+picker/table groups, exact user-root evidence, and bounded scrolling. Machine-wide
+rows retain their entry's scope and opaque key; selection still anchors on its
+existing learning path. The cached census adds no per-render transcript scan.
+[Reader](../../src/lib/dashboard/intel-history.mjs),
+[renderer](../../src/lib/dashboard/client/intelligence.mjs), and
+[table tests](../../tests/kit/intelligence-table-groups.test.mjs) preserve KPI totals
+and every grouped row. The three source files and IntelligenceWatch contract
+remain; a change-only trigger can write the existing 500-sample health ring.
+The 2.5-second trailing debounce is not a maximum latency guarantee during a
+continuous write stream.
 
 ## Context
 
@@ -203,8 +218,8 @@ capability-coverage contract, and unlike Observability's ruflo/agentic-qe source
 
 ### 4. `/api/status` keeps working as the fallback path
 
-The SSE route is additive. `collectData()`'s existing return gains `globalStats`, `patternStore`,
-and `graph` alongside the unchanged `health` field (still `intel.healthRing`); a client without
+The SSE route is additive. The current `collectData()` response nests `globalStats`,
+`patternStore`, `graph`, and `health` under `intel`; the original flat fields are historical. A client without
 `EventSource` support, or one that has not yet opened the stream, still gets the full picture on the
 next poll. The `/api/status` error-fallback payload was extended with the same three keys
 (`globalStats: null, patternStore: [], graph: null`) so its shape never diverges from the success
@@ -251,7 +266,7 @@ path.
 - `src/lib/dashboard/intel-history.mjs` (`readIntelHistory`, `readMachineWideIntel`),
   `tests/kit/intel-history.test.mjs`
 - `src/lib/project-census.mjs` (`projectCensus`, `projectsInScope`) — replaced `src/lib/dashboard/project-discovery.mjs` (`discoverRuvfloProjects`) per ADR-0027,
-  `tests/kit/project-discovery.test.mjs`
+  `tests/kit/project-census.test.mjs`
 - `src/lib/live/intelligence-watch.mjs`, `tests/kit/intelligence-watch.test.mjs`
 - `src/lib/dashboard-server.mjs` (`collectData`, `buildProjectSnapshotCache`,
   `resolveSelectedProject`, `GET /api/live/intelligence`'s `intelPool`)

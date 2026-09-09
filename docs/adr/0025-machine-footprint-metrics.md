@@ -12,6 +12,7 @@
   graphical/container languages have presence-only evidence and shared suffixes use
   bounded syntax checks without retaining source text.
 - **Date:** 2026-08-06
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Updated:** 2026-08-06 — accepted and implemented; the open points below are resolved decisions
 - **Updated:** 2026-08-07 — §7 replaced by an enumerated read surface (the collectors now read a
   transcript head's `cwd` field and project manifests' dependency keys); §6 gains reclaimable
@@ -115,6 +116,25 @@
 > action while every other part reports what is; that distinction was invisible while it sat as a
 > card under a byte chart. Neither split changes a measurement, and Advisory still has no delete
 > verb (§6 stands).
+
+## Current implementation boundary (2026-09-09)
+
+FootprintSnapshot is currently **v7**, CatalogInventory **v4**. Earlier v3/v4/v6
+statements below describe successive migrations rather than the current cache
+version. Catalog presentation moved to Maintenance; the current System rail is
+Summary, Advisory, Sessions, Storage, Runtime, Projects, and Maintenance. The
+original mock/table taxonomy below is adoption-time design.
+
+ADR-0050 adds an all-discovered project view without broadening the expensive
+measured population. Missing and excluded paths remain in `discoveryProjects`;
+only the existing hosted/session population receives full footprints. Repository
+identity and Desktop origin are independent, and parent/child byte totals are not
+added. [Project discovery](../../src/lib/footprint/project-sources.mjs) now reads
+explicit launch metadata and bounded Git common-directory/backlink evidence. The
+read-surface table below includes these additions; it does not authorize message
+content collection. [Project identity tests](../../tests/kit/dashboard-project-identity.test.mjs)
+pin association, unknowns, and count bases. Runtime measurements are not persisted
+as liveness in the deep snapshot.
 
 ## Context
 
@@ -346,9 +366,9 @@ taken from it:
 |------|---------------|---------------------|
 | Directory entries, `lstat` | name, kind, size, mtime, blocks | anything inside a file |
 | `.git/config` | the origin remote URL | every other key |
-| `.git/worktrees/<name>/gitdir` | one path, bounded to 4 KB | — |
-| A transcript's head (≤256 KB, ≤40 parsed lines) | opening `cwd`, opaque native session ID, and timezone-bearing timestamp fields | every message, prompt, generated title, tool call, tool result and model output |
-| OpenCode's session store (read-only) | the `directory` column | every other column and every message row |
+| `.git` pointer plus common-directory and reverse-pointer metadata | Git association paths, each text read bounded to 4 KB | branch content, source code, or a name-only association |
+| A transcript's head (≤256 KB, ≤40 parsed lines) | opening `cwd`, opaque native session ID, timezone-bearing timestamps, and explicit `entrypoint`/`originator` declarations | every message, prompt, generated title, tool call, tool result and model output |
+| OpenCode's session store (read-only) | `directory`, grouped session count, and latest session timestamp | message rows, prompts, and tool output |
 | A project's own manifests (≤3 deep, ≤64 files, ≤512 KB each) | dependency **keys** | values, scripts, anything executable — nothing is evaluated or resolved |
 | Resource Markdown frontmatter and installed plugin manifests (≤64 KiB each) | explicit description string, ≤1024 characters | body text and unrelated manifest values |
 | A project's own source files | the count of `\n` bytes; a transient ≤16 KiB prefix for ambiguous language/XML signatures | the text: each 64 KB chunk is counted and overwritten |
@@ -524,12 +544,12 @@ The draft left four points open. All four are decided; this section is the recor
    snapshot's `asOf` is always rendered, and beyond `SNAPSHOT_STALE_AFTER_MS` (7 days) the
    freshness label turns amber and reads "stale, rescan". Opening the System tab issues a plain
    `GET /api/system`; only the Rescan control adds `?refresh=deep`.
-4. **Windows ships a guaranteed census plus a best-effort true `cwd`, degrading honestly, with no
+4. **Windows ships a current-user census plus a best-effort true `cwd`, degrading honestly, with no
    dependency added.** The draft's "unsupported on win32" answer would have blanked the whole
    Runtime view on a supported platform. Instead `src/lib/live/win-process-survey.ps1` — a plain text
    script invoked the same way the POSIX path already invokes `ps` and `lsof`, no npm package and
    no compiled artifact — provides two layers:
-   - a **guaranteed** census (host, pid, ppid, start time, CPU, working set) from
+   - a **best-effort current-user** census (host, pid, ppid, start time, CPU, working set) from
      `Get-CimInstance Win32_Process`, plus current-user-only command lines proven via `GetOwner`;
    - a **best-effort** true per-process working directory via inline `Add-Type` P/Invoke
      (`NtQueryInformationProcess` → PEB → `RTL_USER_PROCESS_PARAMETERS` → `CurrentDirectory`).
@@ -539,7 +559,8 @@ The draft left four points open. All four are decided; this section is the recor
    degrades to an explicit "not attributable on Windows" carrying the failure reason. An empty
    census is treated as a broken survey, not an idle machine. This is genuinely verified rather
    than asserted: `windows-latest` is already in the CI matrix (`.github/workflows/ci.yml`), so
-   the Windows path runs on every push alongside Linux and macOS.
+   Windows fixtures run alongside Linux and macOS. A CI matrix entry alone does not
+   prove every real WMI/PEB, security-policy, or bitness combination.
 
 ## Follow-ups on acceptance
 
@@ -569,4 +590,4 @@ All complete:
 - `src/commands/system.mjs` (the CLI twin)
 - `src/lib/live/win-process-survey.ps1` (the Windows stand-in for `ps` + `lsof`)
 - `src/lib/live/process-sessions.mjs` (the runtime survey this reuses)
-- `src/lib/dashboard/project-discovery.mjs` (the project catalog this reuses)
+- `src/lib/project-census.mjs` and `src/lib/footprint/project-sources.mjs` (current census; the former `dashboard/project-discovery.mjs` is retired)

@@ -2,6 +2,7 @@
 
 - Status: Implemented
 - Date: 2026-09-02
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - Updated: 2026-09-02 — Linux ARM64 converges without retrying an unavailable
   Chrome for Testing payload; project and host policy boundaries are unchanged
 - Context: issue #189 browser/runtime and capability-footprint verification
@@ -11,7 +12,7 @@
 Ruflo 3.38.21 registers its browser MCP tools only when the `agent-browser`
 command is available, and those tools shell out to that command. The published
 `@claude-flow/browser@3.0.0-alpha.4` dependency accepts `agent-browser ^0.27.0`.
-The current npm latest, 0.36.0, is outside that compatibility range, so a
+The npm latest inspected on 2026-09-02, 0.36.0, is outside that compatibility range, so a
 generic install or latest-version updater is not a safe lifecycle.
 
 Agent-browser also discovers repository `agent-browser.json` files by default.

@@ -2,6 +2,7 @@
 
 - **Status:** Implemented
 - **Date:** 2026-08-06
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Updated:** 2026-08-06 — accepted and implemented; the open points below are resolved decisions
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0005](0005-dashboard-in-page-routing-reveal.md),
@@ -84,10 +85,12 @@ Curated editorial content joined with live detection facts — see
 
 ### 3. Completeness is a gate, not a hope
 
-Every tool in the managed-tools registry must have a directory entry — enforced by a parity
+Every built-in tool in the managed-tools registry must have a directory entry — enforced by a parity
 test, so a newly managed tool cannot ship without its About card. The reverse also holds: a
 directory entry for something ak does not install or configure is a lie and fails the same
-gate.
+gate. This parity gate is built-in-scoped: ADR-0029/0031 admitted external
+adapters are not required to have an authored About card before graduation.
+`tests/kit/about-directory.test.mjs` explicitly pins that scope.
 
 ### 4. Card anatomy and the new-user register
 

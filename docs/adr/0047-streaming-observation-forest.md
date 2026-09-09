@@ -2,6 +2,7 @@
 
 - **Status:** Accepted; Projects pilot and ADR-0048 checkpointed continuation implemented
 - **Date:** 2026-09-03
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Updated:** 2026-09-04 — proposed ADR-0048 supplies the separate journal-backed continuation
   decision anticipated by this ADR; it must extend this forest rather than introduce a competing
   walker or persistent per-file index
@@ -134,8 +135,10 @@ its own deterministic cap keeps that exact partial result without rereading the 
 
 At candidate `ad09c30`, the three-run Projects phase examined 1,731,134 physical entries per run,
 down from 2,536,701 immediately before the pilot. The whole deep scan produced a 138,561.30 ms
-median versus ADR-0046's 210,203 ms reference. Later static cross-collector, asynchronous, native,
-and journal-backed phases remain unimplemented.
+median versus ADR-0046's 210,203 ms reference. Later static cross-collector, asynchronous, native, and filesystem-journal
+backends remain unimplemented. ADR-0048's implemented Discovery checkpoint
+continuation is separate from a change-journal-driven incremental filesystem
+scanner and does not checkpoint the Footprint worker.
 
 ## References
 
