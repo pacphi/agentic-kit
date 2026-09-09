@@ -2,6 +2,7 @@
 // uses; --dry-run prints it and stops. Apply order: upgrades first (they wipe
 // natives), then heals, then re-collect to prove convergence.
 import path from 'node:path';
+import { manageCodexContext } from '../lib/codex-context.mjs';
 import readline from 'node:readline/promises';
 import { collect } from './status.mjs';
 import * as heal from '../lib/heal.mjs';
@@ -428,6 +429,14 @@ export const SYNC_STEPS = [
   // files on disk, and the new code applies from the next ak run, so nothing
   // after this point should depend on the kit's own modules being current.
   // (Array position — the final entry in SYNC_STEPS — is the invariant.)
+  {
+    id: 'codex-context',
+    when: (subs, flags, cfg) => subs.has('codex-context') && !!cfg.codexContext && !!cfg.integrations?.hosts?.codex,
+    run: async (ctx) => {
+      await manageCodexContext(ctx.cfg, { persist: saveKitConfig });
+      ok('Codex native context maximum reconciled; start new sessions');
+    },
+  },
   {
     id: 'self',
     when: (subs, flags) => subs.has('self') && !flags['no-upgrade'],

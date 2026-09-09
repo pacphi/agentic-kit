@@ -9,6 +9,7 @@ import path from 'node:path';
 import readline from 'node:readline/promises';
 import { run as runCmd, have } from '../lib/exec.mjs';
 import * as heal from '../lib/heal.mjs';
+import { manageCodexContext } from '../lib/codex-context.mjs';
 import { fixStatusline } from '../lib/statusline.mjs';
 import { reconcileGuidance } from '../lib/blocks.mjs';
 import { captureProjectGuidance, reconcileProjectGuidance } from '../lib/project-guidance.mjs';
@@ -463,6 +464,10 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
   deployTokenAuditSkill(pkgRoot);
   await installEnabledAbsentHosts(cfg, flags);
   if (!(await applyMachineHostLifecycles(cfg, pkgRoot))) return false;
+  if (cfg.codexContext && cfg.integrations?.hosts?.codex) {
+    try { await manageCodexContext(cfg, { persist: saveKitConfig }); }
+    catch (error) { warn(`Codex context reconciliation incomplete: ${error.message}`); return false; }
+  }
   await printUndetectedHostHints(cfg);
   return true;
 }
