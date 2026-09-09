@@ -118,7 +118,7 @@ test('receipt candidate is preserved when git evidence is dirty or incomplete', 
     (_binary, args) => {
       if (args.includes('rev-parse')) return { status: 0, stdout: 'true\n' };
       if (args.includes('ls-files')) return { status: 0, stdout: '' };
-      return { status: 0, stdout: `?? ${path.relative(project, modifiedPath)}\0` };
+      return { status: 0, stdout: `?? ${path.relative(project, modifiedPath).split(path.sep).join('/')}\0` };
     },
     (_binary, args) => {
       if (args.includes('rev-parse')) return { status: 0, stdout: 'true\n' };

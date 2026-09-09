@@ -91,6 +91,11 @@ function snapshot(root) {
   return JSON.stringify(walk(root).sort(([a], [b]) => a.localeCompare(b)));
 }
 
+// These integration fixtures require native POSIX ownership or durable mutation storage.
+const POSIX_MUTATION_ONLY = process.platform === 'win32'
+  ? { skip: 'native maintenance mutation requires POSIX ownership and durable directory flush support' }
+  : {};
+
 test('MNT-RCV-002: disclosure is populated before inspection and returned for every result, including a skipped one', async (t) => {
   const root = fixture(t);
   const results = await auditInterruptions({
@@ -107,7 +112,7 @@ test('MNT-RCV-002: disclosure is populated before inspection and returned for ev
   assert.equal(typeof result.disclosure.networkPolicy, 'string');
 });
 
-test('MNT-RCV-003/004: audit interruption at every durable phase compares only recorded images and never replays', async (t) => {
+test('MNT-RCV-003/004: audit interruption at every durable phase compares only recorded images and never replays', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const cases = [
     { name: 'prepared', status: 'prepared', entries: [entry('a', { state: 'prepared', outcome: null })], expected: 'no-action-started', enables: 'record-no-change' },
@@ -133,7 +138,7 @@ test('MNT-RCV-003/004: audit interruption at every durable phase compares only r
   }
 });
 
-test('MNT-RCV-002/007: provider drift is disclosed as matching-inspection-provider-not-present, non-conclusive, with no corrective action', async (t) => {
+test('MNT-RCV-002/007: provider drift is disclosed as matching-inspection-provider-not-present, non-conclusive, with no corrective action', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const tx = receipt(root, 'applying', [entry('a')], 'drifted');
   const [result] = await auditInterruptions({
@@ -145,7 +150,7 @@ test('MNT-RCV-002/007: provider drift is disclosed as matching-inspection-provid
   assert.deepEqual(result.nextSteps, ['No corrective action is offered.']);
 });
 
-test('MNT-RCV-007: mixed images across entries are non-conclusive and disclose the failed comparisons', async (t) => {
+test('MNT-RCV-007: mixed images across entries are non-conclusive and disclose the failed comparisons', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const entries = [entry('a'), entry('b', { outcome: { status: 'applied', postFingerprint: 'post-b' } })];
   const tx = receipt(root, 'applying', entries, 'mixed');
@@ -158,7 +163,7 @@ test('MNT-RCV-007: mixed images across entries are non-conclusive and disclose t
   assert.ok(result.failedComparisons.length > 0);
 });
 
-test('MNT-RCV-002/003: receipt-integrity failure is a distinct, non-conclusive result and blocks nothing else', async (t) => {
+test('MNT-RCV-002/003: receipt-integrity failure is a distinct, non-conclusive result and blocks nothing else', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const tx = receipt(root, 'prepared', [entry('a', { state: 'prepared' })], 'tampered');
   fs.writeFileSync(tx.file, fs.readFileSync(tx.file, 'utf8').replace('prepared', 'applying'));
@@ -170,7 +175,7 @@ test('MNT-RCV-002/003: receipt-integrity failure is a distinct, non-conclusive r
   assert.equal(result.conclusive, false);
 });
 
-test('MNT-RCV-005: audits batch across several receipts while keeping independent, receipt-scoped conclusions', async (t) => {
+test('MNT-RCV-005: audits batch across several receipts while keeping independent, receipt-scoped conclusions', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const noDispatch = receipt(root, 'prepared', [entry('a', { state: 'prepared' })], 'batch-a');
   const committed = receipt(root, 'verifying', [entry('b', {
@@ -188,7 +193,7 @@ test('MNT-RCV-005: audits batch across several receipts while keeping independen
   assert.equal(results[1].result, 'matches-verified-after-state');
 });
 
-test('MNT-RCV-005: repeating an audit is idempotent and changes no file', async (t) => {
+test('MNT-RCV-005: repeating an audit is idempotent and changes no file', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const tx = receipt(root, 'verifying', [entry('a', {
     state: 'verified', outcome: { status: 'applied', postFingerprint: 'post-a' },
@@ -211,7 +216,7 @@ test('MNT-RCV-005: repeating an audit is idempotent and changes no file', async 
   );
 });
 
-test('MNT-RCV-011: exportable audit output carries no local path, secret, or rollback material', async (t) => {
+test('MNT-RCV-011: exportable audit output carries no local path, secret, or rollback material', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const tx = receipt(root, 'verifying', [entry('a', {
     state: 'verified', outcome: { status: 'applied', postFingerprint: 'post-a' },
@@ -228,7 +233,7 @@ test('MNT-RCV-011: exportable audit output carries no local path, secret, or rol
   assert.equal(result.exportable.enables, 'record-completed');
 });
 
-test('a caller-supplied refreshAffectedCatalog is never invoked by the audit', async (t) => {
+test('a caller-supplied refreshAffectedCatalog is never invoked by the audit', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const tx = receipt(root, 'refreshing-catalog', [entry('a', {
     state: 'verified', outcome: { status: 'applied', postFingerprint: 'post-a' },
@@ -242,7 +247,7 @@ test('a caller-supplied refreshAffectedCatalog is never invoked by the audit', a
   });
 });
 
-test('reconcileMaintenanceReceipt refuses without confirmation, refuses an outcome the audit does not enable, and seals the one it does', async (t) => {
+test('reconcileMaintenanceReceipt refuses without confirmation, refuses an outcome the audit does not enable, and seals the one it does', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const tx = receipt(root, 'prepared', [entry('a', { state: 'prepared' })], 'reconcile');
 
@@ -274,7 +279,7 @@ test('reconcileMaintenanceReceipt refuses without confirmation, refuses an outco
   assert.equal(again.status, 'already-reconciled');
 });
 
-test('reconcileMaintenanceReceipt records a completed apply and marks a failed catalog refresh distinctly, never replaying the provider', async (t) => {
+test('reconcileMaintenanceReceipt records a completed apply and marks a failed catalog refresh distinctly, never replaying the provider', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const tx = receipt(root, 'verifying', [entry('a', {
     state: 'verified', outcome: { status: 'applied', postFingerprint: 'post-a' },

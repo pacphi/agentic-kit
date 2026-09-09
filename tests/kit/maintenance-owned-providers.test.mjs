@@ -93,7 +93,12 @@ function makeSkill(root, name = 'demo') {
   return { allowedRoot, target };
 }
 
-test('exact recursive skill receipt archives, verifies, and restores without exposing paths', async (t) => {
+// These integration fixtures require native POSIX ownership or durable mutation storage.
+const POSIX_MUTATION_ONLY = process.platform === 'win32'
+  ? { skip: 'native maintenance mutation requires POSIX ownership and durable directory flush support' }
+  : {};
+
+test('exact recursive skill receipt archives, verifies, and restores without exposing paths', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const { allowedRoot, target } = makeSkill(root);
   const archiveRoot = path.join(root, 'maintenance-archive');
@@ -133,7 +138,7 @@ test('exact recursive skill receipt archives, verifies, and restores without exp
   assert.equal(fs.readFileSync(path.join(target, 'references', 'notes.md'), 'utf8'), 'owned notes\n');
 });
 
-test('skill provider preserves legacy, partial, modified, duplicate, and unreceipted resources', async (t) => {
+test('skill provider preserves legacy, partial, modified, duplicate, and unreceipted resources', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const { allowedRoot, target } = makeSkill(root);
   const exact = skillReceipt(target, allowedRoot);
@@ -215,7 +220,7 @@ test('skill ownership fails closed when filesystem owner identity is unavailable
   assert.equal(provider.actionFor(skillFinding(receipt), facts), null);
 });
 
-test('skill provider rejects traversal, symlink targets, plugin-cache roots, and incomplete shape', async (t) => {
+test('skill provider rejects traversal, symlink targets, plugin-cache roots, and incomplete shape', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const { allowedRoot, target } = makeSkill(root);
   const outsideRoot = path.join(root, 'outside-root');
@@ -263,7 +268,7 @@ test('skill provider rejects traversal, symlink targets, plugin-cache roots, and
   }), /bounded roots/);
 });
 
-test('skill prune is exact and idempotent while archive undo refuses postimage drift', async (t) => {
+test('skill prune is exact and idempotent while archive undo refuses postimage drift', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const pruned = makeSkill(root, 'pruned');
   const pruneReceipt = skillReceipt(pruned.target, pruned.allowedRoot);
@@ -324,7 +329,7 @@ function makeNpxEnv(root, id = 'abc', version = '1.0.0') {
   return target;
 }
 
-test('owned npx provider cleans only an exact freshly stale collector candidate', async (t) => {
+test('owned npx provider cleans only an exact freshly stale collector candidate', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const cacheRoot = path.join(root, '_npx');
   makeNpxEnv(cacheRoot);

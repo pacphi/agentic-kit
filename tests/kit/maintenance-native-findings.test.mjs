@@ -47,6 +47,11 @@ function serviceFor(t, provider, input = footprint()) {
   });
 }
 
+// These integration fixtures require native POSIX ownership or durable mutation storage.
+const POSIX_MUTATION_ONLY = process.platform === 'win32'
+  ? { skip: 'native maintenance mutation requires POSIX ownership and durable directory flush support' }
+  : {};
+
 test('Claude joins exact host-native installed and available rows without lexical version inference', async (t) => {
   const calls = [];
   const inventory = {
@@ -213,7 +218,7 @@ test('provider failures collapse into one report-only finding', async (t) => {
   assert.doesNotMatch(JSON.stringify(unavailable), /private failure/i);
 });
 
-test('default wiring promotes only an exact currently stale npx candidate', async (t) => {
+test('default wiring promotes only an exact currently stale npx candidate', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const cacheRoot = path.join(root, '_npx');
   const target = path.join(cacheRoot, 'abc');
@@ -279,7 +284,7 @@ test('service advertises control capability while read models remain independent
   assert.deepEqual(model.capabilities, { plan: true, apply: true, undo: true });
 });
 
-test('scan reloads bounded sanitized receipt history and exposes corrupt recovery state without creating roots', async (t) => {
+test('scan reloads bounded sanitized receipt history and exposes corrupt recovery state without creating roots', POSIX_MUTATION_ONLY, async (t) => {
   const controlRoot = fixture(t);
   const transactionsRoot = path.join(controlRoot, 'transactions');
   const transaction = createMaintenanceTransaction(transactionsRoot, {
@@ -361,7 +366,7 @@ test('owner-sensitive providers fail closed when the current user identity is un
   assert.equal((await provider.detect()).candidates[0].status, 'unsupported');
 });
 
-test('explicit complete-tree ownership wiring archives and exposes guarded undo after reload', async (t) => {
+test('explicit complete-tree ownership wiring archives and exposes guarded undo after reload', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const allowedRoot = path.join(root, 'skills');
   const target = path.join(allowedRoot, 'demo');

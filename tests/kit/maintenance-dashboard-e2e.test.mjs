@@ -168,7 +168,12 @@ function assertNoPrivateTransport(value, { capability = true } = {}) {
   ].map((item) => item.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')));
 }
 
-test('dashboard HTTP executes and undoes one maintenance finding through the real service stack', async (t) => {
+// These integration fixtures require native POSIX ownership or durable mutation storage.
+const POSIX_MUTATION_ONLY = process.platform === 'win32'
+  ? { skip: 'native maintenance mutation requires POSIX ownership and durable directory flush support' }
+  : {};
+
+test('dashboard HTTP executes and undoes one maintenance finding through the real service stack', POSIX_MUTATION_ONLY, async (t) => {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-maint-http-e2e-'));
   const controlRoot = path.join(scratch, 'control');
   t.after(() => fs.rmSync(scratch, { recursive: true, force: true }));

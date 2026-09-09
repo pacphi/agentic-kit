@@ -214,6 +214,11 @@ function writeReceipt(transactionsRoot, receipt = INTERRUPTED_RECEIPT) {
 
 // ── INV-001 / PERF-001: refresh, then read without a collector call ────────
 
+// These integration fixtures require native POSIX ownership or durable mutation storage.
+const POSIX_MUTATION_ONLY = process.platform === 'win32'
+  ? { skip: 'native maintenance mutation requires POSIX ownership and durable directory flush support' }
+  : {};
+
 test('INV-001: refreshInventory builds a valid inventory and persists it as last-good', async (t) => {
   const h = buildHarness(t);
   const { inventoryId, capturedAt } = await h.service.refreshInventory();
@@ -953,7 +958,7 @@ test("the inventory's sourceCoverage excludes non-filesystem automatic sources; 
 
 // ── ACT-001: activity aggregates receipts, dispositions, and scan history ──
 
-test('ACT-001: activity() aggregates an unfinished receipt into recovery', async (t) => {
+test('ACT-001: activity() aggregates an unfinished receipt into recovery', POSIX_MUTATION_ONLY, async (t) => {
   const h = buildHarness(t);
   writeReceipt(h.transactionsRoot);
   const activity = h.service.activity();
@@ -964,7 +969,7 @@ test('ACT-001: activity() aggregates an unfinished receipt into recovery', async
 
 // ── RCV-005/006: auditInterruption is read-only; reconcile is gated ────────
 
-test('RCV-005: auditInterruption reads an unfinished receipt without mutating it', async (t) => {
+test('RCV-005: auditInterruption reads an unfinished receipt without mutating it', POSIX_MUTATION_ONLY, async (t) => {
   const h = buildHarness(t);
   writeReceipt(h.transactionsRoot);
   const [audit] = await h.service.auditInterruption({ receiptIds: [INTERRUPTED_RECEIPT.id] });
@@ -976,7 +981,7 @@ test('RCV-005: auditInterruption reads an unfinished receipt without mutating it
   assert.equal(activityAfter.recovery.length, 1, 'the audit must not resolve the receipt');
 });
 
-test('RCV-006: reconcile refuses without explicit confirmation', async (t) => {
+test('RCV-006: reconcile refuses without explicit confirmation', POSIX_MUTATION_ONLY, async (t) => {
   const h = buildHarness(t);
   writeReceipt(h.transactionsRoot);
   await assert.rejects(() => h.service.reconcile({ receiptId: INTERRUPTED_RECEIPT.id, outcome: 'record-no-change' }));

@@ -2,6 +2,8 @@ import { formatLocalDateTimeLong, formatLocalDay, formatLocalTime } from '../../
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import vm from 'node:vm';
 import { catalogSurfaceSpecs } from '../../src/lib/footprint/catalog-surfaces.mjs';
 import { JS } from '../../src/lib/dashboard/client.mjs';
@@ -118,10 +120,11 @@ test('filesystem completion excludes provider checks without inventing their suc
 test('Hermes path honors HERMES_HOME and otherwise resolves the user configuration', () => {
   const previous = process.env.HERMES_HOME;
   try {
-    process.env.HERMES_HOME = '/tmp/maintenance-hermes-test';
-    assert.equal(hermesDir(), '/tmp/maintenance-hermes-test');
+    const configured = path.join(os.tmpdir(), 'maintenance-hermes-test');
+    process.env.HERMES_HOME = configured;
+    assert.equal(hermesDir(), configured);
     delete process.env.HERMES_HOME;
-    assert.ok(hermesDir().endsWith('/.hermes'));
+    assert.equal(hermesDir(), path.join(os.homedir(), '.hermes'));
   } finally { if (previous === undefined) delete process.env.HERMES_HOME; else process.env.HERMES_HOME = previous; }
 });
 
@@ -184,14 +187,15 @@ test('Hosts and external Adapters are separate filter axes', () => {
   assert.equal(page.facetCounts.adapter.codex,undefined);
 });
 test('implicit managed host directories do not become catalog projects', () => {
-  const roots={claudeRoot:'/fixture/.claude',claudeMcpFile:'/fixture/.claude.json',codexRoot:'/fixture/.codex',codexConfigFile:'/fixture/.codex/config.toml',opencodeRoot:'/fixture/.config/opencode',opencodeConfigFile:'/fixture/.config/opencode/opencode.json',agentsRoot:'/fixture/.agents',cwd:process.cwd(),projects:['/fixture/.codex/plugins/example/1.2.0','/fixture/work/non-git','/fixture/work/1.2.0'],env:{}};
+  const fixturePath = (...segments) => path.resolve('/fixture', ...segments);
+  const roots={claudeRoot:fixturePath('.claude'),claudeMcpFile:fixturePath('.claude.json'),codexRoot:fixturePath('.codex'),codexConfigFile:fixturePath('.codex', 'config.toml'),opencodeRoot:fixturePath('.config', 'opencode'),opencodeConfigFile:fixturePath('.config', 'opencode', 'opencode.json'),agentsRoot:fixturePath('.agents'),cwd:process.cwd(),projects:[fixturePath('.codex', 'plugins', 'example', '1.2.0'),fixturePath('work', 'non-git'),fixturePath('work', '1.2.0')],env:{}};
   const readers={marker:()=>({}),markdown:()=>({}),stems:()=>({}),manifest:()=>({}),toml:()=>({})};
   const surfaces=catalogSurfaceSpecs(roots,readers,{fsImpl:{readFileSync:()=> '{}'}}).specs;
-  assert.equal(surfaces.some((s)=>s.project==='/fixture/.codex/plugins/example/1.2.0'),false);
-  assert.ok(surfaces.some((s)=>s.project==='/fixture/work/non-git'));
-  assert.ok(surfaces.some((s)=>s.project==='/fixture/work/1.2.0'));
-  roots.projects=[{path:'/fixture/.codex/projects/explicit',configured:true}];
-  assert.ok(catalogSurfaceSpecs(roots,readers,{fsImpl:{readFileSync:()=> '{}'}}).specs.some((s)=>s.project==='/fixture/.codex/projects/explicit'));
+  assert.equal(surfaces.some((s)=>s.project===fixturePath('.codex', 'plugins', 'example', '1.2.0')),false);
+  assert.ok(surfaces.some((s)=>s.project===fixturePath('work', 'non-git')));
+  assert.ok(surfaces.some((s)=>s.project===fixturePath('work', '1.2.0')));
+  roots.projects=[{path:fixturePath('.codex', 'projects', 'explicit'),configured:true}];
+  assert.ok(catalogSurfaceSpecs(roots,readers,{fsImpl:{readFileSync:()=> '{}'}}).specs.some((s)=>s.project===fixturePath('.codex', 'projects', 'explicit')));
 });
 
 test('automatic host plugin repositories do not become projects; explicit sources retain them', () => {

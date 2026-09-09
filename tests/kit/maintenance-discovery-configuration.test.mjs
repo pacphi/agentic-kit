@@ -103,13 +103,14 @@ test('MNT-DSC-004: automatic sources toggle, and exact/recursive exclusions can 
 });
 
 test('MNT-DSC-005: a recursive exclusion covers a newly discovered descendant automatically', () => {
-  const configuration = { exclusions: [{ path: '/repos/big', recursive: true }] };
-  assert.equal(exclusionAppliesTo(configuration, '/repos/big'), true);
-  assert.equal(exclusionAppliesTo(configuration, path.join('/repos/big', 'new-child', 'deeper')), true);
-  assert.equal(exclusionAppliesTo(configuration, '/repos/other'), false);
-  const exact = { exclusions: [{ path: '/repos/big/one', recursive: false }] };
-  assert.equal(exclusionAppliesTo(exact, '/repos/big/one'), true);
-  assert.equal(exclusionAppliesTo(exact, '/repos/big/one/child'), false);
+  const root = path.resolve('/repos');
+  const configuration = { exclusions: [{ path: path.join(root, 'big'), recursive: true }] };
+  assert.equal(exclusionAppliesTo(configuration, path.join(root, 'big')), true);
+  assert.equal(exclusionAppliesTo(configuration, path.join(path.join(root, 'big'), 'new-child', 'deeper')), true);
+  assert.equal(exclusionAppliesTo(configuration, path.join(root, 'other')), false);
+  const exact = { exclusions: [{ path: path.join(root, 'big', 'one'), recursive: false }] };
+  assert.equal(exclusionAppliesTo(exact, path.join(root, 'big', 'one')), true);
+  assert.equal(exclusionAppliesTo(exact, path.join(root, 'big', 'one', 'child')), false);
 });
 
 test('MNT-DSC-006: configuration.mjs exposes no import/export surface', async () => {

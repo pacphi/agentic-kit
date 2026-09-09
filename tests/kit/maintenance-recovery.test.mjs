@@ -83,7 +83,12 @@ function provider(current, events = [], overrides = {}) {
 
 const registry = (implementation) => new Map([[implementation.id, implementation]]);
 
-test('mutation lock handles a crash before any receipt and only reclaims a proven dead same-machine owner', (t) => {
+// These integration fixtures require native POSIX ownership or durable mutation storage.
+const POSIX_MUTATION_ONLY = process.platform === 'win32'
+  ? { skip: 'native maintenance mutation requires POSIX ownership and durable directory flush support' }
+  : {};
+
+test('mutation lock handles a crash before any receipt and only reclaims a proven dead same-machine owner', POSIX_MUTATION_ONLY, (t) => {
   const root = fixture(t);
   const first = acquireMaintenanceLock(root, {
     machineId: 'machine-a', pid: 424242, nonce: () => 'owner-a',
@@ -153,7 +158,7 @@ test('mutation lock never steals live, foreign-machine, malformed, symlinked, or
   }
 });
 
-test('prepared receipt with no dispatched entry is sealed as aborted without provider inspection', async (t) => {
+test('prepared receipt with no dispatched entry is sealed as aborted without provider inspection', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const tx = receipt(root, 'prepared', [entry('a', { state: 'prepared' })]);
   const events = [];
@@ -166,7 +171,7 @@ test('prepared receipt with no dispatched entry is sealed as aborted without pro
   assert.equal(readMaintenanceReceipt(root, tx.id).receipt.recovery.outcome, 'journal-proved-no-dispatch');
 });
 
-test('apply-side recovery commits only an exact recorded postimage and refreshes catalog', async (t) => {
+test('apply-side recovery commits only an exact recorded postimage and refreshes catalog', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   for (const status of ['verifying', 'refreshing-catalog']) {
     const tx = receipt(root, status, [entry('a', {
@@ -187,7 +192,7 @@ test('apply-side recovery commits only an exact recorded postimage and refreshes
   }
 });
 
-test('catalog refresh failure preserves a verified postimage as recovery-required', async (t) => {
+test('catalog refresh failure preserves a verified postimage as recovery-required', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const tx = receipt(root, 'refreshing-catalog', [entry('a', {
     state: 'verified', outcome: { status: 'applied', postFingerprint: 'post-a' },
@@ -202,7 +207,7 @@ test('catalog refresh failure preserves a verified postimage as recovery-require
   assert.equal(result.receipt.recovery.reason, 'catalog-refresh-incomplete');
 });
 
-test('recovery records no-change only against an explicit observed preimage', async (t) => {
+test('recovery records no-change only against an explicit observed preimage', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const proven = receipt(root, 'applying', [entry('a')], 'proven-pre');
   const recovered = await recoverMaintenanceReceipt({
@@ -220,7 +225,7 @@ test('recovery records no-change only against an explicit observed preimage', as
   assert.match(inconclusive.error, /inconclusive/i);
 });
 
-test('undo recovery restores terminal state only when every current image is uniform and proven', async (t) => {
+test('undo recovery restores terminal state only when every current image is uniform and proven', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const restoredTx = receipt(root, 'undoing', [entry('a', {
     state: 'rolled-back', outcome: { status: 'applied', postFingerprint: 'post-a' },
@@ -246,7 +251,7 @@ test('undo recovery restores terminal state only when every current image is uni
   assert.equal(unchanged.status, 'committed');
 });
 
-test('provider drift, mixed images, and inspection ambiguity remain recovery-required without mutation', async (t) => {
+test('provider drift, mixed images, and inspection ambiguity remain recovery-required without mutation', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const cases = [
     { name: 'missing', providers: new Map(), current: null },
@@ -272,7 +277,7 @@ test('provider drift, mixed images, and inspection ambiguity remain recovery-req
   }
 });
 
-test('receipt integrity and receipt-directory path safety are required before reconciliation', async (t) => {
+test('receipt integrity and receipt-directory path safety are required before reconciliation', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const tx = receipt(root, 'prepared', [entry('a', { state: 'prepared' })], 'tampered');
   fs.writeFileSync(tx.file, fs.readFileSync(tx.file, 'utf8').replace('prepared', 'applying'));
@@ -291,7 +296,7 @@ test('receipt integrity and receipt-directory path safety are required before re
   assert.equal(linked.status, 'receipt-refused');
 });
 
-test('recovery is serialized, idempotent, and leaves original plan selection consumed', async (t) => {
+test('recovery is serialized, idempotent, and leaves original plan selection consumed', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const tx = receipt(root, 'prepared', [entry('a', { state: 'prepared' })], 'idempotent');
   const active = acquireMaintenanceLock(root);
@@ -323,7 +328,7 @@ test('recovery is serialized, idempotent, and leaves original plan selection con
   assert.match(replay.error, /consumed/i);
 });
 
-test('service persists explicit preimages, exposes recovery history, and requires confirmation', async (t) => {
+test('service persists explicit preimages, exposes recovery history, and requires confirmation', POSIX_MUTATION_ONLY, async (t) => {
   const controlRoot = fixture(t);
   const transactionsRoot = path.join(controlRoot, 'transactions');
   const tx = receipt(transactionsRoot, 'applying', [entry('a')], 'service');

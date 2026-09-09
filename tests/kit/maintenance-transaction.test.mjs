@@ -81,6 +81,11 @@ function provider(events, overrides = {}) {
 
 const registry = (p) => new Map([[p.id, p]]);
 
+// These integration fixtures require native POSIX ownership or durable mutation storage.
+const POSIX_MUTATION_ONLY = process.platform === 'win32'
+  ? { skip: 'native maintenance mutation requires POSIX ownership and durable directory flush support' }
+  : {};
+
 test('apply refuses stale, tampered, duplicate, mixed, and unavailable selections before providers run', async (t) => {
   const root = fixture(t);
   const cases = [
@@ -115,7 +120,7 @@ test('apply refuses stale, tampered, duplicate, mixed, and unavailable selection
   }
 });
 
-test('a single selected action preflights before the first effect and success is verified and receipted', async (t) => {
+test('a single selected action preflights before the first effect and success is verified and receipted', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const events = [];
   const selectedPlan = plan([action('a')]);
@@ -151,7 +156,7 @@ test('MNT-ACT-001: a plan with more than one action refuses apply before any pro
   assert.deepEqual(fs.readdirSync(root), [], 'no lock or receipt directory is created before the one-action check');
 });
 
-test('an opaque placementId on the action rides through the plan digest into the sealed receipt entry', async (t) => {
+test('an opaque placementId on the action rides through the plan digest into the sealed receipt entry', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const placementId = `plc_${'a'.repeat(20)}`;
   const events = [];
@@ -166,7 +171,7 @@ test('an opaque placementId on the action rides through the plan digest into the
   assert.equal(receipt.actions[0].placementId, placementId);
 });
 
-test('a legacy action with no placementId still applies exactly as before and the receipt omits the field', async (t) => {
+test('a legacy action with no placementId still applies exactly as before and the receipt omits the field', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const events = [];
   const selectedPlan = plan([action('a')]);
@@ -180,7 +185,7 @@ test('a legacy action with no placementId still applies exactly as before and th
   assert.equal('placementId' in receipt.actions[0], false);
 });
 
-test('a malformed placementId on a receipt entry is never invented or passed through', async (t) => {
+test('a malformed placementId on a receipt entry is never invented or passed through', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const events = [];
   const selectedPlan = plan([action('a', { placementId: 'not-an-opaque-id' })]);
@@ -208,7 +213,7 @@ test('live plan drift refuses after preflight and before apply', async (t) => {
   assert.deepEqual(events, ['preflight:a']);
 });
 
-test('a refused apply after dispatch compensates the one applied action, while uncertain outcomes require recovery', async (t) => {
+test('a refused apply after dispatch compensates the one applied action, while uncertain outcomes require recovery', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const events = [];
   const selectedPlan = plan([action('a')]);
@@ -245,7 +250,7 @@ test('a refused apply after dispatch compensates the one applied action, while u
   assert.equal(listUnfinishedMaintenanceReceipts(path.join(root, 'uncertain')).length, 1);
 });
 
-test('a provider exception after dispatch is an unknown outcome and is never retried or blindly rolled back', async (t) => {
+test('a provider exception after dispatch is an unknown outcome and is never retried or blindly rolled back', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const events = [];
   const selectedPlan = plan();
@@ -263,7 +268,7 @@ test('a provider exception after dispatch is an unknown outcome and is never ret
   assert.equal(receipt.actions[0].state, 'outcome-unknown');
 });
 
-test('guarded undo verifies current postimage and refuses drift without calling provider undo', async (t) => {
+test('guarded undo verifies current postimage and refuses drift without calling provider undo', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const events = [];
   const p = provider(events);
@@ -293,7 +298,7 @@ test('guarded undo verifies current postimage and refuses drift without calling 
   assert.deepEqual(events, ['undo:a', 'verify-undo:a']);
 });
 
-test('receipt seal tampering and an active mutation lock fail closed', async (t) => {
+test('receipt seal tampering and an active mutation lock fail closed', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const events = [];
   const p = provider(events);
@@ -356,7 +361,7 @@ test('provider availability and fresh-state checks fail before transaction creat
   }
 });
 
-test('verification failure rolls back, while irreversible and failed compensation stay recovery-required', async (t) => {
+test('verification failure rolls back, while irreversible and failed compensation stay recovery-required', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   for (const [name, rollback, overrides, expectedState] of [
     ['reversible', 'reversible', { async verify() { return { ok: false }; } }, 'rolled-back'],
@@ -379,7 +384,7 @@ test('verification failure rolls back, while irreversible and failed compensatio
   }
 });
 
-test('undo rejects ineligible receipts, busy state, providers, outcomes, and verification', async (t) => {
+test('undo rejects ineligible receipts, busy state, providers, outcomes, and verification', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const makeApplied = async (name) => {
     const selectedPlan = plan([], { planId: name, planDigest: `digest-${name}`, actions: [action('a')] });
@@ -433,7 +438,7 @@ test('undo rejects ineligible receipts, busy state, providers, outcomes, and ver
   }
 });
 
-test('transaction store rejects broad roots, unsafe identities, oversized data, and exposes corrupt recovery state', (t) => {
+test('transaction store rejects broad roots, unsafe identities, oversized data, and exposes corrupt recovery state', POSIX_MUTATION_ONLY, (t) => {
   const root = fixture(t);
   const defaults = createMaintenanceTransaction(path.join(root, 'defaults'));
   assert.match(defaults.id, /^mnt-/);
@@ -463,7 +468,7 @@ test('transaction store rejects broad roots, unsafe identities, oversized data, 
   lock.release();
 });
 
-test('journal and lock I/O failures remain explicit and do not masquerade as success', async (t) => {
+test('journal and lock I/O failures remain explicit and do not masquerade as success', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const selectedPlan = plan();
   let renames = 0;
@@ -513,7 +518,7 @@ test('journal and lock I/O failures remain explicit and do not masquerade as suc
   assert.throws(() => acquireMaintenanceLock(path.join(root, 'lock-failure'), { fsImpl: lockFailureFs }), /permission denied/);
 });
 
-test('undo refuses an unfinished receipt and recognizes an already rolled-back receipt', async (t) => {
+test('undo refuses an unfinished receipt and recognizes an already rolled-back receipt', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const selectedPlan = plan();
   const uncertain = await applyMaintenancePlan({
@@ -582,7 +587,7 @@ function injectedReceipt(root, selectedPlan, status, nonce) {
   });
 }
 
-test('apply repeats unfinished and replay authorization reads under the acquired lock', async (t) => {
+test('apply repeats unfinished and replay authorization reads under the acquired lock', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   for (const [name, status, expected] of [
     ['unfinished', 'prepared', /requires recovery/i],
@@ -607,7 +612,7 @@ test('apply repeats unfinished and replay authorization reads under the acquired
   }
 });
 
-test('undo rereads receipt eligibility under lock before any current-state inspection', async (t) => {
+test('undo rereads receipt eligibility under lock before any current-state inspection', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   const selectedPlan = plan();
   const applied = await applyMaintenancePlan({
@@ -634,7 +639,7 @@ test('undo rereads receipt eligibility under lock before any current-state inspe
   assert.deepEqual(events, []);
 });
 
-test('undo catalog refresh false or throw seals recovery-required without repeating provider undo', async (t) => {
+test('undo catalog refresh false or throw seals recovery-required without repeating provider undo', POSIX_MUTATION_ONLY, async (t) => {
   const root = fixture(t);
   for (const [name, refresh] of [
     ['false-object', async () => ({ ok: false })],

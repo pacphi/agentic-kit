@@ -43,10 +43,13 @@ test('MNT-PERF-005: a checkpoint round-trips with a bounded size and sealed inte
   assert.equal(written.schemaVersion, 'maintenance-scan-checkpoint/v1');
   assert.ok(written.integrity?.digest);
 
-  const stat = fs.lstatSync(path.join(dir, `${written.scanId}.json`));
-  assert.equal(stat.mode & 0o777, 0o600);
-  const dirStat = fs.lstatSync(dir);
-  assert.equal(dirStat.mode & 0o777, 0o700);
+  // Windows permissions do not expose POSIX owner/group mode bits.
+  if (process.platform !== 'win32') {
+    const stat = fs.lstatSync(path.join(dir, `${written.scanId}.json`));
+    assert.equal(stat.mode & 0o777, 0o600);
+    const dirStat = fs.lstatSync(dir);
+    assert.equal(dirStat.mode & 0o777, 0o700);
+  }
 
   const read = store.read(written.scanId);
   assert.deepEqual(read.pendingPartitions, written.pendingPartitions);
