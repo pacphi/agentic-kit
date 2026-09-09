@@ -1,4 +1,5 @@
 import os from 'node:os';
+import { auditAqeArtifacts } from '../aqe-artifacts.mjs';
 import path from 'node:path';
 
 import {
@@ -8,10 +9,10 @@ import {
 
 const SCHEMA = Object.freeze({
   id: 'claude-hooks-2.1.258',
-  verifiedVersions: ['2.1.258'],
+  verifiedVersions: ['2.1.258', '2.1.266'],
   timeoutUnits: 'seconds',
   evidence: 'https://code.claude.com/docs/en/hooks',
-  verifiedAt: '2026-09-01',
+  verifiedAt: '2026-09-09',
 });
 
 const MANAGED = Object.freeze({
@@ -291,7 +292,9 @@ export function auditClaudeHooks({
   if (plugins.registry) sources.push(plugins.registry);
   sources.push(...plugins.sources);
   const records = sources.flatMap((source) => recordsFrom(source, claudeVersion)).sort((a, b) => a.source.file.localeCompare(b.source.file) || a.event.localeCompare(b.event));
-  const plan = remediation(records);
+  const artifacts = auditAqeArtifacts(projectRoots);
+  sources.push(...artifacts.sources);
+  const plan = [...remediation(records), ...artifacts.plan];
   const gaps = [
     'Claude runtime selection, organization policy, and trust decisions are not inferred from static files',
     'Skill, subagent, and session-defined hooks outside settings/plugin manifests are reported only when declared through an inspected plugin hook document',
@@ -299,7 +302,7 @@ export function auditClaudeHooks({
   const coverage = { status: 'partial', gaps };
   return {
     schemaVersion: 2, host: 'claude', mode: 'read-only', observedVersion: claudeVersion,
-    hostSchema: { ...SCHEMA, confidence: verified ? 'verified' : 'syntax-only' },
+    hostSchema: { ...SCHEMA, id: verified ? `claude-hooks-${claudeVersion}` : SCHEMA.id, confidence: verified ? 'verified' : 'syntax-only' },
     sources: sources.map(publicSource), records, plan, issues: [], coverage,
     summary: summarizeHostReport({ sources, records, plan, coverage: coverage.status }),
   };

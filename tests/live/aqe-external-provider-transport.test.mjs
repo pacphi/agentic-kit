@@ -25,7 +25,7 @@ const PROVIDER_ID = 'aqe-live-proof';
 const MODEL_ID = 'proof-model';
 const COMPLETION = 'LIVE_AQE_628_OK';
 const AQE_BIN = process.env.AQE_BIN ?? 'aqe';
-const REQUIRED_AQE = [3, 13, 12];
+const REQUIRED_AQE = [3, 14, 1];
 
 function versionTuple(text) {
   const match = String(text).match(/(\d+)\.(\d+)\.(\d+)/);
@@ -143,7 +143,7 @@ function parseJson(label, text) {
   }
 }
 
-async function mcpGenerate({ cwd, env }) {
+async function mcpGenerate({ cwd, env, advisorOnly = false }) {
   const child = spawn(AQE_BIN, ['mcp'], {
     cwd,
     env: { ...env, AQE_MEMORY_BACKEND: 'memory' },
@@ -194,7 +194,19 @@ async function mcpGenerate({ cwd, env }) {
     });
     assert.equal(initialized.error, undefined, JSON.stringify(initialized.error));
     child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'initialized', params: {} })}\n`);
-    const generation = await request(2, 'tools/call', {
+    // The stdio server eagerly initializes its fleet before announcing Ready.
+    if (advisorOnly) {
+      const advisor = await request(3, 'tools/call', {
+        name: 'advisor_consult',
+        arguments: { agent: 'qe-test-architect', task: 'Suggest a deterministic addition test', provider: PROVIDER_ID, model: MODEL_ID },
+      });
+      assert.equal(advisor.error, undefined, JSON.stringify(advisor.error));
+      assert.match(JSON.stringify(advisor.result), new RegExp(COMPLETION), stderrTail);
+      assert.match(JSON.stringify(advisor.result), new RegExp(`provider=${PROVIDER_ID}`));
+      assert.match(JSON.stringify(advisor.result), new RegExp(`model=${MODEL_ID}`));
+      return { result: advisor.result, stderr: stderrTail };
+    }
+    const generation = await request(4, 'tools/call', {
       name: 'test_generate_enhanced',
       arguments: {
         sourceCode: 'export function add(a, b) { return a + b; }',
@@ -225,7 +237,7 @@ async function mcpGenerate({ cwd, env }) {
   }
 }
 
-test('Agentic-QE 3.13.12+ serves an admitted provider through CLI and MCP', {
+test('Agentic-QE 3.14.1+ serves advisors without fallback and generation with explicit fallback', {
   timeout: 240_000,
 }, async (t) => {
   const version = runAqe(['--version']);
@@ -264,7 +276,7 @@ test('Agentic-QE 3.13.12+ serves an admitted provider through CLI and MCP', {
   cfg.hostAdapters = [{ name: PROVIDER_ID, source: manifestFile, contract: 1 }];
   cfg.integrations.hosts[PROVIDER_ID] = true;
   cfg.providers.aqeProvider = PROVIDER_ID;
-  cfg.providers.aqeFallback = [{ provider: PROVIDER_ID, models: [MODEL_ID] }];
+  cfg.providers.aqeFallback = [];
   saveKitConfig(cfg, configFile);
   recordConsent(PROVIDER_ID, integrity.hash, { file: consentFile });
   recordTierResult(PROVIDER_ID, 'aqe-provider', {
@@ -287,6 +299,8 @@ test('Agentic-QE 3.13.12+ serves an admitted provider through CLI and MCP', {
   assert.ok(fs.existsSync(aqeRouterFile(projectRoot)));
   const projectedConfig = JSON.parse(fs.readFileSync(aqeRouterFile(projectRoot), 'utf8'));
   assert.deepEqual(projectedConfig.providers[PROVIDER_ID], { enabled: true });
+  assert.equal(projectedConfig.defaultProvider, PROVIDER_ID);
+  assert.ok(!(projectedConfig.fallbackChain?.entries ?? []).some((entry) => entry.provider === PROVIDER_ID));
 
   const env = {
     ...process.env,
@@ -303,6 +317,21 @@ test('Agentic-QE 3.13.12+ serves an admitted provider through CLI and MCP', {
   const providerList = parseJson('aqe llm providers', providers.stdout);
   assert.match(JSON.stringify(providerList), new RegExp(PROVIDER_ID));
 
+  const advice = runAqe(['llm', 'advise', '--stdin', '--provider', PROVIDER_ID, '--model', MODEL_ID, '--json'], {
+    cwd: projectRoot, env,
+    input: JSON.stringify({ taskDescription: 'Test addition', messages: [{ role: 'user', content: 'Suggest a deterministic test' }] }),
+  });
+  assert.equal(advice.status, 0, advice.stderr);
+  assert.match(advice.stdout, new RegExp(COMPLETION));
+  assert.match(advice.stdout, new RegExp(`provider=${PROVIDER_ID}`));
+  assert.match(advice.stdout, new RegExp(`model=${MODEL_ID}`));
+
+  await mcpGenerate({ cwd: projectRoot, env, advisorOnly: true });
+
+  // Generation remains a separate explicit-fallback conformance path.
+  cfg.providers.aqeFallback = [{ provider: PROVIDER_ID, models: [MODEL_ID] }];
+  saveKitConfig(cfg, configFile);
+  assert.equal(applyAqeRouter(cfg, projectRoot).ok, true);
   const mcp = await mcpGenerate({ cwd: projectRoot, env });
   const mcpText = JSON.stringify(mcp.result);
   assert.match(mcpText, new RegExp(COMPLETION), mcp.stderr);

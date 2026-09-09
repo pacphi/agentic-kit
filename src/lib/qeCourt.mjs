@@ -25,6 +25,7 @@
 // shared one 'unknown' vendor — it may flag stricter, but never the reverse.
 import fs from 'node:fs';
 import path from 'node:path';
+import { globalRoot } from './paths.mjs';
 import { readJson } from './settings.mjs';
 import { installedVersion, cmpVersions } from './versions.mjs';
 
@@ -107,26 +108,20 @@ export function readQeCourtConfig(root) {
   return readJson(qeCourtConfigPath(root), null);
 }
 
-function anyExists(files) {
-  return files.some((file) => fs.existsSync(file));
-}
-
-/** Fail-closed consumer readiness for the upstream-owned court skill. This does
- * not implement or execute the court. It proves only that both host projections
- * are present, agree, and carry the schema/referee/oracle assets their own
- * metadata and evals reference. Provider-seat readiness is a separate live
- * proof. */
-export function qeCourtReadiness(root) {
-  const projections = [
-    { host: 'Claude', dir: path.join(root, '.claude', 'skills', 'qe-court') },
-    { host: 'Codex', dir: path.join(root, '.agents', 'skills', 'qe-court') },
-  ];
+/** Static package contract only: presence never proves execution or provider identity. */
+export function qeCourtReadiness(root, {
+  hosts = { claude: true, codex: true },
+  packageRoot = path.join(globalRoot(), 'agentic-qe'),
+} = {}) {
   const artifactIssues = [];
+  const projections = [{ host: 'Canonical', dir: path.join(root, '.claude', 'skills', 'qe-court') }];
+  // AQE's curated Codex manifest does not install qe-court. Check a legacy
+  // projection only when it exists and its host is enabled; never require it.
+  const codexDir = path.join(root, '.agents', 'skills', 'qe-court');
+  if (hosts.codex && fs.existsSync(codexDir)) projections.push({ host: 'Codex', dir: codexDir });
   const configs = [];
-  const required = [
-    'SKILL.md', 'config.json', 'schemas/output.json',
-    'scripts/validate-config.json', 'evals/qe-court.yaml',
-  ];
+  const required = ['SKILL.md', 'config.json', 'schemas/output.json',
+    'scripts/validate-config.json', 'evals/qe-court.yaml'];
   for (const projection of projections) {
     for (const rel of required) {
       if (!fs.existsSync(path.join(projection.dir, rel))) {
@@ -139,20 +134,33 @@ export function qeCourtReadiness(root) {
     if (schemaRef && !fs.existsSync(path.resolve(projection.dir, schemaRef))) {
       artifactIssues.push(`${projection.host} projection missing referenced ${schemaRef.replace(/^\.\//, '')}`);
     }
+    // Old skills/evals point into the AQE source repository, not its public API.
+    for (const rel of ['SKILL.md', 'evals/qe-court.yaml']) {
+      const file = path.join(projection.dir, rel);
+      if (fs.existsSync(file) && /(?:src\/skills|tests\/unit\/skills)\/qe-court\/referee/.test(fs.readFileSync(file, 'utf8'))) {
+        artifactIssues.push(`${projection.host} ${rel} references obsolete repository-only referee paths`);
+      }
+    }
   }
-  if (configs.every(Boolean) && JSON.stringify(configs[0]) !== JSON.stringify(configs[1])) {
-    artifactIssues.push('Claude and Codex qe-court config projections differ');
+  if (configs.length > 1 && configs.every(Boolean) && JSON.stringify(configs[0]) !== JSON.stringify(configs[1])) {
+    artifactIssues.push('Canonical and Codex qe-court config projections differ');
   }
-  if (!anyExists(['.ts', '.js', '.mjs'].map((ext) => path.join(root, 'src', 'skills', 'qe-court', `referee${ext}`)))) {
-    artifactIssues.push('consumer is missing the referenced qe-court referee implementation');
-  }
-  if (!anyExists(['.ts', '.js', '.mjs'].map((ext) => path.join(root, 'tests', 'unit', 'skills', 'qe-court', `referee.test${ext}`)))) {
-    artifactIssues.push('consumer is missing the referenced qe-court referee oracle');
+  const pkg = readJson(path.join(packageRoot, 'package.json'), null);
+  const exported = pkg?.exports?.['./skills/qe-court/referee'];
+  const referee = typeof exported === 'string' ? exported : exported?.import;
+  const cli = pkg?.bin?.['aqe-court-referee'];
+  for (const [label, target] of [['referee export', referee], ['referee executable', cli]]) {
+    const resolved = typeof target === 'string' ? path.resolve(packageRoot, target) : null;
+    if (!resolved || !resolved.startsWith(`${path.resolve(packageRoot)}${path.sep}`) || !fs.existsSync(resolved)) {
+      artifactIssues.push(`installed agentic-qe is missing its public ${label}`);
+    }
   }
   const routingViolations = configs[0] ? validateCourtConfig(configs[0]) : ['missing-config'];
   return {
     ready: routingViolations.length === 0 && artifactIssues.length === 0,
     routingViolations,
     artifactIssues,
+    evidence: 'static-artifacts',
+    providerExecutionProven: false,
   };
 }

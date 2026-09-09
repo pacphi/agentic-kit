@@ -115,6 +115,12 @@ versions. The table below describes the current contract.
 | `.agents/skills/` | Ruflo's auto-detected Codex and skills.sh projections are suppressed. Existing unreceipted skills are preserved for review; agentic-kit never infers deletion ownership from a familiar name. AQE may install its current curated Codex skills when that integration is enabled. | Only the explicitly enabled host integration may populate this root. |
 | Project `AGENTS.md` | Arbitrary project content and upstream-owned sentinels are preserved. Agentic-kit replaces/removes only its own complete sentinel-delimited blocks and collapses duplicate owned blocks. | Created only when a selected integration needs project-scoped managed guidance. |
 
+For AQE 3.14.1 and newer, Codex-enabled setup passes the persisted
+`kit.json` preference `"aqeCodexGuidance": "compact"` to AQE's initializer.
+Use `"full"` for AQE's full eager instructions or `"none"` to omit them.
+An explicit preference survives subsequent setup runs; older AQE versions retain
+their supported initializer arguments. AQE owns and updates its guidance block.
+
 Setup with Codex enabled inventories the effective user Codex MCP configuration
 even in machine-only mode. When project setup is active it inventories that
 project's Codex MCP configuration too. An exact recursive

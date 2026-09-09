@@ -8,6 +8,10 @@ import path from 'node:path';
 import { run as runCmd, have } from '../../lib/exec.mjs';
 import { aidefencePresent, securityPresent } from '../../lib/natives.mjs';
 import { scanRvf } from '../../lib/rvf.mjs';
+import { aqeEmbeddingConfiguration, classifyAqeStartup, probeAqeBrowser } from '../../lib/aqe-readiness.mjs';
+import { probeMcp } from '../../lib/mcp-probe.mjs';
+import { probeAqeEmbeddings } from '../../lib/aqe-embedding-probe.mjs';
+import { aqeRoot } from '../../lib/paths.mjs';
 import { projectAqeDir } from '../../lib/paths.mjs';
 import { findMemoryEntry } from '../../lib/project-memory.mjs';
 import { projectMemoryEnv } from '../../lib/ruflo-memory.mjs';
@@ -32,7 +36,8 @@ Suites:
   learning    train a cycle in a temp dir; assert patterns persist
   memory      store/retrieve/purge in a temp dir; confirm the actual DB writer
   security    packages load; defend flags injection / passes clean
-  aqe         RVF store healthy; aqe status has no FsyncFailed
+  aqe         storage, embedding configuration/provenance, and browser payload
+  mcp         initialize/tools-list for effective Codex AQE and Brain commands
   providers   kit config matches installed CLIs; ruflo/aqe see the wiring
   harvest     seed real episodes, run the write path, assert real skills come back
   deja-vu     content-free structural proof of CLI, doctor, wiring, and index
@@ -80,11 +85,11 @@ async function verifyMemory() {
   try {
     const init = await runCmd('ruflo', ['memory', 'init'], { cwd: tmp, env, timeout: 120_000 });
     if (init.code !== 0) { fail('ruflo memory init failed'); return false; }
+    stored = true; // a failing process may still have persisted its write
     const put = await runCmd('ruflo',
       ['memory', 'store', '-k', key, '--value', value, '-n', namespace],
       { cwd: tmp, env, timeout: 120_000 });
     if (put.code !== 0) { fail(`ruflo memory store failed: ${(put.stderr || '').slice(0, 160)}`); return false; }
-    stored = true;
 
     const get = await runCmd('ruflo',
       ['memory', 'retrieve', '-k', key, '-n', namespace, '--value-only'],
@@ -134,14 +139,57 @@ async function verifySecurity() {
 }
 
 async function verifyAqe() {
-  heading('aqe — on ruvector: RVF store healthy, no FsyncFailed at startup');
+  heading('aqe — separate storage, embedding, and browser observations');
   const findings = scanRvf(projectAqeDir(process.cwd()));
   if (findings.length) { fail(`${findings.length} oversized RVF store(s) — run: ak sync`); return false; }
-  ok('RVF store artifacts healthy');
+  ok('no oversized RVF stores detected (not a storage integrity proof)');
   const st = await runCmd('aqe', ['status'], { timeout: 120_000 });
-  if (/FsyncFailed|0x0303/.test(st.stdout + st.stderr)) { fail('aqe status reports FsyncFailed — off ruvector'); return false; }
-  (st.code === 0 ? ok : warn)('aqe status clean (no FsyncFailed)');
-  return true;
+  const startup = classifyAqeStartup(st);
+  (startup.status === 'observed' ? ok : fail)(startup.reason);
+  const embedding = aqeEmbeddingConfiguration();
+  const configured = embedding.status === 'configured-unverified';
+  (configured ? warn : fail)(`embedding backend: ${embedding.status}${embedding.backend ? ` (${embedding.backend})` : ''}; current CLI environment only`);
+  if (!configured) warn('configure AQE_EMBEDDER_ENDPOINT in each consuming host; do not substitute hash vectors');
+  const provenance = await runCmd('aqe', ['learning', 'embedding-health', '--json'], { timeout: 30_000 });
+  if (provenance.code === 0) {
+    try {
+      const data = JSON.parse(provenance.stdout);
+      console.log(JSON.stringify({ embeddingProvenance: data }));
+    } catch { warn('embedding provenance response was not valid JSON'); }
+  } else warn('embedding provenance unavailable; installed AQE may not support this diagnostic');
+  const browser = await probeAqeBrowser({ runner: runCmd });
+  (browser.status === 'payload-present' ? ok : warn)(`optional browser: ${browser.status} (no browser launched)`);
+  const live = await probeAqeEmbeddings({ packageRoot: aqeRoot() });
+  (live.status === 'passed' ? ok : fail)(`live embedding request: ${live.status}; dimension=${live.dimension ?? 'unknown'}`);
+  warn('fleet execution and checkpoint recovery remain separate from this embedding/storage diagnostic');
+  return startup.status === 'observed' && live.status === 'passed';
+}
+
+export async function verifyMcp({ runner = runCmd, probe = probeMcp, cwd = process.cwd() } = {}) {
+  heading('mcp — commands from effective Codex configuration, bounded initialize/tools-list');
+  warn('diagnostic process environment; this does not replace a fresh Codex host-session proof');
+  const listed = await runner('codex', ['mcp', 'list', '--json'], { cwd, timeout: 30_000 });
+  let servers;
+  try { servers = JSON.parse(listed.stdout); } catch { /* unavailable */ }
+  if (listed.code !== 0 || !Array.isArray(servers)) { fail('effective Codex MCP inventory unavailable'); return false; }
+  let good = true;
+  for (const name of ['agentic-qe', 'ruvnet-brain']) {
+    const server = servers.find((item) => item.name === name && item.enabled !== false);
+    const transport = server?.transport;
+    if (transport?.type !== 'stdio' || typeof transport.command !== 'string') {
+      fail(`${name}: enabled stdio registration unavailable`); good = false; continue;
+    }
+    const configuredMs = server.startup_timeout_sec == null ? 30_000 : Number(server.startup_timeout_sec) * 1000;
+    if (!Number.isInteger(configuredMs) || configuredMs < 1 || configuredMs > 120_000) {
+      fail(`${name}: startup budget outside the diagnostic's 1–120000 ms bound`); good = false; continue;
+    }
+    const result = await probe({ command: transport.command, args: transport.args ?? [],
+      cwd: transport.cwd ?? cwd, env: transport.env ?? {}, timeoutMs: configuredMs });
+    (result.status === 'ready' ? ok : fail)(`${name}: ${result.status}; ${result.elapsedMs} ms; tools=${result.toolCount ?? 'unknown'}`);
+    if (['npx', 'npm'].includes(path.basename(transport.command))) warn(`${name}: effective startup uses package-manager resolution`);
+    good = result.status === 'ready' && good;
+  }
+  return good;
 }
 
 async function verifyProviders() {
@@ -361,6 +409,7 @@ export async function verifyDejaVu({
 export async function run({ positionals }) {
   const which = positionals[0] ?? 'all';
   const suites = {
+    mcp: verifyMcp,
     learning: verifyLearning,
     memory: verifyMemory,
     security: verifySecurity,
@@ -369,9 +418,10 @@ export async function run({ positionals }) {
     harvest: verifyHarvest,
     'deja-vu': verifyDejaVu,
   };
-  const selected = which === 'all' ? Object.entries(suites) : [[which, suites[which]]];
+  // Codex MCP discovery is explicit: Claude-only installations need no Codex.
+  const selected = which === 'all' ? Object.entries(suites).filter(([name]) => name !== 'mcp') : [[which, suites[which]]];
   if (!selected.every(([, fn]) => fn)) {
-    fail(`unknown suite: ${which} (learning|memory|security|aqe|providers|harvest|deja-vu|all)`);
+    fail(`unknown suite: ${which} (learning|memory|security|aqe|mcp|providers|harvest|deja-vu|all)`);
     return 2;
   }
   let allGood = true;

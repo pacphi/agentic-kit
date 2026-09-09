@@ -1,0 +1,132 @@
+[
+  {
+    "event": "PreToolUse",
+    "matcher": "^(Write|Edit|MultiEdit)$",
+    "hook": {
+      "type": "command",
+      "command": "node \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/aqe-hook.cjs\" guard --file \"$TOOL_INPUT_file_path\" --json",
+      "timeout": 3000,
+      "continueOnError": true
+    }
+  },
+  {
+    "event": "PreToolUse",
+    "matcher": "^(Write|Edit|MultiEdit)$",
+    "hook": {
+      "type": "command",
+      "command": "node \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/aqe-hook.cjs\" pre-edit --file \"$TOOL_INPUT_file_path\" --json",
+      "timeout": 5000,
+      "continueOnError": true
+    }
+  },
+  {
+    "event": "PreToolUse",
+    "matcher": "^Bash$",
+    "hook": {
+      "type": "command",
+      "command": "node \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/aqe-hook.cjs\" pre-command --command \"$TOOL_INPUT_command\" --json",
+      "timeout": 3000,
+      "continueOnError": true
+    }
+  },
+  {
+    "event": "PreToolUse",
+    "matcher": "^(Task|Agent)$",
+    "hook": {
+      "type": "command",
+      "command": "node \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/aqe-hook.cjs\" pre-task --description \"$TOOL_INPUT_prompt\" --json",
+      "timeout": 5000,
+      "continueOnError": true
+    }
+  },
+  {
+    "event": "PostToolUse",
+    "matcher": "^(Write|Edit|MultiEdit)$",
+    "hook": {
+      "type": "command",
+      "command": "node \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/aqe-hook.cjs\" post-edit --file \"$TOOL_INPUT_file_path\" --success --json",
+      "timeout": 5000,
+      "continueOnError": true
+    }
+  },
+  {
+    "event": "PostToolUse",
+    "matcher": "^Bash$",
+    "hook": {
+      "type": "command",
+      "command": "node \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/aqe-hook.cjs\" post-command --command \"$TOOL_INPUT_command\" --success true --json",
+      "timeout": 5000,
+      "continueOnError": true
+    }
+  },
+  {
+    "event": "PostToolUse",
+    "matcher": "^(Task|Agent)$",
+    "hook": {
+      "type": "command",
+      "command": "node \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/aqe-hook.cjs\" post-task --task-id \"$TOOL_RESULT_agent_id\" --agent \"$TOOL_INPUT_subagent_type\" --success true --description \"$TOOL_INPUT_prompt\" --json",
+      "timeout": 5000,
+      "continueOnError": true
+    }
+  },
+  {
+    "event": "UserPromptSubmit",
+    "matcher": "",
+    "hook": {
+      "type": "command",
+      "command": "node \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/aqe-hook.cjs\" route --json",
+      "timeout": 5000,
+      "continueOnError": true
+    }
+  },
+  {
+    "event": "SessionStart",
+    "matcher": "",
+    "hook": {
+      "type": "command",
+      "command": "node \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/aqe-hook.cjs\" session-start --session-id \"$SESSION_ID\" --json",
+      "timeout": 10000,
+      "continueOnError": true
+    }
+  },
+  {
+    "event": "SessionStart",
+    "matcher": "",
+    "hook": {
+      "type": "command",
+      "command": "sh -c 'exec node \"${CLAUDE_PROJECT_DIR:-.}/.claude/helpers/brain-checkpoint.cjs\" verify --json'",
+      "timeout": 5000,
+      "continueOnError": true
+    }
+  },
+  {
+    "event": "Stop",
+    "matcher": "",
+    "hook": {
+      "type": "command",
+      "command": "node \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/aqe-hook.cjs\" session-end --save-state --json",
+      "timeout": 5000,
+      "continueOnError": true
+    }
+  },
+  {
+    "event": "Stop",
+    "matcher": "",
+    "hook": {
+      "type": "command",
+      "command": "node \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/aqe-hook.cjs\" post-route --success true --json",
+      "timeout": 5000,
+      "continueOnError": true
+    }
+  },
+  {
+    "event": "Stop",
+    "matcher": "",
+    "hook": {
+      "type": "command",
+      "command": "sh -c 'exec node \"${CLAUDE_PROJECT_DIR:-.}/.claude/helpers/brain-checkpoint.cjs\" export --json'",
+      "timeout": 60000,
+      "continueOnError": true
+    }
+  }
+]
