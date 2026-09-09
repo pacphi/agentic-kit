@@ -6,6 +6,7 @@ import path from 'node:path';
 import {
   codexMcpStatus, codexMcpTopology, codexMcpRepairPlan, repairCodexMcpTopology,
 } from '../../src/lib/mcp.mjs';
+import { agentBrowserConfigPath } from '../../src/lib/paths.mjs';
 
 // A tmp dir with a .git marker → repoRoot() resolves to it, so codexMcpStatus reads
 // the .mcp.json we write here (not the real repo's).
@@ -117,7 +118,7 @@ test('Codex MCP topology detects recursive self-registration, duplicate Ruflo, a
   } finally { rm(dir); rm(home); }
 });
 
-test('Codex should detect an environment-bearing Ruflo duplicate without allowing automatic removal', () => {
+test('Codex should preserve a duplicate with a user-owned Ruflo environment', () => {
   const dir = tmpProject();
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-codexmcp-home-'));
   try {
@@ -125,7 +126,7 @@ test('Codex should detect an environment-bearing Ruflo duplicate without allowin
     const file = path.join(home, '.codex', 'config.toml');
     const source = [
       '[mcp_servers.claude-flow]', 'command = "ruflo"', 'args = ["mcp", "start"]',
-      '[mcp_servers.claude-flow.env]', 'AGENT_BROWSER_CONFIG = "/owned/browser.json"',
+      '[mcp_servers.claude-flow.env]', 'USER_OWNED_SETTING = "preserve"',
       '[mcp_servers.ruflo]', 'command = "ak"', 'args = ["x", "ruflo-mcp"]', '',
     ].join('\n');
     fs.writeFileSync(file, source);
@@ -133,6 +134,25 @@ test('Codex should detect an environment-bearing Ruflo duplicate without allowin
     assert.equal(topology.duplicateRuflo, true);
     assert.deepEqual(codexMcpRepairPlan(topology), []);
     assert.equal(fs.readFileSync(file, 'utf8'), source);
+  } finally { rm(dir); rm(home); }
+});
+
+test('Codex should repair a legacy duplicate with only the managed browser environment', () => {
+  const dir = tmpProject();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-codexmcp-home-'));
+  try {
+    fs.mkdirSync(path.join(home, '.codex'), { recursive: true });
+    const file = path.join(home, '.codex', 'config.toml');
+    fs.writeFileSync(file, [
+      '[mcp_servers.claude-flow]', 'command = "ruflo"', 'args = ["mcp", "start"]',
+      '[mcp_servers.claude-flow.env]', `AGENT_BROWSER_CONFIG = ${JSON.stringify(agentBrowserConfigPath())}`,
+      '[mcp_servers.ruflo]', 'command = "ak"', 'args = ["x", "ruflo-mcp"]', '',
+    ].join('\n'));
+
+    const plan = codexMcpRepairPlan(codexMcpTopology({ cwd: dir, home }));
+    assert.deepEqual(plan.map(({ name, repairKind }) => ({ name, repairKind })), [
+      { name: 'claude-flow', repairKind: 'legacy-ruflo' },
+    ]);
   } finally { rm(dir); rm(home); }
 });
 

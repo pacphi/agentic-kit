@@ -11,3 +11,7 @@ overrides:
   # unbounded intermediate arrays). It reaches us only via eslint ->
   # minimatch. Drop once eslint ships a bumped minimatch.
   'brace-expansion@>=4.0.0 <5.0.9': '>=5.0.9'
+  # smol-toml <=1.7.0 carries GHSA-7w5x-hrqm-74c2 (malformed-input DoS)
+  # through markdownlint-cli2. Retain the compatible patched 1.7 line until
+  # markdownlint-cli2 updates its direct dependency.
+  'smol-toml@<=1.7.0': 1.7.2

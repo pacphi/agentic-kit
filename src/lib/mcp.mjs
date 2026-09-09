@@ -183,8 +183,8 @@ function mcpTableName(table) {
 /** Read the bounded base-table sections behind Codex MCP registrations. This
  * is deliberately not a general TOML parser: only a base
  * `[mcp_servers.<name>]` table with single-line string command/args facts is
- * observed. Any extra field or child table makes the entry ineligible for
- * automatic repair, while status can still report a suspicious topology. */
+ * observed. Extra fields or child tables preserve ownership, except for the
+ * exact kit-managed browser environment on the retired Ruflo transport. */
 function codexMcpSections(file, scope) {
   let source;
   let regularFile = false;
@@ -210,12 +210,25 @@ function codexMcpSections(file, scope) {
       && meaningful.some((line) => /^command\s*=/.test(line))
       && meaningful.some((line) => /^args\s*=/.test(line));
     const childPrefixes = [`mcp_servers.${name}.`, `mcp_servers."${name}".`];
-    const hasChildren = headers.some((candidate) =>
+    const childTables = headers.filter((candidate) =>
       childPrefixes.some((prefix) => candidate[1].trim().startsWith(prefix)));
+    const hasChildren = childTables.length > 0;
+    const managedBrowserChild = childTables.length === 1
+      && childTables[0][1].trim() === `mcp_servers.${name}.env`
+      && (() => {
+        const childIndex = headers.indexOf(childTables[0]);
+        const childBody = source.slice(childTables[0].index + childTables[0][0].length,
+          headers[childIndex + 1]?.index ?? source.length);
+        const childFields = childBody.split(/\r?\n/).map((line) => line.trim())
+          .filter((line) => line && !line.startsWith('#'));
+        const configured = tomlString(/^\s*AGENT_BROWSER_CONFIG\s*=\s*("(?:[^"\\]|\\.)*")\s*$/m.exec(childBody)?.[1]);
+        return childFields.length === 1
+          && configured === managedAgentBrowserEnv().AGENT_BROWSER_CONFIG;
+      })();
     let repairKind = null;
     if (exactFields && !hasChildren && name === 'codex' && command === 'codex'
       && sameArgs(args, ['mcp-server'])) repairKind = 'recursive-codex';
-    if (exactFields && !hasChildren && name === 'claude-flow' && command === 'ruflo'
+    if (exactFields && (!hasChildren || managedBrowserChild) && name === 'claude-flow' && command === 'ruflo'
       && sameArgs(args, ['mcp', 'start'])) repairKind = 'legacy-ruflo';
     return [{
       name, scope, file, command, args, enabled, repairKind, regularFile,
