@@ -289,12 +289,12 @@ test('readMachineWideIntel aggregates totals and perProject rows across multiple
   });
   assert.deepEqual(result.perProject, [
     {
-      path: cwdAlpha, label: 'Alpha', patternsLearned: 10, patternStoreCount: 2,
+      path: cwdAlpha, label: 'Alpha', key: null, learningScope: 'unknown', patternsLearned: 10, patternStoreCount: 2,
       trajectoriesRecorded: 4, graphLatest: { nodes: 5, edges: 8 }, lastAdaptation: 1000,
       learningState: [],
     },
     {
-      path: cwdBeta, label: 'Beta', patternsLearned: 20, patternStoreCount: 3,
+      path: cwdBeta, label: 'Beta', key: null, learningScope: 'unknown', patternsLearned: 20, patternStoreCount: 3,
       trajectoriesRecorded: 6, graphLatest: null, lastAdaptation: 2000,
       learningState: [],
     },
@@ -355,11 +355,11 @@ test('readMachineWideIntel degrades a project with missing/malformed data to nul
     mostActiveProject: 'Good',
   });
   assert.deepEqual(result.perProject[1], {
-    path: cwdEmpty, label: 'Empty', patternsLearned: null, patternStoreCount: 0,
+    path: cwdEmpty, label: 'Empty', key: null, learningScope: 'unknown', patternsLearned: null, patternStoreCount: 0,
     trajectoriesRecorded: null, graphLatest: null, lastAdaptation: null, learningState: [],
   });
   assert.deepEqual(result.perProject[2], {
-    path: cwdMalformed, label: 'Malformed', patternsLearned: null, patternStoreCount: 0,
+    path: cwdMalformed, label: 'Malformed', key: null, learningScope: 'unknown', patternsLearned: null, patternStoreCount: 0,
     trajectoriesRecorded: null, graphLatest: null, lastAdaptation: null, learningState: [],
   });
 });

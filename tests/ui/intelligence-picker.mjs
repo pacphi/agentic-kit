@@ -86,3 +86,71 @@ test('Intelligence picker groups and sorts learning scopes without changing sele
   assert.equal(await page.locator('#history-empty').isVisible(), true);
   assert.deepEqual(errors, []);
 });
+
+test('Intelligence table keeps every grouped row in five-row scroll regions with stable KPIs', async t => {
+  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1360, height: 980 } });
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const scopes = ['repository', 'worktree', 'user', 'unknown'];
+  const rows = scopes.flatMap(learningScope => Array.from({ length: 8 }, (_, i) => ({
+    key: `${learningScope}-${8-i}`, label: `Project ${8-i}`, learningScope,
+    patternsLearned: i+1, patternStoreCount: 1, learningState: ['.claude-flow'], lastAdaptation: 1700000000000,
+  })));
+  await page.route('http://intelligence-table.test/**', async route => {
+    const url = new URL(route.request().url());
+    if (url.pathname === '/') return route.fulfill({ contentType: 'text/html', body: renderPage({ name: 'Intelligence table fixture', version: 'test' }) });
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify(url.pathname === '/api/status' ? {
+      overall: 'ok', rows: [], intel: { projects: rows, selectedProjectKey: rows[0].key, selectedProjectLabel: rows[0].label,
+        health: [], graph: [], patternStore: [], machineWide: {
+          totals: { projectCount: 32, patternsLearnedLifetime: 144, mostActiveProject: 'Project 8' }, perProject: rows,
+        } },
+    } : {}) });
+  });
+  await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: 'dark' });
+  await page.goto('http://intelligence-table.test/#token=fixture');
+  await page.click('[data-overview-view="intel"]');
+  await page.locator('.mw-data-row').first().waitFor();
+  const table = page.locator('#mw-table'), hero = await page.locator('#mw-hero').innerText();
+  assert.equal(await table.locator('.mw-data-row').count(), 32);
+  assert.deepEqual(await table.locator('.mw-group h3').allTextContents(),
+    ['Git repositories8', 'Git worktrees8', 'User-level learning8', 'Other / unclassified8']);
+  assert.equal(await table.getByRole('columnheader').count(), 16);
+  for (const scope of scopes) {
+    assert.deepEqual(await table.locator(`[data-learning-scope="${scope}"] .mw-name`).allTextContents(),
+      ['Project 1', 'Project 2', 'Project 3', 'Project 4', 'Project 5', 'Project 6', 'Project 7', 'Project 8']);
+  }
+  const shots = process.env.AK_UI_ARTIFACTS;
+  if (shots) fs.mkdirSync(shots, { recursive: true });
+  for (const width of [1360, 1100, 390]) {
+    await page.setViewportSize({ width, height: 980 });
+    const sizes = await table.locator('.mw-group-scroll').evaluateAll(regions => regions.map(region => ({
+      height: region.clientHeight, scroll: region.scrollHeight,
+      header: region.querySelector('.mw-head').getBoundingClientRect().height,
+      row: region.querySelector('.mw-data-row').getBoundingClientRect().height,
+    })));
+    for (const size of sizes) {
+      assert.equal(size.row, 34);
+      assert.equal((size.height-size.header)/size.row, 5);
+      assert.ok(size.scroll > size.height);
+    }
+    assert.ok(await table.evaluate(el => el.getBoundingClientRect().height) <= 520);
+    assert.equal(await page.evaluate(() => globalThis.document.documentElement.scrollWidth <= globalThis.innerWidth), true, `no horizontal overflow at ${width}px`);
+    assert.equal(await page.locator('#mw-hero').innerText(), hero);
+    if (shots) await page.screenshot({ path: path.join(shots, `intelligence-table-${width}.png`), fullPage: true });
+  }
+  await table.focus();
+  await page.keyboard.press('End');
+  await page.waitForFunction(() => globalThis.document.getElementById('mw-table').scrollTop > 0);
+  assert.equal(await table.evaluate(el => el === el.ownerDocument.activeElement), true);
+  if (shots) await page.screenshot({ path: path.join(shots, 'intelligence-table-390-scrolled.png'), fullPage: true });
+  const region = table.getByRole('region', { name: 'Git repositories learning rows', exact: true });
+  await region.focus();
+  await page.keyboard.press('End');
+  await page.waitForFunction(() => globalThis.document.querySelector('.mw-group-scroll').scrollTop > 0);
+  assert.equal(await region.locator('.mw-name').last().getAttribute('title'), 'Project 8');
+  assert.equal(await region.evaluate(el => el === el.ownerDocument.activeElement), true);
+  assert.equal(await table.locator('.mw-data-row').count(), 32);
+  assert.deepEqual(errors, []);
+});

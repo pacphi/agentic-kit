@@ -266,7 +266,9 @@ test('intel.machineWide sums correctly across multiple fixture projects, keeping
     // Cross-checked against the same reader intel-history.test.mjs exercises
     // directly — the seam under test here is collectData()'s wiring/caching,
     // not readMachineWideIntel's own arithmetic.
-    assert.deepEqual(body.intel.machineWide, readMachineWideIntel([beta, alpha]));
+    assert.deepEqual(body.intel.machineWide, readMachineWideIntel([beta, alpha].map(project => (
+      { ...project, key: resolveProjectIdentity(project.path).key }
+    ))));
 
     assert.equal(body.intel.machineWide.totals.patternsLearnedLifetime, 800); // 500 + 300
     assert.equal(body.intel.machineWide.totals.patternStoreEntries, 3); // 2 + 1 entries on disk
