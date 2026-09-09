@@ -415,6 +415,8 @@ function missingProject(project, reason, presence = 'absent') {
     projectKind: 'unknown',
     label: project.label,
     source: project.source ?? null,
+    repository: project.repository ?? null,
+    sessionOrigins: project.sessionOrigins ?? null,
     hosts: Array.isArray(project.hosts) ? [...project.hosts] : null,
     remote: { status: 'unknown', name: null, raw: null, hostname: null, host: null, slug: null, webUrl: null, reason },
     loc: locNotMeasured(reason),
@@ -562,6 +564,8 @@ export function measureProject(project, {
     projectKind: measureProjectKind(root, { fsImpl }),
     label: project.label,
     source: project.source ?? null,
+    repository: project.repository ?? null,
+    sessionOrigins: project.sessionOrigins ?? null,
     hosts: Array.isArray(project.hosts) ? [...project.hosts] : null,
     // collectProjects preflights the remote to choose the stated hosted-repo
     // population. Reuse that exact evidence instead of opening .git/config a
@@ -692,7 +696,7 @@ function aggregateUnrecognized(rows) {
  */
 function resolveProjectCatalog({ projects, sources, discover, fsImpl }) {
   if (Array.isArray(projects)) {
-    return { catalog: projects, counts: summarizeCatalog(projects, fsImpl), discoveryReason: null };
+    return { catalog: projects, discoveryProjects: projects, counts: summarizeCatalog(projects, fsImpl), discoveryReason: null };
   }
   try {
     const payload = (isSourcesPayload(projects) ? projects : sources) ?? discover({ fsImpl });
@@ -701,6 +705,7 @@ function resolveProjectCatalog({ projects, sources, discover, fsImpl }) {
     const catalog = (payload?.projects ?? []).filter((project) => project?.exists);
     return {
       catalog,
+      discoveryProjects: payload?.projects ?? [],
       counts: {
         everSeen: payload?.everSeen ?? 0,
         onDisk: payload?.onDisk ?? 0,
@@ -713,7 +718,7 @@ function resolveProjectCatalog({ projects, sources, discover, fsImpl }) {
       discoveryReason: null,
     };
   } catch (error) {
-    return { catalog: [], counts: null, discoveryReason: error?.code ?? 'discovery failed' };
+    return { catalog: [], discoveryProjects: [], counts: null, discoveryReason: error?.code ?? 'discovery failed' };
   }
 }
 
@@ -771,7 +776,7 @@ function measureSelectedProjects(selected, { walk, limits, detect, loc, asOf, fs
 }
 
 /** Assemble the ProjectFootprint section from a completed measurement pass. */
-function buildProjectsSection({ asOf, out, eligible, selected, excluded, counts, discoveryReason, loc }) {
+function buildProjectsSection({ asOf, out, eligible, selected, excluded, counts, discoveryProjects, discoveryReason, loc }) {
   // A count whose sweep hit an unreadable transcript or an unrecoverable project
   // directory is a FLOOR, not a total — `partial` is what makes a surface render
   // it as "≥ N" instead of quietly overstating certainty.
@@ -781,6 +786,9 @@ function buildProjectsSection({ asOf, out, eligible, selected, excluded, counts,
   return {
     asOf,
     projects: out,
+    // Discovery-only rows carry no byte/LOC measurements. This preserves the
+    // measured population while exposing folders, missing paths and worktrees.
+    discoveryProjects,
     // Retained under its original name for existing consumers; it has always
     // meant "how many projects discovery found", which is now everSeen.
     count: kpi(counts?.everSeen ?? 0),
@@ -848,7 +856,7 @@ export function collectProjects({
   fsImpl = fs,
 } = {}) {
   const asOf = now();
-  const { catalog, counts, discoveryReason } = resolveProjectCatalog({ projects, sources, discover, fsImpl });
+  const { catalog, counts, discoveryProjects, discoveryReason } = resolveProjectCatalog({ projects, sources, discover, fsImpl });
   const rows = Array.isArray(catalog) ? catalog : [];
   const population = selectHostedPopulation(rows, fsImpl);
   const selected = typeof limit === 'number' && limit >= 0
@@ -856,6 +864,6 @@ export function collectProjects({
   const out = measureSelectedProjects(selected, { walk, limits, detect, loc, asOf, fsImpl, onProgress });
   return buildProjectsSection({
     asOf, out, eligible: population.eligible, selected, excluded: population.excluded,
-    counts, discoveryReason, loc,
+    counts, discoveryProjects, discoveryReason, loc,
   });
 }
