@@ -57,6 +57,7 @@ function checkScope(cfg, home) {
 
 export function inspectCodexContext(cfg, { home = contextHome(), now = Date.now() } = {}) {
   const owned = !!cfg.codexContext;
+  const observedAt = new Date(now).toISOString();
   try {
     checkScope(cfg, home);
     const evidence = readEvidence(home, now);
@@ -65,9 +66,10 @@ export function inspectCodexContext(cfg, { home = contextHome(), now = Date.now(
       file: evidence.file, requestedWindow: evidence.requestedWindow, configuredWindow: evidence.config.window,
       autoCompactTokenLimit: evidence.config.autoCompact, clientVersion: evidence.cache.client_version,
       evidence: 'native-catalog-and-user-config', runtimeVerified: false,
+      observedAt, cacheFetchedAt: evidence.cache.fetched_at,
       models: evidence.models.map(m => contextCapacity(m, evidence.config.window)) };
   } catch (error) {
-    return { owned, available: false, drifted: false, reason: error.message, models: [], runtimeVerified: false };
+    return { owned, available: false, drifted: false, reason: error.message, models: [], runtimeVerified: false, observedAt, cacheFetchedAt: null };
   }
 }
 

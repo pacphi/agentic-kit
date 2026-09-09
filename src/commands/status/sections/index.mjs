@@ -9,6 +9,7 @@
 // original monolithic collect().
 import models from './models.mjs';
 import codexContext from './codex-context.mjs';
+import context from './context.mjs';
 import versions from './versions.mjs';
 import ruvnetBrain from './ruvnet-brain.mjs';
 import ruvector from './ruvector.mjs';
@@ -51,5 +52,5 @@ export const SECTIONS_BEFORE_HOST_DETAIL = [
 export const SECTIONS_AFTER_HOST_DETAIL = [
   hosts, providersStatus, providersExternalIntent, providersExternalProjection,
   providersRufloModels, providersLocalBindings, routing, daemons, blocks,
-  statusline, codexContext, qeCourt,
+  statusline, codexContext, context, qeCourt,
 ];

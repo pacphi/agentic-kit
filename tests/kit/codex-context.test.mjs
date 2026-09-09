@@ -41,6 +41,8 @@ test('unmanaged inspection never writes or requests a repair', (t) => {
   const f = fixture(t);
   const result = inspectCodexContext(f.cfg, f.options);
   assert.equal(result.owned, false);
+  assert.equal(result.observedAt, new Date(now).toISOString());
+  assert.equal(result.cacheFetchedAt, f.cache.fetched_at);
   assert.equal(result.drifted, false);
   assert.equal(f.read(), f.source);
 });

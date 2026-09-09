@@ -37,6 +37,7 @@ test('max survives reload, status creates an actionable sync repair, and off res
   assert.equal(cfg.codexContext.lastProjection, 872000);
   const current = await section.collect({ cfg });
   assert.equal(current[0].level, 'ok');
+  assert.equal(current[0].contextReport.hosts.find(h => h.host === 'codex').runtimeVerified, false);
   fs.writeFileSync(path.join(process.env.CODEX_HOME, 'config.toml'), 'model = "gpt-6-astra"\n');
   const drift = await section.collect({ cfg });
   assert.ok(drift[0].fix);
