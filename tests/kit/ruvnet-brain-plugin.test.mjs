@@ -56,6 +56,38 @@ test('Brain continuity requires the selected shim without claiming runtime execu
   }
 });
 
+test('Brain should qualify the 4.3.18 continuity contract', (t) => {
+  const f = fixture(t);
+  f.registry([{ ...f.record, version: '4.3.18' }]);
+  f.write(path.join(f.payload, '.claude-plugin/plugin.json'), { name: 'ruvnet-brain', version: '4.3.18' });
+  const entry = (matcher, action, timeout) => [{ matcher, hooks: [{ type: 'command',
+    command: `node "\${CLAUDE_PLUGIN_ROOT}/scripts/hook-shim.mjs" ${action} || true`, timeout }] }];
+  f.write(path.join(f.payload, 'hooks/hooks.json'), { hooks: {
+    SessionStart: entry('startup|resume|clear|compact|fork', 'session-start', 5),
+    Stop: entry('*', 'continuation-gate', 10),
+  } });
+  f.write(path.join(f.payload, 'scripts/hook-shim.mjs'), 'not executed');
+
+  const result = f.inspect();
+  assert.deepEqual(result.issues, []);
+  assert.equal(result.hookContract, '4.3.17-continuity');
+});
+
+test('Brain should qualify a future release with the exact continuity contract', (t) => {
+  const f = fixture(t);
+  f.registry([{ ...f.record, version: '4.3.19' }]);
+  f.write(path.join(f.payload, '.claude-plugin/plugin.json'), { name: 'ruvnet-brain', version: '4.3.19' });
+  const entry = (matcher, action, timeout) => [{ matcher, hooks: [{ type: 'command',
+    command: `node "\${CLAUDE_PLUGIN_ROOT}/scripts/hook-shim.mjs" ${action} || true`, timeout }] }];
+  f.write(path.join(f.payload, 'hooks/hooks.json'), { hooks: {
+    SessionStart: entry('startup|resume|clear|compact|fork', 'session-start', 5),
+    Stop: entry('*', 'continuation-gate', 10),
+  } });
+  f.write(path.join(f.payload, 'scripts/hook-shim.mjs'), 'not executed');
+
+  assert.deepEqual(f.inspect().issues, []);
+});
+
 test('Brain should disclose both missing commands and retired hooks in a disabled old payload', (t) => {
   const f = fixture(t);
   fs.unlinkSync(path.join(f.payload, 'commands/rvbc.md'));
