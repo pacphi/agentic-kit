@@ -270,7 +270,6 @@ export const MAINTENANCE_CSS = `
 .mnt-language-list{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
 .mnt-language-badge{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;background:#fff;flex:none}
 .mnt-language-icon{display:block;width:24px;height:24px;object-fit:contain;flex:none}
-.mnt-language-more{padding:8px 16px;font-size:12px}
 .mnt-resource-description{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .mnt-row-context{font-size:11.5px;line-height:1.5;color:var(--ink-2);overflow-wrap:anywhere}
 .mnt-row-action{margin-left:auto;display:flex;flex:none}
@@ -370,6 +369,9 @@ body:has(#panel-sys-maintenance:not([hidden])) #sys-rescan{display:none}
 .mnt-focus-list{display:grid;gap:8px;list-style:none;margin:0;padding:0}
 .mnt-focus-list>.mnt-row,.mnt-focus-list>li>.mnt-row{border:1px solid var(--line);border-radius:10px;min-height:68px;padding:14px 16px}
 .mnt-focus-list .mnt-row-name{overflow-wrap:anywhere}
+.mnt-project-title{display:flex;align-items:center;gap:7px}
+.mnt-project-title>.mnt-icon{width:16px;height:16px;flex:none}
+.mnt-focus-node .mnt-project-kind{display:flex;margin:5px 0 0}
 .mnt-node-count{font-size:11px;color:var(--ink-2);margin-left:auto;white-space:nowrap}
 .mnt-main>.mnt-inspector:not([hidden]){position:static;inset:auto;max-height:none;margin-top:20px;border-radius:12px;padding:20px;overflow:visible}
 .mnt-relationships{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:10px;margin-top:12px}
@@ -380,4 +382,8 @@ body:has(#panel-sys-maintenance:not([hidden])) #sys-rescan{display:none}
 .mnt-relationship-link{border:0;background:none;color:var(--accent);font:inherit;text-align:left;padding:7px 0;cursor:pointer;overflow-wrap:anywhere}
 .mnt-relationship-link span{display:block;color:var(--ink-2);font-size:11px}
 .mnt-related-context{border-left:2px solid var(--accent);padding-left:10px}
+
+.mnt-repository-group { margin:0 0 18px; }
+.mnt-repository-group h3 { font-size:13px; color:var(--ink-2); margin:12px 0 8px; overflow-wrap:anywhere; }
+.mnt-project-origins { display:block; font-size:11px; color:var(--ink-2); margin:3px 0; }
 `;

@@ -4,6 +4,7 @@
 // exactly when `ak sync` should act — a stray `fix` on a row the user
 // deliberately disabled makes sync heal something they turned off.
 import { test } from 'node:test';
+import { normalizeStatusObservations } from './helpers/status-observations.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -986,7 +987,8 @@ test('collect(): with nothing admitted, rows are unaffected (flag-off/no-admitte
   seedHome();
   const before = await collect();
   const after = await withFlag('1', async () => collect());
-  assert.deepEqual(after, before, 'no admitted lifecycle host registered — the fallback must add nothing');
+  assert.deepEqual(normalizeStatusObservations(after), normalizeStatusObservations(before),
+    'no admitted lifecycle host registered — the fallback must add nothing beyond a new inspection time');
 });
 
 test('collect(): a built-in host (opencode) never gets the generic admitted-host fallback row, even when enabled', async () => {

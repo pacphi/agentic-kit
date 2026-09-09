@@ -977,15 +977,16 @@ import { renderUsage } from './usage-orchestrators.mjs';
   }
 
   function renderScoreProjects(d){
-    var projects=entries(d.byProject), pMax=projects.length?projects[0].cost:0;
-    var shown=projects.slice(0,8);
-    document.getElementById("u-projects-note").textContent=
-      projects.length>8?("top 8 of "+projects.length):(projects.length+" project"+(projects.length===1?"":"s"));
-    document.getElementById("u-projects").innerHTML=shown.length?shown.map(function(pr){
-      return bar(esc(pr.name),fmtUsd(pr.cost),fmtNum(fld(pr.v,"sessions"))+" sess · "+fmtMins(fld(pr.v,"minutes")),
-        pct(pr.cost,pMax),true);
-    }).join(""):'<div class="empty">no projects in window.</div>';
-
+    var target=document.getElementById('u-projects'),note=document.getElementById('u-projects-note');
+    if(!Array.isArray(d.gitProjects)){
+      note.textContent='';target.innerHTML='<div class="empty">Refresh usage to identify Git projects.</div>';return;
+    }
+    var projects=d.gitProjects.slice().sort(function(a,b){return b.cost-a.cost||String(a.label).localeCompare(String(b.label));});
+    var max=projects.length?projects[0].cost:0,shown=projects.slice(0,10);
+    note.textContent=projects.length>10?'top 10 of '+projects.length:projects.length+' project'+(projects.length===1?'':'s');
+    target.innerHTML=shown.length?shown.map(function(project){
+      return bar(esc(project.label),fmtUsd(project.cost),fmtNum(project.sessions)+' sess · '+fmtMins(project.minutes),pct(project.cost,max),true);
+    }).join(''):'<div class="empty">No Git-project usage in this timeframe.</div>';
   }
 
   function renderScoreCategories(d){

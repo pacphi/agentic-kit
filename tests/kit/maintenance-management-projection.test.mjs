@@ -501,12 +501,13 @@ test('MNT-INV-010: two projects sharing a basename get the shortest distinguishi
   assert.ok(inventory); // the first (no-projects) call still produced a valid inventory
 });
 
-test('MNT-INV-011: linked worktrees group under one repositoryId; an unrelated project does not', () => {
+test('MNT-INV-011: verified common Git identity groups worktrees; an unrelated project does not', () => {
+  const repository = { kind: 'git', repositoryId: 'repository:0123456789abcdef0123', root: '/repo/main', evidence: 'git-directory', observedAt: 17 };
   const footprint = {
     projects: {
       projects: [
-        { path: '/repo/main', label: 'kit', hosts: ['claude'], remote: { status: 'linked', webUrl: 'https://github.com/a/kit' } },
-        { path: '/repo/feature-wt', label: 'kit', hosts: ['claude'], remote: { status: 'linked', webUrl: 'https://github.com/a/kit' } },
+        { path: '/repo/main', label: 'kit', hosts: ['claude'], repository, remote: { status: 'linked', webUrl: 'https://github.com/a/kit' } },
+        { path: '/repo/feature-wt', label: 'kit', hosts: ['claude'], repository: { ...repository, kind: 'worktree', evidence: 'git-common-directory-and-backlink' }, remote: { status: 'linked', webUrl: 'https://github.com/a/kit' } },
         { path: '/elsewhere/kit', label: 'kit', hosts: ['claude'], remote: null },
       ],
     },

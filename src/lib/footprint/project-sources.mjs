@@ -17,10 +17,10 @@
 //             ones a byte/LOC measurement can be taken of at all.
 //
 // Content boundary. This is DISCOVERY, invariant 9's candidate-path source, not
-// a measurement: it reads ONE field out of a transcript — the session's `cwd` —
-// and nothing else. The same read `native-transcript-discovery.mjs` already
+// a measurement: it reads a session's cwd and explicit launch-origin declaration
+// from the bounded head. The same read `native-transcript-discovery.mjs` already
 // performs for Observability at the same trust boundary. No message, prompt or
-// tool payload is parsed, retained or emitted; every figure the System area
+// tool payload is retained or emitted; every figure the System area
 // renders is measured downstream by walk.mjs-backed collectors from the paths
 // this module returns.
 //
@@ -37,6 +37,8 @@ import { resolveProjectLabel } from '../live/index.mjs';
 import { withDb } from '../sqlite.mjs';
 import { defaultOpencodeDbPath } from '../usage-opencode.mjs';
 import { presenceOf, statNode, UNKNOWN, walkTree } from './walk.mjs';
+import { inspectProjectIdentity } from './project-identity.mjs';
+import { transcriptSessionOrigin } from './session-origin.mjs';
 
 /** Hosts in the order every payload lists them. */
 export const PROJECT_SOURCE_HOSTS = Object.freeze(['claude', 'codex', 'opencode']);
@@ -299,7 +301,7 @@ export function scanTranscriptCwds(root, host, {
     const cwd = firstCwd(lines, host);
     if (!cwd) { withoutCwd += 1; continue; }
     withCwd += 1;
-    sightings.push({ cwd, mtimeMs, origin: 'cwd' });
+    sightings.push({ cwd, mtimeMs, origin: 'cwd', sessionOrigin: transcriptSessionOrigin(lines, host) });
     if (group) group.withCwd = true;
   }
 
@@ -456,12 +458,25 @@ export function discoverProjectSources({
       const resolved = resolvePath(cwd, fsImpl);
       let row = byPath.get(resolved);
       if (!row) {
-        row = { path: resolved, hosts: new Set(), origins: new Set(), sessions: 0, lastSeenMs: null };
+        row = { path: resolved, hosts: new Set(), origins: new Set(), sessionOrigins: new Map(), sessions: 0, lastSeenMs: null };
         byPath.set(resolved, row);
       }
       row.hosts.add(host);
       row.origins.add(sighting.origin ?? 'cwd');
-      row.sessions += Number.isFinite(sighting.weight) ? sighting.weight : 1;
+      const weight = Number.isFinite(sighting.weight) ? sighting.weight : 1;
+      row.sessions += weight;
+      const declared = sighting.sessionOrigin;
+      const origin = ['claude-desktop', 'codex-desktop'].includes(declared?.origin)
+        && declared.origin.startsWith(`${host}-`) ? declared.origin : 'unknown';
+      let membership = row.sessionOrigins.get(origin);
+      if (!membership) {
+        membership = { origin, sessions: 0, evidence: new Set(), countBases: new Set() };
+        row.sessionOrigins.set(origin, membership);
+      }
+      membership.sessions += weight;
+      membership.countBases.add(sighting.origin === 'encoded-dir' ? 'recovered-project-sighting'
+        : host === 'opencode' ? 'database-sessions' : 'transcript-files');
+      membership.evidence.add(origin === 'unknown' ? 'desktop-origin-not-declared' : declared.evidence);
       const at = sighting.mtimeMs;
       if (Number.isFinite(at) && (row.lastSeenMs === null || at > row.lastSeenMs)) row.lastSeenMs = at;
     }
@@ -482,6 +497,11 @@ export function discoverProjectSources({
       isGitRepo: exists && gitPresence(row.path, fsImpl),
       lastSeenMs: row.lastSeenMs,
       sessions: row.sessions,
+      sessionOrigins: [...row.sessionOrigins.values()].map((entry) => ({
+        origin: entry.origin, sessions: entry.sessions, evidence: [...entry.evidence].filter(Boolean).sort(),
+        countBasis: entry.countBases.size === 1 ? [...entry.countBases][0] : 'mixed-observations',
+      })).sort((a, b) => a.origin.localeCompare(b.origin)),
+      repository: inspectProjectIdentity(row.path, { fsImpl, observedAt: asOf }),
     };
   });
   // Most-recently-seen first; a project with no usable timestamp sorts last but

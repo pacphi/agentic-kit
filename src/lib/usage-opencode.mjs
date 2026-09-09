@@ -33,6 +33,7 @@ import {
   addUsage, blankSession, noteContextSample, noteLatencySample, notePromptFingerprint,
 } from './usage-parsers.mjs';
 import { normalizeMode } from './usage-modes.mjs';
+import { observeUsageProject } from './usage-project-evidence.mjs';
 
 /** The live opencode store. Overridable via roots in tests. */
 export function defaultOpencodeDbPath() {
@@ -312,6 +313,7 @@ function initSessionRecord(srow) {
   // blankSession's default host/provider ('opencode' for both) already
   // matches this source; only the opencode-specific fields are overridden.
   const rec = blankSession(srow.id, 'opencode');
+  rec.projectEvidence = observeUsageProject(srow.directory);
   rec.title = clip(srow.title) || '(untitled)';
   rec.project = project;
   rec.sidechain = !!srow.parent_id;

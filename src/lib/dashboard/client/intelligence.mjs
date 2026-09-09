@@ -57,6 +57,40 @@ import { fmtNum, kpi } from './usage.mjs';
     box.hidden=false;
   }
 
+  var INTEL_SCOPE_GROUPS=[['repository','Git repositories'],['worktree','Git worktrees'],['user','User-level learning'],['unknown','Other / unclassified']];
+  function intelScopeRows(rows,scope){
+    return rows.filter(function(p){
+      var kind=['repository','worktree','user'].includes(p.learningScope)?p.learningScope:'unknown';
+      return kind===scope;
+    }).sort(function(a,b){return String(a.label||'').localeCompare(String(b.label||''),undefined,{sensitivity:'base',numeric:true})
+      ||String(a.key||a.path||'').localeCompare(String(b.key||b.path||''));});
+  }
+
+  function machineWideRow(p){
+    var lastMs=Number(p.lastAdaptation)||0;
+    var lastTxt=lastMs?ago(Math.max(0,Math.round((Date.now()-lastMs)/1000))):"—";
+    var stores=Array.isArray(p.learningState)?p.learningState:[];
+    var storeHtml=stores.length?'<span class="mw-stores" title="'+esc(stores.join(' · '))+'">'
+      +stores.map(function(s){return '<i class="mw-store" data-store="'+esc(String(s).replace(/^[.]/,''))+'"></i>';}).join('')+'</span>':'';
+    var label=p.label||'(unlabeled)';
+    return '<div class="mw-row mw-data-row" role="row">'
+      +'<span class="mw-name" role="cell" title="'+esc(label)+'">'+esc(label)+storeHtml+'</span>'
+      +'<span class="mw-val mono" role="cell">'+esc(fmtNum(p.patternsLearned))+'</span>'
+      +'<span class="mw-val mono" role="cell">'+esc(fmtNum(p.patternStoreCount))+'</span>'
+      +'<span class="mw-val mono" role="cell" title="'+esc(lastTxt)+'">'+esc(lastTxt)+'</span></div>';
+  }
+
+  function machineWideGroup(group,rows){
+    var id='mw-group-'+group[0];
+    return '<section class="mw-group" data-learning-scope="'+group[0]+'" aria-labelledby="'+id+'">'
+      +'<h3 id="'+id+'">'+esc(group[1])+'<span>'+esc(fmtNum(rows.length))+'</span></h3>'
+      +'<div class="mw-group-scroll" role="region" aria-label="'+esc(group[1])+' learning rows" tabindex="0">'
+      +'<div role="table" aria-labelledby="'+id+'"><div class="mw-row mw-head" role="row">'
+      +'<span role="columnheader">Project</span><span class="mw-val" role="columnheader">Patterns learned</span>'
+      +'<span class="mw-val" role="columnheader">Pattern store</span><span class="mw-val" role="columnheader">Last active</span></div>'
+      +'<div role="rowgroup">'+rows.map(machineWideRow).join('')+'</div></div></div></section>';
+  }
+
   function renderMachineWide(mw){
     var totals=(mw&&mw.totals)||{};
     var perProject=Array.isArray(mw&&mw.perProject)?mw.perProject.slice():[];
@@ -65,35 +99,24 @@ import { fmtNum, kpi } from './usage.mjs';
       kpi("patterns learned",fmtNum(totals.patternsLearnedLifetime),"lifetime &middot; every tracked project","")
       +kpi("projects tracked",fmtNum(totals.projectCount),"with memory or intelligence state","")
       +kpi("most active project",totals.mostActiveProject||"—","by most recent learning adaptation","accent");
-    perProject.sort(function(a,b){return (Number(b&&b.patternsLearned)||0)-(Number(a&&a.patternsLearned)||0);});
     var table=document.getElementById("mw-table");
     if(!table)return;
     if(!perProject.length){table.innerHTML='<div class="empty">no projects discovered on this machine.</div>';return;}
-    var html='<div class="mw-row mw-head"><span>project</span><span class="mw-val">patterns learned</span>'
-      +'<span class="mw-val">pattern store</span><span class="mw-val">last active</span></div>';
-    for(var i=0;i<perProject.length;i++){
-      var p=perProject[i]||{};
-      var lastMs=Number(p.lastAdaptation)||0;
-      var lastTxt=lastMs?ago(Math.max(0,Math.round((Date.now()-lastMs)/1000))):"—";
-      // Name the stores this project actually has. Without it a 0/0/— row is
-      // ambiguous between "intelligence is active here but ruflo never trained"
-      // and "something failed to read" — and the first is the common case now
-      // that the panel counts agentic-qe and swarm state too.
-      var stores=Array.isArray(p.learningState)?p.learningState:[];
-      var storeTip=stores.length?stores.join(" · "):"no learning stores found";
-      var storeHtml=stores.length
-        ? '<span class="mw-stores" title="'+esc(storeTip)+'">'
-          +stores.map(function(s){return '<i class="mw-store" data-store="'+esc(String(s).replace(/^[.]/,""))+'"></i>';}).join("")
-          +"</span>"
-        : "";
-      html+='<div class="mw-row">'
-        +'<span class="mw-name">'+esc(p.label||"(unlabeled)")+storeHtml+"</span>"
-        +'<span class="mw-val mono">'+esc(fmtNum(p.patternsLearned))+"</span>"
-        +'<span class="mw-val mono">'+esc(fmtNum(p.patternStoreCount))+"</span>"
-        +'<span class="mw-val mono">'+esc(lastTxt)+"</span>"
-      +"</div>";
-    }
-    table.innerHTML=html;
+    var positions={};
+    var active=document.activeElement,focusedScope=active&&active.classList&&active.classList.contains('mw-group-scroll')
+      ?active.closest('.mw-group').getAttribute('data-learning-scope'):null;
+    if(table.querySelectorAll)Array.from(table.querySelectorAll('.mw-group')).forEach(function(section){
+      positions[section.getAttribute('data-learning-scope')]=section.querySelector('.mw-group-scroll').scrollTop;
+    });
+    table.innerHTML=INTEL_SCOPE_GROUPS.map(function(group){
+      var rows=intelScopeRows(perProject,group[0]);
+      return rows.length?machineWideGroup(group,rows):'';
+    }).join('');
+    if(table.querySelectorAll)Array.from(table.querySelectorAll('.mw-group')).forEach(function(section){
+      var region=section.querySelector('.mw-group-scroll'),scope=section.getAttribute('data-learning-scope');
+      region.scrollTop=positions[scope]||0;
+      if(scope===focusedScope)region.focus({preventScroll:true});
+    });
   }
 
   // The picker's option list AND its default selection come from the SAME
@@ -119,9 +142,13 @@ import { fmtNum, kpi } from './usage.mjs';
       return;
     }
     sel.disabled=false;
-    sel.innerHTML=intelProjects.map(function(p){
-      return '<option value="'+esc(p.key)+'"'+(p.key===selectedProjectKey?" selected":"")+'>'+esc(p.label)+"</option>";
-    }).join("");
+    sel.innerHTML=INTEL_SCOPE_GROUPS.map(function(group){
+      var rows=intelScopeRows(intelProjects,group[0]);
+      if(!rows.length)return '';
+      return '<optgroup label="'+esc(group[1])+'">'+rows.map(function(p){
+        return '<option value="'+esc(p.key)+'"'+(p.key===selectedProjectKey?" selected":"")+'>'+esc(p.label)+"</option>";
+      }).join('')+'</optgroup>';
+    }).join('');
   }
 
   export function wireIntelPicker(){
@@ -299,4 +326,3 @@ import { fmtNum, kpi } from './usage.mjs';
     var btn=document.getElementById("poll-now");
     if(btn)btn.disabled=inflight||(Date.now()-lastAttempt)<POLL_COOLDOWN_MS;
   }
-

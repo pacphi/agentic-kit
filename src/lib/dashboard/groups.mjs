@@ -1,3 +1,4 @@
+import { contextCard } from './context-card.mjs';
 // Pure status-row classification, grouping, and card/notice HTML for the
 // dashboard. This module is the ONE source of truth for both consumers:
 //   - node unit tests import it directly (deterministic, no DOM, no browser);
@@ -58,7 +59,7 @@ export const PREF = ['versions', 'self', 'natives', 'security', 'learning', 'mem
 export function groupRows(rows) {
   const map = {}; const seq = [];
   for (let i = 0; i < rows.length; i++) {
-    const r = rows[i]; const k = r.subsystem || 'other';
+    const r = rows[i]; const k = ['codex-context', 'codex-context/model', 'context'].includes(r.subsystem) ? 'context' : r.subsystem || 'other';
     if (!map[k]) { map[k] = { subsystem: k, rows: [], level: 'info' }; seq.push(k); }
     map[k].rows.push(r);
     if ((RANK[r.level] || 0) > (RANK[map[k].level] || 0)) map[k].level = r.level;
@@ -84,6 +85,7 @@ export function rowLine(r) {
 
 /** One subsystem group as a card: level dot + name + rows. */
 export function groupCard(g) {
+  if (g.subsystem === 'context') return contextCard(g);
   const lvl = g.level || 'info'; const calm = (lvl === 'ok' || lvl === 'info');
   const count = g.rows.length > 1 ? ('<span class="card-count">' + g.rows.length + '</span>') : '';
   const badge = calm ? '' : ('<span class="card-level">' + esc(lvl) + '</span>');

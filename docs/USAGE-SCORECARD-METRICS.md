@@ -73,7 +73,7 @@ Every metric section below follows the same shape:
 Two transcript stores, read-only, parsed at most once per file — the derived
 record is cached "keyed by (path, mtime, size)" (`src/lib/usage-index.mjs:10`),
 and the whole cache is invalidated on a `SCHEMA_VERSION` change
-(`usage-index.mjs:142`):
+(`usage-index.mjs:154`):
 
 | Transcript host | Store | Format |
 |---|---|---|
@@ -784,7 +784,7 @@ session that runs from 23:58 local to 00:05 local is billed to the day its
 *first* row landed on (test:
 `tests/kit/usage-index.test.mjs:738`, "a session that opens before midnight
 is counted on its first billed day"). Accumulation, at this call: `dayBucket(byDay,
-row.day)` then `d.cost = round(d.cost + rowCost)` (`usage-aggregate.mjs:747-752`). Bar height:
+row.day)` then `d.cost = round(d.cost + rowCost)` (`usage-aggregate.mjs:760-767`). Bar height:
 `h = maxDay ? max(2, cost/maxDay*100) : 2` (`dashboard/client.mjs`) —
 every non-empty day gets a visually nonzero bar (floor of 2%), so a very
 cheap day is never rendered as invisible.
@@ -976,25 +976,25 @@ ranking entirely rather than merely re-labelled in place.
 
 ## 11. Projects
 
-**Displayed as:** a ranked bar list, top 8 shown, note reading `"top 8 of
-N"` when more exist; each row shows `cost`, `N sess · minutes`.
+**Displayed as:** a simple ranked bar list of the top 10 discovered Git projects
+in the selected timeframe. Each row shows cost, session count, and minutes.
+No standalone worktree, user-level, or unclassified directory appears here.
 
-**Formula:** identical shape to §10 (`byProject[project]`), plus a `project
-= 'unknown'` fallback and a repo/worktree collapsing rule:
-`projectLabel(cwd)` collapses `<repo>/<marker>/worktrees/<rest>` (marker ∈
-`.autopilot`, `.claude`, `.git`) to `<repo>`, keeping `rest` as a separate
-`worktree` field on the session rather than either discarding it or letting
-it masquerade as a sibling project. (The mislabelling this rule corrected is
-recorded in [Appendix A](#appendix-a--fix-history).)
+**Formula:** the additive `gitProjects` projection uses the same filtered session
+population as the rest of Usage. It sums session cost, count, tokens, and minutes
+by evidenced repository identity. A worktree contributes to its parent only when
+Git common-directory/backlink evidence establishes an existing project root.
+Exact user/host-state roots and unverifiable repository associations are excluded
+from this ranking. Names and remotes alone do not establish eligibility.
 
-**Source:** ranking and truncation, `dashboard/client.mjs`
-(`shown = projects.slice(0,8)`); accumulation via the same `addTo()`/
-`entries()` machinery as §10, keyed by `s.project` instead of `s.models`.
+**Source:** `usage-project-evidence.mjs`, `usage-project-groups.mjs`, and
+`dashboard/client/usage.mjs` (`renderScoreProjects`). The existing `byProject`
+aggregate remains available to other consumers, but does not establish Git identity.
 
-**What this does not model:** a session whose working directory could not be
-determined (e.g. missing `cwd` in the transcript) lands in a literal
-`"unknown"` bucket rather than being dropped — visible in the project list
-rather than silently absent from the total.
+**Population:** the overall Usage totals still include all recorded usage. They
+can exceed the sum of these ten Git-project rows. Missing identity remains in
+those totals; it is not guessed into this ranking. Older payloads without Git
+identity request a usage refresh instead of displaying arbitrary directories.
 
 ---
 
@@ -1753,7 +1753,7 @@ cacheSavedUsd        = Σ rows  (costOf(1M as input) - costOf(1M as cacheRead)) 
 **Source:** the derived block is `finishTotals` (`usage-aggregate.mjs:1033-1073`),
 which the previous-window projection calls too so a baseline is never derived a
 second, drifting way. `median` and `percentile` are exact over the values
-(`usage-aggregate.mjs:998-1009`), unlike §15's bucketed percentiles.
+(`usage-aggregate.mjs:1020-1032`), unlike §15's bucketed percentiles.
 Active days come from `byDay`'s key count and the streak from `activeStreak` in
 `src/lib/dashboard/client/usage.mjs`; the tiles are `cadenceCells` there, and
 `printScoreCadence` (`src/commands/usage.mjs:219-242`) in the CLI.
@@ -1802,9 +1802,9 @@ positive figure that rounds away at two decimals prints `<$0.01`, never
 "nothing" are different claims.
 
 **What the cache saved, asked as a difference.** `cacheSavingPerMillion`
-(`usage-aggregate.mjs:718-727`) prices one million tokens twice through the
+(`usage-aggregate.mjs:731-742`) prices one million tokens twice through the
 *injected* pricer — once as fresh input, once as cache reads — and takes the
-gap; `cacheSavedFor` (`usage-aggregate.mjs:717-720`) scales that to the tokens
+gap; `cacheSavedFor` (`usage-aggregate.mjs:731-749`) scales that to the tokens
 a row actually read from cache. Nothing in that path knows what the cache
 multiplier is, so the saving cannot drift out of step with §3's table the way a
 hard-coded "0.9 × input" would the day the multiplier changed. Both probes
@@ -2155,13 +2155,13 @@ unbounded observation list. Codex reads the gross `last_token_usage.input_tokens
 not add its cached-input subset again. Claude and OpenCode sum their split fresh/cache fields but
 usually have no runtime window, so their coverage is commonly partial.
 
-The current cache schema is v18 because controlled prompt intent/topic facets also require parser
-output. A v17 cache is reparsed; the context evidence contract itself is unchanged.
+Cache schema v20 also retains Git-project eligibility evidence. Older cache records are reparsed;
+the context evidence contract itself is unchanged.
 
 The Context view contains:
 
 - the canonical startup/dynamic/reserve policy bands;
-- counted coverage, including paired samples and sessions missing a window;
+- counted coverage, including sessions with paired measurements and sessions missing a window;
 - one host card each for Claude, Codex and OpenCode;
 - p90 peak pressure/input and median observed window where supported; and
 - at most 20 attention rows carrying a deterministic opaque session reference plus bounded project
@@ -2334,7 +2334,7 @@ promise.
   `byModel` on the first run after the change, purely because the cache
   predated it; every unit test still passed, since tests only exercise a
   fresh parse. `SCHEMA_VERSION` went to `4` specifically to force the one-time
-  re-parse; the constant now reads `17` (`usage-index.mjs:142`), each bump since
+  re-parse; the constant now reads `17` (`usage-index.mjs:154`), each bump since
   having forced its own re-parse the same way.
   Re-querying the same live server after the bump returned
   `totals.exceptions: 20` with `<synthetic>` absent from `byModel` —

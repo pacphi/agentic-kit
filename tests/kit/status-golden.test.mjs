@@ -8,6 +8,7 @@
 // Regenerate deliberately, never casually:
 //   STATUS_GOLDEN_UPDATE=1 node --test tests/kit/status-golden.test.mjs
 import { test } from 'node:test';
+import { normalizeStatusObservations } from './helpers/status-observations.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -31,7 +32,7 @@ paths._setGlobalRootForTest(fakeGlobalRoot(HOME, { ruflo: '9.9.9', 'agentic-qe':
 // The kit's own version appears in the `self` row and changes every release;
 // pin it to a token so the golden survives version bumps.
 const SELF_VERSION = JSON.parse(fs.readFileSync(path.join(PKG_ROOT, 'package.json'), 'utf8')).version;
-const normalize = (rows) => rows.map((r) => ({
+const normalize = (rows) => normalizeStatusObservations(rows).map((r) => ({
   ...r,
   message: r.message.split(SELF_VERSION).join('<self-version>'),
 }));

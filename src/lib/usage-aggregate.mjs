@@ -16,6 +16,7 @@
 // already-decoded fingerprints, which is exactly this module's own subject.
 import { PROVENANCE_TAGS } from './usage-provenance.mjs';
 import { buildContextProjection } from './usage-context.mjs';
+import { buildUsageProjectGroups, buildUsageGitProjects } from './usage-project-groups.mjs';
 import {
   crossSessionClusters, exactRepeatGroups, nearDupClusters, reAskPairs,
 } from './usage-prompt-patterns.mjs';
@@ -843,6 +844,8 @@ function buildSessionRow(rec, usage, verdict) {
     transcriptProvider: rec.provider,
     providerProvenance: rec.providerProvenance ?? 'unknown',
     title: rec.title, project: rec.project,
+    projectEvidence: rec.projectEvidence ? { ...rec.projectEvidence } : null,
+    sessionOrigin: rec.sessionOrigin ? { ...rec.sessionOrigin } : null,
     worktree: rec.worktree ?? null,
     start: new Date(rec.start ?? rec.end).toISOString(),
     minutes: Math.round(((rec.end - (rec.start ?? rec.end)) / 60_000) * 10) / 10,
@@ -1251,7 +1254,8 @@ export function aggregate(records, { days, now, cutoff, deps, previous = false, 
     pricesAsOf: deps.pricesAsOf ?? null,
     totals, byDay, engagedByDay, byModel, byHost, byProvider,
     byMode, bySource, byTool,
-    byProject, byCategory,
+    byProject, byCategory, projectGroups: buildUsageProjectGroups(sessions),
+    gitProjects: buildUsageGitProjects(sessions),
     // v16 prompt layer. `promptStatsByDay` is a SIBLING of byDay for the same
     // reason engagedByDay is: byDay's keys are billed days, and a prompt series
     // keyed on them would have to invent zero-token rows or drop real prompts.

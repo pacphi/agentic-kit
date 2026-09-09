@@ -387,4 +387,25 @@ export const SYSTEM_CSS = `
   *{animation:none !important; transition:none !important}
   .card{opacity:1; transform:none}
 }
+
+.context-card { align-self:start; min-width:0; }
+.context-host { padding:9px 0; border-bottom:1px solid var(--line); }
+.context-host h3 { margin:0 0 4px; font-size:13px; }
+.context-host p,.context-notes { font-size:11px; line-height:1.5; margin:4px 0; }
+.context-basis { color:var(--ink-2); overflow-wrap:anywhere; }
+.context-card summary { cursor:pointer; font-size:12px; padding:4px 0; }
+.context-model-scroll { overflow:auto; max-height:220px; }
+.context-model-scroll table { border-collapse:collapse; font-size:11px; width:100%; }
+.context-model-scroll th,.context-model-scroll td { padding:5px; text-align:right; white-space:nowrap; }
+.context-model-scroll th:first-child { text-align:left; }
+.context-notes ul { padding-left:18px; }
+
+.project-controls { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:12px; }
+.project-controls label { font-size:12px; display:flex; align-items:center; gap:6px; }
+.project-controls select { max-width:100%; background:var(--bg); color:var(--ink); border:1px solid var(--line); border-radius:5px; padding:6px; }
+.project-identity,.project-path { display:block; font-size:11px; color:var(--ink-2); overflow-wrap:anywhere; white-space:normal; }
+
+.context-host-heading { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
+.context-host-heading span { font-size:11px; color:var(--ink-2); }
+.context-control { display:inline-block; color:var(--accent); font-size:11px; margin:2px 0; }
 `;

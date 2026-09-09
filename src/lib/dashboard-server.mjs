@@ -356,8 +356,11 @@ async function collectData({ cwd, fetchStatus, projectParam, getProjectSnapshot 
     intel: {
       selectedProjectKey: selected?.key ?? null,
       selectedProjectLabel: selected?.label ?? null,
-      projects: projects.map(({ key, label, path: projectPath, source }) => (
-        { key, label, path: projectPath, source }
+      projects: projects.map(({ key, label, path: projectPath, source, learningScope, learningScopeEvidence, learningOrigins, learningObservedAt }) => (
+        { key, label, path: projectPath, source,
+          learningScope: ['repository', 'worktree', 'user'].includes(learningScope) ? learningScope : 'unknown',
+          learningScopeEvidence: learningScopeEvidence ?? 'unclassified', learningObservedAt: learningObservedAt ?? null,
+          learningOrigins: ['claude-desktop', 'codex-desktop'].filter((origin) => learningOrigins?.includes(origin)) }
       )),
       health: selectedHistory.healthRing,
       globalStats: selectedHistory.globalStats,

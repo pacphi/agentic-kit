@@ -272,6 +272,8 @@ const FACET_EXTRACTORS = Object.freeze({
   environment: (placement) => [placement.environmentId],
   project: (placement) => (placement.projectId ? [placement.projectId] : []),
   projectType: (placement) => placement.projectId ? [PROJECT_KINDS.includes(placement.projectKind) ? placement.projectKind : 'unknown'] : [],
+  sessionOrigin: (placement) => placement.projectId
+    ? [...new Set(placement.sessionOrigins?.length ? placement.sessionOrigins.map((entry) => entry.origin) : ['unknown'])] : [],
   kind: (placement) => [placement.kind],
   consumer: (placement) => (placement.consumerHosts ?? []).filter((host) => ['claude', 'codex', 'opencode'].includes(host)),
   adapter: (placement) => [...new Set([...(placement.consumerHosts ?? []), ...(placement.kind === 'host-adapter' ? [placement.hostNamespace] : [])].filter((host) => typeof host === 'string' && host && !['claude', 'codex', 'opencode', 'agentic-kit'].includes(host)))],
@@ -401,6 +403,9 @@ function buildPlacementRow(placement, index) {
     placementId: placement.placementId,
     projectId: placement.projectId ?? null,
     ...(placement.projectId ? { projectKind: PROJECT_KINDS.includes(placement.projectKind) ? placement.projectKind : 'unknown' } : {}),
+    ...(placement.projectId ? { repositoryId: placement.repositoryId ?? null, repositoryLabel: placement.repositoryLabel ?? null,
+      repositoryEvidence: placement.repositoryEvidence ?? null, repositoryObservedAt: placement.repositoryObservedAt ?? null,
+      sessionOrigins: placement.sessionOrigins ?? [] } : {}),
     displayName: placement.displayName,
     ...(index.resourcesById.get(placement.resourceId)?.installationSource ? { installationSource: index.resourcesById.get(placement.resourceId).installationSource } : {}),
     ...(description ? { description } : {}),

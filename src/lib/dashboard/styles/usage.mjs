@@ -777,19 +777,19 @@ export const USAGE_CSS = `
 .ctx-grid{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:11px; margin-bottom:12px}
 .ctx-card{border:1px solid var(--line); border-radius:var(--r-sm); padding:13px 14px; background:var(--panel)}
 .ctx-card[data-state="partial"]{border-color:color-mix(in srgb,var(--warn) 45%,var(--line))}
-.ctx-card[data-state="not-recorded"],.ctx-card[data-state="not-observed"]{opacity:.78}
+
 .ctx-card-head{display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px}
 .ctx-card-head h2{margin:0; font-size:14px; text-transform:capitalize}
-.ctx-state{font-size:10px; color:var(--ink-dim); border:1px solid var(--line); border-radius:999px; padding:2px 7px}
+.ctx-state{font-size:10px; color:var(--ink-2); border:1px solid var(--line); border-radius:999px; padding:2px 7px}
 .ctx-meter{display:grid; grid-template-columns:1fr auto; gap:9px; align-items:center}
 .ctx-meter-track{height:9px; overflow:hidden; border-radius:999px; background:var(--panel-2)}
 .ctx-meter-track i{display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg,var(--ok),var(--warn),var(--fail))}
 .ctx-meter-value{min-width:52px; text-align:right; color:var(--ink-2); font-size:11px}
 .ctx-facts{display:grid; grid-template-columns:1fr 1fr; gap:7px 11px; margin:12px 0 0}
 .ctx-facts div{min-width:0}
-.ctx-facts dt{font-size:9px; color:var(--ink-dim); text-transform:uppercase; letter-spacing:.05em}
+.ctx-facts dt{font-size:9px; color:var(--ink-2); text-transform:uppercase; letter-spacing:.05em}
 .ctx-facts dd{margin:2px 0 0; font-family:var(--mono); font-size:11.5px; color:var(--ink)}
-.ctx-caveat{margin:11px 0 0; padding-top:9px; border-top:1px solid var(--line); color:var(--ink-dim); font-size:10.5px; line-height:1.45}
+.ctx-caveat{margin:11px 0 0; padding-top:9px; border-top:1px solid var(--line); color:var(--ink-2); font-size:10.5px; line-height:1.45}
 .ctx-attention{max-height:420px; overflow:auto; scrollbar-width:thin}
 .ctx-att-group{border-top:1px solid var(--line)}
 .ctx-att-group:last-child{border-bottom:1px solid var(--line)}
@@ -871,4 +871,6 @@ export const USAGE_CSS = `
   .hook-finding-placement-wrap{padding-left:0}
 }
 
+
+.ctx-no-pressure{color:var(--ink-2);font-size:12px;margin:15px 0;min-height:18px}
 `;

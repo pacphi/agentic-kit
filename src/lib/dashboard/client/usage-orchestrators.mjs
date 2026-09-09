@@ -30,8 +30,12 @@ import { MODEL_PAGE, USAGE, fmtNum, loadLimits, loadModelInventory, loadModelLif
       if(b)setUsageView(b.getAttribute("data-view"));
     });
     if(seg)seg.addEventListener("keydown",function(e){if(!/^(ArrowLeft|ArrowRight|Home|End)$/.test(e.key))return;var i=USAGE_NAV_VIEWS.indexOf(usageView);if(i<0)i=USAGE_NAV_VIEWS.indexOf("sessions");i=e.key==="Home"?0:e.key==="End"?USAGE_NAV_VIEWS.length-1:(i+(e.key==="ArrowRight"?1:USAGE_NAV_VIEWS.length-1))%USAGE_NAV_VIEWS.length;setUsageView(USAGE_NAV_VIEWS[i]);var b=seg.querySelector('[data-view="'+USAGE_NAV_VIEWS[i]+'"]');if(b)b.focus();e.preventDefault();});
-    var summary=document.getElementById("mli-summary");
-    if(summary)summary.addEventListener("click",function(e){e.preventDefault();setTab("usage");setUsageView("models");});
+    document.addEventListener("click",function(e){
+      var link=e.target&&e.target.closest?e.target.closest("#mli-summary, [data-model-inventory]"):null;
+      if(!link)return;
+      e.preventDefault();setTab("usage");setUsageView("models");
+      var tab=document.getElementById("usage-tab-models");if(tab)tab.focus();
+    });
     function resetModelPage(){
       var region=document.querySelector(".mli-ledger .mli-table-wrap");if(region){region.scrollTop=0;region.scrollLeft=0;}
       loadModelInventory(0,false,false);

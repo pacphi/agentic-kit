@@ -147,7 +147,11 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
  *       (`i`/`d`) derived while prompt text is transient. Cached v17 records
  *       cannot recover those facets because raw prompt text was correctly not
  *       retained, so they must be reparsed. */
-export const SCHEMA_VERSION = 18;
+// v19 preserves opaque working-path/Git association and explicit session origin
+// from parsing. Earlier cache entries discarded this metadata and must reparse.
+// v20 records exact user-root exclusion and verified real-parent eligibility
+// for the Git-only score ranking. A v19 cache cannot establish either fact.
+export const SCHEMA_VERSION = 20;
 
 const DAY_MS = 86_400_000;
 // One day of slack past dashboard-server.mjs's 365-day clampDays ceiling —

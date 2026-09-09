@@ -11,6 +11,13 @@ function navigationLevel(scope, facets) {
         : facets.kind?.length !== 1 ? 'kind' : 'resource';
 }
 
+function projectDescriptor(placement, kind) {
+  return { projectKind: kind ?? 'unknown', languages: placement.projectLanguages ?? [],
+    repositoryId: placement.repositoryId ?? null, repositoryLabel: placement.repositoryLabel ?? null,
+    repositoryEvidence: placement.repositoryEvidence ?? null, repositoryObservedAt: placement.repositoryObservedAt ?? null,
+    sessionOrigins: placement.sessionOrigins ?? [] };
+}
+
 function descriptor(level, placement, resource, projectLabels, projectKinds) {
   const value = level === 'scope' ? placement.administrativeScope
     : level === 'project' ? placement.projectId
@@ -21,7 +28,7 @@ function descriptor(level, placement, resource, projectLabels, projectKinds) {
       : level === 'kind' ? RESOURCE_KIND_LABELS[value] : resource?.capabilityLabel ?? resource?.displayName ?? placement.displayName;
   return { value, label, count: 0,
     ...(level === 'resource' ? { kind: placement.kind, installationSource: resource?.installationSource ?? null, description: Object.hasOwn(placement, 'description') ? placement.description : resource?.description ?? null, descriptionSource: resource?.descriptionSource ?? null } : {}),
-    ...(level === 'project' ? { projectKind: projectKinds[value] ?? 'unknown', languages: placement.projectLanguages ?? [] } : {}),
+    ...(level === 'project' ? projectDescriptor(placement, projectKinds[value]) : {}),
   };
 }
 
