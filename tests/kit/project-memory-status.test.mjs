@@ -17,10 +17,13 @@ test('memory status never treats file presence as a proven writer and checks bot
   db.close();
   const single = await section.collect({ cwd });
   assert.equal(single[0].level, 'info');
-  assert.match(single[0].message, /1 active entry observed.*routing unverified/);
+  assert.match(single[0].message, /agentdb-memory\.db: 1 active entry observed.*backend.*routing unverified/);
+  assert.doesNotMatch(single[0].message, /native-agentdb:/);
   fs.writeFileSync(path.join(cwd, '.swarm/memory.db'), 'corrupt');
   const dual = await section.collect({ cwd });
-  assert.ok(dual.some((r) => r.level === 'warn' && /sqljs store is unreadable/.test(r.message)));
+  assert.ok(dual.some((r) => r.level === 'warn' && /memory\.db store is unreadable/.test(r.message)));
   assert.ok(dual.some((r) => /two project memory stores/.test(r.message)));
+  assert.ok(dual.some((r) => /--path/.test(r.message)));
+  assert.ok(dual.some((r) => /preserve both/.test(r.message)));
   assert.ok(dual.every((r) => r.level !== 'ok' && r.fix === null));
 });

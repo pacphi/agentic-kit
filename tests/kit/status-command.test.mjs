@@ -507,8 +507,8 @@ test('status discloses both project-memory stores without asserting writer ident
     db.close();
   }
   const memory = (await collect()).filter((r) => r.subsystem === 'memory');
-  assert.ok(memory.some((r) => r.level === 'info' && /native-agentdb: 1 active entry observed/.test(r.message)));
-  assert.ok(memory.some((r) => r.level === 'info' && /sqljs: 1 active entry observed/.test(r.message)));
+  assert.ok(memory.some((r) => r.level === 'info' && /agentdb-memory\.db: 1 active entry observed/.test(r.message)));
+  assert.ok(memory.some((r) => r.level === 'info' && /memory\.db: 1 active entry observed/.test(r.message)));
   assert.ok(memory.some((r) => r.level === 'warn' && /two project memory stores/.test(r.message)));
   rmrf(swarm);
 });
