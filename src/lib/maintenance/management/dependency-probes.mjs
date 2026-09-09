@@ -14,6 +14,21 @@ import path from 'node:path';
 const MAX_CONFIG_BYTES = 1024 * 1024; // 1 MiB — generous for a registration table
 const DEFAULT_PATHEXT = Object.freeze(['.COM', '.EXE', '.BAT', '.CMD']);
 
+// Collected facts are deliberately path-free. Keep the actual absolute
+// command private until the immediate collect -> probe call completes;
+// serializing a fact must never disclose it. These transient facts must be
+// passed directly to probeDependencies, not cloned or persisted for probing.
+const absoluteCommands = new WeakMap();
+
+function stdioFact(host, name, command) {
+  const fact = {
+    host, subjectKind: 'mcp-registration', subjectSelector: name,
+    requirement: basenameOf(command), requirementKind: 'executable', transport: 'stdio',
+  };
+  if (isAbsoluteLike(command)) absoluteCommands.set(fact, command);
+  return fact;
+}
+
 function basenameOf(value) {
   const segments = String(value ?? '').split(/[\\/]+/).filter(Boolean);
   return segments.length ? segments[segments.length - 1] : String(value ?? '');
@@ -46,10 +61,7 @@ function readBoundedJson(fsImpl, file) {
 function factFromRegistration(host, name, definition) {
   if (!definition || typeof definition !== 'object') return null;
   if (typeof definition.command === 'string' && definition.command.trim()) {
-    return {
-      host, subjectKind: 'mcp-registration', subjectSelector: name,
-      requirement: basenameOf(definition.command), requirementKind: 'executable', transport: 'stdio',
-    };
+    return stdioFact(host, name, definition.command);
   }
   if (typeof definition.url === 'string' && definition.url.trim()) {
     return { host, subjectKind: 'mcp-registration', subjectSelector: name, transport: 'http' };
@@ -115,10 +127,7 @@ function codexMcpFacts(fsImpl, file) {
     if (body == null) continue;
     const command = tomlStringField(body, 'command');
     if (command) {
-      facts.push({
-        host: 'codex', subjectKind: 'mcp-registration', subjectSelector: name,
-        requirement: basenameOf(command), requirementKind: 'executable', transport: 'stdio',
-      });
+      facts.push(stdioFact('codex', name, command));
       continue;
     }
     const url = tomlStringField(body, 'url');
@@ -214,7 +223,8 @@ export function probeDependencies({
   const results = [];
   for (const fact of facts) {
     if (!fact?.requirement || fact.transport === 'http') continue;
-    const satisfied = isRequirementSatisfied(fsImpl, fact.requirement, pathEntries, extensions, platform);
+    const command = absoluteCommands.get(fact) ?? fact.requirement;
+    const satisfied = isRequirementSatisfied(fsImpl, command, pathEntries, extensions, platform);
     results.push({
       subjectKind: fact.subjectKind, subjectSelector: fact.subjectSelector, host: fact.host ?? null,
       requirement: basenameOf(fact.requirement), requirementKind: fact.requirementKind ?? 'executable',

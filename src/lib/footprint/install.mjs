@@ -115,22 +115,43 @@ export function attributeInstallMethod(realPath, { globalRootDir = null } = {}) 
 export function resolveBinPath(bin, {
   env = process.env, windows = isWindows, fsImpl = fs,
 } = {}) {
-  if (!bin) return null;
-  const dirs = String(env.PATH || env.Path || '').split(path.delimiter).filter(Boolean);
+  if (!bin || /[\\/]/.test(bin) || bin === '..') return null;
+  const envValue = (key) => env[key] || (windows ? env[Object.keys(env).find((name) => name.toUpperCase() === key) || key] : undefined);
+  const paths = windows ? path.win32 : path.posix;
+  const dirs = String(envValue('PATH') || '').split(windows ? ';' : ':')
+    .map((dir) => dir.replace(/^"|"$/g, '')).filter((dir) => paths.isAbsolute(dir));
   const exts = windows
-    ? ['', ...String(env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)]
+    ? ['', ...String(envValue('PATHEXT') || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)]
     : [''];
   for (const dir of dirs) {
     for (const ext of exts) {
-      const candidate = path.join(dir, bin + ext);
+      const candidate = paths.join(dir, bin + ext);
       try {
-        const st = fsImpl.lstatSync(candidate);
-        if (!st.isFile() && !st.isSymbolicLink()) continue;
-        return fsImpl.realpathSync(candidate);
-      } catch { /* not here: try the next PATH entry */ }
+        const resolved = fsImpl.realpathSync(candidate);
+        if (!fsImpl.statSync(resolved).isFile()) continue;
+        if (!windows) fsImpl.accessSync(resolved, fs.constants.X_OK);
+        return resolved;
+      } catch { /* not executable here: try the next PATH entry */ }
     }
   }
   return null;
+}
+
+/** Read only a bounded package manifest; never execute package code to locate its launcher. */
+function packageBinPath(root, bin, fsImpl) {
+  if (!root) return null;
+  try {
+    const manifest = path.join(root, 'package.json');
+    if (fsImpl.statSync(manifest).size > 65536) return null;
+    const pkg = JSON.parse(fsImpl.readFileSync(manifest, 'utf8'));
+    const declared = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin?.[bin];
+    if (typeof declared !== 'string' || !declared || path.isAbsolute(declared)) return null;
+    const candidate = path.resolve(root, declared);
+    const relative = path.relative(root, candidate);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) return null;
+    const resolved = fsImpl.realpathSync(candidate);
+    return fsImpl.statSync(resolved).isFile() ? resolved : null;
+  } catch { return null; }
 }
 
 /** The npm-managed package name that owns a native addon file, derived from its
@@ -344,6 +365,7 @@ function collectTool(desc, ctx) {
     present,
     version,
     root: realRoot,
+    executablePath: desc.bin ? resolveBinPath(desc.bin, { fsImpl }) || packageBinPath(realRoot, desc.bin, fsImpl) : null,
     linkedFrom,
     rootReason: null,
     components: [],
@@ -375,6 +397,7 @@ function collectTool(desc, ctx) {
       present: true,
       installMethod: attributeInstallMethod(binPath, { globalRootDir: ctx.globalRootDir }),
       root: binPath,
+      executablePath: binPath,
       rootReason: reason,
       bytes: unknown(reason),
       files: unknown(reason),

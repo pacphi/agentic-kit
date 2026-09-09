@@ -370,6 +370,12 @@ test('a blocked Windows cwd probe renders as an honest not-attributable project'
   });
   const census = await collectRuntimeCensus({
     platform: 'win32',
+    // Captured Windows cwd needs explicit repository evidence on every host.
+    classifyContext(cwd, { pathImpl }) {
+      assert.equal(pathImpl, path.win32);
+      assert.equal(cwd, 'C:\\repos\\keel');
+      return { kind: 'repository', label: 'keel', path: cwd, projectKey: 'fixture-keel' };
+    },
     surveyImpl: (options) => surveyHostProcesses({
       ...options, execFileImpl: runner, scriptPath: SCRIPT, env: WIN_ENV,
     }),
