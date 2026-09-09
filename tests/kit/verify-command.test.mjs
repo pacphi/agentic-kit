@@ -39,7 +39,7 @@ test('an unknown suite exits 2 and names the valid suites', async () => {
   seedHome();
   const { result, out } = await runVerify(['bogus']);
   assert.equal(result, 2, 'a usage error is exit 2, distinct from a failed proof (1)');
-  assert.match(out, /unknown suite: bogus \(learning\|memory\|security\|aqe\|providers\|harvest\|deja-vu\|all\)/);
+  assert.match(out, /unknown suite: bogus \(learning\|memory\|security\|aqe\|mcp\|providers\|harvest\|deja-vu\|all\)/);
   assert.ok(!/all selected proofs passed/.test(out), 'a usage error must not claim success');
 });
 
