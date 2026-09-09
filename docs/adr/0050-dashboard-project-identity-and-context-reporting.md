@@ -44,7 +44,8 @@ The System Projects default keeps its existing measured population. An additive
 lightweight discovery catalog exposes excluded and missing paths without adding
 expensive disk walks. The all-discovered view joins measurements by path, so each
 path appears once. Unknown measurements are not zero. Existing ever-seen/on-disk
-counts remain unchanged; group counts describe directories. Disk and LOC are not
+counts remain unchanged. Rows retain their details without repeated directory-path
+headings. Disk and LOC are not
 summed across overlapping parent/child paths.
 
 Maintenance project cards preserve their installation counts and navigation.

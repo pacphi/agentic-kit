@@ -56,7 +56,8 @@ test('context and project grouping stay readable, keyboard operable and evidence
  assert.equal(await page.locator('#sys-projects tbody tr:not(.project-group)').count(),1);
  await page.selectOption('#project-population','all');
  assert.equal(await page.locator('#sys-projects tbody tr:not(.project-group)').count(),3);
- assert.equal(await page.locator('#sys-projects .project-group').count(),2);
+ assert.equal(await page.locator('#sys-projects .project-group').count(),0);
+ assert.equal(await page.locator('#sys-projects tbody').count(),2);
  await page.selectOption('#project-origin','codex-desktop');
  assert.equal(await page.locator('#sys-projects tbody tr:not(.project-group)').count(),1);
  assert.match(await page.locator('#sys-projects').innerText(),/feature/);

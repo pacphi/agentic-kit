@@ -829,9 +829,7 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     var groups=projectView({projects:elig.list,discoveryProjects:p.discoveryProjects},projectPopulation,projectOrigin);
     var list=groups.reduce(function(rows,group){return rows.concat(group.rows);},[]);
     var body=groups.map(function(group){
-      var heading=group.rows.some(function(row){return !!row.repository;})
-        ? '<tr class="project-group"><th colspan="5" scope="rowgroup">'+esc(group.label)+' · '+group.rows.length+' director'+(group.rows.length===1?'y':'ies')+'</th></tr>' : '';
-      return '<tbody>'+heading+sortProjects(group.rows,projSort.key,projSort.dir).map(sysProjectRowHtml).join('')+'</tbody>';
+      return '<tbody>'+sortProjects(group.rows,projSort.key,projSort.dir).map(sysProjectRowHtml).join('')+'</tbody>';
     }).join('');
     // Legend covers only what still renders: the language ramp. The disk column
     // is a single figure now, and there are no chips left to explain.
@@ -852,7 +850,7 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
       // than a fact about the machine — so it is named. Leaving the reader to
       // subtract 25 from 16 and guess is the silent exclusion ADR-0023 forbids.
       +sysProjectsLinerHtml(p,list,excluded)
-      +'<p class="sy-liner" role="status">'+list.length+' directories match. Origins can overlap within a directory; each directory appears once. Group counts are directories, not distinct repositories. Unmeasured values stay unknown; disk and line counts are not summed across nested paths.</p>'
+      +'<p class="sy-liner" role="status">'+list.length+' directories match. Origins can overlap within a directory; each directory appears once. Unmeasured values stay unknown; disk and line counts are not summed across nested paths.</p>'
       +(!list.length?sysEmpty('No directories match these filters.'):'');
   }
 

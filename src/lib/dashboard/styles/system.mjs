@@ -404,7 +404,6 @@ export const SYSTEM_CSS = `
 .project-controls label { font-size:12px; display:flex; align-items:center; gap:6px; }
 .project-controls select { max-width:100%; background:var(--bg); color:var(--ink); border:1px solid var(--line); border-radius:5px; padding:6px; }
 .project-identity,.project-path { display:block; font-size:11px; color:var(--ink-2); overflow-wrap:anywhere; white-space:normal; }
-.project-group th { text-align:left; font-size:11px; padding:12px 8px 6px; overflow-wrap:anywhere; white-space:normal; }
 
 .context-host-heading { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
 .context-host-heading span { font-size:11px; color:var(--ink-2); }
