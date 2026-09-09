@@ -2155,13 +2155,13 @@ unbounded observation list. Codex reads the gross `last_token_usage.input_tokens
 not add its cached-input subset again. Claude and OpenCode sum their split fresh/cache fields but
 usually have no runtime window, so their coverage is commonly partial.
 
-The current cache schema is v18 because controlled prompt intent/topic facets also require parser
-output. A v17 cache is reparsed; the context evidence contract itself is unchanged.
+Cache schema v20 also retains Git-project eligibility evidence. Older cache records are reparsed;
+the context evidence contract itself is unchanged.
 
 The Context view contains:
 
 - the canonical startup/dynamic/reserve policy bands;
-- counted coverage, including paired samples and sessions missing a window;
+- counted coverage, including sessions with paired measurements and sessions missing a window;
 - one host card each for Claude, Codex and OpenCode;
 - p90 peak pressure/input and median observed window where supported; and
 - at most 20 attention rows carrying a deterministic opaque session reference plus bounded project

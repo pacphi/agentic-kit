@@ -144,6 +144,36 @@ performed for the picker. Values, selected key, initial recency choice, learning
 paths, and history remain unchanged. Names and UUID-like labels do not establish
 origin. Native select keyboard behavior and optgroup semantics are retained.
 
+## Machine-wide Intelligence table
+
+The table uses the picker's same four learning-scope categories, alphabetized
+within each. Metadata comes from the existing project entries, not a label join.
+Each subgroup retains all rows in a keyboard-scrollable region with five visible
+rows; the surrounding table area is bounded. The layout stacks on narrow screens.
+The hero totals and underlying learning population remain unchanged.
+
+## Historical context coverage
+
+Usage Context reports recorded session observations, separately from Runtime's
+cached model configuration. Claude transcript usage fields supply input/cache
+tokens but not a paired window. Claude's native statusline supplies a true pair,
+but the existing quota cache retains only one latest payload and is conditional
+on quota data; it cannot establish historical coverage for other sessions.
+Codex records with paired token-count fields establish pressure; cumulative-only
+or older records do not. OpenCode's sessions may simply fall outside the selected
+timeframe; its recorded message tokens do not establish the runtime window.
+
+The cards distinguish input-only records, partial paired coverage, no recorded
+measurements, and no sessions. Missing numeric evidence displays as an em dash,
+not zero. The count is labelled Sessions with pressure because it counts sessions
+with a pair, rather than individual telemetry samples. A meter appears only for
+a measured pressure value; otherwise the card states that pressure is unmeasured.
+
+Future Claude coverage could use bounded per-session statusline snapshots with
+session/model/time identity. OpenCode would require validated request/response
+correlation across retries and model switches. Neither is implemented here, and
+model catalogs are not substituted for historical runtime windows.
+
 ## Usage Score projects
 
 An additive `gitProjects` projection ranks discovered Git projects using exactly

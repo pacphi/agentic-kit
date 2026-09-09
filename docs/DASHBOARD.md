@@ -134,7 +134,8 @@ Overview keeps status and routing in one health-first area:
   Direct Ruflo agents must explicitly select OpenRouter or Ollama together with a provider-native
   model, and the Ruflo/MCP process must inherit the required credential environment. Served-provider
   and served-model claims come from **Usage → Scorecard** evidence instead.
-- **Runtime** presents operational services, processes, and MCP readiness.
+- **Runtime** presents operational services, processes, MCP readiness, and cached
+  context configuration with host-specific native controls.
 - **Intelligence** presents memory, learning, and quality-improvement signals machine-wide: an
   always-visible rollup folded across every project on this machine where memory or intelligence has
   been activated — a `.claude-flow`, `.agentic-qe` or `.swarm` directory, whichever host created it
@@ -149,13 +150,15 @@ Overview keeps status and routing in one health-first area:
   [Project intelligence](ddd/project-intelligence.md) and
   [ADR-0024](adr/0024-project-intelligence-telemetry.md) for the full model and the two learning
   metrics' load-bearing distinction, and [ADR-0027](adr/0027-shared-project-census.md) for project
-  discovery.
+  discovery. The machine-wide table and picker share alphabetized Git repository,
+  worktree, user-level, and other/unclassified subgroups. Each table subgroup shows
+  five rows before scrolling; all rows remain available inside the bounded panel.
 
 ### Why project counts differ between tabs
 
-Every area derives its project list from one census, so a project means the same thing everywhere —
-a session run in `myrepo/backend` belongs to `myrepo`, not to a project called `backend`, and an
-agent worktree is not a peer of the repository it was cut from.
+Project counts reflect different populations. Intelligence uses the learning census, while Usage
+Score ranks verified Git identities from the selected session window. Evidence-backed worktree
+associations keep a worktree with its repository; display names alone do not establish identity.
 
 The totals still differ, because the tabs ask different questions:
 
@@ -282,13 +285,15 @@ sources: [Usage scorecard metrics](USAGE-SCORECARD-METRICS.md) §2a, §2b, §20�
 Context answers how much of a runtime-observed window the retained sessions used. The policy strip
 shows the canonical startup, dynamic and reserve bands. The summary reports exactly how many
 sessions have a paired input/window pressure observation and how many lack a denominator. Claude,
-Codex and OpenCode each keep their own card with evidence state, p90 peak pressure, paired-sample
-count, p90 peak input and median observed window.
+Codex and OpenCode each keep their own card with coverage state, p90 peak pressure, number of
+sessions with pressure measurements, p90 peak input and median observed window.
 
 A percentage is rendered only when input and window were observed together for that session.
-Claude and OpenCode commonly carry input-only evidence, so they may read **Partial evidence** while
-Codex is observed. Missing evidence renders `unknown`; an unknown ARIA meter omits `aria-valuenow`
-rather than announcing zero. The attention projection is capped to the top 20 sessions before
+The cards distinguish **Input only**, **Partial coverage**, **Not recorded**, and **No sessions**.
+Missing token/window values render as an em dash. A pressure meter appears only for a measured
+value, and each card explains its coverage gap. Claude transcript input records do not include a
+paired window; older Codex records can contain only cumulative totals. OpenCode may have no
+sessions in the chosen window even when its installation and model catalog are available. The attention projection is capped to the top 20 sessions before
 presentation. The browser renders one disclosure row per bounded project and keeps each sanitized
 conversation label inside the expanded session table, then exposes explicit column headers, an opaque session reference, host, policy-derived
 recommendation, pressure/input/window, and start date. The session reference links to that retained
