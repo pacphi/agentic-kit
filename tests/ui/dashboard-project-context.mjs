@@ -12,8 +12,14 @@ const main={path:'/projects/example',label:'example',hosts:['claude'],remote:{st
  sessionOrigins:[{origin:'claude-desktop',sessions:2},{origin:'unknown',sessions:1}],totalBytes:measured(1024),loc:{total:measured(42),languages:[]}};
 const work={path:'/worktrees/feature',label:'feature',repository:{...repo,kind:'worktree'},sessionOrigins:[{origin:'codex-desktop',sessions:1}]};
 const other={path:'/missing/project',label:'Unavailable folder',repository:{kind:'unknown'},sessionOrigins:[{origin:'unknown',sessions:1}]};
+const capturedAt='2026-09-09T14:00:00Z';
+const catalogModels=['claude','opencode'].map(host=>({key:{host,modelId:host+'-example',scopeId:'fixture-scope',provider:host==='opencode'?'example':null},
+ capabilities:{contextLimit:200000,outputLimit:32000},evidence:['contextLimit','outputLimit'].map(field=>({field:'capabilities.'+field,
+ source:host==='claude'?'anthropic-docs':'opencode-models',capturedAt,scopeFingerprint:'fixture-scope',freshness:'fresh'}))}));
+const modelSnapshot={capturedAt,scope:{fingerprint:'fixture-scope'},models:catalogModels,
+ sources:['anthropic-docs','opencode-models'].map(id=>({id,scopeFingerprint:'fixture-scope'}))};
 const report=buildContextReport({integrations:{hosts:{claude:true,codex:true,opencode:true}},codexContext:{}},{available:true,configuredWindow:1000000,
- cacheFetchedAt:'2026-09-09T14:00:00Z',models:Array.from({length:12},(_,i)=>({model:'model-'+i,nativeWindow:200000,maximumWindow:1000000,effectiveWindow:950000}))});
+ cacheFetchedAt:'2026-09-09T14:00:00Z',models:Array.from({length:12},(_,i)=>({model:'model-'+i,nativeWindow:200000,maximumWindow:1000000,effectiveWindow:950000}))},{now:Date.parse(capturedAt),modelSnapshot});
 
 test('context and project grouping stay readable, keyboard operable and evidence-aware',async t=>{
  const browser=await chromium.launch({channel:'chrome',headless:true});t.after(()=>browser.close());
@@ -32,12 +38,14 @@ test('context and project grouping stay readable, keyboard operable and evidence
  await page.click('[data-overview-view="runtime"]');
  await page.waitForSelector('#cards-runtime .context-card');
  assert.equal(await page.locator('#cards-runtime .context-card').count(),1);
- assert.ok((await page.locator('#cards-runtime .context-card').innerText()).includes('Current usage: unknown'));
+ assert.doesNotMatch(await page.locator('#cards-runtime .context-card').innerText(),/Current usage|Reporting limits/);
  const card=await page.locator('#cards-runtime .context-card').boundingBox();assert.ok(card.height<520,JSON.stringify(card));
- await page.locator('#cards-runtime .context-host details summary').focus();await page.keyboard.press('Enter');
- assert.equal(await page.locator('#cards-runtime .context-model-scroll tbody tr').count(),12);
- assert.ok((await page.locator('#cards-runtime .context-model-scroll').boundingBox()).height<=220);
+ await page.locator('#cards-runtime .context-host').filter({hasText:'Codex'}).locator('details summary').focus();await page.keyboard.press('Enter');
+ assert.equal(await page.locator('#cards-runtime .context-host').filter({hasText:'Codex'}).locator('.context-model-scroll tbody tr').count(),12);
+ assert.ok((await page.locator('#cards-runtime .context-host').filter({hasText:'Codex'}).locator('.context-model-scroll').boundingBox()).height<=220);
  const shots=path.resolve(process.env.AK_DASHBOARD_EVIDENCE_DIR || '.ui-artifacts/project-context');fs.mkdirSync(shots,{recursive:true});
+ await page.screenshot({path:path.join(shots,'context-models-desktop.png'),fullPage:true,animations:"disabled"});
+ await page.locator('#cards-runtime .context-host').filter({hasText:'Codex'}).locator('details summary').click();
  await page.screenshot({path:path.join(shots,'context-desktop.png'),fullPage:true,animations:"disabled"});
  await page.click('#tab-system');await page.click('[data-system-view="projects"]');
  await page.waitForSelector('#project-population');

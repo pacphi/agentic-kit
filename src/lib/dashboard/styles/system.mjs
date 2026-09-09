@@ -389,7 +389,7 @@ export const SYSTEM_CSS = `
 }
 
 .context-card { align-self:start; min-width:0; }
-.context-host { padding:8px 0; border-bottom:1px solid var(--line); }
+.context-host { padding:9px 0; border-bottom:1px solid var(--line); }
 .context-host h3 { margin:0 0 4px; font-size:13px; }
 .context-host p,.context-notes { font-size:11px; line-height:1.5; margin:4px 0; }
 .context-basis { color:var(--ink-2); overflow-wrap:anywhere; }
@@ -405,4 +405,8 @@ export const SYSTEM_CSS = `
 .project-controls select { max-width:100%; background:var(--bg); color:var(--ink); border:1px solid var(--line); border-radius:5px; padding:6px; }
 .project-identity,.project-path { display:block; font-size:11px; color:var(--ink-2); overflow-wrap:anywhere; white-space:normal; }
 .project-group th { text-align:left; font-size:11px; padding:12px 8px 6px; overflow-wrap:anywhere; white-space:normal; }
+
+.context-host-heading { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
+.context-host-heading span { font-size:11px; color:var(--ink-2); }
+.context-control { display:inline-block; color:var(--accent); font-size:11px; margin:2px 0; }
 `;

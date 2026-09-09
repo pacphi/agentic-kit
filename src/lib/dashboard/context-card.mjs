@@ -1,38 +1,50 @@
 import { esc, rowLine } from './groups.mjs';
 
-// Self-contained apart from the shared escaper/row renderer: also injected into
-// the browser bundle, so tests execute exactly the shipped formatter.
+// Also injected into the browser bundle: one tested formatter for both paths.
 export function contextCard(group) {
-  const reports = group.rows.map(r => r.contextReport).filter(Boolean);
-  const report = reports[0];
-  const tokens = value => Number.isFinite(value) && value >= 0 ? value.toLocaleString('en-US') : 'unknown';
+  const report = group.rows.find(row => row.contextReport)?.contextReport;
+  const tokens = value => Number.isFinite(value) && value >= 0 ? value.toLocaleString('en-US') : '—';
+  const controls = {
+    claude: ['Model & compaction', 'https://code.claude.com/docs/en/model-config'],
+    codex: ['Model & compaction', 'https://learn.chatgpt.com/docs/config-file/config-reference'],
+    opencode: ['Per-model limits', 'https://opencode.ai/docs/config'],
+  };
   const hostHtml = host => {
     const models = host.models || [];
-    const summary = '<section class="context-host"><h3>' + esc(host.label || host.host) + (host.enabled === false ? ' (disabled)' : '') + '</h3>'
-      + '<p>' + (host.managed ? 'Managed request: ' + tokens(host.configuredRequest) + ' tokens.' : host.configuredRequest != null ? 'User request: ' + tokens(host.configuredRequest) + ' tokens (unmanaged).' : 'Context controls not managed by kit.')
-      + ' Current usage: unknown.</p>';
-    const table = models.length ? '<details><summary>' + models.length + ' cached model limits</summary>'
-      + '<div class="context-model-scroll" role="region" aria-label="Cached model context limits" tabindex="0">'
-      + '<table><thead><tr><th>Model</th><th>Default</th><th>Maximum</th><th>Usable¹</th></tr></thead><tbody>'
-      + models.map(model => '<tr><th scope="row">' + esc(model.model) + '</th><td>' + tokens(model.nativeWindow)
-        + '</td><td>' + tokens(model.maximumWindow) + '</td><td>' + tokens(model.effectiveWindow) + '</td></tr>').join('')
-      + '</tbody></table></div><p>¹ Calculated from configuration and cache; running session unverified.</p></details>' : '';
+    const control = controls[host.host];
+    const requested = host.configuredRequest != null ? tokens(host.configuredRequest) + ' tokens requested' : null;
+    const summary = '<section class="context-host"><div class="context-host-heading"><h3>' + esc(host.label || host.host)
+      + (host.enabled === false ? ' (disabled)' : '') + '</h3>'
+      + (host.managed ? '<span>Kit-managed</span>' : control ? '<a class="context-control" href="' + control[1]
+        + '" target="_blank" rel="noopener noreferrer" aria-label="' + esc((host.label || host.host) + ' ' + control[0] + ' documentation')
+        + '">Native controls ↗</a>' : '<span>Native</span>') + '</div>'
+      + (requested ? '<p>' + requested + '</p>' : '');
+    const codex = host.host === 'codex' && models.some(model => model.nativeWindow != null);
+    const columns = codex ? [['nativeWindow','Default'],['maximumWindow','Maximum'],['effectiveWindow','Usable¹']]
+      : [['capacityWindow','Context'],['inputLimit','Input'],['outputLimit','Output']].filter(([field]) => models.some(model => model[field] != null));
+    const header = columns.map(([,label]) => '<th>' + label + '</th>').join('');
+    const cells = model => columns.map(([field]) => model[field]);
+    const freshnessNote = models.some(model => model.freshness === 'stale') ? ' · stale'
+      : models.some(model => model.freshness === 'unknown') ? ' · freshness unverified' : '';
+    const table = models.length ? '<details><summary>' + models.length + (host.modelsOmitted ? ' of ' + (models.length + host.modelsOmitted) : '') + ' cached model limit' + (models.length === 1 ? '' : 's') + freshnessNote + '</summary>'
+      + '<div class="context-model-scroll" role="region" aria-label="' + esc(host.label || host.host) + ' cached model context limits" tabindex="0">'
+      + '<table><thead><tr><th>Model</th>' + header + '</tr></thead><tbody>'
+      + models.map(model => '<tr><th scope="row" title="' + esc(model.capturedAt ? 'Captured ' + model.capturedAt : 'Capture date unavailable') + '">' + esc(model.provider ? model.provider + '/' + model.model : model.model)
+        + '</th>' + cells(model).map(value => '<td>' + tokens(value) + '</td>').join('') + '</tr>').join('')
+      + '</tbody></table></div>' + (codex ? '<p>¹ Calculated configuration; session application unverified.</p>' : '') + '</details>' : '';
     const threshold = host.compaction?.configuredThreshold;
-    const compact = threshold != null ? '<p>User compaction setting: ' + tokens(threshold)
-      + ' tokens; scope and runtime application unverified.</p>' : '';
-    const freshness = host.cacheFetchedAt || host.observedAt;
-    const basis = '<p class="context-basis">' + esc(host.cacheFetchedAt ? 'Model cache captured' : host.source === 'integration-configuration' ? 'Host enablement inspected' : 'Context inspection attempted')
-      + (freshness ? ' · <time datetime="' + esc(freshness) + '">' + esc(new Date(freshness).toLocaleString('en-US', {dateStyle:'medium',timeStyle:'short'})) + '</time>' : '') + '</p>';
-    return summary + compact + table + basis + '</section>';
+    const compact = threshold != null ? '<p>Configured compaction: ' + tokens(threshold) + ' tokens</p>' : '';
+    const freshness = codex ? host.cacheFetchedAt : host.inventoryCapturedAt;
+    const basis = models.length && freshness ? '<p class="context-basis">Cache <time datetime="' + esc(freshness) + '">'
+      + esc(new Date(freshness).toLocaleString('en-US', {dateStyle:'medium',timeStyle:'short'})) + '</time></p>' : '';
+    return summary + compact + table.replace('</details>', basis + '</details>') + '</section>';
   };
-  const warnings = group.rows.filter(r => r.level === 'warn' || r.level === 'fail');
+  const warnings = group.rows.filter(row => row.level === 'warn' || row.level === 'fail');
   const content = report ? (report.hosts || []).map(hostHtml).join('')
-    + '<details class="context-notes"><summary>Reporting limits</summary><ul>'
-    + (report.hosts || []).flatMap(host => (host.limitations || []).map(note => '<li>' + esc(host.label || host.host) + ': ' + esc(note) + '</li>')).join('')
-    + '<li>Actual session window and compaction threshold are unknown here. Historical observations are in Usage → Context.</li></ul></details>'
+    + '<a class="context-control" href="#usage/models">Open model inventory →</a>'
     + (warnings.length ? '<ul class="rows">' + warnings.map(rowLine).join('') + '</ul>' : '')
     : '<ul class="rows">' + group.rows.map(rowLine).join('') + '</ul>';
   return '<article class="card context-card" data-level="' + esc(group.level) + '"><div class="card-top">'
-    + '<span class="dot" data-level="' + esc(group.level) + '"></span><span class="card-name">Context</span></div>'
+    + '<span class="dot" data-level="' + esc(group.level) + '"></span><span class="card-name">Context configuration</span></div>'
     + content + '</article>';
 }

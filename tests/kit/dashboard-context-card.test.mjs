@@ -20,11 +20,21 @@ test('structured context renders host differences and model columns once behind 
   assert.match(html, /Maximum/);
   assert.match(html, /950,000/);
   assert.match(html, /Claude/);
-  assert.match(html, /unknown/i);
+  assert.doesNotMatch(html, /Current usage|Reporting limits|Native controls not inspected/);
+  assert.match(html, /Open model inventory/);
   assert.doesNotMatch(html, /old repeated label/);
 });
 test('legacy context facts and remediation remain accessible without structured metadata', () => {
   const html = groupCard(groupRows([{subsystem:'codex-context',level:'warn',message:'unavailable',fix:'repair'}])[0]);
   assert.match(html,/unavailable/);
   assert.match(html,/repair/);
+});
+
+test('catalog fallback uses capacity columns without inventing native allocation or effective values',()=>{
+ const contextReport={hosts:[{host:'codex',label:'Codex',models:[{model:'catalog',capacityWindow:200000,outputLimit:32000,basis:'catalog',freshness:'stale'}]}]};
+ const html=groupCard(groupRows([{subsystem:'codex-context',level:'info',contextReport}])[0]);
+ assert.match(html,/<th>Context<\/th>/);
+ assert.match(html,/200,000/);
+ assert.match(html,/stale/);
+ assert.doesNotMatch(html,/Usable|<th>Default|<th>Input/);
 });

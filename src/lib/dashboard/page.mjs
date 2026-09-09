@@ -24,19 +24,20 @@ const INTEL_CSS = `
 .mw-val{color:var(--ink-2); text-align:right}
 .mw-row.mw-head .mw-val{color:var(--ink-dim)}
 @media(max-width:560px){.mw-row{grid-template-columns:1fr repeat(3,minmax(60px,1fr)); gap:6px}}
-.mw-picker{display:flex; align-items:center; gap:9px; flex-wrap:wrap}
+.mw-picker{display:flex; align-items:center; gap:9px; flex-wrap:wrap; min-width:0; max-width:100%}
 .mw-picker label{color:var(--ink-dim); font-size:11.5px}
 .mw-picker select{
   background:var(--panel-2); border:1px solid var(--line); color:var(--ink);
   font-family:inherit; font-size:12.5px; padding:6px 12px; border-radius:100px;
-  cursor:pointer; max-width:100%;
+  cursor:pointer; min-width:0; max-width:100%;
 }
 .mw-picker select:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
 .mw-picker select:disabled{opacity:.5; cursor:not-allowed}
 /* The picker moved INTO this strip's head (it is a control on "learning over
    time", not a panel of its own), so the head's baseline alignment has to give
    way to centre alignment or the select sits low against the heading. */
-#history .strip-head{align-items:center}
+#history .strip-head{align-items:center; flex-wrap:wrap}
+#history .strip-title{min-width:0; overflow-wrap:anywhere}
 #history #strip-note{margin:0 0 14px}
 /* The census explainer: how this panel's project count relates to the counts
    the other tabs show. Sits under the hero because it explains the number in
