@@ -41,7 +41,7 @@ export function contextCard(group) {
   };
   const warnings = group.rows.filter(row => row.level === 'warn' || row.level === 'fail');
   const content = report ? (report.hosts || []).map(hostHtml).join('')
-    + '<a class="context-control" href="#usage/models">Open model inventory →</a>'
+    + '<a class="context-control" data-model-inventory href="#usage/models">Open model inventory →</a>'
     + (warnings.length ? '<ul class="rows">' + warnings.map(rowLine).join('') + '</ul>' : '')
     : '<ul class="rows">' + group.rows.map(rowLine).join('') + '</ul>';
   return '<article class="card context-card" data-level="' + esc(group.level) + '"><div class="card-top">'

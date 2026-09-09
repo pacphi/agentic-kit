@@ -38,21 +38,26 @@ function contains(hay, needle) {
 // anchors the user clicks in their own browser, which is a stated design point
 // (docs/ddd/component-directory.md §6 — "Links are outbound and user-initiated;
 // the kit stays offline"). So the invariant is pinned to the directory itself —
-// every external URL baked into the page must be one the directory declares.
+// every external URL baked into the page must be a declared directory or native
+// context-control documentation anchor.
 // A CDN script, webfont, tracking beacon, or any other new external host still
 // fails here, because its URL is not in that set.
 let directoryUrls = null;
 async function assertSelfContained(body) {
   if (!directoryUrls) {
     const { directoryEntries } = await import('../src/lib/dashboard/about-directory.mjs');
-    directoryUrls = new Set();
+    directoryUrls = new Set([
+      'https://code.claude.com/docs/en/model-config',
+      'https://learn.chatgpt.com/docs/config-file/config-reference',
+      'https://opencode.ai/docs/config',
+    ]);
     for (const e of directoryEntries()) for (const l of e.links || []) directoryUrls.add(l.url);
   }
   const unexpected = (body.match(/https?:\/\/[^"'`\s\\)]+/g) || [])
     .filter((u) => !/^https?:\/\/127\.0\.0\.1/.test(u) && !/w3\.org/.test(u))
     .filter((u) => !directoryUrls.has(u));
   assert(unexpected.length === 0,
-    'page must not reference external hosts beyond the About directory anchors; found: '
+    'page must not reference external hosts beyond the declared documentation anchors; found: '
     + unexpected.slice(0, 5).join(', '));
   assert(!/<link[^>]+stylesheet/i.test(body), 'no external stylesheet links');
   assert(!/<script[^>]+src=/i.test(body), 'no external script src');

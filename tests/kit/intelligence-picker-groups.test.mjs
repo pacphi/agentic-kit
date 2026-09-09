@@ -31,8 +31,8 @@ test('should_segment_and_alphabetize_picker_options_without_changing_selection_k
     assert.ok(html.includes(`<optgroup label="${label}">`));
   }
   assert.ok(html.indexOf('value="a"') < html.indexOf('value="z"'));
-  assert.match(html, /value="z" selected>Zulu · Codex Desktop/);
-  assert.match(html, /alpha · Claude Desktop/);
+  assert.match(html, /value="z" selected>Zulu</);
+  assert.doesNotMatch(html, /Claude Desktop|Codex Desktop/);
   assert.equal(elements['history-project-name'].textContent, 'Zulu');
 });
 test('should_keep_empty_picker_disabled_and_escape_untrusted_option_labels', () => {

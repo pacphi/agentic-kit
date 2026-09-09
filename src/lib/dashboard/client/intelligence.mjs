@@ -127,10 +127,7 @@ import { fmtNum, kpi } from './usage.mjs';
       }).sort(function(a,b){return String(a.label||'').localeCompare(String(b.label||''),undefined,{sensitivity:'base',numeric:true})||String(a.key).localeCompare(String(b.key));});
       if(!rows.length)return '';
       return '<optgroup label="'+esc(group[1])+'">'+rows.map(function(p){
-        var qualifiers=[];
-        if((p.learningOrigins||[]).includes('claude-desktop'))qualifiers.push('Claude Desktop');
-        if((p.learningOrigins||[]).includes('codex-desktop'))qualifiers.push('Codex Desktop');
-        return '<option value="'+esc(p.key)+'"'+(p.key===selectedProjectKey?" selected":"")+'>'+esc(p.label+(qualifiers.length?' · '+qualifiers.join(' · '):''))+"</option>";
+        return '<option value="'+esc(p.key)+'"'+(p.key===selectedProjectKey?" selected":"")+'>'+esc(p.label)+"</option>";
       }).join('')+'</optgroup>';
     }).join('');
   }

@@ -47,6 +47,10 @@ test('context and project grouping stay readable, keyboard operable and evidence
  await page.screenshot({path:path.join(shots,'context-models-desktop.png'),fullPage:true,animations:"disabled"});
  await page.locator('#cards-runtime .context-host').filter({hasText:'Codex'}).locator('details summary').click();
  await page.screenshot({path:path.join(shots,'context-desktop.png'),fullPage:true,animations:"disabled"});
+ await page.locator('#cards-runtime [data-model-inventory]').click();
+ await page.waitForSelector('#v-models',{state:'visible'});
+ assert.equal(await page.locator('#usage-tab-models').getAttribute('aria-selected'),'true');
+ assert.equal(await page.evaluate(()=>globalThis.document.activeElement.id),'usage-tab-models');
  await page.click('#tab-system');await page.click('[data-system-view="projects"]');
  await page.waitForSelector('#project-population');
  assert.equal(await page.locator('#sys-projects tbody tr:not(.project-group)').count(),1);

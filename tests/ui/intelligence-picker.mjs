@@ -53,8 +53,8 @@ test('Intelligence picker groups and sorts learning scopes without changing sele
     ['Git repositories', ['repo-a', 'repo-z']], ['Git worktrees', ['tree-a', 'tree-z']],
     ['User-level learning', ['user-a', 'user-z']], ['Other / unclassified', ['unknown-a', 'unknown-z']],
   ]);
-  assert.equal(groups[0].labels[0], 'alpha · Claude Desktop · Codex Desktop');
-  assert.equal(groups[1].labels[0], 'Alpha tree · Codex Desktop');
+  assert.equal(groups[0].labels[0], 'alpha');
+  assert.equal(groups[1].labels[0], 'Alpha tree');
   assert.equal(await picker.locator('option').count(), projects.length);
   assert.equal(await picker.inputValue(), 'repo-z', 'sorting must retain the server-selected project');
   await picker.focus();
