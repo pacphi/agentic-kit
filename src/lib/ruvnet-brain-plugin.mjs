@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { claudeDir } from './paths.mjs';
+import { brainHookContract } from './brain-hook-contract.mjs';
 
 const ID = 'ruvnet-brain@ruvnet-brain';
 const object = (v) => v && typeof v === 'object' && !Array.isArray(v);
@@ -75,7 +76,12 @@ export function inspectClaudeBrainPlugin({ claudeRoot = claudeDir() } = {}) {
     const hooks = readJson(payloadFile(root, 'hooks/hooks.json'))?.hooks;
     if (!object(hooks)) throw new Error('invalid hooks');
     result.hookEvents = Object.keys(hooks);
-    if (result.hookEvents.length) result.issues.push(`Selected payload declares automatic hooks outside the audited 4.3.16 retirement baseline: ${result.hookEvents.join(', ')}`);
+    const contract = brainHookContract(result.payloadVersion, hooks);
+    if (!contract.qualified) result.issues.push(contract.issue);
+    else {
+      result.hookContract = contract.contract;
+      if (result.payloadVersion === '4.3.17') payloadFile(root, 'scripts/hook-shim.mjs');
+    }
   } catch { result.issues.push('Automatic hook retirement is unverified: missing or invalid hook manifest'); }
   return result;
 }

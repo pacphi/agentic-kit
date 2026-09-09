@@ -33,6 +33,29 @@ test('Brain should observe the selected payload without asserting runtime health
   assert.equal(brainPluginRows(r)[0].fix, null);
 });
 
+test('Brain continuity requires the selected shim without claiming runtime execution', (t) => {
+  const f = fixture(t);
+  f.registry([{ ...f.record, version: '4.3.17' }]);
+  f.write(path.join(f.payload, '.claude-plugin/plugin.json'), { name: 'ruvnet-brain', version: '4.3.17' });
+  const entry = (matcher, action, timeout) => [{ matcher, hooks: [{ type: 'command',
+    command: `node "\${CLAUDE_PLUGIN_ROOT}/scripts/hook-shim.mjs" ${action} || true`, timeout }] }];
+  f.write(path.join(f.payload, 'hooks/hooks.json'), { hooks: {
+    SessionStart: entry('startup|resume|clear|compact|fork', 'session-start', 5),
+    Stop: entry('*', 'continuation-gate', 10),
+  } });
+  assert.equal(f.inspect().issues.length, 1, 'missing shim cannot pass');
+  const shim = path.join(f.payload, 'scripts/hook-shim.mjs');
+  f.write(shim, 'not executed');
+  assert.deepEqual(f.inspect().issues, []);
+  assert.equal(f.inspect().runtimeVerified, false);
+  assert.equal(f.inspect().hookContract, '4.3.17-continuity');
+  if (process.platform !== 'win32') {
+    fs.unlinkSync(shim);
+    fs.symlinkSync(path.join(f.payload, 'commands/rvbc.md'), shim);
+    assert.equal(f.inspect().issues.length, 1, 'symlinked shim cannot pass');
+  }
+});
+
 test('Brain should disclose both missing commands and retired hooks in a disabled old payload', (t) => {
   const f = fixture(t);
   fs.unlinkSync(path.join(f.payload, 'commands/rvbc.md'));
