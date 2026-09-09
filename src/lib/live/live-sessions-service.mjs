@@ -121,6 +121,15 @@ export class LiveSessionsService {
     return {
       ...serializeLiveProjection(this.#projection),
       health: Object.fromEntries(this.#health),
+      acquisitionCoverage: [...this.#contexts.values()].reduce((total, context) => {
+        const coverage = context.acquisitionCoverage;
+        if (!coverage) return total;
+        total.complete &&= coverage.complete;
+        total.truncated ||= coverage.truncated;
+        total.droppedLines += coverage.droppedLines;
+        total.pendingBytes += coverage.pendingBytes;
+        return total;
+      }, { complete: true, truncated: false, droppedLines: 0, pendingBytes: 0 }),
     };
   }
 
@@ -220,7 +229,10 @@ export class LiveSessionsService {
     }
     const onRecord = (record) => this.#record(record, context, file);
     const onError = (error) => this.#error(context.adapter, error);
-    const tailer = new JsonlTailer(file, { onRecord, onError, startAtEnd: initial });
+    const tailer = new JsonlTailer(file, {
+      onRecord, onError, startAtEnd: initial,
+      onCoverage: (coverage) => { context.acquisitionCoverage = coverage; },
+    });
     this.#tailers.set(file, tailer);
     this.#contexts.set(file, context);
     this.#mark(context.adapter, { files: (this.#health.get(context.adapter)?.files ?? 0) + 1 });

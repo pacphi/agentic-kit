@@ -324,3 +324,17 @@ test('selected stream builds a deterministic bounded playback timeline with live
     'the same retained history and seek point must reconstruct identically');
   streams.close();
 });
+
+test('selected transcript discloses live acquisition truncation in snapshot and playback', async (t) => {
+  const sb = sandbox();
+  const file = path.join(sb.claude, 's1.jsonl');
+  fs.writeFileSync(file, '');
+  const streams = new TranscriptStreams({ roots: sb.roots, intervalMs: 10, mask: (value) => value });
+  t.after(() => { streams.close(); fs.rmSync(sb.dir, { recursive: true, force: true }); });
+  const stream = streams.open('claude', 's1');
+  fs.appendFileSync(file, 'x'.repeat(1024 * 1024 + 1) + '\n');
+  await waitUntil(() => stream.snapshot().acquisitionCoverage?.truncated,
+    'oversized live line was not disclosed');
+  assert.equal(stream.playback().truncated, true);
+  assert.equal(stream.playback().acquisitionCoverage.complete, false);
+});

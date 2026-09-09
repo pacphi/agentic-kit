@@ -51,3 +51,42 @@ test('tailer isolates malformed lines and continues', () => {
   assert.equal(errors.length, 1);
   assert.equal(errors[0][1], 'not-json');
 });
+
+test('tailer bounds each reconciliation, retains burst backlog, and decodes split UTF-8', (t) => {
+  const file = tempFile();
+  t.after(() => fs.rmSync(path.dirname(file), { recursive: true, force: true }));
+  const lines = Array.from({ length: 20 }, (_, n) => ({ n, text: 'é😀' }));
+  fs.writeFileSync(file, lines.map(JSON.stringify).join('\n') + '\n');
+  const rows = [], coverage = [];
+  const tailer = new JsonlTailer(file, {
+    onRecord: (row) => rows.push(row), onCoverage: (value) => coverage.push(value),
+    maxChunkBytes: 7, maxReadBytes: 31,
+  });
+  tailer.reconcile();
+  assert.ok(rows.length < lines.length, 'a burst must not be acquired in one reconciliation');
+  assert.ok(coverage.at(-1).pendingBytes > 0);
+  fs.appendFileSync(file, '{"n":20}\n');
+  for (let i = 0; i < 100; i++) tailer.reconcile();
+  assert.deepEqual(rows, [...lines, { n: 20 }]);
+  assert.equal(coverage.at(-1).complete, true);
+});
+
+test('tailer discards oversized incomplete lines with explicit coverage and recovers at newline', (t) => {
+  const file = tempFile();
+  t.after(() => fs.rmSync(path.dirname(file), { recursive: true, force: true }));
+  fs.writeFileSync(file, '{"text":"' + 'x'.repeat(80));
+  const rows = [], coverage = [];
+  const tailer = new JsonlTailer(file, {
+    onRecord: (row) => rows.push(row), onCoverage: (value) => coverage.push(value),
+    maxChunkBytes: 9, maxReadBytes: 100, maxLineBytes: 32,
+  });
+  tailer.reconcile();
+  assert.equal(coverage.at(-1)?.truncated, true);
+  assert.equal(coverage.at(-1).droppedLines, 1);
+  assert.ok(coverage.at(-1).bufferedBytes <= 32);
+  fs.appendFileSync(file, 'x'.repeat(80) + '"}\n{"n":1}\n');
+  tailer.reconcile();
+  assert.deepEqual(rows, [{ n: 1 }]);
+  assert.equal(coverage.at(-1).droppedLines, 1);
+  assert.equal(coverage.at(-1).complete, false);
+});
