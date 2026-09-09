@@ -224,6 +224,18 @@ export const USAGE_CSS = `
 .mbar i.alt{background:var(--purple)}
 .mval{font-size:12.5px; text-align:right; color:var(--ink)}
 .msub{font-size:10.5px; color:var(--ink-dim); text-align:right}
+.u-project-group>summary{cursor:pointer;list-style:none}
+.u-project-group>summary::-webkit-details-marker{display:none}
+.u-project-group>summary:focus-visible,.u-project-member>summary:focus-visible,.u-project-overflow>summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.u-project-chevron{display:inline-block;font-size:11px;transition:transform .15s}
+.u-project-group[open]>summary .u-project-chevron{transform:rotate(90deg)}
+.u-project-members{margin:0 0 8px 12px;border-left:1px solid var(--line);padding-left:10px;min-width:0;max-height:360px;overflow:auto}
+.u-project-member>summary{display:flex;justify-content:space-between;gap:12px;padding:7px 0;cursor:pointer;font-size:12px}
+.u-project-member>summary>span:first-child{min-width:0;overflow-wrap:anywhere}
+.u-project-member>summary>span:last-child{flex-shrink:0;text-align:right}
+.u-project-member small{display:block;color:var(--ink-dim);font-size:10px;margin-top:3px}
+.u-project-sessions{display:grid;gap:5px;padding:4px 0 8px;font-size:11px;overflow-wrap:anywhere;max-height:180px;overflow:auto}
+.u-project-overflow>summary{cursor:pointer;color:var(--accent);font-size:12px;padding:9px 0}
 .crow{
   display:grid; grid-template-columns:minmax(140px,1.4fr) 2fr 62px minmax(128px,auto);
   gap:11px; align-items:center; padding:7px 0; border-bottom:1px solid var(--line);

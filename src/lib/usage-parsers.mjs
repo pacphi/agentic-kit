@@ -17,6 +17,7 @@ import { toMs, maskSecrets } from './usage-aggregate.mjs';
 import { normalizeMode } from './usage-modes.mjs';
 import { provenanceOf } from './usage-provenance.mjs';
 import { promptSemantics } from './usage-prompt-semantics.mjs';
+import { observeUsageProject, usageSessionOrigin } from './usage-project-evidence.mjs';
 
 export { promptSemantics } from './usage-prompt-semantics.mjs';
 
@@ -187,6 +188,7 @@ export function blankSession(id, provider) {
   return {
     id, provider, host: provider, inferenceProvider: null, providerProvenance: 'unknown',
     title: '', project: 'unknown', start: null, end: null,
+    projectEvidence: null, sessionOrigin: { origin: 'unknown', evidence: 'desktop-origin-not-declared' },
     prompts: 0, responses: 0, exceptions: 0, sidechain: false, threadSource: null, models: [], tools: {},
     skill: null, plugin: null, worktree: null, usage: [], punchcard: {}, active: [], stamps: [],
     // Codex-only detail (v6): reasoning tokens inside output, and the last
@@ -687,6 +689,7 @@ function recordClaudeAssistantTurn(rec, turns, latState, ms, decoded, withTurns)
  */
 export function parseClaude(raw, { id, dirName, withTurns = false }) {
   const rec = blankSession(id, 'claude');
+  rec.sessionOrigin = usageSessionOrigin(raw, 'claude');
   const turns = [];
   const titleState = { firstPrompt: '', aiTitle: '' };
   // Open by the most recent human prompt, closed by the first real assistant
@@ -700,6 +703,7 @@ export function parseClaude(raw, { id, dirName, withTurns = false }) {
     if (typeof e.attributionPlugin === 'string' && !rec.plugin) rec.plugin = e.attributionPlugin;
     const decoded = decodeClaudeRecord(e);
     if (decoded.isSidechain) rec.sidechain = true;
+    if (!rec.projectEvidence && typeof e.cwd === 'string') rec.projectEvidence = observeUsageProject(e.cwd);
     if (rec.project === 'unknown' && typeof e.cwd === 'string') applyProject(rec, projectLabel(e.cwd, dirName, repoRootOf(e.cwd)));
 
     if (decoded.role === 'user') {
@@ -768,6 +772,7 @@ function handleCodexMeta(rec, metaState, decoded) {
   metaState.seen = true;
   if (typeof decoded.sessionId === 'string' && decoded.sessionId) rec.id = decoded.sessionId;
   if (typeof decoded.cwd === 'string') applyProject(rec, projectLabel(decoded.cwd, null, repoRootOf(decoded.cwd)));
+  if (typeof decoded.cwd === 'string') rec.projectEvidence = observeUsageProject(decoded.cwd);
   if (typeof decoded.threadSource === 'string') rec.threadSource = decoded.threadSource;
   if (decoded.provider) {
     rec.inferenceProvider = decoded.provider;
@@ -776,6 +781,7 @@ function handleCodexMeta(rec, metaState, decoded) {
 }
 
 function handleCodexTurnContext(rec, decoded, payload) {
+  if (!rec.projectEvidence && typeof decoded.cwd === 'string') rec.projectEvidence = observeUsageProject(decoded.cwd);
   if (typeof decoded.model === 'string' && !rec.models.includes(decoded.model)) rec.models.push(decoded.model);
   if (decoded.provider) {
     rec.inferenceProvider = decoded.provider;
@@ -1066,6 +1072,7 @@ function finalizeCodexUsage(rec, usageState) {
  */
 export function parseCodex(raw, { id, withTurns = false }) {
   const rec = blankSession(id, 'codex');
+  rec.sessionOrigin = usageSessionOrigin(raw, 'codex');
   const turns = [];
   const stats = codexParseStats();
   const usageState = { lastUsage: null, lastUsageAt: null };
