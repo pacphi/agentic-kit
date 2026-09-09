@@ -68,6 +68,20 @@ test('a successful forced fetch updates seen, stamps last, and reports drift', a
   assert.ok(after.last > 1, 'last stamped on success');
 });
 
+test('release observations should retain per-package timestamps after a partial refresh failure', async () => {
+  seedHome({ last: 1, seen: { ruflo: '9.9.9', 'agentic-qe': '9.9.9' } });
+  const first = await driftReport({ force: true, fetchLatest: async () => '9.9.10' });
+  const observed = first.find((r) => r.pkg === 'agentic-qe').latestObservedAt;
+  assert.ok(observed > 0);
+  const partial = await driftReport({ force: true, fetchLatest: async (pkg) => pkg === 'ruflo' ? '9.9.11' : null });
+  const aqe = partial.find((r) => r.pkg === 'agentic-qe');
+  assert.equal(aqe.latestSource, 'cache-fallback');
+  assert.equal(aqe.latestObservedAt, observed);
+  const cached = await driftReport({ fetchLatest: async () => { throw new Error('fresh cache must not fetch'); } });
+  assert.equal(cached.find((r) => r.pkg === 'agentic-qe').latestObservedAt, observed);
+  assert.equal(cached.find((r) => r.pkg === 'ruflo').latestSource, 'cache');
+});
+
 test('a STALE cache with newer seen data reaches the sync plan even when npm is unreachable', async () => {
   // The collect() path: last=0 forces a refetch; offline that refetch fails.
   // Resilient fallback must keep 9.9.10 visible so the plan includes the upgrade.

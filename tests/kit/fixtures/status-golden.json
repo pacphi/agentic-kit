@@ -8,13 +8,13 @@
   {
     "subsystem": "versions",
     "level": "ok",
-    "message": "ruflo 9.9.9 (latest)",
+    "message": "ruflo 9.9.9 (latest known; cache; observed time unknown)",
     "fix": null
   },
   {
     "subsystem": "versions",
     "level": "ok",
-    "message": "agentic-qe 9.9.9 (latest)",
+    "message": "agentic-qe 9.9.9 (latest known; cache; observed time unknown)",
     "fix": null
   },
   {

@@ -81,17 +81,19 @@ export async function driftReport({ force = false, fetchLatest = latestVersion }
   const pkgs = ['ruflo', 'agentic-qe', ...HOST_PKGS.filter((p) => installedVersion(p))];
   const report = [];
   const cached = cfg.versionCheck?.seen ?? {};
+  const observedAt = { ...cfg.versionCheck?.observedAt };
+  const live = new Set();
   let latest = cached;
   if (!fresh) {
     latest = {};
     let succeeded = 0;
     for (const p of pkgs) {
       const v = await fetchLatest(p);
-      if (v) succeeded += 1;
+      if (v) { succeeded += 1; live.add(p); observedAt[p] = Date.now(); }
       latest[p] = v ?? cached[p] ?? null;
     }
     if (succeeded > 0) {
-      cfg.versionCheck = { ...cfg.versionCheck, last: Date.now(), seen: latest };
+      cfg.versionCheck = { ...cfg.versionCheck, last: Date.now(), seen: latest, observedAt };
       try { saveKitConfig(cfg); } catch { /* read-only envs: nudge just re-fetches */ }
     }
   }
@@ -101,10 +103,19 @@ export async function driftReport({ force = false, fetchLatest = latestVersion }
       pkg: p,
       installed,
       latest: latest[p] ?? null,
+      latestSource: live.has(p) ? 'live' : fresh ? 'cache' : 'cache-fallback',
+      latestObservedAt: observedAt[p] ?? null,
       outdated: !!(installed && latest[p] && newer(latest[p], installed)),
     });
   }
   return report;
+}
+
+/** Do not turn cached registry data into an unqualified "latest" claim. */
+export function releaseObservationLabel({ latestSource, latestObservedAt }) {
+  const when = Number.isFinite(latestObservedAt) && latestObservedAt > 0
+    && latestObservedAt <= 8.64e15 ? new Date(latestObservedAt).toISOString() : 'time unknown';
+  return `${latestSource ?? 'unverified'}; observed ${when}`;
 }
 
 export const KIT_PKG = '@pacphi/agentic-kit';
