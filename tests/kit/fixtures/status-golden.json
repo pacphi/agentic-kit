@@ -149,6 +149,10 @@
             "control": "not-inspected"
           },
           "models": [],
+          "modelsOmitted": 0,
+          "nativeControls": "Native model selection, autoCompactWindow and /autocompact; settings not inspected here.",
+          "inventoryCapturedAt": null,
+          "inventoryScopeId": null,
           "limitations": [
             "Context and compaction configuration not inspected; agentic-kit does not manage these controls.",
             "Live session window and usage unverified; historical input observations remain in Usage → Context."
