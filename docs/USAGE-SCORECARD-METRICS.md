@@ -479,12 +479,12 @@ price · not plan billing`.
 **Formula**, per `(session, day, model)` usage row:
 
 ```text
-inputUnits = input + cacheWrite × 1.25 + cacheRead × cacheReadMultiplier
+inputUnits = input + cacheWrite × cacheWriteMultiplier + cacheRead × cacheReadMultiplier
 cost = (inputUnits × rate_in + output × rate_out) / 1,000,000
 ```
 
 `cacheReadMultiplier` is 0.1 for every model except Claude Fable 5.1 / Claude
-Mythos 5.1, which resolve to 0.025 (§13.1). Summed across every row in the
+Mythos 5.1, which resolve to 0.025, and OpenAI Pro, which uses 1 (§13). Summed across every row in the
 window.
 
 **Source:** `costOf()`, `src/lib/pricing.mjs:298-305`, reproduced verbatim:
@@ -492,21 +492,19 @@ window.
 ```js
 export function costOf(usage) {
   const { model, provider, input, output, cacheRead, cacheWrite, day } = usage ?? {};
-  const { in: rin, out: rout, cacheReadMultiplier } = priceFor(model, provider, day);
+  const { in: rin, out: rout, cacheReadMultiplier, cacheWriteMultiplier } = priceFor(model, provider, day);
   const inputUnits = tokens(input)
-    + tokens(cacheWrite) * CACHE_WRITE_MULTIPLIER
+    + tokens(cacheWrite) * cacheWriteMultiplier
     + tokens(cacheRead) * cacheReadMultiplier;
   return (inputUnits * rin + tokens(output) * rout) / 1e6;
 }
 ```
 
-`CACHE_READ_MULTIPLIER = 0.1` is the default `cacheReadMultiplier` `priceFor`
-resolves for a matched entry; `CACHE_WRITE_MULTIPLIER = 1.25` is applied
-uniformly, no per-model override (`pricing.mjs:193-194`) — see §13 for why
-these two numbers are correct for **both** Anthropic and OpenAI (excepting
-the one documented cache-read exception), which is why `costOf` needs no
-per-provider branch on either multiplier (only on the base
-`rate_in`/`rate_out`, resolved by `priceFor`, `pricing.mjs:258-273`).
+`priceFor` resolves both cache multipliers per model. Anthropic 5-minute
+writes and OpenAI GPT-5.6+ writes use 1.25×; older OpenAI models have no
+write premium and use 1×. Pro models have no published cached-input discount,
+so the estimator conservatively uses ordinary input rates for reported cached tokens.
+See [OpenAI prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching).
 
 Rate resolution is **longest-prefix match** (`isPrefixOf`, `KEYS_BY_LENGTH`)
 on a normalized model id (`pricing.mjs:202-211`), so a dated release
@@ -522,8 +520,8 @@ find fallback-priced rows if the table needs a new entry.
 
 Each table entry is a **schedule** — an ordered list of periods, each with the
 day it takes effect. Nearly every entry has exactly one period that has always
-applied (`anthropic(5, 25)` builds that shape); an entry whose rate the vendor
-has *published* a change to carries more than one (`schedule`,
+applied (`anthropic(5, 25)` builds that shape); a confirmed effective rate
+change can be represented by multiple periods (`schedule`,
 `pricing.mjs:44-67`). `periodOn` (`pricing.mjs:226`) picks the last period
 already in effect on the given day, comparing ISO date strings
 lexicographically so no `Date` parsing is involved and the module stays
@@ -534,19 +532,17 @@ clock-free.
 it already has because rows are keyed by `(day, model)`. **This is the whole
 point:** tokens metered in August must still read as August's rate when the
 panel is opened in December. Pricing by *today's* date instead would restate a
-finished window the moment a published rate changed — a 50% jump in a
-Sonnet-heavy August, with no session having changed. A panel whose claim is
+finished window the moment a published rate changed, with no session having changed. A panel whose claim is
 "what these tokens would cost metered" cannot do that.
 
 Two rules bound the mechanism:
 
-- **Only published changes are encoded.** Anthropic announced that Sonnet 5's
-  introductory rate ends 2026-08-31, so that boundary is a recorded fact.
-  Encoding a *forecast* of some future repricing would fabricate data — the
-  same error as an invented denominator (§14).
+- **Only effective published changes are retained.** Anthropic canceled Sonnet 5's
+  planned September 1 increase; $2/$10 is now standard. The canceled period
+  has been removed, correcting September estimates while retaining August rates.
 - **The mechanism is identical for both providers.** A date range is a fact
   about a price, not about a vendor. As of the verification date OpenAI
-  publishes no promotional rates or expiry dates, so every OpenAI entry is a
+  publishes no definite expiry for Sol’s promotional rate, so every OpenAI entry is a
   single always-applied period — but that is a fact about the *data*, not a gap
   in the table: `openai.dated([...])` exists and behaves identically, so a
   Codex promo would be a one-line edit rather than new machinery. Rates that
@@ -1099,21 +1095,16 @@ path, opt-in or otherwise, anywhere in this codebase.
 
 ## 13. Provider pricing tables — verified rates
 
-Every rate lives in the `PRICES` table (`src/lib/pricing.mjs:78-149`) and carries
-the table's own last-verified date, `PRICES_AS_OF = '2026-08-25'`
-(`pricing.mjs:21`). Each subsection below dates its own source check separately.
-
-**The code is the authority for a rate; this section is a reading of it.** The
-Anthropic transcription in §13.1 matches `pricing.mjs:79-113` value for value.
-The OpenAI transcription in §13.2 does **not** currently match
-`pricing.mjs:136-148`, and the sourcing note there is likewise out of step with
-the file's own comment. Price a row from `pricing.mjs`, not from §13.2's table,
-until the two are reconciled.
+Every rate lives in `PRICES` (`src/lib/pricing.mjs`) and carries an `asOf`
+verification date. Entries default to `PRICES_AS_OF` and can carry a newer
+individual check date. The tables below cite the providers' authoritative
+public documentation; they are maintained data, not live quotes.
 
 ### 13.1 Anthropic — primary source, directly verified
 
-Fetched in full from **[C1]** on 2026-07-25. The table below is Anthropic's
-own published table, not a transcription from a secondary source:
+Rates rechecked against [Anthropic's official pricing](https://platform.claude.com/docs/en/about-claude/pricing)
+on 2026-09-08. Fable 5.1 and Mythos 5.1 were already catalogued with the
+correct rates; this pass refreshes their verification evidence.
 
 | Model | Base input | 5m cache write | 1h cache write | Cache read (hit) | Output |
 |---|---|---|---|---|---|
@@ -1121,20 +1112,21 @@ own published table, not a transcription from a secondary source:
 | Claude Fable 5 / Mythos 5 | $10/MTok | $12.50/MTok | $20/MTok | $1/MTok | $50/MTok |
 | Claude Opus 5 | $5/MTok | $6.25/MTok | $10/MTok | $0.50/MTok | $25/MTok |
 | Claude Opus 4.8 / 4.7 / 4.6 / 4.5 | $5/MTok | $6.25/MTok | $10/MTok | $0.50/MTok | $25/MTok |
-| Claude Sonnet 5 (through 2026-08-31) | $2/MTok | $2.50/MTok | $4/MTok | $0.20/MTok | $10/MTok |
-| Claude Sonnet 5 (from 2026-09-01) | $3/MTok | $3.75/MTok | $6/MTok | $0.30/MTok | $15/MTok |
+| Claude Sonnet 5 | $2/MTok | $2.50/MTok | $4/MTok | $0.20/MTok | $10/MTok |
 | Claude Sonnet 4.6 / 4.5 | $3/MTok | $3.75/MTok | $6/MTok | $0.30/MTok | $15/MTok |
 | Claude Haiku 4.5 | $1/MTok | $1.25/MTok | $2/MTok | $0.10/MTok | $5/MTok |
 
 ¹ Cache hits on Claude Fable 5.1 and Claude Mythos 5.1 price at **0.025×** base
-input — every other current Anthropic model uses 0.1×. Verified 2026-09-02
+input — every other current Anthropic model uses 0.1×. Verified 2026-09-08
 against **[C1]**'s live pricing page.
 
-Every value in `pricing.mjs`'s Anthropic entries (`pricing.mjs:79-113`) matches
-this table's Base-input and Output columns exactly. Note that the two Sonnet
-5 rows above are not a documentation convenience — they are exactly what the
-code encodes, as the two periods of that entry's schedule (§3a), so the table
-and the implementation state the same published change in the same shape. The cache-write and
+Sonnet 5's previously announced September increase was canceled by Anthropic;
+$2/$10 is now its standard price. Fable 5.1 is generally available; Mythos 5.1
+is limited to approved participants. Both have 1M context and 128K maximum
+output according to the [official model overview](https://platform.claude.com/docs/en/models/fable-5-1/overview).
+Public listing does not establish account entitlement or routability.
+
+The cache-write and
 cache-read *columns* in this table are provider-published absolute rates; the
 kit's `pricing.mjs` instead stores **multipliers** — 1.25× for a 5-minute cache
 write (uniform, no published per-model exception) and, for cache reads, 0.1×
@@ -1176,39 +1168,32 @@ documentation and are the most drift-prone entries in the file — this is
 explicitly why `PRICES_AS_OF` is surfaced in the UI (`u-asof`,
 `dashboard/client.mjs`) rather than assumed current.
 
-| Model (kit key) | Input | Output | Cache read (0.1×, derived) |
+Standard USD rates per million tokens (Astra verified 2026-09-08 against
+[OpenAI's model documentation](https://developers.openai.com/api/docs/models/gpt-6-astra);
+GPT-5.6 rates reconciled with the implementation and
+[OpenAI pricing](https://developers.openai.com/api/docs/pricing)):
+
+| Model (kit key) | Input | Output | Cache read |
 |---|---|---|---|
-| `gpt-5.6-sol` | $5/MTok | $30/MTok | $0.50/MTok |
-| `gpt-5.6-terra` | $2.50/MTok | $15/MTok | $0.25/MTok |
-| `gpt-5.6-luna` | $1/MTok | $6/MTok | $0.10/MTok |
-| `gpt-5.5` | $5/MTok | $30/MTok | $0.50/MTok |
-| `gpt-5.5-pro` | $30/MTok | $180/MTok | $3/MTok |
+| `gpt-6-astra` | $10 | $50 | $1 |
+| `gpt-5.6-sol` | $4 | $20 | $0.40 |
+| `gpt-5.6-terra` | $2 | $12 | $0.20 |
+| `gpt-5.6-luna` | $0.20 | $1.20 | $0.02 |
+| `gpt-5.5` | $5 | $30 | $0.50 |
+| `gpt-5.5-pro` | $30 | $180 | Not published |
 
-Independently corroborated (aggregator sources, not OpenAI's own page —
-see the sourcing-tier note below) on 2026-07-25: GPT-5.6 Sol short-context
-pricing of $5 input / $30 output / $0.50 cache-read / $6.25 cache-write per
-MTok, rising to $10/$45 above a 272K-input-token threshold **[C3, C4, C5]**;
-OpenAI's cached-input discount is described industry-wide as "cached tokens
-cost approximately 10% of regular input" and "automatic for all requests
-containing 1,024+ tokens," and cache writes for the GPT-5.6+ model family
-specifically are described as costing 1.25× the uncached input rate
-**[C6]** — the same multiplier Anthropic publishes, which is why
-`pricing.mjs` applies one multiplier pair to both providers rather than
-maintaining two.
+Astra cache writes cost $12.50/MTok (1.25× input), using the existing
+cache-write arithmetic. Sol's promotional rate has no confirmed end date:
+OpenAI says at least through 2026-11-21, so no future reversion is invented.
+These are API list-price equivalents, not subscription charges or access guarantees.
 
-**Sourcing-tier disclosure, stated plainly rather than glossed over:** the
-Anthropic table above (§13.1) was fetched directly from Anthropic's own
-documentation domain and is a primary source. The OpenAI table was
-corroborated via web search against multiple independent third-party
-pricing aggregators (all citing the same figures independently, which is
-reasonable but not equivalent evidence to a direct fetch of OpenAI's own
-pricing page); an attempt to directly fetch OpenAI's developer pricing
-documentation for this document was not completed. A maintainer updating
-this table should fetch `https://platform.openai.com/docs/pricing` (or
-whatever OpenAI's current canonical pricing URL is at the time) directly and
-upgrade this citation to primary-source status. Until then, treat the OpenAI
-rows in `pricing.mjs` — like the file's own comment already says — as
-hand-maintained and drift-prone, not vendor-confirmed via automated fetch.
+The full maintained rate table was rechecked on 2026-09-08; `PRICES_AS_OF`
+and the Usage summary now show that date. Individual entries can still override
+verification dates. The official `gpt-5.6` alias resolves exactly to Sol;
+unknown suffixed variants do not inherit its price. Realtime entries describe
+text tokens only; audio and image charges are outside this estimator.
+
+See [the pricing audit](MODEL-PRICING-AUDIT.md) for source links and scope.
 
 ### 13.3 What the pricing table deliberately does not model
 
@@ -1227,16 +1212,17 @@ Recorded verbatim from `pricing.mjs:152-180` (`UNMODELLED_PRICING_FACTORS`,
   local corpus records is the literal string `"not_available"`, which names no
   geography and so selects no multiplier. The key is present; the evidence
   is not.
-- **Large-prompt surcharge.** A reported 2× input / 1.5× output surcharge
-  above ~272K input tokens for the GPT-5.6 line is not restated on OpenAI's
-  current canonical pricing page as far as this audit could confirm, so it
-  is deliberately left unmodelled rather than encoded on one unconfirmed
-  source.
-- **`*-pro` models list no cached-input rate** in the maintained table
-  (caching appears unsupported for that tier); their transcripts report
-  zero cached tokens, so the 0.1× branch of `costOf()` is simply never
-  exercised for them — not a bug, just an unreachable code path for that
-  model family.
+- **Large-prompt surcharge.** Astra's official model page confirms that requests
+  above 272K input tokens cost 2× input and cache rates and 1.5× output rates
+  for the full request. Aggregated daily usage cannot establish which requests
+  crossed that boundary; applying it to daily totals would misprice short requests.
+  This surcharge remains unmodelled.
+- **Astra service modes.** Batch and Flex are 50% of Standard; Fast is 2× the
+  applicable rates. These are documented but unmodelled because aggregated
+  usage does not reliably identify the billing tier that served each request.
+- **Pro cached input.** GPT-5.5 Pro explicitly offers no cached-input discount;
+  GPT-5.4 Pro publishes no cached rate. The estimator applies ordinary input
+  rates to reported cache reads instead of inventing a discount.
 - **Service tiers.** Batch API, Flex, and Priority-tier multipliers (on
   both providers) are not applied. Anthropic's Batch API carries a
   documented 50% input/output discount **[C1]** §"Batch processing"; Claude

@@ -64,7 +64,7 @@ function corpus() {
         type: 'assistant', sessionId: `synth${i}`, cwd: '/Users/me/proj',
         timestamp: `2026-07-${day}T${hh}:04:00.000Z`,
         message: {
-          role: 'assistant', model: i % 2 ? 'claude-sonnet-5' : 'claude-opus-5',
+          role: 'assistant', model: i === 0 ? 'test-unknown-model' : i % 2 ? 'claude-sonnet-5' : 'claude-opus-5',
           usage: {
             input_tokens: 2_000, output_tokens: 1_500,
             cache_read_input_tokens: 400_000, cache_creation_input_tokens: 120_000,
@@ -193,11 +193,7 @@ test('every costOf call at the seam carries the row day, so dated rates apply', 
 });
 
 test('a model absent from the rate table is still priced, not zeroed or NaN', async () => {
-  // The fixture corpus emits `gpt-5.6`, which the table carries only as
-  // `gpt-5.6-sol` / `-terra` / `-luna` — so the bare id falls to FALLBACK_PRICE.
-  // Asserted as a PROPERTY of the corpus, not as a literal id, so this keeps
-  // meaning if the fixtures change: what must hold is that the unmatched branch
-  // is exercised at all.
+  // Include an explicit synthetic unknown; gpt-5.6 is an official Sol alias.
   const { agg, log } = await seam();
   const models = [...new Set(agg.sessions.flatMap((s) => s.models))];
   const unmatched = models.filter((m) => priceFor(m).matched === false);

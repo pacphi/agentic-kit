@@ -10,7 +10,7 @@ const M = 1_000_000;
 // ── Table shape ──────────────────────────────────────────────────────────────
 
 test('PRICES_AS_OF is the ISO date the table was last verified', () => {
-  assert.equal(PRICES_AS_OF, '2026-08-25');
+  assert.equal(PRICES_AS_OF, '2026-09-08');
 });
 
 test('every PRICES entry carries finite in/out rates, a provider, and asOf', () => {
@@ -44,7 +44,7 @@ test('the table carries the ADR-0009 §3 rates for each Anthropic tier', () => {
   assert.deepEqual([priceFor('claude-fable-5').in, priceFor('claude-fable-5').out], [10, 50]);
   assert.deepEqual([priceFor('claude-opus-5').in, priceFor('claude-opus-5').out], [5, 25]);
   assert.deepEqual([priceFor('claude-opus-4-8').in, priceFor('claude-opus-4-8').out], [5, 25]);
-  // Sonnet 5 runs INTRODUCTORY pricing through 2026-08-31; standard is 3/15.
+  // Sonnet 5 retains $2/$10 after the announced increase was canceled.
   assert.deepEqual([priceFor('claude-sonnet-5').in, priceFor('claude-sonnet-5').out], [2, 10]);
   assert.deepEqual([priceFor('claude-sonnet-4-6').in, priceFor('claude-sonnet-4-6').out], [3, 15]);
   assert.deepEqual([priceFor('claude-haiku-4-5').in, priceFor('claude-haiku-4-5').out], [1, 5]);
@@ -212,4 +212,50 @@ test('costOf never throws on junk input', () => {
   assert.doesNotThrow(() => costOf(null));
   assert.doesNotThrow(() => costOf({ model: {}, input: {}, output: [] }));
   assert.equal(costOf(null), 0);
+});
+
+
+test('Astra resolves its published rates and independent verification date', () => {
+  for (const id of ['gpt-6-astra', 'GPT_6_ASTRA', 'gpt-6-astra-20260903']) {
+    const p = priceFor(id, 'openai');
+    assert.equal(p.matched, true);
+    assert.equal(p.key, 'gpt-6-astra');
+    assert.deepEqual([p.in, p.out, p.cacheReadMultiplier, p.asOf], [10, 50, 0.1, '2026-09-08']);
+  }
+  assert.equal(priceFor('gpt-6-astral').matched, false);
+  assert.equal(priceFor('gpt-6').matched, false);
+  assert.equal(priceFor('gpt-5.6-sol').asOf, PRICES_AS_OF);
+});
+
+test('Astra prices each token category at the standard API rate', () => {
+  for (const [counter, expected] of Object.entries({ input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 })) {
+    assert.equal(costOf({ model: 'gpt-6-astra', [counter]: M }), expected, counter);
+  }
+  assert.equal(costOf({ model: 'gpt-6-astra', input: 100_000, output: 10_000,
+    cacheRead: 100_000, cacheWrite: 20_000 }), 1.85);
+});
+
+
+test('both Claude 5.1 models use verified standard input, output, and cache rates', () => {
+  for (const model of ['claude-fable-5-1', 'claude-mythos-5-1']) {
+    assert.equal(priceFor(model).asOf, '2026-09-08');
+    for (const [counter, expected] of Object.entries({ input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 })) {
+      assert.equal(costOf({ model, [counter]: M }), expected, `${model} ${counter}`);
+    }
+  }
+});
+
+
+test('official GPT-5.6 alias resolves exactly to Sol without pricing unknown variants', () => {
+  assert.deepEqual(priceFor('gpt-5.6'), priceFor('gpt-5.6-sol'));
+  assert.equal(costOf({ model: 'gpt-5.6', input: M, output: M }), 24);
+  assert.equal(priceFor('gpt-5.6-unknown').matched, false);
+});
+
+test('OpenAI cache premiums follow the published model generation', () => {
+  assert.equal(costOf({ model: 'gpt-5.5-pro', cacheRead: M }), 30);
+  assert.equal(costOf({ model: 'gpt-5.4-pro', cacheRead: M }), 30);
+  assert.equal(costOf({ model: 'gpt-5.5', cacheWrite: M }), 5);
+  assert.equal(costOf({ model: 'gpt-5.6', cacheWrite: M }), 5);
+  assert.equal(costOf({ model: 'gpt-6-astra', cacheWrite: M }), 12.5);
 });

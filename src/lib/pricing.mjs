@@ -8,8 +8,8 @@
 // ~96% of tokens are cache reads, which bill at 0.1× input for nearly every
 // model (0.025× on Fable 5.1 / Mythos 5.1 — a per-entry override, see below);
 // pricing them as fresh input overstates cost by roughly 10×, or 40× on those
-// two. Cache writes bill at 1.25× uniformly (no published per-model exception
-// as of this writing).
+// two. Cache-write premiums apply to Anthropic 5-minute writes and OpenAI
+// GPT-5.6 and later; older OpenAI models use the ordinary input rate.
 //
 // Rates drift and are maintained BY HAND (OpenAI publishes nothing
 // machine-readable in ~/.codex/models_cache.json, verified). PRICES_AS_OF is
@@ -17,8 +17,8 @@
 
 // ── Table ────────────────────────────────────────────────────────────────────
 
-/** The date the whole table was last verified — date-stamped in the UI. */
-export const PRICES_AS_OF = '2026-08-25';
+/** The baseline verification date; newer entries may carry their own asOf — date-stamped in the UI. */
+export const PRICES_AS_OF = '2026-09-08';
 
 // ── Rate constructors ────────────────────────────────────────────────────────
 // A rate entry is always a SCHEDULE — an ordered list of periods, each with the
@@ -27,14 +27,9 @@ export const PRICES_AS_OF = '2026-08-25';
 // single-period schedule; `.dated([...])` is for the rare entry whose rate the
 // vendor has PUBLISHED a change to.
 //
-// The mechanism is deliberately IDENTICAL for both vendors. A date range is a
-// fact about a price, not about a provider, and today's asymmetry — Anthropic
-// has published a dated change, OpenAI has not — is a fact about the DATA, not
-// about the mechanics. Encoding it in the shape of the table would mean that
-// the day OpenAI ships a promo rate, someone has to build a second mechanism
-// under deadline pressure and then keep two sets of boundary tests from
-// drifting apart. This mirrors `costOf`, which has no per-provider branch for
-// exactly the same reason (see the multiplier note below).
+// Both providers use the same schedule shape. Only confirmed effective changes
+// belong in a schedule; a vendor cancellation must remove a never-effective
+// future period (Sonnet 5's September 2026 increase was canceled).
 //
 // NOT expressible here, on purpose: rates that vary by HOW a request was served
 // rather than WHEN — regional uplift, the large-prompt surcharge, service
@@ -51,11 +46,12 @@ const schedule = (provider) => {
   // this writing, the only published exception (§ PRICES).
   /**
    * @param {{in: number, out: number, from?: string}[]} periods
-   * @param {{cacheReadMultiplier?: number}} [extra]
+   * @param {{cacheReadMultiplier?: number, cacheWriteMultiplier?: number, asOf?: string}} [extra]
    */
-  const build = (periods, { cacheReadMultiplier } = {}) => ({
+  const build = (periods, { cacheReadMultiplier, cacheWriteMultiplier = provider === 'openai' ? 1 : 1.25, asOf = PRICES_AS_OF } = {}) => ({
     provider,
-    asOf: PRICES_AS_OF,
+    asOf,
+    cacheWriteMultiplier,
     periods: [...periods]
       .map((p) => ({ from: p.from ?? null, in: p.in, out: p.out }))
       .sort((a, b) => String(a.from ?? '').localeCompare(String(b.from ?? ''))),
@@ -86,8 +82,8 @@ export const PRICES = {
   // other current model uses (platform.claude.com/docs/en/about-claude/pricing,
   // verified 2026-09-02) — hence the per-entry override below rather than
   // relying on the module-wide default.
-  'claude-fable-5-1': anthropic(10, 50, { cacheReadMultiplier: 0.025 }),
-  'claude-mythos-5-1': anthropic(10, 50, { cacheReadMultiplier: 0.025 }),
+  'claude-fable-5-1': anthropic(10, 50, { cacheReadMultiplier: 0.025, asOf: '2026-09-08' }),
+  'claude-mythos-5-1': anthropic(10, 50, { cacheReadMultiplier: 0.025, asOf: '2026-09-08' }),
   'claude-fable-5': anthropic(10, 50),
   'claude-mythos-5': anthropic(10, 50),
   // Anthropic — Opus line (5 and the prior generations share a price)
@@ -96,24 +92,16 @@ export const PRICES = {
   'claude-opus-4-7': anthropic(5, 25),
   'claude-opus-4-6': anthropic(5, 25),
   'claude-opus-4-5': anthropic(5, 25),
-  // Anthropic — Sonnet line.
-  // Sonnet 5 launched on INTRODUCTORY pricing ($2/$10) through 2026-08-31,
-  // reverting to the standard $3/$15 on 2026-09-01. Anthropic PUBLISHED that
-  // end date, so it is a recorded fact rather than a forecast — which is the
-  // bar for putting anything in a `dated` schedule. Tokens spent before the
-  // boundary stay priced at the rate they were metered at, forever; only
-  // tokens spent on or after it price at the standard rate.
-  'claude-sonnet-5': anthropic.dated([
-    { in: 2, out: 10 },                      // introductory, from launch
-    { from: '2026-09-01', in: 3, out: 15 },  // standard
-  ]),
+  // Anthropic canceled the September 1 increase; $2/$10 is now standard.
+  // https://platform.claude.com/docs/en/about-claude/pricing (2026-09-08).
+  'claude-sonnet-5': anthropic(2, 10, { asOf: '2026-09-08' }),
   'claude-sonnet-4-6': anthropic(3, 15),
   'claude-sonnet-4-5': anthropic(3, 15),
   // Anthropic — Haiku line
   'claude-haiku-4-5': anthropic(1, 5),
 
   // OpenAI (Codex). Verified against the individual OpenAI API model pages on
-  // 2026-08-25. There is NO machine-readable pricing in
+  // 2026-09-08. There is NO machine-readable pricing in
   // ~/.codex/models_cache.json (checked: zero price/pricing/usd keys), so this
   // table is maintained by hand and is the most drift-prone thing in this file.
   //
@@ -121,9 +109,9 @@ export const PRICES = {
   // start date and only says it is available at least through 2026-11-21. The
   // current rate is therefore recorded without inventing a future boundary.
   //
-  // OpenAI's cached-input rate is a 90% discount (0.1x) and cache writes are
-  // 1.25x — the SAME multipliers as Anthropic, which is why costOf() needs no
-  // per-provider branch.
+  // OpenAI cached input is normally 0.1x; Pro has no published discount.
+  // GPT-5.6+ cache writes cost 1.25x; older models have no write premium.
+  // https://developers.openai.com/api/docs/guides/prompt-caching
   //
   // Slugs come from the Codex model cache itself, so an id seen in a real
   // rollout resolves rather than silently hitting FALLBACK_PRICE.
@@ -133,14 +121,17 @@ export const PRICES = {
   // spent tokens on them are read forever, and deleting their keys would
   // silently re-cost that history at FALLBACK_PRICE. Retirement is a routing
   // decision; this table is a historical record. Never prune one from the other.
-  'gpt-5.6-sol': openai(4, 20),
-  'gpt-5.6-terra': openai(2, 12),
-  'gpt-5.6-luna': openai(0.2, 1.2),
-  'gpt-5.5-pro': openai(30, 180), // before gpt-5.5, so the longer key wins
+  // https://developers.openai.com/api/docs/models/gpt-6-astra (2026-09-08).
+  // Standard rates: input $10, cached input $1, writes $12.50, output $50 / MTok.
+  'gpt-6-astra': openai(10, 50, { cacheWriteMultiplier: 1.25 }),
+  'gpt-5.6-sol': openai(4, 20, { cacheWriteMultiplier: 1.25 }),
+  'gpt-5.6-terra': openai(2, 12, { cacheWriteMultiplier: 1.25 }),
+  'gpt-5.6-luna': openai(0.2, 1.2, { cacheWriteMultiplier: 1.25 }),
+  'gpt-5.5-pro': openai(30, 180, { cacheReadMultiplier: 1 }), // before gpt-5.5, so the longer key wins
   'gpt-5.5': openai(5, 30),
   'gpt-5.4-mini': openai(0.75, 4.5),
   'gpt-5.4-nano': openai(0.2, 1.25),
-  'gpt-5.4-pro': openai(30, 180),
+  'gpt-5.4-pro': openai(30, 180, { cacheReadMultiplier: 1 }),
   'gpt-5.4': openai(2.5, 15),
   'gpt-5.3-codex': openai(1.75, 14),
   'chat-latest': openai(5, 30),
@@ -160,14 +151,14 @@ export const PRICES = {
  *   per assistant turn, but the only value observed locally is the literal
  *   "not_available" — the key is recorded, the region is not, so there is
  *   nothing to price on.
- * - **Large-prompt surcharge.** A 2x input / 1.5x output surcharge above ~272K
- *   input tokens has been reported for the GPT-5.6 line but is NOT restated on
- *   the current pricing page; it is left unmodelled rather than encoded on one
- *   unconfirmed source.
- * - **`*-pro` models list no cached-input rate** (caching appears unsupported).
- *   Their transcripts therefore report zero cached tokens, so the 0.1x branch
- *   is simply never exercised for them.
- * - **Service tiers.** Batch / Flex / Priority multipliers are not applied.
+ * - **Large-prompt surcharge.** Astra's model page confirms >272K input tokens
+ *   incur 2x input/cache and 1.5x output rates for the entire request. Usage
+ *   rows aggregate multiple requests; applying that threshold to their totals
+ *   would overcharge ordinary short requests, so it remains unmodelled.
+ * - **Pro models have no published cached-input discount.** Any reported
+ *   cached input is conservatively charged at ordinary input rates (1x).
+ * - **Service tiers.** Batch / Flex / Priority / Fast multipliers are not applied.
+ *   Astra publishes Batch/Flex at 0.5x Standard and Fast at 2x applicable rates.
  *   Not for want of a field: Claude turns carry `usage.service_tier` and
  *   `usage.speed`, and newer Codex rollouts carry a
  *   `thread_settings.service_tier`. Semantics is the blocker: each corpus holds
@@ -245,7 +236,7 @@ function periodOn(periods, day) {
  * never throws.
  *
  * `cacheReadMultiplier` defaults to the module-wide `CACHE_READ_MULTIPLIER`
- * unless the matched entry carries its own (Fable 5.1 / Mythos 5.1 today) —
+ * unless the matched entry carries its own (Claude 5.1 or OpenAI Pro) —
  * see the `schedule()` comment in the table above.
  *
  * `day` (ISO `YYYY-MM-DD`) selects the rate IN EFFECT ON THAT DAY. Cost
@@ -256,7 +247,9 @@ function periodOn(periods, day) {
  * Omitting `day` prices as of `PRICES_AS_OF` (see `periodOn`).
  */
 export function priceFor(model, provider, day) {
-  const id = typeof model === 'string' ? normalize(model) : '';
+  const normalized = typeof model === 'string' ? normalize(model) : '';
+  // Official exact alias; unknown gpt-5.6-* variants must still remain unknown.
+  const id = normalized === 'gpt-5-6' ? 'gpt-5-6-sol' : normalized;
   if (id) {
     const hits = KEYS_BY_LENGTH.filter(({ norm }) => isPrefixOf(norm, id));
     if (hits.length) {
@@ -264,12 +257,13 @@ export function priceFor(model, provider, day) {
       const p = PRICES[best.key];
       const r = periodOn(p.periods, day);
       return {
-        in: r.in, out: r.out, provider: p.provider, key: best.key, matched: true,
+        in: r.in, out: r.out, provider: p.provider, key: best.key, matched: true, asOf: p.asOf,
         cacheReadMultiplier: p.cacheReadMultiplier ?? CACHE_READ_MULTIPLIER,
+        cacheWriteMultiplier: p.cacheWriteMultiplier,
       };
     }
   }
-  return { ...FALLBACK_PRICE, key: null, matched: false, cacheReadMultiplier: CACHE_READ_MULTIPLIER };
+  return { ...FALLBACK_PRICE, key: null, matched: false, cacheReadMultiplier: CACHE_READ_MULTIPLIER, cacheWriteMultiplier: CACHE_WRITE_MULTIPLIER };
 }
 
 // ── Cost ─────────────────────────────────────────────────────────────────────
@@ -280,7 +274,7 @@ const tokens = (v) => (Number.isFinite(v) && v > 0 ? v : 0);
 /**
  * API-equivalent cost in USD for one model's token usage:
  *
- *   (input·in + cacheWrite·in·1.25 + cacheRead·in·cacheReadMultiplier + output·out) / 1e6
+ *   (input·in + cacheWrite·in·cacheWriteMultiplier + cacheRead·in·cacheReadMultiplier + output·out) / 1e6
  *
  * `cacheReadMultiplier` is 0.1 for nearly every model but is resolved per-model
  * via `priceFor` (Fable 5.1 / Mythos 5.1 price cache reads at 0.025x — see the
@@ -297,9 +291,9 @@ const tokens = (v) => (Number.isFinite(v) && v > 0 ? v : 0);
  */
 export function costOf(usage) {
   const { model, provider, input, output, cacheRead, cacheWrite, day } = usage ?? {};
-  const { in: rin, out: rout, cacheReadMultiplier } = priceFor(model, provider, day);
+  const { in: rin, out: rout, cacheReadMultiplier, cacheWriteMultiplier } = priceFor(model, provider, day);
   const inputUnits = tokens(input)
-    + tokens(cacheWrite) * CACHE_WRITE_MULTIPLIER
+    + tokens(cacheWrite) * cacheWriteMultiplier
     + tokens(cacheRead) * cacheReadMultiplier;
   return (inputUnits * rin + tokens(output) * rout) / 1e6;
 }

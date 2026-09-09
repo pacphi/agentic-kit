@@ -77,7 +77,7 @@ export const SUBSCRIPTION_PROVIDERS = new Set(['claude-code', 'codex', 'ollama',
 // WITHOUT saying "per-token" gets read as cost-per-task, which is the axis users
 // actually pay on (a model needing 2-3x the agentic turns costs more per task at
 // identical per-token price). Measured end-to-end in pacphi/retort versions-blog.
-export const MODEL_CATALOG_VERIFIED = '2026-09-02';
+export const MODEL_CATALOG_VERIFIED = '2026-09-08';
 export const COST_AXIS_NOTE = 'per-token price ≠ per-task cost — a model that needs more agentic turns costs more per task at the same per-token price';
 // Tier names are the pairing key for swapHostModel(): a codex tier only mirrors
 // to a claude model (and back) when BOTH catalogs use the same tier string.
@@ -93,12 +93,14 @@ export const MODEL_CATALOG = {
     // longer what ak routes to by default. Kept listed so divergedRoutes can name
     // its cost-per-task trade when a policy is still pointing at it.
     { id: 'claude-opus-4-8', tier: 'prior', note: 'prior Opus generation — same per-token price as Opus 5, roughly half the agentic turns on routine work' },
+    { id: 'claude-mythos-5-1', tier: 'restricted', note: 'same specifications and pricing as Fable 5.1; invitation-only access through Project Glasswing' },
     { id: 'claude-fable-5', tier: 'prior', note: 'prior Fable generation — same per-token price as Fable 5.1, superseded as the flagship pick' },
   ],
   codex: [
     { id: 'gpt-5.6-sol', tier: 'flagship', note: 'flagship 5.6 — strongest on complex coding, computer use and security work; first-class max reasoning effort' },
     { id: 'gpt-5.6-terra', tier: 'balanced', note: 'balanced 5.6 — everyday implementation and testing at a materially lower per-token price than sol; the gpt-5.4 replacement' },
     { id: 'gpt-5.6-luna', tier: 'fast', note: 'fastest/cheapest 5.6 — mechanical implementation, docs and packaging; the gpt-5.4-mini replacement' },
+    { id: 'gpt-6-astra', tier: 'frontier', note: 'most capable OpenAI model — complex end-to-end work; $10/$50 per million input/output tokens' },
   ],
 };
 
@@ -147,7 +149,7 @@ export function retirementOf(model) {
 export const PROVIDER_MODEL_CATALOG = {
   openrouter: [
     { id: 'z-ai/glm-5.2', tier: 'flagship', note: 'GLM 5.2 — 1M context, strong tool-use, long-horizon agent work (metered)' },
-    { id: 'z-ai/glm-5', tier: 'value', note: 'GLM 5 — 205K context, cheapest of the 5.x line (metered)' },
+    { id: 'z-ai/glm-5', tier: 'value', note: 'GLM 5 — 205K context; compare current provider per-token rates (metered)' },
   ],
 };
 

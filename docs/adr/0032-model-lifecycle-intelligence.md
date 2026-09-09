@@ -2,7 +2,9 @@
 
 - **Status:** Implemented
 - **Date:** 2026-08-25
-- **Updated:** 2026-08-25
+- **Updated:** 2026-09-08
+- **Pricing audit:** Verified Claude 5.1 identity, availability, limits and rates; Models
+  pricing uses verified rate dates and official Astra/Sol alias documentation.
 - **Update note:** The bounded inventory, descriptor-selected source adapters, conservative snapshot
   diff, and read-only CLI/status surfaces are implemented. The operator-first Dashboard separates
   configured routes, aggregate model use in the selected 7/14/30-day window, and a progressive

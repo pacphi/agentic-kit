@@ -2,7 +2,10 @@
 
 - **Status:** Implemented
 - **Date:** 2026-07-25
-- **Updated:** 2026-08-25
+- **Updated:** 2026-09-08
+- **Pricing update:** Added GPT-6 Astra standard rates and per-entry verification dates;
+  verified Claude 5.1 cache rates, removed Sonnet 5’s canceled September increase, and documented
+  unmodelled request surcharges.
 - **Update note:** Reconciled Usage with the implemented five-area Dashboard. ADR-0032 adds a Models
   destination that consumes bounded structured observed-model facts without moving transcript
   indexing, session history, or usage aggregates out of this context; its release proof remains
@@ -132,7 +135,8 @@ single-flight: a refresh already in progress is joined, not duplicated.
 ### 3. Cost is an API-list-price equivalent, stated as such, never plan billing
 
 `src/lib/pricing.mjs` holds dated per-model rates and computes
-`input×rate + cacheWrite×rate×1.25 + cacheRead×rate×0.1 + output×outRate`.
+`input×rate + cacheWrite×rate×cacheWriteMultiplier + cacheRead×rate×cacheReadMultiplier + output×outRate`.
+The cache-read multiplier follows the published model rate (0.025 for Claude 5.1).
 
 **Rates are a schedule, and a row is priced on the day it was spent.** Every table entry is an
 ordered list of periods (the common case being one period that has always applied), and
@@ -143,7 +147,8 @@ changed — which a panel claiming "what these tokens would cost metered" cannot
 follow, both enforced in code:
 
 - **Only published changes may be encoded.** A schedule records a rate change the vendor has
-  announced (Anthropic's Sonnet 5 introductory period ending 2026-08-31). Encoding a *forecast*
+  confirmed. Anthropic canceled Sonnet 5's September increase; that never-effective period
+  has been removed in the 2026-09-08 pricing audit. Encoding a *forecast*
   would fabricate data, the same error as the invented denominator above.
 - **The mechanism is identical for both providers**, because a date range is a fact about a price,
   not about a vendor. That OpenAI currently publishes no dated promos is a fact about the data, not
