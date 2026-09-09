@@ -9,12 +9,11 @@ const fixture = () => ({
     command: 'node "${CLAUDE_PLUGIN_ROOT}/scripts/hook-shim.mjs" continuation-gate || true', timeout: 10 }] }],
 });
 
-test('Brain continuity is qualified only for the exact reviewed release', () => {
-  assert.equal(brainHookContract('4.3.17', fixture()).qualified, true);
-  assert.equal(brainHookContract('4.3.16', {}).qualified, true);
-  for (const version of ['4.3.16', '4.3.18', '4.3.17-beta.1', null]) {
-    assert.equal(brainHookContract(version, fixture()).qualified, false);
+test('Brain continuity is qualified by the exact reviewed hook contract', () => {
+  for (const version of ['4.3.17', '4.3.18', '4.3.19', '4.3.17-beta.1', null]) {
+    assert.equal(brainHookContract(version, fixture()).qualified, true);
   }
+  assert.equal(brainHookContract('4.3.16', {}).qualified, true);
   assert.equal(brainHookContract('4.3.17', {}).qualified, false);
 });
 
