@@ -784,7 +784,7 @@ session that runs from 23:58 local to 00:05 local is billed to the day its
 *first* row landed on (test:
 `tests/kit/usage-index.test.mjs:738`, "a session that opens before midnight
 is counted on its first billed day"). Accumulation, at this call: `dayBucket(byDay,
-row.day)` then `d.cost = round(d.cost + rowCost)` (`usage-aggregate.mjs:747-752`). Bar height:
+row.day)` then `d.cost = round(d.cost + rowCost)` (`usage-aggregate.mjs:760-767`). Bar height:
 `h = maxDay ? max(2, cost/maxDay*100) : 2` (`dashboard/client.mjs`) —
 every non-empty day gets a visually nonzero bar (floor of 2%), so a very
 cheap day is never rendered as invisible.
@@ -1753,7 +1753,7 @@ cacheSavedUsd        = Σ rows  (costOf(1M as input) - costOf(1M as cacheRead)) 
 **Source:** the derived block is `finishTotals` (`usage-aggregate.mjs:1033-1073`),
 which the previous-window projection calls too so a baseline is never derived a
 second, drifting way. `median` and `percentile` are exact over the values
-(`usage-aggregate.mjs:998-1009`), unlike §15's bucketed percentiles.
+(`usage-aggregate.mjs:1020-1032`), unlike §15's bucketed percentiles.
 Active days come from `byDay`'s key count and the streak from `activeStreak` in
 `src/lib/dashboard/client/usage.mjs`; the tiles are `cadenceCells` there, and
 `printScoreCadence` (`src/commands/usage.mjs:219-242`) in the CLI.
@@ -1802,9 +1802,9 @@ positive figure that rounds away at two decimals prints `<$0.01`, never
 "nothing" are different claims.
 
 **What the cache saved, asked as a difference.** `cacheSavingPerMillion`
-(`usage-aggregate.mjs:718-727`) prices one million tokens twice through the
+(`usage-aggregate.mjs:731-742`) prices one million tokens twice through the
 *injected* pricer — once as fresh input, once as cache reads — and takes the
-gap; `cacheSavedFor` (`usage-aggregate.mjs:717-720`) scales that to the tokens
+gap; `cacheSavedFor` (`usage-aggregate.mjs:731-749`) scales that to the tokens
 a row actually read from cache. Nothing in that path knows what the cache
 multiplier is, so the saving cannot drift out of step with §3's table the way a
 hard-coded "0.9 × input" would the day the multiplier changed. Both probes
