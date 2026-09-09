@@ -3,7 +3,14 @@
 // 4.0.0-alpha.1 vs 4.0.0-alpha.0 compare equal and self-update impossible.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cmpVersions, isValidSemver, latestVersion } from '../../src/lib/versions.mjs';
+import { cmpVersions, isValidSemver, latestVersion, releaseObservationLabel } from '../../src/lib/versions.mjs';
+
+test('release labels should disclose cached observations and missing timestamps', () => {
+  assert.equal(releaseObservationLabel({ latestSource: 'cache', latestObservedAt: 1788919211591 }),
+    'cache; observed 2026-09-09T02:00:11.591Z');
+  assert.equal(releaseObservationLabel({ latestSource: 'cache-fallback', latestObservedAt: null }),
+    'cache-fallback; observed time unknown');
+});
 
 const newer = (a, b) => cmpVersions(a, b) > 0;
 

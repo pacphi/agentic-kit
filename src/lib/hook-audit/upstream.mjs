@@ -7,6 +7,16 @@ const defaultFile = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const ISSUE_STATES = new Set(['open-at-last-verification', 'closed-at-last-verification']);
 const NOTIFICATION_STATES = new Set(['draft-only', 'published']);
 
+function validConstraintSource(entry, schemaVersion) {
+  if (typeof entry.issue === 'string' && /^https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/\d+$/.test(entry.issue)) {
+    return ISSUE_STATES.has(entry.issueState);
+  }
+  return schemaVersion === 4 && entry.kind === 'blocked-version'
+    && entry.issue == null && entry.issueState == null
+    && typeof entry.releaseUrl === 'string'
+    && /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/releases\/tag\/[\w.-]+$/.test(entry.releaseUrl);
+}
+
 function validDate(value) {
   return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
     && Number.isFinite(Date.parse(`${value}T00:00:00Z`))
@@ -29,7 +39,7 @@ export function loadUpstreamConstraints({
   const document = source.document;
   const errors = [];
   const asOf = now();
-  if (![2, 3].includes(document?.schemaVersion)) errors.push('unsupported upstream constraint schema');
+  if (![2, 3, 4].includes(document?.schemaVersion)) errors.push('unsupported upstream constraint schema');
   if (!Array.isArray(document?.constraints)) errors.push('constraints must be an array');
   if (!Array.isArray(document?.dependencyPolicies)) errors.push('dependencyPolicies must be an array');
   if (!validDate(document?.lastVerifiedAt)) errors.push('lastVerifiedAt must be an ISO date');
@@ -61,8 +71,7 @@ export function loadUpstreamConstraints({
       && typeof entry.id === 'string' && typeof entry.dependency === 'string' && typeof entry.kind === 'string'
       && Array.isArray(entry.affected) && typeof entry.strategy === 'string'
       && typeof entry.primaryEvidence === 'string' && typeof entry.versionGate === 'string'
-      && typeof entry.issue === 'string' && /^https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/\d+$/.test(entry.issue)
-      && ISSUE_STATES.has(entry.issueState)
+      && validConstraintSource(entry, document.schemaVersion)
       && typeof entry.expiryPolicy === 'string' && validDate(entry.nextRetestAt)
       && typeof entry.sunsetWhen === 'string'
       && NOTIFICATION_STATES.has(entry.notification?.status)

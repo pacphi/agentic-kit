@@ -16,6 +16,9 @@ test('upstream registry separates valid shape, current evidence, and version app
   assert.equal(result.status, 'valid');
   assert.equal(result.registryStatus, 'valid');
   assert.equal(result.evidenceStatus, 'current');
+  const publication = result.constraints.find((entry) => entry.id === 'ruflo-3.38.17-3.38.18-block');
+  assert.equal(publication.issue, undefined);
+  assert.match(publication.releaseUrl, /releases\/tag\/v3\.38\.19$/);
   const blocked = result.constraints.find((entry) => entry.id === 'ruflo-3.38.17-3.38.18-block');
   assert.equal(blocked.evidence.observedVersion, '3.38.17');
   assert.equal(blocked.evidence.applicability, 'affected');

@@ -179,10 +179,12 @@ export async function drift({ force = false } = {}) {
   // metadata before collection; ordinary status waits for the normal TTL.
   const fresh = !force && cached.last && Date.now() - cached.last < ttlMs;
   let latest = fresh ? cached.latest ?? null : null;
+  let latestObservedAt = fresh ? cached.last : null;
   let releaseAssetAvailable = fresh ? cached.releaseAssetAvailable ?? null : null;
   if (!fresh) {
     const release = await latestRelease();
     latest = release?.version ?? null;
+    latestObservedAt = latest ? Date.now() : null;
     releaseAssetAvailable = release?.releaseAssetAvailable ?? null;
     // Preserve installedRelease across the cache write.
     cfg.versionCheck = {
@@ -195,6 +197,8 @@ export async function drift({ force = false } = {}) {
   return {
     ...classifyDrift({ present: present(), installedRelease, latest }),
     releaseAssetAvailable,
+    latestSource: fresh ? 'cache' : 'live',
+    latestObservedAt,
     pluginVersion: installedVersion(),
   };
 }

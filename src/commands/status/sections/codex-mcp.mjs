@@ -69,7 +69,7 @@ function topologyRows(cwd) {
     }
     if (topology.duplicateRuflo) {
       rows.push(row('codex-mcp', 'warn',
-        `duplicate Ruflo MCP registrations in Codex: ${topology.rufloRegistrations.map((entry) => entry.name).join(', ')}`,
+        `duplicate Ruflo MCP registrations in Codex: ${topology.effectiveRufloRegistrations.map((entry) => entry.name).join(', ')}`,
         'keep the workspace-aware [mcp_servers.ruflo] entry and remove legacy duplicates after reviewing ownership'));
     }
   } catch (e) {
