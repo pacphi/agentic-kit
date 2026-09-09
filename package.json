@@ -32,6 +32,7 @@
     "docs/TROUBLESHOOTING.md",
     "docs/UPGRADING.md",
     "docs/CODEX-STATUSLINE.md",
+    "docs/evidence/codex-context-0.153.4.md",
     "docs/adr/0015-managed-codex-native-statusline.md",
     "docs/adr/0032-model-lifecycle-intelligence.md",
     "docs/adr/0033-retire-codex-mcp-and-bound-qe-court-participants.md",
@@ -39,6 +40,7 @@
     "docs/adr/0044-receipt-aware-maintenance-control-plane.md",
     "tests/live/aqe-external-provider-transport.test.mjs",
     "tests/live/qe-court-participant-transport.test.mjs",
+    "tests/live/codex-context-contract.test.mjs",
     "docs/ddd/maintenance.md",
     "docs/ddd/model-lifecycle-intelligence.md"
   ],

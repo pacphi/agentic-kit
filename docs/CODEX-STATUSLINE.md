@@ -48,6 +48,55 @@ Selecting `native` or `extended` records explicit ownership in agentic-kit's
 machine configuration. From then on, `ak status` reports drift and `ak sync`
 reconciles the selected preset.
 
+## Native context capacities
+
+`context-remaining` uses Codex's active session allocation. The API model's
+advertised context capacity is a separate measurement. On Codex 0.153.4,
+Astra and Sol default to 272,000 tokens with a 95% effective allocation
+(258,400 tokens). Their native catalog maximum is 872,000, giving 828,400
+effective tokens when explicitly requested. A fresh session with a 1,050,000
+request still reports 828,400. GPT-5.5 remains at 258,400 under that same
+request: Codex caps the allocation for each selected model.
+
+Agentic-kit can maintain the native maximum preference:
+
+```bash
+ak x codex-context max --dry-run
+ak x codex-context max
+ak x codex-context status --json
+ak sync --no-upgrade
+# Restore the original setting while the owned value is unchanged:
+ak x codex-context off
+```
+
+This is an explicit opt-in independent of the status-line preset. Setup and
+sync reconcile the persisted preference; uninstall restores the original scalar
+only if the current value matches a successful or pending owned projection.
+User-modified values survive removal. Recovery receipts retain both projections
+across interrupted writes, and every changed configuration gets a backup.
+
+The request comes from a fresh native model cache, with a verified per-model
+clamp profile for Codex 0.153.4. Unknown versions, stale or malformed caches,
+custom providers/catalogs, ambiguous TOML, and mismatched `CODEX_HOME` ownership
+prevent writes. Refresh stale metadata with `codex debug models`; a new Codex
+version needs its own conformance evidence. The native cache is never patched.
+
+The new command and model inventory honor absolute `CODEX_HOME`. The projection
+owns only the top-level `model_context_window` scalar. Profile, project, managed,
+or command-line overrides may supersede it. Status labels catalog/config
+estimates separately from runtime observations; restart existing Codex clients
+and verify the window in a fresh session. Auto-compaction settings remain owned
+by Codex or the user and are reported when explicitly configured.
+
+The opt-in `tests/live/codex-context-contract.test.mjs` checks fresh Astra/Sol
+and GPT-5.5 sessions under `AK_CODEX_CONTEXT_CONFORMANCE=1`. It makes three short
+model requests and inspects their recorded effective windows; it does not
+claim that a near-limit input was processed successfully.
+
+See the [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)
+for native settings and the [capacity evidence](evidence/codex-context-0.153.4.md)
+for the initial conformance observations.
+
 Agentic-kit narrowly updates only these keys under `[tui]`:
 
 ```toml
