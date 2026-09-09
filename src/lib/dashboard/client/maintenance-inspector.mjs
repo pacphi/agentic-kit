@@ -3,10 +3,12 @@
 // override comment for why this directory isn't run through the node lib.
 //
 // ADR-0048 Resource inspector (MNT-UX-003/004/011, MNT-PRV-005). Desktop opens
-// a side panel without losing the selected result; every screen also supports
+// details below the list without losing the selected result; every screen also supports
 // the "Back to N results" affordance that returns focus to the originating
 // row. The exact path is revealed only via an explicit click on the
 // owner-protected reveal endpoint, and is never copied automatically.
+import { formatLocalDateTimeLong } from './datetime.mjs';
+import { mntRenderRelationships } from './maintenance-relationships.mjs';
 import { mntIcon } from './maintenance-cards.mjs';
 import { esc } from './bootstrap.mjs';
 import {
@@ -16,18 +18,18 @@ import {
 import { mntRenderGuidanceEntry, mntWireGuidanceActions } from './maintenance-guidance.mjs';
 
   var mntInspectorBusy=false,mntInspectorError=null,mntInspectorOriginPlc=null,mntInspectorWired=false;
-  var mntRevealed=null,mntInspectorSeq=0,mntRevealError=null;
+  var mntRevealed=null,mntInspectorSeq=0,mntRevealError=null,mntRelatedTrail=[],mntRelatedOutside=false;
   function mntInspectorCloseButton(){return '<div class="mnt-inspector-toolbar"><span>Details</span><button type="button" class="mnt-icon-button" id="mnt-inspector-back" aria-label="Close details">'+mntIcon("close")+'</button></div>';}
   function mntMarkSelection(){document.querySelectorAll("[data-mnt-plc]").forEach(function(row){var on=row.getAttribute("data-mnt-plc")===MNT.plc;row.classList.toggle("selected",on);row.setAttribute("aria-expanded",String(on));});}
 
   function mntInspectorEl(){return document.getElementById("mnt-inspector");}
 
-  function mntCloseInspector(){
+  export function mntCloseInspector(){
     var el=mntInspectorEl();if(!el||el.hidden)return;
     mntInspectorSeq++;mntInspectorBusy=false;
     el.hidden=true;el.innerHTML="";
     mntPopEscapable(mntCloseInspector);
-    MNT.plc=null;MNT.inspector=null;mntRevealed=null;mntMarkSelection();
+    MNT.plc=null;MNT.inspector=null;mntRevealed=null;mntRelatedTrail=[];mntRelatedOutside=false;mntMarkSelection();
     mntSyncHash();
     var origin=mntInspectorOriginPlc;
     mntInspectorOriginPlc=null;
@@ -48,7 +50,7 @@ import { mntRenderGuidanceEntry, mntWireGuidanceActions } from './maintenance-gu
     var keys=Object.keys(versions||{}).filter(function(key){return key!=="contentDigest";});
     if(!keys.length)return "";
     return '<section class="mnt-q"><h4>What version is here?</h4><dl class="mt-facts compact">'
-      +keys.map(function(key){return "<div><dt>"+esc(versionLabels[key]||mntKindLabel(key)||key)+"</dt><dd>"+esc(versions[key])+"</dd></div>";}).join("")
+      +keys.map(function(key){return "<div><dt>"+esc(versionLabels[key]||mntKindLabel(key)||key)+"</dt><dd>"+esc(key==='checkedAt'||key==='measuredAt' ? (formatLocalDateTimeLong(versions[key])||'Not recorded') : versions[key])+"</dd></div>";}).join("")
       +"</dl></section>";
   }
 
@@ -76,13 +78,15 @@ import { mntRenderGuidanceEntry, mntWireGuidanceActions } from './maintenance-gu
       }).join("")+"</ul></section>";
   }
 
-  function mntWhatCanIAccomplish(entries){
+  function mntWhatCanIAccomplish(entries,resourceKind){
     if(!entries||entries.detail){
       return '<section class="mnt-q"><h4>What can I accomplish?</h4><p class="mnt-no-action">'
         +esc((entries&&entries.detail)||"")+"</p></section>";
     }
-    return '<section class="mnt-q"><h4>What can I accomplish?</h4>'
-      +entries.map(mntRenderGuidanceEntry).join("")+"</section>";
+    var recommendations=entries.filter(function(entry){return entry.purpose!=='optional-management';});
+    var optional=entries.filter(function(entry){return entry.purpose==='optional-management';});
+    return (recommendations.length?'<section class="mnt-q"><h4>Guidance</h4>'+recommendations.map(function(entry){return mntRenderGuidanceEntry(entry,resourceKind);}).join('')+'</section>':'')
+      +(optional.length?'<section class="mnt-q"><h4>Optional actions</h4><p>These actions are available if you choose to manage this resource; their availability is not a recommendation to change it.</p>'+optional.map(function(entry){return mntRenderGuidanceEntry(entry,resourceKind);}).join('')+'</section>':'');
   }
 
   function mntEvidence(scorecard,technicalDetails){
@@ -142,25 +146,26 @@ import { mntRenderGuidanceEntry, mntWireGuidanceActions } from './maintenance-gu
     var what=inspector.whatIsThis||{};
     el.hidden=false;
     el.innerHTML=mntInspectorCloseButton()
+      +(mntRelatedTrail.length?'<p class="mnt-related-context">'+(mntRelatedOutside?'Related installation outside the current filters.':'Related installation.')+' Your inventory location and filters are unchanged.</p><button type="button" class="mt-action" id="mnt-related-back">Back to '+esc(mntRelatedTrail[mntRelatedTrail.length-1].name)+'</button>':'')
       +'<h3 id="mnt-inspector-title" tabindex="-1">'+esc(what.displayName)+"</h3>"
       +'<p class="mnt-inspector-kind">'+esc(what.kindLabel)+"</p>"
       +(what.conditionLabels&&what.conditionLabels.length
         ?'<ul class="mnt-conditions">'+what.conditionLabels.map(function(c){return "<li>"+esc(c)+"</li>";}).join("")+"</ul>":"")
       +mntWhereIsIt(inspector)
-      +mntWhereDidItComeFrom(inspector.whereDidItComeFrom)
-      +mntWhatVersion(inspector.whatVersionIsHere)
-      +mntWhoUses(inspector.whoUsesIt)
+      +(inspector.relationships?'':mntWhereDidItComeFrom(inspector.whereDidItComeFrom))
+      +(inspector.whatVersionIsHere&&Object.keys(inspector.whatVersionIsHere).length?'<details class="mnt-q"><summary>Version details</summary>'+mntWhatVersion(inspector.whatVersionIsHere)+'</details>':'')
+      +(inspector.relationships?mntRenderRelationships(inspector.relationships):mntWhoUses(inspector.whoUsesIt))
       +mntConflicts(inspector.whatChangedOrConflicts)
-      +mntWhatCanIAccomplish(inspector.whatCanIAccomplish)
+      +mntWhatCanIAccomplish(inspector.whatCanIAccomplish,what.kind)
       +mntEvidence(inspector.whatProvesThis&&inspector.whatProvesThis.evidenceScorecard,
         (inspector.whatProvesThis&&inspector.whatProvesThis.technicalDetails||[]).concat(inspector.whatVersionIsHere&&inspector.whatVersionIsHere.contentDigest?['Content digest: '+inspector.whatVersionIsHere.contentDigest]:[]))
-      +mntHistory(inspector.whatHappenedBefore);
+      +'<details class="mnt-q"><summary>History</summary>'+mntHistory(inspector.whatHappenedBefore)+'</details>';
     var title=document.getElementById("mnt-inspector-title");
     if(title)title.focus();
   }
 
-  export function mntOpenInspector(placementId,originButton){
-    mntInspectorOriginPlc=originButton&&originButton.getAttribute?originButton.getAttribute("data-mnt-plc"):placementId;
+  export function mntOpenInspector(placementId,originButton,related){
+    if(!related){mntRelatedTrail=[];mntRelatedOutside=false;mntInspectorOriginPlc=originButton&&originButton.getAttribute?originButton.getAttribute("data-mnt-plc"):placementId;}
     MNT.plc=placementId;MNT.inspector=null;mntInspectorBusy=true;mntInspectorError=null;mntRevealed=null;mntRevealError=null;
     mntSyncHash();mntMarkSelection();
     renderMntInspector();
@@ -197,6 +202,9 @@ import { mntRenderGuidanceEntry, mntWireGuidanceActions } from './maintenance-gu
     if(mntInspectorWired)return;mntInspectorWired=true;
     var el=mntInspectorEl();if(!el)return;
     el.addEventListener("click",function(event){
+      var related=event.target.closest&&event.target.closest('[data-mnt-related]');
+      if(related){mntRelatedTrail.push({id:MNT.plc,outside:mntRelatedOutside,name:MNT.inspector&&MNT.inspector.whatIsThis&&MNT.inspector.whatIsThis.displayName||'installation'});mntRelatedOutside=related.getAttribute('data-mnt-related-outside')==='true';mntOpenInspector(related.getAttribute('data-mnt-related'),null,true);return;}
+      if(event.target.closest&&event.target.closest('#mnt-related-back')){var previous=mntRelatedTrail.pop();if(previous){mntRelatedOutside=previous.outside;mntOpenInspector(previous.id,null,true);}return;}
       var back=event.target.closest?event.target.closest("#mnt-inspector-back"):null;
       if(back){mntCloseInspector();return;}
       var reveal=event.target.closest?event.target.closest("#mnt-reveal"):null;

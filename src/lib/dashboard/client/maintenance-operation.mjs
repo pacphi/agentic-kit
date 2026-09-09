@@ -83,7 +83,8 @@ function mntPollProviders(previousCheck){
       if(Date.now()-started>300000)throw new Error('The evidence check is still pending.');
       return mntDelay(2000).then(tick);
     }
-    if(!scan||scan.status!=='complete')throw new Error('The evidence check did not complete.');
+    if(!scan||(scan.status!=='complete'&&scan.status!=='stale'))throw new Error('The evidence check did not complete.');
+    MNT.operation.staleMeasurement=scan.status==='stale';
     MNT.operation.gaps=scan.coverage==='partial';
     return data;
   });}
@@ -100,7 +101,7 @@ function mntRunOperation(measure){
     return mntGet('/api/maintenance?refresh=scan');
   }).then(function(){return mntPollProviders(previousCheck);})
     .then(function(){return mntAwaitInventoryBuild(previousAt);})
-    .then(function(){mntSetOperation(MNT.operation.gaps?'Finished with coverage gaps · see Discovery.':'Inventory updated · checks complete.');})
+    .then(function(){mntSetOperation(MNT.operation.staleMeasurement?'Evidence refreshed · machine measurement is stale. Re-measure machine.':MNT.operation.gaps?'Finished with coverage gaps · see Discovery.':'Inventory updated · checks complete.');})
     .catch(function(error){MNT.operation.failed=true;mntSetOperation(error.message+' Previous inventory remains available.');})
     .then(function(){
       MNT.remeasureBusy=false;MNT.providersBusy=false;
@@ -130,7 +131,7 @@ function mntObserveSystemScan(scan){
     Promise.resolve(op.baseline).then(function(before){
       if(scan&&scan.error)throw new Error('The measurement reported a problem.');
       return mntPollProviders(before&&before.check).then(function(){return mntAwaitInventoryBuild(before&&before.at);});
-    }).then(function(){mntSetOperation(op.gaps?'Finished with coverage gaps · see Discovery.':'Inventory updated · checks complete.');})
+    }).then(function(){mntSetOperation(op.staleMeasurement?'Evidence refreshed · machine measurement is stale. Re-measure machine.':op.gaps?'Finished with coverage gaps · see Discovery.':'Inventory updated · checks complete.');})
       .catch(function(error){op.failed=true;mntSetOperation(error.message+' Previous inventory remains available.');})
       .then(function(){MNT.externalScanBusy=false;clearInterval(mntOperationTimer);mntOperationTimer=null;renderMntOperation();mntRefreshActiveDestination();});
   }

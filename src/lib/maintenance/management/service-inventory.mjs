@@ -9,6 +9,8 @@ import { latestSnapshot } from '../../model-inventory/store.mjs';
 import { mutationBlocksForGuidance } from './correlation.mjs';
 import { collectMcpRegistrationFacts, probeDependencies } from './dependency-probes.mjs';
 import { admitGuidance, inspectorFor } from './guidance.mjs';
+import { isOptionalManagement, recommendationEntries, normalizeGuidanceInventory } from './guidance-purpose.mjs';
+import { guidanceCoverage } from './guidance-coverage.mjs';
 import {
   MANAGEMENT_QUERY_SCHEMA, assertManagementInventory, deepFreeze, isOpaqueId, isProhibitedLabel, opaqueId,
 } from './model.mjs';
@@ -76,7 +78,12 @@ function collectUserInstructionFiles(ctx) {
   for (const source of ctx.listSources()) {
     for (const file of source.instructionFiles ?? []) {
       if (!file.present) continue;
-      files.push({ host: file.host, name: file.name, scope: 'user', ...(file.digest ? { digest: file.digest } : {}) });
+      const paths = path.posix.isAbsolute(source.root ?? '') ? path.posix : path.win32;
+      const measuredPath = paths.isAbsolute(source.root ?? '') && file.name
+        && !/[\\/]/.test(file.name) && file.name !== '..'
+        ? paths.join(source.root, file.name) : null;
+      files.push({ host: file.host, name: file.name, scope: 'user',
+        ...(measuredPath ? { path: measuredPath } : {}), ...(file.digest ? { digest: file.digest } : {}) });
     }
   }
   return files;
@@ -314,7 +321,7 @@ export function refreshInventory(ctx) {
 
 /** The last-good inventory, or `null` when none has ever been built. */
 export function loadLastGoodInventory(ctx) {
-  return ctx.inventorySnapshotStore.read();
+  return normalizeGuidanceInventory(ctx.inventorySnapshotStore.read());
 }
 
 /** The most recent `refreshInventory` outcome, or `null` before any refresh
@@ -324,6 +331,7 @@ function lastRefresh(ctx) {
 }
 
 function laneCounts(entries) {
+  entries = recommendationEntries(entries);
   const counts = {
     apply: 0, steps: 0, decision: 0, update: 0, recovery: 0, total: entries.length,
   };
@@ -450,12 +458,14 @@ export function guidance(ctx) {
     if (!inventory) return deepFreeze({ scanRequired: true, lanes, counts: laneCounts([]), entries: [], lastRefresh: lastRefresh(ctx) });
     const matchingPlacementIds = placementIdsMatchingQuery(inventory, { scope, facets });
     const entries = (inventory.guidanceEntries ?? []).filter((entry) => {
+      if (isOptionalManagement(entry)) return false;
       if (lane && entry.lane !== lane) return false;
       return matchingPlacementIds.has(entry.placementId);
     });
     for (const entry of entries) lanes[entry.lane].push(entry);
     return deepFreeze({
       scanRequired: false, lanes, counts: laneCounts(entries), entries, lastRefresh: lastRefresh(ctx),
+      coverage: inventory.guidanceCoverage ?? guidanceCoverage(inventory),
     });
   };
 }

@@ -1186,3 +1186,25 @@ test('saved guidance cannot reopen an unbound or withdrawn procedure', () => {
   const ctx = { inventorySnapshotStore: { read: () => inventory }, allRecipes: () => [recipe] };
   assert.throws(() => procedure(ctx)({ guidanceId: 'g' }), /no longer compatible/);
 });
+
+test('user instruction files retain measured custom-root locations only in the private locator store', async (t) => {
+  const root = fixtureRoot(t);
+  const paths = hermeticPaths(root);
+  const expected = new Map([
+    ['CLAUDE.md', path.join(paths.claudeDir(), 'CLAUDE.md')],
+    ['AGENTS.md', path.join(paths.codexDir(), 'AGENTS.md')],
+  ]);
+  for (const [name, file] of expected) fs.writeFileSync(file, '# '+name+'\n');
+  const h = buildHarness(t, { paths });
+  await h.service.refreshInventory();
+  const rows = h.service.inventory({ scope: 'user', facets: { kind: ['instruction-context-file'] } }).groups.flatMap(g => g.placements);
+  assert.equal(rows.length, 2);
+  for (const row of rows) {
+    const details = h.service.placement({ placementId: row.placementId });
+    assert.equal(details.whereIsIt.revealAvailable, true);
+    assert.equal(details.whereIsIt.carrier.label, 'User instruction file');
+    assert.equal(h.service.revealLocator({ placementId: row.placementId }).exactPath, expected.get(row.displayName));
+    assert.equal(JSON.stringify(details).includes(root), false);
+    assert.equal(JSON.stringify(h.service.inventory({})).includes(root), false);
+  }
+});

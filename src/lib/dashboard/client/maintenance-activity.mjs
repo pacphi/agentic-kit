@@ -7,9 +7,10 @@
 // dispositions, recipe changes, and scan records. Receipts open a detail
 // sheet; export defaults to sanitized and "Include local paths" is a fresh,
 // separately warned selection every time — never persisted.
+import { formatLocalDateTimeLong, formatLocalDay, formatLocalTime } from './datetime.mjs';
 import { mntWritesBlocked, mntOperationText } from './maintenance-operation.mjs';
 import { esc } from './bootstrap.mjs';
-import { MNT, MNT_AUDIT_ACTION_LABEL, mntAge, mntGet, mntKindLabel, mntPost, mntRegisterDestination } from './maintenance-workspace.mjs';
+import { MNT, MNT_SOURCE_COVERAGE_LABELS, MNT_AUDIT_ACTION_LABEL, mntAge, mntGet, mntKindLabel, mntPost, mntRegisterDestination } from './maintenance-workspace.mjs';
 import { mntWireGuidanceActions } from './maintenance-guidance.mjs';
 import { beginMaintUndo } from './system-maintenance-actions.mjs';
 
@@ -40,17 +41,39 @@ import { beginMaintUndo } from './system-maintenance-actions.mjs';
       +'">'+esc(entry.primaryActionLabel||MNT_AUDIT_ACTION_LABEL)+"</button></li>";
   }
   function mntDispositionRow(entry){
-    return "<li>"+esc(entry.kindLabel)+(entry.until?" until "+esc(mntAge(entry.until)):"")
+    return "<li>"+esc(entry.kindLabel)+(entry.until?" until "+esc(formatLocalDateTimeLong(entry.until)||'time unknown'):"")
       +(entry.invalidationReason?" — "+esc(entry.invalidationReason):"")+"</li>";
   }
   function mntRecipeRow(entry){
     return "<li>"+esc(entry.kind)+(entry.recipeId?" "+esc(entry.recipeId)+" v"+esc(entry.recipeVersion):"")
       +(entry.at?" — "+esc(mntAge(entry.at)):"")+"</li>";
   }
-  function mntScanRow(entry){
-    return "<li>"+esc(entry.label||"Discovery source")+" — "+esc(entry.state==="published"?"Complete":entry.state)
-      +(entry.completedAt?" "+esc(mntAge(entry.completedAt)):"")+"</li>";
+  var mntExpandedHistoryDays=new Set();
+  function renderMntScanHistory(){
+    var el=document.getElementById("mnt-scan-history");if(!el)return;
+    var history=(MNT.activity&&(MNT.activity.scanHistory||MNT.activity.scans))||[];
+    if(!history.length){el.innerHTML="<h3>Scan history</h3><p>No scans have completed yet.</p>";return;}
+    var groups=new Map();
+    history.slice().sort(function(a,b){return (Date.parse(b.completedAt)||0)-(Date.parse(a.completedAt)||0);}).forEach(function(entry){
+      var day=formatLocalDay(entry.completedAt)||'Date not recorded';
+      if(!groups.has(day))groups.set(day,[]);
+      groups.get(day).push(entry);
+    });
+    el.innerHTML='<h3>Scan history</h3><div class="mnt-history-scroll" role="region" aria-label="Scan history by date" tabindex="0"><table class="mnt-coverage-table mnt-history-table"><caption class="sr-only">Scanned sources grouped by local date, newest first</caption><thead><tr><th scope="col">Date / time</th><th scope="col">Source scanned</th><th scope="col">Status</th><th scope="col">Entries</th></tr></thead>'
+      +Array.from(groups,function(group,index){var expanded=mntExpandedHistoryDays.has(group[0]);return '<tbody><tr class="mnt-history-day"><th colspan="4" scope="rowgroup"><button type="button" class="mnt-history-toggle" data-mnt-history-day="'+index+'" aria-expanded="'+expanded+'"><span class="mnt-history-chevron" aria-hidden="true"></span>'+esc(group[0])+'</button></th></tr>'
+        +group[1].map(function(entry){return '<tr'+(expanded?'':' hidden')+'><td>'+esc(formatLocalTime(entry.completedAt)||'Time not recorded')+'</td><th scope="row">'+esc(entry.label||'Source no longer configured')+'</th><td>'+esc(MNT_SOURCE_COVERAGE_LABELS[entry.state]||(entry.state==='published'?'Complete':entry.state))
+          +(entry.limitingReason?'<small>'+esc(entry.limitingReason)+'</small>':'')+'</td><td>'+(Number.isFinite(entry.visited)?esc(entry.visited.toLocaleString()):'—')+'</td></tr>';}).join('')+'</tbody>';}).join('')+'</table></div>';
+    el.onclick=function(event){
+      var button=event.target.closest&&event.target.closest('[data-mnt-history-day]');
+      if(!button)return;
+      var day=Array.from(groups.keys())[Number(button.getAttribute('data-mnt-history-day'))];
+      var expanded=button.getAttribute('aria-expanded')!=='true';
+      if(expanded)mntExpandedHistoryDays.add(day);else mntExpandedHistoryDays.delete(day);
+      button.setAttribute('aria-expanded',String(expanded));
+      button.closest('tbody').querySelectorAll('tr:not(.mnt-history-day)').forEach(function(row){row.hidden=!expanded;});
+    };
   }
+
   function mntGroupSection(title,items,renderer,emptyText){
     return "<section class=\"mnt-activity-group\"><h3>"+esc(title)+"</h3>"
       +(items&&items.length?"<ul>"+items.map(renderer).join("")+"</ul>":"<p>"+esc(emptyText)+"</p>")
@@ -61,12 +84,13 @@ import { beginMaintUndo } from './system-maintenance-actions.mjs';
     var el=document.getElementById("mnt-activity-groups");if(!el)return;
     if(mntActivityError){el.innerHTML="<p>Activity could not be read.</p>";return;}
     var data=MNT.activity||{};
-    el.innerHTML=mntGroupSection("Recovery to finish",data.recovery,mntRecoveryRow,"Nothing needs recovery.")
+    el.innerHTML='<div class="mnt-activity-overview">'+mntGroupSection("Recovery to finish",data.recovery,mntRecoveryRow,"Nothing needs recovery.")
       +mntGroupSection("In progress",(mntWritesBlocked()?[{label:mntOperationText(),activeMeasurement:true}]:[]).concat(data.inProgress||[]),function(entry){return (entry.activeMeasurement?'<li id="mnt-active-operation">':"<li>")+esc(entry.label||mntKindLabel(entry.kind))+"</li>";},"Nothing is in progress.")
       +mntGroupSection("Change receipts",data.receipts,mntReceiptRow,"No changes have been recorded.")
       +mntGroupSection("Dispositions",data.dispositions,mntDispositionRow,"No dispositions have been recorded.")
       +mntGroupSection("Recipe changes",data.recipes,mntRecipeRow,"No recipe changes yet.")
-      +mntGroupSection("Scan records",data.scans,mntScanRow,"No scans have completed yet.");
+      +'</div><section class="mnt-activity-group" aria-label="Scan history" id="mnt-scan-history"></section>';
+    renderMntScanHistory();
   }
 
   // ── Receipt detail sheet ─────────────────────────────────────────────────

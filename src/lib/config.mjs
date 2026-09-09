@@ -57,7 +57,7 @@ const DEFAULTS = {
   // admitAdapters/bootstrapHostAdapters. Empty by default = zero effect.
   hostAdapters: [],
   // ADR-0048 Maintenance discovery intent (user `kit.json` state — see
-  // docs/design/maintenance-overhaul/discovery-and-scan-policy.md). Owner-private
+  // docs/MAINTENANCE.md). Owner-private
   // operational state (checkpoints, coverage, preferences) lives under
   // maintenanceControlDir(), never here.
   maintenance: {

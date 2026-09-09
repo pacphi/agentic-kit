@@ -552,3 +552,21 @@ test('pause() on a non-pausable source throws with code SOURCE_NOT_PAUSABLE', as
     (error) => error.code === 'SOURCE_NOT_PAUSABLE',
   );
 });
+
+test('scan history rolls over independently at ten records per source and survives reopening', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-history-window-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const now = Date.parse('2026-09-08T12:00:00Z');
+  const store = createScanHistoryStore(dir, { now: () => now });
+  for (let round = 0; round < 12; round++) {
+    for (const sourceId of ['claude', 'codex']) {
+      store.recordSummary({ sourceId, environmentId: 'local', state: 'published', visited: round,
+        completedAt: new Date(now - (12 - round) * 60000).toISOString() });
+    }
+  }
+  const reopened = createScanHistoryStore(dir, { now: () => now });
+  for (const sourceId of ['claude', 'codex']) {
+    assert.deepEqual(reopened.list().filter((row) => row.sourceId === sourceId).map((row) => row.visited),
+      [2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+  }
+});

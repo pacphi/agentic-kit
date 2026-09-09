@@ -3,23 +3,24 @@
 // override comment for why this directory isn't run through the node lib.
 //
 // ADR-0048 Guidance destination (MNT-GUD-001/003, MNT-RCV-001/008/012). Five
-// outcome-first lanes with resource type as a filter; the procedure panel;
+// outcome-first lanes; the procedure panel;
 // decisions compared without a write action; updates disclosed without a
 // write action (an apply-lane entry, not this lane, carries any real Update
 // verb); and Recovery's single "Audit interruption" -> disclosure/result ->
 // exactly one Record button, or "No corrective action is offered." + export.
 import { mntWritesBlocked } from './maintenance-operation.mjs';
 import { esc } from './bootstrap.mjs';
+import { mntAvailableTo } from './maintenance-cards.mjs';
 import {
   MNT, MNT_AUDIT_ACTION_LABEL, MNT_AUDIT_RESULT_LABELS, MNT_GUIDANCE_LANE_LABELS,
   MNT_NO_CORRECTIVE_ACTION, MNT_RECONCILE_OUTCOME_LABELS, mntAnnounce, mntGet, mntHumanize,
   mntKindLabel, mntPost, mntPushEscapable, mntPopEscapable, mntRefreshActiveDestination,
-  mntRegisterDestination, mntScanRequiredAnnouncement, mntScanRequiredHtml,
+  mntSetDestination, mntRegisterDestination, mntScanRequiredAnnouncement, mntScanRequiredHtml,
 } from './maintenance-workspace.mjs';
 import { beginMaintPreview, beginMaintReconcile } from './system-maintenance-actions.mjs';
 
   var MNT_LANES=["apply","steps","decision","update","recovery"];
-  var MNT_LANE_VIEW={apply:"can-apply",steps:"steps",decision:"decisions",update:"updates"};
+  var MNT_LANE_VIEW={apply:"can-apply",steps:"steps",decision:"decisions",update:"updates",recovery:"all"};
   var VERB_LABEL={
     update:"Update",disable:"Disable",remove:"Remove","repair-registration":"Repair registration",
     "relink-dependency":"Relink dependency",reinstall:"Reinstall","clean-cache":"Clean cache",
@@ -40,24 +41,24 @@ import { beginMaintPreview, beginMaintReconcile } from './system-maintenance-act
     return "<li><b>"+esc(choice.label)+"</b><p>Changes: "+esc(choice.changes)+". Keeps: "+esc(choice.keeps)+".</p>"
       +(choice.grounded?"":"<p>"+esc(choice.reason||"")+"</p>")+"</li>";
   }
-  function mntEntryOutcomeLabel(entry){
+  function mntEntryOutcomeLabel(entry,resourceKind){
     if(entry.lane==="apply"&&entry.verb&&VERB_LABEL[entry.verb]){
       if(MNT_SELF_CONTAINED_VERBS[entry.verb])return esc(VERB_LABEL[entry.verb]);
       // GuidanceEntry carries no resourceKind of its own — the joined
       // placement row (see mntJoinPlacements below) is the only source for
       // the resource-kind noun a verb-specific row action needs.
       var row=mntPlacementRows[entry.placementId];
-      var noun=row?mntKindLabel(row.kind):"";
+      var noun=typeof resourceKind==="string"?mntKindLabel(resourceKind):row?mntKindLabel(row.kind):"";
       return esc(VERB_LABEL[entry.verb]+(noun?" "+noun.toLowerCase():""));
     }
     return esc(entry.outcome);
   }
-  export function mntRenderGuidanceEntry(entry){
+  export function mntRenderGuidanceEntry(entry,resourceKind){
     var body="";
     if(entry.lane==="apply"){
       body='<button type="button" class="mt-action primary" data-mnt-plan-plc="'+esc(entry.placementId)
         +'" data-mnt-plan-gid="'+esc(entry.guidanceId)+'"'+(mntWritesBlocked()?" disabled":"")+'>'
-        +mntEntryOutcomeLabel(entry)+"</button>";
+        +mntEntryOutcomeLabel(entry,resourceKind)+"</button>";
     }else if(entry.lane==="steps"){
       body='<button type="button" class="mt-action" data-mnt-procedure-gid="'+esc(entry.guidanceId)+'">Open procedure</button>';
     }else if(entry.lane==="decision"&&entry.choices){
@@ -73,7 +74,7 @@ import { beginMaintPreview, beginMaintReconcile } from './system-maintenance-act
     return '<article class="mnt-guidance-entry" data-mnt-gid="'+esc(entry.guidanceId)+'">'
       +"<h5>"+esc(entry.outcome)+"</h5>"
       +(entry.impact&&entry.impact.summary?"<p>"+esc(entry.impact.summary)+"</p>":"")
-      +warning+body+mntRenderDispositions(entry)+"</article>";
+      +warning+body+(entry.purpose==='optional-management'?'':mntRenderDispositions(entry))+"</article>";
   }
 
   // ── Dispositions (MNT-GUD-009/011): Acknowledge / Snooze until… / Ignore
@@ -118,7 +119,7 @@ import { beginMaintPreview, beginMaintReconcile } from './system-maintenance-act
     var guidanceId=container&&container.getAttribute("data-mnt-gid");
     if(!guidanceId)return;
     var payload={guidanceId:guidanceId,kind:kind,confirm:true};
-    if(untilDate)payload.until=new Date(untilDate+"T00:00:00.000Z").toISOString();
+    if(untilDate)payload.until=new Date(untilDate+"T00:00:00").toISOString();
     return mntPost("/api/maintenance/v2/dispositions",payload).then(function(){
       mntAnnounce("Recorded.");
       mntRefreshActiveDestination();
@@ -134,15 +135,19 @@ import { beginMaintPreview, beginMaintReconcile } from './system-maintenance-act
   // is needed here beyond keying rows by placementId. ──
   function mntJoinPlacements(view){
     if(mntPlacementIndex[view])return Promise.resolve();
-    return mntGet("/api/maintenance/v2/inventory?scope=across&view="+encodeURIComponent(view)+"&limit=200")
+    function readPage(cursor){
+      return mntGet("/api/maintenance/v2/inventory?scope=across&view="+encodeURIComponent(view)+"&limit=200"+(cursor?'&cursor='+encodeURIComponent(cursor):''))
       .then(function(page){
-        mntPlacementIndex[view]=true;
         (page.groups||[]).forEach(function(group){
           (group.placements||[]).forEach(function(row){
             mntPlacementRows[row.placementId]=row;
           });
         });
-      }).catch(function(){mntPlacementIndex[view]=true;});
+        if(page.nextCursor)return readPage(page.nextCursor);
+        mntPlacementIndex[view]=true;
+      });
+    }
+    return readPage(null).catch(function(){});
   }
   var mntPlacementRows={};
 
@@ -150,9 +155,9 @@ import { beginMaintPreview, beginMaintReconcile } from './system-maintenance-act
     if(mntGuidanceBusy&&!force)return Promise.resolve();
     mntGuidanceBusy=true;mntGuidanceError=null;renderMntGuidance();
     return mntGet("/api/maintenance/v2/guidance").then(function(data){
-      MNT.guidance=data;mntGuidanceBusy=false;
+      MNT.guidance=data;mntGuidanceBusy=false;mntPlacementIndex={};mntPlacementRows={};
       var firstNonEmpty=MNT_LANES.find(function(lane){return (data.counts&&data.counts[lane])>0;});
-      if(firstNonEmpty)mntActiveLane=firstNonEmpty;
+      if(firstNonEmpty&&!(data.counts&&data.counts[mntActiveLane]))mntActiveLane=firstNonEmpty;
       var view=MNT_LANE_VIEW[mntActiveLane];
       return (view?mntJoinPlacements(view):Promise.resolve()).then(renderMntGuidance);
     }).catch(function(error){
@@ -174,19 +179,12 @@ import { beginMaintPreview, beginMaintReconcile } from './system-maintenance-act
 
   function mntEntriesForLane(){
     var entries=(MNT.guidance&&MNT.guidance.entries)||[];
-    var kindFilter=document.getElementById("mnt-guidance-kind");
-    var kind=kindFilter?kindFilter.value:"";
-    return entries.filter(function(entry){
-      if(entry.lane!==mntActiveLane)return false;
-      if(!kind)return true;
-      var row=mntPlacementRows[entry.placementId];
-      return row&&row.kind===kind;
-    });
+    return entries.filter(function(entry){return entry.lane===mntActiveLane&&entry.purpose!=='optional-management';});
   }
 
   function mntRowLabelFor(entry){
     var row=mntPlacementRows[entry.placementId];
-    return row?esc(row.displayName)+' <span class="mnt-row-scope">'+esc(row.scope.label)+"</span>":"";
+    return row?esc(row.displayName)+' <span class="mnt-row-scope">'+esc([row.scope.label,mntAvailableTo(row)].filter(Boolean).join(' · '))+"</span>":"";
   }
 
   function renderMntGuidanceList(){
@@ -203,30 +201,31 @@ import { beginMaintPreview, beginMaintReconcile } from './system-maintenance-act
     }).join("")+"</ul>";
   }
 
-  function mntPopulateKindFilter(){
-    var el=document.getElementById("mnt-guidance-kind");if(!el)return;
-    var entries=(MNT.guidance&&MNT.guidance.entries)||[];
-    var kinds={};
-    entries.forEach(function(entry){
-      var row=mntPlacementRows[entry.placementId];
-      if(row)kinds[row.kind]=true;
-    });
-    var current=el.value;
-    el.innerHTML='<option value="">All resource types</option>'+Object.keys(kinds).sort().map(function(kind){
-      return '<option value="'+esc(kind)+'">'+esc(mntKindLabel(kind))+"</option>";
-    }).join("");
-    if(kinds[current])el.value=current;
+  function mntRenderGuidanceCoverage(){
+    var el=document.getElementById('mnt-guidance-coverage');if(!el)return;
+    var coverage=MNT.guidance&&MNT.guidance.coverage||[];
+    el.innerHTML='<p class="mnt-filter-note">Guidance shows evidence-backed issues, updates, and recovery work. Optional management actions are available in <a href="#system/maintenance/inventory" data-mnt-open-inventory>Inventory</a>.</p>'
+      +(coverage.length?'<details class="mnt-q"><summary>Host coverage</summary><p>Counts reflect saved evidence, not a health assessment. Action checks cover the listed resource types in host-specific adapters. Refresh evidence to update these checks.</p><ul>'+coverage.map(function(row){
+        return '<li><b>'+esc(row.label)+'</b> · '+esc(row.placements)+' installations · '+esc(row.recommendations)+' guidance items · '+esc(row.optionalActions)+' optional actions<br>'+esc(row.actionStatusLabel)
+          +((row.actionKinds||[]).length?' ('+esc(row.actionKinds.map(mntKindLabel).join(', '))+')':'')+'</li>';
+      }).join('')+'</ul></details>':'');
+    el.onclick=function(event){
+      var link=event.target.closest&&event.target.closest('[data-mnt-open-inventory]');
+      if(!link||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey||event.button>0)return;
+      event.preventDefault();
+      mntSetDestination('inventory',{focus:true});
+    };
   }
 
   export function renderMntGuidance(){
-    renderMntLaneTabs();mntPopulateKindFilter();renderMntGuidanceList();
+    renderMntLaneTabs();mntRenderGuidanceCoverage();renderMntGuidanceList();
     var status=document.getElementById("mnt-guidance-status");
     if(status){
       var failure=MNT.guidance&&MNT.guidance.scanRequired
         ?mntScanRequiredAnnouncement(MNT.guidance.lastRefresh):null;
       var total=(MNT.guidance&&MNT.guidance.counts&&MNT.guidance.counts.total)||0;
       status.textContent=mntGuidanceBusy?"Reading guidance…"
-        :(failure||total+" bounded outcome"+(total===1?"":"s")+" admitted.");
+        :(failure||total+" guidance item"+(total===1?"":"s")+" from current evidence.");
     }
     var badge=document.getElementById("mnt-guidance-badge");
     if(badge){
@@ -396,8 +395,6 @@ import { beginMaintPreview, beginMaintReconcile } from './system-maintenance-act
       var button=event.target.closest?event.target.closest("[data-mnt-lane]"):null;
       if(button)mntSetLane(button.getAttribute("data-mnt-lane"));
     });
-    var kind=document.getElementById("mnt-guidance-kind");
-    if(kind)kind.addEventListener("change",renderMntGuidance);
     var list=document.getElementById("mnt-guidance-list");
     if(list)mntWireGuidanceActions(list);
     var procedure=document.getElementById("mnt-procedure");

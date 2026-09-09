@@ -76,6 +76,17 @@ function scanSummary(entry) {
   return { sourceId: entry.sourceId, environmentId: entry.environmentId, state: entry.state, label: entry.label, visited: entry.visited, limitingReason: entry.limitingReason ?? null, completedAt: entry.completedAt ?? null };
 }
 
+function latestScans(scanHistory) {
+  const latest = new Map();
+  const timestamp = (entry) => Date.parse(entry.completedAt) || 0;
+  for (const entry of scanHistory.map(scanSummary)) {
+    const key = JSON.stringify([entry.environmentId, entry.sourceId]);
+    const previous = latest.get(key);
+    if (!previous || timestamp(entry) >= timestamp(previous)) latest.set(key, entry);
+  }
+  return [...latest.values()].sort((a, b) => timestamp(b) - timestamp(a));
+}
+
 /**
  * Shape already-loaded evidence into the six Activity groups. `receipts` are
  * ALL known receipts (recovery is derived from the unfinished subset, not a
@@ -92,7 +103,8 @@ export function buildActivity({
     receipts: receipts.map(receiptSummary),
     dispositions: dispositions.map(dispositionSummary),
     recipes: recipeEvents.map(recipeEventSummary),
-    scans: scanHistory.map(scanSummary),
+    scans: latestScans(scanHistory),
+    scanHistory: scanHistory.map(scanSummary),
   };
 }
 

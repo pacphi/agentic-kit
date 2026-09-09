@@ -1,3 +1,4 @@
+import { projectLanguages } from './project-languages.mjs';
 // ADR-0048 project identity, breadcrumb, worktree/repository grouping, and
 // instruction-context-file mapping — split out of projection.mjs purely to
 // keep that file under the repository's max-lines budget. Not a public
@@ -5,6 +6,7 @@
 // only supported entry point. See that file's header for the accepted
 // `footprint.projects`/`discovery.projects`/`discovery.instructionFiles`
 // shapes.
+import path from 'node:path';
 import { PROJECT_KINDS } from '../../footprint/project-kind.mjs';
 import { artifactIdentity, bindingIdentity, placementIdentity, projectIdentity, resourceIdentity } from './identity.mjs';
 import { assertion, scorecardFor } from './evidence.mjs';
@@ -12,6 +14,16 @@ import { finalizePlacement, hostLabel } from './projection-builder.mjs';
 
 function segmentsOf(rawPath) {
   return String(rawPath ?? '').split(/[\\/]+/).filter(Boolean);
+}
+
+/** Only disclose a measured location inside its project, never its absolute root. */
+export function projectInstallationLocation(projectRoot, itemPath) {
+  if (typeof projectRoot !== 'string' || typeof itemPath !== 'string') return null;
+  const paths = /^[A-Za-z]:[\\/]|^\\\\/.test(projectRoot) ? path.win32 : path.posix;
+  if (!paths.isAbsolute(projectRoot) || !paths.isAbsolute(itemPath)) return null;
+  const relative = paths.relative(projectRoot, itemPath);
+  if (!relative || paths.isAbsolute(relative) || relative.split(/[\\/]/).includes('..')) return null;
+  return relative.replace(/\\/g, '/');
 }
 
 /** Each project's shortest tail of path segments that no other known project
@@ -87,7 +99,7 @@ function mapLexicalProjects(builder, rows, { installationKey }) {
     const projectId = projectIdentity({ verifiedRemote, worktreeRoot: row.path }, installationKey);
     const key = repositoryKeyFor(row);
     registry.set(row.path, {
-      projectId,
+      projectId, projectLanguages: projectLanguages(row),
       projectKind: PROJECT_KINDS.includes(row.projectKind) ? row.projectKind : row.isGitRepo === true || verifiedRemote ? 'git' : 'unknown',
       breadcrumb: breadcrumbs.get(row) ?? segmentsOf(row.path),
       repositoryResourceId: key ? repositoryResourceIdFor.get(key) ?? null : null,
@@ -127,6 +139,7 @@ function mergeDiscoveryProjects(builder, registry, entries, { installationKey })
   for (const entry of entries) {
     const projectEntry = {
       projectId: entry.projectId,
+      projectLanguages: registry.get(entry.path)?.projectLanguages ?? [],
       projectKind: PROJECT_KINDS.includes(entry.projectKind) ? entry.projectKind : entry.worktree === true ? 'worktree' : entry.repositoryKey || entry.submoduleOfProjectId ? 'git' : 'unknown',
       breadcrumb: entry.breadcrumb ?? [],
       repositoryResourceId: (!entry.nested && entry.repositoryKey)
@@ -203,7 +216,7 @@ function emitInstructionFilePlacement(builder, ctx, { file, projectEntry, locato
   }, installationKey);
   const artifactId = artifactIdentity({ carrier: 'file', locator: locatorKey }, installationKey);
   builder.upsertArtifact(artifactId, {
-    carrier: 'file', label: 'Project instruction file', ...(file.digest ? { digest: file.digest } : {}),
+    carrier: 'file', label: administrativeScope === 'user' ? 'User instruction file' : 'Project instruction file', ...(file.digest ? { digest: file.digest } : {}),
   });
   const bindingId = bindingIdentity({
     placementId, artifactId, consumerKind: 'host', consumerLabel: hostLabel(file.host),
@@ -220,18 +233,19 @@ function emitInstructionFilePlacement(builder, ctx, { file, projectEntry, locato
     conditions: ['healthy'],
     evidenceScorecard: scorecardFor([
       assertion({
-        subjectId: placementId, field: 'identity', value: true, grade: 'verified', authority: 'project scan',
-        sourceRef: 'projects', capturedAt: new Date(now()).toISOString(),
+        subjectId: placementId, field: 'identity', value: true, grade: 'verified', authority: 'instruction file scan',
+        sourceRef: administrativeScope === 'user' ? 'user-instructions' : 'projects', capturedAt: new Date(now()).toISOString(),
       }),
       assertion({
-        subjectId: placementId, field: 'placement', value: true, grade: 'verified', authority: 'project scan',
-        sourceRef: 'projects', capturedAt: new Date(now()).toISOString(),
+        subjectId: placementId, field: 'placement', value: true, grade: 'verified', authority: 'instruction file scan',
+        sourceRef: administrativeScope === 'user' ? 'user-instructions' : 'projects', capturedAt: new Date(now()).toISOString(),
       }),
     ]),
     displayName: file.name, kind: 'instruction-context-file', consumerHosts: [file.host], technicalDetails,
     versions: file.digest ? { contentDigest: file.digest } : {},
-    extra: { projectKind: projectEntry?.projectKind ?? 'unknown', ...(projectEntry?.repositoryResourceId ? { repositoryId: projectEntry.repositoryResourceId } : {}) },
+    extra: { projectLanguages: projectEntry?.projectLanguages ?? [], projectKind: projectEntry?.projectKind ?? 'unknown', ...(projectEntry?.repositoryResourceId ? { repositoryId: projectEntry.repositoryResourceId } : {}) },
   });
+  if (typeof file.path === 'string' && (path.isAbsolute(file.path) || path.win32.isAbsolute(file.path))) builder.locate(placementId, { path: file.path });
   return placementId;
 }
 

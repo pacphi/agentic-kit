@@ -114,13 +114,14 @@ test('J1: row action for Lightpanda is "Open procedure", never generic Fix/Revie
   assert.equal(isProhibitedLabel(row.rowAction.label), false);
 });
 
-test('J1: "can-apply" curated view surfaces only the plugin placement, with a specific verb label', () => {
+test('"can-apply" excludes optional disabling of an otherwise installed plugin', () => {
   const inventory = SENTINEL_FIXTURES.base();
   const page = runInventoryQuery(inventory, { view: 'can-apply' });
-  assert.equal(page.total, 1);
-  const row = page.groups[0].placements[0];
-  assert.equal(row.displayName, 'frontend-design');
-  assert.equal(row.rowAction.label, 'Disable plugin');
+  assert.equal(page.total, 0);
+  const all = runInventoryQuery(inventory, {});
+  const row = all.groups.flatMap((group) => group.placements).find((entry) => entry.displayName === 'frontend-design');
+  assert.equal(row.guidanceLane, null);
+  assert.equal(row.rowAction.label, 'Open details');
 });
 
 // ── J2: shared skill is one artifact, one placement, two consumer bindings ─
@@ -322,7 +323,7 @@ test('guidance-first sort places recovery/apply/steps/decision/update ahead of h
   const inventory = SENTINEL_FIXTURES.base();
   const page = runInventoryQuery(inventory, { sort: 'guidance-first', limit: 200 });
   const order = page.groups.flatMap((g) => g.placements.map((p) => p.displayName));
-  assert.ok(order.indexOf('frontend-design') < order.indexOf('clarity'));
+  assert.ok(order.indexOf('Lightpanda') < order.indexOf('clarity'));
 });
 
 test('two identical queries against one inventory produce byte-identical group ordering', () => {

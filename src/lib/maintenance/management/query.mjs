@@ -6,7 +6,9 @@
 // placement's `guidanceLane` (set upstream by `guidance.mjs`). An index is
 // built once per inventory object (cached in a WeakMap) so repeated queries
 // against one snapshot stay fast even at 50,000 placements.
+import { focusNavigation } from './focus-navigation.mjs';
 import { PROJECT_KINDS } from '../../footprint/project-kind.mjs';
+import { recommendationEntries, normalizeGuidanceInventory } from './guidance-purpose.mjs';
 import {
   ADMINISTRATIVE_SCOPES, CARRIER_KINDS, CURATED_VIEWS, FACETS, GUIDANCE_LANE_LABELS,
   INVENTORY_GROUP_LABELS, INVENTORY_GROUP_ORDER, MANAGEMENT_QUERY_SCHEMA, RESOURCE_KIND_LABELS,
@@ -122,7 +124,7 @@ function buildIndex(inventory) {
   );
   return {
     inventory, placementsById, resourcesById, artifactsById, environmentsById, searchText,
-    guidanceByPlacement: groupByKey(inventory.guidanceEntries, (g) => g.placementId),
+    guidanceByPlacement: groupByKey(recommendationEntries(inventory.guidanceEntries), (g) => g.placementId),
     conflictsByPlacement: buildConflictsByPlacement(inventory),
     provenanceByPlacement: groupByKey(inventory.provenanceAssertions, (a) => a.subjectId),
     versionObsByPlacement: groupByKey(inventory.versionObservations, (v) => v.subjectId),
@@ -385,11 +387,14 @@ function rowActionFor(placement, index) {
 }
 
 function buildPlacementRow(placement, index) {
+  const description = Object.hasOwn(placement, 'description') ? placement.description : index.resourcesById.get(placement.resourceId)?.description;
   return {
     placementId: placement.placementId,
     projectId: placement.projectId ?? null,
     ...(placement.projectId ? { projectKind: PROJECT_KINDS.includes(placement.projectKind) ? placement.projectKind : 'unknown' } : {}),
     displayName: placement.displayName,
+    ...(index.resourcesById.get(placement.resourceId)?.installationSource ? { installationSource: index.resourcesById.get(placement.resourceId).installationSource } : {}),
+    ...(description ? { description } : {}),
     kind: placement.kind,
     scope: {
       value: placement.administrativeScope,
@@ -507,18 +512,22 @@ function projectFacetLabels(index, projectIds) {
   for (const projectId of projectIds) {
     const placements = index.placementsByProjectId.get(projectId);
     if (!placements) continue;
-    const breadcrumbs = placements.map((placement) => placement.locationBreadcrumb ?? []);
+    // A single installation's location cannot identify the project root.
+    // Prefer measured project breadcrumbs; older snapshots keep the fallback.
+    const projectBreadcrumbs = placements.map((placement) => placement.projectBreadcrumb).filter(Array.isArray);
+    const breadcrumbs = projectBreadcrumbs.length ? projectBreadcrumbs : placements.map((placement) => placement.locationBreadcrumb ?? []);
     const label = longestCommonBreadcrumb(breadcrumbs).join(' › ');
     if (label) labels[projectId] = label;
   }
   return labels;
 }
 
-function buildFacetLabels(index, facetCounts) {
+function buildFacetLabels(index, facetCounts, selectedFacets = {}) {
+  const keys = (facet) => [...new Set([...(selectedFacets[facet] ?? []), ...Object.keys(facetCounts[facet] ?? {})])];
   return {
-    family: Object.fromEntries(Object.keys(facetCounts.family ?? {}).map((id) => [id, index.placementsByFamily.get(id)?.[0]?.displayName ?? 'Resource'])),
-    environment: environmentFacetLabels(index, Object.keys(facetCounts.environment ?? {})),
-    project: projectFacetLabels(index, Object.keys(facetCounts.project ?? {})),
+    family: Object.fromEntries(keys('family').map((id) => [id, index.placementsByFamily.get(id)?.[0]?.displayName ?? 'Resource'])),
+    environment: environmentFacetLabels(index, keys('environment')),
+    project: projectFacetLabels(index, keys('project')),
   };
 }
 
@@ -558,6 +567,22 @@ function clampLimit(limit) {
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
+function validateQueryOptions({ scope, view, sort, presentation, includeWorktrees }) {
+  if (!SCOPE_LENSES.includes(scope)) throw new TypeError(`invalid inventory query scope: ${scope}`);
+  if (!CURATED_VIEWS.includes(view)) throw new TypeError(`invalid inventory query view: ${view}`);
+  if (!SORT_ORDERS.includes(sort)) throw new TypeError(`invalid inventory query sort: ${sort}`);
+
+  if (!['flat', 'focus'].includes(presentation)) throw new TypeError('invalid inventory query presentation');
+  if (typeof includeWorktrees !== 'boolean') throw new TypeError('includeWorktrees must be a boolean');
+}
+
+function projectKindsFor(index, facetCounts) {
+  return Object.fromEntries(Object.keys(facetCounts.project ?? {}).map((id) => {
+    const kinds = new Set((index.placementsByProjectId.get(id) ?? []).map((p) => PROJECT_KINDS.includes(p.projectKind) ? p.projectKind : 'unknown'));
+    return [id, kinds.size === 1 ? [...kinds][0] : 'unknown'];
+  }));
+}
+
 /**
  * Query a privacy-projected ManagementInventory. Pure and synchronous; never
  * mutates `inventory`. Throws `TypeError` for an invalid scope/view/sort and
@@ -565,14 +590,12 @@ function clampLimit(limit) {
  * to a different inventory generation (MNT-PERF-003).
  */
 export function runInventoryQuery(inventory, params = {}) {
+  inventory = normalizeGuidanceInventory(inventory);
   const {
     scope = 'across', view = 'all', facets: rawFacets = {}, search = '',
-    sort = 'guidance-first', cursor = null, limit = 50,
+    sort = 'guidance-first', cursor = null, limit = 50, presentation = 'flat', includeWorktrees = false,
   } = params ?? {};
-  if (!SCOPE_LENSES.includes(scope)) throw new TypeError(`invalid inventory query scope: ${scope}`);
-  if (!CURATED_VIEWS.includes(view)) throw new TypeError(`invalid inventory query view: ${view}`);
-  if (!SORT_ORDERS.includes(sort)) throw new TypeError(`invalid inventory query sort: ${sort}`);
-
+  validateQueryOptions({ scope, view, sort, presentation, includeWorktrees });
   const index = getIndex(inventory);
   const appliedFacets = normalizeFacets(rawFacets);
   const clampedLimit = clampLimit(limit);
@@ -588,21 +611,34 @@ export function runInventoryQuery(inventory, params = {}) {
   const ordered = [...families.values()].flat();
   const total = ordered.length;
   const pageIds = ordered.slice(offset, offset + clampedLimit);
-  const nextCursor = offset + pageIds.length < total
+  let nextCursor = offset + pageIds.length < total
     ? encodeCursor(inventory.inventoryId, offset + pageIds.length)
     : undefined;
 
+  const facetLabels = buildFacetLabels(index, facetCounts, appliedFacets);
+  const projectKinds = projectKindsFor(index, facetCounts);
+  let navigation;
+  if (presentation === 'focus') {
+    navigation = focusNavigation({ scope, facets: appliedFacets,
+      placements: ranked.map((id) => index.placementsById.get(id)), resourcesById: index.resourcesById,
+      projectLabels: facetLabels.project, projectKinds, includeWorktrees,
+      initial: scope === 'across' && view === 'all' && !search.trim() && !Object.keys(appliedFacets).length,
+    });
+    if (navigation.level !== 'installation') {
+      const allNodes = navigation.nodes;
+      navigation = { ...navigation, nodes: allNodes.slice(offset, offset + clampedLimit) };
+      nextCursor = offset + navigation.nodes.length < allNodes.length
+        ? encodeCursor(inventory.inventoryId, offset + navigation.nodes.length) : undefined;
+    }
+  }
   return {
     schema: MANAGEMENT_QUERY_SCHEMA,
     inventoryId: inventory.inventoryId,
     total,
-    groups: buildGroups(pageIds, index),
+    groups: navigation && navigation.level !== 'installation' ? [] : buildGroups(pageIds, index),
+    ...(navigation ? { navigation } : {}),
     facetCounts,
-    facetLabels: buildFacetLabels(index, facetCounts),
-    projectKinds: Object.fromEntries(Object.keys(facetCounts.project ?? {}).map((id) => {
-      const kinds = new Set((index.placementsByProjectId.get(id) ?? []).map((p) => PROJECT_KINDS.includes(p.projectKind) ? p.projectKind : 'unknown'));
-      return [id, kinds.size === 1 ? [...kinds][0] : 'unknown'];
-    })),
+    facetLabels, projectKinds,
     ...(nextCursor ? { nextCursor } : {}),
     sortGroups: sortGroupSummary(finalMatches, index),
     partialSources: partialSources(inventory),

@@ -259,7 +259,7 @@ export const LIMITING_REASONS = Object.freeze([
   'source-changed', 'io-failure',
 ]);
 export const SCAN_CHECKPOINT_SCHEMA = 'maintenance-scan-checkpoint/v1';
-export const SCAN_HISTORY_RETENTION = Object.freeze({ maxSummaries: 32, maxAgeDays: 90, checkpointDays: 7 });
+export const SCAN_HISTORY_RETENTION = Object.freeze({ maxSummaries: 10, maxAgeDays: 90, checkpointDays: 7 });
 export const SCAN_HISTORY_FLOORS = Object.freeze({ minSummaries: 1, minAgeDays: 1 });
 
 // ── Recovery audit ─────────────────────────────────────────────────────────
@@ -449,6 +449,7 @@ function assertPlacement(entry, field, ids) {
 }
 
 function assertGuidance(entry, field, ids) {
+  if (entry.purpose != null && !['recommendation', 'optional-management'].includes(entry.purpose)) fail(`${field}.purpose`, 'must identify a recommendation or optional management action');
   if (!isOpaqueId(entry.guidanceId, 'gid')) fail(`${field}.guidanceId`, 'must be an opaque guidance id');
   if (!ids.placements.has(entry.placementId)) fail(`${field}.placementId`, 'must reference a placement in this inventory');
   if (!GUIDANCE_LANES.includes(entry.lane)) fail(`${field}.lane`, 'must be a guidance lane');

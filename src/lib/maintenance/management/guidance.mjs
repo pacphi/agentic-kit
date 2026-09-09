@@ -16,6 +16,9 @@ import {
 } from './model.mjs';
 import { findCompatibleRecipes } from './recipes.mjs';
 import { UNFINISHED_MAINTENANCE_STATUSES } from '../transaction-store.mjs';
+import { isOptionalManagement, recommendationEntries, normalizeGuidanceInventory } from './guidance-purpose.mjs';
+import { inspectorRelationships } from './inspector-relationships.mjs';
+import { guidanceCoverage } from './guidance-coverage.mjs';
 
 const DEPENDENCY_EDGE_KINDS = Object.freeze([
   'requires-executable', 'requires-runtime', 'requires-provider', 'requires-credential',
@@ -526,7 +529,7 @@ function finalizeEntry(candidate, installationKey) {
   const warning = candidate.impact?.irreversible
     ? { impact: candidate.impact.summary, containmentChoice: 'snooze' }
     : undefined;
-  return { guidanceId, ...candidate, ...(warning ? { warning } : {}) };
+  return { guidanceId, ...candidate, ...(isOptionalManagement(candidate) ? { purpose: 'optional-management' } : {}), ...(warning ? { warning } : {}) };
 }
 
 function primaryLane(entries) {
@@ -586,17 +589,19 @@ export function admitGuidance({
   const suppressed = suppressedIdentities(dispositions);
   const admitted = finalized.filter((entry) => !suppressed.has(entry.dispositionIdentity));
 
-  const byPlacement = groupByPlacementId(admitted);
+  const recommendations = recommendationEntries(admitted);
+  const byPlacement = groupByPlacementId(recommendations);
   const nextPlacements = inventory.placements.map((placement) => ({
     ...placement, guidanceLane: primaryLane(byPlacement.get(placement.placementId)),
   }));
   const nextInventory = { ...inventory, placements: nextPlacements, guidanceEntries: admitted };
+  nextInventory.guidanceCoverage = guidanceCoverage(nextInventory, providers, detections);
 
   const lanes = { apply: [], steps: [], decision: [], update: [], recovery: [] };
-  for (const entry of admitted) lanes[entry.lane].push(entry);
+  for (const entry of recommendations) lanes[entry.lane].push(entry);
   const counts = {
     apply: lanes.apply.length, steps: lanes.steps.length, decision: lanes.decision.length,
-    update: lanes.update.length, recovery: lanes.recovery.length, total: admitted.length,
+    update: lanes.update.length, recovery: lanes.recovery.length, total: recommendations.length,
   };
 
   return { inventory: nextInventory, lanes, counts };
@@ -655,12 +660,15 @@ function historyFor(placement, receipts, dispositions, coverage, inventory) {
  * @param {{ guidance?: any, receipts?: any[], dispositions?: any[], coverage?: any[] }} [ctx]
  */
 export function inspectorFor(inventory, placementId, { guidance, receipts = [], dispositions = [], coverage } = /** @type {any} */ ({})) {
+  inventory = normalizeGuidanceInventory(inventory);
   const placement = inventory.placements.find((p) => p.placementId === placementId);
   if (!placement) throw new TypeError(`unknown placement: ${placementId}`);
   const allEntries = Array.isArray(guidance) ? guidance : (guidance?.guidanceEntries ?? inventory.guidanceEntries ?? []);
-  const entries = allEntries.filter((entry) => entry.placementId === placementId);
+  const entries = allEntries.filter((entry) => entry.placementId === placementId)
+    .map((entry) => isOptionalManagement(entry) ? { ...entry, purpose: 'optional-management' } : entry);
 
   return {
+    relationships: inspectorRelationships(inventory, placement),
     whatIsThis: {
       displayName: placement.displayName, kind: placement.kind, kindLabel: RESOURCE_KIND_LABELS[placement.kind],
       placementId, environmentId: placement.environmentId, conditions: [...placement.conditions],

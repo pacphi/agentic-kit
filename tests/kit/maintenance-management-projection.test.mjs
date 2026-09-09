@@ -1207,3 +1207,13 @@ test('ranked local storage retains its measured path only in private locator evi
   assert.equal(result.privateLocators.get(row.placementId).path, '/private/cache/huggingface');
   assert.ok(!JSON.stringify(result.inventory).includes('/private/cache/huggingface'));
 });
+
+test('measured executable locations stay private and prefer the launcher over the package root', () => {
+  for (const executablePath of ['/opt/homebrew/bin/vibium', '/usr/local/bin/vibium', 'C:\\Tools\\vibium.cmd']) {
+    const { inventory, privateLocators } = invoke({ footprint: { install: { tools: [
+      { tool: 'vibium', present: true, executablePath, root: '/packages/vibium' },
+    ] } } });
+    assert.equal(privateLocators.get(inventory.placements[0].placementId).path, executablePath);
+    assert.ok(!JSON.stringify(inventory).includes(executablePath));
+  }
+});

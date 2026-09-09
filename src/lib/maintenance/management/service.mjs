@@ -1,8 +1,7 @@
 // ADR-0048 Maintenance management facade (agent I). Composes P's projection,
 // Q's query/guidance/activity/discovery-adjacent stores, D's discovery
 // slice, and T's transaction engine into the ONE object the dashboard API
-// and CLI code against (docs/design/maintenance-overhaul/ "Compatibility and
-// rollback": the facade is the seam that keeps those callers stable while
+// and CLI code against (docs/MAINTENANCE.md "Compatibility surface": the facade is the seam that keeps those callers stable while
 // the slices underneath evolve).
 //
 // Every method group lives in its own `service-*.mjs` helper module so each

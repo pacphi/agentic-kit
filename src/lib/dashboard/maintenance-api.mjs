@@ -453,9 +453,10 @@ const PROVIDER = T.obj({ id: T.text(80), version: T.text(40) });
 const COVERAGE = T.obj({
   sourceId: ID, environmentId: ID, state: T.oneOf(SOURCE_COVERAGE_STATES), label: LABEL, visited: T.int, estimated: T.int,
   limitingReason: T.oneOf(LIMITING_REASONS), ceiling: T.oneOf(SAFETY_CEILINGS), completedPartitions: T.int, pendingPartitions: T.int,
-  lastCompletedAt: STAMP,
+  lastCompletedAt: STAMP, filesystem: T.bool,
 });
 const ROW = T.obj({
+  installationSource: LABEL, description: T.text(1024),
   placementId: ID, projectId: ID, projectKind: T.oneOf(['git','folder','worktree','unknown']), displayName: LABEL, kind: T.oneOf(RESOURCE_KINDS),
   scope: T.obj({ value: T.oneOf(SCOPE_LENSES), label: LABEL, icon: T.text(32) }),
   breadcrumb: T.list(T.text(120), 16), versions: T.dict(T.text(120), 20),
@@ -478,6 +479,9 @@ const PARTIAL_SOURCES = T.either(T.list(COVERAGE, 100), T.obj({
   action: T.oneOf(['remeasure', 'discovery']), narrative: T.label(1000), entries: T.list(COVERAGE, 50),
 }));
 const INVENTORY_PAGE = T.obj({
+  navigation: T.obj({ level: T.oneOf(['scope', 'project', 'kind', 'resource', 'installation']),
+    nodes: T.list(T.obj({ value: T.token(128), label: LABEL, installationSource: LABEL, description: T.text(1024), descriptionSource: LABEL, languages: T.list(T.obj({ id: T.token(64), name: LABEL, icon: T.text(8), evidence: T.oneOf(['source','artifact']) }), 100), count: T.int, kind: T.oneOf(RESOURCE_KINDS), projectKind: T.oneOf(['git', 'folder', 'worktree', 'unknown']) }), MAX_PAGE_ROWS),
+  }),
   scanRequired: T.bool, lastRefresh: LAST_REFRESH, schema: T.text(80), inventoryId: ID, total: T.int, groups: T.list(GROUP, MAX_PAGE_ROWS),
   facetCounts: T.dict(T.dict(T.int, 500), 16), nextCursor: T.text(512),
   projectKinds: T.idDict('prj', T.oneOf(['git','folder','worktree','unknown']), 500),
@@ -487,6 +491,7 @@ const INVENTORY_PAGE = T.obj({
 });
 const CHOICE = T.obj({ choiceId: T.text(64), label: LABEL, changes: T.text(300), keeps: T.text(300), grounded: T.bool, reason: T.text(300) });
 const GUIDANCE_ENTRY = T.obj({
+  purpose: T.oneOf(['recommendation', 'optional-management']),
   guidanceId: ID, placementId: ID, lane: T.oneOf(GUIDANCE_LANES), outcome: LABEL, verb: T.oneOf(ACTION_VERBS),
   verifiedPremises: T.list(T.text(80), 20),
   impact: T.obj({
@@ -500,7 +505,16 @@ const DISPOSITION = T.obj({
   dispositionId: ID, guidanceId: ID, placementId: ID, dispositionIdentity: T.text(300), kind: T.oneOf(DISPOSITION_KINDS), kindLabel: LABEL,
   until: STAMP, recordedAt: STAMP, invalidatedAt: STAMP, invalidationReason: T.oneOf(DISPOSITION_INVALIDATIONS),
 });
+const RELATION_TARGET = T.obj({ placementId: ID, displayName: LABEL, kind: T.oneOf(RESOURCE_KINDS),
+  scope: T.oneOf(ADMINISTRATIVE_SCOPES), projectId: ID, consumerHosts: T.list(T.text(32), 8) });
+const RELATION_EDGE = T.obj({ edgeId: ID, kind: T.oneOf(DEPENDENCY_KINDS), requirement: LABEL, satisfied: T.bool, target: RELATION_TARGET });
 const INSPECTOR = T.obj({
+  relationships: T.obj({
+    consumers: T.list(T.obj({ label: LABEL, kind: T.oneOf(CONSUMER_KINDS), enabled: T.bool }), 200),
+    providedBy: T.list(RELATION_TARGET, 200), includes: T.list(RELATION_TARGET, 200),
+    dependencies: T.list(RELATION_EDGE, 200), dependents: T.list(RELATION_EDGE, 200),
+    otherInstallations: T.list(RELATION_TARGET, 200), originStatus: T.oneOf(['recorded', 'not-established']), truncated: T.bool,
+  }),
   scanRequired: T.bool,
   whatIsThis: T.obj({
     displayName: LABEL, kind: T.oneOf(RESOURCE_KINDS), kindLabel: LABEL, placementId: ID, environmentId: ID,
@@ -528,6 +542,9 @@ const INSPECTOR = T.obj({
   }),
 });
 const GUIDANCE = T.obj({
+  coverage: T.list(T.obj({ host: T.text(80), label: LABEL, placements: T.int, recommendations: T.int, optionalActions: T.int,
+    actionKinds: T.list(LABEL, 30),
+    actionStatus: T.oneOf(['checked', 'incomplete', 'unavailable', 'not-checked', 'unsupported']), actionStatusLabel: LABEL }), 50),
   scanRequired: T.bool, lastRefresh: LAST_REFRESH,
   lanes: T.obj(Object.fromEntries(GUIDANCE_LANES.map((lane) => [lane, T.list(GUIDANCE_ENTRY, 200)]))),
   counts: T.obj(Object.fromEntries([...GUIDANCE_LANES, 'total'].map((lane) => [lane, T.int]))),
@@ -617,7 +634,7 @@ const ACTIVITY = T.obj({
   recipes: T.list(T.obj({
     kind: T.text(40), recipeId: T.text(120), recipeVersion: T.text(40), at: STAMP, pendingIds: T.list(T.text(120), 100),
   }), 100),
-  scans: T.list(SCAN_SUMMARY, 200),
+  scans: T.list(SCAN_SUMMARY, 200), scanHistory: T.list(SCAN_SUMMARY, 200),
 });
 function receiptDetailSchema(str) {
   return T.obj({

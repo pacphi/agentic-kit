@@ -40,9 +40,14 @@ import { MNT, mntKindLabel } from './maintenance-workspace.mjs';
     if(inheritedHost)crumbs=crumbs.filter(function(crumb){return crumb.toLowerCase()!==inheritedHost;});
     var context=crumbs.join(' › ');
     if(MNT.scope==='across')context=(row.scope.label||'')+(context?' · '+context:'');
-    var hosts=(row.consumerHosts||[]).filter(function(host){return host.toLowerCase()!==inheritedHost;}).join(', ');
-    if(hosts&&(!crumbs.some(function(crumb){return crumb.toLowerCase()===hosts.toLowerCase();})||hosts.indexOf(',')>=0))context+=(context?' · ':'')+'Used by '+hosts;
     return context;
+  }
+  export function mntAvailableTo(row){
+    var labels={claude:'Claude',codex:'Codex',opencode:'OpenCode',hermes:'Hermes','agentic-kit':'Agentic Kit'};
+    var hosts=Array.from(new Set((row.consumerHosts||[]).map(function(host){return host.toLowerCase();})))
+      .map(function(host){return labels[host]||host;});
+    if(!hosts.length)return '';
+    return 'Available to '+(hosts.length<2?hosts[0]:hosts.slice(0,-1).join(', ')+' and '+hosts[hosts.length-1]);
   }
   function renderMntVersions(row){
     var v=row.versions||{},pieces=[];
@@ -56,7 +61,7 @@ import { MNT, mntKindLabel } from './maintenance-workspace.mjs';
     var context=mntRowContext(row),version=renderMntVersions(row);
     if(showCarrier&&row.carrier&&row.carrier.label&&context.toLowerCase().indexOf(row.carrier.label.toLowerCase())<0)context+=(context?' · ':'')+row.carrier.label;
     var title=single?row.displayName:context||row.displayName;
-    var subtitle=single?context:version;
+    var subtitle=[single?context:'',mntAvailableTo(row),single?'':version].filter(Boolean).join(' · ');
     var kindShown=!(MNT.facets.kind&&MNT.facets.kind.length===1);
     return '<li><button type="button" class="mnt-row'+(selected?' selected':'')+'" data-mnt-plc="'+esc(row.placementId)
       +'" tabindex="'+(rowIndex===0?'0':'-1')+'" aria-controls="mnt-inspector" aria-expanded="'+selected+'"'
@@ -92,7 +97,7 @@ import { MNT, mntKindLabel } from './maintenance-workspace.mjs';
     }catch(e){}
   }
   function mntGroupExpanded(group){
-    var remembered=mntGroupExpandedMap()[group.presentationKey||group.resourceId];
+    var remembered=mntGroupExpandedMap()[group.disclosureKey||group.presentationKey||group.resourceId];
     if(typeof remembered==="boolean")return remembered;
     return group.placements.some(function(row){return !!row.guidanceLane;});
   }
@@ -107,7 +112,7 @@ import { MNT, mntKindLabel } from './maintenance-workspace.mjs';
       return html;
     }).join("");
     var toggle=overLimit
-      ?'<button type="button" class="mt-action mnt-group-toggle" data-mnt-group-toggle="'+esc(group.presentationKey||group.resourceId)
+      ?'<button type="button" class="mt-action mnt-group-toggle" data-mnt-group-toggle="'+esc(group.disclosureKey||group.presentationKey||group.resourceId)
         +'" aria-expanded="'+(expanded?"true":"false")+'">'
         +(expanded?"Show fewer":"Show "+esc(group.placements.length-visible.length)+" more")+"</button>"
       :"";
@@ -116,9 +121,8 @@ import { MNT, mntKindLabel } from './maintenance-workspace.mjs';
     return '<li class="mnt-group"><div class="mnt-group-head">'+mntIcon(group.kind)
       +'<span class="mnt-group-name">'+esc(group.displayName)+'</span>'
       +(kindShown?'<span class="mnt-group-kind">'+esc(mntKindLabel(group.kind))+'</span>':'')
-      +'<span class="mnt-group-counts">'+esc(group.placementCount)+' installations in these results</span>'
-      +(group.knownHosts&&group.knownHosts.length?'<span class="mnt-group-counts">Hosts: '+esc(group.knownHosts.map(function(h){return h==='claude'?'Claude':h==='codex'?'Codex':h==='opencode'?'OpenCode':h;}).join(', '))+(group.knownPlacementCount>group.placements.length?' · '+esc(group.knownPlacementCount)+' known installations':'')+'</span>':'')
-      +(group.knownPlacementCount>group.placements.length&&(MNT.view!=='all'||MNT.scope!=='across'||Object.keys(MNT.facets||{}).some(function(f){return f!=='family';}))?'<button type="button" class="mt-action" data-mnt-family="'+esc(group.presentationKey||group.resourceId)+'">Show all installations</button>':'')
+      +'<span class="mnt-group-counts">'+esc(group.placementCount)+(group.placementCount===1?' installation':' installations')+(mntProjectContext?' in this project':' in these results')+'</span>'
+      +(group.knownPlacementCount>group.placements.length&&(MNT.view!=='all'||MNT.scope!=='across'||MNT.search||Object.keys(MNT.facets||{}).some(function(f){return f!=='family';}))?'<button type="button" class="mt-action" data-mnt-family="'+esc(group.presentationKey||group.resourceId)+'" aria-label="View all '+esc(group.knownPlacementCount)+' installations of '+esc(group.displayName)+' across scopes">View all '+esc(group.knownPlacementCount)+' installations</button>':'')
       +'</div><ul class="mnt-placements">'+rowsHtml+'</ul>'+toggle+'</li>';
   }
 
@@ -131,7 +135,7 @@ import { MNT, mntKindLabel } from './maintenance-workspace.mjs';
       group.placements.forEach(function(row){var key=row.projectId||'';if(!rows.has(key))rows.set(key,[]);rows.get(key).push(row);});
       rows.forEach(function(placements,key){
         if(!projects.has(key))projects.set(key,[]);
-        projects.get(key).push(Object.assign({},group,{presentationKey:(group.presentationKey||group.resourceId)+':'+key,placements:placements,placementCount:placements.length}));
+        projects.get(key).push(Object.assign({},group,{disclosureKey:(group.presentationKey||group.resourceId)+':'+key,placements:placements,placementCount:placements.length}));
       });
     });
     var html='';

@@ -903,14 +903,16 @@ ${LIVE_HTML}
               <div class="mnt-main">
                 <div class="mnt-results-heading"><div><h3 id="mnt-context-heading">Across scopes</h3><span id="mnt-result-count"></span></div>
                   <label class="mnt-sort">Sort <select id="mnt-sort" aria-label="Sort inventory"><option value="guidance-first">Guidance first</option><option value="name">Name</option><option value="kind">Type</option><option value="recently-changed">Recently changed</option></select></label></div>
+                <nav class="mnt-breadcrumbs" id="mnt-breadcrumbs" aria-label="Inventory location"></nav>
                 <div class="mnt-chips" id="mnt-chips"></div>
+                <p class="mnt-focus-help" id="mnt-focus-help"></p>
                 <div class="mnt-partial" id="mnt-partial" role="status" hidden></div>
                 <div class="mnt-legend" id="mnt-legend"></div>
                 <a id="mnt-results-start" tabindex="-1"></a>
                 <div class="mnt-results" id="mnt-results" role="region" aria-label="Inventory results"></div>
                 <div class="mnt-paging" id="mnt-paging"></div>
+                <aside class="mnt-inspector" id="mnt-inspector" aria-label="Resource inspector" hidden></aside>
               </div>
-              <aside class="mnt-inspector" id="mnt-inspector" aria-label="Resource inspector" hidden></aside>
             </div>
             <dialog class="mnt-facets-sheet" id="mnt-facets-sheet" aria-labelledby="mnt-facets-sheet-title">
               <div class="mt-confirm-head">
@@ -924,10 +926,9 @@ ${LIVE_HTML}
           <section class="mnt-panel mnt-guidance" id="mnt-panel-guidance" role="tabpanel" aria-labelledby="mnt-tab-guidance" hidden>
             <div class="mnt-toolbar">
               <div class="mnt-lanes" role="tablist" aria-label="Guidance lanes" id="mnt-lanes"></div>
-              <label class="sr-only" for="mnt-guidance-kind">Filter by resource type</label>
-              <select id="mnt-guidance-kind"><option value="">All resource types</option></select>
             </div>
             <p class="mnt-status" id="mnt-guidance-status" role="status" aria-live="polite" aria-atomic="true"></p>
+            <div id="mnt-guidance-coverage"></div>
             <div class="mnt-guidance-body">
               <div class="mnt-guidance-list" id="mnt-guidance-list"></div>
             </div>
@@ -957,7 +958,6 @@ ${LIVE_HTML}
               </div>
               <aside aria-label="Scan progress" id="mnt-scan-progress"></aside>
             </div>
-            <section aria-label="Scan history" id="mnt-scan-history"></section>
             <dialog class="mt-confirm" id="mnt-stop-dialog" aria-labelledby="mnt-stop-title" aria-busy="false">
               <div class="mt-confirm-head">
                 <h2 id="mnt-stop-title">Stop this source?</h2>

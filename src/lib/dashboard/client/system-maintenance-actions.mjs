@@ -10,6 +10,7 @@
 // audited outcome (POST /v2/reconcile/preview → /v2/reconcile). Authorization
 // is intentionally closure-local and short-lived — never add a persistence
 // adapter, data attribute, query parameter, or debug renderer for it.
+import { formatLocalDateTimeLong } from './datetime.mjs';
 import { mntWritesBlocked } from './maintenance-operation.mjs';
 import { authHeaders, esc } from './bootstrap.mjs';
 import { mntAge, mntFact, mntRefreshActiveDestination, mntText, mntValue } from './maintenance-workspace.mjs';
@@ -58,7 +59,7 @@ import { mntAge, mntFact, mntRefreshActiveDestination, mntText, mntValue } from 
   function maintExpiryText(plan){
     var raw=mntText(plan&&plan.expiresAt),at=Date.parse(raw);
     if(!Number.isFinite(at))return "This preview expires. Reopen it before confirming if its evidence changes.";
-    return "Valid until "+new Date(at).toLocaleString()+". Reopen the preview if it expires or the evidence changes.";
+    return "Valid until "+(formatLocalDateTimeLong(at)||"time unknown")+". Reopen the preview if it expires or the evidence changes.";
   }
   function maintConfirmationHtml(operation){
     var confirmation=operation.confirmation&&typeof operation.confirmation==="object"?operation.confirmation:{};

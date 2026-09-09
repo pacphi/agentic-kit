@@ -7,7 +7,7 @@ import test from 'node:test';
 
 import {
   createMaintenanceDashboardApi, publicActivity, publicAuditResults, publicDiscovery, publicGuidance, publicInspector,
-  publicInventoryPage, publicMaintenanceModel, publicProcedure, publicReceiptExport,
+  publicInventoryPage, publicMaintenanceModel, publicProcedure, publicReceiptExport, publicScanProgress,
 } from '../../src/lib/dashboard/maintenance-api.mjs';
 import { createMaintenanceCapabilityStore } from '../../src/lib/dashboard/maintenance-security.mjs';
 import { buildActivity, exportReceipt, receiptDetail } from '../../src/lib/maintenance/management/activity.mjs';
@@ -601,7 +601,7 @@ test('v2 inventory projection keeps the nine inspector sections and the page env
   ]);
   const inspector = publicInspector(inspectorFor(inventory, PLACEMENT));
   assert.deepEqual(Object.keys(inspector).sort(), [
-    'whatCanIAccomplish', 'whatChangedOrConflicts', 'whatHappenedBefore', 'whatIsThis', 'whatProvesThis', 'whatVersionIsHere', 'whereIsIt', 'whoUsesIt',
+    'relationships', 'whatCanIAccomplish', 'whatChangedOrConflicts', 'whatHappenedBefore', 'whatIsThis', 'whatProvesThis', 'whatVersionIsHere', 'whereIsIt', 'whoUsesIt',
   ]);
   assert.equal(inspector.whatCanIAccomplish.length, 2);
   assert.equal(inspector.whatCanIAccomplish[1].choices.length, 4);
@@ -861,4 +861,22 @@ test('partialSources projects the structured disclosure over the incomplete fixt
   assert.equal('extra' in hostile.stopped, false);
   assert.equal(hostile.entries.length, 50);
   assert.equal(hostile.entries[0].label, 'Seen [local path omitted]');
+});
+
+test('discovery and scan polling preserve non-filesystem classification through the public API', () => {
+  const coverage = [
+    { sourceId: SOURCE, state: 'complete', label: 'Claude', filesystem: true },
+    { sourceId: 'runtimes', state: 'not-scanned', label: 'Runtimes', filesystem: false },
+  ];
+  for (const payload of [publicDiscovery({ coverage }), publicScanProgress({ coverage })]) {
+    assert.deepEqual(payload.coverage.map((row) => row.filesystem), [true, false]);
+  }
+});
+
+test('public activity retains historical scans as well as latest source summaries', () => {
+  const scans = [{ sourceId: SOURCE, state: 'complete', completedAt: '2026-09-08T23:00:00Z' }];
+  const history = [...scans, { ...scans[0], completedAt: '2026-09-07T23:00:00Z' }];
+  const payload = publicActivity({ scans, scanHistory: history });
+  assert.equal(payload.scans.length, 1);
+  assert.equal(payload.scanHistory.length, 2);
 });

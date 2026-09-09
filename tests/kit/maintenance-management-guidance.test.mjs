@@ -65,11 +65,12 @@ function claudePluginDetections({ enabled = true } = {}) {
 }
 
 function admit(inventory, overrides = {}) {
-  return admitGuidance({
+  const result = admitGuidance({
     inventory: stripped(inventory), providers: new Map(), detections: new Map(),
     receipts: [], recipes: BUILTIN_RECIPES, dispositions: [], mutationBlocks: [],
     now: () => new Date(FIXTURE_NOW), installationKey: FIXTURE_KEY, ...overrides,
   });
+  return { ...result, actions: result.inventory.guidanceEntries.filter((entry) => entry.lane === 'apply') };
 }
 
 // ── Basic contract ───────────────────────────────────────────────────────────
@@ -182,12 +183,14 @@ function ollamaContext(activeSecond = true) {
   };
 }
 
-test('J6: the inactive model admits an apply/remove entry with irreversible+redownload impact and a warning', () => {
-  const { inventory, lanes } = admit(SENTINEL_FIXTURES.models(), ollamaContext());
+test('J6: inactive model removal remains optional with irreversible+redownload impact', () => {
+  const { inventory, actions, counts } = admit(SENTINEL_FIXTURES.models(), ollamaContext());
   const inactive = inventory.placements.find((p) => p.displayName === 'llama3.2:3b');
-  assert.equal(inactive.guidanceLane, 'apply');
-  const entry = lanes.apply.find((e) => e.placementId === inactive.placementId);
+  assert.equal(inactive.guidanceLane, null);
+  assert.equal(counts.apply, 0);
+  const entry = actions.find((e) => e.placementId === inactive.placementId);
   assert.equal(entry.verb, 'remove');
+  assert.equal(entry.purpose, 'optional-management');
   assert.equal(entry.impact.irreversible, true);
   assert.equal(entry.impact.redownloadRequired, true);
   assert.ok(entry.warning);
@@ -201,8 +204,9 @@ test('J6: the active model never admits removal (MNT-MDL-002)', () => {
 });
 
 test('J6: without a registered ollama-model provider, no apply guidance is admitted at all', () => {
-  const { counts } = admit(SENTINEL_FIXTURES.models());
+  const { counts, actions } = admit(SENTINEL_FIXTURES.models());
   assert.equal(counts.apply, 0);
+  assert.equal(actions.length, 0);
 });
 
 // ── J9: remedy-free stays calm evidence ─────────────────────────────────────
@@ -230,21 +234,25 @@ test('J9: inspectorFor a remedy-free placement reports NO_ACTION_REQUESTED_DETAI
 
 // ── Apply lane: claude-plugin ────────────────────────────────────────────────
 
-test('an enabled Claude plugin admits an apply/disable entry with a provider capability id', () => {
-  const { lanes } = admit(SENTINEL_FIXTURES.base(), { providers: new Map([['claude-plugin', claudePluginProvider()]]), detections: claudePluginDetections() });
-  assert.equal(lanes.apply.length, 1);
-  assert.equal(lanes.apply[0].verb, 'disable');
-  assert.match(lanes.apply[0].providerCapabilityId, /^claude-plugin:v1:disable:user$/);
+test('an enabled Claude plugin offers optional disabling without recommending it', () => {
+  const { actions, counts } = admit(SENTINEL_FIXTURES.base(), { providers: new Map([['claude-plugin', claudePluginProvider()]]), detections: claudePluginDetections() });
+  assert.equal(actions.length, 1);
+  assert.equal(actions[0].purpose, 'optional-management');
+  assert.equal(counts.apply, 0);
+  assert.equal(actions[0].verb, 'disable');
+  assert.match(actions[0].providerCapabilityId, /^claude-plugin:v1:disable:user$/);
 });
 
 test('a provider that does not declare the matched operation admits nothing (defense in depth)', () => {
-  const { counts } = admit(SENTINEL_FIXTURES.base(), { providers: new Map([['claude-plugin', claudePluginProvider([])]]), detections: claudePluginDetections() });
+  const { counts, actions } = admit(SENTINEL_FIXTURES.base(), { providers: new Map([['claude-plugin', claudePluginProvider([])]]), detections: claudePluginDetections() });
   assert.equal(counts.apply, 0);
+  assert.equal(actions.length, 0);
 });
 
 test('a disabled plugin never admits an apply/disable entry', () => {
-  const { counts } = admit(SENTINEL_FIXTURES.base(), { providers: new Map([['claude-plugin', claudePluginProvider()]]), detections: claudePluginDetections({ enabled: false }) });
+  const { counts, actions } = admit(SENTINEL_FIXTURES.base(), { providers: new Map([['claude-plugin', claudePluginProvider()]]), detections: claudePluginDetections({ enabled: false }) });
   assert.equal(counts.apply, 0);
+  assert.equal(actions.length, 0);
 });
 
 // ── Mutation blocks (MNT-RCV-009) ───────────────────────────────────────────
@@ -252,45 +260,49 @@ test('a disabled plugin never admits an apply/disable entry', () => {
 test('a mutation block on the exact placement suppresses only its apply-lane entry', () => {
   const { inventory: unblocked } = admit(SENTINEL_FIXTURES.base(), { providers: new Map([['claude-plugin', claudePluginProvider()]]), detections: claudePluginDetections() });
   const pluginPlacementId = unblocked.placements.find((p) => p.displayName === 'frontend-design').placementId;
-  const { counts } = admit(SENTINEL_FIXTURES.base(), {
+  const { counts, actions } = admit(SENTINEL_FIXTURES.base(), {
     providers: new Map([['claude-plugin', claudePluginProvider()]]), detections: claudePluginDetections(),
     mutationBlocks: [{ receiptId: 'mnt-x', placementIds: [pluginPlacementId], environmentId: 'env_x', dependents: [], broad: false }],
   });
   assert.equal(counts.apply, 0);
+  assert.equal(actions.length, 0);
   assert.ok(counts.steps > 0); // unrelated lanes for other placements remain
 });
 
 test('a broad mutation block suppresses apply guidance across its whole environment', () => {
   const base = SENTINEL_FIXTURES.base();
   const environmentId = base.environments[0].environmentId;
-  const { counts } = admit(base, {
+  const { counts, actions } = admit(base, {
     providers: new Map([['claude-plugin', claudePluginProvider()]]), detections: claudePluginDetections(),
     mutationBlocks: [{ receiptId: 'mnt-x', placementIds: [], environmentId, dependents: [], broad: true }],
   });
   assert.equal(counts.apply, 0);
+  assert.equal(actions.length, 0);
 });
 
 // ── Dispositions (MNT-GUD-009) ───────────────────────────────────────────────
 
 test('a snoozed disposition suppresses only its exact matching guidance entry', () => {
   const withApply = admit(SENTINEL_FIXTURES.base(), { providers: new Map([['claude-plugin', claudePluginProvider()]]), detections: claudePluginDetections() });
-  const identity = withApply.lanes.apply[0].dispositionIdentity;
-  const { counts } = admit(SENTINEL_FIXTURES.base(), {
+  const identity = withApply.actions[0].dispositionIdentity;
+  const { counts, actions } = admit(SENTINEL_FIXTURES.base(), {
     providers: new Map([['claude-plugin', claudePluginProvider()]]), detections: claudePluginDetections(),
     dispositions: [{ dispositionIdentity: identity, kind: 'snoozed' }],
   });
   assert.equal(counts.apply, 0);
+  assert.equal(actions.length, 0);
   assert.ok(counts.steps > 0); // Lightpanda's steps entries are untouched
 });
 
 test('an acknowledged disposition does NOT suppress the guidance entry (MNT-GUD-009)', () => {
   const withApply = admit(SENTINEL_FIXTURES.base(), { providers: new Map([['claude-plugin', claudePluginProvider()]]), detections: claudePluginDetections() });
-  const identity = withApply.lanes.apply[0].dispositionIdentity;
-  const { counts } = admit(SENTINEL_FIXTURES.base(), {
+  const identity = withApply.actions[0].dispositionIdentity;
+  const { counts, actions } = admit(SENTINEL_FIXTURES.base(), {
     providers: new Map([['claude-plugin', claudePluginProvider()]]), detections: claudePluginDetections(),
     dispositions: [{ dispositionIdentity: identity, kind: 'acknowledged' }],
   });
-  assert.equal(counts.apply, 1);
+  assert.equal(counts.apply, 0);
+  assert.equal(actions.length, 1);
 });
 
 // ── Update lane (MNT-GUD-004..008; not exercised by any sentinel fixture) ──
@@ -397,7 +409,7 @@ test('no outcome, choice label/reason, or warning text across any fixture combin
 // maintenance-model-removal.test.mjs) — not invented shapes.
 
 test('claude-plugin: an exact ref+scope match is required — a same-name plugin in a DIFFERENT scope never matches (never name-only)', () => {
-  const { counts } = admit(SENTINEL_FIXTURES.base(), {
+  const { counts, actions } = admit(SENTINEL_FIXTURES.base(), {
     providers: new Map([['claude-plugin', claudePluginProvider()]]),
     // Same ref as the fixture's user-scope plugin, but only a PROJECT-scope
     // row is detected — the fixture's placement is user-scope.
@@ -407,6 +419,7 @@ test('claude-plugin: an exact ref+scope match is required — a same-name plugin
     }]]),
   });
   assert.equal(counts.apply, 0);
+  assert.equal(actions.length, 0);
 });
 
 function codexPluginPlacement({ installed = true, enabled = true } = {}) {
@@ -423,28 +436,32 @@ function codexPluginPlacement({ installed = true, enabled = true } = {}) {
 
 test('codex-plugin: an installed plugin admits apply/remove regardless of enabled state (no enabled gate in the real provider)', () => {
   const { inventory, providers, detections } = codexPluginPlacement({ installed: true, enabled: false });
-  const { lanes, counts } = admit(inventory, { providers, detections });
-  assert.equal(counts.apply, 1);
-  assert.equal(lanes.apply[0].verb, 'remove');
-  assert.match(lanes.apply[0].providerCapabilityId, /^codex-plugin:v1:remove:user$/);
+  const { actions, counts } = admit(inventory, { providers, detections });
+  assert.equal(counts.apply, 0);
+  assert.equal(actions.length, 1);
+  assert.equal(actions[0].purpose, 'optional-management');
+  assert.equal(actions[0].verb, 'remove');
+  assert.match(actions[0].providerCapabilityId, /^codex-plugin:v1:remove:user$/);
 });
 
 test('codex-plugin: incomplete detection admits no apply-lane guidance', () => {
   const { inventory, providers } = codexPluginPlacement();
-  const { counts } = admit(inventory, {
+  const { counts, actions } = admit(inventory, {
     providers, detections: new Map([['codex-plugin', { status: 'available', complete: false, plugins: [] }]]),
   });
   assert.equal(counts.apply, 0);
+  assert.equal(actions.length, 0);
 });
 
 test('codex-plugin: a name-equal plugin the host reports as NOT installed never matches (identity, not name, proves eligibility)', () => {
   const { inventory, providers } = codexPluginPlacement({ installed: false });
-  const { counts } = admit(inventory, {
+  const { counts, actions } = admit(inventory, {
     providers, detections: new Map([['codex-plugin', {
       status: 'available', complete: true, plugins: [{ ref: 'demo', version: '1.0.0', installed: false, enabled: false, candidates: [] }],
     }]]),
   });
   assert.equal(counts.apply, 0);
+  assert.equal(actions.length, 0);
 });
 
 function codexMcpPlacement(scope = 'user') {
@@ -458,24 +475,28 @@ function codexMcpPlacement(scope = 'user') {
 test('codex-mcp: a registered server at scope=user admits apply/remove (matches the conformance test\'s own fixture shape)', () => {
   const { inventory, providers } = codexMcpPlacement('user');
   const detections = new Map([['codex-mcp', { status: 'available', complete: true, servers: [{ name: 'demo-mcp', enabled: true }] }]]);
-  const { lanes, counts } = admit(inventory, { providers, detections });
-  assert.equal(counts.apply, 1);
-  assert.equal(lanes.apply[0].findingResourceKey.id, 'mcp:codex:demo-mcp');
+  const { actions, counts } = admit(inventory, { providers, detections });
+  assert.equal(counts.apply, 0);
+  assert.equal(actions.length, 1);
+  assert.equal(actions[0].purpose, 'optional-management');
+  assert.equal(actions[0].findingResourceKey.id, 'mcp:codex:demo-mcp');
 });
 
 test('codex-mcp: the SAME name at a different scope never matches — codex-mcp only supports scope=user', () => {
   const { inventory, providers } = codexMcpPlacement('project');
   const detections = new Map([['codex-mcp', { status: 'available', complete: true, servers: [{ name: 'demo-mcp', enabled: true }] }]]);
-  const { counts } = admit(inventory, { providers, detections });
+  const { counts, actions } = admit(inventory, { providers, detections });
   assert.equal(counts.apply, 0);
+  assert.equal(actions.length, 0);
 });
 
 test('codex-mcp: incomplete detection admits no apply-lane guidance', () => {
   const { inventory, providers } = codexMcpPlacement('user');
-  const { counts } = admit(inventory, {
+  const { counts, actions } = admit(inventory, {
     providers, detections: new Map([['codex-mcp', { status: 'available', complete: false, servers: [] }]]),
   });
   assert.equal(counts.apply, 0);
+  assert.equal(actions.length, 0);
 });
 
 function npxCachePlacement() {
@@ -503,17 +524,19 @@ test('agentic-kit-npx-cache: a candidate for a DIFFERENT placementId never match
     status: 'available', complete: true,
     candidates: [{ resourceId: 'stale-npx-env:demo', executable: true, sourceFingerprint: 'fp', placementId: 'plc_someone_elses_cache_00000000' }],
   }]]);
-  const { counts } = admit(inventory, { providers, detections });
+  const { counts, actions } = admit(inventory, { providers, detections });
   assert.equal(counts.apply, 0);
+  assert.equal(actions.length, 0);
 });
 
 test('agentic-kit-npx-cache: incomplete detection admits no apply-lane guidance', () => {
   const inventory = npxCachePlacement();
   const providers = new Map([['agentic-kit-npx-cache', { id: 'agentic-kit-npx-cache', version: 'v1', resourceKinds: ['stale-npx-env'], operations: ['clean'] }]]);
-  const { counts } = admit(inventory, {
+  const { counts, actions } = admit(inventory, {
     providers, detections: new Map([['agentic-kit-npx-cache', { status: 'available', complete: false, candidates: [] }]]),
   });
   assert.equal(counts.apply, 0);
+  assert.equal(actions.length, 0);
 });
 
 function orphanPlacement() {
@@ -536,10 +559,11 @@ test('ruflo-mcp-orphan: an executable orphan linked by placementId admits apply/
 test('ruflo-mcp-orphan: an unsupported capability (current user identity unavailable) admits no apply-lane guidance', () => {
   const inventory = orphanPlacement();
   const providers = new Map([['ruflo-mcp-orphan', { id: 'ruflo-mcp-orphan', version: 'v1', resourceKinds: ['daemon'], operations: ['terminate'] }]]);
-  const { counts } = admit(inventory, {
+  const { counts, actions } = admit(inventory, {
     providers, detections: new Map([['ruflo-mcp-orphan', { status: 'unsupported', complete: false, capability: { status: 'unsupported' }, orphans: [] }]]),
   });
   assert.equal(counts.apply, 0);
+  assert.equal(actions.length, 0);
 });
 
 test('ruflo-mcp-orphan: a placement without the orphaned-process condition never matches even with a live detection', () => {
@@ -550,8 +574,9 @@ test('ruflo-mcp-orphan: a placement without the orphaned-process condition never
     status: 'available', complete: true, capability: { status: 'available' },
     orphans: [{ resourceId: 'ruflo-mcp-orphan:4242', pid: 4242, executable: true, placementId }],
   }]]);
-  const { counts } = admit(inventory, { providers, detections });
+  const { counts, actions } = admit(inventory, { providers, detections });
   assert.equal(counts.apply, 0);
+  assert.equal(actions.length, 0);
 });
 
 function skillReceiptPlacement(scope = 'user') {
@@ -566,10 +591,12 @@ test('agentic-kit-owned-skill: an owned-current, executable receipt linked by pl
     status: 'available', complete: true,
     skills: [{ resourceId: 'skill-receipt:clarity:user', scope: 'user', status: 'owned-current', executable: true, sourceFingerprint: 'fp', placementId }],
   }]]);
-  const { lanes, counts } = admit(inventory, { providers, detections });
-  assert.equal(counts.apply, 1);
-  assert.equal(lanes.apply[0].verb, 'archive');
-  assert.equal(lanes.apply[0].findingResourceKey.scope, 'user');
+  const { actions, counts } = admit(inventory, { providers, detections });
+  assert.equal(counts.apply, 0);
+  assert.equal(actions.length, 1);
+  assert.equal(actions[0].purpose, 'optional-management');
+  assert.equal(actions[0].verb, 'archive');
+  assert.equal(actions[0].findingResourceKey.scope, 'user');
 });
 
 test('agentic-kit-owned-skill: the same linked receipt with drifted content (not owned-current) never matches', () => {
@@ -580,8 +607,9 @@ test('agentic-kit-owned-skill: the same linked receipt with drifted content (not
     status: 'available', complete: true,
     skills: [{ resourceId: 'skill-receipt:clarity:user', scope: 'user', status: 'modified-or-shape-drift', executable: false, placementId }],
   }]]);
-  const { counts } = admit(inventory, { providers, detections });
+  const { counts, actions } = admit(inventory, { providers, detections });
   assert.equal(counts.apply, 0);
+  assert.equal(actions.length, 0);
 });
 
 function projectFilePlacement() {
@@ -609,8 +637,9 @@ test('git-project-patch: affected-path drift (status=drift) never admits apply, 
     status: 'available', complete: true,
     patches: [{ resourceId: 'patch:claude-md:1', status: 'drift', placementId }],
   }]]);
-  const { counts } = admit(inventory, { providers, detections });
+  const { counts, actions } = admit(inventory, { providers, detections });
   assert.equal(counts.apply, 0);
+  assert.equal(actions.length, 0);
 });
 
 test('ollama-model: a placement-carried digest that disagrees with the detected tag never matches (identity, not name-only)', () => {

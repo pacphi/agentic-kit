@@ -97,6 +97,7 @@
 // repository grouping, submodule-of derivation) lives in
 // projection-projects.mjs, split out to keep this file under the repo's
 // max-lines budget; it is not a separate public contract.
+import path from 'node:path';
 import { catalogVersions, addReleaseObservations } from './catalog-versions.mjs';
 import { createHash } from 'node:crypto';
 import {
@@ -109,10 +110,10 @@ import { assertion, scorecardFor } from './evidence.mjs';
 import { detectEnvironments, currentEnvironmentId } from './environments.mjs';
 import { deriveDependencyEdges } from './dependencies.mjs';
 import { classifyConflicts } from './conflicts.mjs';
-import { createBuilder, finalizePlacement, hostLabel } from './projection-builder.mjs';
+import { createBuilder, finalizePlacement, hostLabel, scrubTechnicalDetails } from './projection-builder.mjs';
 import {
   deriveSubmoduleEdges, mapDiscoveryProjectInstructionFiles, mapInstructionFiles, mapProjects,
-  registerFallbackProjectPaths,
+  registerFallbackProjectPaths, projectInstallationLocation,
 } from './projection-projects.mjs';
 
 // ── small pure helpers ──────────────────────────────────────────────────────
@@ -262,7 +263,10 @@ const CATALOG_KIND_FOLDER = Object.freeze({
 });
 
 function catalogBreadcrumb(kind, first, projectEntry) {
-  if (projectEntry) return [...projectEntry.breadcrumb, hostLabel(first.host)];
+  if (projectEntry) {
+    const location = projectInstallationLocation(first.project, first.itemPath ?? first.path);
+    return [...projectEntry.breadcrumb, location ?? hostLabel(first.host)];
+  }
   return [hostLabel(first.host), CATALOG_KIND_FOLDER[kind] ?? 'Resources'];
 }
 
@@ -317,6 +321,9 @@ function mapCatalogGroup(builder, item, group, ctx) {
   builder.upsertResource(resourceId, {
     presentationFamilyId: catalogResourceId(item, kind, null, installationKey),
     kind, displayName: item.name, namespace: item.pluginRef ?? null, publisher: item.pluginRef ?? null,
+    capabilityLabel: item.capabilityName ?? item.name,
+    installationSource: first.provider ? `Provided by ${first.provider.name}${first.provider.marketplace ? ` · ${first.provider.marketplace}` : ''}` : kind === 'mcp-registration' ? 'Direct configuration' : null,
+    description: first.description ?? null, descriptionSource: item.kind === 'plugin' ? 'Plugin manifest' : 'Description frontmatter',
   });
   const placementId = placementIdentity({
     resourceId, environmentId, administrativeScope: group.scope,
@@ -336,7 +343,7 @@ function mapCatalogGroup(builder, item, group, ctx) {
     evidenceScorecard: { ...catalogScorecard(placementId, consumerHosts, now), ...(versions.installed ? { installedVersion: 'verified' } : {}), ...(versions.candidate ? { candidateSource: 'verified' } : {}) },
     displayName: item.name, kind, hostNamespace: item.pluginRef ?? undefined, consumerHosts,
     versions,
-    technicalDetails, extra: { ...(projectEntry ? { projectKind: projectEntry.projectKind ?? 'unknown' } : {}), ...(transportKey ? { transportKey } : {}) },
+    technicalDetails, extra: { description: scrubTechnicalDetails([first.description])[0] ?? null, ...(projectEntry ? { projectLanguages: projectEntry.projectLanguages ?? [], projectKind: projectEntry.projectKind ?? 'unknown', projectBreadcrumb: [...projectEntry.breadcrumb] } : {}), ...(transportKey ? { transportKey } : {}) },
   });
   if (first.itemPath || first.path) builder.locate(placementId, { path: first.itemPath ?? first.path });
   const probeMatches = catalogDependencyProbeMatches(item, dependencyProbes, consumerHosts);
@@ -482,6 +489,10 @@ function mapInstallTools(builder, tools, ctx) {
     // Locator includes the environment: the same tool name in two
     // environments (Windows vs. a WSL distribution) is never the same
     // physical binary, so it must never collapse onto one shared artifact.
+    const exactPath = tool.executablePath || tool.root;
+    if (typeof exactPath === 'string' && (path.posix.isAbsolute(exactPath) || path.win32.isAbsolute(exactPath))) {
+      builder.locate(placementId, { path: exactPath });
+    }
     const artifactId = artifactIdentity({ carrier: 'executable', locator: `${tool.tool}:${environmentId}` }, installationKey);
     builder.upsertArtifact(artifactId, { carrier: 'executable', label: tool.label ?? tool.tool });
     const bindingId = bindingIdentity({

@@ -1,5 +1,5 @@
 // ADR-0048 scan history — bounded, retained scan summaries
-// (docs/design/maintenance-overhaul/discovery-and-scan-policy.md "Retention").
+// (docs/MAINTENANCE.md "Retention").
 // This store holds ONLY terminal scan summaries. It structurally cannot reach
 // receipts, dispositions, or recipe acceptance records — those live in other
 // agents' stores — so `clearHistory` cannot violate MNT-PRV-008 by scope
@@ -28,15 +28,16 @@ function clampRetention(retention) {
 
 function pruneSummaries(summaries, retention, now) {
   const cutoff = now - retention.maxAgeDays * 86_400_000;
-  const byEnvironment = new Map();
+  const bySource = new Map();
   for (const summary of summaries
     .filter((entry) => Date.parse(entry.completedAt) >= cutoff)
     .sort((a, b) => Date.parse(a.completedAt) - Date.parse(b.completedAt))) {
-    const list = byEnvironment.get(summary.environmentId) ?? [];
+    const key = JSON.stringify([summary.environmentId, summary.sourceId]);
+    const list = bySource.get(key) ?? [];
     list.push(summary);
-    byEnvironment.set(summary.environmentId, list.slice(-retention.maxSummaries));
+    bySource.set(key, list.slice(-retention.maxSummaries));
   }
-  return [...byEnvironment.values()].flat().sort((a, b) => Date.parse(a.completedAt) - Date.parse(b.completedAt));
+  return [...bySource.values()].flat().sort((a, b) => Date.parse(a.completedAt) - Date.parse(b.completedAt));
 }
 
 /**
@@ -81,7 +82,7 @@ export function createScanHistoryStore(dir, {
 
   /** @param {{environmentId?: string}} [options] */
   function list({ environmentId } = {}) {
-    const summaries = read().summaries;
+    const summaries = pruneSummaries(read().summaries, effectiveRetention, now());
     return environmentId ? summaries.filter((entry) => entry.environmentId === environmentId) : summaries;
   }
 

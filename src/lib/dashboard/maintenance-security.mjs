@@ -413,6 +413,11 @@ export function validateMaintenanceV2Body(name, value, { now = Date.now } = {}) 
 const V2_QUERIES = Object.freeze({
   inventory: {
     facets: true,
+    presentation: check.oneOf(['flat', 'focus']),
+    includeWorktrees: (value, field) => {
+      if (!['true', 'false'].includes(value)) throw invalid(`${field} must be true or false`);
+      return value === 'true';
+    },
     scope: check.oneOf(SCOPE_LENSES), view: check.oneOf(CURATED_VIEWS), sort: check.oneOf(SORT_ORDERS),
     search: searchText,
     cursor: (value, field) => {

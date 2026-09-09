@@ -3,7 +3,7 @@
 // override comment for why this directory isn't run through the node lib.
 //
 // ADR-0048 Discovery destination (MNT-DSC-003/016/018). Automatic sources,
-// exact projects, collection roots, exclusions, coverage, and scan history.
+// exact projects, collection roots, exclusions, and current scan coverage.
 // The root/path text inputs here are the ONLY place a user types a path in
 // this workspace, and they are sent only to the preview and exclusion routes
 // — never echoed into a filter URL, notification, or the inventory itself.
@@ -168,17 +168,6 @@ import { MNT, mntAge, MNT_SOURCE_COVERAGE_LABELS, mntGet, mntPost, mntRegisterDe
       +'<section class="mnt-scan-section"><h3>Evidence checks</h3><p>Runtimes, package managers, Ollama, and providers are checked by Refresh evidence, separately from filesystem coverage. The toolbar reports the latest operation outcome.</p></section>'
       +'<section class="mnt-scan-section"><h3>Project coverage</h3><p>'+esc(MNT.discovery&&MNT.discovery.projectCoverageNote||'Configured project roots contribute to filesystem coverage. Machine-discovered projects appear in Inventory.')+'</p></section>';
   }
-  function renderMntScanHistory(){
-    var el=document.getElementById("mnt-scan-history");if(!el)return;
-    var history=(MNT.discovery&&MNT.discovery.history)||[];
-    if(!history.length){el.innerHTML="<h3>Scan history</h3><p>No scans have completed yet.</p>";return;}
-    el.innerHTML="<h3>Scan history</h3><ul>"+history.map(function(entry){
-      return '<li>'+esc(entry.label||'Source no longer configured')+' — '+esc(entry.state==='published'?'Complete':entry.state)
-        +(entry.completedAt?' · '+esc(mntAge(entry.completedAt)):'')
-        +(Number.isFinite(entry.visited)?' · '+entry.visited.toLocaleString()+' entries':'')+'</li>';
-    }).join("")+"</ul>";
-  }
-
   export function renderMntDiscovery(){
     if(mntDiscoveryError){
       var el=document.getElementById("mnt-automatic-sources");
@@ -191,7 +180,6 @@ import { MNT, mntAge, MNT_SOURCE_COVERAGE_LABELS, mntGet, mntPost, mntRegisterDe
     renderMntExclusions();
     renderMntPreview();
     renderMntCoverage();
-    renderMntScanHistory();
   }
 
   // ── Stop-source preview dialog ───────────────────────────────────────────

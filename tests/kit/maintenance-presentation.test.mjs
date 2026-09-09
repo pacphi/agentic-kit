@@ -1,3 +1,4 @@
+import { formatLocalDateTimeLong, formatLocalDay, formatLocalTime } from '../../src/lib/dashboard/client/datetime.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -9,6 +10,9 @@ import { scanProgress } from '../../src/lib/maintenance/management/service-disco
 import { hermesDir } from '../../src/lib/paths.mjs';
 import { runInventoryQuery } from '../../src/lib/maintenance/management/query.mjs';
 import { SENTINEL_FIXTURES } from '../fixtures/maintenance/management-fixtures.mjs';
+import { buildManagementInventory } from '../../src/lib/maintenance/management/projection.mjs';
+import { projectInstallationLocation } from '../../src/lib/maintenance/management/projection-projects.mjs';
+import { publicInventoryPage } from '../../src/lib/dashboard/maintenance-api.mjs';
 
 const esc = (value) => String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 function client(file, deps, bindings) {
@@ -42,7 +46,7 @@ test('project sections remove inherited project text without merging same-name r
   assert.equal((html.match(/class="mnt-project-section"/g) || []).length, 1);
   assert.equal((html.match(/agentic-kit/g) || []).length, 1);
   assert.equal((html.match(/class="mnt-group mnt-group-single"/g) || []).length, 2);
-  assert.match(html, /Used by Codex/);
+  assert.match(html, /Available to Codex/);
   assert.doesNotMatch(html, /mnt-group-kind/);
 });
 test('query rows carry opaque project identity for context grouping', () => {
@@ -241,4 +245,149 @@ test('loading another page extends a family without repeating its heading or pla
   const groups = api.mntMergeGroups([{ resourceId: 'r1', presentationKey: 'family', placements: [{ placementId: 'p1' }] }], [{ resourceId: 'r2', presentationKey: 'family', placements: [{ placementId: 'p1' }, { placementId: 'p2' }] }]);
   assert.equal(groups.length, 1);
   assert.deepEqual(groups[0].placements.map((p) => p.placementId), ['p1', 'p2']);
+});
+
+test('project cards keep resource navigation separate from per-project disclosure identity', () => {
+  const state = { scope: 'project', facets: {}, query: { facetLabels: { project: { pr1: 'ampel' } } } };
+  const placements = [1, 2, 3, 4].map((n) => ({ ...row('p'+n, 'pr1'), breadcrumb: ['ampel', '.claude/skills/a11y-ally'], consumerHosts: ['claude', 'OpenCode', 'CLAUDE'] }));
+  const html = cards(state).renderMntGroups([{ ...group('r1', placements), presentationKey: 'family1', knownPlacementCount: 23 }], { value: 0 });
+  assert.match(html, /data-mnt-family="family1"/);
+  assert.match(html, /data-mnt-group-toggle="family1:pr1"/);
+  assert.match(html, /View all 23 installations/);
+  assert.match(html, /mnt-row-name">\.claude\/skills\/a11y-ally/);
+  assert.match(html, /Available to Claude and OpenCode/);
+  assert.doesNotMatch(html, /Used by|Hosts:|known installations/);
+});
+
+test('project filter hides worktrees by default but keeps selected worktrees and the inclusion control', () => {
+  const state = { facets: { project: ['selected'] }, query: { projectKinds: { repo: 'git', hidden: 'worktree', selected: 'worktree', folder: 'folder' } } };
+  const api = client('maintenance-filters', { MNT: state, esc, mntProjectDesignation: () => '', mntHumanize: (s) => s, MNT_CURATED_VIEW_LABELS: {} }, ['renderMntFacetGroup', 'mntResetFacetSearch', 'include:(value)=>{mntIncludeWorktrees=value}']);
+  const counts = { repo: 5, hidden: 2, selected: 1, folder: 3 };
+  const html = api.renderMntFacetGroup('project', counts);
+  assert.match(html, /data-mnt-include-worktrees>/);
+  assert.doesNotMatch(html, /value="hidden"/);
+  assert.match(html, /value="repo"/);
+  assert.match(html, /value="selected" checked/);
+  assert.match(html, /Selected worktrees stay listed/);
+  api.include(true);
+  assert.match(api.renderMntFacetGroup('project', counts), /value="hidden"/);
+  api.mntResetFacetSearch();
+  assert.doesNotMatch(api.renderMntFacetGroup('project', counts), /value="hidden"/);
+  assert.match(api.renderMntFacetGroup('project', { hidden: 2 }), /Enable worktrees/);
+});
+
+test('installation location is relative to its measured project on POSIX and Windows', () => {
+  assert.equal(projectInstallationLocation('/repo/ampel', '/repo/ampel/.agents/skills/a11y-ally'), '.agents/skills/a11y-ally');
+  assert.equal(projectInstallationLocation('C:\\repo\\ampel', 'C:\\repo\\ampel\\.claude\\skills\\a11y-ally'), '.claude/skills/a11y-ally');
+  for (const candidate of ['/repo/ampel-other/secret', '/repo/ampel/../secret', '/repo/ampel', null, 'relative/path']) {
+    assert.equal(projectInstallationLocation('/repo/ampel', candidate), null);
+  }
+  assert.equal(projectInstallationLocation('C:\\repo', 'D:\\private\\secret'), null);
+});
+
+test('public inventory uses the measured project location instead of guessing from its consumers', () => {
+  const { inventory } = buildManagementInventory({
+    environment: { platform: 'darwin' }, installationKey: 'fixture-installation-key', now: () => Date.parse('2026-09-08T00:00:00Z'),
+    footprint: {
+      projects: { projects: [{ path: '/private/repo/ampel', label: 'ampel', hosts: ['claude'] }] },
+      catalog: { items: [{ canonicalId: 'skill::a11y-ally', kind: 'skill', name: 'a11y-ally', presence: [{
+        host: 'claude', scope: 'project', project: '/private/repo/ampel', itemPath: '/private/repo/ampel/.agents/skills/a11y-ally', artifactId: 'measured-skill',
+        consumer: { mechanism: 'project-skills', enabled: true, configScope: 'project' },
+      }] }] },
+    },
+  });
+  const page = publicInventoryPage(runInventoryQuery(inventory, { scope: 'project' }));
+  const skill = page.groups.flatMap((entry) => entry.placements).find((item) => item.kind === 'skill');
+  assert.deepEqual(skill.breadcrumb, ['ampel', '.agents/skills/a11y-ally']);
+  assert.equal(page.facetLabels.project[skill.projectId], 'ampel');
+  assert.doesNotMatch(JSON.stringify(page), /\/private\/repo/);
+});
+test('a completed refresh over stale machine evidence waits for publication and asks for remeasurement', async () => {
+  let inventoryCalls=0, providerCalls=0;
+  const api=operation(async url=>{
+    if(url.includes('/v2/inventory'))return {scanRequired:false,lastRefresh:{at:++inventoryCalls===1?'old':'new',status:'ok'}};
+    if(url.includes('?refresh=scan'))return {scan:{status:'complete',checkedAt:'new'}};
+    return {activity:{status:'complete'},scan:{status:'stale',checkedAt:++providerCalls===1?'old':'new',coverage:'partial'}};
+  });
+  await api.mntCheckProviders();
+  assert.equal(api.state.operation.failed,false);
+  assert.equal(inventoryCalls,2);
+  assert.match(api.state.operation.message,/Evidence refreshed.*Re-measure machine/);
+  assert.equal(api.nodes['mnt-check-providers'].disabled,false);
+});
+
+test('version inspector localizes measured and checked instants without interpreting version identifiers', () => {
+  const api = client('maintenance-inspector', {
+    esc, mntKindLabel: (value) => value,
+    formatLocalDateTimeLong: (value) => formatLocalDateTimeLong(value, { locale: 'en-US', timeZone: 'America/Los_Angeles' }),
+  }, ['mntWhatVersion']);
+  const html = api.mntWhatVersion({ measuredAt: '2026-09-08T23:37:19.823Z', checkedAt: '2026-09-08T23:39:36.248Z', installed: '1.2.2', cacheGeneration: '2026-09-08' });
+  assert.match(html, /Sep 8, 2026 · 4:37:19 PM PDT/);
+  assert.match(html, /Sep 8, 2026 · 4:39:36 PM PDT/);
+  assert.match(html, /<dd>1.2.2<\/dd>/);
+  assert.match(html, /<dd>2026-09-08<\/dd>/);
+  assert.doesNotMatch(html, /T23:/);
+});
+
+test('scan history groups by local day and sorts source rows newest first', () => {
+  const panel = { innerHTML: '' };
+  const options = { locale: 'en-US', timeZone: 'America/Los_Angeles' };
+  const api = client('maintenance-activity', {
+    mntRegisterDestination() {},
+    MNT: { activity: { scanHistory: [
+      { label: 'Older source', completedAt: '2026-09-08T01:00:00Z', state: 'published', visited: 4 },
+      { label: '<Claude>', completedAt: '2026-09-09T01:00:00Z', state: 'published', visited: 12 },
+      { label: 'Codex', completedAt: '2026-09-08T23:00:00Z', state: 'failed', limitingReason: 'Read failed' },
+    ] } }, esc, document: { getElementById: () => panel },
+    MNT_SOURCE_COVERAGE_LABELS: { published: 'Complete', failed: 'Failed' },
+    formatLocalDay: (value) => formatLocalDay(value, options),
+    formatLocalTime: (value) => formatLocalTime(value, options),
+  }, ['renderMntScanHistory']);
+  api.renderMntScanHistory();
+  assert.equal((panel.innerHTML.match(/<tbody>/g)||[]).length, 2);
+  assert.equal((panel.innerHTML.match(/Sep 8, 2026/g)||[]).length, 1);
+  assert.match(panel.innerHTML, /6:00:00 PM PDT/);
+  assert.match(panel.innerHTML, /&lt;Claude&gt;/);
+  assert.match(panel.innerHTML, /Read failed/);
+  assert.ok(panel.innerHTML.indexOf('Codex') < panel.innerHTML.indexOf('Older source'));
+  assert.match(panel.innerHTML, /scope="rowgroup"/);
+  assert.doesNotMatch(panel.innerHTML, /aria-expanded="true"/);
+  const rows = [{ hidden: true }, { hidden: true }];
+  const attributes = { 'data-mnt-history-day': '0', 'aria-expanded': 'false' };
+  const button = {
+    getAttribute: (name) => attributes[name],
+    setAttribute: (name, value) => { attributes[name] = value; },
+    closest: () => ({ querySelectorAll: () => rows }),
+  };
+  panel.onclick({ target: { closest: () => button } });
+  assert.equal(attributes['aria-expanded'], 'true');
+  assert.ok(rows.every((row) => !row.hidden));
+  api.renderMntScanHistory();
+  assert.match(panel.innerHTML, /aria-expanded="true"/);
+  panel.onclick({ target: { closest: () => button } });
+  assert.equal(attributes['aria-expanded'], 'false');
+  assert.ok(rows.every((row) => row.hidden));
+
+});
+
+test('snoozed activity shows its future local deadline instead of a relative age', () => {
+  const api = client('maintenance-activity', { mntRegisterDestination() {}, esc, formatLocalDateTimeLong: (value) => formatLocalDateTimeLong(value, { locale: 'en-US', timeZone: 'America/Los_Angeles' }) }, ['mntDispositionRow']);
+  assert.match(api.mntDispositionRow({ kindLabel: 'Snoozed', until: '2026-09-10T07:00:00Z' }), /until Sep 10, 2026 · 12:00:00 AM PDT/);
+});
+
+test('Guidance Inventory link activates the destination and preserves modified navigation', () => {
+  const panel = { innerHTML: '' };
+  const calls = [];
+  const api = client('maintenance-guidance', {
+    MNT: {}, document: { getElementById: () => panel }, mntRegisterDestination() {},
+    mntSetDestination: (...args) => calls.push(args),
+  }, ['mntRenderGuidanceCoverage']);
+  api.mntRenderGuidanceCoverage();
+  let prevented = false;
+  const event = { target: { closest: () => ({}) }, preventDefault() { prevented = true; } };
+  panel.onclick(event);
+  assert.equal(prevented, true);
+  assert.deepEqual(calls, [['inventory', { focus: true }]]);
+  panel.onclick({ ...event, ctrlKey: true });
+  assert.equal(calls.length, 1);
 });

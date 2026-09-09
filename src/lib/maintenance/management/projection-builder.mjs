@@ -24,7 +24,7 @@ const LOCAL_PATH = /(?:^|[\s"'([{=:])(?:file:\/\/\/?|~[\\/]|[A-Za-z]:[\\/]|\\\\|
  *  so an unpresentable line is omitted outright rather than rewritten.
  *  Missing evidence omits the field (ADR-0048 §5); this is the same rule
  *  applied to one free-text line instead of a whole claim. */
-function scrubTechnicalDetails(lines) {
+export function scrubTechnicalDetails(lines) {
   if (!Array.isArray(lines)) return [];
   return lines.filter((line) => typeof line === 'string' && !LOCAL_PATH.test(line));
 }
@@ -51,6 +51,9 @@ export function createBuilder() {
         resources.set(resourceId, {
           resourceId, kind: fields.kind, displayName: fields.displayName, placementIds: [],
           ...(fields.presentationFamilyId ? { presentationFamilyId: fields.presentationFamilyId } : {}),
+          ...(fields.capabilityLabel ? { capabilityLabel: fields.capabilityLabel } : {}),
+          ...(fields.installationSource ? { installationSource: fields.installationSource } : {}),
+          ...(fields.description && !LOCAL_PATH.test(fields.description) ? { description: fields.description, descriptionSource: fields.descriptionSource } : {}),
           ...(fields.namespace != null ? { namespace: fields.namespace } : {}),
           ...(fields.publisher != null ? { publisher: fields.publisher } : {}),
         });

@@ -1,6 +1,6 @@
 // ADR-0048 Discovery configuration — the curated automatic-source catalogue and
 // the read/validate/write surface over `kit.json`'s `maintenance.discovery`
-// intent (docs/design/maintenance-overhaul/discovery-and-scan-policy.md).
+// intent (docs/MAINTENANCE.md).
 //
 // This module never touches the filesystem beyond `validateRoot`'s bounded,
 // injected probes: it reads and writes user INTENT, not scan results. Every

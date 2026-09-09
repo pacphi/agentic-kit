@@ -13,9 +13,10 @@ import {
   mntGet, mntRegisterDestination, mntScanRequiredAnnouncement,
   mntScanRequiredHtml, mntSyncHash,
 } from './maintenance-workspace.mjs';
-import { renderMntViews, renderMntFacets, renderMntChips, mntWireFilterPresentation, mntResetFacetSearch, mntFacetValueLabel } from './maintenance-filters.mjs';
+import { renderMntViews, renderMntFacets, renderMntChips, mntWireFilterPresentation, mntResetFacetSearch, mntFacetValueLabel, mntWorktreesIncluded } from './maintenance-filters.mjs';
 import { renderMntGroups, mntRememberGroupExpanded, mntIcon, mntProjectDesignation } from './maintenance-cards.mjs';
-import { mntOpenInspector } from './maintenance-inspector.mjs';
+import { mntFocusNavigation, mntFocusChoose, mntFocusBack, renderMntFocusContext, renderMntFocusResults } from './maintenance-focus.mjs';
+import { mntOpenInspector, mntCloseInspector } from './maintenance-inspector.mjs';
 
   var MNT_SCOPES=["across","system","machine","user","project"];
   var mntInventoryWired=false,mntInventoryBusy=false,mntInventoryError=null,mntFocusPlacement=null;
@@ -34,7 +35,7 @@ import { mntOpenInspector } from './maintenance-inspector.mjs';
   }
   function mntInventoryUrl(cursor){
     var params=new URLSearchParams();
-    params.set("scope",MNT.scope);params.set("view",MNT.view);params.set("sort",MNT.sort);
+    params.set("presentation","focus");params.set("includeWorktrees",String(mntWorktreesIncluded()));params.set("scope",MNT.scope);params.set("view",MNT.view);params.set("sort",MNT.sort);
     if(MNT.search)params.set("search",MNT.search);
     if(cursor)params.set("cursor",cursor);
     Object.keys(MNT.facets||{}).forEach(function(facet){
@@ -50,6 +51,10 @@ import { mntOpenInspector } from './maintenance-inspector.mjs';
       if(seq!==MNT.seq)return;
       if(append&&MNT.query){
         page.groups=mntMergeGroups(MNT.query.groups||[],page.groups||[]);
+        if(page.navigation&&MNT.query.navigation&&page.navigation.level===MNT.query.navigation.level){
+          var nodes=new Map();(MNT.query.navigation.nodes||[]).concat(page.navigation.nodes||[]).forEach(function(node){nodes.set(node.value,node);});
+          page.navigation.nodes=Array.from(nodes.values());
+        }
       }
       MNT.query=page;
       mntInventoryBusy=false;
@@ -132,12 +137,12 @@ import { mntOpenInspector } from './maintenance-inspector.mjs';
       return;
     }
     var groups=(MNT.query&&MNT.query.groups)||[];
-    if(!groups.length){
+    if(!groups.length&&!(mntFocusNavigation()&&(mntFocusNavigation().nodes||[]).length)){
       el.innerHTML='<div class="mnt-empty">No resources match the current scope, view, search, and facets.</div>';
       return;
     }
     var rowIndexRef={value:0};
-    el.innerHTML='<ul class="mnt-groups">'+renderMntGroups(groups,rowIndexRef)+"</ul>";
+    el.innerHTML=renderMntFocusResults(mntInventoryBusy)||'<ul class="mnt-groups">'+renderMntGroups(groups,rowIndexRef)+"</ul>";
     if(mntFocusPlacement){
       var target=el.querySelector('[data-mnt-plc="'+mntFocusPlacement+'"]');
       if(target)target.focus();
@@ -149,6 +154,8 @@ import { mntOpenInspector } from './maintenance-inspector.mjs';
     var total=(MNT.query&&MNT.query.total)||0;
     var shown=((MNT.query&&MNT.query.groups)||[]).reduce(function(sum,g){return sum+g.placements.length;},0);
     var more=MNT.query&&MNT.query.nextCursor;
+    var nav=mntFocusNavigation();
+    if(nav&&nav.level!=='installation'){el.innerHTML=more?'<button type="button" class="mt-action" id="mnt-load-more">Load more groups</button>':'';return;}
     el.innerHTML='<span class="mnt-paging-count">'+esc(shown)+" of "+esc(total)+" placements</span>"
       +(more?'<button type="button" class="mt-action" id="mnt-load-more">Load more</button>':"");
   }
@@ -156,19 +163,20 @@ import { mntOpenInspector } from './maintenance-inspector.mjs';
   export function renderMntInventory(){
     var focused=document.activeElement,focusKey=null;
     var focusRoot=focused&&focused.closest&&focused.closest("#mnt-facets-sheet")?"mnt-facets-sheet":"mnt-panel-inventory";
-    ['data-mnt-facet','data-mnt-scope','data-mnt-view'].some(function(attr){
+    ['data-mnt-facet','data-mnt-scope','data-mnt-view','data-mnt-include-worktrees'].some(function(attr){
       if(focused&&focused.hasAttribute&&focused.hasAttribute(attr)){focusKey={attr:attr,key:focused.getAttribute(attr),value:focused.value};return true;}return false;
     });
     renderMntScope();renderMntViews();renderMntFacets();renderMntChips();
-    var context=[MNT_SCOPE_LABELS[MNT.scope]];
+    var context=(MNT.facets.family||[]).length===1?[mntFacetValueLabel('family',MNT.facets.family[0])+' installations',MNT_SCOPE_LABELS[MNT.scope]]:[MNT_SCOPE_LABELS[MNT.scope]];
     ['project','adapter','consumer','kind'].forEach(function(facet){
       var values=MNT.facets[facet]||[];
       if(values.length===1)context.push(mntFacetValueLabel(facet,values[0]));
     });
     var heading=document.getElementById('mnt-context-heading');if(heading)heading.innerHTML=esc(context.join(' / '))+((MNT.facets.project||[]).length===1?' '+mntProjectDesignation(MNT.facets.project[0]):'');
-    var count=document.getElementById('mnt-result-count');if(count)count.textContent=((MNT.query&&MNT.query.total)||0).toLocaleString()+' installations';
+    var count=document.getElementById('mnt-result-count');if(count)count.textContent=((MNT.query&&MNT.query.total)||0).toLocaleString()+((MNT.query&&MNT.query.total)===1?' installation':' installations')+' across current filters';
     var sort=document.getElementById('mnt-sort');if(sort)sort.value=MNT.sort;
-    renderMntPartial();renderMntLegend();renderMntResults();renderMntPaging();
+    renderMntPartial();renderMntLegend();renderMntResults();renderMntPaging();renderMntFocusContext();
+    var legend=document.getElementById('mnt-legend');if(legend)legend.hidden=!!mntFocusNavigation();
     if(focusKey){
       var root=document.getElementById(focusRoot);
       if(root)[].slice.call(root.querySelectorAll('['+focusKey.attr+']')).some(function(el){
@@ -177,13 +185,28 @@ import { mntOpenInspector } from './maintenance-inspector.mjs';
     }
   }
 
+  function mntFocusHeading(){var heading=document.getElementById('mnt-context-heading');if(heading){heading.setAttribute('tabindex','-1');heading.focus();}}
+
   // ── Wiring ───────────────────────────────────────────────────────────────
+  function mntShowAllInstallations(familyId){
+    mntCloseInspector();
+    MNT.plc=null;MNT.inspector=null;
+    MNT.facets={family:[familyId]};MNT.view='all';MNT.scope='across';MNT.search='';
+    var search=document.getElementById('mnt-search');if(search)search.value='';
+    mntResetFacetSearch();mntRememberGroupExpanded(familyId,true);mntSyncHash();
+    return mntRunInventoryQuery(false).then(function(){
+      var heading=document.getElementById('mnt-context-heading');
+      if(heading){heading.setAttribute('tabindex','-1');heading.focus();}
+    });
+  }
   var mntSearchDebounced=mntDebounce(function(value){
     var input=document.getElementById("mnt-search");if(input&&input.value!==value)return;
     MNT.search=value;mntSyncHash();mntRunInventoryQuery(false);
   },300);
 
   function mntToggleFacet(facet,value,checked){
+    mntCloseInspector();
+    if(facet==='kind'||facet==='project')delete MNT.facets.family;
     var current=MNT.facets[facet]||[];
     if(checked){if(current.indexOf(value)<0)current=current.concat([value]);}
     else{current=current.filter(function(v){return v!==value;});}
@@ -201,11 +224,11 @@ import { mntOpenInspector } from './maintenance-inspector.mjs';
   }
 
   function mntWireInventoryControls(panel){
-    mntWireFilterPresentation();
+    mntWireFilterPresentation(function(){mntRunInventoryQuery(false);});
     var scope=document.getElementById("mnt-scope");
     if(scope)scope.addEventListener("click",function(event){
       var button=event.target.closest?event.target.closest("[data-mnt-scope]"):null;if(!button)return;
-      MNT.scope=button.getAttribute("data-mnt-scope");mntSyncHash();mntRunInventoryQuery(false);
+      mntCloseInspector();mntFocusChoose("scope",button.getAttribute("data-mnt-scope"));mntSyncHash();mntRunInventoryQuery(false);
     });
     var viewClick=function(event){
       var button=event.target.closest?event.target.closest("[data-mnt-view]"):null;if(!button)return;
@@ -214,10 +237,15 @@ import { mntOpenInspector } from './maintenance-inspector.mjs';
     ['mnt-views','mnt-facets-sheet-body'].forEach(function(id){var el=document.getElementById(id);if(el)el.addEventListener('click',viewClick);});
     panel.addEventListener('click',function(event){
       if(event.target.closest&&event.target.closest('[data-mnt-reset]')){
-        MNT.facets={};MNT.view='all';MNT.search='';mntResetFacetSearch();
+        mntCloseInspector();MNT.facets={};MNT.scope='across';MNT.view='all';MNT.search='';mntResetFacetSearch();
         var input=document.getElementById('mnt-search');if(input)input.value='';
         mntSyncHash();mntRunInventoryQuery(false);
       }
+    });
+    var breadcrumbs=document.getElementById('mnt-breadcrumbs');
+    if(breadcrumbs)breadcrumbs.addEventListener('click',function(event){
+      var back=event.target.closest&&event.target.closest('[data-mnt-back]');if(!back)return;
+      mntCloseInspector();mntFocusBack(back.getAttribute('data-mnt-back'));mntSyncHash();mntRunInventoryQuery(false).then(mntFocusHeading);
     });
     var sort=document.getElementById('mnt-sort');if(sort)sort.addEventListener('change',function(){MNT.sort=sort.value;mntSyncHash();mntRunInventoryQuery(false);});
     var facetChange=function(event){
@@ -242,8 +270,10 @@ import { mntOpenInspector } from './maintenance-inspector.mjs';
     var results=document.getElementById("mnt-results");
     if(results){
       results.addEventListener("click",function(event){
+        var node=event.target.closest&&event.target.closest('[data-mnt-focus]');
+        if(node){mntCloseInspector();mntFocusChoose(node.getAttribute('data-mnt-level'),node.getAttribute('data-mnt-focus'));mntSyncHash();mntRunInventoryQuery(false).then(mntFocusHeading);return;}
         var family=event.target.closest?event.target.closest("[data-mnt-family]"):null;
-        if(family){MNT.facets={family:[family.getAttribute("data-mnt-family")]};MNT.view="all";MNT.scope="across";MNT.search="";mntSyncHash();mntRunInventoryQuery(false);return;}
+        if(family){mntShowAllInstallations(family.getAttribute("data-mnt-family"));return;}
         var retry=event.target.closest?event.target.closest("#mnt-retry"):null;
         if(retry){mntRunInventoryQuery(false);return;}
         var groupToggle=event.target.closest?event.target.closest("[data-mnt-group-toggle]"):null;
@@ -264,7 +294,7 @@ import { mntOpenInspector } from './maintenance-inspector.mjs';
       // tabindex among rows without adding the whole list to the Tab order.
       results.addEventListener("keydown",function(event){
         if(!/^(ArrowDown|ArrowUp|Home|End)$/.test(event.key))return;
-        var rows=[].slice.call(results.querySelectorAll("[data-mnt-plc]"));
+        var rows=[].slice.call(results.querySelectorAll("[data-mnt-plc], [data-mnt-focus]"));
         if(!rows.length)return;
         var current=rows.indexOf(document.activeElement);
         var next=event.key==="Home"?0:event.key==="End"?rows.length-1

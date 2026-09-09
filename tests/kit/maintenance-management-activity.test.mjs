@@ -61,6 +61,23 @@ test('buildActivity rejects an unknown scan state rather than silently passing i
   assert.throws(() => buildActivity({ scanHistory: [{ sourceId: 'x', environmentId: 'y', state: 'not-a-real-state' }] }), TypeError);
 });
 
+test('activity shows the latest scan per source and environment without changing history', () => {
+  const scan = { sourceId: 'claude', environmentId: 'local', state: 'complete', label: 'Claude user configuration' };
+  const older = { ...scan, completedAt: '2026-09-07T00:00:00Z' };
+  const newer = { ...scan, completedAt: '2026-09-08T00:00:00Z', state: 'failed' };
+  const otherEnvironment = { ...older, environmentId: 'remote' };
+  const otherSource = { ...older, sourceId: 'codex' };
+  const scanHistory = [newer, otherEnvironment, older, otherSource, { ...scan }];
+  const original = structuredClone(scanHistory);
+  const { scans, scanHistory: retained } = buildActivity({ scanHistory });
+  assert.equal(retained.length, scanHistory.length);
+  assert.ok(retained.some((entry) => entry.completedAt === older.completedAt));
+  assert.ok(retained.some((entry) => entry.completedAt === newer.completedAt));
+  assert.deepEqual(scans.map(({ sourceId, environmentId, completedAt, state }) => ({ sourceId, environmentId, completedAt, state })),
+    [newer, otherEnvironment, otherSource].map(({ sourceId, environmentId, completedAt, state }) => ({ sourceId, environmentId, completedAt, state })));
+  assert.deepEqual(scanHistory, original);
+});
+
 test('no label anywhere in buildActivity output is prohibited', () => {
   const activity = buildActivity({
     receipts: [INTERRUPTED_RECEIPT],

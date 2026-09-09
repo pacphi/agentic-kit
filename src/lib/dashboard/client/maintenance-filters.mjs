@@ -4,7 +4,7 @@ import { esc } from './bootstrap.mjs';
 import { MNT, MNT_GUIDANCE_LANE_LABELS, MNT_CONFLICT_EXPLANATIONS, MNT_CREDENTIAL_READINESS_LABELS, MNT_CURATED_VIEW_LABELS, MNT_SCOPE_LABELS, mntHumanize, mntKindLabel } from './maintenance-workspace.mjs';
   var MNT_CURATED_VIEWS=Object.keys(MNT_CURATED_VIEW_LABELS);
   var MNT_FACET_ORDER=[
-    "scope","environment","project","projectType","kind","adapter","consumer","carrier","provenance","packageManager",
+    "scope","environment","project","kind","adapter","consumer","carrier","provenance","packageManager",
     "versionState","guidance","dependencyRole","conflict","credentialReadiness","channel",
     "evidenceFields","recentlyChanged",
   ];
@@ -32,7 +32,7 @@ import { MNT, MNT_GUIDANCE_LANE_LABELS, MNT_CONFLICT_EXPLANATIONS, MNT_CREDENTIA
     if(facet==="credentialReadiness")return MNT_CREDENTIAL_READINESS_LABELS[value]||mntHumanize(value);
     if(facet==="dependencyRole")return MNT_DEPENDENCY_ROLE_LABEL[value]||mntHumanize(value);
     if(facet==="recentlyChanged")return value==="true"?"Recently changed":mntHumanize(value);
-    if(facet==="environment"||facet==="project"){
+    if(['environment','project','family'].indexOf(facet)>=0){
       var named=mntFacetLabelsFor(facet);
       var label=named&&named[value];
       if(label)return label;
@@ -41,7 +41,7 @@ import { MNT, MNT_GUIDANCE_LANE_LABELS, MNT_CONFLICT_EXPLANATIONS, MNT_CREDENTIA
     return mntHumanize(value);
   }
 
-  var mntDisclosureState={},mntFacetNeedles={};
+  var mntDisclosureState={},mntFacetNeedles={},mntIncludeWorktrees=false;
   function mntDisclosure(key,label,body,initial){
     var open=Object.prototype.hasOwnProperty.call(mntDisclosureState,key)?mntDisclosureState[key]:initial;
     return '<details class="mnt-filter-disclosure" data-mnt-disclosure="'+esc(key)+'"'+(open?' open':'')+'><summary>'+esc(label)+'</summary>'+body+'</details>';
@@ -66,19 +66,27 @@ import { MNT, MNT_GUIDANCE_LANE_LABELS, MNT_CONFLICT_EXPLANATIONS, MNT_CREDENTIA
     var values=Object.keys(counts||{}).sort(function(a,b){return mntFacetValueLabel(facet,a).localeCompare(mntFacetValueLabel(facet,b));});
     if(!values.length)return '';
     var label=MNT_FACET_LABEL[facet]||mntHumanize(facet),needle=mntFacetNeedles[facet]||'';
-    var search=values.length>6||needle?'<input type="search" class="mnt-facet-search" data-mnt-facet-search="'+esc(facet)+'" aria-label="Find '+esc(label.toLowerCase())+' options" placeholder="Find '+esc(label.toLowerCase())+'…" value="'+esc(needle)+'">':'';
-    var body=(facet==='adapter'?'<p class="mnt-filter-note">Associated resources; zero means none observed.</p>':'')+'<fieldset class="mnt-facet-group"><legend class="sr-only">'+esc(label)+'</legend>'+search+'<div class="mnt-facet-options">'
+    var search=facet==='project'||values.length>6||needle?'<input type="search" class="mnt-facet-search" data-mnt-facet-search="'+esc(facet)+'" aria-label="Find '+esc(label.toLowerCase())+' options" placeholder="Find '+esc(label.toLowerCase())+'…" value="'+esc(needle)+'">':'';
+    var worktrees='';
+    if(facet==='project'){
+      var kinds=MNT.query&&MNT.query.projectKinds||{};
+      var selectedWorktree=values.some(function(value){return kinds[value]==='worktree'&&mntFacetSelected(facet,value);});
+      worktrees='<label class="mnt-facet-opt"><input type="checkbox" data-mnt-include-worktrees'+(mntIncludeWorktrees?' checked':'')+'> <span>Include worktrees</span></label>'
+        +(!mntIncludeWorktrees&&selectedWorktree?'<p class="mnt-filter-note">Selected worktrees stay listed until deselected.</p>':'');
+      values=values.filter(function(value){return mntIncludeWorktrees||kinds[value]!=='worktree'||mntFacetSelected(facet,value);});
+    }
+    var body=(facet==='adapter'?'<p class="mnt-filter-note">Associated resources; zero means none observed.</p>':'')+'<fieldset class="mnt-facet-group"><legend class="sr-only">'+esc(label)+'</legend>'+search+worktrees+'<div class="mnt-facet-options">'
       +values.map(function(value){
         var checked=mntFacetSelected(facet,value),name=mntFacetValueLabel(facet,value);
         return '<label class="mnt-facet-opt"'+(!checked&&needle&&name.toLowerCase().indexOf(needle.toLowerCase())<0?' hidden':'')+'><input type="checkbox" data-mnt-facet="'+esc(facet)+'" value="'+esc(value)+'"'+(checked?' checked':'')+'> <span>'+esc(name)+(facet==='project'?mntProjectDesignation(value):'')+'</span><span class="mono">'+esc(counts[value])+'</span></label>';
-      }).join('')+'</div></fieldset>';
+      }).join('')+(!values.length?'<p class="mnt-filter-note">Enable worktrees to see project options.</p>':'')+'</div></fieldset>';
     var selected=(MNT.facets[facet]||[]).length;
     return mntDisclosure(facet,label+(selected?' ('+selected+')':''),body,['project','kind','consumer','adapter'].indexOf(facet)>=0||selected>0);
   }
   export function renderMntFacets(){
     var counts=Object.assign({},(MNT.query&&MNT.query.facetCounts)||{});
     counts.adapter=Object.assign({hermes:0},counts.adapter||{});
-    var common=['project','projectType','kind','consumer','adapter'];
+    var common=['project','kind','consumer','adapter'];
     var other=MNT_FACET_ORDER.filter(function(facet){return common.indexOf(facet)<0;});
     var advanced=other.map(function(facet){return renderMntFacetGroup(facet,counts[facet]);}).join('');
     var active=other.some(function(facet){return (MNT.facets[facet]||[]).length>0;});
@@ -88,7 +96,7 @@ import { MNT, MNT_GUIDANCE_LANE_LABELS, MNT_CONFLICT_EXPLANATIONS, MNT_CREDENTIA
     var sheet=document.getElementById('mnt-facets-sheet-body');
     if(sheet)sheet.innerHTML=document.getElementById('mnt-views').innerHTML+html;
   }
-  export function mntWireFilterPresentation(){
+  export function mntWireFilterPresentation(onWorktreeChange){
     ['mnt-side','mnt-facets-sheet-body'].forEach(function(id){
       var root=document.getElementById(id);if(!root)return;
       root.addEventListener('toggle',function(event){
@@ -98,7 +106,14 @@ import { MNT, MNT_GUIDANCE_LANE_LABELS, MNT_CONFLICT_EXPLANATIONS, MNT_CREDENTIA
       root.addEventListener('input',function(event){
         var input=event.target,facet=input.getAttribute&&input.getAttribute('data-mnt-facet-search');if(!facet)return;
         mntFacetNeedles[facet]=input.value;
-        input.parentElement.querySelectorAll('.mnt-facet-opt').forEach(function(label){label.hidden=!label.querySelector('input:checked')&&label.textContent.toLowerCase().indexOf(input.value.toLowerCase())<0;});
+        input.parentElement.querySelectorAll('.mnt-facet-options .mnt-facet-opt').forEach(function(label){label.hidden=!label.querySelector('input:checked')&&label.textContent.toLowerCase().indexOf(input.value.toLowerCase())<0;});
+      });
+      root.addEventListener('change',function(event){
+        var input=event.target;if(!input.matches||!input.matches('[data-mnt-include-worktrees]'))return;
+        mntIncludeWorktrees=input.checked;
+        if(onWorktreeChange)onWorktreeChange();
+        renderMntFacets();
+        var toggle=root.querySelector('[data-mnt-include-worktrees]');if(toggle)toggle.focus();
       });
     });
   }
@@ -113,6 +128,7 @@ import { MNT, MNT_GUIDANCE_LANE_LABELS, MNT_CONFLICT_EXPLANATIONS, MNT_CREDENTIA
   export function renderMntChips(){
     var el=document.getElementById("mnt-chips");if(!el)return;
     var entries=mntActiveFacetEntries();
+    if(MNT.query&&MNT.query.navigation)entries=entries.filter(function(entry){return ['scope','project','kind','family'].indexOf(entry.facet)<0||(MNT.facets[entry.facet]||[]).length!==1;});
     if(!entries.length){el.innerHTML="";return;}
     el.innerHTML=entries.map(function(entry){
       return '<span class="mnt-chip">'+esc(MNT_FACET_LABEL[entry.facet]||entry.facet)+": "
@@ -124,4 +140,6 @@ import { MNT, MNT_GUIDANCE_LANE_LABELS, MNT_CONFLICT_EXPLANATIONS, MNT_CREDENTIA
   }
 
 
-export function mntResetFacetSearch(){mntFacetNeedles={};}
+export function mntResetFacetSearch(){mntFacetNeedles={};mntIncludeWorktrees=false;}
+
+export function mntWorktreesIncluded(){return mntIncludeWorktrees;}
