@@ -22,7 +22,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { repoRoot } from './paths.mjs';
-import { readJson, writeJsonWithBackup } from './settings.mjs';
+import { readJson } from './settings.mjs';
+import { writeOwnedRouter, undoOwnedRouter } from './provider-ownership.mjs';
 import { configuredPolicyToAgentOverrides, AGENT_ACTIVITY_MAP } from './routing.mjs';
 import { admittedAqeProviders } from './adapters/aqe-provider.mjs';
 import {
@@ -634,7 +635,7 @@ export function applyAqeRouter(cfg, cwd = process.cwd()) {
     return { ok: !error, changed: false, detail: details.join('; ') || 'nothing to apply' };
   }
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  writeJsonWithBackup(file, next);
+  writeOwnedRouter(file, next);
   return { ok: !error, changed: true, detail: details.join('; ') };
 }
 
@@ -662,20 +663,12 @@ export function aqeRouterDrift(cfg, cwd = process.cwd()) {
   return { applicable: true, drift, order };
 }
 
-/** Reversible teardown of ak's router management. Restores the pre-ak file from
- *  its one-time .bak, or removes an ak-created file. Never touches a file ak
- *  didn't write (no `_managedBy` tag). */
+/** Restore/remove only a verified unchanged projection. Legacy ownership or
+ *  post-setup drift is preserved with a manual recovery path. */
 export function undoAqeRouter(cwd = process.cwd()) {
   const file = aqeRouterFile(cwd);
   if (!fs.existsSync(file)) return { ok: true, changed: false, detail: 'no aqe router config' };
   const cur = readJson(file);
   if (cur?._managedBy !== AQE_MANAGED_TAG) return { ok: true, changed: false, detail: 'llm-config.json not ak-managed — left as-is' };
-  const bak = `${file}.bak`;
-  if (fs.existsSync(bak)) {
-    fs.copyFileSync(bak, file);
-    fs.rmSync(bak, { force: true });
-    return { ok: true, changed: true, detail: 'restored pre-ak llm-config.json' };
-  }
-  fs.rmSync(file, { force: true });
-  return { ok: true, changed: true, detail: 'removed ak-created llm-config.json' };
+  return undoOwnedRouter(file);
 }
