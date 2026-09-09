@@ -2,8 +2,9 @@ name: release
 
 # Publishes to npm when a version tag is pushed (v4.0.0, v4.1.0-alpha.1, …),
 # then creates the matching GitHub Release with auto-generated notes.
-# Requires the NPM_TOKEN repository secret (npm "Automation" token: repo
-# Settings → Secrets and variables → Actions → New repository secret).
+# Uses the NPM_TOKEN repository secret via NODE_AUTH_TOKEN. Configure a valid
+# granular package-publish token with appropriate 2FA capability and expiry;
+# secret validity is a release-owner check, not a property of this workflow.
 # The tag must match package.json's version — the guard below enforces it.
 on:
   push:

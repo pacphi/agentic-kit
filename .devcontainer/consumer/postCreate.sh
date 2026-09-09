@@ -31,5 +31,5 @@ Ready. In the integrated terminal:
 
 Pin a specific release instead of next: rebuild with AK_DIST_TAG set in this
 devcontainer.json's "remoteEnv", or inside the container:
-  npm install -g @pacphi/agentic-kit@4.0.0-alpha.41 && ak sync
+  npm install -g @pacphi/agentic-kit@4.0.0-alpha.41 && ak sync --no-upgrade
 EOF

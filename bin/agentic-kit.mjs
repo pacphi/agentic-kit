@@ -71,7 +71,7 @@ Usage (ak = alias of agentic-kit):
 
   When in doubt: ak sync
 
-Every mutating command accepts --dry-run (prints the plan, changes nothing).
+Use --dry-run where offered to preview managed changes; consult command help for scope.
 Any command accepts --help for its own flags + examples.
 
 More:
@@ -84,7 +84,7 @@ const HELP_ALL = `${HELP}
 Plumbing (power users) — each takes --help:
   ak x admin [--port N]        maintainer-only telemetry admin (localhost; GitHub/npm egress)
   ak x daemon-gc [--kill]      list/stop stale ruflo daemons
-  ak x dashboard [--port N]    read-only local health dashboard (localhost only)
+  ak x dashboard [--port N]    local health and guarded maintenance dashboard (localhost only)
   ak x harvest [--dry-run]     opt-in learning-write: replay experiences into the substrate
   ak x mcp [status|pick|off]   MCP registration + tool-family deny rules
   ak x host [status|pick|refresh|off]   manage hosts, routing, and provider bindings

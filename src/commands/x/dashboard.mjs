@@ -1,10 +1,10 @@
-// x dashboard — a read-only local web dashboard for the kit's health.
+// x dashboard — local observations and guarded Maintenance actions.
 //
 // Boots a loopback-only HTTP server (127.0.0.1) that serves a single
-// self-contained page plus read-only status, usage, and live-session endpoints.
+// self-contained page, observation endpoints, and guarded Maintenance routes.
 // The live view tails metadata from Claude/Codex and optional explicitly
 // registered ruflo/AQE JSONL sources. Runs FOREGROUND and blocks until
-// Ctrl-C; nothing is detached and nothing mutates state.
+// Ctrl-C; nothing is detached. Cache/scan writes and authorized maintenance are scoped.
 import path from 'node:path';
 import { startDashboard } from '../../lib/dashboard-server.mjs';
 import { openInBrowser } from '../../lib/browser.mjs';
@@ -16,23 +16,22 @@ export const options = {
   'live-source': { type: 'string', multiple: true },
 };
 
-export const help = `ak dashboard — read-only local health dashboard (localhost only)  [alias: ak x dashboard]
+export const help = `ak dashboard — local health and guarded maintenance dashboard (localhost only)  [alias: ak x dashboard]
 
 Serves a self-contained web panel that visualizes the same subsystem rows
 \`ak status\` reports — versions, natives, security, learning, providers, hosts,
 mcp, ruvnet-brain, aqe — plus version drift, a learning-history sparkline, and
 (on the Usage tab) full session transcripts. Bound to 127.0.0.1; health
-polling defaults to 30s and the Observability tab streams metadata with SSE. Read-only:
-it never changes state. Nothing leaves your machine — the page is fully
-self-contained (no external fetches, no internet).
+polling defaults to 30s and the Observability tab streams metadata with SSE.
+The browser uses same-origin API requests. Server-side status/version checks can
+contact version services and persist caches; explicit Maintenance actions can
+modify managed state after their plan/confirmation checks.
 
-A fresh per-session token is minted at startup and carried into the browser
-in the launch URL's # fragment (never a query param, never logged); the page
-moves it to localStorage and sends it as a request header (or, for the two
-live-stream routes, a query param — EventSource cannot set headers). Any
-other process on this machine that reaches 127.0.0.1 without that token is
-turned away — this page serves full transcript text, so it is gated the same
-way \`ak admin\` already gates GitHub/npm stats.
+A per-session token is printed in the launch URL's # fragment. The page stores
+it locally and sends a header for ordinary requests, or a query token for native
+EventSource streams. API GET routes also accept a query token for compatibility;
+prefer headers. Maintenance POST routes require header authentication. The token
+is reusable for the server session, so protect the printed URL and local storage.
 
 It opens in your default browser automatically. Runs in the foreground —
 press Ctrl-C to stop.
@@ -98,8 +97,8 @@ export async function run({ flags }) {
   }
 
   ok(`dashboard live at ${server.url}`);
-  info(dim('read-only · localhost only · Ctrl-C to stop'));
-  info('open this URL (it carries a one-time session token in the # fragment):');
+  info(dim('localhost only · guarded Maintenance actions · Ctrl-C to stop'));
+  info('open this URL (it carries a session token in the # fragment):');
   info(`  ${server.urlWithToken}`);
 
   if (!flags['no-open']) {

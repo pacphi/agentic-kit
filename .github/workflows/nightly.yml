@@ -1,9 +1,8 @@
 name: nightly-live
 
 # Installs the REAL latest ruflo + agentic-qe and runs the kit's checks against
-# them — catches upstream drift the day it ships (e.g. the 3.28 aidefence drop,
-# ruvnet/ruflo#2670). Scheduled + manual only; failures here mean "upstream
-# changed", not "this repo broke".
+# them — samples upstream drift (e.g. the 3.28 aidefence drop, ruvnet/ruflo#2670).
+# Scheduled + manual only; failures can also be runner/network or kit defects.
 on:
   schedule:
     - cron: '17 6 * * *'
@@ -163,5 +162,5 @@ jobs:
       - name: Check all links (internal + external)
         uses: lycheeverse/lychee-action@v2
         with:
-          args: "--config lychee.toml README.md CLAUDE.md 'docs/**/*.md'"
+          args: "--config lychee.toml README.md CLAUDE.md AGENTS.md MAINTAINER.md 'docker/*.md' 'claude/**/*.md' 'src/templates/**/*.md' 'docs/**/*.md'"
           fail: true
