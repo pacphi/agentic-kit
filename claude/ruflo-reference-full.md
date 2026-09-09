@@ -1,29 +1,29 @@
 # Ruflo CLI Reference (full, on-demand)
 
-> This is the complete ruflo reference. It is intentionally NOT auto-loaded into
+> This is an on-demand operational reference for the kit's Ruflo integration. It is intentionally NOT auto-loaded into
 > every session (that was a ~5.6K-token-per-session context tax). The global
 > `~/.claude/CLAUDE.md` carries only a compact pointer; read this file on demand.
 > Deployed copy: `~/.config/ruflo/ruflo-reference-full.md`.
 
-
 ## Ruflo CLI Reference
 
 Ruflo is an AI orchestration toolkit (memory, hooks, swarms, neural learning,
-security). It exposes the same functionality via two surfaces:
+security). It exposes CLI and MCP surfaces whose availability can differ by release:
 
-- **CLI** — `ruflo <subcommand>` via Bash. Zero context cost; right for one-off calls
+- **CLI** — `ruflo <subcommand>` via Bash. No eagerly loaded MCP schema; tool output still uses context. Useful for one-off calls
   and scripting.
 - **MCP** — `mcp__claude-flow__*` tools, registered once at USER scope under the
   `claude-flow` key (`ak x mcp pick`). Claude Code defers MCP tool schemas and
-  loads them on demand, so registration no longer costs the historical ~84k tokens of
-  always-loaded tool definitions per session. ruflo (3.28+) exposes ~276 tools across ~35
-  families with no server-side gating; the kit's family picker turns exclusions into
-  `permissions.deny` rules. Prefer MCP for tight, repeated, schema-typed integration;
-  `ak x mcp off` opts back out entirely.
+  loads them on demand when supported by the host. Discover the live registry for
+  actual tool names and schemas; no fixed tool count establishes current availability.
+  The kit's family picker records Claude permission exclusions. Other hosts have their
+  own projection and enforcement surfaces. Prefer MCP for repeated typed integration;
+  `ak x mcp off` relinquishes the managed Claude registration.
 
 ### When NOT to use ruflo
 
 Ruflo is for orchestration, learning, and memory. Don't use it for:
+
 - Single-file edits (use Edit/Write directly)
 - Trivial bug fixes (use Edit + your normal flow)
 - Read-only questions about the codebase (use Grep/Read)
@@ -56,94 +56,33 @@ ruflo memory cleanup            # remove stale/expired
 
 **Use `--smart`** for query expansion + RRF + MMR + recency boosting.
 **Use `--build-hnsw`** the first time you search a populated namespace (one-time
-indexing for 150x speedup).
+indexing; measure any speedup on your own corpus).
 
 **When to store**: After a non-obvious decision, a debugging breakthrough, a
 pattern that worked, or a constraint discovered (e.g., "library X breaks on
 Node 22"). Don't store anything derivable from `git log` or current code.
 
-**Three known ruflo memory parity gotchas** that look like "store succeeded
-but read returns 0". All three can happen from Claude Code's Bash tool but
-not from a plain terminal shell, so verify with `sqlite3` directly when in
-doubt — see diagnostic table below.
+### Memory and native-runtime diagnosis
 
-1. **Bash subprocess cwd drift**. Each Bash tool invocation runs in a fresh
-   subprocess whose cwd may not match the user's terminal. Ruflo defaults to
-   `cwd/.swarm/memory.db`, so store + retrieve can hit *different* DB files if
-   cwd drifts. **Fix**: set `CLAUDE_FLOW_DB_PATH` in `.claude/settings.local.json`
-   as an **absolute, fully-resolved path** (see #3 for why).
+The configured `.swarm/memory.db` pin and Ruflo's native
+`.swarm/agentdb-memory.db` sibling have different roles. Do not infer lost writes
+from an empty table in only one file. First run `ak status` and
+`ak x verify memory`; the latter uses a disposable store/retrieve/delete probe to
+identify the active writer and verify persistence. Preserve existing databases.
 
-2. **sql.js (WASM) WAL blindness**. Ruflo's WASM SQLite reader cannot replay
-   uncheckpointed `.swarm/memory.db-wal` sidecars. If a prior native-SQLite
-   ruflo build wrote to the WAL and the WAL never got checkpointed, every
-   subsequent CLI memory read sees a stale snapshot — even with `--path`
-   correct. Diagnostic: `.swarm/memory.db-wal` larger than `.swarm/memory.db`
-   is the smoking gun. **Fix**:
-   ```bash
-   sqlite3 .swarm/memory.db "PRAGMA wal_checkpoint(TRUNCATE);"
-   ```
-   `ak sync` checkpoints this automatically; `ak setup` also runs it post-init.
+Ruflo subprocesses must use the intended project directory. Agentic-kit writes
+an absolute `CLAUDE_FLOW_DB_PATH` for Claude and derives the same project pin in
+its Codex/OpenCode bridges. A literal `${CLAUDE_PROJECT_DIR}` in a settings value
+is not a substitute for the resolved path.
 
-3. **`${CLAUDE_PROJECT_DIR}` is NOT expanded by Claude Code in settings env
-   values** (at least in v2.1.x). The literal string passes through to the
-   subprocess, and ruflo's WASM backend silently fails to open it — but the
-   in-memory store call still returns `[OK] Data stored successfully`. Data
-   is lost without warning. **Fix**: always write `CLAUDE_FLOW_DB_PATH` as an
-   absolute, fully-resolved path in `settings.local.json`, e.g.:
-   ```json
-   "env": {"CLAUDE_FLOW_DB_PATH": "/Users/you/project/.swarm/memory.db"}
-   ```
-   NOT `"${CLAUDE_PROJECT_DIR}/.swarm/memory.db"`. `ak setup`
-   writes the resolved path automatically and heals stale broken values
-   when re-run.
-
-**Diagnostic table** (same surface symptom: store says OK, reads see 0):
-
-| Native `sqlite3` count | WAL size | Likely cause |
-|---|---|---|
-| > 0 | < main DB | Data exists — reader sees stale snapshot → **cwd drift** (#1) |
-| > 0 | > main DB | Data in WAL only → **WAL blindness** (#2), checkpoint to fix |
-| 0 | 0 | Write never landed → **broken env var** (#3) or **Node-version/WASM** (below) |
-
-### Node version compatibility (historically the ROOT cause of the WASM bugs)
-
-> **Partly resolved upstream in ruflo v3.10.6**
-> ([ruvnet/ruflo#2219](https://github.com/ruvnet/ruflo/issues/2219)). Ruflo added an
-> npm override forcing `better-sqlite3 ≥12.8.0` across the agentdb copies, which fixes
-> Node 24. Node 26 support starts at better-sqlite3 12.10.0; an exact 12.8/12.9
-> override can still fall back to WASM. The kit's natives heal (part of `ak sync`)
-> raises a stale v12 pin to a Node-compatible range and installs the binding.
-
-Background (why the bug existed, and the cases where patching still matters):
-
-The sql.js (WASM) backend is a *fallback*. ruflo prefers native `better-sqlite3`. The
-deeper `agentdb` packages still *declare* `better-sqlite3@^11.8.1` (no prebuilt for Node
-24+, won't compile against Node 26's V8). Ruflo's ancestor override should decide the
-effective version, but nested repair installs must discover that override explicitly.
-On Node 26 they must also avoid v12 releases older than 12.10.0.
-
-| Node | ABI | Compatible better-sqlite3 | Stale/incompatible resolution |
-|------|-----|---------------------------|-------------------------------|
-| ≤ 22 (LTS) | ≤ 127 | **native** | native |
-| 24 | 137 | **native (v12 prebuilt)** | v11 → ❌ WASM |
-| 26 | 147 | **native (v12.10+ prebuilt)** | v11 or v12.8/12.9 → ❌ WASM |
-
-**When the kit's natives heal still earns its keep:**
-- **npm ≥ 11.17** — npm's new `allow-scripts` blocks `better-sqlite3`'s build/`prebuild-install`
-  during a global upgrade, so the native `.node` is skipped (the override resolves v12 but the
-  prebuilt is never fetched) → WASM. **Always run `ak sync` after a global upgrade on npm
-  ≥ 11.17**; its natives-heal step installs the binary even under `allow-scripts`.
-- **Node 26 with a stale v12 pin** — better-sqlite3 12.8/12.9 does not declare Node 26
-  support. `ak sync` raises it to `^12.10.0`, whose prebuilt supports ABI 147.
-- **ruflo < 3.10.6** on Node ≥24 — no override yet, so the agentdb copies fall to WASM;
-  patch (or upgrade ruflo) to fix.
-- **agentic-qe** — a *separate* package with its own native-SQLite init that the override
-  doesn't cover; `ak setup` repairs it.
-- As an idempotent re-assert if anything ever resolves a stale v11 binary.
-
-To check current state without changing anything: `ak status` (it reports
-`already native` when resolution and the binding are healthy). Alternative to all of this: run ruflo
-on **Node 22 LTS** (e.g. `mise install node@22`), where native resolves cleanly regardless.
+Historical sql.js/WAL and native better-sqlite3 mismatches could produce stale or
+non-durable reads. A WAL file's size is not enough to diagnose the cause. Use
+current native-module and memory probes before changing database state; back up
+stores before manual recovery. `ak sync --dry-run` shows applicable repairs and
+`ak sync --no-upgrade` performs configured healing without package upgrades.
+Node-version support depends on the installed binding and ABI, not just package
+presence. Do not repair an unrelated store because an old incident had similar
+symptoms.
 
 ### Hooks (learning + routing + workers)
 
@@ -237,9 +176,9 @@ ruflo security defend -f untrusted-input.txt
 ruflo security defend --stats                    # detection statistics
 ```
 
-**Run `ruflo security defend` on any untrusted text** before passing it to
-another agent or storing it in memory (e.g., scraped web content, user-uploaded
-files, federation messages).
+`ruflo security defend` can provide an additional diagnostic on untrusted text
+when its engine is available. A clean classification does not authorize an action
+or make retrieved text trusted instructions.
 
 ### Performance
 
@@ -293,114 +232,68 @@ ruflo neural predict -i "task description"       # query a model
 ruflo neural benchmark                           # WASM training perf
 ```
 
-Mostly background — the daemon trains continuously. Manual invocation is for
-forcing training cycles after big behavioral shifts.
+Background learning depends on enabled workers and recorded signals. Manual
+training is a separate explicit operation; a running daemon is not proof that
+a training cycle completed.
 
-**Activate + verify self-learning (machine-ref helpers).** On Node ≥24 the ruvector
-self-learning stack (SONA, HNSW, ReasoningBank) is dormant until the native
-better-sqlite3 binary is in place — the same root cause as the memory bug, and it is
-wiped by every `npm install -g ruflo` upgrade.
+**Verify learning separately from module presence.** `ruflo neural status` can
+show lazy per-process state. `ak status` inspects installed capabilities, while
+`ak x verify learning` trains a temporary fixture and checks retained patterns.
+Neither establishes model-quality improvement on a real project. Inspect the
+sync plan after an upgrade; a repair is required only when the relevant evidence
+shows drift or missing native support.
 
-```bash
-ak sync            # patch native bsq3 + assert real capability (5 probes)
-ak sync --check    # report activation only, change nothing
-ak x verify learning            # prove the loop: train in a temp dir, patterns 0 -> N
-```
+### Agentic-QE
 
-Note: `ruflo neural status` may still print HNSW/Training as "Not loaded" — that is a
-**lazy per-process display** (`getHNSWStatus`), not real dormancy. Trust
-`ak sync`'s capability probes (`@ruvector/core`→`VectorDb`, `sona`,
-`gnn`, agentdb v3) and `ak x verify learning`'s on-disk pattern count instead. Re-run
-`ak sync` after every ruflo upgrade.
+Agentic-QE is a separate package and owns its project database, generated assets,
+platform integrations, and quality tools. It is enabled in the kit's default
+configuration; `ak setup --no-aqe` explicitly disables it. Project setup can run
+`aqe init --auto` and change generated files, so review `ak setup --dry-run` and
+the project's backup requirements before reinitializing an existing repository.
+For routine convergence use `ak sync`; this is not the same as forcing a fresh
+initializer run. Read the managed AQE reference for tool discovery and authority.
 
-### Agentic-QE (opt-in quality-engineering fleet)
+### Security verification
 
-`agentic-qe` is a SEPARATE package (`npm i -g agentic-qe`) with its own MCP, 60+ QE
-agents, and a ReasoningBank. On Node ≥24 its `aqe init` fails at persistence-db init
-for the same native-SQLite reason. The machine-ref helper repairs that and handles
-half-init:
-
-```bash
-ak setup                  # native-bsq3 repair + aqe init --auto + half-init repair
-ak setup          # force reinitialize (aqe init --auto --upgrade)
-```
-
-Opt-in only — `ak setup` does NOT run it.
-
-When agentic-qe is enabled in `kit.json`, the kit merges the compact
-**`ruflo-aqe-reference`** block into `~/.claude/CLAUDE.md`; disabling AQE strips it.
-Executable detection remains a compatibility fallback for legacy reference commands that
-do not load kit configuration. Source: `claude/aqe-reference.md`; applied by `ak setup` and
-reconciled by `ak sync`.
-
-### Security surface (verify + activate)
-
-```bash
-ak x verify security            # verify @claude-flow/security + @claude-flow/aidefence
-                                 # load, defend detects injection, scan/secrets run
-ak setup   # run the security pass during project setup
-```
-
-`ruflo security cve --list` has no CVE database configured — use `npm audit` for
-dependency CVEs. **Known upstream defect on 3.28.0** (ruvnet/ruflo#2670): the tree
-no longer ships `@claude-flow/aidefence` but `security defend` still imports it, so
-on a bare install defend prints only its banner with no verdict and an untrustworthy
-exit code. **`ak sync` heals this** (reinstalls the package `--no-save`),
-restoring exit 1=threat / 0=clean — with only the old cosmetic render crash after
-the verdict. Re-run resync after every `npm i -g ruflo`.
+`ak x verify security` probes the installed security modules and their behavior.
+A loaded module or zero exit code alone is not a security verdict. Historical
+Ruflo 3.28.0 packaging gaps required kit repair; that incident does not establish
+that every later version has the same defect. Use `ak status`, the current sync
+plan, and the verifier rather than reinstalling packages on assumption.
 
 ### Status-line activation footer
 
-When set up via this kit, a footer is appended **below** ruflo's native status-line
-render (append-only, so it never breaks on a ruflo template change). Each ruflo
-feature renders on **its own line** so the live metrics are individually scannable:
+The kit injects its footer below Ruflo's project status-line output. Generated
+helper replacement can remove that injection; `ak status` detects drift and
+`ak sync` reapplies the supported projection. The current renderer is
+`src/templates/statusline-footer.cjs` in the agentic-kit source.
 
-```
-🧠 SONA  [●●●●●]  50 patterns · 55 traj · ⚡ HNSW
-📈 RL  ε0.83↓ · δ̄0.012↓ · |Q|6 · upd42
-🛡 aidefence on
-⚙ 1 ruflo daemon
-─────────────────────────────────────────────────────
-🎓 Agentic QE  🎓 23 patterns · 🧭 114 traj · 🧬 543 vec⚡ · 💾 16MB
-```
+- SONA counts come from `.claude-flow/neural/stats.json`. The volume dots show
+  roughly ten recorded patterns per dot, not a quality score.
+- A `Δ‖W‖` field can accompany SONA when the installed coordinator supports it.
+  The kit persists a confidence-weighted micro-LoRA mirror in
+  `.claude-flow/neural/lora-live.json`. This is adaptation magnitude, not proof
+  that the model serving the session changed or that task quality improved.
+- Routing metrics read `.swarm/q-learning-model.json`, with an older metrics
+  fallback. They describe saved observations, not continuous runtime sampling.
+- `◷ proof FAIL` is an alarm from `.claude-flow/improvement.json`; a passing
+  proof-of-mechanism fixture stays silent and is not a real-workload verdict.
+- `⚠ aidefence OFF` appears only when an inspected Ruflo install lacks the
+  engine. Unknown discovery is not absence; healthy presence stays silent.
+- Daemon counts are machine-wide and briefly cached. A count alone does not
+  establish automated inference or spend.
+- The AQE line uses guarded database reads of recorded pattern, trajectory,
+  embedding, and store-size fields. Missing evidence is not a measured zero.
 
-Each field renders only when active: SONA `patterns`/`traj` from
-`.claude-flow/neural/stats.json` (the `[bar]` is a ~10-patterns/dot volume gauge;
-both counts persist across restarts since ruflo #2245), `⚡ HNSW` only when
-`.swarm/hnsw.index` exists, `🛡` when `@claude-flow/aidefence` (the engine behind
-`security defend`) is resolvable — absent on a bare 3.28 install until `ak sync`
-reinstalls it (ruvnet/ruflo#2670), `⚙` counting running daemons machine-wide
-(yellow ≥4 — one per active project is normal), and the
-`🎓 Agentic QE` line (a few guarded `sqlite3` reads of `.agentic-qe/memory.db`;
-`vec` reads `qe_pattern_embeddings`, falling back to `vectors`/`embeddings`) only
-when AQE is initialized.
-
-`📈 RL` is **live** route Q-learner metrics, read fs-only from
-`.swarm/q-learning-model.json` (fallback `.claude-flow/metrics/learning.json`), never
-the broken `route stats` CLI: `ε`↓ (exploration), `δ̄`↓ (mean TD error), `|Q|`
-(distinct task-states), `upd`. Gated on `updateCount > 0`, so it stays absent until
-routing feedback runs. `◷ proof FAIL` is an **alarm-only** segment from
-`.claude-flow/improvement.json` (the `ruflo-improvement-eval` verdict): a `PASS`
-renders nothing, only a regression surfaces (`◷ proof FAIL  Δpp · CI · p · d · <age>`).
-There is **no `Δ LoRA` field** — the adaptation seam (`@ruvector/ruvllm`
-`processInstantLearning`) is an unshipped no-op stub, so `deltaNorm` is always 0;
-omitting it avoids a fabricated signal.
-
-```bash
-ruflo neural train               # train directly; the statusline Δ‖W‖ tracker
-ruflo neural train -p security -e 100   # auto-refreshes on the next render
-```
+Use the accompanying diagnostics to investigate a segment; module presence and
+saved counters cannot substitute for a fresh end-to-end verification.
 
 ### Re-apply after a ruflo / agentic-qe upgrade — one command
 
-`npm install -g ruflo@latest` (or `agentic-qe@latest`) re-resolves pins, drops the
-native better-sqlite3 binaries, and regenerates the statusline — so self-learning goes
-dormant and the footer disappears. Heal it in one step from a project root:
-
-```bash
-ak sync            # enable-learning + agentic-qe native repair + statusline
-ak sync      # also refresh agentic-qe skills (aqe init --auto --upgrade)
-```
+Package upgrades can replace native bindings and generated helpers. Inspect
+`ak sync --dry-run`, then use `ak sync` for configured convergence. Review its
+results and restart affected host sessions; no command guarantees that every
+upstream defect can be repaired locally.
 
 ### Autopilot (persistent task completion)
 
@@ -412,8 +305,9 @@ ruflo autopilot predict                          # next-action recommendation
 ruflo autopilot disable
 ```
 
-Use when you want a long-horizon goal to survive across sessions without
-hand-holding (e.g., "complete all open issues in this milestone").
+Use only within an explicitly authorized task, execution budget, and permissions.
+Enabling an upstream loop does not prove cross-session completion or authorize
+new tasks, publication, spending, or privilege changes.
 
 ### Session management
 
@@ -463,8 +357,8 @@ ruflo daemon stop --all                          # every workspace/worktree on t
 ruflo daemon install-supervisor                  # launchd/systemd auto-start
 ```
 
-The daemon is what makes self-learning continuous. Without it, hooks fire but no
-pattern training happens in the background. `ak setup` starts one per
+The daemon can schedule background analysis and learning workers. Hooks can
+also record learning signals independently; inspect their outcomes separately. `ak setup` starts one per
 project by default — safe because its workers run the local ($0) path. Headless
 **AI workers** (they spawn `claude --print` and spend tokens) are opt-in:
 `RUFLO_DAEMON_AI_WORKERS=1` (or `daemon start --headless`), governed by the
@@ -510,7 +404,7 @@ For uninstalling ruflo from a project.
 
 ## Quick decision tree
 
-```
+```text
 Need to ... ?
 ├─ Search past work / decisions      → ruflo memory search -q "..." --smart
 ├─ Store a decision/pattern          → ruflo memory store -k K --value V -n patterns
@@ -521,7 +415,7 @@ Need to ... ?
 ├─ Coordinate 3+ agents              → native Agent tool first; ruflo swarm only if topology/consensus needed
 ├─ Scan untrusted text               → ruflo security defend -i "..."
 ├─ Activate + verify self-learning   → ak sync && ak x verify learning
-├─ Re-apply after a ruflo/aqe upgrade → ak sync   (one command heals everything)
+├─ Re-apply after a ruflo/aqe upgrade → ak sync   (inspect the plan and resulting evidence)
 ├─ Verify the security surface       → ak x verify security
 ├─ Set up agentic-qe in a repo       → ak setup   (opt-in)
 └─ Background analysis (long task)   → ruflo hooks worker dispatch -t <type>

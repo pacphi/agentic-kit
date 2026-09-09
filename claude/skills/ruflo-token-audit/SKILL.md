@@ -8,8 +8,8 @@ user-invocable: true
 
 A **comprehensive** picture of Claude Code usage, built from the local session transcripts
 in `~/.claude/projects/**/*.jsonl` (each assistant message records its token usage, tool
-calls, model, and metadata). This is **not limited to "tokens ruflo burns"** — it covers
-ALL Claude Code activity (interactive, subagents, hooks, MCP, web tools) and answers two
+calls, model, and metadata). This is **not limited to "tokens ruflo burns"** — it summarizes
+the activity visible in retained Claude Code transcripts (including recorded subagent and tool activity) and answers two
 questions: *where is my usage going?* and *is any of it runaway automation?*
 
 This skill is **self-contained** — it bundles its own engine, so it works even if the full
@@ -25,12 +25,14 @@ Claude Code activity", "I'm hitting my Max/Pro limit", "what am I spending token
 
 1. **Run the bundled engine.** Prefer the copy that ships *inside this skill* (works with
    no kit install); fall back to the PATH command if present:
+
    ```bash
    # self-contained (always available wherever this skill is installed):
    python3 ~/.claude/skills/ruflo-token-audit/scripts/ruflo-token-audit.py --days 7
    # …or, if the agentic-kit kit put it on PATH:
    ruflo-token-audit --days 7
    ```
+
    - Honor any window the user gives ("past month" → `--days 30`).
    - `--top N` widens each section; `--json` gives machine-readable output; `--no-daemons`
      skips the `ps` cross-reference.
@@ -38,26 +40,30 @@ Claude Code activity", "I'm hitting my Max/Pro limit", "what am I spending token
 
 2. **Read the whole picture, then lead with the headline.** The report has many sections;
    synthesize, don't echo. Key sections and what they tell you:
+
    | Section | Read it for |
    |---|---|
-   | BY MODEL | Opus = interactive; heavy Haiku/Sonnet = automation/subagents |
-   | SESSIONS PER DAY | tens = human; hundreds–thousands = automation (≈one/min = robotic) |
-   | ACTIVITY BY HOUR | a flat 24h histogram (busy at 3am) is automation, not a person |
+   | BY MODEL | Model mix; model name alone does not establish human or automated origin |
+   | SESSIONS PER DAY | Volume and bursts to investigate; counts alone do not prove automation |
+   | ACTIVITY BY HOUR | Timing patterns to correlate with user activity and process evidence |
    | TOOL USAGE | what the work actually *is* (Bash/Read/Edit vs Task/MCP) |
-   | MCP USAGE | per-server call volume; heavy MCP also means big per-session tool-def tax |
+   | MCP USAGE | Per-server call volume; loaded-schema cost depends on host/tool discovery |
    | SUBAGENT FAN-OUT | Task spawns + sidechain share — how much is delegated/parallel |
    | BUSIEST SESSIONS | a single runaway conversation surfaces here by token total |
    | CACHE EFFICIENCY | high cache-read% is normal/cheap; flag only with huge automated volume |
    | STARTUP CONTEXT TAX | fixed per-session cost (CLAUDE.md + tool/skill manifests) × many sessions |
    | RUNNING DAEMONS | live `ruflo daemon start` mapped to top-burn projects (the classic leak) |
 
-3. **Check the daemon cross-reference** (most common automation leak). Each daemon spawns
-   worker sessions continuously and is **invisible to `ruflo daemon status`** (that checks
-   only the current workspace). If daemons are listed and the user authorizes:
+3. **Check the daemon cross-reference** (most common automation leak). A daemon process alone does not prove model spend. Current Ruflo daemons default to
+   local-only workers; AI workers are separately enabled and budgeted. Inspect
+   `ruflo daemon status --all` and `ruflo daemon budget show`, then correlate process
+   and transcript evidence. If daemons are listed and the user authorizes:
+
    ```bash
    ruflo-daemon-gc            # preview stale daemons
    ruflo-daemon-gc --kill     # stop them
    ```
+
    Then re-run the audit to confirm. (These `ruflo-*` helpers exist only with the kit; if
    absent, fall back to `kill <pid>` on the daemon PIDs the report lists.)
 
@@ -74,8 +80,8 @@ Claude Code activity", "I'm hitting my Max/Pro limit", "what am I spending token
 - High **cache-read** is normal and cheap; flag it only when it's huge *and* multiplied by
   thousands of automated sessions.
 - A few hundred sessions (or Task spawns) from legitimate parallel subagent work is not a
-  leak. The tell is *unattended, repeating* activity — flat overnight hours, near-identical
-  session counts across projects, daemons running.
+  leak. Investigate repeated unattended activity by correlating explicit session metadata,
+  known worker schedules, and running processes; timing and naming are leads, not proof.
 
 ## Sample prompts the user can use
 
@@ -88,5 +94,5 @@ Claude Code activity", "I'm hitting my Max/Pro limit", "what am I spending token
 
 Built after a real incident: six leaked `ruflo daemon start` processes (one per onboarded
 project, oldest running 19 days) produced ~10,100 sessions / 8.1B tokens in a week — ~94%
-background machinery vs ~6% interactive Opus. The kit now makes the daemon opt-in and
-auto-reaps stale ones; this audit is how you catch a recurrence or any other usage surprise.
+background machinery vs ~6% interactive Opus. Project setup now starts a bounded local-only daemon by default; model-spending AI
+workers remain opt-in, and the kit can reap stale daemons; this audit is how you catch a recurrence or any other usage surprise.

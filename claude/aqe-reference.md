@@ -26,6 +26,6 @@ tool discovery or `aqe --help` for exact current names and schemas instead of re
 an eagerly loaded catalogue.
 
 `aqe init` owns project-specific projection. Agentic-kit manages machine provider intent
-through `ak host`; run `ak sync` after upgrades and `aqe health` for runtime/billing
-evidence. Do not overwrite foreign hooks, status lines, or user environment settings.
+through `ak host`; run `ak sync` after upgrades and `aqe health` for reported health. Billing and served
+provider identity require separate evidence. Do not overwrite foreign hooks, status lines, or user environment settings.
 <!-- END ruflo-aqe-reference -->
