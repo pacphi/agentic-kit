@@ -4288,6 +4288,7 @@ async function main() {
         const contextView = await page.evaluate(() => ({
           policy: document.getElementById('u-ctx-policy')?.textContent,
           states: [...document.querySelectorAll('#u-ctx-hosts .ctx-state')].map((node) => node.textContent),
+          unavailable: document.querySelectorAll('#u-ctx-hosts .ctx-no-pressure').length,
           meters: [...document.querySelectorAll('#u-ctx-hosts [role="meter"]')].map((node) => ({
             text: node.textContent.trim(), now: node.getAttribute('aria-valuenow'),
             min: node.getAttribute('aria-valuemin'), max: node.getAttribute('aria-valuemax'),
@@ -4306,8 +4307,8 @@ async function main() {
           /5%.*7%.*10%/.test(contextView.policy) && /60%.*70%.*75%/.test(contextView.policy)
             && /25%/.test(contextView.policy),
           `Context policy was ${JSON.stringify(contextView.policy)}`);
-        check('Context exposes one evidence state and one semantic meter per supported host',
-          contextView.states.length === 3 && contextView.meters.length === 3,
+        check('Context exposes one coverage state and a measurement or explicit absence per host',
+          contextView.states.length === 3 && contextView.meters.length + contextView.unavailable === 3,
           `Context evidence was ${JSON.stringify(contextView)}`);
         check('unknown Context meters omit aria-valuenow while observed meters include it',
           contextView.meters.every((meter) => meter.min === '0' && meter.max === '100'

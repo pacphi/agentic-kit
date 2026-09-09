@@ -6,8 +6,9 @@ import { authHeaders, esc } from './bootstrap.mjs';
   export var HOOKS=null,hooksBusy=null;
 
   function ctxTokens(value){
+    if(value===null||value===undefined||value==="")return "—";
     var n=Number(value);
-    if(!Number.isFinite(n))return "unknown";
+    if(!Number.isFinite(n))return "—";
     if(n>=1000000)return (n/1000000).toFixed(1)+"M";
     if(n>=1000)return Math.round(n/1000)+"K";
     return String(Math.round(n));
@@ -30,22 +31,36 @@ import { authHeaders, esc } from './bootstrap.mjs';
       +'<span class="ctx-meter-value mono">'+(known?actual.toFixed(1)+"%":"unknown")+'</span></div>';
   }
 
+  function contextCount(value){
+    return Number.isInteger(value)&&value>=0?value.toLocaleString('en-US'):'—';
+  }
+
+  function contextCoverageDescription(coverage){
+    var sessions=coverage.sessions,paired=coverage.pressureMeasured||0;
+    if(sessions===0)return {label:'No sessions',reason:'No sessions in the selected timeframe.'};
+    if(!Number.isFinite(sessions))return {label:'Unavailable',reason:'Session coverage is unavailable.'};
+    if(paired>0)return {label:paired===sessions?'Measured':'Partial coverage',reason:paired+' of '+sessions+' sessions have paired input/window measurements.'};
+    if(coverage.inputMeasured>0&&!(coverage.windowMeasured>0))return {label:'Input only',reason:'Input tokens are available without a recorded context window.'};
+    if(coverage.windowMeasured>0)return {label:'Unpaired data',reason:'Input and window were not recorded together, so pressure cannot be calculated.'};
+    return {label:'Not recorded',reason:'No input/window measurements were found in these sessions.'};
+  }
+
   function contextHostCard(host,fold){
     fold=fold||{};
-    var coverage=fold.coverage||{},state=coverage.state||"not-observed";
+    var coverage=fold.coverage||{},state=coverage.state||"not-observed",description=contextCoverageDescription(coverage);
     var peak=fold.pressureBps&&fold.pressureBps.peak&&fold.pressureBps.peak.p90;
     var windowMedian=fold.windowTokens&&fold.windowTokens.median;
     var inputPeak=fold.inputTokens&&fold.inputTokens.peak&&fold.inputTokens.peak.p90;
+    var label=({claude:'Claude',codex:'Codex',opencode:'OpenCode'})[host]||host;
+    var pressure=peak!==null&&peak!==undefined&&Number.isFinite(Number(peak));
     return '<article class="ctx-card" data-state="'+esc(state)+'">'
-      +'<div class="ctx-card-head"><h2>'+esc(host)+'</h2><span class="ctx-state">'+esc(ctxState(state))+'</span></div>'
-      +contextMeter(host+' p90 peak context pressure',peak)
-      +'<dl class="ctx-facts"><div><dt>sessions</dt><dd>'+esc(coverage.sessions||0)+'</dd></div>'
-      +'<div><dt>paired samples</dt><dd>'+esc(coverage.pressureMeasured||0)+'</dd></div>'
+      +'<div class="ctx-card-head"><h2>'+esc(label)+'</h2><span class="ctx-state">'+esc(description.label)+'</span></div>'
+      +(pressure?contextMeter(label+' p90 peak context pressure',peak):'<p class="ctx-no-pressure">Pressure not measured</p>')
+      +'<dl class="ctx-facts"><div><dt>sessions</dt><dd>'+esc(contextCount(coverage.sessions))+'</dd></div>'
+      +'<div><dt>Sessions with pressure</dt><dd>'+esc(contextCount(coverage.pressureMeasured))+'</dd></div>'
       +'<div><dt>p90 peak input</dt><dd>'+esc(ctxTokens(inputPeak))+'</dd></div>'
       +'<div><dt>median window</dt><dd>'+esc(ctxTokens(windowMedian))+'</dd></div></dl>'
-      +'<p class="ctx-caveat">'+(state==="observed"?'Input and window were observed together for every session in this slice.'
-        :state==="partial"?'Some input or window evidence exists, but not every session has a paired pressure sample.'
-          :'No paired runtime context evidence was recorded for this host in the selected window.')+'</p></article>';
+      +'<p class="ctx-caveat">'+esc(description.reason)+'</p></article>';
   }
 
   function contextAttentionAction(state){
@@ -111,7 +126,7 @@ import { authHeaders, esc } from './bootstrap.mjs';
     var hostsEl=document.getElementById("u-ctx-hosts"),attentionEl=document.getElementById("u-ctx-attention");
     if(!policyEl||!summaryEl||!hostsEl||!attentionEl)return;
     var policy=context&&context.policy||{};
-    function percent(key){return Number.isFinite(Number(policy[key]))?(Number(policy[key])/100).toFixed(0)+"%":"unknown";}
+    function percent(key){return policy[key]!==null&&policy[key]!==undefined&&Number.isFinite(Number(policy[key]))?(Number(policy[key])/100).toFixed(0)+"%":"unknown";}
     policyEl.innerHTML='<span><b>startup</b> target '+percent("startupTargetBps")+' · warning '+percent("startupWarningBps")+' · critical '+percent("startupCriticalBps")+'</span>'
       +'<span><b>dynamic</b> warn '+percent("dynamicWarningBps")+' · compact '+percent("dynamicCompactBps")+' · handoff '+percent("dynamicHandoffBps")+'</span>'
       +'<span><b>reserve</b> '+percent("reserveBps")+'</span>';
@@ -130,7 +145,7 @@ import { authHeaders, esc } from './bootstrap.mjs';
     var openGroups=Object.create(null),open=attentionEl.querySelectorAll("details[data-context-group][open]");
     for(var i=0;i<open.length;i++)openGroups[open[i].getAttribute("data-context-group")]=true;
     attentionEl.innerHTML=attention.length?contextAttentionMarkup(attention,openGroups)
-      :'<div class="empty">No session crossed a configured attention threshold in this window.</div>';
+      :'<div class="empty">'+(coverage.pressureMeasured>0?'No session crossed a configured attention threshold in this window.':'No sessions have paired context measurements in this timeframe.')+'</div>';
   }
 
   function hookKpi(label,value,detail){
