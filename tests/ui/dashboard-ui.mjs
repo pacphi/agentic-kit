@@ -49,6 +49,7 @@ import { directoryEntries } from '../../src/lib/dashboard/about-directory.mjs';
 // functions over the shared sentinel fixtures every maintenance slice tests
 // against — never hand-typed JSON that could drift from the actual contract.
 import { runInventoryQuery } from '../../src/lib/maintenance/management/query.mjs';
+import { recommendationEntries } from '../../src/lib/maintenance/management/guidance-purpose.mjs';
 import { inspectorFor } from '../../src/lib/maintenance/management/guidance.mjs';
 import { buildActivity } from '../../src/lib/maintenance/management/activity.mjs';
 import {
@@ -1451,7 +1452,7 @@ async function main() {
     return activeMaintenanceInventory.placements.find((p) => p.placementId === placementId) ?? null;
   }
   function mntGuidanceResponse() {
-    const entries = activeMaintenanceInventory.guidanceEntries ?? [];
+    const entries = recommendationEntries(activeMaintenanceInventory.guidanceEntries);
     const counts = { apply: 0, steps: 0, decision: 0, update: 0, recovery: 0, total: entries.length };
     const lanes = { apply: [], steps: [], decision: [], update: [], recovery: [] };
     for (const entry of entries) { counts[entry.lane] += 1; lanes[entry.lane].push(entry); }
@@ -1695,12 +1696,12 @@ async function main() {
         },
         capability: 'cap-ui-plan-secret',
         confirmation: {
-          title: '<img src=x onerror="globalThis.__maintConfirmXss=1"> Disable frontend-design?',
-          summary: 'Claude stops loading frontend-design until it is enabled again.',
+          title: '<img src=x onerror="globalThis.__maintConfirmXss=1"> Update frontend-design?',
+          summary: 'Installs the verified newer frontend-design version.',
           willChange: ['<svg onload="globalThis.__maintConfirmXss=2">'],
           preserved: ['Plugin data', 'Other plugins'],
-          restart: false, rollback: 'Enable the plugin again.',
-          actionLabel: 'Disable plugin', typedPhrase: 'DISABLE frontend-design',
+          restart: false, rollback: 'Restore the previous plugin version.',
+          actionLabel: 'Update plugin', typedPhrase: 'UPDATE frontend-design',
         },
       });
     }
@@ -1721,9 +1722,9 @@ async function main() {
       }
       return reply(200, {
         ok: true, receipt: {
-          id: 'receipt-disable-ui', status: 'committed',
-          summary: 'frontend-design was disabled.', updatedAt: new Date().toISOString(),
-          verification: 'Claude reports the plugin disabled.',
+          id: 'receipt-update-ui', status: 'committed',
+          summary: 'frontend-design was updated.', updatedAt: new Date().toISOString(),
+          verification: 'Claude reports the updated plugin version.',
         },
       });
     }
@@ -2297,8 +2298,8 @@ async function main() {
       return rows.length === 1 && /clarity/i.test(rows[0].textContent || '');
     });
     const clarityRowText = await page.$eval('#mnt-results .mnt-row', (btn) => btn.innerText);
-    check('J2: the user-scope clarity skill shows one placement with two consumer chips and no duplicate-removal action',
-      /claude/i.test(clarityRowText) && /codex/i.test(clarityRowText) && /Open details/.test(clarityRowText),
+    check('J2: the user-scope clarity skill shows one placement available to both consumers and no duplicate-removal action',
+      /claude/i.test(clarityRowText) && /codex/i.test(clarityRowText) && /View details/.test(clarityRowText),
       `clarity row read ${JSON.stringify(clarityRowText)}`);
     await page.click('#mnt-results .mnt-row');
     await page.waitForSelector('#mnt-inspector-title');
@@ -2402,12 +2403,12 @@ async function main() {
       /stopped at a limit/.test(incompleteBanner || '') && /entries/.test(incompleteBanner || '')
         && !/^\d+ of \d+/.test(incompleteBanner || ''),
       `partial banner read ${JSON.stringify(incompleteBanner)}`);
-    check('J10: the partial-source banner offers exactly the recommended action (Open Discovery)',
-      await page.isVisible('#mnt-partial [data-mnt-partial-action="discovery"]')
-        && /Open Discovery/.test(incompleteBanner || ''),
+    check('J10: the partial-source banner directs readers to Discovery without duplicating navigation',
+      await page.locator('#mnt-partial button').count() === 0
+        && /See Discovery for coverage details/.test(incompleteBanner || ''),
       `partial banner read ${JSON.stringify(incompleteBanner)}`);
-    check('J10: the found resource carries Open details, not a Managed action, while its source is incomplete',
-      /Open details/.test(incompleteRow),
+    check('J10: the found resource carries View details, not a Managed action, while its source is incomplete',
+      /View details/.test(incompleteRow),
       `incomplete-source row read ${JSON.stringify(incompleteRow)}`);
     await page.click('#mnt-results .mnt-row');
     await page.waitForSelector('#mnt-inspector-title');
@@ -2504,7 +2505,7 @@ async function main() {
     const twelveExpanded = await page.evaluate(() => {
       const groups = [...document.querySelectorAll('#mnt-results .mnt-group')];
       const target = groups.find((g) => /12-project-skill/.test(g.querySelector('.mnt-group-name')?.textContent || ''));
-      const sibling = groups.find((g) => /sibling/.test(g.querySelector('.mnt-group-name')?.textContent || ''));
+      const sibling = groups.find((g) => /sibling-skill/.test(g.querySelector('.mnt-row')?.textContent || ''));
       const toggle = target?.querySelector('[data-mnt-group-toggle]');
       return {
         targetRowCount: target?.querySelectorAll('.mnt-row').length,
@@ -2539,7 +2540,13 @@ async function main() {
         && !/Fresh source/.test(freshInstallBanner || ''),
       `fresh-install banner read ${JSON.stringify(freshInstallBanner)}`);
 
-    activeMaintenanceInventory = SENTINEL_FIXTURES.base();
+    // A verified update is a recommendation; an optional disable stays in the inspector.
+    activeMaintenanceInventory = structuredClone(SENTINEL_FIXTURES.base());
+    const updateEntry = activeMaintenanceInventory.guidanceEntries.find((entry) => entry.lane === 'apply');
+    Object.assign(updateEntry, { verb: 'update', outcome: 'Update Claude plugin',
+      providerCapabilityId: 'claude-plugin:v1:update:user',
+      verifiedPremises: ['placement', 'installedVersion', 'published-update', 'consumers', 'impact'],
+      impact: { summary: 'Installs the verified newer frontend-design version.' } });
     await page.fill('#mnt-search', '');
     await page.waitForFunction(() => document.querySelectorAll('#mnt-results .mnt-row').length > 3);
 
@@ -2556,7 +2563,9 @@ async function main() {
       `guidance lane labels read ${JSON.stringify(guidanceLaneLabels)}`);
     check('a provider check never starts on its own',
       maintenanceCheckProvidersReads === 0, 'the workspace probed providers without an explicit click');
+    const providerRefreshResponse = page.waitForResponse((response) => new URL(response.url()).searchParams.get('refresh') === 'scan');
     await page.click('#mnt-check-providers');
+    await providerRefreshResponse;
     // The button disables synchronously; Apply's disabled attribute follows
     // once the guidance re-render that mntCheckProviders() triggers resolves.
     await page.waitForFunction(() => document.querySelector('[data-mnt-plan-plc]')?.disabled === true, null, { timeout: 5000 });
@@ -2581,8 +2590,10 @@ async function main() {
     check('a disposition explains its effect before it can be confirmed',
       /keeps this outcome visible/i.test(dispositionExplanation) && maintenanceDispositionRequests.length === 0,
       `disposition explanation read ${JSON.stringify(dispositionExplanation)}`);
-    await page.click('.mnt-disposition-confirm [data-mnt-disposition-confirm="acknowledged"]');
-    await page.waitForFunction(() => maintenanceDispositionRequests?.length > 0).catch(() => {});
+    await Promise.all([
+      page.waitForResponse((response) => new URL(response.url()).pathname === '/api/maintenance/v2/dispositions' && response.request().method() === 'POST'),
+      page.click('.mnt-disposition-confirm [data-mnt-disposition-confirm="acknowledged"]'),
+    ]);
     check('confirming a disposition posts exactly one guidanceId and kind, with confirm:true',
       maintenanceDispositionRequests.length === 1
         && Object.keys(maintenanceDispositionRequests[0]).sort().join(',') === 'confirm,guidanceId,kind'
@@ -2594,7 +2605,7 @@ async function main() {
     // now driven by placementId + guidanceId against the v2 plan route ──
     const applyButtonLabel = await page.textContent('[data-mnt-plan-plc]');
     check('MNT-EVD-006: the Can apply here row uses a specific verb, never generic Fix',
-      /Disable plugin/i.test(applyButtonLabel || '') && !/\bFix\b/i.test(applyButtonLabel || ''),
+      /Update plugin/i.test(applyButtonLabel || '') && !/\bFix\b/i.test(applyButtonLabel || ''),
       `apply button read ${JSON.stringify(applyButtonLabel)}`);
     await page.click('[data-mnt-plan-plc]');
     await page.waitForSelector('#sys-maint-confirm[open] #sys-maint-typed');
@@ -2612,16 +2623,16 @@ async function main() {
         && /<svg onload=/.test(String(firstPreview.body))
         && firstPreview.xss === undefined && !firstPreview.secretInDom && !firstPreview.secretInUrl,
       `first preview was ${JSON.stringify(firstPreview)}; plan request was ${JSON.stringify(maintenancePlanRequests[0])}`);
-    await page.fill('#sys-maint-typed', 'DISABLE wrong');
+    await page.fill('#sys-maint-typed', 'UPDATE wrong');
     check('a partial typed phrase leaves Apply disabled',
       await page.$eval('#sys-maint-confirm-apply', (button) => button.disabled), 'a partial phrase enabled Apply');
-    await page.fill('#sys-maint-typed', 'DISABLE frontend-design');
+    await page.fill('#sys-maint-typed', 'UPDATE frontend-design');
     check('the exact typed phrase enables the named action',
       !(await page.$eval('#sys-maint-confirm-apply', (button) => button.disabled)), 'the exact phrase did not enable Apply');
     await page.click('#sys-maint-confirm-apply');
     await page.waitForFunction(() => document.getElementById('sys-maint-confirm-title')?.textContent === 'Change recorded');
     check('MNT-UX-012: a successful apply becomes a retained receipt, and the active destination refreshes',
-      /receipt-disable-ui/.test(await visibleText(page, '#sys-maint-confirm')),
+      /receipt-update-ui/.test(await visibleText(page, '#sys-maint-confirm')),
       `receipt sheet read ${JSON.stringify(await visibleText(page, '#sys-maint-confirm'))}`);
     await page.click('#sys-maint-confirm-apply');
     await page.waitForFunction(() => !document.getElementById('sys-maint-confirm')?.open);
@@ -2637,7 +2648,7 @@ async function main() {
 
     await page.click('[data-mnt-plan-plc]');
     await page.waitForSelector('#sys-maint-confirm[open] #sys-maint-typed');
-    await page.fill('#sys-maint-typed', 'DISABLE frontend-design');
+    await page.fill('#sys-maint-typed', 'UPDATE frontend-design');
     await page.click('#sys-maint-confirm-apply');
     await page.waitForFunction(() => document.getElementById('sys-maint-confirm-title')?.textContent === 'Recovery required');
     check('MNT-UX-012: an apply-phase 409 retains its receipt and never claims the resource is unchanged',
@@ -2703,8 +2714,10 @@ async function main() {
     check('checking Include local paths reveals the warning before any request is sent',
       await page.isVisible('#mnt-export-warning') && maintenanceExportRequests.length === 1,
       'the local-paths warning did not appear, or a request fired before confirmation');
-    await page.click('#mnt-export-again');
-    await page.waitForFunction(() => maintenanceExportRequests?.length > 1).catch(() => {});
+    await Promise.all([
+      page.waitForResponse((response) => new URL(response.url()).pathname === '/api/maintenance/v2/receipts/export' && response.request().method() === 'POST'),
+      page.click('#mnt-export-again'),
+    ]);
     check('re-exporting with local paths sends acknowledgedWarning:true in the SAME request',
       maintenanceExportRequests.length === 2 && maintenanceExportRequests[1].includeLocalPaths === true
         && maintenanceExportRequests[1].acknowledgedWarning === true,
@@ -2756,7 +2769,11 @@ async function main() {
     mntCoverageFilesystemByLabel = { 'Claude user configuration': false, 'Projects': true };
     await page.click('[data-mnt-dest="inventory"]');
     await page.click('[data-mnt-dest="discovery"]');
-    await page.waitForFunction(() => /Refresh evidence/.test(document.getElementById('mnt-scan-progress')?.innerText || ''));
+    await page.waitForFunction(() => {
+      const rows = [...document.querySelectorAll('#mnt-scan-progress tbody tr')];
+      return rows.some((row) => row.textContent.startsWith('Projects'))
+        && rows.every((row) => !row.textContent.startsWith('Claude user configuration'));
+    });
     const filesystemAwareRows = await page.$$eval('#mnt-scan-progress tbody tr', (els) => els.map((li) => li.textContent.trim()));
     const claudeRow = filesystemAwareRows.find((text) => text.startsWith('Claude user configuration'));
     const projectsRow = filesystemAwareRows.find((text) => text.startsWith('Projects'));
@@ -2780,8 +2797,10 @@ async function main() {
 
     // ── Scan this root (MNT-DSC-011): a per-source start control for a
     // user-added root that has never run ──
-    await page.click('[data-mnt-scan-start]');
-    await page.waitForFunction(() => maintenanceScanActionRequests?.length > 0).catch(() => {});
+    await Promise.all([
+      page.waitForResponse((response) => new URL(response.url()).pathname === '/api/maintenance/v2/scans' && response.request().method() === 'POST'),
+      page.click('[data-mnt-scan-start]'),
+    ]);
     check('Scan this root posts an exact start action',
       maintenanceScanActionRequests.length === 1 && maintenanceScanActionRequests[0].action === 'start'
         && maintenanceScanActionRequests[0].sourceId === neverScannedSourceId,
@@ -2894,6 +2913,11 @@ async function main() {
       const reqUrl = new URL(route.request().url());
       if (reqUrl.searchParams.get('refresh') === 'deep') remeasureDeepScanRequests += 1;
       remeasureSystemReadCount += 1;
+      if (remeasureSystemReadCount === 2) {
+        // Deep measurement also completes a fresh provider check and inventory build.
+        maintenanceCheckProvidersReads += 1;
+        maintenanceProviderPollCount = 2;
+      }
       return route.fulfill({
         status: 200, contentType: 'application/json',
         body: JSON.stringify({ ...SYSTEM_PAYLOAD, scan: { ...SYSTEM_PAYLOAD.scan, running: remeasureSystemReadCount <= 1 } }),
@@ -2914,6 +2938,13 @@ async function main() {
     check('Re-measure machine delegates to #sys-rescan (a real deep scan) and settles, re-enabling itself and Apply',
       remeasureDeepScanRequests === 1 && await page.$eval('[data-mnt-plan-plc]', (b) => b.disabled === false),
       `deep scan requests: ${remeasureDeepScanRequests}, Apply stayed disabled after Re-measure machine settled: ${await page.$eval('[data-mnt-plan-plc]', (b) => b.disabled)}`);
+    // A stale scheduled System poll used to restart a completed owned scan as
+    // an external operation, waiting forever for a second evidence generation.
+    await page.waitForTimeout(3200);
+    check('a completed remeasurement stays settled after the System poll interval',
+      await page.isEnabled('#mnt-remeasure') && await page.isEnabled('[data-mnt-plan-plc]')
+        && remeasureSystemReadCount === 2,
+      `system reads: ${remeasureSystemReadCount}; operation: ${await page.textContent('#mnt-check-providers-status')}`);
     await page.unroute(/\/api\/system(\?|$)/);
 
     // ── #system/catalog redirects to Maintenance Inventory (ADR-0048) ──
@@ -2951,12 +2982,13 @@ async function main() {
       const rect = document.getElementById('mnt-inspector').getBoundingClientRect();
       return {
         position: getComputedStyle(document.getElementById('mnt-inspector')).position,
-        coversViewport: rect.width >= globalThis.innerWidth - 1 && rect.height >= globalThis.innerHeight - 1,
+        belowResults: rect.top >= document.getElementById('mnt-results').getBoundingClientRect().bottom,
+        fitsWidth: rect.left >= 0 && rect.right <= globalThis.innerWidth && document.documentElement.scrollWidth <= globalThis.innerWidth,
         backLabel: document.getElementById('mnt-inspector-back')?.getAttribute('aria-label'),
       };
     });
-    check('MNT-UX-003: a narrow screen opens the placement as a full-screen inspector with Close details',
-      narrowInspector.position === 'fixed' && narrowInspector.coversViewport && narrowInspector.backLabel === 'Close details',
+    check('MNT-UX-003: a narrow screen reveals inline details below results with Close details',
+      narrowInspector.position === 'static' && narrowInspector.belowResults && narrowInspector.fitsWidth && narrowInspector.backLabel === 'Close details',
       `narrow inspector layout was ${JSON.stringify(narrowInspector)}`);
     await page.keyboard.press('Escape');
     await page.waitForFunction(() => document.getElementById('mnt-inspector')?.hidden === true);
@@ -4594,10 +4626,11 @@ async function main() {
       'Models loading state was not exposed to assistive technology');
     const proof = page.locator('#mli-models details.mli-proof').first();
     await proof.locator('summary').click();
+    const localCaptureDate = await page.evaluate((at) => new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' }).format(new Date(at)), MODEL_AT);
     check('usage/models state disclosure names source, class, capture, freshness, and completeness',
       /codex-cache/.test(await visibleText(page, '#mli-models'))
         && /catalog/.test(await visibleText(page, '#mli-models'))
-        && /2026-08-25/.test(await visibleText(page, '#mli-models'))
+        && (await visibleText(page, '#mli-models')).includes(localCaptureDate)
         && /fresh/.test(await visibleText(page, '#mli-models'))
         && /complete/.test(await visibleText(page, '#mli-models'))
         && !/scope-[a-f0-9]{12}/.test(await visibleText(page, '#mli-models')),

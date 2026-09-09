@@ -302,9 +302,8 @@ scanned yet." Counts are visited work, never totals.
 The last complete snapshot stays authoritative; a partial or failed run never replaces it. A
 placement whose source is still scanning carries the condition **Source scan incomplete** in its
 technical details. Inventory shows a one-sentence banner, such as "4 sources have not been scanned
-yet." or "2 sources stopped at a limit (entries).", with at most one button: **Re-measure machine**
-when sources have never been scanned, **Open Discovery** when sources are paused, stopped, or
-failed, and none while sources are still scanning. The banner never lists every source; per-source
+yet." or "2 sources stopped at a limit (entries)." The banner directs readers to **Discovery**
+for coverage details; measurement controls stay in the toolbar. The banner never lists every source; per-source
 detail stays under **What proves this?** in the inspector. The non-filesystem automatic sources
 (Runtimes, Package managers, Ollama, Providers) never appear in it, because their evidence comes
 from the provider check.

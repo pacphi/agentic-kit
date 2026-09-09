@@ -42,7 +42,9 @@ function mntSetMeasurement(scan){
 }
 function mntDelay(ms){return new Promise(function(resolve){setTimeout(resolve,ms);});}
 function mntPollSystemMeasurement(){
-  return mntGet('/api/system').then(function(data){
+  // Publish completion through System so its scheduled poll cannot replay stale running state.
+  return loadSystem().then(function(){
+    var data=SYSTEM;
     if(!data||data.error||!data.scan)throw new Error('The measurement status could not be read.');
     if(data.scan.running){mntSetMeasurement(data.scan);return mntDelay(3000).then(mntPollSystemMeasurement);}
     if(data.scan.error)throw new Error('The measurement reported a problem.');
