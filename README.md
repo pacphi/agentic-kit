@@ -171,7 +171,7 @@ One of those is worth calling out:
 ## The status line
 
 Projects set up by the kit get an append-only footer under ruflo's own status line,
-each segment shown **only when genuinely active**: 🧠 SONA patterns/trajectories (+
+with segments reflecting their documented presence and metric checks: 🧠 SONA patterns/trajectories (+
 live micro-LoRA Δ‖W‖), 📈 route-RL metrics, 🛡 aidefence, 🧿 RuvNet Brain KB,
 ⚙ machine-wide daemon count, and 🎓 Agentic-QE stats.
 
