@@ -723,9 +723,10 @@ Project coverage is designed around build ecosystems rather than one manifest fo
 See the [proposed project metadata adapter design](PROJECT-METADATA-ADAPTERS.md)
 for the 25-language target, polyglot attribution, and unsupported-metadata behavior.
 
-Project cards show up to three measured language badges, with an expandable remainder
+Project cards show up to three uniformly sized SVG language icons, with language names in
+tooltips and accessible labels, and an expandable remainder
 for polyglot repositories. Artifact-only detections do not imply source line counts.
-See the [dated top-50 coverage list](LANGUAGE-COVERAGE.md).
+See the [dated top-50 coverage list](LANGUAGE-COVERAGE.md) and [bundled logo sources and licenses](LANGUAGE-LOGOS.md).
 
 ### Scan history dates
 

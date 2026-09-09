@@ -136,6 +136,7 @@ const maintenanceWorkspaceSrc = readSplit('maintenance-workspace.mjs');
 const maintenanceFiltersSrc = readSplit('maintenance-filters.mjs');
 const maintenanceCardsSrc = readSplit('maintenance-cards.mjs');
 const maintenanceOperationSrc = readSplit('maintenance-operation.mjs');
+const maintenanceLanguageLogosSrc = readSplit('maintenance-language-logos.mjs');
 const maintenanceFocusSrc = readSplit('maintenance-focus.mjs');
 const maintenanceInventorySrc = readSplit('maintenance-inventory.mjs');
 const maintenanceRelationshipsSrc = readSplit('maintenance-relationships.mjs');
@@ -154,5 +155,5 @@ const bootSrc = readSplit('boot.mjs');
 // sequence) running in the same relative order it always has.
 export const JS = `
 (function(){
-${bootstrapSrc}${overviewSrc}${datetimeSrc}${intelligenceSrc}${pollSrc}${usageRhythmSrc}${usagePromptsSrc}${usageContextHooksSrc}${usageSrc}${modelLifecycleSrc}${usageOrchestratorsSrc}${aboutSrc}${systemReadoutSrc}${systemProjectsSrc}${maintenanceWorkspaceSrc}${maintenanceFiltersSrc}${maintenanceCardsSrc}${maintenanceOperationSrc}${maintenanceFocusSrc}${maintenanceInventorySrc}${maintenanceRelationshipsSrc}${maintenanceInspectorSrc}${maintenanceGuidanceSrc}${maintenanceDiscoverySrc}${maintenanceActivitySrc}${systemMaintenanceActionsSrc}${systemMaintenanceSrc}${bootSrc}})();
+${bootstrapSrc}${overviewSrc}${datetimeSrc}${intelligenceSrc}${pollSrc}${usageRhythmSrc}${usagePromptsSrc}${usageContextHooksSrc}${usageSrc}${modelLifecycleSrc}${usageOrchestratorsSrc}${aboutSrc}${systemReadoutSrc}${systemProjectsSrc}${maintenanceWorkspaceSrc}${maintenanceFiltersSrc}${maintenanceCardsSrc}${maintenanceOperationSrc}${maintenanceLanguageLogosSrc}${maintenanceFocusSrc}${maintenanceInventorySrc}${maintenanceRelationshipsSrc}${maintenanceInspectorSrc}${maintenanceGuidanceSrc}${maintenanceDiscoverySrc}${maintenanceActivitySrc}${systemMaintenanceActionsSrc}${systemMaintenanceSrc}${bootSrc}})();
 `;

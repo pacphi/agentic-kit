@@ -33,7 +33,7 @@ test('focus browser progressively narrows to exact installations and preserves f
   function esc(v){return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
   function ago(){return '';}
   function mntWritesBlocked(){return false;}
-  ${['maintenance-workspace','maintenance-cards','maintenance-filters','maintenance-focus','maintenance-relationships','maintenance-guidance','maintenance-inspector','maintenance-inventory'].map(source).join('\n')}
+  ${['maintenance-workspace','maintenance-cards','maintenance-filters','maintenance-language-logos','maintenance-focus','maintenance-relationships','maintenance-guidance','maintenance-inspector','maintenance-inventory'].map(source).join('\n')}
   wireMntInventory();wireMntInspector();loadMntInventory();
  `});
  await page.locator('[data-mnt-focus="user"]').waitFor();
@@ -84,13 +84,17 @@ test('focus browser progressively narrows to exact installations and preserves f
 test('polyglot cards expose labelled language badges and an accessible disclosure',async(t)=>{
  const browser=await chromium.launch({channel:'chrome',headless:true});t.after(()=>browser.close());
  const page=await browser.newPage({viewport:{width:1100,height:650}});
- const languages=[['java','Java','Jv'],['typescript','TypeScript','TS'],['sql','SQL','SQL'],['python','Python','Py']].map(([id,name,icon])=>({id,name,icon,evidence:'source'}));
+ const languages=[['rust','Rust','Rs'],['typescript','TypeScript','TS'],['javascript','JavaScript','JS'],['python','Python','Py'],['java','Java','Jv']].map(([id,name,icon])=>({id,name,icon,evidence:'source'}));
  const state={facets:{},query:{navigation:{level:'project',nodes:[{value:'prj_example',label:'billing-service',count:24,projectKind:'git',languages}]},groups:[]}};
  await page.setContent('<!doctype html><html data-theme="dark"><head><style>'+CSS+'</style></head><body><main style="padding:32px"><h2>Projects</h2><div id="cards"></div></main></body></html>');
- await page.addScriptTag({content:'var MNT='+JSON.stringify(state)+';var MNT_SCOPE_LABELS={};function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;");}function mntKindLabel(s){return s;}function mntFacetValueLabel(_,s){return s;}function mntIcon(){return "";}function mntAvailableTo(){return "";}\n'+source('maintenance-focus')+'\ndocument.getElementById("cards").innerHTML=renderMntFocusResults(false);'});
+ await page.addScriptTag({content:'var MNT='+JSON.stringify(state)+';var MNT_SCOPE_LABELS={};function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;");}function mntKindLabel(s){return s;}function mntFacetValueLabel(_,s){return s;}function mntIcon(){return "";}function mntAvailableTo(){return "";}\n'+source('maintenance-language-logos')+'\n'+source('maintenance-focus')+'\ndocument.getElementById("cards").innerHTML=renderMntFocusResults(false);'});
  assert.equal(await page.locator('.mnt-language-icon:visible').count(),3);
- await page.getByText('+1 more languages',{exact:true}).click();
- assert.equal(await page.locator('.mnt-language-icon:visible').count(),4);
- assert.equal(await page.locator('.mnt-language-badge').filter({hasText:'Python'}).isVisible(),true);
- await page.screenshot({path:'/tmp/ak-polyglot-projects.png'});
+ await page.getByText('+2 more languages',{exact:true}).focus();
+ await page.keyboard.press('Enter');
+ assert.equal(await page.locator('.mnt-language-icon:visible').count(),5);
+ assert.equal(await page.getByRole('img', { name: 'Python — Source language detected', exact: true }).isVisible(),true);
+ await page.screenshot({path:'/tmp/ak-polyglot-projects-svg.png'});
+ await page.emulateMedia({colorScheme:'light'});
+ await page.locator('html').evaluate(el=>el.setAttribute('data-theme','light'));
+ await page.screenshot({path:'/tmp/ak-polyglot-projects-svg-light.png'});
 });

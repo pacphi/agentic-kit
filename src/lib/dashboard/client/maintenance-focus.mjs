@@ -1,4 +1,5 @@
 // @ts-nocheck — classic browser bundle source.
+import { mntLanguageLogo } from './maintenance-language-logos.mjs';
 import { esc } from './bootstrap.mjs';
 import { MNT, MNT_SCOPE_LABELS, mntKindLabel } from './maintenance-workspace.mjs';
 import { mntIcon, mntAvailableTo } from './maintenance-cards.mjs';
@@ -42,7 +43,8 @@ import { mntFacetValueLabel } from './maintenance-filters.mjs';
   }
   function mntLanguageBadges(languages){
     return '<span class="mnt-language-list">'+languages.map(function(language){
-      return '<span class="mnt-language-badge" title="'+esc(language.evidence==='artifact'?'Project artifact detected; source lines not measured':'Source language detected')+'"><span class="mnt-language-icon" aria-hidden="true">'+esc(language.icon)+'</span>'+esc(language.name)+'</span>';
+      var label=language.name+' — '+(language.evidence==='artifact'?'Project artifact detected; source lines not measured':'Source language detected');
+      return '<span class="mnt-language-badge" title="'+esc(label)+'"><img class="mnt-language-icon" width="24" height="24" src="'+mntLanguageLogo(language.id)+'" alt="'+esc(language.name)+'" aria-label="'+esc(label)+'"></span>';
     }).join('')+'</span>';
   }
   function mntFocusNode(node,index,level,busy){

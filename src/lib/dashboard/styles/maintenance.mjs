@@ -268,8 +268,8 @@ export const MAINTENANCE_CSS = `
 .mnt-row-copy{display:flex;flex-direction:column;gap:5px;flex:1;min-width:0;text-align:left}
 .mnt-row-name{font-size:13px;overflow-wrap:anywhere}
 .mnt-language-list{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
-.mnt-language-badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--ink-2)}
-.mnt-language-icon{display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:24px;border:1px solid var(--line);border-radius:6px;color:var(--accent);font-size:10px;font-weight:700}
+.mnt-language-badge{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;background:#fff;flex:none}
+.mnt-language-icon{display:block;width:24px;height:24px;object-fit:contain;flex:none}
 .mnt-language-more{padding:8px 16px;font-size:12px}
 .mnt-resource-description{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .mnt-row-context{font-size:11.5px;line-height:1.5;color:var(--ink-2);overflow-wrap:anywhere}

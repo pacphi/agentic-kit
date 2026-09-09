@@ -2,6 +2,8 @@
 
 - **Status:** Accepted — implementation delivered 2026-09-05; Implemented withheld pending
   human-evaluation and cross-platform gates
+- **Updated:** 2026-09-08 — project language badges use locally bundled SVGs with
+  name tooltips and accessible labels; the three-icon disclosure stays progressive.
 - **Updated:** 2026-09-08 — installed tools preserve measured executable locations
   for private path reveal, with PATH resolution and bounded package-manifest fallback;
   Windows command extensions and POSIX executable checks are covered by fixtures.

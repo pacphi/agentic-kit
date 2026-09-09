@@ -14,6 +14,7 @@ import { publicInventoryPage, publicInspector } from '../../src/lib/dashboard/ma
 
 function fixture() {
   const projects = ['ampel', 'boon-worthy', 'emailibrium', 'finima', 'keel', 'prompt-genie', 'ampel-feature'].map((name) => ({
+    loc: { languages: (name === 'ampel' ? ['javascript', 'python', 'rust', 'java', 'ada'] : ['typescript']).map(id => ({ id })) },
     path: '/fixture/projects/'+name, label: name, hosts: ['claude', 'codex'], projectKind: name==='ampel-feature'?'worktree':'git',
   }));
   const copies = projects.map((project) => ({ project: project.path, itemPath: project.path+'/.claude/skills/a11y-ally', host: 'claude', scope: 'project' }));
@@ -65,7 +66,7 @@ test('project worktree visibility and all-installations navigation work on deskt
     function authHeaders(){return {};}
     function esc(value){return String(value).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
     function ago(){return '';}
-    ${['maintenance-workspace', 'maintenance-cards', 'maintenance-filters', 'maintenance-guidance', 'maintenance-relationships', 'maintenance-inspector', 'maintenance-focus', 'maintenance-inventory'].map(clientSource).join('\n')}
+    ${['maintenance-workspace', 'maintenance-cards', 'maintenance-filters', 'maintenance-guidance', 'maintenance-relationships', 'maintenance-inspector', 'maintenance-language-logos','maintenance-focus', 'maintenance-inventory'].map(clientSource).join('\n')}
     MNT.scope='project';wireMntInventory();wireMntInspector();loadMntInventory();
   ` });
   await page.locator('#mnt-results [data-mnt-focus]').first().waitFor();
@@ -84,6 +85,24 @@ test('project worktree visibility and all-installations navigation work on deskt
   assert.equal(await page.locator('#mnt-facets [data-mnt-include-worktrees]').isVisible(), true);
   await page.locator('#mnt-facets [data-mnt-facet-search="project"]').fill('');
   const ampelId = inventory.placements.find(p => p.locationBreadcrumb?.includes('ampel')).projectId;
+  const ampelCard = page.locator('[data-mnt-focus="'+ampelId+'"]');
+  await ampelCard.waitFor();
+  const logoFacts = await ampelCard.locator('img.mnt-language-icon').evaluateAll(images => images.map(image => ({
+    source: image.getAttribute('src'), alt: image.getAttribute('alt'), label: image.getAttribute('aria-label'),
+    tooltip: image.parentElement.title, width: image.getBoundingClientRect().width,
+    height: image.getBoundingClientRect().height, loaded: image.complete && image.naturalWidth > 0,
+  })));
+  assert.equal(logoFacts.length, 3);
+  assert.deepEqual(logoFacts.map(logo => logo.alt), ['JavaScript', 'Python', 'Rust']);
+  assert.ok(logoFacts.every(logo => logo.source.startsWith('data:image/svg+xml;base64,')
+    && logo.tooltip.startsWith(logo.alt) && logo.label.startsWith(logo.alt)
+    && logo.width === 24 && logo.height === 24 && logo.loaded));
+  assert.equal(await ampelCard.locator('.mnt-language-list').innerText(), '', 'language initials and names do not crowd the card');
+  const moreLanguages = ampelCard.locator('..').locator('.mnt-language-more');
+  assert.equal(await moreLanguages.getAttribute('open'), null);
+  await moreLanguages.locator('summary').click();
+  assert.deepEqual(await moreLanguages.locator('img').evaluateAll(images => images.map(image => image.alt)), ['Java', 'Ada']);
+  await moreLanguages.locator('summary').click();
   await page.locator('[data-mnt-focus="'+ampelId+'"]').click();
   await page.locator('[data-mnt-focus="skill"]').click();
   await page.locator('#mnt-results [data-mnt-focus]').first().click();
