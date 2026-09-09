@@ -1,6 +1,8 @@
+/* global projectView */
 // @ts-nocheck — browser bundle source (never node-imported; client.mjs
 // reads it as text). See src/lib/dashboard/client/**'s eslint.config.mjs
 // override comment for why this directory isn't run through the node lib.
+import { projectControls, projectIdentityCell, projectPopulation, projectOrigin } from './project-group-controls.mjs';
 import { authHeaders, esc } from './bootstrap.mjs';
 import { formatLocalDateTime, formatLocalDateTimeLong, shortSessionId } from './datetime.mjs';
 import { ago } from './intelligence.mjs';
@@ -613,7 +615,7 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     var filtered=items.length!==all.length;
     matrix.innerHTML='<div class="sy-tblwrap sy-catalog-scroll" tabindex="0" aria-label="Catalog presence matrix"><table class="sy-table sy-matrix-t">'
       +'<caption class="sr-only">Capabilities and the hosts that carry them.</caption>'
-      +"<thead><tr><th scope=\"col\">Name and source</th>"+head+"</tr></thead><tbody>"+body+"</tbody></table></div>"
+      +"<thead><tr><th scope=\"col\">Name and source</th>"+head+"</tr></thead>"+body+"</table></div>"
       +'<div class="sy-liner">'
       +(filtered
         ?esc(fmtNum(items.length))+" of "+esc(fmtNum(all.length))+" deduplicated items shown"
@@ -793,7 +795,7 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
   function sysProjectRowHtml(pr){
     var name=sysProjectNameCell(pr);
     var last=mval(pr.lastActivity);
-    return "<tr><td>"+name+"</td>"
+    return "<tr><td>"+name+projectIdentityCell(pr)+"</td>"
       +'<td class="num">'+mhtml(pr.loc&&pr.loc.total,function(v){return "~"+fmtTok(v);})+"</td>"
       +"<td>"+langCell(pr.loc)+"</td>"
       +'<td class="num">'+mhtml(pr.totalBytes,fmtBytes)+"</td>"
@@ -808,10 +810,9 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
           +(p.onDisk?mhtml(p.onDisk):"some")+" still on disk"
         :mhtml(p.count)+" projects measured (this snapshot predates the ever-seen count)")
       +", "+esc(fmtNum(list.length))+" listed here."
-      +(excluded
+      +(excluded&&projectPopulation==="measured"
         ? " Excluded "+esc(fmtNum(excluded))+" measured director"+(excluded===1?"y":"ies")
-          +" with no remote or no recorded session \u2014 agent worktrees, sub-folders of a "
-          +"repository already listed, and repositories with no remote."
+          +" without an HTTPS remote or recorded host. Full discovery retains other known paths."
         : "")
       +" Line counts are approximate: extension-bucketed, with node_modules and vendored "
       +"trees excluded. Disk is the whole project directory, .git and node_modules included.</div>";
@@ -823,39 +824,18 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     var p=d.projects;
     if(!p){el.innerHTML=sysEmpty(NOT_SCANNED);return;}
     var all=p.projects||[];
-    if(!all.length){el.innerHTML=sysEmpty("no project was discovered on this machine.");return;}
-    // Repositories, not directories. Two conditions, both required:
-    //
-    //   a remote — a row with no https remote is, in practice, never a project
-    //     you would recognise: it is an ephemeral .claude/worktrees/agent-*
-    //     checkout, a sub-directory a session happened to run in
-    //     (myrepo/backend), or a home directory someone once launched a session
-    //     from. Those sat beside their own parent repo as if they were peers of
-    //     it, each with its own multi-gigabyte disk figure.
-    //   a session — this table is about projects you have actually worked in
-    //     with a host. Discovery is session-derived today, so this holds by
-    //     construction; asserting it anyway keeps that true if a future
-    //     discovery source is not.
-    //
-    // The session test excludes only an EMPTY host list, never a missing one. A
-    // snapshot written before rows carried a hosts field cannot answer the question,
-    // and reading "absent" as "no sessions" would blank the whole table for
-    // anyone holding one — treating unmeasured as zero, which is the one thing
-    // this area may not do.
-    //
-    // A genuine local-only repository is excluded too. That is the cost of the
-    // rule, and it is why the count is stated below rather than left implied.
-    var elig=sysProjectsEligible(all),list=elig.list,excluded=elig.excluded;
-    if(!list.length){
-      el.innerHTML=sysEmpty("no project with a remote and a recorded session was measured \u2014 "
-        +fmtNum(excluded)+" measured director"+(excluded===1?"y was":"ies were")+" excluded.");
-      return;
-    }
-    list=sortProjects(list,projSort.key,projSort.dir);
-    var body=list.map(sysProjectRowHtml).join("");
+    if(!all.length&&!(p.discoveryProjects||[]).length){el.innerHTML=projectControls(p)+sysEmpty("no project was discovered on this machine.");return;}
+    var elig=sysProjectsEligible(all),excluded=elig.excluded;
+    var groups=projectView({projects:elig.list,discoveryProjects:p.discoveryProjects},projectPopulation,projectOrigin);
+    var list=groups.reduce(function(rows,group){return rows.concat(group.rows);},[]);
+    var body=groups.map(function(group){
+      var heading=group.rows.some(function(row){return !!row.repository;})
+        ? '<tr class="project-group"><th colspan="5" scope="rowgroup">'+esc(group.label)+' · '+group.rows.length+' director'+(group.rows.length===1?'y':'ies')+'</th></tr>' : '';
+      return '<tbody>'+heading+sortProjects(group.rows,projSort.key,projSort.dir).map(sysProjectRowHtml).join('')+'</tbody>';
+    }).join('');
     // Legend covers only what still renders: the language ramp. The disk column
     // is a single figure now, and there are no chips left to explain.
-    el.innerHTML='<div class="sy-legend" style="margin-bottom:4px">'
+    el.innerHTML=projectControls(p)+'<div class="sy-legend" style="margin-bottom:4px">'
       +'<span>lines: top '+LANG_TOP+' languages, darkest first'
       +'<i style="background:var(--s1);margin-left:8px"></i>'
       +'<i style="background:var(--s1);opacity:.63"></i>'
@@ -867,11 +847,13 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
       +projSortHeader("language","By language",false)
       +projSortHeader("disk","Disk",true)
       +projSortHeader("active","Last active",true)
-      +"</tr></thead><tbody>"+body+"</tbody></table></div>"
+      +"</tr></thead>"+body+"</table></div>"
       // Three numbers now, and the gap between the last two is a filter rather
       // than a fact about the machine — so it is named. Leaving the reader to
       // subtract 25 from 16 and guess is the silent exclusion ADR-0023 forbids.
-      +sysProjectsLinerHtml(p,list,excluded);
+      +sysProjectsLinerHtml(p,list,excluded)
+      +'<p class="sy-liner" role="status">'+list.length+' directories match. Origins can overlap within a directory; each directory appears once. Group counts are directories, not distinct repositories. Unmeasured values stay unknown; disk and line counts are not summed across nested paths.</p>'
+      +(!list.length?sysEmpty('No directories match these filters.'):'');
   }
 
   export function renderSystemFreshness(){

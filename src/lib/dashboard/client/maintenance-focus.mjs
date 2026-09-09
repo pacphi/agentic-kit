@@ -47,13 +47,32 @@ import { mntFacetValueLabel } from './maintenance-filters.mjs';
       return '<span class="mnt-language-badge" title="'+esc(label)+'"><img class="mnt-language-icon" width="24" height="24" src="'+mntLanguageLogo(language.id)+'" alt="'+esc(language.name)+'" aria-label="'+esc(label)+'"></span>';
     }).join('')+'</span>';
   }
+  function mntProjectOrigins(node){
+    var origins=(node.sessionOrigins||[]).filter(function(item){return item.origin==='claude-desktop'||item.origin==='codex-desktop';});
+    if(!origins.length)return '';
+    return '<span class="mnt-project-origins">'+origins.map(function(item){
+      return esc(mntFacetValueLabel('sessionOrigin',item.origin));
+    }).join(' · ')+'</span>';
+  }
+  function mntProjectGroups(nodes,busy){
+    var groups=new Map(),index=0;
+    nodes.forEach(function(node){
+      var key=node.repositoryId||(node.projectKind==='folder'?'folders':'unassociated');
+      if(!groups.has(key))groups.set(key,{label:node.repositoryLabel||(key==='folders'?'Other folders':'Other projects'),nodes:[]});
+      groups.get(key).nodes.push(node);
+    });
+    return Array.from(groups.values()).map(function(group){
+      return '<section class="mnt-repository-group"><h3>'+esc(group.label)+'</h3><ul class="mnt-focus-list">'
+        +group.nodes.map(function(node){return mntFocusNode(node,index++,'project',busy);}).join('')+'</ul></section>';
+    }).join('');
+  }
   function mntFocusNode(node,index,level,busy){
     var icon=level==='scope'?node.value:level==='project'?'project':level==='kind'?node.value:node.kind;
     var note=level==='resource'&&!(MNT.facets.kind||[]).length?mntKindLabel(node.kind):'';
     if(level==='resource'&&node.installationSource)note=node.installationSource;
     return '<li><button type="button" class="mnt-row mnt-focus-node" data-mnt-focus="'+esc(node.value)+'" data-mnt-level="'+esc(level)+'" tabindex="'+(index===0?'0':'-1')+'"'+(busy?' disabled':'')+'>'
       +(level==='project'?'':mntIcon(icon))+'<span class="mnt-row-copy"><span class="mnt-row-name'+(level==='project'?' mnt-project-title':'')+'">'+(level==='project'?mntIcon('project'):'')+esc(node.label)+'</span>'
-      +(level==='project'?mntProjectKindBadge(node.projectKind):'')
+      +(level==='project'?mntProjectKindBadge(node.projectKind)+mntProjectOrigins(node):'')
       +(level==='project'&&node.languages&&node.languages.length?mntLanguageBadges(node.languages):'')
       +(node.description?'<span class="mnt-row-context mnt-resource-description" title="'+esc(node.descriptionSource||'Declared description')+'">'+esc(node.description)+'</span>':'')
       +(note?'<span class="mnt-row-context">'+esc(note)+'</span>':'')+'</span><span class="mnt-node-count">'+esc(node.count)+' installation'+(node.count===1?'':'s')+'</span>'+mntIcon('chevron')+'</button></li>';
@@ -73,6 +92,7 @@ import { mntFacetValueLabel } from './maintenance-filters.mjs';
   }
   export function renderMntFocusResults(busy){
     var nav=mntFocusNavigation();if(!nav)return null;
+    if(nav.level==='project')return mntProjectGroups(nav.nodes||[],busy);
     if(nav.level!=='installation')return '<ul class="mnt-focus-list">'+(nav.nodes||[]).map(function(node,index){return mntFocusNode(node,index,nav.level,busy);}).join('')+'</ul>';
     var rows=(MNT.query.groups||[]).reduce(function(all,group){return all.concat(group.placements||[]);},[]);
     var family=(MNT.query.groups||[])[0],allLink=family&&family.knownPlacementCount>MNT.query.total?'<p><button type="button" class="mt-action" data-mnt-family="'+esc(family.presentationKey||family.resourceId)+'">View all '+esc(family.knownPlacementCount)+' installations</button></p>':'';

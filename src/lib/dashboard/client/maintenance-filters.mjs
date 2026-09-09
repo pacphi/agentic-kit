@@ -4,12 +4,12 @@ import { esc } from './bootstrap.mjs';
 import { MNT, MNT_GUIDANCE_LANE_LABELS, MNT_CONFLICT_EXPLANATIONS, MNT_CREDENTIAL_READINESS_LABELS, MNT_CURATED_VIEW_LABELS, MNT_SCOPE_LABELS, mntHumanize, mntKindLabel } from './maintenance-workspace.mjs';
   var MNT_CURATED_VIEWS=Object.keys(MNT_CURATED_VIEW_LABELS);
   var MNT_FACET_ORDER=[
-    "scope","environment","project","kind","adapter","consumer","carrier","provenance","packageManager",
+    "scope","environment","project","sessionOrigin","kind","adapter","consumer","carrier","provenance","packageManager",
     "versionState","guidance","dependencyRole","conflict","credentialReadiness","channel",
     "evidenceFields","recentlyChanged",
   ];
   var MNT_FACET_LABEL={
-    family:"Resource",scope:"Scope",environment:"Environment",project:"Project",projectType:"Project type",kind:"Type",adapter:"Adapters",consumer:"Hosts",
+    family:"Resource",scope:"Scope",environment:"Environment",project:"Project",sessionOrigin:"Session origin",projectType:"Project type",kind:"Type",adapter:"Adapters",consumer:"Hosts",
     carrier:"Carrier",provenance:"Source",packageManager:"Package manager",versionState:"Version state",
     guidance:"Guidance",dependencyRole:"Dependency role",conflict:"Conflict",
     credentialReadiness:"Credential",channel:"Channel",evidenceFields:"Evidence available",
@@ -24,6 +24,7 @@ import { MNT, MNT_GUIDANCE_LANE_LABELS, MNT_CONFLICT_EXPLANATIONS, MNT_CREDENTIA
   }
   export function mntFacetValueLabel(facet,value){
     if(facet==="adapter"||facet==="consumer")return MNT_ADAPTER_LABELS[value]||mntHumanize(value);
+    if(facet==="sessionOrigin")return ({"claude-desktop":"Claude Desktop","codex-desktop":"Codex Desktop",unknown:"Unclassified"})[value]||"Unclassified";
     if(facet==="projectType")return ({git:'Git',folder:'Folder',worktree:'Worktree',unknown:'Not checked'})[value]||'Not checked';
     if(facet==="scope")return MNT_SCOPE_LABELS[value]||mntHumanize(value);
     if(facet==="kind")return mntKindLabel(value);
@@ -81,12 +82,12 @@ import { MNT, MNT_GUIDANCE_LANE_LABELS, MNT_CONFLICT_EXPLANATIONS, MNT_CREDENTIA
         return '<label class="mnt-facet-opt"'+(!checked&&needle&&name.toLowerCase().indexOf(needle.toLowerCase())<0?' hidden':'')+'><input type="checkbox" data-mnt-facet="'+esc(facet)+'" value="'+esc(value)+'"'+(checked?' checked':'')+'> <span>'+esc(name)+(facet==='project'?mntProjectDesignation(value):'')+'</span><span class="mono">'+esc(counts[value])+'</span></label>';
       }).join('')+(!values.length?'<p class="mnt-filter-note">Enable worktrees to see project options.</p>':'')+'</div></fieldset>';
     var selected=(MNT.facets[facet]||[]).length;
-    return mntDisclosure(facet,label+(selected?' ('+selected+')':''),body,['project','kind','consumer','adapter'].indexOf(facet)>=0||selected>0);
+    return mntDisclosure(facet,label+(selected?' ('+selected+')':''),body,['project','sessionOrigin','kind','consumer','adapter'].indexOf(facet)>=0||selected>0);
   }
   export function renderMntFacets(){
     var counts=Object.assign({},(MNT.query&&MNT.query.facetCounts)||{});
     counts.adapter=Object.assign({hermes:0},counts.adapter||{});
-    var common=['project','kind','consumer','adapter'];
+    var common=['project','sessionOrigin','kind','consumer','adapter'];
     var other=MNT_FACET_ORDER.filter(function(facet){return common.indexOf(facet)<0;});
     var advanced=other.map(function(facet){return renderMntFacetGroup(facet,counts[facet]);}).join('');
     var active=other.some(function(facet){return (MNT.facets[facet]||[]).length>0;});

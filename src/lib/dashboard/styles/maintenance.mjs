@@ -382,4 +382,8 @@ body:has(#panel-sys-maintenance:not([hidden])) #sys-rescan{display:none}
 .mnt-relationship-link{border:0;background:none;color:var(--accent);font:inherit;text-align:left;padding:7px 0;cursor:pointer;overflow-wrap:anywhere}
 .mnt-relationship-link span{display:block;color:var(--ink-2);font-size:11px}
 .mnt-related-context{border-left:2px solid var(--accent);padding-left:10px}
+
+.mnt-repository-group { margin:0 0 18px; }
+.mnt-repository-group h3 { font-size:13px; color:var(--ink-2); margin:12px 0 8px; overflow-wrap:anywhere; }
+.mnt-project-origins { display:block; font-size:11px; color:var(--ink-2); margin:3px 0; }
 `;

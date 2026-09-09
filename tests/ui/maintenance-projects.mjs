@@ -15,6 +15,8 @@ import { publicInventoryPage, publicInspector } from '../../src/lib/dashboard/ma
 function fixture() {
   const projects = ['ampel', 'boon-worthy', 'emailibrium', 'finima', 'keel', 'prompt-genie', 'ampel-feature'].map((name) => ({
     loc: { languages: (name === 'ampel' ? ['javascript', 'python', 'rust', 'java', 'ada'] : ['typescript']).map(id => ({ id })) },
+    repository: ['ampel','ampel-feature'].includes(name)?{repositoryId:'repository:0123456789abcdef0123',kind:name==='ampel-feature'?'worktree':'git',root:'/fixture/projects/ampel',evidence:name==='ampel-feature'?'git-common-directory-and-backlink':'git-directory',observedAt:Date.parse('2026-09-09T12:00:00Z')}:null,
+    sessionOrigins: [{origin:name==='ampel-feature'?'codex-desktop':name==='ampel'?'claude-desktop':'unknown',sessions:1}],
     path: '/fixture/projects/'+name, label: name, hosts: ['claude', 'codex'], projectKind: name==='ampel-feature'?'worktree':'git',
   }));
   const copies = projects.map((project) => ({ project: project.path, itemPath: project.path+'/.claude/skills/a11y-ally', host: 'claude', scope: 'project' }));
@@ -78,6 +80,14 @@ test('project worktree visibility and all-installations navigation work on deskt
   await page.waitForFunction(() => !globalThis.mntInventoryBusy);
   assert.equal(await page.locator(worktree).count(), 1);
   assert.equal(await page.locator('[data-mnt-focus="'+worktreeId+'"]').count(), 1);
+  const sharedGroup=page.locator('.mnt-repository-group').filter({has:page.locator('[data-mnt-focus="'+worktreeId+'"]')});
+  assert.equal(await sharedGroup.locator('[data-mnt-level="project"]').count(),2);
+  const originFilter=page.locator('#mnt-facets input[data-mnt-facet="sessionOrigin"][value="codex-desktop"]');
+  await originFilter.check();await page.waitForFunction(()=>!globalThis.mntInventoryBusy);
+  assert.equal(await page.locator('#mnt-results [data-mnt-level="project"]').count(),1);
+  assert.match(await page.locator('#mnt-results').innerText(),/Codex Desktop/);
+  await originFilter.uncheck();await page.waitForFunction(()=>!globalThis.mntInventoryBusy);
+
   await page.locator('#mnt-facets [data-mnt-include-worktrees]').uncheck();
   await page.waitForFunction(() => !globalThis.mntInventoryBusy);
   await page.locator('#mnt-facets [data-mnt-facet-search="project"]').fill('feature');
@@ -129,6 +139,7 @@ test('project worktree visibility and all-installations navigation work on deskt
   assert.equal(await page.locator('#mnt-results [data-mnt-plc]').count(), 9);
   await page.locator('[data-mnt-back="root"]').click();
   await page.locator('[data-mnt-focus="project"]').click();
+  await ampelCard.waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await ampelCard.locator('img.mnt-language-icon').count(), 5);
   assert.equal(await ampelCard.locator('.mnt-language-list').evaluate(el => globalThis.getComputedStyle(el).flexWrap), 'wrap');

@@ -7,7 +7,7 @@ function load(name,deps,exports){
  const source=fs.readFileSync(new URL('../../src/lib/dashboard/client/'+name+'.mjs',import.meta.url),'utf8').replace(/^import\s[\s\S]*?from ['"][^'"]+['"];\s*$/gm,'').replace(/\bexport (?=(?:function|var)\b)/g,'');
  return new Function(...Object.keys(deps),source+'\nreturn {'+exports.join(',')+'};')(...Object.values(deps));
 }
-function focus(state){return load('maintenance-focus',{MNT:state,esc,mntLanguageLogo,MNT_SCOPE_LABELS:{user:'User',across:'All scopes',project:'Projects'},mntKindLabel:s=>s,mntFacetValueLabel:(_,v)=>v,mntIcon:()=>'',mntAvailableTo:()=>''},['mntFocusChoose','mntFocusBack','mntFocusCrumbs','renderMntFocusResults']);}
+function focus(state){return load('maintenance-focus',{MNT:state,esc,mntLanguageLogo,MNT_SCOPE_LABELS:{user:'User',across:'All scopes',project:'Projects'},mntKindLabel:s=>s,mntFacetValueLabel:(_,v)=>v,mntIcon:()=>'',mntProjectKindBadge:kind=>esc(kind),mntAvailableTo:()=>''},['mntFocusChoose','mntFocusBack','mntFocusCrumbs','renderMntFocusResults']);}
 test('navigation turns User and resource type into explicit filters while retaining host refinements',()=>{
  const state={scope:'across',facets:{consumer:['claude']}};const api=focus(state);
  api.mntFocusChoose('scope','user');api.mntFocusChoose('kind','mcp-registration');api.mntFocusChoose('resource','res_1');
@@ -37,11 +37,19 @@ test('resource cards separate source from name and escape declared descriptions'
  const html=focus(state).renderMntFocusResults(false);
  assert.match(html,/Provided by brain/);assert.match(html,/&lt;script>text&lt;\/script>/);assert.match(html,/title="Plugin manifest"/);
 });
-test('polyglot project cards show three labelled icons and expand the remaining languages',()=>{
+test('polyglot project cards show all labelled icons without a language disclosure',()=>{
  const languages=['Java','TypeScript','SQL','Python'].map((name,i)=>({id:String(i),name,icon:name.slice(0,2),evidence:'source'}));
  const state={facets:{},query:{navigation:{level:'project',nodes:[{value:'prj_1',label:'Polyglot',count:2,projectKind:'git',languages}]},groups:[]}};
  const html=focus(state).renderMntFocusResults(false);
  assert.match(html,/mnt-language-icon/);assert.match(html,/<img[^>]*src="data:image\/svg\+xml;base64,/);assert.match(html,/alt="Java"/);assert.doesNotMatch(html,/>Ja<|>Java<|>Python</);
- assert.match(html,/<details class="mnt-language-more"><summary>\+1 more languages/);
+ assert.equal((html.match(/class="mnt-language-icon"/g)||[]).length,4);
+ assert.doesNotMatch(html,/mnt-language-more/);
  assert.match(html,/Python/);assert.doesNotMatch(html,/<button[^>]*>[^]*<details[^]*<\/button>/);
+});
+
+test('unclassified project cards omit origin noise and implementation guidance',()=>{
+ const state={facets:{},query:{navigation:{level:'project',nodes:[{value:'prj_1',label:'Project',count:1,projectKind:'git'}]},groups:[]}};
+ const html=focus(state).renderMntFocusResults(false);
+ assert.doesNotMatch(html,/Sessions:|mnt-project-origins|Projects appear once|Repository association unknown/);
+ assert.match(html,/Other projects/);
 });
