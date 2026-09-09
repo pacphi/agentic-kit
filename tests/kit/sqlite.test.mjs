@@ -18,7 +18,9 @@ test('withDb classifies corrupt input instead of returning the caller fallback',
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-sqlite-corrupt-'));
   const file = path.join(dir, 'store.db');
   fs.writeFileSync(file, 'not a sqlite database');
-  const result = withDb(file, (db) => db.prepare('SELECT 1').get());
+  // Read the on-disk schema: SELECT 1 can succeed without opening database
+  // pages on the SQLite bundled with Node 22.13.0.
+  const result = withDb(file, (db) => db.prepare('SELECT * FROM sqlite_schema').all());
   assert.equal(result.ok, false);
   assert.equal(result.error.kind, 'corrupt');
   assert.equal(result.error.stage, 'query');

@@ -185,12 +185,12 @@ rollback, and the current parity boundary.
 
 ## Requirements
 
-The package declares `engines.node: >=22`, but SQLite-backed commands import
-`node:sqlite`, available without a flag from Node 22.13.0. Use a maintained patch
-release in the tested Node 22/24/26 lines; the broad manifest range does not prove
-compatibility with early Node 22 releases. See [Node SQLite history](https://nodejs.org/api/sqlite.html).
+The runtime requires Node 22.13.0+ on the 22.x line or Node 23.4.0+ on later
+lines (`>=22.13.0 <23 || >=23.4.0`), where `node:sqlite` is available without a
+flag. Use a maintained release in the tested Node 22/24/26 lines. CI separately
+checks the minimum 22.13.0 runtime. See [Node SQLite history](https://nodejs.org/api/sqlite.html).
 
-Node ≥ 22 and npm are the runner prerequisites. Enabled host CLIs can be installed
+A supported Node release and npm are the runner prerequisites. Enabled host CLIs can be installed
 by setup; authentication is separate and required for inference.
 **ruflo and agentic-qe are not prerequisites; `ak setup` installs them for you**
 (pre-installing them is fine too — setup just detects and reuses them). Everything

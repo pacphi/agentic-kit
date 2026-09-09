@@ -5,6 +5,13 @@ import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { fail, dim, exitWhenFlushed } from '../src/lib/output.mjs';
+import { nodeRuntimeError } from '../src/lib/node-runtime.mjs';
+
+const runtimeError = nodeRuntimeError();
+if (runtimeError) {
+  console.error(runtimeError);
+  process.exit(1);
+}
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
