@@ -118,5 +118,43 @@
     "level": "info",
     "message": "no project statusline here (created by setup)",
     "fix": null
+  },
+  {
+    "subsystem": "context",
+    "level": "info",
+    "message": "Host context controls not inspected; live session window and usage unverified",
+    "fix": null,
+    "contextReport": {
+      "schemaVersion": 1,
+      "observedAt": "<inspection-time>",
+      "hosts": [
+        {
+          "host": "claude",
+          "label": "Claude",
+          "enabled": true,
+          "managed": false,
+          "state": "not-inspected",
+          "source": "integration-configuration",
+          "observedAt": "<inspection-time>",
+          "cacheFetchedAt": null,
+          "runtimeVerified": false,
+          "modelCapacity": null,
+          "configuredRequest": null,
+          "effectiveWindow": null,
+          "usage": null,
+          "compaction": {
+            "configuredThreshold": null,
+            "scope": "unverified",
+            "runtimeThreshold": null,
+            "control": "not-inspected"
+          },
+          "models": [],
+          "limitations": [
+            "Context and compaction configuration not inspected; agentic-kit does not manage these controls.",
+            "Live session window and usage unverified; historical input observations remain in Usage → Context."
+          ]
+        }
+      ]
+    }
   }
 ]
