@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-04 — proposed ADR-0048 adds completion-oriented work slicing and resumable
   checkpoints over the accepted observation forest; the current non-checkpointed worker behavior
   remains implemented until that proposal ships
-- **Updated:** 2026-09-05 — ADR-0048 is now Accepted and implemented. This ADR's nonblocking
+- **Earlier update:** 2026-09-05 — ADR-0048 is now Accepted and implemented. This ADR's nonblocking
   single-flight deep-scan worker is unchanged and remains the Machine Footprint scan path. ADR-0048
   adds a separate, resumable checkpointed scan for its own Discovery sources
   (`src/lib/maintenance/discovery/{orchestrator,checkpoint,partitions}.mjs`), which pauses at a

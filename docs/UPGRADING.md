@@ -3,7 +3,7 @@
 New `ak` features almost always ship **opt-in**. That means moving your machine to the
 latest capability is *two* motions, not one: get the newer code, then turn the feature on.
 This page exists because those two are easy to conflate — and `ak sync`, despite its name,
-only does the first.
+updates the code and reconverges choices you have already made.
 
 ## 2026-09-04: Human session identity in System
 
@@ -180,14 +180,17 @@ What does **not** break, by design: running binaries keep executing their old co
 (replaced files don't affect a running process's open inodes). Agentic-kit's managed
 settings and guidance writers are atomic and fail closed when the one-time backup cannot
 be created or validated. Settings env keys, `~/.codex/config.toml` edits (Ruflo/AQE MCP,
-`[tui]` status line), OpenCode wiring, `.agentic-qe/llm-config.json`, and the managed
-guidance blocks are all **read at session start** — a live session simply doesn't see
-them until its next launch. The kit's own self-update runs last and applies from the next
+`[tui]` status line), OpenCode wiring, `.agentic-qe/llm-config.json`, and managed guidance
+have host-specific reload behavior. Restart affected sessions to
+load a consistent configuration. Claude can reload a changed status-line command during
+a session; do not assume every setting is frozen until restart. The kit's own self-update
+runs last and applies from the next
 `ak` invocation.
 
 > [!TIP]
-> If other sessions are mid-task: `ak sync --dry-run` first. No `versions` row → the plan
-> is local heals and config convergence; run it freely. A `versions` row → either let the
+> If other sessions are mid-task: `ak sync --dry-run` first. Even without a `versions` row,
+> inspect the named repairs: native-module, MCP, hook, and
+> configuration changes can affect running sessions. A `versions` row → either let the
 > other sessions reach a stopping point, or run `ak sync --no-upgrade` now (heals only —
 > skips the daemon stop and the npm swaps entirely) and do the full sync later. The armed
 > footer wipe in other open projects follows from the upgrade itself, not from sync — expect
@@ -226,7 +229,7 @@ A **host** runs the work; a **provider** serves inference. A binding can connect
 several hosts through separate native configuration **projections**, while **observability**
 sources establish facts with observed, configured, inferred, or unknown provenance. Upgrading does
 not silently create, adopt, or rewrite these bindings, and credentials remain environment-only.
-See [ADR-0016](adr/0016-capability-driven-integration-adapters.md).
+See [ADR-0016](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0016-capability-driven-integration-adapters.md).
 
 ## `ak system --json` fields removed in 4.0.0-alpha.41
 
@@ -235,7 +238,7 @@ them defensively or drop them:
 
 | Removed | Where | Why |
 |---|---|---|
-| `runtime.daemons.budget` | daemon census | No local source exists for ruflo's launch budget — not circumstantially, structurally — so the field could only ever read `unknown`. A permanently unknowable quantity is removed rather than reported as degraded ([ADR-0023](adr/0023-fail-closed-operations-and-explicit-degradation.md) §9). `ruflo daemon budget` remains the way to ask. |
+| `runtime.daemons.budget` | daemon census | No local source exists for ruflo's launch budget — not circumstantially, structurally — so the field could only ever read `unknown`. A permanently unknowable quantity is removed rather than reported as degraded ([ADR-0023](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0023-fail-closed-operations-and-explicit-degradation.md) §9). `ruflo daemon budget` remains the way to ask. |
 | `runtime.childProcessCount` | runtime census | Still counted by the process survey — it is what makes the per-host rows correct — but no longer republished. As a rendered figure it was a bare number with no denominator, no history and no action attached. |
 
 Nothing else was removed. `storage.topSessions` rows **gained** `projectLabel`,
@@ -370,6 +373,6 @@ further back. (If you'd rather move it by hand: `npm i -g @pacphi/agentic-kit@ne
 ## Appendix — design references
 
 The *why* behind primary-host selection and ambidextrous mirroring is captured as an ADR —
-[docs/adr/0006-primary-host-and-ambidextrous-mirroring.md](adr/0006-primary-host-and-ambidextrous-mirroring.md).
+[docs/adr/0006-primary-host-and-ambidextrous-mirroring.md](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0006-primary-host-and-ambidextrous-mirroring.md).
 The per-activity routing model spans ADR-0001..0005 (see [docs/adr/](adr/)). This page
 deliberately links rather than restates them, so the ADRs stay the source of truth.

@@ -2,10 +2,11 @@
 
 - **Status:** Implemented
 - **Date:** 2026-09-03
-- **Updated:** 2026-09-04 — proposed ADR-0048 retains physical artifact and consumer-binding
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
+- **Earlier update:** 2026-09-04 — proposed ADR-0048 retains physical artifact and consumer-binding
   identity, adds exact management placements, and plans configurable/resumable discovery; current
   explicit provider-scan behavior remains authoritative until implementation
-- **Updated:** 2026-09-05 — ADR-0048 is now Accepted and implemented. This ADR's `PhysicalArtifact`
+- **Earlier update:** 2026-09-05 — ADR-0048 is now Accepted and implemented. This ADR's `PhysicalArtifact`
   and `ConsumerBinding` identity is now projected, unchanged, as the management projection's own
   `PhysicalArtifact` and `ConsumerBinding` rows (`src/lib/maintenance/management/
   {identity,projection}.mjs`): one physical artifact used by several hosts still appears once with
@@ -18,6 +19,16 @@
   [issue #200](https://github.com/pacphi/agentic-kit/issues/200),
   [ADR-0025](0025-machine-footprint-metrics.md), and
   [ADR-0044](0044-receipt-aware-maintenance-control-plane.md)
+
+## Current implementation boundary (2026-09-09)
+
+Artifact/consumer identity and the explicit provider-scan contract remain current.
+The **Browser refresh / Scan now** wording below describes the v1 view; current
+Maintenance uses the consolidated measurement toolbar and v2 scan routes under
+ADR-0048. Neither passive report/query reads nor filesystem discovery grant
+provider mutation authority. FootprintSnapshot is now v7; v6 below records the
+Catalog v4 migration. The independent configurable Discovery scan does not replace
+the Footprint deep worker or the explicit provider scan.
 
 ## Context
 

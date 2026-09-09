@@ -41,7 +41,7 @@ even when nothing here changed) and on demand via `workflow_dispatch`.
 # VS Code:   Dev Containers: Reopen in Container
 ```
 
-`postCreateCommand` runs `corepack enable && pnpm install && npm link`.
+`postCreateCommand` runs `sudo corepack enable && pnpm install && sudo npm link && ak --version`.
 `packageManager` in `package.json` pins the pnpm version, so corepack
 resolves it without a separate install step. `npm link` registers the
 `ak`/`agentic-kit` bins globally, pointing at `bin/agentic-kit.mjs` in the
@@ -62,10 +62,9 @@ pnpm test          # unit suite + statusline/dashboard/admin tests
 pnpm run check      # typecheck + lint + markdown lint + build + test
 ```
 
-The `claude` CLI (required for `ak setup`) is deliberately **not**
-auto-installed — it needs an interactive device-flow login tied to your own
-Anthropic account, which doesn't belong in `postCreateCommand`. Install it
-yourself when you want to exercise setup end to end:
+The contributor container does not run `ak setup` automatically. Setup can install
+an absent enabled Claude CLI; authenticating for model execution is a separate
+operator action. To inspect that flow explicitly:
 
 ```bash
 npm install -g @anthropic-ai/claude-code
@@ -101,7 +100,7 @@ Pin a specific release instead of `next` by editing `AK_DIST_TAG` in
 container, or after creation:
 
 ```bash
-npm install -g @pacphi/agentic-kit@4.0.0-alpha.41 && ak sync
+npm install -g @pacphi/agentic-kit@4.0.0-alpha.41 && ak sync --no-upgrade
 ```
 
 ### The dashboard port
@@ -118,7 +117,8 @@ and use the forwarded URL, appending the `#token=...` fragment printed by
 
 ## Choosing between a dev container and `docker compose`
 
-Both routes end up running the published package in a disposable container;
+The consumer dev-container and Compose routes run the published package in a container;
+the maintainer dev-container instead links the source checkout.
 they exist for different workflows:
 
 - **This directory's consumer config** — editor-attached (files, terminal,

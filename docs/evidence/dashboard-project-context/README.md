@@ -1,5 +1,10 @@
 # Dashboard project and context evidence
 
+Capture series: **September 9, 2026, PR #210**. These files are retained fixture evidence from that
+delivery; the issue 211 audit inventory binds their original bytes to repository baseline
+`67fb5c0`. It does not claim that every image was recaptured at that commit or revalidated for the
+current audit. Use the PR's source-bound validation record for the original execution provenance.
+
 All screenshots use deterministic fixtures, not private project data. The design
 and host capability research are in [ADR-0050](../../adr/0050-dashboard-project-identity-and-context-reporting.md).
 

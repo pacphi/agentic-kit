@@ -1,0 +1,100 @@
+{
+  "referenceBaseline": "67fb5c0",
+  "sourceCheckout": "current checkout",
+  "sourceDigests": {
+    "src/lib/usage-opencode.mjs": "b404b7369ad3eeb45e473e232c61823a06bff7ee19bb15cb6828eb4d0bdaa4f8",
+    "src/lib/usage-parsers.mjs": "8c5c65973d0bad915584a2a3917f71ea18fdd50b0dbb92c96c0b61ad067063e9",
+    "src/lib/usage-aggregate.mjs": "333f741bad3550cbd444e3a1104adfe6318f6dd8d539a0298e438c267f8f9c0d",
+    "src/lib/pricing.mjs": "dd12022b1862659db292fb2e3e282de56648e1ed0c82ac6d83794244a9fa95ef",
+    "src/lib/aqe-router.mjs": "6002876cb3b1450a0fe0e51876480928f4c90becde932c34ef38d0350ec6d3d2",
+    "src/lib/dashboard/client/usage.mjs": "51ebae3bcdf563afc95759f4661cef105b2b6417cd740de65d092db1b02ab560",
+    "scripts/codex-usage-diagnostic.mjs": "2db43a31e5ff9324de745173d7435fad034b6529ccbab212f60c64cc96b334a7"
+  },
+  "syntheticOnly": true,
+  "results": [
+    {
+      "issue": "OpenCode cost coverage",
+      "case": "null-cost",
+      "inputTokens": 1000000,
+      "retainedCostObserved": 0,
+      "expectedCostWithMissingEstimated": 4,
+      "actualCost": 0,
+      "pass": false
+    },
+    {
+      "issue": "OpenCode cost coverage",
+      "case": "missing-cost",
+      "inputTokens": 1000000,
+      "retainedCostObserved": null,
+      "expectedCostWithMissingEstimated": 4,
+      "actualCost": 4,
+      "pass": true
+    },
+    {
+      "issue": "OpenCode cost coverage",
+      "case": "mixed-cost",
+      "inputTokens": 2000000,
+      "retainedCostObserved": 0.25,
+      "expectedCostWithMissingEstimated": 4.25,
+      "actualCost": 0.25,
+      "pass": false
+    },
+    {
+      "issue": "Session context chip",
+      "input": 100000,
+      "window": 200000,
+      "evidenceState": "partial",
+      "pairedSamples": null,
+      "expected": "No pressure percentage for independently observed input/window",
+      "actualHtml": "<span class=\"s-chip\" title=\"context at the last turn: 100000 of 200000 tokens — both recorded by the transcript\">ctx 50%</span>"
+    },
+    {
+      "issue": "Legacy router undo",
+      "before": {
+        "_managedBy": "agentic-kit",
+        "defaultProvider": "openai",
+        "userKey": "edited-after-setup",
+        "newUserKey": "keep-me"
+      },
+      "outcome": {
+        "ok": true,
+        "changed": true,
+        "detail": "restored pre-ak llm-config.json"
+      },
+      "after": {
+        "defaultProvider": "gemini",
+        "userKey": "original"
+      },
+      "expected": "Preserve later user edits or refuse drift",
+      "actualLostKeys": [
+        "newUserKey"
+      ],
+      "actualRevertedKey": "userKey"
+    },
+    {
+      "issue": "Legacy diagnostic pricing",
+      "model": "gpt-5.6-sol",
+      "inputTokens": 1000000,
+      "currentParserPrice": 4,
+      "diagnosticPrice": 5
+    },
+    {
+      "issue": "Legacy diagnostic privacy",
+      "claims": [
+        "No prompts, titles, session ids, file paths, or timestamps below.",
+        "This entire block is safe to paste back in full."
+      ],
+      "actualPathLine": "Rollout files scanned root: <temporary-root>/rollouts"
+    },
+    {
+      "issue": "Legacy diagnostic replay",
+      "currentThreadSource": "subagent",
+      "currentUsageRows": 0,
+      "diagnosticThreadSources": {
+        "user": 1,
+        "subagent": 0
+      },
+      "diagnosticAfterTokens": 1000000
+    }
+  ]
+}

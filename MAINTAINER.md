@@ -5,8 +5,8 @@ release this kit. User-facing docs live in [README.md](README.md); this file is 
 *inside* view.
 
 > **What this package is:** a zero-runtime-dependency, cross-platform CLI (`ak` /
-> `agentic-kit`) that installs, heals, and *proves* a ruflo + agentic-qe stack for
-> Claude Code. It develops with **pnpm** but heals **npm-managed** global trees,
+> `agentic-kit`) that installs, repairs, and runs scoped checks for a Ruflo + Agentic QE stack across
+> Claude Code, Codex, and opt-in OpenCode. It develops with **pnpm** but heals **npm-managed** global trees,
 > because that's how ruflo/agentic-qe land on target machines.
 
 ---
@@ -15,20 +15,20 @@ release this kit. User-facing docs live in [README.md](README.md); this file is 
 
 | Property | Value | Why it matters |
 |----------|-------|----------------|
-| Module system | **ESM only** (`.mjs`); `.cjs` reserved for the statusline template + its test | `"type": "module"` in `package.json` |
+| Module system | **ESM only** (`.mjs`); `.cjs` used for shipped hook/statusline helpers and legacy tests | `"type": "module"` in `package.json` |
 | Runtime deps | **Zero** | Uses `node:` builtins only — `node:sqlite`, `node:test`, `node:util` (`parseArgs`), `node:child_process`, `node:fs`. Keeps installs instant and supply-chain surface tiny |
-| Node | **≥ 22** (`engines.node`) | `node:sqlite` + `node --test` need it. CI matrix covers 22 / 24 / 26 |
+| Node | **≥ 22** (`engines.node`) | `node:sqlite` is available unflagged from 22.13; use maintained patch releases. The manifest is broader than that effective floor. CI covers 22 / 24 / 26 |
 | Package manager (dev) | **pnpm** pinned via `packageManager: pnpm@11.17.0` | CI uses `pnpm/action-setup` which reads that field — don't drift it casually |
 | Package manager (target) | **npm** | The kit heals `npm root -g` trees; `lib/heal.mjs` shells `npm install -g` |
 | Version source of truth | `package.json` `version` **only** | `bin/agentic-kit.mjs --version` reads it at runtime; no version string is duplicated anywhere else in source |
 
 ### CLI shape (`bin/agentic-kit.mjs`)
 
-- **Porcelain** (daily): `setup`, `status`, `sync`, `dashboard`, `admin`, `usage`, `run`,
-  `host`, `maintain`, `uninstall`. Bare `ak` → `status --hint`. (`dashboard`, `admin`, and `host`
+- **Porcelain** (daily): `setup`, `status`, `sync`, `dashboard`, `admin`, `usage`, `models`, `system`,
+  `about`, `audit`, `heal`, `run`, `host`, `maintain`, `uninstall`. Bare `ak` → `status --hint`. (`dashboard`, `admin`, and `host`
   are also reachable under `ak x`.)
 - **Plumbing** (power users): `ak x admin | codex-context | daemon-gc | dashboard | harvest | host | mcp |
-  reference | statusline | verify | improvement-eval`.
+  reference | skills | statusline | verify | improvement-eval`.
 - Each command module exports `options` (a `parseArgs` config) and `run({ flags, positionals, pkgRoot })`.
 - A best-effort drift nudge runs after non-`sync`, non-`--json` commands.
 
@@ -36,7 +36,7 @@ release this kit. User-facing docs live in [README.md](README.md); this file is 
 
 ## 2. Repository layout
 
-```
+```text
 bin/agentic-kit.mjs      # single entrypoint — arg parse + command dispatch (PORCELAIN/PLUMBING maps)
 src/
   commands/              # porcelain verbs
@@ -49,7 +49,7 @@ src/
     sqlite.mjs           # node:sqlite helpers (scalar, checkpoint, withDb)
     versions.mjs         # installedVersion, driftReport, KIT_PKG
     ruvnet-brain.mjs     # RuvNet Brain: on-disk detection + GitHub-release drift (NOT an npm pkg)
-    blocks.mjs           # managed-block registry + syncBlocks + guidanceTargets (3 targets: ~/.claude/CLAUDE.md, project AGENTS.md, ~/.codex/AGENTS.md)
+    blocks.mjs           # managed-block registry + syncBlocks + guidanceTargets (enabled host-specific user/project targets; see guidanceTargets)
     hosts.mjs            # host-adapter core: drivingHost() + HOST_ADAPTERS (guidance file, auth, statusline)
     codex-statusline.mjs # owned presets + narrow ~/.codex/config.toml projection
     providers.mjs        # frontier-host + LLM-provider detect/wire (hosts, auth, MCP bridges, aqe router)
@@ -57,7 +57,7 @@ src/
     qeCourt.mjs          # qe-court vendor-diversity panel helpers
     agentdb.mjs          # agentdb CLI coherence (harvest write path)
     health-history.mjs   # regression ring appended by sync, read by status
-    dashboard-server.mjs # read-only localhost dashboard (shells `ak status --json`)
+    dashboard-server.mjs # loopback dashboard: observations plus guarded Maintenance actions
     admin-server.mjs     # maintainer admin: loopback server, per-session token auth, page assembly (ADR-0007)
     admin-styles.mjs     # admin presentation: dashboard-aligned dark/light design tokens
     admin-theme.mjs      # embedded theme controller; shares the dashboard preference key
@@ -165,7 +165,7 @@ Toggle with the `ruvnetBrain` kit.json flag / `--no-ruvnet-brain`.
 > (`npx ruvnet-brain --enable-nightly`) gets re-flagged; opt ak out entirely with
 > `ruvnetBrain:false`. The spend watchdog and telemetry consent of already-affected
 > machines are left alone on purpose — local-only / a recorded user answer.
-
+>
 > **Version gotcha — three unrelated namespaces.** The plugin semver (`plugin.json`, e.g.
 > `0.5.0-dev`), the KB bundle's `brainVersion` (e.g. `v0.3.0-dev`), and the GitHub **release
 > tags** the installer downloads by (e.g. `v3.3.1`) are all different tracks. Evergreen-era
@@ -177,7 +177,7 @@ Toggle with the `ruvnetBrain` kit.json flag / `--no-ruvnet-brain`.
 > banner folds the brain in from the same `drift()` result (`foldBrainDrift()` in
 > dashboard-server.mjs — driftReport only carries npm tools; the kit's own
 > `selfDrift` is folded the same way), so `ak status`, the footer, and the
-> dashboard can never disagree.
+> displays share version logic, while different capture/cache times can still disagree.
 > `classifyDrift()` compares that resolved value vs `releases/latest` —
 > same namespace, so it converges. A present-but-unstamped install (manual / pre-existing)
 > surfaces as outdated once, so `ak sync` pulls it onto the managed track. Do **not**
@@ -204,10 +204,12 @@ node bin/agentic-kit.mjs status --json     # exercise a command directly
 npm link                          # then `ak status`, `ak setup`, …  (npm, not pnpm, to match target)
 ```
 
-Because everything is `node:` builtins, there is no build step — source runs as-is.
+There is no compilation step: source runs as-is. `pnpm run build` performs syntax,
+CLI-load, and package-manifest checks; it does not produce a compiled application.
 Edit a file under `src/`, re-run the CLI, done.
 
-**House conventions**
+### House conventions
+
 - Output goes through `src/lib/output.mjs` (`ok`/`warn`/`fail`/`info`/`heading`/`bold`/`dim`) — never raw `console.log` for status lines, so formatting stays consistent.
 - Heal actions in `lib/heal.mjs` return `{ ok, detail }` and **must be idempotent** (they run on every `sync`).
 - Keep files focused and under ~500 lines; one concern per `lib/` file.
@@ -219,7 +221,9 @@ Edit a file under `src/`, re-run the CLI, done.
 
 ```bash
 pnpm test        # coverage-enforced unit + renderer/server suites
-pnpm run check   # release gate: typecheck, lint, markdown, build/package, tests
+pnpm run check   # local static/build/unit gate
+pnpm run test:ui # browser checks (separate from check)
+pnpm run lint:links:internal # requires lychee
 ```
 
 - `tests/kit/*.test.mjs` — the broad `node:test` suite, run with 70% line, branch, and
@@ -253,9 +257,10 @@ Two further workflows cover surfaces `ci.yml` doesn't:
 
 ## 5. Branching methodology
 
-- **Default branch:** `main`. It is always releasable — CI runs on every push to it.
-- **Small docs / fix commits** land **directly on `main`** (fast-forward). This is
-  how `db4607c`, `b33bab2`, `571b593` (docs) went in.
+- **Default branch:** `main`. CI runs on every push; release readiness still requires the relevant
+  source/artifact and authorization gates.
+- Use a branch and PR for changes, including documentation. Historical direct-to-main
+  commits are not standing authorization for new direct pushes.
 - **Features and non-trivial fixes** go through a **short-lived branch → PR →
   squash-merge** with the PR number appended to the subject, e.g.
   `fix(setup): … (#20)`, `feat(sync): … (#18)`. GitHub auto-deletes the branch on
@@ -289,6 +294,7 @@ git checkout main && git pull --ff-only
 | Stable | `4.0.1` | **`latest`** | GA. Stable installs only ever follow `latest` |
 
 Bump rules while in the `4.0.0` alpha line:
+
 - Bug fix or docs → `-alpha.N` → `-alpha.(N+1)`.
 - Feature-complete / stabilizing → graduate to `-beta.0`.
 - Ship 4.0 → drop the prerelease suffix → `4.0.0` (goes to `latest`).
@@ -347,11 +353,16 @@ version don't match, `release.yml` fails before publishing. That's the safety ne
 if a release run fails on the guard, you tagged the wrong string.
 
 ### Requirements for publishing to work
-- `NPM_TOKEN` repo secret — an npm **Automation** token with publish rights
-  (already configured). Rotate with `gh secret set NPM_TOKEN`.
+
+- The current workflow supplies `NPM_TOKEN` as `NODE_AUTH_TOKEN`. Configure a valid
+  package-scoped granular token with the required publish/2FA capability and expiry.
+  Secret presence and validity must be checked by the release owner; they are not
+  guaranteed by this checkout. See [npm CI authentication](https://docs.npmjs.com/using-private-packages-in-a-ci-cd-workflow/).
+  Trusted publishing is an alternative design, not the authentication this workflow configures.
 - `release.yml` has `id-token: write` for provenance attestation — keep it.
 
 ### If a release goes wrong
+
 - **Failed on the guard / tests:** the package was NOT published. Fix, then move the
   tag (`git tag -d vX && git push origin :vX`, correct, re-tag, re-push) or cut the
   next patch.
@@ -373,37 +384,42 @@ if a release run fails on the guard, you tagged the wrong string.
 | **`dependabot.yml`** | weekly, Monday | Grouped bumps: `github-actions` (keeps action majors current) + `npm` (watchdog even though repo is zero-dep) | Opens PRs |
 
 Notes:
+
 - `release.yml` is **independent of `ci.yml`** — it runs its own test gate on the
   tagged commit. A green `main` CI is reassurance, not a precondition for release.
-- A **nightly failure means "upstream changed"**, not "this repo broke" — it's how
-  we catch ruflo/aqe drift the day it ships. Triage by reading the drift message.
+- A nightly failure may be upstream drift, a runner/network problem, or a kit defect.
+  Inspect the failing step and captured evidence before assigning a cause.
 - Dependabot PRs carry `dependencies` (+ `ci`) labels; merge like any PR after CI.
 
 ---
 
 ## 9. `gh` CLI cookbook (by use case)
 
-**Releases / publishing**
+### Releases / publishing
+
 ```bash
 gh run list --workflow=release.yml --limit 5          # recent publish runs
 gh run watch <run-id> --exit-status                   # follow one to completion
 gh run view <run-id> --log-failed                     # why a publish failed
 ```
 
-**CI**
+### CI
+
 ```bash
 gh workflow run ci.yml                                # manual matrix run (workflow_dispatch)
 gh run list --workflow=ci.yml --branch main --limit 5
 gh run rerun <run-id> --failed                        # re-run only failed jobs
 ```
 
-**Nightly upstream-drift probe**
+### Nightly upstream-drift probe
+
 ```bash
 gh workflow run nightly.yml                           # force a live-drift check now
 gh run list --workflow=nightly.yml --limit 3
 ```
 
-**Pull requests**
+### Pull requests
+
 ```bash
 gh pr create --fill                                   # open PR from current branch
 gh pr checks                                          # CI status for the PR
@@ -411,23 +427,27 @@ gh pr merge --squash --delete-branch                  # standard merge
 gh pr list --label dependencies                       # pending Dependabot PRs
 ```
 
-**Repo config / secrets**
+### Repo config / secrets
+
 ```bash
 gh secret list                                        # confirm NPM_TOKEN present
 gh secret set NPM_TOKEN                               # rotate the publish token
 gh repo view --web                                    # open on GitHub
 ```
 
-**GitHub Releases (automated)**
+### GitHub Releases (automated)
+
 Every tag push that publishes successfully also creates the GitHub Release
 automatically (`github-release` job in `release.yml`). Manual `gh release`
 commands are only for inspection or repair:
+
 ```bash
 gh release view v4.0.0-alpha.5                        # inspect one
 gh release list --limit 10                            # recent ledger
 # Backfill/repair only — notes bounded to exactly one release:
 gh release create vX --verify-tag --prerelease --generate-notes --notes-start-tag vW
 ```
+
 Note: `--generate-notes` diffs against the **previous Release object**, not the
 previous tag — a missing Release corrupts the next one's notes window, which is
 why the ledger must stay gap-free (history was backfilled 2026-07-24).
@@ -438,11 +458,11 @@ why the ledger must stay gap-free (history was backfilled 2026-07-24).
 
 | I want to… | Do this |
 |------------|---------|
-| Run the exact CI gate | `pnpm test` |
+| Run local validation | `pnpm run check`, `pnpm run test:ui`, and `pnpm run lint:links:internal`; CI additionally runs the OS/Node matrix |
 | Try the CLI locally | `node bin/agentic-kit.mjs <cmd>` |
 | Cut a release | Bump `package.json` → `release: vX` commit → push `main` → push `vX` tag |
 | See why a publish failed | `gh run view <id> --log-failed` |
 | Force an upstream-drift check | `gh workflow run nightly.yml` |
 | Confirm what npm sees | `npm dist-tag ls @pacphi/agentic-kit` |
-| Prune a merged branch locally | `git remote prune origin` |
+| Clean merged branch references | `git fetch --prune` removes stale remote-tracking refs; inspect then delete the local branch separately (`git branch -d <branch>`, or deliberate `-D` after verifying a squash merge) |
 | Verify the published tarball contents | `npm pack --dry-run` |

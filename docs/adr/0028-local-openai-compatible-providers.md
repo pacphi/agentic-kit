@@ -2,7 +2,8 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-11
-- **Updated:** 2026-08-25
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
+- **Earlier update:** 2026-08-25
 - **Update note:** Accepted with corrections after review of PR #131: the quoted Hermes
   `api_mode: openai` value is annotated as invalid rather than reproduced as valid (F-30), and the
   AQE-projection asymmetry between `ollama` and `local-openai` is now stated explicitly as
@@ -17,6 +18,17 @@
 Proposed by [@adrianco](https://github.com/adrianco) in
 [PR #131](https://github.com/pacphi/agentic-kit/pull/131); accepted with the corrections recorded
 below.
+
+## Current implementation boundary (2026-09-09)
+
+`local-openai` remains a configured local-provider abstraction with the explicit
+projection limits below. Its billing declaration must not be treated as observed
+local execution or an implemented Usage `$0` classification. Loopback gateways
+can forward remote requests, and Ollama itself documents both local and cloud
+models. Historical usage attribution still has ADR-0011's unimplemented evidence
+gate; [pricing.mjs](../../src/lib/pricing.mjs) continues to use its fallback rate
+for unmatched IDs. No generic provider discovery or direct Ruflo dispatcher
+capability is added by this documentation correction.
 
 ## Context
 
@@ -71,7 +83,7 @@ of which program serves it:
 
 - `billing: 'local'`, `credentials: { kind: 'none' }`, `capabilities.pricing: 'zero'` — required by
   the registry's own construction invariants for a local provider (`validateRegistries`), and
-  correct: a loopback server bills nothing. A server that wants a placeholder token does not make
+  a configured billing declaration, not proof that every request is served locally. A server that wants a placeholder token does not make
   the credential *required*, so `kind: 'none'` remains accurate.
 - `transports: ['openai-compatible']` — the only transport the row may claim. Anthropic-compatible
   and native shells stay Ollama's, established separately.
@@ -94,8 +106,8 @@ against one provider — the same relation ADR-0011 already names for `ollama-vi
 
 Consistent with [ADR-0021](0021-inference-provider-provenance.md), such a binding establishes
 **configured** provenance and nothing stronger. The endpoint is user-declared, so it may not be
-displayed as observed, and it does not upgrade model, token, cache, or digest claims. The `$0`
-claim is the one exception and is a property of the billing type, not of evidence about the run.
+displayed as observed, and it does not upgrade model, token, cache, or digest claims. The registry's zero-rate capability is a property of declared local billing, not a
+verified cost classification for a historical run.
 
 ### 3. No built-in bindings for the generic provider
 

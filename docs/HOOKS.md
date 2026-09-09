@@ -74,11 +74,11 @@ compatibility separate from trust, consent, grants, reachability, and organizati
   explicit at this CLI boundary.
 - `approval-required`: a user/project source or a change requiring explicit review.
 - `upstream-required`: the authoritative repair belongs in the producing dependency.
-- `never-automatic`: generated/cache targets, opaque modules, trust bypasses, unsupported
-  schemas, unsafe files, or unproven ownership.
+- `never-automatic`: unrecognized generated targets, plugin caches, opaque modules, trust
+  bypasses, unsupported schemas, unsafe files, or unproven ownership.
 
 Executable recipes cover canonical user-owned JSON for exact Codex CLI `0.151.0`,
-`0.152.1`, and `0.153.2`, plus Claude Code `2.1.258`, `SessionEnd` timeout normalization.
+`0.152.1`, and `0.153.2`, plus Claude Code `2.1.258` and `2.1.266`, `SessionEnd` timeout normalization.
 Under the exact Codex `0.152.1` profile, the planner can also retire the frozen legacy Ruflo
 Claude-helper projection from a project when a selected, valid `ruflo-core@ruflo` plugin
 is proven. That legacy-retirement recipe removes only exact
@@ -107,8 +107,20 @@ shift and require Codex review. The preview discloses both facts. A fresh Codex 
 is required after apply because hook definitions are loaded at session start.
 
 OpenCode, external adapters, JSONC, plugin caches, generated copies, unknown versions,
-and remote sources remain observable but non-executable. Windows receives the full plan
+and remote sources remain observable but non-executable, except for the exact reviewed AQE
+project-artifact compatibility migration below. Windows receives the full plan
 but no mutation until atomic replace-existing behavior has a proven platform port.
+
+## Reviewed AQE project-artifact migration
+
+The current healer can replace exact reviewed project copies of `aqe-hook.cjs` and
+`brain-checkpoint.cjs` and normalize recognized Claude lifecycle timeout groups.
+It compares complete helper preimage SHA-256 values; a package version or generated
+banner is insufficient. The compatibility templates derive from AQE 3.14.1 and preserve
+RVF data and sidecars. Unknown helper bytes and user edits remain manual review findings.
+This is an explicit, receipt-backed project repair, not mutation of plugin caches or the
+installed upstream package. See the [template provenance](../src/templates/aqe-lifecycle/README.md)
+and `tests/kit/aqe-lifecycle-migration.test.mjs`.
 
 ## Transactions and receipts
 
@@ -129,5 +141,6 @@ separately. Opening or updating an upstream issue always requires explicit user 
 constraint registry may retain either a draft or the published URL/time receipt after that
 approval. Agentic-QE's 3.14.0 Stop generator is tracked in
 [AQE #654](https://github.com/proffesor-for-testing/agentic-qe/issues/654); historical ETIMEDOUT is
-detected and attributed, but generated copies are not patched and no released fix is claimed. A
+detected and attributed. Exact reviewed project copies now have the compatibility repair
+above; this does not claim that all upstream-generated variants are fixed. A
 workaround is retired only after a released artifact passes the relevant conformance suite.

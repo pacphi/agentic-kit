@@ -110,8 +110,10 @@ Two things to know before running it:
 
 ## Capture (run after both sessions)
 
-Substitute the working directory you used. The commands below print **field names, counts, and model
-ids only — never message content** — so the output is safe to paste into an issue or a PR.
+Substitute the working directory you used. The commands below read raw local transcripts. Their selected output excludes message
+text, but the file listing exposes paths and the model/catalogue output can expose private
+tags and digests. Review and redact the output before sharing it. Select the exact test
+transcripts rather than assuming that the latest file belongs to this experiment.
 
 ```bash
 # 1. Locate the two most recent Claude transcripts
@@ -185,7 +187,11 @@ outcome — it means ADR-0011 gets corrected before any code is written against 
 
 ## Two decisions that are not the experiment's to make
 
-Both are recorded here so they are not silently assumed while the evidence is being gathered:
+These are historical design questions from the July 2026 protocol. Model lifecycle
+intelligence now performs explicit loopback `/api/tags`, bounded `/api/show`, and `/api/ps`
+reads during `ak models refresh`; see [MODELS.md](MODELS.md). That shipped catalogue
+collector does not resolve this protocol's unmeasured transcript-provenance questions.
+The original questions remain below for their decision history:
 
 1. **Whether `ak` may read `127.0.0.1:11434` at all.** ADR-0009 §2 promised "zero network calls";
    ADR-0011 §2 argues a loopback read is not egress and sits inside ADR-0010's provider-mediated

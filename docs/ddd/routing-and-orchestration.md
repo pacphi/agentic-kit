@@ -60,6 +60,8 @@ on disk.
 Retirement is the single case in which a `user` route is overridden, and only for the run: honoring
 a pin into a withdrawn model fails the work rather than respecting the intent. The persisted value is
 left exactly as the user wrote it. A model that is merely superseded is diverged, not retired.
+The current `RETIRED_MODELS` map is empty: the substitution mechanism is implemented, but no
+model is currently substituted by that curated map. Catalogue disappearance cannot populate it.
 
 ### Primary host
 

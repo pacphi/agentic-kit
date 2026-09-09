@@ -2,19 +2,20 @@
 
 - **Status:** Implemented
 - **Date:** 2026-09-03
-- **Updated:** 2026-09-03 — issue #200 delivered the control plane, bounded providers, dashboard
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
+- **Earlier update:** 2026-09-03 — issue #200 delivered the control plane, bounded providers, dashboard
   action boundary, durable receipts, guarded undo, fail-closed interruption recovery, prescriptive
   relationship findings, and resilient dashboard loading
-- **Updated:** 2026-09-04 — ADR-0048 is a Proposed successor for the findings-first product,
+- **Earlier update:** 2026-09-04 — ADR-0048 is a Proposed successor for the findings-first product,
   single-write contract, and interruption-audit surface; this ADR remains the implemented and
   authoritative runtime contract until the successor is accepted and shipped
-- **Updated:** 2026-09-05 — ADR-0048 is now Accepted and implemented. This ADR's transaction
+- **Earlier update:** 2026-09-05 — ADR-0048 is now Accepted and implemented. This ADR's transaction
   engine (plan/apply/verify/receipt, mutation lock, provider registry) remains the authoritative
   runtime floor underneath it, unchanged. Its one-use-capability contract is now enforced as a
   one-write-action-per-plan rule at the planner, coordinator, service, dashboard API, and CLI. Its
   single `recoverMaintenanceReceipt` recovery is now split into a read-only interruption audit
   (`interruption-audit.mjs`) and a separate confirmed `reconcileMaintenanceReceipt` write, both
-  available from the CLI and, for audit, the dashboard; `recoverMaintenanceReceipt` remains as a
+  available from the CLI and the v2 dashboard; `recoverMaintenanceReceipt` remains as a
   compatibility wrapper. Its findings-first Maintenance dashboard panel has been replaced by
   ADR-0048's inventory workspace; this ADR's v1 HTTP routes (`GET /api/maintenance`,
   `POST /api/maintenance/{plans,apply,undo}`) and CLI verbs remain as a documented compatibility
@@ -23,12 +24,28 @@
 - **Deciders:** agentic-kit maintainers
 - **Related:** [issue #198](https://github.com/pacphi/agentic-kit/issues/198),
   [issue #200](https://github.com/pacphi/agentic-kit/issues/200),
-  [ADR-0005](0005-dashboard-in-page-routing-reveal.md),
-  [ADR-0014](0014-dashboard-auth-and-remediation.md),
-  [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),
-  [ADR-0025](0025-machine-footprint-metrics.md), and
-  [ADR-0041](0041-host-neutral-hook-configuration-assurance.md), and
-  [ADR-0045](0045-artifact-consumer-bindings-and-explicit-maintenance-scans.md)
+  [ADR-0005](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0005-dashboard-in-page-routing-reveal.md),
+  [ADR-0014](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0014-dashboard-auth-and-remediation.md),
+  [ADR-0023](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0023-fail-closed-operations-and-explicit-degradation.md),
+  [ADR-0025](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0025-machine-footprint-metrics.md), and
+  [ADR-0041](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0041-host-neutral-hook-configuration-assurance.md), and
+  [ADR-0045](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0045-artifact-consumer-bindings-and-explicit-maintenance-scans.md)
+
+## Current implementation boundary (2026-09-09)
+
+ADR-0048's implemented v2 API includes `audit`, `reconcile/preview`, and
+`reconcile`, plus exact discovery/preferences/recipe operations.
+[maintenance-security.mjs](../../src/lib/dashboard/maintenance-security.mjs) is
+the closed route authority; [API tests](https://github.com/pacphi/agentic-kit/blob/main/tests/kit/maintenance-dashboard-v2-api.test.mjs)
+pin header authentication, schemas and one-use capabilities. The four routes
+and findings-first screen below are the historical v1 surface, retained only
+for documented compatibility.
+
+Default v2 composition also includes the separately proven Git-project-patch and
+Ollama-model-removal providers. No generic package executor or bulk write follows
+from these additions. The single-write-action and audit-versus-reconciliation
+rules in ADR-0048 supersede the older batching/recovery description below; its
+human and cross-platform acceptance gates remain open.
 
 ## Context
 
@@ -141,7 +158,7 @@ separate <code>reversible</code>, <code>compensating</code>, or <code>irreversib
 Native marketplace, package, network, and process operations are not presented as
 filesystem-atomic.
 
-## Implemented provider matrix
+## Initial provider matrix — extended by ADR-0048
 
 | Provider | Executable operations | Fail-closed limits |
 |----------|-----------------------|--------------------|
@@ -195,19 +212,20 @@ record proves this machine, the current numeric UID, and a PID proven dead, with
 check under an exclusive reclaim marker. Remote-machine, tampered, malformed, symlinked,
 wrong-owner, liveness-unknown, and UID-unknown locks remain busy.
 
-## Dashboard boundary
+## Original v1 Dashboard boundary — v2 extension in ADR-0048
 
-The dashboard allowlist is exactly:
+The original v1 dashboard allowlist is:
 
     GET  /api/maintenance
     POST /api/maintenance/plans
     POST /api/maintenance/apply
     POST /api/maintenance/undo
 
-Every other route retains default non-GET rejection. POST requests require the per-session header
+ADR-0048 adds a separate exact v2 allowlist. Routes outside the combined
+allowlists retain default non-GET rejection. POST requests require the per-session header
 token, valid Host/Origin/Sec-Fetch-Site evidence, <code>application/json</code>, an exact schema, and
-a body no larger than 64 KiB. The SSE query-token exception does not apply. The dashboard has no
-recovery endpoint: it displays recovery-required evidence and directs the operator to the CLI.
+a body no larger than 64 KiB. The SSE query-token exception does not apply. The original v1 dashboard had no recovery endpoint. The v2 workspace now offers
+read-only interruption audit and separately confirmed single-receipt reconciliation.
 
 Plain <code>GET /api/maintenance</code> reads the latest persisted scan report and never polls a
 provider. The exact <code>?refresh=scan</code> query performs and atomically persists a provider scan;

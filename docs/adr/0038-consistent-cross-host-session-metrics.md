@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-29
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0009](0009-usage-scorecard-local-transcript-analytics.md),
   [ADR-0010](0010-provider-mediated-quota-reads.md),
@@ -9,6 +10,20 @@
   [ADR-0017](0017-opencode-host.md),
   [ADR-0021](0021-inference-provider-provenance.md),
   [ADR-0042](0042-capability-aware-context-budget-intelligence.md)
+
+## Current implementation boundary (2026-09-09)
+
+The original §8 provider-axis description conflicted with the implementation and
+has been corrected: [aggregation](../../src/lib/usage-aggregate.mjs) folds
+`s.provider ?? unknown`, and [usage tests](../../tests/kit/usage-index.test.mjs)
+pin distinct `openai`/`unknown` buckets. OpenCode's observed provider/cost path is
+implemented. The remaining metrics, posture judgments, histogram bounds and
+main-thread denominators retain the rules below.
+
+Schema v11–v17 statements record the original migrations; the current usage cache
+is v20 under ADR-0050. Its verified top-10 Git-project ranking is separate from
+legacy label-keyed aggregates. September pricing work in ADR-0009/0032 supersedes
+the older deferred-rate-document discrepancy; this audit does not reprice data.
 
 ## Context
 
@@ -192,17 +207,15 @@ machine output per human touch — and `humanPromptsPerHour` is those same promp
 `totals.humanPrompts` ships beside `totals.prompts` so the distinction is auditable rather than
 implicit.
 
-### 8. There is no window bucket for the inference provider
+### 8. Provider evidence remains distinct from execution host
 
-Window cost is bucketed by execution host, not by the vendor that served the tokens. Only Codex
-transcripts record an inference provider together with the provenance backing it; Claude and
-OpenCode transcripts name none at all. An aggregate axis over that evidence would put most of a
-window's spend in one unattributed row, which a reader takes as a finding about providers rather
-than as what it is — an absence of provider evidence in two of the three formats.
-
-Provider identity is therefore per-session evidence, reported on the session row beside its
-provenance, which is where ADR-0021's rule already applies it. The legacy `byProvider` map is left
-alone, keyed by transcript host as it always was.
+`byHost` aggregates execution hosts. The implemented `byProvider` map aggregates
+the session's independently recorded inference provider, or `unknown`; it is not
+a duplicate host map. Codex may record `model_provider`, and OpenCode records
+`providerID` on assistant messages. Native Claude history may leave provider
+unestablished. Provider provenance remains visible per session, and absent
+evidence is never filled from host or model name. A separate
+`byInferenceProvider`/“served by” UI was not retained.
 
 ### 9. Tool names are the host's own, never translated
 

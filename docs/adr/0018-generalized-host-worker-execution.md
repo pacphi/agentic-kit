@@ -3,7 +3,8 @@
 - **Status:** Implemented; compatibility retention superseded by
   [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-29
-- **Updated:** 2026-08-25
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
+- **Earlier update:** 2026-08-25
 - **Update note:** Added private bounded dependency handoffs and one absolute lifecycle deadline
   per attempt; removed the temporary command, adapter, and persisted-schema compatibility clauses.
   ADR-0033 extends cleanup to POSIX process groups so host-spawned MCP descendants share the
@@ -12,6 +13,18 @@
 
 > **GA amendment:** the host-neutral lifecycle, `ak run`, and OpenCode safety decisions remain.
 > The temporary command, adapter, and persisted-schema compatibility clauses were removed for GA.
+
+## Current implementation boundary (2026-09-09)
+
+Decision 7's tagged-text handoff describes the original transport.
+[ADR-0034](0034-schema-native-handoffs-and-hermetic-seats.md) supersedes it for
+Claude/Codex handoff workers with host-enforced schemas; other hosts retain the
+bounded tagged fallback. The 2 KiB individual/8 KiB fan-in and private-only handoff
+boundaries remain. Source: [handoff.mjs](../../src/lib/execution/handoff.mjs),
+[Claude adapter](../../src/lib/execution/claude.mjs),
+[Codex adapter](../../src/lib/execution/codex.mjs), and
+[handoff tests](../../tests/kit/execution-handoff.test.mjs).
+The compatibility executor/fields below remain historical under ADR-0020.
 
 ## Context
 

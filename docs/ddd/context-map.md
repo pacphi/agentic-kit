@@ -59,7 +59,8 @@ See [Integration management](integration-management.md).
 ### Maintenance
 
 The Focus browser amendment approved on 2026-09-08 is a Dashboard interaction over the existing
-management projection; integration verification is pending. Scope/repository/type/family browsing
+management projection; its automated coverage does not close the separate human and platform
+acceptance gates. Scope/repository/type/family browsing
 and context-preserving relationship links add no measurement, provenance, or action authority.
 See the [current Maintenance guide](../MAINTENANCE.md).
 
@@ -100,11 +101,12 @@ dashboard polling reads the report and cannot silently become provider discovery
 
 ### Hook configuration assurance
 
-Owns read-only, host-neutral discovery of lifecycle sources; normalized occurrences and
+Owns host-neutral read-only discovery of lifecycle sources; normalized occurrences and
 material behavior identity; coverage gaps; diagnostics; and remediation authority
 proposals. It consumes host identity, project scope and validated external adapter
-manifests. It never executes hook or plugin code and owns no host trust, consent, grant,
-installation, route or configuration write.
+manifests. Discovery never executes hook/plugin code. Exact-profile healing uses its separate explicit
+mutation port; ordinary discovery owns no host trust, consent, grant, installation or routing
+authority.
 
 It may contribute the static half of a sanitized Hook read model. It does not own supervised
 execution receipts and cannot reinterpret an absent runtime stream as zero failures.
@@ -137,6 +139,14 @@ See [Observability](observability.md).
 Owns transcript indexing, session history, token and cost aggregation, classification, and usage
 findings. It may share a host-qualified session identity with Observability, but its aggregate and
 cache are separate from the live event store.
+
+Current cache schema v20 records bounded parse-time project evidence and explicit Desktop origin.
+The additive `projectGroups` projection retains every admitted session and its traceable membership.
+The visible Usage Score **Projects** ranking instead uses `gitProjects`: only existing, non-user
+Git parents with verified association qualify, and worktree costs roll into their real parent.
+It shows the top ten by API-equivalent cost; user-level, missing-parent and unclassified sessions
+remain in overall totals. These are different populations, not competing whole-machine totals.
+No historical Git association is reconstructed from a current repository name or shared remote.
 
 Prompt Telemetry is a Historical Usage subdomain. It owns privacy-bounded prompt fingerprints,
 controlled semantic facets, recurring-cluster evidence and deterministic presentation names. It
@@ -171,7 +181,8 @@ release proof are recorded by implemented ADR-0032.
 ### Workspace snapshot cache
 
 Owns the bounded, owner-only last safe `SessionWorkspace` value per host-qualified session. It is
-an advisory read-model cache, not the append-only Evidence Archive and not a source of liveness.
+an advisory read-model cache, not the proposed (unimplemented) append-only Evidence Archive or a
+source of liveness.
 Restoration supplies inert History context using the original capture time; it cannot query a
 current checkout and present that state as historical.
 
@@ -179,10 +190,10 @@ current checkout and present that state as historical.
 
 Owns read-only trend projections over ruflo/agentic-qe's own project-level learning state: the
 neural pattern store, its lifetime learned-pattern counter, reasoning-graph size samples, and the
-machine-health sample ring. It reads `.claude-flow/*` files directly — there is only ever one
-shape, ak's own, so no anti-corruption adapter is required — and is independent of Evidence
-Acquisition and Observability's canonical event model. It carries no session, actor, host,
-provider, or lifecycle identity and grades no per-field evidence confidence.
+machine-health sample ring. It uses bounded readers for the supported `.claude-flow/*` shapes, independently of
+Observability's canonical event model, and may append its own deduplicated health-history ring.
+It carries no session, actor or lifecycle identity and grades no per-field evidence confidence. Learning-scope and
+Desktop-origin qualifiers belong to the picker projection, not its time-series evidence.
 
 See [Project intelligence](project-intelligence.md).
 
@@ -194,9 +205,9 @@ data breakdown (category → host → project → session) with growth and advis
 candidates, the deduplicated cross-host catalog inventory, and per-project approximate lines of
 code and disk. Its sources are the local filesystem and the current-user process table — the same
 trust boundary `ak status` and the runtime survey already cross — so no anti-corruption adapter is
-required. It is structurally metadata-only: collectors read directory entries, `stat` results,
-manifest names, and `.git/config`'s remote URL, so transcript, prompt, and tool-payload content
-cannot enter the model. It owns no spend, activity, or learning facts, and it mutates nothing
+required. Its enumerated metadata surface includes directory/stat data, bounded manifest fields and
+resource descriptions, transient source bytes for LOC, Git metadata, and opening transcript
+identity/origin declarations. Message bodies, prompts and tool payloads do not enter the read model. It owns no spend, activity, or learning facts, and it mutates nothing
 beyond its own snapshot file.
 
 See [Machine footprint](machine-footprint.md).
@@ -223,8 +234,9 @@ domain facts.
 
 Dashboard Delivery owns ADR-0044's narrowly allowlisted Maintenance POST boundary and accessible
 confirmation/progress/receipt interaction. Maintenance, not the browser, owns policy, fixed
-operations, verification, and receipts. Every other dashboard route retains default non-GET
-rejection. Interrupted-receipt recovery is CLI-only.
+operations, verification, and receipts. Other routes retain their explicitly documented method allowlists. Maintenance v2 exposes
+read-only interruption audits and separately confirmed reconciliation; neither replays a provider
+action, and neither follows from ordinary polling.
 
 ### Maintainer administration
 
@@ -267,7 +279,7 @@ and credential policy is distinct from the offline-first dashboard and integrati
 | Local filesystem and process table | Machine footprint | Direct metadata-only reads; no anti-corruption adapter needed |
 | Project census | Machine footprint | Candidate paths only, at directory granularity; every rendered figure is measured by this context's own collectors |
 | Project census | Project intelligence | The `learning` scope, folded onto project identity — the project list and the selectable key |
-| Project census | Historical usage | Repository roots, so a session in a sub-directory labels as its repository rather than as a peer project |
+| Project identity helpers | Historical usage | Parse-time Git association and explicit Desktop origin; schema-v20 evidence drives the existing-parent Git ranking without changing overall usage totals |
 | Machine footprint | Dashboard delivery | Two-tier measurement read model over `GET /api/system`, and the same collector behind `ak system` |
 | Machine footprint | Maintenance | Observed inventory, pressure, freshness, and advisory facts only; no ownership or mutation authority crosses the boundary |
 | Integration management | Maintenance | Provider capabilities, native lifecycle facts, desired state, and exact ownership receipts |
@@ -285,10 +297,11 @@ and credential policy is distinct from the offline-first dashboard and integrati
 
 `src/lib/project-census.mjs` is the one enumeration of this machine's projects
 ([ADR-0027](../adr/0027-shared-project-census.md)). It is a **shared kernel**, not a context: it
-owns no domain logic, produces no rendered figure, and every consumer applies its own named scope
-and takes its own measurements. Four contexts derive their project list from it, and the identity
-it keys on (`resolveProjectIdentity`) is Observability's, reused rather than reinvented — which is
-what makes a project mean the same thing in all four.
+provides session-derived candidates plus named scopes and learning-identity folding. Each
+consumer applies its own population rules and takes its own measurements. Maintenance additionally
+accepts user-configured Discovery roots. `resolveProjectIdentity` preserves existing learning/live
+keys; `footprint/project-identity.mjs` supplies stricter current Git association evidence for
+additive grouping. Neither display grouping nor a basename changes an action or session ID.
 
 The kernel deliberately serves **two granularities**. Machine footprint consumes directories,
 because directories are what have bytes and lines in them. Project intelligence consumes projects,
@@ -314,10 +327,10 @@ observed before the split was made explicit.
   different totals, but neither may report an unexplained one.
 - Project intelligence reads local project state directly; it never enters Evidence Acquisition's
   anti-corruption layer or Observability's canonical event model, and it establishes no session,
-  actor, host, provider, or lifecycle identity.
-- Machine footprint measures metadata only. It never opens transcript, prompt, or tool-payload
-  content, never publishes spend, session, or learning facts, and never renders an unmeasured
-  value as zero.
+  actor or lifecycle identity. Picker host-origin qualifiers do not establish live execution.
+- Machine footprint retains only the metadata enumerated in its read-surface contract. Bounded
+  transcript-head parsing extracts identity/origin fields, never message bodies; spend, activity
+  and learning counters remain in their owning contexts. Unmeasured values never become zero.
 - Maintenance cannot derive authority from a Machine Footprint observation. It acts only through a
   capability-advertising provider, a current source-bound plan, explicit confirmation, live
   preflight, verification, and a durable receipt. Unsupported operations stay report-only.
@@ -333,7 +346,8 @@ observed before the split was made explicit.
 - Managed companion surfaces stay downstream of Integration management. Their ability to read host
   history or inject recalled context does not make them hosts, evidence owners, or policy
   authorities; consent, content-free observation, and ownership-safe teardown remain upstream.
-- Hook configuration assurance is read-only. It never imports an OpenCode plugin, executes a hook,
+- Hook assurance discovery is read-only. It never imports an OpenCode plugin, executes a hook,
   fetches a remote adapter by default, changes trust, or treats a diagnostic as write authority.
+  The separate healing port requires an exact action, plan, profile, preimage and explicit apply.
 - A static hook occurrence is not a runtime outcome. A supervised receipt does not prove native
   Claude, Codex or OpenCode lifecycle behavior, and an absent receipt stream is `not-recorded`.

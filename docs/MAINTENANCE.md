@@ -43,7 +43,7 @@ text:
   discovery source, then refreshes evidence. It takes minutes. The CLI equivalent is
   `ak maintain scan --deep --refresh-inventory`.
 
-Refresh evidence is the only control that runs executable provider probes. While either action
+Both controls run provider probes: Re-measure machine includes the Refresh evidence stage. While either action
 runs, both buttons are disabled, the status line says what is running ("Refreshing evidence…" or
 "Re-measuring the machine… this can take minutes."), and apply, undo, and record are refused. If
 the work does not finish, the previous evidence is kept. The inventory build runs after the probes
@@ -54,7 +54,7 @@ reason if it fails. The retired Catalog link (`#system/catalog`) redirects to In
 ## Inventory
 
 The **Focus browser** described below was approved and implemented on 2026-09-08.
-See [focused validation](archive/2026-09-08-validation-maintenance-focus.md); older builds may
+See [focused validation](https://github.com/pacphi/agentic-kit/blob/main/docs/archive/2026-09-08-validation-maintenance-focus.md); older builds may
 still show expanded resource cards. The approved interaction does
 not change the exact-operation, preview, confirmation, or receipt contracts in this guide.
 
@@ -77,6 +77,15 @@ reveals worktree choices; selected worktrees stay reachable until deselected. Th
 type control. This preference changes browsing choices, not saved measurements, discovery sources,
 or the exact installation targeted by an operation. Measured ordinary project folders retain
 their distinct designation rather than being falsely labelled Git repositories.
+
+Project choices group beneath repositories only when shared Git metadata or the existing discovery
+contract establishes the association. A worktree remains its own selectable project. Folder/name
+headers, a Git/Worktree/Folder designation, and all detected language icons identify each choice.
+An independent **Session origin** facet can match Claude Desktop, Codex Desktop, or unclassified
+observations; Desktop origin never replaces repository membership. Facet counts are installations
+in matching projects, not numbers of sessions. Selecting several origins does not duplicate a
+placement. Exact root paths stay private; the public grouping uses opaque repository identities
+and bounded display labels.
 
 ### Exact installations
 
@@ -101,7 +110,7 @@ Host adapter, Executable, Runtime, Model, Provider configuration, Cache, Credent
   Updates available, Dependencies, Conflicts and overlaps, Duplicated placements, Disabled
   resources, Credentials and providers, Models and runtimes, Storage and caches, Recently
   changed, and Inventory evidence only.
-- **Facets** are multiselect and show counts. Scope, environment, project, type, hosts/adapters,
+- **Facets** are multiselect and show counts. Scope, environment, project, session origin, type, hosts/adapters,
   carrier, provenance, package manager, version, Guidance, dependency, conflict, credential,
   channel, evidence, and recent-change filters remain available. **Clear all** removes facets;
   narrow screens use a **Filters** sheet.
@@ -496,7 +505,10 @@ Use the audit and `ak maintain reconcile` for the receipt.
 
 ## The `ak maintain` verbs
 
-Add `--json` to any verb for the complete DTO. Verbs that write require `--yes`.
+Add `--json` where supported for the complete DTO. Apply, undo, reconciliation, dispositions,
+and recipe acceptance require `--yes`; source add/remove and stop use it after their preview.
+Source toggles, exclusions and preference updates are explicit configuration commands rather than
+transaction applies; follow the verb-specific options below.
 
 | Verb | What it does |
 |------|--------------|
@@ -690,8 +702,8 @@ storage is blocked, so authenticated panels can still finish bootstrap.
   interrupted operation.
 
 For architecture and invariants, see [the Maintenance domain](ddd/maintenance.md),
-[ADR-0048](adr/0048-inventory-led-maintenance-resource-management.md), the
-[acceptance criteria and open gates](MAINTENANCE-ACCEPTANCE.md), and
+[ADR-0048](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0048-inventory-led-maintenance-resource-management.md), the
+[acceptance criteria and open gates](https://github.com/pacphi/agentic-kit/blob/main/docs/MAINTENANCE-ACCEPTANCE.md), and
 [ADR-0044](adr/0044-receipt-aware-maintenance-control-plane.md) for the transaction engine.
 
 ### Resource descriptions and installation sources
@@ -720,13 +732,12 @@ path-bearing descriptions are omitted from public Maintenance data. Refresh the
 machine measurement after upgrading to capture new catalog metadata.
 
 Project coverage is designed around build ecosystems rather than one manifest format.
-See the [proposed project metadata adapter design](PROJECT-METADATA-ADAPTERS.md)
-for the 25-language target, polyglot attribution, and unsupported-metadata behavior.
+See the [proposed project metadata adapter design](https://github.com/pacphi/agentic-kit/blob/main/docs/PROJECT-METADATA-ADAPTERS.md)
+for the proposed ecosystem targets, polyglot attribution, and unsupported-metadata behavior.
 
-Project cards show up to three uniformly sized SVG language icons, with language names in
-tooltips and accessible labels, and an expandable remainder
-for polyglot repositories. Artifact-only detections do not imply source line counts.
-See the [dated top-50 coverage list](LANGUAGE-COVERAGE.md) and [bundled logo sources and licenses](LANGUAGE-LOGOS.md).
+Project cards show all detected, uniformly sized SVG language icons inline with wrapping,
+with language names in tooltips and accessible labels. Artifact-only detections do not imply source line counts.
+See the [dated top-50 coverage list](https://github.com/pacphi/agentic-kit/blob/main/docs/LANGUAGE-COVERAGE.md) and [bundled logo sources and licenses](https://github.com/pacphi/agentic-kit/blob/main/docs/LANGUAGE-LOGOS.md).
 
 ### Scan history dates
 

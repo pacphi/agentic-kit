@@ -9,7 +9,7 @@ Its terms are merged into [Ubiquitous language](ubiquitous-language.md) and the 
 > inventory" below); this context's collectors and measurement ownership remain read-only and
 > unchanged.
 
-Maintenance's approved Focus browser (2026-09-08; integration verification pending) presents
+Maintenance's implemented Focus browser (broader acceptance gates remain open) presents
 this measured evidence one level at a time, with repository choices and optional worktree
 visibility. That presentation cannot change source inclusion, complete-placement counts, or
 collector ownership. Its evidence-backed relationship disclosures are governed by the
@@ -47,7 +47,7 @@ boundaries are what keep all four honest:
 
 - **[Historical usage](context-map.md)** owns *spend* facts — tokens, API-equivalent cost, model
   identity — parsed from transcript **content**. Machine footprint reads transcript `stat`
-  metadata, plus one declared field — the session's `cwd` — and never a message body
+  metadata plus bounded opening identity/origin fields, never a retained message body
   ([the read surface](#the-read-surface)). A 400 MB session is a storage fact here and a token
   fact there; the two figures answer different questions and neither substitutes for the other.
 - **[Observability](observability.md)** owns *activity* evidence — session lifecycle, actors,
@@ -57,11 +57,10 @@ boundaries are what keep all four honest:
   graph.
 - **[Project intelligence](project-intelligence.md)** owns *learning* trends from
   `.claude-flow/` state. Machine footprint measures those same directories only as bytes on
-  disk. The shared piece is the *idea* of project discovery, not the implementation: this domain
-  runs its own (`project-sources.mjs`) because Intelligence's catalog answers "which projects
-  carry ruflo learning state" and collapses ~50 projects to 5 here. Either way a path is not
-  evidence, and discovery supplies nothing this domain renders as a measurement — exactly the
-  boundary ADR-0024 draws when it reuses Observability's workspace store.
+  disk. Both consume `project-sources.mjs` through the shared census: System keeps directory
+  granularity while Intelligence selects existing learning-state roots and folds project identity.
+  A candidate path is not a byte/LOC measurement, and a learning marker is not a trained-pattern
+  count.
 - **[Integration management](integration-management.md)** owns what *should* be deployed
   (bindings, projections, ownership). Machine footprint reports what *is* on disk and how big it
   is; catalog counts here are observed inventory, never desired state.
@@ -87,8 +86,9 @@ read not on this list is a defect, and adding one is an amendment to this docume
 | Directory entries and `lstat` | `walk.mjs`, every collector | name, kind, size, mtime, block count | anything inside a file |
 | `.git/config` | `projects.mjs` | the origin remote URL | every other config key |
 | `.git/worktrees/<name>/gitdir` | `storage-reclaim-detectors.mjs` (re-exported from `storage.mjs`) | one filesystem path, bounded to 4 KB | — |
-| A transcript's **head** | `project-sources.mjs`, consumed by project discovery and top-N session attribution | opening `cwd`, native session ID, and timezone-bearing timestamp fields | every message, prompt, title, tool call, tool result and model output in the file |
-| OpenCode's session store | `project-sources.mjs` | the `directory` column, read-only | every other column, and every message row |
+| A transcript's **head** | `project-sources.mjs`, consumed by project discovery and top-N session attribution | opening `cwd`, native session ID, timezone-bearing timestamps, and exact Desktop entrypoint/originator declarations | message bodies, prompts, titles, tool calls/results and model output |
+| OpenCode's session store | `project-sources.mjs` | grouped `directory`, session count, and latest session time, read-only | titles, message rows, content and credentials |
+| Git association metadata | `project-identity.mjs` | bounded `.git` pointer, `commondir` and matching `gitdir` backlink; canonical directory identity | history, diffs and name-based provenance guesses |
 | A project's own manifests | `stack-detect.mjs` | dependency **keys** (and, for `path:`/`workspace:` entries, enough of the value to reject them) | manifest values, scripts, and anything executable |
 | A project's own source files | `stack-detect.mjs` | the count of `\n` bytes, binary checks, and transient ≤16 KiB language-signature checks | the text — each 64 KB chunk is counted and immediately overwritten |
 | Capability entrypoints and bounded skill trees | `catalog.mjs`, `catalog-evidence.mjs` | SHA-256 of regular, non-symlink files; full skill definitions are capped at 512 entries, 1 MiB per file, and 8 MiB total | body text; only metadata and digests leave the read |
@@ -97,8 +97,8 @@ read not on this list is a defect, and adding one is an amendment to this docume
 | Project artifact Git state | `catalog-project-evidence.mjs` | tracked/untracked and clean/changed state for the exact artifacts already measured | history, commit content, diffs, and ownership claims |
 | Host-native plugin inventory | `claude plugin list --json`, `codex plugin list --json` | whitelisted identity, version, scope, enabled state, install/cache location, lifecycle policy | MCP definitions, headers, credentials, arbitrary source documents, unknown fields |
 
-Three of those rows are new since the first draft of this document, and they are the reason this
-section exists rather than a one-line invariant.
+These explicit exceptions distinguish bounded metadata extraction from unrestricted content
+collection. Full records may be transiently parsed; only the enumerated fields leave the reader.
 
 **A transcript's opening metadata is identity, not content.** Project discovery opens each Claude and Codex
 transcript, reads at most its first 256 KB, JSON-parses at most its leading 40 non-blank lines,
@@ -106,7 +106,7 @@ and takes only declared opening fields: Claude's `cwd`, `sessionId`, and first t
 `timestamp`; or Codex's `payload.cwd` on `session_meta` / `turn_context` plus the first
 `session_meta` record's `payload.id` and timezone-bearing timestamp. Codex latches that first
 `session_meta` because later records may contain replayed parent metadata. The parsed records are
-discarded at the end of the loop; project discovery retains only the path, while Storage's
+discarded at the end of the loop; discovery retains the path plus bounded origin/count evidence, while Storage's
 already-ranked top-N rows may also retain the opaque ID and normalized instant. This is the same read
 `native-transcript-discovery.mjs` already performs for Observability at the same trust boundary,
 and it is what makes discovery honest: the alternative is guessing the path from the directory
@@ -136,12 +136,15 @@ report a dependency's dependencies as the project's own.
 sanctioned from the first draft (`§4`: "a zero-dependency extension-bucketed line count by the
 kit's own bounded walker"). What was left implicit is that a line count is a byte scan: the
 counter streams the file through one fixed 64 KB buffer, increments on `0x0a`, bails out on a NUL
-byte in the first chunk (binary), and never retains, concatenates, decodes or emits the text. The
-figure that leaves the function is an integer.
+byte in the first chunk (binary), and does not retain or emit source text. Separate bounded language-signature disambiguation may
+decode a transient prefix; its output is a language classification, not source content. The
+line counter returns an integer.
 
 The boundary that still holds, stated positively: **no message body, prompt, tool call, tool
-result, model output, or manifest value enters this domain, in any tier, on any path.** Every
-figure the System area renders is either a `stat` result, a count, or a path.
+result, or model output enters the read model.** Manifest-derived dependency names and
+allowlisted resource-description fields are declared exceptions; unrelated values stay private.
+Rendered measurements are counts/stat facts, while identity and descriptions retain their own
+source/provenance.
 
 Two neighbouring boundaries are untouched by the above. The `cwd` read is *discovery*
 (invariant 9) and supplies a candidate path, never a measurement. And nothing here reads a
@@ -156,7 +159,7 @@ Sources (all local; see "The read surface" for exactly what is read)
   transcript roots (~/.claude, ~/.codex, opencode store)
   consumer registry (~50 curated third-party cache roots — consumers.mjs)
   known files (ledgers, tee logs, caches, indexes)
-  project sources (own cross-host discovery)     host catalog surfaces (agents/skills/commands/MCP)
+  project sources (shared cross-host census)     host catalog surfaces (agents/skills/commands/MCP)
         |
         v
 Collectors (bounded walkers; two tiers — src/lib/footprint/)
@@ -195,10 +198,10 @@ Delivery
         |
         v
   Machine Footprint destinations under System:
-    Summary | Advisory | Sessions | Storage | Runtime | Catalog | Projects
+    Summary | Advisory | Sessions | Storage | Runtime | Projects
 
   Separate control-plane sibling destination:
-    Maintenance (separate bounded context; not a Footprint mutation path)
+    Maintenance (includes former Catalog presentation; #system/catalog redirects here)
 ```
 
 ### Measurement semantics
@@ -219,6 +222,10 @@ A measurement additionally carries `partial`. A total whose inputs included an u
 capped subtree is a **lower bound**, not a total: unknown inputs never contribute a zero, they set
 `partial` on the sum. Every surface renders a partial figure as "≥ N" — a partial total presented
 as a total would be the honest-degradation contract broken at the last mile.
+
+Historical measurement examples below record earlier development investigations. Their machine
+sizes/counts illustrate the accounting decisions; they are not current measurements of the reader's
+machine. Current values come only from the collectors.
 
 ### Install footprint
 
@@ -555,14 +562,11 @@ one deduplicated read-only plan command. Inventory completeness is distinct from
 inclusion: hosts do not report the latter, so the dashboard states that limitation once instead of
 repeating a contradictory-looking `complete · context unknown` label.
 
-The presence matrix carries three independent multi-select filters — by kind, host, and source
-scope — with every
-option selected at first paint, so the default remains the whole inventory. The host filter matches
-**any** selected host rather than all of them: "carried by codex" is the question a reader is
-asking, and intersecting would answer a different one. A filtered view states how much it is
-hiding, and each row carries its own kind, because a filtered list must never leave a name
-unexplained. The config-surface row (managed CLAUDE.md/AGENTS.md block count, settings
-file sizes) lives here because it answers the same "what is deployed" question.
+Maintenance now presents Catalog evidence through its Focus hierarchy and independently counted
+facets, including consumer/adapter, kind, scope and session origin. Values within a facet match
+any selected value; different facets intersect. Exact placements remain the counting/action grain.
+The earlier standalone presence matrix is a historical presentation, not an additional current
+Catalog tab. Config-surface counts remain collector evidence.
 
 A deep scan persists bounded stat stamps for active surfaces and entrypoints. The cheap tier
 re-probes them and marks `catalog changed, scan again` immediately when a watched path changes, rather
@@ -578,7 +582,9 @@ The preview is evidence for a MaintenancePlan, not that plan or an authorization
 
 ### Project accounting
 
-**The Projects table lists hosted repositories, not every discovered directory.** A candidate is
+**The default Projects table lists measured hosted repositories.** Its population selector can
+also show all discovered directories, including unmeasured/missing paths; those rows have no
+fabricated byte or LOC values. The measurement eligibility rule is unchanged: a candidate is
 measured only when at least one host recorded a session in it and its Git evidence yields a proven
 HTTPS web destination. Without that rule the expensive pass walked ephemeral
 `.claude/worktrees/agent-*` checkouts, sub-folders a session happened to run in, home directories,
@@ -594,22 +600,20 @@ are different questions:
   the ones since deleted or moved. The deletions are the point, so they are never dropped.
 - **`onDisk`** — the subset that still resolves to a directory, i.e. the candidate pool from which
   byte or line measurements can be taken. Only the eligible hosted-repository population becomes
-  table rows; the remainder stays visible in the exclusion counts. Vanished projects survive in
-  `everSeen`, not as unmeasurable rows.
+  measured rows; the remainder stays in exclusion counts and the all-discovered view. Vanished
+  projects survive in `everSeen` and as discovery-only rows.
 
 On this machine: **50 ever seen, 25 still on disk, 21 of those git repositories.** The gap is the
 figure, not an error.
 
-This domain deliberately does **not** reuse `discoverRuvfloProjects()`. That function answers a
-different question — "which projects carry ruflo learning state" — by requiring a
-`.claude-flow/neural/` directory and by reading only the 150 most-recently-modified transcripts
-per host. Both narrowings are correct there and wrong here: on this machine they collapse ~50
-projects to 5. The Intelligence panel keeps that meaning; System has its own source with its own
-stated method.
+The old `discoverRuvfloProjects()` neural-only/top-150 discovery is retired.
+`project-sources.mjs` supplies the shared census; Intelligence applies the separate `learning`
+scope (`.claude-flow`, `.agentic-qe`, or `.swarm`) and existing identity folding. System continues
+to measure directories, so its counts and the learning picker intentionally differ.
 
 **De-duplication is by resolved real path.** One project touched by Claude, Codex and OpenCode is
 one project; a project reached through a symlink is the same project as the one reached directly.
-Each sighting's `cwd` is `realpath`-resolved before it keys the map, falling back to
+Each sighting's `cwd` is native-`realpath`-resolved before it keys the map, falling back to
 `path.resolve` when the target cannot be resolved — a deleted project has no real path and must
 still be counted. A row therefore carries the set of hosts that saw it, its session count across
 all of them, and its most recent sighting.
@@ -631,7 +635,17 @@ this machine. When neither route resolves, the group is counted as **`unresolved
 contributes no row: it is never given a fabricated path, and its existence makes `everSeen` a
 **lower bound** rather than a total (`complete: false`). Every project row carries `origins`
 saying which route named it (`cwd` or `encoded-dir`), so a fallback-derived path can never be
-mistaken for a declared one.
+mistaken for a declared one. `sessionOrigins` separately partitions exact Claude/Codex Desktop
+declarations and unclassified sightings. `countBasis` distinguishes transcript files, database
+sessions, recovered-project sightings and mixed observations; a recovered directory is not one
+verified session.
+
+`project-identity.mjs` relates directories through canonical Git metadata and, for linked worktrees,
+a verified common directory plus backlink. It preserves unknown association when evidence is
+missing or unreadable; names and remote equality never associate independent clones. Discovery
+and measured rows carry that additive relationship and capture time. Grouping/filtering changes
+neither legacy totals nor individual directory measurements, and Desktop origin may overlap any
+repository/worktree group.
 
 Codex is left out of the fallback entirely: its rollout directories are dated, not
 project-scoped, so there is nothing to decode.
@@ -683,7 +697,7 @@ ordinary reads remain responsive while the worker is busy. Injected collectors a
 implementations run the same `deep-scan-runner.mjs` inline rather than attempting to serialize test
 functions. This containment is not evidence that total scan duration decreased.
 
-The server stays GET-only: a Full scan re-measures local state and writes only this domain's own
+The System measurement routes stay GET-only: a Full scan re-measures local state and writes only this domain's own
 snapshot file — it mutates no user data.
 
 **A deep scan never runs on its own.** Opening the System area issues a plain `GET /api/system`;
@@ -712,13 +726,14 @@ payload verbatim, following the one-collector-two-surfaces precedent of the usag
    Collectors read directory entries and `stat` results; `.git/config`'s remote URL;
    `.git/worktrees/<name>/gitdir` (bounded to 4 KB, validated as an absolute path) for the
    orphaned-worktree candidate, which no `stat` can identify; a transcript head's opening `cwd`,
-   native ID, and timezone-bearing timestamp fields and OpenCode's session `directory` column,
+   native ID, timezone-bearing timestamps, and exact Desktop-origin fields; OpenCode session
+   directory/count/latest-time metadata; and bounded Git common-directory/backlink metadata,
    for project discovery and top-N identity; a project manifest's
    dependency **keys**; and a source file's bytes streamed through a fixed buffer to count
    newlines. Every one of those yields a path, an opaque identifier, an instant, a name, or an
    integer. **No message body, prompt, generated title, tool call, tool result, model output, or
-   manifest value enters this domain, in any tier, on any path**, and nothing read is retained
-   past the function that read it.
+   unrelated manifest value enters the read model**. Bounded resource description declarations
+   are an explicit exception above; raw source buffers and parsed bodies are discarded.
 2. **Unknown is never zero.** An unmeasured or failed measurement renders as unknown with a
    reason; a measured zero renders as zero. A total built over an unknown or capped input is
    `partial` and renders as a lower bound. No fabricated figures.
@@ -732,7 +747,8 @@ payload verbatim, following the one-collector-two-surfaces precedent of the usag
    same System shell is a separate bounded context and application service.
 5. **The runtime census is ephemeral.** It is computed per request and never persisted; a stale
    process table is never replayed as liveness.
-6. **Bounded walkers.** Symlinks are never followed; depth and entry caps apply; one unreadable
+6. **Bounded walkers.** Traversal never follows symlinks (identity resolution may canonicalize a
+   supplied root); depth and entry caps apply; one unreadable
    subtree degrades that node to unknown without discarding siblings or aborting the scan.
 7. **Single-flight deep scans.** Concurrent refresh requests attach to the in-flight scan; two
    scans never race each other or double-write the snapshot.

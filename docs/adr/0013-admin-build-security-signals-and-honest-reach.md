@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-28
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Deciders:** agentic-kit maintainers
 
 ## Context
@@ -112,7 +113,8 @@ carry the same point concisely rather than as an aside.
   avoided (Context, point 5). GitHub-native signals (contributors, watchers) answer the same "kill
   the dead tiles" goal without that risk.
 - **Full pagination (follow `Link` headers) for releases/issues/stargazers/forks/contributors.**
-  Rejected for now: none of these currently exceed the 100-item cap for this repo, and full
+  Rejected at the 2026-07-28 adoption baseline: the examined lists did not exceed
+  the 100-item cap for this repo, and full
   pagination is a larger, inconsistent change against the file's established one-page-best-effort
   house pattern. The 100-item ceiling is now documented in code rather than silently assumed; revisit
   if/when any list genuinely exceeds it.

@@ -2,7 +2,8 @@
 
 - **Status:** Implemented
 - **Date:** 2026-08-25
-- **Updated:** 2026-09-08
+- **Updated:** 2026-09-09 — scoped network/read-only claims for issue #211
+- **Earlier update:** 2026-09-08
 - **Pricing audit:** Verified Claude 5.1 identity, availability, limits and rates; Models
   pricing uses verified rate dates and official Astra/Sol alias documentation.
 - **Update note:** The bounded inventory, descriptor-selected source adapters, conservative snapshot
@@ -18,10 +19,10 @@
   references, session identity, and history identifiers remain protected. Cited lifecycle alerts now
   name affected routes, current and recommended models, the provider notice, and a concrete planning
   action. The acceptance conditions and exact-head release proof are complete.
-- **Updated:** 2026-09-04 — proposed ADR-0048 makes installed models first-class Maintenance
+- **Earlier update:** 2026-09-04 — proposed ADR-0048 makes installed models first-class Maintenance
   resources and admits only an exact provider-owned removal operation after separate conformance;
   this implemented context remains read-only until that proposal ships
-- **Updated:** 2026-09-05 — ADR-0048 is now Accepted and implemented. Installed models are now
+- **Earlier update:** 2026-09-05 — ADR-0048 is now Accepted and implemented. Installed models are now
   first-class Maintenance resources in the management projection (`resourceKind: 'model'`), read
   from this context's model-inventory snapshot without change to how that snapshot is built.
   Exactly one Managed removal operation exists — `src/lib/maintenance/providers/
@@ -32,14 +33,23 @@
 - **Deciders:** agentic-kit maintainers
 - **Related:** [issue #110](https://github.com/pacphi/agentic-kit/issues/110),
   [implementation PR #179](https://github.com/pacphi/agentic-kit/pull/179),
-  [ADR-0001](0001-one-routing-policy-many-projections.md),
-  [ADR-0005](0005-dashboard-in-page-routing-reveal.md),
-  [ADR-0009](0009-usage-scorecard-local-transcript-analytics.md),
-  [ADR-0016](0016-capability-driven-integration-adapters.md),
-  [ADR-0017](0017-opencode-host.md),
-  [ADR-0020](0020-ga-stable-surfaces.md),
-  [ADR-0021](0021-inference-provider-provenance.md), and
-  [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md)
+  [ADR-0001](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0001-one-routing-policy-many-projections.md),
+  [ADR-0005](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0005-dashboard-in-page-routing-reveal.md),
+  [ADR-0009](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0009-usage-scorecard-local-transcript-analytics.md),
+  [ADR-0016](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0016-capability-driven-integration-adapters.md),
+  [ADR-0017](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0017-opencode-host.md),
+  [ADR-0020](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0020-ga-stable-surfaces.md),
+  [ADR-0021](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0021-inference-provider-provenance.md), and
+  [ADR-0023](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0023-fail-closed-operations-and-explicit-degradation.md)
+
+## Current implementation boundary (2026-09-09)
+
+Cache-only and network-silent claims here describe the model-inventory read
+model, not the entire Dashboard status process. Broader package/release checks
+can egress and update their caches under ADR-0005. Explicit model refresh may
+read a local Ollama HTTP endpoint; `--online` authorizes remote catalogue refresh.
+The completed release proof below is dated implementation evidence, not a new
+certification of every later Dashboard change.
 
 ## Context
 

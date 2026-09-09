@@ -1,7 +1,10 @@
 # Architecture Decision Records
 
 Lightweight [MADR](https://adr.github.io/madr/)-style records for **agentic-kit** (`ak`) design
-decisions. These are ak's own ADRs — distinct from the ruflo / agentic-qe ADRs that `.claude/helpers/`
+decisions. Reviewed against source on **2026-09-09**; the
+[file-by-file audit](../audits/211-adrs-matrix.md) records examined boundaries and
+remaining limitations. Status describes each record's declared scope, not a
+blanket release or safety certification. These are ak's own ADRs — distinct from the ruflo / agentic-qe ADRs that `.claude/helpers/`
 tooling references.
 
 Format: `NNNN-kebab-title.md`, monotonically numbered. Each record states **Context → Decision →
@@ -38,45 +41,48 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0027](0027-shared-project-census.md) | One project census, four scopes, every count explains itself | Implemented |
 | [0028](0028-local-openai-compatible-providers.md) | One generic local OpenAI-compatible provider, not a vendor enumeration | Accepted |
 | [0029](0029-host-adapter-extension-point.md) | External host adapters: declarative manifest, subprocess hooks | Accepted (experimental contract) |
-| [0031](0031-capability-graduation-and-upstream-requests.md) | Capability graduation: earned parity for external adapters, and the upstream request path | Accepted (governance; implementation staged) |
+| [0031](0031-capability-graduation-and-upstream-requests.md) | Capability graduation: earned parity for external adapters, and the upstream request path | Accepted (governance; experimental machinery implemented, consumption/soak gaps remain) |
 | [0032](0032-model-lifecycle-intelligence.md) | Model lifecycle intelligence from provenance-aware local evidence | Implemented |
 | [0033](0033-retire-codex-mcp-and-bound-qe-court-participants.md) | Retire Codex MCP; bound reciprocal QE-Court participant transport | Implemented; handoff transport amended by 0034 |
 | [0034](0034-schema-native-handoffs-and-hermetic-seats.md) | Schema-native worker handoffs and hermetic qe-court seats | Implemented |
-| [0035](0035-managed-deja-vu-companion.md) | Manage deja-vu as an opt-in session-history companion | Accepted; implementation tracked by issue #114 |
+| [0035](0035-managed-deja-vu-companion.md) | Manage deja-vu as an opt-in session-history companion | Implemented for issue #114 |
 | [0036](0036-dashboard-client-modularization-and-shared-loopback-server.md) | Dashboard client modularization and shared loopback server | Implemented |
 | [0037](0037-complexity-program-structural-patterns.md) | Complexity program: structural patterns and gates | Implemented |
 | [0038](0038-consistent-cross-host-session-metrics.md) | Consistent cross-host session metrics | Accepted |
 | [0039](0039-prompts-intelligence.md) | Deterministic Prompts telemetry on main | Accepted |
 | [0040](0040-codex-hook-audit-and-conservative-remediation.md) | Codex hook audit and conservative remediation | Implemented (Codex Wave 1) |
-| [0041](0041-host-neutral-hook-configuration-assurance.md) | Host-neutral hook configuration assurance | Implemented; native runtime receipt acquisition deferred |
+| [0041](0041-host-neutral-hook-configuration-assurance.md) | Host-neutral hook configuration assurance | Accepted; static assurance/healing/read model implemented, native runtime receipts deferred |
 | [0042](0042-capability-aware-context-budget-intelligence.md) | Capability-aware context budget intelligence | Implemented |
-| [0043](0043-managed-ruflo-browser-executor.md) | Manage Ruflo's browser executor behind a replaceable boundary | Accepted |
+| [0043](0043-managed-ruflo-browser-executor.md) | Manage Ruflo's browser executor behind a replaceable boundary | Implemented |
 | [0044](0044-receipt-aware-maintenance-control-plane.md) | Receipt-aware Maintenance control plane | Implemented |
 | [0045](0045-artifact-consumer-bindings-and-explicit-maintenance-scans.md) | Physical artifacts, host consumers, and explicit Maintenance scans | Implemented |
 | [0046](0046-scan-local-observation-reuse-and-nonblocking-deep-scans.md) | Scan-local observation reuse and nonblocking deep scans | Implemented |
-| [0047](0047-streaming-observation-forest.md) | Streaming observation forest for deep scans | Accepted; Projects pilot implemented |
+| [0047](0047-streaming-observation-forest.md) | Streaming observation forest for deep scans | Accepted; Projects pilot and separate Discovery continuation implemented |
 | [0048](0048-inventory-led-maintenance-resource-management.md) | Inventory-led Maintenance resource management | Accepted; Focus browser implemented and focused checks pass; human/cross-platform gates pending |
+| [0050](0050-dashboard-project-identity-and-context-reporting.md) | Dashboard project identity and context reporting | Implemented |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
 or Codex) and model, which host **leads** (0006), seeded on detection, tunable by the user, and surfaced
 across `setup`/`sync`/`status`/`dashboard`. **0007** covers the local diagnostic surfaces — splitting the
-offline-first `dashboard` from the deliberately-egressing, credential-touching maintainer `admin` along
-the network-egress line. **0008** draws a second scope line — machine-scoped guidance blocks belong in
+local operational `dashboard` from the deliberate remote-analytics `admin`.
+Dashboard status/update and vendor-mediated quota activity can also egress;
+ADR-0005/0007 now qualify the original universal-silence premise. **0008** draws a second scope line — machine-scoped guidance blocks belong in
 machine-wide files (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`), never a repo's checked-in `AGENTS.md` —
 and folds the two duplicated target lists into one shared `guidanceTargets` helper. **0009** adds the
-usage scorecard — local transcript analytics as a dashboard tab (no egress, so it stays inside 0005's
-offline contract rather than joining 0007's egressing admin), with an incremental index over a
+usage scorecard — local transcript analytics as a dashboard tab (the index itself
+performs no remote analytics request), with an incremental index over a
 multi-GB corpus and an explicit evidence grading rule: findings claim a dollar figure only when they
 can compute one, and capability claims carry citations or are not made. **0010** supplies the one
 thing 0009 refused to invent — plan-utilisation denominators — by reading each vendor's own reported
 percentages through supported channels (Claude Code's statusLine push, Codex's `app-server` RPC),
-with provenance and freshness attached. **0011** extends the same discipline to the other end of the
+with provenance and freshness attached. **0011** proposes extending the same discipline to the other end of the
 price axis: a session served by a **local** model (`ollama launch claude` / `codex`) reports no cache
-accounting, approximate token counts, and a model id the vendor documents how to forge — so
-provenance is established out-of-band via a loopback catalogue read, local models are priced at an
-exact `$0` **per model** rather than in one bucket, unrecognised models become `unpriced` instead of
-silently fallback-priced, and each local session states what its provider could not report. See also
+accounting, approximate token counts, and a model id the vendor documents how to forge — so the proposal seeks out-of-band provenance, per-model local cost states,
+unpriced unknowns, and fidelity notes. Those Usage behaviors are **not implemented**:
+`costOf()` still uses its fallback rate. Ollama catalogue/runtime discovery ships
+separately under ADR-0032; loopback transport can also serve cloud models and
+does not prove free historical execution. See also
 `docs/PROVIDERS.md`. **0012** adds a read-only Observability workspace: host-specific evidence is
 normalized into a versioned, provenance-bearing event model, reduced into an interactive
 agent/tool canvas, and paired with a rich selected-session transcript rail. Separate SSE planes
@@ -310,14 +316,14 @@ prompts from control/agent/adapter turns, retains bounded fingerprints rather th
 history-backed baselines where evidence permits, and keeps model enrichment opt-in and
 receipt-bound.
 
-**0040** proposes a separate hook-audit bounded context. It discovers direct, project, and
+**0040** records the implemented Codex Wave 1 hook-audit bounded context. It discovers direct, project, and
 selected-plugin Codex lifecycle hooks without executing them; preserves every occurrence while
 behavior-deduplicating; keeps compatibility, trust, security, provenance, ownership, duplicate,
 performance, and runtime diagnostics independent; and classifies healing as automatic,
 approval-required, or never-automatic. Plugin caches and trust state remain unwritable. A later
 apply wave requires exact preimages, transaction-specific backups/receipts, guarded rollback, a
-clean second audit, and a byte/mtime no-op proof. The ADR remains Proposed pending independent
-dual-host review.
+clean second audit, and a byte/mtime no-op proof. ADR-0041 subsequently implements host-neutral static assurance and exact
+transactional healing; native-host runtime receipt acquisition remains deferred.
 
 **0044** implements Maintenance as a separate control-plane bounded context under System without
 giving Machine Footprint mutation authority. It separates evidence-backed
@@ -329,7 +335,7 @@ stays read-only except for four explicitly allowlisted Maintenance route shapes,
 each retaining ADR-0014's loopback protections and adding bounded JSON, fixed server-side actions,
 explicit confirmation, and one-use authorization. Recovery from an interrupted outcome is now a
 read-only interruption audit followed by a separately confirmed, individually recorded
-reconciliation write (ADR-0048), available from the CLI and, for the audit half, the dashboard;
+reconciliation write (ADR-0048), available from the CLI and through separate audit/reconciliation operations in the v2 dashboard;
 it never retries or rolls back an uncertain provider effect.
 
 **0048** is the implemented product successor to 0044's findings-first screen, built on its
@@ -346,3 +352,11 @@ CLI verbs remain a documented compatibility surface and 0044 is not marked Super
 Focus browser amendment approved on 2026-09-08 adds one-level scope/repository/type/family browsing
 and evidence-backed relationship disclosures with preserved filter context. Its integration
 focused verification is recorded in the [Focus receipt](../archive/2026-09-08-validation-maintenance-focus.md); baseline test totals alone do not verify it.
+
+**0050** records the implemented project/repository and session-origin dimensions,
+shared Runtime context configuration reporting, and historical pressure limits.
+It also governs the plain-name grouped Intelligence picker/table, the top-10
+verified Git-project Usage ranking, wrapping Maintenance language icons, and
+cache schema 20. These UI projections preserve their existing totals and do not
+turn model capacity, Desktop declarations, or Git observations into stronger
+live-session or ownership claims.

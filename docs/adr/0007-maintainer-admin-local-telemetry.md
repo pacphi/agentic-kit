@@ -2,13 +2,28 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-24
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Deciders:** agentic-kit maintainers
 
-## Context
+## Current implementation boundary (2026-09-09)
+
+The self-contained browser makes same-origin requests, but the complete Dashboard
+process is **not an air-gapped or zero-egress surface**. Status collection and
+`collectData()` may refresh package/release drift through `npm view` and GitHub
+after their TTLs expire, and cache those observations in `kit.json`. The Limits
+view may spawn the authenticated Codex app-server quota reader. Local Usage
+indexing and cache-only Models reads do not themselves request remote analytics
+or run inference. Maintenance remains the only allowlisted resource-action API;
+derived-cache/history writes are separate from those actions.
+Evidence: [Dashboard composition](../../src/lib/dashboard-server.mjs),
+[version probes](../../src/lib/versions.mjs), and
+[injected-network boundary tests](../../tests/dashboard.test.cjs).
+
+## Context at adoption
 
 `ak dashboard` (ADR-0005, `src/lib/dashboard-server.mjs`) is a read-only, loopback-only,
-**offline-first** health panel: a self-contained page that shells `ak status --json` and makes
-zero network calls. Its whole contract is "nothing leaves your machine."
+health panel: a self-contained page that shells `ak status --json`. The original
+o-egress premise below is superseded by the current implementation boundary above.
 
 Maintainers want a different thing: *how is this project actually doing* — who filed issues, who
 forked, release-asset pulls, npm range, GitHub traffic. That data lives on **github.com and
@@ -21,8 +36,9 @@ We are adapting a proven design — the RuvNet Brain explainer admin
 (`stuinfla/ruvnet-brain` `explainer/{admin.html,admin.js,api/admin-stats.mjs}`, MIT © 2026 Stuart
 Kerr / Isovision.ai). The reference is a **hosted** Vercel page gated by a static `ADMIN_TOKEN`; we
 are making it **local-first** — a `node:http` sibling of the dashboard, zero runtime deps, bound to
-`127.0.0.1`. Spec: `docs/adr/../../sparc/spec-ak-admin.md` (Phase 1); design: `pseudocode-ak-admin.md`
-(Phase 2).
+`127.0.0.1`. The original planning files (`sparc/spec-ak-admin.md` and `pseudocode-ak-admin.md`)
+are historical references and are not present in the maintained tree. The
+implementation and tests below are the current review targets.
 
 ## Decision
 
@@ -32,14 +48,16 @@ are making it **local-first** — a `node:http` sibling of the dashboard, zero r
 server**, default port **7432** (dashboard is 7431). The split is drawn along the one line that
 matters: **egress**.
 
-- `dashboard` = offline-first. No fetch ever leaves the machine; safe to leave running, safe for the
-  privacy-conscious, needs no credential.
+- `dashboard` = local operational UI, with local analytics and separately described
+  package-drift and vendor-mediated quota network activity.
 - `admin` = deliberate egress. It exists *to* call GitHub and npm, and it touches a credential. That
   is a conscious act the maintainer opts into by name, not a tab they might wander onto.
 
 Both remain **loopback-only** (`127.0.0.1`), both carry the dashboard's DNS-rebinding `Host`-header
-guard, both are foreground-until-Ctrl-C. What differs — and what justifies two commands — is that
-one promises silence and the other promises reach. Collapsing them would force one contract to lie.
+guard, both are foreground-until-Ctrl-C. Admin explicitly collects remote project analytics with a GitHub credential.
+Dashboard remains the local operational console, with the bounded update/quota
+exceptions described above. Separate commands keep those purposes and credential
+flows distinct rather than promising a nonexistent network firewall.
 
 ### 2. Auth: per-session random token, URL-fragment bootstrap, header-only transport, fail-closed
 
@@ -132,8 +150,8 @@ precedence over the operating-system color scheme.
 
 ## Consequences
 
-- The offline-first dashboard contract is preserved intact; the egressing, credential-touching view
-  is a deliberate, separately-named opt-in — the two contracts never blur.
+- Admin remains a separate deliberate GitHub/npm analytics surface. Dashboard also
+  has bounded update and quota activity; the split is not a universal egress firewall.
 - Zero runtime dependencies hold: `node:http`/`crypto`/`child_process`/`fs`/`path`/`url` only, Node
   ≥22 ESM, matching the dashboard.
 - The credential's blast radius is minimal: runtime-only, server-side-only, never persisted, never in
@@ -172,5 +190,5 @@ precedence over the operating-system color scheme.
 - House patterns: `src/lib/dashboard-server.mjs` (loopback server, Host guard, self-contained page,
   injectable collector), `src/commands/x/dashboard.mjs` (`openInBrowser`, option parsing, foreground
   loop), `tests/dashboard.test.cjs` (injected-fetcher harness), `bin/agentic-kit.mjs` (dispatch).
-- ADR-0005 (dashboard as read-only offline-first diagnostic); spec `sparc/spec-ak-admin.md`;
-  pseudocode `sparc/pseudocode-ak-admin.md`.
+- ADR-0005 (Dashboard operational boundary); the original `sparc/spec-ak-admin.md`
+  and `sparc/pseudocode-ak-admin.md` are historical planning references, not maintained files.

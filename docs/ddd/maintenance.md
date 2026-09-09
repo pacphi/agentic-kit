@@ -2,7 +2,7 @@
 
 Maintenance is the resource-management control plane defined by
 [ADR-0044](../adr/0044-receipt-aware-maintenance-control-plane.md) and
-[ADR-0048](../adr/0048-inventory-led-maintenance-resource-management.md). ADR-0048 is Accepted and
+[ADR-0048](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0048-inventory-led-maintenance-resource-management.md). ADR-0048 is Accepted and
 implemented; it is not yet marked Implemented in its own record because the human-evaluation and
 cross-platform acceptance gates its migration plan requires have not run (see that ADR's
 "Implementation status"). ADR-0044's transaction engine remains the runtime safety floor underneath
@@ -22,19 +22,19 @@ digest match, or missing usage observation.
 
 **System measures; Maintenance manages; Maintenance's transaction engine acts.**
 
-[Machine Footprint](machine-footprint.md) owns the read-only inventory, project pressure, source
+[Machine Footprint](https://github.com/pacphi/agentic-kit/blob/main/docs/ddd/machine-footprint.md) owns the read-only inventory, project pressure, source
 relationships, freshness, and advisory candidates. Maintenance's management projection consumes
 those facts without turning an observation into ownership. Catalog is no longer a separate
 dashboard destination: `#system/catalog` redirects into Maintenance's Inventory route, which
 presents Catalog v4 evidence at placement grain alongside installs, models, and provider
 configuration. Catalog, Advisory, and the Footprint collectors still do not mutate the machine.
 
-[Integration Management](integration-management.md) owns host lifecycle capability, desired state,
+[Integration Management](https://github.com/pacphi/agentic-kit/blob/main/docs/ddd/integration-management.md) owns host lifecycle capability, desired state,
 and agentic-kit ownership receipts. Maintenance asks which exact provider operation exists; it does
 not manufacture a missing lifecycle verb. [Model Lifecycle Intelligence](model-lifecycle-intelligence.md)
 keeps owning model facts, sources, and lifecycle diffs — Maintenance consumes the exact placement,
 consumer, and storage evidence and adds exactly one Managed removal operation.
-[Hook configuration assurance](hook-configuration-assurance.md) keeps owning hook occurrences and
+[Hook configuration assurance](https://github.com/pacphi/agentic-kit/blob/main/docs/ddd/hook-configuration-assurance.md) keeps owning hook occurrences and
 behavior identity — Maintenance joins its sanitized read model into `hook`-kind placements without
 gaining healing authority.
 
@@ -119,6 +119,22 @@ verified.
   `route`, `provider`, `model-runtime`, or `tool` consumer, carrying discovery mechanism and
   enabled state.
 
+### Repository and session-origin presentation
+
+`management/projection-projects.mjs` enriches existing opaque project identities after registry
+and fallback identities are assigned. Verified common Git directory/backlink evidence can relate
+worktree choices to a repository without changing placement IDs or action targets. Equal names or
+remotes do not establish that relationship. Public fields retain only the keyed repository ID,
+bounded label, evidence class and observation time; raw roots and common-directory paths remain
+private. Discovery's existing repository-key relationships retain their own provenance.
+
+Session origin is an independent overlapping project facet. Exact Claude/Codex Desktop declarations
+supply memberships; all other observations remain unclassified. Selecting either or both Desktop
+origins filters distinct placements in matching projects once. Focus node counts remain installation
+counts, and session-origin counts are copied once per project rather than summed per installed
+resource. Encoded-directory recovery is labelled a recovered-project sighting, not a verified
+session. Native language icons wrap inline without dropping additional detected languages.
+
 ## Evidence and version policy
 
 Every primary claim is a field-local `EvidenceAssertion` (`management/evidence.mjs`) graded
@@ -132,14 +148,17 @@ observed.
 
 Version axes stay independent (`VERSION_AXES`: installed, effective, candidate, compatible
 candidate, recommended candidate, producer, source revision, cache generation, content digest, pin,
-channel). An Updates-available Guidance entry requires verified installed version and verified
-compatibility plus a source-bound candidate (`guidance.mjs`'s `computeUpdateEntries`); `Recommended`
+channel). The compatibility-based Updates-available path requires verified installed version and verified
+compatibility plus a source-bound candidate (`guidance.mjs`'s `computeUpdateEntries`). A separate
+host-reported candidate path requires verified candidate-source evidence and explicitly states
+that compatibility has not been verified; `Recommended`
 additionally requires a verified `recommendationAuthority`. Stable channels are default; prerelease
 and nightly candidates require existing enrollment or explicit enablement (`channelAllowed`).
 
-The user interface never renders `Unknown`, `Unsupported`, `Needs attention`, generic `Review`,
-`Fix`, `Repair all`, or `Clean all` (`model.mjs`'s `PROHIBITED_LABELS`, enforced by
-`isProhibitedLabel`/`assertLabelAllowed` on every placement `displayName` and Guidance `outcome`).
+Resource names and Guidance outcomes reject `Unknown`, `Unsupported`, `Needs attention`,
+generic `Review` or `Fix`, `Repair all`, and `Clean all` (`model.mjs`'s `PROHIBITED_LABELS`).
+Evidence-specific missing-association and unclassified-origin explanations are separate from
+resource disposition labels; they do not create an action or a failure state.
 
 ## Dependencies and conflicts
 
@@ -167,7 +186,7 @@ duplicate.
 | `apply` | Can apply here | A `providerCapabilityId` from a registered provider, and the placement is not under an active mutation block |
 | `steps` | Steps available | A `procedureId` for a signed, compatible recipe |
 | `decision` | Decisions to make | At least one bounded `choices[]` entry, each independently grounded or carrying a reason |
-| `update` | Updates available | Verified installed version and compatibility, a source-bound `candidateId`, and (for `Recommended`) a verified recommendation authority |
+| `update` | Updates available | A verified host-reported candidate with an explicit compatibility limitation, or verified installed version/compatibility with a source-bound `candidateId`; `Recommended` additionally requires a verified recommendation authority |
 | `recovery` | Recovery to finish | A `receiptId` for an unresolved transaction |
 
 A verified condition with no grounded operation, procedure, decision, or candidate is never
@@ -285,8 +304,9 @@ before confirmation.
 
 The default registry always installs Claude plugin, Codex plugin, Codex MCP, and Ruflo orphan
 providers. It conditionally adds owned npx storage, owned skills, the Git project-patch provider
-(when a project root is supplied), and the Ollama model-removal provider (when loopback is
-reachable — probed, default off in tests).
+(when a project root is supplied). The Ollama model-removal provider is registered by default
+unless explicitly disabled; its detection and action preconditions, including loopback reachability,
+decide whether a removal can be offered. Registration itself proves none of those preconditions.
 
 ## Transaction rules
 
@@ -398,7 +418,9 @@ only for the owner running the CLI. `--actions` accepts exactly one id; more tha
 
 ## Invariants and non-claims
 
-The fourteen invariants below are `domain-model.md`'s; each is enforced in code, not merely stated:
+The fourteen invariants below describe the implemented management contract and its enforcement
+points. The broader acceptance gates remain tracked separately in
+[Maintenance acceptance](https://github.com/pacphi/agentic-kit/blob/main/docs/MAINTENANCE-ACCEPTANCE.md):
 
 1. Every actionable row identifies one exact placement — `planner.mjs`/`coordinator.mjs`'s
    `ONE_ACTION_PER_PLAN` refusal before any provider call, lock, or journal write.
@@ -420,7 +442,9 @@ The fourteen invariants below are `domain-model.md`'s; each is enforced in code,
    `CONFLICT_EXPLANATIONS` to every classification.
 7. A candidate is not compatible or recommended without separate evidence —
    `guidance.mjs`'s `computeUpdateEntries` requires verified `installedVersion` and `compatibility`
-   before considering a candidate, and verified `recommendationAuthority` before `Recommended`.
+   before considering a compatible candidate, and verified `recommendationAuthority` before
+   `Recommended`. The separate host-reported update path explicitly discloses unverified
+   compatibility and does not turn availability into an executable update.
 8. No write action spans more than one exact provider operation and placement — the same
    `ONE_ACTION_PER_PLAN` contract as (1), also enforced at the dashboard API and CLI boundaries.
 9. Read batching never merges evidence, receipts, scopes, or conclusions —

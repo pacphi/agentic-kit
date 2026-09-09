@@ -1,6 +1,19 @@
 # ADR-0010 — Provider-mediated quota reads (the Limits view)
 
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 Date: 2026-07-27 · Status: **Accepted** · Amends: ADR-0009 §3
+
+## Current implementation boundary (2026-09-09)
+
+The native quota command uses `-a never`, not the removed `untrusted` spelling;
+[quota tests](../../tests/kit/quota.test.mjs) pin the subprocess argv and
+normalization. [Current Codex App Server documentation](https://learn.chatgpt.com/docs/app-server)
+confirms `account/rateLimits/read` and optional plan/credit evidence.
+[Claude statusline documentation](https://code.claude.com/docs/en/statusline)
+qualifies `rate_limits` availability by plan/gateway and first response; it is not
+present in every invocation. The kit tee requires quota data and is a latest-writer
+cache, not durable per-session context history. Broader Dashboard update checks
+are described by ADR-0005; this quota adapter never reads vendor credentials.
 
 ## Context
 
@@ -35,14 +48,15 @@ never reading, storing, or refreshing a vendor credential:
    one write per minute). Push, not pull: with no recent Claude session the
    file goes stale, and the UI labels it stale rather than hiding it.
 2. **Codex — app-server subprocess.** `src/lib/quota.mjs` spawns
-   `codex -s read-only -a untrusted app-server` (codex authenticates itself),
+   `codex -s read-only -a never app-server` (codex authenticates itself),
    performs one `initialize` → `account/rateLimits/read` exchange with a hard
    timeout and kill, and caches the normalized answer for `CODEX_TTL_MS`.
    This is the same shell-out trust model the dashboard already uses for
    `ak status --json`.
-3. **The dashboard server itself still opens no sockets to the internet.**
-   ADR-0005/0007's egress split is unchanged: the Codex subprocess is vendor
-   code using vendor auth, and the Claude path is a local file read.
+3. **This quota exchange is delegated to vendor code.** The Codex subprocess
+   may contact its provider using host-owned auth; the Claude path is a local
+   file read. Separate Dashboard package/release probes may also use the network,
+   as recorded by ADR-0005/0007.
 
 Normalization rules (all in `quota.mjs`, all pinned by tests):
 
@@ -55,10 +69,9 @@ Normalization rules (all in `quota.mjs`, all pinned by tests):
 
 ### Explicit non-paths
 
-- **No `api.anthropic.com/api/oauth/usage`.** Undocumented; hostile
-  rate-limiting to unrecognized clients; and Anthropic's consumer ToS bars
-  subscription OAuth tokens "in any other product, tool, or service", enforced
-  server-side since January 2026.
+- **No `api.anthropic.com/api/oauth/usage`.** This integration deliberately
+  avoids direct subscription-OAuth calls and relies on the native statusline
+  contract. The dated research below is not a current legal interpretation.
 - **No Keychain or credential-file reads** (the macOS item stopped carrying
   the OAuth token in Claude Code 2.1.x; refresh tokens rotate destructively).
 - **No `chatgpt.com/backend-api/wham/*`** — private endpoints that would
@@ -68,10 +81,9 @@ Normalization rules (all in `quota.mjs`, all pinned by tests):
 
 ## Consequences
 
-- The Limits sub-view can show authoritative, cross-device session/weekly
-  utilization — data local transcript parsing can never produce (ADR-0009 §3's
-  table of unknowables shrinks to: extra-usage credit balance and subscription
-  tier, which have no supported channel).
+- The Limits sub-view shows vendor-reported utilization when supplied. Codex may
+  also report plan type and credit/reset-credit fields; missing values remain
+  unknown. These are not locally calculated plan denominators.
 - `usage-insights.mjs` gains limit-aware detectors (`detectLimitInsights`)
   under the same evidence rules; vendor percentages count as the user's own
   data, and no dollar impact is ever claimed from a percentage.

@@ -10,6 +10,14 @@
 - **Replaces:** branch-only MetaHarness retrieval proposal in commit
   [`8dcad80`](https://github.com/pacphi/agentic-kit/commit/8dcad806c015e3de42f46b8fa4858edf9dd439c1)
 
+## Implementation status
+
+The September 9, 2026 documentation audit retains this as a proposal. The checked-in
+`src/commands/run.mjs` still emits `{plan, results}` without the proposed companion
+schema. No shipped companion integration or promotion authority is asserted here.
+Upstream descriptions below retain the original proposal's dated scope; their presence
+does not establish current package availability or operational readiness.
+
 ## Executive decision
 
 Use MetaHarness primarily **around** agentic-kit, as an optional assurance and optimization
@@ -36,7 +44,7 @@ experience.
 
 ## The three systems that must not be conflated
 
-The name “MetaHarness” currently appears at three different boundaries:
+At the August 4, 2026 proposal evidence cutoff, the name “MetaHarness” appeared at three different boundaries:
 
 1. **Standalone MetaHarness** is a factory and deterministic control plane for generated agent
    harnesses. Its worker contract is a function, and its packages cover repo scoring, policy,

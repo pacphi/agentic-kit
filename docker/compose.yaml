@@ -5,12 +5,13 @@
 # host npm prefix. The only bind mount is the repo-local ./artifacts dir; all
 # persistent state lives in Docker-managed named volumes (namespaced
 # agentic-kit-firstuse_*), so a host with any agentic-kit version installed
-# cannot conflict with these containers, and vice versa.
+# keeps separate package/configuration state. Ports, Docker, kernel access and
+# the writable artifact mount are still shared infrastructure.
 name: agentic-kit-firstuse
 
 services:
-  # True first-use: nothing persists. Every `up`/`run` starts from a bare
-  # Ubuntu + Node image, installs @next, runs setup, serves the dashboard.
+  # A newly created container starts from the Ubuntu + Node image. Restarting
+  # an existing container reuses its writable layer; setup runs again unless skipped.
   ak:
     build: .
     image: agentic-kit-firstuse

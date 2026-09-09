@@ -1,7 +1,8 @@
 # Transcripts & Session Detail — Reference
 
 **Audience.** agentic-kit maintainers and contributors touching the transcript
-pipeline — `src/lib/usage-index.mjs` (parsing, `readSession`),
+pipeline — `src/lib/usage-index.mjs` (discovery/cache, `readSession`),
+`src/lib/usage-parsers.mjs` and `src/lib/usage-opencode.mjs` (host parsing),
 `src/lib/dashboard-server.mjs` (HTTP composition),
 `src/lib/dashboard/session-security.mjs` (request/masking guards), or
 `src/lib/dashboard/client.mjs` (Sessions and Transcript views) — and anyone auditing why a turn is labelled,
@@ -19,8 +20,9 @@ transcript stores → parsers → turn model → `readSession` → masking/trunc
 *per-session* pipeline. The design rationale for both is mapped in
 [Appendix C](#appendix-c--design-rationale-adr-map).
 
-**Citations are machine-checked.** Every `file:line` citation below is
-verified against the current source by the test suite
+**Citation locations are machine-checked.** The suite checks nearby identifiers and
+line ranges, not the truth or completeness of the surrounding explanation. The
+checks run in the test suite
 (`tests/kit/doc-citations.test.mjs`; see
 [Appendix B](#appendix-b--verification-record)).
 
@@ -28,10 +30,10 @@ verified against the current source by the test suite
 
 ---
 
-## 1. The two transcript stores
+## 1. Transcript stores
 
-Both supported transcript **hosts** write complete session logs to disk as JSONL — one JSON object
-per line — and the kit reads them **read-only** (transcripts are never
+Claude and Codex use JSONL files; OpenCode uses its SQLite session/message/part store.
+The kit reads source histories without rewriting them (transcripts are never
 rewritten; rule 3 of the module header, `usage-index.mjs:22`):
 
 | Host | Store | Discovered by |
@@ -39,6 +41,7 @@ rewritten; rule 3 of the module header, `usage-index.mjs:22`):
 | Claude Code | `~/.claude/projects/<encoded-project-dir>/<sessionId>.jsonl` | `listClaude` (`usage-index.mjs:338-352`) — exactly one level of project directories |
 | Claude Code (subagent) | `~/.claude/projects/<encoded-project-dir>/<sessionId>/subagents/agent-<hash>.jsonl` | `listClaudeSubagents` (`usage-index.mjs:313-318`) — the one nested shape `listClaude` descends into |
 | Codex CLI | `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<uuid>.jsonl` | `listCodex` (`usage-index.mjs:355-375`) — the `yyyy/mm/dd` tree walk |
+| OpenCode | platform data root `opencode/opencode.db` (normally `~/.local/share/opencode/opencode.db` on Unix) | `usage-opencode.mjs` reads session/message/part rows with read-only SQLite queries |
 
 Roots come from `defaultRoots()` (`usage-index.mjs:288-293`) and are injectable
 for tests. A malformed line is skipped, never fatal (`jsonLines`,
@@ -56,9 +59,11 @@ covers how a namespaced id is validated and resolved back to its file.
 
 Host evidence is not inference-provider proof. A Claude transcript may describe Anthropic-,
 OpenRouter-, or Ollama-served inference. ADR-0016 defines separate
-[bindings and field provenance](adr/0016-capability-driven-integration-adapters.md). Until that
-Proposed migration is implemented, the legacy session field named `provider` should be read as the
-transcript host/parser identity unless other evidence grounds the inference provider.
+[bindings and field provenance](adr/0016-capability-driven-integration-adapters.md). In that
+migration, raw parser records retain `provider` as the transcript-source identity. The
+served session contract already separates `host`, `transcriptProvider`, inference
+`provider`, and `providerProvenance`. Codex and OpenCode populate inference-provider
+evidence when their native records name it; Claude history normally leaves it unknown.
 
 ### 1.1 Claude entry vocabulary
 
@@ -103,7 +108,7 @@ Codex rollout lines carry `type` + `payload`. The parser (`parseCodex`,
 | `session_meta` | Authoritative session id, `cwd`, and `thread_source` — the FIRST such line in the file wins for all three, AND for `inferenceProvider`/`providerProvenance` too (`usage-parsers.mjs:762-772`, gate; `:744-761`, why); a subagent rollout replays its PARENT thread's own session_meta line later in the same file, and a later-wins rule let that relabel the record `subagent`→`user` and re-key its id to the parent's — `"subagent"` marks a thread_spawn replay whose tokens are excluded from aggregation (`usage-parsers.mjs:1054-1061`; `USAGE-SCORECARD-METRICS.md` Appendix A, Bug B) |
 | `turn_context` | The model id in effect from this point on, plus `approval_policy` (a string) and `sandbox_policy` (an **object** keyed `.type`, e.g. `{"type":"danger-full-access"}`) — the permission posture, last evidence winning, since a session may renegotiate mid-run (`usage-parsers.mjs:774-795`) |
 | `event_msg` → `token_count` | A **cumulative** usage snapshot; only the last one is kept (`usage-parsers.mjs:829-840`) |
-| `event_msg` → `task_started` | `model_context_window` — the context-window denominator, which no other host records — and the turn's start time (`usage-parsers.mjs:842-852`) |
+| `event_msg` → `task_started` | `model_context_window` — denominator-only compatibility evidence, not proof of a paired input/window sample — and the turn's start time (`usage-parsers.mjs:842-852`) |
 | `event_msg` → `task_complete` | The host's own `duration_ms` for the turn, taken as a latency sample only when no prompt-to-response gap already covered it; a non-null `error` counts as an exception (`usage-parsers.mjs:854-872`) |
 | `event_msg` → `turn_aborted` | An explicit interrupt: counted in `aborts`, and it clears both latency states so an unanswered prompt is never timed against a later, unrelated response (`usage-parsers.mjs:967-985`) |
 | `event_msg` → `user_message` | A legacy-format prompt CANDIDATE — Codex does not route tool output through this event, but the text still needs the human-prompt gate below before it counts |
@@ -210,10 +215,14 @@ OpenCode retain numerator-only evidence when no runtime window exists. The legac
 `ctxLastTokens`/`ctxWindow` fields remain compatibility facts but do not establish pressure unless
 the normalized v17 evidence proves a pair.
 
-Schema v18 applies the rule to controlled Prompt telemetry facets. Earlier cache rows contain no
+Schema v18 applied the rule to controlled Prompt telemetry facets. Earlier cache rows contain no
 parser-time intent/topic codes, and the aggregate cannot reconstruct them because it retains no
 prompt text. The reparse preserves the v17 context evidence contract while adding only optional
 closed-vocabulary facet codes to prompt fingerprints.
+
+The current cache schema is **20**. v19 adds working-path/Git association and session-origin
+evidence; v20 adds exact user-root exclusion and verified parent-repository eligibility.
+These affect project identity, not the paired context or transcript-turn contract.
 
 ---
 
@@ -255,7 +264,7 @@ story is [Appendix A](#appendix-a--fix-history).)
 |---|---|---|
 | `tool-result` | content carries a `tool_result` block | Output the **harness** fed back to the model after a tool call |
 | `context` | `isMeta`, **or** the text opens with a harness-output envelope (`HARNESS_OUTPUT_RE`: `task-notification`, `bash-stdout`/`-stderr`, `local-command-stdout`/`-stderr`, `local-command-caveat`, and since v15 the attribute-bearing `in-app-browser-context`) | Harness-injected content — neither the person **nor the model**. These envelopes carry neither `isMeta` nor a `tool_result`, so text shape is the only signal (the envelope census is in §6.2) |
-| `prompt` | everything else | The person — including `bash-input` (a `! command` the person typed) and slash-command records (the person invoked them) |
+| `prompt` | everything else | Prompt-role content left after the gate, including operator commands and unrecognized machine templates; fingerprint provenance is a separate classification |
 
 Two deliberate subtleties:
 
@@ -304,7 +313,7 @@ formula, the taxonomy, and what the tagging deliberately does not model are in
 The layer sits *behind* the gates above, it does not re-litigate them: a
 harness envelope or a mirrored cross-host delivery that `kind` already routes
 to `'context'` contributes no fingerprint at all. What provenance adds is the
-distinction `kind` cannot make — a `'prompt'` turn is the person *acting*, but
+distinction `kind` cannot make — a `'prompt'` turn is not proof of a person *typing*:
 an agent delivery, a headless adapter template and a slash-command record are
 all things that reach a user turn without anyone typing them.
 
@@ -321,6 +330,13 @@ string.
 transcript content leaves the module, and every step is a gate:
 
 ### 4.1 Locate, contain, bound
+
+After ID validation, `readSession` first checks the configured OpenCode SQLite store.
+A found OpenCode session follows its SQL reader and then the shared `sessionPayload`
+mask/truncate step. The JSONL realpath and 64 MiB file limit below apply to Claude/Codex
+files, not to OpenCode's database or query result. There is no equivalent aggregate
+session-byte cap on the current OpenCode reader; per-turn output truncation occurs
+after its rows are materialized.
 
 1. **Id grammar before any filesystem access** — an id must match one of
    exactly two shapes, or it is rejected with `ERR_INVALID_SESSION_ID` at
@@ -353,10 +369,13 @@ transcript content leaves the module, and every step is a gate:
 
 The file is parsed with `withTurns: true` by the provider's parser
 (`usage-index.mjs:1020-1027`), and `meta` is assembled by `sessionPayload`
-(`usage-aggregate.mjs:1309-1335`) with the same fields the Sessions view rows
-carry — `prompts`, `responses`, `exceptions`, `sidechain`, `threadSource`,
+(`usage-aggregate.mjs:1313-1350`). Its call builds a narrower subset of the Sessions
+view fields: `prompts`, `responses`, `exceptions`, `sidechain`, `threadSource`,
 `models`, `tools`, `skill`/`plugin`, worktree — plus a `cost` priced from the
-same per-model usage rows `aggregate()` uses.
+same per-model usage rows `aggregate()` uses. OpenCode recorded row cost wins over
+the bundled estimate when present. Transcript meta does not currently include every
+Sessions detail field: classification, context/rhythm/posture, cache savings, and
+project evidence are not mirrored by `sessionPayload`.
 
 Model lifecycle intelligence reuses only the aggregate session's execution host, independently
 evidenced inference provider, and bounded model ids. It does not copy session ids, titles, prompts,
@@ -371,7 +390,7 @@ never renames a retained session model, changes historical token pricing, or rew
 ### 4.3 Mask, then truncate — both marked, differently
 
 Every turn body is passed through `maskSecrets` (`usage-aggregate.mjs:167-172` — the
-23 secret shapes) **server-side, before
+configured secret shapes) **server-side, before
 serialization**, then length-capped at `MAX_TURN_CHARS` (40,000,
 `usage-aggregate.mjs:72`) with the marker appended at the truncation call
 ("originalChars is measured", `usage-aggregate.mjs:1335-1344`). Two invariants:
@@ -380,6 +399,10 @@ serialization**, then length-capped at `MAX_TURN_CHARS` (40,000,
   when the slice fired, so a complete turn cannot be misread as abridged.
 * **`originalChars` is measured after masking** — it describes loss due to
   truncation alone, never a raw-file length.
+
+Masking is best effort over recognized patterns, not proof that every secret or piece of
+private prose was removed. In particular, arbitrary credentials without recognized
+prefix/assignment context can remain. Only matched values are withheld server-side.
 
 The two kinds of withholding keep distinct vocabulary end-to-end: masking
 renders as `…redacted` marks (`markRedactions`,
@@ -393,7 +416,10 @@ text so a changed constant can't desync the display).
 
 ## 5. The HTTP surface
 
-All routes inherit the dashboard's loopback bind, DNS-rebinding `Host` guard,
+All API routes require the session token: normal requests use `X-Dash-Token`, while
+the current GET handler also accepts `?token=` on all API GETs, including transcripts.
+That compatibility fallback is not restricted to SSE; token-bearing URLs are credentials.
+Routes inherit the dashboard's loopback bind, DNS-rebinding `Host` guard,
 and cross-site fetch-metadata guard (`dashboard-server.mjs` request handler
 preamble). Transcript-relevant routes:
 
@@ -432,7 +458,7 @@ nothing on the page to reveal.
 `renderSessions` (`dashboard/client.mjs`) renders the project tree
 (collapsed by default; every project starts closed so the cross-project
 comparison stays above the fold). Each session is a `sessionRow`
-(`sessionRow` in `dashboard/client.mjs`): host chip (claude/codex), title,
+(`sessionRow` in `dashboard/client.mjs`): host chip (Claude/Codex/OpenCode), title,
 worktree glyph, category chip (dimmed when confidence < 0.6 or
 Unclassified), start, duration, `prompts/responses`, tokens, cost — and an
 expander (`sdetail` in `dashboard/client.mjs`) carrying the
@@ -450,7 +476,7 @@ project, duration, `prompts/responses`, tokens, cost — all from masked
 
 | Turn | Label | Styling |
 |---|---|---|
-| user, `kind: 'prompt'` | `you` | accent — reserved for the person |
+| user, `kind: 'prompt'` | `you` | accent; the current label reflects the prompt gate, not independently verified authorship |
 | user, `kind: 'tool-result'` | `tool result` | purple; hover says the harness, not the person, sent it |
 | user, `kind: 'context'` | `context` | same purple + hover title |
 | assistant | the model id | dim mono (`exception` placeholder turns label as `exception`) |
@@ -486,13 +512,13 @@ Deep links: `#usage/<sessionId>` opens the Transcript view directly
 
 ---
 
-## 7. Provider differences at a glance
+## 7. JSONL host differences at a glance
 
 | | Claude Code | Codex CLI |
 |---|---|---|
 | Human prompts | `user` entries passing `isHumanPrompt` | `user_message` events |
 | Tool results as turns | yes — `kind: 'tool-result'` | not surfaced (different event types; fidelity gap, §1.2) |
-| Harness context as turns | yes — `kind: 'context'` (`isMeta`) | not surfaced |
+| Harness context as turns | yes — `kind: 'context'` (`isMeta` or recognized envelope) | recognized harness/mirrored prompt candidates become `context` turns |
 | Model per assistant turn | per-turn `message.model` | last `turn_context` model in effect |
 | Token usage | per-assistant-turn `usage` object | cumulative `token_count`; last snapshot wins |
 | API-error placeholders | `<synthetic>` / `isApiErrorMessage` → exceptions | none observed |
@@ -502,6 +528,18 @@ Deep links: `#usage/<sessionId>` opens the Transcript view directly
 | Response latency | derived from the prompt-to-completion gap | same gap where available, else the host's own `duration_ms` — both capped at 3600 s, since `duration_ms` includes time blocked on an approval prompt |
 | Context window | bounded input evidence only, no denominator | paired gross input and `model_context_window` from `token_count`; older `task_started` rows may provide window-only compatibility evidence |
 | Session title | model-written `ai-title`, first-prompt fallback | first prompt clipped |
+
+OpenCode's separate SQLite reader records user prompts, assistant text/reasoning and tool
+names. Tool result bodies are not flattened into the assistant text. `parent_id` marks
+subagent sessions, `providerID` supplies observed serving-provider identity, and finite
+message `cost` values contribute recorded cost; absent row cost falls back to pricing.
+Its title comes from the session row, and its context evidence is input-only. These
+are reader contracts, not assertions that the native host lacks richer data.
+
+Usage transcript reads are separate from Observability playback. The latter opens bounded
+Claude/Codex stream tails and in-memory replay rings; it is not a durable full-history
+archive, and it does not inherit Usage's OpenCode or nested-subagent reader support.
+See [Observability](OBSERVABILITY.md) for retention and gap behavior.
 
 **OpenRouter boundary:** the supported activity API has account-level date/model/provider/token/
 request/spend rows, but no transcript or local-session correlation key. `ak usage refresh openrouter`

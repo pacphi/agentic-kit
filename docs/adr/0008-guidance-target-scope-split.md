@@ -2,7 +2,8 @@
 
 - **Status:** Implemented
 - **Date:** 2026-07-24
-- **Updated:** 2026-09-02
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
+- **Earlier update:** 2026-09-02
 - **Update note:** ADR-0023 made machine-guidance backups fail-closed and replacement atomic. Project
   setup now also preserves user-authored guidance, migrates the old unsentineled lean stub, and
   converges duplicate agentic-kit sentinels idempotently.
@@ -30,9 +31,10 @@ and rides along in every clone.
 Codex reads a **user-level** guidance file at `~/.codex/AGENTS.md` (ak's host adapter
 already models codex's guidance surface, `src/lib/hosts.mjs`). That is the correct home for
 machine-scoped guidance destined for the codex host: same scope (the machine), same
-lifecycle (`kit.json` enablement), never in a repo. `~/.codex` exists on machines where
-codex is installed and **must never be created by ak** — its existence is itself the signal
-that codex is present.
+lifecycle (`kit.json` enablement), never in a repo. This guidance-target helper includes `~/.codex` only when it already exists;
+**guidance reconciliation does not create that directory**. This is a scoped
+write rule, not proof that a Codex binary exists or a promise that a separately
+authorized native install/registration command can never create its config home.
 
 ## Decision
 

@@ -75,32 +75,32 @@ export const SUBSCRIPTION_PROVIDERS = new Set(['claude-code', 'codex', 'ollama',
 // below; model lines move fast, so re-check and let users override (ADR-0002/0003).
 // Notes must state work-per-task, not only price: a note that compares cost
 // WITHOUT saying "per-token" gets read as cost-per-task, which is the axis users
-// actually pay on (a model needing 2-3x the agentic turns costs more per task at
-// identical per-token price). Measured end-to-end in pacphi/retort versions-blog.
+// actually pay on. No workload benchmark is embedded in this catalog; notes
+// describe curated roles, not measured superiority.
 export const MODEL_CATALOG_VERIFIED = '2026-09-08';
-export const COST_AXIS_NOTE = 'per-token price ≠ per-task cost — a model that needs more agentic turns costs more per task at the same per-token price';
+export const COST_AXIS_NOTE = 'per-token price ≠ per-task cost — compare total tokens, cache use and agentic turns on representative tasks';
 // Tier names are the pairing key for swapHostModel(): a codex tier only mirrors
 // to a claude model (and back) when BOTH catalogs use the same tier string.
 // Keep `flagship`/`balanced`/`fast` spelled identically on both hosts —
 // renaming one side silently degrades every mirrored route to cat[0].
 export const MODEL_CATALOG = {
   claude: [
-    { id: 'claude-opus-5', tier: 'reasoning', note: 'top Opus — the deepest reasoning, at ~2–3× the agentic turns of a balanced model on routine work; earns it at the hard end' },
-    { id: 'claude-sonnet-5', tier: 'balanced', note: 'near-Opus capability at a lower per-token price — review, spec, release' },
-    { id: 'claude-fable-5-1', tier: 'flagship', note: 'top capability (Mythos-class, above Opus 5) — successor to Fable 5 at the same per-token price — hardest problems' },
-    { id: 'claude-haiku-4-5-20251001', tier: 'fast', note: 'cheap/fast — high-volume mechanical work' },
+    { id: 'claude-opus-5', tier: 'reasoning', note: 'reasoning-oriented preset; compare agentic turns and per-task cost on representative work' },
+    { id: 'claude-sonnet-5', tier: 'balanced', note: 'balanced preset for review, specification and release work' },
+    { id: 'claude-fable-5-1', tier: 'flagship', note: 'flagship preset for demanding tasks; availability depends on the host and account' },
+    { id: 'claude-haiku-4-5-20251001', tier: 'fast', note: 'fast-tier preset for high-volume mechanical work' },
     // Still current (no deprecation notice) and still pinnable — it is simply no
     // longer what ak routes to by default. Kept listed so divergedRoutes can name
     // its cost-per-task trade when a policy is still pointing at it.
-    { id: 'claude-opus-4-8', tier: 'prior', note: 'prior Opus generation — same per-token price as Opus 5, roughly half the agentic turns on routine work' },
-    { id: 'claude-mythos-5-1', tier: 'restricted', note: 'same specifications and pricing as Fable 5.1; invitation-only access through Project Glasswing' },
-    { id: 'claude-fable-5', tier: 'prior', note: 'prior Fable generation — same per-token price as Fable 5.1, superseded as the flagship pick' },
+    { id: 'claude-opus-4-8', tier: 'prior', note: 'prior-generation option retained for user pins; compare measured per-task results before switching' },
+    { id: 'claude-mythos-5-1', tier: 'restricted', note: 'restricted-access option; entitlement must be established independently' },
+    { id: 'claude-fable-5', tier: 'prior', note: 'prior flagship option retained for explicit selection' },
   ],
   codex: [
-    { id: 'gpt-5.6-sol', tier: 'flagship', note: 'flagship 5.6 — strongest on complex coding, computer use and security work; first-class max reasoning effort' },
-    { id: 'gpt-5.6-terra', tier: 'balanced', note: 'balanced 5.6 — everyday implementation and testing at a materially lower per-token price than sol; the gpt-5.4 replacement' },
-    { id: 'gpt-5.6-luna', tier: 'fast', note: 'fastest/cheapest 5.6 — mechanical implementation, docs and packaging; the gpt-5.4-mini replacement' },
-    { id: 'gpt-6-astra', tier: 'frontier', note: 'most capable OpenAI model — complex end-to-end work; $10/$50 per million input/output tokens' },
+    { id: 'gpt-5.6-sol', tier: 'flagship', note: 'flagship preset for complex coding workflows' },
+    { id: 'gpt-5.6-terra', tier: 'balanced', note: 'balanced preset for everyday implementation and testing' },
+    { id: 'gpt-5.6-luna', tier: 'fast', note: 'fast-tier preset for mechanical work, documentation and packaging' },
+    { id: 'gpt-6-astra', tier: 'frontier', note: 'frontier preset; inspect current model evidence and prices before selection' },
   ],
 };
 
@@ -434,8 +434,8 @@ function currentSeedFor(act, entry = {}) {
  * Only `provenance === 'seeded'` entries are reported: a 'user' pin is deliberate
  * intent and is never divergence.
  *
- * Which side is better is activity-dependent (a newer default can cost 2-3× the
- * agentic turns on routine work), so callers must present this neutrally — a
+ * Which side is better is workload-dependent; a default change does not prove
+ * lower end-to-end cost or higher quality, so callers present this neutrally — a
  * divergence to decide about, not a lag to clear.
  */
 export function divergedRoutes(policy = {}) {

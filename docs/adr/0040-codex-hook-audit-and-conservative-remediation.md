@@ -2,6 +2,7 @@
 
 - **Status:** Implemented (Codex Wave 1); extended by ADR-0041
 - **Date:** 2026-09-01
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md),
   [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),
@@ -9,6 +10,16 @@
   [ADR-0029](0029-host-adapter-extension-point.md)
 - **Evidence:** [2026-09-01 hook audit](../audits/codex-hooks-audit-2026-09-01.md)
 - **Extended by:** [ADR-0041](0041-host-neutral-hook-configuration-assurance.md)
+
+## Current implementation boundary (2026-09-09)
+
+The Codex discovery wave is implemented. Its no-apply and deferred-static-summary
+statements below describe Wave 1 only: ADR-0041 now supplies host-neutral static
+audit, bounded read models, and `ak heal hooks` dry-run/apply/undo/recovery.
+[Remediation tests](../../tests/kit/hook-remediation.test.mjs) cover exact-action
+selection, preimages, receipt integrity, rollback and platform refusal. No generic
+hook mutation or host-trust writer is introduced, and native-host runtime
+outcome acquisition remains deferred.
 
 ## Context
 
@@ -146,10 +157,11 @@ Those are review recommendations, not authorization. Agentic-kit will not set
 `trusted_hash`, modify project `trust_level`, invoke a bypass, or equate a successful
 benchmark with trust.
 
-### 6. Future apply is transactional
+### 6. Original Wave 1 apply prerequisites — extended by ADR-0041
 
-The current command intentionally exposes no apply surface. A later wave may add it only
-with these invariants:
+At Wave 1 adoption the command exposed no apply surface. ADR-0041 subsequently
+implemented exact approval-required apply/undo/recovery recipes under these
+transactional invariants:
 
 1. plan includes canonical owner, action ID, target, expected preimage digest, desired
    digest, mode, unified diff, behavior impact, trust impact, and rollback description;

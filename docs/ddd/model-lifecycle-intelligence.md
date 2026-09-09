@@ -4,9 +4,10 @@ This document defines the bounded context accepted by
 [ADR-0032](../adr/0032-model-lifecycle-intelligence.md). The implementation and exact-head release
 proof are recorded by ADR-0032, whose current status is Implemented.
 
-> **Proposed evolution:** ADR-0048 projects installed models into Maintenance and permits only an
-> independently conformant provider-owned removal operation. Model download, update, migration,
-> and this context's current read-only behavior remain unchanged until that proposal is implemented.
+> **Maintenance integration:** ADR-0048's implemented projection consumes model evidence and
+> offers provider-owned Ollama removal only when its exact safety prerequisites pass. Broader
+> acceptance gates remain open. Model download/update/migration stay Guided; this context
+> remains read-only and does not acquire Maintenance's removal authority.
 
 ## Purpose
 
@@ -95,8 +96,9 @@ aliases public product vocabulary and carries first-party specifications/lifecyc
 cache display names qualify only through host-owned discovery evidence. OpenCode identity becomes
 public only after an exact provider/model-key join with the
 bounded Models.dev catalogue; provider syntax does not establish proof. A custom
-provider, configured variant, gateway deployment, local tag, or observed-only id remains a keyed
-pseudonym. Trusted documentation and catalogue links are server-produced HTTPS links on a fixed
+provider, configured variant, gateway deployment, local tag, or observed-only id does not become
+source-proven public identity. The authenticated `owner-visible-v2` presentation may expose its
+bounded exact name and selector; sensitive relations and scope remain keyed. Trusted documentation and catalogue links are server-produced HTTPS links on a fixed
 host allowlist. The browser never guesses a link from a model-name substring.
 
 ### ModelBinding
@@ -261,6 +263,15 @@ the privacy-projected snapshot id; a changed snapshot is rejected and the browse
 one rather than mixing generations. Missing key material fails closed without creating state.
 Delivery remains behind the loopback, session-token, origin, CSP, and `no-store` boundary and cannot
 apply a plan.
+
+## Context reporting consumer
+
+`context-model-cache.mjs` reads the latest saved snapshot without refreshing it. It projects only
+positive model limits with matching source/field/scope evidence, preserves captured time and
+provider identity, and bounds each host list to 100 rows with an omitted count. This narrow
+consumer does not infer an effective session window from catalog capacity, use raw configuration,
+or call a host CLI/API during dashboard polling. Its seven-day freshness warning is a presentation
+policy, distinct from this context's 90-day snapshot retention and bundled-source expiry rules.
 
 ## Invariants
 

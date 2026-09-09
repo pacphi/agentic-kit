@@ -2,14 +2,14 @@
 
 - **Status:** Implemented
 - **Date:** 2026-07-25
-- **Updated:** 2026-09-08
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
+- **Earlier update:** 2026-09-08
 - **Pricing update:** Added GPT-6 Astra standard rates and per-entry verification dates;
   verified Claude 5.1 cache rates, removed Sonnet 5’s canceled September increase, and documented
   unmodelled request surcharges.
 - **Update note:** Reconciled Usage with the implemented five-area Dashboard. ADR-0032 adds a Models
   destination that consumes bounded structured observed-model facts without moving transcript
-  indexing, session history, or usage aggregates out of this context; its release proof remains
-  pending. A successful observation establishes only that exact path's observed, entitlement,
+  indexing, session history, or usage aggregates out of this context; its implementation-time release proof is recorded in ADR-0032. A successful observation establishes only that exact path's observed, entitlement,
   policy, and routability facts; it never establishes catalogue completeness.
   Issue #170 added backward-compatible parsing for legacy Codex messages and
   `item_completed` envelopes, bumped the derived-index schema to force reparse of stale zero-turn
@@ -54,6 +54,33 @@ The implemented boundary is therefore additive and evidence-graded:
   maintainer answers on categories, nested-agent semantics, and deduplication before it changes that
   boundary.
 
+## Current implementation boundary (2026-09-09)
+
+ADR-0050 now governs the Scorecard's plain top-10 Git-project ranking and the
+separate Runtime context card. Existing label-keyed usage aggregates remain for
+compatibility; verified ranking identity uses parse-time Git evidence, not name
+heuristics. Usage cache schema 20 preserves these new facts and forces one normal
+reparse. ADR-0038/0039/0042 govern current metrics, Prompts, and Context/Hooks views.
+
+ADR-0011 remains Proposed. `pricing.mjs` still returns `FALLBACK_PRICE` for unmatched
+models and `costOf()` consumes it numerically; no metered/local token split,
+per-session local-zero-cost classification, or local-provider fidelity annotation
+is implemented in Usage. ADR-0032's shipped Ollama catalogue discovery is a
+separate feature. Historical measurements below are adoption-time examples, not
+current machine totals.
+
+The self-contained browser makes same-origin requests, but the complete Dashboard
+process is **not an air-gapped or zero-egress surface**. Status collection and
+`collectData()` may refresh package/release drift through `npm view` and GitHub
+after their TTLs expire, and cache those observations in `kit.json`. The Limits
+view may spawn the authenticated Codex app-server quota reader. Local Usage
+indexing and cache-only Models reads do not themselves request remote analytics
+or run inference. Maintenance remains the only allowlisted resource-action API;
+derived-cache/history writes are separate from those actions.
+Evidence: [Dashboard composition](../../src/lib/dashboard-server.mjs),
+[version probes](../../src/lib/versions.mjs), and
+[injected-network boundary tests](../../tests/dashboard.test.cjs).
+
 ## Context
 
 Claude Code and Codex both write complete session transcripts to disk — `~/.claude/projects/**/*.jsonl`
@@ -84,19 +111,21 @@ Three properties of the data force most of the design:
 
 ### 1. A dashboard area, not a third command — the split is egress, and this has none
 
-ADR-0007 split `admin` from `dashboard` along **network egress**: `dashboard` promises silence,
-`admin` promises reach. Usage analytics reads **local files only** and makes **zero network calls**.
-It therefore sits squarely inside the dashboard's existing offline-first contract and ships as one
-of the dashboard's five primary areas, not a new server.
+Usage indexing reads local transcript stores without contacting a remote analytics
+service. It belongs in the operational Dashboard rather than Admin's remote
+project analytics, and needs no new server. The complete Dashboard's update/quota
+network boundaries are qualified above; local indexing does not make the entire
+server network-silent.
 
 > **Current implementation note (2026-08-25):** The dashboard exposes five primary areas: About,
 > Overview, Usage, Observability, and System. One fixed, left-aligned secondary rail provides the
 > current area's destinations. Usage still loads lazily and remains separate from the live
 > transcript tailers.
 
-Usage carries six in-page views — **Scorecard**, **Limits**, **Findings**, **Sessions**, **Models**,
-and **Transcript** — deep-linked as `#usage/score`, `#usage/limits`, `#usage/findings`,
-`#usage/sessions`, `#usage/models`, and `#usage/transcript`. A selected retained session uses
+Usage carries nine in-page views — **Scorecard**, **Limits**, **Findings**, **Prompts**,
+**Context**, **Hooks**, **Sessions**, **Models**, and **Transcript** — with corresponding
+`#usage/<view>` hashes (`score`, `limits`, `findings`, `prompts`, `context`, `hooks`,
+`sessions`, `models`, `transcript`). A selected retained session uses
 `#usage/<sessionId>` and opens Transcript detail. Each destination publishes a visible heading and
 plain-language description. The primary and secondary tab sets use a roving selected state:
 Left/Right Arrow activates the adjacent destination with wrapping, while Home and End activate the
@@ -125,9 +154,10 @@ and the fallback when the kit is not installed; the panel does not replace it an
 key changed are re-parsed. Cold build is a one-time cost (~1 min on the reference corpus); warm
 refresh is near-instant because a finished transcript never changes again.
 
-That immutability is load-bearing well beyond caching: **a completed session's derived facts —
-totals, duration, category — are computed once and are correct forever.** It is what makes optional
-LLM classification (§5) economically bounded rather than a recurring bill.
+File identity and the parser schema bound cache reuse. Schema upgrades reparse retained
+records; pricing is calculated from the dated rate table during aggregation. Finished
+transcripts do not make every derived fact permanently correct. Optional model
+classification remains absent from main under ADR-0039.
 
 The Usage tab fetches **lazily on activation**, never on the shared status poll. Scans are
 single-flight: a refresh already in progress is joined, not duplicated.
@@ -176,13 +206,13 @@ would make such a percentage honest, and an invented denominator is worse than n
 OpenAI publishes no pricing in `~/.codex/models_cache.json` (verified), so Codex rates are a
 maintained table and are **date-stamped** in the UI so staleness is visible rather than silent.
 
-> **Amended by [ADR-0011](0011-local-model-provenance-zero-cost-and-transcript-fidelity.md)
+> **Proposed extension in [ADR-0011](0011-local-model-provenance-zero-cost-and-transcript-fidelity.md)
 > (2026-07-27):** this section assumes every transcript came from a metered vendor endpoint. A
 > session served by a **local** model (`ollama launch claude` / `ollama launch codex`) breaks three of
 > its premises at once — no cache accounting exists to apply the 0.1× multiplier to, token counts are
 > the provider's own approximations, and the model id is one the vendor documents how to alias onto a
-> Claude name. ADR-0011 therefore splits cost into `metered` / `local` ($0, exact) / `unpriced`, and
-> **retires `FALLBACK_PRICE` from the cost path**: pricing an unrecognised model at Sonnet-class rates
+> Claude name. ADR-0011 proposes splitting cost into `metered` / `local` / `unpriced` and
+> retiring `FALLBACK_PRICE`; neither proposal is implemented in the Usage cost path: pricing an unrecognised model at Sonnet-class rates
 > is the invented-denominator error this section rejects, applied to a rate instead of a limit.
 
 ### 4. Engaged time is the union of *active* intervals — three tiers, and the honest one leads
@@ -369,16 +399,17 @@ from role: `you` is reserved for `prompt`, tool results render as **tool result*
 **context**, both purple like the tool chips and carrying a hover title stating the harness — not
 the person — sent them. The existing `prompt` boolean (which drives the prompt *counts*) is
 unchanged; `kind` is deliberately broader on the image-only edge, because "not countable as a text
-prompt" and "not the human" are different claims. Codex rollouts record only real prompts as
-`user_message` events, so every Codex user turn is `kind: prompt` by construction. Full mechanics:
+prompt" and "not the human" are different claims. Codex user-message events can also contain harness or mirrored context. Current
+parsers apply the provenance gates documented by ADR-0038/0039; role alone does not
+establish a human prompt. Full mechanics:
 [`docs/TRANSCRIPTS.md`](../TRANSCRIPTS.md).
 
-> **Amended by [ADR-0011](0011-local-model-provenance-zero-cost-and-transcript-fidelity.md)
+> **Proposed extension in [ADR-0011](0011-local-model-provenance-zero-cost-and-transcript-fidelity.md)
 > (2026-07-27):** this section's principle — *withheld content announces itself* — was scoped to
 > masking and truncation, both things **this panel** does. A **provider** withholds too: a local
 > Ollama-backed session reports no cache accounting and approximate token counts, and its titling and
 > mid-stream errors are served locally, so `cacheRead: 0` on a local session is a fact about the
-> provider and not about the work. ADR-0011 §7 extends the same announcement rule to provider
+> provider and not about the work. ADR-0011 §7 proposes extending the same announcement rule to provider
 > capability, so a reader can tell "this workload had no cache hits" from "this provider cannot
 > report cache hits" — which the panel currently renders identically.
 
@@ -421,8 +452,8 @@ two evidence streams requires a new decision and fixtures from both sides.
 
 ### Good
 
-- The dashboard's offline-first contract (ADR-0005) is preserved exactly; no new server, no new port,
-  no credential, no egress.
+- The local transcript index adds no remote analytics request or model invocation.
+  It uses the existing token-protected Dashboard server and no additional port.
 - Warm refreshes are near-instant, so a live panel over a 1.3 GB corpus is viable.
 - Cost, time, and category figures are defensible under scrutiny: each either derives from the user's
   own data or carries a citation.

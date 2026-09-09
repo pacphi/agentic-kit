@@ -7,10 +7,10 @@ RuvNet Brain without treating those independent layers as interchangeable.
 Behind an experimental flag, agentic-kit can also admit **external host adapters**
 that extend this set with a host not shipped in-tree — see
 [External host adapters](PROVIDERS.md#external-host-adapters-experimental),
-[Using Hermes through the external adapter](HERMES-HOST-ADAPTER.md),
-[AUTHORING-HOST-ADAPTERS.md](AUTHORING-HOST-ADAPTERS.md),
-[ADR-0029](adr/0029-host-adapter-extension-point.md), and
-[ADR-0031](adr/0031-capability-graduation-and-upstream-requests.md). An admitted
+[Using Hermes through the external adapter](https://github.com/pacphi/agentic-kit/blob/main/docs/HERMES-HOST-ADAPTER.md),
+[AUTHORING-HOST-ADAPTERS.md](https://github.com/pacphi/agentic-kit/blob/main/docs/AUTHORING-HOST-ADAPTERS.md),
+[ADR-0029](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0029-host-adapter-extension-point.md), and
+[ADR-0031](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0031-capability-graduation-and-upstream-requests.md). An admitted
 external host picks up the same capability-driven treatment described here, but it
 is not one of the three built-ins this reference compares. It can never
 **self-declare** primary-host, AQE-provider, or status-line status — that ban is
@@ -124,7 +124,7 @@ can still require a separate provider credential even when invoked from Codex.
 `ak run` avoids that conflation by executing the selected host directly and using
 Ruflo for tools, memory, routing context, and orchestration assets.
 
-Current cross-host Ruflo risks include:
+The dated upstream risk inventory includes:
 
 - force initialization can overwrite unrelated `.mcp.json` content
   ([ruflo #420](https://github.com/ruvnet/ruflo/issues/420));
@@ -164,7 +164,7 @@ Current AQE includes a subscription-backed `codex` provider. Agentic-kit accepts
 `ak host pick --aqe-provider codex`, admits Codex fallback rungs, enables Codex
 providers referenced by `agentOverrides`, and projects Codex activity routes.
 
-AQE risks relevant across hosts include its
+The dated AQE risk inventory includes its
 [MCP entrypoint double-spawn](https://github.com/proffesor-for-testing/agentic-qe/issues/528),
 [multi-platform initialization behavior](https://github.com/proffesor-for-testing/agentic-qe/issues/532),
 [MCP tool correctness gaps](https://github.com/proffesor-for-testing/agentic-qe/issues/535),
@@ -194,12 +194,32 @@ OpenCode can search the same source-grounded Brain, but it lacks the official
 plugin lifecycle, console, and enforcement hooks. Describe it as **Brain search
 access**, not full Brain host support.
 
-Current Brain limitations include release/plugin version lockstep
+The dated Brain risk inventory includes release/plugin version lockstep
 ([brain #77](https://github.com/stuinfla/ruvnet-brain/issues/77)), Codex MCP warmup
 causing `search_ruvnet` to disappear
 ([#78](https://github.com/stuinfla/ruvnet-brain/issues/78)), and a Claude
 pre-tool hook that may resolve too late to block subagent dispatch
 ([#84](https://github.com/stuinfla/ruvnet-brain/issues/84)).
+
+## Context controls and reporting
+
+Native controls exist in all three hosts; the kit currently manages only Codex's
+explicit `model_context_window` preference. The September 9, 2026 documentation check
+confirms Claude model selection and auto-compaction controls, OpenCode provider/model
+limits and compaction settings, and Codex context/compaction configuration. See the
+[Claude model reference](https://code.claude.com/docs/en/model-config),
+[OpenCode configuration](https://opencode.ai/docs/config/), and
+[Codex configuration](https://learn.chatgpt.com/docs/config-file/config-reference).
+
+The Overview Context configuration card reads Codex config/cache estimates and the
+model inventory's cached facts for other hosts. It does not inspect or change Claude
+or OpenCode compaction settings and never asserts a live session window. Claude's
+native status-line JSON can expose session usage and window size; that does not mean
+those values exist in older transcript files or are collected by the Usage parser.
+Usage → Context computes pressure only from paired input/window observations in the
+selected timeframe. Missing measurements remain missing; catalogue capacity cannot
+fill a historical denominator. See [Dashboard](DASHBOARD.md) and
+[ADR-0050](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0050-dashboard-project-identity-and-context-reporting.md).
 
 ## Host-specific limitations
 
@@ -214,7 +234,7 @@ compatibility. The dashboard therefore reports one artifact and separate host Co
 The common `SKILL.md` authoring format does not establish the same precedence, permissions, model
 advertisement, or runtime loading. MCP registrations are also per host; equal server configuration
 does not prove equal scope, health, authentication, or authorization. See
-[ADR-0045](adr/0045-artifact-consumer-bindings-and-explicit-maintenance-scans.md) and the official
+[ADR-0045](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0045-artifact-consumer-bindings-and-explicit-maintenance-scans.md) and the official
 [Claude](https://code.claude.com/docs/en/slash-commands),
 [Codex](https://developers.openai.com/codex/skills/), and
 [OpenCode](https://opencode.ai/docs/skills) skill documentation.
@@ -231,7 +251,7 @@ observable execution behavior, not proof based only on a configured file.
 
 ### Codex
 
-Codex lacks agentic-kit's command-backed status line. Current reports also cover
+Codex lacks agentic-kit's command-backed status line. The dated reports also cover
 MCP tools being discovered but unavailable to Desktop threads
 ([codex #19425](https://github.com/openai/codex/issues/19425)), MCP child-process
 leakage ([#30408](https://github.com/openai/codex/issues/30408)), and silent
@@ -305,12 +325,12 @@ label:
 The governing decisions currently stand as follows: ADR-0017 and ADR-0018 are
 **Accepted** and were amended on 2026-08-04 and 2026-07-30 respectively;
 ADR-0020 is **Implemented** as of 2026-07-30; ADR-0021 is **Accepted** and was
-updated 2026-08-03. See [ADR-0017](adr/0017-opencode-host.md),
-[ADR-0018](adr/0018-generalized-host-worker-execution.md),
-[ADR-0020](adr/0020-ga-stable-surfaces.md), and
-[ADR-0021](adr/0021-inference-provider-provenance.md). For the external-adapter
-section above, [ADR-0029](adr/0029-host-adapter-extension-point.md) is the
-extension point and [ADR-0031](adr/0031-capability-graduation-and-upstream-requests.md)
+updated 2026-08-03. See [ADR-0017](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0017-opencode-host.md),
+[ADR-0018](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0018-generalized-host-worker-execution.md),
+[ADR-0020](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0020-ga-stable-surfaces.md), and
+[ADR-0021](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0021-inference-provider-provenance.md). For the external-adapter
+section above, [ADR-0029](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0029-host-adapter-extension-point.md) is the
+extension point and [ADR-0031](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0031-capability-graduation-and-upstream-requests.md)
 amends it with capability graduation — replacing ADR-0029's permanent
 capability caps with the earn-then-grant model, except for the permanent ban on
 self-declaring them.

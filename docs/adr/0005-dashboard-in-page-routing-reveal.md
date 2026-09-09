@@ -1,15 +1,17 @@
 # ADR-0005 — Dashboard surfaces routing via in-page reveal
 
+> Historical vocabulary below is governed by [ADR-0020](0020-ga-stable-surfaces.md);
+> it does not restore retired commands or configuration surfaces.
+
 - **Status:** Implemented
 - **Date:** 2026-07-23
-- **Updated:** 2026-08-25
-- **Updated:** 2026-09-03 — ADR-0044 implements a narrowly allowlisted Maintenance action boundary
-  under System while ordinary Dashboard and Machine Footprint routes remain read-only.
-- **Update note:** Reconciled the implemented five-area shell introduced by ADR-0025 and ADR-0026.
-  ADR-0032 adds Models as a secondary Usage destination and a compact Overview summary while
-  preserving read-only, network-silent ordinary Dashboard reads. Model identifiers use a fail-closed
-  keyed Dashboard projection, and the semantic table has a labelled focusable scroll region plus
-  field-evidence disclosures. ADR-0032 release proof remains pending.
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
+- **Earlier update:** 2026-08-25
+- **Earlier update:** 2026-09-03 — ADR-0044 implements a narrowly allowlisted Maintenance action boundary
+  under System; ordinary measurement/status routes retain their separate cache/observation effects.
+- **Update note:** Issue #211 reconciles server egress/cache writes, GET query-token compatibility,
+  owner-visible model identifiers, and guarded Maintenance actions with current source.
+  Earlier design decisions remain below as historical context.
 - **Deciders:** agentic-kit maintainers
 
 > **GA amendment:** the dashboard is read-only except for ADR-0044's exact receipt-aware
@@ -17,6 +19,25 @@
 > to compatibility configuration names and projections describe
 > the implementation at adoption time only; [ADR-0020](0020-ga-stable-surfaces.md) defines the
 > canonical GA surface.
+
+## Current implementation boundary (2026-09-09)
+
+The self-contained browser makes same-origin requests, but the complete Dashboard
+process is **not an air-gapped or zero-egress surface**. Status collection and
+`collectData()` may refresh package/release drift through `npm view` and GitHub
+after their TTLs expire, and cache those observations in `kit.json`. The Limits
+view may spawn the authenticated Codex app-server quota reader. Local Usage
+indexing and cache-only Models reads do not themselves request remote analytics
+or run inference. Maintenance remains the only allowlisted resource-action API;
+derived-cache/history writes are separate from those actions.
+Evidence: [Dashboard composition](../../src/lib/dashboard-server.mjs),
+[version probes](../../src/lib/versions.mjs), and
+[injected-network boundary tests](../../tests/dashboard.test.cjs).
+
+The original matrix-only Decision below is historical presentation. Current routing
+is in Overview → Hosts & Routing; context configuration is in Runtime, and
+[ADR-0050](0050-dashboard-project-identity-and-context-reporting.md) governs the
+new project and context read models. Route tuning uses `ak host pick`.
 
 ## Context
 
@@ -36,7 +57,8 @@ grid grouped by subsystem, a `#history` strip — all fed by shelling `ak status
 System supplies machine-footprint views under ADR-0026 and ADR-0025. Overview absorbs the former
 health-oriented
 peer tabs as **Summary**, **Hosts & Routing**, **Providers**, **Runtime**, and **Intelligence**.
-Usage owns **Scorecard**, **Limits**, **Findings**, **Sessions**, and **Transcript**. Observability
+Usage owns **Scorecard**, **Limits**, **Findings**, **Prompts**, **Context**, **Hooks**,
+**Sessions**, **Models**, and **Transcript**. Observability
 owns **Live** and **History**. System and About retain the secondary destinations documented by
 their governing ADRs. The secondary row remains in one stable location across all five areas.
 Canonical hashes are rooted at `#about`, `#overview`, `#usage`, `#observability`, and `#system`.

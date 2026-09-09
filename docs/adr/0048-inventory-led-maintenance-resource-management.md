@@ -3,28 +3,31 @@
 - **Status:** Accepted — implementation delivered 2026-09-05; Implemented withheld pending
   human-evaluation and cross-platform gates
 - **Updated:** 2026-09-08 — project language badges use locally bundled SVGs with
-  name tooltips and accessible labels; the three-icon disclosure stays progressive.
-- **Updated:** 2026-09-08 — installed tools preserve measured executable locations
+  name tooltips and accessible labels; ADR-0050 subsequently replaces the
+  three-icon limit with a wrapping row of all detected language icons.
+- **Earlier update:** 2026-09-08 — installed tools preserve measured executable locations
   for private path reveal, with PATH resolution and bounded package-manifest fallback;
   Windows command extensions and POSIX executable checks are covered by fixtures.
-- **Updated:** 2026-09-08 — dashboard instant displays share browser-local date/time
+- **Earlier update:** 2026-09-08 — dashboard instant displays share browser-local date/time
   formatting; published calendar dates retain their day and stored timestamps remain UTC.
-- **Updated:** 2026-09-08 — Focus cards separate capability names from installation sources;
+- **Earlier update:** 2026-09-08 — Focus cards separate capability names from installation sources;
   bounded local frontmatter and plugin-manifest descriptions are displayed when declared.
-- **Updated:** 2026-09-08 — project Focus cards reveal measured language combinations
-  with three labelled icon badges and a disclosure for additional languages.
-- **Updated:** 2026-09-08 — Activity scan history uses a local-date hierarchy with
+- **Earlier update:** 2026-09-08 — project Focus cards reveal measured language combinations
+  with three labelled icon badges at that baseline; ADR-0050 now shows all
+  detected language icons in a wrapping row.
+- **Earlier update:** 2026-09-08 — Activity scan history uses a local-date hierarchy with
   completion time, source, status, and entry-count columns, newest first; date groups
   have keyboard-accessible chevron toggles and start collapsed.
-- **Updated:** 2026-09-08 — scan history rolls over at 10 records per source and
+- **Earlier update:** 2026-09-08 — scan history rolls over at 10 records per source and
   environment, retaining the existing 90-day age limit.
-- **Updated:** 2026-09-08 — Activity summary sections use a responsive bordered
+- **Earlier update:** 2026-09-08 — Activity summary sections use a responsive bordered
   card grid, with scan history remaining full-width below.
 - **Date:** 2026-09-04
-- **Updated:** 2026-09-04 — records the completed Maintenance overhaul decision interview and
+- **Earlier update:** 2026-09-09 — reconciled against repository source and tests for issue #211
+- **Earlier update:** 2026-09-04 — records the completed Maintenance overhaul decision interview and
   defines the proposed inventory, guidance, discovery, activity, recovery-audit, and action
   contracts; no implementation is claimed
-- **Updated:** 2026-09-05 — implementation delivered: the management projection schema v2 with
+- **Earlier update:** 2026-09-05 — implementation delivered: the management projection schema v2 with
   opaque ids and a privacy guard; Inventory/Guidance/Discovery/Activity queries; configurable
   discovery with resumable checkpointed scans over the ADR-0047 forest; a one-write-action contract
   enforced at the planner, coordinator, service, dashboard API, and CLI; a read-only interruption
@@ -32,19 +35,19 @@
   project-patch provider and an exact Ollama model-removal provider; signed built-in recipes under
   an N-3 package-manager policy; the v2 dashboard route allowlist; `ak maintain` v2 verbs; and
   Catalog navigation redirected into Maintenance. See "Implementation status" below.
-- **Updated:** 2026-09-07 — approved Option A presentation: progressive filters, contextual
+- **Earlier update:** 2026-09-07 — approved Option A presentation: progressive filters, contextual
   project/resource hierarchy, conditional inspector, one local measurement toolbar with phased
   progress through inventory publication, and distinct filesystem/evidence coverage. See the
   [experience specification](../archive/2026-09-04-design-maintenance-overhaul-experience-specification.md).
-- **Updated:** 2026-09-07 — Projects retain Git repositories and non-Git folders, with
+- **Earlier update:** 2026-09-07 — Projects retain Git repositories and non-Git folders, with
   Git/Folder/Worktree icons and labels plus a Project type facet; missing or unreadable evidence
   remains Not checked. Classification is presentation metadata and never changes identity.
-- **Updated:** 2026-09-08 — procedures open in a shared dialog from Inventory or Guidance;
+- **Earlier update:** 2026-09-08 — procedures open in a shared dialog from Inventory or Guidance;
   stale procedure requests recheck admission, and unbound removal/update templates are withheld.
-- **Updated:** 2026-09-08 — canonical presentation families preserve exact installation identities;
+- **Earlier update:** 2026-09-08 — canonical presentation families preserve exact installation identities;
   plugin release/candidate evidence is retained, compatibility-unknown availability is labelled,
   catalog-only models are excluded, and path reveal follows recorded locators.
-- **Updated:** 2026-09-08 — current working-tree presentation replaces Project type with
+- **Earlier update:** 2026-09-08 — current working-tree presentation replaces Project type with
   Include worktrees below project search; scan records show the latest per source; Guidance
   separates optional management from evidence-backed outcomes and uses exclusive pills.
   The user subsequently approved **B — Focus browser** from the
@@ -54,10 +57,9 @@
   [focused validation](../archive/2026-09-08-validation-maintenance-focus.md) are delivered.
   Remaining gates keep this ADR Accepted rather than Implemented.
 - **Deciders:** agentic-kit maintainers
-- **Planned successor to:** [ADR-0044](0044-receipt-aware-maintenance-control-plane.md) for the
-  findings-first product and surface contracts; ADR-0044 remains authoritative until this decision
-  is accepted and implemented
-- **Amends when implemented:** [ADR-0025](0025-machine-footprint-metrics.md),
+- **Delivered product successor to:** [ADR-0044](0044-receipt-aware-maintenance-control-plane.md) for the
+  findings-first product and surface contracts; ADR-0044 remains the transaction safety floor
+- **Amends these implemented boundaries:** [ADR-0025](0025-machine-footprint-metrics.md),
   [ADR-0029](0029-host-adapter-extension-point.md),
   [ADR-0032](0032-model-lifecycle-intelligence.md),
   [ADR-0041](0041-host-neutral-hook-configuration-assurance.md),
@@ -78,8 +80,8 @@ model lifecycle operations read-only except for the one exact Ollama removal pro
 adds. ADR-0046 is Implemented, and ADR-0047 is Accepted with its Projects observation-forest pilot
 and this ADR's checkpointed continuation both implemented.
 
-This ADR moved from Proposed to Accepted on 2026-09-05: every contract in the Decision below has a
-source implementation covered by named automated tests for that baseline (see "Implementation status").
+This ADR moved from Proposed to Accepted on 2026-09-05: the eight delivered phases below have
+source implementations and named automated tests within their recorded scope (see "Implementation status").
 The Focus browser amendment approved on 2026-09-08 is implemented and passes focused verification; the
 approved prototype establishes interaction intent, not production or adapter completeness. It is not
 yet Implemented in this record's own sense, because the
@@ -88,6 +90,24 @@ cross-platform acceptance gates have not run on this machine. The dashboard's Ma
 renders this ADR's Inventory/Guidance/Discovery/Activity workspace; ADR-0044's v1 HTTP routes and
 CLI verbs remain available as a documented compatibility surface until those gates pass and this
 record is updated again. ADR-0044 is not marked Superseded; see "Implementation status" for why.
+
+## Current implementation boundary (2026-09-09)
+
+This stays **Accepted with implementation delivered**, not a completed human or
+cross-platform release certification. ADR-0050 adds evidence-backed repository
+groups, independent Desktop-origin filtering, and wrapping language icons.
+Current cards have no three-icon disclosure or repeated uncertainty labels.
+Installation counts and exact action identities are unchanged.
+
+The implementation is narrower than the complete future-facing universe below:
+admitted external-adapter manifest capabilities are not yet ingested by
+Maintenance; built-in detection and typed known placements are the current
+source. Scope defaults/filters retain non-Git folders, not only repositories.
+[Focus queries](../../src/lib/maintenance/management/focus-navigation.mjs),
+[project presentation](../../src/lib/maintenance/management/projection-projects.mjs),
+[API tests](../../tests/kit/maintenance-project-grouping.test.mjs), and
+[browser tests](../../tests/ui/maintenance-projects.mjs) pin the implemented
+boundaries. The original Context describes the pre-overhaul findings view.
 
 ## Context
 
@@ -354,7 +374,9 @@ Filter state uses opaque environment, placement, and resource identifiers. URL s
 remembered user view. View, filter, shell, and retention preferences live in owner-private user
 state, not project configuration. Discovery roots and exclusions remain user `kit.json` intent.
 
-Scan summaries default to the existing 32-snapshot/90-day precedent per environment. Intermediate
+Scan summaries retain up to 10 records per source and environment, with a 90-day
+age limit (`SCAN_HISTORY_RETENTION`). Configured retention is bounded by the
+implemented floors and ceilings; it is not an unlimited history setting. Intermediate
 checkpoints are retained only until completion plus a short recovery window. Action receipts are
 not automatically deleted in v1; users may clear terminal, non-protected history. Unresolved,
 verification-required, undo-eligible, active dismissal, and recipe-acceptance evidence is protected
@@ -497,9 +519,9 @@ all eight phases into the one object the dashboard API and CLI call against; pro
   representative users; none has run.
 - **Assistive-technology and browser-journey signoff.** VoiceOver-with-Safari and
   NVDA-with-Chrome-or-Edge task completion have not been performed. `tests/ui/dashboard-ui.mjs`,
-  the repository's browser test suite, has not yet been extended with the v2 workspace's
-  keyboard-focus, 320-CSS-pixel, forced-colors, or sentinel-journey (J1/J2/J9/J10) checks the
-  acceptance criteria require; only the static client-label scan cited above has run.
+  and the focused `tests/ui/maintenance-projects.mjs` now exercise automated
+  navigation, keyboard, disclosure and responsive fixtures. These tests do not
+  establish human screen-reader task completion or all remaining acceptance criteria.
 - **Source-bound performance benchmarks.** The 100 ms/5,000-placement and 250 ms/50,000-placement
   filter targets, and the discovery scan benchmarks, have not been measured on the agreed reference
   machines.

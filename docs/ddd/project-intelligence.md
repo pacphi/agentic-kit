@@ -1,7 +1,7 @@
 # Project Intelligence Domain
 
 This document describes the domain implemented by [ADR-0024](../adr/0024-project-intelligence-telemetry.md),
-`src/lib/dashboard/intel-history.mjs`, `src/lib/dashboard/project-discovery.mjs`, and
+`src/lib/dashboard/intel-history.mjs`, `src/lib/project-census.mjs`, and
 `src/lib/live/intelligence-watch.mjs`.
 
 > **2026-08-07 amendment:** project discovery moved to the shared census
@@ -23,11 +23,11 @@ Project intelligence surfaces trend data about ruflo/agentic-qe's own project-le
 subsystem — the neural pattern store, its lifetime learned-pattern counter, the reasoning graph's
 structural growth, and a machine-health sample ring — inside the dashboard's Overview →
 **Intelligence** view (`#overview/intelligence`). It is a read-only projection over files those
-tools already write under `.claude-flow/`, discovered across every project on this machine ruflo
-has genuinely initialized rather than read from one implicit location. The view always shows a
+tools already write under `.claude-flow/`, selected from census projects carrying any supported
+learning-state marker rather than from one implicit location. The view always shows a
 machine-wide aggregate folded across every discovered project, plus per-project detail for exactly
 one explicitly selected, explicitly labeled project — defaulting to whichever discovered project
-was most recently active, never the dashboard server's own launching working directory. It owns no
+was most recently seen by the census, never the dashboard server's own launching working directory. It owns no
 session, actor, or activity identity; it grades no per-field evidence confidence; and it cannot
 steer, retrain, or mutate the learning subsystem it reads.
 
@@ -44,21 +44,20 @@ state machine, and a protected transcript-content plane. None of that applies he
   a discovered project's own `.claude-flow/` state — whether one selected project's detail or the
   machine-wide rollup folded across every discovered project — the same local trust boundary
   `ak status` already reads directly. There is no other host's evidence to normalize through an
-  anti-corruption adapter, because there is only ever one shape: ak's own.
-- There is no session, actor, host, provider, or model identity anywhere in this domain's data, and
-  therefore no capability-coverage matrix, no actor lens, and no court membership.
+  anti-corruption adapter, because there is only ever one shape: the supported local learning-state schemas.
+- Learning series do not carry session or actor identity and have no capability-coverage matrix,
+  actor lens, or court membership. The discovery/picker projection separately retains host-origin
+  and learning-scope metadata; these are selection qualifiers, not live execution evidence.
 - There is no lifecycle (`queued → running → completed`); sources are either a live inventory
   (the pattern store), a monotonic lifetime counter, an append-only sample history (the graph), or
   a capped, deduplicated ring (machine health).
 - The panel is a permanent secondary view under **Overview**, never a mode of **Observability**'s
   mutually exclusive Live/History scope (see [ADR-0005](../adr/0005-dashboard-in-page-routing-reveal.md)).
 
-[Project discovery](#project-discovery) below cross-references Observability's own
-`WorkspaceSnapshotStore` as a secondary source, but only for a candidate project *path* — never for
-evidence, confidence, or any value this domain renders. That store's own privacy sanitizers make it
-structurally incapable of yielding a resolvable absolute path today, so in practice this domain's
-primary registry scan supplies the entire discovered catalog; either way, the boundary above is
-unaffected, because a path is not evidence.
+The current project source is `projectCensus()` and its `learning` scope. The earlier
+registry/workspace-store discovery experiment is not an active secondary discovery path.
+Observability's `WorkspaceSnapshotStore` remains metadata-only and is not a source of resolvable
+project roots for this catalog.
 
 The implementation reuses only source-agnostic transport plumbing that Dashboard delivery already
 shares across contexts — `JsonlTailer`, `sseChannel`, `reserveClientSlot`/`clientGone`, and
@@ -74,7 +73,7 @@ never a remote or unregistered one.
 Intelligence does not discover projects. It consumes the **learning scope** of the shared project
 census ([ADR-0027](../adr/0027-shared-project-census.md), `src/lib/project-census.mjs`), which is
 the same census the System area measures directories from and the same identity Observability keys
-sessions by. A project therefore means the same thing here as it does there.
+sessions by. Consumers share identity helpers but deliberately retain different populations and granularities.
 
 The learning scope is every project still on disk that carries **learning state** — a
 `.claude-flow`, `.agentic-qe` or `.swarm` directory — regardless of which host created it.
@@ -98,29 +97,37 @@ in the ordinary case), because that is the path `readIntelHistory()` reads. It k
 directory that contributed, and `learningState`, which markers were found — so a project reporting
 zero patterns can say *why* it reports zero rather than being indistinguishable from a failed read.
 
-`label` reuses Observability's own `resolveProjectLabel` so a project reads identically wherever it
-is named, and the key a client echoes back as `?project=<key>` is `resolveProjectIdentity(path).key`.
+`label` reuses `resolveProjectLabel`; the key a client echoes back as `?project=<key>` is
+`resolveProjectIdentity(path).key`. Repository identity and launch origin remain separate.
+
+The native select groups choices as Git repositories, Git worktrees, User-level learning, and
+Other / unclassified, alphabetically within each group. Grouping uses `learningScope` and its
+evidence; only exact configured user-state roots qualify as user-level. Known Desktop declarations
+add Claude Desktop/Codex Desktop suffixes independently. `learningOrigins` is a union when census
+rows fold to one identity. Sorting does not change selection keys or machine-wide totals. The
+picker remains visible when the selected project has no history, so the user can choose another.
 
 ## Model
 
 ```text
-projectsInScope(census, 'learning')                                (every project on this machine
-  -> ProjectRow[] { path, label, paths, learningState, hosts }       with memory or intelligence
-                                                                     state, any host — ADR-0027)
+projectsInScope(census, 'learning')
+  -> ProjectRow[] { path, label, paths, learningState, hosts,
+                   learningScope, learningOrigins, learningObservedAt }
+     (existing learning-state roots, any host — ADR-0027)
 
 .claude-flow/neural/patterns.json             -> PatternStoreEntry[]   { createdAt, type }
 .claude-flow/neural/stats.json                -> GlobalLearningStats   { patternsLearned, trajectoriesRecorded,
                                                                           signalsProcessed, lastAdaptation }
 .claude-flow/data/intelligence-snapshot.json  -> GraphSample[]         { timestamp, nodes, edges, pageRankSum }
 .claude-flow/health-history.json              -> HealthSample[]        (capped ring, deduped, appended here)
-.claude-flow/data/pending-insights.jsonl      -> change signal only (line contents never read)
+.claude-flow/data/pending-insights.jsonl      -> change signal only (record contents never used as learning evidence)
 .claude-flow/improvement.json                 -> ImprovementEval       (pre-existing; unchanged by this domain)
 
 readIntelHistory(cwd)              -> { patternStore, graph, healthRing, globalStats }   (one project)
 readMachineWideIntel(ProjectRow[]) -> { totals, perProject }                             (every project, folds readIntelHistory)
 
 resolveSelectedProject(ProjectRow[], ?project=<key>) -> selected project
-        (explicit key match, else most-recently-active; shared by BOTH routes below)
+        (explicit key match, else census most-recently-seen order; shared by BOTH routes below)
         |
         +--> readMachineWideIntel(ProjectRow[])   -- always the full machine-wide rollup
         +--> readIntelHistory(selected.path)      -- detail for the selected project only
@@ -152,7 +159,7 @@ substitute display for the other.
 ### Machine-wide rollup
 
 `readMachineWideIntel(projects)` folds `readIntelHistory()` across every project
-`discoverRuvfloProjects()` returns into one `{ totals, perProject }` view. Exactly as at
+`projectsInScope(census, 'learning')` returns into one `{ totals, perProject }` view. Exactly as at
 single-project scope above, the lifetime counter and the current store size are never conflated —
 now at machine scope too:
 
@@ -193,7 +200,7 @@ verbatim by `collectData()` and rendered as the existing Δpp sparkline and verd
 
 Each `IntelligenceWatch` instance still polls its one project's three source files' `mtime` on an
 interval (default 1,000 ms), corroborated by a change-only tail of that project's own
-`pending-insights.jsonl` via the existing `JsonlTailer` — line *contents* are never read; a record
+`pending-insights.jsonl` via the existing `JsonlTailer` — record contents are discarded by the watch callback; a record
 arriving at all is the signal. Detected changes accumulate against a trailing-edge debounce
 (default 2,500 ms, measured from the most recently detected change) so a burst of writes during an
 active session collapses into one flush. A flush re-reads `readGlobalStats(cwd)` for that project;
@@ -215,9 +222,9 @@ set and its own broadcast closure.
 `GET /api/status` and `GET /api/live/intelligence` accept the identical optional `?project=<key>`
 query parameter and resolve it through the same shared `resolveSelectedProject(projects, rawParam)`
 helper — an explicit key match if present and valid, else the first entry in
-`discoverRuvfloProjects()`'s own most-recently-active-first order — so the two routes can never
+`projectsInScope(census, 'learning')`'s most-recently-seen-first order — so the two routes can never
 disagree about what an absent or unresolvable key defaults to. `GET /api/live/intelligence`
-answers `503` if discovery finds zero ruflo-initialized projects on this machine at all, rather
+answers `503` if discovery finds zero projects with learning state on this machine at all, rather
 than picking anything. The machine-wide project catalog and the `readMachineWideIntel()` rollup
 themselves are shared, TTL-cached (~60s) state — one scan per dashboard instance per window, reused
 by every poll and every new connection within it, rather than re-walking the machine per request.
@@ -243,18 +250,18 @@ support, the stream — both paths resolve the same selected project and return 
 3. `readGlobalStats` and `status.mjs`'s CLI `learning` row read the same file through the same
    helper and default logic, so the two cannot silently drift apart.
 4. The health-history ring is capped and deduplicated; unchanged repeated snapshots do not grow it.
-5. `pending-insights.jsonl` line contents are never read or trusted as data — only "a record
-   arrived" is a signal.
-6. This domain introduces no session, actor, host, provider, model, or lifecycle identity, and no
-   per-field evidence-confidence grading.
+5. `JsonlTailer` parses complete pending-insight records, but this watcher ignores their contents.
+   Only "a record arrived" triggers a bounded reread of the owned learning-state files.
+6. Learning series introduce no session/actor lifecycle or per-field confidence grading.
+   Picker scope and Desktop-origin metadata do not establish activity or inference-provider facts.
 7. `GET /api/live/intelligence` requires no `--live-source` registration; its sources are always a
    discovered project's own `.claude-flow/` state, never a remote or unregistered source.
 8. `/api/status` and `GET /api/live/intelligence` resolve `?project=<key>` identically and return
    the same `readIntelHistory(selected.path)` shape for their detail fields, so client rendering
    has one code path regardless of delivery route or which project is selected.
-9. A project appears in the discovered catalog only when it has genuine neural state
-   (`.claude-flow/neural/` present) — a bare `.claude-flow/` directory is not enough.
-10. Selection defaults to the most-recently-active discovered project by `lastAdaptation`; it is
+9. A project appears in the learning catalog when it is on disk and carries `.claude-flow`,
+   `.agentic-qe`, or `.swarm`. Neural training is not required; an existing bare marker qualifies.
+10. Selection defaults to the first learning-scope project, ordered by census `lastSeenMs`; it is
     never implicitly the dashboard server's own launching working directory. There is no unlabeled
     "this project" default anywhere in this domain's delivery contract.
 11. `machineWide`/`totals` are always computed across every discovered project, independent of
@@ -262,9 +269,8 @@ support, the stream — both paths resolve the same selected project and return 
     machine-wide figures.
 12. A project's `IntelligenceWatch` exists in the delivery pool only while at least one client is
     subscribed to it; that project's last disconnect stops and removes it.
-13. Discovery's cross-reference into Observability's `WorkspaceSnapshotStore` supplies only a
-    candidate project path; it is never treated as evidence, confidence, or a rendered value in
-    this domain.
+13. The shared census supplies selection candidates; learning totals come from the selected
+    state readers. The workspace snapshot store is not a project-discovery source.
 
 ## References
 

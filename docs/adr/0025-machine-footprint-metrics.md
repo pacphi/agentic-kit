@@ -4,60 +4,61 @@
 - **Updated:** 2026-09-08 — installed tools preserve measured executable locations
   for private path reveal, with PATH resolution and bounded package-manifest fallback;
   Windows command extensions and POSIX executable checks are covered by fixtures.
-- **Updated:** 2026-09-08 — dashboard instant displays share browser-local date/time
+- **Earlier update:** 2026-09-08 — dashboard instant displays share browser-local date/time
   formatting; published calendar dates retain their day and stored timestamps remain UTC.
-- **Updated:** 2026-09-08 — bounded declared resource descriptions are an explicit read-surface
+- **Earlier update:** 2026-09-08 — bounded declared resource descriptions are an explicit read-surface
   exception; project ecosystem description adapters remain proposed, not implemented.
-- **Updated:** 2026-09-08 — registry 2026.09.1 covers the September TIOBE top 50;
+- **Earlier update:** 2026-09-08 — registry 2026.09.1 covers the September TIOBE top 50;
   graphical/container languages have presence-only evidence and shared suffixes use
   bounded syntax checks without retaining source text.
 - **Date:** 2026-08-06
-- **Updated:** 2026-08-06 — accepted and implemented; the open points below are resolved decisions
-- **Updated:** 2026-08-07 — §7 replaced by an enumerated read surface (the collectors now read a
+- **Earlier update:** 2026-09-09 — reconciled against repository source and tests for issue #211
+- **Earlier update:** 2026-08-06 — accepted and implemented; the open points below are resolved decisions
+- **Earlier update:** 2026-08-07 — §7 replaced by an enumerated read surface (the collectors now read a
   transcript head's `cwd` field and project manifests' dependency keys); §6 gains reclaimable
   safety tiers; §8 and §9 added for the widened scan surface, the corrected brain/Playwright
   figures, and project accounting
-- **Updated:** 2026-09-02 — Agentic Kit now manages the receipt-owned agent-browser executor while
+- **Earlier update:** 2026-09-02 — Agentic Kit now manages the receipt-owned agent-browser executor while
   Install observes AQE-owned Vibium and both payloads; daemon cleanup gains an opt-in,
   identity-proven Ruflo MCP orphan path; Catalog covers the launching repository plus observed
   on-disk projects and attributes Codex `.agents/skills` separately
-- **Updated:** 2026-09-03 — CatalogInventory v3 preserves plugin marketplace/version relationships,
+- **Earlier update:** 2026-09-03 — CatalogInventory v3 preserves plugin marketplace/version relationships,
   separates user/project/plugin occurrences, hashes bounded capability entrypoints and complete
   bounded skill definitions, reports project pressure and source-probe drift, and feeds read-only
   relationship evidence to Maintenance.
-- **Updated:** 2026-09-03 — the Catalog leads with the host profile and a five-record cross-host
+- **Earlier update:** 2026-09-03 — the Catalog leads with the host profile and a five-record cross-host
   viewport, then gives Project skill pressure a full-width row; pressure groups one disclosure per
   relevant project, keeps the launching project first, omits measured-zero project rows, and moves
   per-host source evidence plus one deduplicated plan command behind progressive disclosure.
-- **Updated:** 2026-09-03 — ADR-0044 implements Maintenance as a separate control plane under the
+- **Earlier update:** 2026-09-03 — ADR-0044 implements Maintenance as a separate control plane under the
   System shell. Machine Footprint collectors, Catalog, pressure, and System measurement routes
   remain read-only.
-- **Updated:** 2026-09-03 — a session cwd that aliases a host user root no longer creates a
+- **Earlier update:** 2026-09-03 — a session cwd that aliases a host user root no longer creates a
   project occurrence: one host/kind/path cannot be both user and project scope, while a shared
   user root carried by different hosts remains explicit cross-host evidence. The FootprintSnapshot
   schema advances to v3 so cached v2 scope aliases cannot be replayed.
-- **Updated:** 2026-09-04 — Runtime distinguishes proven repositories, host app services, desktop
+- **Earlier update:** 2026-09-04 — Runtime distinguishes proven repositories, host app services, desktop
   apps, host state, user home, system root, and ordinary folders instead of calling every readable
   working directory a project. Storage reads only the already-ranked top-N transcript heads to
   attribute dated Codex rollouts from their `cwd` metadata.
-- **Updated:** 2026-09-04 — that same bounded top-N head read now also retains the host's opaque
+- **Earlier update:** 2026-09-04 — that same bounded top-N head read now also retains the host's opaque
   native session ID and timezone-bearing opening timestamp. Sessions presents a localized
   two-line identity, exposes the original filename and exact time on focus or hover, and labels
   file mtime fallback as last activity rather than a fabricated start.
-- **Updated:** 2026-09-03 — project inventory expands to supported agent, command, skill, and MCP
+- **Earlier update:** 2026-09-03 — project inventory expands to supported agent, command, skill, and MCP
   surfaces across Claude, Codex, and OpenCode; Git tracking is observed without becoming ownership.
   CatalogInventory advances to v3 and FootprintSnapshot to v4 so older evidence cannot be replayed
   as complete relationship evidence.
-- **Updated:** 2026-09-03 — ADR-0045 separates physical artifacts from host consumer bindings,
+- **Earlier update:** 2026-09-03 — ADR-0045 separates physical artifacts from host consumer bindings,
   applies host-specific discovery and enablement, groups cross-host relationships once, and
   advances CatalogInventory to v4 and FootprintSnapshot to v6.
-- **Updated:** 2026-09-03 — ADR-0046 moves production deep collection to a worker, reuses compatible
+- **Earlier update:** 2026-09-03 — ADR-0046 moves production deep collection to a worker, reuses compatible
   physical observations within one explicit scan, measures only the hosted-repository population
   the Projects table names, reports all exclusions, and advances FootprintSnapshot to v7.
-- **Updated:** 2026-09-04 — proposed ADR-0048 folds Catalog presentation into an inventory-led
+- **Earlier update:** 2026-09-04 — proposed ADR-0048 folds Catalog presentation into an inventory-led
   Maintenance workspace while preserving this ADR's read-only measurement ownership; no current
   collector or mutation boundary changes until that proposal is implemented
-- **Updated:** 2026-09-05 — ADR-0048 is now Accepted and implemented. Catalog is no longer a
+- **Earlier update:** 2026-09-05 — ADR-0048 is now Accepted and implemented. Catalog is no longer a
   visible dashboard destination: `src/lib/dashboard/page.mjs` redirects `#system/catalog` into
   Maintenance's Inventory route, which presents this context's Catalog v4 evidence at placement
   grain alongside installs, models, and provider configuration. This context's collectors, `ak
@@ -115,6 +116,25 @@
 > action while every other part reports what is; that distinction was invisible while it sat as a
 > card under a byte chart. Neither split changes a measurement, and Advisory still has no delete
 > verb (§6 stands).
+
+## Current implementation boundary (2026-09-09)
+
+FootprintSnapshot is currently **v7**, CatalogInventory **v4**. Earlier v3/v4/v6
+statements below describe successive migrations rather than the current cache
+version. Catalog presentation moved to Maintenance; the current System rail is
+Summary, Advisory, Sessions, Storage, Runtime, Projects, and Maintenance. The
+original mock/table taxonomy below is adoption-time design.
+
+ADR-0050 adds an all-discovered project view without broadening the expensive
+measured population. Missing and excluded paths remain in `discoveryProjects`;
+only the existing hosted/session population receives full footprints. Repository
+identity and Desktop origin are independent, and parent/child byte totals are not
+added. [Project discovery](../../src/lib/footprint/project-sources.mjs) now reads
+explicit launch metadata and bounded Git common-directory/backlink evidence. The
+read-surface table below includes these additions; it does not authorize message
+content collection. [Project identity tests](../../tests/kit/dashboard-project-identity.test.mjs)
+pin association, unknowns, and count bases. Runtime measurements are not persisted
+as liveness in the deep snapshot.
 
 ## Context
 
@@ -346,9 +366,9 @@ taken from it:
 |------|---------------|---------------------|
 | Directory entries, `lstat` | name, kind, size, mtime, blocks | anything inside a file |
 | `.git/config` | the origin remote URL | every other key |
-| `.git/worktrees/<name>/gitdir` | one path, bounded to 4 KB | — |
-| A transcript's head (≤256 KB, ≤40 parsed lines) | opening `cwd`, opaque native session ID, and timezone-bearing timestamp fields | every message, prompt, generated title, tool call, tool result and model output |
-| OpenCode's session store (read-only) | the `directory` column | every other column and every message row |
+| `.git` pointer plus common-directory and reverse-pointer metadata | Git association paths, each text read bounded to 4 KB | branch content, source code, or a name-only association |
+| A transcript's head (≤256 KB, ≤40 parsed lines) | opening `cwd`, opaque native session ID, timezone-bearing timestamps, and explicit `entrypoint`/`originator` declarations | every message, prompt, generated title, tool call, tool result and model output |
+| OpenCode's session store (read-only) | `directory`, grouped session count, and latest session timestamp | message rows, prompts, and tool output |
 | A project's own manifests (≤3 deep, ≤64 files, ≤512 KB each) | dependency **keys** | values, scripts, anything executable — nothing is evaluated or resolved |
 | Resource Markdown frontmatter and installed plugin manifests (≤64 KiB each) | explicit description string, ≤1024 characters | body text and unrelated manifest values |
 | A project's own source files | the count of `\n` bytes; a transient ≤16 KiB prefix for ambiguous language/XML signatures | the text: each 64 KB chunk is counted and overwritten |
@@ -524,12 +544,12 @@ The draft left four points open. All four are decided; this section is the recor
    snapshot's `asOf` is always rendered, and beyond `SNAPSHOT_STALE_AFTER_MS` (7 days) the
    freshness label turns amber and reads "stale, rescan". Opening the System tab issues a plain
    `GET /api/system`; only the Rescan control adds `?refresh=deep`.
-4. **Windows ships a guaranteed census plus a best-effort true `cwd`, degrading honestly, with no
+4. **Windows ships a current-user census plus a best-effort true `cwd`, degrading honestly, with no
    dependency added.** The draft's "unsupported on win32" answer would have blanked the whole
    Runtime view on a supported platform. Instead `src/lib/live/win-process-survey.ps1` — a plain text
    script invoked the same way the POSIX path already invokes `ps` and `lsof`, no npm package and
    no compiled artifact — provides two layers:
-   - a **guaranteed** census (host, pid, ppid, start time, CPU, working set) from
+   - a **best-effort current-user** census (host, pid, ppid, start time, CPU, working set) from
      `Get-CimInstance Win32_Process`, plus current-user-only command lines proven via `GetOwner`;
    - a **best-effort** true per-process working directory via inline `Add-Type` P/Invoke
      (`NtQueryInformationProcess` → PEB → `RTL_USER_PROCESS_PARAMETERS` → `CurrentDirectory`).
@@ -539,7 +559,8 @@ The draft left four points open. All four are decided; this section is the recor
    degrades to an explicit "not attributable on Windows" carrying the failure reason. An empty
    census is treated as a broken survey, not an idle machine. This is genuinely verified rather
    than asserted: `windows-latest` is already in the CI matrix (`.github/workflows/ci.yml`), so
-   the Windows path runs on every push alongside Linux and macOS.
+   Windows fixtures run alongside Linux and macOS. A CI matrix entry alone does not
+   prove every real WMI/PEB, security-policy, or bitness combination.
 
 ## Follow-ups on acceptance
 
@@ -569,4 +590,4 @@ All complete:
 - `src/commands/system.mjs` (the CLI twin)
 - `src/lib/live/win-process-survey.ps1` (the Windows stand-in for `ps` + `lsof`)
 - `src/lib/live/process-sessions.mjs` (the runtime survey this reuses)
-- `src/lib/dashboard/project-discovery.mjs` (the project catalog this reuses)
+- `src/lib/project-census.mjs` and `src/lib/footprint/project-sources.mjs` (current census; the former `dashboard/project-discovery.mjs` is retired)

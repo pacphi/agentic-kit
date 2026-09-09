@@ -35,8 +35,8 @@ unsupported rather than evaluating them. XML parsing must disable external entit
 ## Initial metadata-adapter coverage target
 
 Language detection now has a separate [top-50 baseline](LANGUAGE-COVERAGE.md).
-The following are 25 initial description-adapter language coverage targets, not a claim about a current popularity ranking
-or completed adapters. Shared ecosystems use shared adapters. Filename recognition is
+The following grouped ecosystem targets are a proposal, not a measured adapter count, a current
+popularity ranking, or a claim of completed adapters. Shared ecosystems use shared adapters. Filename recognition is
 not a promise that every file contains a description.
 
 | Languages | Ecosystems / candidate surfaces |
@@ -73,8 +73,9 @@ build evaluation is outside this abstraction, even if it would find more descrip
    generated summary. This fallback remains optional and unimplemented.
 4. Show at most two lines beneath the project name; reveal full text and provenance in
    details. Omit an empty description area.
-5. Show the primary detected ecosystem and a compact additional-ecosystem count only
-   when that helps distinguish projects; expand for all languages/build systems.
+5. Keep proposed ecosystem/description selection separate from the shipped language presentation.
+   Maintenance currently shows all observed language icons inline with wrapping; additional
+   build-system presentation remains part of this proposal.
 
 Example (illustrative):
 
@@ -95,5 +96,5 @@ summary; preserve module descriptions after drilling into modules.
 
 Implement common declarative JSON/TOML/XML/YAML/package formats first, then bounded
 literal readers for executable build ecosystems. Broaden the adapter registry to all
-25 target languages with explicit coverage receipts. Keep project descriptions separate
+target ecosystems with explicit coverage receipts. Keep project descriptions separate
 from resource frontmatter/plugin metadata already implemented in this work.

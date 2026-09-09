@@ -5,6 +5,10 @@
     "README.md",
     "CLAUDE.md",
     "AGENTS.md",
+    "MAINTAINER.md",
+    "docker/*.md",
+    "claude/**/*.md",
+    "src/templates/**/*.md",
     "docs/**/*.md"
   ],
   "ignores": [

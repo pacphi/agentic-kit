@@ -15,6 +15,11 @@ not make setup local or temporary.
 The package requires Node.js 22 or newer. The `next` tag is the 4.0 prerelease
 channel; after 4.0 GA, use the release channel documented in the README.
 
+The package declares `engines.node: >=22`, but SQLite-backed commands import
+`node:sqlite`, available without a flag from Node 22.13.0. Use a maintained patch
+release in the tested Node 22/24/26 lines; the broad manifest range does not prove
+compatibility with early Node 22 releases. See [Node SQLite history](https://nodejs.org/api/sqlite.html).
+
 ## The two independent scope decisions
 
 | Decision | Controlled by | What it affects |
@@ -184,7 +189,7 @@ preferred for normal users. See npm's supported
 From a trusted checkout:
 
 ```bash
-corepack enable
+# Use the pnpm version specified by package.json (Corepack must be installed if used).
 pnpm install
 node bin/agentic-kit.mjs status
 ```
@@ -217,9 +222,9 @@ against Node and npm. They are not the supported machine-management contract.
 | Ruflo, AQE, AgentDB | None | Installed/repaired in the active npm global prefix | Project assets initialized from those versions |
 | Claude/Codex/OpenCode CLI | None | Missing enabled hosts may be installed globally; external installs are reused | Host-specific project wiring may be generated |
 | `~/.config/agentic-kit/kit.json` | None | Created/updated for the current OS user | Choices are read and project routing may be materialized |
-| Model inventory and private scope key | None | Created only by an explicit `ak models refresh` | Scope is stored as a keyed non-identifying fingerprint; the owner-only cache can retain exact model ids for explicit CLI evidence, while the Dashboard receives keyed pseudonyms |
+| Model inventory and private scope key | None | Created only by an explicit `ak models refresh` | Scope is stored as a keyed non-identifying fingerprint; the owner-only cache can retain exact model ids for explicit CLI evidence, while the authenticated Dashboard uses the owner-visible read model and masks secret-shaped values |
 | Claude/Codex/OpenCode user guidance | None | Managed sentinel blocks reconciled | Project guidance/assets may be created or refreshed |
-| Ruflo MCP registration | None | Offered at user scope | Conflicting project-local Ruflo registration is removed |
+| Ruflo MCP registration | None | Offered at user scope | Existing project/local registrations are not automatically migrated; inspect scope conflicts explicitly |
 | RuvNet Brain | None | Shared current-user KB/plugin installation; approximately 2 GB | No per-project Brain copy |
 | deja-vu transcript companion | None | Disabled by default; explicit opt-in can install the npm package, wire enabled hosts, and build one user-level plaintext derived index | No per-project index copy; host-native hooks may act in project sessions |
 | Repository files | Local npm install can alter `package.json`, lockfile, and `node_modules` | None by package scope alone | Ruflo/AQE initialization can replace generated/config files |
@@ -267,8 +272,9 @@ workspace when that identity can be established.
 The current-UID rule is independent of how `ak` was acquired: local dependency,
 global prefix, `npm exec`, tarball, Git checkout, and direct Node execution all
 use the UID of the process running the dashboard. A service sees only the
-service account's sessions. Windows does not currently provide runtime process
-discovery; retained transcript/history sources remain available there.
+service account's sessions. Windows uses the implemented process survey and bounded working-directory probe.
+Permissions or probe failures can leave workspace attribution unavailable; retained
+transcript/history sources remain independent. See [Observability](https://github.com/pacphi/agentic-kit/blob/main/docs/OBSERVABILITY.md).
 
 ### Repository onboarding
 
@@ -283,7 +289,7 @@ existing project, commit or back up first and review the exact mutation contract
 | --- | --- | --- |
 | Update the global package manually | `npm install -g @pacphi/agentic-kit@next` | Active npm prefix |
 | Update/heal the managed stack | `ak sync` | Global tools, current-user config, current project |
-| Heal without package upgrades | `ak sync --no-upgrade` | Configuration/current-project heals only |
+| Heal without package upgrades | `ak sync --no-upgrade` | Configuration and native repairs; missing enabled dependencies may still be installed |
 | Remove a local dependency | `npm uninstall @pacphi/agentic-kit` | Current package/workspace |
 | Remove the global runner only | `npm uninstall -g @pacphi/agentic-kit` | Active npm prefix; leaves setup-created state |
 | Remove managed integration state | `ak uninstall` | User/project state selected by its flags |

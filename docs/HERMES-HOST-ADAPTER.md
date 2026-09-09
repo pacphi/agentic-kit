@@ -22,7 +22,7 @@ manifest plus subprocess hooks that `ak` validates, hash-pins, and supervises.
 The adapter lets `ak run` route selected activities to a local Hermes process while preserving
 `ak`'s worker supervision, timeout, result, escalation, and usage-reporting boundaries.
 
-The current adapter provides:
+The upstream manifest and hook inspected on September 9, 2026 provide:
 
 | Capability | What it means in practice |
 | --- | --- |
@@ -31,7 +31,7 @@ The current adapter provides:
 | Conformance testing | Exercise the real adapter hooks against the real Hermes executable. |
 | Explicit routing | Choose Hermes for a run-local activity route; Hermes is not seeded into defaults. |
 
-The adapter's current upstream conformance report shows admission and activity routing passing,
+The adapter's published conformance report shows admission and activity routing passing,
 with primary-eligibility also passing against the tested setup. Session-driving is skipped because
 the adapter does not provide a native Ruflo backend, and statusline support remains gated by `ak`.
 See the [adapter README](https://github.com/adrianco/ak-adapter-hermes#status) for the current
@@ -70,7 +70,10 @@ the adapter remain separately managed tools.
 ## Install and register the adapter
 
 Obtain the adapter from its [source repository](https://github.com/adrianco/ak-adapter-hermes)
-and review the manifest and both hooks before trusting them. A local checkout keeps the manifest
+and review the manifest and both hooks before trusting them. The inspected [run hook](https://github.com/adrianco/ak-adapter-hermes/blob/main/run-hook.mjs) explicitly passes `TERMINAL_CWD`
+to Hermes because newer oneshot versions can ignore the subprocess working directory
+for tools. Verify that behavior for the exact adapter and host revision you use; the
+variable is still not an operating-system isolation boundary. A local checkout keeps the manifest
 and its file-backed hooks together:
 
 ```bash

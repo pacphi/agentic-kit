@@ -2,10 +2,22 @@
 
 - **Status:** Implemented
 - **Date:** 2026-08-26
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0005](0005-dashboard-in-page-routing-reveal.md),
   [ADR-0007](0007-maintainer-admin-local-telemetry.md),
   [ADR-0014](0014-dashboard-auth-and-remediation.md)
+
+## Current implementation boundary (2026-09-09)
+
+The 11 client/four stylesheet counts below describe the initial refactor, not
+the current module inventory. The current source lists are in
+[client.mjs](../../src/lib/dashboard/client.mjs) and
+[styles.mjs](../../src/lib/dashboard/styles.mjs), now including Maintenance and
+other extracted views. Browser modules deliberately use `@ts-nocheck`: they are
+parsed/linted and exercised as the served bundle, not statically typechecked
+against Node's library. Shared loopback primitives and the flat inline serving
+contract remain unchanged.
 
 ## Context
 
@@ -96,7 +108,7 @@ server's CSP.
 large to review as one string, and both `client.mjs` and `styles.mjs` are rebuilt on it:
 
 - `dashboard/client.mjs` is now a ~90-line **collector**. The former template literal's content
-  lives in eleven real, individually lintable and typecheckable browser modules under
+  lives in eleven real, individually lintable and syntax-checkable browser modules under
   `dashboard/client/` (`bootstrap`, `overview`, `intelligence`, `poll`, `usage`,
   `model-lifecycle`, `usage-orchestrators`, `about`, `system-readout`, `system-projects`, `boot`),
   split along the file's own section-comment boundaries. Each declares real `import`/`export` for
@@ -139,7 +151,7 @@ the same CSP, with no new HTTP routes.
   plus named per-route handlers, each independently under CC 25.
 - The SSE reserve-slot/early-close/channel lifecycle exists in exactly one place; a fourth SSE
   route only has to supply `setup`/`afterOpen`, not re-derive the TOCTOU-safe scaffolding.
-- `client.mjs` and `styles.mjs` are real, lintable, typecheckable source for the first time —
+- `client.mjs` and `styles.mjs` are real, lintable, syntax-checkable source for the first time —
   ESLint's very first pass over this code found (and this refactor fixed) a handful of pre-existing
   dead locals and unused catch bindings that had been invisible inside the template literal.
 - `tokenMatches` and the loopback listen/response boilerplate have one home, independent of either

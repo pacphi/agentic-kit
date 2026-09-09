@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="880" height="644" viewBox="0 0 880 644"
      role="img" aria-labelledby="fig-title fig-desc">
-  <title id="fig-title">role is not author: how a user-role turn gets its kind</title>
-  <desc id="fig-desc">An ordered first-match-wins cascade that assigns kind tool-result, context, or prompt to a user-role transcript turn, and a stacked bar showing that of 302 user-role turns in a real 884-turn session, 276 were tool results, 20 were prompts, and 6 were harness context.</desc>
+  <title id="fig-title">role is not author: how source evidence classifies a turn</title>
+  <desc id="fig-desc">The Claude user-role cascade distinguishes tool-result, context and admitted prompt turns. Codex independently excludes harness and mirrored/control records through source/provenance gates; kind is not proof of human authorship. The bar preserves one historical 884-turn sample with 302 user-role turns, not a current corpus measurement.</desc>
   <style>
     svg { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
     :root {
@@ -47,11 +47,11 @@
 
   <!-- ── header ───────────────────────────────────────────────────────────── -->
   <text class="h1" x="28" y="34">role ≠ author: how a user-role turn gets its <tspan class="mi">kind</tspan></text>
-  <text class="t2 small" x="28" y="54">The Messages API records tool results and harness context under <tspan class="mono">role: "user"</tspan> — <tspan class="mono">kind</tspan> restores authorship.</text>
+  <text class="t2 small" x="28" y="54">The Messages API records tool results and harness context under <tspan class="mono">role: "user"</tspan> — <tspan class="mono">kind</tspan> classifies the evidence.</text>
 
   <!-- ── top half: ordered decision cascade ───────────────────────────────── -->
   <text class="h2" x="28" y="80">Decision cascade</text>
-  <text class="tm small" x="158" y="80">first match wins, evaluated top to bottom</text>
+  <text class="tm small" x="158" y="80">Claude records: first match wins</text>
 
   <!-- entry -->
   <rect class="box" x="168" y="90" width="140" height="26" rx="13"/>
@@ -87,7 +87,7 @@
   <text class="small" x="68" y="275"><tspan class="mono">isMeta</tspan>, OR text opens with a harness-output envelope</text>
   <text class="small" x="68" y="290">(<tspan class="mono">HARNESS_OUTPUT_RE</tspan>: <tspan class="mono">task-notification</tspan>,</text>
   <text class="small" x="68" y="305"><tspan class="mono">bash-stdout/-stderr, local-command-stdout/-stderr,</tspan></text>
-  <text class="small" x="68" y="320"><tspan class="mono">local-command-caveat</tspan>)?</text>
+  <text class="small" x="68" y="320"><tspan class="mono">local-command-caveat, in-app-browser-context</tspan>)?</text>
   <line class="flow" x1="448" y1="270" x2="482" y2="270" marker-end="url(#arr)"/>
   <text class="tm small" x="465" y="263" text-anchor="middle">yes</text>
 
@@ -105,19 +105,19 @@
   <rect x="484" y="322" width="368" height="84" rx="6" fill="var(--wash1)" stroke="var(--border)"/>
   <rect x="498" y="335" width="10" height="10" rx="2" fill="var(--s1)"/>
   <text class="mono" x="516" y="344">kind: 'prompt'</text>
-  <text class="t2 small" x="498" y="363">the person — includes <tspan class="mono">bash-input</tspan> (a ! command they</text>
-  <text class="t2 small" x="498" y="378">typed), slash-command records, and image-only pastes</text>
-  <text class="t2 small" x="498" y="393">(not countable as a text prompt, but still the person acting)</text>
+  <text class="t2 small" x="498" y="363">admitted input — includes <tspan class="mono">bash-input</tspan>, slash commands,</text>
+  <text class="t2 small" x="498" y="378">and image-only pastes; kind alone is not authorship proof</text>
+  <text class="t2 small" x="498" y="393">(image-only input is not counted as a text prompt)</text>
 
   <!-- side note: codex -->
   <rect x="28" y="376" width="3" height="32" rx="1.5" fill="var(--axis)"/>
-  <text class="tm small" x="42" y="389">Codex user turns are <tspan class="mono">kind: 'prompt'</tspan> by construction —</text>
-  <text class="tm small" x="42" y="404">rollouts only record real prompts.</text>
+  <text class="tm small" x="42" y="389">Codex also gates harness, mirrored and control records;</text>
+  <text class="tm small" x="42" y="404">user role alone does not establish a human prompt.</text>
 
   <line x1="28" y1="436" x2="852" y2="436" stroke="var(--border)"/>
 
   <!-- ── bottom half: measured split ──────────────────────────────────────── -->
-  <text class="h2" x="28" y="464">Measured on a real 884-turn session</text>
+  <text class="h2" x="28" y="464">Historical sample: one 884-turn session</text>
   <text class="t2 small" x="28" y="482">all 302 user-role turns in that session, by <tspan class="mono">kind</tspan></text>
 
   <!-- value labels + leader ticks -->
@@ -148,5 +148,5 @@
 
   <!-- takeaway -->
   <rect x="28" y="598" width="824" height="30" rx="6" fill="var(--wash2)" stroke="var(--border)"/>
-  <text class="small" x="42" y="617">~93% of user-role turns are not the person — <tspan class="mono">kind</tspan> is what tells them apart.</text>
+  <text class="small" x="42" y="617">In this sample, ~93% of user-role turns are tool/context records — <tspan class="mono">kind</tspan> is what tells them apart.</text>
 </svg>

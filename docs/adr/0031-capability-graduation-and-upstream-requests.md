@@ -2,7 +2,8 @@
 
 - **Status:** Accepted (governance decision; implementation active)
 - **Date:** 2026-08-16
-- **Updated:** 2026-08-26
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
+- **Earlier update:** 2026-08-26
 - **Update note:** Agentic-QE 3.13.12 satisfied the provider-registration request in
   [#628](https://github.com/proffesor-for-testing/agentic-qe/issues/628). The six-tier ladder now
   includes a real `aqe-provider` transport exercise, and a passed tier plus explicit hash-pinned
@@ -20,6 +21,16 @@
   [Amendment](#amendment-to-adr-0029))
 - **Amends:** ADR-0029, on one point only: the three capability caps are reframed from *permanent*
   to *not self-declarable, but earnable*.
+
+## Current implementation boundary (2026-09-09)
+
+The governance ladder and grant machinery are implemented behind the experimental
+flag; this does not close the primary-selection/statusline consumption gaps or
+prove a real third-party adapter has completed the required soak. The source
+[primary-picker boundary](../../src/lib/routing.mjs) remains built-in-only.
+[AQE provider dispatch](../../src/lib/adapters/aqe-provider.mjs) independently
+checks admission, host intent, consent, and grant. No status is advanced by this
+documentation audit.
 
 ## Context
 
@@ -59,8 +70,10 @@ Parity comes through a **separate channel**. A capability is *earned* by passing
 and *granted* by the maintainer — recorded as a hash-pinned **capability grant** (the same
 edit-invalidation model as adapter consent), never as a field in the adapter's own manifest. The
 adapter never asserts the capability; conformance evidence plus an explicit maintainer grant confers
-it. `hostTierLabel()` and the registry already render behaviour from capabilities, so a granted
-capability lights up at every call site without special-casing.
+it. Registry eligibility and `hostTierLabel()` expose granted capabilities, but each
+consumer still needs a supported implementation. AQE projection and supervised
+activity execution are wired; primary-picker and command-statusline consumption
+remain gaps as recorded in the implementation table.
 
 ### 2. Tiered conformance
 
