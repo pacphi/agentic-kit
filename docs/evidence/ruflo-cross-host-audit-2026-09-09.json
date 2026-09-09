@@ -1,0 +1,251 @@
+{
+  "schemaVersion": 1,
+  "kind": "agentic-kit.ruflo-cross-host-audit",
+  "observedAt": "2026-09-09T14:05:41.154461+00:00",
+  "sourceCommit": "98e170611d754594d25f48e75d4fa58f8cb79e8a",
+  "branch": "audit/ruflo-last-ten-releases",
+  "platform": "darwin-arm64",
+  "node": "26.4.0",
+  "priorPRs": [
+    {
+      "number": 205,
+      "mergeCommit": "98324515520c55324159a6e08d69e50224617975",
+      "ciRun": 34358993902
+    },
+    {
+      "number": 206,
+      "mergeCommit": "98e170611d754594d25f48e75d4fa58f8cb79e8a",
+      "ciRun": 34359361153,
+      "attempt": 2,
+      "note": "Windows Node22 timing failures passed unchanged rerun"
+    }
+  ],
+  "policyReceipts": {
+    "merge205": "sha256:32144283af04c62cd68b588c16c33f912c1511237f4bb0ba5c88ba6e5aefded8",
+    "merge206": "sha256:0bb39164b34355617f8e66b1f29dc1f8d27469acbdf7874cdd5f8ef1d06e89e4",
+    "report": "sha256:c4db24d918e67f8744323c8186f0cfc1095309c999f168ddb1b9e59dac1c876d",
+    "mode": "legacy-default-allow; decision receipt is not a release certification"
+  },
+  "installed": {
+    "ruflo": "3.39.0",
+    "rufloNestedFastUri": "3.1.5",
+    "claude": "2.1.266",
+    "codex": "0.153.4",
+    "opencode": "1.18.29",
+    "brainKB": "4.3.14",
+    "brainMarketplace": "4.3.15",
+    "brainClaudeRegistry": "0.5.0-dev",
+    "brainCodexSkillCache": "4.3.14"
+  },
+  "liveLatest": {
+    "ruflo": "3.39.2",
+    "rufloPublishedAt": "2026-09-09T13:45:08Z",
+    "brain": "4.3.16",
+    "brainPublishedAt": "2026-09-09T03:40:46Z",
+    "brainZipAvailable": true
+  },
+  "brain": {
+    "integrity": {
+      "valid": true,
+      "failures": [],
+      "coverageState": "COMPLETE",
+      "release": {
+        "version": "4.3.14",
+        "tag": "v4.3.14",
+        "sourceSnapshot": "80c5322e6eaf87dd93cdeaac9fd12b49811cf034"
+      }
+    },
+    "mcpQueryGrounded": true,
+    "groundingReceipt": "009b4b083087",
+    "verifiedCitation": "ruflo/v3/docs/releases/v3.32.29.md",
+    "citationContentSha256": "f460cee4a9c0d98c905158d5d72d445f0edd2617ae87c77de90e5454bf00c320",
+    "doctorExit": 1,
+    "doctorLiveQuerySeconds": 122.3,
+    "doctorCitation": "concepts/ruvector/CARD/ruvector-card",
+    "doctorFailure": "Claude Brain plugin registry record does not resolve to a managed install",
+    "registeredClaudePayloadExpectedCommandPresent": false,
+    "registeredClaudeHookEvents": [
+      "SessionStart",
+      "UserPromptSubmit",
+      "PreToolUse"
+    ],
+    "registeredClaudeHookManifestSha256": "5a44664112471f5dafd1099694806854a3ba8d6115909fb115c1f8a4f49f1ac5",
+    "rufloCorpusSourceCommit": "fa13ee4ad60ac2090b1480656eb233521790d640",
+    "rufloCorpusSourceCommitDate": "2026-08-15T23:18:24Z"
+  },
+  "mcp": {
+    "codexEffectiveRufloRegistrations": [
+      {
+        "name": "claude-flow",
+        "command": "ruflo",
+        "args": [
+          "mcp",
+          "start"
+        ],
+        "enabled": true,
+        "envKeys": [
+          "AGENT_BROWSER_CONFIG"
+        ]
+      },
+      {
+        "name": "ruflo",
+        "command": "ak",
+        "args": [
+          "x",
+          "ruflo-mcp"
+        ],
+        "enabled": true
+      }
+    ],
+    "toolCountPerNamespace": {
+      "claude_flow": 356,
+      "ruflo": 356
+    },
+    "kitDuplicateDetection": false,
+    "rufloDoctorSchemaTokenEstimate": 64858,
+    "actualCodexRequestTokenCost": "not measured",
+    "freshDiscovery": [
+      {
+        "name": "ruvnet-brain",
+        "status": "ready",
+        "elapsedMs": 29,
+        "toolCount": 4
+      },
+      {
+        "name": "ruflo",
+        "status": "ready",
+        "elapsedMs": 457,
+        "toolCount": 356
+      }
+    ]
+  },
+  "releaseScope": "ten newest published non-draft GitHub releases; npm tags independently checked; tagged 3.39.0 examined separately",
+  "releases": [
+    {
+      "tag": "v3.39.2",
+      "publishedAt": "2026-09-09T13:45:08Z",
+      "prerelease": false,
+      "url": "https://github.com/ruvnet/ruflo/releases/tag/v3.39.2",
+      "bodySha256": "445576c5957d4d2fc6c2ab8cec5a04ec8c150a1f848ed221bfab87b1a93e13a2"
+    },
+    {
+      "tag": "v3.38.23",
+      "publishedAt": "2026-09-07T17:41:46Z",
+      "prerelease": false,
+      "url": "https://github.com/ruvnet/ruflo/releases/tag/v3.38.23",
+      "bodySha256": "ea9cd9de266b9436e252e0004ab22881997574c600b239bb7e998b143db37afa"
+    },
+    {
+      "tag": "v3.38.21",
+      "publishedAt": "2026-09-02T13:40:40Z",
+      "prerelease": false,
+      "url": "https://github.com/ruvnet/ruflo/releases/tag/v3.38.21",
+      "bodySha256": "140b6bf652c1ccbc13bab266c70c2c1d8bc73691fac75bbb34f819626df7edaa"
+    },
+    {
+      "tag": "v3.38.20",
+      "publishedAt": "2026-08-24T19:46:01Z",
+      "prerelease": false,
+      "url": "https://github.com/ruvnet/ruflo/releases/tag/v3.38.20",
+      "bodySha256": "50fd2f45f6828d2d86d9c800f17ea20ebf114c1f6e6fb31733d1be3b1a954fce"
+    },
+    {
+      "tag": "v3.38.19",
+      "publishedAt": "2026-08-22T16:39:08Z",
+      "prerelease": false,
+      "url": "https://github.com/ruvnet/ruflo/releases/tag/v3.38.19",
+      "bodySha256": "e8571533dfccba8b8e6287d35b42ff7ab3b4d700f6cc1a7e772f2406865c84c1"
+    },
+    {
+      "tag": "v3.38.18",
+      "publishedAt": "2026-08-22T16:30:28Z",
+      "prerelease": false,
+      "url": "https://github.com/ruvnet/ruflo/releases/tag/v3.38.18",
+      "bodySha256": "85a7a83ba54cd755b3104d957f077245cd73268c1ff732cd4242e26476105d03"
+    },
+    {
+      "tag": "v3.38.16",
+      "publishedAt": "2026-08-21T15:23:38Z",
+      "prerelease": false,
+      "url": "https://github.com/ruvnet/ruflo/releases/tag/v3.38.16",
+      "bodySha256": "41d0e09ba1acc8ee86935b81a1585d021099e6dea60af33d5d446a3de81343cb"
+    },
+    {
+      "tag": "v3.38.15",
+      "publishedAt": "2026-08-21T14:42:00Z",
+      "prerelease": false,
+      "url": "https://github.com/ruvnet/ruflo/releases/tag/v3.38.15",
+      "bodySha256": "98f4db62852680cea2a49f9b10cad319805e1daf89981853648241373f78be19"
+    },
+    {
+      "tag": "v3.38.14",
+      "publishedAt": "2026-08-21T14:31:33Z",
+      "prerelease": false,
+      "url": "https://github.com/ruvnet/ruflo/releases/tag/v3.38.14",
+      "bodySha256": "e52e57d82fe55d4e6afee995d5d929984f23824cd416948de5275ccf6841dbe9"
+    },
+    {
+      "tag": "v3.38.13",
+      "publishedAt": "2026-08-21T14:20:04Z",
+      "prerelease": false,
+      "url": "https://github.com/ruvnet/ruflo/releases/tag/v3.38.13",
+      "bodySha256": "daf28ac5a3ddf310ec2e007eee2cd585358dd04f51b430cbfbf9552acc5ad43e"
+    }
+  ],
+  "issueScope": {
+    "rufloNewestOpenInspected": 300,
+    "kitOpenInspected": 6,
+    "kitIssueNumbers": [
+      167,
+      117,
+      116,
+      115,
+      109,
+      95
+    ],
+    "note": "Screened 300 issue titles and inspected selected relevant bodies and linked reports; upstream reports are not local reproductions"
+  },
+  "rawEvidence": [
+    {
+      "file": "ak-audit-status.log",
+      "sha256": "d7e9a51b0284ed802cae55cb244ce6776911cb356ed691cd8f35a1ca17c0d45a"
+    },
+    {
+      "file": "ak-audit-ruflo-doctor.log",
+      "sha256": "864a766d8f0ee21db3efd0f9e9a6bd3ef60a134d58bd81f42cc4d6f1cab00985"
+    },
+    {
+      "file": "ak-audit-ruflo-status.log",
+      "sha256": "a445db98ee0886368290e0fe9f485ce375eebccb55eddd3b0a01db079a46b621"
+    },
+    {
+      "file": "ak-audit-brain-doctor.log",
+      "sha256": "8466ef9bc901020a7e6d26597dd1d21f3311a8070187ee5200db0857bfd2d59b"
+    },
+    {
+      "file": "ak-audit-brain-integrity.json",
+      "sha256": "3f3a863b437f134ce15332ffcb9e447c328646e40585e46e8578dd6e908a012e"
+    },
+    {
+      "file": "ak-pr206-timing-focused.log",
+      "sha256": "ad2db2c188f19aa544ad5d380752c0738cc652ca2974a8ca4a38fdfd6f60fa4a"
+    }
+  ],
+  "limits": [
+    "No package upgrades or host configuration repairs",
+    "No live Claude/OpenCode execution or Windows native-store experiment",
+    "No full ZIP signature verification",
+    "No paid provider inference",
+    "Diagnostic commands may refresh caches or their own receipts",
+    "Doctor failure retained despite successful grounding",
+    "No upstream issue publication or package release"
+  ],
+  "reportValidation": {
+    "markdownlint": "103 files checked, zero issues",
+    "gaSurfaceGuard": "6 tests passed",
+    "build": "390 syntax checks, CLI version and 436-file package dry-run passed",
+    "internalLinks": "9 local links passed;29 external links excluded from offline check",
+    "whitespace": "passed",
+    "independentReview": "No blockers; release hashes, raw evidence hashes, and merge chronology verified"
+  }
+}
