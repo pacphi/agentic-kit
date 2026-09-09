@@ -117,6 +117,39 @@ test('Codex MCP topology detects recursive self-registration, duplicate Ruflo, a
   } finally { rm(dir); rm(home); }
 });
 
+test('Codex should detect an environment-bearing Ruflo duplicate without allowing automatic removal', () => {
+  const dir = tmpProject();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-codexmcp-home-'));
+  try {
+    fs.mkdirSync(path.join(home, '.codex'), { recursive: true });
+    const file = path.join(home, '.codex', 'config.toml');
+    const source = [
+      '[mcp_servers.claude-flow]', 'command = "ruflo"', 'args = ["mcp", "start"]',
+      '[mcp_servers.claude-flow.env]', 'AGENT_BROWSER_CONFIG = "/owned/browser.json"',
+      '[mcp_servers.ruflo]', 'command = "ak"', 'args = ["x", "ruflo-mcp"]', '',
+    ].join('\n');
+    fs.writeFileSync(file, source);
+    const topology = codexMcpTopology({ cwd: dir, home });
+    assert.equal(topology.duplicateRuflo, true);
+    assert.deepEqual(codexMcpRepairPlan(topology), []);
+    assert.equal(fs.readFileSync(file, 'utf8'), source);
+  } finally { rm(dir); rm(home); }
+});
+
+test('Codex should exclude disabled transports from duplicate detection', () => {
+  const dir = tmpProject();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-codexmcp-home-'));
+  try {
+    fs.mkdirSync(path.join(home, '.codex'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.codex', 'config.toml'), [
+      '[mcp_servers.claude-flow]', 'command = "ruflo"', 'args = ["mcp", "start"]',
+      'enabled = false # retained by the user',
+      '[mcp_servers.ruflo]', 'command = "ak"', 'args = ["x", "ruflo-mcp"]', '',
+    ].join('\n'));
+    assert.equal(codexMcpTopology({ cwd: dir, home }).duplicateRuflo, false);
+  } finally { rm(dir); rm(home); }
+});
+
 test('Codex MCP topology treats absent and malformed files as empty', () => {
   const dir = tmpProject();
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-codexmcp-home-'));
@@ -129,8 +162,32 @@ test('Codex MCP topology treats absent and malformed files as empty', () => {
       selfRegistrations: [],
       agenticQeRegistrations: [],
       rufloRegistrations: [],
+      effectiveRufloRegistrations: [],
       duplicateRuflo: false,
     });
+  } finally { rm(dir); rm(home); }
+});
+
+test('Codex should count a repeated configured name once and honor a disabled project override', () => {
+  const dir = tmpProject();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-codexmcp-home-'));
+  try {
+    for (const root of [dir, home]) fs.mkdirSync(path.join(root, '.codex'), { recursive: true });
+    const canonical = '[mcp_servers.ruflo]\ncommand = "ak"\nargs = ["x", "ruflo-mcp"]\n';
+    fs.writeFileSync(path.join(home, '.codex', 'config.toml'), canonical);
+    fs.writeFileSync(path.join(dir, '.codex', 'config.toml'), canonical);
+    assert.equal(codexMcpTopology({ cwd: dir, home }).duplicateRuflo, false);
+    fs.appendFileSync(path.join(home, '.codex', 'config.toml'),
+      '[mcp_servers.custom-ruflo]\ncommand = "ruflo"\nargs = ["mcp", "start"]\n');
+    assert.equal(codexMcpTopology({ cwd: dir, home }).duplicateRuflo, true);
+    fs.appendFileSync(path.join(dir, '.codex', 'config.toml'),
+      '[mcp_servers.custom-ruflo]\nstartup_timeout_sec = 60\nenabled = true\n');
+    assert.equal(codexMcpTopology({ cwd: dir, home }).duplicateRuflo, true,
+      'a partial project override retains inherited command and args');
+    fs.writeFileSync(path.join(dir, '.codex', 'config.toml'), canonical);
+    fs.appendFileSync(path.join(dir, '.codex', 'config.toml'),
+      '[mcp_servers.custom-ruflo]\nenabled = false\n');
+    assert.equal(codexMcpTopology({ cwd: dir, home }).duplicateRuflo, false);
   } finally { rm(dir); rm(home); }
 });
 

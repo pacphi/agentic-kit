@@ -202,6 +202,8 @@ function codexMcpSections(file, scope) {
     const body = source.slice(bodyStart, bodyEnd);
     const command = tomlString(/^\s*command\s*=\s*("(?:[^"\\]|\\.)*")\s*$/m.exec(body)?.[1]);
     const args = tomlStringArray(/^\s*args\s*=\s*(\[[^\n]*\])\s*$/m.exec(body)?.[1]);
+    const enabledValue = /^\s*enabled\s*=\s*(true|false)\s*(?:#.*)?$/m.exec(body)?.[1];
+    const enabled = enabledValue == null ? undefined : enabledValue === 'true';
     const meaningful = body.split(/\r?\n/).map((line) => line.trim())
       .filter((line) => line && !line.startsWith('#'));
     const exactFields = meaningful.length === 2
@@ -216,7 +218,7 @@ function codexMcpSections(file, scope) {
     if (exactFields && !hasChildren && name === 'claude-flow' && command === 'ruflo'
       && sameArgs(args, ['mcp', 'start'])) repairKind = 'legacy-ruflo';
     return [{
-      name, scope, file, command, args, repairKind, regularFile,
+      name, scope, file, command, args, enabled, repairKind, regularFile,
       fingerprint: fingerprint(source.slice(header.index, bodyEnd)),
       start: header.index, end: bodyEnd, source,
     }];
@@ -240,17 +242,31 @@ export function codexMcpTopology({ cwd = process.cwd(), home = os.homedir() } = 
   const selfRegistrations = registrations.filter((entry) =>
     entry.name === 'codex' && entry.command === 'codex' && entry.args?.includes('mcp-server'));
   const agenticQeRegistrations = registrations.filter((entry) => entry.name === 'agentic-qe');
-  const rufloRegistrations = registrations.filter((entry) =>
-    (entry.name === 'ruflo' && (entry.command === 'ruflo'
-      || (entry.command === 'ak' && sameArgs(entry.args, ['x', 'ruflo-mcp']))))
-    || entry.repairKind === 'legacy-ruflo');
+  // Detection is broader than permission to remove a table. Custom environment
+  // and timeout fields preserve ownership without hiding duplicate transports.
+  const isRuflo = (entry) => (entry.command === 'ruflo' && sameArgs(entry.args, ['mcp', 'start']))
+    || (entry.command === 'ak' && sameArgs(entry.args, ['x', 'ruflo-mcp']));
+  const rufloRegistrations = registrations.filter(isRuflo);
+  // Merge observed fields user→project: a timeout-only project table inherits
+  // the user's transport. Keep raw tables separate for exact repair matching.
+  const layered = new Map();
+  for (const entry of [...registrations].reverse()) {
+    const prior = layered.get(entry.name);
+    layered.set(entry.name, { ...entry,
+      command: entry.command ?? prior?.command,
+      args: entry.args ?? prior?.args,
+      enabled: entry.enabled ?? prior?.enabled ?? true,
+    });
+  }
+  const effectiveRufloRegistrations = [...layered.values()].filter((entry) => entry.enabled && isRuflo(entry));
   return {
     files,
     registrations,
     selfRegistrations,
     agenticQeRegistrations,
     rufloRegistrations,
-    duplicateRuflo: rufloRegistrations.length > 1,
+    effectiveRufloRegistrations,
+    duplicateRuflo: effectiveRufloRegistrations.length > 1,
   };
 }
 
