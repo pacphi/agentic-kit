@@ -8,6 +8,10 @@ import { transcriptSessionOrigin } from '../../src/lib/footprint/session-origin.
 import { discoverProjectSources, scanTranscriptCwds } from '../../src/lib/footprint/project-sources.mjs';
 import { collectProjects } from '../../src/lib/footprint/projects.mjs';
 
+// Native realpath expands Windows 8.3 temp paths (RUNNER~1), matching the
+// collector's canonical identity. The JavaScript variant may retain them.
+const realpath = (file) => (fs.realpathSync.native ?? fs.realpathSync)(file);
+
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-dashboard-identity-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -33,14 +37,14 @@ test('should_group_nested_worktree_paths_by_verified_common_directory', (t) => {
   const nested = inspectProjectIdentity(path.join(linked, 'src'), { observedAt: 17 });
   assert.deepEqual({ kind: nested.kind, id: nested.repositoryId, root: nested.root,
     checkout: nested.worktreeRoot, common: nested.commonDir, observedAt: nested.observedAt },
-  { kind: 'worktree', id: primary.repositoryId, root: fs.realpathSync(main),
-    checkout: fs.realpathSync(linked), common: fs.realpathSync(common), observedAt: 17 });
+  { kind: 'worktree', id: primary.repositoryId, root: realpath(main),
+    checkout: realpath(linked), common: realpath(common), observedAt: 17 });
 });
 test('should_group_bare_worktrees_without_inventing_a_main_checkout', (t) => {
   const { linked, common } = worktree(fixture(t), { bare: true });
   const identity = inspectProjectIdentity(linked);
   assert.deepEqual({ kind: identity.kind, root: identity.root, common: identity.commonDir },
-    { kind: 'worktree', root: null, common: fs.realpathSync(common) });
+    { kind: 'worktree', root: null, common: realpath(common) });
 });
 test('should_keep_submodule_git_directories_distinct_from_parent_repository', (t) => {
   const root = fixture(t), main = path.join(root, 'main'), sub = path.join(main, 'sub');
@@ -122,7 +126,7 @@ test('should_preserve_path_totals_while_partitioning_overlapping_host_origins', 
     scanTranscripts: (_root, host) => ({ sightings: records[host], complete: true }),
     scanOpencode: () => ({ sightings: [{ cwd: main, weight: 4 }], complete: true }),
   });
-  const primary = result.projects.find((row) => row.path === fs.realpathSync(main));
+  const primary = result.projects.find((row) => row.path === realpath(main));
   assert.equal(result.everSeen, 2);
   assert.equal(primary.sessions, 6);
   assert.deepEqual(primary.sessionOrigins.map(({ origin, sessions }) => [origin, sessions]),
