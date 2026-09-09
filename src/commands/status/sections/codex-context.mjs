@@ -1,5 +1,5 @@
 import { inspectCodexContext } from '../../../lib/codex-context.mjs';
-import { buildContextReport } from '../../../lib/context-report.mjs';
+import { collectContextReport } from '../../../lib/context-report.mjs';
 import { row } from '../row.mjs';
 
 export default {
@@ -8,7 +8,7 @@ export default {
     if (!cfg.integrations?.hosts?.codex && !cfg.codexContext) return [];
     const status = inspectCodexContext(cfg);
     const rows = collectRows(status);
-    rows[0].contextReport = buildContextReport(cfg, status);
+    rows[0].contextReport = collectContextReport(cfg, status);
     return rows;
   },
 };
