@@ -39,7 +39,8 @@ them.
 
 4. **One drift story across all surfaces.** `ak status` rows, the statusline
    footer chips, and the dashboard (subsystem cards *and* the update banner)
-   derive from the same reads, so they cannot disagree. The dashboard banner
+   reuse the same collectors where applicable. Separate invocations and cached snapshots
+   can differ in freshness; compare capture times before treating a mismatch as drift. The dashboard banner
    is the easy one to miss: `driftReport()` only knows npm tools, so
    non-npm-managed tools (the brain, the kit itself) are folded into the same
    `{pkg, installed, latest, outdated}` array explicitly

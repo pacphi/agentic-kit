@@ -11,8 +11,8 @@ proves it, and can undo it.
 
 There are two independent things you can point at a model:
 
-- **Hosts** — which agent CLI runs the *ruflo* loop: `claude` (Claude Code), `codex` (OpenAI
-  Codex), or **both** at once.
+- **Hosts** — which agent CLI executes work: `claude` (Claude Code), `codex` (OpenAI
+  Codex), or explicitly routed `opencode`; multiple hosts may be enabled.
 - **Providers** — which LLM the *routers* use: ruflo's provider router and agentic-qe's
   `HybridRouter`. Independent of the host; API keys always live in your environment.
 
@@ -43,7 +43,8 @@ totals or prove which host executed a request.
 **Model lifecycle evidence is separate from both.** `ak models refresh` inventories host-scoped
 configuration, catalogues, and sanitized observed model ids. `ak models status|diff|explain|plan`
 are cache-only. Discovery does not prove quality or mutate provider/routing configuration, and
-`refresh --online` is the only permitted online-catalogue boundary. See [Model lifecycle
+`refresh --online` permits OpenCode catalogue egress; ordinary Ollama refresh can
+contact its local loopback API. See [Model lifecycle
 intelligence](MODELS.md).
 
 Claude refresh includes a network-silent, dated Anthropic public record. It proves Anthropic's
@@ -85,8 +86,9 @@ rather than Ollama? Declare it as a `local-openai` binding in `kit.json`:
 }
 ```
 
-This gets you a named local inference target with `$0` billing and configured-grade provenance,
-however the endpoint is served. `local-openai` is not an AQE provider type — `ollama` is. Loopback
+This records a local inference target with configured-grade provenance. A binding or
+OpenAI-compatible URL alone does not prove that a session used it or incurred no charge;
+keep configured local intent separate from observed execution and billing evidence. `local-openai` is not an AQE provider type — `ollama` is. Loopback
 `http://` is allowed; a remote endpoint requires `https://`; and the endpoint may never embed
 credentials, fragments, or secret-bearing query parameters. See
 [ADR-0028](adr/0028-local-openai-compatible-providers.md).
@@ -113,7 +115,8 @@ like Hermes, say? Set `AK_EXPERIMENTAL_HOST_ADAPTERS=1` and declare it as **data
 An adapter is a manifest plus a handful of subprocess hooks — nothing an adapter declares ever
 runs inside the `ak` process itself. `source` may be a local file path, an `https://` URL (HTTPS
 only, no redirects, bounded), or `npm:<pkg>[@version]`, fetched with `npm pack --ignore-scripts`
-and extracted to stdout — nothing runs and nothing lands on disk. The source is resolved *before*
+and extracted to stdout. npm and tar run locally, and the tarball is downloaded into a
+temporary directory; package lifecycle scripts do not run and hook files are not installed. The source is resolved *before*
 hashing, so a mutated remote surfaces as `consent-stale` rather than sliding in quietly.
 
 Consent is explicit and hash-pinned. `ak host adapters trust <name>` discloses the full validated
@@ -523,39 +526,15 @@ a user-pinned route is reported, never rewritten (still routed to the replacemen
 merely no longer the default, which `ak status` reports as routing *divergence*: a trade for you to
 weigh, cleared with `ak x host refresh` if you want the newer default.
 
-**Known-good model choices** (verified 2026-09; any model your host CLI accepts also works):
+**Configured model examples.** The route defaults above are policy choices, not a
+benchmark or entitlement guarantee. Use `ak models refresh` and `ak models status` to
+inspect the installed host's evidence, then verify the intended route in that host.
+Published model limits and prices are separate from context allocated to a session,
+subscription quota, and measured cost per completed task. The dated
+[pricing audit](MODEL-PRICING-AUDIT.md) records the bundled rate decisions; it does not
+prove a model remains available or better for a particular workload.
 
-> **Per-token price ≠ per-task cost.** A model that needs more agentic turns costs more
-> per task at the same per-token price. On subscription (`claude-code` oauth) billing the
-> marginal dollar cost is $0 either way, and the extra turns are paid in wall-clock and
-> quota instead — so read every note below on the turns axis, not only the price axis.
-
-| Host | Model | When to use |
-|---|---|---|
-| claude | `claude-opus-5` | top Opus — the deepest reasoning, at ~2–3× the agentic turns of a balanced model on routine work; earns it at the hard end |
-| claude | `claude-sonnet-5` | near-Opus capability at a lower per-token price — review, spec, release |
-| claude | `claude-fable-5-1` | top capability (Mythos-class, above Opus 5) — successor to Fable 5 at the same per-token price — hardest problems |
-| claude | `claude-haiku-4-5-20251001` | cheap/fast — high-volume mechanical work |
-| claude | `claude-opus-4-8` | prior Opus generation — same per-token price as Opus 5, roughly half the agentic turns on routine work |
-| claude | `claude-fable-5` | prior Fable generation — same per-token price as Fable 5.1, superseded as the flagship pick |
-| claude | `claude-mythos-5-1` | same specifications and pricing as Fable 5.1; invitation-only access through Project Glasswing |
-| codex | `gpt-6-astra` | most capable OpenAI model — complex end-to-end work; $10/$50 per million input/output tokens |
-| codex | `gpt-5.6-sol` | flagship 5.6 — strongest on complex coding, computer use and security work; first-class max reasoning effort |
-| codex | `gpt-5.6-terra` | balanced 5.6 — everyday implementation and testing at a materially lower per-token price than sol; the gpt-5.4 replacement |
-| codex | `gpt-5.6-luna` | fastest/cheapest 5.6 — mechanical implementation, docs and packaging; the gpt-5.4-mini replacement |
-
-> **Where Opus 5 sits** ([announcement](https://www.anthropic.com/news/claude-opus-5), July 2026):
-> same $5/$25 per-Mtok pricing as Opus 4.8 with roughly double the Frontier-Bench
-> performance, which is why it is the reasoning-tier default. That parity is **per token**:
-> measured end-to-end it takes 2–3.4× the agentic turns on routine work, so per task it is
-> the more expensive arm there and 4.8 remains a defensible pin. It is **not** Mythos-class: `claude-fable-5-1`
-> remains the flagship tier. Opus 5 lands within ~0.5% of Fable on coding/agentic
-> benchmarks at about half the cost per task, but stays behind the Mythos-class models on
-> frontier domains. Rule of thumb: `claude-opus-5` is the premium default;
-> `claude-fable-5-1` is the escalation ceiling. `claude-fable-5` remains pinnable at the
-> same per-token price but is no longer the default flagship pick.
-
-`ak host pick --help` prints this list too. Tuning is per-route and reversible: hand-edit
+`ak host pick --help` lists the bundled model suggestions. Tuning is per-route and reversible: hand-edit
 `kit.json` `routing.routes`, pass `--route`, or use `ak host off` to clear it entirely.
 
 **Disabling is complete, not just a flag change.** `ak host pick --host <set>` treats the
@@ -574,8 +553,9 @@ is a separate binding lookup; absent grounded evidence remains unknown or explic
 
 This is the part that matters: **`ak` is a facilitator, not a wall.** Every value it manages
 is the tool's own native config, and you can set it by hand — or let `ak` and hand-edits
-coexist. `ak` merges-not-clobbers and backs up first, mirroring how rUv itself layers config
-(`mergeWithDefaults(config, defaults)` — sensible defaults, override with your partial).
+coexist. Managed writes merge supported native fields and make backups, but teardown has a
+broader legacy behavior described below. Do not assume every projection has exact-value
+conditional undo.
 
 The native config stores each knob below lives in — and their precedence — are summarized in
 [Native configs, one front door](#native-configs-one-front-door) above.
@@ -602,9 +582,13 @@ neither agentic-kit nor AQE persists them.
 ak host off     # reset to the claude-only default, reversibly
 ```
 
-Strips the managed env keys (leaving your other settings), and restores your pre-`ak`
-`llm-config.json` from its one-time backup — or removes the file if `ak` created it. `ak
-status` and `ak sync` keep everything converged and flag drift in between.
+This removes the known managed environment keys, including later edits to those keys.
+For a router file still marked `_managedBy: agentic-kit`, it restores the whole
+pre-`ak` `llm-config.json` backup, or removes the whole file if no backup exists.
+Later user edits in that managed file can therefore be lost. Save them before `off`
+and review the result. A file without the managed tag is left alone. This legacy
+whole-file teardown differs from the exact-value receipts used by external-provider
+reconciliation.
 
 ---
 

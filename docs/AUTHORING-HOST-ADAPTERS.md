@@ -35,8 +35,8 @@ What you give up in exchange is real and is covered in [section 8](#8-what-earni
 ## 2. Write the manifest
 
 Name it whatever you like as a file; name it exactly `ak-adapter.json` at the package root if you
-publish it on npm. Here is a complete, valid one — this shape validates against `ak`'s real
-validator:
+publish it on npm. Here is a minimal manifest example matching the validator's shape. The referenced
+hook files must exist and be reviewed before admission:
 
 ```json
 {
@@ -342,9 +342,9 @@ ak host adapters conformance hermes
 ```
 
 This runs the tiered black-box harness against your **real** host — spawning your actual hooks — and
-prints an honest per-tier verdict. It warns first, listing every hook command it is about to run as
-a real subprocess. Here is a real run against the repository's conformance fixture
-(an adapter shaped exactly like the manifest in section 2):
+prints a per-tier verdict. It warns first, listing the real hook commands it will run.
+The example below illustrates the repository fixture with an additional AQE provider
+hook; the minimal manifest in section 2 omits that hook and cannot pass the AQE tier:
 
 `activity-routing` and `primary-eligible` drive a genuine worker through your `execution.run` hook,
 so two things are handled for you: the outer time budget honors your manifest's own declared

@@ -1,7 +1,7 @@
 # Verifying the Codex usage-scorecard fix on your own machine
 
 **For:** anyone who uses Codex CLI and wants to check whether the two bugs
-fixed on this branch affected their own numbers — without sharing any
+fixed in the usage parser affected their own numbers — without sharing any
 transcript content, session ids, titles, or file paths with anyone.
 
 **You don't need to read the rest of this repo to use this document.**
@@ -21,9 +21,9 @@ roughly $935,000 and 1.46 trillion tokens, attributed to under 2,000
 sessions, with **zero** recorded responses despite that volume.
 
 Investigation found two real bugs in how this project's code parses Codex's
-session logs (`src/lib/usage-index.mjs`, function `parseCodex`) — nothing
-wrong with Codex CLI itself, and nothing you did. Both are fixed on this
-branch. This document lets you check, on your own machine, whether either
+session logs (`src/lib/usage-parsers.mjs`, function `parseCodex`) — nothing
+wrong with Codex CLI itself, and nothing you did. Both fixes are in the maintained
+parser. This document lets you check, on your own machine, whether either
 bug was actually inflating *your* numbers, and by how much.
 
 ## What was wrong
@@ -70,8 +70,8 @@ faith:
    CLI behavior, observed by other people, in other tools, before this
    project encountered it.
 2. **Regression tests.** The fix is pinned by test cases built from the
-   documented bug signature (`tests/kit/usage-index.test.mjs`), currently
-   passing 87/87.
+   documented bug signature (`tests/kit/usage-index.test.mjs`). Run the tests from your checkout
+   for its current result; the original pass count is not a release guarantee.
 3. **A before/after comparison you can run yourself**, on your own data,
    computed by code that does **not** import or reuse the fix — so it's an
    independent check, not a restatement of the same claim. That's the
@@ -89,7 +89,7 @@ Nothing else — no `npm install`, no cloning this repo, no network access
 beyond the one download below, and nothing gets written to your disk except
 the script file itself.
 
-**1. Get the script.** If you already have this branch checked out:
+**1. Get the script.** If you already have the repository checked out:
 
 ```bash
 node scripts/codex-usage-diagnostic.mjs
@@ -98,7 +98,7 @@ node scripts/codex-usage-diagnostic.mjs
 If you don't have the repo, just download the one file:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pacphi/agentic-kit/fix/codex-usage-scorecard-metrics/scripts/codex-usage-diagnostic.mjs -o codex-usage-diagnostic.mjs
+curl -fsSL https://raw.githubusercontent.com/pacphi/agentic-kit/main/scripts/codex-usage-diagnostic.mjs -o codex-usage-diagnostic.mjs
 node codex-usage-diagnostic.mjs
 ```
 
@@ -109,15 +109,19 @@ dashboard) and **"after the fix"** (subagent-replay logs excluded). It also
 tells you what percentage of tokens/cost, if any, is attributable to
 subagent-replay logs.
 
-The script's own source is short and readable — open it in an editor if
-you want to confirm for yourself what it does before running it. In short:
-it walks `~/.codex/sessions/**/rollout-*.jsonl`, reads exactly three kinds
-of field per line (`type`, `session_meta.thread_source`, and the numeric
-fields inside `token_count.info.total_token_usage`), and never touches,
-stores, or prints anything else — no prompts, no titles, no session ids, no
-file paths, no timestamps. There is no code path in the script that could
-emit those even by accident, because it never reads them into a variable in
-the first place.
+The script reads complete local rollout files into memory and parses their JSON lines. It
+selects model, thread-source, cumulative token, and response-event fields for an aggregate
+report; it does not print prompts, titles, session identifiers, or individual file paths.
+Review the script and its output before sharing anything. Its default root is
+`~/.codex/sessions`; pass `--root /absolute/path/to/sessions` for another Codex home.
+
+This is a **legacy replay comparison**, not a second implementation of today's dashboard.
+Its fixed July 2026 rate table, model fallback, string-only `thread_source` handling, and
+last-cumulative-event logic are retained for that comparison. The maintained parser also
+handles newer source shapes and first-session metadata precedence. Consequently, the
+script's dollar totals and even its replay classification may differ from current Usage.
+Use the maintained dashboard and metrics reference for current estimates; do not use this
+script as billing reconciliation or proof that every current parser path is correct.
 
 ## What to send back
 

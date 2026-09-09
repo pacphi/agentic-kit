@@ -131,11 +131,15 @@ state. Uninstall follows the same rule.
 
 | Capability | Claude Code | Codex |
 |---|---:|---:|
-| Configuration scope | Project | User/machine |
+| Native configuration scope | User or project; kit footer is project-scoped | User/machine |
 | Native single-line fields | Host-dependent | Yes |
 | Command-backed renderer | Yes | No |
 | Multiple rich telemetry lines | Yes | No |
 | Managed by `ak sync` | Yes | After explicit preset selection |
+
+Claude supports user and project `statusLine` settings and sends session context data to
+the configured command ([official status-line reference](https://code.claude.com/docs/en/statusline)).
+That live input is a separate source from the historical transcript-based Usage dashboard.
 
 For Claude Code, agentic-kit continues to inject its rich renderer into the
 project's ruflo status-line helper. The Codex preset complements that renderer;

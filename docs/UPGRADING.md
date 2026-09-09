@@ -3,7 +3,7 @@
 New `ak` features almost always ship **opt-in**. That means moving your machine to the
 latest capability is *two* motions, not one: get the newer code, then turn the feature on.
 This page exists because those two are easy to conflate — and `ak sync`, despite its name,
-only does the first.
+updates the code and reconverges choices you have already made.
 
 ## 2026-09-04: Human session identity in System
 
@@ -180,14 +180,17 @@ What does **not** break, by design: running binaries keep executing their old co
 (replaced files don't affect a running process's open inodes). Agentic-kit's managed
 settings and guidance writers are atomic and fail closed when the one-time backup cannot
 be created or validated. Settings env keys, `~/.codex/config.toml` edits (Ruflo/AQE MCP,
-`[tui]` status line), OpenCode wiring, `.agentic-qe/llm-config.json`, and the managed
-guidance blocks are all **read at session start** — a live session simply doesn't see
-them until its next launch. The kit's own self-update runs last and applies from the next
+`[tui]` status line), OpenCode wiring, `.agentic-qe/llm-config.json`, and managed guidance
+have host-specific reload behavior. Restart affected sessions to
+load a consistent configuration. Claude can reload a changed status-line command during
+a session; do not assume every setting is frozen until restart. The kit's own self-update
+runs last and applies from the next
 `ak` invocation.
 
 > [!TIP]
-> If other sessions are mid-task: `ak sync --dry-run` first. No `versions` row → the plan
-> is local heals and config convergence; run it freely. A `versions` row → either let the
+> If other sessions are mid-task: `ak sync --dry-run` first. Even without a `versions` row,
+> inspect the named repairs: native-module, MCP, hook, and
+> configuration changes can affect running sessions. A `versions` row → either let the
 > other sessions reach a stopping point, or run `ak sync --no-upgrade` now (heals only —
 > skips the daemon stop and the npm swaps entirely) and do the full sync later. The armed
 > footer wipe in other open projects follows from the upgrade itself, not from sync — expect
