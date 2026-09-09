@@ -54,7 +54,7 @@ permanent.
 | System | Runtime | `#system/runtime` | Runtime | Live host processes, their CPU and memory, background daemons, and machine denominators — refreshed on the header's poll clock while open |
 | System | Catalog | `#system/catalog` | (redirect) | Retired as a visible destination. The link redirects to Maintenance › Inventory. Full scan still collects the catalog measurement, and its cards now sit in Summary |
 | System | Projects | `#system/projects` | Projects | Every repository with a remote that a host has recorded a session in — its approximate lines of code, language mix, total disk size and last activity. Worktrees, sub-folders and remote-less repositories are counted below the table, not listed |
-| System | Maintenance | `#system/maintenance` | Maintenance | Four destinations: **Inventory** (`#system/maintenance/inventory`, every verified placement grouped by logical resource, with a resource inspector), **Guidance** (`/guidance`, only outcomes the kit can ground, in five lanes), **Discovery** (`/discovery`, automatic sources, exact projects, collection roots, exclusions, scan coverage), and **Activity** (`/activity`, receipts, undo, interruption audits, dispositions, recipe changes, scan records). Inventory links carry scope, view, sort, `facet.<name>` values, and the selected placement as opaque state |
+| System | Maintenance | `#system/maintenance` | Maintenance | Four destinations: **Inventory** (`#system/maintenance/inventory`, Focus navigation from scope through resource family to exact installation details), **Guidance** (`/guidance`, only outcomes the kit can ground, in five lanes), **Discovery** (`/discovery`, automatic sources, exact projects, collection roots, exclusions, scan coverage), and **Activity** (`/activity`, receipts, undo, interruption audits, dispositions, recipe changes, scan records). Inventory links carry scope, view, sort, `facet.<name>` values, and the selected placement as opaque state |
 
 About is one scrolling page, so its hashes scroll to a section rather than swapping panels; `#about`
 alone opens the page at the top.
@@ -582,28 +582,49 @@ apply, undo, and record are refused; if the work does not finish, the previous e
 After the probes settle the inventory builds in the background: the empty state reads **Building
 the inventory…** until rows appear, or names the reason if the build did not complete.
 
-**Inventory** lists every verified placement, healthy ones included, grouped under its logical
-resource. One logical resource groups every placement with the same name, namespace, and verified
-definition across user and project scopes, so a skill installed in five projects is one group with
-one row per exact placement; copies whose verified definitions differ stay separate groups, linked
-by a **Same name, different definition** conflict. A group with more than three placements collapses
-to three rows behind **Show N more** (**Show fewer** once opened), opens expanded when one of its
-placements carries a Guidance lane, and remembers your toggle for the browser session. Choose a scope (System, Machine, User, Projects, or Across scopes), a curated view, and
-multiselect facets whose counts reflect the current result set; active facets become chips, and
-**Clear all** removes them at once. On narrow screens the facets move into a **Filters** sheet.
-Search matches names, locations, and consumers. Selecting a row opens the inspector, which answers
-what this is, where it is, where it came from, what version is here, who uses it, what changed or
-conflicts, what you can accomplish, what proves it, and what happened before; a question with no
-verified answer is omitted. The exact path is owner-private: press **Reveal exact path**, then
-**Copy exact path**. When a filesystem source is not complete, a one-sentence banner says so (for
-example "4 sources have not been scanned yet.") with at most one button, **Re-measure machine** for
-never-scanned sources or **Open Discovery** for paused, stopped, or failed ones, and the affected
-rows disclose **Source scan incomplete** in their technical details. The banner never lists every
-source, and the non-filesystem automatic sources never appear in it.
+**Inventory** uses the **Focus browser** approved and implemented on 2026-09-08.
+[Focused validation](archive/2026-09-08-validation-maintenance-focus.md) covers this presentation;
+older builds may still show expanded cards.
+Across scopes begins with **System**, **Machine**, **User**, and **Projects**. Select a scope, type,
+resource family, and exact installation; Projects inserts the repository before type. Only the
+current level appears in the list. Breadcrumbs let you return without losing filters.
+
+Selecting a scope, project, or type filter skips that chosen level. A type selected while browsing
+User retains User context; removing filters restores the relevant levels. Search matches names,
+location breadcrumbs, and consumers. Singleton scope/project/type/family choices appear in the
+breadcrumb instead of duplicate chips; additional and multiselect refinements keep removable chips.
+Use breadcrumb backtracking or sidebar deselection to remove navigation choices; **Clear all**
+removes facets. The **Filters** sheet holds these controls on narrow screens. Sorting applies in
+the current level and healthy resources remain reachable.
+
+Projects shows repository choices by default. **Include worktrees**, below project search, reveals
+worktree choices without removing saved placements or changing discovery. Selected worktrees stay
+reachable until deselected. There is no Project type control. Exact installation rows show recorded
+location or host context, then **Available to** consumers; version details expand in the inspector. One installation
+read by multiple hosts counts once; family and branch identities never replace exact placement IDs.
+
+Selecting an exact installation opens details below the list. Compact expandable relationship
+cards show recorded plugin contents/producers, consumer bindings, dependencies, and other
+installations. Host-specific override links are not emitted by the current relationship projection. A matching name, shared
+digest, or narrower scope does not prove a producer or override relationship. **Installed by**
+requires an installer receipt. Missing provenance does not imply independent ownership.
+
+Following a relationship preserves your inventory location and filters; an outside-filter
+selection is labelled explicitly. Back returns to the previous related installation; closing
+details restores the original row. Relationship links do not silently clear filters or grant
+action authority. Exact paths remain owner-private: **Reveal exact path**, then **Copy exact path**.
+The current source-coverage banner and incomplete-source evidence remain visible; navigating a
+branch or hiding worktrees cannot turn a partial scan into complete coverage.
 
 **Guidance** shows only outcomes the kit can ground, in five lanes: Can apply here, Steps
-available, Decisions to make, Updates available, and Recovery to finish. A placement with nothing to
-offer stays in Inventory and its inspector says "No action is requested." A Steps entry opens a
+available, Decisions to make, Updates available, and Recovery to finish. The pill controls select
+one lane at a time. Guidance requires evidence of a reason to act: merely being able to remove or
+disable a resource does not make that operation a recommendation. These operations remain under
+**Optional actions** in the Inventory inspector, with the same preview and confirmation flow.
+**Host coverage** separates saved installation evidence from automatic action checks
+and lists the resource types those adapters cover. An empty lane is not a health assessment;
+unsupported or incomplete adapters do not prove that a host needs no attention.
+A placement with nothing to offer stays in Inventory and its inspector says "No action is requested." A Steps entry opens a
 copyable procedure for your shell with **Copy command**; the dashboard never runs it. A Decisions
 entry always offers four choices, each grounded or carrying the reason it is not. Every entry offers
 **Acknowledge**, **Snooze until** a chosen date, and, for an update candidate, **Ignore this
@@ -778,3 +799,12 @@ count newlines. Each of those yields a path, a name, or a number. **No message, 
 tool result, or model output is ever read** — those stay in Usage and Observability, which have
 their own contracts for them. The full enumeration is
 [Machine footprint § The read surface](ddd/machine-footprint.md#the-read-surface).
+
+### Date and time display
+
+Dashboard timestamps use the browser’s locale and timezone through the shared date/time
+formatter. Detailed timestamps include seconds and the timezone abbreviation, including
+Maintenance version measurements and update checks, model captures and local model expiry.
+Relative ages remain relative. Published calendar dates (such as a retirement commitment)
+retain their calendar day; they are not midnight UTC instants. Stored/API timestamps and
+machine-readable `datetime` attributes retain their original instant.

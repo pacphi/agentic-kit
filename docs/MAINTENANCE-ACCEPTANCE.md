@@ -1,7 +1,7 @@
-# Maintenance overhaul acceptance criteria
+# Maintenance acceptance criteria and release gates
 
-- **Specification status:** Accepted — implemented 2026-09-05; see ADR-0048 "Implementation status" for open gates
-- **Governing decision:** [ADR-0048](../../adr/0048-inventory-led-maintenance-resource-management.md)
+- **Specification status:** Accepted — Focus implementation has focused evidence; broader integration and human/cross-platform gates remain open
+- **Governing decision:** [ADR-0048](adr/0048-inventory-led-maintenance-resource-management.md)
 
 These criteria convert the approved product decisions into release gates. IDs are stable and must
 appear in tests, prototype studies, and implementation receipts. Passing current Maintenance tests
@@ -207,19 +207,24 @@ preserve.
 - **MNT-PRV-005:** Exact paths are revealable and copyable only in the owner-protected inspector.
 - **MNT-PRV-006:** URL state overrides owner-private remembered view state; neither is project
   configuration.
-- **MNT-PRV-007:** Scan retention defaults to at most 32 summaries and 90 days per environment and
+- **MNT-PRV-007:** Scan retention defaults to at most 10 summaries per source per environment and 90 days and
   is user-overridable within safety floors.
 - **MNT-PRV-008:** Clearing scan history cannot delete unresolved, verification-required,
   undo-eligible, active-disposition, or recipe-acceptance evidence.
 
 ## UX and accessibility
 
-- **MNT-UX-001:** Inventory opens across all resources with Guidance-admitted rows sorted first and
-  restores the last valid view.
-- **MNT-UX-002:** Multiselect facets show counts, removable chips, unavailable-value removal, and
-  one Clear all action.
-- **MNT-UX-003:** Desktop selection opens a side inspector; narrow screens open a full-screen detail
-  route with **Back to N results**.
+- **MNT-UX-001:** Across scopes initially shows four scope roots. Focus navigation renders one
+  level at a time: scope → repository (Projects only) → type → resource family → exact installation.
+  Guidance-first sorting applies within the current level; healthy placements remain reachable.
+  The last valid view is restored without expanding the complete inventory.
+- **MNT-UX-002:** Facets show counts, unavailable-value removal, and one Clear all action. Singleton
+  scope/project/type/family navigation filters use breadcrumbs without duplicate chips; extra and
+  multiselect refinements retain removable chips. Breadcrumb back and sidebar deselection remove
+  navigation filters.
+- **MNT-UX-003:** Exact installation selection opens details below the current list with compact
+  expandable relationship cards. Narrow screens reflow without losing breadcrumbs or filters;
+  Close details restores the originating row.
 - **MNT-UX-004:** Back returns focus to the originating result where it still exists.
 - **MNT-UX-005:** Search/facet announcements are debounced and announce one settled result count.
 - **MNT-UX-006:** Icon meaning is duplicated by visible text and accessible name; color never acts
@@ -235,7 +240,30 @@ preserve.
 - **MNT-UX-012:** Progress, copy, apply, verification, receipt, and partial-result feedback is
   available at every stage and does not depend on transient toasts alone.
 
+- **MNT-UX-013:** Breadcrumbs navigate ancestors and restore the originating level/focus. Scope,
+  project, and type filters skip already selected levels; applying a type while browsing User
+  retains User context. Removing a filter restores the corresponding level.
+- **MNT-UX-014:** Projects hides worktree choices by default and exposes Include worktrees below
+  project search. Search never hides this control; selected worktrees stay reachable until
+  deselected. There is no Project type control. Discovery and placement IDs remain unchanged.
+- **MNT-UX-015:** Installation rows show measured location and Available to consumer names without
+  repeated aggregate host labels. A singleton project's label excludes its installation suffix;
+  location stays visible on its installation row. Missing location never creates a guessed path.
+- **MNT-UX-016:** Related installation navigation preserves filters, labels outside-filter
+  selections, and returns to its originating context. Relationship links never increase distinct
+  installation counts or grant mutation authority.
+- **MNT-UX-017:** Plugin inclusion requires manifest or producer evidence, Installed by requires an
+  installer receipt, Requires needs dependency evidence, and Overrides needs host-specific
+  precedence and effective-configuration evidence. Same-name, path, scope, or digest coincidences
+  cannot establish those relationships. Missing provenance does not imply independent origin.
+- **MNT-UX-018:** Optional management actions remain separate from Guidance. Navigation or a
+  relationship never bypasses exact placement selection, preview, confirmation, or one-use gates.
+
 ## Performance and reliability
+
+The Focus amendment is approved, but its final source-bound browser/API, integration, and
+performance results must still be recorded. Prototype smoke checks and earlier Option A test
+totals do not satisfy these criteria for the production implementation.
 
 - **MNT-PERF-001:** Saved Inventory paints without waiting for deep scan, provider command, network,
   or credential validation.
@@ -367,3 +395,19 @@ ADR-0048 can become Implemented only when:
 6. ADR-0044 and every amended ADR accurately describe its remaining authority;
 7. current DDD, CLI/API schemas, and help match the code; and
 8. exact source-state test, benchmark, security, accessibility, and decision receipts are retained.
+
+## Open release gates
+
+ADR-0048 remains Accepted. Focused automated evidence does not close these gates:
+
+- Representative-user task study using the sentinel journeys and metrics above.
+- VoiceOver/Safari and NVDA/Chrome or Edge assistive-technology signoff.
+- Source-bound reference-machine benchmarks for 5,000 and 50,000 placements and
+  discovery targets on macOS, Linux, Windows and WSL.
+- Clean-machine Windows and WSL discovery and Ollama/Git-project-patch integration.
+- Broader dashboard regression completion, privacy review and an exact-source
+  release receipt with unresolved limitations recorded.
+
+ADR-0044 remains the compatibility and transaction-safety floor until those gates
+pass. The archived migration plan records the original phase sequence; it is not
+an assertion that every release gate has passed.

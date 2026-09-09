@@ -1,15 +1,20 @@
+> Archived snapshot, 2026-09-08. Original status and evidence below are historical.
+> Current guidance: [Maintenance](../MAINTENANCE.md), [acceptance and open gates](../MAINTENANCE-ACCEPTANCE.md),
+> and [ADR-0048](../adr/0048-inventory-led-maintenance-resource-management.md).
+
 # Maintenance overhaul migration plan
 
-- **Plan status:** Accepted — implemented 2026-09-05; see ADR-0048 "Implementation status" for open gates
-- **Governing decision:** [ADR-0048](../../adr/0048-inventory-led-maintenance-resource-management.md)
+- **Plan status:** Accepted — Focus browser approved 2026-09-08; integration verification and ADR-0048 human/cross-platform gates remain open
+- **Governing decision:** [ADR-0048](../adr/0048-inventory-led-maintenance-resource-management.md)
 
 The migration preserves the implemented safety engine while replacing its findings-first product
 model. Each slice must leave the current production contract truthful and usable. No slice gains
 write, network, privilege, path, or adapter authority from being part of this plan.
 
-## Current baseline
+## Original baseline (2026-09-04)
 
-The current system is implemented and internally consistent with its living plans:
+The following records the starting point for the baseline phases delivered on 2026-09-05.
+It does not describe the current four-destination workspace:
 
 - ADR-0025 owns Machine Footprint and Catalog v4 measurement.
 - ADR-0032 owns read-only model lifecycle intelligence and explicitly has no model Apply.
@@ -18,12 +23,35 @@ The current system is implemented and internally consistent with its living plan
 - ADR-0045 owns physical artifact and consumer-binding identity plus explicit provider scans.
 - ADR-0046 owns scan-local reuse and worker-thread dashboard responsiveness.
 - ADR-0047 is Accepted with the Projects observation-forest pilot implemented; later forest phases
-  and journal-backed incremental mode are not implemented.
+  and journal-backed incremental mode were not yet implemented.
 
-The proposed product differs deliberately. Current source still contains `needsReview` and
+At that starting point the proposed product differed deliberately. Source then contained `needsReview` and
 `unsupportedOrBlocked` summary buckets, generic evidence-first guidance, multiple-action CLI plan
 arguments, no dashboard recovery endpoint, latest-only Maintenance scan storage, and no Managed
-model removal. Those are migration targets, not undocumented drift.
+model removal. These were baseline migration targets; ADR-0048 records their delivered source and open gates.
+
+## Focus browser amendment — approved 2026-09-08
+
+Replace the expanded placement-list presentation with the approved one-level Focus browser.
+Preserve the existing measurement, query, exact identity, provider, and transaction contracts.
+The integration slice must:
+
+- render four Across scopes roots, then scope → repository (Projects only) → type → family →
+  exact installation, with breadcrumbs and filters skipping already selected levels;
+- preserve User context when applying a type, and restore navigable levels when filters clear;
+- show repository labels separately from measured installation locations and consumer bindings;
+- retain Include worktrees below project search, selected-worktree reachability, and no Project
+  type control, without altering discovery inclusion or placement identity;
+- disclose only evidence-backed plugin, consumer, dependency, precedence, and family relationships;
+- keep filters and return context when opening related installations, including outside-filter labels;
+- keep optional management separate from Guidance and retain every existing exact action gate; and
+- adapt user/design docs and real browser/API regressions before claiming completion.
+
+Implementation and focused validation are recorded in [the Focus receipt](2026-09-08-validation-maintenance-focus.md).
+The broader dashboard suite and repository quality gate are not green. The approved
+[prototype](2026-09-08-design-maintenance-focus-mockups.md) remains illustrative; it does not prove collector support for its
+fictional edges. Retain the human, assistive-technology, cross-platform, privacy, and reference-
+machine performance gates. Do not mark ADR-0048 Implemented from prototype approval.
 
 ## Source touchpoints
 
@@ -99,8 +127,8 @@ Ship Inventory behind an internal feature flag or versioned route:
 
 - scope lens and curated views;
 - multiselect facets, chips, counts, search, sort, and paging;
-- logical groups and exact placement rows;
-- desktop inspector and narrow-screen detail route;
+- logical groups and exact placement rows (now progressively revealed by the approved Focus amendment);
+- exact details below the current-level list, with responsive relationship disclosures;
 - location breadcrumbs and protected exact-path reveal;
 - complete healthy inventory and inventory-only evidence; and
 - URL and remembered preference contracts.
@@ -202,8 +230,9 @@ Every phase updates, in the same change:
 - CLI/API schema documentation; and
 - acceptance evidence linked to exact source state.
 
-The Proposed package may describe the target. Current DDD documents must continue to describe
-current behavior until each target slice is implemented.
+This Accepted package may specify an approved target whose integration evidence is pending.
+Current DDD and user documents must label that status and must not use old test totals as proof
+of newly approved interaction or relationship coverage.
 
 ## Release evidence
 

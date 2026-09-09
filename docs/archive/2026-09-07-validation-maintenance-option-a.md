@@ -1,4 +1,15 @@
+> Archived snapshot, 2026-09-08. Original status and evidence below are historical.
+> Current guidance: [Maintenance](../MAINTENANCE.md), [acceptance and open gates](../MAINTENANCE-ACCEPTANCE.md),
+> and [ADR-0048](../adr/0048-inventory-led-maintenance-resource-management.md).
+
 # Maintenance Option A validation — 2026-09-07
+
+Historical evidence for Option A. **B — Focus browser** was approved on 2026-09-08 and
+supersedes the expanded inventory-list and Project type presentation described below. Retained
+measurement and exact-action checks remain relevant, but these totals do not verify Focus.
+Its integration, browser/API, usability, and cross-platform gates must be recorded separately.
+See the [current experience specification](2026-09-04-design-maintenance-overhaul-experience-specification.md) and
+[approved prototype reference](2026-09-08-design-maintenance-focus-mockups.md).
 
 The user approved Option A: progressive filters, compact contextual inventory cards,
 project/resource hierarchy, a conditional side inspector, and one local measurement toolbar.

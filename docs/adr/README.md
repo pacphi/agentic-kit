@@ -55,7 +55,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0045](0045-artifact-consumer-bindings-and-explicit-maintenance-scans.md) | Physical artifacts, host consumers, and explicit Maintenance scans | Implemented |
 | [0046](0046-scan-local-observation-reuse-and-nonblocking-deep-scans.md) | Scan-local observation reuse and nonblocking deep scans | Implemented |
 | [0047](0047-streaming-observation-forest.md) | Streaming observation forest for deep scans | Accepted; Projects pilot implemented |
-| [0048](0048-inventory-led-maintenance-resource-management.md) | Inventory-led Maintenance resource management | Accepted; implemented pending human-evaluation and cross-platform gates |
+| [0048](0048-inventory-led-maintenance-resource-management.md) | Inventory-led Maintenance resource management | Accepted; Focus browser implemented and focused checks pass; human/cross-platform gates pending |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -335,11 +335,14 @@ it never retries or rolls back an uncertain provider effect.
 **0048** is the implemented product successor to 0044's findings-first screen, built on its
 transaction safety floor rather than replacing it. It folds Catalog presentation into a
 four-destination Maintenance workspace — Inventory, Guidance, Discovery, and Activity — uses exact
-placement rows grouped under logical resources, removes alarmist or indeterminate user-facing
+placement identities beneath logical resources, removes alarmist or indeterminate user-facing
 labels, and admits only bounded outcomes into Guidance. It ships capability-driven package
 procedures, an exact Git-aware project-patch provider and an exact Ollama model-removal provider, a
 read-only interruption audit followed by individually recorded receipt reconciliation, and
 completion-oriented resumable checkpointed scans over 0047's observation forest, all covered by
 named automated tests. The decision is Accepted, not yet Implemented: the human-evaluation and
 cross-platform acceptance gates its migration plan requires have not run, so 0044's v1 routes and
-CLI verbs remain a documented compatibility surface and 0044 is not marked Superseded.
+CLI verbs remain a documented compatibility surface and 0044 is not marked Superseded. The
+Focus browser amendment approved on 2026-09-08 adds one-level scope/repository/type/family browsing
+and evidence-backed relationship disclosures with preserved filter context. Its integration
+focused verification is recorded in the [Focus receipt](../archive/2026-09-08-validation-maintenance-focus.md); baseline test totals alone do not verify it.

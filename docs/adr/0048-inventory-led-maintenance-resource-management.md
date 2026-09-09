@@ -2,6 +2,22 @@
 
 - **Status:** Accepted — implementation delivered 2026-09-05; Implemented withheld pending
   human-evaluation and cross-platform gates
+- **Updated:** 2026-09-08 — installed tools preserve measured executable locations
+  for private path reveal, with PATH resolution and bounded package-manifest fallback;
+  Windows command extensions and POSIX executable checks are covered by fixtures.
+- **Updated:** 2026-09-08 — dashboard instant displays share browser-local date/time
+  formatting; published calendar dates retain their day and stored timestamps remain UTC.
+- **Updated:** 2026-09-08 — Focus cards separate capability names from installation sources;
+  bounded local frontmatter and plugin-manifest descriptions are displayed when declared.
+- **Updated:** 2026-09-08 — project Focus cards reveal measured language combinations
+  with three labelled icon badges and a disclosure for additional languages.
+- **Updated:** 2026-09-08 — Activity scan history uses a local-date hierarchy with
+  completion time, source, status, and entry-count columns, newest first; date groups
+  have keyboard-accessible chevron toggles and start collapsed.
+- **Updated:** 2026-09-08 — scan history rolls over at 10 records per source and
+  environment, retaining the existing 90-day age limit.
+- **Updated:** 2026-09-08 — Activity summary sections use a responsive bordered
+  card grid, with scan history remaining full-width below.
 - **Date:** 2026-09-04
 - **Updated:** 2026-09-04 — records the completed Maintenance overhaul decision interview and
   defines the proposed inventory, guidance, discovery, activity, recovery-audit, and action
@@ -17,7 +33,7 @@
 - **Updated:** 2026-09-07 — approved Option A presentation: progressive filters, contextual
   project/resource hierarchy, conditional inspector, one local measurement toolbar with phased
   progress through inventory publication, and distinct filesystem/evidence coverage. See the
-  [experience specification](../design/maintenance-overhaul/experience-specification.md).
+  [experience specification](../archive/2026-09-04-design-maintenance-overhaul-experience-specification.md).
 - **Updated:** 2026-09-07 — Projects retain Git repositories and non-Git folders, with
   Git/Folder/Worktree icons and labels plus a Project type facet; missing or unreadable evidence
   remains Not checked. Classification is presentation metadata and never changes identity.
@@ -26,6 +42,15 @@
 - **Updated:** 2026-09-08 — canonical presentation families preserve exact installation identities;
   plugin release/candidate evidence is retained, compatibility-unknown availability is labelled,
   catalog-only models are excluded, and path reveal follows recorded locators.
+- **Updated:** 2026-09-08 — current working-tree presentation replaces Project type with
+  Include worktrees below project search; scan records show the latest per source; Guidance
+  separates optional management from evidence-backed outcomes and uses exclusive pills.
+  The user subsequently approved **B — Focus browser** from the
+  [scope hierarchy and relationship mockups](../archive/2026-09-08-design-maintenance-focus-mockups.md):
+  one level at a time, with breadcrumbs and filters skipping already selected levels. This
+  supersedes the expanded resource-list presentation; implementation and
+  [focused validation](../archive/2026-09-08-validation-maintenance-focus.md) are delivered.
+  Remaining gates keep this ADR Accepted rather than Implemented.
 - **Deciders:** agentic-kit maintainers
 - **Planned successor to:** [ADR-0044](0044-receipt-aware-maintenance-control-plane.md) for the
   findings-first product and surface contracts; ADR-0044 remains authoritative until this decision
@@ -37,7 +62,10 @@
   [ADR-0045](0045-artifact-consumer-bindings-and-explicit-maintenance-scans.md),
   [ADR-0046](0046-scan-local-observation-reuse-and-nonblocking-deep-scans.md), and
   [ADR-0047](0047-streaming-observation-forest.md)
-- **Detailed design:** [Maintenance overhaul package](../design/maintenance-overhaul/README.md)
+- **Documentation update (2026-09-08):** Experimental design and mockup records are archived;
+  live acceptance criteria, language coverage and the proposed project-metadata adapters remain maintained.
+- **Current release gates:** [Maintenance acceptance](../MAINTENANCE-ACCEPTANCE.md)
+- **Historical design:** [Archived maintenance overhaul package](../archive/2026-09-04-design-maintenance-overhaul-overview.md)
 
 ## Status of the governed system
 
@@ -49,9 +77,11 @@ adds. ADR-0046 is Implemented, and ADR-0047 is Accepted with its Projects observ
 and this ADR's checkpointed continuation both implemented.
 
 This ADR moved from Proposed to Accepted on 2026-09-05: every contract in the Decision below has a
-source implementation covered by named automated tests (see "Implementation status"). It is not
+source implementation covered by named automated tests for that baseline (see "Implementation status").
+The Focus browser amendment approved on 2026-09-08 is implemented and passes focused verification; the
+approved prototype establishes interaction intent, not production or adapter completeness. It is not
 yet Implemented in this record's own sense, because the
-[migration plan](../design/maintenance-overhaul/migration-plan.md)'s human-evaluation and
+[live acceptance criteria](../MAINTENANCE-ACCEPTANCE.md)'s human-evaluation and
 cross-platform acceptance gates have not run on this machine. The dashboard's Maintenance panel now
 renders this ADR's Inventory/Guidance/Discovery/Activity workspace; ADR-0044's v1 HTTP routes and
 CLI verbs remain available as a documented compatibility surface until those gates pass and this
@@ -89,9 +119,14 @@ actions. The visible third-level destinations are:
 3. **Discovery** — automatic and user-configured sources, exclusions, coverage, and scans; and
 4. **Activity** — interruption audits, receipts, deferrals, recipe changes, and scan history.
 
-Inventory opens across all scopes, sorts Guidance-admitted resources first, and remembers the
-user's last view. Curated views ship before saved views, but the query model and opaque URL state
-must support saved views later without redesign.
+Inventory uses the approved Focus browser: Across scopes opens four scope roots, **System**,
+**Machine**, **User**, and **Projects**, then reveals one hierarchy level per selection. System,
+Machine, and User lead to resource type → resource family → exact installation; Projects inserts
+the repository before resource type. Breadcrumbs support backtracking without losing filters.
+Selecting a scope, repository, or type in the filters skips the corresponding redundant level;
+its context remains visible. Sorting applies within the current level, including Guidance-first
+ordering where applicable, without hiding healthy resources. The query model and opaque URL state
+continue to support remembered views and future saved views.
 
 ### 2. Keep administrative scope, source, and consumers independent
 
@@ -107,7 +142,7 @@ Producer scope, configuration scope, effective consumer scope, provenance, and b
 separate fields. WSL distributions are separate Linux environments linked to the Windows host by
 explicit consumer or dependency edges. Nothing executes or crosses filesystems implicitly.
 
-### 3. Use placement rows grouped by logical resources
+### 3. Reveal resource families and exact installations progressively
 
 The management projection separates:
 
@@ -123,7 +158,24 @@ The management projection separates:
 - `ConflictSet` — a classification over placements that never grants deletion authority.
 
 One physical artifact used by several hosts appears once with several bindings. Several physical
-placements of one logical resource appear as separate selectable rows under one group.
+placements of one logical resource appear as separate selectable rows after choosing its family.
+Family identity is evidence-backed; equal display names alone do not merge resources. Navigation
+keys never replace exact placement IDs or operation targets. Installation counts count each
+placement once even when a relationship also exposes it in another context.
+
+Projects defaults to repository choices; **Include worktrees** reveals worktree choices while
+selected worktrees remain reachable. There is no Project type control. Classification and browsing
+preferences never remove measured placements or change discovery, receipt, or action authority.
+
+An exact installation may disclose **Provides / Provided by**, **Available to**, **Requires /
+Required by**, **Overrides / Overridden in**, and **Also installed** only when recorded evidence
+establishes the relationship. Plugin inclusion requires manifest or producer evidence; **Installed
+by** additionally requires an installer receipt. Overrides require host-specific precedence and
+effective-configuration evidence. Matching names, path containment, or a shared digest do not
+establish those claims. Missing origin remains unestablished. Relationship navigation preserves
+filters, explicitly labels selections outside those filters, and returns to the prior context.
+No edge creates a recommendation or action capability; optional management remains separate from
+Guidance and uses the existing exact preview and confirmation flow.
 
 ### 4. Include the agentic development footprint
 
@@ -309,10 +361,13 @@ those safety floors.
 
 ### 13. Treat accessibility and usability evidence as release gates
 
-Desktop uses a selectable inventory with a side inspector; narrow screens use a full-screen detail
-view with **Back to N results**. Multiselect facets show counts, removable chips, and one Clear all
-action. Unavailable values disappear. Icons always accompany visible text and never carry scope,
-source, action, or status meaning alone.
+Focus navigation uses a selectable current-level list, breadcrumbs, and exact details below the
+list. Closing details restores the originating row; relationship Back restores the prior selected
+installation. Narrow screens reflow the same information and move filters into a sheet. Singleton
+scope/project/type/family navigation context appears in breadcrumbs rather than duplicate chips;
+additional and multiselect refinements retain removable chips. Breadcrumb backtracking and sidebar
+deselection remove navigation filters; Clear all remains available. Icons accompany visible text
+and never carry scope, source, action, or status meaning alone.
 
 The release must prove keyboard focus continuity, debounced result announcements, table/list and
 disclosure semantics, 320 CSS-pixel reflow, target sizing, forced-colors behavior, both themes,
@@ -356,7 +411,8 @@ consequential, actionable conditions.
 Implementation proceeds through separately gated slices: contracts and fixtures; read-only
 management projection; Discovery and resumable scans; Inventory and Guidance; existing action
 migration; interruption audit; exact model removal; Catalog redirects and retirement. The detailed
-[migration plan](../design/maintenance-overhaul/migration-plan.md) defines the gates.
+[acceptance criteria](../MAINTENANCE-ACCEPTANCE.md) define the current gates; the
+[archived migration plan](../archive/2026-09-04-design-maintenance-overhaul-migration-plan.md) preserves the original sequence.
 
 This ADR moves from Proposed to Accepted only after the schema, interaction prototype, provider
 matrix, privacy review, and acceptance suite are approved. It becomes Implemented only when the
@@ -367,7 +423,7 @@ marked Superseded; not before.
 ## Implementation status
 
 **Updated 2026-09-05.** Every phase the
-[migration plan](../design/maintenance-overhaul/migration-plan.md) defines has a source
+[migration plan](../archive/2026-09-04-design-maintenance-overhaul-migration-plan.md) defines has a source
 implementation and named automated tests. `node --test` over the files cited below reports 605
 passing tests and zero failures (run 2026-09-05).
 
@@ -390,7 +446,8 @@ passing tests and zero failures (run 2026-09-05).
   faceted, paged, opaque-cursor query engine; `src/lib/dashboard/client/{maintenance-workspace,
   maintenance-inventory,maintenance-inspector}.mjs` and `src/lib/dashboard/page.mjs`'s Maintenance
   panel render it as the four-destination workspace (Inventory, Guidance, Discovery, Activity) with
-  a side inspector. Proven by `tests/kit/maintenance-management-query.test.mjs` and the parity
+  the baseline side inspector (superseded by the approved Focus details-below-list amendment).
+  Baseline proven by `tests/kit/maintenance-management-query.test.mjs` and the parity
   suite; `tests/kit/maintenance-dashboard-client-labels.test.mjs` scans the shipped client source
   for every prohibited label (MNT-EVD-006/007).
 - **Phase 4 — Guidance and dispositions.** `src/lib/maintenance/management/{guidance,dispositions,
@@ -482,7 +539,7 @@ identity, authority, impact, and verification independently.
 
 ## References
 
-- [Maintenance overhaul design package](../design/maintenance-overhaul/README.md)
+- [Maintenance overhaul design package](../archive/2026-09-04-design-maintenance-overhaul-overview.md)
 - `src/lib/maintenance/recovery-coordinator.mjs` — implemented provider-bound current-state
   inspection and receipt reconciliation baseline
 - `src/lib/maintenance/transaction-store.mjs` — implemented private integrity-sealed receipt store
@@ -491,3 +548,6 @@ identity, authority, impact, and verification independently.
 - [GOV.UK warning text](https://design-system.service.gov.uk/components/warning-text/)
 - [PatternFly alert guidance](https://www.patternfly.org/components/alert/design-guidelines/)
 - [W3C accessible names and descriptions](https://www.w3.org/WAI/ARIA/apg/practices/names-and-descriptions/)
+
+Scan history scrolls within a bounded panel sized for a date heading and about four source
+rows. Column headers stay pinned while dates and records scroll.

@@ -1,6 +1,16 @@
 # ADR-0025 — Machine footprint: infrastructure metrics for install, runtime, storage, and catalog
 
 - **Status:** Implemented
+- **Updated:** 2026-09-08 — installed tools preserve measured executable locations
+  for private path reveal, with PATH resolution and bounded package-manifest fallback;
+  Windows command extensions and POSIX executable checks are covered by fixtures.
+- **Updated:** 2026-09-08 — dashboard instant displays share browser-local date/time
+  formatting; published calendar dates retain their day and stored timestamps remain UTC.
+- **Updated:** 2026-09-08 — bounded declared resource descriptions are an explicit read-surface
+  exception; project ecosystem description adapters remain proposed, not implemented.
+- **Updated:** 2026-09-08 — registry 2026.09.1 covers the September TIOBE top 50;
+  graphical/container languages have presence-only evidence and shared suffixes use
+  bounded syntax checks without retaining source text.
 - **Date:** 2026-08-06
 - **Updated:** 2026-08-06 — accepted and implemented; the open points below are resolved decisions
 - **Updated:** 2026-08-07 — §7 replaced by an enumerated read surface (the collectors now read a
@@ -340,11 +350,12 @@ taken from it:
 | A transcript's head (≤256 KB, ≤40 parsed lines) | opening `cwd`, opaque native session ID, and timezone-bearing timestamp fields | every message, prompt, generated title, tool call, tool result and model output |
 | OpenCode's session store (read-only) | the `directory` column | every other column and every message row |
 | A project's own manifests (≤3 deep, ≤64 files, ≤512 KB each) | dependency **keys** | values, scripts, anything executable — nothing is evaluated or resolved |
-| A project's own source files | the count of `\n` bytes | the text: each 64 KB chunk is counted and overwritten |
+| Resource Markdown frontmatter and installed plugin manifests (≤64 KiB each) | explicit description string, ≤1024 characters | body text and unrelated manifest values |
+| A project's own source files | the count of `\n` bytes; a transient ≤16 KiB prefix for ambiguous language/XML signatures | the text: each 64 KB chunk is counted and overwritten |
 
 Each of those yields a path, an opaque identifier, an instant, a name, or an integer. **No message
-body, prompt, generated title, tool call, tool result, model output, or manifest value enters this
-domain, in any tier, on any path.**
+body, prompt, generated title, tool call, tool result, model output, enters this domain. The explicit resource-description fields above are the only new
+manifest-value exception; project stack manifests still expose dependency keys only.**
 
 Three of the rows are justifications rather than mere disclosures. The transcript opening-metadata
 read is the *only* honest way to know which project a session belonged to and which host-native

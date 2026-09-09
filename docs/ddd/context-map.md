@@ -58,6 +58,11 @@ See [Integration management](integration-management.md).
 
 ### Maintenance
 
+The Focus browser amendment approved on 2026-09-08 is a Dashboard interaction over the existing
+management projection; integration verification is pending. Scope/repository/type/family browsing
+and context-preserving relationship links add no measurement, provenance, or action authority.
+See the [current Maintenance guide](../MAINTENANCE.md).
+
 Maintenance is the human-guided control plane for upgrades, stale/unsupported resource cleanup,
 lifecycle remediation, verification, guarded undo, recovery, and receipts. It does not own the
 facts it manages and cannot promote disk presence, age, digest equality, or a read-only plan into

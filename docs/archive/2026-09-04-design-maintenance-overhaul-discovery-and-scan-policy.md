@@ -1,13 +1,27 @@
+> Archived snapshot, 2026-09-08. Original status and evidence below are historical.
+> Current guidance: [Maintenance](../MAINTENANCE.md), [acceptance and open gates](../MAINTENANCE-ACCEPTANCE.md),
+> and [ADR-0048](../adr/0048-inventory-led-maintenance-resource-management.md).
+
 # Discovery and scan policy
 
-- **Design status:** Accepted — implemented 2026-09-05; see ADR-0048 "Implementation status" for open gates
-- **Governing decision:** [ADR-0048](../../adr/0048-inventory-led-maintenance-resource-management.md)
-- **Extends:** [ADR-0046](../../adr/0046-scan-local-observation-reuse-and-nonblocking-deep-scans.md)
-  and [ADR-0047](../../adr/0047-streaming-observation-forest.md)
+- **Design status:** Accepted — Focus browser approved 2026-09-08; integration verification and ADR-0048 human/cross-platform gates remain open
+- **Governing decision:** [ADR-0048](../adr/0048-inventory-led-maintenance-resource-management.md)
+- **Extends:** [ADR-0046](../adr/0046-scan-local-observation-reuse-and-nonblocking-deep-scans.md)
+  and [ADR-0047](../adr/0047-streaming-observation-forest.md)
 
 Discovery must remain friendly on a new installation without making a large source permanently
 partial. This policy separates where Agentic Kit may look, how it budgets responsive work, and when
 the resulting inventory is complete enough to support negative or destructive conclusions.
+
+## Focus browsing and source inclusion
+
+The approved Focus browser presents Projects as repository choices, with Include worktrees for
+worktree choices and no Project type control. Hiding a browsing choice is not a source exclusion:
+it cannot remove a measured placement, stop scanning, alter receipts, or establish negative
+coverage. Selected worktrees stay reachable until deselected. Scope/type/project filters shorten
+the visible hierarchy while using the same completed snapshot and truthful source coverage.
+Relationship links may open a known exact installation outside the current filters only with an
+explicit outside-filter label; they cannot discover a new source or follow an unscanned path.
 
 ## Source types
 
@@ -246,8 +260,8 @@ cleanup of the resources it once observed.
 
 ## Retention
 
-- Completed scan summaries retain at most 32 per environment and no summary older than 90 days by
-  default, matching the implemented model-inventory precedent.
+- Completed scan summaries retain the latest 10 per source within each environment and no summary older
+  than 90 days by default. New records roll out the oldest record for that source only.
 - Active checkpoints persist until completion, stop, invalidation, or seven days without a valid
   continuation; the exact default is benchmarked before acceptance.
 - The last complete source snapshot is retained regardless of a newer partial or failed run.

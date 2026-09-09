@@ -1,11 +1,28 @@
+> Archived snapshot, 2026-09-08. Original status and evidence below are historical.
+> Current guidance: [Maintenance](../MAINTENANCE.md), [acceptance and open gates](../MAINTENANCE-ACCEPTANCE.md),
+> and [ADR-0048](../adr/0048-inventory-led-maintenance-resource-management.md).
+
 # Provider and action policy
 
-- **Design status:** Accepted — implemented 2026-09-05; see ADR-0048 "Implementation status" for open gates
-- **Governing decision:** [ADR-0048](../../adr/0048-inventory-led-maintenance-resource-management.md)
-- **Safety floor:** [ADR-0044](../../adr/0044-receipt-aware-maintenance-control-plane.md)
+- **Design status:** Accepted — Focus browser approved 2026-09-08; integration verification and ADR-0048 human/cross-platform gates remain open
+- **Governing decision:** [ADR-0048](../adr/0048-inventory-led-maintenance-resource-management.md)
+- **Safety floor:** [ADR-0044](../adr/0044-receipt-aware-maintenance-control-plane.md)
 
 This policy explains when Maintenance may offer an in-product operation, when it may offer sourced
 steps, and when it must leave a verified condition in Inventory without assigning work to the user.
+
+## Focus navigation does not grant action authority
+
+The approved Focus browser reveals scope, repository where applicable, type, resource family, and
+exact installation one level at a time. Only the final exact installation can bind an operation.
+Plugin inclusion, consumer bindings, dependencies, related installations, and host-specific
+precedence are read-only evidence disclosures. Following one preserves filters and labels an
+outside-filter selection; it never broadens the target or creates a provider capability.
+
+A capability to remove or disable a healthy installation is an **Optional action** in its details,
+not a Guidance recommendation. Admission still requires the verified reason and bounded outcome
+below. Optional actions use the same current evidence, exact preview, confirmation, one-use
+capability, verification, and receipt path as every other Managed operation.
 
 ## Assistance levels
 

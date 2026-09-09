@@ -1,7 +1,11 @@
+> Archived snapshot, 2026-09-08. Original status and evidence below are historical.
+> Current guidance: [Maintenance](../MAINTENANCE.md), [acceptance and open gates](../MAINTENANCE-ACCEPTANCE.md),
+> and [ADR-0048](../adr/0048-inventory-led-maintenance-resource-management.md).
+
 # Maintenance resource-management domain model
 
-- **Design status:** Accepted — implemented 2026-09-05; see ADR-0048 "Implementation status" for open gates
-- **Governing decision:** [ADR-0048](../../adr/0048-inventory-led-maintenance-resource-management.md)
+- **Design status:** Accepted — Focus browser approved 2026-09-08; integration verification and ADR-0048 human/cross-platform gates remain open
+- **Governing decision:** [ADR-0048](../adr/0048-inventory-led-maintenance-resource-management.md)
 
 This model separates what exists from what may be changed. It replaces the current finding as the
 primary UI object with a verified management projection while retaining the implemented transaction
@@ -66,6 +70,30 @@ ManagementInventory
 
 It is rebuildable evidence, not canonical configuration. It never grants mutation authority. Its
 opaque `inventoryId` binds paging and filters so one result set cannot mix snapshot generations.
+
+### Focus browsing projection
+
+The approved browser derives scope → repository (Projects only) → resource type → canonical
+family → exact installation from this snapshot. It presents one level at a time, with breadcrumbs
+and active filters skipping already selected levels. Across scopes is four root choices, not a
+new aggregate or an expanded list of all placements. A branch key is presentation identity only;
+it cannot replace canonical family or exact placement identity in queries or operations.
+
+Project identity and its distinguishing breadcrumb stay separate from relative installation
+location. Include worktrees changes project-choice visibility, not recorded placements or
+provider authority. No Project type UI axis is required. Counts count unique placements once,
+including when plugin inclusion or another relationship makes one placement reachable elsewhere.
+
+Relationships expose only recorded provenance, consumer, dependency, conflict, or family evidence.
+Provides / Provided by requires manifest or producer evidence; Installed by requires an installer
+receipt. Available to is a consumer binding, not usage telemetry. Requires / Required by is one
+verified edge viewed in either direction. Overrides requires host-specific precedence and
+effective-configuration evidence, never a narrower scope alone. Also installed requires explicit
+family identity. Missing provenance does not imply independent installation.
+
+Following a related exact placement retains the query context and labels outside-filter
+selections; it does not mutate the stored query, expand capabilities, or admit Guidance. Optional
+management operations remain distinct from recommended outcomes and retain exact action gates.
 
 ### DiscoveryConfiguration
 
@@ -240,8 +268,10 @@ Version axes remain independent:
 - `Pin`
 - `Channel`
 
-An Updates available entry requires a verified installed version, a source-bound candidate, and
-verified compatibility. `Recommended` additionally requires a named recommendation authority.
+Host-reported update availability may be disclosed from a verified candidate source while
+compatibility remains explicitly unverified. Other Updates available entries require a verified
+installed version, source-bound candidate, and verified compatibility. `Recommended` additionally
+requires a named recommendation authority.
 
 ### ProvenanceAssertion
 
@@ -281,7 +311,8 @@ become recursive actions.
 Conflict classification explains a relationship; it does not decide removal:
 
 - `duplicate-placement` — independently verified equivalent definitions in separate placements;
-- `shadowed-override` — a narrower placement takes precedence over a broader one;
+- `shadowed-override` — host-specific precedence and effective-configuration evidence establishes
+  which exact placement overrides another; narrower scope alone is insufficient;
 - `same-name-different-definition` — names match while verified definitions differ;
 - `equivalent-transport-registration` — MCP registrations target the same verified transport;
 - `version-requirement-divergence` — consumers require incompatible versions;

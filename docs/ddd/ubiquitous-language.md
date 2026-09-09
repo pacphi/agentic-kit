@@ -202,6 +202,13 @@ transcript and never substitute for each other. See [Machine footprint](machine-
 
 ## Maintenance language
 
+The Focus browser amendment approved on 2026-09-08 is undergoing integration verification.
+**Focus browser** means one visible hierarchy level with breadcrumbs: scope → repository for
+Projects → type → canonical family → exact installation. **Related installation** is an
+evidence-backed navigation target that preserves the originating filters and labels outside-filter
+context; it is not a recommendation or mutation capability. **Optional action** is an exact
+management capability whose availability alone does not admit it to Guidance.
+
 These terms describe [ADR-0044](../adr/0044-receipt-aware-maintenance-control-plane.md)'s
 implemented transaction engine and [ADR-0048](../adr/0048-inventory-led-maintenance-resource-management.md)'s
 implemented resource-management projection, guidance admission, discovery, and interruption-audit

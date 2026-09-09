@@ -20,7 +20,7 @@ The dashboard workspace has four tabs. Each answers a different question.
 
 | Destination | Question it answers |
 |-------------|---------------------|
-| **Inventory** | What exists? Every verified placement, healthy ones included, grouped by logical resource. |
+| **Inventory** | What exists? Browse scope, repository where applicable, type, family, then exact installation. Healthy resources remain included. |
 | **Guidance** | What can I accomplish? Only outcomes Agentic Kit can ground, in five lanes. |
 | **Discovery** | Where does Agentic Kit look? Automatic sources, your projects and collection roots, exclusions, and scan coverage. |
 | **Activity** | What changed? Receipts, undo, interruption audits, dispositions, recipe changes, and scan records. |
@@ -47,60 +47,97 @@ reason if it fails. The retired Catalog link (`#system/catalog`) redirects to In
 
 ## Inventory
 
-### Rows are exact placements
+The **Focus browser** described below was approved and implemented on 2026-09-08.
+See [focused validation](archive/2026-09-08-validation-maintenance-focus.md); older builds may
+still show expanded resource cards. The approved interaction does
+not change the exact-operation, preview, confirmation, or receipt contracts in this guide.
 
-An Inventory row is **one exact placement** of a resource: one file, one config entry, one
-installed package, one cache object, one model revision. Rows are grouped under the logical
-resource they belong to, so a skill carried by three hosts shows one artifact with three consumers,
-never three copies. One logical resource groups every placement with the same name, namespace, and
-verified definition across user and project scopes: a skill installed in five projects is one group
-with one row per exact placement, each naming the hosts that carry it. Copies whose verified
-definitions differ stay separate groups, linked by a **Same name, different definition** conflict.
-A group with more than three placements collapses to three rows behind **Show N more** (**Show
-fewer** once opened); it opens expanded when any of its placements carries a Guidance lane, and a
-toggle you click is remembered for the rest of the browser session. A logical resource, its
-placement, its physical artifact, and the host bindings that consume it are always kept separate.
+### Find a resource one level at a time
 
-Resource kinds: Skill, MCP registration, Plugin, Hook, Instruction file, Agent, Command, Host
-adapter, Executable, Runtime, Model, Provider configuration, Cache, Credential, and Storage.
+**Across scopes** begins with four choices: **System**, **Machine**, **User**, and **Projects**.
+Choose a scope, then a resource type, resource family, and exact installation. Projects adds a
+repository step before resource type. The breadcrumb returns to any earlier level. The browser
+shows only the current level, rather than thousands of installation cards at once.
 
-### Scope, views, facets, and search
+Scope, project, and type filters skip levels you have already selected. For example, choosing
+MCP registrations while inside User shows those resources in User, with User still in the context.
+Removing a filter restores the corresponding navigation level. Other filters and search narrow
+the same inventory. Singleton scope, project, type, and family choices appear in the breadcrumb
+instead of repeated chips; other and multiselect refinements keep removable chips. Breadcrumb
+backtracking or sidebar deselection removes navigation choices.
 
-- **Scope lens**: System, Machine, User, Projects, or Across scopes (the default). Scope is an
-  administrative fact about where the placement lives; it is independent of who consumes it.
-- **Curated views**: All resources, Can apply here, Steps available, Decisions to make, Updates
-  available, Dependencies, Conflicts and overlaps, Duplicated placements, Disabled resources,
-  Credentials and providers, Models and runtimes, Storage and caches, Recently changed, and
-  Inventory evidence only.
-- **Facets** are multiselect and show counts for the current result set only: scope, environment,
-  project, kind, consumer, carrier, provenance, package manager, version state, guidance,
-  dependency role, conflict, credential readiness, channel, evidence fields, and recently changed.
-  Active facets appear as chips; **Clear all** removes every facet at once. On narrow screens the
-  facets open in a **Filters** sheet.
-- **Search** matches displayed names, locations, and consumers. It refuses anything shaped like a
-  local path.
-- **Sort**: guidance first (the default), name, recently changed, or kind. Guidance-first orders
-  groups as Recovery to finish, Can apply here, Steps available, Decisions to make, Updates
-  available, Inventory evidence only, then Healthy resources. This is a sort order, not a severity
-  ladder.
-- **Load more** appends the next page. Pages carry an opaque cursor bound to the inventory that
-  produced them; if a newer inventory replaced it, the request is refused with
-  `INVENTORY_GENERATION_MISMATCH` and the browser reloads page one instead of mixing two
-  inventories.
+Projects offers repository choices by default. **Include worktrees**, below project search,
+reveals worktree choices; selected worktrees stay reachable until deselected. There is no Project
+type control. This preference changes browsing choices, not saved measurements, discovery sources,
+or the exact installation targeted by an operation. Measured ordinary project folders retain
+their distinct designation rather than being falsely labelled Git repositories.
 
-Your last scope, view, sort, facets, and search are remembered privately. A link with state in the
-URL wins over the remembered view.
+### Exact installations
 
-### The inspector
+A family can contain multiple installations across scopes, hosts, and projects. Family identity
+comes from recorded evidence, not matching display names. Selecting a family reveals exact rows:
+one file, configuration entry, package, cache object, or model revision per installation. Location
+appears first, followed by **Available to** consumer names and applicable measured version evidence.
+Project locations are relative to the measured repository. Missing location evidence never creates
+a guessed `.claude` or `.agents` directory.
 
-Selecting a row opens the resource inspector. It answers, in order: what this is, **Where is it?**,
-**Where did it come from?**, **What version is here?**, **Who uses it?**, **What changed or
-conflicts?**, **What can I accomplish?**, **What proves this?**, and **What happened before?**. A
-question with no verified answer is omitted rather than filled with a placeholder. **Back to N
-results** restores your place in the list.
+A skill installed once and consumed by several hosts appears once with several consumer bindings.
+A family may group measured versions for browsing while preserving each exact resource and placement
+identity. Conflicting definitions remain evidence, not permission to remove a copy. Counts count
+distinct installations once, even when a relationship links to one from another branch.
 
-Locations render as breadcrumbs. The exact path is owner-private: press **Reveal exact path** to
-fetch it, then **Copy exact path**. Paths never appear in the inventory, links, exports, or toasts.
+Resource kinds include Skill, MCP registration, Plugin, Hook, Instruction file, Agent, Command,
+Host adapter, Executable, Runtime, Model, Provider configuration, Cache, Credential, and Storage.
+
+### Views, facets, search, and sorting
+
+- **Curated views** include All resources, Can apply here, Steps available, Decisions to make,
+  Updates available, Dependencies, Conflicts and overlaps, Duplicated placements, Disabled
+  resources, Credentials and providers, Models and runtimes, Storage and caches, Recently
+  changed, and Inventory evidence only.
+- **Facets** are multiselect and show counts. Scope, environment, project, type, hosts/adapters,
+  carrier, provenance, package manager, version, Guidance, dependency, conflict, credential,
+  channel, evidence, and recent-change filters remain available. **Clear all** removes facets;
+  narrow screens use a **Filters** sheet.
+- **Search** matches displayed names, location breadcrumbs, and consumers. Exact private paths
+  do not enter filter URLs.
+- **Sort** applies within the current level: guidance first, name, recently changed, or kind.
+  Guidance-first prioritizes Recovery to finish, Can apply here, Steps available, Decisions to
+  make, Updates available, Inventory evidence only, then Healthy resources. This order is not a
+  severity assessment and does not expand all branches.
+- Bounded pages retain their inventory-generation identity. When a newer snapshot replaces the
+  source, the browser reloads the current query instead of mixing generations or treating a
+  partial page as the whole inventory.
+
+A valid linked view takes precedence over privately remembered preferences. Navigation state uses
+opaque identities; a displayed repository or location never becomes an action target string.
+
+### Details and relationships
+
+Selecting an exact installation opens details below the current list. They explain identity,
+location, provenance, versions, consumers, changes, available outcomes, evidence, and history.
+Closing details restores the originating row. Relationships use compact expandable cards; a
+question with no supporting evidence is omitted or states what has not been established.
+
+- **Provides / Provided by** links plugin contents only with manifest or recorded producer evidence.
+  **Installed by** requires an installer receipt; an enclosing plugin directory is insufficient.
+- **Available to** names recorded consumer bindings. It does not claim recent use.
+- **Requires / Required by** links a verified dependency in either direction.
+- **Overrides / Overridden in** requires that host's precedence and effective-configuration evidence.
+  A project scope alone does not prove that it overrides user configuration.
+- **Also installed** links other exact installations of the same established resource family.
+  Equal names do not establish equivalence, and missing origin does not prove independent ownership.
+
+Opening a related installation keeps your inventory location and filters unchanged. If the related
+installation falls outside those filters, details say so explicitly. Back returns to the previous
+related installation; closing details returns to the original list. These links neither change
+resources nor recommend an operation. **Optional actions**, such as supported removal or
+disablement, stay separate from Guidance and retain the same exact preview and confirmation flow.
+
+Locations render as short breadcrumbs or measured relative project locations. Use **Reveal exact
+path**, then **Copy exact path**, for the owner-private absolute path. Exact paths never enter
+inventory links or global toasts; exported receipts remain sanitized unless you explicitly choose
+to include local paths.
 
 ### Evidence grades in plain words
 
@@ -144,8 +181,9 @@ operation, a signed procedure, a set of decision choices, an exact update candid
 - **Decisions to make** appears for a missing verified dependency. It always offers four choices:
   **Repair command path**, **Relink dependency**, **Reinstall dependency**, and **Remove
   registration**. A choice that cannot be grounded stays visible with the reason.
-- **Updates available** needs a verified installed version, an observed candidate, and verified
-  compatibility. The word *recommended* appears only when a named authority is verified; otherwise
+- **Updates available** can disclose host-reported availability from a verified candidate source
+  while explicitly stating that compatibility is unverified. Other candidate entries require a
+  verified installed version and compatibility. The word *recommended* appears only when a named authority is verified; otherwise
   the entry says a candidate is available. Prerelease and nightly candidates appear only for
   placements enrolled in that channel.
 - **Recovery to finish** comes from unfinished receipts.
@@ -277,7 +315,7 @@ on completeness.
 ### Retention
 
 Checkpoints are bounded to 256 KiB, expire after 7 days, and are rejected if the source, environment,
-exclusions, or policy drifted. Scan history keeps at most 32 summaries per environment for at most
+exclusions, or policy drifted. Scan history keeps at most 10 summaries per source per environment for at most
 90 days; you may lower either figure, never below one. Receipts, dispositions, and recipe acceptance
 records are never cleared by history retention.
 
@@ -404,6 +442,15 @@ The service registers only providers it can execute. Npx actions depend on curre
 evidence. The absence of a button can be the correct result.
 
 ## Skill ownership is stricter than inventory identity
+
+Direct MCP registrations and plugin-provided registrations retain separate identities: a
+plugin prefix identifies the provider, even when its server has the same name. Inspect
+**Provided by** to follow that relationship. Nested Codex tool settings are part of their
+server registration and are not separate MCP installations.
+
+Measured user instruction files retain their resolved configuration location through
+**Reveal exact path**. Their paths remain private in ordinary inventory responses.
+Refresh evidence after upgrading to populate locations missing from an older snapshot.
 
 Inventory can relate a standalone skill and a plugin-contributed skill by exact name, bounded
 entrypoint digest, or bounded full-definition digest. Full-definition equality includes the
@@ -639,5 +686,62 @@ storage is blocked, so authenticated panels can still finish bootstrap.
 
 For architecture and invariants, see [the Maintenance domain](ddd/maintenance.md),
 [ADR-0048](adr/0048-inventory-led-maintenance-resource-management.md), the
-[design package](design/maintenance-overhaul/README.md), and
+[acceptance criteria and open gates](MAINTENANCE-ACCEPTANCE.md), and
 [ADR-0044](adr/0044-receipt-aware-maintenance-control-plane.md) for the transaction engine.
+
+### Resource descriptions and installation sources
+
+Focus cards show the capability name with **Direct configuration** or **Provided by
+<plugin>** where applicable. These labels do not merge installation identities.
+The scanner retains declared skill, agent, and command description frontmatter and
+installed plugin manifest descriptions. Cards show at most two lines; absent metadata
+adds no placeholder. Descriptions are author declarations, not verified behavior.
+Different descriptions within a family are shown on individual installation rows.
+
+Metadata sources for further coverage:
+
+| Resource | Source | Collection status |
+| --- | --- | --- |
+| Skills | `SKILL.md` description frontmatter | Local scan |
+| Agents and commands | Markdown description frontmatter | Local scan |
+| Plugins | Host plugin manifest `description` | Local scan |
+| Projects | Package manifest description, e.g. `package.json` or `pyproject.toml` | Not yet collected |
+| MCP servers | Initialization `serverInfo.description` | Requires runtime evidence; not yet collected |
+| MCP tools | `tools/list` description | Requires runtime evidence; not yet collected |
+
+The local scan does not launch MCP servers for descriptions or substitute a parent
+plugin description for its components. Reads are bounded and displayed as plain text;
+path-bearing descriptions are omitted from public Maintenance data. Refresh the
+machine measurement after upgrading to capture new catalog metadata.
+
+Project coverage is designed around build ecosystems rather than one manifest format.
+See the [proposed project metadata adapter design](PROJECT-METADATA-ADAPTERS.md)
+for the 25-language target, polyglot attribution, and unsupported-metadata behavior.
+
+Project cards show up to three measured language badges, with an expandable remainder
+for polyglot repositories. Artifact-only detections do not imply source line counts.
+See the [dated top-50 coverage list](LANGUAGE-COVERAGE.md).
+
+### Scan history dates
+
+Activity presents scan history as a table grouped by the browser’s local calendar date,
+newest first. Each date has a chevron toggle to expand or collapse its source rows; groups
+start collapsed and retain their state while the dashboard stays open. Source rows show completion time and timezone, source, status, and entry count.
+Discovery focuses on source configuration and current coverage; historical scans appear only
+in Activity. Groups represent dates, not inferred shared scan runs. Missing dates remain explicitly unknown.
+Version measurements, update checks, and snooze deadlines also use local date/time formatting.
+
+Scan history retains the latest 10 completed records per source and environment, within the
+90-day retention limit. Each new record replaces the oldest retained record for that source.
+
+Activity places recovery, work in progress, receipts, dispositions, and recipe changes in a
+responsive card grid above the full-width scan history. Narrow screens use a single column.
+
+Scan history scrolls within a bounded panel sized for a date heading and about four source
+rows. Column headers stay pinned while dates and records scroll.
+
+Executable installations expose their measured launcher through **Reveal exact path**.
+Detection checks PATH (including Windows PATHEXT), resolves symlinks, and reads bounded npm
+`bin` metadata when a launcher is not on PATH. When only the installation root was measured,
+that root remains revealable. Paths stay out of the public inventory. Re-measure machine
+to collect new launcher evidence; discovery covers the environment running the scan.

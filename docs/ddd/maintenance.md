@@ -217,7 +217,7 @@ new run is scanning, paused, stopped, or failed; a partial source can never supp
 `INCOMPLETE_SOURCE_FORBIDDEN_CLAIMS` names (absence, complete totals, uniqueness, complete
 conflicts, complete reverse dependencies, reclaimable totals, or a completeness-dependent action —
 enforced by `sourceComplete`, applied to every affected placement as the `source-scan-incomplete`
-condition). Retention defaults to 32 summaries and 90 days per environment, with a 7-day checkpoint
+condition). Retention defaults to 10 summaries per source per environment and 90 days, with a 7-day checkpoint
 floor (`SCAN_HISTORY_RETENTION`); `discovery/history.mjs`'s `clearHistory` cannot remove an
 unresolved, verification-required, or otherwise protected summary.
 
@@ -309,10 +309,13 @@ rollback-capable action, an exact current postimage, and verified restoration.
 
 The Maintenance panel renders four destinations:
 
-1. **Inventory** — scope lens (System, Machine, User, Projects, Across scopes), curated views,
-   multiselect facets, logical resource groups with exact placement rows sorted Guidance-first, and
-   a resource inspector (`management/query.mjs`'s `runInventoryQuery`, an opaque-cursor, indexed
-   query engine).
+1. **Inventory** — implemented Focus browser (2026-09-08; focused verification passed): four
+   Across scopes roots, then scope → repository (Projects only) → type → family → exact
+   installation. Breadcrumbs and multiselect filters skip already chosen levels. Details below
+   the current list expose evidence-backed relationships; related selections preserve filters
+   and label outside-filter context. Include worktrees controls project-choice visibility, with
+   no Project type control. The underlying `runInventoryQuery` remains an opaque-cursor, indexed
+   query over exact placements; presentation does not grant action authority.
 2. **Guidance** — the five admitted lanes, rendered procedures, and the Audit interruption dialog.
 3. **Discovery** — automatic sources, exact projects, collection roots, exclusions, scan progress,
    and history.
@@ -320,6 +323,12 @@ The Maintenance panel renders four destinations:
    history.
 
 Catalog is no longer a separate destination; `#system/catalog` redirects into Inventory.
+
+The approved Focus relationship contract separates plugin inclusion, installer receipts, consumer
+bindings, dependencies, host-specific configuration precedence, and canonical family identity.
+None can be inferred from display-name equality or physical containment alone. Optional management
+capabilities stay in exact installation details, separate from Guidance admission. Source-bound
+integration and human/cross-platform evidence remain required before completion claims.
 
 The dashboard's v2 HTTP allowlist (`src/lib/dashboard/maintenance-security.mjs`'s
 `MAINTENANCE_V2_ROUTES`) is exact:

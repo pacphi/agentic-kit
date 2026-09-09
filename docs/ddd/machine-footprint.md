@@ -9,6 +9,12 @@ Its terms are merged into [Ubiquitous language](ubiquitous-language.md) and the 
 > inventory" below); this context's collectors and measurement ownership remain read-only and
 > unchanged.
 
+Maintenance's approved Focus browser (2026-09-08; integration verification pending) presents
+this measured evidence one level at a time, with repository choices and optional worktree
+visibility. That presentation cannot change source inclusion, complete-placement counts, or
+collector ownership. Its evidence-backed relationship disclosures are governed by the
+[Maintenance guide](../MAINTENANCE.md).
+
 ## Purpose
 
 Machine footprint answers **what this toolchain costs the machine itself**: how many bytes the
@@ -84,8 +90,9 @@ read not on this list is a defect, and adding one is an amendment to this docume
 | A transcript's **head** | `project-sources.mjs`, consumed by project discovery and top-N session attribution | opening `cwd`, native session ID, and timezone-bearing timestamp fields | every message, prompt, title, tool call, tool result and model output in the file |
 | OpenCode's session store | `project-sources.mjs` | the `directory` column, read-only | every other column, and every message row |
 | A project's own manifests | `stack-detect.mjs` | dependency **keys** (and, for `path:`/`workspace:` entries, enough of the value to reject them) | manifest values, scripts, and anything executable |
-| A project's own source files | `stack-detect.mjs` | the count of `\n` bytes, and whether byte 0 of the first chunk region is NUL | the text — each 64 KB chunk is counted and immediately overwritten |
-| Capability entrypoints and bounded skill trees | `catalog.mjs`, `catalog-evidence.mjs` | SHA-256 of regular, non-symlink files; full skill definitions are capped at 512 entries, 1 MiB per file, and 8 MiB total | descriptions or body text; only metadata and digests leave the read |
+| A project's own source files | `stack-detect.mjs` | the count of `\n` bytes, binary checks, and transient ≤16 KiB language-signature checks | the text — each 64 KB chunk is counted and immediately overwritten |
+| Capability entrypoints and bounded skill trees | `catalog.mjs`, `catalog-evidence.mjs` | SHA-256 of regular, non-symlink files; full skill definitions are capped at 512 entries, 1 MiB per file, and 8 MiB total | body text; only metadata and digests leave the read |
+| Resource description declarations | `catalog-descriptions.mjs` | Markdown frontmatter or installed plugin manifest description; ≤64 KiB input and ≤1024 characters output | resource bodies and unrelated metadata; symlinked files |
 | MCP/config capability tables | `catalog-config-readers.mjs` | named JSON values or bounded TOML table blocks, normalized into value-only fingerprints | credentials and raw configuration text |
 | Project artifact Git state | `catalog-project-evidence.mjs` | tracked/untracked and clean/changed state for the exact artifacts already measured | history, commit content, diffs, and ownership claims |
 | Host-native plugin inventory | `claude plugin list --json`, `codex plugin list --json` | whitelisted identity, version, scope, enabled state, install/cache location, lifecycle policy | MCP definitions, headers, credentials, arbitrary source documents, unknown fields |

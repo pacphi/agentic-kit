@@ -1,7 +1,11 @@
+> Archived snapshot, 2026-09-08. Original status and evidence below are historical.
+> Current guidance: [Maintenance](../MAINTENANCE.md), [acceptance and open gates](../MAINTENANCE-ACCEPTANCE.md),
+> and [ADR-0048](../adr/0048-inventory-led-maintenance-resource-management.md).
+
 # Maintenance experience specification
 
-- **Design status:** Accepted — implemented 2026-09-05; see ADR-0048 "Implementation status" for open gates
-- **Governing decision:** [ADR-0048](../../adr/0048-inventory-led-maintenance-resource-management.md)
+- **Design status:** Accepted — Focus browser approved 2026-09-08; integration verification and ADR-0048 human/cross-platform gates remain open
+- **Governing decision:** [ADR-0048](../adr/0048-inventory-led-maintenance-resource-management.md)
 
 The experience is an administrative workspace, not an alert feed. It leads with outcomes, keeps
 the complete verified footprint close at hand, and exposes technical evidence progressively.
@@ -25,68 +29,61 @@ restores the user's last destination, scope, view, sort, and facets from owner-p
 ### Desktop workspace wireframe
 
 ```text
-┌ Maintenance ─────────────────────────────────────────────────────────────────┐
-│ Inventory | Guidance | Discovery | Activity                                  │
-│ System | Machine | User | Projects | Across scopes             Search…       │
-├───────────────┬──────────────────────────────────┬────────────────────────────┤
-│ Curated views │ 128 resources                    │ Resource inspector         │
-│ □ Updates     │ ┌ Logical resource ────────────┐ │ What is this?              │
-│ □ Conflicts   │ │ Placement · Scope · Location │ │ Where is it/from?          │
-│               │ │ Version · Source · Consumers │ │ Version and consumers      │
-│ Facets        │ │ Outcome or Open details      │ │ Dependencies/conflicts     │
-│ Type (12)     │ └──────────────────────────────┘ │ What can I accomplish?     │
-│ Host (4)      │                                  │ Evidence and activity      │
-│ Source (8)    │                                  │                            │
-│ [Clear all]   │                                  │                            │
-└───────────────┴──────────────────────────────────┴────────────────────────────┘
+Maintenance                 Inventory | Guidance | Discovery | Activity
+Refresh evidence            Re-measure machine
+Filters                     Across scopes › User › MCP registrations
+  Scope                     context7                 2 installations
+  Project                   playwright               1 installation
+  Include worktrees         …
+  Type                      [Select a resource to reveal its installations]
+  Hosts / Adapters
+  More filters              [Exact installation opens details below the list]
+  Active chips / Clear all
 ```
 
 ### Narrow-screen flow
 
-```text
-Maintenance / Inventory
-[Search] [Filters (3)]
-[Scope: Across scopes]
-
-Logical resource
-Placement · Scope · Location
-Version · Guidance outcome
-
-        select placement
-               ↓
-┌ Back to 128 results ──────────┐
-│ Resource detail               │
-│ identity and location         │
-│ provenance and version        │
-│ consumers and dependencies    │
-│ outcome / procedure / action  │
-│ evidence and activity         │
-└───────────────────────────────┘
-```
+The same Focus browser shows one level at a time. Filters open in a sheet, breadcrumbs wrap,
+and selecting an exact installation opens details below the current list. Closing details restores the prior
+level and row focus. No essential navigation requires horizontal scrolling or a hover gesture.
 
 ## Inventory
 
-Inventory opens with all verified resources across all scopes. Rows associated with Guidance are
-sorted first without hiding healthy or inventory-only resources. The initial group order is:
+**B — Focus browser**, approved 2026-09-08, is the current interaction design. The earlier compact
+Option A cards remain historical context; the expandable tree and column-browser alternatives
+remain comparison prototypes. Approval does not complete integration, usability, assistive-
+technology, or cross-platform verification.
 
-1. Recovery to finish
-2. Can apply here
-3. Steps available
-4. Decisions to make
-5. Updates available
-6. Inventory evidence only
-7. Healthy resources
+Across scopes initially shows four labelled roots: **System**, **Machine**, **User**, and
+**Projects**. It does not render every resource family or installation at once. Selecting a root
+reveals the next level:
 
-This is a sort, not a severity ladder. Warning color is not applied to groups 2–6 by default.
+- System / Machine / User → resource type → resource family → exact installation.
+- Projects → repository → resource type → resource family → exact installation.
 
-### Scope lens
+Only the current level is rendered as the main list. A breadcrumb records the selected context;
+ancestor controls return to a broader level while retaining active filters. Resource types come
+from verified measurements, not hardcoded assumptions about what a host must have installed.
+Scope roots remain distinguishable even when a source is empty or incomplete; coverage explains
+which conclusions the saved evidence can support.
 
-The persistent first facet is **System**, **Machine**, **User**, **Projects**, or **Across scopes**.
-Selecting a scope changes the secondary facets to values that actually exist in the result set.
-Unavailable facet values disappear.
+### Scope lens and filter shortcuts
 
-Scope labels always include text. Suggested supporting icons are shield for System, computer for
-Machine, person for User, and folder/repository for Projects. Icons do not encode provenance.
+The scope lens remains **System**, **Machine**, **User**, **Projects**, or **Across scopes**.
+Selecting a scope filter skips the scope roots; selecting one project skips its repository level;
+selecting one type skips the type level. Already selected context stays in the heading, breadcrumb,
+or chips. Selecting a type while inside User must retain User; it must not unexpectedly broaden
+the view across scopes. Removing a filter restores the corresponding navigable level. Multiselect
+filters narrow available branches while preserving any level with more than one possible value.
+Search and host filters narrow the same query; they do not create a separate inventory.
+
+Guidance-first, name, recently changed, and kind sorting apply within the current level where
+meaningful. The Guidance-first order remains Recovery to finish, Can apply here, Steps available,
+Decisions to make, Updates available, Inventory evidence only, then Healthy resources. This is a
+sort, not a severity ladder or a reason to expand every matching branch. Healthy verified
+resources remain available.
+
+Scope labels always include text. Supporting icons do not encode provenance or actionability.
 
 ### Curated views
 
@@ -112,7 +109,10 @@ than introduce a second filter model.
 
 ### Facets
 
-Facets are multiselect, show counts, render removable chips, and provide one **Clear all** action.
+Facets are multiselect, show counts, and provide one **Clear all** action. Singleton scope, project,
+type, and family choices appear in the breadcrumb, without duplicate chips. Other refinements and
+multiselect choices retain removable chips. Breadcrumb backtracking or sidebar deselection removes
+navigation choices.
 They include only applicable values from:
 
 - Administrative scope and environment
@@ -134,30 +134,41 @@ They include only applicable values from:
 Search and facets compose. Clearing a scope-dependent facet announces one debounced result update,
 not one live-region message per chip.
 
-### Logical group and placement row
+### Resource family and exact installation
 
-Option A (approved 2026-09-07) uses a compact filter rail and a full-width result area until a
-placement is selected. Common views and project, kind, and consumer facets are immediately
-available; More views and More filters retain the advanced controls. Active facets stay visible
-as removable chips. Long facet lists are searchable and scroll within their disclosure.
+The compact filter rail and full-width list remain until an exact installation is selected.
+Common views and project, type, host, and adapter facets are available immediately; More views
+and More filters retain advanced controls. Extra and multiselect refinements remain removable chips;
+singleton navigation choices use breadcrumbs. Long option
+lists are searchable and scroll inside their disclosure.
 
-Singleton resources render one compact card. Multiple installations share one resource heading;
-rows identify their context and verified version. Projects scope groups results under project
-headings, preserving separate resource and placement identities even when names match. The
-selected scope, project, and kind supply shared context, so rows omit redundant labels. Verified
-carrier and consumer differences remain visible. Rows use neutral **View details** controls;
-write actions are presented only with the selected placement's details and existing preview flow.
-Variant markers and content digests do not appear on cards. Digests remain in technical evidence.
+A family row names the resource and distinct installation count in context. Choosing it reveals
+exact installations, each with measured location first, **Available to** host names, and meaningful
+version evidence. Shared scope, repository, and type are supplied by navigation context instead
+of repeated on every row. Project labels contain repository identity, not an installation suffix;
+colliding basenames use the shortest distinguishing parent breadcrumb. Missing location evidence
+falls back to a factual breadcrumb, never a guessed host directory. Relative project locations
+must stay inside the measured project root; exact absolute paths remain owner-private.
 
-When project basenames collide, the breadcrumb adds the shortest distinguishing parent segments,
-for example `Development › ai › agentic-kit`. User-defined display names are deferred.
+Canonical family identity may group different measured versions for presentation; it never
+collapses exact resource or placement IDs or relies on display-name equality alone. One physical
+installation consumed by several hosts is one row. Resource and branch counts do not add repeated
+relationship links. Bounded paging remains source-generation-bound and must not turn a partial
+page into a complete count. No loading path opens all installations across the whole inventory.
+
+Rows offer neutral **View details** navigation. Variant markers and content digests remain in
+technical evidence. Optional write actions appear only in exact installation details and use the
+existing preview and confirmation flow. Exploring **Also installed** is a contextual relationship:
+it preserves filters and identifies any related selection outside them, rather than silently
+clearing the view. A separately labelled reset or clear-filter control is the explicit way to
+broaden filters.
 
 ### Resource inspector
 
-Desktop opens a side inspector only after selection, without losing result or filter context.
-Closing it restores the result width and originating row focus. Escape also closes it. Narrow
-screens use a full-screen inspector with an accessible **Close details** control. The inspector answers questions in
-this order:
+Selecting an exact installation opens details below the current list without losing its
+breadcrumb or filters. Closing details restores the originating row focus; Escape also closes
+them. Details and expandable relationship cards reflow on narrow screens, with an accessible
+**Close details** control. The inspector answers questions in this order:
 
 1. **What is this?** Logical identity, kind, exact placement, environment, condition.
 2. **Where is it?** Scope, breadcrumb, carrier, reveal/copy exact path.
@@ -172,9 +183,34 @@ this order:
 The exact path reveal is owner-only and never copied automatically. Copy feedback names what was
 copied and does not expose the path through a global toast or URL.
 
+### Evidence-backed relationship disclosures
+
+Relationships are compact expandable sections in exact installation details. Following a related
+installation preserves filters and the originating browsing context. A related item outside the
+current filters is explicitly labelled; returning restores the original installation or list.
+Every relationship is read-only navigation and counts each placement once.
+
+| Relationship | Required evidence |
+|---|---|
+| Provides / Provided by | Manifest or explicit recorded producer relationship; inclusion is not an installer receipt |
+| Available to | Recorded consumer bindings; availability does not claim recent use |
+| Requires / Required by | Declared configuration reference and resolved dependency evidence; reverse links derive from the same edge |
+| Overrides / Overridden in | Adapter-specific precedence and effective-configuration evidence, never scope order alone |
+| Also installed | Explicit canonical resource identity; equal names alone are insufficient |
+| Origin not established | No supported origin claim; absence is not proof of independent ownership |
+
+Plugin-provided skills may be explored from a plugin only when inclusion is established. They
+remain the same installations reachable from their resource type. **Installed by** requires an
+installer receipt. Symlink targets, physical containment, content equality, conflict, and update
+availability are separate facts; none substitutes for a producer or override edge. Adapters that
+lack evidence omit the relationship rather than imitating prototype fixture relationships.
+
 ## Guidance
 
-Guidance is outcome-first; resource type remains a filter. Its lanes are:
+Guidance is outcome-first; resource type remains a filter. Merely supporting removal or disablement
+does not admit a recommendation. Such capabilities stay under **Optional actions** in installation
+details, using the same exact preview and confirmation flow. Relationships never admit Guidance
+without its independent condition, evidence, and outcome requirements. Its lanes are:
 
 ### Can apply here
 
@@ -293,10 +329,10 @@ Partial success keeps completed checklist evidence and presents only the next gr
 
 ## Responsive behavior
 
-- At wide widths, filters, results, and inspector remain simultaneously available without nested
-  horizontal page scrolling.
-- At narrow widths, filters use a dedicated sheet, selected details use a full-screen route, and
-  Back returns focus to the originating row.
+- At wide widths, the filter rail and current list remain visible; selected details appear below
+  the list without horizontal page scrolling.
+- At narrow widths, filters use a dedicated sheet, selected details reflow below the list, and
+  closing returns focus to the originating row.
 - At 320 CSS pixels, actions reflow vertically and no essential control hides behind a horizontal
   scroller.
 - Large inventories use deterministic server-side paging or virtualization that preserves list or
@@ -335,7 +371,7 @@ choice. Informational evidence without requested action stays visually neutral.
 - [WCAG Label in Name](https://www.w3.org/WAI/WCAG22/Understanding/label-in-name.html) keeps visible
   and programmatic control labels aligned for speech and assistive-technology users.
 
-### Measurement feedback (Option A)
+### Measurement feedback (retained in Focus browser)
 
 The toolbar directly below Inventory, Guidance, Discovery, and Activity is the single location
 for Refresh evidence and Re-measure machine within Maintenance. Coverage notices are passive.
@@ -349,8 +385,8 @@ project discovery is a policy toggle, not an extra filesystem root in the covera
 ### Hosts and external adapters (2026-09-07 correction)
 
 The filter rail keeps **Hosts** (Claude, Codex, OpenCode) separate from **Adapters**
-(external host integrations, including Hermes). This follows [Host support](../../HOST-SUPPORT.md)
-and the [Hermes external adapter guide](../../HERMES-HOST-ADAPTER.md). An adapter filter counts
+(external host integrations, including Hermes). This follows [Host support](../HOST-SUPPORT.md)
+and the [Hermes external adapter guide](../HERMES-HOST-ADAPTER.md). An adapter filter counts
 associated inventory resources; a zero count does not assert installation, admission, trust,
 or runtime health. Existing preview and capability gates continue to govern actions.
 
@@ -359,13 +395,15 @@ model inventory does not establish Agentic Kit as a consuming host. Known manage
 roots are excluded from implicit catalog project candidates; explicitly designated project
 objects remain eligible. Version-like project names are not filtered by their spelling.
 
-
 ### Project designations (approved 2026-09-07)
 
 Projects include repositories and ordinary project folders. A Git branch icon with **Git**,
 a folder icon with **Folder**, or a branch icon with **Worktree** appears beside each project
-filter option and once in the project's result heading. A **Project type** facet selects these
-categories. Shared context is not repeated on every resource card. Labels accompany icons.
+choice and once in its browsing context. **Include worktrees** below project search controls
+worktree visibility; worktrees are hidden by default, while selected worktrees stay reachable
+until deselected. The toggle remains available during project search and when only worktree
+choices exist. There is no **Project type** control. The preference changes presentation, not
+discovery inclusion, measured placements, or exact write targets. Labels accompany icons.
 
 New catalog measurements retain classification for all project candidates, independently of
 the narrower hosted-repository disk measurement. A readable folder with no Git marker in its
@@ -379,12 +417,13 @@ implicit project candidates; a version-like name alone never excludes a genuine 
 
 ### Resource families and measured versions — approved 2026-09-08
 
-Across scopes presents one heading for a canonical resource family, excluding its definition
-digest from the presentation key while retaining every exact resource and placement identity.
-Grouping never relies on a display name alone. Installations beneath it carry scopes, hosts,
-projects, and measured versions. Filtered groups name all observed hosts and offer Show all
-installations; that action changes the query to the exact family. Bounded pages remain at most
-200 placements, and the client merges continuation rows into the existing family heading.
+Families appear at their selected hierarchy level; Across scopes starts at scope roots. The
+canonical family key excludes definition digest while every exact resource and placement identity
+is retained. Family identity is separate from branch/disclosure identity. Installation rows carry
+measured locations, consumer bindings, and versions. Related installations can be inspected across
+scopes with the current filters preserved and any outside-filter selection labelled. Bounded pages
+remain at most 200 placements and continuations merge by canonical family without losing branch
+context.
 
 Plugin release versions come from measured native inventory or installed manifests. Skills,
 agents, and commands may inherit a parent-plugin version, labelled separately from their own
