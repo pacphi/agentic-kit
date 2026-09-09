@@ -1,13 +1,14 @@
 // @ts-nocheck — browser bundle source (client.mjs reads it as text). These
 // pure helpers are also imported directly by unit tests.
 
-function dateTimeInstant(value) {
+export function dateTimeInstant(value) {
   if (value === null || value === undefined || value === '') return null;
   var at = typeof value === 'number' ? value : Date.parse(String(value));
-  return Number.isFinite(at) ? new Date(at) : null;
+  var instant = new Date(at);
+  return Number.isFinite(instant.getTime()) ? instant : null;
 }
 
-function dateTimeOptions(options) {
+export function dateTimeOptions(options) {
   var supplied = options && typeof options === 'object' ? options : {};
   return {
     locale: supplied.locale || undefined,
@@ -52,4 +53,38 @@ export function formatLocalDateTimeLong(value, options) {
 export function shortSessionId(value) {
   var id = String(value == null ? '' : value);
   return id.length > 12 ? '…' + id.slice(-12) : id;
+}
+
+/** Published calendar dates have no timezone; preserve their calendar day. */
+export function formatLocalDateOrTime(value, options) {
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    var instant = dateTimeInstant(value);
+    if (!instant) return null;
+    try {
+      return new Intl.DateTimeFormat(dateTimeOptions(options).locale, {
+        year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC',
+      }).format(instant);
+    } catch (_) { return null; }
+  }
+  return formatLocalDateTimeLong(value, options);
+}
+
+/** Calendar day containing an instant in the reader's timezone. */
+export function formatLocalDay(value, options) {
+  var instant = dateTimeInstant(value);
+  if (!instant) return null;
+  var settings = dateTimeOptions(options);
+  return new Intl.DateTimeFormat(settings.locale, {
+    year: 'numeric', month: 'short', day: 'numeric', timeZone: settings.timeZone,
+  }).format(instant);
+}
+
+export function formatLocalTime(value, options) {
+  var instant = dateTimeInstant(value);
+  if (!instant) return null;
+  var settings = dateTimeOptions(options);
+  return new Intl.DateTimeFormat(settings.locale, {
+    hour: 'numeric', minute: '2-digit', second: '2-digit',
+    timeZoneName: 'short', timeZone: settings.timeZone,
+  }).format(instant);
 }

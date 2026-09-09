@@ -1,6 +1,7 @@
 // @ts-nocheck — browser bundle source (never node-imported; client.mjs
 // reads it as text). See src/lib/dashboard/client/**'s eslint.config.mjs
 // override comment for why this directory isn't run through the node lib.
+import { formatLocalDateTimeLong, formatLocalDateOrTime } from './datetime.mjs';
 import { esc } from './bootstrap.mjs';
 import { fmtBytes } from './system-readout.mjs';
 import { MODEL_PAGE, fmtNum, modelFilters, modelRows, modelsBusy } from './usage.mjs';
@@ -25,7 +26,7 @@ import { MODEL_PAGE, fmtNum, modelFilters, modelRows, modelsBusy } from './usage
       seen.add(summary);return true;
     });
     return rows.map(function(row){return '<span class="mli-proof-row"><b>'+esc(row.source)+'</b> · '+esc(row.class)
-      +' · '+esc(row.capturedAt||"capture unknown")+' · '+esc(row.freshness)+' · '+esc(row.completeness)
+      +' · '+esc(formatLocalDateTimeLong(row.capturedAt)||"capture unknown")+' · '+esc(row.freshness)+' · '+esc(row.completeness)
       +'</span>';}).join("");
   }
 
@@ -138,8 +139,7 @@ import { MODEL_PAGE, fmtNum, modelFilters, modelRows, modelsBusy } from './usage
   }
 
   function mliDetectedAt(value){
-    var when=new Date(String(value||''));
-    return isNaN(when)?'Time not recorded':when.toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    return formatLocalDateTimeLong(value)||'Time not recorded';
   }
 
   function mliChangeRows(changes){
@@ -234,14 +234,14 @@ import { MODEL_PAGE, fmtNum, modelFilters, modelRows, modelsBusy } from './usage
   function mliDetailVariantFields(variants){
     var lifecycleScope=variants.lifecycleScope?'<div><dt>Lifecycle scope</dt><dd>'+esc(variants.lifecycleScope)+'</dd></div>':'';
     var availability=variants.availability?'<div><dt>Published availability</dt><dd>'+esc(variants.availability)+'</dd></div>':'';
-    var retirement=variants.retiredAt?'<div><dt>Retired</dt><dd>'+esc(variants.retiredAt)+'</dd></div>'
-      :(variants.retirementNotBefore?'<div><dt>Retirement commitment</dt><dd>Not before '+esc(variants.retirementNotBefore)+'</dd></div>':'');
+    var retirement=variants.retiredAt?'<div><dt>Retired</dt><dd>'+esc(formatLocalDateOrTime(variants.retiredAt)||'Not recorded')+'</dd></div>'
+      :(variants.retirementNotBefore?'<div><dt>Retirement commitment</dt><dd>Not before '+esc(formatLocalDateOrTime(variants.retirementNotBefore)||'Not recorded')+'</dd></div>':'');
     return {lifecycleScope:lifecycleScope,availability:availability,retirement:retirement};
   }
 
   function mliDetailLocalBlock(id,variants){
-    return id.provider==='ollama'?'<div><dt>Local installation</dt><dd>Installed'+(variants.modifiedAt?' · updated '+esc(variants.modifiedAt):'')+'</dd></div>'
-      +'<div><dt>Loaded now</dt><dd>'+esc(variants.loaded?'Yes':'No')+(variants.expiresAt?' · expires '+esc(variants.expiresAt):'')+'</dd></div>'
+    return id.provider==='ollama'?'<div><dt>Local installation</dt><dd>Installed'+(variants.modifiedAt?' · updated '+esc(formatLocalDateOrTime(variants.modifiedAt)||'Not recorded'):'')+'</dd></div>'
+      +'<div><dt>Loaded now</dt><dd>'+esc(variants.loaded?'Yes':'No')+(variants.expiresAt?' · expires '+esc(formatLocalDateOrTime(variants.expiresAt)||'Not recorded'):'')+'</dd></div>'
       +'<div><dt>Local model build</dt><dd>'+esc([variants.parameterSize,variants.quantizationLevel,variants.format].filter(Boolean).join(' · ')||'Not exposed')+'</dd></div>'
       +'<div><dt>Local memory</dt><dd>'+esc(variants.memoryBytes!=null?fmtBytes(variants.memoryBytes)+(variants.vramBytes!=null?' · VRAM '+fmtBytes(variants.vramBytes):''):'Not loaded')+'</dd></div>':'';
   }
@@ -366,7 +366,7 @@ import { MODEL_PAGE, fmtNum, modelFilters, modelRows, modelsBusy } from './usage
   function mliRenderBadgeAndAsof(empty,snap,attention){
     var badge=document.getElementById("mli-attention-n");
     if(badge){badge.hidden=!attention.length;badge.textContent=attention.length?String(attention.length):"";}
-    document.getElementById("mli-asof").textContent=empty?"not captured":("captured "+String(snap.capturedAt||"").replace("T"," ").replace(".000Z","Z"));
+    document.getElementById("mli-asof").textContent=empty?"not captured":("captured "+(formatLocalDateTimeLong(snap.capturedAt)||"time unknown"));
   }
 
   function mliRenderAttention(empty,attention){
