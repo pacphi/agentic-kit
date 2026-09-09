@@ -15,7 +15,7 @@ let rootObservation = null;
 function canonicalPath(candidate) {
   if (typeof candidate !== 'string' || !path.isAbsolute(candidate)) return null;
   let resolved;
-  try { resolved = fs.realpathSync(candidate); } catch { resolved = path.resolve(candidate); }
+  try { resolved = (fs.realpathSync.native ?? fs.realpathSync)(candidate); } catch { resolved = path.resolve(candidate); }
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 function userRootObservation(roots) {
@@ -43,7 +43,7 @@ export function observeUsageProject(cwd, { observedAt = Date.now(), cache = CACH
   if (prior && observedAt - prior.observedAt >= 0 && observedAt - prior.observedAt < 60_000) return prior;
   const repository = inspectProjectIdentity(cwd, { observedAt });
   let workingPath = repository.worktreeRoot ?? cwd;
-  try { workingPath = fs.realpathSync(workingPath); } catch { workingPath = path.resolve(workingPath); }
+  try { workingPath = (fs.realpathSync.native ?? fs.realpathSync)(workingPath); } catch { workingPath = path.resolve(workingPath); }
   const value = { key: keyFor(workingPath), label: safeProjectLabel(workingPath), kind: repository.kind,
     repositoryId: repository.repositoryId,
     repositoryLabel: repository.repositoryId ? safeProjectLabel(repository.root ?? repository.commonDir) : null,

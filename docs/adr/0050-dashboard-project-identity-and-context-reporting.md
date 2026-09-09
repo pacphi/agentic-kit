@@ -146,22 +146,24 @@ origin. Native select keyboard behavior and optgroup semantics are retained.
 
 ## Usage Score projects
 
-An additive `projectGroups` projection groups exactly the sessions admitted by the
-existing time/host filters. The existing `byProject` and total aggregates remain
-unchanged. New parse-time metadata carries opaque working-directory/repository
-identifiers and declared origins; display names are never joined to repository
-identity. Git observations describe the filesystem at parse time, with timestamps,
-not the historical state of a session. Repository inspection is bounded and
-memoized; aggregation and rendering perform no filesystem inspection.
+An additive `gitProjects` projection ranks discovered Git projects using exactly
+the sessions admitted by the existing time/host filters. Existing `byProject`
+and overall totals remain unchanged. Parse-time metadata carries opaque working
+and repository identifiers; display names never establish repository identity.
+Git observations describe the filesystem at parse time, with timestamps.
+Repository inspection is bounded and memoized; rendering performs no filesystem
+inspection.
 
-The panel ranks eight groups by cost, with expandable working-directory/session
-members and Show all for the remainder. Each session contributes exactly once.
-Original reported labels and transcript links preserve traceability. Unknown
-identity remains an unclassified group, and old payloads retain the flat fallback.
-Member lists scroll within a bound; expanded state survives rerenders.
+The panel shows a simple top 10 by spend, with plain names and cost/session/time
+values. Verified worktree spend rolls into an existing parent Git project.
+Standalone worktrees, exact user-level roots, bare repositories without a parent
+checkout, and unclassified directories do not appear in the ranking. There are no
+expanded group lists or Desktop suffixes. Overall Usage totals retain activity
+excluded from these ten rows. Older payloads request a usage refresh instead of
+guessing Git membership from labels.
 
-Usage index schema 19 rebuilds the derived cache once to recover metadata discarded
-by schema 18. This reads retained records; it does not alter original transcripts.
+Usage index schema 20 rebuilds the derived cache once to recover metadata missing
+from the previous release. This reads retained records without changing originals.
 Subsequent reads use incremental cached observations.
 
 ## Verification

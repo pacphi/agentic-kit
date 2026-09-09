@@ -977,70 +977,16 @@ import { renderUsage } from './usage-orchestrators.mjs';
   }
 
   function renderScoreProjects(d){
-    if(Array.isArray(d.projectGroups)){renderScoreProjectGroups(d.projectGroups);return;}
-    var projects=entries(d.byProject), pMax=projects.length?projects[0].cost:0;
-    var shown=projects.slice(0,8);
-    document.getElementById("u-projects-note").textContent=
-      projects.length>8?("top 8 of "+projects.length):(projects.length+" project"+(projects.length===1?"":"s"));
-    document.getElementById("u-projects").innerHTML=shown.length?shown.map(function(pr){
-      return bar(esc(pr.name),fmtUsd(pr.cost),fmtNum(fld(pr.v,"sessions"))+" sess · "+fmtMins(fld(pr.v,"minutes")),
-        pct(pr.cost,pMax),true);
-    }).join(""):'<div class="empty">no projects in window.</div>';
-
-  }
-
-  function scoreProjectOrigins(origins){
-    var labels=[];
-    if((origins||[]).includes('claude-desktop'))labels.push('Claude Desktop');
-    if((origins||[]).includes('codex-desktop'))labels.push('Codex Desktop');
-    return labels.length?' · '+labels.join(' · '):'';
-  }
-
-  function scoreProjectMember(member){
-    var kind=({git:'Repository',worktree:'Worktree',folder:'Folder'})[member.kind]||'';
-    var evidence=member.observationBasis==='current-filesystem'&&Number.isFinite(member.observedAt)
-      ?'Git association observed '+new Date(member.observedAt).toLocaleString():'';
-    var labels=(member.reportedLabels||[]).filter(function(label){return label!==member.label;});
-    var title=[evidence,labels.length?'Recorded as: '+labels.join(', '):''].filter(Boolean).join(' · ');
-    var links=(member.sessionRefs||[]).map(function(ref){
-      return '<a class="sy-link" data-transcript="'+esc(ref.id)+'" href="#usage/'+encodeURIComponent(ref.id)+'">'
-        +esc(ref.host+' · '+(formatLocalDateTime(ref.start)||ref.id))+'</a>';
-    }).join('');
-    var qualifier=(kind+scoreProjectOrigins(member.origins)).replace(/^ · /,'');
-    return '<details class="u-project-member" data-project-member="'+esc(member.key)+'"><summary title="'+esc(title)+'"><span>'+esc(member.label)
-      +(qualifier?'<small>'+esc(qualifier)+'</small>':'')+'</span><span class="mono">'+esc(fmtUsd(member.cost))
-      +'<small>'+esc(fmtNum(member.sessions)+' sess · '+fmtMins(member.minutes))+'</small></span></summary>'
-      +'<div class="u-project-sessions">'+links+'</div></details>';
-  }
-
-  function scoreProjectGroup(group,max){
-    var label=group.label+scoreProjectOrigins(group.origins);
-    return '<details class="u-project-group" data-project-group="'+esc(group.key)+'"><summary class="mrow">'
-      +'<span class="mname" title="'+esc(label)+'"><span aria-hidden="true" class="u-project-chevron">▸</span> '+esc(label)+'</span>'
-      +'<span class="mbar"><i class="alt" style="width:'+pct(group.cost,max).toFixed(1)+'%"></i></span>'
-      +'<span class="mval mono">'+esc(fmtUsd(group.cost))+'</span><span class="msub mono">'
-      +esc(fmtNum(group.sessions)+' sess · '+fmtMins(group.minutes))+'</span></summary>'
-      +'<div class="u-project-members">'+(group.members||[]).map(scoreProjectMember).join('')+'</div></details>';
-  }
-
-  function renderScoreProjectGroups(groups){
-    var container=document.getElementById('u-projects'),openKeys=new Set();
-    if(container.querySelectorAll)Array.from(container.querySelectorAll('details[open]')).forEach(function(node){
-      openKeys.add(node.getAttribute('data-project-group')||node.getAttribute('data-project-member')||'overflow');
-    });
-    var rows=groups.slice().sort(function(a,b){return b.cost-a.cost||String(a.label).localeCompare(String(b.label));});
-    var max=rows.length?rows[0].cost:0,shown=rows.slice(0,8),total=rows.reduce(function(sum,row){return sum+row.cost;},0);
-    var shownCost=shown.reduce(function(sum,row){return sum+row.cost;},0);
-    document.getElementById('u-projects-note').textContent=rows.length>8
-      ?'top 8 of '+rows.length+' groups · '+fmtUsd(shownCost)+' / '+fmtUsd(total)
-      :rows.length+' group'+(rows.length===1?'':'s');
-    var html=shown.map(function(group){return scoreProjectGroup(group,max);}).join('');
-    if(rows.length>8)html+='<details class="u-project-overflow"><summary>Show all '+esc(rows.length)+' groups</summary>'
-      +rows.slice(8).map(function(group){return scoreProjectGroup(group,max);}).join('')+'</details>';
-    container.innerHTML=html||'<div class="empty">no projects in window.</div>';
-    if(container.querySelectorAll)Array.from(container.querySelectorAll('details')).forEach(function(node){
-      node.open=openKeys.has(node.getAttribute('data-project-group')||node.getAttribute('data-project-member')||'overflow');
-    });
+    var target=document.getElementById('u-projects'),note=document.getElementById('u-projects-note');
+    if(!Array.isArray(d.gitProjects)){
+      note.textContent='';target.innerHTML='<div class="empty">Refresh usage to identify Git projects.</div>';return;
+    }
+    var projects=d.gitProjects.slice().sort(function(a,b){return b.cost-a.cost||String(a.label).localeCompare(String(b.label));});
+    var max=projects.length?projects[0].cost:0,shown=projects.slice(0,10);
+    note.textContent=projects.length>10?'top 10 of '+projects.length:projects.length+' project'+(projects.length===1?'':'s');
+    target.innerHTML=shown.length?shown.map(function(project){
+      return bar(esc(project.label),fmtUsd(project.cost),fmtNum(project.sessions)+' sess · '+fmtMins(project.minutes),pct(project.cost,max),true);
+    }).join(''):'<div class="empty">No Git-project usage in this timeframe.</div>';
   }
 
   function renderScoreCategories(d){

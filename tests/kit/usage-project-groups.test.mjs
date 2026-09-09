@@ -49,21 +49,19 @@ test('should_preserve_existing_totals_and_byProject_while_grouping_only_the_filt
   after.sessions[0].projectEvidence.label = 'changed';
   assert.equal(records[0].projectEvidence.label, 'repo');
 });
-test('should_render_top_eight_groups_show_all_and_escape_session_link_identity', () => {
+test('should_render_only_ten_ranked_git_projects_and_escape_labels', () => {
   const elements = { 'u-projects': {}, 'u-projects-note': {} };
   const source = fs.readFileSync(new URL('../../src/lib/dashboard/client/usage.mjs', import.meta.url), 'utf8')
     .replace(/^import .*;$/gm, '').replace(/\bexport /g, '');
   const esc = (value) => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
   const context = vm.createContext({ window: {}, document: { getElementById: (id) => elements[id] }, esc, formatLocalDateTime: () => null });
   vm.runInContext(`${source}\nglobalThis.renderProjects=renderScoreProjects;`, context);
-  const groups = buildUsageProjectGroups(Array.from({ length: 10 }, (_, i) => session(`id-${i}"><img>`, i + 1,
-    { key: `working:${i}`, label: `Repo ${i}`, kind: 'folder' }, 'claude-desktop')));
-  context.renderProjects({ projectGroups: groups });
-  assert.match(elements['u-projects-note'].textContent, /top 8 of 10 groups/);
-  assert.match(elements['u-projects'].innerHTML, /Show all 10 groups/);
-  assert.equal((elements['u-projects'].innerHTML.match(/data-project-group=/g) || []).length, 10);
-  assert.ok(elements['u-projects'].innerHTML.includes('Claude Desktop'));
-  assert.ok(!elements['u-projects'].innerHTML.includes('<img>'));
+  const gitProjects = Array.from({length:12},(_,i)=>({key:'repo-'+i,label:'Repo '+i+'<img>',cost:i+1,sessions:1,minutes:1}));
+  context.renderProjects({gitProjects,byProject:{'agent-xxx':{cost:1000}}});
+  assert.match(elements['u-projects-note'].textContent,/top 10 of 12/);
+  assert.doesNotMatch(elements['u-projects'].innerHTML,/Show all|Desktop|<img>|agent-xxx/);
+  assert.match(elements['u-projects'].innerHTML,/Repo 11&amp;lt;|Repo 11&lt;/);
+  assert.doesNotMatch(elements['u-projects'].innerHTML,/Repo 0&lt;/);
 });
 test('should_keep_same_named_paths_separate_and_retain_every_legacy_session_in_unclassified_group', () => {
   const groups = buildUsageProjectGroups([session('one', 1, { key: 'path:a', label: 'same', kind: 'folder' }),

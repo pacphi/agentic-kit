@@ -204,6 +204,12 @@ evidence at all is structurally zero rather than cheap, and folding it in would 
 toward zero for a reason that is not about spend. A real figure under a cent renders `<$0.01`, never
 `$0.00`.
 
+**Projects** ranks the top 10 discovered Git projects by spend in the selected
+timeframe. Verified worktree usage rolls into its parent project; standalone
+worktrees, user-level locations, and unclassified directories are excluded from
+this panel. Overall Usage totals retain all activity, including usage outside
+these ten rows.
+
 **Rhythm & responsiveness** puts two histograms side by side, session length and response latency,
 each with its percentile markers laid over the bars. A percentile that lands in the open-ended
 top bucket renders with a `≥` prefix — the bucket has no upper edge, so the honest claim is a floor

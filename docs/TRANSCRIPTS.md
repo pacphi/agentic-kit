@@ -179,8 +179,8 @@ The same parsers serve two very different callers, switched by `withTurns`:
 
 | Path | Entry point | `withTurns` | Message bodies | Cached? |
 |---|---|---|---|---|
-| **Scan** — the aggregate index behind the Scorecard/Findings/Sessions views | `buildIndex` (`usage-index.mjs:566`) → `parseFile` (`usage-index.mjs:389`) | `false` | no turn list is built, and no body is retained — holding them would balloon memory across 3,000+ files (`parseClaude`'s own doc comment, `usage-parsers.mjs:679-684`). Since v14 the scan path does *read* one narrow slice: opencode's USER text parts, so a prompt can be fingerprinted (`loadTextParts`, `usage-opencode.mjs:276`). Only the fingerprint is kept; the text is discarded with the row. Measured at 45 µs/session materializing 0.6 MB on a 300-session store, against 125 µs and 61 MB for the reader path's unfiltered join | yes: per-file derived records in `~/.config/agentic-kit/usage-index.json`, keyed `(path, mtime, size)`, invalidated wholesale by `SCHEMA_VERSION` (`usage-index.mjs:142`) |
-| **Reader** — one transcript for the Transcript view | `readSession` (`usage-index.mjs:960`) | `true` | full turn list built | **never** — every call re-reads and re-parses the one file |
+| **Scan** — the aggregate index behind the Scorecard/Findings/Sessions views | `buildIndex` (`usage-index.mjs:578`) → `parseFile` (`usage-index.mjs:401`) | `false` | no turn list is built, and no body is retained — holding them would balloon memory across 3,000+ files (`parseClaude`'s own doc comment, `usage-parsers.mjs:679-684`). Since v14 the scan path does *read* one narrow slice: opencode's USER text parts, so a prompt can be fingerprinted (`loadTextParts`, `usage-opencode.mjs:276`). Only the fingerprint is kept; the text is discarded with the row. Measured at 45 µs/session materializing 0.6 MB on a 300-session store, against 125 µs and 61 MB for the reader path's unfiltered join | yes: per-file derived records in `~/.config/agentic-kit/usage-index.json`, keyed `(path, mtime, size)`, invalidated wholesale by `SCHEMA_VERSION` (`usage-index.mjs:154`) |
+| **Reader** — one transcript for the Transcript view | `readSession` (`usage-index.mjs:972`) | `true` | full turn list built | **never** — every call re-reads and re-parses the one file |
 
 ![Figure: one parser, two read paths — the scan path (withTurns false) caches per-file records keyed by path, mtime and size; the reader path (withTurns true) builds full turns and is never cached](assets/transcript-read-paths.svg)
 
@@ -317,7 +317,7 @@ string.
 
 ## 4. The `readSession` pipeline — how one session becomes a payload
 
-`readSession(id, opts)` (`usage-index.mjs:960-987`) is the only way
+`readSession(id, opts)` (`usage-index.mjs:972-987`) is the only way
 transcript content leaves the module, and every step is a gate:
 
 ### 4.1 Locate, contain, bound
@@ -325,7 +325,7 @@ transcript content leaves the module, and every step is a gate:
 1. **Id grammar before any filesystem access** — an id must match one of
    exactly two shapes, or it is rejected with `ERR_INVALID_SESSION_ID` at
    this call: `invalidId(id)` (`usage-index.mjs:961`) before any read happens:
-   * `VALID_ID` (`/^[A-Za-z0-9._-]{1,128}$/`, `usage-index.mjs:153`) — a plain
+   * `VALID_ID` (`/^[A-Za-z0-9._-]{1,128}$/`, `usage-index.mjs:165`) — a plain
      session id;
    * `VALID_SUBAGENT_ID` (`usage-index.mjs:169`) — a namespaced nested
      subagent id, EXACTLY `<parentId>/<stem>` with one slash, where the parent
@@ -345,7 +345,7 @@ transcript content leaves the module, and every step is a gate:
    symlinks; a symlink planted inside a root pointing at `/etc/anything`
    passes a lexical `startsWith` but fails this. Roots are realpath'd too so
    a symlinked dotfiles setup still works.
-4. **Size cap** — `MAX_SESSION_BYTES` (64 MB, `usage-index.mjs:152`): a
+4. **Size cap** — `MAX_SESSION_BYTES` (64 MB, `usage-index.mjs:164`): a
    transcript is read whole and JSON-expands ~5×, so an unbounded read is a
    memory-amplification primitive. Oversized reads as unavailable, not risky.
 

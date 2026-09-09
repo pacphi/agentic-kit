@@ -14,8 +14,8 @@ code with fixture HTTP observations. They verify:
   navigation through installations and back.
 - Alphabetized Intelligence optgroups, plain names, stable selection keys, and
   empty-history navigation.
-- Usage Score top-eight groups, Show all, working-directory/session disclosures,
-  transcript links, and preserved cost/session/time totals.
+- Usage Score top-ten Git-project ranking, timeframe changes, plain names,
+  excluded unclassified entries, and preserved overall totals.
 - Compact collapsed context configuration, bounded expanded model lists,
   cache/configuration semantics, and catalog fallback columns.
 - Desktop, tablet, and phone overflow checks, keyboard controls, focus retention,
@@ -57,7 +57,7 @@ reviewed source commit are linked from the pull request.
 
 - Older footprint snapshots need a remeasurement to acquire new identity/origin
   metadata; they remain readable and unclassified in the meantime.
-- Usage index schema 19 reparses retained records once; originals are untouched.
+- Usage index schema 20 reparses retained records once; originals are untouched.
 - Desktop labels reflect exact recorded declarations, not independently verified
   launching applications. Undiscovered Desktop history stays outside coverage.
 - Cached model capacities and configuration calculations are not live-session
