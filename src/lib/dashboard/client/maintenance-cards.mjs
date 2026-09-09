@@ -26,6 +26,9 @@ import { MNT, mntKindLabel } from './maintenance-workspace.mjs';
   var MNT_PROJECT_KIND_LABELS={git:'Git',folder:'Folder',worktree:'Worktree',unknown:'Not checked'};
   export function mntProjectDesignation(projectId){
     var kind=MNT.query&&MNT.query.projectKinds&&MNT.query.projectKinds[projectId]||'unknown';
+    return mntProjectKindBadge(kind);
+  }
+  export function mntProjectKindBadge(kind){
     return '<span class="mnt-project-kind">'+mntIcon(kind==='git'||kind==='worktree'?'git':kind==='folder'?'project':'info')+'<span>'+esc(MNT_PROJECT_KIND_LABELS[kind]||MNT_PROJECT_KIND_LABELS.unknown)+'</span></span>';
   }
   function mntRowContext(row){

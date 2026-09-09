@@ -92,17 +92,21 @@ test('project worktree visibility and all-installations navigation work on deskt
     tooltip: image.parentElement.title, width: image.getBoundingClientRect().width,
     height: image.getBoundingClientRect().height, loaded: image.complete && image.naturalWidth > 0,
   })));
-  assert.equal(logoFacts.length, 3);
-  assert.deepEqual(logoFacts.map(logo => logo.alt), ['JavaScript', 'Python', 'Rust']);
+  assert.equal(logoFacts.length, 5);
+  assert.deepEqual(logoFacts.map(logo => logo.alt), ['JavaScript', 'Python', 'Rust', 'Java', 'Ada']);
   assert.ok(logoFacts.every(logo => logo.source.startsWith('data:image/svg+xml;base64,')
     && logo.tooltip.startsWith(logo.alt) && logo.label.startsWith(logo.alt)
     && logo.width === 24 && logo.height === 24 && logo.loaded));
   assert.equal(await ampelCard.locator('.mnt-language-list').innerText(), '', 'language initials and names do not crowd the card');
-  const moreLanguages = ampelCard.locator('..').locator('.mnt-language-more');
-  assert.equal(await moreLanguages.getAttribute('open'), null);
-  await moreLanguages.locator('summary').click();
-  assert.deepEqual(await moreLanguages.locator('img').evaluateAll(images => images.map(image => image.alt)), ['Java', 'Ada']);
-  await moreLanguages.locator('summary').click();
+  assert.equal(await ampelCard.locator('..').locator('.mnt-language-more').count(), 0);
+  assert.equal(await ampelCard.locator('.mnt-project-title > .mnt-icon').count(), 1);
+  assert.equal(await ampelCard.locator('.mnt-project-kind').innerText(), 'Git');
+  assert.equal(await ampelCard.locator('.mnt-project-kind .mnt-icon').count(), 1);
+  assert.doesNotMatch(await ampelCard.innerText(), /Git repository/);
+  if (process.env.AK_UI_ARTIFACTS) {
+    fs.mkdirSync(process.env.AK_UI_ARTIFACTS, { recursive: true });
+    await page.screenshot({ path: path.join(process.env.AK_UI_ARTIFACTS, 'project-cards-desktop.png') });
+  }
   await page.locator('[data-mnt-focus="'+ampelId+'"]').click();
   await page.locator('[data-mnt-focus="skill"]').click();
   await page.locator('#mnt-results [data-mnt-focus]').first().click();
@@ -126,6 +130,9 @@ test('project worktree visibility and all-installations navigation work on deskt
   await page.locator('[data-mnt-back="root"]').click();
   await page.locator('[data-mnt-focus="project"]').click();
   await page.setViewportSize({ width: 390, height: 844 });
+  assert.equal(await ampelCard.locator('img.mnt-language-icon').count(), 5);
+  assert.equal(await ampelCard.locator('.mnt-language-list').evaluate(el => globalThis.getComputedStyle(el).flexWrap), 'wrap');
+  if (process.env.AK_UI_ARTIFACTS) await page.screenshot({ path: path.join(process.env.AK_UI_ARTIFACTS, 'project-cards-mobile.png') });
   await page.getByRole('button', { name: 'Filters', exact: true }).click();
   const sheet = page.locator('#mnt-facets-sheet');
   await sheet.locator('[data-mnt-include-worktrees]').check();

@@ -2,7 +2,7 @@
 import { mntLanguageLogo } from './maintenance-language-logos.mjs';
 import { esc } from './bootstrap.mjs';
 import { MNT, MNT_SCOPE_LABELS, mntKindLabel } from './maintenance-workspace.mjs';
-import { mntIcon, mntAvailableTo } from './maintenance-cards.mjs';
+import { mntIcon, mntAvailableTo, mntProjectKindBadge } from './maintenance-cards.mjs';
 import { mntFacetValueLabel } from './maintenance-filters.mjs';
 
   export function mntFocusNavigation(){return MNT.query&&MNT.query.navigation;}
@@ -49,14 +49,14 @@ import { mntFacetValueLabel } from './maintenance-filters.mjs';
   }
   function mntFocusNode(node,index,level,busy){
     var icon=level==='scope'?node.value:level==='project'?'project':level==='kind'?node.value:node.kind;
-    var note=level==='project'?({git:'Git repository',worktree:'Worktree',folder:'Folder',unknown:'Project type not checked'}[node.projectKind]||'')
-      :level==='resource'&&!(MNT.facets.kind||[]).length?mntKindLabel(node.kind):'';
+    var note=level==='resource'&&!(MNT.facets.kind||[]).length?mntKindLabel(node.kind):'';
     if(level==='resource'&&node.installationSource)note=node.installationSource;
     return '<li><button type="button" class="mnt-row mnt-focus-node" data-mnt-focus="'+esc(node.value)+'" data-mnt-level="'+esc(level)+'" tabindex="'+(index===0?'0':'-1')+'"'+(busy?' disabled':'')+'>'
-      +mntIcon(icon)+'<span class="mnt-row-copy"><span class="mnt-row-name">'+esc(node.label)+'</span>'
-      +(level==='project'&&node.languages&&node.languages.length?mntLanguageBadges(node.languages.slice(0,3)):'')
+      +(level==='project'?'':mntIcon(icon))+'<span class="mnt-row-copy"><span class="mnt-row-name'+(level==='project'?' mnt-project-title':'')+'">'+(level==='project'?mntIcon('project'):'')+esc(node.label)+'</span>'
+      +(level==='project'?mntProjectKindBadge(node.projectKind):'')
+      +(level==='project'&&node.languages&&node.languages.length?mntLanguageBadges(node.languages):'')
       +(node.description?'<span class="mnt-row-context mnt-resource-description" title="'+esc(node.descriptionSource||'Declared description')+'">'+esc(node.description)+'</span>':'')
-      +(note?'<span class="mnt-row-context">'+esc(note)+'</span>':'')+'</span><span class="mnt-node-count">'+esc(node.count)+' installation'+(node.count===1?'':'s')+'</span>'+mntIcon('chevron')+'</button>'+(level==='project'&&node.languages&&node.languages.length>3?'<details class="mnt-language-more"><summary>+'+(node.languages.length-3)+' more languages</summary>'+mntLanguageBadges(node.languages.slice(3))+'</details>':'')+'</li>';
+      +(note?'<span class="mnt-row-context">'+esc(note)+'</span>':'')+'</span><span class="mnt-node-count">'+esc(node.count)+' installation'+(node.count===1?'':'s')+'</span>'+mntIcon('chevron')+'</button></li>';
   }
   function mntFocusInstallation(row,index){
     var crumbs=(row.breadcrumb||[]).slice(),scope=row.scope||{};
