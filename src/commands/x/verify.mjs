@@ -80,11 +80,11 @@ async function verifyMemory() {
   try {
     const init = await runCmd('ruflo', ['memory', 'init'], { cwd: tmp, env, timeout: 120_000 });
     if (init.code !== 0) { fail('ruflo memory init failed'); return false; }
+    stored = true; // a failing process may still have persisted its write
     const put = await runCmd('ruflo',
       ['memory', 'store', '-k', key, '--value', value, '-n', namespace],
       { cwd: tmp, env, timeout: 120_000 });
     if (put.code !== 0) { fail(`ruflo memory store failed: ${(put.stderr || '').slice(0, 160)}`); return false; }
-    stored = true;
 
     const get = await runCmd('ruflo',
       ['memory', 'retrieve', '-k', key, '-n', namespace, '--value-only'],
