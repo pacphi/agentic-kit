@@ -7,8 +7,9 @@ language or its ecosystem and do not imply endorsement.
 
 All images occupy the same 24 × 24 pixel area on a neutral white backing so dark
 marks remain visible in both themes. Language names remain in tooltips and accessible
-image labels. Artifact evidence is included in the badge tooltip. Three icons show
-initially; additional languages remain under the existing disclosure.
+image labels. Artifact evidence is included in the badge tooltip. All detected language icons
+are shown inline and wrap on narrow cards; there is no three-icon cap or additional-language
+disclosure.
 
 Languages without a dedicated verified asset use the neutral code glyph, never
 an invented logo or initial-letter badge. SQL dialect/framework marks describe their

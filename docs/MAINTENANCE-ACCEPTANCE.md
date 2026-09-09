@@ -4,9 +4,9 @@
 - **Governing decision:** [ADR-0048](adr/0048-inventory-led-maintenance-resource-management.md)
 
 These criteria convert the approved product decisions into release gates. IDs are stable and must
-appear in tests, prototype studies, and implementation receipts. Passing current Maintenance tests
-does not satisfy this specification; they prove only the safety baseline that the overhaul must
-preserve.
+appear in tests, prototype studies, and implementation receipts. Passing automated Maintenance tests does not by itself satisfy this complete specification;
+tests now cover the implementation as well as its safety baseline, while the separately listed
+human, assistive-technology and reference-platform gates still need their own evidence.
 
 ## Inventory and identity
 
@@ -32,6 +32,10 @@ preserve.
   repositories are separate; initialized submodules are explicit dependency edges.
 - **MNT-INV-012:** WSL distributions are separate Linux environments with explicit Windows host
   relationships.
+- **MNT-INV-013:** Repository association and recorded Desktop origin are independent dimensions.
+  Worktrees retain exact project/placement identities; shared Git metadata establishes grouping.
+  Origin facets select distinct installations in matching projects without duplicating totals.
+  Recovered project sightings remain distinguished from recorded sessions.
 
 ## Evidence and language
 
@@ -65,8 +69,10 @@ preserve.
 - **MNT-GUD-004:** Candidate source, compatibility, pin, channel, and recommendation authority are
   rendered independently.
 - **MNT-GUD-005:** `Recommended` appears only with a named authority for the exact candidate.
-- **MNT-GUD-006:** A candidate without verified compatibility appears only in technical evidence
-  and has no update action or Updates available label.
+- **MNT-GUD-006:** A candidate without verified compatibility must not imply a compatible or
+  executable update. The implemented host-reported availability exception may enter Updates
+  available with verified candidate-source evidence and an explicit compatibility limitation;
+  recommendation and apply still require their independent premises.
 - **MNT-GUD-007:** Stable candidates are default; prerelease/nightly candidates require existing
   exact-placement enrollment or explicit user enablement.
 - **MNT-GUD-008:** Downgrade and channel change are distinct from update and have no Managed v1
@@ -227,8 +233,9 @@ preserve.
   Close details restores the originating row.
 - **MNT-UX-004:** Back returns focus to the originating result where it still exists.
 - **MNT-UX-005:** Search/facet announcements are debounced and announce one settled result count.
-- **MNT-UX-006:** Icon meaning is duplicated by visible text and accessible name; color never acts
-  alone.
+- **MNT-UX-006:** Action/type icons have visible text and accessible names; language SVGs retain
+  accessible language labels and tooltips. All detected language icons wrap inline. Color never
+  carries meaning alone.
 - **MNT-UX-007:** Inventory and Activity use native list/table/disclosure semantics compatible with
   paging or virtualization.
 - **MNT-UX-008:** At 320 CSS pixels, every essential control remains visible without horizontal
@@ -261,9 +268,10 @@ preserve.
 
 ## Performance and reliability
 
-The Focus amendment is approved, but its final source-bound browser/API, integration, and
-performance results must still be recorded. Prototype smoke checks and earlier Option A test
-totals do not satisfy these criteria for the production implementation.
+Focus and the later project-grouping refinements have executable browser/API regression coverage
+(`tests/ui/maintenance-projects.mjs` and `tests/kit/maintenance-project-grouping.test.mjs`).
+Those checks do not replace reference-machine performance evidence or the human/assistive-technology
+gates below. Prototype results and unrelated test totals do not close those gates.
 
 - **MNT-PERF-001:** Saved Inventory paints without waiting for deep scan, provider command, network,
   or credential validation.
@@ -405,8 +413,8 @@ ADR-0048 remains Accepted. Focused automated evidence does not close these gates
 - Source-bound reference-machine benchmarks for 5,000 and 50,000 placements and
   discovery targets on macOS, Linux, Windows and WSL.
 - Clean-machine Windows and WSL discovery and Ollama/Git-project-patch integration.
-- Broader dashboard regression completion, privacy review and an exact-source
-  release receipt with unresolved limitations recorded.
+- Exact-source dashboard regression, privacy review and release evidence for each delivery,
+  with unresolved limitations recorded; earlier automated passes are not permanent gate closure.
 
 ADR-0044 remains the compatibility and transaction-safety floor until those gates
 pass. The archived migration plan records the original phase sequence; it is not

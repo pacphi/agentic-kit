@@ -43,7 +43,7 @@ text:
   discovery source, then refreshes evidence. It takes minutes. The CLI equivalent is
   `ak maintain scan --deep --refresh-inventory`.
 
-Refresh evidence is the only control that runs executable provider probes. While either action
+Both controls run provider probes: Re-measure machine includes the Refresh evidence stage. While either action
 runs, both buttons are disabled, the status line says what is running ("Refreshing evidence…" or
 "Re-measuring the machine… this can take minutes."), and apply, undo, and record are refused. If
 the work does not finish, the previous evidence is kept. The inventory build runs after the probes
@@ -78,6 +78,15 @@ type control. This preference changes browsing choices, not saved measurements, 
 or the exact installation targeted by an operation. Measured ordinary project folders retain
 their distinct designation rather than being falsely labelled Git repositories.
 
+Project choices group beneath repositories only when shared Git metadata or the existing discovery
+contract establishes the association. A worktree remains its own selectable project. Folder/name
+headers, a Git/Worktree/Folder designation, and all detected language icons identify each choice.
+An independent **Session origin** facet can match Claude Desktop, Codex Desktop, or unclassified
+observations; Desktop origin never replaces repository membership. Facet counts are installations
+in matching projects, not numbers of sessions. Selecting several origins does not duplicate a
+placement. Exact root paths stay private; the public grouping uses opaque repository identities
+and bounded display labels.
+
 ### Exact installations
 
 A family can contain multiple installations across scopes, hosts, and projects. Family identity
@@ -101,7 +110,7 @@ Host adapter, Executable, Runtime, Model, Provider configuration, Cache, Credent
   Updates available, Dependencies, Conflicts and overlaps, Duplicated placements, Disabled
   resources, Credentials and providers, Models and runtimes, Storage and caches, Recently
   changed, and Inventory evidence only.
-- **Facets** are multiselect and show counts. Scope, environment, project, type, hosts/adapters,
+- **Facets** are multiselect and show counts. Scope, environment, project, session origin, type, hosts/adapters,
   carrier, provenance, package manager, version, Guidance, dependency, conflict, credential,
   channel, evidence, and recent-change filters remain available. **Clear all** removes facets;
   narrow screens use a **Filters** sheet.
@@ -496,7 +505,10 @@ Use the audit and `ak maintain reconcile` for the receipt.
 
 ## The `ak maintain` verbs
 
-Add `--json` to any verb for the complete DTO. Verbs that write require `--yes`.
+Add `--json` where supported for the complete DTO. Apply, undo, reconciliation, dispositions,
+and recipe acceptance require `--yes`; source add/remove and stop use it after their preview.
+Source toggles, exclusions and preference updates are explicit configuration commands rather than
+transaction applies; follow the verb-specific options below.
 
 | Verb | What it does |
 |------|--------------|
@@ -721,11 +733,10 @@ machine measurement after upgrading to capture new catalog metadata.
 
 Project coverage is designed around build ecosystems rather than one manifest format.
 See the [proposed project metadata adapter design](PROJECT-METADATA-ADAPTERS.md)
-for the 25-language target, polyglot attribution, and unsupported-metadata behavior.
+for the proposed ecosystem targets, polyglot attribution, and unsupported-metadata behavior.
 
-Project cards show up to three uniformly sized SVG language icons, with language names in
-tooltips and accessible labels, and an expandable remainder
-for polyglot repositories. Artifact-only detections do not imply source line counts.
+Project cards show all detected, uniformly sized SVG language icons inline with wrapping,
+with language names in tooltips and accessible labels. Artifact-only detections do not imply source line counts.
 See the [dated top-50 coverage list](LANGUAGE-COVERAGE.md) and [bundled logo sources and licenses](LANGUAGE-LOGOS.md).
 
 ### Scan history dates

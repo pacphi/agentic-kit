@@ -7,7 +7,7 @@
 This is a dated popularity baseline, not a claim of universal popularity or a limit
 on supported languages. Existing additional languages remain supported.
 
-| Rank | Language | Icon label |
+| Rank | Language | Registry abbreviation |
 | --- | --- | --- |
 | 1 | Python | Py |
 | 2 | C | C |
@@ -73,8 +73,9 @@ presence. Their container or XML bytes never become language source-line counts.
 Ladder identification requires PLCopen metadata plus an LD body; `.ld` linker scripts
 are not Ladder Logic. X++ requires AxClass source metadata, not arbitrary XML.
 
-Project cards use local text-icon badges with visible names, not remote logos or
-color-only distinctions. Show three, then an accessible disclosure for the remainder.
+Maintenance project cards show all detected language SVG icons inline, wrapping as needed.
+The table above records registry abbreviations, not the current icon artwork. Local assets have
+language names in tooltips and accessible image labels; no remote image request is made.
 Source and artifact evidence remain distinct. No badges means no language evidence
 was available; it does not assert that the project contains no code.
 
