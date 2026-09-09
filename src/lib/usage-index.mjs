@@ -149,7 +149,9 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
  *       retained, so they must be reparsed. */
 // v19 preserves opaque working-path/Git association and explicit session origin
 // from parsing. Earlier cache entries discarded this metadata and must reparse.
-export const SCHEMA_VERSION = 19;
+// v20 records exact user-root exclusion and verified real-parent eligibility
+// for the Git-only score ranking. A v19 cache cannot establish either fact.
+export const SCHEMA_VERSION = 20;
 
 const DAY_MS = 86_400_000;
 // One day of slack past dashboard-server.mjs's 365-day clampDays ceiling —

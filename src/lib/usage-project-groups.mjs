@@ -50,3 +50,25 @@ export function buildUsageProjectGroups(sessions) {
   return [...groups.values()].map((group) => ({ ...finish(group), members: [...group.members.values()]
     .map((member) => ({ ...finish(member), reportedLabels: [...member.reportedLabels].sort() })).sort(ranked) })).sort(ranked);
 }
+
+/** Ranking population: existing Git projects only, with verified worktrees
+ * charged to their real parent. Unknown/legacy/user-level observations remain
+ * in overall usage totals, but cannot become a Git-ranking candidate. */
+export function buildUsageGitProjects(sessions) {
+  const repositories = new Map();
+  for (const session of sessions ?? []) {
+    const evidence = session.projectEvidence;
+    if (!evidence || evidence.parentRootExists !== true || evidence.userLevel !== false
+      || !/^repository:[a-f0-9]{20}$/u.test(evidence.repositoryId ?? '')
+      || !(evidence.kind === 'git' && ['git-directory', 'git-pointer'].includes(evidence.evidence)
+        || evidence.kind === 'worktree' && evidence.evidence === 'git-common-directory-and-backlink')) continue;
+    const key = evidence.repositoryId;
+    if (!repositories.has(key)) repositories.set(key, {
+      key, label: evidence.repositoryLabel ?? 'Repository', cost: 0, sessions: 0, minutes: 0, tokens: 0,
+    });
+    const row = repositories.get(key);
+    row.sessions++;
+    for (const field of ['cost', 'minutes', 'tokens']) row[field] += Number(session[field]) || 0;
+  }
+  return [...repositories.values()].map((row) => ({ ...row, cost: round(row.cost), minutes: round(row.minutes) })).sort(ranked);
+}
