@@ -25,6 +25,7 @@
 // record their OWN messages, not a replay of the parent's — the codex
 // double-count rule does not apply (different storage semantics).
 import { withDb } from './sqlite.mjs';
+import { sessionAcquisitionCoverage } from './usage-opencode-bounds.mjs';
 // Shared record shape/accumulator with parseClaude/parseCodex — see their
 // definitions in usage-parsers.mjs. usage-index.mjs imports FROM this module
 // (defaultOpencodeDbPath, parseSession, …), but that is no longer a cycle:
@@ -191,14 +192,18 @@ function recordAssistantUsage(rec, data, at) {
     input: num(t.input), output: num(t.output),
     cacheRead: num(cache.read), cacheWrite: num(cache.write), responses: 1,
   });
-  // opencode's OWN metered cost for this message — observed truth, summed
-  // per (day, model) row. Rows where NO message carried a cost stay null
-  // (the field is always present, unlike an absent key, so a consumer
-  // checking `costObserved != null` never needs to guess whether this row
-  // was ever priced), so the aggregate falls back to the pricing table
-  // rather than misreporting a fabricated $0.
+  // Retain missing-cost tokens separately before coalescing by day/model.
   usageRow.costObserved ??= null;
-  if (Number.isFinite(Number(data.cost))) usageRow.costObserved = (usageRow.costObserved ?? 0) + Number(data.cost);
+  if (typeof data.cost === 'number' && Number.isFinite(data.cost) && data.cost >= 0) {
+    usageRow.costObserved = (usageRow.costObserved ?? 0) + data.cost;
+    usageRow.costObservedMessages = (usageRow.costObservedMessages ?? 0) + 1;
+  } else {
+    usageRow.costMissingUsage ??= { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, responses: 0 };
+    const missing = usageRow.costMissingUsage;
+    missing.input += num(t.input); missing.output += num(t.output);
+    missing.cacheRead += num(cache.read); missing.cacheWrite += num(cache.write);
+    missing.responses++;
+  }
   rec.reasoningOutput += num(t.reasoning);
   // Context pressure for THIS turn, evidence-gated: only a row that actually
   // carries a tokens object can claim one — a token-less row (error or not)
@@ -330,15 +335,28 @@ function initSessionRecord(srow) {
  *  built from the SAME blankSession/addUsage parseClaude and parseCodex use.
  *  Returns { session, turns }; null when the session is gone or unreadable.
  *  withTurns emits the transcript-view turn rows alongside the record.
- *  @param {{ dbFile: string, id: string, withTurns?: boolean }} opts */
-export function parseSession({ dbFile, id, withTurns = false }) {
+ *  @param {{ dbFile: string, id: string, withTurns?: boolean, maxSessionBytes?: number, maxSessionRows?: number }} opts */
+export function parseSession({ dbFile, id, withTurns = false, maxSessionBytes, maxSessionRows }) {
   const result = withDb(dbFile, (db) => {
-    const srow = db.prepare('SELECT * FROM session WHERE id = ?').get(id);
+    // Pin preflight and payload queries to one snapshot: concurrent growth cannot
+    // bypass the budget between measurement and acquisition. Closing rolls back
+    // this read-only transaction, including on malformed rows/query errors.
+    db.exec('BEGIN');
+    const acquisitionCoverage = sessionAcquisitionCoverage(db, id, { maxSessionBytes, maxSessionRows });
+    if (!acquisitionCoverage.complete) {
+      const rec = blankSession(id, 'opencode');
+      Object.assign(rec, { acquisitionCoverage });
+      rec.end = acquisitionCoverage.latestMessageAt;
+      delete rec.stamps;
+      return { session: rec, turns: [] };
+    }
+    const srow = db.prepare('SELECT id, parent_id, directory, title FROM session WHERE id = ?').get(id);
     if (!srow) return null;
     const msgRows = db.prepare('SELECT id, time_created, data FROM message WHERE session_id = ? ORDER BY time_created ASC, id ASC').all(id);
     const partsByMessage = buildPartsIndex(loadTextParts(db, id, withTurns));
 
     const rec = initSessionRecord(srow);
+    Object.assign(rec, { acquisitionCoverage });
     const turns = [];
     for (const row of msgRows) processMessageRow(rec, turns, row, { withTurns, partsByMessage });
     if (!withTurns) collectScanToolCounts(db, id, rec);

@@ -264,3 +264,26 @@ test('known Codex runtime-output incompatibilities are version-bounded advisorie
 });
 
 test.after(() => fs.rmSync(ROOT, { recursive: true, force: true }));
+
+test('Codex skill display names may contain capitals and differ from directory names', () => {
+  fs.rmSync(cacheDir, { recursive: true, force: true });
+  fs.writeFileSync(configFile, '[plugins."runtime@official"]\nenabled = true\n');
+  seedPlugin({ marketplace: 'official', plugin: 'runtime', version: '1.0.0', skills: [
+    { directory: 'spreadsheets', source: '---\nname: "Spreadsheets"\ndescription: Work with sheets\n---\n' },
+    { directory: 'presentations', source: '---\nname: "Presentations"\ndescription: Work with slides\n---\n' },
+    { directory: 'different-directory', source: '---\nname: "Readable skill name"\ndescription: A valid name\n---\n' },
+  ] });
+  assert.deepEqual(inspect().skillIssues, []);
+});
+
+test('Codex skill names accept 64 Unicode characters but reject 65', () => {
+  fs.rmSync(cacheDir, { recursive: true, force: true });
+  fs.writeFileSync(configFile, '[plugins."runtime@official"]\nenabled = true\n');
+  seedPlugin({ marketplace: 'official', plugin: 'runtime', version: '1.0.0', skills: [
+    { directory: 'boundary', source: `---\nname: "${'é'.repeat(64)}"\ndescription: boundary\n---\n` },
+    { directory: 'over-limit', source: `---\nname: "${'é'.repeat(65)}"\ndescription: too long\n---\n` },
+  ] });
+  const issues = inspect().skillIssues;
+  assert.equal(issues.length, 1);
+  assert.match(issues[0], /over-limit.*at most 64 characters/);
+});

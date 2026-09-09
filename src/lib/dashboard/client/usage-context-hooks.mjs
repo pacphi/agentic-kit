@@ -32,7 +32,7 @@ import { authHeaders, esc } from './bootstrap.mjs';
   }
 
   function contextCount(value){
-    return Number.isInteger(value)&&value>=0?value.toLocaleString('en-US'):'—';
+    return Number.isInteger(value)&&value>=0?value.toLocaleString():'—';
   }
 
   function contextCoverageDescription(coverage){

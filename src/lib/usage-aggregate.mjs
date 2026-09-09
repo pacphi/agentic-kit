@@ -1,3 +1,4 @@
+import { rowCostEvidence, sessionCostEvidence, acquisitionSummary } from './usage-cost.mjs';
 // usage-aggregate.mjs — pure arithmetic over ALREADY-PARSED session records:
 // interval math, secret masking, and the two shapes usage-index.mjs hands its
 // consumers (the batch Aggregate from `aggregate()`, and the single-session
@@ -632,14 +633,8 @@ function buildPromptPatterns(records, { cutoff, now }) {
 /** Sum a record's per-model usage rows into one API-equivalent cost. Rows with
  *  an observed transcript cost (opencode) use it — same preference as aggregate. */
 function sessionCost(rec, deps) {
-  let cost = 0;
-  for (const row of rec.usage ?? []) {
-    cost += row.costObserved != null ? row.costObserved : (deps.costOf({
-      model: row.model, provider: rec.provider,
-      input: row.input, output: row.output, cacheRead: row.cacheRead, cacheWrite: row.cacheWrite,
-    }) || 0);
-  }
-  return round(cost);
+  const evidence = sessionCostEvidence(rec, deps);
+  return round(evidence.observedUsd + evidence.estimatedUsd);
 }
 
 // ── aggregation ─────────────────────────────────────────────────────────────
@@ -751,10 +746,8 @@ function cacheSavedFor(row, rec, deps, rates) {
  *  today's) and fold it into a session's running sums plus the shared
  *  byDay/byModel buckets. Mutates `acc` and `activeDays`. */
 function foldSessionUsageRow(row, rec, deps, acc, byDay, byModel, activeDays) {
-  const rowCost = row.costObserved != null ? row.costObserved : (deps.costOf({
-    model: row.model, provider: rec.provider, day: row.day,
-    input: row.input, output: row.output, cacheRead: row.cacheRead, cacheWrite: row.cacheWrite,
-  }) || 0);
+  const evidence = rowCostEvidence(row, rec, deps);
+  const rowCost = evidence.observedUsd + evidence.estimatedUsd;
   acc.input += row.input; acc.output += row.output;
   acc.cacheRead += row.cacheRead; acc.cacheWrite += row.cacheWrite;
   acc.cost += rowCost;
@@ -792,7 +785,7 @@ function foldSessionUsageRows(rec, deps, byDay, byModel, rates) {
     foldSessionUsageRow(row, rec, deps, acc, byDay, byModel, activeDays);
   }
   for (const day of activeDays) byDay[day].sessionsActive++;
-  return { ...acc, firstDay: firstBilledDay(rec) };
+  return { ...acc, costEvidence: sessionCostEvidence(rec, deps), firstDay: firstBilledDay(rec) };
 }
 
 /**
@@ -855,6 +848,8 @@ function buildSessionRow(rec, usage, verdict) {
     input, output, cacheRead, cacheWrite,
     tokens: input + output + cacheRead + cacheWrite,
     cost: round(cost),
+    costEvidence: usage.costEvidence,
+    acquisitionCoverage: rec.acquisitionCoverage ?? null,
     // What the cache avoided for THIS session, so the window total is
     // auditable a row at a time rather than only in aggregate.
     cacheSavedUsd: round(cacheSaved),
@@ -1251,6 +1246,8 @@ export function aggregate(records, { days, now, cutoff, deps, previous = false, 
   const agg = {
     generatedAt,
     windowDays: days,
+    windowScope: 'whole-retained-sessions-selected-by-end',
+    acquisitionCoverage: acquisitionSummary(records, cutoff),
     pricesAsOf: deps.pricesAsOf ?? null,
     totals, byDay, engagedByDay, byModel, byHost, byProvider,
     byMode, bySource, byTool,
@@ -1336,6 +1333,8 @@ export function sessionPayload(rec, turns, deps) {
       // panel whose whole subject is cost. `.filter(Boolean)` could not drop it
       // because fmtUsd(undefined) is the truthy string "$0.00".
       cost: sessionCost(rec, deps),
+      costEvidence: sessionCostEvidence(rec, deps),
+      acquisitionCoverage: rec.acquisitionCoverage ?? null,
       ...usage, tokens: usage.input + usage.output + usage.cacheRead + usage.cacheWrite,
     },
     // ADR-0009 §8: truncation is the other way content is withheld, and it used

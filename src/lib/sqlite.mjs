@@ -1,4 +1,4 @@
-// Embedded SQLite via node:sqlite (Node >=22) — replaces every external
+// Embedded SQLite via node:sqlite (Node >=22.13 / >=23.4) — replaces every external
 // `sqlite3` binary call from the shell kit (memory verification, WAL
 // checkpoint, statusline QE metrics).
 import { DatabaseSync } from 'node:sqlite';

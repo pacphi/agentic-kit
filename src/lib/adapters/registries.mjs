@@ -240,7 +240,7 @@ const hostEntries = [
   {
     id: 'opencode', label: 'OpenCode', enabledByDefault: false,
     install: { bin: 'opencode', npmPackage: 'opencode-ai', externalInstallPolicy: 'detect-never-overwrite' },
-    capabilities: { canDriveSession: true, canBePrimary: false, canRouteActivities: true, commandStatusline: false, transcripts: true, usage: false, nativeMcpConfig: true, nativeGuidance: true },
+    capabilities: { canDriveSession: true, canBePrimary: false, canRouteActivities: true, commandStatusline: false, transcripts: true, usage: true, nativeMcpConfig: true, nativeGuidance: true },
     auth: { apiKeyEnv: [], loginFile: ['.local', 'share', 'opencode', 'auth.json'], keyOverridesLogin: false },
     legacy: {
       guidanceFile: 'agents-opencode', configFormat: 'json',

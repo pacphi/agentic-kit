@@ -267,3 +267,24 @@ test('an opencode session with zero assistant responses never reaches the aggreg
   assert.equal(agg.sessions.find((x) => x.id === 'ses_oc6'), undefined);
   rm(sb.dir);
 });
+
+test('oversized SQLite session coverage survives scan and selected-session payloads', async () => {
+  const sb = sandbox({ sessions: [{ id: 'ses_bounded', directory: '/x', title: 'bounded' }] });
+  try {
+    // Many small native rows exercise the production row ceiling without a
+    // resource-exhaustion fixture or a multi-megabyte JavaScript payload.
+    const db = new DatabaseSync(sb.dbFile);
+    db.prepare(`WITH RECURSIVE n(value) AS (
+      VALUES(1) UNION ALL SELECT value + 1 FROM n WHERE value < 100000
+    ) INSERT INTO message (id, session_id, time_created, time_updated, data)
+      SELECT 'm' || value, 'ses_bounded', ?, ?, '{}' FROM n`).run(NOW - DAY, NOW - DAY);
+    db.close();
+    const index = await buildIndex(opts(sb));
+    assert.equal(index.acquisitionCoverage.complete, false);
+    assert.equal(index.sessions.length, 0, 'refused sources are not zero-cost normal sessions');
+    const selected = await readSession('ses_bounded', opts(sb));
+    assert.equal(selected.meta.acquisitionCoverage.truncated, true);
+    assert.equal(selected.meta.acquisitionCoverage.reason, 'session-row-limit');
+    assert.deepEqual(selected.turns, []);
+  } finally { _resetForTest(); rm(sb.dir); }
+});

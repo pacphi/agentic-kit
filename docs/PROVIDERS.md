@@ -582,13 +582,13 @@ neither agentic-kit nor AQE persists them.
 ak host off     # reset to the claude-only default, reversibly
 ```
 
-This removes the known managed environment keys, including later edits to those keys.
-For a router file still marked `_managedBy: agentic-kit`, it restores the whole
-pre-`ak` `llm-config.json` backup, or removes the whole file if no backup exists.
-Later user edits in that managed file can therefore be lost. Save them before `off`
-and review the result. A file without the managed tag is left alone. This legacy
-whole-file teardown differs from the exact-value receipts used by external-provider
-reconciliation.
+This reverts only environment values that still match their saved projection
+receipts. Later edits and unowned values survive. Router teardown requires an
+exact postimage receipt and an unchanged original backup: pristine projections
+restore atomically (retaining the backup), or are removed if ak created them.
+Legacy marker-only ownership, changed files, missing/changed backups, and ambiguous
+interrupted projections are preserved with a manual-reconciliation diagnostic.
+The `_managedBy` tag alone never authorizes whole-file deletion or restoration.
 
 ---
 

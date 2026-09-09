@@ -446,7 +446,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
   // discount factor would. Rendered only when there is a figure to render.
   function cacheSubtitle(t){
     var saved=Number(t.cacheSavedUsd)||0;
-    return "priced at 0.1&times; input"
+    return "model-specific cache rates"
       +(saved>0?'<span class="d-note">saved &asymp; '+esc(fmtUsd(saved))+" vs uncached</span>":"");
   }
   var CACHE_TIP="Share of this window's tokens that were cache reads. Higher is cheaper, so a rise "
@@ -503,7 +503,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
     +"the streak.\nStreak counts consecutive active days ending at the most recent one.\n"
     +"Sessions INCLUDES delegated subagent sessions, which the harness dispatches rather than you — "
     +"the how-you-run panel carries the main/subagent split.";
-  var TIP_AUTONOMY="Assistant responses ÷ prompts you typed — how far each prompt travels.\n"
+  var TIP_AUTONOMY="Assistant responses ÷ recorded main-thread prompts — how far each prompt travels.\n"
     +"Prompts are MAIN-THREAD only: a subagent's prompts are written by the harness, not by you, so "
     +"counting them would inflate the denominator with work nobody asked for by hand.\nTouch rate is "
     +"those same prompts per engaged hour.";
@@ -538,7 +538,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
       esc(fmtNum(active))+" active day"+(active===1?"":"s")
       +'<span class="d-note">streak '+esc(String(streak))+" day"+(streak===1?"":"s")+"</span>","",TIP_PER_DAY)
       +kpi("autonomy",auto==null?"—":fmtRatio(auto)+"×",
-        auto==null?"no prompts you typed in window"
+        auto==null?"no recorded main-thread prompts in window"
           :(touch==null?"touch rate not recorded"
             :esc(fmtRatio(touch))+" prompts / engaged hour"),"",TIP_AUTONOMY)
       +kpi("cost / session",med==null?"—":fmtUsdMin(med),
@@ -670,7 +670,8 @@ import { renderUsage } from './usage-orchestrators.mjs';
     var days=dayRows(d);
     var maxDay=0;
     for(var i=0;i<days.length;i++)maxDay=Math.max(maxDay,fld(days[i].v,"cost"));
-    document.getElementById("u-days-note").textContent="api-equivalent · "+usageDays+"-day window";
+    document.getElementById("u-days-note").textContent="reported + estimated cost · sessions ending in "+usageDays+" days · whole retained sessions"
+      +(d.acquisitionCoverage&&d.acquisitionCoverage.omittedSessions?" · "+d.acquisitionCoverage.omittedSessions+" oversized session(s) omitted":"");
     document.getElementById("u-daybars").innerHTML=days.length?days.map(function(x){
       var c=fld(x.v,"cost"), h=maxDay?Math.max(2,c/maxDay*100):2;
       var tip=x.day+" · "+fmtUsd(c)+" · "+fmtTok(fld(x.v,"tokens"))+" tok · "+fmtNum(fld(x.v,"sessions"))+" started";
@@ -1191,7 +1192,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
     kpis.innerHTML=promptKpis(p);
     setText("u-pr-prov-note",win+" · every fingerprinted user-role turn");
     document.getElementById("u-pr-provenance").innerHTML=provenancePanel(p);
-    setText("u-pr-steer-note",win+" · typed prompts only");
+    setText("u-pr-steer-note",win+" · fingerprinted prompt-kind turns");
     document.getElementById("u-pr-steer").innerHTML=steerPanel(p);
     document.getElementById("u-pr-taps").innerHTML=tapLengthPanel(p);
     setText("u-pr-patterns-note",win+" · deterministic clusters");
@@ -1287,18 +1288,14 @@ import { renderUsage } from './usage-orchestrators.mjs';
         +(raw?" · recorded by the host as \""+raw+"\"":" · the host's own spelling was not recorded"))
       +'">'+esc(mode)+"</span>";
   }
-  // Context fill, and only when BOTH halves were observed: the last turn's
-  // context tokens AND that model's window. Codex records a window; claude and
-  // opencode do not, and this page carries no published-window table to fall
-  // back on — so the chip is omitted rather than divided by a guessed
-  // denominator, which would be a fabricated percentage.
+  // Only paired normalized evidence supports a ratio; legacy fields may
+  // contain independent observations from different turns/windows.
   function ctxChip(sx){
-    var used=Number(sx.ctxLastTokens),win=Number(sx.ctxWindow);
-    if(!isFinite(used)||!isFinite(win)||used<=0||win<=0)return "";
+    var pressure=sx.contextEvidence&&sx.contextEvidence.pressure;
+    if(!pressure||typeof pressure.lastBps!=="number"||!isFinite(pressure.lastBps))return "";
     return '<span class="s-chip" title="'
-      +esc("context at the last turn: "+fmtTok(used)+" of "+fmtTok(win)
-        +" tokens — both recorded by the transcript")
-      +'">ctx '+esc(Math.min(100,used/win*100).toFixed(0))+"%</span>";
+      +esc("context pressure at the last paired transcript measurement")
+      +'">ctx '+esc((pressure.lastBps/100).toFixed(0))+"%</span>";
   }
   function sessionChips(sx){
     var out="",len=Number(sx.lenSeconds)||0,p50=sessionP50(sx);

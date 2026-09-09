@@ -714,3 +714,18 @@ test('historyPage() pages the complete cross-host set after materialization', (t
   assert.equal([...seen].filter((key) => key.startsWith('claude:')).length, 1001);
   assert.equal([...seen].filter((key) => key.startsWith('codex:')).length, 1);
 });
+
+test('service coverage retains dropped-line evidence when a different source is healthy', async (t) => {
+  const sb = sandbox();
+  const file = path.join(sb.claude, 'bad.jsonl');
+  fs.writeFileSync(file, '');
+  fs.writeFileSync(path.join(sb.claude, 'good.jsonl'), '');
+  const service = new LiveSessionsService({ roots: sb.roots, intervalMs: 10, readCodexState: () => null });
+  t.after(() => { service.close(); fs.rmSync(sb.dir, { recursive: true, force: true }); });
+  service.start();
+  fs.appendFileSync(file, 'x'.repeat(1024 * 1024 + 1) + '\n');
+  await waitUntil(() => service.snapshot().acquisitionCoverage.truncated, 'missing live acquisition coverage');
+  const coverage = service.snapshot().acquisitionCoverage;
+  assert.equal(coverage.complete, false);
+  assert.equal(coverage.droppedLines, 1);
+});

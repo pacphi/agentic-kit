@@ -1,0 +1,8 @@
+{"label":"CLI-shaped store with explicit resolved path","exit":0,"result":[{"success":true}]}
+{"label":"actual MCP retrieve handler fresh process","exit":0,"result":[{"key":"cli-key","namespace":"route-proof","value":null,"found":false}]}
+{"label":"actual MCP store handler fresh process","exit":0,"result":[{"success":true,"key":"mcp-key","namespace":"route-proof","stored":true,"storedAt":"2026-09-09T18:13:08.240Z","hasEmbedding":true,"embeddingDimensions":384,"provenanceType":"unknown","backend":"sqlite (bridge, brute-force cosine)","storeTime":"178.67ms"}]}
+{"label":"CLI-shaped retrieve default fresh process","exit":0,"result":[{"found":false}]}
+{"label":"CLI-shaped retrieve explicit sibling fresh process","exit":0,"result":[{"found":true}]}
+{"splitReproduced":true}
+{"file":"memory.db","keys":[{"key":"cli-key"}]}
+{"file":"agentdb-memory.db","keys":[{"key":"mcp-key"}]}

@@ -73,9 +73,9 @@ faith:
    documented bug signature (`tests/kit/usage-index.test.mjs`). Run the tests from your checkout
    for its current result; the original pass count is not a release guarantee.
 3. **A before/after comparison you can run yourself**, on your own data,
-   computed by code that does **not** import or reuse the fix — so it's an
-   independent check, not a restatement of the same claim. That's the
-   script below.
+   computed by a separate cumulative-token parser. Pricing shares the
+   maintained repository module; parsing does not import the dashboard
+   implementation. This checks replay exclusion, not every dashboard path.
 
 If you want the full engineering detail — exact formulas, file:line
 citations, provider pricing sources — that's
@@ -84,59 +84,59 @@ need to read it to use this document.
 
 ## How to check your own numbers
 
-You'll need Node.js 18 or newer (`node --version` to check) and a terminal.
-Nothing else — no `npm install`, no cloning this repo, no network access
-beyond the one download below, and nothing gets written to your disk except
-the script file itself.
+Use a repository checkout and its supported Node runtime (Node 22.13.0 or a
+maintained later release with unflagged `node:sqlite`). No dependency installation
+is needed. The diagnostic itself makes no network requests and writes no files.
 
-**1. Get the script.** If you already have the repository checked out:
+**1. Run the diagnostic from the checkout.**
 
 ```bash
 node scripts/codex-usage-diagnostic.mjs
+# Optional: another transcript root, with machine-readable output
+node scripts/codex-usage-diagnostic.mjs --root /absolute/path/to/sessions --json
 ```
 
-If you don't have the repo, just download the one file:
+Keep the script with the repository: it imports `src/lib/pricing.mjs` so model
+rates, aliases, and cache discounts cannot drift into a second embedded table.
+Downloading the script alone is no longer supported.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/pacphi/agentic-kit/main/scripts/codex-usage-diagnostic.mjs -o codex-usage-diagnostic.mjs
-node codex-usage-diagnostic.mjs
-```
+**2. Read the two aggregate totals.** **ALL rollouts** includes every qualifying
+session's last cumulative token record; **EXCLUDING explicitly marked subagent
+rollouts** removes sessions whose first metadata record says `thread_source:
+"subagent"`. The report gives the excluded token and estimated-cost percentages.
+Historical `beforeFix_allSessions` and `afterFix_excludingSubagentReplays` JSON
+keys remain for compatibility; they do not describe the current dashboard as buggy.
 
-**2. Read the output before sending anything.** The script prints a report
-with two totals: **"before the fix"** (every session log counted — this
-should be close to what you'd currently see if you ran the unpatched
-dashboard) and **"after the fix"** (subagent-replay logs excluded). It also
-tells you what percentage of tokens/cost, if any, is attributable to
-subagent-replay logs.
+The script reads complete local rollout files into memory and parses their JSON
+lines. It selects model, thread-source, cumulative token, and assistant-event
+fields. Both legacy `agent_message` and newer `item_completed` / `AgentMessage`
+responses qualify. First-session metadata takes precedence over later replayed
+metadata, including when that first record has no thread source.
 
-The script reads complete local rollout files into memory and parses their JSON lines. It
-selects model, thread-source, cumulative token, and response-event fields for an aggregate
-report; it does not print prompts, titles, session identifiers, or individual file paths.
-The human-readable report **does print the rollout scan root**, which can identify
-your OS account or workspace. Review and redact that line before sharing. Its default root is
-`~/.codex/sessions`; pass `--root /absolute/path/to/sessions` for another Codex home.
+Reports contain numeric aggregates, not the scan root, transcript strings, prompts,
+titles, session identifiers, timestamps, model names, or arbitrary thread-source
+values. Unknown and other thread sources are counted separately. The default
+scan root is `~/.codex/sessions`.
 
-This is a **legacy replay comparison**, not a second implementation of today's dashboard.
-Its fixed July 2026 rate table, model fallback, string-only `thread_source` handling, and
-last-cumulative-event logic are retained for that comparison. The maintained parser also
-handles newer message formats and first-session metadata precedence. Consequently, the
-script's dollar totals and even its replay classification may differ from current Usage.
-Use the maintained dashboard and metrics reference for current estimates; do not use this
-script as billing reconciliation or proof that every current parser path is correct.
+This remains an **independent cumulative snapshot comparison**, not a second
+implementation of the dashboard. It does not read the Codex state ledger, split
+cumulative tokens across models or days, or analyze context. A missing thread
+source remains unknown and is included in totals. Both parsers currently use
+string-valued `thread_source`; this script does not infer object-shaped sources.
+Costs use the current maintained pricing snapshot, applied to each rollout's
+last model, and represent API equivalents rather than actual subscription bills.
+Use the dashboard and metrics reference for detailed current estimates.
 
 ## What to send back
 
-**Share only output you have reviewed and redacted.** Remove the rollout-root
-line from the human report if it identifies your account or workspace. `--json`
-provides aggregate output without that human-report path line, but still review
-model identifiers and any sensitive metadata before sending it. No transcript
-files or session descriptions are needed.
+Share the aggregate report only if you are comfortable sharing usage and estimated
+cost totals. No transcript files or session descriptions are needed.
 
-If "before" and "after" are close, this legacy comparison found little
-string-marked subagent replay. It does not rule out a current parsing or pricing
-discrepancy that the standalone script does not model. If a
-meaningful percentage is excluded, that's the concrete number behind it —
-not a guess.
+If the two totals are close, this comparison found little explicitly marked
+subagent usage. It does not rule out a discrepancy in a parser path, ledger
+classification, or historical model/day allocation that the diagnostic omits.
+The excluded percentage measures usage in marked subagent rollouts, not a proof
+that every excluded token was duplicated.
 
 ## Appendix — references
 

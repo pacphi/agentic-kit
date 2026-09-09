@@ -7,6 +7,17 @@ on:
   workflow_dispatch:
 
 jobs:
+  minimum-runtime:
+    name: minimum runtime (Node 22.13.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.13.0'
+      - run: node bin/agentic-kit.mjs --help --all
+      - run: node --test tests/kit/node-runtime.test.mjs tests/kit/sqlite.test.mjs tests/kit/usage-audit-211.test.mjs
+
   test:
     name: test (${{ matrix.os }}, node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}

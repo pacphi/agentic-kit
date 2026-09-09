@@ -2,6 +2,7 @@
 // memory.db and the native bridge's plaintext agentdb-memory.db sibling.
 // Presence cannot establish the active writer or CLI/MCP routing. The isolated
 // `ak x verify memory` canary does not prove access to an existing corpus.
+import path from 'node:path';
 import { projectMemoryStatus } from '../../../lib/project-memory.mjs';
 import { row } from '../row.mjs';
 
@@ -16,11 +17,11 @@ export default {
       } else {
         for (const store of memory.stores.filter((candidate) => candidate.present)) {
           rows.push(row('memory', store.readable ? 'info' : 'warn', store.readable
-            ? `${store.kind}: ${store.entries} active entr${store.entries === 1 ? 'y' : 'ies'} observed; writer and existing-corpus routing unverified`
-            : `${store.kind} store is unreadable (${store.file}); existing-corpus access unverified`));
+            ? `${path.basename(store.file)}: ${store.entries} active entr${store.entries === 1 ? 'y' : 'ies'} observed; backend, writer and existing-corpus routing unverified`
+            : `${path.basename(store.file)} store is unreadable (${store.file}); existing-corpus access unverified`));
         }
         if (memory.secondary) rows.push(row('memory', 'warn',
-          'two project memory stores coexist; CLI and MCP may select different files — an isolated canary does not verify existing-corpus routing'));
+          'two project memory stores coexist; preserve both. CLI --path selects a store; MCP routing needs separate verification. See Troubleshooting: Ruflo memory stores and routing'));
       }
     } catch (e) {
       rows.push(row('memory', 'warn', `project memory check unavailable: ${e.message}`));

@@ -148,6 +148,7 @@ class TranscriptStream {
   #seen = new Set();
   #lastMessage = null;
   #historyTruncated = false;
+  #acquisitionCoverage = { complete: true, truncated: false };
   #published = 0;
 
   constructor(host, sessionId, file, options) {
@@ -175,6 +176,10 @@ class TranscriptStream {
         for (const candidate of this.#adapt(record)) this.#publish(candidate);
       },
       onError: () => {},
+      onCoverage: (coverage) => {
+        this.#acquisitionCoverage = coverage;
+        this.#historyTruncated ||= coverage.truncated;
+      },
     }).start();
   }
 
@@ -229,6 +234,7 @@ class TranscriptStream {
     return {
       schemaVersion: 1, sessionKey: canonicalSessionKey(this.#host, this.#sessionId),
       cursor: snapshot.cursor, events: snapshot.events,
+      acquisitionCoverage: this.#acquisitionCoverage,
     };
   }
   replay(cursor) { return this.#stream.replay(cursor); }
@@ -283,6 +289,7 @@ class TranscriptStream {
       startAt,
       endAt,
       durationMs,
+      acquisitionCoverage: this.#acquisitionCoverage,
       truncated: this.#historyTruncated,
       gap: this.#historyTruncated,
       events,

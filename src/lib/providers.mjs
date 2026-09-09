@@ -1,3 +1,4 @@
+import { recordProviderEnv, undoOwnedProviderEnv } from './provider-ownership.mjs';
 // Frontier-host + LLM-provider detection and wiring.
 //
 // why: rUv ships this downstream — ak only detects + wires it (detect→heal→verify),
@@ -835,11 +836,13 @@ export function applyHosts(cfg, cwd = process.cwd()) {
   s.env ??= {};
   const changed = providerEnvDrift(cfg, s.env);
   if (changed) {
+    const completeOwnership = recordProviderEnv(file, s.env, desired, MANAGED_ENV_KEYS);
     for (const k of MANAGED_ENV_KEYS) {
       if (k in desired) s.env[k] = desired[k];
       else delete s.env[k];
     }
     writeJsonWithBackup(file, s);
+    completeOwnership();
   }
   const on = HOSTS.filter((h) => cfg.integrations?.hosts?.[h.id]).map((h) => h.id).join('+') || 'none';
   return { ok: true, changed, detail: `hosts=${on} (${scope}${changed ? ', written' : ', in sync'})` };
@@ -1051,13 +1054,10 @@ export async function convergeProviderStack(cfg, cwd = process.cwd(), {
   };
 }
 
-/** Reversible teardown: strip every managed env key from the target file. */
+/** Revert only unchanged env values whose exact pre/postimages were recorded. */
 export function undoProviders(cwd = process.cwd()) {
   const { file } = settingsTarget(cwd);
   const s = readJson(file);
   if (!s?.env) return { ok: true, changed: false, detail: 'nothing wired' };
-  let removed = 0;
-  for (const k of MANAGED_ENV_KEYS) if (k in s.env) { delete s.env[k]; removed++; }
-  if (removed) writeJsonWithBackup(file, s);
-  return { ok: true, changed: removed > 0, detail: `${removed} managed env key(s) removed` };
+  return undoOwnedProviderEnv(file, s, MANAGED_ENV_KEYS);
 }

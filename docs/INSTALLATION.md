@@ -12,13 +12,13 @@ live. The second command performs agentic-kit's machine/user and optional projec
 work. Those scopes are independent: running a local or one-shot `ak setup` does
 not make setup local or temporary.
 
-The package requires Node.js 22 or newer. The `next` tag is the 4.0 prerelease
+The package requires the Node.js runtime described below. The `next` tag is the 4.0 prerelease
 channel; after 4.0 GA, use the release channel documented in the README.
 
-The package declares `engines.node: >=22`, but SQLite-backed commands import
-`node:sqlite`, available without a flag from Node 22.13.0. Use a maintained patch
-release in the tested Node 22/24/26 lines; the broad manifest range does not prove
-compatibility with early Node 22 releases. See [Node SQLite history](https://nodejs.org/api/sqlite.html).
+The runtime requires Node 22.13.0+ on the 22.x line or Node 23.4.0+ on later
+lines (`>=22.13.0 <23 || >=23.4.0`), where `node:sqlite` is available without a
+flag. Use a maintained release in the tested Node 22/24/26 lines. CI separately
+checks the minimum 22.13.0 runtime. See [Node SQLite history](https://nodejs.org/api/sqlite.html).
 
 ## The two independent scope decisions
 
