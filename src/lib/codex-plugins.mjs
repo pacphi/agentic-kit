@@ -8,7 +8,10 @@ import { inspectCodexTomlStructure, isTomlTableLine } from './codex-toml-safety.
 import { cmpVersions } from './versions.mjs';
 
 const HOOK_KEYS = new Set(['description', 'hooks']);
-const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+// Codex validates a nonempty display name up to 64 Unicode characters.
+// Folder equality/kebab-case are authoring conventions, not loader failures.
+// Verified with Codex 0.153.4 skills/list and upstream ext/skills loader.
+const MAX_SKILL_NAME = 64;
 const ADVISORIES = [{
   ref: 'security-guidance@claude-plugins-official',
   through: '2.0.7',
@@ -206,11 +209,8 @@ function inspectSkills(root) {
     const { name, description } = parsed.metadata;
     if (!name) issues.push(`${file}: frontmatter requires a non-empty name`);
     if (!description) issues.push(`${file}: frontmatter requires a non-empty description`);
-    if (name && name !== directory.name) {
-      issues.push(`${file}: frontmatter name "${name}" must match directory "${directory.name}"`);
-    }
-    if (name && (!SKILL_NAME.test(name) || name.length > 63)) {
-      issues.push(`${file}: frontmatter name must be lowercase kebab-case and at most 63 characters`);
+    if ([...name].length > MAX_SKILL_NAME) {
+      issues.push(`${file}: frontmatter name must be at most 64 characters`);
     }
   }
   return { files, issues };
