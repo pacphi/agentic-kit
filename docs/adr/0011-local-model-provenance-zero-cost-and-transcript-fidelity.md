@@ -3,11 +3,28 @@
 - **Status:** Proposed; current command references amended by
   [ADR-0020](0020-ga-stable-surfaces.md) — see *Validation required* before acceptance
 - **Date:** 2026-07-27
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Updated:** 2026-07-30
 - **Update note:** Repointed the provider-binding reference to the canonical host-management
   module; the unmeasured local-model proposal remains unimplemented.
 - **Deciders:** agentic-kit maintainers
 - **Amends:** [ADR-0009](0009-usage-scorecard-local-transcript-analytics.md) §3 (cost) and §8 (transcripts)
+
+## Current implementation boundary (2026-09-09)
+
+This proposal remains unimplemented in the Usage cost/fidelity pipeline.
+[Pricing](../../src/lib/pricing.mjs) still fallback-prices unmatched model IDs;
+[Usage aggregation](../../src/lib/usage-aggregate.mjs) does not expose the proposed
+local/metered/unpriced split. By contrast, [ADR-0032](0032-model-lifecycle-intelligence.md)
+implements Ollama catalogue/runtime metadata in Model lifecycle intelligence.
+Neither that catalogue nor the registry's configured local billing type proves
+that a historical session ran locally.
+
+The [current Ollama compatibility documentation](https://docs.ollama.com/api/anthropic-compatibility)
+explicitly supports both local and cloud models. Therefore loopback transport or
+catalogue membership alone cannot establish free local execution. The proposed
+attribution design below must be revisited before implementation; its dated
+research and planned schema 6→7 migration are historical, not shipped contracts.
 
 ## Context
 
@@ -110,7 +127,7 @@ with `base_url = "http://localhost:11434/v1/"` and `wire_api = "responses"`
 Codex's own, so `token_count` events survive, while `rate_limits` is simply absent and
 `rec.rateLimits` correctly stays `null`.
 
-## Decision
+## Proposed decision — not implemented in Usage
 
 ### 1. Provenance is established out-of-band and stamped on the session — never inferred from the model id
 
@@ -214,10 +231,10 @@ different statements and the panel currently renders them identically.
 ### 8. Ollama is the implementation; the seam is "OpenAI/Anthropic-compatible local endpoint"
 
 LM Studio, llama.cpp's server, vLLM, and any OpenAI-compatible gateway create the same three
-problems (no cache fields, forgeable ids, absent quota). Only Ollama is implemented, because it is
+problems (no cache fields, forgeable ids, absent quota). Only Ollama was proposed for the initial implementation, because it is
 what `ak` already wires and what is installed here. The provenance channel in §1 is defined as an
 interface — *"a catalogue that can be asked which models are local"* — so a second backend is a new
-catalogue reader, not a second cost model. **Nothing else is implemented on speculation.**
+catalogue reader, not a second cost model. Other backends would require their own measured compatibility evidence.
 
 ## Validation required
 

@@ -3,10 +3,10 @@
 - **Status:** Accepted; compatibility references amended by
   [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-28
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Updated:** 2026-08-25
 - **Update note:** ADR-0032 implements project/provider-scoped OpenCode model discovery through a
-  bounded descriptor-driven source adapter and an explicit online refresh; release proof remains
-  pending. That reader does not change OpenCode's opt-in, non-primary, non-AQE routing boundary.
+  bounded descriptor-driven source adapter and an explicit online refresh; ADR-0032 records its completed implementation-time release proof. That reader does not change OpenCode's opt-in, non-primary, non-AQE routing boundary.
   Clarified that the AQE boundary applies to inference-provider routing, not
   AQE's upstream OpenCode platform assets, and recorded the implemented OpenCode transcript,
   token, observed-cost, and provider-id analytics path. ADR-0023 adds classified SQLite source
@@ -31,6 +31,19 @@ project/provider-scoped `models` output, and explicitly refreshed catalogue are 
 under ADR-0032. Public discovery does not prove current-project entitlement, and ordinary
 status or Dashboard reads will not invoke OpenCode or perform network refresh.
 Provider-qualified CLI selectors preserve both axes as `opencode:provider/model`.
+
+## Current implementation boundary (2026-09-09)
+
+The managed lifecycle, compact gateway, and supervised OpenCode execution are
+implemented; the dated stock-binary measurements below remain historical evidence.
+OpenCode Usage analytics reads observed `providerID` and cost from SQLite. The
+registry still declares `usage: false`; that known implementation/descriptor
+discrepancy remains unresolved by this documentation-only change.
+
+Model discovery is implemented by ADR-0032. Normal model-inventory reads do not
+refresh catalogues; broader Dashboard status/version activity is qualified by
+ADR-0005. OpenCode's native compaction controls do not imply agentic-kit owns
+those settings; ADR-0050 records the shared reporting boundary.
 
 ## Context
 
@@ -289,7 +302,7 @@ now-stale markers** instead of chasing a phantom.
 `env[null]`). `versions.mjs` tracks `opencode-ai` only when npm-managed (external
 installs are visible as host state but never claimed as ak-owned update drift).
 
-The **dashboard** categorizes the subsystem into the Hosts tab alongside
+The **dashboard** categorizes the subsystem into Overview → Hosts & Routing alongside
 `mcp`/`codex-mcp` (its designed fallback is Runtime, so nothing was ever dropped — this
 is categorization, not plumbing; the rows flow through the same `collect()` payload
 `ak status` prints, so the two surfaces cannot disagree). The **drift nudge** (`nudge.mjs`)

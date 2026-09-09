@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-07-31
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Updated:** 2026-08-25
 - **Update note:** Claude provider resolution now covers runtime leases as well as transcript
   discovery, while stronger observed identity remains authoritative; OpenCode runtime presence is
@@ -10,6 +11,16 @@
   evidenced host/provider/model facts and never infers provider identity from a host or model name.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0012](0012-observability.md)
+
+## Current implementation boundary (2026-09-09)
+
+The configured-provider resolver and field-priority rules are implemented in
+[claude-provider.mjs](../../src/lib/live/claude-provider.mjs) and the live adapters.
+Configuration is inspected at observation time, not reconstructed as historical
+configuration. Explicit `record.provider` can outrank fallback context in the
+Claude live adapter; it does not make all Claude historical Usage rows attributed.
+OpenCode Usage has independently observed `providerID`; current `byProvider`
+aggregation retains that evidence and an unknown bucket (ADR-0038 correction).
 
 ## Context
 
@@ -26,8 +37,8 @@ Investigation against current upstream sources found two distinct causes:
    evidence — including custom `model_providers` entries such as `openrouter`, `azure`, or
    `ollama` from `~/.codex/config.toml` — was silently dropped by the schema-tolerant column
    filter.
-2. **Claude Code genuinely never writes the provider.** No record type in
-   `~/.claude/projects/*/*.jsonl` carries one. Which endpoint serves a session is decided by the
+2. **The examined Claude Code transcript corpus did not record the provider.**
+   That observation is not a guarantee about every future host version. Which endpoint serves a session is decided by the
    host's documented configuration surface instead: `CLAUDE_CODE_USE_BEDROCK`,
    `CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_USE_FOUNDRY`, and `ANTHROPIC_BASE_URL` (gateway/proxy),
    where settings-file `env` blocks override the shell with managed > project local > project

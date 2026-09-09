@@ -2,6 +2,7 @@
 
 - **Status:** Implemented
 - **Date:** 2026-08-25
+- **Updated:** 2026-09-09 — scoped network/read-only claims for issue #211
 - **Updated:** 2026-09-08
 - **Pricing audit:** Verified Claude 5.1 identity, availability, limits and rates; Models
   pricing uses verified rate dates and official Astra/Sol alias documentation.
@@ -40,6 +41,15 @@
   [ADR-0020](0020-ga-stable-surfaces.md),
   [ADR-0021](0021-inference-provider-provenance.md), and
   [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md)
+
+## Current implementation boundary (2026-09-09)
+
+Cache-only and network-silent claims here describe the model-inventory read
+model, not the entire Dashboard status process. Broader package/release checks
+can egress and update their caches under ADR-0005. Explicit model refresh may
+read a local Ollama HTTP endpoint; `--online` authorizes remote catalogue refresh.
+The completed release proof below is dated implementation evidence, not a new
+certification of every later Dashboard change.
 
 ## Context
 

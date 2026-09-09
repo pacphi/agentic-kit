@@ -2,6 +2,7 @@
 
 - **Status:** Amended by [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-23
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Updated:** 2026-07-30
 - **Update note:** Preserved the activity vocabulary and moved its runtime ownership to the
   in-repository host-neutral runner.
@@ -9,6 +10,14 @@
 
 > **Historical source note:** the activity vocabulary remains, but 4.0 no longer installs or
 > executes through the dynamic adapter used to ground the original defaults.
+
+## Current implementation boundary (2026-09-09)
+
+The activity vocabulary and defaults remain in `src/lib/routing.mjs`. The earlier
+2026-08-31 retirement assertion was not supported by a direct withdrawal notice.
+`RETIRED_MODELS` is empty at the audited source state; user pins remain valid choices.
+See [ADR-0003](0003-auto-seed-dual-host-provenance.md) and
+[retirement tests](../../tests/kit/routing-retirement.test.mjs).
 
 ## Context
 
@@ -41,8 +50,8 @@ model for execution) and are treated as **soft defaults** — see the "open ques
 Tier is the pairing key, not the model id: `MODEL_CATALOG` spells `flagship`/`balanced`/`fast`
 identically on both hosts so primary-host mirroring can map a route to its counterpart's equivalent.
 As of 2026-08-07 execution routes to `gpt-5.6-terra` (balanced) and mechanical work to `gpt-5.6-luna`
-(fast), following OpenAI's own migration off `gpt-5.4`/`gpt-5.4-mini` before their 2026-08-31 Codex
-retirement; deep reasoning routes to `claude-opus-5`. Withdrawn ids are handled by the retirement
+(fast), as agentic-kit default preferences, not as evidence that `gpt-5.4` or
+`gpt-5.4-mini` were withdrawn; deep reasoning routes to `claude-opus-5`. Withdrawn ids are handled by the retirement
 mechanism in [ADR-0003](0003-auto-seed-dual-host-provenance.md), not by editing this table alone.
 
 ## Consequences

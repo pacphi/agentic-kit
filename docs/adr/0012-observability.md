@@ -2,6 +2,7 @@
 
 - **Status:** Implemented
 - **Date:** 2026-07-27
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Updated:** 2026-08-04
 - **GA surface:** Canonical naming and retired vocabulary follow
   [ADR-0020](0020-ga-stable-surfaces.md).
@@ -80,6 +81,19 @@ capture time, source, and confidence. It is checkout context, never per-agent au
 safe snapshot per host-qualified session is persisted owner-only for History; History must not
 inspect the current checkout and mislabel that state as historical. Absolute paths, filenames,
 patches, untracked contents, and raw Git output never cross the event boundary or enter the store.
+
+## Current implementation boundary (2026-09-09)
+
+Implemented scope is the live projection, bounded source-backed history and
+playback, and sanitized last-workspace persistence. Section 9 is an unimplemented
+design proposal, not an available durable transcript archive.
+[LiveReplayStream](../../src/lib/live/replay-stream.mjs) is an in-process bounded
+array; [playback](../../src/lib/live/transcript-streams.mjs) reconstructs retained
+events. [WorkspaceSnapshotStore](../../src/lib/live/workspace-store.mjs) persists
+workspace metadata only. There is no shipped segmented content archive, durable
+source-offset journal, archive purge/pinning, tombstone, or upcaster pipeline.
+[Live transcript tests](../../tests/kit/live-transcript.test.mjs) validate bounded
+replay rather than cradle-to-grave archive retention.
 
 ## Context
 
@@ -398,12 +412,12 @@ events extend the review range without moving the reader's playhead; **Resume Li
 tail and returns to following. Playback history, queues, and snapshots remain bounded and disclose
 gaps or truncation.
 
-### 9. Amend bounded playback with a durable local evidence archive
+### 9. Deferred proposal: a durable local evidence archive
 
 The bounded replay ring remains the transport buffer for SSE resume, but it is not the historical
 source of truth. Cradle-to-grave review requires a separate local evidence archive and session
-catalog. This amendment supersedes the earlier implication that all transcript content must remain
-ephemeral.
+catalog. This proposal would supersede the ephemeral-content boundary if accepted and
+implemented; it has not done so in the audited implementation.
 
 Supported source artifacts are catalogued by `{host, sessionId, sourceEpoch}` whether or not they
 are actively tailed. The catalog stores only sanitized identity, provider/model metadata,

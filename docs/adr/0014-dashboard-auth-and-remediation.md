@@ -2,12 +2,30 @@
 
 - **Status:** Implemented
 - **Date:** 2026-07-28
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Updated:** 2026-08-04
 - **Updated:** 2026-09-03 — ADR-0044 implements a Maintenance-only POST extension with one-use,
   plan-bound action capabilities. Every other dashboard route retains the non-GET rejection.
 - **Update note:** ADR-0023 completed the settings-writer contract: a promised `.bak` is now
   fail-closed, validated as a regular non-symlink file, and required before atomic replacement.
 - **Deciders:** agentic-kit maintainers
+
+## Current implementation boundary (2026-09-09)
+
+Authentication transport is broader than the adoption-time SSE-only statement:
+`dashboard-server.mjs` accepts header-or-query credentials on API GETs, and
+[the server test](../../tests/dashboard.test.cjs) explicitly asserts
+`GET /api/status?token=...`. This documentation correction does not approve a
+wider security boundary or change runtime behavior; restricting query tokens to
+SSE would require a separate compatibility/security code change. Admin remains
+header-only.
+
+[ADR-0036](0036-dashboard-client-modularization-and-shared-loopback-server.md)
+moved shared token primitives into `loopback-server.mjs`. ADR-0048 adds the exact
+v2 Maintenance POST allowlist; the earlier four-route boundary is historical,
+while default rejection of other non-GET routes remains. Current Windows shim
+handling is defined by [exec.mjs](../../src/lib/exec.mjs), not direct batch-file
+execution.
 
 ## Context
 
@@ -40,13 +58,12 @@ Same mechanism as ADR-0007 §2, applied to `dashboard-server.mjs`:
   `localStorage` under `ak-dash-token` and strips the fragment from the address bar,
   identical to admin's bootstrap.
 - **One necessary deviation from admin:** `EventSource` cannot set custom request
-  headers. The two SSE routes (`/api/live/events`,
-  `/api/live/transcripts/:host/:id/events`) additionally accept the token as a `?token=`
-  query parameter. This is a narrower exception than a full page navigation — it is a
+  headers. SSE clients use a `?token=` query parameter, including
+  `/api/live/events`, `/api/live/intelligence`, and selected transcript streams. This is a narrower exception than a full page navigation — it is a
   same-origin background stream, never enters browser history, and there is no
-  third-party `Referer` for it to leak into. Every other route stays header-only, no
-  query-param fallback, matching admin's stated rejection of query-param tokens
-  (ADR-0007 "Alternatives considered").
+  third-party `Referer` for it to leak into. The current server accepts the same query fallback on all authenticated API GETs,
+  not only SSE; resource-mutation POSTs require the header. This is broader than
+  the original design, and callers should use headers for ordinary GETs.
 - The page itself (`GET /`) is **not** gated — only `/api/*` — because the token gate
   lives client-side (a paste-the-token screen) and needs the shell HTML to render
   before it can prompt.
@@ -70,10 +87,10 @@ Found by the same audit, fixed in the same remediation pass:
   out `npm`/`npx`/`claude`/`ruflo`/`aqe`/`claude-flow` on Windows to work around `.cmd`
   shims — but `shell: true` hands Node's own cmd+args string-join to `cmd.exe`, and
   `providers.mjs`'s `applyProviders()` feeds `kit.json`-sourced provider/model strings
-  into that argv. Fixed by resolving the shim to its real file on `PATH` and running
-  with `shell: false` always (Node's own `.cmd`/`.bat` re-invocation, safe since
-  18.20.2/20.12.2/21.7.2), plus a defense-in-depth grammar check on provider/model
-  strings before they reach the subprocess.
+  into that argv. The current fix resolves native executables directly or uses an existing sibling
+  `.ps1` npm shim through PowerShell `-File`, preserving argument boundaries with
+  `shell: false`. Node does not directly execute `.cmd`/`.bat` without a shell.
+  Provider/model grammar checks remain defense in depth.
 - **Non-atomic `writeJsonWithBackup`.** Truncate-then-write on `~/.claude/settings.json`
   — the file Claude Code reads on every startup — meant an interrupt mid-write (Ctrl-C,
   OOM) could leave it zero-length or partial. Fixed with write-tmp-then-rename
@@ -146,7 +163,7 @@ Found by the same audit, fixed in the same remediation pass:
   (bypassing the browser UI) now needs the token too — this is a deliberate breaking
   change for that class of caller, in favor of not serving transcripts to anonymous
   local processes.
-- `src/lib/dashboard/sse.mjs` is new and shared by both SSE routes; a future SSE
+- `src/lib/dashboard/sse.mjs` is new and shared by the SSE routes; a future SSE
   endpoint should build on it rather than re-copying the inline pattern this ADR
   removed.
 - `src/lib/admin-server.mjs` gained an export dependency from `dashboard-server.mjs`

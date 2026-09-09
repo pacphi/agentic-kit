@@ -2,6 +2,7 @@
 
 - **Status:** Implemented
 - **Date:** 2026-09-09
+- **Updated:** 2026-09-09 — scoped context-card network claims for issue #211
 - **Related:** [ADR-0036](0036-dashboard-client-modularization-and-shared-loopback-server.md),
   [ADR-0048](0048-inventory-led-maintenance-resource-management.md)
 
@@ -95,8 +96,8 @@ The existing model-inventory snapshot supplies Claude/OpenCode capacity and outp
 limits (and Codex fallback catalog limits). Each numeric field requires matching
 source and scope evidence. Stale observations stay marked stale; catalog capacity
 never becomes an effective session window. At most 100 valid models per host
-render, with omitted count and navigation to the complete inventory. No refresh
-commands or network API calls run during dashboard polling. No capacities are summed. The original CLI rows and repair instructions remain;
+render, with omitted count and navigation to the complete inventory. Context-card collection performs no model refresh commands or network API calls.
+Broader Dashboard status/update checks can egress as qualified by ADR-0005. No capacities are summed. The original CLI rows and repair instructions remain;
 the dashboard groups them for display and preserves warnings.
 
 Usage → Context remains the historical pressure view. Only paired input/window

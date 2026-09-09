@@ -2,6 +2,7 @@
 
 - **Status:** Accepted (experimental contract)
 - **Date:** 2026-08-15
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Updated:** 2026-08-26
 - **Update note:** [ADR-0031](0031-capability-graduation-and-upstream-requests.md) amends this ADR's
   "permanent caps" framing. The block on *self-declaring* `canBePrimary` / `aqeProvider` /
@@ -41,6 +42,17 @@ manifest export, dynamically `import()`-ed from a package path named in `kit.jso
 the same validators as a built-in host. **Accepted with a different mechanism**, recorded below,
 after maintainer review found that shape's in-tree gate list materially incomplete and its
 underlying safety premise unmet.
+
+## Current implementation boundary (2026-09-09)
+
+This remains an experimental subprocess contract, not universal host parity.
+The AQE provider bridge now uses private verified-byte execution snapshots for
+declared local files; ordinary lifecycle/execution hooks retain pre-spawn
+content rechecks and do not thereby gain an OS sandbox. The distinction is
+implemented in [aqe-provider.mjs](../../src/lib/adapters/aqe-provider.mjs),
+[hook-runner.mjs](../../src/lib/adapters/hook-runner.mjs), and
+[integrity tests](../../tests/kit/adapter-integrity.test.mjs). The broad
+consumer-overlay claim below has been narrowed to implemented callers.
 
 ## Context
 
@@ -235,13 +247,11 @@ With the flag set, admission of each declared adapter is independent:
 An admitted external host is exposed through an overlay alongside `HOST_REGISTRY`, never by
 mutating the frozen built-in registry itself — the same non-negotiable ADR-0016 §1 drew around
 compatibility exports ("derived… but not independent sources of truth"), generalized to a second,
-explicitly consented source instead of legacy-compat alone. Every consumer that already derives its
-behavior from capability lookups over the registry (ADR-0016 §2: host selection, primary-host
-eligibility, activity routing, install/MCP/guidance/status-line/transcript/usage work, verification)
-picks up an admitted host automatically, with no adapter-specific branch to add. An admitted host is
-invisible as a special case to any consumer that was already capability-driven — and visible only
-where a consumer still hardcodes `claude`/`codex`/`opencode` by name. That residue is exactly the
-amended gate list below.
+explicitly consented source instead of legacy-compat alone. Consumers must explicitly consult the effective overlay. Supervised execution and
+lifecycle paths do so; admission alone does not implement every host surface.
+Primary selection UI and command-statusline consumption remain gaps under
+ADR-0031, and Maintenance does not yet consume admitted manifest capabilities.
+The amended gate list below records the implemented migration boundaries.
 
 ### 6. Consent: hash-pinned, edit-invalidated
 

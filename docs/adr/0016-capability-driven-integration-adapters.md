@@ -4,6 +4,7 @@
   [ADR-0020](0020-ga-stable-surfaces.md); closed-registry clause superseded by
   [ADR-0029](0029-host-adapter-extension-point.md)
 - **Date:** 2026-07-28
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Updated:** 2026-09-02
 - **Update note:** Added read-only Codex plugin-hook compatibility facts,
   runtime-selected Ruflo project-memory store proofs, and the non-correlatable
@@ -16,8 +17,7 @@
   metadata for implemented integrations: no general-purpose collector loop
   exists (F-12). ADR-0032 implements one narrow exception: Model lifecycle intelligence selects
   catalogue descriptors and dispatches only to built-in, bounded source adapters. It does not turn
-  descriptors into arbitrary executable plugins; release proof for the narrow collector remains
-  pending.
+  descriptors into arbitrary executable plugins; ADR-0032 records completed implementation-time release proof for that collector.
   The non-throwing `validateBinding` is wired into `ak host status` as per-entry
   warnings (F-16); and the integrations migrator derives each host's native
   default provider from the provider registry's host-login entries instead of a
@@ -65,6 +65,21 @@
 
 > **GA amendment:** the capability axes and lifecycle contracts remain authoritative. Sections
 > that preserve compatibility exports, commands, or persisted fields are historical after 4.0.
+
+## Current implementation boundary (2026-09-09)
+
+The lifecycle and four-axis separation remain current. Descriptor examples are
+conceptual; actual fields and enum values are defined by
+[registries](../../src/lib/adapters/registries.mjs),
+[facts](../../src/lib/adapters/facts.mjs), and their conformance tests. They are not
+a universal executable plugin API. ADR-0029/0031 govern the experimental admitted
+overlay; built-in-only primary-picker and statusline-consumption gaps remain.
+
+Model lifecycle catalogue reads shipped under ADR-0032 without implementing
+ADR-0011's proposed Usage cost/fidelity pipeline. This ADR's no-network statement
+for config normalization remains valid; it must not be generalized to the whole
+Dashboard, whose status-update probes are documented by ADR-0005. Compatibility
+fields and `ak dual` examples below remain historical under ADR-0020.
 
 ## Context
 
@@ -527,7 +542,7 @@ not write real home/global configuration.
 
 ## Consequences
 
-New built-in hosts and providers become additive registry entries plus their own adapters and
+New built-in hosts and providers require registry entries plus their own adapters and
 contract tests. A new host cannot validate without a setup trust declaration, and setup/host-pick
 preflight derives its disclosure from that registry rather than adding a host-specific branch.
 Commands and UI use a common vocabulary and cannot accidentally expose a provider

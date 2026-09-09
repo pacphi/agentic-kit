@@ -2,6 +2,7 @@
 
 - **Status:** Accepted; static assurance, transactional healing, bounded receipts, and read model implemented
 - **Date:** 2026-09-01
+- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Updated:** 2026-09-04
 - **Updated:** 2026-09-04 — proposed ADR-0048 groups hook findings under logical resources while
   preserving exact placement rows, evidence grades, and this ADR's independent healing authority;
@@ -32,6 +33,17 @@ state.
 `3.38.21`'s signed AutoMemory query-mode mismatch. A new approval-required transaction may
 quarantine only the exact Codex `SessionStart import` and `Stop sync` pair. Claude settings, the
 signed helper, existing bridge data, and native AgentDB are never targets of that action.
+
+## Current implementation boundary (2026-09-09)
+
+The Claude static profile now explicitly includes `2.1.266` alongside `2.1.258`
+([provider source](../../src/lib/hook-audit/providers/claude.mjs), verified date
+2026-09-09). Exact compatibility profiles remain distinct from each recipe's
+mutation eligibility; a profile update is not blanket healing authority.
+Codex profiles remain `0.151.0`, `0.152.1`, and `0.153.2`; OpenCode remains
+`1.18.25`. Native-host runtime receipts are still not acquired by default.
+The v2 Maintenance projection consumes this read model without widening the
+independent hook-healing writer.
 
 ## Context
 
@@ -88,7 +100,7 @@ Profiles name the exact locally verified host versions and a primary documentati
 source. Unknown versions receive syntax-only validation and no automatic compatibility
 repair. A newer version does not inherit a prior profile by optimistic range matching.
 
-The verified profiles are Codex CLI `0.151.0`, `0.152.1`, and `0.153.2`, Claude Code `2.1.258`,
+The verified profiles are Codex CLI `0.151.0`, `0.152.1`, and `0.153.2`, Claude Code `2.1.258` and `2.1.266`,
 and OpenCode `1.18.25`. Codex `0.152.1` adds the `Interrupt` event; both `SessionEnd` and
 `Interrupt` default to one second and clamp at three seconds. The profile registry is
 updated only after source or authoritative docs and
