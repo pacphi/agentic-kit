@@ -321,18 +321,27 @@ function normalizeFacets(rawFacets) {
 }
 
 function computeFacetCounts(baseIds, index, appliedFacets) {
-  const counts = {};
-  for (const facet of FACETS) {
-    const tally = new Map();
-    for (const placementId of baseIds) {
-      if (!matchesFacets(placementId, index, appliedFacets, facet)) continue;
+  const tallies = new Map(FACETS.map((facet) => [facet, new Map()]));
+  const selected = Object.entries(appliedFacets);
+  for (const placementId of baseIds) {
+    const failed = [];
+    for (const [facet, values] of selected) {
+      const placementValues = facetValuesFor(index, placementId, facet);
+      if (!values.some((value) => placementValues.includes(value))) failed.push(facet);
+      if (failed.length === 2) break;
+    }
+    // Counts ignore their own selection. A placement failing two other
+    // selections cannot contribute; one failure contributes only to that facet.
+    if (failed.length === 2) continue;
+    for (const facet of failed.length ? failed : FACETS) {
+      const tally = tallies.get(facet);
       for (const value of facetValuesFor(index, placementId, facet)) {
         tally.set(value, (tally.get(value) ?? 0) + 1);
       }
     }
-    if (tally.size) counts[facet] = Object.fromEntries(tally);
   }
-  return counts;
+  return Object.fromEntries([...tallies].filter(([, tally]) => tally.size)
+    .map(([facet, tally]) => [facet, Object.fromEntries(tally)]));
 }
 
 // ── Sorting ─────────────────────────────────────────────────────────────────

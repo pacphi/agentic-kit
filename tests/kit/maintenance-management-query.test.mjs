@@ -303,6 +303,17 @@ test('facet counts exclude the effect of the facet\'s own current selection', ()
   assert.equal(filteredByKind.total, 1);
 });
 
+test('disjunctive counts preserve each selected facet while excluding failures of other selections', () => {
+  const inventory = SENTINEL_FIXTURES.base();
+  const kindOnly = runInventoryQuery(inventory, { facets: { kind: ['plugin'] } });
+  const scopeOnly = runInventoryQuery(inventory, { facets: { scope: ['project'] } });
+  const combined = runInventoryQuery(inventory, { facets: { kind: ['plugin'], scope: ['project'] } });
+  assert.equal(combined.total, 0);
+  assert.deepEqual(combined.facetCounts.kind, scopeOnly.facetCounts.kind);
+  assert.deepEqual(combined.facetCounts.scope, kindOnly.facetCounts.scope);
+  assert.equal(combined.facetCounts.environment, undefined);
+});
+
 test('unavailable facet values disappear once a scope narrows the result set', () => {
   const inventory = SENTINEL_FIXTURES.base();
   const page = runInventoryQuery(inventory, { scope: 'project' });
