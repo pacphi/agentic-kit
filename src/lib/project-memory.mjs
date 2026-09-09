@@ -1,6 +1,7 @@
 // Project-memory observability. The native bridge keeps its plaintext store in
 // agentdb-memory.db while the compatibility/sql.js surface remains memory.db.
-// Both are legitimate; the native sibling is the active writer when present.
+// Both are legitimate. `active` is a historical preferred-display field, not
+// evidence of the actual writer or which corpus a CLI/MCP invocation selects.
 import fs from 'node:fs';
 import * as paths from './paths.mjs';
 import { withDb } from './sqlite.mjs';

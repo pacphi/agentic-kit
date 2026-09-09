@@ -50,7 +50,7 @@ ak sync             # apply it
 | opencode: `status` reports a later `opencode.jsonc` override | stock OpenCode loads that file after `opencode.json`, so it can shadow the exact MCP/permission values ak receipts; ak cannot verify JSONC without rewriting user comments | merge the Agentic Kit entries into the later file and remove the duplicate override, or keep the override and use direct user-managed wiring; ak preserves both files and does not deploy its gateway against ambiguous effective config |
 | opencode: an agent/skill/plugin file you created yourself keeps ak's version away | deploys are no-clobber: only exact receipt-matching bytes are repairable; an unreceipted or edited destination is user-owned and preserved (`status` reports it as `foreign`) | rename yours (or remove it and run `ak sync` to get ak's managed copy) |
 | opencode: `status` says `no ruflo catalog source` | the agent/skill catalog resolves override → `$RUFLO_REPO` → claude marketplace clone → `@claude-flow/cli` (direct, then nested under ruflo) — all missing | install ruflo (`ak setup` does), or point `integrations.ownership.opencode.catalogDir` / `$RUFLO_REPO` at a ruflo checkout |
-| `ruflo memory store` says OK but reads return nothing | Absolute project pin missing, a legacy Codex MCP launcher inherited the wrong cwd, or an older check looked only at `.swarm/memory.db` while the native bridge selected `.swarm/agentdb-memory.db` | Run `ak sync` to migrate an ak-owned Codex registration, then `ak x verify memory` for an isolated store/retrieve/on-disk/purge proof; `ak setup` pins Claude, Codex, and OpenCode to the project while accepting the runtime-selected native sibling |
+| `ruflo memory store` says OK but reads return nothing | Missing project pin, wrong working directory, or CLI and MCP selecting different files when both `.swarm/memory.db` and `.swarm/agentdb-memory.db` exist | `ak sync` can repair owned registration drift. `ak x verify memory` proves an isolated canary only; inspect existing-corpus routing separately as described below |
 | `status` shows a `codex-plugins` warning | A plugin is enabled in the wrong host, its newest cached hooks or skills fail a known Codex compatibility check, or `config.toml` cannot be inspected safely. The exact `codex@openai-codex` identity is a Claude Code companion and must not be enabled inside Codex | For a valid, regular `config.toml` and verified companion 1.0.6, preview the approval-required repair with `ak heal hooks --host codex`; it changes only that Codex entry, never Claude Code or the cache. Repair malformed TOML or merge symlink-managed config manually. For other plugin findings, open Codex `/plugins`, refresh or disable the named plugin, then start a new session. Setup and sync never rewrite Codex-owned plugin state |
 | `status` shows a `memory-pin` warning | `CLAUDE_FLOW_DB_PATH` is pinned to a dead or foreign path, so every memory op targets the wrong DB ("Database not initialized" beside a healthy in-repo DB). The pin may be deliberate, so `sync` never touches it | repoint (or remove) the pin in `.claude/settings.local.json` `env` |
 | Want to run `ak sync` but Claude/Codex/OpenCode sessions are open in other terminals | Upgrade-bearing syncs stop **all** ruflo daemons machine-wide and swap the global npm trees live sessions execute hooks/statusline/MCP calls from; converged syncs touch nothing | `ak sync --dry-run` first; a `versions` row means idle the other sessions or use `ak sync --no-upgrade`; see [Running `ak sync` while sessions are live](UPGRADING.md#running-ak-sync-while-sessions-are-live) |
@@ -82,6 +82,28 @@ ak sync             # apply it
 > [!WARNING]
 > The `natives … WASM fallback` row is the one that loses data: on the WASM path,
 > memory writes print "OK" and silently vanish. Treat it as the highest-priority fix.
+
+## Existing memory corpus routing
+
+Ruflo 3.39.2 can select different stores through its CLI and MCP bridge. A passing
+`ak x verify memory` canary does not establish access to pre-existing records.
+`ak status` reports both files and leaves writer identity unverified.
+
+A snapshot test retrieved a known native-store record only when the CLI received
+the explicit native file path. For a record independently confirmed in that store,
+use an absolute path:
+
+```sh
+ruflo memory retrieve --namespace YOUR_NAMESPACE --key YOUR_KEY \
+  --path /absolute/project/.swarm/agentdb-memory.db --value-only
+```
+
+Keep the shared MCP path until its routing contract is qualified. Do not rename,
+merge, or delete either database to hide the discrepancy. CLI retrieval can update
+access counters and schema, so use SQLite backup snapshots for read-only diagnostic
+experiments; copying a live database without its WAL is not a consistent snapshot.
+This workaround addresses explicit retrieval, not cross-host writer convergence or
+Windows split-store behavior.
 
 ## Deep proofs (slow, spawn real CLIs)
 

@@ -1,7 +1,7 @@
 // Project memory may legitimately have two stores: the compatibility/sql.js
 // memory.db and the native bridge's plaintext agentdb-memory.db sibling.
-// Presence is a quick signal only; `ak x verify memory` performs the write
-// round-trip proof.
+// Presence cannot establish the active writer or CLI/MCP routing. The isolated
+// `ak x verify memory` canary does not prove access to an existing corpus.
 import { projectMemoryStatus } from '../../../lib/project-memory.mjs';
 import { row } from '../row.mjs';
 
@@ -13,15 +13,14 @@ export default {
       const memory = projectMemoryStatus(cwd);
       if (!memory.active) {
         rows.push(row('memory', 'info', 'no project memory store yet (run setup here to initialize)'));
-      } else if (!memory.active.readable) {
-        rows.push(row('memory', 'warn',
-          `active ${memory.active.kind} store is unreadable (${memory.active.file}) — run: ak x verify memory`));
       } else {
-        const sibling = memory.secondary
-          ? `; ${memory.secondary.kind} compatibility store also present`
-          : '';
-        rows.push(row('memory', 'ok',
-          `${memory.active.kind} active writer: ${memory.active.entries} active entr${memory.active.entries === 1 ? 'y' : 'ies'}${sibling}`));
+        for (const store of memory.stores.filter((candidate) => candidate.present)) {
+          rows.push(row('memory', store.readable ? 'info' : 'warn', store.readable
+            ? `${store.kind}: ${store.entries} active entr${store.entries === 1 ? 'y' : 'ies'} observed; writer and existing-corpus routing unverified`
+            : `${store.kind} store is unreadable (${store.file}); existing-corpus access unverified`));
+        }
+        if (memory.secondary) rows.push(row('memory', 'warn',
+          'two project memory stores coexist; CLI and MCP may select different files — an isolated canary does not verify existing-corpus routing'));
       }
     } catch (e) {
       rows.push(row('memory', 'warn', `project memory check unavailable: ${e.message}`));
