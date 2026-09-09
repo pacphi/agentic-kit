@@ -5,12 +5,11 @@ with nothing pre-installed — without touching the tooling already on your
 machine. This directory gives you that as one command, identically on macOS,
 Windows (Docker Desktop / WSL2), and Linux.
 
-**Isolation promise:** the container never mounts or reads your host's
-`~/.claude`, `~/.codex`, `~/.npmrc`, npm prefix, or any installed CLI. A host
-with any version of agentic-kit installed cannot conflict with these
-containers, and the containers cannot alter your host install. Persistent
-state lives only in Docker-managed named volumes; the single bind mount is
-`./artifacts` inside this directory.
+**Default mount boundary:** the Compose file does not mount your host's
+`~/.claude`, `~/.codex`, `~/.npmrc`, npm prefix, or any installed CLI. Package/configuration state is separate from the host install. The writable
+`./artifacts` bind mount intentionally exports files to the host; ports, the Docker
+daemon, and the host kernel remain shared infrastructure, not absolute isolation.
+The persistent profile stores `/home/tester` in a Docker-managed volume.
 
 Prefer an editor-attached environment (Codespaces, VS Code Dev Containers) over
 a bare `docker compose` shell? The consumer dev container in
@@ -30,9 +29,10 @@ cd docker
 docker compose up --build ak
 ```
 
-What happens, in order — expect **10–15 minutes, network-dependent, on
-*every* run of this service**: a true first-use re-downloads and re-installs
-everything by design (only the image build itself is cached):
+On a newly created container, installation and setup can take several minutes
+depending on the network and selected components. Restarting an existing
+container reuses its writable layer: the entrypoint installs `ak` only when absent,
+but runs setup again unless `AK_SKIP_SETUP=1`.
 
 1. Ubuntu 26.04 + Node image builds (cached on later runs).
 2. The container installs `@pacphi/agentic-kit@next` — the real first-install
@@ -47,10 +47,11 @@ everything by design (only the image build itself is cached):
    ```
 
    Copy it into your **host** browser — it works verbatim. (The token is
-   required; the bare URL without the `#token` fragment is turned away.)
+   required for API data; the bare URL serves the page and its token gate.)
 
-Stop with Ctrl-C (or `docker compose down`). Because this service keeps no
-volumes, the next `up` is a genuine first-use again.
+Ctrl-C stops the service but can leave its container for reuse. Run
+`docker compose down` before the next `up` to recreate the ephemeral container.
+The artifacts bind mount remains on the host.
 
 ## Interactive exploration instead of the dashboard
 
@@ -70,25 +71,23 @@ docker compose --profile persistent up ak-persistent
 
 Same environment, but `/home/tester` lives in a named volume, so the
 converged install (and the ~2 GB RuvNet Brain KB, if you enable it) survives
-restarts. Only the volume's first run pays the 10–15 minute install + setup;
-converged restarts come up in seconds. Reset to factory:
+restarts. The package installation is reused, but setup still runs on each start unless
+skipped; neither timing nor a converged status is guaranteed. Reset to factory:
 `docker compose down --volumes`. Don't run both services at once — they
 share the host port.
 
 ## Signing in to the AI CLIs (optional)
 
-Everything infrastructural — setup, status, sync, dashboard, statusline —
-works with **no** AI login. This is verified, not assumed: a zero-credential
-container completes `ak setup --codex --opencode --yes` (including both MCP
-bridge registrations, `ruflo init`/memory/swarm/daemon with a verified memory
-write, and `aqe init --with-codex`), and a follow-up `ak sync` reports
-**converged — no failing subsystems**. You only need auth to actually drive
-sessions:
+Installation, local configuration, and status inspection can run without an
+inference login. Upstream installation/probe failures remain possible: the
+entrypoint deliberately continues after a setup failure so its state can be
+inspected. A started dashboard does not prove convergence. Model execution
+requires the relevant host/provider authentication:
 
 | CLI | Headless-container strategy |
 | --- | --- |
 | `claude` | `claude` login supports a paste-a-code flow in the terminal — run it inside `docker compose run --rm ak bash`. |
-| `codex` | Easiest: `export OPENAI_API_KEY=…` before starting. The OAuth flow's `localhost:1455` callback can't cross the container boundary without extra bridging. |
+| `codex` | Check `codex login --help`; supported clients offer `codex login --device-auth` without a loopback callback. API-key login is a separate billing choice (`--with-api-key` reads stdin). A host environment variable is not passed through Compose unless explicitly forwarded with `-e`. |
 | `opencode` | API keys via `opencode auth login` in the container shell. |
 
 Never bind-mount host credential dirs into the container — if you must reuse
@@ -109,7 +108,7 @@ a login, `docker cp` the specific file in, deliberately.
   requirement there; use a native Linux x64 runner for the browser-payload
   smoke rather than treating emulated native-module failures as product evidence.
 - **`artifacts/` permission errors (Linux)** — if Docker created the dir
-  root-owned, `sudo chown $USER docker/artifacts`.
+  root-owned, `sudo chown "$USER" artifacts` from the `docker/` directory.
 
 Maintainers: design rationale, knobs, upgrade-path testing, and CI notes are
 in [MAINTAINER-GUIDE.md](MAINTAINER-GUIDE.md).

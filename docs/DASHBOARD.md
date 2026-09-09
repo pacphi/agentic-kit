@@ -148,9 +148,9 @@ Overview keeps status and routing in one health-first area:
   dashboard's own launching project and is not part of project selection. Detail data reads files
   ruflo/agentic-qe already write under `.claude-flow/` and updates near-live over a per-project SSE
   stream while the view is open, falling back to the general status poll otherwise. See
-  [Project intelligence](ddd/project-intelligence.md) and
-  [ADR-0024](adr/0024-project-intelligence-telemetry.md) for the full model and the two learning
-  metrics' load-bearing distinction, and [ADR-0027](adr/0027-shared-project-census.md) for project
+  [Project intelligence](https://github.com/pacphi/agentic-kit/blob/main/docs/ddd/project-intelligence.md) and
+  [ADR-0024](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0024-project-intelligence-telemetry.md) for the full model and the two learning
+  metrics' load-bearing distinction, and [ADR-0027](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0027-shared-project-census.md) for project
   discovery. The machine-wide table and picker share alphabetized Git repository,
   worktree, user-level, and other/unclassified subgroups. Each table subgroup shows
   five rows before scrolling; all rows remain available inside the bounded panel.
@@ -284,7 +284,7 @@ Below the KPIs, **Who is typing**, **Steering mix**, **Tap habits**, **Recurring
 **Re-asks**, and **Host interplay** explain the same deterministic evidence without serving prompt
 text or mutable coaching state. An **All** chip, offered on this view alone, widens the window to the
 full retained history; leaving Prompts drops it back to 30 days. Full formulas, thresholds, and
-sources: [Usage scorecard metrics](USAGE-SCORECARD-METRICS.md) §2a, §2b, §20–§22.
+sources: [Usage scorecard metrics](https://github.com/pacphi/agentic-kit/blob/main/docs/USAGE-SCORECARD-METRICS.md) §2a, §2b, §20–§22.
 
 ### Context
 
@@ -311,7 +311,7 @@ projection.
 Context rides the existing authenticated `/api/usage` aggregate and follows the selected Usage day
 window. Its percentages use runtime-effective denominators where the transcript supplied them; a
 published 1M maximum never overrides a smaller 258.4K session window. Full evidence and threshold
-rules: [ADR-0042](adr/0042-capability-aware-context-budget-intelligence.md).
+rules: [ADR-0042](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0042-capability-aware-context-budget-intelligence.md).
 Run `ak audit context --host all` for the companion read-only startup report: managed guidance
 bytes/state, bounded skill-metadata counts, MCP registration-table bytes, schema availability and
 effective-window evidence. MCP configuration bytes do not include unrelated host preferences, and
@@ -362,7 +362,7 @@ classification is explanation, not actionability.
 A configured Stop risk is not a failed Stop execution. Conversely, an absent receipt is not a
 successful execution or zero failures. Native Claude, Codex and OpenCode hooks do not currently feed
 the bounded supervised-adapter receipt stream, so runtime is normally unknown. See
-[ADR-0041](adr/0041-host-neutral-hook-configuration-assurance.md) for the audit, receipt and
+[ADR-0041](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0041-host-neutral-hook-configuration-assurance.md) for the audit, receipt and
 ownership contracts.
 
 ### Reading a session row
@@ -403,7 +403,7 @@ adding `OPENROUTER_API_KEY`, because it inherits environment variables only when
 
 Usage transcript masking happens on the server. Redaction is marked, there is no reveal or export
 control, and the original masked value never reaches the browser. See
-[ADR-0009](adr/0009-usage-scorecard-local-transcript-analytics.md) for the full evidence and pricing
+[ADR-0009](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0009-usage-scorecard-local-transcript-analytics.md) for the full evidence and pricing
 contract.
 
 ### Models
@@ -482,7 +482,7 @@ action, and activating it with Enter or Space announces whether the stream was c
 This control is presentation-only; **Pause stream** separately controls visual application of live
 updates.
 
-See [Observability](OBSERVABILITY.md) for the map legend, workspace facts, host capability coverage,
+See [Observability](https://github.com/pacphi/agentic-kit/blob/main/docs/OBSERVABILITY.md) for the map legend, workspace facts, host capability coverage,
 History/Review semantics, privacy limits, and troubleshooting.
 
 ## System
@@ -539,7 +539,7 @@ presented as a session start. OpenCode remains unlinked until its shared SQLite 
 byte-attributable retained-session row.
 
 The dashboard-wide semantic and formatting audit is recorded in
-[Date and time presentation](DATE-TIME-PRESENTATION.md).
+[Date and time presentation](https://github.com/pacphi/agentic-kit/blob/main/docs/DATE-TIME-PRESENTATION.md).
 
 The trade is stated rather than hidden. Deep-tier figures always render with when they were
 measured, and once a snapshot passes seven days the freshness label turns amber and reads
@@ -601,7 +601,7 @@ After the probes settle the inventory builds in the background: the empty state 
 the inventory…** until rows appear, or names the reason if the build did not complete.
 
 **Inventory** uses the **Focus browser** approved and implemented on 2026-09-08.
-[Focused validation](archive/2026-09-08-validation-maintenance-focus.md) covers this presentation;
+[Focused validation](https://github.com/pacphi/agentic-kit/blob/main/docs/archive/2026-09-08-validation-maintenance-focus.md) covers this presentation;
 older builds may still show expanded cards.
 Across scopes begins with **System**, **Machine**, **User**, and **Projects**. Select a scope, type,
 resource family, and exact installation; Projects inserts the repository before type. Only the
@@ -776,8 +776,8 @@ local source. Use Ruflo's own budget command; no dashboard number is inferred.
 
 `ak system` prints the same collector output in a terminal, `ak system --deep` runs the scan, and
 `ak system --json` emits the payload verbatim. See
-[Machine footprint](ddd/machine-footprint.md) and
-[ADR-0025](adr/0025-machine-footprint-metrics.md) for the full model and its invariants.
+[Machine footprint](https://github.com/pacphi/agentic-kit/blob/main/docs/ddd/machine-footprint.md) and
+[ADR-0025](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0025-machine-footprint-metrics.md) for the full model and its invariants.
 
 ## Local state and security
 
@@ -824,7 +824,7 @@ count newlines. Each of those yields a path, a name, or a number. Bounded transc
 System selects identity/working-context fields rather than projecting message bodies.
 Catalog also reads bounded definitions and host configuration as described above. Usage
 and Observability have separate content-reading and masking contracts. The full enumeration is
-[Machine footprint § The read surface](ddd/machine-footprint.md#the-read-surface).
+[Machine footprint § The read surface](https://github.com/pacphi/agentic-kit/blob/main/docs/ddd/machine-footprint.md#the-read-surface).
 
 ### Date and time display
 

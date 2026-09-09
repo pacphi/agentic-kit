@@ -3,7 +3,7 @@
 - **Status:** Implemented
 - **Date:** 2026-07-27
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
-- **Updated:** 2026-08-04
+- **Earlier update:** 2026-08-04
 - **GA surface:** Canonical naming and retired vocabulary follow
   [ADR-0020](0020-ga-stable-surfaces.md).
 - **Update note:** Renamed the dashboard surface from Live to Observability and made Live and

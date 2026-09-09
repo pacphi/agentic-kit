@@ -3,10 +3,10 @@
 - **Status:** Accepted; Projects pilot and ADR-0048 checkpointed continuation implemented
 - **Date:** 2026-09-03
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
-- **Updated:** 2026-09-04 — proposed ADR-0048 supplies the separate journal-backed continuation
+- **Earlier update:** 2026-09-04 — proposed ADR-0048 supplies the separate journal-backed continuation
   decision anticipated by this ADR; it must extend this forest rather than introduce a competing
   walker or persistent per-file index
-- **Updated:** 2026-09-05 — ADR-0048 is now Accepted and implemented, delivering the journal-backed
+- **Earlier update:** 2026-09-05 — ADR-0048 is now Accepted and implemented, delivering the journal-backed
   continuation this ADR anticipated as a checkpoint over partitions, not a per-file index. Its
   discovery scan (`src/lib/maintenance/discovery/orchestrator.mjs`) partitions a source root
   (`partitions.mjs`) into bounded, resumable units, executes each partition through this ADR's own

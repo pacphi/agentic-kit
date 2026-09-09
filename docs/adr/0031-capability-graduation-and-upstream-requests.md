@@ -3,7 +3,7 @@
 - **Status:** Accepted (governance decision; implementation active)
 - **Date:** 2026-08-16
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
-- **Updated:** 2026-08-26
+- **Earlier update:** 2026-08-26
 - **Update note:** Agentic-QE 3.13.12 satisfied the provider-registration request in
   [#628](https://github.com/proffesor-for-testing/agentic-qe/issues/628). The six-tier ladder now
   includes a real `aqe-provider` transport exercise, and a passed tier plus explicit hash-pinned

@@ -8,10 +8,10 @@
   F-07): it had zero call sites. The registry capability `commandStatusline` is
   the surviving vocabulary for this distinction.
 - **Deciders:** agentic-kit maintainers
-- **Related:** [ADR-0001](0001-one-routing-policy-many-projections.md),
-  [ADR-0006](0006-primary-host-and-ambidextrous-mirroring.md),
-  [ADR-0008](0008-guidance-target-scope-split.md),
-  [ADR-0010](0010-provider-mediated-quota-reads.md)
+- **Related:** [ADR-0001](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0001-one-routing-policy-many-projections.md),
+  [ADR-0006](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0006-primary-host-and-ambidextrous-mirroring.md),
+  [ADR-0008](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0008-guidance-target-scope-split.md),
+  [ADR-0010](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0010-provider-mediated-quota-reads.md)
 
 ## Context
 

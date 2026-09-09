@@ -7,10 +7,10 @@ RuvNet Brain without treating those independent layers as interchangeable.
 Behind an experimental flag, agentic-kit can also admit **external host adapters**
 that extend this set with a host not shipped in-tree — see
 [External host adapters](PROVIDERS.md#external-host-adapters-experimental),
-[Using Hermes through the external adapter](HERMES-HOST-ADAPTER.md),
-[AUTHORING-HOST-ADAPTERS.md](AUTHORING-HOST-ADAPTERS.md),
-[ADR-0029](adr/0029-host-adapter-extension-point.md), and
-[ADR-0031](adr/0031-capability-graduation-and-upstream-requests.md). An admitted
+[Using Hermes through the external adapter](https://github.com/pacphi/agentic-kit/blob/main/docs/HERMES-HOST-ADAPTER.md),
+[AUTHORING-HOST-ADAPTERS.md](https://github.com/pacphi/agentic-kit/blob/main/docs/AUTHORING-HOST-ADAPTERS.md),
+[ADR-0029](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0029-host-adapter-extension-point.md), and
+[ADR-0031](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0031-capability-graduation-and-upstream-requests.md). An admitted
 external host picks up the same capability-driven treatment described here, but it
 is not one of the three built-ins this reference compares. It can never
 **self-declare** primary-host, AQE-provider, or status-line status — that ban is
@@ -219,7 +219,7 @@ those values exist in older transcript files or are collected by the Usage parse
 Usage → Context computes pressure only from paired input/window observations in the
 selected timeframe. Missing measurements remain missing; catalogue capacity cannot
 fill a historical denominator. See [Dashboard](DASHBOARD.md) and
-[ADR-0050](adr/0050-dashboard-project-identity-and-context-reporting.md).
+[ADR-0050](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0050-dashboard-project-identity-and-context-reporting.md).
 
 ## Host-specific limitations
 
@@ -234,7 +234,7 @@ compatibility. The dashboard therefore reports one artifact and separate host Co
 The common `SKILL.md` authoring format does not establish the same precedence, permissions, model
 advertisement, or runtime loading. MCP registrations are also per host; equal server configuration
 does not prove equal scope, health, authentication, or authorization. See
-[ADR-0045](adr/0045-artifact-consumer-bindings-and-explicit-maintenance-scans.md) and the official
+[ADR-0045](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0045-artifact-consumer-bindings-and-explicit-maintenance-scans.md) and the official
 [Claude](https://code.claude.com/docs/en/slash-commands),
 [Codex](https://developers.openai.com/codex/skills/), and
 [OpenCode](https://opencode.ai/docs/skills) skill documentation.
@@ -325,12 +325,12 @@ label:
 The governing decisions currently stand as follows: ADR-0017 and ADR-0018 are
 **Accepted** and were amended on 2026-08-04 and 2026-07-30 respectively;
 ADR-0020 is **Implemented** as of 2026-07-30; ADR-0021 is **Accepted** and was
-updated 2026-08-03. See [ADR-0017](adr/0017-opencode-host.md),
-[ADR-0018](adr/0018-generalized-host-worker-execution.md),
-[ADR-0020](adr/0020-ga-stable-surfaces.md), and
-[ADR-0021](adr/0021-inference-provider-provenance.md). For the external-adapter
-section above, [ADR-0029](adr/0029-host-adapter-extension-point.md) is the
-extension point and [ADR-0031](adr/0031-capability-graduation-and-upstream-requests.md)
+updated 2026-08-03. See [ADR-0017](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0017-opencode-host.md),
+[ADR-0018](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0018-generalized-host-worker-execution.md),
+[ADR-0020](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0020-ga-stable-surfaces.md), and
+[ADR-0021](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0021-inference-provider-provenance.md). For the external-adapter
+section above, [ADR-0029](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0029-host-adapter-extension-point.md) is the
+extension point and [ADR-0031](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0031-capability-graduation-and-upstream-requests.md)
 amends it with capability graduation — replacing ADR-0029's permanent
 capability caps with the earn-then-grant model, except for the permanent ban on
 self-declaring them.

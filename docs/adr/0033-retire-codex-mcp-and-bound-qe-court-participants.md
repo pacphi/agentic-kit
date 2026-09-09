@@ -1,7 +1,7 @@
 # ADR-0033 — Retire Codex MCP and bound QE-Court participant transport
 
 - **Status:** Implemented; handoff transport amended by
-  [ADR-0034](0034-schema-native-handoffs-and-hermetic-seats.md)
+  [ADR-0034](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0034-schema-native-handoffs-and-hermetic-seats.md)
 - **Date:** 2026-08-25
 - **Updated:** 2026-08-31
 - **Update note:** Initial implementation retires only receipt-owned legacy MCP state,
@@ -17,11 +17,11 @@
   by the installer; tag-only releases remain visible but are deferred without touching the
   healthy installed Brain.
 - **Deciders:** agentic-kit maintainers
-- **Related:** [ADR-0001](0001-one-routing-policy-many-projections.md),
-  [ADR-0006](0006-primary-host-and-ambidextrous-mirroring.md),
-  [ADR-0016](0016-capability-driven-integration-adapters.md),
-  [ADR-0018](0018-generalized-host-worker-execution.md),
-  [ADR-0020](0020-ga-stable-surfaces.md),
+- **Related:** [ADR-0001](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0001-one-routing-policy-many-projections.md),
+  [ADR-0006](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0006-primary-host-and-ambidextrous-mirroring.md),
+  [ADR-0016](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0016-capability-driven-integration-adapters.md),
+  [ADR-0018](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0018-generalized-host-worker-execution.md),
+  [ADR-0020](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0020-ga-stable-surfaces.md),
   [issue #108](https://github.com/pacphi/agentic-kit/issues/108)
 
 ## Context

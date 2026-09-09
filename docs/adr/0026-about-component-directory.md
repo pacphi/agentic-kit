@@ -3,7 +3,7 @@
 - **Status:** Implemented
 - **Date:** 2026-08-06
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
-- **Updated:** 2026-08-06 — accepted and implemented; the open points below are resolved decisions
+- **Earlier update:** 2026-08-06 — accepted and implemented; the open points below are resolved decisions
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0005](0005-dashboard-in-page-routing-reveal.md),
   [ADR-0007](0007-maintainer-admin-local-telemetry.md),

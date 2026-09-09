@@ -1,12 +1,13 @@
 # agentic-kit
 
-> Multi-agent orchestration framework for agentic coding
+> Setup, repair, evidence reporting, and supervised execution for coding-agent integrations
 
 ## Project Overview
 
-A Claude Flow powered project
+A cross-platform, zero-runtime-dependency Node.js CLI (`ak` / `agentic-kit`) integrating
+Ruflo, Agentic QE, Claude Code, Codex, and opt-in OpenCode.
 
-**Tech Stack**: TypeScript, Node.js
+**Tech Stack**: JavaScript ES modules (`.mjs`), Node.js 22+, TypeScript checking via `tsc`
 **Architecture**: Domain-Driven Design with bounded contexts
 
 ## Quick Start
@@ -14,8 +15,8 @@ A Claude Flow powered project
 ### Installation
 
 ```bash
-npm install
-```text
+pnpm install
+```
 
 ### Build
 
@@ -31,15 +32,20 @@ npm test
 
 ### Development
 
+Source runs directly; there is no `dev` script or compilation step.
+
 ```bash
-npm run dev
+node bin/agentic-kit.mjs --help --all
+pnpm run typecheck
 ```
 
 ## Agent Coordination
 
 ### Swarm Configuration
 
-This project uses hierarchical swarm coordination for complex tasks:
+For complex work, the preferred coordination shape is hierarchical. These are
+workflow preferences, not evidence that a swarm is running; obey the current
+host/session capability and concurrency limits:
 
 | Setting | Value | Purpose |
 |---------|-------|---------|
@@ -153,6 +159,11 @@ bind a clean commit or an immutable snapshot including those changes.
 
 ## MCP Runtime Integration
 
+The following upstream tool/command examples describe integration vocabulary,
+not a live inventory or implementation inside agentic-kit. Confirm installed
+upstream help and the configured MCP schemas before use. Prefer the installed
+`ruflo` binary rather than an implicit package download.
+
 Use MCP tools for coordination, then keep coding:
 
 | Tool | Purpose | Example |
@@ -214,7 +225,7 @@ configures and authorizes that attribution.
 ### Storing Patterns
 
 ```bash
-npx @claude-flow/cli memory store \
+ruflo memory store \
   --key "pattern-name" \
   --value "pattern description" \
   --namespace patterns
@@ -223,7 +234,7 @@ npx @claude-flow/cli memory store \
 ### Searching Memory
 
 ```bash
-npx @claude-flow/cli memory search \
+ruflo memory search \
   --query "search terms" \
   --namespace patterns
 ```
@@ -231,10 +242,10 @@ npx @claude-flow/cli memory search \
 ## Quick Commands
 
 ```bash
-npx @claude-flow/cli memory search --query "relevant patterns"
-npx @claude-flow/cli hooks route --task "current task description"
-npx @claude-flow/cli swarm init --topology hierarchical
-npx @claude-flow/cli hooks pre-task --description "task summary"
+ruflo memory search --query "relevant patterns"
+ruflo hooks route --task "current task description"
+ruflo swarm init --topology hierarchical
+ruflo hooks pre-task --description "task summary"
 ```
 
 ## Links
@@ -242,32 +253,32 @@ npx @claude-flow/cli hooks pre-task --description "task summary"
 - Documentation: <https://github.com/ruvnet/ruflo>
 - Issues: <https://github.com/ruvnet/ruflo/issues>
 
-## Performance Targets
+## Performance evidence
 
-| Metric | Target | Notes |
-|--------|--------|-------|
-| HNSW Search | 150x-12,500x faster | Vector operations |
-| Memory Reduction | 50-75% | Int8 quantization |
-| MCP Response | <100ms | API latency |
-| CLI Startup | <500ms | Cold start |
-| SONA Adaptation | <0.05ms | Neural learning |
+Use `pnpm run benchmark:footprint` for the repository's measurement benchmark.
+Bind results to the source revision, workload, and environment. Upstream HNSW,
+compression, or neural-routing targets are not measured agentic-kit guarantees.
 
 ## Testing
 
 ### Running Tests
 
 ```bash
-# Unit tests
-npm test
+# Coverage-enforced unit and legacy renderer/server suites
+pnpm test
 
-# Integration tests
-npm run test:integration
+# One focused suite
+node --test tests/kit/dispatch-surface.test.mjs
 
-# Coverage
-npm run test:coverage
+# Browser verification
+pnpm run test:ui
 
-# Security tests
-npm run test:security
+# Static checks
+pnpm run typecheck
+pnpm run lint
+pnpm run lint:cc
+pnpm run lint:md
+pnpm run build
 ```
 
 ### Test Philosophy
@@ -280,7 +291,8 @@ npm run test:security
 
 ### Coverage Requirements
 
-- Minimum 80% line coverage
+- Repository target: at least 80% line coverage; `pnpm test` currently enforces
+  70% line, branch, and function floors. Report the measured result and any gap.
 - 100% coverage for security-critical code
 - All public APIs must have tests
 
@@ -290,10 +302,10 @@ Claude Flow exposes tools via Model Context Protocol:
 
 ```bash
 # Start MCP server
-npx ruflo mcp start
+ruflo mcp start
 
 # List available tools
-npx ruflo mcp tools
+ruflo mcp tools
 ```
 
 ### Available Tools
@@ -346,22 +358,23 @@ Claude Flow uses hooks for lifecycle automation:
 
 ```bash
 # Before starting a task
-npx @claude-flow/cli hooks pre-task \
+ruflo hooks pre-task \
   --description "implementing authentication"
 
 # After completing a task
-npx @claude-flow/cli hooks post-task \
+ruflo hooks post-task \
   --task-id "task-123" \
   --success true
 
 # Route a task to agents
-npx @claude-flow/cli hooks route \
+ruflo hooks route \
   --task "implement OAuth2 login flow"
 ```
 
 ## Background Workers
 
-12 background workers provide continuous optimization:
+Examples of upstream worker names and intended roles follow. Their installation,
+enablement, execution, and resource use require separate evidence:
 
 | Worker | Priority | Purpose |
 |--------|----------|---------|
@@ -382,22 +395,23 @@ npx @claude-flow/cli hooks route \
 
 ```bash
 # List workers
-npx @claude-flow/cli hooks worker list
+ruflo hooks worker list
 
 # Trigger specific worker
-npx @claude-flow/cli hooks worker dispatch --trigger audit
+ruflo hooks worker dispatch --trigger audit
 
 # Check worker status
-npx @claude-flow/cli hooks worker status
+ruflo hooks worker status
 ```
 
 ## Intelligence System
 
-The RuVector Intelligence System provides neural learning:
+Upstream intelligence concepts referenced by integrations include the following.
+They are not guarantees that a given installation has trained or is using them:
 
 ### Components
 
-- **SONA**: Self-Optimizing Neural Architecture (<0.05ms adaptation)
+- **SONA**: Self-Optimizing Neural Architecture
 - **MoE**: Mixture of Experts for specialized routing
 - **HNSW**: Hierarchical Navigable Small World for fast search
 - **EWC++**: Elastic Weight Consolidation (prevents forgetting)
@@ -419,17 +433,17 @@ The RuVector Intelligence System provides neural learning:
 export CLAUDE_FLOW_LOG_LEVEL=debug
 
 # Enable verbose mode
-npx @claude-flow/cli --verbose <command>
+ruflo --verbose <command>
 ```
 
 ### Health Checks
 
 ```bash
 # Run diagnostics
-npx @claude-flow/cli doctor --fix
+ruflo doctor --fix
 
 # Check system status
-npx @claude-flow/cli status
+ruflo status
 ```
 
 ---

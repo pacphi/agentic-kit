@@ -4,7 +4,7 @@
   [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-29
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
-- **Updated:** 2026-08-25
+- **Earlier update:** 2026-08-25
 - **Update note:** Added private bounded dependency handoffs and one absolute lifecycle deadline
   per attempt; removed the temporary command, adapter, and persisted-schema compatibility clauses.
   ADR-0033 extends cleanup to POSIX process groups so host-spawned MCP descendants share the

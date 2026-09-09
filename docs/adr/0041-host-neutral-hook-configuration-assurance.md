@@ -3,11 +3,11 @@
 - **Status:** Accepted; static assurance, transactional healing, bounded receipts, and read model implemented
 - **Date:** 2026-09-01
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
-- **Updated:** 2026-09-04
-- **Updated:** 2026-09-04 — proposed ADR-0048 groups hook findings under logical resources while
+- **Earlier update:** 2026-09-04
+- **Earlier update:** 2026-09-04 — proposed ADR-0048 groups hook findings under logical resources while
   preserving exact placement rows, evidence grades, and this ADR's independent healing authority;
   no implemented hook behavior changes yet
-- **Updated:** 2026-09-05 — ADR-0048 is now Accepted and implemented. Its management projection's
+- **Earlier update:** 2026-09-05 — ADR-0048 is now Accepted and implemented. Its management projection's
   `mapHooks` (`src/lib/maintenance/management/projection.mjs`) reads this ADR's sanitized hook read
   model and renders each occurrence group as a `hook`-kind placement, scoped by host, with a
   `verified` identity/placement evidence assertion and its behavior identity carried as a content

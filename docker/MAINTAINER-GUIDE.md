@@ -25,10 +25,10 @@ see [USER-GUIDE.md](USER-GUIDE.md); this page is the *why* and the knobs.
   URL works verbatim on the host because the host port mirrors 7431. Do not
   "fix" this by adding a bind flag to the dashboard; the loopback literal is
   deliberate.
-- **Isolation is absolute, both directions.** No host path is mounted except
+- **Default configuration and package state are separate.** No host path is mounted except
   `./artifacts`. Named volumes carry all persistent state, namespaced
-  `agentic-kit-firstuse_*`. A host agentic-kit install (any version, any
-  prefix) and this environment cannot see each other. Keep it that way when
+  `agentic-kit-firstuse_*`. The container does not mount host integration directories. Docker/kernel access,
+  forwarded ports, and the writable artifact mount remain shared boundaries. Keep it that way when
   extending: auth material enters via `docker cp` or env, never a mount.
 - **`--yes` in the default setup flags.** Compose `up` has no interactive
   stdin; `ak setup` prompts would either hang (TTY allocated) or silently
@@ -44,7 +44,7 @@ see [USER-GUIDE.md](USER-GUIDE.md); this page is the *why* and the knobs.
 | `AK_INSTALL_SPEC` (env) | `@pacphi/agentic-kit@$AK_DIST_TAG` | Full npm spec override — test an unpublished build: `npm pack` the checkout, drop the tarball in `./artifacts`, set `AK_INSTALL_SPEC=/artifacts/<name>.tgz` |
 | `AK_SETUP_FLAGS` (env) | `--codex --opencode --yes` | Full setup surface; add `--no-ruvnet-brain` to skip the ~2 GB KB, `--minimal` for the smallest footprint |
 | `AK_SKIP_SETUP` (env) | `0` | `1` = install the kit but stop before setup (bare-kit debugging) |
-| `AK_SYNC_PASSES` (env) | `0` | Run this many post-setup `ak sync --yes` passes; use `2` to prove convergence/idempotence |
+| `AK_SYNC_PASSES` (env) | `0` | Run this many post-setup `ak sync --yes` passes; compare captured outcomes to assess convergence/idempotence |
 | `AK_ARTIFACT_PREFIX` (env) | `first-use` | Safe filename prefix for status/system evidence written under `/artifacts` |
 | `AK_DASHBOARD_PORT` / `AK_BRIDGE_PORT` (env) | `7431` / `7432` | Only needed if you change the compose port mapping too |
 | `UBUNTU_VERSION` (build arg) | `26.04` | OS matrix testing |
@@ -76,11 +76,13 @@ the downloadable browser path on a native Linux x64 runner.
 
 ## Regression artifacts
 
-Each run that completes setup writes `artifacts/first-use-status.json` and
-`artifacts/first-use-system.json` — `ak status --json` plus the deep, content-free
+When `/artifacts` is writable, the entrypoint attempts to write `artifacts/first-use-status.json` and
+`artifacts/first-use-system.json` — `ak status --json` plus the deep, metadata-only
 install/catalogue snapshot seen by a brand-new machine. Diff them across releases to
 catch first-use regressions (a subsystem newly failing on clean install is
-exactly the class of bug maintainers' converged machines can't see). This is
+exactly the class of bug maintainers' converged machines can't see). Setup failure is tolerated to keep inspection possible, but each artifact command sits before `&& echo`, so failure is not propagated
+as a reliable entrypoint failure and can leave an empty or partial output file. Inspect exit codes and files;
+file presence alone is not a successful clean-install receipt. This is
 the seam for a future nightly job: GitHub Actions runs this same compose file
 natively on Linux; compare the JSON against the previous run and alert on new
 `fail` rows.
@@ -90,9 +92,9 @@ passes in an ephemeral container, and compare its catalogue with the host:
 
 ```bash
 npm pack --pack-destination docker/artifacts
-AK_INSTALL_SPEC=/artifacts/pacphi-agentic-kit-<version>.tgz \
-AK_SYNC_PASSES=2 AK_ARTIFACT_PREFIX=clean-branch \
-  docker compose -f docker/compose.yaml run --rm ak true
+docker compose -f docker/compose.yaml run --rm \
+  -e AK_INSTALL_SPEC=/artifacts/pacphi-agentic-kit-<version>.tgz \
+  -e AK_SYNC_PASSES=2 -e AK_ARTIFACT_PREFIX=clean-branch ak true
 ak system --deep --json > docker/artifacts/upgraded-host-system.json
 ```
 
@@ -114,6 +116,5 @@ load-bearing when diagnosing a Codex context warning caused by project history.
 - The healthcheck allows `start_period: 600s` because install + full setup
   precede the dashboard; if setup grows meaningfully slower, raise it rather
   than letting orchestrators flap the container.
-- `docker/*.md` is deliberately outside the repo's markdownlint globs
-  (`.markdownlint-cli2.jsonc` covers `docs/**`); keep these guides tidy by
-  hand.
+- `docker/*.md` participates in the repository Markdown and link checks. Run
+  `pnpm run lint:md` and `pnpm run lint:links:internal` after editing these guides.

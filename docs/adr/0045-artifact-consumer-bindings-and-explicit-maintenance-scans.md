@@ -3,10 +3,10 @@
 - **Status:** Implemented
 - **Date:** 2026-09-03
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
-- **Updated:** 2026-09-04 — proposed ADR-0048 retains physical artifact and consumer-binding
+- **Earlier update:** 2026-09-04 — proposed ADR-0048 retains physical artifact and consumer-binding
   identity, adds exact management placements, and plans configurable/resumable discovery; current
   explicit provider-scan behavior remains authoritative until implementation
-- **Updated:** 2026-09-05 — ADR-0048 is now Accepted and implemented. This ADR's `PhysicalArtifact`
+- **Earlier update:** 2026-09-05 — ADR-0048 is now Accepted and implemented. This ADR's `PhysicalArtifact`
   and `ConsumerBinding` identity is now projected, unchanged, as the management projection's own
   `PhysicalArtifact` and `ConsumerBinding` rows (`src/lib/maintenance/management/
   {identity,projection}.mjs`): one physical artifact used by several hosts still appears once with

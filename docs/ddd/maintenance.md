@@ -2,7 +2,7 @@
 
 Maintenance is the resource-management control plane defined by
 [ADR-0044](../adr/0044-receipt-aware-maintenance-control-plane.md) and
-[ADR-0048](../adr/0048-inventory-led-maintenance-resource-management.md). ADR-0048 is Accepted and
+[ADR-0048](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0048-inventory-led-maintenance-resource-management.md). ADR-0048 is Accepted and
 implemented; it is not yet marked Implemented in its own record because the human-evaluation and
 cross-platform acceptance gates its migration plan requires have not run (see that ADR's
 "Implementation status"). ADR-0044's transaction engine remains the runtime safety floor underneath
@@ -22,19 +22,19 @@ digest match, or missing usage observation.
 
 **System measures; Maintenance manages; Maintenance's transaction engine acts.**
 
-[Machine Footprint](machine-footprint.md) owns the read-only inventory, project pressure, source
+[Machine Footprint](https://github.com/pacphi/agentic-kit/blob/main/docs/ddd/machine-footprint.md) owns the read-only inventory, project pressure, source
 relationships, freshness, and advisory candidates. Maintenance's management projection consumes
 those facts without turning an observation into ownership. Catalog is no longer a separate
 dashboard destination: `#system/catalog` redirects into Maintenance's Inventory route, which
 presents Catalog v4 evidence at placement grain alongside installs, models, and provider
 configuration. Catalog, Advisory, and the Footprint collectors still do not mutate the machine.
 
-[Integration Management](integration-management.md) owns host lifecycle capability, desired state,
+[Integration Management](https://github.com/pacphi/agentic-kit/blob/main/docs/ddd/integration-management.md) owns host lifecycle capability, desired state,
 and agentic-kit ownership receipts. Maintenance asks which exact provider operation exists; it does
 not manufacture a missing lifecycle verb. [Model Lifecycle Intelligence](model-lifecycle-intelligence.md)
 keeps owning model facts, sources, and lifecycle diffs — Maintenance consumes the exact placement,
 consumer, and storage evidence and adds exactly one Managed removal operation.
-[Hook configuration assurance](hook-configuration-assurance.md) keeps owning hook occurrences and
+[Hook configuration assurance](https://github.com/pacphi/agentic-kit/blob/main/docs/ddd/hook-configuration-assurance.md) keeps owning hook occurrences and
 behavior identity — Maintenance joins its sanitized read model into `hook`-kind placements without
 gaining healing authority.
 
@@ -420,7 +420,7 @@ only for the owner running the CLI. `--actions` accepts exactly one id; more tha
 
 The fourteen invariants below describe the implemented management contract and its enforcement
 points. The broader acceptance gates remain tracked separately in
-[Maintenance acceptance](../MAINTENANCE-ACCEPTANCE.md):
+[Maintenance acceptance](https://github.com/pacphi/agentic-kit/blob/main/docs/MAINTENANCE-ACCEPTANCE.md):
 
 1. Every actionable row identifies one exact placement — `planner.mjs`/`coordinator.mjs`'s
    `ONE_ACTION_PER_PLAN` refusal before any provider call, lock, or journal write.

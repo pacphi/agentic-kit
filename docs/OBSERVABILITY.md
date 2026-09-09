@@ -325,8 +325,9 @@ only PID/parent/start/command columns, then requests full argv only for Node or 
 host-controller candidates from that selection. Separate OS accounts are outside the
 intended survey; people sharing one login, a service running under that account, and a
 container sharing the host PID namespace remain inside the same numeric-UID boundary.
-Do not run the dashboard with `sudo`. Windows runtime process discovery is unsupported,
-and missing/restricted `ps`, `lsof`, or `/proc` degrades runtime presence without removing
+Do not run the dashboard with `sudo`. Windows uses a process survey and bounded
+working-directory probe; permission or probe failures can leave attribution unavailable.
+Missing/restricted `ps`, `lsof`, or `/proc` on POSIX degrades runtime presence without removing
 retained transcript/history evidence. The argv lookup is a second process-table query; a PID
 could theoretically be reused between selection and lookup, so current-UID selection is a
 least-privilege reduction rather than a hard isolation boundary. It does **not** search arbitrary
@@ -347,7 +348,10 @@ Historical persisted events from the pre-GA executor normalize to the read-only
 `internal` surface so retained evidence is not mislabeled as native. No current
 writer or `--live-source` parser accepts the retired label.
 
-The diagram is a bounded current-state projection, not a durable audit log.
+The diagram and replay buffers are bounded in-process projections. Restarting the
+service does not retain their event history; source transcript files can be reread
+within configured bounds. The owner-only workspace file retains metadata, not a
+durable transcript/event archive. ADR-0012's durable archive proposal remains deferred.
 Silence changes a session's projection lifecycle to quiescent after 30 seconds
 and expired after five minutes; it does not claim successful completion.
 Source timestamps are preserved, but the event cursor records ingestion order

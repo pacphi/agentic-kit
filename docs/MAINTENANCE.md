@@ -54,7 +54,7 @@ reason if it fails. The retired Catalog link (`#system/catalog`) redirects to In
 ## Inventory
 
 The **Focus browser** described below was approved and implemented on 2026-09-08.
-See [focused validation](archive/2026-09-08-validation-maintenance-focus.md); older builds may
+See [focused validation](https://github.com/pacphi/agentic-kit/blob/main/docs/archive/2026-09-08-validation-maintenance-focus.md); older builds may
 still show expanded resource cards. The approved interaction does
 not change the exact-operation, preview, confirmation, or receipt contracts in this guide.
 
@@ -702,8 +702,8 @@ storage is blocked, so authenticated panels can still finish bootstrap.
   interrupted operation.
 
 For architecture and invariants, see [the Maintenance domain](ddd/maintenance.md),
-[ADR-0048](adr/0048-inventory-led-maintenance-resource-management.md), the
-[acceptance criteria and open gates](MAINTENANCE-ACCEPTANCE.md), and
+[ADR-0048](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0048-inventory-led-maintenance-resource-management.md), the
+[acceptance criteria and open gates](https://github.com/pacphi/agentic-kit/blob/main/docs/MAINTENANCE-ACCEPTANCE.md), and
 [ADR-0044](adr/0044-receipt-aware-maintenance-control-plane.md) for the transaction engine.
 
 ### Resource descriptions and installation sources
@@ -732,12 +732,12 @@ path-bearing descriptions are omitted from public Maintenance data. Refresh the
 machine measurement after upgrading to capture new catalog metadata.
 
 Project coverage is designed around build ecosystems rather than one manifest format.
-See the [proposed project metadata adapter design](PROJECT-METADATA-ADAPTERS.md)
+See the [proposed project metadata adapter design](https://github.com/pacphi/agentic-kit/blob/main/docs/PROJECT-METADATA-ADAPTERS.md)
 for the proposed ecosystem targets, polyglot attribution, and unsupported-metadata behavior.
 
 Project cards show all detected, uniformly sized SVG language icons inline with wrapping,
 with language names in tooltips and accessible labels. Artifact-only detections do not imply source line counts.
-See the [dated top-50 coverage list](LANGUAGE-COVERAGE.md) and [bundled logo sources and licenses](LANGUAGE-LOGOS.md).
+See the [dated top-50 coverage list](https://github.com/pacphi/agentic-kit/blob/main/docs/LANGUAGE-COVERAGE.md) and [bundled logo sources and licenses](https://github.com/pacphi/agentic-kit/blob/main/docs/LANGUAGE-LOGOS.md).
 
 ### Scan history dates
 

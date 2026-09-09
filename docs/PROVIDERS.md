@@ -57,7 +57,7 @@ Intelligence, but it explicitly makes no quality or economic claim. Status can r
 explicit model command; `ak sync` never executes model refresh or model-plan actions.
 
 This capability model is
-[ADR-0016](adr/0016-capability-driven-integration-adapters.md) (Accepted); the controls below
+[ADR-0016](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0016-capability-driven-integration-adapters.md) (Accepted); the controls below
 implement it. `ak host` owns execution-host lifecycle and selection (`status`, `pick`, `refresh`,
 and `off`), with `ak x host` as its plumbing spelling. Inference providers and bindings remain
 separate axes even though some provider controls share that workflow. `ak host status` also
@@ -91,7 +91,7 @@ OpenAI-compatible URL alone does not prove that a session used it or incurred no
 keep configured local intent separate from observed execution and billing evidence. `local-openai` is not an AQE provider type — `ollama` is. Loopback
 `http://` is allowed; a remote endpoint requires `https://`; and the endpoint may never embed
 credentials, fragments, or secret-bearing query parameters. See
-[ADR-0028](adr/0028-local-openai-compatible-providers.md).
+[ADR-0028](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0028-local-openai-compatible-providers.md).
 
 A binding declares a compatible relationship; it does not add a new execution branch inside an
 upstream tool. In particular, Ruflo's direct `agent_execute` path currently dispatches persisted
@@ -213,9 +213,9 @@ descriptor as a first-party registry entry — an ordinary PR, not a command.
 Nothing here installs itself: you declare the adapter, you consent to it, and teardown remains
 reversible. `contract: 1` is still experimental and **not frozen** — freezing waits on a real
 external adapter clearing the conformance kit and soaking. Writing one? See
-[AUTHORING-HOST-ADAPTERS.md](AUTHORING-HOST-ADAPTERS.md). The governing decisions are
-[ADR-0029](adr/0029-host-adapter-extension-point.md) and
-[ADR-0031](adr/0031-capability-graduation-and-upstream-requests.md).
+[AUTHORING-HOST-ADAPTERS.md](https://github.com/pacphi/agentic-kit/blob/main/docs/AUTHORING-HOST-ADAPTERS.md). The governing decisions are
+[ADR-0029](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0029-host-adapter-extension-point.md) and
+[ADR-0031](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0031-capability-graduation-and-upstream-requests.md).
 
 ---
 
@@ -518,7 +518,7 @@ The current [OpenAI API model catalog](https://developers.openai.com/api/docs/mo
 GPT-5.4 and GPT-5.4 mini, and no first-party withdrawal notice supports the former automatic
 replacement claims. `ak` only adds a retirement rule when it can cite the host's direct notice; a
 newer default remains a recommendation, not a route rewrite (see
-[ADR-0003](adr/0003-auto-seed-dual-host-provenance.md)). Once a citation-backed rule exists,
+[ADR-0003](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0003-auto-seed-dual-host-provenance.md)). Once a citation-backed rule exists,
 `ak host pick`, `ak setup`, and `ak sync` all rewrite a seeded route naming the withdrawn model —
 a user-pinned route is reported, never rewritten (still routed to the replacement at run time).
 
@@ -530,8 +530,8 @@ weigh, cleared with `ak x host refresh` if you want the newer default.
 benchmark or entitlement guarantee. Use `ak models refresh` and `ak models status` to
 inspect the installed host's evidence, then verify the intended route in that host.
 Published model limits and prices are separate from context allocated to a session,
-subscription quota, and measured cost per completed task. The dated
-[pricing audit](MODEL-PRICING-AUDIT.md) records the bundled rate decisions; it does not
+subscription quota, and measured per-task cost. The dated
+[pricing audit](https://github.com/pacphi/agentic-kit/blob/main/docs/MODEL-PRICING-AUDIT.md) records the bundled rate decisions; it does not
 prove a model remains available or better for a particular workload.
 
 `ak host pick --help` lists the bundled model suggestions. Tuning is per-route and reversible: hand-edit
@@ -592,21 +592,21 @@ reconciliation.
 
 ---
 
-**The shape of the whole thing:** Level 0 is the 90% case and costs nothing. Each level up is
-one flag, and the bottom is always the tools' own knobs — `ak` never traps your config, it
-just makes the good default automatic and the customization reversible.
+**The customization boundary:** default routes and deeper native configuration use the
+same host/provider distinction. Billing depends on the actual serving path and account.
+Review each projection's ownership and teardown limits before changing or removing it.
 
 ## Appendix — design references
 
 - Per-activity routing and dual-host seeding: [docs/adr/](adr/) ADR-0001..0005;
   grounded in ruflo's own dual-mode templates.
 - Primary-host selection and ambidextrous mirroring:
-  [ADR-0006](adr/0006-primary-host-and-ambidextrous-mirroring.md).
+  [ADR-0006](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0006-primary-host-and-ambidextrous-mirroring.md).
 - Capability-driven integration axes, bindings, and provenance:
-  [ADR-0016](adr/0016-capability-driven-integration-adapters.md).
-- The generic local OpenAI-compatible provider: [ADR-0028](adr/0028-local-openai-compatible-providers.md).
-- External host adapters (experimental): [ADR-0029](adr/0029-host-adapter-extension-point.md),
-  amended by [ADR-0031](adr/0031-capability-graduation-and-upstream-requests.md) — capability
-  graduation. Authoring guide: [AUTHORING-HOST-ADAPTERS.md](AUTHORING-HOST-ADAPTERS.md).
+  [ADR-0016](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0016-capability-driven-integration-adapters.md).
+- The generic local OpenAI-compatible provider: [ADR-0028](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0028-local-openai-compatible-providers.md).
+- External host adapters (experimental): [ADR-0029](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0029-host-adapter-extension-point.md),
+  amended by [ADR-0031](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0031-capability-graduation-and-upstream-requests.md) — capability
+  graduation. Authoring guide: [AUTHORING-HOST-ADAPTERS.md](https://github.com/pacphi/agentic-kit/blob/main/docs/AUTHORING-HOST-ADAPTERS.md).
 - Host env flags (`ENABLE_CLAUDE_CODE` / `ENABLE_CODEX`): upstream ruflo
   ADR-034, "Optional MCP Backends".

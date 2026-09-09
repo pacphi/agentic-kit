@@ -1,6 +1,7 @@
 # Date and time presentation
 
-**Audit date:** 2026-09-04  
+**Audit date:** 2026-09-09
+
 **Status:** contract adopted for System session identity; remaining surfaces are recorded below
 
 The dashboard should feel like one application even though its views were built at different
@@ -34,14 +35,15 @@ session IDs remain opaque; shortening is presentation only and never parsing.
 | System > Maintenance preview expiry | Browser-local `toLocaleString()` | Use the exact-instant helper and `<time>`; retain the explicit validity wording. |
 | Usage > Limits reset and Sessions start | Separate partial `toLocaleString()` formats omit year and timezone | Replace with the canonical exact-instant formatter; disclose timezone where space is constrained. |
 | Usage > Models | Some change times are localized, while source capture and snapshot times render raw ISO-like strings | Normalize all true instants through the exact-instant helper; keep provider date-only release/rate dates as calendar dates. |
-| Usage > Context attention | Converts a session start through UTC and slices `YYYY-MM-DD` | Fix first: this can display the wrong local calendar day. Format the instant locally, or preserve a producer date-only field when that is the actual type. |
+| Usage > Context attention | Uses `formatLocalDateTime` from the canonical datetime helper | Original UTC-slice finding is resolved; preserve the producer instant and test locale/day boundaries. |
+| Runtime > Context configuration | Uses explicit `en-US` compact date formatting and `<time>` for cached limits | Does not yet satisfy this contract's browser-locale preference; record as implementation follow-up rather than claim migration complete. |
 | Observability > Live | Has its own relative helper; playback shows time-of-day without date or timezone | Reuse canonical relative and exact helpers. Review/history playback needs the date and an exact disclosure. |
 | Admin telemetry | Uses an intentionally compact UTC/relative vocabulary in a separate page | Preserve UTC where operationally intentional, but add a visible UTC label and machine-readable instant before sharing helpers. |
 | Charts and storage growth | Raw `YYYY-MM-DD` day buckets | Treat as calendar buckets; do not timezone-shift them. Improve localized axis labels without changing bucket identity. |
 
 ## Remediation order
 
-1. Fix the Usage Context UTC day-shift risk and raw Model lifecycle instants.
+1. Retain the resolved Usage Context local-instant behavior; reconcile remaining raw/locale-specific Model and Runtime context instants.
 2. Consolidate dashboard exact-instant and relative-instant helpers, preserving durations and
    calendar buckets as distinct APIs.
 3. Add focus/hover exact disclosure and `<time>` markup wherever compact relative text remains.

@@ -3,7 +3,7 @@
 - **Status:** Implemented
 - **Date:** 2026-07-25
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
-- **Updated:** 2026-09-08
+- **Earlier update:** 2026-09-08
 - **Pricing update:** Added GPT-6 Astra standard rates and per-entry verification dates;
   verified Claude 5.1 cache rates, removed Sonnet 5’s canceled September increase, and documented
   unmodelled request surcharges.

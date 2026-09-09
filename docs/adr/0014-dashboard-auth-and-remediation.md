@@ -3,8 +3,8 @@
 - **Status:** Implemented
 - **Date:** 2026-07-28
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
-- **Updated:** 2026-08-04
-- **Updated:** 2026-09-03 — ADR-0044 implements a Maintenance-only POST extension with one-use,
+- **Earlier update:** 2026-08-04
+- **Earlier update:** 2026-09-03 — ADR-0044 implements a Maintenance-only POST extension with one-use,
   plan-bound action capabilities. Every other dashboard route retains the non-GET rejection.
 - **Update note:** ADR-0023 completed the settings-writer contract: a promised `.bak` is now
   fail-closed, validated as a regular non-symlink file, and required before atomic replacement.

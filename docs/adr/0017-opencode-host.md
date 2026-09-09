@@ -4,7 +4,7 @@
   [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-28
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
-- **Updated:** 2026-08-25
+- **Earlier update:** 2026-08-25
 - **Update note:** ADR-0032 implements project/provider-scoped OpenCode model discovery through a
   bounded descriptor-driven source adapter and an explicit online refresh; ADR-0032 records its completed implementation-time release proof. That reader does not change OpenCode's opt-in, non-primary, non-AQE routing boundary.
   Clarified that the AQE boundary applies to inference-provider routing, not

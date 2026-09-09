@@ -3,7 +3,7 @@
 - **Status:** Implemented
 - **Date:** 2026-07-24
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
-- **Updated:** 2026-09-02
+- **Earlier update:** 2026-09-02
 - **Update note:** ADR-0023 made machine-guidance backups fail-closed and replacement atomic. Project
   setup now also preserves user-authored guidance, migrates the old unsentineled lean stub, and
   converges duplicate agentic-kit sentinels idempotently.

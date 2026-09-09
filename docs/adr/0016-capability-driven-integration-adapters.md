@@ -5,7 +5,7 @@
   [ADR-0029](0029-host-adapter-extension-point.md)
 - **Date:** 2026-07-28
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
-- **Updated:** 2026-09-02
+- **Earlier update:** 2026-09-02
 - **Update note:** Added read-only Codex plugin-hook compatibility facts,
   runtime-selected Ruflo project-memory store proofs, and the non-correlatable
   OpenRouter account-analytics boundary; removed the pre-GA compatibility command,

@@ -4,7 +4,7 @@
   [ADR-0020](0020-ga-stable-surfaces.md) — see *Validation required* before acceptance
 - **Date:** 2026-07-27
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
-- **Updated:** 2026-07-30
+- **Earlier update:** 2026-07-30
 - **Update note:** Repointed the provider-binding reference to the canonical host-management
   module; the unmeasured local-model proposal remains unimplemented.
 - **Deciders:** agentic-kit maintainers

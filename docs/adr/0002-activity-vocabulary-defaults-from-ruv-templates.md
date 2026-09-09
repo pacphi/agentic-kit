@@ -3,7 +3,7 @@
 - **Status:** Amended by [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-23
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
-- **Updated:** 2026-07-30
+- **Earlier update:** 2026-07-30
 - **Update note:** Preserved the activity vocabulary and moved its runtime ownership to the
   in-repository host-neutral runner.
 - **Deciders:** agentic-kit maintainers

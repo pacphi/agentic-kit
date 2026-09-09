@@ -3,7 +3,7 @@
 - **Status:** Implemented; discovery amended by [ADR-0027](0027-shared-project-census.md)
 - **Date:** 2026-08-05
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
-- **Updated:** 2026-08-07
+- **Earlier update:** 2026-08-07
 - **Update note:** Extended Intelligence from one project's telemetry, implicitly tied to the
   dashboard server's own launching cwd, to a machine-wide catalog of every ruflo-initialized
   project plus an explicitly selected, explicitly labeled detail project (defaulting to

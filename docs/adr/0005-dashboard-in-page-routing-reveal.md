@@ -1,16 +1,17 @@
 # ADR-0005 — Dashboard surfaces routing via in-page reveal
 
+> Historical vocabulary below is governed by [ADR-0020](0020-ga-stable-surfaces.md);
+> it does not restore retired commands or configuration surfaces.
+
 - **Status:** Implemented
 - **Date:** 2026-07-23
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
-- **Updated:** 2026-08-25
-- **Updated:** 2026-09-03 — ADR-0044 implements a narrowly allowlisted Maintenance action boundary
-  under System while ordinary Dashboard and Machine Footprint routes remain read-only.
-- **Update note:** Reconciled the implemented five-area shell introduced by ADR-0025 and ADR-0026.
-  ADR-0032 adds Models as a secondary Usage destination and a compact Overview summary while
-  preserving read-only, network-silent ordinary Dashboard reads. Model identifiers use a fail-closed
-  keyed Dashboard projection, and the semantic table has a labelled focusable scroll region plus
-  field-evidence disclosures. ADR-0032 records its completed implementation-time release proof.
+- **Earlier update:** 2026-08-25
+- **Earlier update:** 2026-09-03 — ADR-0044 implements a narrowly allowlisted Maintenance action boundary
+  under System; ordinary measurement/status routes retain their separate cache/observation effects.
+- **Update note:** Issue #211 reconciles server egress/cache writes, GET query-token compatibility,
+  owner-visible model identifiers, and guarded Maintenance actions with current source.
+  Earlier design decisions remain below as historical context.
 - **Deciders:** agentic-kit maintainers
 
 > **GA amendment:** the dashboard is read-only except for ADR-0044's exact receipt-aware

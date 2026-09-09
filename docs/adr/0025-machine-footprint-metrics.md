@@ -4,61 +4,61 @@
 - **Updated:** 2026-09-08 — installed tools preserve measured executable locations
   for private path reveal, with PATH resolution and bounded package-manifest fallback;
   Windows command extensions and POSIX executable checks are covered by fixtures.
-- **Updated:** 2026-09-08 — dashboard instant displays share browser-local date/time
+- **Earlier update:** 2026-09-08 — dashboard instant displays share browser-local date/time
   formatting; published calendar dates retain their day and stored timestamps remain UTC.
-- **Updated:** 2026-09-08 — bounded declared resource descriptions are an explicit read-surface
+- **Earlier update:** 2026-09-08 — bounded declared resource descriptions are an explicit read-surface
   exception; project ecosystem description adapters remain proposed, not implemented.
-- **Updated:** 2026-09-08 — registry 2026.09.1 covers the September TIOBE top 50;
+- **Earlier update:** 2026-09-08 — registry 2026.09.1 covers the September TIOBE top 50;
   graphical/container languages have presence-only evidence and shared suffixes use
   bounded syntax checks without retaining source text.
 - **Date:** 2026-08-06
-- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
-- **Updated:** 2026-08-06 — accepted and implemented; the open points below are resolved decisions
-- **Updated:** 2026-08-07 — §7 replaced by an enumerated read surface (the collectors now read a
+- **Earlier update:** 2026-09-09 — reconciled against repository source and tests for issue #211
+- **Earlier update:** 2026-08-06 — accepted and implemented; the open points below are resolved decisions
+- **Earlier update:** 2026-08-07 — §7 replaced by an enumerated read surface (the collectors now read a
   transcript head's `cwd` field and project manifests' dependency keys); §6 gains reclaimable
   safety tiers; §8 and §9 added for the widened scan surface, the corrected brain/Playwright
   figures, and project accounting
-- **Updated:** 2026-09-02 — Agentic Kit now manages the receipt-owned agent-browser executor while
+- **Earlier update:** 2026-09-02 — Agentic Kit now manages the receipt-owned agent-browser executor while
   Install observes AQE-owned Vibium and both payloads; daemon cleanup gains an opt-in,
   identity-proven Ruflo MCP orphan path; Catalog covers the launching repository plus observed
   on-disk projects and attributes Codex `.agents/skills` separately
-- **Updated:** 2026-09-03 — CatalogInventory v3 preserves plugin marketplace/version relationships,
+- **Earlier update:** 2026-09-03 — CatalogInventory v3 preserves plugin marketplace/version relationships,
   separates user/project/plugin occurrences, hashes bounded capability entrypoints and complete
   bounded skill definitions, reports project pressure and source-probe drift, and feeds read-only
   relationship evidence to Maintenance.
-- **Updated:** 2026-09-03 — the Catalog leads with the host profile and a five-record cross-host
+- **Earlier update:** 2026-09-03 — the Catalog leads with the host profile and a five-record cross-host
   viewport, then gives Project skill pressure a full-width row; pressure groups one disclosure per
   relevant project, keeps the launching project first, omits measured-zero project rows, and moves
   per-host source evidence plus one deduplicated plan command behind progressive disclosure.
-- **Updated:** 2026-09-03 — ADR-0044 implements Maintenance as a separate control plane under the
+- **Earlier update:** 2026-09-03 — ADR-0044 implements Maintenance as a separate control plane under the
   System shell. Machine Footprint collectors, Catalog, pressure, and System measurement routes
   remain read-only.
-- **Updated:** 2026-09-03 — a session cwd that aliases a host user root no longer creates a
+- **Earlier update:** 2026-09-03 — a session cwd that aliases a host user root no longer creates a
   project occurrence: one host/kind/path cannot be both user and project scope, while a shared
   user root carried by different hosts remains explicit cross-host evidence. The FootprintSnapshot
   schema advances to v3 so cached v2 scope aliases cannot be replayed.
-- **Updated:** 2026-09-04 — Runtime distinguishes proven repositories, host app services, desktop
+- **Earlier update:** 2026-09-04 — Runtime distinguishes proven repositories, host app services, desktop
   apps, host state, user home, system root, and ordinary folders instead of calling every readable
   working directory a project. Storage reads only the already-ranked top-N transcript heads to
   attribute dated Codex rollouts from their `cwd` metadata.
-- **Updated:** 2026-09-04 — that same bounded top-N head read now also retains the host's opaque
+- **Earlier update:** 2026-09-04 — that same bounded top-N head read now also retains the host's opaque
   native session ID and timezone-bearing opening timestamp. Sessions presents a localized
   two-line identity, exposes the original filename and exact time on focus or hover, and labels
   file mtime fallback as last activity rather than a fabricated start.
-- **Updated:** 2026-09-03 — project inventory expands to supported agent, command, skill, and MCP
+- **Earlier update:** 2026-09-03 — project inventory expands to supported agent, command, skill, and MCP
   surfaces across Claude, Codex, and OpenCode; Git tracking is observed without becoming ownership.
   CatalogInventory advances to v3 and FootprintSnapshot to v4 so older evidence cannot be replayed
   as complete relationship evidence.
-- **Updated:** 2026-09-03 — ADR-0045 separates physical artifacts from host consumer bindings,
+- **Earlier update:** 2026-09-03 — ADR-0045 separates physical artifacts from host consumer bindings,
   applies host-specific discovery and enablement, groups cross-host relationships once, and
   advances CatalogInventory to v4 and FootprintSnapshot to v6.
-- **Updated:** 2026-09-03 — ADR-0046 moves production deep collection to a worker, reuses compatible
+- **Earlier update:** 2026-09-03 — ADR-0046 moves production deep collection to a worker, reuses compatible
   physical observations within one explicit scan, measures only the hosted-repository population
   the Projects table names, reports all exclusions, and advances FootprintSnapshot to v7.
-- **Updated:** 2026-09-04 — proposed ADR-0048 folds Catalog presentation into an inventory-led
+- **Earlier update:** 2026-09-04 — proposed ADR-0048 folds Catalog presentation into an inventory-led
   Maintenance workspace while preserving this ADR's read-only measurement ownership; no current
   collector or mutation boundary changes until that proposal is implemented
-- **Updated:** 2026-09-05 — ADR-0048 is now Accepted and implemented. Catalog is no longer a
+- **Earlier update:** 2026-09-05 — ADR-0048 is now Accepted and implemented. Catalog is no longer a
   visible dashboard destination: `src/lib/dashboard/page.mjs` redirects `#system/catalog` into
   Maintenance's Inventory route, which presents this context's Catalog v4 evidence at placement
   grain alongside installs, models, and provider configuration. This context's collectors, `ak

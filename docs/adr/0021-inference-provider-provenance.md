@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-31
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
-- **Updated:** 2026-08-25
+- **Earlier update:** 2026-08-25
 - **Update note:** Claude provider resolution now covers runtime leases as well as transcript
   discovery, while stronger observed identity remains authoritative; OpenCode runtime presence is
   acknowledged without manufacturing provider identity. The user-facing surface is now named

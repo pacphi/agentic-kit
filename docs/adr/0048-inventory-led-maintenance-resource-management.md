@@ -5,29 +5,29 @@
 - **Updated:** 2026-09-08 — project language badges use locally bundled SVGs with
   name tooltips and accessible labels; ADR-0050 subsequently replaces the
   three-icon limit with a wrapping row of all detected language icons.
-- **Updated:** 2026-09-08 — installed tools preserve measured executable locations
+- **Earlier update:** 2026-09-08 — installed tools preserve measured executable locations
   for private path reveal, with PATH resolution and bounded package-manifest fallback;
   Windows command extensions and POSIX executable checks are covered by fixtures.
-- **Updated:** 2026-09-08 — dashboard instant displays share browser-local date/time
+- **Earlier update:** 2026-09-08 — dashboard instant displays share browser-local date/time
   formatting; published calendar dates retain their day and stored timestamps remain UTC.
-- **Updated:** 2026-09-08 — Focus cards separate capability names from installation sources;
+- **Earlier update:** 2026-09-08 — Focus cards separate capability names from installation sources;
   bounded local frontmatter and plugin-manifest descriptions are displayed when declared.
-- **Updated:** 2026-09-08 — project Focus cards reveal measured language combinations
+- **Earlier update:** 2026-09-08 — project Focus cards reveal measured language combinations
   with three labelled icon badges at that baseline; ADR-0050 now shows all
   detected language icons in a wrapping row.
-- **Updated:** 2026-09-08 — Activity scan history uses a local-date hierarchy with
+- **Earlier update:** 2026-09-08 — Activity scan history uses a local-date hierarchy with
   completion time, source, status, and entry-count columns, newest first; date groups
   have keyboard-accessible chevron toggles and start collapsed.
-- **Updated:** 2026-09-08 — scan history rolls over at 10 records per source and
+- **Earlier update:** 2026-09-08 — scan history rolls over at 10 records per source and
   environment, retaining the existing 90-day age limit.
-- **Updated:** 2026-09-08 — Activity summary sections use a responsive bordered
+- **Earlier update:** 2026-09-08 — Activity summary sections use a responsive bordered
   card grid, with scan history remaining full-width below.
 - **Date:** 2026-09-04
-- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
-- **Updated:** 2026-09-04 — records the completed Maintenance overhaul decision interview and
+- **Earlier update:** 2026-09-09 — reconciled against repository source and tests for issue #211
+- **Earlier update:** 2026-09-04 — records the completed Maintenance overhaul decision interview and
   defines the proposed inventory, guidance, discovery, activity, recovery-audit, and action
   contracts; no implementation is claimed
-- **Updated:** 2026-09-05 — implementation delivered: the management projection schema v2 with
+- **Earlier update:** 2026-09-05 — implementation delivered: the management projection schema v2 with
   opaque ids and a privacy guard; Inventory/Guidance/Discovery/Activity queries; configurable
   discovery with resumable checkpointed scans over the ADR-0047 forest; a one-write-action contract
   enforced at the planner, coordinator, service, dashboard API, and CLI; a read-only interruption
@@ -35,19 +35,19 @@
   project-patch provider and an exact Ollama model-removal provider; signed built-in recipes under
   an N-3 package-manager policy; the v2 dashboard route allowlist; `ak maintain` v2 verbs; and
   Catalog navigation redirected into Maintenance. See "Implementation status" below.
-- **Updated:** 2026-09-07 — approved Option A presentation: progressive filters, contextual
+- **Earlier update:** 2026-09-07 — approved Option A presentation: progressive filters, contextual
   project/resource hierarchy, conditional inspector, one local measurement toolbar with phased
   progress through inventory publication, and distinct filesystem/evidence coverage. See the
   [experience specification](../archive/2026-09-04-design-maintenance-overhaul-experience-specification.md).
-- **Updated:** 2026-09-07 — Projects retain Git repositories and non-Git folders, with
+- **Earlier update:** 2026-09-07 — Projects retain Git repositories and non-Git folders, with
   Git/Folder/Worktree icons and labels plus a Project type facet; missing or unreadable evidence
   remains Not checked. Classification is presentation metadata and never changes identity.
-- **Updated:** 2026-09-08 — procedures open in a shared dialog from Inventory or Guidance;
+- **Earlier update:** 2026-09-08 — procedures open in a shared dialog from Inventory or Guidance;
   stale procedure requests recheck admission, and unbound removal/update templates are withheld.
-- **Updated:** 2026-09-08 — canonical presentation families preserve exact installation identities;
+- **Earlier update:** 2026-09-08 — canonical presentation families preserve exact installation identities;
   plugin release/candidate evidence is retained, compatibility-unknown availability is labelled,
   catalog-only models are excluded, and path reveal follows recorded locators.
-- **Updated:** 2026-09-08 — current working-tree presentation replaces Project type with
+- **Earlier update:** 2026-09-08 — current working-tree presentation replaces Project type with
   Include worktrees below project search; scan records show the latest per source; Guidance
   separates optional management from evidence-backed outcomes and uses exclusive pills.
   The user subsequently approved **B — Focus browser** from the

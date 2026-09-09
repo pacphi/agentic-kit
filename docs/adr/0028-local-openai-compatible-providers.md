@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-08-11
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
-- **Updated:** 2026-08-25
+- **Earlier update:** 2026-08-25
 - **Update note:** Accepted with corrections after review of PR #131: the quoted Hermes
   `api_mode: openai` value is annotated as invalid rather than reproduced as valid (F-30), and the
   AQE-projection asymmetry between `ollama` and `local-openai` is now stated explicitly as

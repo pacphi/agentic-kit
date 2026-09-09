@@ -1,8 +1,8 @@
 # Verifying the Codex usage-scorecard fix on your own machine
 
 **For:** anyone who uses Codex CLI and wants to check whether the two bugs
-fixed in the usage parser affected their own numbers — without sharing any
-transcript content, session ids, titles, or file paths with anyone.
+fixed in the usage parser affected their own numbers. Run the comparison locally
+and review/redact its output before sharing it.
 
 **You don't need to read the rest of this repo to use this document.**
 Everything you need is below: what was wrong, why the fix can be trusted
@@ -112,28 +112,29 @@ subagent-replay logs.
 The script reads complete local rollout files into memory and parses their JSON lines. It
 selects model, thread-source, cumulative token, and response-event fields for an aggregate
 report; it does not print prompts, titles, session identifiers, or individual file paths.
-Review the script and its output before sharing anything. Its default root is
+The human-readable report **does print the rollout scan root**, which can identify
+your OS account or workspace. Review and redact that line before sharing. Its default root is
 `~/.codex/sessions`; pass `--root /absolute/path/to/sessions` for another Codex home.
 
 This is a **legacy replay comparison**, not a second implementation of today's dashboard.
 Its fixed July 2026 rate table, model fallback, string-only `thread_source` handling, and
 last-cumulative-event logic are retained for that comparison. The maintained parser also
-handles newer source shapes and first-session metadata precedence. Consequently, the
+handles newer message formats and first-session metadata precedence. Consequently, the
 script's dollar totals and even its replay classification may differ from current Usage.
 Use the maintained dashboard and metrics reference for current estimates; do not use this
 script as billing reconciliation or proof that every current parser path is correct.
 
 ## What to send back
 
-**Just the printed output block, in full — nothing else.** That's the
-complete, minimal report; there's no need to trim it further or describe
-your sessions in your own words. If you'd rather have a copy-pasteable
-single blob instead of the human-readable report, run it with `--json`
-instead.
+**Share only output you have reviewed and redacted.** Remove the rollout-root
+line from the human report if it identifies your account or workspace. `--json`
+provides aggregate output without that human-report path line, but still review
+model identifiers and any sensitive metadata before sending it. No transcript
+files or session descriptions are needed.
 
-If "before" and "after" are close (a low or zero percentage excluded), this
-fix doesn't materially change what you were seeing, and the earlier
-discrepancy has a different explanation worth digging into further. If a
+If "before" and "after" are close, this legacy comparison found little
+string-marked subagent replay. It does not rule out a current parsing or pricing
+discrepancy that the standalone script does not model. If a
 meaningful percentage is excluded, that's the concrete number behind it —
 not a guess.
 

@@ -3,7 +3,7 @@
 - **Status:** Accepted (experimental contract)
 - **Date:** 2026-08-15
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
-- **Updated:** 2026-08-26
+- **Earlier update:** 2026-08-26
 - **Update note:** [ADR-0031](0031-capability-graduation-and-upstream-requests.md) amends this ADR's
   "permanent caps" framing. The block on *self-declaring* `canBePrimary` / `aqeProvider` /
   `commandStatusline` in the manifest is permanent (the safety invariant here), but the *capability*
@@ -17,10 +17,10 @@
   command/relative-import bytes into a private per-call snapshot and rechecks host intent, consent,
   and the exact-hash grant immediately before spawn. This is byte pinning, not an OS sandbox;
   absolute file access by consented hook code remains outside the snapshot boundary.
-- **Updated:** 2026-09-04 — proposed ADR-0048 uses admitted adapter capabilities to populate the
+- **Earlier update:** 2026-09-04 — proposed ADR-0048 uses admitted adapter capabilities to populate the
   Maintenance inventory, but leaves external-adapter actions unavailable until an independent
   operation/scope conformance grant exists; the experimental contract is otherwise unchanged
-- **Updated:** 2026-09-05 — ADR-0048 is now Accepted and implemented, but it does not yet integrate
+- **Earlier update:** 2026-09-05 — ADR-0048 is now Accepted and implemented, but it does not yet integrate
   with this ADR's admission door. Its management projection can render a `host-adapter` resource
   kind, but as shipped that kind is sourced only from Machine Footprint's install detection of the
   built-in host CLIs (Claude, Codex, OpenCode, and Hermes by name); it does not read
