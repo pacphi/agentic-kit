@@ -9,6 +9,11 @@ import { auditHooks } from '../../src/lib/hook-audit/orchestrator.mjs';
 import { buildHookHealingPlan } from '../../src/lib/hook-remediation/planner.mjs';
 import { applyHookHealingPlan, undoHookHealing } from '../../src/lib/hook-remediation/engine.mjs';
 
+// Artifact mutations require POSIX ownership/mode guarantees. Windows retains
+// audit findings but cannot acquire executable migration actions.
+const POSIX_MUTATION_ONLY = { skip: process.platform === 'win32'
+  ? 'AQE artifact mutations are intentionally read-only on Windows' : false };
+
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-aqe-artifact-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -27,7 +32,7 @@ function fixture(t) {
   return { root, audit, settings, settingsFile };
 }
 
-test('content-bound migration backs up helpers and preserves mixed hook groups, then undoes exactly', (t) => {
+test('content-bound migration backs up helpers and preserves mixed hook groups, then undoes exactly', POSIX_MUTATION_ONLY, (t) => {
   const fx = fixture(t);
   const plan = buildHookHealingPlan({ report: fx.audit() });
   const actions = plan.actions.filter((item) => item.executable);
@@ -48,6 +53,18 @@ test('content-bound migration backs up helpers and preserves mixed hook groups, 
   const undone = undoHookHealing({ transactionsRoot, receiptId: result.receipt.id });
   assert.equal(undone.ok, true, JSON.stringify(undone));
   assert.deepEqual(JSON.parse(fs.readFileSync(fx.settingsFile)), fx.settings);
+});
+
+test('Windows keeps reviewed AQE artifact findings read-only without altering project bytes', (t) => {
+  const fx = fixture(t);
+  const files = [fx.settingsFile, ...['hooks/aqe-hook.cjs', 'helpers/brain-checkpoint.cjs']
+    .map(name => path.join(fx.root, '.claude', name))];
+  const before = files.map(file => fs.readFileSync(file));
+  const plan = buildHookHealingPlan({ report: fx.audit(), platform: 'win32' });
+  assert.equal(plan.summary.executable, 0);
+  assert.ok(plan.actions.some(action => action.classification === 'approval-required'),
+    'reviewed artifact findings remain visible for manual review');
+  assert.deepEqual(files.map(file => fs.readFileSync(file)), before);
 });
 
 test('unverified host profile and user-modified artifacts cannot acquire executable helper actions', (t) => {
@@ -95,7 +112,7 @@ test('lifecycle runner launches installed AQE directly when a project bundle is 
 });
 
 
-test('released 3.14.1 checkpoint is also recognized and malformed hooks remain read-only', (t) => {
+test('released 3.14.1 checkpoint is also recognized and malformed hooks remain read-only', POSIX_MUTATION_ONLY, (t) => {
   const fx = fixture(t);
   fs.copyFileSync(new URL('../fixtures/aqe-lifecycle/brain-checkpoint-3.14.1.cjs', import.meta.url),
     path.join(fx.root, '.claude/helpers/brain-checkpoint.cjs'));
@@ -108,7 +125,7 @@ test('released 3.14.1 checkpoint is also recognized and malformed hooks remain r
 });
 
 
-test('Claude 2.1.266 receives its own verified profile and receipt identity', (t) => {
+test('Claude 2.1.266 receives its own verified profile and receipt identity', POSIX_MUTATION_ONLY, (t) => {
   const fx = fixture(t);
   const audit = () => fx.audit('2.1.266');
   const report = audit();
