@@ -157,7 +157,7 @@ A companion reuses the same lifecycle with four extra boundaries:
 - verification combines a versioned machine contract with independent, content-free host
   observations because one source does not prove all hook, trust, and integrity facts.
 
-For deja-vu v0.19.0, normal diagnosis is `deja doctor --json --offline` with JSON schema version 2.
+The supported deja-vu contract starts at v0.19.0; normal diagnosis is `deja doctor --json --offline` with JSON schema version 2.
 Target application uses `--no-guidance --no-index`, followed when required by one bounded
 `deja index`; `deja warmup` is excluded because it also writes deja-owned CLI guidance, and
 `index --rebuild` is reserved for diagnosed corruption.

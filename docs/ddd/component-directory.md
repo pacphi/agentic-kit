@@ -141,9 +141,10 @@ the editorial content — which needs no network and no facts — renders in ful
 purpose survives its join's absence ([ADR-0023](../adr/0023-fail-closed-operations-and-explicit-degradation.md)
 honesty, applied to a page whose primary content is static).
 
-Outbound links open the user's browser; the kit performs no egress. The directory's URLs are
-swept by the same nightly external link check that covers `docs/**` — a rotted link is CI red,
-not a permanent dead end.
+Outbound links open the user's browser; the directory performs no egress. Unit tests validate
+the source-defined URLs' HTTPS/named-host shape and entry completeness. The nightly link job
+scans documentation Markdown, not `about-directory.mjs`, so it does not prove that every directory
+URL currently resolves. Changed source-defined destinations still need an explicit link check.
 
 About is leftmost in the tab order but is **not** the landing view: Overview stays the default on
 every open, including the first, and a one-time dismissible nudge on Overview points newcomers
@@ -174,7 +175,7 @@ takes the worst of the pair, so the quieter one's health cannot hide behind the 
    exempt from this parity gate until the adapter-extension contract graduates it to a
    card-carrying citizen; external companion plugins remain observations, not directory entries.
 5. **Links are `https`, named-host, user-initiated**; the kit fetches none of them; all are
-   covered by the nightly external link sweep.
+   validated structurally in directory tests; documentation links also receive the nightly sweep.
 6. **Official marks only where genuinely official and already shipped**; everything else is an
    explicit monogram tile. No fabricated brand assets, ever.
 7. **No numbers beyond version strings.** Health, cost, counts, and activity belong to their

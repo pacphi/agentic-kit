@@ -119,6 +119,22 @@ verified.
   `route`, `provider`, `model-runtime`, or `tool` consumer, carrying discovery mechanism and
   enabled state.
 
+### Repository and session-origin presentation
+
+`management/projection-projects.mjs` enriches existing opaque project identities after registry
+and fallback identities are assigned. Verified common Git directory/backlink evidence can relate
+worktree choices to a repository without changing placement IDs or action targets. Equal names or
+remotes do not establish that relationship. Public fields retain only the keyed repository ID,
+bounded label, evidence class and observation time; raw roots and common-directory paths remain
+private. Discovery's existing repository-key relationships retain their own provenance.
+
+Session origin is an independent overlapping project facet. Exact Claude/Codex Desktop declarations
+supply memberships; all other observations remain unclassified. Selecting either or both Desktop
+origins filters distinct placements in matching projects once. Focus node counts remain installation
+counts, and session-origin counts are copied once per project rather than summed per installed
+resource. Encoded-directory recovery is labelled a recovered-project sighting, not a verified
+session. Native language icons wrap inline without dropping additional detected languages.
+
 ## Evidence and version policy
 
 Every primary claim is a field-local `EvidenceAssertion` (`management/evidence.mjs`) graded
@@ -132,14 +148,17 @@ observed.
 
 Version axes stay independent (`VERSION_AXES`: installed, effective, candidate, compatible
 candidate, recommended candidate, producer, source revision, cache generation, content digest, pin,
-channel). An Updates-available Guidance entry requires verified installed version and verified
-compatibility plus a source-bound candidate (`guidance.mjs`'s `computeUpdateEntries`); `Recommended`
+channel). The compatibility-based Updates-available path requires verified installed version and verified
+compatibility plus a source-bound candidate (`guidance.mjs`'s `computeUpdateEntries`). A separate
+host-reported candidate path requires verified candidate-source evidence and explicitly states
+that compatibility has not been verified; `Recommended`
 additionally requires a verified `recommendationAuthority`. Stable channels are default; prerelease
 and nightly candidates require existing enrollment or explicit enablement (`channelAllowed`).
 
-The user interface never renders `Unknown`, `Unsupported`, `Needs attention`, generic `Review`,
-`Fix`, `Repair all`, or `Clean all` (`model.mjs`'s `PROHIBITED_LABELS`, enforced by
-`isProhibitedLabel`/`assertLabelAllowed` on every placement `displayName` and Guidance `outcome`).
+Resource names and Guidance outcomes reject `Unknown`, `Unsupported`, `Needs attention`,
+generic `Review` or `Fix`, `Repair all`, and `Clean all` (`model.mjs`'s `PROHIBITED_LABELS`).
+Evidence-specific missing-association and unclassified-origin explanations are separate from
+resource disposition labels; they do not create an action or a failure state.
 
 ## Dependencies and conflicts
 
@@ -167,7 +186,7 @@ duplicate.
 | `apply` | Can apply here | A `providerCapabilityId` from a registered provider, and the placement is not under an active mutation block |
 | `steps` | Steps available | A `procedureId` for a signed, compatible recipe |
 | `decision` | Decisions to make | At least one bounded `choices[]` entry, each independently grounded or carrying a reason |
-| `update` | Updates available | Verified installed version and compatibility, a source-bound `candidateId`, and (for `Recommended`) a verified recommendation authority |
+| `update` | Updates available | A verified host-reported candidate with an explicit compatibility limitation, or verified installed version/compatibility with a source-bound `candidateId`; `Recommended` additionally requires a verified recommendation authority |
 | `recovery` | Recovery to finish | A `receiptId` for an unresolved transaction |
 
 A verified condition with no grounded operation, procedure, decision, or candidate is never
@@ -285,8 +304,9 @@ before confirmation.
 
 The default registry always installs Claude plugin, Codex plugin, Codex MCP, and Ruflo orphan
 providers. It conditionally adds owned npx storage, owned skills, the Git project-patch provider
-(when a project root is supplied), and the Ollama model-removal provider (when loopback is
-reachable — probed, default off in tests).
+(when a project root is supplied). The Ollama model-removal provider is registered by default
+unless explicitly disabled; its detection and action preconditions, including loopback reachability,
+decide whether a removal can be offered. Registration itself proves none of those preconditions.
 
 ## Transaction rules
 
@@ -398,7 +418,9 @@ only for the owner running the CLI. `--actions` accepts exactly one id; more tha
 
 ## Invariants and non-claims
 
-The fourteen invariants below are `domain-model.md`'s; each is enforced in code, not merely stated:
+The fourteen invariants below describe the implemented management contract and its enforcement
+points. The broader acceptance gates remain tracked separately in
+[Maintenance acceptance](../MAINTENANCE-ACCEPTANCE.md):
 
 1. Every actionable row identifies one exact placement — `planner.mjs`/`coordinator.mjs`'s
    `ONE_ACTION_PER_PLAN` refusal before any provider call, lock, or journal write.
@@ -420,7 +442,9 @@ The fourteen invariants below are `domain-model.md`'s; each is enforced in code,
    `CONFLICT_EXPLANATIONS` to every classification.
 7. A candidate is not compatible or recommended without separate evidence —
    `guidance.mjs`'s `computeUpdateEntries` requires verified `installedVersion` and `compatibility`
-   before considering a candidate, and verified `recommendationAuthority` before `Recommended`.
+   before considering a compatible candidate, and verified `recommendationAuthority` before
+   `Recommended`. The separate host-reported update path explicitly discloses unverified
+   compatibility and does not turn availability into an executable update.
 8. No write action spans more than one exact provider operation and placement — the same
    `ONE_ACTION_PER_PLAN` contract as (1), also enforced at the dashboard API and CLI boundaries.
 9. Read batching never merges evidence, receipts, scopes, or conclusions —

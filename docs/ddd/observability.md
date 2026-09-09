@@ -40,7 +40,7 @@ without redefining shared integration concepts.
 | Topology | Nodes and typed relationships visible for a session |
 | Execution canvas | Spatial view of agents, owned tools, and causal flow for one session |
 | Evidence rail | Selected-session transcript synchronized with canvas selection |
-| Primary area | One stable dashboard domain workspace: Overview, Usage, or Observability |
+| Primary area | One stable dashboard workspace: About, Overview, Usage, Observability, or System |
 | Secondary navigation rail | One fixed-position tab row whose choices belong to the active primary area |
 | Live scope | Navigation roots with current presence or fresh meaningful activity |
 | History scope | Retained navigation roots that do not satisfy the Live predicate |
@@ -61,7 +61,7 @@ step is not an active agent. A correlated edge is not an observed spawn.
 
 ### Evidence acquisition
 
-Owns source discovery, append-aware reading, schema-specific parsing, and source checkpoints. Its
+Owns source discovery, append-aware reading, schema-specific parsing, and in-memory source offsets. Its
 language is transcripts, ledgers, registries, hooks, offsets, rotation, and freshness. It does not
 decide graph layout or emit browser DTOs.
 
@@ -207,7 +207,7 @@ may use different linked worktrees or capture the same checkout at different tim
 
 ```text
 SessionWorkspace {
-  opaqueKey,
+  key, // opaque workspace identity
   repositoryLabel,
   directoryLabel,
   branchLabel, branchState,
@@ -343,9 +343,10 @@ and confidence. It cannot contain prompt text, response text, tool arguments, ra
 
 ### `AdapterHealth` aggregate
 
-Kept separate because a source can fail without invalidating every live session. It owns adapter
-state (`starting`, `healthy`, `stale`, `degraded`, `failed`, `stopped`), last success, safe error
-category, checkpoint age, and retry state.
+Kept separate because a source can fail without invalidating every live session. The current
+service records adapter `status` (`idle`, `ok`, `unavailable`, or `degraded`), file/event/error
+counts and a bounded error category. A richer health aggregate with checkpoint age and retry
+lifecycle remains a design extension, not a current serialized field set.
 
 ## Canonical domain event
 
@@ -481,8 +482,8 @@ createLiveEvent(candidate)
 reduceLiveEvent(projection, event, bounds)
 ```
 
-Each source adapter owns checkpoint serialization and validates file containment before opening an
-artifact. Filesystem watch notifications trigger reconciliation; they are not treated as complete
+Each source adapter owns its read-offset/rotation bookkeeping and validates containment before
+opening an artifact. Current tailer offsets are not persisted as restart checkpoints. Filesystem watch notifications trigger reconciliation; they are not treated as complete
 event delivery.
 
 ### Outbound ports
@@ -494,8 +495,9 @@ LiveSessionsService.subscribe(listener)
 LiveSessionsService.close()
 ```
 
-Implementations remain in-memory for current state with bounded replay. Durable restart recovery
-comes from source checkpoints and reconciliation, not from treating the browser stream as storage.
+Implementations remain in-memory for current state with bounded replay. After restart, native
+source rediscovery and reconciliation rebuild available evidence; only last safe workspace metadata
+has a separate persisted store. There is no durable canonical event or source-checkpoint recovery.
 
 ### Delivery adapters
 
@@ -575,26 +577,30 @@ contents change:
 
 ```text
 Overview      → Summary | Hosts & Routing | Providers | Runtime | Intelligence
-Usage         → Scorecard | Limits | Findings | Sessions | Models | Transcript
+Usage         → Scorecard | Limits | Findings | Prompts | Sessions | Models | Context | Hooks | Transcript
 Observability → Live | History
-System        → Summary | Advisory | Sessions | Storage | Runtime | Catalog | Projects
+System        → Summary | Advisory | Sessions | Storage | Runtime | Projects | Maintenance
 ```
 
 About is a continuous editorial directory with secondary section anchors. ADR-0032 adds Models
 beneath Usage. Model lifecycle read models may consume bounded observed identity, but Observability
-retains ownership of live sessions, events, topology, and replay. The browser receives a separate
-keyed, pseudonymous model projection rather than exact local identifiers.
+retains ownership of live sessions, events, topology, and replay. The browser receives the separate authenticated `owner-visible-v2` model projection: bounded
+exact display names/selectors with keyed sensitive evidence and scope. Model catalog data does not
+become live session evidence.
 
 Navigation state has canonical hierarchical hashes:
 
 ```text
 #about/{hosts,engine,quality,kit,configured}
 #overview/{summary,hosts,providers,runtime,intelligence}
-#usage/{score,limits,findings,sessions,models,transcript}
+#usage/{score,limits,findings,prompts,sessions,models,context,hooks,transcript}
 #usage/{sessionId}
 #observability/{live,history}
-#system/{summary,advisory,sessions,storage,runtime,catalog,projects}
+#system/{summary,advisory,sessions,storage,runtime,projects,maintenance}
 ```
+
+`#system/catalog` remains a compatibility redirect to Maintenance Inventory, not a separate
+measurement destination.
 
 Each destination owns a visible heading and concise description. The primary and secondary controls
 are ARIA tab lists with roving focus: Left/Right selects and focuses the adjacent tab with wrapping,
@@ -705,8 +711,8 @@ actor-kind geometry ([Graphics ARIA][graphics-aria]).
 Tests are written against ports and fixtures before each adapter or lifecycle transition:
 
 1. **Contract tests:** event schema, action vocabulary, privacy allowlist, confidence ordering.
-2. **Tailer tests:** append, partial record, duplicate notification, rotation, truncation, checkpoint
-   restart, and symlink/containment rejection.
+2. **Tailer tests:** append, partial record, duplicate notification, rotation, truncation, fresh
+   bootstrap after restart, and symlink/containment rejection.
 3. **Source-adapter fixtures:** known Claude, Codex, ruflo, agentic-qe, skill, plugin,
    and MCP records; unknown fields and schema generations.
 4. **Aggregate tests:** child-before-parent, conflict, terminal-state monotonicity, expiry, and
@@ -731,10 +737,10 @@ through the generated HTML monolith.
 
 ## Phased implementation
 
-### Evidence Archive bounded context
+### Proposed Evidence Archive bounded context (not implemented)
 
-Durable playback is owned by a separate local bounded context between acquisition and the live
-projections. Its aggregates are:
+ADR-0012 §9 describes deferred durable playback between acquisition and live projections. The
+following aggregate names are a target design, not shipped classes, files, APIs or storage:
 
 - `SessionRecord`: sanitized project/session identity, lifecycle, completeness, and retention;
 - `SourceEpoch`: one stable source identity and monotonic record/byte sequence;
@@ -742,11 +748,12 @@ projections. Its aggregates are:
 - `ProjectionCheckpoint`: disposable reducer state at a canonical timeline cursor;
 - `RetentionPolicy`: quota, age, pin, purge, and eviction rules.
 
-The context enforces append-only stable event identity, monotonic source ordinals within an epoch,
+The proposed context would enforce append-only stable event identity, monotonic source ordinals within an epoch,
 explicit gaps, terminal lifecycle monotonicity, selected-session content isolation, and
-replay/live equivalence at the same high-water mark. `LiveReplayStream` remains only the bounded SSE
-resume cache. Historical duration is bounded by an explicit retention policy rather than accidental
-process memory limits.
+replay/live equivalence at the same high-water mark. Currently `LiveReplayStream` is a bounded
+in-process SSE resume cache, selected-session playback reconstructs retained transcript evidence,
+and the workspace store retains only the latest sanitized metadata. There is no durable canonical
+timeline, projection-checkpoint archive, or archive purge/backfill service.
 
 ### Milestone 1: Identity bootstrap
 
@@ -790,7 +797,7 @@ process memory limits.
 - Document source coverage, confidence semantics, and unsupported evidence.
 - Pass `pnpm run check`.
 
-### Milestone 7: Durable cradle-to-grave review
+### Deferred milestone 7: Durable cradle-to-grave review
 
 - Add the persistent sanitized session catalog and append-only canonical timeline segments.
 - Persist source checkpoints and rotation epochs; backfill supported artifacts oldest-first.
@@ -853,6 +860,10 @@ The implemented vertical slice lives in `src/lib/live/`, `src/lib/dashboard/`, a
   frames.
 - 30-second collector idle-stop after the last client.
 
+These are live-collection bounds. The separate retained-history discovery path currently allows
+8,192 files, up to 16,384 sessions, and pages of at most 250. It still reconstructs local evidence
+without a durable canonical archive.
+
 The server subscribes before taking the initial snapshot and reconciles buffered/replayed events,
 closing the snapshot-to-subscribe race. A slow-client queue overflow discards queued frames and
 sends a reset snapshot after drain.
@@ -876,6 +887,14 @@ not confined to the project, so registration is an operator authorization to rea
 Independent plugin, skill, MCP, and gate registries are not implemented. This is an explicit source
 coverage limitation; ADR-0012 is Implemented because the supported adapter contract does not claim
 automatic upstream discovery.
+
+### Known acquisition limit
+
+Event/session retention and transcript history/DTO sizes are bounded, but the shared
+`JsonlTailer.reconcile()` currently allocates the complete newly appended byte range and retains an
+unterminated line without an explicit byte ceiling. Those retention bounds do not prove bounded
+acquisition memory. A per-read/per-record byte cap is an unimplemented hardening item; this
+documentation audit records it without changing production behavior.
 
 ## References
 

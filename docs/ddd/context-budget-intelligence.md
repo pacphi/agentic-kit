@@ -51,8 +51,9 @@ outcome is not a context-window fact.
 The implemented projection is intentionally smaller than the conceptual aggregate:
 
 - `context-budget.mjs` owns the canonical thresholds and conservative ceiling resolver;
-- usage cache schema v17 introduced bounded, paired per-session context evidence; current schema
-  v18 reparses the same evidence while adding controlled Prompt telemetry facets;
+- usage cache schema v17 introduced bounded, paired per-session context evidence;
+  v18 added controlled Prompt telemetry facets; v19 added project/origin evidence and current
+  v20 reparses it with existing-parent and user-level guards for the Usage Git ranking;
 - `usage-context.mjs` owns the privacy-preserving Historical Usage projection;
 - `blocks.mjs` owns exact managed-guidance byte accounting and conservative estimates;
 - the supervised adapter runner owns typed runtime hook receipts;
@@ -70,6 +71,30 @@ handoff or compaction event occurred. Dashboard Delivery renders the projection 
 and exposes the sanitized Hook read model through a lazy, authenticated, 30-second cached,
 single-flight endpoint. That route does not create native runtime evidence: durable native-host
 outcome acquisition remains outside the implemented boundary.
+
+## Configuration reporting versus session pressure
+
+Overview's **Context configuration** card consumes `context-report.mjs` and
+`context-model-cache.mjs`. It combines the existing Codex native cache/config inspector with
+cache-only model-inventory observations for Claude, Codex fallback, and OpenCode. Model rows require
+positive limits with matching field-level source and scope evidence. At most 100 rows per host
+render, with an explicit omitted count. Catalog capacities never become runtime-effective windows.
+The cache adapter retains each observation's timestamp and marks sources stale after seven days;
+reading the dashboard does not refresh those sources.
+
+Only Codex's opt-in `ak x codex-context max` owns a context-window request. Its native per-model
+allocation calculation is gated by the exact verified client/cache profile; it retains the user's
+auto-compaction setting and reports the running session unverified. Claude and OpenCode have native
+model and compaction controls, but this card does not inspect or manage those settings. The model
+inventory is refreshed explicitly through `ak models refresh`, not by dashboard polling.
+
+Usage's **Context** view instead measures retained session evidence. Claude and OpenCode parsers
+currently record gross prompt input without a runtime window. Codex pressure requires prompt input
+and a window in the same `token_count` envelope. A separate legacy `task_started` window cannot
+supply that pair. Coverage reports distinguish input-only, window-only, paired and absent evidence;
+missing distributions render as unavailable, not zero. The single latest Claude statusline quota
+cache is not merged into historical sessions. Historical ratios do not establish current liveness
+or prove that a host compacted a session.
 
 ## Policy vocabulary
 

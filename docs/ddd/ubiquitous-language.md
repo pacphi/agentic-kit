@@ -103,8 +103,7 @@ inference vendors served a workflow. Generalized execution belongs to `ak run`.
 
 ## Model lifecycle language
 
-These terms define ADR-0032's implemented contract. ADR status remains Accepted while exact-head
-release proof is pending.
+These terms define ADR-0032's implemented contract; its record is marked Implemented.
 
 | Term | Meaning |
 |------|---------|
@@ -122,8 +121,8 @@ release proof is pending.
 | Swap plan | Read-only impact report and copyable canonical route action; never an independent routing policy or apply operation |
 | Route Intelligence feed | Mechanical candidates plus audit-preserving lifecycle invalidations; quality and economics claims are explicitly absent |
 | Public catalogue identity | Human-readable model name, publisher, public selector, and trusted links retained only when bounded source evidence establishes that the identity is public |
-| Private model reference | Deployment, gateway, local tag, observed-only id, or other model identity without public-catalogue proof; the Dashboard exposes only its keyed projection |
-| Keyed model projection | Dashboard-only stable pseudonyms derived from the existing private scope key; distinct from exact explicit CLI evidence and source-proven public catalogue identity |
+| Private model reference | Deployment, gateway, local tag, or observed-only identity without public-catalogue proof; owner-visible-v2 may show its bounded exact name/selector behind the authenticated local boundary, without claiming public identity |
+| Keyed model projection | Stable pseudonyms for sensitive model evidence/scope/relations derived from the private key; distinct from owner-visible exact names and selectors |
 
 Configured, effective, observed, discoverable, entitled, policy allowed, routable, lifecycle, and
 recommended are separate model-state dimensions. `Unknown` in one dimension cannot be filled from
@@ -138,9 +137,9 @@ another. A first-party migration is a supported lifecycle edge, not proof of equ
 | Reasoning graph sample | A point-in-time structural-size measurement (`nodes`, `edges`, `pageRankSum`) of the reasoning/knowledge graph |
 | Health-history ring | The capped, deduplicated sample ring recording learning-stat snapshots over time |
 | Project intelligence | Read-only trend telemetry over ruflo/agentic-qe's own local learning state, distinct from Observability evidence |
-| Discovered project | A project on this machine ruflo has genuinely initialized (`.claude-flow/neural/` present); found by project discovery and eligible for Intelligence selection |
-| Project discovery | The registry-plus-Observability-cross-reference scan (`discoverRuvfloProjects()`) that produces the machine-wide, deduplicated, most-recently-active-first catalog of discovered projects |
-| Selected project | The one discovered project whose detail the Intelligence panel currently shows; defaults to the most-recently-active discovered project, never an implicit cwd default |
+| Discovered project | A directory named by the shared census; Intelligence eligibility additionally requires an on-disk learning marker (`.claude-flow`, `.agentic-qe`, or `.swarm`) |
+| Project discovery | Bounded transcript-head/OpenCode-directory census acquisition; each consumer applies its named scope, and learning choices fold identities in most-recently-seen order |
+| Selected project | The learning-scope project whose detail Intelligence shows; defaults to the first census most-recently-seen entry, never an implicit cwd default |
 | Machine-wide rollup | The `{ totals, perProject }` aggregate (`readMachineWideIntel()`) folded across every discovered project; always shown regardless of which project is selected |
 | Intelligence watcher pool | The per-discovered-project pool of `IntelligenceWatch` instances backing `GET /api/live/intelligence`; a project's watcher is created on its first SSE subscriber and torn down on its last disconnect |
 
@@ -152,7 +151,7 @@ the always-visible machine-wide rollup. See [Project intelligence](project-intel
 
 **Project census** — the one enumeration of this machine's projects, read from the session `cwd`
 recorded in every Claude and Codex transcript plus the OpenCode session store. Every area derives
-its project list from it; none discovers projects independently ([ADR-0027](../adr/0027-shared-project-census.md)).
+its session-derived candidates from it; Maintenance also has explicitly configured Discovery roots ([ADR-0027](../adr/0027-shared-project-census.md)).
 
 **Scope** — the named filter an area applies to the census, and the reason two areas can report
 different totals without either being wrong. `everSeen` (all, deletions included), `onDisk` (still
@@ -191,7 +190,7 @@ is what a user selects.
 | Entrypoint digest | SHA-256 of one bounded regular capability entrypoint; equality proves only those bytes, not supporting files, ownership, safety, or context loading |
 | Definition digest | SHA-256 over one complete bounded observed capability definition; equality proves those files match, not host selection, ownership, usage, intent, or removal safety |
 | Skill maintenance preview | The implemented `ak x skills plan` content-derived classification and projected change set; read-only evidence for a human decision, not a MaintenancePlan or authorization to mutate |
-| ProjectFootprint | One project's size facts: approximate LOC by language, tree/`.git`/`node_modules` bytes, last activity, and an optional git-remote web link ("local only" when absent) |
+| ProjectFootprint | One eligible hosted repository's measured size/LOC and HTTPS remote facts; separate discoveryProjects preserve missing or unmeasured directories without fabricating measurements |
 | Deep scan | The explicit, user-triggered, single-flight full measurement pass that produces a FootprintSnapshot |
 | Scan-local observation | Ephemeral evidence acquired once during one explicit scan and reused only when path, timestamp, completeness, and reader contract satisfy the receiving collector; never a cross-scan cache |
 | Cheap tier | The per-request census + known-file stats + snapshot carry-forward served on every read |
@@ -202,8 +201,9 @@ transcript and never substitute for each other. See [Machine footprint](machine-
 
 ## Maintenance language
 
-The Focus browser amendment approved on 2026-09-08 is undergoing integration verification.
-**Focus browser** means one visible hierarchy level with breadcrumbs: scope → repository for
+The Focus browser is implemented; representative-user, assistive-technology and reference-platform
+acceptance gates remain separate from its automated regression coverage.
+**Focus browser** means one visible hierarchy level with breadcrumbs: scope → project choice (repository-grouped where proven) for
 Projects → type → canonical family → exact installation. **Related installation** is an
 evidence-backed navigation target that preserves the originating filters and labels outside-filter
 context; it is not a recommendation or mutation capability. **Optional action** is an exact
@@ -292,8 +292,8 @@ runtime state is a chip word, never a prose word. See
 - Keep **execution host**, **serving provider**, **publisher**, and **public model selector** separate;
   none can be inferred from another or from a human-readable model name.
 - Say **public catalogue identity** only when a bounded source proves it. Say **private model
-  reference** when public identity is absent or ambiguous; do not expose its exact value in the
-  Dashboard.
+  reference** when public identity is absent or ambiguous; owner-visible exact display does not
+  establish public identity, while sensitive relations/scope still require keyed projection.
 - Say **compatible candidate** only when required mechanical facts are established. Reserve
   **cheaper equivalent** and **premium justified** for Route Intelligence evidence.
 - Do not infer an inference provider from a transcript host alone.

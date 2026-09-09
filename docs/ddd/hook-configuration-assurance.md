@@ -69,8 +69,10 @@ manifests, not imported implementation modules.
 
 1. Discovery never executes a hook, imports a plugin or invokes a host debug/effective
    config command.
-2. Files are bounded regular files contained by a proven root; symlinks and special files
-   are refused, and the opened inode/path must still match the inspected source.
+2. Direct hook sources are bounded regular files contained by a proven root; symlinks and special
+   files are refused, and the opened inode/path must match the inspected source. The separate
+   Codex plugin-inventory reader may report a bounded config symlink as `viaSymlink`; healing
+   still refuses that target.
 3. Public command text is redacted while behavior identity retains a one-way digest.
 4. Every physical occurrence survives deduplication.
 5. Working directory, async mode, platform command, MCP contract and timeout are material.
@@ -95,7 +97,7 @@ manifests, not imported implementation modules.
 
 ## Dashboard read model
 
-The browser projection separates four evidence classes:
+The browser projection separates these evidence classes:
 
 - configured entries, distinct behaviors, repeated placements and source readability;
 - host-neutral definition groups with their physical placements and ownership evidence;
