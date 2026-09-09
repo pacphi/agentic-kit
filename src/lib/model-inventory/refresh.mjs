@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { contextHome } from '../codex-context-config.mjs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import * as paths from '../paths.mjs';
@@ -40,10 +41,10 @@ const DISCOVERY_OPTIONS = Object.freeze({
       .filter((name) => typeof processEnvironment?.[name] === 'string')
       .map((name) => [name, processEnvironment[name]])),
   }),
-  'codex-cache': ({ base, inputs, readFileFn }) => ({
+  'codex-cache': ({ base, inputs, readFileFn, processEnvironment }) => ({
     ...base,
-    cacheRaw: inputs.codex?.cacheRaw ?? readOptional(path.join(paths.codexDir(), 'models_cache.json'), readFileFn),
-    configRaw: inputs.codex?.configRaw ?? readOptional(path.join(paths.codexDir(), 'config.toml'), readFileFn),
+    cacheRaw: inputs.codex?.cacheRaw ?? readOptional(path.join(contextHome(processEnvironment), 'models_cache.json'), readFileFn),
+    configRaw: inputs.codex?.configRaw ?? readOptional(path.join(contextHome(processEnvironment), 'config.toml'), readFileFn),
   }),
   'opencode-models': ({ base, inputs, runner, online }) => ({
     ...base, runner, online, provider: inputs.opencode?.provider,
