@@ -2,6 +2,7 @@
 // Prompts-once-config-forever: choices made during `setup` land here and
 // `sync`/`status` reapply them without re-asking.
 import fs from 'node:fs';
+import { validateAqeCodexGuidance } from './aqe-guidance.mjs';
 import path from 'node:path';
 import { kitConfigPath, legacyKitConfigPath } from './paths.mjs';
 import {
@@ -18,6 +19,7 @@ import {
 } from './routing-config.mjs';
 
 const DEFAULTS = {
+  aqeCodexGuidance: 'compact', // full | compact | none; AQE ≥3.14.1
   aqe: true,            // manage agentic-qe alongside ruflo
   agentBrowser: true,   // manage Ruflo's currently-shipped browser executor (disable with setup --no-agent-browser)
   agentdb: true,        // manage the standalone agentdb CLI (harvest's write path), pinned to ruflo's bundled version
@@ -99,6 +101,7 @@ function warnUnknownTopLevelKeys(parsed) {
 }
 
 function assertLoadableEnvelopes(config) {
+  validateAqeCodexGuidance(config.aqeCodexGuidance);
   if (!plain(config.integrations)) {
     throw new TypeError(
       'integrations must be an object; repair kit.json or rerun `ak setup --reconfigure`',
@@ -227,6 +230,7 @@ export function loadKitConfig(file = kitConfigPath()) {
 }
 
 export function saveKitConfig(cfg, file = kitConfigPath()) {
+  validateAqeCodexGuidance(cfg.aqeCodexGuidance);
   const serialized = JSON.stringify(migrateKitConfig(cfg), null, 2) + '\n';
   try {
     if (fs.readFileSync(file, 'utf8') === serialized) return;

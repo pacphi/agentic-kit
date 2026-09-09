@@ -24,8 +24,9 @@ import { managedCompanionFor } from '../lib/adapters/companion-registry.mjs';
 import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
 import { DEJA_VU_TARGETS } from '../lib/deja-vu.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
-import { HOSTS, hostInstallState, installHost, migrateRetiredRoutesInConfig, printActivityRoutingTable, aqeSupportsAgentOverrides, convergeProviderStack, applySetupHostFlags, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
+import { HOSTS, hostInstallState, installHost, migrateRetiredRoutesInConfig, printActivityRoutingTable, convergeProviderStack, applySetupHostFlags, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
 import { installedVersion } from '../lib/versions.mjs';
+import { aqeInitArguments } from '../lib/aqe-guidance.mjs';
 import * as rb from '../lib/ruvnet-brain.mjs';
 import * as adb from '../lib/agentdb.mjs';
 import { ensureAgentBrowser } from '../lib/agent-browser.mjs';
@@ -591,9 +592,9 @@ function reportProjectGuidance(result) {
 async function initProjectAgenticQe(root, cfg, flags, permCtx) {
   if (!(cfg.aqe && !flags['no-aqe'] && await have('aqe'))) return true;
   heal.healRvf(paths.projectAqeDir(root));
-  // aqe ≥ 3.13.1 with codex enabled → install the Codex-native QE skills too.
-  const withCodex = !!cfg.integrations?.hosts?.codex && aqeSupportsAgentOverrides();
-  const aqe = await runCmd('aqe', ['init', '--auto', ...(withCodex ? ['--with-codex'] : [])], { cwd: root, timeout: 300_000 });
+  const args = aqeInitArguments(cfg, installedVersion('agentic-qe'));
+  const withCodex = args.includes('--with-codex');
+  const aqe = await runCmd('aqe', args, { cwd: root, timeout: 300_000 });
   (aqe.code === 0 ? ok : warn)(`agentic-qe initialized${withCodex ? ' (+ codex skills)' : ''}`);
   const aqeUnexpected = removeUndisclosedPermissions(
     permCtx.permissionsFile, permCtx.permissionsBefore, permCtx.authorizedPermissions,
