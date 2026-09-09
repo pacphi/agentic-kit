@@ -244,12 +244,12 @@ test('qeCourtReadiness fails closed when consumer artifacts are not self-contain
       fs.writeFileSync(path.join(skill, 'evals', 'qe-court.yaml'), 'name: qe-court\n');
     }
 
-    const readiness = qeCourtReadiness(dir);
+    const readiness = qeCourtReadiness(dir, { packageRoot: path.join(dir, 'aqe') });
     assert.equal(readiness.ready, false);
     assert.deepEqual(readiness.routingViolations, []);
     assert.ok(readiness.artifactIssues.some((issue) => issue.includes('config-schema.json')));
-    assert.ok(readiness.artifactIssues.some((issue) => issue.includes('referee implementation')));
-    assert.ok(readiness.artifactIssues.some((issue) => issue.includes('referee oracle')));
+    assert.ok(readiness.artifactIssues.some((issue) => issue.includes('referee export')));
+    assert.ok(readiness.artifactIssues.some((issue) => issue.includes('referee executable')));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -273,8 +273,56 @@ test('qeCourtReadiness requires matching Claude and Codex projections', () => {
     fs.writeFileSync(path.join(dir, 'src', 'skills', 'qe-court', 'referee.ts'), 'export {};');
     fs.writeFileSync(path.join(dir, 'tests', 'unit', 'skills', 'qe-court', 'referee.test.ts'), 'export {};');
 
-    const readiness = qeCourtReadiness(dir);
+    const readiness = qeCourtReadiness(dir, { packageRoot: path.join(dir, 'aqe') });
     assert.equal(readiness.ready, false);
-    assert.ok(readiness.artifactIssues.includes('Claude and Codex qe-court config projections differ'));
+    assert.ok(readiness.artifactIssues.includes('Canonical and Codex qe-court config projections differ'));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+function publicCourtFixture(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-court-public-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const skill = path.join(root, '.claude/skills/qe-court');
+  for (const rel of ['SKILL.md', 'config-schema.json', 'schemas/output.json', 'scripts/validate-config.json', 'evals/qe-court.yaml']) {
+    const file = path.join(skill, rel);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, '{}');
+  }
+  fs.writeFileSync(path.join(skill, 'config.json'), JSON.stringify({
+    $schema: './config-schema.json',
+    routing: { defense: { provider: 'claude-code' }, jury: { provider: 'codex' } },
+  }));
+  const packageRoot = path.join(root, 'aqe');
+  fs.mkdirSync(packageRoot);
+  fs.writeFileSync(path.join(packageRoot, 'package.json'), JSON.stringify({
+    exports: { './skills/qe-court/referee': { import: './referee.js' } },
+    bin: { 'aqe-court-referee': './cli.js' },
+  }));
+  for (const file of ['referee.js', 'cli.js']) fs.writeFileSync(path.join(packageRoot, file), 'export {};');
+  return { root, skill, packageRoot };
+}
+
+test('public court contract needs neither consumer source nor a curated Codex court projection', (t) => {
+  const { root, packageRoot } = publicCourtFixture(t);
+  const result = qeCourtReadiness(root, { packageRoot, hosts: { codex: true, claude: false } });
+  assert.equal(result.ready, true, result.artifactIssues.join('; '));
+  assert.equal(result.evidence, 'static-artifacts');
+  assert.equal(result.providerExecutionProven, false);
+});
+
+test('disabled Codex legacy projection does not block canonical court readiness', (t) => {
+  const { root, packageRoot } = publicCourtFixture(t);
+  fs.mkdirSync(path.join(root, '.agents/skills/qe-court'), { recursive: true });
+  assert.equal(qeCourtReadiness(root, { packageRoot, hosts: { claude: true, codex: false } }).ready, true);
+  assert.equal(qeCourtReadiness(root, { packageRoot, hosts: { codex: true } }).ready, false);
+});
+
+test('public court artifacts reject stale source references and missing published target', (t) => {
+  const { root, skill, packageRoot } = publicCourtFixture(t);
+  fs.writeFileSync(path.join(skill, 'evals/qe-court.yaml'), 'oracle: tests/unit/skills/qe-court/referee.test.ts');
+  fs.rmSync(path.join(packageRoot, 'cli.js'));
+  const result = qeCourtReadiness(root, { packageRoot });
+  assert.equal(result.ready, false);
+  assert.ok(result.artifactIssues.some((issue) => issue.includes('obsolete repository-only')));
+  assert.ok(result.artifactIssues.some((issue) => issue.includes('public referee executable')));
 });

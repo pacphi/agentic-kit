@@ -7,7 +7,7 @@ import { row } from '../row.mjs';
 
 export default {
   id: 'qe-court',
-  async collect({ cwd }) {
+  async collect({ cwd, cfg }) {
     if (!qeCourtShipped()) return [];
     const qcRoot = paths.repoRoot(cwd);
     const qc = qcRoot ? readQeCourtConfig(qcRoot) : null;
@@ -17,9 +17,9 @@ export default {
       return [row('qe-court', 'warn',
         `qe-court panel invalid: ${violations.join(', ')} — regenerate with agentic-qe >=3.13.3 or choose different defense/jury vendors`)];
     }
-    const readiness = qeCourtReadiness(qcRoot);
+    const readiness = qeCourtReadiness(qcRoot, { hosts: cfg?.integrations?.hosts });
     if (readiness.ready) {
-      return [row('qe-court', 'ok', 'qe-court routing and consumer artifacts are ready; provider-seat readiness still requires a live proof')];
+      return [row('qe-court', 'ok', 'qe-court routing and public referee artifacts pass static checks; referee execution and provider-seat identity still require live proof')];
     }
     return [row('qe-court', 'warn',
       `qe-court routing config passes the local anti-collusion check, but executability is not proven (${readiness.artifactIssues.join('; ')})`)];
