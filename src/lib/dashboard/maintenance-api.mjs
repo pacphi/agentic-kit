@@ -790,8 +790,10 @@ function v2ErrorPayload(error) {
 function settleWithin(operation, ms) {
   if (!operation || typeof operation.then !== 'function') return Promise.resolve({ settled: true, value: operation });
   const tracked = Promise.resolve(operation).then((value) => ({ settled: true, value }), (error) => ({ settled: true, error }));
-  const window = new Promise((resolve) => { setTimeout(() => resolve({ settled: false }), ms).unref?.(); });
-  return Promise.race([tracked, window]);
+  // The acknowledgement is pending work even when the scan has no active handles.
+  let timer;
+  const window = new Promise((resolve) => { timer = setTimeout(() => resolve({ settled: false }), ms); });
+  return Promise.race([tracked, window]).finally(() => clearTimeout(timer));
 }
 
 async function runScanControl(facade, body, scanAckMs) {
