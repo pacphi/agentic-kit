@@ -286,6 +286,7 @@ function stackFromDetection(detected) {
     ...base,
     status: 'measured',
     reason: null,
+    languagePresence: detected.languagePresence ?? [],
     items: (detected.stack ?? []).map((row) => ({ ...row })),
     manifests: (detected.manifests ?? []).map((row) => ({ ...row })),
     nonSource: { ...(detected.nonSource ?? { files: null, bytes: null }) },

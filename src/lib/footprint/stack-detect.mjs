@@ -36,11 +36,13 @@
 // The walk is the shared bounded walker from walk.mjs, so this module inherits the
 // never-follow-symlinks rule, the entry/depth caps, and the degrade-this-node-only
 // failure mode (invariant 6) rather than reimplementing them.
+import { languageSignature } from './language-signatures.mjs';
+import { LANGUAGE_ARTIFACTS } from './language-coverage.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { walkTree, measured, unknown } from './walk.mjs';
 import {
-  STACK_REGISTRY_VERSION, dependencyEntry, isNonSourceExtension, languageForExtension,
+  STACK_REGISTRY_VERSION, stackEntryById, dependencyEntry, isNonSourceExtension, languageForExtension,
   languageForFilename, manifestKindFor, registryStats, signatureEntries,
 } from './stack-registry.mjs';
 
@@ -466,6 +468,7 @@ export function createStackObserver(root, {
   fsImpl = fs,
 } = {}) {
   const effectiveMaxDepth = limits.maxDepth ?? maxDepth;
+  const languagePresence = new Map();
   const lines = new Map();     // language id → { entry, lines, files }
   const tail = new Map();      // extension (or bare filename) → { files, bytes }
   const manifestFiles = [];    // { file, kind, bytes }
@@ -519,7 +522,15 @@ export function createStackObserver(root, {
       if (kind) manifestFiles.push({ file, kind, bytes });
     }
 
-    const entry = languageForFilename(name) ?? languageForExtension(path.extname(name));
+    const signature = !placeholder && bytes <= MAX_FILE_BYTES ? languageSignature(file, fsImpl) : undefined;
+    const artifactLanguage = LANGUAGE_ARTIFACTS[path.extname(lower)] ?? (signature?.artifact ? signature.id : null);
+    if (artifactLanguage) {
+      const entry = stackEntryById(artifactLanguage);
+      languagePresence.set(entry.id, { id: entry.id, name: entry.name, evidence: 'artifact', icon: entry.id });
+      return;
+    }
+    const entry = signature === null ? null : signature?.id ? stackEntryById(signature.id)
+      : languageForFilename(name) ?? languageForExtension(path.extname(name));
     if (!entry) {
       // A STATED non-source extension is a decision, not a gap: it is named in
       // `exclusions` and counted here, and it never joins the tail — otherwise
@@ -584,6 +595,7 @@ export function createStackObserver(root, {
       approximate: true,
       exclusions: [...STACK_EXCLUSIONS],
       languages,
+      languagePresence: [...languagePresence.values()],
       // The Measurement carries what the array cannot: a walk that hit a cap or an
       // unreadable subtree makes this a floor, which every surface renders as "≥ N".
       totalLines: measured(total, { asOf, partial: !complete }),
