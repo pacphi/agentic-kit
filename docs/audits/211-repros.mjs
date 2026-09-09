@@ -56,7 +56,7 @@ try {
   const ctxChip=vm.runInNewContext(`(${snippet.trim()})`,{esc:String,fmtTok:String});
   results.push({issue:'Session context chip',input:ctx.ctxLastTokens,window:ctx.ctxWindow,
     evidenceState:ctx.contextEvidence.state,pairedSamples:ctx.contextEvidence.pressure?.samples??null,
-    expected:'No pressure percentage for independently observed input/window',actualHtml:ctxChip(ctx)});
+    expected:'No pressure percentage for independently observed input/window',actualHtml:ctxChip(ctx),pass:ctxChip(ctx)===''});
   const project=path.join(tmp,'project');fs.mkdirSync(path.join(project,'.git'),{recursive:true});
   const routerDir=path.join(project,'.agentic-qe');fs.mkdirSync(routerDir);
   const routerFile=path.join(routerDir,'llm-config.json');
@@ -65,7 +65,8 @@ try {
   fs.writeFileSync(routerFile,JSON.stringify(current));fs.writeFileSync(`${routerFile}.bak`,JSON.stringify(prior));
   const outcome=undoAqeRouter(project),after=JSON.parse(fs.readFileSync(routerFile,'utf8'));
   results.push({issue:'Legacy router undo',before:current,outcome,after,
-    expected:'Preserve later user edits or refuse drift',actualLostKeys:['newUserKey'],actualRevertedKey:'userKey'});
+    expected:'Preserve later user edits or refuse drift',actualLostKeys:Object.keys(current).filter(key=>!(key in after)),
+    pass:after.newUserKey===current.newUserKey&&after.userKey===current.userKey});
   const rollRoot=path.join(tmp,'rollouts');const dayDir=path.join(rollRoot,'2026','09','09');fs.mkdirSync(dayDir,{recursive:true});
   const rateRaw=[evt('session_meta',{id:'price-synthetic',cwd:tmp,thread_source:'user'}),
     evt('turn_context',{model:'gpt-5.6-sol'},1),
@@ -75,10 +76,12 @@ try {
   const diagnostic=JSON.parse(execFileSync(process.execPath,[`${root}/scripts/codex-usage-diagnostic.mjs`,'--root',rollRoot,'--json'],{encoding:'utf8'}));
   const modernPrice=sessionPayload(parseCodex(rateRaw,{id:'price-synthetic'}).session,[],{costOf}).meta.cost;
   results.push({issue:'Legacy diagnostic pricing',model:'gpt-5.6-sol',inputTokens:1000000,
-    currentParserPrice:modernPrice,diagnosticPrice:diagnostic.tokens.afterFix_excludingSubagentReplays.cost});
+    currentParserPrice:modernPrice,diagnosticPrice:diagnostic.tokens.afterFix_excludingSubagentReplays.cost,
+    pass:modernPrice===diagnostic.tokens.afterFix_excludingSubagentReplays.cost});
   const humanOutput=execFileSync(process.execPath,[`${root}/scripts/codex-usage-diagnostic.mjs`,'--root',rollRoot],{encoding:'utf8'});
   results.push({issue:'Legacy diagnostic privacy',claims:humanOutput.split('\n').filter(x=>/No prompts|safe to paste/.test(x)),
-    actualPathLine:humanOutput.split('\n').find(x=>x.startsWith('Rollout files scanned root:'))});
+    actualPathLine:humanOutput.split('\n').find(x=>x.startsWith('Rollout files scanned root:'))??null,
+    pass:!humanOutput.includes(rollRoot)});
   fs.rmSync(path.join(dayDir,'rollout-price-synthetic.jsonl'));
   const replayRaw=[evt('session_meta',{id:'child-synthetic',cwd:tmp,thread_source:'subagent'}),
     evt('session_meta',{id:'parent-synthetic',cwd:tmp,thread_source:'user'},1),
@@ -90,8 +93,9 @@ try {
   const currentReplay=parseCodex(replayRaw,{id:'child-synthetic'}).session;
   results.push({issue:'Legacy diagnostic replay',currentThreadSource:currentReplay.threadSource,
     currentUsageRows:currentReplay.usage.length,diagnosticThreadSources:replayDiag.threadSourceCounts,
-    diagnosticAfterTokens:replayDiag.tokens.afterFix_excludingSubagentReplays.total});
-  const primarySources=['src/lib/usage-opencode.mjs','src/lib/usage-parsers.mjs','src/lib/usage-aggregate.mjs','src/lib/pricing.mjs','src/lib/aqe-router.mjs','src/lib/dashboard/client/usage.mjs','scripts/codex-usage-diagnostic.mjs'];
+    diagnosticAfterTokens:replayDiag.tokens.afterFix_excludingSubagentReplays.total,
+    pass:replayDiag.threadSourceCounts.subagent===1&&replayDiag.tokens.afterFix_excludingSubagentReplays.total===0});
+  const primarySources=['src/lib/usage-opencode.mjs','src/lib/usage-parsers.mjs','src/lib/usage-aggregate.mjs','src/lib/pricing.mjs','src/lib/aqe-router.mjs','src/lib/provider-ownership.mjs','src/lib/usage-cost.mjs','src/lib/dashboard/client/usage.mjs','scripts/codex-usage-diagnostic.mjs'];
   const sourceDigests=Object.fromEntries(primarySources.map(file=>[file,createHash('sha256').update(fs.readFileSync(path.join(root,file))).digest('hex')]));
   console.log(JSON.stringify({referenceBaseline:'67fb5c0',sourceCheckout:'current checkout',sourceDigests,syntheticOnly:true,results},null,2).split(tmp).join('<temporary-root>'));
 } finally {fs.rmSync(tmp,{recursive:true,force:true});}

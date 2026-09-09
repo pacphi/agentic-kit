@@ -1,5 +1,8 @@
 # Issue 211: implementation follow-ups found by the documentation audit
 
+Implementation follow-up: [remediation and validation](211-remediation.md).
+The findings below preserve the original audit baseline.
+
 Reference baseline: `67fb5c0` (2026-09-09). These defects/limitations were **not
 changed** by the documentation remediation. Documentation now states the existing
 behavior. The first four findings have actual-source synthetic reproductions.

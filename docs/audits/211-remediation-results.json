@@ -1,0 +1,107 @@
+{
+  "referenceBaseline": "67fb5c0",
+  "sourceCheckout": "current checkout",
+  "sourceDigests": {
+    "src/lib/usage-opencode.mjs": "6344480e33a4f26d8ce6e178e9a70c988ba47e921834df8ea12756e9898084e5",
+    "src/lib/usage-parsers.mjs": "8c5c65973d0bad915584a2a3917f71ea18fdd50b0dbb92c96c0b61ad067063e9",
+    "src/lib/usage-aggregate.mjs": "29cc5e1525b0f9787fe5f852f2c2500a10139553f20f949bceee3fe81bd05096",
+    "src/lib/pricing.mjs": "dd12022b1862659db292fb2e3e282de56648e1ed0c82ac6d83794244a9fa95ef",
+    "src/lib/aqe-router.mjs": "a7a417a2635785e9128964180ea75adb849efba532294055c621b8b188b6e016",
+    "src/lib/provider-ownership.mjs": "7c4f8780d7c13fe2a6971bf0896b3ab643e355fe444d1d72324f5eedb9981c4e",
+    "src/lib/usage-cost.mjs": "d0d330562178e30a2f6a656f8631636360cd5a6295dfa68b2f67a928b365bba9",
+    "src/lib/dashboard/client/usage.mjs": "dbe04c36e9d47cb58455c3ec5ab6ff9f42442fdde5252136a327ee05f6da5816",
+    "scripts/codex-usage-diagnostic.mjs": "b39818f142bccfe8a24d7e41867b1a65612eba4daa3f2d92bc288fe3c0fe5100"
+  },
+  "syntheticOnly": true,
+  "results": [
+    {
+      "issue": "OpenCode cost coverage",
+      "case": "null-cost",
+      "inputTokens": 1000000,
+      "retainedCostObserved": null,
+      "expectedCostWithMissingEstimated": 4,
+      "actualCost": 4,
+      "pass": true
+    },
+    {
+      "issue": "OpenCode cost coverage",
+      "case": "missing-cost",
+      "inputTokens": 1000000,
+      "retainedCostObserved": null,
+      "expectedCostWithMissingEstimated": 4,
+      "actualCost": 4,
+      "pass": true
+    },
+    {
+      "issue": "OpenCode cost coverage",
+      "case": "mixed-cost",
+      "inputTokens": 2000000,
+      "retainedCostObserved": 0.25,
+      "expectedCostWithMissingEstimated": 4.25,
+      "actualCost": 4.25,
+      "pass": true
+    },
+    {
+      "issue": "Session context chip",
+      "input": 100000,
+      "window": 200000,
+      "evidenceState": "partial",
+      "pairedSamples": null,
+      "expected": "No pressure percentage for independently observed input/window",
+      "actualHtml": "",
+      "pass": true
+    },
+    {
+      "issue": "Legacy router undo",
+      "before": {
+        "_managedBy": "agentic-kit",
+        "defaultProvider": "openai",
+        "userKey": "edited-after-setup",
+        "newUserKey": "keep-me"
+      },
+      "outcome": {
+        "ok": false,
+        "changed": false,
+        "detail": "llm-config.json preserved: no verified postimage ownership; review the current file and .bak, then reconcile manually"
+      },
+      "after": {
+        "_managedBy": "agentic-kit",
+        "defaultProvider": "openai",
+        "userKey": "edited-after-setup",
+        "newUserKey": "keep-me"
+      },
+      "expected": "Preserve later user edits or refuse drift",
+      "actualLostKeys": [],
+      "pass": true
+    },
+    {
+      "issue": "Legacy diagnostic pricing",
+      "model": "gpt-5.6-sol",
+      "inputTokens": 1000000,
+      "currentParserPrice": 4,
+      "diagnosticPrice": 4,
+      "pass": true
+    },
+    {
+      "issue": "Legacy diagnostic privacy",
+      "claims": [
+        "No prompts, titles, session ids, file paths, or timestamps below."
+      ],
+      "actualPathLine": null,
+      "pass": true
+    },
+    {
+      "issue": "Legacy diagnostic replay",
+      "currentThreadSource": "subagent",
+      "currentUsageRows": 0,
+      "diagnosticThreadSources": {
+        "user": 0,
+        "unknown": 0,
+        "subagent": 1,
+        "other": 0
+      },
+      "diagnosticAfterTokens": 0,
+      "pass": true
+    }
+  ]
+}

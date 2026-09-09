@@ -141,3 +141,100 @@ Why this kit exists, the original root-cause investigations (Node-ABI/WASM memor
 loss, the F1–F6 self-improvement findings, the June-2026 token-burn incident), and
 the shell-era docs are preserved verbatim in [docs/archive/](https://github.com/pacphi/agentic-kit/tree/main/docs/archive) — see its
 [index](https://github.com/pacphi/agentic-kit/blob/main/docs/archive/README.md).
+
+## Ruflo `policy_evaluate`: `invalid-policy-request`
+
+This error is request validation, before a policy decision. The installed Ruflo
+MCP schema may expose `request` as an unrestricted object even though the engine
+requires `identity.id`, `identity.type`, and `action.type`. `identity.agentId` is
+not a substitute for `identity.id`.
+
+Use the installed contract, for example:
+
+```json
+{
+  "request": {
+    "identity": { "id": "codex-worker", "type": "agent" },
+    "action": {
+      "type": "workspace.edit",
+      "resource": "project:scoped-task",
+      "environment": "development",
+      "destructive": false,
+      "network": false
+    },
+    "context": {
+      "metadata": { "authorization": "User requested this scoped change" }
+    }
+  }
+}
+```
+
+Evidence belongs in `context.evidence` as an array of provenance-bearing records;
+freeform annotations belong in `context.metadata`. An annotation is not a grant of
+permission. Inspect `policy_status` for the actual mode and ledger integrity.
+An `allowed` result in `legacy` mode means compatibility default-allow, not that
+an enforcement policy or signed approval was established. Do not change policy
+mode to work around malformed requests or denied actions.
+
+Verified on 2026-09-09 against installed `@claude-flow/security`'s
+`policy/types.d.ts` and `PolicyEngine.validateRequest`, and the CLI's
+`mcp-tools/policy-tools.js`. A corrected live call returned `allowed` with a
+receipt. The weak nested MCP schema is upstream-owned; agentic-kit does not
+implement this tool and does not patch installed packages during sync.
+
+## Codex plugin skill-name false positives
+
+Older agentic-kit checks incorrectly required each skill's frontmatter name to
+match its folder and use lowercase kebab-case. Codex 0.153.4's own `skills/list`
+loaded `spreadsheets:Spreadsheets` and `presentations:Presentations` with no errors.
+The four reported issues were two naming complaints per skill, not four broken
+plugins. Update agentic-kit and restart the dashboard process; do not rename or
+disable those bundled skills to satisfy the old check.
+
+The corrected compatibility check accepts display names up to 64 Unicode
+characters and still reports missing required frontmatter. This is a loader
+compatibility check, not a claim of compliance with every cross-host authoring
+convention. [Official skill documentation](https://learn.chatgpt.com/docs/build-skills)
+requires `name` and `description` and describes host skill discovery.
+
+## Ruflo memory stores and routing
+
+Two files can contain different project corpora:
+
+- `.swarm/memory.db`, historically the compatibility store.
+- `.swarm/agentdb-memory.db`, the native bridge's default sibling.
+
+The filenames do not prove the active backend: native code can also open
+`memory.db`. Status now names the files and keeps backend/writer/routing unknown
+unless separately verified. File presence alone does not prove lost data or
+correct cross-client routing. `ak x verify memory` tests an isolated canary;
+it cannot establish access to an existing corpus.
+
+Inspection of installed Ruflo 3.39.2 found a concrete path split: CLI memory
+commands pass a resolved `dbPath`, defaulting to `memory.db`; MCP calls omit that
+argument, and the native bridge defaults to `agentdb-memory.db`. Agentic-kit pins
+the project cwd and compatibility environment path, but that environment variable
+is not a universal native MCP filename override in this version.
+
+For an intentional CLI lookup, choose the file explicitly after checking your
+installed `ruflo memory retrieve --help`:
+
+```bash
+ruflo memory retrieve --path /absolute/project/.swarm/agentdb-memory.db --namespace your-namespace --key your-key
+ruflo memory retrieve --path /absolute/project/.swarm/memory.db --namespace your-namespace --key your-key
+```
+
+These are operational lookups, not forensic read-only probes: Ruflo retrieval
+can update access metadata, and initialization can migrate schemas. For a strict
+read-only inspection, open SQLite read-only, enable `PRAGMA query_only=ON`, and
+inspect counts, schemas, and key presence without printing stored values.
+
+Preserve both files and their live WAL state. Do not delete the smaller file,
+globally repin the environment, or merge automatically: it may have unique keys,
+and writers may still be active. A durable upstream fix needs one path-resolution
+contract shared by CLI/MCP/backend selection, registries keyed by resolved path,
+and cross-process tests over existing disjoint corpora. Migration requires a
+separate, reviewed backup, conflict-resolution, and writer-quiescence procedure.
+
+[Local investigation and upstream boundary](audits/plugin-memory-status-followup.md)
+records the source evidence and counts observed on 2026-09-09.
