@@ -145,7 +145,7 @@ test('Codex should repair a legacy duplicate with only the managed browser envir
     const file = path.join(home, '.codex', 'config.toml');
     fs.writeFileSync(file, [
       '[mcp_servers.claude-flow]', 'command = "ruflo"', 'args = ["mcp", "start"]',
-      '[mcp_servers.claude-flow.env]', `AGENT_BROWSER_CONFIG = "${agentBrowserConfigPath()}"`,
+      '[mcp_servers.claude-flow.env]', `AGENT_BROWSER_CONFIG = ${JSON.stringify(agentBrowserConfigPath())}`,
       '[mcp_servers.ruflo]', 'command = "ak"', 'args = ["x", "ruflo-mcp"]', '',
     ].join('\n'));
 
