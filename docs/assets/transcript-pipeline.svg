@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="880" height="556" viewBox="0 0 880 556"
      role="img" aria-labelledby="fig-title fig-desc">
   <title id="fig-title">From disk to browser: the per-session pipeline</title>
-  <desc id="fig-desc">A transcript session moves from the Claude Code and Codex CLI transcript stores through readSession's numbered gates — id grammar, location, realpath containment, size cap, parse, secret masking, truncation — then through the HTTP route's guards, and finally into the browser transcript view.</desc>
+  <desc id="fig-desc">Claude and Codex JSONL sessions pass through readSession ID, location, containment, size and parse gates. Supported nested Claude child IDs are explicit. OpenCode uses a separate read-only SQLite session lookup; it shares best-effort masking and per-turn truncation but not the JSONL whole-file size cap. All paths use authenticated local HTTP delivery.</desc>
   <style>
     svg { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
     :root {
@@ -50,7 +50,7 @@
 
   <!-- header -->
   <text class="h1" x="24" y="36">From disk to browser: the per-session pipeline</text>
-  <text class="t2 small" x="24" y="56">Every step is a gate — content that fails a check reads as unavailable, never as risky.</text>
+  <text class="t2 small" x="24" y="56">JSONL gates plus a separate SQLite reader; masking is best effort, not a guarantee.</text>
 
   <!-- ===================== column 1 · transcript stores ===================== -->
   <text class="h2" x="24" y="92">TRANSCRIPT STORES</text>
@@ -67,9 +67,13 @@
   <text class="mono" x="38" y="286">yyyy/mm/dd/rollout-*.jsonl</text>
 
   <rect class="washp" x="24" y="340" width="214" height="82" rx="6"/>
-  <text class="small t2" x="38" y="368">read-only — transcripts are</text>
-  <text class="small t2" x="38" y="386">never rewritten; a malformed</text>
-  <text class="small t2" x="38" y="404">line is skipped, never fatal</text>
+  <text class="small t2" x="38" y="368">OpenCode — read-only SQLite</text>
+  <text class="small t2" x="38" y="386">opencode/opencode.db (XDG-aware)</text>
+  <text class="small t2" x="38" y="404">session lookup + parseSession</text>
+
+  <text class="small t2" x="38" y="446">SQLite joins at masking below;</text>
+  <text class="small t2" x="38" y="462">no JSONL whole-file cap.</text>
+  <path class="flow" d="M238 382H250V436H260" marker-end="url(#arr)"/>
 
   <!-- stores -> readSession -->
   <path class="flow" d="M238 208H250V143H260" marker-end="url(#arr)"/>
@@ -82,8 +86,8 @@
   <rect class="box" x="264" y="112" width="336" height="62" rx="6"/>
   <circle class="chip" cx="286" cy="143" r="9.5"/>
   <text class="small num" x="286" y="147" text-anchor="middle">1</text>
-  <text x="306" y="132">id grammar — <tspan class="mono">VALID_ID</tspan></text>
-  <text class="mono" x="306" y="148">^[A-Za-z0-9._-]{1,128}$</text>
+  <text x="306" y="132">id grammar — simple or supported child ID</text>
+  <text class="mono" x="306" y="148">simple ID or parent/agent-…</text>
   <text class="small t2" x="306" y="164">rejects traversal before any filesystem access</text>
   <path class="flow" d="M286 174V186" marker-end="url(#arr)"/>
 
@@ -91,7 +95,7 @@
   <rect class="box" x="264" y="186" width="336" height="34" rx="6"/>
   <circle class="chip" cx="286" cy="203" r="9.5"/>
   <text class="small num" x="286" y="207" text-anchor="middle">2</text>
-  <text x="306" y="207">locate across both roots</text>
+  <text x="306" y="207">locate in Claude/Codex JSONL roots</text>
   <path class="flow" d="M286 220V232" marker-end="url(#arr)"/>
 
   <!-- gate 3 -->
@@ -106,7 +110,7 @@
   <rect class="box" x="264" y="292" width="336" height="48" rx="6"/>
   <circle class="chip" cx="286" cy="316" r="9.5"/>
   <text class="small num" x="286" y="320" text-anchor="middle">4</text>
-  <text x="306" y="313">size cap — <tspan class="mono">MAX_SESSION_BYTES 64 MB</tspan></text>
+  <text x="306" y="313">size cap — <tspan class="mono">MAX_SESSION_BYTES 64 MiB</tspan></text>
   <text class="small t2" x="306" y="329">(oversized reads as unavailable)</text>
   <path class="flow" d="M286 340V352" marker-end="url(#arr)"/>
 
@@ -141,7 +145,7 @@
   <rect class="box" x="626" y="112" width="230" height="180" rx="6"/>
   <text class="mono" x="640" y="133">GET /api/session/:id</text>
   <text class="tm" x="640" y="155">–</text><text class="small t2" x="652" y="155">loopback bind</text>
-  <text class="tm" x="640" y="172">–</text><text class="small t2" x="652" y="172">Host guard</text>
+  <text class="tm" x="640" y="172">–</text><text class="small t2" x="652" y="172">Host + session-token guards</text>
   <text class="tm" x="640" y="189">–</text><text class="small t2" x="652" y="189">fetch-metadata guard</text>
   <text class="tm" x="640" y="206">–</text><text class="small t2" x="652" y="206">unknown id ⇒ 404 (not 200)</text>
   <rect class="acc" x="634" y="216" width="214" height="62" rx="5"/>
