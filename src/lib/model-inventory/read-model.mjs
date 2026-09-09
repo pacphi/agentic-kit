@@ -179,6 +179,8 @@ const PUBLIC_CATALOG_METADATA_SOURCES = new Set(['models.dev']);
 // IDs and pre-4.6 aliases are exact: the documented grammar is not publication proof.
 const OFFICIAL_CLAUDE_IDS = new Set(ANTHROPIC_OFFICIAL_MODEL_IDS);
 const OPENAI_MODEL_DOCUMENTATION = new Map([
+  ['gpt-5.6', 'https://developers.openai.com/api/docs/models/gpt-5.6-sol'],
+  ['gpt-6-astra', 'https://developers.openai.com/api/docs/models/gpt-6-astra'],
   ['gpt-5.6-sol', 'https://developers.openai.com/api/docs/models/gpt-5.6-sol'],
   ['gpt-5.6-terra', 'https://developers.openai.com/api/docs/models/gpt-5.6-terra'],
   ['gpt-5.6-luna', 'https://developers.openai.com/api/docs/models/gpt-5.6-luna'],
@@ -271,7 +273,7 @@ function publishedPricing(model) {
   return {
     basis: 'per-million-tokens', input: published.in, output: published.out, currency: 'USD',
     effectiveAt: null, source: sourceUrl ? 'OpenAI API model documentation' : 'published API list-price table',
-    sourceUrl, asOf: PRICES_AS_OF, matched: true,
+    sourceUrl, asOf: published.asOf, matched: true,
   };
 }
 
@@ -524,7 +526,7 @@ function bindingPublishedPricing(configured, effective, provider, linkedModel) {
   return {
     basis: 'per-million-tokens', input: published.in, output: published.out, currency: 'USD',
     effectiveAt: null, source: sourceUrl ? 'OpenAI API model documentation' : 'published API list-price table',
-    sourceUrl, asOf: PRICES_AS_OF, matched: true,
+    sourceUrl, asOf: published.asOf, matched: true,
   };
 }
 

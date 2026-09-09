@@ -1,0 +1,90 @@
+// @ts-nocheck — browser bundle source (client.mjs reads it as text). These
+// pure helpers are also imported directly by unit tests.
+
+export function dateTimeInstant(value) {
+  if (value === null || value === undefined || value === '') return null;
+  var at = typeof value === 'number' ? value : Date.parse(String(value));
+  var instant = new Date(at);
+  return Number.isFinite(instant.getTime()) ? instant : null;
+}
+
+export function dateTimeOptions(options) {
+  var supplied = options && typeof options === 'object' ? options : {};
+  return {
+    locale: supplied.locale || undefined,
+    timeZone: supplied.timeZone || undefined,
+  };
+}
+
+/** Compact instant in the reader's browser locale and timezone. */
+export function formatLocalDateTime(value, options) {
+  var instant = dateTimeInstant(value);
+  if (!instant) return null;
+  var settings = dateTimeOptions(options);
+  try {
+    var date = new Intl.DateTimeFormat(settings.locale, {
+      year: 'numeric', month: 'short', day: 'numeric', timeZone: settings.timeZone,
+    }).format(instant);
+    var time = new Intl.DateTimeFormat(settings.locale, {
+      hour: 'numeric', minute: '2-digit', timeZone: settings.timeZone,
+    }).format(instant);
+    return date + ' · ' + time;
+  } catch (_) { return null; }
+}
+
+/** Detail/rollover instant with seconds and an explicit timezone. */
+export function formatLocalDateTimeLong(value, options) {
+  var instant = dateTimeInstant(value);
+  if (!instant) return null;
+  var settings = dateTimeOptions(options);
+  try {
+    var date = new Intl.DateTimeFormat(settings.locale, {
+      year: 'numeric', month: 'short', day: 'numeric', timeZone: settings.timeZone,
+    }).format(instant);
+    var time = new Intl.DateTimeFormat(settings.locale, {
+      hour: 'numeric', minute: '2-digit', second: '2-digit',
+      timeZoneName: 'short', timeZone: settings.timeZone,
+    }).format(instant);
+    return date + ' · ' + time;
+  } catch (_) { return null; }
+}
+
+/** Native host ids remain opaque; only their presentation is shortened. */
+export function shortSessionId(value) {
+  var id = String(value == null ? '' : value);
+  return id.length > 12 ? '…' + id.slice(-12) : id;
+}
+
+/** Published calendar dates have no timezone; preserve their calendar day. */
+export function formatLocalDateOrTime(value, options) {
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    var instant = dateTimeInstant(value);
+    if (!instant) return null;
+    try {
+      return new Intl.DateTimeFormat(dateTimeOptions(options).locale, {
+        year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC',
+      }).format(instant);
+    } catch (_) { return null; }
+  }
+  return formatLocalDateTimeLong(value, options);
+}
+
+/** Calendar day containing an instant in the reader's timezone. */
+export function formatLocalDay(value, options) {
+  var instant = dateTimeInstant(value);
+  if (!instant) return null;
+  var settings = dateTimeOptions(options);
+  return new Intl.DateTimeFormat(settings.locale, {
+    year: 'numeric', month: 'short', day: 'numeric', timeZone: settings.timeZone,
+  }).format(instant);
+}
+
+export function formatLocalTime(value, options) {
+  var instant = dateTimeInstant(value);
+  if (!instant) return null;
+  var settings = dateTimeOptions(options);
+  return new Intl.DateTimeFormat(settings.locale, {
+    hour: 'numeric', minute: '2-digit', second: '2-digit',
+    timeZoneName: 'short', timeZone: settings.timeZone,
+  }).format(instant);
+}

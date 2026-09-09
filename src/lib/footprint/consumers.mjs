@@ -549,8 +549,9 @@ function measureFamily(desc, { walk, limits, asOf, fsImpl }) {
  * actually written, which would not merely mis-order the ranking, it would put a
  * figure larger than the disk at the top of it.
  *
- * The walker still owns the traversal; the extra lstat per file is what buys
- * `blocks`, which `onFile` does not carry. A platform that reports no usable
+ * The walker still owns the traversal and carries `blocks` from the lstat it
+ * already performs. Reusing that value avoids a second filesystem call for
+ * every file in the largest consumer tree. A platform that reports no usable
  * block count (Windows) falls back to that file's apparent size, so the row
  * degrades to the ordinary basis rather than to zero.
  *
@@ -566,12 +567,10 @@ function measureAllocated(desc, { walk, limits, asOf, fsImpl, platform = process
   const result = walk(desc.path, {
     ...limits,
     fsImpl,
-    onFile: ({ file, bytes, mtimeMs }) => {
+    onFile: ({ bytes, blocks, mtimeMs }) => {
       apparent += bytes;
       files += 1;
       if (newest === null || mtimeMs > newest) newest = mtimeMs;
-      let blocks;
-      try { blocks = Number(fsImpl.lstatSync(file).blocks); } catch { blocks = null; }
       // Zero blocks is a valid answer (an empty file, or one held entirely in
       // an inode); only a platform that reports no block count at all falls
       // back to apparent size, and that fallback is counted so the row can say
@@ -582,8 +581,9 @@ function measureAllocated(desc, { walk, limits, asOf, fsImpl, platform = process
       // the allocated total came out as 0 bytes for an entire machine while the
       // apparent total was right beside it. Estimating from apparent size is
       // the honest degradation, and `estimated` is what makes the row say so.
-      const usable = Number.isFinite(blocks) && blocks >= 0 && platform !== 'win32';
-      if (usable) allocated += blocks * 512;
+      const blockCount = Number(blocks);
+      const usable = Number.isFinite(blockCount) && blockCount >= 0 && platform !== 'win32';
+      if (usable) allocated += blockCount * 512;
       else { allocated += bytes; estimated += 1; }
     },
   });
@@ -641,6 +641,97 @@ function measureDescriptor(desc, ctx) {
     // it could not read a directory that is not there.
     complete: node.presence === 'absent' || result.complete !== false,
   };
+}
+
+const reusableNestedDescriptor = (desc) => Boolean(desc?.path)
+  && !desc.adopted && !desc.match && desc.allocation !== 'blocks';
+
+function nestedCaptures(parent, descendants, ctx) {
+  const captures = [];
+  for (const desc of descendants.filter(reusableNestedDescriptor)) {
+    let stat;
+    try { stat = ctx.fsImpl.lstatSync(desc.path); } catch { continue; }
+    if (stat.isSymbolicLink() || (!stat.isDirectory() && !stat.isFile())) continue;
+    captures.push({
+      desc,
+      key: normalizePath(desc.path),
+      directory: stat.isDirectory(),
+      bytes: 0,
+      files: 0,
+      newestMtimeMs: null,
+    });
+  }
+  if (!captures.length) return { parent: measureDescriptor(parent, ctx), captured: new Map() };
+
+  const result = ctx.walk(parent.path, {
+    ...ctx.limits,
+    fsImpl: ctx.fsImpl,
+    onFile: ({ file, bytes, mtimeMs }) => {
+      const key = normalizePath(file);
+      for (const capture of captures) {
+        const inside = capture.directory
+          ? key.startsWith(`${capture.key}${path.sep}`)
+          : key === capture.key;
+        if (!inside) continue;
+        capture.bytes += bytes;
+        capture.files += 1;
+        if (capture.newestMtimeMs === null || mtimeMs > capture.newestMtimeMs) {
+          capture.newestMtimeMs = mtimeMs;
+        }
+      }
+    },
+  });
+  const node = rootMeasurements(result, { asOf: ctx.asOf });
+  const parentMeasurement = {
+    presence: node.presence,
+    bytes: node.bytes,
+    files: node.files,
+    newestMtimeMs: result.newestMtimeMs ?? null,
+    matchedPaths: [],
+    matchedCount: null,
+    basis: 'apparent-size',
+    complete: node.presence === 'absent' || result.complete !== false,
+  };
+  // A partial parent is only a lower bound. None of its child aggregates may
+  // replace a narrower measurement, even when that child happened to be seen.
+  if (node.presence !== 'present' || result.complete === false) {
+    return { parent: parentMeasurement, captured: new Map() };
+  }
+  return {
+    parent: parentMeasurement,
+    captured: new Map(captures.map((capture) => [capture.desc.id, {
+      presence: 'present',
+      bytes: measured(capture.bytes, { asOf: ctx.asOf }),
+      files: measured(capture.files, { asOf: ctx.asOf }),
+      newestMtimeMs: capture.newestMtimeMs,
+      matchedPaths: [],
+      matchedCount: null,
+      basis: 'parent-observation',
+      measuredBy: 'parent-observation',
+      complete: true,
+    }])),
+  };
+}
+
+/** Measure root descriptors first so one complete ordinary walk can supply
+ * exact nested path rows. Families, allocated-block roots, adopted figures,
+ * and every child of a partial root retain their independent measurement. */
+function measureConsumerDescriptors(descriptors, ctx) {
+  const measuredById = new Map();
+  for (const parent of descriptors.filter((desc) => desc.kind === 'root')) {
+    const descendants = descriptors.filter((desc) => isInside(parent.path, desc.path));
+    if (!reusableNestedDescriptor(parent) || !descendants.length) {
+      measuredById.set(parent.id, measureDescriptor(parent, ctx));
+      continue;
+    }
+    const observation = nestedCaptures(parent, descendants, ctx);
+    measuredById.set(parent.id, observation.parent);
+    for (const [id, value] of observation.captured) measuredById.set(id, value);
+  }
+  for (const desc of descriptors) {
+    if (!measuredById.has(desc.id)) measuredById.set(desc.id, measureDescriptor(desc, ctx));
+  }
+  return measuredById;
 }
 
 /** The ecosystem of each install-section shared cache. Kept beside the adoption
@@ -845,9 +936,10 @@ export function collectConsumers({
       rows: includeProjectTrees ? projectTreeDescriptors(candidates) : [],
     },
   ]));
+  const observations = measureConsumerDescriptors(descriptors, ctx);
 
   const measuredRows = descriptors.map((desc) => {
-    const m = measureDescriptor(desc, ctx);
+    const m = observations.get(desc.id);
     return {
       id: desc.id,
       label: desc.label,
@@ -869,7 +961,7 @@ export function collectConsumers({
       newestMtimeMs: m.newestMtimeMs,
       accountingNote: desc.note,
       source: desc.source,
-      measuredBy: desc.measuredBy,
+      measuredBy: m.measuredBy ?? desc.measuredBy,
       residual: false,
       complete: m.complete,
     };

@@ -1,6 +1,9 @@
 // Read-only CatalogInventory v2 (ADR-0025): canonical standalone/plugin identity,
 // per-source occurrences, and bounded entrypoint digests. Bodies never leave the
 // collector; traversal never follows a symlink or escapes a declared root.
+import { readResourceDescription, readPluginDescription } from './catalog-descriptions.mjs';
+import { measureProjectKind } from './project-kind.mjs';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
@@ -12,15 +15,19 @@ import { readJson } from '../settings.mjs';
 import { inspectCodexPlugins } from '../codex-plugins.mjs';
 import { walkTree, statNode, measured } from './walk.mjs';
 import {
-  artifactDigest, buildCatalogSourceStamps, buildProjectPressure, collectNativePluginInventory, pluginRefParts,
+  artifactDigest, artifactTreeDigest, buildCatalogSourceStamps, buildProjectPressure, collectNativePluginInventory, pluginRefParts,
 } from './catalog-evidence.mjs';
 import { collectConfigSurface } from './catalog-config.mjs';
+import { readManifestKeys, readTomlTables } from './catalog-config-readers.mjs';
+import { inspectProjectArtifacts, summarizeArtifactTracking } from './catalog-project-evidence.mjs';
 import { catalogSurfaceSpecs, pluginCapabilitySpecs } from './catalog-surfaces.mjs';
 
 export { collectConfigSurface } from './catalog-config.mjs';
+export { tomlTableNames } from './catalog-config-readers.mjs';
 
 /** A capped surface reports a floor, never a total. */
 const MAX_NAMES = 4096;
+const ARTIFACT_FILES = Symbol('catalogArtifactFiles');
 
 export const CATALOG_KINDS = ['skill', 'agent', 'command', 'plugin', 'mcpServer'];
 export const CATALOG_HOSTS = ['claude', 'codex', 'opencode'];
@@ -43,7 +50,12 @@ const emptyReading = (status, reason) => ({
 /** Read accepted names without descending into an item's reference material. */
 function readNames(root, {
   accept, nameOf, entryOf = null, dirDepth, walk = walkTree, limits = {}, fsImpl = fs,
+  observationCache = null, observationKey = null,
 }) {
+  const cacheKey = observationCache && observationKey
+    ? `${observationKey}\u0000${path.resolve(root)}`
+    : null;
+  if (cacheKey && observationCache.has(cacheKey)) return observationCache.get(cacheKey);
   const names = [];
   const entries = [];
   const result = walk(root, {
@@ -60,16 +72,20 @@ function readNames(root, {
     },
   });
   if (result.status === 'unknown') {
-    return emptyReading(result.reason === 'ENOENT' ? 'absent' : 'degraded', result.reason);
+    const reading = emptyReading(result.reason === 'ENOENT' ? 'absent' : 'degraded', result.reason);
+    if (cacheKey) observationCache.set(cacheKey, reading);
+    return reading;
   }
   const truncated = Boolean(result.truncated) || names.length >= MAX_NAMES;
-  return {
+  const reading = {
     status: 'ok',
     reason: result.degraded?.[0]?.reason ?? null,
     names, entries,
     partial: result.complete === false || truncated,
     truncated,
   };
+  if (cacheKey) observationCache.set(cacheKey, reading);
+  return reading;
 }
 
 /** ':'-joined path of `file` relative to `root`, minus a trailing extension. */
@@ -83,71 +99,50 @@ function relativeName(root, file, { strip = '' } = {}) {
 /** Directories carrying `marker` (SKILL.md), named by their path below `root`.
  *  Two directory levels: a bare `<skill>/` and a namespaced `<plugin>/<skill>/`. */
 const readMarkerDirs = (root, marker, opts = {}) => readNames(root, {
+  observationKey: `marker:${marker}`,
   dirDepth: 2,
   accept: (name) => name === marker,
   nameOf: (file) => relativeName(root, path.dirname(file)),
-  entryOf: (file) => ({
-    itemPath: path.dirname(file), sourceFile: file,
-    digest: artifactDigest(file, opts),
-  }),
+  entryOf: (file) => {
+    const definition = artifactTreeDigest(path.dirname(file), opts);
+    return {
+      itemPath: path.dirname(file), sourceFile: file, description: readResourceDescription(file, opts),
+      digest: artifactDigest(file, opts), definition: { ...definition, files: undefined },
+      artifactFiles: definition.files ?? [], locatorKind: 'directory',
+    };
+  },
   ...opts,
 });
 
 /** Markdown entries; README documents the surface and is not an entry. */
 const readMarkdownNames = (root, opts = {}) => readNames(root, {
+  observationKey: 'markdown',
   dirDepth: 3,
   accept: (name) => name.endsWith('.md') && !/^readme\.md$/i.test(name),
   nameOf: (file) => relativeName(root, file, { strip: '.md' }),
-  entryOf: (file) => ({ itemPath: file, sourceFile: file, digest: artifactDigest(file, opts) }),
+  entryOf: (file) => {
+    const digest = artifactDigest(file, opts);
+    return { itemPath: file, sourceFile: file, digest,
+      ...(file.endsWith('.md') ? { description: readResourceDescription(file, opts) } : {}),
+      definition: digest, artifactFiles: [file], locatorKind: 'file' };
+  },
   ...opts,
 });
 
 /** Top-level files with one of `exts`, named by basename without the extension. */
 const readFileStems = (root, exts, opts = {}) => readNames(root, {
+  observationKey: `stems:${[...exts].sort().join(',')}`,
   dirDepth: 0,
   accept: (name) => exts.includes(path.extname(name)),
   nameOf: (file) => path.basename(file, path.extname(file)),
-  entryOf: (file) => ({ itemPath: file, sourceFile: file }),
+  entryOf: (file) => {
+    const digest = artifactDigest(file, opts);
+    return { itemPath: file, sourceFile: file, digest,
+      ...(file.endsWith('.md') ? { description: readResourceDescription(file, opts) } : {}),
+      definition: digest, artifactFiles: [file], locatorKind: 'file' };
+  },
   ...opts,
 });
-
-/** Keys of one object inside a JSON manifest. */
-function readManifestKeys(file, pick, { fsImpl = fs } = {}) {
-  const head = statNode(file, { fsImpl });
-  if (head.status === 'unknown') {
-    return emptyReading(head.reason === 'ENOENT' ? 'absent' : 'degraded', head.reason);
-  }
-  const doc = readJson(file, null);
-  if (doc === null) return emptyReading('degraded', 'EPARSE');
-  const bag = pick(doc);
-  if (!bag || typeof bag !== 'object') return { ...emptyReading('ok', null), names: [] };
-  const names = Object.keys(bag);
-  return { status: 'ok', reason: null, names, entries: names.map((name) => ({ name })), partial: false, truncated: false };
-}
-
-/** TOML table names under `section`, exported for tests. */
-export function tomlTableNames(source, section) {
-  const names = [];
-  const re = new RegExp(
-    `^\\[\\s*${section}\\s*\\.\\s*(?:"((?:[^"\\\\]|\\\\.)+)"|'([^']+)'|([A-Za-z0-9_.\\-]+))\\s*\\]\\s*$`,
-    'gm',
-  );
-  let match;
-  while ((match = re.exec(source)) !== null) {
-    const quoted = match[1];
-    names.push(quoted ? quoted.replace(/\\"/g, '"').replace(/\\\\/g, '\\') : (match[2] ?? match[3]));
-  }
-  return names;
-}
-
-function readTomlTables(file, section, { fsImpl = fs } = {}) {
-  let source;
-  try { source = fsImpl.readFileSync(file, 'utf8'); } catch (error) {
-    return emptyReading(error.code === 'ENOENT' ? 'absent' : 'degraded', error.code ?? 'io');
-  }
-  const names = tomlTableNames(source, section);
-  return { status: 'ok', reason: null, names, entries: names.map((name) => ({ name })), partial: false, truncated: false };
-}
 
 /** Claude's installed-plugin manifest and newest install root per full ref. */
 function readClaudePlugins(file, { fsImpl = fs } = {}) {
@@ -187,6 +182,15 @@ function readClaudePlugins(file, { fsImpl = fs } = {}) {
  *  different deployed things. */
 const itemKey = (kind, name) => `${kind}::${name.trim().toLowerCase()}`;
 const fallbackInventoryStatus = (configPresent) => (configPresent === false ? 'degraded' : 'partial');
+const opaqueArtifactId = (value) => `catalog-artifact-${createHash('sha256')
+  .update(JSON.stringify(value)).digest('hex').slice(0, 24)}`;
+
+function discoveryFor(spec) {
+  if (spec.discovery) return spec.discovery;
+  if (spec.provider) return { mechanism: 'plugin-installation', configuredBy: spec.provider.ref, enabled: spec.provider.enabled };
+  if (spec.kind === 'mcpServer') return { mechanism: 'host-configuration', configuredBy: path.basename(spec.path) };
+  return { mechanism: 'host-convention', configuredBy: null, enabled: true };
+}
 
 /** Plugin inventories plus enabled plugins' capability surfaces. */
 function pluginSurfaceSpecs({
@@ -245,7 +249,7 @@ function pluginSurfaceSpecs({
       read: () => ({
         status: source.status === 'degraded' ? 'degraded' : 'ok', reason: source.reason,
         names: plugins.map((plugin) => plugin.ref),
-        entries: plugins.map((plugin) => ({ name: plugin.ref, plugin })),
+        entries: plugins.map((plugin) => ({ name: plugin.ref, plugin, description: readPluginDescription(plugin.root, host, io) })),
         partial: source.status === 'partial', truncated: false,
       }),
     });
@@ -275,19 +279,63 @@ function mergeCatalogItem(items, spec, entry) {
     };
     items.set(key, item);
   }
-  if (!item.hosts.includes(spec.host)) item.hosts.push(spec.host);
-  if (!item.sourceScopes.includes(spec.scope)) item.sourceScopes.push(spec.scope);
   const provider = spec.provider ? {
     ref: spec.provider.ref, name: spec.provider.name, marketplace: spec.provider.marketplace,
     version: spec.provider.version ?? null, cacheGeneration: spec.provider.cacheGeneration ?? null,
     enabled: spec.provider.enabled ?? null, evidence: spec.provider.evidence ?? null,
   } : null;
-  item.presence.push({
+  const discovery = discoveryFor(spec);
+  const activeConsumer = discovery.enabled !== false;
+  if (activeConsumer && !item.hosts.includes(spec.host)) item.hosts.push(spec.host);
+  if (activeConsumer && !item.sourceScopes.includes(spec.sourceScope ?? spec.scope)) {
+    item.sourceScopes.push(spec.sourceScope ?? spec.scope);
+  }
+  const locator = {
+    kind: spec.kind,
+    locatorKind: entry.locatorKind ?? (entry.itemPath ? 'file' : 'surface-entry'),
+    path: path.resolve(entry.itemPath ?? spec.path),
+    selector: entry.selector ?? (!entry.itemPath ? raw : null),
+  };
+  const artifactId = opaqueArtifactId(locator);
+  const presence = {
     host: spec.host, surface: spec.id, path: spec.path,
     itemPath: entry.itemPath ?? null, sourceFile: entry.sourceFile ?? null,
-    scope: spec.scope ?? 'unknown', project: spec.project ?? null,
+    scope: spec.sourceScope ?? spec.scope ?? 'unknown', project: spec.sourceProject ?? spec.project ?? null,
+    description: entry.description ?? null,
     provider, plugin: entry.plugin ?? null, digest: entry.digest ?? null,
-  });
+    definition: entry.definition ?? entry.digest ?? null,
+    artifactId,
+    consumer: {
+      host: spec.host,
+      mechanism: discovery.mechanism,
+      configuredBy: discovery.configuredBy ?? null,
+      configScope: spec.scope ?? 'unknown',
+      configProject: spec.project ?? null,
+      enabled: typeof discovery.enabled === 'boolean' ? discovery.enabled : null,
+      resolution: 'not-reported',
+    },
+  };
+  Object.defineProperty(presence, ARTIFACT_FILES, { value: entry.artifactFiles ?? [], enumerable: false });
+  item.presence.push(presence);
+}
+
+function addProjectTracking(items, inspect) {
+  const byProject = new Map();
+  for (const item of items.values()) for (const presence of item.presence) {
+    if (presence.scope !== 'project' || !presence.project) continue;
+    const files = presence[ARTIFACT_FILES];
+    if (!files.length) continue;
+    if (!byProject.has(presence.project)) byProject.set(presence.project, []);
+    byProject.get(presence.project).push({ presence, files });
+  }
+  for (const [project, occurrences] of byProject) {
+    const files = [...new Set(occurrences.flatMap((entry) => entry.files))];
+    let facts;
+    try { facts = inspect(project, files); } catch { facts = new Map(); }
+    for (const occurrence of occurrences) {
+      occurrence.presence.tracking = summarizeArtifactTracking(occurrence.files, facts);
+    }
+  }
 }
 
 /** Read every spec once, folding hits into deduplicated CatalogItems and
@@ -338,11 +386,50 @@ function trackIncompleteness(surfaces) {
 function sortCatalogItems(items) {
   const list = [...items.values()];
   for (const item of list) {
-    const digests = item.presence.map((presence) => presence.digest?.value).filter(Boolean);
+    const artifacts = new Map();
+    item.consumerBindings = item.presence.map((presence) => ({
+      artifactId: presence.artifactId,
+      host: presence.consumer.host,
+      scope: presence.scope,
+      project: presence.project,
+      mechanism: presence.consumer.mechanism,
+      configuredBy: presence.consumer.configuredBy,
+      configScope: presence.consumer.configScope,
+      configProject: presence.consumer.configProject,
+      enabled: presence.consumer.enabled,
+      resolution: presence.consumer.resolution,
+    }));
+    for (const presence of item.presence) {
+      if (!artifacts.has(presence.artifactId)) {
+        artifacts.set(presence.artifactId, {
+          id: presence.artifactId,
+          definition: presence.definition ?? null,
+          entrypoint: presence.digest ?? null,
+          sourceScopes: [],
+          consumers: [],
+        });
+      }
+      const artifact = artifacts.get(presence.artifactId);
+      if (!artifact.sourceScopes.includes(presence.scope)) artifact.sourceScopes.push(presence.scope);
+      const consumer = item.consumerBindings.find((binding) => (
+        binding.artifactId === presence.artifactId
+        && binding.host === presence.host
+        && binding.mechanism === presence.consumer.mechanism
+        && binding.scope === presence.scope
+      ));
+      if (!artifact.consumers.some((row) => JSON.stringify(row) === JSON.stringify(consumer))) {
+        artifact.consumers.push(consumer);
+      }
+    }
+    item.artifacts = [...artifacts.values()];
+    const activeArtifacts = item.artifacts.filter((artifact) => (
+      artifact.consumers.some((consumer) => consumer?.enabled !== false)
+    ));
+    const digests = activeArtifacts.map((artifact) => artifact.entrypoint?.value).filter(Boolean);
     const unique = [...new Set(digests)];
     item.digestCoverage = {
       measured: digests.length,
-      unknown: item.presence.length - digests.length,
+      unknown: activeArtifacts.length - digests.length,
       unique: unique.length,
       exactMatch: digests.length > 1 && unique.length === 1,
     };
@@ -359,26 +446,58 @@ function buildOverlapGroups(list) {
   for (const item of list.filter((candidate) => candidate.kind === 'skill')) {
     const name = item.capabilityName.trim().toLowerCase();
     if (!nameGroups.has(name)) nameGroups.set(name, []);
-    nameGroups.get(name).push(item);
-    for (const digest of new Set(item.presence.map((presence) => presence.digest?.value).filter(Boolean))) {
+    for (const artifact of item.artifacts.filter((candidate) => (
+      candidate.consumers.some((consumer) => consumer?.enabled !== false)
+    ))) nameGroups.get(name).push({ item, artifact });
+    for (const artifact of item.artifacts.filter((candidate) => (
+      candidate.consumers.some((consumer) => consumer?.enabled !== false)
+      && candidate.entrypoint?.value
+    ))) {
+      const digest = artifact.entrypoint.value;
       if (!digestGroups.has(digest)) digestGroups.set(digest, []);
-      digestGroups.get(digest).push(item);
+      digestGroups.get(digest).push({ item, artifact });
     }
   }
-  const mapGroups = (groups, field) => [...groups.entries()].flatMap(([value, items]) => {
-    const occurrences = items.reduce((sum, item) => sum + item.presence.length, 0);
-    if (items.length < 2 && occurrences < 2) return [];
-    return [{ [field]: value, itemKeys: items.map((item) => item.key), occurrences }];
+  const mapGroups = (groups, field) => [...groups.entries()].flatMap(([value, entries]) => {
+    const artifacts = new Set(entries.map((entry) => entry.artifact.id));
+    if (artifacts.size < 2) return [];
+    return [{
+      [field]: value,
+      itemKeys: [...new Set(entries.map((entry) => entry.item.key))],
+      occurrences: artifacts.size,
+    }];
   });
-  const measuredDigests = list.filter((item) => item.kind === 'skill')
-    .flatMap((item) => item.presence).filter((presence) => presence.digest?.value).length;
-  const total = list.filter((item) => item.kind === 'skill')
-    .reduce((sum, item) => sum + item.presence.length, 0);
+  const artifacts = new Map();
+  for (const item of list.filter((candidate) => candidate.kind === 'skill')) {
+    for (const artifact of item.artifacts.filter((candidate) => (
+      candidate.consumers.some((consumer) => consumer?.enabled !== false)
+    ))) if (!artifacts.has(artifact.id)) artifacts.set(artifact.id, artifact);
+  }
+  const measuredDigests = [...artifacts.values()].filter((artifact) => artifact.entrypoint?.value).length;
+  const total = artifacts.size;
   return {
     exactName: mapGroups(nameGroups, 'name'),
     exactEntrypointDigest: mapGroups(digestGroups, 'digest'),
     digestCoverage: { measured: measuredDigests, unknown: total - measuredDigests, partial: measuredDigests < total },
   };
+}
+
+function buildArtifactGraph(list) {
+  const graph = new Map();
+  for (const item of list) for (const artifact of item.artifacts) {
+    let node = graph.get(artifact.id);
+    if (!node) {
+      node = { ...artifact, logicalItemKeys: [], consumers: [] };
+      graph.set(artifact.id, node);
+    }
+    if (!node.logicalItemKeys.includes(item.key)) node.logicalItemKeys.push(item.key);
+    for (const consumer of artifact.consumers) {
+      if (!node.consumers.some((candidate) => JSON.stringify(candidate) === JSON.stringify(consumer))) {
+        node.consumers.push(consumer);
+      }
+    }
+  }
+  return [...graph.values()];
 }
 
 /** Total count per kind, `partial` when any surface feeding that kind was
@@ -418,7 +537,9 @@ function tallyCatalogPerHost(list, asOf, incompleteByHost) {
  *           cwd?: string, projects?: string[], cfg?: object, now?: () => number, walk?: Function,
  *           limits?: object, fsImpl?: typeof fs,
  *           inspectCodexPlugins?: Function, collectNativePlugins?: Function,
- *           nativePlugins?: object, includePluginSurfaces?: boolean }} [options]
+ *           nativePlugins?: object, includePluginSurfaces?: boolean,
+ *           inspectProjectArtifacts?: Function,
+ *           env?: Record<string, string|undefined> }} [options]
  * @returns {object} CatalogInventory
  */
 export function collectCatalog({
@@ -442,11 +563,18 @@ export function collectCatalog({
   collectNativePlugins = collectNativePluginInventory,
   nativePlugins = null,
   includePluginSurfaces = true,
+  inspectProjectArtifacts: inspectProjectArtifactsImpl = inspectProjectArtifacts,
+  env = process.env,
 } = {}) {
   const asOf = now();
-  const io = { walk, limits, fsImpl };
+  // One physical capability directory may feed several host consumer bindings
+  // (for example, OpenCode's documented Claude-compatible skill surface). Keep
+  // those bindings distinct while paying for one bounded observation. The
+  // cache lives for this collector call only; it is never persisted or reused
+  // across scans, so a rescan always observes current disk state.
+  const io = { walk, limits, fsImpl, observationCache: new Map() };
   const roots = { claudeRoot, claudeMcpFile, codexRoot, agentsRoot, codexConfigFile, opencodeRoot, opencodeConfigFile,
-    cwd, projects };
+    cwd, projects, env };
   const readers = {
     marker: readMarkerDirs, markdown: readMarkdownNames, stems: readFileStems,
     manifest: readManifestKeys, toml: readTomlTables,
@@ -460,6 +588,7 @@ export function collectCatalog({
   const specs = [...base.specs, ...plugins.specs];
 
   const { items, surfaces } = readCatalogSurfaces(specs);
+  addProjectTracking(items, inspectProjectArtifactsImpl);
   const { incomplete, incompleteByHost } = trackIncompleteness(surfaces);
   const list = sortCatalogItems(items);
   const counts = tallyCatalogCounts(list, asOf, incomplete);
@@ -469,16 +598,21 @@ export function collectCatalog({
   const partial = surfaces.filter((surface) => surface.partial).map((surface) => surface.id);
 
   return {
-    schemaVersion: 2,
+    schemaVersion: 4,
     asOf,
     hosts: CATALOG_HOSTS,
     kinds: CATALOG_KINDS,
     items: list,
+    artifacts: buildArtifactGraph(list),
+    consumerBindings: list.flatMap((item) => item.consumerBindings.map((binding) => ({
+      ...binding, logicalItemKey: item.key,
+    }))),
     counts,
     perHost,
     surfaces,
     scopes: ['user', 'project', 'plugin'],
     pluginSources: plugins.sources,
+    projectMetadata: base.catalogProjects.map((root) => ({ path: root, projectKind: measureProjectKind(root, { fsImpl }) })),
     sourceStamps: buildCatalogSourceStamps({ surfaces, items: list, fsImpl }),
     overlaps: buildOverlapGroups(list),
     projects: buildProjectPressure({

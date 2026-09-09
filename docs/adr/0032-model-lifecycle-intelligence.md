@@ -2,7 +2,9 @@
 
 - **Status:** Implemented
 - **Date:** 2026-08-25
-- **Updated:** 2026-08-25
+- **Updated:** 2026-09-08
+- **Pricing audit:** Verified Claude 5.1 identity, availability, limits and rates; Models
+  pricing uses verified rate dates and official Astra/Sol alias documentation.
 - **Update note:** The bounded inventory, descriptor-selected source adapters, conservative snapshot
   diff, and read-only CLI/status surfaces are implemented. The operator-first Dashboard separates
   configured routes, aggregate model use in the selected 7/14/30-day window, and a progressive
@@ -16,6 +18,17 @@
   references, session identity, and history identifiers remain protected. Cited lifecycle alerts now
   name affected routes, current and recommended models, the provider notice, and a concrete planning
   action. The acceptance conditions and exact-head release proof are complete.
+- **Updated:** 2026-09-04 — proposed ADR-0048 makes installed models first-class Maintenance
+  resources and admits only an exact provider-owned removal operation after separate conformance;
+  this implemented context remains read-only until that proposal ships
+- **Updated:** 2026-09-05 — ADR-0048 is now Accepted and implemented. Installed models are now
+  first-class Maintenance resources in the management projection (`resourceKind: 'model'`), read
+  from this context's model-inventory snapshot without change to how that snapshot is built.
+  Exactly one Managed removal operation exists — `src/lib/maintenance/providers/
+  ollama-model-remove.mjs`, one provider-owned local Ollama model per action, refusing active use
+  or incomplete consumer evidence and never elevating privilege. Model download, pull, update,
+  migration, and channel change remain Guided, not Managed: this ADR's read-only model-lifecycle
+  ownership, diffs, and swap plans are unchanged.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [issue #110](https://github.com/pacphi/agentic-kit/issues/110),
   [implementation PR #179](https://github.com/pacphi/agentic-kit/pull/179),

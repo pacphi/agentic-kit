@@ -475,9 +475,10 @@ test('every prompt-pattern entry carries only keys from the allowed set', async 
 // real ESM (bootstrap.mjs's `esc` is a build-time placeholder), and client.mjs
 // strips both from the bundle.
 const BUNDLE_ORDER = [
-  'bootstrap.mjs', 'overview.mjs', 'intelligence.mjs', 'poll.mjs', 'usage-rhythm.mjs',
-  'usage-prompts.mjs', 'usage.mjs', 'model-lifecycle.mjs', 'usage-orchestrators.mjs',
-  'about.mjs', 'system-readout.mjs', 'system-projects.mjs', 'boot.mjs',
+  'bootstrap.mjs', 'overview.mjs', 'datetime.mjs', 'intelligence.mjs', 'poll.mjs', 'usage-rhythm.mjs',
+  'usage-prompts.mjs', 'usage-context-hooks.mjs', 'usage.mjs', 'model-lifecycle.mjs',
+  'usage-orchestrators.mjs', 'about.mjs', 'system-readout.mjs', 'system-projects.mjs',
+  'system-maintenance-actions.mjs', 'system-maintenance.mjs', 'boot.mjs',
 ];
 const STRIPPED_FROM_BUNDLE = new Set(['esc']);
 

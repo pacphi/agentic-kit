@@ -19,7 +19,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   HEAD_MAX_LINES, PROJECT_SOURCE_HOSTS, PROJECT_SOURCE_METHOD,
-  decodeClaudeProjectDir, discoverProjectSources, firstCwd, scanOpencodeDirectories,
+  decodeClaudeProjectDir, discoverProjectSources, firstCwd, firstSessionMetadata, scanOpencodeDirectories,
   scanTranscriptCwds,
 } from '../../src/lib/footprint/project-sources.mjs';
 import { collectProjects } from '../../src/lib/footprint/projects.mjs';
@@ -81,6 +81,48 @@ test('a cwd is read from either host shape, and only from the head', () => {
   assert.equal(firstCwd([], 'claude'), null);
   assert.equal(firstCwd(null, 'claude'), null);
   assert.equal(firstCwd([JSON.stringify({ cwd: '' })], 'claude'), null);
+});
+
+test('bounded transcript metadata normalizes native identity and start time without prompt content', () => {
+  const codex = firstSessionMetadata([
+    '{"truncated":',
+    JSON.stringify({
+      timestamp: '2026-09-03T16:10:25.468Z', type: 'session_meta',
+      payload: {
+        id: '01a06808-ff7f-7ae1-96a1-510da7cf6277',
+        timestamp: '2026-09-03T16:10:15.342Z', cwd: '/repos/agentic-kit',
+      },
+    }),
+  ], 'codex');
+  assert.deepEqual(codex, {
+    cwd: '/repos/agentic-kit',
+    nativeId: '01a06808-ff7f-7ae1-96a1-510da7cf6277',
+    startedAt: '2026-09-03T16:10:15.342Z',
+    timeBasis: 'started',
+  });
+
+  const claude = firstSessionMetadata([
+    JSON.stringify({
+      type: 'queue-operation', sessionId: '8b5fdc77-788f-4857-9b16-1cbac2a717e9',
+      cwd: '/repos/boon-worthy', timestamp: '2026-09-03T06:57:27.087Z',
+    }),
+    JSON.stringify({ type: 'ai-title', aiTitle: 'sensitive conversation title' }),
+  ], 'claude');
+  assert.deepEqual(claude, {
+    cwd: '/repos/boon-worthy',
+    nativeId: '8b5fdc77-788f-4857-9b16-1cbac2a717e9',
+    startedAt: '2026-09-03T06:57:27.087Z',
+    timeBasis: 'first-event',
+  }, 'the System inventory must not surface a prompt-derived title');
+});
+
+test('Codex metadata latches its first session_meta and rejects timezone-less instants', () => {
+  const result = firstSessionMetadata([
+    JSON.stringify({ type: 'session_meta', payload: { id: 'own', timestamp: '2026-09-03T09:10:15' } }),
+    JSON.stringify({ type: 'session_meta', payload: { id: 'replayed-parent', timestamp: '2026-09-04T10:00:00Z' } }),
+  ], 'codex');
+  assert.equal(result.nativeId, 'own');
+  assert.equal(result.startedAt, null, 'a timezone-less wall clock is not an absolute instant');
 });
 
 test('the encoded Claude directory decodes only against the real filesystem', { skip: POSIX_ONLY }, (t) => {
@@ -148,6 +190,8 @@ test('a project that no longer exists is counted in everSeen and never in the ta
   const root = fixture(t, 'vanished');
   const alive = path.join(root, 'alive');
   fs.mkdirSync(path.join(alive, '.git'), { recursive: true });
+  write(path.join(alive, '.git', 'config'),
+    '[remote "origin"]\n\turl = https://github.com/pacphi/alive.git\n');
   const gone = path.join(root, 'deleted-last-week');
 
   const claudeRoot = path.join(root, 'claude-projects');
@@ -314,26 +358,30 @@ test('an OpenCode-only project joins the same de-duplicated list', (t) => {
   assert.deepEqual(found.projects.find((p) => p.path === oc).hosts, ['opencode']);
 });
 
-test('an explicit catalog is measured exactly as given, existence and all', (t) => {
+test('an explicit catalog preserves discovery counts while measuring only its hosted session rows', (t) => {
   const root = fixture(t, 'explicit');
   const alive = path.join(root, 'alive');
   fs.mkdirSync(path.join(alive, '.git'), { recursive: true });
+  write(path.join(alive, '.git', 'config'),
+    '[remote "origin"]\n\turl = https://github.com/pacphi/alive.git\n');
 
   const section = collectProjects({
     projects: [
-      { path: alive, label: 'alive' },
-      { path: path.join(root, 'gone'), label: 'gone' },
+      { path: alive, label: 'alive', hosts: ['claude'] },
+      { path: path.join(root, 'gone'), label: 'gone', hosts: ['codex'] },
     ],
     loc: false,
     now: () => 1_700_000_000_000,
   });
-  // The caller — not discovery — chose these rows, so the on-disk filter does
-  // NOT apply and the missing one is reported as a missing row rather than
-  // silently dropped.
-  assert.equal(section.projects.length, 2);
+  // The caller still defines the KPI population, but a missing or unlinked
+  // directory is counted as an exclusion rather than receiving deep walks.
+  assert.equal(section.projects.length, 1);
+  assert.equal(section.projects[0].path, alive);
   assert.equal(section.everSeen.value, 2);
   assert.equal(section.onDisk.value, 1);
   assert.equal(section.gitRepos.value, 1);
+  assert.equal(section.population.excluded.total, 1);
+  assert.equal(section.population.excluded.byRemoteStatus.localOnly, 1);
   assert.equal(section.method, null, 'an explicit catalog has no discovery method to state');
 });
 

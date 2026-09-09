@@ -668,7 +668,7 @@ export const USAGE_CSS = `
    as a stack of comparable bars. A fixed cap that yields under pressure keeps
    them aligned; below ~950px the ellipsis returns and limRow's title carries
    the full text. */
-.lim .mrow{grid-template-columns:minmax(0,190px) minmax(60px,0.9fr) 54px minmax(88px,auto)}
+.lim .mrow{grid-template-columns:minmax(0,190px) minmax(60px,1fr) 54px 88px}
 .lim .mbar{position:relative; overflow:visible}
 .lim .mbar i.pace{
   position:absolute; top:-3px; bottom:-3px; left:0; width:2px; height:auto;

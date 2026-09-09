@@ -1,5 +1,6 @@
 // @ts-nocheck — browser bundle source (never node-imported; client.mjs
 // reads it as text). See src/lib/dashboard/client/**'s eslint.config.mjs.
+import { formatLocalDateTime } from './datetime.mjs';
 import { authHeaders, esc } from './bootstrap.mjs';
 
   export var HOOKS=null,hooksBusy=null;
@@ -57,10 +58,7 @@ import { authHeaders, esc } from './bootstrap.mjs';
   }
 
   function contextStarted(value){
-    if(!value)return "unknown";
-    var d=new Date(value);
-    if(!Number.isFinite(d.getTime()))return "unknown";
-    return d.toISOString().slice(0,10);
+    return formatLocalDateTime(value)||"unknown";
   }
 
   function contextAttentionGroups(rows){

@@ -27,9 +27,11 @@ test('ak heal hooks requires exact preview authorization and supports previewed 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-hook-cli-'));
   const codexHome = path.join(root, 'codex');
   const target = path.join(codexHome, 'hooks.json');
+  const project = path.join(root, 'project');
   const transactionsRoot = path.join(root, 'transactions');
   const priorCodexHome = process.env.CODEX_HOME;
   fs.mkdirSync(codexHome, { recursive: true });
+  fs.mkdirSync(project, { recursive: true });
   fs.writeFileSync(target, `${JSON.stringify({
     hooks: { SessionEnd: [{ hooks: [{ type: 'command', command: 'node end.cjs', timeout: 5 }] }] },
   }, null, 2)}\n`, { mode: 0o640 });
@@ -38,7 +40,7 @@ test('ak heal hooks requires exact preview authorization and supports previewed 
     const capture = captureConsole();
     try {
       const code = await run({
-        flags: { host: ['codex'], project: [], json: true, 'transactions-root': transactionsRoot, ...flags },
+        flags: { host: ['codex'], project: [project], json: true, 'transactions-root': transactionsRoot, ...flags },
         positionals: ['hooks'], detectVersionFn: () => '0.151.0',
         loadConfigFn: () => { throw new Error('Codex-only healing must not load adapter config'); },
       });

@@ -22,7 +22,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0011](0011-local-model-provenance-zero-cost-and-transcript-fidelity.md) | Local models: provenance out-of-band, $0 per model, stated transcript fidelity | Proposed |
 | [0012](0012-observability.md) | Evidence-graded session observability | Implemented |
 | [0013](0013-admin-build-security-signals-and-honest-reach.md) | Admin: build/security signals, an honest Reach panel, and a pagination fix | Accepted |
-| [0014](0014-dashboard-auth-and-remediation.md) | Dashboard auth token, plus a security/quality remediation pass | Accepted |
+| [0014](0014-dashboard-auth-and-remediation.md) | Dashboard auth token, plus a security/quality remediation pass | Implemented |
 | [0015](0015-managed-codex-native-statusline.md) | Manage Codex's native user-wide status line without claiming rich-renderer parity | Accepted |
 | [0016](0016-capability-driven-integration-adapters.md) | Capability-driven host, provider, binding, projection, and observability adapters | Accepted; compatibility amended; closed-registry clause superseded by 0029 |
 | [0017](0017-opencode-host.md) | OpenCode as a managed, observable host through native surfaces | Accepted; compatibility amended |
@@ -51,6 +51,11 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0041](0041-host-neutral-hook-configuration-assurance.md) | Host-neutral hook configuration assurance | Implemented; native runtime receipt acquisition deferred |
 | [0042](0042-capability-aware-context-budget-intelligence.md) | Capability-aware context budget intelligence | Implemented |
 | [0043](0043-managed-ruflo-browser-executor.md) | Manage Ruflo's browser executor behind a replaceable boundary | Accepted |
+| [0044](0044-receipt-aware-maintenance-control-plane.md) | Receipt-aware Maintenance control plane | Implemented |
+| [0045](0045-artifact-consumer-bindings-and-explicit-maintenance-scans.md) | Physical artifacts, host consumers, and explicit Maintenance scans | Implemented |
+| [0046](0046-scan-local-observation-reuse-and-nonblocking-deep-scans.md) | Scan-local observation reuse and nonblocking deep scans | Implemented |
+| [0047](0047-streaming-observation-forest.md) | Streaming observation forest for deep scans | Accepted; Projects pilot implemented |
+| [0048](0048-inventory-led-maintenance-resource-management.md) | Inventory-led Maintenance resource management | Accepted; Focus browser implemented and focused checks pass; human/cross-platform gates pending |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -313,3 +318,31 @@ approval-required, or never-automatic. Plugin caches and trust state remain unwr
 apply wave requires exact preimages, transaction-specific backups/receipts, guarded rollback, a
 clean second audit, and a byte/mtime no-op proof. The ADR remains Proposed pending independent
 dual-host review.
+
+**0044** implements Maintenance as a separate control-plane bounded context under System without
+giving Machine Footprint mutation authority. It separates evidence-backed
+findings, immutable source-bound plans, one-use action capabilities, provider-owned operations,
+verification, durable receipts, guarded undo, and observation-only receipt recovery. Its provider boundary exposes only
+host-native lifecycle verbs or exact agentic-kit-owned procedures; plugin cache children, incomplete
+skill receipts, unsupported host verbs, and uncertain evidence remain report-only. The dashboard
+stays read-only except for four explicitly allowlisted Maintenance route shapes,
+each retaining ADR-0014's loopback protections and adding bounded JSON, fixed server-side actions,
+explicit confirmation, and one-use authorization. Recovery from an interrupted outcome is now a
+read-only interruption audit followed by a separately confirmed, individually recorded
+reconciliation write (ADR-0048), available from the CLI and, for the audit half, the dashboard;
+it never retries or rolls back an uncertain provider effect.
+
+**0048** is the implemented product successor to 0044's findings-first screen, built on its
+transaction safety floor rather than replacing it. It folds Catalog presentation into a
+four-destination Maintenance workspace — Inventory, Guidance, Discovery, and Activity — uses exact
+placement identities beneath logical resources, removes alarmist or indeterminate user-facing
+labels, and admits only bounded outcomes into Guidance. It ships capability-driven package
+procedures, an exact Git-aware project-patch provider and an exact Ollama model-removal provider, a
+read-only interruption audit followed by individually recorded receipt reconciliation, and
+completion-oriented resumable checkpointed scans over 0047's observation forest, all covered by
+named automated tests. The decision is Accepted, not yet Implemented: the human-evaluation and
+cross-platform acceptance gates its migration plan requires have not run, so 0044's v1 routes and
+CLI verbs remain a documented compatibility surface and 0044 is not marked Superseded. The
+Focus browser amendment approved on 2026-09-08 adds one-level scope/repository/type/family browsing
+and evidence-backed relationship disclosures with preserved filter context. Its integration
+focused verification is recorded in the [Focus receipt](../archive/2026-09-08-validation-maintenance-focus.md); baseline test totals alone do not verify it.

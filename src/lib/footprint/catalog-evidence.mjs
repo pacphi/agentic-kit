@@ -39,6 +39,58 @@ export function artifactDigest(file, {
   }
 }
 
+/** Hash a complete, bounded directory definition. Relative paths, node kind,
+ * mode, size and file hashes participate; bodies and member paths do not leave
+ * the collector. A symlink, special node or cap makes equality unknown. */
+export function artifactTreeDigest(root, {
+  fsImpl = fs, asOf = null, maxEntries = 512,
+  maxFileBytes = CATALOG_ARTIFACT_MAX_BYTES, maxTotalBytes = 8 * CATALOG_ARTIFACT_MAX_BYTES,
+} = {}) {
+  const records = [];
+  const files = [];
+  let totalBytes = 0;
+  let failure = null;
+  const visit = (current, relative = '') => {
+    if (failure) return;
+    let stat;
+    try { stat = fsImpl.lstatSync(current); } catch (error) {
+      failure = error?.code ?? 'io'; return;
+    }
+    if (stat.isSymbolicLink()) { failure = 'artifact tree contains a symlink'; return; }
+    if (records.length >= maxEntries) { failure = `artifact tree exceeds ${maxEntries} entry limit`; return; }
+    const mode = stat.mode & 0o777;
+    if (stat.isDirectory()) {
+      records.push({ path: relative || '.', kind: 'directory', mode });
+      let names;
+      try { names = fsImpl.readdirSync(current).map(String).sort(); } catch (error) {
+        failure = error?.code ?? 'io'; return;
+      }
+      for (const name of names) visit(path.join(current, name), relative ? `${relative}/${name}` : name);
+      return;
+    }
+    if (!stat.isFile()) { failure = 'artifact tree contains a special file'; return; }
+    if (stat.size > maxFileBytes || totalBytes + stat.size > maxTotalBytes) {
+      failure = 'artifact tree exceeds byte digest limit'; return;
+    }
+    let bytes;
+    try { bytes = fsImpl.readFileSync(current); } catch (error) {
+      failure = error?.code ?? 'io'; return;
+    }
+    totalBytes += bytes.length;
+    files.push(current);
+    records.push({
+      path: relative, kind: 'file', mode, size: bytes.length,
+      digest: createHash('sha256').update(bytes).digest('hex'),
+    });
+  };
+  visit(root);
+  if (failure) return { ...unknown(failure), files: [] };
+  return {
+    ...measured(createHash('sha256').update(JSON.stringify(records)).digest('hex'), { asOf }),
+    files,
+  };
+}
+
 function commandJson(binary, args, run) {
   let result;
   try {
@@ -128,6 +180,7 @@ export function collectNativePluginInventory({ run = spawnSync } = {}) {
 
 function matchingPresence(item, { host, scope, project }) {
   return (item.presence ?? []).some((presence) => presence.host === host
+    && presence.consumer?.enabled !== false
     && presence.scope === scope
     && (scope !== 'project' || presence.project === project));
 }
@@ -160,10 +213,15 @@ function overlapMeasurement(projectItems, sharedItems, field, asOf) {
 
 function skillOccurrences(items, host, scopes, project) {
   const out = [];
+  const seen = new Set();
   for (const item of items.filter((candidate) => candidate.kind === 'skill')) {
     for (const presence of item.presence ?? []) {
       if (presence.host !== host || !scopes.includes(presence.scope)) continue;
+      if (presence.consumer?.enabled === false) continue;
       if (presence.scope === 'project' && presence.project !== project) continue;
+      const identity = presence.artifactId ?? `${presence.itemPath ?? presence.path}::${item.capabilityName ?? item.name}`;
+      if (seen.has(identity)) continue;
+      seen.add(identity);
       out.push({ name: item.capabilityName ?? item.name, digest: digestValue(presence) });
     }
   }

@@ -2,6 +2,7 @@
 // reads it as text). See src/lib/dashboard/client/**'s eslint.config.mjs
 // override comment for why this directory isn't run through the node lib.
 import { authHeaders, esc } from './bootstrap.mjs';
+import { formatLocalDateTime, formatLocalDateTimeLong, shortSessionId } from './datetime.mjs';
 import { ago } from './intelligence.mjs';
 import { CHART_EXCLUDED_CATEGORIES, KIND_LABEL, KIND_PLURAL, NOT_SCANNED, SERIES, bytesPair, catColor, dayTick, fmtBytes, fmtDur, hostColor, mhtml, mval, renderSysConsumers, renderSysReclaim, renderSysSummary, storageHostTotals, svgArea, svgDonut, svgRadar, sysEmpty, transcriptIdOf, unkHtml } from './system-readout.mjs';
 import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
@@ -161,15 +162,33 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     }
   }
 
-  function sysTopSessionsAttributable(sess){
-    var attributable=[],unattributable=0,i;
-    for(i=0;i<sess.length;i++){
-      if(sess[i]&&sess[i].project)attributable.push(sess[i]);else unattributable++;
-    }
-    return {attributable:attributable,unattributable:unattributable};
+  function sysSessionIdentity(x,sid,index){
+    var identity=x.identity||{},started=identity.startedAt||null;
+    var last=identity.lastModifiedAt||(Number.isFinite(x.mtimeMs)?new Date(x.mtimeMs).toISOString():null);
+    var at=started||last,compact=formatLocalDateTime(at),detail=formatLocalDateTimeLong(at);
+    var basis=started?(identity.timeBasis||"started"):(last?"file-mtime":"unavailable");
+    var prefix=basis==="file-mtime"?"Last active ":"";
+    var primary=compact?prefix+compact:"Time not recorded";
+    var original=String(identity.original||x.session||"");
+    var nativeId=String(identity.nativeId||sid||original.replace(/\.jsonl$/,""));
+    var host=String(x.host||"host"),hostName=host.charAt(0).toUpperCase()+host.slice(1);
+    var timeLabel=basis==="first-event"?"First recorded":basis==="file-mtime"?"Last active":"Started";
+    var actionTime=compact?(timeLabel.toLowerCase()+" "+compact):("ID "+nativeId);
+    var disclosure="Original: "+original+"\nNative ID: "+nativeId;
+    if(detail)disclosure+="\n"+timeLabel+": "+detail;
+    var descId="sys-session-desc-"+index;
+    var timeHtml=at&&compact
+      ?'<time class="sy-session-primary" datetime="'+esc(new Date(Date.parse(at)).toISOString())+'">'+esc(primary)+"</time>"
+      :'<span class="sy-session-primary">'+esc(primary)+"</span>";
+    var contents=timeHtml+'<span class="sy-session-id">ID '+esc(shortSessionId(nativeId))+"</span>";
+    if(!sid)return '<span class="sy-session-link sy-session-static">'+contents+"</span>";
+    return '<a class="sy-link sy-session-link" href="#usage/'+encodeURIComponent(sid)+'" data-transcript="'+esc(sid)+'"'
+      +' data-tooltip="'+esc(disclosure)+'" aria-describedby="'+descId+'"'
+      +' aria-label="Open '+esc(hostName)+' session '+esc(actionTime)+'">'+contents+"</a>"
+      +'<span class="sr-only" id="'+descId+'">'+esc(disclosure)+"</span>";
   }
 
-  function sysTopSessionRowHtml(x,hostTotals){
+  function sysTopSessionRowHtml(x,hostTotals,index){
     var ht=hostTotals[x.host],share=ht>0?(x.bytes/ht)*100:null;
     // Link to the transcript the same way Usage does, through the public
     // bridge it already exposes. The id has to be normalised first:
@@ -177,26 +196,21 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     // Usage's form. A row we cannot address renders as plain text — a
     // dead link is worse than no link.
     var sid=transcriptIdOf(x);
-    // Strip the extension rather than truncating mid-id: a uuid cut at 34
-    // characters reads as a corrupted value.
-    var sname=String(x.session||"");
-    if(sname.slice(-6)===".jsonl")sname=sname.slice(0,-6);
-    var cell=esc(sname);
     return "<tr>"
-      +'<td class="mono" title="'+esc(x.path||"")+'">'
-      +(sid?'<button class="sy-link" type="button" data-transcript="'+esc(sid)+'" title="open transcript">'+cell+"</button>":cell)
-      +"</td>"
+      +'<td class="mono">'+sysSessionIdentity(x,sid,index)+"</td>"
       +'<td><span class="sy-dot" style="background:'+hostColor(x.host)+'"></span>'+esc(x.host||"\u2014")+"</td>"
-      // An undecoded name says WHICH reason. "deleted project" is a
-      // claim, and on Windows it would be a false one for every row: the
-      // encoding there carries a drive prefix that the decoder refuses by
-      // design, so nothing is decodable and nothing has been deleted.
-      +"<td>"+(x.projectResolved===false
+      // A bounded transcript-head read supplies the working context for Codex
+      // rows whose dated storage path carries no project. Older snapshots fall
+      // back to path-derived Claude evidence rather than inventing a name.
+      +'<td title="'+esc((x.context&&x.context.path)||x.projectPath||"")+'">'
+      +(x.context&&x.context.label
+        ?esc(x.context.label)
+        :x.projectResolved===false
         ?'<span class="sy-unk" title="'+esc(x.projectReason==="encoding"
           ? "this name is not a POSIX-rooted transcript directory, so it cannot be decoded to a project path: "+String(x.project||"")
           : "this project directory no longer exists, so its name cannot be decoded from "+String(x.project||""))
           +'">'+(x.projectReason==="encoding"?"name not decodable":"deleted project")+"</span>"
-        :esc(x.projectLabel||x.project))+"</td>"
+        :esc(x.projectLabel||x.project||((x.host||"Host")+" session store")))+"</td>"
       +'<td class="num">'+esc(fmtBytes(x.bytes))+"</td>"
       +"<td>"+(share==null
         ?unkHtml("this host's retained total was not measured",false)
@@ -211,19 +225,11 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     var sess=(s&&s.topSessions)||null;
     if(!s){top.innerHTML=sysEmpty(NOT_SCANNED);return;}
     if(!sess||!sess.length){top.innerHTML=sysEmpty("no session files were measured.");return;}
-    var attr=sysTopSessionsAttributable(sess),attributable=attr.attributable,unattributable=attr.unattributable;
-    if(!attributable.length){
-      top.innerHTML=sysEmpty("no session file could be attributed to a project.");
-      return;
-    }
     var hostTotals=storageHostTotals(s);
-    var body=attributable.map(function(x){return sysTopSessionRowHtml(x,hostTotals);}).join("");
-    top.innerHTML='<div class="sy-tblwrap"><table class="sy-table"><thead><tr><th>Session</th><th>Host</th>'
-      +'<th>Project</th><th style="text-align:right">Size</th><th>Share of host</th></tr></thead><tbody>'
-      +body+"</tbody></table></div>"
-      +(unattributable?'<div class="sy-liner">'+esc(fmtNum(unattributable))
-        +" larger session file"+(unattributable===1?"":"s")+" could not be attributed to a project "
-        +"and "+(unattributable===1?"is":"are")+" not listed.</div>":"");
+    var body=sess.map(function(x,index){return sysTopSessionRowHtml(x,hostTotals,index);}).join("");
+    top.innerHTML='<div class="sy-tblwrap" role="region" aria-label="Largest retained sessions" tabindex="0"><table class="sy-table"><thead><tr><th>Session</th><th>Host</th>'
+      +'<th>Working context</th><th style="text-align:right">Size</th><th>Share of host</th></tr></thead><tbody>'
+      +body+"</tbody></table></div>";
   }
 
   function renderSysStorage(d){
@@ -254,13 +260,15 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
         for(i=0;i<rows.length;i++){var rv=mval(rows[i].rssBytes);if(rv!=null&&rv>maxRss)maxRss=rv;}
         for(i=0;i<rows.length;i++){
           var p=rows[i],rss=mval(p.rssBytes);
-          // The project cell is the honest-degradation surface: the census
+          // The working-context cell is the honest-degradation surface: the census
           // states WHY a process could not be attributed (including the Windows
           // reasons), and that sentence is what renders. Never blank, never a guess.
-          var proj=p.project&&p.project.status!=="unknown"&&p.project.value
-            ? esc(p.project.value.label||p.project.value.path)
-            : '<span class="sy-unk" title="'+esc((p.project&&p.project.reason)||"not attributable")+'">'
-              +esc(String((p.project&&p.project.reason)||"not attributable").split("\u2014")[0].trim())+"</span>";
+          var source=p.source||p.project;
+          var proj=source&&source.status!=="unknown"&&source.value
+            ? '<span title="'+esc(source.value.path||source.value.label||"")+'">'
+              +esc(source.value.label||source.value.path)+"</span>"
+            : '<span class="sy-unk" title="'+esc((source&&source.reason)||"not attributable")+'">'
+              +esc(String((source&&source.reason)||"not attributable").split("\u2014")[0].trim())+"</span>";
           body+='<tr><td><span class="sy-dot" style="background:'+hostColor(p.host)+'"></span>'+esc(p.host)+"</td>"
             +'<td class="num">'+esc(String(p.pid))+"</td>"
             +"<td>"+proj+"</td>"
@@ -274,7 +282,7 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
         // column whose header hangs off the far side reads as a different column.
         procs.innerHTML='<div class="sy-tblwrap"><table class="sy-table"><thead><tr><th>Host</th>'
           +'<th style="text-align:right">pid</th>'
-          +'<th>Project</th><th style="text-align:right">Uptime</th><th style="text-align:right">CPU</th>'
+          +'<th>Working context</th><th style="text-align:right">Uptime</th><th style="text-align:right">CPU</th>'
           +"<th>RSS</th></tr></thead><tbody>"+body+"</tbody></table></div>";
       }
     }
@@ -434,8 +442,7 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     var signals=(names?'<span class="sy-pressure-state sy-warn">'+fmtNum(names)+' name overlap'+(names===1?"":"s")+'</span>':"")
       +(entries?'<span class="sy-pressure-state">'+fmtNum(entries)+' matching entrypoint'+(entries===1?"":"s")+'</span>':"");
     return '<details class="sy-pressure-project"'+(project.launching?' open data-launching="true"':"")+'>'
-      +'<summary><span class="sy-pressure-project-id"><span><b>'+esc(project.label)+'</b>'
-      +(project.launching?'<span class="sy-current">current project</span>':"")+'</span>'
+      +'<summary><span class="sy-pressure-project-id"><span><b>'+esc(project.label)+'</b></span>'
       +'<span class="sy-pressure-path" title="'+esc(project.project)+'">'+esc(pressurePath(project))+'</span></span>'
       +'<span class="sy-pressure-meta">'+chips+status+signals+'</span></summary>'
       +'<div class="sy-pressure-detail"><div class="sy-path">'+esc(project.project)+'</div>'
@@ -445,7 +452,11 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
       +'<th scope="col">Plugin skills</th><th scope="col">Name overlaps</th><th scope="col">Matching entrypoints</th></tr></thead>'
       +'<tbody>'+rows+'</tbody></table></div>'
       +(command?'<div class="sy-pressure-action"><span><b>Inspect safely</b><small>Read-only plan; changes nothing.</small></span>'
-        +'<code>'+esc(command)+'</code></div>':"")+'</div></details>';
+        +'<div class="sy-pressure-command"><code>'+esc(command)+'</code>'
+        +'<button class="sy-copy-command" type="button" data-copy-command data-copy-project="'+esc(project.label)+'" '
+        +'aria-label="Copy skill plan command for '+esc(project.label)+'" title="Copy command">'
+        +'<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="5" y="5" width="8" height="8" rx="1.5"></rect>'
+        +'<path d="M3 10.5H2.5A1.5 1.5 0 0 1 1 9V2.5A1.5 1.5 0 0 1 2.5 1H9a1.5 1.5 0 0 1 1.5 1.5V3"></path></svg></button></div></div>':"")+'</div></details>';
   }
 
   function renderProjectPressure(c){
@@ -480,6 +491,7 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
       +'<b>Context inclusion is not reported by these hosts.</b>'
       +(omitted?' '+fmtNum(omitted)+' project'+(omitted===1?" has":"s have")+' no local skill contribution and '+(omitted===1?"is":"are")+' omitted.':"")+'</div>'
       +'<div class="sy-pressure-list" tabindex="0" aria-label="Projects with local skill pressure">'+html+'</div>'
+      +'<span class="sr-only" id="sys-pressure-copy-status" role="status" aria-live="polite" aria-atomic="true"></span>'
       +'<div class="sy-pressure-foot"><b>System measures; Maintenance acts.</b> Expand one project for source counts and its read-only plan command.</div>';
   }
 
@@ -863,20 +875,35 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
   }
 
   export function renderSystemFreshness(){
-    var el=document.getElementById("sys-asof"),btn=document.getElementById("sys-rescan");
+    var el=document.getElementById("sys-asof"),btn=document.getElementById("sys-rescan"),
+      freshness=document.getElementById("system-freshness");
     if(!el)return;
     var scan=(SYSTEM&&SYSTEM.scan)||null,snap=(SYSTEM&&SYSTEM.snapshot)||null;
+    try{document.dispatchEvent(new CustomEvent("ak-system-scan",{detail:{running:!!(scan&&scan.running),scan:scan}}));}catch(e){}
     el.removeAttribute("data-stale");
     if(scan&&scan.running){
-      el.innerHTML='<span class="sy-scan">scanning\u2026 '+esc(scan.phase||"")
-        +(scan.total?" ("+fmtNum(scan.scanned)+"/"+fmtNum(scan.total)+")":"")+"</span>";
-      if(btn){btn.disabled=true;btn.title="a deep scan is already running";}
+      if(freshness)freshness.setAttribute("data-running","1");
+      var phase={install:"Reading installed tools",storage:"Measuring retained data",catalog:"Comparing skills, plugins, and MCP servers",
+        projects:"Measuring projects",consumers:"Ranking disk use",persist:"Saving report"}[scan.phase]||"Preparing scan";
+      var started=Number(scan.startedAt),seconds=Number.isFinite(started)?Math.max(0,Math.floor((Date.now()-started)/1000)):null;
+      var elapsed=seconds==null?"":seconds<60?seconds+"s":Math.floor(seconds/60)+"m "+seconds%60+"s";
+      el.classList.add("sy-scan");
+      el.textContent="Full scan running \u00b7 "+phase+(scan.total?" "+fmtNum(scan.scanned)+" of "+fmtNum(scan.total):"");
+      if(elapsed){var clock=document.createElement("span");clock.setAttribute("aria-hidden","true");clock.textContent=" \u00b7 "+elapsed;el.appendChild(clock);}
+      // The status line already says what is running, how far it has progressed,
+      // and for how long. Repeating that sentence inside a disabled button made
+      // the System rail wider than the viewport precisely when the scan was
+      // active. There is no available action until it settles, so remove the
+      // button from both the visual and accessibility layouts for that state.
+      if(btn){btn.disabled=true;btn.hidden=true;btn.title="the full scan is already running";}
       return;
     }
-    if(btn){btn.disabled=false;btn.title="re-measure the deep tier now";}
-    if(!SYSTEM){el.textContent="deep scan \u2014 not loaded";return;}
+    if(freshness)freshness.removeAttribute("data-running");
+    el.classList.remove("sy-scan");
+    if(btn){btn.hidden=false;btn.disabled=false;btn.textContent="\u21bb Full scan";btn.title="re-measure installs, storage, catalog, and projects";}
+    if(!SYSTEM){el.textContent="full scan \u2014 not loaded";return;}
     if(!snap||!snap.measured||snap.asOf==null){
-      el.textContent="deep scan \u2014 never run on this machine";
+      el.textContent="full scan \u2014 never run on this machine";
       el.title=(snap&&snap.reason)||"no snapshot has been written yet";
       el.setAttribute("data-stale","1");
       return;
@@ -887,10 +914,10 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     // formatter keeps one vocabulary for "how old is this figure".
     var age=limAge(Date.now()-Math.max(0,Number(snap.ageMs)||0));
     var drift=snap.catalogDrift,changed=drift&&drift.status==="changed";
-    el.textContent="deep scan \u00b7 "+age+(changed?" \u00b7 catalog changed, rescan":(snap.stale?" \u00b7 stale, rescan":""))
+    el.textContent="full scan \u00b7 "+age+(changed?" \u00b7 catalog changed, scan again":(snap.stale?" \u00b7 stale, scan again":""))
       +(scan&&scan.error?" \u00b7 last scan reported a problem":"");
     el.title=(scan&&scan.error?scan.error+" \u2014 ":"")
-      +"deep-tier figures were measured "+age+"; nothing rescans on its own";
+      +"full-scan figures were measured "+age+"; browser refresh does not start a scan";
     if(snap.stale||changed)el.setAttribute("data-stale","1");
   }
 
@@ -953,7 +980,83 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     // without any client-side deadline to get wrong.
     systemPollTimer=setTimeout(function(){loadSystem();},3000);
   }
+
+  function legacyClipboardWrite(text){
+    return new Promise(function(resolve,reject){
+      var active=document.activeElement,field=document.createElement("textarea"),copied=false;
+      field.value=text;field.setAttribute("readonly","");
+      field.style.position="fixed";field.style.opacity="0";field.style.pointerEvents="none";
+      document.body.appendChild(field);field.select();
+      try{copied=document.execCommand("copy");}catch(e){copied=false;}
+      field.remove();
+      if(active&&typeof active.focus==="function")active.focus();
+      if(copied)resolve();else reject(new Error("clipboard unavailable"));
+    });
+  }
+
+  function clipboardWrite(text){
+    if(navigator.clipboard&&typeof navigator.clipboard.writeText==="function"){
+      try{return Promise.resolve(navigator.clipboard.writeText(text)).catch(function(){return legacyClipboardWrite(text);});}
+      catch(e){return legacyClipboardWrite(text);}
+    }
+    return legacyClipboardWrite(text);
+  }
+
+  function reportPressureCopy(button,ok){
+    var status=document.getElementById("sys-pressure-copy-status"),
+      project=button.getAttribute("data-copy-project")||"this project",
+      original=button.getAttribute("data-copy-label")||button.getAttribute("aria-label")||"Copy command";
+    button.setAttribute("data-copy-label",original);
+    button.setAttribute("data-copy-state",ok?"copied":"failed");
+    button.removeAttribute("data-copy-busy");
+    button.setAttribute("aria-label",original+(ok?", copied":", copy failed"));
+    button.title=ok?"Copied":"Copy failed; select the command and copy it manually";
+    if(status)status.textContent=ok?"Skill plan command for "+project+" copied to clipboard."
+      :"Could not copy the skill plan command for "+project+". Select it and copy manually.";
+    setTimeout(function(){
+      if(!button.isConnected)return;
+      button.removeAttribute("data-copy-state");
+      button.setAttribute("aria-label",original);button.title="Copy command";
+    },1800);
+  }
+
   export function wireSystem(){
+    var sessionTooltip=document.getElementById("sys-session-tooltip");
+    if(!sessionTooltip){
+      sessionTooltip=document.createElement("div");
+      sessionTooltip.id="sys-session-tooltip";sessionTooltip.className="sy-session-tooltip";
+      sessionTooltip.setAttribute("role","tooltip");sessionTooltip.hidden=true;
+      document.body.appendChild(sessionTooltip);
+    }
+    function hideSessionTooltip(){sessionTooltip.hidden=true;sessionTooltip.textContent="";}
+    function showSessionTooltip(link){
+      var text=link&&link.getAttribute("data-tooltip");if(!text)return;
+      sessionTooltip.textContent=text;sessionTooltip.hidden=false;
+      var rect=link.getBoundingClientRect(),tip=sessionTooltip.getBoundingClientRect();
+      var left=Math.max(8,Math.min(rect.left,window.innerWidth-tip.width-8));
+      var top=rect.bottom+7;
+      if(top+tip.height>window.innerHeight-8)top=Math.max(8,rect.top-tip.height-7);
+      sessionTooltip.style.left=left+"px";sessionTooltip.style.top=top+"px";
+    }
+    document.addEventListener("focusin",function(e){
+      var link=e.target&&e.target.closest?e.target.closest(".sy-session-link[data-tooltip]"):null;
+      if(link)showSessionTooltip(link);
+    });
+    document.addEventListener("focusout",function(e){
+      var link=e.target&&e.target.closest?e.target.closest(".sy-session-link[data-tooltip]"):null;
+      if(link&&(!e.relatedTarget||!link.contains(e.relatedTarget)))hideSessionTooltip();
+    });
+    document.addEventListener("pointerover",function(e){
+      var link=e.target&&e.target.closest?e.target.closest(".sy-session-link[data-tooltip]"):null;
+      if(link&&(!e.relatedTarget||!link.contains(e.relatedTarget)))showSessionTooltip(link);
+    });
+    document.addEventListener("pointerout",function(e){
+      var link=e.target&&e.target.closest?e.target.closest(".sy-session-link[data-tooltip]"):null;
+      if(link&&(!e.relatedTarget||!link.contains(e.relatedTarget))&&document.activeElement!==link)hideSessionTooltip();
+    });
+    document.addEventListener("keydown",function(e){
+      if(e.key==="Escape"&&!sessionTooltip.hidden)hideSessionTooltip();
+    });
     var btn=document.getElementById("sys-rescan");
     if(btn)btn.addEventListener("click",function(){
       if(btn.disabled)return;
@@ -975,5 +1078,17 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
       // Flipping the scope re-measures; the panel keeps showing the previous
       // scan's figures, correctly labelled, until the new one lands.
       loadSystem(true,t.getAttribute("aria-pressed")!=="true");
+    });
+    var pressure=document.getElementById("sys-pressure");
+    if(pressure)pressure.addEventListener("click",function(e){
+      var copy=e.target.closest?e.target.closest("[data-copy-command]"):null;
+      if(!copy||!pressure.contains(copy)||copy.getAttribute("data-copy-busy")==="1")return;
+      var row=copy.closest(".sy-pressure-command"),code=row&&row.querySelector("code"),
+        command=code&&code.textContent||"";
+      if(!command)return;
+      var status=document.getElementById("sys-pressure-copy-status");
+      if(status)status.textContent="";
+      copy.setAttribute("data-copy-busy","1");
+      clipboardWrite(command).then(function(){reportPressureCopy(copy,true);},function(){reportPressureCopy(copy,false);});
     });
   }

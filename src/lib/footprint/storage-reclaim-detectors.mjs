@@ -536,8 +536,42 @@ export function runtimeVersionReclaimables(ctx, roots) {
       }
       // One installed version is the toolchain working as intended, not sprawl.
       if (versions.length < 2) continue;
-      const { walked, capped, bytes, files } = measureMembers(versions, ctx, budget);
-      budget -= walked.length;
+      // Consumers has already measured the whole tool directory. A shallow
+      // listing proves whether that aggregate can answer the narrower question:
+      // ordinary version directories are the subject, symlink aliases counted
+      // in neither measurement, and direct metadata files can be subtracted by
+      // their exact lstat size. A hidden/non-version directory cannot be
+      // subtracted without another tree walk, so it forces the original path.
+      let directFileBytes = 0;
+      let directFileCount = 0;
+      let aggregateCompatible = true;
+      for (const entry of inner.entries) {
+        if (entry.isSymbolicLink() || (entry.isDirectory() && !entry.name.startsWith('.'))) continue;
+        if (!entry.isFile()) {
+          if (entry.isDirectory()) aggregateCompatible = false;
+          continue;
+        }
+        try {
+          const stat = ctx.fsImpl.lstatSync(path.join(dir, entry.name));
+          directFileBytes += stat.size;
+          directFileCount += 1;
+        } catch { aggregateCompatible = false; }
+      }
+      const aggregate = aggregateCompatible ? ctx.adopt?.(dir) : null;
+      const adopted = aggregate && aggregate.bytes.value >= directFileBytes
+        && aggregate.files.value >= directFileCount ? {
+          ...aggregate,
+          bytes: measured(aggregate.bytes.value - directFileBytes, { asOf: ctx.asOf }),
+          files: measured(aggregate.files.value - directFileCount, { asOf: ctx.asOf }),
+        } : null;
+      const measuredVersions = adopted ? {
+        walked: versions,
+        capped: false,
+        bytes: adopted.bytes,
+        files: adopted.files,
+      } : measureMembers(versions, ctx, budget);
+      const { walked, capped, bytes, files } = measuredVersions;
+      if (!adopted) budget -= walked.length;
       if (!worthListing(bytes)) continue;
       rows.push(candidate({
         id: `${root.id}:${tool.name}`,
@@ -557,6 +591,7 @@ export function runtimeVersionReclaimables(ctx, roots) {
           + `and any ${root.manager} config on this machine can pin any of them. Review with `
           + `\`${root.manager} ls ${tool.name}\` before removing anything.`,
         cleanupHint: root.cleanupHint,
+        measuredBy: adopted ? 'consumers' : 'storage',
       }));
     }
   }
@@ -638,9 +673,31 @@ export function orphanedTranscriptReclaimables({
  *  A record whose pointer cannot be read is reported as unverifiable rather
  *  than assumed dead. See storage.mjs's header for why the pointer read is in
  *  scope (the one deliberate content-read exception, bounded to 4 KB). */
-export function worktreeReclaimables({ asOf, projects, opts, walk, limits, fsImpl }) {
+function reusableProjectFootprints(rows, asOf) {
+  const index = new Map();
+  const keyOf = (target) => {
+    const resolved = path.resolve(target);
+    return process.platform === 'linux' ? resolved : resolved.toLowerCase();
+  };
+  for (const row of rows ?? []) {
+    const facts = [row?.totalBytes, row?.totalFiles, row?.footprintMtime];
+    if (!row?.path || row.complete === false
+        || facts.some((fact) => !hasValue(fact) || fact.partial === true || fact.asOf !== asOf)) continue;
+    index.set(keyOf(row.path), {
+      bytes: row.totalBytes,
+      files: row.totalFiles,
+      newestMtimeMs: row.footprintMtime.value,
+    });
+  }
+  return (target) => index.get(keyOf(target)) ?? null;
+}
+
+export function worktreeReclaimables({
+  asOf, projects, opts, walk, limits, fsImpl, projectFootprints = null,
+}) {
   const rows = [];
   let walks = 0;
+  const projectObservation = reusableProjectFootprints(projectFootprints, asOf);
   for (const project of projects) {
     const adminRoot = path.join(project, '.git', 'worktrees');
     let entries;
@@ -685,12 +742,23 @@ export function worktreeReclaimables({ asOf, projects, opts, walk, limits, fsImp
         }));
         continue;
       }
-      if (walks >= opts.maxWorktreeWalks) continue;
-      walks += 1;
-      const result = walk(checkout, { ...limits, fsImpl });
-      const { bytes, files } = rootMeasurements(result, { asOf });
-      const idleMs = result.newestMtimeMs === null ? null : asOf - result.newestMtimeMs;
-      if (idleMs === null || idleMs < opts.worktreeIdleDays * 86_400_000) continue;
+      // A recent checkout-root mtime is sufficient evidence that this cannot
+      // satisfy the idle-window predicate: the directory was created or one of
+      // its direct entries changed inside the window. This is deliberately a
+      // one-way preflight. An old root says nothing about nested files, so only
+      // the existing complete recursive observation may create a candidate.
+      const idleWindowMs = opts.worktreeIdleDays * 86_400_000;
+      if (Number.isFinite(head.mtimeMs) && asOf - head.mtimeMs < idleWindowMs) continue;
+      const observed = projectObservation(checkout);
+      if (!observed && walks >= opts.maxWorktreeWalks) continue;
+      if (!observed) walks += 1;
+      const result = observed ? null : walk(checkout, { ...limits, fsImpl });
+      const { bytes, files, newestMtimeMs } = observed ?? {
+        ...rootMeasurements(result, { asOf }),
+        newestMtimeMs: result.newestMtimeMs,
+      };
+      const idleMs = newestMtimeMs === null ? null : asOf - newestMtimeMs;
+      if (idleMs === null || idleMs < idleWindowMs) continue;
       rows.push(candidate({
         id: `idle-worktree:${record}`,
         kind: 'orphaned-worktree',

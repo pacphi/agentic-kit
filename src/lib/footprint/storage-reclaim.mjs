@@ -66,7 +66,8 @@ export const RECLAIM_SAFETY_MEANING = Object.freeze({
 export function collectReclaimables({
   asOf, agedTranscripts, transcriptProjects = new Map(), projects, opts, walk, limits,
   detectWorktrees, detectCaches = true, detectOrphanedTranscripts = true,
-  consumers = null, env = process.env, decodeDir = decodeClaudeProjectDir, fsImpl,
+  consumers = null, install = null, projectFootprints = null,
+  env = process.env, decodeDir = decodeClaudeProjectDir, fsImpl,
 }) {
   const rows = [];
   const days = (ms) => Math.floor((asOf - ms) / 86_400_000);
@@ -94,7 +95,7 @@ export function collectReclaimables({
     }));
   }
 
-  rows.push(...npxReclaimables({ asOf, opts, walk, limits, fsImpl }));
+  rows.push(...npxReclaimables({ asOf, opts, walk, limits, fsImpl, install }));
   if (detectOrphanedTranscripts) {
     rows.push(...orphanedTranscriptReclaimables({
       asOf, opts, transcriptProjects, decodeDir, fsImpl,
@@ -107,7 +108,9 @@ export function collectReclaimables({
     rows.push(...runtimeVersionReclaimables(ctx, runtimeVersionRoots({ env })));
   }
   if (detectWorktrees && Array.isArray(projects)) {
-    rows.push(...worktreeReclaimables({ asOf, projects, opts, walk, limits, fsImpl }));
+    rows.push(...worktreeReclaimables({
+      asOf, projects, opts, walk, limits, fsImpl, projectFootprints,
+    }));
   }
   return rows.sort((a, b) => (b.bytes.value ?? 0) - (a.bytes.value ?? 0));
 }
@@ -192,25 +195,55 @@ export function candidate(row) {
  *  copy strictly older than its installed global baseline (npx.mjs's version
  *  verdict — the bug that kept a machine running a retired ruflo), and an env
  *  untouched for longer than the idle threshold. */
-export function npxReclaimables({ asOf, opts, walk, limits, fsImpl }) {
-  const nodes = npxEnvNodes({ walk, limits, asOf, fsImpl });
+function measurementMatchesScan(value, asOf) {
+  return Boolean(value) && (value.status === 'unknown' || value.asOf === asOf);
+}
+
+function validNpxEnvFact(env, root, asOf) {
+  if (!env || typeof env.id !== 'string' || !env.id || !path.isAbsolute(env.path ?? '')) return false;
+  if (path.resolve(path.dirname(env.path)) !== path.resolve(root)) return false;
+  if (path.basename(env.path) !== env.id || !Array.isArray(env.packages)) return false;
+  if (env.packages.some((pkg) => typeof pkg !== 'string')) return false;
+  if (!measurementMatchesScan(env.bytes, asOf) || !measurementMatchesScan(env.files, asOf)) return false;
+  return env.newestMtimeMs === null || Number.isFinite(env.newestMtimeMs);
+}
+
+function sameScanNpxFacts(install, asOf) {
+  if (!install || install.asOf !== asOf) return null;
+  const nodes = install.npxEnvs;
+  if (!nodes || typeof nodes !== 'object' || !path.isAbsolute(nodes.root ?? '')
+      || !['present', 'absent', 'degraded'].includes(nodes.presence)
+      || !Array.isArray(nodes.envs)) return null;
+  if (nodes.presence !== 'present') return nodes.envs.length === 0 ? nodes : null;
+  if (nodes.envs.some((env) => !validNpxEnvFact(env, nodes.root, asOf))) return null;
+  return nodes;
+}
+
+export function npxReclaimables({ asOf, opts, walk, limits, fsImpl, install = null }) {
+  // Install runs earlier in the same deep scan and already measures every npx
+  // environment. Reuse only an exact, same-asOf, immediate-child inventory;
+  // malformed or older evidence falls back to the original bounded walk.
+  const nodes = sameScanNpxFacts(install, asOf)
+    ?? npxEnvNodes({ walk, limits, asOf, fsImpl });
   if (nodes.presence !== 'present') return [];
   let staleByVersion = new Map();
   try {
-    staleByVersion = new Map(scanNpxStale().map((entry) => [entry.dir, entry.stale]));
+    staleByVersion = new Map(scanNpxStale({ root: nodes.root }).map((entry) => [entry.dir, entry.stale]));
   } catch { /* an unreadable cache simply yields no version verdict */ }
   const idleCutoff = asOf - opts.npxEnvIdleDays * 86_400_000;
   const rows = [];
   for (const env of nodes.envs) {
     const stale = staleByVersion.get(env.path);
     const idle = env.newestMtimeMs !== null && env.newestMtimeMs < idleCutoff;
-    if (!stale && !idle) continue;
+    const versionStale = Array.isArray(stale) && stale.length > 0;
+    if (!versionStale && !idle) continue;
+    const idleDays = idle ? Math.floor((asOf - env.newestMtimeMs) / 86_400_000) : null;
     const why = [];
-    if (stale) {
+    if (versionStale) {
       why.push(`cached ${stale.map((s) => `${s.pkg}@${s.cached}`).join(', ')} `
         + `older than installed ${stale.map((s) => s.installed).join(', ')}`);
     }
-    if (idle) why.push(`untouched for ${Math.floor((asOf - env.newestMtimeMs) / 86_400_000)}d`);
+    if (idle) why.push(`untouched for ${idleDays}d`);
     rows.push(candidate({
       id: `stale-npx-env:${env.id}`,
       kind: 'stale-npx-env',
@@ -219,8 +252,9 @@ export function npxReclaimables({ asOf, opts, walk, limits, fsImpl }) {
       bytes: env.bytes,
       files: env.files,
       safety: 'regenerable',
+      basis: { versionStale, idle, idleDays },
       rationale: `${why.join('; ')}. npx re-fetches on demand, so the cache is reproducible.`,
-      cleanupHint: 'ak sync prunes version-stale envs (npx.pruneNpxStale)',
+      cleanupHint: versionStale ? 'ak sync prunes version-stale envs (npx.pruneNpxStale)' : null,
     }));
   }
   return rows;
@@ -232,19 +266,25 @@ export function npxReclaimables({ asOf, opts, walk, limits, fsImpl }) {
  * Exact paths only: a consumers row for a glob FAMILY carries one total for the
  * whole family and cannot answer for an individual member.
  *
- * @param {{ rows?: any[] }|null} consumers a collectConsumers payload
+ * @param {{ asOf?: number, rows?: any[] }|null} consumers a collectConsumers payload
  * @returns {(target: string) => ({ presence: string, bytes: Measurement,
  *   files: Measurement, newestMtimeMs: number|null })|null}
  */
 export function adoptedConsumerFigures(consumers) {
   const index = new Map();
   for (const row of consumers?.rows ?? []) {
-    if (!row?.path || row.residual || row.presence !== 'present' || !hasValue(row.bytes)) continue;
+    const sameScan = Number.isFinite(consumers?.asOf)
+      && row?.bytes?.asOf === consumers.asOf
+      && row?.files?.asOf === consumers.asOf;
+    if (!row?.path || row.residual || row.presence !== 'present'
+      || row.complete !== true || row.bytes?.partial === true || row.files?.partial === true
+      || !hasValue(row.bytes) || !hasValue(row.files) || !sameScan) continue;
     index.set(pathKey(row.path), {
       presence: 'present',
       bytes: row.bytes,
-      files: row.files ?? unknown('file count not carried by the adopted figure'),
+      files: row.files,
       newestMtimeMs: row.newestMtimeMs ?? null,
+      complete: true,
     });
   }
   return (target) => (target ? index.get(pathKey(target)) ?? null : null);

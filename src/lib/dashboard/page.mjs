@@ -54,7 +54,7 @@ const INTEL_CSS = `
 // Layout: five primary areas — About, Overview, Usage, Observability, and
 // System — share one left-aligned secondary-navigation rail. Overview owns
 // Summary, Hosts & Routing, Providers, Runtime, and Intelligence; System owns
-// Summary, Advisory, Sessions, Storage, Runtime, Catalog, and Projects. Problems never hide:
+// Summary, Advisory, Sessions, Storage, Runtime, Catalog, Projects, and Maintenance. Problems never hide:
 // Overview's Summary aggregates attention and child tabs retain their scoped
 // badges.
 //
@@ -185,12 +185,12 @@ export function renderPage({ name, version }) {
         <button class="seg-btn" role="tab" data-system-view="sessions" aria-selected="false" aria-controls="panel-sys-sessions" type="button">Sessions</button>
         <button class="seg-btn" role="tab" data-system-view="storage" aria-selected="false" aria-controls="panel-sys-storage" type="button">Storage</button>
         <button class="seg-btn" role="tab" data-system-view="runtime" aria-selected="false" aria-controls="panel-sys-runtime" type="button">Runtime</button>
-        <button class="seg-btn" role="tab" data-system-view="catalog" aria-selected="false" aria-controls="panel-sys-catalog" type="button">Catalog</button>
         <button class="seg-btn" role="tab" data-system-view="projects" aria-selected="false" aria-controls="panel-sys-projects" type="button">Projects</button>
+        <button class="seg-btn" role="tab" data-system-view="maintenance" aria-selected="false" aria-controls="panel-sys-maintenance" type="button">Maintenance</button>
       </div>
       <div class="secondary-actions sy-freshness" id="system-freshness">
-        <span class="sy-asof" id="sys-asof">deep scan &mdash; not run yet</span>
-        <button class="chipf" type="button" id="sys-rescan" title="re-measure the deep tier now">&#8635; Rescan</button>
+        <span class="sy-asof" id="sys-asof" role="status" aria-live="polite" aria-atomic="true">full scan &mdash; not run yet</span>
+        <button class="chipf" type="button" id="sys-rescan" title="re-measure installs, storage, catalog, and projects">&#8635; Full scan</button>
       </div>
     </div>
     <div class="secondary-group" id="secondary-observability" hidden>
@@ -681,10 +681,10 @@ export function renderPage({ name, version }) {
 
 ${LIVE_HTML}
 
-  <!-- SYSTEM (ADR-0025). Five sub-views on the shared secondary rail; every
-       card's body is rendered by the client from GET /api/system. The deep tier
-       is NEVER scanned on open — the rail's Rescan button is the only trigger,
-       and the freshness label states how old the figures are. -->
+  <!-- SYSTEM (ADR-0025). Footprint views render from GET /api/system;
+       Maintenance lazily reads its own report. The deep tier is NEVER scanned
+       on open — the rail's Rescan button is the only trigger, and the freshness
+       label states how old the figures are. -->
   <section class="primary-area" id="area-system" role="tabpanel" aria-labelledby="tab-system" hidden>
     <section class="panel" id="panel-sys-summary" role="tabpanel" hidden>
       <header class="view-heading">
@@ -719,6 +719,38 @@ ${LIVE_HTML}
           </div>
           <div class="sy-liner" id="sys-consumers-note"></div>
           <div class="sy-scroll" id="sys-consumers"></div>
+        </div>
+        <!-- Formerly the standalone Catalog destination (ADR-0048 retires the
+             separate Catalog tab: Maintenance Inventory is now the deployed-
+             resource browser). These three cards keep their exact element ids
+             and read-only behavior, just folded into Summary. -->
+        <div class="sy-card sy-5">
+          <div class="sy-head"><h3>Host inventory profile</h3></div>
+          <div id="sys-radar"></div>
+        </div>
+        <div class="sy-card sy-7">
+          <div class="sy-head"><h3>Unique across hosts</h3></div>
+          <div id="sys-catcounts"></div>
+          <div class="sy-filters">
+            <div class="sy-filter-row">
+              <span class="sy-filter-l" id="sys-cat-kind-l">show</span>
+              <div class="sy-ctl" id="sys-cat-kinds" role="group" aria-labelledby="sys-cat-kind-l"></div>
+            </div>
+            <div class="sy-filter-row">
+              <span class="sy-filter-l" id="sys-cat-host-l">carried by</span>
+              <div class="sy-ctl" id="sys-cat-hosts" role="group" aria-labelledby="sys-cat-host-l"></div>
+            </div>
+            <div class="sy-filter-row">
+              <span class="sy-filter-l" id="sys-cat-scope-l">source</span>
+              <div class="sy-ctl" id="sys-cat-scopes" role="group" aria-labelledby="sys-cat-scope-l"></div>
+            </div>
+          </div>
+          <div class="sr-only" id="sys-cat-status" role="status" aria-live="polite" aria-atomic="true"></div>
+          <div id="sys-matrix"></div>
+        </div>
+        <div class="sy-card">
+          <div class="sy-head"><h3>Project skill pressure</h3></div>
+          <div id="sys-pressure"></div>
         </div>
       </div>
     </section>
@@ -757,11 +789,11 @@ ${LIVE_HTML}
       </div>
     </section>
 
-    <!-- Advisory is its own area, not a card under a measurement. Everything
-         else in System reports what IS; this is the only place that suggests
-         what you might DO, and it still has no delete control and may never
-         gain one (ADR-0025 §6). Giving it a tab is what keeps that distinction
-         legible instead of burying it under a byte chart. -->
+    <!-- Advisory is its own area, not a card under a measurement. It remains
+         the storage-specific evidence source and has no delete control
+         (ADR-0025 §6); Maintenance is the separate cross-resource reporting
+         context. Keeping the source view intact prevents a recommendation from
+         masquerading as the observation that produced it. -->
     <section class="panel" id="panel-sys-advisory" role="tabpanel" hidden>
       <header class="view-heading">
         <span class="view-eyebrow">SYSTEM</span>
@@ -783,8 +815,8 @@ ${LIVE_HTML}
       <header class="view-heading">
         <span class="view-eyebrow">SYSTEM</span>
         <h2>Sessions</h2>
-        <p>The individual session files behind the retained bytes &mdash; which projects hold the
-          largest of them, and how much of a host's retained data each one accounts for.</p>
+        <p>The individual session files behind the retained bytes &mdash; the repository, workspace,
+          or host store each belongs to, and how much retained data each one accounts for.</p>
       </header>
       <div class="sy-grid">
         <div class="sy-card">
@@ -815,49 +847,6 @@ ${LIVE_HTML}
       </div>
     </section>
 
-    <section class="panel" id="panel-sys-catalog" role="tabpanel" hidden>
-      <header class="view-heading">
-        <span class="view-eyebrow">SYSTEM</span>
-        <h2>Catalog</h2>
-        <p>What is actually deployed, where it came from, and how project-local capabilities overlap
-          user and plugin sources. Inventory is not proof that a host loaded an item into context.</p>
-      </header>
-      <div class="sy-grid">
-        <div class="sy-card sy-5">
-          <div class="sy-head"><h3>Host inventory profile</h3></div>
-          <div id="sys-radar"></div>
-        </div>
-        <div class="sy-card sy-7">
-          <div class="sy-head"><h3>Unique across hosts</h3></div>
-          <div id="sys-catcounts"></div>
-          <!-- Two independent multi-selects, every option on at first paint, so
-               the default view is still the whole inventory. Populated from the
-               payload's own kinds/hosts rather than hardcoded, so a host or a
-               kind added to the collector appears here without an edit. -->
-          <div class="sy-filters">
-            <div class="sy-filter-row">
-              <span class="sy-filter-l" id="sys-cat-kind-l">show</span>
-              <div class="sy-ctl" id="sys-cat-kinds" role="group" aria-labelledby="sys-cat-kind-l"></div>
-            </div>
-            <div class="sy-filter-row">
-              <span class="sy-filter-l" id="sys-cat-host-l">carried by</span>
-              <div class="sy-ctl" id="sys-cat-hosts" role="group" aria-labelledby="sys-cat-host-l"></div>
-            </div>
-            <div class="sy-filter-row">
-              <span class="sy-filter-l" id="sys-cat-scope-l">source</span>
-              <div class="sy-ctl" id="sys-cat-scopes" role="group" aria-labelledby="sys-cat-scope-l"></div>
-            </div>
-          </div>
-          <div class="sr-only" id="sys-cat-status" role="status" aria-live="polite" aria-atomic="true"></div>
-          <div id="sys-matrix"></div>
-        </div>
-        <div class="sy-card">
-          <div class="sy-head"><h3>Project skill pressure</h3><span class="n mono">read-only evidence</span></div>
-          <div id="sys-pressure"></div>
-        </div>
-      </div>
-    </section>
-
     <section class="panel" id="panel-sys-projects" role="tabpanel" hidden>
       <header class="view-heading">
         <span class="view-eyebrow">SYSTEM</span>
@@ -870,6 +859,157 @@ ${LIVE_HTML}
         <div class="sy-card">
           <div class="sy-head"><h3>Project footprints</h3></div>
           <div id="sys-projects"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-sys-maintenance" role="tabpanel" hidden>
+      <header class="view-heading">
+        <span class="view-eyebrow">SYSTEM</span>
+        <h2>Maintenance</h2>
+        <p>Explore installed resources, refine your inventory, and review changes.</p>
+      </header>
+      <div class="sy-grid">
+        <div class="sy-card mt-card mnt-card" id="sys-maintenance" aria-busy="false">
+          <a class="mnt-skip-link" href="#mnt-results-start" id="mnt-skip-link">Skip to results</a>
+          <div class="mnt-tabs" role="tablist" aria-label="Maintenance destinations" id="mnt-tabs">
+            <button class="seg-btn" role="tab" type="button" id="mnt-tab-inventory" data-mnt-dest="inventory" aria-selected="true" aria-controls="mnt-panel-inventory">Inventory</button>
+            <button class="seg-btn" role="tab" type="button" id="mnt-tab-guidance" data-mnt-dest="guidance" aria-selected="false" tabindex="-1" aria-controls="mnt-panel-guidance">Guidance<span class="segbadge" id="mnt-guidance-badge" hidden>0</span></button>
+            <button class="seg-btn" role="tab" type="button" id="mnt-tab-discovery" data-mnt-dest="discovery" aria-selected="false" tabindex="-1" aria-controls="mnt-panel-discovery">Discovery</button>
+            <button class="seg-btn" role="tab" type="button" id="mnt-tab-activity" data-mnt-dest="activity" aria-selected="false" tabindex="-1" aria-controls="mnt-panel-activity">Activity<span class="segbadge" id="mnt-activity-badge" hidden>0</span></button>
+          </div>
+          <p class="mnt-status sr-only" id="mnt-status" role="status" aria-live="polite" aria-atomic="true"></p>
+          <div class="mnt-providers-bar">
+            <button type="button" class="chipf" id="mnt-check-providers" aria-describedby="mnt-refresh-help" title="Executable provider probes are never automatic; this is the explicit control that runs them">&#8635; Refresh evidence</button>
+            <span class="mnt-providers-help sr-only" id="mnt-refresh-help">Runs provider probes on the saved measurement and rebuilds the inventory. Seconds.</span>
+            <button type="button" class="chipf" id="mnt-remeasure" aria-describedby="mnt-remeasure-help" title="Walks the filesystem to re-measure installs, storage, projects, and discovery sources, then refreshes evidence">&#8635; Re-measure machine</button>
+            <span class="mnt-providers-help sr-only" id="mnt-remeasure-help">Walks the filesystem, then refreshes evidence. Minutes.</span>
+            <span class="mnt-providers-status" id="mnt-check-providers-status" role="status" aria-live="polite" aria-atomic="true"></span>
+            <span class="mnt-operation-elapsed" id="mnt-operation-elapsed" aria-hidden="true" hidden></span>
+          </div>
+
+          <section class="mnt-panel mnt-inventory" id="mnt-panel-inventory" role="tabpanel" aria-labelledby="mnt-tab-inventory">
+            <div class="mnt-toolbar">
+              <div class="mnt-scope" role="group" aria-label="Scope" id="mnt-scope"></div>
+              <label class="sr-only" for="mnt-search">Search inventory by name, location, or consumer</label>
+              <input type="search" id="mnt-search" placeholder="Search by name, location, or consumer" autocomplete="off" spellcheck="false" maxlength="200">
+              <button type="button" class="chipf mnt-filters-toggle" id="mnt-filters-toggle" aria-haspopup="dialog" aria-controls="mnt-facets-sheet">Filters</button>
+            </div>
+            <div class="mnt-body">
+              <aside class="mnt-side" id="mnt-side">
+                <div class="mnt-views" role="group" aria-label="Curated views" id="mnt-views"></div>
+                <div class="mnt-facets" id="mnt-facets"></div>
+              </aside>
+              <div class="mnt-main">
+                <div class="mnt-results-heading"><div><h3 id="mnt-context-heading">Across scopes</h3><span id="mnt-result-count"></span></div>
+                  <label class="mnt-sort">Sort <select id="mnt-sort" aria-label="Sort inventory"><option value="guidance-first">Guidance first</option><option value="name">Name</option><option value="kind">Type</option><option value="recently-changed">Recently changed</option></select></label></div>
+                <nav class="mnt-breadcrumbs" id="mnt-breadcrumbs" aria-label="Inventory location"></nav>
+                <div class="mnt-chips" id="mnt-chips"></div>
+                <p class="mnt-focus-help" id="mnt-focus-help"></p>
+                <div class="mnt-partial" id="mnt-partial" role="status" hidden></div>
+                <div class="mnt-legend" id="mnt-legend"></div>
+                <a id="mnt-results-start" tabindex="-1"></a>
+                <div class="mnt-results" id="mnt-results" role="region" aria-label="Inventory results"></div>
+                <div class="mnt-paging" id="mnt-paging"></div>
+                <aside class="mnt-inspector" id="mnt-inspector" aria-label="Resource inspector" hidden></aside>
+              </div>
+            </div>
+            <dialog class="mnt-facets-sheet" id="mnt-facets-sheet" aria-labelledby="mnt-facets-sheet-title">
+              <div class="mt-confirm-head">
+                <h2 id="mnt-facets-sheet-title">Filters</h2>
+                <button type="button" id="mnt-facets-sheet-close" aria-label="Close filters">Close</button>
+              </div>
+              <div class="mnt-sheet-body" id="mnt-facets-sheet-body"></div>
+            </dialog>
+          </section>
+
+          <section class="mnt-panel mnt-guidance" id="mnt-panel-guidance" role="tabpanel" aria-labelledby="mnt-tab-guidance" hidden>
+            <div class="mnt-toolbar">
+              <div class="mnt-lanes" role="tablist" aria-label="Guidance lanes" id="mnt-lanes"></div>
+            </div>
+            <p class="mnt-status" id="mnt-guidance-status" role="status" aria-live="polite" aria-atomic="true"></p>
+            <div id="mnt-guidance-coverage"></div>
+            <div class="mnt-guidance-body">
+              <div class="mnt-guidance-list" id="mnt-guidance-list"></div>
+            </div>
+          </section>
+
+          <dialog class="mnt-procedure" id="mnt-procedure" aria-label="Procedure"></dialog>
+
+          <section class="mnt-panel mnt-discovery" id="mnt-panel-discovery" role="tabpanel" aria-labelledby="mnt-tab-discovery" hidden>
+            <div class="mnt-discovery-body">
+              <div class="mnt-discovery-main">
+                <section aria-label="Automatic sources" id="mnt-automatic-sources"></section>
+                <section aria-label="Exact projects" id="mnt-exact-projects"></section>
+                <section aria-label="Collection roots" id="mnt-collection-roots"></section>
+                <section aria-label="Exclusions" id="mnt-exclusions"></section>
+                <section aria-label="Add a source" id="mnt-add-source">
+                  <h3>Add a source</h3>
+                  <label class="sr-only" for="mnt-add-root">Exact folder path</label>
+                  <input type="text" id="mnt-add-root" placeholder="Type an exact folder path" autocomplete="off" spellcheck="false">
+                  <label class="sr-only" for="mnt-add-kind">Source kind</label>
+                  <select id="mnt-add-kind">
+                    <option value="collection-root">Collection root</option>
+                    <option value="exact-project">Exact project</option>
+                  </select>
+                  <button type="button" class="mt-action primary" id="mnt-add-preview">Preview</button>
+                  <div id="mnt-add-preview-body" hidden></div>
+                </section>
+              </div>
+              <aside aria-label="Scan progress" id="mnt-scan-progress"></aside>
+            </div>
+            <dialog class="mt-confirm" id="mnt-stop-dialog" aria-labelledby="mnt-stop-title" aria-busy="false">
+              <div class="mt-confirm-head">
+                <h2 id="mnt-stop-title">Stop this source?</h2>
+                <button type="button" id="mnt-stop-close" aria-label="Close stop preview">Close</button>
+              </div>
+              <div class="mt-confirm-body" id="mnt-stop-body"></div>
+              <div class="mt-confirm-actions">
+                <button type="button" class="mt-action" id="mnt-stop-cancel">Cancel</button>
+                <button type="button" class="mt-action primary" id="mnt-stop-confirm">Stop source</button>
+              </div>
+            </dialog>
+          </section>
+
+          <section class="mnt-panel mnt-activity" id="mnt-panel-activity" role="tabpanel" aria-labelledby="mnt-tab-activity" hidden>
+            <div class="mnt-activity-groups" id="mnt-activity-groups"></div>
+            <dialog class="mt-confirm" id="mnt-receipt-dialog" aria-labelledby="mnt-receipt-title" aria-busy="false">
+              <div class="mt-confirm-head">
+                <h2 id="mnt-receipt-title">Receipt</h2>
+                <button type="button" id="mnt-receipt-close" aria-label="Close receipt">Close</button>
+              </div>
+              <div class="mt-confirm-body" id="mnt-receipt-body"></div>
+              <div class="mt-confirm-actions" id="mnt-receipt-actions"></div>
+            </dialog>
+          </section>
+
+          <!-- Triggerable from both the Guidance Recovery lane and Activity's
+               Recovery-to-finish group, so this lives outside every
+               destination's own .mnt-panel: a <dialog> shown via
+               showModal() is still not painted while an ANCESTOR carries
+               [hidden] (display:none), even though the dialog itself is
+               promoted to the top layer. -->
+          <dialog class="mt-confirm mnt-audit-dialog" id="mnt-audit-dialog" aria-labelledby="mnt-audit-title" aria-describedby="mnt-audit-status" aria-busy="false">
+            <div class="mt-confirm-head">
+              <h2 id="mnt-audit-title">Audit interruption</h2>
+              <button type="button" id="mnt-audit-close" aria-label="Close audit">Close</button>
+            </div>
+            <div class="mt-confirm-body" id="mnt-audit-body"></div>
+            <p class="mt-confirm-status" id="mnt-audit-status" role="status" aria-live="polite" aria-atomic="true"></p>
+            <div class="mt-confirm-actions" id="mnt-audit-actions"></div>
+          </dialog>
+          <dialog class="mt-confirm" id="sys-maint-confirm" aria-labelledby="sys-maint-confirm-title" aria-describedby="sys-maint-confirm-status" aria-busy="false">
+            <div class="mt-confirm-head">
+              <h2 id="sys-maint-confirm-title">Maintenance preview</h2>
+              <button type="button" id="sys-maint-confirm-close" aria-label="Close maintenance preview">Close</button>
+            </div>
+            <div class="mt-confirm-body" id="sys-maint-confirm-body"></div>
+            <p class="mt-confirm-status" id="sys-maint-confirm-status" role="status" aria-live="polite" aria-atomic="true"></p>
+            <div class="mt-confirm-actions">
+              <button type="button" class="mt-action" id="sys-maint-confirm-cancel">Cancel</button>
+              <button type="button" class="mt-action primary" id="sys-maint-confirm-apply" disabled>Apply change</button>
+            </div>
+          </dialog>
         </div>
       </div>
     </section>

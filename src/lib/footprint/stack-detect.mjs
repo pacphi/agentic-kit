@@ -36,11 +36,13 @@
 // The walk is the shared bounded walker from walk.mjs, so this module inherits the
 // never-follow-symlinks rule, the entry/depth caps, and the degrade-this-node-only
 // failure mode (invariant 6) rather than reimplementing them.
+import { languageSignature } from './language-signatures.mjs';
+import { LANGUAGE_ARTIFACTS } from './language-coverage.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { walkTree, measured, unknown } from './walk.mjs';
 import {
-  STACK_REGISTRY_VERSION, dependencyEntry, isNonSourceExtension, languageForExtension,
+  STACK_REGISTRY_VERSION, stackEntryById, dependencyEntry, isNonSourceExtension, languageForExtension,
   languageForFilename, manifestKindFor, registryStats, signatureEntries,
 } from './stack-registry.mjs';
 
@@ -160,11 +162,10 @@ export const isCloudPlaceholder = (bytes, blocks, platform = process.platform) =
  *  is binary (a NUL byte in the first chunk) or unreadable — never 0, which would
  *  claim an empty file. Each chunk is counted and immediately overwritten; no file
  *  content is retained past this function or emitted anywhere. */
-function countFileLines(file, size, fsImpl) {
+function countFileLines(file, size, fsImpl, buffer) {
   let fd;
   try { fd = fsImpl.openSync(file, 'r'); } catch { return null; }
   try {
-    const buffer = Buffer.allocUnsafe(READ_CHUNK);
     let lines = 0;
     let read = 0;
     let lastByte = 0;
@@ -439,26 +440,24 @@ function matchSignatures(stack, { seenFiles, seenPaths, seenDirs }) {
   }
 }
 
-/**
- * Detect the stack of one project directory.
- *
- * One walk answers all three questions: files are line-counted into their
- * language bucket or tallied into the unrecognized tail, shallow manifests and
- * signature paths are collected on the way past, and the manifests are read after
- * the walk so the bounded traversal is never interleaved with file reads.
+/** Build the stateful projection that can consume either Stack's own bounded
+ * walk or a compatible, complete traversal superset acquired by Projects. The
+ * observer owns Stack's exclusions/depth rules; sharing traversal never widens
+ * the semantic scope.
  *
  * @param {string} root the project's directory
- * @param {{ walk?: Function, limits?: object, maxDepth?: number,
+ * @param {{ limits?: Record<string, any>, maxDepth?: number,
  *           manifestDepth?: number, signatureDepth?: number, manifests?: boolean,
  *           platform?: string,
  *           asOf?: number|null, fsImpl?: typeof fs }} [options]
- * @returns {object} `{ registryVersion, languages[{id,name,ecosystem,colorSlot,lines,
- *   files}], totalLines: Measurement, stack[{id,kind,name,ecosystem,via}],
- *   unrecognized: { extensions[{ext,files,bytes}], dependencies[{name,manifest}] },
- *   nonSource, manifests, exclusions, complete, degraded }`
+ * @returns {{ maxDepth: number,
+ *   onDirectory: (dir: string, name: string, depth: number) => boolean,
+ *   acceptFile: (name: string, file?: string, depth?: number) => boolean,
+ *   onFile: (entry: { file: string, name: string, bytes: number, blocks: number,
+ *                    mtimeMs: number, depth: number }) => void,
+ *   finalize: (result: Record<string, any>) => Record<string, any> }}
  */
-export function detectStack(root, {
-  walk = walkTree,
+export function createStackObserver(root, {
   limits = {},
   maxDepth = STACK_MAX_DEPTH,
   manifestDepth = MANIFEST_MAX_DEPTH,
@@ -468,6 +467,8 @@ export function detectStack(root, {
   asOf = null,
   fsImpl = fs,
 } = {}) {
+  const effectiveMaxDepth = limits.maxDepth ?? maxDepth;
+  const languagePresence = new Map();
   const lines = new Map();     // language id → { entry, lines, files }
   const tail = new Map();      // extension (or bare filename) → { files, bytes }
   const manifestFiles = [];    // { file, kind, bytes }
@@ -479,123 +480,180 @@ export function detectStack(root, {
   let tailTruncated = false;
   let nonSourceFiles = 0;
   let nonSourceBytes = 0;
+  // Source reads are sequential inside one observer. Reusing one fixed buffer
+  // avoids allocating and collecting 64 KiB for every source file while
+  // retaining the same bounded, non-retained content contract.
+  const lineBuffer = Buffer.allocUnsafe(READ_CHUNK);
 
   const note = (set, value) => { if (set.size < MAX_SIGNATURE_PATHS) set.add(value); };
+  const relativeParts = (target) => path.relative(root, target).split(path.sep).filter(Boolean);
+  const hasExcludedAncestor = (target) => relativeParts(target).slice(0, -1)
+    .some((part) => EXCLUDED_DIRS.has(part));
+  let scopeTruncated = false;
 
-  const result = walk(root, {
-    maxDepth, ...limits, fsImpl,
-    skipDir: (dir, name, depth) => {
-      // Recorded BEFORE the skip decision: `.terraform` and `.git` are excluded
-      // from the scan and are still evidence of what this project uses.
-      if (depth <= signatureDepth) note(seenDirs, rel(root, dir));
-      return EXCLUDED_DIRS.has(name);
-    },
-    // Rejected files still consume the entry budget but do no work — and, being
-    // deliberate exclusions, they never reach the unrecognized tail either.
-    acceptFile: (name) => !EXCLUDED_FILES.has(name),
-    onFile: ({ file, name, bytes, blocks, depth }) => {
-      const lower = name.toLowerCase();
-      const placeholder = isCloudPlaceholder(bytes, blocks, platform);
-      if (depth <= signatureDepth) { note(seenFiles, lower); note(seenPaths, rel(root, file)); }
-      // A placeholder manifest is still evidence the project HAS that manifest —
-      // its name was noted above. Only its contents are out of reach, so it is
-      // never queued for the read pass.
-      if (readManifests && !placeholder
-        && depth <= manifestDepth && manifestFiles.length < MAX_MANIFESTS) {
-        const kind = manifestKindFor(name);
-        if (kind) manifestFiles.push({ file, kind, bytes });
-      }
+  const onDirectory = (dir, name, depth) => {
+    // A broad footprint walk may continue through a directory this stack
+    // contract excludes. Ignore every descendant as though the walker had
+    // pruned it at this boundary.
+    if (hasExcludedAncestor(dir)) return true;
+    // walkTree checks directory depth before calling skipDir. Reproduce that
+    // signal when observing a broader walk with a larger depth budget.
+    if (depth > effectiveMaxDepth) { scopeTruncated = true; return true; }
+    // Recorded BEFORE the skip decision: `.terraform` and `.git` are excluded
+    // from the scan and are still evidence of what this project uses.
+    if (depth <= signatureDepth) note(seenDirs, rel(root, dir));
+    return EXCLUDED_DIRS.has(name);
+  };
+  const acceptFile = (name) => !EXCLUDED_FILES.has(name);
+  const onFile = ({ file, name, bytes, blocks, depth }) => {
+    // Files immediately inside a max-depth directory are counted by walkTree;
+    // only files whose parent is beyond the stack contract are out of scope.
+    if (depth - 1 > effectiveMaxDepth || hasExcludedAncestor(file)
+      || !acceptFile(name)) return;
+    const lower = name.toLowerCase();
+    const placeholder = isCloudPlaceholder(bytes, blocks, platform);
+    if (depth <= signatureDepth) { note(seenFiles, lower); note(seenPaths, rel(root, file)); }
+    // A placeholder manifest is still evidence the project HAS that manifest —
+    // its name was noted above. Only its contents are out of reach, so it is
+    // never queued for the read pass.
+    if (readManifests && !placeholder
+      && depth <= manifestDepth && manifestFiles.length < MAX_MANIFESTS) {
+      const kind = manifestKindFor(name);
+      if (kind) manifestFiles.push({ file, kind, bytes });
+    }
 
-      const entry = languageForFilename(name) ?? languageForExtension(path.extname(name));
-      if (!entry) {
-        // A STATED non-source extension is a decision, not a gap: it is named in
-        // `exclusions` and counted here, and it never joins the tail — otherwise
-        // .png and .sqlite would bury the extensions the registry should learn.
-        if (isNonSourceExtension(path.extname(lower))) {
-          nonSourceFiles += 1;
-          nonSourceBytes += bytes;
-          return;
-        }
-        // A manifest is recognized — it simply holds declarations rather than
-        // lines. `go.mod` reported as an unrecognized `.mod` extension would be
-        // the tail contradicting the parser that just read it.
-        if (manifestKindFor(name)) return;
-        const key = tailKey(lower);
-        const row = tail.get(key);
-        if (row) { row.files += 1; row.bytes += bytes; } else if (tail.size < MAX_TAIL_KEYS) {
-          tail.set(key, { files: 1, bytes });
-        } else tailTruncated = true;
+    const signature = !placeholder && bytes <= MAX_FILE_BYTES ? languageSignature(file, fsImpl) : undefined;
+    const artifactLanguage = LANGUAGE_ARTIFACTS[path.extname(lower)] ?? (signature?.artifact ? signature.id : null);
+    if (artifactLanguage) {
+      const entry = stackEntryById(artifactLanguage);
+      languagePresence.set(entry.id, { id: entry.id, name: entry.name, evidence: 'artifact', icon: entry.id });
+      return;
+    }
+    const entry = signature === null ? null : signature?.id ? stackEntryById(signature.id)
+      : languageForFilename(name) ?? languageForExtension(path.extname(name));
+    if (!entry) {
+      // A STATED non-source extension is a decision, not a gap: it is named in
+      // `exclusions` and counted here, and it never joins the tail — otherwise
+      // .png and .sqlite would bury the extensions the registry should learn.
+      if (isNonSourceExtension(path.extname(lower))) {
+        nonSourceFiles += 1;
+        nonSourceBytes += bytes;
         return;
       }
-      if (bytes > MAX_FILE_BYTES) { skipped++; return; }
-      if (placeholder) { skipped++; return; }
-      const counted = countFileLines(file, bytes, fsImpl);
-      if (counted === null) { skipped++; return; }
-      const bucket = lines.get(entry.id);
-      if (bucket) { bucket.lines += counted; bucket.files += 1; } else {
-        lines.set(entry.id, { entry, lines: counted, files: 1 });
-      }
-      files++;
-    },
-  });
-
-  if (result.status === 'unknown') return unmeasured(result.reason ?? 'unreadable', asOf);
-
-  // Manifests are read after the walk: the traversal stays a pure metadata pass,
-  // and a slow read cannot hold the walker's entry budget open.
-  const { manifestRows, stack, unrecognizedDeps } = readQueuedManifests(manifestFiles, fsImpl);
-  matchSignatures(stack, { seenFiles, seenPaths, seenDirs });
-
-  const languages = [...lines.values()]
-    .map(({ entry, lines: count, files: fileCount }) => ({
-      id: entry.id,
-      name: entry.name,
-      ecosystem: entry.ecosystem,
-      colorSlot: entry.colorSlot,
-      lines: count,
-      files: fileCount,
-    }))
-    .sort((a, b) => b.lines - a.lines || a.id.localeCompare(b.id));
-
-  const total = languages.reduce((sum, row) => sum + row.lines, 0);
-  const extensions = [...tail.entries()]
-    .map(([ext, row]) => ({ ext, files: row.files, bytes: row.bytes }))
-    .sort((a, b) => b.files - a.files || a.ext.localeCompare(b.ext));
-  const dependencies = [...unrecognizedDeps.values()]
-    .sort((a, b) => a.manifest.localeCompare(b.manifest) || a.name.localeCompare(b.name));
-
-  return {
-    registryVersion: STACK_REGISTRY_VERSION,
-    asOf,
-    approximate: true,
-    exclusions: [...STACK_EXCLUSIONS],
-    languages,
-    // The Measurement carries what the array cannot: a walk that hit a cap or an
-    // unreadable subtree makes this a floor, which every surface renders as "≥ N".
-    totalLines: measured(total, { asOf, partial: result.complete === false }),
-    // PRESENCE ONLY — deliberately no `lines` field; see this file's header.
-    stack: [...stack.values()]
-      .map(({ entry, via }) => ({
-        id: entry.id, kind: entry.kind, name: entry.name, ecosystem: entry.ecosystem, via,
-      }))
-      .sort((a, b) => (KIND_ORDER[a.kind] - KIND_ORDER[b.kind]) || a.name.localeCompare(b.name)),
-    unrecognized: {
-      // Totals sit next to the capped lists so a truncated tail is a stated
-      // number, never a quietly shorter one.
-      extensions: extensions.slice(0, TAIL_EXTENSIONS),
-      extensionsTotal: tailTruncated ? null : extensions.length,
-      dependencies: dependencies.slice(0, TAIL_DEPENDENCIES),
-      dependenciesTotal: dependencies.length,
-    },
-    // Not a gap and not lines: the bytes this project holds in things the
-    // registry has already ruled out as source.
-    nonSource: { files: nonSourceFiles, bytes: nonSourceBytes },
-    manifests: manifestRows,
-    files,
-    skipped,
-    complete: result.complete !== false && manifestRows.every((row) => row.status === 'read'),
-    degraded: result.degraded ?? [],
+      // A manifest is recognized — it simply holds declarations rather than
+      // lines. `go.mod` reported as an unrecognized `.mod` extension would be
+      // the tail contradicting the parser that just read it.
+      if (manifestKindFor(name)) return;
+      const key = tailKey(lower);
+      const row = tail.get(key);
+      if (row) { row.files += 1; row.bytes += bytes; } else if (tail.size < MAX_TAIL_KEYS) {
+        tail.set(key, { files: 1, bytes });
+      } else tailTruncated = true;
+      return;
+    }
+    if (bytes > MAX_FILE_BYTES) { skipped++; return; }
+    if (placeholder) { skipped++; return; }
+    const counted = countFileLines(file, bytes, fsImpl, lineBuffer);
+    if (counted === null) { skipped++; return; }
+    const bucket = lines.get(entry.id);
+    if (bucket) { bucket.lines += counted; bucket.files += 1; } else {
+      lines.set(entry.id, { entry, lines: counted, files: 1 });
+    }
+    files++;
   };
+
+  const finalize = (result) => {
+    if (result.status === 'unknown') return unmeasured(result.reason ?? 'unreadable', asOf);
+
+    // Manifests are read after the walk: the traversal stays a pure metadata pass,
+    // and a slow read cannot hold the walker's entry budget open.
+    const { manifestRows, stack, unrecognizedDeps } = readQueuedManifests(manifestFiles, fsImpl);
+    matchSignatures(stack, { seenFiles, seenPaths, seenDirs });
+
+    const languages = [...lines.values()]
+      .map(({ entry, lines: count, files: fileCount }) => ({
+        id: entry.id,
+        name: entry.name,
+        ecosystem: entry.ecosystem,
+        colorSlot: entry.colorSlot,
+        lines: count,
+        files: fileCount,
+      }))
+      .sort((a, b) => b.lines - a.lines || a.id.localeCompare(b.id));
+
+    const total = languages.reduce((sum, row) => sum + row.lines, 0);
+    const extensions = [...tail.entries()]
+      .map(([ext, row]) => ({ ext, files: row.files, bytes: row.bytes }))
+      .sort((a, b) => b.files - a.files || a.ext.localeCompare(b.ext));
+    const dependencies = [...unrecognizedDeps.values()]
+      .sort((a, b) => a.manifest.localeCompare(b.manifest) || a.name.localeCompare(b.name));
+    const complete = result.complete !== false && !scopeTruncated;
+
+    return {
+      registryVersion: STACK_REGISTRY_VERSION,
+      asOf,
+      approximate: true,
+      exclusions: [...STACK_EXCLUSIONS],
+      languages,
+      languagePresence: [...languagePresence.values()],
+      // The Measurement carries what the array cannot: a walk that hit a cap or an
+      // unreadable subtree makes this a floor, which every surface renders as "≥ N".
+      totalLines: measured(total, { asOf, partial: !complete }),
+      // PRESENCE ONLY — deliberately no `lines` field; see this file's header.
+      stack: [...stack.values()]
+        .map(({ entry, via }) => ({
+          id: entry.id, kind: entry.kind, name: entry.name, ecosystem: entry.ecosystem, via,
+        }))
+        .sort((a, b) => (KIND_ORDER[a.kind] - KIND_ORDER[b.kind]) || a.name.localeCompare(b.name)),
+      unrecognized: {
+        // Totals sit next to the capped lists so a truncated tail is a stated
+        // number, never a quietly shorter one.
+        extensions: extensions.slice(0, TAIL_EXTENSIONS),
+        extensionsTotal: tailTruncated ? null : extensions.length,
+        dependencies: dependencies.slice(0, TAIL_DEPENDENCIES),
+        dependenciesTotal: dependencies.length,
+      },
+      // Not a gap and not lines: the bytes this project holds in things the
+      // registry has already ruled out as source.
+      nonSource: { files: nonSourceFiles, bytes: nonSourceBytes },
+      manifests: manifestRows,
+      files,
+      skipped,
+      complete: complete && manifestRows.every((row) => row.status === 'read'),
+      degraded: result.degraded ?? [],
+    };
+  };
+
+  return { maxDepth: effectiveMaxDepth, onDirectory, acceptFile, onFile, finalize };
+}
+
+/** Detect the stack of one project directory. One walk answers all three
+ * questions: source lines, shallow manifest/signature evidence, and the
+ * unrecognized tail. */
+export function detectStack(root, {
+  walk = walkTree,
+  limits = {},
+  maxDepth = STACK_MAX_DEPTH,
+  manifestDepth = MANIFEST_MAX_DEPTH,
+  signatureDepth = SIGNATURE_MAX_DEPTH,
+  manifests: readManifests = true,
+  platform = process.platform,
+  asOf = null,
+  fsImpl = fs,
+} = {}) {
+  const observer = createStackObserver(root, {
+    limits, maxDepth, manifestDepth, signatureDepth,
+    manifests: readManifests, platform, asOf, fsImpl,
+  });
+  const result = walk(root, {
+    maxDepth: observer.maxDepth, ...limits, fsImpl,
+    skipDir: observer.onDirectory,
+    // Rejected files still consume the entry budget but do no work — and, being
+    // deliberate exclusions, they never reach the unrecognized tail either.
+    acceptFile: observer.acceptFile,
+    onFile: observer.onFile,
+  });
+  return observer.finalize(result);
 }
 
 /** The liner note a panel prints under a changed number: what was counted, by

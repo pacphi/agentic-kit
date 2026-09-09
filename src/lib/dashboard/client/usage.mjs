@@ -1,6 +1,7 @@
 // @ts-nocheck — browser bundle source (never node-imported; client.mjs
 // reads it as text). See src/lib/dashboard/client/**'s eslint.config.mjs
 // override comment for why this directory isn't run through the node lib.
+import { formatLocalDateTime } from './datetime.mjs';
 import { VIEWS, authHeaders, esc, setTab, syncHash } from './bootstrap.mjs';
 import { ago } from './intelligence.mjs';
 import { renderModelFacets, renderModelInventory, renderModelLifecycle } from './model-lifecycle.mjs';
@@ -1050,9 +1051,8 @@ import { renderUsage } from './usage-orchestrators.mjs';
   function limStale(ms,freshMs){return !ms||!isFinite(ms)||(Date.now()-ms)>freshMs;}
   function resetTxt(sec){
     if(!sec||!isFinite(sec))return "";
-    var d=new Date(sec*1000);
-    if(isNaN(d))return "";
-    return "resets "+d.toLocaleString(undefined,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
+    var at=formatLocalDateTime(sec*1000);
+    return at?"resets "+at:"";
   }
   // Where this window's own CLOCK is, as a share of its duration — the mark a
   // straight-line burn would be sitting on right now, which is what turns a
@@ -1387,8 +1387,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
     var cat=sx.category||"Unclassified";
     var uncl=(cat==="Unclassified");
     var weak=(typeof sx.confidence==="number"&&sx.confidence<0.6)?"0":"1";
-    var when=sx.start?new Date(sx.start):null;
-    var whenTxt=when&&!isNaN(when)?when.toLocaleString(undefined,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}):"—";
+    var whenTxt=formatLocalDateTime(sx.start)||"—";
     // Ids are derived from raw filesystem names (usage-index.mjs listClaude /
     // listClaudeSubagents), NOT validated at index time — parseSessionId is a
     // request-path validator that never runs here — and a namespaced subagent

@@ -10,10 +10,11 @@
 // can never be mistaken for a measured zero (invariant #2, ADR-0023). No
 // running daemons is `measured(0)`; a daemon census that failed is `unknown`.
 import os from 'node:os';
+import path from 'node:path';
 import { listDaemons, staleDaemons } from '../daemons.mjs';
 import { surveyHostProcesses } from '../live/process-sessions.mjs';
-import { resolveProjectIdentity } from '../live/project-label.mjs';
 import { measured, sumMeasurements, unknown } from './walk.mjs';
+import { classifyWorkingContext } from './working-context.mjs';
 
 // Why a working directory was unavailable, in the words the Runtime table
 // renders. Each is a distinguishable cause — a blocked probe, a denied handle,
@@ -38,10 +39,32 @@ const CWD_REASONS = new Map([
 const cwdDetail = (reason) => CWD_REASONS.get(reason)
   ?? `not attributable — working directory unavailable (${reason})`;
 
-function projectOf(entry) {
+const hostTitle = (host) => ({ claude: 'Claude', codex: 'Codex', opencode: 'OpenCode' })[host]
+  ?? String(host || 'Host');
+
+function sourceOf(entry, { platform, classifyContext }) {
+  if (entry.controllerKind === 'host-service') {
+    return measured({ kind: 'host-service', label: `${hostTitle(entry.host)} app service` });
+  }
+  if (entry.controllerKind === 'desktop-app') {
+    return measured({ kind: 'desktop-app', label: `${hostTitle(entry.host)} desktop app` });
+  }
   if (!entry.cwd) return unknown(cwdDetail(entry.cwdReason ?? 'cwd-unavailable'));
-  const identity = resolveProjectIdentity(entry.cwd);
-  return measured({ path: entry.cwd, label: identity.label, key: identity.key });
+  const pathImpl = platform === 'win32' ? path.win32 : path;
+  const context = classifyContext(entry.cwd, { pathImpl });
+  return context ? measured(context) : unknown('not attributable — working directory is not absolute');
+}
+
+function projectOf(entry, source) {
+  if (source?.status === 'measured' && source.value?.kind === 'repository') {
+    return measured({
+      path: source.value.path,
+      label: source.value.label,
+      key: source.value.projectKey,
+    });
+  }
+  if (!entry.cwd) return unknown(cwdDetail(entry.cwdReason ?? 'cwd-unavailable'));
+  return unknown('this process is not running from a proven Git repository');
 }
 
 function machineFacts(osImpl) {
@@ -120,6 +143,7 @@ async function daemonCensus({ listDaemonsImpl, cwd, ttlSecs }) {
  *   cwd?: string,
  *   ttlSecs?: number,
  *   now?: number,
+ *   classifyContext?: typeof classifyWorkingContext,
  * }} [options]
  */
 export async function collectRuntimeCensus({
@@ -130,6 +154,7 @@ export async function collectRuntimeCensus({
   cwd = process.cwd(),
   ttlSecs = Number(process.env.RUFLO_DAEMON_TTL_SECS ?? 43200),
   now = Date.now(),
+  classifyContext = classifyWorkingContext,
 } = {}) {
   const observedAt = new Date(now).toISOString();
   const machine = machineFacts(osImpl);
@@ -160,24 +185,28 @@ export async function collectRuntimeCensus({
     };
   }
 
-  const rows = survey.processes.map((entry) => ({
-    host: entry.host,
-    pid: entry.pid,
-    startedAt: entry.startedAt,
-    // Kept alongside `project` so a renderer or a debug log can key on the
-    // machine token while the user reads the sentence.
-    cwdReason: entry.cwd ? null : (entry.cwdReason ?? 'cwd-unavailable'),
-    uptimeMs: Number.isFinite(entry.uptimeMs)
-      ? measured(entry.uptimeMs)
-      : unknown('the process reported no usable start time'),
-    cpuPercent: Number.isFinite(entry.cpuPercent)
-      ? measured(entry.cpuPercent)
-      : unknown('the platform reported no CPU time for this process'),
-    rssBytes: Number.isFinite(entry.rssBytes)
-      ? measured(entry.rssBytes)
-      : unknown('the platform reported no resident set size for this process'),
-    project: projectOf(entry),
-  }));
+  const rows = survey.processes.map((entry) => {
+    const source = sourceOf(entry, { platform, classifyContext });
+    return {
+      host: entry.host,
+      pid: entry.pid,
+      startedAt: entry.startedAt,
+      // Kept alongside `project` so a renderer or a debug log can key on the
+      // machine token while the user reads the sentence.
+      cwdReason: entry.cwd ? null : (entry.cwdReason ?? 'cwd-unavailable'),
+      source,
+      uptimeMs: Number.isFinite(entry.uptimeMs)
+        ? measured(entry.uptimeMs)
+        : unknown('the process reported no usable start time'),
+      cpuPercent: Number.isFinite(entry.cpuPercent)
+        ? measured(entry.cpuPercent)
+        : unknown('the platform reported no CPU time for this process'),
+      rssBytes: Number.isFinite(entry.rssBytes)
+        ? measured(entry.rssBytes)
+        : unknown('the platform reported no resident set size for this process'),
+      project: projectOf(entry, source),
+    };
+  });
 
   return {
     observedAt: survey.observedAt ?? observedAt,

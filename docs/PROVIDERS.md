@@ -434,9 +434,8 @@ ak host pick \
   --aqe-fallback 'claude-code:claude-opus-5; openrouter:z-ai/glm-5.2'
 ```
 
-Curated picks (verified July 2026): `z-ai/glm-5.2` (flagship — 1M context, strong
-tool-use, long-horizon agent work) and `z-ai/glm-5` (value — 205K context, cheapest of
-the 5.x line). Both are **metered** — GLM is never an auto-seed target (seeding only ever
+Curated picks (verified September 8, 2026): `z-ai/glm-5.2` (flagship — 1M context, strong
+tool-use, long-horizon agent work) and `z-ai/glm-5` (value — 205K context; compare current provider per-token prices). Both are **metered** — GLM is never an auto-seed target (seeding only ever
 routes to subscription/local providers).
 
 ## Level 3.5 — seeded Claude + Codex defaults, explicit OpenCode routes
@@ -539,6 +538,8 @@ weigh, cleared with `ak x host refresh` if you want the newer default.
 | claude | `claude-haiku-4-5-20251001` | cheap/fast — high-volume mechanical work |
 | claude | `claude-opus-4-8` | prior Opus generation — same per-token price as Opus 5, roughly half the agentic turns on routine work |
 | claude | `claude-fable-5` | prior Fable generation — same per-token price as Fable 5.1, superseded as the flagship pick |
+| claude | `claude-mythos-5-1` | same specifications and pricing as Fable 5.1; invitation-only access through Project Glasswing |
+| codex | `gpt-6-astra` | most capable OpenAI model — complex end-to-end work; $10/$50 per million input/output tokens |
 | codex | `gpt-5.6-sol` | flagship 5.6 — strongest on complex coding, computer use and security work; first-class max reasoning effort |
 | codex | `gpt-5.6-terra` | balanced 5.6 — everyday implementation and testing at a materially lower per-token price than sol; the gpt-5.4 replacement |
 | codex | `gpt-5.6-luna` | fastest/cheapest 5.6 — mechanical implementation, docs and packaging; the gpt-5.4-mini replacement |

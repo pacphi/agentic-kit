@@ -25,7 +25,7 @@
 
 /** Bump on every entry change. Date-ordinal so a snapshot's provenance reads
  *  without a lookup table; consumers compare for equality, never for ordering. */
-export const STACK_REGISTRY_VERSION = '2026.08.1';
+export const STACK_REGISTRY_VERSION = '2026.09.1';
 
 /** The closed set of ecosystem tags. Closed on purpose: an open string field
  *  becomes a synonym pile ('js' / 'javascript' / 'node') that no grouping can
@@ -85,6 +85,7 @@ const lower = (list) => Object.freeze(list.map((s) => s.toLowerCase()));
 const lang = (id, name, ecosystem, colorSlot, extensions, filenames = []) => Object.freeze({
   id,
   kind: 'language',
+  measurement: extensions.length || filenames.length ? 'source' : 'presence-only',
   name,
   ecosystem,
   colorSlot,
@@ -130,6 +131,25 @@ const sig = (id, name, ecosystem, { files = [], dirs = [], filePrefixes = [] }) 
 // 'objective-c', …) so a snapshot taken before this registry still joins.
 
 const LANGUAGE_ENTRIES = [
+  lang('pascal', 'Delphi/Object Pascal', 'native', 'native', ['.pas', '.pascal', '.dpr', '.lpr']),
+  lang('ada', 'Ada', 'native', 'native', ['.adb', '.ada', '.ads']),
+  lang('cobol', 'COBOL', 'native', 'native', ['.cob', '.cbl', '.cobol', '.cpy']),
+  lang('sas', 'SAS', 'data', 'data', ['.sas']),
+  lang('gml', 'GML', 'gamedev', 'native', ['.gml']),
+  lang('d', 'D', 'native', 'native', ['.d', '.di']),
+  lang('abap', 'ABAP', 'other', 'other', ['.abap']),
+  lang('vbscript', 'VBScript', 'shell', 'shell', ['.vbs']),
+  lang('xslt', 'XSLT', 'data', 'data', ['.xsl', '.xslt']),
+  lang('prolog', 'Prolog', 'functional', 'functional', ['.prolog', '.yap']),
+  lang('plsql', 'PL/SQL', 'data', 'data', ['.plsql', '.pks', '.pkb', '.plb']),
+  lang('tsql', 'Transact-SQL', 'data', 'data', ['.tsql']),
+  lang('xpp', 'X++', 'other', 'other', []),
+  lang('foxpro', 'FoxPro', 'other', 'other', []),
+  lang('scratch', 'Scratch', 'other', 'other', []),
+  lang('labview', 'LabVIEW', 'other', 'other', []),
+  lang('ladder', 'Ladder Logic', 'other', 'other', []),
+  lang('classic-vb', 'Classic Visual Basic', 'other', 'other', []),
+  lang('matlab', 'MATLAB', 'data', 'data', ['.matlab']),
   lang('javascript', 'JavaScript', 'node', 'js', ['.js', '.mjs', '.cjs', '.jsx']),
   lang('typescript', 'TypeScript', 'node', 'ts', ['.ts', '.tsx', '.mts', '.cts']),
   lang('coffeescript', 'CoffeeScript', 'node', 'js', ['.coffee']),
@@ -148,8 +168,7 @@ const LANGUAGE_ENTRIES = [
   lang('visual-basic', 'Visual Basic', 'dotnet', 'dotnet', ['.vb']),
   lang('razor', 'Razor', 'dotnet', 'dotnet', ['.cshtml', '.razor']),
   lang('swift', 'Swift', 'apple', 'apple', ['.swift']),
-  // `.m` is Objective-C here, as it was in projects.mjs: MATLAB is the rarer
-  // reading of that extension on a machine running agent CLIs.
+  // The observer disambiguates .m using bounded syntax evidence.
   lang('objective-c', 'Objective-C', 'apple', 'apple', ['.m', '.mm']),
   lang('c', 'C', 'native', 'native', ['.c', '.h']),
   lang('cpp', 'C++', 'native', 'native', ['.cc', '.cpp', '.cxx', '.c++', '.hpp', '.hh', '.hxx', '.ipp']),
@@ -158,12 +177,13 @@ const LANGUAGE_ENTRIES = [
   lang('crystal', 'Crystal', 'native', 'native', ['.cr']),
   lang('assembly', 'Assembly', 'native', 'native', ['.asm', '.s']),
   lang('fortran', 'Fortran', 'native', 'native', ['.f', '.f90', '.f95', '.for']),
-  lang('verilog', 'Verilog / VHDL', 'native', 'native', ['.sv', '.svh', '.vhd', '.vhdl']),
+  lang('verilog', 'Verilog', 'native', 'native', ['.sv', '.svh']),
+  lang('vhdl', 'VHDL', 'native', 'native', ['.vhd', '.vhdl']),
   lang('elixir', 'Elixir', 'beam', 'beam', ['.ex', '.exs']),
   lang('erlang', 'Erlang', 'beam', 'beam', ['.erl', '.hrl']),
   lang('gleam', 'Gleam', 'beam', 'beam', ['.gleam']),
   lang('haskell', 'Haskell', 'functional', 'functional', ['.hs', '.lhs']),
-  lang('ocaml', 'OCaml', 'functional', 'functional', ['.ml', '.mli']),
+  lang('ocaml', 'Caml / OCaml', 'functional', 'functional', ['.ml', '.mli']),
   lang('elm', 'Elm', 'functional', 'functional', ['.elm']),
   lang('purescript', 'PureScript', 'functional', 'functional', ['.purs']),
   lang('rescript', 'ReScript', 'functional', 'functional', ['.res', '.resi']),
@@ -451,7 +471,7 @@ export const NON_SOURCE_EXTENSIONS = Object.freeze([
   // compiled and linked artefacts
   '.exe', '.dll', '.so', '.dylib', '.a', '.o', '.obj', '.lib', '.bin', '.wasm',
   '.class', '.jar', '.war', '.ear', '.pyc', '.pyo', '.pyd', '.node', '.rlib',
-  '.rmeta', '.pdb', '.d', '.map',
+  '.rmeta', '.pdb', '.map',
   // stores, indexes and model weights
   '.db', '.db-wal', '.db-shm', '.sqlite', '.sqlite3', '.sqlite-wal', '.sqlite-shm',
   '.mdb', '.mmdb', '.rvf', '.hnsw', '.idx', '.index', '.pack', '.parquet', '.arrow',

@@ -77,6 +77,15 @@ export function hostFromCommand(command, executable = null) {
   return host;
 }
 
+/** Reduce process argv to a non-sensitive controller role, then discard argv. */
+function controllerKind(row) {
+  const argv = tokens(row.command);
+  if (argv.includes('app-server')) return 'host-service';
+  const executable = String(row.executable ?? argv[0] ?? '').replaceAll('\\', '/');
+  if (/\/[^/]+\.app\/Contents\//i.test(executable)) return 'desktop-app';
+  return 'project-session';
+}
+
 /** Parse `ps -axo pid=,ppid=,lstart=,comm=,args=` without command guessing. */
 export function parseProcessList(output) {
   const rows = [];
@@ -584,6 +593,7 @@ export async function surveyHostProcesses({
     const attributable = typeof cwd === 'string' && isAbsoluteFor(cwd);
     return {
       host: row.host,
+      controllerKind: controllerKind(row),
       pid: row.pid,
       ppid: row.ppid,
       startedAt: row.startedAt,

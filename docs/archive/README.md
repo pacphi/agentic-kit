@@ -1,7 +1,7 @@
 # docs/archive — historical record
 
 Documents in this directory are **frozen**: they describe investigations, incidents, and
-design work that shaped this kit but whose subject matter has since been resolved —
+design work that shaped this kit. Some subjects have been resolved —
 mostly by upstream ruflo/agentic-qe releases (baseline: ruflo 3.28.0 / agentic-qe 3.12.2,
 2026-07-14). They are kept verbatim as provenance for *why* the kit's surviving pieces
 exist. Do not update them; the living docs are [../TROUBLESHOOTING.md](../TROUBLESHOOTING.md),
@@ -12,6 +12,12 @@ The complete Prompts coaching and layer-3 capability is additionally preserved a
 git snapshot on `archive/prompts-capability-main` at
 `91e892f523f307ecb29271cb0e370b538115a2c0`. Current main retains deterministic Prompts
 telemetry only; [ADR-0039](../adr/0039-prompts-intelligence.md) records that boundary.
+
+The maintenance design package was frozen on 2026-09-08 after experimental branch
+iterations. Archiving records its history; it does not close its open release gates.
+Current contracts live in [Maintenance](../MAINTENANCE.md),
+[acceptance criteria](../MAINTENANCE-ACCEPTANCE.md), [language coverage](../LANGUAGE-COVERAGE.md),
+and the still-proposed [project metadata adapters](../PROJECT-METADATA-ADAPTERS.md).
 
 ## Index
 
@@ -61,3 +67,21 @@ incident reports intentionally keep their original, now-dangling paths.
 | [2026-08-28-superpowers-plan-scorecard-matrix-a.md](2026-08-28-superpowers-plan-scorecard-matrix-a.md) | `docs/superpowers/plans/2026-08-28-scorecard-matrix-a.md` | Plan for the cross-host session-metrics build (permission posture, response latency, delegation/subagent accounting, and the other ADR-0038 decisions) — the module map and build order five agents worked against in parallel. | Implemented and shipped on this branch (PR #187). The durable record is [ADR-0038](../adr/0038-consistent-cross-host-session-metrics.md); the as-built shapes live in `src/lib/usage-*.mjs` with their tests, and `USAGE-SCORECARD-METRICS.md` §15–§19 carry the per-metric formulas. |
 | [2026-08-29-superpowers-spec-prompts-view-design.md](2026-08-29-superpowers-spec-prompts-view-design.md) | `docs/superpowers/specs/2026-08-29-prompts-view-design.md` | Interface contract for the prompts-intelligence build: the fingerprint evidence contract, the Prompts view's panels, the three adaptive-architecture layers (deterministic detectors, personal baselines, layer-3 enrichment), the outcome ledger, and the six coaching rules. | Implemented in PR #187. Its full as-built capability is preserved on `archive/prompts-capability-main`; current main retains the deterministic fingerprint, baseline, clustering, and detector layers described by [ADR-0039](../adr/0039-prompts-intelligence.md) and `USAGE-SCORECARD-METRICS.md` §2a, §2b, §20–§22. Frozen with its §4 detector table already carrying the shipped `≥50-typed-per-host` gate — the one amendment made before archiving. |
 | [2026-08-31-superpowers-spec-coaching-panel-redesign.md](2026-08-31-superpowers-spec-coaching-panel-redesign.md) | `docs/superpowers/specs/2026-08-31-coaching-panel-redesign.md` | Design spec for reworking the shipped Prompts view into one **Coaching** panel: a kind-filterable, sortable pattern table where each pattern expands to its occurrences, its own masked prompt text (shown on demand via `GET /api/prompts/samples`), a recommendation, a copyable draft, and a dashboard-persisted Dismiss (`POST /api/prompts/dismiss`) — plus the derived per-cluster `kind` and the cluster→coaching-card association. | Implemented in PR #187 and preserved in full on `archive/prompts-capability-main`. The panel, sample and mutation endpoints, ledger, and layer-3 surfaces are intentionally absent from current main; [ADR-0039](../adr/0039-prompts-intelligence.md) is the living boundary record. |
+
+### Added 2026-09-08 — Maintenance design snapshots
+
+| File | Original location | What it was | Why archived / live successor |
+|---|---|---|---|
+| [2026-09-04-design-maintenance-overhaul-overview.md](2026-09-04-design-maintenance-overhaul-overview.md) | `docs/design/maintenance-overhaul/README.md` | Maintenance overhaul README.md | Frozen design snapshot; current behavior and remaining gates live in ADR-0048 and the maintained Maintenance guide. |
+| [2026-09-04-design-maintenance-overhaul-acceptance-criteria.md](2026-09-04-design-maintenance-overhaul-acceptance-criteria.md) | `docs/design/maintenance-overhaul/acceptance-criteria.md` | Maintenance overhaul acceptance-criteria.md | Live successor: [MAINTENANCE-ACCEPTANCE.md](../MAINTENANCE-ACCEPTANCE.md); original snapshot retained as provenance. |
+| [2026-09-04-design-maintenance-overhaul-discovery-and-scan-policy.md](2026-09-04-design-maintenance-overhaul-discovery-and-scan-policy.md) | `docs/design/maintenance-overhaul/discovery-and-scan-policy.md` | Maintenance overhaul discovery-and-scan-policy.md | Frozen design snapshot; current behavior and remaining gates live in ADR-0048 and the maintained Maintenance guide. |
+| [2026-09-04-design-maintenance-overhaul-domain-model.md](2026-09-04-design-maintenance-overhaul-domain-model.md) | `docs/design/maintenance-overhaul/domain-model.md` | Maintenance overhaul domain-model.md | Frozen design snapshot; current behavior and remaining gates live in ADR-0048 and the maintained Maintenance guide. |
+| [2026-09-04-design-maintenance-overhaul-experience-specification.md](2026-09-04-design-maintenance-overhaul-experience-specification.md) | `docs/design/maintenance-overhaul/experience-specification.md` | Maintenance overhaul experience-specification.md | Frozen design snapshot; current behavior and remaining gates live in ADR-0048 and the maintained Maintenance guide. |
+| [2026-09-08-validation-maintenance-focus.md](2026-09-08-validation-maintenance-focus.md) | `docs/design/maintenance-overhaul/focus-validation.md` | Maintenance overhaul focus-validation.md | Dated verification evidence; does not prove the current source state or close open release gates. |
+| [2026-09-08-design-maintenance-language-coverage.md](2026-09-08-design-maintenance-language-coverage.md) | `docs/design/maintenance-overhaul/language-coverage.md` | Maintenance overhaul language-coverage.md | Live successor: [LANGUAGE-COVERAGE.md](../LANGUAGE-COVERAGE.md); original snapshot retained as provenance. |
+| [2026-09-04-design-maintenance-overhaul-migration-plan.md](2026-09-04-design-maintenance-overhaul-migration-plan.md) | `docs/design/maintenance-overhaul/migration-plan.md` | Maintenance overhaul migration-plan.md | Frozen design snapshot; current behavior and remaining gates live in ADR-0048 and the maintained Maintenance guide. |
+| [2026-09-08-design-maintenance-focus-mockups.md](2026-09-08-design-maintenance-focus-mockups.md) | `docs/design/maintenance-overhaul/mockups/README.md` | Maintenance overhaul mockups/README.md | Illustrative alternatives and approved Focus prototype; not production behavior or adapter-support evidence. |
+| [2026-09-08-artifact-maintenance-progressive-inventory.html](2026-09-08-artifact-maintenance-progressive-inventory.html) | `docs/design/maintenance-overhaul/mockups/progressive-inventory.html` | Maintenance overhaul mockups/progressive-inventory.html | Illustrative alternatives and approved Focus prototype; not production behavior or adapter-support evidence. |
+| [2026-09-07-validation-maintenance-option-a.md](2026-09-07-validation-maintenance-option-a.md) | `docs/design/maintenance-overhaul/option-a-validation.md` | Maintenance overhaul option-a-validation.md | Dated verification evidence; does not prove the current source state or close open release gates. |
+| [2026-09-08-design-maintenance-project-metadata-adapters.md](2026-09-08-design-maintenance-project-metadata-adapters.md) | `docs/design/maintenance-overhaul/project-metadata-adapters.md` | Maintenance overhaul project-metadata-adapters.md | Live successor: [PROJECT-METADATA-ADAPTERS.md](../PROJECT-METADATA-ADAPTERS.md); original snapshot retained as provenance. |
+| [2026-09-04-design-maintenance-overhaul-provider-and-action-policy.md](2026-09-04-design-maintenance-overhaul-provider-and-action-policy.md) | `docs/design/maintenance-overhaul/provider-and-action-policy.md` | Maintenance overhaul provider-and-action-policy.md | Frozen design snapshot; current behavior and remaining gates live in ADR-0048 and the maintained Maintenance guide. |

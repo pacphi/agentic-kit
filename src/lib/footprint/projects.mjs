@@ -35,14 +35,19 @@
 // than a shrug.
 //
 // Discovery supplies PATHS ONLY (invariant 9). Every figure below is measured here.
+import { measureProjectKind } from './project-kind.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseRepoSlug } from '../admin-collect.mjs';
+import { observeWalkForest } from './observation-forest.mjs';
 import { discoverProjectSources } from './project-sources.mjs';
-import { detectStack, isCloudPlaceholder, STACK_EXCLUSIONS } from './stack-detect.mjs';
+import {
+  createStackObserver, detectStack, isCloudPlaceholder, STACK_EXCLUSIONS,
+} from './stack-detect.mjs';
 import { STACK_REGISTRY_VERSION } from './stack-registry.mjs';
 import {
-  walkTree, rootMeasurements, measured, statNode, UNKNOWN, unknown, sumMeasurements,
+  carriesWalkTreeContract, walkTree, rootMeasurements, measured, statNode,
+  MEASURED, UNKNOWN, unknown, sumMeasurements,
 } from './walk.mjs';
 
 /** Directories that are never code and never the user's work. Excluded from the
@@ -281,6 +286,7 @@ function stackFromDetection(detected) {
     ...base,
     status: 'measured',
     reason: null,
+    languagePresence: detected.languagePresence ?? [],
     items: (detected.stack ?? []).map((row) => ({ ...row })),
     manifests: (detected.manifests ?? []).map((row) => ({ ...row })),
     nonSource: { ...(detected.nonSource ?? { files: null, bytes: null }) },
@@ -329,9 +335,12 @@ export function countLines(root, {
  *  already draws the absent-vs-degraded line: a directory that does not exist
  *  holds a real, measured zero; one that could not be read stays unknown. */
 function walkNode(walk, root, options) {
-  const result = walk(root, options);
+  return walkedNode(walk(root, options), options.asOf ?? null);
+}
+
+function walkedNode(result, asOf = null) {
   return {
-    ...rootMeasurements(result, { asOf: options.asOf ?? null }),
+    ...rootMeasurements(result, { asOf }),
     newestMtimeMs: Number.isFinite(result.newestMtimeMs) ? result.newestMtimeMs : null,
     complete: result.complete !== false,
   };
@@ -347,18 +356,53 @@ function walkNode(walk, root, options) {
  * @returns {string[]}
  */
 export function nodeModulesRoots(root, { walk = walkTree, maxDepth = NODE_MODULES_MAX_DEPTH, fsImpl = fs } = {}) {
-  const roots = [];
+  const observation = nodeModulesWalk(maxDepth, fsImpl);
   // `skipDir` is the walker's directory hook: recording a hit and pruning it in
   // one step is what keeps the roots non-overlapping, so their bytes sum cleanly.
-  walk(root, {
-    maxDepth, fsImpl,
-    acceptFile: () => false, // directories are the subject here; no file work
-    skipDir: (dir, name) => {
-      if (name === 'node_modules') { if (roots.length < 256) roots.push(dir); return true; }
-      return OVERHEAD_DIRS.has(name) || name.startsWith('.');
+  walk(root, observation.options);
+  return observation.roots;
+}
+
+function nodeModulesWalk(maxDepth = NODE_MODULES_MAX_DEPTH, fsImpl = fs) {
+  const roots = [];
+  return {
+    roots,
+    options: {
+      maxDepth,
+      fsImpl,
+      acceptFile: () => false,
+      skipDir: (dir, name) => {
+        if (name === 'node_modules') {
+          if (roots.length < 256) roots.push(dir);
+          return true;
+        }
+        return OVERHEAD_DIRS.has(name) || name.startsWith('.');
+      },
     },
-  });
-  return roots;
+  };
+}
+
+/** Observe the same top-most dependency roots while the working-tree byte walk
+ * is already visiting every directory. Hidden ancestors remain excluded from
+ * dependency attribution without excluding their ordinary files from the
+ * working-tree byte figure. The observation is reusable only when that walk is
+ * complete; a cap or unreadable subtree triggers the independent bounded search
+ * above so an optimization can never erase evidence. */
+function nodeModulesObserver(root) {
+  const roots = [];
+  return {
+    roots,
+    skipDir(dir, name, depth) {
+      if (name !== 'node_modules') return OVERHEAD_DIRS.has(name);
+      const relativeParent = path.relative(root, path.dirname(dir));
+      const belowHiddenDirectory = relativeParent.split(path.sep)
+        .some((part) => part && part.startsWith('.'));
+      if (depth <= NODE_MODULES_MAX_DEPTH && !belowHiddenDirectory && roots.length < 256) {
+        roots.push(dir);
+      }
+      return true;
+    },
+  };
 }
 
 // ── assembly ──────────────────────────────────────────────────────────────────
@@ -368,6 +412,7 @@ export function nodeModulesRoots(root, { walk = walkTree, maxDepth = NODE_MODULE
 function missingProject(project, reason, presence = 'absent') {
   return {
     path: project.path,
+    projectKind: 'unknown',
     label: project.label,
     source: project.source ?? null,
     hosts: Array.isArray(project.hosts) ? [...project.hosts] : null,
@@ -381,6 +426,8 @@ function missingProject(project, reason, presence = 'absent') {
     nodeModulesBytes: unknown(reason),
     nodeModulesRoots: [],
     totalBytes: unknown(reason),
+    totalFiles: unknown(reason),
+    footprintMtime: unknown(reason),
     lastActivity: unknown(reason),
     treeExclusions: [...OVERHEAD_DIRS],
     complete: false,
@@ -399,7 +446,7 @@ function notify(onProgress, payload) {
  * the only thing discovery contributes (invariant 9) — `hosts` rides along as
  * attribution (which hosts saw this project), never as a measurement.
  *
- * @param {{ path: string, label: string, source?: string, hosts?: string[] }} project
+ * @param {{ path: string, label: string, source?: string, hosts?: string[], remote?: object }} project
  * @param {{ walk?: Function, limits?: object, detect?: Function, loc?: boolean,
  *           asOf?: number|null, fsImpl?: typeof fs }} [options]
  *   `loc: false` skips the stack pass entirely — the expensive part of a project
@@ -412,7 +459,52 @@ export function measureProject(project, {
 } = {}) {
   const root = project.path;
   const common = { ...limits, fsImpl, asOf };
-  const tree = walkNode(walk, root, { ...common, skipDir: (dir, name) => OVERHEAD_DIRS.has(name) });
+  const observedModules = nodeModulesObserver(root);
+  const traversalCallbacks = ['skipDir', 'acceptFile', 'onFile'];
+  const hasTraversalCallback = traversalCallbacks
+    .some((key) => Object.prototype.hasOwnProperty.call(limits, key));
+  const callerSkipDir = typeof limits['skipDir'] === 'function' ? limits['skipDir'] : null;
+  const callerOnFile = typeof limits['onFile'] === 'function' ? limits['onFile'] : null;
+  // The ordinary footprint walk is a traversal superset of stack detection:
+  // it excludes only .git/node_modules, while the stack scope excludes those
+  // plus generated/vendor trees. The observer applies the narrower contract to
+  // callbacks from the broad walk. Only the built-in detector participates;
+  // injected detectors retain their independent invocation contract.
+  const stackObserver = loc && detect === detectStack
+    && carriesWalkTreeContract(walk) && !hasTraversalCallback
+    ? createStackObserver(root, { limits, asOf, fsImpl }) : null;
+  const moduleObservation = stackObserver ? nodeModulesWalk(NODE_MODULES_MAX_DEPTH, fsImpl) : null;
+  let stackResult = null;
+  let moduleResult = null;
+  let treeResult;
+  if (stackObserver && moduleObservation) {
+    [treeResult, stackResult, moduleResult] = observeWalkForest(root, [
+      {
+        ...common,
+        skipDir: observedModules.skipDir,
+        onFile: callerOnFile,
+      },
+      {
+        maxDepth: stackObserver.maxDepth,
+        ...limits,
+        fsImpl,
+        skipDir: stackObserver.onDirectory,
+        acceptFile: stackObserver.acceptFile,
+        onFile: stackObserver.onFile,
+      },
+      moduleObservation.options,
+    ], { walk, fsImpl });
+  } else {
+    treeResult = walk(root, {
+      ...common,
+      skipDir(dir, name, depth) {
+        return observedModules.skipDir(dir, name, depth)
+          || Boolean(callerSkipDir?.(dir, name, depth));
+      },
+      onFile: callerOnFile,
+    });
+  }
+  const tree = walkedNode(treeResult, asOf);
 
   // A project whose ROOT is gone or unreadable is not a project measuring zero
   // bytes — it is a project we could not measure. `rootMeasurements` turns an
@@ -429,25 +521,52 @@ export function measureProject(project, {
 
   const git = walkNode(walk, path.join(root, '.git'), common);
 
-  const moduleRoots = nodeModulesRoots(root, { walk, fsImpl });
+  // A complete tree walk has already observed every top-most dependency root.
+  // If it was capped or degraded, repeat the purpose-built search: its distinct
+  // limits may still recover evidence the byte walk could not reach.
+  const moduleRoots = moduleObservation
+    ? (moduleResult.degradedCount > 0
+      ? nodeModulesRoots(root, { walk, fsImpl }) : moduleObservation.roots)
+    : tree.complete ? observedModules.roots : nodeModulesRoots(root, { walk, fsImpl });
   // An empty roots list is a real, measured zero — this project has no
   // node_modules — which is why it is stated explicitly rather than handed to
   // sumMeasurements, whose empty-list zero would mean the same thing by accident.
+  const moduleNodes = moduleRoots.map((dir) => walkNode(walk, dir, common));
   const nodeModulesBytes = moduleRoots.length === 0
     ? measured(0, { asOf })
-    : sumMeasurements(moduleRoots.map((dir) => walkNode(walk, dir, common).bytes), { asOf });
+    : sumMeasurements(moduleNodes.map((node) => node.bytes), { asOf });
+  const totalFiles = sumMeasurements([
+    tree.files, git.files, ...moduleNodes.map((node) => node.files),
+  ], { asOf });
+  const footprintMtimeMs = [tree, git, ...moduleNodes]
+    .map((node) => node.newestMtimeMs)
+    .filter(Number.isFinite)
+    .reduce((latest, value) => Math.max(latest, value), -Infinity);
 
   // ONE detection pass, split into its two projections below: lines belong to
   // languages, presence belongs to frameworks/SDKs/tools, and the tail names what
   // neither could claim.
-  const detected = loc ? detect(root, { walk, limits, asOf, fsImpl }) : null;
+  const detected = loc
+    ? (stackObserver
+      && stackResult
+      && stackResult.status === MEASURED
+      && typeof stackResult.root === 'string'
+      && path.resolve(stackResult.root) === path.resolve(root)
+      && stackResult.degradedCount === 0
+      ? stackObserver.finalize(stackResult)
+      : detect(root, { walk, limits, asOf, fsImpl }))
+    : null;
 
   return {
     path: root,
+    projectKind: measureProjectKind(root, { fsImpl }),
     label: project.label,
     source: project.source ?? null,
     hosts: Array.isArray(project.hosts) ? [...project.hosts] : null,
-    remote: projectRemote(root, { fsImpl }),
+    // collectProjects preflights the remote to choose the stated hosted-repo
+    // population. Reuse that exact evidence instead of opening .git/config a
+    // second time; direct measureProject callers retain the original probe.
+    remote: project.remote ?? projectRemote(root, { fsImpl }),
     loc: detected ? locFromStack(detected) : locNotMeasured('not measured'),
     stack: detected ? stackFromDetection(detected) : stackNotMeasured('not measured'),
     presence: tree.presence,
@@ -457,6 +576,10 @@ export function measureProject(project, {
     nodeModulesBytes,
     nodeModulesRoots: moduleRoots,
     totalBytes: sumMeasurements([tree.bytes, git.bytes, nodeModulesBytes], { asOf }),
+    totalFiles,
+    footprintMtime: Number.isFinite(footprintMtimeMs)
+      ? measured(footprintMtimeMs, { asOf })
+      : unknown('no readable file in project footprint'),
     // Working-tree mtime only: `.git` and `node_modules` churn on operations the
     // user did not perform, so including them would report a `pnpm install` as
     // "last active".
@@ -464,7 +587,7 @@ export function measureProject(project, {
       ? unknown('no readable working-tree entry')
       : measured(tree.newestMtimeMs, { asOf }),
     treeExclusions: [...OVERHEAD_DIRS],
-    complete: tree.complete && git.complete,
+    complete: tree.complete && git.complete && moduleNodes.every((node) => node.complete),
   };
 }
 
@@ -594,6 +717,46 @@ function resolveProjectCatalog({ projects, sources, discover, fsImpl }) {
   }
 }
 
+const HTTPS_REMOTE = /^https:/i;
+
+/** The Projects table is intentionally narrower than the discovery KPIs: only
+ * repositories with a proven HTTPS web destination and a recorded host session
+ * are expensive enough to measure. Everything else remains counted explicitly
+ * rather than disappearing behind the performance optimization. */
+function selectHostedPopulation(rows, fsImpl) {
+  const eligible = [];
+  const excluded = {
+    total: 0,
+    noRecordedSession: 0,
+    noHttpsRemote: 0,
+    byRemoteStatus: { localOnly: 0, insecureHttp: 0, unrecognized: 0, unknown: 0 },
+  };
+  for (const project of rows) {
+    if (!project?.path) continue;
+    const remote = projectRemote(project.path, { fsImpl });
+    const recorded = Array.isArray(project.hosts) && project.hosts.length > 0;
+    const linked = typeof remote.webUrl === 'string' && HTTPS_REMOTE.test(remote.webUrl);
+    if (recorded && linked) {
+      eligible.push({ ...project, remote });
+      continue;
+    }
+    excluded.total += 1;
+    if (!recorded) excluded.noRecordedSession += 1;
+    if (linked) continue;
+    excluded.noHttpsRemote += 1;
+    if (typeof remote.webUrl === 'string' && /^http:/i.test(remote.webUrl)) {
+      excluded.byRemoteStatus.insecureHttp += 1;
+    } else if (remote.status === 'local-only') {
+      excluded.byRemoteStatus.localOnly += 1;
+    } else if (remote.status === 'unknown') {
+      excluded.byRemoteStatus.unknown += 1;
+    } else {
+      excluded.byRemoteStatus.unrecognized += 1;
+    }
+  }
+  return { eligible, excluded };
+}
+
 /** Measure every selected project, reporting progress the same way the scan
  *  always has: one `project` callback per row, one `done` callback at the end. */
 function measureSelectedProjects(selected, { walk, limits, detect, loc, asOf, fsImpl, onProgress }) {
@@ -608,7 +771,7 @@ function measureSelectedProjects(selected, { walk, limits, detect, loc, asOf, fs
 }
 
 /** Assemble the ProjectFootprint section from a completed measurement pass. */
-function buildProjectsSection({ asOf, out, rows, selected, counts, discoveryReason, loc }) {
+function buildProjectsSection({ asOf, out, eligible, selected, excluded, counts, discoveryReason, loc }) {
   // A count whose sweep hit an unreadable transcript or an unrecoverable project
   // directory is a FLOOR, not a total — `partial` is what makes a surface render
   // it as "≥ N" instead of quietly overstating certainty.
@@ -628,7 +791,13 @@ function buildProjectsSection({ asOf, out, rows, selected, counts, discoveryReas
     method: counts?.method ?? null,
     sources: counts?.sources ?? null,
     scanned: out.length,
-    truncated: selected.length < rows.length,
+    truncated: selected.length < eligible.length,
+    population: {
+      kind: 'hosted-repositories-with-recorded-session',
+      eligible: eligible.length,
+      measured: out.length,
+      excluded,
+    },
     locMeasured: loc,
     // Which catalog produced the language and stack facts in every row above. A
     // figure that moves between releases can then be explained by the registry
@@ -638,7 +807,7 @@ function buildProjectsSection({ asOf, out, rows, selected, counts, discoveryReas
     // Stated as `null` when nothing was scanned, because an empty tail from an
     // unmeasured scan would read as "the registry knows everything here".
     unrecognized: loc ? aggregateUnrecognized(out) : null,
-    complete: !discoveryReason && !partial && selected.length === rows.length
+    complete: !discoveryReason && !partial && selected.length === eligible.length
       && out.every((row) => row.complete),
   };
 }
@@ -681,7 +850,12 @@ export function collectProjects({
   const asOf = now();
   const { catalog, counts, discoveryReason } = resolveProjectCatalog({ projects, sources, discover, fsImpl });
   const rows = Array.isArray(catalog) ? catalog : [];
-  const selected = typeof limit === 'number' && limit >= 0 ? rows.slice(0, limit) : rows;
+  const population = selectHostedPopulation(rows, fsImpl);
+  const selected = typeof limit === 'number' && limit >= 0
+    ? population.eligible.slice(0, limit) : population.eligible;
   const out = measureSelectedProjects(selected, { walk, limits, detect, loc, asOf, fsImpl, onProgress });
-  return buildProjectsSection({ asOf, out, rows, selected, counts, discoveryReason, loc });
+  return buildProjectsSection({
+    asOf, out, eligible: population.eligible, selected, excluded: population.excluded,
+    counts, discoveryReason, loc,
+  });
 }

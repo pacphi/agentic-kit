@@ -21,7 +21,7 @@ export function safeProjectLabel(cwd) {
  * worktrees carry a `.git` file pointing into `<repo>/.git/worktrees/<name>`;
  * retained paths may no longer exist, so known nested layouts are a fallback.
  */
-function resolveProjectRoot(cwd) {
+function resolveProjectRoot(cwd, { fsImpl = fs } = {}) {
   if (typeof cwd !== 'string' || !cwd) return null;
   const normalized = cwd.replaceAll('\\', '/').replace(/\/+$/, '');
   // Sessions frequently run from a subdirectory of their repository, so walk
@@ -31,11 +31,11 @@ function resolveProjectRoot(cwd) {
   let current = cwd;
   for (let depth = 0; depth < 32; depth++) {
     let marker = null;
-    try { marker = fs.statSync(path.join(current, '.git')).isDirectory() ? 'dir' : 'file'; }
+    try { marker = fsImpl.statSync(path.join(current, '.git')).isDirectory() ? 'dir' : 'file'; }
     catch { /* not a repository boundary; retained paths may be gone entirely */ }
     if (marker === 'file') {
       try {
-        const pointer = fs.readFileSync(path.join(current, '.git'), 'utf8').trim();
+        const pointer = fsImpl.readFileSync(path.join(current, '.git'), 'utf8').trim();
         const match = /^gitdir:\s*(.+?)[\\/]\.git[\\/]worktrees[\\/][^\\/]+$/i.exec(pointer);
         if (match) return path.resolve(current, match[1]);
       } catch { /* unreadable pointer: the marker directory is still the root */ }
@@ -67,18 +67,21 @@ function resolveProjectRoot(cwd) {
  * remain distinct without exposing either path. Retained paths fall back to
  * the display label because no repository boundary can be proven.
  */
-export function resolveProjectIdentity(cwd) {
-  const root = resolveProjectRoot(cwd);
+export function resolveProjectIdentity(cwd, { fsImpl = fs } = {}) {
+  const root = resolveProjectRoot(cwd, { fsImpl });
   const rawLabel = safeProjectLabel(root ?? cwd);
   const label = root && rawLabel === 'unknown' ? 'unknown repository' : rawLabel;
   if (label === 'unknown') {
     return { label, key: stableProjectKey(label), canonical: false };
   }
   let hasGitMarker = false;
-  try { hasGitMarker = Boolean(root && fs.statSync(path.join(root, '.git'))); } catch { /* fallback */ }
+  try { hasGitMarker = Boolean(root && fsImpl.statSync(path.join(root, '.git'))); } catch { /* fallback */ }
   let canonical = hasGitMarker ? root : null;
   if (canonical) {
-    try { canonical = fs.realpathSync.native(root); } catch { canonical = path.resolve(root); }
+    try {
+      const realpath = fsImpl.realpathSync?.native ?? fsImpl.realpathSync;
+      canonical = realpath ? realpath(root) : path.resolve(root);
+    } catch { canonical = path.resolve(root); }
   }
   return {
     label,

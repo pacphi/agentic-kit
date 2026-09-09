@@ -39,10 +39,9 @@
 // "nothing crossed a threshold" rather than "nothing was looked at".
 //
 // Metadata only (invariant 1). Every figure comes from dirents, lstat sizes and
-// mtimes. A transcript's contents are never opened — which is also why codex
-// transcripts have no project attribution here: codex rollout PATHS are dated,
-// not project-scoped, and the project lives inside the file. That reads as an
-// honest "unattributable", never as a guess and never as a zero.
+// mtimes, plus the cwd field in the bounded head of only the top-N transcript
+// rows. Codex rollout paths are dated rather than project-scoped; reading that
+// one metadata field is the only way to attribute them without guessing.
 //
 // One deliberate exception, narrow and documented: orphaned-worktree detection
 // (storage-reclaim-detectors.mjs) reads `<repo>/.git/worktrees/<name>/gitdir`,
@@ -55,7 +54,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { home, claudeDir, codexDir, configDir } from '../paths.mjs';
 import { defaultOpencodeDbPath } from '../usage-opencode.mjs';
-import { decodeClaudeProjectDir } from './project-sources.mjs';
+import { decodeClaudeProjectDir, transcriptMetadata } from './project-sources.mjs';
+import { classifyWorkingContext } from './working-context.mjs';
 import {
   walkTree, rootMeasurements, measured, unknown, sumMeasurements,
 } from './walk.mjs';
@@ -488,7 +488,8 @@ function fillMissingStorageCategories(categories, projects) {
  *   roots?: StorageRoot[]|null, limits?: object, growthDays?: number, topN?: number,
  *   maxChildren?: number, reclaim?: object, detectWorktrees?: boolean,
  *   detectCaches?: boolean, detectOrphanedTranscripts?: boolean,
- *   consumers?: object|null, env?: NodeJS.ProcessEnv,
+ *   consumers?: object|null, install?: object|null, projectFootprints?: object[]|null,
+ *   env?: NodeJS.ProcessEnv,
  *   decodeDir?: typeof decodeClaudeProjectDir,
  *   fsImpl?: typeof fs,
  * }} [options]
@@ -507,6 +508,8 @@ export function collectStorage({
   detectCaches = true,
   detectOrphanedTranscripts = true,
   consumers = null,
+  install = null,
+  projectFootprints = null,
   env = process.env,
   decodeDir = decodeClaudeProjectDir,
   fsImpl = fs,
@@ -532,7 +535,8 @@ export function collectStorage({
 
   const reclaimables = collectReclaimables({
     asOf, agedTranscripts, transcriptProjects, projects, opts, walk, limits,
-    detectWorktrees, detectCaches, detectOrphanedTranscripts, consumers, env, decodeDir, fsImpl,
+    detectWorktrees, detectCaches, detectOrphanedTranscripts, consumers, install,
+    projectFootprints, env, decodeDir, fsImpl,
   });
 
   return {
@@ -559,8 +563,33 @@ export function collectStorage({
   };
 }
 
+function readTopSessionMetadata(row, { readMetadata, readCwd, fsImpl }) {
+  if (row.host !== 'claude' && row.host !== 'codex') return null;
+  try {
+    return typeof readCwd === 'function'
+      ? { cwd: readCwd(row.path, row.host, { fsImpl }) }
+      : readMetadata(row.path, row.host, { fsImpl });
+  } catch { return null; }
+}
+
+function topSessionIdentity(row, metadata) {
+  const lastModifiedAt = Number.isFinite(row.mtimeMs) ? new Date(row.mtimeMs).toISOString() : null;
+  return {
+    original: row.session,
+    ...(metadata?.nativeId ? { nativeId: metadata.nativeId } : {}),
+    ...(metadata?.startedAt ? { startedAt: metadata.startedAt } : {}),
+    ...(lastModifiedAt ? { lastModifiedAt } : {}),
+    timeBasis: metadata?.timeBasis ?? (lastModifiedAt ? 'file-mtime' : 'unavailable'),
+    provenance: {
+      ...(metadata?.nativeId ? { nativeId: 'transcript-head' } : {}),
+      ...(metadata?.startedAt ? { startedAt: 'transcript-head' } : {}),
+      ...(lastModifiedAt ? { lastModifiedAt: 'file-mtime' } : {}),
+    },
+  };
+}
+
 /**
- * Give each session row a human `projectLabel` beside its raw `project` key.
+ * Give each top session a human working context and identity beside its raw tree key.
  *
  * The raw key stays untouched — it is the tree key everything else joins on.
  * The label is the decoded directory's basename when the decode succeeds, and
@@ -568,15 +597,24 @@ export function collectStorage({
  * longer exists cannot be decoded, and showing its encoded form is honest
  * where inventing a plausible name would not be.
  *
- * Memoized per distinct project key: the top-N rows commonly share a handful of
- * projects, and each decode is a bounded filesystem walk.
+ * Only Claude/Codex JSONL heads are opened; the OpenCode SQLite store is named
+ * as a host store and is never fed to a line parser. Decodes are memoized per
+ * distinct project key because each is a bounded filesystem walk.
  *
  * @param {Array<Record<string, any>>} rows
- * @param {{ decodeDir?: typeof decodeClaudeProjectDir, fsImpl?: typeof fs }} [opts]
+ * @param {{ decodeDir?: typeof decodeClaudeProjectDir, fsImpl?: typeof fs,
+ *   readMetadata?: typeof transcriptMetadata, readCwd?: Function,
+ *   classifyContext?: typeof classifyWorkingContext }} [opts]
  */
-export function labelSessions(rows, { decodeDir = decodeClaudeProjectDir, fsImpl = fs } = {}) {
+export function labelSessions(rows, {
+  decodeDir = decodeClaudeProjectDir,
+  fsImpl = fs,
+  readMetadata = transcriptMetadata,
+  readCwd,
+  classifyContext = classifyWorkingContext,
+} = {}) {
   const cache = new Map();
-  const label = (key) => {
+  const decodedLabel = (key) => {
     if (!cache.has(key)) {
       let decoded;
       try { decoded = decodeDir(key, { fsImpl }); } catch { decoded = null; }
@@ -592,7 +630,7 @@ export function labelSessions(rows, { decodeDir = decodeClaudeProjectDir, fsImpl
       // design). Collapsing the two would report every Windows session as a
       // deleted project.
       cache.set(key, decoded
-        ? { projectLabel: path.basename(decoded), projectResolved: true }
+        ? { projectLabel: path.basename(decoded), projectPath: decoded, projectResolved: true }
         : {
           projectLabel: key,
           projectResolved: false,
@@ -601,9 +639,38 @@ export function labelSessions(rows, { decodeDir = decodeClaudeProjectDir, fsImpl
     }
     return cache.get(key);
   };
-  return rows.map((row) => (
-    row.project ? { ...row, ...label(row.project) } : row
-  ));
+  return rows.map((row) => {
+    const metadata = readTopSessionMetadata(row, { readMetadata, readCwd, fsImpl });
+    const base = { ...row, identity: topSessionIdentity(row, metadata) };
+    const cwd = metadata?.cwd ?? null;
+    if (cwd) {
+      const context = classifyContext(cwd, { fsImpl });
+      if (context) {
+        return {
+          ...base,
+          context,
+          attribution: 'transcript-cwd',
+          ...(context.kind === 'repository'
+            ? { projectLabel: context.label, projectResolved: true } : {}),
+        };
+      }
+    }
+    if (row.project) {
+      const decoded = decodedLabel(row.project);
+      const context = decoded.projectResolved
+        ? classifyContext(decoded.projectPath, { fsImpl }) : null;
+      return { ...base, ...decoded, ...(context ? { context } : {}) };
+    }
+    return {
+      ...base,
+      context: {
+        kind: 'host-store',
+        label: `${row.host === 'opencode' ? 'OpenCode' : row.host === 'claude' ? 'Claude' : 'Codex'} session store`,
+        ...(row.path ? { path: path.dirname(row.path) } : {}),
+      },
+      contextReason: 'the bounded transcript header did not contain a working directory',
+    };
+  });
 }
 
 /** Trailing-window growth per host, from mtime + size only — no content read

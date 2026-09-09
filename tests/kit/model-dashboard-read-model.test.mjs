@@ -645,3 +645,21 @@ test('authenticated /api/models allowlists adversarial cached and empty envelope
     fs.rmSync(cwd, { recursive: true, force: true });
   }
 });
+
+
+test('Astra inventory and unlinked routes show first-party pricing and its verification date', () => {
+  const input = payload();
+  input.snapshot.models = [model({ host: 'codex', provider: 'openai', id: 'gpt-6-astra',
+    name: 'GPT-6 Astra', source: 'codex-cache', values: { discoverable: true } })];
+  input.snapshot.bindings = [{ id: 'astra-route', consumer: 'route:review', host: 'codex',
+    provider: 'openai', configured: 'gpt-6-astra', effective: 'gpt-6-astra', evidenceRefs: [] }];
+  const projected = createDashboardModelPayload(input, { key: KEY }).snapshot.models[0];
+  assert.equal(projected.pricing.input, 10);
+  assert.equal(projected.pricing.output, 50);
+  assert.equal(projected.pricing.asOf, '2026-09-08');
+  assert.equal(projected.pricing.sourceUrl, 'https://developers.openai.com/api/docs/models/gpt-6-astra');
+  assert.equal(projected.dimensions.entitled.value, null);
+  input.snapshot.models = [];
+  const binding = createDashboardModelPayload(input, { key: KEY }).snapshot.bindings[0];
+  assert.deepEqual(binding.pricing, projected.pricing);
+});

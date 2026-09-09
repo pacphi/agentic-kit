@@ -85,7 +85,7 @@ test('a framework, sdk or tool NEVER owns lines — only languages do', () => {
     if (entry.kind === 'language') {
       assert.equal(entry.match.by, 'extension', `${entry.id} is a language but not extension-matched`);
       assert.ok(COLOR_SLOTS.includes(entry.colorSlot), `${entry.id}: slot ${entry.colorSlot}`);
-      assert.ok(entry.match.extensions.length || entry.match.filenames.length, entry.id);
+      assert.ok(entry.measurement === 'presence-only' || entry.match.extensions.length || entry.match.filenames.length, entry.id);
       continue;
     }
     // The structural guarantee: a non-language entry has no extensions and no

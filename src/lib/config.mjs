@@ -56,6 +56,19 @@ const DEFAULTS = {
   // [{name, source, contract}] entries admitted by admission.mjs's
   // admitAdapters/bootstrapHostAdapters. Empty by default = zero effect.
   hostAdapters: [],
+  // ADR-0048 Maintenance discovery intent (user `kit.json` state — see
+  // docs/MAINTENANCE.md). Owner-private
+  // operational state (checkpoints, coverage, preferences) lives under
+  // maintenanceControlDir(), never here.
+  maintenance: {
+    discovery: {
+      automaticSources: {},  // {sourceId: boolean} — overrides the curated defaults
+      exactProjects: [],     // [{root}]
+      collectionRoots: [],   // [{root, maxDepth?, includeNetwork?:false}]
+      exclusions: [],        // [{path, recursive}]
+    },
+    retention: {},           // user overrides within SCAN_HISTORY_FLOORS
+  },
 };
 
 const plain = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -169,6 +182,15 @@ function withDefaults(config) {
     routing,
     providers: { ...DEFAULTS.providers, ...config.providers },
     statusline: { ...DEFAULTS.statusline, ...config.statusline },
+    maintenance: {
+      ...structuredClone(DEFAULTS.maintenance),
+      ...config.maintenance,
+      discovery: {
+        ...structuredClone(DEFAULTS.maintenance.discovery),
+        ...config.maintenance?.discovery,
+      },
+      retention: { ...DEFAULTS.maintenance.retention, ...config.maintenance?.retention },
+    },
   };
   // Defaults can enable a host omitted by a partial legacy file. Normalize once
   // more so inferred bindings and the saved representation already converge.

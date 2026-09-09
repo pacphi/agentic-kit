@@ -27,7 +27,7 @@ import {
 } from '../../src/lib/footprint/projects.mjs';
 import { collectCatalog, tomlTableNames } from '../../src/lib/footprint/catalog.mjs';
 import {
-  buildCatalogSourceStamps, collectNativePluginInventory, probeCatalogDrift,
+  artifactTreeDigest, buildCatalogSourceStamps, collectNativePluginInventory, probeCatalogDrift,
 } from '../../src/lib/footprint/catalog-evidence.mjs';
 import { collectConsumers } from '../../src/lib/footprint/consumers.mjs';
 import {
@@ -367,7 +367,8 @@ function storageFixture(t) {
   const sizes = {
     recent: write(path.join(claudeProjects, '-repos-keel', 'recent.jsonl'), 'a'.repeat(100)),
     aged: write(path.join(claudeProjects, '-repos-keel', 'aged.jsonl'), 'b'.repeat(50)),
-    rollout: write(path.join(codexSessions, '2026', '08', '06', 'rollout.jsonl'), 'c'.repeat(30)),
+    rollout: write(path.join(codexSessions, '2026', '08', '06', 'rollout.jsonl'),
+      `${JSON.stringify({ type: 'session_meta', payload: { cwd: '/repos/agentic-kit' } })}\n`),
     index: write(path.join(akConfig, 'usage-index.json'), 'd'.repeat(10)),
   };
   touch(path.join(claudeProjects, '-repos-keel', 'recent.jsonl'), now - DAY);
@@ -598,9 +599,11 @@ test('an idle npx cache env is a candidate because the cache is reproducible', (
   assert.equal(rows[0].path, env);
   assert.equal(rows[0].label, 'npx cache env (some-tool)');
   assert.equal(rows[0].bytes.value, total);
+  assert.deepEqual(rows[0].basis, { versionStale: false, idle: true, idleDays: 120 });
   assert.match(rows[0].rationale, /untouched for 120d/);
   assert.match(rows[0].rationale, /re-fetches on demand/);
-  assert.match(rows[0].cleanupHint, /ak sync/, 'the hint names the CLI that owns removal');
+  assert.equal(rows[0].cleanupHint, null,
+    'idle age alone must not claim the version-stale pruning procedure applies');
   assert.equal(rows[0].advisory, true);
 });
 
@@ -618,6 +621,7 @@ test('worktree candidates state what they know and never guess a dead checkout',
   const size = write(path.join(idle, 'file.txt'), 'a'.repeat(48));
   write(path.join(admin, 'idle', 'gitdir'), `${path.join(idle, '.git')}\n`);
   touch(path.join(idle, 'file.txt'), now - 200 * DAY);
+  touch(idle, now - 200 * DAY);
 
   const rows = worktreeReclaimables({
     asOf: now, projects: [project], opts: { ...STORAGE_DEFAULTS },
@@ -770,6 +774,8 @@ test('project git and node_modules bytes stay separate from the working tree', (
   assert.equal(row.gitBytes.value, gitBytes);
   assert.equal(row.nodeModulesBytes.value, moduleBytes);
   assert.equal(row.totalBytes.value, treeBytes + gitBytes + moduleBytes);
+  assert.equal(row.totalFiles.status, MEASURED);
+  assert.equal(row.footprintMtime.status, MEASURED);
   assert.deepEqual(row.treeExclusions, ['.git', 'node_modules']);
   assert.equal(row.presence, 'present');
   assert.equal(row.complete, true);
@@ -796,7 +802,7 @@ test('a project path that vanished is unknown everywhere, never a zero-byte proj
     { fsImpl: fixtureFs(root) });
   assert.equal(row.presence, 'absent');
   for (const figure of [row.treeBytes, row.gitBytes, row.nodeModulesBytes, row.totalBytes,
-    row.lastActivity, row.loc.total]) {
+    row.totalFiles, row.footprintMtime, row.lastActivity, row.loc.total]) {
     assert.equal(figure.status, UNKNOWN);
     assert.equal(figure.value, null);
   }
@@ -806,10 +812,14 @@ test('a project path that vanished is unknown everywhere, never a zero-byte proj
 
 test('the projects section measures the supplied catalog and reports discovery failure', (t) => {
   const { root, project } = projectFixture(t);
+  const second = path.join(root, 'second');
+  write(path.join(second, 'index.js'), 'second\n');
+  write(path.join(second, '.git', 'config'),
+    '[remote "origin"]\n\turl = https://github.com/pacphi/second.git\n');
   const seen = [];
   const result = collectProjects({
-    projects: [{ path: project, label: 'repo' },
-      { path: path.join(root, 'second'), label: 'second' }],
+    projects: [{ path: project, label: 'repo', hosts: ['claude'] },
+      { path: second, label: 'second', hosts: ['codex'] }],
     loc: false, limit: 1, fsImpl: fixtureFs(root),
     onProgress: (payload) => seen.push(payload.phase),
   });
@@ -842,7 +852,7 @@ function catalogFixture(t) {
   // The same skill on two hosts, spelled differently: identity is the
   // normalized name, so this is ONE deployed skill present twice.
   write(path.join(claudeRoot, 'skills', 'Deep-Research', 'SKILL.md'),
-    '---\nname: x\n---\nSECRET BODY\n');
+    '---\nname: x\ndescription: Researches source documents\n---\nSECRET BODY\n');
   write(path.join(codexRoot, 'skills', 'deep-research', 'SKILL.md'), 'SECRET BODY\n');
   write(path.join(claudeRoot, 'skills', 'claude-only', 'SKILL.md'), 'SECRET BODY\n');
   write(path.join(claudeRoot, 'agents', 'reviewer.md'), 'SECRET BODY\n');
@@ -877,11 +887,26 @@ test('catalog dedups by normalized name and keeps a per-host presence matrix', (
   const skills = result.items.filter((item) => item.kind === 'skill');
   assert.deepEqual(skills.map((item) => item.name).sort(), ['Deep-Research', 'claude-only']);
   const shared = skills.find((item) => item.name === 'Deep-Research');
-  assert.deepEqual(shared.hosts.sort(), ['claude', 'codex'],
+  assert.deepEqual(shared.hosts.sort(), ['claude', 'codex', 'opencode'],
     'case and spacing are presentation; the deployed skill is one thing');
-  assert.equal(shared.presence.length, 2);
+  assert.equal(shared.presence.length, 3);
+  assert.equal(shared.presence.find(row => row.host === 'claude').description, 'Researches source documents');
+  assert.equal(shared.presence.find(row => row.host === 'codex').description, null);
   assert.deepEqual(shared.presence.map((entry) => entry.surface).sort(),
-    ['claude-skills', 'codex-skills']);
+    ['claude-skills', 'codex-skills', 'opencode-claude-skills']);
+  const claudeArtifact = shared.artifacts.find((artifact) => artifact.consumers.some((row) => row.host === 'claude'));
+  assert.deepEqual(claudeArtifact.consumers.map((row) => row.host).sort(), ['claude', 'opencode'],
+    'one physical Claude-compatible skill is exposed to both documented consumers');
+  assert.deepEqual(new Set(shared.consumerBindings.map((row) => row.artifactId)).size, 2,
+    'consumer bindings preserve two installed copies instead of treating three host edges as three copies');
+  assert.equal(shared.digestCoverage.measured, 2,
+    'digest coverage counts physical artifacts, not host consumer bindings');
+  assert.equal(result.overlaps.exactName.find((group) => group.name === 'deep-research')?.occurrences, 2);
+  const claudeMcpArtifacts = result.items.filter((item) => ['ruflo', 'lightpanda'].includes(item.name))
+    .flatMap((item) => item.presence.filter((presence) => presence.surface === 'claude-user-mcp'))
+    .map((presence) => presence.artifactId);
+  assert.equal(new Set(claudeMcpArtifacts).size, 2,
+    'separate config entries in one file retain separate artifact identities');
 
   // Kind is part of identity: a `reviewer` agent and a `reviewer` command are
   // two different deployed things.
@@ -899,13 +924,37 @@ test('catalog dedups by normalized name and keeps a per-host presence matrix', (
 
   assert.equal(result.perHost.claude.skill.value, 2);
   assert.equal(result.perHost.codex.skill.value, 1);
-  assert.equal(result.perHost.opencode.skill.value, 0);
+  assert.equal(result.perHost.opencode.skill.value, 2);
   assert.equal(result.perHost.opencode.agent.value, 1);
   assert.equal(result.perHost.codex.agent.value, 0);
   assert.equal(result.perHost.codex.mcpServer.value, 2);
   assert.equal(result.complete, false, 'fallback plugin inventories keep overall evidence partial');
   assert.deepEqual(result.degraded, []);
   assert.deepEqual(result.partial.sort(), ['claude-plugins', 'codex-plugins']);
+});
+
+test('catalog observes one physical capability surface once per scan', (t) => {
+  const fixtureRoots = catalogFixture(t);
+  const { root, ...roots } = fixtureRoots;
+  const walked = [];
+  const walk = (surfaceRoot, options) => {
+    walked.push(path.resolve(surfaceRoot));
+    return walkTree(surfaceRoot, options);
+  };
+
+  const result = collectCatalog({
+    ...roots, cwd: root, now: () => 1_700_000_000_000,
+    includePluginSurfaces: false, fsImpl: fixtureFs(root), walk,
+  });
+
+  const sharedClaudeSkills = path.resolve(roots.claudeRoot, 'skills');
+  assert.equal(walked.filter((surface) => surface === sharedClaudeSkills).length, 1,
+    'Claude and OpenCode consumer bindings must reuse one physical directory observation');
+  assert.deepEqual(
+    result.items.find((item) => item.name === 'Deep-Research')?.hosts.sort(),
+    ['claude', 'codex', 'opencode'],
+    'reusing an observation must preserve every host consumer binding',
+  );
 });
 
 test('catalog includes project-scoped Codex skills from .agents/skills', (t) => {
@@ -928,6 +977,187 @@ test('catalog includes project-scoped Codex skills from .agents/skills', (t) => 
   assert.equal(result.surfaces.find((surface) => surface.id === `codex-project-skills:${project}`)?.count, 1);
 });
 
+test('catalog exposes project Claude-compatible skills to Claude and OpenCode without duplicating the artifact', (t) => {
+  const fixtureRoots = catalogFixture(t);
+  const { root, ...roots } = fixtureRoots;
+  const project = path.join(root, 'claude-compatible-project');
+  write(path.join(project, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+  write(path.join(project, '.claude', 'skills', 'shared-project', 'SKILL.md'),
+    '---\nname: shared-project\n---\nshared project skill\n');
+
+  const result = collectCatalog({
+    ...roots, cwd: project, now: () => 1_700_000_000_000,
+    includePluginSurfaces: false, fsImpl: fixtureFs(root),
+  });
+  const skill = result.items.find((item) => item.kind === 'skill' && item.name === 'shared-project');
+  assert.deepEqual(skill.hosts.sort(), ['claude', 'opencode']);
+  assert.equal(skill.artifacts.length, 1);
+  assert.deepEqual(skill.artifacts[0].consumers.map((row) => row.host).sort(), ['claude', 'opencode']);
+  assert.equal(skill.consumerBindings.every((row) => row.resolution === 'not-reported'), true);
+  assert.equal(skill.consumerBindings.find((row) => row.host === 'opencode').mechanism,
+    'claude-compatible-directory');
+});
+
+test('catalog inventories OpenCode skills.paths as configured consumer bindings', (t) => {
+  const fixtureRoots = catalogFixture(t);
+  const { root, opencodeConfigFile, ...roots } = fixtureRoots;
+  const configured = path.join(root, 'shared-catalog');
+  write(path.join(configured, 'configured-skill', 'SKILL.md'), 'configured skill\n');
+  write(opencodeConfigFile, JSON.stringify({ mcp: { ruflo: {} }, skills: { paths: [configured] } }));
+
+  const result = collectCatalog({
+    ...roots, opencodeConfigFile, cwd: root, now: () => 1_700_000_000_000,
+    includePluginSurfaces: false, fsImpl: fixtureFs(root),
+  });
+  const skill = result.items.find((item) => item.kind === 'skill' && item.name === 'configured-skill');
+  assert.deepEqual(skill.hosts, ['opencode']);
+  assert.equal(skill.consumerBindings.length, 1);
+  assert.equal(skill.consumerBindings[0].mechanism, 'configured-path');
+  assert.equal(skill.consumerBindings[0].configuredBy, 'opencode.json');
+  assert.equal(skill.consumerBindings[0].resolution, 'not-reported');
+});
+
+test('OpenCode compatibility disablement preserves evidence but excludes the consumer', (t) => {
+  const fixtureRoots = catalogFixture(t);
+  const { root, ...roots } = fixtureRoots;
+  const result = collectCatalog({
+    ...roots, cwd: root, now: () => 1_700_000_000_000,
+    includePluginSurfaces: false, fsImpl: fixtureFs(root),
+    env: { OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: '1' },
+  });
+  const skill = result.items.find((item) => item.kind === 'skill' && item.name === 'claude-only');
+  assert.deepEqual(skill.hosts, ['claude']);
+  assert.equal(skill.consumerBindings.find((binding) => binding.host === 'opencode')?.enabled, false);
+  assert.equal(result.perHost.opencode.skill.value, 0);
+});
+
+test('configured and conventional views of one skill remain one physical artifact', (t) => {
+  const fixtureRoots = catalogFixture(t);
+  const { root, opencodeConfigFile, ...roots } = fixtureRoots;
+  write(opencodeConfigFile, JSON.stringify({ skills: { paths: [path.join(roots.claudeRoot, 'skills')] } }));
+  const result = collectCatalog({
+    ...roots, opencodeConfigFile, cwd: root, now: () => 1_700_000_000_000,
+    includePluginSurfaces: false, fsImpl: fixtureFs(root),
+  });
+  const skill = result.items.find((item) => item.kind === 'skill' && item.name === 'claude-only');
+  assert.equal(skill.artifacts.length, 1);
+  assert.equal(skill.consumerBindings.length, 3);
+  assert.equal(result.overlaps.exactName.some((group) => group.name === 'claude-only'), false,
+    'multiple discovery mechanisms do not manufacture a duplicate copy');
+});
+
+test('invalid, remote and JSONC-only OpenCode skill paths are explicit partial evidence', (t) => {
+  const fixtureRoots = catalogFixture(t);
+  const { root, opencodeConfigFile, ...roots } = fixtureRoots;
+  write(opencodeConfigFile, JSON.stringify({ skills: { paths: 'not-an-array' } }));
+  const invalid = collectCatalog({
+    ...roots, opencodeConfigFile, cwd: root, now: () => 1_700_000_000_000,
+    includePluginSurfaces: false, fsImpl: fixtureFs(root),
+  });
+  assert.equal(invalid.surfaces.find((surface) => surface.id === 'opencode-skill-paths:config')?.status, 'degraded');
+
+  write(opencodeConfigFile, JSON.stringify({ skills: { paths: ['https://example.test/skills'] } }));
+  const remote = collectCatalog({
+    ...roots, opencodeConfigFile, cwd: root, now: () => 1_700_000_000_000,
+    includePluginSurfaces: false, fsImpl: fixtureFs(root),
+  });
+  const remoteSurface = remote.surfaces.find((surface) => surface.id === 'opencode-skill-paths:config');
+  assert.equal(remoteSurface.partial, true);
+  assert.match(remoteSurface.reason, /remote/i);
+  assert.equal(remote.sourceStamps.entries.some((entry) => /^https?:/.test(entry.path)), false);
+
+  const project = path.join(root, 'jsonc-project');
+  write(path.join(project, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+  write(path.join(project, 'opencode.jsonc'), '{ // valid JSONC, deliberately not interpreted here\n "skills": {"paths": ["./skills"]}\n}\n');
+  const jsonc = collectCatalog({
+    ...roots, opencodeConfigFile, cwd: project, projects: [project], now: () => 1_700_000_000_000,
+    includePluginSurfaces: false, fsImpl: fixtureFs(root),
+  });
+  const jsoncSurface = jsonc.surfaces.find((surface) => surface.id === `opencode-project-skill-paths-jsonc:${project}:config`);
+  assert.equal(jsoncSurface.status, 'degraded');
+  assert.match(jsoncSurface.reason, /jsonc/i);
+});
+
+test('catalog inventories project agents, commands and MCP registrations across supported host surfaces', (t) => {
+  const fixtureRoots = catalogFixture(t);
+  const { root, ...roots } = fixtureRoots;
+  const project = path.join(root, 'project-resources');
+  write(path.join(project, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+  write(path.join(project, '.claude', 'agents', 'reviewer.md'), 'same agent\n');
+  write(path.join(project, '.claude', 'commands', 'ship.md'), 'same command\n');
+  write(path.join(project, '.mcp.json'), JSON.stringify({ mcpServers: { ruflo: { command: 'ruflo', args: ['mcp', 'start'] } } }));
+  write(path.join(project, '.codex', 'agents', 'planner.toml'), 'name = "planner"\n');
+  write(path.join(project, '.codex', 'config.toml'), '[mcp_servers.ruflo]\ncommand = "ruflo"\nargs = ["mcp", "start"]\n');
+  write(path.join(project, '.opencode', 'agents', 'reviewer.md'), 'same agent\n');
+  write(path.join(project, '.opencode', 'commands', 'ship.md'), 'same command\n');
+  write(path.join(project, '.opencode', 'skills', 'project-open', 'SKILL.md'), 'open skill\n');
+  write(path.join(project, 'opencode.json'), JSON.stringify({ mcp: { ruflo: { type: 'local', command: ['ruflo', 'mcp', 'start'] } } }));
+
+  const result = collectCatalog({
+    ...roots, cwd: project, projects: [project], now: () => 1_700_000_000_000,
+    includePluginSurfaces: false, fsImpl: fixtureFs(root),
+    inspectProjectArtifacts: (_project, files) => new Map(files.map((file) => [file, {
+      repository: true, tracked: file.endsWith('reviewer.md'), workingTree: 'clean', reason: null,
+    }])),
+  });
+
+  for (const id of [
+    `claude-project-mcp:${project}`, `codex-project-mcp:${project}`,
+    `codex-project-agents:${project}`, `opencode-project-agents:${project}`,
+    `opencode-project-commands:${project}`, `opencode-project-dot-skills:${project}`,
+    `opencode-project-mcp-json:${project}`,
+  ]) assert.equal(result.surfaces.find((surface) => surface.id === id)?.status, 'ok', id);
+  const claudeAgent = result.items.find((item) => item.kind === 'agent' && item.name === 'reviewer');
+  const projectAgent = claudeAgent.presence.find((presence) => presence.host === 'claude' && presence.scope === 'project');
+  assert.equal(projectAgent.digest.status, 'measured');
+  assert.deepEqual(projectAgent.tracking, { repository: true, tracked: true, workingTree: 'clean', reason: null });
+  const mcp = result.items.find((item) => item.kind === 'mcpServer' && item.name === 'ruflo');
+  assert.equal(mcp.presence.filter((presence) => presence.scope === 'project').length, 3);
+  assert.equal(mcp.presence.filter((presence) => presence.scope === 'project')
+    .every((presence) => presence.digest?.status === 'measured'), true);
+});
+
+test('catalog never reclassifies a user capability root as project-local', (t) => {
+  const fixtureRoots = catalogFixture(t);
+  const { root, ...baseRoots } = fixtureRoots;
+  const userHome = path.join(root, 'user-home');
+  const claudeRoot = path.join(userHome, '.claude');
+  const agentsRoot = path.join(userHome, '.agents');
+
+  write(path.join(claudeRoot, 'skills', 'claude-user', 'SKILL.md'), 'claude user skill\n');
+  write(path.join(claudeRoot, 'agents', 'reviewer.md'), 'claude user agent\n');
+  write(path.join(claudeRoot, 'commands', 'review.md'), 'claude user command\n');
+  write(path.join(agentsRoot, 'skills', 'shared-user', 'SKILL.md'), 'shared user skill\n');
+
+  const result = collectCatalog({
+    ...baseRoots, claudeRoot, agentsRoot, cwd: root, projects: [userHome],
+    now: () => 1_700_000_000_000, includePluginSurfaces: false, fsImpl: fixtureFs(root),
+  });
+
+  for (const item of result.items) {
+    const sameFileInTwoScopes = item.presence.some((left) => item.presence.some((right) => (
+      left.host === right.host
+      && left.sourceFile === right.sourceFile
+      && left.scope !== right.scope
+    )));
+    assert.equal(sameFileInTwoScopes, false,
+      `${item.kind}:${item.name} must not be both user- and project-scoped on one host`);
+  }
+
+  assert.equal(result.surfaces.some((surface) => surface.scope === 'project'
+    && surface.project === userHome), false,
+  'a census cwd whose project roots are the user roots contributes no project surfaces');
+
+  const userPressure = result.projects.find((row) => row.project === userHome);
+  assert.equal(userPressure, undefined,
+    'the user home must not produce a project-pressure record');
+  assert.deepEqual(
+    result.items.find((item) => item.name === 'shared-user')?.hosts.sort(),
+    ['codex', 'opencode'],
+    'one shared user skill can legitimately be carried by both hosts',
+  );
+});
+
 test('catalog hashes bounded entrypoints but never returns their bodies', (t) => {
   const fixtureRoots = catalogFixture(t);
   const { root, ...roots } = fixtureRoots;
@@ -947,6 +1177,33 @@ test('catalog hashes bounded entrypoints but never returns their bodies', (t) =>
   });
   assert.ok(reads.some((file) => /SKILL\.md$/.test(file)), 'skill entrypoints are hashed');
   assert.doesNotMatch(JSON.stringify(result), /SECRET BODY/, 'artifact prose must not leave the collector');
+});
+
+test('skill definition evidence covers the bounded tree and fails closed on symlinks or caps', (t) => {
+  const root = fixture(t, 'catalog-definition');
+  const skill = path.join(root, 'skill');
+  write(path.join(skill, 'SKILL.md'), 'same entrypoint\n');
+  write(path.join(skill, 'references', 'guide.md'), 'first supporting file\n');
+  const first = artifactTreeDigest(skill, { fsImpl: fixtureFs(root) });
+  assert.equal(first.status, 'measured');
+  assert.equal(first.files.length, 2);
+
+  write(path.join(skill, 'references', 'guide.md'), 'different supporting file\n');
+  const changed = artifactTreeDigest(skill, { fsImpl: fixtureFs(root) });
+  assert.notEqual(first.value, changed.value,
+    'matching SKILL.md entrypoints do not imply matching skill definitions');
+
+  const capped = artifactTreeDigest(skill, { fsImpl: fixtureFs(root), maxEntries: 1 });
+  assert.equal(capped.status, 'unknown');
+  assert.match(capped.reason, /entry limit/);
+
+  try { fs.symlinkSync(path.join(skill, 'SKILL.md'), path.join(skill, 'alias.md')); } catch {
+    t.diagnostic('symlink creation unavailable on this platform');
+    return;
+  }
+  const linked = artifactTreeDigest(skill, { fsImpl: fixtureFs(root) });
+  assert.equal(linked.status, 'unknown');
+  assert.match(linked.reason, /symlink/);
 });
 
 test('an unreadable catalog surface has no count, and the total it feeds is a floor', (t) => {
@@ -1143,6 +1400,8 @@ test('codex MCP table names are read from config.toml without parsing values', (
     '[mcp_servers.ruflo]', 'command = "npx"',
     '[mcp_servers."with.dot"]',
     "[mcp_servers.'single']",
+    '[mcp_servers.ruvnet-brain.tools.search_ruvnet]',
+    '[mcp_servers.ruvnet-brain.tools.ruvnet_cli_run]',
     '[other.section]',
   ].join('\n');
   assert.deepEqual(tomlTableNames(source, 'mcp_servers'), ['ruflo', 'with.dot', 'single']);
@@ -1178,10 +1437,69 @@ test('an undecodable project is FLAGGED, never guessed at', () => {
   assert.equal(row.projectLabel, encoded, 'falling back to the encoded name beats inventing one');
 });
 
-test('labelSessions leaves an unattributed row alone', () => {
-  const [row] = labelSessions([{ session: 'rollout.jsonl', project: null }]);
+test('labelSessions identifies the host store when no working context is available', () => {
+  const [row] = labelSessions([{
+    session: 'rollout.jsonl', host: 'codex', project: null, path: '/sessions/rollout.jsonl',
+  }], { readCwd: () => null });
   assert.equal(Object.hasOwn(row, 'projectLabel'), false);
   assert.equal(Object.hasOwn(row, 'projectResolved'), false);
+  assert.deepEqual(row.context, {
+    kind: 'host-store', label: 'Codex session store', path: '/sessions',
+  });
+  assert.match(row.contextReason, /did not contain a working directory/);
+});
+
+test('labelSessions does not line-parse OpenCode shared storage as a transcript', () => {
+  let metadataReads = 0;
+  const [row] = labelSessions([{
+    session: 'opencode.db', host: 'opencode', project: null, path: '/sessions/opencode.db',
+  }], { readMetadata: () => { metadataReads += 1; return {}; } });
+  assert.equal(metadataReads, 0);
+  assert.equal(row.context.label, 'OpenCode session store');
+  assert.equal(row.identity.timeBasis, 'unavailable');
+});
+
+test('labelSessions attributes a flat Codex rollout from its bounded header cwd', () => {
+  const [row] = labelSessions([{
+    session: 'rollout.jsonl', host: 'codex', project: null, path: '/sessions/rollout.jsonl',
+  }], {
+    readCwd: () => '/repos/agentic-kit',
+    classifyContext: (cwd) => ({
+      kind: 'repository', label: 'agentic-kit', path: cwd, projectKey: 'project:0123456789abcdef',
+    }),
+  });
+  assert.equal(row.attribution, 'transcript-cwd');
+  assert.equal(row.projectLabel, 'agentic-kit');
+  assert.equal(row.projectResolved, true);
+  assert.equal(row.context.kind, 'repository');
+});
+
+test('labelSessions carries native identity and authoritative start time from the same bounded read', () => {
+  let metadataReads = 0;
+  const [row] = labelSessions([{
+    session: 'rollout-2026-09-03T09-10-15-native.jsonl', host: 'codex', project: null,
+    path: '/sessions/rollout-2026-09-03T09-10-15-native.jsonl', mtimeMs: 1_788_460_000_000,
+  }], {
+    readMetadata: () => {
+      metadataReads += 1;
+      return {
+        cwd: '/repos/agentic-kit', nativeId: 'native-session-id',
+        startedAt: '2026-09-03T16:10:15.342Z', timeBasis: 'started',
+      };
+    },
+    classifyContext: (cwd) => ({ kind: 'repository', label: 'agentic-kit', path: cwd }),
+  });
+  assert.deepEqual(row.identity, {
+    original: 'rollout-2026-09-03T09-10-15-native.jsonl',
+    nativeId: 'native-session-id',
+    startedAt: '2026-09-03T16:10:15.342Z',
+    lastModifiedAt: new Date(1_788_460_000_000).toISOString(),
+    timeBasis: 'started',
+    provenance: {
+      nativeId: 'transcript-head', startedAt: 'transcript-head', lastModifiedAt: 'file-mtime',
+    },
+  });
+  assert.equal(metadataReads, 1, 'working context and identity must share one bounded head read');
 });
 
 test('labelSessions decodes each distinct project once', () => {
@@ -1213,6 +1531,10 @@ test('collectStorage labels the sessions it returns', (t) => {
     assert.equal(s.projectLabel, 'keel', 'the wiring must reach topSessions, not just exist');
     assert.equal(s.projectResolved, true);
   }
+  const codex = result.topSessions.find((s) => s.host === 'codex');
+  assert.equal(codex.context.kind, 'directory');
+  assert.equal(codex.context.label, 'Folder · agentic-kit');
+  assert.equal(codex.attribution, 'transcript-cwd');
 });
 
 test('an undecodable name says WHICH reason — deleted, or never encodable', () => {

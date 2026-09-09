@@ -87,6 +87,7 @@ overviewSrc = inject(overviewSrc, "function noticeHtml(drift) { return String(dr
 let aboutSrc = readSplit('about.mjs');
 aboutSrc = inject(aboutSrc, 'var ABOUT = []; // PLACEHOLDER:ABOUT_JS', `var ABOUT=${ABOUT_JS};`);
 
+const datetimeSrc = readSplit('datetime.mjs');
 const intelligenceSrc = readSplit('intelligence.mjs');
 const pollSrc = readSplit('poll.mjs');
 // usage-rhythm.mjs declares its OWN `esc` on disk, and its comment says why:
@@ -124,6 +125,27 @@ const modelLifecycleSrc = readSplit('model-lifecycle.mjs');
 const usageOrchestratorsSrc = readSplit('usage-orchestrators.mjs');
 const systemReadoutSrc = readSplit('system-readout.mjs');
 const systemProjectsSrc = readSplit('system-projects.mjs');
+// ADR-0048 Maintenance workspace: maintenanceWorkspaceSrc MUST precede the
+// four destination modules below — each registers itself with
+// mntRegisterDestination() at its own top level (see each file's matching
+// comment), which dereferences maintenance-workspace.mjs's own top-level
+// `var mntDestLoaders = {}`. Concatenation order is real execution order for
+// that one statement, unlike the function-hoisted cross-file calls
+// everywhere else in this bundle.
+const maintenanceWorkspaceSrc = readSplit('maintenance-workspace.mjs');
+const maintenanceFiltersSrc = readSplit('maintenance-filters.mjs');
+const maintenanceCardsSrc = readSplit('maintenance-cards.mjs');
+const maintenanceOperationSrc = readSplit('maintenance-operation.mjs');
+const maintenanceLanguageLogosSrc = readSplit('maintenance-language-logos.mjs');
+const maintenanceFocusSrc = readSplit('maintenance-focus.mjs');
+const maintenanceInventorySrc = readSplit('maintenance-inventory.mjs');
+const maintenanceRelationshipsSrc = readSplit('maintenance-relationships.mjs');
+const maintenanceInspectorSrc = readSplit('maintenance-inspector.mjs');
+const maintenanceGuidanceSrc = readSplit('maintenance-guidance.mjs');
+const maintenanceDiscoverySrc = readSplit('maintenance-discovery.mjs');
+const maintenanceActivitySrc = readSplit('maintenance-activity.mjs');
+const systemMaintenanceActionsSrc = readSplit('system-maintenance-actions.mjs');
+const systemMaintenanceSrc = readSplit('system-maintenance.mjs');
 const bootSrc = readSplit('boot.mjs');
 
 // Concatenation order matches the pre-split file's own top-to-bottom
@@ -133,5 +155,5 @@ const bootSrc = readSplit('boot.mjs');
 // sequence) running in the same relative order it always has.
 export const JS = `
 (function(){
-${bootstrapSrc}${overviewSrc}${intelligenceSrc}${pollSrc}${usageRhythmSrc}${usagePromptsSrc}${usageContextHooksSrc}${usageSrc}${modelLifecycleSrc}${usageOrchestratorsSrc}${aboutSrc}${systemReadoutSrc}${systemProjectsSrc}${bootSrc}})();
+${bootstrapSrc}${overviewSrc}${datetimeSrc}${intelligenceSrc}${pollSrc}${usageRhythmSrc}${usagePromptsSrc}${usageContextHooksSrc}${usageSrc}${modelLifecycleSrc}${usageOrchestratorsSrc}${aboutSrc}${systemReadoutSrc}${systemProjectsSrc}${maintenanceWorkspaceSrc}${maintenanceFiltersSrc}${maintenanceCardsSrc}${maintenanceOperationSrc}${maintenanceLanguageLogosSrc}${maintenanceFocusSrc}${maintenanceInventorySrc}${maintenanceRelationshipsSrc}${maintenanceInspectorSrc}${maintenanceGuidanceSrc}${maintenanceDiscoverySrc}${maintenanceActivitySrc}${systemMaintenanceActionsSrc}${systemMaintenanceSrc}${bootSrc}})();
 `;

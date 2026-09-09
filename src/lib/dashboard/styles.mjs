@@ -11,8 +11,9 @@ import { BASE_CSS } from './styles/base.mjs';
 import { USAGE_CSS } from './styles/usage.mjs';
 import { ABOUT_CSS } from './styles/about.mjs';
 import { SYSTEM_CSS } from './styles/system.mjs';
+import { MAINTENANCE_CSS } from './styles/maintenance.mjs';
 
-export const CSS = `${BASE_CSS}${USAGE_CSS}${ABOUT_CSS}${SYSTEM_CSS}`;
+export const CSS = `${BASE_CSS}${USAGE_CSS}${ABOUT_CSS}${SYSTEM_CSS}${MAINTENANCE_CSS}`;
 
 // ── Client script ────────────────────────────────────────────────────────────
 // No backticks and no ${ } anywhere below — this whole string is embedded inside

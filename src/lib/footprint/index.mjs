@@ -21,12 +21,10 @@
 // never an object full of zeros — there is no numeric field for a renderer to
 // misread. A measured zero is a real zero and stays one.
 //
-// KNOWN COST, deliberately accepted for v1: the deep collectors are
-// synchronous, so a scan occupies the event loop in multi-second stretches.
-// The tier boundary is what contains this — nothing on the cheap path walks a
-// tree — and the scan yields between phases so an embedding server is not
-// blocked for the whole run. Moving the walk off-thread is a separate
-// decision with its own seam.
+// Deep collectors use synchronous filesystem APIs, but production runs them in
+// one worker so dashboard reads and progress polls remain responsive. Injected
+// filesystem/collector collaborators stay inline: functions are not serialized
+// across the worker boundary, and hermetic tests exercise the same runner.
 import fs from 'node:fs';
 import path from 'node:path';
 import {
@@ -36,16 +34,15 @@ import { loadKitConfig } from '../config.mjs';
 import { defaultOpencodeDbPath } from '../usage-opencode.mjs';
 import { UNKNOWN, measured, statNode, unknown } from './walk.mjs';
 import { collectRuntimeCensus } from './runtime.mjs';
-import { collectInstall } from './install.mjs';
-import { collectStorage } from './storage.mjs';
-import { collectCatalog } from './catalog.mjs';
 import { probeCatalogDrift } from './catalog-evidence.mjs';
-import { collectProjects } from './projects.mjs';
-import { collectConsumers } from './consumers.mjs';
 import { discoverProjectSources } from './project-sources.mjs';
 import {
+  DEEP_SCAN_PHASES, DEFAULT_DEEP_COLLECTORS, runDeepScan,
+} from './deep-scan-runner.mjs';
+import { runDeepScanInWorker } from './deep-scan-engine.mjs';
+import {
   SNAPSHOT_SECTIONS, SNAPSHOT_STALE_AFTER_MS, carryForward, readSnapshot, snapshotFreshness,
-  snapshotPath, summarizeCompleteness, writeSnapshot,
+  snapshotPath, writeSnapshot,
 } from './snapshot.mjs';
 
 /** Same window as the project-snapshot cache: long enough that a burst of
@@ -54,9 +51,7 @@ export const CHEAP_TTL_MS = 60_000;
 
 /** Deep-scan progress phases, in order. `idle` is the state before any scan
  *  has run in this process; `done`/`failed` are terminal. */
-export const SCAN_PHASES = Object.freeze([
-  'idle', 'install', 'storage', 'catalog', 'projects', 'consumers', 'persist', 'done', 'failed',
-]);
+export const SCAN_PHASES = DEEP_SCAN_PHASES;
 
 /** Whether the ranked-consumers view walks project working trees. Off by
  *  default and deliberately: one repository on this machine is 175 GB, which is
@@ -135,11 +130,6 @@ export function knownFileNodes({ asOf = Date.now(), fsImpl = fs, specs = null } 
   });
 }
 
-/** Hand the event loop back between deep-scan phases. Not a throttle: the
- *  collectors are synchronous, and without this an embedding HTTP server
- *  cannot answer anything at all for the whole run. */
-const breathe = () => new Promise((resolve) => { setImmediate(resolve); });
-
 function freshScanState() {
   return {
     running: false,
@@ -155,34 +145,6 @@ function freshScanState() {
     // What the RUNNING scan is measuring, not what the next one would: `null`
     // until a scan starts, so "no scan has run" cannot read as "trees off".
     includeProjectTrees: null,
-  };
-}
-
-/**
- * Read a discovery result without deciding what it means for the caller.
- *
- * Two shapes are legitimate. `discoverProjectSources()` returns a payload whose
- * `projects` include projects that have since been DELETED — that is the point
- * of `everSeen` — so only the surviving subset can be measured, and the payload
- * itself is forwarded so the Projects section can publish everSeen/onDisk/
- * gitRepos/method rather than recomputing them from the rows it kept. A bare
- * array is an explicit catalog and is passed straight through as one.
- *
- * @param {any} result a discoverProjectSources() payload, an explicit catalog
- *   array, or whatever an injected discovery returned — including nothing
- * @returns {{ sources: object|null, catalog: Array|null, onDisk: Array }}
- */
-function readDiscovery(result) {
-  if (Array.isArray(result)) {
-    return { sources: null, catalog: result, onDisk: result.filter((p) => p?.path) };
-  }
-  if (!result || typeof result !== 'object' || !Array.isArray(result.projects)) {
-    return { sources: null, catalog: null, onDisk: [] };
-  }
-  return {
-    sources: result,
-    catalog: null,
-    onDisk: result.projects.filter((project) => project?.path && project.exists !== false),
   };
 }
 
@@ -209,6 +171,7 @@ function readDiscovery(result) {
  *   includeProjectTrees?: boolean,
  *   collectors?: Record<string, Function>, collectorOptions?: Record<string, object>,
  *   readSnapshotImpl?: typeof readSnapshot, writeSnapshotImpl?: typeof writeSnapshot,
+ *   runWorkerImpl?: typeof runDeepScanInWorker,
  * }} [options]
  */
 export function createSystemCollector({
@@ -225,17 +188,25 @@ export function createSystemCollector({
   collectorOptions = {},
   readSnapshotImpl = readSnapshot,
   writeSnapshotImpl = writeSnapshot,
+  runWorkerImpl = runDeepScanInWorker,
 } = {}) {
   const collect = {
     runtime: collectRuntimeCensus,
-    install: collectInstall,
-    storage: collectStorage,
-    catalog: collectCatalog,
-    projects: collectProjects,
-    consumers: collectConsumers,
+    ...DEFAULT_DEEP_COLLECTORS,
     ...collectors,
   };
   const snapshotOpts = { ...(snapshotFile ? { file: snapshotFile } : {}), fsImpl };
+  // Production inputs (`cwd`, snapshot path, project-tree toggle) are data and
+  // cross the worker boundary. Any injected function/fs or collector option is
+  // an in-process contract and selects the transport-neutral runner directly.
+  const useWorker = now === Date.now
+    && fsImpl === fs
+    && loadConfig === loadKitConfig
+    && discoverProjects === discoverProjectSources
+    && readSnapshotImpl === readSnapshot
+    && writeSnapshotImpl === writeSnapshot
+    && Object.keys(collectors).length === 0
+    && Object.keys(collectorOptions).length === 0;
 
   /** @type {{ at: number, runtime: any, knownFiles: object,
  *           snapshot: ReturnType<typeof readSnapshot>,
@@ -319,11 +290,9 @@ export function createSystemCollector({
     };
   }
 
-  /** Run the five deep collectors in order, persist, invalidate the cheap
-   *  cache. Never rejects: a scan that blows up records the reason in `scan`
-   *  and resolves with `ok: false`, so a fire-and-forget caller (the HTTP
-   *  route) cannot produce an unhandled rejection and a waiting caller (the
-   *  CLI) still gets an answer. */
+  /** Run the five deep collectors using the appropriate execution transport.
+   *  Never rejects: a failed worker or collector records the reason in `scan`
+   *  and resolves with `ok: false`. */
   async function runDeep() {
     const startedAt = now();
     const withTrees = includeProjectTrees;
@@ -335,140 +304,29 @@ export function createSystemCollector({
       asOf: startedAt,
       includeProjectTrees: withTrees,
     };
-    /** @type {Record<string, any>} */
-    const sections = {};
-    try {
-      // Yield BEFORE the first synchronous collector. `refreshDeep()` runs this
-      // body up to the first await, so without this an HTTP caller that starts
-      // a scan would wait out the install walk before its own response — the
-      // start-or-attach route must return while the scan runs, not after it.
-      await breathe();
-
-      // Discovery is a candidate-path source shared by three collectors
-      // (invariant 9). Resolve it ONCE — a ~3,200-transcript sweep — so
-      // storage's learning-store nodes, the Projects table and the consumers
-      // ranking describe the same set of projects.
-      let discovered = null;
-      try { discovered = discoverProjects({ fsImpl }); } catch { discovered = null; }
-      const { sources, catalog, onDisk } = readDiscovery(discovered);
-      // Only projects that still exist can be walked; the vanished ones survive
-      // in the Projects section's everSeen, not as unmeasurable paths handed to
-      // a collector. `null` (discovery failed) stays null — storage reports that
-      // as unknown, which a zero-length array would not.
-      const projectPaths = discovered ? onDisk.map((project) => project.path) : null;
-
-      let cfg = {};
-      try { cfg = loadConfig() ?? {}; } catch { cfg = {}; }
-
-      sections.install = collect.install({ now: () => startedAt, fsImpl, ...(collectorOptions.install ?? {}) });
-      await breathe();
-
-      markPhase('storage');
-      // `projects: null` is load-bearing — it means "no catalog was supplied",
-      // which storage reports as unknown rather than a fabricated zero.
-      sections.storage = collect.storage({
-        projects: projectPaths, now: () => startedAt, fsImpl, ...(collectorOptions.storage ?? {}),
-      });
-      await breathe();
-
-      markPhase('catalog');
-      // The same on-disk project list storage measures. A skill defined in a
-      // repo is as deployed as one in ~/.claude, so the inventory covers every
-      // project rather than only the one the dashboard was launched from —
-      // `?? []` keeps "discovery failed" as user scope, never as a claim that
-      // no project defines anything.
-      sections.catalog = collect.catalog({
-        cwd, cfg, projects: projectPaths ?? [], now: () => startedAt, fsImpl,
-        ...(collectorOptions.catalog ?? {}),
-      });
-      await breathe();
-
-      markPhase('projects', { scanned: 0, total: onDisk.length });
-      sections.projects = collect.projects({
-        // Whichever shape discovery produced: a sources payload carries
-        // everSeen/onDisk/gitRepos/method through to the KPIs, an explicit
-        // array is measured verbatim. Both slots are null when discovery
-        // failed, which makes the section report the failure rather than an
-        // empty machine.
-        sources,
-        projects: catalog,
-        now: () => startedAt,
-        fsImpl,
-        onProgress: ({ scanned, total, path: at }) => {
-          scan = { ...scan, scanned, total, path: at ?? null };
-        },
-        ...(collectorOptions.projects ?? {}),
-      });
-      await breathe();
-
-      // Consumers runs LAST because it is the only collector that can adopt
-      // another section's figures instead of re-walking: install's tool trees
-      // and — when project trees are in scope — every ProjectFootprint's
-      // totalBytes, which is what keeps the toggle from walking a 175 GB
-      // repository a second time in the same scan.
-      markPhase('consumers');
-      const measuredProjects = sections.projects?.projects;
-      sections.consumers = collect.consumers({
-        now: () => startedAt,
-        fsImpl,
-        install: sections.install ?? null,
-        // Adopted footprints when the Projects phase measured any, the bare
-        // discovered paths otherwise (a truncated or LOC-less projects scan
-        // still leaves the ranking able to walk what it names).
-        projects: Array.isArray(measuredProjects) && measuredProjects.length
-          ? measuredProjects
-          : projectPaths,
+    const onActivity = ({ phase, ...extra }) => markPhase(phase, extra);
+    const completed = useWorker
+      ? await runWorkerImpl({
+        startedAt, cwd, includeProjectTrees: withTrees, snapshotFile, onActivity,
+      })
+      : await runDeepScan({
+        startedAt,
+        cwd,
         includeProjectTrees: withTrees,
-        ...(collectorOptions.consumers ?? {}),
+        fsImpl,
+        loadConfig,
+        discoverProjects,
+        collectors: collect,
+        collectorOptions,
+        snapshotOpts,
+        writeSnapshotImpl,
+        now,
+        onActivity,
       });
-      await breathe();
-
-      markPhase('persist');
-      const persisted = writeSnapshotImpl(sections, { ...snapshotOpts, now: now(), asOf: startedAt });
-      const finishedAt = now();
-      scan = {
-        ...scan,
-        running: false,
-        phase: 'done',
-        finishedAt,
-        durationMs: finishedAt - startedAt,
-        // A snapshot that could not be written is a degraded convenience, not a
-        // failed scan: the figures were still measured. Say so without
-        // pretending the scan failed.
-        error: persisted.ok ? null : `snapshot not persisted: ${persisted.error}`,
-      };
-      cheap = null;
-      return {
-        ok: true,
-        asOf: startedAt,
-        sections,
-        completeness: summarizeCompleteness(sections),
-        persisted,
-        error: scan.error,
-      };
-    } catch (error) {
-      const finishedAt = now();
-      const reason = String(error?.code || error?.message || error);
-      scan = {
-        ...scan,
-        running: false,
-        phase: 'failed',
-        finishedAt,
-        durationMs: finishedAt - startedAt,
-        error: reason,
-      };
-      cheap = null;
-      // Whatever DID complete is returned rather than discarded — one failed
-      // section must not erase three measured ones.
-      return {
-        ok: false,
-        asOf: startedAt,
-        sections,
-        completeness: summarizeCompleteness(sections),
-        persisted: null,
-        error: reason,
-      };
-    }
+    const { terminal, ...result } = completed;
+    scan = { ...scan, ...terminal };
+    cheap = null;
+    return result;
   }
 
   return {

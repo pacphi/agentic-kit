@@ -1,6 +1,16 @@
 # ADR-0025 — Machine footprint: infrastructure metrics for install, runtime, storage, and catalog
 
 - **Status:** Implemented
+- **Updated:** 2026-09-08 — installed tools preserve measured executable locations
+  for private path reveal, with PATH resolution and bounded package-manifest fallback;
+  Windows command extensions and POSIX executable checks are covered by fixtures.
+- **Updated:** 2026-09-08 — dashboard instant displays share browser-local date/time
+  formatting; published calendar dates retain their day and stored timestamps remain UTC.
+- **Updated:** 2026-09-08 — bounded declared resource descriptions are an explicit read-surface
+  exception; project ecosystem description adapters remain proposed, not implemented.
+- **Updated:** 2026-09-08 — registry 2026.09.1 covers the September TIOBE top 50;
+  graphical/container languages have presence-only evidence and shared suffixes use
+  bounded syntax checks without retaining source text.
 - **Date:** 2026-08-06
 - **Updated:** 2026-08-06 — accepted and implemented; the open points below are resolved decisions
 - **Updated:** 2026-08-07 — §7 replaced by an enumerated read surface (the collectors now read a
@@ -11,14 +21,48 @@
   Install observes AQE-owned Vibium and both payloads; daemon cleanup gains an opt-in,
   identity-proven Ruflo MCP orphan path; Catalog covers the launching repository plus observed
   on-disk projects and attributes Codex `.agents/skills` separately
-- **Updated:** 2026-09-03 — CatalogInventory v2 preserves plugin marketplace/version relationships,
-  separates user/project/plugin occurrences, hashes bounded capability entrypoints, reports
-  project pressure and source-probe drift, and feeds a read-only skill maintenance plan. Mutating
-  remediation is explicitly deferred to issue #200.
+- **Updated:** 2026-09-03 — CatalogInventory v3 preserves plugin marketplace/version relationships,
+  separates user/project/plugin occurrences, hashes bounded capability entrypoints and complete
+  bounded skill definitions, reports project pressure and source-probe drift, and feeds read-only
+  relationship evidence to Maintenance.
 - **Updated:** 2026-09-03 — the Catalog leads with the host profile and a five-record cross-host
   viewport, then gives Project skill pressure a full-width row; pressure groups one disclosure per
   relevant project, keeps the launching project first, omits measured-zero project rows, and moves
   per-host source evidence plus one deduplicated plan command behind progressive disclosure.
+- **Updated:** 2026-09-03 — ADR-0044 implements Maintenance as a separate control plane under the
+  System shell. Machine Footprint collectors, Catalog, pressure, and System measurement routes
+  remain read-only.
+- **Updated:** 2026-09-03 — a session cwd that aliases a host user root no longer creates a
+  project occurrence: one host/kind/path cannot be both user and project scope, while a shared
+  user root carried by different hosts remains explicit cross-host evidence. The FootprintSnapshot
+  schema advances to v3 so cached v2 scope aliases cannot be replayed.
+- **Updated:** 2026-09-04 — Runtime distinguishes proven repositories, host app services, desktop
+  apps, host state, user home, system root, and ordinary folders instead of calling every readable
+  working directory a project. Storage reads only the already-ranked top-N transcript heads to
+  attribute dated Codex rollouts from their `cwd` metadata.
+- **Updated:** 2026-09-04 — that same bounded top-N head read now also retains the host's opaque
+  native session ID and timezone-bearing opening timestamp. Sessions presents a localized
+  two-line identity, exposes the original filename and exact time on focus or hover, and labels
+  file mtime fallback as last activity rather than a fabricated start.
+- **Updated:** 2026-09-03 — project inventory expands to supported agent, command, skill, and MCP
+  surfaces across Claude, Codex, and OpenCode; Git tracking is observed without becoming ownership.
+  CatalogInventory advances to v3 and FootprintSnapshot to v4 so older evidence cannot be replayed
+  as complete relationship evidence.
+- **Updated:** 2026-09-03 — ADR-0045 separates physical artifacts from host consumer bindings,
+  applies host-specific discovery and enablement, groups cross-host relationships once, and
+  advances CatalogInventory to v4 and FootprintSnapshot to v6.
+- **Updated:** 2026-09-03 — ADR-0046 moves production deep collection to a worker, reuses compatible
+  physical observations within one explicit scan, measures only the hosted-repository population
+  the Projects table names, reports all exclusions, and advances FootprintSnapshot to v7.
+- **Updated:** 2026-09-04 — proposed ADR-0048 folds Catalog presentation into an inventory-led
+  Maintenance workspace while preserving this ADR's read-only measurement ownership; no current
+  collector or mutation boundary changes until that proposal is implemented
+- **Updated:** 2026-09-05 — ADR-0048 is now Accepted and implemented. Catalog is no longer a
+  visible dashboard destination: `src/lib/dashboard/page.mjs` redirects `#system/catalog` into
+  Maintenance's Inventory route, which presents this context's Catalog v4 evidence at placement
+  grain alongside installs, models, and provider configuration. This context's collectors, `ak
+  system`, and `GET /api/system` are unchanged and remain the sole source of that evidence; the
+  management projection reads it and mutates nothing here.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0005](0005-dashboard-in-page-routing-reveal.md),
   [ADR-0007](0007-maintainer-admin-local-telemetry.md),
@@ -26,20 +70,31 @@
   [ADR-0012](0012-observability.md),
   [ADR-0014](0014-dashboard-auth-and-remediation.md),
   [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),
-  [ADR-0024](0024-project-intelligence-telemetry.md)
+  [ADR-0024](0024-project-intelligence-telemetry.md),
+  [ADR-0044](0044-receipt-aware-maintenance-control-plane.md),
+  [ADR-0045](0045-artifact-consumer-bindings-and-explicit-maintenance-scans.md)
 
 > **2026-09-03 amendment.** Catalog identity is no longer only `(kind, normalized name)`: a
 > standalone skill and a plugin-contributed skill with the same logical name are distinct catalog
 > identities joined by explicit exact-name and exact-entrypoint-digest relationships. Full
 > `plugin@marketplace` identity, installed version, enabled state, scope, and evidence authority are
-> retained per host occurrence. The deep snapshot schema advances to v2 so old flattened identities
-> cannot render as current. System remains read-only; `ak x skills plan` classifies and previews,
-> while [Maintenance](../ddd/maintenance.md) / issue #200 owns future mutation and receipts.
+> retained per host occurrence. Catalog v3 adds a bounded full-definition digest for skill trees,
+> per-entry MCP configuration fingerprints, broader project agent/command/MCP surfaces, and Git
+> tracking evidence. The deep snapshot schema is now v4 so old flattened or incomplete identities
+> cannot render as current. Machine Footprint and its System measurement views remain read-only;
+> `ak x skills plan` classifies and previews, while [Maintenance](../ddd/maintenance.md) owns
+> mutation and receipts.
 > The pressure view is summary-first: it counts projects with local skills and projects carrying
 > same-name or matching-entrypoint relationships, then groups host evidence beneath one native
 > disclosure per project. Inventory completeness and model-context inclusion are separate facts;
 > hosts do not currently report the latter, so that caveat appears once rather than as a repeated
 > `complete · context unknown` row label. The all-kind detail remains in the Catalog matrix.
+> Project discovery may observe a user home as a session cwd, but discovery alone cannot change a
+> capability's scope. Catalog rejects any project candidate whose host, kind, and resolved surface
+> path equal an already declared user surface. This removes false home-directory pressure without
+> requiring Git and preserves legitimate non-repository project-local skills.
+> ADR-0044 implements the Maintenance control-plane contract; its placement under System
+> does not add mutation to this context's collectors or routes.
 
 <!-- amendment boundary -->
 
@@ -146,7 +201,8 @@ left of Overview; the System area itself is unaffected):
 [ Overview | Usage | Observability | System ]
 
 System secondary rail:
-  [ Summary | Storage | Runtime | Catalog | Projects ]        [ as of 2h ago · ⟳ rescan ]
+  [ Summary | Advisory | Sessions | Storage | Runtime | Catalog | Projects | Maintenance ]
+                                                [ full scan · 2h ago ] [ ⟳ Full scan ]
 
 Summary   KPI band: install size · data size · live processes (combined RSS) · projects
           ("N ever · M on disk") · skills/agents/commands counts · machine free-space
@@ -155,7 +211,9 @@ Summary   KPI band: install size · data size · live processes (combined RSS) �
 Storage   Breakdown tree: category → host → project → session. Transcripts vs ledgers/logs vs
           learning stores vs kit caches. Trailing-30d growth sparkline per host. Top-N largest
           sessions/files. Advisory reclaimable candidates in two safety tiers, never one total.
-Runtime   Live process table (host, pid, CPU%, RSS, uptime, bound project) + combined totals.
+Runtime   Live process table (host, pid, CPU%, RSS, uptime, working context) + combined totals.
+          A project label requires a proven Git boundary; app services and desktop apps are named
+          as processes, while host state, home, root, and ordinary folders remain directories.
           Daemon census (count, age vs TTL).
 Catalog   Deduplicated skills / agents / commands / plugins / MCP servers, each with a per-host
           presence matrix (which hosts carry it).
@@ -197,19 +255,20 @@ Metrics marked ✚ are additions beyond the requesting examples; the taxonomy is
 | Install | Native-addon inventory and duplicate builds across trees (better-sqlite3, hnswlib, onnxruntime) ✚ | walk |
 | Install | Shared caches: npx cache envs, brain KB, Playwright/Puppeteer/agent-browser/Vibium browser binaries ✚ | known roots |
 | Install | Total install bytes + machine free-space denominator ✚ | walk + `statfs` |
-| Runtime | Per live host process: pid, host, CPU%, RSS, uptime, bound project | existing runtime survey + `ps -o pcpu,rss` |
+| Runtime | Per live host process: pid, host, CPU%, RSS, uptime, and working context (proven repository, app/service, host state, home/root, or folder) | existing runtime survey + bounded argv classification + `ps -o pcpu,rss` |
 | Runtime | Daemon census: count, age vs 12h TTL ✚ | existing daemon registry |
 | Runtime | Child / MCP-server process count ✚ | survey process tree |
 | Storage | Transcript bytes + file counts: host → project → session | transcript-root walk |
 | Storage | Host ledgers/logs: Codex `state_N.sqlite`, statusline tee, runtime-debug log, OpenCode store | known paths |
 | Storage | Learning/memory stores: per-project `.claude-flow`, `.agentic-qe`, agentdb/HNSW/RVF files ✚ | project catalog + walk |
 | Storage | ak's own caches: usage-index.json, observability-workspaces.json, footprint snapshot itself ✚ | known paths |
-| Storage | Top-N largest sessions / files ✚ | walk |
+| Storage | Top-N largest sessions / files, with working context and native identity from only those transcript heads ✚ | walk + one bounded opening-metadata read |
 | Storage | Trailing-30d growth per host (from mtime + size) ✚ | walk metadata |
 | Storage | Advisory reclaimable candidates (stale npx envs, aged transcripts, superseded cache snapshots, regenerable package caches, redundant browser revisions, extra runtime versions, orphaned worktrees), each with a `safety` tier ✚ | walk + heuristics |
 | Storage | Ranked largest consumers across ~50 curated third-party cache roots, grouped by ecosystem, with containment/residual accounting ✚ | consumer registry + walk |
-| Catalog | Unique skills / agents / commands across hosts, per-host presence matrix, including project `.claude/skills` and Codex `.agents/skills` | host catalog surfaces |
-| Catalog | Plugins and registered MCP servers ✚ | settings surfaces |
+| Catalog | Unique skills / agents / commands across hosts, per-host presence matrix, including supported Claude, Codex, and OpenCode user/project surfaces | host catalog surfaces |
+| Catalog | Plugins and registered MCP servers, with bounded per-registration configuration fingerprints ✚ | settings surfaces |
+| Catalog | Bounded skill entrypoint/full-definition digests and project Git-tracking evidence for relationship classification ✚ | filesystem + Git observation |
 | Catalog | Config surface: managed CLAUDE.md/AGENTS.md block count, settings file sizes ✚ | managed-blocks registry |
 | Projects | Projects **ever seen** across hosts and the **on-disk** subset ✚; per on-disk project: LOC by language, detected frameworks/SDKs/tools by presence ✚, the unrecognized extension/dependency tail ✚, working-tree bytes, `.git` bytes ✚, `node_modules` bytes ✚, last activity | own cross-host discovery + walk |
 | Projects | Git remote web link per project (origin URL → GitHub/GitLab/etc. page; "local only" when absent) ✚ | `.git/config` remote parse — the admin collector's `parseRepoSlug` shapes, reused |
@@ -288,18 +347,24 @@ taken from it:
 | Directory entries, `lstat` | name, kind, size, mtime, blocks | anything inside a file |
 | `.git/config` | the origin remote URL | every other key |
 | `.git/worktrees/<name>/gitdir` | one path, bounded to 4 KB | — |
-| A transcript's head (≤256 KB, ≤40 parsed lines) | the session's `cwd` **field** | every message, prompt, tool call, tool result and model output |
+| A transcript's head (≤256 KB, ≤40 parsed lines) | opening `cwd`, opaque native session ID, and timezone-bearing timestamp fields | every message, prompt, generated title, tool call, tool result and model output |
 | OpenCode's session store (read-only) | the `directory` column | every other column and every message row |
 | A project's own manifests (≤3 deep, ≤64 files, ≤512 KB each) | dependency **keys** | values, scripts, anything executable — nothing is evaluated or resolved |
-| A project's own source files | the count of `\n` bytes | the text: each 64 KB chunk is counted and overwritten |
+| Resource Markdown frontmatter and installed plugin manifests (≤64 KiB each) | explicit description string, ≤1024 characters | body text and unrelated manifest values |
+| A project's own source files | the count of `\n` bytes; a transient ≤16 KiB prefix for ambiguous language/XML signatures | the text: each 64 KB chunk is counted and overwritten |
 
-Each of those yields a path, a name, or an integer. **No message body, prompt, tool call, tool
-result, model output, or manifest value enters this domain, in any tier, on any path.**
+Each of those yields a path, an opaque identifier, an instant, a name, or an integer. **No message
+body, prompt, generated title, tool call, tool result, model output, enters this domain. The explicit resource-description fields above are the only new
+manifest-value exception; project stack manifests still expose dependency keys only.**
 
-Three of the rows are justifications rather than mere disclosures. The transcript `cwd` read is
-the *only* honest way to know which project a session belonged to — the alternative is decoding
+Three of the rows are justifications rather than mere disclosures. The transcript opening-metadata
+read is the *only* honest way to know which project a session belonged to and which host-native
+identity and start evidence it declared — the alternatives are decoding
 Claude's transcript-directory name, which is a lossy encoding that a naive decode gets wrong for
-85% of directories on a real corpus (§9). It is also the same read
+85% of directories on a real corpus (§9), or parsing a host-specific filename as if it were a
+stable public schema. Codex accepts only the first `session_meta`; Claude reports its first
+timezone-bearing event as **first recorded**, not necessarily started. A missing declared instant
+falls back to measured file mtime labeled **last active**. It is also the same read
 `native-transcript-discovery.mjs` already performs for Observability at the same trust boundary,
 and it is *discovery*, which supplies a candidate path and never a measurement. The manifest read
 is the same class of datum as `.git/config`'s remote: a bounded read of a declaration file, for
@@ -470,7 +535,7 @@ The draft left four points open. All four are decided; this section is the recor
      (`NtQueryInformationProcess` → PEB → `RTL_USER_PROCESS_PARAMETERS` → `CurrentDirectory`).
 
    If the P/Invoke path fails for any reason — antivirus block, execution policy, insufficient
-   rights, WOW64 bitness mismatch — every other field still returns and the Project column
+   rights, WOW64 bitness mismatch — every other field still returns and the Working context column
    degrades to an explicit "not attributable on Windows" carrying the failure reason. An empty
    census is treated as a broken survey, not an idle machine. This is genuinely verified rather
    than asserted: `windows-latest` is already in the CI matrix (`.github/workflows/ci.yml`), so

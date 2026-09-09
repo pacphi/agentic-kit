@@ -67,6 +67,10 @@ import { renderPage } from './dashboard/page.mjs';
 // module does not do.
 import { BASELINE_TRAILING_DAYS } from './usage-aggregate.mjs';
 import { requestRejection } from './dashboard/request-security.mjs';
+import { createMaintenanceDashboardApi } from './dashboard/maintenance-api.mjs';
+import {
+  MAINTENANCE_MUTATION_ROUTES, MAINTENANCE_V2_MUTATION_ROUTES, maintenanceMutationRejection,
+} from './dashboard/maintenance-security.mjs';
 import {
   readJsonSafe, mintToken, tokenMatches, sendJson, sendUnauthorized, sendNotFound, listenLoopback,
 } from './loopback-server.mjs';
@@ -960,6 +964,40 @@ function sendTranscriptJson(res, status, payload) {
  *  survey, and a panel that never opens that tab must not pay for them. One
  *  instance per dashboard server — it owns the cheap tier's TTL cache and the
  *  deep scan's single-flight slot, and a second instance would defeat both. */
+/** How the dashboard obtains the ADR-0048 management facade. Injectable like
+ *  `maintenance`: a function is called to produce it, a value is reused
+ *  verbatim, and the default composes it lazily over the SAME maintenance
+ *  service and collector. Hermeticity rule: the default facade is composed
+ *  only when the maintenance service is also the default one (or the caller
+ *  supplied managementOptions). An injected maintenance service without an
+ *  injected facade means the caller owns that composition; the server never
+ *  wraps an owner-private facade (real control root, real kit.json) around
+ *  it on its own — such a server answers 503 on every v2 route. */
+function managementProvider({ management, maintenance, managementOptions, maintenanceOptions, getMaintenance, getSystem }) {
+  if (typeof management === 'function') return management;
+  if (management) return async () => management;
+  if (maintenance && Object.keys(managementOptions).length === 0) return async () => null;
+  // The facade shares the maintenance service's private root and clock unless
+  // managementOptions says otherwise, so both read and write one control dir.
+  const shared = Object.fromEntries(['controlRoot', 'fsImpl', 'now']
+    .filter((key) => maintenanceOptions[key] !== undefined).map((key) => [key, maintenanceOptions[key]]));
+  // A pre-built maintenance service carries its own (possibly temporary)
+  // control root that this server cannot see. Composing the facade over the
+  // DEFAULT root would then write owner-private state (inventory snapshots,
+  // locators, preferences) into the user's real state directory while the
+  // service writes elsewhere — exactly what a test with provider stubs did.
+  // Refuse at composition time so such a caller fails loudly instead.
+  if (maintenance && managementOptions.controlRoot === undefined && shared.controlRoot === undefined) {
+    throw new TypeError('an injected maintenance service requires an explicit managementOptions.controlRoot');
+  }
+  return async () => {
+    const [{ createManagementService }, maintenanceService, collector] = await Promise.all([
+      import('./maintenance/management/service.mjs'), getMaintenance(), getSystem(),
+    ]);
+    return createManagementService({ maintenance: maintenanceService, collector, ...shared, ...managementOptions });
+  };
+}
+
 function lazySystem(systemOptions = {}) {
   let instancePromise;
   return async () => {
@@ -996,7 +1034,9 @@ function lazyLive(liveOptions = {}) {
  *           intelClientBuffer?: number, intelMaxClients?: number,
  *           discoverProjects?: () => Array<{ path: string, label: string, source?: string }>,
  *           machineWideIntel?: (projects: Array<any>) => any,
- *           models?: any, modelScopeKey?: string, system?: any, systemOptions?: any }} [opts]
+ *           models?: any, modelScopeKey?: string, system?: any, systemOptions?: any,
+ *           maintenance?: any, maintenanceOptions?: any,
+ *           management?: any, managementOptions?: any }} [opts]
  * @returns {Promise<{ url: string, urlWithToken: string, port: number, token: string, close: () => Promise<void> }>}
  */
 export function startDashboard({
@@ -1007,6 +1047,7 @@ export function startDashboard({
   transcriptClientBuffer = 64, transcriptMaxClients = 16,
   intelWatch, intelClientBuffer = 256, intelMaxClients = 32,
   discoverProjects, machineWideIntel, models, modelScopeKey, system, systemOptions = {},
+  maintenance, maintenanceOptions = {}, management, managementOptions = {},
 } = {}) {
   const provide = fetchStatus || shellOutStatus(cwd);
   const usageApi = usage || lazyUsage();
@@ -1058,6 +1099,76 @@ export function startDashboard({
     }
     return collector;
   };
+  // Maintenance consumes the SAME collector instance as System. This preserves
+  // the bounded-context split (System measures; Maintenance plans/acts) without
+  // letting two dashboard routes independently walk or disagree about the
+  // machine. Like every expensive panel, construction remains lazy.
+  const provideMaintenance = typeof maintenance === 'function'
+    ? maintenance : maintenance ? async () => maintenance : async () => {
+      const [{ createMaintenanceService }, collector] = await Promise.all([
+        import('./maintenance/service.mjs'), getSystem(),
+      ]);
+      return createMaintenanceService({ collector, ...maintenanceOptions });
+    };
+  let maintenancePromise;
+  const getMaintenance = async () => {
+    const service = await (maintenancePromise ||= Promise.resolve().then(provideMaintenance));
+    if (!service || typeof service.report !== 'function' || typeof service.scan !== 'function'
+      || typeof service.plan !== 'function') {
+      throw new TypeError('maintenance service must implement report, scan, and plan');
+    }
+    return service;
+  };
+  // The ADR-0048 management facade (inventory, guidance, discovery, activity)
+  // composes over the SAME maintenance service and collector. Injectable
+  // exactly like `maintenance`; constructed lazily on the first v2 request so
+  // opening the dashboard never touches owner-private management stores. When
+  // it cannot be built, every v2 route answers 503 and v1 keeps working.
+  const provideManagement = managementProvider({
+    management, maintenance, managementOptions, maintenanceOptions, getMaintenance, getSystem,
+  });
+  // ONE facade instance for the whole server: the API's v2 routes and the
+  // post-scan inventory refresh below must share in-memory state (preview
+  // cache, orchestrator, refresh single-flight), so both resolve this memo.
+  let managementPromise;
+  const getManagement = () => (managementPromise ||= Promise.resolve().then(provideManagement));
+  // A successful provider scan (either path below) rebuilds the ADR-0048
+  // inventory once, single-flight, never awaited by any request handler.
+  // Failure is logged and leaves the last-good inventory authoritative; it
+  // can never turn the provider-scan response into an error.
+  let inventoryRefreshPromise = null;
+  function refreshInventoryAfterProviderScan({ measured = false } = {}) {
+    if (inventoryRefreshPromise) return inventoryRefreshPromise;
+    // After a machine measurement the discovery sources are walked too (and
+    // awaited) before the rebuild, so coverage and project evidence land in
+    // the same inventory; after a cheap provider check only the rebuild runs.
+    inventoryRefreshPromise = getManagement()
+      .then((facade) => {
+        if (measured && typeof facade?.rebuildAfterMeasurement === 'function') return facade.rebuildAfterMeasurement();
+        return typeof facade?.refreshInventory === 'function' ? facade.refreshInventory({ deep: false }) : null;
+      })
+      .catch((error) => { console.error('[dashboard] maintenance inventory refresh failed:', error); return null; })
+      .finally(() => { inventoryRefreshPromise = null; });
+    return inventoryRefreshPromise;
+  }
+  let maintenanceRefreshSource = null;
+  let maintenanceRefreshPromise = null;
+  function refreshMaintenanceAfterSystem(deepScan) {
+    if (maintenanceRefreshSource === deepScan) return maintenanceRefreshPromise;
+    maintenanceRefreshSource = deepScan;
+    maintenanceRefreshPromise = Promise.resolve(deepScan).then(async (result) => {
+      if (result?.ok !== true || result?.persisted?.ok === false) return null;
+      const model = await (await getMaintenance()).scan({ deep: false });
+      refreshInventoryAfterProviderScan({ measured: true });
+      return model;
+    }).catch(() => null).finally(() => {
+      if (maintenanceRefreshSource === deepScan) {
+        maintenanceRefreshSource = null;
+        maintenanceRefreshPromise = null;
+      }
+    });
+    return maintenanceRefreshPromise;
+  }
   let transcriptServicePromise;
   const provideTranscripts = typeof transcripts === 'function'
     ? transcripts : transcripts ? async () => transcripts : async () => {
@@ -1224,15 +1335,26 @@ export function startDashboard({
   // also accept the token as a query param (see client.mjs's dashSseUrl).
   const token = mintToken();
   const checkToken = (req, query) => tokenMatches(req.headers['x-dash-token'] || query.get('token'), token);
+  let maintenanceApiPromise;
+  const getMaintenanceApi = async () => (maintenanceApiPromise ||= getMaintenance()
+    .then((service) => createMaintenanceDashboardApi({
+      service, management: getManagement, sessionToken: token, afterScan: refreshInventoryAfterProviderScan,
+    })));
 
   const server = http.createServer(async (req, res) => {
     const raw = req.url || '/';
     const qi = raw.indexOf('?');
     const url = qi < 0 ? raw : raw.slice(0, qi);
     const query = new URLSearchParams(qi < 0 ? '' : raw.slice(qi + 1));
-    // The dashboard is read-only. Reject every mutating method before route
-    // dispatch so a new GET endpoint cannot accidentally create a write path.
-    if (req.method !== 'GET') { res.writeHead(405).end('method not allowed'); return; }
+    // Maintenance has the only mutation allowlist (v1 compatibility routes plus
+    // the exact ADR-0048 v2 POST paths). Every other route remains GET-only,
+    // so adding a new read endpoint cannot accidentally create a write path.
+    const maintenanceMutation = req.method === 'POST'
+      && (MAINTENANCE_MUTATION_ROUTES.has(url) || MAINTENANCE_V2_MUTATION_ROUTES.has(url));
+    if (req.method !== 'GET' && !maintenanceMutation) {
+      res.writeHead(405).end('method not allowed');
+      return;
+    }
     const rejected = requestRejection(req.headers);
     if (rejected) {
       res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
@@ -1254,8 +1376,24 @@ export function startDashboard({
 
     // Every route below serves data — none of it is safe to hand to any
     // process that can merely reach this loopback port (Security Finding 1).
-    if (url.startsWith('/api/') && !checkToken(req, query)) {
+    // Query tokens remain an SSE compatibility exception for GET. Mutation
+    // capability can only be reached with the explicit header; it never rides
+    // in a URL, browser history, referrer or server log.
+    const authorized = maintenanceMutation
+      ? tokenMatches(req.headers['x-dash-token'], token) : checkToken(req, query);
+    if (url.startsWith('/api/') && !authorized) {
       sendUnauthorized(res, 'Wrong or missing dashboard token.');
+      return;
+    }
+    if (maintenanceMutation) {
+      const mutationRejection = maintenanceMutationRejection(req.headers);
+      if (mutationRejection) {
+        res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
+        res.end(mutationRejection);
+        return;
+      }
+      try { await (await getMaintenanceApi()).mutate(url, req, res); }
+      catch { sendJson(res, 503, { error: 'maintenance operation unavailable' }); }
       return;
     }
 
@@ -1783,9 +1921,10 @@ export function startDashboard({
           // has to be re-measured, not re-sorted. Absent means "keep whatever
           // the collector already defaults to".
           const trees = query.get('trees');
-          Promise.resolve(collector.refreshDeep(
+          const deepScan = Promise.resolve(collector.refreshDeep(
             trees == null ? undefined : { includeProjectTrees: trees === '1' },
-          )).catch(() => {});
+          ));
+          refreshMaintenanceAfterSystem(deepScan);
           // The payload predates the start by microseconds; re-stamp the live
           // scan block so this response reads "running", not "idle".
           if (typeof collector.scanState === 'function') payload.scan = collector.scanState();
@@ -1795,6 +1934,26 @@ export function startDashboard({
         sendJson(res, 503, { error: 'system footprint unavailable', reason: String(e && e.message || e) });
       }
       return;
+    }
+
+    async function handleMaintenance(req, res, query) {
+      const refresh = query.getAll('refresh');
+      if ([...query.keys()].some((key) => key !== 'refresh')
+          || refresh.length > 1 || (refresh.length === 1 && refresh[0] !== 'scan')) {
+        sendJson(res, 400, { error: 'invalid maintenance scan request' });
+        return;
+      }
+      try { await (await getMaintenanceApi()).report(req, res, { refresh: query.get('refresh') === 'scan' }); }
+      catch { sendJson(res, 503, { error: 'maintenance evidence unavailable' }); }
+      return;
+    }
+
+    // ADR-0048 v2 reads. The API owns the exact route allowlist, query
+    // grammar, and projections; the facade owns state. Progress reads never
+    // await a running scan (MNT-PERF-004), so these stay cheap during scans.
+    async function handleMaintenanceV2(req, res) {
+      try { await (await getMaintenanceApi()).readV2(req, res, new URL(raw, 'http://127.0.0.1')); }
+      catch { sendJson(res, 503, { error: 'maintenance evidence unavailable' }); }
     }
 
     async function handleSessions(req, res, query) {
@@ -1876,10 +2035,12 @@ export function startDashboard({
       '/api/hooks': handleHooks,
       '/api/limits': handleLimits,
       '/api/system': handleSystem,
+      '/api/maintenance': handleMaintenance,
       '/api/sessions': handleSessions,
     };
     /** @type {Array<[RegExp, (req: any, res: any, query: any, match: RegExpExecArray) => Promise<void>]>} */
     const PARAM_ROUTES = [
+      [/^\/api\/maintenance\/v2\/.*$/, handleMaintenanceV2],
       [/^\/api\/hooks\/source\/([^/]+)$/, handleHookSource],
       [/^\/api\/live\/playback\/([^/]+)\/([^/]+)$/, handlePlayback],
       [/^\/api\/live\/transcripts\/([^/]+)\/([^/]+)\/events$/, handleTranscriptEvents],

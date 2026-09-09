@@ -5,12 +5,45 @@ latest capability is *two* motions, not one: get the newer code, then turn the f
 This page exists because those two are easy to conflate — and `ak sync`, despite its name,
 only does the first.
 
-## 2026-09-03: System Catalog snapshot v2
+## 2026-09-04: Human session identity in System
+
+`storage.topSessions[]` now carries an additive `identity` object with the original storage name,
+host-native ID when declared, declared opening instant when available, measured file mtime, the
+time basis, and per-field provenance. One bounded transcript-head read supplies identity and
+working context for the already-ranked top-N rows; it does not read prompts, titles, or messages.
+
+System > Sessions renders the identity as one two-line transcript link: localized date/time first,
+then a shortened opaque native ID. Focus or hover discloses the original filename, full native ID,
+and detailed localized time with timezone. If an older snapshot or host has no declared opening
+instant, the measured mtime is explicitly labeled **Last active**. Run **Full scan** or
+`ak system --deep` to populate native identity for an existing snapshot; no configuration or
+payload migration is required.
+
+## 2026-09-03: System Projects snapshot v7
+
+The Projects section now deep-measures only repositories with both a recorded host session and a
+proven HTTPS web destination. The lifetime census still reports every project-like session path,
+and the payload names how many paths were excluded for no session attribution, a local-only or
+unrecognized remote, an insecure HTTP remote, or unreadable evidence. This prevents a session cwd
+such as the user home from triggering several hundred thousand unrelated filesystem observations.
+
+Because that population is narrower than the v6 measurement contract, the Footprint snapshot
+schema advances to v7. A v6 snapshot is reported as unreadable by this build until the next explicit
+**Full scan** or `ak system --deep`; it is never silently reinterpreted.
+
+## 2026-09-03: System Catalog snapshot v6
 
 Catalog identity now preserves full plugin marketplace/version provenance and separates
-standalone capability identities from plugin-contributed identities. The Footprint snapshot schema
-therefore advances from v1 to v2; an older snapshot is reported as unreadable-by-this-build until
+standalone capability identities from plugin-contributed identities. Catalog v4 now also separates
+one physical artifact from each host ConsumerBinding, and the Footprint snapshot schema advances to
+v6. An older snapshot is reported as unreadable-by-this-build until
 you run `ak system --deep`. It is not migrated or silently shown under the new semantics.
+
+This issue #198 prerequisite closed through
+[PR #201](https://github.com/pacphi/agentic-kit/pull/201), merge `1bf0a5b`. Its identity,
+snapshot, preview, and bounded-dashboard regressions are locked by
+`tests/kit/footprint-collectors.test.mjs`, `tests/kit/footprint-snapshot-v2.test.mjs`,
+`tests/kit/skill-maintenance-plan.test.mjs`, and `tests/ui/dashboard-ui.mjs`.
 
 JSON consumers should treat `catalog.items[].key` as an opaque canonical identifier. The additive
 fields `canonicalId`, `capabilityName`, `pluginRef`, `sourceScopes`, occurrence evidence,
@@ -25,8 +58,48 @@ ak system --deep
 ak x skills plan --project /absolute/path/to/project
 ```
 
-The plan does not remove anything. Mutating upgrade/cleanup remediation is tracked separately in
-issue #200.
+The plan does not remove anything. Use the separate Maintenance workflow below for provider-backed
+remediation.
+
+## 2026-09-03: Maintenance control plane
+
+The upgrade adds `ak maintain` and **System > Maintenance**. No configuration opt-in is required,
+but no operation runs automatically: ordinary scan/plan are read-only, executable plans expire
+after five minutes, and apply requires the exact plan ID, digest, selected action IDs, and `--yes`.
+
+```bash
+ak maintain scan --deep
+ak maintain plan --findings FINDING_ID --executable
+ak maintain apply --plan PLAN_ID --digest SHA256 --actions ACTION_ID --yes
+```
+
+Maintenance stores private, integrity-sealed scan reports, plans, and receipts under the current
+user's agentic-kit state directory. Existing System snapshot files remain read-only evidence inputs;
+Catalog schema v4 is still refreshed with `ak system --deep`. `ak sync` neither selects nor
+executes Maintenance findings.
+
+Browser refresh now reads the saved Maintenance report without polling providers. Use **Scan now**
+or `ak maintain scan` for current provider/version evidence. A successful System deep rescan also
+chains one Maintenance scan after the snapshot is persisted.
+
+The first provider set is intentionally narrower than the inventory. Claude plugin disable,
+update, and remove; exact Codex plugin/MCP removal; exact receipt-owned skill archive; one bounded
+owned stale-npx cleanup; and identity-proven Ruflo MCP orphan termination can be executable when
+their provider and evidence are present. OpenCode plugin/MCP, Codex per-plugin update, Claude
+plugin prune, unreceipted skills, other caches, transcripts, and ambiguous resources remain
+report-only.
+
+If an older or interrupted transaction is recovery-required, new Maintenance changes stop. The
+only recovery command is:
+
+```bash
+ak maintain recover --receipt RECEIPT_ID --yes
+```
+
+It reconciles every entry against its recorded preimage or verified postimage. It never retries,
+applies, undoes, or compensates an uncertain operation. A mixed, drifting, or uninspectable state
+remains blocked. See the [Maintenance runbook](MAINTENANCE.md) before acting on an interrupted
+receipt.
 
 ## The one rule
 
@@ -165,8 +238,13 @@ them defensively or drop them:
 | `runtime.daemons.budget` | daemon census | No local source exists for ruflo's launch budget — not circumstantially, structurally — so the field could only ever read `unknown`. A permanently unknowable quantity is removed rather than reported as degraded ([ADR-0023](adr/0023-fail-closed-operations-and-explicit-degradation.md) §9). `ruflo daemon budget` remains the way to ask. |
 | `runtime.childProcessCount` | runtime census | Still counted by the process survey — it is what makes the per-host rows correct — but no longer republished. As a rendered figure it was a bare number with no denominator, no history and no action attached. |
 
-Nothing else was removed. `storage.topSessions` rows **gained** `projectLabel` and
-`projectResolved`; the raw `project` key is unchanged. `catalog.items` now also covers
+Nothing else was removed. `storage.topSessions` rows **gained** `projectLabel`,
+`projectResolved`, and `context`; the raw `project` key is unchanged. The top-N rows now use the
+bounded transcript-head `cwd` metadata already allowed by ADR-0025, so dated Codex rollouts can be
+attributed without scanning their message bodies. `runtime.processes[]` gained `source`; its
+`project` measurement is now present only when a Git repository boundary is proven. Consumers
+should render `source` as the process working context and keep `project` only for repository joins.
+`catalog.items` now also covers
 project-scoped `.claude/skills|agents|commands` across every project on disk, so the list is
 longer — the shape is identical and deduplication by `(kind, name)` is unchanged.
 

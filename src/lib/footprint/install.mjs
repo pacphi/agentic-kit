@@ -115,22 +115,43 @@ export function attributeInstallMethod(realPath, { globalRootDir = null } = {}) 
 export function resolveBinPath(bin, {
   env = process.env, windows = isWindows, fsImpl = fs,
 } = {}) {
-  if (!bin) return null;
-  const dirs = String(env.PATH || env.Path || '').split(path.delimiter).filter(Boolean);
+  if (!bin || /[\\/]/.test(bin) || bin === '..') return null;
+  const envValue = (key) => env[key] || (windows ? env[Object.keys(env).find((name) => name.toUpperCase() === key) || key] : undefined);
+  const paths = windows ? path.win32 : path.posix;
+  const dirs = String(envValue('PATH') || '').split(windows ? ';' : ':')
+    .map((dir) => dir.replace(/^"|"$/g, '')).filter((dir) => paths.isAbsolute(dir));
   const exts = windows
-    ? ['', ...String(env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)]
+    ? ['', ...String(envValue('PATHEXT') || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)]
     : [''];
   for (const dir of dirs) {
     for (const ext of exts) {
-      const candidate = path.join(dir, bin + ext);
+      const candidate = paths.join(dir, bin + ext);
       try {
-        const st = fsImpl.lstatSync(candidate);
-        if (!st.isFile() && !st.isSymbolicLink()) continue;
-        return fsImpl.realpathSync(candidate);
-      } catch { /* not here: try the next PATH entry */ }
+        const resolved = fsImpl.realpathSync(candidate);
+        if (!fsImpl.statSync(resolved).isFile()) continue;
+        if (!windows) fsImpl.accessSync(resolved, fs.constants.X_OK);
+        return resolved;
+      } catch { /* not executable here: try the next PATH entry */ }
     }
   }
   return null;
+}
+
+/** Read only a bounded package manifest; never execute package code to locate its launcher. */
+function packageBinPath(root, bin, fsImpl) {
+  if (!root) return null;
+  try {
+    const manifest = path.join(root, 'package.json');
+    if (fsImpl.statSync(manifest).size > 65536) return null;
+    const pkg = JSON.parse(fsImpl.readFileSync(manifest, 'utf8'));
+    const declared = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin?.[bin];
+    if (typeof declared !== 'string' || !declared || path.isAbsolute(declared)) return null;
+    const candidate = path.resolve(root, declared);
+    const relative = path.relative(root, candidate);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) return null;
+    const resolved = fsImpl.realpathSync(candidate);
+    return fsImpl.statSync(resolved).isFile() ? resolved : null;
+  } catch { return null; }
 }
 
 /** The npm-managed package name that owns a native addon file, derived from its
@@ -344,6 +365,7 @@ function collectTool(desc, ctx) {
     present,
     version,
     root: realRoot,
+    executablePath: desc.bin ? resolveBinPath(desc.bin, { fsImpl }) || packageBinPath(realRoot, desc.bin, fsImpl) : null,
     linkedFrom,
     rootReason: null,
     components: [],
@@ -375,6 +397,7 @@ function collectTool(desc, ctx) {
       present: true,
       installMethod: attributeInstallMethod(binPath, { globalRootDir: ctx.globalRootDir }),
       root: binPath,
+      executablePath: binPath,
       rootReason: reason,
       bytes: unknown(reason),
       files: unknown(reason),
@@ -453,10 +476,14 @@ export function duplicateNativeBuilds(addons) {
 
 /** One node per npx cache env (`<npm-cache>/_npx/<hash>`). Exported because the
  *  storage collector's reclaimable rows need exactly these figures — walking
- *  the cache twice would double the I/O to answer one question. Package NAMES
- *  come from the env's own package.json manifest; nothing else is read. */
+ *  the cache twice would double the I/O to answer one question. A complete
+ *  parent-cache observation may provide exact child totals from the cache row's
+ *  own walk; incomplete or mismatched evidence falls back to one bounded walk
+ *  per environment. Package NAMES come from the env's own package.json
+ *  manifest; nothing else is read. */
 export function npxEnvNodes({
   root = npxCacheDir(), walk = walkTree, limits = {}, asOf = null, fsImpl = fs,
+  parentObservation = null,
 } = {}) {
   let entries;
   try {
@@ -471,10 +498,20 @@ export function npxEnvNodes({
     };
   }
   const envs = [];
+  const reusable = parentObservation?.complete === true
+    && path.resolve(parentObservation.root ?? '') === path.resolve(root)
+    && parentObservation.children instanceof Map;
   for (const entry of entries) {
     if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
     const dir = path.join(root, entry.name);
-    const result = walk(dir, { ...limits, fsImpl });
+    const observed = reusable ? parentObservation.children.get(entry.name) : null;
+    const result = reusable ? {
+      status: 'measured',
+      bytes: observed?.bytes ?? 0,
+      files: observed?.files ?? 0,
+      newestMtimeMs: observed?.newestMtimeMs ?? null,
+      complete: true,
+    } : walk(dir, { ...limits, fsImpl });
     const { bytes, files } = walkMeasurements(result, { asOf });
     const manifest = readJson(path.join(dir, 'package.json'), {}) ?? {};
     envs.push({
@@ -485,6 +522,7 @@ export function npxEnvNodes({
       files,
       newestMtimeMs: result.newestMtimeMs,
       complete: result.complete,
+      measuredBy: reusable ? 'parent-observation' : 'direct',
     });
   }
   envs.sort((a, b) => (b.bytes.value ?? 0) - (a.bytes.value ?? 0));
@@ -666,10 +704,27 @@ export function sharedCacheRoots({
  *  unmeasured". Only a genuinely multi-location cache merges, and it merges
  *  conservatively — present beats degraded beats absent, and an unreadable
  *  location makes the sum partial rather than silently dropping its bytes. */
-function measureCacheRoot(cache, { walk, limits, fsImpl, asOf }) {
+function measureCacheRoot(cache, {
+  walk, limits, fsImpl, asOf, captureImmediateChildren = false,
+}) {
   const locations = cache.paths?.length ? cache.paths : [cache.path];
+  const childObservations = new Map();
   const parts = locations.map((dir) => {
-    const result = walk(dir, { ...limits, fsImpl });
+    const result = walk(dir, {
+      ...limits,
+      fsImpl,
+      onFile: captureImmediateChildren && locations.length === 1 ? (entry) => {
+        const relative = path.relative(dir, entry.file);
+        const child = relative.split(path.sep)[0];
+        if (!child || child === '..' || path.isAbsolute(relative)) return;
+        const current = childObservations.get(child) ?? { bytes: 0, files: 0, newestMtimeMs: null };
+        current.bytes += entry.bytes;
+        current.files += 1;
+        current.newestMtimeMs = current.newestMtimeMs === null
+          ? entry.mtimeMs : Math.max(current.newestMtimeMs, entry.mtimeMs);
+        childObservations.set(child, current);
+      } : null,
+    });
     return { result, ...rootMeasurements(result, { asOf }) };
   });
   if (parts.length === 1) {
@@ -677,6 +732,7 @@ function measureCacheRoot(cache, { walk, limits, fsImpl, asOf }) {
     return {
       presence: only.presence, bytes: only.bytes, files: only.files,
       newestMtimeMs: only.result.newestMtimeMs, complete: only.result.complete,
+      childObservations,
     };
   }
   const presence = parts.some((p) => p.presence === 'present') ? 'present'
@@ -688,6 +744,7 @@ function measureCacheRoot(cache, { walk, limits, fsImpl, asOf }) {
     files: sumMeasurements(parts.map((p) => p.files), { asOf }),
     newestMtimeMs: mtimes.length ? Math.max(...mtimes) : null,
     complete: parts.every((p) => p.result.complete !== false),
+    childObservations,
   };
 }
 
@@ -746,14 +803,29 @@ export function collectInstall({
   const sharedCaches = [];
   let npxEnvs = { root: npxCacheDir(), presence: 'unknown', reason: 'not collected', envs: [] };
   if (includeCaches) {
+    let npxParentObservation = null;
     for (const cache of sharedCacheRoots({ fsImpl })) {
+      const measuredCache = measureCacheRoot(cache, {
+        walk, limits, fsImpl, asOf,
+        captureImmediateChildren: cache.id === 'npx-envs',
+      });
+      const { childObservations, ...cacheMeasurement } = measuredCache;
       sharedCaches.push({
         ...cache,
-        ...measureCacheRoot(cache, { walk, limits, fsImpl, asOf }),
+        ...cacheMeasurement,
         payload: browserPayloadReadiness(cache, { fsImpl }),
       });
+      if (cache.id === 'npx-envs') {
+        npxParentObservation = {
+          root: cache.path,
+          complete: cacheMeasurement.presence === 'present' && cacheMeasurement.complete === true,
+          children: childObservations,
+        };
+      }
     }
-    npxEnvs = npxEnvNodes({ walk, limits, asOf, fsImpl });
+    npxEnvs = npxEnvNodes({
+      walk, limits, asOf, fsImpl, parentObservation: npxParentObservation,
+    });
   }
 
   const allAddons = tools.flatMap((t) => t.nativeAddons);

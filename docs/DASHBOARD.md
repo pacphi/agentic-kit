@@ -1,8 +1,8 @@
 # Dashboard
 
-`ak dashboard` opens an observation-only local diagnostic workspace. It binds to loopback, requires
-the per-session dashboard token for every API route, and does not mutate configuration, agents, or
-repositories.
+`ak dashboard` opens a local diagnostic workspace. It binds to loopback and requires the
+per-session dashboard token for every API route. Ordinary views are observation-only;
+**System > Maintenance** is the sole receipt-aware action surface.
 
 ```bash
 ak dashboard
@@ -47,13 +47,14 @@ permanent.
 | Usage | Sessions | `#usage/sessions` | Session usage | Retained sessions grouped by project, category, duration, tokens, and cost |
 | Observability | Live | `#observability/live` | Observability · Live | Projects and roots with current presence or fresh meaningful activity |
 | Observability | History | `#observability/history` | Observability · History | Retained roots that are not currently Live |
-| System | Summary | `#system/summary` | Summary | Install size, retained data, live resource use, deployed inventory, and the machine's largest storage consumers in one glance |
-| System | Advisory | `#system/advisory` | Advisory | What could be reclaimed, in two safety tiers reported separately and never added — the only System area that suggests an action, and it still has no delete control |
-| System | Sessions | `#system/sessions` | Sessions | The largest individual session files, the project each belongs to, and its share of that host's retained bytes |
+| System | Summary | `#system/summary` | Summary | Install size, retained data, live resource use, deployed inventory, the machine's largest storage consumers, and the cross-host capability catalog cards (host inventory profile, unique-across-hosts presence matrix, project skill pressure) in one glance |
+| System | Advisory | `#system/advisory` | Advisory | What could be reclaimed, in two safety tiers reported separately and never added — the only measurement area that suggests an action, and it still has no delete control |
+| System | Sessions | `#system/sessions` | Sessions | The largest retained sessions, with a localized two-line native identity, working context, and share of that host's retained bytes |
 | System | Storage | `#system/storage` | Storage | Where the retained bytes are, by category and host — learning stores counted separately because they dwarf everything else — plus per-series growth |
 | System | Runtime | `#system/runtime` | Runtime | Live host processes, their CPU and memory, background daemons, and machine denominators — refreshed on the header's poll clock while open |
-| System | Catalog | `#system/catalog` | Catalog | Summary-first project skill pressure with per-project host disclosure; standalone and plugin-qualified skills, agents, commands, plugins and MCP servers across user/project/plugin scope; provider/version and entrypoint-digest evidence; per-host matrix with kind/host/source filters |
+| System | Catalog | `#system/catalog` | (redirect) | Retired as a visible destination. The link redirects to Maintenance › Inventory. Full scan still collects the catalog measurement, and its cards now sit in Summary |
 | System | Projects | `#system/projects` | Projects | Every repository with a remote that a host has recorded a session in — its approximate lines of code, language mix, total disk size and last activity. Worktrees, sub-folders and remote-less repositories are counted below the table, not listed |
+| System | Maintenance | `#system/maintenance` | Maintenance | Four destinations: **Inventory** (`#system/maintenance/inventory`, Focus navigation from scope through resource family to exact installation details), **Guidance** (`/guidance`, only outcomes the kit can ground, in five lanes), **Discovery** (`/discovery`, automatic sources, exact projects, collection roots, exclusions, scan coverage), and **Activity** (`/activity`, receipts, undo, interruption audits, dispositions, recipe changes, scan records). Inventory links carry scope, view, sort, `facet.<name>` values, and the selected placement as opaque state |
 
 About is one scrolling page, so its hashes scroll to a section rather than swapping panels; `#about`
 alone opens the page at the top.
@@ -469,47 +470,201 @@ History/Review semantics, privacy limits, and troubleshooting.
 ## System
 
 System answers what this toolchain costs the machine itself — a different question from health
-(Overview), spend (Usage), or activity (Observability). Its seven views are Summary, Advisory,
-Sessions, Storage, Runtime, Catalog, and Projects. Projects stays separate from Storage on purpose:
-lines of code and a git remote answer "what have I built here", not "where are my bytes".
+(Overview), spend (Usage), or activity (Observability). Six measurement views cover Summary,
+Advisory, Sessions, Storage, Runtime, and Projects. Maintenance is a seventh navigation destination
+and a separate control-plane context. The former Catalog view is folded into Summary, and its old
+link redirects to Maintenance › Inventory. Projects stays separate from Storage on purpose: lines of
+code and a git remote answer "what have I built here", not "where are my bytes".
 
 ### Two tiers, and why nothing scans on open
 
 Opening System costs almost nothing. The cheap tier — the live process census, individually known
-file sizes, and the figures carried forward from the last deep scan — is served on every read and
+file sizes, and the figures carried forward from the last full scan — is served on every read and
 cached briefly.
 
-Everything else comes from a **deep scan**, which walks the install trees, the retained-data roots,
-every host's catalog surfaces, and every known project. That is real I/O and takes tens of seconds
-on a large machine, so it runs **only when you press Rescan** (or run `ak system --deep`). Opening
-the tab never triggers it, and System does not poll: it fetches once, then again only while a scan
-you started is still running.
+Everything else comes from the **Full scan**—the dashboard name for the deep tier—which walks
+install trees, retained-data roots, host catalog surfaces, and the eligible hosted-repository
+population. That is real I/O and can take minutes on a large machine, so it runs **only when you
+press Full scan** (or run `ak system --deep`). Opening the tab never triggers it. Production runs
+the synchronous collectors in one worker thread so the page can report phases and remain usable
+while they run. Its status names the current phase, bounded count when available, and elapsed time.
+Worker containment does not claim that the filesystem work itself completes faster.
+
+One scan may reuse a complete physical observation when another section asks the same bounded
+question. Catalog reads one physical surface once per compatible reader contract even when several
+hosts consume it; Install derives npx-environment totals from its complete parent-cache walk;
+Storage can adopt that exact same-scan inventory; and an allocated-size consumer uses the block
+count from the walker's existing `lstat`. A complete Consumers parent supplies its exact nested
+breakdowns, and Storage can reuse exact Consumers cache or Projects worktree observations later in
+the same scan. Reuse is confined to that scan.
+Incomplete, older, differently rooted, or differently scoped evidence falls back to a fresh bounded
+walk rather than being treated as equivalent.
+
+Measurement views fetch once, then again only while a scan you started is running. Maintenance
+loads when you open it, never on the shared status poll, and reads the last complete inventory;
+opening it checks no host provider and executes nothing. **Refresh evidence** on the Maintenance
+workspace is the explicit control that runs provider probes, and it rebuilds the Inventory
+afterwards; **Re-measure machine** beside it runs the System Full scan, walks every discovery source
+to completion, then refreshes evidence. Full scan from the System rail chains the same provider
+check after the snapshot is persisted. `ak maintain scan --refresh-inventory` and
+`ak maintain scan --deep --refresh-inventory` are the CLI equivalents.
+
+### Session identity and local time
+
+Each **Largest sessions** identity is one link to the retained transcript. Its first line is the
+host-declared opening instant in the browser's locale and timezone; its second line is a shortened
+opaque host-native ID. Hover or keyboard focus reveals the original storage filename, full native
+ID, seconds, and timezone, while the machine-readable instant remains in a `<time datetime>`
+element. Claude's earliest timestamp is labeled **First recorded** because it is not a proven
+start. When no declared instant exists, measured file mtime is labeled **Last active** rather than
+presented as a session start. OpenCode remains unlinked until its shared SQLite store can supply a
+byte-attributable retained-session row.
+
+The dashboard-wide semantic and formatting audit is recorded in
+[Date and time presentation](DATE-TIME-PRESENTATION.md).
 
 The trade is stated rather than hidden. Deep-tier figures always render with when they were
 measured, and once a snapshot passes seven days the freshness label turns amber and reads
-`stale, rescan`. Catalog snapshots also retain bounded stat-only source probes; if a watched plugin,
-surface, or entrypoint changes first, the label immediately reads `catalog changed, rescan`.
+`stale, scan again`. Catalog snapshots also retain bounded stat-only source probes; if a watched
+plugin, surface, or entrypoint changes first, the label immediately reads
+`catalog changed, scan again`.
 An unchanged probe is not full content validation, and says so in the JSON evidence.
-A scan writes one file — its own snapshot — and nothing else; the reclaimable-space
-rows are advisory, with their rationale and their path, and there is no delete button anywhere in
-this area.
+The System measurement writes one file—its own Footprint snapshot—and mutates no user data. The
+provider check that the dashboard chains afterward belongs to Maintenance; a successful check
+replaces Maintenance's private saved report. Reclaimable-space rows remain advisory, with their
+rationale and their path. Advisory and the Summary catalog cards have no machine-mutating controls;
+the project skill pressure card offers copy buttons for its read-only project inspection commands,
+while provider-backed actions live only in Maintenance.
 
-### Catalog evidence and project pressure
+### Catalog cards in Summary
 
-Catalog starts with a project-by-host pressure table. Project, user, and enabled-plugin
-contributions are separate columns; exact skill-name and bounded entrypoint-body overlaps are
-separate evidence. The table always says that context inclusion and cutoff are host-owned and
-unknown. Filesystem presence must not be read as “loaded into this session.”
+The cross-host capability catalog is still measured by Full scan, and its three cards now live at
+the bottom of Summary: **Host inventory profile**, **Unique across hosts** (the presence matrix,
+filtered by what to show, which host carries it, and which source scope), and **Project skill
+pressure** (a project-by-host table with per-project host disclosure). Project, user, and
+enabled-plugin contributions are separate columns; exact skill-name, bounded entrypoint-body, and
+complete bounded definition relationships are separate evidence. The table always says that context
+inclusion and cutoff are host-owned; filesystem presence must not be read as "loaded into this
+session."
 
-The presence matrix can be filtered independently by kind, host, and source scope. Rows name their
-provider/version and body variants where known. Plugin inventory prefers the hosts' native list
+A session cwd is only a discovery candidate; it does not confer project scope. If that cwd makes a
+candidate surface resolve to the same host, kind, and path as a user surface, the user occurrence
+wins and no project-pressure row is fabricated. One shared user surface carried by two hosts remains
+visible on both hosts.
+
+The measurement counts a physical artifact once and retains each host that discovers it as a
+separate consumer binding. It fingerprints bounded skill definitions and individual MCP
+configurations, covers supported project agent/command/MCP surfaces, and reports whether measured
+project artifacts are Git-tracked or changed. Plugin inventory prefers the hosts' native list
 commands and labels manifest/config/cache fallback as partial; installed-disabled plugins stay in
 inventory without contributing enabled capabilities.
 
-The dashboard remains read-only. `ak x skills plan --project <path>` emits the corresponding
-receipt-aware classification, git state, affected paths, projected result, and stable plan ID; it
-writes nothing. Future remediation belongs to the [Maintenance capability](ddd/maintenance.md)
-tracked by issue #200.
+For browsing, use **Maintenance › Inventory**: every artifact the catalog measures appears there
+exactly once, at the grain of one exact placement, with its consumers, versions, conflicts, and
+evidence grades. The catalog cards remain read-only. `ak x skills plan --project <path>` emits the
+corresponding receipt-aware classification, git state, affected paths, projected result, and stable
+plan ID; it writes nothing and is evidence for Maintenance, not an executable plan or authorization.
+
+### The Maintenance workspace
+
+Maintenance opens on **Inventory** across all scopes and reads the last complete inventory. Nothing
+scans on open. Its four tabs are **Inventory**, **Guidance**, **Discovery**, and **Activity**; the
+Guidance and Activity tabs carry a count only when something is admitted or needs recovery.
+
+A fresh installation shows an empty Inventory and every automatic source as **Not scanned yet**.
+Two actions sit side by side above the tabs, each with its helper text: **Refresh evidence** runs
+provider probes on the saved measurement and rebuilds the inventory in seconds, and **Re-measure
+machine** walks the filesystem, then every discovery source, then refreshes evidence, which takes
+minutes. Choose Refresh evidence to build the inventory; `ak maintain scan --refresh-inventory`
+does the same from a terminal. While either runs, both buttons are disabled, the status line says
+what is running ("Refreshing evidence…" or "Re-measuring the machine… this can take minutes."), and
+apply, undo, and record are refused; if the work does not finish, the previous evidence is kept.
+After the probes settle the inventory builds in the background: the empty state reads **Building
+the inventory…** until rows appear, or names the reason if the build did not complete.
+
+**Inventory** uses the **Focus browser** approved and implemented on 2026-09-08.
+[Focused validation](archive/2026-09-08-validation-maintenance-focus.md) covers this presentation;
+older builds may still show expanded cards.
+Across scopes begins with **System**, **Machine**, **User**, and **Projects**. Select a scope, type,
+resource family, and exact installation; Projects inserts the repository before type. Only the
+current level appears in the list. Breadcrumbs let you return without losing filters.
+
+Selecting a scope, project, or type filter skips that chosen level. A type selected while browsing
+User retains User context; removing filters restores the relevant levels. Search matches names,
+location breadcrumbs, and consumers. Singleton scope/project/type/family choices appear in the
+breadcrumb instead of duplicate chips; additional and multiselect refinements keep removable chips.
+Use breadcrumb backtracking or sidebar deselection to remove navigation choices; **Clear all**
+removes facets. The **Filters** sheet holds these controls on narrow screens. Sorting applies in
+the current level and healthy resources remain reachable.
+
+Projects shows repository choices by default. **Include worktrees**, below project search, reveals
+worktree choices without removing saved placements or changing discovery. Selected worktrees stay
+reachable until deselected. There is no Project type control. Exact installation rows show recorded
+location or host context, then **Available to** consumers; version details expand in the inspector. One installation
+read by multiple hosts counts once; family and branch identities never replace exact placement IDs.
+
+Selecting an exact installation opens details below the list. Compact expandable relationship
+cards show recorded plugin contents/producers, consumer bindings, dependencies, and other
+installations. Host-specific override links are not emitted by the current relationship projection. A matching name, shared
+digest, or narrower scope does not prove a producer or override relationship. **Installed by**
+requires an installer receipt. Missing provenance does not imply independent ownership.
+
+Following a relationship preserves your inventory location and filters; an outside-filter
+selection is labelled explicitly. Back returns to the previous related installation; closing
+details restores the original row. Relationship links do not silently clear filters or grant
+action authority. Exact paths remain owner-private: **Reveal exact path**, then **Copy exact path**.
+The current source-coverage banner and incomplete-source evidence remain visible; navigating a
+branch or hiding worktrees cannot turn a partial scan into complete coverage.
+
+**Guidance** shows only outcomes the kit can ground, in five lanes: Can apply here, Steps
+available, Decisions to make, Updates available, and Recovery to finish. The pill controls select
+one lane at a time. Guidance requires evidence of a reason to act: merely being able to remove or
+disable a resource does not make that operation a recommendation. These operations remain under
+**Optional actions** in the Inventory inspector, with the same preview and confirmation flow.
+**Host coverage** separates saved installation evidence from automatic action checks
+and lists the resource types those adapters cover. An empty lane is not a health assessment;
+unsupported or incomplete adapters do not prove that a host needs no attention.
+A placement with nothing to offer stays in Inventory and its inspector says "No action is requested." A Steps entry opens a
+copyable procedure for your shell with **Copy command**; the dashboard never runs it. A Decisions
+entry always offers four choices, each grounded or carrying the reason it is not. Every entry offers
+**Acknowledge**, **Snooze until** a chosen date, and, for an update candidate, **Ignore this
+candidate**; each explains its effect before you press **Confirm**, and recorded dispositions appear
+in the inspector's history and under Activity.
+
+Selecting a Can apply here entry requests a fresh five-minute server-derived plan for that one
+placement and one action. The confirmation sheet shows the exact operation, what will change, and
+what is preserved; an approval-required or irreversible action asks you to type the phrase the
+server shows. Confirming consumes a session- and plan-bound one-use capability before provider work
+begins. The browser sends opaque ids only. There are no checkboxes and no batches.
+
+**Discovery** lists the automatic sources with a toggle each, your exact projects and collection
+roots, and your exclusions. **Add a source** takes a path and a kind and shows a **Preview** of what
+would be scanned before **Save source**. Removing a source shows the affected resources first.
+A saved root starts scanning at once. Scan progress reads as visited work, never a total. Roots you
+added offer **Pause** and **Stop** while running, **Resume** and **Stop** while paused, **Retry
+scan** after a failure, and **Scan this root** if never run; stopping shows what would be affected
+and asks **Stop this source?**. Automatic sources carry no per-source control: each reads Not
+scanned yet with "measured by Re-measure machine", or Complete with "covered by the last
+measurement". A started
+source keeps running until it completes, pauses, stops, or fails. Host configuration sources skip
+transcript, session, log, and cache trees by name so they can complete.
+
+**Activity** groups Recovery to finish, In progress, Change receipts, Dispositions, Recipe changes,
+and Scan records. A committed reversible receipt offers **Undo**, and every receipt offers a
+sanitized **Export**; ticking **Include local paths** warns you and requires **Export again**.
+
+An interrupted receipt offers **Audit interruption**. The audit discloses what it will check and
+its read-only policies, then reports a result; a conclusive result enables exactly one **Record**
+button (Record no change, Record completed, or Record restored), and any other result says "No
+corrective action is offered." Recording reuses the same typed-confirmation dialog as apply and
+undo, and the server reruns the audit under the mutation lock before writing. An unresolved receipt
+blocks writes to its own placement, environment, and dependents only.
+
+If a Maintenance read fails, the panel keeps the error visible and offers **Retry**. If browser
+storage is blocked, dashboard bootstrap retains the authenticated fragment token in page memory so
+real panels can still load rather than degrading into a blank gated page. See the
+[Maintenance runbook](MAINTENANCE.md) for the provider matrix, the CLI verbs, ownership rules, and
+the exact route and body contracts.
 
 ### Largest consumers, and the project-trees toggle
 
@@ -531,7 +686,7 @@ ranked at 0 B, and roots that could not be read say so with their reason.
 **Project trees** are excluded by default, and the chip that includes them is a *scan* control,
 not a filter. One large repository can outweigh every shared cache combined, and a chart
 containing it is a chart of one repository — so the ranking says, in the panel, that they were
-left out. Turning the chip on starts a new deep scan that walks them (and turning it off starts
+left out. Turning the chip on starts a new Full scan that walks them (and turning it off starts
 one that does not); it is disabled while a scan is running. `ak system --deep` scans without
 project trees.
 
@@ -555,7 +710,7 @@ removes anything; where a CLI already owns the cleanup, the row names it.
 
 ### Reading the numbers honestly
 
-- **A section that has never been scanned says so.** It reads "not measured yet — press Rescan",
+- **A section that has never been scanned says so.** It reads "not measured yet — run Full scan",
   never `0`. A zero here means a real, measured zero.
 - **A total whose inputs were incomplete renders as `≥ N`.** If one subtree could not be read or a
   walk hit its cap, the sum is a floor, not a total, and is labeled that way.
@@ -565,11 +720,13 @@ removes anything; where a CLI already owns the cleanup, the row names it.
   trees, and binary files excluded. Only *languages* carry lines. Frameworks, SDKs and tools are
   shown as present or not — React does not own lines, the `.tsx` files do — and what the registry
   could not name is listed by name rather than swept into an "Other" slice.
-- **Projects are counted twice, and the two numbers differ.** The KPI reads
+- **Project discovery and project measurement are different populations.** The KPI reads
   `N ever · M on disk`: *ever* is every project any host has ever recorded a session in, including
-  ones you have since deleted or moved; *on disk* is the subset that still exists, and only those
-  become rows in the Projects table — a deleted project has no bytes and no lines to measure.
-  A large gap is a fact about your history, not an error.
+  ones you have since deleted or moved; *on disk* is the subset that still exists. The Projects
+  table is narrower still: it measures only repositories with a recorded host session and a proven
+  HTTPS web destination. Local-only, insecure or unrecognized remotes, missing remote evidence,
+  and candidates without a recorded session remain counted in the exclusion summary instead of
+  being silently walked or discarded.
 - **A project whose path cannot be recovered is counted, not invented.** Claude stores transcripts
   in a directory name that encodes the project path lossily (`/`, `.` and `-` all become `-`), so
   it cannot simply be decoded back. The path is read from the session record instead; where no
@@ -583,10 +740,17 @@ removes anything; where a CLI already owns the cleanup, the row names it.
 
 ### Platforms
 
-All seven views work on macOS, Linux, and Windows. On Windows the process census (host, pid, CPU,
+All six Machine Footprint views work on macOS, Linux, and Windows. On Windows the process census (host, pid, CPU,
 memory, uptime) is always available; the bound project is a best-effort read that can be blocked by
 antivirus, execution policy, or permissions, in which case that one column reads
 "not attributable on Windows" with the reason and every other figure in the row still renders.
+
+Maintenance itself remains available on Windows, but the Ruflo MCP orphan action requires a
+numeric POSIX UID and therefore stays report-only there. Every other provider is advertised only
+when its native operation and evidence are available on the current machine. The Ollama model
+provider is registered by default, and its Remove model action appears only when Ollama is
+reachable over loopback and every premise is verified; the Git project patch provider is registered
+only when a composition supplies project roots.
 
 One field is honestly missing everywhere: the ruflo daemon budget has no local source this
 collector can read, so it reports unknown rather than a number inferred from nothing.
@@ -604,7 +768,12 @@ Canonical hashes make views linkable without putting the dashboard token in the 
 string.
 
 The launch token initially arrives in the URL fragment and is then stored locally for authenticated
-API requests. The dashboard remains localhost-only and offline-first. Usage, Models, Observability, and
+API requests. The dashboard remains localhost-only and offline-first. Maintenance POST requests,
+on the v1 routes and the exact v2 route allowlist, add same-origin fetch metadata, exact JSON
+schemas, a 64 KiB body limit, and one-use apply, undo, and reconcile capabilities; every other
+route retains default non-GET rejection. Maintenance never places a local path in a URL, export, or
+notification; only the owner-protected **Reveal exact path** control, a deliberate path-including
+export, and the Discovery configuration carry paths. Usage, Models, Observability, and
 System may show sensitive local project, transcript, or filesystem-path information; use them only
 where that local information may be viewed. System deliberately shows absolute paths — a storage
 breakdown that hides where the bytes live answers nothing — behind the same token-gated loopback
@@ -630,3 +799,12 @@ count newlines. Each of those yields a path, a name, or a number. **No message, 
 tool result, or model output is ever read** — those stay in Usage and Observability, which have
 their own contracts for them. The full enumeration is
 [Machine footprint § The read surface](ddd/machine-footprint.md#the-read-surface).
+
+### Date and time display
+
+Dashboard timestamps use the browser’s locale and timezone through the shared date/time
+formatter. Detailed timestamps include seconds and the timezone abbreviation, including
+Maintenance version measurements and update checks, model captures and local model expiry.
+Relative ages remain relative. Published calendar dates (such as a retirement commitment)
+retain their calendar day; they are not midnight UTC instants. Stored/API timestamps and
+machine-readable `datetime` attributes retain their original instant.

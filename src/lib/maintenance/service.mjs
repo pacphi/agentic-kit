@@ -1,0 +1,668 @@
+import { assertMaintenancePersistenceSupported } from './persistence-support.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+
+import { createSystemCollector } from '../footprint/index.mjs';
+import { SNAPSHOT_STALE_AFTER_MS } from '../footprint/snapshot.mjs';
+import { maintenanceControlDir } from '../paths.mjs';
+import {
+  applyMaintenancePlan, mutationBlocks as computeMutationBlocks, reconcileMaintenanceReceipt,
+  recoverMaintenanceReceipt, undoMaintenanceReceipt,
+} from './coordinator.mjs';
+import { projectReference } from './evidence.mjs';
+import { auditInterruptions } from './interruption-audit.mjs';
+import { isOpaqueId } from './management/model.mjs';
+import { deepFreeze } from './model.mjs';
+import { projectProviderFindings } from './provider-findings.mjs';
+import {
+  ensurePrivateMaintenanceRoot, readMaintenancePlanEnvelope, writeMaintenancePlanEnvelope,
+} from './plan-store.mjs';
+import {
+  assertExecutableMaintenancePlanIntegrity, buildExecutableMaintenancePlan, buildMaintenancePlan,
+} from './planner.mjs';
+import {
+  createDefaultMaintenanceProviderRegistry, publicMaintenanceProviders,
+} from './provider-registry.mjs';
+import { maintenanceReceiptPresentation } from './receipt-presentation.mjs';
+import { buildMaintenanceReadModel } from './read-model.mjs';
+import { readMaintenanceScan, writeMaintenanceScan } from './scan-store.mjs';
+import {
+  listMaintenanceReceiptsReadOnly, readMaintenanceReceipt,
+} from './transaction-store.mjs';
+
+const EXECUTABLE_CLASSES = new Set(['safe-automatic', 'approval-required']);
+const CONTROL_CAPABILITIES = Object.freeze({ plan: true, apply: true, undo: true });
+const NO_CONTROL_CAPABILITIES = Object.freeze({ plan: false, apply: false, undo: false });
+const RECOVERY_STATUSES = new Set([
+  'prepared', 'applying', 'verifying', 'refreshing-catalog', 'undoing', 'failed', 'partial',
+  'partial-recovery-required', 'outcome-unknown', 'unknown-recovery-required',
+]);
+const RECEIPT_STATUSES = new Set([
+  ...RECOVERY_STATUSES, 'committed', 'rolled-back', 'already-rolled-back',
+  'aborted-no-change', 'recovered-no-change', 'already-reconciled',
+]);
+
+function scanRequiredModel({ status = 'not-scanned', now = Date.now } = {}) {
+  const asOf = new Date(now()).toISOString();
+  const unavailable = status === 'unavailable';
+  const label = unavailable ? 'Run Maintenance scan again' : 'Run Maintenance scan';
+  const finding = {
+    id: 'maintenance-finding-scan-required', state: 'unreadable-partial', bucket: 'needsReview',
+    classification: 'maintenance-scan-required', safetyClass: 'never-automatic',
+    statusLabel: unavailable ? 'Saved scan unavailable' : 'Not scanned',
+    headline: unavailable ? 'The saved Maintenance report could not be verified' : 'Maintenance has not measured this machine yet',
+    resource: { id: 'system:maintenance-scan', kind: 'system-evidence', name: 'Maintenance scan', host: 'agentic-kit', scope: 'machine' },
+    versions: { installed: null, recommended: null, producer: null, sourceRevision: null, cacheGeneration: null, contentDigest: null },
+    ownership: { owner: 'agentic-kit', authority: 'system', managed: true },
+    evidence: { sources: ['maintenance-scan-store'], asOf: null, freshness: 'unknown', completeness: 'partial', gaps: [unavailable ? 'Saved scan integrity or schema could not be verified.' : 'No Maintenance scan has been saved.'] },
+    observedUsage: { status: 'not-measured', statement: 'Usage evidence is unavailable.' },
+    consumerHosts: { basis: 'not-measured', hosts: [], count: 0, truncated: false },
+    impact: { summary: 'Scanning changes no installed resource.', bytes: null, files: null, dependencies: 'unknown', preserved: ['All installed resources'] },
+    nextAction: { operation: 'scan', label, providerId: 'system.deep-scan', providerVersion: '1', safetyClass: 'never-automatic', rollback: 'reversible', restart: 'not-required', executable: false, recommendation: label, steps: ['Use Rescan in System to measure files and native provider inventories.', 'Return to Maintenance when the scan completes.'], preserved: ['All installed resources'], blockedReason: 'A current saved scan is required before Maintenance can recommend changes.' },
+  };
+  return deepFreeze({
+    schemaVersion: 1, mode: 'control-plane', capabilities: NO_CONTROL_CAPABILITIES,
+    asOf: null, freshness: { asOf: null, ageMs: null, status: 'unknown', completeness: 'partial', gaps: finding.evidence.gaps },
+    sourceFingerprint: null,
+    scan: { status, checkedAt: asOf, deep: null, coverage: 'unknown', providersChecked: 0, providersTotal: 0 },
+    summary: { updatesReady: 0, safeCleanup: 0, needsReview: 1, unsupportedOrBlocked: 0, recentChanges: 0 },
+    findings: [finding], receipts: [], providers: [],
+  });
+}
+
+function ageSavedModel(model, now) {
+  const at = now();
+  const evidenceAt = Date.parse(model?.freshness?.asOf ?? model?.asOf ?? '');
+  const ageMs = Number.isFinite(evidenceAt) ? Math.max(0, at - evidenceAt) : null;
+  const stale = model?.freshness?.status === 'stale'
+    || (ageMs !== null && ageMs > SNAPSHOT_STALE_AFTER_MS);
+  if (!stale) {
+    if (ageMs === model?.freshness?.ageMs) return deepFreeze(model);
+    return deepFreeze({ ...model, freshness: { ...model.freshness, ageMs } });
+  }
+  const staleGap = 'Saved Maintenance evidence is older than the freshness window; run a new scan.';
+  const findings = Array.isArray(model?.findings) ? model.findings.map((finding) => ({
+    ...finding,
+    evidence: {
+      ...finding.evidence,
+      freshness: 'stale',
+      gaps: [...new Set([...(finding.evidence?.gaps ?? []), staleGap])],
+    },
+    nextAction: finding.nextAction ? {
+      ...finding.nextAction,
+      executable: false,
+      blockedReason: staleGap,
+    } : finding.nextAction,
+  })) : [];
+  return deepFreeze({
+    ...model,
+    capabilities: NO_CONTROL_CAPABILITIES,
+    freshness: {
+      ...model.freshness,
+      ageMs,
+      status: 'stale',
+      gaps: [...new Set([...(model.freshness?.gaps ?? []), staleGap])],
+    },
+    scan: { ...model.scan, status: 'stale' },
+    summary: { ...model.summary, actionable: 0 },
+    findings,
+  });
+}
+
+function publicTimestamp(value) {
+  if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) return null;
+  try { return new Date(value).toISOString(); } catch { return null; }
+}
+
+function exactFindings(model, { findingIds = null, safetyClass = null, project = null } = {}) {
+  const requested = findingIds ? new Set(findingIds) : null;
+  const selectedProject = projectReference(project);
+  const findings = model.findings.filter((finding) => (
+    (!requested || requested.has(finding.id))
+    && (!safetyClass || finding.safetyClass === safetyClass)
+    && (!selectedProject || finding.resource.projectRef === selectedProject)
+  ));
+  if (requested) {
+    const missing = [...requested].filter((id) => !findings.some((finding) => finding.id === id));
+    if (missing.length) throw new Error(`Maintenance findings are absent or drifted: ${missing.join(', ')}`);
+  }
+  return findings;
+}
+
+async function providerActions(findings, providers, detections = new Map()) {
+  const actions = [];
+  for (const finding of findings) {
+    if (!EXECUTABLE_CLASSES.has(finding.safetyClass)) {
+      throw new Error(`Finding is not executable under its safety classification: ${finding.id}`);
+    }
+    const candidates = [...providers.values()].filter((provider) => (
+      provider.resourceKinds.includes(finding.resource.kind)
+      && provider.operations.includes(finding.nextAction?.operation)
+      && (!provider.host || provider.host === finding.resource.host)
+    ));
+    const derived = [];
+    for (const provider of candidates) {
+      if (!detections.has(provider.id)) {
+        let facts;
+        try { facts = await provider.detect(); } catch { facts = null; }
+        detections.set(provider.id, facts);
+      }
+      const facts = detections.get(provider.id);
+      const authority = provider.authority ?? 'native-inventory';
+      if (facts?.status !== 'available' || facts.complete !== true
+          || facts.authority !== authority) continue;
+      let action;
+      try { action = provider.actionFor(finding, facts); } catch { action = null; }
+      if (action) derived.push(action);
+    }
+    if (derived.length > 1) throw new Error(`Native provider resolution is ambiguous for finding: ${finding.id}`);
+    if (!derived.length) throw new Error(`No executable native provider is available for finding: ${finding.id}`);
+    actions.push(derived[0]);
+  }
+  return actions;
+}
+
+/** @param {any} options */
+async function publicReceipts(transactionsRoot, providers, options = {}) {
+  const { fsImpl, limit = 20 } = options;
+  const receipts = listMaintenanceReceiptsReadOnly(transactionsRoot, { fsImpl }).slice(0, limit);
+  return Promise.all(receipts.map(async (receipt) => {
+    const status = RECEIPT_STATUSES.has(receipt.status)
+      ? receipt.status : 'unknown-recovery-required';
+    let undoEligible = false;
+    if (status === 'committed' && Array.isArray(receipt.actions) && receipt.actions.length) {
+      try {
+        undoEligible = (await Promise.all(receipt.actions.map(async (entry) => {
+          const provider = providers.get(entry.providerId);
+          if (!provider || provider.version !== entry.providerVersion
+              || !['reversible', 'compensating'].includes(entry.rollback)
+              || typeof provider.inspectCurrent !== 'function'
+              || typeof provider.undo !== 'function' || typeof provider.verifyUndo !== 'function') return false;
+          const current = await provider.inspectCurrent(entry);
+          return current?.postFingerprint === entry.outcome?.postFingerprint;
+        }))).every(Boolean);
+      } catch {
+        undoEligible = false;
+      }
+    }
+    const actionCount = Array.isArray(receipt.actions) ? receipt.actions.length : 0;
+    const presentation = maintenanceReceiptPresentation(status, actionCount);
+    return {
+      id: receipt.id,
+      ...presentation,
+      createdAt: publicTimestamp(receipt.createdAt),
+      updatedAt: publicTimestamp(receipt.updatedAt),
+      actionCount,
+      undoEligible,
+    };
+  }));
+}
+
+function publicResult(result) {
+  if (!result || typeof result !== 'object') return result;
+  const { receiptFile: _receiptFile, ...safe } = result;
+  return deepFreeze(structuredClone(safe));
+}
+
+function undoPreview(receiptId, undoable, actionCount, summary, reason = null) {
+  return deepFreeze({
+    receiptId: String(receiptId ?? ''), undoable, actionCount, summary,
+    ...(reason ? { reason } : {}),
+  });
+}
+
+/** Application service shared by CLI and dashboard adapters. Read operations
+ * remain side-effect free; mutation requires a provider-derived plan plus an
+ * exact, explicit confirmation at the adapter boundary.
+ * @param {any} options */
+export function createMaintenanceService({
+  collector = createSystemCollector(),
+  now = Date.now,
+  providers = null,
+  providerOptions = {},
+  controlRoot = maintenanceControlDir(),
+  fsImpl = fs,
+  nonce,
+} = {}) {
+  const plansRoot = path.join(controlRoot, 'plans');
+  const transactionsRoot = path.join(controlRoot, 'transactions');
+  let scanFlight = null;
+  let scanActivity = {
+    kind: 'provider', status: 'idle', phase: 'idle', startedAt: null,
+    updatedAt: null, finishedAt: null, progress: null,
+  };
+  /** The registry/detections from the most recent `collect()` (scan or
+   * executable plan derivation) or provider-evidence cold path, for
+   * `providerEvidence()` to reuse read-only. Never itself mutated by
+   * anything but those two producers. */
+  let lastCollected = null;
+  /** True while this process holds the mutation lock inside apply/undo/
+   * recover/reconcile. `providerEvidence()`'s cold path waits it out before
+   * calling any provider's `detect()`, so it never races a live mutation. */
+  let mutationInFlight = false;
+
+  const scanState = () => deepFreeze(structuredClone(scanActivity));
+  const markScan = (status, phase, extra = {}) => {
+    scanActivity = {
+      ...scanActivity, status, phase, updatedAt: new Date(now()).toISOString(), ...extra,
+    };
+  };
+  const systemScanning = () => typeof collector.isScanning === 'function' && collector.isScanning();
+  const scanConflict = (system = false) => {
+    return Object.assign(new Error(system
+      ? 'Full System scan is in progress.' : 'Maintenance provider scan is in progress.'), {
+      code: system ? 'SYSTEM_SCAN_IN_PROGRESS' : 'MAINTENANCE_SCAN_IN_PROGRESS',
+      statusCode: 409,
+    });
+  };
+  const assertScanIdle = () => {
+    if (scanFlight) throw scanConflict();
+    if (systemScanning()) throw scanConflict(true);
+  };
+
+  const resolveProviders = (footprint) => providers
+    ?? createDefaultMaintenanceProviderRegistry({ ...providerOptions, footprint });
+
+  /** @param {{deep?: boolean, onProgress?: (progress: any) => void}} [options] */
+  async function collect({ deep = false, onProgress } = {}) {
+    if (deep) {
+      const refreshed = await collector.refreshDeep();
+      if (refreshed?.ok !== true || refreshed?.persisted?.ok === false) {
+        throw new Error('Deep System scan did not produce a reproducible persisted snapshot.');
+      }
+    }
+    const footprint = await collector.read();
+    const registry = resolveProviders(footprint);
+    const base = buildMaintenanceReadModel({ footprint, now });
+    const projected = await projectProviderFindings({
+      providers: registry, footprint, model: base, onProgress,
+    });
+    const receipts = await publicReceipts(transactionsRoot, registry, { fsImpl });
+    const summary = { ...projected.summary, recentChanges: receipts.length };
+    const model = deepFreeze({
+      ...base,
+      mode: 'control-plane',
+      capabilities: CONTROL_CAPABILITIES,
+      sourceFingerprint: projected.sourceFingerprint,
+      summary,
+      findings: projected.findings,
+      receipts,
+      providers: publicMaintenanceProviders(registry, { includeUnsupported: true }),
+    });
+    lastCollected = { providers: registry, detections: projected.detections };
+    return { footprint, providers: registry, detections: projected.detections, model };
+  }
+
+  async function runScan({ deep = false } = {}) {
+    const startedAt = new Date(now()).toISOString();
+    scanActivity = {
+      kind: 'provider', status: 'running', phase: deep ? 'system' : 'providers',
+      startedAt, updatedAt: startedAt, finishedAt: null, progress: null,
+    };
+    const onProgress = ({ phase, done, total, unit }) => {
+      markScan('running', phase, { progress: { done, total, unit } });
+    };
+    try {
+      const collected = await collect({ deep, onProgress });
+      const providersTotal = collected.providers.size;
+      const providersChecked = collected.detections.size;
+      const providersComplete = [...collected.detections.values()]
+        .filter((facts) => facts?.status === 'available' && facts.complete === true).length;
+      const model = deepFreeze({
+        ...collected.model,
+        scan: {
+          status: 'complete', checkedAt: new Date(now()).toISOString(), deep,
+          coverage: providersComplete === providersTotal ? 'complete' : 'partial',
+          providersChecked, providersComplete, providersTotal,
+        },
+      });
+      markScan('running', 'persist', {
+        progress: { done: providersChecked, total: providersTotal, unit: 'providers' },
+      });
+      writeMaintenanceScan(controlRoot, model, { fsImpl });
+      markScan('complete', 'done', {
+        finishedAt: new Date(now()).toISOString(),
+        progress: { done: providersChecked, total: providersTotal, unit: 'providers' },
+      });
+      return model;
+    } catch (error) {
+      markScan('failed', 'failed', {
+        finishedAt: new Date(now()).toISOString(), progress: scanActivity.progress,
+      });
+      throw error;
+    }
+  }
+
+  function scan(options = {}) {
+    if (scanFlight) return scanFlight;
+    if (options.deep !== true && systemScanning()) return Promise.reject(scanConflict(true));
+    const operation = runScan(options);
+    scanFlight = operation.finally(() => { scanFlight = null; });
+    return scanFlight;
+  }
+
+  async function report() {
+    const saved = readMaintenanceScan(controlRoot, { fsImpl });
+    return saved.model ? ageSavedModel(saved.model, now) : scanRequiredModel({ status: saved.status, now });
+  }
+
+  async function createPlan({
+    findingIds = null, safetyClass = null, project = null, deep = false,
+    executable = false, persist = false, generatedAt = null, placementId = null,
+  } = {}) {
+    assertScanIdle();
+    const collected = await collect({ deep });
+    const { model } = collected;
+    const findings = exactFindings(model, { findingIds, safetyClass, project });
+    if (!executable) {
+      if (persist) throw new Error('Only executable maintenance plans may be persisted.');
+      return buildMaintenancePlan({ findings, sourceFingerprint: model.sourceFingerprint, now });
+    }
+    if (findings.length !== 1) {
+      // MNT-ACT-001: refuse before any provider is even asked for an action.
+      throw Object.assign(
+        new Error('An executable maintenance plan requires exactly one exact finding.'),
+        { code: 'ONE_ACTION_PER_PLAN' },
+      );
+    }
+    const derivedActions = await providerActions(findings, collected.providers, collected.detections);
+    // Q's guidance module maps a receipt back onto its Inventory row via
+    // receipt.actions[].placementId; a placementId supplied here (from
+    // service.planAction) rides along with the single action it authorized.
+    const actions = placementId
+      ? derivedActions.map((action) => ({ ...action, placementId }))
+      : derivedActions;
+    const result = buildExecutableMaintenancePlan({
+      findings,
+      actions,
+      sourceFingerprint: model.sourceFingerprint,
+      now: generatedAt == null ? now : () => generatedAt,
+    });
+    if (persist) {
+      ensurePrivateMaintenanceRoot(controlRoot, { fsImpl });
+      writeMaintenancePlanEnvelope(plansRoot, result, { fsImpl, now });
+    }
+    return result;
+  }
+
+  async function plan(options = {}) {
+    return createPlan(options);
+  }
+
+  function loadPlan(planId) {
+    ensurePrivateMaintenanceRoot(controlRoot, { fsImpl });
+    return readMaintenancePlanEnvelope(plansRoot, planId, { fsImpl, now }).plan;
+  }
+
+  /** @param {any} input */
+  async function apply({
+    plan: suppliedPlan = null, planId = null, actionIds, expectedPlanDigest, confirmed = false,
+  } = {}) {
+    assertScanIdle();
+    if (confirmed !== true) throw new Error('Explicit confirmation is required for maintenance apply.');
+    if (typeof expectedPlanDigest !== 'string' || !expectedPlanDigest) {
+      throw new Error('Exact maintenance plan digest is required.');
+    }
+    if (!Array.isArray(actionIds) || !actionIds.length) throw new Error('Exact maintenance action IDs are required.');
+    if (actionIds.length !== 1) {
+      // MNT-ACT-001: refuse before the plan is even loaded, let alone the
+      // mutation lock acquired or a journal written.
+      throw Object.assign(
+        new Error('A maintenance apply request carries exactly one exact action id.'),
+        { code: 'ONE_ACTION_PER_PLAN' },
+      );
+    }
+    ensurePrivateMaintenanceRoot(controlRoot, { fsImpl });
+    const selectedPlan = suppliedPlan ?? loadPlan(planId);
+    if (planId && selectedPlan.planId !== planId) throw new Error('Maintenance plan ID does not match the supplied plan.');
+    assertExecutableMaintenancePlanIntegrity(selectedPlan, { now });
+    assertMaintenancePersistenceSupported({ fsImpl });
+    const generatedAt = Date.parse(selectedPlan.generatedAt);
+    const liveFootprint = await collector.read();
+    const liveProviders = resolveProviders(liveFootprint);
+    const result = await applyMaintenancePlan({
+      plan: selectedPlan,
+      actionIds,
+      expectedPlanDigest,
+      providers: liveProviders,
+      transactionsRoot,
+      refreshPlan: () => createPlan({
+        findingIds: selectedPlan.findingIds,
+        executable: true,
+        generatedAt,
+        // The freshly-derived plan must match the original byte-for-byte
+        // (including any placementId stamped by planAction) or the digest
+        // comparison below would spuriously refuse a plan that never
+        // actually drifted.
+        placementId: selectedPlan.actions?.[0]?.placementId ?? null,
+      }),
+      refreshAffectedCatalog: async () => collector.refreshDeep(),
+      validatePlan: (candidate, options = {}) => assertExecutableMaintenancePlanIntegrity(candidate, {
+        ...options,
+        now: typeof options.now === 'number' ? () => options.now : (options.now ?? now),
+      }),
+      fsImpl,
+      now,
+      ...(nonce ? { nonce } : {}),
+    });
+    try { await scan(); } catch { /* the durable transaction result remains authoritative */ }
+    return publicResult(result);
+  }
+
+  /** @param {any} input */
+  async function prepareUndo({ receiptId } = {}) {
+    assertScanIdle();
+    ensurePrivateMaintenanceRoot(controlRoot, { fsImpl });
+    const providerRegistry = resolveProviders(await collector.read());
+    let receipt;
+    try { ({ receipt } = readMaintenanceReceipt(transactionsRoot, receiptId, { fsImpl })); } catch {
+      return undoPreview(receiptId, false, 0, 'Undo is unavailable.', 'receipt-refused');
+    }
+    if (receipt.status === 'rolled-back') {
+      return undoPreview(receiptId, false, 0, 'This maintenance change was already undone.', 'already-rolled-back');
+    }
+    if (receipt.status !== 'committed') {
+      return undoPreview(receiptId, false, 0, 'This maintenance change is not undoable.', 'receipt-refused');
+    }
+    const actions = [];
+    for (const entry of [...receipt.actions].reverse()) {
+      const provider = providerRegistry.get(entry.providerId);
+      if (!provider || provider.version !== entry.providerVersion
+          || !['reversible', 'compensating'].includes(entry.rollback)
+          || typeof provider.inspectCurrent !== 'function'
+          || typeof provider.undo !== 'function' || typeof provider.verifyUndo !== 'function') {
+        return undoPreview(receiptId, false, 0, 'The owning provider cannot safely undo this change.', 'provider-unavailable');
+      }
+      const current = await provider.inspectCurrent(entry);
+      if (current?.postFingerprint !== entry.outcome?.postFingerprint) {
+        return undoPreview(receiptId, false, 0, 'The resource changed after maintenance; undo is blocked.', 'drift-refused');
+      }
+      actions.push({
+        actionId: entry.actionId,
+        operation: entry.operation,
+        resourceIdentity: entry.resourceIdentity,
+        rollback: entry.rollback,
+      });
+    }
+    return undoPreview(receiptId, true, actions.length, `${actions.length} maintenance action(s) can be safely undone.`);
+  }
+
+  /** @param {any} input */
+  async function undo({ receiptId, confirmed = false } = {}) {
+    assertScanIdle();
+    if (confirmed !== true) throw new Error('Explicit confirmation is required for maintenance undo.');
+    ensurePrivateMaintenanceRoot(controlRoot, { fsImpl });
+    const providerRegistry = resolveProviders(await collector.read());
+    const result = await undoMaintenanceReceipt({
+      transactionsRoot,
+      receiptId,
+      providers: providerRegistry,
+      inspectCurrent: (entry, provider) => provider.inspectCurrent(entry),
+      refreshAffectedCatalog: async () => collector.refreshDeep(),
+      fsImpl,
+      now,
+    });
+    try { await scan(); } catch { /* undo receipt remains authoritative */ }
+    return publicResult(result);
+  }
+
+  /** Reconcile journal state without replaying an action or invoking undo.
+   * @param {any} input */
+  async function recover({ receiptId, confirmed = false } = {}) {
+    assertScanIdle();
+    if (confirmed !== true) throw new Error('Explicit confirmation is required for maintenance recovery.');
+    ensurePrivateMaintenanceRoot(controlRoot, { fsImpl });
+    const providerRegistry = resolveProviders(await collector.read());
+    const result = await recoverMaintenanceReceipt({
+      transactionsRoot,
+      receiptId,
+      providers: providerRegistry,
+      refreshAffectedCatalog: async () => collector.refreshDeep(),
+      fsImpl,
+      now,
+    });
+    try { await scan(); } catch { /* recovery receipt remains authoritative */ }
+    return publicResult(result);
+  }
+
+  /** Read-only, batchable, ephemeral (MNT-RCV-001..005). It deliberately does
+   * not call `assertScanIdle()`: it never acquires the mutation lock and
+   * every receipt write is one atomic tmp+rename, so a concurrent audit read
+   * can only observe a prior or a next durable state, never a torn one. It is
+   * therefore safe to run while a scan or another mutation is in flight.
+   * @param {any} input `{ receiptIds: string[] }` */
+  async function auditInterruption({ receiptIds } = {}) {
+    ensurePrivateMaintenanceRoot(controlRoot, { fsImpl });
+    const providerRegistry = resolveProviders(await collector.read());
+    const results = await auditInterruptions({
+      transactionsRoot, receiptIds, providers: providerRegistry, fsImpl, now,
+    });
+    return results.map((entry) => publicResult(entry));
+  }
+
+  /** One confirmed receipt write, re-running the audit under the mutation
+   * lock and refusing unless it enables exactly the requested outcome
+   * (MNT-RCV-006). @param {any} input `{ receiptId: string, outcome: string, confirmed?: boolean }` */
+  async function reconcile({ receiptId, outcome, confirmed = false } = {}) {
+    assertScanIdle();
+    if (confirmed !== true) throw new Error('Explicit confirmation is required to reconcile a maintenance receipt.');
+    ensurePrivateMaintenanceRoot(controlRoot, { fsImpl });
+    const providerRegistry = resolveProviders(await collector.read());
+    const result = await reconcileMaintenanceReceipt({
+      transactionsRoot,
+      receiptId,
+      outcome,
+      confirmed,
+      providers: providerRegistry,
+      refreshAffectedCatalog: async () => collector.refreshDeep(),
+      fsImpl,
+      now,
+    });
+    try { await scan(); } catch { /* reconciled receipt remains authoritative */ }
+    return publicResult(result);
+  }
+
+  /** Read-only scoped/broad write-block report (ADR-0048 §10). */
+  function mutationBlocksReport() {
+    return deepFreeze(structuredClone(computeMutationBlocks({ transactionsRoot, fsImpl })));
+  }
+
+  async function waitOutMutation({ intervalMs = 20, timeoutMs = 5_000 } = {}) {
+    const deadline = Date.now() + timeoutMs;
+    while (mutationInFlight && Date.now() < deadline) {
+      await new Promise((resolve) => { setTimeout(resolve, intervalMs); });
+    }
+  }
+
+  async function detectOne(implementation) {
+    try {
+      return await implementation.detect();
+    } catch {
+      return null;
+    }
+  }
+
+  /** The minimal read-only pass `providerEvidence()` uses when nothing has
+   * scanned yet: resolve the registry from a fresh footprint read and call
+   * every provider's `detect()` exactly once, concurrently (single-flight
+   * per provider, no read-model/findings/receipts work — that is `collect()`'s
+   * heavier job, not this one). Never mutates. */
+  async function resolveProviderEvidence() {
+    const footprint = await collector.read();
+    const registry = resolveProviders(footprint);
+    const detections = new Map();
+    await Promise.all([...registry.entries()].map(async ([id, implementation]) => {
+      detections.set(id, await detectOne(implementation));
+    }));
+    return { providers: registry, detections };
+  }
+
+  /** The most recently collected provider registry and raw detection facts,
+   * so a caller (the facade's Guidance matchers) does not have to build a
+   * second registry or re-run `detect()` itself. Read-only: it never
+   * applies, undoes, plans, or writes anything, and carries no scan-idle
+   * gate — but if no scan/plan has run yet in this service instance, its
+   * cold path waits out any apply/undo/recover/reconcile this process
+   * currently has the mutation lock for, so it never calls a provider's
+   * `detect()` concurrently with a live mutation of that same provider's
+   * resource. `detections` and `registry` are defensive copies; the
+   * registry's provider objects are the live, callable implementations —
+   * nothing about them is redacted, unlike `providers`. */
+  async function providerEvidence() {
+    if (!lastCollected) {
+      await waitOutMutation();
+      lastCollected = await resolveProviderEvidence();
+    }
+    const { providers: registry, detections } = lastCollected;
+    return Object.freeze({
+      providers: publicMaintenanceProviders(registry, { includeUnsupported: true }),
+      detections: new Map(detections),
+      registry: new Map(registry),
+    });
+  }
+
+  /** One-action executable plan for exactly one finding, persisted so a
+   * subsequent `apply` can load it by planId. `guidanceId` is accepted for
+   * the eventual Guidance-driven call shape but is not yet resolved to
+   * anything — the caller must supply `findingId` directly until
+   * placement-to-finding mapping is wired (see ORCHESTRATION.md §T
+   * deliverable (a); the facade/CLI/API layers will need an interim finding
+   * lookup step, or this signature revisited, once Guidance exists).
+   * When `placementId` is supplied (an opaque `plc_…` id), it rides through
+   * onto the plan's single action and, on apply, onto the receipt entry, so
+   * Q's guidance module can map an unfinished receipt back onto its
+   * Inventory row via `receipt.actions[].placementId`.
+   * @param {any} input `{ placementId?: string, findingId: string, guidanceId?: string }` */
+  async function planAction({ placementId = null, findingId, guidanceId: _guidanceId = null } = {}) {
+    if (typeof findingId !== 'string' || !findingId) {
+      throw new TypeError('planAction requires an exact findingId (placementId/guidanceId resolution is not wired yet).');
+    }
+    if (placementId != null && !isOpaqueId(placementId, 'plc')) {
+      throw new TypeError('planAction requires an opaque plc_ placementId when supplied.');
+    }
+    return createPlan({
+      findingIds: [findingId], executable: true, persist: true, placementId,
+    });
+  }
+
+  /** Brackets the exact window this process holds the mutation lock for
+   * (apply/undo/recover/reconcile), so `providerEvidence()`'s cold path can
+   * wait it out rather than race a live provider mutation. */
+  function guarded(fn) {
+    return async (...args) => {
+      mutationInFlight = true;
+      try {
+        return await fn(...args);
+      } finally {
+        mutationInFlight = false;
+      }
+    };
+  }
+
+  return Object.freeze({
+    report, scan, scanState, isScanning: () => scanFlight !== null,
+    plan, apply: guarded(apply), prepareUndo, undo: guarded(undo), recover: guarded(recover),
+    auditInterruption, reconcile: guarded(reconcile), mutationBlocks: mutationBlocksReport,
+    planAction, providerEvidence,
+  });
+}

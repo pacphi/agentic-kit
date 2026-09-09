@@ -25,7 +25,29 @@ export const SYSTEM_CSS = `
    reason rides the title so a reader can find out why without leaving. */
 .sy-unk{color:var(--ink-dim); font-style:italic; cursor:help}
 .sy-approx{color:var(--ink-dim)}
-.sy-freshness{display:flex; align-items:center; gap:9px; font-size:12px; color:var(--ink-2)}
+#secondary-system{align-items:center;flex-wrap:nowrap}
+/* Scan state is information about every System view, not another segment in
+   the view picker. The menu keeps its content width; status consumes only the
+   remaining rail. A breakpoint below gives status its own row only when both
+   controls genuinely cannot fit. */
+#secondary-system>.subseg{flex:0 1 auto;width:max-content;min-width:0}
+.sy-freshness{
+  display:flex;align-items:center;flex:1 1 auto;width:auto;margin-left:0;
+  justify-content:flex-end;flex-wrap:nowrap;gap:9px;max-width:100%;min-width:0;
+  font-size:12px;color:var(--ink-2)
+}
+.sy-freshness[data-running="1"] .sy-asof{
+  max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+}
+@media(max-width:980px){
+  #secondary-system{align-items:flex-start;flex-wrap:wrap;overflow-x:visible}
+  #secondary-system>.subseg{flex:1 1 100%;width:100%}
+  .sy-freshness{
+    position:static;flex:1 1 100%;width:100%;padding-left:0;
+    justify-content:flex-start;flex-wrap:wrap
+  }
+  .sy-freshness[data-running="1"] .sy-asof{white-space:normal}
+}
 .sy-asof{font-family:var(--mono); font-size:11.5px}
 .sy-asof[data-stale="1"]{color:var(--warn)}
 .sy-scan{color:var(--accent)}
@@ -240,10 +262,23 @@ export const SYSTEM_CSS = `
    as, so the affordance is visible without a second visual vocabulary. */
 .sy-link{
   background:none; border:0; padding:0; font:inherit; color:var(--accent);
-  cursor:pointer; text-align:left; border-radius:3px;
+  cursor:pointer; text-align:left; border-radius:3px; text-decoration:none;
 }
-.sy-link:hover{text-decoration:underline}
+.sy-link:hover .sy-session-primary{text-decoration:underline}
 .sy-link:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+.sy-session-link{
+  display:inline-flex; flex-direction:column; align-items:flex-start; justify-content:center;
+  gap:2px; min-height:32px; max-width:100%; line-height:1.2;
+}
+.sy-session-primary{color:var(--accent); font-family:var(--sans); font-size:12px; font-weight:600}
+.sy-session-id{color:var(--ink-dim); font-family:var(--mono); font-size:10.5px; font-weight:400}
+.sy-session-static .sy-session-primary{color:var(--ink-2)}
+.sy-session-tooltip{
+  position:fixed; z-index:1000; max-width:min(520px,calc(100vw - 16px));
+  padding:8px 10px; border:1px solid var(--line-2); border-radius:7px;
+  background:var(--panel); color:var(--ink); box-shadow:var(--shadow);
+  font:11px/1.5 var(--mono); white-space:pre-wrap; overflow-wrap:anywhere; pointer-events:none;
+}
 /* The presence matrix is a real table and retains EVERY deduplicated item, but
    its viewport is deliberately one header plus no more than five records. The
    44px minimum accounts for the name and source lines; a wrapped record may
@@ -290,7 +325,6 @@ export const SYSTEM_CSS = `
 .sy-pressure-project-id{display:flex; flex-direction:column; min-width:0; gap:3px}
 .sy-pressure-project-id>span:first-child{display:flex; align-items:center; gap:7px; min-width:0}
 .sy-pressure-project-id b{color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
-.sy-current{padding:2px 6px; border-radius:999px; background:color-mix(in srgb,var(--accent) 15%,transparent); color:var(--accent); font-size:9px; text-transform:uppercase; letter-spacing:.04em; white-space:nowrap}
 .sy-pressure-path{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink-dim); font-family:var(--mono); font-size:10.5px}
 .sy-pressure-meta{display:flex; justify-content:flex-end; align-items:center; gap:6px; flex-wrap:wrap}
 .sy-pressure-chip,.sy-pressure-state{padding:3px 7px; border:1px solid var(--line); border-radius:999px; color:var(--ink-2); font-size:10.5px; white-space:nowrap}
@@ -305,7 +339,19 @@ export const SYSTEM_CSS = `
 .sy-pressure-action{display:grid; grid-template-columns:auto minmax(0,1fr); gap:12px; align-items:center; padding-top:10px}
 .sy-pressure-action>span{display:flex; flex-direction:column; color:var(--ink-2); white-space:nowrap}
 .sy-pressure-action small{color:var(--ink-dim); font-size:10px}
-.sy-pressure-action code{display:block; min-width:0; padding:7px 9px; border-radius:6px; background:var(--bg); color:var(--accent); overflow:auto; white-space:nowrap}
+.sy-pressure-command{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:stretch;min-width:0;border-radius:6px;background:var(--bg);overflow:hidden}
+.sy-pressure-command code{display:block;min-width:0;padding:7px 9px;color:var(--accent);overflow:auto;white-space:nowrap}
+.sy-copy-command{display:inline-flex;align-items:center;justify-content:center;width:34px;padding:5px;border:0;border-left:1px solid var(--line);background:transparent;color:var(--ink-2);cursor:pointer}
+.sy-copy-command:hover{color:var(--accent);background:var(--accent-soft)}
+.sy-copy-command:focus-visible{outline:2px solid var(--accent);outline-offset:-3px}
+.sy-copy-command[data-copy-busy="1"]{cursor:wait;opacity:.7}
+.sy-copy-command svg{width:15px;height:15px;stroke:currentColor;stroke-width:1.4;fill:none}
+.sy-copy-command[data-copy-state="copied"]{color:var(--ok)}
+.sy-copy-command[data-copy-state="failed"]{color:var(--fail)}
+.sy-copy-command[data-copy-state] svg{display:none}
+.sy-copy-command[data-copy-state]::after{font:700 14px/1 var(--sans)}
+.sy-copy-command[data-copy-state="copied"]::after{content:'✓'}
+.sy-copy-command[data-copy-state="failed"]::after{content:'!'}
 .sy-pressure-foot{margin-top:10px}
 @media(max-width:900px){
   .sy-pressure-overview{grid-template-columns:repeat(2,minmax(0,1fr))}
