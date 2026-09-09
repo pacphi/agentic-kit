@@ -19,6 +19,34 @@ Current contracts live in [Maintenance](../MAINTENANCE.md),
 [acceptance criteria](../MAINTENANCE-ACCEPTANCE.md), [language coverage](../LANGUAGE-COVERAGE.md),
 and the still-proposed [project metadata adapters](../PROJECT-METADATA-ADAPTERS.md).
 
+## Reading archived material safely
+
+Status words such as **Draft**, **Approved**, **Implemented**, **current**, or **uncommitted**
+refer to the document's original capture date. Plans, agent prompts, shell commands and model/version
+recommendations inside these files are historical content, not instructions to execute today or
+new authorization. The July 2026 dependency baseline above describes that archival transition;
+it is not the current installation requirement. Follow the linked living guide and current ADR
+for operative behavior, then verify the exact source and artifact before applying a procedure.
+
+### Original-location links retained in frozen files
+
+The metadata audit for issue 211 found twelve unresolved link occurrences in three archived files.
+They are relocation artifacts, not missing current documentation. Frozen bodies remain unchanged;
+use these destinations when following their historical references:
+
+| Original reference in archived material | Preserved or current destination |
+| --- | --- |
+| shell-kit README `docs/BACKGROUND.md` | [Archived background](2026-07-14-shell-kit-background.md) |
+| shell-kit README `docs/CONDITIONAL-BLOCKS.md` | [Archived conditional blocks](2026-07-14-shell-kit-conditional-blocks.md) |
+| shell-kit README `docs/TROUBLESHOOTING.md` | [Archived troubleshooting](2026-07-14-shell-kit-troubleshooting.md); [current guide](../TROUBLESHOOTING.md) |
+| shell-kit README `docs/archive` | [This archive index](README.md) |
+| shell-kit README/troubleshooting `docs/archive/…` or `archive/…` incident paths | [June incident](2026-06-token-consumption-incident.md), [June recurrence](2026-06-11-token-consumption-recurrence.md) |
+| host-extensibility HTML `AUTHORING-HOST-ADAPTERS.md` | [Current adapter authoring](../AUTHORING-HOST-ADAPTERS.md) |
+
+External links and upstream resolution claims are retained as historical evidence and were not
+reconfirmed by this metadata audit. The per-file inventory and limitations are recorded in the
+[issue 211 history matrix](../audits/211-history-matrix.md).
+
 ## Index
 
 | File | Original location | What it was | Why it's historical |
