@@ -3,7 +3,7 @@
 - **Status:** Implemented; handoff transport amended by
   [ADR-0034](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0034-schema-native-handoffs-and-hermetic-seats.md)
 - **Date:** 2026-08-25
-- **Updated:** 2026-08-31
+- **Updated:** 2026-09-10
 - **Update note:** Initial implementation retires only receipt-owned legacy MCP state,
   diagnoses effective Codex MCP topology, extends POSIX cleanup to process groups, and adds
   fail-closed QE-Court readiness plus a reciprocal live participant-transport regression.
@@ -16,6 +16,12 @@
   release drift is now actionable only when GitHub publishes the exact bundle asset consumed
   by the installer; tag-only releases remain visible but are deferred without touching the
   healthy installed Brain.
+  2026-09-10: setup/sync explicitly disclose remembered correction of the exact
+  recognized user-scope legacy Ruflo alias. Legacy removal is deferred until
+  after provisioning and requires an enabled canonical replacement. Successful
+  removal can record consent for matching future repairs while the workspace-aware
+  replacement remains agentic-kit-owned. Final topology verification rejects
+  unresolved duplication and in-scope recursion; custom entries remain preserved.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0001](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0001-one-routing-policy-many-projections.md),
   [ADR-0006](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0006-primary-host-and-ambidextrous-mirroring.md),
@@ -50,8 +56,12 @@ seats. A successful Claude/Codex transport check therefore cannot be called a co
 2. Setup, sync, and host selection stop creating `codex mcp-server`. They remove a legacy project
    registration only when `integrations.ownership.codex.mcp === "ak"`, confirm its absence, and
    clear the receipt only after confirmation. User-owned recursive and legacy duplicate entries
-   are disclosed by `ak sync`, removed only after explicit confirmation (or `--yes`), and verified;
-   unrelated user-owned entries remain preserved.
+   are disclosed by `ak sync`, removed only after explicit confirmation (or `--yes`), and verified.
+   A new repair-and-remember approval may persist the recognized user-scope alias
+   correction for later setup/sync runs; historical approvals confer no ongoing
+   authority. Reuse requires the same absolute config, alias and launch shape,
+   plus the enabled agentic-kit-owned workspace-aware replacement. Unrelated
+   user-owned entries remain preserved.
 3. Codex keeps one independent, workspace-aware Ruflo MCP registration. Agentic-QE continues to
    own its Codex platform/MCP integration. Agentic-kit detects recursive Codex self-registration,
    missing concrete Agentic-QE registration, and duplicate Ruflo transports without rewriting

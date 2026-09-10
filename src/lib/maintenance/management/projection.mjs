@@ -99,6 +99,7 @@
 // max-lines budget; it is not a separate public contract.
 import path from 'node:path';
 import { catalogVersions, addReleaseObservations } from './catalog-versions.mjs';
+import { mapHostAlignment } from './host-alignment.mjs';
 import { createHash } from 'node:crypto';
 import {
   MANAGEMENT_INVENTORY_SCHEMA, MANAGEMENT_SCHEMA_VERSION, assertManagementInventory, canonicalJson, sourceComplete,
@@ -989,6 +990,7 @@ function runMappingStages(
   builder, { footprint, hookReadModel, modelSnapshot, providerDetections, discovery, byProjectId }, ctx,
 ) {
   mapCatalog(builder, footprint.catalog, ctx);
+  mapHostAlignment(builder, discovery.hostAlignment, ctx);
   mapHooks(builder, hookReadModel, ctx);
   mapInstallTools(builder, footprint.install?.tools, ctx);
   mapStorageReclaimables(builder, footprint.storage?.reclaimables, ctx);
@@ -1076,7 +1078,8 @@ export function buildManagementInventory({
   // needs a real, opaque projectId — `project` placements may never carry a
   // null one. Filled in from the presence's own lexical root before catalog
   // mapping runs, so mapCatalogGroup's ordinary registry lookup finds it.
-  registerFallbackProjectPaths(projects, projectPathsIn(footprint.catalog), { installationKey });
+  registerFallbackProjectPaths(projects, [...projectPathsIn(footprint.catalog),
+    ...(discovery.hostAlignment?.entries ?? []).map(entry => entry.project).filter(Boolean)], { installationKey });
   enrichProjectPresentation(builder, projects,
     [...(footprint?.projects?.projects ?? []), ...(footprint?.projects?.discoveryProjects ?? [])], { installationKey });
   // Add presentation evidence after identity assignment; a better label must

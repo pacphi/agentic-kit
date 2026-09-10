@@ -11,6 +11,8 @@ import { run } from './exec.mjs';
 import { readJson, addDenyRules, removeDenyRules } from './settings.mjs';
 import { writeFileWithBackup } from './file-write.mjs';
 import { managedAgentBrowserEnv } from './agent-browser.mjs';
+import { isRufloMcpTransport } from './ruflo-mcp-transport.mjs';
+import { retiredCodexTransport } from './host-alignment.mjs';
 
 /** Enumerate MCP tool names from the installed package's mcp-tools modules,
  *  grouped by name prefix (family). Returns Map<family, string[]>. */
@@ -156,7 +158,7 @@ export function ruvectorRegistered() {
 export function codexMcpStatus(cfg, cwd = process.cwd()) {
   const root = repoRoot(cwd) ?? cwd;
   const servers = readJson(path.join(root, '.mcp.json'), {})?.mcpServers ?? {};
-  return { registered: 'codex' in servers, owned: cfg?.integrations?.ownership?.codex?.mcp === 'ak' };
+  return { registered: retiredCodexTransport(servers.codex), owned: cfg?.integrations?.ownership?.codex?.mcp === 'ak' };
 }
 
 function tomlString(value) {
@@ -257,8 +259,7 @@ export function codexMcpTopology({ cwd = process.cwd(), home = os.homedir() } = 
   const agenticQeRegistrations = registrations.filter((entry) => entry.name === 'agentic-qe');
   // Detection is broader than permission to remove a table. Custom environment
   // and timeout fields preserve ownership without hiding duplicate transports.
-  const isRuflo = (entry) => (entry.command === 'ruflo' && sameArgs(entry.args, ['mcp', 'start']))
-    || (entry.command === 'ak' && sameArgs(entry.args, ['x', 'ruflo-mcp']));
+  const isRuflo = (entry) => isRufloMcpTransport(entry);
   const rufloRegistrations = registrations.filter(isRuflo);
   // Merge observed fields user→project: a timeout-only project table inherits
   // the user's transport. Keep raw tables separate for exact repair matching.
@@ -358,13 +359,18 @@ function createCurrentRepairBackup(file) {
  * supported command. Every target is identity-checked immediately before its
  * mutation and re-probed immediately after it. */
 export async function repairCodexMcpTopology(targets, cwd = process.cwd(), {
-  runner = run, inspect = codexMcpTopology,
+  runner = run, inspect = codexMcpTopology, codexHome = process.env.CODEX_HOME,
 } = {}) {
   const backedUp = new Set();
   const removed = [];
   for (const target of targets) {
     if (!validRepairTarget(target)) {
       return { ok: false, changed: removed.length > 0, detail: 'Codex MCP repair target was not a recognized disclosed legacy shape' };
+    }
+    if (target.scope === 'user' && codexHome
+      && path.resolve(codexHome, 'config.toml') !== target.file) {
+      return { ok: false, changed: removed.length > 0,
+        detail: 'CODEX_HOME does not match the disclosed Codex config; native removal refused' };
     }
     const live = inspect({ cwd }).registrations.find((entry) =>
       entry.file === target.file && entry.scope === target.scope && entry.name === target.name);

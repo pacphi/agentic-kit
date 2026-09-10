@@ -144,7 +144,7 @@ export function codexMcpRepairTrustManifest(plan = []) {
       value: `[mcp_servers.${entry.name}]`,
       effect: entry.repairKind === 'recursive-codex'
         ? `create a current-state recovery copy, remove this deprecated recursive Codex transport ${mechanism}, and verify its absence`
-        : `create a current-state recovery copy, remove this duplicate legacy Ruflo transport ${mechanism}, and verify its absence`,
+        : `create a current-state recovery copy, remove this duplicate legacy Ruflo transport ${mechanism}, and verify its absence${entry.scope === 'user' ? '; remember this recognized correction for future setup/sync runs while the managed workspace-aware replacement remains present' : ''}`,
     };
   });
   if (!changes.length) return [];

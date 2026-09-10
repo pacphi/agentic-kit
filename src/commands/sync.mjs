@@ -32,6 +32,18 @@ import * as paths from '../lib/paths.mjs';
 import { ok, warn, fail, info, bold, dim, withProgress, reportOutcome } from '../lib/output.mjs';
 import { applyCodexStatusline, projectionFor } from '../lib/codex-statusline.mjs';
 import { ensureAgentBrowser } from '../lib/agent-browser.mjs';
+import { confirmCodexMcpRepairs, reconcileCodexMcp } from '../lib/codex-mcp-reconcile.mjs';
+import { alignHosts } from './x/host-align.mjs';
+
+async function askCodexRepair(question) {
+  if (!process.stdin.isTTY) {
+    fail('Codex repairs need confirmation; re-run with --yes in a non-interactive session');
+    return false;
+  }
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try { return /^y(?:es)?$/i.test((await rl.question(`${question} [y/N] `)).trim()); }
+  finally { rl.close(); }
+}
 
 /** Prints one lifecycle-render.mjs report line at its own level — 'fail'
  *  (F5, Wave C security review) reaches `fail()`, not a fallback `info()`,
@@ -128,8 +140,9 @@ export const SYNC_STEPS = [
     id: 'codex-mcp-repair',
     when: (subs) => subs.has('codex-mcp'),
     run: async (ctx) => {
-      if (!ctx.codexRepairPlan.length) return;
-      const result = await ctx.step('codex MCP repair', () => repairCodexMcpTopology(ctx.codexRepairPlan, ctx.cwd));
+      const recursive = ctx.codexRepairPlan.filter(entry => entry.repairKind === 'recursive-codex');
+      if (!recursive.length) return;
+      const result = await ctx.step('codex MCP repair', () => ctx.repairCodexTopology(recursive, ctx.cwd));
       if (!result.ok) ctx.state.codexRepairFailure = result.detail;
     },
   },
@@ -475,6 +488,9 @@ export async function run({
   fetchLatest,
   dejaVuAdapter = companionLifecycleFor('deja-vu'),
   collectFn = collect,
+  confirmCodexRepair = askCodexRepair,
+  inspectCodexTopology = codexMcpTopology,
+  repairCodexTopology = repairCodexMcpTopology,
 }) {
   const cwd = process.cwd();
   const dejaVuPlanOptions = { allowUpgrade: !flags['no-upgrade'] };
@@ -502,23 +518,11 @@ export async function run({
   const cfg = loadKitConfig();
   const subsystems = new Set(plan.map((p) => p.subsystem));
   const codexRepairPlan = plan.some((p) => p.subsystem === 'codex-mcp')
-    ? codexMcpRepairPlan(codexMcpTopology({ cwd })) : [];
+    ? codexMcpRepairPlan(inspectCodexTopology({ cwd })) : [];
   if (codexRepairPlan.length) {
-    console.log(bold(`Codex repair plan (${codexRepairPlan.length} action(s)):`));
-    for (const action of codexRepairPlan) {
-      console.log(`  • remove ${action.file} → [mcp_servers.${action.name}] — ${action.reason}`);
-    }
-    let confirmed = flags.yes;
-    if (!confirmed) {
-      if (!process.stdin.isTTY) {
-        fail('Codex repairs need confirmation; re-run with --yes in a non-interactive session');
-        return 1;
-      }
-      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-      const answer = await rl.question('Apply these Codex repairs? [y/N] ');
-      rl.close();
-      confirmed = /^y(?:es)?$/i.test(answer.trim());
-    }
+    const confirmed = await confirmCodexMcpRepairs(cfg, codexRepairPlan, inspectCodexTopology({ cwd }), {
+      yes: flags.yes, confirm: confirmCodexRepair,
+    });
     if (!confirmed) {
       info('Codex configuration was left unchanged; no sync actions were applied');
       return 1;
@@ -542,10 +546,23 @@ export async function run({
   };
   const ctx = {
     cfg, cwd, pkgRoot, flags, dejaVuAdapter, codexRepairPlan, subsystems, report, step, state,
+    inspectCodexTopology, repairCodexTopology,
   };
 
   for (const s of SYNC_STEPS) {
     if (s.when(subsystems, flags, cfg)) await s.run(ctx);
+    if (state.codexRepairFailure) return 1;
+  }
+
+  // An initializer can restore a legacy alias after the initial repair. Keep
+  // the replacement's ownership check and the user's explicitly remembered
+  // choice, then verify the final topology before declaring convergence.
+  const finalMcp = await reconcileCodexMcp({ cfg, cwd, yes: flags.yes, confirm: confirmCodexRepair,
+    inspect: inspectCodexTopology, repair: repairCodexTopology, approvedTargets: codexRepairPlan });
+  if (!finalMcp.ok) state.codexRepairFailure = finalMcp.detail;
+  if (await alignHosts({ flags: { apply: true, yes: flags.yes }, roots: [cwd], cfg,
+    confirm: confirmCodexRepair }) !== 0) {
+    state.applyFailures.push({ name: 'host-alignment', detail: 'transport anomalies remain; run ak host align for the exact scope and correction' });
   }
 
   // converge proof

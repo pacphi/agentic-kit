@@ -190,7 +190,7 @@ test('MNT-DSC-013: complete coverage cannot carry pending partitions and source 
 
 test('fixture ids derive from the fixture key only', () => {
   assert.equal(id('plc', { a: 1 }), opaqueId('plc', { a: 1 }, FIXTURE_KEY));
-  assert.equal(CURATED_VIEWS.length, 14);
+  assert.equal(CURATED_VIEWS.length, 15);
 });
 
 test('MNT-INV-004/J2: a shared-artifact set may hold one placement but must name exactly one artifact; other kinds need two placements', () => {

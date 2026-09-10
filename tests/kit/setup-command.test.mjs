@@ -68,7 +68,7 @@ function fakeDejaVu(events = [], { mode = 'mcp', hosts = ['claude'], applyResult
 }
 
 function seedHome(cfg = offlineKitConfig()) {
-  rmrf(paths.claudeDir(), paths.configDir(), path.join(HOME, '.config', 'opencode'));
+  rmrf(paths.claudeDir(), paths.codexDir(), paths.configDir(), path.join(HOME, '.config', 'opencode'));
   fs.mkdirSync(paths.claudeDir(), { recursive: true });
   fs.writeFileSync(paths.claudeMdPath(), '# my machine notes\n');
   writeKitConfig(HOME, cfg);

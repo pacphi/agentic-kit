@@ -181,6 +181,7 @@ function matchesView(placement, view, index) {
   }
   if (view === 'disabled') return (placement.conditions ?? []).includes('disabled');
   if (view === 'recently-changed') return placement.recentlyChangedAt != null;
+  if (view === 'host-alignment') return placement.conditions.includes('host-alignment-required');
   if (view === 'evidence-only') return groupBucket(placement) === 'evidence-only';
   return true;
 }

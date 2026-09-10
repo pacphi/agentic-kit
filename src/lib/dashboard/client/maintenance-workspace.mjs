@@ -37,6 +37,7 @@ import { ago } from './intelligence.mjs';
     "duplicates":"Duplicated placements","disabled":"Disabled resources",
     "credentials-providers":"Credentials and providers","models-runtimes":"Models and runtimes",
     "storage-caches":"Storage and caches","recently-changed":"Recently changed",
+    "host-alignment":"Host alignment",
     "evidence-only":"Inventory evidence only"
   };
   export var MNT_CONFLICT_EXPLANATIONS={

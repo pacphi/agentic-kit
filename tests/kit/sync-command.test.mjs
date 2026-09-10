@@ -27,7 +27,7 @@ const PROJECT = sandboxProject('ak-sync');
 const FLAGS = (over = {}) => ({ 'dry-run': false, 'no-upgrade': false, yes: false, json: false, ...over });
 
 function seedHome(cfg = offlineKitConfig(), pkgs = {}) {
-  rmrf(paths.claudeDir(), paths.configDir(), path.join(HOME, '.config', 'opencode'));
+  rmrf(paths.claudeDir(), paths.codexDir(), paths.configDir(), path.join(HOME, '.config', 'opencode'));
   fs.mkdirSync(paths.claudeDir(), { recursive: true });
   fs.writeFileSync(paths.claudeMdPath(), '# machine notes\n');
   writeKitConfig(HOME, cfg);

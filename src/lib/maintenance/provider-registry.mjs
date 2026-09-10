@@ -6,6 +6,8 @@ import { createOllamaModelRemoveProvider } from './providers/ollama-model-remove
 import { createOwnedNpxCacheProvider } from './providers/owned-storage.mjs';
 import { createOwnedSkillProvider } from './providers/owned-skill.mjs';
 import { createRufloMcpOrphanProvider } from './providers/ruflo-mcp-orphan.mjs';
+import { createHostAlignmentProvider } from './providers/host-alignment.mjs';
+import { configuredHostProjects } from '../host-alignment.mjs';
 import { managedBaseline } from '../npx.mjs';
 import { npxCacheDir } from '../paths.mjs';
 
@@ -66,6 +68,10 @@ export function createDefaultMaintenanceProviderRegistry(options = {}) {
     createCodexPluginProvider(options.codexPlugin),
     createCodexMcpProvider(options.codexMcp),
     createRufloMcpOrphanProvider(options.rufloMcpOrphan),
+    createHostAlignmentProvider({ projectRoots: options.hostAlignment?.projectRoots
+      ?? [...new Set([process.cwd(), ...(options.footprint?.projects?.projects ?? []).map(p => p.path).filter(Boolean)])],
+    discoverProjects: configuredHostProjects,
+    ...options.hostAlignment }),
   ];
   const candidates = (options.footprint?.storage?.reclaimables ?? [])
     .filter((row) => row?.kind === 'stale-npx-env');
