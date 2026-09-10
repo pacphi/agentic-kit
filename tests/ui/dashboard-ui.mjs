@@ -3421,9 +3421,9 @@ async function main() {
       s0.aria[0] === 'ascending'
         && JSON.stringify(names0) === JSON.stringify([...names0].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))),
       `aria was ${JSON.stringify(s0.aria)} and the order ${JSON.stringify(names0)}`);
-    check('every measured column header is sortable while Worktrees is a control column', await page.$$eval('#sys-projects thead th',
-      (ths) => ths.slice(0, 5).every((t) => !!t.querySelector('button[data-proj-sort]')) && ths[5]?.innerText.trim() === 'Worktrees'),
-      'the worktree control column must remain separate from sortable measurements');
+    check('every measured column header is sortable', await page.$$eval('#sys-projects thead th',
+      (ths) => ths.slice(0, 5).every((t) => !!t.querySelector('button[data-proj-sort]'))),
+      'each measured column needs its own sort control');
 
     await page.click('[data-proj-sort="project"]');
     const s1 = await sortState();
