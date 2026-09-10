@@ -24,7 +24,7 @@ import { MNT, MNT_GUIDANCE_LANE_LABELS, MNT_CONFLICT_EXPLANATIONS, MNT_CREDENTIA
   }
   export function mntFacetValueLabel(facet,value){
     if(facet==="adapter"||facet==="consumer")return MNT_ADAPTER_LABELS[value]||mntHumanize(value);
-    if(facet==="sessionOrigin")return ({"claude-desktop":"Claude Desktop","codex-desktop":"Codex Desktop",unknown:"Unclassified"})[value]||"Unclassified";
+    if(facet==="sessionOrigin")return ({"claude-desktop":"Claude Desktop","codex-desktop":"ChatGPT Desktop",unknown:"Unclassified"})[value]||"Unclassified";
     if(facet==="projectType")return ({git:'Git',folder:'Folder',worktree:'Worktree',unknown:'Not checked'})[value]||'Not checked';
     if(facet==="scope")return MNT_SCOPE_LABELS[value]||mntHumanize(value);
     if(facet==="kind")return mntKindLabel(value);
