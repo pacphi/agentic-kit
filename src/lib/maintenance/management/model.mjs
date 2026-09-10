@@ -132,6 +132,7 @@ export const PLACEMENT_CONDITIONS = Object.freeze([
   'definitions-differ', 'superseded-revision', 'recovery-receipt-open',
   'credential-mechanism-not-checked', 'source-scan-incomplete', 'reproducible-cache',
   'orphaned-process',
+  'host-alignment-required',
 ]);
 export const CONDITION_LABELS = Object.freeze({
   'healthy': 'Healthy',
@@ -145,6 +146,7 @@ export const CONDITION_LABELS = Object.freeze({
   'source-scan-incomplete': 'Source scan incomplete',
   'reproducible-cache': 'Reproducible cache',
   'orphaned-process': 'Orphaned process',
+  'host-alignment-required': 'Host realignment required',
 });
 export const GUIDANCE_LANES = Object.freeze(['apply', 'steps', 'decision', 'update', 'recovery']);
 export const GUIDANCE_LANE_LABELS = Object.freeze({
@@ -167,6 +169,7 @@ export const CURATED_VIEWS = Object.freeze([
   'all', 'can-apply', 'steps', 'decisions', 'updates', 'dependencies', 'conflicts', 'duplicates',
   'disabled', 'credentials-providers', 'models-runtimes', 'storage-caches', 'recently-changed',
   'evidence-only',
+  'host-alignment',
 ]);
 export const CURATED_VIEW_LABELS = Object.freeze({
   'all': 'All resources',
@@ -183,6 +186,7 @@ export const CURATED_VIEW_LABELS = Object.freeze({
   'storage-caches': 'Storage and caches',
   'recently-changed': 'Recently changed',
   'evidence-only': 'Inventory evidence only',
+  'host-alignment': 'Host alignment',
 });
 export const FACETS = Object.freeze([
   'scope', 'environment', 'project', 'projectType', 'sessionOrigin', 'family', 'kind', 'adapter', 'consumer', 'carrier', 'provenance',

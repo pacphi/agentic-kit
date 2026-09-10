@@ -19,6 +19,7 @@ import { UNFINISHED_MAINTENANCE_STATUSES } from '../transaction-store.mjs';
 import { isOptionalManagement, recommendationEntries, normalizeGuidanceInventory } from './guidance-purpose.mjs';
 import { inspectorRelationships } from './inspector-relationships.mjs';
 import { guidanceCoverage } from './guidance-coverage.mjs';
+import { hostAlignmentMatcher } from './host-alignment.mjs';
 
 const DEPENDENCY_EDGE_KINDS = Object.freeze([
   'requires-executable', 'requires-runtime', 'requires-provider', 'requires-credential',
@@ -259,6 +260,7 @@ function ollamaModelMatcher(placement, facts, ctx) {
 }
 
 const APPLY_MATCHERS = Object.freeze({
+  'host-alignment': hostAlignmentMatcher,
   'claude-plugin': claudePluginMatcher,
   'codex-plugin': codexPluginMatcher,
   'codex-mcp': codexMcpMatcher,

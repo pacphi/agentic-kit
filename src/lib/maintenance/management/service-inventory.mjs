@@ -217,6 +217,7 @@ async function gatherAndProject(ctx, { deep }) {
     discovery: {
       instructionFiles, dependencyProbes, installResourceKinds: {}, modelStorage,
       pluginEvidence: { claude: detections.get('claude-plugin'), codex: detections.get('codex-plugin') },
+      hostAlignment: detections.get('host-alignment'),
       projects: discoveryProjects,
     },
     environment: { platform: ctx.platform },

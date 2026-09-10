@@ -20,6 +20,32 @@ before provider effects: the default filesystem adapter does not establish the r
 durable storage on Windows. Directory-flush failures are not ignored. WSL uses its own Linux
 environment; native Windows mutation support remains an integration gate.
 
+## Host alignment in User and Project views
+
+Select **Host alignment** under **More views**, then choose **User** or **Projects**
+and an optional project filter. Use **Refresh evidence** to inspect current host
+configuration. The rows identify retired peer transports and other host-alignment
+anomalies without exposing configuration contents or local paths in the inventory.
+
+Open a row to inspect the host, scope, policy reason, preserved integrations and
+available correction. **Repair registration** opens the existing exact-action
+preview. Applying requires confirmation of that one registration; another finding
+in the same file or another project is not included. A changed file invalidates
+the preview. The transaction records verification and refreshes the affected catalog.
+
+Each correction creates a current-state recovery backup beside the configuration.
+Automatic dashboard **Undo** is not provided for this recipe; review the backup
+before manual restoration so later edits are preserved. Custom commands/environments,
+ambiguous configuration and misplaced plugins remain review items instead of
+receiving an unsupported Apply action. The companion plugin's separate exact
+repair remains available through `ak heal hooks --host codex`.
+
+Dashboard approval does not grant broad future cleanup permission. The CLI's
+`ak host align --apply` repair-and-remember preference remains a separate explicit
+choice. Ruflo dual-mode execution, AQE native providers, provider fallbacks and
+modern MCP endpoints are preserved. See
+[ADR-0051](adr/0051-supported-peer-delegation-and-host-realignment.md).
+
 ## Four destinations
 
 The dashboard workspace has four tabs. Each answers a different question.
