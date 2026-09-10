@@ -5,6 +5,71 @@ latest capability is *two* motions, not one: get the newer code, then turn the f
 This page exists because those two are easy to conflate — and `ak sync`, despite its name,
 updates the code and reconverges choices you have already made.
 
+## Supported host delegation and realignment
+
+Claude and Codex remain ambidextrous through their native CLI workers. Agentic-kit
+uses `ak run`; Ruflo's dual-mode orchestrator and AQE's `claude-code` / `codex`
+providers retain their own supported routes. The optional Codex plugin in Claude
+uses App Server. These paths do not require the retired `codex mcp-server`.
+
+To audit and correct this workstation:
+
+```bash
+ak host align --all-projects
+ak host align --all-projects --apply
+```
+
+The first command is read-only. The second names the affected files and offers
+backed-up removal of recognized retired transports. `--yes` approves the displayed
+corrections noninteractively. Approval remembers the exact repair recipe,
+file, host, scope, project and name; later matching corrections do not prompt again.
+Remove `integrations.hostAlignment` from `kit.json` to revoke that preference.
+
+The all-projects scope combines the bounded session census with existing projects
+declared in Claude configuration, plus the home-directory `.mcp.json`. Add
+`--project /absolute/path` for a project or worktree not in those sources.
+Custom environments or executables, ambiguous syntax, symlinks, and misplaced
+plugins require review. The companion plugin's existing correction workflow is
+`ak heal hooks --host codex`; alignment does not reinstall or delete plugins.
+
+`ak status` reports user/current-project anomalies. Setup and sync offer
+realignment, and `ak run` refuses affected workers while blocking anomalies
+remain. AQE routing, provider fallbacks, modern servers named `codex` or `claude`,
+and supported `claude mcp serve` tool exposure are preserved. See
+[ADR-0051](adr/0051-supported-peer-delegation-and-host-realignment.md) for the policy,
+official source citations, authority boundaries and verification limits.
+
+## 2026-09-10: Remembered Codex MCP correction
+
+Claude Code's `claude-flow` registration and Codex's `ruflo` registration follow
+Ruflo's host-specific conventions. Seeing both names across hosts is expected;
+two enabled Ruflo connections inside Codex need review.
+
+Run `ak sync` when status reports a duplicate. The repair prompt names the exact
+configuration and offers to remember correction of the recognized user-scope
+`claude-flow` alias. Accepting that prompt, or the equivalent disclosed setup
+manifest with `--yes`, authorizes later setup/sync runs to repeat this bounded
+correction. Historical approvals are not converted into remembered consent.
+
+Legacy alias removal runs after provisioning, with an enabled canonical `ruflo`
+replacement present. Each removal retains the live fingerprint check, creates a
+current-state backup, and verifies the result. The remembered correction is used
+only while agentic-kit owns the workspace-aware `ak x ruflo-mcp` replacement.
+It does not authorize removing project entries, other names, custom commands,
+custom environment settings, or plugin-provided servers. Standard upstream `npx`
+launch forms are recognized for diagnostics; they do not expand removal consent.
+
+Setup and sync recheck the final topology. An unresolved duplicate or in-scope
+recursive transport prevents a success verdict. Machine-only setup can repair a
+user-scope duplicate when its replacement already exists, without editing project
+registrations. A mismatched `CODEX_HOME` stops native removal before any write.
+
+The preference is stored at
+`integrations.ownership.codex.mcpRepairConsent` in `kit.json`. Remove that property
+to revoke remembered correction. Future matching repairs will ask again. This
+protects the outcome of setup/sync; it cannot prevent another program from editing
+configuration between runs.
+
 ## 2026-09-04: Human session identity in System
 
 `storage.topSessions[]` now carries an additive `identity` object with the original storage name,

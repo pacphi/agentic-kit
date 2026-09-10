@@ -38,6 +38,7 @@
     "docs/adr/0033-retire-codex-mcp-and-bound-qe-court-participants.md",
     "docs/adr/0043-managed-ruflo-browser-executor.md",
     "docs/adr/0044-receipt-aware-maintenance-control-plane.md",
+    "docs/adr/0051-supported-peer-delegation-and-host-realignment.md",
     "tests/live/aqe-external-provider-transport.test.mjs",
     "tests/live/qe-court-participant-transport.test.mjs",
     "tests/live/codex-context-contract.test.mjs",

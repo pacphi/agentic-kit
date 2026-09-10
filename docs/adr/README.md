@@ -60,6 +60,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0047](0047-streaming-observation-forest.md) | Streaming observation forest for deep scans | Accepted; Projects pilot and separate Discovery continuation implemented |
 | [0048](0048-inventory-led-maintenance-resource-management.md) | Inventory-led Maintenance resource management | Accepted; Focus browser implemented and focused checks pass; human/cross-platform gates pending |
 | [0050](0050-dashboard-project-identity-and-context-reporting.md) | Dashboard project identity and context reporting | Implemented |
+| [0051](0051-supported-peer-delegation-and-host-realignment.md) | Supported peer delegation and scoped host realignment | Accepted; implemented locally |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
