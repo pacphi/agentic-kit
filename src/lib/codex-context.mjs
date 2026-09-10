@@ -1,5 +1,5 @@
-// Native per-model clamp is verified on 0.153.4. An API maximum is not a
-// Codex allocation. New host versions need their own native contract evidence.
+// A native catalog's per-model contract, not an exact CLI patch version,
+// governs a maximum request. An API maximum is not a Codex allocation.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -7,8 +7,15 @@ import { run } from './exec.mjs';
 import { contextHome, positiveTokens, readContextConfig, replaceContextWindow,
   writeContextConfig, validateCodexContextIntent } from './codex-context-config.mjs';
 
-export const VERIFIED_CODEX_CONTEXT_VERSIONS = Object.freeze(['0.153.4']);
 export const CONTEXT_CACHE_MAX_AGE_MS = 7 * 86400000;
+
+export function hasCodexContextProfile(raw) {
+  return typeof raw?.slug === 'string' && /^[a-zA-Z0-9._:-]{1,128}$/.test(raw.slug)
+    && positiveTokens(raw.context_window) && positiveTokens(raw.max_context_window)
+    && raw.max_context_window >= raw.context_window
+    && Number.isInteger(raw.effective_context_window_percent)
+    && raw.effective_context_window_percent > 0 && raw.effective_context_window_percent <= 100;
+}
 
 export function contextCapacity(raw, request = null) {
   const nativeWindow = positiveTokens(raw.context_window) ? raw.context_window : null;
@@ -34,14 +41,12 @@ function readEvidence(home, now) {
   if (!Number.isFinite(age) || age < -300000 || age > CONTEXT_CACHE_MAX_AGE_MS) {
     throw new Error('Codex model cache is stale or undated; run codex debug models to refresh');
   }
-  if (!VERIFIED_CODEX_CONTEXT_VERSIONS.includes(cache.client_version)) {
-    throw new Error('Codex version has no verified per-model context clamp profile');
+  if (typeof cache.client_version !== 'string' || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(cache.client_version)) {
+    throw new Error('Codex model cache has no valid client version');
   }
   if (!Array.isArray(cache.models) || cache.models.length === 0 || cache.models.length > 1000) throw new Error('invalid Codex model catalog');
   const models = cache.models.filter(m => !['hide', 'hidden'].includes(m.visibility));
-  if (!models.length || models.some(m => typeof m.slug !== 'string' || !/^[a-zA-Z0-9._:-]{1,128}$/.test(m.slug)
-    || !positiveTokens(m.context_window) || !positiveTokens(m.max_context_window)
-    || m.max_context_window < m.context_window || contextCapacity(m).effectivePercent === null)) {
+  if (!models.length || models.some(m => !hasCodexContextProfile(m))) {
     throw new Error('Codex catalog lacks valid native capacity bounds');
   }
   return { file, config, cache, models, requestedWindow: Math.max(...models.map(m => m.max_context_window)),

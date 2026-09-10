@@ -9,9 +9,10 @@ import { spawnSync } from 'node:child_process';
 import { contextHome } from '../../src/lib/codex-context-config.mjs';
 
 const enabled = process.env.AK_CODEX_CONTEXT_CONFORMANCE === '1';
+const clientVersion = process.env.AK_CODEX_CONTEXT_CLIENT_VERSION ?? '0.154.0';
 for (const [model, expected] of [['gpt-6-astra', 828400], ['gpt-5.6-sol', 828400], ['gpt-5.5', 258400]]) {
-  test(`Codex 0.153.4 native per-model clamp: ${model}`, { skip: !enabled, timeout: 65000 }, t => {
-    assert.equal(spawnSync('codex', ['--version'], { encoding: 'utf8', timeout: 5000 }).stdout.trim(), 'codex-cli 0.153.4');
+  test(`Codex ${clientVersion} native per-model clamp: ${model}`, { skip: !enabled, timeout: 65000 }, t => {
+    assert.equal(spawnSync('codex', ['--version'], { encoding: 'utf8', timeout: 5000 }).stdout.trim(), `codex-cli ${clientVersion}`);
     const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-context-contract-'));
     t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
     const result = spawnSync('codex', ['exec', '--skip-git-repo-check', '-C', cwd, '-s', 'read-only',

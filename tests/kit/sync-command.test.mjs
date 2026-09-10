@@ -371,6 +371,22 @@ test('failed heal results are retained for the final convergence proof', () => {
   assert.deepEqual(state.applyFailures, [{ name: 'ruvnet-brain', detail: 'network unavailable' }]);
 });
 
+test('a package upgrade makes an enabled lifecycle host eligible for a same-run refresh', () => {
+  assert.equal(sync.lifecycleRefreshRequired(new Set(['versions']), 'opencode'), true);
+  assert.equal(sync.lifecycleRefreshRequired(new Set(['versions']), 'codex'), false);
+  assert.equal(sync.lifecycleRefreshRequired(new Set(['opencode']), 'opencode'), true);
+  assert.equal(sync.lifecycleRefreshRequired(new Set(), 'opencode'), false);
+});
+
+test('a Ruflo version upgrade explicitly refreshes generated helpers before the statusline heal', () => {
+  const helpers = sync.SYNC_STEPS.findIndex((step) => step.id === 'ruflo-helpers');
+  const statusline = sync.SYNC_STEPS.findIndex((step) => step.id === 'statusline');
+  assert.ok(helpers > -1, 'sync needs a dedicated Ruflo generated-helper stage');
+  assert.ok(helpers < statusline, 'Ruflo may replace statusline.cjs, so helpers refresh first');
+  assert.equal(sync.SYNC_STEPS[helpers].when(new Set(['versions'])), true);
+  assert.equal(sync.SYNC_STEPS[helpers].when(new Set()), false);
+});
+
 // ── opencode convergence through a REAL sync ─────────────────────────────────
 // The maintainer's command-level scenarios: enabled+drifted converges after the
 // hosts step and before the final verification; enabled+absent never fabricates
