@@ -27,6 +27,7 @@ import agentBrowser from './agent-browser.mjs';
 import mcp from './mcp.mjs';
 import codexMcp from './codex-mcp.mjs';
 import codexPlugins from './codex-plugins.mjs';
+import hostAlignment from './host-alignment.mjs';
 
 import hosts from './hosts.mjs';
 import providersStatus from './providers-status.mjs';
@@ -45,7 +46,7 @@ import qeCourt from './qe-court.mjs';
 export const SECTIONS_BEFORE_HOST_DETAIL = [
   models, versions, ruvnetBrain, ruvector, self, natives, memoryPin,
   projectMemory, scaffoldAgents, npx, security, learning, aqe, agentdb, agentBrowser, mcp,
-  codexMcp, codexPlugins,
+  codexMcp, codexPlugins, hostAlignment,
 ];
 
 // Everything from `hosts` onward — after those direct calls.

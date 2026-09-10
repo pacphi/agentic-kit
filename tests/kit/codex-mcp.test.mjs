@@ -57,7 +57,7 @@ test('registered is false when .mcp.json has other servers but not codex', () =>
 test('owned reflects the kit.json ak-ownership marker', () => {
   const dir = tmpProject();
   try {
-    writeMcp(dir, { codex: {} });
+    writeMcp(dir, { codex: { command: 'codex', args: ['mcp-server'] } });
     assert.equal(codexMcpStatus({ integrations: { ownership: { codex: { mcp: 'ak' } } } }, dir).owned, true);
     assert.equal(codexMcpStatus({ integrations: { ownership: { codex: { mcp: null } } } }, dir).owned, false);
     assert.equal(codexMcpStatus({}, dir).owned, false);
@@ -67,9 +67,17 @@ test('owned reflects the kit.json ak-ownership marker', () => {
 test('a pre-existing (unowned) codex server is registered but not owned', () => {
   const dir = tmpProject();
   try {
-    writeMcp(dir, { codex: {} });
+    writeMcp(dir, { codex: { command: 'codex', args: ['mcp-server'] } });
     assert.deepEqual(codexMcpStatus({ integrations: { ownership: { codex: { mcp: null } } } }, dir),
       { registered: true, owned: false });
+  } finally { rm(dir); }
+});
+
+test('a modern server named codex is not a retired Codex transport', () => {
+  const dir = tmpProject();
+  try {
+    writeMcp(dir, { codex: { type: 'http', url: 'https://example.com/mcp' } });
+    assert.equal(codexMcpStatus({}, dir).registered, false);
   } finally { rm(dir); }
 });
 

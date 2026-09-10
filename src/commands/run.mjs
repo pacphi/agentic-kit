@@ -139,6 +139,15 @@ export async function run({ flags, positionals, executePlan = executeRunPlan, cf
     maxConcurrent = positiveInt(flags['max-concurrent'], 'max-concurrent');
     timeoutMs = positiveInt(flags.timeout, 'timeout', { ceiling: 2_147_483_647 });
   } catch (error) { fail(error.message); return 2; }
+  const { inspectHostAlignment, publicHostAlignment } = await import('../lib/host-alignment.mjs');
+  const alignment = inspectHostAlignment();
+  const usedHosts = new Set(plan.workers.flatMap(worker => [worker.host, ...(worker.escalate ?? []).map(rung => rung.host)]));
+  if (alignment.findings.some(finding => finding.level === 'fail' && usedHosts.has(finding.host))) {
+    const error = 'Host transport anomaly: run ak host align to review and offer correction before delegation';
+    if (flags.json) console.log(JSON.stringify({ error, alignment: publicHostAlignment(alignment) }, null, 2));
+    else fail(error);
+    return 1;
+  }
   if (!flags.json) printPlan(plan);
   const results = await executePlan(plan, { maxConcurrent, timeoutMs, escalate: !!flags.escalate });
   if (flags.json) console.log(JSON.stringify({ plan, results }, null, 2));

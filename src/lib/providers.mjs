@@ -14,8 +14,8 @@ import { recordProviderEnv, undoOwnedProviderEnv } from './provider-ownership.mj
 //     ALL_PROVIDER_TYPES — claude-code (subscription), claude/openai/gemini/
 //     openrouter/azure-openai/bedrock/cognitum (metered api), ollama (local). It
 //     normalizes `anthropic`→`claude` and warns on unknown values. So aqe is NOT
-//     limited to claude-code; codex-the-CLI simply isn't a provider *type* (its
-//     OpenAI models are reached via `openai`).
+//     limited to claude-code: current AQE also has a `codex` CLI subscription
+//     provider. Its native providers do not require cross-host MCP servers.
 //
 // Two independent axes:
 //   host axis     — which agent CLI executes a managed worker (claude, codex,

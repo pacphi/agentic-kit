@@ -17,6 +17,8 @@ import {
   register as mcpRegister, applyExclusions, registrationStatus, agentBrowserMcpConfigured,
   codexMcpTopology, codexMcpRepairPlan, repairCodexMcpTopology,
 } from '../lib/mcp.mjs';
+import { reconcileCodexMcp } from '../lib/codex-mcp-reconcile.mjs';
+import { alignHosts } from './x/host-align.mjs';
 import { reconcileOpencodeGuidance } from '../lib/opencode.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
 import { hostsWithLifecycle, lifecycleAdapterFor, lifecycleExecutionEnabled, detectionBinFor } from '../lib/adapters/lifecycle-registry.mjs';
@@ -821,10 +823,12 @@ const DEFAULT_SETUP_RUNTIME = Object.freeze({
 
 function setupCodexRepairPlan(cfg, cwd, willConfigureProject, inspectTopology) {
   if (!cfg.integrations?.hosts?.codex) return [];
-  const plan = codexMcpRepairPlan(inspectTopology({ cwd }));
+  const topology = inspectTopology({ cwd });
+  const plan = codexMcpRepairPlan(topology);
   if (willConfigureProject) return plan;
   return plan.filter((target) =>
-    target.scope === 'user' && target.repairKind === 'recursive-codex');
+    target.scope === 'user' && (target.repairKind === 'recursive-codex'
+      || topology.effectiveRufloRegistrations.some(entry => entry.name === 'ruflo')));
 }
 
 async function applySetupCodexRepairs(flags, repairPlan, cwd, repairTopology) {
@@ -874,7 +878,7 @@ export async function run({
 
   if (!(await runtime.machineSetup({ flags, pkgRoot, cfg }))) return 1;
   if (!(await applySetupCodexRepairs(
-    flags, repairPlan, process.cwd(), runtime.repairCodexTopology,
+    flags, repairPlan.filter(entry => entry.repairKind === 'recursive-codex'), process.cwd(), runtime.repairCodexTopology,
   ))) return 1;
   // Companion execution is deliberately sequenced after every enabled host is
   // installed and its lifecycle wiring has converged. It never uses upstream
@@ -897,6 +901,22 @@ export async function run({
     info('not inside a project (no .git here) — run `ak setup` from a repo to set one up');
   }
   if (!flags['dry-run']) await runtime.finalizeSetup(cfg, pkgRoot, flags);
+  if (!flags['dry-run'] && await alignHosts({
+    flags: { apply: true, yes: flags.yes }, roots: willConfigureProject ? [process.cwd()] : [], cfg,
+    confirm: question => confirm(question, false, flags.yes),
+  }) !== 0) return 1;
+
+  if (!flags['dry-run'] && (willConfigureProject
+    || runtime.inspectCodexTopology({ cwd: process.cwd() }).duplicateRuflo)) {
+    const finalMcp = await reconcileCodexMcp({
+      cfg, cwd: process.cwd(), yes: flags.yes,
+      confirm: question => confirm(question, false, flags.yes),
+      inspect: runtime.inspectCodexTopology, repair: runtime.repairCodexTopology,
+      includeProject: willConfigureProject,
+      approvedTargets: repairPlan,
+    });
+    if (!finalMcp.ok) { reportOutcome('Codex MCP convergence', finalMcp); return 1; }
+  }
 
   console.log('');
   ok(bold('setup complete — `agentic-kit` anytime for status, `ak sync` after upgrades'));

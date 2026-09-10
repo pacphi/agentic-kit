@@ -58,6 +58,10 @@ export const options = {
   dev: { type: 'boolean', default: false }, // adapters conformance: run without persisting evidence/grants
   yes: { type: 'boolean', default: false },
   json: { type: 'boolean', default: false },
+  project: { type: 'string', multiple: true },
+  'all-projects': { type: 'boolean', default: false },
+  apply: { type: 'boolean', default: false },
+  'dry-run': { type: 'boolean', default: false },
 };
 
 /** Billing is the non-obvious axis of the aqe provider list. Three categories,
@@ -82,6 +86,10 @@ Host model — three managed hosts, all eligible for explicit activity routing:
 
 Subcommands:
   status   (default) detected CLIs, aqe provider, ruflo providers, what's wired
+  align    audit user/current-project host transports; --all-projects adds the
+             bounded census, --project PATH adds a location. Preview by default;
+             --apply offers backed-up correction; --yes approves noninteractively.
+             Preserves Ruflo dual-mode workers and AQE native provider routing.
   pick     choose hosts / aqe provider / ruflo providers → persist → apply
   refresh  re-seed routes whose seeded pin diverges from the current defaults
              (per-activity, opt-in; user pins are never touched, and \`ak sync\`
@@ -167,12 +175,16 @@ export async function run({ flags, positionals, pkgRoot }) {
   if (sub === 'off') return off({ cwd, pkgRoot });
   if (sub === 'pick') return pick({ flags, cwd, pkgRoot });
   if (sub === 'refresh') return refresh({ flags, cwd });
+  if (sub === 'align') {
+    const { run: align } = await import('./host-align.mjs');
+    return align({ flags });
+  }
   if (sub === 'adapters') {
     const { run: runHostAdapters } = await import('./host-adapters.mjs');
     return runHostAdapters({ flags, positionals: positionals.slice(1) });
   }
 
-  fail(`unknown host subcommand: ${sub} (status|pick|refresh|off|adapters)`);
+  fail(`unknown host subcommand: ${sub} (status|pick|refresh|off|adapters|align)`);
   return 2;
 }
 
