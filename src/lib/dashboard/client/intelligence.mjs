@@ -58,6 +58,16 @@ import { fmtNum, kpi } from './usage.mjs';
   }
 
   var INTEL_SCOPE_GROUPS=[['repository','Git repositories'],['worktree','Git worktrees'],['user','User-level learning'],['unknown','Other / unclassified']];
+  var machineWideDesignationFilter='all';
+  function machineWideDesignation(p){
+    if(p.learningScope==='repository')return 'Git repository';
+    if(p.learningScope==='worktree')return 'Git worktree';
+    var origins=Array.isArray(p.learningOrigins)?p.learningOrigins:[];
+    if(origins.includes('codex-desktop'))return 'ChatGPT Desktop';
+    if(origins.includes('claude-desktop'))return 'Claude Desktop';
+    if(Array.isArray(p.hosts)&&p.hosts.includes('opencode'))return 'OpenCode';
+    return 'Directory';
+  }
   function intelScopeRows(rows,scope){
     return rows.filter(function(p){
       var kind=['repository','worktree','user'].includes(p.learningScope)?p.learningScope:'unknown';
@@ -75,20 +85,18 @@ import { fmtNum, kpi } from './usage.mjs';
     var label=p.label||'(unlabeled)';
     return '<div class="mw-row mw-data-row" role="row">'
       +'<span class="mw-name" role="cell" title="'+esc(label)+'">'+esc(label)+storeHtml+'</span>'
+      +'<span class="mw-designation" role="cell">'+esc(machineWideDesignation(p))+'</span>'
       +'<span class="mw-val mono" role="cell">'+esc(fmtNum(p.patternsLearned))+'</span>'
       +'<span class="mw-val mono" role="cell">'+esc(fmtNum(p.patternStoreCount))+'</span>'
       +'<span class="mw-val mono" role="cell" title="'+esc(lastTxt)+'">'+esc(lastTxt)+'</span></div>';
   }
 
-  function machineWideGroup(group,rows){
-    var id='mw-group-'+group[0];
-    return '<section class="mw-group" data-learning-scope="'+group[0]+'" aria-labelledby="'+id+'">'
-      +'<h3 id="'+id+'">'+esc(group[1])+'<span>'+esc(fmtNum(rows.length))+'</span></h3>'
-      +'<div class="mw-group-scroll" role="region" aria-label="'+esc(group[1])+' learning rows" tabindex="0">'
-      +'<div role="table" aria-labelledby="'+id+'"><div class="mw-row mw-head" role="row">'
-      +'<span role="columnheader">Project</span><span class="mw-val" role="columnheader">Patterns learned</span>'
+  function machineWideTable(rows){
+    return '<div class="mw-group-scroll" role="region" aria-label="Learning locations" tabindex="0">'
+      +'<div role="table"><div class="mw-row mw-head" role="row">'
+      +'<span role="columnheader">Name</span><span role="columnheader">Designation</span><span class="mw-val" role="columnheader">Patterns learned</span>'
       +'<span class="mw-val" role="columnheader">Pattern store</span><span class="mw-val" role="columnheader">Last active</span></div>'
-      +'<div role="rowgroup">'+rows.map(machineWideRow).join('')+'</div></div></div></section>';
+      +'<div role="rowgroup">'+rows.map(machineWideRow).join('')+'</div></div></div>';
   }
 
   function renderMachineWide(mw){
@@ -102,21 +110,12 @@ import { fmtNum, kpi } from './usage.mjs';
     var table=document.getElementById("mw-table");
     if(!table)return;
     if(!perProject.length){table.innerHTML='<div class="empty">no projects discovered on this machine.</div>';return;}
-    var positions={};
-    var active=document.activeElement,focusedScope=active&&active.classList&&active.classList.contains('mw-group-scroll')
-      ?active.closest('.mw-group').getAttribute('data-learning-scope'):null;
-    if(table.querySelectorAll)Array.from(table.querySelectorAll('.mw-group')).forEach(function(section){
-      positions[section.getAttribute('data-learning-scope')]=section.querySelector('.mw-group-scroll').scrollTop;
-    });
-    table.innerHTML=INTEL_SCOPE_GROUPS.map(function(group){
-      var rows=intelScopeRows(perProject,group[0]);
-      return rows.length?machineWideGroup(group,rows):'';
-    }).join('');
-    if(table.querySelectorAll)Array.from(table.querySelectorAll('.mw-group')).forEach(function(section){
-      var region=section.querySelector('.mw-group-scroll'),scope=section.getAttribute('data-learning-scope');
-      region.scrollTop=positions[scope]||0;
-      if(scope===focusedScope)region.focus({preventScroll:true});
-    });
+    var designations=['all'].concat(Array.from(new Set(perProject.map(machineWideDesignation))).sort());
+    var visible=(machineWideDesignationFilter==='all'?perProject:perProject.filter(function(row){return machineWideDesignation(row)===machineWideDesignationFilter;})).sort(function(a,b){return String(a.label||'').localeCompare(String(b.label||''),undefined,{sensitivity:'base',numeric:true})||String(a.key||a.path||'').localeCompare(String(b.key||b.path||''));});
+    table.innerHTML='<div class="mw-filter-pills" role="group" aria-label="Filter learning locations by designation">'
+      +designations.map(function(designation){var label=designation==='all'?'All':designation;return '<button type="button" class="mw-filter-pill" data-designation="'+esc(designation)+'" aria-pressed="'+(designation===machineWideDesignationFilter)+'">'+esc(label)+'</button>';}).join('')
+      +'</div>'+machineWideTable(visible);
+    if(table.querySelectorAll)Array.from(table.querySelectorAll('.mw-filter-pill')).forEach(function(button){button.addEventListener('click',function(){machineWideDesignationFilter=button.getAttribute('data-designation')||'all';renderMachineWide(mw);});});
   }
 
   // The picker's option list AND its default selection come from the SAME
@@ -137,7 +136,7 @@ import { fmtNum, kpi } from './usage.mjs';
     var sel=document.getElementById("intel-project-select");
     if(!sel)return;
     if(!intelProjects.length){
-      sel.innerHTML='<option value="">no projects discovered</option>';
+      sel.innerHTML='<option value="">no learning locations discovered</option>';
       sel.disabled=true;
       return;
     }
@@ -146,7 +145,7 @@ import { fmtNum, kpi } from './usage.mjs';
       var rows=intelScopeRows(intelProjects,group[0]);
       if(!rows.length)return '';
       return '<optgroup label="'+esc(group[1])+'">'+rows.map(function(p){
-        return '<option value="'+esc(p.key)+'"'+(p.key===selectedProjectKey?" selected":"")+'>'+esc(p.label)+"</option>";
+        return '<option value="'+esc(p.key)+'"'+(p.key===selectedProjectKey?" selected":"")+'>'+esc(p.label)+' — '+esc(machineWideDesignation(p))+"</option>";
       }).join('')+'</optgroup>';
     }).join('');
   }

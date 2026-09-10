@@ -1,8 +1,7 @@
-/* global projectView */
+/* global repositoryTree */
 // @ts-nocheck — browser bundle source (never node-imported; client.mjs
 // reads it as text). See src/lib/dashboard/client/**'s eslint.config.mjs
 // override comment for why this directory isn't run through the node lib.
-import { projectControls, projectIdentityCell, projectPopulation, projectOrigin } from './project-group-controls.mjs';
 import { authHeaders, esc } from './bootstrap.mjs';
 import { formatLocalDateTime, formatLocalDateTimeLong, shortSessionId } from './datetime.mjs';
 import { ago } from './intelligence.mjs';
@@ -14,6 +13,7 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
   // (now its own card) and agentic-kit is ak's own state. Both are accounted
   // for in the panel's footnote rather than dropped silently.
   var REAL_HOSTS={claude:true,codex:true,opencode:true};
+  var expandedRepositoryTrees={};
 
   // renderSysStorage was one CC-88 function mixing five independent DOM
   // regions (learning stores, donut, per-host split, growth sparks, top
@@ -765,22 +765,6 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
       +"</span></button></th>";
   }
 
-  // renderSysProjects was one CC-33 function mixing eligibility filtering,
-  // per-row HTML building, and final table+liner assembly. Split by concern;
-  // each keeps the exact original logic unchanged. (The row builder also
-  // drops a dead `_diskBar` computation that was built but never read in the
-  // original -- a no-op removal, not a behavior change.)
-  function sysProjectsEligible(all){
-    var list=[],excluded=0;
-    for(var f=0;f<all.length;f++){
-      var cand=all[f],crem=cand.remote||null;
-      var linked=!!(crem&&crem.webUrl&&/^https:/.test(String(crem.webUrl)));
-      var hosted=!Array.isArray(cand.hosts)||cand.hosts.length>0;
-      if(linked&&hosted)list.push(cand);else excluded++;
-    }
-    return {list:list,excluded:excluded};
-  }
-
   function sysProjectNameCell(pr){
     var rem=pr.remote||null,name;
     if(rem&&rem.status==="linked"&&/^https:/.test(String(rem.webUrl||""))){
@@ -792,28 +776,30 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     return name;
   }
 
-  function sysProjectRowHtml(pr){
+  function sysProjectRowHtml(pr,opts){
+    opts=opts||{};
     var name=sysProjectNameCell(pr);
     var last=mval(pr.lastActivity);
-    return "<tr><td>"+name+projectIdentityCell(pr)+"</td>"
+    var control=opts.expandable?'<button type="button" class="project-chevron" data-project-tree="'+esc(opts.treeKey)+'" aria-expanded="'+opts.expanded+'">'+(opts.expanded?'⌄':'›')+'</button>':'';
+    var worktreeMark=opts.worktree?'<span class="project-worktree-mark" aria-hidden="true">↳</span>':'';
+    var display=opts.worktree?'<span class="project-worktree-name">'+esc(pr.label||'worktree')+'</span>':name;
+    return '<tr class="'+(opts.worktree?'project-worktree':'project-repository')+'"'+(opts.hidden?' hidden':'')+'><td>'+worktreeMark+display+'<span class="project-path">'+esc(pr.path||'not measured yet')+'</span></td>'
       +'<td class="num">'+mhtml(pr.loc&&pr.loc.total,function(v){return "~"+fmtTok(v);})+"</td>"
       +"<td>"+langCell(pr.loc)+"</td>"
       +'<td class="num">'+mhtml(pr.totalBytes,fmtBytes)+"</td>"
       +'<td class="num">'+(last==null?unkHtml((pr.lastActivity&&pr.lastActivity.reason)||"no readable entry",false)
-        :esc(ago(Math.max(0,Math.round((Date.now()-last)/1000)))))+"</td></tr>";
+        :esc(ago(Math.max(0,Math.round((Date.now()-last)/1000)))))+"</td><td>"+control+"</td></tr>";
   }
 
-  function sysProjectsLinerHtml(p,list,excluded){
+  function sysProjectsLinerHtml(p,tree){
+    var worktrees=tree.repositories.reduce(function(n,group){return n+group.worktrees.length;},0);
     return '<div class="sy-liner">'
       +(p.everSeen
-        ?mhtml(p.everSeen)+" projects ever seen across all hosts, "
+        ?mhtml(p.everSeen)+" working directories ever seen across all hosts, "
           +(p.onDisk?mhtml(p.onDisk):"some")+" still on disk"
-        :mhtml(p.count)+" projects measured (this snapshot predates the ever-seen count)")
-      +", "+esc(fmtNum(list.length))+" listed here."
-      +(excluded&&projectPopulation==="measured"
-        ? " Excluded "+esc(fmtNum(excluded))+" measured director"+(excluded===1?"y":"ies")
-          +" without an HTTPS remote or recorded host. Full discovery retains other known paths."
-        : "")
+        :mhtml(p.count)+" directories measured (this snapshot predates the ever-seen count)")
+      +". This view shows "+esc(fmtNum(tree.repositories.length))+" verified repositor"+(tree.repositories.length===1?"y":"ies")
+      +" with "+esc(fmtNum(worktrees))+" nested worktree"+(worktrees===1?"":"s")+"; "+esc(fmtNum(tree.excludedDirectories))+" non-repository directories are excluded."
       +" Line counts are approximate: extension-bucketed, with node_modules and vendored "
       +"trees excluded. Disk is the whole project directory, .git and node_modules included.</div>";
   }
@@ -824,34 +810,32 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     var p=d.projects;
     if(!p){el.innerHTML=sysEmpty(NOT_SCANNED);return;}
     var all=p.projects||[];
-    if(!all.length&&!(p.discoveryProjects||[]).length){el.innerHTML=projectControls(p)+sysEmpty("no project was discovered on this machine.");return;}
-    var elig=sysProjectsEligible(all),excluded=elig.excluded;
-    var groups=projectView({projects:elig.list,discoveryProjects:p.discoveryProjects},projectPopulation,projectOrigin);
-    var list=groups.reduce(function(rows,group){return rows.concat(group.rows);},[]);
-    var body=groups.map(function(group){
-      return '<tbody>'+sortProjects(group.rows,projSort.key,projSort.dir).map(sysProjectRowHtml).join('')+'</tbody>';
-    }).join('');
+    if(!all.length&&!(p.discoveryProjects||[]).length){el.innerHTML=sysEmpty("no repository was discovered on this machine.");return;}
+    var tree=repositoryTree({projects:all,discoveryProjects:p.discoveryProjects});
+    var byPath={};tree.repositories.forEach(function(group){byPath[group.repository.path]=group;});
+    var repositories=sortProjects(tree.repositories.map(function(group){return group.repository;}),projSort.key,projSort.dir);
+    var body=repositories.map(function(repository){var group=byPath[repository.path],expanded=!!expandedRepositoryTrees[group.key];return '<tbody>'+sysProjectRowHtml(repository,{expandable:group.worktrees.length>0,expanded:expanded,treeKey:group.key})+group.worktrees.map(function(worktree){return sysProjectRowHtml(worktree,{worktree:true,hidden:!expanded});}).join('')+'</tbody>';}).join('');
     // Legend covers only what still renders: the language ramp. The disk column
     // is a single figure now, and there are no chips left to explain.
-    el.innerHTML=projectControls(p)+'<div class="sy-legend" style="margin-bottom:4px">'
+    el.innerHTML='<div class="sy-legend" style="margin-bottom:4px">'
       +'<span>lines: top '+LANG_TOP+' languages, darkest first'
       +'<i style="background:var(--s1);margin-left:8px"></i>'
       +'<i style="background:var(--s1);opacity:.63"></i>'
       +'<i style="background:var(--s1);opacity:.27"></i>'
       +'<i style="background:var(--dim)"></i> the rest</span></div>'
-      +'<div class="sy-tblwrap"><table class="sy-table sy-sortable"><thead><tr>'
+      +'<div class="sy-tblwrap sy-project-scroll" role="region" aria-label="Repository footprints" tabindex="0"><table class="sy-table sy-sortable"><thead><tr>'
       +projSortHeader("project","Project",false)
       +projSortHeader("lines","Lines ≈",true)
       +projSortHeader("language","By language",false)
       +projSortHeader("disk","Disk",true)
       +projSortHeader("active","Last active",true)
+      +"<th>Worktrees</th>"
       +"</tr></thead>"+body+"</table></div>"
       // Three numbers now, and the gap between the last two is a filter rather
       // than a fact about the machine — so it is named. Leaving the reader to
       // subtract 25 from 16 and guess is the silent exclusion ADR-0023 forbids.
-      +sysProjectsLinerHtml(p,list,excluded)
-      +'<p class="sy-liner" role="status">'+list.length+' directories match. Origins can overlap within a directory; each directory appears once. Unmeasured values stay unknown; disk and line counts are not summed across nested paths.</p>'
-      +(!list.length?sysEmpty('No directories match these filters.'):'');
+      +sysProjectsLinerHtml(p,tree)
+      +(!repositories.length?sysEmpty('no verified repository footprint is available in this snapshot.'):'');
   }
 
   export function renderSystemFreshness(){
@@ -1001,6 +985,14 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
   }
 
   export function wireSystem(){
+    document.addEventListener("click",function(e){
+      var toggle=e.target&&e.target.closest?e.target.closest("[data-project-tree]"):null;
+      if(!toggle)return;
+      var key=toggle.getAttribute("data-project-tree");
+      if(!key)return;
+      expandedRepositoryTrees[key]=!expandedRepositoryTrees[key];
+      if(SYSTEM)renderSysProjects(SYSTEM);
+    });
     var sessionTooltip=document.getElementById("sys-session-tooltip");
     if(!sessionTooltip){
       sessionTooltip=document.createElement("div");

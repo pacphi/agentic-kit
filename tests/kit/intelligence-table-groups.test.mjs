@@ -18,7 +18,7 @@ test('machine-wide rows retain their own scope and key without name-based attrib
   assert.equal(result.totals.projectCount, 3);
 });
 
-test('machine-wide groups alphabetize every retained row and preserve KPI totals', () => {
+test('machine-wide inventory alphabetizes every retained row and preserves KPI totals', () => {
   const elements = { 'mw-table': {}, 'mw-hero': {} };
   const source = fs.readFileSync(new URL('../../src/lib/dashboard/client/intelligence.mjs', import.meta.url), 'utf8')
     .replace(/^import .*;$/gm, '').replace(/\bexport /g, '');
@@ -31,12 +31,31 @@ test('machine-wide groups alphabetize every retained row and preserve KPI totals
   perProject.push({ key: 'user', label: '<User>', learningScope: 'user' });
   context.renderTable({ totals: { patternsLearnedLifetime: 28, projectCount: 9, mostActiveProject: 'Repository 8' }, perProject });
   const html = elements['mw-table'].innerHTML;
-  assert.match(html, /Git repositories/);
-  assert.match(html, /User-level learning/);
+  assert.match(html, /Designation/);
+  assert.match(html, /Git repository/);
   assert.equal((html.match(/class="mw-row mw-data-row"/g) || []).length, 9);
   assert.ok(html.indexOf('Repository 1') < html.indexOf('Repository 8'));
   assert.ok(html.includes('title="&lt;User&gt;"'));
   assert.ok(html.includes('role="columnheader"'));
   assert.ok(html.includes('tabindex="0"'));
   assert.equal(elements['mw-hero'].innerHTML, 'patterns learned:28;projects tracked:9;most active project:Repository 8;');
+});
+
+test('machine-wide inventory renders one designation column and filter pills for every origin', () => {
+  const elements = { 'mw-table': {}, 'mw-hero': {} };
+  const source = fs.readFileSync(new URL('../../src/lib/dashboard/client/intelligence.mjs', import.meta.url), 'utf8')
+    .replace(/^import .*;$/gm, '').replace(/\bexport /g, '');
+  const esc = (value) => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+  const context = vm.createContext({ document: { getElementById: (id) => elements[id] }, esc,
+    fmtNum: (value) => String(value ?? 0), kpi: (label, value) => `${label}:${value};` });
+  vm.runInContext(`${source}\nglobalThis.renderTable=renderMachineWide;`, context);
+  context.renderTable({ totals: { patternsLearnedLifetime: 2, projectCount: 2, mostActiveProject: 'Repository' }, perProject: [
+    { key: 'repo', label: 'Repository', learningScope: 'repository', patternsLearned: 1, patternStoreCount: 1 },
+    { key: 'desktop', label: 'g-p-opaque', learningScope: 'unknown', learningOrigins: ['codex-desktop'], patternsLearned: 1, patternStoreCount: 1 },
+  ] });
+  const html = elements['mw-table'].innerHTML;
+  assert.match(html, /Designation/);
+  assert.match(html, /Git repository/);
+  assert.match(html, /ChatGPT Desktop/);
+  assert.match(html, /mw-filter-pill/);
 });

@@ -123,7 +123,7 @@ function fixtureProject(root, name, {
     { timestamp: 1, nodes: storeEntries, edges: storeEntries * 2, pageRankSum: 0.1 },
   ]);
   writeFile(path.join(dir, '.claude-flow', 'health-history.json'), [{ ts: 1, ok: true }]);
-  return { path: dir, label: name, source: 'registry' };
+  return { path: dir, label: name, source: 'registry', learningScope: 'repository' };
 }
 
 const tempRoot = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ak-dash-intel-'));
