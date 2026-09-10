@@ -17,7 +17,7 @@ function picker() {
   return { elements, render: context.renderPicker, context };
 }
 
-test('should_segment_and_alphabetize_picker_options_without_changing_selection_keys', () => {
+test('should_segment_and-alphabetize picker options with the same designations as the inventory', () => {
   const { elements, render } = picker();
   render({ selectedProjectKey: 'z', selectedProjectLabel: 'Zulu', projects: [
     { key: 'z', label: 'Zulu', learningScope: 'repository', learningOrigins: ['codex-desktop'] },
@@ -25,14 +25,18 @@ test('should_segment_and_alphabetize_picker_options_without_changing_selection_k
     { key: 'u', label: 'Settings', learningScope: 'user' },
     { key: 'w', label: 'Feature', learningScope: 'worktree' },
     { key: 'x', label: 'uuid-looking-123', learningScope: 'unknown' },
+    { key: 'd', label: 'g-p-opaque', learningScope: 'unknown', learningOrigins: ['codex-desktop'] },
   ] });
   const html = elements['intel-project-select'].innerHTML;
   for (const label of ['Git repositories', 'Git worktrees', 'User-level learning', 'Other / unclassified']) {
     assert.ok(html.includes(`<optgroup label="${label}">`));
   }
   assert.ok(html.indexOf('value="a"') < html.indexOf('value="z"'));
-  assert.match(html, /value="z" selected>Zulu</);
-  assert.doesNotMatch(html, /Claude Desktop|Codex Desktop/);
+  assert.match(html, /value="z" selected>Zulu — Git repository</);
+  assert.match(html, /alpha — Git repository/);
+  assert.match(html, /Settings — Directory/);
+  assert.match(html, /Feature — Git worktree/);
+  assert.match(html, /g-p-opaque — ChatGPT Desktop/);
   assert.equal(elements['history-project-name'].textContent, 'Zulu');
 });
 test('should_keep_empty_picker_disabled_and_escape_untrusted_option_labels', () => {

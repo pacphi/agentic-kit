@@ -1,5 +1,5 @@
 import { readContextConfig } from '../../codex-context-config.mjs';
-import { VERIFIED_CODEX_CONTEXT_VERSIONS, contextCapacity } from '../../codex-context.mjs';
+import { hasCodexContextProfile, contextCapacity } from '../../codex-context.mjs';
 import {
   MAX_COMMAND_BYTES, MAX_MODELS, diagnostic, modelRecord, sourceRecord,
 } from './index.mjs';
@@ -9,14 +9,14 @@ const REASONING = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 
 const bounded = (value, max = 256) => typeof value === 'string' && value.length > 0 && value.length <= max ? value : null;
 const positiveSafeInteger = (value) => Number.isSafeInteger(value) && value > 0 ? value : null;
 
-function codexContextVariant(raw, config, clientVersion) {
+function codexContextVariant(raw, config, _clientVersion) {
   const contextWindow = positiveSafeInteger(raw.context_window);
   const maximumContextWindow = positiveSafeInteger(raw.max_context_window);
   const effectiveContextWindowPercent = Number.isSafeInteger(raw.effective_context_window_percent)
     && raw.effective_context_window_percent > 0 && raw.effective_context_window_percent <= 100
     ? raw.effective_context_window_percent : null;
   const requested = config.window;
-  const supported = VERIFIED_CODEX_CONTEXT_VERSIONS.includes(clientVersion);
+  const supported = hasCodexContextProfile(raw);
   const capacity = contextCapacity(raw, requested);
   const configured = requested !== null && (!config.provider || config.provider === 'openai') && !config.catalog;
   return {

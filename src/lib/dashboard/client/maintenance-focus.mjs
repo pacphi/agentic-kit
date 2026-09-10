@@ -47,13 +47,6 @@ import { mntFacetValueLabel } from './maintenance-filters.mjs';
       return '<span class="mnt-language-badge" title="'+esc(label)+'"><img class="mnt-language-icon" width="24" height="24" src="'+mntLanguageLogo(language.id)+'" alt="'+esc(language.name)+'" aria-label="'+esc(label)+'"></span>';
     }).join('')+'</span>';
   }
-  function mntProjectOrigins(node){
-    var origins=(node.sessionOrigins||[]).filter(function(item){return item.origin==='claude-desktop'||item.origin==='codex-desktop';});
-    if(!origins.length)return '';
-    return '<span class="mnt-project-origins">'+origins.map(function(item){
-      return esc(mntFacetValueLabel('sessionOrigin',item.origin));
-    }).join(' · ')+'</span>';
-  }
   function mntProjectGroups(nodes,busy){
     var groups=new Map(),index=0;
     nodes.forEach(function(node){
@@ -72,7 +65,7 @@ import { mntFacetValueLabel } from './maintenance-filters.mjs';
     if(level==='resource'&&node.installationSource)note=node.installationSource;
     return '<li><button type="button" class="mnt-row mnt-focus-node" data-mnt-focus="'+esc(node.value)+'" data-mnt-level="'+esc(level)+'" tabindex="'+(index===0?'0':'-1')+'"'+(busy?' disabled':'')+'>'
       +(level==='project'?'':mntIcon(icon))+'<span class="mnt-row-copy"><span class="mnt-row-name'+(level==='project'?' mnt-project-title':'')+'">'+(level==='project'?mntIcon('project'):'')+esc(node.label)+'</span>'
-      +(level==='project'?mntProjectKindBadge(node.projectKind)+mntProjectOrigins(node):'')
+      +(level==='project'?mntProjectKindBadge(node.projectKind):'')
       +(level==='project'&&node.languages&&node.languages.length?mntLanguageBadges(node.languages):'')
       +(node.description?'<span class="mnt-row-context mnt-resource-description" title="'+esc(node.descriptionSource||'Declared description')+'">'+esc(node.description)+'</span>':'')
       +(note?'<span class="mnt-row-context">'+esc(note)+'</span>':'')+'</span><span class="mnt-node-count">'+esc(node.count)+' installation'+(node.count===1?'':'s')+'</span>'+mntIcon('chevron')+'</button></li>';

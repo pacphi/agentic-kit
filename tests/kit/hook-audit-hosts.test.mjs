@@ -121,6 +121,7 @@ test('host-neutral audit reports each provider and never proposes automatic trus
       codex: { codexHome: fx.codex, pluginCacheDir: path.join(fx.codex, 'plugins', 'cache') },
       claude: { claudeRoot: fx.claude, managedSettingsFile: null },
       opencode: { opencodeRoot: fx.opencode },
+      upstream: { now: () => new Date('2026-09-03T00:00:00Z') },
     });
 
     assert.deepEqual(report.hosts, ['codex', 'claude', 'opencode', 'external']);

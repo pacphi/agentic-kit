@@ -404,6 +404,12 @@ export const SYSTEM_CSS = `
 .project-controls label { font-size:12px; display:flex; align-items:center; gap:6px; }
 .project-controls select { max-width:100%; background:var(--bg); color:var(--ink); border:1px solid var(--line); border-radius:5px; padding:6px; }
 .project-identity,.project-path { display:block; font-size:11px; color:var(--ink-2); overflow-wrap:anywhere; white-space:normal; }
+.sy-project-scroll{max-height:286px;overflow:auto}
+.sy-project-scroll .sy-table thead th{position:sticky;top:0;z-index:1;background:var(--panel)}
+.project-chevron{width:20px;margin:0 3px 0 -4px;padding:0;border:0;background:transparent;color:var(--accent);font:inherit;font-size:18px;line-height:1;cursor:pointer}
+.project-worktree-mark{display:inline-block;width:20px;margin-right:3px;color:var(--ink-dim)}
+.project-worktree-name{color:var(--ink-2);font-weight:600}
+.project-worktree td:first-child{padding-left:22px}
 
 .context-host-heading { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
 .context-host-heading span { font-size:11px; color:var(--ink-2); }

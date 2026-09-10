@@ -81,13 +81,22 @@ for (const source of ['model_context_window = 1\nmodel_context_window = 2\n', '"
   });
 }
 
-for (const change of [c => { c.fetched_at = '2020-01-01'; }, c => { c.client_version = '0.999.0'; }, c => { c.models[0].max_context_window = -1; }, c => { c.models = []; }]) {
+for (const change of [c => { c.fetched_at = '2020-01-01'; }, c => { delete c.models[0].effective_context_window_percent; }, c => { c.models[0].max_context_window = -1; }, c => { c.models = []; }]) {
   test('untrusted capacity evidence prevents a write', async t => {
     const f = fixture(t); change(f.cache); f.writeCache();
     await assert.rejects(manageCodexContext(f.cfg, { ...f.options, enable: true }));
     assert.equal(f.read(), f.source);
   });
 }
+
+test('a fresh catalog with the same per-model clamp contract survives a Codex patch upgrade', async t => {
+  const f = fixture(t);
+  f.cache.client_version = '0.154.0'; f.writeCache();
+  const options = { ...f.options, runner: async () => ({ code: 0, stdout: 'codex-cli 0.154.0' }) };
+  await manageCodexContext(f.cfg, { ...options, enable: true });
+  assert.equal(inspectCodexContext(f.cfg, options).available, true);
+  assert.match(f.read(), /model_context_window = 872000/);
+});
 
 test('native version mismatch and custom providers cannot acquire ownership', async t => {
   const f = fixture(t);

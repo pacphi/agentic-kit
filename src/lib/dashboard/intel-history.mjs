@@ -246,7 +246,10 @@ export function readMachineWideIntel(projects) {
     patternStoreEntries += patternStore.length;
     trajectoriesRecorded += trajectories ?? 0;
 
-    if (lastAdaptation != null && lastAdaptation > mostActiveAdaptation) {
+    // The headline names a project, which means a verified repository. The
+    // inventory still retains worktrees and non-Git workspaces as learning
+    // locations, but neither may displace a repository in this metric.
+    if (entry?.learningScope === 'repository' && lastAdaptation != null && lastAdaptation > mostActiveAdaptation) {
       mostActiveAdaptation = lastAdaptation;
       mostActiveProject = label;
     }

@@ -52,17 +52,18 @@ test('context and project grouping stay readable, keyboard operable and evidence
  assert.equal(await page.locator('#usage-tab-models').getAttribute('aria-selected'),'true');
  assert.equal(await page.evaluate(()=>globalThis.document.activeElement.id),'usage-tab-models');
  await page.click('#tab-system');await page.click('[data-system-view="projects"]');
- await page.waitForSelector('#project-population');
- assert.equal(await page.locator('#sys-projects tbody tr:not(.project-group)').count(),1);
- await page.selectOption('#project-population','all');
- assert.equal(await page.locator('#sys-projects tbody tr:not(.project-group)').count(),3);
- assert.equal(await page.locator('#sys-projects .project-group').count(),0);
- assert.equal(await page.locator('#sys-projects tbody').count(),2);
- await page.selectOption('#project-origin','codex-desktop');
- assert.equal(await page.locator('#sys-projects tbody tr:not(.project-group)').count(),1);
+ await page.waitForSelector('#sys-projects .project-repository');
+ assert.equal(await page.locator('#sys-projects .project-repository').count(),1);
+ assert.deepEqual(await page.locator('#sys-projects th').allTextContents(),['Project↑','Lines ≈↓','By language↑','Disk↓','Last active↓','Worktrees']);
+ assert.equal(await page.locator('#sys-projects .project-repository td').count(),6);
+ assert.equal(await page.locator('#sys-projects .project-worktree[hidden]').count(),1);
+ assert.equal(await page.locator('#project-population').count(),0);
+ assert.equal(await page.locator('#project-origin').count(),0);
+ assert.doesNotMatch(await page.locator('#sys-projects').innerText(),/Unavailable folder/);
+ await page.locator('#sys-projects [data-project-tree]').click();
+ assert.equal(await page.locator('#sys-projects .project-worktree:not([hidden])').count(),1);
  assert.match(await page.locator('#sys-projects').innerText(),/feature/);
- assert.equal(await page.evaluate(()=>globalThis.document.activeElement.id),'project-origin');
- await page.selectOption('#project-origin','all');
+ assert.ok((await page.locator('#sys-projects .sy-project-scroll').boundingBox()).height<=286);
  await page.screenshot({path:path.join(shots,'system-projects-desktop.png'),fullPage:true,animations:"disabled"});
  for(const width of [768,390]){
   await page.setViewportSize({width,height:900});
@@ -71,10 +72,10 @@ test('context and project grouping stay readable, keyboard operable and evidence
   await page.click('#tab-overview');await page.click('[data-overview-view="runtime"]');
   assert.ok(await page.evaluate(()=>globalThis.document.documentElement.scrollWidth<=globalThis.innerWidth),`context overflow at ${width}`);
   await page.screenshot({path:path.join(shots,'context-'+width+'.png'),fullPage:true,animations:"disabled"});
-  await page.click('#tab-system');await page.click('[data-system-view="projects"]');
+ await page.click('#tab-system');await page.click('[data-system-view="projects"]');
  }
  projects={projects:[],discoveryProjects:[],everSeen:measured(0)};
  await page.reload();await page.click('#tab-system');await page.click('[data-system-view="projects"]');
- await page.waitForSelector('#project-population');assert.match(await page.locator('#sys-projects').innerText(),/no project was discovered/);
+ await page.waitForSelector('#sys-projects');assert.match(await page.locator('#sys-projects').innerText(),/no repository was discovered/);
  assert.deepEqual(errors,[]);
 });

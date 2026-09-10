@@ -202,8 +202,8 @@ test('Codex inventory applies configured capacity per model and preserves native
   assert.equal(model.variant.effectiveContextWindow, 828400);
 });
 
-test('Codex inventory never fabricates an effective override for an unverified client', () => {
+test('Codex inventory derives an effective override from a valid per-model clamp contract', () => {
   const result = discoverCodex({ cacheRaw: fixture('codex', 'models-cache.json'),
     configRaw: 'model_context_window = 872000\n', scopeKey: SCOPE_KEY });
-  assert.equal(result.models[0].variant.effectiveContextWindow, null);
+  assert.equal(result.models[0].variant.effectiveContextWindow, 828400);
 });

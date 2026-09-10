@@ -8,18 +8,20 @@ import { LIVE_CSS, LIVE_HTML, LIVE_JS } from './live-view.mjs';
 // --ink*, --r-sm, --accent) so the new rows/picker match the Apple system
 // motif everywhere else, without duplicating any of styles.mjs's own rules.
 const INTEL_CSS = `
-.mw-table{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;max-height:520px;overflow:auto;align-items:start;margin-top:14px;padding:2px}
+.mw-table{max-height:520px;overflow:auto;align-items:start;margin-top:14px;padding:2px}
 .mw-group{min-width:0;border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden}
 .mw-group h3{display:flex;justify-content:space-between;gap:8px;margin:0;padding:10px 14px;background:var(--panel);font-size:12px;font-weight:600;color:var(--ink)}
 .mw-group h3 span{color:var(--ink-dim);font-weight:400}
 .mw-group-scroll{max-height:212px;overflow:auto;overscroll-behavior:contain}
 .mw-table:focus-visible,.mw-group-scroll:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
-.mw-row{display:grid; grid-template-columns:minmax(140px,1.6fr) repeat(3,minmax(96px,1fr)); gap:10px; align-items:center; padding:8px 14px; background:var(--panel); font-size:12.5px}
+.mw-row{display:grid; grid-template-columns:minmax(140px,1.6fr) minmax(110px,1fr) repeat(3,minmax(96px,1fr)); gap:10px; align-items:center; padding:8px 14px; background:var(--panel); font-size:12.5px}
 .mw-data-row{height:34px;box-sizing:border-box;border-top:1px solid var(--line)}
 .mw-data-row .mw-val{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mw-row.mw-head{height:42px;box-sizing:border-box;position:sticky;top:0;z-index:1;background:var(--panel-2); color:var(--ink-dim); font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:.06em;line-height:12px}
 .mw-row:not(.mw-head):hover{background:var(--panel-2)}
 .mw-name{color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.mw-designation{color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mw-filter-pills{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 10px}.mw-filter-pill{border:1px solid var(--line-2);border-radius:999px;background:var(--panel);color:var(--ink-2);padding:5px 9px;cursor:pointer}.mw-filter-pill[aria-pressed="true"]{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,var(--panel))}
 /* Which learning stores a project carries — three tiny dots, one per store,
    so a row reporting 0 patterns still says what IS active there. Colour, not
    text, because the column is already tight and the title carries the names. */
@@ -31,7 +33,7 @@ const INTEL_CSS = `
 .mw-val{color:var(--ink-2); text-align:right}
 .mw-row.mw-head .mw-val{color:var(--ink-dim)}
 @media(max-width:1100px){.mw-table{grid-template-columns:minmax(0,1fr)}}
-@media(max-width:560px){.mw-row{grid-template-columns:minmax(0,1.4fr) repeat(3,minmax(0,1fr));gap:6px;padding-left:9px;padding-right:9px;font-size:11px}.mw-row.mw-head{font-size:9px;letter-spacing:0}.mw-group h3{padding-left:9px;padding-right:9px}}
+@media(max-width:560px){.mw-row{grid-template-columns:minmax(0,1.4fr) minmax(80px,1fr) repeat(3,minmax(0,1fr));gap:6px;padding-left:9px;padding-right:9px;font-size:11px}.mw-row.mw-head{font-size:9px;letter-spacing:0}.mw-group h3{padding-left:9px;padding-right:9px}}
 .mw-picker{display:flex; align-items:center; gap:9px; flex-wrap:wrap; min-width:0; max-width:100%}
 .mw-picker label{color:var(--ink-dim); font-size:11.5px}
 .mw-picker select{
@@ -398,7 +400,7 @@ export function renderPage({ name, version }) {
       <div class="strip-head">
         <h2 class="strip-title">learning over time &mdash; <span id="history-project-name"></span></h2>
         <div class="mw-picker">
-          <label for="intel-project-select">select project</label>
+          <label for="intel-project-select">select learning location</label>
           <select id="intel-project-select"></select>
         </div>
       </div>

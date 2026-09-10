@@ -276,8 +276,8 @@ test('readMachineWideIntel aggregates totals and perProject rows across multiple
   });
 
   const result = readMachineWideIntel([
-    { path: cwdAlpha, label: 'Alpha' },
-    { path: cwdBeta, label: 'Beta' },
+    { path: cwdAlpha, label: 'Alpha', learningScope: 'repository' },
+    { path: cwdBeta, label: 'Beta', learningScope: 'repository' },
   ]);
 
   assert.deepEqual(result.totals, {
@@ -289,12 +289,12 @@ test('readMachineWideIntel aggregates totals and perProject rows across multiple
   });
   assert.deepEqual(result.perProject, [
     {
-      path: cwdAlpha, label: 'Alpha', key: null, learningScope: 'unknown', patternsLearned: 10, patternStoreCount: 2,
+      path: cwdAlpha, label: 'Alpha', key: null, learningScope: 'repository', patternsLearned: 10, patternStoreCount: 2,
       trajectoriesRecorded: 4, graphLatest: { nodes: 5, edges: 8 }, lastAdaptation: 1000,
       learningState: [],
     },
     {
-      path: cwdBeta, label: 'Beta', key: null, learningScope: 'unknown', patternsLearned: 20, patternStoreCount: 3,
+      path: cwdBeta, label: 'Beta', key: null, learningScope: 'repository', patternsLearned: 20, patternStoreCount: 3,
       trajectoriesRecorded: 6, graphLatest: null, lastAdaptation: 2000,
       learningState: [],
     },
@@ -342,7 +342,7 @@ test('readMachineWideIntel degrades a project with missing/malformed data to nul
   writeFixture(cwdMalformed, '.claude-flow/neural/stats.json', '{ broken');
 
   const result = readMachineWideIntel([
-    { path: cwdGood, label: 'Good' },
+    { path: cwdGood, label: 'Good', learningScope: 'repository' },
     { path: cwdEmpty, label: 'Empty' },
     { path: cwdMalformed, label: 'Malformed' },
   ]);
@@ -373,9 +373,9 @@ test('readMachineWideIntel picks mostActiveProject by the highest lastAdaptation
   writeFixture(cwdNewest, '.claude-flow/neural/stats.json', { patternsLearned: 1, lastAdaptation: 999999 });
 
   const withAdaptation = readMachineWideIntel([
-    { path: cwdOld, label: 'Old' },
-    { path: cwdNewest, label: 'Newest' },
-    { path: cwdNewer, label: 'Newer' },
+    { path: cwdOld, label: 'Old', learningScope: 'repository' },
+    { path: cwdNewest, label: 'Newest', learningScope: 'repository' },
+    { path: cwdNewer, label: 'Newer', learningScope: 'repository' },
   ]);
   assert.equal(withAdaptation.totals.mostActiveProject, 'Newest');
 
@@ -388,6 +388,22 @@ test('readMachineWideIntel picks mostActiveProject by the highest lastAdaptation
     { path: cwdZeroAdaptation, label: 'ZeroAdaptation' },
   ]);
   assert.equal(withoutAdaptation.totals.mostActiveProject, null);
+});
+
+test('readMachineWideIntel selects the most active Git repository, never a desktop or directory workspace', () => {
+  const root = tmp();
+  const repository = path.join(root, 'repository');
+  const desktopWorkspace = path.join(root, 'g-p-opaque');
+  writeFixture(repository, '.claude-flow/neural/stats.json', { patternsLearned: 1, lastAdaptation: 100 });
+  writeFixture(desktopWorkspace, '.claude-flow/neural/stats.json', { patternsLearned: 999, lastAdaptation: 999 });
+
+  const result = readMachineWideIntel([
+    { path: repository, label: 'Repository', learningScope: 'repository' },
+    { path: desktopWorkspace, label: 'g-p-opaque', learningScope: 'unknown' },
+  ]);
+
+  assert.equal(result.totals.mostActiveProject, 'Repository');
+  assert.equal(result.totals.projectCount, 2, 'non-repository learning remains in the inventory');
 });
 
 test('readMachineWideIntel returns zeroed totals and an empty perProject for an empty projects array', () => {

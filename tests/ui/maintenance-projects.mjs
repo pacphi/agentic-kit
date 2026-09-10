@@ -85,7 +85,8 @@ test('project worktree visibility and all-installations navigation work on deskt
   const originFilter=page.locator('#mnt-facets input[data-mnt-facet="sessionOrigin"][value="codex-desktop"]');
   await originFilter.check();await page.waitForFunction(()=>!globalThis.mntInventoryBusy);
   assert.equal(await page.locator('#mnt-results [data-mnt-level="project"]').count(),1);
-  assert.match(await page.locator('#mnt-results').innerText(),/Codex Desktop/);
+  assert.match(await page.locator('#mnt-facets').innerText(),/ChatGPT Desktop/);
+  assert.doesNotMatch(await page.locator('#mnt-results').innerText(),/ChatGPT Desktop/);
   await originFilter.uncheck();await page.waitForFunction(()=>!globalThis.mntInventoryBusy);
 
   await page.locator('#mnt-facets [data-mnt-include-worktrees]').uncheck();

@@ -592,6 +592,7 @@ const SYSTEM_PAYLOAD = {
     projects: [
       {
         label: 'agentic-kit',
+        path: '/Users/me/projects/agentic-kit', repository: { repositoryId: 'repo:agentic-kit', kind: 'git', root: '/Users/me/projects/agentic-kit' },
         loc: { total: meas(48_210), byLanguage: { JavaScript: 31_000, Markdown: 12_000, CSS: 3100, JSON: 2110 } },
         treeBytes: meas(42_000_000), gitBytes: meas(120_000_000), nodeModulesBytes: meas(310_000_000),
         totalBytes: meas(472_000_000), lastActivity: meas(SYS_NOW - 3_600_000),
@@ -606,6 +607,7 @@ const SYSTEM_PAYLOAD = {
         // listed: absent is not zero, and blanking it would be the fail-closed
         // rule inverted.
         label: 'legacy-snapshot-row',
+        path: '/Users/me/projects/legacy-snapshot-row', repository: { repositoryId: 'repo:legacy', kind: 'git', root: '/Users/me/projects/legacy-snapshot-row' },
         loc: { total: meas(1200), byLanguage: { Rust: 1200 } },
         treeBytes: meas(1_000), gitBytes: meas(1_000), nodeModulesBytes: meas(0),
         totalBytes: meas(2_000), lastActivity: meas(SYS_NOW - 7_200_000),
@@ -619,6 +621,7 @@ const SYSTEM_PAYLOAD = {
         // still LIST, and must sort to the bottom in BOTH directions — an
         // absent figure is not a small one.
         label: 'zz-unmeasured',
+        path: '/Users/me/projects/zz-unmeasured', repository: { repositoryId: 'repo:unmeasured', kind: 'git', root: '/Users/me/projects/zz-unmeasured' },
         loc: { total: unmeasured('the working tree could not be read'), byLanguage: {} },
         treeBytes: meas(1), gitBytes: meas(1), nodeModulesBytes: meas(0),
         totalBytes: unmeasured('the working tree could not be read'),
@@ -632,6 +635,7 @@ const SYSTEM_PAYLOAD = {
       {
         // Linked, but no host ever recorded a session here.
         label: 'never-worked-in',
+        path: '/Users/me/projects/never-worked-in', repository: { repositoryId: 'repo:never-worked', kind: 'git', root: '/Users/me/projects/never-worked-in' },
         loc: { total: meas(10), byLanguage: { Rust: 10 } },
         treeBytes: meas(10), gitBytes: meas(10), nodeModulesBytes: meas(0),
         totalBytes: meas(20), lastActivity: meas(SYS_NOW - 9_200_000),
@@ -3386,7 +3390,7 @@ async function main() {
     const projectRows = await page.$$eval('#sys-projects tbody tr', (els) => els.map((e) => ({
       linked: !!e.querySelector('a[href^="https:"]'), text: e.innerText,
     })));
-    check('the Projects table lists only repositories with a remote',
+    check('the Projects table lists only verified repository rows',
       projectRows.length > 0 && projectRows.every((r) => r.linked),
       `${projectRows.filter((r) => !r.linked).length} unlinked row(s) survived the filter`);
     const projectNames = projectRows.map((r) => r.text.split('\n')[0]).join(' ');
@@ -3396,10 +3400,8 @@ async function main() {
       /legacy-snapshot-row/.test(projectNames),
       `an older snapshot cannot answer "was this worked in", and guessing no blanks the table`);
     const projectLiner = await page.$eval('#sys-projects .sy-liner', (e) => e.innerText);
-    check('and states what it excluded rather than leaving the reader to subtract',
-      /listed here/.test(projectLiner)
-        && (projectRows.length === (SYSTEM_PAYLOAD.projects?.projects ?? []).length
-          || /Excluded \d+ measured director/.test(projectLiner)),
+    check('and states the repository footprint separately from excluded directories',
+      /verified repositories/.test(projectLiner) && /non-repository directories are excluded/.test(projectLiner),
       `the liner read ${JSON.stringify(projectLiner)}`);
     check('the language legend matches the ramp it describes',
       /top 5 languages/.test(await page.$eval('#sys-projects .sy-legend', (e) => e.innerText)),
@@ -3419,9 +3421,9 @@ async function main() {
       s0.aria[0] === 'ascending'
         && JSON.stringify(names0) === JSON.stringify([...names0].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))),
       `aria was ${JSON.stringify(s0.aria)} and the order ${JSON.stringify(names0)}`);
-    check('every header is a sort control', await page.$$eval('#sys-projects thead th',
-      (ths) => ths.every((t) => !!t.querySelector('button[data-proj-sort]'))),
-      'a header without a control is a column the user cannot order by');
+    check('every measured column header is sortable', await page.$$eval('#sys-projects thead th',
+      (ths) => ths.slice(0, 5).every((t) => !!t.querySelector('button[data-proj-sort]'))),
+      'each measured column needs its own sort control');
 
     await page.click('[data-proj-sort="project"]');
     const s1 = await sortState();

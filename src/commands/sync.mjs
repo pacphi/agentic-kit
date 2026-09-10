@@ -7,7 +7,7 @@ import readline from 'node:readline/promises';
 import { collect } from './status.mjs';
 import * as heal from '../lib/heal.mjs';
 import { have } from '../lib/exec.mjs';
-import { fixStatusline, helperStampStale } from '../lib/statusline.mjs';
+import { fixStatusline, helperStampStale, refreshRufloHelpers } from '../lib/statusline.mjs';
 import { reconcileGuidance } from '../lib/blocks.mjs';
 import {
   register as mcpRegister, applyExclusions, codexMcpTopology, codexMcpRepairPlan,
@@ -42,6 +42,13 @@ function printReportLine(line) {
   else if (line.level === 'warn') warn(line.text);
   else if (line.level === 'fail') fail(line.text);
   else info(line.text);
+}
+
+/** A package update can change the source catalog used by a lifecycle host.
+ * Re-enter its idempotent apply path in the same sync, rather than leaving a
+ * fresh package paired with its prior generated projection until another run. */
+export function lifecycleRefreshRequired(subsystems, hostId) {
+  return subsystems.has(hostId) || (hostId === 'opencode' && subsystems.has('versions'));
 }
 
 /** Preserve a failed mutation for the final convergence proof. A failed heal
@@ -314,7 +321,7 @@ export const SYNC_STEPS = [
     when: () => true,
     run: async (ctx) => {
       for (const hostId of hostsWithLifecycle()) {
-        if (!ctx.subsystems.has(hostId) || !lifecycleExecutionEnabled(hostId, ctx.cfg)) continue;
+        if (!lifecycleRefreshRequired(ctx.subsystems, hostId) || !lifecycleExecutionEnabled(hostId, ctx.cfg)) continue;
         if (!(await have(detectionBinFor(hostId)))) {
           info(`${hostId}: enabled but CLI not installed — wiring skipped (hosts step installs it)`);
           continue;
@@ -397,6 +404,21 @@ export const SYNC_STEPS = [
         reporter,
         runProviders: (fn) => withProgress('providers (api)', fn),
       });
+    },
+  },
+  // Ruflo's signed helper-refresh owns the generated `.claude/helpers` set.
+  // Run it explicitly after a versions plan, rather than requiring a broad
+  // `ruflo init --full --force` or waiting for a later hook invocation to do
+  // it implicitly. Statusline follows immediately because this refresh may
+  // replace statusline.cjs.
+  {
+    id: 'ruflo-helpers',
+    when: (subs) => subs.has('versions'),
+    run: async (ctx) => {
+      const refreshed = await withProgress('ruflo helpers', async () => refreshRufloHelpers(ctx.cwd));
+      if (refreshed) ok('ruflo helpers: signed generated helpers refreshed');
+      else if (helperStampStale(ctx.cwd)) warn('ruflo helpers: refresh did not converge; generated helpers remain stale');
+      else info('ruflo helpers: current');
     },
   },
   // Gate includes 'providers': applyProviders runs ruflo CLI commands, and any
