@@ -9,6 +9,7 @@ export function repositoryTree(payload = {}) {
   const unresolved = [];
   for (const row of byPath.values()) {
     const repo = row.repository;
+    if (Array.isArray(row.hosts) && row.hosts.length === 0) continue;
     if (!repo?.repositoryId || !['git', 'worktree'].includes(repo.kind)) {
       unresolved.push(row);
       continue;
