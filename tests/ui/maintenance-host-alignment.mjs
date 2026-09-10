@@ -61,11 +61,11 @@ test('Host alignment view filters User and Project rows and offers exact registr
   await page.locator('[data-mnt-plc]').first().click();
   await page.waitForFunction(() => !globalThis.mntInspectorBusy);
   assert.equal(errors.length, 0, errors.join('\n'));
-  assert.match(await page.locator('#mnt-inspector').innerText(), /Realign|Repair registration/, String(await page.evaluate(() => mntInspectorError && (mntInspectorError.stack || mntInspectorError))));
+  assert.match(await page.locator('#mnt-inspector').innerText(), /Realign|Repair registration/, String(await page.evaluate(() => globalThis.mntInspectorError && (globalThis.mntInspectorError.stack || globalThis.mntInspectorError))));
   const preview = page.locator('[data-mnt-plan-plc]');
   await preview.waitFor();
   await preview.click();
-  const selected = await page.evaluate(() => window.selectedPreview);
+  const selected = await page.evaluate(() => globalThis.selectedPreview);
   assert.equal(selected.placementId, inventory.placements.find(p => p.administrativeScope === 'user').placementId);
   await page.locator('[data-mnt-scope="project"]').click();
   await page.waitForFunction(() => !globalThis.mntInventoryBusy);
