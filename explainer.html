@@ -235,6 +235,26 @@
     .drawer .front{border-right:none;border-bottom:1.5px dashed var(--rule);padding-right:40px}
   }
 
+  /* ---------------- dashboard site map ---------------- */
+  .sitemap{margin-top:22px;display:flex;flex-direction:column;gap:2px}
+  .sm-tab{
+    display:grid;grid-template-columns:180px 1fr;gap:16px;
+    padding:14px 4px;border-top:1px solid var(--rule);
+  }
+  .sitemap .sm-tab:first-child{border-top:1.5px double var(--ink)}
+  .sm-tab .sm-head{display:flex;align-items:baseline;gap:8px}
+  .sm-tab .sm-n{font-family:var(--mono);font-size:11px;color:var(--tool-deep);font-weight:600}
+  .sm-tab h4{font-family:var(--display);font-size:16.5px;font-weight:600}
+  .sm-tab .sm-port{display:block;font-family:var(--mono);font-size:10.5px;color:var(--ink-soft);margin-top:2px}
+  .sm-subs{display:flex;flex-wrap:wrap;gap:6px;align-content:flex-start}
+  .sm-subs span{
+    font-family:var(--mono);font-size:11.5px;border:1px solid var(--rule);
+    border-radius:5px;padding:3px 9px;background:var(--paper);color:var(--ink-soft);
+  }
+  .sm-subs span b{color:var(--ink);font-weight:600}
+  .sm-subs .sm-shot{border-color:var(--tool);color:var(--tool-deep);background:var(--tool-soft)}
+  @media(max-width:640px){.sm-tab{grid-template-columns:1fr;gap:6px}}
+
   /* ---------------- command bench ---------------- */
   .bench{margin-top:24px;border:1.5px solid var(--rule);border-radius:10px;overflow:hidden}
   .bench .row{
@@ -887,6 +907,58 @@
     <div class="f-lbl">Feature file · 03</div>
     <h4>The dashboard — local evidence and guarded maintenance</h4>
     <p>One command opens a self-contained local web app on <code>127.0.0.1:7431</code>, guarded by a per-session token, that <strong>offers explicit, guarded actions in System → Maintenance</strong>. Five areas: <strong>About</strong> (a plain-words directory of everything the kit installed, and why), <strong>Overview</strong> (what's installed, wired, and routed — plus machine-wide intelligence), <strong>Usage</strong> (scorecards, limits, and sessions indexed from your local Claude/Codex/OpenCode transcripts), <strong>Observability</strong> (live and historical agent activity on an interactive canvas, with masked transcript evidence), and <strong>System</strong> (what the stack occupies on your machine — storage, runtime, catalog, and a project census).</p>
+    <p style="margin-top:16px">Left to right, every tab and what's behind it — the floor plan, not just the five headline rooms:</p>
+    <div class="sitemap">
+      <div class="sm-tab">
+        <div class="sm-head"><span class="sm-n">1</span><h4>About</h4></div>
+        <div class="sm-subs"><span><b>Hosts</b></span><span><b>Engine &amp; memory</b></span><span><b>Quality · Safety · Knowledge</b></span><span><b>The kit</b></span><span><b>Configured for you</b></span><span class="sm-shot">captured below ↓</span></div>
+      </div>
+      <div class="sm-tab">
+        <div class="sm-head"><span class="sm-n">2</span><h4>Overview</h4></div>
+        <div class="sm-subs">
+          <span><b>Summary</b> — <code>ak status</code>, warnings first</span>
+          <span><b>Hosts &amp; Routing</b></span>
+          <span><b>Providers</b></span>
+          <span><b>Runtime</b></span>
+          <span><b>Intelligence</b> — machine-wide SONA/route-RL/AQE rollup, any project</span>
+        </div>
+      </div>
+      <div class="sm-tab">
+        <div class="sm-head"><span class="sm-n">3</span><h4>Usage</h4></div>
+        <div class="sm-subs">
+          <span><b>Score</b> — the scorecard below</span>
+          <span><b>Limits</b> — plan ceiling, ADR-0010</span>
+          <span><b>Findings</b></span>
+          <span><b>Prompts</b> — quality intelligence, Matrix A</span>
+          <span><b>Context</b> — startup budget</span>
+          <span><b>Hooks</b></span>
+          <span class="sm-shot"><b>Models</b> — lifecycle drift, captured below</span>
+          <span><b>Sessions</b> → Transcript</span>
+        </div>
+      </div>
+      <div class="sm-tab">
+        <div class="sm-head"><span class="sm-n">4</span><h4>Observability</h4></div>
+        <div class="sm-subs"><span><b>Live</b></span><span><b>History</b> — sanitized, owner-only</span></div>
+      </div>
+      <div class="sm-tab">
+        <div class="sm-head"><span class="sm-n">5</span><h4>System</h4></div>
+        <div class="sm-subs">
+          <span><b>Summary</b> — footprint, disk denominator</span>
+          <span><b>Advisory</b> — reclaimable, never auto-deleted</span>
+          <span><b>Sessions</b> — largest first</span>
+          <span><b>Storage</b> — by category × host</span>
+          <span><b>Runtime</b> — live processes</span>
+          <span><b>Projects</b> — captured above</span>
+          <span><b>Maintenance</b> — Host alignment and friends</span>
+        </div>
+      </div>
+      <div class="sm-tab">
+        <div class="sm-head"><span class="sm-n">·</span><h4>ak admin<span class="sm-port">separate app, :7432</span></h4></div>
+        <div class="sm-subs"><span><b>Overview</b></span><span><b>Review</b></span><span><b>Humans</b></span><span><b>Activity</b></span><span><b>Gaps</b> — captured above</span></div>
+      </div>
+    </div>
+    <p class="caption" style="margin-top:12px">Orange tiles get a real capture below, not just a description — the rest keep the one-line summary above until they earn their own.</p>
+
     <p>The captures below are <em>historical illustrations from the alpha.41-era page</em>, not current UI or release evidence. Current behavior is documented in docs/DASHBOARD.md. First, Overview: the same subsystems as <code>ak status</code>, with the two warnings front and center and what <code>sync</code> would do about each:</p>
     <div class="browser">
       <div class="b-bar"><i></i><i></i><i></i><span class="addr">127.0.0.1:7431 · #overview/summary · token-guarded</span></div>
