@@ -46,7 +46,11 @@ never reading, storing, or refreshing a vendor credential:
    pushed `rate_limits` (plus `context_window` and `cost`) to
    `~/.config/agentic-kit/claude-rate-limits.json` (0600, atomic, throttled to
    one write per minute). Push, not pull: with no recent Claude session the
-   file goes stale, and the UI labels it stale rather than hiding it.
+   file goes stale, and the UI labels it stale rather than hiding it. The same
+   statusline payload is the sanctioned source of the Claude context window;
+   the footer's per-session window ledger (a change log, no credentials, no
+   quota data) rides that channel under
+   [ADR-0042](0042-capability-aware-context-budget-intelligence.md).
 2. **Codex — app-server subprocess.** `src/lib/quota.mjs` spawns
    `codex -s read-only -a never app-server` (codex authenticates itself),
    performs one `initialize` → `account/rateLimits/read` exchange with a hard

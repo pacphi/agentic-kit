@@ -1,5 +1,6 @@
 import { repositoryTree } from './project-groups.mjs';
 import { contextCard } from './context-card.mjs';
+import { contextHostCard } from './context-host-card.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -57,7 +58,7 @@ function readSplit(name) {
   // \r?\n: a CRLF checkout (git on Windows without eol pinning) must strip the
   // same lines, or a surviving `import` breaks the served classic-script bundle
   // (mirrors admin-server.mjs's stripModelImport, whose `\s*$` already tolerates \r).
-  src = src.replace(/^import \{[^}]*\} from '\.\/[^']+\.mjs';\r?\n/gm, '');
+  src = src.replace(/^import \{[^}]*\} from '\.\.?\/[^']+\.mjs';\r?\n/gm, '');
   src = src.replace(/^(\s*)export (?=(function|var)\b)/gm, '$1');
   return src;
 }
@@ -157,5 +158,5 @@ const bootSrc = readSplit('boot.mjs');
 // sequence) running in the same relative order it always has.
 export const JS = `
 (function(){
-${bootstrapSrc}${contextCard.toString()}${repositoryTree.toString()}${overviewSrc}${datetimeSrc}${intelligenceSrc}${pollSrc}${usageRhythmSrc}${usagePromptsSrc}${usageContextHooksSrc}${usageSrc}${modelLifecycleSrc}${usageOrchestratorsSrc}${aboutSrc}${systemReadoutSrc}${systemProjectsSrc}${maintenanceWorkspaceSrc}${maintenanceFiltersSrc}${maintenanceCardsSrc}${maintenanceOperationSrc}${maintenanceLanguageLogosSrc}${maintenanceFocusSrc}${maintenanceInventorySrc}${maintenanceRelationshipsSrc}${maintenanceInspectorSrc}${maintenanceGuidanceSrc}${maintenanceDiscoverySrc}${maintenanceActivitySrc}${systemMaintenanceActionsSrc}${systemMaintenanceSrc}${bootSrc}})();
+${bootstrapSrc}${contextCard.toString()}${contextHostCard.toString()}${repositoryTree.toString()}${overviewSrc}${datetimeSrc}${intelligenceSrc}${pollSrc}${usageRhythmSrc}${usagePromptsSrc}${usageContextHooksSrc}${usageSrc}${modelLifecycleSrc}${usageOrchestratorsSrc}${aboutSrc}${systemReadoutSrc}${systemProjectsSrc}${maintenanceWorkspaceSrc}${maintenanceFiltersSrc}${maintenanceCardsSrc}${maintenanceOperationSrc}${maintenanceLanguageLogosSrc}${maintenanceFocusSrc}${maintenanceInventorySrc}${maintenanceRelationshipsSrc}${maintenanceInspectorSrc}${maintenanceGuidanceSrc}${maintenanceDiscoverySrc}${maintenanceActivitySrc}${systemMaintenanceActionsSrc}${systemMaintenanceSrc}${bootSrc}})();
 `;

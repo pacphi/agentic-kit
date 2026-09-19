@@ -342,8 +342,8 @@ test('X-6: a single-day, single-model session keeps ONE row totalling the last s
 
 // ── schema version ──────────────────────────────────────────────────────────
 
-test('SCHEMA_VERSION is 23 and a forged v22 Codex cache is discarded and re-parsed', async () => {
-  assert.equal(SCHEMA_VERSION, 23, 'Codex attribution changes every cached Codex record');
+test('SCHEMA_VERSION is at least 23 and a forged v22 Codex cache is discarded and re-parsed', async () => {
+  assert.ok(SCHEMA_VERSION >= 23, 'Codex attribution changes every cached Codex record');
   _resetForTest();
   const sb = codexSandbox({ 'rollout-2026-07-24T09-00-00-x9.jsonl': itemRollout(KNOWN_NON_TOOL_ITEMS) });
   const first = await buildIndex(opts(sb));
@@ -359,4 +359,46 @@ test('SCHEMA_VERSION is 23 and a forged v22 Codex cache is discarded and re-pars
   const again = await buildIndex(opts(sb));
   assert.equal(again.sourceHealth.codex.diagnostics.cachedFiles, 0, 'the v22 entry was not trusted');
   assert.deepEqual(again.sourceHealth.codex.diagnostics.unknownItemTypes, {});
+});
+
+// ── X-10: Codex context coverage is native-only, with no duplicate samples ──
+
+/** A native rollout that also carries the runtime window, so it pairs. */
+function windowedRollout(id, inputs) {
+  const r = new Rollout({ id }).meta().turn('gpt-5.6').user('go').agent('ok');
+  for (const input of inputs) r.tokenCount(usage({ input, cached: 0, output: 10 }), { window: 100_000 });
+  return r;
+}
+
+test('X-10 (regression, fixed by X-3): imports never enter Codex context coverage', async () => {
+  _resetForTest();
+  const sb = codexSandbox({
+    'rollout-2026-07-24T09-00-00-nat1.jsonl': windowedRollout('nat1', [10_000]),
+    'rollout-2026-07-24T09-01-00-nat2.jsonl': windowedRollout('nat2', [20_000]),
+    'rollout-2026-07-24T09-05-00-imp1.jsonl': importedRollout('imp1'),
+    'rollout-2026-07-24T09-06-00-imp2.jsonl': importedRollout('imp2', 5),
+  });
+  const codex = (await buildIndex(opts(sb))).context.byHost.codex.coverage;
+  assert.equal(codex.sessions, 2, 'the denominator is native sessions only');
+  assert.equal(codex.pressureMeasured, 2, 'and every native session is measured: 2/2, not 2/4');
+  assert.equal(codex.state, 'observed');
+});
+
+test('X-10: an identical repeated token_count adds no second pressure sample', () => {
+  const r = windowedRollout('dup1', [10_000]);
+  r.raw('event_msg', {
+    type: 'token_count',
+    info: { total_token_usage: r.total, last_token_usage: usage({ input: 10_000, output: 10 }), model_context_window: 100_000 },
+  });
+  r.tokenCount(usage({ input: 30_000, output: 10 }), { window: 100_000 });
+  const { session } = parseCodex(r.toString(), { id: 'dup1' });
+  assert.equal(session.contextEvidence.pressure.samples, 2, 'one per distinct model call, not per event');
+  assert.equal(session.contextEvidence.input.samples, 2);
+  assert.equal(session.contextEvidence.pressure.peakBps, 3000);
+  assert.equal(session.usage.reduce((n, u) => n + u.input, 0), 40_000, 'token totals are unaffected');
+});
+
+test('X-10: two distinct calls with identical last-usage but a growing total both count', () => {
+  const { session } = parseCodex(windowedRollout('same', [10_000, 10_000]).toString(), { id: 'same' });
+  assert.equal(session.contextEvidence.pressure.samples, 2);
 });

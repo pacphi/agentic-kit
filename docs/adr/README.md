@@ -52,7 +52,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0039](0039-prompts-intelligence.md) | Deterministic Prompts telemetry on main | Accepted |
 | [0040](0040-codex-hook-audit-and-conservative-remediation.md) | Codex hook audit and conservative remediation | Implemented (Codex Wave 1) |
 | [0041](0041-host-neutral-hook-configuration-assurance.md) | Host-neutral hook configuration assurance | Accepted; static assurance/healing/read model implemented, native runtime receipts deferred |
-| [0042](0042-capability-aware-context-budget-intelligence.md) | Capability-aware context budget intelligence | Implemented; Claude and Codex context samples corrected 2026-09-19 |
+| [0042](0042-capability-aware-context-budget-intelligence.md) | Capability-aware context budget intelligence | Implemented; Claude and Codex context samples corrected and Claude window observed via the statusline ledger 2026-09-19 |
 | [0043](0043-managed-ruflo-browser-executor.md) | Manage Ruflo's browser executor behind a replaceable boundary | Implemented |
 | [0044](0044-receipt-aware-maintenance-control-plane.md) | Receipt-aware Maintenance control plane | Implemented |
 | [0045](0045-artifact-consumer-bindings-and-explicit-maintenance-scans.md) | Physical artifacts, host consumers, and explicit Maintenance scans | Implemented |

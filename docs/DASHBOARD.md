@@ -294,17 +294,29 @@ sources: [Usage scorecard metrics](https://github.com/pacphi/agentic-kit/blob/ma
 
 Context answers how much of a runtime-observed window the retained sessions used. The policy strip
 shows the canonical startup, dynamic and reserve bands. The summary reports exactly how many
-sessions have a paired input/window pressure observation and how many lack a denominator. Claude,
-Codex and OpenCode each keep their own card with coverage state, p90 peak pressure, number of
-sessions with pressure measurements, p90 peak input and median observed window.
+main sessions have a paired input/window pressure observation and how many lack a denominator.
+Claude, Codex and OpenCode each keep their own card with coverage state, p90 peak pressure, number
+of sessions with pressure measurements, p90 peak input and median observed window. The cards fold
+**main** sessions only; delegated subagent sessions (Claude sidechains, Codex subagent threads) have
+very different input sizes, so each card reports them on a separate labelled line (count, p90 peak
+input, and pressure only where a window exists) instead of blending them in.
 
 A percentage is rendered only when input and window were observed together for that session.
 The cards distinguish **Input only**, **Partial coverage**, **Unpaired data**,
-**Not recorded**, **Measured**, **Unavailable**, and **No sessions**.
-Missing token/window values render as an em dash. A pressure meter appears only for a measured
-value, and each card explains its coverage gap. Claude transcript input records do not include a
-paired window; older Codex records can contain only cumulative totals. OpenCode may have no
-sessions in the chosen window even when its installation and model catalog are available. The attention projection is capped to the top 20 sessions before
+**Not recorded**, **Measured**, **Unavailable**, **No sessions**, **Not installed** and
+**Source unreadable**. The last three separate an empty card into a host with no data on this
+machine, one whose store exists but could not be read (with the reason), and one that is installed
+and readable but ran nothing in the window. Missing token/window values render as an em dash. A
+pressure meter appears only for a measured value, and each card explains its coverage gap.
+
+Each card's pressure area is keyboard-focusable and carries a tooltip (shown on hover; the same text
+is exposed to assistive technology) stating that host's formula and evidence source. Codex divides
+`last_token_usage.input_tokens` by `model_context_window` from the same `token_count` event. Claude
+divides each message's gross input by the window the statusline reported for that session at that
+time; Claude transcripts record no window, so only main sessions that ran with the kit's statusline
+have one (run `ak sync` to project the updated template), and headless, subagent and earlier
+sessions show Input only. OpenCode records no runtime window, so its pressure is not measured, and a
+catalogue maximum is deliberately not used. "Not measured" never means 0%. The attention projection is capped to the top 20 sessions before
 presentation. The browser renders one disclosure row per bounded project and keeps each sanitized
 conversation label inside the expanded session table, then exposes explicit column headers, an opaque session reference, host, policy-derived
 recommendation, pressure/input/window, and start date. The session reference links to that retained
