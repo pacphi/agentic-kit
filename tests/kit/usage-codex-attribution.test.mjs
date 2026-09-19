@@ -30,6 +30,20 @@ test('X-9: item types the host is known to emit are not reported as unknown kind
   assert.equal(parseStats.unknownItemTypeOverflow, 0);
 });
 
+test('X-9: DynamicToolCall (a codex_app tool call) is tallied as a tool and its FunctionCallOutput is known', () => {
+  // Both first seen on a real corpus after the audit: `DynamicToolCall` carries
+  // namespace/tool/arguments (a tool call, sibling of McpToolCall);
+  // `FunctionCallOutput` carries the paired name/namespace/output.
+  const r = new Rollout({ id: 'dyn' }).meta().turn().user()
+    .item('DynamicToolCall', { namespace: 'codex_app', tool: 'load_workspace_dependencies' })
+    .item('FunctionCallOutput', { name: 'create_thread', namespace: 'codex_app' })
+    .agent().tokenCount(usage({ input: 10, output: 1 }));
+  const { session, parseStats } = parseCodex(r.toString(), { id: 'dyn' });
+  assert.equal(session.tools.DynamicToolCall, 1);
+  assert.equal(session.tools.FunctionCallOutput, undefined);
+  assert.deepEqual(parseStats.unknownItemTypes, {});
+});
+
 test('X-9: a genuinely new item type is still surfaced', () => {
   const { parseStats } = parseCodex(itemRollout([...KNOWN_NON_TOOL_ITEMS, 'HologramProjection']).toString(), { id: 'x9' });
   assert.deepEqual(parseStats.unknownItemTypes, { HologramProjection: 1 });

@@ -1019,13 +1019,18 @@ function handleCodexEventMessage(rec, turns, titleState, latState, decoded, ms, 
   handleCodexAssistantMessage(rec, turns, latState, decoded, ms, withTurns);
 }
 
-/** The four Codex `item_completed` item types this parser tallies into
+/** The Codex `item_completed` item types this parser tallies into
  *  `rec.tools`, keyed by the item's OWN type name — never renamed to Claude
  *  tool names. Codex's tool vocabulary is host-specific and the UI ranks
  *  names as-is. Every other item type (including UserMessage/AgentMessage,
  *  already handled as messages) is left to the unknownItemType diagnostic
  *  only, not tallied as a tool. */
-const CODEX_TOOL_ITEM_TYPES = new Set(['CommandExecution', 'McpToolCall', 'FileChange', 'CollabAgentToolCall']);
+const CODEX_TOOL_ITEM_TYPES = new Set([
+  'CommandExecution', 'McpToolCall', 'FileChange', 'CollabAgentToolCall',
+  // A codex_app tool call (namespace/tool/arguments) — first seen on a real
+  // corpus after the ADR-0052 audit; the sibling of McpToolCall.
+  'DynamicToolCall',
+]);
 
 /** `item_completed` item types the host emits that are UNDERSTOOD and are
  *  neither a message nor a tool: model reasoning, sub-agent lifecycle notes,
@@ -1037,6 +1042,8 @@ const CODEX_TOOL_ITEM_TYPES = new Set(['CommandExecution', 'McpToolCall', 'FileC
  *  Only a type in NEITHER set is unknown. */
 const CODEX_KNOWN_NON_TOOL_ITEM_TYPES = new Set([
   'Reasoning', 'SubAgentActivity', 'ImageView', 'Extension', 'WebSearch', 'ContextCompaction',
+  // The paired output of a codex_app function call (name/namespace/output).
+  'FunctionCallOutput',
 ]);
 
 /** One `event_msg` record: token_count, a lifecycle event (task_started/
