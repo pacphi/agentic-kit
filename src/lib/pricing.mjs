@@ -8,8 +8,9 @@
 // ~96% of tokens are cache reads, which bill at 0.1× input for nearly every
 // model (0.025× on Fable 5.1 / Mythos 5.1 — a per-entry override, see below);
 // pricing them as fresh input overstates cost by roughly 10×, or 40× on those
-// two. Cache-write premiums apply to Anthropic 5-minute writes and OpenAI
-// GPT-5.6 and later; older OpenAI models use the ordinary input rate.
+// two. Cache-write premiums apply to Anthropic writes (1.25× for the 5-minute
+// tier, 2× for the 1-hour tier) and OpenAI GPT-5.6 and later; older OpenAI
+// models use the ordinary input rate.
 //
 // Rates drift and are maintained BY HAND (OpenAI publishes nothing
 // machine-readable in ~/.codex/models_cache.json, verified). PRICES_AS_OF is
@@ -180,9 +181,11 @@ export const UNMODELLED_PRICING_FACTORS = Object.freeze([
  */
 export const FALLBACK_PRICE = { in: 3, out: 15, provider: null, asOf: PRICES_AS_OF };
 
-/** Cache-read tokens bill at 0.1× the input rate; cache writes at 1.25×. */
+/** Cache-read tokens bill at 0.1× the input rate; cache writes at 1.25× (the
+ *  Anthropic 5-minute tier — its 1-hour tier is CACHE_WRITE_1H_MULTIPLIER). */
 export const CACHE_READ_MULTIPLIER = 0.1;
 export const CACHE_WRITE_MULTIPLIER = 1.25;
+export const CACHE_WRITE_1H_MULTIPLIER = 2;
 
 // ── Matching ─────────────────────────────────────────────────────────────────
 
@@ -260,10 +263,14 @@ export function priceFor(model, provider, day) {
         in: r.in, out: r.out, provider: p.provider, key: best.key, matched: true, asOf: p.asOf,
         cacheReadMultiplier: p.cacheReadMultiplier ?? CACHE_READ_MULTIPLIER,
         cacheWriteMultiplier: p.cacheWriteMultiplier,
+        // Anthropic's 1-hour cache tier writes at 2x base input (5-minute: 1.25x) —
+        // platform.claude.com/docs/en/about-claude/pricing, verified 2026-09-19.
+        // OpenAI has no such tier, so its 1h multiplier is just its write rate.
+        cacheWrite1hMultiplier: p.provider === 'anthropic' ? CACHE_WRITE_1H_MULTIPLIER : p.cacheWriteMultiplier,
       };
     }
   }
-  return { ...FALLBACK_PRICE, key: null, matched: false, cacheReadMultiplier: CACHE_READ_MULTIPLIER, cacheWriteMultiplier: CACHE_WRITE_MULTIPLIER };
+  return { ...FALLBACK_PRICE, key: null, matched: false, cacheReadMultiplier: CACHE_READ_MULTIPLIER, cacheWriteMultiplier: CACHE_WRITE_MULTIPLIER, cacheWrite1hMultiplier: CACHE_WRITE_MULTIPLIER };
 }
 
 // ── Cost ─────────────────────────────────────────────────────────────────────
@@ -274,7 +281,12 @@ const tokens = (v) => (Number.isFinite(v) && v > 0 ? v : 0);
 /**
  * API-equivalent cost in USD for one model's token usage:
  *
- *   (input·in + cacheWrite·in·cacheWriteMultiplier + cacheRead·in·cacheReadMultiplier + output·out) / 1e6
+ *   (input·in + cacheWrite5m·in·cacheWriteMultiplier + cacheWrite1h·in·cacheWrite1hMultiplier
+ *    + cacheRead·in·cacheReadMultiplier + output·out) / 1e6
+ *
+ * `cacheWrite1h` is the 1-hour-tier SUBSET of `cacheWrite` (Claude transcripts
+ * report the split); `cacheWrite5m` is the remainder. An absent split prices
+ * every write at the 5-minute rate, exactly as before the split was retained.
  *
  * `cacheReadMultiplier` is 0.1 for nearly every model but is resolved per-model
  * via `priceFor` (Fable 5.1 / Mythos 5.1 price cache reads at 0.025x — see the
@@ -290,10 +302,13 @@ const tokens = (v) => (Number.isFinite(v) && v > 0 ? v : 0);
  * omitting it falls back to the current standing rate.
  */
 export function costOf(usage) {
-  const { model, provider, input, output, cacheRead, cacheWrite, day } = usage ?? {};
-  const { in: rin, out: rout, cacheReadMultiplier, cacheWriteMultiplier } = priceFor(model, provider, day);
+  const { model, provider, input, output, cacheRead, cacheWrite, cacheWrite1h, day } = usage ?? {};
+  const { in: rin, out: rout, cacheReadMultiplier, cacheWriteMultiplier, cacheWrite1hMultiplier } = priceFor(model, provider, day);
+  const writes = tokens(cacheWrite);
+  const writes1h = Math.min(tokens(cacheWrite1h), writes);
   const inputUnits = tokens(input)
-    + tokens(cacheWrite) * cacheWriteMultiplier
+    + (writes - writes1h) * cacheWriteMultiplier
+    + writes1h * cacheWrite1hMultiplier
     + tokens(cacheRead) * cacheReadMultiplier;
   return (inputUnits * rin + tokens(output) * rout) / 1e6;
 }

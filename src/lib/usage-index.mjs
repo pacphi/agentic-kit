@@ -152,7 +152,13 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
 // v20 records exact user-root exclusion and verified real-parent eligibility
 // for the Git-only score ranking. A v19 cache cannot establish either fact.
 // v21 retains per-message missing-cost coverage before OpenCode row coalescing.
-export const SCHEMA_VERSION = 21;
+// v22 counts a Claude assistant message ONCE (keyed by message.id, else
+// requestId) instead of once per transcript line — Claude Code writes a line
+// per content block and repeats the message's usage on each, so every cached
+// v21 Claude record carries tokens, cost, responses, punchcard and context
+// samples inflated ~2-3x and must be re-parsed. It also retains the 1-hour
+// cache-write split (`cacheWrite1h` on usage rows) so those writes price at 2x.
+export const SCHEMA_VERSION = 22;
 
 const DAY_MS = 86_400_000;
 // One day of slack past dashboard-server.mjs's 365-day clampDays ceiling —
