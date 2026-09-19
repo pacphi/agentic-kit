@@ -176,10 +176,17 @@ function applyProject(rec, res) {
 
 /** Split JSONL into parsed objects, skipping anything that will not parse. */
 function* jsonLines(raw) {
-  for (const line of raw.split('\n')) {
-    if (!line || line.charCodeAt(0) !== 123 /* '{' */) continue;
+  // Scanned lazily, not split up front: a caller that needs only the first
+  // line (the subagent replay pre-pass) must not pay for the whole file.
+  let pos = 0;
+  while (pos < raw.length) {
+    const found = raw.indexOf('\n', pos);
+    const end = found < 0 ? raw.length : found;
+    const start = pos;
+    pos = end + 1;
+    if (end === start || raw.charCodeAt(start) !== 123 /* '{' */) continue;
     let obj;
-    try { obj = JSON.parse(line); } catch { continue; }
+    try { obj = JSON.parse(raw.slice(start, end)); } catch { continue; }
     if (obj && typeof obj === 'object') yield obj;
   }
 }
