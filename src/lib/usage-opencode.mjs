@@ -203,6 +203,29 @@ function recordUserMessage(rec, turns, { rowId, at, withTurns, partsByMessage })
   turns.push({ role: 'user', at: new Date(at).toISOString(), text, prompt: true, kind: 'prompt' });
 }
 
+/** A message's output tokens INCLUDING reasoning. OpenCode (its `getUsage`,
+ *  verified against the installed 1.18.31 binary) stores
+ *  `output = max(0, outputTokens - reasoningTokens)` and `reasoning` as a
+ *  separate field, and prices reasoning at the output rate — so the real output
+ *  is their sum, and recording `output` alone under-counts every reasoning
+ *  model in both tokens and estimated cost.
+ *
+ *  One guard against double counting: builds that predate that split stored
+ *  reasoning INSIDE `output`. The message's own `tokens.total` (the provider's
+ *  input + output) tells the two apart when it is present: a total equal to
+ *  the sum of the non-reasoning fields means output already contained the
+ *  reasoning, so nothing is added. No total, or one that fits neither shape,
+ *  falls to the verified current convention (additive). */
+function outputWithReasoning(t, cache) {
+  const output = num(t.output);
+  const reasoning = num(t.reasoning);
+  if (reasoning <= 0) return output;
+  const total = num(t.total);
+  const gross = num(t.input) + num(cache.read) + num(cache.write) + output;
+  if (total > 0 && total === gross) return output;
+  return output + reasoning;
+}
+
 /** Model/provider/token-usage bookkeeping for one assistant message. Returns
  *  the model id, for the caller's turn row. */
 function recordAssistantUsage(rec, data, at) {
@@ -215,8 +238,9 @@ function recordAssistantUsage(rec, data, at) {
   const t = data.tokens ?? {};
   const cache = t.cache ?? {};
   const day = localDay(at || Date.now());
+  const output = outputWithReasoning(t, cache);
   const usageRow = addUsage(rec, day, model, {
-    input: num(t.input), output: num(t.output),
+    input: num(t.input), output,
     cacheRead: num(cache.read), cacheWrite: num(cache.write), responses: 1,
   });
   // Retain missing-cost tokens separately before coalescing by day/model.
@@ -227,7 +251,7 @@ function recordAssistantUsage(rec, data, at) {
   } else {
     usageRow.costMissingUsage ??= { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, responses: 0 };
     const missing = usageRow.costMissingUsage;
-    missing.input += num(t.input); missing.output += num(t.output);
+    missing.input += num(t.input); missing.output += output;
     missing.cacheRead += num(cache.read); missing.cacheWrite += num(cache.write);
     missing.responses++;
   }

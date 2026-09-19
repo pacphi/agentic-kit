@@ -105,10 +105,10 @@ test('scan aggregates opencode sessions: host bucket, provider bucket, tokens, a
   assert.equal(s.project, 'oc-proj');
   assert.equal(s.responses, 2);
   assert.equal(s.input, 2000);
-  assert.equal(s.output, 200);
+  assert.equal(s.output, 220, '2 x (100 text + 10 reasoning): OpenCode stores output net of reasoning');
   assert.equal(s.cacheRead, 400);
   assert.equal(s.cacheWrite, 20);
-  assert.equal(s.tokens, 2620);
+  assert.equal(s.tokens, 2640);
   assert.equal(s.cost, 0.5, 'the transcript\'s own metered cost, not the stub price (would be 2.62)');
   assert.ok(agg.byHost.opencode, 'byHost gains the opencode bucket');
   assert.equal(agg.byHost.opencode.cost, 0.5);
@@ -126,7 +126,7 @@ test('sessions with NO observed cost fall back to the pricing table (never a fab
   });
   const agg = await buildIndex(opts(sb));
   const s = agg.sessions.find((x) => x.id === 'ses_oc2');
-  assert.equal(s.cost, (1000 + 100 + 200 + 10) / 1000, 'pricing stub applies when nothing was observed');
+  assert.equal(s.cost, (1000 + 110 + 200 + 10) / 1000, 'pricing stub applies when nothing was observed (output = 100 text + 10 reasoning)');
   rm(sb.dir);
 });
 
@@ -238,7 +238,7 @@ test('readSession prices an opencode session whose rows carry NO observed cost',
 
   const out = await readSession('ses_oc7', { roots: sb.roots, deps: deps() });
   assert.ok(out, 'payload returned rather than throwing');
-  assert.equal(out.meta.cost, (1000 + 100 + 200 + 10) / 1000,
+  assert.equal(out.meta.cost, (1000 + 110 + 200 + 10) / 1000,
     'the injected pricer priced the row the transcript never costed');
   rm(sb.dir);
 });
