@@ -83,6 +83,11 @@ function knownFileSpecs() {
     ['ak-kit-config', 'agentic-kit', 'kit-caches', 'kit.json', kit('kit.json')],
     ['ak-claude-limits', 'agentic-kit', 'kit-caches', 'claude-rate-limits.json',
       kit('claude-rate-limits.json')],
+    // A directory, not a file: one tiny JSON per Claude session (the statusline's
+    // context-window change log). Listed so its presence is visible; a directory
+    // gets no claimed size here (knownFileNodes), the deep tier measures it.
+    ['ak-claude-context-windows', 'agentic-kit', 'kit-caches', 'claude-context-windows',
+      kit('claude-context-windows')],
     ['ak-codex-limits', 'agentic-kit', 'kit-caches', 'codex-rate-limits.json',
       kit('codex-rate-limits.json')],
     ['ak-footprint-snapshot', 'agentic-kit', 'kit-caches', 'footprint-snapshot.json', snapshotPath()],
