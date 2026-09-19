@@ -73,32 +73,32 @@ Every metric section below follows the same shape:
 Two JSONL transcript stores plus OpenCode's SQLite store, read without source edits — the derived
 record is cached "keyed by (path, mtime, size)" (`src/lib/usage-index.mjs:10`),
 and the whole cache is invalidated on a `SCHEMA_VERSION` change
-(`usage-index.mjs:161`):
+(`usage-index.mjs:162`):
 
 | Transcript host | Store | Format |
 |---|---|---|
 | Claude Code | `~/.claude/projects/<project>/<sessionId>.jsonl` | one JSON object per line: `user`/`assistant` entries. Claude Code writes **one assistant line per content block** (thinking, text, each `tool_use`) and repeats the whole message's `usage` object on every one, so usage is counted once per API message id (`message.id`, else `requestId`), not once per line |
 | Claude Code (subagent) | `~/.claude/projects/<project>/<sessionId>/subagents/agent-<hash>.jsonl` | the same per-line format. A session's own delegated work, written to its own file beside the parent — cost-bearing, and marked `sidechain` by its own entries |
-| Codex CLI | `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<sessionId>.jsonl` | one JSON object per line: `session_meta`, `turn_context`, and `event_msg` records; the latter carry **cumulative** `token_count` snapshots plus legacy messages or newer `item_completed` envelopes |
+| Codex CLI | `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<ts>-<sessionId>.jsonl` | one JSON object per line: `session_meta`, `turn_context`, and `event_msg` records; the latter carry **cumulative** `token_count` snapshots plus legacy messages or newer `item_completed` envelopes. A rollout Codex imported from a Claude Code transcript (turn ids `external-import-turn-N`) is excluded and counted, not read as Codex activity; a forked subagent's rollout opens with its parent's replayed history, which is not counted as the subagent's own; a rollout larger than 128 MiB is read by a bounded-memory streaming reader rather than as one string |
 | OpenCode | platform data root `opencode/opencode.db` | SQLite session/message/part rows; per-assistant token fields and optional recorded cost/provider identity |
 
 Discovery is **one level of project directories plus that one nested shape**,
-not a recursive walk: `listClaude` (`usage-index.mjs:344-358`) descends into a
+not a recursive walk: `listClaude` (`usage-index.mjs:357-371`) descends into a
 session-id directory only through "listClaudeSubagents"
-(`usage-index.mjs:319-324`), which reads exactly
+(`usage-index.mjs:332-337`), which reads exactly
 `<projectDir>/<sessionId>/subagents/*.jsonl`. A directory that is not a
 session-id dir with a `subagents` child — Claude Code's own `memory` dir, say —
 contributes nothing rather than being crawled. Each subagent record takes a
-**namespaced** id, `<sessionId>/<stem>` (`usage-index.mjs:324`), because Claude
+**namespaced** id, `<sessionId>/<stem>` (`usage-index.mjs:337`), because Claude
 Code names every such file `agent-<hash>.jsonl` and that stem is not guaranteed
 unique across two parents; an unnamespaced id would silently collide two
 unrelated subagent records into one. `locateSubagent`
-(`usage-index.mjs:884-903`) resolves that id back to the nested path when a
+(`usage-index.mjs:942-961`) resolves that id back to the nested path when a
 reader opens the session, building the candidate path from the two validated
 capture groups rather than from raw request input.
 
-The parsers are `parseClaude` (`usage-parsers.mjs:719-754`) and `parseCodex`
-(`usage-parsers.mjs:1091-1128`). They normalize raw JSONL bytes; project evidence also consults the local filesystem.
+The parsers are `parseClaude` (`usage-parsers.mjs:728-763`) and `parseCodex`
+(`usage-parsers.mjs:1160-1217`). They normalize raw JSONL bytes; project evidence also consults the local filesystem.
 Missing-time fallback paths can consult the clock. Their output is local evidence,
 not a network response or an invoice.
 Nothing in this transcript pipeline calls a provider API or a billing endpoint; **no transcript
@@ -129,7 +129,11 @@ visible regardless of which tab is active, and cannot be mistaken for
 healthy empty data. See [ADR-0023 §7](adr/0023-fail-closed-operations-and-explicit-degradation.md)
 for why the four fields are tracked to different degrees of external documentation.
 Codex diagnostics additionally record files scanned, parse yield, token-bearing
-files, response-bearing files, and unknown item types; a readable root with
+files, response-bearing files, unknown item types, the Claude sessions Codex
+imported and the scan excluded (`importedExcluded`), any rollout that could not be
+read or parsed with its reason (`unparsedFiles`, `unparsedReasons`, warning
+`unparsed-rollouts`), and oversized lines the streaming reader clipped
+(`clippedLines`, warning `oversized-lines-clipped`); a readable root with
 token-bearing files but zero normalized responses is degraded as
 `parse-yield-zero`, and a root where only some token-bearing files yield
 responses is degraded as `parse-yield-partial`, rather than reported as healthy
@@ -193,8 +197,8 @@ responses = Σ over included sessions of session.responses
   (`usage-aggregate.mjs:894-895`).
 - `responses` accumulation: Claude increments once per API message id — every
   transcript line of one message counts once, the last line's usage winning
-  (`usage-parsers.mjs:641-673`); Codex increments per `agent_message` event
-  (`usage-parsers.mjs:969-974`).
+  (`usage-parsers.mjs:650-682`); Codex increments per `agent_message` event
+  (`usage-parsers.mjs:985-990`).
 - Totals: `totals.responses += s.responses` per included session
 (`usage-aggregate.mjs:924`).
 - Render: `kpi("sessions", fmtNum(t.sessions), fmtNum(t.responses)+" assistant
@@ -240,11 +244,15 @@ clipping them to the window. A session spanning the cutoff can therefore contrib
 usage and days outside the displayed range. The previous-window pass assigns the whole
 session by its end time too. Top Git projects and Context inherit this population.
 
-For Codex, one final cumulative usage row is attributed to the last recorded usage event's
-day and the last model in the record. It does not reconstruct daily or per-model deltas
-inside a long, resumed, or model-switched session. Those attribution limits are distinct
-from correctly avoiding a sum of cumulative snapshots. Exact per-request timeframe
-accounting would require additional parser/aggregation work.
+For Codex, each cumulative `token_count` snapshot is turned into its increase over the
+previous one and booked on that event's local day under the model of the `turn_context`
+in effect, so a session spanning several days or models spreads across them. A snapshot
+that is lower than its predecessor means the host's counter restarted; its increase is
+the whole snapshot, so every segment before a restart still counts. For a single-day,
+single-model session without a restart the increases add up to the last snapshot.
+The cause of a counter restart is not known; the arithmetic relies only on the counter
+having started again. The whole session is still selected into a window by its end time
+(above).
 
 ### 2a. Prompt fingerprints and provenance (SCHEMA_VERSION 14, extended in 16)
 
@@ -313,22 +321,22 @@ same sentence fingerprints identically whichever host recorded it:
 
 | Symbol | Location | Notes |
 |---|---|---|
-| `normalizePromptText` | `src/lib/usage-parsers.mjs:251` | lowercased, whitespace-collapsed, trailing punctuation stripped |
-| `promptFingerprint` | `src/lib/usage-parsers.mjs:286` | the `{h, t, th}` hash/count/token-hash triple |
-| `promptShape` | `src/lib/usage-parsers.mjs:332` | the `q`/`o` flags, anchored on the question and persona-opener rules below |
-| `QUESTION_WH_RE` | `src/lib/usage-parsers.mjs:301` | one of two rules the `q` flag checks |
-| `QUESTION_AUX_RE` | `src/lib/usage-parsers.mjs:302` | the other |
-| `PERSONA_OPENER_RE` | `src/lib/usage-parsers.mjs:308` | what the `o` flag checks |
-| `notePromptFingerprint` | `src/lib/usage-parsers.mjs:349` | records one fingerprint, or counts overflow past the caps below |
-| `MAX_PROMPT_FPS` | `src/lib/usage-parsers.mjs:230` | the per-session fingerprint cap |
-| `MAX_TOKEN_HASHES` | `src/lib/usage-parsers.mjs:245` | the per-fingerprint token-hash cap |
+| `normalizePromptText` | `src/lib/usage-parsers.mjs:260` | lowercased, whitespace-collapsed, trailing punctuation stripped |
+| `promptFingerprint` | `src/lib/usage-parsers.mjs:295` | the `{h, t, th}` hash/count/token-hash triple |
+| `promptShape` | `src/lib/usage-parsers.mjs:341` | the `q`/`o` flags, anchored on the question and persona-opener rules below |
+| `QUESTION_WH_RE` | `src/lib/usage-parsers.mjs:310` | one of two rules the `q` flag checks |
+| `QUESTION_AUX_RE` | `src/lib/usage-parsers.mjs:311` | the other |
+| `PERSONA_OPENER_RE` | `src/lib/usage-parsers.mjs:317` | what the `o` flag checks |
+| `notePromptFingerprint` | `src/lib/usage-parsers.mjs:358` | records one fingerprint, or counts overflow past the caps below |
+| `MAX_PROMPT_FPS` | `src/lib/usage-parsers.mjs:239` | the per-session fingerprint cap |
+| `MAX_TOKEN_HASHES` | `src/lib/usage-parsers.mjs:254` | the per-fingerprint token-hash cap |
 | `PROVENANCE_TAGS` | `src/lib/usage-provenance.mjs:21` | the closed four-tag vocabulary |
 | the ordered provenance rules | `src/lib/usage-provenance.mjs:33-77` | matched against, in order, to resolve a tag |
 | `provenanceOf` | `src/lib/usage-provenance.mjs:93` | resolves one turn's provenance tag |
 
 Wired on the Claude path where userTurnKind is called —
-`src/lib/usage-parsers.mjs:580-601`; on the Codex path inside
-`handleCodexUserMessage` — `src/lib/usage-parsers.mjs:946-967`; on the
+`src/lib/usage-parsers.mjs:589-610`; on the Codex path inside
+`handleCodexUserMessage` — `src/lib/usage-parsers.mjs:962-983`; on the
 opencode path inside `recordUserMessage` — `src/lib/usage-opencode.mjs:157-170`
 
 **What this does not model:**
@@ -437,7 +445,7 @@ this day carried the fingerprint layer", so a zero here is *measured*.
 | Symbol | Location |
 |---|---|
 | `TAP_MAX_TOKENS` | `src/lib/usage-aggregate.mjs:286` |
-| the baseline window and floor | `src/lib/usage-aggregate.mjs:293-293` |
+| the baseline window and floor | `src/lib/usage-aggregate.mjs:293` |
 | `v16Projection` (per session) | `src/lib/usage-aggregate.mjs:329` |
 | `foldSessionPrompts` | `src/lib/usage-aggregate.mjs:368` |
 | `sealPromptHosts` | `src/lib/usage-aggregate.mjs:386` |
@@ -644,17 +652,18 @@ per row is **gross input minus cached input** — Claude's parser reads
 `cache_read_input_tokens` and `cache_creation_input_tokens` as separate fields
 the provider already reports separately (`telemetry-records.mjs:216-224`); Codex's
 parser subtracts `cached_input_tokens` from `input_tokens` explicitly
-at this call site (`usage-parsers.mjs:1068-1089`, `input: Math.max(0, gross - cacheRead)`) because
+at this call site (`usage-parsers.mjs:1109-1160`, `input: Math.max(0, gross - cacheRead)`) because
 Codex's own `input_tokens` field **includes** cached tokens and would
 double-count them against the separately-reported `cacheRead` figure if left
 as-is. This is asserted by test:
 `tests/kit/usage-index.test.mjs:442-471` ("Codex tokens come from the LAST
 token_count event, never the sum") pins a fixture where the naive sum of two
 cumulative snapshots (4000/1600/400) would be wrong, and the correct
-last-event-only answer (3000/1200/300, split into `input: 1800, cacheRead:
-1200`) is what the assertion requires.
+answer without a counter restart (the last snapshot, 3000/1200/300, split into
+`input: 1800, cacheRead: 1200`) is what the assertion requires; the per-event
+increases of a reset-free session add up to exactly that figure.
 
-![Figure: Claude sums per-turn usage deltas while Codex reports cumulative token_count snapshots where only the last one counts — summing snapshots would double-count](assets/usage-token-accounting.svg)
+![Figure: Claude sums per-turn usage deltas while Codex reports cumulative token_count snapshots where each event counts only its increase over the previous one — summing the snapshots would double-count; a forked subagent counts only what follows its replayed parent history](assets/usage-token-accounting.svg)
 
 **What this does not model:** reasoning tokens (`reasoning_output_tokens`,
 present in Codex's `token_count` payload) are not broken out as a separate
@@ -734,7 +743,7 @@ session data, and each needs its own fix:
    human, or genuinely idle) donates its *entire* idle stretch to the span,
    even though no work happened during it. Fix: split each session into
    active sub-intervals wherever the gap between two consecutive timestamps
-   exceeds `IDLE_GAP_MS` (15 minutes, `usage-parsers.mjs:24`), then union
+   exceeds `IDLE_GAP_MS` (15 minutes, `usage-parsers.mjs:28`), then union
    *those* sub-intervals — this is `engagedSeconds`.
 
 **Source:**
@@ -743,10 +752,10 @@ session data, and each needs its own fix:
   sorts intervals and merges any two that are "overlapping OR exactly touching"
   (`s <= curEnd`, `usage-aggregate.mjs:55`), returning total covered seconds
   rounded to the nearest second.
-- `activeIntervals()` (`usage-parsers.mjs:459-477`) — splits one session's
+- `activeIntervals()` (`usage-parsers.mjs:468-486`) — splits one session's
   sorted timestamp list into sub-intervals wherever a gap exceeds
   IDLE_GAP_MS; "a run of one timestamp yields a zero-length interval and so
-  contributes nothing" (comment, `usage-parsers.mjs:459-465`).
+  contributes nothing" (comment, `usage-parsers.mjs:468-474`).
 - Aggregation, each its own call to `mergeIntervals`: `engagedSeconds` over
   every session's active sub-intervals (`usage-aggregate.mjs:1055-1060`);
   `spanUnionSeconds` over whole spans instead
@@ -805,7 +814,7 @@ byDay[day].sessionsActive = count of distinct sessions with any usage row that d
 
 **Source:** the day key is the row's own `row.day`, computed once at parse
 time as **local calendar day**, not UTC
-(`usage-parsers.mjs:30`/`usage-parsers.mjs:1077-1078` call `localDay(at)`) — so a
+(`usage-parsers.mjs:34`/`usage-parsers.mjs:1162` call `localDay(at)`) — so a
 session that runs from 23:58 local to 00:05 local has its session count attributed
 to the day its *first* usage row landed on (test:
 `tests/kit/usage-index.test.mjs:738`, "a session that opens before midnight
@@ -842,7 +851,7 @@ renders "no sessions in window" instead of zeroed figures
   called once per session at this call: `usage-aggregate.mjs:964-984`), keyed by the literal string
 `"claude"` or `"codex"` assigned at parse time
 (this call: `blankSession(id, 'claude')` / `blankSession(id, 'codex')`,
-`usage-parsers.mjs:183-211`, `:1106-1108`, `parseClaude`/`parseCodex` entry points).
+`usage-parsers.mjs:196-224`, `:1197`, `parseClaude`/`parseCodex` entry points).
 OpenCode's SQLite reader builds the same record shape and contributes a third
 host key.
 
@@ -894,8 +903,8 @@ punchcard[dow + "-" + hour] += 1   per assistant/agent_message response, at its 
 
 **Source:** incremented once per Claude API message (all of a message's
 transcript lines are one hit)
-(`usage-parsers.mjs:37`, keyed by this call: `punchKey(at)`) and once per Codex
-`agent_message` (`usage-parsers.mjs:969-974`), merged into the window-level
+(`usage-parsers.mjs:41`, keyed by this call: `punchKey(at)`) and once per Codex
+`agent_message` (`usage-parsers.mjs:985-990`), merged into the window-level
 `punchcard` object per session (`usage-aggregate.mjs:939-998`). Cell intensity is
 linear against the single busiest cell in the window:
 `v = pcMax ? n/pcMax : 0` (`dashboard/client.mjs`) — this is a
@@ -951,10 +960,10 @@ rather than vanishing.
 
 `byModel[...].responses` is populated from each usage row's response field at
 this call (`usage-aggregate.mjs:771-774`). The shared usage-row accumulator is
-defined at `usage-parsers.mjs:489-500`; Claude passes one response per API
-message at its call site (`usage-parsers.mjs:657`). Codex passes the session's
+defined at `usage-parsers.mjs:498-509`; Claude passes one response per API
+message at its call site (`usage-parsers.mjs:666`). Codex passes the session's
 whole response count once, where finalizeCodexUsage makes the corresponding
-call (`usage-parsers.mjs:1072-1084`).
+call (`usage-parsers.mjs:1113-1156`).
 
 The two parsers therefore hand the aggregate the same response-bearing row shape, despite their
 different per-turn and cumulative transcript formats.
@@ -973,8 +982,8 @@ split `server_error` 27, `authentication_failed` 3, `rate_limit` 3 — three
 distinct underlying causes, one placeholder shape).
 
 The parser recognizes the decoded API-error placeholder and returns before model
-or usage attribution (`usage-parsers.mjs:678-697`). The turn does **not** increment
-the response count or punchcard — it is not a model response (`usage-parsers.mjs:641-673`) — it *is* real
+or usage attribution (`usage-parsers.mjs:687-706`). The turn does **not** increment
+the response count or punchcard — it is not a model response (`usage-parsers.mjs:650-682`) — it *is* real
 engaged time (its timestamp still extends the session span), someone was
 genuinely waiting on it — and increments the record's exception count instead. Aggregation rolls that count into the window
 total (`usage-aggregate.mjs:964-975`) and keeps it on the session row beside the
@@ -1322,7 +1331,7 @@ both credential-free for ak:
 `windowDurationMins: 10080` (the weekly). Windows are therefore keyed and
 labelled by duration (`windowLabel`, `quota.mjs:51`), never by slot name. The
 same rule applies to the historical snapshots parsed out of rollouts: the
-normalizer at `usage-parsers.mjs:840-858` keeps a flat `windows` list keyed by
+normalizer at `usage-parsers.mjs:852-870` keeps a flat `windows` list keyed by
 `window_minutes`.
 
 **Freshness is part of the number.** Both sides carry `fetchedAt`; the view
@@ -1349,10 +1358,13 @@ Codex ≥0.140 maintains its own SQLite thread ledger (`~/.codex/state_N.sqlite`
 globs and takes the newest). `readCodexState` (`:62`, whose own delegate
 call reads the db file) reads per-thread
 `thread_source` (`user` vs `subagent`) plus `thread_spawn_edges`, and
-`applyCodexLedger` (`usage-aggregate.mjs:1271-1300`) overlays that onto parsed
-sessions: a ledger-identified subagent has its token usage stripped — its
-rollout replays the parent's entire token history (ccusage/ccusage#950
-measured up to 91× inflation) — while the session record stays visible.
+`applyCodexLedger` (`usage-aggregate.mjs:1271-1301`) overlays that onto parsed
+sessions: a thread that ONLY the ledger identifies as a subagent has its token
+usage stripped — with no `thread_source` in its own rollout its parsed usage is the
+unsubtracted cumulative total, which replays the parent's entire token history
+(ccusage/ccusage#950 measured up to 91× inflation) — while the session record stays
+visible. A rollout that says `thread_source: subagent` itself is left untouched: the
+parser already reduced it to the subagent's own usage (§16.2).
 **The parser is primary, the ledger is the fallback**: `rec.threadSource ??
 t?.threadSource ?? fromEdges` (`usage-aggregate.mjs:1271`) reads the rollout's
 own `session_meta.thread_source` first, and only consults the ledger when
@@ -1365,7 +1377,7 @@ migration generation its `N` reflects; a rollout the ledger cannot resolve
 (an older Codex build, a migrated-beyond-recognition state file) still gets
 a correct `threadSource` straight from its own transcript rather than
 falling through unclassified. Codex sessions also carry
-`reasoningOutput` (`usage-parsers.mjs:1072-1089`) — reasoning tokens are a **subset**
+`reasoningOutput` (`usage-parsers.mjs:1113-1160`) — reasoning tokens are a **subset**
 of output tokens and are annotation only, never added to any sum.
 
 ## 14. Known limitations, restated as a single checklist
@@ -1432,16 +1444,16 @@ p(q), over N samples, landing in bucket i (count n_i, running total `cum` before
 **Source:**
 
 - Edges: `LAT_BUCKET_EDGES` and `LEN_BUCKET_EDGES` (`usage-aggregate.mjs:211`, `:214`).
-  The parsers carry their own copies (`usage-parsers.mjs:355-360`) and the
+  The parsers carry their own copies (`usage-parsers.mjs:364-369`) and the
   browser bundle a third pair (`LAT_EDGES`/`LEN_EDGES`), because the payload
   ships bucket *counts* and never the edges they were binned on.
-- Slotting: `bucketIndex` (`usage-parsers.mjs:369-371`) — one definition of a
+- Slotting: `bucketIndex` (`usage-parsers.mjs:378-380`) — one definition of a
   boundary, shared by every histogram built on these edges.
-- Sampling: `noteLatencySample` (`usage-parsers.mjs:362-367`) allocates
+- Sampling: `noteLatencySample` (`usage-parsers.mjs:371-376`) allocates
   `latHist` lazily, so a session that never observed a latency keeps
   `latHist: null` — absent, not a fabricated row of zeroes.
 - Session length: `seal` derives each session's `lenSeconds` from its own
-  active intervals (`usage-parsers.mjs:479-486`) — the §6 engaged figure for
+  active intervals (`usage-parsers.mjs:488-495`) — the §6 engaged figure for
   one session, never its first-to-last span. This is a per-session parse result,
   kept distinct from the next window-level fold.
 
@@ -1497,13 +1509,13 @@ same way, and the panel says so rather than implying a single clock:
 
 | Host | How a latency sample is produced |
 |---|---|
-| codex | **Host-measured.** `task_started` remembers the turn's start (`usage-parsers.mjs:885-895`) and `task_complete` samples Codex's own `duration_ms` (`usage-parsers.mjs:897-915`) — but only if no prompt-gap already covered that turn (so a turn is never sampled twice) and only within the same 3600 s cap the derived paths apply. |
-| codex | Also derives a prompt-gap when one is available: `handleCodexUserMessage` opens the window (`usage-parsers.mjs:937-967`) and the next agent message closes it, clearing `turnStartedAt` so the `duration_ms` fallback cannot double-fire (`usage-parsers.mjs:969-981`). |
-| claude | **Derived from event gaps.** A human prompt sets `latState.pendingMs` (`pendingMs`, `usage-parsers.mjs:573-588`); the first real assistant turn closes that gap into a `noteLatencySample` call (`usage-parsers.mjs:699-702`). |
+| codex | **Host-measured.** `task_started` remembers the turn's start (`usage-parsers.mjs:901-911`) and `task_complete` samples Codex's own `duration_ms` (`usage-parsers.mjs:913-931`) — but only if no prompt-gap already covered that turn (so a turn is never sampled twice) and only within the same 3600 s cap the derived paths apply. |
+| codex | Also derives a prompt-gap when one is available: `handleCodexUserMessage` opens the window (`usage-parsers.mjs:953-983`) and the next agent message closes it, clearing `turnStartedAt` so the `duration_ms` fallback cannot double-fire (`usage-parsers.mjs:985-996`). |
+| claude | **Derived from event gaps.** A human prompt sets `latState.pendingMs` (`pendingMs`, `usage-parsers.mjs:582-597`); the first real assistant turn closes that gap into a `noteLatencySample` call (`usage-parsers.mjs:708-711`). |
 | opencode | Derived the same way from its message stream — `rec.pendingPromptMs`, closed by `noteLatencySample` (`usage-opencode.mjs:235-239`). |
 
 **Every** path is capped: a sample above `MAX_LATENCY_SAMPLE_SECONDS`
-(3600 s, `usage-parsers.mjs:435-450`) is an idle resume — the person walked away
+(3600 s, `usage-parsers.mjs:444-459`) is an idle resume — the person walked away
 and came back — not a wait for a reply, so it is dropped from sampling
 entirely rather than parked in the overflow bucket beside genuinely slow turns.
 That includes Codex's host-measured `duration_ms`. An earlier ruling exempted
@@ -1516,11 +1528,11 @@ reference corpus before the fix: 12 of 835 durations exceeded the cap, the
 largest 94,079,450 ms ≈ 26.1 hours, all of them landing in the `≥60s` overflow
 bucket and dragging `latP95` into it.
 An interrupted turn contributes nothing at all — `turn_aborted` clears both
-pending states (`usage-parsers.mjs:1010-1028`), so a prompt that was never
+pending states (`usage-parsers.mjs:1025-1066`), so a prompt that was never
 answered can never be timed against a later, unrelated reply. A dropped API
 turn is likewise never a sample: the error branch returns before the latency
 block and deliberately leaves `pendingMs` set, so the first real completion
-that eventually follows is what gets timed (`usage-parsers.mjs:565-574`).
+that eventually follows is what gets timed (`usage-parsers.mjs:590-599`).
 
 **This figure is never labeled TTFT, in any surface.** Time-to-first-token
 measures when a stream *starts*; every figure here measures when a turn
@@ -1561,7 +1573,7 @@ Neither transcript store records it, so no panel here may borrow the name.
   means a window dominated by one host is really reporting that host's
   instrument;
 - the bucketing *function* is implemented twice: the parsers export
-  `bucketIndex` (`usage-parsers.mjs:369-371`) and the aggregate keeps a private
+  `bucketIndex` (`usage-parsers.mjs:378-380`) and the aggregate keeps a private
   copy of the same loop (`usage-aggregate.mjs:221-224`), because the dependency
   between the two modules is deliberately one-way. The *edges* they run on are
   pinned equal by test — `AGG_LAT_EDGES` against `LAT_BUCKET_EDGES`
@@ -1596,9 +1608,9 @@ folding is "addCost(d.byMode, rec.mode ?? 'not-recorded', rowCost)"
 which day its dollars landed on. The window bucket is
 this call: `addTo(bucket(byMode, s.mode ?? 'not-recorded'), s)` (`usage-aggregate.mjs:979-984`).
 The evidence each parser reads: Claude's `permissionMode`, off the human prompt
-only (`usage-parsers.mjs:573-588`); Codex's `approval_policy`/`sandbox_policy`
+only (`usage-parsers.mjs:582-597`); Codex's `approval_policy`/`sandbox_policy`
 off each `turn_context`, last one wins since a session may renegotiate mid-run
-(`usage-parsers.mjs:817-838`); OpenCode's `mode` off each assistant message
+(`usage-parsers.mjs:829-850`); OpenCode's `mode` off each assistant message
 (`usage-opencode.mjs:240-241`). Render is `modeChart` in
 `src/lib/dashboard/client/usage.mjs`; the CLI table is `printScoreModeTable`
 (`src/commands/usage.mjs:270-272`).
@@ -1630,7 +1642,7 @@ or `{"type":"workspace-write", …}` with sibling fields such as
 `network_access` — never the bare string the taxonomy is written against. A
 survey of this machine's rollouts (400 files, 2026-08-28) found 1,110 object
 occurrences and **zero** string ones. `handleCodexTurnContext`
-(`usage-parsers.mjs:817-838`) therefore reads `sandbox_policy.type` and passes
+(`usage-parsers.mjs:829-850`) therefore reads `sandbox_policy.type` and passes
 that to `normalizeMode`, which is unchanged and still accepts the string form.
 Before this extraction the object reached `normalizeMode` intact, matched no
 rule, and stringified into `modeRaw` as `"never/[object Object]"`: the `plan`,
@@ -1653,7 +1665,7 @@ second field.
 (`usage-modes.mjs:25`, `:32`), so an unrecognised raw value — a future
 `permissionMode`, a policy this taxonomy has not been taught — yields no mode.
 The raw string is kept beside the normalized one as `modeRaw`
-(`usage-parsers.mjs:198`) precisely because the mapping is a judgement call and
+(`usage-parsers.mjs:207`) precisely because the mapping is a judgement call and
 a reader checking it needs the evidence it was made from. `not-recorded` is a
 first-class bucket key rather than a display fallback, folded at this call:
 `addTo(bucket(byMode, s.mode ?? 'not-recorded'), s)`
@@ -1679,35 +1691,45 @@ centre of the donut = round(main / (main + subagent) × 100) %
 at this call to it, before the fold
 ("Both source rows always exist", `usage-aggregate.mjs:958-962`) so "no subagent sessions" renders
 as a zero rather than a row the UI silently drops. Claude's evidence is the
-`isSidechain` flag on any entry in the file (`usage-parsers.mjs:735-740`, decoded at
+`isSidechain` flag on any entry in the file (`usage-parsers.mjs:744-749`, decoded at
 `telemetry-records.mjs:267`); Codex's is the ledger-backed `thread_source`
 (§13c). Render is `sourceDonut` in `src/lib/dashboard/client/usage.mjs`.
 
 **Delegation cost differs by source.** Claude sidechains and OpenCode sessions
-with `parent_id` retain their own recorded usage/cost. Codex replay-identified
-subagents have usage excluded. A zero cannot establish whether actual work was free.
+with `parent_id` retain their own recorded usage/cost. A forked Codex subagent
+reports its own usage with its replayed parent history excluded; only a subagent whose
+replay cannot be separated reports none. A zero cannot establish whether actual work was free.
 
 **Claude — real, priced, included.** A session's delegated work is written to
 its own transcript under `<project>/<sessionId>/subagents/`, and those files are
-discovered by `listClaudeSubagents` (`usage-index.mjs:319-324`, §1) and parsed
+discovered by `listClaudeSubagents` (`usage-index.mjs:332-337`, §1) and parsed
 like any other. `parseClaude` already prices those bytes and marks the record
 `sidechain` from its own `isSidechain` entries, so the cost is real, is included
 in `totals.cost`, and the session opens in the Sessions tab like a main-thread
 one. A `$0` Claude subagent slice may also mean missing or zero-valued token evidence;
 check its session and response counts before concluding no work occurred.
 
-**Codex — structurally `$0`, by ledger design.** A ledger-identified subagent
-has its usage rows removed outright (`applyCodexLedger`,
-`usage-aggregate.mjs:1271-1300`) and `finalizeCodexUsage` never writes one in the
-first place (`usage-parsers.mjs:1068-1089`), because a subagent rollout replays its
-parent's entire cumulative token history and keeping it would bill the parent
-twice (§13c, **[C7]**). The record stays visible and auditable; its cost is zero
-because nothing was measured for it, not because the work was cheap — which is
-also why §17 keeps such sessions out of the cost-per-session distribution.
+**Codex — the subagent's own usage, not its parent's replay.** A forked subagent's
+rollout opens with its parent's history (messages, tool runs, the parent's own
+`session_meta` and cumulative `token_count` snapshots) and then records its own
+turns. Counting the replay would bill the parent twice (**[C7]**), so events below
+the replay boundary count for nothing (no prompt, response, tool, context sample or
+usage), and the subagent's usage is what its own snapshots add. The boundary is
+`subagent_history_start_ordinal` when some event lies at or beyond it; when the host
+wrote the file length there instead, it is the parent's first `agent_message`
+addressed to the thread (`codex-replay.mjs`). An unforked subagent replays nothing,
+so all of its usage is its own. The record stays flagged `subagent`, so its prompts
+stay out of human-prompt figures. A subagent from a host that writes no `ordinal` at
+all cannot have its replay separated and reports no usage: that zero means "not
+measurable", not "cheap", which is why §17 keeps such sessions out of the
+cost-per-session distribution. A ledger-only subagent (no `thread_source` in its
+rollout) is stripped for the same reason (§13c).
 
 **Worked example**, one machine's own 14-day window — every figure below taken
-from a single aggregate generated 2026-08-29T00:00Z, so the parts add up. It is
-one corpus, so the *shape* is the point, not the totals:
+from a single aggregate generated 2026-08-29T00:00Z, so the parts add up. That
+aggregate predates counting a Codex subagent's own tokens (ADR-0052), so its Codex
+subagent row reads zero; today that row carries the subagents' own cost. It is one
+corpus, so the *shape* is the point, not the totals:
 
 | Source | Host | Sessions | Api-equivalent cost | Responses |
 |---|---|---|---|---|
@@ -1719,9 +1741,9 @@ one corpus, so the *shape* is the point, not the totals:
 `bySource` therefore reads `main` 947 sessions / $3,707.50 and `subagent` **334
 sessions / $2,376.13**, which sum exactly to the window's $6,083.63 across 1,281
 sessions. Delegated work is **39.1% of the window's cost, and every dollar of it
-is Claude's.** The Codex row is the honest zero described above: 156 sessions and
-1,356 responses are visible, and their cost is `$0.00` because their tokens were
-stripped as a double-count. Both rows exist because both are pre-created before
+was Claude's in that aggregate.** Its Codex subagent row shows 156 sessions and
+1,356 responses at `$0.00`, from before those sessions' own tokens were counted.
+Both rows exist because both are pre-created before
 the fold; neither is a row the UI invented. (The four host rows are each rounded
 to the cent independently, so reading them as a column sums a cent high against
 `bySource` — the buckets, not the display, are what the totals are built from.)
@@ -1800,8 +1822,8 @@ sat down. The `How you run` panel carries the main/subagent split. The
 denominator is `byDay`'s key count, and `byDay`'s presence contract is
 **days with retained usage rows** — which is why the aggregate keeps a separate
 `engagedByDay` map (§6): the two sets genuinely differ (a session running past
-midnight, a day spent reading, a day worked entirely in stripped Codex
-subagent sessions that billed nothing). A day worked but never billed is not
+midnight, a day spent reading, a day worked entirely in Codex
+sessions that recorded no token usage). A day worked but never billed is not
 an active day here, and it breaks the streak. Both surfaces say so: the
 browser in the tile's tooltip, `ak usage score` inline, since a terminal
 reader has nothing to hover.
@@ -1815,8 +1837,8 @@ that map nor its per-day session count.
 `_priced` when it had any usage rows at all (`usage-aggregate.mjs:869-875`), and
 only those costs enter the distribution (`usage-aggregate.mjs:958-976`). A session
 with no usage rows costs `$0` *structurally* — nothing was ever measured for it,
-the common case being a Codex subagent rollout whose tokens were stripped as a
-double-count (§16.2) — and letting those in would report "the typical session
+the common case being a Codex subagent that only its ledger row identifies, whose
+tokens are stripped as a double-count (§16.2, §13c) — and letting those in would report "the typical session
 cost nothing" when the truth is "the typical session was not measured". The
 median rather than the mean because session cost is heavy-tailed: one 12-hour
 refactor can outweigh forty short sessions, and a mean would describe that one
@@ -1937,9 +1959,9 @@ model, and each host signals that differently:
 
 | Host | What is counted, and where |
 |---|---|
-| claude | The API-error placeholder — Claude Code synthesizes a local turn with no completion behind it when a connection drops, a rate limit rejects, or auth fails. The decoder sets `isApiError` from either `isApiErrorMessage` or the literal `<synthetic>` model marker (`telemetry-records.mjs:269`), because the flag is not set on every build that emits the placeholder; the parser counts it as an exception, not a response, and returns before any model or usage attribution (`usage-parsers.mjs:678-697`). |
-| codex | A `task_complete` event carrying a non-null `error` (`usage-parsers.mjs:897-915`). |
-| codex | `turn_aborted` is counted **separately**, into `rec.aborts` (`usage-parsers.mjs:1010-1028`) — not into exceptions. |
+| claude | The API-error placeholder — Claude Code synthesizes a local turn with no completion behind it when a connection drops, a rate limit rejects, or auth fails. The decoder sets `isApiError` from either `isApiErrorMessage` or the literal `<synthetic>` model marker (`telemetry-records.mjs:269`), because the flag is not set on every build that emits the placeholder; the parser counts it as an exception, not a response, and returns before any model or usage attribution (`usage-parsers.mjs:687-706`). |
+| codex | A `task_complete` event carrying a non-null `error` (`usage-parsers.mjs:913-931`). |
+| codex | `turn_aborted` is counted **separately**, into `rec.aborts` (`usage-parsers.mjs:1025-1066`) — not into exceptions. |
 | opencode | An assistant message carrying a non-null `error` (`usage-opencode.mjs:232-234`). |
 
 **Aborts are held apart from exceptions on purpose.** An aborted turn is a
@@ -1985,7 +2007,7 @@ them from the model ranking rather than showing a `$0` model row.
 
 **What this does not model:** the rate's denominator is *responses*, which
 includes the exception turns themselves (they increment `rec.responses` before
-the error branch returns, `usage-parsers.mjs:548`) — they were real engaged
+the error branch returns, `usage-parsers.mjs:557`) — they were real engaged
 time, someone was genuinely waiting on them. A retry that eventually succeeded
 appears as one exception plus one successful response, not as a single
 recovered turn; nothing in either transcript links the two. And the worst-day
@@ -2019,16 +2041,18 @@ row knows its day. Render is `toolRows`/`modelMix` in
 
 **Tool names are the host's own, never renamed.** Claude's tally is keyed by
 the `tool_use` block's own `name` (`collectClaudeToolNames`,
-`usage-parsers.mjs:607-618`). Codex's four tallied item types —
-`CommandExecution`, `McpToolCall`, `FileChange`, `CollabAgentToolCall`
-(`CODEX_TOOL_ITEM_TYPES`, `usage-parsers.mjs:1002-1008`, tallied at this
-call: `CODEX_TOOL_ITEM_TYPES.has(decoded.unknownItemType)` — `usage-parsers.mjs:1031-1042`) —
+`usage-parsers.mjs:616-627`). Codex's five tallied item types —
+`CommandExecution`, `McpToolCall`, `FileChange`, `CollabAgentToolCall`,
+`DynamicToolCall` (`CODEX_TOOL_ITEM_TYPES`, `usage-parsers.mjs:1017-1023`, tallied at this
+call: `CODEX_TOOL_ITEM_TYPES.has(decoded.unknownItemType)` — `usage-parsers.mjs:1069-1080`) —
 keep those exact spellings in the ranking. Mapping `CommandExecution` onto
 `Bash`, or `FileChange` onto `Edit`, would be a claim about equivalence that
 neither host makes: the vocabularies are host-specific, the semantics do not
 line up one-to-one, and a renamed row would quietly assert a correspondence no
-evidence supports. Every other Codex item type is left to the unknown-item
-diagnostic rather than tallied as a tool. The tail is **folded, never dropped**
+evidence supports. The item types the host is known to emit that are not tools
+(`Reasoning`, `SubAgentActivity`, `ImageView`, `Extension`, `WebSearch`,
+`ContextCompaction`, `FunctionCallOutput`) are recognised and dropped; only a type in
+neither set reaches the unknown-item diagnostic, and none is tallied as a tool. The tail is **folded, never dropped**
 — a top-8 list that silently loses the rest misstates the total every share
 above it is read against — and the fold row is dimmed because `Other` is a
 residue, not a tool.
@@ -2262,16 +2286,20 @@ commit `540be18` in the historical fix.
 
 `parseCodex`'s single `addUsage()` call never included a `responses` field —
 Claude's parser passes `responses: 1` per API message at this call:
-`usage-parsers.mjs:657` (the current equivalent), but Codex's call
+`usage-parsers.mjs:666` (the current equivalent), but Codex's call
 passed no such field at all. Because `byModel[model].responses` is summed
 directly from each usage row's `responses` field (`usage-aggregate.mjs:771-774`,
 `m.responses += row.responses`), **every** Codex model in §10's Models-in-Play
 list displayed `0 resp` regardless of real token/cost volume or actual
 `agent_message` count. **Fix:** parseCodex now passes `responses:
 rec.responses` (the session's own tallied response count, inside
-`finalizeCodexUsage`, `usage-parsers.mjs:1072-1089`) on its `addUsage()` call.
+`finalizeCodexUsage`, `usage-parsers.mjs:1113-1160`) on its `addUsage()` call.
 
 #### Bug B — subagent thread-replay could double-bill tokens
+
+*Background on the first fix. It has since been refined: a forked subagent now reports its
+own usage with only the replay excluded (§16.2, ADR-0052); the record below describes the
+earlier, all-or-nothing behaviour and the evidence that motivated it.*
 
 Codex CLI's `thread_spawn` subagent-delegation mechanism writes a rollout
 file for the spawned subagent that **replays its parent thread's entire
@@ -2294,10 +2322,10 @@ confirmed as a real Codex rollout field by **[C7]**) and skips the
 `addUsage()` call entirely when its value is `'subagent'` —
 `finalizeCodexUsage` returns early at this call:
 `if (!lastUsage || rec.threadSource === 'subagent')`
-(`usage-parsers.mjs:1072-1078`). The session record itself is **not**
+(`usage-parsers.mjs:1113-1150`). The session record itself is **not**
 dropped — it remains visible in the Sessions tab with `threadSource`
 surfaced (mirroring the existing `sidechain` flag Claude sessions already
-carry, `usage-parsers.mjs:737-740`), so a maintainer auditing the raw data can
+carry, `usage-parsers.mjs:746-749`), so a maintainer auditing the raw data can
 still see it; it simply contributes zero tokens/cost, exactly as intended by
 the "models still shows up in §10's list, with zero cost" mechanism §10
 describes.
@@ -2359,7 +2387,7 @@ parity: it does not apply ledger fallback or allocate costs per turn/day/model.
   `byModel` on the first run after the change, purely because the cache
   predated it; every unit test still passed, since tests only exercise a
   fresh parse. `SCHEMA_VERSION` went to `4` specifically to force the one-time
-  re-parse; the constant now reads `22` (`usage-index.mjs:161`), each bump since
+  re-parse; the constant now reads `22` (`usage-index.mjs:162`), each bump since
   having forced its own re-parse the same way.
   Re-querying the same live server after the bump returned
   `totals.exceptions: 20` with `<synthetic>` absent from `byModel` —

@@ -48,6 +48,7 @@ import {
   MAX_TELEMETRY_UNKNOWN_KINDS, recordTelemetryUnit,
 } from './usage-telemetry.mjs';
 import { parseClaude, parseCodex } from './usage-parsers.mjs';
+import { openCodexRollout } from './codex-rollout-reader.mjs';
 import { maskSecrets, applyCodexLedger, aggregate, sessionPayload } from './usage-aggregate.mjs';
 
 export { IDLE_GAP_MS, projectLabel } from './usage-parsers.mjs';
@@ -158,7 +159,14 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
 // v21 Claude record carries tokens, cost, responses, punchcard and context
 // samples inflated ~2-3x and must be re-parsed. It also retains the 1-hour
 // cache-write split (`cacheWrite1h` on usage rows) so those writes price at 2x.
-export const SCHEMA_VERSION = 22;
+// v23 corrects Codex attribution (ADR-0052). Cached v22 Codex records (and the
+// `parseStats` beside them) carry: imported Claude sessions counted as native
+// Codex ones; subagent usage stripped to zero; replayed parent history in
+// subagent prompts/responses/context samples; last-wins totals that lose every
+// segment before a mid-file counter reset; one day and one model for a whole
+// session; and permanent unknown-item-type diagnostics for known non-tool
+// items. None can be corrected in place, so every cached record re-parses.
+export const SCHEMA_VERSION = 23;
 
 const DAY_MS = 86_400_000;
 // One day of slack past dashboard-server.mjs's 365-day clampDays ceiling —
@@ -243,10 +251,10 @@ function rootHealth(dir) {
 
 function emptyCodexDiagnostics() {
   return {
-    files: 0, cachedFiles: 0, parsedFiles: 0, unparsedFiles: 0,
+    files: 0, cachedFiles: 0, parsedFiles: 0, unparsedFiles: 0, unparsedReasons: {}, importedExcluded: 0,
     filesWithTokens: 0, filesWithResponses: 0,
     legacyEvents: 0, itemCompletedEvents: 0, tokenCountEvents: 0,
-    prompts: 0, responses: 0, unknownItemTypes: {}, unknownItemTypeOverflow: 0, warnings: [],
+    prompts: 0, responses: 0, unknownItemTypes: {}, unknownItemTypeOverflow: 0, clippedLines: 0, warnings: [],
   };
 }
 
@@ -260,6 +268,7 @@ function addCodexParseDiagnostics(target, stats) {
   target.tokenCountEvents += stats.tokenCountEvents;
   target.prompts += stats.prompts;
   target.responses += stats.responses;
+  target.clippedLines += stats.clippedLines ?? 0;
   for (const [type, count] of Object.entries(stats.unknownItemTypes ?? {})) {
     if (Object.hasOwn(target.unknownItemTypes, type)) {
       target.unknownItemTypes[type] += count;
@@ -281,6 +290,10 @@ function finalizeCodexHealth(root, diagnostics) {
   if (Object.keys(diagnostics.unknownItemTypes).length || diagnostics.unknownItemTypeOverflow > 0) {
     warnings.push('unknown-item-types');
   }
+  // A rollout that could not be read or parsed at all contributes NOTHING to
+  // the scorecard, so it is named here rather than left as a bare counter.
+  if (diagnostics.unparsedFiles > 0) warnings.push('unparsed-rollouts');
+  if (diagnostics.clippedLines > 0) warnings.push('oversized-lines-clipped');
   diagnostics.warnings = warnings;
   const hasYieldWarning = warnings.includes('zero-response-yield') || warnings.includes('partial-response-yield');
   const status = root.status === 'ok' && hasYieldWarning
@@ -405,7 +418,36 @@ function codexIdFromName(name) {
 // codex/claude 2-way ternary silently mis-files anything unrecognized as
 // claude; an entry this module doesn't know how to parse must be declined
 // (same contract as a parse failure), never mis-labeled.
-function parseFile(entry) {
+/** Rollouts up to this size are read whole (the fast path, byte-for-byte what
+ *  this always did); larger ones stream. `fs.readFileSync(_, 'utf8')` throws
+ *  ERR_STRING_TOO_LONG near 512 MB, and JSON-expanding a big string is a
+ *  memory spike, so the cut sits well below both. */
+const SMALL_ROLLOUT_BYTES = 128 * 1024 * 1024;
+
+/** A file-system error code names a read failure; anything else thrown while
+ *  parsing is the parser's. */
+const failureReason = (err) => (typeof err?.code === 'string' && err.code.startsWith('E') ? 'read-error' : 'parse-error');
+
+/** Parse one Codex rollout, whole-string when small and streamed when large.
+ *  On failure returns null and says why in `sink.reason`, so the scan can
+ *  report the file as unparsed WITH a reason instead of dropping it silently. */
+function parseCodexFile(entry, sink, limits) {
+  let source;
+  try {
+    const size = entry.stat?.size ?? fs.statSync(entry.file).size;
+    source = size > (limits.streamAboveBytes ?? SMALL_ROLLOUT_BYTES)
+      ? openCodexRollout(entry.file, limits)
+      : fs.readFileSync(entry.file, 'utf8');
+  } catch { sink.reason = 'read-error'; return null; }
+  try {
+    return parseCodex(source, { id: entry.id });
+  } catch (err) {
+    sink.reason = failureReason(err);
+    return null; // a parser bug must not cost the user their whole index
+  }
+}
+
+function parseFile(entry, sink = {}, limits = {}) {
   if (entry.provider === 'opencode') {
     try {
       const parsed = parseOpencodeSession({ dbFile: entry.dbFile, id: entry.id });
@@ -415,13 +457,12 @@ function parseFile(entry) {
       return parsed;
     } catch { return null; } // a parser bug must not cost the user their whole index
   }
-  if (entry.provider !== 'codex' && entry.provider !== 'claude') return null;
+  if (entry.provider === 'codex') return parseCodexFile(entry, sink, limits);
+  if (entry.provider !== 'claude') return null;
   let raw;
   try { raw = fs.readFileSync(entry.file, 'utf8'); } catch { return null; }
   try {
-    return entry.provider === 'codex'
-      ? parseCodex(raw, { id: entry.id })
-      : parseClaude(raw, { id: entry.id, dirName: entry.dirName });
+    return parseClaude(raw, { id: entry.id, dirName: entry.dirName });
   } catch {
     return null; // a parser bug must not cost the user their whole index
   }
@@ -568,6 +609,9 @@ function notify(onProgress, payload) {
  * @property {Function} [onProgress] called with { scanned, total, phase }
  * @property {{claude?: string, codex?: string, opencode?: string}} [roots] override transcript roots (tests; opencode = the SQLite store path)
  * @property {string} [cachePath]   override the index cache location (tests)
+ * @property {{streamAboveBytes?: number, chunkBytes?: number, maxLineBytes?: number}} [readLimits]
+ *           override where a Codex rollout switches from a whole-string read to
+ *           the bounded streaming reader, and that reader's chunk/line limits (tests)
  * @property {number} [now]         override "now" (tests)
  * @property {number} [maxAgeMs]    readIndex only: memo TTL
  * @property {object|null} [codexState] override the Codex SQLite thread ledger
@@ -617,25 +661,45 @@ function discoverOpencodeSource(rawRoots, cutoff) {
   return { health: { status: 'ok', reason: null }, candidates, ocDb };
 }
 
+/** Codex's own per-file bookkeeping for one scan candidate: file counts, the
+ *  parse-yield diagnostics, and — for a file that yielded no record — why. An
+ *  imported Claude session (ADR-0052) carries none of Codex's own activity: it
+ *  is counted (`importedExcluded`) and kept out of every Codex statistic.
+ *  Returns false for such an import so the caller skips the common telemetry
+ *  units too. */
+function recordCodexCandidate(codexDiagnostics, { session, parseStats, cacheHit, failure }) {
+  codexDiagnostics.files++;
+  if (cacheHit) codexDiagnostics.cachedFiles++;
+  if (session?.imported === true) { codexDiagnostics.importedExcluded++; return false; }
+  if (session) { addCodexParseDiagnostics(codexDiagnostics, parseStats); return true; }
+  codexDiagnostics.unparsedFiles++;
+  const reason = failure.reason ?? 'parse-error';
+  codexDiagnostics.unparsedReasons[reason] = (codexDiagnostics.unparsedReasons[reason] ?? 0) + 1;
+  return true;
+}
+
 /** Parse (or reuse the cached parse of) one scan candidate, updating the
  *  common cross-host telemetry diagnostics and codex's extra per-file
  *  diagnostics as side effects. Pulled out of scan()'s loop so the per-file
  *  bookkeeping — which is genuinely provider-specific (codex tracks file
  *  counts and yield diagnostics no other source has) — is not inlined into
  *  the generic scan loop's own complexity. */
-function processCandidate(c, cache, commonDiagnostics, codexDiagnostics) {
+function processCandidate(c, cache, commonDiagnostics, codexDiagnostics, readLimits = {}) {
   const key = { mtime: c.stat.mtimeMs, size: c.stat.size };
   const hit = cache?.entries?.[c.file];
   const cacheHit = !!(hit && hit.mtime === key.mtime && hit.size === key.size
     && (c.provider !== 'codex' || hit.parseStats));
   let session = cacheHit ? hit.session : null;
   let parseStats = cacheHit ? hit.parseStats : null;
+  const failure = {};
   if (!session) {
-    const parsed = parseFile(c);
+    const parsed = parseFile(c, failure, readLimits);
     session = parsed ? parsed.session : null;
     parseStats = parsed?.parseStats ?? null;
   }
-  if (commonDiagnostics[c.provider]) {
+  const counted = c.provider !== 'codex'
+    || recordCodexCandidate(codexDiagnostics, { session, parseStats, cacheHit, failure });
+  if (counted && commonDiagnostics[c.provider]) {
     recordTelemetryUnit(commonDiagnostics[c.provider], session);
     if (c.provider === 'codex') {
       addTelemetryDiagnostics(commonDiagnostics.codex, {
@@ -643,12 +707,6 @@ function processCandidate(c, cache, commonDiagnostics, codexDiagnostics) {
         unknownKindOverflow: parseStats?.unknownItemTypeOverflow,
       });
     }
-  }
-  if (c.provider === 'codex') {
-    codexDiagnostics.files++;
-    if (cacheHit) codexDiagnostics.cachedFiles++;
-    if (session) addCodexParseDiagnostics(codexDiagnostics, parseStats);
-    else codexDiagnostics.unparsedFiles++;
   }
   return { key, session, parseStats };
 }
@@ -741,7 +799,7 @@ function resolveCodexLedger(o, rawRoots) {
 async function scan(o = {}) {
   const {
     days = 14, lookbackDays, force = false, onProgress, roots, cachePath, now = Date.now(), deps: injected,
-    previous = false, prompts = false,
+    previous = false, prompts = false, readLimits = {},
   } = o;
   const deps = await loadDeps(injected);
   const r = { ...defaultRoots(), ...(roots ?? {}) };
@@ -784,14 +842,14 @@ async function scan(o = {}) {
 
   notify(onProgress, { scanned: 0, total, phase: 'scan' });
   for (const c of candidates) {
-    const { key, session, parseStats } = processCandidate(c, cache, commonDiagnostics, codexDiagnostics);
+    const { key, session, parseStats } = processCandidate(c, cache, commonDiagnostics, codexDiagnostics, readLimits);
     if (session) {
       entries[c.file] = {
         ...key, session,
         ...(parseStats ? { parseStats } : {}),
         ...(c.dbFile ? { dbFile: c.dbFile } : {}),
       };
-      records.push(session);
+      if (!session.imported) records.push(session);
     }
     scanned++;
     if (scanned % 100 === 0) notify(onProgress, { scanned, total, phase: 'scan' });

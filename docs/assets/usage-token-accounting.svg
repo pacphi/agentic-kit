@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="880" height="456" viewBox="0 0 880 456"
      role="img" aria-labelledby="fig-title fig-desc">
   <title id="fig-title">Two token vocabularies: per-turn deltas vs cumulative snapshots</title>
-  <desc id="fig-desc">Claude Code reports a usage delta on every assistant turn, so a session total is the sum of the turns; Codex CLI reports a cumulative token_count snapshot, so a session total is the last snapshot and summing the snapshots double-counts.</desc>
+  <desc id="fig-desc">Claude Code reports a usage delta on every assistant turn, so a session total is the sum of the turns; Codex CLI reports a cumulative token_count snapshot, so a session total is the last snapshot (a restart of the counter starts a new segment) and summing the snapshots double-counts; a subagent counts only what follows its replayed parent history.</desc>
   <style>
     svg { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
     :root {
@@ -122,6 +122,6 @@
   <rect class="callout" x="16.75" y="366.75" width="846.5" height="37.5" rx="6"/>
   <text class="small" x="32" y="390">summing snapshots double-counts: <tspan class="mono num">10k + 25k + 40k = 75k ≠ 40k</tspan> — never sum cumulative totals</text>
 
-  <text class="small tm" x="32" y="424"><tspan class="mono">session_meta</tspan> <tspan class="mono">thread_source: "subagent"</tspan> ⇒ the whole rollout is a <tspan class="mono">thread_spawn</tspan> replay of the</text>
-  <text class="small tm" x="32" y="440">parent's spend — excluded from aggregation, session kept visible</text>
+  <text class="small tm" x="32" y="424"><tspan class="mono">session_meta</tspan> <tspan class="mono">thread_source: "subagent"</tspan> ⇒ the rollout first replays the parent's history; only the</text>
+  <text class="small tm" x="32" y="440">events after the replay are its own — its tokens = final snapshot minus the total at the end of the replay</text>
 </svg>

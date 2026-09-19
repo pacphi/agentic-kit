@@ -138,10 +138,10 @@ test('parseCodex normalizes current item_completed messages and exposes bounded 
   // genuinely new shapes.
   assert.equal(s.tools.CommandExecution, 1, 'tallied as the tool it is');
   assert.deepEqual(agg.sourceHealth.codex.diagnostics, {
-    files: 1, cachedFiles: 0, parsedFiles: 1, unparsedFiles: 0,
+    files: 1, cachedFiles: 0, parsedFiles: 1, unparsedFiles: 0, unparsedReasons: {}, importedExcluded: 0,
     filesWithTokens: 1, filesWithResponses: 1,
     legacyEvents: 0, itemCompletedEvents: 3, tokenCountEvents: 1,
-    prompts: 1, responses: 1, unknownItemTypes: {}, unknownItemTypeOverflow: 0,
+    prompts: 1, responses: 1, unknownItemTypes: {}, unknownItemTypeOverflow: 0, clippedLines: 0,
     warnings: [],
     common: {
       unitsSeen: 1, unitsParsed: 1, unitsWithUsage: 1,

@@ -13,6 +13,10 @@ import { createHash } from 'node:crypto';
 import { repoRoot } from './paths.mjs';
 import { MAX_TELEMETRY_UNKNOWN_KINDS } from './usage-telemetry.mjs';
 import { decodeClaudeRecord, decodeCodexRecord } from './telemetry-records.mjs';
+import { codexReplayPlan, isCodexReplayLine } from './codex-replay.mjs';
+import {
+  newCodexUsageWalk, noteCodexWalkModel, noteCodexWalkResponse, walkCodexTokenCount, codexWalkRows,
+} from './codex-usage-walk.mjs';
 import { toMs, maskSecrets } from './usage-aggregate.mjs';
 import { normalizeMode } from './usage-modes.mjs';
 import { provenanceOf } from './usage-provenance.mjs';
@@ -172,10 +176,17 @@ function applyProject(rec, res) {
 
 /** Split JSONL into parsed objects, skipping anything that will not parse. */
 function* jsonLines(raw) {
-  for (const line of raw.split('\n')) {
-    if (!line || line.charCodeAt(0) !== 123 /* '{' */) continue;
+  // Scanned lazily, not split up front: a caller that needs only the first
+  // line (the subagent replay pre-pass) must not pay for the whole file.
+  let pos = 0;
+  while (pos < raw.length) {
+    const found = raw.indexOf('\n', pos);
+    const end = found < 0 ? raw.length : found;
+    const start = pos;
+    pos = end + 1;
+    if (end === start || raw.charCodeAt(start) !== 123 /* '{' */) continue;
     let obj;
-    try { obj = JSON.parse(line); } catch { continue; }
+    try { obj = JSON.parse(raw.slice(start, end)); } catch { continue; }
     if (obj && typeof obj === 'object') yield obj;
   }
 }
@@ -767,6 +778,9 @@ function codexParseStats() {
   return {
     legacyEvents: 0, itemCompletedEvents: 0, tokenCountEvents: 0,
     prompts: 0, responses: 0, unknownItemTypes: {}, unknownItemTypeOverflow: 0,
+    // Oversized rollout lines the streaming reader clipped instead of parsing
+    // (codex-rollout-reader.mjs); always 0 for a rollout read as a string.
+    clippedLines: 0,
   };
 }
 
@@ -879,12 +893,16 @@ function applyCodexRateLimit(rec, rl, ms) {
   };
 }
 
-/** `event_msg` → `token_count`: keep the LAST cumulative snapshot (see
- *  parseCodex's own doc comment for why last-only), plus its rate limits. */
-function handleCodexTokenCount(rec, stats, usageState, decoded, ms) {
+/** `event_msg` → `token_count`: fold the cumulative snapshot into the usage
+ *  walk (codex-usage-walk.mjs — a per-event delta booked on the event's day
+ *  and model, restarts of the counter starting a new segment), plus its context
+ *  sample and rate limits. A REPLAYED snapshot (a forked subagent's copy of its
+ *  parent's history) only advances the walk's running total — it is neither the
+ *  thread's own usage nor a context or rate-limit observation of it. */
+function handleCodexTokenCount(rec, stats, usageState, decoded, ms, replay) {
   stats.tokenCountEvents++;
-  const t = decoded.usage.total;
-  if (t) { usageState.lastUsage = t; usageState.lastUsageAt = ms; }
+  walkCodexTokenCount(usageState.walk, decoded.usage.total, ms, replay, localDay);
+  if (replay) return;
   // last.input_tokens is already gross prompt input. cached_input_tokens is a
   // subset, not an additional amount (unlike Claude/OpenCode's split fields).
   noteContextSample(rec, decoded.usage.last?.input_tokens, decoded.usage.contextWindow);
@@ -949,12 +967,12 @@ function isCodexHumanMessage(text) {
  *  parseClaude keeps a harness-origin "user" entry's turn row) — but only a
  *  genuinely human one (isCodexHumanMessage) counts toward `rec.prompts`,
  *  sets the session title, or opens the prompt→agent-message latency
- *  window. `stats.prompts` stays a raw per-event-shape diagnostic,
- *  deliberately ungated: it answers "how many user_message-shaped events did
- *  this file carry", which is a different, still-useful question from "how
- *  many were human". */
-function handleCodexUserMessage(rec, turns, stats, titleState, latState, decoded, ms, withTurns) {
-  stats.prompts++;
+ *  window. `stats.prompts` (counted in handleCodexEventMsg) stays a raw
+ *  per-event-shape diagnostic, deliberately ungated: it answers "how many
+ *  user_message-shaped events did this file carry", which is a different,
+ *  still-useful question from "how many were human" — or how many were the
+ *  thread's own rather than a replayed parent's. */
+function handleCodexUserMessage(rec, turns, titleState, latState, decoded, ms, withTurns) {
   const text = decoded.text;
   const human = isCodexHumanMessage(text);
   if (human) {
@@ -976,9 +994,8 @@ function handleCodexUserMessage(rec, turns, stats, titleState, latState, decoded
   }
 }
 
-function handleCodexAssistantMessage(rec, turns, stats, latState, decoded, ms, withTurns) {
+function handleCodexAssistantMessage(rec, turns, latState, decoded, ms, withTurns) {
   rec.responses++;
-  stats.responses++;
   const at = Number.isFinite(ms) ? ms : (rec.start ?? Date.now());
   const pk = punchKey(at);
   rec.punchcard[pk] = (rec.punchcard[pk] ?? 0) + 1;
@@ -1001,28 +1018,51 @@ function handleCodexAssistantMessage(rec, turns, stats, latState, decoded, ms, w
 
 /** `event_msg` → a decoded `message` (user or assistant), after generation/
  *  unknown-type bookkeeping already ran in handleCodexEventMsg. */
-function handleCodexEventMessage(rec, turns, stats, titleState, latState, decoded, ms, withTurns) {
+function handleCodexEventMessage(rec, turns, titleState, latState, decoded, ms, withTurns) {
   if (decoded.role === 'user') {
-    handleCodexUserMessage(rec, turns, stats, titleState, latState, decoded, ms, withTurns);
+    handleCodexUserMessage(rec, turns, titleState, latState, decoded, ms, withTurns);
     return;
   }
-  handleCodexAssistantMessage(rec, turns, stats, latState, decoded, ms, withTurns);
+  handleCodexAssistantMessage(rec, turns, latState, decoded, ms, withTurns);
 }
 
-/** The four Codex `item_completed` item types this parser tallies into
+/** The Codex `item_completed` item types this parser tallies into
  *  `rec.tools`, keyed by the item's OWN type name — never renamed to Claude
  *  tool names. Codex's tool vocabulary is host-specific and the UI ranks
  *  names as-is. Every other item type (including UserMessage/AgentMessage,
  *  already handled as messages) is left to the unknownItemType diagnostic
  *  only, not tallied as a tool. */
-const CODEX_TOOL_ITEM_TYPES = new Set(['CommandExecution', 'McpToolCall', 'FileChange', 'CollabAgentToolCall']);
+const CODEX_TOOL_ITEM_TYPES = new Set([
+  'CommandExecution', 'McpToolCall', 'FileChange', 'CollabAgentToolCall',
+  // A codex_app tool call (namespace/tool/arguments) — first seen on a real
+  // corpus after the ADR-0052 audit; the sibling of McpToolCall.
+  'DynamicToolCall',
+]);
+
+/** `item_completed` item types the host emits that are UNDERSTOOD and are
+ *  neither a message nor a tool: model reasoning, sub-agent lifecycle notes,
+ *  image views, extension calls, web searches and context compaction. They
+ *  carry no usage or turn evidence this parser needs, so they are recognised
+ *  and dropped. Without this list every scan raised the `unknown-item-types`
+ *  warning permanently (six kinds landed in the 32-kind cap), which taught
+ *  readers to ignore the one diagnostic meant to flag a genuinely new shape.
+ *  Only a type in NEITHER set is unknown. */
+const CODEX_KNOWN_NON_TOOL_ITEM_TYPES = new Set([
+  'Reasoning', 'SubAgentActivity', 'ImageView', 'Extension', 'WebSearch', 'ContextCompaction',
+  // The paired output of a codex_app function call (name/namespace/output).
+  'FunctionCallOutput',
+]);
 
 /** One `event_msg` record: token_count, a lifecycle event (task_started/
  *  task_complete/turn_aborted), a message, or unknown (generation/unknown-
  *  item-type diagnostics apply to every non-token_count/non-lifecycle shape,
  *  so they run before the message/non-message split). */
-function handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState, decoded, payload, ms, withTurns) {
-  if (decoded.type === 'tokenCount') { handleCodexTokenCount(rec, stats, usageState, decoded, ms); return; }
+function handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState, decoded, payload, ms, withTurns, replay) {
+  if (decoded.type === 'tokenCount') { handleCodexTokenCount(rec, stats, usageState, decoded, ms, replay); return; }
+  // Lifecycle events of REPLAYED history are the parent's turns, not this
+  // thread's: they must not open latency windows, sample a context window or
+  // count the parent's aborts against the child.
+  if (replay && ['task_started', 'task_complete', 'turn_aborted'].includes(payload.type)) return;
   if (payload.type === 'task_started') { handleCodexTaskStarted(rec, latState, payload); return; }
   if (payload.type === 'task_complete') { handleCodexTaskComplete(rec, latState, payload); return; }
   if (payload.type === 'turn_aborted') {
@@ -1047,13 +1087,16 @@ function handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState
     // shapes. (The field is named unknownItemType because the DECODER, which
     // has no tool vocabulary, does not normalize these to messages.)
     if (CODEX_TOOL_ITEM_TYPES.has(decoded.unknownItemType)) {
-      rec.tools[decoded.unknownItemType] = (rec.tools[decoded.unknownItemType] ?? 0) + 1;
-    } else {
+      if (!replay) rec.tools[decoded.unknownItemType] = (rec.tools[decoded.unknownItemType] ?? 0) + 1;
+    } else if (!CODEX_KNOWN_NON_TOOL_ITEM_TYPES.has(decoded.unknownItemType)) {
       recordCodexUnknownType(stats, decoded.unknownItemType);
     }
   }
   if (decoded.type !== 'message') return;
-  handleCodexEventMessage(rec, turns, stats, titleState, latState, decoded, ms, withTurns);
+  if (decoded.role === 'user') stats.prompts++; else stats.responses++;
+  if (replay) return;
+  if (decoded.role !== 'user') noteCodexWalkResponse(usageState.walk, ms, localDay);
+  handleCodexEventMessage(rec, turns, titleState, latState, decoded, ms, withTurns);
 }
 
 /** Raw payload of one rollout line, defensively defaulted — mirrors
@@ -1070,55 +1113,103 @@ function rawPayload(e) {
 function processCodexLine(rec, turns, stats, titleState, usageState, latState, metaState, e, ms, withTurns) {
   const decoded = decodeCodexRecord(e);
   if (decoded.type === 'meta') { handleCodexMeta(rec, metaState, decoded); return; }
-  if (decoded.type === 'turnContext') { handleCodexTurnContext(rec, decoded, rawPayload(e)); return; }
+  if (decoded.type === 'turnContext') {
+    handleCodexTurnContext(rec, decoded, rawPayload(e));
+    noteCodexWalkModel(usageState.walk, decoded.model);
+    return;
+  }
   if (e.type !== 'event_msg') return;
-  handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState, decoded, rawPayload(e), ms, withTurns);
+  const replay = isCodexReplayLine(usageState.boundary, e);
+  handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState, decoded, rawPayload(e), ms, withTurns, replay);
 }
 
-/** The session-total usage row, derived from the LAST token_count event seen
- *  (see parseCodex's doc comment). A no-op for a subagent thread (its
- *  cumulative total double-counts the parent's already-billed tokens) or a
- *  rollout that never carried a token_count at all. */
-function finalizeCodexUsage(rec, usageState) {
-  const { lastUsage, lastUsageAt } = usageState;
-  if (!lastUsage || rec.threadSource === 'subagent') return;
-  const cacheRead = Number(lastUsage.cached_input_tokens) || 0;
-  const gross = Number(lastUsage.input_tokens) || 0;
-  const at = Number.isFinite(lastUsageAt) ? lastUsageAt : (rec.end ?? rec.start ?? Date.now());
-  addUsage(rec, localDay(at), rec.models[rec.models.length - 1] ?? 'unknown', {
-    input: Math.max(0, gross - cacheRead),
-    output: Number(lastUsage.output_tokens) || 0,
-    cacheRead,
-    cacheWrite: 0,
-    responses: rec.responses,
+/** Codex can import a Claude Code transcript as a thread. The host stamps such
+ *  a rollout's turns `external-import-turn-N` (measured: 796 imports, every one
+ *  carrying it from its first task_started, none of a native thread). The
+ *  in-rollout marker is the signal — the host's imports file is deliberately
+ *  not read, so detection works without it. */
+const CODEX_IMPORT_TURN_PREFIX = 'external-import-turn';
+
+function isCodexImportedLine(e) {
+  const turnId = e?.payload?.turn_id;
+  return typeof turnId === 'string' && turnId.startsWith(CODEX_IMPORT_TURN_PREFIX);
+}
+
+/** The record for an imported rollout: identity only. The conversation's real
+ *  prompts, responses and tokens live in the Claude transcript it was imported
+ *  from (input_tokens 0, model 'unknown', $0 here), so counting them again as
+ *  Codex activity inflated Codex responses and prompts and diluted its
+ *  coverage figures. `imported` is set ONLY on these records, and the scan
+ *  reports how many it excluded (`importedExcluded`) rather than dropping them
+ *  silently. Parsing stops at the first imported line — nothing after it is
+ *  read. */
+function importedCodexSession(rec, stats) {
+  rec.imported = true;
+  rec.title = '(imported Claude session)';
+  return { session: seal(rec), turns: [], parseStats: { ...stats, imported: true } };
+}
+
+/** The session's usage rows, from the walk (codex-usage-walk.mjs): one per
+ *  (day, model) the thread actually spent tokens on, each token_count booked as
+ *  a delta on its own event's day and the model of the turn in effect. For a
+ *  single-day, single-model session without a counter restart that is one row
+ *  totalling the last cumulative snapshot, as before. A subagent's replay was
+ *  never booked (see codex-replay.mjs), so a subagent reports its OWN spend; a
+ *  rollout with no own token_count, or a pre-ordinal subagent whose replay
+ *  cannot be separated (`unattributable`), yields no rows. */
+function finalizeCodexUsage(rec, walk) {
+  const { rows, reasoningOutput } = codexWalkRows(walk, {
+    models: rec.models, fallbackMs: rec.end ?? rec.start ?? Date.now(), dayOf: localDay,
   });
+  for (const row of rows) addUsage(rec, row.day, row.model, row);
   // Reasoning tokens are a SUBSET of output_tokens (they bill as output) —
   // recorded as detail, never added into any token sum, or the total would
   // double-count exactly the reasoning share.
-  rec.reasoningOutput = Number(lastUsage.reasoning_output_tokens) || 0;
+  rec.reasoningOutput = reasoningOutput;
 }
 
 /**
- * Parse one Codex rollout. `total_token_usage` is CUMULATIVE, so the LAST
- * token_count event is the session total — summing them would multiply the
- * figure by the number of turns. `input_tokens` there INCLUDES
- * `cached_input_tokens`, which bill as cache reads, so the two are separated.
+ * Parse one Codex rollout. `total_token_usage` is CUMULATIVE, so each event's
+ * spend is its DELTA against the previous snapshot (summing the snapshots
+ * themselves would multiply the figure by the number of turns). A snapshot
+ * lower than its predecessor means the counter restarted; its delta is the
+ * whole snapshot. Each delta books on its own event's day and the model of the
+ * turn in effect (codex-usage-walk.mjs), and for a reset-free single-day,
+ * single-model session the deltas sum to the last snapshot. `input_tokens`
+ * there INCLUDES `cached_input_tokens`, which bill as cache reads, so the two
+ * are separated.
  *
  * A rollout whose `session_meta.thread_source` is `subagent` is a delegated
- * thread whose file replays its parent thread's ENTIRE prior token history
- * as duplicate events before its own new turns (openai/codex thread_spawn
- * behavior — see ccusage/ccusage#950, which measured up to 91x cost
- * inflation from exactly this). Its cumulative `total_token_usage` therefore
- * double-counts tokens the parent session already billed, so it is excluded
- * from cost/token aggregation here; the session record itself is kept
- * (`threadSource` is surfaced on it) so it stays visible/auditable.
+ * thread whose file may replay its parent thread's ENTIRE prior history
+ * (messages, tool runs, token snapshots) as duplicate events before its own
+ * new turns (openai/codex thread_spawn behavior — see ccusage/ccusage#950,
+ * which measured up to 91x cost inflation from counting exactly this). Its
+ * cumulative `total_token_usage` therefore includes tokens the parent already
+ * billed. codex-replay.mjs finds where the replay ends; everything before that
+ * ordinal is counted for nothing (no prompt, response, tool, context sample or
+ * usage), and the subagent reports its OWN tokens: the final cumulative total
+ * minus the total at the end of the replay. The record keeps `threadSource`,
+ * so its prompts stay out of human-prompt figures. A subagent whose replay
+ * cannot be separated (no ordinals at all) reports no usage, as before.
+ *
+ * A rollout Codex imported from a Claude Code transcript
+ * (`external-import-turn-N`) is not Codex activity at all — see
+ * importedCodexSession.
  */
 export function parseCodex(raw, { id, withTurns = false }) {
+  // `raw` is the rollout text, or a streaming source (openCodexRollout) for one
+  // too large to hold as a string: `{ head, lines, stats }`. Both feed the SAME
+  // walk below, so the two paths cannot drift.
+  const source = typeof raw === 'string'
+    ? { head: raw, lines: { [Symbol.iterator]: () => jsonLines(raw) } }
+    : raw;
   const rec = blankSession(id, 'codex');
-  rec.sessionOrigin = usageSessionOrigin(raw, 'codex');
+  rec.sessionOrigin = usageSessionOrigin(source.head, 'codex');
   const turns = [];
   const stats = codexParseStats();
-  const usageState = { lastUsage: null, lastUsageAt: null };
+  const lines = source.lines;
+  const plan = codexReplayPlan(lines);
+  const usageState = { walk: newCodexUsageWalk({ unattributable: plan.unprovable }), boundary: plan.boundary };
   const titleState = { firstPrompt: '' };
   // Opened by task_started (turn start remembered), closed either by a
   // prompt→agent-message gap sample or by task_complete's own duration_ms
@@ -1130,13 +1221,15 @@ export function parseCodex(raw, { id, withTurns = false }) {
   // follow a later (possibly replayed-parent) meta.
   const metaState = { seen: false };
 
-  for (const e of jsonLines(raw)) {
+  for (const e of lines) {
+    if (isCodexImportedLine(e)) return importedCodexSession(rec, stats);
     const ms = toMs(e.timestamp);
     noteSpan(rec, ms);
     processCodexLine(rec, turns, stats, titleState, usageState, latState, metaState, e, ms, withTurns);
   }
 
-  finalizeCodexUsage(rec, usageState);
+  finalizeCodexUsage(rec, usageState.walk);
+  stats.clippedLines = source.stats?.clippedLines ?? 0;
   rec.title = maskSecrets(clip(titleState.firstPrompt)) || '(untitled)';
   return { session: seal(rec), turns, parseStats: stats };
 }

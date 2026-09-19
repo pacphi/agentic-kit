@@ -53,13 +53,15 @@ previously-reported Codex CLI behavior:
   cost inflation in a real corpus (reported ~$9,041 against actual spend of
   ~$100).
 
-This project's parser took each Codex log file's final cumulative token
+This project's parser once took each Codex log file's final cumulative token
 count at face value, with no check for whether that file was a subagent
-replaying its parent's history. The fix reads the field Codex CLI itself
-writes to mark this (`session_meta.thread_source`) and excludes a
-`"subagent"`-sourced file's tokens/cost from every total — while still
-showing the session itself in the dashboard's session list, so nothing is
-silently hidden.
+replaying its parent's history. The dashboard now reads the field Codex CLI
+itself writes to mark a subagent (`session_meta.thread_source`) and the event
+ordinals that show where the replay ends, and counts only what follows: a
+subagent's own tokens are priced, its replayed parent history is not, and the
+session stays in the session list flagged as a subagent. This diagnostic script
+keeps the older, coarser comparison below — it removes whole subagent rollouts —
+so its "excluding subagents" total is the more conservative of the two.
 
 ## Why you can trust this without re-reading the diff
 
@@ -106,9 +108,12 @@ rollouts** removes sessions whose first metadata record says `thread_source:
 "subagent"`. The report gives the excluded token and estimated-cost percentages.
 Historical `beforeFix_allSessions` and `afterFix_excludingSubagentReplays` JSON
 keys remain for compatibility; they do not describe the current dashboard as buggy.
+Because the dashboard counts a subagent's own usage, its Codex total sits between
+these two figures rather than on the second one.
 
 The script reads complete local rollout files into memory and parses their JSON
-lines. It selects model, thread-source, cumulative token, and assistant-event
+lines. A rollout too large to hold as one string (about 512 MB) cannot be read and
+is counted as unparsed; the dashboard reads such files with a bounded-memory reader. It selects model, thread-source, cumulative token, and assistant-event
 fields. Both legacy `agent_message` and newer `item_completed` / `AgentMessage`
 responses qualify. First-session metadata takes precedence over later replayed
 metadata, including when that first record has no thread source.
@@ -120,7 +125,8 @@ scan root is `~/.codex/sessions`.
 
 This remains an **independent cumulative snapshot comparison**, not a second
 implementation of the dashboard. It does not read the Codex state ledger, split
-cumulative tokens across models or days, or analyze context. A missing thread
+cumulative tokens across models or days, sum a counter restart's segments,
+exclude sessions Codex imported from Claude Code, or analyze context. A missing thread
 source remains unknown and is included in totals. Both parsers currently use
 string-valued `thread_source`; this script does not infer object-shaped sources.
 Costs use the current maintained pricing snapshot, applied to each rollout's

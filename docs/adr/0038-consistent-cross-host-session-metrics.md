@@ -21,9 +21,41 @@ implemented. The remaining metrics, posture judgments, histogram bounds and
 main-thread denominators retain the rules below.
 
 Schema v11–v17 statements record the original migrations; the current usage cache
-was v20 under ADR-0050 and is v22 after the 2026-09-19 correction below. Its verified top-10 Git-project ranking is separate from
+was v20 under ADR-0050, v22 after the first 2026-09-19 correction below, and v23 after the second. Its verified top-10 Git-project ranking is separate from
 legacy label-keyed aggregates. September pricing work in ADR-0009/0032 supersedes
 the older deferred-rate-document discrepancy; this audit does not reprice data.
+
+## Correction (2026-09-19): Codex usage attribution
+
+An audit of the Codex parser against a real corpus found the Codex arithmetic this
+ADR stood on wrong in several places. The decisions are unchanged; the record of
+what was counted is corrected by [ADR-0052](0052-codex-usage-attribution.md):
+
+- **Subagents are not `$0`.** Decision 7 and the limitations below describe a Codex
+  subagent rollout read as `$0.00` "by ledger design". That withheld the
+  subagent's own spend (about 2.3B tokens, a third of Codex's total). A forked
+  subagent's replayed parent history is now excluded from its prompts, responses,
+  tools, context samples and usage, and its own tokens count. It stays flagged
+  `subagent`, so main-thread prompt denominators are unchanged. A `$0` Codex
+  subagent now means it spent nothing of its own (or came from a host that writes
+  no ordinals, whose replay cannot be separated).
+- **Imported sessions are excluded.** Claude Code sessions Codex imports as
+  threads (`external-import-turn-N`) are no longer counted as Codex sessions,
+  prompts or responses; they are counted in `diagnostics.importedExcluded`.
+- **Totals sum counter restarts and book per event.** "Only the last cumulative
+  snapshot is kept" is replaced by per-event deltas: a restart of the counter
+  starts a new segment, and each delta books on its own local day under the model
+  of the turn in effect, not the session's last day and model.
+- **Oversized rollouts are read.** A rollout above about 512 MB used to vanish
+  silently; larger-than-128 MiB rollouts now stream and any file that still cannot
+  be parsed is reported.
+- **Decision 9's tool list.** `DynamicToolCall` joins the tallied Codex tools;
+  known non-tool item types (`Reasoning`, `WebSearch`, `ImageView`, ...) no longer
+  raise the unknown-item-types diagnostic.
+
+The v13 statement that `session_meta` is first-wins stands, as does its subagent
+classification (409 raw = ledger = kit on the reference corpus). The usage cache
+is **v23**, so every cached Codex record re-parses.
 
 ## Correction (2026-09-19): Claude usage is counted once per API message
 
