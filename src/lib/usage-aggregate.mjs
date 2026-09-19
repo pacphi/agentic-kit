@@ -16,7 +16,7 @@ import { rowCostEvidence, sessionCostEvidence, acquisitionSummary } from './usag
 // none of them can close a cycle through here. They are pure arithmetic over
 // already-decoded fingerprints, which is exactly this module's own subject.
 import { PROVENANCE_TAGS } from './usage-provenance.mjs';
-import { buildContextProjection } from './usage-context.mjs';
+import { buildContextProjection, isSubagentSession } from './usage-context.mjs';
 import { buildUsageProjectGroups, buildUsageGitProjects } from './usage-project-groups.mjs';
 import {
   crossSessionClusters, exactRepeatGroups, nearDupClusters, reAskPairs,
@@ -930,7 +930,7 @@ function foldSessionIntoTree(tree, s) {
 /** Subagent work is either Claude's sidechain flag or Codex's ledger-backed
  *  thread source; both mean "not a session a human was driving". */
 function sourceKey(s) {
-  return s.sidechain || s.threadSource === 'subagent' ? 'subagent' : 'main';
+  return isSubagentSession(s) ? 'subagent' : 'main';
 }
 
 /** Second pass over the (now sorted) session rows: totals, the by-host/

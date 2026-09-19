@@ -170,7 +170,9 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
 // v24 pairs a main Claude session's context samples with the statusline's
 // context-window ledger (ADR-0042). A cached v23 record holds input-only
 // evidence that a ledger can now turn into pressure, and the ledger's own
-// stat (`wmtime`/`wsize`) joins the entry key, so every cached record re-parses.
+// stat (`wmtime`/`wsize`) joins the entry key. It also drops the duplicate
+// Codex context samples an identical repeated token_count added (~2.8% of
+// events), so every cached record re-parses.
 export const SCHEMA_VERSION = 24;
 
 const DAY_MS = 86_400_000;

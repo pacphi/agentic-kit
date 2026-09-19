@@ -14,6 +14,13 @@ export const CONTEXT_POLICY = CONTEXT_BUDGET_POLICY;
 export const CONTEXT_ATTENTION_LIMIT = 20;
 const HOSTS = Object.freeze(['claude', 'codex', 'opencode']);
 
+/** Subagent work is either Claude's sidechain flag or Codex's ledger-backed
+ *  thread source; both mean "not a session a human was driving". The one
+ *  definition shared with usage-aggregate's bySource split. */
+export function isSubagentSession(session) {
+  return !!(session?.sidechain || session?.threadSource === 'subagent');
+}
+
 const positive = (value) => Number.isFinite(Number(value)) && Number(value) > 0;
 const numberOrNull = (value) => value !== null && value !== undefined && Number.isFinite(Number(value))
   ? Number(value) : null;
@@ -160,22 +167,35 @@ function attentionRow(session) {
   };
 }
 
-/** Build the fixed-shape Context sibling returned with the Usage aggregate. */
+const foldByHost = (rows) => Object.fromEntries(HOSTS.map((host) => [host, fold(rows.filter((row) => row.host === host))]));
+
+/**
+ * Build the fixed-shape Context sibling returned with the Usage aggregate.
+ *
+ * The host cards, summary and attention list describe MAIN sessions — the ones
+ * a person drives. Delegated subagent sessions carry very different input
+ * sizes (audited: median peak input 56.8K for 531 main Claude sessions against
+ * 179.8K for 302 subagent ones), so pooling them produced a distribution that
+ * described neither. They are folded separately under `subagents`, and are
+ * input-only unless a real runtime window exists for them.
+ */
 export function buildContextProjection(sessions, { generatedAt = null, windowDays = null } = {}) {
   const rows = Array.isArray(sessions) ? sessions.filter((row) => row && typeof row === 'object') : [];
-  const byHost = Object.fromEntries(HOSTS.map((host) => [host, fold(rows.filter((row) => row.host === host))]));
-  const attention = rows.map(attentionRow).filter(Boolean).sort((a, b) =>
+  const main = rows.filter((row) => !isSubagentSession(row));
+  const subagents = rows.filter(isSubagentSession);
+  const attention = main.map(attentionRow).filter(Boolean).sort((a, b) =>
     (b.peakBps ?? -1) - (a.peakBps ?? -1)
       || (b.firstBps ?? -1) - (a.firstBps ?? -1)
       || a.id.localeCompare(b.id)).slice(0, CONTEXT_ATTENTION_LIMIT);
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     generatedAt: typeof generatedAt === 'string' ? generatedAt : null,
     windowDays: windowDays !== null && windowDays !== undefined && Number.isFinite(Number(windowDays))
       ? Number(windowDays) : null,
     policy: { ...CONTEXT_POLICY },
-    summary: fold(rows),
-    byHost,
+    summary: fold(main),
+    byHost: foldByHost(main),
+    subagents: { summary: fold(subagents), byHost: foldByHost(subagents) },
     attention,
   };
 }

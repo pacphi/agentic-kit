@@ -907,9 +907,18 @@ function handleCodexTokenCount(rec, stats, usageState, decoded, ms, replay) {
   stats.tokenCountEvents++;
   walkCodexTokenCount(usageState.walk, decoded.usage.total, ms, replay, localDay);
   if (replay) return;
-  // last.input_tokens is already gross prompt input. cached_input_tokens is a
-  // subset, not an additional amount (unlike Claude/OpenCode's split fields).
-  noteContextSample(rec, decoded.usage.last?.input_tokens, decoded.usage.contextWindow);
+  // Codex re-emits an identical token_count (measured: ~2.8% of events) with
+  // the SAME cumulative total when no new model call happened; that is a
+  // duplicate observation, not a second context sample. Only a repeated,
+  // present total is dropped — one that is absent is never treated as equal.
+  const totalKey = decoded.usage.total ? JSON.stringify(decoded.usage.total) : null;
+  const duplicate = totalKey !== null && totalKey === usageState.lastTotalKey;
+  usageState.lastTotalKey = totalKey;
+  if (!duplicate) {
+    // last.input_tokens is already gross prompt input. cached_input_tokens is a
+    // subset, not an additional amount (unlike Claude/OpenCode's split fields).
+    noteContextSample(rec, decoded.usage.last?.input_tokens, decoded.usage.contextWindow);
+  }
   const rl = decoded.usage.rateLimits;
   if (rl) applyCodexRateLimit(rec, rl, ms);
 }

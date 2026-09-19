@@ -50,7 +50,7 @@ test('buildContextProjection folds evidence and publishes bounded local navigati
     generatedAt: '2026-09-02T00:00:00.000Z', windowDays: 7,
   });
 
-  assert.equal(projection.schemaVersion, 2);
+  assert.equal(projection.schemaVersion, 3);
   assert.equal(projection.generatedAt, '2026-09-02T00:00:00.000Z');
   assert.equal(projection.windowDays, 7);
   assert.deepEqual(projection.policy, CONTEXT_POLICY);
@@ -154,4 +154,58 @@ test('aggregate exposes Context and projects immutable per-session evidence', ()
   projection.sessions[0].contextEvidence.input.first = 999;
   assert.equal(rec.contextEvidence.input.first, 25_000,
     'aggregate session rows never expose a mutable alias to cached parse records');
+});
+
+// ── main vs subagent split (audit C-5) ──────────────────────────────────────
+// Subagent work is Claude's sidechain flag or Codex's thread_source 'subagent'
+// (the same rule aggregate's bySource uses). Pooling it into one distribution
+// hid a 56.8K main median under a 179.8K subagent one.
+const inputOnly = (peak) => ({
+  schemaVersion: 1, state: 'partial',
+  input: { first: peak, last: peak, peak, samples: 1 }, window: null, pressure: null,
+});
+const row = (id, host, evidence, extra = {}) => ({
+  id, host, project: 'p', start: '2026-09-01T00:00:00.000Z', contextEvidence: evidence, ...extra,
+});
+
+test('host cards fold MAIN sessions only; subagents are a separate labelled summary', () => {
+  const projection = buildContextProjection([
+    row('m1', 'claude', inputOnly(50_000)), row('m2', 'claude', inputOnly(60_000)), row('m3', 'claude', inputOnly(70_000)),
+    row('s1', 'claude', inputOnly(180_000), { sidechain: true }),
+    row('s2', 'claude', inputOnly(190_000), { sidechain: true }),
+  ], { windowDays: 30 });
+  assert.equal(projection.schemaVersion, 3);
+  assert.equal(projection.byHost.claude.coverage.sessions, 3);
+  assert.equal(projection.byHost.claude.inputTokens.peak.median, 60_000, 'main median, not pooled');
+  assert.equal(projection.summary.coverage.sessions, 3);
+  assert.equal(projection.subagents.byHost.claude.coverage.sessions, 2);
+  assert.equal(projection.subagents.byHost.claude.inputTokens.peak.p90, 190_000);
+  assert.equal(projection.subagents.summary.coverage.sessions, 2);
+  assert.equal(projection.subagents.byHost.claude.pressureBps.peak, null, 'input-only unless a window exists');
+});
+
+test('Codex thread_source subagent sessions split the same way and keep their own pressure', () => {
+  const projection = buildContextProjection([
+    row('main', 'codex', observed({ first: 1, last: 2, peak: 10_000, window: 100_000, firstBps: 100, lastBps: 200, peakBps: 1_000 })),
+    row('sub', 'codex', observed({ first: 1, last: 2, peak: 90_000, window: 100_000, firstBps: 100, lastBps: 200, peakBps: 9_000 }),
+      { threadSource: 'subagent' }),
+  ]);
+  assert.equal(projection.byHost.codex.coverage.sessions, 1);
+  assert.equal(projection.byHost.codex.pressureBps.peak.p90, 1_000, 'a subagent spike never inflates the main card');
+  assert.equal(projection.subagents.byHost.codex.pressureBps.peak.p90, 9_000);
+});
+
+test('attention lists sessions a person drives: subagent sessions are excluded', () => {
+  const hot = observed({ first: 1, last: 2, peak: 95_000, window: 100_000, firstBps: 100, lastBps: 200, peakBps: 9_500 });
+  const projection = buildContextProjection([
+    row('main', 'codex', hot), row('sub', 'codex', hot, { threadSource: 'subagent' }), row('side', 'claude', hot, { sidechain: true }),
+  ]);
+  assert.deepEqual(projection.attention.map((a) => a.id), ['main']);
+});
+
+test('with no subagent sessions the secondary summary is present and empty', () => {
+  const projection = buildContextProjection([row('m1', 'claude', inputOnly(1))]);
+  assert.equal(projection.subagents.summary.coverage.sessions, 0);
+  assert.equal(projection.subagents.summary.coverage.state, 'not-observed');
+  assert.deepEqual(Object.keys(projection.subagents.byHost).sort(), ['claude', 'codex', 'opencode']);
 });
