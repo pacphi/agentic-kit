@@ -187,8 +187,8 @@ test('turn rows (reader path) are still emitted per transcript line', () => {
 
 // ── schema version ──────────────────────────────────────────────────────────
 
-test('SCHEMA_VERSION is 22 and a v21 cache is discarded and re-parsed de-duplicated', async () => {
-  assert.equal(SCHEMA_VERSION, 22, 'the de-dup correction changes every cached Claude record');
+test('SCHEMA_VERSION is at least 22 and a v21 cache is discarded and re-parsed de-duplicated', async () => {
+  assert.ok(SCHEMA_VERSION >= 22, 'the de-dup correction changes every cached Claude record');
   _resetForTest();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-dedup-'));
   const proj = path.join(dir, 'claude', '-Users-me-proj');

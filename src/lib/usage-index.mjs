@@ -158,7 +158,14 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
 // v21 Claude record carries tokens, cost, responses, punchcard and context
 // samples inflated ~2-3x and must be re-parsed. It also retains the 1-hour
 // cache-write split (`cacheWrite1h` on usage rows) so those writes price at 2x.
-export const SCHEMA_VERSION = 22;
+// v23 corrects Codex attribution (ADR-0052). Cached v22 Codex records (and the
+// `parseStats` beside them) carry: imported Claude sessions counted as native
+// Codex ones; subagent usage stripped to zero; replayed parent history in
+// subagent prompts/responses/context samples; last-wins totals that lose every
+// segment before a mid-file counter reset; one day and one model for a whole
+// session; and permanent unknown-item-type diagnostics for known non-tool
+// items. None can be corrected in place, so every cached record re-parses.
+export const SCHEMA_VERSION = 23;
 
 const DAY_MS = 86_400_000;
 // One day of slack past dashboard-server.mjs's 365-day clampDays ceiling —

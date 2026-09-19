@@ -1017,6 +1017,18 @@ function handleCodexEventMessage(rec, turns, stats, titleState, latState, decode
  *  only, not tallied as a tool. */
 const CODEX_TOOL_ITEM_TYPES = new Set(['CommandExecution', 'McpToolCall', 'FileChange', 'CollabAgentToolCall']);
 
+/** `item_completed` item types the host emits that are UNDERSTOOD and are
+ *  neither a message nor a tool: model reasoning, sub-agent lifecycle notes,
+ *  image views, extension calls, web searches and context compaction. They
+ *  carry no usage or turn evidence this parser needs, so they are recognised
+ *  and dropped. Without this list every scan raised the `unknown-item-types`
+ *  warning permanently (six kinds landed in the 32-kind cap), which taught
+ *  readers to ignore the one diagnostic meant to flag a genuinely new shape.
+ *  Only a type in NEITHER set is unknown. */
+const CODEX_KNOWN_NON_TOOL_ITEM_TYPES = new Set([
+  'Reasoning', 'SubAgentActivity', 'ImageView', 'Extension', 'WebSearch', 'ContextCompaction',
+]);
+
 /** One `event_msg` record: token_count, a lifecycle event (task_started/
  *  task_complete/turn_aborted), a message, or unknown (generation/unknown-
  *  item-type diagnostics apply to every non-token_count/non-lifecycle shape,
@@ -1048,7 +1060,7 @@ function handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState
     // has no tool vocabulary, does not normalize these to messages.)
     if (CODEX_TOOL_ITEM_TYPES.has(decoded.unknownItemType)) {
       rec.tools[decoded.unknownItemType] = (rec.tools[decoded.unknownItemType] ?? 0) + 1;
-    } else {
+    } else if (!CODEX_KNOWN_NON_TOOL_ITEM_TYPES.has(decoded.unknownItemType)) {
       recordCodexUnknownType(stats, decoded.unknownItemType);
     }
   }
