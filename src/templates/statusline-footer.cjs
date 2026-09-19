@@ -56,6 +56,81 @@ function rufloQuotaTeeSegment(ctx){
     }
   } catch(e){ rufloStatuslineDebug("quota-tee", e); }
 }
+// ── context-window ledger (ADR-0042): Claude transcripts never record the model's
+// context window, but every statusline payload carries the real one
+// (context_window.context_window_size — the same sanctioned push channel as the
+// quota tee above, ADR-0010). The kit keeps a per-session CHANGE LOG so the usage
+// parser can pair each historical message with the window that was in effect:
+//   <configdir>/claude-context-windows/<session_id>.json = [{t, size, model}]
+// One tiny file per session, so concurrent sessions never share a read-modify-write
+// file. Independent of the rate_limits gate (API-key sessions have no rate_limits).
+// An entry is appended ONLY when size or model differs from the file's last entry
+// (each refresh is a fresh process, so it compares against the file), which also
+// captures a mid-session /model switch to a 1M variant. Dir 0700, files 0600,
+// atomic tmp+rename, log capped, stale files pruned only when a new file is made.
+// Holds no prompt text and no secrets. Failure is silent: it must never cost a
+// render. Side effect only — like the quota tee it contributes no rendered text.
+var RUFLO_WINDOW_LOG_MAX = 64;
+var RUFLO_WINDOW_PRUNE_MS = 35 * 86400000;
+function rufloWindowSafeId(id){
+  // The id becomes a filename: no separators, dots or traversal — ever.
+  return typeof id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(id);
+}
+function rufloWindowReadLog(ctx, file){
+  try {
+    var log = JSON.parse(ctx.fs.readFileSync(file, "utf8"));
+    return Array.isArray(log) ? log.filter(function(e){ return e && typeof e.size === "number"; }) : null;
+  } catch(e){ rufloStatuslineDebug("window-ledger-read", e); return null; }
+}
+function rufloWindowPrune(ctx, dir, nowMs){
+  try {
+    ctx.fs.readdirSync(dir).forEach(function(name){
+      try {
+        var f = ctx.path.join(dir, name);
+        if (/\.(json|tmp)$/.test(name) && nowMs - ctx.fs.statSync(f).mtimeMs > RUFLO_WINDOW_PRUNE_MS) ctx.fs.unlinkSync(f);
+      } catch(e){ rufloStatuslineDebug("window-ledger-prune-entry", e); }
+    });
+  } catch(e){ rufloStatuslineDebug("window-ledger-prune", e); }
+}
+function rufloWindowWrite(ctx, file, log){
+  var tmp = file + "." + process.pid + ".tmp";
+  try {
+    ctx.fs.writeFileSync(tmp, JSON.stringify(log), { mode: 0o600 });
+    ctx.fs.renameSync(tmp, file);
+  } catch(e){
+    try { ctx.fs.unlinkSync(tmp); } catch(_gone){}
+    throw e;
+  }
+}
+function rufloWindowObservation(ctx){
+  var sd = ctx.getStdinData();
+  var size = sd && sd.context_window && sd.context_window.context_window_size;
+  if (!sd || !rufloWindowSafeId(sd.session_id)) return null;
+  if (typeof size !== "number" || !isFinite(size) || size <= 0 || size > 1e9) return null;
+  var model = (sd.model && typeof sd.model.id === "string") ? sd.model.id.replace(/[^A-Za-z0-9._:[\]/-]/g, "").slice(0, 96) : "";
+  return { sid: sd.session_id, size: Math.round(size), model: model || null };
+}
+function rufloWindowTeeSegment(ctx){
+  try {
+    if (typeof ctx.getStdinData !== "function") return;
+    var obs = rufloWindowObservation(ctx);
+    if (!obs) return;
+    var dir = ctx.path.join(process.env.XDG_CONFIG_HOME || ctx.path.join(ctx.os.homedir(), ".config"), "agentic-kit", "claude-context-windows");
+    var file = ctx.path.join(dir, obs.sid + ".json");
+    var log = rufloWindowReadLog(ctx, file);
+    var last = log && log.length ? log[log.length - 1] : null;
+    if (last && last.size === obs.size && (last.model || null) === obs.model) return;
+    var now = Date.now();
+    if (log === null) {   // no readable file: this is a NEW session's ledger
+      ctx.fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+      try { ctx.fs.chmodSync(dir, 0o700); } catch(_mode){}
+      rufloWindowPrune(ctx, dir, now);
+      log = [];
+    }
+    log.push({ t: now, size: obs.size, model: obs.model });
+    rufloWindowWrite(ctx, file, log.slice(-RUFLO_WINDOW_LOG_MAX));
+  } catch(e){ rufloStatuslineDebug("window-ledger", e); }
+}
 // ── self-learning (SONA): own line with a volume bar (patterns/traj) plus a
 // LIVE micro-LoRA adaptation field (Δ‖W‖, appended by rufloLoraSegment below —
 // the one deliberate coupling between segments: LoRA has no line of its own).
@@ -533,6 +608,7 @@ function rufloActivationSegments(cwd){
       getStdinData: (typeof getStdinData === "function") ? getStdinData : undefined
     };
     rufloQuotaTeeSegment(ctx);   // side effect only: never contributes rendered text
+    rufloWindowTeeSegment(ctx);  // side effect only: per-session context-window change log
     var providers = [
       function(c){ return rufloLoraSegment(c, rufloSonaSegment(c)); },   // LoRA appends onto SONA's line
       rufloRouteSegment,
