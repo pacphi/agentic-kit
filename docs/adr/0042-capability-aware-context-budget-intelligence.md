@@ -28,6 +28,18 @@ or meter is fabricated for missing pressure.
 The policy resolver is implemented; exact per-route launch enforcement remains
 deferred as stated below.
 
+## Correction (2026-09-19): context samples are recorded once per message
+
+The Claude context-pressure evidence this ADR relies on (`samples`, `first`,
+`last`, `peak`, and the pressure histogram) was recorded once per transcript
+line, and Claude Code repeats a message's `usage` on every content-block line,
+so `samples` and the histogram counts were inflated roughly 2x–3x. The parser now
+records one sample per API message id, from that message's last line (gross
+input = input + cache read + cache write). `last` and `peak` are unaffected in
+value; `samples` and the histogram now count messages. The usage cache moved to
+v22 so cached records re-parse. See the correction in
+[ADR-0038](0038-consistent-cross-host-session-metrics.md#correction-2026-09-19-claude-usage-is-counted-once-per-api-message).
+
 ## Context
 
 A fresh Codex session on the reference machine reported 25,985 tokens in a 258,400-token effective

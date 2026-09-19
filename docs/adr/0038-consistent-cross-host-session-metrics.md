@@ -21,9 +21,49 @@ implemented. The remaining metrics, posture judgments, histogram bounds and
 main-thread denominators retain the rules below.
 
 Schema v11–v17 statements record the original migrations; the current usage cache
-is v20 under ADR-0050. Its verified top-10 Git-project ranking is separate from
+was v20 under ADR-0050 and is v22 after the 2026-09-19 correction below. Its verified top-10 Git-project ranking is separate from
 legacy label-keyed aggregates. September pricing work in ADR-0009/0032 supersedes
 the older deferred-rate-document discrepancy; this audit does not reprice data.
+
+## Correction (2026-09-19): Claude usage is counted once per API message
+
+Every Claude figure this ADR describes — responses, the punchcard, per-model
+`responses`, tokens, cost, and the context samples behind pressure — was
+computed **per transcript line**. Claude Code writes one line per content block
+of an assistant message (thinking, text, each `tool_use`) and repeats the whole
+message's `usage` on every one. The parser therefore inflated all of them by the
+mean blocks-per-message factor, roughly 2x–3x on the reference corpus (59,139
+assistant lines against 30,276 unique `message.id` values across 786 files;
+cache-read 17.38 B naive against 9.16 B de-duplicated; list-price cost about
+$11.1 k against $5.3 k). Tool counts were never affected: each `tool_use` block
+is its own line.
+
+The decision is unchanged; the arithmetic it stood on is corrected:
+
+- `decodeClaudeRecord` now exposes `messageId` (`message.id`, else `requestId`,
+  else `null`). The parser stages each assistant line under that id, takes
+  tokens, model and day from the id's **last** line, and adds usage,
+  `responses`, the punchcard hit and the context sample **once per id**. A later
+  line with no token evidence never displaces an earlier one that had some. A
+  line with neither id is its own message, so nothing is dropped or merged.
+- The `<synthetic>`/API-error placeholder no longer increments `responses` or
+  the punchcard (it still extends the session span and counts as an
+  exception). The earlier statement that the placeholder "still counts as a real
+  turn" is withdrawn.
+- Latency sampling (first real assistant line after a prompt), tool, title,
+  skill and plugin attribution are unchanged.
+- The usage cache is **v22**, so every cached v21 Claude record re-parses.
+
+Known limitation: de-duplication is scoped to one transcript file. The same
+message id can appear in a session's main transcript and in a subagent file
+(5 cases measured); those are not merged across files.
+
+The same change retains Claude's `cache_creation.ephemeral_1h_input_tokens` as
+`cacheWrite1h` on usage rows, and `costOf` prices that subset at 2x base input
+(5-minute writes stay 1.25x) — confirmed against Anthropic's published pricing
+on 2026-09-19. Records without the split price every write at the 5-minute
+rate, as before. See [ADR-0009](0009-usage-scorecard-local-transcript-analytics.md)
+for the cost model.
 
 ## Context
 

@@ -190,7 +190,9 @@ Scorecard reads top to bottom as one argument: what the window cost, how you spe
 says about the way you work. Figures derive from locally retained transcripts. Claude/Codex cost uses the bundled
 rate table (including fallback rates for unknown models); OpenCode uses its recorded
 message cost when present and falls back to that table otherwise. None is an invoice
-or proof of subscription billing.
+or proof of subscription billing. Claude Code writes one transcript line per content block and
+repeats the message's usage on each, so Claude tokens, cost, responses and context samples count
+each API message once.
 
 **Two hero rows.** The first carries sessions, api-equivalent cost, tokens, engaged time, and cache
 read. Each tile pairs its figure with a change against the previous window of the same length and a
