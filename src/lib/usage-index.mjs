@@ -37,6 +37,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { configDir, claudeDir, codexDir } from './paths.mjs';
+import { readClaudeWindowLog, statClaudeWindowLedger } from './claude-window-ledger.mjs';
 import { writePrivateFileAtomic } from './file-write.mjs';
 import { readCodexStateResult } from './codex-state.mjs';
 import {
@@ -166,7 +167,11 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
 // segment before a mid-file counter reset; one day and one model for a whole
 // session; and permanent unknown-item-type diagnostics for known non-tool
 // items. None can be corrected in place, so every cached record re-parses.
-export const SCHEMA_VERSION = 23;
+// v24 pairs a main Claude session's context samples with the statusline's
+// context-window ledger (ADR-0042). A cached v23 record holds input-only
+// evidence that a ledger can now turn into pressure, and the ledger's own
+// stat (`wmtime`/`wsize`) joins the entry key, so every cached record re-parses.
+export const SCHEMA_VERSION = 24;
 
 const DAY_MS = 86_400_000;
 // One day of slack past dashboard-server.mjs's 365-day clampDays ceiling —
@@ -462,7 +467,11 @@ function parseFile(entry, sink = {}, limits = {}) {
   let raw;
   try { raw = fs.readFileSync(entry.file, 'utf8'); } catch { return null; }
   try {
-    return parseClaude(raw, { id: entry.id, dirName: entry.dirName });
+    // MAIN sessions only: a sidechain id is `parent/stem`, which fails the
+    // ledger's id grammar by construction, so a subagent never borrows the
+    // parent session's window (it may run a different model/window).
+    const windowLog = entry.windowConfigDir ? readClaudeWindowLog(entry.windowConfigDir, entry.id) : null;
+    return parseClaude(raw, { id: entry.id, dirName: entry.dirName, windowLog });
   } catch {
     return null; // a parser bug must not cost the user their whole index
   }
@@ -567,7 +576,7 @@ function scanKey(o = {}) {
   // {previous:false} answer, or vice versa; likewise {prompts:true}).
   return JSON.stringify([
     Number(o.days) || 14, Number(o.lookbackDays) || 0,
-    !!o.previous, !!o.prompts, !!o.force, roots, o.cachePath || '',
+    !!o.previous, !!o.prompts, !!o.force, roots, o.cachePath || '', o.claudeWindowConfigDir || '',
   ]);
 }
 
@@ -609,6 +618,10 @@ function notify(onProgress, payload) {
  * @property {Function} [onProgress] called with { scanned, total, phase }
  * @property {{claude?: string, codex?: string, opencode?: string}} [roots] override transcript roots (tests; opencode = the SQLite store path)
  * @property {string} [cachePath]   override the index cache location (tests)
+ * @property {string|null} [claudeWindowConfigDir] kit config dir holding the
+ *           statusline's `claude-context-windows/` ledger (tests). Unset reads
+ *           the real config dir only for default-root scans; overridden `roots`
+ *           read no ledger. `null` disables ledger pairing.
  * @property {{streamAboveBytes?: number, chunkBytes?: number, maxLineBytes?: number}} [readLimits]
  *           override where a Codex rollout switches from a whole-string read to
  *           the bounded streaming reader, and that reader's chunk/line limits (tests)
@@ -678,6 +691,42 @@ function recordCodexCandidate(codexDiagnostics, { session, parseStats, cacheHit,
   return true;
 }
 
+/** Is a cached entry still valid against the session's window ledger? The
+ *  ledger's stat is part of a Claude entry's key: a ledger that APPEARS or
+ *  CHANGES after the transcript was parsed must re-parse the session, or a
+ *  finished session stays "Input only" forever (the transcript's own mtime/size
+ *  never moves again). A ledger that has since VANISHED (the statusline prunes
+ *  files after 35 days) does not invalidate: the pressure it produced is real,
+ *  already-derived evidence. */
+function ledgerStillValid(hit, windowStat) {
+  if (!windowStat) return true;
+  return hit.wmtime === windowStat.mtimeMs && hit.wsize === windowStat.size;
+}
+
+/** The ledger half of an entry key: the live stat when there is a ledger,
+ *  else whatever the reused entry already recorded (so a pruned ledger does
+ *  not erase the record of what the evidence was derived from). */
+function windowKey(windowStat, reused) {
+  if (windowStat) return { wmtime: windowStat.mtimeMs, wsize: windowStat.size };
+  return reused?.wmtime === undefined ? {} : { wmtime: reused.wmtime, wsize: reused.wsize };
+}
+
+/** Where the statusline ledger lives for this scan. An explicit
+ *  `claudeWindowConfigDir` wins; otherwise overridden transcript roots
+ *  (tests, sandboxes) imply the REAL config dir is the wrong one — same
+ *  hermeticity rule as the Codex ledger — so only default-root scans read it.
+ *  `rawRoots` is the caller's OWN `roots` option, unmerged with defaults. */
+function resolveWindowConfigDir(o, rawRoots) {
+  if (o.claudeWindowConfigDir !== undefined) return o.claudeWindowConfigDir || null;
+  return rawRoots?.claude ? null : configDir();
+}
+
+/** Attach the session's window-ledger location and stat to a Claude candidate. */
+function withWindowLedger(entry, windowConfigDir) {
+  if (entry.provider !== 'claude' || !windowConfigDir) return entry;
+  return { ...entry, windowConfigDir, windowStat: statClaudeWindowLedger(windowConfigDir, entry.id) };
+}
+
 /** Parse (or reuse the cached parse of) one scan candidate, updating the
  *  common cross-host telemetry diagnostics and codex's extra per-file
  *  diagnostics as side effects. Pulled out of scan()'s loop so the per-file
@@ -685,10 +734,11 @@ function recordCodexCandidate(codexDiagnostics, { session, parseStats, cacheHit,
  *  counts and yield diagnostics no other source has) — is not inlined into
  *  the generic scan loop's own complexity. */
 function processCandidate(c, cache, commonDiagnostics, codexDiagnostics, readLimits = {}) {
-  const key = { mtime: c.stat.mtimeMs, size: c.stat.size };
   const hit = cache?.entries?.[c.file];
-  const cacheHit = !!(hit && hit.mtime === key.mtime && hit.size === key.size
+  const cacheHit = !!(hit && hit.mtime === c.stat.mtimeMs && hit.size === c.stat.size
+    && ledgerStillValid(hit, c.windowStat)
     && (c.provider !== 'codex' || hit.parseStats));
+  const key = { mtime: c.stat.mtimeMs, size: c.stat.size, ...windowKey(c.windowStat, cacheHit ? hit : null) };
   let session = cacheHit ? hit.session : null;
   let parseStats = cacheHit ? hit.parseStats : null;
   const failure = {};
@@ -819,8 +869,9 @@ async function scan(o = {}) {
   // recursive per-file walk listClaude/listCodex still do below).
   const claudeHealth = rootHealth(r.claude);
   const codexHealth = rootHealth(r.codex);
+  const windowConfigDir = resolveWindowConfigDir(o, roots);
   const candidates = [...listClaude(r.claude), ...listCodex(r.codex)]
-    .map((e) => ({ ...e, stat: statSafe(e.file) }))
+    .map((e) => withWindowLedger({ ...e, stat: statSafe(e.file) }, windowConfigDir))
     .filter((e) => e.stat && e.stat.mtimeMs >= cutoff);
 
   const opencodeSource = discoverOpencodeSource(roots, cutoff);

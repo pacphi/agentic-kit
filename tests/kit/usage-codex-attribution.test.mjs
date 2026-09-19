@@ -342,8 +342,8 @@ test('X-6: a single-day, single-model session keeps ONE row totalling the last s
 
 // ── schema version ──────────────────────────────────────────────────────────
 
-test('SCHEMA_VERSION is 23 and a forged v22 Codex cache is discarded and re-parsed', async () => {
-  assert.equal(SCHEMA_VERSION, 23, 'Codex attribution changes every cached Codex record');
+test('SCHEMA_VERSION is at least 23 and a forged v22 Codex cache is discarded and re-parsed', async () => {
+  assert.ok(SCHEMA_VERSION >= 23, 'Codex attribution changes every cached Codex record');
   _resetForTest();
   const sb = codexSandbox({ 'rollout-2026-07-24T09-00-00-x9.jsonl': itemRollout(KNOWN_NON_TOOL_ITEMS) });
   const first = await buildIndex(opts(sb));
