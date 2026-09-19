@@ -541,6 +541,48 @@ test('a message with no reasoning, or no usable total, keeps its output as recor
   } finally { rm(d); }
 });
 
+// ── O-7: rows carry the provider that served them ───────────────────────────
+
+test('the same modelID under two providers stays two usage rows, each carrying its provider', () => {
+  const d = tmp();
+  try {
+    const dbFile = buildDb(path.join(d, 'opencode.db'), {
+      sessions: [{ id: 'ses_p', directory: '/x', title: 't', timeCreated: T }],
+      messages: [
+        assistantMsg('a1', 'ses_p', T, { model: 'qwen3-coder', provider: 'lmstudio', tokens: { input: 10 } }),
+        assistantMsg('a2', 'ses_p', T + 1000, { model: 'qwen3-coder', provider: 'openrouter', cost: 0.2, tokens: { input: 70 } }),
+        assistantMsg('a3', 'ses_p', T + 2000, { model: 'qwen3-coder', provider: 'openrouter', cost: 0.1, tokens: { input: 5 } }),
+      ],
+    });
+    const { session } = parseSession({ dbFile, id: 'ses_p' });
+    assert.equal(session.usage.length, 2, 'rows are (day, model, provider), not (day, model)');
+    const local = session.usage.find((r) => r.provider === 'lmstudio');
+    const cloud = session.usage.find((r) => r.provider === 'openrouter');
+    assert.equal(local.input, 10);
+    assert.equal(local.costObserved, null, 'the local turn recorded no cost and is not charged with the cloud turn\'s');
+    assert.equal(cloud.input, 75);
+    assert.ok(Math.abs(cloud.costObserved - 0.3) < 1e-9);
+    assert.equal(session.inferenceProvider, 'openrouter', 'the session-level provider stays the last observed one');
+  } finally { rm(d); }
+});
+
+test('a row with no providerID carries no provider key and still merges with its own kind', () => {
+  const d = tmp();
+  try {
+    const dbFile = buildDb(path.join(d, 'opencode.db'), {
+      sessions: [{ id: 'ses_np', directory: '/x', title: 't', timeCreated: T }],
+      messages: [
+        { ...assistantMsg('a1', 'ses_np', T), data: { ...assistantMsg('a1', 'ses_np', T).data, providerID: undefined } },
+        { ...assistantMsg('a2', 'ses_np', T + 1000), data: { ...assistantMsg('a2', 'ses_np', T + 1000).data, providerID: undefined } },
+      ],
+    });
+    const { session } = parseSession({ dbFile, id: 'ses_np' });
+    assert.equal(session.usage.length, 1);
+    assert.equal('provider' in session.usage[0], false);
+    assert.equal(session.usage[0].responses, 2);
+  } finally { rm(d); }
+});
+
 // Verified-correct behaviour, pinned: OpenCode also writes a `step-finish`
 // part carrying the same tokens/cost as its message. Parts are never read for
 // usage, so a message with one is counted exactly once.

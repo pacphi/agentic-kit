@@ -231,8 +231,9 @@ function outputWithReasoning(t, cache) {
 function recordAssistantUsage(rec, data, at) {
   const model = typeof data.modelID === 'string' && data.modelID ? data.modelID : 'unknown';
   if (!rec.models.includes(model)) rec.models.push(model);
-  if (typeof data.providerID === 'string' && data.providerID) {
-    rec.inferenceProvider = data.providerID;
+  const provider = typeof data.providerID === 'string' && data.providerID ? data.providerID : null;
+  if (provider) {
+    rec.inferenceProvider = provider;
     rec.providerProvenance = 'observed';
   }
   const t = data.tokens ?? {};
@@ -241,7 +242,7 @@ function recordAssistantUsage(rec, data, at) {
   const output = outputWithReasoning(t, cache);
   const usageRow = addUsage(rec, day, model, {
     input: num(t.input), output,
-    cacheRead: num(cache.read), cacheWrite: num(cache.write), responses: 1,
+    cacheRead: num(cache.read), cacheWrite: num(cache.write), responses: 1, provider,
   });
   // Retain missing-cost tokens separately before coalescing by day/model.
   usageRow.costObserved ??= null;

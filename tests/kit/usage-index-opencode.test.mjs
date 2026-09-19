@@ -322,6 +322,28 @@ test('a message row rewritten in place re-parses the session (mid-turn scan does
   rm(sb.dir);
 });
 
+// O-7: a session that switches provider mid-way keeps both providers' rows, and
+// the model-level aggregate still folds them under the one model id.
+test('one model served by two providers aggregates under the model without losing either row', async () => {
+  const at = NOW - DAY;
+  const sb = sandbox({
+    sessions: [{ id: 'ses_two', directory: '/x', title: 'switch', timeCreated: at }],
+    messages: [
+      userMsg('u1', 'ses_two', at),
+      assistantMsg('a1', 'ses_two', at + 1000, { model: 'qwen3-coder', provider: 'lmstudio', cost: 0 }),
+      assistantMsg('a2', 'ses_two', at + 2000, { model: 'qwen3-coder', provider: 'openrouter', cost: 0.5 }),
+    ],
+  });
+  try {
+    const agg = await buildIndex(opts(sb));
+    const s = agg.sessions.find((x) => x.id === 'ses_two');
+    assert.equal(s.input, 2000);
+    assert.equal(s.cost, 0.5, 'the reported zero stays an observed zero; only the cloud turn cost anything');
+    assert.equal(agg.byModel['qwen3-coder'].responses, 2);
+    assert.equal(agg.byModel['qwen3-coder'].cost, 0.5);
+  } finally { rm(sb.dir); }
+});
+
 // O-4: OpenCode records a user stop as assistant error MessageAbortedError. It
 // reaches the aggregate as an abort — per host, so a reader can divide by the
 // responses of the hosts that CAN record one — and not as an exception.
