@@ -15,7 +15,7 @@ const DAY = 86_400_000;
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 const rm = (d) => fs.rmSync(d, { recursive: true, force: true });
 
-const { buildIndex, readSession, _resetForTest } = await import('../../src/lib/usage-index.mjs');
+const { buildIndex, readSession, SCHEMA_VERSION, _resetForTest } = await import('../../src/lib/usage-index.mjs');
 
 /** Pricing stub: prices EVERY token at 1/1000 — deliberately different from
  *  the fixture's observed costs so the preference is provable. */
@@ -286,5 +286,59 @@ test('oversized SQLite session coverage survives scan and selected-session paylo
     assert.equal(selected.meta.acquisitionCoverage.truncated, true);
     assert.equal(selected.meta.acquisitionCoverage.reason, 'session-row-limit');
     assert.deepEqual(selected.turns, []);
+  } finally { _resetForTest(); rm(sb.dir); }
+});
+
+// O-2: OpenCode writes a step's tokens, cost and completed stamp into the SAME
+// assistant row it inserted at turn start. A scan taken mid-turn (zero tokens)
+// must not stay cached after the turn finishes.
+test('a message row rewritten in place re-parses the session (mid-turn scan does not stay cached)', async () => {
+  const at = NOW - DAY;
+  const sb = sandbox({
+    sessions: [{ id: 'ses_mid', directory: '/x', title: 'mid turn', timeCreated: at }],
+    messages: [
+      userMsg('u1', 'ses_mid', at),
+      { id: 'a1', sessionId: 'ses_mid', at: at + 10, data: {
+        role: 'assistant', agent: 'build', modelID: 'kimi-k3', providerID: 'opencode',
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, cost: 0, time: { created: at + 10 },
+      } },
+    ],
+  });
+  const first = await buildIndex(opts(sb));
+  assert.equal(first.sessions.find((x) => x.id === 'ses_mid').input, 0);
+
+  const db = new DatabaseSync(sb.dbFile);
+  db.prepare('UPDATE message SET time_updated = ?, data = ? WHERE id = ?').run(
+    at + 30_000,
+    JSON.stringify(assistantMsg('a1', 'ses_mid', at + 10, { cost: 0.4 }).data),
+    'a1',
+  );
+  db.close();
+
+  const second = await buildIndex(opts(sb));
+  const s = second.sessions.find((x) => x.id === 'ses_mid');
+  assert.equal(s.input, 1000, 'the finished turn replaces the cached mid-turn zero');
+  assert.equal(s.cost, 0.4);
+  rm(sb.dir);
+});
+
+test('SCHEMA_VERSION is at least 25 and a forged v24 OpenCode cache is discarded and re-parsed', async () => {
+  assert.ok(SCHEMA_VERSION >= 25, 'OpenCode row semantics changed (reasoning, latency, aborts, keys)');
+  const at = NOW - DAY;
+  const sb = sandbox({
+    sessions: [{ id: 'ses_forged', directory: '/x', title: 'real title', timeCreated: at }],
+    messages: [userMsg('u1', 'ses_forged', at), assistantMsg('a1', 'ses_forged', at + 1000, { cost: 0.25 })],
+  });
+  try {
+    await buildIndex(opts(sb));
+    const cache = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+    cache.schemaVersion = 24;
+    for (const e of Object.values(cache.entries)) { e.session.title = 'FORGED-V24'; e.session.responses = 99; }
+    fs.writeFileSync(sb.cachePath, JSON.stringify(cache));
+    _resetForTest();
+    const agg = await buildIndex(opts(sb));
+    const s = agg.sessions.find((x) => x.id === 'ses_forged');
+    assert.notEqual(s.title, 'FORGED-V24');
+    assert.equal(s.responses, 1);
   } finally { _resetForTest(); rm(sb.dir); }
 });

@@ -89,8 +89,15 @@ const parseJson = (raw) => { try { return JSON.parse(raw); } catch { return null
 const MAX_LATENCY_SAMPLE_SECONDS = 3600;
 
 /** Incremental candidates: sessions whose latest message lands at/after
- *  cutoffMs. `mtimeMs` (latest message time) + `size` (message count) are the
- *  cache key — a warm refresh re-parses only sessions that gained messages.
+ *  cutoffMs. The cache key is `mtimeMs` (latest message time) + `size`
+ *  (message count) + `updatedMs` (latest `time_updated` over the session's
+ *  messages and the session row itself). The last one is what makes a warm
+ *  refresh notice an IN-PLACE rewrite: OpenCode inserts the assistant row when
+ *  a turn starts (zero tokens, no `time.completed`) and writes the step's
+ *  tokens, cost and completed stamp into that same row later, so neither the
+ *  created-time nor the row count moves when the turn finishes — only
+ *  `time_updated` does. The session row's own stamp covers a title/summary
+ *  change that no message carries.
  *  @param {{ dbFile: string, cutoffMs?: number }} opts */
 export function listSessions({ dbFile, cutoffMs = 0 }) {
   const result = listSessionsResult({ dbFile, cutoffMs });
@@ -100,12 +107,15 @@ export function listSessions({ dbFile, cutoffMs = 0 }) {
 export function listSessionsResult({ dbFile, cutoffMs = 0 }) {
   return withDb(dbFile, (db) => db.prepare(`
     SELECT s.id AS id, COALESCE(MAX(m.time_created), s.time_created) AS mtime,
-           COUNT(m.id) AS messages
+           COUNT(m.id) AS messages,
+           MAX(COALESCE(MAX(m.time_updated), 0), COALESCE(s.time_updated, 0)) AS updated
     FROM session s LEFT JOIN message m ON m.session_id = s.id
     GROUP BY s.id
     HAVING mtime >= ?
     ORDER BY mtime DESC
-  `).all(cutoffMs).map((r) => ({ id: r.id, mtimeMs: num(r.mtime), size: num(r.messages) })));
+  `).all(cutoffMs).map((r) => ({
+    id: r.id, mtimeMs: num(r.mtime), size: num(r.messages), updatedMs: num(r.updated),
+  })));
 }
 
 /** Carry-forward existence probe (a session can be deleted between scans). */

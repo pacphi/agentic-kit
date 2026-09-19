@@ -363,3 +363,43 @@ test('SQLite acquisition bounds cover single message and metadata bytes, includi
     }
   } finally { rm(d); }
 });
+
+// ── O-2: in-place row updates are part of the session's cache key ───────────
+
+test('listSessions exposes the latest time_updated so an in-place message write changes the key', () => {
+  const d = tmp();
+  try {
+    const dbFile = buildDb(path.join(d, 'opencode.db'), {
+      sessions: [{ id: 'ses_u', directory: '/x', title: 'u', timeCreated: T, timeUpdated: T }],
+      messages: [userMsg('u1', 'ses_u', T), assistantMsg('a1', 'ses_u', T + 1000)],
+    });
+    const before = listSessions({ dbFile })[0];
+    assert.equal(before.updatedMs, T + 1000, 'the newest message time_updated seeds the key');
+
+    // OpenCode finishes a step by REWRITING the assistant row: same id, same
+    // time_created, same message count — only time_updated (and data) move.
+    const db = new DatabaseSync(dbFile);
+    db.prepare('UPDATE message SET time_updated = ?, data = ? WHERE id = ?')
+      .run(T + 9000, JSON.stringify(assistantMsg('a1', 'ses_u', T + 1000, { cost: 0.5 }).data), 'a1');
+    db.close();
+    const after = listSessions({ dbFile })[0];
+    assert.equal(after.mtimeMs, before.mtimeMs, 'created-time and count are blind to the rewrite');
+    assert.equal(after.size, before.size);
+    assert.equal(after.updatedMs, T + 9000, 'time_updated is not');
+  } finally { rm(d); }
+});
+
+test('a session-row-only change (auto title) also moves the key', () => {
+  const d = tmp();
+  try {
+    const dbFile = buildDb(path.join(d, 'opencode.db'), {
+      sessions: [{ id: 'ses_t', directory: '/x', title: 'New session', timeCreated: T, timeUpdated: T }],
+      messages: [userMsg('u1', 'ses_t', T)],
+    });
+    const before = listSessions({ dbFile })[0].updatedMs;
+    const db = new DatabaseSync(dbFile);
+    db.prepare('UPDATE session SET title = ?, time_updated = ? WHERE id = ?').run('Real title', T + 5000, 'ses_t');
+    db.close();
+    assert.ok(listSessions({ dbFile })[0].updatedMs > before);
+  } finally { rm(d); }
+});

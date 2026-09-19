@@ -173,7 +173,13 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
 // stat (`wmtime`/`wsize`) joins the entry key. It also drops the duplicate
 // Codex context samples an identical repeated token_count added (~2.8% of
 // events), so every cached record re-parses.
-export const SCHEMA_VERSION = 24;
+// v25 corrects OpenCode usage fidelity (ADR-0038 correction note). The OpenCode
+// entry key gains `upd` (latest message/session `time_updated`) because OpenCode
+// rewrites a turn's assistant row in place, so a cached mid-turn zero no longer
+// survives the finished turn. A cached v24 OpenCode record cannot be corrected
+// in place: it carries that stale zero. Further OpenCode row semantics land
+// under this same version (see the commits that follow on this schema).
+export const SCHEMA_VERSION = 25;
 
 const DAY_MS = 86_400_000;
 // One day of slack past dashboard-server.mjs's 365-day clampDays ceiling —
@@ -671,7 +677,7 @@ function discoverOpencodeSource(rawRoots, cutoff) {
   }
   const candidates = listed.value.map((e) => ({
     file: `opencode://${e.id}`, provider: 'opencode', id: e.id, dbFile: ocDb,
-    stat: { mtimeMs: e.mtimeMs, size: e.size },
+    stat: { mtimeMs: e.mtimeMs, size: e.size, updatedMs: e.updatedMs },
   }));
   return { health: { status: 'ok', reason: null }, candidates, ocDb };
 }
@@ -737,10 +743,15 @@ function withWindowLedger(entry, windowConfigDir) {
  *  the generic scan loop's own complexity. */
 function processCandidate(c, cache, commonDiagnostics, codexDiagnostics, readLimits = {}) {
   const hit = cache?.entries?.[c.file];
+  // `updatedMs` exists only on OpenCode candidates (its rows are rewritten in
+  // place, so created-time and count cannot see a finished turn); file-backed
+  // sources key on mtime/size alone.
+  const updated = c.stat.updatedMs === undefined ? {} : { upd: c.stat.updatedMs };
   const cacheHit = !!(hit && hit.mtime === c.stat.mtimeMs && hit.size === c.stat.size
+    && hit.upd === updated.upd
     && ledgerStillValid(hit, c.windowStat)
     && (c.provider !== 'codex' || hit.parseStats));
-  const key = { mtime: c.stat.mtimeMs, size: c.stat.size, ...windowKey(c.windowStat, cacheHit ? hit : null) };
+  const key = { mtime: c.stat.mtimeMs, size: c.stat.size, ...updated, ...windowKey(c.windowStat, cacheHit ? hit : null) };
   let session = cacheHit ? hit.session : null;
   let parseStats = cacheHit ? hit.parseStats : null;
   const failure = {};
