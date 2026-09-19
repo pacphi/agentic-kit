@@ -226,6 +226,106 @@ test('X-2: aggregation reports the subagent\'s own cost and keeps it out of huma
   assert.equal(agg.bySource.main.tokens, 3300);
 });
 
+// ── X-5: a cumulative counter that restarts mid-file ───────────────────────
+
+const rowSum = (session, pick) => session.usage.reduce((n, r) => n + pick(r), 0);
+
+/** Three turns; the counter restarts from zero before the third (the real
+ *  shape: after the restart the snapshot equals its own `last_token_usage`). */
+function resetRollout() {
+  return new Rollout({ id: 'reset' }).meta().turn('gpt-5.6')
+    .user('one').agent('a').tokenCount(usage({ input: 1000, cached: 200, output: 100, reasoning: 10 }))
+    .user('two').agent('b').tokenCount(usage({ input: 2000, cached: 900, output: 200, reasoning: 20 }))
+    .resetTotal()
+    .user('three').agent('c').tokenCount(usage({ input: 500, cached: 100, output: 50, reasoning: 5 }));
+}
+
+test('X-5: tokens before a mid-file counter restart are summed, not dropped (last-wins)', () => {
+  const { session } = parseCodex(resetRollout().toString(), { id: 'reset' });
+  // segment 1 final: 3000 in / 1100 cached / 300 out; segment 2 final: 500 / 100 / 50.
+  assert.equal(rowSum(session, (r) => r.input), (3000 - 1100) + (500 - 100));
+  assert.equal(rowSum(session, (r) => r.cacheRead), 1100 + 100);
+  assert.equal(rowSum(session, (r) => r.output), 300 + 50);
+  assert.equal(session.reasoningOutput, 30 + 5);
+  assert.equal(rowSum(session, (r) => r.responses), 3);
+});
+
+test('X-5: a reset-free session totals exactly its last cumulative snapshot (regression)', () => {
+  const r = new Rollout({ id: 'plain' }).meta().turn('gpt-5.6')
+    .user('one').agent('a').tokenCount(usage({ input: 1000, cached: 200, output: 100 }))
+    .user('two').agent('b').tokenCount(usage({ input: 2000, cached: 900, output: 200 }));
+  const { session } = parseCodex(r.toString(), { id: 'plain' });
+  assert.equal(session.usage.length, 1);
+  assert.deepEqual(
+    { input: session.usage[0].input, cacheRead: session.usage[0].cacheRead, output: session.usage[0].output, responses: session.usage[0].responses },
+    { input: 3000 - 1100, cacheRead: 1100, output: 300, responses: 2 },
+  );
+});
+
+test('X-5: a restart inside the replayed history does not leak into a forked subagent\'s own usage', () => {
+  const parent = new Rollout({ id: 'parent' }).meta().turn('gpt-5.6')
+    .user('p1').agent('a').tokenCount(usage({ input: 5000, output: 500 }))
+    .resetTotal()
+    .user('p2').agent('b').tokenCount(usage({ input: 700, output: 70 }));
+  const child = forkedSubagent({
+    parent, own: (r) => r.agent('mine').tokenCount(usage({ input: 300, output: 30 })),
+  });
+  const { session } = parseCodex(child.toString(), { id: 'child' });
+  assert.equal(rowSum(session, (r) => r.input), 300);
+  assert.equal(rowSum(session, (r) => r.output), 30);
+});
+
+// ── X-6: each token_count books on its own day and model ───────────────────
+
+test('X-6: tokens land on the day they were spent, not the last event\'s day', async () => {
+  _resetForTest();
+  const r = new Rollout({ id: 'multiday' }).meta().turn('gpt-5.6')
+    .at('2026-07-22T12:00:00.000Z').user('day one').agent('a').tokenCount(usage({ input: 1000, output: 100 }))
+    .at('2026-07-23T12:00:00.000Z').user('day two').agent('b').tokenCount(usage({ input: 4000, output: 400 }));
+  const { session } = parseCodex(r.toString(), { id: 'multiday' });
+  assert.deepEqual(
+    session.usage.map((u) => [u.day, u.input + u.output + u.cacheRead, u.responses]),
+    [['2026-07-22', 1100, 1], ['2026-07-23', 4400, 1]],
+  );
+  const sb = codexSandbox({ 'rollout-2026-07-22T12-00-00-multiday.jsonl': r });
+  const agg = await buildIndex(opts(sb));
+  assert.equal(agg.byDay['2026-07-22'].tokens, 1100);
+  assert.equal(agg.byDay['2026-07-23'].tokens, 4400);
+});
+
+test('X-6: tokens are priced under the model of the turn that spent them, including a switch back', async () => {
+  _resetForTest();
+  const r = new Rollout({ id: 'multimodel' }).meta()
+    .turn('gpt-5.6-sol').user('a').agent('a').tokenCount(usage({ input: 1000, output: 100 }))
+    .turn('gpt-5.6-mini').user('b').agent('b').tokenCount(usage({ input: 200, output: 20 }))
+    .turn('gpt-5.6-sol').user('c').agent('c').tokenCount(usage({ input: 3000, output: 300 }));
+  const { session } = parseCodex(r.toString(), { id: 'multimodel' });
+  const byModel = Object.fromEntries(session.usage.map((u) => [u.model, [u.input + u.output, u.responses]]));
+  assert.deepEqual(byModel, { 'gpt-5.6-sol': [1100 + 3300, 2], 'gpt-5.6-mini': [220, 1] });
+  assert.deepEqual(session.models, ['gpt-5.6-sol', 'gpt-5.6-mini'], 'the de-duplicated model list is unchanged');
+  const sb = codexSandbox({ 'rollout-2026-07-24T09-00-00-multimodel.jsonl': r });
+  const agg = await buildIndex(opts(sb));
+  assert.equal(agg.byModel['gpt-5.6-sol'].tokens, 4400);
+  assert.equal(agg.byModel['gpt-5.6-mini'].tokens, 220);
+  assert.equal(agg.byModel['gpt-5.6-sol'].responses, 2);
+});
+
+test('X-6: a token_count before any turn_context takes the first model the session reports', () => {
+  const r = new Rollout({ id: 'early' }).meta().user('x').agent('a')
+    .tokenCount(usage({ input: 100, output: 10 })).turn('gpt-5.6-late').agent('b')
+    .tokenCount(usage({ input: 100, output: 10 }));
+  const { session } = parseCodex(r.toString(), { id: 'early' });
+  assert.deepEqual(session.usage.map((u) => u.model), ['gpt-5.6-late']);
+  assert.equal(rowSum(session, (u) => u.input + u.output), 220);
+});
+
+test('X-6: a single-day, single-model session keeps ONE row totalling the last snapshot (regression)', () => {
+  const { session } = parseCodex(nativeRollout('one', { prompts: 3 }).toString(), { id: 'one' });
+  assert.equal(session.usage.length, 1);
+  assert.equal(session.usage[0].input + session.usage[0].cacheRead + session.usage[0].output, 3 * 1100);
+  assert.equal(session.usage[0].responses, 3);
+});
+
 // ── schema version ──────────────────────────────────────────────────────────
 
 test('SCHEMA_VERSION is 23 and a forged v22 Codex cache is discarded and re-parsed', async () => {

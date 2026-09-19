@@ -14,6 +14,9 @@ import { repoRoot } from './paths.mjs';
 import { MAX_TELEMETRY_UNKNOWN_KINDS } from './usage-telemetry.mjs';
 import { decodeClaudeRecord, decodeCodexRecord } from './telemetry-records.mjs';
 import { codexReplayPlan, isCodexReplayLine } from './codex-replay.mjs';
+import {
+  newCodexUsageWalk, noteCodexWalkModel, noteCodexWalkResponse, walkCodexTokenCount, codexWalkRows,
+} from './codex-usage-walk.mjs';
 import { toMs, maskSecrets } from './usage-aggregate.mjs';
 import { normalizeMode } from './usage-modes.mjs';
 import { provenanceOf } from './usage-provenance.mjs';
@@ -880,17 +883,16 @@ function applyCodexRateLimit(rec, rl, ms) {
   };
 }
 
-/** `event_msg` → `token_count`: keep the LAST cumulative snapshot (see
- *  parseCodex's own doc comment for why last-only), plus its rate limits. A
- *  REPLAYED snapshot (a forked subagent's copy of its parent's history) only
- *  advances `baseline`, the cumulative total already spent before the thread's
- *  own turns began — it is neither the thread's own usage nor a context or
- *  rate-limit observation of it. */
+/** `event_msg` → `token_count`: fold the cumulative snapshot into the usage
+ *  walk (codex-usage-walk.mjs — a per-event delta booked on the event's day
+ *  and model, restarts of the counter starting a new segment), plus its context
+ *  sample and rate limits. A REPLAYED snapshot (a forked subagent's copy of its
+ *  parent's history) only advances the walk's running total — it is neither the
+ *  thread's own usage nor a context or rate-limit observation of it. */
 function handleCodexTokenCount(rec, stats, usageState, decoded, ms, replay) {
   stats.tokenCountEvents++;
-  const t = decoded.usage.total;
-  if (replay) { if (t) usageState.baseline = t; return; }
-  if (t) { usageState.lastUsage = t; usageState.lastUsageAt = ms; }
+  walkCodexTokenCount(usageState.walk, decoded.usage.total, ms, replay, localDay);
+  if (replay) return;
   // last.input_tokens is already gross prompt input. cached_input_tokens is a
   // subset, not an additional amount (unlike Claude/OpenCode's split fields).
   noteContextSample(rec, decoded.usage.last?.input_tokens, decoded.usage.contextWindow);
@@ -1076,6 +1078,7 @@ function handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState
   if (decoded.type !== 'message') return;
   if (decoded.role === 'user') stats.prompts++; else stats.responses++;
   if (replay) return;
+  if (decoded.role !== 'user') noteCodexWalkResponse(usageState.walk, ms, localDay);
   handleCodexEventMessage(rec, turns, titleState, latState, decoded, ms, withTurns);
 }
 
@@ -1093,7 +1096,11 @@ function rawPayload(e) {
 function processCodexLine(rec, turns, stats, titleState, usageState, latState, metaState, e, ms, withTurns) {
   const decoded = decodeCodexRecord(e);
   if (decoded.type === 'meta') { handleCodexMeta(rec, metaState, decoded); return; }
-  if (decoded.type === 'turnContext') { handleCodexTurnContext(rec, decoded, rawPayload(e)); return; }
+  if (decoded.type === 'turnContext') {
+    handleCodexTurnContext(rec, decoded, rawPayload(e));
+    noteCodexWalkModel(usageState.walk, decoded.model);
+    return;
+  }
   if (e.type !== 'event_msg') return;
   const replay = isCodexReplayLine(usageState.boundary, e);
   handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState, decoded, rawPayload(e), ms, withTurns, replay);
@@ -1125,43 +1132,35 @@ function importedCodexSession(rec, stats) {
   return { session: seal(rec), turns: [], parseStats: { ...stats, imported: true } };
 }
 
-/** One cumulative field, non-negative: `last - baseline`, where a missing or
- *  non-numeric side reads as 0. */
-function codexUsageDelta(last, baseline, field) {
-  return Math.max(0, (Number(last?.[field]) || 0) - (Number(baseline?.[field]) || 0));
-}
-
-/** The session-total usage row: the LAST token_count event's cumulative total
- *  (see parseCodex's doc comment) minus `baseline`, the total a forked
- *  subagent had inherited from its parent's replayed history — so a subagent
- *  reports its OWN spend, an unforked thread (no baseline) its whole total.
- *  A no-op for a rollout that never carried an own token_count at all, and for
- *  a subagent from a pre-ordinal host, whose replay cannot be told from its own
- *  turns (`unattributable`, see codexReplayPlan). */
-function finalizeCodexUsage(rec, usageState) {
-  const { lastUsage, lastUsageAt, baseline, unattributable } = usageState;
-  if (!lastUsage || unattributable) return;
-  const cacheRead = codexUsageDelta(lastUsage, baseline, 'cached_input_tokens');
-  const gross = codexUsageDelta(lastUsage, baseline, 'input_tokens');
-  const at = Number.isFinite(lastUsageAt) ? lastUsageAt : (rec.end ?? rec.start ?? Date.now());
-  addUsage(rec, localDay(at), rec.models[rec.models.length - 1] ?? 'unknown', {
-    input: Math.max(0, gross - cacheRead),
-    output: codexUsageDelta(lastUsage, baseline, 'output_tokens'),
-    cacheRead,
-    cacheWrite: 0,
-    responses: rec.responses,
+/** The session's usage rows, from the walk (codex-usage-walk.mjs): one per
+ *  (day, model) the thread actually spent tokens on, each token_count booked as
+ *  a delta on its own event's day and the model of the turn in effect. For a
+ *  single-day, single-model session without a counter restart that is one row
+ *  totalling the last cumulative snapshot, as before. A subagent's replay was
+ *  never booked (see codex-replay.mjs), so a subagent reports its OWN spend; a
+ *  rollout with no own token_count, or a pre-ordinal subagent whose replay
+ *  cannot be separated (`unattributable`), yields no rows. */
+function finalizeCodexUsage(rec, walk) {
+  const { rows, reasoningOutput } = codexWalkRows(walk, {
+    models: rec.models, fallbackMs: rec.end ?? rec.start ?? Date.now(), dayOf: localDay,
   });
+  for (const row of rows) addUsage(rec, row.day, row.model, row);
   // Reasoning tokens are a SUBSET of output_tokens (they bill as output) —
   // recorded as detail, never added into any token sum, or the total would
   // double-count exactly the reasoning share.
-  rec.reasoningOutput = codexUsageDelta(lastUsage, baseline, 'reasoning_output_tokens');
+  rec.reasoningOutput = reasoningOutput;
 }
 
 /**
- * Parse one Codex rollout. `total_token_usage` is CUMULATIVE, so the LAST
- * token_count event is the session total — summing them would multiply the
- * figure by the number of turns. `input_tokens` there INCLUDES
- * `cached_input_tokens`, which bill as cache reads, so the two are separated.
+ * Parse one Codex rollout. `total_token_usage` is CUMULATIVE, so each event's
+ * spend is its DELTA against the previous snapshot (summing the snapshots
+ * themselves would multiply the figure by the number of turns). A snapshot
+ * lower than its predecessor means the counter restarted; its delta is the
+ * whole snapshot. Each delta books on its own event's day and the model of the
+ * turn in effect (codex-usage-walk.mjs), and for a reset-free single-day,
+ * single-model session the deltas sum to the last snapshot. `input_tokens`
+ * there INCLUDES `cached_input_tokens`, which bill as cache reads, so the two
+ * are separated.
  *
  * A rollout whose `session_meta.thread_source` is `subagent` is a delegated
  * thread whose file may replay its parent thread's ENTIRE prior history
@@ -1187,10 +1186,7 @@ export function parseCodex(raw, { id, withTurns = false }) {
   const stats = codexParseStats();
   const lines = { [Symbol.iterator]: () => jsonLines(raw) };
   const plan = codexReplayPlan(lines);
-  const usageState = {
-    lastUsage: null, lastUsageAt: null, baseline: null,
-    boundary: plan.boundary, unattributable: plan.unprovable,
-  };
+  const usageState = { walk: newCodexUsageWalk({ unattributable: plan.unprovable }), boundary: plan.boundary };
   const titleState = { firstPrompt: '' };
   // Opened by task_started (turn start remembered), closed either by a
   // prompt→agent-message gap sample or by task_complete's own duration_ms
@@ -1209,7 +1205,7 @@ export function parseCodex(raw, { id, withTurns = false }) {
     processCodexLine(rec, turns, stats, titleState, usageState, latState, metaState, e, ms, withTurns);
   }
 
-  finalizeCodexUsage(rec, usageState);
+  finalizeCodexUsage(rec, usageState.walk);
   rec.title = maskSecrets(clip(titleState.firstPrompt)) || '(untitled)';
   return { session: seal(rec), turns, parseStats: stats };
 }
