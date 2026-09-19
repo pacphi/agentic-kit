@@ -7,8 +7,8 @@ import { esc } from './groups.mjs';
  * stay self-contained — every helper is declared inside it.
  *
  * @param {string} host    'claude' | 'codex' | 'opencode'
- * @param {object} fold    the host's MAIN-session fold from the Context projection
- * @param {object} [ctx]   { policy, health, subagent }
+ * @param {any} fold    the host's MAIN-session fold from the Context projection
+ * @param {any} [ctx]   { policy, health, subagent }
  *   policy   — the Context Budget thresholds (bps), for the pressure tooltip
  *   health   — sourceHealth[host] ({status, reason}); makes the empty state
  *              distinguish "not installed" / "unreadable" / "nothing ran"

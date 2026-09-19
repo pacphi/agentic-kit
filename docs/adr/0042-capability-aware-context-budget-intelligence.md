@@ -1,8 +1,8 @@
 # ADR-0042 — Capability-aware context budget intelligence
 
-- **Status:** Implemented; evidence, policy, guidance budgets, hook assurance, and dashboard delivery
+- **Status:** Implemented; evidence, policy, guidance budgets, hook assurance, and dashboard delivery; Claude window evidence via the statusline ledger (2026-09-19)
 - **Date:** 2026-09-02
-- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
+- **Updated:** 2026-09-19 — Claude window evidence is runtime-observed through the statusline ledger (usage cache v24); earlier: reconciled against repository source and tests for issue #211
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0008](0008-guidance-target-scope-split.md),
   [ADR-0009](0009-usage-scorecard-local-transcript-analytics.md),
@@ -50,6 +50,57 @@ sample, window observation or rate-limit snapshot; `samples`, `peak` and the
 histogram now describe the subagent's own calls. Pressure still uses the window
 carried by the same `token_count` envelope. The usage cache is v23. See
 [ADR-0052](0052-codex-usage-attribution.md).
+
+## Amendment (2026-09-19): Claude's context window is runtime-observed through the statusline ledger
+
+Claude transcripts never record the model's context window, so Claude sessions
+had input evidence and no denominator ("Input only"). Claude offers 200K and 1M
+variants of one model, so a catalogue maximum would have been a guess and is
+still forbidden. The window IS pushed by Claude Code in every statusline payload
+(`context_window.context_window_size`, with `model.id`), the same sanctioned
+push channel as the quota tee in [ADR-0010](0010-provider-mediated-quota-reads.md);
+no credential is read and nothing is polled.
+
+The managed statusline footer now keeps a **per-session change log**,
+`<config>/claude-context-windows/<session_id>.json` = `[{t, size, model}]`
+(directory 0700, file 0600, atomic tmp+rename, at most 64 entries, files older
+than 35 days pruned only when a new session's file is created). An entry is
+appended only when the size or model differs from the file's last entry, so a
+mid-session `/model` switch is captured and the roughly five-second refresh does
+not write. It is independent of `rate_limits` (API-key sessions are covered),
+holds no prompt text or secrets, validates the session id as a filename, and
+fails silently: it never costs a render. One file per session means concurrent
+sessions share no read-modify-write file.
+
+The parser pairs each assistant message with **the window in effect at that
+message's timestamp** ([claude-window-ledger.mjs](../../src/lib/claude-window-ledger.mjs)):
+the latest entry with `t <=` the message time; a message before the first entry
+takes the first entry's window only when it is within 120 seconds of it,
+otherwise the window is unknown (never a guess). A pressure sample therefore
+exists exactly when a ledger window covers the message; gross input is
+unchanged (fresh + cache read + cache write). `parseClaude` stays pure — the log
+arrives as an option — and only MAIN sessions are paired: a subagent transcript
+(`parent/stem`) may run a different model and window than the session the
+statusline reported, so it stays input-only.
+
+The index keys a Claude entry on the transcript's mtime and size **and** the
+ledger file's mtime and size (`wmtime`/`wsize`), so a ledger that appears or
+changes after a transcript was parsed re-parses the session instead of leaving a
+finished session at "Input only" forever. A ledger that later disappears (the
+35-day prune) does not invalidate the entry: the pressure already derived is real
+evidence. The usage cache is **v24**, which also drops the duplicate Codex context
+samples an identical repeated `token_count` event added (about 2.8% of events).
+
+There is no backfill. Sessions without a ledger — everything before the updated
+statusline template was projected (`ak sync`), headless `claude -p` runs, and
+subagents — remain "Input only". OpenCode records no runtime window and stays
+"not measured". The Usage → Context projection folds MAIN sessions into the host
+cards, summary and attention rows; subagent sessions (Claude sidechains, Codex
+`thread_source: subagent`) are folded separately under `subagents`
+(projection schema 3), because pooling them mixed a 56.8K main median with a
+179.8K subagent one. Each card's pressure area carries a tooltip stating its
+host's formula and evidence source, and an empty card distinguishes not installed,
+unreadable (with the health reason) and nothing ran in the window.
 
 ## Context
 
@@ -130,7 +181,8 @@ for that session. Drops are retained as negative growth; they are not automatica
 compaction.
 
 Persisted usage schema changes force a reparse. The legacy `ctxWindow` and `ctxLastTokens` fields
-may remain temporarily for compatibility, but the normalized evidence is authoritative.
+may remain temporarily for compatibility, but the normalized evidence is authoritative. The
+current cache schema is **v24** (Claude window ledger pairing; see the 2026-09-19 amendment).
 
 Cache schema **v17** introduced the normalized session evidence: bounded
 first/last/peak/count input summaries, first/last/min/max/count window summaries and a fixed

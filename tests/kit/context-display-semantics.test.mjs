@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {esc} from '../../src/lib/dashboard/groups.mjs';
+import {contextHostCard} from '../../src/lib/dashboard/context-host-card.mjs';
 const source=fs.readFileSync(new URL('../../src/lib/dashboard/client/usage-context-hooks.mjs',import.meta.url),'utf8')
  .replace(/^import .*;$/gm,'').replace(/\bexport /g,'');
 const scope=vm.createContext({esc});
-vm.runInContext(source+'\nglobalThis.api={ctxTokens,contextHostCard};',scope);
-const {ctxTokens,contextHostCard}=scope.api;
+vm.runInContext(source+'\nglobalThis.api={ctxTokens};',scope);
+const {ctxTokens}=scope.api;
 test('missing token evidence is not rendered as zero',()=>{
  for(const value of [null,undefined,'',NaN])assert.equal(ctxTokens(value),'—');
  assert.equal(ctxTokens(0),'0');
