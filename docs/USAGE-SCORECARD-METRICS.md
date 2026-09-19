@@ -1312,8 +1312,8 @@ both credential-free for ak:
 - **Claude** — Claude Code pushes `rate_limits` (session/weekly/per-model
   `used_percentage` + `resets_at`) into every statusLine invocation on Pro/Max.
   The kit's managed statusline footer tees that JSON to
-  `~/.config/agentic-kit/claude-rate-limits.json` (throttled, atomic, 0600) —
-  the `quota tee` block in `statusline-footer.cjs:22`. (The footer also appends the
+  `~/.config/agentic-kit/claude-rate-limits.json` (`%APPDATA%\agentic-kit` on Windows; throttled, atomic, 0600) —
+  the `quota tee` block in `statusline-footer.cjs:35`. (The footer also appends the
   payload's `context_window_size` to a per-session change log for Usage → Context; that
   ledger is independent of `rate_limits` and is described in §23.) The dashboard reads the
   tee via `normalizeClaudeLimits` (`quota.mjs:69`), which maps `five_hour` /

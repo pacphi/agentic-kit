@@ -69,7 +69,9 @@ appended only when the size or model differs from the file's last entry, so a
 mid-session `/model` switch is captured and the roughly five-second refresh does
 not write. It is independent of `rate_limits` (API-key sessions are covered),
 holds no prompt text or secrets, validates the session id as a filename, and
-fails silently: it never costs a render. One file per session means concurrent
+fails silently: it never costs a render. The footer resolves the kit config dir exactly as
+`paths.mjs` does (`%APPDATA%` on Windows, `XDG_CONFIG_HOME` or `~/.config` elsewhere), for the
+ledger and the quota tee alike, and a parity test fails if the two resolutions diverge. One file per session means concurrent
 sessions share no read-modify-write file.
 
 The parser pairs each assistant message with **the window in effect at that

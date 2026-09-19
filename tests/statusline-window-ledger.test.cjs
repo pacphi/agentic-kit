@@ -26,6 +26,7 @@ const block = fs.readFileSync(SRC, 'utf8')
 // eslint-disable-next-line no-eval -- first-party template source, see statusline-segments.test.cjs
 const load = (name, prefix = '') => eval('(function(){' + prefix + block + '\nreturn ' + name + ';})()');
 const windowTee = load('rufloWindowTeeSegment');
+const quotaTee = load('rufloQuotaTeeSegment');
 
 let passed = 0, failed = 0;
 function test(name, fn) {
@@ -173,7 +174,50 @@ test('the full renderer still returns text and records the ledger as a side effe
   } finally { delete globalThis.__akPayload; }
 }));
 
-const EXPECTED = 13;
+// ── kit config dir parity with src/lib/paths.mjs configBase() ───────────────
+// win32: %APPDATA% (fallback ~/AppData/Roaming), XDG ignored. POSIX: XDG_CONFIG_HOME
+// || ~/.config, byte-for-byte as before. Injected via ctx.env/ctx.platform/ctx.os.
+function tmpHome() { return fs.mkdtempSync(path.join(os.tmpdir(), 'ak-cfg-parity-')); }
+const RATE = { five_hour: { used_percentage: 12 } };
+
+test('win32: the ledger lands under %APPDATA%/agentic-kit even when XDG_CONFIG_HOME is set', () => {
+  const appdata = tmpHome(), xdg = tmpHome(), home = tmpHome();
+  tee(payload(), { platform: 'win32', env: { APPDATA: appdata, XDG_CONFIG_HOME: xdg }, os: { homedir: () => home } });
+  assert(fs.existsSync(path.join(appdata, 'agentic-kit', 'claude-context-windows', SID + '.json')), 'ledger must be under APPDATA');
+  eq(fs.readdirSync(xdg), [], 'XDG_CONFIG_HOME must be ignored on win32');
+  eq(fs.readdirSync(home), [], 'nothing under home');
+});
+
+test('win32 without APPDATA falls back to ~/AppData/Roaming', () => {
+  const home = tmpHome();
+  tee(payload(), { platform: 'win32', env: {}, os: { homedir: () => home } });
+  assert(fs.existsSync(path.join(home, 'AppData', 'Roaming', 'agentic-kit', 'claude-context-windows', SID + '.json')));
+});
+
+test('win32: the rate-limits tee (pre-existing mismatch) now lands under %APPDATA%/agentic-kit', () => {
+  const appdata = tmpHome(), xdg = tmpHome();
+  quotaTee({ fs, path, os, platform: 'win32', env: { APPDATA: appdata, XDG_CONFIG_HOME: xdg }, getStdinData: () => payload({ rate_limits: RATE }) });
+  const tee = JSON.parse(fs.readFileSync(path.join(appdata, 'agentic-kit', 'claude-rate-limits.json'), 'utf8'));
+  eq(tee.rate_limits, RATE);
+  eq(fs.readdirSync(xdg), []);
+});
+
+test('POSIX is unchanged: XDG_CONFIG_HOME wins, else ~/.config, for both the ledger and the tee', () => {
+  const xdg = tmpHome(), home = tmpHome();
+  const env = { XDG_CONFIG_HOME: xdg };
+  tee(payload(), { platform: 'linux', env, os: { homedir: () => home } });
+  quotaTee({ fs, path, os: { homedir: () => home }, platform: 'linux', env, getStdinData: () => payload({ rate_limits: RATE }) });
+  assert(fs.existsSync(path.join(xdg, 'agentic-kit', 'claude-context-windows', SID + '.json')));
+  assert(fs.existsSync(path.join(xdg, 'agentic-kit', 'claude-rate-limits.json')));
+  const home2 = tmpHome();
+  tee(payload(), { platform: 'darwin', env: {}, os: { homedir: () => home2 } });
+  quotaTee({ fs, path, os: { homedir: () => home2 }, platform: 'darwin', env: {}, getStdinData: () => payload({ rate_limits: RATE }) });
+  assert(fs.existsSync(path.join(home2, '.config', 'agentic-kit', 'claude-context-windows', SID + '.json')));
+  assert(fs.existsSync(path.join(home2, '.config', 'agentic-kit', 'claude-rate-limits.json')));
+  eq(fs.readdirSync(home), [], 'XDG set: home untouched');
+});
+
+const EXPECTED = 17;
 if (passed + failed !== EXPECTED) {
   console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
   process.exit(1);

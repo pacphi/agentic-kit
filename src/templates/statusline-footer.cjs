@@ -19,6 +19,19 @@ function rufloStatuslineDebug(stage, error){
 }
 // ── shared gauge helper (used by the SONA segment) ────────────────────────────
 function rufloBar(n, max){ n = Math.max(0, Math.min(max, n)); return "[" + "●".repeat(n) + "○".repeat(max - n) + "]"; }
+// ── kit config dir: MIRRORS src/lib/paths.mjs configBase()/configDir() (this template
+// is self-contained CJS and cannot import it). win32: %APPDATA% (fallback
+// ~/AppData/Roaming), XDG ignored; elsewhere: XDG_CONFIG_HOME || ~/.config. Used by BOTH
+// the quota tee and the context-window ledger so they land where the dashboard reads.
+// tests/kit/statusline-config-dir-parity.test.mjs fails if the two ever diverge.
+// ctx.platform / ctx.env exist only so tests can inject a platform; production omits them.
+function rufloKitConfigDir(ctx){
+  var env = ctx.env || process.env, platform = ctx.platform || process.platform;
+  var base = platform === "win32"
+    ? (env.APPDATA || ctx.path.join(ctx.os.homedir(), "AppData", "Roaming"))
+    : (env.XDG_CONFIG_HOME || ctx.path.join(ctx.os.homedir(), ".config"));
+  return ctx.path.join(base, "agentic-kit");
+}
 // ── quota tee (ADR-0010): Claude Code pushes plan utilization into every
 // statusline invocation (rate_limits: five_hour/seven_day used_percentage +
 // reset epochs — code.claude.com/docs/en/statusline.md). This is the ONLY
@@ -35,7 +48,7 @@ function rufloQuotaTeeSegment(ctx){
     if (typeof ctx.getStdinData === "function") {
       var _qsd = ctx.getStdinData();
       if (_qsd && _qsd.rate_limits && typeof _qsd.rate_limits === "object") {
-        var _qdir = ctx.path.join(process.env.XDG_CONFIG_HOME || ctx.path.join(ctx.os.homedir(), ".config"), "agentic-kit");
+        var _qdir = rufloKitConfigDir(ctx);
         var _qf = ctx.path.join(_qdir, "claude-rate-limits.json");
         var _qold = 0;
         try { _qold = ctx.fs.statSync(_qf).mtimeMs; } catch(e){ rufloStatuslineDebug("quota-cache-stat", e); }
@@ -115,7 +128,7 @@ function rufloWindowTeeSegment(ctx){
     if (typeof ctx.getStdinData !== "function") return;
     var obs = rufloWindowObservation(ctx);
     if (!obs) return;
-    var dir = ctx.path.join(process.env.XDG_CONFIG_HOME || ctx.path.join(ctx.os.homedir(), ".config"), "agentic-kit", "claude-context-windows");
+    var dir = ctx.path.join(rufloKitConfigDir(ctx), "claude-context-windows");
     var file = ctx.path.join(dir, obs.sid + ".json");
     var log = rufloWindowReadLog(ctx, file);
     var last = log && log.length ? log[log.length - 1] : null;
