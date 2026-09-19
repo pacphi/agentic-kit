@@ -11,6 +11,7 @@
 // a whole file, and no input here may throw.
 import { createHash } from 'node:crypto';
 import { repoRoot } from './paths.mjs';
+import { windowAt } from './claude-window-ledger.mjs';
 import { MAX_TELEMETRY_UNKNOWN_KINDS } from './usage-telemetry.mjs';
 import { decodeClaudeRecord, decodeCodexRecord } from './telemetry-records.mjs';
 import { codexReplayPlan, isCodexReplayLine } from './codex-replay.mjs';
@@ -660,7 +661,7 @@ function stageClaudeMessage(msgState, decoded, at, model) {
 /** Account every staged message exactly once: response count, punchcard,
  *  the per-day/model usage row and the context sample — all from the message's
  *  last line. Runs after the whole transcript has been read. */
-function flushClaudeMessages(rec, msgState) {
+function flushClaudeMessages(rec, msgState, windowLog) {
   for (const { at, model, usage } of msgState.groups.values()) {
     rec.responses++;
     const pk = punchKey(at);
@@ -675,7 +676,10 @@ function flushClaudeMessages(rec, msgState) {
     // with a fabricated 0. A completion with neither fresh input nor a cache
     // read carried no context evidence to record.
     const ctxTokens = usage.input + usage.cacheRead + usage.cacheWrite;
-    if (ctxTokens > 0) noteContextSample(rec, ctxTokens);
+    // The denominator is the window the statusline reported at this message's
+    // time (claude-window-ledger.mjs); null when no ledger covers it — the
+    // sample is then input-only, never a guessed pressure (ADR-0042).
+    if (ctxTokens > 0) noteContextSample(rec, ctxTokens, windowAt(windowLog, at));
   }
   msgState.groups.clear();
 }
@@ -738,7 +742,7 @@ function recordClaudeAssistantTurn(rec, turns, latState, msgState, ms, decoded, 
  * populated when `withTurns` (the reader path) — the scan path does not need
  * message bodies and holding them would balloon memory over 3,000 files.
  */
-export function parseClaude(raw, { id, dirName, withTurns = false }) {
+export function parseClaude(raw, { id, dirName, withTurns = false, windowLog = null }) {
   const rec = blankSession(id, 'claude');
   rec.sessionOrigin = usageSessionOrigin(raw, 'claude');
   const turns = [];
@@ -767,7 +771,7 @@ export function parseClaude(raw, { id, dirName, withTurns = false }) {
     if (decoded.role !== 'assistant' || !e.message) continue;
     recordClaudeAssistantTurn(rec, turns, latState, msgState, ms, decoded, withTurns);
   }
-  flushClaudeMessages(rec, msgState);
+  flushClaudeMessages(rec, msgState, windowLog);
 
   rec.title = maskSecrets(titleState.aiTitle || clip(titleState.firstPrompt)) || '(untitled)';
   if (rec.project === 'unknown') applyProject(rec, projectLabel(null, dirName));
