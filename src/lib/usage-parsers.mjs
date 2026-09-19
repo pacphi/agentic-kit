@@ -13,6 +13,7 @@ import { createHash } from 'node:crypto';
 import { repoRoot } from './paths.mjs';
 import { MAX_TELEMETRY_UNKNOWN_KINDS } from './usage-telemetry.mjs';
 import { decodeClaudeRecord, decodeCodexRecord } from './telemetry-records.mjs';
+import { codexReplayPlan, isCodexReplayLine } from './codex-replay.mjs';
 import { toMs, maskSecrets } from './usage-aggregate.mjs';
 import { normalizeMode } from './usage-modes.mjs';
 import { provenanceOf } from './usage-provenance.mjs';
@@ -880,10 +881,15 @@ function applyCodexRateLimit(rec, rl, ms) {
 }
 
 /** `event_msg` → `token_count`: keep the LAST cumulative snapshot (see
- *  parseCodex's own doc comment for why last-only), plus its rate limits. */
-function handleCodexTokenCount(rec, stats, usageState, decoded, ms) {
+ *  parseCodex's own doc comment for why last-only), plus its rate limits. A
+ *  REPLAYED snapshot (a forked subagent's copy of its parent's history) only
+ *  advances `baseline`, the cumulative total already spent before the thread's
+ *  own turns began — it is neither the thread's own usage nor a context or
+ *  rate-limit observation of it. */
+function handleCodexTokenCount(rec, stats, usageState, decoded, ms, replay) {
   stats.tokenCountEvents++;
   const t = decoded.usage.total;
+  if (replay) { if (t) usageState.baseline = t; return; }
   if (t) { usageState.lastUsage = t; usageState.lastUsageAt = ms; }
   // last.input_tokens is already gross prompt input. cached_input_tokens is a
   // subset, not an additional amount (unlike Claude/OpenCode's split fields).
@@ -949,12 +955,12 @@ function isCodexHumanMessage(text) {
  *  parseClaude keeps a harness-origin "user" entry's turn row) — but only a
  *  genuinely human one (isCodexHumanMessage) counts toward `rec.prompts`,
  *  sets the session title, or opens the prompt→agent-message latency
- *  window. `stats.prompts` stays a raw per-event-shape diagnostic,
- *  deliberately ungated: it answers "how many user_message-shaped events did
- *  this file carry", which is a different, still-useful question from "how
- *  many were human". */
-function handleCodexUserMessage(rec, turns, stats, titleState, latState, decoded, ms, withTurns) {
-  stats.prompts++;
+ *  window. `stats.prompts` (counted in handleCodexEventMsg) stays a raw
+ *  per-event-shape diagnostic, deliberately ungated: it answers "how many
+ *  user_message-shaped events did this file carry", which is a different,
+ *  still-useful question from "how many were human" — or how many were the
+ *  thread's own rather than a replayed parent's. */
+function handleCodexUserMessage(rec, turns, titleState, latState, decoded, ms, withTurns) {
   const text = decoded.text;
   const human = isCodexHumanMessage(text);
   if (human) {
@@ -976,9 +982,8 @@ function handleCodexUserMessage(rec, turns, stats, titleState, latState, decoded
   }
 }
 
-function handleCodexAssistantMessage(rec, turns, stats, latState, decoded, ms, withTurns) {
+function handleCodexAssistantMessage(rec, turns, latState, decoded, ms, withTurns) {
   rec.responses++;
-  stats.responses++;
   const at = Number.isFinite(ms) ? ms : (rec.start ?? Date.now());
   const pk = punchKey(at);
   rec.punchcard[pk] = (rec.punchcard[pk] ?? 0) + 1;
@@ -1001,12 +1006,12 @@ function handleCodexAssistantMessage(rec, turns, stats, latState, decoded, ms, w
 
 /** `event_msg` → a decoded `message` (user or assistant), after generation/
  *  unknown-type bookkeeping already ran in handleCodexEventMsg. */
-function handleCodexEventMessage(rec, turns, stats, titleState, latState, decoded, ms, withTurns) {
+function handleCodexEventMessage(rec, turns, titleState, latState, decoded, ms, withTurns) {
   if (decoded.role === 'user') {
-    handleCodexUserMessage(rec, turns, stats, titleState, latState, decoded, ms, withTurns);
+    handleCodexUserMessage(rec, turns, titleState, latState, decoded, ms, withTurns);
     return;
   }
-  handleCodexAssistantMessage(rec, turns, stats, latState, decoded, ms, withTurns);
+  handleCodexAssistantMessage(rec, turns, latState, decoded, ms, withTurns);
 }
 
 /** The four Codex `item_completed` item types this parser tallies into
@@ -1033,8 +1038,12 @@ const CODEX_KNOWN_NON_TOOL_ITEM_TYPES = new Set([
  *  task_complete/turn_aborted), a message, or unknown (generation/unknown-
  *  item-type diagnostics apply to every non-token_count/non-lifecycle shape,
  *  so they run before the message/non-message split). */
-function handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState, decoded, payload, ms, withTurns) {
-  if (decoded.type === 'tokenCount') { handleCodexTokenCount(rec, stats, usageState, decoded, ms); return; }
+function handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState, decoded, payload, ms, withTurns, replay) {
+  if (decoded.type === 'tokenCount') { handleCodexTokenCount(rec, stats, usageState, decoded, ms, replay); return; }
+  // Lifecycle events of REPLAYED history are the parent's turns, not this
+  // thread's: they must not open latency windows, sample a context window or
+  // count the parent's aborts against the child.
+  if (replay && ['task_started', 'task_complete', 'turn_aborted'].includes(payload.type)) return;
   if (payload.type === 'task_started') { handleCodexTaskStarted(rec, latState, payload); return; }
   if (payload.type === 'task_complete') { handleCodexTaskComplete(rec, latState, payload); return; }
   if (payload.type === 'turn_aborted') {
@@ -1059,13 +1068,15 @@ function handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState
     // shapes. (The field is named unknownItemType because the DECODER, which
     // has no tool vocabulary, does not normalize these to messages.)
     if (CODEX_TOOL_ITEM_TYPES.has(decoded.unknownItemType)) {
-      rec.tools[decoded.unknownItemType] = (rec.tools[decoded.unknownItemType] ?? 0) + 1;
+      if (!replay) rec.tools[decoded.unknownItemType] = (rec.tools[decoded.unknownItemType] ?? 0) + 1;
     } else if (!CODEX_KNOWN_NON_TOOL_ITEM_TYPES.has(decoded.unknownItemType)) {
       recordCodexUnknownType(stats, decoded.unknownItemType);
     }
   }
   if (decoded.type !== 'message') return;
-  handleCodexEventMessage(rec, turns, stats, titleState, latState, decoded, ms, withTurns);
+  if (decoded.role === 'user') stats.prompts++; else stats.responses++;
+  if (replay) return;
+  handleCodexEventMessage(rec, turns, titleState, latState, decoded, ms, withTurns);
 }
 
 /** Raw payload of one rollout line, defensively defaulted — mirrors
@@ -1084,7 +1095,8 @@ function processCodexLine(rec, turns, stats, titleState, usageState, latState, m
   if (decoded.type === 'meta') { handleCodexMeta(rec, metaState, decoded); return; }
   if (decoded.type === 'turnContext') { handleCodexTurnContext(rec, decoded, rawPayload(e)); return; }
   if (e.type !== 'event_msg') return;
-  handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState, decoded, rawPayload(e), ms, withTurns);
+  const replay = isCodexReplayLine(usageState.boundary, e);
+  handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState, decoded, rawPayload(e), ms, withTurns, replay);
 }
 
 /** Codex can import a Claude Code transcript as a thread. The host stamps such
@@ -1113,19 +1125,28 @@ function importedCodexSession(rec, stats) {
   return { session: seal(rec), turns: [], parseStats: { ...stats, imported: true } };
 }
 
-/** The session-total usage row, derived from the LAST token_count event seen
- *  (see parseCodex's doc comment). A no-op for a subagent thread (its
- *  cumulative total double-counts the parent's already-billed tokens) or a
- *  rollout that never carried a token_count at all. */
+/** One cumulative field, non-negative: `last - baseline`, where a missing or
+ *  non-numeric side reads as 0. */
+function codexUsageDelta(last, baseline, field) {
+  return Math.max(0, (Number(last?.[field]) || 0) - (Number(baseline?.[field]) || 0));
+}
+
+/** The session-total usage row: the LAST token_count event's cumulative total
+ *  (see parseCodex's doc comment) minus `baseline`, the total a forked
+ *  subagent had inherited from its parent's replayed history — so a subagent
+ *  reports its OWN spend, an unforked thread (no baseline) its whole total.
+ *  A no-op for a rollout that never carried an own token_count at all, and for
+ *  a subagent from a pre-ordinal host, whose replay cannot be told from its own
+ *  turns (`unattributable`, see codexReplayPlan). */
 function finalizeCodexUsage(rec, usageState) {
-  const { lastUsage, lastUsageAt } = usageState;
-  if (!lastUsage || rec.threadSource === 'subagent') return;
-  const cacheRead = Number(lastUsage.cached_input_tokens) || 0;
-  const gross = Number(lastUsage.input_tokens) || 0;
+  const { lastUsage, lastUsageAt, baseline, unattributable } = usageState;
+  if (!lastUsage || unattributable) return;
+  const cacheRead = codexUsageDelta(lastUsage, baseline, 'cached_input_tokens');
+  const gross = codexUsageDelta(lastUsage, baseline, 'input_tokens');
   const at = Number.isFinite(lastUsageAt) ? lastUsageAt : (rec.end ?? rec.start ?? Date.now());
   addUsage(rec, localDay(at), rec.models[rec.models.length - 1] ?? 'unknown', {
     input: Math.max(0, gross - cacheRead),
-    output: Number(lastUsage.output_tokens) || 0,
+    output: codexUsageDelta(lastUsage, baseline, 'output_tokens'),
     cacheRead,
     cacheWrite: 0,
     responses: rec.responses,
@@ -1133,7 +1154,7 @@ function finalizeCodexUsage(rec, usageState) {
   // Reasoning tokens are a SUBSET of output_tokens (they bill as output) —
   // recorded as detail, never added into any token sum, or the total would
   // double-count exactly the reasoning share.
-  rec.reasoningOutput = Number(lastUsage.reasoning_output_tokens) || 0;
+  rec.reasoningOutput = codexUsageDelta(lastUsage, baseline, 'reasoning_output_tokens');
 }
 
 /**
@@ -1143,20 +1164,33 @@ function finalizeCodexUsage(rec, usageState) {
  * `cached_input_tokens`, which bill as cache reads, so the two are separated.
  *
  * A rollout whose `session_meta.thread_source` is `subagent` is a delegated
- * thread whose file replays its parent thread's ENTIRE prior token history
- * as duplicate events before its own new turns (openai/codex thread_spawn
- * behavior — see ccusage/ccusage#950, which measured up to 91x cost
- * inflation from exactly this). Its cumulative `total_token_usage` therefore
- * double-counts tokens the parent session already billed, so it is excluded
- * from cost/token aggregation here; the session record itself is kept
- * (`threadSource` is surfaced on it) so it stays visible/auditable.
+ * thread whose file may replay its parent thread's ENTIRE prior history
+ * (messages, tool runs, token snapshots) as duplicate events before its own
+ * new turns (openai/codex thread_spawn behavior — see ccusage/ccusage#950,
+ * which measured up to 91x cost inflation from counting exactly this). Its
+ * cumulative `total_token_usage` therefore includes tokens the parent already
+ * billed. codex-replay.mjs finds where the replay ends; everything before that
+ * ordinal is counted for nothing (no prompt, response, tool, context sample or
+ * usage), and the subagent reports its OWN tokens: the final cumulative total
+ * minus the total at the end of the replay. The record keeps `threadSource`,
+ * so its prompts stay out of human-prompt figures. A subagent whose replay
+ * cannot be separated (no ordinals at all) reports no usage, as before.
+ *
+ * A rollout Codex imported from a Claude Code transcript
+ * (`external-import-turn-N`) is not Codex activity at all — see
+ * importedCodexSession.
  */
 export function parseCodex(raw, { id, withTurns = false }) {
   const rec = blankSession(id, 'codex');
   rec.sessionOrigin = usageSessionOrigin(raw, 'codex');
   const turns = [];
   const stats = codexParseStats();
-  const usageState = { lastUsage: null, lastUsageAt: null };
+  const lines = { [Symbol.iterator]: () => jsonLines(raw) };
+  const plan = codexReplayPlan(lines);
+  const usageState = {
+    lastUsage: null, lastUsageAt: null, baseline: null,
+    boundary: plan.boundary, unattributable: plan.unprovable,
+  };
   const titleState = { firstPrompt: '' };
   // Opened by task_started (turn start remembered), closed either by a
   // prompt→agent-message gap sample or by task_complete's own duration_ms
@@ -1168,7 +1202,7 @@ export function parseCodex(raw, { id, withTurns = false }) {
   // follow a later (possibly replayed-parent) meta.
   const metaState = { seen: false };
 
-  for (const e of jsonLines(raw)) {
+  for (const e of lines) {
     if (isCodexImportedLine(e)) return importedCodexSession(rec, stats);
     const ms = toMs(e.timestamp);
     noteSpan(rec, ms);

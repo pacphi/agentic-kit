@@ -85,7 +85,44 @@ export class Rollout {
     return this;
   }
 
+  /** Rewrite the FIRST line's payload (the meta) once later facts are known,
+   *  e.g. the ordinal at which a subagent's own history begins. */
+  patchMeta(patch) {
+    const first = JSON.parse(this.lines[0]);
+    first.payload = { ...first.payload, ...patch };
+    this.lines[0] = JSON.stringify(first);
+    return this;
+  }
+
   toString() { return `${this.lines.join('\n')}\n`; }
+}
+
+/** The host's own subagent envelope shape. */
+export const subagentMeta = (id, extra = {}) => ({
+  id, thread_source: 'subagent', agent_path: '/root/worker',
+  source: { subagent: { thread_spawn: { parent_thread_id: 'parent', depth: 1 } } },
+  ...extra,
+});
+
+/**
+ * A FORKED subagent: its file opens with the child's meta, replays the
+ * parent's whole history (including the parent's own session_meta line and its
+ * cumulative token_counts), then records the child's own turns. `own(r)` adds
+ * the child's own events after the replay; the meta's
+ * `subagent_history_start_ordinal` is patched to the ordinal of the first own
+ * event unless `start` overrides it (the real host sometimes writes the file
+ * length instead — the degenerate case).
+ */
+export function forkedSubagent({ id = 'child', parent, own, start, meta = {} }) {
+  const r = new Rollout({ id, ts: '2026-07-24T10:00:00.000Z' }).meta(subagentMeta(id, meta));
+  r.replay(parent);
+  const firstOwn = r.ordinal;
+  r.taskStarted('own-turn');
+  r.turn('gpt-5.6-sub');
+  r.raw('response_item', { type: 'agent_message', author: '/root', recipient: meta.agent_path ?? '/root/worker', content: [] });
+  own(r);
+  r.patchMeta({ subagent_history_start_ordinal: start === 'end' ? r.ordinal : (start ?? firstOwn) });
+  return r;
 }
 
 /** A temp sandbox with claude/ and codex/YYYY/MM/DD rollout dirs. */

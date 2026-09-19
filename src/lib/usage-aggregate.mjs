@@ -870,10 +870,10 @@ function buildSessionRow(rec, usage, verdict) {
     _span: [rec.start ?? rec.end, rec.end],
     // Did this session carry ANY token evidence? A session with no usage rows
     // costs $0 structurally — nothing was measured — rather than because the
-    // work was cheap. Codex subagent rollouts are the common case: their tokens
-    // are stripped as a double-count (applyCodexLedger), leaving a real session
-    // with an empty ledger. The cost distribution excludes them; see
-    // finishTotals.
+    // work was cheap. The Codex case is a subagent identified only by the
+    // ledger, whose tokens are stripped as a double-count (applyCodexLedger),
+    // leaving a real session with an empty ledger. The cost distribution
+    // excludes them; see finishTotals.
     _priced: (rec.usage?.length ?? 0) > 0,
     // Pre-v2 cache entries have no `active`; fall back to the whole span so a
     // stale record degrades to the old figure instead of vanishing.
@@ -1280,14 +1280,15 @@ export function aggregate(records, { days, now, cutoff, deps, previous = false, 
  *   - a session whose rollout carried no `thread_source` is backfilled from
  *     the ledger's `threads.thread_source` (or marked `subagent` when a
  *     spawn edge names it as a child);
- *   - a session the ledger says is a subagent has its token usage STRIPPED,
- *     mirroring the parse-time exclusion: its rollout replays the parent's
- *     entire token history, so keeping the tokens double-counts the parent
- *     (ccusage/ccusage#950). `reasoningOutput` goes with them — it is read
- *     off the SAME cumulative token_count snapshot (finalizeCodexUsage) and
- *     carries the same inflation, and leaving it made the session detail
- *     render a replayed "reasoning 412K (in out)" beside an output total the
- *     strip had just zeroed. The record itself stays visible/auditable.
+ *   - a session that ONLY the ledger (never its own rollout) identifies as a
+ *     subagent has its token usage STRIPPED: its parsed usage is the
+ *     unsubtracted cumulative total, which replays the parent's entire token
+ *     history and would double-count the parent (ccusage/ccusage#950). A
+ *     rollout that says `thread_source: subagent` itself is untouched — the
+ *     parser already reduced it to the subagent's OWN usage (codex-replay.mjs,
+ *     ADR-0052), which is real spend. `reasoningOutput` is stripped with the
+ *     tokens (same cumulative snapshot, same inflation). The record itself
+ *     stays visible/auditable.
  * Exported for test.
  */
 export function applyCodexLedger(records, ledger) {
@@ -1297,8 +1298,9 @@ export function applyCodexLedger(records, ledger) {
     const t = ledger.threads.get(rec.id);
     const fromEdges = ledger.parents instanceof Map && ledger.parents.has(rec.id) ? 'subagent' : null;
     const source = rec.threadSource ?? t?.threadSource ?? fromEdges;
-    const stripped = !rec.usage.length && !rec.reasoningOutput;
-    if (source === rec.threadSource && (source !== 'subagent' || stripped)) return rec;
+    // A rollout that classified ITSELF (any source, subagent included) already
+    // carries the right usage: a subagent's is its own, replay subtracted.
+    if (source === rec.threadSource) return rec;
     const out = { ...rec, threadSource: source };
     if (source === 'subagent') { out.usage = []; out.reasoningOutput = 0; }
     return out;

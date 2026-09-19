@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { buildIndex, SCHEMA_VERSION, _resetForTest } from '../../src/lib/usage-index.mjs';
 import { parseCodex } from '../../src/lib/usage-parsers.mjs';
-import { Rollout, usage, codexSandbox, stubDeps } from './helpers/codex-rollout.mjs';
+import { Rollout, usage, codexSandbox, stubDeps, forkedSubagent, subagentMeta } from './helpers/codex-rollout.mjs';
 
 const NOW = Date.parse('2026-07-25T12:00:00.000Z');
 const opts = (sb, extra = {}) => ({
@@ -106,6 +106,124 @@ test('X-3: imports are excluded from sessions, prompts, responses and yield diag
   assert.equal(again.sourceHealth.codex.diagnostics.importedExcluded, 2);
   assert.equal(again.sourceHealth.codex.diagnostics.cachedFiles, 3);
   assert.equal(again.totals.sessions, 1);
+});
+
+// ── X-4 / X-2: subagent replay is not the subagent's own activity ──────────
+
+const W = 200_000;
+
+/** A user thread with two prompts, two answers, two tool runs and known usage:
+ *  cumulative gross 3000 / cached 500 / out 300 / reasoning 30. */
+function parentThread() {
+  return new Rollout({ id: 'parent' }).meta().turn('gpt-5.6')
+    .user('parent prompt one').item('CommandExecution').agent('parent answer one')
+    .tokenCount(usage({ input: 1000, output: 100, reasoning: 30 }), { window: W })
+    .user('parent prompt two').item('CommandExecution').agent('parent answer two')
+    .tokenCount(usage({ input: 2000, cached: 500, output: 200 }), { window: W });
+}
+
+/** The child's OWN work: gross 2000 / cached 300 / out 200 / reasoning 25. */
+const childWork = (r) => r
+  .agent('own answer').item('CommandExecution')
+  .tokenCount(usage({ input: 1500, cached: 300, output: 150, reasoning: 20 }), { window: W })
+  .tokenCount(usage({ input: 500, output: 50, reasoning: 5 }), { window: W });
+
+const rowsOf = (session) => session.usage.reduce((a, r) => ({
+  input: a.input + r.input, output: a.output + r.output, cacheRead: a.cacheRead + r.cacheRead,
+  cacheWrite: a.cacheWrite + r.cacheWrite, responses: a.responses + r.responses,
+}), { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, responses: 0 });
+
+test('X-2/X-4: a forked subagent counts only its own tokens, responses, tools and context samples', () => {
+  const child = forkedSubagent({ parent: parentThread(), own: childWork });
+  const { session, parseStats } = parseCodex(child.toString(), { id: 'child' });
+  assert.equal(session.threadSource, 'subagent', 'still flagged so human-prompt figures exclude it');
+  assert.deepEqual(rowsOf(session), { input: 1700, output: 200, cacheRead: 300, cacheWrite: 0, responses: 1 });
+  assert.equal(session.reasoningOutput, 25, 'the replayed 30 reasoning tokens are not the child\'s');
+  assert.equal(session.prompts, 0, 'replayed parent prompts are not the subagent\'s');
+  assert.equal(session.responses, 1, 'only the child\'s own answer');
+  assert.equal(session.tools.CommandExecution, 1, 'the replayed parent tool runs are not the child\'s');
+  const ctx = session.contextEvidence.input;
+  assert.equal(ctx.samples, 2, 'no context sample from replayed token_counts');
+  assert.equal(ctx.peak, 1500, 'peak pressure comes from the child\'s own events, not the replay\'s 2000');
+  // The raw per-event diagnostics still count everything the file carried.
+  assert.equal(parseStats.responses, 3);
+  assert.equal(parseStats.tokenCountEvents, 4);
+});
+
+test('X-2/X-4: a degenerate history-start ordinal (the file length) falls back to the first message addressed to the thread', () => {
+  const child = forkedSubagent({ parent: parentThread(), own: childWork, start: 'end' });
+  const { session } = parseCodex(child.toString(), { id: 'child' });
+  assert.deepEqual(rowsOf(session), { input: 1700, output: 200, cacheRead: 300, cacheWrite: 0, responses: 1 });
+  assert.equal(session.prompts, 0);
+  assert.equal(session.contextEvidence.input.samples, 2);
+});
+
+test('X-2: an unforked subagent replays nothing, so ALL of its usage is its own', () => {
+  const r = new Rollout({ id: 'unforked' }).meta(subagentMeta('unforked')).taskStarted('t').turn('gpt-5.6-sub');
+  r.raw('response_item', { type: 'agent_message', author: '/root', recipient: '/root/worker', content: [] });
+  childWork(r);
+  const { session } = parseCodex(r.toString(), { id: 'unforked' });
+  assert.deepEqual(rowsOf(session), { input: 1700, output: 200, cacheRead: 300, cacheWrite: 0, responses: 1 });
+  assert.equal(session.contextEvidence.input.samples, 2);
+});
+
+test('X-2: a guardian-style subagent (no agent path, history start at the file end) counts all of its usage', () => {
+  const r = new Rollout({ id: 'guard' }).meta({ thread_source: 'subagent', source: { subagent: { other: 'guardian' } } })
+    .taskStarted('t').turn('codex-auto-review').user('review this').agent('approved');
+  r.tokenCount(usage({ input: 900, cached: 100, output: 50 }), { window: W });
+  r.patchMeta({ subagent_history_start_ordinal: r.ordinal });
+  const { session } = parseCodex(r.toString(), { id: 'guard' });
+  assert.deepEqual(rowsOf(session), { input: 800, output: 50, cacheRead: 100, cacheWrite: 0, responses: 1 });
+});
+
+test('X-2: a subagent whose every token_count is replayed has no usage of its own', () => {
+  const child = forkedSubagent({ parent: parentThread(), own: (r) => r.agent('no tokens yet') });
+  const { session } = parseCodex(child.toString(), { id: 'child' });
+  assert.deepEqual(session.usage, []);
+  assert.equal(session.reasoningOutput, 0);
+});
+
+test('X-2: a pre-ordinal subagent rollout cannot separate its replay, so its cumulative usage is still not counted', () => {
+  // No `ordinal` on any envelope: the replay is indistinguishable from own
+  // turns. Counting the cumulative total could double-count the parent by
+  // orders of magnitude, so the conservative pre-ADR-0052 behaviour holds.
+  const lines = [
+    { type: 'session_meta', timestamp: '2026-07-24T09:00:00.000Z', payload: { id: 'legacy', cwd: '/Users/me/proj', thread_source: 'subagent' } },
+    { type: 'turn_context', timestamp: '2026-07-24T09:00:01.000Z', payload: { model: 'gpt-5.6' } },
+    { type: 'event_msg', timestamp: '2026-07-24T09:00:02.000Z', payload: { type: 'agent_message', message: 'done' } },
+    { type: 'event_msg', timestamp: '2026-07-24T09:00:03.000Z', payload: { type: 'token_count', info: { total_token_usage: usage({ input: 900_000, cached: 850_000, output: 9000 }) } } },
+  ].map((l) => JSON.stringify(l)).join('\n');
+  const { session } = parseCodex(lines, { id: 'legacy' });
+  assert.deepEqual(session.usage, []);
+  assert.equal(session.responses, 1, 'the session itself stays visible');
+});
+
+test('X-2: the ledger still strips a subagent that only the ledger identifies', async () => {
+  _resetForTest();
+  // A rollout whose meta carries no thread_source: its usage is the
+  // unsubtracted cumulative total, so a ledger-named subagent must not bill it.
+  const raw = nativeRollout('ledgered').toString().replace('"thread_source":"user"', '"thread_source":null');
+  const sb = codexSandbox({ 'rollout-2026-07-24T09-00-00-ledgered.jsonl': raw });
+  const agg = await buildIndex(opts(sb, {
+    codexState: { threads: new Map([['ledgered', { threadSource: 'subagent' }]]), parents: new Map() },
+  }));
+  assert.equal(agg.sessions.find((s) => s.id === 'ledgered').tokens, 0);
+});
+
+test('X-2: aggregation reports the subagent\'s own cost and keeps it out of human prompts', async () => {
+  _resetForTest();
+  const sb = codexSandbox({
+    'rollout-2026-07-24T09-00-00-parent.jsonl': parentThread(),
+    'rollout-2026-07-24T10-00-00-child.jsonl': forkedSubagent({ parent: parentThread(), own: childWork }),
+  });
+  const agg = await buildIndex(opts(sb));
+  const child = agg.sessions.find((s) => s.id === 'child');
+  assert.equal(child.tokens, 2200, 'own tokens: 1700 + 200 + 300');
+  assert.equal(agg.totals.tokens, 3300 + 2200, 'parent 3300 + the child\'s own 2200, replay counted once');
+  assert.equal(agg.totals.humanPrompts, 2, 'the subagent\'s replayed prompts are not human typing');
+  assert.equal(agg.bySource.subagent.sessions, 1);
+  assert.equal(agg.bySource.subagent.tokens, 2200);
+  assert.equal(agg.bySource.main.tokens, 3300);
 });
 
 // ── schema version ──────────────────────────────────────────────────────────

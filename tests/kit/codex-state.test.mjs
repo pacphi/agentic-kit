@@ -130,14 +130,17 @@ test('applyCodexLedger strips reasoningOutput along with the replayed tokens', (
   assert.equal(out.reasoningOutput, 0, 'same replayed snapshot, same double-count');
 });
 
-test('applyCodexLedger strips a subagent whose ONLY replayed figure is reasoningOutput', () => {
-  // The early return must not let a record through just because usage is
-  // already empty while reasoningOutput still carries the inflation.
-  const [out] = applyCodexLedger(
-    [rec({ threadSource: 'subagent', usage: [], reasoningOutput: 412_000 })],
-    ledgerOf({ 'child-1': { threadSource: 'subagent' } }),
-  );
-  assert.equal(out.reasoningOutput, 0);
+// ADR-0052: a rollout that ITSELF says `thread_source: subagent` is parsed to
+// the subagent's OWN usage (replayed parent history subtracted), so the ledger
+// must not strip it — that was the ~40%-of-tokens hole. Only a record the file
+// did not classify (its usage is the unsubtracted cumulative total, replay
+// included) is still stripped when the ledger names it a subagent.
+test('applyCodexLedger keeps the own usage of a subagent the rollout itself classified', () => {
+  const own = rec({ threadSource: 'subagent', reasoningOutput: 25 });
+  const [out] = applyCodexLedger([own], ledgerOf({ 'child-1': { threadSource: 'subagent' } }));
+  assert.equal(out, own, 'returned untouched');
+  assert.equal(out.usage.length, 1);
+  assert.equal(out.reasoningOutput, 25);
 });
 
 test('applyCodexLedger marks a spawn-edge child subagent even without a thread row', () => {
