@@ -1100,6 +1100,12 @@ test('model mix keeps four named families and folds the rest into one dim band',
   assert.match(JS, /for\(k in tot\)if\(k!=="other"\)/);
 });
 
+test('the source-health tooltip carries the common warnings when a host has no per-file diagnostics', () => {
+  // OpenCode's `usage-not-reported:N` lives in diagnostics.common.warnings; the
+  // per-host `warnings` (Codex) is preferred when present so nothing prints twice.
+  assert.match(JS, /if\(q&&q\.warnings&&q\.warnings\.length\) d\+=" · "\+q\.warnings\.join\(", "\);else if\(q&&q\.common&&q\.common\.warnings&&q\.common\.warnings\.length\) d\+=" · "\+q\.common\.warnings\.join\(", "\);/);
+});
+
 test('reliability states a rate with its denominator, and flags direction in words not only color', () => {
   assert.match(JS, /exceptions \/ 1k responses/);
   assert.match(JS, /\(Number\(t\.exceptions\)\|\|0\)\/r\*1000/);

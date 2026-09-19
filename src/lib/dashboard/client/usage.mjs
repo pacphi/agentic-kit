@@ -104,7 +104,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
         var d=pt.status+(pt.reason?" · "+pt.reason:"");
         var q=pt.diagnostics;
         if(q&&q.files) d+=" · "+fmtNum(q.responses)+" responses / "+fmtNum(q.files)+" files";
-        if(q&&q.warnings&&q.warnings.length) d+=" · "+q.warnings.join(", ");
+        if(q&&q.warnings&&q.warnings.length) d+=" · "+q.warnings.join(", ");else if(q&&q.common&&q.common.warnings&&q.common.warnings.length) d+=" · "+q.common.warnings.join(", ");
         if(q&&q.common) d+=" · "+fmtNum(q.common.unitsParsed)+"/"+fmtNum(q.common.unitsSeen)+" parsed · "+fmtNum(q.common.prompts)+" prompts / "+fmtNum(q.common.responses)+" responses";
         return pt.sub?pt.sub+": "+d:d;
       }).join(" · ");

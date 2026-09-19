@@ -226,6 +226,24 @@ function outputWithReasoning(t, cache) {
   return output + reasoning;
 }
 
+/** A completed, error-free assistant message whose every token field is zero
+ *  or absent. */
+function isUnreportedUsage(data, t, cache) {
+  if (data.error != null || !(num(data.time?.completed) > 0)) return false;
+  return [t.input, t.output, t.reasoning, cache.read, cache.write].every((v) => num(v) === 0);
+}
+
+/** The one usage-health warning for a set of parsed OpenCode sessions, or
+ *  none: how many completed responses the providers gave no token counts for.
+ *  Informational — the responses are still counted, just with unknown usage.
+ *  @param {Array<{usage?: Array<{tokensUnreported?: number}>}>} sessions
+ *  @returns {string[]} */
+export function usageNotReportedWarnings(sessions) {
+  let n = 0;
+  for (const rec of sessions) for (const row of rec.usage ?? []) n += Number(row.tokensUnreported) || 0;
+  return n > 0 ? [`usage-not-reported:${n}`] : [];
+}
+
 /** Model/provider/token-usage bookkeeping for one assistant message. Returns
  *  the model id, for the caller's turn row. */
 function recordAssistantUsage(rec, data, at) {
@@ -244,6 +262,13 @@ function recordAssistantUsage(rec, data, at) {
     input: num(t.input), output,
     cacheRead: num(cache.read), cacheWrite: num(cache.write), responses: 1, provider,
   });
+  // A response that FINISHED cleanly yet carries no token counts at all did not
+  // use zero tokens — the provider never reported them (a local model server,
+  // typically; the same rows also record a cost of 0). Counted on the row so
+  // "usage not reported" stays distinguishable from a measured zero; the scan
+  // raises one health warning from these counts. An in-flight, failed or
+  // aborted row is not judged: it has no completed response to have reported.
+  if (isUnreportedUsage(data, t, cache)) usageRow.tokensUnreported = (usageRow.tokensUnreported ?? 0) + 1;
   // Retain missing-cost tokens separately before coalescing by day/model.
   usageRow.costObserved ??= null;
   if (typeof data.cost === 'number' && Number.isFinite(data.cost) && data.cost >= 0) {

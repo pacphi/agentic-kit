@@ -43,6 +43,7 @@ import { readCodexStateResult } from './codex-state.mjs';
 import {
   defaultOpencodeDbPath, listSessionsResult as listOpencodeSessionsResult,
   parseSession as parseOpencodeSession, sessionExistsResult as opencodeSessionExistsResult,
+  usageNotReportedWarnings,
 } from './usage-opencode.mjs';
 import {
   addTelemetryDiagnostics, emptyTelemetryDiagnostics, finalizeTelemetryDiagnostics,
@@ -173,12 +174,15 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
 // stat (`wmtime`/`wsize`) joins the entry key. It also drops the duplicate
 // Codex context samples an identical repeated token_count added (~2.8% of
 // events), so every cached record re-parses.
-// v25 corrects OpenCode usage fidelity (ADR-0038 correction note). The OpenCode
-// entry key gains `upd` (latest message/session `time_updated`) because OpenCode
-// rewrites a turn's assistant row in place, so a cached mid-turn zero no longer
-// survives the finished turn. A cached v24 OpenCode record cannot be corrected
-// in place: it carries that stale zero. Further OpenCode row semantics land
-// under this same version (see the commits that follow on this schema).
+// v25 corrects OpenCode usage fidelity (ADR-0038 correction note). Cached v24
+// OpenCode records carry: a mid-turn zero that outlived the finished turn (the
+// entry key now includes `upd`, the latest message/session `time_updated`,
+// because OpenCode rewrites a turn's assistant row in place); output without
+// its reasoning tokens; latency measured to the row insert (~15 ms) instead of
+// the completed response; user stops counted as exceptions; usage rows merged
+// across providers (rows now carry `provider`); and no mark on completed
+// responses whose provider reported no tokens (`tokensUnreported`). None can be
+// corrected in place, so every cached OpenCode record re-parses.
 export const SCHEMA_VERSION = 25;
 
 const DAY_MS = 86_400_000;
@@ -923,6 +927,11 @@ async function scan(o = {}) {
     now, cutoff, ocDb, opencodeHealth,
   });
   writeCache(cacheFile, { schemaVersion: SCHEMA_VERSION, updatedAt: new Date(now).toISOString(), entries });
+  // Completed OpenCode responses whose provider reported no token counts: one
+  // informational health warning (the sessions themselves are still counted).
+  addTelemetryDiagnostics(commonDiagnostics.opencode, {
+    warnings: usageNotReportedWarnings(records.filter((rec) => rec.host === 'opencode')),
+  });
   notify(onProgress, { scanned: total, total, phase: 'aggregate' });
 
   // Applied AFTER the cache write, on copies: the cache stores what the FILE
