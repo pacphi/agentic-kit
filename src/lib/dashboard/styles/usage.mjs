@@ -873,4 +873,8 @@ export const USAGE_CSS = `
 
 
 .ctx-no-pressure{color:var(--ink-2);font-size:12px;margin:15px 0;min-height:18px}
+.ctx-pressure{cursor:help;border-radius:6px}
+.ctx-pressure:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.ctx-subagents{margin:8px 0 0;color:var(--ink-2);font-size:10.5px;line-height:1.45}
+.ctx-subagents b{color:var(--ink);font-weight:600}
 `;

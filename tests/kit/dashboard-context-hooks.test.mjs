@@ -54,7 +54,7 @@ test('Context and Hooks ship lazy renderers, explicit unknown meters, and respon
     'Hooks uses its authenticated lazy endpoint instead of riding the Usage poll');
   assert.match(JS, /role="meter"/);
   assert.match(JS, /aria-valuenow/);
-  assert.match(JS, /known\?[^:]+aria-valuenow/,
+  assert.match(JS, /known\s*\?[^:]+aria-valuenow/,
     'aria-valuenow is conditional so unknown is never announced as zero');
   assert.match(JS, /Not recorded|not-recorded/);
   assert.match(JS, /Partial evidence|partial/);

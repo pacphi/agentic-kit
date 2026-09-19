@@ -17,7 +17,7 @@ import { MODEL_PAGE, USAGE, fmtNum, loadLimits, loadModelInventory, loadModelLif
     renderScore(USAGE);
     renderFindings(USAGE);
     renderPrompts(USAGE);
-    renderContext(USAGE.context||null);
+    renderContext(USAGE.context||null,USAGE.sourceHealth||null);
     renderHooks(HOOKS);
     renderSessions(USAGE);
     if(usageView==="transcript")renderTranscript();

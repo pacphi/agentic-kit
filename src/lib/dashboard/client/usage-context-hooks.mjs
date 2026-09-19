@@ -2,6 +2,7 @@
 // reads it as text). See src/lib/dashboard/client/**'s eslint.config.mjs.
 import { formatLocalDateTime } from './datetime.mjs';
 import { authHeaders, esc } from './bootstrap.mjs';
+import { contextHostCard } from '../context-host-card.mjs';
 
   export var HOOKS=null,hooksBusy=null;
 
@@ -19,48 +20,6 @@ import { authHeaders, esc } from './bootstrap.mjs';
     if(state==="partial")return "Partial evidence";
     if(state==="not-recorded")return "Not recorded";
     return "Not observed";
-  }
-
-  export function contextMeter(label,bps){
-    var known=bps!==null&&bps!==undefined&&Number.isFinite(Number(bps));
-    var actual=known?Math.max(0,Number(bps)/100):null;
-    var bounded=known?Math.min(100,actual):0;
-    var valueAttr=known?' aria-valuenow="'+bounded.toFixed(1)+'" aria-valuetext="'+actual.toFixed(1)+' percent"':'';
-    return '<div class="ctx-meter" role="meter" aria-label="'+esc(label)+'" aria-valuemin="0" aria-valuemax="100"'+valueAttr+'>'
-      +'<span class="ctx-meter-track"><i style="width:'+bounded.toFixed(1)+'%"></i></span>'
-      +'<span class="ctx-meter-value mono">'+(known?actual.toFixed(1)+"%":"unknown")+'</span></div>';
-  }
-
-  function contextCount(value){
-    return Number.isInteger(value)&&value>=0?value.toLocaleString():'—';
-  }
-
-  function contextCoverageDescription(coverage){
-    var sessions=coverage.sessions,paired=coverage.pressureMeasured||0;
-    if(sessions===0)return {label:'No sessions',reason:'No sessions in the selected timeframe.'};
-    if(!Number.isFinite(sessions))return {label:'Unavailable',reason:'Session coverage is unavailable.'};
-    if(paired>0)return {label:paired===sessions?'Measured':'Partial coverage',reason:paired+' of '+sessions+' sessions have paired input/window measurements.'};
-    if(coverage.inputMeasured>0&&!(coverage.windowMeasured>0))return {label:'Input only',reason:'Input tokens are available without a recorded context window.'};
-    if(coverage.windowMeasured>0)return {label:'Unpaired data',reason:'Input and window were not recorded together, so pressure cannot be calculated.'};
-    return {label:'Not recorded',reason:'No input/window measurements were found in these sessions.'};
-  }
-
-  function contextHostCard(host,fold){
-    fold=fold||{};
-    var coverage=fold.coverage||{},state=coverage.state||"not-observed",description=contextCoverageDescription(coverage);
-    var peak=fold.pressureBps&&fold.pressureBps.peak&&fold.pressureBps.peak.p90;
-    var windowMedian=fold.windowTokens&&fold.windowTokens.median;
-    var inputPeak=fold.inputTokens&&fold.inputTokens.peak&&fold.inputTokens.peak.p90;
-    var label=({claude:'Claude',codex:'Codex',opencode:'OpenCode'})[host]||host;
-    var pressure=peak!==null&&peak!==undefined&&Number.isFinite(Number(peak));
-    return '<article class="ctx-card" data-state="'+esc(state)+'">'
-      +'<div class="ctx-card-head"><h2>'+esc(label)+'</h2><span class="ctx-state">'+esc(description.label)+'</span></div>'
-      +(pressure?contextMeter(label+' p90 peak context pressure',peak):'<p class="ctx-no-pressure">Pressure not measured</p>')
-      +'<dl class="ctx-facts"><div><dt>sessions</dt><dd>'+esc(contextCount(coverage.sessions))+'</dd></div>'
-      +'<div><dt>Sessions with pressure</dt><dd>'+esc(contextCount(coverage.pressureMeasured))+'</dd></div>'
-      +'<div><dt>p90 peak input</dt><dd>'+esc(ctxTokens(inputPeak))+'</dd></div>'
-      +'<div><dt>median window</dt><dd>'+esc(ctxTokens(windowMedian))+'</dd></div></dl>'
-      +'<p class="ctx-caveat">'+esc(description.reason)+'</p></article>';
   }
 
   function contextAttentionAction(state){
@@ -121,7 +80,18 @@ import { authHeaders, esc } from './bootstrap.mjs';
     }).join("");
   }
 
-  export function renderContext(context){
+  // Every host card, from the MAIN-session fold plus its own subagent fold and
+  // its source health (so an empty card can say not installed / unreadable /
+  // nothing ran, instead of one wording for three different facts).
+  function contextHostCards(context,health){
+    var byHost=context&&context.byHost||{},subs=context&&context.subagents&&context.subagents.byHost||{};
+    health=health||{};
+    return ["claude","codex","opencode"].map(function(host){
+      return contextHostCard(host,byHost[host]||null,{policy:context&&context.policy||null,health:health[host]||null,subagent:subs[host]||null});
+    }).join("");
+  }
+
+  export function renderContext(context,health){
     var policyEl=document.getElementById("u-ctx-policy"),summaryEl=document.getElementById("u-ctx-summary");
     var hostsEl=document.getElementById("u-ctx-hosts"),attentionEl=document.getElementById("u-ctx-attention");
     if(!policyEl||!summaryEl||!hostsEl||!attentionEl)return;
@@ -132,15 +102,16 @@ import { authHeaders, esc } from './bootstrap.mjs';
       +'<span><b>reserve</b> '+percent("reserveBps")+'</span>';
     if(!context){
       summaryEl.innerHTML='<div class="empty">Context evidence is unavailable. Pressure remains unknown.</div>';
-      hostsEl.innerHTML=["claude","codex","opencode"].map(function(host){return contextHostCard(host,null);}).join("");
+      hostsEl.innerHTML=contextHostCards(null,health);
       attentionEl.innerHTML='<div class="empty">No context attention list is available.</div>';
       return;
     }
     var coverage=context.summary&&context.summary.coverage||{};
+    var subCoverage=context.subagents&&context.subagents.summary&&context.subagents.summary.coverage||{};
     summaryEl.innerHTML='<p><b>'+esc(ctxState(coverage.state))+'</b> · '+esc(coverage.pressureMeasured||0)+' of '+esc(coverage.sessions||0)
-      +' sessions have paired input/window pressure evidence; '+esc(coverage.missingWindow||0)+' lack an observed window.</p>';
-    var byHost=context.byHost||{};
-    hostsEl.innerHTML=["claude","codex","opencode"].map(function(host){return contextHostCard(host,byHost[host]);}).join("");
+      +' main sessions have paired input/window pressure evidence; '+esc(coverage.missingWindow||0)+' lack an observed window.'
+      +(subCoverage.sessions>0?' '+esc(subCoverage.sessions)+' delegated subagent sessions are reported separately on each host card.':'')+'</p>';
+    hostsEl.innerHTML=contextHostCards(context,health);
     var attention=Array.isArray(context.attention)?context.attention:[];
     var openGroups=Object.create(null),open=attentionEl.querySelectorAll("details[data-context-group][open]");
     for(var i=0;i<open.length;i++)openGroups[open[i].getAttribute("data-context-group")]=true;
@@ -375,7 +346,7 @@ import { authHeaders, esc } from './bootstrap.mjs';
   }
 
   export function activateUsageEvidenceView(view,usage){
-    if(view==="context")renderContext(usage&&usage.context||null);
+    if(view==="context")renderContext(usage&&usage.context||null,usage&&usage.sourceHealth||null);
     if(view==="hooks")loadHooks();
   }
 
