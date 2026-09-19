@@ -110,7 +110,7 @@ import { contextHostCard } from '../context-host-card.mjs';
     var subCoverage=context.subagents&&context.subagents.summary&&context.subagents.summary.coverage||{};
     summaryEl.innerHTML='<p><b>'+esc(ctxState(coverage.state))+'</b> · '+esc(coverage.pressureMeasured||0)+' of '+esc(coverage.sessions||0)
       +' main sessions have paired input/window pressure evidence; '+esc(coverage.missingWindow||0)+' lack an observed window.'
-      +(subCoverage.sessions>0?' '+esc(subCoverage.sessions)+' delegated subagent sessions are reported separately on each host card.':'')+'</p>';
+      +(subCoverage.sessions>0?' '+esc(subCoverage.sessions)+' delegated subagent session'+(subCoverage.sessions===1?' is':'s are')+' reported separately on the host cards.':'')+'</p>';
     hostsEl.innerHTML=contextHostCards(context,health);
     var attention=Array.isArray(context.attention)?context.attention:[];
     var openGroups=Object.create(null),open=attentionEl.querySelectorAll("details[data-context-group][open]");

@@ -309,8 +309,8 @@ machine, one whose store exists but could not be read (with the reason), and one
 and readable but ran nothing in the window. Missing token/window values render as an em dash. A
 pressure meter appears only for a measured value, and each card explains its coverage gap.
 
-Each card's pressure area carries a tooltip (hover, or keyboard focus with the text also exposed to
-assistive technology) stating that host's formula and evidence source. Codex divides
+Each card's pressure area is keyboard-focusable and carries a tooltip (shown on hover; the same text
+is exposed to assistive technology) stating that host's formula and evidence source. Codex divides
 `last_token_usage.input_tokens` by `model_context_window` from the same `token_count` event. Claude
 divides each message's gross input by the window the statusline reported for that session at that
 time; Claude transcripts record no window, so only main sessions that ran with the kit's statusline
