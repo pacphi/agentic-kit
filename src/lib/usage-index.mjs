@@ -250,7 +250,7 @@ function rootHealth(dir) {
 
 function emptyCodexDiagnostics() {
   return {
-    files: 0, cachedFiles: 0, parsedFiles: 0, unparsedFiles: 0,
+    files: 0, cachedFiles: 0, parsedFiles: 0, unparsedFiles: 0, importedExcluded: 0,
     filesWithTokens: 0, filesWithResponses: 0,
     legacyEvents: 0, itemCompletedEvents: 0, tokenCountEvents: 0,
     prompts: 0, responses: 0, unknownItemTypes: {}, unknownItemTypeOverflow: 0, warnings: [],
@@ -642,6 +642,15 @@ function processCandidate(c, cache, commonDiagnostics, codexDiagnostics) {
     session = parsed ? parsed.session : null;
     parseStats = parsed?.parseStats ?? null;
   }
+  // A Claude session Codex imported carries none of Codex's own activity: it is
+  // counted (importedExcluded) and kept out of every Codex statistic.
+  const imported = c.provider === 'codex' && session?.imported === true;
+  if (imported) {
+    codexDiagnostics.files++;
+    if (cacheHit) codexDiagnostics.cachedFiles++;
+    codexDiagnostics.importedExcluded++;
+    return { key, session, parseStats };
+  }
   if (commonDiagnostics[c.provider]) {
     recordTelemetryUnit(commonDiagnostics[c.provider], session);
     if (c.provider === 'codex') {
@@ -798,7 +807,7 @@ async function scan(o = {}) {
         ...(parseStats ? { parseStats } : {}),
         ...(c.dbFile ? { dbFile: c.dbFile } : {}),
       };
-      records.push(session);
+      if (!session.imported) records.push(session);
     }
     scanned++;
     if (scanned % 100 === 0) notify(onProgress, { scanned, total, phase: 'scan' });

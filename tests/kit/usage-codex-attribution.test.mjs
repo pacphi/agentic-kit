@@ -43,6 +43,71 @@ test('X-9: a corpus of only known item types raises no unknown-item-types warnin
   assert.equal(agg.sourceHealth.codex.status, 'ok');
 });
 
+// ── X-3: imported Claude Code sessions are not native Codex sessions ───────
+
+/** Mirrors a real imported rollout: `external-import-turn-N` turn ids, no
+ *  turn_context, no thread_source, input_tokens 0 with only total_tokens. */
+function importedRollout(id, turns = 3) {
+  const r = new Rollout({ id }).meta({ thread_source: undefined, source: 'vscode' });
+  for (let n = 1; n <= turns; n++) {
+    r.taskStarted(`external-import-turn-${n}`).user(`imported prompt ${n}`).agent(`imported answer ${n}`);
+    r.raw('event_msg', { type: 'token_count', info: { total_token_usage: { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0, total_tokens: 1942 * n }, last_token_usage: { input_tokens: 0, output_tokens: 0, total_tokens: 1942 } } });
+  }
+  return r;
+}
+
+function nativeRollout(id, { prompts = 1 } = {}) {
+  const r = new Rollout({ id }).meta().turn('gpt-5.6');
+  for (let n = 0; n < prompts; n++) {
+    r.user(`native prompt ${n}`).agent(`native answer ${n}`).tokenCount(usage({ input: 1000, cached: 400, output: 100 }));
+  }
+  return r;
+}
+
+test('X-3: parseCodex marks an imported rollout and counts none of its activity', () => {
+  const { session, parseStats } = parseCodex(importedRollout('imp1').toString(), { id: 'imp1' });
+  assert.equal(session.imported, true);
+  assert.equal(session.prompts, 0);
+  assert.equal(session.responses, 0);
+  assert.deepEqual(session.usage, []);
+  assert.equal(parseStats.imported, true);
+});
+
+test('X-3: a native rollout is never marked imported', () => {
+  const { session, parseStats } = parseCodex(nativeRollout('nat1').toString(), { id: 'nat1' });
+  assert.equal(session.imported, undefined);
+  assert.equal(parseStats.imported, undefined);
+});
+
+test('X-3: imports are excluded from sessions, prompts, responses and yield diagnostics, and counted', async () => {
+  _resetForTest();
+  const sb = codexSandbox({
+    'rollout-2026-07-24T09-00-00-nat1.jsonl': nativeRollout('nat1', { prompts: 2 }),
+    'rollout-2026-07-24T09-05-00-imp1.jsonl': importedRollout('imp1'),
+    'rollout-2026-07-24T09-06-00-imp2.jsonl': importedRollout('imp2', 5),
+  });
+  const agg = await buildIndex(opts(sb));
+  assert.deepEqual(agg.sessions.map((s) => s.id), ['nat1']);
+  assert.equal(agg.totals.sessions, 1);
+  assert.equal(agg.totals.prompts, 2);
+  assert.equal(agg.totals.responses, 2);
+  const d = agg.sourceHealth.codex.diagnostics;
+  assert.equal(d.importedExcluded, 2, 'the exclusion is recorded, never silent');
+  assert.equal(d.files, 3);
+  assert.equal(d.parsedFiles, 1);
+  assert.equal(d.filesWithResponses, 1);
+  assert.equal(d.unparsedFiles, 0);
+  assert.equal(agg.sourceHealth.codex.status, 'ok');
+  assert.equal(d.common.unitsWithResponses, 1);
+
+  // A second scan reads the cached imported entries and reports the same.
+  _resetForTest();
+  const again = await buildIndex(opts(sb));
+  assert.equal(again.sourceHealth.codex.diagnostics.importedExcluded, 2);
+  assert.equal(again.sourceHealth.codex.diagnostics.cachedFiles, 3);
+  assert.equal(again.totals.sessions, 1);
+});
+
 // ── schema version ──────────────────────────────────────────────────────────
 
 test('SCHEMA_VERSION is 23 and a forged v22 Codex cache is discarded and re-parsed', async () => {

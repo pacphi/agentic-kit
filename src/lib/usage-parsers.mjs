@@ -1087,6 +1087,32 @@ function processCodexLine(rec, turns, stats, titleState, usageState, latState, m
   handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState, decoded, rawPayload(e), ms, withTurns);
 }
 
+/** Codex can import a Claude Code transcript as a thread. The host stamps such
+ *  a rollout's turns `external-import-turn-N` (measured: 796 imports, every one
+ *  carrying it from its first task_started, none of a native thread). The
+ *  in-rollout marker is the signal — the host's imports file is deliberately
+ *  not read, so detection works without it. */
+const CODEX_IMPORT_TURN_PREFIX = 'external-import-turn';
+
+function isCodexImportedLine(e) {
+  const turnId = e?.payload?.turn_id;
+  return typeof turnId === 'string' && turnId.startsWith(CODEX_IMPORT_TURN_PREFIX);
+}
+
+/** The record for an imported rollout: identity only. The conversation's real
+ *  prompts, responses and tokens live in the Claude transcript it was imported
+ *  from (input_tokens 0, model 'unknown', $0 here), so counting them again as
+ *  Codex activity inflated Codex responses and prompts and diluted its
+ *  coverage figures. `imported` is set ONLY on these records, and the scan
+ *  reports how many it excluded (`importedExcluded`) rather than dropping them
+ *  silently. Parsing stops at the first imported line — nothing after it is
+ *  read. */
+function importedCodexSession(rec, stats) {
+  rec.imported = true;
+  rec.title = '(imported Claude session)';
+  return { session: seal(rec), turns: [], parseStats: { ...stats, imported: true } };
+}
+
 /** The session-total usage row, derived from the LAST token_count event seen
  *  (see parseCodex's doc comment). A no-op for a subagent thread (its
  *  cumulative total double-counts the parent's already-billed tokens) or a
@@ -1143,6 +1169,7 @@ export function parseCodex(raw, { id, withTurns = false }) {
   const metaState = { seen: false };
 
   for (const e of jsonLines(raw)) {
+    if (isCodexImportedLine(e)) return importedCodexSession(rec, stats);
     const ms = toMs(e.timestamp);
     noteSpan(rec, ms);
     processCodexLine(rec, turns, stats, titleState, usageState, latState, metaState, e, ms, withTurns);
