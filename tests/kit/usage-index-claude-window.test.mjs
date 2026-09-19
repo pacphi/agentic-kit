@@ -157,15 +157,17 @@ test('a subagent transcript never borrows its parent session ledger', async () =
 test('sandboxed roots never read the real config dir (hermetic by default)', async () => {
   _resetForTest();
   const { dir, o, configHome } = sandbox();
-  writeLedger(configHome, SID, [{ t: BASE, size: 1_000_000, model: 'm' }]);
-  const before = process.env.XDG_CONFIG_HOME;
+  // Where configDir() would look if the default were (wrongly) consulted: <config>/agentic-kit.
+  writeLedger(path.join(configHome, 'agentic-kit'), SID, [{ t: BASE, size: 1_000_000, model: 'm' }]);
+  const before = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, APPDATA: process.env.APPDATA };
   process.env.XDG_CONFIG_HOME = configHome; // would be picked up if the default were consulted
+  process.env.APPDATA = configHome;         // (configDir() reads APPDATA on Windows)
   try {
     const { claudeWindowConfigDir: _omit, ...withoutOverride } = o;
     const ev = evidenceOf(await buildIndex(withoutOverride), SID);
     assert.equal(ev.pressure, null, 'roots overridden => no ledger read unless explicitly directed');
   } finally {
-    if (before === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = before;
+    for (const [k, v] of Object.entries(before)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
   }
   fs.rmSync(dir, { recursive: true, force: true });
 });

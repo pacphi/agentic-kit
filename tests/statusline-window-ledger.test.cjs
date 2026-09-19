@@ -41,11 +41,14 @@ const SID = '0f8fad5b-d9cb-469f-a165-70867728950e';
 /** Run `fn(configHome)` with XDG_CONFIG_HOME pointing at a fresh temp dir. */
 function withConfig(fn) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-window-ledger-'));
-  const before = process.env.XDG_CONFIG_HOME;
+  // The template resolves the kit config dir like paths.mjs: %APPDATA% on win32, XDG elsewhere.
+  // Set both so the real config dir is never touched on any platform.
+  const before = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, APPDATA: process.env.APPDATA };
   process.env.XDG_CONFIG_HOME = home;
+  process.env.APPDATA = home;
   try { return fn(home); }
   finally {
-    if (before === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = before;
+    for (const [k, v] of Object.entries(before)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
     fs.rmSync(home, { recursive: true, force: true });
   }
 }
@@ -157,6 +160,7 @@ test('failure is silent: an unwritable config root never throws', () => withConf
   const blocker = path.join(home, 'blocker');
   fs.writeFileSync(blocker, 'x');
   process.env.XDG_CONFIG_HOME = blocker; // mkdir under a regular file -> ENOTDIR
+  process.env.APPDATA = blocker;
   tee(payload());
   windowTee({ fs: { ...fs, mkdirSync() { throw new Error('boom'); } }, path, os, getStdinData: () => payload() });
   windowTee({ fs, path, os, getStdinData() { throw new Error('stdin exploded'); } });

@@ -10,20 +10,29 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const PATHS = path.join(ROOT, 'src', 'lib', 'paths.mjs');
+// A bare absolute path is not a valid ESM specifier on Windows (`D:` parses as a URL
+// scheme), so the child imports paths.mjs by file:// URL.
+const PATHS_URL = pathToFileURL(path.join(ROOT, 'src', 'lib', 'paths.mjs')).href;
 const block = fs.readFileSync(path.join(ROOT, 'src', 'templates', 'statusline-footer.cjs'), 'utf8')
   .match(/\/\* ruflo-seg:BEGIN \*\/([\s\S]*?)\/\* ruflo-seg:END \*\//)[1];
 // First-party template source, the same extraction the statusline suites use.
 const templateConfigDir = new Function(`${block}\nreturn rufloKitConfigDir;`)();
 
+function cleanEnv() {
+  const out = { ...process.env };
+  for (const key of Object.keys(out)) if (/^(XDG_CONFIG_HOME|APPDATA)$/i.test(key)) delete out[key];
+  return out;
+}
+
 function realConfigDir(platform, env, home) {
   const script = `Object.defineProperty(process,'platform',{value:${JSON.stringify(platform)}});`
-    + `const {configDir}=await import(${JSON.stringify(PATHS)});process.stdout.write(configDir());`;
+    + `const {configDir}=await import(${JSON.stringify(PATHS_URL)});process.stdout.write(configDir());`;
   return execFileSync(process.execPath, ['--input-type=module', '-e', script], {
-    env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home, ...env }, encoding: 'utf8',
+    // Inherit the runner's env (Windows needs SystemRoot etc.) minus the variables under test.
+    env: { ...cleanEnv(), HOME: home, USERPROFILE: home, ...env }, encoding: 'utf8',
   });
 }
 
