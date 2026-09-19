@@ -505,13 +505,23 @@ function seal(rec) {
 }
 
 /** Add usage to a session's (day, model) bucket, creating it on first touch.
+ *  A source that observes WHICH provider served each message (opencode) passes
+ *  `u.provider`, which then joins the key — the same modelID served by two
+ *  providers, or a mid-session provider switch, stays two rows instead of
+ *  merging into one that names neither. Sources that don't pass it are keyed
+ *  and shaped exactly as before.
  *  Returns the row so a caller with a per-source extra field (opencode's
  *  observed `costObserved`) can set it without a second find(). Exported for
  *  the same reason as blankSession — one definition of "how a usage row
  *  accumulates", shared across transcript-source parsers. */
 export function addUsage(rec, day, model, u) {
-  let row = rec.usage.find((r) => r.day === day && r.model === model);
-  if (!row) { row = { day, model, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, responses: 0 }; rec.usage.push(row); }
+  const provider = u.provider ?? null;
+  let row = rec.usage.find((r) => r.day === day && r.model === model && (r.provider ?? null) === provider);
+  if (!row) {
+    row = { day, model, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, responses: 0 };
+    if (provider) row.provider = provider;
+    rec.usage.push(row);
+  }
   row.input += u.input; row.output += u.output;
   row.cacheRead += u.cacheRead; row.cacheWrite += u.cacheWrite;
   // 1-hour-tier SUBSET of cacheWrite (Claude only). Written only when the

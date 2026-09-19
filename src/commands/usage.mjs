@@ -273,27 +273,26 @@ function printScoreReliability(agg) {
   const t = agg.totals ?? {};
   const responses = Number(t.responses) || 0;
   const exceptions = Number(t.exceptions) || 0;
-  const aborts = Number(t.aborts) || 0;
   const rate = responses ? (exceptions / responses) * 1000 : null;
   const line = `EXCEPTIONS / 1K RESPONSES   ${rate == null ? 'no samples' : rate.toFixed(1)}  `
     + dim(`${fmtNum(exceptions)} of ${fmtNum(responses)} responses`);
   if (rate == null) info(line);
   else if (exceptions > 0) warn(line);
   else ok(line);
-  // Codex-only evidence: turn_aborted is the only interrupt signal any host
-  // writes, so a window with no codex sessions has nothing that COULD have
-  // recorded one. Rendering 0 there would read as "you never interrupted a
-  // turn" — the browser carries the same rule, and a terminal reader has no
-  // tooltip to correct it with.
-  const codex = agg.byHost?.codex ?? null;
-  const codexSessions = Number(codex?.sessions) || 0;
-  const codexResponses = Number(codex?.responses) || 0;
-  const abortNote = codexSessions
-    ? (codexResponses
-      ? `interrupted mid-flight — codex only, ${fmtRatio((aborts / codexResponses) * 1000)} per 1k codex responses`
-      : 'interrupted mid-flight — codex only; no codex responses in window')
-    : 'not recorded — only codex transcripts carry an interrupt signal, and this window has none';
-  info(`ABORTED TURNS               ${codexSessions ? fmtNum(aborts) : '—'}  ${dim(abortNote)}`);
+  // Evidence only codex (turn_aborted) and opencode (MessageAbortedError)
+  // write, so a window with neither has nothing that COULD have recorded a
+  // stop. Rendering 0 there would read as "you never interrupted a turn" — the
+  // browser carries the same rule, and a terminal reader has no tooltip to
+  // correct it with. Count and rate are over those hosts alone.
+  const capable = ['codex', 'opencode'].map((h) => agg.byHost?.[h] ?? {});
+  const sum = (key) => capable.reduce((n, b) => n + (Number(b[key]) || 0), 0);
+  const [abSessions, abResponses, aborts] = [sum('sessions'), sum('responses'), sum('aborts')];
+  const abortNote = abSessions
+    ? (abResponses
+      ? `interrupted mid-flight — codex/opencode only, ${fmtRatio((aborts / abResponses) * 1000)} per 1k codex/opencode responses`
+      : 'interrupted mid-flight — codex/opencode only; no codex or opencode responses in window')
+    : 'not recorded — only codex and opencode transcripts carry an interrupt signal, and this window has none';
+  info(`ABORTED TURNS               ${abSessions ? fmtNum(aborts) : '—'}  ${dim(abortNote)}`);
 }
 
 /** The --json shape: an ADDITIVE, credential-free, offline projection of the

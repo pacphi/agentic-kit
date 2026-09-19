@@ -189,7 +189,8 @@ its right.
 Scorecard reads top to bottom as one argument: what the window cost, how you spent it, and what that
 says about the way you work. Figures derive from locally retained transcripts. Claude/Codex cost uses the bundled
 rate table (including fallback rates for unknown models); OpenCode uses its recorded
-message cost when present and falls back to that table otherwise. None is an invoice
+message cost when present and falls back to that table otherwise, except that a local
+model with no recorded cost is left unpriced rather than charged a fallback rate. None is an invoice
 or proof of subscription billing. Claude Code writes one transcript line per content block and
 repeats the message's usage on each, so Claude tokens, cost, responses and context samples count
 each API message once.
@@ -249,9 +250,10 @@ evidence supports. **Model mix over time** stacks per-day cost by coarse model f
 families coloured and the rest folded into a de-emphasised band.
 
 **Reliability** reports turns that never landed: exceptions per thousand responses, aborted turns,
-and a per-day exceptions sparkline that names the worst single day. Aborted turns are **codex-only
-normalized evidence** — the other parsers do not populate this counter — so the count appears only when the window holds a
-codex session, and otherwise reads `—` rather than a zero that would look measured.
+and a per-day exceptions sparkline that names the worst single day. Aborted turns are **codex and
+opencode normalized evidence** — the Claude parser does not populate this counter — so the count
+appears only when the window holds a codex or opencode session, and otherwise reads `—` rather
+than a zero that would look measured. An OpenCode turn you stop counts as an abort, not an exception.
 
 `ak usage score` prints the same scorecard figures in a terminal, offline, including the rhythm
 pair, the posture and served-by tables, and the reliability lines.

@@ -21,7 +21,7 @@ implemented. The remaining metrics, posture judgments, histogram bounds and
 main-thread denominators retain the rules below.
 
 Schema v11–v17 statements record the original migrations; the current usage cache
-was v20 under ADR-0050, v22 after the first 2026-09-19 correction below, and v23 after the second. Its verified top-10 Git-project ranking is separate from
+was v20 under ADR-0050, v22 after the first 2026-09-19 correction below, v23 after the second, and v25 after the OpenCode correction (v24 is ADR-0042's window ledger). Its verified top-10 Git-project ranking is separate from
 legacy label-keyed aggregates. September pricing work in ADR-0009/0032 supersedes
 the older deferred-rate-document discrepancy; this audit does not reprice data.
 
@@ -96,6 +96,58 @@ The same change retains Claude's `cache_creation.ephemeral_1h_input_tokens` as
 on 2026-09-19. Records without the split price every write at the 5-minute
 rate, as before. See [ADR-0009](0009-usage-scorecard-local-transcript-analytics.md)
 for the cost model.
+
+## Correction (2026-09-19): OpenCode usage fidelity
+
+An audit of the OpenCode reader against the shipped OpenCode 1.18.31 source (its
+`getUsage`, read from the binary) and the kit's own fixtures found the OpenCode
+arithmetic this ADR stood on wrong or blind in several places. The decisions are
+unchanged; the record of what was counted is corrected:
+
+- **Reasoning is output.** OpenCode stores `output = outputTokens − reasoningTokens`
+  with `reasoning` as a separate field, and prices reasoning at the output rate.
+  The reader booked `output` alone, so tokens and estimated cost ran low on every
+  reasoning model. A usage row's `output` now adds the reasoning
+  (`reasoningOutput` keeps it visible); where a message's own `tokens.total`
+  shows output already contained it (older builds), nothing is added. Recorded
+  cost was never affected. The additive relationship is established from the
+  binary's code, not from data: this machine's stores hold no reasoning-bearing
+  message with a priced model to cross-check against.
+- **A finished turn is re-read.** OpenCode writes a turn's tokens, cost and
+  `time.completed` into the assistant row it inserted at turn start. The cache key
+  `(MAX(time_created), COUNT)` could not see that, so a mid-turn scan stayed
+  cached. The key now includes the latest `time_updated` over the session's
+  messages and the session row.
+- **Latency is measured to completion.** It ran user `time.created` to assistant
+  `time.created` (~15 ms). It now ends at the assistant row's `time.completed`; a
+  row with none yields no sample. The completed stamp and each row's generation
+  span join engaged time, so a long single generation is one interval.
+  (Decision 3 stands: still prompt-to-response, never time-to-first-token.)
+- **A user stop is an abort.** `MessageAbortedError` was counted as an exception
+  and the dashboard said OpenCode "records nothing when you stop a turn". It now
+  counts as an abort, kept per host in `byHost[h].aborts`; the abort tile, the
+  session strip and `ak usage score` read it over the responses of the codex and
+  opencode hosts, the two that record one.
+- **Local models are not priced from a guess.** With no recorded cost a local
+  provider (`lmstudio`, `ollama`, `llama.cpp`, `local-openai`) fell to the
+  Sonnet-class fallback (1M in + 1M out read $18) because the pricer only saw the
+  host id. Its missing-cost portion is now left unpriced and counted as
+  `costEvidence.unpricedMessages`; a reported cost, including 0, stays observed.
+- **Rows carry the serving provider.** Rows were keyed `(day, model)`, so one model
+  under two providers, or a mid-session switch, merged into one row. They are now
+  keyed `(day, model, provider)`. The session-level provider bucket is still the
+  last observed provider; attributing a mixed session across provider buckets is
+  deferred.
+- **Unreported usage is distinguishable from zero.** A completed, error-free
+  response with no token counts (typical of local servers) is marked
+  `tokensUnreported` on its row, and the scan raises one `usage-not-reported:N`
+  warning on OpenCode source health.
+
+Verified correct and unchanged: parts (including `step-finish`) are never read for
+usage, so no message counts twice; gross context input is `input + cache.read +
+cache.write`; child sessions keep their own tokens; a reported cost of 0 from a
+local provider stays an observed zero. The usage cache is **v25**, so every cached
+OpenCode record re-parses.
 
 ## Context
 

@@ -53,8 +53,8 @@ function writeLedger(configHome, sessionId, log) {
 
 const evidenceOf = (agg, id) => agg.sessions.find((s) => s.id === id)?.contextEvidence;
 
-test('SCHEMA_VERSION is 24 and a forged v23 cache is discarded and re-parsed', async () => {
-  assert.equal(SCHEMA_VERSION, 24);
+test('SCHEMA_VERSION is at least 24 and a forged v23 cache is discarded and re-parsed', async () => {
+  assert.ok(SCHEMA_VERSION >= 24, 'the window-ledger pairing changes every cached Claude record');
   _resetForTest();
   const { dir, o, configHome } = sandbox();
   writeLedger(configHome, SID, [{ t: BASE, size: 1_000_000, model: 'claude-opus-5' }]);

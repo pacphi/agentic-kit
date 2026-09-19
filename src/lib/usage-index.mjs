@@ -43,6 +43,7 @@ import { readCodexStateResult } from './codex-state.mjs';
 import {
   defaultOpencodeDbPath, listSessionsResult as listOpencodeSessionsResult,
   parseSession as parseOpencodeSession, sessionExistsResult as opencodeSessionExistsResult,
+  usageNotReportedWarnings,
 } from './usage-opencode.mjs';
 import {
   addTelemetryDiagnostics, emptyTelemetryDiagnostics, finalizeTelemetryDiagnostics,
@@ -173,7 +174,16 @@ export { MAX_TURN_CHARS, mergeIntervals, maskSecrets, normalizeSessionIdentity, 
 // stat (`wmtime`/`wsize`) joins the entry key. It also drops the duplicate
 // Codex context samples an identical repeated token_count added (~2.8% of
 // events), so every cached record re-parses.
-export const SCHEMA_VERSION = 24;
+// v25 corrects OpenCode usage fidelity (ADR-0038 correction note). Cached v24
+// OpenCode records carry: a mid-turn zero that outlived the finished turn (the
+// entry key now includes `upd`, the latest message/session `time_updated`,
+// because OpenCode rewrites a turn's assistant row in place); output without
+// its reasoning tokens; latency measured to the row insert (~15 ms) instead of
+// the completed response; user stops counted as exceptions; usage rows merged
+// across providers (rows now carry `provider`); and no mark on completed
+// responses whose provider reported no tokens (`tokensUnreported`). None can be
+// corrected in place, so every cached OpenCode record re-parses.
+export const SCHEMA_VERSION = 25;
 
 const DAY_MS = 86_400_000;
 // One day of slack past dashboard-server.mjs's 365-day clampDays ceiling —
@@ -671,7 +681,7 @@ function discoverOpencodeSource(rawRoots, cutoff) {
   }
   const candidates = listed.value.map((e) => ({
     file: `opencode://${e.id}`, provider: 'opencode', id: e.id, dbFile: ocDb,
-    stat: { mtimeMs: e.mtimeMs, size: e.size },
+    stat: { mtimeMs: e.mtimeMs, size: e.size, updatedMs: e.updatedMs },
   }));
   return { health: { status: 'ok', reason: null }, candidates, ocDb };
 }
@@ -737,10 +747,15 @@ function withWindowLedger(entry, windowConfigDir) {
  *  the generic scan loop's own complexity. */
 function processCandidate(c, cache, commonDiagnostics, codexDiagnostics, readLimits = {}) {
   const hit = cache?.entries?.[c.file];
+  // `updatedMs` exists only on OpenCode candidates (its rows are rewritten in
+  // place, so created-time and count cannot see a finished turn); file-backed
+  // sources key on mtime/size alone.
+  const updated = c.stat.updatedMs === undefined ? {} : { upd: c.stat.updatedMs };
   const cacheHit = !!(hit && hit.mtime === c.stat.mtimeMs && hit.size === c.stat.size
+    && hit.upd === updated.upd
     && ledgerStillValid(hit, c.windowStat)
     && (c.provider !== 'codex' || hit.parseStats));
-  const key = { mtime: c.stat.mtimeMs, size: c.stat.size, ...windowKey(c.windowStat, cacheHit ? hit : null) };
+  const key = { mtime: c.stat.mtimeMs, size: c.stat.size, ...updated, ...windowKey(c.windowStat, cacheHit ? hit : null) };
   let session = cacheHit ? hit.session : null;
   let parseStats = cacheHit ? hit.parseStats : null;
   const failure = {};
@@ -912,6 +927,11 @@ async function scan(o = {}) {
     now, cutoff, ocDb, opencodeHealth,
   });
   writeCache(cacheFile, { schemaVersion: SCHEMA_VERSION, updatedAt: new Date(now).toISOString(), entries });
+  // Completed OpenCode responses whose provider reported no token counts: one
+  // informational health warning (the sessions themselves are still counted).
+  addTelemetryDiagnostics(commonDiagnostics.opencode, {
+    warnings: usageNotReportedWarnings(records.filter((rec) => rec.host === 'opencode')),
+  });
   notify(onProgress, { scanned: total, total, phase: 'aggregate' });
 
   // Applied AFTER the cache write, on copies: the cache stores what the FILE

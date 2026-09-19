@@ -1,4 +1,5 @@
 import { rowCostEvidence, sessionCostEvidence, acquisitionSummary } from './usage-cost.mjs';
+import { isLocalInferenceProvider } from './usage-local-provider.mjs';
 // usage-aggregate.mjs — pure arithmetic over ALREADY-PARSED session records:
 // interval math, secret masking, and the two shapes usage-index.mjs hands its
 // consumers (the batch Aggregate from `aggregate()`, and the single-session
@@ -738,7 +739,10 @@ function cacheSavingPerMillion(model, provider, day, deps, rates) {
  *  above, scaled to the tokens this row actually read from cache. */
 function cacheSavedFor(row, rec, deps, rates) {
   if (!(row.cacheRead > 0)) return 0;
-  return (cacheSavingPerMillion(row.model, rec.provider, row.day, deps, rates) * row.cacheRead) / 1e6;
+  // A local model has no per-token rate to save against (see rowCostEvidence):
+  // quoting a saving from the unknown-model fallback would invent one.
+  if (isLocalInferenceProvider(row.provider)) return 0;
+  return (cacheSavingPerMillion(row.model, row.provider ?? rec.provider, row.day, deps, rates) * row.cacheRead) / 1e6;
 }
 
 /** Price one usage row (observed opencode cost wins over the pricing table —
@@ -978,7 +982,12 @@ function foldSessionTotals(sessions, byDay, byModel) {
     if (s._priced) pricedCosts.push(s.cost);
     spanMs += s._span[1] - s._span[0];
 
-    addTo(bucket(byHost, s.host ?? 'unknown'), s);
+    const hostBucket = bucket(byHost, s.host ?? 'unknown');
+    addTo(hostBucket, s);
+    // Aborts are host-capability evidence (codex and opencode record a user
+    // stop; claude does not), so they are kept per host — a reader dividing
+    // by "responses that could have recorded one" needs them apart.
+    hostBucket.aborts = (hostBucket.aborts ?? 0) + (Number(s.aborts) || 0);
     addTo(bucket(byProvider, s.provider ?? 'unknown'), s);
     // 'not-recorded' is a first-class key, not a display fallback: a transcript
     // that carried no mode evidence must not be folded into a real posture.

@@ -65,7 +65,7 @@ const clip = (text, max = 100) => {
 /** Split activity timestamps into engaged intervals at the same 15-min gap
  *  the index uses (kept in lockstep with usage-index.IDLE_GAP_MS). */
 const IDLE_GAP_MS = 15 * 60 * 1000;
-function activeIntervals(stamps) {
+function stampIntervals(stamps) {
   const ts = stamps.filter(Number.isFinite).sort((a, b) => a - b);
   if (!ts.length) return [];
   const out = [];
@@ -79,6 +79,23 @@ function activeIntervals(stamps) {
   return out;
 }
 
+/** Engaged intervals: the gap-split stamps, unioned with each assistant row's
+ *  own [created, completed] span. A generation is continuous work however long
+ *  it ran, so a single response longer than the idle gap must not be cut in two
+ *  by the created-stamp heuristic. */
+function activeIntervals(stamps, spans = []) {
+  const base = stampIntervals(stamps);
+  const own = spans.filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b) && b > a);
+  if (!own.length) return base;
+  const merged = [];
+  for (const iv of [...base, ...own].sort((x, y) => x[0] - y[0])) {
+    const last = merged[merged.length - 1];
+    if (last && iv[0] <= last[1]) last[1] = Math.max(last[1], iv[1]);
+    else merged.push([iv[0], iv[1]]);
+  }
+  return merged;
+}
+
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const parseJson = (raw) => { try { return JSON.parse(raw); } catch { return null; } };
 
@@ -89,8 +106,15 @@ const parseJson = (raw) => { try { return JSON.parse(raw); } catch { return null
 const MAX_LATENCY_SAMPLE_SECONDS = 3600;
 
 /** Incremental candidates: sessions whose latest message lands at/after
- *  cutoffMs. `mtimeMs` (latest message time) + `size` (message count) are the
- *  cache key — a warm refresh re-parses only sessions that gained messages.
+ *  cutoffMs. The cache key is `mtimeMs` (latest message time) + `size`
+ *  (message count) + `updatedMs` (latest `time_updated` over the session's
+ *  messages and the session row itself). The last one is what makes a warm
+ *  refresh notice an IN-PLACE rewrite: OpenCode inserts the assistant row when
+ *  a turn starts (zero tokens, no `time.completed`) and writes the step's
+ *  tokens, cost and completed stamp into that same row later, so neither the
+ *  created-time nor the row count moves when the turn finishes — only
+ *  `time_updated` does. The session row's own stamp covers a title/summary
+ *  change that no message carries.
  *  @param {{ dbFile: string, cutoffMs?: number }} opts */
 export function listSessions({ dbFile, cutoffMs = 0 }) {
   const result = listSessionsResult({ dbFile, cutoffMs });
@@ -100,12 +124,15 @@ export function listSessions({ dbFile, cutoffMs = 0 }) {
 export function listSessionsResult({ dbFile, cutoffMs = 0 }) {
   return withDb(dbFile, (db) => db.prepare(`
     SELECT s.id AS id, COALESCE(MAX(m.time_created), s.time_created) AS mtime,
-           COUNT(m.id) AS messages
+           COUNT(m.id) AS messages,
+           MAX(COALESCE(MAX(m.time_updated), 0), COALESCE(s.time_updated, 0)) AS updated
     FROM session s LEFT JOIN message m ON m.session_id = s.id
     GROUP BY s.id
     HAVING mtime >= ?
     ORDER BY mtime DESC
-  `).all(cutoffMs).map((r) => ({ id: r.id, mtimeMs: num(r.mtime), size: num(r.messages) })));
+  `).all(cutoffMs).map((r) => ({
+    id: r.id, mtimeMs: num(r.mtime), size: num(r.messages), updatedMs: num(r.updated),
+  })));
 }
 
 /** Carry-forward existence probe (a session can be deleted between scans). */
@@ -176,22 +203,72 @@ function recordUserMessage(rec, turns, { rowId, at, withTurns, partsByMessage })
   turns.push({ role: 'user', at: new Date(at).toISOString(), text, prompt: true, kind: 'prompt' });
 }
 
+/** A message's output tokens INCLUDING reasoning. OpenCode (its `getUsage`,
+ *  verified against the installed 1.18.31 binary) stores
+ *  `output = max(0, outputTokens - reasoningTokens)` and `reasoning` as a
+ *  separate field, and prices reasoning at the output rate — so the real output
+ *  is their sum, and recording `output` alone under-counts every reasoning
+ *  model in both tokens and estimated cost.
+ *
+ *  One guard against double counting: builds that predate that split stored
+ *  reasoning INSIDE `output`. The message's own `tokens.total` (the provider's
+ *  input + output) tells the two apart when it is present: a total equal to
+ *  the sum of the non-reasoning fields means output already contained the
+ *  reasoning, so nothing is added. No total, or one that fits neither shape,
+ *  falls to the verified current convention (additive). */
+function outputWithReasoning(t, cache) {
+  const output = num(t.output);
+  const reasoning = num(t.reasoning);
+  if (reasoning <= 0) return output;
+  const total = num(t.total);
+  const gross = num(t.input) + num(cache.read) + num(cache.write) + output;
+  if (total > 0 && total === gross) return output;
+  return output + reasoning;
+}
+
+/** A completed, error-free assistant message whose every token field is zero
+ *  or absent. */
+function isUnreportedUsage(data, t, cache) {
+  if (data.error != null || !(num(data.time?.completed) > 0)) return false;
+  return [t.input, t.output, t.reasoning, cache.read, cache.write].every((v) => num(v) === 0);
+}
+
+/** The one usage-health warning for a set of parsed OpenCode sessions, or
+ *  none: how many completed responses the providers gave no token counts for.
+ *  Informational — the responses are still counted, just with unknown usage.
+ *  @param {Array<{usage?: Array<{tokensUnreported?: number}>}>} sessions
+ *  @returns {string[]} */
+export function usageNotReportedWarnings(sessions) {
+  let n = 0;
+  for (const rec of sessions) for (const row of rec.usage ?? []) n += Number(row.tokensUnreported) || 0;
+  return n > 0 ? [`usage-not-reported:${n}`] : [];
+}
+
 /** Model/provider/token-usage bookkeeping for one assistant message. Returns
  *  the model id, for the caller's turn row. */
 function recordAssistantUsage(rec, data, at) {
   const model = typeof data.modelID === 'string' && data.modelID ? data.modelID : 'unknown';
   if (!rec.models.includes(model)) rec.models.push(model);
-  if (typeof data.providerID === 'string' && data.providerID) {
-    rec.inferenceProvider = data.providerID;
+  const provider = typeof data.providerID === 'string' && data.providerID ? data.providerID : null;
+  if (provider) {
+    rec.inferenceProvider = provider;
     rec.providerProvenance = 'observed';
   }
   const t = data.tokens ?? {};
   const cache = t.cache ?? {};
   const day = localDay(at || Date.now());
+  const output = outputWithReasoning(t, cache);
   const usageRow = addUsage(rec, day, model, {
-    input: num(t.input), output: num(t.output),
-    cacheRead: num(cache.read), cacheWrite: num(cache.write), responses: 1,
+    input: num(t.input), output,
+    cacheRead: num(cache.read), cacheWrite: num(cache.write), responses: 1, provider,
   });
+  // A response that FINISHED cleanly yet carries no token counts at all did not
+  // use zero tokens — the provider never reported them (a local model server,
+  // typically; the same rows also record a cost of 0). Counted on the row so
+  // "usage not reported" stays distinguishable from a measured zero; the scan
+  // raises one health warning from these counts. An in-flight, failed or
+  // aborted row is not judged: it has no completed response to have reported.
+  if (isUnreportedUsage(data, t, cache)) usageRow.tokensUnreported = (usageRow.tokensUnreported ?? 0) + 1;
   // Retain missing-cost tokens separately before coalescing by day/model.
   usageRow.costObserved ??= null;
   if (typeof data.cost === 'number' && Number.isFinite(data.cost) && data.cost >= 0) {
@@ -200,7 +277,7 @@ function recordAssistantUsage(rec, data, at) {
   } else {
     usageRow.costMissingUsage ??= { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, responses: 0 };
     const missing = usageRow.costMissingUsage;
-    missing.input += num(t.input); missing.output += num(t.output);
+    missing.input += num(t.input); missing.output += output;
     missing.cacheRead += num(cache.read); missing.cacheWrite += num(cache.write);
     missing.responses++;
   }
@@ -226,24 +303,50 @@ function recordAssistantTurn(rec, turns, { rowId, at, model, partsByMessage }) {
   turns.push({ role: 'assistant', at: new Date(at).toISOString(), model, text, tools });
 }
 
+/** OpenCode's own error name for a turn the user stopped (its
+ *  `MessageAbortedError`, written together with a `time.completed` stamp). */
+const ABORT_ERROR_NAME = 'MessageAbortedError';
+
+/** Close the open prompt→response latency window for one assistant message.
+ *  A response is measured from the user's prompt to the assistant row's
+ *  `time.completed`: OpenCode inserts the assistant row ~10-20 ms after the
+ *  prompt and fills it in as it generates, so its `time.created` says nothing
+ *  about how long the answer took. A row with no completed stamp (still in
+ *  flight, or never finished) has no measured response time and yields no
+ *  sample. The prompt is consumed either way, so a later step of the same turn
+ *  is never sampled against a stale prompt. */
+function closeLatencyWindow(rec, completedAt) {
+  const promptAt = rec.pendingPromptMs;
+  rec.pendingPromptMs = null;
+  if (promptAt === null || promptAt === undefined || !completedAt) return;
+  const seconds = (completedAt - promptAt) / 1000;
+  if (seconds <= MAX_LATENCY_SAMPLE_SECONDS) noteLatencySample(rec, seconds);
+}
+
 function recordAssistantMessage(rec, turns, { data, rowId, at, withTurns, partsByMessage }) {
   rec.responses++;
   if (at) { const pk = punchKey(at); rec.punchcard[pk] = (rec.punchcard[pk] ?? 0) + 1; }
+  const completedAt = num(data.time?.completed);
+  // The completion is activity too: without it the last generation of a turn
+  // (often minutes long) is excluded from engaged time, and a long single
+  // generation is split by the created-gap heuristic.
+  noteStamp(rec, completedAt);
+  if (completedAt > at) rec.spans.push([at, completedAt]);
   // A provider/auth/network failure is a REAL logged row here — unlike
   // parseClaude's synthetic all-zero placeholder, it still carries whatever
   // mode/model/usage/cost evidence it has, and that evidence is kept. Only
-  // two effects are error-specific: it counts as an exception, and it can
-  // never BE a latency sample (an unanswered prompt is not a measured
+  // two effects are error-specific: it counts (as an exception, or as an
+  // abort when the user stopped the turn — a choice, not a failure), and it
+  // can never BE a latency sample (an unanswered prompt is not a measured
   // response time) — though the pending prompt is still consumed here so a
   // later, unrelated assistant message is never mis-sampled against a stale
   // prompt.
   if (data.error != null) {
-    rec.exceptions++;
+    if (data.error?.name === ABORT_ERROR_NAME) rec.aborts++;
+    else rec.exceptions++;
     rec.pendingPromptMs = null;
-  } else if (rec.pendingPromptMs !== null && rec.pendingPromptMs !== undefined) {
-    const gapSeconds = (at - rec.pendingPromptMs) / 1000;
-    if (gapSeconds <= MAX_LATENCY_SAMPLE_SECONDS) noteLatencySample(rec, gapSeconds);
-    rec.pendingPromptMs = null;
+  } else {
+    closeLatencyWindow(rec, completedAt);
   }
   const m = normalizeMode({ host: 'opencode', opencodeMode: data.mode });
   if (m.raw) { rec.mode = m.mode; rec.modeRaw = m.raw; }
@@ -328,6 +431,8 @@ function initSessionRecord(srow) {
   // see recordUserMessage/recordAssistantMessage) — deleted before return in
   // parseSession, never part of the returned session shape.
   rec.pendingPromptMs = null;
+  // Transient too: each assistant row's [created, completed] generation span.
+  rec.spans = [];
   return rec;
 }
 
@@ -362,10 +467,11 @@ export function parseSession({ dbFile, id, withTurns = false, maxSessionBytes, m
     if (!withTurns) collectScanToolCounts(db, id, rec);
 
     if (!rec.title) rec.title = '(untitled)';
-    rec.active = activeIntervals(rec.stamps);
+    rec.active = activeIntervals(rec.stamps, rec.spans);
     rec.lenSeconds = Math.round(rec.active.reduce((n, [a, b]) => n + (b - a), 0) / 1000);
     delete rec.stamps;
     delete rec.pendingPromptMs;
+    delete rec.spans;
     return { session: rec, turns };
   });
   return result.ok ? result.value : null;

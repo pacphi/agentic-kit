@@ -15,7 +15,7 @@ const DAY = 86_400_000;
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 const rm = (d) => fs.rmSync(d, { recursive: true, force: true });
 
-const { buildIndex, readSession, _resetForTest } = await import('../../src/lib/usage-index.mjs');
+const { buildIndex, readSession, SCHEMA_VERSION, _resetForTest } = await import('../../src/lib/usage-index.mjs');
 
 /** Pricing stub: prices EVERY token at 1/1000 — deliberately different from
  *  the fixture's observed costs so the preference is provable. */
@@ -105,10 +105,10 @@ test('scan aggregates opencode sessions: host bucket, provider bucket, tokens, a
   assert.equal(s.project, 'oc-proj');
   assert.equal(s.responses, 2);
   assert.equal(s.input, 2000);
-  assert.equal(s.output, 200);
+  assert.equal(s.output, 220, '2 x (100 text + 10 reasoning): OpenCode stores output net of reasoning');
   assert.equal(s.cacheRead, 400);
   assert.equal(s.cacheWrite, 20);
-  assert.equal(s.tokens, 2620);
+  assert.equal(s.tokens, 2640);
   assert.equal(s.cost, 0.5, 'the transcript\'s own metered cost, not the stub price (would be 2.62)');
   assert.ok(agg.byHost.opencode, 'byHost gains the opencode bucket');
   assert.equal(agg.byHost.opencode.cost, 0.5);
@@ -126,7 +126,7 @@ test('sessions with NO observed cost fall back to the pricing table (never a fab
   });
   const agg = await buildIndex(opts(sb));
   const s = agg.sessions.find((x) => x.id === 'ses_oc2');
-  assert.equal(s.cost, (1000 + 100 + 200 + 10) / 1000, 'pricing stub applies when nothing was observed');
+  assert.equal(s.cost, (1000 + 110 + 200 + 10) / 1000, 'pricing stub applies when nothing was observed (output = 100 text + 10 reasoning)');
   rm(sb.dir);
 });
 
@@ -238,7 +238,7 @@ test('readSession prices an opencode session whose rows carry NO observed cost',
 
   const out = await readSession('ses_oc7', { roots: sb.roots, deps: deps() });
   assert.ok(out, 'payload returned rather than throwing');
-  assert.equal(out.meta.cost, (1000 + 100 + 200 + 10) / 1000,
+  assert.equal(out.meta.cost, (1000 + 110 + 200 + 10) / 1000,
     'the injected pricer priced the row the transcript never costed');
   rm(sb.dir);
 });
@@ -286,5 +286,105 @@ test('oversized SQLite session coverage survives scan and selected-session paylo
     assert.equal(selected.meta.acquisitionCoverage.truncated, true);
     assert.equal(selected.meta.acquisitionCoverage.reason, 'session-row-limit');
     assert.deepEqual(selected.turns, []);
+  } finally { _resetForTest(); rm(sb.dir); }
+});
+
+// O-2: OpenCode writes a step's tokens, cost and completed stamp into the SAME
+// assistant row it inserted at turn start. A scan taken mid-turn (zero tokens)
+// must not stay cached after the turn finishes.
+test('a message row rewritten in place re-parses the session (mid-turn scan does not stay cached)', async () => {
+  const at = NOW - DAY;
+  const sb = sandbox({
+    sessions: [{ id: 'ses_mid', directory: '/x', title: 'mid turn', timeCreated: at }],
+    messages: [
+      userMsg('u1', 'ses_mid', at),
+      { id: 'a1', sessionId: 'ses_mid', at: at + 10, data: {
+        role: 'assistant', agent: 'build', modelID: 'kimi-k3', providerID: 'opencode',
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, cost: 0, time: { created: at + 10 },
+      } },
+    ],
+  });
+  const first = await buildIndex(opts(sb));
+  assert.equal(first.sessions.find((x) => x.id === 'ses_mid').input, 0);
+
+  const db = new DatabaseSync(sb.dbFile);
+  db.prepare('UPDATE message SET time_updated = ?, data = ? WHERE id = ?').run(
+    at + 30_000,
+    JSON.stringify(assistantMsg('a1', 'ses_mid', at + 10, { cost: 0.4 }).data),
+    'a1',
+  );
+  db.close();
+
+  const second = await buildIndex(opts(sb));
+  const s = second.sessions.find((x) => x.id === 'ses_mid');
+  assert.equal(s.input, 1000, 'the finished turn replaces the cached mid-turn zero');
+  assert.equal(s.cost, 0.4);
+  rm(sb.dir);
+});
+
+// O-7: a session that switches provider mid-way keeps both providers' rows, and
+// the model-level aggregate still folds them under the one model id.
+test('one model served by two providers aggregates under the model without losing either row', async () => {
+  const at = NOW - DAY;
+  const sb = sandbox({
+    sessions: [{ id: 'ses_two', directory: '/x', title: 'switch', timeCreated: at }],
+    messages: [
+      userMsg('u1', 'ses_two', at),
+      assistantMsg('a1', 'ses_two', at + 1000, { model: 'qwen3-coder', provider: 'lmstudio', cost: 0 }),
+      assistantMsg('a2', 'ses_two', at + 2000, { model: 'qwen3-coder', provider: 'openrouter', cost: 0.5 }),
+    ],
+  });
+  try {
+    const agg = await buildIndex(opts(sb));
+    const s = agg.sessions.find((x) => x.id === 'ses_two');
+    assert.equal(s.input, 2000);
+    assert.equal(s.cost, 0.5, 'the reported zero stays an observed zero; only the cloud turn cost anything');
+    assert.equal(agg.byModel['qwen3-coder'].responses, 2);
+    assert.equal(agg.byModel['qwen3-coder'].cost, 0.5);
+  } finally { rm(sb.dir); }
+});
+
+// O-4: OpenCode records a user stop as assistant error MessageAbortedError. It
+// reaches the aggregate as an abort — per host, so a reader can divide by the
+// responses of the hosts that CAN record one — and not as an exception.
+test('an OpenCode user abort lands in byHost.opencode.aborts and totals.aborts, not exceptions', async () => {
+  const at = NOW - DAY;
+  const sb = sandbox({
+    sessions: [{ id: 'ses_abort', directory: '/x', title: 'aborted', timeCreated: at }],
+    messages: [
+      userMsg('u1', 'ses_abort', at),
+      { id: 'a1', sessionId: 'ses_abort', at: at + 10, data: {
+        ...assistantMsg('a1', 'ses_abort', at + 10, { cost: 0.1 }).data,
+        error: { name: 'MessageAbortedError', data: { message: 'The operation was aborted.' } },
+      } },
+    ],
+  });
+  try {
+    const agg = await buildIndex(opts(sb));
+    assert.equal(agg.totals.aborts, 1);
+    assert.equal(agg.totals.exceptions, 0);
+    assert.equal(agg.byHost.opencode.aborts, 1);
+    assert.equal(agg.sessions.find((x) => x.id === 'ses_abort').aborts, 1);
+  } finally { rm(sb.dir); }
+});
+
+test('SCHEMA_VERSION is at least 25 and a forged v24 OpenCode cache is discarded and re-parsed', async () => {
+  assert.ok(SCHEMA_VERSION >= 25, 'OpenCode row semantics changed (reasoning, latency, aborts, keys)');
+  const at = NOW - DAY;
+  const sb = sandbox({
+    sessions: [{ id: 'ses_forged', directory: '/x', title: 'real title', timeCreated: at }],
+    messages: [userMsg('u1', 'ses_forged', at), assistantMsg('a1', 'ses_forged', at + 1000, { cost: 0.25 })],
+  });
+  try {
+    await buildIndex(opts(sb));
+    const cache = JSON.parse(fs.readFileSync(sb.cachePath, 'utf8'));
+    cache.schemaVersion = 24;
+    for (const e of Object.values(cache.entries)) { e.session.title = 'FORGED-V24'; e.session.responses = 99; }
+    fs.writeFileSync(sb.cachePath, JSON.stringify(cache));
+    _resetForTest();
+    const agg = await buildIndex(opts(sb));
+    const s = agg.sessions.find((x) => x.id === 'ses_forged');
+    assert.notEqual(s.title, 'FORGED-V24');
+    assert.equal(s.responses, 1);
   } finally { _resetForTest(); rm(sb.dir); }
 });

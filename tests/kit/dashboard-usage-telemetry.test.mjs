@@ -1100,22 +1100,27 @@ test('model mix keeps four named families and folds the rest into one dim band',
   assert.match(JS, /for\(k in tot\)if\(k!=="other"\)/);
 });
 
+test('the source-health tooltip carries the common warnings when a host has no per-file diagnostics', () => {
+  // OpenCode's `usage-not-reported:N` lives in diagnostics.common.warnings; the
+  // per-host `warnings` (Codex) is preferred when present so nothing prints twice.
+  assert.match(JS, /if\(q&&q\.warnings&&q\.warnings\.length\) d\+=" · "\+q\.warnings\.join\(", "\);else if\(q&&q\.common&&q\.common\.warnings&&q\.common\.warnings\.length\) d\+=" · "\+q\.common\.warnings\.join\(", "\);/);
+});
+
 test('reliability states a rate with its denominator, and flags direction in words not only color', () => {
   assert.match(JS, /exceptions \/ 1k responses/);
   assert.match(JS, /\(Number\(t\.exceptions\)\|\|0\)\/r\*1000/);
-  // aborts is CODEX-ONLY evidence — turn_aborted is the only interrupt signal
-  // any host writes. These three assertions used to pin the opposite: they
-  // asserted the presence of an unconditional count and of the tooltip
-  // sentence "Turns the transcript recorded as interrupted", which is false
-  // for a claude-only corpus. They now pin the capability gate, so reverting
+  // aborts is evidence only codex (turn_aborted) and opencode
+  // (MessageAbortedError) write; a claude transcript records nothing when a
+  // turn is stopped. These assertions pin the capability gate, so reverting
   // to the measured-looking zero goes red instead of staying green.
   assert.match(JS, /aborted turns/, 'aborts are counted apart from exceptions');
-  assert.match(JS, /value:cxSess\?fmtNum\(ab\):"—"/,
-    'no codex sessions in the window → em dash, never a 0 that reads as "you never interrupted a turn"');
-  assert.match(JS, /ab\/cxResp\*1000\)\+" per 1k codex responses"/,
-    'the rate is over codex responses only — dividing by every host\'s responses dilutes it by host mix');
-  assert.match(JS, /no codex sessions — no other host records interrupts/);
-  assert.match(JS, /CODEX ONLY\./, 'the tooltip states the capability, not just the definition');
+  assert.match(JS, /value:abSess\?fmtNum\(ab\):"—"/,
+    'no codex/opencode sessions in the window → em dash, never a 0 that reads as "you never interrupted a turn"');
+  assert.match(JS, /ab\/abResp\*1000\)\+" per 1k codex\/opencode responses"/,
+    'the rate is over the responses of hosts that CAN record an abort — dividing by every host\'s responses dilutes it by host mix');
+  assert.match(JS, /no codex or opencode sessions — claude records no interrupts/);
+  assert.match(JS, /CODEX AND OPENCODE ONLY\./, 'the tooltip states the capability, not just the definition');
+  assert.doesNotMatch(JS, /opencode transcripts record nothing when you stop a turn/);
   assert.doesNotMatch(JS, /relStat\(\{label:"aborted turns",value:fmtNum\(ab\)/,
     'the unconditional count must not come back');
   // Icon + words + color, never color alone.
@@ -1238,9 +1243,9 @@ test('the session detail strip spells out posture and rhythm, and never omits th
   assert.match(JS, /Not recorded <span class='sd-conf'>\(no posture evidence in this transcript\)/);
   assert.match(JS, /latency samples/);
   // Per-row, the same capability rule the reliability panel applies: a
-  // claude/opencode row cannot have recorded an interrupt, so it says so
-  // rather than printing a 0 indistinguishable from a measured one.
-  assert.match(JS, /aborts "\+\(sx\.host==="codex"\?fmtNum\(Number\(sx\.aborts\)\|\|0\):"not recorded for this host"\)/);
+  // claude row cannot have recorded an interrupt, so it says so rather than
+  // printing a 0 indistinguishable from a measured one.
+  assert.match(JS, /aborts "\+\(sx\.host==="codex"\|\|sx\.host==="opencode"\?fmtNum\(Number\(sx\.aborts\)\|\|0\):"not recorded for this host"\)/);
 });
 
 test('an observed-but-unmapped posture shows the host spelling, never "no posture evidence"', () => {
