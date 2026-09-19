@@ -34,8 +34,20 @@ const MONOTONIC = ['input_tokens', 'cached_input_tokens', 'output_tokens', 'tota
 
 const snapshotOf = (t) => Object.fromEntries(FIELDS.map((f) => [f, Number(t?.[f]) || 0]));
 
+/**
+ * @typedef {object} CodexUsageWalk
+ * @property {boolean} unattributable
+ * @property {Record<string, number>|null} prev
+ * @property {string|null} model
+ * @property {number|null} lastMs
+ * @property {Map<string, any>} buckets
+ * @property {Map<string, any>} responses
+ * @property {number} segments
+ */
+
 /** Fresh walk state. `unattributable` (a subagent whose replay cannot be
- *  separated) makes the walk book nothing. */
+ *  separated) makes the walk book nothing.
+ *  @returns {CodexUsageWalk} */
 export function newCodexUsageWalk({ unattributable = false } = {}) {
   return {
     unattributable,
@@ -110,8 +122,8 @@ export function walkCodexTokenCount(walk, total, ms, replay, dayOf) {
  * (day, model); any that match no token row go to the last row so a session's
  * rows always sum to its `responses` (byModel response counts rely on it).
  *
- * @param {object} walk
- * @param {{ models: string[], fallbackMs: number, dayOf: (ms:number)=>string, responses: number }} ctx
+ * @param {CodexUsageWalk} walk
+ * @param {{ models: string[], fallbackMs: number, dayOf: (ms:number)=>string }} ctx
  * @returns {{ rows: Array<{day:string,model:string,input:number,output:number,cacheRead:number,cacheWrite:number,responses:number}>, reasoningOutput: number }}
  */
 export function codexWalkRows(walk, { models, fallbackMs, dayOf }) {

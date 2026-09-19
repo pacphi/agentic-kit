@@ -47,7 +47,7 @@ function isMessageToThread(e, path) {
  *                by up to 91x is the failure being avoided). Never true for a
  *                file that has ordinals.
  *
- * @param {Iterable<object>} lines parsed rollout envelopes, first line first
+ * @param {Iterable<any>} lines parsed rollout envelopes, first line first
  * @returns {{ boundary: number|null, unprovable: boolean }}
  */
 export function codexReplayPlan(lines) {

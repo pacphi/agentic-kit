@@ -661,6 +661,23 @@ function discoverOpencodeSource(rawRoots, cutoff) {
   return { health: { status: 'ok', reason: null }, candidates, ocDb };
 }
 
+/** Codex's own per-file bookkeeping for one scan candidate: file counts, the
+ *  parse-yield diagnostics, and — for a file that yielded no record — why. An
+ *  imported Claude session (ADR-0052) carries none of Codex's own activity: it
+ *  is counted (`importedExcluded`) and kept out of every Codex statistic.
+ *  Returns false for such an import so the caller skips the common telemetry
+ *  units too. */
+function recordCodexCandidate(codexDiagnostics, { session, parseStats, cacheHit, failure }) {
+  codexDiagnostics.files++;
+  if (cacheHit) codexDiagnostics.cachedFiles++;
+  if (session?.imported === true) { codexDiagnostics.importedExcluded++; return false; }
+  if (session) { addCodexParseDiagnostics(codexDiagnostics, parseStats); return true; }
+  codexDiagnostics.unparsedFiles++;
+  const reason = failure.reason ?? 'parse-error';
+  codexDiagnostics.unparsedReasons[reason] = (codexDiagnostics.unparsedReasons[reason] ?? 0) + 1;
+  return true;
+}
+
 /** Parse (or reuse the cached parse of) one scan candidate, updating the
  *  common cross-host telemetry diagnostics and codex's extra per-file
  *  diagnostics as side effects. Pulled out of scan()'s loop so the per-file
@@ -680,32 +697,15 @@ function processCandidate(c, cache, commonDiagnostics, codexDiagnostics, readLim
     session = parsed ? parsed.session : null;
     parseStats = parsed?.parseStats ?? null;
   }
-  // A Claude session Codex imported carries none of Codex's own activity: it is
-  // counted (importedExcluded) and kept out of every Codex statistic.
-  const imported = c.provider === 'codex' && session?.imported === true;
-  if (imported) {
-    codexDiagnostics.files++;
-    if (cacheHit) codexDiagnostics.cachedFiles++;
-    codexDiagnostics.importedExcluded++;
-    return { key, session, parseStats };
-  }
-  if (commonDiagnostics[c.provider]) {
+  const counted = c.provider !== 'codex'
+    || recordCodexCandidate(codexDiagnostics, { session, parseStats, cacheHit, failure });
+  if (counted && commonDiagnostics[c.provider]) {
     recordTelemetryUnit(commonDiagnostics[c.provider], session);
     if (c.provider === 'codex') {
       addTelemetryDiagnostics(commonDiagnostics.codex, {
         unknownKinds: parseStats?.unknownItemTypes,
         unknownKindOverflow: parseStats?.unknownItemTypeOverflow,
       });
-    }
-  }
-  if (c.provider === 'codex') {
-    codexDiagnostics.files++;
-    if (cacheHit) codexDiagnostics.cachedFiles++;
-    if (session) addCodexParseDiagnostics(codexDiagnostics, parseStats);
-    else {
-      codexDiagnostics.unparsedFiles++;
-      const reason = failure.reason ?? 'parse-error';
-      codexDiagnostics.unparsedReasons[reason] = (codexDiagnostics.unparsedReasons[reason] ?? 0) + 1;
     }
   }
   return { key, session, parseStats };
