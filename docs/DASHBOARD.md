@@ -232,10 +232,12 @@ evidence; a raw value the taxonomy has not been taught yields **not-recorded**, 
 first-class row rendered in the de-emphasis ink rather than a display fallback, because spend with
 no posture evidence must never read as a posture. The delegation donut splits main-thread from
 subagent work, and its two halves are honest in different ways: Claude writes delegated work to its
-own nested transcript, so that cost is discovered, priced, and included, while a Codex subagent
-rollout reads `$0.00` by ledger design — its tokens replay the parent's and are stripped as a
-double-count, so the sessions stay visible and auditable at zero rather than billing the parent
-twice. The panel does not rank window cost by inference provider: a transcript host is not a vendor.
+own nested transcript, so that cost is discovered, priced, and included; a forked Codex subagent's
+rollout opens with its parent's replayed history, so only what follows the replay is counted — the
+subagent's own tokens are priced and the parent is never billed twice. A subagent from a host that
+records no event ordinals cannot have its replay separated and reads `$0.00`, which means not
+measurable rather than cheap. Codex sessions imported from Claude Code are not Codex activity and are
+excluded from every Codex figure. The panel does not rank window cost by inference provider: a transcript host is not a vendor.
 Codex and OpenCode can record a serving provider, while Claude history lacks that field;
 identity is reported per session on
 the Sessions detail strip — beside the provenance backing it — rather than as a window axis.

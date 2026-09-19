@@ -40,6 +40,17 @@ value; `samples` and the histogram now count messages. The usage cache moved to
 v22 so cached records re-parse. See the correction in
 [ADR-0038](0038-consistent-cross-host-session-metrics.md#correction-2026-09-19-claude-usage-is-counted-once-per-api-message).
 
+## Correction (2026-09-19): Codex subagent replay is not a context sample
+
+A forked Codex subagent's rollout replays its parent's `token_count` events, so
+every pressure sample it recorded came from the parent's history, and in all 132
+replaying files the peak came from a replayed event. Events below the
+subagent's replay boundary (`codex-replay.mjs`) no longer contribute a context
+sample, window observation or rate-limit snapshot; `samples`, `peak` and the
+histogram now describe the subagent's own calls. Pressure still uses the window
+carried by the same `token_count` envelope. The usage cache is v23. See
+[ADR-0052](0052-codex-usage-attribution.md).
+
 ## Context
 
 A fresh Codex session on the reference machine reported 25,985 tokens in a 258,400-token effective

@@ -48,11 +48,11 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0035](0035-managed-deja-vu-companion.md) | Manage deja-vu as an opt-in session-history companion | Implemented for issue #114 |
 | [0036](0036-dashboard-client-modularization-and-shared-loopback-server.md) | Dashboard client modularization and shared loopback server | Implemented |
 | [0037](0037-complexity-program-structural-patterns.md) | Complexity program: structural patterns and gates | Implemented |
-| [0038](0038-consistent-cross-host-session-metrics.md) | Consistent cross-host session metrics | Accepted; Claude counting corrected 2026-09-19 |
+| [0038](0038-consistent-cross-host-session-metrics.md) | Consistent cross-host session metrics | Accepted; Claude and Codex counting corrected 2026-09-19 |
 | [0039](0039-prompts-intelligence.md) | Deterministic Prompts telemetry on main | Accepted |
 | [0040](0040-codex-hook-audit-and-conservative-remediation.md) | Codex hook audit and conservative remediation | Implemented (Codex Wave 1) |
 | [0041](0041-host-neutral-hook-configuration-assurance.md) | Host-neutral hook configuration assurance | Accepted; static assurance/healing/read model implemented, native runtime receipts deferred |
-| [0042](0042-capability-aware-context-budget-intelligence.md) | Capability-aware context budget intelligence | Implemented; Claude context samples corrected 2026-09-19 |
+| [0042](0042-capability-aware-context-budget-intelligence.md) | Capability-aware context budget intelligence | Implemented; Claude and Codex context samples corrected 2026-09-19 |
 | [0043](0043-managed-ruflo-browser-executor.md) | Manage Ruflo's browser executor behind a replaceable boundary | Implemented |
 | [0044](0044-receipt-aware-maintenance-control-plane.md) | Receipt-aware Maintenance control plane | Implemented |
 | [0045](0045-artifact-consumer-bindings-and-explicit-maintenance-scans.md) | Physical artifacts, host consumers, and explicit Maintenance scans | Implemented |
@@ -61,6 +61,7 @@ Consequences**, and cites the grounded source it rests on where relevant.
 | [0048](0048-inventory-led-maintenance-resource-management.md) | Inventory-led Maintenance resource management | Accepted; Focus browser implemented and focused checks pass; human/cross-platform gates pending |
 | [0050](0050-dashboard-project-identity-and-context-reporting.md) | Dashboard project identity and context reporting | Implemented |
 | [0051](0051-supported-peer-delegation-and-host-realignment.md) | Supported peer delegation and scoped host realignment | Accepted; implemented locally |
+| [0052](0052-codex-usage-attribution.md) | Codex usage attribution: own usage, imports, segments, streaming | Accepted |
 
 Theme: ADRs **0001–0006** define **dual-host LLM routing and leadership** — how `ak` lets ruflo route
 each development activity (architecture, implementation, testing, review, …) to the right host (Claude
@@ -361,3 +362,9 @@ verified Git-project Usage ranking, wrapping Maintenance language icons, and
 cache schema 20. These UI projections preserve their existing totals and do not
 turn model capacity, Desktop declarations, or Git observations into stronger
 live-session or ownership claims.
+
+**0052** corrects the Codex arithmetic under 0038 and 0042: a subagent's own usage counts and only its
+replayed parent history is excluded (with a boundary that survives the host writing the file length
+as the history start), Claude sessions Codex imports are excluded and counted, counter restarts are
+summed and each delta books on its own day and model, oversized rollouts are read by a bounded-memory
+streaming reader, and rollouts that still cannot be parsed are reported. Cache schema 23.
