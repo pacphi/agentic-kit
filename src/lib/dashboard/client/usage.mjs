@@ -844,10 +844,10 @@ import { renderUsage } from './usage-orchestrators.mjs';
     +"to) and surfaced here instead of vanishing.\nRate is exceptions ÷ responses × 1000.";
   var ABORT_TIP="Turns the transcript recorded as interrupted — the answer was stopped mid-flight. "
     +"Counted apart from exceptions: an abort is a choice, not a failure.\n"
-    +"CODEX ONLY. Only codex rollouts carry an interrupt signal (turn_aborted); claude and "
-    +"opencode transcripts record nothing when you stop a turn. So the count and its rate are "
-    +"over codex responses alone, and a window with no codex sessions shows — (not 0), because "
-    +"nothing in it could have recorded an interrupt.";
+    +"CODEX AND OPENCODE ONLY. Codex rollouts (turn_aborted) and opencode messages "
+    +"(MessageAbortedError) carry an interrupt signal; claude transcripts record nothing when you "
+    +"stop a turn. So the count and its rate are over codex and opencode responses alone, and a "
+    +"window with neither shows — (not 0), because nothing in it could have recorded an interrupt.";
   // The per-day series rides the SAME first-billed-day attribution the session
   // count uses, which is not the moment a turn dropped: a session that spans
   // midnight lands all of its exceptions on one day. Said on the panel, because
@@ -906,22 +906,25 @@ import { renderUsage } from './usage-orchestrators.mjs';
       stripHtml("u-reliability","Reliability","turns that never landed"),"u-models");
     if(!body)return;
     var t=d.totals||{},p=(d.previous&&d.previous.totals)||null;
-    var cur=relRate(t),exc=Number(t.exceptions)||0,ab=Number(t.aborts)||0,resp=Number(t.responses)||0;
-    // aborts is CODEX-ONLY evidence: turn_aborted is the only interrupt signal
-    // any host writes, so a claude-or-opencode window renders "—", not a 0 that
-    // reads as "you never interrupted a turn". The rate's denominator is codex
-    // responses for the same reason — dividing codex aborts by every host's
-    // responses dilutes it by an arbitrary amount that depends on host mix.
-    var cx=(d.byHost&&d.byHost.codex)||null;
-    var cxSess=Number(cx&&cx.sessions)||0,cxResp=Number(cx&&cx.responses)||0;
+    var cur=relRate(t),exc=Number(t.exceptions)||0,resp=Number(t.responses)||0;
+    // aborts is evidence only codex (turn_aborted) and opencode
+    // (MessageAbortedError) write, so a claude-only window renders "—", not a 0
+    // that reads as "you never interrupted a turn". The count and the rate's
+    // denominator are both over those hosts alone — dividing their aborts by
+    // every host's responses dilutes it by an arbitrary amount that depends on
+    // host mix.
+    var cx=(d.byHost&&d.byHost.codex)||{},oc=(d.byHost&&d.byHost.opencode)||{};
+    var abSess=(Number(cx.sessions)||0)+(Number(oc.sessions)||0);
+    var abResp=(Number(cx.responses)||0)+(Number(oc.responses)||0);
+    var ab=(Number(cx.aborts)||0)+(Number(oc.aborts)||0);
     body.innerHTML='<div class="rel">'
       +relStat({label:"exceptions / 1k responses",value:cur==null?"—":cur.toFixed(1),
         sub:fmtNum(exc)+" of "+fmtNum(resp)+" responses",tip:REL_TIP,
         flag:relFlag(cur,p?relRate(p):null)})
-      +relStat({label:"aborted turns",value:cxSess?fmtNum(ab):"—",
-        sub:cxSess
-          ?(cxResp?fmtRatio(ab/cxResp*1000)+" per 1k codex responses":"no codex responses in window")
-          :"no codex sessions — no other host records interrupts",
+      +relStat({label:"aborted turns",value:abSess?fmtNum(ab):"—",
+        sub:abSess
+          ?(abResp?fmtRatio(ab/abResp*1000)+" per 1k codex/opencode responses":"no codex or opencode responses in window")
+          :"no codex or opencode sessions — claude records no interrupts",
         tip:ABORT_TIP})
       +"</div>"+relTrend(d)+'<p class="hr-note">'+esc(REL_TREND_NOTE)+"</p>";
   }
@@ -1359,9 +1362,9 @@ import { renderUsage } from './usage-orchestrators.mjs';
       +" · p50 "+(p50==null?"—":fmtAtLeast(p50,60,fmtSecs))
       +" · latency samples "+fmtNum(Number(sx.latCount)||0)
       // Same capability rule as the reliability panel, applied per row: only a
-      // codex transcript can record an interrupt, so a claude/opencode row
+      // codex or opencode transcript can record an interrupt, so a claude row
       // reads "not recorded" rather than a measured-looking 0.
-      +" · aborts "+(sx.host==="codex"?fmtNum(Number(sx.aborts)||0):"not recorded for this host");
+      +" · aborts "+(sx.host==="codex"||sx.host==="opencode"?fmtNum(Number(sx.aborts)||0):"not recorded for this host");
     var rows=[["execution host",esc(identityName(sx.host))],["inference provider",esc(provider)+" <span class='sd-conf'>("+esc(providerContext)+")</span>"],["models",esc(models)],["posture",posture],["rhythm",esc(rhythm)],["basis",esc(basis)+conf],["tokens",esc(toks)],
       ["tools",esc(tools)],["flags",esc(flags)]];
     return '<div class="sdetail" id="sd-'+esc(sx.id)+'" hidden>'

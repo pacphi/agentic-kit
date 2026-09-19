@@ -59,7 +59,8 @@ const userMsg = (id, sessionId, at, text = null) => ({
 // entirely — a token-LESS row, distinct from `tokens: {}` which still merges
 // onto the hardcoded defaults below. Same conditional-spread convention as
 // mode/error.
-const assistantMsg = (id, sessionId, at, { model = 'kimi-k3', provider = 'opencode', tokens = {}, cost = null, mode = null, error = null } = {}) => ({
+// completed: null omits `time.completed` (a turn still in flight, or never finished).
+const assistantMsg = (id, sessionId, at, { model = 'kimi-k3', provider = 'opencode', tokens = {}, cost = null, mode = null, error = null, completed = at + 1000 } = {}) => ({
   id, sessionId, at,
   data: {
     role: 'assistant', agent: 'build', path: { cwd: '/x', root: '/' },
@@ -68,7 +69,7 @@ const assistantMsg = (id, sessionId, at, { model = 'kimi-k3', provider = 'openco
     ...(cost != null ? { cost } : {}),
     ...(mode != null ? { mode } : {}),
     ...(error != null ? { error } : {}),
-    time: { created: at, completed: at + 1000 }, finish: 'stop',
+    time: { created: at, ...(completed !== null ? { completed } : {}) }, finish: 'stop',
   },
 });
 
@@ -210,7 +211,9 @@ test('assistant messages: mode (last wins), user→assistant latency gap, error 
     sessions: [{ id: 'ses_1', directory: '/x', title: 't', timeCreated: T }],
     messages: [
       userMsg('u1', 'ses_1', T, 'fix the auth flow'),
-      assistantMsg('a1', 'ses_1', T + 4_000, { mode: 'build', tokens: { input: 900, cache: { read: 20000, write: 3000 }, output: 10 } }),
+      // OpenCode inserts the assistant row within ~15 ms of the prompt; the
+      // response is DONE at `completed`, which is what latency measures.
+      assistantMsg('a1', 'ses_1', T + 15, { completed: T + 4_000, mode: 'build', tokens: { input: 900, cache: { read: 20000, write: 3000 }, output: 10 } }),
       // token-LESS: the error row must never overwrite ctxLastTokens with a
       // fabricated 0 (evidence-gated — see recordAssistantUsage).
       assistantMsg('a2', 'ses_1', T + 8_000, { error: { name: 'ProviderAuthError' }, tokens: null }),
@@ -235,7 +238,7 @@ test('an error row WITH evidence still records mode/model/usage/cost/ctx — onl
     sessions: [{ id: 'ses_2', directory: '/x', title: 't', timeCreated: T }],
     messages: [
       userMsg('u1', 'ses_2', T, 'deploy the fix'),
-      assistantMsg('a1', 'ses_2', T + 3_000, {
+      assistantMsg('a1', 'ses_2', T + 15, { completed: T + 3_000,
         model: 'claude-opus-5', mode: 'plan', cost: 0.5, error: { name: 'ProviderAuthError' },
         tokens: { input: 10, cache: { read: 5 } },
       }),
@@ -401,5 +404,82 @@ test('a session-row-only change (auto title) also moves the key', () => {
     db.prepare('UPDATE session SET title = ?, time_updated = ? WHERE id = ?').run('Real title', T + 5000, 'ses_t');
     db.close();
     assert.ok(listSessions({ dbFile })[0].updatedMs > before);
+  } finally { rm(d); }
+});
+
+// ── O-3: latency ends when the response COMPLETES ───────────────────────────
+
+test('latency is user.created to assistant.completed, not the ~15 ms row-insert gap', () => {
+  const d = tmp();
+  try {
+    const dbFile = buildDb(path.join(d, 'opencode.db'), {
+      sessions: [{ id: 'ses_l', directory: '/x', title: 't', timeCreated: T }],
+      messages: [
+        userMsg('u1', 'ses_l', T, 'explain the module'),
+        assistantMsg('a1', 'ses_l', T + 15, { completed: T + 12_000 }),
+      ],
+    });
+    const { session } = parseSession({ dbFile, id: 'ses_l' });
+    assert.equal(session.latCount, 1);
+    assert.equal(session.latHist[3], 1, '12 s lands in the 10-30 s bucket (the created-gap read it as ~0.015 s)');
+  } finally { rm(d); }
+});
+
+test('an assistant row with no completed stamp yields no latency sample, and consumes the prompt', () => {
+  const d = tmp();
+  try {
+    const dbFile = buildDb(path.join(d, 'opencode.db'), {
+      sessions: [{ id: 'ses_n', directory: '/x', title: 't', timeCreated: T }],
+      messages: [
+        userMsg('u1', 'ses_n', T, 'go'),
+        assistantMsg('a1', 'ses_n', T + 15, { completed: null }),
+        // a later step of the same turn must not be sampled against the stale prompt
+        assistantMsg('a2', 'ses_n', T + 20_000, { completed: T + 30_000 }),
+      ],
+    });
+    const { session } = parseSession({ dbFile, id: 'ses_n' });
+    assert.equal(session.latCount, 0);
+    assert.equal(session.latHist, null);
+  } finally { rm(d); }
+});
+
+test('the completed stamp joins activity, so one long generation is one interval and the last generation counts', () => {
+  const d = tmp();
+  try {
+    const dbFile = buildDb(path.join(d, 'opencode.db'), {
+      sessions: [{ id: 'ses_long', directory: '/x', title: 't', timeCreated: T }],
+      messages: [
+        userMsg('u1', 'ses_long', T, 'refactor everything'),
+        // a 20-minute generation: created-only stamps read it as an instant
+        assistantMsg('a1', 'ses_long', T + 15, { completed: T + 20 * 60_000 }),
+      ],
+    });
+    const { session } = parseSession({ dbFile, id: 'ses_long' });
+    assert.equal(session.active.length, 1);
+    assert.equal(session.lenSeconds, 1200);
+    assert.equal(session.end, T + 20 * 60_000, 'the session span reaches the last completion');
+  } finally { rm(d); }
+});
+
+// ── O-4: a user abort is an abort, not an exception ─────────────────────────
+
+test('MessageAbortedError counts as an abort, keeps its usage, and is never an exception or a latency sample', () => {
+  const d = tmp();
+  try {
+    const dbFile = buildDb(path.join(d, 'opencode.db'), {
+      sessions: [{ id: 'ses_ab', directory: '/x', title: 't', timeCreated: T }],
+      messages: [
+        userMsg('u1', 'ses_ab', T, 'stop me'),
+        assistantMsg('a1', 'ses_ab', T + 15, { completed: T + 3_000, cost: 0.2, error: { name: 'MessageAbortedError', data: { message: 'The operation was aborted.' } } }),
+        userMsg('u2', 'ses_ab', T + 10_000, 'again'),
+        assistantMsg('a2', 'ses_ab', T + 10_015, { completed: T + 10_500, error: { name: 'APIError', data: { message: 'boom' } } }),
+      ],
+    });
+    const { session } = parseSession({ dbFile, id: 'ses_ab' });
+    assert.equal(session.aborts, 1);
+    assert.equal(session.exceptions, 1, 'only the genuine provider failure is an exception');
+    assert.equal(session.latHist, null, 'neither an aborted nor a failed turn is a latency sample');
+    assert.equal(session.usage[0].costObserved, 0.2, 'the aborted turn still spent tokens and cost');
+    assert.equal(session.responses, 2);
   } finally { rm(d); }
 });

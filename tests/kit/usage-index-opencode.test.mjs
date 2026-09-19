@@ -322,6 +322,30 @@ test('a message row rewritten in place re-parses the session (mid-turn scan does
   rm(sb.dir);
 });
 
+// O-4: OpenCode records a user stop as assistant error MessageAbortedError. It
+// reaches the aggregate as an abort — per host, so a reader can divide by the
+// responses of the hosts that CAN record one — and not as an exception.
+test('an OpenCode user abort lands in byHost.opencode.aborts and totals.aborts, not exceptions', async () => {
+  const at = NOW - DAY;
+  const sb = sandbox({
+    sessions: [{ id: 'ses_abort', directory: '/x', title: 'aborted', timeCreated: at }],
+    messages: [
+      userMsg('u1', 'ses_abort', at),
+      { id: 'a1', sessionId: 'ses_abort', at: at + 10, data: {
+        ...assistantMsg('a1', 'ses_abort', at + 10, { cost: 0.1 }).data,
+        error: { name: 'MessageAbortedError', data: { message: 'The operation was aborted.' } },
+      } },
+    ],
+  });
+  try {
+    const agg = await buildIndex(opts(sb));
+    assert.equal(agg.totals.aborts, 1);
+    assert.equal(agg.totals.exceptions, 0);
+    assert.equal(agg.byHost.opencode.aborts, 1);
+    assert.equal(agg.sessions.find((x) => x.id === 'ses_abort').aborts, 1);
+  } finally { rm(sb.dir); }
+});
+
 test('SCHEMA_VERSION is at least 25 and a forged v24 OpenCode cache is discarded and re-parsed', async () => {
   assert.ok(SCHEMA_VERSION >= 25, 'OpenCode row semantics changed (reasoning, latency, aborts, keys)');
   const at = NOW - DAY;

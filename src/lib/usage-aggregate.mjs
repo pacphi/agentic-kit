@@ -978,7 +978,12 @@ function foldSessionTotals(sessions, byDay, byModel) {
     if (s._priced) pricedCosts.push(s.cost);
     spanMs += s._span[1] - s._span[0];
 
-    addTo(bucket(byHost, s.host ?? 'unknown'), s);
+    const hostBucket = bucket(byHost, s.host ?? 'unknown');
+    addTo(hostBucket, s);
+    // Aborts are host-capability evidence (codex and opencode record a user
+    // stop; claude does not), so they are kept per host — a reader dividing
+    // by "responses that could have recorded one" needs them apart.
+    hostBucket.aborts = (hostBucket.aborts ?? 0) + (Number(s.aborts) || 0);
     addTo(bucket(byProvider, s.provider ?? 'unknown'), s);
     // 'not-recorded' is a first-class key, not a display fallback: a transcript
     // that carried no mode evidence must not be folded into a real posture.

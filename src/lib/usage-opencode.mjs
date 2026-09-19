@@ -65,7 +65,7 @@ const clip = (text, max = 100) => {
 /** Split activity timestamps into engaged intervals at the same 15-min gap
  *  the index uses (kept in lockstep with usage-index.IDLE_GAP_MS). */
 const IDLE_GAP_MS = 15 * 60 * 1000;
-function activeIntervals(stamps) {
+function stampIntervals(stamps) {
   const ts = stamps.filter(Number.isFinite).sort((a, b) => a - b);
   if (!ts.length) return [];
   const out = [];
@@ -77,6 +77,23 @@ function activeIntervals(stamps) {
   }
   out.push([start, prev]);
   return out;
+}
+
+/** Engaged intervals: the gap-split stamps, unioned with each assistant row's
+ *  own [created, completed] span. A generation is continuous work however long
+ *  it ran, so a single response longer than the idle gap must not be cut in two
+ *  by the created-stamp heuristic. */
+function activeIntervals(stamps, spans = []) {
+  const base = stampIntervals(stamps);
+  const own = spans.filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b) && b > a);
+  if (!own.length) return base;
+  const merged = [];
+  for (const iv of [...base, ...own].sort((x, y) => x[0] - y[0])) {
+    const last = merged[merged.length - 1];
+    if (last && iv[0] <= last[1]) last[1] = Math.max(last[1], iv[1]);
+    else merged.push([iv[0], iv[1]]);
+  }
+  return merged;
 }
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
@@ -236,24 +253,50 @@ function recordAssistantTurn(rec, turns, { rowId, at, model, partsByMessage }) {
   turns.push({ role: 'assistant', at: new Date(at).toISOString(), model, text, tools });
 }
 
+/** OpenCode's own error name for a turn the user stopped (its
+ *  `MessageAbortedError`, written together with a `time.completed` stamp). */
+const ABORT_ERROR_NAME = 'MessageAbortedError';
+
+/** Close the open prompt→response latency window for one assistant message.
+ *  A response is measured from the user's prompt to the assistant row's
+ *  `time.completed`: OpenCode inserts the assistant row ~10-20 ms after the
+ *  prompt and fills it in as it generates, so its `time.created` says nothing
+ *  about how long the answer took. A row with no completed stamp (still in
+ *  flight, or never finished) has no measured response time and yields no
+ *  sample. The prompt is consumed either way, so a later step of the same turn
+ *  is never sampled against a stale prompt. */
+function closeLatencyWindow(rec, completedAt) {
+  const promptAt = rec.pendingPromptMs;
+  rec.pendingPromptMs = null;
+  if (promptAt === null || promptAt === undefined || !completedAt) return;
+  const seconds = (completedAt - promptAt) / 1000;
+  if (seconds <= MAX_LATENCY_SAMPLE_SECONDS) noteLatencySample(rec, seconds);
+}
+
 function recordAssistantMessage(rec, turns, { data, rowId, at, withTurns, partsByMessage }) {
   rec.responses++;
   if (at) { const pk = punchKey(at); rec.punchcard[pk] = (rec.punchcard[pk] ?? 0) + 1; }
+  const completedAt = num(data.time?.completed);
+  // The completion is activity too: without it the last generation of a turn
+  // (often minutes long) is excluded from engaged time, and a long single
+  // generation is split by the created-gap heuristic.
+  noteStamp(rec, completedAt);
+  if (completedAt > at) rec.spans.push([at, completedAt]);
   // A provider/auth/network failure is a REAL logged row here — unlike
   // parseClaude's synthetic all-zero placeholder, it still carries whatever
   // mode/model/usage/cost evidence it has, and that evidence is kept. Only
-  // two effects are error-specific: it counts as an exception, and it can
-  // never BE a latency sample (an unanswered prompt is not a measured
+  // two effects are error-specific: it counts (as an exception, or as an
+  // abort when the user stopped the turn — a choice, not a failure), and it
+  // can never BE a latency sample (an unanswered prompt is not a measured
   // response time) — though the pending prompt is still consumed here so a
   // later, unrelated assistant message is never mis-sampled against a stale
   // prompt.
   if (data.error != null) {
-    rec.exceptions++;
+    if (data.error?.name === ABORT_ERROR_NAME) rec.aborts++;
+    else rec.exceptions++;
     rec.pendingPromptMs = null;
-  } else if (rec.pendingPromptMs !== null && rec.pendingPromptMs !== undefined) {
-    const gapSeconds = (at - rec.pendingPromptMs) / 1000;
-    if (gapSeconds <= MAX_LATENCY_SAMPLE_SECONDS) noteLatencySample(rec, gapSeconds);
-    rec.pendingPromptMs = null;
+  } else {
+    closeLatencyWindow(rec, completedAt);
   }
   const m = normalizeMode({ host: 'opencode', opencodeMode: data.mode });
   if (m.raw) { rec.mode = m.mode; rec.modeRaw = m.raw; }
@@ -338,6 +381,8 @@ function initSessionRecord(srow) {
   // see recordUserMessage/recordAssistantMessage) — deleted before return in
   // parseSession, never part of the returned session shape.
   rec.pendingPromptMs = null;
+  // Transient too: each assistant row's [created, completed] generation span.
+  rec.spans = [];
   return rec;
 }
 
@@ -372,10 +417,11 @@ export function parseSession({ dbFile, id, withTurns = false, maxSessionBytes, m
     if (!withTurns) collectScanToolCounts(db, id, rec);
 
     if (!rec.title) rec.title = '(untitled)';
-    rec.active = activeIntervals(rec.stamps);
+    rec.active = activeIntervals(rec.stamps, rec.spans);
     rec.lenSeconds = Math.round(rec.active.reduce((n, [a, b]) => n + (b - a), 0) / 1000);
     delete rec.stamps;
     delete rec.pendingPromptMs;
+    delete rec.spans;
     return { session: rec, turns };
   });
   return result.ok ? result.value : null;

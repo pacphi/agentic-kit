@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { MODES } from '../../src/lib/usage-modes.mjs';
 
 const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin/agentic-kit.mjs');
@@ -293,6 +294,46 @@ test('ak usage score section headings are sentence-cased; the command banner is 
   ]) assert.ok(result.stdout.includes(heading), `missing heading ${JSON.stringify(heading)}`);
   assert.match(result.stdout, /ak usage — scorecard \(last \d+d\)/,
     'the command banner keeps its own spelling');
+  fs.rmSync(sb.home, { recursive: true, force: true });
+});
+
+/** A tiny OpenCode store under the sandbox's XDG data dir: one session whose
+ *  only assistant turn the user stopped (MessageAbortedError). */
+function writeOpencodeAbort(sb) {
+  const dir = path.join(sb.home, '.local', 'share', 'opencode');
+  fs.mkdirSync(dir, { recursive: true });
+  const db = new DatabaseSync(path.join(dir, 'opencode.db'));
+  const at = Date.now() - 120_000;
+  db.exec(`
+    CREATE TABLE session (id text PRIMARY KEY, parent_id text, directory text NOT NULL, title text NOT NULL,
+      time_created integer NOT NULL, time_updated integer NOT NULL);
+    CREATE TABLE message (id text PRIMARY KEY, session_id text NOT NULL,
+      time_created integer NOT NULL, time_updated integer NOT NULL, data text NOT NULL);
+    CREATE TABLE part (id text PRIMARY KEY, message_id text NOT NULL, session_id text NOT NULL,
+      time_created integer NOT NULL, time_updated integer NOT NULL, data text NOT NULL);
+  `);
+  db.prepare('INSERT INTO session VALUES (?, ?, ?, ?, ?, ?)').run('ses_cli_ab', null, '/tmp/oc-proj', 'aborted', at, at);
+  const ins = db.prepare('INSERT INTO message VALUES (?, ?, ?, ?, ?)');
+  ins.run('u1', 'ses_cli_ab', at, at, JSON.stringify({ role: 'user', time: { created: at } }));
+  ins.run('a1', 'ses_cli_ab', at + 10, at + 20, JSON.stringify({
+    role: 'assistant', modelID: 'kimi-k3', providerID: 'opencode',
+    tokens: { input: 10, output: 5, reasoning: 0, cache: { read: 0, write: 0 } }, cost: 0.01,
+    error: { name: 'MessageAbortedError', data: { message: 'aborted' } }, time: { created: at + 10, completed: at + 20 },
+  }));
+  db.close();
+}
+
+test('ak usage score counts an OpenCode user abort as an interrupt, over codex and opencode responses', () => {
+  const sb = sandbox();
+  writeOpencodeAbort(sb);
+  const result = ak(['usage', 'score'], sb);
+  assert.equal(result.status, 0, result.stderr);
+  const line = result.stdout.split('\n').find((l) => l.includes('ABORTED TURNS'));
+  assert.ok(line, 'the reliability section renders an aborted-turns row');
+  assert.match(line, /ABORTED TURNS\s+1\b/, 'the OpenCode stop is counted, not an em dash');
+  assert.match(line, /per 1k codex\/opencode responses/);
+  const exceptions = result.stdout.split('\n').find((l) => l.includes('EXCEPTIONS / 1K RESPONSES'));
+  assert.match(exceptions, /0\.0\b/, 'a user stop is not an exception');
   fs.rmSync(sb.home, { recursive: true, force: true });
 });
 
