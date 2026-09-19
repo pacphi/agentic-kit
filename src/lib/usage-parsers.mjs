@@ -771,6 +771,9 @@ function codexParseStats() {
   return {
     legacyEvents: 0, itemCompletedEvents: 0, tokenCountEvents: 0,
     prompts: 0, responses: 0, unknownItemTypes: {}, unknownItemTypeOverflow: 0,
+    // Oversized rollout lines the streaming reader clipped instead of parsing
+    // (codex-rollout-reader.mjs); always 0 for a rollout read as a string.
+    clippedLines: 0,
   };
 }
 
@@ -1180,11 +1183,17 @@ function finalizeCodexUsage(rec, walk) {
  * importedCodexSession.
  */
 export function parseCodex(raw, { id, withTurns = false }) {
+  // `raw` is the rollout text, or a streaming source (openCodexRollout) for one
+  // too large to hold as a string: `{ head, lines, stats }`. Both feed the SAME
+  // walk below, so the two paths cannot drift.
+  const source = typeof raw === 'string'
+    ? { head: raw, lines: { [Symbol.iterator]: () => jsonLines(raw) } }
+    : raw;
   const rec = blankSession(id, 'codex');
-  rec.sessionOrigin = usageSessionOrigin(raw, 'codex');
+  rec.sessionOrigin = usageSessionOrigin(source.head, 'codex');
   const turns = [];
   const stats = codexParseStats();
-  const lines = { [Symbol.iterator]: () => jsonLines(raw) };
+  const lines = source.lines;
   const plan = codexReplayPlan(lines);
   const usageState = { walk: newCodexUsageWalk({ unattributable: plan.unprovable }), boundary: plan.boundary };
   const titleState = { firstPrompt: '' };
@@ -1206,6 +1215,7 @@ export function parseCodex(raw, { id, withTurns = false }) {
   }
 
   finalizeCodexUsage(rec, usageState.walk);
+  stats.clippedLines = source.stats?.clippedLines ?? 0;
   rec.title = maskSecrets(clip(titleState.firstPrompt)) || '(untitled)';
   return { session: seal(rec), turns, parseStats: stats };
 }
