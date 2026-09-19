@@ -502,6 +502,10 @@ export function addUsage(rec, day, model, u) {
   if (!row) { row = { day, model, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, responses: 0 }; rec.usage.push(row); }
   row.input += u.input; row.output += u.output;
   row.cacheRead += u.cacheRead; row.cacheWrite += u.cacheWrite;
+  // 1-hour-tier SUBSET of cacheWrite (Claude only). Written only when the
+  // transcript actually recorded some, so rows from hosts with no such tier
+  // keep their exact prior shape.
+  if (u.cacheWrite1h > 0) row.cacheWrite1h = (row.cacheWrite1h ?? 0) + u.cacheWrite1h;
   row.responses += u.responses ?? 0;
   return row;
 }
@@ -619,28 +623,74 @@ function collectClaudeToolNames(rec, toolUses) {
   return tools;
 }
 
+/** Did this decoded usage carry any token evidence at all? */
+const hasClaudeUsage = (u) => u.input + u.output + u.cacheRead + u.cacheWrite > 0;
+
+/**
+ * Stage one assistant transcript line under its API message id. Claude Code
+ * writes ONE line per content block (thinking / text / each tool_use) and
+ * repeats the whole message's `usage` on every one, so usage must be counted
+ * once per MESSAGE, not once per line. The last line of an id wins — measured
+ * on 30,276 ids across 786 files, its usage equals the maximum on every group.
+ * A later line with no token evidence never displaces an earlier one that had
+ * some (honest-absent, same rule as the context sample below). A line with no
+ * id at all is its own message: nothing is dropped and nothing is merged with
+ * an unrelated line. Dedup is scoped to ONE transcript — the same id can
+ * reappear in a subagent's file, and that cross-file overlap is not attempted.
+ */
+function stageClaudeMessage(msgState, decoded, at, model) {
+  const key = decoded.messageId ?? `line:${msgState.seq++}`;
+  const prior = msgState.groups.get(key);
+  if (prior && hasClaudeUsage(prior.usage) && !hasClaudeUsage(decoded.usage)) return;
+  // Re-set keeps the Map's first-seen insertion order, so flush order is stable.
+  msgState.groups.set(key, { at, model, usage: decoded.usage });
+}
+
+/** Account every staged message exactly once: response count, punchcard,
+ *  the per-day/model usage row and the context sample — all from the message's
+ *  last line. Runs after the whole transcript has been read. */
+function flushClaudeMessages(rec, msgState) {
+  for (const { at, model, usage } of msgState.groups.values()) {
+    rec.responses++;
+    const pk = punchKey(at);
+    rec.punchcard[pk] = (rec.punchcard[pk] ?? 0) + 1;
+    addUsage(rec, localDay(at), model, { ...usage, responses: 1 });
+    // Context pressure: the tokens actually IN the model's window for this
+    // message (fresh input plus what got served from cache) — the last message
+    // wins so the field reflects the LAST completion, not a running total.
+    // Evidence-gated, exactly as the opencode parser is: decodeClaudeRecord
+    // normalizes an ABSENT message.usage to all-zeros, so writing
+    // unconditionally let a token-less entry overwrite real context pressure
+    // with a fabricated 0. A completion with neither fresh input nor a cache
+    // read carried no context evidence to record.
+    const ctxTokens = usage.input + usage.cacheRead + usage.cacheWrite;
+    if (ctxTokens > 0) noteContextSample(rec, ctxTokens);
+  }
+  msgState.groups.clear();
+}
+
 /** An `assistant`-role Claude entry (caller has already confirmed `e.message`
- *  exists): span/response-count bookkeeping, the API-error placeholder path,
- *  and otherwise latency/model/usage/tool accounting plus its turn row. */
-function recordClaudeAssistantTurn(rec, turns, latState, ms, decoded, withTurns) {
+ *  exists): span bookkeeping, the API-error placeholder path, and otherwise
+ *  latency/model/tool accounting plus its turn row. Usage, response count,
+ *  punchcard and context sample are STAGED per message id here and accounted
+ *  once by flushClaudeMessages. */
+function recordClaudeAssistantTurn(rec, turns, latState, msgState, ms, decoded, withTurns) {
   noteSpan(rec, ms);
-  rec.responses++;
   const at = Number.isFinite(ms) ? ms : (rec.start ?? Date.now());
-  const pk = punchKey(at);
-  rec.punchcard[pk] = (rec.punchcard[pk] ?? 0) + 1;
 
   // A dropped connection, rate limit, or auth failure makes Claude Code
   // synthesize a local placeholder turn (model: "<synthetic>",
   // isApiErrorMessage: true) with no real completion behind it — usage is
-  // always zero. It IS real engaged time (counted above), but it is not a
+  // always zero. It IS real engaged time (span, above), but it is not a
   // model attempt: excluded from `models`/cost attribution so it can never
-  // appear as a $0 "model in play," and counted instead as an EXCEPTION so
-  // it stays visible rather than silently vanishing. isApiErrorMessage isn't
-  // reliably set on every build that emits this placeholder, so the literal
-  // model marker is checked directly too — it's the one part of the shape
-  // that's never varied in observed transcripts. A dropped request is also
-  // never a latency SAMPLE — `latState.pendingMs` is deliberately left set so
-  // the FIRST real completion that eventually follows is what gets timed.
+  // appear as a $0 "model in play," NOT counted as a response or punchcard
+  // hit, and counted instead as an EXCEPTION so it stays visible rather than
+  // silently vanishing. isApiErrorMessage isn't reliably set on every build
+  // that emits this placeholder, so the literal model marker is checked
+  // directly too — it's the one part of the shape that's never varied in
+  // observed transcripts. A dropped request is also never a latency SAMPLE —
+  // `latState.pendingMs` is deliberately left set so the FIRST real
+  // completion that eventually follows is what gets timed.
   if (decoded.isApiError) {
     rec.exceptions++;
     if (withTurns) {
@@ -661,17 +711,7 @@ function recordClaudeAssistantTurn(rec, turns, latState, ms, decoded, withTurns)
   const model = typeof decoded.model === 'string' ? decoded.model : 'unknown';
   if (!rec.models.includes(model)) rec.models.push(model);
 
-  addUsage(rec, localDay(at), model, { ...decoded.usage, responses: 1 });
-  // Context pressure: the tokens actually IN the model's window for this
-  // turn (fresh input plus what got served from cache) — overwritten every
-  // turn so the field always reflects the LAST completion, not a running
-  // total across the session. Evidence-gated, exactly as the opencode parser
-  // is: decodeClaudeRecord normalizes an ABSENT message.usage to all-zeros,
-  // so writing unconditionally let a token-less entry overwrite real context
-  // pressure with a fabricated 0. A completion with neither fresh input nor a
-  // cache read carried no context evidence to record.
-  const ctxTokens = decoded.usage.input + decoded.usage.cacheRead + decoded.usage.cacheWrite;
-  if (ctxTokens > 0) noteContextSample(rec, ctxTokens);
+  stageClaudeMessage(msgState, decoded, at, model);
 
   const tools = collectClaudeToolNames(rec, decoded.toolUses);
   if (withTurns) {
@@ -695,6 +735,8 @@ export function parseClaude(raw, { id, dirName, withTurns = false }) {
   // Open by the most recent human prompt, closed by the first real assistant
   // turn that follows it — see recordClaudeUserTurn/recordClaudeAssistantTurn.
   const latState = { pendingMs: null };
+  // Assistant lines staged per API message id — see stageClaudeMessage.
+  const msgState = { groups: new Map(), seq: 0 };
 
   for (const e of jsonLines(raw)) {
     const ms = toMs(e.timestamp);
@@ -712,8 +754,9 @@ export function parseClaude(raw, { id, dirName, withTurns = false }) {
     }
 
     if (decoded.role !== 'assistant' || !e.message) continue;
-    recordClaudeAssistantTurn(rec, turns, latState, ms, decoded, withTurns);
+    recordClaudeAssistantTurn(rec, turns, latState, msgState, ms, decoded, withTurns);
   }
+  flushClaudeMessages(rec, msgState);
 
   rec.title = maskSecrets(titleState.aiTitle || clip(titleState.firstPrompt)) || '(untitled)';
   if (rec.project === 'unknown') applyProject(rec, projectLabel(null, dirName));

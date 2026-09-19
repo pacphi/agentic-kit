@@ -222,15 +222,38 @@ function claudeRole(record) {
 /** Claude's four token-usage fields, normalized to zero rather than NaN.
  *  `cache_read_input_tokens`/`cache_creation_input_tokens` are separate
  *  fields the API already reports, kept apart rather than folded into
- *  `input_tokens` (which would double them into gross input). */
+ *  `input_tokens` (which would double them into gross input).
+ *
+ *  `cacheWrite1h` is the part of `cacheWrite` the API reports as written to
+ *  the 1-hour cache tier (`cache_creation.ephemeral_1h_input_tokens`); the
+ *  rest is 5-minute. It is a SUBSET of `cacheWrite` — never added to any token
+ *  sum — clamped so a malformed record cannot make the subset exceed the total.
+ *  Absent split = 0, i.e. every write is priced as the 5-minute tier. */
 function claudeUsage(record) {
   const usage = record?.message?.usage ?? {};
+  const cacheWrite = Number(usage.cache_creation_input_tokens) || 0;
+  const oneHour = Number(usage.cache_creation?.ephemeral_1h_input_tokens) || 0;
   return {
     input: Number(usage.input_tokens) || 0,
     output: Number(usage.output_tokens) || 0,
     cacheRead: Number(usage.cache_read_input_tokens) || 0,
-    cacheWrite: Number(usage.cache_creation_input_tokens) || 0,
+    cacheWrite,
+    cacheWrite1h: Math.min(Math.max(oneHour, 0), cacheWrite),
   };
+}
+
+/** The identity of the API message an assistant transcript line belongs to.
+ *  Claude Code writes one line PER CONTENT BLOCK and repeats the message's
+ *  `usage` on each, so a consumer that counts usage must key on this. `null`
+ *  when the line carries neither `message.id` nor `requestId` — the caller
+ *  then treats the line as its own message rather than merging it with an
+ *  unrelated one. */
+function claudeMessageId(record) {
+  const id = record?.message?.id;
+  if (typeof id === 'string' && id) return id;
+  const requestId = record?.requestId;
+  if (typeof requestId === 'string' && requestId) return requestId;
+  return null;
 }
 
 /**
@@ -239,8 +262,8 @@ function claudeUsage(record) {
  * pass-throughs where the two consumers apply different validation on top
  * (batch requires a tool_use block's `name`; live requires its `id`).
  *
- * Returns `{role, sessionId, agentId, isSidechain, model, isApiError, text,
- * toolUses, toolResults, usage}` — `role` is `'user'|'assistant'|null`.
+ * Returns `{role, sessionId, agentId, isSidechain, messageId, model,
+ * isApiError, text, toolUses, toolResults, usage}` — `role` is `'user'|'assistant'|null`.
  * Deliberately untyped beyond that, for the same reason as decodeCodexRecord.
  */
 export function decodeClaudeRecord(record) {
@@ -252,6 +275,7 @@ export function decodeClaudeRecord(record) {
     sessionId: record?.sessionId,
     agentId: record?.agentId,
     isSidechain: record?.isSidechain === true,
+    messageId: claudeMessageId(record),
     model: record?.message?.model,
     isApiError: record?.isApiErrorMessage === true || record?.message?.model === '<synthetic>',
     text: claudeText(content),

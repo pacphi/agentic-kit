@@ -805,7 +805,8 @@ test('a dropped-connection turn (isApiErrorMessage) counts as an exception, neve
   // isApiErrorMessage: true, all-zero usage — when a request's connection
   // drops, rate-limits, or fails auth before a real completion returns. It
   // must count as engaged time (a real turn happened) but must NOT create a
-  // byModel row: there was no model attempt to attribute cost/tokens to.
+  // byModel row or a response: there was no model attempt to attribute
+  // cost/tokens to.
   _resetForTest();
   const sb = soloSandbox();
   const base = Date.parse('2026-07-24T10:00:00.000Z');
@@ -832,7 +833,7 @@ test('a dropped-connection turn (isApiErrorMessage) counts as an exception, neve
   const s = byId(agg, 'iiii9999');
 
   assert.ok(s, 'session indexed');
-  assert.equal(s.responses, 2, 'the error placeholder still counts as a real turn');
+  assert.equal(s.responses, 1, 'the error placeholder is an exception, not a model response (C-12)');
   assert.equal(s.exceptions, 1);
   assert.deepEqual(s.models, ['claude-opus-5'], '"<synthetic>" never enters the models list');
   assert.equal(s.tokens, 150, 'only the real turn contributes tokens');
@@ -872,7 +873,7 @@ test('a "<synthetic>" placeholder without isApiErrorMessage still counts as an e
   const s = byId(agg, 'jjjj0000');
 
   assert.ok(s, 'session indexed');
-  assert.equal(s.responses, 2, 'the error placeholder still counts as a real turn');
+  assert.equal(s.responses, 1, 'the error placeholder is an exception, not a model response (C-12)');
   assert.equal(s.exceptions, 1);
   assert.deepEqual(s.models, ['claude-sonnet-5'], '"<synthetic>" never enters the models list');
   assert.equal(s.tokens, 150, 'only the real turn contributes tokens');

@@ -6,7 +6,7 @@ export function rowCostEvidence(row, rec, deps) {
   const estimatedUsd = missing ? (deps.costOf({
     model: row.model, provider: rec.provider, day: row.day,
     input: missing.input, output: missing.output,
-    cacheRead: missing.cacheRead, cacheWrite: missing.cacheWrite,
+    cacheRead: missing.cacheRead, cacheWrite: missing.cacheWrite, cacheWrite1h: missing.cacheWrite1h,
   }) || 0) : 0;
   return {
     observedUsd: observed ? row.costObserved : 0,
