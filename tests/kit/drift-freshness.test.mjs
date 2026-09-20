@@ -14,7 +14,7 @@ import {
 
 const HOME = sandboxHome('ak-drift-fresh');
 const paths = await import('../../src/lib/paths.mjs');
-const { driftReport } = await import('../../src/lib/versions.mjs');
+const { driftReport, KIT_PKG } = await import('../../src/lib/versions.mjs');
 const sync = await import('../../src/commands/sync.mjs');
 const { loadKitConfig } = await import('../../src/lib/config.mjs');
 assertSandboxed(paths, HOME);
@@ -99,7 +99,7 @@ test('sync (non-dry) force-refreshes drift BEFORE building the plan, so a fresh-
   const { out } = await inSandboxProject(() =>
     captureLog(() => sync.run({
       flags: FLAGS(), pkgRoot: PKG_ROOT,
-      fetchLatest: async (pkg) => (pkg === 'ruflo' ? '9.9.12' : '9.9.9'), // npm knows better
+      fetchLatest: async (pkg) => pkg === KIT_PKG ? '0.0.0' : pkg === 'ruflo' ? '9.9.12' : '9.9.9', // isolate the Ruflo upgrade
     })));
 
   assert.match(out, /\[versions\].*ruflo 9\.9\.9 installed, 9\.9\.12 available/,
