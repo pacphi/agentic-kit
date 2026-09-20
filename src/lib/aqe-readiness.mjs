@@ -27,12 +27,12 @@ export function aqeEmbeddingConfiguration({ packageRoot = aqeRoot(), env = proce
 export function classifyAqeStartup(result) {
   if (result.code !== 0) return { status: 'failed', reason: 'AQE command failed' };
   const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
-  if (/locked by a live process|lock is held by a live process/.test(output)) {
-    return { status: 'degraded', reason: 'RVF is held by another live process; this probe used SQLite fallback (no corruption inferred)' };
-  }
   if (/FsyncFailed|0x0303/.test(output)) return { status: 'failed', reason: 'RVF backend failed' };
   if (/prewarm failed|Transformer initialization previously failed|Embedding model failed|semantic embedding unavailable/i.test(output)) {
     return { status: 'degraded', reason: 'Embedding initialization failed' };
+  }
+  if (/locked by a live process|lock is held by a live process/.test(output)) {
+    return { status: 'busy', reason: 'RVF is held by another live process; SQLite fallback observed; owner health and RVF integrity unverified' };
   }
   return { status: 'observed', reason: 'Command completed; embedding and fleet readiness require separate proofs' };
 }

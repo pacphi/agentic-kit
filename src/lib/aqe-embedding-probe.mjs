@@ -1,93 +1,68 @@
-// Run AQE's installed endpoint client in a bounded child. No ReasoningBank,
-// database, local model import, or fallback participates in this check.
+// Observe AQE's installed runtime without writing the project's memory stores.
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { run } from './exec.mjs';
 
-const CHILD = `
-let client;
-let result;
-try {
-  let input = '';
-  for await (const chunk of process.stdin) input += chunk;
-  const cfg = JSON.parse(input);
-  const { EmbedderEndpointClient } = await import(cfg.module);
-  client = new EmbedderEndpointClient({ endpoint: cfg.endpoint, token: cfg.token,
-    model: 'Xenova/all-MiniLM-L6-v2', expectedDim: 384,
-    connectTimeoutMs: Math.min(5000, cfg.timeoutMs), requestTimeoutMs: Math.min(10000, cfg.timeoutMs) });
-  const identity = await client.probe();
-  const vectors = await client.embed([
-    'The cat is sitting on the mat.',
-    'A kitten rests on a rug.',
-    'Database transactions require atomic commit guarantees.',
-  ]);
-  if (identity.dim !== 384) throw Error('dim mismatch');
-  if (!Array.isArray(vectors) || vectors.length !== 3
-      || vectors.some(v => !Array.isArray(v) || v.length !== 384
-        || v.some(n => !Number.isFinite(n)) || !v.some(n => n !== 0))) throw Error('invalid vectors');
-  const cosine = (a, b) => a.reduce((s, n, i) => s + n * b[i], 0)
-    / Math.sqrt(a.reduce((s, n) => s + n*n, 0) * b.reduce((s, n) => s + n*n, 0));
-  const relatedSimilarity = cosine(vectors[0], vectors[1]);
-  const unrelatedSimilarity = cosine(vectors[0], vectors[2]);
-  if (relatedSimilarity <= unrelatedSimilarity + 0.05) throw Error('semantic smoke failed');
-  if (!/^[a-f0-9]{16}$/.test(identity.fingerprint)) throw Error('invalid identity');
-  result = { status: 'passed', dimension: 384, fingerprint: identity.fingerprint,
-    relatedSimilarity, unrelatedSimilarity };
-} catch (error) {
-  const text = String(error?.message ?? '');
-  result = { status: 'failed', reason: /dim(ension)? mismatch/i.test(text) ? 'dimension-mismatch'
-    : /semantic smoke failed/.test(text) ? 'semantic-smoke-failed' : 'endpoint-probe-failed' };
-} finally {
-  try { client?.close(); } catch {}
-}
-process.stdout.write('AK_EMBEDDING_PROBE=' + JSON.stringify(result) + '\\n');
-`;
+const CHILD = fileURLToPath(new URL('./aqe-embedding-probe-child.mjs', import.meta.url));
+const REASONS = new Set(['dimension-mismatch', 'semantic-smoke-failed', 'invalid-vectors',
+  'runtime-identity-unavailable', 'authentication-failed', 'model-unavailable', 'endpoint-unreachable',
+  'endpoint-timeout', 'local-model-unavailable', 'backend-unavailable', 'embedding-probe-failed']);
 
-/** Explicit endpoint only. Return bounded evidence, never raw subprocess errors. */
-/** @param {{packageRoot:string,env?:NodeJS.ProcessEnv,timeoutMs?:number}} options */
-export async function probeAqeEmbeddings({ packageRoot, env = process.env, timeoutMs = 30_000 }) {
+function validEndpoint(endpoint) {
+  try {
+    if (endpoint.startsWith('unix:')) return endpoint.slice(5).startsWith('/') && !endpoint.includes('\0');
+    const url = new URL(endpoint);
+    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password
+      && !url.search && !url.hash && url.pathname === '/';
+  } catch { return false; }
+}
+
+function validEvidence(evidence) {
+  return evidence.status === 'passed' && evidence.dimension === 384
+    && /^[a-f0-9]{16}$/.test(evidence.fingerprint) && /^[a-f0-9]{64}$/.test(evidence.spaceId)
+    && Number.isFinite(evidence.relatedSimilarity) && Number.isFinite(evidence.unrelatedSimilarity);
+}
+
+/** @param {{packageRoot?:string,env?:NodeJS.ProcessEnv,timeoutMs?:number,backend?:string,allowDownload?:boolean,corpusPath?:string,modelCacheDir?:string}} options */
+export async function probeAqeEmbeddings({ packageRoot, env = process.env, timeoutMs = 30_000,
+  backend = 'endpoint', allowDownload = false, corpusPath, modelCacheDir }) {
   const endpoint = env.AQE_EMBEDDER_ENDPOINT;
-  if (!endpoint) return { status: 'not-configured', reason: 'embedding-endpoint-not-configured' };
+  if (backend === 'endpoint' && !endpoint) return { status: 'not-configured', reason: 'embedding-endpoint-not-configured' };
+  if (!['endpoint', 'in-process'].includes(backend)) return { status: 'invalid-config', reason: 'unsupported-backend' };
   if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 30_000) {
     return { status: 'invalid-config', reason: 'timeout-must-be-between-1-and-30000-ms' };
   }
-  try {
-    const url = new URL(endpoint);
-    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password
-        || url.search || url.hash || url.pathname !== '/') throw Error('invalid endpoint');
-  } catch {
-    return { status: 'invalid-config', reason: 'embedding-endpoint-must-be-an-http-origin-without-credentials' };
+  if (backend === 'endpoint' && !validEndpoint(endpoint)) return { status: 'invalid-config', reason: 'embedding-endpoint-invalid' };
+  if ([corpusPath, modelCacheDir].some(value => value !== undefined && (typeof value !== 'string' || !path.isAbsolute(value)))) {
+    return { status: 'invalid-config', reason: 'probe-path-must-be-absolute' };
   }
-  if (typeof packageRoot !== 'string' || !path.isAbsolute(packageRoot)) {
-    return { status: 'unavailable', reason: 'aqe-package-root-unavailable' };
-  }
-  const moduleFile = path.join(packageRoot, 'dist', 'learning', 'embedder-endpoint-client.js');
-  if (!fs.existsSync(moduleFile)) return { status: 'unavailable', reason: 'aqe-endpoint-client-unavailable' };
+  if (typeof packageRoot !== 'string' || !path.isAbsolute(packageRoot)) return { status: 'unavailable', reason: 'aqe-package-root-unavailable' };
+  if (!fs.existsSync(path.join(packageRoot, 'dist/learning/real-embeddings.js'))) return { status: 'unavailable', reason: 'aqe-embedding-runtime-unavailable' };
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-aqe-probe-'));
   const started = Date.now();
-  const result = await run(process.execPath, ['--input-type=module', '-e', CHILD], {
-    input: JSON.stringify({ module: pathToFileURL(moduleFile).href, endpoint,
-      token: env.AQE_EMBEDDER_TOKEN, timeoutMs }),
-    timeout: timeoutMs, maxBuffer: 64 * 1024,
-    // No inherited NODE_OPTIONS preload or unrelated credentials enter this probe.
-    env: { ...Object.fromEntries(Object.keys(process.env).map(key => [key, undefined])),
-      PATH: process.env.PATH, SystemRoot: process.env.SystemRoot },
-  });
-  const elapsedMs = Date.now() - started;
-  if (result.code !== 0) return { status: 'failed', reason: 'probe-process-failed-or-timed-out', elapsedMs };
   try {
-    const line = result.stdout.split('\n').findLast(row => row.startsWith('AK_EMBEDDING_PROBE='));
-    const evidence = JSON.parse(line.slice('AK_EMBEDDING_PROBE='.length));
-    // Child output is allowlisted: upstream logs and endpoint strings stay private.
-    if (evidence.status === 'passed' && evidence.dimension === 384
-        && /^[a-f0-9]{16}$/.test(evidence.fingerprint)
-        && Number.isFinite(evidence.relatedSimilarity) && Number.isFinite(evidence.unrelatedSimilarity)) {
-      return { status: 'passed', dimension: 384, fingerprint: evidence.fingerprint,
-        relatedSimilarity: evidence.relatedSimilarity, unrelatedSimilarity: evidence.unrelatedSimilarity, elapsedMs };
-    }
-    const reasons = ['dimension-mismatch', 'semantic-smoke-failed', 'endpoint-probe-failed'];
-    return { status: 'failed', reason: reasons.includes(evidence.reason) ? evidence.reason : 'invalid-probe-result', elapsedMs };
-  } catch {
-    return { status: 'failed', reason: 'invalid-probe-result', elapsedMs };
-  }
+    const result = await run(process.execPath, [CHILD], {
+      input: JSON.stringify({ packageRoot, endpoint, token: env.AQE_EMBEDDER_TOKEN,
+        backend, allowDownload, corpusPath, modelCacheDir }),
+      cwd: temporary, timeout: timeoutMs, maxBuffer: 64 * 1024,
+      env: { ...Object.fromEntries(Object.keys(process.env).map(key => [key, undefined])),
+        PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, HOME: temporary,
+        USERPROFILE: temporary, AQE_MEMORY_PATH: path.join(temporary, 'memory.db') },
+    });
+    const elapsedMs = Date.now() - started;
+    if (result.code !== 0) return { status: 'failed', reason: 'probe-process-failed-or-timed-out', elapsedMs };
+    try {
+      const line = result.stdout.split('\n').findLast(row => row.startsWith('AK_EMBEDDING_PROBE='));
+      const evidence = JSON.parse(line.slice('AK_EMBEDDING_PROBE='.length));
+      let outcome;
+      if (validEvidence(evidence)) {
+        outcome = { status: 'passed', dimension: 384, fingerprint: evidence.fingerprint, spaceId: evidence.spaceId,
+          relatedSimilarity: evidence.relatedSimilarity, unrelatedSimilarity: evidence.unrelatedSimilarity, elapsedMs };
+      } else outcome = { status: 'failed', reason: REASONS.has(evidence.reason) ? evidence.reason : 'invalid-probe-result', elapsedMs };
+      if (corpusPath && evidence.corpus) outcome.corpus = evidence.corpus;
+      return outcome;
+    } catch { return { status: 'failed', reason: 'invalid-probe-result', elapsedMs }; }
+  } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
 }

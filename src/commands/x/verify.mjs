@@ -10,6 +10,8 @@ import { aidefencePresent, securityPresent } from '../../lib/natives.mjs';
 import { scanRvf } from '../../lib/rvf.mjs';
 import { aqeEmbeddingConfiguration, classifyAqeStartup, probeAqeBrowser } from '../../lib/aqe-readiness.mjs';
 import { probeMcp } from '../../lib/mcp-probe.mjs';
+import { resolveAqeEmbedding } from '../../lib/aqe-embedding-config.mjs';
+import { aqeVerificationPassed } from '../../lib/aqe-verification.mjs';
 import { probeAqeEmbeddings } from '../../lib/aqe-embedding-probe.mjs';
 import { aqeRoot } from '../../lib/paths.mjs';
 import { projectAqeDir } from '../../lib/paths.mjs';
@@ -143,26 +145,25 @@ async function verifyAqe() {
   const findings = scanRvf(projectAqeDir(process.cwd()));
   if (findings.length) { fail(`${findings.length} oversized RVF store(s) — run: ak sync`); return false; }
   ok('no oversized RVF stores detected (not a storage integrity proof)');
-  const st = await runCmd('aqe', ['status'], { timeout: 120_000 });
+  const resolved = resolveAqeEmbedding(loadKitConfig());
+  const st = await runCmd('aqe', ['status'], { timeout: 120_000, env: resolved.env });
   const startup = classifyAqeStartup(st);
-  (startup.status === 'observed' ? ok : fail)(startup.reason);
-  const embedding = aqeEmbeddingConfiguration();
+  (startup.status === 'observed' ? ok : startup.status === 'busy' ? warn : fail)(startup.reason);
+  const embedding = aqeEmbeddingConfiguration({ env: resolved.env });
   const configured = embedding.status === 'configured-unverified';
-  (configured ? warn : fail)(`embedding backend: ${embedding.status}${embedding.backend ? ` (${embedding.backend})` : ''}; current CLI environment only`);
-  if (!configured) warn('configure AQE_EMBEDDER_ENDPOINT in each consuming host; do not substitute hash vectors');
-  const provenance = await runCmd('aqe', ['learning', 'embedding-health', '--json'], { timeout: 30_000 });
-  if (provenance.code === 0) {
-    try {
-      const data = JSON.parse(provenance.stdout);
-      console.log(JSON.stringify({ embeddingProvenance: data }));
-    } catch { warn('embedding provenance response was not valid JSON'); }
-  } else warn('embedding provenance unavailable; installed AQE may not support this diagnostic');
+  (configured ? warn : fail)(`embedding backend: ${embedding.status}; selected mode ${resolved.mode}`);
+  if (!configured) warn('Select a semantic backend with ak x aqe-embedding configure; no hash fallback');
+  if (resolved.ambientConflict) warn('Shell endpoint differs from saved intent; this Kit probe uses the saved choice');
   const browser = await probeAqeBrowser({ runner: runCmd });
   (browser.status === 'payload-present' ? ok : warn)(`optional browser: ${browser.status} (no browser launched)`);
-  const live = await probeAqeEmbeddings({ packageRoot: aqeRoot() });
-  (live.status === 'passed' ? ok : fail)(`live embedding request: ${live.status}; dimension=${live.dimension ?? 'unknown'}`);
-  warn('fleet execution and checkpoint recovery remain separate from this embedding/storage diagnostic');
-  return startup.status === 'observed' && live.status === 'passed';
+  const backend = resolved.mode === 'in-process' || embedding.backend === 'in-process' ? 'in-process' : 'endpoint';
+  const live = await probeAqeEmbeddings({ packageRoot: aqeRoot(), env: resolved.env, backend,
+    corpusPath: path.join(projectAqeDir(process.cwd()), 'memory.db') });
+  (live.status === 'passed' ? ok : fail)(`live embedding request: ${live.status}; reason=${live.reason ?? 'none'}; dimension=${live.dimension ?? 'unknown'}`);
+  if (live.corpus) console.log(JSON.stringify({ embeddingProvenance: live.corpus }));
+  if (!['healthy', 'empty'].includes(live.corpus?.status)) warn('Corpus compatibility unverified or mismatched; preserve vectors and plan explicit migration');
+  warn('Fleet execution, RVF owner health and checkpoint recovery remain separate proofs');
+  return aqeVerificationPassed(startup, live);
 }
 
 export async function verifyMcp({ runner = runCmd, probe = probeMcp, cwd = process.cwd() } = {}) {

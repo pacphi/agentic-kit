@@ -21,7 +21,7 @@ test('successful exit never conceals embedding or RVF initialization failure', (
   assert.equal(classifyAqeStartup({ code: 1 }).status, 'failed');
   assert.equal(classifyAqeStartup({ code: 0, stderr: 'ReasoningBank prewarm failed' }).status, 'degraded');
   assert.equal(classifyAqeStartup({ code: 0, stdout: 'FsyncFailed' }).status, 'failed');
-  assert.equal(classifyAqeStartup({ code: 0, stderr: 'locked by a live process; FsyncFailed' }).status, 'degraded');
+  assert.equal(classifyAqeStartup({ code: 0, stderr: 'locked by a live process; FsyncFailed' }).status, 'failed');
   assert.equal(classifyAqeStartup({ code: 0 }).status, 'observed');
 });
 
