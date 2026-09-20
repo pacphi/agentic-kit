@@ -42,8 +42,10 @@
 //     a file we cannot parse is REFUSED, never clobbered.
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { have } from './exec.mjs';
 import { writeJsonWithBackup } from './settings.mjs';
+import { aqeEmbeddingProjectionEnv } from './aqe-embedding-projection.mjs';
 import { CURRENT_INTEGRATIONS_VERSION } from './adapters/config.mjs';
 import * as paths from './paths.mjs';
 import { deepEqual, hasReceiptValue } from './opencode-receipts.mjs';
@@ -60,6 +62,98 @@ export function mutableOpencodeOwnership(cfg) {
   cfg.integrations.ownership ??= {};
   cfg.integrations.ownership.opencode ??= {};
   return cfg.integrations.ownership.opencode;
+}
+
+const EMBEDDING_ENDPOINT_KEY = 'AQE_EMBEDDER_ENDPOINT';
+const plainEmbeddingRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+// Unmanaged restores the pre-kit endpoint when the full-entry receipt recorded one.
+// Both broad lifecycle reconciliation and the narrow command use this same intent.
+function opencodeEmbeddingEnv(cfg) {
+  const selected = aqeEmbeddingProjectionEnv(cfg);
+  if (Object.hasOwn(selected, EMBEDDING_ENDPOINT_KEY)) return selected;
+  const prior = opencodeOwnership(cfg).managed?.mcp?.['agentic-qe']?.prior?.environment;
+  return typeof prior?.[EMBEDDING_ENDPOINT_KEY] === 'string'
+    ? { [EMBEDDING_ENDPOINT_KEY]: prior[EMBEDDING_ENDPOINT_KEY] } : {};
+}
+
+function writeEmbeddingConfig(file, before, after) {
+  const stat = fs.lstatSync(file);
+  if (!stat.isFile() || stat.isSymbolicLink() || fs.readFileSync(file, 'utf8') !== before) {
+    throw new Error('OpenCode configuration changed during embedding reconciliation');
+  }
+  const backup = `${file}.ak-aqe-backup.${randomUUID()}`;
+  fs.copyFileSync(file, backup, fs.constants.COPYFILE_EXCL);
+  const tmp = `${file}.ak-aqe-tmp.${randomUUID()}`;
+  try {
+    fs.writeFileSync(tmp, after, { flag: 'wx', mode: stat.mode & 0o777 });
+    const current = fs.lstatSync(file);
+    if (!current.isFile() || current.isSymbolicLink() || fs.readFileSync(file, 'utf8') !== before) {
+      throw new Error('OpenCode configuration changed before embedding write');
+    }
+    fs.renameSync(tmp, file);
+  } finally { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); }
+}
+
+function openEmbeddingEntry(configFile) {
+  if (laterJsoncOverride(configFile)) throw new Error('OpenCode JSONC override prevents verified embedding projection');
+  const stat = fs.lstatSync(configFile);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 4 * 1024 * 1024) {
+    throw new Error('OpenCode embedding configuration must be a bounded regular file');
+  }
+  const dirStat = fs.lstatSync(path.dirname(configFile));
+  if (!dirStat.isDirectory() || dirStat.isSymbolicLink()) throw new Error('OpenCode configuration directory is not safely writable');
+  const source = fs.readFileSync(configFile, 'utf8');
+  let doc;
+  try { doc = JSON.parse(source); } catch { throw new Error('OpenCode embedding configuration is not plain JSON'); }
+  const entry = doc?.mcp?.['agentic-qe'];
+  if (!plainEmbeddingRecord(entry) || entry.type !== 'local' || entry.enabled !== true
+    || !deepEqual(entry.command, ['aqe-mcp']) || !plainEmbeddingRecord(entry.environment)) {
+    throw new Error('OpenCode requires an existing enabled AQE registration; run ak setup to initialize the host');
+  }
+  return { source, doc, entry };
+}
+
+/** Update only an existing AQE entry's endpoint through its full-entry owner.
+ * No host install, permissions, plugins, skill paths, or other MCP entries change.
+ * Caller MUST persist cfg after markersChanged; dryRun is a read-only preview.
+ * @param {any} cfg @param {{configFile?:string,dryRun?:boolean}} [options] */
+export function reconcileOpencodeAqeEmbedding(cfg, { configFile = paths.opencodeConfigPath(), dryRun = false } = {}) {
+  if (!cfg.integrations?.hosts?.opencode || cfg.aqe === false) {
+    return { ok: true, changed: false, markersChanged: false, detail: 'OpenCode AQE embeddings unmanaged (host or AQE disabled)' };
+  }
+  try {
+    const { source, doc, entry } = openEmbeddingEntry(configFile);
+    const receipt = opencodeOwnership(cfg).managed?.mcp?.['agentic-qe'];
+    const desired = opencodeEmbeddingEnv(cfg);
+    const selected = Object.hasOwn(aqeEmbeddingProjectionEnv(cfg), EMBEDDING_ENDPOINT_KEY);
+    if (!selected && !receipt?.written) {
+      return { ok: true, changed: false, markersChanged: false, detail: 'OpenCode embedding endpoint remains unmanaged' };
+    }
+    const present = Object.hasOwn(desired, EMBEDDING_ENDPOINT_KEY);
+    const currentPresent = Object.hasOwn(entry.environment, EMBEDDING_ENDPOINT_KEY);
+    if (present === currentPresent && (!present || desired[EMBEDDING_ENDPOINT_KEY] === entry.environment[EMBEDDING_ENDPOINT_KEY])) {
+      return { ok: true, changed: false, markersChanged: false, detail: 'OpenCode embedding endpoint converged; no ownership adopted' };
+    }
+    if (opencodeOwnership(cfg).mcp !== 'ak' || !plainEmbeddingRecord(receipt)
+      || !Object.hasOwn(receipt, 'prior') || !deepEqual(receipt.written, entry)) {
+      return { ok: false, changed: false, markersChanged: false,
+        detail: 'OpenCode AQE entry is unowned or edited; endpoint preserved for manual reconciliation' };
+    }
+    const nextEntry = structuredClone(entry);
+    if (present) nextEntry.environment[EMBEDDING_ENDPOINT_KEY] = desired[EMBEDDING_ENDPOINT_KEY];
+    else delete nextEntry.environment[EMBEDDING_ENDPOINT_KEY];
+    if (!dryRun) {
+      doc.mcp['agentic-qe'] = nextEntry;
+      writeEmbeddingConfig(configFile, source, JSON.stringify(doc, null, 2) + '\n');
+      receipt.written = structuredClone(nextEntry);
+    }
+    return { ok: true, changed: true, markersChanged: !dryRun,
+      detail: dryRun ? 'OpenCode AQE endpoint requires its owned projection update' : 'OpenCode AQE endpoint updated; restart OpenCode to load it' };
+  } catch {
+    return { ok: false, changed: false, markersChanged: false,
+      detail: 'OpenCode AQE embedding projection unavailable: check registration, JSONC override, ownership, and regular configuration file; existing configuration preserved' };
+  }
 }
 
 // ── config-file wiring (opencode.json) ──────────────────────────────────────
@@ -120,10 +214,10 @@ export function mcpCommandFor({ binPresent, nestedPath }) {
  *  included by default because machine setup installs it; `--no-aqe` disables
  *  that projection. ruvnet-brain is included only when its shim is on disk.
  *  @param {{ brainShim?: string, nestedPath?: string, includeAqe?: boolean,
- *            agentBrowserEnabled?: boolean }} [opts] */
+ *            agentBrowserEnabled?: boolean, aqeEmbeddingEnv?: Record<string, string> }} [opts] */
 export async function mcpEntriesFor({
   brainShim = brainShimPath(), nestedPath = nestedMcpServerPath(), includeAqe = true,
-  agentBrowserEnabled = true,
+  agentBrowserEnabled = true, aqeEmbeddingEnv = {},
 } = {}) {
   const entries = {
     'claude-flow': {
@@ -143,7 +237,7 @@ export async function mcpEntriesFor({
       command: ['aqe-mcp'],
       enabled: true,
       timeout: 30000,
-      environment: { ...AQE_MCP_ENV },
+      environment: { ...AQE_MCP_ENV, ...aqeEmbeddingEnv },
     };
   }
   if (fs.existsSync(brainShim)) {
@@ -254,6 +348,7 @@ export async function opencodeConverged(cfg, { configFile = paths.opencodeConfig
   const doc = readJsonStrict(configFile).doc;
   const entries = await mcpEntriesFor({
     brainShim, includeAqe: cfg.aqe !== false, agentBrowserEnabled: cfg.agentBrowser !== false,
+    aqeEmbeddingEnv: opencodeEmbeddingEnv(cfg),
   });
   const managed = normalizeManaged(opencodeOwnership(cfg).managed);
   const ownedEntries = Object.fromEntries(Object.entries(entries).filter(
@@ -529,6 +624,7 @@ export async function applyOpencode(cfg, { dryRun = false, configFile = paths.op
   }
   const entries = await mcpEntriesFor({
     brainShim, includeAqe: cfg.aqe !== false, agentBrowserEnabled: cfg.agentBrowser !== false,
+    aqeEmbeddingEnv: opencodeEmbeddingEnv(cfg),
   });
   const source = catalogSource({ override: opencodeOwnership(cfg).catalogDir });
   const skillPaths = skillPathsFor(source);

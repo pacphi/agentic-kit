@@ -25,9 +25,40 @@ assertSandboxed(paths, HOME);
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const FLAGS = (over = {}) => ({
   'dry-run': false, yes: false, minimal: false, project: false,
+  'aqe-embedding-mode': 'unmanaged', // unrelated host tests explicitly leave embeddings unmanaged
   'no-aqe': false, 'no-ruvnet-brain': false, 'no-security': false,
   codex: false, opencode: false, reconfigure: false,
   'with-deja-vu': false, 'deja-vu-mode': undefined, 'no-deja-vu': false, ...over,
+});
+
+test('fresh local setup persists the chosen backend and verifies before project initialization', async () => {
+  seedHome();
+  const events = [];
+  const { result, out } = await captureLog(() => setup.run({
+    flags: FLAGS({ yes: true, minimal: true, 'aqe-embedding-mode': 'local' }), pkgRoot: PKG_ROOT,
+    machineSetup: async () => { events.push('machine'); return true; },
+    embeddingSetup: async cfg => { events.push(cfg.aqeEmbedding.provisioning); return { ok: true, detail: 'synthetic proof' }; },
+    finalizeSetup: async () => { events.push('finalize'); },
+  }));
+  assert.equal(result, 0, out);
+  assert.deepEqual(events, ['machine', 'ollama', 'finalize']);
+  assert.equal(loadKitConfig().aqeEmbedding.provisioning, 'ollama');
+  assert.match(out, /45 MB/);
+});
+
+test('missing fresh backend prevents a green setup and project initialization', async () => {
+  seedHome();
+  let projectRan = false;
+  const { result, out } = await captureLog(() => setup.run({
+    flags: FLAGS({ yes: true, project: true, 'aqe-embedding-mode': 'local' }), pkgRoot: PKG_ROOT,
+    machineSetup: async () => true,
+    embeddingSetup: async () => ({ ok: false, detail: 'Ollama missing; install/start and retry' }),
+    projectSetup: async () => { projectRan = true; return true; },
+  }));
+  assert.equal(result, 1);
+  assert.equal(projectRan, false);
+  assert.doesNotMatch(out, /setup complete/);
+  assert.equal(loadKitConfig().aqeEmbedding.mode, 'endpoint');
 });
 const repairBackups = (file) => fs.readdirSync(path.dirname(file))
   .filter((name) => name.startsWith(`${path.basename(file)}.ak-mcp-repair-`) && name.endsWith('.bak'));

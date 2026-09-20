@@ -19,6 +19,7 @@ import {
 } from './helpers/home-sandbox.mjs';
 
 const HOME = sandboxHome('ak-status-golden');
+delete process.env.AQE_EMBEDDER_ENDPOINT;
 const paths = await import('../../src/lib/paths.mjs');
 const status = await import('../../src/commands/status.mjs');
 assertSandboxed(paths, HOME);

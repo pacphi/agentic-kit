@@ -60,6 +60,18 @@
     "fix": null
   },
   {
+    "subsystem": "aqe-embedding",
+    "level": "info",
+    "message": "unmanaged; backend missing-backend; live model and corpus compatibility unverified",
+    "fix": null
+  },
+  {
+    "subsystem": "aqe-embedding",
+    "level": "warn",
+    "message": "semantic backend missing; choose one with ak x aqe-embedding configure",
+    "fix": null
+  },
+  {
     "subsystem": "aqe",
     "level": "info",
     "message": "agentic-qe not initialized in this project",

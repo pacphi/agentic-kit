@@ -34,6 +34,8 @@ import { applyCodexStatusline, projectionFor } from '../lib/codex-statusline.mjs
 import { ensureAgentBrowser } from '../lib/agent-browser.mjs';
 import { confirmCodexMcpRepairs, reconcileCodexMcp } from '../lib/codex-mcp-reconcile.mjs';
 import { alignHosts } from './x/host-align.mjs';
+import { prepareAqeEmbedding } from '../lib/aqe-embedding-lifecycle.mjs';
+import { reconcileAqeEmbeddingProjections } from '../lib/aqe-embedding-projection.mjs';
 
 async function askCodexRepair(question) {
   if (!process.stdin.isTTY) {
@@ -476,6 +478,17 @@ export const SYNC_STEPS = [
     },
   },
   {
+    id: 'aqe-embedding',
+    when: (subs, flags, cfg) => cfg.aqe !== false && subs.has('aqe-embedding'),
+    run: async (ctx) => {
+      const backend = await ctx.step('aqe-embedding', () => prepareAqeEmbedding(ctx.cfg));
+      if (backend?.ok === false) return;
+      const projection = reconcileAqeEmbeddingProjections(ctx.cfg, ctx.cwd);
+      ctx.report('AQE embedding projections', projection);
+      recordApplyFailure(ctx.state, 'aqe-embedding', projection);
+    },
+  },
+  {
     id: 'self',
     when: (subs, flags) => subs.has('self') && !flags['no-upgrade'],
     run: async (ctx) => {
@@ -511,6 +524,11 @@ export async function run({
     .filter((r) => r.subsystem !== 'models')
     .filter((r) => !(flags['no-upgrade'] && ['versions', 'self', 'ruvnet-brain', 'ruvector'].includes(r.subsystem)));
 
+  const cfg = loadKitConfig();
+  if (cfg.aqe !== false && cfg.aqeEmbedding && cfg.aqeEmbedding.mode !== 'unmanaged') {
+    plan.push({ subsystem: 'aqe-embedding', message: 'selected semantic backend requires live verification',
+      fix: 'verify selected backend and repair missing opted-in local model' });
+  }
   if (plan.length === 0) { ok('nothing to do — all subsystems healthy'); return 0; }
 
   console.log(bold(`sync plan (${plan.length} action(s)):`));
@@ -518,7 +536,6 @@ export async function run({
   if (flags['dry-run']) return 0;
   console.log('');
 
-  const cfg = loadKitConfig();
   const subsystems = new Set(plan.map((p) => p.subsystem));
   const codexRepairPlan = plan.some((p) => p.subsystem === 'codex-mcp')
     ? codexMcpRepairPlan(inspectCodexTopology({ cwd })) : [];

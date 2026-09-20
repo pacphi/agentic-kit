@@ -30,6 +30,10 @@ import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { HOSTS, hostInstallState, installHost, migrateRetiredRoutesInConfig, printActivityRoutingTable, convergeProviderStack, applySetupHostFlags, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
 import { installedVersion } from '../lib/versions.mjs';
 import { aqeInitArguments } from '../lib/aqe-guidance.mjs';
+import { resolveAqeEmbedding } from '../lib/aqe-embedding-config.mjs';
+import { embeddingIntentFromFlags, embeddingSetupDisclosure } from '../lib/aqe-embedding-setup.mjs';
+import { prepareAqeEmbedding } from '../lib/aqe-embedding-lifecycle.mjs';
+import { reconcileAqeEmbeddingProjections } from '../lib/aqe-embedding-projection.mjs';
 import * as rb from '../lib/ruvnet-brain.mjs';
 import * as adb from '../lib/agentdb.mjs';
 import { ensureAgentBrowser } from '../lib/agent-browser.mjs';
@@ -63,6 +67,8 @@ export const options = {
   minimal: { type: 'boolean', default: false },
   project: { type: 'boolean', default: false },
   'no-aqe': { type: 'boolean', default: false },
+  'aqe-embedding-mode': { type: 'string' },
+  'aqe-embedding-endpoint': { type: 'string' },
   'no-agent-browser': { type: 'boolean', default: false },
   'no-ruvnet-brain': { type: 'boolean', default: false },
   'no-security': { type: 'boolean', default: false },
@@ -90,6 +96,8 @@ Options:
   --project        force project setup in cwd even without .git; same mutations
   --minimal        machine scope only; skip project setup
   --no-aqe         skip agentic-qe install + configuration
+  --aqe-embedding-mode <mode>  local (new setup default), endpoint, in-process, unmanaged
+  --aqe-embedding-endpoint <url>  preserve/select an existing compatible endpoint
   --no-agent-browser  skip the managed Ruflo browser executor
   --no-ruvnet-brain  skip the RuvNet Brain (~2 GB offline KB) setup step
   --no-security    skip the security-surface verification
@@ -601,7 +609,10 @@ async function initProjectAgenticQe(root, cfg, flags, permCtx) {
   heal.healRvf(paths.projectAqeDir(root));
   const args = aqeInitArguments(cfg, installedVersion('agentic-qe'));
   const withCodex = args.includes('--with-codex');
-  const aqe = await runCmd('aqe', args, { cwd: root, timeout: 300_000 });
+  // Relinquish only unchanged owned values before AQE regenerates its tables.
+  const relinquish = reconcileAqeEmbeddingProjections({ ...cfg, aqeEmbedding: { mode: 'unmanaged' } }, root);
+  if (!relinquish.ok) { reportOutcome('AQE embedding pre-init', relinquish); return false; }
+  const aqe = await runCmd('aqe', args, { cwd: root, timeout: 300_000, env: resolveAqeEmbedding(cfg).env });
   (aqe.code === 0 ? ok : warn)(`agentic-qe initialized${withCodex ? ' (+ codex skills)' : ''}`);
   const aqeUnexpected = removeUndisclosedPermissions(
     permCtx.permissionsFile, permCtx.permissionsBefore, permCtx.authorizedPermissions,
@@ -610,7 +621,7 @@ async function initProjectAgenticQe(root, cfg, flags, permCtx) {
     fail(`agentic-qe init introduced undisclosed auto-approve rules; removed: ${aqeUnexpected.join(', ')}`);
     return false;
   }
-  return true;
+  return aqe.code === 0;
 }
 
 /** The 'aqe-router' step's own report, plus the activity-routing table print
@@ -814,6 +825,8 @@ async function finalizeSetupGuidanceAndMcp(cfg, pkgRoot, flags) {
 }
 
 const DEFAULT_SETUP_RUNTIME = Object.freeze({
+  embeddingSetup: prepareAqeEmbedding,
+  embeddingProjection: reconcileAqeEmbeddingProjections,
   inspectCodexTopology: codexMcpTopology,
   repairCodexTopology: repairCodexMcpTopology,
   machineSetup: run_machine,
@@ -853,6 +866,11 @@ export async function run({
   if (flags['no-agent-browser']) cfg.agentBrowser = false;
   if (flags['no-ruvnet-brain']) cfg.ruvnetBrain = false;
   if (flags['no-security']) cfg.security = false;
+  if (cfg.aqe !== false) {
+    try { cfg.aqeEmbedding = embeddingIntentFromFlags(cfg, flags); }
+    catch (error) { fail(error.message); return 2; }
+    info(embeddingSetupDisclosure(cfg.aqeEmbedding));
+  }
 
   const inProject = flags.project
     || (fs.existsSync(path.join(process.cwd(), '.git')) && process.cwd() !== paths.home);
@@ -877,6 +895,13 @@ export async function run({
   });
 
   if (!(await runtime.machineSetup({ flags, pkgRoot, cfg }))) return 1;
+  if (!flags['dry-run'] && cfg.aqe !== false) {
+    // Persist the selected choice even on failure, so retry/sync has an exact plan.
+    saveKitConfig(cfg);
+    const embedding = await runtime.embeddingSetup(cfg);
+    reportOutcome('AQE embedding backend', embedding);
+    if (!embedding.ok) return 1;
+  }
   if (!(await applySetupCodexRepairs(
     flags, repairPlan.filter(entry => entry.repairKind === 'recursive-codex'), process.cwd(), runtime.repairCodexTopology,
   ))) return 1;
@@ -901,6 +926,11 @@ export async function run({
     info('not inside a project (no .git here) — run `ak setup` from a repo to set one up');
   }
   if (!flags['dry-run']) await runtime.finalizeSetup(cfg, pkgRoot, flags);
+  if (!flags['dry-run'] && willConfigureProject && cfg.aqe !== false) {
+    const projection = runtime.embeddingProjection(cfg, process.cwd());
+    reportOutcome('AQE embedding environment', projection);
+    if (!projection.ok) return 1;
+  }
   if (!flags['dry-run'] && await alignHosts({
     flags: { apply: true, yes: flags.yes }, roots: willConfigureProject ? [process.cwd()] : [], cfg,
     confirm: question => confirm(question, false, flags.yes),

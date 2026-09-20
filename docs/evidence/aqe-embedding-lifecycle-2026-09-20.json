@@ -1,0 +1,251 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-09-20",
+  "branch": "fix/aqe-embedding-lifecycle",
+  "baseCommit": "bdebd92e7f13931950fad7679d788d5d35a72176",
+  "sourceState": "uncommitted working snapshot; receipt excluded from its own hash set",
+  "sourceSnapshotSha256": "2f76fe05189b2aa53ca14227b28878472b07aae47bab945ccdcc52c8599d1acd",
+  "files": [
+    {
+      "path": ".github/workflows/nightly.yml",
+      "sha256": "8682ade6b6b7a053a9ed62d14dfd9a1a017e7a9db3b41e951d5f228a51ff69f1"
+    },
+    {
+      "path": "MAINTAINER.md",
+      "sha256": "3d922472a98b3842fbbd70f02ac1ce3af1ab49fba0273ae919610698c20490f8"
+    },
+    {
+      "path": "bin/agentic-kit.mjs",
+      "sha256": "c5bdc2e072bf69491235bf125f35ab50444095e2eecf640982ab54b41d23243c"
+    },
+    {
+      "path": "docs/AQE-EMBEDDINGS.md",
+      "sha256": "fdf6f7931f41259ac587c6cbb92bb73b41e45b8a027849d084c68a85a43e9dd5"
+    },
+    {
+      "path": "docs/SETUP.md",
+      "sha256": "f99d9a00d86d2baa1e112f22a1acb4987d782eebda628f6a033c4ba15772e4af"
+    },
+    {
+      "path": "docs/TROUBLESHOOTING.md",
+      "sha256": "3e7b7bd42b74aae2bd7bdf5a37d27d1c17d369dac0381a9f20c0a277b66e2390"
+    },
+    {
+      "path": "docs/adr/0023-fail-closed-operations-and-explicit-degradation.md",
+      "sha256": "173f7d554d46b30b5c63720cf39ceb1f9b439e9586c19908a769cadaf370dec9"
+    },
+    {
+      "path": "docs/adr/0055-aqe-embedding-lifecycle.md",
+      "sha256": "9612fbefd3814df6e8d9b5cf015f2d597e36b6c320810382f723996b3708352f"
+    },
+    {
+      "path": "docs/adr/README.md",
+      "sha256": "d196814960e457b49f048e8782c830055f8040d0b7b68e4a2012a30e0401e509"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-09-20-aqe-embedding-lifecycle.md",
+      "sha256": "b8c0446ed4b207b9ae730d13cabf2541b3ed2f2f44656356a04105b2d85f92c3"
+    },
+    {
+      "path": "package.json",
+      "sha256": "9c85f2fcc2102096c69fe8131745aaff6f07ee7633bf699b436f00eefac77cb4"
+    },
+    {
+      "path": "src/commands/setup.mjs",
+      "sha256": "6af229327427b5d5d401cff4268c91581e067d6bc6a618471128b10ffdb8cbac"
+    },
+    {
+      "path": "src/commands/status/sections/aqe.mjs",
+      "sha256": "8adfc359cc9756e7240618f85220836768ad152f9c77ff5f0dded1ee96bcce4d"
+    },
+    {
+      "path": "src/commands/sync.mjs",
+      "sha256": "22f6ea4e27e39e6b01fbce40b037196276d61c859b41a7c4c3a1376de2e9b2d5"
+    },
+    {
+      "path": "src/commands/x/aqe-embedding.mjs",
+      "sha256": "264f71001855593dfb5e9fb017eb7710f373bd96d792f91a83335b0a67bf6e3c"
+    },
+    {
+      "path": "src/commands/x/verify.mjs",
+      "sha256": "ab7c4b3c1e4f29029836c8ffc1a8062e02a995e34cfbb5d3d3a61773779e8e28"
+    },
+    {
+      "path": "src/lib/aqe-embedding-config.mjs",
+      "sha256": "b2504f3c1f461dd2db2d8ab6e45b24accb5a34a09d28cd8a9b97d598cbb237ef"
+    },
+    {
+      "path": "src/lib/aqe-embedding-lifecycle.mjs",
+      "sha256": "d65af6f2612faa6bb7ae724c3079c9f15dbd91f9a6f2fd45789311c88889b66a"
+    },
+    {
+      "path": "src/lib/aqe-embedding-probe-child.mjs",
+      "sha256": "683d65c0aaf7ca1da0449aad302792a5a5c3b04a47b56a98373644d1329f1eb6"
+    },
+    {
+      "path": "src/lib/aqe-embedding-probe.mjs",
+      "sha256": "063c94c25cde2691a15426e37a68742fed656711b1d80192a3dc0b3fa84b50eb"
+    },
+    {
+      "path": "src/lib/aqe-embedding-projection.mjs",
+      "sha256": "3e5530efee6546b5326dfe053ef6f0aeec3a5cfe2884574c5d135a5b3c4b2bbe"
+    },
+    {
+      "path": "src/lib/aqe-embedding-setup.mjs",
+      "sha256": "af5112616030a413caeed4ee105b14e963865d5e4dd177f6d72c4115b403d782"
+    },
+    {
+      "path": "src/lib/aqe-embedding-toml.mjs",
+      "sha256": "6bb8f0c25499001b27eff0d144e4b5b4c4c95f94f2df3d6889bb9179031ec0be"
+    },
+    {
+      "path": "src/lib/aqe-embedding-transport.mjs",
+      "sha256": "29455f143891ccb17668f1b7aaabef0200546abd0adcb027df260d2d24b8a852"
+    },
+    {
+      "path": "src/lib/aqe-readiness.mjs",
+      "sha256": "f139ce22c61e7037e3937f410f40d3f5d360a745d695ce699d42d3b600442f21"
+    },
+    {
+      "path": "src/lib/aqe-verification.mjs",
+      "sha256": "58cd5baacede525615e16d920e6689d07de72076c238b62c4722ede0b011e609"
+    },
+    {
+      "path": "src/lib/config.mjs",
+      "sha256": "833a18272328fa035cd6404d71ce316b87089e1824d967f54ee73cd7775d8d9a"
+    },
+    {
+      "path": "src/lib/opencode-core.mjs",
+      "sha256": "7d217ae6198a02f407f9264484446c13d76d30918e085903a74b297f31c85648"
+    },
+    {
+      "path": "src/lib/trust-manifest.mjs",
+      "sha256": "27e46e98571bd53ccbede507c326015dc66c71a3f5905c94fec3d7b4927d11b8"
+    },
+    {
+      "path": "tests/kit/aqe-embedding-command.test.mjs",
+      "sha256": "8ae44904a59264953031f6706d576658d8e5c99df6d073062be895613e243e23"
+    },
+    {
+      "path": "tests/kit/aqe-embedding-config.test.mjs",
+      "sha256": "b46934753615b1ac6799a4f75bdad338e5c372cf6a01fc5b4f74baa0bf86e935"
+    },
+    {
+      "path": "tests/kit/aqe-embedding-http.test.mjs",
+      "sha256": "3b0ae7f2d487ebff146cfa55a13692160ec1632a253ad11630e6a6ceb88f558e"
+    },
+    {
+      "path": "tests/kit/aqe-embedding-lifecycle.test.mjs",
+      "sha256": "fd4543612e101a7e294ee3a5363394ffa0e27b82f87939f4914a891d0496dbaa"
+    },
+    {
+      "path": "tests/kit/aqe-embedding-probe.test.mjs",
+      "sha256": "cabff63cbda541767965108f5f0d8bb305bada8459365d17b576708f7d35127a"
+    },
+    {
+      "path": "tests/kit/aqe-embedding-projection.test.mjs",
+      "sha256": "b17e3ccb5ae483b1b9f00c08826ffb40e9c341d7116f23b462d00dc41eeb56db"
+    },
+    {
+      "path": "tests/kit/aqe-embedding-setup.test.mjs",
+      "sha256": "a1be747ccde51497d00cb26940da6b48768ef7da3f338a4be7631339ea5a29db"
+    },
+    {
+      "path": "tests/kit/aqe-embedding-toml.test.mjs",
+      "sha256": "e6ca0b3f9553d8939a1e2dbeecb042c43147ce3d5a292622b36543379938c621"
+    },
+    {
+      "path": "tests/kit/aqe-readiness.test.mjs",
+      "sha256": "648d0f9935f4cea53614dcf430b106bb0207a5dccdbf0cba25a9aff60c689f19"
+    },
+    {
+      "path": "tests/kit/aqe-verification.test.mjs",
+      "sha256": "9c933beac09d5413f760747d8ae179ca2b82044fd984aa1e95c22a6c34709624"
+    },
+    {
+      "path": "tests/kit/clean-machine-setup.test.mjs",
+      "sha256": "cc0a11c86f9d02ace480ef074bbbeda00ca9e1645edcddb785fd40ca37c92244"
+    },
+    {
+      "path": "tests/kit/fixtures/status-golden.json",
+      "sha256": "f61214f58340a106e23b990fd10074ca3592f0b2a7fe5ebef7fc17791e298971"
+    },
+    {
+      "path": "tests/kit/opencode-aqe-embedding.test.mjs",
+      "sha256": "6810b5bbaa59fa7cd779da7f01a70a372e032080ec240bd3868e3e9e1fe58d17"
+    },
+    {
+      "path": "tests/kit/setup-command.test.mjs",
+      "sha256": "94ca2f6e1633c962bbbeaf86d069ba269eddfc412fad3474259ecf315d28ce6c"
+    },
+    {
+      "path": "tests/kit/status-golden.test.mjs",
+      "sha256": "6a547a730ab685ac46b747ed4a3bf2b74ac06da75bdc37e76612003000f31286"
+    }
+  ],
+  "authorization": {
+    "branchAndImplementation": "User requested new branch, architecture, design, documentation, tests and implementation",
+    "localModel": "User authorized required model download and configuration",
+    "openCode": "User explicitly requested immediate OpenCode support",
+    "publication": false
+  },
+  "validation": {
+    "npm test": {
+      "exitCode": 0,
+      "nodeTests": 4300,
+      "passed": 4294,
+      "skipped": 6,
+      "failed": 0,
+      "legacySuites": "passed",
+      "coverage": {
+        "lines": 92.19,
+        "branches": 81.54,
+        "functions": 91.61
+      }
+    },
+    "typecheck": {
+      "exitCode": 0
+    },
+    "lint": {
+      "exitCode": 0,
+      "errors": 0,
+      "warnings": 71
+    },
+    "lint:cc": {
+      "exitCode": 0,
+      "errors": 0,
+      "warnings": 3
+    },
+    "lint:md": {
+      "exitCode": 0,
+      "issues": 0
+    },
+    "build": {
+      "exitCode": 0
+    },
+    "git diff --check": {
+      "exitCode": 0
+    }
+  },
+  "liveEvidence": {
+    "scope": "installed AQE 3.14.2 isolated synthetic backend and readonly SQLite provenance",
+    "dimension": 384,
+    "fingerprint": "e5b3e2419cd301d2",
+    "spaceId": "617daac85e04f571c9d7c7ac9dbd78a4745c195dfeac28932daf6bdde1342063",
+    "relatedSimilarity": 0.623139775336268,
+    "unrelatedSimilarity": -0.05721071108171483,
+    "corpus": {
+      "verified": 0,
+      "mismatched": 1,
+      "unverified": 135,
+      "migrationPerformed": false
+    }
+  },
+  "limitations": [
+    "Packed clean-Mac nightly added but not executed in this local session",
+    "Ollama API lacks atomic create-if-absent alias operation; reread narrows but cannot eliminate concurrent creation race",
+    "Existing corpus requires separate migration decision",
+    "Implementation not committed, installed globally, pushed, merged or released",
+    "pnpm launcher broken on machine; npm scripts used with existing installed development dependencies"
+  ]
+}

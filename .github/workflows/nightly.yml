@@ -108,6 +108,8 @@ jobs:
           mkdir -p "$RUNNER_TEMP/npm-prefix" "$RUNNER_TEMP/package"
           npm pack --pack-destination "$RUNNER_TEMP/package"
           npm install -g "$RUNNER_TEMP"/package/pacphi-agentic-kit-*.tgz
+      - name: Install native local embedding service
+        run: brew install ollama
       - name: Run real setup in a disposable HOME and project
         shell: bash
         env:
@@ -119,14 +121,27 @@ jobs:
           npm_config_cache: ${{ runner.temp }}/npm-cache
           RUVNET_BRAIN_KB: ${{ runner.temp }}/brain-kb
           AK_PROJECT: ${{ runner.temp }}/clean-project
+          OLLAMA_MODELS: ${{ runner.temp }}/clean-ollama-models
+          OLLAMA_HOST: 127.0.0.1:11434
         run: |
           mkdir -p "$HOME" "$AK_PROJECT"
+          ollama serve > "$RUNNER_TEMP/ollama.log" 2>&1 &
+          AK_OLLAMA_PID=$!
+          trap 'kill "$AK_OLLAMA_PID" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            curl --fail --silent http://127.0.0.1:11434/api/version >/dev/null && break
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:11434/api/version
           git -C "$AK_PROJECT" init
-          (cd "$AK_PROJECT" && ak setup --yes --no-ruvnet-brain) | tee "$RUNNER_TEMP/setup.log"
+          (cd "$AK_PROJECT" && ak setup --yes --no-ruvnet-brain --aqe-embedding-mode local) | tee "$RUNNER_TEMP/setup.log"
+          (cd "$AK_PROJECT" && ak x aqe-embedding verify --json) | tee "$RUNNER_TEMP/embedding-proof.json"
           node --input-type=module -e '
             import fs from "node:fs";
             import path from "node:path";
             const log = fs.readFileSync(process.env.RUNNER_TEMP + "/setup.log", "utf8");
+            const proof = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/embedding-proof.json", "utf8"));
+            if (!proof.ok || proof.evidence?.dimension !== 384) throw new Error("fresh embedding proof failed");
             const settings = JSON.parse(fs.readFileSync(path.join(process.env.AK_PROJECT, ".claude", "settings.json"), "utf8"));
             const expected = ["Bash(npx @claude-flow*)","Bash(npx claude-flow*)","Bash(node .claude/*)","mcp__claude-flow__*","Bash(npx agentic-qe:*)","Bash(npx @anthropics/agentic-qe:*)","mcp__agentic-qe__*"];
             for (const rule of expected) if (!log.includes(rule)) throw new Error(`permission was not disclosed: ${rule}`);
@@ -150,6 +165,8 @@ jobs:
           name: clean-mac-setup-evidence
           path: |
             ${{ runner.temp }}/setup.log
+            ${{ runner.temp }}/embedding-proof.json
+            ${{ runner.temp }}/ollama.log
             ${{ runner.temp }}/clean-project/.claude/settings.json
 
   links-external:

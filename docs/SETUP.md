@@ -295,3 +295,12 @@ the developer's existing home or global npm prefix.
 See [Upgrading](UPGRADING.md) for the `setup` versus `sync` lifecycle and
 [Troubleshooting](TROUBLESHOOTING.md) for setup and health-check failures. See
 [Host support](HOST-SUPPORT.md) before enabling Claude, Codex, or OpenCode.
+
+## AQE embedding backend
+
+New setup recommends local Ollama with MiniLM, preserves a selected endpoint, and
+verifies the backend before completion. The download and host changes are disclosed
+in the setup manifest. Missing Ollama leaves setup incomplete with installation
+guidance. Use `--aqe-embedding-mode unmanaged` to defer semantic learning explicitly.
+See [AQE embeddings](AQE-EMBEDDINGS.md) for alternatives, shell configuration and
+existing-corpus safeguards.
