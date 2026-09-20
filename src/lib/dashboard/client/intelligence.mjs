@@ -1,6 +1,7 @@
 // @ts-nocheck — browser bundle source (never node-imported; client.mjs
 // reads it as text). See src/lib/dashboard/client/**'s eslint.config.mjs
 // override comment for why this directory isn't run through the node lib.
+import { renderHostReadiness } from './host-readiness.mjs';
 import { renderAbout } from './about.mjs';
 import { DASH_TOKEN, activeTab, esc, overviewView, positionThumb } from './bootstrap.mjs';
 import { renderModelSummary } from './model-lifecycle.mjs';
@@ -294,6 +295,7 @@ import { fmtNum, kpi } from './usage.mjs';
   export function render(data){
     if(!data)return;
     LAST=data;
+    renderHostReadiness(data.hostReadiness);
     renderVerdict(data.overall);
     renderNotice(data.drift);
     renderAbout(data);

@@ -142,8 +142,24 @@ export function renderPage({ name, version }) {
     <button class="seg-btn" role="tab" id="tab-observability" data-tab="observability" aria-selected="false" aria-controls="panel-observability" type="button">Observability</button>
     <button class="seg-btn" role="tab" id="tab-system" data-tab="system" aria-selected="false" aria-controls="area-system" type="button">System</button>
   </div>
-  <div class="source-health" id="u-source-health" role="status" aria-live="polite" hidden></div>
+  <div class="source-health" id="host-readiness" role="status" aria-label="Host health" aria-live="polite" hidden></div>
 </nav>
+
+<dialog id="host-health-dialog" class="host-health-dialog" aria-labelledby="host-health-title" aria-describedby="host-health-summary">
+  <div class="health-dialog-heading"><h2 id="host-health-title">Host health</h2><button type="button" id="host-health-close" aria-label="Close health details">Close</button></div>
+  <p id="host-health-summary" role="status"></p>
+  <p id="host-health-project"></p>
+  <ul id="host-health-checks" class="health-checks"></ul>
+  <p id="host-health-target"></p>
+  <h3>Connection check</h3>
+  <p id="host-health-connection"></p>
+  <p id="host-health-integrations"></p>
+  <p id="host-health-eligibility"></p>
+  <p class="health-disclosure">Sends one short request using your selected host and provider. Normal provider billing and native context usage apply. Native startup may initialize dependencies and update local cache or session files. Agent tools are restricted; this check does not repair your setup.</p>
+  <label class="health-consent"><input type="checkbox" id="host-health-consent"> Run one connection check with these settings.</label>
+  <div class="health-actions"><button type="button" id="host-health-refresh">Check local setup</button><button type="button" id="host-health-connect" disabled>Check connection</button></div>
+  <p id="host-health-message" role="status" aria-live="polite"></p>
+</dialog>
 
 <div class="secondary-shell">
   <div class="secondary-rail">
@@ -443,6 +459,11 @@ export function renderPage({ name, version }) {
       <h2 id="usage-view-title">Usage scorecard</h2>
       <p id="usage-view-description">Token consumption, API-equivalent cost, efficiency, and trends.</p>
     </header>
+
+    <details class="usage-source-details"><summary>Usage data sources</summary>
+      <p>These checks describe retained usage records, independently of host setup. The scan includes the selected period plus 90 days for comparisons.</p>
+      <div class="source-health" id="u-source-health" role="status" aria-live="polite" hidden></div>
+    </details>
 
     <section class="view" id="v-score" role="tabpanel" aria-labelledby="usage-tab-score">
       <div class="hero" id="u-hero"></div>

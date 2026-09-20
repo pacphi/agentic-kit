@@ -91,6 +91,7 @@ let aboutSrc = readSplit('about.mjs');
 aboutSrc = inject(aboutSrc, 'var ABOUT = []; // PLACEHOLDER:ABOUT_JS', `var ABOUT=${ABOUT_JS};`);
 
 const datetimeSrc = readSplit('datetime.mjs');
+const hostReadinessSrc = readSplit('host-readiness.mjs');
 const intelligenceSrc = readSplit('intelligence.mjs');
 const pollSrc = readSplit('poll.mjs');
 // usage-rhythm.mjs declares its OWN `esc` on disk, and its comment says why:
@@ -158,5 +159,6 @@ const bootSrc = readSplit('boot.mjs');
 // sequence) running in the same relative order it always has.
 export const JS = `
 (function(){
-${bootstrapSrc}${contextCard.toString()}${contextHostCard.toString()}${repositoryTree.toString()}${overviewSrc}${datetimeSrc}${intelligenceSrc}${pollSrc}${usageRhythmSrc}${usagePromptsSrc}${usageContextHooksSrc}${usageSrc}${modelLifecycleSrc}${usageOrchestratorsSrc}${aboutSrc}${systemReadoutSrc}${systemProjectsSrc}${maintenanceWorkspaceSrc}${maintenanceFiltersSrc}${maintenanceCardsSrc}${maintenanceOperationSrc}${maintenanceLanguageLogosSrc}${maintenanceFocusSrc}${maintenanceInventorySrc}${maintenanceRelationshipsSrc}${maintenanceInspectorSrc}${maintenanceGuidanceSrc}${maintenanceDiscoverySrc}${maintenanceActivitySrc}${systemMaintenanceActionsSrc}${systemMaintenanceSrc}${bootSrc}})();
+${bootstrapSrc}${contextCard.toString()}${contextHostCard.toString()}${repositoryTree.toString()}${overviewSrc}${datetimeSrc}${hostReadinessSrc}
+${intelligenceSrc}${pollSrc}${usageRhythmSrc}${usagePromptsSrc}${usageContextHooksSrc}${usageSrc}${modelLifecycleSrc}${usageOrchestratorsSrc}${aboutSrc}${systemReadoutSrc}${systemProjectsSrc}${maintenanceWorkspaceSrc}${maintenanceFiltersSrc}${maintenanceCardsSrc}${maintenanceOperationSrc}${maintenanceLanguageLogosSrc}${maintenanceFocusSrc}${maintenanceInventorySrc}${maintenanceRelationshipsSrc}${maintenanceInspectorSrc}${maintenanceGuidanceSrc}${maintenanceDiscoverySrc}${maintenanceActivitySrc}${systemMaintenanceActionsSrc}${systemMaintenanceSrc}${bootSrc}})();
 `;

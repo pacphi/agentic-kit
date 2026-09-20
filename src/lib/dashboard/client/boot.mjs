@@ -1,6 +1,7 @@
 // @ts-nocheck — browser bundle source (never node-imported; client.mjs
 // reads it as text). See src/lib/dashboard/client/**'s eslint.config.mjs
 // override comment for why this directory isn't run through the node lib.
+import { wireHostHealth } from './host-readiness.mjs';
 import { renderAbout, wireAboutNudge } from './about.mjs';
 import { activeTab, initialLiveScope, setSystemView, setTab, syncHash, systemView } from './bootstrap.mjs';
 import { tickClock, wireIntelPicker } from './intelligence.mjs';
@@ -19,6 +20,7 @@ import { loadUsage, setUsageView } from './usage.mjs';
   // "state unknown" until the first /api/status response supplies the join.
   renderAbout(null);
   renderSystemFreshness();
+  wireHostHealth();
   wirePoll();
   wireUsage();
   wireIntelPicker();

@@ -89,7 +89,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
     var el=document.getElementById("u-source-health");
     if(!el)return;
     health=health||{};
-    var pills=[];
+    var pills=[],details=[];
     for(var g=0; g<SOURCE_HEALTH_GROUPS.length; g++){
       var grp=SOURCE_HEALTH_GROUPS[g],present=[];
       for(var p=0; p<grp.parts.length; p++){
@@ -108,13 +108,14 @@ import { renderUsage } from './usage-orchestrators.mjs';
         if(q&&q.common) d+=" · "+fmtNum(q.common.unitsParsed)+"/"+fmtNum(q.common.unitsSeen)+" parsed · "+fmtNum(q.common.prompts)+" prompts / "+fmtNum(q.common.responses)+" responses";
         return pt.sub?pt.sub+": "+d:d;
       }).join(" · ");
+      details.push('<li>'+esc(detail)+'</li>');
       pills.push('<span class="source-pill" data-status="'+esc(lead.status)+'">'
         +'<span class="sp-icon live-host" data-host="'+esc(grp.host)+'" title="'+esc(grp.title)+'">'+sourceHostIcon(grp.host)+'</span>'
-        +'<span class="sp-status" title="'+esc(detail)+'">'+esc(lead.status)+'</span>'
+        +'<span class="sp-status" title="'+esc(detail)+'">'+esc(({ok:'Readable',degraded:'Partial data',absent:'No records','not-read':'Not checked'})[lead.status]||'Not checked')+'</span>'
         +'</span>');
     }
     el.hidden=pills.length===0;
-    el.innerHTML=pills.join("");
+    el.innerHTML=pills.join("")+'<ul class="source-diagnostics">'+details.join("")+'</ul>';
   }
 
   export function loadUsage(force){
