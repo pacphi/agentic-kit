@@ -90,6 +90,13 @@ space ID and 135 unverified legacy vectors. No corpus migration was attempted.
 OpenCode has an immediate narrow update inside its full-entry owner; it does not
 require a separate sync for an already owned registration. The packed clean-Mac
 nightly now provisions native Ollama in disposable storage and checks the actual
-backend, but that GitHub-hosted job has not run in this local session. Ollama copy
+backend. The [hosted live run](https://github.com/pacphi/agentic-kit/actions/runs/35526137263)
+passed on source `2b13ade`, including clean macOS setup and live Linux/macOS checks.
+The [PR matrix](https://github.com/pacphi/agentic-kit/actions/runs/35526119373) also
+passed Linux, macOS and Windows on Node 22, 24 and 26. Ollama copy
 has no atomic create-if-absent operation: a fresh inventory check narrows, but does
 not eliminate, the alias creation race with another writer.
+
+The pre-PR portability review added a conditional-export regression: the local
+transformer probe now resolves the same ESM module instance as AQE, so disabling
+remote model downloads cannot accidentally configure a separate CommonJS instance.
