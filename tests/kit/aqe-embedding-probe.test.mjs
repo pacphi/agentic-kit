@@ -153,3 +153,16 @@ test('malformed stored space IDs are unverified and never reflected', async t =>
   assert.equal(result.corpus.unverifiedVectors,1);
   assert.equal(JSON.stringify(result).includes('private-token'),false);
 });
+
+test('local-only control uses the same ESM conditional export as AQE runtime', async t => {
+  const packageRoot = fixture(t, good.replace('if (texts.length', `
+    const { env } = await import('@huggingface/transformers');
+    if (env.allowRemoteModels !== false) throw Error('uncontrolled ESM download');
+    if (texts.length`));
+  const dir = path.join(packageRoot,'node_modules/@huggingface/transformers');
+  fs.mkdirSync(dir,{recursive:true});
+  fs.writeFileSync(path.join(dir,'package.json'), JSON.stringify({ type:'module', exports:{node:{import:'./esm.mjs',require:'./cjs.cjs'}} }));
+  fs.writeFileSync(path.join(dir,'esm.mjs'),'export const env = {allowRemoteModels:true};');
+  fs.writeFileSync(path.join(dir,'cjs.cjs'),'exports.env = {allowRemoteModels:true};');
+  assert.equal((await probeAqeEmbeddings({packageRoot,env:{},backend:'in-process'})).status,'passed');
+});

@@ -1,7 +1,6 @@
 // Internal isolated worker: only synthetic text is sent to the selected embedder.
 import fs from 'node:fs';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 
 function classify(error) {
@@ -50,8 +49,10 @@ try {
   for await (const chunk of process.stdin) input += chunk;
   cfg = JSON.parse(input);
   if (cfg.backend === 'in-process') {
-    const require = createRequire(path.join(cfg.packageRoot, 'package.json'));
-    const transformers = await import(pathToFileURL(require.resolve('@huggingface/transformers')).href);
+    // Resolve with AQE's ESM parent and import conditions, not require conditions.
+    // Transformers publishes distinct CJS/ESM instances with independent env state.
+    const parent = pathToFileURL(path.join(cfg.packageRoot, 'dist/learning/real-embeddings.js')).href;
+    const transformers = await import(import.meta.resolve('@huggingface/transformers', parent));
     transformers.env.allowRemoteModels = cfg.allowDownload === true;
     if (cfg.modelCacheDir) transformers.env.cacheDir = cfg.modelCacheDir;
   }

@@ -135,7 +135,7 @@ test('interrupted receipt does not authorize a second overwrite', t => {
 test('refuses a symlinked configuration directory', t => {
   const { cwd, write, cfg } = fixture(t);
   const file = write('external/settings.local.json', '{}');
-  fs.symlinkSync(path.dirname(file), path.join(cwd, '.claude'));
+  fs.symlinkSync(path.dirname(file), path.join(cwd, '.claude'), process.platform === 'win32' ? 'junction' : 'dir');
   assert.equal(reconcileAqeEmbeddingProjections(cfg, cwd).ok, false);
   assert.equal(fs.readFileSync(file, 'utf8'), '{}');
 });

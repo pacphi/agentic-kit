@@ -43,7 +43,7 @@ export async function probeAqeEmbeddings({ packageRoot, env = process.env, timeo
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-aqe-probe-'));
   const started = Date.now();
   try {
-    const result = await run(process.execPath, [CHILD], {
+    const result = await run(process.execPath, ['--experimental-import-meta-resolve', CHILD], {
       input: JSON.stringify({ packageRoot, endpoint, token: env.AQE_EMBEDDER_TOKEN,
         backend, allowDownload, corpusPath, modelCacheDir }),
       cwd: temporary, timeout: timeoutMs, maxBuffer: 64 * 1024,
