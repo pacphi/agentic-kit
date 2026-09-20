@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import { validateCodexContextIntent } from './codex-context-config.mjs';
 import { validateAqeCodexGuidance } from './aqe-guidance.mjs';
+import { validateAqeEmbeddingIntent } from './aqe-embedding-config.mjs';
 import path from 'node:path';
 import { kitConfigPath, legacyKitConfigPath } from './paths.mjs';
 import {
@@ -23,6 +24,7 @@ const DEFAULTS = {
   codexContext: null, // opt-in native maximum with original scalar and ownership receipt
   aqeCodexGuidance: 'compact', // full | compact | none; AQE ≥3.14.1
   aqe: true,            // manage agentic-qe alongside ruflo
+  aqeEmbedding: undefined, // absent legacy intent differs from explicit unmanaged opt-out
   agentBrowser: true,   // manage Ruflo's currently-shipped browser executor (disable with setup --no-agent-browser)
   agentdb: true,        // manage the standalone agentdb CLI (harvest's write path), pinned to ruflo's bundled version
   ruvnetBrain: true,    // install/manage the RuvNet Brain (offline KB + search_ruvnet MCP)
@@ -103,6 +105,7 @@ function warnUnknownTopLevelKeys(parsed) {
 }
 
 function assertLoadableEnvelopes(config) {
+  validateAqeEmbeddingIntent(config.aqeEmbedding);
   validateCodexContextIntent(config.codexContext);
   validateAqeCodexGuidance(config.aqeCodexGuidance);
   if (!plain(config.integrations)) {
@@ -233,6 +236,7 @@ export function loadKitConfig(file = kitConfigPath()) {
 }
 
 export function saveKitConfig(cfg, file = kitConfigPath()) {
+  validateAqeEmbeddingIntent(cfg.aqeEmbedding);
   validateCodexContextIntent(cfg.codexContext);
   validateAqeCodexGuidance(cfg.aqeCodexGuidance);
   const serialized = JSON.stringify(migrateKitConfig(cfg), null, 2) + '\n';
