@@ -120,12 +120,31 @@ export function releaseObservationLabel({ latestSource, latestObservedAt }) {
 
 export const KIT_PKG = '@pacphi/agentic-kit';
 
+/** Retain cached evidence only for a channel whose lookup failed. Do not
+ * renew the TTL unless the winning candidate was actually observed: a fresh
+ * latest response cannot make an older next observation fresh. */
+async function fetchSelfCandidate(tags, cachedBest, fetchLatest) {
+  let best = null;
+  let observed = false;
+  for (const tag of tags) {
+    const version = await fetchLatest(KIT_PKG, tag);
+    const live = isValidSemver(version);
+    const candidate = live ? { version, tag } : cachedBest?.tag === tag ? cachedBest : null;
+    if (candidate && (!best || newer(candidate.version, best.version))) {
+      best = candidate;
+      observed = live;
+    }
+  }
+  return { best, observed };
+}
+
 /** Drift for the kit itself. Installed = the running copy's package.json
  *  (pkgRoot). Prerelease installs also consult the `next` dist-tag —
  *  prereleases publish there, so `latest` alone would never see them; the
  *  higher of latest/next wins. Cached in kit.json alongside versionCheck.
- *  @param {{ pkgRoot?: string, force?: boolean }} [opts] */
-export async function selfDrift({ pkgRoot, force = false } = {}) {
+ *  Failed lookups preserve eligible cached evidence without renewing its TTL.
+ *  @param {{ pkgRoot?: string, force?: boolean, fetchLatest?: typeof latestVersion }} [opts] */
+export async function selfDrift({ pkgRoot, force = false, fetchLatest = latestVersion } = {}) {
   let installed = null;
   try {
     installed = JSON.parse(fs.readFileSync(path.join(pkgRoot, 'package.json'), 'utf8')).version;
@@ -133,16 +152,19 @@ export async function selfDrift({ pkgRoot, force = false } = {}) {
   const cfg = loadKitConfig();
   const ttlMs = (cfg.versionCheck?.ttlHours ?? 24) * 3600_000;
   const cached = cfg.versionCheck?.self;
-  const fresh = !force && cached?.last && Date.now() - cached.last < ttlMs;
-  let best = fresh ? cached.best ?? null : null;
+  const tags = installed?.includes('-') ? ['latest', 'next'] : ['latest'];
+  const cachedBest = cached?.best && tags.includes(cached.best.tag) && isValidSemver(cached.best.version)
+    ? cached.best : null;
+  const fresh = !force && cached?.last && Date.now() - cached.last < ttlMs
+    && (!cached.best || cachedBest);
+  let best = fresh ? cachedBest : null;
   if (!fresh) {
-    const tags = installed?.includes('-') ? ['latest', 'next'] : ['latest'];
-    for (const tag of tags) {
-      const v = await latestVersion(KIT_PKG, tag);
-      if (v && (!best || newer(v, best.version))) best = { version: v, tag };
+    const candidate = await fetchSelfCandidate(tags, cachedBest, fetchLatest);
+    best = candidate.best;
+    if (candidate.observed) {
+      cfg.versionCheck = { ...cfg.versionCheck, self: { last: Date.now(), best } };
+      try { saveKitConfig(cfg); } catch { /* read-only envs: next call re-fetches */ }
     }
-    cfg.versionCheck = { ...cfg.versionCheck, self: { last: Date.now(), best } };
-    try { saveKitConfig(cfg); } catch { /* read-only envs: next call re-fetches */ }
   }
   return {
     pkg: KIT_PKG,

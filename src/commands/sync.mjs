@@ -72,10 +72,13 @@ export function recordApplyFailure(state, name, result) {
 
 /** Refresh every network-backed fact that can open an upgrade gate. Kept out
  *  of run() so adding one release boundary does not grow the command's already
- *  broad orchestration complexity. Sequential: both probes persist kit.json. */
-async function refreshPlanDrift(flags, fetchLatest) {
+ *  broad orchestration complexity. Sequential: these probes persist kit.json. */
+async function refreshPlanDrift(flags, fetchLatest, pkgRoot) {
   if (flags['dry-run'] || flags['no-upgrade']) return;
   await driftReport({ force: true, ...(fetchLatest ? { fetchLatest } : {}) });
+  // Self-update has its own TTL cache; refresh it before the collector decides
+  // whether a self action exists. An apply-time refresh cannot open that gate.
+  await selfDrift({ pkgRoot, force: true, ...(fetchLatest ? { fetchLatest } : {}) });
   // Brain releases have a second executability fact beyond the tag: the
   // required ruvnet-brain.zip asset. A tag-only release is not actionable.
   if (loadKitConfig().ruvnetBrain) await ruvnetBrainDrift({ force: true });
@@ -500,7 +503,7 @@ export async function run({
   // versions gate it needed to open). Dry-runs skip the refresh: it writes
   // kit.json, and --dry-run is pinned to touch nothing — so a dry-run
   // preview may be cache-stale by up to one TTL window.
-  await refreshPlanDrift(flags, fetchLatest);
+  await refreshPlanDrift(flags, fetchLatest, pkgRoot);
   const rows = await collectFn({ pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions });
   const plan = rows.filter((r) => r.fix)
     // Model lifecycle actions are explicit advisory commands. `ak status` must
