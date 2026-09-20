@@ -1,7 +1,7 @@
 # ADR-0023 — Fail-closed mutations and explicit degraded operation evidence
 
 - **Status:** Implemented
-- **Updated:** 2026-09-20 — ADR-0053 separates qualified local/connected host health from usage-source diagnostics
+- **Updated:** 2026-09-20 — ADR-0055 adds qualified AQE embedding lifecycle evidence; ADR-0053 separates host health from usage-source diagnostics
 - **Earlier update:** 2026-08-26 — ADR-0035 applies fail-closed preflight, bounded evidence, and
   content-free degradation to the opt-in deja-vu companion
 - **Earlier update:** 2026-09-03 — ADR-0044 implements these fail-closed principles in the Maintenance
@@ -51,6 +51,15 @@ defect was losing the evidence needed to distinguish healthy, degraded, absent, 
 or mutating user state after a promised safety prerequisite failed.
 
 ## Decision
+
+### AQE embedding amendment — 2026-09-20
+
+[ADR-0055](0055-aqe-embedding-lifecycle.md) applies this evidence vocabulary to
+backend intent, model provisioning, host projections, synthetic embedding proof,
+SQLite corpus compatibility and busy RVF access. Setup cannot report completion
+when its selected semantic backend failed. A backend pass does not certify old
+vectors; missing active identity cannot become a mismatch assertion. Existing
+installations remain unmanaged until selection, and explicit opt-out is preserved.
 
 ### 1. Managed operations carry explicit outcome status
 

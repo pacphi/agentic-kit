@@ -372,3 +372,10 @@ streaming reader, and rollouts that still cannot be parsed are reported. Cache s
 - [ADR-0053 — Qualified host health and separate usage diagnostics](0053-host-setup-evidence-and-usage-diagnostics.md) — scoped local and connected health; usage acquisition remains separate.
 
 - [ADR-0054 — Vendor-neutral fleet evidence export](0054-fleet-evidence-export.md) — Implemented — versioned local snapshots, privacy allowlists and deterministic aggregation.
+
+## ADR-0055 — AQE embedding lifecycle
+
+[ADR-0055](0055-aqe-embedding-lifecycle.md) defines explicit backend intent, local
+Ollama provisioning, receipt-owned host environments and separate backend/corpus/
+storage evidence. Existing opt-outs survive upgrades and setup; semantic failures
+never become a silent hash fallback.

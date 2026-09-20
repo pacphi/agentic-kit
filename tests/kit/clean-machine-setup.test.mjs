@@ -31,12 +31,14 @@ test('clean-machine setup preview is hermetic and discloses every auto-approve r
     RUVNET_BRAIN_KB: path.join(root, 'brain-kb'),
     PATH: noBin,
     NO_COLOR: '1',
+    AQE_EMBEDDER_ENDPOINT: '', AQE_EMBEDDER_TOKEN: '',
   };
   const run = spawnSync(process.execPath, [BIN, 'setup', '--project', '--dry-run', '--yes'], {
     cwd: project, env, encoding: 'utf8', timeout: 30_000,
   });
   assert.equal(run.status, 0, run.stderr || run.stdout);
   const output = `${run.stdout}\n${run.stderr}`;
+  assert.match(output, /45 MB/);
   for (const rule of [
     'Bash(npx @claude-flow*)', 'Bash(npx claude-flow*)', 'Bash(node .claude/*)',
     'mcp__claude-flow__*', 'Bash(npx agentic-qe:*)',
@@ -66,6 +68,7 @@ test('clean-machine noninteractive trust requires --yes and declines without mut
     RUVNET_BRAIN_KB: path.join(root, 'brain-kb'),
     PATH: path.join(root, 'no-such-bin'),
     NO_COLOR: '1',
+    AQE_EMBEDDER_ENDPOINT: '', AQE_EMBEDDER_TOKEN: '',
   };
   const run = spawnSync(process.execPath, [BIN, 'setup', '--project'], {
     cwd: project, env, encoding: 'utf8', timeout: 30_000,
