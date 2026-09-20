@@ -1,6 +1,7 @@
 # ADR-0051 — Supported peer delegation and host realignment
 
-- **Status:** Accepted; implemented locally, release not published
+- **Status:** Implemented; published in `4.0.0-alpha.48`
+- **Updated:** 2026-09-20 — reconciled publication status against the GitHub release and npm artifact
 - **Date:** 2026-09-10
 - **Deciders:** Project maintainer, through the current design discussion
 - **Amends:** [ADR-0033](0033-retire-codex-mcp-and-bound-qe-court-participants.md)
@@ -155,3 +156,16 @@ Regression evidence covers scope filtering, path-free projection, stale action
 rejection, selected-only removal, and the real transaction coordinator. Browser
 verification exercises the actual markup, filtering client and preview selection
 against deterministic evidence fixtures.
+
+### Publication evidence — 2026-09-20
+
+PR [#217](https://github.com/pacphi/agentic-kit/pull/217), commit `8caa25f`,
+shipped in [v4.0.0-alpha.48](https://github.com/pacphi/agentic-kit/releases/tag/v4.0.0-alpha.48).
+GitHub published the prerelease on 2026-09-10 at 18:51:42 UTC; npm published
+`@pacphi/agentic-kit@4.0.0-alpha.48` at 18:51:33 UTC. This is an alpha
+prerelease publication, not a stable-release designation.
+
+The registry tarball's SHA-512 matched its published integrity value. Eight
+implementation files matched the release tag byte-for-byte: the alignment
+engine and CLI, run guard, setup, sync, status section, and Maintenance provider
+and management projection. The previous “release not published” header was stale.
