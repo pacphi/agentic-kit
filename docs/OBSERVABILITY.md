@@ -484,3 +484,10 @@ harder, while also cautioning that stability must serve the user's task
 [eyes-have-it]: https://www.cs.umd.edu/~ben/papers/Shneiderman1996eyes.pdf
 [mental-map-review]: https://doi.org/10.1016/j.ijhcs.2013.08.004
 [stable-graphs]: https://doi.org/10.1177/1473871620972339
+
+## Fleet data export
+
+For vendor-neutral, offline export and aggregation independent of the dashboard, see
+[Fleet evidence export](TELEMETRY.md). `ak telemetry` exports a strict subset of local usage
+and retained maintenance evidence. Live SSE and transcript endpoints remain local dashboard
+interfaces; they are not the fleet export contract.

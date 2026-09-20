@@ -18,6 +18,7 @@ function stateBase() {
   return process.env.XDG_STATE_HOME || path.join(home, '.local', 'state');
 }
 export const configDir = () => path.join(configBase(), 'agentic-kit');
+export const telemetryDir = () => path.join(configDir(), 'telemetry');
 export const hookHealingTransactionsDir = () => path.join(stateBase(), 'agentic-kit', 'hook-healing');
 export const maintenanceControlDir = () => path.join(stateBase(), 'agentic-kit', 'maintenance');
 /** The ruflo-era config dir — read-fallback for kit.json migration and the

@@ -2,7 +2,9 @@
 
 - **Status:** Accepted — implementation delivered 2026-09-05; Implemented withheld pending
   human-evaluation and cross-platform gates
-- **Updated:** 2026-09-08 — project language badges use locally bundled SVGs with
+- **Updated:** 2026-09-20 — ADR-0054 consumer hardens retained inventory reads with compressed,
+  uncompressed and decompression limits; existing acceptance gates remain outstanding.
+- **Earlier update:** 2026-09-08 — project language badges use locally bundled SVGs with
   name tooltips and accessible labels; ADR-0050 subsequently replaces the
   three-icon limit with a wrapping row of all detected language icons.
 - **Earlier update:** 2026-09-08 — installed tools preserve measured executable locations

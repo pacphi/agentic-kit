@@ -355,3 +355,10 @@ current release):
 > v4 (npm, cross-platform). The shell-based v3 kit is archived in
 > [docs/archive/](https://github.com/pacphi/agentic-kit/tree/main/docs/archive) — `ak setup` migrates an existing shell-kit
 > install automatically. A thin, reversible layer — not a fork. PRs welcome.
+
+## Fleet evidence
+
+Use `ak telemetry export --output ./snapshot.json` to produce a private, versioned JSON snapshot
+of usage and retained maintenance evidence. `ak telemetry aggregate FILE...` combines the latest
+snapshot per installation without counting repeated exports twice. No vendor dashboard or network
+service is required. See [Fleet evidence export](docs/TELEMETRY.md) for schema, coverage and limits.

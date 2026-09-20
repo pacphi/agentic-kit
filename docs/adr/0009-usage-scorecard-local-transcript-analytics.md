@@ -2,7 +2,9 @@
 
 - **Status:** Implemented
 - **Date:** 2026-07-25
-- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
+- **Updated:** 2026-09-20 — ADR-0054 adds an explicit, offline, allowlisted fleet export boundary;
+  local analytics and dashboard collection semantics remain unchanged.
+- **Earlier update:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Earlier update:** 2026-09-08
 - **Pricing update:** Added GPT-6 Astra standard rates and per-entry verification dates;
   verified Claude 5.1 cache rates, removed Sonnet 5’s canceled September increase, and documented
@@ -501,3 +503,10 @@ two evidence streams requires a new decision and fixtures from both sides.
   [Stop Overthinking (arXiv 2503.16419)](https://arxiv.org/pdf/2503.16419).
 - ruflo swarm surface grounded via `search_ruvnet`: `ruflo/plugins/ruflo-swarm/commands/swarm.md`
   (topology init, then native Task-tool fan-out).
+
+## Fleet export boundary
+
+[ADR-0054](0054-fleet-evidence-export.md) adds `ak telemetry` as an explicit export consumer.
+Its versioned snapshots preserve source coverage and whole-session selection semantics, omit
+transcript content, and aggregate by replacing each installation's prior snapshot. It neither
+turns the dashboard into a fleet service nor makes telemetry collection continuous.

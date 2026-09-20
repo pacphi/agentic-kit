@@ -2,7 +2,9 @@
 
 - **Status:** Implemented
 - **Date:** 2026-07-27
-- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
+- **Updated:** 2026-09-20 — ADR-0054 adds an explicit, offline, allowlisted fleet export boundary;
+  local analytics and dashboard collection semantics remain unchanged.
+- **Earlier update:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Earlier update:** 2026-08-04
 - **GA surface:** Canonical naming and retired vocabulary follow
   [ADR-0020](0020-ga-stable-surfaces.md).
@@ -618,3 +620,10 @@ Acceptance does not imply automatic knowledge of every upstream store:
 [stable-graphs]: https://doi.org/10.1177/1473871620972339
 [wcag]: https://www.w3.org/TR/WCAG22/
 [websocket]: https://datatracker.ietf.org/doc/html/rfc6455
+
+## Fleet export boundary
+
+[ADR-0054](0054-fleet-evidence-export.md) adds `ak telemetry` as an explicit export consumer.
+Its versioned snapshots preserve source coverage and whole-session selection semantics, omit
+transcript content, and aggregate by replacing each installation's prior snapshot. It neither
+turns the dashboard into a fleet service nor makes telemetry collection continuous.

@@ -24,7 +24,7 @@ release this kit. User-facing docs live in [README.md](README.md); this file is 
 
 ### CLI shape (`bin/agentic-kit.mjs`)
 
-- **Porcelain** (daily): `setup`, `status`, `sync`, `dashboard`, `admin`, `usage`, `models`, `system`,
+- **Porcelain** (daily): `setup`, `status`, `sync`, `dashboard`, `admin`, `usage`, `telemetry`, `models`, `system`,
   `about`, `audit`, `heal`, `run`, `host`, `maintain`, `uninstall`. Bare `ak` → `status --hint`. (`dashboard`, `admin`, and `host`
   are also reachable under `ak x`.)
 - **Plumbing** (power users): `ak x admin | codex-context | daemon-gc | dashboard | harvest | host | mcp |
@@ -96,7 +96,7 @@ docs/
 
 **Published tarball** = the `files` whitelist in `package.json`:
 `bin/agentic-kit.mjs`, `src/`, `claude/`, `docs/DEJA-VU.md`, `docs/DASHBOARD.md`, `docs/HOST-SUPPORT.md`, `docs/HOOKS.md`,
-`docs/INSTALLATION.md`, `docs/MODELS.md`, `docs/PROVIDERS.md`, `docs/SETUP.md`,
+`docs/INSTALLATION.md`, `docs/MODELS.md`, `docs/TELEMETRY.md`, `docs/PROVIDERS.md`, `docs/SETUP.md`,
 `docs/MAINTENANCE.md`, `docs/TROUBLESHOOTING.md`, `docs/UPGRADING.md`, `docs/CODEX-STATUSLINE.md`,
 `docs/evidence/codex-context-0.153.4.md`,
 `docs/adr/0015-managed-codex-native-statusline.md`,
@@ -105,6 +105,7 @@ docs/
 `docs/adr/0043-managed-ruflo-browser-executor.md`,
 `docs/adr/0044-receipt-aware-maintenance-control-plane.md`,
 `docs/adr/0051-supported-peer-delegation-and-host-realignment.md`,
+`docs/adr/0054-fleet-evidence-export.md`,
 `tests/live/aqe-external-provider-transport.test.mjs`,
 `tests/live/qe-court-participant-transport.test.mjs`,
 `tests/live/codex-context-contract.test.mjs`, and
