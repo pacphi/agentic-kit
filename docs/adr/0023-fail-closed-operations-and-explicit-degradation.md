@@ -1,7 +1,8 @@
 # ADR-0023 — Fail-closed mutations and explicit degraded operation evidence
 
 - **Status:** Implemented
-- **Updated:** 2026-08-26 — ADR-0035 applies fail-closed preflight, bounded evidence, and
+- **Updated:** 2026-09-20 — ADR-0053 separates qualified local/connected host health from usage-source diagnostics
+- **Earlier update:** 2026-08-26 — ADR-0035 applies fail-closed preflight, bounded evidence, and
   content-free degradation to the opt-in deja-vu companion
 - **Earlier update:** 2026-09-03 — ADR-0044 implements these fail-closed principles in the Maintenance
   coordinator while explicitly refusing to claim filesystem atomicity for native lifecycle,
@@ -139,6 +140,10 @@ plugin-coexistence, Codex-trust, or index-integrity evidence remains unknown. A 
 purge is planned and confirmed separately from wiring or package removal.
 
 ### 7. Usage source degradation is visible in the dashboard, for all four local sources
+
+> **2026-09-20 amendment:** [ADR-0053](0053-host-setup-evidence-and-usage-diagnostics.md)
+> supersedes the persistent-tabbar placement described below. Usage-source
+> diagnostics remain available in Usage; persistent badges now assess scoped host health.
 
 The Usage API's `sourceHealth` field is rendered as persistent local-source pills in the
 dashboard's sticky tabbar (right-aligned, visible on every view once Usage data has loaded once —

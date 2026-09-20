@@ -667,8 +667,17 @@ async function main() {
   const spy = spyUsage();
   const usageSrv = await startDashboard({
     port: 0, cwd: fixture, fetchStatus: async () => STUB_STATUS, usage: spy.api,
+    hostReadiness: async () => ({ scope: 'Dashboard launch directory', checkedAt: '2026-09-20T10:00:00Z', hosts: { codex: { status: 'ok', level: 'local' } } }),
   });
   try {
+    await test('GET /api/status reports scoped host setup independently of usage-source warnings', async () => {
+      const r = await get(usageSrv.url + 'api/status', usageSrv.token);
+      const body = JSON.parse(r.body);
+      assert(body.hostReadiness.hosts.codex.status === 'ok');
+      assert(body.hostReadiness.scope === 'Dashboard launch directory');
+      assert(body.hostReadiness.checkedAt === '2026-09-20T10:00:00Z');
+    });
+
     await test('GET /api/usage?days=N → Aggregate rollups WITHOUT sessions[]', async () => {
       const r = await get(usageSrv.url + 'api/usage?days=7', usageSrv.token);
       assert(r.status === 200, 'expected 200, got ' + r.status);
@@ -2103,7 +2112,7 @@ async function main() {
   // is the suite where it matters most — the traversal-guard and credential-
   // leak tests live here and were the reviewer's cited example of a block
   // that could silently vanish with the old harness never noticing.
-  const EXPECTED = 85;
+  const EXPECTED = 86;
   if (passed + failed !== EXPECTED) {
     console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
     process.exit(1);

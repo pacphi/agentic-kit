@@ -368,3 +368,5 @@ replayed parent history is excluded (with a boundary that survives the host writ
 as the history start), Claude sessions Codex imports are excluded and counted, counter restarts are
 summed and each delta books on its own day and model, oversized rollouts are read by a bounded-memory
 streaming reader, and rollouts that still cannot be parsed are reported. Cache schema 23.
+
+- [ADR-0053 — Qualified host health and separate usage diagnostics](0053-host-setup-evidence-and-usage-diagnostics.md) — scoped local and connected health; usage acquisition remains separate.

@@ -158,7 +158,7 @@ export const USAGE_CSS = `
 }
 .note b{color:var(--ink)}
 .note .i{color:var(--accent); font-weight:700}
-/* local-source pills — sit right-aligned in the sticky tabbar, one per host */
+/* Host health buttons in the tabbar; usage-source pills stay inside Usage. */
 .tabbar .source-health{
   display:flex; align-items:stretch; gap:6px; margin-left:auto;
   color:var(--ink-2); font-size:11.5px;
@@ -176,9 +176,43 @@ export const USAGE_CSS = `
 .tabbar .source-pill .live-host-icon{width:20px; height:20px; stroke-width:1.8}
 .source-pill .sp-status{
   display:flex; align-items:center; padding:5px 14px 5px 10px; font-size:13px;
-  font-weight:600; letter-spacing:-.006em; text-transform:lowercase; color:var(--ink-2);
+  font-weight:600; letter-spacing:-.006em; color:var(--ink-2);
 }
 .source-pill[data-status="ok"] .sp-status{color:var(--ok)}
+.source-pill[data-status="attention"] .sp-status{color:var(--warn)}
+button.source-pill{border:0;cursor:pointer;font:inherit;color:inherit}
+.source-pill[data-status="checking"] .sp-status{color:var(--accent)}
+.source-pill[data-status="disabled"] .sp-status{color:var(--ink-dim)}
+.host-health-dialog{width:min(600px,calc(100vw - 32px));max-height:calc(100dvh - 40px);overflow:auto;box-sizing:border-box;background:var(--panel-2);color:var(--ink);border:1px solid var(--line);border-radius:16px;padding:24px}
+.host-health-dialog::backdrop{background:rgba(0,0,0,.65)}
+.health-dialog-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.health-dialog-heading h2{margin:0;font-size:20px}
+.host-health-dialog p{font-size:13px;line-height:1.5;color:var(--ink-2)}
+.health-checks{list-style:none;margin:18px 0;padding:0}
+.health-checks li{padding:10px 0;border-bottom:1px solid var(--line);font-size:12px;color:var(--ink-2)}
+.health-check-heading{display:flex;justify-content:space-between;gap:12px;font-size:13px;color:var(--ink);margin-bottom:5px}
+.health-checks [data-check-state="pass"] b{color:var(--ok)}
+.health-checks [data-check-state="fail"] b{color:var(--warn)}
+.health-actions{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
+.host-health-dialog button{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px 12px;cursor:pointer}
+.host-health-dialog button:disabled{opacity:.5;cursor:default}
+.health-consent{display:flex;align-items:flex-start;gap:8px;font-size:13px;line-height:1.5}
+.source-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.usage-source-details{margin-bottom:18px;color:var(--ink-2);font-size:13px}
+.usage-source-details summary{cursor:pointer}
+.usage-source-details .source-health{display:flex;flex-wrap:wrap;gap:8px}
+.usage-source-details .source-health[hidden]{display:none}
+.usage-source-details .live-host-icon{width:20px;height:20px}
+.source-diagnostics{flex-basis:100%;line-height:1.6}
+.tabbar .source-health{flex-wrap:wrap}
+@media(max-width:760px){
+  .tabbar{flex-wrap:wrap}
+  .tabbar>.seg{width:100%}
+  .tabbar .source-health{width:100%;margin-left:0;gap:4px;justify-content:flex-end}
+  .tabbar .source-pill .live-host{width:24px;height:24px}
+  .tabbar .source-pill .sp-icon{padding:3px}
+  .tabbar .source-pill .sp-status{font-size:11px;padding:4px 8px 4px 5px}
+}
 .source-pill[data-status="degraded"]{background:color-mix(in srgb,var(--warn) 16%,var(--panel-2))}
 .source-pill[data-status="degraded"] .sp-status{color:var(--warn)}
 .source-pill[data-status="absent"] .sp-status,.source-pill[data-status="not-read"] .sp-status{color:var(--ink-dim)}

@@ -1,3 +1,5 @@
+import { HOST_HEALTH_POST_ROUTES, handleHostHealthPost } from './dashboard/host-health-api.mjs';
+import { createHostReadinessReader } from './host-readiness.mjs';
 // dashboard-server.mjs — a read-only, localhost-only web dashboard for the kit.
 //
 // Zero runtime deps: a plain node:http server bound to 127.0.0.1. Routes:
@@ -273,7 +275,8 @@ function censusBackedDiscovery() {
 }
 
 /** Assemble the full /api/status payload. */
-async function collectData({ cwd, fetchStatus, projectParam, getProjectSnapshot }) {
+async function collectData({ cwd, fetchStatus, projectParam, getProjectSnapshot, getHostReadiness }) {
+  const readiness = getHostReadiness().catch(() => null);
   let status;
   try { status = await fetchStatus(); } catch (e) { status = { overall: 'unknown', rows: [], error: String(e && e.message || e) }; }
   const rows = Array.isArray(status?.rows) ? status.rows : [];
@@ -318,6 +321,7 @@ async function collectData({ cwd, fetchStatus, projectParam, getProjectSnapshot 
     kit: { name: '@pacphi/agentic-kit', version: kitVersion() },
     overall,
     error: status?.error ?? null,
+    hostReadiness: await readiness,
     rows,
     drift,
     // improvement — UNCHANGED contract: still the LAUNCHING project's own
@@ -1038,7 +1042,7 @@ function lazyLive(liveOptions = {}) {
  *           discoverProjects?: () => Array<{ path: string, label: string, source?: string }>,
  *           machineWideIntel?: (projects: Array<any>) => any,
  *           models?: any, modelScopeKey?: string, system?: any, systemOptions?: any,
- *           maintenance?: any, maintenanceOptions?: any,
+ *           maintenance?: any, maintenanceOptions?: any, hostReadiness?: any,
  *           management?: any, managementOptions?: any }} [opts]
  * @returns {Promise<{ url: string, urlWithToken: string, port: number, token: string, close: () => Promise<void> }>}
  */
@@ -1050,9 +1054,10 @@ export function startDashboard({
   transcriptClientBuffer = 64, transcriptMaxClients = 16,
   intelWatch, intelClientBuffer = 256, intelMaxClients = 32,
   discoverProjects, machineWideIntel, models, modelScopeKey, system, systemOptions = {},
-  maintenance, maintenanceOptions = {}, management, managementOptions = {},
+  maintenance, maintenanceOptions = {}, management, managementOptions = {}, hostReadiness,
 } = {}) {
   const provide = fetchStatus || shellOutStatus(cwd);
+  const getHostReadiness = hostReadiness ?? (fetchStatus ? async () => null : createHostReadinessReader({ cwd }));
   const usageApi = usage || lazyUsage();
   const getHooks = createHookDashboardReader({ hooks, cacheMs: hookCacheMs });
   // Cache-only and lazy: model discovery is exclusively owned by
@@ -1349,12 +1354,13 @@ export function startDashboard({
     const qi = raw.indexOf('?');
     const url = qi < 0 ? raw : raw.slice(0, qi);
     const query = new URLSearchParams(qi < 0 ? '' : raw.slice(qi + 1));
-    // Maintenance has the only mutation allowlist (v1 compatibility routes plus
+    // Maintenance and explicit host connection checks have separate mutation allowlists (v1 compatibility routes plus
     // the exact ADR-0048 v2 POST paths). Every other route remains GET-only,
     // so adding a new read endpoint cannot accidentally create a write path.
     const maintenanceMutation = req.method === 'POST'
       && (MAINTENANCE_MUTATION_ROUTES.has(url) || MAINTENANCE_V2_MUTATION_ROUTES.has(url));
-    if (req.method !== 'GET' && !maintenanceMutation) {
+    const healthMutation = req.method === 'POST' && HOST_HEALTH_POST_ROUTES.has(url);
+    if (req.method !== 'GET' && !maintenanceMutation && !healthMutation) {
       res.writeHead(405).end('method not allowed');
       return;
     }
@@ -1382,19 +1388,20 @@ export function startDashboard({
     // Query tokens remain an SSE compatibility exception for GET. Mutation
     // capability can only be reached with the explicit header; it never rides
     // in a URL, browser history, referrer or server log.
-    const authorized = maintenanceMutation
+    const authorized = (maintenanceMutation || healthMutation)
       ? tokenMatches(req.headers['x-dash-token'], token) : checkToken(req, query);
     if (url.startsWith('/api/') && !authorized) {
       sendUnauthorized(res, 'Wrong or missing dashboard token.');
       return;
     }
-    if (maintenanceMutation) {
+    if (maintenanceMutation || healthMutation) {
       const mutationRejection = maintenanceMutationRejection(req.headers);
       if (mutationRejection) {
         res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
         res.end(mutationRejection);
         return;
       }
+      if (healthMutation) { await handleHostHealthPost(url, req, res, getHostReadiness); return; }
       try { await (await getMaintenanceApi()).mutate(url, req, res); }
       catch { sendJson(res, 503, { error: 'maintenance operation unavailable' }); }
       return;
@@ -1404,7 +1411,7 @@ export function startDashboard({
       let payload;
       try {
         payload = await collectData({
-          cwd, fetchStatus: provide, projectParam: query.get('project'), getProjectSnapshot,
+          cwd, fetchStatus: provide, projectParam: query.get('project'), getProjectSnapshot, getHostReadiness,
         });
       } catch (e) {
         payload = {
@@ -2029,6 +2036,10 @@ export function startDashboard({
     // out separately into sse.mjs's sseRoute().
     const ROUTES = {
       '/api/status': handleStatus,
+      '/api/host-health': async (_req, res) => {
+        try { sendJson(res, 200, await getHostReadiness()); }
+        catch { sendJson(res, 503, { error: 'Host health checks unavailable.' }); }
+      },
       '/api/live': handleLiveSnapshot,
       '/api/live/history': handleLiveHistory,
       '/api/live/events': handleLiveEvents,
@@ -2067,6 +2078,7 @@ export function startDashboard({
   return listenLoopback(server, {
     port, token,
     close: async () => {
+      getHostReadiness.close?.();
       shuttingDown = true;
       cancelLiveIdle();
       for (const cleanup of [...liveClients]) cleanup(true);

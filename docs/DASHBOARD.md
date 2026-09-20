@@ -852,3 +852,42 @@ Maintenance version measurements and update checks, model captures and local mod
 Relative ages remain relative. Published calendar dates (such as a retirement commitment)
 retain their calendar day; they are not midnight UTC instants. Stored/API timestamps and
 machine-readable `datetime` attributes retain their original instant.
+
+## Host health badges
+
+Claude, Codex and OpenCode use the same statuses: **OK**, **Attention**,
+**Checking**, **Unknown**, and **Disabled**. Click a badge for the qualification,
+check time, project and individual results. Keyboard users can focus the badge
+and press Enter; Escape closes the details and restores focus.
+
+**Local OK** means the required local checks passed: executable launch,
+supported configuration and provider/model selection, applicable authentication
+setup, and known blocking integration configuration. These checks run in the
+dashboard launch directory, independently of the Intelligence project picker.
+Credentials are checked for setup, not remotely validated. Optional MCP tool
+connections, runtime plugins and model access are not implied by Local OK.
+Native defaults are valid selections; an explicit model setting is not required.
+Unsupported or ambiguous evidence is Unknown, rather than an alarm.
+
+OpenCode has real local checks for its JSON/JSONC configuration layers, selected
+provider, model/default agent, and applicable credentials or local endpoint.
+Automatic checks do not invoke its config-debug command, which can install
+dependencies. Unresolved remote configuration and native overrides stay Unknown.
+
+**Check local setup** refreshes the local evidence. **Check connection** requires
+checking a confirmation box first: it sends one small provider request, using
+normal billing and native context. Native startup may initialize dependencies
+and update local cache/session files. Agent tools are restricted, and no repair
+is requested. No inference runs during automatic polling.
+
+A connection result is qualified as **Connected**, scoped to provider inference.
+It must contain a completed response to a fresh challenge; successful process
+exit alone is insufficient. MCP tool connectivity is separately marked untested.
+Only one connected check runs at a time. Results expire after 15 minutes,
+invalidate when observed settings change, and are not persisted across dashboard
+restarts. The local cache lasts at most one minute; a stale or failed observation
+cannot silently provide a new positive result.
+
+**Usage → Usage data sources** retains transcript/database reading diagnostics.
+Partial historical records do not lower host health. That scan includes the
+selected period plus 90 days for comparisons.

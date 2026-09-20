@@ -1,6 +1,7 @@
 // @ts-nocheck — browser bundle source (never node-imported; client.mjs
 // reads it as text). See src/lib/dashboard/client/**'s eslint.config.mjs
 // override comment for why this directory isn't run through the node lib.
+import { renderHostReadiness } from './host-readiness.mjs';
 import { renderAbout } from './about.mjs';
 import { DASH_TOKEN_KEY, activeTab, authHeaders, hideGate, showGate, systemView } from './bootstrap.mjs';
 import { render, tickClock } from './intelligence.mjs';
@@ -117,6 +118,8 @@ import { loadModelLifecycle, loadUsage } from './usage.mjs';
       if(seq===intelRequestSeq)render(d);
       tickClock();
     }).catch(function(){
+      if(seq!==intelRequestSeq)return;
+      renderHostReadiness(null);
       var t=document.getElementById("verdict-text"); if(t)t.textContent="server unreachable";
       // About is editorial content plus a runtime join. Losing the join must
       // cost the chips, never the page: every card still renders, each one
