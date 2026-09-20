@@ -1,8 +1,9 @@
 # ADR-0053 — Qualified host health and separate usage diagnostics
 
-- **Status:** Implemented; not yet released
+- **Status:** Implemented
+- **Release:** `4.0.0-alpha.50`; publication is verified through the matching GitHub release and npm registry artifact
 - **Date:** 2026-09-20
-- **Updated:** 2026-09-20 — replace setup-only badges with consistent local health and explicit provider connection checks for Claude, Codex and OpenCode
+- **Updated:** 2026-09-20 — record inclusion in `4.0.0-alpha.50`; replace setup-only badges with consistent local health and explicit provider connection checks for Claude, Codex and OpenCode
 - **Amends:** [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md)
 - **Related:** [ADR-0041](0041-host-neutral-hook-configuration-assurance.md), [ADR-0051](0051-supported-peer-delegation-and-host-realignment.md)
 
