@@ -1,6 +1,7 @@
 # ADR-0055 — AQE embedding lifecycle and qualified readiness
 
-- **Status:** Implemented — not released
+- **Status:** Implemented
+- **Release target:** `4.0.0-alpha.53`
 - **Date:** 2026-09-20
 - **Updated:** 2026-09-20 — implemented explicit defaults, owned Claude/Codex/OpenCode projections and qualified runtime proof
 - **Related:** [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),
