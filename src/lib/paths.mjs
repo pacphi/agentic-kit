@@ -192,3 +192,32 @@ export const rufloMarketplaceRoot = () =>
   path.join(home, '.claude', 'plugins', 'marketplaces', 'ruflo');
 
 export { isWindows, home };
+
+/** Bounded local inputs whose changes invalidate dashboard host-health evidence.
+ * Includes native custom roots and ancestor project layers. Remote policy is
+ * time-bound observation, never claimed to be snapshotted by this local list. */
+export function hostHealthInputPaths(cwd, env = process.env) {
+  const claude = env.CLAUDE_CONFIG_DIR || claudeDir();
+  const codex = env.CODEX_HOME || codexDir();
+  const opencode = env.OPENCODE_CONFIG_DIR || opencodeDir();
+  const files = [
+    path.join(claude, 'settings.json'), path.join(claude, '.credentials.json'), claudeUserMcpPath(),
+    claudeManagedSettingsPath(), path.join(codex, 'config.toml'), path.join(codex, 'auth.json'),
+    path.join(codex, 'requirements.toml'), '/etc/codex/config.toml', '/etc/codex/requirements.toml',
+    ...(process.platform === 'win32' ? [path.join(env.ProgramData || 'C:\\ProgramData', 'OpenAI', 'Codex', 'config.toml')] : []),
+    path.join(opencode, 'config.json'), path.join(opencode, 'opencode.json'), path.join(opencode, 'opencode.jsonc'),
+    path.join(env.XDG_STATE_HOME || path.join(home, '.local', 'state'), 'opencode', 'model.json'),
+    path.join(env.XDG_DATA_HOME || path.join(home, '.local', 'share'), 'opencode', 'auth.json'),
+    env.OPENCODE_CONFIG,
+  ].filter(Boolean);
+  let root = path.resolve(cwd);
+  for (let depth = 0; depth < 64; depth++) {
+    for (const relative of ['.claude/settings.json', '.claude/settings.local.json', '.mcp.json',
+      '.codex/config.toml', '.codex/hooks.json', 'opencode.json', 'opencode.jsonc',
+      '.opencode/opencode.json', '.opencode/opencode.jsonc']) files.push(path.join(root, relative));
+    const parent = path.dirname(root);
+    if (parent === root) break;
+    root = parent;
+  }
+  return [...new Set(files.map(file => path.resolve(file)))];
+}
