@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "kind": "local-development-verification",
+  "branch": "feat/fleet-evidence-export",
+  "baseCommit": "261af3269bf0d266f68d1889b75a1e53afd65115",
+  "recordedAt": "2026-09-20T14:34:08.194153+00:00",
+  "environment": {
+    "node": "v26.4.0",
+    "platform": "Darwin",
+    "architecture": "arm64"
+  },
+  "authority": {
+    "user": "local implementation and new branch authorized; no commit, push or publication",
+    "rufloPolicyReceipt": "sha256:e21b09352327083b5d4b154805efb12db33692905cff727746fbf9da3115e070",
+    "policyMode": "legacy-default-allow"
+  },
+  "checks": {
+    "focused": {
+      "passed": 56,
+      "failed": 0,
+      "lineCoverage": 99.81,
+      "branchCoverage": 93.81,
+      "functionCoverage": 97.47
+    },
+    "fullNodeSuite": {
+      "passed": 4230,
+      "skipped": 6,
+      "failed": 0,
+      "lineCoverage": 92.16,
+      "branchCoverage": 81.44,
+      "functionCoverage": 91.57
+    },
+    "legacySuites": "passed via npm test",
+    "typecheck": "passed",
+    "lint": {
+      "errors": 0,
+      "warnings": 70
+    },
+    "complexityGate": {
+      "errors": 0,
+      "warnings": 3
+    },
+    "markdown": "passed",
+    "build": "passed; 433 shipped files syntax-checked, package dry run 482 files",
+    "aqe": "inconsistent executor response; no passing claim"
+  },
+  "benchmark": {
+    "sourceDigest": "4fc698f419a48b77418546abc4602f06f6ab63a7f76522e06ec87ca903619f5e",
+    "node": "v26.4.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "workload": {
+      "installations": 10,
+      "sessionsEach": 1000,
+      "totalSessions": 10000
+    },
+    "exportMs": 168.304625,
+    "aggregateMs": [
+      53.474541999999985,
+      51.82387499999999,
+      51.767375000000015,
+      52.09941700000002,
+      51.998875
+    ],
+    "jsonBytes": 3546741,
+    "note": "Synthetic workload; one warmup and five samples. No pre-feature equivalent or performance improvement claim."
+  },
+  "limits": [
+    "macOS arm64 execution only; no Windows/Linux live verification",
+    "No network exporter, dashboard, scheduler or identity authentication",
+    "Installation-scoped observations; copied transcripts across installations not deduplicated",
+    "Whole retained sessions selected by end time; no disjoint time-window billing claim"
+  ],
+  "files": {
+    "MAINTAINER.md": "769d17dc19e91ad5ea3ef9a3402715b77b10ba01f3544f28c81d5630a99e5448",
+    "README.md": "56460bda8cfe48bd924de47ece046b0de976030baba6a8520c0793c806da58fa",
+    "bin/agentic-kit.mjs": "e60f10d711000e1bcb1b5172f706904009c6b3b6a8562616dd667632d439dcd0",
+    "docs/OBSERVABILITY.md": "b29abd41bb39910364be92c951d2825baf50c381567456de7787bd939557dc43",
+    "docs/TELEMETRY.md": "f5e181982b6b691f0325edc0040d1f4ef6ff37b3a68f4757f8e44c17dc8ad3d6",
+    "docs/adr/0009-usage-scorecard-local-transcript-analytics.md": "139256c2d3b5ba87010277f405327ebac31911950ceab386e926db48cdbe642d",
+    "docs/adr/0012-observability.md": "960387190f1198e3ccb76db9484b246626bf886166d4f88d8d41be16758b1f27",
+    "docs/adr/0048-inventory-led-maintenance-resource-management.md": "ffebb6898ff68508674a4b159cd25787800383782250f7dcd6e9a8ce5de5c0ca",
+    "docs/adr/0054-fleet-evidence-export.md": "f68dee4840a938664a3146da7f95def9e6bb07ebe0e6fc4d0283aaed1c2b8343",
+    "docs/adr/README.md": "1d7fca77ac663393af013576a31c459152eba8cd644ae7e2af33f796ac0551eb",
+    "docs/implementation/fleet-evidence-export.md": "3e83c72220ee7666897ef438dbe6a91fb843230b40d76e66f9a7f80eac55bc7a",
+    "package.json": "9f515b0ec7378b3f076042ef51a58da0e52ab3b79c9df4b57f37071012343fad",
+    "src/commands/telemetry.mjs": "05cb2e4e54dc9288c21fa72c1e68ee1b97571f82c92e37fa7a870f9b49c6a22c",
+    "src/lib/maintenance/management/service-store.mjs": "71db4936d1a5ec008a9234a018d39886e59546e8f986744afcf467441cb6677a",
+    "src/lib/paths.mjs": "9aad3185d23a7d6cb721af380c612e4094c24a47415d86f0ca4747bb9725229e",
+    "src/lib/telemetry/aggregate.mjs": "56360425fa14c3ae07e1d8d601b1dd24fdb8121b99fafa9af257e04feba71ec7",
+    "src/lib/telemetry/collect.mjs": "856a1da5a47080a2f5650dce16065cb2a82976a8a70d6013b1085e70166d5428",
+    "src/lib/telemetry/contract.mjs": "31641f485da1aa9501bac1ce1a591820c917f179a1ed2ec91a1b4988a05ce3da",
+    "src/lib/telemetry/projection.mjs": "9ca8330f9db49685d31aaecfb9f2654d829a3879b21125c9f6974775d77c24cb",
+    "src/lib/telemetry/schema.mjs": "f377f2dd08114a9642666915c491db3e20a5e15556b8b5a5a911e1bf3756c6ec",
+    "src/lib/telemetry/store.mjs": "f7805889ba1e656d2cca002cd601f9c239519b025073b7dc7680376ab062a91c",
+    "tests/kit/helpers/telemetry.mjs": "e4dfb06551ebbe4d619f1acd7448f94446597a7d767c4b36c62090624b364aad",
+    "tests/kit/telemetry-aggregate.test.mjs": "6943c996afe31241e87d9d90d7c226aff8dfe07864eeeb3df43f1428fffa6dbe",
+    "tests/kit/telemetry-cli.test.mjs": "b1c5da609bf81bc9b90aed1719e0d184a45849450d8a7fda79b685c0d779ea86",
+    "tests/kit/telemetry-contract.test.mjs": "a337910f016a3ae4e17a7bfdb95280088b7b0e73a9442eefb5ace09f61b34eb8",
+    "tests/kit/telemetry-source-bounds.test.mjs": "859fc7eef072024df1515c3064f4a7b8953babdc2960f6c7c27ba7dd6aad64a5"
+  }
+}

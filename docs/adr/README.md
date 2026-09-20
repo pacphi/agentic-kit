@@ -370,3 +370,5 @@ summed and each delta books on its own day and model, oversized rollouts are rea
 streaming reader, and rollouts that still cannot be parsed are reported. Cache schema 23.
 
 - [ADR-0053 — Qualified host health and separate usage diagnostics](0053-host-setup-evidence-and-usage-diagnostics.md) — scoped local and connected health; usage acquisition remains separate.
+
+- [ADR-0054 — Vendor-neutral fleet evidence export](0054-fleet-evidence-export.md) — Implemented — versioned local snapshots, privacy allowlists and deterministic aggregation.

@@ -5,6 +5,7 @@
 // `scan-store.mjs`; a failed build never replaces the last-good snapshot
 // (MNT-PERF-007).
 import { createHash } from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 
@@ -46,6 +47,26 @@ function sealedEnvelope(schema, payloadKey, payload) {
   return { ...base, integrity: { algorithm: 'sha256', digest: sha256(base) } };
 }
 
+/** Bound retained input before allocation and also reject growth/replacement while opening. */
+function readInventoryBytes(file, maxBytes, fsImpl) {
+  const before = fsImpl.lstatSync(file);
+  if (!before.isFile() || before.isSymbolicLink() || before.size > maxBytes) throw new Error('inventory input exceeds bounds');
+  const fd = fsImpl.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+  try {
+    const stat = fsImpl.fstatSync(fd);
+    if (!stat.isFile() || stat.ino !== before.ino || stat.dev !== before.dev || stat.size > maxBytes) throw new Error('inventory input changed');
+    const buffer = Buffer.alloc(stat.size + 1);
+    let size = 0;
+    while (size < buffer.length) {
+      const bytes = fsImpl.readSync(fd, buffer, size, buffer.length - size, null);
+      if (!bytes) break;
+      size += bytes;
+    }
+    if (size > stat.size) throw new Error('inventory input grew');
+    return buffer.subarray(0, size);
+  } finally { fsImpl.closeSync(fd); }
+}
+
 /** `<root>/inventory-latest.json.gz` — the last successfully built,
  *  privacy-projected ManagementInventory plus its admitted guidance, gzip-
  *  compressed on disk (D6). Read by every path-free facade method so a read
@@ -59,15 +80,15 @@ export function createInventorySnapshotStore(root, { fsImpl }) {
   const compressedFile = path.join(root, 'inventory-latest.json.gz');
   const legacyFile = path.join(root, 'inventory-latest.json');
 
-  function readFrom(file, decode) {
+  function readFrom(file, maxBytes, decode) {
     let raw;
-    try { raw = decode(fsImpl.readFileSync(file)); } catch { return null; }
+    try { raw = decode(readInventoryBytes(file, maxBytes, fsImpl)); } catch { return null; }
     try { return readVerifiedEnvelope(raw, INVENTORY_SNAPSHOT_SCHEMA, 'snapshot'); } catch { return null; }
   }
 
   function read() {
-    return readFrom(compressedFile, (buffer) => zlib.gunzipSync(buffer).toString('utf8'))
-      ?? readFrom(legacyFile, (buffer) => buffer.toString('utf8'));
+    return readFrom(compressedFile, MAX_COMPRESSED_BYTES, (buffer) => zlib.gunzipSync(buffer, { maxOutputLength: MAX_UNCOMPRESSED_BYTES }).toString('utf8'))
+      ?? readFrom(legacyFile, MAX_UNCOMPRESSED_BYTES, (buffer) => buffer.toString('utf8'));
   }
 
   /** @returns {{ uncompressedBytes: number, compressedBytes: number }} the

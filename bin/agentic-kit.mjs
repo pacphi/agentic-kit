@@ -29,6 +29,7 @@ const PORCELAIN = Object.assign(Object.create(null), {
   dashboard: () => import('../src/commands/x/dashboard.mjs'),
   admin: () => import('../src/commands/x/admin.mjs'),
   usage: () => import('../src/commands/usage.mjs'),
+  telemetry: () => import('../src/commands/telemetry.mjs'),
   models: () => import('../src/commands/models.mjs'),
   system: () => import('../src/commands/system.mjs'),
   maintain: () => import('../src/commands/maintain.mjs'),
@@ -66,6 +67,7 @@ Usage (ak = alias of agentic-kit):
   ak dashboard       open the local web dashboard (localhost; auto-opens browser)  [--port N] [--no-open]
   ak admin           maintainer-only telemetry admin (localhost; GitHub/npm egress)  [--port N] [--no-open]
   ak usage           offline scorecard, prompt patterns, provider cache  [status|score|prompts|refresh openrouter]
+  ak telemetry       export, validate and aggregate fleet evidence   [export|validate|aggregate|schema|metrics]
   ak models          inspect/refresh model lifecycle evidence  [status|refresh|diff|explain|plan]
   ak system          what this stack occupies on your machine   [--deep] [--json]
   ak maintain        inventory, guidance, discovery, guarded one-action plans  [inventory|guidance|plan|apply|...] [--json]
@@ -172,6 +174,10 @@ async function main() {
     });
   } catch (err) {
     if (!String(err?.code ?? '').startsWith('ERR_PARSE_ARGS_')) throw err;
+    if (cmd === 'telemetry') {
+      console.error('Telemetry failed: invalid command options.');
+      return 2;
+    }
     fail(`ak ${cmd}: ${err.message}`);
     console.log(mod.help ?? `ak ${cmd} — flags: ${
       Object.keys(mod.options ?? {}).map((o) => `--${o}`).join(' ') || '(none)'}`);
@@ -185,7 +191,7 @@ async function main() {
   // zero behavior change: no dynamic import, no config read, nothing.
   // Refusals are warnings on stderr, never fatal — a bad external adapter
   // must never block a command that doesn't use it.
-  if (process.env.AK_EXPERIMENTAL_HOST_ADAPTERS === '1') {
+  if (cmd !== 'telemetry' && process.env.AK_EXPERIMENTAL_HOST_ADAPTERS === '1') {
     try {
       const { loadKitConfig } = await import('../src/lib/config.mjs');
       const { bootstrapHostAdapters } = await import('../src/lib/adapters/admission.mjs');
@@ -210,7 +216,7 @@ async function main() {
   // setup and host own complete mutation/reporting flows. Running the generic
   // nudge after a declined trust preflight could write version-cache state and
   // violate their "before any changes" boundary.
-  if (!values.json && !values['dry-run'] && !['sync', 'usage', 'models', 'setup', 'host', 'audit', 'heal', 'maintain', 'ruflo-mcp', 'aqe-provider'].includes(cmd)) {
+  if (!values.json && !values['dry-run'] && !['sync', 'usage', 'telemetry', 'models', 'setup', 'host', 'audit', 'heal', 'maintain', 'ruflo-mcp', 'aqe-provider'].includes(cmd)) {
     try {
       const { driftReport } = await import('../src/lib/versions.mjs');
       for (const r of await driftReport()) {
