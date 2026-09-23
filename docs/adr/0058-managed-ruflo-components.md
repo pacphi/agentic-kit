@@ -152,9 +152,10 @@ Targets:
 - **Claude Code.** Hooks and the ruflo MCP server inherit the `env` block of Claude settings.
   Machine-wide variables (pickers, learning profile) go in the user `~/.claude/settings.json`;
   the governance variable goes in the project's `.claude/settings.local.json`, next to its
-  policy file. `replaceableRufloRegistration` (`src/lib/mcp.mjs`) learns to treat keys ak holds
-  receipts for as ak-owned instead of user-owned. Verified 2026-09-23: Claude Code passes the
-  settings `env` block to stdio MCP servers and hooks; the ruflo MCP registration is unchanged.
+  policy file. Verified 2026-09-23: Claude Code passes the settings `env` block to stdio MCP
+  servers and hooks, so the ruflo MCP registration is unchanged and ak never writes component
+  keys into it. A registration that carries one is the user's (its value overrides the settings
+  env) and `replaceableRufloRegistration` (`src/lib/mcp.mjs`) preserves it (ADR-0016 §4).
 - **Codex.** The ruflo MCP server already starts through ak's launcher (`ak x ruflo-mcp` →
   `rufloMcpLaunch`), which knows the workspace; it adds `componentEnv(workspace)` at launch.
   Whether ruflo's Codex hooks receive variables ak sets could not be verified without changing

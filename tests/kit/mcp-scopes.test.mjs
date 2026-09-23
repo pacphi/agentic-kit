@@ -113,7 +113,10 @@ test('Claude registration safely replaces the prior canonical claude-flow entry'
   ]);
 });
 
-test('Claude registration replaces a prior registration carrying ak-owned ruflo-components env keys', async () => {
+// ADR-0016 §4 / ADR-0058 §3 (Inherits): ak never writes ruflo component keys into a
+// registration, so a registration carrying one is the user's — its value overrides the
+// settings env and must survive, never be re-added without it.
+test('Claude registration preserves a user registration carrying a ruflo component env key', async () => {
   const calls = [];
   const ok = await register({ agentBrowser: true }, {
     runner: async (bin, args) => { calls.push([bin, args]); return { code: 0, stdout: '', stderr: '' }; },
@@ -122,18 +125,11 @@ test('Claude registration replaces a prior registration carrying ak-owned ruflo-
       env: { RUFLO_INTELLIGENCE_MODE: 'research' },
     }] }),
   });
-  assert.equal(ok, true);
-  assert.deepEqual(calls, [
-    ['claude', ['mcp', 'remove', 'claude-flow', '-s', 'user']],
-    ['claude', [
-      'mcp', 'add', 'claude-flow', '-s', 'user',
-      '-e', `AGENT_BROWSER_CONFIG=${agentBrowserConfigPath()}`,
-      '--', 'ruflo', 'mcp', 'start',
-    ]],
-  ]);
+  assert.equal(ok, false);
+  assert.deepEqual(calls, []);
 });
 
-test('Claude registration preserves a canonical entry carrying a foreign env key alongside an ak key', async () => {
+test('Claude registration preserves a canonical entry carrying a foreign env key alongside a component key', async () => {
   const calls = [];
   const ok = await register({ agentBrowser: true }, {
     runner: async (bin, args) => { calls.push([bin, args]); return { code: 0, stdout: '', stderr: '' }; },
