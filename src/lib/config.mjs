@@ -19,6 +19,7 @@ import {
   ROUTING_SCHEMA_VERSION,
   migrateRoutingConfig,
 } from './routing-config.mjs';
+import { RUFLO_COMPONENT_DEFAULTS, validateRufloComponents } from './ruflo-components/config.mjs';
 
 const DEFAULTS = {
   codexContext: null, // opt-in native maximum with original scalar and ownership receipt
@@ -31,6 +32,7 @@ const DEFAULTS = {
   ruvector: true,       // report drift for a globally-installed ruvector CLI (never installs it)
   security: true,       // run the security verification surface by default
   harvest: false,       // opt-in learning-write (`ak x harvest`); off = never runs writes
+  rufloComponents: structuredClone(RUFLO_COMPONENT_DEFAULTS), // ADR-0058 managed ruflo components
   health: { ring: [] }, // persisted stack-health snapshot ring (see health-history.mjs)
   mcp: { register: true, excludeFamilies: [] },
   integrations: {
@@ -108,6 +110,7 @@ function assertLoadableEnvelopes(config) {
   validateAqeEmbeddingIntent(config.aqeEmbedding);
   validateCodexContextIntent(config.codexContext);
   validateAqeCodexGuidance(config.aqeCodexGuidance);
+  validateRufloComponents(config.rufloComponents);
   if (!plain(config.integrations)) {
     throw new TypeError(
       'integrations must be an object; repair kit.json or rerun `ak setup --reconfigure`',
@@ -191,6 +194,7 @@ function withDefaults(config) {
     routing,
     providers: { ...DEFAULTS.providers, ...config.providers },
     statusline: { ...DEFAULTS.statusline, ...config.statusline },
+    rufloComponents: { ...structuredClone(RUFLO_COMPONENT_DEFAULTS), ...config.rufloComponents },
     maintenance: {
       ...structuredClone(DEFAULTS.maintenance),
       ...config.maintenance,
@@ -239,6 +243,7 @@ export function saveKitConfig(cfg, file = kitConfigPath()) {
   validateAqeEmbeddingIntent(cfg.aqeEmbedding);
   validateCodexContextIntent(cfg.codexContext);
   validateAqeCodexGuidance(cfg.aqeCodexGuidance);
+  validateRufloComponents(cfg.rufloComponents);
   const serialized = JSON.stringify(migrateKitConfig(cfg), null, 2) + '\n';
   try {
     if (fs.readFileSync(file, 'utf8') === serialized) return;
