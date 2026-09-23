@@ -8,6 +8,12 @@ import {
 } from '../../src/lib/ruflo-components/apply.mjs';
 
 const cfg = () => ({ integrations: { ownership: {} }, rufloComponents: { typesafePicker: true, funnel: false } });
+// This fs-error repro relies on a chmod'd read-only directory actually blocking mkdirSync with
+// EACCES: on win32 chmod only toggles the read-only attribute and does not enforce this, and a
+// root process bypasses permission bits entirely, so the assertion would never see the failure.
+const POSIX_PERMS_ONLY = (process.platform === 'win32' || process.getuid?.() === 0)
+  ? { skip: 'EACCES-from-chmod repro requires a non-root POSIX process' }
+  : {};
 function recorder(responses) {
   const calls = [];
   const runner = async (cmd, args) => { calls.push([cmd, ...args].join(' ')); return responses(cmd, args) ?? { code: 0, stdout: '', stderr: '' }; };
@@ -175,7 +181,7 @@ test('reconcile: a foreign policy file (e.g. from MetaHarness or Agentic-QE) is 
   assert.match(gov.state.meaning, /This project has its own \.harness\/mcp-policy\.json, so ak leaves enforcement off\./);
 });
 
-test('reconcile: an fs error while reconciling the policy is caught and reported blocked, never thrown', async (t) => {
+test('reconcile: an fs error while reconciling the policy is caught and reported blocked, never thrown', POSIX_PERMS_ONLY, async (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-rc-policy-fs-error-'));
   t.after(() => { fs.chmodSync(path.join(tmp, 'proj'), 0o755); fs.rmSync(tmp, { recursive: true, force: true }); });
   const root = path.join(tmp, 'proj');
