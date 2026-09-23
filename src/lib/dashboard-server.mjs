@@ -57,7 +57,7 @@ import { execFile } from 'node:child_process';
 import { createHmac } from 'node:crypto';
 import { driftReport, selfDrift, installedVersion } from './versions.mjs';
 import { HOSTS, collectIntegrationFacts } from './providers.mjs';
-import { globalRoot, repoRoot } from './paths.mjs';
+import { globalRoot } from './paths.mjs';
 import { drift as ruvnetBrainDrift } from './ruvnet-brain.mjs';
 import { drift as ruvectorDrift, managed as ruvectorManaged } from './ruvector.mjs';
 import { loadKitConfig } from './config.mjs';
@@ -1744,12 +1744,12 @@ export function startDashboard({
     // dry run only; this route never probes ruflo or writes anything.
     async function handleRufloComponents(_req, res) {
       try {
-        const [{ rufloComponentsPayload }, { rufloComponentsEvidenceFile }] = await Promise.all([
+        const [{ rufloComponentsPayload }, { rufloComponentsEvidenceFile, rufloProjectRoot }] = await Promise.all([
           import('./ruflo-components/snapshot.mjs'), import('./ruflo-components/apply.mjs'),
         ]);
         const cfg = loadKitConfig();
         const rufloVersion = installedVersion('ruflo');
-        const projectRoot = repoRoot(cwd);
+        const projectRoot = rufloProjectRoot(cwd);
         sendJson(res, 200, rufloComponentsPayload({
           cfg, rufloVersion, projectRoot, evidenceFile: rufloComponentsEvidenceFile(),
         }));

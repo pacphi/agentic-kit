@@ -34,3 +34,17 @@ test('server registers the route', () => {
   assert.match(fs.readFileSync(new URL('../../src/lib/dashboard-server.mjs', import.meta.url), 'utf8'),
     /'\/api\/ruflo-components': handleRufloComponents/);
 });
+
+// Regression guard for the dashboard/status parity bug: the handler must use
+// rufloProjectRoot (git root AND .claude-flow/ — see apply.mjs and
+// ruflo-components-apply.test.mjs) rather than paths.repoRoot (git root
+// alone), which is what status/sections/ruflo-components.mjs already does.
+// paths.repoRoot alone would let any unrelated git repo above cwd (e.g. a
+// dotfiles repo at $HOME) receive project-scope policy reads.
+test('handler resolves project scope with rufloProjectRoot, matching the status caller', () => {
+  const serverSrc = fs.readFileSync(new URL('../../src/lib/dashboard-server.mjs', import.meta.url), 'utf8');
+  const handler = serverSrc.slice(serverSrc.indexOf('async function handleRufloComponents'),
+    serverSrc.indexOf('handleRufloComponents') + 900);
+  assert.match(handler, /rufloProjectRoot\(cwd\)/);
+  assert.doesNotMatch(handler, /\brepoRoot\(cwd\)/);
+});
