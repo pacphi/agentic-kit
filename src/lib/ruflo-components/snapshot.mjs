@@ -34,8 +34,12 @@ const CONFIRMERS = {
   turnCredit: (intent, e) => e.turnCredit?.present ?? null,
   memoryFix2887: (intent, e) => (e.memoryFix?.version ? cmpVersions(e.memoryFix.version, '3.0.0-alpha.22') >= 0 : null),
   funnel: (intent, e) => (e.funnel ? e.funnel.enabled === false : null),
-  mcpGovernance: (intent, e) => (e.governance?.audit ? true : null),
+  // ADR-0058 §2: "active" means confirmed by ruflo's own evidence. A readable audit log
+  // with zero calls in the last 24h is not evidence enforcement ran — only activity is.
+  mcpGovernance: (intent, e) => (e.governance?.audit?.audited > 0 ? true : null),
 };
+
+const GOVERNANCE_UNOBSERVED_REASON = 'No ruflo MCP tool calls have been audited in the last 24 hours, so enforcement has not been observed yet.';
 
 /** Returns true (confirmed), false (contradicted) or null (no evidence). */
 function confirmed(id, intent, e) {
@@ -55,8 +59,8 @@ const EVIDENCE_LINES = {
   mcpGovernance: (e, at) => {
     const a = e.governance?.audit;
     return a
-      ? [ev('MCP audit log (last 24 h)', at, `${a.audited} calls audited, ${a.refused} refused${a.reasons.length ? `; latest: ${a.reasons.at(-1)}` : ''}`)]
-      : [ev('MCP audit log', at, 'no audit records yet')];
+      ? [ev('MCP audit log (last 24 h)', at, `${a.audited} calls audited, ${a.refused} refused${a.reasons.length ? `; latest: ${a.reasons.at(-1)}` : ''}; shared log across all projects`)]
+      : [ev('MCP audit log', at, 'no audit records yet; shared log across all projects')];
   },
   funnel: (e, at) => (e.funnel ? [ev('ruflo funnel status', at, `${e.funnel.enabled ? 'enabled' : 'disabled'} (decided by ${e.funnel.decidedBy})`)] : []),
   memoryFix2887: (e, at) => (e.memoryFix?.version ? [ev('@claude-flow/memory', at, e.memoryFix.version)] : []),
@@ -89,7 +93,10 @@ function stateFor(component, { cfg, rufloVersion, evidence, projection, now }) {
   if (id === 'memoryFix2887' && result === false) {
     return describeState('blocked', { reason: 'Run npm install -g ruflo@latest so ruflo resolves @claude-flow/memory 3.0.0-alpha.22 or newer.' });
   }
-  if (result === null) return describeState('unknown', { reason: evidence.errors?.[ERROR_KEY_OF[id]] ?? '' });
+  if (result === null) {
+    const reason = id === 'mcpGovernance' ? GOVERNANCE_UNOBSERVED_REASON : evidence.errors?.[ERROR_KEY_OF[id]] ?? '';
+    return describeState('unknown', { reason });
+  }
   if (result === false) return describeState('applied-unverified');
   if (KEY_OF[id] && projection?.missingHosts?.length) return describeState('partial', { hosts: projection.missingHosts });
   return describeState('active');

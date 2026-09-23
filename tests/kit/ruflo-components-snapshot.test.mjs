@@ -93,3 +93,34 @@ test('a probe error surfaces as the unknown reason (ruling: id -> probe key)', (
   assert.equal(view.state.id, 'unknown');
   assert.match(view.state.meaning, /timed out/);
 });
+
+test('governance with zero audited calls in 24h is unknown, not active (ADR-0058 §2)', () => {
+  const snap = componentSnapshot({
+    cfg, rufloVersion: '3.44.0',
+    evidence: evidence({ governance: { audit: { audited: 0, refused: 0, reasons: [] } } }),
+    projection: projection(), now,
+  });
+  const view = byId(snap, 'mcpGovernance');
+  assert.equal(view.state.id, 'unknown');
+  assert.match(view.state.meaning, /No ruflo MCP tool calls have been audited in the last 24 hours, so enforcement has not been observed yet\./);
+});
+
+test('governance with observed audit activity is active', () => {
+  const snap = componentSnapshot({
+    cfg, rufloVersion: '3.44.0',
+    evidence: evidence({ governance: { audit: { audited: 3, refused: 0, reasons: [] } } }),
+    projection: projection(), now,
+  });
+  assert.equal(byId(snap, 'mcpGovernance').state.id, 'active');
+});
+
+test('governance with no audit evidence at all is unknown', () => {
+  const snap = componentSnapshot({
+    cfg, rufloVersion: '3.44.0',
+    evidence: evidence({ governance: { audit: null } }),
+    projection: projection(), now,
+  });
+  const view = byId(snap, 'mcpGovernance');
+  assert.equal(view.state.id, 'unknown');
+  assert.match(view.state.meaning, /No ruflo MCP tool calls have been audited in the last 24 hours, so enforcement has not been observed yet\./);
+});
