@@ -48,13 +48,14 @@ as such** wherever surfaced (an `ak` tag in the UI, a comment in the defaults ta
 Default *models* map to the host's appropriate tier (Opus for deep reasoning, Sonnet for review, a Codex
 model for execution) and are treated as **soft defaults** — see the "open question" on pinning live model IDs.
 
-Tier is the pairing key, not the model id: `MODEL_CATALOG` spells `flagship`/`balanced`/`fast`
+Tier is the pairing key, not the model id: `MODEL_CATALOG` spells `reasoning`/`balanced`/`fast`
 identically on both hosts so primary-host mirroring can map a route to its counterpart's equivalent.
 As of 2026-09-23 execution routes to `gpt-6-sol` (balanced) and mechanical work to `gpt-6-luna`
 (fast), and deep reasoning routes to `claude-opus-5-5`. These are agentic-kit default preferences,
 following each vendor's recommended starting model, not evidence that earlier models were withdrawn.
 Cross-host tiers pair by role and per-token price: `gpt-6-sol` ↔ `claude-sonnet-5`,
-`gpt-6-astra` ↔ `claude-fable-5-1`, `gpt-6-luna` ↔ Haiku. Withdrawn ids are handled by the retirement
+`gpt-6-astra` ↔ `claude-opus-5-5` (reasoning; Astra also pairs with `claude-fable-5-1`),
+`gpt-6-luna` ↔ Haiku. See [ADR-0006](0006-primary-host-and-ambidextrous-mirroring.md) for tier parity. Withdrawn ids are handled by the retirement
 mechanism in [ADR-0003](0003-auto-seed-dual-host-provenance.md), not by editing this table alone.
 
 ## Consequences
