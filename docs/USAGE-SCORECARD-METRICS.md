@@ -515,7 +515,7 @@ cost = (inputUnits × rate_in + output × rate_out) / 1,000,000
 Mythos 5.1, which resolve to 0.025, and OpenAI Pro, which uses 1 (§13). Summed across every row in the
 window.
 
-**Source:** `costOf()`, `src/lib/pricing.mjs:304-315`, reproduced verbatim:
+**Source:** `costOf()`, `src/lib/pricing.mjs`, reproduced verbatim:
 
 ```js
 export function costOf(usage) {
@@ -567,12 +567,12 @@ so the estimator conservatively uses ordinary input rates for reported cached to
 See [OpenAI prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching).
 
 Rate resolution is **longest-prefix match** (`isPrefixOf`, `KEYS_BY_LENGTH`)
-on a normalized model id (`pricing.mjs:205-214`), so a dated release
+on a normalized model id (`pricing.mjs`), so a dated release
 (`claude-haiku-4-5-20251001`)
 resolves to the same entry as its bare alias, and a more specific entry
 (`gpt-5.6-sol`) is never shadowed by a shorter one (`gpt-5.6`). An id matching
 nothing gets `FALLBACK_PRICE` — Sonnet-class rate, `$3`/`$15`
-(`pricing.mjs:182`) — rather than `$0`, so an unrecognized model can never be
+(`pricing.mjs`) — rather than `$0`, so an unrecognized model can never be
 silently free; `matched: false` travels with the result so a maintainer can
 find fallback-priced rows if the table needs a new entry.
 
@@ -582,7 +582,7 @@ Each table entry is a **schedule** — an ordered list of periods, each with the
 day it takes effect. Nearly every entry has exactly one period that has always
 applied (`anthropic(5, 25)` builds that shape); a confirmed effective rate
 change can be represented by multiple periods (`schedule`,
-`pricing.mjs:45-68`). `periodOn` (`pricing.mjs:229`) picks the last period
+`pricing.mjs`). `periodOn` (`pricing.mjs`) picks the last period
 already in effect on the given day, comparing ISO date strings
 lexicographically so no `Date` parsing is involved and the module stays
 clock-free.
@@ -608,7 +608,7 @@ Two rules bound the mechanism:
   Codex promo would be a one-line edit rather than new machinery. Rates that
   vary by *how* a request was served — regional uplift, large-prompt surcharge,
   service tiers — are a different axis, are deliberately **not** expressible
-  here, and remain in `UNMODELLED_PRICING_FACTORS` (`pricing.mjs:182-185`)
+  here, and remain in `UNMODELLED_PRICING_FACTORS` (`pricing.mjs`)
   because a transcript does not record the endpoint or tier.
 
 A `priceFor` call with no day prices as of `PRICES_AS_OF`, the table's
@@ -721,7 +721,7 @@ rates; the subtitle is overgeneralized and needs a UI correction.
 **Why this number matters more than it looks like it should.** On the
 reference corpus, 96.3% of tokens were cache reads — pricing them as fresh
 input (rather than at the 0.1× multiplier) would overstate cost by roughly
-10× (`pricing.mjs:7-10`). A cache-read share this high is not an anomaly to be
+10× (`pricing.mjs`). A cache-read share this high is not an anomaly to be
 suspicious of on its own — it is the expected steady state for any
 long-running agentic session that resends a large, mostly-unchanged system
 prompt and tool-result history on every turn, which both Claude Code and
@@ -1154,13 +1154,13 @@ public documentation; they are maintained data, not live quotes.
 ### 13.1 Anthropic — primary source, directly verified
 
 Rates rechecked against [Anthropic's official pricing](https://platform.claude.com/docs/en/about-claude/pricing)
-on 2026-09-08. Fable 5.1 and Mythos 5.1 were already catalogued with the
-correct rates; this pass refreshes their verification evidence.
+on 2026-09-23, which adds Claude Opus 5.5 (released 2026-09-22).
 
 | Model | Base input | 5m cache write | 1h cache write | Cache read (hit) | Output |
 |---|---|---|---|---|---|
 | Claude Fable 5.1 / Mythos 5.1 | $10/MTok | $12.50/MTok | $20/MTok | $0.25/MTok¹ | $50/MTok |
 | Claude Fable 5 / Mythos 5 | $10/MTok | $12.50/MTok | $20/MTok | $1/MTok | $50/MTok |
+| Claude Opus 5.5 | $4/MTok | $5/MTok | $8/MTok | $0.20/MTok² | $20/MTok |
 | Claude Opus 5 | $5/MTok | $6.25/MTok | $10/MTok | $0.50/MTok | $25/MTok |
 | Claude Opus 4.8 / 4.7 / 4.6 / 4.5 | $5/MTok | $6.25/MTok | $10/MTok | $0.50/MTok | $25/MTok |
 | Claude Sonnet 5 | $2/MTok | $2.50/MTok | $4/MTok | $0.20/MTok | $10/MTok |
@@ -1168,8 +1168,8 @@ correct rates; this pass refreshes their verification evidence.
 | Claude Haiku 4.5 | $1/MTok | $1.25/MTok | $2/MTok | $0.10/MTok | $5/MTok |
 
 ¹ Cache hits on Claude Fable 5.1 and Claude Mythos 5.1 price at **0.025×** base
-input — every other current Anthropic model uses 0.1×. Verified 2026-09-08
-against **[C1]**'s live pricing page.
+input. ² Cache hits on Claude Opus 5.5 price at **0.05×**. Every other current
+Anthropic model uses 0.1×. Verified 2026-09-23 against **[C1]**'s live pricing page.
 
 Sonnet 5's previously announced September increase was canceled by Anthropic;
 $2/$10 is now its standard price. Fable 5.1 is generally available; Mythos 5.1
@@ -1182,15 +1182,15 @@ cache-read *columns* in this table are provider-published absolute rates; the
 kit's `pricing.mjs` instead stores **multipliers** — 1.25× for a 5-minute cache
 write and 2× for a 1-hour cache write (both uniform, no published per-model
 exception) and, for cache reads, 0.1×
-for every model *except* Fable 5.1 / Mythos 5.1, which carry their own
-0.025× cache-read override on that catalog entry (`pricing.mjs:90-91`)
+for every model *except* Fable 5.1 / Mythos 5.1 (0.025×) and Opus 5.5 (0.05×),
+which carry their own cache-read override on their `PRICES` entries
 instead of the module-wide default multiplier.
 
-`priceFor()` (`pricing.mjs:261-280`) is what resolves that: it returns a
+`priceFor()` (`pricing.mjs`) is what resolves that: it returns a
 `cacheReadMultiplier` field taken from the matched entry, falling back to
-`CACHE_READ_MULTIPLIER` (`pricing.mjs:186-188`) when the entry carries none.
+`CACHE_READ_MULTIPLIER` (`pricing.mjs`) when the entry carries none.
 
-`costOf()` (`pricing.mjs:304-315`) then multiplies cache-read tokens by
+`costOf()` (`pricing.mjs`) then multiplies cache-read tokens by
 that resolved value rather than a hardcoded constant.
 
 Claude transcripts record which TTL each cache write used
@@ -1201,7 +1201,7 @@ and `costOf` prices it at 2×. A record with no split prices every write at the
 rate is exactly *$5 × 1.25*, its $10 1-hour rate exactly *$5 × 2*; its published
 $0.50 cache-read rate is exactly *$5 × 0.1*. Every row in Anthropic's own table
 satisfies `cache_write_5m = input × 1.25`, `cache_write_1h = input × 2` and, except for the Fable 5.1 / Mythos 5.1
-row noted above, `cache_read = input × 0.1` — confirming the multiplier
+and Opus 5.5 rows noted above, `cache_read = input × 0.1` — confirming the multiplier
 approach is arithmetically identical to using the provider's published
 absolute cache rates directly.
 
@@ -1210,11 +1210,11 @@ in prose, independent of the pricing table: *"5-minute cache write tokens are
 1.25 times the base input tokens price... 1-hour cache write tokens are 2 times
 the base input tokens price... Cache read tokens are 0.1 times the
 base input tokens price."* This is the second, independent confirmation of
-`CACHE_READ_MULTIPLIER`/`CACHE_WRITE_MULTIPLIER`/`CACHE_WRITE_1H_MULTIPLIER` (`pricing.mjs:185-188`).
+`CACHE_READ_MULTIPLIER`/`CACHE_WRITE_MULTIPLIER`/`CACHE_WRITE_1H_MULTIPLIER` (`pricing.mjs`).
 
 ### 13.2 OpenAI (Codex) — hand-maintained, no canonical machine-readable source
 
-`pricing.mjs`'s own comment (`pricing.mjs:116-119`) records that
+`pricing.mjs`'s own comment (`pricing.mjs`) records that
 `~/.codex/models_cache.json` was checked directly and contains **zero**
 price-related keys — Codex CLI does not ship pricing data locally, unlike
 Anthropic which publishes a fetchable pricing document. OpenAI's rates in
@@ -1223,37 +1223,44 @@ documentation and are the most drift-prone entries in the file — this is
 explicitly why `PRICES_AS_OF` is surfaced in the UI (`u-asof`,
 `dashboard/client.mjs`) rather than assumed current.
 
-Standard USD rates per million tokens (Astra verified 2026-09-08 against
-[OpenAI's model documentation](https://developers.openai.com/api/docs/models/gpt-6-astra);
-GPT-5.6 rates reconciled with the implementation and
-[OpenAI pricing](https://developers.openai.com/api/docs/pricing)):
+Standard USD rates per million tokens, verified 2026-09-23 against
+[OpenAI pricing](https://developers.openai.com/api/docs/pricing) and the
+individual model pages for [Astra](https://developers.openai.com/api/docs/models/gpt-6-astra),
+[GPT-6 Sol](https://developers.openai.com/api/docs/models/gpt-6-sol) and
+[GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna):
 
 | Model (kit key) | Input | Output | Cache read |
 |---|---|---|---|
 | `gpt-6-astra` | $10 | $50 | $1 |
+| `gpt-6-sol` | $2 | $10 | $0.20 |
+| `gpt-6-luna` | $0.10 | $0.50 | $0.01 |
 | `gpt-5.6-sol` | $4 | $20 | $0.40 |
 | `gpt-5.6-terra` | $2 | $12 | $0.20 |
 | `gpt-5.6-luna` | $0.20 | $1.20 | $0.02 |
 | `gpt-5.5` | $5 | $30 | $0.50 |
 | `gpt-5.5-pro` | $30 | $180 | Not published |
 
-Astra cache writes cost $12.50/MTok (1.25× input), using the existing
-cache-write arithmetic. Sol's promotional rate has no confirmed end date:
+GPT-6 and GPT-5.6 cache writes cost 1.25× input (Astra $12.50, GPT-6 Sol
+$2.50, GPT-6 Luna $0.125/MTok), using the existing cache-write arithmetic.
+Do not confuse GPT-6 Sol ($2/$10) with GPT-5.6 Sol ($4/$20); both are current. Sol's promotional rate has no confirmed end date:
 OpenAI says at least through 2026-11-21, so no future reversion is invented.
 These are API list-price equivalents, not subscription charges or access guarantees.
 
-The full maintained rate table was rechecked on 2026-09-08; `PRICES_AS_OF`
+The full maintained rate table was rechecked on 2026-09-23; `PRICES_AS_OF`
 and the Usage summary now show that date. Individual entries can still override
 verification dates. The official `gpt-5.6` alias resolves exactly to Sol;
-unknown suffixed variants do not inherit its price. Realtime entries describe
+unknown suffixed variants do not inherit its price. A provider-namespaced id
+(`anthropic/claude-opus-4.7`) is matched on its last path segment. Codex's
+`codex-auto-review` (its auto-approval reviewer) has no published per-token
+price, so it stays unmatched and is costed at the flagged fallback rate. Realtime entries describe
 text tokens only; audio and image charges are outside this estimator.
 
 See [the pricing audit](MODEL-PRICING-AUDIT.md) for source links and scope.
 
 ### 13.3 What the pricing table deliberately does not model
 
-Recorded verbatim from `pricing.mjs:153-181` (`UNMODELLED_PRICING_FACTORS`,
-`pricing.mjs:182-185`) because listing known gaps is what makes the
+Recorded verbatim from `pricing.mjs` (`UNMODELLED_PRICING_FACTORS`,
+`pricing.mjs`) because listing known gaps is what makes the
 *modelled* factors credible:
 
 - **Regional-processing uplift.** OpenAI charges +10% on data-residency

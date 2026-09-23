@@ -54,11 +54,11 @@ test('Claude keeps the 1M selector as a variant instead of a duplicate base mode
 
 test('Claude public facts retain first-party lifecycle, discovery, limits, and scope', () => {
   const result = discoverAnthropicPublicCatalog({
-    capturedAt: '2026-09-02T13:00:00.000Z', scope: { profile: 'default' }, scopeKey: SCOPE_KEY,
+    capturedAt: '2026-09-23T13:00:00.000Z', scope: { profile: 'default' }, scopeKey: SCOPE_KEY,
   });
   assert.equal(result.source.id, 'anthropic-docs');
   assert.equal(result.source.ownerType, 'provider');
-  assert.equal(result.source.sourceVersion, '2026-09-02');
+  assert.equal(result.source.sourceVersion, '2026-09-23');
   assert.equal(result.models.length, ANTHROPIC_PUBLIC_MODELS.length);
 
   const fable = result.models.find((model) => model.identity.modelId === 'claude-fable-5');
@@ -123,7 +123,7 @@ test('Claude public facts include Fable 5.1 and Mythos 5.1 as active, priced ent
 
 test('Claude bundled public facts become explicitly stale instead of silently aging', () => {
   const result = discoverAnthropicPublicCatalog({
-    capturedAt: '2026-12-09T00:00:00.000Z', scopeKey: SCOPE_KEY,
+    capturedAt: '2026-12-23T00:00:01.000Z', scopeKey: SCOPE_KEY, // just past 90 days after 2026-09-23
   });
   assert.equal(result.source.status, 'stale');
   assert.equal(result.models[0].evidence.every(({ freshness }) => freshness === 'stale'), true);
@@ -206,4 +206,11 @@ test('Codex inventory derives an effective override from a valid per-model clamp
   const result = discoverCodex({ cacheRaw: fixture('codex', 'models-cache.json'),
     configRaw: 'model_context_window = 872000\n', scopeKey: SCOPE_KEY });
   assert.equal(result.models[0].variant.effectiveContextWindow, 828400);
+});
+
+test('Claude public facts include Opus 5.5 as an active 1M-context entry at its own rate', () => {
+  const opus55 = ANTHROPIC_PUBLIC_MODELS.find((model) => model.id === 'claude-opus-5-5');
+  assert.ok(opus55, 'Opus 5.5 is catalogued');
+  assert.deepEqual([opus55.lifecycle, opus55.contextLimit, opus55.outputLimit, opus55.retirementNotBefore],
+    ['active', 1_000_000, 128_000, '2027-09-22']);
 });

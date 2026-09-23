@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { routingPayload } from '../../src/lib/dashboard-server.mjs';
+import { DEFAULT_ROUTES } from '../../src/lib/routing.mjs';
 
 test('dashboard routing describes host assignment without manufacturing a provider', () => {
   const payload = routingPayload({
@@ -58,7 +59,7 @@ test('retirement and divergence are separate signals on the wire', () => {
   const route = payload.routes.find((entry) => entry.activity === 'architecture');
   assert.equal(route.model, 'claude-opus-4-8', 'a superseded-but-live model is left alone');
   assert.equal(Object.hasOwn(route, 'retiredFrom'), false, 'not a retirement');
-  assert.equal(route.diverged.defaultModel, 'claude-opus-5');
+  assert.equal(route.diverged.defaultModel, DEFAULT_ROUTES.architecture.model);
   assert.ok(route.diverged.currentNote && route.diverged.defaultNote,
     'both sides must carry their cost-per-task note so the trade is legible');
 });

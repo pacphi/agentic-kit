@@ -6,9 +6,9 @@
 //
 // The cache multipliers are the whole point of this module. On a real corpus
 // ~96% of tokens are cache reads, which bill at 0.1× input for nearly every
-// model (0.025× on Fable 5.1 / Mythos 5.1 — a per-entry override, see below);
-// pricing them as fresh input overstates cost by roughly 10×, or 40× on those
-// two. Cache-write premiums apply to Anthropic writes (1.25× for the 5-minute
+// model (0.025× on Fable 5.1 / Mythos 5.1, 0.05× on Opus 5.5 — per-entry
+// overrides, see below); pricing them as fresh input overstates cost by
+// roughly 10×, or 20–40× on those three. Cache-write premiums apply to Anthropic writes (1.25× for the 5-minute
 // tier, 2× for the 1-hour tier) and OpenAI GPT-5.6 and later; older OpenAI
 // models use the ordinary input rate.
 //
@@ -19,7 +19,7 @@
 // ── Table ────────────────────────────────────────────────────────────────────
 
 /** The baseline verification date; newer entries may carry their own asOf — date-stamped in the UI. */
-export const PRICES_AS_OF = '2026-09-08';
+export const PRICES_AS_OF = '2026-09-23';
 
 // ── Rate constructors ────────────────────────────────────────────────────────
 // A rate entry is always a SCHEDULE — an ordered list of periods, each with the
@@ -87,7 +87,13 @@ export const PRICES = {
   'claude-mythos-5-1': anthropic(10, 50, { cacheReadMultiplier: 0.025, asOf: '2026-09-08' }),
   'claude-fable-5': anthropic(10, 50),
   'claude-mythos-5': anthropic(10, 50),
-  // Anthropic — Opus line (5 and the prior generations share a price)
+  // Anthropic — Opus line. Opus 5.5 (released 2026-09-22) is CHEAPER than the
+  // generations before it, $4/$20, and reads cache at 0.05x base input ($0.20),
+  // not 0.1x (platform.claude.com/docs/en/about-claude/pricing, verified
+  // 2026-09-23). It needs its own key: without one, `claude-opus-5-5` matches
+  // `claude-opus-5` on the token boundary and is priced as Opus 5.
+  'claude-opus-5-5': anthropic(4, 20, { cacheReadMultiplier: 0.05, asOf: '2026-09-23' }),
+  // Opus 5 and the prior generations share a price.
   'claude-opus-5': anthropic(5, 25),
   'claude-opus-4-8': anthropic(5, 25),
   'claude-opus-4-7': anthropic(5, 25),
@@ -102,7 +108,7 @@ export const PRICES = {
   'claude-haiku-4-5': anthropic(1, 5),
 
   // OpenAI (Codex). Verified against the individual OpenAI API model pages on
-  // 2026-09-08. There is NO machine-readable pricing in
+  // 2026-09-23. There is NO machine-readable pricing in
   // ~/.codex/models_cache.json (checked: zero price/pricing/usd keys), so this
   // table is maintained by hand and is the most drift-prone thing in this file.
   //
@@ -125,6 +131,12 @@ export const PRICES = {
   // https://developers.openai.com/api/docs/models/gpt-6-astra (2026-09-08).
   // Standard rates: input $10, cached input $1, writes $12.50, output $50 / MTok.
   'gpt-6-astra': openai(10, 50, { cacheWriteMultiplier: 1.25 }),
+  // GPT-6 Sol and Luna (released 2026-09-22; the model pages' "release date"
+  // field shows the knowledge cutoff instead). Standard rates, cached input 0.1x,
+  // writes 1.25x, same >272K surcharge as Astra (unmodelled):
+  // https://developers.openai.com/api/docs/models/gpt-6-sol and .../gpt-6-luna.
+  'gpt-6-sol': openai(2, 10, { cacheWriteMultiplier: 1.25, asOf: '2026-09-23' }),
+  'gpt-6-luna': openai(0.1, 0.5, { cacheWriteMultiplier: 1.25, asOf: '2026-09-23' }),
   'gpt-5.6-sol': openai(4, 20, { cacheWriteMultiplier: 1.25 }),
   'gpt-5.6-terra': openai(2, 12, { cacheWriteMultiplier: 1.25 }),
   'gpt-5.6-luna': openai(0.2, 1.2, { cacheWriteMultiplier: 1.25 }),
@@ -191,9 +203,13 @@ export const CACHE_WRITE_1H_MULTIPLIER = 2;
 
 // Model ids arrive with inconsistent separators and case (`claude-opus-4-8` vs
 // `claude-opus-4.8`, Codex's `gpt-5.6`), so both key and id are normalised the
-// same way before comparison. Underscores and slashes fold too, so a namespaced
-// id (`anthropic/claude-opus-5`) still ends on the same tokens.
+// same way before comparison.
 const normalize = (s) => String(s).toLowerCase().replace(/[._/]/g, '-');
+
+// A provider-namespaced id (`anthropic/claude-opus-4.7`, `openai/gpt-5.5`, as
+// OpenCode and custom Codex providers record them) is matched on its last path
+// segment. Matching is by prefix, so the namespace would otherwise hide the model.
+const bareModel = (s) => String(s).slice(String(s).lastIndexOf('/') + 1);
 
 // A prefix only counts on a TOKEN boundary: `claude-opus-5` must match
 // `claude-opus-5-20260401` but not `claude-opus-50`, which is a different model.
@@ -239,7 +255,7 @@ function periodOn(periods, day) {
  * never throws.
  *
  * `cacheReadMultiplier` defaults to the module-wide `CACHE_READ_MULTIPLIER`
- * unless the matched entry carries its own (Claude 5.1 or OpenAI Pro) —
+ * unless the matched entry carries its own (Claude 5.1, Opus 5.5 or OpenAI Pro) —
  * see the `schedule()` comment in the table above.
  *
  * `day` (ISO `YYYY-MM-DD`) selects the rate IN EFFECT ON THAT DAY. Cost
@@ -250,7 +266,7 @@ function periodOn(periods, day) {
  * Omitting `day` prices as of `PRICES_AS_OF` (see `periodOn`).
  */
 export function priceFor(model, provider, day) {
-  const normalized = typeof model === 'string' ? normalize(model) : '';
+  const normalized = typeof model === 'string' ? normalize(bareModel(model)) : '';
   // Official exact alias; unknown gpt-5.6-* variants must still remain unknown.
   const id = normalized === 'gpt-5-6' ? 'gpt-5-6-sol' : normalized;
   if (id) {
@@ -289,7 +305,8 @@ const tokens = (v) => (Number.isFinite(v) && v > 0 ? v : 0);
  * every write at the 5-minute rate, exactly as before the split was retained.
  *
  * `cacheReadMultiplier` is 0.1 for nearly every model but is resolved per-model
- * via `priceFor` (Fable 5.1 / Mythos 5.1 price cache reads at 0.025x — see the
+ * via `priceFor` (Fable 5.1 / Mythos 5.1 price cache reads at 0.025x, Opus 5.5
+ * at 0.05x — see the
  * `PRICES` table comment), so this is never hardcoded here.
  *
  * All counters are optional and default to 0, so all-zero usage returns exactly

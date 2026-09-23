@@ -91,7 +91,7 @@ const cfgWithChain = (aqeFallback) => ({
  *  writes them: two of the six diverge ONLY on their escalation rung, and a
  *  hand-built fixture that dropped `escalation` would silently under-report. */
 function divergedPolicy() {
-  const rewind = (m) => (m === 'claude-opus-5' ? 'claude-opus-4-8' : m);
+  const rewind = (m) => (m === DEFAULT_ROUTES.architecture.model ? 'claude-opus-4-8' : m);
   const seed = seedActivityRoutes({ hosts: ['claude', 'codex'] });
   const activityRoutes = {};
   for (const [act, r] of Object.entries(seed)) {
