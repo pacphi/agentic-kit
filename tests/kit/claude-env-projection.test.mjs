@@ -42,7 +42,23 @@ test('deleting the policy file later removes enforcement on the next reconcile',
   reconcileClaudeComponentEnv(cfg(), { projectRoot: root, rufloVersion: '3.44.0', userSettingsFile });
   fs.rmSync(policy);
   reconcileClaudeComponentEnv(cfg(), { projectRoot: root, rufloVersion: '3.44.0', userSettingsFile });
-  assert.equal(fs.existsSync(path.join(root, '.claude', 'settings.local.json')), false);
+  const local = path.join(root, '.claude', 'settings.local.json');
+  assert.equal('RUFLO_MCP_ENFORCE_POLICY' in (read(local).env ?? {}), false);
+});
+
+test('a settings.local.json that pre-exists as {} survives an add-then-retract cycle', (t) => {
+  const { root, userSettingsFile } = fixture(t);
+  const local = path.join(root, '.claude', 'settings.local.json');
+  fs.mkdirSync(path.dirname(local), { recursive: true });
+  fs.writeFileSync(local, '{}');
+  const policy = path.join(root, '.harness', 'mcp-policy.json');
+  fs.mkdirSync(path.dirname(policy)); fs.writeFileSync(policy, renderPolicy({ maxCallsPerMinute: 120 }));
+  reconcileClaudeComponentEnv(cfg(), { projectRoot: root, rufloVersion: '3.44.0', userSettingsFile });
+  assert.equal(read(local).env.RUFLO_MCP_ENFORCE_POLICY, '1');
+  fs.rmSync(policy);
+  reconcileClaudeComponentEnv(cfg(), { projectRoot: root, rufloVersion: '3.44.0', userSettingsFile });
+  assert.equal(fs.existsSync(local), true);
+  assert.equal('RUFLO_MCP_ENFORCE_POLICY' in (read(local).env ?? {}), false);
 });
 
 test('a user-set learning profile is preserved and reported', (t) => {

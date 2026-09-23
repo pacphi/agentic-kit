@@ -13,29 +13,10 @@ const MACHINE_KEYS = [RC_KEYS.typesafe, RC_KEYS.embedder, RC_KEYS.mode];
 const editorFor = (source) => jsonTopLevelEnvEditor(source);
 const asStates = (keys, env) => Object.fromEntries(keys.map((k) => [k, k in env ? { present: true, value: env[k] } : { present: false }]));
 
-/** The shared engine never deletes a config file it emptied out (it only ever
- *  rewrites in place). Once the last owned key is removed and nothing else was
- *  in the file, an empty `{}` envelope has no reason to linger — prune it so a
- *  fully-reverted reconcile leaves no trace. Best-effort: any surprise (file
- *  gone already, not JSON, a symlink) just leaves the file alone. */
-function pruneIfEmptyEnvelope(file) {
-  try {
-    const stat = fs.lstatSync(file);
-    if (!stat.isFile() || stat.isSymbolicLink()) return;
-    const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (doc && typeof doc === 'object' && !Array.isArray(doc) && Object.keys(doc).length === 0) {
-      fs.unlinkSync(file);
-    }
-  } catch { /* leave the file exactly as the engine wrote it */ }
-}
-
 function reconcileTarget(target, desired, receiptSuffix, dryRun) {
   try {
     const plan = planOwnedEnv(target, desired, { receiptSuffix, format: 'multi', editorFor });
-    if (plan.changed && !dryRun) {
-      applyOwnedEnv(plan, { backupTag: 'ruflo-components' });
-      pruneIfEmptyEnvelope(target.file);
-    }
+    if (plan.changed && !dryRun) applyOwnedEnv(plan, { backupTag: 'ruflo-components' });
     return { file: target.file, status: plan.status, changed: plan.changed };
   } catch (error) { return { file: target.file, status: 'conflict', changed: false, reason: error.message }; }
 }

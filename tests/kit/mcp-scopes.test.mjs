@@ -133,6 +133,19 @@ test('Claude registration replaces a prior registration carrying ak-owned ruflo-
   ]);
 });
 
+test('Claude registration preserves a canonical entry carrying a foreign env key alongside an ak key', async () => {
+  const calls = [];
+  const ok = await register({ agentBrowser: true }, {
+    runner: async (bin, args) => { calls.push([bin, args]); return { code: 0, stdout: '', stderr: '' }; },
+    inspect: () => ({ registrations: [{
+      name: 'claude-flow', scope: 'user', command: 'ruflo', args: ['mcp', 'start'],
+      env: { RUFLO_INTELLIGENCE_MODE: 'research', MY_KEY: 'user-value' },
+    }] }),
+  });
+  assert.equal(ok, false);
+  assert.deepEqual(calls, []);
+});
+
 test('Claude registration preserves a conflicting user-owned claude-flow entry', async () => {
   const calls = [];
   const ok = await register({ agentBrowser: true }, {
