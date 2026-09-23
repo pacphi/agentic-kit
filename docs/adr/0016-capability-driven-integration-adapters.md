@@ -4,6 +4,7 @@
   [ADR-0020](0020-ga-stable-surfaces.md); closed-registry clause superseded by
   [ADR-0029](0029-host-adapter-extension-point.md)
 - **Date:** 2026-07-28
+- **Updated:** 2026-09-23 — the Claude memory pin is receipt-owned and removed by uninstall (ADR-0058).
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Earlier update:** 2026-09-02
 - **Update note:** Added read-only Codex plugin-hook compatibility facts,

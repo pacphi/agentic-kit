@@ -1,9 +1,14 @@
 # ADR-0058 — Managed ruflo components
 
-- **Status:** Accepted (not yet implemented)
+- **Status:** Accepted (implementation in progress — see Implementation status)
 - **Date:** 2026-09-23
 - **Updated:** 2026-09-23 — accepted after maintainer review; implementation plan at
   [docs/superpowers/plans/2026-09-23-managed-ruflo-components.md](../superpowers/plans/2026-09-23-managed-ruflo-components.md)
+- **Updated:** 2026-09-23 — implementation status refreshed against the merged branch commits
+  (catalogue through the dashboard panel); §7's picker evidence corrected (the route probe's
+  `embedder=` marker and `doctor -c typesafe`, not a per-picker routed-count stat ruflo does not
+  expose); real-machine verification against ruflo 3.44.0 and the four upstream requests remain
+  open, so Status stays Accepted rather than Implemented.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md) (value-precise ownership),
   [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md) (explicit degradation),
@@ -222,7 +227,9 @@ The catalogue's `explain` text and the state meanings are written once and reuse
   section lands there through `groups.mjs`. Each card shows the state badge beside its meaning,
   the current value, the options, who controls it, when and where the evidence came from, and
   live evidence:
-  - pickers: `routedByCounts` for which picker chose recently;
+  - pickers: the `hooks route` probe's `embedder=` marker and `doctor -c typesafe`'s confirmation
+    line — ruflo has no per-picker routed-count stat; `routedByCounts` belongs to the model
+    router (ADR-148's haiku/sonnet/opus tiering), not the agent pickers this ADR manages;
   - governance: audited and refused calls in the last 24 hours and recent refusal reasons;
   - learning profile: engine loaded or not, time since last training, trajectory growth;
   - funnel: the deciding source.
@@ -249,7 +256,8 @@ Tracked under ADR-0031 and shown as "waiting on upstream" where relevant:
   what it does, whether it is really working, and how to change it.
 - Each new ruflo component costs one descriptor and its tests.
 - ak takes on the risk of enabling opt-in upstream features, including two pickers ruflo has
-  not yet made default. The mitigation is evidence: which picker chose is visible, and each
+  not yet made default. The mitigation is evidence: which picker chose is visible through the
+  route probe and doctor, not a persisted per-picker count ruflo does not keep, and each
   component opts out with one `kit.json` value.
 - Governance adds a small tracked file to each ruflo repository. Committing it is the user's
   choice; ak does not commit.
@@ -276,16 +284,25 @@ Tracked under ADR-0031 and shown as "waiting on upstream" where relevant:
 
 ## Implementation status
 
+`ak status`'s per-component fix action (`FIXABLE` in
+`src/commands/status/sections/ruflo-components.mjs`) excludes `encryptionAtRest`: ADR-0059 has
+not shipped a reconcile step for it, so offering a `sync` fix would be a promise `ak sync` cannot
+keep. The hermetic test suite's default `kit.json` (`offlineKitConfig` in
+`tests/kit/helpers/home-sandbox.mjs`) sets every `rufloComponents` entry to `false` except
+`funnel: true` (funnel's managed value is inverted — `true` means "leave ruflo's funnel alone"),
+so ordinary tests never trigger a real npm install or a real `ruflo funnel`/`hooks route` call; a
+test that wants a component managed opts back in explicitly.
+
 | Piece | Status |
 |---|---|
-| Spike: environment reach per host | Done (2026-09-23) |
-| Component catalogue and states | Not started |
-| Multi-key owned projection engine (from ADR-0055) | Not started |
-| Host projections (Claude, Codex launcher, OpenCode) | Not started |
-| Typesafe package install and receipt | Not started |
-| Governance policy file and lockout guard | Not started |
-| Funnel disable and undo | Not started |
-| Setup disclosure and results, status section, sync | Not started |
-| Dashboard panel and About chip | Not started |
-| Memory pin receipt (ADR-0016 drift) | Not started |
-| Upstream requests filed | Not started |
+| Spike: environment reach per host | Done (2026-09-23) — Claude MCP and Claude hooks confirmed; Codex hooks inconclusive within the spike's time-box, so the pickers and learning profile report `partial` for Codex hooks when Codex is enabled |
+| Component catalogue and states | Done — catalogue, `kit.json` intent and validation, state classification with meanings |
+| Multi-key owned projection engine (from ADR-0055) | Done — generalized from AQE's single-key engine; AQE's own tests unchanged and passing |
+| Host projections (Claude, Codex launcher, OpenCode) | Done — Claude user/project settings, the Codex `ak x ruflo-mcp` launcher, and OpenCode's generated gateway/lifecycle hooks all read `componentEnv` |
+| Typesafe package install and receipt | Done (global install, receipt-gated uninstall, `doctor -c typesafe` parsing) — real-machine confirmation against installed ruflo 3.44.0 is verified pending (Task 11A) |
+| Governance policy file and lockout guard | Done (ak-written-only enforcement, foreign-policy detection, fail-closed removal on an invalid file) — the real lockout/audit-log round trip against ruflo 3.44.0 is verified pending (Task 11A) |
+| Funnel disable and undo | Done (JSON-first `funnel status` parsing, receipt-gated re-enable) — the real disabled-state fixture against ruflo 3.44.0 is verified pending (Task 11A) |
+| Setup disclosure and results, status section, sync | Done — trust manifest group, machine and project setup results, `ak status` rows, `ak sync` fixes and convergence accounting |
+| Dashboard panel and About chip | Done — Overview > Runtime panel, About summary chip and link, read-only `/api/ruflo-components` route |
+| Memory pin receipt (ADR-0016 drift) | Done — `pinProjectMemoryDbPath` moved onto the owned projection engine and is now removed by `ak uninstall` |
+| Upstream requests filed | Not started — four requests drafted (ADR §8); filing requires user approval (`gh issue create --repo ruvnet/ruflo`) |
