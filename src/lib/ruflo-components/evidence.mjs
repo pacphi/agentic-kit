@@ -79,11 +79,19 @@ export function auditStats(file, now = Date.now()) {
 }
 
 export function moduleVersionFromRuflo(pkg) {
-  for (const base of [
-    path.join(paths.rufloNodeModules(), '@claude-flow', 'cli', 'node_modules'),
-    paths.rufloNodeModules(),
-    path.dirname(paths.rufloRoot()),
-  ]) {
+  // The whole lookup — including computing the candidate bases — must never throw:
+  // `paths.rufloRoot()`/`rufloNodeModules()` walk to `globalRoot()`, which throws
+  // "cannot determine npm global root" whenever npm is not on PATH (its own comment:
+  // sandboxed tests and hooks hit this). Unreadable stays null, never an escaped throw.
+  let bases;
+  try {
+    bases = [
+      path.join(paths.rufloNodeModules(), '@claude-flow', 'cli', 'node_modules'),
+      paths.rufloNodeModules(),
+      path.dirname(paths.rufloRoot()),
+    ];
+  } catch { return null; }
+  for (const base of bases) {
     try { return JSON.parse(fs.readFileSync(path.join(base, pkg, 'package.json'), 'utf8')).version; } catch { /* next */ }
   }
   return null;
@@ -98,8 +106,23 @@ async function probe(runner, args, env, errors, key) {
   return null;
 }
 
+/** Resolve one module's version through the injected resolver. A plain "not
+ *  installed" null is not an error and gets no `errors[key]` entry; only a thrown
+ *  resolver (the default `moduleVersionFromRuflo` no longer throws, but an injected
+ *  test double or a future resolver might) is recorded there, and still resolves
+ *  to null rather than escaping `collectEvidence`. */
+function resolveVersion(resolveModuleVersion, pkg, errors, key) {
+  try {
+    return resolveModuleVersion(pkg) ?? null;
+  } catch (error) {
+    errors[key] = String(error?.message ?? error).slice(0, 200);
+    return null;
+  }
+}
+
 export async function collectEvidence({
   projectRoot, cfg, rufloVersion, runner = run, now = Date.now(), cwd = projectRoot ?? process.cwd(),
+  resolveModuleVersion = moduleVersionFromRuflo,
 }) {
   const env = { ...process.env, ...componentEnv(projectRoot, cfg, rufloVersion) };
   const errors = {};
@@ -114,10 +137,12 @@ export async function collectEvidence({
   ]);
   const typesafeRow = typesafeDoc ? parseDoctor(typesafeDoc).find((r) => /typesafe/i.test(r.name)) ?? null : null;
   const intelligence = intel ? parseIntelligence(intel) : null;
+  const typesafeVersion = resolveVersion(resolveModuleVersion, '@ruvector/typesafe', errors, 'typesafeModule');
+  const memoryVersion = resolveVersion(resolveModuleVersion, '@claude-flow/memory', errors, 'memoryModule');
   return {
     capturedAt: new Date(now).toISOString(),
     rufloVersion,
-    typesafe: { resolves: moduleVersionFromRuflo('@ruvector/typesafe') !== null, doctor: typesafeRow },
+    typesafe: { resolves: typesafeVersion !== null, doctor: typesafeRow },
     minilm: { embedder: route ? parseRouteEmbedder(route) : null },
     learning: {
       mode: intelligence?.mode ?? null,
@@ -126,7 +151,7 @@ export async function collectEvidence({
       trajectories: intelligence?.trajectories ?? null,
     },
     turnCredit: { present: metaDoc ? parseDoctor(metaDoc).some((r) => /turn-credit/.test(r.detail)) : null },
-    memoryFix: { version: moduleVersionFromRuflo('@claude-flow/memory') },
+    memoryFix: { version: memoryVersion },
     funnel: funnel ? parseFunnel(funnel) : null,
     governance: { audit: auditStats(AUDIT_LOG(), now) },
     errors,

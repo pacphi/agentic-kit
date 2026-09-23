@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   parseDoctor, parseRouteEmbedder, parseIntelligence, parseNeuralStatus, parseFunnel, auditStats, collectEvidence,
+  readEvidenceCache, writeEvidenceCache,
 } from '../../src/lib/ruflo-components/evidence.mjs';
 
 const fixture = (name) => fs.readFileSync(new URL(`../fixtures/ruflo-components/${name}`, import.meta.url), 'utf8');
@@ -115,4 +116,50 @@ test('3.44.0 fixtures: route embedder markers and doctor typesafe row', () => {
 
 test('3.44.0 fixture: funnel status JSON parses directly', () => {
   assert.deepEqual(parseFunnel(fixture('funnel-status-3.44.0.json')), { enabled: true, decidedBy: 'package-default' });
+});
+
+test('collectEvidence never throws when the injected module-version resolver throws', async () => {
+  const runner = async (cmd, args) => {
+    if (args.includes('funnel')) return { code: 0, stdout: fixture('funnel-status-3.43.0.txt'), stderr: '' };
+    if (args[0] === 'doctor' && args.includes('typesafe')) {
+      return { code: 0, stdout: fixture('doctor-typesafe-3.43.0.txt'), stderr: '' };
+    }
+    if (args[0] === 'doctor' && args.includes('metaharness')) {
+      return { code: 0, stdout: fixture('doctor-metaharness-3.43.0.txt'), stderr: '' };
+    }
+    if (args.includes('route')) return { code: 0, stdout: fixture('route-minilm-3.44.0.txt'), stderr: '' };
+    if (args.includes('stats') && args.includes('intelligence')) {
+      return { code: 0, stdout: fixture('intelligence-stats-3.43.0.txt'), stderr: '' };
+    }
+    if (args.includes('status') && args.includes('neural')) {
+      return { code: 0, stdout: fixture('neural-status-3.43.0.txt'), stderr: '' };
+    }
+    return { code: 1, stdout: '', stderr: 'unexpected probe' };
+  };
+  const resolveModuleVersion = () => { throw new Error('cannot determine npm global root (is npm installed?)'); };
+  const evidence = await collectEvidence({
+    projectRoot: null, cfg: {}, rufloVersion: '3.43.0', runner, now: Date.now(), resolveModuleVersion,
+  });
+  assert.equal(evidence.typesafe.resolves, false);
+  assert.equal(evidence.memoryFix.version, null);
+  assert.match(evidence.errors.typesafeModule, /cannot determine npm global root/);
+  assert.match(evidence.errors.memoryModule, /cannot determine npm global root/);
+});
+
+test('writeEvidenceCache then readEvidenceCache round-trips; a missing path reads as null', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-evidence-cache-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'evidence.json');
+  assert.equal(readEvidenceCache(file), null);
+  const evidence = {
+    capturedAt: '2026-09-23T12:00:00.000Z', rufloVersion: '3.44.0',
+    typesafe: { resolves: false, doctor: null }, minilm: { embedder: 'minilm' },
+    learning: { mode: 'balanced', engineLoaded: false, lastTrainingSeconds: 170300, trajectories: 13649 },
+    turnCredit: { present: true }, memoryFix: { version: null },
+    funnel: { enabled: true, decidedBy: 'package-default' },
+    governance: { audit: { audited: 2, refused: 1, reasons: [] } }, errors: {},
+  };
+  writeEvidenceCache(file, evidence);
+  assert.deepEqual(readEvidenceCache(file), evidence);
+  assert.equal(readEvidenceCache(path.join(dir, 'missing.json')), null);
 });
