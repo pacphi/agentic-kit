@@ -22,7 +22,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  sandboxHome, assertSandboxed, sandboxProject, rmrf, captureLog,
+  sandboxHome, assertSandboxed, sandboxProject, rmrf, captureLog, offlineKitConfig,
 } from './helpers/home-sandbox.mjs';
 
 const HOME = sandboxHome('ak-routing-retirement');
@@ -83,6 +83,8 @@ function fakeMigrateThatRetires(activity, from, to) {
 
 function baseCfg(routes) {
   return {
+    // Components off: run_project's non-dry reconcile must never probe or toggle ruflo here.
+    rufloComponents: offlineKitConfig().rufloComponents,
     integrations: {
       version: 2, hosts: { claude: true, codex: false, opencode: false }, bindings: [],
     },
