@@ -13,7 +13,8 @@ assertSandboxed(paths, sandbox);
 const sync = await import('../../src/commands/sync.mjs');
 const setup = await import('../../src/commands/setup.mjs');
 const { loadKitConfig } = await import('../../src/lib/config.mjs');
-const { codexMcpTopology, repairCodexMcpTopology, register, claudeMcpTopology } = await import('../../src/lib/mcp.mjs');
+const { codexMcpTopology, repairCodexMcpTopology, register, claudeMcpTopology, LEGACY_RUFLO_PLACEHOLDER } = await import('../../src/lib/mcp.mjs');
+const { managedAgentBrowserEnv } = await import('../../src/lib/agent-browser.mjs');
 const { ensureRufloMcpInCodex } = await import('../../src/lib/providers.mjs');
 const { reconcileCodexMcp } = await import('../../src/lib/codex-mcp-reconcile.mjs');
 const project = sandboxProject('ak-mcp-convergence');
@@ -39,19 +40,24 @@ function seed(source = canonical + legacy + unrelated) {
   removals = 0;
 }
 
+// The legacy alias is disabled in place (a bounded file edit), never removed
+// through `codex mcp remove`: Codex's Claude config import re-adds any Claude
+// server whose name Codex lacks, so a deleted alias came straight back.
 async function repair(plan, cwd) {
-  return repairCodexMcpTopology(plan, cwd, {
+  const result = await repairCodexMcpTopology(plan, cwd, {
     inspect,
-    runner: async (command, args) => {
-      assert.equal(command, 'codex');
-      assert.deepEqual(args, ['mcp', 'remove', 'claude-flow']);
-      removals++;
-      const source = fs.readFileSync(file, 'utf8');
-      fs.writeFileSync(file, source.replace(/\[mcp_servers\.claude-flow\][\s\S]*?(?=\[mcp_servers\.|$)/, ''));
-      return { code: 0, stdout: '', stderr: '' };
-    },
+    runner: async () => { throw new Error('legacy alias must be disabled in place, not removed through codex mcp'); },
   });
+  if (result.ok) removals += plan.filter(entry => entry.repairKind === 'legacy-ruflo').length;
+  return result;
 }
+
+// An external writer (upstream initializer, Codex's Claude import) turning the
+// placeholder back into the live legacy transport.
+const restoreLegacy = () => fs.writeFileSync(file,
+  fs.readFileSync(file, 'utf8').replace(LEGACY_RUFLO_PLACEHOLDER, legacy.trimEnd()));
+
+const disabledAlias = () => inspect().registrations.find(entry => entry.name === 'claude-flow');
 
 function rows() {
   return inspect().duplicateRuflo
@@ -78,8 +84,10 @@ test('sync repairs an approved alias and remembers only the disclosed correction
   assert.equal(prompts, 1);
   assert.equal(inspect().duplicateRuflo, false);
   assert.ok(fs.readFileSync(file, 'utf8').includes(unrelated));
+  assert.equal(disabledAlias()?.enabled, false, 'alias stays as a disabled placeholder');
+  assert.equal(disabledAlias()?.repairKind, null, 'the placeholder is never itself a repair target');
   // An external upgrader restores the same recognized legacy transport.
-  fs.appendFileSync(file, legacy);
+  restoreLegacy();
   const second = await run({ confirm: async () => { throw new Error('must reuse explicit repair consent'); } });
   assert.equal(second.result, 0, second.out);
   assert.equal(inspect().duplicateRuflo, false);
@@ -101,7 +109,7 @@ test('declining repair leaves configuration and consent unchanged', async () => 
 test('remembered repair never consumes an alias with a custom environment', async () => {
   seed();
   assert.equal((await run({ yes: true })).result, 0);
-  fs.appendFileSync(file, legacy + '[mcp_servers.claude-flow.env]\nPRIVATE_DB = "keep"\n');
+  fs.writeFileSync(file, canonical + unrelated + legacy + '[mcp_servers.claude-flow.env]\nPRIVATE_DB = "keep"\n');
   const before = fs.readFileSync(file, 'utf8');
   const result = await run();
   assert.equal(result.result, 1, result.out);
@@ -278,4 +286,23 @@ test('native repair refuses a Codex home that differs from the approved config',
   });
   assert.equal(result.ok, false);
   assertUnchanged(before, sandbox, 'mismatched native Codex home');
+});
+
+test('the kit-managed browser env child is folded into the placeholder and Codex import finds the name taken', async () => {
+  const browser = managedAgentBrowserEnv().AGENT_BROWSER_CONFIG;
+  seed(canonical + legacy + `\n[mcp_servers.claude-flow.env]\nAGENT_BROWSER_CONFIG = ${JSON.stringify(browser)}\n\n` + unrelated);
+  assert.equal(inspect().duplicateRuflo, true);
+  const result = await run({ yes: true });
+  assert.equal(result.result, 0, result.out);
+  const source = fs.readFileSync(file, 'utf8');
+  assert.doesNotMatch(source, /mcp_servers\.claude-flow\.env/, 'no orphaned child table');
+  assert.ok(source.includes(LEGACY_RUFLO_PLACEHOLDER));
+  assert.ok(source.includes(unrelated));
+  assert.equal(inspect().duplicateRuflo, false);
+  // Codex's importer adds a Claude server only when no Codex server has its name.
+  const importerWouldAdd = !inspect().registrations.some(entry => entry.name === 'claude-flow');
+  assert.equal(importerWouldAdd, false);
+  const again = await run({ confirm: async () => { throw new Error('nothing left to repair'); } });
+  assert.equal(again.result, 0, again.out);
+  assert.equal(fs.readFileSync(file, 'utf8'), source, 'a converged placeholder is left alone');
 });

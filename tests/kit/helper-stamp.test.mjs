@@ -23,7 +23,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { _setGlobalRootForTest } from '../../src/lib/paths.mjs';
-import { helperStampStale, refreshRufloHelpers, fixStatusline } from '../../src/lib/statusline.mjs';
+import { helperStampStale, refreshRufloHelpers, runHelperRefresh, fixStatusline } from '../../src/lib/statusline.mjs';
 
 // Minimal host: just the shapes fixStatusline keys off, runnable post-injection.
 const HOST = `#!/usr/bin/env node
@@ -65,7 +65,21 @@ const BLOCKED_REFRESH = `export async function autoRefreshHelpersIfStale() {
 }
 `;
 
-const REFRESH_BODIES = { faithful: FAKE_REFRESH, throws: THROWING_REFRESH, hangs: HANGING_REFRESH, blocked: BLOCKED_REFRESH };
+// Upstream's no-op: ran unblocked, wrote nothing (stamp current, or no
+// hook-handler.cjs in either the project or the global helpers directory).
+const NOOP_REFRESH = `export async function autoRefreshHelpersIfStale() {
+  return { refreshed: false, global: { refreshed: false } };
+}
+`;
+
+// Only the global ~/.claude/helpers pass rewrote anything.
+const GLOBAL_REFRESH = `export async function autoRefreshHelpersIfStale() {
+  return { refreshed: false, global: { refreshed: true } };
+}
+`;
+
+const REFRESH_BODIES = { faithful: FAKE_REFRESH, throws: THROWING_REFRESH, hangs: HANGING_REFRESH,
+  blocked: BLOCKED_REFRESH, noop: NOOP_REFRESH, global: GLOBAL_REFRESH };
 
 function fixture({ cliVersion = '3.32.7', stamp, refreshModule } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-stamp-'));
@@ -73,6 +87,7 @@ function fixture({ cliVersion = '3.32.7', stamp, refreshModule } = {}) {
   const helpers = path.join(proj, '.claude', 'helpers');
   fs.mkdirSync(helpers, { recursive: true });
   fs.writeFileSync(path.join(helpers, 'statusline.cjs'), HOST);
+  fs.writeFileSync(path.join(helpers, 'hook-handler.cjs'), '');
   if (stamp !== undefined) fs.writeFileSync(path.join(helpers, '.helpers-version'), stamp);
 
   const groot = path.join(dir, 'groot');
@@ -129,6 +144,16 @@ test('missing stamp with a resolvable CLI counts as stale (first refresh pending
   assert.equal(helperStampStale(proj), true);
 });
 
+test('no ruflo helpers (no hook-handler.cjs) → never stale: ruflo refreshes nothing there', () => {
+  // e.g. `ak sync` run from ~/.claude: no stamp exists, but ruflo's own refresh
+  // returns early without hook-handler.cjs, so "stale" would be a false alarm.
+  const { proj } = fixture({ cliVersion: '3.32.7' });
+  fs.rmSync(path.join(proj, '.claude', 'helpers', 'hook-handler.cjs'));
+  assert.equal(helperStampStale(proj), false);
+  fs.rmSync(path.join(proj, '.claude'), { recursive: true });
+  assert.equal(helperStampStale(proj), false);
+});
+
 test('no installed CLI → never stale (nothing exists to refresh anything)', () => {
   const { proj } = fixture({ cliVersion: null, stamp: '3.32.2' });
   assert.equal(helperStampStale(proj), false);
@@ -183,4 +208,28 @@ test('dryRun never triggers the refresh (status stays read-only)', () => {
   const { proj } = fixture({ refreshModule: 'faithful' });
   fixStatusline(proj, { dryRun: true });
   assert.equal(fs.existsSync(path.join(proj, 'REFRESHED')), false);
+});
+
+// --- runHelperRefresh: a no-op must never read as a heal ----------------------
+
+test('runHelperRefresh distinguishes refreshed, current and failed', () => {
+  assert.equal(runHelperRefresh(fixture({ refreshModule: 'faithful' }).proj), 'refreshed');
+  assert.equal(runHelperRefresh(fixture({ refreshModule: 'global' }).proj), 'refreshed');
+  assert.equal(runHelperRefresh(fixture({ refreshModule: 'noop' }).proj), 'current');
+  assert.equal(runHelperRefresh(fixture({ refreshModule: 'blocked' }).proj), 'failed');
+  assert.equal(runHelperRefresh(fixture({ refreshModule: 'throws' }).proj), 'failed');
+  assert.equal(runHelperRefresh(fixture({}).proj), 'failed');
+  // The boolean wrapper keeps its "ran unblocked" contract.
+  assert.equal(refreshRufloHelpers(fixture({ refreshModule: 'noop' }).proj), true);
+});
+
+test('fixStatusline marks a location without ruflo helpers as absent, not a defect', () => {
+  const { proj } = fixture({});
+  fs.rmSync(path.join(proj, '.claude'), { recursive: true });
+  const r = fixStatusline(proj);
+  assert.equal(r.applied, false);
+  assert.equal(r.absent, true);
+  const { proj: partial, sl } = fixture({});
+  fs.rmSync(sl);
+  assert.equal(fixStatusline(partial).absent, false, 'helpers without statusline.cjs stays a warning');
 });

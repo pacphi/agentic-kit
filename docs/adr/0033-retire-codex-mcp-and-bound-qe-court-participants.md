@@ -3,7 +3,7 @@
 - **Status:** Implemented; handoff transport amended by
   [ADR-0034](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0034-schema-native-handoffs-and-hermetic-seats.md)
 - **Date:** 2026-08-25
-- **Updated:** 2026-09-10
+- **Updated:** 2026-09-23
 - **Update note:** Initial implementation retires only receipt-owned legacy MCP state,
   diagnoses effective Codex MCP topology, extends POSIX cleanup to process groups, and adds
   fail-closed QE-Court readiness plus a reciprocal live participant-transport regression.
@@ -22,6 +22,13 @@
   removal can record consent for matching future repairs while the workspace-aware
   replacement remains agentic-kit-owned. Final topology verification rejects
   unresolved duplication and in-scope recursion; custom entries remain preserved.
+  2026-09-23: the legacy `claude-flow` alias is now replaced in place by a disabled
+  placeholder (`enabled = false`, bounded exact-table edit with backup, child tables
+  included) instead of deleted. Codex's Claude config import (re-run on a schedule by
+  the desktop app) adds any Claude MCP server whose name Codex lacks, so deletion was
+  undone within hours and every sync repeated the repair (14 repairs observed
+  2026-09-04 → 2026-09-23). The placeholder keeps the name taken and is never itself a
+  repair target.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0001](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0001-one-routing-policy-many-projections.md),
   [ADR-0006](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0006-primary-host-and-ambidextrous-mirroring.md),

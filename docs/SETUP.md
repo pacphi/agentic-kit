@@ -125,9 +125,10 @@ Setup with Codex enabled inventories the effective user Codex MCP configuration
 even in machine-only mode. When project setup is active it inventories that
 project's Codex MCP configuration too. An exact recursive
 `[mcp_servers.codex]` entry and the exact deprecated `claude-flow` Ruflo
-transport are listed in the setup trust manifest, backed up, removed only after
+transport are listed in the setup trust manifest, backed up, corrected only after
 the setup confirmation (or `--yes`), and re-probed before setup may report
-success. A fresh recovery copy captures the immediate pre-repair bytes; symlinked
+success. The recursive entry is removed; the `claude-flow` alias is replaced by a
+disabled placeholder so Codex's Claude config import cannot add it back. A fresh recovery copy captures the immediate pre-repair bytes; symlinked
 or otherwise non-regular config files remain report-only. Project files and the
 legacy Ruflo replacement stay outside this repair scope under `--minimal` or
 when setup is run outside a project.

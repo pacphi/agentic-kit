@@ -41,7 +41,10 @@ export function rememberCodexMcpRepairs(cfg, targets, topology) {
 export async function confirmCodexMcpRepairs(cfg, targets, topology, { yes, confirm }) {
   if (!targets.length) return true;
   console.log(`Codex repair plan (${targets.length} action(s)):`);
-  for (const entry of targets) console.log(`  • remove ${entry.file} → [mcp_servers.${entry.name}] — ${entry.reason}`);
+  for (const entry of targets) {
+    const action = entry.repairKind === 'legacy-ruflo' ? 'disable' : 'remove';
+    console.log(`  • ${action} ${entry.file} → [mcp_servers.${entry.name}] — ${entry.reason}`);
+  }
   const pending = targets.filter(entry => !hasCodexMcpRepairConsent(cfg, entry, topology));
   if (!pending.length) {
     console.log('Using remembered consent for the recognized legacy Ruflo correction.');

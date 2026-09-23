@@ -133,7 +133,7 @@ export function codexMcpRepairTrustManifest(plan = []) {
     && ((entry?.repairKind === 'recursive-codex' && entry?.name === 'codex')
       || (entry?.repairKind === 'legacy-ruflo' && entry?.name === 'claude-flow'))
   )).map((entry) => {
-    const mechanism = entry.scope === 'user'
+    const mechanism = entry.scope === 'user' && entry.repairKind === 'recursive-codex'
       ? 'through `codex mcp`'
       : 'with a bounded exact-table edit';
     return {
@@ -144,7 +144,7 @@ export function codexMcpRepairTrustManifest(plan = []) {
       value: `[mcp_servers.${entry.name}]`,
       effect: entry.repairKind === 'recursive-codex'
         ? `create a current-state recovery copy, remove this deprecated recursive Codex transport ${mechanism}, and verify its absence`
-        : `create a current-state recovery copy, remove this duplicate legacy Ruflo transport ${mechanism}, and verify its absence${entry.scope === 'user' ? '; remember this recognized correction for future setup/sync runs while the managed workspace-aware replacement remains present' : ''}`,
+        : `create a current-state recovery copy, replace this duplicate legacy Ruflo transport ${mechanism} with a disabled placeholder (so Codex's Claude config import cannot re-add it), and verify it is disabled${entry.scope === 'user' ? '; remember this recognized correction for future setup/sync runs while the managed workspace-aware replacement remains present' : ''}`,
     };
   });
   if (!changes.length) return [];

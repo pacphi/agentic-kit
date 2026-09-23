@@ -7,7 +7,7 @@ import readline from 'node:readline/promises';
 import { collect } from './status.mjs';
 import * as heal from '../lib/heal.mjs';
 import { have } from '../lib/exec.mjs';
-import { fixStatusline, helperStampStale, refreshRufloHelpers } from '../lib/statusline.mjs';
+import { fixStatusline, helperStampStale, runHelperRefresh } from '../lib/statusline.mjs';
 import { reconcileGuidance } from '../lib/blocks.mjs';
 import {
   register as mcpRegister, applyExclusions, codexMcpTopology, codexMcpRepairPlan,
@@ -446,9 +446,12 @@ export const SYNC_STEPS = [
     id: 'ruflo-helpers',
     when: (subs) => subs.has('versions'),
     run: async (ctx) => {
-      const refreshed = await withProgress('ruflo helpers', async () => refreshRufloHelpers(ctx.cwd));
-      if (refreshed) ok('ruflo helpers: signed generated helpers refreshed');
-      else if (helperStampStale(ctx.cwd)) warn('ruflo helpers: refresh did not converge; generated helpers remain stale');
+      // Helpers live at the project root, not a subdirectory cwd (repoRoot is
+      // the kit-wide project gate); outside a repository the cwd is used as-is.
+      const root = paths.repoRoot(ctx.cwd) ?? ctx.cwd;
+      const outcome = await withProgress('ruflo helpers', async () => runHelperRefresh(root));
+      if (outcome === 'refreshed') ok('ruflo helpers: signed generated helpers refreshed');
+      else if (helperStampStale(root)) warn('ruflo helpers: refresh did not converge; generated helpers remain stale');
       else info('ruflo helpers: current');
     },
   },
@@ -466,14 +469,16 @@ export const SYNC_STEPS = [
       // refresh, up to 30s). The interval can't animate through a synchronous
       // execFileSync, but the initial "⏳ statusline" render lands before the
       // block — a visible label beats a frozen prompt.
-      const r = await withProgress('statusline', async () => fixStatusline(ctx.cwd));
-      (r.applied || !r.reason ? ok : warn)(`statusline: ${r.applied ? `footer injected (v${r.version})` : r.reason ?? 'in sync'}`);
+      const root = paths.repoRoot(ctx.cwd) ?? ctx.cwd;
+      const r = await withProgress('statusline', async () => fixStatusline(root));
+      if (r.absent) info('statusline: no ruflo helpers here — nothing to patch');
+      else (r.applied || !r.reason ? ok : warn)(`statusline: ${r.applied ? `footer injected (v${r.version})` : r.reason ?? 'in sync'}`);
       // Honest success: fixStatusline invokes ruflo's PRIVATE helper-refresh
       // internal, best-effort. If the stamp is STILL stale after the heal, that
       // refresh silently no-oped (e.g. upstream moved the dist module) and the
       // next ruflo command will wipe the footer we just injected — say so
       // instead of letting "footer injected" read as converged.
-      if (helperStampStale(ctx.cwd)) {
+      if (helperStampStale(root)) {
         warn('statusline: helper stamp still stale after heal — ruflo\'s refresh did not run; the footer may not survive the next ruflo command');
       }
     },

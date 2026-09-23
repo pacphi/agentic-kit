@@ -51,8 +51,23 @@ configuration and offers to remember correction of the recognized user-scope
 manifest with `--yes`, authorizes later setup/sync runs to repeat this bounded
 correction. Historical approvals are not converted into remembered consent.
 
-Legacy alias removal runs after provisioning, with an enabled canonical `ruflo`
-replacement present. Each removal retains the live fingerprint check, creates a
+The correction disables the alias in place rather than deleting it:
+
+```toml
+[mcp_servers.claude-flow]
+# agentic-kit: disabled placeholder — stops Codex's Claude import from
+# re-adding a duplicate of [mcp_servers.ruflo]. Delete this table to undo.
+command = "ruflo"
+args = ["mcp", "start"]
+enabled = false
+```
+
+Codex's Claude config import adds any Claude MCP server whose name Codex does
+not already have. A deleted alias therefore returned within hours. The
+placeholder keeps the name taken and launches nothing.
+
+The correction runs after provisioning, with an enabled canonical `ruflo`
+replacement present. Each correction retains the live fingerprint check, creates a
 current-state backup, and verifies the result. The remembered correction is used
 only while agentic-kit owns the workspace-aware `ak x ruflo-mcp` replacement.
 It does not authorize removing project entries, other names, custom commands,
