@@ -2,7 +2,8 @@
 
 - **Status:** Amended by [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-23
-- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
+- **Updated:** 2026-09-23 — default models moved to the current generation: `claude-opus-5-5`, `gpt-6-sol`, `gpt-6-luna`
+- **Previous update:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Earlier update:** 2026-07-30
 - **Update note:** Preserved the activity vocabulary and moved its runtime ownership to the
   in-repository host-neutral runner.
@@ -49,9 +50,11 @@ model for execution) and are treated as **soft defaults** — see the "open ques
 
 Tier is the pairing key, not the model id: `MODEL_CATALOG` spells `flagship`/`balanced`/`fast`
 identically on both hosts so primary-host mirroring can map a route to its counterpart's equivalent.
-As of 2026-08-07 execution routes to `gpt-5.6-terra` (balanced) and mechanical work to `gpt-5.6-luna`
-(fast), as agentic-kit default preferences, not as evidence that `gpt-5.4` or
-`gpt-5.4-mini` were withdrawn; deep reasoning routes to `claude-opus-5`. Withdrawn ids are handled by the retirement
+As of 2026-09-23 execution routes to `gpt-6-sol` (balanced) and mechanical work to `gpt-6-luna`
+(fast), and deep reasoning routes to `claude-opus-5-5`. These are agentic-kit default preferences,
+following each vendor's recommended starting model, not evidence that earlier models were withdrawn.
+Cross-host tiers pair by role and per-token price: `gpt-6-sol` ↔ `claude-sonnet-5`,
+`gpt-6-astra` ↔ `claude-fable-5-1`, `gpt-6-luna` ↔ Haiku. Withdrawn ids are handled by the retirement
 mechanism in [ADR-0003](0003-auto-seed-dual-host-provenance.md), not by editing this table alone.
 
 ## Consequences

@@ -373,7 +373,7 @@ When you want explicit ordering rather than env auto-enable, `ak` manages agenti
 ```bash
 ak host pick \
   --aqe-provider claude-code \
-  --aqe-fallback 'claude-code:claude-opus-5; openai:gpt-5.6; gemini:gemini-3.5-flash'
+  --aqe-fallback 'claude-code:claude-opus-5-5; openai:gpt-5.6; gemini:gemini-3.5-flash'
 ```
 
 Each `provider:model,model` becomes an ordered chain entry (first = highest priority). `ak`
@@ -434,7 +434,7 @@ provider — add them to the chain and put `OPENROUTER_API_KEY` in your env:
 ```bash
 ak host pick \
   --aqe-provider claude-code \
-  --aqe-fallback 'claude-code:claude-opus-5; openrouter:z-ai/glm-5.2'
+  --aqe-fallback 'claude-code:claude-opus-5-5; openrouter:z-ai/glm-5.2'
 ```
 
 Curated picks (verified September 8, 2026): `z-ai/glm-5.2` (flagship — 1M context, strong
@@ -507,11 +507,14 @@ Defaults (all overridable; your edits are marked `custom` and never re-seeded):
 | Activity | Host | Default model |
 |---|---|---|
 | specification, review, release | claude | `claude-sonnet-5` |
-| architecture, design, debugging, security-analysis | claude | `claude-opus-5` |
-| implementation, testing, security-scan | codex | `gpt-5.6-terra` |
-| documentation, packaging | codex | `gpt-5.6-luna` |
+| architecture, design, debugging, security-analysis | claude | `claude-opus-5-5` |
+| implementation, testing, security-scan | codex | `gpt-6-sol` |
+| documentation, packaging | codex | `gpt-6-luna` |
 
 *(packaging & release are `ak`-added — ruflo ships templates for feature/security/refactor only.)*
+
+Implementation and testing escalate to `claude-opus-5-5`. Routes seeded before a default
+changes are reported as diverged and keep their model until you run `ak x host refresh`.
 
 **Retired Codex models.** `ak` has no automatic Codex retirement substitutions as of 2026-08-25.
 The current [OpenAI API model catalog](https://developers.openai.com/api/docs/models/all) still lists

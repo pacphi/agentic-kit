@@ -66,7 +66,7 @@ test('divergedRoutes returns [] for an empty policy (nothing persisted, nothing 
 
 test('divergedRoutes reports a seeded entry whose model no longer matches the default', () => {
   // The exact #55 reproduction: a machine seeded pre-alpha.22 still pinned to
-  // the prior Opus generation while DEFAULT_ROUTES moved to claude-opus-5.
+  // the prior Opus generation while DEFAULT_ROUTES moved on.
   const policy = { architecture: { host: 'claude', model: 'claude-opus-4-8', provenance: 'seeded' } };
   const out = divergedRoutes(policy);
   assert.equal(out.length, 1);
@@ -121,12 +121,13 @@ test('the codex-primary clean-seed assertion actually covers a LADDER-bearing ac
 test('a corrupted rung on a MIRRORED activity is still reported (mirroring is not amnesty)', () => {
   const seed = seedActivityRoutes({ primary: 'codex' });
   const [act] = Object.entries(seed).find(([, r]) => r.escalation?.length);
+  const mirroredRung = seed[act].escalation[0].model;
   seed[act].escalation[0].model = 'gpt-5.6-luna';
   const [d] = divergedRoutes(seed);
   assert.equal(d.activity, act);
   assert.equal(d.modelDiverged, false, 'only the rung moved — the primary model is untouched');
   assert.equal(d.escalation[0].model, 'gpt-5.6-luna');
-  assert.equal(d.escalation[0].defaultModel, 'gpt-5.6-sol', 'compared against the MIRRORED default rung');
+  assert.equal(d.escalation[0].defaultModel, mirroredRung, 'compared against the MIRRORED default rung');
 });
 
 test('divergedRoutes ignores a seeded entry that still matches the default', () => {
@@ -138,21 +139,26 @@ test('divergedRoutes ignores a seeded entry that still matches the default', () 
 });
 
 /** The pre-alpha.22 seed: a REAL seeded policy (escalation ladders included,
- *  exactly as seedActivityRoutes writes them) with every claude-opus-5 pin rewound
+ *  exactly as seedActivityRoutes writes them) with every default-Opus pin rewound
  *  to claude-opus-4-8 — primary models and escalation rungs alike. Building this
  *  from seedActivityRoutes rather than by hand matters: a fixture that silently
  *  dropped `escalation` would under-report divergence and hide the escalation-only
  *  case entirely. */
 function priorCatalogSeed({ primary = 'claude' } = {}) {
   // Two rewind rules, one per primary. A claude-primary seed carries
-  // claude-opus-5; a codex-primary seed mirrors every claude model away, so it
+  // the default Opus; a codex-primary seed mirrors every claude model away, so it
   // carries none — rewinding only that id would make the mirrored fixture
   // silently vacuous (it tested nothing at all once the catalog's tier pairing
   // became complete). gpt-5.6-sol appears ONLY in the mirrored seed, so the
   // second rule bites exactly where the first cannot. Both targets are current,
   // non-retired models: this fixture is about divergence, and letting a RETIRED
   // id in would conflate it with the substitution mechanism.
-  const PRIOR = { 'claude-opus-5': 'claude-opus-4-8', 'gpt-5.6-sol': 'gpt-5.6-terra' };
+  // Keyed on the CURRENT defaults so the fixture follows a future default change
+  // instead of silently rewinding nothing. The claude default appears only in a
+  // claude-primary seed, the codex workhorse is the rung a mirrored seed carries.
+  const PRIOR = primary === 'codex'
+    ? { [DEFAULT_ROUTES.implementation.model]: 'gpt-5.6-sol' }
+    : { [DEFAULT_ROUTES.architecture.model]: 'claude-opus-4-8' };
   const rewind = (m) => PRIOR[m] ?? m;
   const policy = seedActivityRoutes({ hosts: ['claude', 'codex'], primary });
   const out = {};

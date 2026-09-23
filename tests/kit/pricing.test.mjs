@@ -10,7 +10,7 @@ const M = 1_000_000;
 // ── Table shape ──────────────────────────────────────────────────────────────
 
 test('PRICES_AS_OF is the ISO date the table was last verified', () => {
-  assert.equal(PRICES_AS_OF, '2026-09-08');
+  assert.equal(PRICES_AS_OF, '2026-09-23');
 });
 
 test('every PRICES entry carries finite in/out rates, a provider, and asOf', () => {
@@ -220,7 +220,7 @@ test('Astra resolves its published rates and independent verification date', () 
     const p = priceFor(id, 'openai');
     assert.equal(p.matched, true);
     assert.equal(p.key, 'gpt-6-astra');
-    assert.deepEqual([p.in, p.out, p.cacheReadMultiplier, p.asOf], [10, 50, 0.1, '2026-09-08']);
+    assert.deepEqual([p.in, p.out, p.cacheReadMultiplier, p.asOf], [10, 50, 0.1, PRICES_AS_OF]);
   }
   assert.equal(priceFor('gpt-6-astral').matched, false);
   assert.equal(priceFor('gpt-6').matched, false);
@@ -258,4 +258,43 @@ test('OpenAI cache premiums follow the published model generation', () => {
   assert.equal(costOf({ model: 'gpt-5.5', cacheWrite: M }), 5);
   assert.equal(costOf({ model: 'gpt-5.6', cacheWrite: M }), 5);
   assert.equal(costOf({ model: 'gpt-6-astra', cacheWrite: M }), 12.5);
+});
+
+
+// Opus 5.5 (2026-09-22) is priced BELOW the Opus line before it and reads cache
+// at 0.05x. Before its own key existed, `claude-opus-5-5` matched `claude-opus-5`
+// on the token boundary and was costed at $5/$25 with 0.1x cache reads.
+test('Opus 5.5 resolves its own row: $4/$20, 0.05x cache reads, 1.25x/2x writes', () => {
+  const p = priceFor('claude-opus-5-5');
+  assert.equal(p.key, 'claude-opus-5-5', 'must not fall through to claude-opus-5');
+  assert.deepEqual([p.in, p.out, p.cacheReadMultiplier, p.asOf], [4, 20, 0.05, '2026-09-23']);
+  for (const [counter, expected] of Object.entries({ input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 })) {
+    assert.equal(costOf({ model: 'claude-opus-5-5', [counter]: M }), expected, counter);
+  }
+  assert.equal(costOf({ model: 'claude-opus-5-5', cacheWrite: M, cacheWrite1h: M }), 8, '1-hour writes at 2x');
+  assert.equal(priceFor('claude-opus-5').key, 'claude-opus-5', 'Opus 5 keeps its own rate');
+  assert.equal(priceFor('claude-opus-5-20260401').key, 'claude-opus-5', 'a dated Opus 5 id is not Opus 5.5');
+});
+
+test('GPT-6 Sol and Luna carry their published standard rates and write premium', () => {
+  for (const [model, rates] of Object.entries({
+    'gpt-6-sol': { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
+    'gpt-6-luna': { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
+  })) {
+    assert.equal(priceFor(model).key, model);
+    for (const [counter, expected] of Object.entries(rates)) {
+      assert.ok(Math.abs(costOf({ model, [counter]: M }) - expected) < 1e-12, `${model} ${counter}`);
+    }
+  }
+  assert.equal(priceFor('gpt-5.6-sol').key, 'gpt-5.6-sol', 'the GPT-5.6 namesake keeps its own rate');
+});
+
+// OpenCode and custom Codex providers record provider-namespaced ids. Matching
+// is by prefix, so before this the namespace sent them to the fallback rate.
+test('a provider-namespaced id is matched on its model segment', () => {
+  assert.equal(priceFor('anthropic/claude-opus-4.7').key, 'claude-opus-4-7');
+  assert.equal(priceFor('openai/gpt-5.5').key, 'gpt-5.5');
+  assert.equal(priceFor('openrouter/anthropic/claude-sonnet-5').key, 'claude-sonnet-5');
+  assert.equal(priceFor('anthropic/unknown-model').matched, false);
+  assert.equal(priceFor('anthropic/').matched, false);
 });

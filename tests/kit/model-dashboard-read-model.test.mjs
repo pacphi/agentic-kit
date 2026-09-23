@@ -656,7 +656,7 @@ test('Astra inventory and unlinked routes show first-party pricing and its verif
   const projected = createDashboardModelPayload(input, { key: KEY }).snapshot.models[0];
   assert.equal(projected.pricing.input, 10);
   assert.equal(projected.pricing.output, 50);
-  assert.equal(projected.pricing.asOf, '2026-09-08');
+  assert.equal(projected.pricing.asOf, '2026-09-23');
   assert.equal(projected.pricing.sourceUrl, 'https://developers.openai.com/api/docs/models/gpt-6-astra');
   assert.equal(projected.dimensions.entitled.value, null);
   input.snapshot.models = [];

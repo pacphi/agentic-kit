@@ -17,8 +17,8 @@ ak models refresh
 ak models refresh --host claude
 ak models status
 ak models diff
-ak models explain codex:gpt-5.6-terra
-ak models plan --activity testing --from codex:gpt-5.4 --to codex:gpt-5.6-terra
+ak models explain codex:gpt-6-sol
+ak models plan --activity testing --from codex:gpt-5.6-terra --to codex:gpt-6-sol
 ```
 
 Only `refresh` contacts model sources or writes a snapshot. `status`, `diff`, `explain`, `plan`,

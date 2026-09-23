@@ -127,7 +127,7 @@ Options (pick, all optional — omit for interactive):
                                  needs OPENROUTER_API_KEY in the env)
   --provider <csv>             register ruflo providers (e.g. ollama:qwen3.6:27b)
   --route 'act:host[:model]'   override one activity's routing (repeatable), e.g.
-                                 --route 'implementation:claude:claude-opus-5'
+                                 --route 'implementation:claude:claude-opus-5-5'
                                  activities: specification, architecture, design,
                                  implementation, testing, review, security-scan,
                                  security-analysis, documentation, debugging,
