@@ -121,9 +121,15 @@ export function agentBrowserMcpConfigured(registration, enabled = true) {
 const canonicalRufloRegistration = (entry) => entry?.command === 'ruflo'
   && JSON.stringify(entry.args) === JSON.stringify(['mcp', 'start']);
 
+// ADR-0058 §3 (Claude, Inherits branch): Task 0's 2026-09-23 spike verified Claude Code
+// passes the settings `env` block to stdio MCP servers, so the machine-scoped ruflo
+// component keys never need to travel as registration `-e` values; only a prior ak-set
+// AGENT_BROWSER_CONFIG or one of these keys marks a registration as ak's own to replace.
+const AK_REGISTRATION_ENV_KEYS = new Set(['AGENT_BROWSER_CONFIG',
+  'CLAUDE_FLOW_ROUTER_TYPESAFE', 'CLAUDE_FLOW_ROUTER_EMBEDDER', 'RUFLO_INTELLIGENCE_MODE']);
 function replaceableRufloRegistration(entry) {
   if (!canonicalRufloRegistration(entry) || entry.scope !== 'user') return false;
-  return Object.keys(entry.env ?? {}).every((key) => key === 'AGENT_BROWSER_CONFIG');
+  return Object.keys(entry.env ?? {}).every((key) => AK_REGISTRATION_ENV_KEYS.has(key));
 }
 
 function mcpAddArgs(name, entry) {

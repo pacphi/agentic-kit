@@ -41,6 +41,7 @@ import { readJson, writeJsonWithBackup } from '../lib/settings.mjs';
 import { withDb } from '../lib/sqlite.mjs';
 import { findMemoryEntry } from '../lib/project-memory.mjs';
 import { projectMemoryEnv } from '../lib/ruflo-memory.mjs';
+import { reconcileMemoryPin } from '../lib/claude-env-projection.mjs';
 import {
   setupTrustManifest, trustManifestLines,
 } from '../lib/trust-manifest.mjs';
@@ -539,12 +540,9 @@ async function sanitizeProjectMcpConfig(root) {
 /** Step 4: pin ABSOLUTE CLAUDE_FLOW_DB_PATH (Claude Code doesn't expand
  *  ${CLAUDE_PROJECT_DIR}). */
 function pinProjectMemoryDbPath(root) {
-  const dbPath = paths.projectMemoryDb(fs.realpathSync(root));
-  const localFile = paths.projectSettingsLocal(root);
-  const local = readJson(localFile, {}) ?? {};
-  local.env = { ...local.env, CLAUDE_FLOW_DB_PATH: dbPath };
-  writeJsonWithBackup(localFile, local);
-  ok(`CLAUDE_FLOW_DB_PATH pinned → ${dbPath}`);
+  const result = reconcileMemoryPin(root, { enabled: true });
+  if (result.ok) ok(`CLAUDE_FLOW_DB_PATH pinned (${result.status}) → ${paths.projectMemoryDb(fs.realpathSync(root))}`);
+  else warn(`CLAUDE_FLOW_DB_PATH pin preserved: ${result.reason} — memory may use a different store`);
 }
 
 /** Step 5: activate memory + swarm with the pin exported. */

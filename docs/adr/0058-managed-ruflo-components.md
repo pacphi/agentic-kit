@@ -148,11 +148,13 @@ Targets:
   Machine-wide variables (pickers, learning profile) go in the user `~/.claude/settings.json`;
   the governance variable goes in the project's `.claude/settings.local.json`, next to its
   policy file. `replaceableRufloRegistration` (`src/lib/mcp.mjs`) learns to treat keys ak holds
-  receipts for as ak-owned instead of user-owned.
+  receipts for as ak-owned instead of user-owned. Verified 2026-09-23: Claude Code passes the
+  settings `env` block to stdio MCP servers and hooks; the ruflo MCP registration is unchanged.
 - **Codex.** The ruflo MCP server already starts through ak's launcher (`ak x ruflo-mcp` →
   `rufloMcpLaunch`), which knows the workspace; it adds `componentEnv(workspace)` at launch.
-  Whether ruflo's Codex hooks can be given these variables is an open question for the
-  implementation plan. If they cannot, those components report `partial` for Codex hooks.
+  Whether ruflo's Codex hooks receive variables ak sets could not be verified without changing
+  Codex trust state (2026-09-23 spike); until upstream request 4 is answered, the pickers and
+  learning profile report `partial` for Codex hooks when Codex is enabled.
 - **OpenCode.** The generated gateway takes its environment from `componentEnv` instead of the
   fixed `RUFLO_MCP_ENV`. The lifecycle hooks template stops hardcoding only the memory pin and
   reads the generated environment. Both artifacts stay content-hash receipted.
@@ -271,6 +273,7 @@ Tracked under ADR-0031 and shown as "waiting on upstream" where relevant:
 
 | Piece | Status |
 |---|---|
+| Spike: environment reach per host | Done (2026-09-23) |
 | Component catalogue and states | Not started |
 | Multi-key owned projection engine (from ADR-0055) | Not started |
 | Host projections (Claude, Codex launcher, OpenCode) | Not started |

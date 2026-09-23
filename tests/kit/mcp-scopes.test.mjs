@@ -113,6 +113,26 @@ test('Claude registration safely replaces the prior canonical claude-flow entry'
   ]);
 });
 
+test('Claude registration replaces a prior registration carrying ak-owned ruflo-components env keys', async () => {
+  const calls = [];
+  const ok = await register({ agentBrowser: true }, {
+    runner: async (bin, args) => { calls.push([bin, args]); return { code: 0, stdout: '', stderr: '' }; },
+    inspect: () => ({ registrations: [{
+      name: 'claude-flow', scope: 'user', command: 'ruflo', args: ['mcp', 'start'],
+      env: { RUFLO_INTELLIGENCE_MODE: 'research' },
+    }] }),
+  });
+  assert.equal(ok, true);
+  assert.deepEqual(calls, [
+    ['claude', ['mcp', 'remove', 'claude-flow', '-s', 'user']],
+    ['claude', [
+      'mcp', 'add', 'claude-flow', '-s', 'user',
+      '-e', `AGENT_BROWSER_CONFIG=${agentBrowserConfigPath()}`,
+      '--', 'ruflo', 'mcp', 'start',
+    ]],
+  ]);
+});
+
 test('Claude registration preserves a conflicting user-owned claude-flow entry', async () => {
   const calls = [];
   const ok = await register({ agentBrowser: true }, {
