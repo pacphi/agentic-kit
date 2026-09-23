@@ -10,6 +10,7 @@ import { installedVersion } from '../versions.mjs';
 import { globalInstallArgs } from '../npm-global-install.mjs';
 import { reconcileClaudeComponentEnv } from '../claude-env-projection.mjs';
 import { managedIntent } from './config.mjs';
+import { componentById } from './catalogue.mjs';
 import { supports } from './env.mjs';
 import { reconcilePolicy, readPolicy } from './policy.mjs';
 import {
@@ -42,7 +43,7 @@ export async function ensureTypesafePackage(cfg, options = {}) {
     runner = run, rufloVersion = installedVersion('ruflo'),
     resolveVersion = () => moduleVersionFromRuflo(TYPESAFE), preinstalled,
   } = options;
-  if (!managedIntent(cfg, 'typesafePicker') || !supports(rufloVersion, '3.43.0')) {
+  if (!managedIntent(cfg, 'typesafePicker') || !supports(rufloVersion, componentById('typesafePicker').minRuflo)) {
     return { ok: true, changed: false, detail: 'not required' };
   }
   if (preinstalled ?? resolveVersion() !== null) return { ok: true, changed: false, detail: `${TYPESAFE} present` };
@@ -123,11 +124,23 @@ export async function reconcileRufloComponents(cfg, options = {}) {
     if (!fun.ok) blocked.funnel = fun.detail;
   }
   let policy = null;
-  if (projectRoot && supports(rufloVersion, '3.42.0')) {
-    const receipts = (owned(cfg).policies ??= {});
-    const p = reconcilePolicy(projectRoot, managedIntent(cfg, 'mcpGovernance'), receipts, { dryRun });
-    results.push({ id: 'mcpGovernance', ok: true, changed: p.changed, detail: `policy ${p.status}` });
-    policy = readPolicy(projectRoot).state;
+  if (projectRoot && supports(rufloVersion, componentById('mcpGovernance').minRuflo)) {
+    try {
+      // Dry run must never create cfg.integrations.ownership.rufloComponents.policies (or
+      // any parent of it) — reconcilePolicy only reads/writes its receipts argument, so a
+      // throwaway copy keeps dry-run side-effect-free while still detecting drift correctly.
+      const receipts = dryRun
+        ? { ...(cfg?.integrations?.ownership?.rufloComponents?.policies ?? {}) }
+        : (owned(cfg).policies ??= {});
+      const p = reconcilePolicy(projectRoot, managedIntent(cfg, 'mcpGovernance'), receipts, { dryRun });
+      results.push({ id: 'mcpGovernance', ok: true, changed: p.changed, detail: `policy ${p.status}` });
+      policy = readPolicy(projectRoot).state;
+    } catch (error) {
+      const detail = (error?.message || String(error)).slice(0, 160);
+      blocked.mcpGovernance = detail;
+      results.push({ id: 'mcpGovernance', ok: false, changed: false, detail });
+      policy = readPolicy(projectRoot).state;
+    }
   }
   const claude = reconcileClaudeComponentEnv(cfg, {
     projectRoot, rufloVersion, userSettingsFile, dryRun,

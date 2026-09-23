@@ -110,10 +110,14 @@ test('reconcile: dry run writes nothing; real run writes policy and env and clas
     userSettingsFile: path.join(tmp, 'home', 'settings.json'), evidenceFile: path.join(tmp, 'state', 'evidence.json'),
   };
   const before = fs.readdirSync(root);
-  const dry = await reconcileRufloComponents(fullCfg(), { ...opts, dryRun: true });
+  const dryCfg = fullCfg();
+  const dryCfgBefore = structuredClone(dryCfg);
+  const dry = await reconcileRufloComponents(dryCfg, { ...opts, dryRun: true });
   assert.equal(dry.changed, true);
   assert.deepEqual(fs.readdirSync(root), before);
   assert.equal(fs.existsSync(opts.userSettingsFile), false);
+  assert.equal(fs.existsSync(opts.evidenceFile), false);
+  assert.deepEqual(dryCfg, dryCfgBefore);
 
   const cfgReal = fullCfg();
   const real = await reconcileRufloComponents(cfgReal, opts);
@@ -148,4 +152,44 @@ test('reconcile: Codex enabled but unverifiable marks an otherwise-active minilm
   const minilm = result.snapshot.components.find((c) => c.id === 'minilmPicker');
   assert.equal(minilm.state.id, 'partial');
   assert.match(minilm.state.meaning, /Codex hooks/);
+});
+
+test('reconcile: a foreign policy file (e.g. from MetaHarness or Agentic-QE) is left alone, never enforced, and reported user-managed', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-rc-foreign-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const root = path.join(tmp, 'proj');
+  fs.mkdirSync(path.join(root, '.harness'), { recursive: true });
+  fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+  const foreign = JSON.stringify({ auditLog: true, maxToolCallsPerTurn: 8 });
+  fs.writeFileSync(path.join(root, '.harness', 'mcp-policy.json'), foreign);
+  const opts = {
+    cwd: root, runner: fakeRuflo, rufloVersion: '3.44.0',
+    userSettingsFile: path.join(tmp, 'home', 'settings.json'), evidenceFile: path.join(tmp, 'state', 'evidence.json'),
+  };
+  const result = await reconcileRufloComponents(fullCfg(), opts);
+  assert.equal(fs.readFileSync(path.join(root, '.harness', 'mcp-policy.json'), 'utf8'), foreign);
+  const local = `${path.join(root, '.claude', 'settings.local.json')}`;
+  assert.equal(fs.existsSync(local), false);
+  const gov = result.snapshot.components.find((c) => c.id === 'mcpGovernance');
+  assert.equal(gov.state.id, 'user-managed');
+  assert.match(gov.state.meaning, /This project has its own \.harness\/mcp-policy\.json, so ak leaves enforcement off\./);
+});
+
+test('reconcile: an fs error while reconciling the policy is caught and reported blocked, never thrown', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-rc-policy-fs-error-'));
+  t.after(() => { fs.chmodSync(path.join(tmp, 'proj'), 0o755); fs.rmSync(tmp, { recursive: true, force: true }); });
+  const root = path.join(tmp, 'proj');
+  fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+  fs.chmodSync(root, 0o555); // read-only: reconcilePolicy's mkdirSync('.harness') throws EACCES.
+  const opts = {
+    cwd: root, runner: fakeRuflo, rufloVersion: '3.44.0',
+    userSettingsFile: path.join(tmp, 'home', 'settings.json'), evidenceFile: path.join(tmp, 'state', 'evidence.json'),
+  };
+  const result = await reconcileRufloComponents(fullCfg(), opts);
+  const entry = result.results.find((r) => r.id === 'mcpGovernance');
+  assert.equal(entry.ok, false);
+  assert.equal(entry.changed, false);
+  assert.equal(typeof entry.detail, 'string');
+  const gov = result.snapshot.components.find((c) => c.id === 'mcpGovernance');
+  assert.equal(gov.state.id, 'blocked');
 });

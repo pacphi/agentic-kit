@@ -61,6 +61,13 @@ test('governance with an invalid policy is blocked with the lockout reason', () 
   assert.match(byId(snap, 'mcpGovernance').state.meaning, /refuse every tool call/);
 });
 
+test('governance with a foreign policy file is user-managed with the leaves-enforcement-off sentence', () => {
+  const snap = componentSnapshot({ cfg, rufloVersion: '3.44.0', evidence: evidence(), projection: projection({ policy: 'foreign' }), now });
+  const view = byId(snap, 'mcpGovernance');
+  assert.equal(view.state.id, 'user-managed');
+  assert.match(view.state.meaning, /This project has its own \.harness\/mcp-policy\.json, so ak leaves enforcement off\./);
+});
+
 test('missing hosts make a component partial and name them', () => {
   const snap = componentSnapshot({ cfg, rufloVersion: '3.44.0', evidence: evidence(), projection: projection({ missingHosts: ['Codex hooks'] }), now });
   assert.equal(byId(snap, 'typesafePicker').state.id, 'partial');

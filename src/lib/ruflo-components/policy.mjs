@@ -7,16 +7,23 @@ import { createHash } from 'node:crypto';
 import { writePrivateFileAtomic } from '../file-write.mjs';
 
 export const POLICY_RELATIVE = path.join('.harness', 'mcp-policy.json');
+// ak only ever enforces a policy file it wrote itself — other tools (MetaHarness,
+// Agentic-QE) also write .harness/mcp-policy.json, and turning enforcement on against
+// a foreign file would silently cap ruflo at a budget ak never chose. `_about` on an
+// ak-written file always starts with this marker (see renderPolicy below).
+export const AK_POLICY_MARKER = 'Managed by agentic-kit';
 const sha = (text) => createHash('sha256').update(text).digest('hex');
 const policyFile = (root) => path.join(root, POLICY_RELATIVE);
 
 export function renderPolicy({ maxCallsPerMinute }) {
   return JSON.stringify({
-    _about: 'Managed by agentic-kit (ADR-0058). Ruflo enforces auditLog and maxToolCallsPerTurn per rolling turnWindowMs.',
+    _about: `${AK_POLICY_MARKER} (ADR-0058). Ruflo enforces auditLog and maxToolCallsPerTurn per rolling turnWindowMs.`,
     auditLog: true, maxToolCallsPerTurn: maxCallsPerMinute, turnWindowMs: 60000,
   }, null, 2) + '\n';
 }
 
+/** states: 'absent' (no file) | 'invalid' (unreadable/malformed/unsafe) |
+ *  'foreign' (valid JSON object, but not written by ak) | 'valid' (ak-written). */
 export function readPolicy(root) {
   let source;
   try {
@@ -30,7 +37,8 @@ export function readPolicy(root) {
   try {
     const policy = JSON.parse(source);
     if (policy === null || typeof policy !== 'object' || Array.isArray(policy)) return { state: 'invalid', source };
-    return { state: 'valid', policy, source };
+    const akWritten = typeof policy._about === 'string' && policy._about.startsWith(AK_POLICY_MARKER);
+    return { state: akWritten ? 'valid' : 'foreign', policy, source };
   } catch { return { state: 'invalid', source }; }
 }
 

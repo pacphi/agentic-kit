@@ -87,6 +87,10 @@ function stateFor(component, { cfg, rufloVersion, evidence, projection, now }) {
     return describeState('blocked', { reason: 'The policy file is invalid, so ruflo would refuse every tool call; ak removed enforcement for this project.' });
   }
   if (id === 'mcpGovernance' && projection?.policy === 'absent') return describeState('not-applied');
+  if (id === 'mcpGovernance' && projection?.policy === 'foreign') {
+    const base = describeState('user-managed');
+    return { ...base, meaning: `${base.meaning} This project has its own .harness/mcp-policy.json, so ak leaves enforcement off.` };
+  }
   if (KEY_OF[id] && projection?.claude?.conflicts?.includes(KEY_OF[id])) return describeState('user-managed');
   if (!evidence || now - Date.parse(evidence.capturedAt) > EVIDENCE_STALE_MS) return describeState('unknown');
   const result = confirmed(id, intent, evidence);
