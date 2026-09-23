@@ -107,6 +107,27 @@ const fakeRuflo = async (cmd, args) => {
   return { code: 0, stdout: '', stderr: '' };
 };
 
+// Final review M9: "detected, not assumed" — a ruflo without a readable funnel status is
+// not a failure, and a higher-precedence source is never fought with a repeated disable.
+test('funnel: unreadable status is not a failure and runs no disable', async () => {
+  const { calls, runner } = recorder(() => ({ code: 1, stdout: '', stderr: 'Unknown command: funnel' }));
+  const result = await ensureFunnel(cfg(), { runner });
+  assert.equal(result.ok, true);
+  assert.ok(!calls.some((c) => /funnel disable/.test(c)));
+});
+
+for (const decidedBy of ['env', 'enterprise-policy']) {
+  test(`funnel: enabled by ${decidedBy} is left alone (disable cannot outrank it)`, async () => {
+    const { calls, runner } = recorder(() => ({ code: 0, stdout: JSON.stringify({ enabled: true, decidedBy }), stderr: '' }));
+    const c = cfg();
+    const result = await ensureFunnel(c, { runner });
+    assert.equal(result.ok, true);
+    assert.match(result.detail, /outranks/);
+    assert.ok(!calls.some((x) => /funnel disable/.test(x)));
+    assert.equal(c.integrations.ownership.rufloComponents?.funnelDisabled, undefined);
+  });
+}
+
 test('reconcile: dry run writes nothing; real run writes policy and env and classifies', async (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-rc-reconcile-'));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));

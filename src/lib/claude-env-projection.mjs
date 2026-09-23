@@ -13,23 +13,34 @@ const MACHINE_KEYS = [RC_KEYS.typesafe, RC_KEYS.embedder, RC_KEYS.mode];
 const editorFor = (source) => jsonTopLevelEnvEditor(source);
 const asStates = (keys, env) => Object.fromEntries(keys.map((k) => [k, k in env ? { present: true, value: env[k] } : { present: false }]));
 
+/** One target's finding: `keys` maps each managed key to the engine's per-key state
+ *  ('converged' | 'write' | 'restore' | 'release' | 'foreign' | 'user-edited'), or to
+ *  'blocked' for every key when the whole file cannot be touched (`fileError`). */
 function reconcileTarget(target, desired, receiptSuffix, dryRun) {
   try {
     const plan = planOwnedEnv(target, desired, { receiptSuffix, format: 'multi', editorFor });
     if (plan.changed && !dryRun) applyOwnedEnv(plan, { backupTag: 'ruflo-components' });
-    return { file: target.file, status: plan.status, changed: plan.changed };
-  } catch (error) { return { file: target.file, status: 'conflict', changed: false, reason: error.message }; }
+    return { file: target.file, status: plan.status, changed: plan.changed, keys: plan.keys ?? {}, conflicts: plan.conflicts ?? [] };
+  } catch (error) {
+    const keys = Object.fromEntries(Object.keys(desired).map((k) => [k, 'blocked']));
+    return { file: target.file, status: 'conflict', changed: false, reason: error.message, fileError: true, keys, conflicts: [] };
+  }
 }
 
-/** @param {{projectRoot?: string|null, rufloVersion?: string, userSettingsFile?: string, dryRun?: boolean}} [options] */
+/** `userScope: false` skips the user settings file, for a project-only release (uninstall,
+ *  or governance turned off, across every receipted project).
+ *  @param {{projectRoot?: string|null, rufloVersion?: string, userSettingsFile?: string, dryRun?: boolean, userScope?: boolean}} [options] */
 export function reconcileClaudeComponentEnv(cfg, options = {}) {
   const {
-    projectRoot = null, rufloVersion, userSettingsFile = paths.claudeSettingsPath(), dryRun = false,
+    projectRoot = null, rufloVersion, userSettingsFile = paths.claudeSettingsPath(), dryRun = false, userScope = true,
   } = options;
   const enabled = cfg?.integrations?.hosts?.claude !== false;
-  const findings = [reconcileTarget(
-    { file: userSettingsFile, boundary: path.dirname(userSettingsFile), enabled },
-    asStates(MACHINE_KEYS, machineComponentEnv(cfg, rufloVersion)), CLAUDE_RC_RECEIPT, dryRun)];
+  const findings = [];
+  if (userScope) {
+    findings.push(reconcileTarget(
+      { file: userSettingsFile, boundary: path.dirname(userSettingsFile), enabled },
+      asStates(MACHINE_KEYS, machineComponentEnv(cfg, rufloVersion)), CLAUDE_RC_RECEIPT, dryRun));
+  }
   if (projectRoot) {
     const local = paths.projectSettingsLocal(projectRoot);
     const wanted = asStates([RC_KEYS.enforce], componentEnv(projectRoot, cfg, rufloVersion));
@@ -37,7 +48,9 @@ export function reconcileClaudeComponentEnv(cfg, options = {}) {
       findings.push(reconcileTarget({ file: local, boundary: projectRoot, enabled }, wanted, CLAUDE_RC_RECEIPT, dryRun));
     }
   }
-  const ok = findings.every((f) => f.status !== 'conflict');
+  // A preserved per-key conflict is reported (user-managed), not a failure; only a file ak
+  // could not touch at all is.
+  const ok = findings.every((f) => !f.fileError);
   return { ok, changed: findings.some((f) => f.changed), findings };
 }
 
@@ -65,6 +78,8 @@ export function reconcileMemoryPin(projectRoot, { enabled = true, dryRun = false
   try {
     const plan = planOwnedEnv(target, desired, { receiptSuffix: MEMORY_PIN_RECEIPT, format: 'multi', editorFor });
     if (plan.changed && !dryRun) applyOwnedEnv(plan, { backupTag: 'memory-pin' });
+    // The pin is a single key: a preserved foreign or user-edited value means it is not ak's pin.
+    if (plan.conflicts?.length) return { ok: false, changed: plan.changed, status: 'conflict', reason: plan.conflicts[0].reason };
     return { ok: true, changed: plan.changed || legacy, status: plan.status };
   } catch (error) { return { ok: false, changed: false, status: 'conflict', reason: error.message }; }
 }

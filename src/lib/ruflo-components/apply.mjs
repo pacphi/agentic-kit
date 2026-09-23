@@ -9,15 +9,15 @@ import { run } from '../exec.mjs';
 import * as paths from '../paths.mjs';
 import { installedVersion } from '../versions.mjs';
 import { globalInstallArgs } from '../npm-global-install.mjs';
-import { reconcileClaudeComponentEnv } from '../claude-env-projection.mjs';
+import { reconcileClaudeComponentEnv, CLAUDE_RC_RECEIPT, MEMORY_PIN_RECEIPT } from '../claude-env-projection.mjs';
 import { managedIntent } from './config.mjs';
 import { componentById } from './catalogue.mjs';
 import { supports } from './env.mjs';
 import { reconcilePolicy, readPolicy } from './policy.mjs';
 import {
-  moduleVersionFromRuflo, parseFunnel, collectEvidence, readEvidenceCache, writeEvidenceCache, EVIDENCE_TTL_MS,
+  moduleVersionFromRuflo, parseFunnel, collectEvidence, OUTRANKS_USER, readEvidenceCache, writeEvidenceCache, EVIDENCE_TTL_MS,
 } from './evidence.mjs';
-import { componentSnapshot } from './snapshot.mjs';
+import { componentSnapshot, claudeKeyStates } from './snapshot.mjs';
 
 const TYPESAFE = '@ruvector/typesafe';
 
@@ -99,8 +99,15 @@ async function funnelStatus(runner) {
 export async function ensureFunnel(cfg, { runner = run } = {}) {
   if (managedIntent(cfg, 'funnel') !== 'off') return { ok: true, changed: false, detail: 'funnel not managed' };
   const before = await funnelStatus(runner);
-  if (!before) return { ok: false, changed: false, detail: 'ruflo funnel status unreadable' };
+  // ADR-0058 §1 "detected, not assumed": a ruflo without a readable `funnel status` has
+  // no funnel for ak to turn off, which is not a failure to repeat on every sync.
+  if (!before) return { ok: true, changed: false, detail: 'ruflo has no readable funnel status; nothing to disable' };
   if (!before.enabled) return { ok: true, changed: false, detail: `funnel already disabled (${before.decidedBy})` };
+  // A higher-precedence source (ADR-305: env, enterprise-policy) outranks the user tier
+  // `disable` writes, so running it would only delete ruflo's funnel ID again for nothing.
+  if (OUTRANKS_USER.test(before.decidedBy)) {
+    return { ok: true, changed: false, detail: `funnel enabled by ${before.decidedBy}, which outranks ruflo funnel disable; left alone` };
+  }
   const r = await runner('ruflo', ['funnel', 'disable'], { timeout: 60_000 });
   const after = await funnelStatus(runner);
   if (r.code !== 0 || after?.enabled !== false) return { ok: false, changed: false, detail: 'ruflo funnel disable did not take effect' };
@@ -117,6 +124,101 @@ export async function releaseFunnel(cfg, { runner = run } = {}) {
   if (status && !status.enabled && /user/i.test(status.decidedBy)) await runner('ruflo', ['funnel', 'enable'], { timeout: 60_000 });
   delete owned(cfg).funnelDisabled;
   return { ok: true, detail: 'funnel returned to ruflo\'s default' };
+}
+
+/** Remember a project that holds ak's Claude env or memory-pin receipt, so `ak uninstall`
+ *  (and governance turned off) can release it from any cwd, not only from inside it. */
+export function recordProjectReceipts(cfg, root) {
+  const local = paths.projectSettingsLocal(root);
+  if (![CLAUDE_RC_RECEIPT, MEMORY_PIN_RECEIPT].some((suffix) => fs.existsSync(`${local}${suffix}`))) return;
+  (owned(cfg).projects ??= {})[path.resolve(root)] = true;
+}
+
+/** Every project root ak holds a receipt for: policy files, project env and memory pins. */
+export function receiptedProjectRoots(cfg) {
+  const rc = cfg?.integrations?.ownership?.rufloComponents ?? {};
+  return [...new Set([...Object.keys(rc.policies ?? {}), ...Object.keys(rc.projects ?? {})])];
+}
+
+/** Governance turned off releases ak's policy file and project env in EVERY receipted
+ *  project, not only the one sync happens to run in. */
+function releaseGovernanceEverywhere(cfg, { skip, rufloVersion }) {
+  const results = [];
+  for (const root of receiptedProjectRoots(cfg)) {
+    if (root === skip || !fs.existsSync(root)) continue;
+    try {
+      const p = reconcilePolicy(root, false, owned(cfg).policies ??= {});
+      const env = reconcileClaudeComponentEnv(cfg, { projectRoot: root, rufloVersion, userScope: false });
+      results.push({ id: 'mcpGovernance', ok: env.ok, changed: p.changed || env.changed, detail: `${root}: policy ${p.status}` });
+    } catch (error) {
+      results.push({ id: 'mcpGovernance', ok: false, changed: false, detail: `${root}: ${(error?.message || String(error)).slice(0, 160)}` });
+    }
+  }
+  return results;
+}
+
+async function applyMachine(cfg, { runner, rufloVersion }, results, blocked) {
+  const pkg = await ensureTypesafePackage(cfg, { runner, rufloVersion });
+  results.push({ id: 'typesafePicker', ...pkg });
+  if (!pkg.ok) blocked.typesafePicker = pkg.detail;
+  if (managedIntent(cfg, 'funnel') === 'off') {
+    const fun = await ensureFunnel(cfg, { runner });
+    results.push({ id: 'funnel', ...fun });
+    if (!fun.ok) blocked.funnel = fun.detail;
+  } else if (cfg?.integrations?.ownership?.rufloComponents?.funnelDisabled) {
+    // funnel handed back to ruflo: undo the disable ak itself ran (ADR-0058 §1 "off really is off").
+    const rel = await releaseFunnel(cfg, { runner });
+    results.push({ id: 'funnel', ok: rel.ok, changed: true, detail: rel.detail });
+  }
+}
+
+function applyPolicy(cfg, projectRoot, dryRun, results, blocked) {
+  try {
+    // Dry run must never create cfg.integrations.ownership.rufloComponents.policies (or
+    // any parent of it) — reconcilePolicy only reads/writes its receipts argument, so a
+    // throwaway copy keeps dry-run side-effect-free while still detecting drift correctly.
+    const receipts = dryRun
+      ? { ...(cfg?.integrations?.ownership?.rufloComponents?.policies ?? {}) }
+      : (owned(cfg).policies ??= {});
+    const p = reconcilePolicy(projectRoot, managedIntent(cfg, 'mcpGovernance'), receipts, { dryRun });
+    results.push({ id: 'mcpGovernance', ok: true, changed: p.changed, detail: `policy ${p.status}` });
+  } catch (error) {
+    const detail = (error?.message || String(error)).slice(0, 160);
+    blocked.mcpGovernance = detail;
+    results.push({ id: 'mcpGovernance', ok: false, changed: false, detail });
+  }
+  return readPolicy(projectRoot).state;
+}
+
+/** Evidence (refreshed after a change) plus the on-disk projection, classified. */
+async function classify(cfg, o) {
+  const cached = readEvidenceCache(o.evidenceFile);
+  const fresh = cached && cached.rufloVersion === o.rufloVersion && o.now - Date.parse(cached.capturedAt) < EVIDENCE_TTL_MS;
+  let evidence = cached;
+  if (o.refresh && !o.dryRun && (!fresh || o.changed)) {
+    evidence = await collectEvidence({
+      projectRoot: o.projectRoot, cfg, rufloVersion: o.rufloVersion, runner: o.runner, now: o.now, cwd: o.cwd,
+    });
+    writeEvidenceCache(o.evidenceFile, evidence);
+  }
+  // Classify against what is on disk NOW: after a real write, re-plan (read-only) so the
+  // snapshot shows the converged projection rather than the plan that was just applied.
+  const settled = o.dryRun ? o.claude : reconcileClaudeComponentEnv(cfg, {
+    projectRoot: o.projectRoot, rufloVersion: o.rufloVersion, userSettingsFile: o.userSettingsFile, dryRun: true,
+  });
+  // Codex hooks integration cannot currently be verified from here (2026-09-23 spike);
+  // recorded as a missing host so a component that projects to it, such as the MiniLM
+  // agent picker, is classified `partial` rather than claimed `active` for Codex.
+  const missingHosts = cfg?.integrations?.hosts?.codex ? ['Codex hooks'] : [];
+  return componentSnapshot({
+    cfg,
+    rufloVersion: o.rufloVersion,
+    evidence,
+    now: o.now,
+    projection: {
+      claude: { keys: claudeKeyStates(settled), changed: o.claude.changed }, missingHosts, policy: o.policy, blocked: o.blocked,
+    },
+  });
 }
 
 /** Apply every ak-managed ruflo component, project Claude's env, and return a
@@ -138,62 +240,28 @@ export async function reconcileRufloComponents(cfg, options = {}) {
   const projectRoot = projectRootOption === undefined ? rufloProjectRoot(cwd) : projectRootOption;
   const results = [];
   const blocked = {};
-  if (!dryRun) {
-    const pkg = await ensureTypesafePackage(cfg, { runner, rufloVersion });
-    results.push({ id: 'typesafePicker', ...pkg });
-    if (!pkg.ok) blocked.typesafePicker = pkg.detail;
-    const fun = await ensureFunnel(cfg, { runner });
-    results.push({ id: 'funnel', ...fun });
-    if (!fun.ok) blocked.funnel = fun.detail;
-  }
+  if (!dryRun) await applyMachine(cfg, { runner, rufloVersion }, results, blocked);
   let policy = null;
   if (projectRoot && supports(rufloVersion, componentById('mcpGovernance').minRuflo)) {
-    try {
-      // Dry run must never create cfg.integrations.ownership.rufloComponents.policies (or
-      // any parent of it) — reconcilePolicy only reads/writes its receipts argument, so a
-      // throwaway copy keeps dry-run side-effect-free while still detecting drift correctly.
-      const receipts = dryRun
-        ? { ...(cfg?.integrations?.ownership?.rufloComponents?.policies ?? {}) }
-        : (owned(cfg).policies ??= {});
-      const p = reconcilePolicy(projectRoot, managedIntent(cfg, 'mcpGovernance'), receipts, { dryRun });
-      results.push({ id: 'mcpGovernance', ok: true, changed: p.changed, detail: `policy ${p.status}` });
-      policy = readPolicy(projectRoot).state;
-    } catch (error) {
-      const detail = (error?.message || String(error)).slice(0, 160);
-      blocked.mcpGovernance = detail;
-      results.push({ id: 'mcpGovernance', ok: false, changed: false, detail });
-      policy = readPolicy(projectRoot).state;
-    }
+    policy = applyPolicy(cfg, projectRoot, dryRun, results, blocked);
   }
   const claude = reconcileClaudeComponentEnv(cfg, {
     projectRoot, rufloVersion, userSettingsFile, dryRun,
   });
   results.push({
     id: 'claude-env', ok: claude.ok, changed: claude.changed,
-    detail: claude.findings.map((f) => `${f.file}: ${f.status}${f.reason ? ` (${f.reason})` : ''}`).join('; '),
+    detail: claude.findings.map((f) => `${f.file}: ${f.status}${f.reason ? ` (${f.reason})` : ''}`
+      + (f.conflicts?.length ? ` (preserved: ${f.conflicts.map((c) => c.key).join(', ')})` : '')).join('; '),
   });
-  const cached = readEvidenceCache(evidenceFile);
-  const fresh = cached && cached.rufloVersion === rufloVersion && now - Date.parse(cached.capturedAt) < EVIDENCE_TTL_MS;
-  let evidence = cached;
-  if (refresh && !dryRun && (!fresh || results.some((r) => r.changed))) {
-    evidence = await collectEvidence({
-      projectRoot, cfg, rufloVersion, runner, now, cwd,
-    });
-    writeEvidenceCache(evidenceFile, evidence);
+  if (!dryRun) {
+    if (projectRoot) recordProjectReceipts(cfg, projectRoot);
+    if (!managedIntent(cfg, 'mcpGovernance')) {
+      results.push(...releaseGovernanceEverywhere(cfg, { skip: projectRoot && path.resolve(projectRoot), rufloVersion }));
+    }
   }
-  const conflicts = claude.findings
-    .filter((f) => f.status === 'conflict')
-    .map((f) => (f.reason ?? '').split(':')[0]);
-  // Codex hooks integration cannot currently be verified from here (2026-09-23 spike);
-  // recorded as a missing host so a component that projects to it, such as the MiniLM
-  // agent picker, is classified `partial` rather than claimed `active` for Codex.
-  const missingHosts = cfg?.integrations?.hosts?.codex ? ['Codex hooks'] : [];
-  const snapshot = componentSnapshot({
-    cfg,
-    rufloVersion,
-    evidence,
-    now,
-    projection: { claude: { conflicts, changed: claude.changed }, missingHosts, policy, blocked },
+  const snapshot = await classify(cfg, {
+    projectRoot, rufloVersion, userSettingsFile, dryRun, claude, runner, now, cwd, evidenceFile, refresh, policy, blocked,
+    changed: results.some((r) => r.changed),
   });
   return {
     ok: results.every((r) => r.ok),

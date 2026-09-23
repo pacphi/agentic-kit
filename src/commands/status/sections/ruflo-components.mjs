@@ -16,27 +16,24 @@ const FIXABLE = new Set(['not-applied', 'drifted', 'needs-ruflo', 'blocked']);
 // blocked component would let `ak sync` claim "converged" while it stayed broken.
 const LEVEL = (id) => {
   if (id === 'active' || id === 'user-managed') return 'ok';
-  if (id === 'unknown') return 'info';
+  if (id === 'unknown' || id === 'not-managed-yet') return 'info';
   if (id === 'blocked') return 'fail';
   return 'warn';
 };
-// encryptionAtRest is permanently classified 'not-applied' (ADR-0059, not yet
-// implemented — see snapshot.mjs's hardcoded branch) regardless of managed
-// intent or evidence. `reconcileRufloComponents` has no reconcile step for
-// it, so a `fix` here would be a false promise ak sync cannot honor, and
-// would perpetually re-enter the sync step's `when` gate for every project —
-// spawning real evidence probes on every sync even when every OTHER
-// component is opted out. Excluded from FIXABLE until ADR-0059 ships one.
-const NEVER_FIXABLE = new Set(['encryptionAtRest']);
 
+/** Each row carries its component state id (`state`), so sync can filter on it rather
+ *  than on free text. 'not-managed-yet' (encryption, ADR-0059) is info with no fix: ak
+ *  sync has nothing to apply for it. */
 export function rufloComponentRows(snapshot) {
   const rows = [row('ruflo-components', snapshot.summary.active === snapshot.summary.total ? 'ok' : 'info',
     `ruflo components: ${snapshot.summary.active} of ${snapshot.summary.total} active (ruflo ${snapshot.rufloVersion ?? 'not installed'})`)];
   for (const c of snapshot.components) {
     const text = `${c.label} — ${c.state.label}: ${c.state.meaning}${c.state.action ? ` ${c.state.action}` : ''}`;
-    const fixable = FIXABLE.has(c.state.id) && !NEVER_FIXABLE.has(c.id);
-    rows.push(row('ruflo-components', LEVEL(c.state.id), text,
-      fixable ? `sync applies ${c.label} (${c.state.action || 'reconcile'})` : null));
+    rows.push({
+      ...row('ruflo-components', LEVEL(c.state.id), text,
+        FIXABLE.has(c.state.id) ? `sync applies ${c.label} (${c.state.action || 'reconcile'})` : null),
+      state: c.state.id,
+    });
   }
   return rows;
 }

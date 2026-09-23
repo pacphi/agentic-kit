@@ -16,7 +16,7 @@ const evidence = (over = {}) => ({
   turnCredit: { present: true }, memoryFix: { version: '3.0.0-alpha.25' },
   funnel: { enabled: false, decidedBy: 'user-config' }, governance: { audit: { audited: 10, refused: 0, reasons: [] } },
   errors: {}, ...over });
-const projection = (over = {}) => ({ claude: { conflicts: [], changed: false }, missingHosts: [], policy: 'valid', ...over });
+const projection = (over = {}) => ({ claude: { keys: {}, changed: false }, missingHosts: [], policy: 'valid', ...over });
 const byId = (snap, id) => snap.components.find((c) => c.id === id);
 
 test('everything confirmed is active and the summary counts it', () => {
@@ -24,7 +24,8 @@ test('everything confirmed is active and the summary counts it', () => {
   for (const id of ['typesafePicker', 'minilmPicker', 'mcpGovernance', 'learningProfile', 'turnCredit', 'memoryFix2887', 'funnel']) {
     assert.equal(byId(snap, id).state.id, 'active', id);
   }
-  assert.deepEqual(snap.summary, { active: 7, total: 8 });
+  // encryptionAtRest is not yet managed (ADR-0059), so it is outside the denominator.
+  assert.deepEqual(snap.summary, { active: 7, total: 7 });
 });
 
 test('old ruflo reports needs-ruflo with the version in the label', () => {
@@ -41,7 +42,7 @@ test('opted-out component is user-managed with its meaning', () => {
 
 test('a preserved conflicting value is user-managed, not drifted', () => {
   const snap = componentSnapshot({ cfg, rufloVersion: '3.44.0', evidence: evidence({ learning: { mode: 'research', engineLoaded: false } }),
-    projection: projection({ claude: { conflicts: ['RUFLO_INTELLIGENCE_MODE'], changed: false } }), now });
+    projection: projection({ claude: { keys: { RUFLO_INTELLIGENCE_MODE: { state: 'foreign', reason: '' } }, changed: false } }), now });
   assert.equal(byId(snap, 'learningProfile').state.id, 'user-managed');
 });
 
@@ -61,7 +62,7 @@ test('stale or missing evidence is unknown, never active', () => {
 test('governance with an invalid policy is blocked with the lockout reason', () => {
   const snap = componentSnapshot({ cfg, rufloVersion: '3.44.0', evidence: evidence(), projection: projection({ policy: 'invalid' }), now });
   assert.equal(byId(snap, 'mcpGovernance').state.id, 'blocked');
-  assert.match(byId(snap, 'mcpGovernance').state.meaning, /refuse every tool call/);
+  assert.match(byId(snap, 'mcpGovernance').state.meaning, /fails closed on an invalid file, so ak removed enforcement/);
 });
 
 test('governance with a foreign policy file is user-managed with the leaves-enforcement-off sentence', () => {
@@ -87,10 +88,13 @@ test('memory fix older than alpha.22 is blocked with upgrade guidance', () => {
   assert.equal(byId(snap, 'memoryFix2887').state.id, 'blocked');
 });
 
-test('encryption is reported as not yet managed (ADR-0059)', () => {
+test('encryption is reported as not yet managed (ADR-0059), with no sync promise', () => {
   const snap = componentSnapshot({ cfg, rufloVersion: '3.44.0', evidence: evidence(), projection: projection(), now });
-  assert.equal(byId(snap, 'encryptionAtRest').state.id, 'not-applied');
-  assert.match(byId(snap, 'encryptionAtRest').state.meaning, /ADR-0059/);
+  const state = byId(snap, 'encryptionAtRest').state;
+  assert.equal(state.id, 'not-managed-yet');
+  assert.match(state.meaning, /ADR-0059/);
+  assert.equal(state.action, '');
+  assert.doesNotMatch(`${state.meaning} ${state.action}`, /Run ak sync/);
 });
 
 test('a probe error surfaces as the unknown reason (ruling: id -> probe key)', () => {
@@ -162,7 +166,7 @@ test('funnel still enabled (any decidedBy) is applied-unverified, not user-manag
 
 // Controller ruling 1: the shared, read-only projection every surface (status,
 // Task 10's dashboard) builds a snapshot from.
-test('rufloComponentsPayload has all 8 components, writes nothing, and reports typesafe unknown without evidence', () => {
+test('rufloComponentsPayload has all 8 components, writes nothing, and reports unwritten typesafe as not applied', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-rc-payload-'));
   try {
     const before = fs.readdirSync(tmp);
@@ -173,7 +177,8 @@ test('rufloComponentsPayload has all 8 components, writes nothing, and reports t
       now,
     });
     assert.equal(snap.components.length, 8);
-    assert.equal(byId(snap, 'typesafePicker').state.id, 'unknown');
+    assert.equal(byId(snap, 'typesafePicker').state.id, 'not-applied');
+    assert.equal(byId(snap, 'turnCredit').state.id, 'unknown');
     assert.deepEqual(fs.readdirSync(tmp), before, 'rufloComponentsPayload must never write');
     assert.equal(fs.existsSync(path.join(tmp, 'evidence.json')), false);
     assert.equal(fs.existsSync(path.join(tmp, 'settings.json')), false);
@@ -182,3 +187,33 @@ test('rufloComponentsPayload has all 8 components, writes nothing, and reports t
   }
 });
 
+
+// Final review M12: with no ruflo the dashboard mirrors ak status's single
+// "nothing managed" row, not eight needs-ruflo cards.
+test('rufloComponentsPayload without ruflo reports nothing managed', () => {
+  const snap = rufloComponentsPayload({ cfg, rufloVersion: null, projectRoot: null, evidenceFile: '/nonexistent/evidence.json', now });
+  assert.deepEqual(snap, { rufloVersion: null, capturedAt: null, components: [], summary: { active: 0, total: 0 } });
+});
+
+// Final review M13: evidence without a turnCredit object has no line, not "turn-credit not found".
+test('turn-credit evidence line is omitted when the probe recorded nothing', () => {
+  const e = evidence();
+  delete e.turnCredit;
+  const snap = componentSnapshot({ cfg, rufloVersion: '3.44.0', evidence: e, projection: projection(), now });
+  assert.deepEqual(byId(snap, 'turnCredit').evidence, []);
+});
+
+test('governance unknown on ruflo 3.44.0 says stdio launches do not enforce the policy', () => {
+  const snap = componentSnapshot({ cfg, rufloVersion: '3.44.0',
+    evidence: evidence({ governance: { audit: null } }), projection: projection(), now });
+  assert.match(byId(snap, 'mcpGovernance').state.meaning, /do not enforce the policy on stdio MCP launches/);
+});
+
+for (const decidedBy of ['env', 'enterprise-policy']) {
+  test(`funnel kept on by ${decidedBy} is user-managed, not "restart"`, () => {
+    const snap = componentSnapshot({ cfg, rufloVersion: '3.44.0',
+      evidence: evidence({ funnel: { enabled: true, decidedBy } }), projection: projection(), now });
+    assert.equal(byId(snap, 'funnel').state.id, 'user-managed');
+    assert.match(byId(snap, 'funnel').state.meaning, /outranks/);
+  });
+}

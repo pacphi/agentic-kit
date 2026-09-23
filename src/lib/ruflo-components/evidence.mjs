@@ -44,6 +44,9 @@ export function parseNeuralStatus(text) {
 // Funnel evidence is JSON on current ruflo (`funnel status --json`): the probe below
 // requests --json, but the parser still accepts the older text form as a fallback so a
 // stale/unpatched ruflo or a stderr-mixed capture still yields evidence rather than null.
+/** ruflo funnel sources that outrank the user tier `ruflo funnel disable` writes (ADR-305). */
+export const OUTRANKS_USER = /^(env|enterprise-policy)$/i;
+
 export function parseFunnel(text) {
   const raw = String(text).replace(ANSI, '').trim();
   try {

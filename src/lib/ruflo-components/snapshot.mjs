@@ -5,7 +5,7 @@ import { COMPONENTS } from './catalogue.mjs';
 import { describeState } from './states.mjs';
 import { managedIntent } from './config.mjs';
 import { supports, RC_KEYS } from './env.mjs';
-import { EVIDENCE_STALE_MS, readEvidenceCache } from './evidence.mjs';
+import { EVIDENCE_STALE_MS, OUTRANKS_USER, readEvidenceCache } from './evidence.mjs';
 import { readPolicy } from './policy.mjs';
 import { reconcileClaudeComponentEnv } from '../claude-env-projection.mjs';
 
@@ -15,6 +15,9 @@ import { reconcileClaudeComponentEnv } from '../claude-env-projection.mjs';
 // either applied through other mechanisms (mcpGovernance's policy file,
 // funnel's CLI toggle) or need no host at all (turnCredit, memoryFix2887).
 const KEY_OF = { typesafePicker: RC_KEYS.typesafe, minilmPicker: RC_KEYS.embedder, learningProfile: RC_KEYS.mode };
+// Every key ak writes into Claude settings for a component, governance's project key
+// included — what ak actually wrote is judged before any evidence (ADR-0058 §2).
+const PROJECTED_KEY_OF = { ...KEY_OF, mcpGovernance: RC_KEYS.enforce };
 
 // Maps a component id to the probe key collectEvidence() records errors
 // under (see evidence.mjs's `call(args, key)` sites). memoryFix2887 and
@@ -42,6 +45,11 @@ const CONFIRMERS = {
 };
 
 const GOVERNANCE_UNOBSERVED_REASON = 'No ruflo MCP tool calls have been audited in the last 24 hours, so enforcement has not been observed yet.';
+// Ruflo 3.44.0 and earlier keep the policy enforcer in MCPServerManager, which neither stdio
+// entry point (bin/mcp-server.js, `ruflo mcp start`) reaches — upstream request 6.
+const GOVERNANCE_NOT_WIRED = 'ruflo 3.44.0 and earlier do not enforce the policy on stdio MCP launches, so no audit records are expected until upstream request 6 lands.';
+const governanceUnobservedReason = (rufloVersion) => (!rufloVersion || cmpVersions(rufloVersion, '3.44.0') <= 0
+  ? `${GOVERNANCE_UNOBSERVED_REASON} ${GOVERNANCE_NOT_WIRED}` : GOVERNANCE_UNOBSERVED_REASON);
 
 /** Returns true (confirmed), false (contradicted) or null (no evidence). */
 function confirmed(id, intent, e) {
@@ -66,7 +74,7 @@ const EVIDENCE_LINES = {
   },
   funnel: (e, at) => (e.funnel ? [ev('ruflo funnel status', at, `${e.funnel.enabled ? 'enabled' : 'disabled'} (decided by ${e.funnel.decidedBy})`)] : []),
   memoryFix2887: (e, at) => (e.memoryFix?.version ? [ev('@claude-flow/memory', at, e.memoryFix.version)] : []),
-  turnCredit: (e, at) => (e.turnCredit?.present === null ? [] : [ev('ruflo doctor', at, e.turnCredit?.present ? '@metaharness/turn-credit resolves' : 'turn-credit not found')]),
+  turnCredit: (e, at) => (e.turnCredit?.present == null ? [] : [ev('ruflo doctor', at, e.turnCredit?.present ? '@metaharness/turn-credit resolves' : 'turn-credit not found')]),
 };
 
 function evidenceLines(id, e) {
@@ -75,47 +83,109 @@ function evidenceLines(id, e) {
   return fn ? fn(e, e.capturedAt) : [];
 }
 
-function stateFor(component, { cfg, rufloVersion, evidence, projection, now }) {
-  const { id, minRuflo } = component;
-  if (id === 'encryptionAtRest') {
-    const base = describeState('not-applied');
-    return { ...base, meaning: `${base.meaning} Managed by ADR-0059, not yet implemented.` };
+const withMeaning = (id, meaning) => ({ ...describeState(id), meaning });
+
+// ADR-0059 has not shipped, so ak manages nothing here yet: an info row with no sync
+// promise, and outside the "N of M active" count.
+const ENCRYPTION_STATE = Object.freeze(describeState('not-managed-yet'));
+
+/** An opted-out component is the user's — unless ak still holds a change it made while
+ *  managing it; that is fixable, because the next sync releases it. */
+function optOutState(id, cfg, projection) {
+  if (id === 'funnel' && cfg?.integrations?.ownership?.rufloComponents?.funnelDisabled) {
+    return withMeaning('not-applied', 'You set funnel to true, but the `ruflo funnel disable` ak ran earlier is still in force; ak sync re-enables the funnel.');
   }
-  const intent = managedIntent(cfg, id);
-  if (!intent) return describeState('user-managed');
-  if (!supports(rufloVersion, minRuflo)) return describeState('needs-ruflo', { minRuflo });
-  if (projection?.blocked?.[id]) return describeState('blocked', { reason: projection.blocked[id] });
-  if (id === 'mcpGovernance' && projection?.policy === 'invalid') {
-    return describeState('blocked', { reason: 'The policy file is invalid, so ruflo would refuse every tool call; ak removed enforcement for this project.' });
+  const key = PROJECTED_KEY_OF[id];
+  if (key && projection?.claude?.keys?.[key]?.state === 'release') {
+    return withMeaning('not-applied', `You opted out, but the ${key} value ak set earlier is still in Claude's settings; ak sync removes it.`);
   }
-  if (id === 'mcpGovernance' && projection?.policy === 'absent') return describeState('not-applied');
-  if (id === 'mcpGovernance' && projection?.policy === 'foreign') {
+  return describeState('user-managed');
+}
+
+function governancePolicyState(projection) {
+  if (projection?.policy === 'invalid') {
+    return describeState('blocked', { reason: 'The policy file is invalid; ruflo\'s policy enforcer fails closed on an invalid file, so ak removed enforcement for this project.' });
+  }
+  if (projection?.policy === 'absent') return describeState('not-applied');
+  if (projection?.policy === 'foreign') {
     const base = describeState('user-managed');
     return { ...base, meaning: `${base.meaning} This project has its own .harness/mcp-policy.json, so ak leaves enforcement off.` };
   }
-  if (KEY_OF[id] && projection?.claude?.conflicts?.includes(KEY_OF[id])) return describeState('user-managed');
-  if (!evidence || now - Date.parse(evidence.capturedAt) > EVIDENCE_STALE_MS) return describeState('unknown');
+  return null;
+}
+
+/** What ak actually wrote into Claude settings for this component, or null when that
+ *  has converged (only then may evidence decide). */
+function projectedState(id, projection) {
+  const key = PROJECTED_KEY_OF[id];
+  const k = key && projection?.claude?.keys?.[key];
+  if (!k) return null;
+  const base = describeState('user-managed');
+  switch (k.state) {
+    case 'blocked': return describeState('blocked', { reason: `Claude settings could not be updated: ${k.reason}.` });
+    case 'foreign': return { ...base, meaning: `${base.meaning} Claude settings already hold your own ${key} value.` };
+    case 'user-edited': return { ...base, meaning: `${base.meaning} You changed the ${key} value ak set in Claude settings.` };
+    case 'write': return describeState('not-applied', { reason: `Claude settings do not have ${key} set to ak's value yet.` });
+    case 'restore': return describeState('drifted', { reason: `${key} was removed from Claude settings.` });
+    default: return null;
+  }
+}
+
+/** The funnel's deciding source, when it is not ak's own user-tier disable. */
+function funnelSourceState(funnel) {
+  if (!funnel) return null;
+  const base = describeState('user-managed');
   // ADR-305 precedence: env > enterprise-policy > user-config > project-config >
   // package-default. ak's own `ruflo funnel disable` always lands as the user-tier
   // ('user-config') source (apply.mjs's releaseFunnel gates its undo on the same
   // /user/i test). A funnel that reads disabled from any OTHER source is off, but
   // not by ak's hand — reported as user-managed (goal met, not an error) rather
   // than claiming credit ak didn't earn.
-  if (id === 'funnel' && evidence.funnel?.enabled === false && !/user/i.test(evidence.funnel.decidedBy ?? '')) {
-    const base = describeState('user-managed');
-    return { ...base, meaning: `${base.meaning} Ruflo's funnel is already off, decided by ${evidence.funnel.decidedBy} — not ak's doing.` };
+  if (funnel.enabled === false && !/user/i.test(funnel.decidedBy ?? '')) {
+    return { ...base, meaning: `${base.meaning} Ruflo's funnel is already off, decided by ${funnel.decidedBy} — not ak's doing.` };
   }
+  if (funnel.enabled && OUTRANKS_USER.test(funnel.decidedBy ?? '')) {
+    return { ...base, meaning: `${base.meaning} Ruflo's funnel is on, decided by ${funnel.decidedBy}, which outranks the ruflo funnel disable ak would run.` };
+  }
+  return null;
+}
+
+function evidenceState(component, intent, { evidence, projection, now }) {
+  const { id } = component;
+  if (!evidence || now - Date.parse(evidence.capturedAt) > EVIDENCE_STALE_MS) return describeState('unknown');
+  // ADR-0058 §4: a Node version switch can drop the global package; a restart cannot bring
+  // it back, the next sync reinstalls it.
+  if (id === 'typesafePicker' && evidence.typesafe?.resolves === false) {
+    return describeState('not-applied', { reason: '@ruvector/typesafe no longer resolves from ruflo\'s install (for example after a Node version switch); ak sync reinstalls it.' });
+  }
+  const funnel = id === 'funnel' ? funnelSourceState(evidence.funnel) : null;
+  if (funnel) return funnel;
   const result = confirmed(id, intent, evidence);
   if (id === 'memoryFix2887' && result === false) {
     return describeState('blocked', { reason: 'Run npm install -g ruflo@latest so ruflo resolves @claude-flow/memory 3.0.0-alpha.22 or newer.' });
   }
   if (result === null) {
-    const reason = id === 'mcpGovernance' ? GOVERNANCE_UNOBSERVED_REASON : evidence.errors?.[ERROR_KEY_OF[id]] ?? '';
+    const reason = id === 'mcpGovernance' ? governanceUnobservedReason(evidence.rufloVersion) : evidence.errors?.[ERROR_KEY_OF[id]] ?? '';
     return describeState('unknown', { reason });
   }
   if (result === false) return describeState('applied-unverified');
   if (KEY_OF[id] && projection?.missingHosts?.length) return describeState('partial', { hosts: projection.missingHosts });
   return describeState('active');
+}
+
+function stateFor(component, ctx) {
+  const { id, minRuflo } = component;
+  const { cfg, rufloVersion, projection } = ctx;
+  if (id === 'encryptionAtRest') return ENCRYPTION_STATE;
+  const intent = managedIntent(cfg, id);
+  if (!intent) return optOutState(id, cfg, projection);
+  if (!supports(rufloVersion, minRuflo)) return describeState('needs-ruflo', { minRuflo });
+  if (projection?.blocked?.[id]) return describeState('blocked', { reason: projection.blocked[id] });
+  if (id === 'mcpGovernance') {
+    const policy = governancePolicyState(projection);
+    if (policy) return policy;
+  }
+  return projectedState(id, projection) ?? evidenceState(component, intent, ctx);
 }
 
 function valueOf(intent) {
@@ -145,7 +215,10 @@ export function componentSnapshot({ cfg, rufloVersion, evidence, projection, now
     rufloVersion,
     capturedAt: evidence?.capturedAt ?? null,
     components,
-    summary: { active: components.filter((c) => c.state.id === 'active').length, total: components.length },
+    summary: {
+      active: components.filter((c) => c.state.id === 'active').length,
+      total: components.filter((c) => c.state.id !== 'not-managed-yet').length,
+    },
   };
 }
 
@@ -159,12 +232,12 @@ export function componentSnapshot({ cfg, rufloVersion, evidence, projection, now
 export function rufloComponentsPayload({
   cfg, rufloVersion, projectRoot, evidenceFile, userSettingsFile = undefined, now = Date.now(),
 }) {
+  // Mirrors `ak status`'s one "ruflo not installed; nothing managed" row instead of eight
+  // needs-ruflo cards for software that is not there.
+  if (!rufloVersion) return { rufloVersion: null, capturedAt: null, components: [], summary: { active: 0, total: 0 } };
   const claude = reconcileClaudeComponentEnv(cfg, {
     projectRoot, rufloVersion, userSettingsFile, dryRun: true,
   });
-  const conflicts = claude.findings
-    .filter((f) => f.status === 'conflict')
-    .map((f) => (f.reason ?? '').split(':')[0]);
   const evidence = readEvidenceCache(evidenceFile);
   const missingHosts = cfg?.integrations?.hosts?.codex ? ['Codex hooks'] : [];
   const policy = projectRoot ? readPolicy(projectRoot).state : null;
@@ -173,6 +246,19 @@ export function rufloComponentsPayload({
     rufloVersion,
     evidence,
     now,
-    projection: { claude: { conflicts, changed: claude.changed }, missingHosts, policy },
+    projection: { claude: { keys: claudeKeyStates(claude), changed: claude.changed }, missingHosts, policy },
   });
+}
+
+/** Per-key projection state across every Claude settings file a reconcile touched:
+ *  `{ KEY: { state, reason } }`, where a file-level failure marks each of that file's keys
+ *  'blocked' with the file's reason. */
+export function claudeKeyStates(claude) {
+  const keys = {};
+  for (const f of claude?.findings ?? []) {
+    for (const [key, state] of Object.entries(f.keys ?? {})) {
+      keys[key] = { state, reason: f.reason ?? f.conflicts?.find((c) => c.key === key)?.reason ?? '' };
+    }
+  }
+  return keys;
 }

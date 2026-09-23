@@ -33,7 +33,7 @@ test('learning profile lists all five profiles with their budgets', () => {
 
 test('every state carries a meaning and an action', () => {
   assert.deepEqual(Object.keys(STATES), ['active', 'applied-unverified', 'needs-ruflo',
-    'not-applied', 'drifted', 'user-managed', 'partial', 'blocked', 'unknown']);
+    'not-applied', 'drifted', 'user-managed', 'partial', 'blocked', 'not-managed-yet', 'unknown']);
   for (const [id, s] of Object.entries(STATES)) {
     assert.ok(s.meaning.length > 10 && typeof s.action === 'string', id);
   }

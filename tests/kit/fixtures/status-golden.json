@@ -20,56 +20,64 @@
   {
     "subsystem": "ruflo-components",
     "level": "info",
-    "message": "ruflo components: 0 of 8 active (ruflo 9.9.9)",
+    "message": "ruflo components: 0 of 7 active (ruflo 9.9.9)",
     "fix": null
   },
   {
     "subsystem": "ruflo-components",
     "level": "ok",
     "message": "Typesafe agent picker — user-managed: You set your own value or opted out; ak reports it and leaves it alone.",
-    "fix": null
+    "fix": null,
+    "state": "user-managed"
   },
   {
     "subsystem": "ruflo-components",
     "level": "ok",
     "message": "MiniLM agent picker — user-managed: You set your own value or opted out; ak reports it and leaves it alone.",
-    "fix": null
+    "fix": null,
+    "state": "user-managed"
   },
   {
     "subsystem": "ruflo-components",
     "level": "ok",
     "message": "MCP tool governance — user-managed: You set your own value or opted out; ak reports it and leaves it alone.",
-    "fix": null
+    "fix": null,
+    "state": "user-managed"
   },
   {
     "subsystem": "ruflo-components",
     "level": "ok",
     "message": "Learning profile — user-managed: You set your own value or opted out; ak reports it and leaves it alone.",
-    "fix": null
+    "fix": null,
+    "state": "user-managed"
   },
   {
     "subsystem": "ruflo-components",
     "level": "ok",
     "message": "MetaHarness turn-credit — user-managed: You set your own value or opted out; ak reports it and leaves it alone.",
-    "fix": null
+    "fix": null,
+    "state": "user-managed"
   },
   {
     "subsystem": "ruflo-components",
     "level": "ok",
     "message": "Memory durability fix (#2887) — user-managed: You set your own value or opted out; ak reports it and leaves it alone.",
-    "fix": null
+    "fix": null,
+    "state": "user-managed"
   },
   {
     "subsystem": "ruflo-components",
     "level": "ok",
     "message": "Ruflo funnel (promotions) — user-managed: You set your own value or opted out; ak reports it and leaves it alone.",
-    "fix": null
+    "fix": null,
+    "state": "user-managed"
   },
   {
     "subsystem": "ruflo-components",
-    "level": "warn",
-    "message": "Encryption at rest — not applied: ak has not applied the managed value yet. Managed by ADR-0059, not yet implemented. Run ak sync.",
-    "fix": null
+    "level": "info",
+    "message": "Encryption at rest — not yet managed: ak does not manage this yet; it is waiting on ADR-0059, so nothing here needs ak sync.",
+    "fix": null,
+    "state": "not-managed-yet"
   },
   {
     "subsystem": "self",

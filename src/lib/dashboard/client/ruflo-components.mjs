@@ -7,7 +7,7 @@
 import { authHeaders, esc } from './bootstrap.mjs';
 import { formatLocalDateTimeLong } from './datetime.mjs';
 
-  var RC_LEVEL={active:"ok","user-managed":"ok",unknown:"unknown","applied-unverified":"warn","needs-ruflo":"warn","not-applied":"warn",drifted:"warn",partial:"warn",blocked:"fail"};
+  var RC_LEVEL={active:"ok","user-managed":"ok",unknown:"unknown","applied-unverified":"warn","needs-ruflo":"warn","not-applied":"warn",drifted:"warn",partial:"warn",blocked:"fail","not-managed-yet":"unknown"};
 
   function rcCard(c){
     var options=c.options?'<ul class="rc-options">'+c.options.map(function(o){
@@ -28,6 +28,7 @@ import { formatLocalDateTimeLong } from './datetime.mjs';
     var el=document.getElementById("ruflo-components");
     if(!el)return;
     if(!payload||!Array.isArray(payload.components)){el.innerHTML='<div class="empty">ruflo components unavailable.</div>';return;}
+    if(!payload.rufloVersion){el.innerHTML='<div class="empty">ruflo is not installed, so ak manages no ruflo components.</div>';return;}
     el.innerHTML='<header class="rc-head"><h3>ruflo components</h3><span>'+esc(payload.summary.active)+' of '+esc(payload.summary.total)
       +' active · ruflo '+esc(payload.rufloVersion||"not installed")+' · evidence '+esc(formatLocalDateTimeLong(payload.capturedAt)||"not collected")+'</span></header>'
       +'<div class="rc-grid">'+payload.components.map(rcCard).join("")+"</div>";

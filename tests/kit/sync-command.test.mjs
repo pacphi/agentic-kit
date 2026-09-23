@@ -269,12 +269,12 @@ test('--no-upgrade drops a needs-ruflo ruflo-components row but keeps other rufl
   seedHome();
   const collectMixed = async () => [
     {
-      subsystem: 'ruflo-components', level: 'warn',
+      subsystem: 'ruflo-components', level: 'warn', state: 'needs-ruflo',
       message: 'MiniLM agent picker — needs ruflo ≥ 3.44.0: The installed ruflo is too old for this component.',
       fix: 'sync applies MiniLM agent picker (Run ak sync to upgrade ruflo.)',
     },
     {
-      subsystem: 'ruflo-components', level: 'warn',
+      subsystem: 'ruflo-components', level: 'warn', state: 'not-applied',
       message: 'Typesafe agent picker — not applied: ak has not applied the managed value yet.',
       fix: 'sync applies Typesafe agent picker (reconcile)',
     },
@@ -327,6 +327,17 @@ test('a blocked (fail-level) ruflo component prevents a false converged verdict'
   assert.equal(result.result, 1, result.out);
   assert.match(result.out, /still failing: \[ruflo-components\]/);
   assert.doesNotMatch(result.out, /converged — no failing subsystems/);
+});
+
+// ADR-0058 C1: with nothing written to Claude settings yet (and no evidence cache), the
+// real status section must still hand sync a ruflo-components fix, or an upgraded ak
+// never applies the components from a non-project cwd.
+test('an unconverged Claude projection puts ruflo-components in the sync plan', async () => {
+  seedHome(offlineKitConfig({
+    rufloComponents: { ...offlineKitConfig().rufloComponents, minilmPicker: true },
+  }), { ruflo: '3.44.0' });
+  const { out } = await dryRun();
+  assert.match(out, /\[ruflo-components\] sync applies MiniLM agent picker/);
 });
 
 test('kit.json opt-outs keep their subsystems out of the plan entirely', async () => {

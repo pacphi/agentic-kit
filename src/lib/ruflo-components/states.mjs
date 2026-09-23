@@ -12,6 +12,8 @@ export const STATES = Object.freeze({
     meaning: 'You set your own value or opted out; ak reports it and leaves it alone.', action: '' },
   partial: { label: 'partial', meaning: 'Applied for some hosts only.', action: 'See which hosts are missing.' },
   blocked: { label: 'blocked', meaning: 'Applying failed.', action: 'Follow the reason shown, then run ak sync.' },
+  'not-managed-yet': { label: 'not yet managed',
+    meaning: 'ak does not manage this yet; it is waiting on ADR-0059, so nothing here needs ak sync.', action: '' },
   unknown: { label: 'unknown', meaning: 'No current evidence, so ak does not claim this component is on.',
     action: 'Run ak status --refresh to collect evidence.' },
 });
@@ -31,6 +33,6 @@ export function describeState(id, { minRuflo, hosts, reason } = {}) {
   const { action } = base;
   if (id === 'needs-ruflo' && minRuflo) label = `needs ruflo ≥ ${minRuflo}`;
   if (id === 'partial' && hosts?.length) meaning = `Applied for some hosts only; missing: ${hosts.join(', ')}.`;
-  if ((id === 'blocked' || id === 'unknown' || id === 'drifted') && reason) meaning = `${meaning} ${reason}`;
+  if ((id === 'blocked' || id === 'unknown' || id === 'drifted' || id === 'not-applied') && reason) meaning = `${meaning} ${reason}`;
   return { id, label, meaning, action };
 }

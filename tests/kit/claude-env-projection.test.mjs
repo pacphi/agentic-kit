@@ -65,8 +65,11 @@ test('a user-set learning profile is preserved and reported', (t) => {
   const { root, userSettingsFile } = fixture(t);
   fs.writeFileSync(userSettingsFile, JSON.stringify({ env: { RUFLO_INTELLIGENCE_MODE: 'research' } }));
   const result = reconcileClaudeComponentEnv(cfg(), { projectRoot: root, rufloVersion: '3.44.0', userSettingsFile });
-  assert.equal(result.ok, false);
-  assert.match(result.findings.find((f) => f.status === 'conflict').reason, /RUFLO_INTELLIGENCE_MODE/);
+  // A preserved per-key conflict is reported, not a failure; the other keys still land.
+  assert.equal(result.ok, true);
+  const user = result.findings[0];
+  assert.equal(user.keys.RUFLO_INTELLIGENCE_MODE, 'foreign');
+  assert.match(user.conflicts[0].reason, /RUFLO_INTELLIGENCE_MODE/);
   assert.equal(read(userSettingsFile).env.RUFLO_INTELLIGENCE_MODE, 'research');
 });
 
