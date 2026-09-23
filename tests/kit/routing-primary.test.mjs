@@ -38,6 +38,40 @@ test('seedActivityRoutes with codex primary mirrors host assignments', () => {
   assert.equal(policy.implementation.host, 'claude'); // claude becomes the alternate
 });
 
+// Tier parity: a Codex-driven seed must get the same tier benefits a
+// Claude-driven one does — reasoning work on each host's reasoning-tier model,
+// and an escalation that steps UP a tier rather than sideways.
+const REASONING_ACTIVITIES = ['architecture', 'design', 'security-analysis', 'debugging'];
+
+test('each host leads reasoning work on its own reasoning-tier model', () => {
+  const claudeLed = seedActivityRoutes({ hosts: ['claude', 'codex'] });
+  const codexLed = seedActivityRoutes({ hosts: ['claude', 'codex'], primary: 'codex' });
+  for (const act of REASONING_ACTIVITIES) {
+    assert.deepEqual([claudeLed[act].host, claudeLed[act].model], ['claude', 'claude-opus-5-5'], act);
+    assert.deepEqual([codexLed[act].host, codexLed[act].model], ['codex', 'gpt-6-astra'], act);
+  }
+});
+
+test('escalation steps up to the reasoning tier whichever host drives', () => {
+  const claudeLed = seedActivityRoutes({ hosts: ['claude', 'codex'] });
+  const codexLed = seedActivityRoutes({ hosts: ['claude', 'codex'], primary: 'codex' });
+  for (const act of ['implementation', 'testing']) {
+    assert.deepEqual(claudeLed[act].escalation, [{ host: 'claude', model: 'claude-opus-5-5' }], act);
+    assert.equal(codexLed[act].model, 'claude-sonnet-5', act);
+    assert.deepEqual(codexLed[act].escalation, [{ host: 'codex', model: 'gpt-6-astra' }], act);
+  }
+});
+
+test('tier pairs mirror both ways, and flagship pins reach Astra through an explicit pair', () => {
+  assert.equal(swapHostModel('claude', 'claude-opus-5-5').model, 'gpt-6-astra');
+  assert.equal(swapHostModel('codex', 'gpt-6-astra').model, 'claude-opus-5-5');
+  assert.equal(swapHostModel('claude', 'claude-fable-5-1').model, 'gpt-6-astra');
+  assert.equal(swapHostModel('claude', 'claude-sonnet-5').model, 'gpt-6-sol');
+  assert.equal(swapHostModel('codex', 'gpt-6-sol').model, 'claude-sonnet-5');
+  assert.equal(swapHostModel('claude', 'claude-haiku-4-5-20251001').model, 'gpt-6-luna');
+  assert.equal(swapHostModel('codex', 'gpt-6-luna').model, 'claude-haiku-4-5-20251001');
+});
+
 test('seedActivityRoutes stamps every seeded entry with provenance:seeded', () => {
   const policy = seedActivityRoutes({ hosts: ['claude', 'codex'], primary: 'codex' });
   assert.ok(Object.values(policy).every((r) => r.provenance === 'seeded'));

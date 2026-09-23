@@ -37,8 +37,9 @@ which the estimator does not model.
   GPT-6 models first and labels GPT-5.6 "Older"; OpenAI's Codex docs make Sol the
   default preset ([Codex models](https://learn.chatgpt.com/docs/models)). GPT-5.6
   models remain listed for pins.
-- Cross-host tiers pair by role and per-token price: GPT-6 Sol ↔ Sonnet 5
-  ($2/$10), GPT-6 Astra ↔ Fable 5.1 ($10/$50), GPT-6 Luna ↔ Haiku 4.5.
+- Cross-host tiers pair by role: GPT-6 Sol ↔ Sonnet 5 (balanced, $2/$10),
+  GPT-6 Astra ↔ Opus 5.5 (reasoning; Astra also pairs with Fable 5.1), GPT-6
+  Luna ↔ Haiku 4.5 (fast). A Codex-driven seed runs reasoning work on Astra.
 - Routes seeded before this change are reported as diverged and keep their model
   until `ak x host refresh`.
 - Not added as retirements: OpenAI's Codex docs retire GPT-5.4 / 5.4 Mini

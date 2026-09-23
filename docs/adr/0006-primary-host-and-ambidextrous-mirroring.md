@@ -2,9 +2,12 @@
 
 - **Status:** Amended by [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-23
-- **Updated:** 2026-07-30
-- **Update note:** Preserved primary-host mirroring while removing the compatibility executor and
-  moving persisted intent to `routing.primaryHost`.
+- **Updated:** 2026-09-23
+- **Update note:** Tier parity: both hosts now have a `reasoning` tier (`claude-opus-5-5` ↔
+  `gpt-6-astra`), so a Codex-driven seed gets reasoning-tier models and an escalation that steps up a
+  tier, as a Claude-driven seed does. A catalog entry may `pairs` with an extra tier.
+- **Earlier update (2026-07-30):** Preserved primary-host mirroring while removing the compatibility
+  executor and moving persisted intent to `routing.primaryHost`.
 - **Deciders:** agentic-kit maintainers
 
 > **GA amendment:** primary-host mirroring remains. The old command spelling, adapter dependency,
@@ -51,9 +54,14 @@ orchestrator stays symmetric underneath.
 - Codex-primary is expressible in one flag at setup or pick time, with the whole experience
   (routing, escalation, status severity, dashboard indicator) following symmetrically.
 - The default (claude-primary) is unchanged, so existing repos see no difference.
-- The mirror is coarse where host model tiers don't line up (claude tiers ≠ codex tiers): a
-  swapped route falls back to the counterpart host's recommended model. Users tune per activity
-  with `--route`.
+- The mirror pairs models by tier. Both hosts carry `reasoning`, `balanced` and `fast` tiers
+  (`claude-opus-5-5` ↔ `gpt-6-astra`, `claude-sonnet-5` ↔ `gpt-6-sol`, Haiku ↔ `gpt-6-luna`), so
+  reasoning work and escalation land on the same tier whichever host drives. A model with no
+  same-tier twin uses an explicit `pairs` entry (`claude-fable-5-1` → `gpt-6-astra`), else the
+  counterpart host's recommended model. Users tune per activity with `--route`.
+- Tier parity is not price parity: `gpt-6-astra` costs more per token than `claude-opus-5-5`
+  ($10/$50 vs $4/$20). Codex-driven reasoning therefore costs more at API rates, and uses more
+  Codex plan allowance, than Claude-driven reasoning.
 - `status`/dashboard must read `primaryHost` to render the correct severity + primary marker
   (done: `status.mjs` host rows, `dashboard-server.mjs` routing matrix).
 

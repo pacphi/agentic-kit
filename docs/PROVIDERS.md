@@ -460,8 +460,19 @@ ak host pick --primary-host codex       # make codex the lead; claude becomes th
 **Which host leads.** `--primary-host claude|codex` (default `claude`) chooses the primary.
 Codex-primary **mirrors** the default table below — codex takes the reasoning/review lead
 and claude becomes the alternate/escalation target — so the experience is ambidextrous
-regardless of which CLI drives. `ak status` marks the primary and fails (not warns) if the
-primary host is missing.
+regardless of which CLI drives. Models pair by tier, so each host leads reasoning work on its
+reasoning model and escalation steps up a tier either way:
+
+| Tier | Claude | Codex |
+|---|---|---|
+| reasoning | `claude-opus-5-5` | `gpt-6-astra` |
+| balanced | `claude-sonnet-5` | `gpt-6-sol` |
+| fast | `claude-haiku-4-5-20251001` | `gpt-6-luna` |
+
+With Codex leading, architecture, design, security-analysis and debugging run on `gpt-6-astra`,
+and implementation and testing run on `claude-sonnet-5`, escalating to `gpt-6-astra`. Astra costs
+more per token than Opus 5.5 ($10/$50 vs $4/$20), so Codex-led reasoning uses more Codex allowance.
+`ak status` marks the primary and fails (not warns) if the primary host is missing.
 
 **OpenCode is explicit, not seeded or AQE-projected.** Enable it, then use `ak run` with either
 a persisted route or a run-local override:

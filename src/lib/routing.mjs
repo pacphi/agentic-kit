@@ -81,8 +81,10 @@ export const MODEL_CATALOG_VERIFIED = '2026-09-23';
 export const COST_AXIS_NOTE = 'per-token price ≠ per-task cost — compare total tokens, cache use and agentic turns on representative tasks';
 // Tier names are the pairing key for swapHostModel(): a codex tier only mirrors
 // to a claude model (and back) when BOTH catalogs use the same tier string.
-// Keep `flagship`/`balanced`/`fast` spelled identically on both hosts —
-// renaming one side silently degrades every mirrored route to cat[0].
+// Keep `reasoning`/`balanced`/`fast` spelled identically on both hosts —
+// renaming one side silently degrades every mirrored route to cat[0]. A model
+// may also list `pairs`: extra tiers it answers for when the other host has no
+// model of that exact tier (Astra stands in for claude's `flagship`).
 export const MODEL_CATALOG = {
   claude: [
     // Opus 5.5 (released 2026-09-22) is the reasoning preset: Anthropic's
@@ -105,12 +107,17 @@ export const MODEL_CATALOG = {
     // catalog ranks these first and labels every GPT-5.6 model "Older", and
     // OpenAI's Codex docs make Sol the default preset
     // (learn.chatgpt.com/docs/models, verified 2026-09-23). Tier pairing with the
-    // claude catalog follows role and per-token price: Sol ↔ Sonnet 5 ($2/$10
-    // both), Astra ↔ Fable 5.1 ($10/$50 both), Luna ↔ Haiku. Sol is first, so a
-    // claude tier with no codex twin (reasoning) mirrors to the workhorse.
+    // claude catalog follows role: Sol ↔ Sonnet 5 (balanced, $2/$10 both),
+    // Luna ↔ Haiku (fast), and Astra ↔ Opus 5.5 (reasoning). Astra is the
+    // reasoning tier so a Codex-driven seed gets what a Claude-driven one does:
+    // reasoning work on the host's reasoning model and an escalation that steps
+    // UP a tier (Sonnet → Astra), not sideways to an equal-priced workhorse.
+    // Astra is priced above Opus 5.5 ($10/$50 vs $4/$20); OpenAI positions it for
+    // the hardest end-to-end work, and Anthropic reports Opus 5.5 at Fable 5.1
+    // level, which is Astra's class. It also answers for claude's `flagship`.
     { id: 'gpt-6-sol', tier: 'balanced', note: 'workhorse preset for coding, testing and everyday work' },
     { id: 'gpt-6-luna', tier: 'fast', note: 'fast-tier preset for mechanical work, documentation and packaging' },
-    { id: 'gpt-6-astra', tier: 'flagship', note: 'frontier preset for the hardest end-to-end work; compare per-task cost before selection' },
+    { id: 'gpt-6-astra', tier: 'reasoning', pairs: ['flagship'], note: 'reasoning preset for the hardest end-to-end work; compare per-task cost before selection' },
     // Still served, retained for user pins. Codex labels them "Older".
     { id: 'gpt-5.6-sol', tier: 'prior', note: 'prior coding preset retained for user pins; compare measured per-task results before switching' },
     { id: 'gpt-5.6-terra', tier: 'prior', note: 'prior balanced preset retained for user pins' },
@@ -224,14 +231,14 @@ const MODEL_TIER = Object.fromEntries(
   HOSTS.flatMap((h) => (MODEL_CATALOG[h] ?? []).map((m) => [m.id, m.tier])),
 );
 
-/** The opposite host's best model when swapping. Tier names differ between claude
- *  and codex, so an exact-tier match is best-effort; else fall back to that host's
- *  first (recommended) model. Pure. */
+/** The opposite host's best model when swapping: the model of the same tier,
+ *  else one that `pairs` with that tier, else that host's first (recommended)
+ *  model. Pure. */
 export function swapHostModel(host, model) {
   const other = host === 'claude' ? 'codex' : 'claude';
   const cat = MODEL_CATALOG[other] ?? [];
   const tier = MODEL_TIER[model];
-  const pick = (tier && cat.find((m) => m.tier === tier)) || cat[0];
+  const pick = (tier && (cat.find((m) => m.tier === tier) || cat.find((m) => m.pairs?.includes(tier)))) || cat[0];
   return { host: other, model: pick?.id };
 }
 
