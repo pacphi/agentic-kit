@@ -1,5 +1,5 @@
 // Deliberately narrow TOML editor: unsupported encodings remain user-owned.
-import { inspectCodexTomlStructure, isTomlTableLine } from './codex-toml-safety.mjs';
+import { inspectCodexTomlStructure, isTomlTableLine, tomlStringArrayAt } from './codex-toml-safety.mjs';
 import { recognizedAqeTransport, parseEmbeddingJson } from './aqe-embedding-transport.mjs';
 const BASE = 'mcp_servers.agentic-qe';
 const ENV = `${BASE}.env`;
@@ -32,7 +32,7 @@ function scalar(text, key) {
   return parseEmbeddingJson(match[1]);
 }
 
-function transportAssignment(text, transport) {
+function transportAssignment(text, transport, rest) {
   if (/^env\s*=/.test(text)) throw new Error('inline AQE environment requires manual embedding configuration');
   if (/^command\s*=/.test(text)) {
     if (transport.command !== null) throw new Error('duplicate AQE command');
@@ -40,10 +40,10 @@ function transportAssignment(text, transport) {
   }
   if (/^args\s*=/.test(text)) {
     if (transport.args !== null) throw new Error('duplicate AQE arguments');
-    const match = /^args\s*=\s*(\[[^\n]*\])\s*(?:#.*)?$/.exec(text);
-    if (!match) throw new Error('unsupported AQE arguments encoding');
-    transport.args = parseEmbeddingJson(match[1]);
-    if (!Array.isArray(transport.args)) throw new Error('unsupported AQE arguments shape');
+    // `rest` starts at this line so a multi-line array is read whole.
+    const args = tomlStringArrayAt(rest, 'args');
+    if (!args?.value) throw new Error('unsupported AQE arguments encoding');
+    transport.args = args.value;
   }
 }
 
@@ -73,7 +73,7 @@ export function aqeTomlEnvironment(source) {
     if (table === 'unrelated') continue;
     // Dotted/quoted keys can alias a managed table: refuse rather than guessing.
     if (!/^[A-Za-z0-9_-]+\s*=/.test(text)) throw new Error('dotted or quoted TOML assignments require manual embedding configuration');
-    if (table === BASE) transportAssignment(text, transport);
+    if (table === BASE) transportAssignment(text, transport, source.slice(line.start));
     if (table === ENV && new RegExp(`^${KEY}\\s*=`).test(text)) {
       if (endpoint) throw new Error('duplicate AQE endpoint');
       endpoint = { ...line, value: scalar(text, KEY) };

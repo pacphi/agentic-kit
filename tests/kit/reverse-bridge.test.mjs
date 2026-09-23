@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { rufloCodexMcpStatus } from '../../src/lib/mcp.mjs';
+import { rufloCodexMcpStatus, codexMcpTopology } from '../../src/lib/mcp.mjs';
 
 /** Build a temp $HOME containing (or not) ~/.codex/config.toml with given body. */
 function tempHome(configBody) {
@@ -52,4 +52,23 @@ test('rufloCodexMcpStatus does not match a similarly-named table', () => {
   const home = tempHome('[mcp_servers.ruflo-extra]\ncommand = "x"\n');
   const s = rufloCodexMcpStatus({}, { home });
   assert.equal(s.registered, false);
+});
+
+// Codex (toml_edit) writes `codex mcp add` arguments as a multi-line array.
+test('rufloCodexMcpStatus reads the multi-line args array codex writes', () => {
+  const home = tempHome('[mcp_servers.ruflo]\ncommand = "ak"\nargs = [\n    "x",\n    "ruflo-mcp",\n]\n\n[mcp_servers.other]\ncommand = "y"\n');
+  const s = rufloCodexMcpStatus({}, { home });
+  assert.equal(s.command, 'ak');
+  assert.deepEqual(s.args, ['x', 'ruflo-mcp']);
+});
+
+test('codexMcpTopology reads multi-line args and still classifies exact repair tables', () => {
+  const home = tempHome('[mcp_servers.claude-flow]\ncommand = "ruflo"\nargs = [\n    "mcp",\n    "start",\n]\n\n[mcp_servers.codex]\ncommand = "codex"\nargs = [\n    "mcp-server",\n]\n');
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-rev-cwd-'));
+  const topology = codexMcpTopology({ cwd, home });
+  const byName = Object.fromEntries(topology.registrations.map((entry) => [entry.name, entry]));
+  assert.deepEqual(byName['claude-flow'].args, ['mcp', 'start']);
+  assert.equal(byName['claude-flow'].repairKind, 'legacy-ruflo');
+  assert.equal(byName.codex.repairKind, 'recursive-codex');
+  assert.equal(topology.selfRegistrations.length, 1);
 });

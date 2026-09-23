@@ -242,6 +242,18 @@ export async function hostInstallState(host) {
   return { method: 'absent', version: null };
 }
 
+/** Does the installed launcher actually start? An npm install is recorded by
+ *  its package.json alone, which survives a missing platform binary (e.g.
+ *  @openai/codex without @openai/codex-darwin-arm64). Local spawn, no network.
+ *  Returns { ok, detail } where detail is the most telling error line. */
+export async function hostExecutable(host, { runner = run } = {}) {
+  const r = await runner(host.bin, ['--version'], { timeout: 15_000 });
+  if (r.code === 0) return { ok: true, detail: null };
+  const lines = `${r.stderr || ''}\n${r.stdout || ''}`.split('\n').map((line) => line.trim()).filter(Boolean);
+  const detail = lines.find((line) => /^[A-Za-z]*Error\b/.test(line)) ?? lines[0] ?? `exit ${r.code}`;
+  return { ok: false, detail: detail.slice(0, 160) };
+}
+
 /** How a host is AUTHENTICATED (distinct from how it's installed) — the axis that
  *  drives billing. Grounded, evidence-based (no over-claiming):
  *   - api key env present → 'api-key' (metered). For codex, an api key OVERRIDES a
