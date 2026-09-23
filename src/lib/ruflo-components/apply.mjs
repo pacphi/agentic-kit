@@ -3,6 +3,7 @@
 // projection — then returns a classified snapshot built from fresh (or cached) evidence.
 // Every mutation is receipt-gated under cfg.integrations.ownership.rufloComponents so a
 // later reconcile (or `ak sync --undo`) only ever touches what agentic-kit itself set.
+import fs from 'node:fs';
 import path from 'node:path';
 import { run } from '../exec.mjs';
 import * as paths from '../paths.mjs';
@@ -31,6 +32,22 @@ const owned = (cfg) => {
  *  (`<stateBase>/agentic-kit/ruflo-components-evidence.json`). */
 export const rufloComponentsEvidenceFile = () =>
   path.join(path.dirname(paths.maintenanceControlDir()), 'ruflo-components-evidence.json');
+
+/** Controller ruling: a ruflo PROJECT is not merely "any ancestor .git" — ADR-0058
+ *  defines it as a git repository root that ALSO has a `.claude-flow/` directory.
+ *  `paths.repoRoot` alone would let a dotfiles repo (or any unrelated repo) at or
+ *  above $HOME receive project-scope writes (a `.harness/mcp-policy.json`) when
+ *  a caller reconciles from a non-project cwd such as `paths.home`. Returns null
+ *  when there is no repo, or the repo has no `.claude-flow/` yet. */
+export function rufloProjectRoot(cwd) {
+  const root = paths.repoRoot(cwd);
+  if (!root) return null;
+  try {
+    return fs.statSync(path.join(root, '.claude-flow')).isDirectory() ? root : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Install `@ruvector/typesafe` globally under the shared reviewed-lifecycle-scripts
  *  policy, and record a receipt only once it resolves from ruflo's own module tree —
@@ -105,14 +122,20 @@ export async function releaseFunnel(cfg, { runner = run } = {}) {
 /** Apply every ak-managed ruflo component, project Claude's env, and return a
  *  classified snapshot. `dryRun` skips every mutation (package install/removal,
  *  funnel toggle, policy write, env write) but still reports what WOULD change.
- *  @param {{cwd?: string, dryRun?: boolean, runner?: typeof run, userSettingsFile?: string, evidenceFile?: string, refresh?: boolean, now?: number, rufloVersion?: (string|null)}} [options] */
+ *  @param {{cwd?: string, dryRun?: boolean, runner?: typeof run, userSettingsFile?: string, evidenceFile?: string, refresh?: boolean, now?: number, rufloVersion?: (string|null), projectRoot?: (string|null)}} [options] */
 export async function reconcileRufloComponents(cfg, options = {}) {
   const {
     cwd = process.cwd(), dryRun = false, runner = run, userSettingsFile,
     evidenceFile = rufloComponentsEvidenceFile(), refresh = true, now = Date.now(),
     rufloVersion = installedVersion('ruflo'),
+    // Controller ruling: `undefined` (the default — option not passed at all) resolves the
+    // project from `cwd` via `rufloProjectRoot`; an EXPLICIT `null` forces machine-scope only
+    // (no project targets are ever touched), which is how `run_machine` calls this so a
+    // dotfiles repo or any unrelated repo at/above the machine-scope cwd is never mistaken
+    // for a ruflo project.
+    projectRoot: projectRootOption,
   } = options;
-  const projectRoot = paths.repoRoot(cwd);
+  const projectRoot = projectRootOption === undefined ? rufloProjectRoot(cwd) : projectRootOption;
   const results = [];
   const blocked = {};
   if (!dryRun) {

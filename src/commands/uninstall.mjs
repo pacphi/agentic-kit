@@ -13,7 +13,7 @@ import { unregister } from '../lib/mcp.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { reconcileClaudeComponentEnv, reconcileMemoryPin } from '../lib/claude-env-projection.mjs';
 import { reconcilePolicy } from '../lib/ruflo-components/policy.mjs';
-import { releaseFunnel, removeTypesafePackage } from '../lib/ruflo-components/apply.mjs';
+import { releaseFunnel, removeTypesafePackage, rufloProjectRoot } from '../lib/ruflo-components/apply.mjs';
 import { installedVersion } from '../lib/versions.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
 import { hostsWithLifecycle, lifecycleAdapterFor, lifecycleExecutionEnabled, isBuiltinHost } from '../lib/adapters/lifecycle-registry.mjs';
@@ -443,17 +443,28 @@ async function stepRufloComponents(ctx) {
       learningProfile: false, turnCredit: false, memoryFix2887: false, funnel: true,
     },
   };
-  const projectRoot = paths.repoRoot(process.cwd());
+  // rufloProjectRoot (not paths.repoRoot) — a ruflo project also needs `.claude-flow/`,
+  // so an unrelated repo at cwd never receives project-scope teardown either.
+  const projectRoot = rufloProjectRoot(process.cwd());
   const env = reconcileClaudeComponentEnv(off, { projectRoot, rufloVersion: installedVersion('ruflo') });
   (env.ok ? ok : warn)(`ruflo component env: ${env.changed ? 'removed' : 'nothing owned'}`);
+  // Controller ruling: every teardown failure here must gate kit.json's purge and the
+  // exit code, exactly like every other uninstall step that can fail to release what it owns.
+  if (!env.ok) ctx.state.ownershipTeardownOk = false;
   const receipts = ctx.cfg.integrations?.ownership?.rufloComponents?.policies ?? {};
   for (const root of Object.keys(receipts)) {
-    const r = reconcilePolicy(root, false, receipts);
-    info(`policy ${root}: ${r.status}`);
+    try {
+      const r = reconcilePolicy(root, false, receipts);
+      info(`policy ${root}: ${r.status}`);
+    } catch (error) {
+      ctx.state.ownershipTeardownOk = false;
+      warn(`policy ${root}: could not be removed — ${error.message}`);
+    }
   }
   if (projectRoot) {
     const pin = reconcileMemoryPin(projectRoot, { enabled: false });
     if (pin.changed) ok('CLAUDE_FLOW_DB_PATH pin removed');
+    if (!pin.ok) ctx.state.ownershipTeardownOk = false;
   }
   if ((await releaseFunnel(ctx.cfg)).ok) info('funnel returned to ruflo\'s default');
   if (ctx.flags.purge) {

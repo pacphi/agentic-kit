@@ -260,6 +260,75 @@ test('--no-upgrade still plans non-version heals (e.g. MCP registration)', async
   assert.match(out, /\[mcp\] setup\/sync registers claude-flow at user scope/);
 });
 
+// Controller ruling: a ruflo-components row asking for a ruflo UPGRADE
+// (needs-ruflo) gets the same --no-upgrade treatment as 'versions' — but
+// other ruflo-components fixes (which don't need an upgrade) must stay
+// planned. collectFn is fully injected here (dry-run stops before any
+// SYNC_STEPS apply), so this never spawns a real reconcile.
+test('--no-upgrade drops a needs-ruflo ruflo-components row but keeps other ruflo-components fixes', async () => {
+  seedHome();
+  const collectMixed = async () => [
+    {
+      subsystem: 'ruflo-components', level: 'warn',
+      message: 'MiniLM agent picker — needs ruflo ≥ 3.44.0: The installed ruflo is too old for this component.',
+      fix: 'sync applies MiniLM agent picker (Run ak sync to upgrade ruflo.)',
+    },
+    {
+      subsystem: 'ruflo-components', level: 'warn',
+      message: 'Typesafe agent picker — not applied: ak has not applied the managed value yet.',
+      fix: 'sync applies Typesafe agent picker (reconcile)',
+    },
+  ];
+  const prior = process.cwd();
+  process.chdir(PROJECT);
+  try {
+    const { out } = await captureLog(() => sync.run({
+      flags: FLAGS({ 'dry-run': true, 'no-upgrade': true }), pkgRoot: PKG_ROOT, collectFn: collectMixed,
+    }));
+    assert.doesNotMatch(out, /MiniLM agent picker/, '--no-upgrade must withhold a needs-ruflo ruflo-components fix');
+    assert.match(out, /Typesafe agent picker/, 'a non-upgrade ruflo-components fix must stay planned');
+  } finally { process.chdir(prior); }
+});
+
+// Controller ruling: a blocked (level: 'fail') ruflo-components row must
+// survive into the post-heal convergence check the same way any other
+// subsystem's fail row does. The FIRST collectFn call seeds the plan with an
+// unrelated, unmatched subsystem (so none of SYNC_STEPS' specific `when`
+// gates fire — 'host-lifecycles' is the only unconditional step, and it
+// no-ops with no lifecycle hosts enabled); the SECOND call (the post-heal
+// "after" proof) reports the blocked ruflo-components row. This proves the
+// convergence check without ever entering the real `reconcileRufloComponents`
+// (which never appears in `subsystems` here) — hermetic by construction.
+test('a blocked (fail-level) ruflo component prevents a false converged verdict', async () => {
+  seedHome();
+  let calls = 0;
+  const collectFn = async () => {
+    calls += 1;
+    if (calls === 1) {
+      return [{
+        subsystem: 'sync-test-only-marker', level: 'warn', message: 'placeholder heal for this test',
+        fix: 'sync does something harmless not tied to any real step',
+      }];
+    }
+    return [{
+      subsystem: 'ruflo-components', level: 'fail',
+      message: 'MCP tool governance — blocked: Applying failed. Follow the reason shown, then run ak sync.',
+      fix: null,
+    }];
+  };
+  const prior = process.cwd();
+  process.chdir(PROJECT);
+  let result;
+  try {
+    result = await captureLog(() => sync.run({
+      flags: FLAGS({ 'no-upgrade': true }), pkgRoot: PKG_ROOT, collectFn,
+    }));
+  } finally { process.chdir(prior); }
+  assert.equal(result.result, 1, result.out);
+  assert.match(result.out, /still failing: \[ruflo-components\]/);
+  assert.doesNotMatch(result.out, /converged — no failing subsystems/);
+});
+
 test('kit.json opt-outs keep their subsystems out of the plan entirely', async () => {
   seedHome(offlineKitConfig({ security: false, agentdb: false, mcp: { register: false, excludeFamilies: [] } }));
   const { out } = await dryRun();

@@ -407,4 +407,28 @@ test('printReportLine routes each level to its own output function (ok/warn/fail
   assert.match(infoOut, /ℹ.*fyi/);
 });
 
+// Controller ruling: every ruflo-components teardown failure must gate
+// ownershipTeardownOk exactly like every other uninstall step that can fail
+// to release what it owns (agent-browser, opencode, deja-vu, ...).
+test('a ruflo component env conflict blocks ownership teardown so a purge must not delete kit.json', async () => {
+  seedHome();
+  const settingsFile = paths.claudeSettingsPath();
+  fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
+  // A receipt claims ak set CLAUDE_FLOW_ROUTER_TYPESAFE=1, but the file on disk
+  // now carries a different, user-edited value — the exact shape
+  // owned-env-projection.mjs's planOwnedEnv throws "user-edited value preserved"
+  // on, which reconcileClaudeComponentEnv turns into a `status: 'conflict'`
+  // finding (so `env.ok` is false and nothing is silently overwritten).
+  fs.writeFileSync(settingsFile, JSON.stringify({ env: { CLAUDE_FLOW_ROUTER_TYPESAFE: 'user-edited' } }, null, 2) + '\n');
+  fs.writeFileSync(`${settingsFile}.agentic-kit-ruflo-components.json`, JSON.stringify({
+    version: 2, pending: false,
+    keys: { CLAUDE_FLOW_ROUTER_TYPESAFE: { before: { present: false }, after: { present: true, value: '1' } } },
+  }) + '\n');
+  const { result, out } = await captureLog(() => uninstall.run({ flags: { yes: true, purge: true } }));
+  assert.equal(result, 1, out);
+  assert.match(out, /ruflo component env:/);
+  assert.ok(fs.existsSync(paths.kitConfigPath()),
+    'kit.json must survive a purge when ruflo-components teardown could not release an owned, user-edited value');
+});
+
 test.after(() => rmrf(HOME));

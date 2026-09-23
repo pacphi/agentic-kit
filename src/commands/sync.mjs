@@ -557,7 +557,14 @@ export async function run({
     // Model lifecycle actions are explicit advisory commands. `ak status` must
     // name them, but sync neither refreshes catalogs nor applies model plans.
     .filter((r) => r.subsystem !== 'models')
-    .filter((r) => !(flags['no-upgrade'] && ['versions', 'self', 'ruvnet-brain', 'ruvector'].includes(r.subsystem)));
+    .filter((r) => !(flags['no-upgrade'] && ['versions', 'self', 'ruvnet-brain', 'ruvector'].includes(r.subsystem)))
+    // A ruflo-components row asking for a ruflo UPGRADE (needs-ruflo -- the status
+    // section's own row text names it, e.g. "needs ruflo >= 3.44.0") gets the same
+    // --no-upgrade treatment as 'versions': the component can't actually apply
+    // without the upgrade --no-upgrade just withheld, so planning it would report
+    // an action sync cannot complete this run. Other ruflo-components fixes
+    // (not-applied/drifted/blocked) don't need an upgrade and stay in the plan.
+    .filter((r) => !(flags['no-upgrade'] && r.subsystem === 'ruflo-components' && /needs ruflo/.test(r.message)));
 
   const cfg = loadKitConfig();
   if (cfg.aqe !== false && cfg.aqeEmbedding && cfg.aqeEmbedding.mode !== 'unmanaged') {

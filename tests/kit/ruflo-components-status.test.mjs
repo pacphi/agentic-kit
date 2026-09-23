@@ -51,3 +51,18 @@ test('trust group omits opted-out components', () => {
   });
   assert.equal(group, null);
 });
+
+// Controller ruling: a blocked component must count toward `ak sync`'s
+// post-heal convergence check, which filters on `r.level === 'fail'` — a
+// 'warn' row would let sync report "converged" while the component stayed broken.
+test('a blocked component row is level fail, not warn, so sync convergence counts it', () => {
+  const blocked = {
+    rufloVersion: '3.44.0', summary: { active: 0, total: 1 }, components: [
+      view('mcpGovernance', 'MCP tool governance', 'blocked', 'blocked',
+        'Applying failed. Follow the reason shown, then run ak sync.', 'Follow the reason shown, then run ak sync.'),
+    ],
+  };
+  const rows = rufloComponentRows(blocked);
+  assert.equal(rows[1].level, 'fail');
+  assert.match(rows[1].fix, /ak sync/);
+});

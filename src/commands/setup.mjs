@@ -483,9 +483,10 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
   }
   await printUndetectedHostHints(cfg);
   // ADR-0058: machine-scope ruflo components (typesafe picker, MiniLM picker,
-  // learning profile, funnel) — no project here, so `cwd: paths.home` never
-  // reaches the project-only mcpGovernance policy path.
-  const components = await reconcileRufloComponents(cfg, { cwd: paths.home, refresh: false });
+  // learning profile, funnel). projectRoot: null (not merely omitted) — machine
+  // scope must never pick up an ancestor .git above $HOME (e.g. a dotfiles repo)
+  // as a ruflo project; only `run_project` ever targets a project (controller ruling).
+  const components = await reconcileRufloComponents(cfg, { cwd: paths.home, refresh: false, projectRoot: null });
   for (const r of components.results) (r.ok ? ok : warn)(`ruflo components: ${r.id} — ${r.detail}`);
   saveKitConfig(cfg);
   return true;

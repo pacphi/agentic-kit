@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   ensureTypesafePackage, removeTypesafePackage, ensureFunnel, releaseFunnel, reconcileRufloComponents,
+  rufloProjectRoot,
 } from '../../src/lib/ruflo-components/apply.mjs';
 
 const cfg = () => ({ integrations: { ownership: {} }, rufloComponents: { typesafePicker: true, funnel: false } });
@@ -111,6 +112,9 @@ test('reconcile: dry run writes nothing; real run writes policy and env and clas
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
   const root = path.join(tmp, 'proj');
   fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+  // A ruflo project also needs .claude-flow/ (controller ruling: rufloProjectRoot),
+  // or the project-scope mcpGovernance policy below is correctly never reached.
+  fs.mkdirSync(path.join(root, '.claude-flow'), { recursive: true });
   const opts = {
     cwd: root, runner: fakeRuflo, rufloVersion: '3.44.0',
     userSettingsFile: path.join(tmp, 'home', 'settings.json'), evidenceFile: path.join(tmp, 'state', 'evidence.json'),
@@ -166,6 +170,7 @@ test('reconcile: a foreign policy file (e.g. from MetaHarness or Agentic-QE) is 
   const root = path.join(tmp, 'proj');
   fs.mkdirSync(path.join(root, '.harness'), { recursive: true });
   fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+  fs.mkdirSync(path.join(root, '.claude-flow'), { recursive: true });
   const foreign = JSON.stringify({ auditLog: true, maxToolCallsPerTurn: 8 });
   fs.writeFileSync(path.join(root, '.harness', 'mcp-policy.json'), foreign);
   const opts = {
@@ -186,6 +191,7 @@ test('reconcile: an fs error while reconciling the policy is caught and reported
   t.after(() => { fs.chmodSync(path.join(tmp, 'proj'), 0o755); fs.rmSync(tmp, { recursive: true, force: true }); });
   const root = path.join(tmp, 'proj');
   fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+  fs.mkdirSync(path.join(root, '.claude-flow'), { recursive: true });
   fs.chmodSync(root, 0o555); // read-only: reconcilePolicy's mkdirSync('.harness') throws EACCES.
   const opts = {
     cwd: root, runner: fakeRuflo, rufloVersion: '3.44.0',
@@ -198,4 +204,65 @@ test('reconcile: an fs error while reconciling the policy is caught and reported
   assert.equal(typeof entry.detail, 'string');
   const gov = result.snapshot.components.find((c) => c.id === 'mcpGovernance');
   assert.equal(gov.state.id, 'blocked');
+});
+
+// --- Controller ruling: rufloProjectRoot (a ruflo project needs .claude-flow/, not
+// merely an ancestor .git) --------------------------------------------------------
+
+test('rufloProjectRoot requires BOTH a git root and .claude-flow/', (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-rc-project-root-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  assert.equal(rufloProjectRoot(tmp), null, 'no .git at all is not a project');
+  fs.mkdirSync(path.join(tmp, '.git'), { recursive: true });
+  assert.equal(rufloProjectRoot(tmp), null, 'a git repo without .claude-flow/ is not (yet) a ruflo project');
+  fs.mkdirSync(path.join(tmp, '.claude-flow'), { recursive: true });
+  assert.ok(rufloProjectRoot(tmp), 'a git repo WITH .claude-flow/ is a ruflo project');
+  assert.equal(path.basename(rufloProjectRoot(tmp)), path.basename(tmp));
+});
+
+test('reconcile: a git repo without .claude-flow/ used as a machine-scope cwd never receives project targets', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-rc-home-like-repo-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  // Simulates the exact hazard: `run_machine` reconciles from paths.home, which
+  // could itself be (or sit under) an unrelated dotfiles git repo.
+  fs.mkdirSync(path.join(tmp, '.git'), { recursive: true });
+  const opts = {
+    cwd: tmp, runner: fakeRuflo, rufloVersion: '3.44.0',
+    userSettingsFile: path.join(tmp, 'settings.json'), evidenceFile: path.join(tmp, 'state', 'evidence.json'),
+  };
+  const result = await reconcileRufloComponents(fullCfg(), opts);
+  assert.equal(fs.existsSync(path.join(tmp, '.harness')), false,
+    'no project (no .claude-flow/) must never receive a .harness/mcp-policy.json');
+  assert.equal(result.results.some((r) => r.id === 'mcpGovernance'), false,
+    'mcpGovernance is not even attempted without a real project root');
+});
+
+test('reconcile: the SAME repo, once it has .claude-flow/, is a project and receives the policy', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-rc-home-becomes-project-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(tmp, '.git'), { recursive: true });
+  fs.mkdirSync(path.join(tmp, '.claude-flow'), { recursive: true });
+  const opts = {
+    cwd: tmp, runner: fakeRuflo, rufloVersion: '3.44.0',
+    userSettingsFile: path.join(tmp, 'settings.json'), evidenceFile: path.join(tmp, 'state', 'evidence.json'),
+  };
+  const result = await reconcileRufloComponents(fullCfg(), opts);
+  assert.ok(fs.existsSync(path.join(tmp, '.harness', 'mcp-policy.json')));
+  assert.ok(result.results.some((r) => r.id === 'mcpGovernance'));
+});
+
+test('reconcile: an explicit projectRoot: null forces machine scope only, even from inside a real ruflo project', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-rc-explicit-null-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const root = path.join(tmp, 'proj');
+  fs.mkdirSync(path.join(root, '.git'), { recursive: true });
+  fs.mkdirSync(path.join(root, '.claude-flow'), { recursive: true });
+  const opts = {
+    cwd: root, projectRoot: null, runner: fakeRuflo, rufloVersion: '3.44.0',
+    userSettingsFile: path.join(tmp, 'home', 'settings.json'), evidenceFile: path.join(tmp, 'state', 'evidence.json'),
+  };
+  const result = await reconcileRufloComponents(fullCfg(), opts);
+  assert.equal(fs.existsSync(path.join(root, '.harness')), false,
+    'an explicit projectRoot: null must win over what cwd would otherwise resolve to');
+  assert.equal(result.results.some((r) => r.id === 'mcpGovernance'), false);
 });
