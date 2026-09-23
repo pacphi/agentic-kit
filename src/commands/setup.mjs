@@ -42,6 +42,8 @@ import { withDb } from '../lib/sqlite.mjs';
 import { findMemoryEntry } from '../lib/project-memory.mjs';
 import { projectMemoryEnv } from '../lib/ruflo-memory.mjs';
 import { reconcileMemoryPin } from '../lib/claude-env-projection.mjs';
+import { reconcileRufloComponents } from '../lib/ruflo-components/apply.mjs';
+import { formatComponentResults } from './status/sections/ruflo-components.mjs';
 import {
   setupTrustManifest, trustManifestLines,
 } from '../lib/trust-manifest.mjs';
@@ -480,6 +482,12 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
     catch (error) { warn(`Codex context reconciliation incomplete: ${error.message}`); return false; }
   }
   await printUndetectedHostHints(cfg);
+  // ADR-0058: machine-scope ruflo components (typesafe picker, MiniLM picker,
+  // learning profile, funnel) — no project here, so `cwd: paths.home` never
+  // reaches the project-only mcpGovernance policy path.
+  const components = await reconcileRufloComponents(cfg, { cwd: paths.home, refresh: false });
+  for (const r of components.results) (r.ok ? ok : warn)(`ruflo components: ${r.id} — ${r.detail}`);
+  saveKitConfig(cfg);
   return true;
 }
 
@@ -706,7 +714,7 @@ export async function run_project({
   const root = process.cwd();
   heading(`project setup — ${root}`);
   if (!trustDisclosed) discloseSetupTrust(cfg, { project: true });
-  if (flags['dry-run']) { info('dry-run: would init, sanitize, pin DB path, activate memory/swarm/daemon, verify'); return true; }
+  if (flags['dry-run']) { info('dry-run: would init, sanitize, pin DB path, activate memory/swarm/daemon, verify, apply managed ruflo components'); return true; }
 
   const permissionsFile = paths.projectSettings(root);
   const permCtx = {
@@ -719,6 +727,12 @@ export async function run_project({
   if (!(await rufloProjectInit(root, permCtx))) return false;
   await sanitizeProjectMcpConfig(root);
   pinProjectMemoryDbPath(root);
+  // ADR-0058: project-scope ruflo components (adds MCP governance, which needs a project root).
+  const components = await reconcileRufloComponents(cfg, { cwd: root, refresh: true });
+  heading('ruflo components');
+  for (const line of formatComponentResults(components.snapshot)) console.log(line);
+  if (components.changed) info('Restart Claude Code, Codex and OpenCode so the new ruflo component settings take effect.');
+  saveKitConfig(cfg);
   const env = projectMemoryEnv(root);
   await activateProjectMemoryAndSwarm(root, env);
   await startProjectDaemon(root);

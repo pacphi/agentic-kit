@@ -19,6 +19,7 @@ import { companionLifecycleFor } from '../lib/adapters/companion-lifecycle-regis
 import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
+import { reconcileRufloComponents } from '../lib/ruflo-components/apply.mjs';
 import { HOSTS, commandHosts, hostInstallState, hostExecutable, installHost, convergeProviderStack, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
 import { driftReport, selfDrift } from '../lib/versions.mjs';
 import { drift as ruvnetBrainDrift } from '../lib/ruvnet-brain.mjs';
@@ -198,6 +199,22 @@ export const SYNC_STEPS = [
       for (const d of await driftReport()) {
         if (d.outdated || !d.installed) await ctx.step(`upgrade ${d.pkg}`, () => heal.upgradePackage(d.pkg, hostUpgradeOptions(d.pkg)));
       }
+    },
+  },
+  // ADR-0058: runs immediately after `versions` so a `needs ruflo >= X`
+  // component can apply in the SAME sync that just upgraded ruflo, rather
+  // than waiting one more sync cycle behind it.
+  {
+    id: 'ruflo-components',
+    when: (subs) => subs.has('ruflo-components'),
+    run: async (ctx) => {
+      const result = await ctx.step('ruflo components', async () => {
+        const r = await reconcileRufloComponents(ctx.cfg, { cwd: ctx.cwd, refresh: true });
+        return { ok: r.ok, detail: r.results.map((x) => `${x.id}: ${x.detail}`).join('; '), snapshot: r.snapshot, changed: r.changed };
+      });
+      saveKitConfig(ctx.cfg);
+      if (result?.changed) info('Restart Claude Code, Codex and OpenCode so the new ruflo component settings take effect.');
+      return result;
     },
   },
   // ruvnet-brain: install if absent / re-run installer to pull latest when

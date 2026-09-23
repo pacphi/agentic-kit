@@ -152,6 +152,14 @@ export function offlineKitConfig(extra = {}) {
   return {
     agentBrowser: false, // avoid global installs/browser downloads in unrelated hermetic tests
     ruvnetBrain: false, // its drift probe hits the GitHub releases API
+    // ADR-0058: every component off by default here too -- reconcileRufloComponents runs
+    // for real inside setup/sync's non-dry paths (some tests exercise those directly), and
+    // an untamed default would spawn a real global npm install or a real ruflo funnel call
+    // in an otherwise-hermetic test. A test that wants a component managed opts back in via `extra`.
+    rufloComponents: {
+      typesafePicker: false, minilmPicker: false, mcpGovernance: false,
+      learningProfile: false, turnCredit: false, memoryFix2887: false, funnel: true,
+    },
     versionCheck: {
       ttlHours: 24,
       last: Date.now(),

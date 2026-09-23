@@ -17,6 +17,7 @@ export const options = {
   json: { type: 'boolean', default: false },
   deep: { type: 'boolean', default: false },
   hint: { type: 'boolean', default: false },
+  refresh: { type: 'boolean', default: false },
 };
 
 export const help = `ak status — read-only dashboard of what's true and what's drifted
@@ -28,8 +29,9 @@ suggested next action.
 Usage: ak status [options]
 
 Options:
-  --deep    run the slower probes (spawns CLIs) for a fuller picture
-  --json    emit the raw rows as JSON (suppresses the drift nudge)
+  --deep      run the slower probes (spawns CLIs) for a fuller picture
+  --json      emit the raw rows as JSON (suppresses the drift nudge)
+  --refresh   re-probe ruflo component evidence
 
 Examples:
   ak status           quick dashboard
@@ -60,11 +62,12 @@ export async function collect({
   cwd = process.cwd(),
   dejaVuAdapter = companionLifecycleFor('deja-vu'),
   dejaVuPlanOptions = {},
+  refresh = false,
 }) {
   const rows = [];
   const cfg = loadKitConfig();
   const integrationFacts = await collectIntegrationFacts({ cwd, cfg });
-  const ctx = { cfg, cwd, pkgRoot, integrationFacts };
+  const ctx = { cfg, cwd, pkgRoot, integrationFacts, refresh };
 
   await runSections(SECTIONS_BEFORE_HOST_DETAIL, ctx, rows);
 
@@ -87,7 +90,7 @@ export async function collect({
 }
 
 export async function run({ flags, pkgRoot }) {
-  const rows = await collect({ pkgRoot });
+  const rows = await collect({ pkgRoot, refresh: !!flags.refresh });
   const worst = rows.some((r) => r.level === 'fail') ? 'fail'
     : rows.some((r) => r.level === 'warn') ? 'warn' : 'ok';
 

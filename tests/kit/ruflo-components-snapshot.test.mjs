@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { componentSnapshot } from '../../src/lib/ruflo-components/snapshot.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { componentSnapshot, rufloComponentsPayload } from '../../src/lib/ruflo-components/snapshot.mjs';
 
 const now = Date.parse('2026-09-23T12:00:00Z');
 const cfg = { rufloComponents: { typesafePicker: true, minilmPicker: true, mcpGovernance: { maxCallsPerMinute: 120 },
@@ -131,3 +134,26 @@ test('governance with no audit evidence at all is unknown', () => {
   assert.equal(view.state.id, 'unknown');
   assert.match(view.state.meaning, /No ruflo MCP tool calls have been audited in the last 24 hours, so enforcement has not been observed yet\./);
 });
+
+// Controller ruling 1: the shared, read-only projection every surface (status,
+// Task 10's dashboard) builds a snapshot from.
+test('rufloComponentsPayload has all 8 components, writes nothing, and reports typesafe unknown without evidence', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-rc-payload-'));
+  try {
+    const before = fs.readdirSync(tmp);
+    const snap = rufloComponentsPayload({
+      cfg, rufloVersion: '3.44.0', projectRoot: null,
+      evidenceFile: path.join(tmp, 'evidence.json'),
+      userSettingsFile: path.join(tmp, 'settings.json'),
+      now,
+    });
+    assert.equal(snap.components.length, 8);
+    assert.equal(byId(snap, 'typesafePicker').state.id, 'unknown');
+    assert.deepEqual(fs.readdirSync(tmp), before, 'rufloComponentsPayload must never write');
+    assert.equal(fs.existsSync(path.join(tmp, 'evidence.json')), false);
+    assert.equal(fs.existsSync(path.join(tmp, 'settings.json')), false);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+

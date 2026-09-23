@@ -5,7 +5,9 @@ import { COMPONENTS } from './catalogue.mjs';
 import { describeState } from './states.mjs';
 import { managedIntent } from './config.mjs';
 import { supports, RC_KEYS } from './env.mjs';
-import { EVIDENCE_STALE_MS } from './evidence.mjs';
+import { EVIDENCE_STALE_MS, readEvidenceCache } from './evidence.mjs';
+import { readPolicy } from './policy.mjs';
+import { reconcileClaudeComponentEnv } from '../claude-env-projection.mjs';
 
 // The machine env key each RC-backed component projects — used to detect a
 // user-set conflict (Claude host layer) and to know which components can go
@@ -135,4 +137,32 @@ export function componentSnapshot({ cfg, rufloVersion, evidence, projection, now
     components,
     summary: { active: components.filter((c) => c.state.id === 'active').length, total: components.length },
   };
+}
+
+/** Controller ruling 3: the ONE read-only projection every surface (status's own
+ *  section, and Task 10's dashboard) builds a snapshot from — so none of them
+ *  re-implements it. Never spawns anything and never writes: the Claude env read
+ *  is a dry run, and the evidence comes from whatever is already cached (a
+ *  caller wanting fresher evidence collects + writes it BEFORE calling this,
+ *  e.g. `ak status --refresh`). `projectRoot` may be null (no repo at `cwd`),
+ *  in which case policy state is reported as null rather than probed. */
+export function rufloComponentsPayload({
+  cfg, rufloVersion, projectRoot, evidenceFile, userSettingsFile = undefined, now = Date.now(),
+}) {
+  const claude = reconcileClaudeComponentEnv(cfg, {
+    projectRoot, rufloVersion, userSettingsFile, dryRun: true,
+  });
+  const conflicts = claude.findings
+    .filter((f) => f.status === 'conflict')
+    .map((f) => (f.reason ?? '').split(':')[0]);
+  const evidence = readEvidenceCache(evidenceFile);
+  const missingHosts = cfg?.integrations?.hosts?.codex ? ['Codex hooks'] : [];
+  const policy = projectRoot ? readPolicy(projectRoot).state : null;
+  return componentSnapshot({
+    cfg,
+    rufloVersion,
+    evidence,
+    now,
+    projection: { claude: { conflicts, changed: claude.changed }, missingHosts, policy },
+  });
 }
