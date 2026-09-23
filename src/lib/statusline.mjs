@@ -149,6 +149,10 @@ function rufloCliVersion() {
 export function helperStampStale(root = process.cwd()) {
   const installed = rufloCliVersion();
   if (!installed) return false; // no ruflo cli → nothing will refresh anything
+  // Mirror ruflo's own precondition (helper-refresh.js refreshOneHelpersDir):
+  // a directory without hook-handler.cjs is never refreshed, so there is no
+  // armed wipe to report — e.g. ~/.claude or a project ruflo never initialized.
+  if (!fs.existsSync(path.join(root, '.claude', 'helpers', 'hook-handler.cjs'))) return false;
   try {
     // Tolerate a `v` prefix: ruflo writes the stamp bare today, but a prefixed
     // stamp fed raw into cmpVersions goes NaN and reads as PERMANENTLY stale —
@@ -170,25 +174,37 @@ export function helperStampStale(root = process.cwd()) {
  *  failure returns false and injection proceeds on the file as-is (no worse
  *  than the pre-fix behavior). */
 export function refreshRufloHelpers(root = process.cwd(), { timeoutMs = 30_000 } = {}) {
+  return runHelperRefresh(root, { timeoutMs }) !== 'failed';
+}
+
+/** refreshRufloHelpers with the outcome kept: 'refreshed' when ruflo actually
+ *  rewrote a helper set (project or global), 'current' when it ran unblocked
+ *  and had nothing to write (stamp current, or no ruflo helpers in either
+ *  location), 'failed' when the module is absent, rejected, hung or was
+ *  blocked. Sync reports from this so a no-op never reads as a heal. */
+export function runHelperRefresh(root = process.cwd(), { timeoutMs = 30_000 } = {}) {
   const mod = helperRefreshModule();
-  if (!fs.existsSync(mod)) return false;
+  if (!fs.existsSync(mod)) return 'failed';
   try {
-    // A failed import / rejecting refresh exits 1; a BLOCKED refresh — upstream
-    // resolves {blocked:'…signature invalid'} rather than rejecting when the
-    // signed-manifest gate refuses to copy — exits 2. Both surface as false:
-    // "true = the refresh ran unblocked", never "a child spawned". (A resolved
-    // {refreshed:false} without blocked is a current-stamp no-op — success.)
+    // exit 1 = import failed / refresh rejected; 2 = BLOCKED (upstream resolves
+    // {blocked:'…signature invalid'} rather than rejecting when the
+    // signed-manifest gate refuses to copy); 3 = ran unblocked, wrote nothing.
     execFileSync(process.execPath, ['-e',
-      'import(process.argv[2]).then((m)=>m.autoRefreshHelpersIfStale(process.argv[1],{alsoRefreshGlobal:true})).then((r)=>{if(r&&r.blocked)process.exit(2)},()=>process.exit(1))',
+      'import(process.argv[2]).then((m)=>m.autoRefreshHelpersIfStale(process.argv[1],{alsoRefreshGlobal:true})).then((r)=>{if(r&&r.blocked)process.exit(2);if(!(r&&(r.refreshed||(r.global&&r.global.refreshed))))process.exit(3)},()=>process.exit(1))',
       root, pathToFileURL(mod).href,
     ], { stdio: 'ignore', timeout: timeoutMs });
-    return true;
-  } catch { return false; }
+    return 'refreshed';
+  } catch (error) { return error?.status === 3 ? 'current' : 'failed'; }
 }
 
 export function fixStatusline(root = process.cwd(), { dryRun = false } = {}) {
   const file = projectStatusline(root);
-  if (!fs.existsSync(file)) return { file, applied: false, reason: 'no statusline.cjs (created by ruflo init)' };
+  if (!fs.existsSync(file)) {
+    // No ruflo helpers directory at all = not a ruflo-initialized location
+    // (e.g. ~/.claude): nothing to patch, which is not a defect.
+    return { file, applied: false, absent: !fs.existsSync(path.dirname(file)),
+      reason: 'no statusline.cjs (created by ruflo init)' };
+  }
 
   // Order matters: refresh ruflo's helpers BEFORE reading, so we inject onto the
   // freshly-stamped copy and nothing rewrites it until the next ruflo upgrade

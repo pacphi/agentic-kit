@@ -4,6 +4,7 @@
 - **Release target:** `4.0.0-alpha.53`
 - **Date:** 2026-09-20
 - **Updated:** 2026-09-20 — implemented explicit defaults, owned Claude/Codex/OpenCode projections and qualified runtime proof
+- **Updated:** 2026-09-23 — project projections are scoped to the enclosing git repository root; outside a repository only the user Codex target applies (earlier project-scope values are relinquished by receipt), and the `.mcp.json` AQE registration is required only in an AQE-initialized project
 - **Related:** [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),
   [September repair](../audits/2026-09-09-aqe-integration-repair.md)
 

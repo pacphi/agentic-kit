@@ -12,6 +12,7 @@ const reconcileAqeEmbeddingProjections = (cfg, cwd, opts = {}) => reconcile(cfg,
 function fixture(t) {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-aqe-projection-'));
   t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(cwd, '.git'));
   const write = (name, value) => {
     const file = path.join(cwd, name); fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, typeof value === 'string' ? value : JSON.stringify(value)); return file;
@@ -194,4 +195,56 @@ test('reports explicit user scope conflict and refuses malformed precedence evid
   const result = inspectAqeEmbeddingProjections(cfg, cwd);
   assert.equal(result.ok, false);
   assert.doesNotMatch(JSON.stringify(result), /DO_NOT_PRINT_SECRET/);
+});
+
+test('outside a git repository no project target is required or written', t => {
+  const { cwd, cfg } = fixture(t);
+  fs.rmSync(path.join(cwd, '.git'), { recursive: true });
+  cfg.integrations.hosts = { claude: true, codex: true };
+  const codexHome = path.join(cwd, 'codex-home');
+  fs.mkdirSync(codexHome);
+  fs.writeFileSync(path.join(codexHome, 'config.toml'), '[mcp_servers.agentic-qe]\ncommand = "aqe-mcp"\nargs = []\n');
+  const result = reconcileAqeEmbeddingProjections(cfg, cwd, { codexHome });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(result.findings.map(f => f.file), [path.join(codexHome, 'config.toml')]);
+  assert.equal(fs.existsSync(path.join(cwd, '.claude')), false);
+  assert.equal(fs.existsSync(path.join(cwd, '.mcp.json')), false);
+  assert.match(fs.readFileSync(path.join(codexHome, 'config.toml'), 'utf8'), /AQE_EMBEDDER_ENDPOINT/);
+});
+
+test('outside a git repository a previously owned stray value is relinquished', t => {
+  const { cwd, write, cfg } = fixture(t);
+  fs.rmSync(path.join(cwd, '.git'), { recursive: true });
+  const file = write('.claude/settings.local.json', { env: { AQE_EMBEDDER_ENDPOINT: cfg.aqeEmbedding.endpoint } });
+  write('.claude/settings.local.json.agentic-kit-aqe-embedding.json', {
+    version: 1, before: { present: false }, after: { present: true, value: cfg.aqeEmbedding.endpoint }, pending: false,
+  });
+  const result = reconcileAqeEmbeddingProjections(cfg, cwd, { codexHome: path.join(cwd, 'none') });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(JSON.parse(fs.readFileSync(file)), {});
+  assert.equal(fs.existsSync(`${file}.agentic-kit-aqe-embedding.json`), false);
+  assert.equal(inspectAqeEmbeddingProjections(cfg, cwd, { codexHome: path.join(cwd, 'none') }).findings.length, 0);
+});
+
+test('AQE registration is required only in an AQE-initialized repository', t => {
+  const { cwd, cfg } = fixture(t);
+  const opts = { codexHome: path.join(cwd, 'none') };
+  const plain = inspectAqeEmbeddingProjections(cfg, cwd, opts);
+  assert.equal(plain.ok, true, JSON.stringify(plain));
+  assert.equal(plain.findings.find(f => f.file.endsWith('.mcp.json')).status, 'absent');
+  fs.mkdirSync(path.join(cwd, '.agentic-qe'));
+  const initialized = inspectAqeEmbeddingProjections(cfg, cwd, opts);
+  assert.equal(initialized.ok, false);
+  assert.equal(initialized.findings.find(f => f.file.endsWith('.mcp.json')).status, 'missing-registration');
+});
+
+test('a repository subdirectory projects into the repository root', t => {
+  const { cwd, write, cfg } = fixture(t);
+  const file = write('.mcp.json', { mcpServers: { 'agentic-qe': { command: 'aqe-mcp' } } });
+  const sub = path.join(cwd, 'src', 'deep');
+  fs.mkdirSync(sub, { recursive: true });
+  const result = reconcileAqeEmbeddingProjections(cfg, sub, { codexHome: path.join(cwd, 'none'), claudeUserFile: path.join(cwd, 'claude-user.json') });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(JSON.parse(fs.readFileSync(file)).mcpServers['agentic-qe'].env.AQE_EMBEDDER_ENDPOINT, cfg.aqeEmbedding.endpoint);
+  assert.equal(fs.existsSync(path.join(sub, '.mcp.json')), false);
 });

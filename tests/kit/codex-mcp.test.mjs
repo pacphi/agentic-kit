@@ -249,8 +249,10 @@ test('Codex MCP repair plans only remove recursive and legacy duplicate entries'
       'repair must preserve one current-state recovery copy before mutation');
     assert.deepEqual(calls.map(({ command, args }) => [command, args]), [
       ['codex', ['mcp', 'remove', 'codex']],
-      ['codex', ['mcp', 'remove', 'claude-flow']],
-    ]);
+    ], 'the legacy alias is disabled in place, not removed through codex mcp');
+    const alias = codexMcpTopology({ cwd: dir, home }).registrations.find(({ name }) => name === 'claude-flow');
+    assert.equal(alias?.enabled, false);
+    assert.equal(result.detail, 'removed [mcp_servers.codex], disabled [mcp_servers.claude-flow]');
   } finally { rm(dir); rm(home); }
 });
 

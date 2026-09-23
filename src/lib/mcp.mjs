@@ -175,6 +175,14 @@ function mcpTableName(table) {
   return match ? (match[1] ?? match[2]) : null;
 }
 
+/** A table's own children ([mcp_servers.<name>.env] …) belong to its block:
+ * cutting only up to the next header would orphan them. */
+function ownedBlockEnd(headers, index, childTables, sourceLength) {
+  let last = index;
+  while (headers[last + 1] && childTables.includes(headers[last + 1])) last++;
+  return headers[last + 1]?.index ?? sourceLength;
+}
+
 /** Read the bounded base-table sections behind Codex MCP registrations. This
  * is deliberately not a general TOML parser: only a base
  * `[mcp_servers.<name>]` table with string command and string-array args facts is
@@ -210,6 +218,7 @@ function codexMcpSections(file, scope) {
     const childPrefixes = [`mcp_servers.${name}.`, `mcp_servers."${name}".`];
     const childTables = headers.filter((candidate) =>
       childPrefixes.some((prefix) => candidate[1].trim().startsWith(prefix)));
+    const blockEnd = ownedBlockEnd(headers, index, childTables, source.length);
     const hasChildren = childTables.length > 0;
     const managedBrowserChild = childTables.length === 1
       && childTables[0][1].trim() === `mcp_servers.${name}.env`
@@ -231,7 +240,7 @@ function codexMcpSections(file, scope) {
     return [{
       name, scope, file, command, args, enabled, repairKind, regularFile,
       fingerprint: fingerprint(source.slice(header.index, bodyEnd)),
-      start: header.index, end: bodyEnd, source,
+      start: header.index, end: blockEnd, source,
     }];
   });
 }
@@ -325,11 +334,29 @@ function validRepairTarget(target) {
   return false;
 }
 
-function removeProjectCodexMcpTarget(target) {
+
+/** The legacy alias is disabled in place rather than deleted. Codex's Claude
+ * config import (the desktop app re-runs it on a schedule) adds a Claude MCP
+ * server whenever Codex has no server of that NAME, so a deleted
+ * [mcp_servers.claude-flow] came straight back and every sync removed it again.
+ * A disabled table keeps the name taken, launches nothing, and is not a repair
+ * target (its extra field and comment make it a non-exact shape). */
+export const LEGACY_RUFLO_PLACEHOLDER = [
+  '[mcp_servers.claude-flow]',
+  '# agentic-kit: disabled placeholder — stops Codex\'s Claude import from',
+  '# re-adding a duplicate of [mcp_servers.ruflo]. Delete this table to undo.',
+  'command = "ruflo"',
+  'args = ["mcp", "start"]',
+  'enabled = false',
+].join('\n');
+
+function replaceCodexMcpTarget(target, replacement) {
   const current = codexMcpSections(target.file, target.scope)
     .find((entry) => sameRepairIdentity(entry, target));
   if (!current) return false;
-  writeFileWithBackup(target.file, current.source.slice(0, current.start) + current.source.slice(current.end));
+  const tail = current.source.slice(current.end);
+  const block = replacement ? `${replacement}\n${tail ? '\n' : ''}` : '';
+  writeFileWithBackup(target.file, current.source.slice(0, current.start) + block + tail);
   return true;
 }
 
@@ -347,6 +374,26 @@ function createCurrentRepairBackup(file) {
     fs.closeSync(handle);
   }
   return backup;
+}
+
+/** Mutate one identity-checked target; returns a failure detail or null. The
+ * legacy alias is disabled in place (see LEGACY_RUFLO_PLACEHOLDER); project
+ * tables are edited directly; other user tables go through `codex mcp remove`. */
+async function applyCodexRepairTarget(target, live, runner, cwd) {
+  const disable = target.repairKind === 'legacy-ruflo';
+  if (target.scope === 'project' || disable) {
+    try {
+      if (!replaceCodexMcpTarget(live, disable ? LEGACY_RUFLO_PLACEHOLDER : null)) {
+        throw new Error('exact confirmed table was not found');
+      }
+      return null;
+    } catch (error) {
+      return `could not ${disable ? 'disable' : 'remove'} [mcp_servers.${target.name}] in ${target.file}: ${error.message}`;
+    }
+  }
+  const result = await runner('codex', ['mcp', 'remove', target.name], { cwd });
+  if (result.code === 0) return null;
+  return `could not remove [mcp_servers.${target.name}] from ${target.file}: ${(result.stderr || result.stdout || `exit ${result.code}`).split('\n')[0].slice(0, 160)}`;
 }
 
 /** Apply a previously disclosed repair plan. Project-scoped tables are edited
@@ -387,27 +434,11 @@ export async function repairCodexMcpTopology(targets, cwd = process.cwd(), {
         };
       }
     }
-    if (target.scope === 'project') {
-      try {
-        if (!removeProjectCodexMcpTarget(live)) throw new Error('exact confirmed table was not found');
-      } catch (error) {
-        return {
-          ok: false, changed: removed.length > 0,
-          detail: `could not remove [mcp_servers.${target.name}] from ${target.file}: ${error.message}`,
-        };
-      }
-    } else {
-      const result = await runner('codex', ['mcp', 'remove', target.name], { cwd });
-      if (result.code !== 0) {
-        return {
-          ok: false, changed: removed.length > 0,
-          detail: `could not remove [mcp_servers.${target.name}] from ${target.file}: ${(result.stderr || result.stdout || `exit ${result.code}`).split('\n')[0].slice(0, 160)}`,
-        };
-      }
-    }
+    const failure = await applyCodexRepairTarget(target, live, runner, cwd);
+    if (failure) return { ok: false, changed: removed.length > 0, detail: failure };
     const remaining = inspect({ cwd }).registrations.find((entry) =>
       entry.file === target.file && entry.scope === target.scope && entry.name === target.name);
-    if (remaining) {
+    if (target.repairKind === 'legacy-ruflo' ? remaining?.enabled !== false || remaining.repairKind : remaining) {
       return {
         ok: false, changed: true,
         detail: `Codex MCP repair could not be verified; [mcp_servers.${target.name}] remains`,
@@ -415,7 +446,9 @@ export async function repairCodexMcpTopology(targets, cwd = process.cwd(), {
     }
     removed.push(target);
   }
-  return { ok: true, changed: removed.length > 0, detail: `removed ${removed.map((target) => `[mcp_servers.${target.name}]`).join(', ')}` };
+  const verb = (target) => (target.repairKind === 'legacy-ruflo' ? 'disabled' : 'removed');
+  return { ok: true, changed: removed.length > 0,
+    detail: removed.map((target) => `${verb(target)} [mcp_servers.${target.name}]`).join(', ') };
 }
 
 /**
