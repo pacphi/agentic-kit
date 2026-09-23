@@ -80,21 +80,55 @@ export function planOwnedEnv(target, desired, { receiptSuffix, format = 'multi',
   }
   const nextStates = {};
   const nextReceipt = {};
+  const keys = {};
+  const conflicts = [];
   for (const key of new Set([...Object.keys(wanted), ...ownedKeys])) {
-    const current = editor.get(key);
     const owned = receipt?.keys?.[key];
     const want = wanted[key] ?? ABSENT;
-    if (owned && !same(current, owned.after)) throw new Error(`${key}: user-edited value preserved`);
-    if (!owned && current.present && !(want.present && same(current, want))) throw new Error(`${key}: conflicting unmanaged value preserved`);
-    if (!owned && current.present) continue; // equal foreign value: never adopted (ADR-0055)
-    const next = want.present ? want : (owned ? owned.before : ABSENT);
-    nextStates[key] = next;
-    if (want.present) nextReceipt[key] = { before: owned?.before ?? current, after: next };
+    const d = decideKey(editor.get(key), owned, want, Boolean(fmt.single));
+    keys[key] = d.state;
+    if (d.conflict) {
+      // Single-key receipts (AQE) keep ADR-0055's refuse-the-file contract; the multi-key
+      // engine preserves just this key and still converges the others (ADR-0058 §3).
+      if (fmt.single) throw new Error(`${key}: ${d.conflict}`);
+      conflicts.push({ key, reason: `${key}: ${d.conflict}` });
+      if (owned) nextReceipt[key] = owned; // user-edited: still reported, never overwritten
+      continue;
+    }
+    if (!d.next) continue;
+    nextStates[key] = d.next;
+    if (want.present) nextReceipt[key] = { before: owned?.before ?? editor.get(key), after: d.next };
   }
-  const changed = Object.entries(nextStates).some(([key, next]) => !same(editor.get(key), next));
-  if (!changed) return { file, status: 'converged', changed: false };
+  const envChanged = Object.entries(nextStates).some(([key, next]) => !same(editor.get(key), next));
+  const receiptDropped = [...ownedKeys].some((key) => !(key in nextReceipt));
+  if (!envChanged && !receiptDropped) return { file, status: 'converged', changed: false, keys, conflicts };
   return { file, boundary: target.boundary, status: 'drift', changed: true, source, receiptSource, receiptFile,
-    after: editor.render(nextStates), nextReceipt, format: fmt };
+    after: editor.render(nextStates), nextReceipt, format: fmt, keys, conflicts };
+}
+
+/** One key's outcome: `state` for reporting, `next` when ak writes it, `conflict` when a
+ *  value ak does not own (or a user edit of one it did) is preserved. */
+function decideKey(current, owned, want, single) {
+  if (owned && !current.present && !single) {
+    // ak's value was deleted: restore it while wanted (nothing of the user's is
+    // overwritten), otherwise there is nothing left to release.
+    return want.present ? { state: 'restore', next: want } : { state: 'converged', next: ABSENT };
+  }
+  if (owned && !same(current, owned.after)) return { state: 'user-edited', conflict: 'user-edited value preserved' };
+  if (!owned && current.present && !(want.present && same(current, want))) {
+    return { state: 'foreign', conflict: 'conflicting unmanaged value preserved' };
+  }
+  if (!owned && current.present) return { state: 'converged' }; // equal foreign value: never adopted (ADR-0055)
+  const next = want.present ? want : (owned ? owned.before : ABSENT);
+  if (same(current, next)) return { state: 'converged', next };
+  return { state: want.present ? 'write' : 'release', next };
+}
+
+/** Keys marked in flight while a plan is applied: every key the prior receipt held plus
+ *  every key the next one holds, so an interruption never loses a released key's `before`. */
+export function pendingReceiptKeys(plan) {
+  const prior = plan.receiptSource ? parseReceipt(plan.receiptSource, plan.format).keys : {};
+  return { ...prior, ...plan.nextReceipt };
 }
 
 function assertCurrent(file, source) {
@@ -109,8 +143,7 @@ export function applyOwnedEnv(plan, { backupTag }) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   if (source !== null) fs.copyFileSync(file, `${file}.ak-${backupTag}-backup.${randomUUID()}`, fs.constants.COPYFILE_EXCL);
   const hasKeys = Object.keys(nextReceipt).length > 0;
-  // Mark the write in flight: the new keys when adding, else the prior keys being released.
-  const pendingKeys = hasKeys ? nextReceipt : (plan.receiptSource ? parseReceipt(plan.receiptSource, format).keys : {});
+  const pendingKeys = pendingReceiptKeys(plan);
   if (Object.keys(pendingKeys).length) writePrivateFileAtomic(receiptFile, serializeReceipt(pendingKeys, format, true));
   const tmp = `${file}.ak-${backupTag}-tmp.${randomUUID()}`;
   try {

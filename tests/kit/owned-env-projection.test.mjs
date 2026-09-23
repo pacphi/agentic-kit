@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { planOwnedEnv, applyOwnedEnv, jsonTopLevelEnvEditor } from '../../src/lib/owned-env-projection.mjs';
+import { planOwnedEnv, applyOwnedEnv, jsonTopLevelEnvEditor, pendingReceiptKeys } from '../../src/lib/owned-env-projection.mjs';
 
 const opts = { receiptSuffix: '.test-receipt.json', format: 'multi', editorFor: (source) => jsonTopLevelEnvEditor(source) };
 const want = (map) => Object.fromEntries(Object.entries(map).map(([k, v]) => [k, v === null ? { present: false } : { present: true, value: v }]));
@@ -41,17 +41,68 @@ test('removing all managed keys restores exactly the prior document', (t) => {
 
 test('a foreign value for a managed key is preserved and reported', (t) => {
   const { file, target } = fixture(t, { env: { A: 'user' } });
-  assert.throws(() => planOwnedEnv(target, want({ A: '1' }), opts), /A.*preserved/);
+  const plan = planOwnedEnv(target, want({ A: '1' }), opts);
+  assert.equal(plan.keys.A, 'foreign');
+  assert.deepEqual(plan.conflicts, [{ key: 'A', reason: 'A: conflicting unmanaged value preserved' }]);
+  assert.equal(plan.changed, false);
   assert.equal(env(file).A, 'user');
 });
 
-test('a user edit after ak wrote is preserved and reported', (t) => {
+// ADR-0058 §3 "conflicts preserved rather than overwritten" — one user-set key must not
+// abandon the whole file: the other managed keys are still written.
+test('one foreign key is skipped while the other managed keys are written', (t) => {
+  const { file, target } = fixture(t, { env: { A: '0' } });
+  const plan = run(target, want({ A: '1', B: 'minilm', C: 'balanced' }));
+  assert.deepEqual(plan.keys, { A: 'foreign', B: 'write', C: 'write' });
+  assert.deepEqual(env(file), { A: '0', B: 'minilm', C: 'balanced' });
+  const receipt = JSON.parse(fs.readFileSync(`${file}.test-receipt.json`, 'utf8'));
+  assert.deepEqual(Object.keys(receipt.keys).sort(), ['B', 'C'], 'the foreign key is never adopted');
+  assert.equal(planOwnedEnv(target, want({ A: '1', B: 'minilm', C: 'balanced' }), opts).changed, false);
+});
+
+test('a user edit after ak wrote is preserved and reported, and its receipt entry retained', (t) => {
   const { file, target } = fixture(t, {});
-  run(target, want({ A: '1' }));
+  run(target, want({ A: '1', B: 'x' }));
   const doc = JSON.parse(fs.readFileSync(file, 'utf8')); doc.env.A = 'mine';
   fs.writeFileSync(file, JSON.stringify(doc));
-  assert.throws(() => planOwnedEnv(target, want({ A: null }), opts), /A.*user-edited/);
-  assert.equal(env(file).A, 'mine');
+  const plan = run(target, want({ A: null, B: null }));
+  assert.equal(plan.keys.A, 'user-edited');
+  assert.equal(plan.keys.B, 'release');
+  assert.deepEqual(env(file), { A: 'mine' });
+  const receipt = JSON.parse(fs.readFileSync(`${file}.test-receipt.json`, 'utf8'));
+  assert.deepEqual(Object.keys(receipt.keys), ['A'], 'the edited key stays receipted; the released one is dropped');
+});
+
+test('a managed value the user deleted is restored as drift', (t) => {
+  const { file, target } = fixture(t, {});
+  run(target, want({ A: '1' }));
+  fs.writeFileSync(file, JSON.stringify({ env: {} }));
+  const plan = planOwnedEnv(target, want({ A: '1' }), opts);
+  assert.equal(plan.keys.A, 'restore');
+  assert.equal(plan.changed, true);
+  applyOwnedEnv(plan, { backupTag: 'test' });
+  assert.deepEqual(env(file), { A: '1' });
+});
+
+test('a file-level error still refuses the whole file', (t) => {
+  const { file, target } = fixture(t);
+  fs.writeFileSync(file, '{ not json');
+  assert.throws(() => planOwnedEnv(target, want({ A: '1' }), opts), /invalid JSON/);
+});
+
+test('the single-key format still refuses on a conflicting value (AQE unchanged)', (t) => {
+  const { target } = fixture(t, { env: { A: 'user' } });
+  assert.throws(() => planOwnedEnv(target, want({ A: '1' }), { ...opts, format: { single: 'A' } }), /A: conflicting unmanaged value preserved/);
+});
+
+// Deferred (a): a mixed add+remove plan must mark BOTH the kept keys and the key being
+// released as in flight, or an interruption loses the released key's `before`.
+test('the pending marker of a mixed add+remove plan keeps the released key', (t) => {
+  const { target } = fixture(t, {});
+  run(target, want({ A: '1', MODE: 'balanced' }));
+  const plan = planOwnedEnv(target, want({ A: '1', MODE: null }), opts);
+  assert.equal(plan.keys.MODE, 'release');
+  assert.deepEqual(Object.keys(pendingReceiptKeys(plan)).sort(), ['A', 'MODE']);
 });
 
 test('an interrupted write blocks further changes', (t) => {
