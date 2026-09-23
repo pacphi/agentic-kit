@@ -218,7 +218,7 @@ export function mcpCommandFor({ binPresent, nestedPath }) {
  *  opencode.json wiring is host-global, not per-project — so only the marker
  *  is projected; the gateway/hooks templates decide enforcement per project
  *  directory at runtime from that marker. */
-function rufloComponentEnvFor(cfg) {
+export function rufloComponentEnvFor(cfg) {
   const rufloVersion = installedVersion('ruflo');
   return {
     ...machineComponentEnv(cfg, rufloVersion),

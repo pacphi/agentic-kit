@@ -45,16 +45,52 @@ const AK_CLAUDE_BLOCKS = [
   "ruflo-dual-mode-reference",
 ]
 
+// Mirrors src/lib/ruflo-components/policy.mjs readPolicy's file-safety checks
+// exactly (a regular, non-symlinked file no larger than 1 MiB that parses to
+// one plain JSON object), plus a provenance check: a foreign .harness/mcp-
+// policy.json (e.g. one a MetaHarness-generated project ships with its own
+// maxToolCallsPerTurn) must never silently cap ruflo's MCP server — only a
+// file ak itself wrote (renderPolicy's `_about` stamp) counts.
+function validAkPolicy(directory) {
+  try {
+    const file = path.join(directory, ".harness", "mcp-policy.json")
+    const stat = fs.lstatSync(file)
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1024 * 1024) return false
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"))
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return false
+    return typeof parsed._about === "string" && parsed._about.startsWith("Managed by agentic-kit")
+  } catch { return false }
+}
+
 // ADR-0058 §5: ruflo reads <directory>/.harness/mcp-policy.json and FAILS
 // CLOSED when it is missing or invalid under RUFLO_MCP_ENFORCE_POLICY=1, so
 // enforcement is projected only when the marker says governance is managed
-// AND this project actually has a parseable policy file.
+// AND this project actually has a valid, ak-authored policy file.
 function managedEnforcement(directory, env) {
   if (env.AK_RUFLO_GOVERNANCE !== "managed") return {}
-  try {
-    const parsed = JSON.parse(fs.readFileSync(path.join(directory, ".harness", "mcp-policy.json"), "utf8"))
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? { RUFLO_MCP_ENFORCE_POLICY: "1" } : {}
-  } catch { return {} }
+  return validAkPolicy(directory) ? { RUFLO_MCP_ENFORCE_POLICY: "1" } : {}
+}
+
+// ak OWNS RUFLO_MCP_ENFORCE_POLICY whenever governance is managed: it sets
+// the key when the policy is valid, and otherwise actively clears any
+// inherited/stale value so ruflo never fails closed (or is capped by a
+// foreign policy) on a project whose ak-authored policy is missing or no
+// longer valid. When governance is not managed, an inherited value is the
+// user's own choice and is left untouched.
+//
+// NOTE: this name deliberately avoids an "apply"-prefixed export — stock
+// OpenCode's plugin loader treats a top-level export named `applyXxx` as an
+// additional plugin factory and invokes it with a single context argument,
+// which crashes here (two-argument signature) and silently breaks the whole
+// plugin's tool projection. Verified empirically against stock OpenCode
+// 1.18.32 (see tests/kit/opencode-stock-ruflo-gateway.test.mjs).
+function resolveEnforcedEnvironment(directory, env) {
+  const enforcement = managedEnforcement(directory, env)
+  const result = { ...env, ...enforcement }
+  if (env.AK_RUFLO_GOVERNANCE === "managed" && !("RUFLO_MCP_ENFORCE_POLICY" in enforcement)) {
+    delete result.RUFLO_MCP_ENFORCE_POLICY
+  }
+  return result
 }
 
 function normalize(value) {
@@ -307,8 +343,7 @@ class RufloGatewayClient {
     this.args = command.slice(1)
     const base = entry.environment && typeof entry.environment === "object" ? entry.environment : {}
     this.environment = {
-      ...base,
-      ...managedEnforcement(this.directory, base),
+      ...resolveEnforcedEnvironment(this.directory, base),
       CLAUDE_FLOW_DB_PATH: path.join(this.directory, ".swarm", "memory.db"),
     }
     return true
@@ -816,4 +851,4 @@ export default async function rufloGateway({ directory = process.cwd() } = {}) {
   return plugin
 }
 
-export { managedEnforcement }
+export { managedEnforcement, resolveEnforcedEnvironment }
