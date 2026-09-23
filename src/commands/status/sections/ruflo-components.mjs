@@ -42,6 +42,18 @@ export function formatComponentResults(snapshot) {
   return snapshot.components.map((c) => `  ${c.label.padEnd(30)} ${c.state.label.padEnd(24)} ${c.state.meaning}`);
 }
 
+export const RESTART_REMINDER = 'Restart Claude Code, Codex and OpenCode so the new ruflo component settings take effect.';
+
+/** ADR-0058 §7 "after changes": the results table, any step that failed, and the restart
+ *  reminder when something changed — the same report for machine and project setup. */
+export function componentResultReport(result) {
+  return [
+    ...formatComponentResults(result.snapshot).map((text) => ({ level: 'log', text })),
+    ...result.results.filter((r) => !r.ok).map((r) => ({ level: 'warn', text: `ruflo components: ${r.id} — ${r.detail}` })),
+    ...(result.changed ? [{ level: 'info', text: RESTART_REMINDER }] : []),
+  ];
+}
+
 export default {
   id: 'ruflo-components',
   async collect({ cfg, cwd, refresh = false }) {

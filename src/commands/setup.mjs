@@ -43,7 +43,7 @@ import { findMemoryEntry } from '../lib/project-memory.mjs';
 import { projectMemoryEnv } from '../lib/ruflo-memory.mjs';
 import { reconcileMemoryPin } from '../lib/claude-env-projection.mjs';
 import { reconcileRufloComponents } from '../lib/ruflo-components/apply.mjs';
-import { formatComponentResults } from './status/sections/ruflo-components.mjs';
+import { componentResultReport } from './status/sections/ruflo-components.mjs';
 import {
   setupTrustManifest, trustManifestLines,
 } from '../lib/trust-manifest.mjs';
@@ -487,9 +487,16 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
   // scope must never pick up an ancestor .git above $HOME (e.g. a dotfiles repo)
   // as a ruflo project; only `run_project` ever targets a project (controller ruling).
   const components = await reconcileRufloComponents(cfg, { cwd: paths.home, refresh: false, projectRoot: null });
-  for (const r of components.results) (r.ok ? ok : warn)(`ruflo components: ${r.id} — ${r.detail}`);
+  printComponentResults(components);
   saveKitConfig(cfg);
   return true;
+}
+
+/** ADR-0058 §7: results table, failures and restart reminder after applying components. */
+function printComponentResults(components) {
+  heading('ruflo components');
+  const out = { log: (t) => console.log(t), warn, info };
+  for (const line of componentResultReport(components)) out[line.level](line.text);
 }
 
 export const RUFLO_PROJECT_INIT_ARGS = Object.freeze([
@@ -730,9 +737,7 @@ export async function run_project({
   pinProjectMemoryDbPath(root);
   // ADR-0058: project-scope ruflo components (adds MCP governance, which needs a project root).
   const components = await reconcileRufloComponents(cfg, { cwd: root, refresh: true });
-  heading('ruflo components');
-  for (const line of formatComponentResults(components.snapshot)) console.log(line);
-  if (components.changed) info('Restart Claude Code, Codex and OpenCode so the new ruflo component settings take effect.');
+  printComponentResults(components);
   saveKitConfig(cfg);
   const env = projectMemoryEnv(root);
   await activateProjectMemoryAndSwarm(root, env);

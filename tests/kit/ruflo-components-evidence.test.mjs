@@ -129,6 +129,25 @@ test('3.44.0 fixture: funnel status JSON parses directly', () => {
   assert.deepEqual(parseFunnel(fixture('funnel-status-3.44.0.json')), { enabled: true, decidedBy: 'package-default' });
 });
 
+// Final review M10: the real-machine 3.44.0 captures (installed typesafe, user-disabled
+// funnel) pin the parsers and the typesafe confirmer against what ruflo actually prints.
+test('3.44.0 fixtures: installed typesafe doctor row and user-disabled funnel status', async () => {
+  const [row] = parseDoctor(fixture('doctor-typesafe-installed-3.44.0.txt'));
+  assert.deepEqual(row, { status: 'pass', name: '@ruvector/typesafe router',
+    detail: 'v0.1.0 installed; enabled (hash embedder, uncalibrated)' });
+  const disabled = { enabled: false, decidedBy: 'user-config' };
+  assert.deepEqual(parseFunnel(fixture('funnel-status-disabled-3.44.0.json')), disabled);
+  assert.deepEqual(parseFunnel(fixture('funnel-status-disabled-3.44.0.txt')), disabled);
+  const { componentSnapshot } = await import('../../src/lib/ruflo-components/snapshot.mjs');
+  const classify = (doctorRow) => componentSnapshot({
+    cfg: { rufloComponents: { typesafePicker: true } }, rufloVersion: '3.44.0', now: Date.parse('2026-09-23T12:00:00Z'),
+    projection: { claude: { keys: {} }, missingHosts: [], policy: null },
+    evidence: { capturedAt: '2026-09-23T11:59:00Z', typesafe: { resolves: true, doctor: doctorRow }, errors: {} },
+  }).components.find((c) => c.id === 'typesafePicker').state.id;
+  assert.equal(classify(row), 'active');
+  assert.equal(classify(parseDoctor(fixture('doctor-typesafe-3.44.0.txt'))[0]), 'applied-unverified');
+});
+
 test('collectEvidence never throws when the injected module-version resolver throws', async () => {
   const runner = async (cmd, args) => {
     if (args.includes('funnel')) return { code: 0, stdout: fixture('funnel-status-3.43.0.txt'), stderr: '' };

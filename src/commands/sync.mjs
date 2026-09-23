@@ -20,6 +20,7 @@ import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { reconcileRufloComponents } from '../lib/ruflo-components/apply.mjs';
+import { RESTART_REMINDER } from './status/sections/ruflo-components.mjs';
 import { HOSTS, commandHosts, hostInstallState, hostExecutable, installHost, convergeProviderStack, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
 import { driftReport, selfDrift } from '../lib/versions.mjs';
 import { drift as ruvnetBrainDrift } from '../lib/ruvnet-brain.mjs';
@@ -213,7 +214,7 @@ export const SYNC_STEPS = [
         return { ok: r.ok, detail: r.results.map((x) => `${x.id}: ${x.detail}`).join('; '), snapshot: r.snapshot, changed: r.changed };
       });
       saveKitConfig(ctx.cfg);
-      if (result?.changed) info('Restart Claude Code, Codex and OpenCode so the new ruflo component settings take effect.');
+      if (result?.changed) info(RESTART_REMINDER);
       return result;
     },
   },

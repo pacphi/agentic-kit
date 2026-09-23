@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { rufloComponentRows, formatComponentResults } from '../../src/commands/status/sections/ruflo-components.mjs';
+import { rufloComponentRows, formatComponentResults, componentResultReport, RESTART_REMINDER } from '../../src/commands/status/sections/ruflo-components.mjs';
 import { rufloComponentsTrustGroup, trustManifestLines } from '../../src/lib/trust-manifest.mjs';
 
 const view = (id, label, stateId, stateLabel, meaning, action = '') => ({ id, label, state: { id: stateId, label: stateLabel, meaning, action } });
@@ -65,4 +65,16 @@ test('a blocked component row is level fail, not warn, so sync convergence count
   const rows = rufloComponentRows(blocked);
   assert.equal(rows[1].level, 'fail');
   assert.match(rows[1].fix, /ak sync/);
+});
+
+// Final review M11: machine setup gets the same after-changes report as project setup.
+test('the setup report has the table, failed steps and the restart reminder only after a change', () => {
+  const failed = componentResultReport({ snapshot, changed: true, results: [
+    { id: 'typesafePicker', ok: true, detail: 'present' }, { id: 'funnel', ok: false, detail: 'ruflo funnel disable did not take effect' },
+  ] });
+  assert.equal(failed.filter((l) => l.level === 'log').length, snapshot.components.length);
+  assert.deepEqual(failed.filter((l) => l.level === 'warn').map((l) => l.text), ['ruflo components: funnel — ruflo funnel disable did not take effect']);
+  assert.equal(failed.at(-1).text, RESTART_REMINDER);
+  const quiet = componentResultReport({ snapshot, changed: false, results: [] });
+  assert.ok(!quiet.some((l) => l.text === RESTART_REMINDER));
 });
