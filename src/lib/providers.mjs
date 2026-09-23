@@ -45,7 +45,7 @@ import { opencodeMcpStatus } from './opencode.mjs';
 import { codexMcpStatus, rufloCodexMcpStatus } from './mcp.mjs';
 import { projectedAqeExternalProviders } from './adapters/aqe-provider.mjs';
 import { applyAqeRouter, aqeRouterDrift, undoAqeRouter } from './aqe-router.mjs';
-import { globalInstallArgs } from './npm-global-install.mjs';
+import { installGlobalCli } from './npm-global-install.mjs';
 
 // The AQE-router convergence pipeline itself lives in aqe-router.mjs
 // (ADR-0037); re-exported here so every existing `./providers.mjs` import
@@ -284,29 +284,17 @@ export function hostAuthState(id, { env = process.env, present = true, home = os
   return { mode: 'none', billing: 'unknown', source: null, note: null };
 }
 
-/** Install a missing host globally via npm. Intended for the 'absent' case only —
- *  callers check hostInstallState first so an external install is never shadowed. */
-export async function installHost(id, { runner = run } = {}) {
+/** Install a missing host globally via npm, or reinstall an npm-owned host whose
+ *  CLI cannot start. Never for an external install — callers check
+ *  hostInstallState first so a mise/native/brew install is never shadowed.
+ *  @param {string} id
+ *  @param {{ runner?: typeof run, sleep?: (ms: number) => Promise<void> }} [opts] */
+export async function installHost(id, { runner = run, sleep } = {}) {
   const host = HOSTS.find((h) => h.id === id);
   if (!host) return { ok: false, detail: `unknown host: ${id}` };
-  const r = await runner('npm', globalInstallArgs(`${host.pkg}@latest`), { timeout: 600_000 });
-  if (r.code !== 0) {
-    return {
-      ok: false, changed: false,
-      detail: (r.stderr || `exit ${r.code}`).split('\n').slice(-2).join(' ').slice(0, 200),
-    };
-  }
-  // npm exit 0 proves package extraction, not that a lifecycle-created CLI is
-  // usable. This catches the Claude Code stub state that motivated issue #189
-  // and benefits every managed host without executing a session or network call.
-  const verify = await runner(host.bin, ['--version'], { timeout: 15_000 });
-  if (verify.code !== 0) {
-    return {
-      ok: false, changed: true,
-      detail: `installed package but ${host.bin} --version failed: ${(verify.stderr || verify.stdout || `exit ${verify.code}`).trim().split('\n')[0].slice(0, 160)}`,
-    };
-  }
-  return { ok: true, changed: true, detail: `installed ${host.pkg}` };
+  // npm exit 0 proves package extraction, not that a lifecycle-created CLI or
+  // an optional platform binary is usable (issue #189; codex platform alias).
+  return installGlobalCli(`${host.pkg}@latest`, host.bin, { runner, sleep });
 }
 
 // NOTE: host UPDATES ride versions.mjs `driftReport` (which lists the host

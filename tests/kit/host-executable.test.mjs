@@ -31,7 +31,7 @@ test('hosts status fails a recorded npm install whose binary cannot start', asyn
   const install = rows.find((r) => r.message.startsWith('codex 0.156.1'));
   assert.equal(install.level, 'warn');
   assert.match(install.message, /not executable.*Missing optional dependency/);
-  assert.match(install.fix, /npm install -g @openai\/codex@latest/);
+  assert.equal(install.fix, 'sync reinstalls @openai/codex');
 });
 
 test('hosts status stays ok when the npm install starts', async () => {

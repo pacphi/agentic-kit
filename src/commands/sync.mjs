@@ -19,7 +19,7 @@ import { companionLifecycleFor } from '../lib/adapters/companion-lifecycle-regis
 import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
-import { commandHosts, hostInstallState, installHost, convergeProviderStack, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
+import { HOSTS, commandHosts, hostInstallState, hostExecutable, installHost, convergeProviderStack, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
 import { driftReport, selfDrift } from '../lib/versions.mjs';
 import { drift as ruvnetBrainDrift } from '../lib/ruvnet-brain.mjs';
 import { RUVECTOR_PKG, managed as ruvectorManaged } from '../lib/ruvector.mjs';
@@ -126,6 +126,14 @@ Examples:
 // report, step, state}. `state` carries the two cross-step signals
 // (`dejaVuApplyFailed`, `aqeRouterApplyFailure`) the final convergence check
 // needs — the only state that survives past its own step.
+const HOST_LIFECYCLE = { installState: hostInstallState, executable: hostExecutable, install: installHost };
+
+/** A host package's CLI must start after an upgrade, not just extract. */
+export function hostUpgradeOptions(pkg) {
+  const host = HOSTS.find((h) => h.pkg === pkg);
+  return host ? { bin: host.bin } : {};
+}
+
 export const SYNC_STEPS = [
   {
     id: 'agent-browser',
@@ -139,6 +147,24 @@ export const SYNC_STEPS = [
       // download fails after the native CLI verified successfully.
       saveKitConfig(ctx.cfg);
       return result;
+    },
+  },
+  // hosts: install any ENABLED host that is entirely absent, and reinstall an
+  // npm-owned host whose CLI cannot start (npm exits 0 after dropping a failed
+  // optional platform binary). External installs are never touched; updates
+  // ride the `versions` step via driftReport. Runs before the Codex MCP and
+  // provider steps, which shell out to the host CLIs.
+  {
+    id: 'hosts',
+    when: (subs) => subs.has('hosts'),
+    run: async (ctx) => {
+      const { installState, executable, install } = { ...HOST_LIFECYCLE, ...ctx.hostLifecycle };
+      for (const h of commandHosts()) {
+        if (!ctx.cfg.integrations.hosts[h.id]) continue;
+        const { method } = await installState(h);
+        if (method === 'absent') await ctx.step(`install ${h.id}`, () => install(h.id));
+        else if (method === 'npm' && !(await executable(h)).ok) await ctx.step(`repair ${h.id}`, () => install(h.id));
+      }
     },
   },
   {
@@ -170,7 +196,7 @@ export const SYNC_STEPS = [
       // No force here: the pre-plan refresh in run() already ran for every
       // non-dry-run, non-no-upgrade sync, so this read hits that fresh cache.
       for (const d of await driftReport()) {
-        if (d.outdated || !d.installed) await ctx.step(`upgrade ${d.pkg}`, () => heal.upgradePackage(d.pkg));
+        if (d.outdated || !d.installed) await ctx.step(`upgrade ${d.pkg}`, () => heal.upgradePackage(d.pkg, hostUpgradeOptions(d.pkg)));
       }
     },
   },
@@ -280,19 +306,6 @@ export const SYNC_STEPS = [
       const stale = staleDaemons(await listDaemons({ cwd: ctx.cwd }));
       for (const r of reap(stale)) {
         (r.killed ? ok : warn)(`daemon pid=${r.pid}: ${r.killed ? 'reaped' : 'could not stop'}`);
-      }
-    },
-  },
-  // hosts: install any ENABLED host that is entirely absent (updates to
-  // npm-managed hosts ride the `versions` step above via driftReport).
-  {
-    id: 'hosts',
-    when: (subs) => subs.has('hosts'),
-    run: async (ctx) => {
-      for (const h of commandHosts()) {
-        if (!ctx.cfg.integrations.hosts[h.id]) continue;
-        if ((await hostInstallState(h)).method !== 'absent') continue;
-        await ctx.step(`install ${h.id}`, () => installHost(h.id));
       }
     },
   },

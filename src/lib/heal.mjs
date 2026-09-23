@@ -14,7 +14,7 @@ import { KIT_PKG } from './versions.mjs';
 import { scanRvf, quarantine } from './rvf.mjs';
 import { INSTALL_SPEC, INSTALL_ARGS, RELEASE_ASSET as RB_RELEASE_ASSET, NIGHTLY_LABEL as RB_NIGHTLY_LABEL, nightlyAgentPlist as rbNightlyPlist, present as rbPresent, latestRelease as rbLatestRelease, recordInstalledRelease as rbRecord } from './ruvnet-brain.mjs';
 import { PKG as ADB_PKG, present as adbPresent, coherence as adbCoherence } from './agentdb.mjs';
-import { globalInstallArgs } from './npm-global-install.mjs';
+import { globalInstallArgs, installGlobalCli } from './npm-global-install.mjs';
 
 // NB: `--allow-scripts` is rejected for project-scoped installs (EALLOWSCRIPTS,
 // npm >=11.17) — it is a global-install flag only. Plain installs still get
@@ -153,9 +153,16 @@ export function healRvf(projectAqeDir) {
   return { ok: true, detail: removed.length ? `quarantined: ${removed.join(', ')}` : 'healthy' };
 }
 
-/** Upgrade a global package to latest (with allow-scripts). */
-export async function upgradePackage(pkg) {
-  const r = await run('npm', globalInstallArgs(`${pkg}@latest`),
+/** Upgrade a global package to latest (with allow-scripts). With `bin`, the
+ *  package's CLI must also start afterwards (see installGlobalCli).
+ *  @param {string} pkg
+ *  @param {{ bin?: string|null, runner?: typeof run, sleep?: (ms: number) => Promise<void> }} [opts] */
+export async function upgradePackage(pkg, { bin = null, runner = run, sleep } = {}) {
+  if (bin) {
+    const r = await installGlobalCli(`${pkg}@latest`, bin, { runner, sleep });
+    return { ok: r.ok, detail: r.ok ? (r.retried ? 'upgraded (missing platform files repaired on retry)' : 'upgraded') : r.detail };
+  }
+  const r = await runner('npm', globalInstallArgs(`${pkg}@latest`),
     { timeout: 600_000 });
   return { ok: r.code === 0, detail: r.code === 0 ? 'upgraded' : r.stderr.split('\n').slice(-3).join(' ') };
 }

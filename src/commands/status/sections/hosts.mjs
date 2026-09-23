@@ -13,7 +13,7 @@ async function installedHostRows(h, st, primary, deps) {
   const launch = st.method === 'npm' ? await deps.executable(h) : { ok: true, detail: null };
   const install = launch.ok ? row('hosts', 'ok', label)
     : row('hosts', primary ? 'fail' : 'warn', `${label} installed but not executable: ${launch.detail}`,
-      `reinstall: npm install -g ${h.pkg}@latest`);
+      `sync reinstalls ${h.pkg}`);
   // auth mode (billing axis): oauth/subscription ($0) vs metered api-key.
   // A distinct row so `ak status --json` (and the dashboard) can badge it.
   const auth = deps.authState(h.id, { present: true });
