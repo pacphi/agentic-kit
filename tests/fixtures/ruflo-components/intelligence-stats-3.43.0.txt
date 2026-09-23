@@ -1,0 +1,5 @@
+| Mode: balanced                                                                     |
+| Status: active                                                                     |
+| Last Training: 170300s ago                                                         |
+| Trajectories     |   13649 |
+| Patterns Learned |   13586 |

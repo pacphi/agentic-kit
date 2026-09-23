@@ -1,0 +1,32 @@
+[INFO] Routing task: sync and review latest issues
+✅ Using native better-sqlite3
+[hooks] Semantic router initialized: native VectorDb (HNSW, 16k+ routes/s), embedder=hash
+
+Routing Method
+  - Method: semantic-native (native VectorDb (HNSW))
+  - Backend: native VectorDb (HNSW)
+  - Latency: 0.131ms
+  - Matched Pattern: testing-task
+
+Semantic Matches:
+  testing-task: 58.0%
+  testing-task: 57.0%
+  memory-task: 52.0%
+
++------------------ Primary Recommendation -------------------+
+| Agent: tester                                               |
+| Confidence: 58.0%                                           |
+| Reason: Semantic similarity to "testing-task" pattern (58%) |
++-------------------------------------------------------------+
+
+Alternative Agents
++------------+------------+-------------------------------------+
+| Agent Type | Confidence | Reason                              |
++------------+------------+-------------------------------------+
+| reviewer   |      48.0% | Alternative agent for reviewer c... |
++------------+------------+-------------------------------------+
+
+Estimated Metrics
+  - Success Probability: 58.0%
+  - Estimated Duration: 10-30 min
+  - Complexity: LOW
