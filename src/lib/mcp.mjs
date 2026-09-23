@@ -13,6 +13,7 @@ import { writeFileWithBackup } from './file-write.mjs';
 import { managedAgentBrowserEnv } from './agent-browser.mjs';
 import { isRufloMcpTransport } from './ruflo-mcp-transport.mjs';
 import { retiredCodexTransport } from './host-alignment.mjs';
+import { findTomlStringArray } from './codex-toml-safety.mjs';
 
 /** Enumerate MCP tool names from the installed package's mcp-tools modules,
  *  grouped by name prefix (family). Returns Map<family, string[]>. */
@@ -166,14 +167,6 @@ function tomlString(value) {
   try { return JSON.parse(value); } catch { return null; }
 }
 
-function tomlStringArray(value) {
-  if (!value) return null;
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) && parsed.every((entry) => typeof entry === 'string') ? parsed : null;
-  } catch { return null; }
-}
-
 const sameArgs = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 const fingerprint = (value) => createHash('sha256').update(value).digest('hex');
 
@@ -184,7 +177,7 @@ function mcpTableName(table) {
 
 /** Read the bounded base-table sections behind Codex MCP registrations. This
  * is deliberately not a general TOML parser: only a base
- * `[mcp_servers.<name>]` table with single-line string command/args facts is
+ * `[mcp_servers.<name>]` table with string command and string-array args facts is
  * observed. Extra fields or child tables preserve ownership, except for the
  * exact kit-managed browser environment on the retired Ruflo transport. */
 function codexMcpSections(file, scope) {
@@ -203,10 +196,13 @@ function codexMcpSections(file, scope) {
     const bodyEnd = headers[index + 1]?.index ?? source.length;
     const body = source.slice(bodyStart, bodyEnd);
     const command = tomlString(/^\s*command\s*=\s*("(?:[^"\\]|\\.)*")\s*$/m.exec(body)?.[1]);
-    const args = tomlStringArray(/^\s*args\s*=\s*(\[[^\n]*\])\s*$/m.exec(body)?.[1]);
+    const argsAssignment = findTomlStringArray(body, 'args');
+    const args = argsAssignment?.value ?? null;
     const enabledValue = /^\s*enabled\s*=\s*(true|false)\s*(?:#.*)?$/m.exec(body)?.[1];
     const enabled = enabledValue == null ? undefined : enabledValue === 'true';
-    const meaningful = body.split(/\r?\n/).map((line) => line.trim())
+    // Count a multi-line args array as the single field it is.
+    const fieldBody = argsAssignment ? body.replace(argsAssignment.text, 'args = []') : body;
+    const meaningful = fieldBody.split(/\r?\n/).map((line) => line.trim())
       .filter((line) => line && !line.startsWith('#'));
     const exactFields = meaningful.length === 2
       && meaningful.some((line) => /^command\s*=/.test(line))
@@ -445,9 +441,8 @@ export function rufloCodexMcpStatus(cfg, { home = os.homedir() } = {}) {
       const next = rest.search(/^\s*\[/m);
       const body = rest.slice(0, next < 0 ? rest.length : next);
       const commandMatch = /^\s*command\s*=\s*("(?:[^"\\]|\\.)*")\s*$/m.exec(body);
-      const argsMatch = /^\s*args\s*=\s*(\[[^\n]*\])\s*$/m.exec(body);
       try { if (commandMatch) command = JSON.parse(commandMatch[1]); } catch { /* non-canonical TOML */ }
-      try { if (argsMatch) args = JSON.parse(argsMatch[1]); } catch { /* non-canonical TOML */ }
+      args = findTomlStringArray(body, 'args')?.value ?? null;
     }
   } catch { /* config absent → not registered */ }
   return {

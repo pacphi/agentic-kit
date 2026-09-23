@@ -197,3 +197,30 @@ export function inspectCodexTomlStructure(source) {
 }
 
 export const isTomlTableLine = (line) => TABLE.test(line) || ARRAY_TABLE.test(line);
+
+// Arrays of basic strings, single- or multi-line (toml_edit, which Codex and
+// AQE write through, puts each element on its own line with a trailing comma).
+// Comments and non-string elements inside the array stay unsupported.
+const ARRAY_STRING = '"(?:[^"\\\\\\r\\n]|\\\\.)*"';
+const STRING_ARRAY = `\\[\\s*(?:${ARRAY_STRING}(?:\\s*,\\s*${ARRAY_STRING})*\\s*,?\\s*)?\\]`;
+
+function parseStringArray(value) {
+  try {
+    const parsed = JSON.parse(value.replace(/,\s*\]$/, ']'));
+    return Array.isArray(parsed) && parsed.every((entry) => typeof entry === 'string') ? parsed : null;
+  } catch { return null; }
+}
+
+/** Read `key = [..strings..]` at the very start of `text`. Returns
+ * { value, text } where value is null for an unsupported encoding, or null when
+ * `text` does not start with that assignment. */
+export function tomlStringArrayAt(text, key) {
+  const match = new RegExp(`^[\\t ]*${key}[\\t ]*=[\\t ]*(${STRING_ARRAY})[\\t ]*(?:#[^\\r\\n]*)?(?=\\r?\\n|$)`).exec(text);
+  return match ? { value: parseStringArray(match[1]), text: match[0] } : null;
+}
+
+/** Find the first `key = [..strings..]` line in a table body (see tomlStringArrayAt). */
+export function findTomlStringArray(body, key) {
+  const match = new RegExp(`^[\\t ]*${key}[\\t ]*=[\\t ]*(${STRING_ARRAY})[\\t ]*(?:#[^\\r\\n]*)?$`, 'm').exec(body);
+  return match ? { value: parseStringArray(match[1]), text: match[0] } : null;
+}
