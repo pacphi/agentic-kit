@@ -9,6 +9,11 @@
   `embedder=` marker and `doctor -c typesafe`, not a per-picker routed-count stat ruflo does not
   expose); real-machine verification against ruflo 3.44.0 and the four upstream requests remain
   open, so Status stays Accepted rather than Implemented.
+- **Updated:** 2026-09-23 — real-machine results against ruflo 3.44.0 recorded: typesafe, MiniLM
+  and the funnel confirmed; governance's enforcer is not reached by either stdio MCP entry point,
+  so the policy is written but not enforced (upstream request 6). Status now judges what ak wrote
+  before ruflo's evidence (§2), the projection engine preserves a conflicting key without
+  abandoning the file (§3), and uninstall releases every receipted project (§1).
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md) (value-precise ownership),
   [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md) (explicit degradation),
@@ -38,11 +43,18 @@ release from v3.34.0 to v3.44.0 found:
 
 Behaviour the design must respect, verified in ruflo 3.43.0 source:
 
-- **Governance fails closed.** With `RUFLO_MCP_ENFORCE_POLICY=1`, every stdio MCP tool call is
-  refused unless `<cwd>/.harness/mcp-policy.json` exists and parses. Nothing in ruflo creates
-  that file. Only `auditLog` and `maxToolCallsPerTurn` (a rolling `turnWindowMs` window,
-  default 60 s) are enforced. The audit log is always `os.tmpdir()/ruflo-mcp-audit.jsonl`,
-  shared by all projects, and records `timestamp, sessionId, toolName, allowed, reason`.
+- **Governance fails closed.** With `RUFLO_MCP_ENFORCE_POLICY=1`, ruflo's policy enforcer
+  refuses every MCP tool call unless `<cwd>/.harness/mcp-policy.json` exists and parses. Nothing
+  in ruflo creates that file. Only `auditLog` and `maxToolCallsPerTurn` (a rolling
+  `turnWindowMs` window, default 60 s) are enforced. The audit log is always
+  `os.tmpdir()/ruflo-mcp-audit.jsonl`, shared by all projects, and records
+  `timestamp, sessionId, toolName, allowed, reason`.
+- **Governance is not wired into the stdio launches** (verified against ruflo 3.44.0 on
+  2026-09-23). The enforcer lives only in `MCPServerManager` (`dist/src/mcp-server.js`), and
+  neither stdio entry point a host launches reaches it: `bin/mcp-server.js`, which ak registers,
+  has its own `tools/call` handler, and `bin/cli.js`'s non-TTY `mcp start` fast path has another.
+  On those launches the policy is not applied, calls are not capped, and the audit log does not
+  grow (upstream request 6).
 - **The typesafe package is resolved from ruflo's own module tree** (`createRequire` inside
   `@claude-flow/cli`). A global install resolves; a project-local install does not.
 - **Hosts read settings from their launch environment.** A value in the user's shell does not
@@ -85,7 +97,7 @@ Managed values:
 |---|---|---|---|---|
 | `typesafePicker` | on | 3.43.0 | global `@ruvector/typesafe` + `CLAUDE_FLOW_ROUTER_TYPESAFE=1` | module resolves from ruflo's tree; `doctor -c typesafe` |
 | `minilmPicker` | on | 3.44.0 | `CLAUDE_FLOW_ROUTER_EMBEDDER=minilm` | a `hooks route` probe with the managed environment reports `embedder=minilm` |
-| `mcpGovernance` | on; 120 calls per 60 s; audit on | 3.42.0 | `.harness/mcp-policy.json` + project-scoped `RUFLO_MCP_ENFORCE_POLICY=1` | policy file valid; variable present only where the file is valid; audit log activity |
+| `mcpGovernance` | on; 120 calls per 60 s; audit on | 3.42.0 | `.harness/mcp-policy.json` + project-scoped `RUFLO_MCP_ENFORCE_POLICY=1` | policy file valid; variable present only where the file is valid; audit log activity (none on ruflo ≤ 3.44.0 stdio launches, so the component stays `unknown` there) |
 | `learningProfile` | `balanced` | 3.42.1 | `RUFLO_INTELLIGENCE_MODE=balanced` | mode reported by `hooks intelligence stats`, plus learning-activity evidence |
 | `turnCredit` | on | 3.36.0 | nothing (bundled) | `doctor -c metaharness` declared packages |
 | `memoryFix2887` | on | 3.36.0 | nothing | `@claude-flow/memory` ≥ 3.0.0-alpha.22 resolvable from ruflo's tree |
@@ -95,7 +107,10 @@ Managed values:
 `kit.json` gains a `rufloComponents` block. Defaults hold the managed values above. Any value
 may be changed; `false` means "ak does not manage this component". Turning a component to
 `false` restores, by receipt, the value that existed before ak changed it, so off really is
-off. `ak uninstall` undoes every receipted change.
+off: until the next sync does so, status reports the component `not applied` with that sync as
+its fix, and `funnel: true` re-enables a funnel ak disabled. The typesafe package stays
+installed on a `false` opt-out; only `ak uninstall --purge` removes it. `ak uninstall` undoes
+every receipted change, in every project ak holds a receipt for, not only the one it runs in.
 
 ```json
 "rufloComponents": {
@@ -123,14 +138,24 @@ meaning and the action available; a bare label is never shown.
 | `applied, not verified` | Set, but not yet confirmed — usually the hosts have not restarted. | restart Claude Code, Codex and OpenCode |
 | `needs ruflo ≥ X` | The installed ruflo is too old for this component. | `ak sync` upgrades ruflo |
 | `not applied` | ak has not applied the managed value yet. | `ak sync` |
-| `drifted` | Something changed a value ak set. | `ak sync` restores it, or set the component to `false` to keep yours |
+| `drifted` | A value ak set was removed. | `ak sync` restores it, or set the component to `false` to leave it out |
 | `user-managed` | You set your own value or opted out; ak reports it and leaves it alone. | none |
 | `partial` | Applied for some hosts only; the ones missing are named. | shown per host |
 | `blocked` | Applying failed; the reason is shown. | the specific next step |
+| `not yet managed` | ak does not manage this yet (encryption at rest, ADR-0059); it is outside the "N of M active" count. | none |
 | `unknown` | No current evidence, so ak does not claim the component is on. | `ak status` refreshes evidence |
 
-A value ak finds already set by someone else is `user-managed`; ak never adopts or overwrites
-it (ADR-0016 §4). Evidence older than its freshness bound downgrades to `unknown` instead of
+A value ak finds already set by someone else, or one of ak's values the user changed afterwards,
+is `user-managed`; ak never adopts or overwrites it (ADR-0016 §4).
+
+What ak actually wrote decides first. For each variable a component projects into Claude
+settings, a dry-run plan says whether it is still to be written (`not applied`), was removed
+(`drifted`), holds someone else's value (`user-managed`), or sits in a file ak cannot touch
+(`blocked`, for every variable in that file). Only once the projection has converged does
+ruflo's evidence decide between `active`, `applied, not verified` and `unknown`. Evidence alone
+cannot show that a host has the variables, because the probes run with the managed environment
+injected. A typesafe package that no longer resolves is `not applied`, because a restart cannot
+bring it back and the next sync reinstalls it. Evidence older than its freshness bound downgrades to `unknown` instead of
 staying `active`.
 
 ### 3. One owned environment projection for every host
@@ -143,7 +168,10 @@ The projection engine is ADR-0055's `aqe-embedding-projection.mjs` generalized f
 to a set of keys: per-file receipts with a pending guard, a preimage check before writing, a
 backup copy, atomic writes, JSON and TOML editors, conflicts preserved rather than
 overwritten, repository-root scoping for project targets, and one planning function shared by
-inspection and reconciliation. AQE's embedding endpoint becomes one client of the engine and
+inspection and reconciliation. A conflicting key is preserved and reported on its own; the
+engine still writes the file's other keys, and only a file-level problem (invalid JSON, a
+pending receipt, a non-regular file) refuses the whole file. AQE's single-key receipts keep
+refusing the file on a conflict. AQE's embedding endpoint becomes one client of the engine and
 keeps its behaviour and tests. The engine does not reuse `provider-ownership.mjs`, whose
 sidecar receipts remain for provider variables.
 
@@ -198,8 +226,11 @@ For each ruflo project ak manages (a git repository root containing `.claude-flo
 
 The file is content-hash receipted. A hand-edited file is `user-managed` and preserved. Before
 projecting `RUFLO_MCP_ENFORCE_POLICY`, ak parses the file; if it is missing or invalid, ak
-removes the variable for that project and reports `blocked` ("policy file is invalid, so
-ruflo would refuse every tool call"). A typo can therefore never lock a project out.
+removes the variable for that project and reports `blocked` (ruflo's enforcer fails closed on
+an invalid file). Codex and OpenCode re-check the file at every launch. Claude's project variable
+is static JSON, so after a hand edit that breaks the file it stays set until the next `ak sync`
+in that project; on an enforcing ruflo that window would refuse tool calls. On ruflo ≤ 3.44.0 it
+is inert, because the stdio launches do not reach the enforcer (see Context).
 
 ak enforces only a policy file it wrote (its `_about` begins "Managed by agentic-kit"). A
 project that already has its own `.harness/mcp-policy.json` — for example one generated by
@@ -231,10 +262,11 @@ The catalogue's `explain` text and the state meanings are written once and reuse
   - pickers: the `hooks route` probe's `embedder=` marker and `doctor -c typesafe`'s confirmation
     line — ruflo has no per-picker routed-count stat; `routedByCounts` belongs to the model
     router (ADR-148's haiku/sonnet/opus tiering), not the agent pickers this ADR manages;
-  - governance: audited and refused calls in the last 24 hours and recent refusal reasons;
+  - governance: audited and refused calls in the last 24 hours and recent refusal reasons (zero
+    on ruflo ≤ 3.44.0 stdio launches until upstream request 6 lands);
   - learning profile: engine loaded or not, time since last training, trajectory growth;
   - funnel: the deciding source.
-- **Dashboard, About:** a summary chip on the ruflo card ("ruflo components: 6 of 8 active")
+- **Dashboard, About:** a summary chip on the ruflo card ("ruflo components: 6 of 7 active")
   linking to the panel.
 
 The dashboard stays read-only: it names the command or `kit.json` change instead of acting.
@@ -250,6 +282,16 @@ Tracked under ADR-0031 and shown as "waiting on upstream" where relevant:
 4. A supported way to give ruflo's Codex hooks environment variables, if the plan confirms
    the gap.
 5. Encryption for the AgentDB store (ADR-0059).
+6. Route stdio MCP `tools/call` through the policy enforcer. Evidence against ruflo 3.44.0, with
+   `RUFLO_MCP_ENFORCE_POLICY=1` and a `memory_store` call from a disposable project:
+
+   | Entry point | Policy file | Result | Audit record |
+   |---|---|---|---|
+   | `ruflo mcp start` (`bin/cli.js` fast path) | valid, ak-written | call succeeds | none |
+   | `node bin/mcp-server.js` (ak's registration) | valid, ak-written | call succeeds | none |
+   | `node bin/mcp-server.js` | removed | call succeeds (should be refused) | none |
+   | `MCPServerManager.handleMCPMessage()` in-process | valid | call succeeds | written |
+   | `MCPServerManager.handleMCPMessage()` in-process | removed | refused, fails closed | none (by design) |
 
 ## Consequences
 
@@ -278,17 +320,20 @@ Tracked under ADR-0031 and shown as "waiting on upstream" where relevant:
 - **Real machine, disposable project:** install typesafe into an isolated npm prefix and run
   the real `doctor -c typesafe`; run a real `hooks route` with the managed environment and
   check which picker chose; with enforcement and a policy file, make a real MCP call and see an
-  audit record; without the file, see the refusal.
+  audit record; without the file, see the refusal. Result on 2026-09-23 against ruflo 3.44.0:
+  typesafe and MiniLM confirmed, the funnel confirmed (`decidedBy: user-config`), governance not
+  enforced on either stdio entry point (§8 request 6). The status and uninstall round trip on a
+  real machine and the dashboard browser check are not yet verified: the first attempt ran with
+  compromised isolation and its results are discarded.
 - **Hosts:** snapshots of Claude settings, the Codex launcher environment and OpenCode
   generated artifacts.
 - **Dashboard:** the existing UI suite plus a browser check of the panel and chip.
 
 ## Implementation status
 
-`ak status`'s per-component fix action (`FIXABLE` in
-`src/commands/status/sections/ruflo-components.mjs`) excludes `encryptionAtRest`: ADR-0059 has
-not shipped a reconcile step for it, so offering a `sync` fix would be a promise `ak sync` cannot
-keep. The hermetic test suite's default `kit.json` (`offlineKitConfig` in
+`encryptionAtRest` reports `not yet managed` (level info, no fix, outside the active count):
+ADR-0059 has not shipped a reconcile step for it, so offering a `sync` fix would be a promise
+`ak sync` cannot keep. The hermetic test suite's default `kit.json` (`offlineKitConfig` in
 `tests/kit/helpers/home-sandbox.mjs`) sets every `rufloComponents` entry to `false` except
 `funnel: true` (funnel's managed value is inverted — `true` means "leave ruflo's funnel alone"),
 so ordinary tests never trigger a real npm install or a real `ruflo funnel`/`hooks route` call; a
@@ -300,10 +345,14 @@ test that wants a component managed opts back in explicitly.
 | Component catalogue and states | Done — catalogue, `kit.json` intent and validation, state classification with meanings |
 | Multi-key owned projection engine (from ADR-0055) | Done — generalized from AQE's single-key engine; AQE's own tests unchanged and passing |
 | Host projections (Claude, Codex launcher, OpenCode) | Done — Claude user/project settings, the Codex `ak x ruflo-mcp` launcher, and OpenCode's generated gateway/lifecycle hooks all read `componentEnv` |
-| Typesafe package install and receipt | Done (global install, receipt-gated uninstall, `doctor -c typesafe` parsing) — real-machine confirmation against installed ruflo 3.44.0 is verified pending (Task 11A) |
-| Governance policy file and lockout guard | Done (ak-written-only enforcement, foreign-policy detection, fail-closed removal on an invalid file) — the real lockout/audit-log round trip against ruflo 3.44.0 is verified pending (Task 11A) |
-| Funnel disable and undo | Done (JSON-first `funnel status` parsing, receipt-gated re-enable) — the real disabled-state fixture against ruflo 3.44.0 is verified pending (Task 11A) |
+| Typesafe package install and receipt | Done (global install, receipt-gated uninstall, `doctor -c typesafe` parsing; a package that stops resolving reads `not applied` and sync reinstalls it) — confirmed against ruflo 3.44.0 on a disposable prefix (`doctor-typesafe-installed-3.44.0.txt`) |
+| MiniLM agent picker | Done — confirmed against ruflo 3.44.0: a `hooks route` probe with the managed environment reports `embedder=minilm` |
+| Governance policy file and lockout guard | Done (ak-written-only enforcement, foreign-policy detection, fail-closed removal on an invalid file, release in every receipted project when turned off) — on ruflo 3.44.0 the policy is written but not enforced, because neither stdio entry point reaches the enforcer; the component stays `unknown` until upstream request 6 lands |
+| Funnel disable and undo | Done (JSON-first `funnel status` parsing, receipt-gated re-enable, `funnel: true` releases ak's disable on the next sync, higher-precedence sources left alone) — confirmed against ruflo 3.44.0 (`decidedBy: user-config`) |
+| Status judged by what ak wrote | Done — per-key Claude projection state before evidence; opt-outs holding a receipt are fixable; the projection engine preserves a conflicting key and still writes the others |
+| Uninstall across projects | Done — every project holding a policy, project env or memory-pin receipt is released, not only the cwd project |
+| Real-machine status/uninstall round trip, dashboard browser check | Not verified — the first round trip ran with compromised isolation and its results are discarded; the panel and chip have no browser check yet |
 | Setup disclosure and results, status section, sync | Done — trust manifest group, machine and project setup results, `ak status` rows, `ak sync` fixes and convergence accounting |
 | Dashboard panel and About chip | Done — Overview > Runtime panel, About summary chip and link, read-only `/api/ruflo-components` route |
 | Memory pin receipt (ADR-0016 drift) | Done — `pinProjectMemoryDbPath` moved onto the owned projection engine and is now removed by `ak uninstall` |
-| Upstream requests filed | Not started — four requests drafted (ADR §8); filing requires user approval (`gh issue create --repo ruvnet/ruflo`) |
+| Upstream requests filed | Not started — requests 1-4 and 6 drafted (§8; request 5 is ADR-0059's); filing requires user approval (`gh issue create --repo ruvnet/ruflo`) |

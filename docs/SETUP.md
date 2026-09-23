@@ -82,10 +82,10 @@ with `rufloComponents` in `kit.json`.
 
 The setup trust manifest's "Managed ruflo components" group discloses each applicable change
 before setup runs: the exact environment variable or file it will set, one line of benefit and
-cost, and the `kit.json` opt-out. After changes, setup prints a results table (component, state,
-meaning) and, if anything changed, reminds you to restart Claude Code, Codex and OpenCode —
-hosts read their environment at start-up, so a component stays `applied, not verified` until the
-next session and ruflo's own check confirm it. `ak status --refresh` re-checks without a restart
+cost, and the `kit.json` opt-out. After changes, machine and project setup both print a results
+table (component, state, meaning), any step that failed, and, if anything changed, a reminder to
+restart Claude Code, Codex and OpenCode — hosts read their environment at start-up, so a
+component stays `applied, not verified` until the next session and ruflo's own check confirm it. `ak status --refresh` re-checks without a restart
 once the hosts are back up.
 
 ### Optional deja-vu companion

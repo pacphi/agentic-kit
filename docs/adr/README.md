@@ -382,7 +382,7 @@ never become a silent hash fallback.
 
 ## ADR-0058 — Managed ruflo components
 
-[ADR-0058](0058-managed-ruflo-components.md) (Accepted, not yet implemented) has ak turn on and
+[ADR-0058](0058-managed-ruflo-components.md) (Accepted; implementation in progress) has ak turn on and
 report a catalogue of opt-in ruflo components: the typesafe and MiniLM agent pickers, MCP tool
 governance, the learning profile, turn-credit, the #2887 memory fix, and the funnel (off). Every
 state is shown with its meaning; settings reach Claude Code, Codex and OpenCode through one

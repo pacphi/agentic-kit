@@ -93,7 +93,7 @@ comes from the same read-only status facts as the terminal: compatible package,
 verified native executable, trusted MCP config, and local browser payload remain
 separate from Vibium's Agentic-QE-owned cache visibility in System.
 
-The ruflo card carries a summary line ("ruflo components: 6 of 8 active") built from the same
+The ruflo card carries a summary line ("ruflo components: 6 of 7 active") built from the same
 `ak status` row Overview > Runtime's panel header shows, so About and Runtime always agree. The
 line links to that panel; it appears only once `ak status` has reported the subsystem at least
 once.
@@ -169,9 +169,13 @@ memory durability fix, and the funnel toggle — get one card each in Overview >
 shows the state badge beside its plain-language meaning (and the action to take, when one
 applies), the current value and who controls it, an expandable "what it does" with its benefit,
 cost, and how to change it in `kit.json`, and the live evidence behind the state: which picker a
-`hooks route` probe reported, MCP calls audited and refused in the last 24 hours, whether the
+`hooks route` probe reported, MCP calls audited and refused in the last 24 hours (zero on ruflo
+≤ 3.44.0, which does not yet enforce the policy on stdio launches; see
+[ADR-0058](adr/0058-managed-ruflo-components.md)), whether the
 learning engine is loaded, or the funnel's deciding source. The panel header repeats the same
-count and ruflo version `ak status` reports, so the two never disagree.
+count and ruflo version `ak status` reports, so the two never disagree. Encryption at rest shows
+as `not yet managed` (ADR-0059) and is not part of that count. With ruflo not installed, the panel
+says so instead of showing cards.
 
 The panel reads a cache-only `GET /api/ruflo-components` route — the dashboard never probes ruflo
 itself. Run `ak status --refresh` (or `ak sync`) to collect fresh evidence, then reload the panel.
