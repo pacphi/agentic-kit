@@ -127,6 +127,10 @@ const usageContextHooksSrc = readSplit('usage-context-hooks.mjs');
 const usageSrc = readSplit('usage.mjs');
 const modelLifecycleSrc = readSplit('model-lifecycle.mjs');
 const usageOrchestratorsSrc = readSplit('usage-orchestrators.mjs');
+// ADR-0058: the Overview > Runtime "ruflo components" panel. Placed with the
+// other Overview-area modules, ahead of bootSrc (which wires its load into
+// the Overview sub-tab switch — see bootstrap.mjs's setOverviewView).
+const rufloComponentsSrc = readSplit('ruflo-components.mjs');
 const systemReadoutSrc = readSplit('system-readout.mjs');
 const systemProjectsSrc = readSplit('system-projects.mjs');
 // ADR-0048 Maintenance workspace: maintenanceWorkspaceSrc MUST precede the
@@ -160,5 +164,5 @@ const bootSrc = readSplit('boot.mjs');
 export const JS = `
 (function(){
 ${bootstrapSrc}${contextCard.toString()}${contextHostCard.toString()}${repositoryTree.toString()}${overviewSrc}${datetimeSrc}${hostReadinessSrc}
-${intelligenceSrc}${pollSrc}${usageRhythmSrc}${usagePromptsSrc}${usageContextHooksSrc}${usageSrc}${modelLifecycleSrc}${usageOrchestratorsSrc}${aboutSrc}${systemReadoutSrc}${systemProjectsSrc}${maintenanceWorkspaceSrc}${maintenanceFiltersSrc}${maintenanceCardsSrc}${maintenanceOperationSrc}${maintenanceLanguageLogosSrc}${maintenanceFocusSrc}${maintenanceInventorySrc}${maintenanceRelationshipsSrc}${maintenanceInspectorSrc}${maintenanceGuidanceSrc}${maintenanceDiscoverySrc}${maintenanceActivitySrc}${systemMaintenanceActionsSrc}${systemMaintenanceSrc}${bootSrc}})();
+${intelligenceSrc}${pollSrc}${usageRhythmSrc}${usagePromptsSrc}${usageContextHooksSrc}${usageSrc}${modelLifecycleSrc}${usageOrchestratorsSrc}${rufloComponentsSrc}${aboutSrc}${systemReadoutSrc}${systemProjectsSrc}${maintenanceWorkspaceSrc}${maintenanceFiltersSrc}${maintenanceCardsSrc}${maintenanceOperationSrc}${maintenanceLanguageLogosSrc}${maintenanceFocusSrc}${maintenanceInventorySrc}${maintenanceRelationshipsSrc}${maintenanceInspectorSrc}${maintenanceGuidanceSrc}${maintenanceDiscoverySrc}${maintenanceActivitySrc}${systemMaintenanceActionsSrc}${systemMaintenanceSrc}${bootSrc}})();
 `;

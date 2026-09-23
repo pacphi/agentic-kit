@@ -57,7 +57,7 @@ import { execFile } from 'node:child_process';
 import { createHmac } from 'node:crypto';
 import { driftReport, selfDrift, installedVersion } from './versions.mjs';
 import { HOSTS, collectIntegrationFacts } from './providers.mjs';
-import { globalRoot } from './paths.mjs';
+import { globalRoot, repoRoot } from './paths.mjs';
 import { drift as ruvnetBrainDrift } from './ruvnet-brain.mjs';
 import { drift as ruvectorDrift, managed as ruvectorManaged } from './ruvector.mjs';
 import { loadKitConfig } from './config.mjs';
@@ -1738,6 +1738,24 @@ export function startDashboard({
       });
     }
 
+    // ADR-0058: read-only ruflo components snapshot for Overview > Runtime.
+    // Shares its projection logic with `ak status`'s own section through
+    // rufloComponentsPayload (controller ruling 3) — cache + a Claude-env
+    // dry run only; this route never probes ruflo or writes anything.
+    async function handleRufloComponents(_req, res) {
+      try {
+        const [{ rufloComponentsPayload }, { rufloComponentsEvidenceFile }] = await Promise.all([
+          import('./ruflo-components/snapshot.mjs'), import('./ruflo-components/apply.mjs'),
+        ]);
+        const cfg = loadKitConfig();
+        const rufloVersion = installedVersion('ruflo');
+        const projectRoot = repoRoot(cwd);
+        sendJson(res, 200, rufloComponentsPayload({
+          cfg, rufloVersion, projectRoot, evidenceFile: rufloComponentsEvidenceFile(),
+        }));
+      } catch (e) { serverFault(res, '/api/ruflo-components', e, 'ruflo components unavailable'); }
+    }
+
     // ── Usage (ADR-0009). Lazy: nothing below runs until the tab is opened. ──
 
     async function handleModels(req, res, query) {
@@ -2045,6 +2063,7 @@ export function startDashboard({
       '/api/live/events': handleLiveEvents,
       '/api/live/intelligence': handleLiveIntelligence,
       '/api/models': handleModels,
+      '/api/ruflo-components': handleRufloComponents,
       '/api/usage': handleUsage,
       '/api/hooks': handleHooks,
       '/api/limits': handleLimits,

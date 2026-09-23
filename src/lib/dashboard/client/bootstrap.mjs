@@ -6,6 +6,7 @@ import { mntHash } from './maintenance-workspace.mjs';
 import { loadMaintenance } from './system-maintenance.mjs';
 import { loadSystem } from './system-projects.mjs';
 import { loadUsage } from './usage.mjs';
+import { loadRufloComponents } from './ruflo-components.mjs';
 
   "use strict";
   export var root=document.documentElement;
@@ -170,6 +171,11 @@ import { loadUsage } from './usage.mjs';
       var view=OVERVIEW_VIEWS[i],on=view===id,button=document.querySelector('[data-overview-view="'+view+'"]'),panel=document.getElementById("panel-"+(view==="summary"?"overview":view));
       if(button){button.setAttribute("aria-selected",on?"true":"false");button.tabIndex=on?0:-1;if(on&&focus)button.focus();}
       if(panel)panel.hidden=!on;
+      // ADR-0058: read-only, cache-only snapshot — same pattern as Maintenance's
+      // own lazy load below. Fires on every entry into Runtime (including the
+      // very first setTab("overview") at boot, when Runtime was persisted as
+      // the initial sub-view), not just the first.
+      if(on&&view==="runtime"&&activeTab==="overview")loadRufloComponents();
     }
     if(!skipHash&&activeTab==="overview")syncHash();
     syncIntelStream();
@@ -297,6 +303,16 @@ import { loadUsage } from './usage.mjs';
   if(mapEl)mapEl.addEventListener("click",function(e){
     var t=e.target.closest?e.target.closest("[data-go]"):null;
     if(t){setTab("overview");setOverviewView(t.getAttribute("data-go"));}
+  });
+  // ADR-0058: the About > ruflo card's summary link — same [data-go]
+  // navigation the status map tiles above use, document-scoped since the
+  // link lives inside the About area rather than #statusmap.
+  document.addEventListener("click",function(e){
+    var rc=e.target&&e.target.closest?e.target.closest(".rc-link[data-go]"):null;
+    if(!rc)return;
+    e.preventDefault();
+    setTab("overview");
+    setOverviewView(rc.getAttribute("data-go"),true);
   });
 
   // severity rank for rollups + triage sort; preferred order breaks ties

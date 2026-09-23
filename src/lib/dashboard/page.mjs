@@ -389,6 +389,7 @@ export function renderPage({ name, version }) {
       <h2>Runtime health</h2>
       <p>Local services, MCP connections, processes, and operational readiness.</p>
     </header>
+    <div id="ruflo-components" class="rc-panel" aria-live="polite"></div>
     <div id="cards-runtime"></div>
   </section>
 

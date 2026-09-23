@@ -32,7 +32,7 @@ import { sourceHostIcon } from './usage.mjs';
     "hosts.claude":{host:"claude"},
     "hosts.codex":{host:"codex"},
     "hosts.opencode":{host:"opencode"},
-    "ruflo":{versions:"ruflo"},
+    "ruflo":{versions:"ruflo",subs:["ruflo-components"]},
     "agent-browser":{subs:["agent-browser"]},
     "agentdb":{subs:["agentdb"]},
     "deja-vu":{subs:["deja-vu"]},
@@ -142,6 +142,19 @@ import { sourceHostIcon } from './usage.mjs';
     }else if(entry.manage){
       tail='<div class="ab-manage">manage: '+esc(entry.manage)+"</div>";
     }
+    // ADR-0058: the ruflo card links to Overview > Runtime's own component
+    // panel, using the SAME summary row rufloComponentRows() puts first — so
+    // this line and that panel's header always agree, and the link only
+    // appears once /api/status has actually reported the subsystem.
+    var rcLink="";
+    if(entry.id==="ruflo"&&data&&Array.isArray(data.rows)){
+      var rcRow=null;
+      for(var ri=0;ri<data.rows.length;ri++){
+        var rr=data.rows[ri];
+        if(rr&&rr.subsystem==="ruflo-components"&&/^ruflo components:/.test(String(rr.message||""))){rcRow=rr;break;}
+      }
+      if(rcRow)rcLink='<div class="ab-links"><a href="#" class="rc-link" data-go="runtime">'+esc(rcRow.message)+"</a></div>";
+    }
     return '<article class="ab-card'+(entry.category==="kit"?" ab-wide":"")+'">'
       +'<div class="ab-head">'+aboutTile(entry.icon)
       +'<span class="ab-name"><b>'+esc(entry.name)+"</b>"
@@ -149,7 +162,7 @@ import { sourceHostIcon } from './usage.mjs';
       +"</span></div>"
       +'<span class="ab-tagline">'+esc(entry.tagline)+"</span>"
       +'<p class="ab-body">'+esc(entry.paragraph)+"</p>"
-      +detail+tail
+      +detail+tail+rcLink
     +"</article>";
   }
   export function renderAbout(data){
