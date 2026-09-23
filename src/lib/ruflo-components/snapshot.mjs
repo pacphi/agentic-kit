@@ -95,6 +95,16 @@ function stateFor(component, { cfg, rufloVersion, evidence, projection, now }) {
   }
   if (KEY_OF[id] && projection?.claude?.conflicts?.includes(KEY_OF[id])) return describeState('user-managed');
   if (!evidence || now - Date.parse(evidence.capturedAt) > EVIDENCE_STALE_MS) return describeState('unknown');
+  // ADR-305 precedence: env > enterprise-policy > user-config > project-config >
+  // package-default. ak's own `ruflo funnel disable` always lands as the user-tier
+  // ('user-config') source (apply.mjs's releaseFunnel gates its undo on the same
+  // /user/i test). A funnel that reads disabled from any OTHER source is off, but
+  // not by ak's hand — reported as user-managed (goal met, not an error) rather
+  // than claiming credit ak didn't earn.
+  if (id === 'funnel' && evidence.funnel?.enabled === false && !/user/i.test(evidence.funnel.decidedBy ?? '')) {
+    const base = describeState('user-managed');
+    return { ...base, meaning: `${base.meaning} Ruflo's funnel is already off, decided by ${evidence.funnel.decidedBy} — not ak's doing.` };
+  }
   const result = confirmed(id, intent, evidence);
   if (id === 'memoryFix2887' && result === false) {
     return describeState('blocked', { reason: 'Run npm install -g ruflo@latest so ruflo resolves @claude-flow/memory 3.0.0-alpha.22 or newer.' });

@@ -14,7 +14,7 @@ const evidence = (over = {}) => ({
   minilm: { embedder: 'minilm' },
   learning: { mode: 'balanced', engineLoaded: false, lastTrainingSeconds: 170300, trajectories: 13649 },
   turnCredit: { present: true }, memoryFix: { version: '3.0.0-alpha.25' },
-  funnel: { enabled: false, decidedBy: 'user' }, governance: { audit: { audited: 10, refused: 0, reasons: [] } },
+  funnel: { enabled: false, decidedBy: 'user-config' }, governance: { audit: { audited: 10, refused: 0, reasons: [] } },
   errors: {}, ...over });
 const projection = (over = {}) => ({ claude: { conflicts: [], changed: false }, missingHosts: [], policy: 'valid', ...over });
 const byId = (snap, id) => snap.components.find((c) => c.id === id);
@@ -133,6 +133,31 @@ test('governance with no audit evidence at all is unknown', () => {
   const view = byId(snap, 'mcpGovernance');
   assert.equal(view.state.id, 'unknown');
   assert.match(view.state.meaning, /No ruflo MCP tool calls have been audited in the last 24 hours, so enforcement has not been observed yet\./);
+});
+
+// ADR-305 funnel precedence: env > enterprise-policy > user-config > project-config
+// > package-default. Only 'user-config' is ak's own channel (`ruflo funnel disable`
+// writes ruflo's user-tier state — see apply.mjs's ensureFunnel/releaseFunnel).
+test('funnel disabled by ak\'s own user-config channel is active', () => {
+  const snap = componentSnapshot({ cfg, rufloVersion: '3.44.0',
+    evidence: evidence({ funnel: { enabled: false, decidedBy: 'user-config' } }), projection: projection(), now });
+  assert.equal(byId(snap, 'funnel').state.id, 'active');
+});
+
+for (const decidedBy of ['env', 'enterprise-policy', 'project-config', 'package-default']) {
+  test(`funnel disabled by ${decidedBy} (not ak) reads as user-managed, not an error`, () => {
+    const snap = componentSnapshot({ cfg, rufloVersion: '3.44.0',
+      evidence: evidence({ funnel: { enabled: false, decidedBy } }), projection: projection(), now });
+    const view = byId(snap, 'funnel');
+    assert.equal(view.state.id, 'user-managed');
+    assert.match(view.state.meaning, new RegExp(`decided by ${decidedBy} — not ak's doing`));
+  });
+}
+
+test('funnel still enabled (any decidedBy) is applied-unverified, not user-managed', () => {
+  const snap = componentSnapshot({ cfg, rufloVersion: '3.44.0',
+    evidence: evidence({ funnel: { enabled: true, decidedBy: 'package-default' } }), projection: projection(), now });
+  assert.equal(byId(snap, 'funnel').state.id, 'applied-unverified');
 });
 
 // Controller ruling 1: the shared, read-only projection every surface (status,

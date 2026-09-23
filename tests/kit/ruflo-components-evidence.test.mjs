@@ -44,6 +44,17 @@ test('funnel parser accepts the JSON shape first, and falls back to the text for
   assert.equal(parseFunnel('{"enabled": "yes"}'), null);
 });
 
+// ADR-305: funnel precedence is env > enterprise-policy > user-config >
+// project-config > package-default. parseFunnel treats decidedBy as an opaque
+// string (no allowlist), so every source round-trips; snapshot.mjs is what
+// tells ak's own channel ('user-config') apart from the other four (see
+// ruflo-components-snapshot.test.mjs).
+test('funnel parser round-trips every ADR-305 decidedBy source', () => {
+  for (const decidedBy of ['env', 'enterprise-policy', 'user-config', 'project-config', 'package-default']) {
+    assert.deepEqual(parseFunnel(JSON.stringify({ enabled: false, decidedBy })), { enabled: false, decidedBy });
+  }
+});
+
 test('audit stats count the last 24 hours only and keep recent refusal reasons', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-audit-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
