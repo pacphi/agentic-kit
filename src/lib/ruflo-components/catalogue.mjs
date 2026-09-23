@@ -16,9 +16,9 @@ export const COMPONENTS = Object.freeze([
     change: 'Set rufloComponents.minilmPicker to false in kit.json, then run ak sync.',
   }),
   c('mcpGovernance', 'MCP tool governance', '3.42.0', 'project', {
-    does: 'Makes ruflo\'s MCP server audit every tool call and cap calls per rolling minute, using .harness/mcp-policy.json.',
-    benefit: 'An audit trail of which ruflo tools ran, and a stop for runaway loops.',
-    cost: 'A small file in each ruflo repository; calls beyond the cap are refused until the minute rolls over.',
+    does: 'Writes .harness/mcp-policy.json (audit on, calls capped per rolling minute) and projects RUFLO_MCP_ENFORCE_POLICY=1 for the project. Ruflo 3.44.0 and earlier do not yet apply the policy on the stdio MCP launches Claude Code, Codex and OpenCode use (upstream request 6).',
+    benefit: 'Ready when ruflo wires enforcement: then an audit trail of which ruflo tools ran, and a stop for runaway loops.',
+    cost: 'A small file in each ruflo repository; once ruflo enforces it, calls beyond the cap are refused until the minute rolls over.',
     change: 'Set rufloComponents.mcpGovernance to false, or change maxCallsPerMinute, then run ak sync.',
   }),
   c('learningProfile', 'Learning profile', '3.42.1', 'machine', {
@@ -49,13 +49,13 @@ export const COMPONENTS = Object.freeze([
     does: 'Turns off ruflo\'s Cognitum tips, enrollment prompts and statusline promotions (ruflo funnel disable).',
     benefit: 'No promotional content in your statusline or CLI output.',
     cost: 'You will not see ruflo\'s educational tips.',
-    change: 'Set rufloComponents.funnel to true to let ruflo decide, then run ak sync; ak re-enables only what it disabled.',
+    change: 'Set rufloComponents.funnel to true to let ruflo decide, then run ak sync; it re-enables the funnel only if ak disabled it.',
   }),
   c('encryptionAtRest', 'Encryption at rest', null, 'project', {
     does: 'Keeps ruflo\'s project data encrypted on disk (ADR-0059).',
     benefit: 'Memory and learning data are not readable by other local processes, backups or accidental commits.',
-    cost: 'Defined by ADR-0059.',
-    change: 'Defined by ADR-0059.',
+    cost: 'Defined by ADR-0059; ak does not manage it yet.',
+    change: 'Nothing to change yet; ADR-0059 will add the setting.',
   }),
 ]);
 

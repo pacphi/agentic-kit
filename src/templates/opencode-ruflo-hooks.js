@@ -157,9 +157,10 @@ function validAkPolicy(directory) {
   } catch { return false }
 }
 
-// ADR-0058 §5: ruflo reads <directory>/.harness/mcp-policy.json and FAILS
-// CLOSED when it is missing or invalid under RUFLO_MCP_ENFORCE_POLICY=1, so
-// enforcement is projected only when the marker says governance is managed
+// ADR-0058 §5: ruflo's policy enforcer reads <directory>/.harness/mcp-policy.json
+// and FAILS CLOSED when it is missing or invalid under RUFLO_MCP_ENFORCE_POLICY=1
+// (when the enforcer is reachable; ruflo 3.44.0's stdio MCP entry points do not
+// reach it — ADR-0058 upstream request 6), so enforcement is projected only when the marker says governance is managed
 // AND this project actually has a valid, ak-authored policy file.
 function managedEnforcement(directory, env) {
   if (env.AK_RUFLO_GOVERNANCE !== "managed") return {}

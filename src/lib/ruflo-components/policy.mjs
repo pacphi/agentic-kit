@@ -1,6 +1,8 @@
-// ADR-0058 §5. Ruflo reads <cwd>/.harness/mcp-policy.json and FAILS CLOSED when it is
-// missing or invalid under RUFLO_MCP_ENFORCE_POLICY=1 (policy-enforcer.js), so validity is
-// the gate for projecting that variable.
+// ADR-0058 §5. Ruflo's policy enforcer (policy-enforcer.js) reads <cwd>/.harness/mcp-policy.json
+// and FAILS CLOSED when it is missing or invalid under RUFLO_MCP_ENFORCE_POLICY=1, so validity
+// is the gate for projecting that variable. Ruflo 3.44.0 and earlier reach the enforcer only
+// through MCPServerManager, which neither stdio entry point uses (upstream request 6), so the
+// policy is written ready for enforcement rather than enforced today.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
