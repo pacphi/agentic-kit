@@ -53,6 +53,7 @@ import { catalogSource, skillPathsFor } from './opencode-agents.mjs';
 import { managedAgentBrowserEnv } from './agent-browser.mjs';
 import { machineComponentEnv, supports } from './ruflo-components/env.mjs';
 import { managedIntent } from './ruflo-components/config.mjs';
+import { componentById } from './ruflo-components/catalogue.mjs';
 import { installedVersion } from './versions.mjs';
 
 export const opencodeOwnership = (cfg) => cfg?.integrations?.ownership?.opencode ?? {};
@@ -222,7 +223,7 @@ export function rufloComponentEnvFor(cfg) {
   const rufloVersion = installedVersion('ruflo');
   return {
     ...machineComponentEnv(cfg, rufloVersion),
-    ...(managedIntent(cfg, 'mcpGovernance') && supports(rufloVersion, '3.42.0')
+    ...(managedIntent(cfg, 'mcpGovernance') && supports(rufloVersion, componentById('mcpGovernance').minRuflo)
       ? { AK_RUFLO_GOVERNANCE: 'managed' } : {}),
   };
 }
