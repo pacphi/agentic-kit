@@ -132,12 +132,25 @@ function resolveHookHandler() {
 
 const HANDLER = resolveHookHandler()
 
+// ADR-0058 §5: ruflo reads <directory>/.harness/mcp-policy.json and FAILS
+// CLOSED when it is missing or invalid under RUFLO_MCP_ENFORCE_POLICY=1, so
+// enforcement is projected only when the marker says governance is managed
+// AND this project actually has a parseable policy file.
+function managedEnforcement(directory, env) {
+  if (env.AK_RUFLO_GOVERNANCE !== "managed") return {}
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path.join(directory, ".harness", "mcp-policy.json"), "utf8"))
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? { RUFLO_MCP_ENFORCE_POLICY: "1" } : {}
+  } catch { return {} }
+}
+
 function projectHookEnv(directory, env = process.env) {
   const resolved = path.resolve(directory)
   let root = resolved
   try { root = fs.realpathSync(resolved) } catch { /* preserve the resolved path */ }
   return {
     ...env,
+    ...managedEnforcement(root, env),
     CLAUDE_FLOW_DB_PATH: path.join(root, ".swarm", "memory.db"),
   }
 }

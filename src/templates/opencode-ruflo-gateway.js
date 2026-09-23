@@ -45,6 +45,18 @@ const AK_CLAUDE_BLOCKS = [
   "ruflo-dual-mode-reference",
 ]
 
+// ADR-0058 §5: ruflo reads <directory>/.harness/mcp-policy.json and FAILS
+// CLOSED when it is missing or invalid under RUFLO_MCP_ENFORCE_POLICY=1, so
+// enforcement is projected only when the marker says governance is managed
+// AND this project actually has a parseable policy file.
+function managedEnforcement(directory, env) {
+  if (env.AK_RUFLO_GOVERNANCE !== "managed") return {}
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path.join(directory, ".harness", "mcp-policy.json"), "utf8"))
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? { RUFLO_MCP_ENFORCE_POLICY: "1" } : {}
+  } catch { return {} }
+}
+
 function normalize(value) {
   return String(value || "")
     .toLowerCase()
@@ -293,8 +305,10 @@ class RufloGatewayClient {
     if (this.child || this.starting) throw new Error(`${this.label} gateway cannot be reconfigured after use`)
     this.command = command[0]
     this.args = command.slice(1)
+    const base = entry.environment && typeof entry.environment === "object" ? entry.environment : {}
     this.environment = {
-      ...(entry.environment && typeof entry.environment === "object" ? entry.environment : {}),
+      ...base,
+      ...managedEnforcement(this.directory, base),
       CLAUDE_FLOW_DB_PATH: path.join(this.directory, ".swarm", "memory.db"),
     }
     return true
@@ -801,3 +815,5 @@ export default async function rufloGateway({ directory = process.cwd() } = {}) {
   }
   return plugin
 }
+
+export { managedEnforcement }

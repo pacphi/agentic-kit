@@ -5,6 +5,8 @@ import fs from 'node:fs';
 import * as paths from './paths.mjs';
 import { loadKitConfig } from './config.mjs';
 import { managedAgentBrowserEnv } from './agent-browser.mjs';
+import { installedVersion } from './versions.mjs';
+import { componentEnv } from './ruflo-components/env.mjs';
 
 export function memoryProjectRoot(cwd = process.cwd()) {
   return fs.realpathSync(paths.repoRoot(cwd) ?? cwd);
@@ -15,7 +17,9 @@ export function projectMemoryEnv(cwd = process.cwd(), env = {}) {
   return { ...env, CLAUDE_FLOW_DB_PATH: paths.projectMemoryDb(root) };
 }
 
-export function rufloMcpLaunch(cwd = process.cwd(), env = process.env, { cfg = loadKitConfig() } = {}) {
+export function rufloMcpLaunch(cwd = process.cwd(), env = process.env, {
+  cfg = loadKitConfig(), rufloVersion = installedVersion('ruflo'),
+} = {}) {
   const root = memoryProjectRoot(cwd);
   return {
     command: 'ruflo',
@@ -24,6 +28,7 @@ export function rufloMcpLaunch(cwd = process.cwd(), env = process.env, { cfg = l
     env: projectMemoryEnv(root, {
       ...env,
       ...managedAgentBrowserEnv({ enabled: cfg.agentBrowser !== false }),
+      ...componentEnv(root, cfg, rufloVersion),
     }),
   };
 }
