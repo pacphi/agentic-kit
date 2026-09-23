@@ -1,0 +1,12 @@
+
+RuFlo Doctor
+System diagnostics and health check
+──────────────────────────────────────────────────
+
+... Running health checks in parallel...                                              ✓ @ruvector/typesafe router: v0.1.0 installed; enabled (hash embedder, uncalibrated)
+
+──────────────────────────────────────────────────
+
+Summary: 1 passed
+
+All checks passed! System is healthy.
