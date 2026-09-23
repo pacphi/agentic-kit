@@ -11,9 +11,7 @@ import { run as runCmd } from '../lib/exec.mjs';
 import { stripBlock, BEGIN, BUILTIN_BLOCKS } from '../lib/blocks.mjs';
 import { unregister } from '../lib/mcp.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
-import { reconcileClaudeComponentEnv, reconcileMemoryPin } from '../lib/claude-env-projection.mjs';
-import { reconcilePolicy } from '../lib/ruflo-components/policy.mjs';
-import { releaseFunnel, removeTypesafePackage, rufloProjectRoot } from '../lib/ruflo-components/apply.mjs';
+import { releaseRufloComponents } from '../lib/ruflo-components/teardown.mjs';
 import { installedVersion } from '../lib/versions.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
 import { hostsWithLifecycle, lifecycleAdapterFor, lifecycleExecutionEnabled, isBuiltinHost } from '../lib/adapters/lifecycle-registry.mjs';
@@ -424,8 +422,8 @@ async function stepHostLifecycles(ctx) {
   }
 }
 
-// ADR-0058: release every ak-owned ruflo component setting (Claude env keys,
-// receipt-owned policy files, the project memory pin, the funnel toggle), and
+// ADR-0058: release every ak-owned ruflo component setting (Claude env keys, and in every
+// receipted project the policy file, project env and memory pin; the funnel toggle), and
 // only under --purge, the typesafe package. Runs BEFORE purge-artifacts/
 // purge-kit-config (not literally adjacent to 'mcp', but still strictly
 // before it in this array) because it calls saveKitConfig — placed after
@@ -436,41 +434,14 @@ async function stepRufloComponents(ctx) {
     info('[dry-run] remove ak-owned ruflo component settings, policy files and funnel change; keep @ruvector/typesafe unless --purge');
     return;
   }
-  const off = {
-    ...ctx.cfg,
-    rufloComponents: {
-      typesafePicker: false, minilmPicker: false, mcpGovernance: false,
-      learningProfile: false, turnCredit: false, memoryFix2887: false, funnel: true,
-    },
-  };
-  // rufloProjectRoot (not paths.repoRoot) — a ruflo project also needs `.claude-flow/`,
-  // so an unrelated repo at cwd never receives project-scope teardown either.
-  const projectRoot = rufloProjectRoot(process.cwd());
-  const env = reconcileClaudeComponentEnv(off, { projectRoot, rufloVersion: installedVersion('ruflo') });
-  (env.ok ? ok : warn)(`ruflo component env: ${env.changed ? 'removed' : 'nothing owned'}`);
+  const report = { ok, warn, info };
+  const result = await releaseRufloComponents(ctx.cfg, {
+    cwd: process.cwd(), purge: Boolean(ctx.flags.purge), rufloVersion: installedVersion('ruflo'),
+  });
+  for (const line of result.lines) report[line.level](line.text);
   // Controller ruling: every teardown failure here must gate kit.json's purge and the
   // exit code, exactly like every other uninstall step that can fail to release what it owns.
-  if (!env.ok) ctx.state.ownershipTeardownOk = false;
-  const receipts = ctx.cfg.integrations?.ownership?.rufloComponents?.policies ?? {};
-  for (const root of Object.keys(receipts)) {
-    try {
-      const r = reconcilePolicy(root, false, receipts);
-      info(`policy ${root}: ${r.status}`);
-    } catch (error) {
-      ctx.state.ownershipTeardownOk = false;
-      warn(`policy ${root}: could not be removed — ${error.message}`);
-    }
-  }
-  if (projectRoot) {
-    const pin = reconcileMemoryPin(projectRoot, { enabled: false });
-    if (pin.changed) ok('CLAUDE_FLOW_DB_PATH pin removed');
-    if (!pin.ok) ctx.state.ownershipTeardownOk = false;
-  }
-  if ((await releaseFunnel(ctx.cfg)).ok) info('funnel returned to ruflo\'s default');
-  if (ctx.flags.purge) {
-    const pkg = await removeTypesafePackage(ctx.cfg);
-    (pkg.ok ? ok : warn)(`typesafe: ${pkg.detail}`);
-  }
+  if (!result.ok) ctx.state.ownershipTeardownOk = false;
   saveKitConfig(ctx.cfg);
 }
 
