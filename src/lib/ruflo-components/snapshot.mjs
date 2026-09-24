@@ -168,6 +168,11 @@ function evidenceState(component, intent, { evidence, projection, now }) {
     const reason = id === 'mcpGovernance' ? governanceUnobservedReason(evidence.rufloVersion) : evidence.errors?.[ERROR_KEY_OF[id]] ?? '';
     return describeState('unknown', { reason });
   }
+  // A restart cannot turn the funnel off (outranking sources were handled above), but
+  // `ruflo funnel disable` can: fixable, so sync re-disables it after a hand-back.
+  if (result === false && id === 'funnel') {
+    return describeState('not-applied', { reason: `Ruflo's funnel is on (decided by ${evidence.funnel.decidedBy}); ak sync runs ruflo funnel disable.` });
+  }
   if (result === false) return describeState('applied-unverified');
   if (KEY_OF[id] && projection?.missingHosts?.length) return describeState('partial', { hosts: projection.missingHosts });
   return describeState('active');

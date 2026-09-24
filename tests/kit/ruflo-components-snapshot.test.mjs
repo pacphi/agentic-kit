@@ -158,11 +158,19 @@ for (const decidedBy of ['env', 'enterprise-policy', 'project-config', 'package-
   });
 }
 
-test('funnel still enabled (any decidedBy) is applied-unverified, not user-managed', () => {
-  const snap = componentSnapshot({ cfg, rufloVersion: '3.44.0',
-    evidence: evidence({ funnel: { enabled: true, decidedBy: 'package-default' } }), projection: projection(), now });
-  assert.equal(byId(snap, 'funnel').state.id, 'applied-unverified');
-});
+// A restart cannot turn the funnel off; `ruflo funnel disable` can, so a funnel ak
+// manages as off that reads enabled (from a source ak's user-tier disable outranks)
+// is fixable — otherwise sync never re-disables it after a hand-back (e.g. funnel:
+// true → false, verified in the Docker first-use round trip against ruflo 3.45.0).
+for (const decidedBy of ['package-default', 'project-config', 'user-config']) {
+  test(`funnel managed off but enabled by ${decidedBy} is not-applied (sync disables it)`, () => {
+    const snap = componentSnapshot({ cfg, rufloVersion: '3.44.0',
+      evidence: evidence({ funnel: { enabled: true, decidedBy } }), projection: projection(), now });
+    const { state } = byId(snap, 'funnel');
+    assert.equal(state.id, 'not-applied');
+    assert.match(state.meaning, /ruflo funnel disable/);
+  });
+}
 
 // Controller ruling 1: the shared, read-only projection every surface (status,
 // Task 10's dashboard) builds a snapshot from.
