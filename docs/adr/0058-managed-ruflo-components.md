@@ -14,6 +14,7 @@
   so the policy is written but not enforced (upstream request 6). Status now judges what ak wrote
   before ruflo's evidence (§2), the projection engine preserves a conflicting key without
   abandoning the file (§3), and uninstall releases every receipted project (§1).
+- **Updated:** 2026-09-24 — upstream requests 1–4 and 6 filed (ruflo#3415–#3419); §8 links them.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md) (value-precise ownership),
   [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md) (explicit degradation),
@@ -273,16 +274,19 @@ The dashboard stays read-only: it names the command or `kit.json` change instead
 
 ### 8. Upstream requests
 
-Tracked under ADR-0031 and shown as "waiting on upstream" where relevant:
+Tracked under ADR-0031 and shown as "waiting on upstream" where relevant. Requests 1–4 and 6 were
+filed on 2026-09-24:
 
-1. `ruflo doctor --json`, so ak can stop parsing text.
+1. `ruflo doctor --json`, so ak can stop parsing text ([ruflo#3416](https://github.com/ruvnet/ruflo/issues/3416)).
 2. A configurable, per-project, rotated MCP audit log (today: one shared file in the temp
-   directory whose path can only be changed in tests).
-3. `doctor` components for the MiniLM picker and MCP governance.
-4. A supported way to give ruflo's Codex hooks environment variables, if the plan confirms
-   the gap.
+   directory whose path can only be changed in tests) ([ruflo#3417](https://github.com/ruvnet/ruflo/issues/3417)).
+3. `doctor` components for the MiniLM picker and MCP governance ([ruflo#3418](https://github.com/ruvnet/ruflo/issues/3418)).
+4. A supported way to give ruflo's Codex hooks environment variables, filed as a question since
+   the spike was inconclusive ([ruflo#3419](https://github.com/ruvnet/ruflo/issues/3419)).
 5. Encryption for the AgentDB store (ADR-0059).
-6. Route stdio MCP `tools/call` through the policy enforcer. Evidence against ruflo 3.44.0, with
+6. Route stdio MCP `tools/call` through the policy enforcer ([ruflo#3415](https://github.com/ruvnet/ruflo/issues/3415), a follow-up
+   to ruflo#3138 and ruflo#3151, whose fix is reached only when `MCPServerManager` is called
+   directly). Evidence against ruflo 3.44.0, with
    `RUFLO_MCP_ENFORCE_POLICY=1` and a `memory_store` call from a disposable project:
 
    | Entry point | Policy file | Result | Audit record |
@@ -355,4 +359,4 @@ test that wants a component managed opts back in explicitly.
 | Setup disclosure and results, status section, sync | Done — trust manifest group, machine and project setup results, `ak status` rows, `ak sync` fixes and convergence accounting |
 | Dashboard panel and About chip | Done — Overview > Runtime panel, About summary chip and link, read-only `/api/ruflo-components` route |
 | Memory pin receipt (ADR-0016 drift) | Done — `pinProjectMemoryDbPath` moved onto the owned projection engine and is now removed by `ak uninstall` |
-| Upstream requests filed | Not started — requests 1-4 and 6 drafted (§8; request 5 is ADR-0059's); filing requires user approval (`gh issue create --repo ruvnet/ruflo`) |
+| Upstream requests filed | Done — requests 1–4 and 6 filed 2026-09-24 as ruflo#3416, #3417, #3418, #3419 and #3415 (§8); request 5 belongs to ADR-0059 |
