@@ -18,7 +18,7 @@ const STATUS = { '✓': 'pass', '⚠': 'warn', '✗': 'fail' };
 
 export function parseDoctor(text) {
   const rows = [];
-  for (const raw of String(text).replace(ANSI, '').split('\n')) {
+  for (const raw of String(text).replace(ANSI, '').split(/\r?\n/)) {
     const m = raw.match(/([✓⚠✗])\s+([^:]+?):\s*(.*)$/);
     if (m) rows.push({ status: STATUS[m[1]], name: m[2].trim(), detail: m[3].trim() });
   }

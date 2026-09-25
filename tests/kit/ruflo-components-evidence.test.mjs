@@ -17,6 +17,14 @@ test('doctor parser reads a spinner-prefixed line and plain lines', () => {
   assert.equal(parseDoctor(fixture('doctor-metaharness-3.43.0.txt')).length, 3);
 });
 
+// A CRLF checkout (Windows autocrlf) or CRLF console output leaves a trailing \r that
+// `.` cannot match, so an LF-only split silently returned no rows on Windows CI.
+test('doctor parser reads CRLF-terminated output', () => {
+  const crlf = fixture('doctor-typesafe-3.43.0.txt').replace(/\r?\n/g, '\r\n');
+  assert.deepEqual(parseDoctor(crlf), [{ status: 'pass', name: '@ruvector/typesafe router',
+    detail: 'Not installed; disabled (set CLAUDE_FLOW_ROUTER_TYPESAFE=1) — hooks_route uses the built-in router' }]);
+});
+
 test('doctor parser strips ANSI colour and ignores unrelated lines', () => {
   assert.deepEqual(parseDoctor('\u001b[32m⚠\u001b[0m Encryption at Rest: Off\nSummary: 0 passed'),
     [{ status: 'warn', name: 'Encryption at Rest', detail: 'Off' }]);
