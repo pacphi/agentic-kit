@@ -12,7 +12,9 @@ v5 implementation or accepted architecture decision.
   interactive workbench in one browser document.
 - [Latest management workbench](previews/management-workbench.html) — stable
   navigation, shared panels, persona attention, onboarding, settings categories,
-  scoped plans, updates and optional schedules.
+  scoped plans, updates, optional schedules and navigation memory.
+- [Navigation memory](navigation-memory.md) — audit of where deep jumps lost
+  your place, the five-visit Back/Forward trail and what the workbench remembers.
 - [Settings organization](settings-organization.md) — eight purpose categories,
   component filters, shared editors and ownership/scope distinctions.
 - [Shared management design](shared-management-design.md) — the current design
@@ -34,11 +36,13 @@ their existing access permissions.
 | Initial v5 concept | [Preview](previews/agentic-kit-v5-concept.html) | [Source](agentic-kit-v5-concept.html) | Historical exploration |
 | Persona compositions | [Preview](previews/role-workbench.html) | [Source](role-workbench.html) | Historical; separate role navigation superseded |
 | Shared management and onboarding | [Preview](previews/management-workbench-before-grouping.html) | [Source](management-workbench-before-grouping.html) | Historical; before settings grouping |
-| Shared workbench with grouped settings | [Preview](previews/management-workbench.html) | [Source](management-workbench.html) | Latest concept |
+| Shared workbench with grouped settings and navigation memory | [Preview](previews/management-workbench.html) | [Source](management-workbench.html) | Latest concept |
 
 Standalone previews preserve the fragments in a sandboxed document and bundle
-their display helpers. Presentation choices may be remembered by the preview
-host; simulated configuration and operations are not durable system state.
+their display helpers. The latest workbench remembers its trail, views and
+simulated drafts in the preview host's storage, or in browser storage when the
+report or fragment is opened directly. That memory stays in one browser; it is
+not durable system state.
 
 ## Research and traceability
 
@@ -52,6 +56,7 @@ host; simulated configuration and operations are not durable system state.
 | [Settings and lifecycle audit](settings-audit.md) | Configuration coverage, lifecycle ownership and native boundaries |
 | [Role experience review](role-experience-review.md) | Reference artifact clickthrough and earlier persona exploration |
 | [Experience contract](experience-contract.md) | Earlier shared-panel and attention recommendations |
+| [Navigation memory](navigation-memory.md) | Deep-jump audit, visit trail design, remembered state and storage limits |
 | [Verification](verification.md) | Checks performed and explicit prototype limitations |
 | [Packaging record](packaging.md) | Repository capture, portability and publication adjustments |
 

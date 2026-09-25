@@ -5,8 +5,8 @@
   "taxonomySourceCommit": "7b9093ef3e6d4c0efb9453ee5e48532a2064e612",
   "selfExcluded": true,
   "validation": {
-    "files": 28,
-    "local_links_checked": 75,
+    "files": 29,
+    "local_links_checked": 85,
     "inline_scripts_checked": 29,
     "standalone_frames_checked": 4,
     "settings": 330,
@@ -16,8 +16,8 @@
   "files": [
     {
       "path": "README.md",
-      "bytes": 4899,
-      "sha256": "fa897eb4eac6d74697c75f01a8652732df5a90dca9532a67f46b06090188fc19"
+      "bytes": 5329,
+      "sha256": "e232c9325f04c85ebb8bbc42f3990d07fc567999dd86b433b3120f95deb24d96"
     },
     {
       "path": "agentic-kit-v5-concept.html",
@@ -56,8 +56,8 @@
     },
     {
       "path": "management-workbench.html",
-      "bytes": 403694,
-      "sha256": "2cb03aa19eddff7d44c343d0b1039aedf193bf9f2b15dd2c7c0e484e55e5d427"
+      "bytes": 427642,
+      "sha256": "c82405e8673cdaa2a2d338460e9b46e2fcf3397497c4ae6bff242d69787df397"
     },
     {
       "path": "meeting-evidence.md",
@@ -65,9 +65,14 @@
       "sha256": "acdda1504b2c7f979657cdd494beb7b056484214b880c5e10d7dfc6e34c11a27"
     },
     {
+      "path": "navigation-memory.md",
+      "bytes": 12664,
+      "sha256": "ca45ac46b50e62ceda3fac4e92456842c9bc102a859290bfc96635515ec1da48"
+    },
+    {
       "path": "packaging.md",
-      "bytes": 2347,
-      "sha256": "24a301b8f95c765655cb332fb965d245893fa49f33360701074c3ec8426cb0cc"
+      "bytes": 3835,
+      "sha256": "495d8ab952b568e0ff6511ccff0511cccf367d32297ec86965d4f0cfaf096fd3"
     },
     {
       "path": "panel-map.md",
@@ -91,8 +96,8 @@
     },
     {
       "path": "previews/management-workbench.html",
-      "bytes": 632721,
-      "sha256": "dd9f7af21a2ba31091d3097741c97d07cb3a73c042b9b3d76e63e29a786d3777"
+      "bytes": 660390,
+      "sha256": "722425fa6ce03af0231f25e13c8ced9062b43041b8680f0b5ff59a9d063c3591"
     },
     {
       "path": "previews/role-workbench.html",
@@ -101,8 +106,8 @@
     },
     {
       "path": "report.html",
-      "bytes": 712022,
-      "sha256": "ca1916eabc9002d0158711dea620bda413c4f5fd3b5618544e786e2968c2e22e"
+      "bytes": 735970,
+      "sha256": "5740f9498d32fcfe0ab638d9e6df455b80f4e5048ca299ec7722699c14987285"
     },
     {
       "path": "report.md",
@@ -151,8 +156,8 @@
     },
     {
       "path": "verification.md",
-      "bytes": 11849,
-      "sha256": "53d186527f7455d0409cb6c4547927311a9a628041fefee7c75424dd6d6e6f93"
+      "bytes": 14983,
+      "sha256": "8d46c4e94ad58f06d0f7c374b6137a84cca368e73535293285e0aa8102149539"
     }
   ]
 }

@@ -66,13 +66,13 @@ Focused browser checks completed:
 - A schedule draft selected Codex only, daily 02:00 UTC, check-and-notify. The review showed those exact values; applying produced a separate simulated schedule receipt. A draft toggle alone does not change the saved scheduling policy.
 - JavaScript syntax parsed successfully. The fragment contains no fetch, XMLHttpRequest or WebSocket calls. Browser console inspection showed no application errors during the tested flows.
 
-The source catalogue is real research; machine inventory, update candidates, health observations, plans and results are synthetic. No installation, package update, native setting change, scheduled job, paid probe, enrollment or remote write was performed. Session-only wizard resume and browser navigation continuity are demonstrated; durable restart recovery, real native schema validation and controller self-update/reconnect remain product work. No full native parity, runtime enforcement, cross-platform release, performance SLA or WCAG certification is claimed.
+The source catalogue is real research; machine inventory, update candidates, health observations, plans and results are synthetic. No installation, package update, native setting change, scheduled job, paid probe, enrollment or remote write was performed. Session-only wizard resume and browser navigation continuity are demonstrated; durable restart recovery, real native schema validation and controller self-update/reconnect remain product work. The navigation-memory revision below extends the mockup's memory across reloads in browser storage; durable recovery remains product work. No full native parity, runtime enforcement, cross-platform release, performance SLA or WCAG certification is claimed.
 
 ## Settings organization revision · September 25
 
 - Mapped all 330 unique source IDs to exactly one purpose category, with independent entry-kind, record and related-component metadata in settings-taxonomy.json. The 101-panel map is retained.
 - Checked eight purpose categories on the landing screen. Grouped 36 routing members into 12 activity rows and 20 repeated-record members into six collection editors. Scheduling exposes one shared policy entry.
-- Browser-verified a Review host change: Studio-only draft, attempted scope change rejected with an explanation, exact before/after preview, simulated apply and a one-machine verified receipt.
+- Browser-verified a Review host change: Studio-only draft, attempted scope change rejected with an explanation, exact before/after preview, simulated apply and a one-machine verified receipt. (Superseded by the navigation-memory revision below: a scope change now parks the draft with its scope instead of being rejected.)
 - Browser-verified adding a provider binding with ID, host, provider and endpoint; staging produced one atomic integrations.bindings collection change and a simulated receipt. No provider was contacted.
 - Search for max-concurrent opened a clearly labeled operation-only contract; search for encryption retained an Unavailable result with its canonical category.
 - At a 320px viewport, the landing screen and all eight category views had root clientWidth = scrollWidth = 286px. The discovery collection editor also fit that width. Inspected desktop and narrow-screen screenshots.
@@ -80,3 +80,23 @@ The source catalogue is real research; machine inventory, update candidates, hea
 - JavaScript syntax checked after the final edits. Controls remain synthetic, and native adapter validation, real writes, full accessibility certification and six-host runtime support are not claimed.
 - The browser automation occasionally raced iframe layout after navigation; fresh accessibility snapshots and keyboard activation resolved those interactions. Text/model roundtrip was not separately validated; the route roundtrip used the host selector.
 - Codex restore/release opens an explanatory lifecycle contract; it does not simulate a native restore. Preferred-shell maps retain structured environment keys. Invocation forms outside existing representative workflows remain design work.
+
+## Navigation memory revision · September 25
+
+- Audited the workbench captured at `b8e77f7` and recorded 13 points where navigation discarded state or chose the destination for the person, with line references, in [navigation-memory.md](navigation-memory.md).
+- Reworked an uncommitted first attempt. Before the rework, a browser probe showed in-app Back after a reload navigating the standalone preview's frame away, because Back delegated to `history.go()`. The revision no longer uses the History API.
+- A 64-check Playwright scenario suite passed in the regenerated standalone preview and, unchanged, in the regenerated report, where the workbench runs inline and saves to `localStorage`. It ran in headless Chromium through Playwright 1.63 with the icon and tooltip CDN scripts blocked. It covered:
+  - Six visits deep, then Back five times: the map search, Insights tabs, the settings search text, the opened result detail, an expanded disclosure and focus on the control that was used were restored. The trail held five earlier visits, Back stopped at the fifth, Start still reached the first view, Forward replayed popped visits, and Start behaved as a new visit.
+  - Returning to Manage reopened its last tab with the search intact; Clear search was the explicit reset; the panel-map search survived leaving the map.
+  - Escape and Close popped a finding detail on the same page and returned focus to Inspect; Forward reopened the detail.
+  - A reload restored the location and trail, and Back and Forward worked afterwards.
+  - A Studio draft was parked when switching to the fleet scope, with a live message and a Switch to Studio control. Switching back restored it, and Back reversed the scope change.
+  - Exiting setup returned to Insights › Practice; resuming kept the wizard step.
+  - Back to an applied configuration plan showed Completed with its receipt, and History's receipt count did not change.
+  - Clear trail emptied the stack. Reset demo state required confirmation, Keep my work cancelled it, and a confirmed reset restored the pristine demo and survived a reload.
+  - At a 320-pixel viewport with a full trail, the root client and scroll widths were equal.
+  - After more than 60 visits across three scopes, the saved state was 3,373 bytes of the 16,384-byte budget, and a reload kept the trail.
+  - No console or page errors occurred other than the blocked CDN requests.
+- Desktop and 320-pixel screenshots of the trail were inspected.
+- JavaScript syntax parsed successfully. The fragment still contains no fetch, XMLHttpRequest or WebSocket calls. The standalone preview and the report's embedded workbench were regenerated as recorded in [packaging.md](packaging.md).
+- Not checked: Firefox, Safari, the Codex visualization host itself, screen readers, touch devices and usability with people. No WCAG certification is claimed.

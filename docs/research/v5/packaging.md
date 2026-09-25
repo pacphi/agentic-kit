@@ -42,3 +42,27 @@ scripts and four standalone frames. JSON comparisons preserved all catalogue
 data; 330 unique settings entries and 101 unique panel entries were retained.
 Repository Markdown lint checked 175 documents with zero issues. The manifest
 records content digests and excludes itself from its file list.
+
+## Navigation memory update · September 25
+
+This update adds [navigation-memory.md](navigation-memory.md), revises the
+management workbench fragment, and regenerates the two documents that embed it.
+The preview wrappers, their display helpers and the other mockups are unchanged.
+
+- **Standalone preview.** The iframe `data-srcdoc` of
+  `previews/management-workbench.html` was decoded, the previous fragment was
+  found verbatim and replaced, and the document was re-encoded with the original
+  entity set (`&lt;`, `&gt;`, `&quot;`, `&#x27;`, `&amp;`, `&#10;`). Rebuilding
+  with the previous fragment reproduced the committed preview byte for byte.
+- **Report.** `report.html` embeds the workbench inline. That copy matched the
+  previous fragment except for 48 line breaks rendered as spaces, so it was
+  located by comparing against the previous fragment and replaced with the new
+  fragment verbatim. The report's appendices were not regenerated and do not
+  include the navigation-memory memo.
+- **Validation.** The manifest's validation counts were recomputed with rules
+  that reproduce the capture's recorded counts exactly on the previous snapshot:
+  Markdown and static HTML local links, inline scripts including standalone
+  frames, and JSON parsing. The manifest digests were recomputed for every file.
+- **Excluded.** The regeneration and browser-check scripts ran from a temporary
+  workspace and are not part of this package, consistent with the capture policy
+  above.
