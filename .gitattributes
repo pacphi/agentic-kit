@@ -5,3 +5,6 @@
 *.mjs text eol=lf
 *.cjs text eol=lf
 *.js text eol=lf
+# Captured CLI output fixtures are byte-exact evidence (one keeps a spinner \r):
+# never let a Windows checkout rewrite their line endings.
+tests/fixtures/ruflo-components/** -text

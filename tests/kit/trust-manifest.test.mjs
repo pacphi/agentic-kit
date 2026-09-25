@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { HOST_REGISTRY, validateHostAdapter } from '../../src/lib/adapters/index.mjs';
 import {
   setupTrustManifest, trustManifestForOperation, newlyEnabledHostTrustManifest,
-  autoApproveValues, trustManifestLines,
+  autoApproveValues, trustManifestLines, rufloComponentsTrustGroup,
 } from '../../src/lib/trust-manifest.mjs';
 import { validHost } from './helpers/integration-builders.mjs';
 
@@ -190,11 +190,62 @@ test('a future enabled host joins setup disclosure without a setup command branc
   const manifest = setupTrustManifest({
     agentBrowser: false, integrations: { hosts: { grok: true } }, aqe: true, ruvnetBrain: true,
   }, { hosts: [future] });
-  assert.equal(manifest.length, 1);
+  // Default rufloComponents intent (ADR-0058) is always managed absent an
+  // explicit opt-out, so its disclosure group rides along here too.
+  assert.equal(manifest.length, 2);
   assert.equal(manifest[0].hostId, 'grok');
   assert.equal(manifest[0].changes[0].value, 'ruflo mcp start');
+  assert.equal(manifest[1].componentId, 'ruflo-components');
   const picked = trustManifestForOperation({
     integrations: { hosts: { grok: true } }, aqe: true, ruvnetBrain: true,
   }, { hosts: [future], operation: 'host-pick' });
   assert.equal(picked[0].hostId, 'grok');
+});
+
+test('ruflo components trust group discloses every managed change with benefit, cost and opt-out', () => {
+  const group = rufloComponentsTrustGroup({
+    rufloComponents: {
+      typesafePicker: true, minilmPicker: true, mcpGovernance: { maxCallsPerMinute: 120 },
+      learningProfile: 'balanced', turnCredit: true, memoryFix2887: true, funnel: false,
+    },
+  });
+  const text = trustManifestLines([group]).join('\n');
+  for (const needle of [
+    '@ruvector/typesafe', 'CLAUDE_FLOW_ROUTER_TYPESAFE=1', 'CLAUDE_FLOW_ROUTER_EMBEDDER=minilm',
+    '.harness/mcp-policy.json', 'RUFLO_INTELLIGENCE_MODE=balanced', 'ruflo funnel disable', 'rufloComponents',
+  ]) assert.ok(text.includes(needle), needle);
+});
+
+test('ruflo components trust group omits opted-out components', () => {
+  const group = rufloComponentsTrustGroup({
+    rufloComponents: {
+      typesafePicker: false, minilmPicker: false, mcpGovernance: false,
+      learningProfile: false, turnCredit: false, memoryFix2887: false, funnel: true,
+    },
+  });
+  assert.equal(group, null);
+});
+
+test('ruflo components funnel disclosure names the irreversible funnel ID + event-queue deletion (ruling 2)', () => {
+  const group = rufloComponentsTrustGroup({
+    rufloComponents: {
+      typesafePicker: false, minilmPicker: false, mcpGovernance: false,
+      learningProfile: false, turnCredit: false, memoryFix2887: false, funnel: false,
+    },
+  });
+  const funnelChange = group.changes.find((c) => c.id === 'rc-funnel');
+  assert.match(funnelChange.effect, /no promotional tips or statusline promos/);
+  assert.match(funnelChange.effect, /deletes ruflo's local funnel ID and event queue/);
+});
+
+test('ruflo components governance disclosure states enforcement is scoped to the ak-written policy file (ruling 3)', () => {
+  const group = rufloComponentsTrustGroup({
+    rufloComponents: {
+      typesafePicker: false, minilmPicker: false, mcpGovernance: { maxCallsPerMinute: 60 },
+      learningProfile: false, turnCredit: false, memoryFix2887: false, funnel: true,
+    },
+  });
+  const text = trustManifestLines([group]).join('\n');
+  assert.match(text, /enforced only against the policy file ak itself wrote/);
+  assert.match(text, /project's own existing \.harness\/mcp-policy\.json is left alone/);
 });

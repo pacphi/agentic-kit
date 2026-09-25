@@ -33,6 +33,15 @@ export function sandboxHome(prefix) {
   process.env.USERPROFILE = home;
   process.env.XDG_CONFIG_HOME = cfg;
   process.env.APPDATA = cfg;
+  // A developer shell may export the other XDG bases (and the host-home overrides)
+  // to REAL directories; paths.mjs prefers them over HOME, so each one is pinned
+  // inside the sandbox or removed. The state base holds ak's evidence cache and
+  // maintenance journal, so leaving it inherited writes the real machine.
+  process.env.XDG_STATE_HOME = path.join(home, '.local', 'state');
+  process.env.XDG_DATA_HOME = path.join(home, '.local', 'share');
+  process.env.XDG_CACHE_HOME = path.join(home, '.cache');
+  process.env.LOCALAPPDATA = path.join(home, 'AppData', 'Local');
+  for (const key of ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'HERMES_HOME']) delete process.env[key];
   // npm injects its resolved cache path into lifecycle scripts. Without
   // overriding it here, `npm test` lets otherwise-isolated status/setup tests
   // inspect the developer's real `_npx` cache and vary with host upgrade cruft.
@@ -76,7 +85,8 @@ export function sandboxConfigBase(testContext, prefix) {
  *  are imported. */
 export function assertSandboxed(paths, home) {
   const real = os.homedir();
-  if (paths.home !== home || !paths.claudeDir().startsWith(home) || !paths.configDir().startsWith(home)) {
+  const located = [paths.claudeDir(), paths.configDir(), paths.maintenanceControlDir(), paths.hookHealingTransactionsDir()];
+  if (paths.home !== home || !located.every((p) => p.startsWith(home))) {
     throw new Error(
       `home sandbox NOT active (paths.home=${paths.home}, want ${home}) — refusing to run against ${real}`,
     );
@@ -152,6 +162,14 @@ export function offlineKitConfig(extra = {}) {
   return {
     agentBrowser: false, // avoid global installs/browser downloads in unrelated hermetic tests
     ruvnetBrain: false, // its drift probe hits the GitHub releases API
+    // ADR-0058: every component off by default here too -- reconcileRufloComponents runs
+    // for real inside setup/sync's non-dry paths (some tests exercise those directly), and
+    // an untamed default would spawn a real global npm install or a real ruflo funnel call
+    // in an otherwise-hermetic test. A test that wants a component managed opts back in via `extra`.
+    rufloComponents: {
+      typesafePicker: false, minilmPicker: false, mcpGovernance: false,
+      learningProfile: false, turnCredit: false, memoryFix2887: false, funnel: true,
+    },
     versionCheck: {
       ttlHours: 24,
       last: Date.now(),

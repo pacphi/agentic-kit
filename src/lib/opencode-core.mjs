@@ -51,6 +51,10 @@ import * as paths from './paths.mjs';
 import { deepEqual, hasReceiptValue } from './opencode-receipts.mjs';
 import { catalogSource, skillPathsFor } from './opencode-agents.mjs';
 import { managedAgentBrowserEnv } from './agent-browser.mjs';
+import { machineComponentEnv, supports } from './ruflo-components/env.mjs';
+import { managedIntent } from './ruflo-components/config.mjs';
+import { componentById } from './ruflo-components/catalogue.mjs';
+import { installedVersion } from './versions.mjs';
 
 export const opencodeOwnership = (cfg) => cfg?.integrations?.ownership?.opencode ?? {};
 export function mutableOpencodeOwnership(cfg) {
@@ -209,15 +213,31 @@ export function mcpCommandFor({ binPresent, nestedPath }) {
 
 /** @typedef {{ kind: string, root: string, id: string, hasPlugins: boolean, hasPlatformSkill: boolean }} CatalogSource */
 
+/** The machine-scoped ruflo-component env plus the AK_RUFLO_GOVERNANCE marker
+ *  (ADR-0058 §5) for the OpenCode `claude-flow` MCP entry. Project-scoped
+ *  enforcement itself (RUFLO_MCP_ENFORCE_POLICY) is NOT decided here — the
+ *  opencode.json wiring is host-global, not per-project — so only the marker
+ *  is projected; the gateway/hooks templates decide enforcement per project
+ *  directory at runtime from that marker. */
+export function rufloComponentEnvFor(cfg) {
+  const rufloVersion = installedVersion('ruflo');
+  return {
+    ...machineComponentEnv(cfg, rufloVersion),
+    ...(managedIntent(cfg, 'mcpGovernance') && supports(rufloVersion, componentById('mcpGovernance').minRuflo)
+      ? { AK_RUFLO_GOVERNANCE: 'managed' } : {}),
+  };
+}
+
 /** The MCP server entries ak writes. `claude-flow` resolves via mcpCommandFor
  *  (bin on PATH → nested mcp-server.js → `ruflo mcp start`). Agentic QE is
  *  included by default because machine setup installs it; `--no-aqe` disables
  *  that projection. ruvnet-brain is included only when its shim is on disk.
  *  @param {{ brainShim?: string, nestedPath?: string, includeAqe?: boolean,
- *            agentBrowserEnabled?: boolean, aqeEmbeddingEnv?: Record<string, string> }} [opts] */
+ *            agentBrowserEnabled?: boolean, aqeEmbeddingEnv?: Record<string, string>,
+ *            rufloComponentEnv?: Record<string, string> }} [opts] */
 export async function mcpEntriesFor({
   brainShim = brainShimPath(), nestedPath = nestedMcpServerPath(), includeAqe = true,
-  agentBrowserEnabled = true, aqeEmbeddingEnv = {},
+  agentBrowserEnabled = true, aqeEmbeddingEnv = {}, rufloComponentEnv = {},
 } = {}) {
   const entries = {
     'claude-flow': {
@@ -228,6 +248,7 @@ export async function mcpEntriesFor({
       environment: {
         ...RUFLO_MCP_ENV,
         ...managedAgentBrowserEnv({ enabled: agentBrowserEnabled }),
+        ...rufloComponentEnv,
       },
     },
   };
@@ -349,6 +370,7 @@ export async function opencodeConverged(cfg, { configFile = paths.opencodeConfig
   const entries = await mcpEntriesFor({
     brainShim, includeAqe: cfg.aqe !== false, agentBrowserEnabled: cfg.agentBrowser !== false,
     aqeEmbeddingEnv: opencodeEmbeddingEnv(cfg),
+    rufloComponentEnv: rufloComponentEnvFor(cfg),
   });
   const managed = normalizeManaged(opencodeOwnership(cfg).managed);
   const ownedEntries = Object.fromEntries(Object.entries(entries).filter(
@@ -625,6 +647,7 @@ export async function applyOpencode(cfg, { dryRun = false, configFile = paths.op
   const entries = await mcpEntriesFor({
     brainShim, includeAqe: cfg.aqe !== false, agentBrowserEnabled: cfg.agentBrowser !== false,
     aqeEmbeddingEnv: opencodeEmbeddingEnv(cfg),
+    rufloComponentEnv: rufloComponentEnvFor(cfg),
   });
   const source = catalogSource({ override: opencodeOwnership(cfg).catalogDir });
   const skillPaths = skillPathsFor(source);

@@ -1916,7 +1916,7 @@ aggregated here, and deriving the baseline from a widened bound would silently
 stretch it to whatever lookback the caller happened to pass. The dashboard route widens it to
 the depth the personal tap-share baseline needs rather than to the previous
 window alone: `days + BASELINE_TRAILING_DAYS` (`lookbackDays`,
-`src/lib/dashboard-server.mjs:1779`); `ak usage score` applies the same rule
+`src/lib/dashboard-server.mjs:1824`); `ak usage score` applies the same rule
 (`src/commands/usage.mjs:316`). One extra window would be a strict
 subset — too shallow for `promptBaselines`, which needs
 BASELINE_MIN_ACTIVE_DAYS of history BEFORE the displayed window and returns

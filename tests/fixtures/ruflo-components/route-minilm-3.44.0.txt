@@ -1,0 +1,33 @@
+[INFO] Routing task: sync and review latest issues
+✅ Using native better-sqlite3
+[hooks] Semantic router initialized: native VectorDb (HNSW, 16k+ routes/s), embedder=minilm
+
+Routing Method
+  - Method: keyword
+  - Backend: keyword matching
+  - Latency: 0.086ms
+  - Matched Pattern: keyword-fallback
+
+Semantic Matches:
+  bugfix-task: 32.0%
+  bugfix-task: 30.0%
+  bugfix-task: 29.0%
+
++------------------- Primary Recommendation -------------------+
+| Agent: coder                                                 |
+| Confidence: 70.0%                                            |
+| Reason: Task contains keywords matching coder specialization |
++--------------------------------------------------------------+
+
+Alternative Agents
++------------+------------+-------------------------------------+
+| Agent Type | Confidence | Reason                              |
++------------+------------+-------------------------------------+
+| researcher |      60.0% | Alternative agent for researcher... |
+| tester     |      50.0% | Alternative agent for tester cap... |
++------------+------------+-------------------------------------+
+
+Estimated Metrics
+  - Success Probability: 70.0%
+  - Estimated Duration: 10-30 min
+  - Complexity: LOW

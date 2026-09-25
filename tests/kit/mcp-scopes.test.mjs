@@ -113,6 +113,35 @@ test('Claude registration safely replaces the prior canonical claude-flow entry'
   ]);
 });
 
+// ADR-0016 §4 / ADR-0058 §3 (Inherits): ak never writes ruflo component keys into a
+// registration, so a registration carrying one is the user's — its value overrides the
+// settings env and must survive, never be re-added without it.
+test('Claude registration preserves a user registration carrying a ruflo component env key', async () => {
+  const calls = [];
+  const ok = await register({ agentBrowser: true }, {
+    runner: async (bin, args) => { calls.push([bin, args]); return { code: 0, stdout: '', stderr: '' }; },
+    inspect: () => ({ registrations: [{
+      name: 'claude-flow', scope: 'user', command: 'ruflo', args: ['mcp', 'start'],
+      env: { RUFLO_INTELLIGENCE_MODE: 'research' },
+    }] }),
+  });
+  assert.equal(ok, false);
+  assert.deepEqual(calls, []);
+});
+
+test('Claude registration preserves a canonical entry carrying a foreign env key alongside a component key', async () => {
+  const calls = [];
+  const ok = await register({ agentBrowser: true }, {
+    runner: async (bin, args) => { calls.push([bin, args]); return { code: 0, stdout: '', stderr: '' }; },
+    inspect: () => ({ registrations: [{
+      name: 'claude-flow', scope: 'user', command: 'ruflo', args: ['mcp', 'start'],
+      env: { RUFLO_INTELLIGENCE_MODE: 'research', MY_KEY: 'user-value' },
+    }] }),
+  });
+  assert.equal(ok, false);
+  assert.deepEqual(calls, []);
+});
+
 test('Claude registration preserves a conflicting user-owned claude-flow entry', async () => {
   const calls = [];
   const ok = await register({ agentBrowser: true }, {

@@ -41,6 +41,9 @@ import { readJson, writeJsonWithBackup } from '../lib/settings.mjs';
 import { withDb } from '../lib/sqlite.mjs';
 import { findMemoryEntry } from '../lib/project-memory.mjs';
 import { projectMemoryEnv } from '../lib/ruflo-memory.mjs';
+import { reconcileMemoryPin } from '../lib/claude-env-projection.mjs';
+import { reconcileRufloComponents } from '../lib/ruflo-components/apply.mjs';
+import { componentResultReport } from './status/sections/ruflo-components.mjs';
 import {
   setupTrustManifest, trustManifestLines,
 } from '../lib/trust-manifest.mjs';
@@ -479,7 +482,21 @@ export async function run_machine({ flags, pkgRoot, cfg }) {
     catch (error) { warn(`Codex context reconciliation incomplete: ${error.message}`); return false; }
   }
   await printUndetectedHostHints(cfg);
+  // ADR-0058: machine-scope ruflo components (typesafe picker, MiniLM picker,
+  // learning profile, funnel). projectRoot: null (not merely omitted) — machine
+  // scope must never pick up an ancestor .git above $HOME (e.g. a dotfiles repo)
+  // as a ruflo project; only `run_project` ever targets a project (controller ruling).
+  const components = await reconcileRufloComponents(cfg, { cwd: paths.home, refresh: false, projectRoot: null });
+  printComponentResults(components);
+  saveKitConfig(cfg);
   return true;
+}
+
+/** ADR-0058 §7: results table, failures and restart reminder after applying components. */
+function printComponentResults(components) {
+  heading('ruflo components');
+  const out = { log: (t) => console.log(t), warn, info };
+  for (const line of componentResultReport(components)) out[line.level](line.text);
 }
 
 export const RUFLO_PROJECT_INIT_ARGS = Object.freeze([
@@ -539,12 +556,9 @@ async function sanitizeProjectMcpConfig(root) {
 /** Step 4: pin ABSOLUTE CLAUDE_FLOW_DB_PATH (Claude Code doesn't expand
  *  ${CLAUDE_PROJECT_DIR}). */
 function pinProjectMemoryDbPath(root) {
-  const dbPath = paths.projectMemoryDb(fs.realpathSync(root));
-  const localFile = paths.projectSettingsLocal(root);
-  const local = readJson(localFile, {}) ?? {};
-  local.env = { ...local.env, CLAUDE_FLOW_DB_PATH: dbPath };
-  writeJsonWithBackup(localFile, local);
-  ok(`CLAUDE_FLOW_DB_PATH pinned → ${dbPath}`);
+  const result = reconcileMemoryPin(root, { enabled: true });
+  if (result.ok) ok(`CLAUDE_FLOW_DB_PATH pinned (${result.status}) → ${paths.projectMemoryDb(fs.realpathSync(root))}`);
+  else warn(`CLAUDE_FLOW_DB_PATH pin preserved: ${result.reason} — memory may use a different store`);
 }
 
 /** Step 5: activate memory + swarm with the pin exported. */
@@ -708,7 +722,7 @@ export async function run_project({
   const root = process.cwd();
   heading(`project setup — ${root}`);
   if (!trustDisclosed) discloseSetupTrust(cfg, { project: true });
-  if (flags['dry-run']) { info('dry-run: would init, sanitize, pin DB path, activate memory/swarm/daemon, verify'); return true; }
+  if (flags['dry-run']) { info('dry-run: would init, sanitize, pin DB path, activate memory/swarm/daemon, verify, apply managed ruflo components'); return true; }
 
   const permissionsFile = paths.projectSettings(root);
   const permCtx = {
@@ -721,6 +735,10 @@ export async function run_project({
   if (!(await rufloProjectInit(root, permCtx))) return false;
   await sanitizeProjectMcpConfig(root);
   pinProjectMemoryDbPath(root);
+  // ADR-0058: project-scope ruflo components (adds MCP governance, which needs a project root).
+  const components = await reconcileRufloComponents(cfg, { cwd: root, refresh: true });
+  printComponentResults(components);
+  saveKitConfig(cfg);
   const env = projectMemoryEnv(root);
   await activateProjectMemoryAndSwarm(root, env);
   await startProjectDaemon(root);

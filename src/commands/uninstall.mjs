@@ -11,6 +11,8 @@ import { run as runCmd } from '../lib/exec.mjs';
 import { stripBlock, BEGIN, BUILTIN_BLOCKS } from '../lib/blocks.mjs';
 import { unregister } from '../lib/mcp.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
+import { releaseRufloComponents } from '../lib/ruflo-components/teardown.mjs';
+import { installedVersion } from '../lib/versions.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
 import { hostsWithLifecycle, lifecycleAdapterFor, lifecycleExecutionEnabled, isBuiltinHost } from '../lib/adapters/lifecycle-registry.mjs';
 import { companionLifecycleFor } from '../lib/adapters/companion-lifecycle-registry.mjs';
@@ -420,6 +422,29 @@ async function stepHostLifecycles(ctx) {
   }
 }
 
+// ADR-0058: release every ak-owned ruflo component setting (Claude env keys, and in every
+// receipted project the policy file, project env and memory pin; the funnel toggle), and
+// only under --purge, the typesafe package. Runs BEFORE purge-artifacts/
+// purge-kit-config (not literally adjacent to 'mcp', but still strictly
+// before it in this array) because it calls saveKitConfig — placed after
+// kit.json's own purge, that save would resurrect the file a purge just
+// deleted (codex-review: 'purge must not recreate kit.json').
+async function stepRufloComponents(ctx) {
+  if (ctx.dry) {
+    info('[dry-run] remove ak-owned ruflo component settings, policy files and funnel change; keep @ruvector/typesafe unless --purge');
+    return;
+  }
+  const report = { ok, warn, info };
+  const result = await releaseRufloComponents(ctx.cfg, {
+    cwd: process.cwd(), purge: Boolean(ctx.flags.purge), rufloVersion: installedVersion('ruflo'),
+  });
+  for (const line of result.lines) report[line.level](line.text);
+  // Controller ruling: every teardown failure here must gate kit.json's purge and the
+  // exit code, exactly like every other uninstall step that can fail to release what it owns.
+  if (!result.ok) ctx.state.ownershipTeardownOk = false;
+  saveKitConfig(ctx.cfg);
+}
+
 function stepPurgeArtifacts(ctx) {
   for (const [label, file] of [
     ['model inventory cache', modelInventoryPath()], ['model scope key', modelScopeKeyPath()],
@@ -555,6 +580,7 @@ export const UNINSTALL_STEPS = [
   { id: 'deja-vu', when: () => true, run: stepDejaVu },
   { id: 'host-lifecycles', when: () => true, run: stepHostLifecycles },
   { id: 'agent-browser', when: () => true, run: stepAgentBrowser },
+  { id: 'ruflo-components', when: () => true, run: stepRufloComponents },
   { id: 'purge-artifacts', when: (ctx) => ctx.flags.purge, run: stepPurgeArtifacts },
   {
     id: 'purge-kit-config',

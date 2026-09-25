@@ -5,6 +5,7 @@ import { HOST_REGISTRY } from './adapters/index.mjs';
 import { managedCompanionFor } from './adapters/companion-registry.mjs';
 import { DEJA_VU_TARGETS } from './deja-vu.mjs';
 import { targetAgentBrowserVersion } from './agent-browser.mjs';
+import { managedIntent } from './ruflo-components/config.mjs';
 
 const DEJA_VU = managedCompanionFor('deja-vu');
 const AUTO_EVENTS = Object.freeze({
@@ -156,6 +157,40 @@ export function codexMcpRepairTrustManifest(plan = []) {
   }];
 }
 
+// Controller rulings 2 + 3 (ADR-0058 disclosure): the funnel entry names the
+// irreversible funnel-ID/event-queue deletion `ruflo funnel disable` performs
+// beyond the toggle itself (apply.mjs's ensureFunnel grounds this against
+// ruflo's own funnel command); the governance entries make clear enforcement
+// only ever applies to the policy file ak itself wrote — a project's own
+// pre-existing .harness/mcp-policy.json is left alone (policy.mjs's foreign
+// state).
+export function rufloComponentsTrustGroup(cfg) {
+  const change = (id, kind, scope, value, effect) => ({ id, kind, scope, owner: 'agentic-kit', value, effect });
+  const changes = [];
+  if (managedIntent(cfg, 'typesafePicker')) {
+    changes.push(change('rc-typesafe-package', 'npm-package', 'global', '@ruvector/typesafe',
+      'semantic agent picker library; ruflo ≥ 3.43.0 only'));
+    changes.push(change('rc-typesafe-env', 'env', 'user', 'CLAUDE_FLOW_ROUTER_TYPESAFE=1', 'route agents by meaning; falls back when unsure'));
+  }
+  if (managedIntent(cfg, 'minilmPicker')) changes.push(change('rc-minilm-env', 'env', 'user', 'CLAUDE_FLOW_ROUTER_EMBEDDER=minilm', 'MiniLM routing; ~5 ms per prompt; ruflo ≥ 3.44.0'));
+  const gov = managedIntent(cfg, 'mcpGovernance');
+  if (gov) {
+    changes.push(change('rc-governance-file', 'project-file', 'project', '.harness/mcp-policy.json',
+      `policy file for ruflo's MCP governance (audit on, ${gov.maxCallsPerMinute} calls per minute); not yet enforced on stdio launches by ruflo ≤ 3.44.0`));
+    changes.push(change('rc-governance-env', 'env', 'project', 'RUFLO_MCP_ENFORCE_POLICY=1',
+      'enforced only against the policy file ak itself wrote; a project\'s own existing .harness/mcp-policy.json is left alone'));
+  }
+  const profile = managedIntent(cfg, 'learningProfile');
+  if (profile) changes.push(change('rc-learning-env', 'env', 'user', `RUFLO_INTELLIGENCE_MODE=${profile}`, 'explicit learning profile'));
+  if (managedIntent(cfg, 'funnel') === 'off') {
+    changes.push(change('rc-funnel', 'cli-state', 'user', 'ruflo funnel disable',
+      'no promotional tips or statusline promos; also deletes ruflo\'s local funnel ID and event queue'));
+  }
+  if (!changes.length) return null;
+  changes.push(change('rc-opt-out', 'config', 'user', 'kit.json → rufloComponents', 'set any component to false to leave it alone'));
+  return { componentId: 'ruflo-components', label: 'Managed ruflo components (ADR-0058)', approvalPolicy: 'managed', changes };
+}
+
 /** @param {any} cfg
  * @param {{project?: boolean, hosts?: any[], companionPreflight?: any,
  *   codexRepairPlan?: any[]}} [options] */
@@ -195,6 +230,7 @@ export function setupTrustManifest(cfg, {
         },
       ],
     }]),
+    ...[rufloComponentsTrustGroup(cfg)].filter(Boolean),
     ...dejaVuSetupTrustManifest(cfg, companionPreflight),
   ];
 }

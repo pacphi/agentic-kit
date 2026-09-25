@@ -121,6 +121,10 @@ export function agentBrowserMcpConfigured(registration, enabled = true) {
 const canonicalRufloRegistration = (entry) => entry?.command === 'ruflo'
   && JSON.stringify(entry.args) === JSON.stringify(['mcp', 'start']);
 
+// ADR-0058 §3 (Claude, Inherits branch): Claude Code passes the settings `env` block to
+// stdio MCP servers, so ak never writes ruflo component keys into a registration. Only a
+// prior ak-set AGENT_BROWSER_CONFIG marks a registration as ak's own to replace; any other
+// key, a component key included, is the user's and overrides the settings env (ADR-0016 §4).
 function replaceableRufloRegistration(entry) {
   if (!canonicalRufloRegistration(entry) || entry.scope !== 'user') return false;
   return Object.keys(entry.env ?? {}).every((key) => key === 'AGENT_BROWSER_CONFIG');

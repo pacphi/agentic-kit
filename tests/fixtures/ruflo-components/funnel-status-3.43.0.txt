@@ -1,0 +1,4 @@
+Funnel: enabled (decided by: package-default)
+Disclosure: disclosed_enabled
+State dir: /Users/example/.ruflo
+Consents: none recorded

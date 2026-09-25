@@ -93,6 +93,11 @@ comes from the same read-only status facts as the terminal: compatible package,
 verified native executable, trusted MCP config, and local browser payload remain
 separate from Vibium's Agentic-QE-owned cache visibility in System.
 
+The ruflo card carries a summary line ("ruflo components: 6 of 7 active") built from the same
+`ak status` row Overview > Runtime's panel header shows, so About and Runtime always agree. The
+line links to that panel; it appears only once `ak status` has reported the subsystem at least
+once.
+
 System's capability catalog counts both user/plugin surfaces and the project
 surfaces discovered by the host census. In particular, Codex project skills in
 `.agents/skills` are distinct evidence from user `~/.codex/skills` and enabled
@@ -136,7 +141,8 @@ Overview keeps status and routing in one health-first area:
   model, and the Ruflo/MCP process must inherit the required credential environment. Served-provider
   and served-model claims come from **Usage → Scorecard** evidence instead.
 - **Runtime** presents operational services, processes, MCP readiness, and cached
-  context configuration with host-specific native controls.
+  context configuration with host-specific native controls. It also holds the read-only
+  "ruflo components" panel (below).
 - **Intelligence** presents memory, learning, and quality-improvement signals machine-wide: an
   always-visible rollup folded across every project on this machine where memory or intelligence has
   been activated — a `.claude-flow`, `.agentic-qe` or `.swarm` directory, whichever host created it
@@ -154,6 +160,27 @@ Overview keeps status and routing in one health-first area:
   discovery. The machine-wide table and picker share alphabetized Git repository,
   worktree, user-level, and other/unclassified subgroups. Each table subgroup shows
   five rows before scrolling; all rows remain available inside the bounded panel.
+
+### Ruflo components
+
+[ADR-0058](adr/0058-managed-ruflo-components.md)'s managed ruflo components — the typesafe and
+MiniLM agent pickers, MCP tool governance, the learning profile, MetaHarness turn-credit, the
+memory durability fix, and the funnel toggle — get one card each in Overview > Runtime. A card
+shows the state badge beside its plain-language meaning (and the action to take, when one
+applies), the current value and who controls it, an expandable "what it does" with its benefit,
+cost, and how to change it in `kit.json`, and the live evidence behind the state: which picker a
+`hooks route` probe reported, MCP calls audited and refused in the last 24 hours (zero on ruflo
+≤ 3.44.0, which does not yet enforce the policy on stdio launches; see
+[ADR-0058](adr/0058-managed-ruflo-components.md)), whether the
+learning engine is loaded, or the funnel's deciding source. The panel header repeats the same
+count and ruflo version `ak status` reports, so the two never disagree. Encryption at rest shows
+as `not yet managed` (ADR-0059) and is not part of that count. With ruflo not installed, the panel
+says so instead of showing cards.
+
+The panel reads a cache-only `GET /api/ruflo-components` route — the dashboard never probes ruflo
+itself. Run `ak status --refresh` (or `ak sync`) to collect fresh evidence, then reload the panel.
+The dashboard stays read-only here too: a card names the `kit.json` change or command instead of
+offering a control to act with.
 
 ### Why project counts differ between tabs
 

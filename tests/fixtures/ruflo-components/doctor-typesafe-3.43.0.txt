@@ -1,0 +1,7 @@
+RuFlo Doctor
+System diagnostics and health check
+──────────────────────────────────────────────────
+... Running health checks in parallel...                                              ✓ @ruvector/typesafe router: Not installed; disabled (set CLAUDE_FLOW_ROUTER_TYPESAFE=1) — hooks_route uses the built-in router
+──────────────────────────────────────────────────
+Summary: 1 passed
+All checks passed! System is healthy.

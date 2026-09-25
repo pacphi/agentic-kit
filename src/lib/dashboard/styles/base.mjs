@@ -416,4 +416,39 @@ body.gated .band,body.gated .tabbar,body.gated main{display:none}
 .spark-svg{width:100%; overflow-x:auto}
 .spark-svg svg{display:block; width:100%; height:auto}
 
+/* ── ruflo components panel (ADR-0058), Overview > Runtime ── */
+.rc-panel{margin-bottom:20px}
+.rc-head{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:12px}
+.rc-head h3{margin:0; font-size:14px; font-weight:700; color:var(--ink)}
+.rc-head span{color:var(--ink-dim); font-size:12px}
+.rc-grid{display:grid; gap:14px; grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
+.rc-card{
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--r);
+  padding:15px 16px 14px; display:flex; flex-direction:column; gap:8px;
+}
+.rc-card header{display:flex; align-items:center; gap:9px; justify-content:space-between}
+.rc-card h3{margin:0; font-size:13.5px; font-weight:600; color:var(--ink); letter-spacing:-.008em}
+.rc-badge{
+  display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:600;
+  color:var(--ink-2); white-space:nowrap;
+}
+.rc-meaning{margin:0; font-size:12.5px; color:var(--ink-2); line-height:1.5}
+.rc-action{display:inline-block; margin-left:2px; color:var(--accent); font-weight:500}
+.rc-value{margin:0; font-size:11.5px; color:var(--ink-dim)}
+.rc-value b{color:var(--ink-2); font-weight:600}
+.rc-card details{font-size:12px; color:var(--ink-2)}
+.rc-card summary{cursor:pointer; color:var(--accent); font-size:11.5px; font-weight:600; margin-bottom:4px}
+.rc-card details p{margin:4px 0}
+.rc-options{list-style:none; margin:6px 0 0; padding:0; display:flex; flex-direction:column; gap:3px}
+.rc-options li{font-size:11.5px; color:var(--ink-dim)}
+.rc-options li.rc-current{color:var(--ink); background:var(--accent-soft); border-radius:6px; padding:1px 6px; margin:0 -6px}
+.rc-evidence{
+  margin-top:2px; padding-top:8px; border-top:1px solid var(--line);
+  font-size:11px; color:var(--ink-dim); line-height:1.5;
+}
+.rc-evidence code{font-family:var(--mono); color:var(--ink-2)}
+.rc-link{color:var(--accent); font-size:11.5px; font-weight:600; text-decoration:none}
+.rc-link:hover{text-decoration:underline}
+.rc-link:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+
 `;

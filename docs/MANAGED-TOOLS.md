@@ -106,6 +106,73 @@ are separate facts. Existing compatible packages stay external; incompatible ext
 are preserved. Normal detection never runs `agent-browser doctor` or launches Chrome. Package
 removal is receipt-gated, while browser/session/profile data is always preserved.
 
+## Managed ruflo components
+
+[ADR-0058](adr/0058-managed-ruflo-components.md) applies the same ownership discipline to a set of
+opt-in ruflo capabilities that ship off by default: two agent pickers, MCP tool governance, the
+learning profile, MetaHarness turn-credit, a memory durability fix, and ruflo's promotional
+funnel. `ak setup` and `ak sync` apply the managed value for each component the installed ruflo
+version supports; `ak status` reports the real state, never a bare label.
+
+| Component | Managed value | Minimum ruflo | Applied by |
+| --- | --- | --- | --- |
+| Typesafe agent picker | on | 3.43.0 | global `@ruvector/typesafe` package + `CLAUDE_FLOW_ROUTER_TYPESAFE=1` |
+| MiniLM agent picker | on | 3.44.0 | `CLAUDE_FLOW_ROUTER_EMBEDDER=minilm` |
+| MCP tool governance | on; 120 calls/min, audit on | 3.42.0 | project `.harness/mcp-policy.json` + project-scoped `RUFLO_MCP_ENFORCE_POLICY=1` (not yet enforced on stdio launches by ruflo ≤ 3.44.0) |
+| Learning profile | `balanced` | 3.42.1 | `RUFLO_INTELLIGENCE_MODE=balanced` |
+| MetaHarness turn-credit | on | 3.36.0 | nothing to apply; ak confirms ruflo's bundled dependency resolves |
+| Memory durability fix (#2887) | on | 3.36.0 | nothing to apply; ak confirms `@claude-flow/memory` ≥ 3.0.0-alpha.22 |
+| Ruflo funnel (promotions) | off | any ruflo with `ruflo funnel` | `ruflo funnel disable` |
+| Encryption at rest | — | — | not managed yet; waits on ADR-0059 and is left out of the "N of M active" count |
+
+Opt out of any component in `kit.json`:
+
+```json
+{ "rufloComponents": { "minilmPicker": false, "learningProfile": "edge", "funnel": true } }
+```
+
+`false` means "ak does not manage this component" — the next `ak sync` restores, by receipt,
+whatever value existed before ak changed it; until it runs, `ak status` shows the component as
+`not applied` with that sync as its fix. `funnel` is inverted: `true` means "leave ruflo's funnel
+alone" (ak's managed value is off), and the next `ak sync` re-enables the funnel if ak was the one
+that disabled it. Turning `typesafePicker` off removes its environment variable but keeps the
+`@ruvector/typesafe` package; only `ak uninstall --purge` removes a package ak installed.
+
+A value ak did not write is never overwritten: a variable you set yourself, or one of ak's values
+you changed afterwards, is reported `user-managed` and kept, and ak still applies the other
+components in the same settings file. If you delete a value ak set, `ak status` reports it
+`drifted` and the next `ak sync` puts it back.
+
+The governance policy file is enforced only when it carries ak's own `_about` marker; a
+project's own pre-existing `.harness/mcp-policy.json` is left alone and reported `user-managed`.
+Ruflo 3.44.0 and earlier do not apply the policy on the stdio MCP launches Claude Code, Codex and
+OpenCode use (ADR-0058 upstream request 6): ak writes the file and the variable so they are ready
+when ruflo wires enforcement, and the component reports `unknown` until then, because no audit
+records appear.
+
+Every state `ak status`, `ak setup`, and the dashboard show carries its meaning and, where one
+applies, the fix:
+
+| State | Meaning | Action |
+| --- | --- | --- |
+| `active` | Applied and confirmed by ruflo's own evidence. | none |
+| `applied, not verified` | Set, but not yet confirmed — usually the hosts have not restarted. | restart Claude Code, Codex and OpenCode |
+| `needs ruflo ≥ X` | The installed ruflo is too old for this component. | `ak sync` upgrades ruflo |
+| `not applied` | ak has not applied the managed value yet. | `ak sync` |
+| `drifted` | A value ak set was removed. | `ak sync` restores it, or set the component to `false` to leave it out |
+| `user-managed` | You set your own value or opted out; ak reports it and leaves it alone. | none |
+| `partial` | Applied for some hosts only; the ones missing are named. | shown per host |
+| `blocked` | Applying failed; the reason is shown. | the specific next step |
+| `not yet managed` | ak does not manage this yet (encryption at rest, ADR-0059). | none |
+| `unknown` | No current evidence, so ak does not claim the component is on. | `ak status --refresh` |
+
+Restart Claude Code, Codex and OpenCode after a setup or sync that changes any component —
+hosts read their environment at start-up, so a component stays `applied, not verified` until a
+new session and ruflo's own check confirm it. See
+[Ruflo components](adr/0058-managed-ruflo-components.md) for the full design, and
+[Troubleshooting](TROUBLESHOOTING.md) for governance that stays `unknown` and stuck
+`applied, not verified` rows.
+
 ## Where each piece lives
 
 - **npm tools** — `src/lib/versions.mjs` (`installedVersion`, `driftReport`,
@@ -117,6 +184,11 @@ removal is receipt-gated, while browser/session/profile data is always preserved
 - **agent-browser** — `src/lib/agent-browser.mjs` (Node-aware exact version,
   native verification, trusted MCP config, receipt-gated teardown); lifecycle
   rationale in [ADR-0043](adr/0043-managed-ruflo-browser-executor.md).
+- **ruflo components** — `src/lib/ruflo-components/` (catalogue, states, `kit.json` intent,
+  the owned Claude/Codex/OpenCode environment projection, the governance policy file, evidence
+  collection and classification, apply/reconcile, uninstall teardown); surfaced in
+  `src/commands/status/sections/ruflo-components.mjs` and the dashboard's Overview > Runtime
+  panel; design in [ADR-0058](adr/0058-managed-ruflo-components.md).
 - **ruvnet-brain** — `src/lib/ruvnet-brain.mjs` (`installedReleaseOnDisk`,
   `latestVersion`, `classifyDrift`, `drift`, nightly-agent detection), heals
   `installRuvnetBrain` / `disableRuvnetBrainNightly`. Full background on its

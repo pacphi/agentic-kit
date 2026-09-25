@@ -72,6 +72,22 @@ Use `--no-agent-browser` to disable the component. Restart or reconnect Claude,
 Codex, and OpenCode after setup so their stdio MCP process receives the new
 environment.
 
+### Ruflo components
+
+Machine setup also applies [ADR-0058's managed ruflo components](MANAGED-TOOLS.md#managed-ruflo-components):
+the typesafe and MiniLM agent pickers, the learning profile, and the funnel toggle. Project setup
+additionally applies MCP tool governance, which needs a project root for its policy file. Each is
+skipped when the installed ruflo predates its minimum version, and any component can be turned off
+with `rufloComponents` in `kit.json`.
+
+The setup trust manifest's "Managed ruflo components" group discloses each applicable change
+before setup runs: the exact environment variable or file it will set, one line of benefit and
+cost, and the `kit.json` opt-out. After changes, machine and project setup both print a results
+table (component, state, meaning), any step that failed, and, if anything changed, a reminder to
+restart Claude Code, Codex and OpenCode — hosts read their environment at start-up, so a
+component stays `applied, not verified` until the next session and ruflo's own check confirm it. `ak status --refresh` re-checks without a restart
+once the hosts are back up.
+
 ### Optional deja-vu companion
 
 deja-vu is disabled unless setup receives `--with-deja-vu`. The default opted-in

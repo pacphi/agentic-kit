@@ -1,0 +1,3 @@
+| SONA Coordinator    | Active     | Adaptation: 0.97μs avg           |
+| SONA Engine         | Not loaded | Optional, enable with --sona     |
+| ReasoningBank       | Active     | 13586 patterns stored            |

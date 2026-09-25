@@ -1,0 +1,4 @@
+Funnel: disabled (decided by: user-config)
+Disclosure: disclosed_disabled
+State dir: /Users/example/.ruflo
+Consents: none recorded

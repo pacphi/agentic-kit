@@ -407,4 +407,85 @@ test('printReportLine routes each level to its own output function (ok/warn/fail
   assert.match(infoOut, /ℹ.*fyi/);
 });
 
+// Controller ruling: every ruflo-components teardown failure must gate
+// ownershipTeardownOk exactly like every other uninstall step that can fail
+// to release what it owns (agent-browser, opencode, deja-vu, ...).
+test('a ruflo component env conflict blocks ownership teardown so a purge must not delete kit.json', async () => {
+  seedHome();
+  const settingsFile = paths.claudeSettingsPath();
+  fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
+  // A receipt claims ak set CLAUDE_FLOW_ROUTER_TYPESAFE=1, but the file on disk
+  // now carries a different, user-edited value — planOwnedEnv preserves it and
+  // keeps the receipt entry (a 'user-edited' conflict), so the release is
+  // incomplete and nothing is silently overwritten.
+  fs.writeFileSync(settingsFile, JSON.stringify({ env: { CLAUDE_FLOW_ROUTER_TYPESAFE: 'user-edited' } }, null, 2) + '\n');
+  fs.writeFileSync(`${settingsFile}.agentic-kit-ruflo-components.json`, JSON.stringify({
+    version: 2, pending: false,
+    keys: { CLAUDE_FLOW_ROUTER_TYPESAFE: { before: { present: false }, after: { present: true, value: '1' } } },
+  }) + '\n');
+  const { result, out } = await captureLog(() => uninstall.run({ flags: { yes: true, purge: true } }));
+  assert.equal(result, 1, out);
+  assert.match(out, /ruflo component env:/);
+  assert.ok(fs.existsSync(paths.kitConfigPath()),
+    'kit.json must survive a purge when ruflo-components teardown could not release an owned, user-edited value');
+});
+
+// ADR-0058 §1 "ak uninstall undoes every receipted change" (final review I2): governance
+// applied in two projects is released in BOTH — policy file, project env key, memory pin
+// and their receipt sidecars — even when uninstall runs from neither.
+test('uninstall releases every receipted project, not only the cwd project', async () => {
+  seedHome();
+  const { reconcilePolicy } = await import('../../src/lib/ruflo-components/policy.mjs');
+  const { reconcileClaudeComponentEnv, reconcileMemoryPin } = await import('../../src/lib/claude-env-projection.mjs');
+  const { recordProjectReceipts } = await import('../../src/lib/ruflo-components/apply.mjs');
+  const cfg = {
+    aqe: true,
+    integrations: { hosts: { claude: true }, ownership: { rufloComponents: { policies: {} } } },
+    rufloComponents: { mcpGovernance: { maxCallsPerMinute: 120 } },
+  };
+  const projects = ['a', 'b'].map((name) => {
+    const root = sandboxProject(`ak-uninstall-rc-${name}`);
+    fs.mkdirSync(path.join(root, '.claude-flow'), { recursive: true });
+    reconcilePolicy(root, cfg.rufloComponents.mcpGovernance, cfg.integrations.ownership.rufloComponents.policies);
+    assert.equal(reconcileClaudeComponentEnv(cfg, { projectRoot: root, rufloVersion: '3.44.0', userScope: false }).changed, true);
+    assert.equal(reconcileMemoryPin(root, { enabled: true }).ok, true);
+    recordProjectReceipts(cfg, root);
+    return root;
+  });
+  writeKitConfig(HOME, cfg);
+  const elsewhere = sandboxProject('ak-uninstall-rc-elsewhere');
+  const prior = process.cwd();
+  process.chdir(elsewhere);
+  let run;
+  try {
+    run = await captureLog(() => uninstall.run({ flags: { yes: true } }));
+  } finally { process.chdir(prior); }
+  for (const root of projects) {
+    const local = paths.projectSettingsLocal(root);
+    const env = fs.existsSync(local) ? JSON.parse(fs.readFileSync(local, 'utf8')).env ?? {} : {};
+    assert.equal(env.RUFLO_MCP_ENFORCE_POLICY, undefined, `${root}: enforcement left behind\n${run.out}`);
+    assert.equal(env.CLAUDE_FLOW_DB_PATH, undefined, `${root}: memory pin left behind`);
+    assert.equal(fs.existsSync(path.join(root, '.harness', 'mcp-policy.json')), false);
+    const sidecars = fs.readdirSync(path.dirname(local)).filter((f) => f.includes('.agentic-kit-'));
+    assert.deepEqual(sidecars, [], `${root}: receipt sidecars left behind`);
+  }
+  rmrf(...projects, elsewhere);
+});
+
+// Final review M2: --purge deletes kit.json, the only record that ak installed the
+// typesafe package, so a failed package removal must keep it and fail the run.
+test('a failed typesafe package removal keeps kit.json under --purge', async () => {
+  seedHome();
+  writeKitConfig(HOME, {
+    aqe: true,
+    integrations: { ownership: { rufloComponents: {
+      typesafePackage: { owner: 'agentic-kit', package: '@ruvector/typesafe', version: '0.1.0' },
+    } } },
+  });
+  const { result, out } = await captureLog(() => uninstall.run({ flags: { yes: true, purge: true } }));
+  assert.equal(result, 1, out);
+  assert.match(out, /typesafe: npm uninstall failed/);
+  assert.ok(fs.existsSync(paths.kitConfigPath()), 'kit.json holds the only typesafe receipt');
+});
+
 test.after(() => rmrf(HOME));

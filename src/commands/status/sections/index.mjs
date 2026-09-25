@@ -13,6 +13,7 @@ import context from './context.mjs';
 import versions from './versions.mjs';
 import ruvnetBrain from './ruvnet-brain.mjs';
 import ruvector from './ruvector.mjs';
+import rufloComponents from './ruflo-components.mjs';
 import self from './self.mjs';
 import natives from './natives.mjs';
 import memoryPin from './memory-pin.mjs';
@@ -44,7 +45,7 @@ import qeCourt from './qe-court.mjs';
 // Everything up to and including codex-plugins — before the deja-vu /
 // host-detail / admitted-lifecycle calls that collect() makes directly.
 export const SECTIONS_BEFORE_HOST_DETAIL = [
-  models, versions, ruvnetBrain, ruvector, self, natives, memoryPin,
+  models, versions, ruvnetBrain, ruvector, rufloComponents, self, natives, memoryPin,
   projectMemory, scaffoldAgents, npx, security, learning, aqe, agentdb, agentBrowser, mcp,
   codexMcp, codexPlugins, hostAlignment,
 ];

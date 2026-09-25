@@ -19,6 +19,8 @@ import { companionLifecycleFor } from '../lib/adapters/companion-lifecycle-regis
 import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
+import { reconcileRufloComponents } from '../lib/ruflo-components/apply.mjs';
+import { RESTART_REMINDER } from './status/sections/ruflo-components.mjs';
 import { HOSTS, commandHosts, hostInstallState, hostExecutable, installHost, convergeProviderStack, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
 import { driftReport, selfDrift } from '../lib/versions.mjs';
 import { drift as ruvnetBrainDrift } from '../lib/ruvnet-brain.mjs';
@@ -198,6 +200,22 @@ export const SYNC_STEPS = [
       for (const d of await driftReport()) {
         if (d.outdated || !d.installed) await ctx.step(`upgrade ${d.pkg}`, () => heal.upgradePackage(d.pkg, hostUpgradeOptions(d.pkg)));
       }
+    },
+  },
+  // ADR-0058: runs immediately after `versions` so a `needs ruflo >= X`
+  // component can apply in the SAME sync that just upgraded ruflo, rather
+  // than waiting one more sync cycle behind it.
+  {
+    id: 'ruflo-components',
+    when: (subs) => subs.has('ruflo-components'),
+    run: async (ctx) => {
+      const result = await ctx.step('ruflo components', async () => {
+        const r = await reconcileRufloComponents(ctx.cfg, { cwd: ctx.cwd, refresh: true });
+        return { ok: r.ok, detail: r.results.map((x) => `${x.id}: ${x.detail}`).join('; '), snapshot: r.snapshot, changed: r.changed };
+      });
+      saveKitConfig(ctx.cfg);
+      if (result?.changed) info(RESTART_REMINDER);
+      return result;
     },
   },
   // ruvnet-brain: install if absent / re-run installer to pull latest when
@@ -540,7 +558,13 @@ export async function run({
     // Model lifecycle actions are explicit advisory commands. `ak status` must
     // name them, but sync neither refreshes catalogs nor applies model plans.
     .filter((r) => r.subsystem !== 'models')
-    .filter((r) => !(flags['no-upgrade'] && ['versions', 'self', 'ruvnet-brain', 'ruvector'].includes(r.subsystem)));
+    .filter((r) => !(flags['no-upgrade'] && ['versions', 'self', 'ruvnet-brain', 'ruvector'].includes(r.subsystem)))
+    // A ruflo-components row asking for a ruflo UPGRADE (state 'needs-ruflo') gets the
+    // same --no-upgrade treatment as 'versions': the component can't actually apply
+    // without the upgrade --no-upgrade just withheld, so planning it would report
+    // an action sync cannot complete this run. Other ruflo-components fixes
+    // (not-applied/drifted/blocked) don't need an upgrade and stay in the plan.
+    .filter((r) => !(flags['no-upgrade'] && r.subsystem === 'ruflo-components' && r.state === 'needs-ruflo'));
 
   const cfg = loadKitConfig();
   if (cfg.aqe !== false && cfg.aqeEmbedding && cfg.aqeEmbedding.mode !== 'unmanaged') {

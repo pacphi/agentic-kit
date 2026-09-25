@@ -76,18 +76,38 @@ function managedPluginStatus({
   };
 }
 
+const HOOKS_COMPONENT_ENV_PLACEHOLDER = '/* AK_RUFLO_COMPONENT_ENV */ {}';
+
+/** Bakes the machine ruflo-component env (+ the AK_RUFLO_GOVERNANCE marker,
+ *  both from ADR-0058) into the deployed hooks plugin's source, the same way
+ *  gatewayDesiredText bakes the managed MCP entries into the lazy gateway:
+ *  runHook spawns the hook-handler with no MCP round-trip, so nothing else
+ *  gets that environment to the process at runtime. The placeholder is
+ *  OPTIONAL here (unlike the gateway's three mandatory placeholders) so a
+ *  template/fixture without it — including every synthetic template used by
+ *  existing tests — still deploys unchanged. */
+function hooksDesiredText(pkgRoot, componentEnv = {}) {
+  const template = pluginTemplate(pkgRoot);
+  if (!fs.existsSync(template)) return null;
+  const source = fs.readFileSync(template, 'utf8');
+  if (!source.includes(HOOKS_COMPONENT_ENV_PLACEHOLDER)) return source;
+  return source.replace(HOOKS_COMPONENT_ENV_PLACEHOLDER, JSON.stringify(componentEnv ?? {}));
+}
+
 /** Deploy the lifecycle bridge plugin from the kit's template, content-diffed
  *  (rewrites only when the template changed — hash-stamped by content itself).
  *  A destination file that exists WITHOUT the ak marker is user-owned:
  *  preserved and reported, never overwritten.
- *  @param {{ pkgRoot: string, pluginsDir?: string, dryRun?: boolean, receipt?:string|null, adoptionBlocked?:boolean }} opts */
+ *  @param {{ pkgRoot: string, pluginsDir?: string, dryRun?: boolean, receipt?:string|null,
+ *            adoptionBlocked?:boolean, componentEnv?: Record<string, string> }} opts */
 export function deployPlugin({
   pkgRoot, pluginsDir = paths.opencodePluginsDir(), dryRun = false, receipt = null,
-  adoptionBlocked = false,
+  adoptionBlocked = false, componentEnv = {},
 }) {
   return deployManagedPlugin({
     template: pluginTemplate(pkgRoot), marker: PLUGIN_MARKER, name: PLUGIN_NAME,
     label: 'lifecycle plugin', pluginsDir, dryRun, receipt, adoptionBlocked,
+    desiredText: hooksDesiredText(pkgRoot, componentEnv),
   });
 }
 
@@ -152,13 +172,16 @@ export function retireGatewayPlugin({
 
 /** Plugin presence/currency against the kit template. `foreign` flags a
  *  user-owned file occupying the destination (status must not nag to
- *  overwrite it — deploy will leave it alone). */
+ *  overwrite it — deploy will leave it alone).
+ *  @param {{ pkgRoot: string, pluginsDir?: string, receipt?:string|null,
+ *            adoptionBlocked?:boolean, componentEnv?: Record<string, string> }} opts */
 export function pluginStatus({
   pkgRoot, pluginsDir = paths.opencodePluginsDir(), receipt = null, adoptionBlocked = false,
+  componentEnv = {},
 }) {
   return managedPluginStatus({
     template: pluginTemplate(pkgRoot), marker: PLUGIN_MARKER, name: PLUGIN_NAME,
-    pluginsDir, receipt, adoptionBlocked,
+    pluginsDir, receipt, adoptionBlocked, desiredText: hooksDesiredText(pkgRoot, componentEnv),
   });
 }
 

@@ -40,6 +40,7 @@ container for you. See [docs/DEVCONTAINERS.md](https://github.com/pacphi/agentic
 - **Local transcript recall (optional):** [deja-vu](docs/DEJA-VU.md) indexes coding-agent histories for MCP search or host-native automatic recall. It is off by default because the derived plaintext index has its own privacy and retention boundary.
 - **Multi-host execution (optional):** Claude, Codex, and opt-in OpenCode can share one activity policy; `ak run` is the canonical executor, while `ak setup --codex` enables the subscription-backed Claude/Codex defaults.
 - **Self-healing:** `ak sync` re-converges after every upgrade; `ak status` and a local dashboard report observed state and explicit evidence gaps.
+- **Managed ruflo components:** ak applies and reports ruflo's opt-in agent pickers, MCP tool governance, learning profile, and promotional funnel — see [Managed ruflo components](docs/MANAGED-TOOLS.md#managed-ruflo-components).
 - **Scoped verification:** `ak x verify` exercises named paths against real CLIs and reports
   their results. Registration, configuration, and one passing probe do not establish
   every capability or every running session.

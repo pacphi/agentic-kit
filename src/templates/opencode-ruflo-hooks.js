@@ -31,6 +31,14 @@ const TRIVIAL_PROMPT = /^(yes|y|ok|k|sure|continue|go ahead|proceed|lgtm|next)[.
 const TOOL_LOOP_THRESHOLD = 3
 const TOOL_LOOP_SESSION_LIMIT = 256
 
+// Baked in by `ak sync` from the machine's managed ruflo-component config
+// (ADR-0058) the same way the lazy gateway bakes AK_MANAGED_MCP_ENTRIES —
+// runHook spawns the hook-handler with no MCP round-trip, so it never
+// inherits the claude-flow MCP entry's environment on its own; this is how
+// AK_RUFLO_GOVERNANCE and the machine keys actually reach that process.
+// Empty in this unsubstituted source file.
+const RUFLO_COMPONENT_ENV = Object.freeze(/* AK_RUFLO_COMPONENT_ENV */ {})
+
 function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`
   if (value && typeof value === "object") {
@@ -132,12 +140,64 @@ function resolveHookHandler() {
 
 const HANDLER = resolveHookHandler()
 
+// Mirrors src/lib/ruflo-components/policy.mjs readPolicy's file-safety checks
+// exactly (a regular, non-symlinked file no larger than 1 MiB that parses to
+// one plain JSON object), plus a provenance check: a foreign .harness/mcp-
+// policy.json (e.g. one a MetaHarness-generated project ships with its own
+// maxToolCallsPerTurn) must never silently cap ruflo's MCP server — only a
+// file ak itself wrote (renderPolicy's `_about` stamp) counts.
+function validAkPolicy(directory) {
+  try {
+    const file = path.join(directory, ".harness", "mcp-policy.json")
+    const stat = fs.lstatSync(file)
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1024 * 1024) return false
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"))
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return false
+    return typeof parsed._about === "string" && parsed._about.startsWith("Managed by agentic-kit")
+  } catch { return false }
+}
+
+// ADR-0058 §5: ruflo's policy enforcer reads <directory>/.harness/mcp-policy.json
+// and FAILS CLOSED when it is missing or invalid under RUFLO_MCP_ENFORCE_POLICY=1
+// (when the enforcer is reachable; ruflo 3.44.0's stdio MCP entry points do not
+// reach it — ADR-0058 upstream request 6), so enforcement is projected only when the marker says governance is managed
+// AND this project actually has a valid, ak-authored policy file.
+function managedEnforcement(directory, env) {
+  if (env.AK_RUFLO_GOVERNANCE !== "managed") return {}
+  return validAkPolicy(directory) ? { RUFLO_MCP_ENFORCE_POLICY: "1" } : {}
+}
+
+// ak OWNS RUFLO_MCP_ENFORCE_POLICY whenever governance is managed: it sets
+// the key when the policy is valid, and otherwise actively clears any
+// inherited/stale value so ruflo never fails closed (or is capped by a
+// foreign policy) on a project whose ak-authored policy is missing or no
+// longer valid. When governance is not managed, an inherited value is the
+// user's own choice and is left untouched.
+//
+// NOTE: named to avoid an "apply"-prefixed export, mirroring the gateway
+// template — stock OpenCode's plugin loader treats a top-level export named
+// `applyXxx` as an additional plugin factory (see opencode-ruflo-gateway.js).
+// This helper is not exported here, but the name is kept consistent in case
+// that ever changes.
+function resolveEnforcedEnvironment(directory, env) {
+  const enforcement = managedEnforcement(directory, env)
+  const result = { ...env, ...enforcement }
+  if (env.AK_RUFLO_GOVERNANCE === "managed" && !("RUFLO_MCP_ENFORCE_POLICY" in enforcement)) {
+    delete result.RUFLO_MCP_ENFORCE_POLICY
+  }
+  return result
+}
+
 function projectHookEnv(directory, env = process.env) {
   const resolved = path.resolve(directory)
   let root = resolved
   try { root = fs.realpathSync(resolved) } catch { /* preserve the resolved path */ }
+  // The governance decision is made against the MERGED environment (baked
+  // machine component env + the caller's env, which wins on conflict) — a
+  // deployed copy's baked AK_RUFLO_GOVERNANCE marker must be seen even when
+  // callers (runHook) pass no explicit env of their own.
   return {
-    ...env,
+    ...resolveEnforcedEnvironment(root, { ...RUFLO_COMPONENT_ENV, ...env }),
     CLAUDE_FLOW_DB_PATH: path.join(root, ".swarm", "memory.db"),
   }
 }

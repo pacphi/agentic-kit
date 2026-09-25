@@ -379,3 +379,12 @@ streaming reader, and rollouts that still cannot be parsed are reported. Cache s
 Ollama provisioning, receipt-owned host environments and separate backend/corpus/
 storage evidence. Existing opt-outs survive upgrades and setup; semantic failures
 never become a silent hash fallback.
+
+## ADR-0058 — Managed ruflo components
+
+[ADR-0058](0058-managed-ruflo-components.md) (Accepted; implementation in progress) has ak turn on and
+report a catalogue of opt-in ruflo components: the typesafe and MiniLM agent pickers, MCP tool
+governance, the learning profile, turn-credit, the #2887 memory fix, and the funnel (off). Every
+state is shown with its meaning; settings reach Claude Code, Codex and OpenCode through one
+receipt-owned environment projection generalized from ADR-0055; `kit.json` `false` opts a
+component out.

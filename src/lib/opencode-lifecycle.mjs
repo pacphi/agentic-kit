@@ -9,6 +9,7 @@ import { registry, syncBlocks, blocksForTarget, retiredForTarget, guidanceTarget
 import {
   opencodeOwnership, mutableOpencodeOwnership, applyOpencode, undoOpencode,
   opencodeArtifactReceiptState, managedGatewayMcp, opencodeConverged, normalizeManaged,
+  rufloComponentEnvFor,
 } from './opencode-core.mjs';
 import { catalogSource, specialistDispatcherState, gatewayAgentCatalog, syncAgents, agentsStatus } from './opencode-agents.mjs';
 import {
@@ -63,7 +64,7 @@ function deployOpencodeArtifacts({ cfg, pkgRoot, source, receiptState, configFil
   const agentCatalog = dispatcher.available ? gatewayAgentCatalog(source) : [];
   const gatewayRequired = Object.keys(managedMcp).length > 0 || agentCatalog.length > 0;
   const plugin = deployPlugin({
-    pkgRoot, receipt: receipts.plugin, adoptionBlocked,
+    pkgRoot, receipt: receipts.plugin, adoptionBlocked, componentEnv: rufloComponentEnvFor(cfg),
     ...(pluginsDir ? { pluginsDir } : {}),
   });
   const gateway = gatewayRequired
@@ -212,6 +213,7 @@ export function createOpencodeLifecycleAdapter(defaults = {}) {
     const plugin = opts.pkgRoot
       ? pluginStatus({
           pkgRoot: opts.pkgRoot, receipt: receipts.plugin, adoptionBlocked,
+          componentEnv: rufloComponentEnvFor(cfg),
           ...(opts.pluginsDir ? { pluginsDir: opts.pluginsDir } : {}),
         })
       : { present: false, current: false, foreign: false, adoptable: false };

@@ -1,0 +1,4 @@
+... Running health checks in parallel...                                              ✓ MetaHarness (ADR-150): v0.4.2 — run `npx ruflo metaharness score` for the full scorecard
+✓ MetaHarness declared packages (ADR-150): 4 declared package(s) resolve: @metaharness/darwin, @metaharness/flywheel, @metaharness/radio, @metaharness/turn-credit
+✓ MetaHarness integration (ADR-150): plugin scripts intact, _similarity.mjs + parseMcpScanText load, smoke OK
+Summary: 3 passed
