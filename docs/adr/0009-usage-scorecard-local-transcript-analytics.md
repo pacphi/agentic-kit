@@ -2,6 +2,10 @@
 
 - **Status:** Implemented
 - **Date:** 2026-07-25
+- **Proposed amendment (2026-09-21):** [ADR-0057](0057-dashboard-taxonomy-role-lenses-and-metric-catalogue.md)
+  proposes renaming this scorecard "Summary" and moving its panels into Summary, Spend and
+  Practice views with a redirect and command alias. No metric arithmetic would change. Nothing in
+  this record is altered until that ADR is accepted and implemented.
 - **Updated:** 2026-09-20 — ADR-0054 adds an explicit, offline, allowlisted fleet export boundary;
   local analytics and dashboard collection semantics remain unchanged.
 - **Earlier update:** 2026-09-09 — reconciled against repository source and tests for issue #211

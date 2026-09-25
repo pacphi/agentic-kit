@@ -2,6 +2,10 @@
 
 - **Status:** Implemented
 - **Date:** 2026-09-20
+- **Proposed amendment (2026-09-21):** [ADR-0056](0056-delivery-outcome-metrics.md) proposes
+  snapshot schema version 2 with an optional `delivery` section of keyed daily counters, and
+  amends the statement that export does not inspect repositories for installations that opt in.
+  Version 1 stays valid and this record is unchanged until that ADR is accepted and implemented.
 - **Updated:** 2026-09-20 — snapshot export, admission, aggregation, CLI and documentation delivered;
   local regression/static/package gates passed on `feat/fleet-evidence-export`.
 

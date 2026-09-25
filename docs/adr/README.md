@@ -380,6 +380,21 @@ Ollama provisioning, receipt-owned host environments and separate backend/corpus
 storage evidence. Existing opt-outs survive upgrades and setup; semantic failures
 never become a silent hash fallback.
 
+## ADR-0056 — Delivery outcome metrics
+
+[ADR-0056](0056-delivery-outcome-metrics.md) (Proposed) adds window-aware outcome metrics in a
+new Delivery dashboard area: commits, lines, PRs, releases and CI across every project with a
+session. Local and GitHub tiers are separate opt-ins, `gh` is detected and never bundled, and
+fleet export moves to schema v2 with keyed daily counters.
+
+## ADR-0057 — Dashboard taxonomy and role lenses
+
+[ADR-0057](0057-dashboard-taxonomy-role-lenses-and-metric-catalogue.md) (Proposed) organizes the
+dashboard by question, with eight domains. It renames the Scorecard "Summary" and splits it into
+Summary, Spend and Practice, adds role lenses (manager, developer, finance, security, platform,
+architect) as reading preferences that never gate anything, and introduces a pure-data metric
+catalogue. Old links and the `ak usage score` command keep working.
+
 ## ADR-0058 — Managed ruflo components
 
 [ADR-0058](0058-managed-ruflo-components.md) (Accepted; implementation in progress) has ak turn on and
