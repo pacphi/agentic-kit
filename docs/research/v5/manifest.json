@@ -1,0 +1,158 @@
+{
+  "schemaVersion": "agentic-kit-v5-research-snapshot/v1",
+  "capturedAt": "2026-09-25",
+  "sourceCommit": "847486c61689f8499ada08f5b5684ecf26b22db8",
+  "taxonomySourceCommit": "7b9093ef3e6d4c0efb9453ee5e48532a2064e612",
+  "selfExcluded": true,
+  "validation": {
+    "files": 28,
+    "local_links_checked": 75,
+    "inline_scripts_checked": 29,
+    "standalone_frames_checked": 4,
+    "settings": 330,
+    "panels": 101,
+    "errors": []
+  },
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 4899,
+      "sha256": "fa897eb4eac6d74697c75f01a8652732df5a90dca9532a67f46b06090188fc19"
+    },
+    {
+      "path": "agentic-kit-v5-concept.html",
+      "bytes": 43817,
+      "sha256": "9ecaed146483cd51f480e342891f89886e3ee79d81ec251396545ea76a4048e1"
+    },
+    {
+      "path": "attention.json",
+      "bytes": 35408,
+      "sha256": "112c180679a7d61c25b31884776f694cece89475a9617b993784245a368dbbd1"
+    },
+    {
+      "path": "experience-contract.md",
+      "bytes": 22136,
+      "sha256": "7fd3a6632734cc23587706687fecef6c33e4343421a308777fad5b334080fc6e"
+    },
+    {
+      "path": "hosts.md",
+      "bytes": 21705,
+      "sha256": "f271dc2d054e9caae851b44dd48eb81200b9060533d12fec01fa75a93660665a"
+    },
+    {
+      "path": "implementation-audit.md",
+      "bytes": 38411,
+      "sha256": "9afc60ce49910f0caad793c8a2c9617b1bccf8f575ea0316797fb2c03832bb01"
+    },
+    {
+      "path": "lifecycle.json",
+      "bytes": 27756,
+      "sha256": "176b6122754f15c4d8b7180eeaf5f2ffd408f42913e0aab795731cb0b5759ac0"
+    },
+    {
+      "path": "management-workbench-before-grouping.html",
+      "bytes": 378328,
+      "sha256": "cc69fed439bca4d0ea65f3539cb6a347a21af34d8fa3477c2b5cc8273705acbe"
+    },
+    {
+      "path": "management-workbench.html",
+      "bytes": 403694,
+      "sha256": "2cb03aa19eddff7d44c343d0b1039aedf193bf9f2b15dd2c7c0e484e55e5d427"
+    },
+    {
+      "path": "meeting-evidence.md",
+      "bytes": 29674,
+      "sha256": "acdda1504b2c7f979657cdd494beb7b056484214b880c5e10d7dfc6e34c11a27"
+    },
+    {
+      "path": "packaging.md",
+      "bytes": 2347,
+      "sha256": "24a301b8f95c765655cb332fb965d245893fa49f33360701074c3ec8426cb0cc"
+    },
+    {
+      "path": "panel-map.md",
+      "bytes": 47407,
+      "sha256": "5b777d009f9c40e166fadd5bd15e3a15c8b076b2d2a93782629aa86adad0e582"
+    },
+    {
+      "path": "panels.json",
+      "bytes": 59817,
+      "sha256": "18ebbee1c135f0e23f53749b5717bd851baed964c9924fb744b055362a4f051c"
+    },
+    {
+      "path": "previews/agentic-kit-v5-concept.html",
+      "bytes": 120775,
+      "sha256": "c820ec4c9c408db142b6dcda71c4a8041229df2ede49394d717c1e72f74293e6"
+    },
+    {
+      "path": "previews/management-workbench-before-grouping.html",
+      "bytes": 598768,
+      "sha256": "e9036893e110d595d699791f1e08c1a21e6cff95802b46acf01613fc16dd0fbc"
+    },
+    {
+      "path": "previews/management-workbench.html",
+      "bytes": 632721,
+      "sha256": "dd9f7af21a2ba31091d3097741c97d07cb3a73c042b9b3d76e63e29a786d3777"
+    },
+    {
+      "path": "previews/role-workbench.html",
+      "bytes": 187622,
+      "sha256": "cd113b895075443e7c0a34392d2e92680a179e11256185a227c0384a9c13ced9"
+    },
+    {
+      "path": "report.html",
+      "bytes": 712022,
+      "sha256": "ca1916eabc9002d0158711dea620bda413c4f5fd3b5618544e786e2968c2e22e"
+    },
+    {
+      "path": "report.md",
+      "bytes": 56742,
+      "sha256": "b19bc9b1792351a6f24946e5faf8ab20b0833a5a939fc39a977289b4f8cfee54"
+    },
+    {
+      "path": "role-experience-review.md",
+      "bytes": 19484,
+      "sha256": "ce97192219b53d1dbd81f946b82a9f28173c853064b0745a8691dd021eeebb83"
+    },
+    {
+      "path": "role-workbench.html",
+      "bytes": 93569,
+      "sha256": "20ce42fc80f8a99dbedc678598d1dcfde5ea492f4eda05498b41bee047a6fbd7"
+    },
+    {
+      "path": "settings-audit.md",
+      "bytes": 10139,
+      "sha256": "03bacc14781a4aa3dcb5e5f996f3806cf6d684552611901f348ff7bc8347ac9d"
+    },
+    {
+      "path": "settings-organization.md",
+      "bytes": 11840,
+      "sha256": "3244e80a0ed9d5c75b40332b847d7d9e1342bea6e707dc2476d0b947ce02fed9"
+    },
+    {
+      "path": "settings-taxonomy.json",
+      "bytes": 57508,
+      "sha256": "389b4e6fff9545d42790c8a4a0a712413ebbf81ae9264151b1c34cb8d7391b24"
+    },
+    {
+      "path": "settings.json",
+      "bytes": 220987,
+      "sha256": "e1e70784e16e4e4d52d58a66a696ade6845ed24a511ab5efa7c43677a4dd0c29"
+    },
+    {
+      "path": "shared-management-design.md",
+      "bytes": 16217,
+      "sha256": "1d44a18ca7a4f8199033c0b387c660d45576e0542c36506ad03172376b08cbda"
+    },
+    {
+      "path": "taxonomy-economics.md",
+      "bytes": 28094,
+      "sha256": "56f3c0deaf2d35393cd027f2a3197efdb257708c23addf6ad86f0c61712f8a71"
+    },
+    {
+      "path": "verification.md",
+      "bytes": 11849,
+      "sha256": "53d186527f7455d0409cb6c4547927311a9a628041fefee7c75424dd6d6e6f93"
+    }
+  ]
+}
