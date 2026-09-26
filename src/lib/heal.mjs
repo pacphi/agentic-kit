@@ -12,7 +12,12 @@ import { rufloRoot, aqeRoot } from './paths.mjs';
 import { agentdbLocations, bsq3IsNative, bsq3Root, deriveBsq3Spec, selfSpecConflicts, rufloMemoryContexts, aidefencePresent } from './natives.mjs';
 import { KIT_PKG } from './versions.mjs';
 import { scanRvf, quarantine } from './rvf.mjs';
-import { INSTALL_SPEC, INSTALL_ARGS, RELEASE_ASSET as RB_RELEASE_ASSET, NIGHTLY_LABEL as RB_NIGHTLY_LABEL, nightlyAgentPlist as rbNightlyPlist, present as rbPresent, latestRelease as rbLatestRelease, recordInstalledRelease as rbRecord } from './ruvnet-brain.mjs';
+import {
+  INSTALL_SPEC, INSTALL_ARGS, UPDATE_ARGS as RB_UPDATE_ARGS, UPDATE_ENV as RB_UPDATE_ENV,
+  RELEASE_ASSET as RB_RELEASE_ASSET, NIGHTLY_LABEL as RB_NIGHTLY_LABEL, nightlyAgentPlist as rbNightlyPlist,
+  present as rbPresent, updaterPresent as rbUpdaterPresent, installedReleaseOnDisk as rbReleaseOnDisk,
+  latestRelease as rbLatestRelease, recordInstalledRelease as rbRecord,
+} from './ruvnet-brain.mjs';
 import { globalInstallArgs, installGlobalCli } from './npm-global-install.mjs';
 
 // NB: `--allow-scripts` is rejected for project-scoped installs (EALLOWSCRIPTS,
@@ -180,20 +185,42 @@ export async function selfUpdate(version, { runner = run } = {}) {
   };
 }
 
-/** Install (or update to latest) the RuvNet Brain via its npx installer.
- *  The installer is idempotent and skips the ~2 GB download when the KB is
- *  already present — pass force:true to bypass that skip (used when a drift
- *  check saw a newer release). Runs `--no-stack --no-enhance`: ak already
- *  manages ruflo/RuVector and owns the CLAUDE.md grounding block. */
+/** Refresh an existing Brain through the bundle's own updater. `--update`
+ *  ignores `--version`, so success is judged by the release on disk, never by
+ *  the tag ak asked about: a changed release is stamped; an unchanged one is
+ *  `degraded` (the updater ran, nothing landed) and stamps nothing. */
+async function refreshBrainWithUpdater({ runner, present, recordRelease, releaseOnDisk, tag }) {
+  const before = releaseOnDisk();
+  const r = await runner('npx', ['-y', INSTALL_SPEC, ...RB_UPDATE_ARGS],
+    { timeout: 900_000, env: { ...RB_UPDATE_ENV } });
+  if (r.code !== 0) return { ok: false, status: 'failed', usable: present(), detail: brainInstallFailure(r) };
+  const after = releaseOnDisk();
+  if (!after || after === before) {
+    return {
+      ok: false, status: 'degraded', usable: true,
+      detail: `updater ran; installed release still ${before ? `v${before}` : 'unknown'}${tag ? ` (latest v${tag})` : ''}`,
+    };
+  }
+  recordRelease(after);
+  return { ok: true, status: 'ok', usable: true, detail: `updated to release v${after}` };
+}
+
+/** Install (or refresh) the RuvNet Brain. The heal, not its caller, chooses the
+ *  path from what is on disk:
+ *   · the bundle ships kb/forge-update.mjs → `--update` (the installer's own
+ *     refresh; a forced fresh install is refused for a Brain with private stores,
+ *     after downloading the whole bundle — #237 §4);
+ *   · a present bundle without the updater → pinned `--force` reinstall, the
+ *     only refresh a pre-updater bundle can take;
+ *   · nothing installed → pinned fresh install.
+ *  Every path stamps only the release observed on disk (SOURCE.json releaseTag);
+ *  a pinned install of a pre-stamping bundle falls back to the pinned tag.
+ *  Runs `--no-stack --no-enhance`: ak already manages ruflo/RuVector and owns
+ *  the CLAUDE.md grounding block. */
 export async function installRuvnetBrain({
-  force = false, runner = run, latestRelease = rbLatestRelease,
-  present = rbPresent, recordRelease = rbRecord,
+  runner = run, latestRelease = rbLatestRelease, present = rbPresent,
+  recordRelease = rbRecord, updaterPresent = rbUpdaterPresent, releaseOnDisk = rbReleaseOnDisk,
 } = {}) {
-  // Resolve the release tag FIRST and pin the installer to it (--version v<tag>),
-  // so the bundle that lands on disk is exactly the release ak stamps — the old
-  // install-then-stamp order left a window where a release published mid-install
-  // made the stamp disagree with disk. Offline (tag null): the installer's own
-  // latest logic applies and the stamp is best-effort afterwards, as before.
   const release = await latestRelease();
   const tag = release?.version ?? null;
   // Do not launch the installer for a release that cannot possibly land. Its
@@ -206,36 +233,45 @@ export async function installRuvnetBrain({
       detail: `release v${tag} is missing ${RB_RELEASE_ASSET}; automatic update is blocked upstream and the existing Brain was left unchanged`,
     };
   }
+  if (updaterPresent()) return refreshBrainWithUpdater({ runner, present, recordRelease, releaseOnDisk, tag });
+  // Pin the installer to the resolved tag (--version v<tag>) so a release
+  // published mid-install cannot land something other than what was resolved.
+  const reinstall = present();
   const args = ['-y', INSTALL_SPEC, ...INSTALL_ARGS,
     ...(tag ? ['--version', `v${tag}`] : []),
-    ...(force ? ['--force'] : [])];
+    ...(reinstall ? ['--force'] : [])];
   const r = await runner('npx', args, { timeout: 900_000 });
-  if (r.code === 0) {
-    // Stamp the release-tag namespace so drift converges — the plugin's own
-    // semver never tracks the KB release, so we can't use it.
-    const stamped = tag ?? (await latestRelease())?.version ?? null;
-    if (stamped) recordRelease(stamped);
-    return {
-      ok: true, status: 'ok', usable: true,
-      detail: stamped ? `installed release v${stamped}` : 'installed (release tag unknown)',
-    };
+  if (r.code !== 0) {
+    // Presence after a non-zero exit can be a stale or partial prior install. It
+    // is useful evidence for `usable`, never proof that this install succeeded.
+    return { ok: false, status: 'failed', usable: present(), detail: brainInstallFailure(r) };
   }
-  // Presence after a non-zero exit can be a stale or partial prior install. It
-  // is useful evidence for `usable`, never proof that this install succeeded.
+  const stamped = releaseOnDisk() ?? tag;
+  if (stamped) recordRelease(stamped);
   return {
-    ok: false, status: 'failed', usable: present(),
-    detail: brainInstallFailure(r),
+    ok: true, status: 'ok', usable: true,
+    detail: stamped ? `installed release v${stamped}` : 'installed (release tag unknown)',
   };
 }
 
-/** Prefer the installer's causal error over its generic closing reassurance.
- *  Newer updater failures write the release-asset error to stdout while the
- *  final "Nothing is left half-installed" footer lands on stderr. */
+// ANSI SGR/escape stripper for installer output (ESC built via fromCharCode so
+// the regex stays clean under eslint no-control-regex).
+const BRAIN_ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[A-Za-z]`, 'g');
+const BRAIN_CAUSAL = /\[forge-update\]\s*ERROR:|install stopped:|can't update:|HTTP\s+\d{3}|no matching .*\.zip asset/i;
+// The installer's remediation line after a refusal ("Run npx ruvnet-brain
+// --update so …", "Fix: re-run the installer — npx ruvnet-brain …").
+const BRAIN_HINT = /^(?:Run|Fix:)\s.*\bnpx ruvnet-brain\b/i;
+
+/** Prefer the installer's causal error, plus its remediation hint, over its
+ *  generic closing reassurance. Newer updater failures write the release-asset
+ *  error to stdout while the final "Nothing is left half-installed" footer
+ *  lands on stderr. Terminal color codes never reach a status/sync detail. */
 export function brainInstallFailure(result) {
-  const lines = `${result?.stdout ?? ''}\n${result?.stderr ?? ''}`
+  const lines = `${result?.stdout ?? ''}\n${result?.stderr ?? ''}`.replace(BRAIN_ANSI, '')
     .split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const causal = lines.filter((line) => /\[forge-update\]\s*ERROR:|install stopped:|HTTP\s+\d{3}|no matching .*\.zip asset/i.test(line));
-  const chosen = causal.slice(-2).join(' | ') || lines.slice(-2).join(' ') || `exit ${result?.code ?? 1}`;
+  const causal = lines.filter((line) => BRAIN_CAUSAL.test(line)).slice(-2);
+  const hint = causal.length ? lines.filter((line) => BRAIN_HINT.test(line)).slice(-1) : [];
+  const chosen = [...causal, ...hint].join(' | ') || lines.slice(-2).join(' ') || `exit ${result?.code ?? 1}`;
   return chosen.slice(0, 320);
 }
 

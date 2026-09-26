@@ -14,12 +14,18 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  ensureNativeBsq3, healAqeSolver, healNatives, installRuvnetBrain,
+  brainInstallFailure, ensureNativeBsq3, healAqeSolver, healNatives, installRuvnetBrain,
 } from '../../src/lib/heal.mjs';
 import { bsq3IsNative } from '../../src/lib/natives.mjs';
 import { _setGlobalRootForTest } from '../../src/lib/paths.mjs';
 
 const BINDING = path.join('build', 'Release', 'better_sqlite3.node');
+
+// Every installRuvnetBrain test below must be blind to this machine's real
+// Brain: kbDir() honors RUVNET_BRAIN_KB at call time, so point it at an empty
+// directory for the whole file (a real KB has forge-update.mjs and SOURCE.json,
+// which would silently switch these tests onto the updater path).
+process.env.RUVNET_BRAIN_KB = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-heal-brain-kb-'));
 
 function writePkg(dir, { withBinding = false } = {}) {
   fs.mkdirSync(dir, { recursive: true });
@@ -366,6 +372,112 @@ test('brain installer failure selects the causal updater error across stdout and
   });
   assert.match(r.detail, /no matching \.zip asset/);
   assert.doesNotMatch(r.detail, /Nothing is left half-installed/);
+});
+
+// #237 §4/§C (B-deps D2): an existing install used to be refreshed with the
+// FRESH-install path plus --force, which the installer refuses for a Brain with
+// private stores — after downloading the whole bundle — on every sync. The
+// installed bundle ships its own updater (kb/forge-update.mjs); `--update` runs
+// it, and it is the installer's own precondition for that command.
+const brainCalls = () => {
+  const calls = [];
+  const runner = async (cmd, args, opts) => { calls.push({ cmd, args, opts }); return { code: 0, stdout: '', stderr: '' }; };
+  return { calls, runner };
+};
+const sequence = (...values) => () => (values.length > 1 ? values.shift() : values[0]);
+
+test('brain refresh of an existing install runs its updater, never a forced fresh install', async () => {
+  const { calls, runner } = brainCalls();
+  let stamped = null;
+  const r = await installRuvnetBrain({
+    runner,
+    latestRelease: async () => ({ version: '4.3.28', releaseAssetAvailable: true }),
+    present: () => true,
+    updaterPresent: () => true,
+    releaseOnDisk: sequence('4.3.22', '4.3.28'),
+    recordRelease: (v) => { stamped = v; },
+  });
+  assert.equal(calls.length, 1);
+  const { args, opts } = calls[0];
+  for (const flag of ['--update', '--no-nightly-prompt', '--no-telemetry']) assert.ok(args.includes(flag), flag);
+  assert.equal(args.includes('--force'), false, '--force is the fresh-install bypass, never an update');
+  assert.equal(args.includes('--version'), false, '--update ignores --version, so ak must not pretend to pin');
+  assert.equal(opts.env?.RUVNET_BRAIN_NO_UPDATE_FALLBACK, '1',
+    "the updater's own fallback is a fresh --force install that drops ak's opt-out flags");
+  assert.equal(r.ok, true);
+  assert.equal(r.status, 'ok');
+  assert.equal(stamped, '4.3.28', 'the stamp is the release observed on disk');
+  assert.match(r.detail, /v4\.3\.28/);
+});
+
+test('an updater that exits 0 without changing the release on disk is degraded and stamps nothing', async () => {
+  const { runner } = brainCalls();
+  let stamped = null;
+  const r = await installRuvnetBrain({
+    runner,
+    latestRelease: async () => ({ version: '4.3.28', releaseAssetAvailable: true }),
+    present: () => true,
+    updaterPresent: () => true,
+    releaseOnDisk: () => '4.3.22',
+    recordRelease: (v) => { stamped = v; },
+  });
+  assert.equal(r.ok, false, 'a no-op update must reach the convergence proof as unconverged');
+  assert.equal(r.status, 'degraded');
+  assert.equal(r.usable, true);
+  assert.equal(stamped, null);
+  assert.match(r.detail, /still v4\.3\.22/);
+});
+
+test('a fresh install stamps the release observed on disk, not the one requested', async () => {
+  const { calls, runner } = brainCalls();
+  let stamped = null;
+  await installRuvnetBrain({
+    runner,
+    latestRelease: async () => ({ version: '4.3.28', releaseAssetAvailable: true }),
+    present: () => false,
+    updaterPresent: () => false,
+    releaseOnDisk: () => '4.3.27', // what landed, read after the installer exits
+    recordRelease: (v) => { stamped = v; },
+  });
+  assert.equal(stamped, '4.3.27');
+  assert.equal(calls[0].args.includes('--force'), false, 'a first install needs no bypass');
+  assert.deepEqual(calls[0].args.slice(-2), ['--version', 'v4.3.28']);
+});
+
+test('a present bundle without an updater keeps the pinned forced reinstall', async () => {
+  const { calls, runner } = brainCalls();
+  await installRuvnetBrain({
+    runner,
+    latestRelease: async () => ({ version: '4.3.28', releaseAssetAvailable: true }),
+    present: () => true,
+    updaterPresent: () => false,
+    releaseOnDisk: () => '4.3.28',
+    recordRelease: () => {},
+  });
+  const { args } = calls[0];
+  assert.ok(args.includes('--force'), 'a pre-updater bundle can only be refreshed by reinstalling');
+  assert.ok(args.includes('--version') && args.includes('v4.3.28'));
+  assert.equal(args.includes('--update'), false);
+});
+
+test('brain failures drop ANSI color and keep the installer remediation hint', () => {
+  const esc = String.fromCharCode(27);
+  const detail = brainInstallFailure({
+    code: 1,
+    stdout: '',
+    stderr: [
+      '',
+      `${esc}[31m✗ install stopped:${esc}[0m fresh-install activation refused because this brain contains a private overlay`,
+      '',
+      `Run ${esc}[1mnpx ruvnet-brain --update${esc}[22m so the bundle updater preserves those private stores.`,
+      '',
+      "Nothing is left half-installed — fix the above and re-run the same command (it's safe to re-run).",
+    ].join('\n'),
+  });
+  assert.equal(detail.includes(esc), false, 'no terminal escape codes in a status/sync detail');
+  assert.match(detail, /install stopped: fresh-install activation refused/);
+  assert.match(detail, /npx ruvnet-brain --update/);
+  assert.doesNotMatch(detail, /Nothing is left half-installed/);
 });
 
 test('AQE solver: the unpublished native is never install-attempted and the TS fallback is reported as the implementation (#135)', async () => {

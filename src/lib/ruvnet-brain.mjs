@@ -32,6 +32,13 @@ export const RELEASE_ASSET = 'ruvnet-brain.zip';
  *  installer. ak owns brain updates (`ak sync`), so the self-updater must stay off. */
 export const INSTALL_SPEC = 'ruvnet-brain@latest';
 export const INSTALL_ARGS = ['--yes', '--no-stack', '--no-enhance', '--no-nightly-prompt', '--no-telemetry'];
+/** Refresh of an existing install. `--update` runs the bundle's own updater
+ *  (kb/forge-update.mjs: backup, verified apply, private stores preserved) and
+ *  dispatches before the installer reads `--version`, so it cannot be pinned.
+ *  The env disables the installer's fallback, a fresh `--force` install that
+ *  carries none of ak's opt-out flags (installer bin/install.mjs runUpdate). */
+export const UPDATE_ARGS = ['--update', '--no-nightly-prompt', '--no-telemetry'];
+export const UPDATE_ENV = Object.freeze({ RUVNET_BRAIN_NO_UPDATE_FALLBACK: '1' });
 
 /** The installer's nightly self-update LaunchAgent (macOS). Its label/path are the
  *  installer's own (`--enable-nightly` writes it; `--disable-nightly` removes it).
@@ -53,6 +60,13 @@ export function kbDir() {
 const pluginMarketplace = () =>
   path.join(claudeDir(), 'plugins', 'marketplaces', 'ruvnet-brain');
 const pluginCache = () => path.join(claudeDir(), 'plugins', 'cache', 'ruvnet-brain');
+
+/** Does the installed bundle ship its self-updater? The installer's `--update`
+ *  requires kb/forge-update.mjs and fails loudly without it, so this — not
+ *  present(), which the plugin cache alone satisfies — selects the update path. */
+export function updaterPresent() {
+  return fs.existsSync(path.join(kbDir(), 'forge-update.mjs'));
+}
 
 /** Installed? Mirrors the installer's own "alreadyInstalled" probe: the KB's
  *  forge-mcp-all.mjs entrypoint, or the user-scope plugin cache dir. */

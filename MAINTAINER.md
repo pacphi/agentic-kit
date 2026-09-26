@@ -147,9 +147,14 @@ installer; never `github:`, which runs the unreleased default-branch HEAD) insta
 user-scope Claude Code plugin (the `search_ruvnet` MCP + hooks + a skill). So it gets a
 *parallel* lifecycle in `src/lib/ruvnet-brain.mjs`: `present()` probes disk,
 `latestVersion()`/`drift()` hit the GitHub releases API (TTL-cached in kit.json like
-`selfDrift`). setup/sync install via `heal.installRuvnetBrain()`, which resolves the
-latest release tag FIRST and pins the installer to it (`--version v<tag>`), so the
-bundle on disk is exactly the release ak stamps — no install-then-stamp race.
+`selfDrift`). setup/sync go through `heal.installRuvnetBrain()`, which chooses the path
+from disk: when the KB ships its own updater (`kb/forge-update.mjs`) it runs
+`--update --no-nightly-prompt --no-telemetry` with `RUVNET_BRAIN_NO_UPDATE_FALLBACK=1`
+(the installer's fallback is a fresh `--force` install without ak's opt-out flags); a
+present bundle without the updater gets a `--version v<tag>`-pinned `--force` reinstall;
+nothing installed gets a pinned fresh install. `--update` ignores `--version`, so every
+path stamps only the release it then observes on disk (`SOURCE.json` → `releaseTag`); an
+update that exits 0 with the release unchanged is `degraded` and stamps nothing.
 Toggle with the `ruvnetBrain` kit.json flag / `--no-ruvnet-brain`.
 
 > **Installer flag gotcha — `--yes` accepts *every* optional offer.** Audited live on the

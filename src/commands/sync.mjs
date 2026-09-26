@@ -237,13 +237,14 @@ export const SYNC_STEPS = [
       return result;
     },
   },
-  // ruvnet-brain: install if absent / re-run installer to pull latest when
-  // drifted (force bypasses the installer's skip-if-present). Not an npm pkg, so
-  // it rides its own step rather than the driftReport loop above.
+  // ruvnet-brain: install if absent, else refresh when drifted. The heal picks
+  // the path from disk (the bundle's own updater when it ships one), so this
+  // step passes no mode. Not an npm pkg, so it rides its own step rather than
+  // the driftReport loop above.
   {
     id: 'ruvnet-brain',
     when: (subs, flags) => subs.has('ruvnet-brain') && !flags['no-upgrade'],
-    run: (ctx) => ctx.step('ruvnet-brain', () => heal.installRuvnetBrain({ force: true })),
+    run: (ctx) => ctx.step('ruvnet-brain', () => heal.installRuvnetBrain()),
   },
   // ruvector: an unmanaged global users wire up as an MCP server by hand. Only
   // ever UPGRADED — status emits no row (and so no plan entry) when it is absent,

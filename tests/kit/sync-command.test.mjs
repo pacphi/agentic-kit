@@ -486,6 +486,15 @@ test('a Ruflo version upgrade explicitly refreshes generated helpers before the 
   assert.equal(sync.SYNC_STEPS[helpers].when(new Set()), false);
 });
 
+// #237 §4: sync forced the fresh-install path onto every existing Brain. The
+// heal now chooses between the bundle's updater and an install from what is on
+// disk, so the step must not override that choice.
+test('the Brain sync step lets the heal choose update versus install', () => {
+  const brain = sync.SYNC_STEPS.find((step) => step.id === 'ruvnet-brain');
+  assert.ok(brain, 'sync keeps a Brain step');
+  assert.doesNotMatch(String(brain.run), /force/, 'no forced fresh install from sync');
+});
+
 // ── opencode convergence through a REAL sync ─────────────────────────────────
 // The maintainer's command-level scenarios: enabled+drifted converges after the
 // hosts step and before the final verification; enabled+absent never fabricates
