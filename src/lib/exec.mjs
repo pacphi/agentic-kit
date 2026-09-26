@@ -117,6 +117,20 @@ function killGroup(child) {
   try { child.kill('SIGKILL'); } catch { /* already reaped */ }
 }
 
+/** Kill a spawned child and everything it started. Shared by the MCP stdio
+ *  clients (discovery probe, tool calls) so their teardown cannot drift apart.
+ *  POSIX children must have been spawned `detached` so they lead their own
+ *  process group (killGroup, the same kill run()'s timeout path uses); Windows
+ *  uses `taskkill /T /F`, falling back to the direct child when taskkill
+ *  cannot start. Nothing is spawned without a pid, and an already-exited
+ *  process is not an error. run() keeps its own kill unchanged. */
+export function killProcessTree(child, { platform = process.platform, spawnFn = spawn } = {}) {
+  if (platform !== 'win32') { killGroup(child); return; }
+  if (typeof child.pid !== 'number' || child.pid <= 0) return;
+  const killer = spawnFn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', shell: false });
+  killer.on('error', () => { try { child.kill('SIGKILL'); } catch { /* already reaped */ } });
+}
+
 /** Accumulate one child stream, capped at `maxBuffer` — `execFile` applies its
  *  own cap internally, so the spawn-based path below has to reimplement it. */
 function captureStream(stream, encoding, maxBuffer, onOverflow) {

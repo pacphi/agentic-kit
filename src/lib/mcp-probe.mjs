@@ -1,7 +1,7 @@
 // Bounded MCP discovery against an explicit stdio invocation. No tool calls,
 // repository content, environment values, or stderr are returned in receipts.
 import { spawn } from 'node:child_process';
-import { resolveShim } from './exec.mjs';
+import { resolveShim, killProcessTree } from './exec.mjs';
 
 /** @param {{command:string,args?:string[],cwd?:string,env?:NodeJS.ProcessEnv,timeoutMs?:number}} options */
 export function probeMcp({ command, args = [], cwd, env = {}, timeoutMs = 30_000 }) {
@@ -29,12 +29,7 @@ export function probeMcp({ command, args = [], cwd, env = {}, timeoutMs = 30_000
       finished = true;
       clearTimeout(timer);
       // Kill the probe's owned group, including model workers it started.
-      if (process.platform !== 'win32' && child.pid) {
-        try { process.kill(-child.pid, 'SIGKILL'); } catch { /* already exited */ }
-      } else if (child.pid) {
-        const killer = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', shell: false });
-        killer.on('error', () => child.kill('SIGKILL'));
-      }
+      killProcessTree(child);
       const receipt = { status, initializedMs, elapsedMs: elapsed(), stderrBytes, ...extra };
       // Wait for pipe closure after terminating the owned child before reporting.
       // A bounded cleanup timeout is an explicit failure, never a ready receipt.
