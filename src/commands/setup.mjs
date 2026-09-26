@@ -10,7 +10,7 @@ import readline from 'node:readline/promises';
 import { run as runCmd, have } from '../lib/exec.mjs';
 import * as heal from '../lib/heal.mjs';
 import { manageCodexContext } from '../lib/codex-context.mjs';
-import { fixStatusline } from '../lib/statusline.mjs';
+import { fixStatusline, bakedVersionManualFix } from '../lib/statusline.mjs';
 import { reconcileGuidance } from '../lib/blocks.mjs';
 import { captureProjectGuidance, reconcileProjectGuidance } from '../lib/project-guidance.mjs';
 import {
@@ -714,6 +714,9 @@ function healProjectStatusline(root) {
   if (sl.applied) ok('statusline: footer injected');
   else if (sl.reason) warn(`statusline: ${sl.reason} — run \`ak sync\` to re-inject`);
   else ok('statusline: footer in sync');
+  if (sl.versionRepair === 'failed') {
+    warn(`statusline: shows Ruflo v${sl.versionAhead.baked}, installed v${sl.versionAhead.installed} — ${bakedVersionManualFix(sl.versionAhead.installed)}`);
+  }
 }
 
 export async function run_project({

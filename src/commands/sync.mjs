@@ -7,7 +7,7 @@ import readline from 'node:readline/promises';
 import { collect } from './status.mjs';
 import * as heal from '../lib/heal.mjs';
 import { have } from '../lib/exec.mjs';
-import { fixStatusline, helperStampStale, runHelperRefresh } from '../lib/statusline.mjs';
+import { fixStatusline, helperStampStale, runHelperRefresh, bakedVersionManualFix } from '../lib/statusline.mjs';
 import { reconcileGuidance } from '../lib/blocks.mjs';
 import {
   register as mcpRegister, applyExclusions, codexMcpTopology, codexMcpRepairPlan,
@@ -491,6 +491,13 @@ export const SYNC_STEPS = [
       const r = await withProgress('statusline', async () => fixStatusline(root));
       if (r.absent) info('statusline: no ruflo helpers here — nothing to patch');
       else (r.applied || !r.reason ? ok : warn)(`statusline: ${r.applied ? 'footer injected' : r.reason ?? 'in sync'}`);
+      // The baked Ruflo version is repaired only by Ruflo's own helper refresh
+      // (fixStatusline clears the stamp first); ak never writes a version.
+      const v = r.versionAhead;
+      if (r.versionRepair === 'repaired') ok(`statusline: Ruflo regenerated the helper; it no longer shows v${v.baked} (installed v${v.installed})`);
+      else if (r.versionRepair === 'failed') {
+        warn(`statusline: still shows Ruflo v${v.baked} (installed v${v.installed}) — ruflo's helper refresh did not regenerate it; ${bakedVersionManualFix(v.installed)}`);
+      }
       // Honest success: fixStatusline invokes ruflo's PRIVATE helper-refresh
       // internal, best-effort. If the stamp is STILL stale after the heal, that
       // refresh silently no-oped (e.g. upstream moved the dist module) and the

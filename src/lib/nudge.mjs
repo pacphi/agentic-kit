@@ -19,7 +19,7 @@ import { registry, syncBlocks, blocksForTarget, retiredForTarget, guidanceTarget
 import { loadKitConfig } from './config.mjs';
 import { bothHostsEnabled } from './providers.mjs';
 import { codexMcpStatus, rufloCodexMcpStatus } from './mcp.mjs';
-import { fixStatusline, helperStampStale } from './statusline.mjs';
+import { fixStatusline, helperStampStale, statuslineVersionAhead } from './statusline.mjs';
 
 /**
  * Probe the locally-rendered artifacts for drift.
@@ -71,6 +71,7 @@ export async function localDrift({ pkgRoot, cwd = process.cwd(), cfg, targets } 
       try { stampStale = helperStampStale(cwd); } catch { /* keep false */ }
       if (wouldChange) lines.push('statusline footer');
       else if (stampStale) lines.push('statusline helper stamp');
+      try { if (statuslineVersionAhead(cwd)) lines.push('statusline Ruflo version'); } catch { /* keep quiet */ }
     }
   } catch { /* best-effort */ }
 

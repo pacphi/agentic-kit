@@ -58,7 +58,7 @@ them.
 
 | Tool | Install / update spec | Update owner | Installed version read from | Drift compared against | status / statusline / dashboard |
 | --- | --- | --- | --- | --- | --- |
-| **ruflo** | npm `ruflo@latest` | `ak sync` | disk: global `package.json` | npm `view latest` (TTL-cached) | row ✓ / upstream's own `RuFlo V<x>` header ✓ / card + banner ✓ |
+| **ruflo** | npm `ruflo@latest` | `ak sync` | disk: global `package.json` | npm `view latest` (TTL-cached) | row ✓ / upstream's own `RuFlo V<x>` header ✓ (ak never writes it; status flags a baked version above the install) / card + banner ✓ |
 | **agent-browser** | exact npm `0.27.0` on Node 22/23; `0.27.3` on Node 24+ | `ak sync`, only when receipt-owned; compatible external installs are disowned | disk: global `package.json` plus package-owned native executable | Ruflo's `>=0.27.0 <0.28.0` contract, not npm latest | row ✓ / n/a / About + System ✓; generic update banner excluded |
 | **agentic-qe** | npm `agentic-qe@latest` | `ak sync` | disk: global `package.json` (project-local fallback) | npm `view latest` (TTL-cached) | row ✓ / `Agentic QE V<x>` chip ✓ / card + banner ✓ |
 | **hosts** (Claude, Codex, OpenCode; OpenCode routes explicitly through `ak run`) | npm `@latest` — only when npm-managed | `ak sync` if npm-installed; **explicitly disowned** if brew/mise/native | disk: global `package.json`, else `--version` probe | npm latest for npm-managed only; external → `outdated:false` | row ✓ (version + method) / n/a / card + banner (npm-managed only) ✓ |

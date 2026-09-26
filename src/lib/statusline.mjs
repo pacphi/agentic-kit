@@ -2,7 +2,9 @@
 //   (a) strip the legacy kit version-probe marker. The version itself is
 //       Ruflo's: its helper bakes `let ver` as a floor and shows the HIGHEST
 //       version it finds at render time (3.28+, #2221), so ak never writes it —
-//       a value ak wrote too high could never self-correct,
+//       a value ak wrote too high could never self-correct. A baked value above
+//       every install is repaired by clearing the helper stamp so Ruflo's own
+//       refresh regenerates the helper (refreshHelpersBeforeInjection),
 //   (b) inject/re-inject the kit's activation footer (ruflo-seg block),
 //   (c) legacy repoint: projects initialized under aqe <3.12.1 may still have
 //       settings.json statusLine aimed at the minimal statusline-v3.cjs.
@@ -13,7 +15,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { projectStatusline, projectSettings, rufloCliDist, rufloNodeModules } from './paths.mjs';
-import { cmpVersions } from './versions.mjs';
+import { installedVersion, cmpVersions } from './versions.mjs';
 import { readJson, writeJsonWithBackup } from './settings.mjs';
 
 const FOOTER_TEMPLATE = path.join(
@@ -199,20 +201,93 @@ export function runHelperRefresh(root = process.cwd(), { timeoutMs = 30_000 } = 
   } catch (error) { return error?.status === 3 ? 'current' : 'failed'; }
 }
 
+const BAKED_VERSION = /let (?:ver|pkgVersion) = (["'])(\d+\.\d+(?:\.\d+)?(?:-[\w.]+)?)\1/;
+
+/** The version Ruflo baked into the project helper (`let ver = "…"`), or null. */
+export function bakedStatuslineVersion(root = process.cwd()) {
+  try { return fs.readFileSync(projectStatusline(root), 'utf8').match(BAKED_VERSION)?.[2] ?? null; } catch { return null; }
+}
+
+/** Highest installed ruflo: the @claude-flow/cli version Ruflo bakes and stamps
+ *  with, and the ruflo package itself (versioned in lockstep). */
+function installedRufloCeiling() {
+  const found = [rufloCliVersion(), installedVersion('ruflo')].filter(Boolean);
+  return found.length ? found.reduce((a, b) => (cmpVersions(a, b) >= 0 ? a : b)) : null;
+}
+
+/** Ruflo's helper shows the HIGHEST of its baked `let ver` floor and every
+ *  install it finds at render time. A floor above everything installed (a test
+ *  fixture's fake 9.9.9 once leaked into a real project this way) therefore
+ *  pins the statusline to a version that is not installed, and nothing on the
+ *  render path lowers it. Returns `{ baked, installed }` in exactly that case,
+ *  else null. A higher runtime candidate (e.g. a marketplace checkout ahead of
+ *  the global install) is Ruflo's by-design "highest wins" and is not compared.
+ *  Read-only. */
+export function statuslineVersionAhead(root = process.cwd()) {
+  const baked = bakedStatuslineVersion(root);
+  const installed = baked ? installedRufloCeiling() : null;
+  if (!baked || !installed) return null;
+  return cmpVersions(baked, installed) > 0 ? { baked, installed } : null;
+}
+
+/** Why Ruflo's helper refresh cannot regenerate this project's helpers, or null
+ *  when it can. Mirrors helper-refresh.js's own gates (env opt-out, `.LOCKED`,
+ *  no hook-handler.cjs) plus the module being present at all. A signature-gate
+ *  refusal cannot be predicted; sync reports that one after trying. */
+export function helperRefreshBlocker(root = process.cwd()) {
+  const helpers = path.join(root, '.claude', 'helpers');
+  if (/^(1|true|on|yes)$/i.test(String(process.env.RUFLO_HELPERS_LOCKED ?? ''))) return 'RUFLO_HELPERS_LOCKED is set';
+  if (fs.existsSync(path.join(helpers, '.LOCKED'))) return '.claude/helpers/.LOCKED is present';
+  if (!fs.existsSync(path.join(helpers, 'hook-handler.cjs'))) return 'no ruflo hook-handler.cjs in .claude/helpers';
+  if (!fs.existsSync(helperRefreshModule())) return 'the installed ruflo has no helper-refresh module';
+  return null;
+}
+
+/** The one-line manual remedy when sync cannot repair the baked version. */
+export const bakedVersionManualFix = (installed) =>
+  `edit \`let ver\` in .claude/helpers/statusline.cjs to v${installed} or lower`;
+
+/** Refresh ruflo's helpers before injection (see fixStatusline). When the baked
+ *  version is ahead of every install, first clear the helper stamp: Ruflo's
+ *  refresh is forward-only and skips a current stamp, so this is what makes it
+ *  regenerate the helper with ITS OWN baked value — ak never writes a version.
+ *  Verified by re-reading the file; a refresh that did not lower the version
+ *  gets its stamp back so no permanent "stale stamp" is left behind. When the
+ *  refresh is known not to run here (helperRefreshBlocker) the stamp is not touched.
+ *  @returns {{versionRepair: ('repaired'|'failed'|null), versionAhead: ({baked: string, installed: string}|null)}}
+ *    versionRepair is null when no repair was needed; versionAhead is the state found before it */
+function refreshHelpersBeforeInjection(root) {
+  const ahead = statuslineVersionAhead(root);
+  const clearStamp = ahead && !helperRefreshBlocker(root);
+  const stampFile = helperStampFile(root);
+  let stamp = null;
+  if (clearStamp) {
+    try { stamp = fs.readFileSync(stampFile, 'utf8'); } catch { /* absent: nothing to restore */ }
+    fs.rmSync(stampFile, { force: true });
+  }
+  refreshRufloHelpers(root);
+  if (!ahead) return { versionRepair: null, versionAhead: null };
+  if (!statuslineVersionAhead(root)) return { versionRepair: 'repaired', versionAhead: ahead };
+  if (stamp !== null && !fs.existsSync(stampFile)) {
+    try { fs.writeFileSync(stampFile, stamp); } catch { /* best-effort restore */ }
+  }
+  return { versionRepair: 'failed', versionAhead: ahead };
+}
+
 export function fixStatusline(root = process.cwd(), { dryRun = false } = {}) {
   const file = projectStatusline(root);
   if (!fs.existsSync(file)) {
     // No ruflo helpers directory at all = not a ruflo-initialized location
     // (e.g. ~/.claude): nothing to patch, which is not a defect.
     return { file, applied: false, absent: !fs.existsSync(path.dirname(file)),
-      reason: 'no statusline.cjs (created by ruflo init)' };
+      reason: 'no statusline.cjs (created by ruflo init)', versionRepair: null, versionAhead: null };
   }
 
   // Order matters: refresh ruflo's helpers BEFORE reading, so we inject onto the
   // freshly-stamped copy and nothing rewrites it until the next ruflo upgrade
   // (where sync repeats this, again under its own control). dryRun (status) must
-  // stay read-only — helperStampStale() reports the armed wipe there instead.
-  if (!dryRun) refreshRufloHelpers(root);
+  // stay read-only — helperStampStale() and statuslineVersionAhead() report there.
+  const version = dryRun ? { versionRepair: null, versionAhead: null } : refreshHelpersBeforeInjection(root);
 
   const raw = fs.readFileSync(file, 'utf8');
   const ending = eol(raw);
@@ -249,7 +324,7 @@ export function fixStatusline(root = process.cwd(), { dryRun = false } = {}) {
       execFileSync(process.execPath, ['--check', file], { stdio: 'ignore' });
     } catch {
       fs.writeFileSync(file, raw); // roll back
-      return { file, applied: false, reason: 'injected file failed node --check — rolled back' };
+      return { file, applied: false, reason: 'injected file failed node --check — rolled back', ...version };
     }
   }
 
@@ -271,5 +346,5 @@ export function fixStatusline(root = process.cwd(), { dryRun = false } = {}) {
     repointed = true;
   }
 
-  return { file, applied: out !== raw, repointed, securityOverlay };
+  return { file, applied: out !== raw, repointed, securityOverlay, ...version };
 }
