@@ -281,6 +281,10 @@ export class LiveSessionsService {
         this.#ingestRecord(record, bootstrap, file);
       }
       Object.assign(context, bootstrap, { bootstrap: false });
+      // The working directory was noted on the bootstrap copy; carry it over,
+      // since later records (a Codex tool call, say) do not repeat it.
+      const source = this.#sourceCwds.get(bootstrap);
+      if (source) this.#sourceCwds.set(context, source);
     }
     const onRecord = (record) => this.#ingestRecord(record, context, file);
     const onError = (error) => {
@@ -350,8 +354,9 @@ export class LiveSessionsService {
     const folder = this.#transcriptFolder(context);
     for (const event of events) {
       this.#publish(event, context.adapter);
+      // undefined: this source has named no folder yet, so leave what is known.
       if (folder) this.#sessionFolders.set(event.sessionKey, folder);
-      else this.#sessionFolders.delete(event.sessionKey);
+      else if (folder === null) this.#sessionFolders.delete(event.sessionKey);
     }
     return events.length;
   }
@@ -363,13 +368,15 @@ export class LiveSessionsService {
   }
 
   /**
-   * The exact-folder correlator of a live transcript in a non-Git folder, or
-   * null. Computed once per working directory, only on the live path (History
-   * scans never need it), and only when the folder exists.
+   * The exact-folder correlator of a live transcript in a non-Git folder;
+   * null for a Git repository or a folder that no longer exists; undefined
+   * while the source has not named a folder. Computed once per working
+   * directory, only on the live path (History scans never need it).
    */
   #transcriptFolder(context) {
     const source = this.#sourceCwds.get(context);
-    if (!source || source.canonical) return null;
+    if (!source) return undefined;
+    if (source.canonical) return null;
     if (source.folder === undefined) source.folder = this.#folderOf(source.cwd);
     return source.folder;
   }

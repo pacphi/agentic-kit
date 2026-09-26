@@ -591,6 +591,25 @@ test('a bound plain-folder process that moves to a same-named folder loses the l
     'the prior binding is re-checked against the folder, not only the name-based project key');
 });
 
+test('a bootstrapped Codex session in a non-Git folder keeps its lease while records without a cwd stream in', (t) => {
+  const sb = sandbox();
+  const { a } = plainFolders(sb);
+  const id = '0199aaaa-bbbb-7ccc-8ddd-eeeeffff0003';
+  const file = path.join(sb.codex, `rollout-2026-09-25T01-15-30-${id}.jsonl`);
+  fs.writeFileSync(file, line({
+    type: 'session_meta', timestamp: '2026-09-25T01:15:30Z', payload: { id, cwd: a },
+  }));
+  const { service, tick } = plainFolderService(t, sb,
+    () => [{ pid: 5151, host: 'codex', cwd: a, startedAt: PROCESS_START }]);
+  service.start();
+  const presence = () => service.snapshot().sessions.find((session) => session.id === id).presence.state;
+  assert.equal(presence(), 'present', 'the folder learned during bootstrap binds the process');
+  fs.appendFileSync(file, functionCall('mid-turn'));
+  for (let survey = 0; survey < 3; survey++) tick();
+  assert.equal(toolNodes(service, id).length, 1, 'guard: the streamed record was ingested');
+  assert.equal(presence(), 'present', 'a record that carries no cwd does not forget the session folder');
+});
+
 test('the exact-folder correlator never reaches the snapshot, events, or workspace store', (t) => {
   const sb = sandbox();
   const { a } = plainFolders(sb);
