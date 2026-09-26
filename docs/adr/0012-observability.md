@@ -4,7 +4,10 @@
 - **Date:** 2026-07-27
 - **Updated:** 2026-09-26 — the POSIX process survey keeps executable paths that contain spaces,
   and a Claude Code CLI hosted by the Claude desktop app is its own top-level controller rather
-  than a nested worker of the app (#238 item 3).
+  than a nested worker of the app (#238 item 3). Adapter health is recomputed from the tailed
+  files each pass: a registered source whose file is absent is `awaiting-file`, a readable source
+  with nothing accepted is `no-events`, and an unreadable file or a malformed or rejected latest
+  record is `degraded`; a file created after tailing began is read from its first byte (#237 §E).
 - **Earlier update:** 2026-09-20 — ADR-0054 adds an explicit, offline, allowlisted fleet export
   boundary; local analytics and dashboard collection semantics remain unchanged.
 - **Earlier update:** 2026-09-09 — reconciled against repository source and tests for issue #211
@@ -206,7 +209,8 @@ ever justified ([RFC 6455][websocket]).
 When a cursor is outside retention, the server emits a reset instruction and the client fetches a
 fresh snapshot. Filesystem watches are hints, reinforced with stat polling and reconciliation.
 Tailers retain byte offsets, accept only newline-terminated records, tolerate partial writes, and
-reset safely after rotation or truncation.
+reset safely after rotation or truncation. A file that is absent when tailing begins, or that is
+removed and recreated, is read from its first byte when it appears (2026-09-26).
 
 ### 5. Present one coordinated Observability workspace with distinct scopes
 

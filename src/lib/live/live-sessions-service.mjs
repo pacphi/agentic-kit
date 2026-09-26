@@ -12,7 +12,7 @@ import {
   emptyLiveProjection, reduceLiveEvent, serializeLiveProjection, sweepLiveProjection,
 } from './projection.mjs';
 import { LiveReplayStream } from './replay-stream.mjs';
-import { adaptStructuredEvent } from './structured-adapter.mjs';
+import { adaptStructuredEvent, structuredRecordRejection } from './structured-adapter.mjs';
 import { canonicalSessionKey, resolveProjectIdentity } from './project-label.mjs';
 import { workspaceFromSource } from './git-workspace.mjs';
 import { WorkspaceSnapshotStore } from './workspace-store.mjs';
@@ -31,6 +31,20 @@ const HISTORY_DEFAULT_PAGE_SIZE = 100;
 const HISTORY_MAX_PAGE_SIZE = 250;
 const HISTORY_PAGE_TTL_MS = 60_000;
 const HISTORY_PAGE_CACHE_SIZE = 8;
+
+// Adapters fed by file tailers. Their health is recomputed from the tailed
+// files after every reconciliation pass instead of being set piecemeal.
+const TAILED_ADAPTERS = ['claude', 'codex', 'ruflo', 'aqe'];
+const STRUCTURED_ADAPTERS = ['ruflo', 'aqe'];
+
+function initialHealth(name) {
+  const base = { status: 'idle', files: 0, events: 0, errors: 0, lastError: null };
+  if (!TAILED_ADAPTERS.includes(name)) return base;
+  return {
+    ...base, readable: 0, missing: 0, unreadable: 0,
+    accepted: 0, rejected: 0, lastAcceptedAt: null, lastRejection: null,
+  };
+}
 
 /**
  * Coordinates bounded transcript tailers into one privacy-safe live projection.
@@ -88,11 +102,8 @@ export class LiveSessionsService {
         options.workspaceFile ?? observabilityWorkspacePath(),
       );
     }
-    for (const name of ['claude', 'codex', 'ruflo', 'aqe', 'codex-state']) {
-      this.#health.set(name, { status: 'idle', files: 0, events: 0, errors: 0, lastError: null });
-    }
-    for (const name of ['opencode', 'runtime']) {
-      this.#health.set(name, { status: 'idle', files: 0, events: 0, errors: 0, lastError: null });
+    for (const name of [...TAILED_ADAPTERS, 'codex-state', 'opencode', 'runtime']) {
+      this.#health.set(name, initialHealth(name));
     }
   }
 
@@ -148,12 +159,13 @@ export class LiveSessionsService {
     for (const [file, tailer] of this.#tailers) {
       try {
         tailer.reconcile();
-        const context = this.#contexts.get(file);
-        this.#mark(context.adapter, { status: 'ok' });
       } catch (error) {
-        this.#error(this.#contexts.get(file)?.adapter ?? 'internal', error);
+        const context = this.#contexts.get(file);
+        if (context) context.fault = true;
+        this.#error(context?.adapter ?? 'internal', error);
       }
     }
+    this.#refreshSourceHealth();
     this.#ingestLedger();
     this.#scheduleRuntimeSessions();
     this.#projection = sweepLiveProjection(this.#projection, {
@@ -223,12 +235,18 @@ export class LiveSessionsService {
       // replayed records and into live tailing below.
       const bootstrap = { ...context, bootstrap: true };
       for (const record of bootstrapRecords(file, context.adapter)) {
-        this.#record(record, bootstrap, file);
+        this.#ingestRecord(record, bootstrap, file);
       }
       Object.assign(context, bootstrap, { bootstrap: false });
     }
-    const onRecord = (record) => this.#record(record, context, file);
-    const onError = (error) => this.#error(context.adapter, error);
+    const onRecord = (record) => this.#ingestRecord(record, context, file);
+    const onError = (error) => {
+      // An I/O failure is carried by the tailer's presence and clears when the
+      // file becomes readable again. A bad record stays a fault until a later
+      // record from the same file is accepted.
+      if (tailer.presence !== 'unreadable') context.fault = true;
+      this.#error(context.adapter, error);
+    };
     const tailer = new JsonlTailer(file, {
       onRecord, onError, startAtEnd: initial,
       onCoverage: (coverage) => { context.acquisitionCoverage = coverage; },
@@ -287,6 +305,68 @@ export class LiveSessionsService {
   #record(record, context, file) {
     const events = this.#buildEvents(record, context, file);
     for (const event of events) this.#publish(event, context.adapter);
+    return events.length;
+  }
+
+  /**
+   * Publish one parsed record and account for it in source health. A record
+   * that yields an event is accepted. A structured (ruflo/AQE) record that
+   * yields none is rejected with a fixed reason code, never its content. A
+   * native transcript record the adapter does not map is ignored by design.
+   */
+  #ingestRecord(record, context, file) {
+    const published = this.#record(record, context, file);
+    const current = this.#health.get(context.adapter) ?? {};
+    if (published > 0) {
+      context.fault = false;
+      this.#mark(context.adapter, {
+        accepted: (current.accepted ?? 0) + 1, lastAcceptedAt: this.#options.now(),
+      });
+    } else if (STRUCTURED_ADAPTERS.includes(context.adapter)) {
+      context.fault = true;
+      this.#mark(context.adapter, {
+        rejected: (current.rejected ?? 0) + 1,
+        lastRejection: structuredRecordRejection(record, {
+          surface: context.surface, sessionId: context.sessionId,
+        }) ?? 'not-an-event',
+      });
+    } else {
+      context.fault = false;
+    }
+  }
+
+  /**
+   * Recompute tailed-adapter health from the files themselves: how many are
+   * readable, missing or unreadable, and whether any file's latest record was
+   * bad. Precedence: degraded > awaiting-file > no-events > ok. A configured
+   * source whose file is absent is awaiting it (late creation is legitimate),
+   * never "ok".
+   */
+  #refreshSourceHealth() {
+    const tally = new Map(TAILED_ADAPTERS.map((name) => [name, {
+      sources: 0, readable: 0, missing: 0, unreadable: 0, faulted: 0,
+    }]));
+    for (const [file, context] of this.#contexts) {
+      const counts = tally.get(context.adapter);
+      if (!counts) continue;
+      counts.sources += 1;
+      const presence = this.#tailers.get(file)?.presence;
+      if (presence === 'readable') counts.readable += 1;
+      else if (presence === 'absent') counts.missing += 1;
+      else if (presence === 'unreadable') counts.unreadable += 1;
+      if (context.fault) counts.faulted += 1;
+    }
+    for (const [adapter, counts] of tally) {
+      const accepted = this.#health.get(adapter)?.accepted ?? 0;
+      let status = 'ok';
+      if (!counts.sources) status = 'idle';
+      else if (counts.unreadable || counts.faulted) status = 'degraded';
+      else if (counts.missing) status = 'awaiting-file';
+      else if (!accepted) status = 'no-events';
+      this.#mark(adapter, {
+        status, readable: counts.readable, missing: counts.missing, unreadable: counts.unreadable,
+      });
+    }
   }
 
   /**
@@ -433,8 +513,10 @@ export class LiveSessionsService {
         workspace: published.workspace,
       });
     }
+    // Status is not set here: tailed adapters recompute it once per pass, and
+    // the ledger and runtime adapters mark their own outcome after ingesting.
     const current = this.#health.get(adapter);
-    this.#mark(adapter, { status: 'ok', events: (current?.events ?? 0) + 1 });
+    this.#mark(adapter, { events: (current?.events ?? 0) + 1 });
   }
 
   #ingestLedger() {

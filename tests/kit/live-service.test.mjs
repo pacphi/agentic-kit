@@ -729,3 +729,174 @@ test('service coverage retains dropped-line evidence when a different source is 
   assert.equal(coverage.complete, false);
   assert.equal(coverage.droppedLines, 1);
 });
+
+// Structured-source health acceptance (#237 §E). Each case drives the real
+// service and tailer through a manual reconcile tick so every pass is explicit.
+const structuredService = (t, sources, extra = {}) => {
+  const sb = sandbox();
+  let tick = null;
+  const service = new LiveSessionsService({
+    roots: sb.roots, cwd: sb.dir, readCodexState: () => null, workspaceStore: null,
+    structuredSources: sources(sb.dir),
+    setInterval: (fn) => { tick = fn; return { unref() {} }; }, clearInterval: () => {},
+    now: () => '2026-09-26T12:00:00Z', ...extra,
+  });
+  t.after(() => { service.close(); fs.rmSync(sb.dir, { recursive: true, force: true }); });
+  service.start();
+  return { sb, service, tick: () => tick(), health: () => service.snapshot().health };
+};
+const record = (fields = {}) => line({
+  sessionId: 'qe-1', agentId: 'gate-1', action: 'gate.completed', status: 'completed', ...fields,
+});
+const canTestPermissions = process.platform !== 'win32' && process.getuid?.() !== 0;
+const pick = ({ status, files, readable, missing, unreadable, events, errors }) => ({
+  status, files, readable, missing, unreadable, events, errors,
+});
+
+test('an absent structured source reports awaiting file, never ok', (t) => {
+  const { health } = structuredService(t, (dir) => [{ surface: 'ruflo', file: path.join(dir, 'ruflo.jsonl') }]);
+  assert.deepEqual(pick(health().ruflo), {
+    status: 'awaiting-file', files: 1, readable: 0, missing: 1, unreadable: 0, events: 0, errors: 0,
+  });
+});
+
+test('an empty structured source is readable but reports no events yet', (t) => {
+  const { health } = structuredService(t, (dir) => {
+    fs.writeFileSync(path.join(dir, 'aqe.jsonl'), '');
+    return [{ surface: 'aqe', file: path.join(dir, 'aqe.jsonl') }];
+  });
+  assert.deepEqual(pick(health().aqe), {
+    status: 'no-events', files: 1, readable: 1, missing: 0, unreadable: 0, events: 0, errors: 0,
+  });
+});
+
+test('a valid structured record is accepted and makes the source ok', (t) => {
+  const { sb, tick, health } = structuredService(t, (dir) => {
+    fs.writeFileSync(path.join(dir, 'aqe.jsonl'), '');
+    return [{ surface: 'aqe', file: path.join(dir, 'aqe.jsonl') }];
+  });
+  fs.appendFileSync(path.join(sb.dir, 'aqe.jsonl'), record());
+  tick();
+  assert.equal(health().aqe.status, 'ok');
+  assert.equal(health().aqe.accepted, 1);
+  assert.equal(health().aqe.rejected, 0);
+  assert.equal(health().aqe.lastAcceptedAt, '2026-09-26T12:00:00Z');
+});
+
+test('a schema-invalid structured record is rejected with a reason and no record content', (t) => {
+  const { sb, tick, health } = structuredService(t, (dir) => {
+    fs.writeFileSync(path.join(dir, 'aqe.jsonl'), '');
+    return [{ surface: 'aqe', file: path.join(dir, 'aqe.jsonl') }];
+  });
+  fs.appendFileSync(path.join(sb.dir, 'aqe.jsonl'),
+    line({ sessionId: 'qe-1', agentId: 'gate-1', secret: 'PRIVATE BODY' }));
+  tick();
+  assert.equal(health().aqe.status, 'degraded', 'a source whose records are all rejected is not operational');
+  assert.equal(health().aqe.rejected, 1);
+  assert.equal(health().aqe.accepted, 0);
+  assert.equal(health().aqe.lastRejection, 'missing-action');
+  assert.ok(!JSON.stringify(health()).includes('PRIVATE BODY'));
+  fs.appendFileSync(path.join(sb.dir, 'aqe.jsonl'), record());
+  tick();
+  assert.equal(health().aqe.status, 'ok', 'a later accepted record restores the source');
+  assert.equal(health().aqe.rejected, 1, 'the rejection count is kept');
+});
+
+test('a malformed line keeps the source degraded within and after the same pass', (t) => {
+  const { sb, tick, health } = structuredService(t, (dir) => {
+    fs.writeFileSync(path.join(dir, 'ruflo.jsonl'), '');
+    return [{ surface: 'ruflo', file: path.join(dir, 'ruflo.jsonl') }];
+  });
+  fs.appendFileSync(path.join(sb.dir, 'ruflo.jsonl'), '{not json\n');
+  tick();
+  assert.equal(health().ruflo.status, 'degraded', 'ok must not overwrite the error from the same pass');
+  assert.equal(health().ruflo.errors, 1);
+  assert.equal(health().ruflo.lastError, 'invalid-json');
+  tick();
+  assert.equal(health().ruflo.status, 'degraded', 'nothing has been accepted since the error');
+  fs.appendFileSync(path.join(sb.dir, 'ruflo.jsonl'), record());
+  tick();
+  assert.equal(health().ruflo.status, 'ok');
+  assert.equal(health().ruflo.errors, 1);
+});
+
+test('an unreadable structured source is degraded with its error category', { skip: !canTestPermissions }, (t) => {
+  let file;
+  const { tick, health } = structuredService(t, (dir) => {
+    file = path.join(dir, 'aqe.jsonl');
+    fs.writeFileSync(file, record());
+    fs.chmodSync(file, 0o000);
+    return [{ surface: 'aqe', file }];
+  });
+  t.after(() => { try { fs.chmodSync(file, 0o600); } catch { /* removed */ } });
+  tick();
+  assert.deepEqual(pick(health().aqe), {
+    status: 'degraded', files: 1, readable: 0, missing: 0, unreadable: 1, events: 0, errors: 1,
+  });
+  assert.equal(health().aqe.lastError, 'EACCES');
+  fs.chmodSync(file, 0o600);
+  tick();
+  assert.equal(health().aqe.status, 'no-events', 'restored access clears the unreadable state');
+  assert.equal(health().aqe.readable, 1);
+});
+
+test('records in a structured source created after start are all ingested', (t) => {
+  const { sb, tick, health } = structuredService(t, (dir) => [{ surface: 'aqe', file: path.join(dir, 'late.jsonl') }]);
+  assert.equal(health().aqe.status, 'awaiting-file');
+  fs.writeFileSync(path.join(sb.dir, 'late.jsonl'),
+    record({ agentId: 'a1' }) + record({ agentId: 'a2' }) + record({ agentId: 'a3' }));
+  tick();
+  assert.equal(health().aqe.status, 'ok');
+  assert.equal(health().aqe.accepted, 3, 'late creation is legitimate; none of its records may be skipped');
+});
+
+test('removal, recreation, truncation, and rotation keep structured health truthful', (t) => {
+  const { sb, tick, health } = structuredService(t, (dir) => {
+    fs.writeFileSync(path.join(dir, 'ruflo.jsonl'), '');
+    return [{ surface: 'ruflo', file: path.join(dir, 'ruflo.jsonl') }];
+  });
+  const file = path.join(sb.dir, 'ruflo.jsonl');
+  fs.appendFileSync(file, record({ agentId: 'first' }));
+  tick();
+  assert.equal(health().ruflo.accepted, 1);
+
+  fs.rmSync(file);
+  tick();
+  assert.equal(health().ruflo.status, 'awaiting-file', 'a removed source is awaiting, not ok');
+  assert.equal(health().ruflo.missing, 1);
+  fs.writeFileSync(file, record({ agentId: 'recreated' }));
+  tick();
+  assert.equal(health().ruflo.status, 'ok');
+  assert.equal(health().ruflo.accepted, 2, 'the recreated file is read from its beginning');
+
+  fs.truncateSync(file, 0);
+  tick();
+  fs.appendFileSync(file, record({ agentId: 'after-truncation' }));
+  tick();
+  assert.equal(health().ruflo.accepted, 3);
+
+  fs.renameSync(file, `${file}.1`);
+  fs.writeFileSync(file, record({ agentId: 'rotated' }));
+  tick();
+  assert.equal(health().ruflo.accepted, 4);
+  assert.equal(health().ruflo.status, 'ok');
+});
+
+test('multiple structured sources report mixed health per surface', (t) => {
+  const { sb, tick, health } = structuredService(t, (dir) => {
+    fs.writeFileSync(path.join(dir, 'ruflo-a.jsonl'), '');
+    fs.writeFileSync(path.join(dir, 'aqe.jsonl'), '');
+    return [
+      { surface: 'ruflo', file: path.join(dir, 'ruflo-a.jsonl') },
+      { surface: 'ruflo', file: path.join(dir, 'ruflo-missing.jsonl') },
+      { surface: 'aqe', file: path.join(dir, 'aqe.jsonl') },
+    ];
+  });
+  fs.appendFileSync(path.join(sb.dir, 'ruflo-a.jsonl'), record());
+  fs.appendFileSync(path.join(sb.dir, 'aqe.jsonl'), record());
+  tick();
+  assert.deepEqual(pick(health().ruflo), {
+    status: 'awaiting-file', files: 2, readable: 1, missing: 1, unreadable: 0, events: 1, errors: 0,
+  }, 'one ingesting source must not hide a missing one');
+  assert.equal(health().aqe.status, 'ok');
+});

@@ -344,9 +344,18 @@ and confidence. It cannot contain prompt text, response text, tool arguments, ra
 ### `AdapterHealth` aggregate
 
 Kept separate because a source can fail without invalidating every live session. The current
-service records adapter `status` (`idle`, `ok`, `unavailable`, or `degraded`), file/event/error
-counts and a bounded error category. A richer health aggregate with checkpoint age and retry
-lifecycle remains a design extension, not a current serialized field set.
+service records adapter `status` (`idle`, `ok`, `no-events`, `awaiting-file`, `unavailable`, or
+`degraded`), file/event/error counts and a bounded error category. For file-tailed adapters
+(Claude, Codex, ruflo, agentic-qe) the status and the `readable`/`missing`/`unreadable` file
+gauges are recomputed from the tailed files after every reconciliation pass, never set by an
+individual event. Precedence is `degraded` (an unreadable file, or a file whose latest record was
+malformed or rejected) over `awaiting-file` (a registered file that does not exist yet) over
+`no-events` (readable, nothing accepted) over `ok`. `accepted` and `rejected` count records;
+`rejected` and `lastRejection` apply to structured sources only and carry a fixed reason code,
+never record content. A native record the adapter does not map is ignored, not rejected. A file
+created or recreated after tailing began is read from its first byte. A richer health aggregate
+with checkpoint age and retry lifecycle remains a design extension, not a current serialized
+field set.
 
 ## Canonical domain event
 

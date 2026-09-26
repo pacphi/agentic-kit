@@ -21,6 +21,8 @@ export class JsonlTailer {
   #dropping = false;
   #droppedLines = 0;
   #onCoverage;
+  #presence = 'unknown';
+  #absentSeen = false;
 
   /**
    * @param {string} file
@@ -56,26 +58,50 @@ export class JsonlTailer {
     this.canRead = typeof canRead === 'function' ? canRead : () => false;
   }
 
+  /**
+   * What the last reconciliation observed about the file itself:
+   * `unknown` before the first one, then `absent`, `readable` or `unreadable`.
+   * Records are a separate matter; a readable file may still hold bad lines.
+   */
+  get presence() {
+    return this.#presence;
+  }
+
   reconcile() {
     if (!this.canRead(this.#file)) return;
     let stat;
     try { stat = fs.statSync(this.#file); } catch (error) {
-      if (error.code !== 'ENOENT') this.#onError(error);
+      if (error.code === 'ENOENT') this.#absent();
+      else this.#unreadable(error);
+      return;
+    }
+    if (!stat.isFile()) {
+      // Never open a directory, FIFO or device: a FIFO open blocks.
+      this.#unreadable(Object.assign(new Error('live source is not a regular file'), {
+        code: 'not-regular-file',
+      }));
       return;
     }
     const identity = `${stat.dev}:${stat.ino}`;
     if (this.#identity == null) {
       this.#identity = identity;
-      if (this.startOffset != null) this.#offset = Math.min(this.startOffset, stat.size);
+      // A file that appeared after tailing began holds only new records, so
+      // neither a resume offset nor startAtEnd may skip any of it.
+      if (this.#absentSeen) this.#offset = 0;
+      else if (this.startOffset != null) this.#offset = Math.min(this.startOffset, stat.size);
       else if (this.startAtEnd) this.#offset = stat.size;
     } else if (this.#identity !== identity || stat.size < this.#offset) {
       this.#identity = identity;
-      this.#offset = 0;
-      this.#carry = '';
-      this.#dropping = false;
-      this.#decoder = new StringDecoder('utf8');
+      this.#resetPosition();
     }
-    if (stat.size <= this.#offset) { this.#coverage(stat.size); return; }
+    if (stat.size <= this.#offset) {
+      // Nothing new to read. Prove readability anyway when it is not yet known
+      // (or was lost), so a mode-000 file cannot pass as healthy by staying
+      // the same size.
+      if (this.#presence !== 'readable') this.#probeReadable();
+      this.#coverage(stat.size);
+      return;
+    }
     try {
       const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0);
       const fd = fs.openSync(this.#file, flags);
@@ -90,8 +116,41 @@ export class JsonlTailer {
           this.#consume(this.#decoder.write(bytes.subarray(0, count)));
         }
       } finally { fs.closeSync(fd); }
-    } catch (error) { this.#onError(error); }
+      this.#presence = 'readable';
+    } catch (error) { this.#unreadable(error); }
     this.#coverage(stat.size);
+  }
+
+  #resetPosition() {
+    this.#offset = 0;
+    this.#carry = '';
+    this.#dropping = false;
+    this.#decoder = new StringDecoder('utf8');
+  }
+
+  #absent() {
+    // Forget the old file entirely: whatever appears at this path next is a
+    // new file, even if the filesystem reuses its inode.
+    if (this.#identity != null) {
+      this.#identity = null;
+      this.#resetPosition();
+    }
+    this.#absentSeen = true;
+    this.#presence = 'absent';
+  }
+
+  /** Report an I/O failure once per transition, not once per poll. */
+  #unreadable(error) {
+    const first = this.#presence !== 'unreadable';
+    this.#presence = 'unreadable';
+    if (first) this.#onError(error);
+  }
+
+  #probeReadable() {
+    try {
+      fs.accessSync(this.#file, fs.constants.R_OK);
+      this.#presence = 'readable';
+    } catch (error) { this.#unreadable(error); }
   }
 
   #consume(text) {

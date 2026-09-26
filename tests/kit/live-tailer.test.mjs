@@ -71,6 +71,91 @@ test('tailer bounds each reconciliation, retains burst backlog, and decodes spli
   assert.equal(coverage.at(-1).complete, true);
 });
 
+const canTestPermissions = process.platform !== 'win32' && process.getuid?.() !== 0;
+
+test('tailer reports presence: absent, readable, and back to absent after removal', (t) => {
+  const file = tempFile();
+  t.after(() => fs.rmSync(path.dirname(file), { recursive: true, force: true }));
+  const tailer = new JsonlTailer(file, { onRecord: () => {}, startAtEnd: true });
+  assert.equal(tailer.presence, 'unknown', 'nothing is claimed before the first reconciliation');
+  tailer.reconcile();
+  assert.equal(tailer.presence, 'absent');
+  fs.writeFileSync(file, '');
+  tailer.reconcile();
+  assert.equal(tailer.presence, 'readable');
+  fs.rmSync(file);
+  tailer.reconcile();
+  assert.equal(tailer.presence, 'absent');
+});
+
+test('a file created after tailing started is read from its beginning, even with startAtEnd', (t) => {
+  const file = tempFile();
+  t.after(() => fs.rmSync(path.dirname(file), { recursive: true, force: true }));
+  const rows = [];
+  const tailer = new JsonlTailer(file, { onRecord: (row) => rows.push(row), startAtEnd: true });
+  tailer.reconcile();
+  fs.writeFileSync(file, '{"n":1}\n{"n":2}\n{"n":3}\n');
+  tailer.reconcile();
+  assert.deepEqual(rows, [{ n: 1 }, { n: 2 }, { n: 3 }], 'records in a late-created file must not be skipped');
+});
+
+test('a file absent at a resume offset is read from its beginning when it appears', (t) => {
+  const file = tempFile();
+  t.after(() => fs.rmSync(path.dirname(file), { recursive: true, force: true }));
+  const rows = [];
+  const tailer = new JsonlTailer(file, { onRecord: (row) => rows.push(row), startOffset: 8 });
+  tailer.reconcile();
+  fs.writeFileSync(file, '{"n":1}\n{"n":2}\n');
+  tailer.reconcile();
+  assert.deepEqual(rows, [{ n: 1 }, { n: 2 }], 'a stale offset must not apply to a new file');
+});
+
+test('a removed and recreated file is read from its beginning', (t) => {
+  const file = tempFile();
+  t.after(() => fs.rmSync(path.dirname(file), { recursive: true, force: true }));
+  fs.writeFileSync(file, '{"n":1}\n');
+  const rows = [];
+  const tailer = new JsonlTailer(file, { onRecord: (row) => rows.push(row) });
+  tailer.reconcile();
+  fs.rmSync(file);
+  tailer.reconcile();
+  fs.writeFileSync(file, '{"n":2}\n{"n":3}\n');
+  tailer.reconcile();
+  assert.deepEqual(rows, [{ n: 1 }, { n: 2 }, { n: 3 }]);
+});
+
+test('an unreadable file is reported once, even when it has no new bytes', { skip: !canTestPermissions }, (t) => {
+  const file = tempFile();
+  t.after(() => {
+    try { fs.chmodSync(file, 0o600); } catch { /* already removed */ }
+    fs.rmSync(path.dirname(file), { recursive: true, force: true });
+  });
+  fs.writeFileSync(file, '{"n":1}\n');
+  fs.chmodSync(file, 0o000);
+  const errors = [];
+  const tailer = new JsonlTailer(file, {
+    onRecord: () => {}, onError: (error) => errors.push(error.code), startAtEnd: true,
+  });
+  tailer.reconcile();
+  tailer.reconcile();
+  tailer.reconcile();
+  assert.equal(tailer.presence, 'unreadable');
+  assert.deepEqual(errors, ['EACCES'], 'one error per transition, not one per poll');
+  fs.chmodSync(file, 0o600);
+  tailer.reconcile();
+  assert.equal(tailer.presence, 'readable', 'restored permissions are noticed without new bytes');
+});
+
+test('a path that is not a regular file is unreadable, never opened', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const errors = [];
+  const tailer = new JsonlTailer(dir, { onRecord: () => {}, onError: (error) => errors.push(error.code) });
+  tailer.reconcile();
+  assert.equal(tailer.presence, 'unreadable');
+  assert.deepEqual(errors, ['not-regular-file']);
+});
+
 test('tailer discards oversized incomplete lines with explicit coverage and recovers at newline', (t) => {
   const file = tempFile();
   t.after(() => fs.rmSync(path.dirname(file), { recursive: true, force: true }));
