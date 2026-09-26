@@ -260,6 +260,8 @@ records the source evidence and counts observed on 2026-09-09.
 Run `ak x aqe-embedding status` to inspect the selected backend and projection
 conflicts, then `ak x aqe-embedding verify` for a synthetic backend proof. A local
 model can be restored with `ak x aqe-embedding prepare --yes` after selecting local
-Ollama. A different fingerprint or unknown corpus provenance requires separate
+Ollama. If sync or verify says Ollama is installed but not running, open the Ollama
+app or run `ollama serve`, then retry.
+A different fingerprint or unknown corpus provenance requires separate
 migration planning; do not delete RVF locks or relabel vectors.
 See [AQE embeddings](AQE-EMBEDDINGS.md) for the full recovery and environment guide.

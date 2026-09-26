@@ -24,7 +24,10 @@ preserved and tested. Repeated setup does not redownload an existing model.
 The endpoint must produce valid 384-dimensional vectors with meaningful semantic
 ordering. A missing service, missing runtime or failed proof leaves setup
 incomplete with actionable guidance; it never substitutes hash vectors or prints
-a green completion message. Keep Ollama's model store on durable local storage.
+a green completion message. When the `ollama` command is installed but the
+selected local endpoint refuses connections, the guidance says Ollama is not
+running and asks you to start it rather than install it. Keep Ollama's model
+store on durable local storage.
 
 `--yes` accepts the disclosed setup plan. `--dry-run` makes no changes and does
 not contact or start a model service. The kit does not silently install a daemon.

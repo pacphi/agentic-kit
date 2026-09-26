@@ -318,6 +318,8 @@ See [Upgrading](UPGRADING.md) for the `setup` versus `sync` lifecycle and
 New setup recommends local Ollama with MiniLM, preserves a selected endpoint, and
 verifies the backend before completion. The download and host changes are disclosed
 in the setup manifest. Missing Ollama leaves setup incomplete with installation
-guidance. Use `--aqe-embedding-mode unmanaged` to defer semantic learning explicitly.
+guidance; an installed Ollama that is not running is reported as not running, with
+how to start it. Use `--aqe-embedding-mode unmanaged` to defer semantic learning
+explicitly.
 See [AQE embeddings](AQE-EMBEDDINGS.md) for alternatives, shell configuration and
 existing-corpus safeguards.

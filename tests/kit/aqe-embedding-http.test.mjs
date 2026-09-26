@@ -48,6 +48,20 @@ test('oversized, malformed and error responses fail without reflecting raw conte
   }
 });
 
+test('a refused local connection with Ollama installed says it is not running', async () => {
+  // A real closed loopback port: Node's fetch rejects with a cause carrying ECONNREFUSED.
+  const closed = await new Promise(resolve => {
+    const listener = http.createServer().listen(0, '127.0.0.1', () => {
+      const port = listener.address().port;
+      listener.close(() => resolve(`http://127.0.0.1:${port}`));
+    });
+  });
+  const result = await prepareAqeEmbedding(cfg(closed), { probe: async () => assert.fail(), ollamaInstalled: async () => true });
+  assert.equal(result.ok, false);
+  assert.ok(result.detail.includes(`Ollama is installed but not running at ${closed}`), result.detail);
+  assert.doesNotMatch(result.detail, /Install Ollama/);
+});
+
 test('HTTP failure never reaches the semantic proof or exposes a response body', async t => {
   const endpoint = await server(t, (req, res) => { res.statusCode = 500; res.end('private-service-detail'); });
   const result = await prepareAqeEmbedding(cfg(endpoint), { probe: async () => assert.fail() });
