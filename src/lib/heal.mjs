@@ -16,7 +16,7 @@ import {
   INSTALL_SPEC, INSTALL_ARGS, UPDATE_ARGS as RB_UPDATE_ARGS, UPDATE_ENV as RB_UPDATE_ENV,
   RELEASE_ASSET as RB_RELEASE_ASSET, NIGHTLY_LABEL as RB_NIGHTLY_LABEL, nightlyAgentPlist as rbNightlyPlist,
   present as rbPresent, updaterPresent as rbUpdaterPresent, installedReleaseOnDisk as rbReleaseOnDisk,
-  latestRelease as rbLatestRelease, recordInstalledRelease as rbRecord,
+  latestRelease as rbLatestRelease, recordInstalledRelease as rbRecord, recordHeldRefresh as rbRecordHeld,
 } from './ruvnet-brain.mjs';
 import { globalInstallArgs, installGlobalCli } from './npm-global-install.mjs';
 
@@ -188,21 +188,30 @@ export async function selfUpdate(version, { runner = run } = {}) {
 /** Refresh an existing Brain through the bundle's own updater. `--update`
  *  ignores `--version`, so success is judged by the release on disk, never by
  *  the tag ak asked about: a changed release is stamped; an unchanged one is
- *  `degraded` (the updater ran, nothing landed) and stamps nothing. */
-async function refreshBrainWithUpdater({ runner, present, recordRelease, releaseOnDisk, tag }) {
+ *  `degraded` (the updater ran, nothing landed) and stamps nothing. A refusal or
+ *  a no-op is held (recordRefusal) so the next sync does not repeat it. */
+async function refreshBrainWithUpdater({ runner, present, recordRelease, recordRefusal, releaseOnDisk, tag }) {
   const before = releaseOnDisk();
   const r = await runner('npx', ['-y', INSTALL_SPEC, ...RB_UPDATE_ARGS],
     { timeout: 900_000, env: { ...RB_UPDATE_ENV } });
-  if (r.code !== 0) return { ok: false, status: 'failed', usable: present(), detail: brainInstallFailure(r) };
+  if (r.code !== 0) return refreshFailure(r, { present, recordRefusal, tag });
   const after = releaseOnDisk();
   if (!after || after === before) {
-    return {
-      ok: false, status: 'degraded', usable: true,
-      detail: `updater ran; installed release still ${before ? `v${before}` : 'unknown'}${tag ? ` (latest v${tag})` : ''}`,
-    };
+    const detail = `updater ran; installed release still ${before ? `v${before}` : 'unknown'}${tag ? ` (latest v${tag})` : ''}`;
+    recordRefusal({ detail, latest: tag });
+    return { ok: false, status: 'degraded', usable: true, detail };
   }
   recordRelease(after);
   return { ok: true, status: 'ok', usable: true, detail: `updated to release v${after}` };
+}
+
+/** A failed refresh of an EXISTING install. A deliberate refusal by the
+ *  installer or updater is held for this release pair; anything else (a
+ *  network error, a timeout) stays retryable by the next sync. */
+function refreshFailure(r, { present, recordRefusal, tag }) {
+  const detail = brainInstallFailure(r);
+  if (brainRefused(r)) recordRefusal({ detail, latest: tag });
+  return { ok: false, status: 'failed', usable: present(), detail };
 }
 
 /** Install (or refresh) the RuvNet Brain. The heal, not its caller, chooses the
@@ -220,6 +229,7 @@ async function refreshBrainWithUpdater({ runner, present, recordRelease, release
 export async function installRuvnetBrain({
   runner = run, latestRelease = rbLatestRelease, present = rbPresent,
   recordRelease = rbRecord, updaterPresent = rbUpdaterPresent, releaseOnDisk = rbReleaseOnDisk,
+  recordRefusal = rbRecordHeld,
 } = {}) {
   const release = await latestRelease();
   const tag = release?.version ?? null;
@@ -233,7 +243,9 @@ export async function installRuvnetBrain({
       detail: `release v${tag} is missing ${RB_RELEASE_ASSET}; automatic update is blocked upstream and the existing Brain was left unchanged`,
     };
   }
-  if (updaterPresent()) return refreshBrainWithUpdater({ runner, present, recordRelease, releaseOnDisk, tag });
+  if (updaterPresent()) {
+    return refreshBrainWithUpdater({ runner, present, recordRelease, recordRefusal, releaseOnDisk, tag });
+  }
   // Pin the installer to the resolved tag (--version v<tag>) so a release
   // published mid-install cannot land something other than what was resolved.
   const reinstall = present();
@@ -244,6 +256,7 @@ export async function installRuvnetBrain({
   if (r.code !== 0) {
     // Presence after a non-zero exit can be a stale or partial prior install. It
     // is useful evidence for `usable`, never proof that this install succeeded.
+    if (reinstall) return refreshFailure(r, { present, recordRefusal, tag });
     return { ok: false, status: 'failed', usable: present(), detail: brainInstallFailure(r) };
   }
   const stamped = releaseOnDisk() ?? tag;
@@ -261,6 +274,15 @@ const BRAIN_CAUSAL = /\[forge-update\]\s*ERROR:|install stopped:|can't update:|H
 // The installer's remediation line after a refusal ("Run npx ruvnet-brain
 // --update so …", "Fix: re-run the installer — npx ruvnet-brain …").
 const BRAIN_HINT = /^(?:Run|Fix:)\s.*\bnpx ruvnet-brain\b/i;
+// Deliberate refusals by the installer (`die()` → "install stopped:") or the
+// bundle's updater ("[forge-update] ERROR:", "refusing to update", missing
+// updater) — as opposed to a transient network or timeout failure.
+const BRAIN_REFUSAL = /install stopped:|\[forge-update\]\s*ERROR:|refusing to update|can't update:/i;
+
+/** Did the installer or updater refuse, rather than fail transiently? */
+export function brainRefused(result) {
+  return BRAIN_REFUSAL.test(`${result?.stdout ?? ''}\n${result?.stderr ?? ''}`.replace(BRAIN_ANSI, ''));
+}
 
 /** Prefer the installer's causal error, plus its remediation hint, over its
  *  generic closing reassurance. Newer updater failures write the release-asset

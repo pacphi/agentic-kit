@@ -1,6 +1,9 @@
 // ruvnet-brain (offline KB + search_ruvnet MCP; not an npm package — detected
 // on disk, drift via GitHub releases, TTL-cached like `self`)
-import { drift as ruvnetBrainDrift, nightlyAgentPresent as rbNightlyPresent, NIGHTLY_LABEL as RB_NIGHTLY_LABEL } from '../../../lib/ruvnet-brain.mjs';
+import {
+  activeHeldRefresh, drift as ruvnetBrainDrift, nightlyAgentPresent as rbNightlyPresent,
+  NIGHTLY_LABEL as RB_NIGHTLY_LABEL,
+} from '../../../lib/ruvnet-brain.mjs';
 import { row } from '../row.mjs';
 import { inspectClaudeBrainPlugin } from '../../../lib/ruvnet-brain-plugin.mjs';
 import { releaseObservationLabel } from '../../../lib/versions.mjs';
@@ -41,6 +44,18 @@ export function brainReleaseRow(b) {
     const have = b.installedRelease ? `release v${b.installedRelease}` : 'the existing unversioned install';
     return row('ruvnet-brain', 'info',
       `ruvnet-brain ${have} retained; release v${b.latest} bundle availability awaits a live sync check`);
+  }
+  const held = b.outdated ? activeHeldRefresh(b) : null;
+  if (held) {
+    // The installer or the bundle's updater refused this exact pair (or ran
+    // without landing anything). Re-running it on every sync cannot succeed and
+    // re-downloads the bundle, so the row is deliberately non-actionable until
+    // either release changes; the options are the user's.
+    const have = b.installedRelease ? `release v${b.installedRelease}` : 'the existing unversioned install';
+    return row('ruvnet-brain', 'warn',
+      `ruvnet-brain ${have} retained; the refresh to v${b.latest} was refused (${held.detail}). `
+      + 'ak sync will not retry it until either release changes. Options: fix the cause, then run '
+      + '`npx ruvnet-brain --update`; or set "ruvnetBrain": false in kit.json to stop ak managing the Brain');
   }
   if (b.outdated) {
     const have = b.installedRelease ? `release v${b.installedRelease}` : 'present (unversioned install)';

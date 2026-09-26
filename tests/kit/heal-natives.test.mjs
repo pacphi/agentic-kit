@@ -326,6 +326,7 @@ test('brain installer exit failure is failed even when an old or partial KB is p
     latestRelease: async () => ({ version: '4.0.12', releaseAssetAvailable: true }),
     present: () => true,
     recordRelease: () => { stamped = true; },
+    recordRefusal: () => {},
   });
 
   assert.equal(r.ok, false);
@@ -352,6 +353,7 @@ test('brain installer refuses a release tag whose required bundle asset is absen
     runner: async () => { ran = true; return { code: 0, stdout: '', stderr: '' }; },
     latestRelease: async () => ({ version: '4.3.1', releaseAssetAvailable: false }),
     present: () => true,
+    recordRefusal: () => {},
   });
   assert.equal(r.ok, false);
   assert.equal(r.usable, true);
@@ -369,6 +371,7 @@ test('brain installer failure selects the causal updater error across stdout and
     }),
     latestRelease: async () => ({ version: '4.3.1', releaseAssetAvailable: true }),
     present: () => true,
+    recordRefusal: () => {}, // never the real kit.json from this unsandboxed file
   });
   assert.match(r.detail, /no matching \.zip asset/);
   assert.doesNotMatch(r.detail, /Nothing is left half-installed/);
@@ -396,6 +399,7 @@ test('brain refresh of an existing install runs its updater, never a forced fres
     updaterPresent: () => true,
     releaseOnDisk: sequence('4.3.22', '4.3.28'),
     recordRelease: (v) => { stamped = v; },
+    recordRefusal: () => {},
   });
   assert.equal(calls.length, 1);
   const { args, opts } = calls[0];
@@ -420,6 +424,7 @@ test('an updater that exits 0 without changing the release on disk is degraded a
     updaterPresent: () => true,
     releaseOnDisk: () => '4.3.22',
     recordRelease: (v) => { stamped = v; },
+    recordRefusal: () => {},
   });
   assert.equal(r.ok, false, 'a no-op update must reach the convergence proof as unconverged');
   assert.equal(r.status, 'degraded');
@@ -438,6 +443,7 @@ test('a fresh install stamps the release observed on disk, not the one requested
     updaterPresent: () => false,
     releaseOnDisk: () => '4.3.27', // what landed, read after the installer exits
     recordRelease: (v) => { stamped = v; },
+    recordRefusal: () => {},
   });
   assert.equal(stamped, '4.3.27');
   assert.equal(calls[0].args.includes('--force'), false, 'a first install needs no bypass');
@@ -453,6 +459,7 @@ test('a present bundle without an updater keeps the pinned forced reinstall', as
     updaterPresent: () => false,
     releaseOnDisk: () => '4.3.28',
     recordRelease: () => {},
+    recordRefusal: () => {},
   });
   const { args } = calls[0];
   assert.ok(args.includes('--force'), 'a pre-updater bundle can only be refreshed by reinstalling');

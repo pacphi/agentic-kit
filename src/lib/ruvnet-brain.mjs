@@ -161,9 +161,38 @@ export async function latestVersion(options) {
  *  install" in kit.json as the fallback for pre-stamping installs. */
 export function recordInstalledRelease(tag, cfg = loadKitConfig()) {
   if (!tag) return;
-  const cur = cfg.versionCheck?.ruvnetBrain ?? {};
+  // A release that landed ends any held refresh (see recordHeldRefresh).
+  const { heldRefresh: _cleared, ...cur } = cfg.versionCheck?.ruvnetBrain ?? {};
   cfg.versionCheck = { ...cfg.versionCheck, ruvnetBrain: { ...cur, installedRelease: String(tag).replace(/^v/, '') } };
   try { saveKitConfig(cfg); } catch { /* read-only envs: best-effort */ }
+}
+
+/** Hold a refused refresh. The installer or the bundle's updater refused (a
+ *  private-overlay preflight, a stale updater) or ran without landing anything;
+ *  re-running it on every sync cannot succeed and re-downloads the bundle. The
+ *  record keeps the causal text and the release pair it was refused for, in the
+ *  same resolution drift() uses (disk first, then ak's stamp); status stops
+ *  offering the refresh while that exact pair stands. */
+export function recordHeldRefresh({ detail, latest }, cfg = loadKitConfig()) {
+  if (!latest) return;
+  const cur = cfg.versionCheck?.ruvnetBrain ?? {};
+  const installed = installedReleaseOnDisk() ?? cur.installedRelease ?? null;
+  cfg.versionCheck = {
+    ...cfg.versionCheck,
+    ruvnetBrain: {
+      ...cur,
+      heldRefresh: { detail: String(detail ?? '').slice(0, 320), installed, latest: String(latest).replace(/^v/, ''), at: Date.now() },
+    },
+  };
+  try { saveKitConfig(cfg); } catch { /* read-only envs: best-effort */ }
+}
+
+/** The held refresh that still applies to this drift result, or null: only an
+ *  exact (installed, latest) match holds — either release changing is a new attempt. */
+export function activeHeldRefresh(b) {
+  const held = b?.heldRefresh;
+  if (!held || !b.latest) return null;
+  return held.latest === b.latest && (held.installed ?? null) === (b.installedRelease ?? null) ? held : null;
 }
 
 /** Pure drift classifier — both sides in the RELEASE-TAG namespace.
@@ -214,5 +243,6 @@ export async function drift({ force = false } = {}) {
     latestSource: fresh ? 'cache' : 'live',
     latestObservedAt,
     pluginVersion: installedVersion(),
+    heldRefresh: cached.heldRefresh ?? null,
   };
 }

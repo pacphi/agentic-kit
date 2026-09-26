@@ -31,6 +31,10 @@
   undone within hours and every sync repeated the repair (14 repairs observed
   2026-09-04 → 2026-09-23). The placeholder keeps the name taken and is never itself a
   repair target.
+  2026-09-26: a Brain refresh that the installer or the bundle's updater refused, or that
+  ran without changing the installed release, is held: the status row keeps its cause and
+  the user's options but carries no sync action until the installed or latest release
+  changes (#237). Existing installs now refresh through the bundle's own updater.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0001](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0001-one-routing-policy-many-projections.md),
   [ADR-0006](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0006-primary-host-and-ambidextrous-mirroring.md),
@@ -97,6 +101,8 @@ seats. A successful Claude/Codex transport check therefore cannot be called a co
    requires the installer's exact `ruvnet-brain.zip` asset before prescribing a KB refresh. A
    missing asset is reported as an upstream deferral with no automatic action; an installer that
    was already launched still fails closed and preserves its causal error in convergence output.
+   A refresh the installer or updater refused is then held, with no sync action, until the
+   installed or latest release changes.
 
 ## Consequences
 
