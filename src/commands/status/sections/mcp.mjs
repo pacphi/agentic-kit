@@ -6,8 +6,8 @@ import { row } from '../row.mjs';
 
 /** Rows for one registrationStatus() snapshot. A legacy `ruflo` entry gets a
  *  sync fix only for the scopes register() actually migrates (the shared
- *  legacyRufloDisposition predicate); preserved scopes carry their manual
- *  command in the message and no fix, so sync never plans work it will not do.
+ *  legacyRufloDisposition predicate); preserved scopes carry their removal
+ *  command as a manual fix, so sync never plans work it will not do.
  *  @param {ReturnType<typeof registrationStatus>} mcp
  *  @param {any} cfg */
 export function mcpRows(mcp, cfg) {
@@ -32,7 +32,8 @@ export function mcpRows(mcp, cfg) {
   if (mcp.preservedLegacyScopes.length) {
     const scopes = mcp.preservedLegacyScopes;
     rows.push(row('mcp', 'warn',
-      `legacy 'ruflo'-keyed MCP registration present (${scopes.join(', ')}) — not agentic-kit's registration, so it is preserved; if unwanted, remove it: ${legacyRufloRemovalCommands(scopes)}`));
+      `legacy 'ruflo'-keyed MCP registration present (${scopes.join(', ')}) — not agentic-kit's registration, so it is preserved; remove it yourself if unwanted`,
+      legacyRufloRemovalCommands(scopes), { repair: 'manual' }));
   }
   return rows;
 }

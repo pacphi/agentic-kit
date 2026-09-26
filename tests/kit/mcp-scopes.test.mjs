@@ -217,8 +217,8 @@ for (const [label, shape] of Object.entries(PRESERVED_LEGACY_SHAPES)) {
 
     const legacyRow = mcpSection.mcpRows(status, { mcp: { register: true }, agentBrowser: false })
       .find((r) => /legacy 'ruflo'/.test(r.message));
-    assert.equal(legacyRow.fix, null, 'sync cannot perform this, so the row carries no sync fix');
-    assert.match(legacyRow.message, /claude mcp remove ruflo -s user/);
+    assert.equal(legacyRow.fix, 'claude mcp remove ruflo -s user');
+    assert.equal(legacyRow.repair, 'manual', 'sync cannot perform this, so it is never planned');
   });
 }
 
@@ -242,9 +242,10 @@ test("ak's own legacy 'ruflo mcp start' registration is still migrated (control)
   const legacyRow = mcpSection.mcpRows(status, { mcp: { register: true }, agentBrowser: false })
     .find((r) => /legacy 'ruflo'/.test(r.message));
   assert.equal(legacyRow.fix, 'sync migrates it to claude-flow at user scope');
+  assert.equal(legacyRow.repair, 'sync');
 });
 
-test('a project-scope legacy entry is reported with its manual command and no sync fix', (t) => {
+test('a project-scope legacy entry is reported with its manual command, never a sync fix', (t) => {
   const { home, cwd } = fixture(t);
   fs.writeFileSync(path.join(cwd, '.mcp.json'), JSON.stringify({
     mcpServers: { ruflo: { command: 'ruflo', args: ['mcp', 'start'] } },
@@ -254,6 +255,6 @@ test('a project-scope legacy entry is reported with its manual command and no sy
   const status = registrationStatus({ cwd, home, settingsFile: path.join(home, 'settings.json') });
   const legacyRow = mcpSection.mcpRows(status, { mcp: { register: true }, agentBrowser: false })
     .find((r) => /legacy 'ruflo'/.test(r.message));
-  assert.equal(legacyRow.fix, null);
-  assert.match(legacyRow.message, /claude mcp remove ruflo -s project/);
+  assert.equal(legacyRow.fix, 'claude mcp remove ruflo -s project');
+  assert.equal(legacyRow.repair, 'manual');
 });

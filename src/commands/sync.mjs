@@ -67,6 +67,23 @@ export function lifecycleRefreshRequired(subsystems, hostId) {
   return subsystems.has(hostId) || (hostId === 'opencode' && subsystems.has('versions'));
 }
 
+/** Print the plan, or why there is none, plus the count of manual steps sync
+ *  leaves to the user (status/row.mjs repair contract). With manual rows left,
+ *  an empty plan is never reported as "all subsystems healthy". Returns false
+ *  when there is nothing to apply. */
+function announcePlan(plan, manual) {
+  const manualNote = `${manual.length} item(s) need a manual step — \`ak status\` shows them as "→ manual:"`;
+  if (plan.length === 0) {
+    if (manual.length) info(`nothing sync can do — ${manualNote}`);
+    else ok('nothing to do — all subsystems healthy');
+    return false;
+  }
+  console.log(bold(`sync plan (${plan.length} action(s)):`));
+  for (const p of plan) console.log(`  • [${p.subsystem}] ${p.fix} ${dim(`— because: ${p.message}`)}`);
+  if (manual.length) info(dim(manualNote));
+  return true;
+}
+
 /** Preserve a failed mutation for the final convergence proof. A failed heal
  * may leave an existing but stale capability on disk, so post-heal presence
  * alone is not success evidence. */
@@ -100,6 +117,8 @@ export const help = `ak sync — converge to good: upgrade + heal + verify
 Builds a plan from the same collector \`ak status\` uses, then applies it in
 order: upgrades first (they wipe native modules), then heals, then re-collects
 to prove convergence. Idempotent — safe to run any time. When in doubt, run this.
+Only fixes a sync step performs are planned; a status row marked "→ manual:"
+(a command you run, a file you edit, a login) is counted but never applied.
 
 Usage: ak sync [options]
 
@@ -488,7 +507,9 @@ export const SYNC_STEPS = [
   // footer with no re-inject planned.
   {
     id: 'statusline',
-    when: (subs) => subs.has('statusline') || subs.has('versions') || subs.has('providers'),
+    // 'statusline/cve': fixStatusline also injects the CVE-counter overlay
+    // that row promises (a planned overlay fix used to run no step at all).
+    when: (subs) => subs.has('statusline') || subs.has('statusline/cve') || subs.has('versions') || subs.has('providers'),
     run: async (ctx) => {
       // withProgress: fixStatusline blocks on a node subprocess (ruflo's helper
       // refresh, up to 30s). The interval can't animate through a synchronous
@@ -568,10 +589,12 @@ export async function run({
   // preview may be cache-stale by up to one TTL window.
   await refreshPlanDrift(flags, fetchLatest, pkgRoot);
   const rows = await collectFn({ pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions });
-  const plan = rows.filter((r) => r.fix)
-    // Model lifecycle actions are explicit advisory commands. `ak status` must
-    // name them, but sync neither refreshes catalogs nor applies model plans.
-    .filter((r) => r.subsystem !== 'models')
+  // Only fixes a sync step performs enter the plan (status/row.mjs repair
+  // contract, #237). A manual fix — a command the user runs, a file they edit,
+  // a login, an explicit model-lifecycle command — is named by `ak status` and
+  // counted below, but sync never plans or claims it.
+  const manual = rows.filter((r) => r.fix && r.repair === 'manual');
+  const plan = rows.filter((r) => r.fix && r.repair !== 'manual')
     .filter((r) => !(flags['no-upgrade'] && ['versions', 'self', 'ruvnet-brain', 'ruvector'].includes(r.subsystem)))
     // A ruflo-components row asking for a ruflo UPGRADE (state 'needs-ruflo') gets the
     // same --no-upgrade treatment as 'versions': the component can't actually apply
@@ -585,10 +608,7 @@ export async function run({
     plan.push({ subsystem: 'aqe-embedding', message: 'selected semantic backend requires live verification',
       fix: 'verify selected backend and repair missing opted-in local model' });
   }
-  if (plan.length === 0) { ok('nothing to do — all subsystems healthy'); return 0; }
-
-  console.log(bold(`sync plan (${plan.length} action(s)):`));
-  for (const p of plan) console.log(`  • [${p.subsystem}] ${p.fix} ${dim(`— because: ${p.message}`)}`);
+  if (!announcePlan(plan, manual)) return 0;
   if (flags['dry-run']) return 0;
   console.log('');
 

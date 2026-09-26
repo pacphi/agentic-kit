@@ -274,6 +274,22 @@ function codexMcpRegistrations(file, scope) {
   return codexMcpSections(file, scope).map(({ start: _start, end: _end, source: _source, ...entry }) => entry);
 }
 
+/** Enabled Ruflo transports after layering. Merge observed fields
+ *  user→project: a timeout-only project table inherits the user's transport.
+ *  Raw tables stay separate elsewhere for exact repair matching. */
+function effectiveRufloRegistrationsOf(registrations) {
+  const layered = new Map();
+  for (const entry of [...registrations].reverse()) {
+    const prior = layered.get(entry.name);
+    layered.set(entry.name, { ...entry,
+      command: entry.command ?? prior?.command,
+      args: entry.args ?? prior?.args,
+      enabled: entry.enabled ?? prior?.enabled ?? true,
+    });
+  }
+  return [...layered.values()].filter((entry) => entry.enabled && isRufloMcpTransport(entry));
+}
+
 /** Effective Codex MCP topology across project and user configuration.
  * Reports stall-prone recursive Codex registration, concrete AQE registration,
  * and redundant Ruflo transports without mutating any user-owned config. */
@@ -289,20 +305,8 @@ export function codexMcpTopology({ cwd = process.cwd(), home = os.homedir() } = 
   const agenticQeRegistrations = registrations.filter((entry) => entry.name === 'agentic-qe');
   // Detection is broader than permission to remove a table. Custom environment
   // and timeout fields preserve ownership without hiding duplicate transports.
-  const isRuflo = (entry) => isRufloMcpTransport(entry);
-  const rufloRegistrations = registrations.filter(isRuflo);
-  // Merge observed fields user→project: a timeout-only project table inherits
-  // the user's transport. Keep raw tables separate for exact repair matching.
-  const layered = new Map();
-  for (const entry of [...registrations].reverse()) {
-    const prior = layered.get(entry.name);
-    layered.set(entry.name, { ...entry,
-      command: entry.command ?? prior?.command,
-      args: entry.args ?? prior?.args,
-      enabled: entry.enabled ?? prior?.enabled ?? true,
-    });
-  }
-  const effectiveRufloRegistrations = [...layered.values()].filter((entry) => entry.enabled && isRuflo(entry));
+  const rufloRegistrations = registrations.filter((entry) => isRufloMcpTransport(entry));
+  const effectiveRufloRegistrations = effectiveRufloRegistrationsOf(registrations);
   return {
     files,
     registrations,
@@ -335,6 +339,22 @@ export function codexMcpRepairPlan(topology) {
     add(entry, 'replaces the deprecated legacy Ruflo transport with canonical workspace-aware [mcp_servers.ruflo]');
   }
   return targets;
+}
+
+/** Would sync's confirmed repair (codexMcpRepairPlan → codex-mcp-repair step
+ *  and reconcileCodexMcp) actually clear each topology hazard? Status uses
+ *  this to mark a hazard's fix as a 'sync' or 'manual' repair (#237), so a
+ *  custom recursive table or a duplicate carrying user fields is never planned
+ *  as sync work that sync will refuse. */
+export function codexMcpRepairOutcome(topology, plan = codexMcpRepairPlan(topology)) {
+  const planned = (entry) => plan.some((target) =>
+    target.file === entry.file && target.scope === entry.scope && target.name === entry.name);
+  const remaining = topology.registrations.filter((entry) => !planned(entry));
+  return {
+    recursiveRepairable: topology.selfRegistrations.length > 0 && topology.selfRegistrations.every(planned),
+    duplicateRepairable: plan.some((target) => target.repairKind === 'legacy-ruflo')
+      && effectiveRufloRegistrationsOf(remaining).length <= 1,
+  };
 }
 
 function sameRepairIdentity(left, right) {

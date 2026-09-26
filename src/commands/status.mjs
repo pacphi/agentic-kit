@@ -1,6 +1,7 @@
 // ak status — read-only dashboard. Each row: subsystem, level, message,
-// and (for drift) what `sync` would do. --json emits the raw rows; --hint
-// (set by bare invocation) appends exactly one suggested next action.
+// and (for drift) a fix plus who performs it (`repair`: 'sync' or 'manual',
+// see status/row.mjs). --json emits the raw rows; --hint (set by bare
+// invocation) appends exactly one suggested next action.
 import { glyph, dim, bold, warn } from '../lib/output.mjs';
 import { loadRing, detectRegression } from '../lib/health-history.mjs';
 import { loadKitConfig } from '../lib/config.mjs';
@@ -24,7 +25,9 @@ export const help = `ak status — read-only dashboard of what's true and what's
 
 Prints one row per subsystem (versions, natives, security, learning, providers,
 …). Read-only: it never changes anything. A bare \`ak\` runs this plus one
-suggested next action.
+suggested next action. A row's "→" fix is what \`ak sync\` performs; "→ manual:"
+marks a step you run yourself (sync never plans it). --json rows carry the same
+distinction as \`repair\`: "sync", "manual", or null when there is no fix.
 
 Usage: ak status [options]
 
@@ -104,17 +107,25 @@ export async function run({ flags, pkgRoot }) {
   for (const r of rows) {
     const label = r.subsystem === last ? ' '.repeat(r.subsystem.length) : r.subsystem;
     last = r.subsystem;
-    console.log(`  ${glyph(r.level)} ${label.padEnd(11)} ${r.message}${r.fix ? dim(`  → ${r.fix}`) : ''}`);
+    // A manual fix is labelled so nobody expects `ak sync` to perform it.
+    const fix = r.fix ? dim(`  → ${r.repair === 'manual' ? 'manual: ' : ''}${r.fix}`) : '';
+    console.log(`  ${glyph(r.level)} ${label.padEnd(11)} ${r.message}${fix}`);
   }
 
   // health-history: alarm on any backslide since the previous sync snapshot.
   for (const reg of detectRegression(loadRing(loadKitConfig()))) warn(`regression: ${reg.message}`);
 
   if (flags.hint) {
-    const actionable = rows.filter((r) => r.fix);
+    const bySync = rows.filter((r) => r.fix && r.repair !== 'manual');
+    const manual = rows.filter((r) => r.fix && r.repair === 'manual');
     console.log('');
     if (worst === 'ok') console.log(`${glyph('ok')} all healthy — nothing to do`);
-    else console.log(`${actionable.length} item(s) need attention — run: ${bold('ak sync')}${worst === 'fail' ? '' : dim('  (or --dry-run to preview)')}`);
+    else if (!bySync.length && manual.length) {
+      console.log(`${manual.length} item(s) need attention — run the "→ manual:" step(s) above yourself; ak sync does not perform them`);
+    } else {
+      const more = manual.length ? dim(` · ${manual.length} more need a manual step (→ manual:)`) : '';
+      console.log(`${bySync.length} item(s) need attention — run: ${bold('ak sync')}${worst === 'fail' ? '' : dim('  (or --dry-run to preview)')}${more}`);
+    }
     console.log(dim('📊 ak dashboard — open the local web dashboard (http://127.0.0.1:7431)'));
   }
   return worst === 'fail' ? 1 : 0;

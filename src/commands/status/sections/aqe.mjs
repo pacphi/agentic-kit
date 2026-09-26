@@ -35,7 +35,8 @@ export default {
         `${findings.length} oversized RVF store(s) (runaway append) — quarantine before they eat the disk`,
         'sync quarantines them (aqe rebuilds the store)')];
     }
+    // A verification the user runs — sync has no step that performs it.
     return [...rows, row('aqe', 'info', 'agentic-qe initialized; no oversized RVF stores detected; runtime readiness unverified',
-      'run: ak x verify aqe')];
+      'run: ak x verify aqe', { repair: 'manual' })];
   },
 };

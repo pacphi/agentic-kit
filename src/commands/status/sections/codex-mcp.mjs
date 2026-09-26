@@ -4,7 +4,9 @@
 //
 // Three independently-probed concerns share the codex-mcp subsystem tag, each
 // with its own try/catch: one probe throwing must not silence the other two.
-import { codexMcpStatus, codexMcpTopology, rufloCodexMcpStatus } from '../../../lib/mcp.mjs';
+import {
+  codexMcpStatus, codexMcpTopology, codexMcpRepairOutcome, rufloCodexMcpStatus,
+} from '../../../lib/mcp.mjs';
 import { have } from '../../../lib/exec.mjs';
 import { row } from '../row.mjs';
 
@@ -12,9 +14,11 @@ function legacyProjectionRows(cfg, cwd) {
   try {
     const { registered, owned } = codexMcpStatus(cfg, cwd);
     if (registered) {
-      return [row('codex-mcp', 'warn',
-        `deprecated codex mcp-server registered${owned ? ' — agentic-kit-owned' : ' — user-owned; preserved'}`,
-        owned ? 'sync retires the legacy MCP entry' : 'remove manually: claude mcp remove codex -s project')];
+      return [owned
+        ? row('codex-mcp', 'warn', 'deprecated codex mcp-server registered — agentic-kit-owned',
+          'sync retires the legacy MCP entry')
+        : row('codex-mcp', 'warn', 'deprecated codex mcp-server registered — user-owned; preserved',
+          'claude mcp remove codex -s project', { repair: 'manual' })];
     }
     return [row('codex-mcp', 'ok', 'legacy codex mcp-server absent; supervised cross-host execution uses ak run')];
   } catch (e) {
@@ -53,28 +57,39 @@ async function rufloIntegrationRows(cfg) {
 // stall a Codex-driven worker even when another tool created them. The
 // agentic-qe check is gated on kit.json intent: with `aqe: false` the user
 // opted out of AQE, so its Codex registration is neither expected nor advised.
+// Each hazard's fix is a 'sync' repair only when sync's confirmed repair would
+// clear it (codexMcpRepairOutcome); otherwise the user must review it.
 function topologyRows(cwd, cfg) {
   const rows = [];
   try {
     const topology = codexMcpTopology({ cwd });
+    const outcome = codexMcpRepairOutcome(topology);
     if (topology.selfRegistrations.length) {
       const scopes = topology.selfRegistrations.map((entry) => entry.scope).join(', ');
-      rows.push(row('codex-mcp', 'fail',
-        `recursive codex → codex mcp-server registration detected (${scopes})`,
-        'remove the [mcp_servers.codex] table from the reported Codex config before live multi-host runs'));
+      rows.push(outcome.recursiveRepairable
+        ? row('codex-mcp', 'fail', `recursive codex → codex mcp-server registration detected (${scopes})`,
+          'sync removes the exact recursive [mcp_servers.codex] table after confirmation (backed up)')
+        : row('codex-mcp', 'fail', `recursive codex → codex mcp-server registration detected (${scopes})`,
+          'remove the [mcp_servers.codex] table from the reported Codex config before live multi-host runs',
+          { repair: 'manual' }));
     }
     if (cfg.aqe !== false) {
       if (!topology.agenticQeRegistrations.length) {
+        // Agentic-QE owns its Codex registration (ADR-0033); sync never writes it.
         rows.push(row('codex-mcp', 'warn', 'agentic-qe MCP is not concretely registered in Codex',
-          'run: aqe platform setup codex --overwrite --with-ruflo'));
+          'run: aqe platform setup codex --overwrite --with-ruflo', { repair: 'manual' }));
       } else {
         rows.push(row('codex-mcp', 'ok', 'agentic-qe MCP concretely registered in Codex'));
       }
     }
     if (topology.duplicateRuflo) {
-      rows.push(row('codex-mcp', 'warn',
-        `duplicate Ruflo MCP registrations in Codex: ${topology.effectiveRufloRegistrations.map((entry) => entry.name).join(', ')}`,
-        'run: ak sync — offers a backed-up repair and remembers approved user-scope legacy corrections; custom entries require review'));
+      const names = topology.effectiveRufloRegistrations.map((entry) => entry.name).join(', ');
+      rows.push(outcome.duplicateRepairable
+        ? row('codex-mcp', 'warn', `duplicate Ruflo MCP registrations in Codex: ${names}`,
+          'sync offers a backed-up repair and remembers approved user-scope legacy corrections')
+        : row('codex-mcp', 'warn', `duplicate Ruflo MCP registrations in Codex: ${names} — custom entries sync will not remove`,
+          `review the Codex config and remove the extra Ruflo table(s) yourself: ${[...new Set(topology.rufloRegistrations.map((entry) => entry.file))].join(', ')}`,
+          { repair: 'manual' }));
     }
   } catch (e) {
     rows.push(row('codex-mcp', 'warn', `Codex MCP topology check unavailable: ${e.message}`));

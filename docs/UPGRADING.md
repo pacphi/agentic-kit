@@ -39,6 +39,14 @@ and supported `claude mcp serve` tool exposure are preserved. See
 [ADR-0051](adr/0051-supported-peer-delegation-and-host-realignment.md) for the policy,
 official source citations, authority boundaries and verification limits.
 
+## 2026-09-26: Status rows say who performs each fix
+
+Every `ak status --json` row (and each `/api/status` row) gains `repair`: `"sync"` when an
+`ak sync` step performs the row's `fix`, `"manual"` when you must do it yourself, and `null` when the
+row has no fix. `ak sync` plans only `"sync"` fixes and reports how many manual steps remain; text
+status prints a manual fix as `→ manual: …`. Scripts that treated every `fix` as sync work should
+filter on `repair`.
+
 ## 2026-09-10: Remembered Codex MCP correction
 
 Claude Code's `claude-flow` registration and Codex's `ruflo` registration follow

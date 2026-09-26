@@ -3,31 +3,36 @@
     "subsystem": "models",
     "level": "info",
     "message": "no local model inventory yet; run `ak models refresh` explicitly",
-    "fix": null
+    "fix": null,
+    "repair": null
   },
   {
     "subsystem": "versions",
     "level": "ok",
     "message": "ruflo 9.9.9 (latest known; cache; observed time unknown)",
-    "fix": null
+    "fix": null,
+    "repair": null
   },
   {
     "subsystem": "versions",
     "level": "ok",
     "message": "agentic-qe 9.9.9 (latest known; cache; observed time unknown)",
-    "fix": null
+    "fix": null,
+    "repair": null
   },
   {
     "subsystem": "ruflo-components",
     "level": "info",
     "message": "ruflo components: 0 of 7 active (ruflo 9.9.9)",
-    "fix": null
+    "fix": null,
+    "repair": null
   },
   {
     "subsystem": "ruflo-components",
     "level": "ok",
     "message": "Typesafe agent picker — user-managed: You set your own value or opted out; ak reports it and leaves it alone.",
     "fix": null,
+    "repair": null,
     "state": "user-managed"
   },
   {
@@ -35,6 +40,7 @@
     "level": "ok",
     "message": "MiniLM agent picker — user-managed: You set your own value or opted out; ak reports it and leaves it alone.",
     "fix": null,
+    "repair": null,
     "state": "user-managed"
   },
   {
@@ -42,6 +48,7 @@
     "level": "ok",
     "message": "MCP tool governance — user-managed: You set your own value or opted out; ak reports it and leaves it alone.",
     "fix": null,
+    "repair": null,
     "state": "user-managed"
   },
   {
@@ -49,6 +56,7 @@
     "level": "ok",
     "message": "Learning profile — user-managed: You set your own value or opted out; ak reports it and leaves it alone.",
     "fix": null,
+    "repair": null,
     "state": "user-managed"
   },
   {
@@ -56,6 +64,7 @@
     "level": "ok",
     "message": "MetaHarness turn-credit — user-managed: You set your own value or opted out; ak reports it and leaves it alone.",
     "fix": null,
+    "repair": null,
     "state": "user-managed"
   },
   {
@@ -63,6 +72,7 @@
     "level": "ok",
     "message": "Memory durability fix (#2887) — user-managed: You set your own value or opted out; ak reports it and leaves it alone.",
     "fix": null,
+    "repair": null,
     "state": "user-managed"
   },
   {
@@ -70,6 +80,7 @@
     "level": "ok",
     "message": "Ruflo funnel (promotions) — user-managed: You set your own value or opted out; ak reports it and leaves it alone.",
     "fix": null,
+    "repair": null,
     "state": "user-managed"
   },
   {
@@ -77,127 +88,148 @@
     "level": "info",
     "message": "Encryption at rest — not yet managed: ak does not manage this yet; it is waiting on ADR-0059, so nothing here needs ak sync.",
     "fix": null,
+    "repair": null,
     "state": "not-managed-yet"
   },
   {
     "subsystem": "self",
     "level": "ok",
     "message": "kit <self-version> (latest)",
-    "fix": null
+    "fix": null,
+    "repair": null
   },
   {
     "subsystem": "natives",
     "level": "warn",
     "message": "no agentdb locations found under global ruflo",
-    "fix": "setup/sync installs ruflo"
+    "fix": "setup/sync installs ruflo",
+    "repair": "sync"
   },
   {
     "subsystem": "natives",
     "level": "fail",
     "message": "agentic-qe better-sqlite3 not native",
-    "fix": "sync repairs it"
+    "fix": "sync repairs it",
+    "repair": "sync"
   },
   {
     "subsystem": "memory",
     "level": "info",
     "message": "no project memory store yet (run setup here to initialize)",
-    "fix": null
+    "fix": null,
+    "repair": null
   },
   {
     "subsystem": "npx",
     "level": "ok",
     "message": "npx cache holds no stale ruflo-family envs",
-    "fix": null
+    "fix": null,
+    "repair": null
   },
   {
     "subsystem": "security",
     "level": "warn",
     "message": "@claude-flow/security not found under global ruflo",
-    "fix": null
+    "fix": null,
+    "repair": null
   },
   {
     "subsystem": "learning",
     "level": "info",
     "message": "no learning state in this project (run setup here to activate)",
-    "fix": null
+    "fix": null,
+    "repair": null
   },
   {
     "subsystem": "aqe-embedding",
     "level": "info",
     "message": "unmanaged; backend missing-backend; live model and corpus compatibility unverified",
-    "fix": null
+    "fix": null,
+    "repair": null
   },
   {
     "subsystem": "aqe-embedding",
     "level": "warn",
     "message": "semantic backend missing; choose one with ak x aqe-embedding configure",
-    "fix": null
+    "fix": null,
+    "repair": null
   },
   {
     "subsystem": "aqe",
     "level": "info",
     "message": "agentic-qe not initialized in this project",
-    "fix": null
+    "fix": null,
+    "repair": null
   },
   {
     "subsystem": "agentdb",
     "level": "warn",
     "message": "agentdb CLI not installed (harvest write path unavailable)",
-    "fix": "setup/sync installs it (pinned to ruflo's bundled agentdb)"
+    "fix": "setup/sync installs it (pinned to ruflo's bundled agentdb)",
+    "repair": "sync"
   },
   {
     "subsystem": "agent-browser",
     "level": "info",
     "message": "managed Ruflo browser executor disabled in kit.json",
-    "fix": null
+    "fix": null,
+    "repair": null
   },
   {
     "subsystem": "mcp",
     "level": "warn",
     "message": "ruflo MCP not registered",
-    "fix": "setup/sync registers claude-flow at user scope"
+    "fix": "setup/sync registers claude-flow at user scope",
+    "repair": "sync"
   },
   {
     "subsystem": "deja-vu",
     "level": "info",
     "message": "deja-vu disabled — package, host wiring, and history remain unprobed",
-    "fix": null
+    "fix": null,
+    "repair": null
   },
   {
     "subsystem": "hosts",
     "level": "fail",
     "message": "claude enabled but not installed (primary)",
-    "fix": "sync installs @anthropic-ai/claude-code"
+    "fix": "sync installs @anthropic-ai/claude-code",
+    "repair": "sync"
   },
   {
     "subsystem": "providers",
     "level": "info",
     "message": "claude-only (default host)",
-    "fix": null
+    "fix": null,
+    "repair": null
   },
   {
     "subsystem": "daemons",
     "level": "ok",
     "message": "none running",
-    "fix": null
+    "fix": null,
+    "repair": null
   },
   {
     "subsystem": "blocks",
     "level": "warn",
     "message": "3 CLAUDE.md block(s) drifted: ruflo-preamble→upserted, ruflo-reference→upserted, ruflo-aqe-reference→upserted",
-    "fix": "sync reconciles blocks"
+    "fix": "sync reconciles blocks",
+    "repair": "sync"
   },
   {
     "subsystem": "statusline",
     "level": "info",
     "message": "no project statusline here (created by setup)",
-    "fix": null
+    "fix": null,
+    "repair": null
   },
   {
     "subsystem": "context",
     "level": "info",
     "message": "Host context controls not inspected; live session window and usage unverified",
     "fix": null,
+    "repair": null,
     "contextReport": {
       "schemaVersion": 1,
       "observedAt": "<inspection-time>",

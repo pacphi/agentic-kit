@@ -12,7 +12,9 @@ export default {
       if (!snapshot) rows.push(row('models', 'info', 'no local model inventory yet; run `ak models refresh` explicitly'));
       else {
         const health = summarizeModelHealth(snapshot);
-        rows.push(row('models', health.level, health.message, health.fix));
+        // Model lifecycle actions are explicit advisory commands; sync never
+        // refreshes catalogs or applies model plans.
+        rows.push(row('models', health.level, health.message, health.fix, { repair: 'manual' }));
       }
     } catch (error) {
       rows.push(row('models', 'warn', `model inventory unavailable: ${error.message}; run \`ak models refresh\` explicitly`));

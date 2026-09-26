@@ -17,7 +17,7 @@ function opencodeWiringRow(st, conv) {
   if (st.parseError) {
     return row('opencode', 'warn',
       'opencode.json is not plain JSON (JSONC comments?) — ak refuses to touch it',
-      'merge the ak wiring manually');
+      'merge the ak wiring manually', { repair: 'manual' });
   }
   if (!st.exists || !st.claudeFlow) {
     return row('opencode', 'warn',
@@ -79,7 +79,7 @@ function opencodeAgentsRow({ ag, gateway, source }) {
   if (ag.count === 0 && !source) {
     return row('opencode', 'warn',
       'no ruflo catalog source (marketplace clone or @claude-flow/cli)',
-      'install ruflo (or claude marketplace) for the agent catalog');
+      'install ruflo (or claude marketplace) for the agent catalog', { repair: 'manual' });
   }
   if (ag.count === 0) {
     return row('opencode', 'warn', 'no Agentic Kit specialist projection', 'sync deploys the specialist dispatcher');
@@ -117,7 +117,8 @@ export async function opencodeDetailRows({ cfg, pkgRoot, facts, hostId: _hostId 
     if (receiptState.adoptionBlocked) {
       rows.push(row('opencode', 'warn',
         'artifact receipt ledger is malformed — ownership adoption blocked; artifacts left untouched',
-        'repair integrations.ownership.opencode.managed.artifacts in kit.json or restore it from backup'));
+        'repair integrations.ownership.opencode.managed.artifacts in kit.json or restore it from backup',
+        { repair: 'manual' }));
       return rows;
     }
 

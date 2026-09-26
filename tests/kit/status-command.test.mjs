@@ -109,7 +109,7 @@ test('disabled and unowned deja-vu status is informational and calls no adapter 
   assert.deepEqual(calls, []);
   assert.deepEqual(rows, [{
     subsystem: 'deja-vu', level: 'info',
-    message: 'deja-vu disabled — package, host wiring, and history remain unprobed', fix: null,
+    message: 'deja-vu disabled — package, host wiring, and history remain unprobed', fix: null, repair: null,
   }]);
   assert.doesNotMatch(JSON.stringify(rows), /SENTINEL|\/Users\//);
 });
@@ -432,8 +432,8 @@ test('a legacy ruflo-keyed MCP registration in another form is reported as prese
   const rows = rowsFor(await collect(), 'mcp');
   const legacy = rows.find((r) => r.message.includes('legacy'));
   assert.ok(legacy, 'a legacy registration must surface');
-  assert.equal(legacy.fix, null);
-  assert.match(legacy.message, /claude mcp remove ruflo -s user/);
+  assert.equal(legacy.fix, 'claude mcp remove ruflo -s user');
+  assert.equal(legacy.repair, 'manual', 'sync never removes it, so it must never plan it');
   fs.rmSync(paths.claudeUserMcpPath(), { force: true });
 });
 
@@ -448,6 +448,18 @@ test('a registered claude-flow MCP reports ok with the deny-rule count', async (
   assert.equal(row.level, 'ok');
   assert.match(row.message, /1 tool\(s\) denied/);
   fs.rmSync(paths.claudeUserMcpPath(), { force: true });
+});
+
+test('the AQE readiness hint is a manual step, never a sync plan item', async () => {
+  seedHome();
+  fs.mkdirSync(paths.projectAqeDir(PROJECT), { recursive: true });
+  try {
+    const hint = rowsFor(await collect(), 'aqe').find((r) => /ak x verify aqe/.test(r.fix ?? ''));
+    assert.ok(hint, 'the initialized-project hint must surface');
+    assert.equal(hint.repair, 'manual');
+  } finally {
+    rmrf(paths.projectAqeDir(PROJECT));
+  }
 });
 
 test('project-scope rows degrade to info in a project that was never set up', async () => {
@@ -575,8 +587,56 @@ test('Codex MCP topology fails recursive self-registration and reports missing A
     assert.equal(rows.find((r) => /recursive codex/.test(r.message))?.level, 'fail');
     assert.equal(rows.find((r) => /agentic-qe MCP is not concretely/.test(r.message))?.level, 'warn');
     assert.equal(rows.find((r) => /duplicate Ruflo/.test(r.message))?.level, 'warn');
+    // Who repairs each: sync removes the exact recursive and legacy tables it
+    // can prove (codexMcpRepairPlan); Agentic-QE owns its own Codex registration.
+    assert.equal(rows.find((r) => /recursive codex/.test(r.message))?.repair, 'sync');
+    assert.equal(rows.find((r) => /duplicate Ruflo/.test(r.message))?.repair, 'sync');
+    assert.equal(rows.find((r) => /agentic-qe MCP is not concretely/.test(r.message))?.repair, 'manual');
   } finally {
     rmrf(path.join(PROJECT, '.codex'));
+  }
+});
+
+test('Codex MCP topology marks custom recursive and duplicate registrations for manual review', async () => {
+  seedHome(offlineKitConfig({
+    integrations: { version: 3, hosts: { claude: true, codex: true, opencode: false }, bindings: [], ownership: {} },
+  }));
+  fs.mkdirSync(path.join(PROJECT, '.codex'), { recursive: true });
+  fs.writeFileSync(path.join(PROJECT, '.codex', 'config.toml'), [
+    '[mcp_servers.codex]', 'command = "codex"', 'args = ["mcp-server"]', 'startup_timeout_sec = 30',
+  ].join('\n'));
+  fs.mkdirSync(paths.codexDir(), { recursive: true });
+  fs.writeFileSync(paths.codexConfigPath(), [
+    '[mcp_servers.claude-flow]', 'command = "ruflo"', 'args = ["mcp", "start"]', '',
+    '[mcp_servers.claude-flow.env]', 'PRIVATE_DB = "keep"', '',
+    '[mcp_servers.ruflo]', 'command = "ak"', 'args = ["x", "ruflo-mcp"]',
+  ].join('\n'));
+  try {
+    const rows = rowsFor(await collect(), 'codex-mcp');
+    const recursive = rows.find((r) => /recursive codex/.test(r.message));
+    const duplicate = rows.find((r) => /duplicate Ruflo/.test(r.message));
+    assert.equal(recursive?.repair, 'manual', 'a table with extra fields is not provably ak-removable');
+    assert.equal(duplicate?.repair, 'manual', 'a duplicate carrying a user env is preserved by sync');
+    assert.doesNotMatch(duplicate.fix, /ak sync/, 'the manual fix must not send the user to a sync that will not act');
+  } finally {
+    rmrf(path.join(PROJECT, '.codex'));
+  }
+});
+
+test('a user-owned deprecated codex mcp-server entry is a manual removal', async () => {
+  seedHome(offlineKitConfig({
+    integrations: { version: 3, hosts: { claude: true, codex: true, opencode: false }, bindings: [], ownership: {} },
+  }));
+  fs.writeFileSync(path.join(PROJECT, '.mcp.json'), JSON.stringify({
+    mcpServers: { codex: { command: 'codex', args: ['mcp-server'] } },
+  }));
+  try {
+    const legacy = rowsFor(await collect(), 'codex-mcp').find((r) => /deprecated codex mcp-server/.test(r.message));
+    assert.ok(legacy, 'the deprecated projection must surface');
+    assert.match(legacy.fix, /claude mcp remove codex/);
+    assert.equal(legacy.repair, 'manual');
+  } finally {
+    rmrf(path.join(PROJECT, '.mcp.json'));
   }
 });
 
@@ -792,6 +852,7 @@ test('enabled + JSONC config: refused honestly with a manual-merge fix, never a 
   assert.ok(oc, 'a JSONC-refused row must surface');
   assert.match(oc.message, /not plain JSON/);
   assert.match(oc.fix, /merge the ak wiring manually/);
+  assert.equal(oc.repair, 'manual', 'sync refuses to rewrite JSONC, so it must not plan this');
   // …and status left the file alone (read-only even here).
   assert.match(fs.readFileSync(ocJsonPath(), 'utf8'), /legal JSONC comment/);
 });

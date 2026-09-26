@@ -131,7 +131,9 @@ and `ak about --json` emits the entries with their detected state.
 
 Overview keeps status and routing in one health-first area:
 
-- **Summary** presents the overall verdict, attention items, and subsystem map.
+- **Summary** presents the overall verdict, attention items, and subsystem map. A row's fix
+  shows an arrow when `ak sync` performs it and a `manual` tag when you must do it yourself
+  (sync never plans those).
 - **Hosts & Routing** presents execution-host health, the primary-host policy, per-activity routes,
   escalation paths, and routed host models. A configured route is assignment intent, not evidence
   of which inference provider served a particular session.

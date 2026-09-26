@@ -1,7 +1,9 @@
 # ADR-0023 — Fail-closed mutations and explicit degraded operation evidence
 
 - **Status:** Implemented
-- **Updated:** 2026-09-20 — ADR-0055 adds qualified AQE embedding lifecycle evidence; ADR-0053 separates host health from usage-source diagnostics
+- **Updated:** 2026-09-26 — §11: every status fix declares who performs it (`repair: sync | manual`);
+  `ak sync` plans only fixes a sync step performs (#237)
+- **Earlier update:** 2026-09-20 — ADR-0055 adds qualified AQE embedding lifecycle evidence; ADR-0053 separates host health from usage-source diagnostics
 - **Earlier update:** 2026-08-26 — ADR-0035 applies fail-closed preflight, bounded evidence, and
   content-free degradation to the opt-in deja-vu companion
 - **Earlier update:** 2026-09-03 — ADR-0044 implements these fail-closed principles in the Maintenance
@@ -246,9 +248,27 @@ names the non-host bytes it drops with their figure — so the bars still accoun
 donut beside them. A reader must never have to reconcile two panels and find the difference
 unexplained.
 
+### 11. A status fix declares who performs it (2026-09-26)
+
+An `ak status` row's `fix` once meant two things: in some rows "an `ak sync` step does this", in
+others "you must do this" (run `ak x verify aqe`, edit a pinned path, log in, remove a registration
+agentic-kit does not own). Sync planned every row with a fix, so an advisory row became a sync
+action that no step performed, and sync still reported convergence (#237).
+
+Every row now carries a repair contract beside its fix: `repair: 'sync'` (the default for a fix)
+means a `SYNC_STEPS` step whose `when` fires for that subsystem performs it; `repair: 'manual'`
+means a human must, and sync never plans it; a row without a fix has `repair: null`. Sync plans only
+`sync` fixes and counts manual ones instead of claiming "all subsystems healthy". Text status prints
+a manual fix as `→ manual: …`, the dashboard tags it `manual`, and `ak status --json` carries the
+field. A row whose repair depends on what sync can prove (a Codex recursive or duplicate MCP table)
+is `sync` only when sync's confirmed repair would clear it. A census test fails when a subsystem can
+emit a `sync` fix that no step handles.
+
 ## Consequences
 
 - A fallback can keep work available without being mislabeled healthy.
+- `ak sync` never plans, performs, or claims a fix that only a human can make; `ak status` says which
+  fixes are manual.
 - An unknown carries information, because nothing that is permanently unknowable is rendered as one.
 - A chart may exclude a category for legibility, but the panel says so and the excluded figure is
   still reachable.
