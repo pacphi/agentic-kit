@@ -46,6 +46,7 @@ import { codexMcpStatus, rufloCodexMcpStatus } from './mcp.mjs';
 import { projectedAqeExternalProviders } from './adapters/aqe-provider.mjs';
 import { applyAqeRouter, aqeRouterDrift, undoAqeRouter } from './aqe-router.mjs';
 import { installGlobalCli } from './npm-global-install.mjs';
+import { guardRufloMemoryRoot, MEMORY_ROOT_UPSTREAM } from './ruflo-memory-config.mjs';
 
 // The AQE-router convergence pipeline itself lives in aqe-router.mjs
 // (ADR-0037); re-exported here so every existing `./providers.mjs` import
@@ -923,9 +924,25 @@ async function applyOneProvider(m, cwd, env, runner) {
   return { label: `${m.id}${r.code === 0 ? '' : '(failed)'}`, attempted: true };
 }
 
+/** Why registration stopped because Ruflo moved its memory root, or ''. */
+function memoryHoldDetail(held) {
+  if (!held) return '';
+  const where = `${held.name} ${held.key} "${held.value}"`;
+  return held.restored
+    ? `; Ruflo rewrote ${where}: ak restored "${held.restoredValue}" so project memory stays put, and skipped the remaining providers (${MEMORY_ROOT_UPSTREAM})`
+    : `; Ruflo rewrote ${where} and ak could not restore it, so Ruflo now looks for project memory there: set it back to "${held.restoredValue}" (${MEMORY_ROOT_UPSTREAM})`;
+}
+
 /** Register configured providers with Ruflo (keys read from env, never passed
  * here). Idempotent — Ruflo upserts. A fresh Ollama entry receives its standard
- * loopback endpoint; a pre-existing custom Ruflo endpoint is preserved. */
+ * loopback endpoint; a pre-existing custom Ruflo endpoint is preserved.
+ *
+ * Registration never moves project memory (ruvnet/ruflo#3193): without Ruflo
+ * JSON configuration, `ruflo providers configure` would create one from
+ * defaults that point memory at ./data/memory, so ak first pins `.swarm` in a
+ * minimal claude-flow.config.json (ruflo-memory-config.mjs) and re-checks after
+ * every call. A moved root is put back and the remaining providers are skipped
+ * (degraded); an unwritable pin skips registration altogether. */
 export async function applyProviders(cfg, cwd = process.cwd(), {
   haveFn = have,
   runner = run,
@@ -935,25 +952,38 @@ export async function applyProviders(cfg, cwd = process.cwd(), {
   const models = cfg.providers?.models ?? [];
   if (models.length === 0) return { ok: true, changed: false, status: 'ok', detail: 'no providers configured' };
   if (!(await haveFn('ruflo'))) return { ok: false, changed: false, status: 'failed', detail: 'ruflo not on PATH' };
+  const guard = guardRufloMemoryRoot(cwd, { env });
+  if (guard.error) {
+    return {
+      ok: false, changed: false, status: 'degraded',
+      detail: `skipped: could not pin Ruflo's memory root in claude-flow.config.json (${guard.error}), `
+        + `and registering without it would move project memory (${MEMORY_ROOT_UPSTREAM})`,
+    };
+  }
   const rufloVersion = versionFn('ruflo');
   const providerSelectionSupported = !rufloVersion
     || cmpVersions(rufloVersion, MIN_RUFLO_PERSISTED_PROVIDER_VERSION) >= 0;
   const done = [];
   let attempted = 0;
+  let held = null;
   for (const m of models) {
     if (!m?.id) continue;
+    if (held) { done.push(`${m.id}(skipped)`); continue; }
     const result = await applyOneProvider(m, cwd, env, runner);
     done.push(result.label);
-    if (result.attempted) attempted += 1;
+    if (!result.attempted) continue;
+    attempted += 1;
+    const moved = guard.check();
+    if (moved.moved) held = moved;
   }
-  const ok = done.every((d) => !d.includes('failed') && !d.includes('invalid'));
+  const failed = done.some((d) => d.includes('failed') || d.includes('invalid'));
   const compatibility = providerSelectionSupported ? ''
     : `; ruflo ${rufloVersion} registers providers but agent_execute needs >=${MIN_RUFLO_PERSISTED_PROVIDER_VERSION} to select persisted config`;
   return {
-    ok,
+    ok: !failed && !held,
     changed: attempted > 0,
-    status: !ok ? 'failed' : providerSelectionSupported ? 'ok' : 'degraded',
-    detail: `registered: ${done.join(', ')}${compatibility}`,
+    status: failed ? 'failed' : held || !providerSelectionSupported ? 'degraded' : 'ok',
+    detail: `registered: ${done.join(', ')}${memoryHoldDetail(held)}${compatibility}`,
   };
 }
 

@@ -39,6 +39,19 @@ and supported `claude mcp serve` tool exposure are preserved. See
 [ADR-0051](adr/0051-supported-peer-delegation-and-host-realignment.md) for the policy,
 official source citations, authority boundaries and verification limits.
 
+## 2026-09-26: Registering a provider keeps Ruflo memory in `.swarm`
+
+When `kit.json` lists providers and a project has no Ruflo JSON configuration
+(`claude-flow.config.json` or `.claude-flow/config.json`; `ruflo init` writes only
+`.claude-flow/config.yaml`), `ak setup` and `ak sync` now create a minimal
+`claude-flow.config.json` containing `memory.persistPath: ".swarm"` before running
+`ruflo providers configure`. Without it, Ruflo creates that file from its defaults, which point
+memory at `./data/memory` and hide the existing `.swarm` store
+([ruvnet/ruflo#3193](https://github.com/ruvnet/ruflo/issues/3193)). Commit the file or ignore it,
+as you prefer; Ruflo adds its provider entries to it. An existing Ruflo JSON configuration, or one
+named by `CLAUDE_FLOW_CONFIG`, is left alone. `ak status` warns when a Ruflo JSON configuration
+points memory away from a `.swarm` store that holds entries.
+
 ## 2026-09-26: ak no longer installs a standalone agentdb
 
 AgentDB ships inside Ruflo, and Ruflo is its only writer. `ak setup` and `ak sync` no longer

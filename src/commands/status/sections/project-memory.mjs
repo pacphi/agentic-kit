@@ -26,6 +26,7 @@ import { formatLiveCheckAge as ago } from '../../../lib/live-check-evidence.mjs'
 import { memoryMaintenanceStatus } from '../../../lib/memory-maintenance.mjs';
 import { findStrayMemoryStores, projectMemoryStatus } from '../../../lib/project-memory.mjs';
 import { memoryProjectRoot } from '../../../lib/ruflo-memory.mjs';
+import { MEMORY_ROOT_PIN, MEMORY_ROOT_UPSTREAM, rufloMemoryRedirect } from '../../../lib/ruflo-memory-config.mjs';
 import { installedRoutingVersion, twoStoreMessage } from '../../../lib/ruflo-memory-contract.mjs';
 import { projectSetupHint } from '../../../lib/setup-scope.mjs';
 import { row } from '../row.mjs';
@@ -88,6 +89,24 @@ function strayRows(root) {
   return rows;
 }
 
+// A Ruflo JSON configuration whose memory path points away from a populated
+// .swarm store (ruvnet/ruflo#3193: a command that persists Ruflo settings can
+// create one from defaults). CLI calls under ak's pin still reach .swarm, but
+// the MCP store and any unpinned `ruflo` command follow the configuration.
+// Manual: ak never edits a configuration it did not write.
+function orphanedStoreRow(root, memory) {
+  const setting = rufloMemoryRedirect(root);
+  if (!setting) return null;
+  const populated = memory.stores.filter((store) => store.present && store.readable && store.entries > 0);
+  if (!populated.length) return null;
+  const entries = populated.reduce((sum, store) => sum + store.entries, 0);
+  const files = populated.map((store) => path.basename(store.file)).join(', ');
+  return row('memory', 'warn', `${setting.name} sets ${setting.key} to "${setting.value}", which points Ruflo memory away from `
+    + `the ${entries} entr${entries === 1 ? 'y' : 'ies'} in .swarm (${files}): Ruflo's MCP store and any \`ruflo\` command run here `
+    + `without ak's pin look there instead. To point Ruflo back, set ${setting.key} to "${MEMORY_ROOT_PIN}" in that file, `
+    + `or remove the key (${MEMORY_ROOT_UPSTREAM})`);
+}
+
 function backupRow({ lastAt, ageMs, stale, failed }, daemon, now) {
   const last = lastAt === null ? null : `last memory.db backup ${ago(ageMs)}`;
   if (failed) {
@@ -145,6 +164,8 @@ export default {
             : `${path.basename(store.file)} store is unreadable (${store.file}); existing-corpus access unverified`));
         }
         if (memory.secondary) rows.push(row('memory', 'warn', twoStoreMessage(rufloVersion, platform)));
+        const orphaned = orphanedStoreRow(root, memory);
+        if (orphaned) rows.push(orphaned);
         rows.push(...maintenanceRows(root, memory, now));
       }
       rows.push(...strayRows(root));

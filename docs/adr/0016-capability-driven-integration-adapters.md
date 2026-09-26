@@ -627,3 +627,11 @@ work under ADR-0011's own validation requirements.
 - **Backup and distillation age.** Status reports the age of Ruflo's last memory backup and
   distillation, and the `daemons` row is no longer "ok" when a project with memory has no daemon
   to run them.
+- **Provider registration keeps the memory root (audit Addendum 2, problem 1).** Before
+  `ruflo providers configure` runs in a project with no Ruflo JSON configuration, ak writes a
+  minimal `claude-flow.config.json` pinning `memory.persistPath` to `.swarm`, because Ruflo would
+  otherwise create that file from defaults that point memory at `./data/memory`
+  (ruvnet/ruflo#3193). ak re-reads the memory setting after every call. A moved root is restored,
+  the remaining providers are skipped, and the step is degraded. An unwritable pin skips
+  registration. Status warns, with a manual fix, when a Ruflo JSON configuration points memory away
+  from a populated `.swarm` store.
