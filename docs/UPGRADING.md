@@ -62,6 +62,28 @@ row has no fix. `ak sync` plans only `"sync"` fixes and reports how many manual 
 status prints a manual fix as `→ manual: …`. Scripts that treated every `fix` as sync work should
 filter on `repair`.
 
+## 2026-09-26: `ak sync --json` emits one JSON result
+
+`ak sync --json` was listed in the help but printed the ordinary human output. It now writes
+every human line (the plan, step results, prompts) to stderr and exactly one JSON object to
+stdout, pretty-printed like `ak status --json`:
+
+```json
+{ "plan": [], "steps": [], "unresolved": [], "skipped": [], "converged": true, "exitCode": 0 }
+```
+
+- `plan` and `skipped` items use the `ak status --json` row fields: `subsystem`, `level`,
+  `message`, `fix`, `repair`.
+- Each `steps` item is `{ "id", "ok", "detail" }` for a sync step that ran; `detail` is what the
+  step printed, or `null`.
+- Each `unresolved` item is `{ "subsystem", "fix", "message", "reason" }`. `reason` is one of
+  `not-converged`, `no-step`, `failing`, `apply-failed`, or `declined`.
+- `converged` is `true` when nothing is left for sync to do, `false` when it ended with unresolved
+  items, and `null` when it stopped before a verdict: a dry run with a plan, a rejected flag, or an
+  error. A rejected flag or an error also adds `error`. The process exit code equals `exitCode`.
+
+A script that scraped stdout of `ak sync --json` for human lines should read stderr instead.
+
 ## 2026-09-26: `ak sync` fails when a planned repair did not take
 
 After applying its plan, `ak sync` checks status again. If a row it planned to fix is still there

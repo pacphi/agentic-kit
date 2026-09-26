@@ -9,7 +9,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   sandboxHome, assertSandboxed, snapshot, assertUnchanged, captureLog, rmrf,
   sandboxProject, writeKitConfig, offlineKitConfig, fakeGlobalRoot,
@@ -689,6 +690,130 @@ test('every subsystem a sync step answers to is a name --skip accepts', () => {
   } finally {
     rmrf(paths.claudeUserMcpPath());
   }
+});
+
+// ── --json: exactly one JSON result on stdout (decision D6) ──────────────────
+// Each case runs sync in a child process so its real stdout and stderr can be
+// read apart: stdout must parse as ONE JSON value, and the human lines must
+// all be on stderr. The child inherits this file's sandboxed environment
+// (HOME, XDG_*, npm cache, and a PATH with nothing on it).
+
+const BIN = path.join(PKG_ROOT, 'bin', 'agentic-kit.mjs');
+const moduleUrl = (rel) => pathToFileURL(path.join(PKG_ROOT, rel)).href;
+
+/** Run sync.run({ flags }) in a child whose collector returns `first` for the
+ *  plan and `after` for the proof (or throws). */
+function syncChild({ first = [], after = [], flags = {}, throws = false }) {
+  const root = fakeGlobalRoot(HOME, { ruflo: '9.9.9', 'agentic-qe': '9.9.9' });
+  const script = `
+    const paths = await import(${JSON.stringify(moduleUrl('src/lib/paths.mjs'))});
+    paths._setGlobalRootForTest(${JSON.stringify(root)});
+    const sync = await import(${JSON.stringify(moduleUrl('src/commands/sync.mjs'))});
+    const { exitWhenFlushed } = await import(${JSON.stringify(moduleUrl('src/lib/output.mjs'))});
+    const first = ${JSON.stringify(first)};
+    const after = ${JSON.stringify(after)};
+    let calls = 0;
+    const collectFn = async () => {
+      ${throws ? "throw new Error('collector exploded');" : ''}
+      return calls++ === 0 ? first : after;
+    };
+    exitWhenFlushed(await sync.run({ flags: ${JSON.stringify(FLAGS({ 'no-upgrade': true, json: true, ...flags }))},
+      pkgRoot: ${JSON.stringify(PKG_ROOT)}, collectFn }));
+  `;
+  return spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    cwd: PROJECT, env: process.env, encoding: 'utf8', timeout: 120_000,
+  });
+}
+
+/** Run the real CLI (`node bin/agentic-kit.mjs sync …`) against a fake npm prefix. */
+function akSync(args) {
+  const root = fakeGlobalRoot(HOME, { ruflo: '9.9.9', 'agentic-qe': '9.9.9' });
+  return spawnSync(process.execPath, [BIN, 'sync', ...args], {
+    cwd: PROJECT, encoding: 'utf8', timeout: 120_000,
+    env: { ...process.env, npm_config_prefix: path.dirname(root) },
+  });
+}
+
+/** stdout must hold exactly one JSON value; JSON.parse rejects anything else. */
+function oneJson(child) {
+  assert.ok(child.stdout.trim().startsWith('{'), `stdout is not a JSON object:\n${child.stdout}\n--- stderr:\n${child.stderr}`);
+  return JSON.parse(child.stdout);
+}
+
+const SHAPE = ['plan', 'steps', 'unresolved', 'skipped', 'converged', 'exitCode'];
+
+test('--json: a run with an unresolved repair emits one JSON result and keeps human lines on stderr', () => {
+  seedHome();
+  const persisting = { subsystem: 'aqe', level: 'warn', message: 'store still oversized', fix: RVF_FIX, repair: 'sync' };
+  const child = syncChild({ first: [persisting], after: [persisting] });
+  const out = oneJson(child);
+  assert.deepEqual(Object.keys(out), SHAPE);
+  assert.equal(child.status, 1, child.stderr);
+  assert.equal(out.exitCode, 1);
+  assert.equal(out.converged, false);
+  assert.deepEqual(out.plan, [{ subsystem: 'aqe', level: 'warn', message: 'store still oversized', fix: RVF_FIX, repair: 'sync' }]);
+  const rvf = out.steps.find((s) => s.id === 'aqe-rvf');
+  assert.ok(rvf, `the aqe step is listed: ${JSON.stringify(out.steps)}`);
+  assert.equal(rvf.ok, true);
+  assert.match(rvf.detail, /rvf: healthy/);
+  assert.deepEqual(out.unresolved, [{ subsystem: 'aqe', fix: RVF_FIX, message: 'store still oversized', reason: 'not-converged' }]);
+  assert.match(child.stderr, /sync plan \(1 action\(s\)\)/);
+  assert.match(child.stderr, /unresolved: \[aqe\]/);
+});
+
+test('--json: a converged run with a skip reports the skipped item and exit 0', () => {
+  seedHome();
+  const oversized = { subsystem: 'aqe', level: 'fail', message: 'store oversized', fix: RVF_FIX, repair: 'sync' };
+  const npx = { subsystem: 'npx', level: 'warn', message: 'stale npx env', fix: 'sync prunes stale npx envs', repair: 'sync' };
+  const child = syncChild({ first: [oversized, npx], after: [], flags: { skip: ['aqe'] } });
+  const out = oneJson(child);
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(out.exitCode, 0);
+  assert.equal(out.converged, true);
+  assert.deepEqual(out.plan.map((p) => p.subsystem), ['npx']);
+  assert.deepEqual(out.skipped.map((s) => s.subsystem), ['aqe']);
+  assert.deepEqual(out.unresolved, []);
+  assert.ok(out.steps.some((s) => s.id === 'npx' && s.ok), JSON.stringify(out.steps));
+  assert.ok(!out.steps.some((s) => s.id === 'aqe-rvf'), 'a skipped step is not listed as run');
+  assert.match(child.stderr, /converged — no failing subsystems/);
+});
+
+test('--json: an error still yields exactly one JSON result, with the error and exit 1', () => {
+  seedHome();
+  const child = syncChild({ throws: true });
+  const out = oneJson(child);
+  assert.equal(child.status, 1, child.stderr);
+  assert.equal(out.exitCode, 1);
+  assert.equal(out.converged, null, 'no verdict was reached');
+  assert.equal(out.error, 'collector exploded');
+  assert.match(child.stderr, /collector exploded/);
+});
+
+test('--json --dry-run through the real CLI: plan on stdout as JSON, the listing on stderr', () => {
+  seedHome();
+  const before = snapshot(PROJECT);
+  const child = akSync(['--json', '--dry-run']);
+  const out = oneJson(child);
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(Object.keys(out), SHAPE);
+  assert.equal(out.exitCode, 0);
+  assert.equal(out.converged, null, 'a dry run proves nothing');
+  assert.deepEqual(out.steps, []);
+  assert.ok(Array.isArray(out.plan) && out.plan.length > 0, 'the sandbox has something to plan');
+  assert.ok(out.plan.every((p) => p.subsystem && p.fix && p.repair === 'sync'), JSON.stringify(out.plan));
+  assert.match(child.stderr, /sync plan \(\d+ action\(s\)\)/);
+  assertUnchanged(before, PROJECT, '`ak sync --json --dry-run` must not touch the project');
+});
+
+test('--json with a rejected --skip still answers in JSON on stdout', () => {
+  seedHome();
+  const child = akSync(['--json', '--skip', 'natvies']);
+  const out = oneJson(child);
+  assert.equal(child.status, 2, child.stderr);
+  assert.equal(out.exitCode, 2);
+  assert.equal(out.converged, null);
+  assert.match(out.error, /unknown --skip subsystem 'natvies'/);
+  assert.match(child.stderr, /unknown --skip subsystem/);
 });
 
 test('failed heal results are retained for the final convergence proof', () => {

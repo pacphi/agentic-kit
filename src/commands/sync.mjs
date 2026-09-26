@@ -5,6 +5,8 @@ import path from 'node:path';
 import { manageCodexContext } from '../lib/codex-context.mjs';
 import readline from 'node:readline/promises';
 import { collect } from './status.mjs';
+import { row } from './status/row.mjs';
+import { stripUnsafeChars } from '../lib/text-safety.mjs';
 import * as heal from '../lib/heal.mjs';
 import { have } from '../lib/exec.mjs';
 import { fixStatusline, helperStampStale, runHelperRefresh, bakedVersionManualFix } from '../lib/statusline.mjs';
@@ -53,10 +55,10 @@ async function askCodexRepair(question) {
  *  (F5, Wave C security review) reaches `fail()`, not a fallback `info()`,
  *  so a genuinely failed opencode sub-surface never reads as merely
  *  informational. */
-function printReportLine(line) {
+function printReportLine(line, onFail) {
   if (line.level === 'ok') ok(line.text);
   else if (line.level === 'warn') warn(line.text);
-  else if (line.level === 'fail') fail(line.text);
+  else if (line.level === 'fail') { fail(line.text); onFail?.(); }
   else info(line.text);
 }
 
@@ -131,6 +133,15 @@ none of them counts as a failure. A step shared by several subsystems (for
 example providers, which also serves routing) still runs for the others.
 An unknown name is rejected with the list of names sync accepts.
 
+--json writes every human line (the plan, step results, prompts) to stderr
+and exactly one JSON object to stdout, pretty-printed as \`ak status --json\`:
+  { plan[], steps[{id, ok, detail}], unresolved[], skipped[], converged, exitCode }
+plan and skipped items carry status's row fields (subsystem, level, message,
+fix, repair); each unresolved item has a reason: not-converged, no-step,
+failing, apply-failed, or declined. converged is null when the run stopped
+before a verdict (a dry run with a plan, a rejected flag, an error); an error
+also sets "error". The exit code equals exitCode.
+
 Usage: ak sync [options]
 
 Options:
@@ -139,13 +150,14 @@ Options:
   --skip SUBSYSTEM     leave SUBSYSTEM out of this run (repeatable, or
                        comma-separated: --skip natives,ruvnet-brain)
   --yes                approve disclosed repairs without prompting
-  --json               emit results as JSON
+  --json               one JSON result on stdout; human output on stderr
 
 Examples:
   ak sync                          upgrade, heal, verify
   ak sync --dry-run                preview the plan
   ak sync --no-upgrade             re-heal without touching versions
-  ak sync --skip ruvnet-brain      everything except the Brain refresh`;
+  ak sync --skip ruvnet-brain      everything except the Brain refresh
+  ak sync --json 2>sync.log        machine-readable result for CI`;
 
 // ── the sync step registry ───────────────────────────────────────────────────
 // Every heal used to be a `if (subsystems.has(X)) { ... }` block inlined into
@@ -157,8 +169,8 @@ Examples:
 // *is* the ordering invariant, and `when` is a pure, explicitly-parameterized
 // predicate (no closures) so it stays easy to reason about independent of
 // `run`'s side effects. `run(ctx)` receives the shared per-invocation context
-// (see `run()` below): {cfg, cwd, pkgRoot, flags, dejaVuAdapter, subsystems,
-// skip, report, step, state}. `state` carries the two cross-step signals
+// (see `converge()` below): {cfg, cwd, pkgRoot, flags, dejaVuAdapter, subsystems,
+// skip, report, step, markFailed, state}. `state` carries the two cross-step signals
 // (`dejaVuApplyFailed`, `aqeRouterApplyFailure`) the final convergence check
 // needs — the only state that survives past its own step.
 const HOST_LIFECYCLE = { installState: hostInstallState, executable: hostExecutable, install: installHost };
@@ -380,7 +392,7 @@ export const SYNC_STEPS = [
       if (lifecycle.configChanged) saveKitConfig(ctx.cfg);
       ctx.state.dejaVuApplyFailed = lifecycle.ok === false;
       const applyReport = renderApplyReport('deja-vu', lifecycle);
-      for (const line of applyReport.lines) printReportLine(line);
+      for (const line of applyReport.lines) printReportLine(line, ctx.markFailed);
     },
   },
   // opencode host wiring: connected MCPs, compact lazy gateway, lifecycle
@@ -419,7 +431,7 @@ export const SYNC_STEPS = [
         // markers are stale/missing still needs the save, or the next teardown
         // cannot prove ownership — codex-review r3), not only on file changes.
         if (applyReport.ocChanged || applyReport.markersChanged) saveKitConfig(ctx.cfg);
-        for (const line of applyReport.lines) printReportLine(line);
+        for (const line of applyReport.lines) printReportLine(line, ctx.markFailed);
       }
     },
   },
@@ -690,21 +702,101 @@ export function convergenceVerdict({ plan, after: collected, state, flags, cfg, 
   // erase an apply failure from this run. In particular, an unavailable
   // external fallback can leave only a warning row; claiming convergence
   // after applyAqeRouter returned !ok is a false success and retry loop.
+  const applyFailed = (subsystem, message) => remaining.push({ subsystem, message, reason: 'apply-failed' });
   if (state.aqeRouterApplyFailure && !remaining.some((r) => r.subsystem === 'providers')) {
-    remaining.push({ subsystem: 'providers', message: `AQE router apply failed: ${state.aqeRouterApplyFailure}` });
+    applyFailed('providers', `AQE router apply failed: ${state.aqeRouterApplyFailure}`);
   }
   if (state.dejaVuApplyFailed && !remaining.some((r) => r.subsystem === 'deja-vu')) {
-    remaining.push({ subsystem: 'deja-vu', message: 'companion lifecycle apply failed' });
+    applyFailed('deja-vu', 'companion lifecycle apply failed');
   }
   if (state.codexRepairFailure && !remaining.some((r) => r.subsystem === 'codex-mcp')) {
-    remaining.push({ subsystem: 'codex-mcp', message: state.codexRepairFailure });
+    applyFailed('codex-mcp', state.codexRepairFailure);
   }
   for (const failure of state.applyFailures) {
     if (!remaining.some((r) => r.message === `${failure.name}: ${failure.detail}`)) {
-      remaining.push({ subsystem: failure.name, message: `${failure.name}: ${failure.detail}` });
+      applyFailed(failure.name, `${failure.name}: ${failure.detail}`);
     }
   }
   return { unresolved, remaining, skipped };
+}
+
+// ── --json ───────────────────────────────────────────────────────────────────
+
+const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[A-Za-z]`, 'g');
+const LEADING_GLYPH = /^[✓⚠✗ℹ·]\s*/u;
+
+/** A plan or skipped item as --json reports it: `ak status --json`'s row fields. */
+const publicRow = (r) => ({
+  subsystem: r.subsystem, level: r.level ?? null, message: r.message, fix: r.fix ?? null,
+  repair: r.repair ?? (r.fix ? 'sync' : null),
+});
+
+/** An unresolved item as --json reports it. `reason`: 'not-converged' (the
+ *  planned fix is still there), 'no-step' (no step performs it), 'failing' (a
+ *  fail-level row), 'apply-failed' (a mutation reported failure), or
+ *  'declined' (a Codex repair was not confirmed, so nothing was applied). */
+const publicIssue = (r) => ({ subsystem: r.subsystem, fix: r.fix ?? null, message: r.message, reason: r.reason ?? 'failing' });
+
+/** What one step printed, as a single line: no color, glyphs, or progress
+ *  ticker (only the text after a line's last carriage return survives). */
+function stepDetail(chunks) {
+  const lines = chunks.join('').split('\n')
+    .map((l) => stripUnsafeChars(l.slice(l.lastIndexOf('\r') + 1).replace(ANSI, '')).replace(LEADING_GLYPH, '').trim())
+    .filter(Boolean);
+  return lines.length ? lines.join('; ') : null;
+}
+
+/** Records each step that runs as `{ id, ok, detail }`. A step is not ok when
+ *  a result it reported failed, it printed a failed sub-surface, it recorded a
+ *  failure in the run state, or it threw. Its detail is what it printed, which
+ *  is captured only under --json (see humanOutputToStderr). */
+function stepTracer(state, result, capture) {
+  let current = null;
+  const failures = () => state.applyFailures.length
+    + [state.dejaVuApplyFailed, state.aqeRouterApplyFailure, state.codexRepairFailure].filter(Boolean).length;
+  const markFailed = () => { if (current) current.failed = true; };
+  const report = (name, r) => {
+    const status = reportOutcome(name, r);
+    if (!['ok', 'degraded', 'skipped'].includes(status)) markFailed();
+    return status;
+  };
+  const traced = async (id, fn) => {
+    const rec = { failed: false, chunks: [] };
+    const before = failures();
+    current = rec;
+    if (capture) capture.chunks = rec.chunks;
+    try {
+      return await fn();
+    } catch (e) {
+      rec.failed = true;
+      throw e;
+    } finally {
+      if (capture) capture.chunks = null;
+      current = null;
+      result.steps.push({ id, ok: !rec.failed && failures() === before, detail: stepDetail(rec.chunks) });
+    }
+  };
+  return { traced, report, markFailed };
+}
+
+/** Under --json, send everything written to stdout during `fn` (ok/warn/fail/
+ *  info lines, the plan listing, prompts, progress) to stderr instead, and
+ *  let the step tracer collect it while `capture.chunks` is set. stdout is
+ *  restored even when `fn` throws, so the one JSON result lands on it alone. */
+async function humanOutputToStderr(fn) {
+  const stdoutWrite = process.stdout.write;
+  const capture = { chunks: null };
+  // stderr.write is looked up on every call, so a caller's own wrapper still sees it.
+  const toStderr = (...args) => {
+    capture.chunks?.push(String(args[0]));
+    return Reflect.apply(process.stderr.write, process.stderr, args);
+  };
+  process.stdout.write = /** @type {typeof process.stdout.write} */ (/** @type {unknown} */ (toStderr));
+  try {
+    return await fn(capture);
+  } finally {
+    process.stdout.write = stdoutWrite;
+  }
 }
 
 /** Print the verdict; returns the exit code. */
@@ -722,20 +814,51 @@ function reportVerdict({ unresolved, remaining, skipped }) {
 
 /** The passes after SYNC_STEPS, each unless --skip named it: a final Codex MCP
  *  reconcile (codex-mcp) and host transport alignment (host-alignment). */
-async function runTail({ cfg, cwd, flags, skip, state, codexRepairPlan, confirm, inspect, repair }) {
+async function runTail({ cfg, cwd, flags, skip, state, codexRepairPlan, confirm, inspect, repair, traced }) {
   // An initializer can restore a legacy alias after the initial repair. Keep
   // the replacement's ownership check and the user's explicitly remembered
   // choice, then verify the final topology before declaring convergence.
   if (!skip.has('codex-mcp')) {
-    const finalMcp = await reconcileCodexMcp({ cfg, cwd, yes: flags.yes, confirm, inspect, repair, approvedTargets: codexRepairPlan });
-    if (!finalMcp.ok) state.codexRepairFailure = finalMcp.detail;
+    await traced('codex-mcp-reconcile', async () => {
+      const finalMcp = await reconcileCodexMcp({ cfg, cwd, yes: flags.yes, confirm, inspect, repair, approvedTargets: codexRepairPlan });
+      if (!finalMcp.ok) state.codexRepairFailure = finalMcp.detail;
+    });
   }
-  if (!skip.has('host-alignment') && await alignHosts({ flags: { apply: true, yes: flags.yes }, roots: [cwd], cfg, confirm }) !== 0) {
-    state.applyFailures.push({ name: 'host-alignment', detail: 'transport anomalies remain; run ak host align for the exact scope and correction' });
+  if (!skip.has('host-alignment')) {
+    await traced('host-alignment', async () => {
+      if (await alignHosts({ flags: { apply: true, yes: flags.yes }, roots: [cwd], cfg, confirm }) !== 0) {
+        state.applyFailures.push({ name: 'host-alignment', detail: 'transport anomalies remain; run ak host align for the exact scope and correction' });
+      }
+    });
   }
 }
 
-export async function run({
+/** `ak sync`. Without --json it prints as it goes and returns the exit code.
+ *  With --json every human line goes to stderr and stdout carries exactly one
+ *  JSON object: { plan, steps, unresolved, skipped, converged, exitCode } (plus
+ *  `error` when the run was rejected or threw). `converged` is true when
+ *  nothing is left for sync to do, false when it ended with unresolved or
+ *  failing items, and null when it stopped before a verdict (a dry run with a
+ *  plan, a rejected flag, an error). */
+export async function run(opts) {
+  const result = { plan: [], steps: [], unresolved: [], skipped: [], converged: null, exitCode: 0 };
+  if (!opts.flags.json) {
+    result.exitCode = await converge(opts, result);
+    return result.exitCode;
+  }
+  await humanOutputToStderr(async (capture) => {
+    try {
+      result.exitCode = await converge(opts, result, capture);
+    } catch (e) {
+      fail(`ak sync: ${e?.stack ?? e}`);
+      Object.assign(result, { converged: null, exitCode: 1, error: e?.message ?? String(e) });
+    }
+  });
+  console.log(JSON.stringify(result, null, 2));
+  return result.exitCode;
+}
+
+async function converge({
   flags,
   pkgRoot,
   fetchLatest,
@@ -744,12 +867,13 @@ export async function run({
   confirmCodexRepair = askCodexRepair,
   inspectCodexTopology = codexMcpTopology,
   repairCodexTopology = repairCodexMcpTopology,
-}) {
+}, result, capture = null) {
   const cwd = process.cwd();
   const dejaVuPlanOptions = { allowUpgrade: !flags['no-upgrade'] };
   const { skip, error: skipError } = parseSkip(flags.skip);
   if (skipError) {
     fail(`ak sync: ${skipError}`);
+    result.error = skipError;
     return 2;
   }
   // #134: draw the plan from CURRENT drift, not the TTL cache — a cache
@@ -776,11 +900,16 @@ export async function run({
 
   const cfg = loadKitConfig();
   if (cfg.aqe !== false && cfg.aqeEmbedding && cfg.aqeEmbedding.mode !== 'unmanaged') {
-    candidates.push({ subsystem: 'aqe-embedding', message: 'selected semantic backend requires live verification',
-      fix: 'verify selected backend and repair missing opted-in local model' });
+    candidates.push(row('aqe-embedding', 'info', 'selected semantic backend requires live verification',
+      'verify selected backend and repair missing opted-in local model'));
   }
   const { plan, skipped } = splitSkipped(candidates, skip, flags, cfg);
-  if (!announcePlan(plan, manual, skipped)) return 0;
+  result.plan = plan.map(publicRow);
+  result.skipped = skipped.map(publicRow);
+  if (!announcePlan(plan, manual, skipped)) {
+    result.converged = true;
+    return 0;
+  }
   if (flags['dry-run']) return 0;
   console.log('');
 
@@ -793,16 +922,20 @@ export async function run({
     });
     if (!confirmed) {
       info('Codex configuration was left unchanged; no sync actions were applied');
+      result.converged = false;
+      result.unresolved = plan.filter((p) => p.subsystem === 'codex-mcp').map((p) => publicIssue({
+        ...p, message: 'Codex repairs were not confirmed; no sync actions were applied', reason: 'declined',
+      }));
       return 1;
     }
   }
-  const report = reportOutcome;
   const state = {
     dejaVuApplyFailed: false,
     aqeRouterApplyFailure: null,
     codexRepairFailure: null,
     applyFailures: [],
   };
+  const { traced, report, markFailed } = stepTracer(state, result, capture);
   // Run a managed heal under a live elapsed-time ticker, then print its result.
   // Keeps every slow tool (npm upgrades, brain KB download, native rebuild)
   // visibly alive instead of freezing the prompt; fast/local steps clear in <1s.
@@ -813,15 +946,19 @@ export async function run({
     return r;
   };
   const ctx = {
-    cfg, cwd, pkgRoot, flags, dejaVuAdapter, codexRepairPlan, subsystems, skip, report, step, state,
+    cfg, cwd, pkgRoot, flags, dejaVuAdapter, codexRepairPlan, subsystems, skip, report, step, markFailed, state,
     inspectCodexTopology, repairCodexTopology,
   };
 
   for (const s of SYNC_STEPS) {
-    if (stepRuns(s, subsystems, flags, cfg, skip)) await s.run(ctx);
-    if (state.codexRepairFailure) return 1;
+    if (stepRuns(s, subsystems, flags, cfg, skip)) await traced(s.id, () => s.run(ctx));
+    if (state.codexRepairFailure) {
+      result.converged = false;
+      result.unresolved = [publicIssue({ subsystem: 'codex-mcp', message: state.codexRepairFailure, reason: 'apply-failed' })];
+      return 1;
+    }
   }
-  await runTail({ cfg, cwd, flags, skip, state, codexRepairPlan,
+  await runTail({ cfg, cwd, flags, skip, state, codexRepairPlan, traced,
     confirm: confirmCodexRepair, inspect: inspectCodexTopology, repair: repairCodexTopology });
 
   // converge proof
@@ -855,5 +992,10 @@ export async function run({
     saveKitConfig(cfg);
   } catch { /* health snapshot is best-effort — never fail a sync over it */ }
 
-  return reportVerdict(convergenceVerdict({ plan, after, state, flags, cfg, skip, skipped }));
+  const verdict = convergenceVerdict({ plan, after, state, flags, cfg, skip, skipped });
+  result.unresolved = [...verdict.unresolved, ...verdict.remaining].map(publicIssue);
+  result.skipped = verdict.skipped.map(publicRow);
+  const code = reportVerdict(verdict);
+  result.converged = code === 0;
+  return code;
 }

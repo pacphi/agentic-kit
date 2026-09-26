@@ -42,7 +42,7 @@
   planned subsystem that no sync step performs, is reported `unresolved:` and sync exits 1 (#237).
   Manual fixes never enter the plan, so they never fail sync (decision 9). `ak sync --skip
   <subsystem>` leaves a subsystem out of one run; the proof reports it "skipped by request" and
-  never counts it as a failure.
+  never counts it as a failure. `ak sync --json` emits the verdict as one JSON object on stdout.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0001](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0001-one-routing-policy-many-projections.md),
   [ADR-0006](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0006-primary-host-and-ambidextrous-mirroring.md),
@@ -121,6 +121,9 @@ seats. A successful Claude/Codex transport check therefore cannot be called a co
    owns (on every trigger, including ones another planned subsystem derives) and any fix only that
    step performs. Its rows are reported "skipped by request" and are neither unresolved nor failing.
    `--skip` accepts only the subsystems sync knows and never changes kit.json ownership.
+   `ak sync --json` reports this verdict as one JSON object on stdout (`plan`, `steps`,
+   `unresolved` with a reason per item, `skipped`, `converged`, `exitCode`) and sends every human
+   line to stderr, so a script never parses progress text.
 
 ## Consequences
 
@@ -151,7 +154,8 @@ seats. A successful Claude/Codex transport check therefore cannot be called a co
   or planned with no performing step, fails sync; that manual rows and advisories never do; and
   that a real repair converges and leaves the next sync nothing to do. The same file proves that
   `--skip` rejects unknown names, removes a subsystem's plan items and its step on derived triggers,
-  and never turns a skipped subsystem into a failure.
+  and never turns a skipped subsystem into a failure. Its `--json` cases spawn sync and parse stdout
+  as one JSON value while the human text arrives on stderr, including a rejected flag and an error.
 
 ## References
 
