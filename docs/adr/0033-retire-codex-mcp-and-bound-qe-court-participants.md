@@ -6,7 +6,8 @@
 - **Updated:** 2026-09-26 — the missing concrete Agentic-QE registration check runs only when AQE is
   managed (`aqe` is not `false` in kit.json); an opted-out machine gets no AQE row or advice (#237);
   sync's convergence proof fails a planned repair that did not take, and `--skip` leaves a
-  subsystem out of one run (decision 9).
+  subsystem out of one run (decision 9); the live participant-transport test runs its seats in a
+  disposable Ruflo project.
 - **Earlier update:** 2026-09-23
 - **Update note:** Initial implementation retires only receipt-owned legacy MCP state,
   diagnoses effective Codex MCP topology, extends POSIX cleanup to process groups, and adds
@@ -43,6 +44,9 @@
   Manual fixes never enter the plan, so they never fail sync (decision 9). `ak sync --skip
   <subsystem>` leaves a subsystem out of one run; the proof reports it "skipped by request" and
   never counts it as a failure. `ak sync --json` emits the verdict as one JSON object on stdout.
+  2026-09-26: the live participant-transport test runs its seats in a disposable Ruflo
+  project and deletes it; run in the checkout, it had left 118 proof rows in the real MCP
+  store. A read-only tripwire fails if any proof row reaches the checkout's memory.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0001](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0001-one-routing-policy-many-projections.md),
   [ADR-0006](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0006-primary-host-and-ambidextrous-mirroring.md),
@@ -147,8 +151,9 @@ seats. A successful Claude/Codex transport check therefore cannot be called a co
 
 - Unit tests cover receipt-owned retirement, preservation of user-owned state, concrete Codex MCP
   topology, fail-closed court artifact readiness, POSIX descendant cleanup, and orphan reporting.
-- `pnpm test:qe-court-live` runs one Claude-led and one Codex-led participant-transport trial.
-  `AK_QE_COURT_TRIALS=5` raises this to a reciprocal soak test on POSIX shells.
+- `pnpm test:qe-court-live` runs one Claude-led and one Codex-led participant-transport trial in a
+  disposable Ruflo project. `AK_QE_COURT_TRIALS=5` raises this to a reciprocal soak test on POSIX
+  shells.
 - `ak status` fails recursive self-MCP and reports missing Agentic-QE or duplicate Ruflo MCP state.
 - `tests/kit/sync-command.test.mjs` proves that a planned fix still present after the apply phase,
   or planned with no performing step, fails sync; that manual rows and advisories never do; and

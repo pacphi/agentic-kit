@@ -107,7 +107,8 @@ docs/
 `docs/adr/0051-supported-peer-delegation-and-host-realignment.md`,
 `docs/adr/0054-fleet-evidence-export.md`, `docs/adr/0055-aqe-embedding-lifecycle.md`,
 `tests/live/aqe-external-provider-transport.test.mjs`,
-`tests/live/qe-court-participant-transport.test.mjs`,
+`tests/live/qe-court-participant-transport.test.mjs` (with its helper
+`tests/live/disposable-memory-project.mjs`),
 `tests/live/codex-context-contract.test.mjs`, and
 `docs/ddd/maintenance.md`, `docs/ddd/model-lifecycle-intelligence.md`. Generated workspace state under
 the shipped source trees is explicitly excluded. Nothing else ships — verify with

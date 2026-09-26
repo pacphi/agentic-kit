@@ -45,6 +45,7 @@
     "docs/adr/0055-aqe-embedding-lifecycle.md",
     "tests/live/aqe-external-provider-transport.test.mjs",
     "tests/live/qe-court-participant-transport.test.mjs",
+    "tests/live/disposable-memory-project.mjs",
     "tests/live/codex-context-contract.test.mjs",
     "docs/ddd/maintenance.md",
     "docs/ddd/model-lifecycle-intelligence.md"

@@ -508,9 +508,11 @@ AK_QE_COURT_TRIALS=5 pnpm test:qe-court-live  # POSIX soak
 ```
 
 Each seat performs an MCP-native Ruflo memory store→retrieve round trip, emits the exact returned
-value in a validated bounded handoff, and must terminate within its absolute deadline. The check
-independently confirms the stored project-memory value and fails on repository mutation or
-orphaned state.
+value in a validated bounded handoff, and must terminate within its absolute deadline. The seats
+run in a disposable Ruflo project (its own Git repository and memory root, with Ruflo's daemon
+start-on-use off) that is deleted afterwards, so their rows never reach your project's memory. The
+check independently confirms the stored value in that project, and fails on a file edit there,
+repository mutation, orphaned state, or any proof row found in the checkout's memory.
 Full court parity remains blocked until Agentic-QE ships a supported host-neutral runner and a
 self-contained Codex QE-Court projection.
 
