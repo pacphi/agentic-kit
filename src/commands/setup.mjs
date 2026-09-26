@@ -711,7 +711,7 @@ async function applyProjectProviderStack(cfg, root, migrateRoutes) {
  *  AQE/SONA segments won't render and `ak sync` is needed to heal it. */
 function healProjectStatusline(root) {
   const sl = fixStatusline(root);
-  if (sl.applied) ok(`statusline: footer injected (v${sl.version})`);
+  if (sl.applied) ok('statusline: footer injected');
   else if (sl.reason) warn(`statusline: ${sl.reason} — run \`ak sync\` to re-inject`);
   else ok('statusline: footer in sync');
 }

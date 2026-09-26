@@ -490,7 +490,7 @@ export const SYNC_STEPS = [
       const root = paths.repoRoot(ctx.cwd) ?? ctx.cwd;
       const r = await withProgress('statusline', async () => fixStatusline(root));
       if (r.absent) info('statusline: no ruflo helpers here — nothing to patch');
-      else (r.applied || !r.reason ? ok : warn)(`statusline: ${r.applied ? `footer injected (v${r.version})` : r.reason ?? 'in sync'}`);
+      else (r.applied || !r.reason ? ok : warn)(`statusline: ${r.applied ? 'footer injected' : r.reason ?? 'in sync'}`);
       // Honest success: fixStatusline invokes ruflo's PRIVATE helper-refresh
       // internal, best-effort. If the stamp is STILL stale after the heal, that
       // refresh silently no-oped (e.g. upstream moved the dist module) and the

@@ -1,6 +1,8 @@
 // Statusline healing — port of ruflo-fix-statusline-version:
-//   (a) refresh the hard-coded fallback version string (3.28+ resolves live
-//       versions itself, #2221; any legacy kit probe marker is stripped),
+//   (a) strip the legacy kit version-probe marker. The version itself is
+//       Ruflo's: its helper bakes `let ver` as a floor and shows the HIGHEST
+//       version it finds at render time (3.28+, #2221), so ak never writes it —
+//       a value ak wrote too high could never self-correct,
 //   (b) inject/re-inject the kit's activation footer (ruflo-seg block),
 //   (c) legacy repoint: projects initialized under aqe <3.12.1 may still have
 //       settings.json statusLine aimed at the minimal statusline-v3.cjs.
@@ -11,7 +13,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { projectStatusline, projectSettings, rufloCliDist, rufloNodeModules } from './paths.mjs';
-import { installedVersion, cmpVersions } from './versions.mjs';
+import { cmpVersions } from './versions.mjs';
 import { readJson, writeJsonWithBackup } from './settings.mjs';
 
 const FOOTER_TEMPLATE = path.join(
@@ -216,10 +218,8 @@ export function fixStatusline(root = process.cwd(), { dryRun = false } = {}) {
   const ending = eol(raw);
   let s = raw.replace(/\r\n/g, '\n');
 
-  // (a) legacy probe strip + fallback version refresh
+  // (a) legacy probe strip. The baked `let ver` is left exactly as Ruflo wrote it.
   s = s.replace(/ \/\* agentic-kit: global-install version probe \*\/ require\("path"\)\.join\(require\("path"\)\.dirname\(process\.execPath\),"\.\.","lib","node_modules","ruflo","package\.json"\),/, '');
-  const ver = installedVersion('ruflo');
-  if (ver) s = s.replace(/(let (?:ver|pkgVersion) = )(["'])\d+\.\d+(?:\.\d+)?\2/, `$1$2${ver}$2`);
 
   // (b) footer injection: strip any prior block/wrap, re-inject after shebang
   const footer = fs.readFileSync(FOOTER_TEMPLATE, 'utf8').replace(/\r\n/g, '\n').trim();
@@ -271,5 +271,5 @@ export function fixStatusline(root = process.cwd(), { dryRun = false } = {}) {
     repointed = true;
   }
 
-  return { file, applied: out !== raw, repointed, version: ver, securityOverlay };
+  return { file, applied: out !== raw, repointed, securityOverlay };
 }
