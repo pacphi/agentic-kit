@@ -6,10 +6,13 @@
 // in both surfaces, or one of them shipped text nobody signed off on.
 //
 // The editorial/detection split survives the port. Prose comes from the
-// directory and never claims runtime state; the state chip is the only place a
-// runtime fact appears, and it is fed by collectors that ALREADY EXIST — the
-// version primitives `ak status` itself calls, and `ak status`'s own rows for
-// the configured surfaces. This command adds no probe of its own. When a
+// directory and never claims runtime state; the state chip is the runtime fact,
+// and it is fed by collectors that ALREADY EXIST — the version primitives
+// `ak status` itself calls, and `ak status`'s own rows for the configured
+// surfaces. One measured line may sit beside the ruflo chip: an applied
+// install-edit receipt, read from the same ledger the `natives` status row reads
+// (ADR-0026 amendment 2026-09-26). It never changes the chip. This command adds
+// no probe of its own. When a
 // detection source fails the chip degrades to `state unknown — <reason>` and the
 // entry still renders: an unmeasured component is never drawn as absent
 // (ADR-0023 / component-directory invariants 2 and 3).

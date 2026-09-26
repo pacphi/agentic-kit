@@ -65,7 +65,7 @@ running Ruflo server to pick up the new location. Claude's own Ruflo registratio
 
 When `kit.json` lists providers and a project has no Ruflo JSON configuration
 (`claude-flow.config.json` or `.claude-flow/config.json`; `ruflo init` writes only
-`.claude-flow/config.yaml`), `ak setup` and `ak sync` now create a minimal
+`.claude-flow/config.yaml`), `ak setup`, `ak sync` and `ak host pick` now create a minimal
 `claude-flow.config.json` containing `memory.persistPath: ".swarm"` before running
 `ruflo providers configure`. Without it, Ruflo creates that file from its defaults, which point
 memory at `./data/memory` and hide the existing `.swarm` store

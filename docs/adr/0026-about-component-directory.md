@@ -4,7 +4,9 @@
 - **Date:** 2026-08-06
 - **Updated:** 2026-09-26 — amendments: the agentdb entry describes the copy Ruflo bundles; ak
   no longer installs a standalone agentdb (see "Amendment 2026-09-26" below); host cards (dashboard
-  and `ak about`) read the host management words from ADR-0053's 2026-09-26 amendment
+  and `ak about`) read the host management words from ADR-0053's 2026-09-26 amendment; the ruflo
+  card may show one install-edit line beside its chip (see "Amendment 2026-09-26 — install-edit
+  line" below)
 - **Earlier updates:** 2026-09-09 — reconciled against repository source and tests for issue
   #211; 2026-08-06 — accepted and implemented; the open points below are resolved decisions
 - **Deciders:** agentic-kit maintainers
@@ -195,6 +197,17 @@ package. `ak status` emits no `agentdb` row any more, so on a real machine the d
 degrades to "state unknown" under the unmeasured-fact rule above; binding health for the bundled
 copy is the `natives` row's job. The layout sketch's "version-pinned to ruflo" wording is
 superseded.
+
+## Amendment 2026-09-26 — install-edit line
+
+When ak has an applied install-edit receipt inside Ruflo's install (Addendum 2, problem 3 of the
+[2026-09-26 audit](../audits/2026-09-26-issues-237-238-239-verification-and-decisions.md); the
+native SQLite pin, ruvnet/ruflo#2219), the ruflo card carries one line beside its chip: "ak applied
+Ruflo's native SQLite pin (ruvnet/ruflo#2219)", followed by the package, field and values. `ak about`
+reads it from the receipt ledger and the manifests it names, the same read the `natives` status row
+makes. `--json` carries it as the chip's `edits` field. The dashboard shows that `natives` row. The
+line is detection, not prose, so the editorial/detection split holds. It is a fact beside the chip,
+never a verdict: it does not change the chip's state or word, and it adds no probe of its own.
 
 ## References
 

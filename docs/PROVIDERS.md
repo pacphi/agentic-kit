@@ -273,7 +273,8 @@ installed Ruflo is older than 3.38.8.
 Registering a provider never moves project memory. In a project with no Ruflo JSON configuration,
 `ruflo providers configure` would create `claude-flow.config.json` from Ruflo's defaults, whose
 `memory.persistPath` is `./data/memory`
-([ruvnet/ruflo#3193](https://github.com/ruvnet/ruflo/issues/3193)). `ak` first writes a minimal
+([ruvnet/ruflo#3193](https://github.com/ruvnet/ruflo/issues/3193)). Whether registration runs from
+`ak setup`, `ak sync` or `ak host pick`, `ak` first writes a minimal
 `claude-flow.config.json` with `memory.persistPath: ".swarm"`, and Ruflo adds its keys to it. After
 each registration `ak` re-reads the memory setting. If Ruflo changed it, `ak` puts it back, skips the
 remaining providers, and reports the step as degraded. An existing Ruflo JSON configuration, or a
