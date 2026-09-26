@@ -94,6 +94,17 @@ names what to look at. Manual fixes (`→ manual:` in `ak status`) are never pla
 sync. A Ruflo install that lacks its bundled agentdb now shows a manual reinstall on the `natives`
 row instead of a sync action that no step performed.
 
+## 2026-09-26: AQE embedding edits in Codex TOML
+
+Unrelated keys in Codex `config.toml`, such as `tui.status_line = ["model"]` or other
+dotted and quoted root keys, no longer stop ak from projecting the AQE embedding
+endpoint into that file.
+
+An AQE registration written inline (`agentic-qe = { … }` under `[mcp_servers]`, or
+`mcp_servers = { … }`) was previously read as absent and skipped silently. It is now reported as a conflict, so `ak status` and `ak sync` show an AQE
+embedding warning for that file. Run `ak x aqe-embedding status --json` to see the
+file and reason, then rewrite the entry as a `[mcp_servers.agentic-qe]` table.
+
 ## 2026-09-10: Remembered Codex MCP correction
 
 Claude Code's `claude-flow` registration and Codex's `ruflo` registration follow

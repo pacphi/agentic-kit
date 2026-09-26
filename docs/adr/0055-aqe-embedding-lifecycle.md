@@ -7,6 +7,7 @@
 - **Updated:** 2026-09-23 — project projections are scoped to the enclosing git repository root; outside a repository only the user Codex target applies (earlier project-scope values are relinquished by receipt), and the `.mcp.json` AQE registration is required only in an AQE-initialized project
 - **Updated:** 2026-09-26 — incomplete local setup distinguishes an installed-but-stopped Ollama (refused loopback connection with `ollama` on PATH) from a missing one and asks the user to start it rather than install it (#237)
 - **Updated:** 2026-09-26 — status shows the last remembered live embedding check with its age, and opt-in `ak status --live` runs the quick live checks; see [Amendment: remembered live checks](#amendment-2026-09-26-remembered-live-checks)
+- **Updated:** 2026-09-26 — the Codex TOML editor decodes table and key names with one shared TOML key decoder; unrelated root and `[mcp_servers]` assignments no longer block the edit, and inline, dotted or quoted AQE registrations are reported as conflicts instead of absent (#237)
 - **Related:** [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),
   [September repair](../audits/2026-09-09-aqe-integration-repair.md)
 
