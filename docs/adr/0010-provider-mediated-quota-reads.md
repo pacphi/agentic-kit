@@ -1,7 +1,8 @@
 # ADR-0010 — Provider-mediated quota reads (the Limits view)
 
-- **Updated:** 2026-09-26 — the Limits view names why the Claude side is empty (a read-only,
-  path-free class of the user-level statusLine; #238)
+- **Updated:** 2026-09-26 — the Limits view names why either side is empty: a read-only,
+  path-free class of the user-level statusLine for Claude, and the failure class of the last
+  app-server request for Codex (#238)
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 Date: 2026-07-27 · Status: **Accepted** · Amends: ADR-0009 §3
 
@@ -24,6 +25,9 @@ command line, project local, shared project, user). `/api/limits` therefore carr
 `project-helper`, `custom`, `unknown`) from a read of the settings file and the script it
 names. It returns no path and writes nothing, so this adds no channel; the Claude panel uses it
 to say why it is empty and which project-level setup fills it.
+The Codex exchange likewise keeps the class of a failed refresh as `codexUnavailable`
+(`not-installed`, `spawn-failed`, `exited` with its exit code, `timeout`, `rpc-error` with its
+numeric code, `no-limit-windows`); stderr stays ignored and vendor message text is dropped.
 
 ## Context
 
@@ -109,7 +113,8 @@ Normalization rules (all in `quota.mjs`, all pinned by tests):
   derived, deletable, and self-healing.
 - The `codex app-server` surface is flagged experimental upstream; the client
   pins nothing beyond two method names and degrades to "no data" with the
-  stale cache visible if the protocol shifts.
+  stale cache visible if the protocol shifts, naming the failure class
+  (amendment above) rather than guessing a cause.
 
 ## Research
 

@@ -11,6 +11,7 @@ import {
   windowLabel, normalizeClaudeLimits, normalizeCodexLimits, readClaudeLimits,
   collectCodexLimits, CODEX_TTL_MS, unsupportedQuotaHosts, readLimits,
   classifyClaudeTeeChannel, CLAUDE_TEE_CHANNELS,
+  collectCodexLimitsDetailed, CODEX_UNAVAILABLE_REASONS,
 } from '../../src/lib/quota.mjs';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ak-quota-'));
@@ -352,6 +353,91 @@ test('collectCodexLimits returns null when there has never been an answer', asyn
   assert.equal(out, null);
 });
 
+// ── Why Codex limits are unavailable (#238 P4) ──────────────────────────────
+//
+// Every app-server failure used to collapse to codex:null, and the panel
+// guessed "not installed, not logged in, or did not answer". The collector now
+// keeps the failure CLASS (never vendor text or stderr) so the panel can say
+// which. These children are modeled on the exchange's documented shape; which
+// class a real logged-out or API-key account produces is not asserted here.
+
+/** A child whose reply to each JSON-RPC line is decided by `script`. */
+function scriptedSpawn(script, { onSpawn } = {}) {
+  return () => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.kill = () => {};
+    child.stdin = {
+      write(line) {
+        const reply = script(JSON.parse(line));
+        if (reply) setImmediate(() => child.stdout.emit('data', `${JSON.stringify({ jsonrpc: '2.0', ...reply })}\n`));
+        return true;
+      },
+    };
+    if (onSpawn) setImmediate(() => onSpawn(child));
+    return child;
+  };
+}
+const initOk = (msg) => (msg.id === 1 ? { id: 1, result: {} } : null);
+
+const UNAVAILABLE_SCENARIOS = [
+  ['codex missing from PATH', {
+    spawnImpl: scriptedSpawn(() => null, {
+      onSpawn: (c) => c.emit('error', Object.assign(new Error('spawn codex ENOENT'), { code: 'ENOENT' })),
+    }),
+  }, { reason: 'not-installed' }],
+  ['a spawn that throws', {
+    spawnImpl: () => { throw Object.assign(new Error('spawn EACCES'), { code: 'EACCES' }); },
+  }, { reason: 'spawn-failed' }],
+  ['a CLI that rejects its flags and exits', {
+    spawnImpl: scriptedSpawn(() => null, { onSpawn: (c) => c.emit('exit', 2, null) }),
+  }, { reason: 'exited', exitCode: 2 }],
+  ['an RPC error on the rate-limit read', {
+    spawnImpl: scriptedSpawn((m) => initOk(m)
+      ?? (m.id === 2 ? { id: 2, error: { code: -32600, message: 'not logged in as someone@example.com' } } : null)),
+  }, { reason: 'rpc-error', rpcCode: -32600 }],
+  ['an answer with no usable window', {
+    spawnImpl: scriptedSpawn((m) => initOk(m) ?? (m.id === 2 ? { id: 2, result: { rateLimits: null } } : null)),
+  }, { reason: 'no-limit-windows' }],
+  ['an app-server that never answers', {
+    spawnImpl: scriptedSpawn(() => null), timeoutMs: 30,
+  }, { reason: 'timeout' }],
+];
+
+for (const [name, opts, expected] of UNAVAILABLE_SCENARIOS) {
+  test(`collectCodexLimitsDetailed names the failure class: ${name}`, async () => {
+    const out = await collectCodexLimitsDetailed({ cacheFile: path.join(tmp(), 'none.json'), ...opts });
+    assert.equal(out.limits, null, 'no answer and no cache is still null');
+    assert.deepEqual(out.unavailable, expected);
+    assert.ok(CODEX_UNAVAILABLE_REASONS.includes(out.unavailable.reason));
+    assert.ok(!JSON.stringify(out.unavailable).includes('example.com'),
+      'vendor error text never reaches the payload — only the class and a numeric code');
+  });
+}
+
+test('collectCodexLimitsDetailed reports nothing unavailable on an answer or a fresh cache', async () => {
+  const cacheFile = path.join(tmp(), 'codex-rate-limits.json');
+  const answered = await collectCodexLimitsDetailed({ cacheFile, spawnImpl: fakeSpawn(CODEX_RESP), now: 1000 });
+  assert.equal(answered.unavailable, null);
+  assert.equal(answered.limits.planType, 'prolite');
+  const cached = await collectCodexLimitsDetailed({
+    cacheFile, now: 1001, spawnImpl: () => { throw new Error('must not spawn on a fresh cache'); },
+  });
+  assert.equal(cached.unavailable, null);
+  assert.equal(cached.limits.fetchedAt, 1000);
+});
+
+test('a stale cache served after a failed refresh still carries why the refresh failed', async () => {
+  const cacheFile = path.join(tmp(), 'codex-rate-limits.json');
+  fs.writeFileSync(cacheFile, JSON.stringify({ provider: 'codex', fetchedAt: 1, lanes: [{ id: 'codex' }] }));
+  const out = await collectCodexLimitsDetailed({
+    cacheFile, now: 10 + CODEX_TTL_MS,
+    spawnImpl: scriptedSpawn(() => null, { onSpawn: (c) => c.emit('exit', 2, null) }),
+  });
+  assert.equal(out.limits.fetchedAt, 1, 'stale beats silent-nothing');
+  assert.deepEqual(out.unavailable, { reason: 'exited', exitCode: 2 });
+});
+
 // ── unsupportedQuotaHosts — F-10: label absence instead of leaving it silent ─
 //
 // ADR-0010 sanctions exactly two channels (claude's statusline tee, codex's
@@ -421,4 +507,22 @@ test('readLimits carries the Claude tee channel class beside an unchanged claude
   });
   assert.equal(out.claude, null, 'no tee file still reads as null — the claude contract is unchanged');
   assert.equal(out.claudeChannel, 'custom');
+});
+
+test('readLimits carries why Codex limits are unavailable beside an unchanged codex field', async () => {
+  const out = await readLimits({
+    now: 1000, claudeFile: path.join(tmp(), 'absent.json'),
+    codexCacheFile: path.join(tmp(), 'codex.json'), claudeSettingsFile: path.join(tmp(), 'settings.json'),
+    spawnImpl: scriptedSpawn(() => null, {
+      onSpawn: (c) => c.emit('error', Object.assign(new Error('spawn codex ENOENT'), { code: 'ENOENT' })),
+    }),
+  });
+  assert.equal(out.codex, null);
+  assert.deepEqual(out.codexUnavailable, { reason: 'not-installed' });
+  const ok = await readLimits({
+    now: 1000, claudeFile: path.join(tmp(), 'absent.json'),
+    codexCacheFile: path.join(tmp(), 'codex.json'), claudeSettingsFile: path.join(tmp(), 'settings.json'),
+    spawnImpl: fakeSpawn(CODEX_RESP),
+  });
+  assert.equal(ok.codexUnavailable, null);
 });

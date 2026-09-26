@@ -306,6 +306,10 @@ Claude's limits reach the dashboard only through the kit footer in the statuslin
 and a project's own statusLine takes precedence over your user-level one. When the Claude side is
 empty it says what your user-level statusLine is (none, the kit footer, each project's Ruflo
 helper, or a custom script) and what fills the panel, without showing the script's path.
+When the Codex side is empty it names why the last `codex app-server` request produced nothing —
+codex not found, could not start, exited early (with its exit code), timed out, refused the request,
+or answered without a plan window — and the next check to run. A stale Codex answer shown instead
+notes that its last refresh failed.
 
 ### Prompts
 

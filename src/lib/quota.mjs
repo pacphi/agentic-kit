@@ -291,25 +291,45 @@ export function normalizeCodexLimits(resp, { fetchedAt = null } = {}) {
  * the cache for 10 days before this fix). Resolves the raw response object,
  * or null on any failure.
  */
-export function codexAppServerRateLimits({ timeoutMs = 15_000, spawnImpl = spawn, bin = 'codex' } = {}) {
+export function codexAppServerRateLimits(opts = {}) {
+  return codexAppServerExchange(opts).then((out) => out.result);
+}
+
+/** Every failure class codexAppServerExchange can report (#238 P4). */
+export const CODEX_UNAVAILABLE_REASONS = Object.freeze([
+  'not-installed', 'spawn-failed', 'exited', 'timeout', 'rpc-error', 'no-limit-windows',
+]);
+
+const spawnFailure = (error) => ({ reason: error?.code === 'ENOENT' ? 'not-installed' : 'spawn-failed' });
+
+/**
+ * The same exchange, keeping WHY it produced nothing: `{ result, failure }`
+ * where `failure` is null on an answer, else `{ reason }` plus `exitCode`
+ * (an early exit, e.g. 2 when a CLI rejects the flags) or `rpcCode` (a
+ * JSON-RPC error on the read). Only the class and a number are kept: stderr
+ * stays ignored and the vendor's error message is dropped, because it can
+ * carry account or path detail the dashboard has no business relaying.
+ */
+export function codexAppServerExchange({ timeoutMs = 15_000, spawnImpl = spawn, bin = 'codex' } = {}) {
   return new Promise((resolve) => {
     let child;
     try {
       child = spawnImpl(bin, ['-s', 'read-only', '-a', 'never', 'app-server'],
         { stdio: ['pipe', 'pipe', 'ignore'] });
-    } catch { resolve(null); return; }
+    } catch (error) { resolve({ result: null, failure: spawnFailure(error) }); return; }
     let buf = '';
     let settled = false;
-    const done = (value) => {
+    const done = (result, failure = null) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       try { child.kill(); } catch { /* already gone */ }
-      resolve(value);
+      resolve({ result, failure });
     };
-    const timer = setTimeout(() => done(null), timeoutMs);
-    child.on('error', () => done(null));
-    child.on('exit', () => done(null));
+    const timer = setTimeout(() => done(null, { reason: 'timeout' }), timeoutMs);
+    child.on('error', (error) => done(null, spawnFailure(error)));
+    child.on('exit', (code) => done(null, Number.isInteger(code)
+      ? { reason: 'exited', exitCode: code } : { reason: 'exited' }));
     child.stdout.on('data', (chunk) => {
       buf += String(chunk);
       let nl;
@@ -322,9 +342,11 @@ export function codexAppServerRateLimits({ timeoutMs = 15_000, spawnImpl = spawn
           try {
             child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'initialized' })}\n`);
             child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'account/rateLimits/read', params: {} })}\n`);
-          } catch { done(null); }
+          } catch (error) { done(null, spawnFailure(error)); }
         } else if (msg?.id === 2) {
-          done(msg.result && typeof msg.result === 'object' ? msg.result : null);
+          if (msg.result && typeof msg.result === 'object') done(msg.result);
+          else done(null, Number.isInteger(msg.error?.code)
+            ? { reason: 'rpc-error', rpcCode: msg.error.code } : { reason: 'rpc-error' });
         }
       }
     });
@@ -333,7 +355,7 @@ export function codexAppServerRateLimits({ timeoutMs = 15_000, spawnImpl = spawn
         jsonrpc: '2.0', id: 1, method: 'initialize',
         params: { clientInfo: { name: 'agentic-kit', title: 'agentic-kit dashboard', version: '0' } },
       })}\n`);
-    } catch { done(null); }
+    } catch (error) { done(null, spawnFailure(error)); }
   });
 }
 
@@ -344,19 +366,36 @@ export function codexAppServerRateLimits({ timeoutMs = 15_000, spawnImpl = spawn
  * answer (codex absent / logged out).
  *
  * @param {{ ttlMs?: number, cacheFile?: string, now?: number,
+ *           timeoutMs?: number, spawnImpl?: any, bin?: string }} [opts]
+ */
+export async function collectCodexLimits(opts = {}) {
+  return (await collectCodexLimitsDetailed(opts)).limits;
+}
+
+/**
+ * collectCodexLimits with the failure kept: `{ limits, unavailable }`.
+ * `unavailable` is null when the answer is fresh (from the app-server or the
+ * TTL cache), else the failure class of THIS refresh, including when a stale
+ * cache is served in its place, so the panel can say both "as of 3h ago"
+ * and why it is not newer.
+ *
+ * @param {{ ttlMs?: number, cacheFile?: string, now?: number,
  *           timeoutMs?: number, spawnImpl?: any, bin?: string }} [o]
  */
-export async function collectCodexLimits({
+export async function collectCodexLimitsDetailed({
   ttlMs = CODEX_TTL_MS, cacheFile = codexLimitsFile(), now = Date.now(),
   timeoutMs, spawnImpl, bin,
 } = {}) {
   let cached = null;
   try { cached = JSON.parse(fs.readFileSync(cacheFile, 'utf8')); } catch { /* first run */ }
-  if (cached && Number.isFinite(cached.fetchedAt) && now - cached.fetchedAt < ttlMs) return cached;
+  if (cached && Number.isFinite(cached.fetchedAt) && now - cached.fetchedAt < ttlMs) {
+    return { limits: cached, unavailable: null };
+  }
 
-  const resp = await codexAppServerRateLimits({ timeoutMs, spawnImpl, bin });
-  const fresh = normalizeCodexLimits(resp, { fetchedAt: now });
-  if (!fresh) return cached; // stale beats silent-nothing; null when never answered
+  const { result, failure } = await codexAppServerExchange({ timeoutMs, spawnImpl, bin });
+  const fresh = normalizeCodexLimits(result, { fetchedAt: now });
+  // stale beats silent-nothing; null when never answered
+  if (!fresh) return { limits: cached, unavailable: failure ?? { reason: 'no-limit-windows' } };
   try {
     fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
     const tmp = `${cacheFile}.${process.pid}.tmp`;
@@ -365,7 +404,7 @@ export async function collectCodexLimits({
     fs.writeFileSync(tmp, JSON.stringify(fresh), { mode: 0o600 });
     fs.renameSync(tmp, cacheFile);
   } catch { /* an unwritable cache costs a refetch, never the answer */ }
-  return fresh;
+  return { limits: fresh, unavailable: null };
 }
 
 // ── Unsupported hosts (F-10 labeling policy) ────────────────────────────────
@@ -395,8 +434,10 @@ export function unsupportedQuotaHosts({ enabledHosts = {} } = {}) {
  * any additional enabled host with no sanctioned quota channel (F-10);
  * omitting `enabledHosts` (the default) leaves it empty, so claude/codex
  * output is unchanged unless a caller opts in. `claudeChannel` is the
- * user-level statusLine's class (classifyClaudeTeeChannel), a sibling of
- * `claude` so that field keeps its null-or-windows contract.
+ * user-level statusLine's class (classifyClaudeTeeChannel), and
+ * `codexUnavailable` the failure class of the latest Codex refresh (null when
+ * the answer is fresh); both are siblings so `claude` and `codex` keep their
+ * null-or-data contracts.
  *
  * @param {{ now?: number, claudeFile?: string, codexCacheFile?: string, ttlMs?: number,
  *           timeoutMs?: number, spawnImpl?: any, bin?: string,
@@ -409,9 +450,9 @@ export async function readLimits({
 } = {}) {
   const claude = readClaudeLimits({ file: claudeFile ?? claudeLimitsFile() });
   const claudeChannel = classifyClaudeTeeChannel({ settingsFile: claudeSettingsFile ?? claudeSettingsPath(), home });
-  const codex = await collectCodexLimits({
+  const { limits: codex, unavailable: codexUnavailable } = await collectCodexLimitsDetailed({
     ttlMs, cacheFile: codexCacheFile ?? codexLimitsFile(), now, timeoutMs, spawnImpl, bin,
   });
   const others = unsupportedQuotaHosts({ enabledHosts });
-  return { generatedAt: new Date(now).toISOString(), claude, claudeChannel, codex, others };
+  return { generatedAt: new Date(now).toISOString(), claude, claudeChannel, codex, codexUnavailable, others };
 }

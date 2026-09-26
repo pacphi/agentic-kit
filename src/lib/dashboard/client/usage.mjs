@@ -1153,12 +1153,43 @@ import { renderUsage } from './usage-orchestrators.mjs';
 
   }
 
+  // Why the latest Codex refresh produced nothing (#238 P4). The server keeps
+  // only the failure class and a number (exit or JSON-RPC code) — never stderr
+  // or vendor text — and the panel names the cause instead of guessing
+  // "not installed, not logged in, or did not answer". Unknown classes (a
+  // newer server) fall back to that generic sentence.
+  function codexCode(n){return Number.isInteger(n)?String(n):"";}
+  var CODEX_WHY={
+    "not-installed":function(){return "the codex CLI was not found on the dashboard&rsquo;s PATH, so app-server could not start. "
+      +"Check the Codex host row in <code>ak status</code>.";},
+    "spawn-failed":function(){return "codex app-server could not be started. Check the Codex host row in <code>ak status</code>.";},
+    "exited":function(u){var c=codexCode(u.exitCode);return "codex app-server exited before answering"+(c?" (exit code "+c+")":"")
+      +". An outdated codex CLI can reject the read-only flags; check <code>codex --version</code> and the Codex host row in <code>ak status</code>.";},
+    "timeout":function(){return "codex app-server did not answer in time. It is asked again on the next refresh.";},
+    "rpc-error":function(u){var c=codexCode(u.rpcCode);return "codex app-server refused the rate-limit request"+(c?" (RPC error "+c+")":"")
+      +", for example when codex is not signed in. Run <code>codex login status</code>.";},
+    "no-limit-windows":function(){return "codex answered but reported no plan limit window. Plan windows apply to a ChatGPT-plan "
+      +"sign-in; API-key use is billed at API rates. <code>codex login status</code> shows which one codex uses.";}
+  };
+  var CODEX_FAILED_SHORT={"not-installed":"codex not found","spawn-failed":"could not start","timeout":"timed out",
+    "no-limit-windows":"no plan windows"};
+  function codexWhy(u){
+    return u&&Object.prototype.hasOwnProperty.call(CODEX_WHY,u.reason)?CODEX_WHY[u.reason](u):null;
+  }
+  function codexFailedShort(u){
+    if(!u||!Object.prototype.hasOwnProperty.call(CODEX_WHY,u.reason))return "";
+    var c=u.reason==="exited"?codexCode(u.exitCode):u.reason==="rpc-error"?codexCode(u.rpcCode):"";
+    var label=u.reason==="exited"?"exited":u.reason==="rpc-error"?"refused (RPC)":CODEX_FAILED_SHORT[u.reason];
+    return " · last refresh failed: "+label+(c?" (code "+c+")":"");
+  }
+
   function renderLimitsCodex(){
     var codexEl=document.getElementById("u-lim-codex");
     var x=LIMITS.codex;
     var xn=document.getElementById("u-lim-codex-note");
     if(x&&x.lanes&&x.lanes.length){
-      if(xn)xn.textContent=(x.planType?("plan "+x.planType+" · "):"")+"app-server · "+limAge(x.fetchedAt);
+      if(xn)xn.textContent=(x.planType?("plan "+x.planType+" · "):"")+"app-server · "+limAge(x.fetchedAt)
+        +codexFailedShort(LIMITS.codexUnavailable);
       var html="",paced=false;
       for(var i=0;i<x.lanes.length;i++){
         var lane=x.lanes[i];
@@ -1179,8 +1210,8 @@ import { renderUsage } from './usage-orchestrators.mjs';
       codexEl.innerHTML=html;
     }else{
       if(xn)xn.textContent="no data";
-      codexEl.innerHTML='<div class="empty">no Codex limit data &mdash; codex is not installed, not logged in, '
-        +"or app-server did not answer.</div>";
+      codexEl.innerHTML='<div class="empty">no Codex limit data &mdash; '
+        +(codexWhy(LIMITS.codexUnavailable)||"codex is not installed, not logged in, or app-server did not answer.")+"</div>";
     }
 
   }

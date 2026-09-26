@@ -1353,11 +1353,11 @@ both credential-free for ak:
   tee via `normalizeClaudeLimits` (`quota.mjs:70`), which maps `five_hour` /
   `seven_day` / `seven_day_<model>` keys to duration-labelled windows.
 - **Codex** — one `initialize` → `account/rateLimits/read` JSON-RPC exchange
-  with a spawned `codex app-server`, implemented by `codexAppServerRateLimits`
-  (`quota.mjs:294`) and TTL-cached
+  with a spawned `codex app-server`, implemented by `codexAppServerExchange`
+  (`quota.mjs:313`) and TTL-cached
   (`CODEX_TTL_MS`, `:44`) by
-`collectCodexLimits`, which makes that call
-  (`:349`). Lanes come from `rateLimitsByLimitId` in
+`collectCodexLimitsDetailed`, which makes that call
+  (`:385`). Lanes come from `rateLimitsByLimitId` in
   `normalizeCodexLimits` (`:230`), including per-model pools and
   rate-limit reset credits. A pool reported under both a named lane and the
   legacy generic `codex` lane — same duration, reset instant, and utilization —
@@ -1386,6 +1386,15 @@ Ruflo helper), `custom` (another script, an inline command, or a missing file), 
 unreadable settings file). No path leaves the server. An empty Claude panel then names the
 class and the fix: with a `custom` user-level statusLine, limits come only from sessions in a
 project set up with `ak setup --project`, whose footer `ak sync` keeps current.
+
+The Codex side keeps the failure class of its latest refresh as `codexUnavailable`: `not-installed`
+(no `codex` on the dashboard's PATH), `spawn-failed`, `exited` (with `exitCode`; an outdated CLI
+that rejects the read-only flags exits early), `timeout`, `rpc-error` (with the numeric `rpcCode`),
+or `no-limit-windows` (an answer with no usable window). It is `null` when the answer is fresh.
+Only the class and the number are kept; stderr and the vendor's message text are dropped. The
+empty panel names the cause and the next check (`ak status`, `codex --version`, or
+`codex login status`), and a stale answer shown in its place gets "last refresh failed" in its
+note.
 
 **Limit-aware findings.** `detectLimitInsights` (`usage-insights.mjs:967`)
 applies the same evidence rules as every other detector — vendor percentages

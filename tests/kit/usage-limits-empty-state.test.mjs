@@ -75,3 +75,39 @@ test('Claude windows still render as meters whatever the channel says', () => {
   assert.doesNotMatch(els['u-lim-claude'].innerHTML, /custom script/,
     'data that arrived (from a footer-carrying project) must not be explained away');
 });
+
+// ── Codex: the server's failure class replaces the three-way guess ──────────
+
+const codexText = (extra) => text(renderLimitsWith(empty(extra))['u-lim-codex'].innerHTML);
+
+test('each Codex failure class renders its own cause and next check', () => {
+  const cases = [
+    [{ reason: 'not-installed' }, /codex CLI was not found/, /ak status/],
+    [{ reason: 'spawn-failed' }, /could not be started/, /ak status/],
+    [{ reason: 'exited', exitCode: 2 }, /exited before answering \(exit code 2\)/, /codex --version/],
+    [{ reason: 'timeout' }, /did not answer in time/, /next refresh/],
+    [{ reason: 'rpc-error', rpcCode: -32600 }, /refused the rate-limit request \(RPC error -32600\)/, /codex login status/],
+    [{ reason: 'no-limit-windows' }, /reported no plan limit window/, /API-key/],
+  ];
+  for (const [codexUnavailable, cause, next] of cases) {
+    const html = codexText({ codexUnavailable });
+    assert.match(html, cause, codexUnavailable.reason);
+    assert.match(html, next, codexUnavailable.reason);
+    assert.doesNotMatch(html, /not installed, not logged in, or/, 'the old three-way guess is gone');
+  }
+});
+
+test('an older server with no Codex reason keeps the generic copy', () => {
+  assert.match(codexText({}), /no Codex limit data/);
+  assert.match(codexText({ codexUnavailable: { reason: 'from-the-future' } }), /no Codex limit data/);
+});
+
+test('a stale Codex answer served after a failed refresh says the refresh failed', () => {
+  const codex = { provider: 'codex', fetchedAt: Date.now() - 3_600_000, planType: 'plus',
+    lanes: [{ id: 'codex', name: 'codex', windows: [{ label: 'weekly', usedPercent: 40, windowMinutes: 10080 }] }] };
+  const els = renderLimitsWith(empty({ codex, codexUnavailable: { reason: 'exited', exitCode: 2 } }));
+  assert.match(els['u-lim-codex'].innerHTML, /class="mrow"/, 'the stale meters still render');
+  assert.match(els['u-lim-codex-note'].textContent, /last refresh failed: exited \(code 2\)/);
+  const fresh = renderLimitsWith(empty({ codex, codexUnavailable: null }));
+  assert.doesNotMatch(fresh['u-lim-codex-note'].textContent, /refresh failed/);
+});
