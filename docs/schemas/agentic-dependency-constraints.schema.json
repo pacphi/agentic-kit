@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/pacphi/agentic-kit/docs/schemas/agentic-dependency-constraints.schema.json",
-  "title": "agentic-kit upstream dependency constraints",
+  "title": "agentic-kit upstream registry: dependency constraints and watched upstream threads",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "lastVerifiedAt", "recheckPolicy", "dependencyPolicies", "constraints"],
+  "required": ["schemaVersion", "lastVerifiedAt", "recheckPolicy", "watchPolicy", "dependencyPolicies", "constraints", "watch"],
   "properties": {
-    "schemaVersion": { "const": 3 },
+    "schemaVersion": { "const": 5 },
     "lastVerifiedAt": { "type": "string", "format": "date" },
     "recheckPolicy": {
       "type": "object",
@@ -17,6 +17,36 @@
         "requirePrimarySource": { "const": true },
         "onObservedRelease": { "type": "boolean" },
         "beforeManagedUpgrade": { "type": "boolean" }
+      }
+    },
+    "watchPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ours", "staleAfterDays", "automatedReplyPatterns", "ledger", "dispatch"],
+      "properties": {
+        "ours": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "staleAfterDays": { "type": "integer", "minimum": 1 },
+        "automatedReplyPatterns": { "type": "array", "items": { "type": "string", "format": "regex" } },
+        "ledger": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repo", "issueTitle", "sentinel"],
+          "properties": {
+            "repo": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+            "issueTitle": { "type": "string", "minLength": 1 },
+            "sentinel": { "type": "string", "pattern": "^[A-Z][A-Z-]+$" }
+          }
+        },
+        "dispatch": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["branchPrefix", "pullRequest", "merge"],
+          "properties": {
+            "branchPrefix": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/$" },
+            "pullRequest": { "const": "draft" },
+            "merge": { "const": "never" }
+          }
+        }
       }
     },
     "dependencyPolicies": {
@@ -39,13 +69,18 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "dependency", "kind", "affected", "issue", "issueState", "primaryEvidence", "strategy", "versionGate", "expiryPolicy", "nextRetestAt", "sunsetWhen", "notification"],
+        "required": ["id", "dependency", "kind", "affected", "primaryEvidence", "strategy", "versionGate", "expiryPolicy", "nextRetestAt", "sunsetWhen", "notification"],
+        "oneOf": [
+          { "required": ["issue", "issueState"] },
+          { "required": ["releaseUrl"], "properties": { "kind": { "const": "blocked-version" } }, "not": { "anyOf": [{ "required": ["issue"] }, { "required": ["issueState"] }] } }
+        ],
         "properties": {
           "id": { "type": "string" },
           "dependency": { "type": "string" },
           "kind": { "type": "string" },
           "affected": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
           "issue": { "type": "string", "pattern": "^https://github\\.com/[^/]+/[^/]+/issues/[0-9]+$" },
+          "releaseUrl": { "type": "string", "pattern": "^https://github\\.com/[^/]+/[^/]+/releases/tag/[A-Za-z0-9_.-]+$" },
           "issueState": { "enum": ["open-at-last-verification", "closed-at-last-verification"] },
           "primaryEvidence": { "type": "string" },
           "strategy": { "type": "string" },
@@ -58,7 +93,7 @@
             "required": ["status", "requiredFields"],
             "properties": {
               "status": { "enum": ["draft-only", "published"] },
-              "publishedAt": { "type": "string", "format": "date-time" },
+              "publishedAt": { "type": "string", "anyOf": [{ "format": "date-time" }, { "format": "date" }] },
               "publishedUrl": { "type": "string", "pattern": "^https://github\\.com/[^/]+/[^/]+/issues/[0-9]+(?:#issuecomment-[0-9]+)?$" },
               "requiredFields": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } }
             },
@@ -68,6 +103,91 @@
             }]
           }
         }
+      }
+    },
+    "watch": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "url", "relation", "kind", "title", "dependency", "doneWhen", "mapping", "kitImpact", "adjustment", "status", "constraintIds", "history"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[1-9][0-9]*$" },
+          "url": { "type": "string", "pattern": "^https://github\\.com/[^/]+/[^/]+/(issues|pull)/[0-9]+$" },
+          "relation": { "enum": ["filed", "commented", "referenced", "tracking"] },
+          "kind": { "enum": ["issue", "pr"] },
+          "title": { "type": "string", "minLength": 1 },
+          "dependency": { "type": ["string", "null"] },
+          "doneWhen": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["state", "release"],
+            "properties": {
+              "state": { "enum": ["closed-completed", "merged"] },
+              "release": {
+                "oneOf": [
+                  { "type": "null" },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["channel", "name", "minVersion"],
+                    "properties": {
+                      "channel": { "enum": ["npm", "github-release"] },
+                      "name": { "type": "string", "minLength": 1 },
+                      "minVersion": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$" }] }
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "mapping": { "enum": ["mapped", "unmapped"] },
+          "kitImpact": {
+            "oneOf": [
+              { "type": "null" },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["refs", "files"],
+                "properties": {
+                  "refs": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+                  "files": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+                }
+              }
+            ]
+          },
+          "adjustment": { "type": ["string", "null"] },
+          "status": { "enum": ["watching", "fixed-unreleased", "released", "dispatched", "adopted", "retired"] },
+          "constraintIds": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+          "tracks": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[1-9][0-9]*$" } },
+          "note": { "type": "string", "minLength": 1 },
+          "history": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["date", "event"],
+              "properties": {
+                "date": { "type": "string", "format": "date" },
+                "event": { "enum": ["filed", "commented", "closed", "reopened", "registered", "watching", "fixed-unreleased", "released", "dispatched", "adopted", "retired"] },
+                "note": { "type": "string" }
+              }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "mapping": { "const": "unmapped" } } },
+            "then": { "properties": { "kitImpact": { "type": "null" }, "adjustment": { "type": "null" } } },
+            "else": { "properties": { "kitImpact": { "type": "object" }, "adjustment": { "type": "string", "minLength": 1 } } }
+          },
+          {
+            "if": { "properties": { "relation": { "const": "tracking" } } },
+            "then": { "required": ["tracks"], "properties": { "dependency": { "type": "null" } } },
+            "else": { "not": { "required": ["tracks"] }, "properties": { "dependency": { "type": "string" } } }
+          }
+        ]
       }
     }
   }

@@ -2,6 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { publicSource, readJsonSource } from './common.mjs';
+import { validateWatch } from './upstream-watch.mjs';
 
 // The registry is runtime data: it sits beside this loader so the published
 // package (package.json `files` ships src/, never config/) carries it.
@@ -14,7 +15,7 @@ function validConstraintSource(entry, schemaVersion) {
   if (typeof entry.issue === 'string' && /^https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/\d+$/.test(entry.issue)) {
     return ISSUE_STATES.has(entry.issueState);
   }
-  return schemaVersion === 4 && entry.kind === 'blocked-version'
+  return schemaVersion >= 4 && entry.kind === 'blocked-version'
     && entry.issue == null && entry.issueState == null
     && typeof entry.releaseUrl === 'string'
     && /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/releases\/tag\/[\w.-]+$/.test(entry.releaseUrl);
@@ -32,17 +33,20 @@ function affectedBy(version, ranges) {
     || (/^\d+\.x$/.test(range) && version.startsWith(`${range.slice(0, -1)}`)));
 }
 
-export function loadUpstreamConstraints({
+function loadRegistry({
   file = defaultFile, observedVersions = {}, now = () => new Date(),
 } = {}) {
   const source = readJsonSource(file, path.dirname(file), { kind: 'upstream-constraints' });
   if (!source || source.status !== 'valid') {
-    return { status: source?.status ?? 'absent', source: source ? publicSource(source) : { file, status: 'absent' }, constraints: [], errors: [source?.error ?? 'constraint registry is absent'] };
+    return {
+      result: { status: source?.status ?? 'absent', source: source ? publicSource(source) : { file, status: 'absent' }, constraints: [], errors: [source?.error ?? 'constraint registry is absent'] },
+      watch: { watchPolicy: null, watch: [] },
+    };
   }
   const document = source.document;
   const errors = [];
   const asOf = now();
-  if (![2, 3, 4].includes(document?.schemaVersion)) errors.push('unsupported upstream constraint schema');
+  if (document?.schemaVersion !== 5) errors.push('unsupported upstream constraint schema');
   if (!Array.isArray(document?.constraints)) errors.push('constraints must be an array');
   if (!Array.isArray(document?.dependencyPolicies)) errors.push('dependencyPolicies must be an array');
   if (!validDate(document?.lastVerifiedAt)) errors.push('lastVerifiedAt must be an ISO date');
@@ -128,12 +132,28 @@ export function loadUpstreamConstraints({
     };
   });
   const evidenceStatus = projected.some((entry) => entry.evidence.status === 'stale') ? 'stale' : 'current';
+  const watch = validateWatch(document, { policyNames, constraintIds, constraints });
+  errors.push(...watch.errors);
   return {
-    status: errors.length ? 'invalid' : evidenceStatus === 'stale' ? 'stale' : 'valid',
-    registryStatus: errors.length ? 'invalid' : 'valid', evidenceStatus,
-    source: publicSource(source),
-    lastVerifiedAt: document?.lastVerifiedAt ?? null,
-    recheckPolicy: document?.recheckPolicy ?? null,
-    dependencyPolicies, constraints: projected, errors,
+    result: {
+      status: errors.length ? 'invalid' : evidenceStatus === 'stale' ? 'stale' : 'valid',
+      registryStatus: errors.length ? 'invalid' : 'valid', evidenceStatus,
+      source: publicSource(source),
+      lastVerifiedAt: document?.lastVerifiedAt ?? null,
+      recheckPolicy: document?.recheckPolicy ?? null,
+      dependencyPolicies, constraints: projected, errors,
+    },
+    watch,
   };
+}
+
+/** Constraints as the hook audit consumes them. The watch list is validated but not carried. */
+export function loadUpstreamConstraints(options = {}) {
+  return loadRegistry(options).result;
+}
+
+/** The whole registry: constraints plus the watch policy and watched upstream threads. */
+export function loadUpstreamRegistry(options = {}) {
+  const { result, watch } = loadRegistry(options);
+  return { ...result, watchPolicy: watch.watchPolicy, watch: watch.watch };
 }

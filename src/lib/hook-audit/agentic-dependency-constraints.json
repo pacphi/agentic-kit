@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "lastVerifiedAt": "2026-09-02",
   "recheckPolicy": {
     "cadence": "weekly-and-before-upgrade",
@@ -7,6 +7,21 @@
     "requirePrimarySource": true,
     "onObservedRelease": true,
     "beforeManagedUpgrade": true
+  },
+  "watchPolicy": {
+    "ours": ["pacphi"],
+    "staleAfterDays": 90,
+    "automatedReplyPatterns": ["^🤖 Automated acknowledg"],
+    "ledger": {
+      "repo": "pacphi/agentic-kit",
+      "issueTitle": "Upstream watch",
+      "sentinel": "UPSTREAM-WATCH"
+    },
+    "dispatch": {
+      "branchPrefix": "upstream/",
+      "pullRequest": "draft",
+      "merge": "never"
+    }
   },
   "dependencyPolicies": [
     {
@@ -268,6 +283,1625 @@
         "publishedUrl": "https://github.com/vercel-labs/agent-browser/issues/1679",
         "requiredFields": ["minimalReproduction", "expected", "observed", "hostVersions", "dependencyVersion", "evidenceDigests", "boundedWorkaround", "expiry", "removalProof"]
       }
+    }
+  ],
+  "watch": [
+    {
+      "id": "openai/codex#15451",
+      "url": "https://github.com/openai/codex/issues/15451",
+      "relation": "commented",
+      "kind": "issue",
+      "title": "[Bug] --json and --output-schema are silently ignored when tools/MCP servers are active, resulting in malformed outputs",
+      "dependency": "codex",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "mapped",
+      "kitImpact": {
+        "refs": ["closed-upstream review 2026-09-26"],
+        "files": ["docs/adr/0034-schema-native-handoffs-and-hermetic-seats.md", "src/lib/execution/codex.mjs"]
+      },
+      "adjustment": "None: closed 2026-04-03 as model behaviour without a fix; parseHandoffText is the validation wrapper the maintainer recommended. Re-probe --output-schema with MCP on Codex upgrades (last probed on 0.149.1).",
+      "status": "adopted",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-04-03", "event": "closed", "note": "completed" },
+        { "date": "2026-08-26", "event": "commented" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "adopted", "note": "ak relies on the upstream resolution" }
+      ]
+    },
+    {
+      "id": "openai/codex#16045",
+      "url": "https://github.com/openai/codex/issues/16045",
+      "relation": "commented",
+      "kind": "issue",
+      "title": "bug: -c 'mcp_servers={}' silently no-ops instead of clearing MCP servers",
+      "dependency": "codex",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "@openai/codex", "minVersion": null } },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-08-26", "event": "commented" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "openai/codex#16921",
+      "url": "https://github.com/openai/codex/issues/16921",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "Allow custom status line plugins in Codex CLI",
+      "dependency": "codex",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "@openai/codex", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["src/lib/hosts.mjs"] },
+      "adjustment": "Once Codex ships a command-backed status line, offer a command-backed footer instead of the fixed tui.status_line projection.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "openai/codex#17827",
+      "url": "https://github.com/openai/codex/issues/17827",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "Customizable status line",
+      "dependency": "codex",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "@openai/codex", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["src/lib/hosts.mjs"] },
+      "adjustment": "Once Codex ships a command-backed status line, offer a command-backed footer instead of the fixed tui.status_line projection.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "openai/codex#19679",
+      "url": "https://github.com/openai/codex/issues/19679",
+      "relation": "commented",
+      "kind": "issue",
+      "title": "Make skills metadata context budget configurable instead of hardcoded 2%",
+      "dependency": "codex",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "@openai/codex", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["constraint codex-0.152.1-skill-context-budget"], "files": [] },
+      "adjustment": "Once Codex releases configurable skill metadata budgeting with included/omitted telemetry, relax the per-host guidance budgets and sunset the constraint.",
+      "status": "watching",
+      "constraintIds": ["codex-0.152.1-skill-context-budget"],
+      "history": [
+        { "date": "2026-09-02", "event": "commented" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "openai/codex#20140",
+      "url": "https://github.com/openai/codex/issues/20140",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "Feature request: command-backed/custom statusline rendering in Codex CLI",
+      "dependency": "codex",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["src/lib/hosts.mjs"] },
+      "adjustment": "None: closed as a duplicate; the request is watched through openai/codex#16921 and #17827.",
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-04-29", "event": "closed", "note": "duplicate" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "retired", "note": "closed duplicate upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "openai/codex#20244",
+      "url": "https://github.com/openai/codex/issues/20244",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "Custom command-backed TUI status line or colored status banner",
+      "dependency": "codex",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["src/lib/hosts.mjs"] },
+      "adjustment": "None: closed as a duplicate; the request is watched through openai/codex#16921 and #17827.",
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-04-29", "event": "closed", "note": "duplicate" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "retired", "note": "closed duplicate upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#563",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/563",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "Interrupted brain.rvf export leaves truncated store + FLVR-content .rvf.lock → permanent FsyncFailed; stale-lock self-heal misses it (export is delete-then-rewrite-in-place)",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.12.3" } },
+      "mapping": "mapped",
+      "kitImpact": {
+        "refs": ["closed-upstream review 2026-09-26"],
+        "files": ["docs/TROUBLESHOOTING.md", "src/lib/adapters/grants.mjs", "tests/kit/adapter-grants.test.mjs", "tests/kit/host-adapters-cli.test.mjs"]
+      },
+      "adjustment": "None: the workaround was already removed; remaining citations are comments and format examples.",
+      "status": "adopted",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-07-14", "event": "filed" },
+        { "date": "2026-07-17", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "adopted", "note": "ak relies on the fix (first released in 3.12.3)" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#564",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/pull/564",
+      "relation": "referenced",
+      "kind": "pr",
+      "title": "chore(release): v3.12.3 — atomic RVF export + self-healing stores (#563)",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "merged", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.12.3" } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["closed-upstream review 2026-09-26"], "files": ["src/lib/rvf.mjs"] },
+      "adjustment": "None: the fix for agentic-qe#563; the rvf.mjs comment records the removed workaround.",
+      "status": "adopted",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-07-17", "event": "closed", "note": "merged" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "adopted", "note": "ak relies on the fix (first released in 3.12.3)" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#568",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/568",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "Feature request: stable on-disk per-agent-type LLM provider routing overrides",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-07-20", "event": "filed" },
+        { "date": "2026-07-23", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "retired", "note": "closed completed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#574",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/574",
+      "relation": "commented",
+      "kind": "issue",
+      "title": "Same-PID RVF recovery breaks its own live lock and creates corrupt-file loops",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["lane C: live-lock busy rule", "pacphi/agentic-kit#240"], "files": ["docs/HOST-SUPPORT.md"] },
+      "adjustment": "Once a released agentic-qe stops falling through to create after a live RVF lock, remove the temporary busy rule and close pacphi/agentic-kit#240.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "commented" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#576",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/576",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "qe-court's own shipped default config.json violates its writerIsNeverJuror invariant",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-07-28", "event": "filed" },
+        { "date": "2026-07-29", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "retired", "note": "closed completed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#617",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/617",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "fix: @ruvector/solver-node native solver package was never published to npm (E404 on install)",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.13.10" } },
+      "mapping": "mapped",
+      "kitImpact": {
+        "refs": ["closed-upstream review 2026-09-26"],
+        "files": ["src/lib/heal.mjs", "tests/kit/heal-natives.test.mjs"]
+      },
+      "adjustment": "refactor(heal): drop the report-only AQE solver step (healAqeSolver and its calls in setup and sync). If kept, probe @ruvector/solver and drop \"<50K nodes\".",
+      "status": "released",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-08-05", "event": "filed" },
+        { "date": "2026-08-06", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.13.10; the ak change is pending" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#620",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/pull/620",
+      "relation": "referenced",
+      "kind": "pr",
+      "title": "chore(release): v3.13.10",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "merged", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.13.10" } },
+      "mapping": "mapped",
+      "kitImpact": {
+        "refs": ["closed-upstream review 2026-09-26"],
+        "files": ["src/lib/heal.mjs", "tests/kit/heal-natives.test.mjs"]
+      },
+      "adjustment": "Same change as agentic-qe#617: drop the report-only AQE solver step.",
+      "status": "released",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-08-06", "event": "closed", "note": "merged" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.13.10; the ak change is pending" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#628",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/628",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "Feature request: a provider-plugin registration API for AQE_LLM_PROVIDER",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.0" } },
+      "mapping": "mapped",
+      "kitImpact": {
+        "refs": ["constraint agentic-qe-3.13-external-provider-contract"],
+        "files": ["docs/HOST-ADAPTER-FREEZE-CHECKLIST.md", "docs/adr/0029-host-adapter-extension-point.md", "src/lib/adapters/admission.mjs", "src/lib/providers.mjs", "tests/live/aqe-external-provider-transport.test.mjs"]
+      },
+      "adjustment": "Run the live external-provider participant and advisor conformance (tests/live/aqe-external-provider-transport.test.mjs) on 3.14.0+ before sunsetting constraint agentic-qe-3.13-external-provider-contract. Also cited as \"issue #628\".",
+      "status": "released",
+      "constraintIds": ["agentic-qe-3.13-external-provider-contract"],
+      "history": [
+        { "date": "2026-08-16", "event": "filed" },
+        { "date": "2026-08-27", "event": "commented" },
+        { "date": "2026-08-31", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.14.0; the ak change is pending" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#631",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/631",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "Enabled external host provider (codex) is unreachable unless placed in the fallbackChain",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-08-26", "event": "filed" },
+        { "date": "2026-08-30", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "retired", "note": "closed completed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#632",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/632",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "qe-court consumer materials reference referee/oracle/config-schema assets that are not in the published package",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-08-26", "event": "filed" },
+        { "date": "2026-08-30", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "retired", "note": "closed completed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#654",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/654",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "Generated Claude lifecycle hooks use npx on the hot path and write millisecond-shaped seconds timeouts",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.1" } },
+      "mapping": "mapped",
+      "kitImpact": {
+        "refs": ["constraint agentic-qe-3.14.0-stop-hook-generator", "closed-upstream review 2026-09-26"],
+        "files": ["docs/HOOKS.md", "docs/TROUBLESHOOTING.md", "tests/kit/hook-read-model.test.mjs"]
+      },
+      "adjustment": "Keep the hook-audit detectors for projects generated by 3.14.0. Run offline Stop conformance on 3.14.1+ before sunsetting constraint agentic-qe-3.14.0-stop-hook-generator.",
+      "status": "released",
+      "constraintIds": ["agentic-qe-3.14.0-stop-hook-generator"],
+      "history": [
+        { "date": "2026-09-02", "event": "filed" },
+        { "date": "2026-09-06", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.14.1; the ak change is pending" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#655",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/655",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "Codex init needs a compact/disabled AGENTS.md guidance mode for context-budgeted hosts",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.1" } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["constraint agentic-qe-3.14.0-codex-guidance-policy"], "files": [] },
+      "adjustment": "Run the --codex-guidance preservation, idempotency and receipt conformance on 3.14.1+ before sunsetting constraint agentic-qe-3.14.0-codex-guidance-policy.",
+      "status": "released",
+      "constraintIds": ["agentic-qe-3.14.0-codex-guidance-policy"],
+      "history": [
+        { "date": "2026-09-02", "event": "filed" },
+        { "date": "2026-09-06", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.14.1; the ak change is pending" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#656",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/656",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "aqe init Vibium preflight can install twice and reports CLI presence as browser readiness",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-02", "event": "filed" },
+        { "date": "2026-09-06", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "retired", "note": "closed completed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#661",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/pull/661",
+      "relation": "referenced",
+      "kind": "pr",
+      "title": "fix(init): harden platform setup contracts",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "merged", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.1" } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["src/lib/hook-remediation/aqe-artifacts.mjs", "src/templates/aqe-lifecycle/README.md"] },
+      "adjustment": "None: cited as the release evidence for migrating artifacts generated by 3.14.0.",
+      "status": "adopted",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-06", "event": "closed", "note": "merged" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "adopted", "note": "ak relies on the fix (first released in 3.14.1)" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#719",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/pull/719",
+      "relation": "referenced",
+      "kind": "pr",
+      "title": "fix(rvf): preserve healthy stores behind stale locks",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "merged", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["lane C: live-lock busy rule", "pacphi/agentic-kit#240"], "files": [] },
+      "adjustment": "Partial fix for agentic-qe#574 (rethrows LockHeld). Once released and a live lock no longer surfaces FsyncFailed, remove the temporary busy rule and close pacphi/agentic-kit#240.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#734",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/734",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "CLI fleet run and task submit exit 0 for work that never ran (queen has no domain plugins)",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#735",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/735",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "Running aqe from a subfolder creates and adopts a new .agentic-qe store (#516 follow-up)",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["plan 6.3, addendum 3: AQE_PROJECT_ROOT pin"], "files": [] },
+      "adjustment": "Once a released agentic-qe resolves the project root from subfolders, drop the AQE_PROJECT_ROOT pin.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#736",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/736",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "brain import aborts with UNIQUE(name, qe_domain, pattern_type); --dry-run says 0 conflicts",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["plan 6.4, addendum 3: duplicate pruning before brain import"], "files": [] },
+      "adjustment": "Once a released agentic-qe imports stores that share patterns, drop the duplicate pruning ak runs before brain import.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/agentdb#26",
+      "url": "https://github.com/ruvnet/agentdb/issues/26",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "CLI write commands exit 1 after committing: this.db.save is not a function",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentdb", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["lane G3: stray-store reporting"], "files": [] },
+      "adjustment": "Consumed through Ruflo's bundled AgentDB. Once a Ruflo release bundles the fix, stop treating a non-zero agentdb write exit as possibly committed.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/agentdb#27",
+      "url": "https://github.com/ruvnet/agentdb/issues/27",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "CLI: skill/reflexion ignore --db and save it as record data; stats --db opens './--db'",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentdb", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["lane G3: stray-store reporting"], "files": [] },
+      "adjustment": "Consumed through Ruflo's bundled AgentDB. Once a Ruflo release bundles the fix, drop the stray-store report for databases created by the ignored --db flag.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/agentdb#28",
+      "url": "https://github.com/ruvnet/agentdb/issues/28",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "AgentDB creates ruvector.db and agentdb.rvf in the process cwd instead of beside dbPath",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentdb", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["lane G3: stray-store reporting"], "files": [] },
+      "adjustment": "Consumed through Ruflo's bundled AgentDB. Once a Ruflo release bundles the fix, drop the cwd ruvector.db/agentdb.rvf stray-store report.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#952",
+      "url": "https://github.com/ruvnet/ruflo/issues/952",
+      "relation": "commented",
+      "kind": "issue",
+      "title": "Segment MCP tools into workflow-based groups with selective enablement",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["src/lib/mcp.mjs"] },
+      "adjustment": "Once a released Ruflo filters MCP tools server-side, replace the permissions.deny tool-family gating in mcp.mjs.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-07-14", "event": "commented" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#2206",
+      "url": "https://github.com/ruvnet/ruflo/issues/2206",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "wizard: `.mcp.json` writes server key `ruflo` but plugins reference `mcp__claude-flow__*`",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["claude/ruflo-reference-full.md", "src/lib/mcp.mjs"] },
+      "adjustment": "None: ak registers the claude-flow key upstream tooling expects. Cited as \"#2206\".",
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-05-28", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "retired", "note": "closed completed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#2219",
+      "url": "https://github.com/ruvnet/ruflo/issues/2219",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "agentdb pins better-sqlite3@^11.8.1, which has no Node 24/26 prebuilt and fails to compile — silent fallback to sql.js WASM loses data",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-05-28", "event": "filed" },
+        { "date": "2026-05-28", "event": "commented" },
+        { "date": "2026-05-29", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "retired", "note": "closed completed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#2221",
+      "url": "https://github.com/ruvnet/ruflo/issues/2221",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "Statusline shows `RuFlo V3.6` for global npm installs — statusline-generator version probe never checks the global node_modules (survives #2195)",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["src/lib/paths.mjs", "src/templates/statusline-footer.cjs"] },
+      "adjustment": "None: ak's global-root resolution follows the fix (npm root -g is authoritative). Cited as \"upstream #2221\".",
+      "status": "adopted",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-05-29", "event": "filed" },
+        { "date": "2026-05-29", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "adopted", "note": "ak relies on the upstream resolution" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#2222",
+      "url": "https://github.com/ruvnet/ruflo/issues/2222",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "Route Q-learner never persists CLI feedback (autoSaveInterval); trained LoRA/SONA not consumed at inference — routing appears non-self-improving",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": "3.10.6" } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["src/tools/improvement-eval.mjs"] },
+      "adjustment": "None: improvement-eval checks that route feedback persists (fixed in ruflo 3.10.6). Cited as \"#2222\".",
+      "status": "adopted",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-05-29", "event": "filed" },
+        { "date": "2026-05-29", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "adopted", "note": "ak relies on the fix (first released in 3.10.6)" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#2239",
+      "url": "https://github.com/ruvnet/ruflo/issues/2239",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "Route Q-state encoder discards the entire keyword block — keyword-distinct tasks collapse to one Q-state (q-learning-router.js)",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": "3.10.11" } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["closed-upstream review 2026-09-26"], "files": ["src/templates/statusline-footer.cjs"] },
+      "adjustment": "None: the statusline-footer comment is accurate and nothing depends on it.",
+      "status": "adopted",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-05-29", "event": "filed" },
+        { "date": "2026-05-29", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "adopted", "note": "ak relies on the fix (first released in 3.10.11)" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#2549",
+      "url": "https://github.com/ruvnet/ruflo/issues/2549",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "neural status misreports native @ruvector/ruvllm training path as Unavailable (dead _trainingBackend + cross-process contrastiveTrainer global) — 3.17.0",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-07-03", "event": "filed" },
+        { "date": "2026-07-03", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "retired", "note": "closed completed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#2670",
+      "url": "https://github.com/ruvnet/ruflo/issues/2670",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "security defend non-functional on 3.28.0: @claude-flow/aidefence dropped from the dependency tree but still imported — banner-only output, error silently swallowed",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": "3.32.2" } },
+      "mapping": "mapped",
+      "kitImpact": {
+        "refs": ["closed-upstream review 2026-09-26"],
+        "files": ["docs/TROUBLESHOOTING.md", "src/commands/status/sections/security.mjs", "src/commands/x/verify.mjs", "src/lib/heal.mjs", "src/lib/natives.mjs", "src/templates/statusline-footer.cjs"]
+      },
+      "adjustment": "fix(security): stop reporting defend as non-functional when the installed CLI ships the built-in engine (3.32.2+). The status row, ak x verify, the footer alarm and the about text become warnings; keep healAidefence for the aidefence_* MCP tools and correct its detail text and docs/TROUBLESHOOTING.md.",
+      "status": "released",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-07-14", "event": "filed" },
+        { "date": "2026-07-17", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.32.2; the ak change is pending" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#2694",
+      "url": "https://github.com/ruvnet/ruflo/issues/2694",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "statusline: CVE counter is fabricated — hardcoded `totalCves = 3` + `cvesFixed` counted from scan FILES, not findings",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": "3.32.2" } },
+      "mapping": "mapped",
+      "kitImpact": {
+        "refs": ["closed-upstream review 2026-09-26"],
+        "files": ["src/lib/statusline.mjs", "src/templates/statusline-footer.cjs"]
+      },
+      "adjustment": "refactor(statusline): remove the retired CVE-counter overlay (SEC_WRAP, its gate, the status row, rufloLocalSecurity and rufloHonestInsight); keep SEC_WRAP_STRIP for one release. Conditional on declaring a Ruflo floor >= 3.32.2.",
+      "status": "released",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-07-16", "event": "filed" },
+        { "date": "2026-07-17", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.32.2; the ak change is pending" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#2766",
+      "url": "https://github.com/ruvnet/ruflo/issues/2766",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "@claude-flow/codex: dual run aborts with \"Database not initialized\" — memory bootstrap uses npx ruflo@alpha with an inconsistent DB path",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-07-23", "event": "filed" },
+        { "date": "2026-07-29", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "retired", "note": "closed completed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#2776",
+      "url": "https://github.com/ruvnet/ruflo/issues/2776",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "statusline security segment: STALE/IN_PROGRESS unreachable (scan freshness never checked) + uncapped cache can freeze 'scan pending'",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-07-24", "event": "filed" },
+        { "date": "2026-07-26", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "retired", "note": "closed completed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#2885",
+      "url": "https://github.com/ruvnet/ruflo/issues/2885",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "ruflo neural train crashes with libc++abi mutex lock failed on macOS arm64 (GitHub Actions macos-latest)",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": {
+        "refs": ["nightly macOS deep-proof step tolerates the crash (continue-on-error)"],
+        "files": [".github/workflows/nightly.yml"]
+      },
+      "adjustment": "Once a released Ruflo stops aborting with libc++abi mutex errors on macOS, remove continue-on-error from the nightly deep-proof step.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-07-31", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#2912",
+      "url": "https://github.com/ruvnet/ruflo/issues/2912",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "[BUG] ruflo-browser: smoke.sh check #12 hard-codes a monorepo-sibling path — /ruflo-browser doctor always fails for installed users",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["tests/kit/adapter-conformance.test.mjs"] },
+      "adjustment": "None: the test cites it as a counter-example; nothing in ak changes when it is fixed.",
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "retired", "note": "reference only; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#2922",
+      "url": "https://github.com/ruvnet/ruflo/issues/2922",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "v3.34: Bridge search path not using HNSW — ruvector-core dead code on default path",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["tests/statusline-segments.test.cjs"] },
+      "adjustment": "Once a released Ruflo searches through HNSW by default, reconsider an HNSW segment in the statusline footer; until then the footer makes no HNSW claim.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#2935",
+      "url": "https://github.com/ruvnet/ruflo/issues/2935",
+      "relation": "commented",
+      "kind": "issue",
+      "title": "macOS: daemon memory gate uses os.freemem(), deferring ~70% of workers and causing a KeepAlive restart loop",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["plan 6.2, addendum 3: lowered macOS daemon memory threshold"], "files": [] },
+      "adjustment": "Drop the lowered macOS daemon memory threshold once a released Ruflo gates workers on available rather than free memory.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "commented" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#2962",
+      "url": "https://github.com/ruvnet/ruflo/issues/2962",
+      "relation": "commented",
+      "kind": "issue",
+      "title": "Explicit provider/model selection (providers configure, agent spawn --provider/--model) does not propagate into actual agent execution",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": "3.38.8" } },
+      "mapping": "mapped",
+      "kitImpact": {
+        "refs": ["closed-upstream review 2026-09-26"],
+        "files": ["docs/PROVIDERS.md", "src/commands/setup.mjs", "src/lib/adapters/grants.mjs", "tests/kit/adapter-grants.test.mjs", "tests/kit/host-adapters-cli.test.mjs"]
+      },
+      "adjustment": "None while ak declares no Ruflo floor: providers.mjs gates on 3.38.8, the first fixed release. Drop the gate if ak declares ruflo >= 3.38.8.",
+      "status": "adopted",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-08-11", "event": "commented" },
+        { "date": "2026-08-12", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "adopted", "note": "ak relies on the fix (first released in 3.38.8)" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#2985",
+      "url": "https://github.com/ruvnet/ruflo/issues/2985",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "migrate status (ADR-382 Part B) suggests `ruflo plugins install <plugin>` — wrong subsystem and wrong syntax; the printed fix cannot succeed",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": "3.38.2" } },
+      "mapping": "mapped",
+      "kitImpact": {
+        "refs": ["closed-upstream review 2026-09-26"],
+        "files": ["src/commands/status/sections/scaffold-agents.mjs", "src/lib/scaffold.mjs"]
+      },
+      "adjustment": "fix(status): scaffold-agents advice names ruflo >= 3.38.2 instead of \"ruflo#2986 pending\"; keep the file probe and the delegation.",
+      "status": "released",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-08-12", "event": "filed" },
+        { "date": "2026-08-12", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.38.2; the ak change is pending" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#2986",
+      "url": "https://github.com/ruvnet/ruflo/pull/2986",
+      "relation": "filed",
+      "kind": "pr",
+      "title": "fix(migrate): correct removed-agent install suggestion and add `migrate fix --agents` restore (#2985)",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "merged", "release": { "channel": "npm", "name": "ruflo", "minVersion": "3.38.2" } },
+      "mapping": "mapped",
+      "kitImpact": {
+        "refs": ["closed-upstream review 2026-09-26"],
+        "files": ["src/commands/status/sections/scaffold-agents.mjs", "src/commands/sync.mjs", "src/lib/scaffold.mjs"]
+      },
+      "adjustment": "fix(status): scaffold-agents advice names ruflo >= 3.38.2 instead of \"ruflo#2986 pending\"; keep the file probe and the delegation.",
+      "status": "released",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-08-12", "event": "filed" },
+        { "date": "2026-08-12", "event": "closed", "note": "merged" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.38.2; the ak change is pending" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#3046",
+      "url": "https://github.com/ruvnet/ruflo/issues/3046",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "Feature request: a documented backend-registration surface for host CLIs",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": {
+        "refs": ["constraint ruflo-3x-capability-gap", "ADR-0029 (declarative manifest + subprocess hooks)", "ADR-0031"],
+        "files": ["docs/HOST-ADAPTER-FREEZE-CHECKLIST.md", "docs/adr/0031-capability-graduation-and-upstream-requests.md"]
+      },
+      "adjustment": "Answered from the requester side on 2026-09-26 (manifest + subprocess, ADR-0029). Once a released Ruflo documents a backend-registration surface, verify it against the released artifact and sunset constraint ruflo-3x-capability-gap.",
+      "status": "watching",
+      "constraintIds": ["ruflo-3x-capability-gap"],
+      "history": [
+        { "date": "2026-08-16", "event": "filed" },
+        { "date": "2026-09-26", "event": "commented" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#3153",
+      "url": "https://github.com/ruvnet/ruflo/issues/3153",
+      "relation": "commented",
+      "kind": "issue",
+      "title": "init-generated guidance and project skills contradict MCP-first contract and emit stale tool calls",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["constraint ruflo-3.38.20-project-guidance-selector"], "files": [] },
+      "adjustment": "Once a released Ruflo proves a project-guidance-only skip, drop the captured-guidance restore and sunset the constraint.",
+      "status": "watching",
+      "constraintIds": ["ruflo-3.38.20-project-guidance-selector"],
+      "history": [
+        { "date": "2026-09-02", "event": "commented" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#3163",
+      "url": "https://github.com/ruvnet/ruflo/issues/3163",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "Codex Stop projection emits AutoMemory status prose instead of hook JSON",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["constraint ruflo-3.38.20-stop-output-contract"], "files": ["docs/TROUBLESHOOTING.md"] },
+      "adjustment": "Once a released Ruflo Codex projection emits empty or valid Stop output, drop the signed-helper detection and sunset the constraint.",
+      "status": "watching",
+      "constraintIds": ["ruflo-3.38.20-stop-output-contract"],
+      "history": [
+        { "date": "2026-09-02", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#3166",
+      "url": "https://github.com/ruvnet/ruflo/issues/3166",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "ADR-122 Phase 0 is marked shipped but ruflo doctor never reports agent-browser",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-02", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#3167",
+      "url": "https://github.com/ruvnet/ruflo/issues/3167",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "ruflo init 3.38.21 ignores --no-codex-detect and --no-skills-sh",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": {
+        "refs": ["constraint ruflo-3.38.21-init-suppression-flags"],
+        "files": ["docs/HOST-SUPPORT.md", "docs/SETUP.md"]
+      },
+      "adjustment": "Once a released Ruflo honours --no-codex-detect and --no-skills-sh through the public wrapper, drop the scripted-format and RUFLO_NO_SKILLS_SH suppression and sunset the constraint.",
+      "status": "watching",
+      "constraintIds": ["ruflo-3.38.21-init-suppression-flags"],
+      "history": [
+        { "date": "2026-09-02", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#3193",
+      "url": "https://github.com/ruvnet/ruflo/issues/3193",
+      "relation": "commented",
+      "kind": "issue",
+      "title": "config: `.claude-flow/config.yaml` written by `ruflo init` is never parsed by the daemon (ESM `require('yaml')` fails), and the `memory.persistPath` it writes is dead text nowhere reads",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": {
+        "refs": ["plan 5.1, audit 2026-09-26 (docs/audits/2026-09-26-issues-237-238-239-verification-and-decisions.md) addendum 2: memory pin before provider registration"],
+        "files": []
+      },
+      "adjustment": "Once a released Ruflo honours the memory settings in .claude-flow/config.yaml, re-evaluate the memory pin written before provider registration.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "commented" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#3194",
+      "url": "https://github.com/ruvnet/ruflo/issues/3194",
+      "relation": "commented",
+      "kind": "issue",
+      "title": "daemon: idle-shutdown check uses restored lastRun/lastStartedAt, so a daemon with old persisted state self-kills before its first worker ever runs",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": {
+        "refs": ["plan 6.2, audit 2026-09-26 (docs/audits/2026-09-26-issues-237-238-239-verification-and-decisions.md) addendum 3: daemon.idleSecs 0"],
+        "files": []
+      },
+      "adjustment": "Drop the managed daemon.idleSecs 0 setting once a released Ruflo stops shutting the daemon down on restored lastRun/lastStartedAt timestamps.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "commented" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#3196",
+      "url": "https://github.com/ruvnet/ruflo/issues/3196",
+      "relation": "commented",
+      "kind": "issue",
+      "title": "`memory import` is one instance of a general shape: most bridge-writing call sites across the CLI/MCP surface never thread a resolved `dbPath` into `storeEntry()`/`bridgeStoreEntry()`, so they fall to the AgentDB bridge's own `getAgentDbPath()` default (or, once any caller has initialized the bridge's singleton registry, to whatever file that first caller happened to open) and land in `agentdb-memory.db`, while only the `memory` CLI's `store`/`retrieve`/`search`/`list`/`delete`/`purge` subcommands pass an explicit `resolveDbPath(ctx.flags.path)` and land in `memory.db`",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["lane G2: memory-routing port", "pacphi/agentic-kit#213"], "files": [] },
+      "adjustment": "Once a released Ruflo routes MCP memory operations to the CLI database, retire the memory-routing port and close pacphi/agentic-kit#213.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "commented" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#3415",
+      "url": "https://github.com/ruvnet/ruflo/issues/3415",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "MCP policy enforcement (RUFLO_MCP_ENFORCE_POLICY / .harness/mcp-policy.json) is not reached by the stdio MCP entry points (follow-up to #3138)",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["ADR-0058 section 8, request 6"], "files": [] },
+      "adjustment": "Once a released Ruflo enforces MCP policy on stdio tools/call, ADR-0058 can report governance as enforced instead of inert on stdio entry points.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-24", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#3416",
+      "url": "https://github.com/ruvnet/ruflo/issues/3416",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "Add --json output to ruflo doctor",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["ADR-0058 section 8, request 1"], "files": [] },
+      "adjustment": "Once a released Ruflo ships ruflo doctor --json, parse it instead of doctor text.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-24", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#3417",
+      "url": "https://github.com/ruvnet/ruflo/issues/3417",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "Make the MCP tool-governance audit log path configurable and per-project, with rotation",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["ADR-0058 section 8, request 2"], "files": [] },
+      "adjustment": "Once a released Ruflo makes the MCP audit log path configurable per project, point it at the project and surface it.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-24", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#3418",
+      "url": "https://github.com/ruvnet/ruflo/issues/3418",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "Add ruflo doctor components for the MiniLM picker (CLAUDE_FLOW_ROUTER_EMBEDDER) and MCP governance (RUFLO_MCP_ENFORCE_POLICY)",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["ADR-0058 section 8, request 3"], "files": [] },
+      "adjustment": "Once a released Ruflo reports doctor components for the MiniLM picker and MCP governance, read them instead of ak probes.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-24", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#3419",
+      "url": "https://github.com/ruvnet/ruflo/issues/3419",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "Question: do Codex plugin hook processes inherit the parent environment? (supported way to pass env vars to ruflo's Codex hooks)",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["ADR-0058 section 8, request 4"], "files": [] },
+      "adjustment": "Use the answer to decide whether ak can pass environment variables to Ruflo Codex plugin hooks.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-24", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#3444",
+      "url": "https://github.com/ruvnet/ruflo/issues/3444",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "agentdb_consolidate reports success:true for a no-op stub and ignores minAge/maxEntries",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["lane B1: harvest skill step retired"], "files": [] },
+      "adjustment": "If a released Ruflo makes agentdb_consolidate do real work, reconsider the retired harvest step; until then it stays retired.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#3445",
+      "url": "https://github.com/ruvnet/ruflo/issues/3445",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "post-task skill promotion never runs: agentdb SkillLibrary has no promote()",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["lane B1: harvest skill step retired"], "files": [] },
+      "adjustment": "If a released Ruflo promotes skills after tasks, reconsider the retired harvest skill step; until then it stays retired.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#3446",
+      "url": "https://github.com/ruvnet/ruflo/issues/3446",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "Backup and distill (CLI and daemon) never cover agentdb-memory.db, where MCP writes land",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["lane G3: backup coverage status row"], "files": [] },
+      "adjustment": "Once released Ruflo backups and distillation cover agentdb-memory.db, drop the status row that reports the uncovered store.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#3447",
+      "url": "https://github.com/ruvnet/ruflo/issues/3447",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "hooks post-command keeps every command forever with an embedding: no TTL, cap or cleanup",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["lane G3: command-log growth status row"], "files": [] },
+      "adjustment": "Once a released Ruflo bounds hooks post-command history, drop the command-log growth status row.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#3448",
+      "url": "https://github.com/ruvnet/ruflo/issues/3448",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "memory stats ignores --path and CLAUDE_FLOW_DB_PATH; Storage/Location/Timeline are blank",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#3449",
+      "url": "https://github.com/ruvnet/ruflo/issues/3449",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "config set cannot configure the daemon: wrong file, nested keys, and a value of 0 rejected",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": {
+        "refs": ["plan 6.2, addendum 3: daemon settings written as flat keys to .claude-flow/config.json, never through ruflo config set"],
+        "files": []
+      },
+      "adjustment": "Once a released Ruflo config set writes the daemon file with flat keys and accepts 0, ak may use it instead of writing .claude-flow/config.json itself.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#3450",
+      "url": "https://github.com/ruvnet/ruflo/issues/3450",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "memory purge and delete leave the AgentDB mirror: purged data stays readable through MCP",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["lane G2: purge both memory stores"], "files": [] },
+      "adjustment": "Once a released Ruflo purges the AgentDB mirror with memory purge/delete, stop purging both stores from ak.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/RuVector#519",
+      "url": "https://github.com/ruvnet/RuVector/issues/519",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "Bug: SONA learn→inference loop unwired at the JS/WASM boundary — learn_from_feedback is a no-op; MicroLoRA adapts only on multi-step varying-reward trajectories",
+      "dependency": "ruvector",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-05-29", "event": "filed" },
+        { "date": "2026-06-01", "event": "commented" },
+        { "date": "2026-06-11", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "retired", "note": "closed completed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "ruvnet/RuVector#553",
+      "url": "https://github.com/ruvnet/RuVector/issues/553",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "processInstantLearning still a no-op stub in published @ruvector/ruvllm@2.5.5 (follow-up to #519)",
+      "dependency": "ruvector",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-06-11", "event": "filed" },
+        { "date": "2026-06-11", "event": "commented" },
+        { "date": "2026-06-12", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "retired", "note": "closed completed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "ruvnet/RuVector#641",
+      "url": "https://github.com/ruvnet/RuVector/issues/641",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "RVF create: `dimensions` (plural) required but error/MCP say `dimension`; + `embed text` has no stdin (raw text on argv)",
+      "dependency": "ruvector",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-07-04", "event": "filed" },
+        { "date": "2026-07-05", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "retired", "note": "closed completed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "ruvnet/RuVector#655",
+      "url": "https://github.com/ruvnet/RuVector/issues/655",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "ruvllm: embed()/similarity produce non-discriminative embeddings (random-init char-level embedder, no pretrained weights)",
+      "dependency": "ruvector",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-07-10", "event": "filed" },
+        { "date": "2026-07-17", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "retired", "note": "closed completed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "ruvnet/RuVector#656",
+      "url": "https://github.com/ruvnet/RuVector/issues/656",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "ruvllm: broken ESM entry point — ERR_MODULE_NOT_FOUND (missing .js extensions in dist/esm)",
+      "dependency": "ruvector",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-07-10", "event": "filed" },
+        { "date": "2026-07-17", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "retired", "note": "closed completed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "ruvnet/RuVector#657",
+      "url": "https://github.com/ruvnet/RuVector/issues/657",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "rvf: RvfDatabase.query() throws misleading napi type error on options-object call form ({k}/{topK}/{limit})",
+      "dependency": "ruvector",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-07-10", "event": "filed" },
+        { "date": "2026-07-27", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "retired", "note": "closed completed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "ruvnet/RuVector#658",
+      "url": "https://github.com/ruvnet/RuVector/issues/658",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "rvf: RvfDatabase.create() throws misleading FsyncFailed error when target path already has a valid file",
+      "dependency": "ruvector",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-07-10", "event": "filed" },
+        { "date": "2026-07-27", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "retired", "note": "closed completed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "ruvnet/RuVector#659",
+      "url": "https://github.com/ruvnet/RuVector/issues/659",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "rvf: ingestBatch() silently drops documented per-vector metadata; RvfSearchResult has no metadata field",
+      "dependency": "ruvector",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-07-10", "event": "filed" },
+        { "date": "2026-07-27", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "retired", "note": "closed completed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "ruvnet/RuVector#715",
+      "url": "https://github.com/ruvnet/RuVector/issues/715",
+      "relation": "commented",
+      "kind": "issue",
+      "title": "mcp start: server registers handlers but never listens — mcp-server.js gates bootstrap on require.main === module, which cli.js can never satisfy",
+      "dependency": "ruvector",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-07-24", "event": "commented" },
+        { "date": "2026-07-27", "event": "closed", "note": "completed" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "retired", "note": "closed completed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "ruvnet/RuVector#1026",
+      "url": "https://github.com/ruvnet/RuVector/issues/1026",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "`ruvector mcp start` writes ./ruvector.db into the project cwd; lock failures are silent",
+      "dependency": "ruvector",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruvector", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["lane G3: stray-store reporting"], "files": [] },
+      "adjustment": "Once a released ruvector mcp start stops writing ./ruvector.db into the working directory, drop that stray-store report.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "stuinfla/ruvnet-brain#329",
+      "url": "https://github.com/stuinfla/ruvnet-brain/issues/329",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "Progression store runs ruflo from .swarm, creating a nested .swarm/.swarm AgentDB store",
+      "dependency": "ruvnet-brain",
+      "doneWhen": {
+        "state": "closed-completed",
+        "release": { "channel": "github-release", "name": "stuinfla/ruvnet-brain", "minVersion": null }
+      },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["lane G3: stray-store reporting"], "files": [] },
+      "adjustment": "Once a released Brain stops creating a nested .swarm/.swarm store, drop that stray-store report.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "stuinfla/ruvnet-brain#330",
+      "url": "https://github.com/stuinfla/ruvnet-brain/issues/330",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "capacity-aware-parallel-work keeps injecting advice when the Brain is switched off",
+      "dependency": "ruvnet-brain",
+      "doneWhen": {
+        "state": "closed-completed",
+        "release": { "channel": "github-release", "name": "stuinfla/ruvnet-brain", "minVersion": null }
+      },
+      "mapping": "mapped",
+      "kitImpact": {
+        "refs": ["decision 4, audit 2026-09-26 (docs/audits/2026-09-26-issues-237-238-239-verification-and-decisions.md): the Brain 4.3.28 hooks-changed warning"],
+        "files": []
+      },
+      "adjustment": "Once a released Brain stops injecting capacity advice while the Brain is off, re-review the reviewed hook-contract pin (decision 4).",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "stuinfla/ruvnet-brain#331",
+      "url": "https://github.com/stuinfla/ruvnet-brain/issues/331",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "--update runs the stale installed updater, so a 4.3.22 private-overlay KB can't upgrade",
+      "dependency": "ruvnet-brain",
+      "doneWhen": {
+        "state": "closed-completed",
+        "release": { "channel": "github-release", "name": "stuinfla/ruvnet-brain", "minVersion": null }
+      },
+      "mapping": "mapped",
+      "kitImpact": {
+        "refs": ["plan stage 1 commit 7, audit 2026-09-26 (docs/audits/2026-09-26-issues-237-238-239-verification-and-decisions.md): refused refresh held as blocked"],
+        "files": []
+      },
+      "adjustment": "Once a released Brain --update runs the current updater, lift the blocked hold on the refused refresh.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "vercel-labs/agent-browser#1679",
+      "url": "https://github.com/vercel-labs/agent-browser/issues/1679",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "Auto-discovered project configuration launches repository-controlled executables without workspace approval",
+      "dependency": "agent-browser",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agent-browser", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": {
+        "refs": ["constraint ruflo-agent-browser-compatibility-layer", "ADR-0043"],
+        "files": ["docs/adr/0043-managed-ruflo-browser-executor.md"]
+      },
+      "adjustment": "Keep AGENT_BROWSER_CONFIG pointed at an ak-owned config on managed Ruflo MCP children until a released agent-browser stops launching repository-controlled executables from auto-discovered configuration.",
+      "status": "watching",
+      "constraintIds": ["ruflo-agent-browser-compatibility-layer"],
+      "history": [
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "pacphi/agentic-kit#213",
+      "url": "https://github.com/pacphi/agentic-kit/issues/213",
+      "relation": "tracking",
+      "kind": "issue",
+      "title": "Track upstream Ruflo memory routing fix and safe integration for existing corpora",
+      "dependency": null,
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["lane G2: memory-routing port"], "files": [] },
+      "adjustment": "The upstream remainder is watched as ruvnet/ruflo#3196; #213 closes when the memory-routing port merges.",
+      "status": "watching",
+      "constraintIds": [],
+      "tracks": ["ruvnet/ruflo#3196"],
+      "history": [
+        { "date": "2026-09-09", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "pacphi/agentic-kit#240",
+      "url": "https://github.com/pacphi/agentic-kit/issues/240",
+      "relation": "tracking",
+      "kind": "issue",
+      "title": "Tracking: remove temporary AQE live-lock busy rule once fixed upstream (agentic-qe#574 / #719)",
+      "dependency": null,
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["decision 7", "lane C: live-lock busy rule"], "files": [] },
+      "adjustment": "Migrates into this registry: once the watcher is live, comment on #240 with links to the two watched entries and close it.",
+      "status": "watching",
+      "constraintIds": [],
+      "tracks": ["proffesor-for-testing/agentic-qe#574", "proffesor-for-testing/agentic-qe#719"],
+      "history": [
+        { "date": "2026-09-26", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
     }
   ]
 }
