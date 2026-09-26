@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { run } from './exec.mjs';
 import { rufloRoot, aqeRoot } from './paths.mjs';
-import { agentdbLocations, bsq3IsNative, bsq3Root, deriveBsq3Spec, selfSpecConflicts, rufloMemoryContexts, aidefencePresent } from './natives.mjs';
+import { agentdbLocations, bsq3IsNative, bsq3Root, deriveBsq3Spec, selfSpecConflicts, rufloMemoryContexts, aidefencePresent, probeBsq3Runtime } from './natives.mjs';
 import { KIT_PKG } from './versions.mjs';
 import { scanRvf, quarantine } from './rvf.mjs';
 import {
@@ -96,6 +96,39 @@ export async function ensureNativeBsq3(dir, { runner = run } = {}) {
   return { ok: false, how: failTail(r) };
 }
 
+/** Rebuild a binding FILE that exists but provably will not load (built for
+ *  another Node ABI or platform, or damaged). The file is removed first:
+ *  prebuild-install extracts over an existing file in place (tar-fs writes through
+ *  createWriteStream), and a Node process started before a Node upgrade can still
+ *  map the old file. A new file gets a new inode, and the ladder runs exactly as
+ *  for a missing binding. Success is the load test passing, not a file on disk. */
+async function rebuildUnloadable(dir, runner) {
+  const binding = path.join(bsq3Root(dir), 'build', 'Release', 'better_sqlite3.node');
+  try {
+    fs.rmSync(binding, { force: true });
+  } catch (e) {
+    return { ok: false, how: `FAILED (could not remove the binding that will not load: ${e.code ?? e.message})` };
+  }
+  const built = await ensureNativeBsq3(dir, { runner });
+  if (!built.ok) return built;
+  const after = await probeBsq3Runtime(dir, { runner });
+  if (after.state === 'native') return built;
+  if (after.state === 'unavailable') return { ok: false, how: `FAILED (rebuilt binding still does not load: ${after.reason})` };
+  return { ok: true, how: `${built.how}; load unverified (${after.reason})` };
+}
+
+/** One ruflo memory-runtime context. A missing binding file takes the build
+ *  ladder as before. A present file is load-tested, the same test status uses,
+ *  and rebuilt only when the probe proves it will not load (`unavailable`). An
+ *  `inconclusive` probe (timeout, crash) never triggers a rebuild in ruflo's tree. */
+async function healRuntimeContext(dir, runner) {
+  if (!bsq3IsNative(dir)) return (await ensureNativeBsq3(dir, { runner })).how;
+  const probe = await probeBsq3Runtime(dir, { runner });
+  if (probe.state === 'native') return null;
+  if (probe.state === 'inconclusive') return `load probe inconclusive (${probe.reason}), not rebuilt`;
+  return (await rebuildUnloadable(dir, runner)).how;
+}
+
 /** Native better-sqlite3 into every location the runtime resolves: the agentdb
  *  copies, agentic-qe, AND the ruflo memory-runtime contexts (@claude-flow/memory
  *  + /cli) — the copies `npx ruflo memory` actually loads. #45: healing only
@@ -115,10 +148,12 @@ export async function healNatives({ runner = run } = {}) {
     details.push(`agentic-qe: ${(await ensureNativeBsq3(aqeRoot(), { runner })).how}`);
   }
   // ruflo memory runtime — missing contexts are already filtered out (older trees
-  // may lack either package, EC-2), so this is a silent no-op on them.
+  // may lack either package, EC-2), so this is a silent no-op on them. Sequential:
+  // both contexts can resolve one shared copy, and a rebuild for the first
+  // changes what the second one's probe sees.
   for (const { context, dir } of rufloMemoryContexts()) {
-    if (bsq3IsNative(dir)) continue;
-    details.push(`@claude-flow/${context}: ${(await ensureNativeBsq3(dir, { runner })).how}`);
+    const how = await healRuntimeContext(dir, runner);
+    if (how) details.push(`@claude-flow/${context}: ${how}`);
   }
   return { ok: !details.some((d) => d.includes('FAILED')), detail: details.join('; ') || 'already native everywhere' };
 }

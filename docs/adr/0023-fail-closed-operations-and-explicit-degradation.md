@@ -3,7 +3,8 @@
 - **Status:** Implemented
 - **Updated:** 2026-09-26 — §11: every status fix declares who performs it (`repair: sync | manual`);
   `ak sync` plans only fixes a sync step performs (#237); the Ruflo native runtime probe keeps its
-  load error and separates unavailable from inconclusive (see the native runtime probe amendment)
+  load error and separates unavailable from inconclusive; sync's natives heal uses the same load
+  test (see the native runtime probe amendment)
 - **Earlier update:** 2026-09-20 — ADR-0055 adds qualified AQE embedding lifecycle evidence; ADR-0053 separates host health from usage-source diagnostics
 - **Earlier update:** 2026-08-26 — ADR-0035 applies fail-closed preflight, bounded evidence, and
   content-free degradation to the opt-in deja-vu companion
@@ -62,8 +63,14 @@ states. `native` means it loaded and answered `SELECT 1`. `unavailable` means th
 load error, which status shows with paths reduced to file names. `inconclusive` means no verdict: a
 timeout (retried once, and detected only through the probe's own abort signal), a crash, or a spawn
 error. Only `unavailable` asserts the WASM fallback and fails status. `inconclusive` is a warning
-with no sync fix. Status offers the sync fix only where the natives heal acts; the heal builds a
-binding whose file is missing.
+with no sync fix. Status offers the sync fix only where the natives heal acts.
+
+Status and sync share this load test. The heal builds a binding whose file is missing. It
+load-tests a binding whose file is present and rebuilds it only when the probe returns
+`unavailable`, never on `inconclusive`. Before that rebuild it removes the old file, so the rebuild
+writes a new file instead of overwriting one that a running process may still have mapped. The
+rebuild succeeds only when the load test then passes; a rebuilt file that still will not load is a
+failed heal that reports the load error.
 
 ### AQE embedding amendment — 2026-09-20
 

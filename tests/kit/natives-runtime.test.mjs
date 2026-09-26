@@ -282,15 +282,15 @@ test('runtime rows: a missing binding names the cause and keeps sync\'s build fi
   assert.equal(r.fix, 'sync builds the native binding', 'heal builds a missing binding');
 });
 
-test('runtime rows: a present binding that will not load is not promised to sync', () => {
+test('runtime rows: a present binding that will not load is rebuilt by sync', () => {
   const [r] = nativesSection.runtimeNativeRows({ installed: true, contexts: [
     ctx('cli', { ok: false, state: 'unavailable', reason: 'better_sqlite3.node: invalid ELF header', bindingPresent: true }),
   ] });
   assert.equal(r.level, 'fail');
   assert.match(r.message, /present but will not load/);
   assert.match(r.message, /invalid ELF header/);
-  assert.match(r.message, /npm run install/, 'the human action is in the message');
-  assert.equal(r.fix, null, 'sync only builds missing bindings, so it must not be planned');
+  assert.doesNotMatch(r.message, /by hand|npm run install/, 'no manual step once sync performs it');
+  assert.equal(r.fix, 'sync rebuilds the native binding', 'the natives heal load-tests and rebuilds it');
 });
 
 test('runtime rows: an inconclusive probe is an unverified warning with no fix', () => {

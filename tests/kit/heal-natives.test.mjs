@@ -281,6 +281,107 @@ test('healNatives skips a ruflo tree with no @claude-flow packages, without cras
   fs.rmSync(g, { recursive: true, force: true });
 });
 
+// ── P3: a binding that exists but will not load (status load-tests it) ───────
+
+/** ruflo/node_modules/@claude-flow/cli with its own better-sqlite3 whose
+ *  build/Release binding file is PRESENT — the state a Node major upgrade leaves:
+ *  the file exists, so the old file-exists check called it native. */
+function presentBindingTree() {
+  const g = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-heal-unloadable-'));
+  const cli = path.join(g, 'ruflo', 'node_modules', '@claude-flow', 'cli');
+  fs.mkdirSync(cli, { recursive: true });
+  fs.writeFileSync(path.join(cli, 'package.json'), JSON.stringify({ name: '@claude-flow/cli' }));
+  const pkg = path.join(cli, 'node_modules', 'better-sqlite3');
+  writePkg(pkg, { withBinding: true });
+  fs.writeFileSync(path.join(pkg, BINDING), 'binary built for another Node ABI');
+  _setGlobalRootForTest(g);
+  return { pkg, cleanup: () => { _setGlobalRootForTest(null); fs.rmSync(g, { recursive: true, force: true }); } };
+}
+
+const loadFailure = (message) => ({
+  code: 2, stdout: '', stderr: `AK_NATIVE_FAILURE:${JSON.stringify({ message })}\n`,
+});
+
+/** Runner for the load probe (`node`) and npm. The binding loads once a rung
+ *  has produced a NEW file (`npm run install` writes one) unless `stillBroken`. */
+function probeAndNpm(pkg, { stillBroken = false, probe = null } = {}) {
+  const calls = [];
+  let rebuilt = false;
+  const runner = async (cmd, args, opts) => {
+    calls.push({ cmd, args, cwd: opts?.cwd, bindingOnDisk: fs.existsSync(path.join(pkg, BINDING)) });
+    if (cmd === 'node') {
+      if (probe) return probe();
+      return rebuilt && !stillBroken ? { code: 0, stdout: '', stderr: '' }
+        : loadFailure(`The module '${path.join(pkg, BINDING)}'\nwas compiled against a different Node.js version using\nNODE_MODULE_VERSION 137.`);
+    }
+    if (args[0] === 'run' && args[1] === 'install') { addBinding(opts.cwd); rebuilt = true; }
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  return { runner, calls };
+}
+
+test('healNatives rebuilds a present binding that will not load (status and sync share the load test)', async () => {
+  const { pkg, cleanup } = presentBindingTree();
+  try {
+    const { runner, calls } = probeAndNpm(pkg);
+    const r = await healNatives({ runner });
+    const install = calls.find((c) => c.cmd === 'npm' && c.args.join(' ') === 'run install');
+    assert.ok(install, `npm run install ran (saw ${JSON.stringify(calls.map((c) => `${c.cmd} ${c.args[0]}`))})`);
+    assert.equal(install.cwd, pkg, 'rebuilt in place, in the package the runtime resolves');
+    assert.equal(r.ok, true);
+    assert.match(r.detail, /@claude-flow\/cli: native built in place/);
+  } finally { cleanup(); }
+});
+
+test('healNatives removes the unloadable binding before rebuilding, so the rebuild writes a new file', async () => {
+  // prebuild-install extracts over an existing file in place (tar-fs
+  // createWriteStream); a process started before a Node upgrade may still map it.
+  const { pkg, cleanup } = presentBindingTree();
+  try {
+    const { runner, calls } = probeAndNpm(pkg);
+    await healNatives({ runner });
+    const install = calls.find((c) => c.cmd === 'npm' && c.args[0] === 'run');
+    assert.equal(install.bindingOnDisk, false, 'the stale file is gone before the first rung runs');
+  } finally { cleanup(); }
+});
+
+test('healNatives reports a rebuild that still will not load as a failure with the load error', async () => {
+  const { pkg, cleanup } = presentBindingTree();
+  try {
+    const { runner } = probeAndNpm(pkg, { stillBroken: true });
+    const r = await healNatives({ runner });
+    assert.equal(r.ok, false, 'a binding file on disk is not a heal when it still will not load');
+    assert.match(r.detail, /still (?:does|will) not load/);
+    assert.match(r.detail, /compiled against a different Node\.js version/);
+    assert.doesNotMatch(r.detail, /FAILED \(exit 0\)/);
+  } finally { cleanup(); }
+});
+
+test('healNatives never rebuilds on an inconclusive probe', async () => {
+  const { pkg, cleanup } = presentBindingTree();
+  try {
+    // A crashed probe (no diagnostic, not a timeout): no verdict about the binding.
+    const { runner, calls } = probeAndNpm(pkg, {
+      probe: () => ({ code: 1, stdout: '', stderr: 'Command failed: node -e try{…' }),
+    });
+    const r = await healNatives({ runner });
+    assert.deepEqual(calls.filter((c) => c.cmd === 'npm'), [], 'no npm call on an inconclusive probe');
+    assert.equal(fs.existsSync(path.join(pkg, BINDING)), true, 'the binding is left alone');
+    assert.equal(r.ok, true);
+    assert.match(r.detail, /@claude-flow\/cli: load probe inconclusive/);
+  } finally { cleanup(); }
+});
+
+test('healNatives leaves a present binding that loads alone', async () => {
+  const { pkg, cleanup } = presentBindingTree();
+  try {
+    const { runner, calls } = probeAndNpm(pkg, { probe: () => ({ code: 0, stdout: '', stderr: '' }) });
+    const r = await healNatives({ runner });
+    assert.deepEqual(calls.filter((c) => c.cmd === 'npm'), []);
+    assert.deepEqual(r, { ok: true, detail: 'already native everywhere' });
+  } finally { cleanup(); }
+});
+
 // ── AC-2 / NFR-1: the ladder tolerates npm 9–12 approve-scripts behavior ─────
 
 test('ladder tolerates an npm-9 approve-scripts unknown-command and still succeeds', async () => {

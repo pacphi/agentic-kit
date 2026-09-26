@@ -5,7 +5,8 @@ import { row } from '../row.mjs';
 /** One row per ruflo memory-runtime context that is not native, from the load
  *  probe's state: `unavailable` provably falls back to WASM (fail), while
  *  `inconclusive` has no verdict (warn, nothing for sync to do). The fix names
- *  only what sync's natives heal actually does: it builds a MISSING binding. */
+ *  what sync's natives heal does: it builds a missing binding and, using this
+ *  same load test, rebuilds a present one that will not load. */
 export function runtimeNativeRows(rt) {
   if (!rt.installed || !rt.contexts.length) return [];
   const notNative = rt.contexts.filter((c) => c.state !== 'native');
@@ -25,8 +26,8 @@ export function runtimeNativeRows(rt) {
         'sync builds the native binding');
     }
     return row('natives', 'fail',
-      `ruflo memory runtime on WASM fallback ${where}: its native binding is present but will not load — ${reason}; `
-      + 'sync only builds missing bindings, so rebuild it by hand (npm run install in its better-sqlite3 package)');
+      `ruflo memory runtime on WASM fallback ${where}: its native binding is present but will not load — ${reason}`,
+      'sync rebuilds the native binding');
   });
 }
 
