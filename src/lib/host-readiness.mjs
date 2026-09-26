@@ -5,9 +5,12 @@ import { loadKitConfig } from './config.mjs';
 import { inspectHostAlignment } from './host-alignment.mjs';
 import { collectHostSetup } from './host-readiness-probes.mjs';
 import { createHostHealthSnapshot } from './host-health-evidence.mjs';
+import { hostManagement, hostEnableCommand } from './host-management.mjs';
 
 const HOSTS = ['claude', 'codex', 'opencode'];
-const LABELS = { ok: 'OK', attention: 'Attention', unknown: 'Unknown', disabled: 'Disabled', checking: 'Checking' };
+const LABELS = { ok: 'OK', attention: 'Attention', unknown: 'Unknown', checking: 'Checking' };
+const TOOL_CHECKS = ['installation', 'configuration', 'model', 'authentication'];
+const MANAGED_ONLY = 'Connection checks run only for hosts managed by ak.';
 const unknown = () => ({ state: 'unknown', reason: 'Check unavailable' });
 const BLOCKERS = {
   'retired-codex-mcp': 'Retired Codex transport configured; review with ak host align',
@@ -18,9 +21,17 @@ const fingerprint = value => createHash('sha256').update(JSON.stringify(value)).
 const refused = (message, status = 409) => Object.assign(new Error(message), { status });
 const nativeConnection = async options => (await import('./host-health-connected.mjs')).checkHostConnection(options);
 
-/** @param {any} input */
-export function summarizeHostReadiness({ host, enabled, setup = {}, findings = [], connection = idleConnection() }) {
-  const checks = Object.fromEntries(['installation', 'configuration', 'model', 'authentication'].map(key => [key, setup[key] ?? unknown()]));
+/** Local health for any host; the management fact decides how it is presented.
+ * A managed host's badge is its health. A host ak does not manage (ADR-0053,
+ * 2026-09-26) is still checked, but its badge is the management word, its tool
+ * problems are information rather than Attention, ak's own wiring check is
+ * FYI (ak was never asked to wire it), and the paid connection check stays
+ * managed-only.
+ * @param {any} input */
+export function summarizeHostReadiness({ host, enabled, setup = {}, findings = [], connection = idleConnection(), hint = null }) {
+  const management = hostManagement({ enabled, present: setup.presence });
+  const managed = management.state === 'managed';
+  const checks = Object.fromEntries(TOOL_CHECKS.map(key => [key, setup[key] ?? unknown()]));
   const alignment = findings.filter(finding => finding.host === host);
   const blocked = alignment.find(finding => BLOCKERS[finding.code]);
   checks.integration = blocked
@@ -28,16 +39,19 @@ export function summarizeHostReadiness({ host, enabled, setup = {}, findings = [
     : alignment.some(finding => finding.code === 'config-unassessed')
       ? { state: 'unknown', reason: 'Transport configuration could not be assessed' }
       : { state: 'pass', reason: 'No known blocking transport configuration conflict; optional tool connectivity is separate.' };
-  const values = Object.values(checks);
+  if (!managed) checks.integration = { ...checks.integration, fyi: true };
+  const values = managed ? Object.values(checks) : TOOL_CHECKS.map(key => checks[key]);
   const localStatus = values.some(check => check.state === 'fail') ? 'attention'
     : values.every(check => check.state === 'pass') ? 'ok' : 'unknown';
-  const connected = ['pass', 'fail', 'unknown', 'running'].includes(connection.state);
-  const status = !enabled ? 'disabled' : connection.state === 'running' ? 'checking'
-    : localStatus === 'attention' || connection.state === 'fail' ? 'attention'
-      : connected && connection.state === 'unknown' ? 'unknown' : localStatus;
-  return { host, status, label: LABELS[status], level: connected ? 'connected' : 'local',
-    localStatus, checks: enabled ? checks : {}, target: setup.target ?? null,
-    connection, canCheckConnection: enabled && localStatus !== 'attention' && checks.installation.state === 'pass' };
+  const connected = managed && ['pass', 'fail', 'unknown', 'running'].includes(connection.state);
+  const status = !managed ? (management.state === 'not-installed' ? 'not-installed' : 'unmanaged')
+    : connection.state === 'running' ? 'checking'
+      : localStatus === 'attention' || connection.state === 'fail' ? 'attention'
+        : connected && connection.state === 'unknown' ? 'unknown' : localStatus;
+  return { host, status, label: managed ? LABELS[status] : management.label, level: connected ? 'connected' : 'local',
+    management, participation: { participating: managed, hint: managed ? null : hint },
+    localStatus, checks, target: setup.target ?? null,
+    connection, canCheckConnection: managed && localStatus !== 'attention' && checks.installation.state === 'pass' };
 }
 
 /** One dashboard, one project, one in-flight paid check. Native output is not
@@ -73,7 +87,7 @@ export function createHostReadinessReader({ cwd = process.cwd(), cacheMs = 60_00
         && entry.enabled && hosts[host].localStatus !== 'attention'
         && hosts[host].checks.installation?.state === 'pass';
       hosts[host].connectionUnavailable = hosts[host].canCheckConnection ? null
-        : active ? 'Another connection check is running.' : !entry.enabled ? 'This host is disabled.'
+        : !entry.enabled ? MANAGED_ONLY : active ? 'Another connection check is running.'
           : !base.complete ? 'Some local configuration inputs could not be bounded for a connection check.'
             : 'Review the local setup checks before testing a connection.';
     }
@@ -86,10 +100,13 @@ export function createHostReadinessReader({ cwd = process.cwd(), cacheMs = 60_00
     const entries = {};
     await Promise.all(HOSTS.map(async host => {
       const enabled = input.cfg.integrations?.hosts?.[host] === true;
+      // Every host is observed, managed or not (ADR-0053, 2026-09-26): the
+      // same bounded, read-only local checks under the same 60 s cache.
+      // Provider-network commands (codex doctor) stay excluded for all hosts.
       let setup = {};
-      if (enabled) { try { setup = await probe({ host, cwd }); } catch { /* sanitized unknown */ } }
+      try { setup = await probe({ host, cwd }); } catch { /* sanitized unknown */ }
       const key = fingerprint([input.key, host, setup, findings.filter(f => f.host === host).map(f => f.code)]);
-      entries[host] = { host, enabled, setup, findings, key };
+      entries[host] = { host, enabled, setup, findings, key, hint: enabled ? null : hostEnableCommand(input.cfg, host) };
     }));
     // Never attach a successful check to configuration changed mid-probe.
     const after = inputs();

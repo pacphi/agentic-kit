@@ -878,15 +878,32 @@ test('enabled + CLI absent: the hosts story, and no config-home probing beyond i
   assert.match(oc.fix, /sync installs opencode-ai/);
 });
 
-test('disabled + installed: complete opencode-row silence + the pick hint on providers', async () => {
+test('unmanaged + installed: complete opencode-row silence + the management row on providers', async () => {
   seedHome();
   const rows = await withOpencodeCli(() => collect());
   assert.equal(rowsFor(rows, 'opencode').length, 0,
-    'a disabled host claims no active wiring — no opencode rows at all');
-  const hint = rowsFor(rows, 'providers').find((r) => /opencode CLI installed but not enabled/.test(r.message));
-  assert.ok(hint, 'the providers row carries the adoption hint');
-  assert.match(hint.message, /ak host pick --host claude,opencode/);
-  assert.equal(hint.fix, null, 'advisory only — sync never opts a host in');
+    'an unmanaged host claims no active wiring — no opencode rows at all');
+  const providers = rowsFor(rows, 'providers');
+  const found = providers.find((r) => r.message.startsWith('opencode: Found, not managed'));
+  assert.ok(found, `the providers card names the management state: ${providers.map((r) => r.message)}`);
+  assert.match(found.message, /not participating/);
+  assert.match(found.message, /ak host pick --host claude,opencode/);
+  assert.equal(found.level, 'info', 'an unmanaged host is information, never a warning');
+  assert.equal(found.fix, null, 'advisory only — sync never opts a host in');
+  // ADR-0053 (2026-09-26): the same three states for every supported host.
+  assert.equal(providers.find((r) => r.message.startsWith('codex:'))?.message, 'codex: Not installed');
+  assert.match(providers.find((r) => r.message.startsWith('claude:'))?.message ?? '', /^claude: Managed by ak/);
+});
+
+test('the enable hint lists every enabled host, so following it never disables codex', async () => {
+  seedHome(offlineKitConfig({ integrations: { hosts: { claude: true, codex: true, opencode: false } } }));
+  const rows = await withOpencodeCli(() => collect());
+  const providers = rowsFor(rows, 'providers');
+  const found = providers.find((r) => r.message.startsWith('opencode: Found, not managed'));
+  assert.ok(found, `expected the opencode management row: ${providers.map((r) => r.message)}`);
+  assert.match(found.message, /ak host pick --host claude,codex,opencode/);
+  assert.equal(found.fix, null);
+  assert.match(providers.find((r) => r.message.startsWith('codex:'))?.message ?? '', /^codex: Managed by ak/);
 });
 
 test('--json carries the opencode rows with the same shape the dashboard consumes', async () => {

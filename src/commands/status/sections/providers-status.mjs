@@ -15,18 +15,22 @@ import {
   HOSTS, settingsTarget, isDefault, providerEnvDrift, aqeRouterDrift, credentialGaps, providerExternalState,
 } from '../../../lib/providers.mjs';
 import { readJson } from '../../../lib/settings.mjs';
+import { hostManagement, hostEnableCommand, NOT_PARTICIPATING } from '../../../lib/host-management.mjs';
 import { row } from '../row.mjs';
 
-async function defaultHostRows(cfg) {
+// One row per host in the words every surface uses (ADR-0053, 2026-09-26):
+// Managed by ak / Found, not managed / Not installed. Information only and
+// never a `fix`: opting a host in is a deliberate `ak host pick`, which sync
+// never does. The hint names the COMPLETE --host list (pick disables any
+// enabled host left out of it), built from the current enabled set.
+async function hostManagementRows(cfg, dflt) {
   const rows = [];
-  // advisory only (no fix): opting codex in is a deliberate `ak host pick`
-  if (await have('codex')) {
-    rows.push(row('providers', 'info', 'codex CLI installed but not enabled (claude-only default)'));
-  } else {
-    rows.push(row('providers', 'info', 'claude-only (default host)'));
-  }
-  if (!cfg.integrations?.hosts?.opencode && await have('opencode')) {
-    rows.push(row('providers', 'info', 'opencode CLI installed but not enabled (`ak host pick --host claude,opencode` wires it)'));
+  for (const h of HOSTS) {
+    const enabled = cfg.integrations?.hosts?.[h.id] === true;
+    const { state, label } = hostManagement({ enabled, present: enabled ? null : await have(h.bin) });
+    const tail = state === 'managed' && dflt ? ' (default host)'
+      : state === 'found' ? ` — ${NOT_PARTICIPATING}; to include it: ${hostEnableCommand(cfg, h.id)}` : '';
+    rows.push(row('providers', 'info', `${h.id}: ${label}${tail}`));
   }
   return rows;
 }
@@ -67,13 +71,13 @@ export default {
       const { file, scope } = settingsTarget(cwd);
       const env = readJson(file, {})?.env ?? {};
       const { unavailableIntentSet } = providerExternalState(cfg, cwd);
-      if (isDefault(cfg)) {
-        rows.push(...(await defaultHostRows(cfg)));
-      } else {
+      const dflt = isDefault(cfg);
+      if (!dflt) {
         rows.push(driftRow(cfg, cwd, env, scope));
         const credRow = credentialChainRow(cfg, unavailableIntentSet);
         if (credRow) rows.push(credRow);
       }
+      rows.push(...(await hostManagementRows(cfg, dflt)));
     } catch (e) {
       rows.push(row('providers', 'warn', `provider check unavailable: ${e.message}`));
     }

@@ -81,3 +81,106 @@ test('all hosts have qualified OK, accessible details and explicitly confirmed c
   assert.equal(await page.locator('[data-health-host="codex"] .sp-status').innerText(),'Unknown');
   assert.equal(errors.length,0,errors.join('\n'));
 });
+
+// ADR-0053 amendment (2026-09-26): management is reported, not treated as health.
+const unmanagedReport = () => {
+  const data = report();
+  data.hosts.claude = { ...data.hosts.claude, management: { state: 'managed', label: 'Managed by ak' }, participation: { participating: true, hint: null } };
+  data.hosts.codex = { ...data.hosts.codex, status: 'unmanaged', label: 'Found, not managed', localStatus: 'attention',
+    management: { state: 'found', label: 'Found, not managed' }, canCheckConnection: false,
+    connectionUnavailable: 'Connection checks run only for hosts managed by ak.',
+    participation: { participating: false, hint: 'ak host pick --host claude,codex' },
+    checks: { ...checks, authentication: { state: 'fail', reason: 'Codex reports no configured authentication.' },
+      integration: { state: 'pass', reason: 'No known blocking transport configuration conflict.', fyi: true } } };
+  data.hosts.opencode = { ...data.hosts.opencode, status: 'not-installed', label: 'Not installed', localStatus: 'attention',
+    management: { state: 'not-installed', label: 'Not installed' }, canCheckConnection: false,
+    connectionUnavailable: 'Connection checks run only for hosts managed by ak.',
+    participation: { participating: false, hint: 'ak host pick --host claude,opencode' },
+    checks: { installation: { state: 'fail', reason: 'The host executable is not available on PATH.' } } };
+  return data;
+};
+
+test('unmanaged hosts read their management state everywhere, with information-only checks and a complete enable hint', async t => {
+  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  const errors = [], requests = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.route('http://health.test/**', async route => {
+    const url = new URL(route.request().url());
+    if(url.pathname.startsWith('/api/host-health/')){
+      requests.push(url.pathname);
+      return route.fulfill({contentType:'application/json',body:JSON.stringify(unmanagedReport())});
+    }
+    return route.fulfill({contentType:'text/html',body:renderPage({name:'Health fixture',version:'test'}).replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'')});
+  });
+  await page.goto('http://health.test/');
+  await page.addScriptTag({content:`${esc.toString()}\nfunction authHeaders(){return {'x-dash-token':'fixture'};}\n${source('usage')}\n${source('host-readiness')}\nwireHostHealth();`});
+  await page.evaluate(data=>globalThis.renderHostReadiness(data),unmanagedReport());
+
+  // Header pills: health for the managed host, the management words otherwise, never amber.
+  assert.equal(await page.locator('[data-health-host="claude"] .sp-status').innerText(),'OK');
+  assert.match(await page.locator('[data-health-host="claude"]').getAttribute('aria-label'),/Managed by ak/);
+  assert.equal(await page.locator('[data-health-host="codex"] .sp-status').innerText(),'Found, not managed');
+  assert.equal(await page.locator('[data-health-host="codex"]').getAttribute('data-status'),'unmanaged');
+  assert.equal(await page.locator('[data-health-host="opencode"] .sp-status').innerText(),'Not installed');
+  assert.equal(await page.locator('[data-health-host="opencode"]').getAttribute('data-status'),'not-installed');
+
+  // Details: the checks still ran and are shown; wiring is FYI; the paid check stays managed-only.
+  await page.locator('[data-health-host="codex"]').click();
+  assert.match(await page.locator('#host-health-summary').innerText(),/^Found, not managed · Local checks/);
+  assert.equal(await page.locator('#host-health-checks li').count(),5);
+  assert.match(await page.locator('#host-health-checks li[data-check-key="authentication"]').innerText(),/Needs attention/);
+  assert.match(await page.locator('#host-health-checks li[data-check-key="integration"]').innerText(),/FYI/);
+  assert.equal(await page.locator('#host-health-consent').isDisabled(),true);
+  assert.equal(await page.locator('#host-health-connect').isDisabled(),true);
+  assert.match(await page.locator('#host-health-eligibility').innerText(),/managed by ak/);
+  assert.match(await page.locator('#host-health-participation').innerText(),/not participating/i);
+  assert.equal(await page.locator('#host-health-participation code').innerText(),'ak host pick --host claude,codex');
+  assert.equal(await page.locator('#host-health-participation [data-copy]').getAttribute('data-copy'),'ak host pick --host claude,codex');
+  assert.equal(await page.locator('#host-health-refresh').innerText(),'Check again');
+  await page.locator('#host-health-refresh').click();
+  await page.waitForFunction(()=>globalThis.document.getElementById('host-health-message').textContent==='Check completed.');
+  assert.deepEqual(requests,['/api/host-health/local']);
+  await page.keyboard.press('Escape');
+
+  // Participation view (Overview → Hosts & Routing): one row per host, the hint copyable text.
+  await page.evaluate(()=>{globalThis.document.getElementById('area-overview').hidden=false;globalThis.document.getElementById('panel-hosts').hidden=false;});
+  await page.evaluate(data=>globalThis.renderHostParticipation(data),unmanagedReport());
+  assert.equal(await page.locator('#host-participation-note').innerText(),'1 of 3 managed by ak');
+  assert.equal(await page.locator('#host-participation').isHidden(),false);
+  assert.equal(await page.locator('#host-participation-list li').count(),3);
+  assert.match(await page.locator('#host-participation-list li[data-host="claude"]').innerText(),/Managed by ak/);
+  const codexRow = await page.locator('#host-participation-list li[data-host="codex"]').innerText();
+  assert.match(codexRow,/Found, not managed/);
+  assert.match(codexRow,/not participating/i);
+  assert.match(codexRow,/ak host pick --host claude,codex/);
+  assert.match(await page.locator('#host-participation-list li[data-host="opencode"]').innerText(),/Not installed/);
+  await page.evaluate(()=>globalThis.renderHostParticipation(null));
+  assert.equal(await page.locator('#host-participation').isHidden(),true,'no readiness report → no participation claims');
+
+  // About host cards read the same words, from the same report.
+  assert.deepEqual(await page.evaluate(data=>globalThis.aboutHostChip('codex',data),unmanagedReport()),
+    {state:'unmanaged',word:'Found, not managed',detail:'Not participating: ak routes no work to this host. To include it: ak host pick --host claude,codex'});
+  assert.equal(await page.evaluate(data=>globalThis.aboutHostChip('opencode',data).word,unmanagedReport()),'Not installed');
+  assert.equal(await page.evaluate(data=>globalThis.aboutHostChip('claude',data).word,unmanagedReport()),'Managed by ak');
+  assert.equal(await page.evaluate(()=>globalThis.aboutHostChip('codex',null)),null,'no report → About keeps its row join');
+  await page.addScriptTag({content:`var RANK={fail:3,warn:2,ok:1,info:0,unknown:0};\n${source('about')}`});
+  const aboutFor=(key,rows,data)=>page.evaluate(([key,rows,data])=>globalThis.aboutState({detectionKey:key,category:'hosts'},{rows,hostReadiness:data}),[key,rows,data]);
+  const unmanagedCard=await aboutFor('hosts.codex',[],unmanagedReport());
+  assert.equal(unmanagedCard.state,'unmanaged','an unmanaged host is neither "state unknown" nor a warning');
+  assert.equal(unmanagedCard.word,'Found, not managed');
+  assert.match(unmanagedCard.detail.message,/ak host pick --host claude,codex/);
+  const okRow={subsystem:'hosts',level:'ok',message:'claude 2.1.3 (npm)',fix:null};
+  const warnRow={subsystem:'hosts',level:'warn',message:'claude auth: none (unknown)',fix:'claude login'};
+  assert.deepEqual(await aboutFor('hosts.claude',[okRow],unmanagedReport()).then(st=>[st.state,st.word]),['ok','Managed by ak']);
+  const managedWarn=await aboutFor('hosts.claude',[okRow,warnRow],unmanagedReport());
+  assert.deepEqual([managedWarn.state,managedWarn.word,managedWarn.detail.message],['warn','Managed by ak','claude auth: none (unknown)']);
+  assert.deepEqual(await aboutFor('hosts.claude',[okRow],null).then(st=>[st.state,st.word]),['ok','installed'],'no report → the row join is unchanged');
+
+  await page.setViewportSize({width:390,height:844});
+  await page.evaluate(data=>globalThis.renderHostReadiness(data),unmanagedReport());
+  assert.equal(await page.evaluate(()=>globalThis.document.documentElement.scrollWidth>globalThis.innerWidth),false);
+  await page.screenshot({path:'/tmp/ak-health-unmanaged-mobile.png',animations:'disabled'});
+  assert.equal(errors.length,0,errors.join('\n'));
+});

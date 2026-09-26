@@ -15,6 +15,7 @@
 // (ADR-0023 / component-directory invariants 2 and 3).
 import { heading, dim, bold, glyph, green, yellow } from '../lib/output.mjs';
 import { CATEGORY_ORDER, directoryEntries } from '../lib/dashboard/about-directory.mjs';
+import { hostManagement, HOST_MANAGEMENT_LABELS } from '../lib/host-management.mjs';
 
 export const options = {
   json: { type: 'boolean', default: false },
@@ -68,6 +69,26 @@ const skipped = () => ({ state: 'skipped', version: null, note: 'detection skipp
 const reasonOf = (error) => String(error?.message ?? error);
 
 /**
+ * A host chip in the management words every host surface uses (ADR-0053,
+ * 2026-09-26): an installed host ak does not manage is "Found, not managed",
+ * never a bare "installed", and an absent unmanaged host is not told ak adds
+ * it. `enabled` null (kit.json unreadable) keeps the plain presence chip.
+ * @param {{ method: string, version?: string|null }} install
+ * @param {boolean|null} enabled
+ */
+export function hostAboutState(install, enabled) {
+  const present = install.method !== 'absent';
+  const base = present
+    // An externally-installed host (mise, brew, a native installer) is
+    // present and ak says so — while naming the owner, because ak does not
+    // manage its updates (MANAGED-TOOLS "honest disowning").
+    ? installed(install.version, install.method === 'external' ? 'external install — self-managed' : null)
+    : absent();
+  if (enabled == null) return base;
+  return { ...base, management: hostManagement({ enabled: enabled === true, present }).state };
+}
+
+/**
  * State chips for the packaged entries, from the primitives `ak status` already
  * calls. Each source is guarded independently so one unavailable collector
  * degrades one chip, never the page. Network-free by construction: every call
@@ -83,16 +104,15 @@ async function detectPackaged({ pkgRoot }) {
 
   try {
     const { HOSTS, hostInstallState } = await import('../lib/providers.mjs');
+    let hostsEnabled = null;
+    try {
+      const { loadKitConfig } = await import('../lib/config.mjs');
+      hostsEnabled = loadKitConfig().integrations?.hosts ?? null;
+    } catch { /* management unknown: chips keep plain presence */ }
     for (const host of HOSTS) {
       try {
         const state = await hostInstallState(host);
-        states.set(`hosts.${host.id}`, state.method === 'absent'
-          ? absent()
-          // An externally-installed host (mise, brew, a native installer) is
-          // present and ak says so — while naming the owner, because ak does
-          // not manage its updates (MANAGED-TOOLS "honest disowning").
-          : installed(state.version,
-            state.method === 'external' ? 'external install — self-managed' : null));
+        states.set(`hosts.${host.id}`, hostAboutState(state, hostsEnabled ? hostsEnabled[host.id] === true : null));
       } catch (error) {
         states.set(`hosts.${host.id}`, unknown(reasonOf(error)));
       }
@@ -182,8 +202,14 @@ function detectConfigured(rows) {
 }
 
 /** The chip's rendered text. `installed` without a version is a real state —
- *  some components are nested packages with no manifest ak may read. */
-function chipText(state) {
+ *  some components are nested packages with no manifest ak may read. A host
+ *  chip carrying `management` reads the shared host-management words. */
+export function chipText(state) {
+  if (state.management) {
+    const label = HOST_MANAGEMENT_LABELS[state.management];
+    if (state.state === 'installed') return state.version ? `${label} · v${state.version}` : label;
+    return state.management === 'managed' ? `${label} · not installed — ak sync installs it` : label;
+  }
   if (state.state === 'installed') return state.version ? `installed · v${state.version}` : 'installed';
   if (state.state === 'absent') return 'not installed — ak setup adds it';
   if (state.state === 'configured') return 'configured';
@@ -192,7 +218,9 @@ function chipText(state) {
   return `state unknown — ${state.note}`;
 }
 
-const chipLevel = (state) => (state.state === 'installed' || state.state === 'configured' ? 'ok'
+// A host ak does not manage is a neutral fact, neither a success nor a warning.
+const chipLevel = (state) => (state.management && state.management !== 'managed' ? 'none'
+  : state.state === 'installed' || state.state === 'configured' ? 'ok'
   : state.state === 'attention' || state.state === 'unknown' ? 'warn' : 'none');
 
 function paint(state, text) {

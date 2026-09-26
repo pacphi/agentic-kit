@@ -244,7 +244,8 @@ you opt in.
   OpenCode routes are not projected to AQE, do not affect vendor-diversity claims, and cannot be a
   primary host.
 
-`ak host status` shows what's detected, wired, and routed; `ak host pick` chooses and
+`ak host status` shows each host as Managed by ak, Found, not managed, or Not installed, plus
+what's wired and routed; `ak host pick` chooses and
 applies (reversibly); `ak host off` restores the claude-only default. Full guide:
 [docs/PROVIDERS.md](docs/PROVIDERS.md). Already on an older `ak` and adopting a later capability
 (like dual-host)? [docs/UPGRADING.md](docs/UPGRADING.md) covers the `sync` vs `host pick` motion.

@@ -89,6 +89,7 @@ a.chipf{text-decoration:none; display:inline-flex; align-items:center}
 .ab-state[data-state="warn"]{color:var(--warn); background:color-mix(in srgb,var(--warn) 15%,transparent)}
 .ab-state[data-state="fail"]{color:var(--fail); background:color-mix(in srgb,var(--fail) 15%,transparent)}
 .ab-state[data-state="unknown"]{color:var(--ink-2); background:var(--panel-2); border:1px dashed var(--line-2)}
+.ab-state[data-state="unmanaged"],.ab-state[data-state="not-installed"]{color:var(--ink-2); background:var(--panel-2)}
 .ab-tagline{font-size:13.5px; font-weight:640; letter-spacing:-.006em; color:var(--ink)}
 .ab-body{margin:0; font-size:12.8px; color:var(--ink-2); line-height:1.5}
 .ab-detail{
@@ -96,6 +97,7 @@ a.chipf{text-decoration:none; display:inline-flex; align-items:center}
   padding:2px 0 2px 9px;
 }
 .ab-detail[data-level="fail"]{--lvl:var(--fail)}
+.ab-detail[data-level="info"]{--lvl:var(--line-2)}
 .ab-detail code{font-family:var(--mono); font-size:11px; color:var(--ink)}
 .ab-links{display:flex; gap:6px; flex-wrap:wrap; margin-top:auto; padding-top:2px}
 .ab-pill{

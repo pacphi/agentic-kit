@@ -104,6 +104,24 @@ test('ak host status preserves key presence without exposing the key value', () 
   rm(home, project);
 });
 
+// ADR-0053 (2026-09-26): the terminal reads the same three management states as
+// the dashboard, and the enable hint is the COMPLETE --host list.
+test('ak host status names managed, found-not-managed, and not-installed hosts', () => {
+  const { home, project } = sandbox({ hosts: { claude: true, codex: false } });
+  const bin = path.join(home, 'fake-bin');
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(bin, 'codex'), '#!/bin/sh\necho "codex-cli 0.1.0"\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'codex.cmd'), '@echo off\r\necho codex-cli 0.1.0\r\n');
+  const r = ak(['host', 'status'], { cwd: project, home, env: { PATH: [bin, '/usr/bin', '/bin'].join(path.delimiter) } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^\s*claude\s.*Managed by ak/m);
+  assert.match(r.stdout, /^\s*codex\s.*Found, not managed/m);
+  assert.match(r.stdout, /not participating.*ak host pick --host claude,codex\b/);
+  assert.match(r.stdout, /^\s*opencode\s.*Not installed/m);
+  assert.doesNotMatch(r.stdout, /installed, disabled/);
+  rm(home, project);
+});
+
 test('ak x host status prints the dual-host guidance tips once both hosts are enabled', () => {
   const { home, project } = sandbox({ hosts: { claude: true, codex: true } });
   const r = ak(['x', 'host', 'status'], { cwd: project, home });

@@ -3,6 +3,7 @@
 // override comment for why this directory isn't run through the node lib.
 import { ABOUT_SECTIONS, LS_ABOUT_NUDGE, RANK, activeTab, esc, scrollToAboutSection, setTab } from './bootstrap.mjs';
 import { sourceHostIcon } from './usage.mjs';
+import { aboutHostChip } from './host-readiness.mjs';
 
   // ══ About area (ADR-0026) ══════════════════════════════════════════════════
   // Editorial content comes from the versioned directory below; runtime facts
@@ -64,7 +65,20 @@ import { sourceHostIcon } from './usage.mjs';
     }
     return out;
   }
+  // Host cards read the management words the header pills use (ADR-0053,
+  // 2026-09-26). A host ak does not manage is a neutral fact with its enable
+  // hint; a managed host keeps the verdict of its status rows under the word
+  // "Managed by ak". Without a host-health report the row join stands alone.
   function aboutState(entry,data){
+    var st=aboutRowState(entry,data);
+    var join=ABOUT_JOIN[entry.detectionKey||entry.subsystem||""];
+    var hostChip=data&&join&&join.host?aboutHostChip(join.host,data.hostReadiness):null;
+    if(!hostChip)return st;
+    if(hostChip.state==="managed"){st.word=hostChip.word;return st;}
+    return {state:hostChip.state,word:hostChip.word,title:hostChip.word+(hostChip.detail?" — "+hostChip.detail:""),
+      detail:hostChip.detail?{level:"info",message:hostChip.detail,fix:null}:null};
+  }
+  function aboutRowState(entry,data){
     var configured=entry.category==="configured";
     if(!data||!Array.isArray(data.rows))
       return {state:"unknown",word:"state unknown",title:"the dashboard could not read /api/status",detail:null};

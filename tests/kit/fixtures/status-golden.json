@@ -192,7 +192,21 @@
   {
     "subsystem": "providers",
     "level": "info",
-    "message": "claude-only (default host)",
+    "message": "claude: Managed by ak (default host)",
+    "fix": null,
+    "repair": null
+  },
+  {
+    "subsystem": "providers",
+    "level": "info",
+    "message": "codex: Not installed",
+    "fix": null,
+    "repair": null
+  },
+  {
+    "subsystem": "providers",
+    "level": "info",
+    "message": "opencode: Not installed",
     "fix": null,
     "repair": null
   },

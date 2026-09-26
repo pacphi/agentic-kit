@@ -87,15 +87,21 @@ async function claudeSetup(probe, result) {
 export async function collectHostSetup({ host, cwd, run = nativeRun, have = nativeHave, home, env = process.env, assessSelection = assessLocalSelection }) {
   if (!HOSTS.has(host)) throw new TypeError('unsupported host');
   if (typeof cwd !== 'string' || !path.isAbsolute(cwd)) throw new TypeError('cwd must be absolute');
-  const result = initial();
+  // `presence` answers "is the executable on PATH" separately from whether it
+  // launched: every host is observed, managed or not (ADR-0053, 2026-09-26),
+  // and the management words depend on it.
+  /** @type {ReturnType<typeof initial> & { presence?: 'found'|'absent'|'unknown', target?: any }} */
+  const result = { ...initial(), presence: 'unknown' };
   let present;
   try { present = await have(host, { timeout: 5000, maxBuffer: MAX_OUTPUT, cwd }); }
   catch { return result; }
   if (present === false) {
-    result.installation = observation('fail', 'The enabled host executable is not available on PATH.');
+    result.presence = 'absent';
+    result.installation = observation('fail', 'The host executable is not available on PATH.');
     return result;
   }
   if (present !== true) return result;
+  result.presence = 'found';
   const probe = async args => {
     try {
       const value = await run(host, args, { cwd, env, timeout: 10000, maxBuffer: MAX_OUTPUT });

@@ -468,7 +468,7 @@ ambidextrous dual-host experience (per-activity routing across Claude + Codex). 
 ```bash
 ak sync                              # 1. update the binary (+ heal everything)
 ak host pick --host claude,codex   # 2. opt in → wires dual-host
-ak host status                 # 3. verify: hosts "enabled, wired" + routing table
+ak host status                 # 3. verify: hosts "Managed by ak, wired" + routing table
 ```
 
 Step 1 gets the newer code onto disk. Step 2 is what actually turns dual-host on — it

@@ -2,8 +2,9 @@
 
 - **Status:** Implemented
 - **Date:** 2026-08-06
-- **Updated:** 2026-09-26 — amendment: the agentdb entry describes the copy Ruflo bundles; ak
-  no longer installs a standalone agentdb (see "Amendment 2026-09-26" below)
+- **Updated:** 2026-09-26 — amendments: the agentdb entry describes the copy Ruflo bundles; ak
+  no longer installs a standalone agentdb (see "Amendment 2026-09-26" below); host cards (dashboard
+  and `ak about`) read the host management words from ADR-0053's 2026-09-26 amendment
 - **Earlier updates:** 2026-09-09 — reconciled against repository source and tests for issue
   #211; 2026-08-06 — accepted and implemented; the open points below are resolved decisions
 - **Deciders:** agentic-kit maintainers
@@ -97,7 +98,9 @@ adapters are not required to have an authored About card before graduation.
 ### 4. Card anatomy and the new-user register
 
 Each card: an icon tile; the component name with an honest state chip (`installed v3.34.0` ·
-`not installed — ak setup adds it` · `configured`); a bold plain-language tagline; **one**
+`not installed — ak setup adds it` · `configured`; host cards use the host management words
+`Managed by ak` · `Found, not managed` · `Not installed` per the ADR-0053 2026-09-26
+amendment); a bold plain-language tagline; **one**
 paragraph (~50 words) of value proposition written to a reader who has never heard of the
 tool; and a row of link pills (GitHub / npm / Docs). Editorial register is a contract, not a
 style hope: friendly, concrete, jargon-free — every term of art either avoided or explained in

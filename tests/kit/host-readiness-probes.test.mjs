@@ -24,6 +24,18 @@ function probe(host, outputs = {}, present = true, selection = local()) {
 test('missing executable is actionable and prevents diagnostics', async () => {
   const p = probe('claude', {}, false); assert.equal((await p.collect()).installation.state, 'fail'); assert.deepEqual(p.calls, []);
 });
+// Every host is probed now (ADR-0053, 2026-09-26), so the observation must not
+// claim the host is enabled, and it must say whether the executable was found.
+test('presence is reported separately and the absent reason never claims the host is enabled', async () => {
+  const absent = await probe('opencode', {}, false).collect();
+  assert.equal(absent.presence, 'absent');
+  assert.doesNotMatch(absent.installation.reason, /enabled/i);
+  assert.equal((await probe('codex').collect()).presence, 'found');
+  assert.equal((await probe('codex', { '--version': response('timeout', 1) }).collect()).presence, 'found',
+    'a found executable whose version command fails is still found');
+  const unestablished = await collectHostSetup({ host: 'codex', cwd, have: async () => { throw new Error('which timed out'); } });
+  assert.equal(unestablished.presence, 'unknown');
+});
 test('failed executable launch remains neutral', async () => {
   const p = probe('codex', { '--version': response('timeout', 1) });
   assert.equal((await p.collect()).installation.state, 'unknown'); assert.equal(p.calls.length, 1);

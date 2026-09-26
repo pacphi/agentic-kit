@@ -65,6 +65,10 @@ token estimates never become observed token evidence. An absent or incompatible 
 |------|---------|
 | Present | An executable, file, endpoint, or other surface was detected |
 | Enabled | Persisted user intent permits a host or integration to be used |
+| Managed by ak | Host management state: `kit.json` enables the host, so `ak` wires it and routes work to it; a management fact, never a health verdict |
+| Found, not managed | Host management state: the executable is on `PATH` but `ak` does not manage the host; still health-checked, with problems reported as information |
+| Not installed | Host management state: the executable is not on `PATH` and `ak` does not manage the host |
+| Participating host | Managed host that `ak`'s per-activity routing policy may target (dual-host routes, projected AQE agent routes, `ak run`); the AQE provider chain, qe-court configuration and Ruflo's own dual-mode skills are separate axes |
 | Authenticated | A host login or credential mechanism is known to be usable |
 | Configured | Required provider or projection configuration is present |
 | Reachable | A bounded probe successfully contacted its target |
@@ -271,7 +275,7 @@ engine still owns preflight, apply, verify, and receipt. See [Maintenance](maint
 | DirectoryEntry | One component's editorial identity: category, tagline, paragraph, links, icon, and a detection join key |
 | Editorial content | Authored, versioned prose and links — the part of a card that is true regardless of machine state |
 | Detection fact | An observed install/version/configured fact borrowed read-only from existing collectors, rendered only as chips |
-| State chip | The card element that renders detection facts (`installed v…` / `not installed — ak setup adds it` / `configured` / `unknown`) |
+| State chip | The card element that renders detection facts (`installed v…` / `not installed — ak setup adds it` / `configured` / `unknown`); host cards use the host management words (`Managed by ak` / `Found, not managed` / `Not installed`) |
 | Monogram tile | The honest icon for a component with no official mark: initials on a category-hued tile |
 | Register contract | The editorial writing rules (one ~50-word paragraph, plain language, active voice, no runtime claims, no superlatives) |
 | Parity gate | The test asserting managed-tools registry ↔ directory completeness in both directions |

@@ -110,7 +110,9 @@ Each card carries an icon, the component name with a state chip, a plain-languag
 short paragraph explaining what the thing does for you, and a row of link pills — source (GitHub),
 package (npm), and public docs. Configured surfaces use the same card shape but swap the link pills
 for the command that manages them, because "where do I change this" is their equivalent of "where
-do I read more".
+do I read more". Host cards (Claude Code, Codex, OpenCode) show the host's management state —
+**Managed by ak**, **Found, not managed** or **Not installed** — from the same check the header
+badges use (see [Host health badges](#host-health-badges)).
 
 Two rules make the page trustworthy:
 
@@ -134,9 +136,10 @@ Overview keeps status and routing in one health-first area:
 - **Summary** presents the overall verdict, attention items, and subsystem map. A row's fix
   shows an arrow when `ak sync` performs it and a `manual` tag when you must do it yourself
   (sync never plans those).
-- **Hosts & Routing** presents execution-host health, the primary-host policy, per-activity routes,
-  escalation paths, and routed host models. A configured route is assignment intent, not evidence
-  of which inference provider served a particular session.
+- **Hosts & Routing** presents host participation (which hosts ak manages and routes work to,
+  with a copyable command for any host that is not participating), execution-host health, the
+  primary-host policy, per-activity routes, escalation paths, and routed host models. A configured
+  route is assignment intent, not evidence of which inference provider served a particular session.
 - **Providers** presents inference-provider bindings and their configuration provenance. A
   registered provider is eligible configuration, not evidence that a request selected or used it.
   Direct Ruflo agents must explicitly select OpenRouter or Ollama together with a provider-native
@@ -886,10 +889,26 @@ machine-readable `datetime` attributes retain their original instant.
 
 ## Host health badges
 
-Claude, Codex and OpenCode use the same statuses: **OK**, **Attention**,
-**Checking**, **Unknown**, and **Disabled**. Click a badge for the qualification,
-check time, project and individual results. Keyboard users can focus the badge
-and press Enter; Escape closes the details and restores focus.
+Each host is in one of three management states, named the same way everywhere
+(badges, their details, About, Overview → Providers, Hosts & Routing, `ak status`
+and `ak host status`):
+
+- **Managed by ak**: `kit.json` enables the host, so ak wires it and routes work
+  to it. Its badge shows health: **OK**, **Attention**, **Checking** or **Unknown**.
+- **Found, not managed**: the host is installed, but ak does not manage it. It is
+  still checked automatically. Its badge shows the management state in a neutral
+  colour. Problems in its checks are information, never a warning, and ak's own
+  wiring check is marked FYI.
+- **Not installed**: the host is not on `PATH`, and ak does not manage it.
+
+(If the `PATH` lookup itself fails, an unmanaged host reads **Not managed**.)
+
+Click a badge for the management state, check time, project and individual
+results. For a host ak does not manage, the details say it is not participating
+and give a copyable command that adds it, such as `ak host pick --host claude,codex`.
+`--host` takes the complete list, so the command names every host already managed.
+The dashboard never runs it for you. Keyboard users can focus the badge and press
+Enter; Escape closes the details and restores focus.
 
 **Local OK** means the required local checks passed: executable launch,
 supported configuration and provider/model selection, applicable authentication
@@ -905,7 +924,8 @@ provider, model/default agent, and applicable credentials or local endpoint.
 Automatic checks do not invoke its config-debug command, which can install
 dependencies. Unresolved remote configuration and native overrides stay Unknown.
 
-**Check local setup** refreshes the local evidence. **Check connection** requires
+**Check again** refreshes the local evidence for any host. **Check connection**
+runs only for hosts managed by ak, and requires
 checking a confirmation box first: it sends one small provider request, using
 normal billing and native context. Native startup may initialize dependencies
 and update local cache/session files. Agent tools are restricted, and no repair
