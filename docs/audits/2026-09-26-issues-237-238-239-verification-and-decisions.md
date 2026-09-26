@@ -714,3 +714,407 @@ M1b (a failed source's banner outlives its Discovery row), N4 (preserved memory 
 N5 (accuracy of the partial Codex parsing advisory), L4b ("CONNECTING" needs a browser trace), F1
 (worker early-warning monitor), a per-machine hook-contract acknowledgment, and a dashboard "Run
 live checks" button.
+
+## Implementation status (integration/237-238)
+
+This section was added the same day, after implementation. The opening paragraph ("Nothing in
+this record is implemented") describes the record as it was written against `847486c`.
+
+This section records what then landed on the local branch `integration/237-238`, which was built
+from `3505a29` (the Addendum 2 commit). Every SHA below is on that branch.
+
+- The branch is not merged into `fix/audit-237-238-remediation` or `main`.
+- The implementation lanes and integration stages pushed nothing, released nothing and posted
+  nothing.
+
+### How it was built
+
+- **Lanes.** Each lane built its commits test-first in its own worktree: a failing regression test
+  came before each fix.
+- **Integration.** An integrator cherry-picked the commits in plan order with `git cherry-pick -x`.
+  Conflicts were resolved so that both sides' intent was kept. After each pick the integrator ran
+  that pick's focused tests and ESLint.
+- **Stage 5** was written directly on the integrated branch.
+- **Commit count: 50**, not counting the commit that adds this section.
+  - 45 are cherry-picks, and each carries its `cherry picked from` line.
+  - 4 were written in place for Stage 5.
+  - 1 is an integrator fix, `259f075`.
+  - No commit has a `Co-Authored-By` trailer.
+- **How the checks ran.** They are the `check` and `test:ui` equivalents, run with `node` and `npx`
+  directly rather than through `pnpm`. The worktree's `node_modules` is a link to the main checkout's,
+  and pnpm's dependency check would try to remove it.
+
+### Plan items and commits
+
+#### What the evidence columns mean
+
+- The evidence is the focused `node --test` run after the commit was integrated, written as passed
+  out of run.
+- Where a run skipped a test, the skip was the Windows-only test that is skipped on macOS.
+- `dashboard.cjs` means `tests/dashboard.test.cjs`.
+
+#### Before Stage 1
+
+These two problems were found while taking the baseline:
+
+- `pnpm test` had one failure on `847486c`.
+- A baseline `pnpm test` rewrote the real project's statusline to show Ruflo "9.9.9", and removed
+  its memory and AQE environment pins.
+
+| # | Commit | SHA | Focused evidence |
+|---|---|---|---|
+| 0b | `test(telemetry): keep the hermetic export from reading real host sessions` | `8fc4797` | telemetry-cli 22/22; the baseline failure passes |
+| 0c | `test(isolation): run lifecycle sync and setup tests in a sandbox project` | `5618e97` | 13 files, 198/198 |
+| 0d | `fix(statusline): stop overwriting Ruflo's baked version` | `b6c8dae` | 97/97 |
+| 0e | `feat(status): flag a statusline that shows a different Ruflo version than installed` | `7b9f7cd` | 223/223 |
+
+#### Stage 1
+
+| # | SHA | Focused evidence |
+|---|---|---|
+| 1 | `8596f21` | 105/105 |
+| 2 | `cea1783` | 186/186 |
+| 3 | `7fac767` | 71/71 |
+| 4 | `0ee005f` | 309/309; dashboard.cjs 86/86 |
+| 5 | `5e02beb` | 347/347; dashboard.cjs 86/86 |
+| 6 | `4525733` | 116/116 |
+| 7 | `35ce7ce` | 149/149 |
+| 8 | `8ad8b8a` | 84/84 |
+| 9 | `07ca201` | 162/162 |
+| 10 | `7e3cbe2` | 138/138 |
+| 11 | `01c775d` | 73/73 |
+| 12 | `6c6912d` | 442/442 (every sync, status, natives, setup and Codex MCP suite) |
+
+#### Stage 2
+
+| # | SHA | Focused evidence |
+|---|---|---|
+| 13 | `88b2296` | 74/74 |
+| 14 | `5e8d431` | 279/279 |
+| 15 | `c804d9a` | 383 passed, 1 skipped |
+| 16 | `9b18fda` | 214/214 |
+| 17 | `85c0ebc` | 305/305 |
+| 18 | `31294f2` | 258/258 |
+| 19 | `1829241` | 154/154; statusline-brain.cjs 10/10 |
+| 20 | `5b83626` | 31/31 |
+| 21 | `6ea0124` | 117/117 |
+
+#### Stage 3
+
+Two rows here are not numbered in the plan:
+
+- 26+ is a review fix to 26: `fix(live): keep the exact-folder correlator across the metadata bootstrap`.
+- 29+ is a docs fix: `docs(maintenance): qualify fresh-install coverage wording for absent hosts`.
+
+| # | SHA | Focused evidence |
+|---|---|---|
+| 22 | `50b9491` | 113/113 |
+| 23 | `4d5ee52` | 221/221 |
+| 24 | `b10a344` | 487/487 |
+| 25 | `0e04519` | 493/493; dashboard.cjs 86/86 |
+| 26 | `cbd8ff3` | 502/502 |
+| 26+ | `679532c` | 503/503; dashboard.cjs 86/86 |
+| 27 | `6d3d9c4` | 682/682 |
+| 28 | `93ee66a` | 545/545 |
+| 29 | `80f1f6f` | 709/709 |
+| 29+ | `8bd3c6b` | 275/275 (documentation guards) |
+| 30 | `5d5c288` | 436/436 |
+| 31 | `e487900` | 448/448 |
+| 32 | `7a21e7d` | 506/506; dashboard.cjs 86/86. A test isolation defect in this commit is fixed by `259f075` (see Open items) |
+
+#### Stage 4
+
+The first addendum's "Plan changes" describes this stage in prose. The labels 4.1–4.7 are
+this section's own.
+
+| # | Commit | SHA | Focused evidence |
+|---|---|---|---|
+| 4.1 | `refactor(exec): share a process-tree kill helper` | `7c9bf4f` | 348 passed, 1 skipped |
+| 4.2 | `feat(verify): prove the memory route across CLI and MCP` | `1c95991` | 598 passed, 1 skipped |
+| 4.3 | `feat(status): gate memory routing claims on observed release evidence` | `594eabe` | 723 passed, 1 skipped |
+| 4.4 | `fix(setup): remove the setup memory probe from every store` | `e397f6d` | 601 passed, 1 skipped |
+| 4.5 | `feat(status): report the canonical memory store, its size, and stray stores` | `0d86dbc` | 611 passed, 1 skipped |
+| 4.6 | `feat(status): report memory backup and distillation age` | `f015df0` | 1,180 passed, 1 skipped |
+| 4.7 | `test(live): run the qe-court live test in a disposable project` | `c9c1987` | 1,136 passed, 1 skipped |
+
+#### Stage 5
+
+| # | SHA | Focused evidence |
+|---|---|---|
+| 5.1 | `72506d3` | The new pin test passes 9/9. The provider, memory and sync suites pass 85/85 and 197/197. A real Ruflo 3.45.0 run in a disposable home registered a provider and kept memory at `.swarm`. |
+| 5.2 | `1274262` | The new location test passes 8/8, and a 322-test focused batch passes. |
+| 5.3 | `b036f7c` | The new receipt and About tests pass 8/8 and 2/2. heal-natives passes 28/28, and a 361-test focused batch passes. |
+| 5.3+ | `719b048` | This docs commit is `docs(adr): record the About install-edit line in ADR-0026`. The documentation guards pass 36/36. |
+
+#### Integration fix after Stage 5
+
+| Commit | SHA | Evidence |
+|---|---|---|
+| `test(system-summary): keep the deep-refresh test out of the real maintenance state` | `259f075` | Each kit test file was run alone with `XDG_STATE_HOME` redirected. Before the fix, system-summary was the only file that wrote any file there: 8 maintenance files. After the fix it passes 8/8 and writes nothing. |
+
+### Full-suite results at each stage end
+
+#### Baseline on `847486c`
+
+- The kit suite passed 4,485 of 4,492, with 6 skipped and the one 0b failure.
+- All nine `.cjs` suites passed.
+- Commit 5 retired two of those `.cjs` suites (agentdb and harvest), leaving seven.
+
+| After | Tip | Kit tests: passed / skipped / failed (of total) | Coverage: lines / branches / functions (%) | `.cjs` suites |
+|---|---|---|---|---|
+| 0b–9 | `07ca201` | 4,580 / 6 / 0 (4,586) | 92.64 / 81.82 / 91.96 | 7 of 7 pass |
+| 10–21 | `6ea0124` | 4,779 / 6 / 0 (4,785) | 92.74 / 81.96 / 92.05 | 7 of 7 pass |
+| 22–32 | `7a21e7d` | 4,877 / 6 / 0 (4,883) | 92.81 / 82.16 / 92.20 | 7 of 7 pass |
+| Stage 4 | `c9c1987` | 4,982 / 6 / 0 (4,988) | 92.92 / 82.32 / 92.32 | 7 of 7 pass |
+| Stage 5 | `719b048` | 5,009 / 6 / 0 (5,015) | 92.99 / 82.37 / 92.44 | 7 of 7 pass |
+
+#### Checks that passed at every stage end
+
+- The typecheck was clean.
+- ESLint reported 0 errors and no new warnings. Warning sets were compared by file, rule and message;
+  there are 69 warnings at the tip.
+- The complexity-50 gate was clean.
+- markdownlint found 0 issues in 162 files.
+- `build-check` passed.
+  - `npm pack` grew from 505 to 520 files as new runtime modules shipped.
+- Regenerating the status golden file changed nothing.
+- The main checkout stayed at `3505a29` with a clean tree.
+- The files watched by the tripwire from commit 0c did not change.
+
+#### Final checks
+
+- **Kit suite after the fix.** After `259f075`, the kit suite ran again with `XDG_STATE_HOME`
+  pointed at a temporary folder.
+  - Result: 5,009 passed, 6 skipped and 0 failed, of 5,015.
+  - Coverage: 92.97 / 82.31 / 92.36. It is slightly lower because the fixed test no longer drives
+    the default maintenance services.
+  - The only thing written into that folder was an empty `opencode` folder, which six test files
+    create. `opencode.test.mjs` does the same at `3505a29`. On this machine
+    `~/.local/state/opencode` already exists and did not change.
+- **UI suites.** These use the system Chrome and fixture data.
+  - `dashboard-ui` passed 491/491, with no console errors and no failed or off-origin requests.
+  - The seven `node:test` UI files passed 10/10.
+  - These include the unmanaged-host readiness test from commit 27 and the System page fixtures for
+    the summary endpoint from commit 32.
+- **Stage 5's ruflo About line.** A scratch browser check, not committed, confirmed that the line:
+  - shows the `natives` row verbatim;
+  - escapes markup;
+  - is visible on the card;
+  - leaves the chip unchanged.
+
+### Deviations from the plan
+
+#### Integration
+
+- Commit 4 adds `isolateProject()` to its new test. Lane H's isolation census requires it.
+- Manifest changes are inside the commits that need them:
+  - Commit 5 drops the retired agentdb and harvest `.cjs` suites from `test`.
+  - 4.4 adds the `test:ruflo-memory-live` script.
+  - 4.7 adds its helper to `files`.
+- Restructured ADR headers:
+  - The GA surface guard reads only the first 1,200 characters, and the ADR-0012 and ADR-0016 Update
+    notes must fall inside that limit. Each header is now one short `Updated` line. The detail moved,
+    verbatim, into an end-of-file amendment: "live acquisition" in ADR-0012 and "project memory" in
+    ADR-0016.
+  - The ADR-0023, ADR-0033 and ADR-0055 headers each merge several lanes' 2026-09-26 notes.
+- Commit 30 re-anchors the `quota.mjs` line citations in USAGE-SCORECARD-METRICS, because the
+  commit moved those lines.
+- In 4.6, the daemons-status tests expect `repair: null`. That is commit 4's row contract, which the
+  lane's base did not have.
+- 26+ and 29+ were kept as separate commits, not squashed.
+- `259f075` is an integrator fix made after Stage 5.
+
+#### Lanes
+
+Behavior that differs from, or goes beyond, the plan text.
+
+- **0b:** The cause was a gap in the test harness, not the product. The test inherited
+  `XDG_DATA_HOME`, which is where OpenCode keeps its store. The commit title is therefore
+  `test(telemetry)`.
+- **0c:**
+  - Two more test files are isolated: uninstall-command and deja-vu-teardown-verify.
+  - The tripwire watches more project files than the four the plan named.
+- **2 and 4:**
+  - Status reads the target project's MCP scopes.
+  - More rows are manual-only than the plan listed: host login, models, the OpenCode configuration
+    rows, and the user-owned Codex `mcp-server` row.
+  - When only manual rows remain, sync prints "nothing sync can do — N item(s) need a manual step".
+  - The statusline sync step also fires for `statusline/cve`.
+- **5:**
+  - `ak x verify harvest` fails, rather than skips, when Ruflo is absent.
+  - The About agentdb card reads "state unknown".
+- **8 and 9:**
+  - An inconclusive native probe is a warning. As a result, `ak status` exits 0 when the probe times
+    out twice.
+  - The heal removes an unloadable binding before it rebuilds, and probes again afterwards.
+- **10–12:**
+  - Convergence counts the rows where `fix && repair !== 'manual'`.
+  - `--skip` also accepts comma-separated names.
+  - The JSON result adds:
+    - `error`;
+    - a `reason` on each unresolved entry;
+    - `converged: null` when a run stops before a verdict.
+- **14 and 15:**
+  - Harvest and learning results are not recorded, because they have no evidence id.
+  - `--live` sends the embedding request only for a kit-managed backend.
+  - The providers check runs `aqe health` only where `.agentic-qe` exists.
+- **16–18:**
+  - The TOML table has 29 cases, 3 more than the planned 26.
+  - An inline Codex AQE registration is now a conflict. Dotted and quoted ones were already refused,
+    and now get a more specific message.
+  - `npx agentic-qe mcp` and `.ps1` shims are not recognized.
+  - Lock contention never hides an embedding initialization failure.
+- **23:**
+  - There are two new source states: `awaiting-file` and `no-events`.
+  - The `codex-state` live source reports `unavailable` on every Claude-only machine, so that
+    state is not counted as a source issue.
+- **26:** The folder correlator's secret belongs to each collector and is never serialized.
+- **27:**
+  - The same management words appear in `ak host status`, `ak about` and the `ak status` providers
+    rows.
+  - A fourth label, "Not managed", covers a host that has not been assessed.
+- **30:**
+  - There are two classes beyond the three planned: `project-helper` and `unknown`.
+  - The payload fields are `claudeChannel` and `codexUnavailable`.
+- **4.2–4.4:**
+  - Each doc change is in the commit whose behavior it describes.
+  - The memory check in `ak status --live` does not observe routes.
+- **4.5 and 4.6:**
+  - The memory section resolves the repository root when run from a subfolder.
+  - Backup age also counts manual `ruflo memory backup` files.
+  - Messages say "at most daily".
+- **4.7:** The qe-court live test was not run, because it is paid.
+- **5.1:**
+  - A provider step degraded by the memory guard reports `ok: false`, so `ak sync` always prints it.
+  - One test, for an unwritable pin, was added after the implementation and was not observed failing
+    first.
+- **5.2:**
+  - "Temporary folder" means the temporary root itself. As a result, the sandbox used by
+    `ak x verify memory` keeps its own store.
+  - The tool-folder list is wider than the plan's. It adds:
+    - `~/.claude-flow` and `~/.ruflo`;
+    - `~/.local` and `~/.cache`;
+    - `~/Library/Caches` and `~/AppData`;
+    - the `XDG_*`, `CODEX_HOME` and `CLAUDE_CONFIG_DIR` overrides.
+  - The user-level store is `~/.claude-flow/memory`. Ruflo defines no user-level memory store, so
+    this location follows Ruflo's `~/.claude-flow` state folder by analogy.
+  - A new `user-memory` status section reports this store and any stray stores.
+  - `memoryProjectRoot` changes only for a Git repository at `$HOME` or `/`, or inside a tool folder.
+- **5.3:**
+  - **Option D was tested in disposable install prefixes and was not adopted.**
+    - Only 1 of 4 runs ended with a working native binding.
+    - Ruflo's own `better-sqlite3` override never applied to a global install.
+    - A fresh 3.45.0 install needed no manifest edit.
+  - One test, "every heal re-checks receipts first", was added after the implementation.
+  - An extra docs commit, `719b048`, records the About line in ADR-0026.
+
+### Open items
+
+#### Needs the maintainer's action
+
+- **A test overwrote the real maintenance state.**
+  - What was written: `~/.local/state/agentic-kit/maintenance/latest-scan.json` and
+    `management/*` were rewritten from the fixture in the `system-summary` test.
+  - When: every run of that test until `259f075`.
+    - Observed: the full-suite runs after Stage 4 (14:46) and Stage 5 (15:35 local time, 22:35 UTC,
+      on 2026-09-26, the last write).
+    - Inferred from the same mechanism: lane F2's runs and the run after Stage 3.
+  - What is there now: `management/locators.json` holds 90 fixture paths (`/Users/someone/…`).
+  - What was not touched: `preferences.json` and `transactions/`.
+  - The earlier content cannot be recovered from here.
+  - To repair it:
+    1. Run **Re-measure machine** in the dashboard's Maintenance area.
+    2. Check that `locators.json` no longer mentions `/Users/someone`.
+- **The dashboard server's hermeticity guard has a gap.** It fires only when a maintenance service
+  is injected without a control root. A caller that injects only a System collector still gets the
+  default maintenance service and management facade, and both write real state. This product-side
+  follow-up is not fixed here.
+
+#### From Stage 5
+
+- **Unreceipted edits.** This machine already carries three edits that ak made before receipts
+  existed. Each sets `better-sqlite3` to `^12.10.0`:
+  - bundled `agentdb` `optionalDependencies`;
+  - `@claude-flow/memory` `optionalDependencies`;
+  - `@claude-flow/cli` `overrides` and `optionalDependencies`.
+
+  There are no original values, so ak cannot show or restore these edits. The docs tell the user
+  to reinstall Ruflo to get pristine files.
+- **Claude-side memory outside a project.** Claude's direct `ruflo mcp start` registration, and
+  Claude-side harvest and setup, still use `<cwd>/.swarm` outside a project. This is a follow-up
+  decision under Addendum 2.
+- **`ak x host --dry-run`.** The command declares `--dry-run` but never reads it; this is
+  pre-existing. Its provider registration, and now the memory pin, run even with that flag.
+- **Status wording.** When both the repository root and the folder are unsuitable, the status reason
+  names the repository root's reason ("the home folder") rather than the tool folder's. This is
+  cosmetic.
+- **Resolved during development.**
+  - A heal test briefly wrote a real `install-edits.json` holding only temporary fixture paths, then
+    pruned it. The test is now sandboxed, and no such file exists after the final runs.
+  - The option D runs went through mise's npm wrapper. Its reshim hook failed in the sandbox and
+    changed nothing.
+
+#### Carried from the earlier stages
+
+- **AQE embedding conflicts fail every sync.** An AQE embedding projection conflict gives the status
+  row a sync fix that sync cannot perform, so on such a machine every `ak sync` exits 1. Commit 16
+  made an inline Codex AQE registration, which was previously read as absent, a conflict. The upgrade
+  note calls this a "warning". This comes from reading the code and was not executed. The owner's
+  decision is needed on marking a conflict-only row `manual`.
+- **The bare `ak` hint counts only rows with a fix.** A machine whose only warnings have
+  `fix: null`, such as a stale backup or two memory stores, prints "0 item(s) need attention — run:
+  ak sync".
+- **Sync.**
+  - `ak sync --json` with an unknown option prints help, not JSON.
+  - A configuration error under `--json` loses its recovery text.
+  - With `--skip`, the `skipped by request` lines print twice.
+  - `src/commands/sync.mjs` is 1,004 lines, close to the max-lines limit.
+- **Status.**
+  - With an unwritable evidence store, `ak status --live --json` can print a non-JSON warning on
+    stdout.
+  - `--deep` is declared but never read.
+  - `ak x verify aqe` records failures of an unmanaged backend.
+- **Limits.** `readLimits` starts `codex app-server` whatever the Codex host setting says. This needs
+  a policy decision.
+- **Memory.**
+  - Old `_setup/verify-*` rows in existing MCP stores: clean them up once, or leave them.
+  - AQE's relative `AQE_MEMORY_PATH`: file it upstream, or anchor it in ak's projection.
+  - Observed routing evidence is macOS-only.
+  - The two-store warning is permanent (N4).
+  - `ak setup` sets `daemon.autoStart: false`, so Ruflo's backups stop. This needs a decision.
+- **Live.**
+  - No real producer of a structured live-events file exists, so that path has fixture evidence only.
+  - The plain-folder bind has not been observed on a real machine.
+  - A file that re-enters the window at restart is read from its start.
+- **Usage.**
+  - The Claude statusLine classifier does not read managed settings.
+  - A shell wrapper around the footer helper is classed as `custom`.
+  - Other spawn tests still inherit the developer's `XDG_*` variables.
+  - M1b is still open.
+- **ADR index.** In `docs/adr/README.md` the index table ends at ADR-0052; later ADRs appear only as
+  bullets or sections. This predates the branch.
+- **UI suite outside `test:ui`.** `tests/ui/maintenance-focus.mjs` fails "polyglot cards expose
+  labelled language badges" at `3505a29` too. That file is not part of `test:ui`.
+
+#### Not run
+
+- Windows CI. It is the gate for:
+  - the `ps` paths with spaces;
+  - junction-based symlinks;
+  - the `codex.cmd` and `.cmd` transport recognition;
+  - `taskkill` process-tree kills;
+  - the `%APPDATA%`, `%LOCALAPPDATA%` and `AppData` tool-folder branch.
+- `tests/live/*`.
+  - The memory-routing test uses the real home folder.
+  - The qe-court test is paid.
+- Per-lane browser checks against real data:
+  - Live source health and the zero-operations note;
+  - host badges and About chips;
+  - Discovery "Not installed";
+  - the Limits empty states;
+  - the transfer size of `/api/system/summary` against `/api/system`.
+- A human review of the UI screenshots in `.ui-artifacts/`.
+- The Stage 5 About line has no committed rendered test.
+- External link checking.
+- The end gates from "Gates" above: AQE coverage-gap analysis and an adversarial review of the full
+  diff.
