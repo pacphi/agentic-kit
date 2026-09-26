@@ -459,7 +459,7 @@ const PROVIDER = T.obj({ id: T.text(80), version: T.text(40) });
 const COVERAGE = T.obj({
   sourceId: ID, environmentId: ID, state: T.oneOf(SOURCE_COVERAGE_STATES), label: LABEL, visited: T.int, estimated: T.int,
   limitingReason: T.oneOf(LIMITING_REASONS), ceiling: T.oneOf(SAFETY_CEILINGS), completedPartitions: T.int, pendingPartitions: T.int,
-  lastCompletedAt: STAMP, filesystem: T.bool,
+  lastCompletedAt: STAMP, filesystem: T.bool, present: T.bool,
 });
 const ROW = T.obj({
   ...PROJECT_PRESENTATION,
@@ -768,6 +768,7 @@ const V2_ERRORS = Object.freeze({
   RECONCILE_OUTCOME_NOT_ENABLED: { status: 409, error: 'The interruption audit does not enable this outcome for this receipt.', effect: 'not-started' },
   SCAN_REQUIRED: { status: 409, error: 'No inventory has been built yet. Run a Maintenance scan first.', effect: 'not-started' },
   SOURCE_NOT_SCANNABLE: { status: 409, error: 'This source is covered by the provider check and machine measurement, not by a discovery scan.', effect: 'not-started' },
+  SOURCE_NOT_PRESENT: { status: 409, error: 'This source is not installed on this machine, so there is nothing to scan.', effect: 'not-started' },
 });
 const V2_STATUS_TEXT = Object.freeze({
   400: 'invalid maintenance request', 404: 'The requested maintenance item is not in the current inventory.',

@@ -300,14 +300,16 @@ Discovery is where you tell Agentic Kit where to look. Configuration is user int
   sources have no per-source scan control: their coverage comes from **Re-measure machine**, and
   the non-filesystem ones (Runtimes, Package managers, Ollama, Providers) are covered by the
   provider check. Asking `ak maintain scans start` to walk one of those is refused with
-  `SOURCE_NOT_SCANNABLE`.
+  `SOURCE_NOT_SCANNABLE`. A host source whose folder is not on this machine (for example Hermes
+  when Hermes is not installed) reads **Not installed**: it is never scanned, never counted in
+  coverage or the Inventory banner, and a start request is refused with `SOURCE_NOT_PRESENT`.
 - **Exact projects** and **collection roots** are folders you add. A collection root can carry a
   depth limit. Roots must be absolute, lexically normalized, not symlinks, and real directories.
   Network, removable, cloud-placeholder, and Windows-to-WSL boundaries are excluded by default and
   need an explicit per-root opt-in.
 - **Exclusions** are exact or recursive paths that no source may enter.
-- Every source reports one coverage state: **Not scanned yet**, complete, scanning, paused,
-  stopped, or failed. A source that has never run reports no visited work at all.
+- Every installed source reports one coverage state: **Not scanned yet**, complete, scanning,
+  paused, stopped, or failed. A source that has never run reports no visited work at all.
 
 ### Preview before save
 
@@ -550,7 +552,7 @@ transaction applies; follow the verb-specific options below.
 | `sources exclude --path PATH [--recursive]` | Adds an exclusion. |
 | `sources unexclude --exclusion ID` | Removes an exclusion. |
 | `scans` | Prints scan progress. |
-| `scans start [--source ID,...] [--deep]` | Starts scans for the named roots, or every filesystem source, and waits for their final state. A non-filesystem automatic source is refused with `SOURCE_NOT_SCANNABLE`. |
+| `scans start [--source ID,...] [--deep]` | Starts scans for the named roots, or every installed filesystem source, and waits for their final state. A non-filesystem automatic source is refused with `SOURCE_NOT_SCANNABLE`; a host source that is not installed is refused with `SOURCE_NOT_PRESENT`. |
 | `scans pause\|resume --source ID` | Pauses or resumes one source. |
 | `scans stop --source ID [--yes]` | Shows the affected resources; `--yes` stops the source. |
 | `activity` | Prints the six Activity groups. |

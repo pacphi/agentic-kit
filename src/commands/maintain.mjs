@@ -164,7 +164,9 @@ Compatibility:
   for it to reach a final state before printing progress. Automatic sources
   that are not a filesystem walk (runtimes, package managers, Ollama,
   providers) are measured by "ak maintain scan --deep", not by scans start —
-  naming one with --source is refused.`;
+  naming one with --source is refused. A host source whose folder is not on
+  this machine reads "Not installed", is never scanned or counted, and is
+  refused by --source too.`;
 
 // ── Small parsing helpers ───────────────────────────────────────────────────
 
@@ -544,14 +546,23 @@ async function dispatchDisposition({ flags, deps }) {
 // Renders one SourceCoverage row through SOURCE_COVERAGE_LABELS — never the
 // raw enum token — and, for a source that has never been scanned, a hint to
 // start it (the opaque sourceId is safe to print; it is not a path).
+// A host source whose folder is not on this machine (`present:false`) reads
+// Not installed and gets no start hint: the service refuses to scan it
+// (SOURCE_NOT_PRESENT) and never counts it.
 function renderCoverageEntry(entry) {
+  if (entry.present === false) {
+    info(`${entry.label}: Not installed`);
+    return;
+  }
   info(`${entry.label}: ${SOURCE_COVERAGE_LABELS[entry.state] ?? entry.state}`);
   if (entry.state === 'not-scanned') info(dim(`Run: ak maintain scans start --source ${entry.sourceId}`));
 }
 
 function renderDiscovery(result) {
   heading('Maintenance discovery');
-  for (const source of result.automaticSources ?? []) info(`${source.id}: ${source.enabled ? 'enabled' : 'disabled'}`);
+  for (const source of result.automaticSources ?? []) {
+    info(`${source.id}: ${source.enabled ? 'enabled' : 'disabled'}${source.present === false ? ' (not installed on this machine)' : ''}`);
+  }
   for (const project of result.exactProjects ?? []) info(`Exact project: ${project.root}`);
   for (const root of result.collectionRoots ?? []) info(`Collection root: ${root.root}`);
   for (const exclusion of result.exclusions ?? []) info(`Excluded: ${exclusion.path}${exclusion.recursive ? ' (recursive)' : ''}`);

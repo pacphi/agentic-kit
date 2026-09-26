@@ -67,9 +67,13 @@ import { MNT, mntAge, MNT_SOURCE_COVERAGE_LABELS, mntGet, mntPost, mntRegisterDe
   function renderMntAutomaticSources(){
     var el=document.getElementById("mnt-automatic-sources");if(!el)return;
     var sources=(MNT.discovery&&MNT.discovery.automaticSources)||[];
+    // `present:false` = a host source whose folder is not on this machine
+    // (the host is not installed): never scanned and never counted.
     el.innerHTML="<h3>Automatic sources</h3><ul>"+sources.map(function(source){
       return '<li><label><input type="checkbox" data-mnt-source-toggle="'+esc(source.id)+'"'
-        +(source.enabled!==false?" checked":"")+"> "+esc(source.label)+"</label><p>"+esc(source.inspects)+"</p></li>";
+        +(source.enabled!==false?" checked":"")+"> "+esc(source.label)+"</label>"
+        +(source.present===false?"<small>Not installed on this machine</small>":"")
+        +"<p>"+esc(source.inspects)+"</p></li>";
     }).join("")+"</ul>";
   }
 
@@ -150,6 +154,7 @@ import { MNT, mntAge, MNT_SOURCE_COVERAGE_LABELS, mntGet, mntPost, mntRegisterDe
     el.innerHTML='<section class="mnt-scan-section"><h3>Filesystem coverage</h3>'
       +(narrative?"<p>"+esc(narrative)+"</p>":"")
       +'<table class="mnt-coverage-table"><thead><tr><th>Source</th><th>Outcome</th></tr></thead><tbody>'+coverage.map(function(entry){
+        if(entry.present===false)return '<tr><td>'+esc(entry.label)+'</td><td>Not installed<small>nothing to scan on this machine</small></td></tr>';
         var controls="";
         var userRoot=!!userRoots[entry.sourceId];
         if(userRoot&&entry.state==="scanning"){

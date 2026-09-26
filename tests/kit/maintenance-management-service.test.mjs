@@ -82,15 +82,14 @@ function updatableLightpandaFootprint() {
 // ~/.claude/CLAUDE.md, ~/.codex/AGENTS.md, ~/.claude.json, etc., and the
 // fixture's placement count becomes whatever happens to exist there.
 function hermeticPaths(root) {
-  // Real, empty, hermetic directories rather than nonexistent ones: a
-  // nonexistent root makes `planPartitions` return zero partitions, and the
-  // orchestrator's drive loop (`while (record.pendingPartitions.length)`)
-  // then never runs its body at all — so `finalizeIfComplete` never fires
-  // and the record is stuck reporting `scanning` forever (a real gap in the
-  // zero-partition case, worth flagging upstream). A real empty directory
-  // always yields at least the root-files partition, so it still finalizes
-  // normally; `readInstructionFileEvidence` still reports `present:false`
-  // for the (absent) CLAUDE.md/AGENTS.md file inside it either way.
+  // Real, empty, hermetic directories, one per host source production's
+  // DEFAULT_PATHS resolves (service.mjs), so every host source is present
+  // and completes normally: a real empty directory always yields at least
+  // the root-files partition. A missing root is a different case — the
+  // host is not installed, so the source is never driven or counted (the
+  // M1 tests use `absentHermesPaths` for it). `readInstructionFileEvidence`
+  // still reports `present:false` for the (absent) CLAUDE.md/AGENTS.md file
+  // inside these directories either way.
   const emptyDir = (name) => {
     const dir = path.join(root, 'hermetic', name);
     fs.mkdirSync(dir, { recursive: true });
@@ -101,6 +100,7 @@ function hermeticPaths(root) {
     claudeDir: emptyDir('claude-dir'),
     codexDir: emptyDir('codex-dir'),
     opencodeDir: emptyDir('opencode-dir'),
+    hermesDir: emptyDir('hermes-dir'),
     claudeUserMcpPath: missingFile('claude.json'),
     codexConfigPath: missingFile('config.toml'),
     opencodeConfigPath: missingFile('opencode.json'),
@@ -954,6 +954,56 @@ test("the inventory's sourceCoverage excludes non-filesystem automatic sources; 
   for (const entry of page.partialSources.entries) {
     assert.ok(!nonFilesystemLabels.has(entry.label), `${entry.label} must not appear in the inventory's partialSources`);
   }
+});
+
+// ── M1 (#238 item 6): an absent host root is neither scanned nor counted ──
+
+/** Production's DEFAULT_PATHS with Hermes NOT installed on this machine:
+ * the helper exists (paths.hermesDir) but its root was never created. */
+function absentHermesPaths(root) {
+  return { ...hermeticPaths(root), hermesDir: () => path.join(root, 'hermetic', 'no-such-hermes') };
+}
+const HERMES_LABEL = 'Hermes user configuration';
+
+test('M1: a re-measure never drives an absent host root, so no io-failure banner and no failed Discovery row', async (t) => {
+  const controlRoot = fixtureRoot(t);
+  const h = buildHarness(t, { paths: absentHermesPaths(controlRoot) });
+
+  const result = await h.service.rebuildAfterMeasurement();
+
+  const page = h.service.inventory({});
+  assert.equal(page.partialSources.total, 0, `banner counted ${JSON.stringify(page.partialSources.entries)}`);
+  assert.equal(page.partialSources.narrative, null);
+  assert.ok(!result.scans.coverage.some((entry) => entry.state === 'failed'), 'an absent root must never fail a scan');
+  assert.match(result.scans.narrative, /3 of 3 sources are complete/, 'Discovery must not count the absent root either');
+
+  const d = h.service.discovery();
+  const hermes = d.automaticSources.find((source) => source.id === 'hermes-user');
+  assert.equal(hermes.present, false, 'Discovery must say the Hermes root is not on this machine');
+  assert.equal(d.automaticSources.find((source) => source.id === 'claude-user').present, true);
+  const hermesRow = d.coverage.find((entry) => entry.label === HERMES_LABEL);
+  assert.ok(hermesRow, 'the absent source is still listed, never silently dropped');
+  assert.equal(hermesRow.present, false);
+  assert.equal(hermesRow.limitingReason, null);
+  const rawInventory = createInventorySnapshotStore(path.join(h.controlRoot, 'management'), { fsImpl: fs }).read();
+  for (const entry of rawInventory.sourceCoverage) assert.ok(!('present' in entry), 'present is Discovery-only evidence');
+});
+
+test('M1: a fresh instance counts only present roots as not scanned, and refuses an explicit scan of an absent one', async (t) => {
+  const controlRoot = fixtureRoot(t);
+  const h = buildHarness(t, { paths: absentHermesPaths(controlRoot) });
+  await h.service.refreshInventory();
+
+  const page = h.service.inventory({});
+  assert.equal(page.partialSources.total, 3, 'claude/codex/opencode are present but not scanned; Hermes is not installed');
+  assert.ok(!page.partialSources.entries.some((entry) => entry.label === HERMES_LABEL));
+  assert.match(h.service.scanProgress().narrative, /0 of 3 sources are complete/);
+
+  const hermesId = opaqueId('src', { automatic: 'hermes-user' }, INSTALLATION_KEY);
+  await assert.rejects(
+    () => h.service.startScan({ sourceId: hermesId }),
+    (error) => error.code === 'SOURCE_NOT_PRESENT' && error.sourceIds.includes(hermesId),
+  );
 });
 
 // ── ACT-001: activity aggregates receipts, dispositions, and scan history ──

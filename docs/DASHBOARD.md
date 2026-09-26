@@ -715,7 +715,8 @@ added offer **Pause** and **Stop** while running, **Resume** and **Stop** while 
 scan** after a failure, and **Scan this root** if never run; stopping shows what would be affected
 and asks **Stop this source?**. Automatic sources carry no per-source control: each reads Not
 scanned yet with "measured by Re-measure machine", or Complete with "covered by the last
-measurement". A started
+measurement". A host source whose folder is not on this machine reads **Not installed** and is
+not counted in the progress sentence or the Inventory banner. A started
 source keeps running until it completes, pauses, stops, or fails. Host configuration sources skip
 transcript, session, log, and cache trees by name so they can complete.
 
