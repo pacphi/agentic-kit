@@ -377,7 +377,7 @@ test('runtime provider resolution is Claude-only across all live hosts', (t) => 
   assert.equal(providerFor('opencode'), null);
 });
 
-test('runtime leases require canonical Git repositories and expire after three missed surveys', (t) => {
+test('runtime leases require a Git repository or an exact-folder transcript match, and expire after three missed surveys', (t) => {
   const sb = sandbox();
   const repository = path.join(sb.dir, 'keel');
   const nonRepository = path.join(sb.dir, 'scratch');
@@ -511,6 +511,104 @@ test('runtime presence stays synthetic when same-repository transcript identity 
     .id.startsWith('runtime-'));
   assert.ok(sessions.filter((session) => session.id.startsWith('candidate-'))
     .every((session) => session.presence.state !== 'present'));
+});
+
+// Non-Git folders (#238 item 2, decision 2). A plain folder's project key is a
+// hash of its name only, so a process may lease a transcript session only when
+// both come from exactly the same folder.
+const plainFolderService = (t, sb, readActiveSessions, extra = {}) => {
+  let tick = null;
+  const options = {
+    roots: sb.roots, readCodexState: () => null, workspaceStore: null, runtimeScanMs: 0,
+    resolveClaudeProvider: () => null, readActiveSessions,
+    setInterval: (fn) => { tick = fn; return { unref() {} }; }, clearInterval: () => {},
+    now: () => '2026-09-25T01:16:00Z', ...extra,
+  };
+  // A workspace file means "use the real store", which needs no injected one.
+  if (extra.workspaceFile) delete options.workspaceStore;
+  const service = new LiveSessionsService(options);
+  t.after(() => { service.close(); fs.rmSync(sb.dir, { recursive: true, force: true }); });
+  return { service, tick: () => tick() };
+};
+const plainFolders = (sb) => {
+  const a = path.join(sb.dir, 'a', 'scratch');
+  const b = path.join(sb.dir, 'b', 'scratch');
+  fs.mkdirSync(a, { recursive: true });
+  fs.mkdirSync(b, { recursive: true });
+  fs.writeFileSync(path.join(sb.claude, 'S1.jsonl'), line({
+    type: 'user', sessionId: 'S1', cwd: a, timestamp: '2026-09-25T01:15:30Z',
+    message: { role: 'user', content: 'private prompt' },
+  }));
+  return { a, b };
+};
+const PROCESS_START = '2026-09-25T01:15:00Z';
+const sessionS1 = (service) => service.snapshot().sessions.find((session) => session.id === 'S1');
+
+test('a process in a non-Git folder leases the transcript session from exactly that folder', (t) => {
+  const sb = sandbox();
+  const { a } = plainFolders(sb);
+  const { service } = plainFolderService(t, sb,
+    () => [{ pid: 4242, host: 'claude', cwd: a, startedAt: PROCESS_START }]);
+  service.start();
+  assert.equal(sessionS1(service).presence.state, 'present', 'a waiting session in a plain folder stays in Live');
+  assert.deepEqual(service.snapshot().sessions.map((session) => session.id), ['S1'],
+    'the process is bound to its transcript, not shown as a second session');
+});
+
+test('a process in a same-named but different non-Git folder never leases the session', (t) => {
+  const sb = sandbox();
+  const { b } = plainFolders(sb);
+  const { service } = plainFolderService(t, sb,
+    () => [{ pid: 4242, host: 'claude', cwd: b, startedAt: PROCESS_START }]);
+  service.start();
+  assert.notEqual(sessionS1(service).presence.state, 'present', 'same basename is not the same folder');
+  assert.deepEqual(service.snapshot().sessions.map((session) => session.id), ['S1'],
+    'an unmatched plain-folder process gets no runtime-only session keyed by its name');
+});
+
+test('an exact-folder match compares real paths, so a symlinked cwd still matches', (t) => {
+  const sb = sandbox();
+  plainFolders(sb);
+  const alias = path.join(sb.dir, 'alias');
+  fs.symlinkSync(path.join(sb.dir, 'a'), alias, process.platform === 'win32' ? 'junction' : 'dir');
+  const { service } = plainFolderService(t, sb,
+    () => [{ pid: 4242, host: 'claude', cwd: path.join(alias, 'scratch'), startedAt: PROCESS_START }]);
+  service.start();
+  assert.equal(sessionS1(service).presence.state, 'present');
+});
+
+test('a bound plain-folder process that moves to a same-named folder loses the lease', (t) => {
+  const sb = sandbox();
+  const { a, b } = plainFolders(sb);
+  let cwd = a;
+  const { service, tick } = plainFolderService(t, sb,
+    () => [{ pid: 4242, host: 'claude', cwd, startedAt: PROCESS_START }]);
+  service.start();
+  assert.equal(sessionS1(service).presence.state, 'present');
+  cwd = b;
+  for (let survey = 0; survey < 3; survey++) tick();
+  assert.notEqual(sessionS1(service).presence.state, 'present',
+    'the prior binding is re-checked against the folder, not only the name-based project key');
+});
+
+test('the exact-folder correlator never reaches the snapshot, events, or workspace store', (t) => {
+  const sb = sandbox();
+  const { a } = plainFolders(sb);
+  const workspaceFile = path.join(sb.dir, 'observability-workspaces.json');
+  const { service, tick } = plainFolderService(t, sb,
+    () => [{ pid: 4242, host: 'claude', cwd: a, startedAt: PROCESS_START }], { workspaceFile });
+  const events = [];
+  service.subscribe((event) => events.push(event));
+  service.start();
+  tick();
+  assert.equal(sessionS1(service).presence.state, 'present');
+  assert.ok(fs.existsSync(workspaceFile), 'guard: the workspace store was written, so it is really checked');
+  const surfaces = [JSON.stringify(service.snapshot()), JSON.stringify(events),
+    JSON.stringify(service.replay()), fs.readFileSync(workspaceFile, 'utf8')];
+  for (const surface of surfaces) {
+    assert.doesNotMatch(surface, /[a-f0-9]{64}/, 'no keyed folder digest is published or persisted');
+    for (const fragment of [sb.dir, fs.realpathSync(sb.dir)]) assert.ok(!surface.includes(fragment));
+  }
 });
 
 test('runtime-only Claude sessions resolve provider identity without host inference', (t) => {

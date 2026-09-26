@@ -26,6 +26,7 @@ without redefining shared integration concepts.
 | Actor | An entity that initiates or owns an activity |
 | Activity | A bounded operation performed by an actor |
 | Presence lease | Observed proof that a host controller process exists; never proof of work |
+| Exact-folder match | The only way a process outside a Git repository may lease a transcript session: an in-memory HMAC of both sides' real folder path under the collector's random secret must be equal. Name-based project keys never suffice |
 | Meaningful activity | Semantic input, output, operation, or evaluation evidence attributable to an actor |
 | In-flight flow | A started and unfinished operation/relationship eligible for moving edge treatment |
 | Actor lens | Selectable view of an embedded actor inside its parent session; not a fabricated child session |
@@ -479,6 +480,9 @@ projection lifecycle: active → quiescent → expired
     context; they never enter graph snapshots, deltas, or replay.
 19. Content streams are keyed by host and session ID, server-masked, bounded, ephemeral, and
     destroyed after the last subscriber.
+20. A runtime process in a folder that is not a Git repository leases a session only through an
+    exact-folder match, and never becomes a runtime-only session. The folder correlator stays in
+    collector memory: never in events, snapshots, replay, the workspace store, or logs.
 
 ## Ports and source adapters
 

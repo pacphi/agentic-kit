@@ -14,6 +14,7 @@ import {
 import { LiveReplayStream } from './replay-stream.mjs';
 import { adaptStructuredEvent, structuredRecordRejection } from './structured-adapter.mjs';
 import { canonicalSessionKey, resolveProjectIdentity } from './project-label.mjs';
+import { createFolderCorrelator } from './folder-correlator.mjs';
 import { workspaceFromSource } from './git-workspace.mjs';
 import { WorkspaceSnapshotStore } from './workspace-store.mjs';
 import {
@@ -68,6 +69,11 @@ export class LiveSessionsService {
   #historyPages = new Map();
   #discovery = {};
   #observedSince = null;
+  // Exact-folder matching for sessions outside a Git repository. All three
+  // stay in memory only: nothing here is published, persisted, or logged.
+  #folderOf = createFolderCorrelator();
+  #sourceCwds = new WeakMap(); // context → { cwd, canonical, folder }
+  #sessionFolders = new Map(); // sessionKey → correlator of its non-Git folder
 
   constructor(options = {}) {
     const roots = options.roots ?? {};
@@ -199,6 +205,12 @@ export class LiveSessionsService {
       expiryMs: this.#options.expiryMs,
       pendingExpiryMs: this.#options.pendingExpiryMs,
     });
+    // Folder correlators follow the bounded projection, not every session seen.
+    if (this.#sessionFolders.size > this.#options.maxSessions) {
+      for (const key of this.#sessionFolders.keys()) {
+        if (!this.#projection.sessions.has(key)) this.#sessionFolders.delete(key);
+      }
+    }
   }
 
   #discover(initial) {
@@ -297,6 +309,7 @@ export class LiveSessionsService {
       const identity = resolveProjectIdentity(explicitCwd);
       context.project = identity.label;
       context.projectKey = identity.key;
+      this.#noteSourceCwd(context, explicitCwd, identity.canonical);
       context.workspace = workspaceFromSource({
         cwd: explicitCwd,
         branch: record?.gitBranch ?? record?.payload?.git_branch ?? context.workspace?.branchLabel,
@@ -334,8 +347,31 @@ export class LiveSessionsService {
 
   #record(record, context, file) {
     const events = this.#buildEvents(record, context, file);
-    for (const event of events) this.#publish(event, context.adapter);
+    const folder = this.#transcriptFolder(context);
+    for (const event of events) {
+      this.#publish(event, context.adapter);
+      if (folder) this.#sessionFolders.set(event.sessionKey, folder);
+      else this.#sessionFolders.delete(event.sessionKey);
+    }
     return events.length;
+  }
+
+  /** Remember a source's latest working directory without putting it on the context. */
+  #noteSourceCwd(context, cwd, canonical) {
+    if (this.#sourceCwds.get(context)?.cwd === cwd) return;
+    this.#sourceCwds.set(context, { cwd, canonical, folder: undefined });
+  }
+
+  /**
+   * The exact-folder correlator of a live transcript in a non-Git folder, or
+   * null. Computed once per working directory, only on the live path (History
+   * scans never need it), and only when the folder exists.
+   */
+  #transcriptFolder(context) {
+    const source = this.#sourceCwds.get(context);
+    if (!source || source.canonical) return null;
+    if (source.folder === undefined) source.folder = this.#folderOf(source.cwd);
+    return source.folder;
   }
 
   /**
@@ -608,7 +644,9 @@ export class LiveSessionsService {
       if (!item || !Number.isInteger(item.pid)
         || !['claude', 'codex', 'opencode'].includes(item.host)) continue;
       const identity = resolveProjectIdentity(item.cwd);
-      if (!identity.canonical || identity.label === 'unknown') continue;
+      const folder = this.#leaseFolder(item.cwd, identity);
+      if (folder === undefined) continue;
+      const sameFolder = (key) => folder === null || this.#sessionFolders.get(key) === folder;
       const runtimeKey = `${item.host}:${item.pid}:${item.startedAt ?? 'unreported'}`;
       seen.add(runtimeKey);
       const priorBinding = this.#runtimeBindings.get(runtimeKey);
@@ -617,7 +655,7 @@ export class LiveSessionsService {
       const synthetic = session?.id?.startsWith('runtime-');
       let rebound = false;
       if (!session || session.host !== item.host || session.projectKey !== identity.key
-        || terminal.has(session.status) || synthetic) {
+        || terminal.has(session.status) || synthetic || !sameFolder(sessionKey)) {
         const processStarted = Date.parse(item.startedAt ?? '');
         const candidateCutoff = Number.isFinite(processStarted)
           ? processStarted - 30_000
@@ -625,6 +663,7 @@ export class LiveSessionsService {
         const candidates = [...this.#projection.sessions.values()]
           .filter((candidate) => candidate.host === item.host
             && candidate.projectKey === identity.key
+            && sameFolder(candidate.key)
             && !candidate.parentSessionId
             && !candidate.id.startsWith('runtime-')
             && !terminal.has(candidate.status)
@@ -642,6 +681,11 @@ export class LiveSessionsService {
           session = candidate;
           sessionKey = candidate.key;
           rebound = synthetic;
+        } else if (folder !== null) {
+          // No unique same-folder transcript: no lease. A prior binding
+          // misses and quiesces like a vanished process.
+          seen.delete(runtimeKey);
+          continue;
         } else if (!session || terminal.has(session.status) || !synthetic) {
           session = null;
           const started = Date.parse(item.startedAt ?? '');
@@ -709,6 +753,20 @@ export class LiveSessionsService {
       this.#runtimeBindings.delete(key);
     }
     this.#mark('runtime', { status: surveyHealthy ? 'ok' : 'degraded', files: active.length });
+  }
+
+  /**
+   * What a runtime process may lease. A Git repository's key hashes its
+   * canonical root, so any same-key session may bind (null). A plain folder's
+   * key hashes only its name, so its process may lease a session only through
+   * an exact-folder match with that session's transcript, and never gets a
+   * runtime-only session keyed by a name: the folder's correlator. undefined
+   * means no lease is possible (unknown label, or the folder is gone).
+   */
+  #leaseFolder(cwd, identity) {
+    if (identity.label === 'unknown') return undefined;
+    if (identity.canonical) return null;
+    return this.#folderOf(cwd) ?? undefined;
   }
 
   #dropRuntimeSynthetic(sessionKey) {

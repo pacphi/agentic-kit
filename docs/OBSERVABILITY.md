@@ -50,6 +50,10 @@ Observability has two navigation modes:
 
 - **Live** is the default. It shows only projects with a root session that has an unexpired process
   presence lease or fresh meaningful activity. If none qualify, it shows **0 projects**.
+  In a folder that is not a Git repository, a process leases a session only when its working
+  folder is exactly the folder the session's transcript records. Two folders with the same name
+  are never confused. Until such a session writes its transcript, it is listed only under
+  System → Runtime.
 - **History** shows only projects with at least one retained non-live root session. It never carries
   a current selection, live status, or motion across from Live.
 
@@ -473,6 +477,7 @@ unbounded content snapshot.
 | Sources says `N files (newest of M)` | Live tails only the newest transcripts per host within its file bound; older files are not followed. Switch to History for them |
 | Sources shows `rejected` records | The file's records lack a session ID, actor ID, or action, so they cannot become events |
 | A live session shows 0 operations | Live draws operations written after it started watching. Earlier operations appear in the session stream, not on the map |
+| A session in a non-Git folder is missing from Live | Its process and transcript must name the same folder. A session that has not written its transcript yet is listed under System → Runtime only |
 | Project name not reported | No supported metadata supplied a working directory; raw paths are never sent to the browser |
 | Node disappeared | Server projection or client visibility bounds evicted/collapsed it |
 | Connection interrupted | `EventSource` retries; a cursor miss or buffer overflow resets from a snapshot |

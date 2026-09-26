@@ -2,8 +2,9 @@
 
 - **Status:** Implemented
 - **Date:** 2026-07-27
-- **Updated:** 2026-09-26 — live process survey, source health, discovery coverage and idle
-  restarts (#237 §E; #238 items 3–5); see "Amendment — 2026-09-26: live acquisition" at the end.
+- **Updated:** 2026-09-26 — live process survey, source health, discovery coverage, idle
+  restarts and exact-folder leases (#237 §E; #238 items 2–5); see "Amendment — 2026-09-26: live
+  acquisition" at the end.
 - **Earlier update:** 2026-09-20 — ADR-0054 adds an explicit, offline, allowlisted fleet export
   boundary; local analytics and dashboard collection semantics remain unchanged.
 - **Earlier update:** 2026-09-09 — reconciled against repository source and tests for issue #211
@@ -48,8 +49,19 @@ for top-level Claude Code, Codex, and OpenCode controllers on macOS and Linux. N
 remain workers of their nearest controller, with one exception (2026-09-26): a desktop app never
 absorbs a CLI session it hosts, so a Claude Code CLI launched from the Claude desktop app is its
 own controller, while the app's own services still fold into the app. The survey parses executable
-paths that contain spaces. A runtime lease requires a canonical Git repository;
-three consecutive successful surveys without the controller quiesce it. Retained transcript
+paths that contain spaces. A runtime lease requires a canonical Git repository or, since
+2026-09-26, an exact-folder match. A folder that is not a Git repository has a project key
+derived from its name only, so two `scratch` folders share it and a name-based join could attach
+one folder's process to the other's transcript. Its process may therefore lease a transcript
+session only when an HMAC of the process's real working folder, under a random secret each
+collector generates in memory at startup, equals the same HMAC of the folder the transcript
+records, and the folder exists. The
+correlator stays in collector memory; it is never written to events, snapshots, replay, the
+workspace store, API payloads, or logs, following
+[ADR-0053](0053-host-setup-evidence-and-usage-diagnostics.md)'s per-server-secret rule. Project keys
+are unchanged. A process in such a folder never becomes a runtime-only session, and a bound
+process whose folder changes loses the lease. Three consecutive successful surveys without the
+controller quiesce it. Retained transcript
 evidence may use a privacy-safe repository-label fallback when its former path no longer exists.
 Unresolved internal evidence is retained for later reconciliation but is never presented as an
 `unknown` workspace. Public project keys hash the canonical repository root when proven and never
@@ -655,3 +667,6 @@ turns the dashboard into a fleet service nor makes telemetry collection continuo
   replays what was appended during the stop instead of re-tailing from the end, and a file that
   appeared during the stop is read from its first byte; the snapshot says when observation began,
   and a live session with no operations drawn since then says so (§6).
+- **Exact-folder leases (#238 item 2).** A runtime lease no longer requires a Git repository when
+  an exact-folder match joins the process to its transcript; see the 2026-08-03 runtime identity
+  amendment above.
