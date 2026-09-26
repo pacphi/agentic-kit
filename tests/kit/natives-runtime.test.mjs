@@ -312,6 +312,26 @@ test('runtime rows: absent ruflo or no contexts add no row', () => {
   assert.deepEqual(nativesSection.runtimeNativeRows({ installed: true, contexts: [] }), []);
 });
 
+// #237 §F: `ak sync` fails a planned repair that did not take, so a fix no
+// step performs would fail every sync. Sync installs only a MISSING ruflo (its
+// versions row carries that fix); nothing puts agentdb back into a present one.
+test('no agentdb locations: a present ruflo needs a manual reinstall, an absent one defers to versions', async () => {
+  const present = fakeGlobalTree({ contexts: [] });
+  writePkg(path.join(present.g, 'ruflo'), { name: 'ruflo', version: '9.9.9' });
+  const [presentRow] = await nativesSection.default.collect();
+  present.cleanup();
+  assert.match(presentRow.message, /no agentdb locations/);
+  assert.equal(presentRow.repair, 'manual', 'no sync step reinstalls a present ruflo');
+  assert.match(presentRow.fix, /npm install -g ruflo@latest/);
+
+  const g = tmp('ak-rt-noruflo-');
+  _setGlobalRootForTest(g);
+  const [absentRow] = await nativesSection.default.collect();
+  _setGlobalRootForTest(null); rm(g);
+  assert.match(absentRow.message, /ruflo is not installed/);
+  assert.equal(absentRow.fix, null, 'the versions row owns the install; no second plan item');
+});
+
 test('rufloRuntimeNatives reports all-ok when every context loads native', async () => {
   const { cleanup } = fakeGlobalTree();
   const runner = async () => ({ code: 0, stdout: '', stderr: '' });

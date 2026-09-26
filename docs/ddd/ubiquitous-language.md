@@ -76,6 +76,7 @@ token estimates never become observed token evidence. An absent or incompatible 
 | Ownership receipt | Exact record of a value written by `ak`, permitting narrow undo only while that value is unchanged |
 | Drift | Current state differs from the last value written or expected by `ak` |
 | Repair contract | Who performs a status row's fix: `sync` (an `ak sync` step does it, so sync plans it) or `manual` (a human must; sync never plans it). A row without a fix has none |
+| Unresolved repair | A fix `ak sync` planned that did not take: its row is still present after the apply phase, or no sync step performs it. Sync reports it and exits 1 |
 | Companion data | User-owned index, notes, privacy state, imports, and source transcripts; invoking a managed companion does not transfer ownership to `ak` |
 | ObservationSpec | A bounded virtual-walk declaration: lexical root, contract version, budgets, pruning, accepted metadata, reducer, and one scan timestamp |
 | Observation forest | A scan-local lexical trie that routes each physical filesystem event to independent compatible ObservationSpecs without retaining a cross-scan file index |

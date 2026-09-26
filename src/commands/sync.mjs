@@ -119,6 +119,8 @@ order: upgrades first (they wipe native modules), then heals, then re-collects
 to prove convergence. Idempotent — safe to run any time. When in doubt, run this.
 Only fixes a sync step performs are planned; a status row marked "→ manual:"
 (a command you run, a file you edit, a login) is counted but never applied.
+A planned fix whose row is still there after the apply phase is reported as
+"unresolved: [subsystem] fix — reason", and sync exits 1.
 
 Usage: ak sync [options]
 
@@ -563,6 +565,81 @@ export const SYNC_STEPS = [
   },
 ];
 
+// Repairs run() performs after SYNC_STEPS, on every run.
+const TAIL_REPAIRS = new Set(['host-alignment']);
+
+/** Which steps would perform a planned fix for `subsystem`, judged on that
+ *  subsystem alone. `host-lifecycles` runs on every sync but acts only for a
+ *  lifecycle host it is asked to refresh, so its always-true `when` is not
+ *  evidence; `host-alignment` is the post-step alignHosts pass. An empty list
+ *  means sync cannot perform the fix it planned. */
+export function performingSteps(subsystem, flags, cfg) {
+  const subs = new Set([subsystem]);
+  const steps = SYNC_STEPS.filter((s) => s.id !== 'host-lifecycles' && s.when(subs, flags, cfg)).map((s) => s.id);
+  if (hostsWithLifecycle().includes(subsystem) && lifecycleRefreshRequired(subs, subsystem)
+    && lifecycleExecutionEnabled(subsystem, cfg)) steps.push('host-lifecycles');
+  if (TAIL_REPAIRS.has(subsystem)) steps.push('sync tail');
+  return steps;
+}
+
+const repairKey = (r) => `${r.subsystem}\u0000${r.fix}`;
+
+/** The post-apply verdict (ADR-0033). `unresolved` holds promised repairs that
+ *  did not take: a planned (subsystem, fix) whose row is still present after
+ *  the apply phase, and any planned subsystem no step performs. Manual fixes
+ *  never enter the plan, so they can never be unresolved. `remaining` holds
+ *  everything else still failing: fail-level rows, a deja-vu row with a fix,
+ *  and mutations that reported failure during this run. */
+export function convergenceVerdict({ plan, after, state, flags, cfg }) {
+  const unresolved = [];
+  for (const p of plan) {
+    if (performingSteps(p.subsystem, flags, cfg).length) continue;
+    unresolved.push({ subsystem: p.subsystem, fix: p.fix, message: `no sync step performs this repair (${p.message})`, reason: 'no-step' });
+  }
+  // Same test the plan used to admit a fix, so a row cannot enter the plan
+  // under one rule and escape the proof under another.
+  const planned = new Set(plan.map(repairKey));
+  const flagged = new Set(unresolved.map(repairKey));
+  for (const r of after) {
+    if (!r.fix || r.repair === 'manual' || !planned.has(repairKey(r)) || flagged.has(repairKey(r))) continue;
+    flagged.add(repairKey(r));
+    unresolved.push({ subsystem: r.subsystem, fix: r.fix, message: r.message, reason: 'not-converged' });
+  }
+  const remaining = after.filter((r) => !(r.fix && flagged.has(repairKey(r)))
+    && (r.level === 'fail' || (r.subsystem === 'deja-vu' && r.fix !== null)));
+  // Collector rows describe persisted state after the heal, but they cannot
+  // erase an apply failure from this run. In particular, an unavailable
+  // external fallback can leave only a warning row; claiming convergence
+  // after applyAqeRouter returned !ok is a false success and retry loop.
+  if (state.aqeRouterApplyFailure && !remaining.some((r) => r.subsystem === 'providers')) {
+    remaining.push({ subsystem: 'providers', message: `AQE router apply failed: ${state.aqeRouterApplyFailure}` });
+  }
+  if (state.dejaVuApplyFailed && !remaining.some((r) => r.subsystem === 'deja-vu')) {
+    remaining.push({ subsystem: 'deja-vu', message: 'companion lifecycle apply failed' });
+  }
+  if (state.codexRepairFailure && !remaining.some((r) => r.subsystem === 'codex-mcp')) {
+    remaining.push({ subsystem: 'codex-mcp', message: state.codexRepairFailure });
+  }
+  for (const failure of state.applyFailures) {
+    if (!remaining.some((r) => r.message === `${failure.name}: ${failure.detail}`)) {
+      remaining.push({ subsystem: failure.name, message: `${failure.name}: ${failure.detail}` });
+    }
+  }
+  return { unresolved, remaining };
+}
+
+/** Print the verdict; returns the exit code. */
+function reportVerdict({ unresolved, remaining }) {
+  if (unresolved.length === 0 && remaining.length === 0) {
+    ok(bold('converged — no failing subsystems'));
+    info(dim('📊 dashboard: run `ak dashboard` → opens http://127.0.0.1:7431 (local, read-only)'));
+    return 0;
+  }
+  for (const u of unresolved) fail(`unresolved: [${u.subsystem}] ${u.fix} — ${u.message}`);
+  for (const r of remaining) fail(`still failing: [${r.subsystem}] ${r.message}`);
+  return 1;
+}
+
 export async function run({
   flags,
   pkgRoot,
@@ -686,31 +763,5 @@ export async function run({
     saveKitConfig(cfg);
   } catch { /* health snapshot is best-effort — never fail a sync over it */ }
 
-  const remaining = after.filter((r) => r.level === 'fail'
-    || (r.subsystem === 'deja-vu' && r.fix !== null));
-  // Collector rows describe persisted state after the heal, but they cannot
-  // erase an apply failure from this run. In particular, an unavailable
-  // external fallback can leave only a warning row; claiming convergence
-  // after applyAqeRouter returned !ok is a false success and retry loop.
-  if (state.aqeRouterApplyFailure && !remaining.some((r) => r.subsystem === 'providers')) {
-    remaining.push({ subsystem: 'providers', message: `AQE router apply failed: ${state.aqeRouterApplyFailure}` });
-  }
-  if (state.dejaVuApplyFailed && !remaining.some((r) => r.subsystem === 'deja-vu')) {
-    remaining.push({ subsystem: 'deja-vu', message: 'companion lifecycle apply failed' });
-  }
-  if (state.codexRepairFailure && !remaining.some((r) => r.subsystem === 'codex-mcp')) {
-    remaining.push({ subsystem: 'codex-mcp', message: state.codexRepairFailure });
-  }
-  for (const failure of state.applyFailures) {
-    if (!remaining.some((r) => r.message === `${failure.name}: ${failure.detail}`)) {
-      remaining.push({ subsystem: failure.name, message: `${failure.name}: ${failure.detail}` });
-    }
-  }
-  if (remaining.length === 0) {
-    ok(bold('converged — no failing subsystems'));
-    info(dim('📊 dashboard: run `ak dashboard` → opens http://127.0.0.1:7431 (local, read-only)'));
-    return 0;
-  }
-  for (const r of remaining) fail(`still failing: [${r.subsystem}] ${r.message}`);
-  return 1;
+  return reportVerdict(convergenceVerdict({ plan, after, state, flags, cfg }));
 }

@@ -1,5 +1,6 @@
 // natives (better-sqlite3 in agentdb locations + aqe)
 import { nativesStatus, rufloRuntimeNatives } from '../../../lib/natives.mjs';
+import { installedVersion } from '../../../lib/versions.mjs';
 import { row } from '../row.mjs';
 
 /** One row per ruflo memory-runtime context that is not native, from the load
@@ -39,7 +40,12 @@ export default {
       const n = nativesStatus();
       const bad = n.locations.filter((l) => !l.native);
       if (n.locations.length === 0) {
-        rows.push(row('natives', 'warn', 'no agentdb locations found under global ruflo', 'setup/sync installs ruflo'));
+        // Sync installs a MISSING ruflo through its versions row; no step can
+        // put agentdb back inside a ruflo that is present without it.
+        rows.push(installedVersion('ruflo')
+          ? row('natives', 'warn', 'no agentdb locations found under global ruflo (its bundled agentdb is missing)',
+            'reinstall ruflo: npm install -g ruflo@latest, then ak sync', { repair: 'manual' })
+          : row('natives', 'warn', 'no agentdb locations found: ruflo is not installed globally (the versions row installs it)'));
       } else if (bad.length) {
         rows.push(row('natives', 'fail',
           `${bad.length}/${n.locations.length} agentdb location(s) on WASM fallback (data-loss writes)`,

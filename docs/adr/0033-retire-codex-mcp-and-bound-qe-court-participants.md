@@ -4,7 +4,8 @@
   [ADR-0034](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0034-schema-native-handoffs-and-hermetic-seats.md)
 - **Date:** 2026-08-25
 - **Updated:** 2026-09-26 — the missing concrete Agentic-QE registration check runs only when AQE is
-  managed (`aqe` is not `false` in kit.json); an opted-out machine gets no AQE row or advice (#237).
+  managed (`aqe` is not `false` in kit.json); an opted-out machine gets no AQE row or advice (#237);
+  sync's convergence proof fails a planned repair that did not take (decision 9).
 - **Earlier update:** 2026-09-23
 - **Update note:** Initial implementation retires only receipt-owned legacy MCP state,
   diagnoses effective Codex MCP topology, extends POSIX cleanup to process groups, and adds
@@ -35,6 +36,10 @@
   ran without changing the installed release, is held: the status row keeps its cause and
   the user's options but carries no sync action until the installed or latest release
   changes (#237). Existing installs now refresh through the bundle's own updater.
+  2026-09-26: the convergence proof also covers a step that succeeded while its postcondition
+  stayed unmet. A planned sync fix whose status row is still present after the apply phase, or a
+  planned subsystem that no sync step performs, is reported `unresolved:` and sync exits 1 (#237).
+  Manual fixes never enter the plan, so they never fail sync (decision 9).
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0001](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0001-one-routing-policy-many-projections.md),
   [ADR-0006](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0006-primary-host-and-ambidextrous-mirroring.md),
@@ -103,6 +108,12 @@ seats. A successful Claude/Codex transport check therefore cannot be called a co
    was already launched still fails closed and preserves its causal error in convergence output.
    A refresh the installer or updater refused is then held, with no sync action, until the
    installed or latest release changes.
+9. Sync's convergence proof holds each planned repair to its promise, not only to its exit
+   status. After the apply phase it re-collects status; a row whose sync fix (same subsystem, same
+   fix) was planned and is still present is `unresolved`, and so is any planned subsystem that no
+   `SYNC_STEPS` step (or the post-step host alignment) performs. Either one fails sync with exit 1
+   next to the existing fail-level rows and recorded apply failures. Only fixes a sync step performs
+   are planned (ADR-0023 §11), so manual fixes and fix-less advisories never become unresolved.
 
 ## Consequences
 
@@ -117,6 +128,8 @@ seats. A successful Claude/Codex transport check therefore cannot be called a co
 - A malformed upstream Brain release no longer creates an endless `ak sync` retry loop or rewrites
   a usable local Brain; the update becomes actionable automatically after a later release check sees
   the required bundle asset.
+- `ak sync` no longer reports "converged" while a repair it planned is still pending. A status row
+  whose fix no step can perform must be marked manual, or every sync fails on it.
 - ADR-0001's MCP projection is historical. ADR-0006's leadership decision, ADR-0016's ownership
   boundary, ADR-0018's worker lifecycle, and ADR-0020's stable execution surface remain in force.
 
@@ -127,6 +140,9 @@ seats. A successful Claude/Codex transport check therefore cannot be called a co
 - `pnpm test:qe-court-live` runs one Claude-led and one Codex-led participant-transport trial.
   `AK_QE_COURT_TRIALS=5` raises this to a reciprocal soak test on POSIX shells.
 - `ak status` fails recursive self-MCP and reports missing Agentic-QE or duplicate Ruflo MCP state.
+- `tests/kit/sync-command.test.mjs` proves that a planned fix still present after the apply phase,
+  or planned with no performing step, fails sync; that manual rows and advisories never do; and
+  that a real repair converges and leaves the next sync nothing to do.
 
 ## References
 

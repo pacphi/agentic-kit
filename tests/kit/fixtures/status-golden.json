@@ -101,9 +101,9 @@
   {
     "subsystem": "natives",
     "level": "warn",
-    "message": "no agentdb locations found under global ruflo",
-    "fix": "setup/sync installs ruflo",
-    "repair": "sync"
+    "message": "no agentdb locations found under global ruflo (its bundled agentdb is missing)",
+    "fix": "reinstall ruflo: npm install -g ruflo@latest, then ak sync",
+    "repair": "manual"
   },
   {
     "subsystem": "natives",

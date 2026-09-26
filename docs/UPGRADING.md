@@ -62,6 +62,16 @@ row has no fix. `ak sync` plans only `"sync"` fixes and reports how many manual 
 status prints a manual fix as `→ manual: …`. Scripts that treated every `fix` as sync work should
 filter on `repair`.
 
+## 2026-09-26: `ak sync` fails when a planned repair did not take
+
+After applying its plan, `ak sync` checks status again. If a row it planned to fix is still there
+with the same fix, or it planned a fix that no sync step performs, it prints
+`unresolved: [subsystem] fix — reason` and exits 1. Before, it printed "converged" and exited 0. A
+CI job or script that runs `ak sync` can now fail where it used to pass; the `unresolved:` line
+names what to look at. Manual fixes (`→ manual:` in `ak status`) are never planned and never fail
+sync. A Ruflo install that lacks its bundled agentdb now shows a manual reinstall on the `natives`
+row instead of a sync action that no step performed.
+
 ## 2026-09-10: Remembered Codex MCP correction
 
 Claude Code's `claude-flow` registration and Codex's `ruflo` registration follow

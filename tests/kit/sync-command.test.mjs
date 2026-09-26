@@ -463,6 +463,111 @@ test('the mcp step names a preserved custom legacy ruflo registration and its ma
   assert.match(out, /claude mcp remove ruflo -s user/);
 });
 
+// ── promised repairs must converge (#237 §F) ─────────────────────────────────
+// A planned sync fix whose row is still there after the apply phase was
+// silently dropped from the verdict: sync printed "converged" and exited 0.
+// These runs stay hermetic: the planned subsystem is `aqe`, whose step
+// (healRvf) only scans the sandbox project's missing .agentic-qe directory.
+
+/** A collectFn that returns `first` for the plan and `after` for the proof. */
+function twoPhase(first, after) {
+  let calls = 0;
+  return async () => (calls++ === 0 ? first : after);
+}
+
+async function syncWith(collectFn, over = {}) {
+  const prior = process.cwd();
+  process.chdir(PROJECT);
+  try {
+    return await captureLog(() => sync.run({
+      flags: FLAGS({ 'no-upgrade': true, ...over }), pkgRoot: PKG_ROOT, collectFn,
+    }));
+  } finally { process.chdir(prior); }
+}
+
+const RVF_FIX = 'sync quarantines them (aqe rebuilds the store)';
+
+test('a planned sync repair still present after the apply phase is unresolved and fails sync', async () => {
+  seedHome();
+  const persisting = { subsystem: 'aqe', level: 'warn', message: 'store still oversized', fix: RVF_FIX, repair: 'sync' };
+  const { result, out } = await syncWith(twoPhase([persisting], [persisting]));
+  assert.equal(result, 1, out);
+  assert.match(out, /unresolved: \[aqe\] sync quarantines them \(aqe rebuilds the store\) — store still oversized/);
+  assert.doesNotMatch(out, /converged — no failing subsystems/);
+});
+
+test('a fixture row without a repair field is still held to its promise', async () => {
+  seedHome();
+  // The plan admits any fix that is not manual, so the proof must use the same test.
+  const legacy = { subsystem: 'aqe', level: 'warn', message: 'store still oversized', fix: RVF_FIX };
+  const { result, out } = await syncWith(twoPhase([legacy], [legacy]));
+  assert.equal(result, 1, out);
+  assert.match(out, /unresolved: \[aqe\]/);
+});
+
+test('a planned subsystem that no sync step performs is unresolved even when its row disappears', async () => {
+  seedHome();
+  const { result, out } = await syncWith(twoPhase([{
+    subsystem: 'sync-test-only-marker', level: 'warn', message: 'nothing handles this', fix: 'sync pretends to fix it',
+  }], []));
+  assert.equal(result, 1, out);
+  assert.match(out, /unresolved: \[sync-test-only-marker\] sync pretends to fix it — no sync step performs this repair/);
+  assert.doesNotMatch(out, /converged — no failing subsystems/);
+});
+
+test('manual fixes and preserved advisories never enter the plan and never fail sync', async () => {
+  seedHome();
+  const manual = {
+    subsystem: 'mcp', level: 'warn', message: "custom 'ruflo' MCP registration preserved (user scope)",
+    fix: 'claude mcp remove ruflo -s user', repair: 'manual',
+  };
+  const advisory = { subsystem: 'project-memory', level: 'warn', message: 'two preserved memory files', fix: null, repair: null };
+  const repaired = { subsystem: 'aqe', level: 'warn', message: 'store oversized', fix: RVF_FIX, repair: 'sync' };
+  const { result, out } = await syncWith(twoPhase([repaired, manual, advisory], [manual, advisory]));
+  assert.equal(result, 0, out);
+  assert.doesNotMatch(out, /• \[mcp\]/, 'a manual fix is never a plan item');
+  assert.doesNotMatch(out, /unresolved:/);
+  assert.match(out, /converged — no failing subsystems/);
+});
+
+test('which steps perform a subsystem: none for an unknown one, the tail for host alignment', () => {
+  const cfg = loadKitConfig();
+  const flags = FLAGS();
+  assert.deepEqual(sync.performingSteps('sync-test-only-marker', flags, cfg), []);
+  assert.deepEqual(sync.performingSteps('aqe', flags, cfg), ['aqe-rvf']);
+  assert.ok(sync.performingSteps('versions', flags, cfg).includes('natives'), 'an upgrade re-heals natives');
+  assert.ok(sync.performingSteps('host-alignment', flags, cfg).length > 0, 'alignHosts runs after every step');
+  assert.ok(!sync.performingSteps('memory-pin', flags, cfg).includes('host-lifecycles'),
+    'host-lifecycles runs every sync but only acts for a lifecycle host');
+});
+
+test('a real repair converges, and the next sync has nothing left to do', async () => {
+  seedHome(offlineKitConfig({ aqe: false }));
+  const aqeDir = paths.projectAqeDir(PROJECT);
+  fs.mkdirSync(aqeDir, { recursive: true });
+  fs.writeFileSync(path.join(aqeDir, 'brain.rvf'), 'x'.repeat(4096));
+  const prev = process.env.RUFLO_AQE_RVF_MAX_BYTES;
+  process.env.RUFLO_AQE_RVF_MAX_BYTES = '16';
+  const aqeSection = (await import('../../src/commands/status/sections/aqe.mjs')).default;
+  const collectAqe = async ({ cwd }) => aqeSection.collect({ cwd, cfg: loadKitConfig() });
+  try {
+    const first = await syncWith(collectAqe);
+    assert.equal(first.result, 0, first.out);
+    assert.match(first.out, /\[aqe\] sync quarantines them/);
+    assert.match(first.out, /converged — no failing subsystems/);
+    assert.ok(!fs.existsSync(path.join(aqeDir, 'brain.rvf')), 'the oversized store was quarantined');
+
+    const second = await syncWith(collectAqe);
+    assert.equal(second.result, 0, second.out);
+    assert.doesNotMatch(second.out, /sync plan/, 'a converged machine plans nothing');
+    assert.match(second.out, /nothing sync can do — 1 item\(s\) need a manual step/);
+  } finally {
+    if (prev === undefined) delete process.env.RUFLO_AQE_RVF_MAX_BYTES;
+    else process.env.RUFLO_AQE_RVF_MAX_BYTES = prev;
+    rmrf(aqeDir);
+  }
+});
+
 test('failed heal results are retained for the final convergence proof', () => {
   const state = { applyFailures: [] };
   sync.recordApplyFailure(state, 'ruvnet-brain', { ok: false, status: 'failed', detail: 'network unavailable' });
