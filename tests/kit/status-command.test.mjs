@@ -580,6 +580,21 @@ test('Codex MCP topology fails recursive self-registration and reports missing A
   }
 });
 
+test('Codex MCP topology does not ask an aqe:false machine to register agentic-qe in Codex', async () => {
+  // #237 N1: with AQE opted out, `aqe platform setup codex` is advice for a
+  // tool the user declined; the topology rows must honor kit.json like the
+  // aqe section does.
+  seedHome(offlineKitConfig({
+    aqe: false,
+    integrations: { version: 3, hosts: { claude: true, codex: true, opencode: false }, bindings: [], ownership: {} },
+  }));
+  fs.mkdirSync(paths.codexDir(), { recursive: true });
+  fs.writeFileSync(paths.codexConfigPath(), '[mcp_servers.ruflo]\ncommand = "ak"\nargs = ["x", "ruflo-mcp"]\n');
+  const rows = rowsFor(await collect(), 'codex-mcp');
+  assert.ok(rows.length > 0, 'the Codex MCP section still reports its other checks');
+  assert.deepEqual(rows.filter((r) => /agentic-qe/.test(r.message) || /aqe platform setup/.test(r.fix ?? '')), []);
+});
+
 test('an initialized project reports its learned-pattern count', async () => {
   seedHome();
   const neural = path.join(paths.projectClaudeFlowDir(PROJECT), 'neural');

@@ -50,8 +50,10 @@ async function rufloIntegrationRows(cfg) {
 
 // Effective project+user topology. These checks are independent of the
 // agentic-kit ownership receipt because recursive/duplicate transports can
-// stall a Codex-driven worker even when another tool created them.
-function topologyRows(cwd) {
+// stall a Codex-driven worker even when another tool created them. The
+// agentic-qe check is gated on kit.json intent: with `aqe: false` the user
+// opted out of AQE, so its Codex registration is neither expected nor advised.
+function topologyRows(cwd, cfg) {
   const rows = [];
   try {
     const topology = codexMcpTopology({ cwd });
@@ -61,11 +63,13 @@ function topologyRows(cwd) {
         `recursive codex → codex mcp-server registration detected (${scopes})`,
         'remove the [mcp_servers.codex] table from the reported Codex config before live multi-host runs'));
     }
-    if (!topology.agenticQeRegistrations.length) {
-      rows.push(row('codex-mcp', 'warn', 'agentic-qe MCP is not concretely registered in Codex',
-        'run: aqe platform setup codex --overwrite --with-ruflo'));
-    } else {
-      rows.push(row('codex-mcp', 'ok', 'agentic-qe MCP concretely registered in Codex'));
+    if (cfg.aqe !== false) {
+      if (!topology.agenticQeRegistrations.length) {
+        rows.push(row('codex-mcp', 'warn', 'agentic-qe MCP is not concretely registered in Codex',
+          'run: aqe platform setup codex --overwrite --with-ruflo'));
+      } else {
+        rows.push(row('codex-mcp', 'ok', 'agentic-qe MCP concretely registered in Codex'));
+      }
     }
     if (topology.duplicateRuflo) {
       rows.push(row('codex-mcp', 'warn',
@@ -85,7 +89,7 @@ export default {
     return [
       ...legacyProjectionRows(cfg, cwd),
       ...(await rufloIntegrationRows(cfg)),
-      ...topologyRows(cwd),
+      ...topologyRows(cwd, cfg),
     ];
   },
 };

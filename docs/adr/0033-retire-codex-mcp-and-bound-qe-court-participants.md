@@ -3,7 +3,9 @@
 - **Status:** Implemented; handoff transport amended by
   [ADR-0034](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0034-schema-native-handoffs-and-hermetic-seats.md)
 - **Date:** 2026-08-25
-- **Updated:** 2026-09-23
+- **Updated:** 2026-09-26 — the missing concrete Agentic-QE registration check runs only when AQE is
+  managed (`aqe` is not `false` in kit.json); an opted-out machine gets no AQE row or advice (#237).
+- **Earlier update:** 2026-09-23
 - **Update note:** Initial implementation retires only receipt-owned legacy MCP state,
   diagnoses effective Codex MCP topology, extends POSIX cleanup to process groups, and adds
   fail-closed QE-Court readiness plus a reciprocal live participant-transport regression.
@@ -71,8 +73,8 @@ seats. A successful Claude/Codex transport check therefore cannot be called a co
    user-owned entries remain preserved.
 3. Codex keeps one independent, workspace-aware Ruflo MCP registration. Agentic-QE continues to
    own its Codex platform/MCP integration. Agentic-kit detects recursive Codex self-registration,
-   missing concrete Agentic-QE registration, and duplicate Ruflo transports without rewriting
-   unowned Codex TOML.
+   missing concrete Agentic-QE registration (only while AQE is managed), and duplicate Ruflo
+   transports without rewriting unowned Codex TOML.
 4. OpenAI's Claude Code plugin is optional and user-owned. Agentic-kit may document and detect it,
    but does not silently install, enable, update, or remove it. A future managed App Server/plugin
    adapter requires a separate lifecycle, ownership, cancellation, and teardown decision.
