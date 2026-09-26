@@ -641,7 +641,8 @@ Maintenance opens on **Inventory** across all scopes and reads the last complete
 scans on open. Its four tabs are **Inventory**, **Guidance**, **Discovery**, and **Activity**; the
 Guidance and Activity tabs carry a count only when something is admitted or needs recovery.
 
-A fresh installation shows an empty Inventory and every automatic source as **Not scanned yet**.
+A fresh installation shows an empty Inventory and every installed automatic source as **Not
+scanned yet**; a host that is not installed reads **Not installed**.
 Two actions sit side by side above the tabs, each with its helper text: **Refresh evidence** runs
 provider probes on the saved measurement and rebuilds the inventory in seconds, and **Re-measure
 machine** walks the filesystem, then every discovery source, then refreshes evidence, which takes

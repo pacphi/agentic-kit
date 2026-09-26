@@ -59,8 +59,8 @@ The dashboard workspace has four tabs. Each answers a different question.
 
 Opening Maintenance reads the last complete inventory and opens **Inventory** across all scopes.
 Nothing scans on open. A fresh installation has no inventory yet; the empty state reads **No
-inventory has been built yet. Use Refresh evidence, above, to build it.** and every automatic source
-reads **Not scanned yet**. Two actions sit side by side above the tabs, each with its own helper
+inventory has been built yet. Use Refresh evidence, above, to build it.** and every installed
+automatic source reads **Not scanned yet** (a host that is not installed reads **Not installed**). Two actions sit side by side above the tabs, each with its own helper
 text:
 
 - **Refresh evidence** runs provider probes on the saved measurement and rebuilds the inventory.
