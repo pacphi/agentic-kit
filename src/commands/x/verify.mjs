@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { run as runCmd, have } from '../../lib/exec.mjs';
+import { run as runCmd, have, withAbortSignal } from '../../lib/exec.mjs';
 import { aidefencePresent, securityPresent } from '../../lib/natives.mjs';
 import { scanRvf } from '../../lib/rvf.mjs';
 import { aqeEmbeddingConfiguration, classifyAqeStartup, probeAqeBrowser } from '../../lib/aqe-readiness.mjs';
@@ -23,7 +23,7 @@ import { readJson } from '../../lib/settings.mjs';
 import { runHarvest } from '../../lib/harvest.mjs';
 import { runLifecycle } from '../../lib/adapters/lifecycle.mjs';
 import { companionLifecycleFor } from '../../lib/adapters/companion-lifecycle-registry.mjs';
-import { ok, warn, fail, heading, captureOutput } from '../../lib/output.mjs';
+import { ok, warn, fail, info, heading, captureOutput } from '../../lib/output.mjs';
 import { rememberLiveCheck, embeddingProbeOutcome } from '../../lib/live-check-evidence.mjs';
 
 export const options = { json: { type: 'boolean', default: false } };
@@ -143,13 +143,30 @@ async function verifySecurity() {
   return good;
 }
 
+/**
+ * The live embedding request against the selected backend — the check `ak x
+ * verify aqe` runs and `ak status --live` reuses. `corpus` also reads the
+ * project's stored provenance (read-only); --live skips it to stay quick.
+ * @param {{cfg?:any,cwd?:string,corpus?:boolean}} [options]
+ */
+export async function checkAqeEmbedding({ cfg = loadKitConfig(), cwd = process.cwd(), corpus = true } = {}) {
+  const resolved = resolveAqeEmbedding(cfg);
+  const embedding = aqeEmbeddingConfiguration({ env: resolved.env });
+  const backend = resolved.mode === 'in-process' || embedding.backend === 'in-process' ? 'in-process' : 'endpoint';
+  const live = await probeAqeEmbeddings({ packageRoot: aqeRoot(), env: resolved.env, backend,
+    ...(corpus ? { corpusPath: path.join(projectAqeDir(cwd), 'memory.db') } : {}) });
+  (live.status === 'passed' ? ok : fail)(`live embedding request: ${live.status}; reason=${live.reason ?? 'none'}; dimension=${live.dimension ?? 'unknown'}`);
+  return live;
+}
+
 /** @param {{onEvidence?:(id:string, outcome:{status:string,reason:string|null})=>void}} [options] */
 async function verifyAqe({ onEvidence = () => {} } = {}) {
   heading('aqe — separate storage, embedding, and browser observations');
   const findings = scanRvf(projectAqeDir(process.cwd()));
   if (findings.length) { fail(`${findings.length} oversized RVF store(s) — run: ak sync`); return false; }
   ok('no oversized RVF stores detected (not a storage integrity proof)');
-  const resolved = resolveAqeEmbedding(loadKitConfig());
+  const cfg = loadKitConfig();
+  const resolved = resolveAqeEmbedding(cfg);
   const st = await runCmd('aqe', ['status'], { timeout: 120_000, env: resolved.env });
   const startup = classifyAqeStartup(st);
   (startup.status === 'observed' ? ok : startup.status === 'busy' ? warn : fail)(startup.reason);
@@ -160,10 +177,7 @@ async function verifyAqe({ onEvidence = () => {} } = {}) {
   if (resolved.ambientConflict) warn('Shell endpoint differs from saved intent; this Kit probe uses the saved choice');
   const browser = await probeAqeBrowser({ runner: runCmd });
   (browser.status === 'payload-present' ? ok : warn)(`optional browser: ${browser.status} (no browser launched)`);
-  const backend = resolved.mode === 'in-process' || embedding.backend === 'in-process' ? 'in-process' : 'endpoint';
-  const live = await probeAqeEmbeddings({ packageRoot: aqeRoot(), env: resolved.env, backend,
-    corpusPath: path.join(projectAqeDir(process.cwd()), 'memory.db') });
-  (live.status === 'passed' ? ok : fail)(`live embedding request: ${live.status}; reason=${live.reason ?? 'none'}; dimension=${live.dimension ?? 'unknown'}`);
+  const live = await checkAqeEmbedding({ cfg, cwd: process.cwd() });
   onEvidence('aqe-embedding', embeddingProbeOutcome(live));
   if (live.corpus) console.log(JSON.stringify({ embeddingProvenance: live.corpus }));
   if (!['healthy', 'empty'].includes(live.corpus?.status)) warn('Corpus compatibility unverified or mismatched; preserve vectors and plan explicit migration');
@@ -198,6 +212,20 @@ export async function verifyMcp({ runner = runCmd, probe = probeMcp, cwd = proce
   return good;
 }
 
+/** aqe's billing section reflects the host selector. `aqe health` auto-initializes
+ *  `.agentic-qe` (memory.db, patterns.rvf, witness keys) in its cwd (observed on
+ *  AQE 3.14.3), so a proof never runs it in a project AQE was not set up in. */
+async function checkAqeBillingSection(cwd) {
+  if (!fs.existsSync(projectAqeDir(cwd))) {
+    info('aqe billing/provider section not checked: agentic-qe is not initialized in this project');
+    return;
+  }
+  if (!(await have('aqe'))) return;
+  const h = await runCmd('aqe', ['health'], { timeout: 120_000 });
+  const seen = /LLM Billing|claude-code|provider|billing/i.test(h.stdout + h.stderr);
+  (seen ? ok : warn)('aqe health reports an LLM billing/provider section');
+}
+
 async function verifyProviders() {
   heading('providers — kit config matches installed CLIs; ruflo/aqe see the wiring');
   const cfg = loadKitConfig();
@@ -214,12 +242,7 @@ async function verifyProviders() {
     const list = await runCmd('ruflo', ['providers', 'list'], { timeout: 60_000 });
     (list.code === 0 ? ok : warn)(`ruflo providers list ${list.code === 0 ? 'ok' : 'unavailable'}`);
   }
-  // aqe billing section reflects the host selector
-  if (cfg.aqe !== false && await have('aqe')) {
-    const h = await runCmd('aqe', ['health'], { timeout: 120_000 });
-    const seen = /LLM Billing|claude-code|provider|billing/i.test(h.stdout + h.stderr);
-    (seen ? ok : warn)('aqe health reports an LLM billing/provider section');
-  }
+  if (cfg.aqe !== false) await checkAqeBillingSection(process.cwd());
   // aqe fallback chain: on-disk llm-config.json matches kit.json (order + ak-managed)
   const chain = cfg.providers?.aqeFallback ?? [];
   if (chain.length) {
@@ -418,17 +441,92 @@ const SUITE_EVIDENCE = Object.freeze({
   mcp: 'mcp', memory: 'memory', security: 'security', providers: 'providers', 'deja-vu': 'deja-vu',
 });
 
+/** A suite's verdict as a live-check outcome: a pass, or a failure whose
+ *  reason is the first failure line the suite printed. A check that already
+ *  returns an outcome (the embedding request) keeps it. */
+function checkOutcome(result, entries, name) {
+  if (result && typeof result === 'object') return { status: result.status, reason: result.reason ?? null };
+  return result
+    ? { status: 'passed', reason: null }
+    : { status: 'failed', reason: entries.find((e) => e.level === 'fail')?.text ?? `${name} proof failed` };
+}
+
 /** Run one suite, printing as always, and remember its result for status. */
 async function runRememberedSuite(name, fn, cfg) {
   const remember = (id, outcome) => rememberLiveCheck(id, outcome, { source: 'verify', cfg, cwd: process.cwd() });
   const { result, entries } = await captureOutput(() => fn({ onEvidence: remember }), { echo: true });
   const id = SUITE_EVIDENCE[name];
-  if (id && (id !== 'deja-vu' || dejaVuProofApplies(cfg))) {
-    remember(id, result
-      ? { status: 'passed', reason: null }
-      : { status: 'failed', reason: entries.find((e) => e.level === 'fail')?.text ?? `${name} proof failed` });
-  }
+  if (id && (id !== 'deja-vu' || dejaVuProofApplies(cfg))) remember(id, checkOutcome(result, entries, name));
   return result;
+}
+
+// ── ak status --live (decision 9b) ──────────────────────────────────────────
+// The quick, free checks only, reusing the suites above: the AQE embedding
+// request, Codex MCP initialize/tools-list, provider wiring, the security
+// packages, deja-vu's structural proof and a temp-dir memory round trip. The
+// slow learning and harvest proofs and the paid host connection check are
+// never part of it.
+const LIVE_CHECKS = Object.freeze([
+  // Same gate as sync's embedding step: only a backend the kit manages (an
+  // unmanaged install claims no semantic readiness; `ak x verify aqe` still probes it).
+  { id: 'aqe-embedding', applies: (cfg) => cfg.aqe !== false && !!cfg.aqeEmbedding && cfg.aqeEmbedding.mode !== 'unmanaged',
+    run: async ({ cfg, cwd }) => embeddingProbeOutcome(await checkAqeEmbedding({ cfg, cwd, corpus: false })) },
+  // Codex MCP discovery is explicit: Claude-only installations need no Codex.
+  { id: 'mcp', applies: (cfg) => cfg.integrations?.hosts?.codex === true, run: ({ cwd }) => verifyMcp({ cwd }) },
+  { id: 'providers', applies: () => true, run: () => verifyProviders() },
+  { id: 'security', applies: (cfg) => cfg.security !== false, run: () => verifySecurity() },
+  { id: 'deja-vu', applies: (cfg) => dejaVuProofApplies(cfg), run: ({ cfg }) => verifyDejaVu({ cfg }) },
+  { id: 'memory', applies: () => true, run: () => verifyMemory() },
+]);
+
+/** The live checks that apply to this configuration. */
+export const liveChecksFor = (cfg) => LIVE_CHECKS.filter((check) => check.applies(cfg ?? {}));
+
+export const LIVE_CHECK_TIMEOUT_MS = 60_000;
+const LIVE_CHECK_GRACE_MS = 5_000;
+function sleep(ms) {
+  let timer;
+  const done = new Promise((resolve) => { timer = setTimeout(resolve, ms, null); });
+  return { done, cancel: () => clearTimeout(timer) };
+}
+const duration = (ms) => (ms < 1000 ? `${ms} ms` : `${Math.round(ms / 1000)} s`);
+
+/** One check: output captured, child processes bound to its own abort signal.
+ *  Past the timeout it is inconclusive; its processes are aborted and it gets a
+ *  short grace to run its own cleanup (temp dirs) before status moves on. */
+async function runOneLiveCheck(check, ctx, { timeoutMs, graceMs }) {
+  const controller = new AbortController();
+  const started = Date.now();
+  const work = captureOutput(() => withAbortSignal(controller.signal, () => check.run(ctx)))
+    .then(({ result, entries }) => checkOutcome(result, entries, check.id),
+      () => ({ status: 'inconclusive', reason: 'the check could not run' }));
+  const deadline = sleep(timeoutMs);
+  let outcome = await Promise.race([work, deadline.done]);
+  deadline.cancel();
+  if (!outcome) {
+    controller.abort();
+    const grace = sleep(graceMs);
+    await Promise.race([work, grace.done]);
+    grace.cancel();
+    outcome = { status: 'inconclusive', reason: `no result within ${duration(timeoutMs)}` };
+  }
+  return { id: check.id, status: outcome.status, reason: outcome.reason ?? null, elapsedMs: Date.now() - started };
+}
+
+/**
+ * Run live checks in parallel, each under its own timeout, and remember every
+ * result as `status-live` evidence. Returns one `{id,status,reason,elapsedMs}`
+ * per check, in order.
+ * @param {{cfg?:any,cwd?:string,checks?:any[],timeoutMs?:number,graceMs?:number}} [options]
+ */
+export async function runLiveChecks({
+  cfg = loadKitConfig(), cwd = process.cwd(), checks = liveChecksFor(cfg),
+  timeoutMs = LIVE_CHECK_TIMEOUT_MS, graceMs = LIVE_CHECK_GRACE_MS,
+} = {}) {
+  const ctx = { cfg, cwd };
+  const results = await Promise.all(checks.map((check) => runOneLiveCheck(check, ctx, { timeoutMs, graceMs })));
+  for (const r of results) rememberLiveCheck(r.id, r, { source: 'status-live', cfg, cwd });
+  return results;
 }
 
 export async function run({ positionals }) {

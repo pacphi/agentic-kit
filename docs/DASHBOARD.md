@@ -144,7 +144,9 @@ Overview keeps status and routing in one health-first area:
   and served-model claims come from **Usage → Scorecard** evidence instead.
 - **Runtime** presents operational services, processes, MCP readiness, and cached
   context configuration with host-specific native controls. It also holds the read-only
-  "ruflo components" panel (below).
+  "ruflo components" panel (below) and, once any live check has run, a `live-checks` card
+  with each remembered result and its age. The dashboard never runs live checks itself;
+  `ak status --live`, `ak x verify` and `ak sync` record them.
 - **Intelligence** presents memory, learning, and quality-improvement signals machine-wide: an
   always-visible rollup folded across every project on this machine where memory or intelligence has
   been activated — a `.claude-flow`, `.agentic-qe` or `.swarm` directory, whichever host created it

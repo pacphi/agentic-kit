@@ -19,17 +19,18 @@ export const options = {
   deep: { type: 'boolean', default: false },
   hint: { type: 'boolean', default: false },
   refresh: { type: 'boolean', default: false },
+  live: { type: 'boolean', default: false },
 };
 
 export const help = `ak status — read-only dashboard of what's true and what's drifted
 
 Prints one row per subsystem (versions, natives, security, learning, providers,
-…). Read-only: it never changes anything and never runs a live check; it shows
-the last result \`ak sync\` or \`ak x verify\` remembered, with its age. A bare
-\`ak\` runs this plus one suggested next action. A row's "→" fix is what
-\`ak sync\` performs; "→ manual:" marks a step you run yourself (sync never plans
-it). --json rows carry the same distinction as \`repair\`: "sync", "manual", or
-null when there is no fix.
+…). Without --live it is read-only: it changes nothing and runs no live check;
+it shows the last result \`ak sync\`, \`ak x verify\` or \`ak status --live\`
+remembered, with its age. A bare \`ak\` runs this plus one suggested next action.
+A row's "→" fix is what \`ak sync\` performs; "→ manual:" marks a step you run
+yourself (sync never plans it). --json rows carry the same distinction as
+\`repair\`: "sync", "manual", or null when there is no fix.
 
 Usage: ak status [options]
 
@@ -37,11 +38,25 @@ Options:
   --deep      run the slower probes (spawns CLIs) for a fuller picture
   --json      emit the raw rows as JSON (suppresses the drift nudge)
   --refresh   re-probe ruflo component evidence
+  --live      first run the quick, free live checks from \`ak x verify\` in
+              parallel (AQE embedding request for a kit-managed backend, Codex
+              MCP when Codex is enabled, provider wiring, security packages,
+              deja-vu when enabled, and a memory round trip in a temp dir), each
+              bounded by a timeout that reads inconclusive; remembers the
+              results. A failed check is a warning, so the exit code is unchanged
 
 Examples:
   ak status           quick dashboard
   ak status --deep    thorough check
+  ak status --live    run the quick live checks, then report
   ak status --json    machine-readable rows`;
+
+/** `--live`: the quick, free `ak x verify` checks, loaded only when asked for
+ *  so plain status never pays for the verify suites. */
+async function runDefaultLiveChecks({ cfg, cwd }) {
+  const { runLiveChecks, liveChecksFor } = await import('./x/verify.mjs');
+  return runLiveChecks({ cfg, cwd, checks: liveChecksFor(cfg) });
+}
 
 // Generalizes the HOST_DETAIL_RENDERERS contract (status/host-detail.mjs) to
 // every section: a section owns its own error handling when it needs an
@@ -94,13 +109,17 @@ export async function collect({
   return rows;
 }
 
-export async function run({ flags, pkgRoot }) {
+export async function run({ flags, pkgRoot, runLive = runDefaultLiveChecks }) {
+  // Live checks run BEFORE collect(), never inside it: the dashboard calls
+  // collect() and must stay probe-free.
+  if (flags.live && !flags.json) console.log(dim('running live checks (quick, free; each bounded by a timeout)…'));
+  const live = flags.live ? await runLive({ cfg: loadKitConfig(), cwd: process.cwd() }) : null;
   const rows = await collect({ pkgRoot, refresh: !!flags.refresh });
   const worst = rows.some((r) => r.level === 'fail') ? 'fail'
     : rows.some((r) => r.level === 'warn') ? 'warn' : 'ok';
 
   if (flags.json) {
-    console.log(JSON.stringify({ overall: worst, rows }, null, 2));
+    console.log(JSON.stringify({ overall: worst, rows, ...(live ? { live } : {}) }, null, 2));
     return worst === 'fail' ? 1 : 0;
   }
 

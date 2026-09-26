@@ -267,5 +267,6 @@ migration planning; do not delete RVF locks or relabel vectors.
 See [AQE embeddings](AQE-EMBEDDINGS.md) for the full recovery and environment guide.
 
 `ak status` does not contact the embedding service. Its `aqe-embedding` row shows the
-last live check from `ak sync` or `ak x verify aqe` with its age and reason. After you
-fix the service, run `ak x verify aqe` or `ak sync` to replace an old failure.
+last live check from `ak sync`, `ak x verify aqe` or `ak status --live` with its age and
+reason. After you fix the service, run `ak status --live` (quick) or `ak x verify aqe` to
+replace an old failure.

@@ -40,6 +40,7 @@ import daemons from './daemons.mjs';
 import blocks from './blocks.mjs';
 import statusline from './statusline.mjs';
 import qeCourt from './qe-court.mjs';
+import liveChecks from './live-checks.mjs';
 
 // Everything up to and including codex-plugins — before the deja-vu /
 // host-detail / admitted-lifecycle calls that collect() makes directly.
@@ -53,5 +54,5 @@ export const SECTIONS_BEFORE_HOST_DETAIL = [
 export const SECTIONS_AFTER_HOST_DETAIL = [
   hosts, providersStatus, providersExternalIntent, providersExternalProjection,
   providersRufloModels, providersLocalBindings, routing, daemons, blocks,
-  statusline, codexContext, context, qeCourt,
+  statusline, codexContext, context, qeCourt, liveChecks,
 ];

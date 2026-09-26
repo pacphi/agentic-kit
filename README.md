@@ -42,7 +42,8 @@ container for you. See [docs/DEVCONTAINERS.md](https://github.com/pacphi/agentic
 - **Self-healing:** `ak sync` re-converges after every upgrade; `ak status` and a local dashboard report observed state and explicit evidence gaps.
 - **Managed ruflo components:** ak applies and reports ruflo's opt-in agent pickers, MCP tool governance, learning profile, and promotional funnel — see [Managed ruflo components](docs/MANAGED-TOOLS.md#managed-ruflo-components).
 - **Scoped verification:** `ak x verify` exercises named paths against real CLIs and reports
-  their results; `ak status` shows each remembered result with its age. Registration,
+  their results; `ak status` shows each remembered result with its age, and `ak status --live`
+  runs the quick, free subset first. Registration,
   configuration, and one passing probe do not establish every capability or every running session.
 - Cross-platform, **zero runtime dependencies** (SQLite embedded).
 
@@ -88,7 +89,7 @@ ak setup        first-time setup — machine and/or the project you're standing 
                 [--codex] [--opencode] [--primary-host claude|codex] [--with-deja-vu]
                 [--deja-vu-mode mcp|auto] [--no-deja-vu] [--project] [--minimal]
                 [--yes] [--no-aqe] [--no-security] [--reconfigure]
-ak status       read-only dashboard: what's true, what's drifted   [--json] [--deep]
+ak status       read-only dashboard: what's true, what's drifted   [--json] [--deep] [--live]
 ak sync         converge to good: upgrade + heal + verify          [--dry-run] [--no-upgrade]
                 [--skip SUBSYSTEM] [--json]
 ak dashboard    open the local web dashboard (auto-opens your browser)

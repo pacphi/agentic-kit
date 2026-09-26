@@ -11,6 +11,7 @@
 // Instead, its sibling .ps1 shim runs through Windows PowerShell's `-File`
 // interface, preserving every caller argument as a separate argv element.
 import { execFile, spawn } from 'node:child_process';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { promisify } from 'node:util';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,6 +19,16 @@ import { isWindows } from './paths.mjs';
 
 const pexecFile = promisify(execFile);
 const MAX_EXEC_BUFFER = 16 * 1024 * 1024;
+
+// A caller that bounds work it does not own (a live check under `ak status
+// --live` running an unmodified `ak x verify` suite) scopes an AbortSignal
+// here; every run() inside the scope that passes no signal of its own uses it,
+// so a timed-out check's child processes stop and its own cleanup still runs.
+const abortScope = new AsyncLocalStorage();
+
+/** Run `fn` with `signal` as the default abort signal for run() calls in it.
+ * @template T @param {AbortSignal} signal @param {() => T} fn @returns {T} */
+export const withAbortSignal = (signal, fn) => abortScope.run(signal, fn);
 
 const CMD_SHIMS = new Set([
   'npm', 'npx', 'claude', 'codex', 'opencode', 'deja', 'ruflo', 'aqe', 'claude-flow',
@@ -189,7 +200,7 @@ export async function run(cmd, args = [], opts = {}) {
     const execOpts = {
       encoding: 'utf8',
       timeout: opts.timeout ?? 120_000,
-      signal: opts.signal,
+      signal: opts.signal ?? abortScope.getStore(),
       maxBuffer: Number.isFinite(opts.maxBuffer) && opts.maxBuffer > 0
         ? Math.min(Math.floor(opts.maxBuffer), MAX_EXEC_BUFFER) : MAX_EXEC_BUFFER,
       cwd: opts.cwd,

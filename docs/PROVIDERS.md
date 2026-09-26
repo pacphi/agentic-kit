@@ -400,7 +400,8 @@ Three checks establish different facts; do not collapse them:
    content hash, then `ak host adapters grant <name> aqeProvider` must succeed.
 2. `ak x verify providers` proves admission plus the exact project declaration, ownership receipt,
    default, fallback, and override projection. It deliberately warns that this is not a served
-   model response.
+   model response. It reads AQE's billing section (`aqe health`) only in a project where
+   `.agentic-qe` exists, because `aqe health` initializes a store where it runs.
 3. Release proof starts fresh AQE CLI and MCP processes, lists the external id through
    `aqe llm providers --json`, invokes the real `test_generate_enhanced` MCP tool, and requires the
    served completion to carry the fixture's provider and model markers:

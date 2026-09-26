@@ -6,7 +6,7 @@
 - **Updated:** 2026-09-20 — implemented explicit defaults, owned Claude/Codex/OpenCode projections and qualified runtime proof
 - **Updated:** 2026-09-23 — project projections are scoped to the enclosing git repository root; outside a repository only the user Codex target applies (earlier project-scope values are relinquished by receipt), and the `.mcp.json` AQE registration is required only in an AQE-initialized project
 - **Updated:** 2026-09-26 — incomplete local setup distinguishes an installed-but-stopped Ollama (refused loopback connection with `ollama` on PATH) from a missing one and asks the user to start it rather than install it (#237)
-- **Updated:** 2026-09-26 — status shows the last remembered live embedding check with its age; see [Amendment: remembered live checks](#amendment-2026-09-26-remembered-live-checks)
+- **Updated:** 2026-09-26 — status shows the last remembered live embedding check with its age, and opt-in `ak status --live` runs the quick live checks; see [Amendment: remembered live checks](#amendment-2026-09-26-remembered-live-checks)
 - **Related:** [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),
   [September repair](../audits/2026-09-09-aqe-integration-repair.md)
 
@@ -118,3 +118,16 @@ than 24 hours is information labelled stale, while a stale failure stays a warni
 until a new check shows otherwise. A different backend selection marks the result
 as changed instead of presenting it as current. This follows ADR-0058's evidence
 cache. A backend pass still does not certify the corpus.
+
+Plain status stays probe-free. `ak status --live` is the explicit opt-in: before
+collecting rows it runs the quick, free `ak x verify` checks (the same functions,
+not a copy) in parallel: the embedding request without the corpus read (only for a
+backend the kit manages, the same gate as sync), Codex MCP initialize/tools-list
+when Codex is enabled, provider wiring, the security
+packages, deja-vu's structural proof when enabled, and a memory round trip in a
+temporary directory. Each has a timeout; a timeout or a check that cannot run is
+`inconclusive`, never failed. The slow learning and harvest proofs and the paid
+host connection check are excluded, and the dashboard refresh never runs them.
+The provider check runs `aqe health` only where `.agentic-qe` already exists:
+AQE 3.14.3 auto-initializes a store (memory.db, patterns.rvf, witness keys) in the
+directory it runs in, and a diagnostic must not set AQE up in a project.

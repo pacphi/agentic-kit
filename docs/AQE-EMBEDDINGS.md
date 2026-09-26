@@ -98,9 +98,11 @@ then reapplies the selected environment afterward.
 provenance and reports storage observations.
 
 `ak status` and the dashboard never contact the service. They show the last live
-embedding request that `ak sync` or `ak x verify aqe` made, with its age: a
-failure is a warning with its reason, a pass is green for 24 hours and then
-labelled stale. Selecting a different backend marks the old result as changed.
+embedding request that `ak sync`, `ak x verify aqe` or `ak status --live` made,
+with its age: a failure is a warning with its reason, a pass is green for 24
+hours and then labelled stale. Selecting a different backend marks the old result
+as changed. `ak status --live` sends one synthetic request without reading the
+project corpus.
 These are separate claims:
 
 - A configured URL is not a running service or an installed model.
