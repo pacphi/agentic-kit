@@ -8,14 +8,23 @@ import { row } from '../row.mjs';
 import { inspectClaudeBrainPlugin } from '../../../lib/ruvnet-brain-plugin.mjs';
 import { releaseObservationLabel } from '../../../lib/versions.mjs';
 
+// What a user can do about an unreviewed Brain hook change. ak cannot review a
+// hook for them, so this is guidance in the message and never a sync `fix`.
+const HOOK_DELTA_OPTIONS = 'Options: keep it (this warning stays until an ak release reviews the change; '
+  + 'the Brain maintainer is asked to make added hooks honor the off switch); disable the whole Claude '
+  + 'plugin with `claude plugin disable ruvnet-brain@ruvnet-brain` (this also removes search_ruvnet from '
+  + 'Claude); or set "ruvnetBrain": false in kit.json so ak stops managing and reporting the Brain '
+  + '(the hooks stay installed)';
+
 export function brainPluginRows(state) {
   const enabled = state.enabled === true ? 'enabled' : state.enabled === false ? 'disabled' : 'enablement unknown';
   const selected = state.payloadVersion ?? state.registryVersion ?? 'unknown';
   if (state.registration === 'absent') return [row('ruvnet-brain-plugin', 'info',
     'Claude user plugin registry has no Brain registration; KB and MCP health are separate')];
   const summary = `Claude user Brain plugin ${selected} (${enabled}; project overrides and runtime unverified)`;
+  const detail = state.issues.length ? state.issues.join('; ') : 'selected payload passes static checks';
   return [row('ruvnet-brain-plugin', state.issues.length ? 'warn' : 'info',
-    `${summary}; ${state.issues.length ? state.issues.join('; ') : 'selected payload passes static checks'}`)];
+    `${summary}; ${detail}${state.hookDelta ? `. ${HOOK_DELTA_OPTIONS}` : ''}`)];
 }
 
 /** One status row for the installed/release state. A GitHub tag without the

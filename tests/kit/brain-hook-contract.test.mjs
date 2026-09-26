@@ -73,3 +73,44 @@ test('lifecycle qualification rejects altered or extra behavior', () => {
     assert.equal(brainHookContract('4.3.26', hooks).qualified, false);
   }
 });
+
+// Decision 4 of the 2026-09-26 audit (#237 #6): Brain 4.3.28 added one hook and
+// the warning never said what changed. An unqualified result names the delta
+// against the nearest reviewed contract. ak ships NO 4.3.28 contract: the added
+// hook is declared offBehavior "run" (plugin 4.3.28 scripts/hook-shim.mjs:89).
+const capacity = shim('capacity-aware-parallel-work', 2);
+const with4328 = () => {
+  const hooks = lifecycle();
+  hooks.UserPromptSubmit[0].hooks.splice(2, 0, capacity);
+  return hooks;
+};
+
+test('Brain 4.3.28 stays unreviewed and its warning names the added hook and its off-switch behavior', () => {
+  const result = brainHookContract('4.3.28', with4328());
+  assert.equal(result.qualified, false, 'no 4.3.28 contract: the added hook ignores the Brain off switch');
+  assert.equal(result.delta.contract, '4.3.26-lifecycle', 'the delta is taken against the nearest reviewed contract');
+  assert.deepEqual(result.delta.added, ['UserPromptSubmit capacity-aware-parallel-work']);
+  assert.deepEqual(result.delta.removed, []);
+  assert.match(result.issue, /reviewed 4\.3\.26-lifecycle contract/);
+  assert.match(result.issue, /adds UserPromptSubmit capacity-aware-parallel-work/);
+  assert.match(result.issue, /offBehavior "run"/);
+});
+
+test('the hook delta names removals and changed declarations too', () => {
+  const removed = lifecycle();
+  removed.Stop[0].hooks.pop();
+  const r1 = brainHookContract('4.3.29', removed);
+  assert.deepEqual(r1.delta.removed, ['Stop grounding-turn-gate']);
+  assert.match(r1.issue, /removes Stop grounding-turn-gate/);
+
+  const changed = lifecycle();
+  changed.SessionEnd[0].hooks[0].timeout = 99;
+  const r2 = brainHookContract('4.3.29', changed);
+  assert.deepEqual(r2.delta.changed, ['SessionEnd session-snapshot SessionEnd']);
+  assert.deepEqual(r2.delta.added, []);
+  assert.match(r2.issue, /changes SessionEnd session-snapshot SessionEnd/);
+
+  const continuityPlus = fixture();
+  continuityPlus.PreCompact = [{ matcher: '*', hooks: [shim('session-snapshot PreCompact', 10)] }];
+  assert.equal(brainHookContract('4.3.18', continuityPlus).delta.contract, '4.3.17-continuity');
+});
