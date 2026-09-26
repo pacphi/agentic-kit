@@ -269,10 +269,22 @@ function fakeCollector() {
   };
 }
 
+// A successful deep refresh makes the server re-scan maintenance and rebuild
+// the ADR-0048 inventory over the injected collector. Left to the defaults,
+// both write into the real state directory (~/.local/state/agentic-kit/
+// maintenance) and the facade walks the real home folder, so these fakes keep
+// the server hermetic. Same pattern as maintenance-dashboard-api.test.mjs.
+function hermeticMaintenance() {
+  return {
+    maintenance: { report() { return null; }, async scan() { return {}; }, plan() { return null; } },
+    management: { async rebuildAfterMeasurement() { return null; }, async refreshInventory() { return null; } },
+  };
+}
+
 test('GET /api/system/summary serves the projection; GET /api/system stays complete', async (t) => {
   const collector = fakeCollector();
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-system-summary-'));
-  const server = await startDashboard({ port: 0, cwd, system: collector, usage: {} });
+  const server = await startDashboard({ port: 0, cwd, system: collector, usage: {}, ...hermeticMaintenance() });
   t.after(() => server.close());
 
   const refused = await request(server, '/api/system/summary', null);
@@ -294,7 +306,7 @@ test('GET /api/system/summary serves the projection; GET /api/system stays compl
 test('GET /api/system/summary?refresh=deep starts the scan and answers with its running state', async (t) => {
   const collector = fakeCollector();
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-system-summary-'));
-  const server = await startDashboard({ port: 0, cwd, system: collector, usage: {} });
+  const server = await startDashboard({ port: 0, cwd, system: collector, usage: {}, ...hermeticMaintenance() });
   t.after(() => server.close());
   const r = await request(server, '/api/system/summary?refresh=deep&trees=0');
   assert.equal(r.status, 200);
