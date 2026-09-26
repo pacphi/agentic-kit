@@ -281,7 +281,7 @@ and credential policy is distinct from the offline-first dashboard and integrati
 | Project census | Machine footprint | Candidate paths only, at directory granularity; every rendered figure is measured by this context's own collectors |
 | Project census | Project intelligence | The `learning` scope, folded onto project identity — the project list and the selectable key |
 | Project identity helpers | Historical usage | Parse-time Git association and explicit Desktop origin; schema-v20 evidence drives the existing-parent Git ranking without changing overall usage totals |
-| Machine footprint | Dashboard delivery | Two-tier measurement read model over `GET /api/system`, and the same collector behind `ak system` |
+| Machine footprint | Dashboard delivery | Two-tier measurement read model over `GET /api/system`, and the same collector behind `ak system`; the System page reads the catalog-projected `GET /api/system/summary` |
 | Machine footprint | Maintenance | Observed inventory, pressure, freshness, and advisory facts only; no ownership or mutation authority crosses the boundary |
 | Integration management | Maintenance | Provider capabilities, native lifecycle facts, desired state, and exact ownership receipts |
 | Project census | Maintenance | Candidate project identities and paths only; Maintenance's own Discovery configuration decides scan inclusion |

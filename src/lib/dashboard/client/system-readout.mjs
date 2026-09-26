@@ -5,7 +5,7 @@ import { esc } from './bootstrap.mjs';
 import { fmtNum, fmtTok } from './usage.mjs';
 
   // ══ System area (ADR-0025) ════════════════════════════════════════════════
-  // One payload (GET /api/system), five sub-views. The cheap tier arrives on
+  // One payload (GET /api/system/summary), five sub-views. The cheap tier arrives on
   // open; the deep tier is whatever the last user-triggered scan measured,
   // carried forward with ITS timestamp. Nothing here ever renders an unmeasured
   // quantity as 0 — mhtml() has no code path that can.

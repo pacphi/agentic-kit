@@ -194,6 +194,7 @@ FootprintSnapshot  { asOf, completeness, install, runtime, storage, catalog, pro
 Delivery
   GET /api/system            → cheap tier + persisted snapshot (token auth, loopback, no egress)
   GET /api/system?refresh=deep → start-or-attach the single-flight deep scan
+  GET /api/system/summary    → the same read, catalog projected to what the System page draws
   ak system [--deep] [--json]  → the same collector, CLI-rendered
         |
         v
@@ -703,7 +704,17 @@ functions. This containment is not evidence that total scan duration decreased.
 The System measurement routes stay GET-only: a Full scan re-measures local state and writes only this domain's own
 snapshot file — it mutates no user data.
 
-**A deep scan never runs on its own.** Opening the System area issues a plain `GET /api/system`;
+`GET /api/system` is the complete read model, the same shape as `ak system --json`.
+`GET /api/system/summary` is the page's read: the same payload (and the same `?refresh=deep` and
+`&trees=` parameters) with the catalog projected by `dashboard/system-summary.mjs` to an
+allow-list of catalog keys, and each item cut to its key, kind, name, hosts, source scopes, digest
+coverage, and distinct plugin providers (`presence[].provider` with `ref` and `version`). The
+catalog's repeated presence copies (`item.presence` details, `consumerBindings`, `artifacts`) grow
+with items × projects × hosts and are not drawn, so the page and its 30-second Runtime poll never
+download them. The projection is a Dashboard-delivery view; this domain's collector output is
+unchanged.
+
+**A deep scan never runs on its own.** Opening the System area issues a plain `GET /api/system/summary`;
 only **Full scan** adds `?refresh=deep`. A deep scan can cost minutes of I/O on a large corpus, and
 making the act of *looking* cost that is a worse trade than a stale figure that states
 how stale it is. Staleness is therefore surfaced rather than pre-empted: every deep-tier figure

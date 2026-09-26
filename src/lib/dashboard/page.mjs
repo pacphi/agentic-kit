@@ -716,7 +716,7 @@ ${HOST_PARTICIPATION_HTML}
 
 ${LIVE_HTML}
 
-  <!-- SYSTEM (ADR-0025). Footprint views render from GET /api/system;
+  <!-- SYSTEM (ADR-0025). Footprint views render from GET /api/system/summary;
        Maintenance lazily reads its own report. The deep tier is NEVER scanned
        on open — the rail's Rescan button is the only trigger, and the freshness
        label states how old the figures are. -->

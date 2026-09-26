@@ -147,7 +147,7 @@ import { loadModelLifecycle, loadUsage } from './usage.mjs';
     // header cheerfully reported "updated 4s ago". It now refreshes on the
     // same clock as everything else the header speaks for.
     //
-    // Only the cheap tier: this is the plain /api/system read, which is
+    // Only the cheap tier: this is the plain /api/system/summary read, which is
     // memoized server-side and never walks the filesystem. The deep scan stays
     // behind Rescan (?refresh=deep) — putting a multi-minute walk on a 30s
     // timer would be a different feature and a much worse one.

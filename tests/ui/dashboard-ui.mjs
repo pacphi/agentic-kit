@@ -1154,7 +1154,7 @@ async function main() {
   // screens have room for it beside the content-width menu; narrow screens
   // give it a second row instead of stretching or squeezing the menu.
   const runningScanPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-  await runningScanPage.route(/\/api\/system(\?|$)/, (route) => route.fulfill({
+  await runningScanPage.route(/\/api\/system(\/summary)?(\?|$)/, (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify({
@@ -1879,7 +1879,7 @@ async function main() {
       await page.waitForSelector(`${sel}:not([hidden])`, { timeout: 8000 }).catch(() => {});
       if (tab === 'usage') await page.waitForTimeout(1200); // lazy fetch
       if (tab === 'live') await page.waitForTimeout(350); // segmented-thumb transition
-      // System fetches /api/system on first open. Waiting on a rendered KPI (not
+      // System fetches /api/system/summary on first open. Waiting on a rendered KPI (not
       // a timeout) means this cannot pass by screenshotting an empty grid.
       if (tab === 'system') await page.waitForSelector('#sys-kpis .sy-kpi', { timeout: 8000 }).catch(() => {});
       const text = await visibleText(page, sel);
@@ -2913,7 +2913,7 @@ async function main() {
     // itself is always the first read (reports running), every read after is
     // settled. This cannot race system-projects.mjs's own poll cadence and
     // mntPollSystemMeasurement's independent one against a Node-side timer.
-    await page.route(/\/api\/system(\?|$)/, (route) => {
+    await page.route(/\/api\/system(\/summary)?(\?|$)/, (route) => {
       const reqUrl = new URL(route.request().url());
       if (reqUrl.searchParams.get('refresh') === 'deep') remeasureDeepScanRequests += 1;
       remeasureSystemReadCount += 1;
@@ -2949,7 +2949,7 @@ async function main() {
       await page.isEnabled('#mnt-remeasure') && await page.isEnabled('[data-mnt-plan-plc]')
         && remeasureSystemReadCount === 2,
       `system reads: ${remeasureSystemReadCount}; operation: ${await page.textContent('#mnt-check-providers-status')}`);
-    await page.unroute(/\/api\/system(\?|$)/);
+    await page.unroute(/\/api\/system(\/summary)?(\?|$)/);
 
     // ── #system/catalog redirects to Maintenance Inventory (ADR-0048) ──
     await page.evaluate(() => { location.hash = '#system/catalog'; });
@@ -3171,7 +3171,7 @@ async function main() {
       }],
       complete: true,
     };
-    await page.route(/\/api\/system(\?|$)/, (route) => route.fulfill({
+    await page.route(/\/api\/system(\/summary)?(\?|$)/, (route) => route.fulfill({
       status: 200, contentType: 'application/json', body: JSON.stringify(FILTER_SYSTEM),
     }));
     await page.reload({ waitUntil: 'domcontentloaded' });
@@ -3455,7 +3455,7 @@ async function main() {
     // SYSTEM_STUB served again, the System area open, and its freshness label
     // populated. A bare reload would leave /api/system unfetched and the
     // staleness assertions reading an empty element.
-    await page.unroute(/\/api\/system(\?|$)/);
+    await page.unroute(/\/api\/system(\/summary)?(\?|$)/);
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.click('#tab-system');
     await page.waitForFunction(

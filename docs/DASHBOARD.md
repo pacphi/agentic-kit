@@ -579,7 +579,9 @@ the same scan. Reuse is confined to that scan.
 Incomplete, older, differently rooted, or differently scoped evidence falls back to a fresh bounded
 walk rather than being treated as equivalent.
 
-Measurement views fetch once, then again only while a scan you started is running. Maintenance
+Measurement views fetch once, then again only while a scan you started is running (Runtime also
+refreshes on the header's poll clock). They read `GET /api/system/summary`, which carries only what
+the page draws; `GET /api/system` and `ak system --json` keep the complete payload. Maintenance
 loads when you open it, never on the shared status poll, and reads the last complete inventory;
 opening it checks no host provider and executes nothing. **Refresh evidence** on the Maintenance
 workspace is the explicit control that runs provider probes, and it rebuilds the Inventory

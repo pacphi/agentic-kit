@@ -1,7 +1,10 @@
 # ADR-0025 — Machine footprint: infrastructure metrics for install, runtime, storage, and catalog
 
 - **Status:** Implemented
-- **Updated:** 2026-09-08 — installed tools preserve measured executable locations
+- **Updated:** 2026-09-26 — the System page reads `GET /api/system/summary`, the same payload with
+  the catalog projected to what the page draws; `GET /api/system` and `ak system --json` are
+  unchanged (#237, decision 8).
+- **Earlier update:** 2026-09-08 — installed tools preserve measured executable locations
   for private path reveal, with PATH resolution and bounded package-manifest fallback;
   Windows command extensions and POSIX executable checks are covered by fixtures.
 - **Earlier update:** 2026-09-08 — dashboard instant displays share browser-local date/time
@@ -315,6 +318,12 @@ silent "Other" slice into a to-do list a release can close.
   trees that were never walked cannot be un-hidden client-side.
 - `ak system [--deep] [--json]` — CLI parity sharing the same collector, following the
   usage-scorecard precedent of one collector behind both surfaces.
+- `GET /api/system/summary` (amendment, 2026-09-26) — the page's read: the same payload and
+  parameters with the catalog projected to an allow-list of keys and items cut to what the page
+  draws (including `presence[].provider`). The full catalog repeats each presence fact in five
+  places and grows with items × projects × hosts; the page used about 0.4% of its item bytes and
+  the Runtime view re-fetched it every 30 seconds. `GET /api/system` stays the complete
+  `ak system --json` shape for scripts.
 
 ### 6. Read-only; reclaimables are advisory, in two safety tiers
 
@@ -543,7 +552,7 @@ The draft left four points open. All four are decided; this section is the recor
    large corpus — the surprise cost is worse than a stale figure that says how stale it is. The
    snapshot's `asOf` is always rendered, and beyond `SNAPSHOT_STALE_AFTER_MS` (7 days) the
    freshness label turns amber and reads "stale, rescan". Opening the System tab issues a plain
-   `GET /api/system`; only the Rescan control adds `?refresh=deep`.
+   `GET /api/system/summary`; only the Rescan control adds `?refresh=deep`.
 4. **Windows ships a current-user census plus a best-effort true `cwd`, degrading honestly, with no
    dependency added.** The draft's "unsupported on win32" answer would have blanked the whole
    Runtime view on a supported platform. Instead `src/lib/live/win-process-survey.ps1` — a plain text
