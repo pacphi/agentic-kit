@@ -412,14 +412,28 @@ test('mcp.register:false yields an info row; the default yields an actionable wa
   assert.ok(on.fix);
 });
 
-test('a legacy ruflo-keyed MCP registration is reported as migratable drift', async () => {
+test("agentic-kit's own legacy ruflo-keyed MCP registration is reported as migratable drift", async () => {
+  seedHome();
+  fs.writeFileSync(paths.claudeUserMcpPath(),
+    JSON.stringify({ mcpServers: { ruflo: { command: 'ruflo', args: ['mcp', 'start'] } } }));
+  const rows = rowsFor(await collect(), 'mcp');
+  const legacy = rows.find((r) => r.message.includes('legacy'));
+  assert.ok(legacy, 'a legacy registration must surface');
+  assert.match(legacy.fix, /migrates it to claude-flow/);
+  fs.rmSync(paths.claudeUserMcpPath(), { force: true });
+});
+
+test('a legacy ruflo-keyed MCP registration in another form is reported as preserved, not migratable', async () => {
+  // #237 S1: register() never removes a shape agentic-kit did not write, so
+  // status must not plan a migration for it.
   seedHome();
   fs.writeFileSync(paths.claudeUserMcpPath(),
     JSON.stringify({ mcpServers: { ruflo: { command: 'ruflo' } } }));
   const rows = rowsFor(await collect(), 'mcp');
   const legacy = rows.find((r) => r.message.includes('legacy'));
   assert.ok(legacy, 'a legacy registration must surface');
-  assert.match(legacy.fix, /migrates it to claude-flow/);
+  assert.equal(legacy.fix, null);
+  assert.match(legacy.message, /claude mcp remove ruflo -s user/);
   fs.rmSync(paths.claudeUserMcpPath(), { force: true });
 });
 

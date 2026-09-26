@@ -11,7 +11,7 @@ import { fixStatusline, helperStampStale, runHelperRefresh, bakedVersionManualFi
 import { reconcileGuidance } from '../lib/blocks.mjs';
 import {
   register as mcpRegister, applyExclusions, codexMcpTopology, codexMcpRepairPlan,
-  repairCodexMcpTopology,
+  repairCodexMcpTopology, legacyRufloRemovalCommands,
 } from '../lib/mcp.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
 import { hostsWithLifecycle, lifecycleAdapterFor, lifecycleExecutionEnabled, detectionBinFor } from '../lib/adapters/lifecycle-registry.mjs';
@@ -307,14 +307,21 @@ export const SYNC_STEPS = [
     id: 'mcp',
     when: (subs, flags, cfg) => subs.has('mcp') && cfg.mcp.register,
     run: async (ctx) => {
+      let preserved = [];
       await ctx.step('mcp', async () => {
-        const okReg = await mcpRegister(ctx.cfg);
-        if (!okReg) {
+        const reg = await (ctx.registerMcp ?? mcpRegister)(ctx.cfg);
+        preserved = reg.preserved ?? [];
+        if (!reg.ok) {
           return { ok: false, detail: 'claude mcp registration failed; prior compatible registration was restored when possible' };
         }
         const { denied } = applyExclusions(ctx.cfg.mcp.excludeFamilies ?? []);
         return { ok: true, detail: `claude-flow registered (user scope), ${denied} tool(s) denied per kit.json` };
       });
+      // register() keeps a legacy entry ak did not write (ADR-0016); say so
+      // with the manual command instead of implying a migration happened.
+      for (const entry of preserved) {
+        warn(`custom 'ruflo' MCP registration preserved (${entry.scope} scope) — not agentic-kit's registration; if unwanted, remove it: ${legacyRufloRemovalCommands([entry.scope])}`);
+      }
     },
   },
   {

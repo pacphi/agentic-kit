@@ -4,7 +4,11 @@
   [ADR-0020](0020-ga-stable-surfaces.md); closed-registry clause superseded by
   [ADR-0029](0029-host-adapter-extension-point.md)
 - **Date:** 2026-07-28
-- **Updated:** 2026-09-23 — the Claude memory pin is receipt-owned and removed by uninstall (ADR-0058).
+- **Updated:** 2026-09-26 — one `legacyRufloDisposition` predicate decides whether a legacy
+  `ruflo`-keyed Claude registration is agentic-kit's own (user scope, `ruflo mcp start`, env limited
+  to `AGENT_BROWSER_CONFIG`); status and `register()` share it, so any other user-scope form is
+  reported as preserved with its manual removal command instead of a sync migration (#237).
+- **Earlier update:** 2026-09-23 — the Claude memory pin is receipt-owned and removed by uninstall (ADR-0058).
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Earlier update:** 2026-09-02
 - **Update note:** Added read-only Codex plugin-hook compatibility facts,
@@ -307,7 +311,11 @@ project record in `~/.claude.json`, project entries from `.mcp.json`, and user e
 top-level `mcpServers` in `~/.claude.json`. Effective precedence is local, then project, then
 user. Registration status names every scope instead of flattening them. Agentic-kit owns and may
 auto-migrate only its legacy user-scoped registration; local and project registrations are
-observed and preserved because their authorship cannot be proven from presence alone.
+observed and preserved because their authorship cannot be proven from presence alone. The same
+holds for a user-scoped `ruflo` entry in any form agentic-kit never wrote (another command path,
+`ruflo mcp` without `start`, or a custom env key): status and registration share one ownership
+predicate, report the entry as preserved with its `claude mcp remove ruflo -s <scope>` command,
+and never plan a sync migration for it.
 
 Global npm installation policy is likewise one contract rather than a setup/heal split. Every
 agentic-kit-owned global npm install uses the shared reviewed lifecycle-script allowlist (including

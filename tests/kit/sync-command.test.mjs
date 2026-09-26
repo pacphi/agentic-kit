@@ -446,6 +446,23 @@ test('a noninteractive Codex repair is disclosed but not applied without --yes',
   assertUnchanged(before, HOME, 'unapproved Codex repair must not mutate the sandbox');
 });
 
+test('the mcp step names a preserved custom legacy ruflo registration and its manual command', async () => {
+  seedHome(offlineKitConfig({ mcp: { register: true, excludeFamilies: [] } }));
+  const mcpStep = sync.SYNC_STEPS.find((s) => s.id === 'mcp');
+  const results = [];
+  const ctx = {
+    cfg: loadKitConfig(),
+    step: async (name, thunk) => { const r = await thunk(); results.push([name, r]); return r; },
+    registerMcp: async () => ({
+      ok: true, preserved: [{ name: 'ruflo', scope: 'user', command: '/opt/homebrew/bin/ruflo', args: ['mcp'] }],
+    }),
+  };
+  const { out } = await captureLog(() => mcpStep.run(ctx));
+  assert.equal(results[0][1].ok, true, 'claude-flow registration itself succeeded');
+  assert.match(out, /custom 'ruflo' MCP registration preserved \(user scope\)/);
+  assert.match(out, /claude mcp remove ruflo -s user/);
+});
+
 test('failed heal results are retained for the final convergence proof', () => {
   const state = { applyFailures: [] };
   sync.recordApplyFailure(state, 'ruvnet-brain', { ok: false, status: 'failed', detail: 'network unavailable' });

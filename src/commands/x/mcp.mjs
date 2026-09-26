@@ -3,7 +3,9 @@
 //   pick             : interactive family exclusion picker (re-runnable)
 //   off              : unregister everything + clean deny rules
 import readline from 'node:readline/promises';
-import { toolFamilies, registrationStatus, register, unregister, applyExclusions } from '../../lib/mcp.mjs';
+import {
+  toolFamilies, registrationStatus, register, unregister, applyExclusions, legacyRufloRemovalCommands,
+} from '../../lib/mcp.mjs';
 import { loadKitConfig, saveKitConfig } from '../../lib/config.mjs';
 import { ok, warn, fail, dim, bold } from '../../lib/output.mjs';
 
@@ -41,7 +43,7 @@ export async function run({ flags, positionals }) {
       warn("legacy 'ruflo' key registered at user scope — `x mcp pick` migrates that owned scope");
     }
     if (s.preservedLegacyScopes.length) {
-      warn(`legacy 'ruflo' key also registered at ${s.preservedLegacyScopes.join(', ')} scope — preserved because that configuration is project/user-owned`);
+      warn(`legacy 'ruflo' key also registered at ${s.preservedLegacyScopes.join(', ')} scope — preserved because agentic-kit did not write it; if unwanted, remove it: ${legacyRufloRemovalCommands(s.preservedLegacyScopes)}`);
     }
     console.log(`${bold('families')} (${families.size}, ${[...families.values()].reduce((n, l) => n + l.length, 0)} tools) ${dim(`· ${s.denyCount} denied`)}`);
     for (const [fam, tools] of [...families].sort((a, b) => b[1].length - a[1].length)) {
@@ -67,11 +69,11 @@ export async function run({ flags, positionals }) {
       rl.close();
       exclude = answer.split(',').map((s) => s.trim()).filter(Boolean);
     }
-    if (!(await register())) { fail('claude mcp add failed — is the claude CLI on PATH?'); return 1; }
+    if (!(await register()).ok) { fail('claude mcp add failed — is the claude CLI on PATH?'); return 1; }
     ok('claude-flow registered at user scope');
     const scoped = registrationStatus({ cwd: process.cwd() });
     if (scoped.preservedLegacyScopes.length) {
-      warn(`legacy 'ruflo' registration remains at ${scoped.preservedLegacyScopes.join(', ')} scope; inspect with \`claude mcp get ruflo\` before removing it explicitly`);
+      warn(`legacy 'ruflo' registration remains at ${scoped.preservedLegacyScopes.join(', ')} scope; inspect with \`claude mcp get ruflo\`, then remove it explicitly if unwanted: ${legacyRufloRemovalCommands(scoped.preservedLegacyScopes)}`);
     }
     const { denied, unknown } = applyExclusions(exclude);
     if (unknown.length) warn(`unknown families ignored: ${unknown.join(', ')}`);

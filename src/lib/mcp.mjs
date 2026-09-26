@@ -89,16 +89,21 @@ export function claudeMcpTopology({
   };
 }
 
-/** Registration state across Claude's local/project/user scopes. Only a legacy
- * USER registration is automatically migrated by register(); local and project
- * files may be user/team-owned and are disclosed but preserved. */
+/** Registration state across Claude's local/project/user scopes. Only the
+ * legacy USER registration agentic-kit wrote itself is automatically migrated
+ * by register() (legacyRufloDisposition — the one predicate both share); every
+ * other legacy entry, including a custom user-scope one, is disclosed but
+ * preserved. */
 export function registrationStatus({
   cwd = process.cwd(), home = os.homedir(), settingsFile = claudeSettingsPath(),
   userConfigFile = null, projectConfigFile = null,
 } = {}) {
   const topology = claudeMcpTopology({ cwd, home, userConfigFile, projectConfigFile });
-  const autoMigratableLegacyScopes = topology.legacyRufloScopes.filter((scope) => scope === 'user');
-  const preservedLegacyScopes = topology.legacyRufloScopes.filter((scope) => scope !== 'user');
+  const legacyAt = (scope) => topology.registrations.find((entry) => entry.name === 'ruflo' && entry.scope === scope);
+  const autoMigratableLegacyScopes = topology.legacyRufloScopes
+    .filter((scope) => legacyRufloDisposition(legacyAt(scope)) === 'replaceable');
+  const preservedLegacyScopes = topology.legacyRufloScopes
+    .filter((scope) => !autoMigratableLegacyScopes.includes(scope));
   return {
     claudeFlow: topology.claudeFlowScopes.length > 0,
     legacyRuflo: topology.legacyRufloScopes.length > 0,
@@ -129,6 +134,22 @@ function replaceableRufloRegistration(entry) {
   if (!canonicalRufloRegistration(entry) || entry.scope !== 'user') return false;
   return Object.keys(entry.env ?? {}).every((key) => key === 'AGENT_BROWSER_CONFIG');
 }
+
+/** Ownership of a legacy `ruflo`-keyed Claude MCP entry, shared by status
+ *  (registrationStatus) and register() so status never promises a migration
+ *  register() refuses (#237). 'replaceable' only for the exact form agentic-kit
+ *  itself registered — user scope, `ruflo mcp start`, env limited to ak's
+ *  AGENT_BROWSER_CONFIG (ADR-0016). Any other command path, argument list,
+ *  env key, or scope is 'preserved': presence alone never proves authorship.
+ *  @param {{scope?: string, command?: string, args?: string[], env?: object} | null | undefined} entry
+ *  @returns {'replaceable' | 'preserved'} */
+export function legacyRufloDisposition(entry) {
+  return replaceableRufloRegistration(entry) ? 'replaceable' : 'preserved';
+}
+
+/** The manual command(s) that remove preserved legacy `ruflo` entries. */
+export const legacyRufloRemovalCommands = (scopes) =>
+  scopes.map((scope) => `claude mcp remove ruflo -s ${scope}`).join('; ');
 
 function mcpAddArgs(name, entry) {
   const envArgs = Object.entries(entry.env ?? {}).flatMap(([key, value]) => ['-e', `${key}=${value}`]);
@@ -490,6 +511,11 @@ export function rufloCodexMcpStatus(cfg, { home = os.homedir() } = {}) {
   };
 }
 
+/** Register claude-flow at user scope, migrating ak's own legacy `ruflo` entry.
+ *  Returns `{ ok, preserved }`: `preserved` lists the user-scope legacy `ruflo`
+ *  entries left in place because legacyRufloDisposition says ak did not write
+ *  them ({name, scope, command, args} — never env values), so callers can name
+ *  the manual removal instead of implying a migration happened. */
 export async function register(cfg = { agentBrowser: true }, {
   runner = run, inspect = claudeMcpTopology,
 } = {}) {
@@ -499,24 +525,26 @@ export async function register(cfg = { agentBrowser: true }, {
   };
   const userEntries = inspect().registrations.filter((entry) => entry.scope === 'user');
   const current = userEntries.find((entry) => entry.name === 'claude-flow');
-  if (current && !replaceableRufloRegistration(current)) return false;
   const legacy = userEntries.find((entry) => entry.name === 'ruflo');
-  const removableLegacy = legacy && replaceableRufloRegistration(legacy) ? legacy : null;
+  const removableLegacy = legacy && legacyRufloDisposition(legacy) === 'replaceable' ? legacy : null;
+  const preserved = legacy && !removableLegacy
+    ? [{ name: legacy.name, scope: legacy.scope, command: legacy.command, args: legacy.args }] : [];
+  if (current && !replaceableRufloRegistration(current)) return { ok: false, preserved };
   const alreadyDesired = current && canonicalRufloRegistration(current)
     && JSON.stringify(current.env ?? {}) === JSON.stringify(desired.env);
   const removed = [];
   for (const entry of [removableLegacy, alreadyDesired ? null : current].filter(Boolean)) {
     if (!await removeUserRegistration(entry, runner)) {
       await restoreRegistrations(removed, runner);
-      return false;
+      return { ok: false, preserved };
     }
     removed.push(entry);
   }
-  if (alreadyDesired) return true;
+  if (alreadyDesired) return { ok: true, preserved };
   const added = await runner('claude', mcpAddArgs('claude-flow', desired));
-  if (added.code === 0) return true;
+  if (added.code === 0) return { ok: true, preserved };
   await restoreRegistrations(removed, runner);
-  return false;
+  return { ok: false, preserved };
 }
 
 export async function unregister() {

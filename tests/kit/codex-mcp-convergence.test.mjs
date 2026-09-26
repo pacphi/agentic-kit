@@ -174,7 +174,7 @@ test('fresh dual-host Codex provisioning and repeated refresh retain one canonic
     },
   });
   for (let i = 0; i < 3; i++) {
-    assert.equal(await provisionClaude(), true);
+    assert.equal((await provisionClaude()).ok, true);
     assert.equal((await provision()).ok, true);
   }
   assert.equal(adds, 1);

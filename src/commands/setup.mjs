@@ -15,7 +15,7 @@ import { reconcileGuidance } from '../lib/blocks.mjs';
 import { captureProjectGuidance, reconcileProjectGuidance } from '../lib/project-guidance.mjs';
 import {
   register as mcpRegister, applyExclusions, registrationStatus, agentBrowserMcpConfigured,
-  codexMcpTopology, codexMcpRepairPlan, repairCodexMcpTopology,
+  codexMcpTopology, codexMcpRepairPlan, repairCodexMcpTopology, legacyRufloRemovalCommands,
 } from '../lib/mcp.mjs';
 import { reconcileCodexMcp } from '../lib/codex-mcp-reconcile.mjs';
 import { alignHosts } from './x/host-align.mjs';
@@ -838,10 +838,14 @@ async function finalizeSetupGuidanceAndMcp(cfg, pkgRoot, flags) {
     || !agentBrowserMcpConfigured(existingMcp.effective.claudeFlow, cfg.agentBrowser !== false)
   );
   if (wantMcp && await ask('Register the ruflo MCP server at user scope (schemas load on demand)?', true, flags.yes)) {
-    if (await mcpRegister(cfg)) {
+    const reg = await mcpRegister(cfg);
+    if (reg.ok) {
       const { denied } = applyExclusions(cfg.mcp.excludeFamilies ?? []);
       ok(`MCP registered${denied ? ` (${denied} tool(s) denied per kit.json)` : ''} — exclude families anytime: ak x mcp pick`);
     } else warn('claude mcp add failed — run: ak x mcp pick');
+    for (const entry of reg.preserved) {
+      warn(`custom 'ruflo' MCP registration preserved (${entry.scope} scope) — not agentic-kit's registration; if unwanted, remove it: ${legacyRufloRemovalCommands([entry.scope])}`);
+    }
   }
 }
 
