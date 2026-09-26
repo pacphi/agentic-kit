@@ -23,6 +23,11 @@ ruflo security scan
 ruflo doctor
 ```
 
+Project memory can be two stores: `ruflo memory ...` reads `.swarm/memory.db`, the MCP
+`memory_*` tools use `.swarm/agentdb-memory.db` (native bridge active). A read covers one;
+if a CLI search finds nothing, repeat with `--path <project>/.swarm/agentdb-memory.db` or
+use MCP `memory_search`.
+
 Read `~/.config/ruflo/ruflo-reference-full.md` or run `ruflo <cmd> --help` for
 commands and flags. Reconcile upgrades with `ak sync`; inspect effective health with
 `ak status`.

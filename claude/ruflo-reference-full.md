@@ -54,6 +54,14 @@ ruflo memory delete -k "outdated-key" -n patterns
 ruflo memory cleanup            # remove stale/expired
 ```
 
+**Two memory stores.** A project can hold two corpora: `.swarm/memory.db` (what
+`ruflo memory ...` reads) and `.swarm/agentdb-memory.db` (what the MCP `memory_*`
+tools read and write when Ruflo's native bridge is active). A read through one does
+not cover the other, and a bare count from `memory list` describes one file. If a CLI
+search or retrieve finds nothing, or names an unread sibling store, repeat it with
+`--path <project>/.swarm/agentdb-memory.db` or use MCP `memory_search`. Never delete
+or merge either file. `ak x verify memory` shows the routing on this machine.
+
 **Use `--smart`** for query expansion + RRF + MMR + recency boosting.
 **Use `--build-hnsw`** the first time you search a populated namespace (one-time
 indexing; measure any speedup on your own corpus).
@@ -395,8 +403,8 @@ For uninstalling ruflo from a project.
 
 | Var | Purpose |
 |---|---|
-| `CLAUDE_FLOW_DB_PATH` | Override memory DB path |
-| `CLAUDE_FLOW_MEMORY_PATH` | Memory dir (default `cwd/.swarm/`) |
+| `CLAUDE_FLOW_DB_PATH` | Override the DB file for `ruflo memory ...` (the MCP `memory_*` tools do not read it) |
+| `CLAUDE_FLOW_MEMORY_PATH` | Memory dir for both the CLI and MCP tools (default `cwd/.swarm/`) |
 | `CLAUDE_FLOW_MODE` | `v3` enables hierarchical-mesh |
 | `CLAUDE_FLOW_HOOKS_ENABLED` | Toggle hooks subsystem |
 | `CLAUDE_FLOW_ENCRYPT_AT_REST` | Enable session/memory encryption |
@@ -407,7 +415,7 @@ For uninstalling ruflo from a project.
 
 ```text
 Need to ... ?
-├─ Search past work / decisions      → ruflo memory search -q "..." --smart
+├─ Search past work / decisions      → ruflo memory search -q "..." --smart (empty? also --path .swarm/agentdb-memory.db)
 ├─ Store a decision/pattern          → ruflo memory store -k K --value V -n patterns
 ├─ Pick the right agent for a task   → ruflo route "task description"
 ├─ Run a security audit              → ruflo security scan && ruflo hooks worker dispatch -t audit

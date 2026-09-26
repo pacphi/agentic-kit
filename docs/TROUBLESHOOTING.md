@@ -230,13 +230,39 @@ requires `name` and `description` and describes host skill discovery.
 
 Two files can contain different project corpora:
 
-- `.swarm/memory.db`, historically the compatibility store.
-- `.swarm/agentdb-memory.db`, the native bridge's default sibling.
+- `.swarm/memory.db` is read and written by `ruflo memory ...`. The CLI picks its
+  file from `--path`, then `CLAUDE_FLOW_DB_PATH`, then the memory root.
+- `.swarm/agentdb-memory.db` is used by the MCP `memory_*` tools through the
+  native bridge. It is derived from the memory root (`CLAUDE_FLOW_MEMORY_PATH`,
+  else `<cwd>/.swarm`), and `CLAUDE_FLOW_DB_PATH` is not consulted. Ruflo derives
+  it separately so an encrypted `memory.db` never reaches native SQLite.
 
-The filenames do not prove the active backend: native code can also open
-`memory.db`. Status now names the files and keeps backend/writer/routing unknown
-unless separately verified. File presence alone does not prove lost data or
+`ruflo memory init` may also sync a copy to `.claude/memory.db`; treat it as a third
+file when inventorying a project. File presence alone does not prove lost data or
 correct cross-client routing.
+
+Agentic-kit pins the project cwd and a `CLAUDE_FLOW_DB_PATH` inside `<root>/.swarm`,
+so both interfaces land in the same directory. A pin anywhere else moves only the CLI:
+the MCP tools ignore it, and when `<cwd>/.swarm` is not initialized they fail with
+"Database not initialized" (seen on 3.42.4 and 3.45.0).
+
+The routing below is observed, not documented by Ruflo, and it changes between
+releases: on 3.39.2 a CLI write was not visible to MCP at all
+([results](audits/ruflo-memory-route-results.jsonl)). `ak status` therefore states it
+only for the exact `@claude-flow/cli` release and platform it was observed on,
+currently 3.42.4 and 3.45.0 on macOS, and keeps routing unverified everywhere else:
+
+- An MCP write is not visible to a CLI read. A CLI write is also written to
+  `agentdb-memory.db`, so MCP can read it.
+- Without the native bridge (the default on Windows, or after a bridge init failure)
+  MCP falls back to `memory.db` and the two interfaces can appear aligned.
+  `ak x verify memory` prints the MCP backend it saw.
+- CLI `retrieve`, `search` and `list` name the sibling store they did not read when
+  they can open it. A bare count still describes one file.
+- Neither interface reads both stores, so keys only in `memory.db` are invisible to
+  MCP and the reverse.
+
+A newer release is not evidence of a fix until `ak x verify memory` shows it.
 
 `ak x verify memory` runs in a throwaway project with its own memory root. After its
 CLI store, retrieve and purge proof, it writes one key through the CLI and one through
@@ -246,12 +272,6 @@ suite. A default `ruflo memory purge` clears `memory.db` only and still reports
 success, so the suite clears the sibling of its own throwaway project with `--path`;
 do not do that to a live corpus without a backup and quiesced writers. None of this
 establishes access to an existing corpus. `ak status --live` runs only the CLI proof.
-
-Inspection of installed Ruflo 3.39.2 found a concrete path split: CLI memory
-commands pass a resolved `dbPath`, defaulting to `memory.db`; MCP calls omit that
-argument, and the native bridge defaults to `agentdb-memory.db`. Agentic-kit pins
-the project cwd and compatibility environment path, but that environment variable
-is not a universal native MCP filename override in this version.
 
 For an intentional CLI lookup, choose the file explicitly after checking your
 installed `ruflo memory retrieve --help`:
@@ -268,10 +288,10 @@ inspect counts, schemas, and key presence without printing stored values.
 
 Preserve both files and their live WAL state. Do not delete the smaller file,
 globally repin the environment, or merge automatically: it may have unique keys,
-and writers may still be active. A durable upstream fix needs one path-resolution
-contract shared by CLI/MCP/backend selection, registries keyed by resolved path,
-and cross-process tests over existing disjoint corpora. Migration requires a
-separate, reviewed backup, conflict-resolution, and writer-quiescence procedure.
+and writers may still be active. Migration needs a separate, reviewed backup,
+conflict-resolution, and writer-quiescence procedure. Upstream tracking:
+[ruvnet/ruflo#3196](https://github.com/ruvnet/ruflo/issues/3196) and
+[pacphi/agentic-kit#213](https://github.com/pacphi/agentic-kit/issues/213).
 
 [Local investigation and upstream boundary](audits/plugin-memory-status-followup.md)
 records the source evidence and counts observed on 2026-09-09.
