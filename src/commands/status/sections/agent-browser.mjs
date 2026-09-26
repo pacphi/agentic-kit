@@ -18,10 +18,13 @@ export default {
         `sync installs exact Ruflo-compatible agent-browser ${state.target}`)];
     }
     if (!state.package.compatible) {
-      const owner = state.package.ownership === 'agentic-kit' ? 'Kit-owned' : 'external';
-      return [row('agent-browser', 'warn',
-        `${owner} agent-browser ${state.package.version} is outside Ruflo ${AGENT_BROWSER_RUFLO_RANGE}; preserved`,
-        state.package.ownership === 'agentic-kit' ? 'sync restores the receipt-owned compatible version' : null)];
+      const kitOwned = state.package.ownership === 'agentic-kit';
+      const preserved = `${kitOwned ? 'Kit-owned' : 'external'} agent-browser ${state.package.version} is outside Ruflo ${AGENT_BROWSER_RUFLO_RANGE}; preserved`;
+      // ADR-0043 §3: a user-managed install is never replaced, so there is no sync fix;
+      // the row names the human options instead (#237).
+      return [row('agent-browser', 'warn', kitOwned ? preserved
+        : `${preserved}. Ruflo's browser tools may not work with this version. Options: install a Ruflo-compatible agent-browser 0.27.x yourself, or set agentBrowser: false in kit.json to stop ak managing the executor (Ruflo MCP then no longer gets ak's trusted browser config or readiness checks)`,
+      kitOwned ? 'sync restores the receipt-owned compatible version' : null)];
     }
     if (!state.package.native) {
       return [row('agent-browser', 'fail',

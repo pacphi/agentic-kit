@@ -101,7 +101,8 @@ explicit index purge can still destroy imported-only material whose sole copy is
 Ruflo's current browser executor without making it a companion or installing another plugin/skill
 catalog. Its exact compatible package, native binary, trusted MCP-only config, and browser payload
 are separate facts. Existing compatible packages stay external; incompatible external packages
-are preserved. Normal detection never runs `agent-browser doctor` or launches Chrome. Package
+are preserved, and status lists the options: install a compatible 0.27.x yourself, or set
+`agentBrowser: false`. Normal detection never runs `agent-browser doctor` or launches Chrome. Package
 removal is receipt-gated, while browser/session/profile data is always preserved.
 
 ## Managed ruflo components
