@@ -8,8 +8,8 @@
   `ruflo`-keyed Claude registration is agentic-kit's own (user scope, `ruflo mcp start`, env limited
   to `AGENT_BROWSER_CONFIG`); status and `register()` share it, so any other user-scope form is
   reported as preserved with its manual removal command instead of a sync migration (#237).
-- **Updated:** 2026-09-26 — project memory: route verification, release-gated routing claims,
-  setup probe cleanup, and canonical and stray stores; see "Amendment — 2026-09-26: project
+- **Updated:** 2026-09-26 — project memory: route proof, gated routing claims, setup probe
+  cleanup, stray stores, backup and distillation age; see "Amendment — 2026-09-26: project
   memory" at the end.
 - **Earlier update:** 2026-09-23 — the Claude memory pin is receipt-owned and removed by uninstall (ADR-0058).
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
@@ -303,7 +303,14 @@ every launch contract pins (the repository root, else the folder), names both fi
 observable entries, with each file's size, live WAL, largest namespace and its expiry; a file with
 no `memory_entries` table yet is empty, not unreadable. Stray stores (a Ruflo store outside the
 canonical pair, `./agentdb.db`, `./agentdb.rvf`, `./ruvector.db`, a `.agentic-qe/` below the root)
-are listed by owner as information only, never as a warning or a sync fix. It states which
+are listed by owner as information only, never as a warning or a sync fix. Backup and
+distillation stay Ruflo's jobs: status reads their age from Ruflo's own evidence (the daemon's
+`.claude-flow/metrics/{backup,consolidation}.json` and the newest `.swarm/backups/memory-*.db`)
+and never runs either. Both daemon workers cover `memory.db` only, so an `agentdb-memory.db` gets
+an information row with the manual backup command. A backup older than 48 hours, or none, warns
+only when no daemon runs for the project, and the `daemons` row is information, not "ok", for a
+project with `memory.db` and no daemon, naming any setting that turns off Ruflo's start-on-use.
+Starting a daemon is never a sync repair. It states which
 interface reads which store (CLI `memory.db`, MCP `agentdb-memory.db` with the native bridge) only
 for the exact `@claude-flow/cli` release and platform where that was observed, and otherwise leaves
 routing unverified. Setup and `ak x verify memory` prove persistence by storing
@@ -617,3 +624,6 @@ work under ADR-0011's own validation requirements.
 - **Canonical and stray stores.** Status also names the canonical store at the pinned root with
   each file's size, WAL, largest namespace and expiry, treats a store with no memory table as
   empty, and reports stray stores for information only.
+- **Backup and distillation age.** Status reports the age of Ruflo's last memory backup and
+  distillation, and the `daemons` row is no longer "ok" when a project with memory has no daemon
+  to run them.

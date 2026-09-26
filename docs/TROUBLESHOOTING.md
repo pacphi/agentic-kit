@@ -51,6 +51,7 @@ ak sync             # apply it
 | The right side of Codex's status line is missing | Codex has one width-constrained native line | Widen the terminal or choose the compact preset with `ak x statusline codex native` |
 | Want the rich Ruflo/SONA/AQE display inside Codex | Codex currently accepts built-in status-line fields only, not a command-backed renderer | Keep the rich footer in Claude Code; see [Managed Codex status line](CODEX-STATUSLINE.md) for the current boundary |
 | Too many `⚙` daemons / stale daemons | One daemon per active project is normal (local-only workers, $0). Stale = workspace deleted or past the 12h TTL | `ak x daemon-gc --kill`; `sync` also reaps (and verifies the pid really is a ruflo daemon before killing) |
+| `status` warns that the memory backup is old, or `daemons` says none runs for this project | Ruflo backs up and distills project memory only inside the project's daemon, which ends itself after 12 hours. Ruflo's start-on-use is off when `.claude/settings.json` has `claudeFlow.daemon.autoStart: false` (`ruflo init` writes it; `ak setup` keeps it) | Run `ruflo daemon start` in the project root, or `ruflo memory backup` for a one-off copy; see [Memory backup and distillation](#memory-backup-and-distillation) |
 | Want to change which MCP tool families are callable | Exclusions are `permissions.deny` rules, persisted in kit.json | `ak x mcp pick` (re-runnable); `x mcp status` shows the inventory; `x mcp off` unregisters |
 | `status` says a legacy `ruflo`-keyed MCP registration is preserved | The entry is not the `ruflo mcp start` registration agentic-kit wrote (another path, `ruflo mcp`, a custom env key, or a project/local scope), so `ak sync` leaves it alone. With `claude-flow` also registered, Claude loads the Ruflo tools twice | Inspect it with `claude mcp get ruflo`, then run the command `status` prints (for example `claude mcp remove ruflo -s user`) if you don't need it |
 | opencode: Ruflo/AQE are not connected, compact `ak_*` tools are missing, or `ak-specialist` is unavailable after `ak setup --opencode` / `ak sync` | opencode loads config, plugins, MCP servers, and agents **once at startup** — a running session never sees new wiring | quit and restart opencode; `ak status` shows MCP connectivity, compact gateway, lifecycle plugin, skill, and specialist state separately |
@@ -330,6 +331,42 @@ Ruflo's rotated backups in `.swarm/backups/` are not strays. The search skips
 `node_modules`, `.git` and the contents of dot folders such as `.claude/worktrees`,
 and says so when it stops early. Before you delete a stray, inspect it read-only
 as described above. It may hold rows that exist nowhere else.
+
+### Memory backup and distillation
+
+Ruflo, not ak, backs up and distills project memory. Both jobs are workers inside
+the project's Ruflo daemon. The backup worker writes a snapshot to `.swarm/backups/`
+(the last seven are kept) about 10 minutes after the daemon starts, then at most once
+a day. Distillation runs every 30 minutes. `ak status` shows when each last ran,
+from the files Ruflo writes in `.claude-flow/metrics/` and the newest snapshot in
+`.swarm/backups/`:
+
+- A backup older than 48 hours, or none at all, is a warning only when no daemon
+  runs for the project. A failed attempt is always a warning.
+- An old distillation is information only. A failed or corrupt run is a warning.
+- The `daemons` row is information, not ok, when the project has memory and no
+  daemon, and it names the setting that stops Ruflo starting one on use.
+
+The daemon ends itself after 12 hours, sooner if its workers stop running. `ak setup`
+starts one, but Ruflo's start-on-use is off in a project set up by `ruflo init` or
+`ak setup` (`claudeFlow.daemon.autoStart: false` in `.claude/settings.json`). Backups
+therefore stop within a day of setup unless you start the daemon again:
+
+```bash
+ruflo daemon start          # in the project root; runs both workers until it ends
+ruflo memory backup         # a one-off snapshot of .swarm/memory.db
+```
+
+Both jobs cover `.swarm/memory.db` only. Nothing in Ruflo backs up or distills
+`.swarm/agentdb-memory.db`, the store the MCP tools write. Back it up into its own
+folder, because rotation keeps only the newest snapshots in the destination:
+
+```bash
+ruflo memory backup --db .swarm/agentdb-memory.db --dir .swarm/backups/agentdb
+```
+
+This takes a consistent snapshot, WAL included, and leaves `memory.db`'s snapshots
+alone (checked on Ruflo 3.45.0). `ak status` shows the age of the newest one.
 
 ## AQE embedding backend unavailable or provenance unverified
 

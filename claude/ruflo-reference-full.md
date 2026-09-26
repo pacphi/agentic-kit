@@ -375,6 +375,11 @@ machine-wide budget above (defaults: 1 concurrent, 2/hour, 12/day; override with
 `RUFLO_AI_MAX_CONCURRENT` / `RUFLO_AI_MAX_PER_HOUR` / `RUFLO_AI_MAX_PER_DAY`).
 The daemon self-terminates after `RUFLO_DAEMON_TTL_SECS` (default 12h); the kit's
 `ak x daemon-gc` and shell auto-reaper remain as an independent backstop.
+Its workers also take Ruflo's memory backup (`.swarm/memory.db` only, at most daily)
+and distillation (every 30 min). Ruflo's start-on-use is off in a project where
+`.claude/settings.json` has `claudeFlow.daemon.autoStart: false` (`ruflo init` writes
+it, `ak setup` keeps it), so run `ruflo daemon start` to resume them; `ak status`
+shows when each last ran.
 
 ### Cleanup
 

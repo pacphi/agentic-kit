@@ -197,6 +197,42 @@ export async function listDaemons({ cwd = process.cwd() } = {}) {
   return [...byPid.values()];
 }
 
+/** True when a live process holds `<root>/.claude-flow/daemon.pid`, Ruflo's
+ *  single-instance pidfile for the project's daemon (daemon-autostart.js
+ *  isDaemonAlive, 3.45.0). Read-only: unlike Ruflo, never removes a stale file. */
+export function projectDaemonAlive(root) {
+  try {
+    const pid = Number.parseInt(fs.readFileSync(path.join(root, '.claude-flow', 'daemon.pid'), 'utf8'), 10);
+    return Number.isInteger(pid) && pid > 0 && alive(pid);
+  } catch {
+    return false;
+  }
+}
+
+/** Why Ruflo will not start this project's daemon when a `ruflo` command runs
+ *  there, or null. Mirrors daemon-autostart.js autostartDisabled (3.45.0, #3278):
+ *  RUFLO_DAEMON_AUTOSTART=0|false|no|off, or `autostart`/`autoStart: false` in
+ *  claude-flow.config.json `daemon` or .claude/settings.json `claudeFlow.daemon`.
+ *  `ruflo init` writes the settings key false (init/settings-generator.js) and
+ *  `ak setup` turns a true back to false. The result names the setting found. */
+export function rufloAutostartOff(root, env = process.env) {
+  if (/^(0|false|no|off)$/i.test(env.RUFLO_DAEMON_AUTOSTART ?? '')) {
+    return 'RUFLO_DAEMON_AUTOSTART is off in this environment';
+  }
+  /** @type {Array<{file: string, pick: (config: any) => any, prefix: string}>} */
+  const sources = [
+    { file: 'claude-flow.config.json', pick: (c) => c?.daemon, prefix: 'daemon' },
+    { file: '.claude/settings.json', pick: (c) => c?.claudeFlow?.daemon, prefix: 'claudeFlow.daemon' },
+  ];
+  for (const { file, pick, prefix } of sources) {
+    const daemon = pick(readJsonSafe(path.join(root, ...file.split('/'))));
+    for (const key of ['autostart', 'autoStart']) {
+      if (daemon?.[key] === false) return `${file} ${prefix}.${key}: false`;
+    }
+  }
+  return null;
+}
+
 /** Stale = workspace gone OR older than ttlSecs (0 disables age rule). */
 export function staleDaemons(daemons, ttlSecs = Number(process.env.RUFLO_DAEMON_TTL_SECS ?? 43200)) {
   return daemons.filter((d) =>

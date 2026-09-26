@@ -335,10 +335,10 @@ const ENTRIES = Object.freeze([
     name: 'Background daemon',
     tagline: 'Local workers that keep things tidy between sessions.',
     paragraph:
-      'A background process ruflo runs between your sessions for upkeep — learning from '
-      + 'finished work, tidying up — staffed by local workers that cost nothing. Anything '
-      + 'that would spend money on a model stays opt-in, and each daemon expires on its '
-      + 'own. List or stop them with `ak x daemon-gc`.',
+      'A background process ruflo runs for upkeep: backing up project memory, distilling '
+      + 'what agents recorded, and learning from finished work, on local workers that cost '
+      + 'nothing. Paid model work stays opt-in. Each daemon ends on its own, so start one '
+      + 'with `ruflo daemon start` to keep backups going. List or stop them with `ak x daemon-gc`.',
     links: Object.freeze([]),
     icon: MONOGRAM('D', '--info'),
     subsystem: 'daemons',

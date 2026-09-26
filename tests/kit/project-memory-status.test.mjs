@@ -205,3 +205,110 @@ test('a hoisted @claude-flow/cli is used only when ruflo has no nested copy, and
   withGlobalRoot(t, { ruflo: '3.45.0' });
   assert.match(coexist(await section.collect({ cwd, platform: 'darwin' })).message, UNVERIFIED);
 });
+
+// ── backup and distillation age (Ruflo daemon workers; audit H D9) ─────────
+const NOW = Date.parse('2026-09-26T12:00:00.000Z');
+const HOUR = 60 * 60 * 1000;
+
+function maintained(t, { backupAgoMs, distillAgoMs, distill = {}, daemon = false, mcpStore = false, mcpSnapshotAgoMs } = {}) {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-memory-maint-'));
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  rufloStore(path.join(cwd, '.swarm', 'memory.db'), [['default']]);
+  if (mcpStore) rufloStore(path.join(cwd, '.swarm', 'agentdb-memory.db'), [['commands']]);
+  const metrics = path.join(cwd, '.claude-flow', 'metrics');
+  fs.mkdirSync(metrics, { recursive: true });
+  if (backupAgoMs !== undefined) {
+    fs.writeFileSync(path.join(metrics, 'backup.json'), JSON.stringify({ timestamp: new Date(NOW - backupAgoMs).toISOString(), backedUp: true }));
+  }
+  if (distillAgoMs !== undefined) {
+    fs.writeFileSync(path.join(metrics, 'consolidation.json'), JSON.stringify({
+      timestamp: new Date(NOW - distillAgoMs).toISOString(), distillationEnabled: true, corrupt: false, ...distill,
+    }));
+  }
+  if (daemon) fs.writeFileSync(path.join(cwd, '.claude-flow', 'daemon.pid'), String(process.pid));
+  if (mcpSnapshotAgoMs !== undefined) {
+    const dir = path.join(cwd, '.swarm', 'backups', 'agentdb');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'memory-2026-09-26T09-00-00-000Z.db');
+    fs.writeFileSync(file, 'x');
+    fs.utimesSync(file, new Date(NOW - mcpSnapshotAgoMs), new Date(NOW - mcpSnapshotAgoMs));
+  }
+  return cwd;
+}
+
+const backupRow = (rows) => rows.find((r) => /memory\.db backup/.test(r.message));
+const distillRow = (rows) => rows.find((r) => /distillation/.test(r.message) && !/cover memory\.db only/.test(r.message));
+const gapRow = (rows) => rows.find((r) => /cover memory\.db only/.test(r.message));
+
+test('a recent memory.db backup and distillation are reported with their age as information', async (t) => {
+  const rows = await section.collect({ cwd: maintained(t, { backupAgoMs: 5 * HOUR, distillAgoMs: 20 * 60_000 }), now: NOW });
+  assert.equal(backupRow(rows).level, 'info');
+  assert.match(backupRow(rows).message, /last memory\.db backup 5h ago/);
+  assert.equal(distillRow(rows).level, 'info');
+  assert.match(distillRow(rows).message, /last daemon distillation 20m ago/);
+  assert.ok(rows.every((r) => r.fix === null), 'nothing here is a sync repair');
+});
+
+test('a stale backup with no daemon for this project warns and names both remedies', async (t) => {
+  const rows = await section.collect({ cwd: maintained(t, { backupAgoMs: 16 * 24 * HOUR, distillAgoMs: 15 * 24 * HOUR }), now: NOW });
+  const backup = backupRow(rows);
+  assert.equal(backup.level, 'warn');
+  assert.equal(backup.fix, null);
+  assert.match(backup.message, /last memory\.db backup 16d ago/);
+  assert.match(backup.message, /only while this project's daemon runs/);
+  assert.match(backup.message, /`ruflo daemon start`/);
+  assert.match(backup.message, /`ruflo memory backup`/);
+  const distill = distillRow(rows);
+  assert.equal(distill.level, 'info', 'an old distillation alone is not a warning');
+  assert.match(distill.message, /15d ago.*no daemon is running/);
+});
+
+test('no backup ever recorded warns only when no daemon runs to take one', async (t) => {
+  const idle = await section.collect({ cwd: maintained(t), now: NOW });
+  assert.equal(backupRow(idle).level, 'warn');
+  assert.match(backupRow(idle).message, /no memory\.db backup recorded/);
+  assert.match(distillRow(idle).message, /no daemon distillation recorded/);
+  const running = await section.collect({ cwd: maintained(t, { daemon: true }), now: NOW });
+  assert.equal(backupRow(running).level, 'info');
+  assert.match(backupRow(running).message, /daemon is running/);
+});
+
+test('a stale backup while this project\'s daemon runs is information: the daemon takes the next one', async (t) => {
+  const rows = await section.collect({ cwd: maintained(t, { backupAgoMs: 3 * 24 * HOUR, daemon: true }), now: NOW });
+  assert.equal(backupRow(rows).level, 'info');
+  assert.match(backupRow(rows).message, /3d ago.*daemon is running/);
+});
+
+test('a failed backup attempt or distillation run is a warning with its reason', async (t) => {
+  const cwd = maintained(t, { distillAgoMs: HOUR, distill: { corrupt: true, skipped: 'malformed' } });
+  fs.writeFileSync(path.join(cwd, '.claude-flow', 'metrics', 'backup.json'),
+    JSON.stringify({ timestamp: new Date(NOW - 2 * HOUR).toISOString(), backedUp: false, skipped: 'backup failed: SQLITE_BUSY' }));
+  const rows = await section.collect({ cwd, now: NOW });
+  assert.equal(backupRow(rows).level, 'warn');
+  assert.match(backupRow(rows).message, /failed 2h ago: backup failed: SQLITE_BUSY/);
+  assert.equal(distillRow(rows).level, 'warn');
+  assert.match(distillRow(rows).message, /corrupt/);
+});
+
+test('the MCP store gets an information row: Ruflo backs up and distills memory.db only', async (t) => {
+  const bare = await section.collect({ cwd: maintained(t, { backupAgoMs: HOUR, mcpStore: true }), now: NOW });
+  const gap = gapRow(bare);
+  assert.equal(gap.level, 'info');
+  assert.equal(gap.fix, null);
+  assert.match(gap.message, /agentdb-memory\.db/);
+  assert.match(gap.message, /ruflo memory backup --db \.swarm\/agentdb-memory\.db --dir \.swarm\/backups\/agentdb/);
+  const saved = await section.collect({ cwd: maintained(t, { backupAgoMs: HOUR, mcpStore: true, mcpSnapshotAgoMs: 3 * HOUR }), now: NOW });
+  assert.match(gapRow(saved).message, /last manual backup in \.swarm\/backups\/agentdb 3h ago/);
+  const without = await section.collect({ cwd: maintained(t, { backupAgoMs: HOUR }), now: NOW });
+  assert.equal(gapRow(without), undefined, 'no MCP store, no gap row');
+});
+
+test('an MCP-only project gets the gap row but no memory.db backup or distillation rows', async (t) => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-memory-mcp-only-'));
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  rufloStore(path.join(cwd, '.swarm', 'agentdb-memory.db'), [['commands']]);
+  const rows = await section.collect({ cwd, now: NOW });
+  assert.ok(gapRow(rows));
+  assert.equal(backupRow(rows), undefined);
+  assert.equal(distillRow(rows), undefined);
+});

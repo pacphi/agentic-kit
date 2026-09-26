@@ -12,7 +12,18 @@
 // (project-memory.mjs findStrayMemoryStores) are information only, never a
 // warning or a sync fix: ak leaves them in place, and a warning with no way to
 // resolve it would stay amber forever (#237/#238 comments, audit N4).
+//
+// Backup and distillation ages come from what Ruflo's daemon workers and
+// `ruflo memory backup` write (memory-maintenance.mjs). A backup older than
+// 48 h, or none, warns only when no daemon runs for this project to take the
+// next one; a failed attempt always warns. Distillation age alone never warns:
+// the daemon ends itself on its TTL, so that would be amber forever. Both jobs
+// cover memory.db only, so an agentdb-memory.db gets an information row with
+// the manual backup command (upstream gap).
 import path from 'node:path';
+import { projectDaemonAlive } from '../../../lib/daemons.mjs';
+import { formatLiveCheckAge as ago } from '../../../lib/live-check-evidence.mjs';
+import { memoryMaintenanceStatus } from '../../../lib/memory-maintenance.mjs';
 import { findStrayMemoryStores, projectMemoryStatus } from '../../../lib/project-memory.mjs';
 import { memoryProjectRoot } from '../../../lib/ruflo-memory.mjs';
 import { installedRoutingVersion, twoStoreMessage } from '../../../lib/ruflo-memory-contract.mjs';
@@ -77,9 +88,49 @@ function strayRows(root) {
   return rows;
 }
 
+function backupRow({ lastAt, ageMs, stale, failed }, daemon, now) {
+  const last = lastAt === null ? null : `last memory.db backup ${ago(ageMs)}`;
+  if (failed) {
+    return row('memory', 'warn', `last memory.db backup attempt failed ${ago(now - failed.at)}: ${failed.reason}`
+      + (lastAt === null ? '' : `; the last good one was ${ago(ageMs)}`));
+  }
+  if (!stale) return row('memory', 'info', `${last} (Ruflo's daemon backs it up at most daily; \`ruflo memory backup\` on demand)`);
+  if (daemon) {
+    return row('memory', 'info', `${last ?? 'no memory.db backup recorded yet'}; this project's daemon is running and takes the next one`);
+  }
+  return row('memory', 'warn', `${last ?? 'no memory.db backup recorded'}; Ruflo backs it up at most daily and only while this project's `
+    + 'daemon runs, and none is running: start one with `ruflo daemon start`, or run `ruflo memory backup` from the project root');
+}
+
+function distillRow(distillation, daemon) {
+  const idle = daemon ? '' : '; no daemon is running for this project';
+  if (!distillation) return row('memory', 'info', `no daemon distillation recorded for memory.db yet${idle}`);
+  const age = ago(distillation.ageMs);
+  if (distillation.failed) return row('memory', 'warn', `last daemon distillation ${age} failed: ${distillation.failed}`);
+  if (!distillation.enabled) return row('memory', 'info', `daemon distillation is off (RUFLO_DAEMON_NO_DISTILL); last recorded ${age}`);
+  return row('memory', 'info', `last daemon distillation ${age} (every 30 min while this project's daemon runs${idle})`);
+}
+
+function maintenanceRows(root, memory, now) {
+  const present = (kind) => memory.stores.find((store) => store.kind === kind && store.present);
+  const status = memoryMaintenanceStatus(root, { now });
+  const daemon = projectDaemonAlive(root);
+  const rows = [];
+  if (present('sqljs')) rows.push(backupRow(status.backup, daemon, now), distillRow(status.distillation, daemon));
+  const native = present('native-agentdb');
+  if (native) {
+    rows.push(row('memory', 'info', `Ruflo's backup and distillation cover memory.db only; agentdb-memory.db `
+      + `(${formatBytes((native.sizeBytes ?? 0) + (native.walBytes ?? 0))} with WAL, the MCP store) gets neither (upstream gap)`
+      + (status.mcpStoreBackup
+        ? `; last manual backup in .swarm/backups/agentdb ${ago(status.mcpStoreBackup.ageMs)}`
+        : '. Back it up from the project root with `ruflo memory backup --db .swarm/agentdb-memory.db --dir .swarm/backups/agentdb`')));
+  }
+  return rows;
+}
+
 export default {
   id: 'memory',
-  async collect({ cwd, rufloVersion = installedRoutingVersion(), platform = process.platform }) {
+  async collect({ cwd, rufloVersion = installedRoutingVersion(), platform = process.platform, now = Date.now() }) {
     const rows = [];
     try {
       const root = memoryProjectRoot(cwd);
@@ -94,6 +145,7 @@ export default {
             : `${path.basename(store.file)} store is unreadable (${store.file}); existing-corpus access unverified`));
         }
         if (memory.secondary) rows.push(row('memory', 'warn', twoStoreMessage(rufloVersion, platform)));
+        rows.push(...maintenanceRows(root, memory, now));
       }
       rows.push(...strayRows(root));
     } catch (e) {
