@@ -641,8 +641,8 @@
     <div class="drawer">
       <div class="front"><span class="dno">Drawer B</span><h4>agentic-qe</h4></div>
       <div class="inside">
-        <p>A <strong>quality-engineering fleet</strong>: AI test generation, coverage analysis, quality gates, security scans. The kit keeps its companion <code>agentdb</code> CLI pinned to ruflo's bundled version so the shared learning store stays coherent.</p>
-        <div class="bits"><span>test generation</span><span>coverage</span><span>quality gates</span><span>agentdb pinned</span></div>
+        <p>A <strong>quality-engineering fleet</strong>: AI test generation, coverage analysis, quality gates, security scans.</p>
+        <div class="bits"><span>test generation</span><span>coverage</span><span>quality gates</span><span>security scans</span></div>
       </div>
     </div>
     <div class="drawer">
@@ -778,7 +778,6 @@
   <b class="ok">✓ security</b>    @claude-flow/security + aidefence present (defend functional)
   <b class="ok">✓ learning</b>    1337 patterns learned, 1400 trajectories (this project)
   <b class="ok">✓ aqe</b>         agentic-qe initialized here; RVF store healthy
-  <b class="ok">✓ agentdb</b>     agentdb 3.0.0-alpha.17 (coherent with ruflo)
   <b class="ok">✓ mcp</b>         claude-flow registered (user scope), all families allowed
   <b class="ok">✓ hosts</b>       claude 2.1.226 (external — self-managed)
   <b class="ok">✓</b>             claude auth: oauth (subscription, $0)
@@ -848,7 +847,7 @@
       <div class="when">Once per machine</div>
       <div class="node" data-scope="Machine scope">
         <h4>Global tools, built properly</h4>
-        <p>Installs/updates ruflo, agentic-qe, and the pinned <code>agentdb</code> CLI globally — shepherding native SQLite builds past npm ≥ 11.17's <code>allow-scripts</code> gate (the usual silent-breakage culprit). Installs any enabled host CLI that's entirely absent.</p>
+        <p>Installs/updates ruflo (AgentDB ships inside it) and agentic-qe globally — shepherding native SQLite builds past npm ≥ 11.17's <code>allow-scripts</code> gate (the usual silent-breakage culprit). Installs any enabled host CLI that's entirely absent.</p>
         <div class="bits"><span>npm i -g, healed</span><span>natives load-tested</span><span>hosts installed if absent</span></div>
       </div>
     </div>

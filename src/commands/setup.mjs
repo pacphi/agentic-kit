@@ -35,7 +35,6 @@ import { embeddingIntentFromFlags, embeddingSetupDisclosure } from '../lib/aqe-e
 import { prepareAqeEmbedding } from '../lib/aqe-embedding-lifecycle.mjs';
 import { reconcileAqeEmbeddingProjections } from '../lib/aqe-embedding-projection.mjs';
 import * as rb from '../lib/ruvnet-brain.mjs';
-import * as adb from '../lib/agentdb.mjs';
 import { ensureAgentBrowser } from '../lib/agent-browser.mjs';
 import { readJson, writeJsonWithBackup } from '../lib/settings.mjs';
 import { withDb } from '../lib/sqlite.mjs';
@@ -311,7 +310,7 @@ export function removeUndisclosedPermissions(file, before, authorized) {
   return unexpected;
 }
 
-/** Step 1: global packages (ruflo/agentic-qe/agentdb/ruvnet-brain). Returns
+/** Step 1: global packages (ruflo/agentic-qe/ruvnet-brain). Returns
  *  false only when the mandatory ruflo install itself fails. */
 async function installMachinePackages(cfg, flags) {
   // Ruflo's published browser package tries to install agent-browser itself
@@ -337,17 +336,6 @@ async function installMachinePackages(cfg, flags) {
       const r = await heal.upgradePackage('agentic-qe');
       (r.ok ? ok : warn)(`agentic-qe: ${r.detail}`);
     } else ok(`agentic-qe ${installedVersion('agentic-qe')} present`);
-  }
-  if (cfg.agentdb) {
-    const c = adb.coherence();
-    if (!c.present) {
-      info("installing agentdb globally (harvest write path; pinned to ruflo's bundled version)…");
-      const r = await heal.healAgentdb();
-      (r.ok ? ok : warn)(`agentdb: ${r.detail}`);
-    } else if (c.skew === 'core') {
-      const r = await heal.healAgentdb();
-      (r.ok ? ok : warn)(`agentdb: ${r.detail}`);
-    } else ok(`agentdb ${c.global} present (coherent with ruflo)`);
   }
   if (cfg.ruvnetBrain) {
     if (!rb.present()) {

@@ -55,7 +55,7 @@ src/
     providers.mjs        # frontier-host + LLM-provider detect/wire (hosts, auth, MCP bridges, aqe router)
     routing.mjs          # pure dual-host routing policy: defaults, projections, primary-host swap
     qeCourt.mjs          # qe-court vendor-diversity panel helpers
-    agentdb.mjs          # agentdb CLI coherence (harvest write path)
+    agentdb.mjs          # Ruflo's bundled agentdb version (read-only; ak installs no copy)
     health-history.mjs   # regression ring appended by sync, read by status
     dashboard-server.mjs # loopback dashboard: observations plus guarded Maintenance actions
     admin-server.mjs     # maintainer admin: loopback server, per-session token auth, page assembly (ADR-0007)
@@ -230,8 +230,8 @@ pnpm run lint:links:internal # requires lychee
 
 - `tests/kit/*.test.mjs` — the broad `node:test` suite, run with 70% line, branch, and
   function coverage floors.
-- Eight `.cjs` suites exercise statusline rendering, Brain display, AgentDB,
-  health history, harvest, dashboard, and admin behavior.
+- Seven `.cjs` suites exercise statusline rendering, Brain display, health history,
+  dashboard, and admin behavior.
 - `pnpm run build` validates the CLI load and dry-run package manifest, including
   forbidden generated/private paths.
 

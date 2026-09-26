@@ -13,7 +13,6 @@ import { agentdbLocations, bsq3IsNative, bsq3Root, deriveBsq3Spec, selfSpecConfl
 import { KIT_PKG } from './versions.mjs';
 import { scanRvf, quarantine } from './rvf.mjs';
 import { INSTALL_SPEC, INSTALL_ARGS, RELEASE_ASSET as RB_RELEASE_ASSET, NIGHTLY_LABEL as RB_NIGHTLY_LABEL, nightlyAgentPlist as rbNightlyPlist, present as rbPresent, latestRelease as rbLatestRelease, recordInstalledRelease as rbRecord } from './ruvnet-brain.mjs';
-import { PKG as ADB_PKG, present as adbPresent, coherence as adbCoherence } from './agentdb.mjs';
 import { globalInstallArgs, installGlobalCli } from './npm-global-install.mjs';
 
 // NB: `--allow-scripts` is rejected for project-scoped installs (EALLOWSCRIPTS,
@@ -261,32 +260,6 @@ export async function disableRuvnetBrainNightly({ runner = run } = {}) {
     return { ok: false, detail: `couldn't remove ${plist}: ${e.message} — remove it by hand or run \`npx ruvnet-brain --disable-nightly\`` };
   }
   return { ok: true, detail: 'nightly self-updater disabled (LaunchAgent removed; brain updates flow through ak sync)' };
-}
-
-/** Ensure the standalone agentdb CLI is present AND coherent with ruflo's
- *  bundled agentdb. Pins the global to the bundled version (not npm-latest) so
- *  the shared cognitive store never skews on the core version — a core skew is
- *  the corruption risk this heal exists to prevent. Idempotent: a no-op when
- *  already present and coherent. */
-export async function healAgentdb({
-  runner = run, coherence = adbCoherence, present = adbPresent,
-} = {}) {
-  const c = coherence();
-  // Already present and coherent (identical or prerelease-only diff) → nothing.
-  if (c.present && c.ok && c.skew !== 'core') {
-    return { ok: true, detail: `present ${c.global}${c.skew === 'prerelease' ? ` (bundled ${c.bundled}; prerelease diff ok)` : ' (coherent with ruflo)'}` };
-  }
-  // Pin to ruflo's bundled version; fall back to latest only when unknown.
-  const spec = c.target ? `${ADB_PKG}@${c.target}` : `${ADB_PKG}@latest`;
-  const r = await runner('npm', globalInstallArgs(spec), { timeout: 600_000 });
-  if (r.code !== 0) {
-    return {
-      ok: false, status: 'failed', usable: present(),
-      detail: (r.stderr || `exit ${r.code}`).trim().split('\n').slice(-2).join(' ').slice(0, 200),
-    };
-  }
-  const verb = !c.present ? 'installed' : 'repaired coherence →';
-  return { ok: true, status: 'ok', usable: true, detail: `${verb} ${c.target ?? 'latest'} (matches ruflo's bundled agentdb)` };
 }
 
 /** Stop all ruflo daemons before an upgrade (3.27+; best-effort). */

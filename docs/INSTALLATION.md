@@ -29,7 +29,7 @@ checks the minimum 22.13.0 runtime. See [Node SQLite history](https://nodejs.org
 
 Installing the package is low impact: agentic-kit has zero runtime dependencies and
 publishes its CLI, source/templates, and selected documentation. Running `ak setup`
-is intentionally broader. It can install Ruflo, AQE, AgentDB, and enabled host CLIs
+is intentionally broader. It can install Ruflo (AgentDB ships inside it), AQE, and enabled host CLIs
 globally; install the user-level RuvNet Brain; update current-user guidance and MCP
 configuration; optionally install the deja-vu transcript companion after an explicit
 `--with-deja-vu`; and initialize the current project.
@@ -219,7 +219,7 @@ against Node and npm. They are not the supported machine-management contract.
 | Surface | Package install only | `ak setup` machine/user phase | `ak setup` project phase |
 | --- | --- | --- | --- |
 | agentic-kit package | Local/cache/global according to npm method | No separate change unless later self-updated | None |
-| Ruflo, AQE, AgentDB | None | Installed/repaired in the active npm global prefix | Project assets initialized from those versions |
+| Ruflo (with its bundled AgentDB), AQE | None | Installed/repaired in the active npm global prefix | Project assets initialized from those versions |
 | Claude/Codex/OpenCode CLI | None | Missing enabled hosts may be installed globally; external installs are reused | Host-specific project wiring may be generated |
 | `~/.config/agentic-kit/kit.json` | None | Created/updated for the current OS user | Choices are read and project routing may be materialized |
 | Model inventory and private scope key | None | Created only by an explicit `ak models refresh` | Scope is stored as a keyed non-identifying fingerprint; the owner-only cache can retain exact model ids for explicit CLI evidence, while the authenticated Dashboard uses the owner-visible read model and masks secret-shaped values |

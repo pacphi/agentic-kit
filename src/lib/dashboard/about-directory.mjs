@@ -155,10 +155,11 @@ const ENTRIES = Object.freeze([
     name: 'agentdb',
     tagline: 'Where what your agents learn is stored.',
     paragraph:
-      'The store behind that memory: a single local file holding what agents recorded — '
+      'The store behind that memory: local files holding what agents recorded — '
       + 'decisions, state, and the reasons behind them — searchable by meaning as well as '
-      + 'by keyword, with the links between entries kept too. agentic-kit pins its version '
-      + 'to the one ruflo ships, so the two cannot drift apart.',
+      + 'by keyword, with the links between entries kept too. It ships inside ruflo, which '
+      + 'writes and reads it; agentic-kit installs no separate copy and shows the version '
+      + 'ruflo bundles.',
     links: Object.freeze([
       link('github', 'GitHub', 'https://github.com/ruvnet/agentdb'),
       link('npm', 'npm', 'https://www.npmjs.com/package/agentdb'),

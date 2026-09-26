@@ -39,6 +39,21 @@ and supported `claude mcp serve` tool exposure are preserved. See
 [ADR-0051](adr/0051-supported-peer-delegation-and-host-realignment.md) for the policy,
 official source citations, authority boundaries and verification limits.
 
+## 2026-09-26: ak no longer installs a standalone agentdb
+
+AgentDB ships inside Ruflo, and Ruflo is its only writer. `ak setup` and `ak sync` no longer
+install or repin a separate global `agentdb` CLI, and `ak status` no longer shows an `agentdb`
+row. Nothing is uninstalled for you. A leftover global is harmless; remove it with
+`npm uninstall -g agentdb` only if you do not use it yourself and no other package, such as
+`agentic-flow`, owns the `agentdb` command (`npm ls -g --depth=0` lists what is installed). An
+`agentdb` key in `kit.json` is kept and ignored.
+
+`ak x harvest` now runs only Ruflo commands from the project root: `ruflo hooks post-task`, plus
+`ruflo memory distill run` when you pass `--distill`. Its `--json` result no longer carries the
+`agentdb` or `harvested` fields; each step reports `ok`, `skipped` and `detail`, and the result
+names the project `root`. `ak x verify harvest` now fails when Ruflo is missing instead of
+skipping.
+
 ## 2026-09-26: Status rows say who performs each fix
 
 Every `ak status --json` row (and each `/api/status` row) gains `repair`: `"sync"` when an

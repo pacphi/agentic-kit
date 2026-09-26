@@ -23,7 +23,6 @@ import npx from './npx.mjs';
 import security from './security.mjs';
 import learning from './learning.mjs';
 import aqe from './aqe.mjs';
-import agentdb from './agentdb.mjs';
 import agentBrowser from './agent-browser.mjs';
 import mcp from './mcp.mjs';
 import codexMcp from './codex-mcp.mjs';
@@ -46,7 +45,7 @@ import qeCourt from './qe-court.mjs';
 // host-detail / admitted-lifecycle calls that collect() makes directly.
 export const SECTIONS_BEFORE_HOST_DETAIL = [
   models, versions, ruvnetBrain, ruvector, rufloComponents, self, natives, memoryPin,
-  projectMemory, scaffoldAgents, npx, security, learning, aqe, agentdb, agentBrowser, mcp,
+  projectMemory, scaffoldAgents, npx, security, learning, aqe, agentBrowser, mcp,
   codexMcp, codexPlugins, hostAlignment,
 ];
 

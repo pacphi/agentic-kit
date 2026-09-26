@@ -122,7 +122,7 @@ Windows split-store behavior.
 ak x verify learning    # trains a cycle in an isolated dir; asserts patterns persist to disk
 ak x verify security    # packages load + defend flags a real injection sample
 ak x verify aqe         # agentic-qe genuinely on ruvector (no FsyncFailed)
-ak x verify harvest     # end-to-end learning-write path against real CLIs
+ak x verify harvest     # Ruflo's learning-write path (post-task + distill) in an isolated store
 ak x verify deja-vu     # compatible package/doctor, selected wiring, index state
 ak x verify all
 ```

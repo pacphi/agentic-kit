@@ -41,7 +41,7 @@ Suites:
   aqe         storage, embedding configuration/provenance, and browser payload
   mcp         initialize/tools-list for effective Codex AQE and Brain commands
   providers   kit config matches installed CLIs; ruflo/aqe see the wiring
-  harvest     seed real episodes, run the write path, assert real skills come back
+  harvest     record an outcome and distill through Ruflo, in an isolated store
   deja-vu     content-free structural proof of CLI, doctor, wiring, and index
   all         (default) run every suite
 
@@ -254,35 +254,31 @@ async function verifyProviders() {
   return good;
 }
 
-async function verifyHarvest() {
-  heading('harvest — seed REAL episodes, run the write path, assert real skills come back');
-  if (!(await have('agentdb'))) { warn('agentdb CLI not installed — skipping harvest proof (run: ak sync)'); return true; }
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agentic-kit-harvest-'));
+/** Prove the harvest write path against an ISOLATED store. Every memory path
+ *  Ruflo or its bundled AgentDB can resolve points inside the temporary
+ *  directory: the CLI pin (CLAUDE_FLOW_DB_PATH), the memory root the native
+ *  bridge derives agentdb-memory.db from (CLAUDE_FLOW_MEMORY_PATH), and
+ *  AGENTDB_PATH. An inherited value of any of them would otherwise receive the
+ *  proof rows. Nothing is seeded: the proof is Ruflo's own verbs succeeding. */
+export async function verifyHarvest({ runner = runCmd, haveCmd = have } = {}) {
+  heading('harvest — record an outcome and distill, in an isolated store');
+  if (!(await haveCmd('ruflo'))) { fail('ruflo CLI not installed — cannot prove the harvest write path'); return false; }
+  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agentic-kit-harvest-')));
+  const swarm = path.join(tmp, '.swarm');
+  const env = projectMemoryEnv(tmp, {
+    RUFLO_DAEMON_AUTOSTART: '0',
+    CLAUDE_FLOW_MEMORY_PATH: swarm,
+    AGENTDB_PATH: path.join(swarm, 'agentdb.db'),
+  });
   try {
-    // Seed real episodes into agentdb's default store (./agentdb.db in cwd).
-    for (let i = 1; i <= 3; i++) {
-      const r = await runCmd('agentdb',
-        ['reflexion', 'store', `verify-ep-${i}`, 'implement_feature', '0.9', 'true', `did the work ${i}`],
-        { cwd: tmp, timeout: 120_000 });
-      if (r.code !== 0) { fail(`agentdb reflexion store failed: ${(r.stderr || '').slice(0, 140)}`); return false; }
+    const init = await runner('ruflo', ['memory', 'init'], { cwd: tmp, env, timeout: 120_000 });
+    if (init.code !== 0) { fail('ruflo memory init failed in the isolated store'); return false; }
+    const res = await runHarvest({ runner, cwd: tmp, distill: true, env });
+    for (const s of res.steps) {
+      if (s.skipped) warn(`${s.name}: ${s.detail}`);
+      else (s.ok ? ok : fail)(`${s.name}: ${s.detail}`);
     }
-    ok('seeded 3 real episodes via agentdb reflexion store');
-    // Run the REAL write path (no mock) with low thresholds so the seeds qualify.
-    const res = await runHarvest({ cwd: tmp, minAttempts: 1, minReward: 0.5, days: 365 });
-    const created = res.harvested?.skillsCreated ?? 0;
-    if (created > 0) {
-      ok(`harvest consolidated REAL skills: created ${created}` +
-        (res.harvested.avgReward != null ? ` (avg reward ${res.harvested.avgReward})` : ''));
-    } else {
-      const step = res.steps.find((s) => s.name === 'consolidate-skills');
-      fail(`harvest ran but consolidated 0 skills — ${step ? step.detail : 'no consolidate step'}`);
-      return false;
-    }
-    // Round-trip: the consolidated skill is searchable (real data back).
-    const search = await runCmd('agentdb', ['skill', 'search', 'implement', '5'], { cwd: tmp, timeout: 120_000 });
-    const found = /Found\s+([1-9]\d*)\s+matching/i.test(`${search.stdout}${search.stderr}`);
-    (found ? ok : warn)('agentdb skill search reads the consolidated skill back');
-    return true;
+    return res.ok;
   } catch (e) {
     fail(`harvest verify error: ${e.message}`);
     return false;

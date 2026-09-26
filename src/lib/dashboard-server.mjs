@@ -58,6 +58,7 @@ import { createHmac } from 'node:crypto';
 import { driftReport, selfDrift, installedVersion } from './versions.mjs';
 import { HOSTS, collectIntegrationFacts } from './providers.mjs';
 import { globalRoot } from './paths.mjs';
+import { bundledVersion as agentdbBundledVersion } from './agentdb.mjs';
 import { drift as ruvnetBrainDrift } from './ruvnet-brain.mjs';
 import { drift as ruvectorDrift, managed as ruvectorManaged } from './ruvector.mjs';
 import { loadKitConfig } from './config.mjs';
@@ -480,9 +481,11 @@ async function cachedHostFacts(now) {
  *
  * driftReport only walks the globals whose upgrades are governed by npm-latest.
  * Other managed components are still knowable but sit outside it: a host
- * installed by mise/brew/the native installer; agent-browser and agentdb,
- * whose exact versions are selected for compatibility rather than npm-latest;
- * and aidefence, which ships inside ruflo's dependency tree.
+ * installed by mise/brew/the native installer; agent-browser, whose exact
+ * version is selected for compatibility rather than npm-latest; and agentdb
+ * and aidefence, which ship inside ruflo's dependency tree. agentdb reads
+ * Ruflo's bundled copy on purpose: a standalone global `agentdb` is not ak's
+ * (its install was retired) and may lag or belong to another package.
  *
  * Both fold in with `outdated: false` and no `latest`, which is inert for the
  * banner — `noticeHtml` renders only entries where `outdated` is true — while
@@ -512,7 +515,7 @@ export async function foldKnownVersions(drift, {
   const hosts = hostFacts ?? await cachedHostFacts(now);
   for (const host of HOSTS) add(host.pkg, hosts?.[host.id]?.version);
   add('agent-browser', installedVersionFn('agent-browser'));
-  add('agentdb', installedVersionFn('agentdb'));
+  add('agentdb', agentdbBundledVersion());
   add('@claude-flow/aidefence', bundledVersion('ruflo', '@claude-flow/aidefence'));
   return out;
 }

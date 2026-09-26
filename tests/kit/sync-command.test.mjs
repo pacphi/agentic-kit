@@ -343,9 +343,9 @@ test('an unconverged Claude projection puts ruflo-components in the sync plan', 
 });
 
 test('kit.json opt-outs keep their subsystems out of the plan entirely', async () => {
-  seedHome(offlineKitConfig({ security: false, agentdb: false, mcp: { register: false, excludeFamilies: [] } }));
+  seedHome(offlineKitConfig({ security: false, mcp: { register: false, excludeFamilies: [] } }));
   const { out } = await dryRun();
-  for (const off of ['[security]', '[agentdb]', '[mcp]']) {
+  for (const off of ['[security]', '[mcp]']) {
     assert.ok(!out.includes(off), `a disabled subsystem must never appear in the plan: ${off}`);
   }
 });

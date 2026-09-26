@@ -389,7 +389,6 @@ test('legacy invalid qe-court config is reported read-only and sync is not offer
 // a surface the user deliberately switched off.
 for (const [key, value, subsystem, needle] of [
   ['security', false, 'security', /disabled/i],
-  ['agentdb', false, 'agentdb', /disabled/i],
 ]) {
   test(`kit.json ${key}:${value} yields an info row that sync will never act on`, async () => {
     seedHome(offlineKitConfig({ [key]: value }));

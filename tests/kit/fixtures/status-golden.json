@@ -162,13 +162,6 @@
     "repair": null
   },
   {
-    "subsystem": "agentdb",
-    "level": "warn",
-    "message": "agentdb CLI not installed (harvest write path unavailable)",
-    "fix": "setup/sync installs it (pinned to ruflo's bundled agentdb)",
-    "repair": "sync"
-  },
-  {
     "subsystem": "agent-browser",
     "level": "info",
     "message": "managed Ruflo browser executor disabled in kit.json",

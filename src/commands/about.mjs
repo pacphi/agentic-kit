@@ -111,10 +111,12 @@ async function detectPackaged({ pkgRoot }) {
     }
   }
 
+  // agentdb ships inside Ruflo; ak installs no separate copy, so the chip
+  // reports the bundled version and never a stray standalone global.
   try {
-    const { coherence } = await import('../lib/agentdb.mjs');
-    const c = coherence();
-    states.set('agentdb', c.present ? installed(c.global) : absent());
+    const { bundledVersion } = await import('../lib/agentdb.mjs');
+    const version = bundledVersion();
+    states.set('agentdb', version ? installed(version, 'bundled inside Ruflo') : absent());
   } catch (error) {
     states.set('agentdb', unknown(reasonOf(error)));
   }

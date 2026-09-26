@@ -146,11 +146,12 @@ test('the providers suite fails on aqe fallback-chain drift between kit.json and
   assert.match(out, /aqe fallback chain drift/);
 });
 
-test('the harvest suite skips (does not fail) when the agentdb CLI is absent', async () => {
+test('the harvest suite fails (never skips to a pass) when the ruflo CLI is absent', async () => {
   seedHome();
   const { result, out } = await runVerify(['harvest']);
-  assert.equal(result, 0, 'an unavailable optional dependency is a skip, not a failed proof');
-  assert.match(out, /agentdb CLI not installed — skipping harvest proof/);
+  assert.equal(result, 1, 'harvest drives only Ruflo verbs, so no ruflo means no proof');
+  assert.match(out, /ruflo CLI not installed — cannot prove the harvest write path/);
+  assert.doesNotMatch(out, /agentdb/, 'the retired standalone CLI is never probed');
 });
 
 test('`all` runs every suite and fails if any single proof failed', async () => {

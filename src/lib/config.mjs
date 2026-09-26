@@ -27,7 +27,6 @@ const DEFAULTS = {
   aqe: true,            // manage agentic-qe alongside ruflo
   aqeEmbedding: undefined, // absent legacy intent differs from explicit unmanaged opt-out
   agentBrowser: true,   // manage Ruflo's currently-shipped browser executor (disable with setup --no-agent-browser)
-  agentdb: true,        // manage the standalone agentdb CLI (harvest's write path), pinned to ruflo's bundled version
   ruvnetBrain: true,    // install/manage the RuvNet Brain (offline KB + search_ruvnet MCP)
   ruvector: true,       // report drift for a globally-installed ruvector CLI (never installs it)
   security: true,       // run the security verification surface by default
@@ -84,7 +83,14 @@ const plain = (value) => value !== null && typeof value === 'object' && !Array.i
 // F-14: kit.json top-level keys this ak version understands, derived from
 // DEFAULTS (the envelope already lists every recognized key, versioned
 // sub-objects included) rather than a second literal that could drift.
-const KNOWN_TOP_LEVEL_KEYS = new Set(Object.keys(DEFAULTS));
+// Retired keys this version still recognizes: preserved on save (a downgrade
+// keeps the user's choice) but no longer read, so they must not raise the
+// unknown-key warning on every command. `agentdb` governed the standalone
+// agentdb CLI ak no longer installs (docs/audits/2026-09-26-issues-237-238-239-
+// verification-and-decisions.md, decision A); earlier saves wrote it into nearly
+// every kit.json.
+const RETIRED_TOP_LEVEL_KEYS = Object.freeze(['agentdb']);
+const KNOWN_TOP_LEVEL_KEYS = new Set([...Object.keys(DEFAULTS), ...RETIRED_TOP_LEVEL_KEYS]);
 
 // Warn once per process per distinct unknown-key set, not once per load —
 // loadKitConfig runs on nearly every command invocation.

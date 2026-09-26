@@ -315,13 +315,6 @@ export const SYNC_STEPS = [
     when: (subs) => subs.has('aqe'),
     run: (ctx) => ctx.report('rvf', heal.healRvf(paths.projectAqeDir(ctx.cwd))),
   },
-  // agentdb: install/repin the standalone CLI to ruflo's bundled version so the
-  // shared cognitive store stays coherent (harvest's write path depends on it).
-  {
-    id: 'agentdb',
-    when: (subs, flags, cfg) => subs.has('agentdb') && cfg.agentdb !== false,
-    run: (ctx) => ctx.step('agentdb', () => heal.healAgentdb()),
-  },
   {
     id: 'mcp',
     when: (subs, flags, cfg) => subs.has('mcp') && cfg.mcp.register,
