@@ -3,6 +3,7 @@ import path from 'node:path';
 import * as paths from '../../../lib/paths.mjs';
 import { readJson } from '../../../lib/settings.mjs';
 import { row } from '../row.mjs';
+import { projectSetupHint } from '../../../lib/setup-scope.mjs';
 
 export default {
   id: 'learning',
@@ -14,6 +15,6 @@ export default {
         pn > 0 ? `${pn} patterns learned, ${stats.trajectoriesRecorded ?? 0} trajectories (this project)`
                : 'learning initialized but no patterns yet (this project)')];
     }
-    return [row('learning', 'info', 'no learning state in this project (run setup here to activate)')];
+    return [row('learning', 'info', `no learning state in this project (${projectSetupHint(cwd, 'activate')})`)];
   },
 };

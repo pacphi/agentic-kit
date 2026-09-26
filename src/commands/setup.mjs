@@ -47,6 +47,7 @@ import {
   setupTrustManifest, trustManifestLines,
 } from '../lib/trust-manifest.mjs';
 import * as paths from '../lib/paths.mjs';
+import { setupSelectsProject, projectSetupHint } from '../lib/setup-scope.mjs';
 import { ok, warn, fail, info, heading, bold, dim, reportOutcome } from '../lib/output.mjs';
 
 const DEJA_VU = managedCompanionFor('deja-vu');
@@ -885,8 +886,7 @@ export async function run({
     info(embeddingSetupDisclosure(cfg.aqeEmbedding));
   }
 
-  const inProject = flags.project
-    || (fs.existsSync(path.join(process.cwd(), '.git')) && process.cwd() !== paths.home);
+  const inProject = flags.project || setupSelectsProject(process.cwd());
   const willConfigureProject = inProject && !flags.minimal;
 
   // Apply host flags to the in-memory config before preflight so the manifest
@@ -936,7 +936,7 @@ export async function run({
   if (inProject && !flags.minimal) {
     if (!(await runtime.projectSetup({ flags, cfg, trustDisclosed: true }))) return 1;
   } else if (!flags.minimal) {
-    info('not inside a project (no .git here) — run `ak setup` from a repo to set one up');
+    info(`not inside a project (no .git here) — ${projectSetupHint(process.cwd(), 'set up')}`);
   }
   if (!flags['dry-run']) await runtime.finalizeSetup(cfg, pkgRoot, flags);
   if (!flags['dry-run'] && willConfigureProject && cfg.aqe !== false) {

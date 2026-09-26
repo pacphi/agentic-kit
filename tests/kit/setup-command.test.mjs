@@ -605,6 +605,7 @@ test('a git repo cwd auto-selects project scope; a bare directory does not', asy
     const outside = await captureLog(() =>
       setup.run({ flags: FLAGS({ 'dry-run': true }), pkgRoot: PKG_ROOT }));
     assert.match(outside.out, /not inside a project \(no \.git here\)/);
+    assert.match(outside.out, /`ak setup --project`/, 'name the command that sets this folder up (#237 N3)');
     assert.ok(!outside.out.includes('project setup —'));
   } finally { process.chdir(cwd); }
   rmrf(project);

@@ -4,6 +4,7 @@
 // `ak x verify memory` canary does not prove access to an existing corpus.
 import path from 'node:path';
 import { projectMemoryStatus } from '../../../lib/project-memory.mjs';
+import { projectSetupHint } from '../../../lib/setup-scope.mjs';
 import { row } from '../row.mjs';
 
 export default {
@@ -13,7 +14,7 @@ export default {
     try {
       const memory = projectMemoryStatus(cwd);
       if (!memory.active) {
-        rows.push(row('memory', 'info', 'no project memory store yet (run setup here to initialize)'));
+        rows.push(row('memory', 'info', `no project memory store yet (${projectSetupHint(cwd, 'initialize')})`));
       } else {
         for (const store of memory.stores.filter((candidate) => candidate.present)) {
           rows.push(row('memory', store.readable ? 'info' : 'warn', store.readable

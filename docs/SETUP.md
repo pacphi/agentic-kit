@@ -33,6 +33,11 @@ machine setup only.
 Project detection does not walk upward to find a repository. For predictable
 results, change to the project root before running either form.
 
+`ak status` follows the same rule. Where plain `ak setup` would configure the
+machine only, its memory and learning rows name `ak setup --project` (and, in a
+repository subdirectory, the repository root) as the way to set up project
+features. A folder you only launch the dashboard from does not need them.
+
 ## What machine setup does
 
 The machine phase is the same with or without `--project`. It:
