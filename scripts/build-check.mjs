@@ -80,7 +80,7 @@ try {
   const bundlesBin = packedPaths.includes('bin/agentic-kit.mjs');
   const forbiddenPatterns = [
     /(?:^|\/)\.(?:agentic-qe|claude-flow|swarm)(?:\/|$)/,
-    /(?:^|\/)\.claude(?:\/|$)/,
+    /(?:^|\/)\.(?:claude|agents)(?:\/|$)/,
     /(?:^|\/)\.env(?:\.|$)/,
     /(?:^|\/)[^/]*\.key\.pem$/,
   ];

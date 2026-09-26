@@ -24,11 +24,18 @@ test-*.log
 # repo writes these. They are NOT source (see CLAUDE.md "Dogfooding artifacts are not
 # source"); never commit them. The authored instruction files (CLAUDE.md for claude,
 # AGENTS.md for codex) ARE tracked; only their generated dirs (.claude/, .agents/) and
-# local overrides (.codex/) are ignored.
+# local overrides (.codex/) are ignored. The one exception is the authored
+# upstream-status maintainer skill, tracked for both hosts.
 .agentic-qe/
 .ruvnet-brain/
-.claude/
-.agents/
+**/.claude/*
+!/.claude/skills/
+/.claude/skills/*
+!/.claude/skills/upstream-status/
+**/.agents/*
+!/.agents/skills/
+/.agents/skills/*
+!/.agents/skills/upstream-status/
 .codex/
 .mcp.json
 ruvector.db
