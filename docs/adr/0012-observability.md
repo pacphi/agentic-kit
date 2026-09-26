@@ -2,12 +2,8 @@
 
 - **Status:** Implemented
 - **Date:** 2026-07-27
-- **Updated:** 2026-09-26 — the POSIX process survey keeps executable paths that contain spaces,
-  and a Claude Code CLI hosted by the Claude desktop app is its own top-level controller rather
-  than a nested worker of the app (#238 item 3). Adapter health is recomputed from the tailed
-  files each pass: a registered source whose file is absent is `awaiting-file`, a readable source
-  with nothing accepted is `no-events`, and an unreadable file or a malformed or rejected latest
-  record is `degraded`; a file created after tailing began is read from its first byte (#237 §E).
+- **Updated:** 2026-09-26 — live process survey, source health and discovery coverage (#237 §E;
+  #238 items 3 and 5); see "Amendment — 2026-09-26: live acquisition" at the end.
 - **Earlier update:** 2026-09-20 — ADR-0054 adds an explicit, offline, allowlisted fleet export
   boundary; local analytics and dashboard collection semantics remain unchanged.
 - **Earlier update:** 2026-09-09 — reconciled against repository source and tests for issue #211
@@ -637,3 +633,16 @@ Acceptance does not imply automatic knowledge of every upstream store:
 Its versioned snapshots preserve source coverage and whole-session selection semantics, omit
 transcript content, and aggregate by replacing each installation's prior snapshot. It neither
 turns the dashboard into a fleet service nor makes telemetry collection continuous.
+
+## Amendment — 2026-09-26: live acquisition
+
+- **Process survey (#238 item 3).** The POSIX process survey keeps executable paths that contain
+  spaces, and a Claude Code CLI hosted by the Claude desktop app is its own top-level controller
+  rather than a nested worker of the app (see the 2026-08-03 runtime identity amendment above).
+- **Source health (#237 §E).** Adapter health is recomputed from the tailed files each pass: a
+  registered source whose file is absent is `awaiting-file`, a readable source with nothing
+  accepted is `no-events`, and an unreadable file or a malformed or rejected latest record is
+  `degraded`; a file created after tailing began is read from its first byte (§4).
+- **Discovery coverage (#238 item 5).** Live acquisition coverage is incomplete when the per-host
+  discovery bound leaves files out and reports how many; the tailed-file count is recounted each
+  pass instead of growing on every idle restart.

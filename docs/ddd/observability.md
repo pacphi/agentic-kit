@@ -346,9 +346,10 @@ and confidence. It cannot contain prompt text, response text, tool arguments, ra
 Kept separate because a source can fail without invalidating every live session. The current
 service records adapter `status` (`idle`, `ok`, `no-events`, `awaiting-file`, `unavailable`, or
 `degraded`), file/event/error counts and a bounded error category. For file-tailed adapters
-(Claude, Codex, ruflo, agentic-qe) the status and the `readable`/`missing`/`unreadable` file
-gauges are recomputed from the tailed files after every reconciliation pass, never set by an
-individual event. Precedence is `degraded` (an unreadable file, or a file whose latest record was
+(Claude, Codex, ruflo, agentic-qe) the status, the `files` count of tailed files, and the
+`readable`/`missing`/`unreadable` file gauges are recomputed from the tailed files after every
+reconciliation pass, never set by an individual event or incremented, so a collector restart
+cannot inflate them. Precedence is `degraded` (an unreadable file, or a file whose latest record was
 malformed or rejected) over `awaiting-file` (a registered file that does not exist yet) over
 `no-events` (readable, nothing accepted) over `ok`. `accepted` and `rejected` count records;
 `rejected` and `lastRejection` apply to structured sources only and carry a fixed reason code,
@@ -860,7 +861,10 @@ The implemented vertical slice lives in `src/lib/live/`, `src/lib/dashboard/`, a
 `dashboard-server.mjs` composition root. Defaults are:
 
 - 750 ms reconciliation interval;
-- 256 tailed files; explicit sources take priority and Claude/Codex divide the remainder;
+- 256 tailed files; explicit sources take priority and Claude/Codex divide the remainder. When a
+  host's share leaves files out, `acquisitionCoverage` is `complete: false` and `truncated: true`
+  with `omittedFiles` and per-host `sources` (`candidateFiles`, `returnedFiles`, `fileLimit`);
+  adapter health carries `candidateFiles`;
 - 100 projected sessions and 1,000 nodes per session;
 - 2,000 replay events;
 - 30-second quiescence and five-minute expiry;

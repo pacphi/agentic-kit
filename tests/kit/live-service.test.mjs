@@ -730,6 +730,90 @@ test('service coverage retains dropped-line evidence when a different source is 
   assert.equal(coverage.droppedLines, 1);
 });
 
+test('live coverage is incomplete when the discovery file cap binds, and says how many were left out', (t) => {
+  const sb = sandbox();
+  for (let i = 0; i < 10; i++) {
+    const file = path.join(sb.claude, `session-${i}.jsonl`);
+    fs.writeFileSync(file, '');
+    fs.utimesSync(file, new Date(1_000 + i * 1_000), new Date(1_000 + i * 1_000));
+  }
+  fs.writeFileSync(path.join(sb.codex, 'rollout-2026-07-27T00-00-00-x1.jsonl'), '');
+  const service = new LiveSessionsService({
+    roots: sb.roots, maxFiles: 4, readCodexState: () => null, workspaceStore: null,
+    setInterval: () => ({ unref() {} }), clearInterval: () => {},
+    now: () => '2026-07-27T12:00:00Z',
+  });
+  t.after(() => { service.close(); fs.rmSync(sb.dir, { recursive: true, force: true }); });
+  service.start();
+  const coverage = service.snapshot().acquisitionCoverage;
+  assert.equal(coverage.complete, false, 'a capped window is not complete coverage');
+  assert.equal(coverage.truncated, true);
+  assert.equal(coverage.omittedFiles, 8);
+  assert.deepEqual(coverage.sources, {
+    claude: { candidateFiles: 10, returnedFiles: 2, fileLimit: 2, truncated: true },
+    codex: { candidateFiles: 1, returnedFiles: 1, fileLimit: 2, truncated: false },
+  });
+  const health = service.snapshot().health;
+  assert.equal(health.claude.files, 2);
+  assert.equal(health.claude.candidateFiles, 10, 'Sources can say the tailed files are the newest of more');
+  assert.equal(health.codex.candidateFiles, 1);
+});
+
+test('live coverage stays complete when every discovered file fits the cap', (t) => {
+  const sb = sandbox();
+  fs.writeFileSync(path.join(sb.claude, 'only.jsonl'), '');
+  const service = new LiveSessionsService({
+    roots: sb.roots, maxFiles: 4, readCodexState: () => null, workspaceStore: null,
+    setInterval: () => ({ unref() {} }), clearInterval: () => {},
+    now: () => '2026-07-27T12:00:00Z',
+  });
+  t.after(() => { service.close(); fs.rmSync(sb.dir, { recursive: true, force: true }); });
+  service.start();
+  const coverage = service.snapshot().acquisitionCoverage;
+  assert.equal(coverage.complete, true);
+  assert.equal(coverage.truncated, false);
+  assert.equal(coverage.omittedFiles, 0);
+});
+
+test('the files counter does not drift across idle stop and restart', (t) => {
+  const sb = sandbox();
+  for (let i = 0; i < 3; i++) fs.writeFileSync(path.join(sb.claude, `s${i}.jsonl`), '');
+  const service = new LiveSessionsService({
+    roots: sb.roots, maxFiles: 4, readCodexState: () => null, workspaceStore: null,
+    setInterval: () => ({ unref() {} }), clearInterval: () => {},
+    now: () => '2026-07-27T12:00:00Z',
+  });
+  t.after(() => { service.close(); fs.rmSync(sb.dir, { recursive: true, force: true }); });
+  const files = [];
+  for (let cycle = 0; cycle < 3; cycle++) {
+    service.start();
+    files.push(service.snapshot().health.claude.files);
+    service.close();
+  }
+  assert.deepEqual(files, [2, 2, 2], 'the dashboard reuses one service; each restart must recount, not add');
+});
+
+test('the files counter follows the moving newest-file window', (t) => {
+  const sb = sandbox();
+  let tick;
+  const add = (i) => {
+    const file = path.join(sb.claude, `s${i}.jsonl`);
+    fs.writeFileSync(file, '');
+    fs.utimesSync(file, new Date(1_000 + i * 1_000), new Date(1_000 + i * 1_000));
+  };
+  for (let i = 0; i < 3; i++) add(i);
+  const service = new LiveSessionsService({
+    roots: sb.roots, maxFiles: 4, readCodexState: () => null, workspaceStore: null,
+    setInterval: (fn) => { tick = fn; return { unref() {} }; }, clearInterval: () => {},
+    now: () => '2026-07-27T12:00:00Z',
+  });
+  t.after(() => { service.close(); fs.rmSync(sb.dir, { recursive: true, force: true }); });
+  service.start();
+  const seen = [service.snapshot().health.claude.files];
+  for (let i = 3; i < 6; i++) { add(i); tick(); seen.push(service.snapshot().health.claude.files); }
+  assert.deepEqual(seen, [2, 2, 2, 2]);
+});
+
 // Structured-source health acceptance (#237 §E). Each case drives the real
 // service and tailer through a manual reconcile tick so every pass is explicit.
 const structuredService = (t, sources, extra = {}) => {

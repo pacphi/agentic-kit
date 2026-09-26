@@ -29,6 +29,14 @@ test('source health text keeps the established counters and adds presence only w
     'degraded · 1 files · 0 events · 0 errors · 3 rejected');
 });
 
+test('source health text says when the tailed files are only the newest of more', () => {
+  const summary = extract('liveHealthSummary');
+  assert.equal(summary({ status: 'ok', files: 128, readable: 128, candidateFiles: 257, events: 9, errors: 0 }),
+    'ok · 128 files (newest of 257) · 9 events · 0 errors');
+  assert.equal(summary({ status: 'ok', files: 3, readable: 3, candidateFiles: 3, events: 9, errors: 0 }),
+    'ok · 3 files · 9 events · 0 errors', 'nothing is added when every discovered file is tailed');
+});
+
 test('the Sources toggle counts degraded sources as issues and awaiting files separately', () => {
   const toggle = extract('liveHealthToggle');
   assert.equal(toggle({ claude: { status: 'ok' }, 'codex-state': { status: 'unavailable' } }), 'Sources',

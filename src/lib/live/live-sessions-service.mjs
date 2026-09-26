@@ -17,7 +17,7 @@ import { canonicalSessionKey, resolveProjectIdentity } from './project-label.mjs
 import { workspaceFromSource } from './git-workspace.mjs';
 import { WorkspaceSnapshotStore } from './workspace-store.mjs';
 import {
-  bootstrapRecords, codexTranscriptId, discoverJsonl, discoverJsonlDetailed,
+  bootstrapRecords, codexTranscriptId, discoverJsonlDetailed,
 } from './native-transcript-discovery.mjs';
 
 // historySnapshot() is a one-shot on-demand scan, not a continuously-tailed
@@ -66,6 +66,7 @@ export class LiveSessionsService {
   #runtimeSurvey = null;
   #workspaceStore = null;
   #historyPages = new Map();
+  #discovery = {};
 
   constructor(options = {}) {
     const roots = options.roots ?? {};
@@ -129,18 +130,29 @@ export class LiveSessionsService {
   }
 
   snapshot() {
+    const acquisitionCoverage = [...this.#contexts.values()].reduce((total, context) => {
+      const coverage = context.acquisitionCoverage;
+      if (!coverage) return total;
+      total.complete &&= coverage.complete;
+      total.truncated ||= coverage.truncated;
+      total.droppedLines += coverage.droppedLines;
+      total.pendingBytes += coverage.pendingBytes;
+      return total;
+    }, { complete: true, truncated: false, droppedLines: 0, pendingBytes: 0, omittedFiles: 0 });
+    // Native discovery tails only the newest files per host. When that bound
+    // leaves files out, coverage is incomplete and says how many.
+    acquisitionCoverage.sources = {};
+    for (const [adapter, discovered] of Object.entries(this.#discovery)) {
+      acquisitionCoverage.sources[adapter] = { ...discovered };
+      if (!discovered.truncated) continue;
+      acquisitionCoverage.complete = false;
+      acquisitionCoverage.truncated = true;
+      acquisitionCoverage.omittedFiles += Math.max(0, discovered.candidateFiles - discovered.returnedFiles);
+    }
     return {
       ...serializeLiveProjection(this.#projection),
       health: Object.fromEntries(this.#health),
-      acquisitionCoverage: [...this.#contexts.values()].reduce((total, context) => {
-        const coverage = context.acquisitionCoverage;
-        if (!coverage) return total;
-        total.complete &&= coverage.complete;
-        total.truncated ||= coverage.truncated;
-        total.droppedLines += coverage.droppedLines;
-        total.pendingBytes += coverage.pendingBytes;
-        return total;
-      }, { complete: true, truncated: false, droppedLines: 0, pendingBytes: 0 }),
+      acquisitionCoverage,
     };
   }
 
@@ -196,12 +208,20 @@ export class LiveSessionsService {
     const codexLimit = nativeCapacity - claudeLimit;
     // Depth 3 reaches `<project>/<session>/subagents/agent-*.jsonl`; a session
     // delegating to workers stays observable while its own transcript is idle.
-    const claude = discoverJsonl(this.#options.roots.claude, {
+    const claudeDiscovery = discoverJsonlDetailed(this.#options.roots.claude, {
       maxDepth: 3, maxFiles: claudeLimit, accept: () => true,
     });
-    const codex = discoverJsonl(this.#options.roots.codex, {
+    const codexDiscovery = discoverJsonlDetailed(this.#options.roots.codex, {
       maxDepth: 4, maxFiles: codexLimit, accept: (name) => name.startsWith('rollout-'),
     });
+    // Keep what the bound left out, so coverage can say the window is capped
+    // instead of implying that no other session exists.
+    this.#discovery = {
+      claude: liveDiscoveryCoverage(claudeDiscovery, claudeLimit),
+      codex: liveDiscoveryCoverage(codexDiscovery, codexLimit),
+    };
+    const claude = claudeDiscovery.files;
+    const codex = codexDiscovery.files;
     // The bounded set is a moving window, not a startup-only choice. Replace
     // native tailers that fell out of the newest-file budget so an active
     // session created after the dashboard started can become observable.
@@ -211,8 +231,6 @@ export class LiveSessionsService {
       this.#tailers.get(file)?.close();
       this.#tailers.delete(file);
       this.#contexts.delete(file);
-      const current = this.#health.get(context.adapter);
-      this.#mark(context.adapter, { files: Math.max(0, (current?.files ?? 1) - 1) });
     }
     for (const file of claude) {
       this.#add(file, {
@@ -253,7 +271,6 @@ export class LiveSessionsService {
     });
     this.#tailers.set(file, tailer);
     this.#contexts.set(file, context);
-    this.#mark(context.adapter, { files: (this.#health.get(context.adapter)?.files ?? 0) + 1 });
   }
 
   /** Pure record → LiveEvent[] transformation, shared by the live tailer
@@ -363,8 +380,13 @@ export class LiveSessionsService {
       else if (counts.unreadable || counts.faulted) status = 'degraded';
       else if (counts.missing) status = 'awaiting-file';
       else if (!accepted) status = 'no-events';
+      // `files` is a gauge of the files tailed right now, recounted every
+      // pass; incrementing it drifted upward on each idle stop and restart.
+      const discovered = this.#discovery[adapter];
       this.#mark(adapter, {
-        status, readable: counts.readable, missing: counts.missing, unreadable: counts.unreadable,
+        status, files: counts.sources,
+        readable: counts.readable, missing: counts.missing, unreadable: counts.unreadable,
+        ...(discovered ? { candidateFiles: discovered.candidateFiles } : {}),
       });
     }
   }
@@ -729,6 +751,16 @@ function compareHistorySessions(left, right) {
   return Date.parse(right.updatedAt ?? 0) - Date.parse(left.updatedAt ?? 0)
     || String(left.host ?? '').localeCompare(String(right.host ?? ''))
     || String(left.id ?? '').localeCompare(String(right.id ?? ''));
+}
+
+/** The live window's discovery bound per host; fileLimit is that host's share. */
+function liveDiscoveryCoverage(discovery, fileLimit) {
+  return {
+    candidateFiles: discovery.candidateCount,
+    returnedFiles: discovery.returnedCount,
+    fileLimit,
+    truncated: discovery.truncated,
+  };
 }
 
 function historyDiscoveryCoverage(discovery) {

@@ -303,7 +303,11 @@ nodes per session by default, tails at most 256 files, and retains 2,000 events
 for resume. These are implementation bounds, not claims about the number of
 agents the underlying tools can run. Explicit `--live-source` files receive
 tailer slots first; Claude and Codex automatic discovery divide the remaining
-capacity.
+capacity. When a host has more transcripts than its share, Live tails the newest ones and
+says so: **Sources** shows `N files (newest of M)`, and `/api/live` reports
+`acquisitionCoverage.complete: false`, `truncated: true`, the number of files left out
+(`omittedFiles`), and per-host `sources` with `candidateFiles`, `returnedFiles`, and
+`fileLimit`. A session in an untailed file can still appear through process presence.
 
 ## Evidence and limitations
 
@@ -382,7 +386,9 @@ that the dashboard has inspected an agent's private reasoning.
 | `unavailable` | An optional source is not present on this machine, such as the Codex state ledger |
 | `idle` | Nothing is tailed for this adapter |
 
-When some files are not readable, the file count reads `N of M files readable`. A structured
+The file count is the number of files tailed right now; it is recounted on every pass, so an
+idle stop and restart does not inflate it. When some files are not readable, the file count
+reads `N of M files readable`. A structured
 (ruflo or agentic-qe) record needs a session ID, an actor ID, and an action. A record missing one
 is counted as rejected, and the API reports which field was missing, never the record itself.
 The toggle counts `degraded` adapters as source issues and names sources that are awaiting a file.
@@ -459,6 +465,7 @@ unbounded content snapshot.
 | Worker thread appears at top level | Its declared parent is not currently retained, so it remains navigable as an orphan rather than hiding evidence |
 | Ruflo or AQE absent | Their stores are not auto-discovered; register each JSONL file with `--live-source` |
 | Sources says `awaiting file` | The registered file does not exist. Check the path, and check that its producer is running; registration does not start one |
+| Sources says `N files (newest of M)` | Live tails only the newest transcripts per host within its file bound; older files are not followed. Switch to History for them |
 | Sources shows `rejected` records | The file's records lack a session ID, actor ID, or action, so they cannot become events |
 | Project name not reported | No supported metadata supplied a working directory; raw paths are never sent to the browser |
 | Node disappeared | Server projection or client visibility bounds evicted/collapsed it |
