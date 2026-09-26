@@ -21,8 +21,8 @@ a later installed host version does not inherit those conformance results automa
 
 The [issues 237–239 verification and decisions](2026-09-26-issues-237-238-239-verification-and-decisions.md)
 record verifies an external report against `847486c` and captures the maintainer's nine
-decisions, a same-day AgentDB and Ruflo memory alignment addendum with its decisions, and the
-resulting remediation plan; it authorizes that plan but is not evidence that any of it is
+decisions, two same-day addenda (AgentDB and Ruflo memory alignment; memory location and install
+transparency) with their decisions, and the resulting remediation plan; it authorizes that plan but is not evidence that any of it is
 implemented.
 
 Machine-readable inventories here are observations, not executable policy, ownership receipts,

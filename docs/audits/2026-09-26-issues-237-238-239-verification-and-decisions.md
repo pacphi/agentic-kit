@@ -617,6 +617,97 @@ found). RuVector: `ruvector.db` in the working directory. agentic-qe or ak's AQE
 created in subdirectories (owner to confirm). `ruvnet/ruflo#3195` already covers `doctor` checking
 `memory.db` only.
 
+## Addendum 2 — memory location and install transparency (same day)
+
+While filing upstream reports, the reporting track returned three problems as agentic-kit's own
+rather than upstream defects. Each was presented in the decision format above.
+
+### Problem 1 — registering a provider can make Ruflo lose project memory
+
+**The situation.** On `ak setup` and `ak sync`, ak registers each configured provider by running
+`ruflo providers configure` in the project directory (`src/lib/providers.mjs:915-924`).
+
+**The problem.** `ruflo init` writes `.claude-flow/config.yaml`, but Ruflo reads memory settings only
+from `claude-flow.config.json` or `.claude-flow/config.json`. When neither exists,
+`providers configure` writes a new `claude-flow.config.json` from Ruflo's defaults, including
+`memory.persistPath: "./data/memory"`, and Ruflo then looks for memory in the wrong place. Reproduced
+in a disposable project on Ruflo 3.45.0: `memory list` reports "Database not found", `memory store`
+reports "Database not initialized", and `.swarm/memory.db` is orphaned; moving the new file aside
+restores access. The Ruflo side is reported on ruvnet/ruflo#3193; ak is the trigger.
+
+**What the user sees.** Latent on the maintainer's machine (no providers configured). The first
+configured provider would silently hide project memory from the CLI and hooks.
+
+**What should be the case.** Registering a provider never moves or hides memory.
+
+**The choices.** A: wait for Ruflo. B: skip registration when it would move memory, and explain.
+C: before registering, write a minimal Ruflo JSON configuration pinning the memory folder already in
+use; if a future Ruflo overwrites it, fall back to B; `ak status` warns about an orphaned store.
+D: let Ruflo write its defaults, then reset the memory setting afterwards.
+Verified before recommending C: with `claude-flow.config.json` pinning `memory.persistPath: ".swarm"`,
+Ruflo 3.45.0's `providers configure` keeps the value and only adds its own keys.
+
+**Recommendation: C. Choice: C.**
+
+### Problem 2 — Codex's Ruflo memory lands in odd places outside a Git repository
+
+**The situation.** Codex reaches Ruflo through `ak x ruflo-mcp`, which starts Ruflo in the Git
+repository Codex is working in; outside a repository it falls back to Codex's starting directory
+(`src/lib/ruflo-memory.mjs:13-15`).
+
+**The problem.** Codex often starts outside the user's work: at the filesystem root, where nothing can
+be written, or inside its own `~/.codex/.chatgpt-projects/…` folders. Observed live: one Codex-launched
+Ruflo server with working directory `/`, another inside a Codex ChatGPT project folder, three `.swarm`
+stores under `~/.codex/.chatgpt-projects/`, and a stray `~/.swarm`. Memory in those sessions either
+fails to save or lands where no other host sees it, and `ak status` does not mention it.
+
+**What should be the case.** Memory goes somewhere sensible and predictable: the project folder when
+there is one, never the filesystem root or a tool's internal folder, and ak reports which store is used.
+
+**The choices.** A: refuse outside a Git repository. B: always use one user-level store outside a Git
+repository. C: a plain work folder keeps its own `.swarm` (as with Claude and decision 2); the
+filesystem root, the home folder itself, temporary folders and tool-internal folders use one
+user-level store at Ruflo's own user-level convention; `ak status` shows the chosen store and reports,
+never deletes, existing stray stores. D: leave as is.
+
+**Recommendation: C. Choice: C.** Claude's user-scope registration starts Ruflo directly, without the
+launcher; applying the same rule to Claude sessions would route Claude through the launcher and is
+recorded as a follow-up decision.
+
+### Problem 3 — ak edits a file inside Ruflo's install
+
+**The situation.** Ruflo pins better-sqlite3 ≥ 12.8.0 because AgentDB's optional `^11.8.1` has no
+Node 24–26 binaries and falls back to a non-persistent engine (`ruflo/scripts/audit-better-sqlite3-override.mjs`,
+ruvnet/ruflo#2219). When npm's install-script policy blocks that native build, ak's repair
+(`ensureNativeBsq3`, `src/lib/heal.mjs:60-74`) installs the native binding into Ruflo's install and,
+because npm otherwise fails with EOVERRIDE, first rewrites the better-sqlite3 lines in the bundled
+AgentDB `package.json`.
+
+**The problem.** The repair matches Ruflo's intent, but ak edits another tool's installed files
+without recording, showing, or being able to undo the change.
+
+**What should be the case.** Memory persists as Ruflo intends; any change ak makes inside another
+tool's install is recorded, visible and reversible, and done the least invasive way that works.
+
+**The choices.** A: keep as is. B: keep the repair; record a receipt (file, field, old and new value,
+time), show it in `ak status` and About citing ruflo#2219, restore the originals on `ak uninstall`,
+re-check after Ruflo upgrades. C: report only and give the reinstall command. D: first reinstall the
+same Ruflo version with the native build allowed so Ruflo's own pin applies; fall back to B.
+
+**Recommendation: B, and test D during implementation, reporting back before switching.
+Choice: B.**
+
+### Plan changes
+
+**Stage 5 — memory location and install transparency** runs after Stage 4, built on the integrated
+branch:
+
+| # | Commit | Addresses |
+|---|---|---|
+| 5.1 | `fix(providers): pin the Ruflo memory root before registering providers` | Problem 1 |
+| 5.2 | `fix(ruflo-mcp): keep Codex's Ruflo memory out of system and tool folders` | Problem 2 |
+| 5.3 | `fix(natives): record, show, and reverse ak's edits inside Ruflo's install` | Problem 3 |
+
 ## Follow-ups outside this plan
 
 M1b (a failed source's banner outlives its Discovery row), N4 (preserved memory files, with #213),
