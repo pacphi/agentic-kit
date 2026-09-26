@@ -2,7 +2,8 @@
 
 - **Status:** Implemented
 - **Updated:** 2026-09-26 — §11: every status fix declares who performs it (`repair: sync | manual`);
-  `ak sync` plans only fixes a sync step performs (#237)
+  `ak sync` plans only fixes a sync step performs (#237); the Ruflo native runtime probe keeps its
+  load error and separates unavailable from inconclusive (see the native runtime probe amendment)
 - **Earlier update:** 2026-09-20 — ADR-0055 adds qualified AQE embedding lifecycle evidence; ADR-0053 separates host health from usage-source diagnostics
 - **Earlier update:** 2026-08-26 — ADR-0035 applies fail-closed preflight, bounded evidence, and
   content-free degradation to the opt-in deja-vu companion
@@ -53,6 +54,16 @@ defect was losing the evidence needed to distinguish healthy, degraded, absent, 
 or mutating user state after a promised safety prerequisite failed.
 
 ## Decision
+
+### Native runtime probe amendment — 2026-09-26
+
+The load probe for the better-sqlite3 that Ruflo's memory runtime resolves returns one of three
+states. `native` means it loaded and answered `SELECT 1`. `unavailable` means the child reported the
+load error, which status shows with paths reduced to file names. `inconclusive` means no verdict: a
+timeout (retried once, and detected only through the probe's own abort signal), a crash, or a spawn
+error. Only `unavailable` asserts the WASM fallback and fails status. `inconclusive` is a warning
+with no sync fix. Status offers the sync fix only where the natives heal acts; the heal builds a
+binding whose file is missing.
 
 ### AQE embedding amendment — 2026-09-20
 
@@ -289,11 +300,11 @@ emit a `sync` fix that no step handles.
 
 ## References
 
-- Implementation: `src/lib/{file-write,settings,blocks,sqlite,heal,output}.mjs`,
+- Implementation: `src/lib/{file-write,settings,blocks,sqlite,heal,natives,output}.mjs`,
   `src/lib/live/process-sessions.mjs`, `src/lib/{usage-index,usage-opencode,codex-state,trust-manifest}.mjs`,
-  `src/lib/dashboard/{page,client,styles}.mjs`,
+  `src/lib/dashboard/{page,client,styles}.mjs`, `src/commands/status/sections/natives.mjs`,
   `src/commands/{setup,sync}.mjs`, and `src/templates/statusline-footer.cjs`.
-- Tests: `tests/kit/{clean-machine-setup,heal-natives,sqlite,settings-config,blocks,
+- Tests: `tests/kit/{clean-machine-setup,heal-natives,natives-runtime,natives-probe,sqlite,settings-config,blocks,
   live-process-sessions,setup-command,trust-manifest,usage-index,usage-index-opencode}.test.mjs`,
   `tests/dashboard.test.cjs`, and `tests/statusline-segments.test.cjs`.
 - Clean-machine workflow: `.github/workflows/nightly.yml`.

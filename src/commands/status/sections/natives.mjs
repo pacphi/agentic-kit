@@ -2,6 +2,34 @@
 import { nativesStatus, rufloRuntimeNatives } from '../../../lib/natives.mjs';
 import { row } from '../row.mjs';
 
+/** One row per ruflo memory-runtime context that is not native, from the load
+ *  probe's state: `unavailable` provably falls back to WASM (fail), while
+ *  `inconclusive` has no verdict (warn, nothing for sync to do). The fix names
+ *  only what sync's natives heal actually does: it builds a MISSING binding. */
+export function runtimeNativeRows(rt) {
+  if (!rt.installed || !rt.contexts.length) return [];
+  const notNative = rt.contexts.filter((c) => c.state !== 'native');
+  if (!notNative.length) {
+    return [row('natives', 'ok', `ruflo memory runtime native (${rt.contexts.map((c) => c.context).join(', ')})`)];
+  }
+  return notNative.map((c) => {
+    const where = `(@claude-flow/${c.context})`;
+    const reason = c.reason || 'no diagnostic available';
+    if (c.state !== 'unavailable') {
+      return row('natives', 'warn',
+        `ruflo memory runtime backend unverified ${where}: ${reason} — native or WASM fallback is unknown; re-run ak status`);
+    }
+    if (!c.bindingPresent) {
+      return row('natives', 'fail',
+        `ruflo memory runtime on WASM fallback ${where}: no native binding — ${reason}`,
+        'sync builds the native binding');
+    }
+    return row('natives', 'fail',
+      `ruflo memory runtime on WASM fallback ${where}: its native binding is present but will not load — ${reason}; `
+      + 'sync only builds missing bindings, so rebuild it by hand (npm run install in its better-sqlite3 package)');
+  });
+}
+
 export default {
   id: 'natives',
   async collect() {
@@ -24,17 +52,7 @@ export default {
       // #45: the agentdb copies above are NOT what `npx ruflo memory` loads — probe
       // the binding as resolved from ruflo's own memory runtime (@claude-flow/memory
       // + /cli), or the row reads ✓ while memory store runs on the WASM fallback.
-      const rt = await rufloRuntimeNatives();
-      if (rt.installed && rt.contexts.length) {
-        const wasm = rt.contexts.filter((c) => !c.ok);
-        if (wasm.length) {
-          rows.push(row('natives', 'fail',
-            `ruflo memory runtime on WASM fallback (${wasm.map((c) => `@claude-flow/${c.context}`).join(', ')}) — memory and orchestration may degrade`,
-            'sync builds the native binding'));
-        } else {
-          rows.push(row('natives', 'ok', `ruflo memory runtime native (${rt.contexts.map((c) => c.context).join(', ')})`));
-        }
-      }
+      rows.push(...runtimeNativeRows(await rufloRuntimeNatives()));
     } catch (e) {
       rows.push(row('natives', 'warn', `native check unavailable: ${e.message}`));
     }

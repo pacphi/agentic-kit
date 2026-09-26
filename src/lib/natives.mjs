@@ -134,31 +134,106 @@ export function selfSpecConflicts(dir, spec) {
 // "Could not locate the bindings file"), so requiring it, opening :memory:, and
 // running SELECT 1 in a child process is the real WASM-vs-native answer — not a
 // file-existence guess. Kept in a child process so a broken addon can't crash ak.
+// Any load failure is reported as one tagged JSON line and exit 2, so the parent
+// can tell "better-sqlite3 will not load" (unavailable) from a probe that never
+// reached a verdict (timeout, crash: inconclusive). Node prints its own version as
+// the last stderr line of an uncaught throw, which used to be the only "reason".
+const FAILURE_TAG = 'AK_NATIVE_FAILURE:';
 const RUNTIME_PROBE =
-  "const D=require(require.resolve('better-sqlite3',{paths:[process.argv[1]]}));"
+  "try{const D=require(require.resolve('better-sqlite3',{paths:[process.argv[1]]}));"
   + "const db=new D(':memory:');const r=db.prepare('SELECT 1 AS ok').get();db.close();"
-  + 'process.exit(r&&r.ok===1?0:3);';
+  + "if(!r||r.ok!==1)throw new Error('native SELECT 1 probe returned an unexpected row');}"
+  + `catch(e){process.stderr.write('${FAILURE_TAG}'+JSON.stringify({message:String(e&&e.message||e)})+'\\n');`
+  + 'process.exitCode=2;}';
+
+const PROBE_TIMEOUT_MS = 8000;
+const PROBE_ATTEMPTS = 2;
+const REASON_CAP = 160;
+
+// Module-loader search lists (`bindings`' "Tried:", require's "Require stack:")
+// add paths, not causes.
+const LOADER_SEARCH_LIST = /\s*(?:Tried:|Require stack:)[\s\S]*$/;
+const WIN_PREFIX = String.raw`(?:\\\\\?\\)?(?:[A-Za-z]:)?`;
+// A quoted absolute path, e.g. Node's "The module '<path>'" and dlopen's tried-list.
+const QUOTED_PATH = new RegExp(String.raw`'${WIN_PREFIX}[\\/][^']*?([^'\\/]+)'`, 'g');
+// dlopen(<path>, 0x0001) — unquoted and may contain spaces, so it ends at the comma.
+const DLOPEN_PATH = new RegExp(String.raw`dlopen\(${WIN_PREFIX}[\\/][^,)]*?([^,)\\/]+)(?=,)`, 'g');
+// Any other absolute path without spaces (Linux "<path>: invalid ELF header").
+const BARE_PATH = new RegExp(String.raw`${WIN_PREFIX}[\\/](?:[^\\/\s'"(),]+[\\/])+([^\\/\s'"(),]+)`, 'g');
+
+/** One-line cause of a native load failure. The resolved binding path sits at the
+ *  front of dlopen/ABI errors and alone used up the 160-char cap, hiding the cause
+ *  ("not a valid mach-o file", "compiled against a different Node.js version"), so
+ *  paths shrink to their file name before the cap applies. */
+function conciseLoadError(message) {
+  const text = String(message)
+    .replace(LOADER_SEARCH_LIST, '')
+    .replace(QUOTED_PATH, "'$1'")
+    .replace(DLOPEN_PATH, 'dlopen($1')
+    .replace(BARE_PATH, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text.length > REASON_CAP ? `${text.slice(0, REASON_CAP - 1)}…` : text;
+}
+
+/** The child's tagged load error, or null when it never produced one. */
+function loadFailure(stderr) {
+  const line = String(stderr ?? '').split('\n').find((l) => l.startsWith(FAILURE_TAG));
+  if (!line) return null;
+  try {
+    const { message } = JSON.parse(line.slice(FAILURE_TAG.length));
+    return typeof message === 'string' ? conciseLoadError(message) : null;
+  } catch { return null; } // malformed output proves nothing: inconclusive
+}
+
+/** Why a probe without a load verdict ended. run() reports a crashed or killed
+ *  child as execFile's "Command failed: <the probe source>", which is not a cause. */
+function undiagnosed(r) {
+  const line = String(r.stderr ?? '').split('\n').map((l) => l.trim())
+    .find((l) => l && !l.startsWith('Command failed:'));
+  return line ? conciseLoadError(line) : `native probe exited ${r.code} without a diagnostic`;
+}
 
 /** Load-test better-sqlite3 as resolved from `dir`. Injectable runner keeps the
- *  test spawn-free. Returns {ok} or {ok:false, reason}. */
-export async function probeBsq3Runtime(dir, { runner = run } = {}) {
-  // Generous timeout for a cold `node` spawn on CI; a real native require returns
-  // well under the status budget (probes run in parallel, see rufloRuntimeNatives).
-  const r = await runner('node', ['-e', RUNTIME_PROBE, dir], { cwd: dir, timeout: 8000 });
-  if (r.code === 0) return { ok: true };
-  return { ok: false, reason: (r.stderr || `exit ${r.code}`).trim().split('\n').pop().slice(0, 160) };
+ *  test spawn-free. Returns {ok, state, attempts, reason?} where state is
+ *  `native` (it loads), `unavailable` (it provably will not load; `reason` is the
+ *  load error) or `inconclusive` (no verdict: timeout, crash, spawn error). Only a
+ *  timeout is retried, once: a cold `node` spawn on a loaded machine can miss the
+ *  window, and a single slow start must not read as a broken binding. */
+export async function probeBsq3Runtime(dir, { runner = run, timeoutMs = PROBE_TIMEOUT_MS } = {}) {
+  for (let attempt = 1; ; attempt += 1) {
+    // Timeout evidence comes from this signal alone: run() folds a killed child
+    // into the same {code:1} as any other failure, and stderr words prove nothing.
+    // run()'s own timeout is a backstop that must never fire first.
+    const signal = AbortSignal.timeout(timeoutMs);
+    let r;
+    try {
+      r = await runner('node', ['-e', RUNTIME_PROBE, dir], { cwd: dir, timeout: timeoutMs + 1000, signal });
+    } catch (error) {
+      r = { code: 1, stderr: String(error?.message ?? error) };
+    }
+    if (r.code === 0) return { ok: true, state: 'native', attempts: attempt };
+    const cause = loadFailure(r.stderr);
+    if (cause) return { ok: false, state: 'unavailable', attempts: attempt, reason: cause };
+    if (!signal.aborted) return { ok: false, state: 'inconclusive', attempts: attempt, reason: undiagnosed(r) };
+    if (attempt >= PROBE_ATTEMPTS) {
+      return { ok: false, state: 'inconclusive', attempts: attempt, reason: `native probe timed out after ${attempt} attempts` };
+    }
+  }
 }
 
 /** Per-context native-binding truth for ruflo's memory runtime. {installed:false}
  *  when ruflo is absent (EC-1: status/pre-flight skip, never crash). Probes run in
- *  parallel to stay inside the status time budget. */
+ *  parallel to stay inside the status time budget. `bindingPresent` says whether
+ *  the resolved package has a build/Release binding file at all — what sync's heal
+ *  keys on — so status can say which repair applies. */
 export async function rufloRuntimeNatives({ runner = run } = {}) {
   let installed;
   try { installed = fs.existsSync(rufloRoot()); } catch { installed = false; }
   if (!installed) return { installed: false, contexts: [] };
   const contexts = await Promise.all(rufloMemoryContexts().map(async ({ context, dir }) => {
     const res = await probeBsq3Runtime(dir, { runner });
-    return { context, dir, ok: res.ok, reason: res.reason };
+    return { context, dir, ...res, bindingPresent: bsq3IsNative(dir) };
   }));
   return { installed: true, contexts };
 }
