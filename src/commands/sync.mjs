@@ -67,21 +67,22 @@ export function lifecycleRefreshRequired(subsystems, hostId) {
   return subsystems.has(hostId) || (hostId === 'opencode' && subsystems.has('versions'));
 }
 
-/** Print the plan, or why there is none, plus the count of manual steps sync
- *  leaves to the user (status/row.mjs repair contract). With manual rows left,
- *  an empty plan is never reported as "all subsystems healthy". Returns false
- *  when there is nothing to apply. */
-function announcePlan(plan, manual) {
+/** Print the plan, or why there is none, the items --skip took out of it, and
+ *  the count of manual steps sync leaves to the user (status/row.mjs repair
+ *  contract). With manual or skipped items left, an empty plan is never
+ *  reported as "all subsystems healthy". Returns false when there is nothing
+ *  to apply. */
+function announcePlan(plan, manual, skipped) {
   const manualNote = `${manual.length} item(s) need a manual step — \`ak status\` shows them as "→ manual:"`;
-  if (plan.length === 0) {
-    if (manual.length) info(`nothing sync can do — ${manualNote}`);
-    else ok('nothing to do — all subsystems healthy');
-    return false;
-  }
-  console.log(bold(`sync plan (${plan.length} action(s)):`));
-  for (const p of plan) console.log(`  • [${p.subsystem}] ${p.fix} ${dim(`— because: ${p.message}`)}`);
-  if (manual.length) info(dim(manualNote));
-  return true;
+  if (plan.length) {
+    console.log(bold(`sync plan (${plan.length} action(s)):`));
+    for (const p of plan) console.log(`  • [${p.subsystem}] ${p.fix} ${dim(`— because: ${p.message}`)}`);
+  } else if (skipped.length) info(`nothing to do — ${skipped.length} planned item(s) skipped by request`);
+  else if (manual.length) info(`nothing sync can do — ${manualNote}`);
+  else ok('nothing to do — all subsystems healthy');
+  for (const s of skipped) info(dim(`skipped by request: [${s.subsystem}] ${s.fix}`));
+  if (manual.length && (plan.length || skipped.length)) info(dim(manualNote));
+  return plan.length > 0;
 }
 
 /** Preserve a failed mutation for the final convergence proof. A failed heal
@@ -110,6 +111,7 @@ export const options = {
   'no-upgrade': { type: 'boolean', default: false },
   yes: { type: 'boolean', default: false },
   json: { type: 'boolean', default: false },
+  skip: { type: 'string', multiple: true },
 };
 
 export const help = `ak sync — converge to good: upgrade + heal + verify
@@ -122,18 +124,28 @@ Only fixes a sync step performs are planned; a status row marked "→ manual:"
 A planned fix whose row is still there after the apply phase is reported as
 "unresolved: [subsystem] fix — reason", and sync exits 1.
 
+--skip leaves a subsystem out of this run only; kit.json is unchanged. Its
+plan items, the step it owns (even when another planned subsystem would
+trigger that step), and a fix only that step performs are all skipped, and
+none of them counts as a failure. A step shared by several subsystems (for
+example providers, which also serves routing) still runs for the others.
+An unknown name is rejected with the list of names sync accepts.
+
 Usage: ak sync [options]
 
 Options:
-  --dry-run       print the plan and stop; change nothing
-  --no-upgrade    heal only; don't upgrade ruflo/aqe/kit versions
-  --yes           approve disclosed repairs without prompting
-  --json          emit results as JSON
+  --dry-run            print the plan and stop; change nothing
+  --no-upgrade         heal only; don't upgrade ruflo/aqe/kit versions
+  --skip SUBSYSTEM     leave SUBSYSTEM out of this run (repeatable, or
+                       comma-separated: --skip natives,ruvnet-brain)
+  --yes                approve disclosed repairs without prompting
+  --json               emit results as JSON
 
 Examples:
-  ak sync                 upgrade, heal, verify
-  ak sync --dry-run       preview the plan
-  ak sync --no-upgrade    re-heal without touching versions`;
+  ak sync                          upgrade, heal, verify
+  ak sync --dry-run                preview the plan
+  ak sync --no-upgrade             re-heal without touching versions
+  ak sync --skip ruvnet-brain      everything except the Brain refresh`;
 
 // ── the sync step registry ───────────────────────────────────────────────────
 // Every heal used to be a `if (subsystems.has(X)) { ... }` block inlined into
@@ -146,7 +158,7 @@ Examples:
 // predicate (no closures) so it stays easy to reason about independent of
 // `run`'s side effects. `run(ctx)` receives the shared per-invocation context
 // (see `run()` below): {cfg, cwd, pkgRoot, flags, dejaVuAdapter, subsystems,
-// report, step, state}. `state` carries the two cross-step signals
+// skip, report, step, state}. `state` carries the two cross-step signals
 // (`dejaVuApplyFailed`, `aqeRouterApplyFailure`) the final convergence check
 // needs — the only state that survives past its own step.
 const HOST_LIFECYCLE = { installState: hostInstallState, executable: hostExecutable, install: installHost };
@@ -392,6 +404,8 @@ export const SYNC_STEPS = [
     when: () => true,
     run: async (ctx) => {
       for (const hostId of hostsWithLifecycle()) {
+        // --skip <host> also stops the refresh an upgrade (versions) would trigger.
+        if (ctx.skip?.has(hostId)) continue;
         if (!lifecycleRefreshRequired(ctx.subsystems, hostId) || !lifecycleExecutionEnabled(hostId, ctx.cfg)) continue;
         if (!(await have(detectionBinFor(hostId)))) {
           info(`${hostId}: enabled but CLI not installed — wiring skipped (hosts step installs it)`);
@@ -568,18 +582,77 @@ export const SYNC_STEPS = [
 // Repairs run() performs after SYNC_STEPS, on every run.
 const TAIL_REPAIRS = new Set(['host-alignment']);
 
+// The subsystem each step repairs, which is what --skip names. A step's id is
+// that subsystem unless listed here; host-lifecycles answers per host instead
+// (its loop checks ctx.skip), so no single subsystem owns it.
+const STEP_SUBSYSTEM = { 'codex-mcp-repair': 'codex-mcp', 'aqe-rvf': 'aqe', 'ruflo-helpers': 'versions', 'host-lifecycles': null };
+const stepSubsystem = (s) => (Object.hasOwn(STEP_SUBSYSTEM, s.id) ? STEP_SUBSYSTEM[s.id] : s.id);
+
+// Every subsystem a plan item or step can name. tests/kit/sync-command.test.mjs
+// fails when a step's `when` names one missing here.
+const SYNC_SUBSYSTEMS = [
+  'agent-browser', 'aqe', 'aqe-embedding', 'blocks', 'codex-context', 'codex-mcp', 'codex-statusline',
+  'daemons', 'deja-vu', 'host-alignment', 'hosts', 'mcp', 'natives', 'npx', 'providers', 'routing',
+  'ruflo-components', 'ruvector', 'ruvnet-brain', 'ruvnet-brain-nightly', 'scaffold-agents', 'security',
+  'self', 'statusline', 'statusline/cve', 'versions',
+];
+
+/** The names `ak sync --skip` accepts: SYNC_SUBSYSTEMS plus every lifecycle host. */
+export function skippableSubsystems() {
+  return [...new Set([...SYNC_SUBSYSTEMS, ...hostsWithLifecycle()])].sort();
+}
+
+/** --skip values (repeatable, or comma-separated) → `{ skip: Set }`, or
+ *  `{ error }` naming each unknown value and the accepted list. */
+export function parseSkip(values) {
+  const names = [values ?? []].flat().flatMap((v) => String(v).split(',')).map((v) => v.trim()).filter(Boolean);
+  const known = skippableSubsystems();
+  const unknown = names.filter((n) => !known.includes(n));
+  if (unknown.length) {
+    return { error: `unknown --skip subsystem ${unknown.map((n) => `'${n}'`).join(', ')} — accepted: ${known.join(', ')}` };
+  }
+  return { skip: new Set(names) };
+}
+
+/** A step runs when its `when` fires on the planned subsystems and --skip did
+ *  not name the subsystem it repairs. Removing a skipped subsystem from the
+ *  plan already stops the triggers it would derive (versions → natives …);
+ *  this check stops a skipped step that another planned subsystem triggers. */
+const stepRuns = (s, subsystems, flags, cfg, skip) => !skip.has(stepSubsystem(s)) && s.when(subsystems, flags, cfg);
+
+/** Ids of the steps that run for `subsystems` under --skip (for tests). */
+export function activeSteps(subsystems, flags, cfg, skip = new Set()) {
+  return SYNC_STEPS.filter((s) => stepRuns(s, subsystems, flags, cfg, skip)).map((s) => s.id);
+}
+
 /** Which steps would perform a planned fix for `subsystem`, judged on that
  *  subsystem alone. `host-lifecycles` runs on every sync but acts only for a
  *  lifecycle host it is asked to refresh, so its always-true `when` is not
  *  evidence; `host-alignment` is the post-step alignHosts pass. An empty list
- *  means sync cannot perform the fix it planned. */
-export function performingSteps(subsystem, flags, cfg) {
+ *  means sync cannot perform the fix it planned (or --skip stopped every step
+ *  that could). */
+export function performingSteps(subsystem, flags, cfg, skip = new Set()) {
+  if (skip.has(subsystem)) return [];
   const subs = new Set([subsystem]);
-  const steps = SYNC_STEPS.filter((s) => s.id !== 'host-lifecycles' && s.when(subs, flags, cfg)).map((s) => s.id);
+  const steps = SYNC_STEPS.filter((s) => s.id !== 'host-lifecycles' && stepRuns(s, subs, flags, cfg, skip)).map((s) => s.id);
   if (hostsWithLifecycle().includes(subsystem) && lifecycleRefreshRequired(subs, subsystem)
     && lifecycleExecutionEnabled(subsystem, cfg)) steps.push('host-lifecycles');
   if (TAIL_REPAIRS.has(subsystem)) steps.push('sync tail');
   return steps;
+}
+
+/** Take --skip's items out of the plan: those of a skipped subsystem, and
+ *  those only a skipped step performs (statusline/cve when statusline is
+ *  skipped) — running the rest could never repair them. */
+export function splitSkipped(candidates, skip, flags, cfg) {
+  if (!skip.size) return { plan: candidates, skipped: [] };
+  const plan = []; const skipped = [];
+  for (const p of candidates) {
+    const onlySkippedSteps = () => performingSteps(p.subsystem, flags, cfg).length > 0
+      && performingSteps(p.subsystem, flags, cfg, skip).length === 0;
+    (skip.has(p.subsystem) || onlySkippedSteps() ? skipped : plan).push(p);
+  }
+  return { plan, skipped };
 }
 
 const repairKey = (r) => `${r.subsystem}\u0000${r.fix}`;
@@ -589,8 +662,15 @@ const repairKey = (r) => `${r.subsystem}\u0000${r.fix}`;
  *  the apply phase, and any planned subsystem no step performs. Manual fixes
  *  never enter the plan, so they can never be unresolved. `remaining` holds
  *  everything else still failing: fail-level rows, a deja-vu row with a fix,
- *  and mutations that reported failure during this run. */
-export function convergenceVerdict({ plan, after, state, flags, cfg }) {
+ *  and mutations that reported failure during this run. A subsystem --skip
+ *  left out is never a failure: its failing rows join the skipped plan items
+ *  in `skipped`, reported as "skipped by request". */
+export function convergenceVerdict({ plan, after: collected, state, flags, cfg, skip = new Set(), skipped: skippedPlan = [] }) {
+  const left = new Set([...skip, ...skippedPlan.map((p) => p.subsystem)]);
+  const counts = (r) => r.level === 'fail' || (r.subsystem === 'deja-vu' && r.fix !== null);
+  const skipped = [...skippedPlan, ...collected.filter((r) => left.has(r.subsystem) && counts(r)
+    && !skippedPlan.some((p) => repairKey(p) === repairKey(r)))];
+  const after = collected.filter((r) => !left.has(r.subsystem));
   const unresolved = [];
   for (const p of plan) {
     if (performingSteps(p.subsystem, flags, cfg).length) continue;
@@ -605,8 +685,7 @@ export function convergenceVerdict({ plan, after, state, flags, cfg }) {
     flagged.add(repairKey(r));
     unresolved.push({ subsystem: r.subsystem, fix: r.fix, message: r.message, reason: 'not-converged' });
   }
-  const remaining = after.filter((r) => !(r.fix && flagged.has(repairKey(r)))
-    && (r.level === 'fail' || (r.subsystem === 'deja-vu' && r.fix !== null)));
+  const remaining = after.filter((r) => !(r.fix && flagged.has(repairKey(r))) && counts(r));
   // Collector rows describe persisted state after the heal, but they cannot
   // erase an apply failure from this run. In particular, an unavailable
   // external fallback can leave only a warning row; claiming convergence
@@ -625,19 +704,35 @@ export function convergenceVerdict({ plan, after, state, flags, cfg }) {
       remaining.push({ subsystem: failure.name, message: `${failure.name}: ${failure.detail}` });
     }
   }
-  return { unresolved, remaining };
+  return { unresolved, remaining, skipped };
 }
 
 /** Print the verdict; returns the exit code. */
-function reportVerdict({ unresolved, remaining }) {
+function reportVerdict({ unresolved, remaining, skipped }) {
+  for (const s of skipped) info(`skipped by request: [${s.subsystem}] ${s.fix ?? s.message}`);
   if (unresolved.length === 0 && remaining.length === 0) {
-    ok(bold('converged — no failing subsystems'));
+    ok(bold(`converged — no failing subsystems${skipped.length ? ` (${skipped.length} skipped by request)` : ''}`));
     info(dim('📊 dashboard: run `ak dashboard` → opens http://127.0.0.1:7431 (local, read-only)'));
     return 0;
   }
   for (const u of unresolved) fail(`unresolved: [${u.subsystem}] ${u.fix} — ${u.message}`);
   for (const r of remaining) fail(`still failing: [${r.subsystem}] ${r.message}`);
   return 1;
+}
+
+/** The passes after SYNC_STEPS, each unless --skip named it: a final Codex MCP
+ *  reconcile (codex-mcp) and host transport alignment (host-alignment). */
+async function runTail({ cfg, cwd, flags, skip, state, codexRepairPlan, confirm, inspect, repair }) {
+  // An initializer can restore a legacy alias after the initial repair. Keep
+  // the replacement's ownership check and the user's explicitly remembered
+  // choice, then verify the final topology before declaring convergence.
+  if (!skip.has('codex-mcp')) {
+    const finalMcp = await reconcileCodexMcp({ cfg, cwd, yes: flags.yes, confirm, inspect, repair, approvedTargets: codexRepairPlan });
+    if (!finalMcp.ok) state.codexRepairFailure = finalMcp.detail;
+  }
+  if (!skip.has('host-alignment') && await alignHosts({ flags: { apply: true, yes: flags.yes }, roots: [cwd], cfg, confirm }) !== 0) {
+    state.applyFailures.push({ name: 'host-alignment', detail: 'transport anomalies remain; run ak host align for the exact scope and correction' });
+  }
 }
 
 export async function run({
@@ -652,6 +747,11 @@ export async function run({
 }) {
   const cwd = process.cwd();
   const dejaVuPlanOptions = { allowUpgrade: !flags['no-upgrade'] };
+  const { skip, error: skipError } = parseSkip(flags.skip);
+  if (skipError) {
+    fail(`ak sync: ${skipError}`);
+    return 2;
+  }
   // #134: draw the plan from CURRENT drift, not the TTL cache — a cache
   // stamped before an upstream release claims "all current" and the upgrade
   // never reaches the plan (the old force at apply time sat behind the very
@@ -665,7 +765,7 @@ export async function run({
   // a login, an explicit model-lifecycle command — is named by `ak status` and
   // counted below, but sync never plans or claims it.
   const manual = rows.filter((r) => r.fix && r.repair === 'manual');
-  const plan = rows.filter((r) => r.fix && r.repair !== 'manual')
+  const candidates = rows.filter((r) => r.fix && r.repair !== 'manual')
     .filter((r) => !(flags['no-upgrade'] && ['versions', 'self', 'ruvnet-brain', 'ruvector'].includes(r.subsystem)))
     // A ruflo-components row asking for a ruflo UPGRADE (state 'needs-ruflo') gets the
     // same --no-upgrade treatment as 'versions': the component can't actually apply
@@ -676,10 +776,11 @@ export async function run({
 
   const cfg = loadKitConfig();
   if (cfg.aqe !== false && cfg.aqeEmbedding && cfg.aqeEmbedding.mode !== 'unmanaged') {
-    plan.push({ subsystem: 'aqe-embedding', message: 'selected semantic backend requires live verification',
+    candidates.push({ subsystem: 'aqe-embedding', message: 'selected semantic backend requires live verification',
       fix: 'verify selected backend and repair missing opted-in local model' });
   }
-  if (!announcePlan(plan, manual)) return 0;
+  const { plan, skipped } = splitSkipped(candidates, skip, flags, cfg);
+  if (!announcePlan(plan, manual, skipped)) return 0;
   if (flags['dry-run']) return 0;
   console.log('');
 
@@ -712,25 +813,16 @@ export async function run({
     return r;
   };
   const ctx = {
-    cfg, cwd, pkgRoot, flags, dejaVuAdapter, codexRepairPlan, subsystems, report, step, state,
+    cfg, cwd, pkgRoot, flags, dejaVuAdapter, codexRepairPlan, subsystems, skip, report, step, state,
     inspectCodexTopology, repairCodexTopology,
   };
 
   for (const s of SYNC_STEPS) {
-    if (s.when(subsystems, flags, cfg)) await s.run(ctx);
+    if (stepRuns(s, subsystems, flags, cfg, skip)) await s.run(ctx);
     if (state.codexRepairFailure) return 1;
   }
-
-  // An initializer can restore a legacy alias after the initial repair. Keep
-  // the replacement's ownership check and the user's explicitly remembered
-  // choice, then verify the final topology before declaring convergence.
-  const finalMcp = await reconcileCodexMcp({ cfg, cwd, yes: flags.yes, confirm: confirmCodexRepair,
-    inspect: inspectCodexTopology, repair: repairCodexTopology, approvedTargets: codexRepairPlan });
-  if (!finalMcp.ok) state.codexRepairFailure = finalMcp.detail;
-  if (await alignHosts({ flags: { apply: true, yes: flags.yes }, roots: [cwd], cfg,
-    confirm: confirmCodexRepair }) !== 0) {
-    state.applyFailures.push({ name: 'host-alignment', detail: 'transport anomalies remain; run ak host align for the exact scope and correction' });
-  }
+  await runTail({ cfg, cwd, flags, skip, state, codexRepairPlan,
+    confirm: confirmCodexRepair, inspect: inspectCodexTopology, repair: repairCodexTopology });
 
   // converge proof
   console.log('');
@@ -763,5 +855,5 @@ export async function run({
     saveKitConfig(cfg);
   } catch { /* health snapshot is best-effort — never fail a sync over it */ }
 
-  return reportVerdict(convergenceVerdict({ plan, after, state, flags, cfg }));
+  return reportVerdict(convergenceVerdict({ plan, after, state, flags, cfg, skip, skipped }));
 }

@@ -5,7 +5,8 @@
 - **Date:** 2026-08-25
 - **Updated:** 2026-09-26 — the missing concrete Agentic-QE registration check runs only when AQE is
   managed (`aqe` is not `false` in kit.json); an opted-out machine gets no AQE row or advice (#237);
-  sync's convergence proof fails a planned repair that did not take (decision 9).
+  sync's convergence proof fails a planned repair that did not take, and `--skip` leaves a
+  subsystem out of one run (decision 9).
 - **Earlier update:** 2026-09-23
 - **Update note:** Initial implementation retires only receipt-owned legacy MCP state,
   diagnoses effective Codex MCP topology, extends POSIX cleanup to process groups, and adds
@@ -39,7 +40,9 @@
   2026-09-26: the convergence proof also covers a step that succeeded while its postcondition
   stayed unmet. A planned sync fix whose status row is still present after the apply phase, or a
   planned subsystem that no sync step performs, is reported `unresolved:` and sync exits 1 (#237).
-  Manual fixes never enter the plan, so they never fail sync (decision 9).
+  Manual fixes never enter the plan, so they never fail sync (decision 9). `ak sync --skip
+  <subsystem>` leaves a subsystem out of one run; the proof reports it "skipped by request" and
+  never counts it as a failure.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0001](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0001-one-routing-policy-many-projections.md),
   [ADR-0006](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0006-primary-host-and-ambidextrous-mirroring.md),
@@ -114,6 +117,10 @@ seats. A successful Claude/Codex transport check therefore cannot be called a co
    `SYNC_STEPS` step (or the post-step host alignment) performs. Either one fails sync with exit 1
    next to the existing fail-level rows and recorded apply failures. Only fixes a sync step performs
    are planned (ADR-0023 §11), so manual fixes and fix-less advisories never become unresolved.
+   A subsystem named by `--skip` for one run is taken out of the plan together with the step it
+   owns (on every trigger, including ones another planned subsystem derives) and any fix only that
+   step performs. Its rows are reported "skipped by request" and are neither unresolved nor failing.
+   `--skip` accepts only the subsystems sync knows and never changes kit.json ownership.
 
 ## Consequences
 
@@ -142,7 +149,9 @@ seats. A successful Claude/Codex transport check therefore cannot be called a co
 - `ak status` fails recursive self-MCP and reports missing Agentic-QE or duplicate Ruflo MCP state.
 - `tests/kit/sync-command.test.mjs` proves that a planned fix still present after the apply phase,
   or planned with no performing step, fails sync; that manual rows and advisories never do; and
-  that a real repair converges and leaves the next sync nothing to do.
+  that a real repair converges and leaves the next sync nothing to do. The same file proves that
+  `--skip` rejects unknown names, removes a subsystem's plan items and its step on derived triggers,
+  and never turns a skipped subsystem into a failure.
 
 ## References
 

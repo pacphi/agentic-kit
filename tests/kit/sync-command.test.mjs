@@ -412,7 +412,7 @@ test('an oversized RVF store is planned as a quarantine', async () => {
 });
 
 test('every documented flag is declared in the parser options', () => {
-  for (const flag of ['dry-run', 'no-upgrade', 'yes', 'json']) {
+  for (const flag of ['dry-run', 'no-upgrade', 'yes', 'json', 'skip']) {
     assert.ok(flag in sync.options, `--${flag} is documented in help but not parseable`);
     assert.match(sync.help, new RegExp(`--${flag}\\b`), `--${flag} is parseable but undocumented`);
   }
@@ -565,6 +565,129 @@ test('a real repair converges, and the next sync has nothing left to do', async 
     if (prev === undefined) delete process.env.RUFLO_AQE_RVF_MAX_BYTES;
     else process.env.RUFLO_AQE_RVF_MAX_BYTES = prev;
     rmrf(aqeDir);
+  }
+});
+
+// ── --skip: one-run subsystem exclusions (decision D5) ───────────────────────
+
+test('--skip is a repeatable string option the CLI parser accepts', async () => {
+  const { parseArgs } = await import('node:util');
+  const { values } = parseArgs({
+    args: ['--skip', 'natives', '--skip', 'ruvnet-brain'], options: sync.options, strict: true,
+  });
+  assert.deepEqual(values.skip, ['natives', 'ruvnet-brain']);
+});
+
+test('--skip rejects an unknown subsystem, names the known ones, and runs nothing', async () => {
+  seedHome();
+  let collected = 0;
+  const { result, out } = await syncWith(async () => { collected++; return []; }, { skip: ['natvies'] });
+  assert.equal(result, 2, out);
+  assert.match(out, /unknown --skip subsystem 'natvies'/);
+  assert.match(out, /natives/, 'the error lists the names it accepts');
+  assert.equal(collected, 0, 'a rejected flag never reaches the collector');
+});
+
+test('--skip removes the plan item, says so, and keeps the rest of the plan', async () => {
+  seedHome();
+  const rows = [
+    { subsystem: 'aqe', level: 'fail', message: 'store oversized', fix: RVF_FIX, repair: 'sync' },
+    { subsystem: 'daemons', level: 'warn', message: 'stale daemons', fix: 'sync reaps stale daemons', repair: 'sync' },
+  ];
+  const { result, out } = await syncWith(async () => rows, { 'dry-run': true, skip: ['aqe'] });
+  assert.equal(result, 0, out);
+  const planned = out.split('\n').filter((l) => l.trim().startsWith('•'));
+  assert.equal(planned.length, 1, out);
+  assert.match(planned[0], /\[daemons\]/);
+  assert.match(out, /skipped by request: \[aqe\] sync quarantines them/);
+});
+
+test('--skip accepts a comma-separated list', async () => {
+  seedHome();
+  const rows = [
+    { subsystem: 'aqe', level: 'fail', message: 'store oversized', fix: RVF_FIX, repair: 'sync' },
+    { subsystem: 'daemons', level: 'warn', message: 'stale daemons', fix: 'sync reaps stale daemons', repair: 'sync' },
+  ];
+  const { result, out } = await syncWith(async () => rows, { 'dry-run': true, skip: ['aqe,daemons'] });
+  assert.equal(result, 0, out);
+  assert.doesNotMatch(out, /sync plan/);
+  assert.match(out, /skipped by request: \[daemons\]/);
+});
+
+test('when every planned item is skipped, sync never claims the machine is healthy', async () => {
+  seedHome();
+  const rows = [{ subsystem: 'aqe', level: 'fail', message: 'store oversized', fix: RVF_FIX, repair: 'sync' }];
+  const { result, out } = await syncWith(async () => rows, { skip: ['aqe'] });
+  assert.equal(result, 0, out);
+  assert.match(out, /nothing to do — 1 planned item\(s\) skipped by request/);
+  assert.doesNotMatch(out, /all subsystems healthy/);
+});
+
+test('a skipped subsystem runs no step and is never counted as a failure', async () => {
+  seedHome();
+  const oversized = { subsystem: 'aqe', level: 'fail', message: 'store oversized', fix: RVF_FIX, repair: 'sync' };
+  // npx's step only scans the sandbox npm cache; it keeps the apply phase
+  // running. aqe still fails afterwards, but it was skipped by request.
+  const npx = { subsystem: 'npx', level: 'warn', message: 'stale npx env', fix: 'sync prunes stale npx envs', repair: 'sync' };
+  const { result, out } = await syncWith(twoPhase([oversized, npx], [oversized]), { skip: ['aqe'] });
+  assert.equal(result, 0, out);
+  assert.match(out, /npx: no stale envs/, 'the step that was not skipped ran');
+  assert.doesNotMatch(out, /rvf:/, 'the aqe step never ran');
+  assert.doesNotMatch(out, /unresolved:|still failing:/);
+  assert.match(out, /skipped by request: \[aqe\]/);
+});
+
+test('--skip stops a step on its derived triggers too', () => {
+  const cfg = { ...loadKitConfig(), security: true };
+  const flags = FLAGS();
+  const active = (subs, skip) => sync.activeSteps(new Set(subs), flags, cfg, new Set(skip));
+  assert.ok(active(['versions'], []).includes('natives'), 'control: an upgrade re-heals natives');
+  assert.ok(!active(['versions', 'security'], ['natives']).includes('natives'), 'natives stays off on versions/security');
+  assert.ok(active(['versions', 'security'], ['natives']).includes('security'));
+  assert.ok(!active(['routing', 'codex-mcp'], ['providers']).includes('providers'), 'providers stays off on routing/codex-mcp');
+  assert.ok(!active(['versions'], ['statusline']).includes('statusline'));
+});
+
+test('a fix performed only by a skipped step is skipped with it, never unresolved', async () => {
+  seedHome();
+  const cve = { subsystem: 'statusline/cve', level: 'warn', message: 'fabricated CVE counter', fix: 'sync injects the security overlay', repair: 'sync' };
+  const { out } = await syncWith(async () => [cve], { 'dry-run': true, skip: ['statusline'] });
+  assert.doesNotMatch(out, /sync plan/, out);
+  assert.match(out, /skipped by request: \[statusline\/cve\]/);
+});
+
+test('--skip opencode stops the lifecycle refresh an upgrade would trigger', async () => {
+  const step = sync.SYNC_STEPS.find((s) => s.id === 'host-lifecycles');
+  const cfg = { ...loadKitConfig(), integrations: { ...loadKitConfig().integrations, hosts: { claude: true, codex: false, opencode: true } } };
+  const run = (skip) => captureLog(() => step.run({ cfg, subsystems: new Set(['versions']), skip: new Set(skip), pkgRoot: PKG_ROOT }));
+  assert.match((await run([])).out, /opencode:/, 'control: an upgrade refreshes the opencode wiring');
+  assert.doesNotMatch((await run(['opencode'])).out, /opencode:/);
+});
+
+test('every subsystem a sync step answers to is a name --skip accepts', () => {
+  const known = new Set(sync.skippableSubsystems());
+  for (const step of sync.SYNC_STEPS) {
+    for (const [, name] of String(step.when).matchAll(/has\('([^']+)'\)/g)) {
+      assert.ok(known.has(name), `step ${step.id} fires on '${name}', which --skip does not accept`);
+    }
+  }
+  assert.ok(known.has('opencode'), 'lifecycle hosts are skippable');
+  assert.ok(known.has('host-alignment'), 'the post-step host alignment is skippable');
+  // Every opt-in managed, so each step's own enablement gate is open (ruvector
+  // is managed only while registered as a Claude MCP server).
+  seedHome();
+  fs.writeFileSync(paths.claudeUserMcpPath(), JSON.stringify({ mcpServers: { ruvector: { command: 'ruvector' } } }));
+  try {
+    const cfg = {
+      ...loadKitConfig(), agentBrowser: true, aqe: true, security: true, mcp: { register: true, excludeFamilies: [] },
+      codexContext: { owned: true }, statusline: { codex: { preset: 'census' } },
+      integrations: { ...loadKitConfig().integrations, hosts: { claude: true, codex: true, opencode: true } },
+    };
+    for (const name of known) {
+      assert.ok(sync.performingSteps(name, FLAGS(), cfg).length > 0, `--skip ${name} names nothing sync does`);
+    }
+  } finally {
+    rmrf(paths.claudeUserMcpPath());
   }
 });
 

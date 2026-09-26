@@ -305,7 +305,9 @@ runs last and applies from the next
 > inspect the named repairs: native-module, MCP, hook, and
 > configuration changes can affect running sessions. A `versions` row → either let the
 > other sessions reach a stopping point, or run `ak sync --no-upgrade` now (heals only —
-> skips the daemon stop and the npm swaps entirely) and do the full sync later. The armed
+> skips the daemon stop and the npm swaps entirely) and do the full sync later.
+> `ak sync --skip versions` is narrower: it holds back only the package upgrades and the
+> heals they trigger, and still refreshes RuvNet Brain and the kit itself. The armed
 > footer wipe in other open projects follows from the upgrade itself, not from sync — expect
 > it after any ruflo upgrade regardless of how you apply it.
 

@@ -290,6 +290,7 @@ existing project, commit or back up first and review the exact mutation contract
 | Update the global package manually | `npm install -g @pacphi/agentic-kit@next` | Active npm prefix |
 | Update/heal the managed stack | `ak sync` | Global tools, current-user config, current project |
 | Heal without package upgrades | `ak sync --no-upgrade` | Configuration and native repairs; missing enabled dependencies may still be installed |
+| Heal everything except one subsystem | `ak sync --skip ruvnet-brain` | This run only; repeat `--skip` (or comma-separate) for more; kit.json is unchanged |
 | Remove a local dependency | `npm uninstall @pacphi/agentic-kit` | Current package/workspace |
 | Remove the global runner only | `npm uninstall -g @pacphi/agentic-kit` | Active npm prefix; leaves setup-created state |
 | Remove managed integration state | `ak uninstall` | User/project state selected by its flags |
