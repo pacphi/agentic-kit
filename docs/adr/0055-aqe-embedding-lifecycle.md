@@ -8,6 +8,7 @@
 - **Updated:** 2026-09-26 — incomplete local setup distinguishes an installed-but-stopped Ollama (refused loopback connection with `ollama` on PATH) from a missing one and asks the user to start it rather than install it (#237)
 - **Updated:** 2026-09-26 — status shows the last remembered live embedding check with its age, and opt-in `ak status --live` runs the quick live checks; see [Amendment: remembered live checks](#amendment-2026-09-26-remembered-live-checks)
 - **Updated:** 2026-09-26 — the Codex TOML editor decodes table and key names with one shared TOML key decoder; unrelated root and `[mcp_servers]` assignments no longer block the edit, and inline, dotted or quoted AQE registrations are reported as conflicts instead of absent (#237)
+- **Updated:** 2026-09-26 — one AQE MCP transport recognizer for Claude, Codex and OpenCode now accepts all of AQE's own start commands; see the amendment below (#237, audit decision 3)
 - **Related:** [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),
   [September repair](../audits/2026-09-09-aqe-integration-repair.md)
 
@@ -132,3 +133,21 @@ host connection check are excluded, and the dashboard refresh never runs them.
 The provider check runs `aqe health` only where `.agentic-qe` already exists:
 AQE 3.14.3 auto-initializes a store (memory.db, patterns.rvf, witness keys) in the
 directory it runs in, and a diagnostic must not set AQE up in a project.
+
+## Amendment — 2026-09-26: recognized AQE start commands
+
+Kit edits the endpoint only inside an AQE registration whose start command is one of
+AQE's own programs, started exactly as AQE starts its MCP server. One recognizer
+(`src/lib/aqe-embedding-transport.mjs`) serves Claude, Codex and OpenCode:
+
+- `aqe-mcp` with no arguments;
+- `aqe`, `agentic-qe` or `aqe-v3` with exactly `mcp` (one CLI whose `mcp` command starts
+  the same server);
+- `npx` with exactly `-y agentic-qe@latest mcp`;
+- npm's `.cmd` shims of these, matched case-insensitively on Windows.
+
+Any other command, extra flag, subcommand or wrapper is reported as an unrecognized
+transport and preserved. A user program named like an AQE program that takes exactly
+these arguments receives the loopback endpoint; that value is non-secret and
+receipt-owned, and `aqe-mcp` was already trusted this way. Source: audit decision 3 in
+[the #237–#239 record](../audits/2026-09-26-issues-237-238-239-verification-and-decisions.md).

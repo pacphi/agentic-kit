@@ -105,6 +105,11 @@ An AQE registration written inline (`agentic-qe = { … }` under `[mcp_servers]`
 embedding warning for that file. Run `ak x aqe-embedding status --json` to see the
 file and reason, then rewrite the entry as a `[mcp_servers.agentic-qe]` table.
 
+AQE entries started with `aqe mcp`, `agentic-qe mcp` or `aqe-v3 mcp` are now
+recognized on Claude, Codex and OpenCode, and OpenCode also accepts
+`npx -y agentic-qe@latest mcp`. With a selected embedding backend, ak now projects
+the endpoint into such entries instead of reporting an unrecognized transport.
+
 ## 2026-09-10: Remembered Codex MCP correction
 
 Claude Code's `claude-flow` registration and Codex's `ruflo` registration follow

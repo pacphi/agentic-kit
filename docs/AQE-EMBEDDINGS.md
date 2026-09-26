@@ -83,7 +83,10 @@ agent sessions after changing MCP environments; existing processes retain their
 old environment and may retain an earlier failed initialization.
 
 Claude project MCP and hook settings and existing canonical Codex MCP tables
-have field-level receipts. OpenCode updates immediately through a narrow operation inside its existing
+have field-level receipts. On every host, ak edits only an AQE entry started by one
+of AQE's own commands: `aqe-mcp`, `aqe mcp`, `agentic-qe mcp`, `aqe-v3 mcp` or
+`npx -y agentic-qe@latest mcp` (npm `.cmd` shims included). Entries with other
+commands, flags or wrappers are reported as unrecognized and left unchanged. OpenCode updates immediately through a narrow operation inside its existing
 full-entry owner, preserving permissions, plugins and unrelated MCP entries.
 Its receipt remains compatible with normal `ak sync`. Conflicting user values and unsupported TOML forms
 are reported, never overwritten. Unrelated Codex keys, including dotted root keys such as

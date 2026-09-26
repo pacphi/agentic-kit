@@ -46,6 +46,7 @@ import { randomUUID } from 'node:crypto';
 import { have } from './exec.mjs';
 import { writeJsonWithBackup } from './settings.mjs';
 import { aqeEmbeddingProjectionEnv } from './aqe-embedding-projection.mjs';
+import { recognizedAqeCommandLine } from './aqe-embedding-transport.mjs';
 import { CURRENT_INTEGRATIONS_VERSION } from './adapters/config.mjs';
 import * as paths from './paths.mjs';
 import { deepEqual, hasReceiptValue } from './opencode-receipts.mjs';
@@ -112,7 +113,7 @@ function openEmbeddingEntry(configFile) {
   try { doc = JSON.parse(source); } catch { throw new Error('OpenCode embedding configuration is not plain JSON'); }
   const entry = doc?.mcp?.['agentic-qe'];
   if (!plainEmbeddingRecord(entry) || entry.type !== 'local' || entry.enabled !== true
-    || !deepEqual(entry.command, ['aqe-mcp']) || !plainEmbeddingRecord(entry.environment)) {
+    || !recognizedAqeCommandLine(entry.command) || !plainEmbeddingRecord(entry.environment)) {
     throw new Error('OpenCode requires an existing enabled AQE registration; run ak setup to initialize the host');
   }
   return { source, doc, entry };
