@@ -230,11 +230,12 @@ export function ledgerEvents(report, registry, { since }) {
   const sentinel = registry.watchPolicy.ledger.sentinel;
   const events = [];
   for (const entry of report.entries) {
+    // `at` keeps each comment its own line, even two by one person on one day.
     for (const reply of entry.replies ?? []) {
-      if (reply.at > since) events.push(eventLine(sentinel, entry.id, 'reply', day(reply.at), { by: reply.by }));
+      if (reply.at > since) events.push(eventLine(sentinel, entry.id, 'reply', day(reply.at), { by: reply.by, at: reply.at.slice(11) }));
     }
     for (const ack of entry.acknowledgements ?? []) {
-      if (ack.at > since) events.push(eventLine(sentinel, entry.id, 'acknowledged', day(ack.at), { by: ack.by }));
+      if (ack.at > since) events.push(eventLine(sentinel, entry.id, 'acknowledged', day(ack.at), { by: ack.by, at: ack.at.slice(11) }));
     }
     const up = entry.upstream;
     if (up?.isPr && up.mergedAt && up.mergedAt > since) events.push(eventLine(sentinel, entry.id, 'merged', day(up.mergedAt)));

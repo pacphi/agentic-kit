@@ -184,7 +184,10 @@ test('ledger events use the sentinel, stable dates, and skip lines already recor
   ]), { now: NOW });
   const events = ledgerEvents(report, registry, { since: '2026-09-03T00:00:00Z' });
   const lines = events.map((event) => event.line);
-  assert.ok(lines.includes('UPSTREAM-WATCH ruvnet/ruflo#3153 reply 2026-09-03 by=sparkling'));
+  // One line per comment: two replies by one person on one day stay two ledger lines.
+  assert.ok(lines.includes('UPSTREAM-WATCH ruvnet/ruflo#3153 reply 2026-09-03 by=sparkling at=08:54:07Z'), lines.join('\n'));
+  const sameDay = ledgerEvents(report, registry, { since: '2026-09-02T00:00:00Z' }).filter((event) => event.event === 'reply' && event.date === '2026-09-02');
+  assert.equal(new Set(sameDay.map((event) => event.line)).size, 3);
   assert.ok(!lines.some((line) => line.includes('reply 2026-09-02')), 'replies before --since are not events');
   const released = lines.find((line) => line.includes(' released '));
   assert.match(released, /^UPSTREAM-WATCH proffesor-for-testing\/agentic-qe#617 released 2026-08-06 version=3\.13\.10 branch=upstream\//);

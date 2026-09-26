@@ -95,7 +95,8 @@ creates and pins it when creating the daily routine. Each event is a line:
 UPSTREAM-WATCH <id> <event> <yyyy-mm-dd> [key=value ...]
 ```
 
-Events: `reply`, `acknowledged`, `closed`, `merged`, `released`, `reopened`, `stale`,
+Events: `reply` and `acknowledged` (with `by=` and the comment's `at=` time, so each comment is
+its own line), `closed`, `merged`, `released`, `reopened`, `stale`,
 `retire-proposed`, `retest-due` (constraint id) and `idle` (id `registry`, nothing left to
 watch). `check --since` limits replies, acknowledgements, closures and merges to activity after
 `--since`. The other events repeat while their condition holds, dated by the upstream fact, so
