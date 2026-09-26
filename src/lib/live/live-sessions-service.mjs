@@ -67,6 +67,7 @@ export class LiveSessionsService {
   #workspaceStore = null;
   #historyPages = new Map();
   #discovery = {};
+  #observedSince = null;
 
   constructor(options = {}) {
     const roots = options.roots ?? {};
@@ -111,19 +112,28 @@ export class LiveSessionsService {
   start() {
     if (this.#started) return this;
     this.#started = true;
+    // Only the first start bootstraps metadata and follows new appends from
+    // the end. A start after an idle stop resumes every retained tailer at its
+    // offset, so work appended during the stop is replayed, and a file that
+    // appeared meanwhile is read from its first byte like any late file.
+    const initial = this.#observedSince == null;
+    if (initial) this.#observedSince = this.#options.now();
     this.#restoreWorkspaceHistory();
-    this.#reconcile(true);
+    this.#reconcile(initial);
     this.#timer = this.#options.setInterval(() => this.#reconcile(false), this.#options.intervalMs);
     this.#timer?.unref?.();
     return this;
   }
 
+  /**
+   * Stop following. Tailers keep their byte offsets, partial lines and
+   * session contexts so the next start() resumes instead of re-tailing from
+   * the end; they hold no descriptor or timer between passes.
+   */
   close() {
     if (this.#timer != null) this.#options.clearInterval(this.#timer);
     this.#timer = null;
     for (const tailer of this.#tailers.values()) tailer.close();
-    this.#tailers.clear();
-    this.#contexts.clear();
     this.#runtimeBindings.clear();
     this.#historyPages.clear();
     this.#started = false;
@@ -139,6 +149,9 @@ export class LiveSessionsService {
       total.pendingBytes += coverage.pendingBytes;
       return total;
     }, { complete: true, truncated: false, droppedLines: 0, pendingBytes: 0, omittedFiles: 0 });
+    // Operations written before observation began are not replayed (only
+    // session metadata is bootstrapped), so say when observation began.
+    acquisitionCoverage.observedSince = this.#observedSince;
     // Native discovery tails only the newest files per host. When that bound
     // leaves files out, coverage is incomplete and says how many.
     acquisitionCoverage.sources = {};

@@ -711,7 +711,7 @@ actor-kind geometry ([Graphics ARIA][graphics-aria]).
 | Event storm | Batch projection/client updates; collapse resource nodes |
 | Secret in unknown field | Field never enters allowlisted event |
 | Watch notification lost | Periodic stat/reconciliation discovers change |
-| All clients leave | Release SSE listeners; stop collectors after bounded idle delay |
+| All clients leave | Release SSE listeners; stop collectors after bounded idle delay; keep tail offsets so the next request resumes |
 | Transcript path escape or replacement | Realpath containment and identity recheck |
 | Transcript client falls behind | Bounded queue; emit gap/reset rather than an unbounded snapshot |
 | Encrypted reasoning | Drop at parser/DTO boundary because plaintext is unavailable |
@@ -721,8 +721,8 @@ actor-kind geometry ([Graphics ARIA][graphics-aria]).
 Tests are written against ports and fixtures before each adapter or lifecycle transition:
 
 1. **Contract tests:** event schema, action vocabulary, privacy allowlist, confidence ordering.
-2. **Tailer tests:** append, partial record, duplicate notification, rotation, truncation, fresh
-   bootstrap after restart, and symlink/containment rejection.
+2. **Tailer tests:** append, partial record, duplicate notification, rotation, truncation, resume
+   from retained offsets after an idle restart, and symlink/containment rejection.
 3. **Source-adapter fixtures:** known Claude, Codex, ruflo, agentic-qe, skill, plugin,
    and MCP records; unknown fields and schema generations.
 4. **Aggregate tests:** child-before-parent, conflict, terminal-state monotonicity, expiry, and

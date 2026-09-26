@@ -814,6 +814,87 @@ test('the files counter follows the moving newest-file window', (t) => {
   assert.deepEqual(seen, [2, 2, 2, 2]);
 });
 
+// Idle stop and restart (#238 item 4). The dashboard reuses one service: it
+// calls close() 30 s after the last Live client leaves and start() on the next
+// visit. A restart must resume every tailed file where it stopped.
+const idleService = (t, sb, extra = {}) => {
+  let tick = null;
+  const service = new LiveSessionsService({
+    roots: sb.roots, readCodexState: () => null, workspaceStore: null,
+    setInterval: (fn) => { tick = fn; return { unref() {} }; }, clearInterval: () => {},
+    now: () => '2026-09-25T01:16:00Z', ...extra,
+  });
+  t.after(() => { service.close(); fs.rmSync(sb.dir, { recursive: true, force: true }); });
+  const actions = [];
+  service.subscribe((event) => actions.push(event.action));
+  return { service, actions, tick: () => tick() };
+};
+const GAP_SESSION = '0199aaaa-bbbb-7ccc-8ddd-eeeeffff0002';
+const rolloutMeta = (id = GAP_SESSION) => line({
+  type: 'session_meta', timestamp: '2026-09-25T01:00:00Z', payload: { id, cwd: '/private/project' },
+});
+const functionCall = (callId) => line({
+  type: 'response_item', timestamp: '2026-09-25T01:15:01Z',
+  payload: { type: 'function_call', name: 'exec_command', call_id: callId, arguments: '{}' },
+});
+const toolNodes = (service, id = GAP_SESSION) => (service.snapshot().sessions
+  .find((session) => session.id === id)?.nodes ?? []).filter((node) => node.kind === 'tool');
+
+test('operations appended while Live is idle-stopped appear after restart', (t) => {
+  const sb = sandbox();
+  const file = path.join(sb.codex, `rollout-2026-09-25T01-00-00-${GAP_SESSION}.jsonl`);
+  fs.writeFileSync(file, rolloutMeta());
+  const { service, actions } = idleService(t, sb);
+  service.start();
+  service.close();
+  fs.appendFileSync(file, functionCall('during-gap'));
+  service.start();
+  assert.equal(toolNodes(service).length, 1, 'an operation appended during the idle stop must not be lost');
+  assert.equal(actions.filter((action) => action === 'session.discovered').length, 1,
+    'a restart resumes the tailed file; it does not rediscover the session');
+});
+
+test('a transcript created while Live is idle-stopped is read from its first byte on restart', (t) => {
+  const sb = sandbox();
+  const { service } = idleService(t, sb);
+  service.start();
+  service.close();
+  fs.writeFileSync(path.join(sb.codex, `rollout-2026-09-25T01-00-00-${GAP_SESSION}.jsonl`),
+    rolloutMeta() + functionCall('in-new-file'));
+  service.start();
+  assert.equal(toolNodes(service).length, 1, 'a file that appeared after observation began holds only new work');
+});
+
+test('a partial record at idle stop completes after restart', (t) => {
+  const sb = sandbox();
+  const file = path.join(sb.codex, `rollout-2026-09-25T01-00-00-${GAP_SESSION}.jsonl`);
+  fs.writeFileSync(file, rolloutMeta());
+  const { service, tick } = idleService(t, sb);
+  service.start();
+  const record = functionCall('split');
+  const half = Math.floor(record.length / 2);
+  fs.appendFileSync(file, record.slice(0, half));
+  tick();
+  service.close();
+  fs.appendFileSync(file, record.slice(half));
+  service.start();
+  assert.equal(toolNodes(service).length, 1, 'the buffered first half is kept across the stop');
+});
+
+test('live coverage says since when Live has been watching, across idle restarts', (t) => {
+  const sb = sandbox();
+  let now = '2026-09-25T01:00:00.000Z';
+  const { service } = idleService(t, sb, { now: () => now });
+  assert.equal(service.snapshot().acquisitionCoverage.observedSince, null, 'nothing is observed before start');
+  service.start();
+  assert.equal(service.snapshot().acquisitionCoverage.observedSince, '2026-09-25T01:00:00.000Z');
+  service.close();
+  now = '2026-09-25T02:00:00.000Z';
+  service.start();
+  assert.equal(service.snapshot().acquisitionCoverage.observedSince, '2026-09-25T01:00:00.000Z',
+    'offsets are kept across the idle stop, so observation is continuous');
+});
+
 // Structured-source health acceptance (#237 §E). Each case drives the real
 // service and tailer through a manual reconcile tick so every pass is explicit.
 const structuredService = (t, sources, extra = {}) => {

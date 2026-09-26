@@ -2,8 +2,8 @@
 
 - **Status:** Implemented
 - **Date:** 2026-07-27
-- **Updated:** 2026-09-26 — live process survey, source health and discovery coverage (#237 §E;
-  #238 items 3 and 5); see "Amendment — 2026-09-26: live acquisition" at the end.
+- **Updated:** 2026-09-26 — live process survey, source health, discovery coverage and idle
+  restarts (#237 §E; #238 items 3–5); see "Amendment — 2026-09-26: live acquisition" at the end.
 - **Earlier update:** 2026-09-20 — ADR-0054 adds an explicit, offline, allowlisted fleet export
   boundary; local analytics and dashboard collection semantics remain unchanged.
 - **Earlier update:** 2026-09-09 — reconciled against repository source and tests for issue #211
@@ -364,7 +364,9 @@ Confidence is field-specific where provenance differs. Project, provider, model,
 relationship may independently be `observed`, `correlated`, `inferred`, `assumed`, or `planned`.
 The UI must not promote a host-based assumption to an observed provider claim.
 
-Collection bootstraps stable identity before following new appends. Sources are discovered
+Collection bootstraps stable identity before following new appends. Operations written before
+the first start are not replayed; `acquisitionCoverage.observedSince` records when observation
+began, and a live session with no operations drawn since then discloses it. Sources are discovered
 newest-first. Codex state and bounded metadata records hydrate project, provider, model, hierarchy,
 and lifecycle; Claude records hydrate sanitized project and safe runtime metadata. The graph plane
 never receives `cwd`, transcript paths, raw agent paths, prompt-derived titles, filenames, patches,
@@ -377,7 +379,10 @@ summaries under §7.
 Loopback binding and the dashboard's existing request validation apply to both endpoints. SSE
 listeners and response resources are released when clients disconnect. After the last client, the
 collector and tailers stop following a bounded idle delay (30 seconds by default); a new request
-restarts them safely. Dashboard shutdown cancels the timer and closes all resources.
+restarts them safely. The idle stop keeps each tailer's byte offset and partial line, so the
+restart resumes where it stopped and replays what was appended meanwhile; a file that appeared
+during the stop is read from its first byte (2026-09-26). Dashboard shutdown cancels the timer
+and closes all resources.
 
 ### 7. Use two isolated planes for topology and transcript content
 
@@ -646,3 +651,7 @@ turns the dashboard into a fleet service nor makes telemetry collection continuo
 - **Discovery coverage (#238 item 5).** Live acquisition coverage is incomplete when the per-host
   discovery bound leaves files out and reports how many; the tailed-file count is recounted each
   pass instead of growing on every idle restart.
+- **Idle restarts (#238 item 4).** An idle stop keeps every tailer's byte offset, so a restart
+  replays what was appended during the stop instead of re-tailing from the end, and a file that
+  appeared during the stop is read from its first byte; the snapshot says when observation began,
+  and a live session with no operations drawn since then says so (§6).

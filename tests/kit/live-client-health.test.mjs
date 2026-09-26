@@ -37,6 +37,23 @@ test('source health text says when the tailed files are only the newest of more'
     'ok · 3 files · 9 events · 0 errors', 'nothing is added when every discovered file is tailed');
 });
 
+test('a live session with no drawn operations says since when Live has been watching', () => {
+  const note = extract('liveObservationNote');
+  assert.equal(note(0, '12m ago'),
+    'No operations drawn since Live started watching 12m ago. Earlier operations in this session '
+    + 'are not drawn; its session stream shows the transcript.');
+  assert.equal(note(3, '12m ago'), '', 'a session with drawn operations needs no note');
+  assert.equal(note(0, ''), '', 'no note when the observation start is unknown');
+});
+
+test('the map guidance uses the observation note and live events keep the coverage it reads', () => {
+  const guidance = client.split('\n').find((l) => l.trim().startsWith('function renderGuidance('));
+  assert.match(guidance, /liveObservationNote\(d\.totalTools,ago\(observedSince\(\)\)\)/,
+    'renderGuidance must pass the drawn operation count and the observation age');
+  assert.match(client, /acquisitionCoverage:state\.snapshot\.acquisitionCoverage/,
+    'applying a live event rebuilds the snapshot; it must keep acquisitionCoverage or the note disappears');
+});
+
 test('the Sources toggle counts degraded sources as issues and awaiting files separately', () => {
   const toggle = extract('liveHealthToggle');
   assert.equal(toggle({ claude: { status: 'ok' }, 'codex-state': { status: 'unavailable' } }), 'Sources',

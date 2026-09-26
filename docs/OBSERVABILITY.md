@@ -33,8 +33,9 @@ their own. The Observability choices occupy the same fixed, left-aligned seconda
 Overview and Usage; see the [Dashboard guide](DASHBOARD.md). Collection starts
 lazily when the snapshot or event endpoint is first requested. Leaving the Observability
 tab closes that browser's event stream. After the last snapshot/SSE client
-leaves, collectors stop after 30 seconds by default and restart on the next
-request. Stopping the dashboard closes the live service and all clients.
+leaves, collectors stop after 30 seconds by default. The next request resumes each file where it
+stopped, so work written while nobody was watching still appears. Stopping the dashboard closes
+the live service and all clients.
 
 Model lifecycle is a separate read model under **Usage → Models**. It may consume bounded model ids
 already derived by the historical usage index, but it never consumes live transcript content
@@ -105,7 +106,9 @@ empty History project. Historical rows never fill an empty Live mode.
 ## Reading the operations console
 
 - Claude and Codex sessions discovered newest-first from their local JSONL
-  stores and bootstrapped from bounded, metadata-only records.
+  stores and bootstrapped from bounded, metadata-only records. Operations written before Live
+  started watching are not drawn; a live session with none since then says when Live started
+  watching, and its session stream shows the earlier transcript.
 - Project-first session cards with a host glyph and name, independently
   evidenced inference provider/model when reported, lifecycle, freshness, and
   a concise workspace summary. The Claude Code, Codex, and OpenCode glyph identifies the execution
@@ -308,6 +311,8 @@ says so: **Sources** shows `N files (newest of M)`, and `/api/live` reports
 `acquisitionCoverage.complete: false`, `truncated: true`, the number of files left out
 (`omittedFiles`), and per-host `sources` with `candidateFiles`, `returnedFiles`, and
 `fileLimit`. A session in an untailed file can still appear through process presence.
+`acquisitionCoverage.observedSince` is when Live first started watching; an idle stop and
+restart does not change it, because tailing resumes where it stopped.
 
 ## Evidence and limitations
 
@@ -467,6 +472,7 @@ unbounded content snapshot.
 | Sources says `awaiting file` | The registered file does not exist. Check the path, and check that its producer is running; registration does not start one |
 | Sources says `N files (newest of M)` | Live tails only the newest transcripts per host within its file bound; older files are not followed. Switch to History for them |
 | Sources shows `rejected` records | The file's records lack a session ID, actor ID, or action, so they cannot become events |
+| A live session shows 0 operations | Live draws operations written after it started watching. Earlier operations appear in the session stream, not on the map |
 | Project name not reported | No supported metadata supplied a working directory; raw paths are never sent to the browser |
 | Node disappeared | Server projection or client visibility bounds evicted/collapsed it |
 | Connection interrupted | `EventSource` retries; a cursor miss or buffer overflow resets from a snapshot |
