@@ -2,6 +2,8 @@
 // agentdb-memory.db while the compatibility/sql.js surface remains memory.db.
 // Both are legitimate. `active` is a historical preferred-display field, not
 // evidence of the actual writer or which corpus a CLI/MCP invocation selects.
+// Everything here is read-only and bounded: stores are opened read-only, and
+// the stray-store search walks a capped number of folders.
 import fs from 'node:fs';
 import path from 'node:path';
 import * as paths from './paths.mjs';
@@ -15,21 +17,47 @@ function activityAt(file) {
   return latest || null;
 }
 
+function fileBytes(file) {
+  try { return fs.statSync(file).size; } catch { return null; }
+}
+
+// The largest namespace and how many of its active rows carry an expiry. Ruflo
+// indexes namespace (memory-initializer.js idx_memory_namespace), so this stays
+// in milliseconds even on a 168 MB store (measured 2026-09-26, 3.45.0).
+function topNamespace(db, columns, active) {
+  if (!columns.includes('namespace')) return null;
+  const expiring = columns.includes('expires_at') ? 'SUM(expires_at IS NOT NULL)' : 'NULL';
+  const row = db.prepare(
+    `SELECT COALESCE(namespace, 'default') AS ns, COUNT(*) AS n, ${expiring} AS expiring `
+    + `FROM memory_entries WHERE ${active} GROUP BY ns ORDER BY n DESC, ns LIMIT 1`,
+  ).get();
+  if (!row) return null;
+  return { namespace: row.ns, entries: Number(row.n), expiring: row.expiring === null ? null : Number(row.expiring) };
+}
+
 function inspectStore(file, kind) {
   if (!fs.existsSync(file)) {
-    return { kind, file, present: false, readable: false, entries: null, activityAt: null };
+    return {
+      kind, file, present: false, readable: false, table: false, entries: null,
+      top: null, sizeBytes: null, walBytes: null, activityAt: null,
+    };
   }
   const result = withDb(file, (db) => {
     const columns = db.prepare('PRAGMA table_info(memory_entries)').all().map((column) => column.name);
-    if (!columns.length) return { readable: false, entries: null };
-    const where = columns.includes('status') ? " WHERE status = 'active' OR status IS NULL" : '';
-    const entries = db.prepare(`SELECT COUNT(*) AS n FROM memory_entries${where}`).get()?.n ?? 0;
-    return { readable: true, entries: Number(entries) };
+    // `ruflo memory init` creates agentdb-memory.db before any bridge write adds
+    // memory_entries (observed on 3.45.0): an empty store, not an unreadable one.
+    if (!columns.length) return { readable: true, table: false, entries: 0, top: null };
+    const active = columns.includes('status') ? "(status = 'active' OR status IS NULL)" : '1';
+    const entries = Number(db.prepare(`SELECT COUNT(*) AS n FROM memory_entries WHERE ${active}`).get()?.n ?? 0);
+    return { readable: true, table: true, entries, top: entries ? topNamespace(db, columns, active) : null };
   });
   const observed = result.ok
     ? result.value
-    : { readable: false, entries: null, reason: result.error.kind };
-  return { kind, file, present: true, ...observed, activityAt: activityAt(file) };
+    : { readable: false, table: false, entries: null, top: null, reason: result.error.kind };
+  return {
+    kind, file, present: true, ...observed,
+    sizeBytes: fileBytes(file), walBytes: fileBytes(`${file}-wal`) ?? 0, activityAt: activityAt(file),
+  };
 }
 
 export function projectMemoryStatus(root) {
@@ -57,6 +85,7 @@ export function findMemoryEntry(root, namespace, key) {
   const status = projectMemoryStatus(root);
   return status.stores.find((store) => store.present
     && store.readable
+    && store.table
     && memoryEntryExists(store.file, namespace, key)) ?? null;
 }
 
@@ -73,7 +102,7 @@ export function removeMemoryProbe(root, namespace, key) {
   const removed = [];
   const failed = [];
   for (const store of projectMemoryStatus(root).stores) {
-    if (!store.present || (!store.readable && !store.reason)) continue;
+    if (!store.present || (store.readable && !store.table)) continue;
     if (!store.readable) { failed.push({ file: store.file, kind: store.reason }); continue; }
     const held = lookupEntry(store.file, namespace, key);
     if (!held.ok) { failed.push({ file: store.file, kind: held.error.kind }); continue; }
@@ -87,4 +116,86 @@ export function removeMemoryProbe(root, namespace, key) {
     else failed.push({ file: store.file, kind: result.error.kind });
   }
   return { removed, failed };
+}
+
+// Stray stores: memory files this project's hosts never read, each traced to
+// its owner in the 2026-09-26 audit (docs/audits). Report only: ak never moves,
+// merges or deletes them. Kinds:
+//   ruflo       memory.db/agentdb-memory.db anywhere under .swarm/ except the
+//               canonical pair and Ruflo's own .swarm/backups/, or a .swarm/
+//               store in a subfolder (a Ruflo command ran with that folder as
+//               its working directory; Ruflo derives the path from the cwd)
+//   agentdb-cli ./agentdb.db, the AgentDB CLI default (agentdb-cli.js)
+//   agentdb-rvf ./agentdb.rvf, AgentDB's RVF backend default in the cwd
+//   ruvector    ./ruvector.db, RuVector's default in the cwd (`ruvector mcp
+//               start`; `ruflo memory init` also creates it, 3.45.0)
+//   aqe         a .agentic-qe/ folder below the project root (AQE resolves a
+//               relative AQE_MEMORY_PATH against the folder it runs in)
+// Bounded: at most `maxDirs` folders listed and `maxDepth` levels deep; dot
+// folders (other checkouts under .claude/worktrees, .git) and node_modules are
+// never walked, only a root dot folder's own markers are checked.
+const RUFLO_STORE_FILES = Object.freeze(['memory.db', 'agentdb-memory.db']);
+const ROOT_STRAYS = Object.freeze([['agentdb.db', 'agentdb-cli'], ['agentdb.rvf', 'agentdb-rvf'], ['ruvector.db', 'ruvector']]);
+
+const isDirectory = (file) => { try { return fs.lstatSync(file).isDirectory(); } catch { return false; } };
+const isFile = (file) => { try { return fs.lstatSync(file).isFile(); } catch { return false; } };
+const storeBytes = (file) => (fileBytes(file) ?? 0) + (fileBytes(`${file}-wal`) ?? 0);
+
+export function findStrayMemoryStores(root, { maxDepth = 4, maxDirs = 2000 } = {}) {
+  if (!isDirectory(root)) return { strays: [], complete: true, visited: 0 };
+  const found = new Map();
+  let visited = 0;
+  let complete = true;
+  const add = (kind, file, sizeBytes) => {
+    const relative = path.relative(root, file).split(path.sep).join('/');
+    found.set(relative, { kind, path: relative, file, sizeBytes });
+  };
+  const list = (dir) => {
+    if (visited >= maxDirs) { complete = false; return null; }
+    visited += 1;
+    try {
+      return fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+    } catch { return []; }
+  };
+  const checkMarkers = (dir, { ruflo = true } = {}) => {
+    if (isDirectory(path.join(dir, '.agentic-qe'))) add('aqe', path.join(dir, '.agentic-qe'), null);
+    if (!ruflo) return;
+    for (const name of RUFLO_STORE_FILES) {
+      const file = path.join(dir, '.swarm', name);
+      if (isFile(file)) add('ruflo', file, storeBytes(file));
+    }
+  };
+  const walkSwarm = (dir, depth) => {
+    const entries = list(dir);
+    for (const entry of entries ?? []) {
+      const full = path.join(dir, entry.name);
+      if (entry.isFile() && depth > 0 && RUFLO_STORE_FILES.includes(entry.name)) add('ruflo', full, storeBytes(full));
+      else if (entry.isDirectory() && depth < maxDepth && !(depth === 0 && entry.name === 'backups')) walkSwarm(full, depth + 1);
+    }
+  };
+  const walk = (dir, depth) => {
+    const entries = list(dir);
+    for (const entry of entries ?? []) {
+      if (!entry.isDirectory()) continue;
+      const full = path.join(dir, entry.name);
+      if (entry.name.startsWith('.')) {
+        // .swarm's own subtree is walked separately; only its AQE marker here.
+        if (depth === 0 && entry.name !== '.git') checkMarkers(full, { ruflo: entry.name !== '.swarm' });
+        continue;
+      }
+      if (entry.name === 'node_modules') continue;
+      checkMarkers(full);
+      if (depth + 1 < maxDepth) walk(full, depth + 1);
+    }
+  };
+
+  for (const [name, kind] of ROOT_STRAYS) {
+    const file = path.join(root, name);
+    if (isFile(file)) add(kind, file, storeBytes(file));
+  }
+  // .swarm first: it is small, and the most likely home of a stray Ruflo store.
+  if (isDirectory(path.join(root, '.swarm'))) walkSwarm(path.join(root, '.swarm'), 0);
+  walk(root, 0);
+  const strays = [...found.values()].sort((a, b) => a.path.localeCompare(b.path));
+  return { strays, complete, visited };
 }

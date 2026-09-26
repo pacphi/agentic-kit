@@ -8,8 +8,9 @@
   `ruflo`-keyed Claude registration is agentic-kit's own (user scope, `ruflo mcp start`, env limited
   to `AGENT_BROWSER_CONFIG`); status and `register()` share it, so any other user-scope form is
   reported as preserved with its manual removal command instead of a sync migration (#237).
-- **Updated:** 2026-09-26 — memory route verification, release-gated routing claims and setup
-  probe cleanup (issue #213); see "Amendment — 2026-09-26: project memory" at the end.
+- **Updated:** 2026-09-26 — project memory: route verification, release-gated routing claims,
+  setup probe cleanup, and canonical and stray stores; see "Amendment — 2026-09-26: project
+  memory" at the end.
 - **Earlier update:** 2026-09-23 — the Claude memory pin is receipt-owned and removed by uninstall (ADR-0058).
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Earlier update:** 2026-09-02
@@ -297,7 +298,12 @@ Project memory is also detected at fact level rather than inferred from package 
 single historical filename. Current native Ruflo bridges can preserve a compatibility/sql.js (or
 encrypted) `.swarm/memory.db` while writing native plaintext rows to the sibling
 `.swarm/agentdb-memory.db`. The compatibility store may coexist with the native sibling without
-representing drift. Read-only status names both files and counts observable entries; it states which
+representing drift. Read-only status resolves the canonical store at `<root>/.swarm` for the root
+every launch contract pins (the repository root, else the folder), names both files and counts
+observable entries, with each file's size, live WAL, largest namespace and its expiry; a file with
+no `memory_entries` table yet is empty, not unreadable. Stray stores (a Ruflo store outside the
+canonical pair, `./agentdb.db`, `./agentdb.rvf`, `./ruvector.db`, a `.agentic-qe/` below the root)
+are listed by owner as information only, never as a warning or a sync fix. It states which
 interface reads which store (CLI `memory.db`, MCP `agentdb-memory.db` with the native bridge) only
 for the exact `@claude-flow/cli` release and platform where that was observed, and otherwise leaves
 routing unverified. Setup and `ak x verify memory` prove persistence by storing
@@ -608,3 +614,6 @@ work under ADR-0011's own validation requirements.
   release and platform.
 - **Setup probe cleanup (issue #213).** Setup removes its write probe from every store,
   correcting the earlier "active writer" wording.
+- **Canonical and stray stores.** Status also names the canonical store at the pinned root with
+  each file's size, WAL, largest namespace and expiry, treats a store with no memory table as
+  empty, and reports stray stores for information only.

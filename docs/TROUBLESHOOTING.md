@@ -61,6 +61,7 @@ ak sync             # apply it
 | `ruflo memory store` says OK but reads return nothing | Missing project pin, wrong working directory, or CLI and MCP selecting different files when both `.swarm/memory.db` and `.swarm/agentdb-memory.db` exist | `ak sync` can repair owned registration drift. `ak x verify memory` observes CLI↔MCP routing in an isolated directory only; it cannot show access to an existing corpus, so follow the routing section below |
 | `status` shows a `codex-plugins` warning | A plugin is enabled in the wrong host, its newest cached hooks or skills fail a known Codex compatibility check, or `config.toml` cannot be inspected safely. The exact `codex@openai-codex` identity is a Claude Code companion and must not be enabled inside Codex | For a valid, regular `config.toml` and verified companion 1.0.6, preview the approval-required repair with `ak heal hooks --host codex`; it changes only that Codex entry, never Claude Code or the cache. Repair malformed TOML or merge symlink-managed config manually. For other plugin findings, open Codex `/plugins`, refresh or disable the named plugin, then start a new session. Setup and sync never rewrite Codex-owned plugin state |
 | `status` says an external `agent-browser` is outside Ruflo's range | You installed a newer `agent-browser` yourself. ak never replaces a user-managed install, so `sync` cannot clear this, and Ruflo's browser tools may not work with that version | Install a Ruflo-compatible `agent-browser` 0.27.x yourself, or set `agentBrowser: false` in `~/.config/agentic-kit/kit.json` to stop ak managing the executor (Ruflo MCP then no longer gets ak's trusted browser config or readiness checks) |
+| `status` lists a stray memory store | A tool wrote a store where this project's hosts do not read it, usually because it ran in another folder. ak only reports it | Nothing breaks. To keep its rows, inspect it read-only first; see [Stray memory stores](#stray-memory-stores) |
 | `status` shows a `memory-pin` warning | `CLAUDE_FLOW_DB_PATH` is pinned to a dead or foreign path, so every memory op targets the wrong DB ("Database not initialized" beside a healthy in-repo DB). The pin may be deliberate, so `sync` never touches it | repoint (or remove) the pin in `.claude/settings.local.json` `env` |
 | MCP tool governance stays `unknown` | Ruflo 3.44.0 and earlier do not route stdio MCP tool calls through their policy enforcer, so no audit records are written even though ak wrote the policy file and set `RUFLO_MCP_ENFORCE_POLICY=1` | Nothing to fix on your side; the component confirms once ruflo wires enforcement (ADR-0058 upstream request 6). A project whose `.harness/mcp-policy.json` is invalid shows `mcpGovernance: blocked` instead: restore a valid, ak-written file and run `ak sync`, which also removes the enforcement variable for that project until the file is fixed |
 | A [ruflo component](MANAGED-TOOLS.md#managed-ruflo-components) stays `applied, not verified` | Claude Code, Codex, and OpenCode read their environment only at process start-up, so a change setup or sync just made has not reached a running session yet | Restart Claude Code, Codex, and OpenCode, then run `ak status --refresh` to re-collect evidence with the new environment in effect |
@@ -301,6 +302,34 @@ conflict-resolution, and writer-quiescence procedure. Upstream tracking:
 
 [Local investigation and upstream boundary](audits/plugin-memory-status-followup.md)
 records the source evidence and counts observed on 2026-09-09.
+
+### What `ak status` reports about memory
+
+`ak status` names the canonical store: `<root>/.swarm`, where `<root>` is the
+repository root (or the folder, outside a repository). Every host's Ruflo memory is
+pointed there, so a run from a subfolder reports the same store. For each file it
+shows the active entry count, the file and live WAL size, the largest namespace with
+its share, and whether its rows are set to expire. A namespace that grows without
+expiry (for example `commands`, written by Ruflo's `hooks post-command`) is the usual
+reason a store gets large. A file with no memory table yet is reported as empty.
+
+### Stray memory stores
+
+A stray store is a memory file this project's hosts do not read. `ak status` lists
+each one by owner, for information only. ak never moves, merges or deletes them.
+
+| Stray | Usual owner |
+|---|---|
+| A `memory.db` or `agentdb-memory.db` under `.swarm/` other than the canonical pair (for example `.swarm/.swarm/agentdb-memory.db`), or in a subfolder's `.swarm/` | A Ruflo command that ran with that folder as its working directory. Ruflo derives the store path from the working directory |
+| `./agentdb.db` | The AgentDB CLI's default file |
+| `./agentdb.rvf` | AgentDB's RVF backend, which defaults to the working directory |
+| `./ruvector.db` | RuVector's default store (`ruvector mcp start`; `ruflo memory init` also creates one) |
+| A `.agentic-qe/` below the project root | AQE resolves a relative `AQE_MEMORY_PATH` against the folder a command or hook ran in |
+
+Ruflo's rotated backups in `.swarm/backups/` are not strays. The search skips
+`node_modules`, `.git` and the contents of dot folders such as `.claude/worktrees`,
+and says so when it stops early. Before you delete a stray, inspect it read-only
+as described above. It may hold rows that exist nowhere else.
 
 ## AQE embedding backend unavailable or provenance unverified
 

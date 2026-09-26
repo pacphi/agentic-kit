@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import {
-  findMemoryEntry, memoryEntryExists, projectMemoryStatus, removeMemoryProbe,
+  findMemoryEntry, findStrayMemoryStores, memoryEntryExists, projectMemoryStatus, removeMemoryProbe,
 } from '../../src/lib/project-memory.mjs';
 
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-project-memory-'));
@@ -143,4 +143,130 @@ test('removeMemoryProbe on a project with no stores is a clean no-op', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-probe-remove-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   assert.deepEqual(removeMemoryProbe(root, '_setup', 'probe'), { removed: [], failed: [] });
+});
+
+// Ruflo's own memory_entries shape (memory-initializer.js, 3.45.0): namespace,
+// status and expires_at are real columns there.
+function seedRuflo(file, rows) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const db = new DatabaseSync(file);
+  db.exec('CREATE TABLE memory_entries (id TEXT PRIMARY KEY, key TEXT, namespace TEXT, content TEXT, status TEXT, expires_at INTEGER)');
+  const put = db.prepare('INSERT INTO memory_entries VALUES (?, ?, ?, ?, ?, ?)');
+  rows.forEach(([namespace, status = 'active', expiresAt = null], i) => put.run(String(i), `k${i}`, namespace, 'v', status, expiresAt));
+  db.close();
+}
+
+test('a store reports its file and WAL size, its largest namespace, and how much of it expires', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-memory-size-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, '.swarm', 'agentdb-memory.db');
+  seedRuflo(file, [['commands'], ['commands'], ['commands', 'active', Date.now() + 60_000], ['commands', 'deleted'], ['decisions'], [null]]);
+  // Hold a writer open with checkpoints off, so a live -wal exists as it does
+  // beside a running MCP server.
+  const writer = new DatabaseSync(file);
+  t.after(() => writer.close());
+  writer.exec('PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;');
+  writer.prepare("INSERT INTO memory_entries VALUES ('w', 'kw', 'commands', 'v', 'active', NULL)").run();
+
+  const native = projectMemoryStatus(root).stores.find((store) => store.kind === 'native-agentdb');
+  assert.equal(native.readable, true);
+  assert.equal(native.table, true);
+  assert.equal(native.entries, 6, 'the tombstoned row is not counted');
+  assert.equal(native.sizeBytes, fs.statSync(file).size);
+  assert.ok(native.walBytes > 0, 'the live WAL is measured, not ignored');
+  assert.equal(native.walBytes, fs.statSync(`${file}-wal`).size);
+  assert.deepEqual(native.top, { namespace: 'commands', entries: 4, expiring: 1 });
+});
+
+test('a store without expires_at reports its top namespace with expiry unknown, and a missing WAL as 0', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-memory-size-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  seed(path.join(root, '.swarm', 'memory.db'), [['1', 'a', 'ns-a', 'v'], ['2', 'b', 'ns-b', 'v'], ['3', 'c', 'ns-b', 'v']]);
+  const compat = projectMemoryStatus(root).stores.find((store) => store.kind === 'sqljs');
+  assert.deepEqual(compat.top, { namespace: 'ns-b', entries: 2, expiring: null });
+  assert.equal(compat.walBytes, 0);
+});
+
+test('a store with no memory table yet is empty, not unreadable', (t) => {
+  // `ruflo memory init` creates agentdb-memory.db before any bridge write adds
+  // memory_entries (observed on 3.45.0); status must not call that unreadable.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-memory-size-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, '.swarm'));
+  const db = new DatabaseSync(path.join(root, '.swarm', 'agentdb-memory.db'));
+  db.exec('CREATE TABLE episodes (id INTEGER PRIMARY KEY)');
+  db.close();
+  const native = projectMemoryStatus(root).stores.find((store) => store.kind === 'native-agentdb');
+  assert.equal(native.readable, true);
+  assert.equal(native.table, false);
+  assert.equal(native.entries, 0);
+  assert.equal(native.top, null);
+  assert.equal(findMemoryEntry(root, '_setup', 'anything'), null);
+});
+
+function touch(root, relative, content = 'x') {
+  const file = path.join(root, ...relative.split('/'));
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, content);
+}
+
+test('stray stores are found outside the canonical .swarm pair, and backups, worktrees and dependencies are not', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-stray-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The canonical pair and this project's own AQE store are not strays.
+  touch(root, '.swarm/memory.db');
+  touch(root, '.swarm/agentdb-memory.db');
+  fs.mkdirSync(path.join(root, '.agentic-qe'));
+  // Strays, traced to owners in the 2026-09-26 audit.
+  touch(root, '.swarm/.swarm/agentdb-memory.db', 'nested');
+  touch(root, '.swarm/.swarm/agentdb-memory.db-wal', 'wal');
+  touch(root, '.swarm/deep/er/memory.db');
+  touch(root, 'agentdb.db');
+  touch(root, 'agentdb.rvf');
+  touch(root, 'ruvector.db');
+  touch(root, 'packages/app/.swarm/agentdb-memory.db');
+  for (const dir of ['docs/.agentic-qe', 'docs/archive/.agentic-qe', '.claude/.agentic-qe', '.agentic-qe/.agentic-qe']) {
+    fs.mkdirSync(path.join(root, ...dir.split('/')), { recursive: true });
+  }
+  // Not strays: Ruflo's rotated backups (and a copy kept in a subfolder there),
+  // another checkout under .claude/worktrees, dependencies, git internals.
+  touch(root, '.swarm/backups/memory-2026-09-10T18-27-26-543Z.db');
+  touch(root, '.swarm/backups/pre-cleanup/agentdb-memory.db');
+  fs.mkdirSync(path.join(root, '.claude', 'worktrees', 'w1', '.agentic-qe'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'node_modules', 'pkg', '.agentic-qe'), { recursive: true });
+  touch(root, 'node_modules/pkg/.swarm/memory.db');
+  fs.mkdirSync(path.join(root, '.git', '.agentic-qe'), { recursive: true });
+
+  const { strays, complete } = findStrayMemoryStores(root);
+  assert.equal(complete, true);
+  const found = strays.map((stray) => `${stray.kind} ${stray.path}`).sort();
+  assert.deepEqual(found, [
+    'agentdb-cli agentdb.db',
+    'agentdb-rvf agentdb.rvf',
+    'aqe .agentic-qe/.agentic-qe',
+    'aqe .claude/.agentic-qe',
+    'aqe docs/.agentic-qe',
+    'aqe docs/archive/.agentic-qe',
+    'ruflo .swarm/.swarm/agentdb-memory.db',
+    'ruflo .swarm/deep/er/memory.db',
+    'ruflo packages/app/.swarm/agentdb-memory.db',
+    'ruvector ruvector.db',
+  ]);
+  const nested = strays.find((stray) => stray.path === '.swarm/.swarm/agentdb-memory.db');
+  assert.equal(nested.sizeBytes, 'nested'.length + 'wal'.length, 'a store is sized with its WAL');
+  assert.equal(strays.find((stray) => stray.kind === 'aqe').sizeBytes, null, 'a folder is not sized');
+});
+
+test('the stray search is bounded and says when it stopped early', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-stray-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (let i = 0; i < 6; i++) fs.mkdirSync(path.join(root, `dir${i}`));
+  fs.mkdirSync(path.join(root, 'a', 'b', 'c', 'd', 'e', '.agentic-qe'), { recursive: true });
+  const capped = findStrayMemoryStores(root, { maxDirs: 3 });
+  assert.equal(capped.complete, false);
+  assert.equal(capped.visited, 3);
+  const deep = findStrayMemoryStores(root);
+  assert.equal(deep.complete, true);
+  assert.deepEqual(deep.strays, [], 'folders deeper than the depth bound are not searched');
+  assert.deepEqual(findStrayMemoryStores(path.join(root, 'missing')), { strays: [], complete: true, visited: 0 });
 });
