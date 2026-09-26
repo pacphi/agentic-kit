@@ -146,6 +146,7 @@ The visible Usage Score **Projects** ranking instead uses `gitProjects`: only ex
 Git parents with verified association qualify, and worktree costs roll into their real parent.
 It shows the top ten by API-equivalent cost; user-level, missing-parent and unclassified sessions
 remain in overall totals. These are different populations, not competing whole-machine totals.
+The `project-concentration` Finding ranks the same `gitProjects` population, never `byProject`.
 No historical Git association is reconstructed from a current repository name or shared remote.
 
 Prompt Telemetry is a Historical Usage subdomain. It owns privacy-bounded prompt fingerprints,

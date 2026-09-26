@@ -226,14 +226,6 @@ function modelIds(session) {
 const isPremiumModel = (id) => PREMIUM_PREFIXES.some((p) => id.startsWith(p));
 const isPrevGenOpus = (id) => id.startsWith(PREV_GEN_OPUS_PREFIX) && !id.startsWith(CURRENT_OPUS_PREFIX);
 
-// Keyed map → sorted [key, value] pairs, costliest first. Tolerates a missing map.
-function entriesByCost(map) {
-  if (!map || typeof map !== 'object') return [];
-  return Object.entries(map)
-    .filter(([, v]) => v && typeof v === 'object')
-    .sort((a, b) => num(b[1].cost) - num(a[1].cost));
-}
-
 // ── The detectors ────────────────────────────────────────────────────────────
 
 /**
@@ -257,6 +249,8 @@ function entriesByCost(map) {
  * @property {UsageBucketMap} [byProvider]
  * @property {UsageBucketMap} [byProject]
  * @property {UsageBucketMap} [byCategory]
+ * @property {Array<{key?: string, label?: string, cost?: number, sessions?: number}>} [gitProjects]
+ *   Repository-identity ranking (usage-project-groups.buildUsageGitProjects).
  */
 
 /**
@@ -415,21 +409,28 @@ function detectSpendTrend({ a }) {
 }
 
 // 6 ── project-concentration. Where effort is pooled is where a fix multiplies.
+// Ranked on `gitProjects` (verified repository identity), the same projection
+// Score → Projects draws, so the two never disagree for one project and window.
+// The folder-label `byProject` cannot support a "one project" claim: it merges
+// separate clones, plain folders, vanished repositories and sessions with no
+// evidence. An aggregate without `gitProjects` (older cache) stays silent. The
+// share keeps the whole window's spend as its denominator and says so.
 function detectProjectConcentration({ a, windowCost }) {
-  const projects = entriesByCost(a.byProject);
+  const projects = (Array.isArray(a.gitProjects) ? a.gitProjects : [])
+    .filter((row) => row && typeof row === 'object')
+    .sort((x, y) => num(y.cost) - num(x.cost));
   if (!projects.length || windowCost <= 0) return [];
-  const [topName, topValue] = projects[0];
-  const share = num(topValue.cost) / windowCost;
+  const [top, runnerUp] = projects;
+  const share = num(top.cost) / windowCost;
   if (share <= THRESHOLDS.concentrationMinShare) return [];
-  const runnerUp = projects[1];
   return [withDefaults({
     id: 'project-concentration', kind: 'coach', severity: 'info',
-    title: `${topName} dominates your usage`,
-    finding: `${pct(share)} of API-equivalent spend (${usd(num(topValue.cost))}) and `
-      + `${count(num(topValue.sessions))} sessions went to one project.`,
+    title: `${top.label} dominates your usage`,
+    finding: `${pct(share)} of all API-equivalent spend in this window (${usd(num(top.cost))}) and `
+      + `${count(num(top.sessions))} sessions went to one Git project.`,
     evidence: runnerUp
-      ? `The next largest is ${runnerUp[0]} at ${usd(num(runnerUp[1].cost))}.`
-      : 'It is the only project in this window.',
+      ? `The next largest is ${runnerUp.label} at ${usd(num(runnerUp.cost))}.`
+      : 'It is the only Git project in this window.',
     action: 'Worth a dedicated per-activity routing policy and a tighter project CLAUDE.md — '
       + 'savings there multiply across every session.',
   })];

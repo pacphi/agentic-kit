@@ -1042,6 +1042,12 @@ from this ranking. Names and remotes alone do not establish eligibility.
 `dashboard/client/usage.mjs` (`renderScoreProjects`). The existing `byProject`
 aggregate remains available to other consumers, but does not establish Git identity.
 
+**Findings:** the `project-concentration` card ("*project* dominates your usage")
+ranks this same `gitProjects` projection, so its project, cost and session count
+match this list. Its percentage is that project's share of all API-equivalent
+spend in the window, including activity outside these rows. An older payload
+without `gitProjects` shows no concentration finding.
+
 **Population:** the overall Usage totals still include all recorded usage. They
 can exceed the sum of these ten Git-project rows. Missing identity remains in
 those totals; it is not guessed into this ranking. Older payloads without Git
