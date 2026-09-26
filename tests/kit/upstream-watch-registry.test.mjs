@@ -12,8 +12,9 @@ import {
   CITATION_DIRS, canonicalRepo, findCitations, scanCitations, unregisteredCitations,
 } from '../../scripts/upstream-watch/citations.mjs';
 
-const now = () => new Date('2026-09-27T12:00:00Z');
 const document = () => JSON.parse(fs.readFileSync(UPSTREAM_REGISTRY_FILE, 'utf8'));
+// The clock follows the registry's verification date, so a weekly re-verification is a data-only change.
+const now = () => new Date(`${document().lastVerifiedAt}T12:00:00Z`);
 const ids = (text) => findCitations(text).map((citation) => citation.id);
 // Synthetic fixture ids a test uses on purpose; each must still be cited where listed.
 const SYNTHETIC = new Map([['ruvnet/ruflo#9001', ['tests/kit/conformance-tiers.test.mjs']]]);

@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { loadUpstreamRegistry } from '../../src/lib/hook-audit/upstream.mjs';
+import { UPSTREAM_REGISTRY_FILE, loadUpstreamRegistry } from '../../src/lib/hook-audit/upstream.mjs';
 import {
   buildReport, classifyEntry, compareVersions, ledgerEvents, releaseFacts, withoutRecorded,
 } from '../../scripts/upstream-watch/classify.mjs';
@@ -18,7 +18,8 @@ const FIXTURES = path.resolve('tests/fixtures/upstream-watch');
 const threads = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'threads.json'), 'utf8')).threads;
 const npm = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'npm.json'), 'utf8')).packages;
 const loggedOut = fs.readFileSync(path.join(FIXTURES, 'gh-auth-status-logged-out.txt'), 'utf8');
-const real = loadUpstreamRegistry({ now: () => new Date('2026-09-27T12:00:00Z') });
+const { lastVerifiedAt } = JSON.parse(fs.readFileSync(UPSTREAM_REGISTRY_FILE, 'utf8'));
+const real = loadUpstreamRegistry({ now: () => new Date(`${lastVerifiedAt}T12:00:00Z`) });
 const NOW = new Date('2026-09-26T23:00:00Z');
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -268,8 +269,11 @@ function fixtureFetcher({ authenticated = true } = {}) {
 async function withRegistryFile(watch, run) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-watch-cli-'));
   try {
-    const document = JSON.parse(fs.readFileSync('src/lib/hook-audit/agentic-dependency-constraints.json', 'utf8'));
+    const document = JSON.parse(fs.readFileSync(UPSTREAM_REGISTRY_FILE, 'utf8'));
     document.watch = watch;
+    // Pin the verification window around NOW instead of inheriting the live registry's dates.
+    document.lastVerifiedAt = '2026-09-26';
+    for (const constraint of document.constraints) constraint.nextRetestAt = '2026-10-03';
     // Every constraint issue needs a watch entry; retired ones are never fetched.
     for (const constraint of document.constraints.filter((item) => item.issue)) {
       const id = constraint.issue.replace('https://github.com/', '').replace('/issues/', '#');

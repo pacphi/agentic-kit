@@ -49,6 +49,14 @@ A watch entry records:
 The watcher does not change statuses. The maintainer, or a dispatch pull request, updates the
 entry and adds a dated `history` line.
 
+## Re-verifying constraints
+
+Weekly, and before a managed upgrade, re-check each constraint's issue state on GitHub and the
+released versions on npm. Update `issueState` where it changed, set `lastVerifiedAt` to the
+check date and every `nextRetestAt` one week later, and list what was not re-verified
+(reproductions, conformance, sunset conditions) in the commit body. The tests take their
+clock from `lastVerifiedAt`, so this is a data-only change.
+
 ## The check
 
 `scripts/upstream-watch.mjs` is maintainer tooling; it is not published. It reads GitHub with
@@ -80,8 +88,8 @@ node scripts/upstream-watch.mjs check --since <iso-date> [--ledger <file>] [--js
 
 ## The ledger
 
-The ledger is one pinned issue titled "Upstream watch" in `pacphi/agentic-kit`. Each event is a
-line:
+The ledger is one pinned issue titled "Upstream watch" in `pacphi/agentic-kit`. The maintainer
+creates and pins it when creating the daily routine. Each event is a line:
 
 ```text
 UPSTREAM-WATCH <id> <event> <yyyy-mm-dd> [key=value ...]

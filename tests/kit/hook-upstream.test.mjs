@@ -7,7 +7,9 @@ import path from 'node:path';
 import { UPSTREAM_REGISTRY_FILE, loadUpstreamConstraints } from '../../src/lib/hook-audit/upstream.mjs';
 
 const registryFile = UPSTREAM_REGISTRY_FILE;
-const now = () => new Date('2026-09-27T12:00:00Z');
+// The clock follows the registry's verification date, so a weekly re-verification is a data-only change.
+const { lastVerifiedAt } = JSON.parse(fs.readFileSync(registryFile, 'utf8'));
+const now = () => new Date(`${lastVerifiedAt}T12:00:00Z`);
 
 function globPattern(glob) {
   const source = glob.split(/(\*\*\/|\*\*|\*)/).map((part) => {

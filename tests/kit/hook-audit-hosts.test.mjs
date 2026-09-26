@@ -8,6 +8,7 @@ import { createHash, generateKeyPairSync, sign as signEd25519 } from 'node:crypt
 import { run as runAuditCommand } from '../../src/commands/audit.mjs';
 import { auditCodexHooks } from '../../src/lib/hook-audit/index.mjs';
 import { auditHooks } from '../../src/lib/hook-audit/orchestrator.mjs';
+import { UPSTREAM_REGISTRY_FILE } from '../../src/lib/hook-audit/upstream.mjs';
 import { normalizedOccurrence, readBoundedFile } from '../../src/lib/hook-audit/common.mjs';
 import { auditClaudeHooks } from '../../src/lib/hook-audit/providers/claude.mjs';
 
@@ -121,7 +122,8 @@ test('host-neutral audit reports each provider and never proposes automatic trus
       codex: { codexHome: fx.codex, pluginCacheDir: path.join(fx.codex, 'plugins', 'cache') },
       claude: { claudeRoot: fx.claude, managedSettingsFile: null },
       opencode: { opencodeRoot: fx.opencode },
-      upstream: { now: () => new Date('2026-09-27T00:00:00Z') },
+      // The registry's own verification date, so re-verifying it never breaks this test.
+      upstream: { now: () => new Date(`${JSON.parse(fs.readFileSync(UPSTREAM_REGISTRY_FILE, 'utf8')).lastVerifiedAt}T12:00:00Z`) },
     });
 
     assert.deepEqual(report.hosts, ['codex', 'claude', 'opencode', 'external']);
