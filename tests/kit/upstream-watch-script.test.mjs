@@ -18,7 +18,7 @@ const FIXTURES = path.resolve('tests/fixtures/upstream-watch');
 const threads = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'threads.json'), 'utf8')).threads;
 const npm = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'npm.json'), 'utf8')).packages;
 const loggedOut = fs.readFileSync(path.join(FIXTURES, 'gh-auth-status-logged-out.txt'), 'utf8');
-const real = loadUpstreamRegistry({ now: () => new Date('2026-09-02T12:00:00Z') });
+const real = loadUpstreamRegistry({ now: () => new Date('2026-09-27T12:00:00Z') });
 const NOW = new Date('2026-09-26T23:00:00Z');
 const clone = (value) => JSON.parse(JSON.stringify(value));
 

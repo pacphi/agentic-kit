@@ -12,7 +12,7 @@ import {
   CITATION_DIRS, canonicalRepo, findCitations, scanCitations, unregisteredCitations,
 } from '../../scripts/upstream-watch/citations.mjs';
 
-const now = () => new Date('2026-09-02T12:00:00Z');
+const now = () => new Date('2026-09-27T12:00:00Z');
 const document = () => JSON.parse(fs.readFileSync(UPSTREAM_REGISTRY_FILE, 'utf8'));
 const ids = (text) => findCitations(text).map((citation) => citation.id);
 // Synthetic fixture ids a test uses on purpose; each must still be cited where listed.

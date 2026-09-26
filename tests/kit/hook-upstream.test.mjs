@@ -7,7 +7,7 @@ import path from 'node:path';
 import { UPSTREAM_REGISTRY_FILE, loadUpstreamConstraints } from '../../src/lib/hook-audit/upstream.mjs';
 
 const registryFile = UPSTREAM_REGISTRY_FILE;
-const now = () => new Date('2026-09-02T12:00:00Z');
+const now = () => new Date('2026-09-27T12:00:00Z');
 
 function globPattern(glob) {
   const source = glob.split(/(\*\*\/|\*\*|\*)/).map((part) => {
