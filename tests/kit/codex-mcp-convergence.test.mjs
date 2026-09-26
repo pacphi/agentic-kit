@@ -6,10 +6,12 @@ import {
   sandboxHome, assertSandboxed, sandboxProject, writeKitConfig,
   offlineKitConfig, fakeGlobalRoot, captureLog, snapshot, assertUnchanged,
 } from './helpers/home-sandbox.mjs';
+import { isolateProject } from './helpers/project-isolation.mjs';
 
 const sandbox = sandboxHome('ak-mcp-convergence');
 const paths = await import('../../src/lib/paths.mjs');
 assertSandboxed(paths, sandbox);
+isolateProject('ak-codex-mcp-convergence');
 const sync = await import('../../src/commands/sync.mjs');
 const setup = await import('../../src/commands/setup.mjs');
 const { loadKitConfig } = await import('../../src/lib/config.mjs');

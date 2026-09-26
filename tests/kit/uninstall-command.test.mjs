@@ -13,6 +13,7 @@ import {
   sandboxHome, assertSandboxed, snapshot, assertUnchanged, captureLog, rmrf,
   sandboxProject, writeKitConfig,
 } from './helpers/home-sandbox.mjs';
+import { isolateProject } from './helpers/project-isolation.mjs';
 
 const HOME = sandboxHome('ak-uninstall');
 // Dynamic — paths.mjs snapshots os.homedir() at load, so it must not be
@@ -21,6 +22,7 @@ const paths = await import('../../src/lib/paths.mjs');
 const { BEGIN, END } = await import('../../src/lib/blocks.mjs');
 const uninstall = await import('../../src/commands/uninstall.mjs');
 assertSandboxed(paths, HOME);
+isolateProject('ak-uninstall-command');
 
 const FOREIGN_MD = `# My own notes
 

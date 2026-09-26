@@ -13,6 +13,7 @@ import {
   sandboxHome, assertSandboxed, snapshot, assertUnchanged, captureLog, rmrf,
   sandboxProject, writeKitConfig, offlineKitConfig, fakeGlobalRoot,
 } from './helpers/home-sandbox.mjs';
+import { isolateProject } from './helpers/project-isolation.mjs';
 import { HOST_REGISTRY } from '../../src/lib/adapters/registries.mjs';
 
 const HOME = sandboxHome('ak-setup');
@@ -21,6 +22,7 @@ const setup = await import('../../src/commands/setup.mjs');
 const { loadKitConfig } = await import('../../src/lib/config.mjs');
 const { codexMcpTopology, repairCodexMcpTopology } = await import('../../src/lib/mcp.mjs');
 assertSandboxed(paths, HOME);
+isolateProject('ak-setup-command');
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const FLAGS = (over = {}) => ({

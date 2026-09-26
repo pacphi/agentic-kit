@@ -14,6 +14,7 @@ import {
   sandboxHome, assertSandboxed, snapshot, assertUnchanged, captureLog, rmrf,
   sandboxProject, writeKitConfig, offlineKitConfig, fakeGlobalRoot,
 } from './helpers/home-sandbox.mjs';
+import { isolateProject } from './helpers/project-isolation.mjs';
 
 const HOME = sandboxHome('ak-sync');
 const paths = await import('../../src/lib/paths.mjs');
@@ -21,6 +22,7 @@ const sync = await import('../../src/commands/sync.mjs');
 const status = await import('../../src/commands/status.mjs');
 const { loadKitConfig } = await import('../../src/lib/config.mjs');
 assertSandboxed(paths, HOME);
+isolateProject('ak-sync-command');
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const PROJECT = sandboxProject('ak-sync');

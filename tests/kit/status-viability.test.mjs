@@ -19,6 +19,7 @@ import {
   sandboxHome, assertSandboxed, captureLog, rmrf, sandboxProject,
   writeKitConfig, offlineKitConfig, fakeGlobalRoot,
 } from './helpers/home-sandbox.mjs';
+import { isolateProject } from './helpers/project-isolation.mjs';
 
 const HOME = sandboxHome('ak-viability');
 const paths = await import('../../src/lib/paths.mjs');
@@ -28,6 +29,7 @@ const { appendModelSnapshot } = await import('../../src/lib/model-inventory/stor
 const { AQE_PROVIDER_CREDENTIALS, aqeProviderCredential, credentialGaps } = await import('../../src/lib/providers.mjs');
 const { DEFAULT_ROUTES, ACTIVITIES, seedActivityRoutes, divergedRoutes } = await import('../../src/lib/routing.mjs');
 assertSandboxed(paths, HOME);
+isolateProject('ak-status-viability');
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const PROJECT = sandboxProject('ak-viability');

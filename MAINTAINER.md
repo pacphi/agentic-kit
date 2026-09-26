@@ -237,6 +237,17 @@ pnpm run lint:links:internal # requires lychee
 
 Run one suite while iterating: `node --test tests/kit/versions.test.mjs`.
 
+Test isolation has two halves. `sandboxHome()` (`tests/kit/helpers/home-sandbox.mjs`)
+redirects every home-relative path. Commands also write relative to the current
+directory, so any test file that calls `sync.run`, `setup.run*` or `uninstall.run` must
+call `isolateProject()` (`tests/kit/helpers/project-isolation.mjs`) once at module scope.
+It moves the file into a throwaway project and fails the file if the real repository's
+`.claude/settings.local.json`, `.claude/helpers/statusline.cjs`, `CLAUDE.md`, `AGENTS.md`
+(and a few other project files, or their `.ak-*`/`.agentic-kit-*` siblings) change.
+`tests/kit/project-isolation.test.mjs` fails when a new test file skips it. A live Claude
+Code or Ruflo session that edits those files in the same checkout during `pnpm test`
+also trips the guard; rerun with the session idle.
+
 CI additionally runs a **CLI smoke** against a sandboxed `HOME` (see `ci.yml`):
 `--version`, `--help --all`, `status --json` (asserts valid JSON + `overall`),
 `x reference sync` (asserts managed blocks present), `uninstall --dry-run`. If you

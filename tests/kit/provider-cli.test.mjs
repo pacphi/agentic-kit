@@ -5,7 +5,7 @@
 // real machine's kit.json or ~/.claude — src/lib/paths.mjs's configBase()
 // reads APPDATA (not XDG_CONFIG_HOME) on win32, so both must be set or the
 // sandbox is silently bypassed there.
-import { test, after } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -19,22 +19,15 @@ import { validateAdapterManifest } from '../../src/lib/adapters/manifest.mjs';
 import { hashAdapterContent } from '../../src/lib/adapters/integrity.mjs';
 import { recordConsent } from '../../src/lib/adapters/consent.mjs';
 import { grantCapability, recordTierResult } from '../../src/lib/adapters/grants.mjs';
+import { guardRealRepository } from './helpers/project-isolation.mjs';
 
 // Tripwire (#137): a spawned `ak x host pick` whose cwd falls back to the test
 // process's cwd writes PROJECT-scoped config (.claude/settings.local.json,
 // .agentic-qe/llm-config.json) into the REAL repository the suite runs from —
-// HOME sandboxing cannot catch that class of leak. Record the real cwd's state
-// at module load and prove it byte-identical when the suite ends.
-const REAL_PROJECT_FILES = ['.claude/settings.local.json', '.agentic-qe/llm-config.json']
-  .map((rel) => path.resolve(process.cwd(), rel));
-const readOrNull = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
-const realProjectBefore = REAL_PROJECT_FILES.map(readOrNull);
-after(() => {
-  REAL_PROJECT_FILES.forEach((f, i) => {
-    assert.equal(readOrNull(f), realProjectBefore[i],
-      `${f} was modified by this suite — a spawned ak command leaked out of the sandbox (cwd not anchored to the sandbox project?)`);
-  });
-});
+// HOME sandboxing cannot catch that class of leak. The shared guard records the
+// real repository's project files at module load and proves them byte-identical
+// when the suite ends.
+guardRealRepository();
 
 const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin/agentic-kit.mjs');
 

@@ -24,6 +24,7 @@ import path from 'node:path';
 import {
   sandboxHome, assertSandboxed, sandboxProject, rmrf, captureLog, offlineKitConfig,
 } from './helpers/home-sandbox.mjs';
+import { isolateProject } from './helpers/project-isolation.mjs';
 
 const HOME = sandboxHome('ak-routing-retirement');
 const paths = await import('../../src/lib/paths.mjs');
@@ -31,6 +32,7 @@ const host = await import('../../src/commands/x/host.mjs');
 const setup = await import('../../src/commands/setup.mjs');
 const { loadKitConfig } = await import('../../src/lib/config.mjs');
 assertSandboxed(paths, HOME);
+isolateProject('ak-routing-retirement-convergence');
 
 /** Executable no-op shims — present on PATH so `have()`/`hostInstallState`
  *  see an externally-installed CLI (never an 'absent' host, so pick/setup
