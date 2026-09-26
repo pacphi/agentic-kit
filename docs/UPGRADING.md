@@ -39,6 +39,17 @@ and supported `claude mcp serve` tool exposure are preserved. See
 [ADR-0051](adr/0051-supported-peer-delegation-and-host-realignment.md) for the policy,
 official source citations, authority boundaries and verification limits.
 
+## 2026-09-26: Codex's Ruflo memory outside a project
+
+Codex's Ruflo launcher (`ak x ruflo-mcp`) no longer creates a `.swarm` store at the filesystem
+root, in your home folder itself, in a temporary root or inside a tool's own folder (`~/.codex`,
+`~/.claude`, `~/.config`, `~/.local`, `~/.cache`, `~/Library/Application Support`, `%APPDATA%`).
+Sessions started there share one user-level store, `~/.claude-flow/memory`. Repositories and plain
+work folders keep their own `.swarm` as before. Earlier sessions may have left `~/.swarm` or
+`.swarm` folders under `~/.codex/.chatgpt-projects/`. `ak status` lists them for information and
+never moves or deletes them; inspect one read-only before you remove it. Restart Codex for a
+running Ruflo server to pick up the new location. Claude's own Ruflo registration is unchanged.
+
 ## 2026-09-26: Registering a provider keeps Ruflo memory in `.swarm`
 
 When `kit.json` lists providers and a project has no Ruflo JSON configuration

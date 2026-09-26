@@ -18,6 +18,7 @@ import self from './self.mjs';
 import natives from './natives.mjs';
 import memoryPin from './memory-pin.mjs';
 import projectMemory from './project-memory.mjs';
+import userMemory from './user-memory.mjs';
 import scaffoldAgents from './scaffold-agents.mjs';
 import npx from './npx.mjs';
 import security from './security.mjs';
@@ -46,7 +47,7 @@ import liveChecks from './live-checks.mjs';
 // host-detail / admitted-lifecycle calls that collect() makes directly.
 export const SECTIONS_BEFORE_HOST_DETAIL = [
   models, versions, ruvnetBrain, ruvector, rufloComponents, self, natives, memoryPin,
-  projectMemory, scaffoldAgents, npx, security, learning, aqe, agentBrowser, mcp,
+  projectMemory, userMemory, scaffoldAgents, npx, security, learning, aqe, agentBrowser, mcp,
   codexMcp, codexPlugins, hostAlignment,
 ];
 

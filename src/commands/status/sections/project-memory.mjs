@@ -6,8 +6,9 @@
 // proof does not prove access to an existing corpus.
 //
 // The canonical store is `<root>/.swarm` for the root every ak launch contract
-// pins (memoryProjectRoot: the repository root, else the folder), so a status
-// run from a subfolder reports the same store the hosts use. Size, WAL, the
+// pins (rufloMemoryLocation: the repository root, else the folder), so a status
+// run from a subfolder reports the same store the hosts use. Outside any usable
+// folder, one row names the user-level store Codex's launcher uses instead. Size, WAL, the
 // largest namespace and its expiry come from a read-only query; stray stores
 // (project-memory.mjs findStrayMemoryStores) are information only, never a
 // warning or a sync fix: ak leaves them in place, and a warning with no way to
@@ -25,7 +26,8 @@ import { projectDaemonAlive } from '../../../lib/daemons.mjs';
 import { formatLiveCheckAge as ago } from '../../../lib/live-check-evidence.mjs';
 import { memoryMaintenanceStatus } from '../../../lib/memory-maintenance.mjs';
 import { findStrayMemoryStores, projectMemoryStatus } from '../../../lib/project-memory.mjs';
-import { memoryProjectRoot } from '../../../lib/ruflo-memory.mjs';
+import * as paths from '../../../lib/paths.mjs';
+import { rufloMemoryLocation } from '../../../lib/ruflo-memory.mjs';
 import { MEMORY_ROOT_PIN, MEMORY_ROOT_UPSTREAM, rufloMemoryRedirect } from '../../../lib/ruflo-memory-config.mjs';
 import { installedRoutingVersion, twoStoreMessage } from '../../../lib/ruflo-memory-contract.mjs';
 import { projectSetupHint } from '../../../lib/setup-scope.mjs';
@@ -46,7 +48,7 @@ function expiryClause(top) {
   return `, ${top.expiring} set to expire`;
 }
 
-function storeMessage(store) {
+export function storeMessage(store) {
   const name = path.basename(store.file);
   const size = `${formatBytes(store.sizeBytes)}, WAL ${formatBytes(store.walBytes)}`;
   if (!store.table) return `${name}: no memory table yet (${size}); Ruflo adds it on the first write`;
@@ -147,12 +149,24 @@ function maintenanceRows(root, memory, now) {
   return rows;
 }
 
+// Outside any usable folder (the filesystem root, the home folder, a temporary
+// root, a tool's own folder) there is no project store to describe, and
+// walking such a folder for strays would be slow and meaningless: name the
+// store Codex's launcher uses from here instead (user-memory.mjs reports it).
+const launcherRow = (location) => row('memory', 'info', `no project here: this folder is ${location.reason}, so Codex's Ruflo `
+  + `launcher (\`ak x ruflo-mcp\`) uses the user-level store ${location.dir} instead of creating .swarm here. `
+  + 'Claude\'s own Ruflo registration is unchanged');
+
 export default {
   id: 'memory',
-  async collect({ cwd, rufloVersion = installedRoutingVersion(), platform = process.platform, now = Date.now() }) {
+  async collect({
+    cwd, rufloVersion = installedRoutingVersion(), platform = process.platform, now = Date.now(), home = paths.home,
+  }) {
     const rows = [];
     try {
-      const root = memoryProjectRoot(cwd);
+      const location = rufloMemoryLocation(cwd, { home });
+      if (location.kind === 'user') return [launcherRow(location)];
+      const root = location.root;
       const memory = projectMemoryStatus(root);
       if (!memory.active) {
         rows.push(row('memory', 'info', `no project memory store yet (${projectSetupHint(cwd, 'initialize')})`));

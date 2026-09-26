@@ -7,7 +7,20 @@
 // (@claude-flow/cli memory-initializer.js resolveDbPath/getMemoryRoot and
 // memory-bridge.js getAgentDbPath, 3.45.0). `ak x verify memory` observes
 // which interface sees which write.
+//
+// Where the store lives (audit 2026-09-26 Addendum 2, problem 2): the Git
+// repository root; else the plain work folder itself; but never the filesystem
+// root, the home folder itself, a temporary root, or a tool's own folder
+// (~/.codex, ~/.claude, ~/.config, …). Codex often starts there, and a store
+// created there either fails (the filesystem root is read-only) or lands where
+// no other host looks. Those route to ONE user-level store
+// (paths.userMemoryDir) pinned through both CLAUDE_FLOW_MEMORY_PATH and
+// CLAUDE_FLOW_DB_PATH, with Ruflo started inside it so cwd-relative files
+// (AgentDB's agentdb.rvf, RuVector's ruvector.db) land beside it. A temporary
+// root means the root itself: a disposable project below it (ak x verify
+// memory's sandbox) is a plain work folder and keeps its own store.
 import fs from 'node:fs';
+import path from 'node:path';
 import * as paths from './paths.mjs';
 import { loadKitConfig } from './config.mjs';
 import { managedAgentBrowserEnv } from './agent-browser.mjs';
@@ -16,8 +29,57 @@ import { componentEnv, RC_KEYS, supports } from './ruflo-components/env.mjs';
 import { managedIntent } from './ruflo-components/config.mjs';
 import { componentById } from './ruflo-components/catalogue.mjs';
 
-export function memoryProjectRoot(cwd = process.cwd()) {
-  return fs.realpathSync(paths.repoRoot(cwd) ?? cwd);
+const realOr = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+const inside = (child, parent) => {
+  const rel = path.relative(parent, child);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+};
+/** `~/…` for a folder under the home folder, else the absolute path. */
+export function homeRelative(file, home = paths.home) {
+  const rel = path.relative(realOr(home), realOr(file));
+  return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? `~/${rel.split(path.sep).join('/')}` : file;
+}
+
+/** Why `dir` (a real path) must not hold a Ruflo store, or null. */
+function unsuitableReason(dir, { home, env, platform }) {
+  if (path.dirname(dir) === dir) return 'the filesystem root';
+  if (dir === realOr(home)) return 'the home folder';
+  if (paths.tempRoots({ env, platform }).some((root) => realOr(root) === dir)) return 'a temporary folder';
+  const tool = paths.toolInternalDirs({ home, env, platform }).find((folder) => inside(dir, realOr(folder)));
+  return tool ? `inside ${homeRelative(tool, home)}, a tool's own folder` : null;
+}
+
+/**
+ * Where a Ruflo memory launch from `cwd` keeps its store:
+ * `{ kind: 'project'|'folder'|'user', root, dir, db, reason }`. `root` is the
+ * working directory the launch uses; `dir` holds memory.db and
+ * agentdb-memory.db; `reason` says why a user-level store was chosen.
+ * @param {string} [cwd]
+ * @param {{ home?: string, env?: Record<string, string|undefined>, platform?: string }} [options]
+ */
+export function rufloMemoryLocation(cwd = process.cwd(), {
+  home = paths.home, env = process.env, platform = process.platform,
+} = {}) {
+  const options = { home, env, platform };
+  let reason = null;
+  for (const [kind, candidate] of [['project', paths.repoRoot(cwd)], ['folder', cwd]]) {
+    if (!candidate) continue;
+    const root = realOr(candidate);
+    const why = unsuitableReason(root, options);
+    if (!why) return { kind, root, dir: path.join(root, '.swarm'), db: paths.projectMemoryDb(root), reason: null };
+    reason ??= why;
+  }
+  const dir = paths.userMemoryDir(home);
+  return { kind: 'user', root: dir, dir, db: path.join(dir, 'memory.db'), reason };
+}
+
+/** The project root every ak memory contract pins: the launcher's root for a
+ *  project or plain folder. Outside any usable folder (the user-level store's
+ *  cases) it stays the repository root or folder, for the callers that are not
+ *  the Codex launcher (Claude-side harvest and setup; a follow-up decision). */
+export function memoryProjectRoot(cwd = process.cwd(), options = {}) {
+  const location = rufloMemoryLocation(cwd, options);
+  return location.kind === 'user' ? fs.realpathSync(paths.repoRoot(cwd) ?? cwd) : location.root;
 }
 
 export function projectMemoryEnv(cwd = process.cwd(), env = {}) {
@@ -26,9 +88,10 @@ export function projectMemoryEnv(cwd = process.cwd(), env = {}) {
 }
 
 export function rufloMcpLaunch(cwd = process.cwd(), env = process.env, {
-  cfg = loadKitConfig(), rufloVersion = installedVersion('ruflo'),
+  cfg = loadKitConfig(), rufloVersion = installedVersion('ruflo'), home = paths.home,
 } = {}) {
-  const root = memoryProjectRoot(cwd);
+  const location = rufloMemoryLocation(cwd, { home, env });
+  const root = location.root;
   const rc = componentEnv(root, cfg, rufloVersion);
   const merged = {
     ...env,
@@ -46,10 +109,17 @@ export function rufloMcpLaunch(cwd = process.cwd(), env = process.env, {
   if (managedIntent(cfg, 'mcpGovernance') && supports(rufloVersion, componentById('mcpGovernance').minRuflo) && !(RC_KEYS.enforce in rc)) {
     delete merged[RC_KEYS.enforce];
   }
+  // The user-level store has no project root to derive agentdb-memory.db
+  // from, so the memory root is pinned too; a project keeps Ruflo's own
+  // <cwd>/.swarm derivation (and any CLAUDE_FLOW_MEMORY_PATH the user set).
+  const memoryEnv = location.kind === 'user'
+    ? { CLAUDE_FLOW_MEMORY_PATH: location.dir, CLAUDE_FLOW_DB_PATH: location.db }
+    : { CLAUDE_FLOW_DB_PATH: location.db };
   return {
     command: 'ruflo',
     args: ['mcp', 'start'],
     cwd: root,
-    env: projectMemoryEnv(root, merged),
+    env: { ...merged, ...memoryEnv },
+    location,
   };
 }

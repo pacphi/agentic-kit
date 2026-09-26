@@ -635,3 +635,16 @@ work under ADR-0011's own validation requirements.
   the remaining providers are skipped, and the step is degraded. An unwritable pin skips
   registration. Status warns, with a manual fix, when a Ruflo JSON configuration points memory away
   from a populated `.swarm` store.
+- **Codex memory outside a project (audit Addendum 2, problem 2).** `ak x ruflo-mcp` resolves its
+  store from the Git repository root, else the plain work folder. The filesystem root, the home
+  folder itself, a temporary root, and a tool's own folder (`~/.codex`, `~/.claude`, `~/.config`,
+  `~/.local`, `~/.cache`, `~/Library/Application Support`, `%APPDATA%`, and their environment
+  overrides) are never a store's home. A repository root there falls back to the plain folder, and
+  failing that, all such launches share one user-level store, `~/.claude-flow/memory`, pinned
+  through both `CLAUDE_FLOW_MEMORY_PATH` and `CLAUDE_FLOW_DB_PATH`, with Ruflo started inside it.
+  Ruflo defines no user-level memory store; ak follows Ruflo's user-level state folder
+  `~/.claude-flow` by analogy. Status names the store the launcher uses from a folder that has no
+  project store, reports the user-level store, and lists `~/.swarm` and
+  `~/.codex/.chatgpt-projects/*/.swarm` as strays for information only. Claude's direct
+  `ruflo mcp start` registration does not use the launcher; applying the same rule there is a
+  follow-up decision.

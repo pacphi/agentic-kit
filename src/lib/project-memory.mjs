@@ -60,14 +60,21 @@ function inspectStore(file, kind) {
   };
 }
 
-export function projectMemoryStatus(root) {
-  const sqljs = inspectStore(paths.projectMemoryDb(root), 'sqljs');
-  const native = inspectStore(paths.projectAgentDbMemoryDb(root), 'native-agentdb');
+function storePair(sqljsFile, nativeFile) {
+  const sqljs = inspectStore(sqljsFile, 'sqljs');
+  const native = inspectStore(nativeFile, 'native-agentdb');
   const active = native.present ? native : sqljs.present ? sqljs : null;
   const secondary = active === native && sqljs.present ? sqljs
     : active === sqljs && native.present ? native : null;
   return { active, secondary, stores: [sqljs, native] };
 }
+
+export function projectMemoryStatus(root) {
+  return storePair(paths.projectMemoryDb(root), paths.projectAgentDbMemoryDb(root));
+}
+
+/** The same pair in the user-level store's folder (paths.userMemoryDir). */
+export const memoryDirStatus = (dir) => storePair(path.join(dir, 'memory.db'), path.join(dir, 'agentdb-memory.db'));
 
 const lookupEntry = (file, namespace, key) => withDb(file, (db) => {
   const row = db.prepare(
@@ -198,4 +205,28 @@ export function findStrayMemoryStores(root, { maxDepth = 4, maxDirs = 2000 } = {
   walk(root, 0);
   const strays = [...found.values()].sort((a, b) => a.path.localeCompare(b.path));
   return { strays, complete, visited };
+}
+
+// Stray Ruflo stores outside any project (audit 2026-09-26 Addendum 2,
+// problem 2): `~/.swarm` (Ruflo ran with the home folder as its working
+// directory) and `<CODEX_HOME>/.chatgpt-projects/*/.swarm` (Codex started
+// Ruflo inside its own ChatGPT project folders). Report only, like every stray
+// store: ak never moves, merges or deletes them. One entry per .swarm folder;
+// bounded to `maxProjects` Codex project folders.
+/** @param {{ home: string, codexHome?: string, maxProjects?: number }} options */
+export function findUserStrayStores({ home, codexHome = path.join(home, '.codex'), maxProjects = 500 }) {
+  const strays = [];
+  const check = (dir, where) => {
+    const files = RUFLO_STORE_FILES.map((name) => path.join(dir, '.swarm', name)).filter(isFile);
+    if (files.length) strays.push({ where, dir: path.join(dir, '.swarm'), sizeBytes: files.reduce((sum, file) => sum + storeBytes(file), 0) });
+  };
+  check(home, 'home');
+  const projects = path.join(codexHome, '.chatgpt-projects');
+  let entries = [];
+  try { entries = fs.readdirSync(projects, { withFileTypes: true }).filter((entry) => entry.isDirectory()); } catch { /* none */ }
+  const complete = entries.length <= maxProjects;
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name)).slice(0, maxProjects)) {
+    check(path.join(projects, entry.name), 'codex-projects');
+  }
+  return { strays, complete, projectsDir: projects };
 }

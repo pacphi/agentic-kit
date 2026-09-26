@@ -315,6 +315,15 @@ its share, and whether its rows are set to expire. A namespace that grows withou
 expiry (for example `commands`, written by Ruflo's `hooks post-command`) is the usual
 reason a store gets large. A file with no memory table yet is reported as empty.
 
+Some folders never get a store: the filesystem root, your home folder itself, a
+temporary root such as `/tmp`, and folders that belong to a tool (`~/.codex`,
+`~/.claude`, `~/.config`, `~/.local`, `~/.cache`, `~/Library/Application Support`,
+`%APPDATA%`). Codex often starts in one of these. Its Ruflo launcher (`ak x ruflo-mcp`)
+then uses one user-level store, `~/.claude-flow/memory`. Run from such a folder,
+`ak status` names that store instead of a project store. From anywhere, it reports
+the user-level store once it exists. Claude's own Ruflo registration does not use
+the launcher and is unchanged.
+
 ### Stray memory stores
 
 A stray store is a memory file this project's hosts do not read. `ak status` lists
@@ -327,6 +336,7 @@ each one by owner, for information only. ak never moves, merges or deletes them.
 | `./agentdb.rvf` | AgentDB's RVF backend, which defaults to the working directory |
 | `./ruvector.db` | RuVector's default store (`ruvector mcp start`; `ruflo memory init` also creates one) |
 | A `.agentic-qe/` below the project root | AQE resolves a relative `AQE_MEMORY_PATH` against the folder a command or hook ran in |
+| `~/.swarm`, or `.swarm` folders under `~/.codex/.chatgpt-projects/` (reported from any project) | Ruflo ran with your home folder or a Codex ChatGPT project folder as its working directory, before Codex's launcher used the user-level store there |
 
 Ruflo's rotated backups in `.swarm/backups/` are not strays. The search skips
 `node_modules`, `.git` and the contents of dot folders such as `.claude/worktrees`,

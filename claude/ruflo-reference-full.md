@@ -82,7 +82,10 @@ says nothing about an existing corpus. Preserve existing databases.
 Ruflo subprocesses must use the intended project directory. Agentic-kit writes
 an absolute `CLAUDE_FLOW_DB_PATH` for Claude and derives the same project pin in
 its Codex/OpenCode bridges. A literal `${CLAUDE_PROJECT_DIR}` in a settings value
-is not a substitute for the resolved path.
+is not a substitute for the resolved path. Codex sessions started outside a usable
+folder (the filesystem root, the home folder, a temporary root, or a tool's own
+folder such as `~/.codex`) share the user-level store `~/.claude-flow/memory`;
+`ak status` names the store that applies.
 
 Historical sql.js/WAL and native better-sqlite3 mismatches could produce stale or
 non-durable reads. A WAL file's size is not enough to diagnose the cause. Use

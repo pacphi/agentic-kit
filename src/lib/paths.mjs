@@ -68,6 +68,41 @@ export const opencodePluginsDir = () => path.join(opencodeDir(), 'plugins');
 export const opencodeAgentsDir = () => path.join(opencodeDir(), 'agents');
 export const opencodeSkillsDir = () => path.join(opencodeDir(), 'skills');
 
+/** The one user-level Ruflo memory store, for launches outside any usable
+ *  project folder (ruflo-memory.mjs rufloMemoryLocation). Ruflo defines no
+ *  user-level memory store; it keeps its user-level state in ~/.claude-flow
+ *  (@claude-flow/cli 3.45.0: memory/intelligence.js `~/.claude-flow/neural`,
+ *  update/rate-limiter.js, services/global-ai-budget.js, commands/daemon.js),
+ *  so ak's store follows that convention as ~/.claude-flow/memory. */
+export const userMemoryDir = (h = home) => path.join(h, '.claude-flow', 'memory');
+
+/** Folders that belong to a tool rather than to the user's work: a Ruflo
+ *  store is never created inside one. Environment overrides and the defaults
+ *  both count (a store under either is equally out of sight). */
+export function toolInternalDirs({ home: h = home, env = process.env, platform = process.platform } = {}) {
+  const dirs = [
+    path.join(h, '.claude'), env.CLAUDE_CONFIG_DIR,
+    path.join(h, '.codex'), env.CODEX_HOME,
+    path.join(h, '.claude-flow'), path.join(h, '.ruflo'),
+  ];
+  if (platform === 'win32') {
+    dirs.push(path.join(h, 'AppData'), env.APPDATA, env.LOCALAPPDATA);
+  } else {
+    dirs.push(path.join(h, '.config'), env.XDG_CONFIG_HOME, path.join(h, '.local'), env.XDG_DATA_HOME,
+      env.XDG_STATE_HOME, path.join(h, '.cache'), env.XDG_CACHE_HOME);
+    if (platform === 'darwin') dirs.push(path.join(h, 'Library', 'Application Support'), path.join(h, 'Library', 'Caches'));
+  }
+  return [...new Set(dirs.filter(Boolean).map((dir) => path.resolve(dir)))];
+}
+
+/** The temporary roots themselves. A folder BELOW one (a disposable project)
+ *  is ordinary work and is not listed. */
+export function tempRoots({ env = process.env, platform = process.platform } = {}) {
+  const roots = [os.tmpdir(), env.TMPDIR, env.TEMP, env.TMP];
+  if (platform !== 'win32') roots.push('/tmp', '/var/tmp', '/private/tmp', '/private/var/tmp');
+  return [...new Set(roots.filter(Boolean).map((dir) => path.resolve(dir)))];
+}
+
 /** Per-project locations, relative to a project root. */
 export const projectSettings = (root) => path.join(root, '.claude', 'settings.json');
 export const projectSettingsLocal = (root) => path.join(root, '.claude', 'settings.local.json');
