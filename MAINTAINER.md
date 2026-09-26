@@ -197,7 +197,8 @@ Toggle with the `ruvnetBrain` kit.json flag / `--no-ruvnet-brain`.
 Running `ruflo init` / `aqe init` against *this* repo writes `.agentic-qe/`,
 `.claude/`, `.claude-flow/`, `.swarm/`, `.mcp.json`, `*.db`, `*.rvf`, `ruvector.db`.
 All are `.gitignore`d. **Never commit them.** If you see them staged, something
-generated them in-tree.
+generated them in-tree. The one authored exception is the `upstream-status` maintainer
+skill, tracked at `.claude/skills/upstream-status/` and `.agents/skills/upstream-status/`.
 
 ---
 
@@ -436,6 +437,16 @@ gh run rerun <run-id> --failed                        # re-run only failed jobs
 gh workflow run nightly.yml                           # force a live-drift check now
 gh run list --workflow=nightly.yml --limit 3
 ```
+
+### Upstream watch
+
+```bash
+node scripts/upstream-watch.mjs report                # counts, then action items with links
+node scripts/upstream-watch.mjs check --since 2026-09-26 --ledger ledger.md   # new ledger lines only
+```
+
+Read-only against GitHub and npm. The registry, lifecycle, ledger and daily routine are in
+[UPSTREAM-WATCH.md](docs/UPSTREAM-WATCH.md).
 
 ### Pull requests
 

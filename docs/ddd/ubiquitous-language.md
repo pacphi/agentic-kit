@@ -32,6 +32,9 @@ contradictory meaning.
 | Coverage statement | `complete`, `partial`, or `unsupported` audit reach plus concrete gaps; it is not a health or trust verdict |
 | Remediation proposal | Read-only action description classified as automatic-eligible, approval-required, prohibited, or upstream-required |
 | Upstream constraint | Versioned dependency issue, affected range, bounded local strategy, verification date, and objective sunset condition |
+| Watched upstream thread | Upstream issue or pull request in the upstream registry's watch list: what done means, the ak adjustment it unblocks, a lifecycle status from watching to retired, and dated history |
+| Upstream watch ledger | The pinned "Upstream watch" issue; each event is one `UPSTREAM-WATCH <id> <event> <date>` line, and an exact line is never acted on twice |
+| Upstream dispatch | Draft pull request on `upstream/<id>` that makes a released thread's adjustment and passes its dependency's removal proof; the watcher never merges it |
 
 ## Context budget language
 
