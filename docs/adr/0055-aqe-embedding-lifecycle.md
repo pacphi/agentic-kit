@@ -9,6 +9,7 @@
 - **Updated:** 2026-09-26 — status shows the last remembered live embedding check with its age, and opt-in `ak status --live` runs the quick live checks; see [Amendment: remembered live checks](#amendment-2026-09-26-remembered-live-checks)
 - **Updated:** 2026-09-26 — the Codex TOML editor decodes table and key names with one shared TOML key decoder; unrelated root and `[mcp_servers]` assignments no longer block the edit, and inline, dotted or quoted AQE registrations are reported as conflicts instead of absent (#237)
 - **Updated:** 2026-09-26 — one AQE MCP transport recognizer for Claude, Codex and OpenCode now accepts all of AQE's own start commands; see the amendment below (#237, audit decision 3)
+- **Updated:** 2026-09-26 — temporary: agentic-qe ≤ 3.14.3's live-owner contention sequence (lock warning, live-owner quarantine refusal, then `FsyncFailed` from its create attempt) classifies as busy, not a storage failure; removed when the AQE release carrying agentic-qe#719 is the kit floor ([#240](https://github.com/pacphi/agentic-kit/issues/240), audit decision 7)
 - **Related:** [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),
   [September repair](../audits/2026-09-09-aqe-integration-repair.md)
 

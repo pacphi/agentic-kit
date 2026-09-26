@@ -132,6 +132,12 @@ ak x verify deja-vu     # compatible package/doctor, selected wiring, index stat
 ak x verify all
 ```
 
+If `ak x verify aqe` warns that RVF is held by another live process, another AQE
+process (usually the AQE MCP server in an open Claude Code session) owns the store.
+That is contention, not a storage failure, even though agentic-qe 3.14.3 also prints
+`FsyncFailed` in this case ([#240](https://github.com/pacphi/agentic-kit/issues/240)).
+A `FsyncFailed` without the live-owner lines still fails verification.
+
 ## Known upstream gaps (not fixable by sync)
 
 The host-by-host issue snapshot and limitations are maintained in
