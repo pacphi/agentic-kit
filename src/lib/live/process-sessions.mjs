@@ -62,9 +62,27 @@ const tokens = (command) => String(command ?? '').trim().split(/\s+/)
 const executableName = (value) => path.win32.basename(String(value ?? '')).toLowerCase()
   .replace(/\.exe$/, '');
 
+/**
+ * Split argv, treating a known executable path as one token. `ps` reports the
+ * full executable path (macOS `comm=`) and argv as one space-joined string, so
+ * `/Users/me/Library/Application Support/x/codex mcp-server` would otherwise
+ * split inside the path and shift every argument by one. The prefix must end
+ * at whitespace or the end of the string. Spaces inside later arguments stay
+ * ambiguous, which is inherent to the args= format.
+ */
+function argvOf(command, executable) {
+  const text = String(command ?? '').trim();
+  const prefix = typeof executable === 'string' ? executable : '';
+  if (prefix && /\s/.test(prefix) && text.startsWith(prefix)
+    && (text.length === prefix.length || /\s/.test(text[prefix.length]))) {
+    return [prefix, ...tokens(text.slice(prefix.length)).filter(Boolean)];
+  }
+  return tokens(text);
+}
+
 /** Identify only a controller executable or its supported Node launcher. */
 export function hostFromCommand(command, executable = null) {
-  const argv = tokens(command);
+  const argv = argvOf(command, executable);
   const program = executableName(executable ?? argv[0]);
   let host = HOST_NAMES.get(program) ?? null;
   let argumentOffset = executable == null || executableName(argv[0]) === program ? 1 : 0;
@@ -77,11 +95,18 @@ export function hostFromCommand(command, executable = null) {
   return host;
 }
 
+const DESKTOP_HOSTED_CLAUDE_CLI = /\/claude-code\/[^/]+\/claude\.app\/Contents\/MacOS\/claude$/i;
+
 /** Reduce process argv to a non-sensitive controller role, then discard argv. */
 function controllerKind(row) {
-  const argv = tokens(row.command);
+  const argv = argvOf(row.command, row.executable);
   if (argv.includes('app-server')) return 'host-service';
   const executable = String(row.executable ?? argv[0] ?? '').replaceAll('\\', '/');
+  // The Claude desktop app runs its own Claude Code CLI from a versioned
+  // bundle (`…/Claude/claude-code/<version>/claude.app/Contents/MacOS/claude`).
+  // It is a user's project session, not the desktop app, even though its path
+  // has the `.app/Contents/` shape.
+  if (DESKTOP_HOSTED_CLAUDE_CLI.test(executable)) return 'project-session';
   if (/\/[^/]+\.app\/Contents\//i.test(executable)) return 'desktop-app';
   return 'project-session';
 }
@@ -101,10 +126,15 @@ export function parseProcessList(output) {
   return rows;
 }
 
-/** Parse the privacy-minimized first survey, which deliberately omits argv. */
+/**
+ * Parse the privacy-minimized first survey, which deliberately omits argv.
+ * `comm` is the last column, so it may contain spaces: macOS prints the full
+ * executable path (`…/Application Support/…`, `Visual Studio Code.app`).
+ * `lstart` has a fixed shape under LC_ALL=C, so the split stays unambiguous.
+ */
 export function parseProcessHeaders(output) {
   const rows = [];
-  const pattern = /^\s*(\d+)\s+(\d+)\s+([A-Z][a-z]{2}\s+[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(\S+)\s*$/;
+  const pattern = /^\s*(\d+)\s+(\d+)\s+([A-Z][a-z]{2}\s+[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.+?)\s*$/;
   for (const line of String(output ?? '').split('\n')) {
     const match = pattern.exec(line);
     if (!match) continue;
@@ -220,9 +250,14 @@ function rootControllers(rows) {
   }
   const roots = [...candidates.values()].filter((candidate) => {
     const seen = new Set([candidate.pid]);
+    // A desktop app hosts CLI sessions the user started from it; those are
+    // sessions in their own right, not workers of the app. The app's own
+    // services (for example an app-server) still fold into it.
+    const session = controllerKind(candidate) === 'project-session';
     let parent = byPid.get(candidate.ppid);
     while (parent && !seen.has(parent.pid)) {
-      if (candidates.has(parent.pid)) {
+      const ancestor = candidates.get(parent.pid);
+      if (ancestor && !(session && controllerKind(ancestor) === 'desktop-app')) {
         runtimeDebug('exclude-nested-child', { pid: candidate.pid, host: candidate.host, parentPid: parent.pid });
         return false;
       }

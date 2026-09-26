@@ -2,8 +2,11 @@
 
 - **Status:** Implemented
 - **Date:** 2026-07-27
-- **Updated:** 2026-09-20 — ADR-0054 adds an explicit, offline, allowlisted fleet export boundary;
-  local analytics and dashboard collection semantics remain unchanged.
+- **Updated:** 2026-09-26 — the POSIX process survey keeps executable paths that contain spaces,
+  and a Claude Code CLI hosted by the Claude desktop app is its own top-level controller rather
+  than a nested worker of the app (#238 item 3).
+- **Earlier update:** 2026-09-20 — ADR-0054 adds an explicit, offline, allowlisted fleet export
+  boundary; local analytics and dashboard collection semantics remain unchanged.
 - **Earlier update:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Earlier update:** 2026-08-04
 - **GA surface:** Canonical naming and retired vocabulary follow
@@ -43,7 +46,10 @@
 **2026-08-03 runtime identity amendment:** transcript and ledger evidence remains the topology
 source, while an asynchronous two-second local process survey supplies observed liveness leases
 for top-level Claude Code, Codex, and OpenCode controllers on macOS and Linux. Nested host CLIs
-remain workers of their nearest controller. A runtime lease requires a canonical Git repository;
+remain workers of their nearest controller, with one exception (2026-09-26): a desktop app never
+absorbs a CLI session it hosts, so a Claude Code CLI launched from the Claude desktop app is its
+own controller, while the app's own services still fold into the app. The survey parses executable
+paths that contain spaces. A runtime lease requires a canonical Git repository;
 three consecutive successful surveys without the controller quiesce it. Retained transcript
 evidence may use a privacy-safe repository-label fallback when its former path no longer exists.
 Unresolved internal evidence is retained for later reconciliation but is never presented as an

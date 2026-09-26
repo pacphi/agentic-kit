@@ -322,7 +322,9 @@ The default dashboard automatically discovers Claude and Codex transcript files,
 supported controller processes, and reads the Codex state ledger. On macOS and Linux,
 process discovery is selected by the real numeric UID running the dashboard. It first reads
 only PID/parent/start/command columns, then requests full argv only for Node or known
-host-controller candidates from that selection. Separate OS accounts are outside the
+host-controller candidates from that selection. Executable paths that contain spaces are
+supported. A Claude Code session started from the Claude desktop app appears as its own session,
+not as part of the desktop app. Separate OS accounts are outside the
 intended survey; people sharing one login, a service running under that account, and a
 container sharing the host PID namespace remain inside the same numeric-UID boundary.
 Do not run the dashboard with `sudo`. Windows uses a process survey and bounded

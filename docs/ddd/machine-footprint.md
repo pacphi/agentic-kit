@@ -317,7 +317,10 @@ when a Git boundary is proven; otherwise it classifies host app services and des
 non-sensitive enum derived during the already-bounded argv probe, then distinguishes known host
 state, user home, filesystem root, and ordinary folders. Raw argv is discarded before the survey
 returns. This is why a Codex plugin service no longer appears as a fictitious `.codex` project and
-a desktop host at `/` no longer appears as `unknown`.
+a desktop host at `/` no longer appears as `unknown`. A Claude Code CLI that the Claude desktop app
+runs from its versioned `claude-code/<version>/claude.app` bundle is a project session, not the
+desktop app, and it is surveyed as its own controller instead of being folded into the app. The
+POSIX survey reads executable paths that contain spaces, such as `Application Support`.
 
 One field is honestly absent everywhere: the daemon **budget** state. `ruflo daemon budget` is a
 CLI with no local file this collector can read, so budget reports `unknown` with that reason
