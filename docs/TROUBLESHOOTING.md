@@ -58,7 +58,7 @@ ak sync             # apply it
 | opencode: `status` reports a later `opencode.jsonc` override | stock OpenCode loads that file after `opencode.json`, so it can shadow the exact MCP/permission values ak receipts; ak cannot verify JSONC without rewriting user comments | merge the Agentic Kit entries into the later file and remove the duplicate override, or keep the override and use direct user-managed wiring; ak preserves both files and does not deploy its gateway against ambiguous effective config |
 | opencode: an agent/skill/plugin file you created yourself keeps ak's version away | deploys are no-clobber: only exact receipt-matching bytes are repairable; an unreceipted or edited destination is user-owned and preserved (`status` reports it as `foreign`) | rename yours (or remove it and run `ak sync` to get ak's managed copy) |
 | opencode: `status` says `no ruflo catalog source` | the agent/skill catalog resolves override → `$RUFLO_REPO` → claude marketplace clone → `@claude-flow/cli` (direct, then nested under ruflo) — all missing | install ruflo (`ak setup` does), or point `integrations.ownership.opencode.catalogDir` / `$RUFLO_REPO` at a ruflo checkout |
-| `ruflo memory store` says OK but reads return nothing | Missing project pin, wrong working directory, or CLI and MCP selecting different files when both `.swarm/memory.db` and `.swarm/agentdb-memory.db` exist | `ak sync` can repair owned registration drift. `ak x verify memory` proves an isolated canary only; inspect existing-corpus routing separately as described below |
+| `ruflo memory store` says OK but reads return nothing | Missing project pin, wrong working directory, or CLI and MCP selecting different files when both `.swarm/memory.db` and `.swarm/agentdb-memory.db` exist | `ak sync` can repair owned registration drift. `ak x verify memory` observes CLI↔MCP routing in an isolated directory only; it cannot show access to an existing corpus, so follow the routing section below |
 | `status` shows a `codex-plugins` warning | A plugin is enabled in the wrong host, its newest cached hooks or skills fail a known Codex compatibility check, or `config.toml` cannot be inspected safely. The exact `codex@openai-codex` identity is a Claude Code companion and must not be enabled inside Codex | For a valid, regular `config.toml` and verified companion 1.0.6, preview the approval-required repair with `ak heal hooks --host codex`; it changes only that Codex entry, never Claude Code or the cache. Repair malformed TOML or merge symlink-managed config manually. For other plugin findings, open Codex `/plugins`, refresh or disable the named plugin, then start a new session. Setup and sync never rewrite Codex-owned plugin state |
 | `status` says an external `agent-browser` is outside Ruflo's range | You installed a newer `agent-browser` yourself. ak never replaces a user-managed install, so `sync` cannot clear this, and Ruflo's browser tools may not work with that version | Install a Ruflo-compatible `agent-browser` 0.27.x yourself, or set `agentBrowser: false` in `~/.config/agentic-kit/kit.json` to stop ak managing the executor (Ruflo MCP then no longer gets ak's trusted browser config or readiness checks) |
 | `status` shows a `memory-pin` warning | `CLAUDE_FLOW_DB_PATH` is pinned to a dead or foreign path, so every memory op targets the wrong DB ("Database not initialized" beside a healthy in-repo DB). The pin may be deliberate, so `sync` never touches it | repoint (or remove) the pin in `.claude/settings.local.json` `env` |
@@ -108,9 +108,9 @@ ak sync             # apply it
 
 ## Existing memory corpus routing
 
-Ruflo 3.39.2 can select different stores through its CLI and MCP bridge. A passing
-`ak x verify memory` canary does not establish access to pre-existing records.
-`ak status` reports both files and leaves writer identity unverified.
+Ruflo's CLI and MCP tools can read different stores. A passing `ak x verify memory`
+does not establish access to pre-existing records. `ak status` reports both files;
+see [Ruflo memory stores and routing](#ruflo-memory-stores-and-routing).
 
 A snapshot test retrieved a known native-store record only when the CLI received
 the explicit native file path. For a record independently confirmed in that store,
@@ -236,8 +236,16 @@ Two files can contain different project corpora:
 The filenames do not prove the active backend: native code can also open
 `memory.db`. Status now names the files and keeps backend/writer/routing unknown
 unless separately verified. File presence alone does not prove lost data or
-correct cross-client routing. `ak x verify memory` tests an isolated canary;
-it cannot establish access to an existing corpus.
+correct cross-client routing.
+
+`ak x verify memory` runs in a throwaway project with its own memory root. After its
+CLI store, retrieve and purge proof, it writes one key through the CLI and one through
+MCP, then reports which interface can read which and the MCP backend it saw. A split
+is a warning and an MCP server it cannot use is "not observed"; neither fails the
+suite. A default `ruflo memory purge` clears `memory.db` only and still reports
+success, so the suite clears the sibling of its own throwaway project with `--path`;
+do not do that to a live corpus without a backup and quiesced writers. None of this
+establishes access to an existing corpus. `ak status --live` runs only the CLI proof.
 
 Inspection of installed Ruflo 3.39.2 found a concrete path split: CLI memory
 commands pass a resolved `dbPath`, defaulting to `memory.db`; MCP calls omit that

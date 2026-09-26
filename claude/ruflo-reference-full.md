@@ -67,8 +67,9 @@ Node 22"). Don't store anything derivable from `git log` or current code.
 The configured `.swarm/memory.db` pin and Ruflo's native
 `.swarm/agentdb-memory.db` sibling have different roles. Do not infer lost writes
 from an empty table in only one file. First run `ak status` and
-`ak x verify memory`; the latter uses a disposable store/retrieve/delete probe to
-identify the active writer and verify persistence. Preserve existing databases.
+`ak x verify memory`; the latter runs a disposable store/retrieve/purge proof in a
+throwaway project and reports whether CLI and MCP see each other's writes there. It
+says nothing about an existing corpus. Preserve existing databases.
 
 Ruflo subprocesses must use the intended project directory. Agentic-kit writes
 an absolute `CLAUDE_FLOW_DB_PATH` for Claude and derives the same project pin in

@@ -250,9 +250,10 @@ Claude receives the absolute `CLAUDE_FLOW_DB_PATH` in project settings. Codex's
 user-scoped Ruflo MCP registration launches `ak x ruflo-mcp`, which derives the
 pin from the workspace at process start. OpenCode's managed MCP gateway and
 lifecycle bridge receive its project directory and set the same absolute pin.
-Ruflo's native bridge may write `.swarm/agentdb-memory.db` beside the pinned
-`.swarm/memory.db`; that sibling is the active native store, not configuration
-drift. `ak x verify memory` proves the actual writer with a disposable round trip.
+Ruflo's MCP tools use `.swarm/agentdb-memory.db` beside the pinned
+`.swarm/memory.db`; that sibling is the native store, not configuration drift.
+`ak x verify memory` runs a disposable CLI round trip, then observes whether a
+write through the CLI and one through MCP are readable through the other.
 
 OpenCode's user-scope manifest names all four wildcard tool approvals, the
 Ruflo and optional Brain MCP registrations, the lifecycle plugin, and the

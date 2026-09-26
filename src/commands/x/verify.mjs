@@ -16,7 +16,9 @@ import { probeAqeEmbeddings } from '../../lib/aqe-embedding-probe.mjs';
 import { aqeRoot } from '../../lib/paths.mjs';
 import { projectAqeDir } from '../../lib/paths.mjs';
 import { findMemoryEntry } from '../../lib/project-memory.mjs';
-import { projectMemoryEnv } from '../../lib/ruflo-memory.mjs';
+import { projectMemoryEnv, rufloMcpLaunch } from '../../lib/ruflo-memory.mjs';
+import { callMcpTools } from '../../lib/mcp-tool-call.mjs';
+import { observeMemoryRoutes, describeMemoryRoutes } from '../../lib/memory-route-probe.mjs';
 import { loadKitConfig } from '../../lib/config.mjs';
 import { HOSTS, collectIntegrationFacts, aqeRouterFile, aqeExternalProviderState, EXTERNAL_PROVIDERS_MIN_AQE } from '../../lib/providers.mjs';
 import { readJson } from '../../lib/settings.mjs';
@@ -39,7 +41,7 @@ Usage: ak x verify [suite]
 
 Suites:
   learning    train a cycle in a temp dir; assert patterns persist
-  memory      store/retrieve/purge in a temp dir; confirm the actual DB writer
+  memory      store/retrieve/purge in a temp dir; observe whether CLI and MCP see each other's writes
   security    packages load; defend flags injection / passes clean
   aqe         storage, embedding configuration/provenance, and browser payload
   mcp         initialize/tools-list for effective Codex AQE and Brain commands
@@ -75,15 +77,78 @@ async function verifyLearning() {
   }
 }
 
-async function verifyMemory() {
-  heading('memory — store, retrieve, inspect the actual writer, and purge in an isolated dir');
+// Observe, in the isolated dir only, whether a write through one Ruflo
+// interface is readable through the other (issue #213). The probe returns the
+// observation; the reporter below only warns, never fails: a known upstream
+// split is a warning and an unusable MCP server means "not observed", so the
+// suite's pass/fail stays about the CLI proof.
+export async function probeProjectMemoryRoutes(tmp, env, namespace, { observe = observeMemoryRoutes } = {}) {
+  const value = `route-proof-${process.pid}-${Date.now()}`;
+  const routeNamespace = `${namespace}-routes`;
+  const launch = rufloMcpLaunch(tmp, env);
+  const cliRun = (args) => runCmd('ruflo', args, { cwd: tmp, env, timeout: 120_000 });
+  return observe({
+    namespace: routeNamespace,
+    value,
+    cli: {
+      store: async (key, v) => (await cliRun(['memory', 'store', '-k', key, '--value', v, '-n', routeNamespace])).code === 0,
+      retrieve: async (key) => {
+        const r = await cliRun(['memory', 'retrieve', '-k', key, '-n', routeNamespace, '--value-only']);
+        // Only ruflo's own "Key not found" is a miss; any other failure is unknown.
+        const missed = r.code !== 0 && /key not found/i.test(`${r.stdout}${r.stderr}`);
+        return { ok: r.code === 0 || missed, found: r.code === 0 && r.stdout.includes(value) };
+      },
+    },
+    mcp: (calls) => callMcpTools({ ...launch, calls, timeoutMs: 120_000 }),
+    locate: (key) => {
+      const store = findMemoryEntry(tmp, routeNamespace, key);
+      return store ? path.basename(store.file) : null;
+    },
+  });
+}
+
+export async function observeProjectMemoryRoutes(tmp, env, namespace, deps) {
+  try {
+    const observation = await probeProjectMemoryRoutes(tmp, env, namespace, deps);
+    for (const { level, message } of describeMemoryRoutes(observation)) (level === 'ok' ? ok : warn)(message);
+  } catch (e) {
+    // An observation problem must never turn a working CLI proof into a failure.
+    warn(`cross-interface routing not observed: ${e.message}`);
+  }
+}
+
+// The CLI mirrors a `memory store` into memory.db and agentdb-memory.db, but a
+// default `ruflo memory purge` clears memory.db only and still reports success
+// (observed on 3.42.4 and 3.45.0), so the mirrored row outlives it. Say so, then
+// clear that store by the documented --path so the proof namespace never
+// outlives the isolated directory's contract.
+async function purgeProofNamespace(tmp, env, namespace, key) {
+  const purge = (extra = []) => runCmd('ruflo',
+    ['memory', 'purge', '--namespace', namespace, '--force', ...extra],
+    { cwd: tmp, env, timeout: 120_000 });
+  if ((await purge()).code !== 0) return false;
+  const residue = findMemoryEntry(tmp, namespace, key);
+  if (!residue) return true;
+  warn(`default purge left the proof row in ${path.basename(residue.file)} while reporting success; clearing it with --path`);
+  return (await purge(['--path', residue.file])).code === 0 && !findMemoryEntry(tmp, namespace, key);
+}
+
+/** `observeRoutes: false` keeps the quick `ak status --live` check to the CLI
+ *  proof: the route observation starts a real MCP server and can only add
+ *  warnings, which a live-check record does not carry. */
+async function verifyMemory({ observeRoutes = true } = {}) {
+  heading('memory — store, retrieve, locate the on-disk row, purge, and observe CLI/MCP routing in an isolated dir');
   if (!(await have('ruflo'))) { fail('ruflo CLI not installed — cannot prove project memory'); return false; }
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agentic-kit-memory-'));
   const namespace = `agentic-kit-verify-${process.pid}-${Date.now()}`;
   const key = 'roundtrip';
   const value = `memory-proof-${process.pid}-${Date.now()}`;
+  // The native store follows the memory root (CLAUDE_FLOW_MEMORY_PATH), not the
+  // DB-path pin: without an isolated root a user's own memory root would
+  // receive the proof rows. Ruflo's CLI does not read AGENTDB_PATH.
   const env = projectMemoryEnv(tmp, {
     RUFLO_DAEMON_AUTOSTART: '0',
+    CLAUDE_FLOW_MEMORY_PATH: path.join(fs.realpathSync(tmp), '.swarm'),
   });
   let stored = false;
   let purged = false;
@@ -109,12 +174,10 @@ async function verifyMemory() {
     if (!landed) { fail('stored value was not observable in either supported project DB'); return false; }
     ok(`on-disk row confirmed in ${path.basename(landed.file)} (${landed.kind})`);
 
-    const purge = await runCmd('ruflo',
-      ['memory', 'purge', '--namespace', namespace, '--force'],
-      { cwd: tmp, env, timeout: 120_000 });
-    purged = purge.code === 0 && !findMemoryEntry(tmp, namespace, key);
+    purged = await purgeProofNamespace(tmp, env, namespace, key);
     if (!purged) { fail('isolated namespace purge did not remove the proof row'); return false; }
     ok('isolated proof namespace purged');
+    if (observeRoutes) await observeProjectMemoryRoutes(tmp, env, namespace);
     return true;
   } catch (e) {
     fail(`memory verify error: ${e.message}`);
@@ -476,7 +539,7 @@ const LIVE_CHECKS = Object.freeze([
   { id: 'providers', applies: () => true, run: () => verifyProviders() },
   { id: 'security', applies: (cfg) => cfg.security !== false, run: () => verifySecurity() },
   { id: 'deja-vu', applies: (cfg) => dejaVuProofApplies(cfg), run: ({ cfg }) => verifyDejaVu({ cfg }) },
-  { id: 'memory', applies: () => true, run: () => verifyMemory() },
+  { id: 'memory', applies: () => true, run: () => verifyMemory({ observeRoutes: false }) },
 ]);
 
 /** The live checks that apply to this configuration. */

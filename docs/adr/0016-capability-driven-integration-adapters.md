@@ -8,6 +8,8 @@
   `ruflo`-keyed Claude registration is agentic-kit's own (user scope, `ruflo mcp start`, env limited
   to `AGENT_BROWSER_CONFIG`); status and `register()` share it, so any other user-scope form is
   reported as preserved with its manual removal command instead of a sync migration (#237).
+- **Updated:** 2026-09-26 — memory route verification across CLI and MCP (issue #213); see
+  "Amendment — 2026-09-26: project memory" at the end.
 - **Earlier update:** 2026-09-23 — the Claude memory pin is receipt-owned and removed by uninstall (ADR-0058).
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Earlier update:** 2026-09-02
@@ -298,7 +300,12 @@ encrypted) `.swarm/memory.db` while writing native plaintext rows to the sibling
 compatibility store may coexist without representing drift. Read-only status identifies the active
 writer and counts observable entries. Setup and `ak x verify memory` prove persistence by storing
 a disposable row, locating it in the runtime-selected store, retrieving it through the real CLI,
-and removing it. File or package presence alone is never reported as a persistence proof.
+and removing it. The CLI mirrors a write into both files while a default `ruflo memory purge`
+clears only `memory.db`, so `ak x verify memory` also clears its throwaway project's sibling store
+by `--path`. It then observes, in that isolated project only, whether a CLI write is readable
+through MCP and the reverse; a split is reported as a warning and an unusable MCP server as "not
+observed", never as a failure or as alignment. `ak status --live` runs only the CLI proof. File or
+package presence alone is never reported as a persistence proof.
 Claude carries the absolute compatibility path in project settings. Codex's user-scoped MCP entry
 uses an agentic-kit launcher that derives the same absolute pin from each runtime workspace;
 agentic-kit migrates only a legacy entry it previously registered and preserves user-owned Codex
@@ -588,3 +595,8 @@ The registries, lifecycle conformance suite, compatibility fixtures, consumer mi
 structural proving integrations are implemented and tested, so this ADR is **Accepted**. That
 status does not advance ADR-0011: local-model runtime evidence and usage behavior remain Proposed
 work under ADR-0011's own validation requirements.
+
+## Amendment — 2026-09-26: project memory
+
+- **Memory route verification (issue #213).** `ak x verify memory` observes CLI and MCP
+  project-memory routing in its isolated project and clears its proof row from every store there.

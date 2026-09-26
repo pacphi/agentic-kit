@@ -1,6 +1,12 @@
-// One project-memory launch contract for every host. Ruflo accepts the
-// compatibility path through CLAUDE_FLOW_DB_PATH; its native AgentDB bridge
-// may derive and write the sibling agentdb-memory.db from that same project.
+// One project-memory launch contract for every host. CLAUDE_FLOW_DB_PATH is
+// read only by the `ruflo memory ...` CLI (it selects the memory.db file). The
+// MCP memory_* tools never read it: the native AgentDB bridge derives
+// agentdb-memory.db from the memory root (CLAUDE_FLOW_MEMORY_PATH, else
+// <cwd>/.swarm). The two land in one directory only because this contract pins
+// the cwd to the project root and the pin sits in <root>/.swarm
+// (@claude-flow/cli memory-initializer.js resolveDbPath/getMemoryRoot and
+// memory-bridge.js getAgentDbPath, 3.45.0). `ak x verify memory` observes
+// which interface sees which write.
 import fs from 'node:fs';
 import * as paths from './paths.mjs';
 import { loadKitConfig } from './config.mjs';
