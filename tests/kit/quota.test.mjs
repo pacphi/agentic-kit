@@ -10,6 +10,7 @@ import { EventEmitter } from 'node:events';
 import {
   windowLabel, normalizeClaudeLimits, normalizeCodexLimits, readClaudeLimits,
   collectCodexLimits, CODEX_TTL_MS, unsupportedQuotaHosts, readLimits,
+  classifyClaudeTeeChannel, CLAUDE_TEE_CHANNELS,
 } from '../../src/lib/quota.mjs';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ak-quota-'));
@@ -73,6 +74,104 @@ test('readClaudeLimits returns null for a missing or corrupt tee file', () => {
   const bad = path.join(dir, 'bad.json');
   fs.writeFileSync(bad, '{not json');
   assert.equal(readClaudeLimits({ file: bad }), null);
+});
+
+// ── classifyClaudeTeeChannel — which statusLine could feed the tee (#238 M3) ─
+//
+// The tee lives only inside the kit footer (`ruflo-seg:BEGIN`) that sync injects
+// into a ruflo helper. A user-level statusLine that runs some other script can
+// never write claude-rate-limits.json, and the Limits panel used to hide that.
+// Every case below points the classifier at a temp settings file: the default
+// (the real ~/.claude/settings.json) is never read by a test.
+
+const FOOTER_SCRIPT = '#!/usr/bin/env node\n/* ruflo-seg:BEGIN */\nfunction rufloQuotaTeeSegment(){}\n/* ruflo-seg:END */\n';
+const FOREIGN_SCRIPT = '#!/usr/bin/env node\nconsole.log("my own statusline");\n';
+
+/** A temp home with one settings file and optional scripts; returns paths. */
+function teeFixture({ statusLine, raw, scripts = {} } = {}) {
+  const home = tmp();
+  const settingsFile = path.join(home, '.claude', 'settings.json');
+  fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
+  for (const [rel, body] of Object.entries(scripts)) {
+    const file = path.join(home, rel);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, body);
+  }
+  if (raw !== undefined) fs.writeFileSync(settingsFile, raw);
+  else if (statusLine !== undefined) fs.writeFileSync(settingsFile, JSON.stringify({ statusLine }));
+  return { home, settingsFile };
+}
+const cmd = (command) => ({ type: 'command', command });
+
+test('classifyClaudeTeeChannel: no settings file or no statusLine is "none"', () => {
+  const { home, settingsFile } = teeFixture();
+  assert.equal(classifyClaudeTeeChannel({ settingsFile, home }), 'none', 'absent settings file');
+  const empty = teeFixture({ raw: JSON.stringify({ model: 'x' }) });
+  assert.equal(classifyClaudeTeeChannel({ settingsFile: empty.settingsFile, home: empty.home }), 'none');
+  const noCommand = teeFixture({ statusLine: { type: 'command' } });
+  assert.equal(classifyClaudeTeeChannel({ settingsFile: noCommand.settingsFile, home: noCommand.home }), 'none');
+});
+
+test('classifyClaudeTeeChannel: an unreadable settings file is "unknown", never a guess', () => {
+  const { home, settingsFile } = teeFixture({ raw: '{not json' });
+  assert.equal(classifyClaudeTeeChannel({ settingsFile, home }), 'unknown');
+});
+
+test('classifyClaudeTeeChannel: a script carrying the kit footer is "kit-footer"', () => {
+  const abs = teeFixture({ scripts: { '.claude/helpers/statusline.cjs': FOOTER_SCRIPT } });
+  const script = path.join(abs.home, '.claude', 'helpers', 'statusline.cjs');
+  fs.writeFileSync(abs.settingsFile, JSON.stringify({ statusLine: cmd(`node ${script}`) }));
+  assert.equal(classifyClaudeTeeChannel({ settingsFile: abs.settingsFile, home: abs.home }), 'kit-footer');
+  // Home-relative spellings resolve against the injected home.
+  for (const spelling of ['~/.claude/helpers/statusline.cjs', '$HOME/.claude/helpers/statusline.cjs',
+    '${HOME}/.claude/helpers/statusline.cjs', '"$HOME/.claude/helpers/statusline.cjs"']) {
+    fs.writeFileSync(abs.settingsFile, JSON.stringify({ statusLine: cmd(`node ${spelling}`) }));
+    assert.equal(classifyClaudeTeeChannel({ settingsFile: abs.settingsFile, home: abs.home }), 'kit-footer', spelling);
+  }
+});
+
+test('classifyClaudeTeeChannel: a quoted script path containing spaces is still read', () => {
+  const fx = teeFixture({ scripts: { 'My Tools/status line.cjs': FOOTER_SCRIPT } });
+  const script = path.join(fx.home, 'My Tools', 'status line.cjs');
+  fs.writeFileSync(fx.settingsFile, JSON.stringify({ statusLine: cmd(`node "${script}"`) }));
+  assert.equal(classifyClaudeTeeChannel({ settingsFile: fx.settingsFile, home: fx.home }), 'kit-footer');
+});
+
+test('classifyClaudeTeeChannel: a foreign statusline script is "custom" (the #238 reporter shape)', () => {
+  const fx = teeFixture({ scripts: { '.cache/ruvnet-brain/ruvnet-brain-statusline.cjs': FOREIGN_SCRIPT } });
+  fs.writeFileSync(fx.settingsFile, JSON.stringify({
+    statusLine: cmd('node ~/.cache/ruvnet-brain/ruvnet-brain-statusline.cjs'),
+  }));
+  assert.equal(classifyClaudeTeeChannel({ settingsFile: fx.settingsFile, home: fx.home }), 'custom');
+  // An inline command, a missing script, and a non-file target are custom too:
+  // none of them can run the footer's tee.
+  for (const command of ['echo "hello"', 'node ~/nowhere/statusline.cjs', `node ${fx.home}`]) {
+    fs.writeFileSync(fx.settingsFile, JSON.stringify({ statusLine: cmd(command) }));
+    assert.equal(classifyClaudeTeeChannel({ settingsFile: fx.settingsFile, home: fx.home }), 'custom', command);
+  }
+});
+
+test('classifyClaudeTeeChannel: the ruflo project-helper command is "project-helper"', () => {
+  // The exact POSIX and Windows forms ruflo 3.45.0 writes
+  // (@claude-flow/cli dist/src/init/settings-generator.js generateStatusLineConfig):
+  // which script runs depends on the project each session starts in.
+  const posix = 'sh -c \'D="${CLAUDE_PROJECT_DIR:-.}"; [ -f "$D/.claude/helpers/statusline.cjs" ] || D="${HOME}"; exec node "$D/.claude/helpers/statusline.cjs"\'';
+  const win32 = 'node -e "const fs=require(\'fs\'),p=require(\'path\');const d=process.env.CLAUDE_PROJECT_DIR||\'.\';const f=p.join(d,\'.claude/helpers/statusline.cjs\');const h=p.join(process.env.USERPROFILE||process.env.HOME||\'.\', \'.claude/helpers/statusline.cjs\');require(fs.existsSync(f)?f:h);"';
+  for (const command of [posix, win32]) {
+    const fx = teeFixture({ statusLine: cmd(command) });
+    assert.equal(classifyClaudeTeeChannel({ settingsFile: fx.settingsFile, home: fx.home }), 'project-helper', command);
+  }
+});
+
+test('classifyClaudeTeeChannel returns only a class — never a path', () => {
+  const fx = teeFixture({ scripts: { 'private-dir/statusline.cjs': FOREIGN_SCRIPT } });
+  fs.writeFileSync(fx.settingsFile, JSON.stringify({
+    statusLine: cmd(`node ${path.join(fx.home, 'private-dir', 'statusline.cjs')}`),
+  }));
+  const out = classifyClaudeTeeChannel({ settingsFile: fx.settingsFile, home: fx.home });
+  assert.ok(CLAUDE_TEE_CHANNELS.includes(out), `unexpected class ${out}`);
+  assert.equal(typeof out, 'string');
+  assert.ok(!JSON.stringify(out).includes(fx.home), 'the class must not carry the script path');
 });
 
 // ── Codex normalizer (GetAccountRateLimitsResponse, pinned to a LIVE answer) ─
@@ -284,13 +383,15 @@ test('readLimits: claude/codex outputs are byte-identical whether or not others 
   const claudeFile = path.join(dir, 'claude-rate-limits.json');
   fs.writeFileSync(claudeFile, JSON.stringify(CLAUDE_TEE));
   const codexCacheFile = path.join(dir, 'codex-rate-limits.json');
+  const claudeSettingsFile = path.join(dir, 'settings.json');
 
   const withoutOthers = await readLimits({
-    now: 1000, claudeFile, codexCacheFile, spawnImpl: fakeSpawn(CODEX_RESP),
+    now: 1000, claudeFile, codexCacheFile, spawnImpl: fakeSpawn(CODEX_RESP), claudeSettingsFile,
   });
   const withOthers = await readLimits({
     now: 1000, claudeFile, codexCacheFile: path.join(dir, 'codex-rate-limits-2.json'),
     spawnImpl: fakeSpawn(CODEX_RESP), enabledHosts: { claude: true, codex: true, opencode: true },
+    claudeSettingsFile,
   });
 
   assert.deepEqual(withOthers.claude, withoutOthers.claude);
@@ -305,6 +406,19 @@ test('readLimits defaults to no unsupported-host labels when enabledHosts is not
   const out = await readLimits({
     now: 1000, claudeFile: path.join(tmp(), 'absent.json'),
     codexCacheFile: path.join(tmp(), 'codex.json'), spawnImpl: failSpawn,
+    claudeSettingsFile: path.join(tmp(), 'settings.json'),
   });
   assert.deepEqual(out.others, []);
+});
+
+test('readLimits carries the Claude tee channel class beside an unchanged claude field', async () => {
+  const fx = teeFixture({ scripts: { 'brain.cjs': FOREIGN_SCRIPT } });
+  fs.writeFileSync(fx.settingsFile, JSON.stringify({ statusLine: cmd('node ~/brain.cjs') }));
+  const out = await readLimits({
+    now: 1000, claudeFile: path.join(tmp(), 'absent.json'),
+    codexCacheFile: path.join(tmp(), 'codex.json'), spawnImpl: failSpawn,
+    claudeSettingsFile: fx.settingsFile, home: fx.home,
+  });
+  assert.equal(out.claude, null, 'no tee file still reads as null — the claude contract is unchanged');
+  assert.equal(out.claudeChannel, 'custom');
 });

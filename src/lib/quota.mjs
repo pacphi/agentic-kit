@@ -29,9 +29,10 @@
 // `primary.windowDurationMins = 10080` (the weekly) and `secondary = null`.
 // Everything here therefore keys windows on their DURATION, never their slot.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { configDir } from './paths.mjs';
+import { configDir, claudeSettingsPath } from './paths.mjs';
 import { managedHostIds } from './adapters/registries.mjs';
 
 export const claudeLimitsFile = () => path.join(configDir(), 'claude-rate-limits.json');
@@ -101,6 +102,90 @@ export function normalizeClaudeLimits(raw) {
 export function readClaudeLimits({ file = claudeLimitsFile() } = {}) {
   try { return normalizeClaudeLimits(JSON.parse(fs.readFileSync(file, 'utf8'))); }
   catch { return null; }
+}
+
+// ── Claude tee channel (read-only; #238 M3) ─────────────────────────────────
+//
+// The tee exists only inside the kit footer that sync injects into a ruflo
+// statusline helper (it needs that template's own stdin reader). Whether an
+// empty Claude panel can ever fill therefore depends on which statusLine a
+// session runs, and Claude Code resolves that by precedence: managed, then
+// command line, then the project's .claude/settings.local.json, then its
+// .claude/settings.json, then the user's ~/.claude/settings.json
+// (code.claude.com/docs/en/settings). The dashboard cannot know which project
+// the next session starts in, so it classifies the USER-level statusLine, the
+// one every project without its own inherits, and lets the panel state the
+// precedence rule beside the class.
+//
+// Read-only and path-free: this reads the settings file and, at most, the
+// script files the command names (stat first; regular files under a size cap),
+// and returns ONLY a class — never the command or a path. No file is written,
+// so ADR-0010's single sanctioned channel is unchanged.
+
+/** Every class classifyClaudeTeeChannel can return. */
+export const CLAUDE_TEE_CHANNELS = Object.freeze(['none', 'kit-footer', 'project-helper', 'custom', 'unknown']);
+const KIT_FOOTER_MARKER = 'ruflo-seg:BEGIN';
+const MAX_STATUSLINE_SCRIPT_BYTES = 4 * 1024 * 1024;
+const MAX_STATUSLINE_SCRIPTS = 8;
+// A script the command names: double-quoted, single-quoted (both may hold
+// spaces), or a bare token. Only the JavaScript family, since the tee is JS.
+const STATUSLINE_SCRIPT_TOKEN = /"([^"]*?\.[cm]?js)"|'([^']*?\.[cm]?js)'|([^\s"'`;|&()=,]+?\.[cm]?js)(?![\w.])/g;
+const HOME_PREFIX = /^(?:~|\$HOME|\$\{HOME\}|%USERPROFILE%|%HOME%)(?=[\\/]|$)/;
+// The one project-relative script the kit injects into (fixStatusline).
+const PROJECT_HELPER_SUFFIX = '.claude/helpers/statusline.cjs';
+
+function statusLineScripts(command) {
+  const out = [];
+  for (const m of command.matchAll(STATUSLINE_SCRIPT_TOKEN)) {
+    const token = (m[1] ?? m[2] ?? m[3] ?? '').trim();
+    if (token && !out.includes(token)) out.push(token);
+    if (out.length >= MAX_STATUSLINE_SCRIPTS) break;
+  }
+  return out;
+}
+
+function scriptCarriesFooter(file, fsImpl) {
+  try {
+    const st = fsImpl.statSync(file);
+    if (!st.isFile() || st.size > MAX_STATUSLINE_SCRIPT_BYTES) return false;
+    return fsImpl.readFileSync(file, 'utf8').includes(KIT_FOOTER_MARKER);
+  } catch { return false; }
+}
+
+/** One named script → 'kit-footer' | 'project-helper' | 'custom'. A path that
+ *  stays relative (after home expansion) resolves against each session's
+ *  project, so only the helper the kit injects into can carry the footer. */
+function scriptChannel(token, { fsImpl, home }) {
+  const expanded = token.replace(HOME_PREFIX, () => home);
+  const projectRelative = /CLAUDE_PROJECT_DIR/.test(expanded) || /^\$\{?D\}?[\\/]/.test(expanded)
+    || !(path.isAbsolute(expanded) || path.win32.isAbsolute(expanded));
+  if (projectRelative) {
+    return expanded.replace(/\\/g, '/').endsWith(PROJECT_HELPER_SUFFIX) ? 'project-helper' : 'custom';
+  }
+  return scriptCarriesFooter(expanded, fsImpl) ? 'kit-footer' : 'custom';
+}
+
+/**
+ * Classify the user-level Claude statusLine by whether it can feed the quota
+ * tee: 'none' (no user-level statusLine), 'kit-footer' (its script carries the
+ * footer), 'project-helper' (it runs each project's ruflo helper, so it depends
+ * on the project), 'custom' (anything else: another script, an inline command,
+ * a missing file), or 'unknown' (the settings file exists but cannot be read).
+ *
+ * @param {{ settingsFile?: string, fsImpl?: any, home?: string }} [o]
+ * @returns {'none'|'kit-footer'|'project-helper'|'custom'|'unknown'}
+ */
+export function classifyClaudeTeeChannel({
+  settingsFile = claudeSettingsPath(), fsImpl = fs, home = os.homedir(),
+} = {}) {
+  let settings;
+  try { settings = JSON.parse(fsImpl.readFileSync(settingsFile, 'utf8')); }
+  catch (error) { return error?.code === 'ENOENT' ? 'none' : 'unknown'; }
+  const command = settings?.statusLine?.command;
+  if (typeof command !== 'string' || !command.trim()) return 'none';
+  const classes = statusLineScripts(command).map((token) => scriptChannel(token, { fsImpl, home }));
+  if (classes.includes('kit-footer')) return 'kit-footer';
+  return classes.includes('project-helper') ? 'project-helper' : 'custom';
 }
 
 // ── Codex (app-server) ──────────────────────────────────────────────────────
@@ -309,19 +394,24 @@ export function unsupportedQuotaHosts({ enabledHosts = {} } = {}) {
  * model); Codex may spawn one vendor subprocess, TTL-bounded. `others` lists
  * any additional enabled host with no sanctioned quota channel (F-10);
  * omitting `enabledHosts` (the default) leaves it empty, so claude/codex
- * output is unchanged unless a caller opts in.
+ * output is unchanged unless a caller opts in. `claudeChannel` is the
+ * user-level statusLine's class (classifyClaudeTeeChannel), a sibling of
+ * `claude` so that field keeps its null-or-windows contract.
  *
  * @param {{ now?: number, claudeFile?: string, codexCacheFile?: string, ttlMs?: number,
  *           timeoutMs?: number, spawnImpl?: any, bin?: string,
- *           enabledHosts?: Record<string, boolean> }} [o]
+ *           enabledHosts?: Record<string, boolean>,
+ *           claudeSettingsFile?: string, home?: string }} [o]
  */
 export async function readLimits({
   now = Date.now(), claudeFile, codexCacheFile, ttlMs, timeoutMs, spawnImpl, bin, enabledHosts,
+  claudeSettingsFile, home,
 } = {}) {
   const claude = readClaudeLimits({ file: claudeFile ?? claudeLimitsFile() });
+  const claudeChannel = classifyClaudeTeeChannel({ settingsFile: claudeSettingsFile ?? claudeSettingsPath(), home });
   const codex = await collectCodexLimits({
     ttlMs, cacheFile: codexCacheFile ?? codexLimitsFile(), now, timeoutMs, spawnImpl, bin,
   });
   const others = unsupportedQuotaHosts({ enabledHosts });
-  return { generatedAt: new Date(now).toISOString(), claude, codex, others };
+  return { generatedAt: new Date(now).toISOString(), claude, claudeChannel, codex, others };
 }

@@ -1,5 +1,7 @@
 # ADR-0010 — Provider-mediated quota reads (the Limits view)
 
+- **Updated:** 2026-09-26 — the Limits view names why the Claude side is empty (a read-only,
+  path-free class of the user-level statusLine; #238)
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 Date: 2026-07-27 · Status: **Accepted** · Amends: ADR-0009 §3
 
@@ -14,6 +16,14 @@ qualifies `rate_limits` availability by plan/gateway and first response; it is n
 present in every invocation. The kit tee requires quota data and is a latest-writer
 cache, not durable per-session context history. Broader Dashboard update checks
 are described by ADR-0005; this quota adapter never reads vendor credentials.
+
+**Amendment (2026-09-26, #238).** The tee exists only in the kit footer that `ak sync` injects
+into a Ruflo statusline helper, and Claude Code picks the statusLine by precedence (managed,
+command line, project local, shared project, user). `/api/limits` therefore carries
+`claudeChannel`: the class of the user-level statusLine (`none`, `kit-footer`,
+`project-helper`, `custom`, `unknown`) from a read of the settings file and the script it
+names. It returns no path and writes nothing, so this adds no channel; the Claude panel uses it
+to say why it is empty and which project-level setup fills it.
 
 ## Context
 

@@ -525,7 +525,7 @@ ${HOST_PARTICIPATION_HTML}
     <section class="view" id="v-limits" role="tabpanel" aria-labelledby="usage-tab-limits" hidden>
       <div class="note"><span class="i">&#8505;</span><span>Utilization here is <b>vendor-reported</b> &mdash;
         the plan&rsquo;s own percentages, a denominator local transcripts cannot compute.
-        Claude&rsquo;s numbers arrive via the managed statusLine while a session runs; Codex&rsquo;s come from
+        Claude&rsquo;s numbers arrive through the kit footer in the statusLine a session runs; Codex&rsquo;s come from
         <b>codex app-server</b> using codex&rsquo;s own login. This panel reads no vendor credential.</span></div>
       <div class="two">
         <section class="strip">

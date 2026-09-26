@@ -302,6 +302,11 @@ it describes, or a browser clock that disagrees with the vendor's — the tick i
 pinned to either end, because a mark at 0% or 100% would state a position the data cannot support.
 The legend appears only when at least one row actually carries a tick.
 
+Claude's limits reach the dashboard only through the kit footer in the statusline a session runs,
+and a project's own statusLine takes precedence over your user-level one. When the Claude side is
+empty it says what your user-level statusLine is (none, the kit footer, each project's Ruflo
+helper, or a custom script) and what fills the panel, without showing the script's path.
+
 ### Prompts
 
 Prompts turns the entries classified as human-typed into repetition and habit signals,
