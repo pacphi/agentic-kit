@@ -37,8 +37,7 @@ import { reconcileAqeEmbeddingProjections } from '../lib/aqe-embedding-projectio
 import * as rb from '../lib/ruvnet-brain.mjs';
 import { ensureAgentBrowser } from '../lib/agent-browser.mjs';
 import { readJson, writeJsonWithBackup } from '../lib/settings.mjs';
-import { withDb } from '../lib/sqlite.mjs';
-import { findMemoryEntry } from '../lib/project-memory.mjs';
+import { findMemoryEntry, removeMemoryProbe } from '../lib/project-memory.mjs';
 import { projectMemoryEnv } from '../lib/ruflo-memory.mjs';
 import { reconcileMemoryPin } from '../lib/claude-env-projection.mjs';
 import { reconcileRufloComponents } from '../lib/ruflo-components/apply.mjs';
@@ -575,25 +574,21 @@ async function startProjectDaemon(root) {
 }
 
 /** Step 7: write-verification (store → actual on-disk row, then clean up).
- *  Native memory integrations may select agentdb-memory.db beside the pinned
- *  compatibility DB. */
-async function verifyProjectMemoryWrite(root, env) {
+ *  The CLI mirrors the write into agentdb-memory.db beside the pinned
+ *  memory.db, so the probe is removed from every store that holds it; this is
+ *  the user's real corpus, so nothing of the probe may be left behind. */
+export async function verifyProjectMemoryWrite(root, env, { runner = runCmd } = {}) {
   const probeKey = `_setup/verify-${process.pid}-${Date.now()}`;
-  const stored = (await runCmd('ruflo', ['memory', 'store', '-k', probeKey, '--value', 'setup-verify', '-n', '_setup'], { cwd: root, env })).code === 0;
+  const stored = (await runner('ruflo', ['memory', 'store', '-k', probeKey, '--value', 'setup-verify', '-n', '_setup'], { cwd: root, env })).code === 0;
   const landed = stored ? findMemoryEntry(root, '_setup', probeKey) : null;
-  if (landed) {
-    // Bound parameters, not interpolation. Delete only this disposable probe
-    // from the store that actually received it.
-    const cleanup = withDb(landed.file, (db) => {
-      db.prepare('DELETE FROM memory_entries WHERE namespace = ? AND key = ?').run('_setup', probeKey);
-      db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
-      return true;
-    }, { readonly: false });
-    if (cleanup.ok) ok(`memory write VERIFIED (store → ${path.basename(landed.file)} row confirmed)`);
-    else warn(`memory write verified, but probe cleanup ${cleanup.error.kind} — remove ${probeKey} from _setup manually`);
-  } else {
+  if (!landed) {
     fail('memory write verification FAILED — run: ak status / ruflo doctor -c memory');
+    return;
   }
+  const cleanup = removeMemoryProbe(root, '_setup', probeKey);
+  if (cleanup.failed.length) {
+    warn(`memory write verified, but probe cleanup failed in ${cleanup.failed.map((f) => `${path.basename(f.file)} (${f.kind})`).join(', ')} — remove ${probeKey} from _setup manually`);
+  } else ok(`memory write VERIFIED (store → ${path.basename(landed.file)} row confirmed)`);
 }
 
 function reportProjectGuidance(result) {

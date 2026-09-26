@@ -8,8 +8,8 @@
   `ruflo`-keyed Claude registration is agentic-kit's own (user scope, `ruflo mcp start`, env limited
   to `AGENT_BROWSER_CONFIG`); status and `register()` share it, so any other user-scope form is
   reported as preserved with its manual removal command instead of a sync migration (#237).
-- **Updated:** 2026-09-26 — memory route verification and release-gated routing claims
-  (issue #213); see "Amendment — 2026-09-26: project memory" at the end.
+- **Updated:** 2026-09-26 — memory route verification, release-gated routing claims and setup
+  probe cleanup (issue #213); see "Amendment — 2026-09-26: project memory" at the end.
 - **Earlier update:** 2026-09-23 — the Claude memory pin is receipt-owned and removed by uninstall (ADR-0058).
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Earlier update:** 2026-09-02
@@ -301,10 +301,12 @@ representing drift. Read-only status names both files and counts observable entr
 interface reads which store (CLI `memory.db`, MCP `agentdb-memory.db` with the native bridge) only
 for the exact `@claude-flow/cli` release and platform where that was observed, and otherwise leaves
 routing unverified. Setup and `ak x verify memory` prove persistence by storing
-a disposable row, locating it in the runtime-selected store, retrieving it through the real CLI,
-and removing it. The CLI mirrors a write into both files while a default `ruflo memory purge`
-clears only `memory.db`, so `ak x verify memory` also clears its throwaway project's sibling store
-by `--path`. It then observes, in that isolated project only, whether a CLI write is readable
+a disposable row and locating it on disk (`ak x verify memory` also retrieves it through the real
+CLI), then remove it from every store that holds it, because the CLI mirrors a write into both
+files. Setup deletes its `_setup/verify-*` row from both files of the real project with bound
+parameters (Ruflo's `memory delete` only tombstones a row) and names any store it could not clean
+for manual removal. A default `ruflo memory purge` clears only `memory.db`, so `ak x verify memory`
+also clears its throwaway project's sibling store by `--path`. It then observes, in that isolated project only, whether a CLI write is readable
 through MCP and the reverse; a split is reported as a warning and an unusable MCP server as "not
 observed", never as a failure or as alignment. `ak status --live` runs only the CLI proof. File or
 package presence alone is never reported as a persistence proof.
@@ -604,3 +606,5 @@ work under ADR-0011's own validation requirements.
   project-memory routing in its isolated project and clears its proof row from every store there.
 - **Status routing claims (issue #213).** Status states the routing only for an observed Ruflo
   release and platform.
+- **Setup probe cleanup (issue #213).** Setup removes its write probe from every store,
+  correcting the earlier "active writer" wording.

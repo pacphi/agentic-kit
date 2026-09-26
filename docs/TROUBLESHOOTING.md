@@ -263,6 +263,12 @@ currently 3.42.4 and 3.45.0 on macOS, and keeps routing unverified everywhere el
   MCP and the reverse.
 
 A newer release is not evidence of a fix until `ak x verify memory` shows it.
+Maintainers can run `pnpm run test:ruflo-memory-live` to check the claim against the
+installed Ruflo.
+
+`ak setup` proves a memory write in the real project with a `_setup/verify-*` row and
+deletes that row from both files. If a store cannot be cleaned (for example, a live
+writer holds it), setup names the store and the key to remove by hand.
 
 `ak x verify memory` runs in a throwaway project with its own memory root. After its
 CLI store, retrieve and purge proof, it writes one key through the CLI and one through

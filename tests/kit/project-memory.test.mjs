@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import {
-  findMemoryEntry, memoryEntryExists, projectMemoryStatus,
+  findMemoryEntry, memoryEntryExists, projectMemoryStatus, removeMemoryProbe,
 } from '../../src/lib/project-memory.mjs';
 
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-project-memory-'));
@@ -77,3 +77,70 @@ test('an unreadable native sibling is surfaced instead of falling back silently'
 });
 
 test.after(() => fs.rmSync(ROOT, { recursive: true, force: true }));
+
+test('removeMemoryProbe deletes the probe from every store that holds it and nothing else', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-probe-remove-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const compat = path.join(root, '.swarm', 'memory.db');
+  const native = path.join(root, '.swarm', 'agentdb-memory.db');
+  seed(compat, [['1', 'probe', '_setup', 'v'], ['2', 'keep', '_setup', 'v']]);
+  seed(native, [['3', 'probe', '_setup', 'v'], ['4', 'keep', '_setup', 'v']]);
+  const result = removeMemoryProbe(root, '_setup', 'probe');
+  assert.deepEqual(result.removed.sort(), ['agentdb-memory.db', 'memory.db']);
+  assert.deepEqual(result.failed, []);
+  for (const file of [compat, native]) {
+    assert.equal(memoryEntryExists(file, '_setup', 'probe'), false, `${path.basename(file)} still holds the probe`);
+    assert.equal(memoryEntryExists(file, '_setup', 'keep'), true, `${path.basename(file)} lost an unrelated row`);
+  }
+});
+
+test('removeMemoryProbe removes a tombstoned probe row too, so nothing of it is left', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-probe-remove-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const native = path.join(root, '.swarm', 'agentdb-memory.db');
+  seed(native, [['1', 'probe', '_setup', 'v', 'deleted']]);
+  assert.deepEqual(removeMemoryProbe(root, '_setup', 'probe').removed, ['agentdb-memory.db']);
+  assert.equal(memoryEntryExists(native, '_setup', 'probe'), false);
+});
+
+test('removeMemoryProbe leaves a store that never held the probe untouched', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-probe-remove-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const compat = path.join(root, '.swarm', 'memory.db');
+  const native = path.join(root, '.swarm', 'agentdb-memory.db');
+  seed(compat, [['1', 'probe', '_setup', 'v']]);
+  seed(native, [['2', 'other', '_setup', 'v']]);
+  const before = fs.statSync(native).mtimeMs;
+  const result = removeMemoryProbe(root, '_setup', 'probe');
+  assert.deepEqual(result.removed, ['memory.db']);
+  assert.equal(fs.statSync(native).mtimeMs, before, 'a store without the probe is not opened for writing');
+});
+
+test('removeMemoryProbe reports an unreadable store instead of pretending it was clean', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-probe-remove-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const compat = path.join(root, '.swarm', 'memory.db');
+  seed(compat, [['1', 'probe', '_setup', 'v']]);
+  fs.writeFileSync(path.join(root, '.swarm', 'agentdb-memory.db'), 'not a database');
+  const result = removeMemoryProbe(root, '_setup', 'probe');
+  assert.deepEqual(result.removed, ['memory.db']);
+  assert.deepEqual(result.failed.map((f) => path.basename(f.file)), ['agentdb-memory.db']);
+});
+
+test('a store with no memory table cannot hold the probe and is not a cleanup failure', (t) => {
+  // `ruflo memory init` creates agentdb-memory.db without memory_entries; only a
+  // write through the native bridge adds it (observed on 3.45.0).
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-probe-remove-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  seed(path.join(root, '.swarm', 'memory.db'), [['1', 'probe', '_setup', 'v']]);
+  const native = new DatabaseSync(path.join(root, '.swarm', 'agentdb-memory.db'));
+  native.exec('CREATE TABLE episodes (id INTEGER PRIMARY KEY)');
+  native.close();
+  assert.deepEqual(removeMemoryProbe(root, '_setup', 'probe'), { removed: ['memory.db'], failed: [] });
+});
+
+test('removeMemoryProbe on a project with no stores is a clean no-op', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-probe-remove-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  assert.deepEqual(removeMemoryProbe(root, '_setup', 'probe'), { removed: [], failed: [] });
+});

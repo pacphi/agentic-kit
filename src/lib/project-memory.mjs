@@ -3,6 +3,7 @@
 // Both are legitimate. `active` is a historical preferred-display field, not
 // evidence of the actual writer or which corpus a CLI/MCP invocation selects.
 import fs from 'node:fs';
+import path from 'node:path';
 import * as paths from './paths.mjs';
 import { withDb } from './sqlite.mjs';
 
@@ -40,13 +41,15 @@ export function projectMemoryStatus(root) {
   return { active, secondary, stores: [sqljs, native] };
 }
 
+const lookupEntry = (file, namespace, key) => withDb(file, (db) => {
+  const row = db.prepare(
+    'SELECT 1 AS found FROM memory_entries WHERE namespace = ? AND key = ? LIMIT 1',
+  ).get(namespace, key);
+  return row?.found === 1;
+});
+
 export function memoryEntryExists(file, namespace, key) {
-  const result = withDb(file, (db) => {
-    const row = db.prepare(
-      'SELECT 1 AS found FROM memory_entries WHERE namespace = ? AND key = ? LIMIT 1',
-    ).get(namespace, key);
-    return row?.found === 1;
-  });
+  const result = lookupEntry(file, namespace, key);
   return result.ok ? result.value : false;
 }
 
@@ -55,4 +58,33 @@ export function findMemoryEntry(root, namespace, key) {
   return status.stores.find((store) => store.present
     && store.readable
     && memoryEntryExists(store.file, namespace, key)) ?? null;
+}
+
+// A disposable probe row is mirrored into both stores by the Ruflo CLI (observed
+// on 3.42.4 and 3.45.0), so cleanup must not stop at the first store that holds
+// it (issue #213). Ruflo's own `memory delete` only tombstones a row
+// (status='deleted'), so the row itself is deleted with bound parameters. Only a
+// store that actually holds the row is opened for writing, and an unreadable
+// store is reported: it may hold the row, and "removed" must never mean "not
+// looked at". A busy live store lands in `failed` for manual cleanup. A store
+// without a memory_entries table (agentdb-memory.db right after `memory init`)
+// cannot hold the row and is skipped.
+export function removeMemoryProbe(root, namespace, key) {
+  const removed = [];
+  const failed = [];
+  for (const store of projectMemoryStatus(root).stores) {
+    if (!store.present || (!store.readable && !store.reason)) continue;
+    if (!store.readable) { failed.push({ file: store.file, kind: store.reason }); continue; }
+    const held = lookupEntry(store.file, namespace, key);
+    if (!held.ok) { failed.push({ file: store.file, kind: held.error.kind }); continue; }
+    if (!held.value) continue;
+    const result = withDb(store.file, (db) => {
+      db.prepare('DELETE FROM memory_entries WHERE namespace = ? AND key = ?').run(namespace, key);
+      db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+      return true;
+    }, { readonly: false });
+    if (result.ok) removed.push(path.basename(store.file));
+    else failed.push({ file: store.file, kind: result.error.kind });
+  }
+  return { removed, failed };
 }
