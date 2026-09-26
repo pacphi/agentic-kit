@@ -73,6 +73,7 @@ token estimates never become observed token evidence. An absent or incompatible 
 | Evidence | Observation supporting a fact |
 | Provenance | Strength and origin of a fact: `observed`, `configured`, `inferred`, or `unknown` |
 | Unknown | The available evidence cannot establish a value; it does not mean false, zero, free, absent, or unreachable |
+| Live-check evidence | The last result of a live check (`passed`, `failed`, or `inconclusive`), with a bounded reason, its source (`sync`, `verify`, `status-live`), time, and an inputs key; status shows it with its age, marks it stale after a TTL, and marks it invalidated when the inputs key differs. Reading it never probes |
 | Ownership receipt | Exact record of a value written by `ak`, permitting narrow undo only while that value is unchanged |
 | Drift | Current state differs from the last value written or expected by `ak` |
 | Repair contract | Who performs a status row's fix: `sync` (an `ak sync` step does it, so sync plans it) or `manual` (a human must; sync never plans it). A row without a fix has none |

@@ -40,6 +40,7 @@ import { confirmCodexMcpRepairs, reconcileCodexMcp } from '../lib/codex-mcp-reco
 import { alignHosts } from './x/host-align.mjs';
 import { prepareAqeEmbedding } from '../lib/aqe-embedding-lifecycle.mjs';
 import { reconcileAqeEmbeddingProjections } from '../lib/aqe-embedding-projection.mjs';
+import { rememberLiveCheck, embeddingCheckOutcome } from '../lib/live-check-evidence.mjs';
 
 async function askCodexRepair(question) {
   if (!process.stdin.isTTY) {
@@ -575,6 +576,8 @@ export const SYNC_STEPS = [
     when: (subs, flags, cfg) => cfg.aqe !== false && subs.has('aqe-embedding'),
     run: async (ctx) => {
       const backend = await ctx.step('aqe-embedding', () => prepareAqeEmbedding(ctx.cfg));
+      // Remember the live result so plain `ak status` shows it (decision 9a).
+      rememberLiveCheck('aqe-embedding', embeddingCheckOutcome(backend), { source: 'sync', cfg: ctx.cfg, cwd: ctx.cwd });
       if (backend?.ok === false) return;
       const projection = reconcileAqeEmbeddingProjections(ctx.cfg, ctx.cwd);
       ctx.report('AQE embedding projections', projection);

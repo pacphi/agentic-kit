@@ -6,6 +6,7 @@
 - **Updated:** 2026-09-20 — implemented explicit defaults, owned Claude/Codex/OpenCode projections and qualified runtime proof
 - **Updated:** 2026-09-23 — project projections are scoped to the enclosing git repository root; outside a repository only the user Codex target applies (earlier project-scope values are relinquished by receipt), and the `.mcp.json` AQE registration is required only in an AQE-initialized project
 - **Updated:** 2026-09-26 — incomplete local setup distinguishes an installed-but-stopped Ollama (refused loopback connection with `ollama` on PATH) from a missing one and asks the user to start it rather than install it (#237)
+- **Updated:** 2026-09-26 — status shows the last remembered live embedding check with its age; see [Amendment: remembered live checks](#amendment-2026-09-26-remembered-live-checks)
 - **Related:** [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),
   [September repair](../audits/2026-09-09-aqe-integration-repair.md)
 
@@ -103,3 +104,17 @@ not eliminate, the alias creation race with another writer.
 The pre-PR portability review added a conditional-export regression: the local
 transformer probe now resolves the same ESM module instance as AQE, so disabling
 remote model downloads cannot accidentally configure a separate CommonJS instance.
+
+## Amendment 2026-09-26: remembered live checks
+
+`ak status` reads configuration only, so it reported "configured-unverified" while
+`ak sync` failed the live request (#237). Sync's embedding step, `ak x verify aqe`
+and the other quick verify suites now record each live result (passed, failed or
+inconclusive; a short reason; the source; the time) in a per-check evidence file
+under the kit's state directory, keyed by a hash of the selected backend. Status
+and the dashboard show that result with its age and never probe. A failed result
+is a warning, as in sync, never `fail`; only a fresh pass is green. A pass older
+than 24 hours is information labelled stale, while a stale failure stays a warning
+until a new check shows otherwise. A different backend selection marks the result
+as changed instead of presenting it as current. This follows ADR-0058's evidence
+cache. A backend pass still does not certify the corpus.

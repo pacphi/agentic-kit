@@ -24,10 +24,12 @@ export const options = {
 export const help = `ak status — read-only dashboard of what's true and what's drifted
 
 Prints one row per subsystem (versions, natives, security, learning, providers,
-…). Read-only: it never changes anything. A bare \`ak\` runs this plus one
-suggested next action. A row's "→" fix is what \`ak sync\` performs; "→ manual:"
-marks a step you run yourself (sync never plans it). --json rows carry the same
-distinction as \`repair\`: "sync", "manual", or null when there is no fix.
+…). Read-only: it never changes anything and never runs a live check; it shows
+the last result \`ak sync\` or \`ak x verify\` remembered, with its age. A bare
+\`ak\` runs this plus one suggested next action. A row's "→" fix is what
+\`ak sync\` performs; "→ manual:" marks a step you run yourself (sync never plans
+it). --json rows carry the same distinction as \`repair\`: "sync", "manual", or
+null when there is no fix.
 
 Usage: ak status [options]
 

@@ -23,14 +23,17 @@ import { readJson } from '../../lib/settings.mjs';
 import { runHarvest } from '../../lib/harvest.mjs';
 import { runLifecycle } from '../../lib/adapters/lifecycle.mjs';
 import { companionLifecycleFor } from '../../lib/adapters/companion-lifecycle-registry.mjs';
-import { ok, warn, fail, heading } from '../../lib/output.mjs';
+import { ok, warn, fail, heading, captureOutput } from '../../lib/output.mjs';
+import { rememberLiveCheck, embeddingProbeOutcome } from '../../lib/live-check-evidence.mjs';
 
 export const options = { json: { type: 'boolean', default: false } };
 
 export const help = `ak x verify — deep proofs (slow; spawns real CLIs)
 
 Runs live end-to-end checks, not just presence probes. Pick one suite or run
-all (the default). Exit code is non-zero if any selected proof fails.
+all (the default). Exit code is non-zero if any selected proof fails. The result
+of the mcp, memory, security, providers and deja-vu suites, and of the aqe live
+embedding request, is remembered so \`ak status\` can show it with its age.
 
 Usage: ak x verify [suite]
 
@@ -140,7 +143,8 @@ async function verifySecurity() {
   return good;
 }
 
-async function verifyAqe() {
+/** @param {{onEvidence?:(id:string, outcome:{status:string,reason:string|null})=>void}} [options] */
+async function verifyAqe({ onEvidence = () => {} } = {}) {
   heading('aqe — separate storage, embedding, and browser observations');
   const findings = scanRvf(projectAqeDir(process.cwd()));
   if (findings.length) { fail(`${findings.length} oversized RVF store(s) — run: ak sync`); return false; }
@@ -160,6 +164,7 @@ async function verifyAqe() {
   const live = await probeAqeEmbeddings({ packageRoot: aqeRoot(), env: resolved.env, backend,
     corpusPath: path.join(projectAqeDir(process.cwd()), 'memory.db') });
   (live.status === 'passed' ? ok : fail)(`live embedding request: ${live.status}; reason=${live.reason ?? 'none'}; dimension=${live.dimension ?? 'unknown'}`);
+  onEvidence('aqe-embedding', embeddingProbeOutcome(live));
   if (live.corpus) console.log(JSON.stringify({ embeddingProvenance: live.corpus }));
   if (!['healthy', 'empty'].includes(live.corpus?.status)) warn('Corpus compatibility unverified or mismatched; preserve vectors and plan explicit migration');
   warn('Fleet execution, RVF owner health and checkpoint recovery remain separate proofs');
@@ -305,6 +310,9 @@ function hasDejaVuOwnership(cfg) {
   return plain(own) && (!!own.install || (plain(own.targets) && Object.keys(own.targets).length > 0));
 }
 
+/** Whether the deja-vu proof runs at all; when it does not, it reports a skip. */
+export const dejaVuProofApplies = (cfg) => cfg?.integrations?.tools?.dejaVu?.enabled === true || hasDejaVuOwnership(cfg);
+
 /** Package/CLI presence check — prints its verdict and returns whether it passed. */
 function checkDejaVuPackage(install) {
   const version = typeof install.version === 'string' && SAFE_VERSION.test(install.version)
@@ -378,7 +386,7 @@ export async function verifyDejaVu({
 } = {}) {
   heading('deja-vu — content-free structural companion proof');
   const enabled = cfg?.integrations?.tools?.dejaVu?.enabled === true;
-  if (!enabled && !hasDejaVuOwnership(cfg)) {
+  if (!dejaVuProofApplies(cfg)) {
     warn('deja-vu disabled and unowned — skipped');
     return true;
   }
@@ -403,6 +411,26 @@ export async function verifyDejaVu({
   return finalizeDejaVuVerdict(result, packageGood, doctorGood, indexGood, targetsGood);
 }
 
+// Suites whose boolean verdict is remembered for `ak status` (decision 9a).
+// `aqe` remembers only its live embedding request, through onEvidence; the
+// slow learning/harvest proofs have no live-check id.
+const SUITE_EVIDENCE = Object.freeze({
+  mcp: 'mcp', memory: 'memory', security: 'security', providers: 'providers', 'deja-vu': 'deja-vu',
+});
+
+/** Run one suite, printing as always, and remember its result for status. */
+async function runRememberedSuite(name, fn, cfg) {
+  const remember = (id, outcome) => rememberLiveCheck(id, outcome, { source: 'verify', cfg, cwd: process.cwd() });
+  const { result, entries } = await captureOutput(() => fn({ onEvidence: remember }), { echo: true });
+  const id = SUITE_EVIDENCE[name];
+  if (id && (id !== 'deja-vu' || dejaVuProofApplies(cfg))) {
+    remember(id, result
+      ? { status: 'passed', reason: null }
+      : { status: 'failed', reason: entries.find((e) => e.level === 'fail')?.text ?? `${name} proof failed` });
+  }
+  return result;
+}
+
 export async function run({ positionals }) {
   const which = positionals[0] ?? 'all';
   const suites = {
@@ -422,7 +450,8 @@ export async function run({ positionals }) {
     return 2;
   }
   let allGood = true;
-  for (const [, fn] of selected) allGood = (await fn()) && allGood;
+  const cfg = loadKitConfig();
+  for (const [name, fn] of selected) allGood = (await runRememberedSuite(name, fn, cfg)) && allGood;
   console.log('');
   (allGood ? ok : fail)(allGood ? 'all selected proofs passed' : 'verification failed — see above');
   return allGood ? 0 : 1;

@@ -95,7 +95,13 @@ then reapplies the selected environment afterward.
 
 `ak x aqe-embedding verify` proves the backend with synthetic text.
 `ak x verify aqe` also checks the current project's stored SQLite embedding
-provenance and reports storage observations. These are separate claims:
+provenance and reports storage observations.
+
+`ak status` and the dashboard never contact the service. They show the last live
+embedding request that `ak sync` or `ak x verify aqe` made, with its age: a
+failure is a warning with its reason, a pass is green for 24 hours and then
+labelled stale. Selecting a different backend marks the old result as changed.
+These are separate claims:
 
 - A configured URL is not a running service or an installed model.
 - A backend pass does not certify old vectors or a complete QE fleet.
