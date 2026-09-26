@@ -19,6 +19,12 @@ The September 9 sequence is explicitly cumulative:
 September 1–2 hook reports retain their then-verified host versions and exact-action boundaries;
 a later installed host version does not inherit those conformance results automatically.
 
+The [issues 237–239 verification and decisions](2026-09-26-issues-237-238-239-verification-and-decisions.md)
+record verifies an external report against `847486c` and captures the maintainer's nine
+decisions, a same-day AgentDB and Ruflo memory alignment addendum with its decisions, and the
+resulting remediation plan; it authorizes that plan but is not evidence that any of it is
+implemented.
+
 Machine-readable inventories here are observations, not executable policy, ownership receipts,
 release capabilities or permission to read additional host history. Issue-specific matrices state
 whether their review was semantic, structural, metadata-only, or actually reran executable checks.
