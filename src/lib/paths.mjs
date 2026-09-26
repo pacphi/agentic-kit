@@ -21,6 +21,8 @@ export const configDir = () => path.join(configBase(), 'agentic-kit');
 export const telemetryDir = () => path.join(configDir(), 'telemetry');
 export const hookHealingTransactionsDir = () => path.join(stateBase(), 'agentic-kit', 'hook-healing');
 export const maintenanceControlDir = () => path.join(stateBase(), 'agentic-kit', 'maintenance');
+/** Receipts for edits ak makes inside another tool's install (install-edits.mjs). */
+export const installEditsPath = () => path.join(stateBase(), 'agentic-kit', 'install-edits.json');
 /** The ruflo-era config dir — read-fallback for kit.json migration and the
  *  target of uninstall's legacy shell-kit cleanup. */
 export const legacyConfigDir = () => path.join(configBase(), 'ruflo');

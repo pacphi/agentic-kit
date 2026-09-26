@@ -8,7 +8,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { run } from './exec.mjs';
-import { rufloRoot, aqeRoot } from './paths.mjs';
+import { rufloRoot, aqeRoot, installEditsPath } from './paths.mjs';
+import { pruneInstallEdits, recordInstallEdit } from './install-edits.mjs';
 import { agentdbLocations, bsq3IsNative, bsq3Root, deriveBsq3Spec, selfSpecConflicts, rufloMemoryContexts, aidefencePresent, probeBsq3Runtime } from './natives.mjs';
 import { KIT_PKG } from './versions.mjs';
 import { scanRvf, quarantine } from './rvf.mjs';
@@ -53,8 +54,15 @@ const failTail = (r) =>
  *  3. install a copy into `dir` — only when better-sqlite3 is not resolvable
  *     from `dir` at all, so there is nothing in place to build.
  *
- *  `runner` is injectable so the ladder is testable without npm or a network. */
-export async function ensureNativeBsq3(dir, { runner = run } = {}) {
+ *  `runner` is injectable so the ladder is testable without npm or a network.
+ *
+ *  Every manifest edit is receipted first (install-edits.mjs; audit Addendum 2,
+ *  problem 3): file, field, original value, ak's value and time, written to
+ *  `ledger` BEFORE `npm pkg set`, so status and About can show it and
+ *  `ak uninstall` can put the original back.
+ *  @param {string} dir
+ *  @param {{ runner?: typeof run, ledger?: string, now?: () => number }} [options] */
+export async function ensureNativeBsq3(dir, { runner = run, ledger = installEditsPath(), now = Date.now } = {}) {
   let pkgRoot = bsq3Root(dir);
   if (!pkgRoot) {
     // Derive the spec from THIS tree's own overrides/deps: a hardcoded `@^12` is
@@ -73,6 +81,7 @@ export async function ensureNativeBsq3(dir, { runner = run } = {}) {
     // the still-stale `optionalDependencies`. All conflicting fields have to
     // move together before the install runs.
     for (const field of selfSpecConflicts(dir, spec)) {
+      recordInstallEdit({ file: path.join(dir, 'package.json'), section: field, name: 'better-sqlite3', to: spec, now }, { ledger });
       await runner('npm', ['pkg', 'set', `${field}.better-sqlite3=${spec}`], { cwd: dir, timeout: 30_000 });
     }
     const installed = await npmInstallInto(dir, `better-sqlite3@${spec}`, runner);
@@ -102,14 +111,14 @@ export async function ensureNativeBsq3(dir, { runner = run } = {}) {
  *  createWriteStream), and a Node process started before a Node upgrade can still
  *  map the old file. A new file gets a new inode, and the ladder runs exactly as
  *  for a missing binding. Success is the load test passing, not a file on disk. */
-async function rebuildUnloadable(dir, runner) {
+async function rebuildUnloadable(dir, runner, ledger) {
   const binding = path.join(bsq3Root(dir), 'build', 'Release', 'better_sqlite3.node');
   try {
     fs.rmSync(binding, { force: true });
   } catch (e) {
     return { ok: false, how: `FAILED (could not remove the binding that will not load: ${e.code ?? e.message})` };
   }
-  const built = await ensureNativeBsq3(dir, { runner });
+  const built = await ensureNativeBsq3(dir, { runner, ledger });
   if (!built.ok) return built;
   const after = await probeBsq3Runtime(dir, { runner });
   if (after.state === 'native') return built;
@@ -121,20 +130,23 @@ async function rebuildUnloadable(dir, runner) {
  *  ladder as before. A present file is load-tested, the same test status uses,
  *  and rebuilt only when the probe proves it will not load (`unavailable`). An
  *  `inconclusive` probe (timeout, crash) never triggers a rebuild in ruflo's tree. */
-async function healRuntimeContext(dir, runner) {
-  if (!bsq3IsNative(dir)) return (await ensureNativeBsq3(dir, { runner })).how;
+async function healRuntimeContext(dir, runner, ledger) {
+  if (!bsq3IsNative(dir)) return (await ensureNativeBsq3(dir, { runner, ledger })).how;
   const probe = await probeBsq3Runtime(dir, { runner });
   if (probe.state === 'native') return null;
   if (probe.state === 'inconclusive') return `load probe inconclusive (${probe.reason}), not rebuilt`;
-  return (await rebuildUnloadable(dir, runner)).how;
+  return (await rebuildUnloadable(dir, runner, ledger)).how;
 }
 
 /** Native better-sqlite3 into every location the runtime resolves: the agentdb
  *  copies, agentic-qe, AND the ruflo memory-runtime contexts (@claude-flow/memory
  *  + /cli) — the copies `npx ruflo memory` actually loads. #45: healing only
  *  agentdb left ruflo's own memory on the WASM fallback (memory store failing)
- *  while status still read agentdb-native. `runner` injectable for hermetic tests. */
-export async function healNatives({ runner = run } = {}) {
+ *  while status still read agentdb-native. `runner` and the receipt `ledger`
+ *  are injectable for hermetic tests. Receipts whose files no longer hold ak's
+ *  value (Ruflo was upgraded or reinstalled) are forgotten first. */
+export async function healNatives({ runner = run, ledger = installEditsPath() } = {}) {
+  pruneInstallEdits({ ledger });
   const details = [];
   for (const dir of agentdbLocations()) {
     // Re-check right before installing: an upgrade earlier in the same sync
@@ -142,17 +154,17 @@ export async function healNatives({ runner = run } = {}) {
     // the 3.29.0 tree) between enumeration and heal.
     if (!fs.existsSync(dir)) continue;
     if (bsq3IsNative(dir)) continue;
-    details.push(`${dir}: ${(await ensureNativeBsq3(dir, { runner })).how}`);
+    details.push(`${dir}: ${(await ensureNativeBsq3(dir, { runner, ledger })).how}`);
   }
   if (fs.existsSync(aqeRoot()) && !bsq3IsNative(aqeRoot())) {
-    details.push(`agentic-qe: ${(await ensureNativeBsq3(aqeRoot(), { runner })).how}`);
+    details.push(`agentic-qe: ${(await ensureNativeBsq3(aqeRoot(), { runner, ledger })).how}`);
   }
   // ruflo memory runtime — missing contexts are already filtered out (older trees
   // may lack either package, EC-2), so this is a silent no-op on them. Sequential:
   // both contexts can resolve one shared copy, and a rebuild for the first
   // changes what the second one's probe sees.
   for (const { context, dir } of rufloMemoryContexts()) {
-    const how = await healRuntimeContext(dir, runner);
+    const how = await healRuntimeContext(dir, runner, ledger);
     if (how) details.push(`@claude-flow/${context}: ${how}`);
   }
   return { ok: !details.some((d) => d.includes('FAILED')), detail: details.join('; ') || 'already native everywhere' };

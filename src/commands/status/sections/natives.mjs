@@ -1,7 +1,39 @@
 // natives (better-sqlite3 in agentdb locations + aqe)
+import { describeInstallEdit, editLabel, groupInstallEdits, installEditStatus, RUFLO_PIN_NOTE } from '../../../lib/install-edits.mjs';
 import { nativesStatus, rufloRuntimeNatives } from '../../../lib/natives.mjs';
+import { rufloRoot as defaultRufloRoot } from '../../../lib/paths.mjs';
 import { installedVersion } from '../../../lib/versions.mjs';
 import { row } from '../row.mjs';
+
+/** What ak changed inside another tool's install (install-edits.mjs; audit
+ *  Addendum 2, problem 3). Applied edits in Ruflo's tree are the native SQLite
+ *  pin Ruflo itself intends (ruvnet/ruflo#2219); anything else is named by its
+ *  package. Superseded receipts (the file no longer holds ak's value) are
+ *  information that nothing is left to restore; the next heal forgets them.
+ *  All rows are information: nothing here is for sync or a human to fix. */
+export function installEditRows(edits, { rufloRoot = null } = {}) {
+  const rows = [];
+  const { ruflo, elsewhere, superseded } = groupInstallEdits(edits, { rufloRoot });
+  const list = (group) => group.map((edit) => describeInstallEdit(edit, { rufloRoot })).join('; ');
+  const restores = (group) => `\`ak uninstall\` restores the original value${group.length === 1 ? '' : 's'}`;
+  if (ruflo.length) rows.push(row('natives', 'info', `${RUFLO_PIN_NOTE} inside Ruflo's install: ${list(ruflo)}. ${restores(ruflo)}`));
+  if (elsewhere.length) {
+    rows.push(row('natives', 'info', `ak changed better-sqlite3 in another tool's install so its native binding could be installed: `
+      + `${list(elsewhere)}. ${restores(elsewhere)}`));
+  }
+  if (superseded.length) {
+    rows.push(row('natives', 'info', `ak's earlier edit${superseded.length === 1 ? ' is' : 's are'} no longer there `
+      + `(${superseded.map((edit) => editLabel(edit, { rufloRoot })).join(', ')}; the package was upgraded or reinstalled): nothing to restore`));
+  }
+  return rows;
+}
+
+/** Receipt rows for this machine's installs; never fails the section. */
+function receiptRows() {
+  let root = null;
+  try { root = defaultRufloRoot(); } catch { /* no npm global root: label by folder */ }
+  try { return installEditRows(installEditStatus(), { rufloRoot: root }); } catch { return []; }
+}
 
 /** One row per ruflo memory-runtime context that is not native, from the load
  *  probe's state: `unavailable` provably falls back to WASM (fail), while
@@ -60,9 +92,11 @@ export default {
       // the binding as resolved from ruflo's own memory runtime (@claude-flow/memory
       // + /cli), or the row reads ✓ while memory store runs on the WASM fallback.
       rows.push(...runtimeNativeRows(await rufloRuntimeNatives()));
+      rows.push(...receiptRows());
     } catch (e) {
       rows.push(row('natives', 'warn', `native check unavailable: ${e.message}`));
     }
     return rows;
   },
 };
+

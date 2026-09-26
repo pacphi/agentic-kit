@@ -89,6 +89,23 @@ export function hostAboutState(install, enabled) {
 }
 
 /**
+ * Audit 2026-09-26 Addendum 2, problem 3: an edit ak made inside Ruflo's
+ * install (the native SQLite pin Ruflo itself intends, ruvnet/ruflo#2219)
+ * rides beside the ruflo chip as its own `edits` field. The chip stays the
+ * install fact. Local reads only: the receipt ledger and the manifests it names.
+ * @param {Map<string, Record<string, any>>} states
+ */
+async function addRufloEdits(states) {
+  try {
+    const { installEditStatus, rufloEditNotes } = await import('../lib/install-edits.mjs');
+    const { rufloRoot } = await import('../lib/paths.mjs');
+    const notes = rufloEditNotes(installEditStatus(), { rufloRoot: rufloRoot() });
+    const current = states.get('ruflo');
+    if (notes.length && current) states.set('ruflo', { ...current, edits: notes });
+  } catch { /* no ledger or no npm global root: the chip stands alone */ }
+}
+
+/**
  * State chips for the packaged entries, from the primitives `ak status` already
  * calls. Each source is guarded independently so one unavailable collector
  * degrades one chip, never the page. Network-free by construction: every call
@@ -97,7 +114,7 @@ export function hostAboutState(install, enabled) {
  * installed" is a local question and About asks nothing else.
  *
  * @param {{ pkgRoot?: string }} input
- * @returns {Promise<Map<string, { state: string, version: string|null, note: string|null }>>}
+ * @returns {Promise<Map<string, { state: string, version: string|null, note: string|null, edits?: string[] }>>}
  */
 async function detectPackaged({ pkgRoot }) {
   const states = new Map();
@@ -130,6 +147,8 @@ async function detectPackaged({ pkgRoot }) {
       states.set(key, unknown(reasonOf(error)));
     }
   }
+
+  await addRufloEdits(states);
 
   // agentdb ships inside Ruflo; ak installs no separate copy, so the chip
   // reports the bundled version and never a stray standalone global.
@@ -249,6 +268,7 @@ function renderEntry(entry, state, width) {
   console.log(`${indent}${dim(entry.tagline)}`);
   for (const line of wrap(entry.paragraph, body)) console.log(`${indent}${line}`);
   for (const link of entry.links) console.log(`${indent}${dim(link.label.padEnd(6))} ${link.url}`);
+  for (const note of state.edits ?? []) console.log(`${indent}${dim('edit'.padEnd(6))} ${note}`);
   if (entry.manage) console.log(`${indent}${dim('manage'.padEnd(6))} ${entry.manage}`);
   console.log('');
 }

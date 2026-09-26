@@ -24,6 +24,7 @@ import { ok, warn, fail, info } from '../lib/output.mjs';
 import { removeCodexStatusline } from '../lib/codex-statusline.mjs';
 import { modelInventoryPath, modelScopeKeyPath } from '../lib/model-inventory/store.mjs';
 import { removeManagedAgentBrowser, removeManagedAgentBrowserConfig } from '../lib/agent-browser.mjs';
+import { editLabel, installEditStatus, restoreInstallEdits } from '../lib/install-edits.mjs';
 
 /** Prints one lifecycle-render.mjs report line at its own level — mirrors
  *  setup.mjs/sync.mjs's own printReportLine (N-2, Wave C security review
@@ -52,9 +53,10 @@ export const options = {
 export const help = `ak uninstall — leave cleanly
 
 By default removes only the kit's own machine footprint (CLAUDE.md managed
-blocks, MCP registration) and cleans any legacy shell-kit install. The global
-packages (ruflo, agentic-qe) stay unless you ask for them. Each removal is
-confirmed unless --yes.
+blocks, MCP registration), puts back the better-sqlite3 lines ak changed inside
+Ruflo's install (only where they still hold ak's value; \`ak status\` lists
+them), and cleans any legacy shell-kit install. The global packages (ruflo,
+agentic-qe) stay unless you ask for them. Each removal is confirmed unless --yes.
 
 Usage: ak uninstall [options]
 
@@ -188,7 +190,7 @@ export async function purgeDejaVuIndex({
   }
 }
 
-/** @typedef {{dejaAdapter?:any,purgeDejaVuIndex?:typeof purgeDejaVuIndex}} UninstallDeps */
+/** @typedef {{dejaAdapter?:any,purgeDejaVuIndex?:typeof purgeDejaVuIndex,installEdits?:{ledger?:string,runner?:typeof runCmd}}} UninstallDeps */
 
 // ── the uninstall step registry ──────────────────────────────────────────
 // Mirrors sync.mjs's SYNC_STEPS idiom (ADR-0037): every teardown phase used to
@@ -540,6 +542,29 @@ function stepThisProject(ctx) {
   });
 }
 
+// 5b. ak's receipted edits inside other tools' installs (install-edits.mjs):
+// better-sqlite3 lines ak rewrote so the native binding could be installed
+// (Ruflo's own intent, ruvnet/ruflo#2219). Restored only where the file still
+// holds ak's value; a value someone else changed since is left alone. Runs on
+// every uninstall and before global packages, so an edit is reversed even when
+// ruflo stays installed. A restore that does not take keeps its receipt.
+async function stepInstallEdits(ctx) {
+  const options = ctx.deps?.installEdits ?? {};
+  let rufloRoot = null;
+  try { rufloRoot = paths.rufloRoot(); } catch { /* no npm global root: label by folder */ }
+  const applied = installEditStatus(options).filter((edit) => edit.state === 'applied');
+  if (ctx.dry) {
+    for (const edit of applied) {
+      info(`[dry-run] restore ${editLabel(edit, { rufloRoot })} ${edit.section} ${edit.name} from ak's ${edit.to} to the original ${edit.from ?? '(absent)'}`);
+    }
+    return;
+  }
+  const result = await restoreInstallEdits({ ...options, rufloRoot });
+  const report = { ok, warn, info };
+  for (const line of result.lines) report[line.level](line.text);
+  if (!result.ok) ctx.state.ownershipTeardownOk = false;
+}
+
 // 6. global packages (machine-wide — confirmed individually)
 async function stepGlobalPackages(ctx) {
   const { flags, dry } = ctx;
@@ -590,6 +615,7 @@ export const UNINSTALL_STEPS = [
   { id: 'mcp', when: () => true, run: stepMcp },
   { id: 'legacy-shell-kit', when: () => true, run: stepLegacyShellKit },
   { id: 'this-project', when: (ctx) => ctx.flags['this-project'], run: stepThisProject },
+  { id: 'install-edits', when: () => true, run: stepInstallEdits },
   { id: 'global-packages', when: () => true, run: stepGlobalPackages },
   { id: 'ruvnet-brain-notice', when: () => true, run: stepRuvnetBrainNotice },
 ];

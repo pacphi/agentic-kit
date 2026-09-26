@@ -4,7 +4,8 @@
 - **Updated:** 2026-09-26 — §11: every status fix declares who performs it (`repair: sync | manual`);
   `ak sync` plans only fixes a sync step performs (#237); the Ruflo native runtime probe keeps its
   load error and separates unavailable from inconclusive; sync's natives heal uses the same load
-  test (see the native runtime probe amendment)
+  test (see the native runtime probe amendment); the heal receipts every edit it makes inside
+  another tool's install, and `ak uninstall` reverses it (see the install-edit receipts amendment)
 - **Earlier update:** 2026-09-20 — ADR-0055 adds qualified AQE embedding lifecycle evidence; ADR-0053 separates host health from usage-source diagnostics
 - **Earlier update:** 2026-08-26 — ADR-0035 applies fail-closed preflight, bounded evidence, and
   content-free degradation to the opt-in deja-vu companion
@@ -71,6 +72,33 @@ load-tests a binding whose file is present and rebuilds it only when the probe r
 writes a new file instead of overwriting one that a running process may still have mapped. The
 rebuild succeeds only when the load test then passes; a rebuilt file that still will not load is a
 failed heal that reports the load error.
+
+### Install-edit receipts amendment — 2026-09-26
+
+The natives heal can change files inside another tool's install. When better-sqlite3 cannot be
+resolved from a bundled package at all, the heal installs a copy there. First it rewrites that
+package's own better-sqlite3 lines (`overrides`, `optionalDependencies`, `dependencies`), or npm
+fails with EOVERRIDE. The edit enforces Ruflo's own intent: Ruflo pins better-sqlite3 to 12.8.0 or
+later because AgentDB's optional `^11.8.1` has no Node 24 to 26 binaries (ruvnet/ruflo#2219). An
+`npm install -g ruflo` does not apply that `overrides` entry, because npm reads `overrides` only from
+the root project.
+
+Every such edit is recorded before `npm pkg set` runs. The receipt holds the file, the field, the
+original value, ak's value and the time, in ak's state folder (`install-edits.json`). A second edit
+to the same field keeps the original value. An edit is applied while the file still holds ak's value.
+Otherwise it is superseded, for example after Ruflo was upgraded or reinstalled. Each heal forgets
+superseded receipts before it edits anything. `ak status` reports applied edits as information
+("ak applied Ruflo's native SQLite pin (ruvnet/ruflo#2219)"), and `ak about` and the dashboard's
+ruflo card repeat the line. `ak uninstall` restores an original only where the file still holds ak's
+value, verifies it by reading the file again, and keeps the receipt of a restore that did not take.
+The edits made before this amendment have no receipts, so ak can neither show nor restore them.
+
+Option D was tested before choosing receipts and was not adopted: reinstall the same Ruflo version
+with the native build allowed, so that Ruflo's own pin applies. On Node 26.4.0 with npm 11.17.0,
+four disposable-prefix installs of ruflo 3.45.0 never applied Ruflo's `overrides`. Every context
+resolved a hoisted better-sqlite3 12.11.1. Only the run with `--foreground-scripts` ended native, via
+AgentDB's own postinstall rebuild. The two runs without it, and the one under npm's default script
+policy, left no binding although npm reported every install complete.
 
 ### AQE embedding amendment — 2026-09-20
 

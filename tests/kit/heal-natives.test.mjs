@@ -26,6 +26,11 @@ const BINDING = path.join('build', 'Release', 'better_sqlite3.node');
 // directory for the whole file (a real KB has forge-update.mjs and SOURCE.json,
 // which would silently switch these tests onto the updater path).
 process.env.RUVNET_BRAIN_KB = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-heal-brain-kb-'));
+// The natives heal receipts every manifest edit in ak's state folder
+// (install-edits.mjs), resolved at call time: keep this file's heals out of the
+// real one.
+process.env.XDG_STATE_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-heal-state-'));
+process.env.LOCALAPPDATA = process.env.XDG_STATE_HOME;
 
 function writePkg(dir, { withBinding = false } = {}) {
   fs.mkdirSync(dir, { recursive: true });

@@ -96,7 +96,9 @@ separate from Vibium's Agentic-QE-owned cache visibility in System.
 The ruflo card carries a summary line ("ruflo components: 6 of 7 active") built from the same
 `ak status` row Overview > Runtime's panel header shows, so About and Runtime always agree. The
 line links to that panel; it appears only once `ak status` has reported the subsystem at least
-once.
+once. When ak has changed a better-sqlite3 line inside Ruflo's install to install the native
+binding, the card also shows the `natives` row that says so ("ak applied Ruflo's native SQLite
+pin"). That line never changes the card's chip.
 
 System's capability catalog counts both user/plugin surfaces and the project
 surfaces discovered by the host census. In particular, Codex project skills in

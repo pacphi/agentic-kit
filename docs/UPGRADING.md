@@ -39,6 +39,17 @@ and supported `claude mcp serve` tool exposure are preserved. See
 [ADR-0051](adr/0051-supported-peer-delegation-and-host-realignment.md) for the policy,
 official source citations, authority boundaries and verification limits.
 
+## 2026-09-26: ak records and reverses its edits inside Ruflo's install
+
+When `ak sync` has to rewrite a better-sqlite3 line in a package inside Ruflo's install so the
+native binding can be installed, it now records the file, the field, the original value and its
+own value first, in `install-edits.json` in ak's state folder (`~/.local/state/agentic-kit/` by
+default). `ak status` and `ak about` show each edit that is still in place.
+`ak uninstall` puts the original value back where the file still holds ak's value, and reports the
+rest. A Ruflo upgrade or reinstall replaces the edited files, and ak then forgets the receipt. Edits
+made by earlier releases have no receipt: ak cannot show or restore them. Reinstall Ruflo if you
+want its shipped files back, then run `ak sync`.
+
 ## 2026-09-26: Codex's Ruflo memory outside a project
 
 Codex's Ruflo launcher (`ak x ruflo-mcp`) no longer creates a `.swarm` store at the filesystem

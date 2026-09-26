@@ -130,6 +130,19 @@ import { aboutHostChip } from './host-readiness.mjs';
     return '<span class="ab-tile ab-mg" style="background:var('+hue+')" aria-hidden="true">'
       +esc((icon&&icon.ref)||"?")+"</span>";
   }
+  // Audit 2026-09-26 Addendum 2, problem 3: ak's receipted edit inside Ruflo's
+  // install (the native SQLite pin, ruvnet/ruflo#2219) is shown on the ruflo
+  // card from the SAME natives row `ak status` prints. It is a fact, not a
+  // verdict, so it never changes the card's chip.
+  function aboutEditLine(entry,data){
+    if(entry.id!=="ruflo"||!data||!Array.isArray(data.rows))return "";
+    for(var ei=0;ei<data.rows.length;ei++){
+      var er=data.rows[ei];
+      if(er&&er.subsystem==="natives"&&/^ak applied Ruflo's native SQLite pin/.test(String(er.message||"")))
+        return '<div class="ab-manage">'+esc(er.message)+"</div>";
+    }
+    return "";
+  }
   function aboutCard(entry,data){
     var st=aboutState(entry,data),ver=aboutVersion(entry,data);
     // Release-tagged tools (the Brain) already record their leading "v"; npm
@@ -169,6 +182,7 @@ import { aboutHostChip } from './host-readiness.mjs';
       }
       if(rcRow)rcLink='<div class="ab-links"><a href="#" class="rc-link" data-go="runtime">'+esc(rcRow.message)+"</a></div>";
     }
+    rcLink+=aboutEditLine(entry,data);
     return '<article class="ab-card'+(entry.category==="kit"?" ab-wide":"")+'">'
       +'<div class="ab-head">'+aboutTile(entry.icon)
       +'<span class="ab-name"><b>'+esc(entry.name)+"</b>"
