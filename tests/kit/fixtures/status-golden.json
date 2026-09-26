@@ -184,7 +184,7 @@
   {
     "subsystem": "blocks",
     "level": "warn",
-    "message": "2 CLAUDE.md block(s) drifted: ruflo-preamble→upserted, ruflo-reference→upserted",
+    "message": "3 CLAUDE.md block(s) drifted: ruflo-preamble→upserted, ruflo-reference→upserted, ruflo-aqe-reference→upserted",
     "fix": "sync reconciles blocks"
   },
   {

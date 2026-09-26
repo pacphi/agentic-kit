@@ -434,9 +434,9 @@ machines), Codex's independent Ruflo/AQE access, legacy MCP retirement, and the 
 footer. These can drift with **no version change at all** —
 a kit update (or, on an npm-linked dev checkout, merely merging a PR that edits a
 `claude/*.md` template) revises the source of truth, and the rendered copies lag until the
-next `ak sync`. The nudge closes that window, using the exact drift definitions `ak status` uses (the two
-can never disagree) and stays quiet after `status`, `sync`, and `ak x reference`, which
-already show the same information.
+next `ak sync`. The nudge closes that window. For guidance blocks it reads the dry run of the
+same reconcile `ak sync` applies, as `ak status` does, so the three never disagree. It stays
+quiet after `status`, `sync`, and `ak x reference`, which already show the same information.
 
 ## Why `ak sync` pulled a prerelease
 

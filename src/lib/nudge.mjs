@@ -13,11 +13,10 @@
 // and read-only. Mirrors the exact drift definitions in
 // src/commands/status.mjs so the nudge can never disagree with `ak status`.
 import fs from 'node:fs';
-import path from 'node:path';
 import * as paths from './paths.mjs';
-import { registry, syncBlocks, blocksForTarget, retiredForTarget, guidanceTargets } from './blocks.mjs';
+import { reconcileGuidance, guidanceTargets } from './blocks.mjs';
 import { loadKitConfig } from './config.mjs';
-import { bothHostsEnabled } from './providers.mjs';
+import { guidanceContext } from './providers.mjs';
 import { codexMcpStatus, rufloCodexMcpStatus } from './mcp.mjs';
 import { fixStatusline, helperStampStale, statuslineVersionAhead } from './statusline.mjs';
 
@@ -34,22 +33,16 @@ export async function localDrift({ pkgRoot, cwd = process.cwd(), cfg, targets } 
   const lines = [];
   try { cfg = cfg ?? loadKitConfig(); } catch { return lines; }
 
-  // guidance blocks (dry-run reconcile == status.mjs's drift definition)
+  // guidance blocks: the writer's own dry run (blocks.mjs reconcileGuidance
+  // with sync's exact context) — the same source `ak status` reads, so the
+  // nudge can never report drift sync would not act on (#237). kit.json intent
+  // also answers the `enabled` detectors, so no PATH probe runs here.
   try {
-    const rowsReg = registry(cfg.customBlocks);
-    const resolve = (r) => (r.custom
-      ? (r.template.startsWith('~/') ? path.join(paths.home, r.template.slice(2)) : r.template)
-      : path.join(pkgRoot, 'claude', r.template));
-    const ctx = { flags: { dualMode: bothHostsEnabled(cfg), opencodeEnabled: !!cfg.integrations?.hosts?.opencode } };
-    // The SHARED target list + retired-strip composition (blocks.mjs) — the
-    // nudge's contract is "never disagrees with ak status", which a hardcoded
-    // subset silently breaks every time a guidance target is added (codex's
-    // agents-user, opencode's agents-opencode).
     const tgs = targets ?? guidanceTargets({ cwd, cfg });
-    for (const t of tgs) {
-      const treg = [...blocksForTarget(rowsReg, t.name), ...retiredForTarget(rowsReg, t.name)];
-      const res = await syncBlocks(t.file, treg, resolve, { dryRun: true, context: ctx });
-      const n = res.filter((r) => r.action === 'upserted' || r.action === 'stripped').length;
+    for (const t of await reconcileGuidance({
+      cwd, cfg, pkgRoot, context: guidanceContext(cfg), dryRun: true, targets: tgs,
+    })) {
+      const n = t.results.filter((r) => r.action === 'upserted' || r.action === 'stripped').length;
       if (n) lines.push(`${n} ${t.label} block(s)`);
     }
   } catch { /* best-effort */ }
