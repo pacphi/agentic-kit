@@ -130,7 +130,7 @@ not test an existing live key. This is a verification gap, not a reproduction
 of data loss on this macOS machine.
 
 Relevant tracked implementations:
-[constraints](../../config/agentic-dependency-constraints.json),
+[constraints](../../src/lib/hook-audit/agentic-dependency-constraints.json),
 [project-memory launch](../../src/lib/ruflo-memory.mjs),
 [OpenCode gateway](../../src/templates/opencode-ruflo-gateway.js),
 [Brain version detection](../../src/lib/ruvnet-brain.mjs),

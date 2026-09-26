@@ -4,10 +4,32 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { loadUpstreamConstraints } from '../../src/lib/hook-audit/upstream.mjs';
+import { UPSTREAM_REGISTRY_FILE, loadUpstreamConstraints } from '../../src/lib/hook-audit/upstream.mjs';
 
-const registryFile = path.resolve('config/agentic-dependency-constraints.json');
+const registryFile = UPSTREAM_REGISTRY_FILE;
 const now = () => new Date('2026-09-02T12:00:00Z');
+
+function globPattern(glob) {
+  const source = glob.split(/(\*\*\/|\*\*|\*)/).map((part) => {
+    if (part === '**/') return '(?:.*/)?';
+    if (part === '**') return '.*';
+    if (part === '*') return '[^/]*';
+    return part.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+  }).join('');
+  return new RegExp(`^${source}$`);
+}
+
+test('the registry ships with ak: the loader reads it from inside the published src/ tree', () => {
+  const relative = path.relative(process.cwd(), registryFile).split(path.sep).join('/');
+  assert.match(relative, /^src\//, 'runtime data must live under src/ (package.json files never ships config/)');
+  const { files } = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+  const included = files.filter((entry) => !entry.startsWith('!'))
+    .some((entry) => (entry.endsWith('/') ? relative.startsWith(entry) : relative === entry));
+  const excluded = files.filter((entry) => entry.startsWith('!'))
+    .some((entry) => globPattern(entry.slice(1)).test(relative));
+  assert.ok(included && !excluded, `${relative} is not in the package.json files allowlist`);
+  assert.notEqual(loadUpstreamConstraints({ now }).status, 'absent', 'the default path must find the registry');
+});
 
 test('upstream registry separates valid shape, current evidence, and version applicability', () => {
   const result = loadUpstreamConstraints({

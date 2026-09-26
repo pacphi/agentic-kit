@@ -3,7 +3,10 @@ import { fileURLToPath } from 'node:url';
 
 import { publicSource, readJsonSource } from './common.mjs';
 
-const defaultFile = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'config', 'agentic-dependency-constraints.json');
+// The registry is runtime data: it sits beside this loader so the published
+// package (package.json `files` ships src/, never config/) carries it.
+export const UPSTREAM_REGISTRY_FILE = fileURLToPath(new URL('./agentic-dependency-constraints.json', import.meta.url));
+const defaultFile = UPSTREAM_REGISTRY_FILE;
 const ISSUE_STATES = new Set(['open-at-last-verification', 'closed-at-last-verification']);
 const NOTIFICATION_STATES = new Set(['draft-only', 'published']);
 

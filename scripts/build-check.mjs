@@ -10,6 +10,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
+import { UPSTREAM_REGISTRY_FILE } from '../src/lib/hook-audit/upstream.mjs';
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const node = process.execPath;
 let failures = 0;
@@ -67,6 +69,10 @@ const pack = spawnSync('npm', ['pack', '--dry-run', '--json'], { cwd: root, enco
 let packOk = pack.status === 0;
 let fileCount = 0;
 let forbidden = [];
+// Data files src/ reads at runtime. A file outside the allowlist works from a
+// checkout and silently vanishes from the installed package.
+const runtimeData = [UPSTREAM_REGISTRY_FILE].map((file) => path.relative(root, file).split(path.sep).join('/'));
+let missingData = [];
 try {
   const meta = JSON.parse(pack.stdout);
   const packedPaths = meta[0]?.files?.map((f) => f.path) ?? [];
@@ -79,10 +85,14 @@ try {
     /(?:^|\/)[^/]*\.key\.pem$/,
   ];
   forbidden = packedPaths.filter((file) => forbiddenPatterns.some((pattern) => pattern.test(file)));
-  packOk = packOk && fileCount > 0 && bundlesBin && forbidden.length === 0;
+  missingData = runtimeData.filter((file) => !packedPaths.includes(file));
+  packOk = packOk && fileCount > 0 && bundlesBin && forbidden.length === 0 && missingData.length === 0;
 } catch { packOk = false; }
 if (forbidden.length) {
   console.error(`  refused generated/private package artifacts:\n  ${forbidden.join('\n  ')}`);
+}
+if (missingData.length) {
+  console.error(`  runtime data missing from the package:\n  ${missingData.join('\n  ')}`);
 }
 step('npm pack --dry-run resolves files', packOk, `${fileCount} files`);
 

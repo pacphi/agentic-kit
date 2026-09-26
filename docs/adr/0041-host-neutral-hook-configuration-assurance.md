@@ -184,7 +184,7 @@ to action.
 
 ### 7. Upstream constraints are lifecycle data
 
-`config/agentic-dependency-constraints.json` records dependency, affected versions,
+`src/lib/hook-audit/agentic-dependency-constraints.json` records dependency, affected versions,
 primary issue, independently tracked issue state, bounded strategy, verification date
 and an objective sunset condition. It is not a grant store and never authorizes a patch.
 
