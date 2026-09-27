@@ -39,6 +39,17 @@ and supported `claude mcp serve` tool exposure are preserved. See
 [ADR-0051](adr/0051-supported-peer-delegation-and-host-realignment.md) for the policy,
 official source citations, authority boundaries and verification limits.
 
+## 2026-09-26: `ak sync`'s exit code ignores fixes you do by hand
+
+`ak sync` now exits 0 when everything it can repair has converged, even if a row whose fix you
+must do yourself (`→ manual:` in `ak status`) is still failing. Before, such a row passed sync when
+nothing else was planned and failed it next to any unrelated planned fix, so a CI job's result
+depended on unrelated drift. Each failing or warning manual row is now listed after the verdict
+under "needs your action", and `ak sync --json` lists them in a `needsYourAction` array of
+`{ "subsystem", "level", "message", "fix" }`. When a failing manual row remains, the verdict reads
+"converged — nothing left that sync can repair". A job that relied on `ak sync` failing for such a
+row should read `needsYourAction`, or run `ak status`, which still reports overall health.
+
 ## 2026-09-26: ak records and reverses its edits inside Ruflo's install
 
 When `ak sync` has to rewrite a better-sqlite3 line in a package inside Ruflo's install so the
@@ -113,7 +124,7 @@ every human line (the plan, step results, prompts) to stderr and exactly one JSO
 stdout, pretty-printed like `ak status --json`:
 
 ```json
-{ "plan": [], "steps": [], "unresolved": [], "skipped": [], "converged": true, "exitCode": 0 }
+{ "plan": [], "steps": [], "unresolved": [], "skipped": [], "needsYourAction": [], "converged": true, "exitCode": 0 }
 ```
 
 - `plan` and `skipped` items use the `ak status --json` row fields: `subsystem`, `level`,
@@ -122,6 +133,8 @@ stdout, pretty-printed like `ak status --json`:
   step printed, or `null`.
 - Each `unresolved` item is `{ "subsystem", "fix", "message", "reason" }`. `reason` is one of
   `not-converged`, `no-step`, `failing`, `apply-failed`, or `declined`.
+- Each `needsYourAction` item is `{ "subsystem", "level", "message", "fix" }`: a failing or
+  warning row whose fix you must do yourself. These never change `converged` or `exitCode`.
 - `converged` is `true` when nothing is left for sync to do, `false` when it ended with unresolved
   items, and `null` when it stopped before a verdict: a dry run with a plan, a rejected flag, or an
   error. A rejected flag or an error also adds `error`. The process exit code equals `exitCode`.

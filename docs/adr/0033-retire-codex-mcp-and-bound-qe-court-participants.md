@@ -7,7 +7,8 @@
   managed (`aqe` is not `false` in kit.json); an opted-out machine gets no AQE row or advice (#237);
   sync's convergence proof fails a planned repair that did not take (#237), and `--skip` leaves a
   subsystem out of one run (decision 5); the live participant-transport test runs its seats in a
-  disposable Ruflo project.
+  disposable Ruflo project; sync's exit code reflects only what sync can repair, so a manual row
+  never flips it and is listed under "needs your action" (decision 10).
 - **Earlier update:** 2026-09-23
 - **Update note:** Initial implementation retires only receipt-owned legacy MCP state,
   diagnoses effective Codex MCP topology, extends POSIX cleanup to process groups, and adds
@@ -123,6 +124,10 @@ seats. A successful Claude/Codex transport check therefore cannot be called a co
    `SYNC_STEPS` step (or the post-step host alignment) performs. Either one fails sync with exit 1
    next to the existing fail-level rows and recorded apply failures. Only fixes a sync step performs
    are planned (ADR-0023 §11), so manual fixes and fix-less advisories never become unresolved.
+   Sync's exit code reflects only what sync can repair (decision 10): a fail- or warn-level row
+   whose fix is manual never flips the exit code or the converged verdict, whether or not the plan
+   is empty, and each one is listed after the verdict under "needs your action"; `ak status`
+   remains the overall-health answer.
    A subsystem named by `--skip` for one run is taken out of the plan together with the step it
    owns (on every trigger, including ones another planned subsystem derives) and any fix only that
    step performs, judged per fix. A step shared with other subsystems still runs for them but leaves
@@ -131,8 +136,8 @@ seats. A successful Claude/Codex transport check therefore cannot be called a co
    are reported "skipped by request" and are neither unresolved nor failing.
    `--skip` accepts only the subsystems sync knows and never changes kit.json ownership.
    `ak sync --json` reports this verdict as one JSON object on stdout (`plan`, `steps`,
-   `unresolved` with a reason per item, `skipped`, `converged`, `exitCode`) and sends every human
-   line to stderr, so a script never parses progress text.
+   `unresolved` with a reason per item, `skipped`, `needsYourAction`, `converged`, `exitCode`) and
+   sends every human line to stderr, so a script never parses progress text.
 
 ## Consequences
 
@@ -166,6 +171,10 @@ seats. A successful Claude/Codex transport check therefore cannot be called a co
   `--skip` rejects unknown names, removes a subsystem's plan items and its step on derived triggers,
   and never turns a skipped subsystem into a failure. Its `--json` cases spawn sync and parse stdout
   as one JSON value while the human text arrives on stderr, including a rejected flag and an error.
+  `tests/kit/sync-needs-your-action.test.mjs` proves that a manual fail row leaves sync converged
+  with exit 0 both alone and next to a planned fix that converges, that a sync repair that did not
+  take still exits 1, that the "needs your action" heading prints once, and that `--json` carries
+  `needsYourAction` on every path.
 
 ## References
 

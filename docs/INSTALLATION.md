@@ -264,7 +264,8 @@ workspace when that identity can be established.
   plaintext content, retention, and trust models are acceptable.
 - Avoid `ak sync` self-update in a lockfile-controlled job; use `--no-upgrade`.
 - Read the result with `ak sync --json`: stdout is one JSON object whose `exitCode` matches
-  the process exit code, and the human log goes to stderr.
+  the process exit code, and the human log goes to stderr. Fixes you must do by hand never
+  fail the job; they are listed in `needsYourAction`.
 - Never persist provider credentials in the repository or image layer.
 - HOME, XDG, and npm-prefix isolation protects files but does not isolate the
   process table. Prefer a private PID namespace. A container using the host PID

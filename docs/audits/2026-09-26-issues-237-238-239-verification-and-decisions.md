@@ -915,7 +915,8 @@ this section had no rows for the eleven later commits; the two tables above are 
 changed in this wave:
 
 - Whether a fail-level manual row fails sync. Today it depends on whether anything else is planned;
-  choosing one rule is a maintainer decision, and the same class predates this branch.
+  choosing one rule is a maintainer decision, and the same class predates this branch. Decided
+  afterwards: see Decision 10 in Addendum 3.
 - Stopping the whole process tree on an abort. It needs Windows CI to prove; only the comment was
   corrected.
 - Tests that leave temporary folders behind, and pre-existing tests that write into an enclosing
@@ -1518,3 +1519,47 @@ The order constraints above still hold across those branches.
 **Follow-on (not on this branch).** ADR-0060, beginning with removing imported copies from project
 discovery and origin views, then the shared surface vocabulary; pruning of ak's settings safety
 copies; the AQE audit-chain break; Cowork as a discovery source.
+
+### Decision 10 — sync's exit code and hand-fix rows
+
+The Branch 0 correctness review (finding `correctness-manual-fail-exit-flips`) left one question
+for the maintainer. It was presented in the decision format above.
+
+**The situation.** Every `ak status` row with a fix says who performs it: an `ak sync` step
+(`repair: 'sync'`) or you (`repair: 'manual'`, shown as `→ manual:`). Sync plans only the first
+kind. After applying its plan it re-checks status and exits 1 when a planned repair did not take
+or a fail-level row remains.
+
+**The problem.** A fail-level manual row was judged two ways. With nothing else planned, sync
+stopped at "nothing sync can do" and exited 0. With any planned fix, `convergenceVerdict` in
+`src/commands/sync.mjs` counted every fail-level row as still failing, manual or not, and sync
+exited 1.
+
+**What the user sees.** The same machine passes or fails `ak sync` depending on unrelated drift. A
+custom recursive `[mcp_servers.codex]` table (a manual fail row) exits 0 on its own, but exits 1 on
+any machine with a managed AQE embedding backend, whose check sync always plans. A CI gate on
+`ak sync --json` flips for a reason it does not show.
+
+**What should be the case.** One rule, whatever else the plan holds.
+
+**The choices.**
+
+- **A. Sync's exit code reflects only what sync can repair.** A fail- or warn-level manual row never
+  flips the exit code or the converged verdict, whether or not the plan is empty. Every such row is
+  listed after the verdict under a "needs your action" heading, and in a `needsYourAction` array in
+  `--json` (subsystem, level, message, fix). `ak status` stays the overall-health answer and is
+  unchanged.
+- **B. Every fail-level row fails sync, manual or not,** including when the plan is empty. Sync then
+  fails on work it never performs, on every run, until the user acts.
+
+**Recommendation: A.** It matches the repair contract (sync never plans or claims a manual fix) and
+keeps `ak sync` a usable gate for what it owns, while `ak status` reports the whole picture.
+Options offered: **A: the exit code reflects only what sync can repair (Recommended)** · B: every
+fail-level row fails sync.
+
+**Choice: A.** Implemented test-first in `4dc1544`, with
+[ADR-0033](../adr/0033-retire-codex-mcp-and-bound-qe-court-participants.md) §9, `ak sync --help`
+and [UPGRADING](../UPGRADING.md) updated to match. When a failing manual row remains, the verdict
+reads "converged — nothing left that sync can repair" rather than "no failing subsystems". A manual
+row of a subsystem named by `--skip` is listed under "needs your action" rather than "skipped by
+request".
