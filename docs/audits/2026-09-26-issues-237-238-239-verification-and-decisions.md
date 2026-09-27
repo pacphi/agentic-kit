@@ -1427,6 +1427,16 @@ branch:
 verification code; 6.6 precedes 6.7–6.9; 6.8 precedes 6.10; 6.19 precedes 6.20. The `ak x verify`
 defects (`all` omitting `mcp`, unread `--json`) are resolved by 6.9 rather than patched in place.
 
+**Update, 2026-09-26: Stage 6 split by the program plan.** Stage 6 no longer runs as one stage on
+this branch. The upstream watch (6.19–6.21) landed here as eight commits whose subjects differ from
+the table: `24ddc42` (ships the constraint registry with ak, which the table did not list), `07c2694`
+(6.19), `47acb1b` (6.20), `3f0a7fe` (the `upstream-status` skill, not listed), `357f465` (6.21),
+`de88fdd`, `5d7698a` and `184b14c`. Every other item moved to the
+[remediation program plan](../superpowers/plans/2026-09-26-remediation-program.md): 6.22, 6.1, 6.2,
+6.23, 6.25 and 6.26 are Branch 3's items 1–6; 6.3, 6.4, 6.5, 6.18 and 6.24 are Branch 5's items 1–5;
+6.6 and 6.7 are Branch 6a's items 1–2; 6.8–6.16 are Branch 6b's items 1–9 and 6.17 its item 11.
+The order constraints above still hold across those branches.
+
 **Follow-on (not on this branch).** ADR-0060, beginning with removing imported copies from project
 discovery and origin views, then the shared surface vocabulary; pruning of ak's settings safety
 copies; the AQE audit-chain break; Cowork as a discovery source.

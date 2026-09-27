@@ -25,7 +25,9 @@ decisions, two same-day addenda (AgentDB and Ruflo memory alignment; memory loca
 transparency) with their decisions, the resulting remediation plan, and the implementation status
 of Stages 1–5 on the integration branch. A third addendum records later decisions (Ruflo daemon,
 AQE stores, verification, the refresh vocabulary, the upstream watch, the Ruflo support window and
-product names); its Stage 6 is planned, not implemented.
+product names). Of its Stage 6, the upstream watch is implemented on the integration branch; the
+other items moved to the [remediation program plan](../superpowers/plans/2026-09-26-remediation-program.md),
+which names the branch for each.
 
 Machine-readable inventories here are observations, not executable policy, ownership receipts,
 release capabilities or permission to read additional host history. Issue-specific matrices state
