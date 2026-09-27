@@ -1197,13 +1197,14 @@
         "files": ["src/commands/status/sections/scaffold-agents.mjs", "src/lib/scaffold.mjs"]
       },
       "adjustment": "fix(status): scaffold-agents advice names ruflo >= 3.38.2 instead of \"ruflo#2986 pending\"; keep the file probe and the delegation.",
-      "status": "released",
+      "status": "adopted",
       "constraintIds": [],
       "history": [
         { "date": "2026-08-12", "event": "filed" },
         { "date": "2026-08-12", "event": "closed", "note": "completed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.38.2; the ak change is pending" }
+        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.38.2; the ak change is pending" },
+        { "date": "2026-09-27", "event": "adopted", "note": "same ak change as ruvnet/ruflo#2986: the status note names 3.38.2, below the support window; removal proof: tests/kit/scaffold.test.mjs" }
       ]
     },
     {
@@ -1220,13 +1221,14 @@
         "files": ["src/commands/status/sections/scaffold-agents.mjs", "src/commands/sync.mjs", "src/lib/scaffold.mjs"]
       },
       "adjustment": "fix(status): scaffold-agents advice names ruflo >= 3.38.2 instead of \"ruflo#2986 pending\"; keep the file probe and the delegation.",
-      "status": "released",
+      "status": "adopted",
       "constraintIds": [],
       "history": [
         { "date": "2026-08-12", "event": "filed" },
         { "date": "2026-08-12", "event": "closed", "note": "merged" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.38.2; the ak change is pending" }
+        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.38.2; the ak change is pending" },
+        { "date": "2026-09-27", "event": "adopted", "note": "status note says the fix is in 3.38.2, below the support window (floor 3.39.0), and points to ak sync; file probe and delegation kept; removal proof: tests/kit/scaffold.test.mjs" }
       ]
     },
     {

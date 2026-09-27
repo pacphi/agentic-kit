@@ -134,3 +134,26 @@ test('runScaffoldAgentsFix flags non-convergence when gaps remain after a zero e
     assert.match(r.detail, /gap\(s\) remain/);
   } finally { rm(cwd); rm(homeDir); }
 });
+
+// The status row below the fix: `migrate fix --agents` shipped in Ruflo 3.38.2,
+// which is below the support window, so the old "#2986 pending" note is stale.
+test('without the upstream restore the row points to ak sync, not a pending upstream fix', async () => {
+  const { default: section } = await import('../../src/commands/status/sections/scaffold-agents.mjs');
+  const cwd = tmpProject();
+  const dist = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-scaffold-dist-'));
+  const homeDir = tmpHome();
+  try {
+    const rows = await section.collect({
+      cwd,
+      gaps: (dir) => removedAgentGaps(dir, { homeDir }),
+      fixAvailable: () => upstreamFixAvailable({ cliDist: dist }),
+    });
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].level, 'info');
+    assert.match(rows[0].message,
+      /installed Ruflo predates `migrate fix --agents` \(added in 3\.38\.2, below the support window\): run `ak sync`/);
+    assert.doesNotMatch(rows[0].message, /#2986 pending/);
+  } finally {
+    rm(cwd); rm(dist); rm(homeDir);
+  }
+});
