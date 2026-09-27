@@ -1253,8 +1253,11 @@ Behavior that differs from, or goes beyond, the plan text.
   - `taskkill` process-tree kills;
   - the `%APPDATA%`, `%LOCALAPPDATA%` and `AppData` tool-folder branch.
 - `tests/live/*`.
-  - The memory-routing test uses the real home folder.
-  - The qe-court test is paid.
+  - The memory-routing test used the real home folder. On `fix/test-hermeticity` it runs in a
+    disposable home and a disposable Git-initialised project, without the caller's inherited
+    Ruflo variables; it passed there on macOS with Ruflo 3.46.1 and left the real state unchanged
+    (brief fingerprint before and after identical).
+  - The qe-court test is paid, so it stays manual.
 - Per-lane browser checks against real data:
   - Live source health and the zero-operations note;
   - host badges and About chips;
