@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { readSession, maskSecrets, MAX_TURN_CHARS, _resetForTest } from '../../src/lib/usage-index.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 // ADR-0009 §8 / design decision 2 — "turn truncation is announced, with both
 // figures". A truncated turn must say HOW MUCH was withheld, not merely that
@@ -40,7 +40,7 @@ test('MAX_TURN_CHARS is the 40,000 the spec states', () => {
 
 /** A sandbox with no fixture corpus: one hand-written session is the whole answer. */
 function soloSandbox() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-trunc-'));
+  const dir = tempDir('ak-trunc');
   const claude = path.join(dir, 'claude', '-Users-me-proj');
   fs.mkdirSync(claude, { recursive: true });
   return {

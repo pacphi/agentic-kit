@@ -8,7 +8,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runTieredConformance, CONFORMANCE_TIERS } from '../../src/lib/adapters/conformance.mjs';
@@ -16,12 +15,13 @@ import {
   grantsFor, grantCapability, grantedCapabilitiesFor, recordTierResult,
 } from '../../src/lib/adapters/grants.mjs';
 import { lifecycleAdapterFor } from '../../src/lib/adapters/lifecycle-registry.mjs';
+import { tempDir as makeTempDir } from './helpers/temp-dir.mjs';
 
 const FIXTURE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../fixtures/adapters/acme');
 const VALID_MANIFEST_PATH = path.join(FIXTURE_ROOT, 'manifest.json');
 
 function tempGrantsFile() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-conformance-tiers-grants-'));
+  const dir = makeTempDir('ak-conformance-tiers-grants');
   return path.join(dir, 'adapter-grants.json');
 }
 
@@ -257,7 +257,7 @@ test('activity-routing tier is honestly skipped when the manifest declares neith
 
 test("activity-routing sends a bounded, directive probe prompt and runs the worker in a throwaway scratch cwd, never the caller's process.cwd()", async () => {
   const grantsFile = tempGrantsFile();
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-conformance-probe-'));
+  const tempDir = makeTempDir('ak-conformance-probe');
   const runHookSource = `
 import fs from 'node:fs';
 import path from 'node:path';
@@ -295,7 +295,7 @@ process.stdin.on('end', () => {
 
 test('an explicit timeoutMs option reaches the real worker: a hook that outlives it fails the tier as a genuine timeout, not a 120s wait', async () => {
   const grantsFile = tempGrantsFile();
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-conformance-timeout-override-'));
+  const tempDir = makeTempDir('ak-conformance-timeout-override');
   const runHookSource = "setTimeout(() => { process.stdout.write(JSON.stringify({ summary: 'too slow', provider: 'probe' })); }, 3000);\n";
   const manifestSource = writeProbeAdapter(tempDir, { runHookSource, hookTimeoutMs: 5000 });
 
@@ -314,7 +314,7 @@ test('an explicit timeoutMs option reaches the real worker: a hook that outlives
 
 test("with no explicit override, the outer runner honors the manifest's own declared execution.run.hook.timeoutMs instead of the runner's 120s default", async () => {
   const grantsFile = tempGrantsFile();
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-conformance-declared-timeout-'));
+  const tempDir = makeTempDir('ak-conformance-declared-timeout');
   const runHookSource = "setTimeout(() => { process.stdout.write(JSON.stringify({ summary: 'too slow', provider: 'probe' })); }, 3000);\n";
   const manifestSource = writeProbeAdapter(tempDir, { runHookSource, hookTimeoutMs: 300 });
 
@@ -352,7 +352,7 @@ test('aqe-provider is skipped when no candidate is declared, even though its act
 
 test('aqe-provider genuinely passes a non-injectable public-runtime stdin/stdout probe before its explicit grant', async () => {
   const grantsFile = tempGrantsFile();
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-conformance-aqe-provider-'));
+  const tempDir = makeTempDir('ak-conformance-aqe-provider');
   const manifestSource = writeProbeAdapter(tempDir, {
     runHookSource: 'process.stdin.resume(); process.stdin.on(\'end\', () => process.stdout.write(JSON.stringify({ summary: \'activity OK\', provider: \'probe\' })));\n',
     aqeHookSource: 'let input = \'\'; process.stdin.setEncoding(\'utf8\'); process.stdin.on(\'data\', (chunk) => { input += chunk; }); process.stdin.on(\'end\', () => { if (input !== \'Reply with exactly: OK\' || process.env.AK_AQE_PROVIDER !== \'probe\' || process.env.AK_AQE_MODEL !== \'probe-model\' || !process.env.AK_AQE_PROJECT_CWD) { process.stderr.write(\'bad AQE provider probe contract\'); process.exit(3); return; } process.stdout.write(\'OK\'); });\n',
@@ -386,7 +386,7 @@ test('aqe-provider genuinely passes a non-injectable public-runtime stdin/stdout
 
 test('aqe-provider fails honestly and records no pass when the real hook violates the stdout protocol', async () => {
   const grantsFile = tempGrantsFile();
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-conformance-aqe-provider-bad-output-'));
+  const tempDir = makeTempDir('ak-conformance-aqe-provider-bad-output');
   const manifestSource = writeProbeAdapter(tempDir, {
     runHookSource: 'process.stdin.resume(); process.stdin.on(\'end\', () => process.stdout.write(JSON.stringify({ summary: \'activity OK\', provider: \'probe\' })));\n',
     aqeHookSource: 'process.stdin.resume(); process.stdin.on(\'end\', () => process.stdout.write(\'WRONG\'));\n',
@@ -670,7 +670,7 @@ function flakyPrimaryEligibleManifest(flagPath) {
 
 test('N-1: a grant-bearing tier that RE-FAILS at the SAME hash voids the stored tier and the live capability, leaving an unrelated grant untouched', async () => {
   const grantsFile = tempGrantsFile();
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-conformance-tiers-refail-'));
+  const dir = makeTempDir('ak-conformance-tiers-refail');
   const flagPath = path.join(dir, 'fail-after-here');
   const manifestSource = 'mem://acme-flaky-primary-eligible';
   const readManifest = async () => flakyPrimaryEligibleManifest(flagPath);

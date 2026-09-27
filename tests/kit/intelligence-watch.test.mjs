@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { IntelligenceWatch } from '../../src/lib/live/intelligence-watch.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
-const sandbox = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ak-intel-watch-'));
+const sandbox = () => tempDir('ak-intel-watch');
 
 /** A controllable fake clock: `now()` returns the current fake ms, `advance`
  *  moves it forward without any real wall-clock wait. */

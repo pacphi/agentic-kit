@@ -12,10 +12,10 @@ const enabled = process.env.AK_CODEX_CONTEXT_CONFORMANCE === '1';
 const clientVersion = process.env.AK_CODEX_CONTEXT_CLIENT_VERSION ?? '0.154.0';
 for (const [model, expected] of [['gpt-6-astra', 828400], ['gpt-5.6-sol', 828400], ['gpt-5.5', 258400]]) {
   test(`Codex ${clientVersion} native per-model clamp: ${model}`, { skip: !enabled, timeout: 65000 }, t => {
-    assert.equal(spawnSync('codex', ['--version'], { encoding: 'utf8', timeout: 5000 }).stdout.trim(), `codex-cli ${clientVersion}`);
+    assert.equal(spawnSync('codex', ['--version'], { encoding: 'utf8', timeout: 5000 }).stdout.trim(), `codex-cli ${clientVersion}`); // spawn-env: inherits (live: version probe of the installed Codex CLI)
     const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-context-contract-'));
     t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
-    const result = spawnSync('codex', ['exec', '--skip-git-repo-check', '-C', cwd, '-s', 'read-only',
+    const result = spawnSync('codex', ['exec', '--skip-git-repo-check', '-C', cwd, '-s', 'read-only', // spawn-env: inherits (live, opt-in: needs the developer's Codex login and writes a Codex session)
       '-m', model, ...(process.env.AK_CODEX_CONTEXT_USE_CONFIG === '1' ? [] : ['-c', 'model_context_window=1050000']), '-c', 'model_reasoning_effort="low"',
       '--json', 'Reply exactly AK_CAPACITY_OK. Do not call any tools.'], { encoding: 'utf8', timeout: 55000, maxBuffer: 4 * 1024 * 1024 });
     assert.equal(result.status, 0, 'native smoke request must complete');

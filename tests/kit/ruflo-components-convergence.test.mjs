@@ -3,13 +3,14 @@
 // driven through the same read-only path `ak status` and the dashboard use:
 // rufloComponentRows(rufloComponentsPayload(...)). Every path is injected into a
 // throwaway directory; the home sandbox guards anything that falls back to paths.mjs.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { sandboxHome, assertSandboxed } from './helpers/home-sandbox.mjs';
+import { sandboxHome, assertSandboxed, rmrf } from './helpers/home-sandbox.mjs';
 
 const HOME = sandboxHome('ak-rc-convergence');
+after(() => rmrf(HOME));
 const paths = await import('../../src/lib/paths.mjs');
 const { rufloComponentsPayload } = await import('../../src/lib/ruflo-components/snapshot.mjs');
 const { rufloComponentRows } = await import('../../src/commands/status/sections/ruflo-components.mjs');

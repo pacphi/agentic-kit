@@ -18,12 +18,14 @@ function contained(realRoot, realFile) {
   return realFile === realRoot || realFile.startsWith(`${realRoot}${path.sep}`);
 }
 
-/** Read a bounded regular file without following a final symlink. */
+/** Read a bounded regular file without following a final symlink. Identity is
+ *  compared as BigInt: Windows file IDs can exceed 2^53, where two different
+ *  files can read as the same Number inode. */
 /** @returns {any} */
 export function readBoundedFile(file, containmentRoot, maxBytes = MAX_AUDIT_SOURCE_BYTES) {
   let descriptor;
   try {
-    const stat = fs.lstatSync(file);
+    const stat = fs.lstatSync(file, { bigint: true });
     if (!stat.isFile() || stat.isSymbolicLink()) {
       return { status: 'refused', error: 'source must be a regular non-symlink file' };
     }
@@ -35,7 +37,7 @@ export function readBoundedFile(file, containmentRoot, maxBytes = MAX_AUDIT_SOUR
     }
     const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0);
     descriptor = fs.openSync(file, flags);
-    const opened = fs.fstatSync(descriptor);
+    const opened = fs.fstatSync(descriptor, { bigint: true });
     if (!opened.isFile() || opened.size > maxBytes) {
       return { status: 'refused', error: 'opened source is not a bounded regular file' };
     }
@@ -46,7 +48,7 @@ export function readBoundedFile(file, containmentRoot, maxBytes = MAX_AUDIT_SOUR
     if (reopenedRealFile !== realFile || !contained(realRoot, reopenedRealFile)) {
       return { status: 'refused', error: 'source path changed between inspection and open' };
     }
-    const bytes = Buffer.alloc(opened.size);
+    const bytes = Buffer.alloc(Number(opened.size)); // bounded by maxBytes above
     let offset = 0;
     while (offset < bytes.length) {
       const count = fs.readSync(descriptor, bytes, offset, bytes.length - offset, offset);

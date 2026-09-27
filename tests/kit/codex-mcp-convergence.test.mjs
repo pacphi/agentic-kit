@@ -1,14 +1,15 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
   sandboxHome, assertSandboxed, sandboxProject, writeKitConfig,
-  offlineKitConfig, fakeGlobalRoot, captureLog, snapshot, assertUnchanged,
+  offlineKitConfig, fakeGlobalRoot, captureLog, snapshot, assertUnchanged, rmrf,
 } from './helpers/home-sandbox.mjs';
 import { isolateProject } from './helpers/project-isolation.mjs';
 
 const sandbox = sandboxHome('ak-mcp-convergence');
+after(() => rmrf(sandbox));
 const paths = await import('../../src/lib/paths.mjs');
 assertSandboxed(paths, sandbox);
 isolateProject('ak-codex-mcp-convergence');
@@ -20,6 +21,7 @@ const { managedAgentBrowserEnv } = await import('../../src/lib/agent-browser.mjs
 const { ensureRufloMcpInCodex } = await import('../../src/lib/providers.mjs');
 const { reconcileCodexMcp } = await import('../../src/lib/codex-mcp-reconcile.mjs');
 const project = sandboxProject('ak-mcp-convergence');
+after(() => rmrf(project));
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
 const canonical = '[mcp_servers.ruflo]\ncommand = "ak"\nargs = ["x", "ruflo-mcp"]\n';
 const legacy = '[mcp_servers.claude-flow]\ncommand = "ruflo"\nargs = ["mcp", "start"]\n';

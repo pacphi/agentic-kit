@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {chromium} from 'playwright';
+import { launchChrome } from './helpers/launch-chrome.mjs';
 import {renderPage} from '../../src/lib/dashboard/page.mjs';
 import {buildContextReport} from '../../src/lib/context-report.mjs';
 
@@ -22,7 +22,7 @@ const report=buildContextReport({integrations:{hosts:{claude:true,codex:true,ope
  cacheFetchedAt:'2026-09-09T14:00:00Z',models:Array.from({length:12},(_,i)=>({model:'model-'+i,nativeWindow:200000,maximumWindow:1000000,effectiveWindow:950000}))},{now:Date.parse(capturedAt),modelSnapshot});
 
 test('context and project grouping stay readable, keyboard operable and evidence-aware',async t=>{
- const browser=await chromium.launch({channel:'chrome',headless:true});t.after(()=>browser.close());
+ const browser=await launchChrome();t.after(()=>browser.close());
  const page=await browser.newPage({viewport:{width:1440,height:1050}}),errors=[];
  page.on('pageerror',e=>errors.push(e.message));
  let projects={projects:[main],discoveryProjects:[main,work,other],everSeen:measured(3),onDisk:measured(2),count:measured(3)};

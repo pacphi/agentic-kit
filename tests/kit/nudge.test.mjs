@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { localDrift } from '../../src/lib/nudge.mjs';
 import { upsertBlock } from '../../src/lib/blocks.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 // Fixtures inject everything machine-specific: a fake pkgRoot (so built-in
 // templates resolve to nothing → 'missing-template', never drift), an explicit
@@ -12,7 +12,7 @@ import { upsertBlock } from '../../src/lib/blocks.mjs';
 // statusline → that probe stays quiet), and explicit guidance targets. What
 // remains under test is exactly the blocks-drift phrasing the bin nudge prints.
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-test-'));
+const tmp = () => tempDir('nudge-test');
 const block = (slug, body) => `<!-- BEGIN ${slug} -->\n${body}\n<!-- END ${slug} -->\n`;
 
 function fixture() {

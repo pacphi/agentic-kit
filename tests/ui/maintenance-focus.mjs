@@ -2,19 +2,22 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { chromium } from 'playwright';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { launchChrome } from './helpers/launch-chrome.mjs';
 import { renderPage } from '../../src/lib/dashboard/page.mjs';
 import { CSS } from '../../src/lib/dashboard/styles.mjs';
 import { baseInventory } from '../fixtures/maintenance/management-fixtures.mjs';
 import { runInventoryQuery } from '../../src/lib/maintenance/management/query.mjs';
 import { inspectorFor } from '../../src/lib/maintenance/management/guidance.mjs';
 import { publicInventoryPage, publicInspector } from '../../src/lib/dashboard/maintenance-api.mjs';
+const SHOTS=path.join(path.dirname(fileURLToPath(import.meta.url)),'..','..','.ui-artifacts');
 function source(name){return fs.readFileSync(new URL('../../src/lib/dashboard/client/'+name+'.mjs',import.meta.url),'utf8').replace(/^import\s[\s\S]*?from ['"][^'"]+['"];\s*$/gm,'').replace(/\bexport (?=(?:function|var)\b)/g,'');}
 test('focus browser progressively narrows to exact installations and preserves filters through relationships',async(t)=>{
  const inventory=structuredClone(baseInventory()),requests=[],errors=[];
  const skillResources=inventory.resources.filter(r=>r.kind==='skill');
  for(const resource of skillResources)resource.presentationFamilyId=skillResources[0].resourceId;
- const browser=await chromium.launch({channel:'chrome',headless:true});t.after(()=>browser.close());
+ const browser=await launchChrome();t.after(()=>browser.close());
  const page=await browser.newPage({viewport:{width:1440,height:1050}});page.on('pageerror',e=>errors.push(e.message));
  const markup=renderPage({name:'Fixture',version:'test'}).match(/<section class="mnt-panel mnt-inventory"[\s\S]*?<\/section>/)[0];
  await page.route('http://maintenance.test/**',async route=>{
@@ -68,7 +71,8 @@ test('focus browser progressively narrows to exact installations and preserves f
  assert.equal(await page.evaluate(()=>globalThis.MNT.scope),'user');
  await page.locator('#mnt-related-back').click();
  await page.locator('#mnt-inspector-title').waitFor();
- await page.screenshot({path:'/tmp/ak-focus-implemented-desktop.png',fullPage:true});
+ fs.mkdirSync(SHOTS,{recursive:true});
+ await page.screenshot({path:path.join(SHOTS,'focus-implemented-desktop.png'),fullPage:true});
  await page.setViewportSize({width:390,height:844});
  assert.equal(await page.locator('#mnt-inspector').evaluate(el=>globalThis.getComputedStyle(el).position),'static');
  assert.equal(await page.evaluate(()=>globalThis.document.documentElement.scrollWidth<=globalThis.innerWidth),true);
@@ -77,24 +81,30 @@ test('focus browser progressively narrows to exact installations and preserves f
  await page.locator('[data-mnt-focus="user"]').waitFor();
  await page.locator('[data-mnt-focus="system"]').focus();await page.keyboard.press('ArrowDown');
  assert.equal(await page.locator('[data-mnt-focus="machine"]').evaluate(el=>el===globalThis.document.activeElement),true);
- await page.screenshot({path:'/tmp/ak-focus-implemented-mobile.png',fullPage:true});
+ await page.screenshot({path:path.join(SHOTS,'focus-implemented-mobile.png'),fullPage:true});
  assert.deepEqual(errors,[]);
 });
 
-test('polyglot cards expose labelled language badges and an accessible disclosure',async(t)=>{
- const browser=await chromium.launch({channel:'chrome',headless:true});t.after(()=>browser.close());
+test('polyglot cards show every language as a labelled, wrapping icon with no disclosure',async(t)=>{
+ const browser=await launchChrome();t.after(()=>browser.close());
  const page=await browser.newPage({viewport:{width:1100,height:650}});
- const languages=[['rust','Rust','Rs'],['typescript','TypeScript','TS'],['javascript','JavaScript','JS'],['python','Python','Py'],['java','Java','Jv']].map(([id,name,icon])=>({id,name,icon,evidence:'source'}));
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const languages=[['rust','Rust'],['typescript','TypeScript'],['javascript','JavaScript'],['python','Python'],['java','Java']].map(([id,name])=>({id,name,evidence:'source'}));
  const state={facets:{},query:{navigation:{level:'project',nodes:[{value:'prj_example',label:'billing-service',count:24,projectKind:'git',languages}]},groups:[]}};
  await page.setContent('<!doctype html><html data-theme="dark"><head><style>'+CSS+'</style></head><body><main style="padding:32px"><h2>Projects</h2><div id="cards"></div></main></body></html>');
- await page.addScriptTag({content:'var MNT='+JSON.stringify(state)+';var MNT_SCOPE_LABELS={};function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;");}function mntKindLabel(s){return s;}function mntFacetValueLabel(_,s){return s;}function mntIcon(){return "";}function mntAvailableTo(){return "";}\n'+source('maintenance-language-logos')+'\n'+source('maintenance-focus')+'\ndocument.getElementById("cards").innerHTML=renderMntFocusResults(false);'});
- assert.equal(await page.locator('.mnt-language-icon:visible').count(),3);
- await page.getByText('+2 more languages',{exact:true}).focus();
- await page.keyboard.press('Enter');
+ await page.addScriptTag({content:'var MNT='+JSON.stringify(state)+';var MNT_SCOPE_LABELS={};function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;");}function mntKindLabel(s){return s;}function mntFacetValueLabel(_,s){return s;}function mntIcon(){return "";}function mntAvailableTo(){return "";}\n'
+  +source('maintenance-language-logos')+'\n'+source('maintenance-cards')+'\n'+source('maintenance-focus')
+  +'\ndocument.getElementById("cards").innerHTML=renderMntFocusResults(false);'});
+ assert.deepEqual(errors,[]);
  assert.equal(await page.locator('.mnt-language-icon:visible').count(),5);
- assert.equal(await page.getByRole('img', { name: 'Python — Source language detected', exact: true }).isVisible(),true);
- await page.screenshot({path:'/tmp/ak-polyglot-projects-svg.png'});
+ assert.equal(await page.locator('.mnt-language-more').count(),0);
+ assert.equal(await page.getByText(/more languages/).count(),0);
+ assert.equal(await page.getByRole('img',{name:'Python — Source language detected',exact:true}).isVisible(),true);
+ fs.mkdirSync(SHOTS,{recursive:true});
+ await page.screenshot({path:path.join(SHOTS,'polyglot-projects-svg.png')});
  await page.emulateMedia({colorScheme:'light'});
  await page.locator('html').evaluate(el=>el.setAttribute('data-theme','light'));
- await page.screenshot({path:'/tmp/ak-polyglot-projects-svg-light.png'});
+ await page.screenshot({path:path.join(SHOTS,'polyglot-projects-svg-light.png')});
+ await page.setViewportSize({width:390,height:844});
+ assert.equal(await page.evaluate(()=>globalThis.document.documentElement.scrollWidth>globalThis.innerWidth),false,'icons wrap instead of overflowing');
 });

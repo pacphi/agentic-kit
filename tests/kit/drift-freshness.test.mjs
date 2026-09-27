@@ -2,7 +2,7 @@
 // upgrade, and a failed forced fetch must never clobber good cached data.
 // #135's solver contract lives in heal-natives.test.mjs; this file owns the
 // drift-report resilience contract and the sync plan-freshness contract.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -14,6 +14,7 @@ import {
 import { isolateProject } from './helpers/project-isolation.mjs';
 
 const HOME = sandboxHome('ak-drift-fresh');
+after(() => rmrf(HOME));
 const paths = await import('../../src/lib/paths.mjs');
 const { driftReport, KIT_PKG } = await import('../../src/lib/versions.mjs');
 const sync = await import('../../src/commands/sync.mjs');
@@ -23,6 +24,7 @@ isolateProject('ak-drift-freshness');
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const PROJECT = sandboxProject('ak-drift-fresh');
+after(() => rmrf(PROJECT));
 const FLAGS = (over = {}) => ({ 'dry-run': false, 'no-upgrade': false, json: false, ...over });
 
 /** kit.json with an explicit versionCheck state; global root has ruflo+aqe fixtures. */

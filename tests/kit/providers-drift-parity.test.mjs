@@ -9,7 +9,7 @@
 // and comparing them directly, for a fixture with INDUCED drift — so a
 // future edit that reintroduces a second, independently-derived comparison
 // fails here immediately rather than shipping a silent divergence.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -60,6 +60,7 @@ const providerDriftRow = (rows) => rows
 
 test('#129 parity: an induced chain-order edit is reported as drift, identically, on both paths', async () => {
   const project = sandboxProject('ak-drift-parity-induced');
+  after(() => rmrf(project));
   seedHome(CHAIN_CFG());
   const cfg = loadKitConfig();
   applyAqeRouter(cfg, project); // converge once, exactly what `ak sync` runs
@@ -93,6 +94,7 @@ test('#129 parity: an induced chain-order edit is reported as drift, identically
 
 test('#129 parity: a freshly converged chain is reported as clean, identically, on both paths', async () => {
   const project = sandboxProject('ak-drift-parity-clean');
+  after(() => rmrf(project));
   seedHome(CHAIN_CFG());
   const cfg = loadKitConfig();
   applyAqeRouter(cfg, project);

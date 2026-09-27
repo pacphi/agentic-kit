@@ -244,16 +244,56 @@ pnpm run lint:links:internal # requires lychee
 
 Run one suite while iterating: `node --test tests/kit/versions.test.mjs`.
 
-Test isolation has two halves. `sandboxHome()` (`tests/kit/helpers/home-sandbox.mjs`)
-redirects every home-relative path. Commands also write relative to the current
-directory, so any test file that calls `sync.run`, `setup.run*` or `uninstall.run` must
-call `isolateProject()` (`tests/kit/helpers/project-isolation.mjs`) once at module scope.
-It moves the file into a throwaway project and fails the file if the real repository's
-`.claude/settings.local.json`, `.claude/helpers/statusline.cjs`, `CLAUDE.md`, `AGENTS.md`
-(and a few other project files, or their `.ak-*`/`.agentic-kit-*` siblings) change.
-`tests/kit/project-isolation.test.mjs` fails when a new test file skips it. A live Claude
-Code or Ruflo session that edits those files in the same checkout during `pnpm test`
-also trips the guard; rerun with the session idle.
+`pnpm test` and `pnpm run test:ui` run through `scripts/run-tests.mjs`, a guard around the
+suite. It fingerprints real user state (ak's config and state folders, the Claude Code, Codex
+CLI and OpenCode files ak writes in their homes, this repository's root `CLAUDE.md`, `AGENTS.md`
+and `.mcp.json`, and its `.claude`, `.swarm`, `.agentic-qe`, `.claude-flow` and `.harness`)
+before and after the run, and points `TMPDIR`/`TEMP`/`TMP` at a fresh
+`ak-suite-*` folder. Its exit code tells you what went wrong:
+
+| Exit | Meaning |
+| ---- | ------- |
+| the failing command's code | a test command failed (the after-check still runs) |
+| 2 | the `ak-suite-*` folder is inside a git repository; point `TMPDIR` elsewhere |
+| 3 | real user state changed; the changed paths are listed |
+| 4 | the run left temporary folders behind; they are listed |
+
+Files a live Claude Code, Ruflo or AQE session writes during the run are listed as
+concurrent writers and do not fail a local run; CI, or `AK_TRIPWIRE_STRICT=1`, fails on
+them too. Guard a single command the same way with
+`node scripts/run-tests.mjs exec -- <node args>`.
+
+Inside the suite, isolation comes from shared helpers:
+
+- `sandboxHome()` (`tests/kit/helpers/home-sandbox.mjs`) redirects every home-relative
+  path for tests that run machine-mutating commands in process.
+- `spawnEnv()` (same file) builds the environment for every spawned child, with all
+  per-user bases inside a sandbox home. `tests/kit/spawn-env-guard.test.mjs` fails on a
+  line that spreads `process.env` and on a `child_process` call with no `env` option (an
+  implicit inherit), unless the line carries `spawn-env: inherits (<reason>)`. It reads
+  source text: a call whose options object is built elsewhere needs the marker, and a call
+  through a local wrapper function is not seen. On Windows `spawnEnv()` matches variable
+  names case-insensitively and keeps the parent's spelling (the search path is usually
+  `Path`), so read a value from its result with `envValue()`.
+- `launchChrome()` (`tests/ui/helpers/launch-chrome.mjs`) starts the system Chrome for UI
+  tests with `TMPDIR`, `TEMP`, `TMP` and `MAC_CHROMIUM_TMPDIR` pointed at its own folder, and
+  removes that folder on `browser.close()`. Chrome leaves
+  `com.google.Chrome.chrome_chrome_url_fetcher_.*` folders in its temp dir, which on Linux
+  would otherwise fail the runner's leftover check. `tests/kit/ui-chrome-launch.test.mjs`
+  fails on a UI test that calls `chromium.launch` directly.
+- `redirectToolState()` (same file) moves the config, state, data, cache and temp bases for
+  in-process tests whose code under test spawns real tools such as OpenCode.
+- `tempDir()` (`tests/kit/helpers/temp-dir.mjs`) makes temporary folders that are removed
+  when the test (or the file) finishes.
+- `isolateProject()` (`tests/kit/helpers/project-isolation.mjs`) covers commands that write
+  relative to the current directory: any test file that calls `sync.run`, `setup.run*` or
+  `uninstall.run` calls it once at module scope. It moves the file into a throwaway project
+  and fails the file if the real repository's project files change.
+  `tests/kit/project-isolation.test.mjs` fails when a new test file skips it. A live Claude
+  Code or Ruflo session that edits those files in the same checkout also trips this guard;
+  rerun with the session idle.
+
+[AGENTS.md](AGENTS.md#testing) has the exact list of watched paths.
 
 CI additionally runs a **CLI smoke** against a sandboxed `HOME` (see `ci.yml`):
 `--version`, `--help --all`, `status --json` (asserts valid JSON + `overall`),

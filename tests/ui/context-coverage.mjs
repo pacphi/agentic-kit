@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {chromium} from 'playwright';
+import { launchChrome } from './helpers/launch-chrome.mjs';
 import {renderPage} from '../../src/lib/dashboard/page.mjs';
 import {buildContextProjection} from '../../src/lib/usage-context.mjs';
 import {blankSession,noteContextSample} from '../../src/lib/usage-parsers.mjs';
@@ -11,7 +11,7 @@ const claudeSub=blankSession('cs','claude');claudeSub.sidechain=true;
 noteContextSample(claude,326000);noteContextSample(codex,90000,100000);noteContextSample(older,50000);noteContextSample(claudeSub,180000);
 
 test('Context distinguishes input-only, partial paired coverage and no sessions without zero windows',async t=>{
- const browser=await chromium.launch({channel:'chrome',headless:true});t.after(()=>browser.close());
+ const browser=await launchChrome();t.after(()=>browser.close());
  const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
  page.on('pageerror',error=>errors.push(error.message));
  const projection=buildContextProjection([claude,codex,older,claudeSub],{windowDays:30});
@@ -49,7 +49,7 @@ test('Context distinguishes input-only, partial paired coverage and no sessions 
 });
 
 test('Context pressure tooltips are focusable and state each host formula; empty state follows source health',async t=>{
- const browser=await chromium.launch({channel:'chrome',headless:true});t.after(()=>browser.close());
+ const browser=await launchChrome();t.after(()=>browser.close());
  const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
  page.on('pageerror',error=>errors.push(error.message));
  let health={claude:{status:'ok'},codex:{status:'ok'},opencode:{status:'absent',reason:'absent'}};

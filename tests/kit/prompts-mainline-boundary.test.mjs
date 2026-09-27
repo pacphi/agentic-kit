@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnEnv } from './helpers/home-sandbox.mjs';
 import { renderPage } from '../../src/lib/dashboard/page.mjs';
 
 const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin/agentic-kit.mjs');
@@ -15,14 +16,7 @@ function runUsage(args) {
     return spawnSync(process.execPath, [BIN, 'usage', ...args], {
       cwd: home,
       encoding: 'utf8',
-      env: {
-        ...process.env,
-        HOME: home,
-        USERPROFILE: home,
-        XDG_CONFIG_HOME: path.join(home, '.config'),
-        XDG_DATA_HOME: path.join(home, '.local', 'share'),
-        NO_COLOR: '1',
-      },
+      env: spawnEnv(home, { NO_COLOR: '1' }),
     });
   } finally {
     fs.rmSync(home, { recursive: true, force: true });

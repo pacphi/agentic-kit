@@ -7,12 +7,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { parseClaude } from '../../src/lib/usage-parsers.mjs';
 import { decodeClaudeRecord } from '../../src/lib/telemetry-records.mjs';
 import { buildIndex, SCHEMA_VERSION, _resetForTest } from '../../src/lib/usage-index.mjs';
 import { costOf, priceFor } from '../../src/lib/pricing.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 const T0 = Date.parse('2026-08-20T10:00:00.000Z');
 const at = (s) => new Date(T0 + s * 1000).toISOString();
@@ -190,7 +190,7 @@ test('turn rows (reader path) are still emitted per transcript line', () => {
 test('SCHEMA_VERSION is at least 22 and a v21 cache is discarded and re-parsed de-duplicated', async () => {
   assert.ok(SCHEMA_VERSION >= 22, 'the de-dup correction changes every cached Claude record');
   _resetForTest();
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-dedup-'));
+  const dir = tempDir('ak-dedup');
   const proj = path.join(dir, 'claude', '-Users-me-proj');
   fs.mkdirSync(proj, { recursive: true });
   const base = Date.parse('2026-07-24T10:00:00.000Z');

@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { chromium } from 'playwright';
+import { launchChrome } from './helpers/launch-chrome.mjs';
 import { renderPage } from '../../src/lib/dashboard/page.mjs';
 
 const gitProjects = Array.from({length:12},(_,index)=>({key:'repo-'+index,label:'Git project '+index,
@@ -11,7 +11,7 @@ const gitProjects = Array.from({length:12},(_,index)=>({key:'repo-'+index,label:
 const totals={cost:1000,sessions:40,spanMinutes:500,tokens:12000};
 
 test('Usage Projects shows top ten Git projects and follows the timeframe without changing overall totals',async t=>{
- const browser=await chromium.launch({channel:'chrome',headless:true});t.after(()=>browser.close());
+ const browser=await launchChrome();t.after(()=>browser.close());
  const page=await browser.newPage({viewport:{width:1440,height:1050}}),errors=[],windows=[];
  page.on('pageerror',error=>errors.push(error.message));
  let legacy=false;

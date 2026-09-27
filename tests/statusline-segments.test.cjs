@@ -15,6 +15,8 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+// Every temp folder and footer cache this suite makes lands here and is removed on exit.
+require('./kit/helpers/private-tmpdir.cjs').usePrivateTmpdir('ak-statusline-segments');
 
 const ROOT = path.resolve(__dirname, '..');
 const SRC = path.join(ROOT, 'src', 'templates', 'statusline-footer.cjs');

@@ -1,4 +1,6 @@
 import { test } from 'node:test';
+import { spawnEnv } from './helpers/home-sandbox.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 import assert from 'node:assert/strict';
 import {
   HOST_REGISTRY,
@@ -69,7 +71,7 @@ test('model discovery descriptor validation rejects ambiguous owners and unsafe 
 test('the shipped registries cannot fail construction-time validation (import cannot throw)', () => {
   const r = spawnSync(process.execPath, ['-e',
     "import('./src/lib/adapters/registries.mjs').then(() => console.log('construction-valid'))",
-  ], { encoding: 'utf8', cwd: REPO });
+  ], { encoding: 'utf8', cwd: REPO, env: spawnEnv(tempDir('ak-registries-home')) });
   assert.equal(r.status, 0, `registries module must import cleanly:\n${r.stderr}`);
   assert.match(r.stdout, /construction-valid/);
 });

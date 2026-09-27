@@ -7,7 +7,7 @@ import { globalRoot } from '../../src/lib/paths.mjs';
 
 const bin = process.env.AQE_COURT_BIN ?? 'aqe-court-referee';
 function run(args) {
-  const result = spawnSync(bin, args, { encoding: 'utf8', timeout: 10_000 });
+  const result = spawnSync(bin, args, { encoding: 'utf8', timeout: 10_000 }); // spawn-env: inherits (live, opt-in: runs the installed referee as a user would)
   assert.equal(result.status, 0, result.stderr || result.error?.message);
   return JSON.parse(result.stdout);
 }

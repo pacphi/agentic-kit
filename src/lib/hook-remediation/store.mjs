@@ -123,9 +123,10 @@ function writeReceiptAtomic(receiptFile, bytes, fsImpl) {
   const directory = path.dirname(receiptFile);
   const id = path.basename(directory);
   if (!RECEIPT_ID.test(id)) throw new Error('receipt transaction directory name is invalid');
-  const directoryStat = fsImpl.lstatSync(directory);
+  // BigInt identity: Windows file IDs can exceed 2^53, where Numbers collide.
+  const directoryStat = fsImpl.lstatSync(directory, { bigint: true });
   if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) throw new Error('receipt transaction directory is unsafe');
-  if (process.platform !== 'win32' && (directoryStat.mode & 0o077) !== 0) throw new Error('receipt transaction directory is not private');
+  if (process.platform !== 'win32' && (Number(directoryStat.mode) & 0o077) !== 0) throw new Error('receipt transaction directory is not private');
   const realDirectory = fsImpl.realpathSync(directory);
   const realRoot = fsImpl.realpathSync(path.dirname(directory));
   if (path.dirname(realDirectory) !== realRoot || path.basename(realDirectory) !== id) {
@@ -133,7 +134,7 @@ function writeReceiptAtomic(receiptFile, bytes, fsImpl) {
   }
   let prior = null;
   try {
-    prior = fsImpl.lstatSync(receiptFile);
+    prior = fsImpl.lstatSync(receiptFile, { bigint: true });
     if (!prior.isFile() || prior.isSymbolicLink()) throw new Error('existing receipt is unsafe');
   } catch (error) {
     if (error?.code !== 'ENOENT') throw error;
@@ -148,12 +149,12 @@ function writeReceiptAtomic(receiptFile, bytes, fsImpl) {
     fsImpl.fsyncSync(descriptor);
     fsImpl.closeSync(descriptor);
     descriptor = undefined;
-    const currentDirectory = fsImpl.lstatSync(directory);
+    const currentDirectory = fsImpl.lstatSync(directory, { bigint: true });
     if (currentDirectory.dev !== directoryStat.dev || currentDirectory.ino !== directoryStat.ino) {
       throw new Error('receipt transaction directory changed before commit');
     }
     if (prior) {
-      const currentReceipt = fsImpl.lstatSync(receiptFile);
+      const currentReceipt = fsImpl.lstatSync(receiptFile, { bigint: true });
       if (!currentReceipt.isFile() || currentReceipt.isSymbolicLink()
           || currentReceipt.dev !== prior.dev || currentReceipt.ino !== prior.ino) {
         throw new Error('receipt changed before commit');
@@ -242,17 +243,17 @@ function validateReceipt(receipt, receiptId, transactionDir) {
 }
 
 function readReceiptDescriptor(file, realRoot, fsImpl) {
-  const before = fsImpl.lstatSync(file);
+  const before = fsImpl.lstatSync(file, { bigint: true });
   if (!before.isFile() || before.isSymbolicLink() || before.size > MAX_AUDIT_SOURCE_BYTES) throw new Error('receipt must be a bounded regular non-symlink file');
   const realFile = fsImpl.realpathSync(file);
   if (!contained(realRoot, realFile)) throw new Error('receipt escapes its transaction root');
   let descriptor;
   try {
     descriptor = fsImpl.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
-    const opened = fsImpl.fstatSync(descriptor);
+    const opened = fsImpl.fstatSync(descriptor, { bigint: true });
     if (!opened.isFile() || opened.size > MAX_AUDIT_SOURCE_BYTES || opened.dev !== before.dev || opened.ino !== before.ino) throw new Error('receipt identity changed while opening');
     if (fsImpl.realpathSync(file) !== realFile) throw new Error('receipt path changed while opening');
-    const bytes = Buffer.alloc(opened.size);
+    const bytes = Buffer.alloc(Number(opened.size)); // bounded above
     let offset = 0;
     while (offset < bytes.length) {
       const count = fsImpl.readSync(descriptor, bytes, offset, bytes.length - offset, offset);

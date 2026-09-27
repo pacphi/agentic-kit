@@ -289,7 +289,7 @@ test('Agentic-QE 3.14.1+ serves advisors without fallback and generation with ex
   process.env.APPDATA = xdg;
   const bootstrap = await bootstrapHostAdapters({
     cfg,
-    env: { ...process.env, AK_EXPERIMENTAL_HOST_ADAPTERS: '1' },
+    env: { ...process.env, AK_EXPERIMENTAL_HOST_ADAPTERS: '1' }, // spawn-env: inherits (paid live release proof; config bases pinned just above)
   });
   assert.equal(bootstrap.warnings.length, 0, JSON.stringify(bootstrap.warnings));
   assert.equal(bootstrap.admitted.length, 1);
@@ -303,7 +303,7 @@ test('Agentic-QE 3.14.1+ serves advisors without fallback and generation with ex
   assert.ok(!(projectedConfig.fallbackChain?.entries ?? []).some((entry) => entry.provider === PROVIDER_ID));
 
   const env = {
-    ...process.env,
+    ...process.env, // spawn-env: inherits (paid live release proof against the installed aqe; HOME/config pinned below)
     HOME: home,
     XDG_CONFIG_HOME: xdg,
     APPDATA: xdg,

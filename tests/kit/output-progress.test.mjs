@@ -6,6 +6,8 @@
 // the caller's ok/fail prints. Hermetic via the injectable {tty, out} seam —
 // never touches the real stdout, so results don't depend on how tests are run.
 import { test } from 'node:test';
+import { spawnEnv } from './helpers/home-sandbox.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 import assert from 'node:assert/strict';
 import {
   reportOutcome, withProgress, sanitizeForTerminal, dim, bold,
@@ -113,12 +115,14 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const OUTPUT_MJS = fileURLToPath(new URL('../../src/lib/output.mjs', import.meta.url));
 const PAYLOAD = 200 * 1024;
+// A throwaway home: the child must never reach the developer's real config or state.
+const HOME = tempDir('ak-output-progress-home');
 
 const runChild = (tailJs) => spawnSync(process.execPath, ['--input-type=module', '-e',
   `import { exitWhenFlushed } from ${JSON.stringify(pathToFileURL(OUTPUT_MJS).href)};
    process.stdout.write('x'.repeat(${PAYLOAD}));
    ${tailJs}`,
-], { encoding: 'utf8', maxBuffer: 4 * PAYLOAD });
+], { encoding: 'utf8', maxBuffer: 4 * PAYLOAD, env: spawnEnv(HOME) });
 
 test('exitWhenFlushed delivers the full piped payload past the 64KB pipe buffer', () => {
   const r = runChild('exitWhenFlushed(0);');
@@ -165,7 +169,7 @@ test('SEC-5: a consumer that opens the pipe and never reads it still exits, boun
     `import { exitWhenFlushed } from ${JSON.stringify(pathToFileURL(OUTPUT_MJS).href)};
      process.stdout.write('x'.repeat(${PAYLOAD}));
      exitWhenFlushed(7);`,
-  ], { stdio: ['ignore', 'pipe', 'ignore'] });
+  ], { stdio: ['ignore', 'pipe', 'ignore'], env: spawnEnv(HOME) });
   child.stdout.pause(); // open, never read — the stalled-consumer case
 
   const started = Date.now();

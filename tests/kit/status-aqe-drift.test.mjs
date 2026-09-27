@@ -3,23 +3,25 @@
 // scope gate `ak sync` writes with (applyAqeRouter): a freshly synced state is
 // never drift, and a location sync refuses to manage is never drift either.
 // Anything else is a permanent warning whose own `fix` command cannot clear it.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   sandboxHome, assertSandboxed, rmrf,
   sandboxProject, writeKitConfig, offlineKitConfig, fakeGlobalRoot,
 } from './helpers/home-sandbox.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 const HOME = sandboxHome('ak-status-drift');
+after(() => rmrf(HOME));
 const paths = await import('../../src/lib/paths.mjs');
 const status = await import('../../src/commands/status.mjs');
 const { loadKitConfig } = await import('../../src/lib/config.mjs');
 const { applyAqeRouter, aqeRouterFile, managedEnv, settingsTarget } = await import('../../src/lib/providers.mjs');
 const { seedActivityRoutes } = await import('../../src/lib/routing.mjs');
+const { repoRoot } = paths;
 assertSandboxed(paths, HOME);
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -54,6 +56,7 @@ const routingRow = (rows) => rowsFor(rows, 'routing').find((r) => r.message.incl
 
 test('a freshly synced PARTIAL policy reports no routing drift (writer projection is the contract)', async () => {
   const project = sandboxProject('ak-drift-partial');
+  after(() => rmrf(project));
   seedHome(dualHostCfg({ routes: {
     review: { host: 'claude', model: 'claude-sonnet-5', provenance: 'user' },
   } }));
@@ -66,6 +69,7 @@ test('a freshly synced PARTIAL policy reports no routing drift (writer projectio
 
 test('a user pin on a RETIRED model reports no routing drift after sync honors the pin', async () => {
   const project = sandboxProject('ak-drift-retired');
+  after(() => rmrf(project));
   seedHome(dualHostCfg({ routes: {
     'security-scan': { host: 'codex', model: 'gpt-5.4', provenance: 'user' },
   } }));
@@ -77,6 +81,7 @@ test('a user pin on a RETIRED model reports no routing drift after sync honors t
 
 test('foreign agentOverrides entries and key order are the writer\'s merge domain, not drift', async () => {
   const project = sandboxProject('ak-drift-foreign');
+  after(() => rmrf(project));
   seedHome(dualHostCfg({ routes: seedActivityRoutes() }));
   // Pre-existing file: a managed key first (so merge order differs from a fresh
   // projection) plus a hand-added foreign agent applyAqeRouter must preserve.
@@ -94,8 +99,12 @@ test('foreign agentOverrides entries and key order are the writer\'s merge domai
   assert.equal(row.level, 'ok', `preserved foreign entry / merge order is not drift: ${row.message}`);
 });
 
-test('outside a git project, status never reports router drift sync refuses to manage', async () => {
-  const nowhere = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ak-drift-noproj-')));
+test('outside a git project, status never reports router drift sync refuses to manage', async (t) => {
+  const nowhere = tempDir('ak-drift-noproj');
+  // With TMPDIR inside a git repository this folder is not 'outside' one, and the
+  // status/sync paths would write that enclosing repository's .claude/.agentic-qe.
+  const enclosing = repoRoot(nowhere);
+  if (enclosing) { t.skip(`TMPDIR is inside the git repository ${enclosing}; this case would write into it`); return; }
   seedHome(dualHostCfg({
     routes: seedActivityRoutes(),
     aqeFallback: [{ provider: 'claude-code', models: ['claude-opus-4-8'] }],
@@ -116,6 +125,7 @@ test('outside a git project, status never reports router drift sync refuses to m
 
 test('from a SUBDIRECTORY of a project, the chain check reads the repo root, not cwd', async () => {
   const project = sandboxProject('ak-drift-subdir');
+  after(() => rmrf(project));
   const subdir = path.join(project, 'src', 'deep');
   fs.mkdirSync(subdir, { recursive: true });
   seedHome(dualHostCfg({
@@ -133,6 +143,7 @@ test('from a SUBDIRECTORY of a project, the chain check reads the repo root, not
 
 test('REAL drift is still caught: a hand-edited managed override warns with a sync fix', async () => {
   const project = sandboxProject('ak-drift-real');
+  after(() => rmrf(project));
   seedHome(dualHostCfg({ routes: seedActivityRoutes() }));
   applyAqeRouter(loadKitConfig(), project);
   const disk = JSON.parse(fs.readFileSync(aqeRouterFile(project), 'utf8'));
@@ -147,6 +158,7 @@ test('REAL drift is still caught: a hand-edited managed override warns with a sy
 
 test('REAL drift is still caught: a configured policy with no file yet warns', async () => {
   const project = sandboxProject('ak-drift-nofile');
+  after(() => rmrf(project));
   seedHome(dualHostCfg({ routes: seedActivityRoutes() }));
   // no applyAqeRouter — the file a first sync would create is absent
 
@@ -157,6 +169,7 @@ test('REAL drift is still caught: a configured policy with no file yet warns', a
 
 test('unavailable external intent names a manual remedy instead of an impossible sync loop', async () => {
   const project = sandboxProject('ak-drift-revoked-external');
+  after(() => rmrf(project));
   seedHome(offlineKitConfig({
     // Deliberately mismatched/stale entry name: the external host id in
     // integration intent remains the actionable cleanup identity.

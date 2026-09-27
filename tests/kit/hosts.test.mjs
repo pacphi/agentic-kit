@@ -1,12 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { HOST_IDS, adapterFor, drivingHost, hostTierLabel, hostAsymmetryNote } from '../../src/lib/hosts.mjs';
 import { hostAuthState } from '../../src/lib/providers.mjs';
 import { managedHostIds } from '../../src/lib/adapters/registries.mjs';
 import { applyAdmitted, resetAdmitted, effectivePrimaryHostIds } from '../../src/lib/adapters/admitted.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 // ── HOST_ADAPTERS descriptors ────────────────────────────────────────────────
 // HOST_IDS is HOST_ADAPTERS' key order (hosts.mjs filters HOST_REGISTRY by
@@ -151,7 +149,7 @@ test('hostAuthState reports none for an absent claude with no key', () => {
   // home must point at an EMPTY dir: on a real machine with file-based claude
   // credentials (~/.claude/.credentials.json present, e.g. Linux installs), the
   // login-file probe legitimately wins and this test flaked 'oauth'.
-  const a = hostAuthState('claude', { env: {}, present: false, home: fs.mkdtempSync(path.join(os.tmpdir(), 'ak-nohome-')) });
+  const a = hostAuthState('claude', { env: {}, present: false, home: tempDir('ak-nohome') });
   assert.equal(a.mode, 'none');
 });
 

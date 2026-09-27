@@ -9,12 +9,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';
-import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
 
 import { startDashboard } from '../../src/lib/dashboard-server.mjs';
 import { systemSummaryPayload, SUMMARY_CATALOG_KEYS } from '../../src/lib/dashboard/system-summary.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 // ── A catalog in the persisted CatalogInventory v4 shape ────────────────────
 
@@ -305,7 +305,7 @@ function hermeticMaintenance() {
 
 test('GET /api/system/summary serves the projection; GET /api/system stays complete', async (t) => {
   const collector = fakeCollector();
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-system-summary-'));
+  const cwd = tempDir('ak-system-summary');
   const server = await startDashboard({ port: 0, cwd, system: collector, usage: {}, ...hermeticMaintenance() });
   t.after(() => server.close());
 
@@ -327,7 +327,7 @@ test('GET /api/system/summary serves the projection; GET /api/system stays compl
 
 test('GET /api/system/summary?refresh=deep starts the scan and answers with its running state', async (t) => {
   const collector = fakeCollector();
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-system-summary-'));
+  const cwd = tempDir('ak-system-summary');
   const server = await startDashboard({ port: 0, cwd, system: collector, usage: {}, ...hermeticMaintenance() });
   t.after(() => server.close());
   const r = await request(server, '/api/system/summary?refresh=deep&trees=0');

@@ -1,13 +1,14 @@
 // Exercise the real self-status collector and sync planner against isolated
 // cache/package files; replace only registry I/O and the package install step.
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { sandboxHome, assertSandboxed, writeKitConfig, offlineKitConfig, captureLog } from './helpers/home-sandbox.mjs';
+import { sandboxHome, assertSandboxed, writeKitConfig, offlineKitConfig, captureLog, rmrf } from './helpers/home-sandbox.mjs';
 import { isolateProject } from './helpers/project-isolation.mjs';
 
 const home = sandboxHome('ak-sync-self');
+after(() => rmrf(home));
 const paths = await import('../../src/lib/paths.mjs');
 const { loadKitConfig } = await import('../../src/lib/config.mjs');
 const sync = await import('../../src/commands/sync.mjs');

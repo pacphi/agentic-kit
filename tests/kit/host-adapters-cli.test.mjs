@@ -18,7 +18,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { run } from '../../src/commands/x/host-adapters.mjs';
@@ -32,6 +31,7 @@ import {
   grantsFor, recordTierResult, recordTierGate, grantCapability, grantedCapabilitiesFor,
 } from '../../src/lib/adapters/grants.mjs';
 import { runTieredConformance } from '../../src/lib/adapters/conformance.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 const ON_ENV = { AK_EXPERIMENTAL_HOST_ADAPTERS: '1' };
 const OFF_ENV = {};
@@ -74,7 +74,7 @@ function validManifest(overrides = {}) {
 }
 
 function tmpConsentFile() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-adapter-consent-'));
+  const dir = tempDir('ak-adapter-consent');
   return path.join(dir, 'adapter-consent.json');
 }
 
@@ -751,7 +751,7 @@ async function acmeReader(source) {
 }
 
 function tmpGrantsFile() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-adapter-conformance-cli-'));
+  const dir = tempDir('ak-adapter-conformance-cli');
   return path.join(dir, 'adapter-grants.json');
 }
 

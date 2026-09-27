@@ -16,7 +16,7 @@ import { runNativeCommand } from '../../src/lib/maintenance/native-command.mjs';
 const FORBIDDEN_VERBS = new Set(['stash', 'commit', 'branch', 'checkout', 'push', 'merge']);
 
 let gitAvailable = true;
-try { execFileSync('git', ['--version'], { stdio: 'ignore' }); } catch { gitAvailable = false; }
+try { execFileSync('git', ['--version'], { stdio: 'ignore' }); } catch { gitAvailable = false; } // spawn-env: inherits (git --version probe)
 
 function digestOf(content) {
   return createHash('sha256').update(content).digest('hex');
@@ -25,16 +25,16 @@ function digestOf(content) {
 function gitRepo(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-maint-patch-repo-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  execFileSync('git', ['init', '-q', root]);
-  execFileSync('git', ['-C', root, 'config', 'user.email', 'test@example.com']);
-  execFileSync('git', ['-C', root, 'config', 'user.name', 'Test']);
+  execFileSync('git', ['init', '-q', root]); // spawn-env: inherits (git in a throwaway repository)
+  execFileSync('git', ['-C', root, 'config', 'user.email', 'test@example.com']); // spawn-env: inherits (git in a throwaway repository)
+  execFileSync('git', ['-C', root, 'config', 'user.name', 'Test']); // spawn-env: inherits (git in a throwaway repository)
   return root;
 }
 
 function commitFile(root, relPath, content) {
   fs.writeFileSync(path.join(root, relPath), content);
-  execFileSync('git', ['-C', root, 'add', relPath]);
-  execFileSync('git', ['-C', root, 'commit', '-q', '-m', `add ${relPath}`]);
+  execFileSync('git', ['-C', root, 'add', relPath]); // spawn-env: inherits (git in a throwaway repository)
+  execFileSync('git', ['-C', root, 'commit', '-q', '-m', `add ${relPath}`]); // spawn-env: inherits (git in a throwaway repository)
 }
 
 function preimageRoot(t) {
@@ -137,9 +137,9 @@ test('index drift on the exact target path refuses before apply, even though the
   // Touch and re-stage the file so the index shows a pending change for this
   // exact path even though the working-tree bytes are unchanged.
   fs.writeFileSync(path.join(root, 'staged.json'), '{"y":1}\n');
-  execFileSync('git', ['-C', root, 'add', 'staged.json']);
+  execFileSync('git', ['-C', root, 'add', 'staged.json']); // spawn-env: inherits (git in a throwaway repository)
   fs.appendFileSync(path.join(root, 'staged.json'), '');
-  execFileSync('git', ['-C', root, 'rm', '--cached', '-q', 'staged.json']);
+  execFileSync('git', ['-C', root, 'rm', '--cached', '-q', 'staged.json']); // spawn-env: inherits (git in a throwaway repository)
   const provider = createGitProjectPatchProvider({
     fsImpl: fs, projectRoots: () => [root], preimageRoot: preimageRoot(t),
     patches: [{
@@ -158,8 +158,8 @@ test('a submodule target is refused and no git command touches it beyond status/
   fs.mkdirSync(path.join(root, 'vendor', 'lib'), { recursive: true });
   fs.writeFileSync(path.join(root, '.gitmodules'), '[submodule "lib"]\n\tpath = vendor/lib\n\turl = https://example.invalid/lib.git\n');
   fs.writeFileSync(path.join(root, 'vendor', 'lib', 'inner.json'), '{"z":1}\n');
-  execFileSync('git', ['-C', root, 'add', '.gitmodules']);
-  execFileSync('git', ['-C', root, 'commit', '-q', '-m', 'add gitmodules']);
+  execFileSync('git', ['-C', root, 'add', '.gitmodules']); // spawn-env: inherits (git in a throwaway repository)
+  execFileSync('git', ['-C', root, 'commit', '-q', '-m', 'add gitmodules']); // spawn-env: inherits (git in a throwaway repository)
   const provider = createGitProjectPatchProvider({
     fsImpl: fs, projectRoots: () => [root], preimageRoot: preimageRoot(t),
     patches: [{

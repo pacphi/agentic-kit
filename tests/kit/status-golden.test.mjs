@@ -7,7 +7,7 @@
 //
 // Regenerate deliberately, never casually:
 //   STATUS_GOLDEN_UPDATE=1 node --test tests/kit/status-golden.test.mjs
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import { normalizeStatusObservations } from './helpers/status-observations.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -19,6 +19,7 @@ import {
 } from './helpers/home-sandbox.mjs';
 
 const HOME = sandboxHome('ak-status-golden');
+after(() => rmrf(HOME));
 delete process.env.AQE_EMBEDDER_ENDPOINT;
 const paths = await import('../../src/lib/paths.mjs');
 const status = await import('../../src/commands/status.mjs');
@@ -26,6 +27,7 @@ assertSandboxed(paths, HOME);
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const PROJECT = sandboxProject('ak-status-golden');
+after(() => rmrf(PROJECT));
 const GOLDEN = path.join(PKG_ROOT, 'tests', 'kit', 'fixtures', 'status-golden.json');
 
 paths._setGlobalRootForTest(fakeGlobalRoot(HOME, { ruflo: '9.9.9', 'agentic-qe': '9.9.9' }));

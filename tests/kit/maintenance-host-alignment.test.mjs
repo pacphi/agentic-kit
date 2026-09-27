@@ -1,10 +1,12 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { sandboxHome, sandboxProject } from './helpers/home-sandbox.mjs';
+import { sandboxHome, sandboxProject, rmrf } from './helpers/home-sandbox.mjs';
 const sandbox = sandboxHome('ak-maintenance-alignment');
+after(() => rmrf(sandbox));
 const project = sandboxProject('ak-maintenance-alignment');
+after(() => rmrf(project));
 const { buildManagementInventory } = await import('../../src/lib/maintenance/management/projection.mjs');
 const { runInventoryQuery } = await import('../../src/lib/maintenance/management/query.mjs');
 const KEY = 'host-alignment-ui-test-key';

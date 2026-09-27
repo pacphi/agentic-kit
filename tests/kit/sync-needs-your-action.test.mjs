@@ -11,18 +11,19 @@
 // project's missing .agentic-qe directory. --json runs spawn a child so its
 // real stdout and stderr can be read apart (sync swaps process.stdout.write
 // under --json, which must not happen inside the test runner's own process).
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  sandboxHome, assertSandboxed, captureLog, rmrf, sandboxProject, writeKitConfig, offlineKitConfig, fakeGlobalRoot,
+  sandboxHome, assertSandboxed, captureLog, rmrf, sandboxProject, writeKitConfig, offlineKitConfig, fakeGlobalRoot, spawnEnv,
 } from './helpers/home-sandbox.mjs';
 import { isolateProject } from './helpers/project-isolation.mjs';
 
 const HOME = sandboxHome('ak-sync-needs-action');
+after(() => rmrf(HOME));
 const paths = await import('../../src/lib/paths.mjs');
 const sync = await import('../../src/commands/sync.mjs');
 const { row } = await import('../../src/commands/status/row.mjs');
@@ -32,6 +33,7 @@ isolateProject('ak-sync-needs-action');
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const PROJECT = sandboxProject('ak-sync-needs-action');
+after(() => rmrf(PROJECT));
 const FLAGS = (over = {}) => ({ 'dry-run': false, 'no-upgrade': true, yes: false, json: false, ...over });
 const HEADING = /needs your action/g;
 
@@ -95,7 +97,7 @@ function syncJson({ first = [], after = first, flags = {}, throws = false }) {
       pkgRoot: ${JSON.stringify(PKG_ROOT)}, collectFn }));
   `;
   const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
-    cwd: PROJECT, env: process.env, encoding: 'utf8', timeout: 120_000,
+    cwd: PROJECT, env: spawnEnv(HOME), encoding: 'utf8', timeout: 120_000,
   });
   assert.ok(child.stdout.trim().startsWith('{'), `stdout is not a JSON object:\n${child.stdout}\n--- stderr:\n${child.stderr}`);
   return { child, out: JSON.parse(child.stdout) };

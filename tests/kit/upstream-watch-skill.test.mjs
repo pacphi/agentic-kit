@@ -11,7 +11,7 @@ const SKILLS = ['.claude/skills/upstream-status/SKILL.md', '.agents/skills/upstr
 // .gitattributes checks both copies out with LF everywhere; reading them as
 // LF keeps these content checks independent of a clone made without it.
 const readText = (file) => fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
-const ignored = (file) => spawnSync('git', ['check-ignore', '-q', '--no-index', file]).status === 0;
+const ignored = (file) => spawnSync('git', ['check-ignore', '-q', '--no-index', file]).status === 0; // spawn-env: inherits (read-only git query on this checkout)
 
 test('Claude and Codex get the same upstream-status skill', () => {
   const [claude, codex] = SKILLS.map(readText);
@@ -24,7 +24,7 @@ test('Claude and Codex get the same upstream-status skill', () => {
 
 test('both skill copies check out with LF line endings on every platform', () => {
   for (const file of SKILLS) {
-    const out = spawnSync('git', ['check-attr', 'eol', '--', file], { encoding: 'utf8' });
+    const out = spawnSync('git', ['check-attr', 'eol', '--', file], { encoding: 'utf8' }); // spawn-env: inherits (read-only git query on this checkout)
     assert.match(out.stdout, /: eol: lf$/m, `${file} must be pinned to LF in .gitattributes`);
   }
 });

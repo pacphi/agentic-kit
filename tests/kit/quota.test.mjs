@@ -4,7 +4,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import {
@@ -13,8 +12,9 @@ import {
   classifyClaudeTeeChannel, CLAUDE_TEE_CHANNELS,
   collectCodexLimitsDetailed, CODEX_UNAVAILABLE_REASONS,
 } from '../../src/lib/quota.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ak-quota-'));
+const tmp = () => tempDir('ak-quota');
 
 // ── windowLabel — duration-derived, never slot-derived ───────────────────────
 

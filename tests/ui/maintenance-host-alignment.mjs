@@ -3,9 +3,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { chromium } from 'playwright';
+import { launchChrome } from './helpers/launch-chrome.mjs';
 import { renderPage } from '../../src/lib/dashboard/page.mjs';
 import { CSS } from '../../src/lib/dashboard/styles.mjs';
 import { buildManagementInventory } from '../../src/lib/maintenance/management/projection.mjs';
@@ -32,7 +31,7 @@ test('Host alignment view filters User and Project rows and offers exact registr
     detections: new Map([['host-alignment', facts]]) }).inventory;
   assert.ok(inventory.guidanceEntries.some(entry => entry.lane === 'apply'), JSON.stringify(inventory.guidanceEntries));
   const markup = renderPage({ name: 'Fixture', version: 'test' }).match(/<section class="mnt-panel mnt-inventory"[\s\S]*?<\/section>/)[0];
-  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  const browser = await launchChrome();
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1360, height: 1000 } });
   const errors = [];
@@ -72,5 +71,8 @@ test('Host alignment view filters User and Project rows and offers exact registr
   assert.match(await page.locator('#mnt-results').innerText(), /project-peer/);
   assert.doesNotMatch(await page.locator('#mnt-results').innerText(), /user-peer/);
   assert.equal(errors.length, 0, errors.join('\n'));
-  await page.screenshot({ path: path.join(os.tmpdir(), 'maintenance-host-alignment.png'), fullPage: true });
+  // Evidence for human review goes to the gitignored .ui-artifacts/, never the temp folder.
+  const shots = path.resolve(process.env.AK_DASHBOARD_EVIDENCE_DIR || '.ui-artifacts');
+  fs.mkdirSync(shots, { recursive: true });
+  await page.screenshot({ path: path.join(shots, 'maintenance-host-alignment.png'), fullPage: true });
 });

@@ -13,6 +13,7 @@ import {
   isSupportedStockOpenCodeVersion,
   STOCK_OPENCODE_VERSION_RANGE,
 } from './helpers/opencode-version-policy.mjs';
+import { spawnEnv } from './helpers/home-sandbox.mjs';
 
 const harnessRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const pkgRoot = process.env.AK_STOCK_PACKAGE_ROOT
@@ -35,7 +36,7 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function stockOpenCode() {
   if (process.env.AK_STOCK_OPENCODE_BIN) return process.env.AK_STOCK_OPENCODE_BIN;
   try {
-    return execFileSync('sh', ['-c', 'command -v opencode'], {
+    return execFileSync('sh', ['-c', 'command -v opencode'], { // spawn-env: inherits (PATH probe for an installed opencode)
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
   } catch {
@@ -45,7 +46,7 @@ function stockOpenCode() {
 
 function installedCommand(name) {
   try {
-    return execFileSync('sh', ['-c', `command -v ${name}`], {
+    return execFileSync('sh', ['-c', `command -v ${name}`], { // spawn-env: inherits (PATH probe for an installed tool)
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
   } catch {
@@ -125,7 +126,7 @@ function seedStockPluginRuntime(configDir, cacheDir, version) {
     `@opencode-ai/plugin@${version}`,
   ], {
     cwd: configDir,
-    env: { ...process.env, npm_config_cache: cacheDir },
+    env: { ...process.env, npm_config_cache: cacheDir }, // spawn-env: inherits (npm needs the developer's registry config in ~/.npmrc; its cache is pinned)
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: 45_000,
@@ -298,7 +299,11 @@ test(`stock OpenCode keeps Ruflo and Agentic QE connected with ${compactProjecti
     fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
-  const reportedVersion = execFileSync(opencode, ['--version'], { encoding: 'utf8' }).trim();
+  // Even `--version` creates OpenCode's state/data/cache/temp folders under the
+  // inherited XDG_* bases, so the probe runs in the sandbox too.
+  const reportedVersion = execFileSync(opencode, ['--version'], {
+    encoding: 'utf8', env: spawnEnv(path.join(root, 'home')),
+  }).trim();
   const binarySha256 = createHash('sha256').update(fs.readFileSync(opencode)).digest('hex');
   const version = extractStockOpenCodeVersion(reportedVersion);
   assert.equal(
@@ -320,6 +325,10 @@ test(`stock OpenCode keeps Ruflo and Agentic QE connected with ${compactProjecti
   fs.mkdirSync(fakeBin, { recursive: true });
   fs.mkdirSync(configDir, { recursive: true });
   fs.mkdirSync(workspace, { recursive: true });
+  // Its own repository: from a .git-less workspace under a TMPDIR inside a git
+  // repository, OpenCode edited the enclosing package.json, created
+  // package-lock.json and replaced node_modules (Branch 0 review-hermeticity.md).
+  fs.mkdirSync(path.join(workspace, '.git'));
   if (!installedRuv) {
     writeFakeMcp(path.join(fakeBin, 'claude-flow-mcp'));
     writeFakeMcp(path.join(fakeBin, 'aqe-mcp'));
@@ -390,9 +399,7 @@ test(`stock OpenCode keeps Ruflo and Agentic QE connected with ${compactProjecti
   const port = await freePort();
   processes.opencode = spawn(opencode, ['serve', '--hostname', '127.0.0.1', '--port', String(port), '--print-logs', '--log-level', 'DEBUG'], {
     cwd: workspace,
-    env: {
-      ...process.env,
-      HOME: path.join(root, 'home'),
+    env: spawnEnv(path.join(root, 'home'), {
       XDG_CONFIG_HOME: configHome,
       XDG_CACHE_HOME: path.join(root, 'cache'),
       XDG_DATA_HOME: path.join(root, 'data'),
@@ -401,7 +408,7 @@ test(`stock OpenCode keeps Ruflo and Agentic QE connected with ${compactProjecti
       PATH: `${fakeBin}${path.delimiter}${process.env.PATH}`,
       AK_STOCK_GATEWAY_MCP_LOG: mcpLog,
       OPENCODE_DISABLE_LSP_DOWNLOAD: '1',
-    },
+    }),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   processes.opencode.stdout.on('data', (chunk) => output.push(String(chunk)));

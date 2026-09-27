@@ -6,6 +6,7 @@
 // reads APPDATA (not XDG_CONFIG_HOME) on win32, so both must be set or the
 // sandbox is silently bypassed there.
 import { test } from 'node:test';
+import { spawnEnv } from './helpers/home-sandbox.mjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -72,15 +73,12 @@ function ak(args, { cwd, home, env = {} }) {
   return spawnSync(process.execPath, [BIN, ...args], {
     encoding: 'utf8',
     cwd,
-    env: {
-      ...process.env,
+    env: spawnEnv(home, {
       NO_COLOR: '1',
-      HOME: home,
-      USERPROFILE: home, // Windows os.homedir() reads USERPROFILE, not HOME
       XDG_CONFIG_HOME: cfgDir,
       APPDATA: cfgDir, // Windows configBase() reads APPDATA, not XDG_CONFIG_HOME
       ...env,
-    },
+    }),
   });
 }
 
@@ -229,20 +227,15 @@ function akPick(args, { cwd, project, home, binDir, catalog }, { input, env = {}
     // (settings.local.json, llm-config.json) would land there.
     cwd: cwd ?? project,
     input,
-    env: {
-      ...process.env,
+    env: spawnEnv(home, {
       NO_COLOR: '1',
-      HOME: home,
-      USERPROFILE: home,
-      XDG_CONFIG_HOME: path.join(home, '.config'),
-      APPDATA: path.join(home, '.config'),
       // FULLY controlled PATH: only the fixture shims + the system dirs the
       // `which` probe needs. Real CLIs/npm on the developer's machine can
       // never leak in and make detection non-deterministic.
       PATH: [binDir, '/usr/bin', '/bin'].join(path.delimiter),
       RUFLO_REPO: catalog,
       ...env,
-    },
+    }),
   });
 }
 

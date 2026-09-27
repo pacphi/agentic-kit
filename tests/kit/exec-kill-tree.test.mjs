@@ -27,7 +27,7 @@ function parentWithGrandchild(t, { detached }) {
     const gc = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
     require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(gc.pid));
     setTimeout(() => {}, 60000);`;
-  const child = spawn(process.execPath, ['-e', script], { detached, stdio: 'ignore' });
+  const child = spawn(process.execPath, ['-e', script], { detached, stdio: 'ignore' }); // spawn-env: inherits (inert node process tree, runs no kit code)
   return { child, pidFile };
 }
 
@@ -72,7 +72,7 @@ test('a child that does not lead its own group is still killed directly', posix,
 });
 
 test('killing an already-dead process group is not an error', posix, async () => {
-  const child = spawn(process.execPath, ['-e', ''], { detached: true, stdio: 'ignore' });
+  const child = spawn(process.execPath, ['-e', ''], { detached: true, stdio: 'ignore' }); // spawn-env: inherits (inert node child, runs no kit code)
   await once(child, 'close');
   assert.doesNotThrow(() => killProcessTree(child));
 });

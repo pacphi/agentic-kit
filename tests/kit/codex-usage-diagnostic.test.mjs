@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { spawnEnv } from './helpers/home-sandbox.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,7 +15,7 @@ function run(t, records, json = true) {
   const dir = path.join(root, '2026', '09', '09');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'rollout-private-session.jsonl'), records.map(JSON.stringify).join('\n'));
-  const result = spawnSync(process.execPath, [script, '--root', root, ...(json ? ['--json'] : [])], { encoding: 'utf8' });
+  const result = spawnSync(process.execPath, [script, '--root', root, ...(json ? ['--json'] : [])], { encoding: 'utf8', env: spawnEnv(path.join(root, 'home')) });
   assert.equal(result.status, 0, result.stderr);
   assert.ok(!result.stdout.includes('PRIVATE-DIAGNOSTIC-ROOT'));
   return json ? JSON.parse(result.stdout) : result.stdout;

@@ -2,13 +2,14 @@
 // ruflo chip (audit 2026-09-26 Addendum 2, problem 3): the native SQLite pin
 // Ruflo itself intends (ruvnet/ruflo#2219). The chip stays the install fact;
 // the edit is a separate line and a separate JSON field.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fakeGlobalRoot, sandboxHome } from './helpers/home-sandbox.mjs';
+import { fakeGlobalRoot, sandboxHome, rmrf } from './helpers/home-sandbox.mjs';
 
 const HOME = sandboxHome('ak-about-edits');
+after(() => rmrf(HOME));
 const paths = await import('../../src/lib/paths.mjs');
 const about = await import('../../src/commands/about.mjs');
 

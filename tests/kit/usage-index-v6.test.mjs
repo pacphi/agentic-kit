@@ -5,12 +5,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { buildIndex, readSession, _resetForTest } from '../../src/lib/usage-index.mjs';
 import {
   parseClaude, parseCodex, promptFingerprint, promptSemantics,
 } from '../../src/lib/usage-parsers.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 const NOW = Date.parse('2026-07-25T12:00:00.000Z');
 const T0 = '2026-07-24T09:00:00.000Z';
@@ -84,7 +84,7 @@ function rolloutItemCompleted(id, { mixed = false } = {}) {
 }
 
 function sandbox(files) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-usage-v6-'));
+  const dir = tempDir('ak-usage-v6');
   const day = path.join(dir, 'codex', '2026', '07', '24');
   fs.mkdirSync(day, { recursive: true });
   fs.mkdirSync(path.join(dir, 'claude'), { recursive: true });

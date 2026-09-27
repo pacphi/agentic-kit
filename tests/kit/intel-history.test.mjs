@@ -6,7 +6,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import {
   readNeuralPatternStoreHistory,
@@ -17,8 +16,9 @@ import {
   readIntelHistory,
   readMachineWideIntel,
 } from '../../src/lib/dashboard/intel-history.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ak-intel-history-'));
+const tmp = () => tempDir('ak-intel-history');
 
 /** Write `content` (object → JSON.stringify'd, string → written verbatim so
  *  malformed-JSON fixtures are easy to express) at cwd-relative `relPath`,

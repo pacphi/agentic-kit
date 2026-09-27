@@ -4,13 +4,14 @@
 // re-ran the refused refresh and failed again. A refused refresh is held as
 // blocked — visible, with its cause and the user's options, but not planned —
 // until the (installed, latest) release pair changes.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { sandboxHome, assertSandboxed, writeKitConfig, rmrf } from './helpers/home-sandbox.mjs';
 
 const HOME = sandboxHome('ak-brain-held');
+after(() => rmrf(HOME));
 const paths = await import('../../src/lib/paths.mjs');
 const { installRuvnetBrain } = await import('../../src/lib/heal.mjs');
 const brain = await import('../../src/lib/ruvnet-brain.mjs');

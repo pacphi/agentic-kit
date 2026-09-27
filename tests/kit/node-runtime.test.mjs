@@ -1,4 +1,6 @@
 import { test } from 'node:test';
+import { spawnEnv } from './helpers/home-sandbox.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -18,7 +20,7 @@ for (const version of ['22.13.0', '22.13.1', '22.99.0', '23.4.0', '24.0.0', '26.
 }
 test('CLI rejects early Node before dispatching SQLite commands', () => {
   const cli = fileURLToPath(new URL('../../bin/agentic-kit.mjs', import.meta.url));
-  const result = spawnSync(process.execPath, ['--input-type=module', '-e', `Object.defineProperty(process.versions, 'node', { value: '22.12.0' }); process.argv = ['node', ${JSON.stringify(cli)}, 'status', '--json']; await import(${JSON.stringify(new URL('../../bin/agentic-kit.mjs', import.meta.url).href)});`], { encoding: 'utf8' });
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', `Object.defineProperty(process.versions, 'node', { value: '22.12.0' }); process.argv = ['node', ${JSON.stringify(cli)}, 'status', '--json']; await import(${JSON.stringify(new URL('../../bin/agentic-kit.mjs', import.meta.url).href)});`], { encoding: 'utf8', env: spawnEnv(tempDir('ak-node-runtime-home')) });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /22\.13\.0/);
   assert.doesNotMatch(result.stderr, /ERR_UNKNOWN_BUILTIN_MODULE|at file:/);

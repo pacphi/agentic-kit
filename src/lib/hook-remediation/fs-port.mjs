@@ -37,7 +37,7 @@ export function inspectHookTarget(file, containmentRoot, {
   }
   let descriptor;
   try {
-    const stat = fsImpl.lstatSync(file);
+    const stat = fsImpl.lstatSync(file, { bigint: true });
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('target must be a regular non-symlink file');
     if (stat.size > maxBytes) throw new Error(`target exceeds ${maxBytes} byte limit`);
     const realRoot = fsImpl.realpathSync(containmentRoot);
@@ -46,7 +46,9 @@ export function inspectHookTarget(file, containmentRoot, {
     descriptor = fsImpl.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
     const opened = fsImpl.fstatSync(descriptor);
     if (!opened.isFile() || opened.size > maxBytes) throw new Error('opened target is not a bounded regular file');
-    if (opened.dev !== stat.dev || opened.ino !== stat.ino) {
+    // BigInt identity: Windows file IDs can exceed 2^53; `opened` stays Number for the image.
+    const openedId = fsImpl.fstatSync(descriptor, { bigint: true });
+    if (openedId.dev !== stat.dev || openedId.ino !== stat.ino) {
       throw new Error('target identity changed between inspection and open');
     }
     const reopened = fsImpl.realpathSync(file);

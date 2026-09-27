@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { checkHostConnection } from '../../src/lib/host-health-connected.mjs';
+import { spawnEnv } from './helpers/home-sandbox.mjs';
 
 const help = '--safe-mode --print --output-format --tools --strict-mcp-config --mcp-config --settings --no-session-persistence --disable-slash-commands --permission-mode --json --sandbox --ephemeral --disable --pure --agent --format';
 const features = ['plugins', 'remote_plugin', 'hooks', 'apps', 'shell_tool', 'unified_exec', 'multi_agent', 'skill_mcp_dependency_install', 'browser_use', 'computer_use', 'code_mode', 'code_mode_host', 'image_generation', 'workspace_dependencies'].map(x => `${x} stable true`).join('\n');
@@ -213,7 +214,7 @@ let input='';process.stdin.on('data',chunk=>input+=chunk);process.stdin.on('end'
  console.log(JSON.stringify({type:'result',subtype:'success',is_error:false,result}));
 });
 `, { mode: 0o700 });
-  const env = { ...process.env, PATH: dir + path.delimiter + process.env.PATH };
+  const env = spawnEnv(dir, { PATH: dir + path.delimiter + process.env.PATH });
   const success = await checkHostConnection({ ...base, cwd: dir, host: 'claude', env });
   assert.equal(success.state, 'pass');
   const pidFile = path.join(dir, 'child.pid');

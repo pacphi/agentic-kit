@@ -50,9 +50,9 @@ export async function createDisposableMemoryProject({
   const env = disposableMemoryEnv(root);
   try {
     fs.writeFileSync(path.join(root, 'claude-flow.config.json'), `${JSON.stringify({ daemon: { autostart: false } }, null, 2)}\n`);
-    const git = await runner('git', ['init', '-q'], { cwd: root, env: process.env, timeout: 30_000 });
+    const git = await runner('git', ['init', '-q'], { cwd: root, env: process.env, timeout: 30_000 }); // spawn-env: inherits (live: real git; the caller sandboxes process.env)
     if (git.code !== 0) throw new Error(`git init failed: ${git.stderr}`);
-    const init = await runner('ruflo', ['memory', 'init'], { cwd: root, env: { ...process.env, ...env }, timeout: 120_000 });
+    const init = await runner('ruflo', ['memory', 'init'], { cwd: root, env: { ...process.env, ...env }, timeout: 120_000 }); // spawn-env: inherits (live: the real ruflo on PATH; the caller sandboxes process.env)
     if (init.code !== 0) throw new Error(`ruflo memory init failed: ${String(init.stderr).trim().slice(-400)}`);
   } catch (error) {
     removeProject(root);

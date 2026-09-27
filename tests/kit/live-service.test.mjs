@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { LiveSessionsService, stableProjectKey } from '../../src/lib/live/index.mjs';
 import { waitUntil } from './helpers/wait-until.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 const sandbox = () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-service-'));
+  const dir = tempDir('ak-live-service');
   const claude = path.join(dir, 'claude', 'project');
   const codex = path.join(dir, 'codex', '2026', '07', '27');
   fs.mkdirSync(claude, { recursive: true });

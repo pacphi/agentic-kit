@@ -3,28 +3,26 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { spawnEnv } from './helpers/home-sandbox.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin/agentic-kit.mjs');
 
 function sandbox() {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-host-cli-'));
-  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-host-project-'));
+  const home = tempDir('ak-host-cli');
+  const project = tempDir('ak-host-project');
   fs.mkdirSync(path.join(project, '.git'));
   const config = path.join(home, '.config');
   return {
     home,
     project,
-    env: {
-      ...process.env,
+    env: spawnEnv(home, {
       NO_COLOR: '1',
-      HOME: home,
-      USERPROFILE: home,
       XDG_CONFIG_HOME: config,
       APPDATA: config,
       PATH: path.join(home, 'no-such-bin'),
-    },
+    }),
   };
 }
 

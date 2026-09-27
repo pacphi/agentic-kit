@@ -15,16 +15,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import {
   projectCensus, projectsInScope, describeScope,
   hasLearningState, learningStateOf, LEARNING_MARKERS, CENSUS_SCOPES,
 } from '../../src/lib/project-census.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 /** A temp tree; every test builds its own so none can observe another. */
 function tmp() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'ak-census-'));
+  return tempDir('ak-census');
 }
 
 /** A directory that looks like a git repo root to resolveProjectIdentity. */

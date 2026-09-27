@@ -3,8 +3,8 @@
 // `turn_context`, cumulative `token_count`, `external-import-turn-N` ids).
 // Pure string builders: nothing here touches ~/.codex, ~/.claude or ~/.config.
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { tempDir } from './temp-dir.mjs';
 
 /** A cumulative usage snapshot, `gross` input INCLUDING `cached`. */
 export function usage({ input = 0, cached = 0, output = 0, reasoning = 0 } = {}) {
@@ -127,7 +127,7 @@ export function forkedSubagent({ id = 'child', parent, own, start, meta = {} }) 
 
 /** A temp sandbox with claude/ and codex/YYYY/MM/DD rollout dirs. */
 export function codexSandbox(files, { day = ['2026', '07', '24'] } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-codex-attr-'));
+  const dir = tempDir('ak-codex-attr'); // removed when the calling test (or file) ends
   const dayDir = path.join(dir, 'codex', ...day);
   fs.mkdirSync(dayDir, { recursive: true });
   fs.mkdirSync(path.join(dir, 'claude'), { recursive: true });

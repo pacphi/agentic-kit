@@ -11,13 +11,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import {
   brainInstallFailure, ensureNativeBsq3, healAqeSolver, healNatives, installRuvnetBrain,
 } from '../../src/lib/heal.mjs';
 import { bsq3IsNative } from '../../src/lib/natives.mjs';
 import { _setGlobalRootForTest } from '../../src/lib/paths.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 const BINDING = path.join('build', 'Release', 'better_sqlite3.node');
 
@@ -25,11 +25,11 @@ const BINDING = path.join('build', 'Release', 'better_sqlite3.node');
 // Brain: kbDir() honors RUVNET_BRAIN_KB at call time, so point it at an empty
 // directory for the whole file (a real KB has forge-update.mjs and SOURCE.json,
 // which would silently switch these tests onto the updater path).
-process.env.RUVNET_BRAIN_KB = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-heal-brain-kb-'));
+process.env.RUVNET_BRAIN_KB = tempDir('ak-heal-brain-kb');
 // The natives heal receipts every manifest edit in ak's state folder
 // (install-edits.mjs), resolved at call time: keep this file's heals out of the
 // real one.
-process.env.XDG_STATE_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-heal-state-'));
+process.env.XDG_STATE_HOME = tempDir('ak-heal-state');
 process.env.LOCALAPPDATA = process.env.XDG_STATE_HOME;
 
 function writePkg(dir, { withBinding = false } = {}) {
@@ -47,7 +47,7 @@ function addBinding(pkgDir) {
 /** ruflo/node_modules/{agentdb, better-sqlite3} — better-sqlite3 hoisted and
  *  declared, but unbuilt: the state a `ruflo@latest` upgrade leaves behind. */
 function makeTree() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-heal-'));
+  const root = tempDir('ak-heal');
   const agentdb = path.join(root, 'node_modules', 'agentdb');
   const shared = path.join(root, 'node_modules', 'better-sqlite3');
   fs.mkdirSync(agentdb, { recursive: true });
@@ -109,7 +109,7 @@ test('heal builds the resolved copy in place, planting no extraneous copy', asyn
 });
 
 test('heal installs a copy only when better-sqlite3 is not resolvable at all', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-heal-bare-'));
+  const root = tempDir('ak-heal-bare');
   const agentdb = path.join(root, 'node_modules', 'agentdb');
   fs.mkdirSync(agentdb, { recursive: true });
   const { runner, calls } = fakeNpm();
@@ -134,7 +134,7 @@ test('heal reports failure honestly when no rung produces a binding', async () =
 });
 
 test('heal reports failure when better-sqlite3 stays unresolvable', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-heal-noop-'));
+  const root = tempDir('ak-heal-noop');
   const runner = async () => ({ code: 0, stdout: '', stderr: '' }); // install produces nothing
 
   const r = await ensureNativeBsq3(root, { runner });
@@ -145,7 +145,7 @@ test('heal reports failure when better-sqlite3 stays unresolvable', async () => 
 });
 
 test('heal reports the npm install error when the package stays unresolvable', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-heal-install-fail-'));
+  const root = tempDir('ak-heal-install-fail');
   const runner = async () => ({ code: 1, stdout: '', stderr: 'npm error native build failed\n' });
 
   const r = await ensureNativeBsq3(root, { runner });
@@ -161,7 +161,7 @@ test('heal reports the npm install error when the package stays unresolvable', a
  *  `overrides` for it — the npm-12 state where a direct `@^12` install is
  *  EOVERRIDE-rejected but the declared `^12.9.0` succeeds. */
 function overrideDir(pin) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-heal-override-'));
+  const dir = tempDir('ak-heal-override');
   fs.writeFileSync(path.join(dir, 'package.json'),
     JSON.stringify({ name: '@claude-flow/cli', overrides: { 'better-sqlite3': pin } }));
   return dir;
@@ -209,7 +209,7 @@ test('ensureNativeBsq3 reconciles a self-declared optionalDependencies pin befor
   // package's self-declared fields for the same dependency to agree, so the
   // stale optionalDependencies entry alone triggered EOVERRIDE even though the
   // derived install spec matched `overrides`.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-heal-selfconflict-'));
+  const dir = tempDir('ak-heal-selfconflict');
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({
     name: '@claude-flow/cli',
     overrides: { 'better-sqlite3': '^12.10.0' },
@@ -249,7 +249,7 @@ test('ensureNativeBsq3 reconciles a self-declared optionalDependencies pin befor
 test('healNatives heals @claude-flow/memory + /cli with each tree\'s derived spec (AC-1)', async () => {
   // Fake global tree: ruflo/node_modules/@claude-flow/{memory,cli}, each pinning
   // better-sqlite3 via overrides, none resolvable — the npm-12 WASM-only state.
-  const g = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-heal-global-'));
+  const g = tempDir('ak-heal-global');
   const nm = path.join(g, 'ruflo', 'node_modules');
   for (const c of ['memory', 'cli']) {
     const dir = path.join(nm, '@claude-flow', c);
@@ -272,7 +272,7 @@ test('healNatives heals @claude-flow/memory + /cli with each tree\'s derived spe
 });
 
 test('healNatives skips a ruflo tree with no @claude-flow packages, without crashing (EC-2)', async () => {
-  const g = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-heal-bare-global-'));
+  const g = tempDir('ak-heal-bare-global');
   fs.mkdirSync(path.join(g, 'ruflo', 'node_modules'), { recursive: true });
   _setGlobalRootForTest(g);
   let installed = false;
@@ -292,7 +292,7 @@ test('healNatives skips a ruflo tree with no @claude-flow packages, without cras
  *  build/Release binding file is PRESENT — the state a Node major upgrade leaves:
  *  the file exists, so the old file-exists check called it native. */
 function presentBindingTree() {
-  const g = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-heal-unloadable-'));
+  const g = tempDir('ak-heal-unloadable');
   const cli = path.join(g, 'ruflo', 'node_modules', '@claude-flow', 'cli');
   fs.mkdirSync(cli, { recursive: true });
   fs.writeFileSync(path.join(cli, 'package.json'), JSON.stringify({ name: '@claude-flow/cli' }));
@@ -594,7 +594,7 @@ test('brain failures drop ANSI color and keep the installer remediation hint', (
 });
 
 test('AQE solver: the unpublished native is never install-attempted and the TS fallback is reported as the implementation (#135)', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-solver-'));
+  const root = tempDir('ak-solver');
   fs.mkdirSync(path.join(root, 'agentic-qe'), { recursive: true });
   _setGlobalRootForTest(root);
   try {
@@ -615,7 +615,7 @@ test('AQE solver: the unpublished native is never install-attempted and the TS f
 });
 
 test('AQE solver: a native already present on disk is still detected and reported', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-solver-present-'));
+  const root = tempDir('ak-solver-present');
   const probe = path.join(root, 'agentic-qe', 'node_modules', '@ruvector', 'solver-node');
   fs.mkdirSync(probe, { recursive: true });
   fs.writeFileSync(path.join(probe, 'package.json'), '{"name":"@ruvector/solver-node"}');

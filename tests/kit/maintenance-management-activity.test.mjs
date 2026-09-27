@@ -3,17 +3,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 
 import { isProhibitedLabel } from '../../src/lib/maintenance/management/model.mjs';
 import { buildActivity, exportReceipt, receiptDetail } from '../../src/lib/maintenance/management/activity.mjs';
 import { createDispositionStore } from '../../src/lib/maintenance/management/dispositions.mjs';
 import { createPreferencesStore, resolveViewState } from '../../src/lib/maintenance/management/preferences.mjs';
 import { INTERRUPTED_RECEIPT, FIXTURE_NOW } from '../fixtures/maintenance/management-fixtures.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 function tempRoot(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-mgmt-activity-'));
+  const root = tempDir('ak-mgmt-activity');
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   return root;
 }
@@ -147,7 +146,7 @@ test('recordDisposition returns the confirmation explanation and persists the re
 });
 
 test('snoozed requires a future ISO `until`; other kinds reject an `until`', () => {
-  const store = createDispositionStore({ root: fs.mkdtempSync(path.join(os.tmpdir(), 'ak-disp-')), now: () => new Date(FIXTURE_NOW) });
+  const store = createDispositionStore({ root: tempDir('ak-disp'), now: () => new Date(FIXTURE_NOW) });
   assert.throws(() => store.recordDisposition({ guidanceId: 'g', dispositionIdentity: 'p:x', kind: 'snoozed' }), TypeError);
   assert.throws(() => store.recordDisposition({ guidanceId: 'g', dispositionIdentity: 'p:x', kind: 'acknowledged', until: FIXTURE_NOW }), TypeError);
   assert.throws(() => store.recordDisposition({ guidanceId: 'g', dispositionIdentity: 'p:x', kind: 'not-a-kind' }), TypeError);

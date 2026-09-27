@@ -13,7 +13,7 @@
 //   · `ak x verify harvest` never seeds an AgentDB store and keeps every memory
 //     path inside its temporary directory;
 //   · About reports the agentdb copy Ruflo bundles, never the standalone global.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -24,6 +24,7 @@ import {
 } from './helpers/home-sandbox.mjs';
 
 const HOME = sandboxHome('ak-agentdb-retired');
+after(() => rmrf(HOME));
 const paths = await import('../../src/lib/paths.mjs');
 const status = await import('../../src/commands/status.mjs');
 const heal = await import('../../src/lib/heal.mjs');
@@ -37,6 +38,7 @@ assertSandboxed(paths, HOME);
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const PROJECT = sandboxProject('ak-agentdb-retired');
+after(() => rmrf(PROJECT));
 
 /** A global root where the standalone agentdb (alpha.17) and Ruflo's bundled
  *  copy (alpha.20) disagree — the exact shape H-agentdb-lifecycle observed. */

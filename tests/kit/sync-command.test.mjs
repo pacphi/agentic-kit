@@ -13,7 +13,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   sandboxHome, assertSandboxed, snapshot, assertUnchanged, captureLog, rmrf,
-  sandboxProject, writeKitConfig, offlineKitConfig, fakeGlobalRoot,
+  sandboxProject, writeKitConfig, offlineKitConfig, fakeGlobalRoot, spawnEnv,
 } from './helpers/home-sandbox.mjs';
 import { isolateProject } from './helpers/project-isolation.mjs';
 
@@ -816,7 +816,7 @@ function syncChild({ first = [], after = [], flags = {}, throws = false }) {
       pkgRoot: ${JSON.stringify(PKG_ROOT)}, collectFn }));
   `;
   return spawnSync(process.execPath, ['--input-type=module', '-e', script], {
-    cwd: PROJECT, env: process.env, encoding: 'utf8', timeout: 120_000,
+    cwd: PROJECT, env: spawnEnv(HOME), encoding: 'utf8', timeout: 120_000,
   });
 }
 
@@ -825,7 +825,7 @@ function akSync(args) {
   const root = fakeGlobalRoot(HOME, { ruflo: '9.9.9', 'agentic-qe': '9.9.9' });
   return spawnSync(process.execPath, [BIN, 'sync', ...args], {
     cwd: PROJECT, encoding: 'utf8', timeout: 120_000,
-    env: { ...process.env, npm_config_prefix: path.dirname(root) },
+    env: spawnEnv(HOME, { npm_config_prefix: path.dirname(root) }),
   });
 }
 

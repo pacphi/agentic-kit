@@ -2,7 +2,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import {
   createLiveEvent, LiveReplayStream, emptyLiveProjection,
@@ -10,6 +9,7 @@ import {
   reduceLiveEvent, resolveHost, resolveProjectIdentity, resolveProjectLabel,
   serializeLiveProjection, sweepLiveProjection, stableProjectKey, WorkspaceSnapshotStore,
 } from '../../src/lib/live/index.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 const base = (over = {}) => ({
   sessionId: 's1', observedAt: '2026-07-27T12:00:00Z',
@@ -146,15 +146,15 @@ test('Git workspace inspection reports tracked state without filenames or attrib
   assert.deepEqual(parseGitNumstat('4\t2\tsrc/private.mjs\n-\t-\tasset.bin\n'), {
     additions: 4, deletions: 2, files: 2, binaryFiles: 1,
   });
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-workspace-'));
+  const root = tempDir('ak-live-workspace');
   fs.mkdirSync(path.join(root, 'backend'), { recursive: true });
   // Exercise the real Git boundary in a disposable repository.
-  execFileSync('git', ['init', '-q', '-b', 'feature/workspace', root]);
-  execFileSync('git', ['-C', root, 'config', 'user.email', 'test@example.invalid']);
-  execFileSync('git', ['-C', root, 'config', 'user.name', 'Test']);
+  execFileSync('git', ['init', '-q', '-b', 'feature/workspace', root]); // spawn-env: inherits (git in a throwaway repository)
+  execFileSync('git', ['-C', root, 'config', 'user.email', 'test@example.invalid']); // spawn-env: inherits (git in a throwaway repository)
+  execFileSync('git', ['-C', root, 'config', 'user.name', 'Test']); // spawn-env: inherits (git in a throwaway repository)
   fs.writeFileSync(path.join(root, 'tracked.txt'), 'one\ntwo\n');
-  execFileSync('git', ['-C', root, 'add', 'tracked.txt']);
-  execFileSync('git', ['-C', root, 'commit', '-qm', 'fixture']);
+  execFileSync('git', ['-C', root, 'add', 'tracked.txt']); // spawn-env: inherits (git in a throwaway repository)
+  execFileSync('git', ['-C', root, 'commit', '-qm', 'fixture']); // spawn-env: inherits (git in a throwaway repository)
   fs.writeFileSync(path.join(root, 'tracked.txt'), 'one\nthree\nfour\n');
   fs.writeFileSync(path.join(root, 'untracked-secret.txt'), 'not counted\n');
   const workspace = await inspectGitWorkspace(path.join(root, 'backend'), {
@@ -175,7 +175,7 @@ test('Git workspace inspection reports tracked state without filenames or attrib
 });
 
 test('workspace snapshot store retains only safe last-recorded metadata', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-store-'));
+  const dir = tempDir('ak-live-store');
   const file = path.join(dir, 'observability-workspaces.json');
   const store = new WorkspaceSnapshotStore(file);
   assert.equal(store.remember({
@@ -199,7 +199,7 @@ test('workspace snapshot store retains only safe last-recorded metadata', () => 
 });
 
 test('workspace store re-sanitizes records and does not expose mutable internals', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-store-mutation-'));
+  const dir = tempDir('ak-live-store-mutation');
   const file = path.join(dir, 'observability-workspaces.json');
   const store = new WorkspaceSnapshotStore(file);
   const baseRecord = {
@@ -223,12 +223,12 @@ test('workspace store re-sanitizes records and does not expose mutable internals
 });
 
 test('Git workspace inspection ignores inherited repository-routing variables', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-git-env-'));
+  const root = tempDir('ak-live-git-env');
   const expected = path.join(root, 'expected');
   const redirected = path.join(root, 'redirected');
   for (const repository of [expected, redirected]) {
     fs.mkdirSync(repository);
-    execFileSync('git', ['init', '-q', '-b', path.basename(repository), repository]);
+    execFileSync('git', ['init', '-q', '-b', path.basename(repository), repository]); // spawn-env: inherits (git in a throwaway repository)
   }
   const priorDir = process.env.GIT_DIR;
   const priorTree = process.env.GIT_WORK_TREE;
@@ -245,7 +245,7 @@ test('Git workspace inspection ignores inherited repository-routing variables', 
 });
 
 test('project identity resolves linked and retained worktrees to their owning repository', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-project-'));
+  const root = tempDir('ak-live-project');
   const repository = path.join(root, 'agentic-kit');
   const worktree = path.join(root, 'm3-multi-provider-persona-grounding');
   fs.mkdirSync(worktree, { recursive: true });
@@ -260,7 +260,7 @@ test('project identity resolves linked and retained worktrees to their owning re
 });
 
 test('project identity resolves repository subdirectories to the repository root', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-project-'));
+  const root = tempDir('ak-live-project');
   const repository = path.join(root, 'tub-vault');
   fs.mkdirSync(path.join(repository, '.git'), { recursive: true });
   fs.mkdirSync(path.join(repository, 'scripts', 'lib'), { recursive: true });
@@ -271,8 +271,8 @@ test('project identity resolves repository subdirectories to the repository root
 });
 
 test('canonical project keys distinguish unrelated same-named repositories', () => {
-  const left = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-left-'));
-  const right = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-right-'));
+  const left = tempDir('ak-live-left');
+  const right = tempDir('ak-live-right');
   const leftRepo = path.join(left, 'api');
   const rightRepo = path.join(right, 'api');
   fs.mkdirSync(path.join(leftRepo, '.git'), { recursive: true });
@@ -285,7 +285,7 @@ test('canonical project keys distinguish unrelated same-named repositories', () 
 });
 
 test('project identity prefers a real nested repository over worktree path heuristics', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-project-'));
+  const root = tempDir('ak-live-project');
   const outer = path.join(root, 'outer');
   const nested = path.join(outer, '.claude', 'worktrees', 'nested');
   fs.mkdirSync(path.join(outer, '.git'), { recursive: true });
@@ -296,7 +296,7 @@ test('project identity prefers a real nested repository over worktree path heuri
 });
 
 test('project identity distinguishes unresolved paths and a repository literally named unknown', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-project-'));
+  const root = tempDir('ak-live-project');
   const repository = path.join(root, 'unknown');
   fs.mkdirSync(path.join(repository, '.git'), { recursive: true });
   assert.deepEqual(resolveProjectIdentity(path.join(root, 'scratch')).canonical, false);
@@ -306,7 +306,7 @@ test('project identity distinguishes unresolved paths and a repository literally
 });
 
 test('project identity resolves subdirectories of a linked worktree to the owning repository', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-project-'));
+  const root = tempDir('ak-live-project');
   const repository = path.join(root, 'agentic-kit');
   const worktree = path.join(root, 'm3-persona-grounding');
   fs.mkdirSync(path.join(worktree, 'scripts'), { recursive: true });

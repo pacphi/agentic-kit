@@ -6,7 +6,7 @@
 // project with this suite's environment): a CLI store is mirrored into
 // memory.db AND agentdb-memory.db, an MCP store lands in agentdb-memory.db only,
 // and a default `memory purge` clears memory.db only while reporting success.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -15,6 +15,7 @@ import {
   sandboxHome, assertSandboxed, captureLog, rmrf,
   sandboxProject, writeKitConfig, offlineKitConfig, fakeGlobalRoot,
 } from './helpers/home-sandbox.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 const FAKE_RUFLO = `#!/usr/bin/env node
 const fs = require('node:fs');
@@ -87,10 +88,12 @@ if (argv[0] === 'mcp') {
 `;
 
 const HOME = sandboxHome('ak-verify-routes');
+after(() => rmrf(HOME));
 const paths = await import('../../src/lib/paths.mjs');
 const verify = await import('../../src/commands/x/verify.mjs');
 assertSandboxed(paths, HOME);
 const PROJECT = sandboxProject('ak-verify-routes');
+after(() => rmrf(PROJECT));
 paths._setGlobalRootForTest(fakeGlobalRoot(HOME, { ruflo: '9.9.9' }));
 
 const posix = { skip: process.platform === 'win32' ? 'fake ruflo is a POSIX shebang script' : false };
@@ -99,7 +102,7 @@ const posix = { skip: process.platform === 'win32' ? 'fake ruflo is a POSIX sheb
 async function withFakeRuflo(mode, fn) {
   rmrf(paths.configDir());
   writeKitConfig(HOME, offlineKitConfig());
-  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-fake-ruflo-'));
+  const bin = tempDir('ak-fake-ruflo');
   const log = path.join(bin, 'calls.log');
   fs.writeFileSync(path.join(bin, 'ruflo'), FAKE_RUFLO, { mode: 0o755 });
   const saved = { PATH: process.env.PATH, FAKE_RUFLO_MODE: process.env.FAKE_RUFLO_MODE, FAKE_RUFLO_LOG: process.env.FAKE_RUFLO_LOG, cwd: process.cwd() };
@@ -150,7 +153,7 @@ test('an unusable MCP server is "not observed" and does not fail the suite', pos
 });
 
 test('the isolated proof never writes into a user-set memory root', posix, async () => {
-  const decoy = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-decoy-store-'));
+  const decoy = tempDir('ak-decoy-store');
   const saved = process.env.CLAUDE_FLOW_MEMORY_PATH;
   process.env.CLAUDE_FLOW_MEMORY_PATH = decoy;
   try {

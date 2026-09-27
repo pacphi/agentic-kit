@@ -1,13 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { rufloCodexMcpStatus, codexMcpTopology } from '../../src/lib/mcp.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 /** Build a temp $HOME containing (or not) ~/.codex/config.toml with given body. */
 function tempHome(configBody) {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-rev-'));
+  const home = tempDir('ak-rev');
   if (configBody != null) {
     fs.mkdirSync(path.join(home, '.codex'), { recursive: true });
     fs.writeFileSync(path.join(home, '.codex', 'config.toml'), configBody);
@@ -64,7 +64,7 @@ test('rufloCodexMcpStatus reads the multi-line args array codex writes', () => {
 
 test('codexMcpTopology reads multi-line args and still classifies exact repair tables', () => {
   const home = tempHome('[mcp_servers.claude-flow]\ncommand = "ruflo"\nargs = [\n    "mcp",\n    "start",\n]\n\n[mcp_servers.codex]\ncommand = "codex"\nargs = [\n    "mcp-server",\n]\n');
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-rev-cwd-'));
+  const cwd = tempDir('ak-rev-cwd');
   const topology = codexMcpTopology({ cwd, home });
   const byName = Object.fromEntries(topology.registrations.map((entry) => [entry.name, entry]));
   assert.deepEqual(byName['claude-flow'].args, ['mcp', 'start']);

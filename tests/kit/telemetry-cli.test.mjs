@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { tempDir } from './helpers/temp-dir.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -7,13 +8,16 @@ import { spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { fixture, identity, now } from './helpers/telemetry.mjs';
+import { spawnEnv } from './helpers/home-sandbox.mjs';
 const storePath = '../../src/lib/telemetry/store.mjs';
 const bin = new URL('../../bin/agentic-kit.mjs', import.meta.url);
 function temporary(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-telemetry-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true })); return dir;
 }
-function cli(args) { return spawnSync(process.execPath, [fileURLToPath(bin), 'telemetry', ...args], { encoding: 'utf8' }); }
+// A throwaway home: `ak telemetry` must never reach the developer's real config or state.
+const HOME = tempDir('ak-telemetry-cli-home');
+function cli(args) { return spawnSync(process.execPath, [fileURLToPath(bin), 'telemetry', ...args], { encoding: 'utf8', env: spawnEnv(HOME) }); }
 
 test('should_advertiseTelemetry_when_requestingCommandHelp', () => {
   assert.match(cli(['--help']).stdout, /ak telemetry export/);
@@ -103,12 +107,11 @@ test('should_exportHermeticLocalEvidence_when_invokingRealCli', t => {
   // must override it, or the export absorbs them (same class as usage-cli).
   const outside = temporary(t);
   writeOpencodeStore(outside);
-  const shell = { ...process.env, XDG_DATA_HOME: outside };
-  // Pin every XDG base and drop the host-home overrides, as sandboxHome() does.
-  const env = { ...shell, HOME: dir, USERPROFILE: dir, XDG_CONFIG_HOME: path.join(dir, 'config'),
+  // spawnEnv drops the inherited XDG_DATA_HOME (and every other per-user base)
+  // and pins each one inside the sandbox; the decoy store proves it.
+  const env = spawnEnv(dir, { XDG_CONFIG_HOME: path.join(dir, 'config'),
     XDG_STATE_HOME: path.join(dir, 'state'), XDG_DATA_HOME: path.join(dir, 'data'), XDG_CACHE_HOME: path.join(dir, 'cache'),
-    APPDATA: path.join(dir, 'config'), LOCALAPPDATA: path.join(dir, 'state'), CLAUDE_CONFIG_DIR: path.join(dir, '.claude') };
-  for (const key of ['CODEX_HOME', 'HERMES_HOME']) delete env[key];
+    APPDATA: path.join(dir, 'config'), LOCALAPPDATA: path.join(dir, 'state'), CLAUDE_CONFIG_DIR: path.join(dir, '.claude') });
   const invoke = args => spawnSync(process.execPath, [fileURLToPath(bin), 'telemetry', ...args], { encoding: 'utf8', env });
   const first = invoke(['export']);
   assert.equal(first.status, 0, first.stderr);
@@ -155,6 +158,19 @@ test('should_rejectReplacedFiles_when_openedInodeDiffers', async t => {
   t.mock.method(fs, 'fstatSync', (...args) => { const stat = original(...args); stat.ino++; return stat; });
   assert.throws(() => readJsonFile(file), /bounds/);
 });
+// NTFS file IDs carry a sequence number in the top 16 bits, so they can exceed
+// 2^53: as Numbers, two files one record apart read as the same inode.
+test('should_rejectReplacedFiles_when_fileIdsExceedDoublePrecision', async t => {
+  const { readJsonFile } = await import(storePath); const file = path.join(temporary(t), 'data.json');
+  fs.writeFileSync(file, '{}');
+  const ntfsId = (index) => (64n << 48n) + index;
+  const withIno = (stat, ino, opts) => { stat.ino = opts?.bigint ? ino : Number(ino); return stat; };
+  const lstat = fs.lstatSync; const fstat = fs.fstatSync;
+  t.mock.method(fs, 'lstatSync', (p, opts) => withIno(lstat(p, opts), ntfsId(12344n), opts));
+  t.mock.method(fs, 'fstatSync', (fd, opts) => withIno(fstat(fd, opts), ntfsId(12345n), opts));
+  assert.equal(Number(ntfsId(12344n)), Number(ntfsId(12345n)), 'the two IDs collide as Numbers');
+  assert.throws(() => readJsonFile(file), /bounds/);
+});
 test('should_rejectPublicIdentityDirectory_when_permissionsAreLoose', { skip: process.platform === 'win32' }, async t => {
   const { readOrCreateIdentity } = await import(storePath); const dir = temporary(t); fs.chmodSync(dir, 0o755);
   assert.throws(() => readOrCreateIdentity(dir), /private/);
@@ -181,8 +197,8 @@ test('should_readRetainedMaintenance_when_exportingOffline', t => {
   const root = path.join(state, 'agentic-kit', 'maintenance', 'transactions');
   fs.mkdirSync(path.join(root, 'mnt-corrupt'), { recursive: true, mode: 0o700 });
   const result = spawnSync(process.execPath, [fileURLToPath(bin), 'telemetry', 'export'], { encoding: 'utf8',
-    env: { ...process.env, HOME: dir, USERPROFILE: dir, XDG_CONFIG_HOME: path.join(dir, 'config'),
-      XDG_STATE_HOME: state, LOCALAPPDATA: state, APPDATA: path.join(dir, 'config'), CLAUDE_CONFIG_DIR: path.join(dir, '.claude') } });
+    env: spawnEnv(dir, { XDG_CONFIG_HOME: path.join(dir, 'config'),
+      XDG_STATE_HOME: state, LOCALAPPDATA: state, APPDATA: path.join(dir, 'config'), CLAUDE_CONFIG_DIR: path.join(dir, '.claude') }) });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout).maintenance.receipts[0].status, 'unknown-recovery-required');
 });
