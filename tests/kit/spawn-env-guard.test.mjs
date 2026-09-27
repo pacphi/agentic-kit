@@ -19,7 +19,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { spawnEnv, sandboxEnvFor, INHERITED_STATE_KEYS } from './helpers/home-sandbox.mjs';
+import { spawnEnv, sandboxEnvFor, envValue, INHERITED_STATE_KEYS } from './helpers/home-sandbox.mjs';
 
 const TESTS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SELF = fileURLToPath(import.meta.url);
@@ -169,10 +169,40 @@ test('spawnEnv pins every per-user base inside the sandbox, whatever the parent 
   for (const key of ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'HERMES_HOME', 'CLAUDE_FLOW_DB_PATH', 'CLAUDE_FLOW_MEMORY_PATH']) {
     assert.equal(env[key], undefined, `${key} must not be inherited`);
   }
-  assert.equal(env.PATH, process.env.PATH);
+  // Windows stores the search path as `Path`; a plain-object copy keeps that spelling.
+  assert.equal(envValue(env, 'PATH'), process.env.PATH);
   assert.equal(env.EXTRA, '1');
   assert.deepEqual(Object.keys(sandboxEnvFor(home)).sort(),
     INHERITED_STATE_KEYS.filter((k) => !['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'HERMES_HOME', 'CLAUDE_FLOW_DB_PATH', 'CLAUDE_FLOW_MEMORY_PATH'].includes(k)).sort());
+});
+
+test('on Windows spawnEnv keeps the parent spelling of each variable and never doubles one by case', (t) => {
+  const home = tempHome(t);
+  const parent = { Path: 'C:\\bin', PATHEXT: '.COM;.EXE', SystemRoot: 'C:\\Windows', ComSpec: 'C:\\Windows\\cmd.exe',
+    Temp: 'C:\\real\\tmp', tmp: 'C:\\real\\tmp', LocalAppData: 'C:\\real\\local', xdg_state_home: 'C:\\real\\state',
+    Codex_Home: 'C:\\real\\codex' };
+  const env = spawnEnv(home, { PATH: 'C:\\fake;C:\\bin', SYSTEMROOT: 'C:\\Win' }, { env: parent, platform: 'win32' });
+  const folded = Object.keys(env).map((k) => k.toUpperCase());
+  assert.deepEqual(folded.filter((k, i) => folded.indexOf(k) !== i), [], `duplicate keys: ${Object.keys(env).join(', ')}`);
+  assert.equal(env.Path, 'C:\\fake;C:\\bin', 'extra PATH replaces the parent Path under its spelling');
+  assert.equal(env.SystemRoot, 'C:\\Win');
+  assert.equal(env.PATHEXT, '.COM;.EXE');
+  assert.equal(env.ComSpec, 'C:\\Windows\\cmd.exe');
+  for (const key of ['TEMP', 'TMP', 'LOCALAPPDATA', 'XDG_STATE_HOME']) {
+    assert.ok(envValue(env, key, 'win32').startsWith(home), `${key}=${envValue(env, key, 'win32')} escapes ${home}`);
+  }
+  assert.equal(envValue(env, 'CODEX_HOME', 'win32'), undefined);
+  assert.equal(envValue(env, 'path', 'win32'), 'C:\\fake;C:\\bin');
+  assert.equal(envValue(env, 'path', 'linux'), undefined, 'POSIX names are case-sensitive');
+});
+
+test('on POSIX spawnEnv treats names that differ by case as different variables', (t) => {
+  const home = tempHome(t);
+  const env = spawnEnv(home, {}, { env: { PATH: '/usr/bin', Path: 'other', tmpdir: 'kept' }, platform: 'linux' });
+  assert.equal(env.PATH, '/usr/bin');
+  assert.equal(env.Path, 'other');
+  assert.equal(env.tmpdir, 'kept');
+  assert.ok(env.TMPDIR.startsWith(home));
 });
 
 test('a real child sees the sandboxed state base, not the parent one', (t) => {

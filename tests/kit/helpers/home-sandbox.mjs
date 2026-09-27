@@ -51,18 +51,50 @@ export function sandboxEnvFor(home) {
 }
 
 /**
- * The environment for a spawned child: process.env minus INHERITED_STATE_KEYS,
+ * Read `key` from a plain env object the way the platform does: Windows
+ * variable names are case-insensitive (the search path is usually `Path`).
+ * @param {Record<string, string|undefined>} env
+ * @param {string} key
+ * @param {string} [platform]
+ * @returns {string|undefined}
+ */
+export function envValue(env, key, platform = process.platform) {
+  if (platform !== 'win32') return env[key];
+  const upper = key.toUpperCase();
+  const name = Object.keys(env).find((k) => k.toUpperCase() === upper);
+  return name === undefined ? undefined : env[name];
+}
+
+/**
+ * The environment for a spawned child: the parent env minus INHERITED_STATE_KEYS,
  * plus sandboxEnvFor(home), plus `extra` (last wins). PATH is kept. Creates
  * `home/tmp` so the child's os.tmpdir() exists.
+ * On Windows names are matched case-insensitively: a copy of process.env keeps
+ * the stored spelling (`Path`, `SystemRoot`, sometimes `Temp`), so an exact-name
+ * delete or override would leave the parent's value beside a second spelling.
+ * A key that replaces a parent key keeps the parent's spelling; read one with
+ * envValue().
  * @param {string} home
  * @param {Record<string, string|undefined>} [extra]
+ * @param {{ env?: Record<string, string|undefined>, platform?: string }} [o] injectable for tests
  * @returns {Record<string, string|undefined>}
  */
-export function spawnEnv(home, extra = {}) {
-  const base = { ...process.env }; // spawn-env: inherits (the one sanctioned copy; state keys are removed below)
-  for (const key of INHERITED_STATE_KEYS) delete base[key];
+export function spawnEnv(home, extra = {}, { env = process.env, platform = process.platform } = {}) {
+  const fold = platform === 'win32' ? (key) => key.toUpperCase() : (key) => key;
+  const state = new Set(INHERITED_STATE_KEYS.map(fold));
+  const out = {};
+  const names = new Map(); // folded name -> the spelling stored in `out`
+  const put = (key, value) => {
+    const name = names.get(fold(key)) ?? key;
+    if (value === undefined) { delete out[name]; names.delete(fold(key)); return; }
+    out[name] = value;
+    names.set(fold(key), name);
+  };
+  // The one sanctioned copy of the parent env; per-user state keys are dropped.
+  for (const [key, value] of Object.entries(env)) if (!state.has(fold(key))) put(key, value);
+  for (const [key, value] of Object.entries({ ...sandboxEnvFor(home), ...extra })) put(key, value);
   fs.mkdirSync(path.join(home, 'tmp'), { recursive: true });
-  return { ...base, ...sandboxEnvFor(home), ...extra };
+  return out;
 }
 
 /**
