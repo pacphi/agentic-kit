@@ -568,9 +568,7 @@ export const SYNC_STEPS = [
   // footer with no re-inject planned.
   {
     id: 'statusline',
-    // 'statusline/cve': fixStatusline also injects the CVE-counter overlay
-    // that row promises (a planned overlay fix used to run no step at all).
-    when: (subs) => subs.has('statusline') || subs.has('statusline/cve') || subs.has('versions') || subs.has('providers'),
+    when: (subs) => subs.has('statusline') || subs.has('versions') || subs.has('providers'),
     run: async (ctx) => {
       // withProgress: fixStatusline blocks on a node subprocess (ruflo's helper
       // refresh, up to 30s). The interval can't animate through a synchronous
@@ -651,7 +649,7 @@ const SYNC_SUBSYSTEMS = [
   'agent-browser', 'aqe', 'aqe-embedding', 'blocks', 'codex-context', 'codex-mcp', 'codex-statusline',
   'daemons', 'deja-vu', 'host-alignment', 'hosts', 'mcp', 'natives', 'npx', 'providers', 'routing',
   'ruflo-components', 'ruvector', 'ruvnet-brain', 'ruvnet-brain-nightly', 'scaffold-agents', 'security',
-  'self', 'statusline', 'statusline/cve', 'versions',
+  'self', 'statusline', 'versions',
 ];
 
 /** The names `ak sync --skip` accepts: SYNC_SUBSYSTEMS plus every lifecycle host. */
@@ -713,9 +711,8 @@ export function performingStepsFor(item, flags, cfg, skip = new Set()) {
 }
 
 /** Take --skip's items out of the plan: those of a skipped subsystem, and
- *  those only a skipped step performs (statusline/cve when statusline is
- *  skipped; a Codex MCP registration when providers is skipped) — running the
- *  rest could never repair them. */
+ *  those only a skipped step performs (a Codex MCP registration when
+ *  providers is skipped) — running the rest could never repair them. */
 export function splitSkipped(candidates, skip, flags, cfg) {
   if (!skip.size) return { plan: candidates, skipped: [] };
   const plan = []; const skipped = [];

@@ -1033,16 +1033,17 @@
       "mapping": "mapped",
       "kitImpact": {
         "refs": ["closed-upstream review 2026-09-26"],
-        "files": ["src/lib/statusline.mjs", "src/templates/statusline-footer.cjs"]
+        "files": ["src/lib/statusline.mjs"]
       },
       "adjustment": "refactor(statusline): remove the retired CVE-counter overlay (SEC_WRAP, its gate, the status row, rufloLocalSecurity and rufloHonestInsight); keep SEC_WRAP_STRIP for one release. Conditional on declaring a Ruflo floor >= 3.32.2.",
-      "status": "released",
+      "status": "adopted",
       "constraintIds": [],
       "history": [
         { "date": "2026-07-16", "event": "filed" },
         { "date": "2026-07-17", "event": "closed", "note": "completed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.32.2; the ak change is pending" }
+        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.32.2; the ak change is pending" },
+        { "date": "2026-09-27", "event": "adopted", "note": "overlay removed; SEC_WRAP_STRIP kept one release; floor 3.39.0 >= 3.32.2; removal proof: statusline suites pass and a 3.46.1 statusline helper carrying an old block is stripped, passes node --check and converges on the second run" }
       ]
     },
     {

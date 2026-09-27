@@ -656,10 +656,10 @@ test('--skip stops a step on its derived triggers too', () => {
 
 test('a fix performed only by a skipped step is skipped with it, never unresolved', async () => {
   seedHome();
-  const cve = { subsystem: 'statusline/cve', level: 'warn', message: 'fabricated CVE counter', fix: 'sync injects the security overlay', repair: 'sync' };
-  const { out } = await syncWith(async () => [cve], { 'dry-run': true, skip: ['statusline'] });
+  const codex = { subsystem: 'codex-mcp', level: 'warn', message: 'no ruflo MCP in codex', fix: 'sync registers the ruflo MCP into codex', repair: 'sync' };
+  const { out } = await syncWith(async () => [codex], { 'dry-run': true, skip: ['providers'] });
   assert.doesNotMatch(out, /sync plan/, out);
-  assert.match(out, /skipped by request: \[statusline\/cve\]/);
+  assert.match(out, /skipped by request: \[codex-mcp\]/);
 });
 
 // correctness-skip-providers-false-unresolved: the codex-mcp subsystem has

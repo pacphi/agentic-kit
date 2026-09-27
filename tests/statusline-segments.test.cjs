@@ -40,14 +40,14 @@ try {
   process.exit(2);
 }
 
-// The security overlay ships in the same block (it must: the strip regex in
+// The aidefence and debug helpers ship in the same block (they must: the strip regex in
 // statusline.mjs is non-global, so a second ruflo-seg block would leak on re-injection).
-let rufloLocalSecurity, rufloHonestInsight, rufloAidefenceState, rufloStatuslineDebug;
+// The CVE-counter overlay functions (ruvnet/ruflo#2694 stopgap) are retired: the block
+// must no longer define them.
+let rufloAidefenceState, rufloStatuslineDebug, retiredOverlay;
 try {
   // eslint-disable-next-line no-eval
-  rufloLocalSecurity = eval('(function(){' + block + '\nreturn rufloLocalSecurity;})()');
-  // eslint-disable-next-line no-eval
-  rufloHonestInsight = eval('(function(){' + block + '\nreturn rufloHonestInsight;})()');
+  retiredOverlay = eval('(function(){' + block + '\nreturn [typeof rufloLocalSecurity, typeof rufloHonestInsight];})()');
   // eslint-disable-next-line no-eval
   rufloAidefenceState = eval('(function(){' + block + '\nreturn rufloAidefenceState;})()');
   // eslint-disable-next-line no-eval
@@ -321,140 +321,14 @@ test('Δ LoRA field is never rendered (F4 gate honored)', () => {
   absent(out, 'Δ LoRA');
 });
 
-// ── security overlay: ruflo's fabricated CVE counter ────────────────────────
-// Upstream getSecurityStatus() (@claude-flow/cli funnel/local-signals.js) hardcodes
-// `const totalCves = 3` — ruflo's OWN v3 roadmap items, not the rendered project's risk —
-// and derives cvesFixed from scans.length, a FILE count. So a pristine repo is told it
-// has 3 CVEs, and running the suggested scan "fixes" one by writing a file. The overlay
-// reports what the newest scan actually found and never invents a CVE.
-console.log('\nsecurity overlay (fabricated-CVE fix)');
+// ── retired CVE-counter overlay (ruvnet/ruflo#2694) ─────────────────────────
+// Ruflo fixed getSecurityStatus in 3.32.2, below the support window's floor, so the
+// footer no longer overlays a scan-derived security status or rewrites the CVE insight.
+console.log('\nretired security overlay');
 
-const scanFixture = (files) => mkFixture(Object.fromEntries(
-  Object.entries(files).map(([f, o]) => ['.claude/security-scans/' + f, o])));
-const iso = (ms) => new Date(Date.now() + ms).toISOString();
-
-test('never scanned → PENDING (honest unknown, not a false green)', () => {
-  const r = rufloLocalSecurity(mkFixture({}), { status: 'UPSTREAM' });
-  assert(r.status === 'PENDING', 'expected PENDING, got ' + r.status);
-});
-
-test('clean fresh scan → CLEAN', () => {
-  const r = rufloLocalSecurity(scanFixture({
-    'scan-all-full.json': { timestamp: iso(0), summary: { total: 0 }, findings: [] },
-  }), null);
-  assert(r.status === 'CLEAN', 'expected CLEAN, got ' + r.status);
-});
-
-test('real findings → "N ISSUES" with the true count', () => {
-  const r = rufloLocalSecurity(scanFixture({
-    'scan.json': { timestamp: iso(0), summary: { critical: 1, high: 2, total: 3 }, findings: [1, 2, 3] },
-  }), null);
-  assert(r.status === '3 ISSUES', 'expected "3 ISSUES", got ' + r.status);
-});
-
-test('single finding is singular ("1 ISSUE")', () => {
-  const r = rufloLocalSecurity(scanFixture({
-    'scan.json': { timestamp: iso(0), summary: { total: 1 }, findings: [1] },
-  }), null);
-  assert(r.status === '1 ISSUE', 'expected "1 ISSUE", got ' + r.status);
-});
-
-test('clean but stale scan → STALE (not a stale green tick)', () => {
-  const r = rufloLocalSecurity(scanFixture({
-    'scan.json': { timestamp: iso(-30 * 864e5), summary: { total: 0 }, findings: [] },
-  }), null);
-  assert(r.status === 'STALE', 'expected STALE, got ' + r.status);
-});
-
-// THE regression this whole patch exists for.
-test('N clean scan FILES never fabricate CVEs (the upstream file-count bug)', () => {
-  const r = rufloLocalSecurity(scanFixture({
-    'a.json': { timestamp: iso(0), summary: { total: 0 }, findings: [] },
-    'b.json': { timestamp: iso(1), summary: { total: 0 }, findings: [] },
-    'c.json': { timestamp: iso(2), summary: { total: 0 }, findings: [] },
-  }), null);
-  assert(r.status === 'CLEAN', 'three clean scans must be CLEAN, got ' + r.status);
-  assert(r.totalCves === 0 && r.cvesFixed === 0, 'file count must never become a CVE count');
-});
-
-test('totalCves/cvesFixed are pinned to 0 in every state (⚠ N CVEs can never fire)', () => {
-  const states = [
-    mkFixture({}),
-    scanFixture({ 's.json': { timestamp: iso(0), summary: { total: 0 }, findings: [] } }),
-    scanFixture({ 's.json': { timestamp: iso(0), summary: { total: 9 }, findings: [1] } }),
-    scanFixture({ 's.json': { timestamp: iso(-30 * 864e5), summary: { total: 0 }, findings: [] } }),
-  ];
-  for (const dir of states) {
-    const r = rufloLocalSecurity(dir, null);
-    assert(r.totalCves === 0 && r.cvesFixed === 0,
-      'CVE counters must stay 0, got ' + JSON.stringify(r));
-  }
-});
-
-test('newest scan wins over older ones', () => {
-  const r = rufloLocalSecurity(scanFixture({
-    'old.json': { timestamp: iso(-864e5), summary: { total: 7 }, findings: [1] },
-    'new.json': { timestamp: iso(0), summary: { total: 0 }, findings: [] },
-  }), null);
-  assert(r.status === 'CLEAN', 'newest (clean) scan must win, got ' + r.status);
-});
-
-test('malformed scan JSON is ignored, never throws', () => {
-  const dir = mkFixture({
-    '.claude/security-scans/broken.json': 'not json at all{{',
-    '.claude/security-scans/good.json': JSON.stringify({ timestamp: iso(0), summary: { total: 2 }, findings: [1, 2] }),
-  });
-  const r = rufloLocalSecurity(dir, null);
-  assert(r.status === '2 ISSUES', 'expected "2 ISSUES" from the readable scan, got ' + r.status);
-});
-
-test('findings[] length is used when summary.total is absent', () => {
-  const r = rufloLocalSecurity(scanFixture({
-    'scan.json': { timestamp: iso(0), findings: [1, 2, 3, 4] },
-  }), null);
-  assert(r.status === '4 ISSUES', 'expected "4 ISSUES", got ' + r.status);
-});
-
-// ── insight row: the CLI bakes the fabricated count into promo TEXT ──────────
-// funnel/insights.js computes `pending = totalCves - cvesFixed` CLI-side and ships a
-// finished sentence, so overlaying data.security alone still leaves "⚠ 1 CVE pending"
-// on line 3. promo.js drops the insight id, so this must match on text.
-const cveInsight = (n) => ({ text: `⚠ ${n} CVE${n === 1 ? '' : 's'} pending — Run ruflo security scan --depth full`, kind: 'insight' });
-
-test('fabricated CVE insight is dropped when the real scan is CLEAN', () => {
-  const r = rufloHonestInsight(cveInsight(1), { status: 'CLEAN', cvesFixed: 0, totalCves: 0 });
-  assert(r === null, 'clean scan must not nag about CVEs, got ' + JSON.stringify(r));
-});
-
-test('CVE insight becomes an honest scan-pending prompt when never scanned', () => {
-  const r = rufloHonestInsight(cveInsight(3), { status: 'PENDING', cvesFixed: 0, totalCves: 0 });
-  absent(r.text, 'CVE');
-  contains(r.text, 'scan pending');
-});
-
-test('CVE insight becomes a real issue count when the scan found things', () => {
-  const r = rufloHonestInsight(cveInsight(1), { status: '4 ISSUES', cvesFixed: 0, totalCves: 0 });
-  contains(r.text, '4 security issues');
-  absent(r.text, 'CVE');
-});
-
-test('CVE insight reports a stale scan honestly', () => {
-  const r = rufloHonestInsight(cveInsight(2), { status: 'STALE', cvesFixed: 0, totalCves: 0 });
-  contains(r.text, 'scan stale');
-  absent(r.text, 'CVE');
-});
-
-test('non-CVE insights pass through untouched (funnel rotation preserved)', () => {
-  const tip = { text: '💾 ruflo session restore --latest brings back your last session', kind: 'educational' };
-  assert(rufloHonestInsight(tip, { status: 'CLEAN' }) === tip, 'educational tip must pass through by identity');
-  const other = { text: '🧬 flywheel headline', kind: 'insight' };
-  assert(rufloHonestInsight(other, { status: 'CLEAN' }) === other, 'non-CVE insight must pass through by identity');
-});
-
-test('null/!text promo is safe', () => {
-  assert(rufloHonestInsight(null, { status: 'CLEAN' }) === null, 'null promo stays null');
-  const weird = { kind: 'insight' };
-  assert(rufloHonestInsight(weird, { status: 'CLEAN' }) === weird, 'promo without text passes through');
+test('the footer no longer defines the CVE overlay functions', () => {
+  assert(retiredOverlay[0] === 'undefined' && retiredOverlay[1] === 'undefined',
+    'expected rufloLocalSecurity and rufloHonestInsight to be gone, got ' + retiredOverlay.join(', '));
 });
 
 // ── AI defense (AIMDS): ALARM-ONLY, three-state, fail-safe ──────────────────
@@ -534,7 +408,7 @@ test('unresolvable ruflo → silent (a probe miss must never fail loud and wrong
 
 // Test-quality Finding 5: bump deliberately when adding/removing a test —
 // see admin-model.test.cjs's identical guard for the full rationale.
-const EXPECTED = 46;
+const EXPECTED = 31;
 if (passed + failed !== EXPECTED) {
   console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
   process.exit(1);

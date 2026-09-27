@@ -191,11 +191,13 @@ test('with mcp.register false the mcp rows promise no sync repair, and sync does
   assert.doesNotMatch(out, /unresolved/);
 });
 
-test('the CVE overlay fix is performed by the statusline step', () => {
+// ruvnet/ruflo#2694: the CVE-counter overlay is retired, and its subsystem with it.
+test('the retired statusline/cve subsystem has no sync step and cannot be skipped', () => {
   const cfg = loadKitConfig();
   const fired = sync.SYNC_STEPS.filter((s) => s.when(new Set(['statusline/cve']), { 'no-upgrade': false }, cfg))
     .map((s) => s.id);
-  assert.ok(fired.includes('statusline'), `statusline/cve must fire the statusline step; fired: ${fired}`);
+  assert.equal(fired.includes('statusline'), false, `no step repairs statusline/cve; fired: ${fired}`);
+  assert.equal(sync.skippableSubsystems().includes('statusline/cve'), false);
 });
 
 // ── census: every 'sync' fix has a sync step that runs for it ────────────────
