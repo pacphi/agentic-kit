@@ -181,6 +181,19 @@ test('the tracking issues carry their whole upstream remainder', () => {
   assert.ok(t240.kitImpact.files.includes('src/lib/aqe-readiness.mjs'));
 });
 
+// agentic-qe#719 is a partial fix for #574: releasing it alone must not dispatch removing the busy rule.
+test('the partial fix agentic-qe#719 is context only; agentic-qe#574 drives the dispatch', () => {
+  const doc = document();
+  const partial = entry(doc, 'proffesor-for-testing/agentic-qe#719');
+  assert.equal(partial.mapping, 'unmapped');
+  assert.equal(partial.adjustment, null);
+  assert.equal(partial.kitImpact, null);
+  assert.match(partial.note, /agentic-qe#574/);
+  const driver = entry(doc, 'proffesor-for-testing/agentic-qe#574');
+  assert.equal(driver.mapping, 'mapped');
+  assert.match(driver.adjustment, /busy rule/);
+});
+
 test('stale threads are mapped to what ak carries, or retired with a reason', () => {
   const doc = document();
   const clear = entry(doc, 'openai/codex#16045');

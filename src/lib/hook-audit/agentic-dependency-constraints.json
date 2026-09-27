@@ -737,14 +737,15 @@
       "title": "fix(rvf): preserve healthy stores behind stale locks",
       "dependency": "agentic-qe",
       "doneWhen": { "state": "merged", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
-      "mapping": "mapped",
-      "kitImpact": { "refs": ["lane C: live-lock busy rule", "pacphi/agentic-kit#240"], "files": [] },
-      "adjustment": "Partial fix for agentic-qe#574 (rethrows LockHeld). Once released and a live lock no longer surfaces FsyncFailed, remove the temporary busy rule and close pacphi/agentic-kit#240.",
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
       "status": "watching",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-26", "event": "registered" }
-      ]
+      ],
+      "note": "Context only: a partial fix for agentic-qe#574 (rethrows LockHeld). Its release alone does not prove a live lock no longer surfaces FsyncFailed, so agentic-qe#574 drives removing the busy rule and closing pacphi/agentic-kit#240."
     },
     {
       "id": "proffesor-for-testing/agentic-qe#734",
