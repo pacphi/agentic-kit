@@ -28,7 +28,7 @@ import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
 import { DEJA_VU_TARGETS } from '../lib/deja-vu.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { HOSTS, hostInstallState, installHost, migrateRetiredRoutesInConfig, printActivityRoutingTable, convergeProviderStack, applySetupHostFlags, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
-import { installedVersion } from '../lib/versions.mjs';
+import { cmpVersions, installedVersion } from '../lib/versions.mjs';
 import { aqeInitArguments } from '../lib/aqe-guidance.mjs';
 import { resolveAqeEmbedding } from '../lib/aqe-embedding-config.mjs';
 import { embeddingIntentFromFlags, embeddingSetupDisclosure } from '../lib/aqe-embedding-setup.mjs';
@@ -492,27 +492,36 @@ function printComponentResults(components) {
   for (const line of componentResultReport(components)) out[line.level](line.text);
 }
 
-export const RUFLO_PROJECT_INIT_ARGS = Object.freeze([
-  'init', '--full', '--force',
-  // Agentic-kit owns machine guidance and Codex host selection. These Ruflo
-  // escape hatches declare that boundary. --format json is also required on
-  // Ruflo 3.38.21 because its hyphenated boolean flags are registered but not
-  // observed by the init handler; scripted mode independently suppresses the
-  // two optional projections. The env is the second, documented skills.sh
-  // guard and keeps the boundary explicit when upstream fixes flag parsing.
-  '--no-global', '--no-codex-detect', '--no-skills-sh',
-  '--format', 'json',
-]);
+// Agentic-kit owns machine guidance and Codex host selection. These Ruflo
+// escape hatches declare that boundary.
+const RUFLO_INIT_OPT_OUTS = ['init', '--full', '--force', '--no-global', '--no-codex-detect', '--no-skills-sh'];
+// Ruflo honours the opt-out flags from 3.46.0 (ruvnet/ruflo#3167, PR #3434).
+const RUFLO_INIT_FLAGS_HONOURED = '3.46.0';
 
-export const RUFLO_PROJECT_INIT_ENV = Object.freeze({ RUFLO_NO_SKILLS_SH: '1' });
+/**
+ * The `ruflo init` invocation for project setup. From 3.46.0 the flags alone
+ * suffice. Below that (3.38.21 to 3.45.x) the hyphenated boolean flags are
+ * registered but not observed by the init handler, so `--format json`
+ * (scripted mode suppresses the Codex and skills.sh projections) and
+ * RUFLO_NO_SKILLS_SH=1 carry the boundary. An unknown version gets that
+ * older, safer form. Nothing parses init's output, so the format is free to change.
+ * @param {string|null|undefined} rufloVersion
+ * @returns {{ args: string[], env: Record<string, string> }}
+ */
+export function rufloProjectInitInvocation(rufloVersion) {
+  const honoured = typeof rufloVersion === 'string' && /^\d+\.\d+\.\d+/.test(rufloVersion)
+    && cmpVersions(rufloVersion, RUFLO_INIT_FLAGS_HONOURED) >= 0;
+  return honoured
+    ? { args: [...RUFLO_INIT_OPT_OUTS], env: {} }
+    : { args: [...RUFLO_INIT_OPT_OUTS, '--format', 'json'], env: { RUFLO_NO_SKILLS_SH: '1' } };
+}
 
 /** Step 1: initialize Ruflo project assets without overlapping agentic-kit's
  *  machine guidance, Codex adapter, or explicit skill projections. The caller
  *  restores/reconciles project guidance from its pre-init snapshot. */
 async function rufloProjectInit(root, permCtx) {
-  const init = await runCmd('ruflo', [...RUFLO_PROJECT_INIT_ARGS], {
-    cwd: root, timeout: 300_000, env: RUFLO_PROJECT_INIT_ENV,
-  });
+  const { args, env } = rufloProjectInitInvocation(installedRoutingVersion() ?? installedVersion('ruflo'));
+  const init = await runCmd('ruflo', args, { cwd: root, timeout: 300_000, env });
   (init.code === 0 ? ok : fail)('ruflo init --full');
   if (init.code !== 0) return false;
   const rufloUnexpected = removeUndisclosedPermissions(

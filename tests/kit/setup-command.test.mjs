@@ -137,11 +137,22 @@ test('run_project --dry-run announces the plan and touches neither home nor proj
 });
 
 test('project init delegates without overlapping machine guidance, Codex, or skill registration', () => {
-  assert.deepEqual(setup.RUFLO_PROJECT_INIT_ARGS, [
-    'init', '--full', '--force', '--no-global', '--no-codex-detect', '--no-skills-sh',
-    '--format', 'json',
-  ]);
-  assert.deepEqual(setup.RUFLO_PROJECT_INIT_ENV, { RUFLO_NO_SKILLS_SH: '1' });
+  // Ruflo 3.46.0+ honours the opt-out flags (ruvnet/ruflo#3167, PR #3434).
+  for (const version of ['3.46.0', '3.46.1', '3.50.2']) {
+    assert.deepEqual(setup.rufloProjectInitInvocation(version), {
+      args: ['init', '--full', '--force', '--no-global', '--no-codex-detect', '--no-skills-sh'],
+      env: {},
+    }, version);
+  }
+  // Below 3.46.0 the flags are registered but not observed: scripted mode and
+  // the env are the suppression. An unknown version gets the older, safer form.
+  for (const version of ['3.45.0', '3.39.2', '3.38.21', null, undefined, 'garbage']) {
+    assert.deepEqual(setup.rufloProjectInitInvocation(version), {
+      args: ['init', '--full', '--force', '--no-global', '--no-codex-detect', '--no-skills-sh',
+        '--format', 'json'],
+      env: { RUFLO_NO_SKILLS_SH: '1' },
+    }, String(version));
+  }
 });
 
 test('project permission manifest omits AQE grants when AQE is disabled', () => {

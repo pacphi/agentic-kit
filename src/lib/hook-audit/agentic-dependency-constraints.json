@@ -174,14 +174,14 @@
       "id": "ruflo-3.38.21-init-suppression-flags",
       "dependency": "ruflo",
       "kind": "upstream-defect",
-      "affected": ["3.38.21"],
+      "affected": ["3.38.21", "3.39.x", "3.40.x", "3.41.x", "3.42.x", "3.43.x", "3.44.x", "3.45.x"],
       "issue": "https://github.com/ruvnet/ruflo/issues/3167",
       "issueState": "closed-at-last-verification",
       "primaryEvidence": "fresh empty-directory reproduction plus installed wrapper/init-handler artifact digests",
       "strategy": "retain the declared no-codex-detect/no-skills-sh flags and independently suppress optional projections with scripted format plus RUFLO_NO_SKILLS_SH=1; preserve unreceipted existing skills",
-      "versionGate": "apply to Ruflo 3.38.21; re-run the empty-directory filesystem proof for every later release",
+      "versionGate": "apply to Ruflo below 3.46.0 (flags honoured from 3.46.0, PR #3434)",
       "expiryPolicy": "retest within 14 days and on every Ruflo release",
-      "nextRetestAt": "2026-10-03",
+      "nextRetestAt": "2026-10-11",
       "sunsetWhen": "a released Ruflo build honors both CLI flags independently and together through the public ruflo wrapper",
       "notification": {
         "status": "published",
@@ -1316,18 +1316,21 @@
       "kind": "issue",
       "title": "ruflo init 3.38.21 ignores --no-codex-detect and --no-skills-sh",
       "dependency": "ruflo",
-      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": "3.46.0" } },
       "mapping": "mapped",
       "kitImpact": {
         "refs": ["constraint ruflo-3.38.21-init-suppression-flags"],
-        "files": ["docs/HOST-SUPPORT.md", "docs/SETUP.md"]
+        "files": ["docs/HOST-SUPPORT.md", "docs/SETUP.md", "src/commands/setup.mjs"]
       },
-      "adjustment": "Once a released Ruflo honours --no-codex-detect and --no-skills-sh through the public wrapper, drop the scripted-format and RUFLO_NO_SKILLS_SH suppression and sunset the constraint.",
-      "status": "watching",
+      "adjustment": "ak setup passes the flags alone on Ruflo 3.46.0 and newer (rufloProjectInitInvocation) and keeps the scripted-format and RUFLO_NO_SKILLS_SH suppression below 3.46.0; the constraint sunsets when the support-window floor reaches 3.46.0.",
+      "status": "adopted",
       "constraintIds": ["ruflo-3.38.21-init-suppression-flags"],
       "history": [
         { "date": "2026-09-02", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "closed", "note": "completed by PR #3434" },
+        { "date": "2026-09-26", "event": "released", "note": "PR #3434 in 3.46.0 (confirmed in the @claude-flow/cli 3.46.0 tarball: commands/init.js reads codexDetect/skillsSh false)" },
+        { "date": "2026-09-27", "event": "adopted", "note": "removal proof on 3.46.1 through the public ruflo wrapper, one disposable HOME and empty folder each: --no-codex-detect alone left no .codex/ or AGENTS.md; --no-skills-sh alone left no .agents/skills/ruflo; both together left neither; a control run without them created both" }
       ]
     },
     {

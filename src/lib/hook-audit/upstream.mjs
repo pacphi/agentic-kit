@@ -37,10 +37,11 @@ function validSupportWindow(window) {
     && typeof window.basis === 'string';
 }
 
+// A range is an exact version, `<major>.x` or `<major>.<minor>.x`.
 function affectedBy(version, ranges) {
   if (typeof version !== 'string' || !version || version === 'unknown') return null;
   return ranges.some((range) => range === version
-    || (/^\d+\.x$/.test(range) && version.startsWith(`${range.slice(0, -1)}`)));
+    || (/^\d+(?:\.\d+)?\.x$/.test(range) && version.startsWith(`${range.slice(0, -1)}`)));
 }
 
 // lastCheckedAt is the last state re-read (issue states, npm releases);
