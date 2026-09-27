@@ -149,13 +149,20 @@ test('fresh dual-host Codex provisioning and repeated refresh retain one canonic
   const cfg = loadKitConfig();
   let adds = 0;
   let claudeAdds = 0;
-  const provisionClaude = () => register(cfg, {
+  // Claude Code's entry goes through ak's launcher (B3-D1); the check that the
+  // PATH ak can start it is injected, since the sandbox PATH is empty.
+  // The offline fixture turns agent-browser off; Claude's side turns it on so
+  // the registration carries ak's AGENT_BROWSER_CONFIG, as it does by default.
+  const env = managedAgentBrowserEnv();
+  const envArgs = Object.entries(env).flatMap(([key, value]) => ['-e', `${key}=${value}`]);
+  const provisionClaude = () => register({ ...cfg, agentBrowser: true }, {
+    launcherCheck: async () => null,
     inspect: () => claudeMcpTopology({ cwd: project, home: sandbox }),
     runner: async (command, args) => {
       assert.equal(command, 'claude');
-      assert.deepEqual(args, ['mcp', 'add', 'claude-flow', '-s', 'user', '--', 'ruflo', 'mcp', 'start']);
+      assert.deepEqual(args, ['mcp', 'add', 'claude-flow', '-s', 'user', ...envArgs, '--', 'ak', 'x', 'ruflo-mcp', '--host', 'claude']);
       fs.writeFileSync(paths.claudeUserMcpPath(), JSON.stringify({ mcpServers: {
-        'claude-flow': { command: 'ruflo', args: ['mcp', 'start'] },
+        'claude-flow': { command: 'ak', args: ['x', 'ruflo-mcp', '--host', 'claude'], env },
       } }));
       claudeAdds++;
       return { code: 0, stdout: '', stderr: '' };
