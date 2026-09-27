@@ -36,7 +36,7 @@ A watch entry records:
 | `dependency` | The dependency policy that governs it. AgentDB threads use `ruflo`: ak gets AgentDB through Ruflo, so an AgentDB fix counts as released only when the newest Ruflo (npm `latest`, the newest version in the support window) installs a fixed agentdb (`doneWhen.release.bundledBy`). AgentDB publishes no tags, so a fix is confirmed by hand and recorded as `minVersion` until then. |
 | `doneWhen` | `closed-completed` or `merged`, plus the release channel, the first fixed version when known, the upstream tag spelling (`tagPattern`) when it is not `v<version>`, and the carrier chain (`bundledBy`) when ak gets the package through another. |
 | `mapping`, `kitImpact`, `adjustment` | Whether ak carries something for it, which files and plan or decision refs, and the change ak makes when it lands. |
-| `status`, `history` | Lifecycle status and dated events. A `reviewed` event (with a `note`) records that every comment up to that day was read and needs no reply. |
+| `status`, `history` | Lifecycle status and dated events. A `reviewed` event (with a `note`) records that every comment up to the end of that UTC day was read and needs no reply. History carries dates, not times, so a comment posted later on the day of the review is covered too: record a review only after the day's comments are read, or on a later day. |
 | `constraintIds` | Constraints this thread backs. |
 
 ## Lifecycle
