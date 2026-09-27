@@ -645,8 +645,9 @@ sessions, recovered-project sightings and mixed observations; a recovered direct
 verified session.
 
 Imported session copies are not sightings. A Codex rollout stamped `external-import-turn-*` is a
-Claude Code transcript that the ChatGPT desktop app imported; the Claude transcript already names
-its folder. Discovery skips it before reading its cwd, so it adds no project, host or Session
+Claude Code transcript that the ChatGPT desktop app imported; it is a copy, and the original Claude
+Code session is counted where its transcript still exists. A folder that only an import names is
+therefore not a project. Discovery skips it before reading its cwd, so it adds no project, host or Session
 origin, and counts it in `importedExcluded` (per host scan and in total). `complete` is unaffected.
 
 **Proposed change ([ADR-0060](../adr/0060-session-surface-initiator-and-product-names.md)).**
