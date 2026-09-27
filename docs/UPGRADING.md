@@ -108,7 +108,7 @@ the user-level store `~/.claude-flow/memory` from your home folder, a temporary 
 own folder. Ruflo also reads the repository's MCP policy file from a subfolder. A registration you
 wrote yourself (another command, scope or environment key) is left alone. The launcher must be on
 the `PATH` Claude Code starts with; if `ak` is not found, sync keeps the old registration and says
-so. Restart Claude Code to pick up the new registration.
+so, and `ak status` lists the step as yours: put `ak` on `PATH`, then run `ak sync`. Restart Claude Code to pick up the new registration.
 
 The same sync removes ak's old setup probe rows (`_setup/verify-…`) once, from both memory files of
 the current project and of the user-level store, after backing each file up (see
