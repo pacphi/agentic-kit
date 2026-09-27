@@ -14,6 +14,7 @@ export const GROUPS = [
   ['released-actionable', 'Released and actionable'],
   ['release-unconfirmed', 'Released, fix not confirmed'],
   ['workaround-carried', 'Fixed upstream, ak still carries the workaround'],
+  ['waiting-for-window', 'Released, waiting for the support window'],
   ['fixed-unreleased', 'Fixed upstream, not yet released'],
   ['reopened', 'Reopened upstream after ak recorded a fix'],
   ['waiting', 'Waiting on upstream'],
@@ -284,36 +285,83 @@ function dispatchFor(entry, policy, dependencyPolicies) {
   return { branch: `${policy.dispatch.branchPrefix}${slug}`, pullRequest: policy.dispatch.pullRequest, merge: policy.dispatch.merge, removalProof, adjustment: entry.adjustment };
 }
 
+const ACT_NOW = new Set(['released-actionable', 'workaround-carried']);
+
+/**
+ * ADR-0041 §7: a Ruflo workaround comes out only once the oldest supported
+ * Ruflo (the support-window floor) contains the fix. Returns the hold, or
+ * null when the floor is unknown, the fix version is unknown, or it is in.
+ */
+function windowHold(entry, release, supportFloor, floorBundle = null) {
+  const gate = entry.doneWhen?.release;
+  if (!supportFloor || !gate) return null;
+  if (gate.bundledBy?.[0] === 'ruflo') return bundledHold(gate, release, supportFloor, floorBundle);
+  if (entry.dependency !== 'ruflo' || gate.name !== 'ruflo') return null;
+  const needs = gate.minVersion ?? release?.version ?? null;
+  return needs && compareVersions(needs, supportFloor) > 0 ? { floor: supportFloor, needs } : null;
+}
+
+/**
+ * Decision B3-D5: a fix delivered through Ruflo (AgentDB) waits until the
+ * oldest supported Ruflo bundles a fixed version (`floorBundle`, resolved
+ * like the newest carrier's). An unresolved floor never releases it.
+ */
+function bundledHold(gate, release, floor, floorBundle) {
+  const needs = release?.version ?? gate.minVersion ?? null;
+  if (!needs) return null;
+  const has = floorBundle ? floorBundle.version ?? 'none' : 'unknown';
+  if (floorBundle?.version && compareVersions(floorBundle.version, needs) >= 0) return null;
+  return { floor, needs: `${gate.name} ${needs}`, floorBundles: `${gate.name} ${has}` };
+}
+
+/** A newest-carrier release whose floor bundle could not be resolved is "Could not check", as the newest one is. */
+function floorChecked(gate, release, supportFloor, floorBundle) {
+  if (!supportFloor || gate?.bundledBy?.[0] !== 'ruflo' || release?.released !== true || floorBundle) return release;
+  return { released: null, basis: `could not resolve the ${gate.name} that ${gate.bundledBy[0]} ${supportFloor} bundles`, version: null, date: null };
+}
+
+/** Swap the act-now groups for `waiting-for-window` on a held entry. */
+function applyHold(groups, hold) {
+  if (!hold || !groups.some((group) => ACT_NOW.has(group))) return { groups, hold: null };
+  return { groups: [...groups.filter((group) => !ACT_NOW.has(group)), 'waiting-for-window'], hold };
+}
+
 /** Classify one non-retired entry; `live` is null when offline or the fetch failed. */
-export function classifyEntry(entry, live, { policy, dependencyPolicies, now }) {
+export function classifyEntry(entry, live, { policy, dependencyPolicies, now, supportFloor = null }) {
   const base = {
     id: entry.id, url: entry.url, title: entry.title, relation: entry.relation, status: entry.status,
     mapping: entry.mapping, adjustment: entry.adjustment, tracks: entry.tracks ?? null,
   };
   const fromRegistry = registryGroups(entry);
   if (!live || live.error) {
-    const groups = live?.error ? ['unchecked', ...fromRegistry] : fromRegistry;
-    return { ...base, groups: [...new Set(groups)], error: live?.error ?? null, upstream: null, dispatch: groups.includes('workaround-carried') ? dispatchFor(entry, policy, dependencyPolicies) : null };
+    const held = applyHold([...new Set(live?.error ? ['unchecked', ...fromRegistry] : fromRegistry)], windowHold(entry, null, supportFloor));
+    return {
+      ...base, groups: held.groups, error: live?.error ?? null, upstream: null, ...(held.hold ? { window: held.hold } : {}),
+      dispatch: held.groups.includes('workaround-carried') ? dispatchFor(entry, policy, dependencyPolicies) : null,
+    };
   }
   const up = upstreamOf(live.thread);
   const facts = commentFacts(entry, live.thread, policy);
-  const release = up.fixed && PENDING.has(entry.status) ? releaseState(entry, up.fixedAt, live.release, live.confirmation ?? null, live.bundle ?? null) : null;
+  const release = up.fixed && PENDING.has(entry.status)
+    ? floorChecked(entry.doneWhen.release, releaseState(entry, up.fixedAt, live.release, live.confirmation ?? null, live.bundle ?? null), supportFloor, live.floorBundle ?? null)
+    : null;
   const stale = up.state === 'open' && now.getTime() - Date.parse(facts.lastUpstreamActivityAt) >= policy.staleAfterDays * DAY;
-  const groups = [...new Set([...liveGroups(entry, up, facts, release, stale), ...fromRegistry])];
+  const found = [...new Set([...liveGroups(entry, up, facts, release, stale), ...fromRegistry])];
   if (entry.relation === 'tracking') {
-    for (const drop of ['waiting', 'stale']) if (groups.includes(drop)) groups.splice(groups.indexOf(drop), 1);
+    for (const drop of ['waiting', 'stale']) if (found.includes(drop)) found.splice(found.indexOf(drop), 1);
   }
+  const { groups, hold } = applyHold(found, windowHold(entry, release, supportFloor, live.floorBundle ?? null));
   const actionable = groups.includes('released-actionable') || groups.includes('workaround-carried');
   return {
-    ...base, groups, upstream: up, release, stale, ...facts,
+    ...base, groups, upstream: up, release, stale, ...facts, ...(hold ? { window: hold } : {}),
     lastHistoryDate: lastHistoryDate(entry),
     dispatch: actionable ? dispatchFor(entry, policy, dependencyPolicies) : null,
   };
 }
 
 /** Assemble the report from the registry and whatever live facts were collected. */
-export function buildReport(registry, liveById, { now, offline = null, fetchErrors = [] }) {
-  const context = { policy: registry.watchPolicy, dependencyPolicies: registry.dependencyPolicies, now };
+export function buildReport(registry, liveById, { now, offline = null, fetchErrors = [], supportFloor = null }) {
+  const context = { policy: registry.watchPolicy, dependencyPolicies: registry.dependencyPolicies, now, supportFloor };
   const active = registry.watch.filter((entry) => entry.status !== 'retired');
   const entries = active.map((entry) => classifyEntry(entry, offline ? null : liveById.get(entry.id) ?? null, context));
   const today = now.toISOString().slice(0, 10);
@@ -330,6 +378,7 @@ export function buildReport(registry, liveById, { now, offline = null, fetchErro
     generatedAt: now.toISOString(),
     mode: offline ? 'offline' : 'live',
     offlineReason: offline,
+    supportWindow: { floor: supportFloor },
     registry: { status: registry.registryStatus, errors: registry.errors ?? [], lastVerifiedAt: registry.lastVerifiedAt, lastCheckedAt: registry.lastCheckedAt, statuses },
     counts: Object.fromEntries(groups.map((group) => [group.key, group.items.length])),
     groups,
@@ -364,12 +413,14 @@ export function ledgerEvents(report, registry, { since }) {
     const up = entry.upstream;
     if (up?.isPr && up.mergedAt && up.mergedAt > since) events.push(eventLine(sentinel, entry.id, 'merged', day(up.mergedAt)));
     else if (up?.state === 'closed' && up.closedAt > since) events.push(eventLine(sentinel, entry.id, 'closed', day(up.closedAt), { reason: up.reason }));
-    if (entry.groups.includes('released-actionable')) {
+    // A release held for the support window is still a release: the line
+    // carries no dispatch branch until the floor contains the fix.
+    if (entry.groups.includes('released-actionable') || (entry.window && entry.release?.released === true)) {
       events.push(eventLine(sentinel, entry.id, 'released', entry.release.date, {
         version: entry.release.version,
         pr: entry.release.change?.pr ?? null,
         commit: entry.release.change && !entry.release.change.pr ? entry.release.change.sha.slice(0, 7) : null,
-        branch: entry.dispatch.branch,
+        branch: entry.dispatch?.branch,
       }));
     }
     if (entry.groups.includes('reopened')) events.push(eventLine(sentinel, entry.id, 'reopened', entry.lastHistoryDate, { status: entry.status }));

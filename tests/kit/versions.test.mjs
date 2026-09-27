@@ -83,3 +83,80 @@ test('latestVersion uses literal npm argv, honors its deadline, and rejects unsa
     options: { timeout: 5_000 },
   }]);
 });
+
+// ── The Ruflo support-window row (ADR-0041 §7) ─────────────────────────────
+// The row reads remembered release dates only; the drift report is stubbed so
+// the only process a plain read could start would be the window's own lookup.
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import versionsSection from '../../src/commands/status/sections/versions.mjs';
+
+const WINDOW_NOW = Date.parse('2026-09-27T12:00:00Z');
+const OBSERVED = Date.parse('2026-09-27T09:00:00Z');
+const REMEMBERED = {
+  versionCheck: {
+    rufloMinors: {
+      observedAt: OBSERVED,
+      firstPublished: {
+        3.38: '2026-08-11T22:43:21Z', 3.39: '2026-09-08T16:52:33Z', '3.40': '2026-09-09T23:10:35Z',
+        3.41: '2026-09-10T11:59:59Z', 3.42: '2026-09-15T00:50:39Z', 3.43: '2026-09-23T15:05:58Z',
+        3.44: '2026-09-23T18:47:33Z', 3.45: '2026-09-24T22:54:53Z', 3.46: '2026-09-26T22:34:55Z',
+      },
+    },
+  },
+};
+
+/** Collect the versions section with a fake `npm` first on PATH that records any call. */
+async function windowRows(installed, cfg) {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-window-bin-'));
+  const marker = path.join(bin, 'npm-called');
+  fs.writeFileSync(path.join(bin, 'npm'), `#!/bin/sh\necho "$@" >> "${marker}"\nexit 1\n`, { mode: 0o755 });
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${bin}${path.delimiter}${oldPath}`;
+  try {
+    const rows = await versionsSection.collect({
+      drift: async () => [{ pkg: 'ruflo', installed, latest: '3.46.1', latestSource: 'cache', latestObservedAt: OBSERVED, outdated: installed !== '3.46.1' }],
+      loadConfig: () => cfg,
+      now: () => WINDOW_NOW,
+    });
+    return { rows, npmCalled: fs.existsSync(marker) };
+  } finally {
+    process.env.PATH = oldPath;
+    fs.rmSync(bin, { recursive: true, force: true });
+  }
+}
+const windowRow = (rows) => rows.find((r) => r.subsystem === 'versions' && /support window/.test(r.message));
+
+test('a Ruflo inside the remembered window is reported as supported', async () => {
+  const { rows } = await windowRows('3.46.1', REMEMBERED);
+  const r = windowRow(rows);
+  assert.equal(r.level, 'info');
+  assert.equal(r.message, 'Ruflo 3.46.1 is inside the support window (3.39.0 and newer; release dates observed 2026-09-27T09:00:00.000Z)');
+  assert.equal(r.fix, null);
+});
+
+test('a Ruflo below the window is unsupported and sync repairs it', async () => {
+  const { rows } = await windowRows('3.38.2', REMEMBERED);
+  const r = windowRow(rows);
+  assert.equal(r.level, 'fail');
+  assert.match(r.message, /unsupported/);
+  assert.match(r.message, /below the support window \(3\.39\.0 and newer/);
+  assert.equal(r.fix, 'sync upgrades Ruflo into the support window');
+  assert.equal(r.repair, 'sync');
+});
+
+test('with no remembered release dates the window is unknown and nothing calls npm', async () => {
+  const { rows, npmCalled } = await windowRows('3.46.1', {});
+  const r = windowRow(rows);
+  assert.equal(r.level, 'info');
+  assert.equal(r.message, "Ruflo support window not yet known: run ak sync to record Ruflo's release dates");
+  assert.equal(r.fix, null, 'an info pointer, never a sync step that would stop daemons');
+  assert.equal(npmCalled, false);
+  assert.doesNotMatch(r.message, /unsupported/);
+});
+
+test('no window row when Ruflo is not installed', async () => {
+  const { rows } = await windowRows(null, REMEMBERED);
+  assert.equal(windowRow(rows), undefined);
+});

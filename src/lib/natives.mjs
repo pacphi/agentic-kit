@@ -5,7 +5,7 @@
 // `security defend` needs (dropped from the 3.28 tree — ruvnet/ruflo#2670).
 import fs from 'node:fs';
 import path from 'node:path';
-import { rufloRoot, rufloNodeModules, aqeRoot } from './paths.mjs';
+import { rufloRoot, rufloNodeModules, rufloCliDist, aqeRoot } from './paths.mjs';
 import { run } from './exec.mjs';
 import { readJson } from './settings.mjs';
 
@@ -280,3 +280,9 @@ function claudeFlowPackagePresent(name) {
 export const aidefencePresent = () => claudeFlowPackagePresent('aidefence');
 
 export const securityPresent = () => claudeFlowPackagePresent('security');
+
+/** True when the global Ruflo's CLI ships the built-in defend engine (3.32.2+,
+ *  ruvnet/ruflo#2670): `security defend` then works without @claude-flow/aidefence,
+ *  which only adds adaptive learning and the aidefence_* MCP tools. */
+export const rufloBuiltinDefence = () =>
+  fs.existsSync(path.join(rufloCliDist(), 'security', 'builtin-aidefence.js'));

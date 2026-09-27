@@ -174,7 +174,7 @@ export async function healNatives({ runner = run, ledger = installEditsPath() } 
 export async function healAidefence() {
   if (aidefencePresent()) return { ok: true, detail: 'already present' };
   const r = await npmInstallInto(rufloRoot(), '@claude-flow/aidefence');
-  return { ok: aidefencePresent(), detail: r.code === 0 ? 'installed (defend functional again)' : r.stderr.slice(0, 200) };
+  return { ok: aidefencePresent(), detail: r.code === 0 ? 'installed (adaptive learning and aidefence_* MCP tools)' : r.stderr.slice(0, 200) };
 }
 
 /** Optional native sublinear solver for agentic-qe (best-effort). */

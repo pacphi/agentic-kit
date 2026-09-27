@@ -229,7 +229,22 @@ test('--dry-run prints a plan and then changes nothing at all', async () => {
   assertUnchanged(beforeProject, PROJECT, '`ak sync --dry-run` must not touch the project');
 });
 
-test('the plan is exactly the rows status marked with a fix', async () => {
+/** A fake `ak` on PATH for `fn`: the mcp rows are sync repairs only when the
+ *  PATH `ak` can run the launcher (register() refuses otherwise), and the
+ *  sandbox PATH is empty. It answers the launcher check's `--help` with the
+ *  `--host` option. /usr/bin:/bin ride along for the `which` probe. */
+async function withAkOnPath(fn) {
+  const bin = path.join(HOME, 'fake-bin-ak');
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(bin, 'ak'), '#!/bin/sh\necho "  --host <claude|codex>"\nexit 0\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'ak.cmd'), '@echo off\r\necho   --host ^<claude^|codex^>\r\nexit /b 0\r\n');
+  fs.writeFileSync(path.join(bin, 'ak.ps1'), "Write-Output '  --host <claude|codex>'\r\nexit 0\r\n");
+  const prev = process.env.PATH;
+  process.env.PATH = [bin, '/usr/bin', '/bin'].join(path.delimiter);
+  try { return await fn(); } finally { process.env.PATH = prev; rmrf(bin); }
+}
+
+test('the plan is exactly the rows status marked with a fix', () => withAkOnPath(async () => {
   seedHome();
   const status = await import('../../src/commands/status.mjs');
   const expected = (await status.collect({ pkgRoot: PKG_ROOT, cwd: PROJECT })).filter((r) => r.fix);
@@ -241,7 +256,7 @@ test('the plan is exactly the rows status marked with a fix', async () => {
     assert.ok(planned.some((l) => l.includes(`[${r.subsystem}]`) && l.includes(r.fix)),
       `plan is missing [${r.subsystem}] ${r.fix}`);
   }
-});
+}));
 
 test('--no-upgrade drops version/self/brain upgrades but keeps the heals', async () => {
   // No ruflo in the global root → a `versions` row with a fix, which is the
@@ -257,10 +272,16 @@ test('--no-upgrade drops version/self/brain upgrades but keeps the heals', async
   assert.match(narrowed, /sync plan|nothing to do/, 'the remaining heals are still planned');
 });
 
-test('--no-upgrade still plans non-version heals (e.g. MCP registration)', async () => {
+test('--no-upgrade still plans non-version heals (e.g. MCP registration)', () => withAkOnPath(async () => {
   seedHome();
   const { out } = await dryRun({ 'no-upgrade': true });
   assert.match(out, /\[mcp\] setup\/sync registers claude-flow at user scope/);
+}));
+
+test('without ak on PATH the MCP registration is not planned: register() would refuse', async () => {
+  seedHome();
+  const { out } = await dryRun({ 'no-upgrade': true });
+  assert.doesNotMatch(out, /\[mcp\] setup\/sync registers claude-flow/);
 });
 
 // Controller ruling: a ruflo-components row asking for a ruflo UPGRADE
@@ -656,10 +677,10 @@ test('--skip stops a step on its derived triggers too', () => {
 
 test('a fix performed only by a skipped step is skipped with it, never unresolved', async () => {
   seedHome();
-  const cve = { subsystem: 'statusline/cve', level: 'warn', message: 'fabricated CVE counter', fix: 'sync injects the security overlay', repair: 'sync' };
-  const { out } = await syncWith(async () => [cve], { 'dry-run': true, skip: ['statusline'] });
+  const codex = { subsystem: 'codex-mcp', level: 'warn', message: 'no ruflo MCP in codex', fix: 'sync registers the ruflo MCP into codex', repair: 'sync' };
+  const { out } = await syncWith(async () => [codex], { 'dry-run': true, skip: ['providers'] });
   assert.doesNotMatch(out, /sync plan/, out);
-  assert.match(out, /skipped by request: \[statusline\/cve\]/);
+  assert.match(out, /skipped by request: \[codex-mcp\]/);
 });
 
 // correctness-skip-providers-false-unresolved: the codex-mcp subsystem has

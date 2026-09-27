@@ -20,7 +20,18 @@
 // A manual backup of it (`ruflo memory backup --db .swarm/agentdb-memory.db
 // --dir .swarm/backups/agentdb`, verified in a sandbox on 3.45.0) needs its own
 // folder: rotation keeps the newest N of every memory-*.db in the destination.
-// Read-only and bounded: two small JSON files and two directory listings.
+// Read-only and bounded: two small JSON files, two directory listings and the
+// last 64 KiB of the daemon log.
+//
+// Why a live daemon has not run a job (Ruflo 3.46.1): before each run the
+// daemon checks CPU load and os.freemem() (worker-daemon.js:584-598) and, when
+// either fails, logs `Worker <type> deferred: <reason>` (:1160) through log()
+// (:1874-1881), which appends `[<ISO>] [INFO] <message>` to
+// <root>/.claude-flow/logs/daemon.log. On macOS os.freemem() excludes the file
+// cache, so the default 5% floor (:165) defers work on a busy machine
+// (ruvnet/ruflo#2935, open). The log is append-only across daemons; every
+// start logs `Daemon started (PID: …` (:828), so only later lines describe the
+// daemon running now.
 import fs from 'node:fs';
 import path from 'node:path';
 import * as paths from './paths.mjs';
@@ -59,6 +70,43 @@ function newestSnapshotAt(dir) {
   return newest;
 }
 
+const LOG_TAIL_BYTES = 64 * 1024;
+const DAEMON_STARTED = /^\[([^\]]+)\] \[INFO\] Daemon started \(PID: /;
+const DEFERRED = /^\[([^\]]+)\] \[INFO\] Worker (backup|consolidate) deferred: (.+)$/;
+
+/** The last LOG_TAIL_BYTES of `file` as lines (the first, likely partial, line dropped). */
+function logTail(file) {
+  let fd;
+  try {
+    fd = fs.openSync(file, 'r');
+    const { size } = fs.fstatSync(fd);
+    const length = Math.min(size, LOG_TAIL_BYTES);
+    const buffer = Buffer.alloc(length);
+    fs.readSync(fd, buffer, 0, length, size - length);
+    const lines = buffer.toString('utf8').split('\n');
+    return size > length ? lines.slice(1) : lines;
+  } catch {
+    return [];
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+/** The newest resource deferral of the backup or distillation (`consolidate`)
+ *  worker logged by the daemon running now, or null. A max-concurrent deferral
+ *  is transient (the worker runs when a slot frees) and is not counted. */
+export function lastWorkerDeferral(root, { now = Date.now() } = {}) {
+  let found = null;
+  for (const line of logTail(path.join(paths.projectClaudeFlowDir(root), 'logs', 'daemon.log'))) {
+    if (DAEMON_STARTED.test(line)) { found = null; continue; }
+    const match = DEFERRED.exec(line);
+    if (!match || /^max concurrent/.test(match[3])) continue;
+    const at = Date.parse(match[1]);
+    if (Number.isFinite(at)) found = { worker: match[2], reason: oneLine(match[3]), at, ageMs: Math.max(0, now - at) };
+  }
+  return found;
+}
+
 export function memoryMaintenanceStatus(root, { now = Date.now() } = {}) {
   const metrics = path.join(paths.projectClaudeFlowDir(root), 'metrics');
   const backups = path.join(root, '.swarm', 'backups');
@@ -89,4 +137,15 @@ export function memoryMaintenanceStatus(root, { now = Date.now() } = {}) {
     },
     mcpStoreBackup: mcpAt === null ? null : { ageMs: Math.max(0, now - mcpAt) },
   };
+}
+
+/** lastWorkerDeferral, unless that job has run since (its metrics file is
+ *  newer): the deferral a live daemon is still stuck on, or null. */
+export function pendingDeferral(root, { now = Date.now() } = {}) {
+  const deferred = lastWorkerDeferral(root, { now });
+  if (!deferred) return null;
+  const status = memoryMaintenanceStatus(root, { now });
+  const lastRun = deferred.worker === 'backup' ? status.backup.lastAt
+    : status.distillation && now - status.distillation.ageMs;
+  return Number.isFinite(lastRun) && lastRun >= deferred.at ? null : deferred;
 }

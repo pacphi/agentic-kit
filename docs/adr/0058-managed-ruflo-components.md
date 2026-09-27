@@ -15,6 +15,12 @@
   before ruflo's evidence (§2), the projection engine preserves a conflicting key without
   abandoning the file (§3), and uninstall releases every receipted project (§1).
 - **Updated:** 2026-09-24 — upstream requests 1–4 and 6 filed (ruflo#3415–#3419); §8 links them.
+- **Updated:** 2026-09-27 — Ruflo 3.46.0 enforces the policy on stdio (#3415); ak's boundary
+  corrected from 3.44.0 to below 3.46.0; ak excludes its policy file from git (§5).
+- **Updated:** 2026-09-27 — Claude Code now reaches Ruflo through `ak x ruflo-mcp --host claude`,
+  which sets only the memory location (and ak's agent-browser config); component keys still come
+  from Claude's settings env (§3, decision B3-D1). Ruflo starts at the repository root, so a
+  session opened in a subfolder reads the root's policy file.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md) (value-precise ownership),
   [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md) (explicit degradation),
@@ -55,7 +61,8 @@ Behaviour the design must respect, verified in ruflo 3.43.0 source:
   neither stdio entry point a host launches reaches it: `bin/mcp-server.js`, which ak registers,
   has its own `tools/call` handler, and `bin/cli.js`'s non-TTY `mcp start` fast path has another.
   On those launches the policy is not applied, calls are not capped, and the audit log does not
-  grow (upstream request 6).
+  grow (upstream request 6). Ruflo 3.46.0 wires the enforcer into both stdio entry points
+  (ruflo#3415, PR #3423); every Ruflo below 3.46.0 behaves as described here.
 - **The typesafe package is resolved from ruflo's own module tree** (`createRequire` inside
   `@claude-flow/cli`). A global install resolves; a project-local install does not.
 - **Hosts read settings from their launch environment.** A value in the user's shell does not
@@ -98,7 +105,7 @@ Managed values:
 |---|---|---|---|---|
 | `typesafePicker` | on | 3.43.0 | global `@ruvector/typesafe` + `CLAUDE_FLOW_ROUTER_TYPESAFE=1` | module resolves from ruflo's tree; `doctor -c typesafe` |
 | `minilmPicker` | on | 3.44.0 | `CLAUDE_FLOW_ROUTER_EMBEDDER=minilm` | a `hooks route` probe with the managed environment reports `embedder=minilm` |
-| `mcpGovernance` | on; 120 calls per 60 s; audit on | 3.42.0 | `.harness/mcp-policy.json` + project-scoped `RUFLO_MCP_ENFORCE_POLICY=1` | policy file valid; variable present only where the file is valid; audit log activity (none on ruflo ≤ 3.44.0 stdio launches, so the component stays `unknown` there) |
+| `mcpGovernance` | on; 120 calls per 60 s; audit on | 3.42.0 | `.harness/mcp-policy.json` + project-scoped `RUFLO_MCP_ENFORCE_POLICY=1` | policy file valid; variable present only where the file is valid; audit log activity (none on stdio launches of Ruflo below 3.46.0, so the component stays `unknown` there) |
 | `learningProfile` | `balanced` | 3.42.1 | `RUFLO_INTELLIGENCE_MODE=balanced` | mode reported by `hooks intelligence stats`, plus learning-activity evidence |
 | `turnCredit` | on | 3.36.0 | nothing (bundled) | `doctor -c metaharness` declared packages |
 | `memoryFix2887` | on | 3.36.0 | nothing | `@claude-flow/memory` ≥ 3.0.0-alpha.22 resolvable from ruflo's tree |
@@ -182,9 +189,15 @@ Targets:
   Machine-wide variables (pickers, learning profile) go in the user `~/.claude/settings.json`;
   the governance variable goes in the project's `.claude/settings.local.json`, next to its
   policy file. Verified 2026-09-23: Claude Code passes the settings `env` block to stdio MCP
-  servers and hooks, so the ruflo MCP registration is unchanged and ak never writes component
-  keys into it. A registration that carries one is the user's (its value overrides the settings
-  env) and `replaceableRufloRegistration` (`src/lib/mcp.mjs`) preserves it (ADR-0016 §4).
+  servers and hooks, so ak never writes component keys into the ruflo MCP registration. A
+  registration that carries one is the user's (its value overrides the settings env) and
+  `register()` (`src/lib/mcp.mjs`) preserves it (ADR-0016 §4). Since 2026-09-27 (decision B3-D1)
+  the registration is `ak x ruflo-mcp --host claude`: the launcher's Claude mode starts Ruflo at
+  the repository root (else the folder, else the user-level store) with only the memory location
+  and ak's agent-browser config set, and passes Claude's settings env through untouched — no
+  `componentEnv`, no governance clearing. Starting at the root means a session opened in a
+  subfolder reads `<repo>/.harness/mcp-policy.json`, which Ruflo 3.46.0 and newer enforce on stdio;
+  before this change such a session failed closed on every Ruflo MCP call.
 - **Codex.** The ruflo MCP server already starts through ak's launcher (`ak x ruflo-mcp` →
   `rufloMcpLaunch`), which knows the workspace; it adds `componentEnv(workspace)` at launch.
   Whether ruflo's Codex hooks receive variables ak sets could not be verified without changing
@@ -230,8 +243,17 @@ projecting `RUFLO_MCP_ENFORCE_POLICY`, ak parses the file; if it is missing or i
 removes the variable for that project and reports `blocked` (ruflo's enforcer fails closed on
 an invalid file). Codex and OpenCode re-check the file at every launch. Claude's project variable
 is static JSON, so after a hand edit that breaks the file it stays set until the next `ak sync`
-in that project; on an enforcing ruflo that window would refuse tool calls. On ruflo ≤ 3.44.0 it
-is inert, because the stdio launches do not reach the enforcer (see Context).
+in that project; on an enforcing ruflo that window would refuse tool calls. On Ruflo below 3.46.0
+it is inert, because the stdio launches do not reach the enforcer (see Context).
+
+ak keeps its own file out of git: whenever it writes the file, or finds its earlier write
+unchanged, it adds one anchored line (`/.harness/mcp-policy.json`, under a `# agentic-kit`
+comment) to the repository's `info/exclude`, the file git reads from the common directory (so a
+linked worktree's line lands in the main repository). A committed copy would carry no receipt on
+a teammate's machine, where ak would then report it `user-managed` and stop managing it. ak never
+ignores `.harness/` as a whole and never edits `.gitignore`, because other tools commit their own
+`.harness/mcp-policy.json` on purpose (Agentic-QE does). Removing the policy removes only that
+line and its comment.
 
 ak enforces only a policy file it wrote (its `_about` begins "Managed by agentic-kit"). A
 project that already has its own `.harness/mcp-policy.json` — for example one generated by
@@ -264,7 +286,7 @@ The catalogue's `explain` text and the state meanings are written once and reuse
     line — ruflo has no per-picker routed-count stat; `routedByCounts` belongs to the model
     router (ADR-148's haiku/sonnet/opus tiering), not the agent pickers this ADR manages;
   - governance: audited and refused calls in the last 24 hours and recent refusal reasons (zero
-    on ruflo ≤ 3.44.0 stdio launches until upstream request 6 lands);
+    on stdio launches of Ruflo below 3.46.0);
   - learning profile: engine loaded or not, time since last training, trajectory growth;
   - funnel: the deciding source.
 - **Dashboard, About:** a summary chip on the ruflo card ("ruflo components: 6 of 7 active")
@@ -284,7 +306,8 @@ filed on 2026-09-24:
 4. A supported way to give ruflo's Codex hooks environment variables, filed as a question since
    the spike was inconclusive ([ruflo#3419](https://github.com/ruvnet/ruflo/issues/3419)).
 5. Encryption for the AgentDB store (ADR-0059).
-6. Route stdio MCP `tools/call` through the policy enforcer ([ruflo#3415](https://github.com/ruvnet/ruflo/issues/3415), a follow-up
+6. Route stdio MCP `tools/call` through the policy enforcer ([ruflo#3415](https://github.com/ruvnet/ruflo/issues/3415), fixed in
+   3.46.0 by PR #3423 and adopted by ak on 2026-09-27; a follow-up
    to ruflo#3138 and ruflo#3151, whose fix is reached only when `MCPServerManager` is called
    directly). Evidence against ruflo 3.44.0, with
    `RUFLO_MCP_ENFORCE_POLICY=1` and a `memory_store` call from a disposable project:
@@ -306,8 +329,8 @@ filed on 2026-09-24:
   not yet made default. The mitigation is evidence: which picker chose is visible through the
   route probe and doctor, not a persisted per-picker count ruflo does not keep, and each
   component opts out with one `kit.json` value.
-- Governance adds a small tracked file to each ruflo repository. Committing it is the user's
-  choice; ak does not commit.
+- Governance adds a small file to each ruflo repository. ak keeps it out of git with a line in
+  the repository's `info/exclude` (§5) and never commits.
 - The audit log sits outside ADR-0059's encrypted storage until upstream request 2 lands. It
   holds metadata only (tool names and decisions, no arguments).
 - Parsing `doctor` text is brittle. Unreadable output degrades to `unknown`, and fixtures pin
@@ -348,10 +371,10 @@ test that wants a component managed opts back in explicitly.
 | Spike: environment reach per host | Done (2026-09-23) — Claude MCP and Claude hooks confirmed; Codex hooks inconclusive within the spike's time-box, so the pickers and learning profile report `partial` for Codex hooks when Codex is enabled |
 | Component catalogue and states | Done — catalogue, `kit.json` intent and validation, state classification with meanings |
 | Multi-key owned projection engine (from ADR-0055) | Done — generalized from AQE's single-key engine; AQE's own tests unchanged and passing |
-| Host projections (Claude, Codex launcher, OpenCode) | Done — Claude user/project settings, the Codex `ak x ruflo-mcp` launcher, and OpenCode's generated gateway/lifecycle hooks all read `componentEnv` |
+| Host projections (Claude, Codex launcher, OpenCode) | Done — Claude user/project settings, the Codex `ak x ruflo-mcp` launcher, and OpenCode's generated gateway/lifecycle hooks all read `componentEnv`; Claude Code's registration starts through the launcher's Claude mode, which leaves the settings env in charge (2026-09-27) |
 | Typesafe package install and receipt | Done (global install, receipt-gated uninstall, `doctor -c typesafe` parsing; a package that stops resolving reads `not applied` and sync reinstalls it) — confirmed against ruflo 3.44.0 on a disposable prefix (`doctor-typesafe-installed-3.44.0.txt`) |
 | MiniLM agent picker | Done — confirmed against ruflo 3.44.0: a `hooks route` probe with the managed environment reports `embedder=minilm` |
-| Governance policy file and lockout guard | Done (ak-written-only enforcement, foreign-policy detection, fail-closed removal on an invalid file, release in every receipted project when turned off) — on ruflo 3.44.0 the policy is written but not enforced, because neither stdio entry point reaches the enforcer; the component stays `unknown` until upstream request 6 lands |
+| Governance policy file and lockout guard | Done (ak-written-only enforcement, foreign-policy detection, fail-closed removal on an invalid file, release in every receipted project when turned off, `info/exclude` line for ak's file) — enforced on stdio from Ruflo 3.46.0 (proved on 3.46.1: a cap of 2 allowed two calls, refused the third, audited all three); below 3.46.0 the policy is written but not enforced and the component stays `unknown` |
 | Funnel disable and undo | Done (JSON-first `funnel status` parsing, receipt-gated re-enable, `funnel: true` releases ak's disable on the next sync, higher-precedence sources left alone) — confirmed against ruflo 3.44.0 (`decidedBy: user-config`) |
 | Status judged by what ak wrote | Done — per-key Claude projection state before evidence; opt-outs holding a receipt are fixable; the projection engine preserves a conflicting key and still writes the others |
 | Uninstall across projects | Done — every project holding a policy, project env or memory-pin receipt is released, not only the cwd project |

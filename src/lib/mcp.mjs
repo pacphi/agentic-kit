@@ -8,11 +8,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { rufloNodeModules, claudeUserMcpPath, claudeSettingsPath, repoRoot } from './paths.mjs';
-import { run } from './exec.mjs';
+import { run, have } from './exec.mjs';
 import { readJson, addDenyRules, removeDenyRules } from './settings.mjs';
 import { writeFileWithBackup } from './file-write.mjs';
 import { managedAgentBrowserEnv } from './agent-browser.mjs';
-import { isRufloMcpTransport } from './ruflo-mcp-transport.mjs';
+import { isAkLauncher, isRufloMcpTransport, LAUNCHER_ARGS } from './ruflo-mcp-transport.mjs';
 import { retiredCodexTransport } from './host-alignment.mjs';
 import { findTomlStringArray } from './codex-toml-safety.mjs';
 
@@ -127,14 +127,34 @@ export function agentBrowserMcpConfigured(registration, enabled = true) {
 const canonicalRufloRegistration = (entry) => entry?.command === 'ruflo'
   && JSON.stringify(entry.args) === JSON.stringify(['mcp', 'start']);
 
+/** Claude Code's Ruflo MCP entry as ak registers it (B3-D1): through ak's
+ *  launcher, which picks the memory store from the session folder. */
+export const CLAUDE_LAUNCHER = Object.freeze({ command: 'ak', args: LAUNCHER_ARGS.claude });
+export const isClaudeLauncher = (entry) => isAkLauncher(entry ?? {}, 'claude');
+
+const onlyAkEnv = (entry) => Object.keys(entry?.env ?? {}).every((key) => key === 'AGENT_BROWSER_CONFIG');
+
 // ADR-0058 §3 (Claude, Inherits branch): Claude Code passes the settings `env` block to
 // stdio MCP servers, so ak never writes ruflo component keys into a registration. Only a
 // prior ak-set AGENT_BROWSER_CONFIG marks a registration as ak's own to replace; any other
 // key, a component key included, is the user's and overrides the settings env (ADR-0016 §4).
 function replaceableRufloRegistration(entry) {
   if (!canonicalRufloRegistration(entry) || entry.scope !== 'user') return false;
-  return Object.keys(entry.env ?? {}).every((key) => key === 'AGENT_BROWSER_CONFIG');
+  return onlyAkEnv(entry);
 }
+
+/** A user-scope `claude-flow` entry ak may replace: its launcher form, or the
+ *  `ruflo mcp start` form it registered before the launcher (both with at
+ *  most ak's AGENT_BROWSER_CONFIG). */
+function replaceableClaudeFlow(entry) {
+  if (entry?.scope !== 'user' || !onlyAkEnv(entry)) return false;
+  return canonicalRufloRegistration(entry) || isClaudeLauncher(entry);
+}
+
+/** ak's own earlier `ruflo mcp start` claude-flow entry, which sync moves onto
+ *  the launcher. A user-written entry (another command, scope or env key) is
+ *  never reported: it stays the user's. */
+export const staleAkClaudeFlow = (entry) => replaceableRufloRegistration(entry);
 
 /** Ownership of a legacy `ruflo`-keyed Claude MCP entry, shared by status
  *  (registrationStatus) and register() so status never promises a migration
@@ -261,14 +281,24 @@ function codexMcpSections(file, scope) {
     let repairKind = null;
     if (exactFields && !hasChildren && name === 'codex' && command === 'codex'
       && sameArgs(args, ['mcp-server'])) repairKind = 'recursive-codex';
-    if (exactFields && (!hasChildren || managedBrowserChild) && name === 'claude-flow' && command === 'ruflo'
-      && sameArgs(args, ['mcp', 'start'])) repairKind = 'legacy-ruflo';
+    if (exactFields && (!hasChildren || managedBrowserChild) && claudeFlowAlias({ name, command, args })) {
+      repairKind = 'legacy-ruflo';
+    }
     return [{
       name, scope, file, command, args, enabled, repairKind, regularFile,
       fingerprint: fingerprint(source.slice(header.index, bodyEnd)),
       start: header.index, end: blockEnd, source,
     }];
   });
+}
+
+/** A Codex `claude-flow` table that is a copy of an ak Claude Code
+ *  registration: ak's earlier `ruflo mcp start`, or, since B3-D1, ak's
+ *  launcher in Claude mode. Codex's Claude import copies Claude's servers by
+ *  name, so either form duplicates the canonical [mcp_servers.ruflo]. */
+function claudeFlowAlias({ name, command, args }) {
+  if (name !== 'claude-flow') return false;
+  return (command === 'ruflo' && sameArgs(args, ['mcp', 'start'])) || isAkLauncher({ command, args }, 'claude');
 }
 
 function codexMcpRegistrations(file, scope) {
@@ -337,7 +367,9 @@ export function codexMcpRepairPlan(topology) {
   }
   for (const entry of topology.rufloRegistrations.filter((candidate) =>
     candidate.regularFile && candidate.repairKind === 'legacy-ruflo')) {
-    add(entry, 'replaces the deprecated legacy Ruflo transport with canonical workspace-aware [mcp_servers.ruflo]');
+    add(entry, entry.command === 'ak'
+      ? 'disables a copy of Claude Code\'s claude-flow registration; canonical workspace-aware [mcp_servers.ruflo] serves Codex'
+      : 'replaces the deprecated legacy Ruflo transport with canonical workspace-aware [mcp_servers.ruflo]');
   }
   return targets;
 }
@@ -373,10 +405,7 @@ function validRepairTarget(target) {
     return target.name === 'codex' && target.command === 'codex'
       && sameArgs(target.args, ['mcp-server']);
   }
-  if (target.repairKind === 'legacy-ruflo') {
-    return target.name === 'claude-flow' && target.command === 'ruflo'
-      && sameArgs(target.args, ['mcp', 'start']);
-  }
+  if (target.repairKind === 'legacy-ruflo') return claudeFlowAlias(target);
   return false;
 }
 
@@ -532,16 +561,32 @@ export function rufloCodexMcpStatus(cfg, { home = os.homedir() } = {}) {
   };
 }
 
-/** Register claude-flow at user scope, migrating ak's own legacy `ruflo` entry.
- *  Returns `{ ok, preserved }`: `preserved` lists the user-scope legacy `ruflo`
+/** Why Claude Code could not start ak's launcher from PATH, or null.
+ *  The registration runs whatever `ak` Claude Code finds on PATH, which may be
+ *  an older install than the kit writing it: ak before the Claude mode
+ *  rejects `--host` (exit 2, "Unknown option"). Its launcher help names
+ *  `--host` only once the option exists, and `--help` is answered before the
+ *  command runs, so asking is side-effect free.
+ *  @returns {Promise<null | 'ak-not-on-path' | 'ak-launcher-outdated'>} */
+export async function claudeLauncherUnavailable({ haveFn = have, probe = run } = {}) {
+  if (!(await haveFn('ak'))) return 'ak-not-on-path';
+  const help = await probe('ak', ['x', 'ruflo-mcp', '--help']);
+  return help.code === 0 && /--host\b/.test(help.stdout ?? '') ? null : 'ak-launcher-outdated';
+}
+
+/** Register claude-flow at user scope through ak's launcher
+ *  (`ak x ruflo-mcp --host claude`), moving ak's own earlier `ruflo mcp start`
+ *  entry onto it and migrating ak's own legacy `ruflo` entry.
+ *  Returns `{ ok, reason?, preserved }` (`reason` is claudeLauncherUnavailable's
+ *  when the launcher could not start): `preserved` lists the user-scope legacy `ruflo`
  *  entries left in place because legacyRufloDisposition says ak did not write
  *  them ({name, scope, command, args} — never env values), so callers can name
  *  the manual removal instead of implying a migration happened. */
 export async function register(cfg = { agentBrowser: true }, {
-  runner = run, inspect = claudeMcpTopology,
+  runner = run, inspect = claudeMcpTopology, launcherCheck = claudeLauncherUnavailable,
 } = {}) {
   const desired = {
-    command: 'ruflo', args: ['mcp', 'start'],
+    ...CLAUDE_LAUNCHER,
     env: managedAgentBrowserEnv({ enabled: cfg?.agentBrowser !== false }),
   };
   const userEntries = inspect().registrations.filter((entry) => entry.scope === 'user');
@@ -550,9 +595,14 @@ export async function register(cfg = { agentBrowser: true }, {
   const removableLegacy = legacy && legacyRufloDisposition(legacy) === 'replaceable' ? legacy : null;
   const preserved = legacy && !removableLegacy
     ? [{ name: legacy.name, scope: legacy.scope, command: legacy.command, args: legacy.args }] : [];
-  if (current && !replaceableRufloRegistration(current)) return { ok: false, preserved };
-  const alreadyDesired = current && canonicalRufloRegistration(current)
+  if (current && !replaceableClaudeFlow(current)) return { ok: false, preserved };
+  const alreadyDesired = current && isClaudeLauncher(current)
     && JSON.stringify(current.env ?? {}) === JSON.stringify(desired.env);
+  // The registration starts the PATH `ak` itself; if that cannot run the
+  // launcher, every Claude session would lose Ruflo, so the working
+  // registration is left in place.
+  const unavailable = alreadyDesired ? null : await launcherCheck();
+  if (unavailable) return { ok: false, reason: unavailable, preserved };
   const removed = [];
   for (const entry of [removableLegacy, alreadyDesired ? null : current].filter(Boolean)) {
     if (!await removeUserRegistration(entry, runner)) {

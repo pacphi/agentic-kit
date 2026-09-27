@@ -45,10 +45,12 @@ const CONFIRMERS = {
 };
 
 const GOVERNANCE_UNOBSERVED_REASON = 'No ruflo MCP tool calls have been audited in the last 24 hours, so enforcement has not been observed yet.';
-// Ruflo 3.44.0 and earlier keep the policy enforcer in MCPServerManager, which neither stdio
-// entry point (bin/mcp-server.js, `ruflo mcp start`) reaches — upstream request 6.
-const GOVERNANCE_NOT_WIRED = 'ruflo 3.44.0 and earlier do not enforce the policy on stdio MCP launches, so no audit records are expected until upstream request 6 lands.';
-const governanceUnobservedReason = (rufloVersion) => (!rufloVersion || cmpVersions(rufloVersion, '3.44.0') <= 0
+// Before 3.46.0 Ruflo keeps the policy enforcer in MCPServerManager, which neither stdio
+// entry point (bin/mcp-server.js, `ruflo mcp start`) reaches. 3.46.0 wires evaluateToolCall
+// into both (ruvnet/ruflo#3415, PR #3423).
+const GOVERNANCE_ENFORCED_FROM = '3.46.0';
+const GOVERNANCE_NOT_WIRED = 'Ruflo before 3.46.0 does not apply the policy on stdio MCP launches, so no audit records are expected until ruflo is upgraded.';
+const governanceUnobservedReason = (rufloVersion) => (!rufloVersion || cmpVersions(rufloVersion, GOVERNANCE_ENFORCED_FROM) < 0
   ? `${GOVERNANCE_UNOBSERVED_REASON} ${GOVERNANCE_NOT_WIRED}` : GOVERNANCE_UNOBSERVED_REASON);
 
 /** Returns true (confirmed), false (contradicted) or null (no evidence). */

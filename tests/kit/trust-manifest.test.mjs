@@ -249,3 +249,18 @@ test('ruflo components governance disclosure states enforcement is scoped to the
   assert.match(text, /enforced only against the policy file ak itself wrote/);
   assert.match(text, /project's own existing \.harness\/mcp-policy\.json is left alone/);
 });
+
+// Branch 3, Task 2.2: project setup discloses both daemon writes and the opt-out.
+test('project setup discloses the managed Ruflo daemon settings and how to opt out', () => {
+  const group = (cfg, project) => setupTrustManifest(cfg, { hosts: [], project })
+    .find((g) => g.componentId === 'ruflo-daemon');
+  const on = group({ agentBrowser: false }, true);
+  const rendered = trustManifestLines([on]).join('\n');
+  assert.match(rendered, /\[project\] project-file: \.claude-flow\/config\.json/);
+  assert.match(rendered, /flat keys/);
+  assert.match(rendered, /claudeFlow\.daemon\.autoStart/);
+  assert.match(rendered, /kit\.json → rufloDaemon\.autoStart: false/);
+  const off = group({ agentBrowser: false, rufloDaemon: { autoStart: false } }, true);
+  assert.equal(off.changes.some((c) => c.id === 'ruflo-daemon-autostart'), false, 'opted out: start-on-use is not changed');
+  assert.equal(group({ agentBrowser: false }, false), undefined, 'machine-only setup touches no project');
+});

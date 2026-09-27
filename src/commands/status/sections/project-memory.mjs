@@ -8,7 +8,7 @@
 // The canonical store is `<root>/.swarm` for the root every ak launch contract
 // pins (rufloMemoryLocation: the repository root, else the folder), so a status
 // run from a subfolder reports the same store the hosts use. Outside any usable
-// folder, one row names the user-level store Codex's launcher uses instead. Size, WAL, the
+// folder, one row names the user-level store the hosts' launcher uses instead. Size, WAL, the
 // largest namespace and its expiry come from a read-only query; stray stores
 // (project-memory.mjs findStrayMemoryStores) are information only, never a
 // warning or a sync fix: ak leaves them in place, and a warning with no way to
@@ -26,6 +26,7 @@ import { projectDaemonAlive } from '../../../lib/daemons.mjs';
 import { formatLiveCheckAge as ago } from '../../../lib/live-check-evidence.mjs';
 import { memoryMaintenanceStatus } from '../../../lib/memory-maintenance.mjs';
 import { findStrayMemoryStores, projectMemoryStatus } from '../../../lib/project-memory.mjs';
+import { findProbeRows } from '../../../lib/memory-probe-cleanup.mjs';
 import * as paths from '../../../lib/paths.mjs';
 import { rufloMemoryLocation } from '../../../lib/ruflo-memory.mjs';
 import { MEMORY_ROOT_PIN, MEMORY_ROOT_UPSTREAM, rufloMemoryRedirect } from '../../../lib/ruflo-memory-config.mjs';
@@ -150,18 +151,30 @@ function maintenanceRows(root, memory, now) {
   return rows;
 }
 
+/** ak's old setup probe rows in `dir`'s stores that ak has not cleaned yet
+ *  (decision B3-D2): one warn row that `ak sync` repairs, or none. An
+ *  unreadable store is already reported by the store rows. */
+export function probeRowsRow(dir, cfg) {
+  const cleaned = cfg?.cleanups?.setupProbeRows ?? {};
+  const stores = findProbeRows(dir).filter((store) => !store.error && !Object.hasOwn(cleaned, store.file));
+  const count = stores.reduce((sum, store) => sum + store.rows.length, 0);
+  if (!count) return null;
+  const perFile = stores.map((store) => `${path.basename(store.file)} ${store.rows.length}`).join(', ');
+  return row('memory', 'warn', `${count} old ak setup probe row${count === 1 ? '' : 's'} in ${dir} (${perFile}; `
+    + 'Ruflo\'s own delete leaves the AgentDB mirror, ruvnet/ruflo#3450)', 'sync backs up the store and removes exactly those rows');
+}
+
 // Outside any usable folder (the filesystem root, the home folder, a temporary
 // root, a tool's own folder) there is no project store to describe, and
 // walking such a folder for strays would be slow and meaningless: name the
-// store Codex's launcher uses from here instead (user-memory.mjs reports it).
-const launcherRow = (location) => row('memory', 'info', `no project here: this folder is ${location.reason}, so Codex's Ruflo `
-  + `launcher (\`ak x ruflo-mcp\`) uses the user-level store ${location.dir} instead of creating .swarm here. `
-  + 'Claude\'s own Ruflo registration is unchanged');
+// store the hosts' launcher uses from here instead (user-memory.mjs reports it).
+const launcherRow = (location) => row('memory', 'info', `no project here: this folder is ${location.reason}, so Claude Code's and `
+  + `Codex's Ruflo launcher (\`ak x ruflo-mcp\`) uses the user-level store ${location.dir} instead of creating .swarm here`);
 
 export default {
   id: 'memory',
   async collect({
-    cwd, rufloVersion = installedRoutingVersion(), platform = process.platform, now = Date.now(), home = paths.home,
+    cwd, cfg, rufloVersion = installedRoutingVersion(), platform = process.platform, now = Date.now(), home = paths.home,
   }) {
     const rows = [];
     try {
@@ -182,6 +195,8 @@ export default {
         const orphaned = orphanedStoreRow(root, memory);
         if (orphaned) rows.push(orphaned);
         rows.push(...maintenanceRows(root, memory, now));
+        const probes = probeRowsRow(location.dir, cfg);
+        if (probes) rows.push(probes);
       }
       rows.push(...strayRows(root));
     } catch (e) {

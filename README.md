@@ -175,7 +175,8 @@ One of those is worth calling out:
 
 Projects set up by the kit get an append-only footer under ruflo's own status line,
 with segments reflecting their documented presence and metric checks: 🧠 SONA patterns/trajectories (+
-live micro-LoRA Δ‖W‖), 📈 route-RL metrics, 🛡 aidefence, 🧿 RuvNet Brain KB,
+live micro-LoRA Δ‖W‖), 📈 route-RL metrics, a ⚠ aidefence OFF alarm (only when Ruflo has no
+prompt-injection engine at all), 🧿 RuvNet Brain KB,
 ⚙ machine-wide daemon count, and 🎓 Agentic-QE stats.
 
 That rich, command-backed footer is a Claude Code surface. Codex supports a

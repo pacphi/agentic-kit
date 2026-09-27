@@ -176,7 +176,7 @@ export function rufloComponentsTrustGroup(cfg) {
   const gov = managedIntent(cfg, 'mcpGovernance');
   if (gov) {
     changes.push(change('rc-governance-file', 'project-file', 'project', '.harness/mcp-policy.json',
-      `policy file for ruflo's MCP governance (audit on, ${gov.maxCallsPerMinute} calls per minute); not yet enforced on stdio launches by ruflo ≤ 3.44.0`));
+      `policy file for ruflo's MCP governance (audit on, ${gov.maxCallsPerMinute} calls per minute); enforced on stdio launches by Ruflo 3.46.0 and newer; kept out of git with one line in the repository's .git/info/exclude`));
     changes.push(change('rc-governance-env', 'env', 'project', 'RUFLO_MCP_ENFORCE_POLICY=1',
       'enforced only against the policy file ak itself wrote; a project\'s own existing .harness/mcp-policy.json is left alone'));
   }
@@ -189,6 +189,23 @@ export function rufloComponentsTrustGroup(cfg) {
   if (!changes.length) return null;
   changes.push(change('rc-opt-out', 'config', 'user', 'kit.json → rufloComponents', 'set any component to false to leave it alone'));
   return { componentId: 'ruflo-components', label: 'Managed ruflo components (ADR-0058)', approvalPolicy: 'managed', changes };
+}
+
+/** Ruflo's project daemon (ruflo-daemon-config.mjs): the flat keys in
+ *  .claude-flow/config.json and start-on-use in .claude/settings.json. */
+export function rufloDaemonTrustGroup(cfg, { project = false } = {}) {
+  if (!project) return null;
+  const change = (id, kind, value, effect) => ({ id, kind, scope: 'project', owner: 'agentic-kit', value, effect });
+  const changes = [change('ruflo-daemon-config', 'project-file', '.claude-flow/config.json',
+    'flat keys only, and only what this Ruflo needs: "daemon.idleSecs": 0 below 3.46.0 (ruvnet/ruflo#3194), '
+    + '"daemon.resourceThresholds.minFreeMemoryPercent": 0 on macOS (ruvnet/ruflo#2935); other keys are kept')];
+  if (cfg?.rufloDaemon?.autoStart !== false) {
+    changes.push(change('ruflo-daemon-autostart', 'config', '.claude/settings.json claudeFlow.daemon.autoStart → true',
+      'Ruflo starts the project daemon (memory backup and distillation) on the next ruflo command; the old value is kept for ak uninstall'));
+  }
+  changes.push({ ...change('ruflo-daemon-opt-out', 'config', 'kit.json → rufloDaemon.autoStart: false',
+    'leave start-on-use as Ruflo set it'), scope: 'user' });
+  return { componentId: 'ruflo-daemon', label: "Ruflo's project daemon", approvalPolicy: 'managed', changes };
 }
 
 /** @param {any} cfg
@@ -230,7 +247,7 @@ export function setupTrustManifest(cfg, {
         },
       ],
     }]),
-    ...[rufloComponentsTrustGroup(cfg)].filter(Boolean),
+    ...[rufloComponentsTrustGroup(cfg), rufloDaemonTrustGroup(cfg, options)].filter(Boolean),
     ...dejaVuSetupTrustManifest(cfg, companionPreflight),
   ];
 }

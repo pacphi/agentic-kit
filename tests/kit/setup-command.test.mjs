@@ -137,11 +137,22 @@ test('run_project --dry-run announces the plan and touches neither home nor proj
 });
 
 test('project init delegates without overlapping machine guidance, Codex, or skill registration', () => {
-  assert.deepEqual(setup.RUFLO_PROJECT_INIT_ARGS, [
-    'init', '--full', '--force', '--no-global', '--no-codex-detect', '--no-skills-sh',
-    '--format', 'json',
-  ]);
-  assert.deepEqual(setup.RUFLO_PROJECT_INIT_ENV, { RUFLO_NO_SKILLS_SH: '1' });
+  // Ruflo 3.46.0+ honours the opt-out flags (ruvnet/ruflo#3167, PR #3434).
+  for (const version of ['3.46.0', '3.46.1', '3.50.2']) {
+    assert.deepEqual(setup.rufloProjectInitInvocation(version), {
+      args: ['init', '--full', '--force', '--no-global', '--no-codex-detect', '--no-skills-sh'],
+      env: {},
+    }, version);
+  }
+  // Below 3.46.0 the flags are registered but not observed: scripted mode and
+  // the env are the suppression. An unknown version gets the older, safer form.
+  for (const version of ['3.45.0', '3.39.2', '3.38.21', null, undefined, 'garbage']) {
+    assert.deepEqual(setup.rufloProjectInitInvocation(version), {
+      args: ['init', '--full', '--force', '--no-global', '--no-codex-detect', '--no-skills-sh',
+        '--format', 'json'],
+      env: { RUFLO_NO_SKILLS_SH: '1' },
+    }, String(version));
+  }
 });
 
 test('project permission manifest omits AQE grants when AQE is disabled', () => {
@@ -762,3 +773,61 @@ test('ak setup --opencode with an ABSENT CLI never fabricates the config home', 
 });
 
 test.after(() => rmrf(HOME));
+
+// Branch 3, Task 2.2: setup no longer turns Ruflo's start-on-use off, and it
+// writes the managed daemon settings BEFORE `ruflo daemon start`, because the
+// daemon reads .claude-flow/config.json once, in its constructor
+// (worker-daemon.js:139-144, 3.46.1).
+test('project setup keeps autoStart true and writes the daemon settings before starting the daemon', async () => {
+  seedHome();
+  const project = sandboxProject('ak-setup-daemon');
+  fs.mkdirSync(path.join(project, '.claude'), { recursive: true });
+  fs.writeFileSync(paths.projectSettings(project), JSON.stringify({ claudeFlow: { daemon: { autoStart: true } } }));
+  const cfg = loadKitConfig();
+  const seen = [];
+  const runner = async (cmd, args) => {
+    seen.push({ args: args.join(' '), config: fs.existsSync(path.join(project, '.claude-flow', 'config.json')) });
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  await captureLog(() => setup.startProjectDaemon(project, { cfg, runner, rufloVersion: '3.45.0', platform: 'darwin' }));
+  assert.deepEqual(seen, [{ args: 'daemon start', config: true }], 'the settings exist before the daemon starts');
+  assert.equal(JSON.parse(fs.readFileSync(paths.projectSettings(project), 'utf8')).claudeFlow.daemon.autoStart, true);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(project, '.claude-flow', 'config.json'), 'utf8')),
+    { 'daemon.idleSecs': 0, 'daemon.resourceThresholds.minFreeMemoryPercent': 0 });
+  assert.ok(cfg.rufloDaemon.receipts[path.resolve(project)], 'the receipt is on the config setup saves');
+  rmrf(project);
+});
+
+test("project setup turns init's autoStart false on and records the old value", async () => {
+  seedHome();
+  const project = sandboxProject('ak-setup-daemon-init');
+  fs.mkdirSync(path.join(project, '.claude'), { recursive: true });
+  fs.writeFileSync(paths.projectSettings(project), JSON.stringify({ claudeFlow: { daemon: { autoStart: false } } }));
+  const cfg = loadKitConfig();
+  const runner = async () => ({ code: 0, stdout: '', stderr: '' });
+  await captureLog(() => setup.startProjectDaemon(project, { cfg, runner, rufloVersion: '3.46.1', platform: 'linux' }));
+  assert.equal(JSON.parse(fs.readFileSync(paths.projectSettings(project), 'utf8')).claudeFlow.daemon.autoStart, true);
+  assert.equal(cfg.rufloDaemon.receipts[path.resolve(project)].autostartBefore, false);
+  rmrf(project);
+});
+
+// B3-D1: outside a project (the home folder, a temporary root, a tool's own
+// folder) there is no project to set up: ak's launcher uses the one
+// user-level store there, so `ak setup --project` refuses instead of running
+// `ruflo init` and creating .swarm/, .claude/ and a daemon in that folder.
+test('project setup from the home folder refuses before spawning anything', async () => {
+  seedHome();
+  const beforeHome = snapshot(HOME);
+  const cwd = process.cwd();
+  process.chdir(HOME);
+  try {
+    for (const dryRun of [false, true]) {
+      const { result, out } = await captureLog(() =>
+        setup.run_project({ flags: FLAGS({ project: true, yes: true, 'dry-run': dryRun }), cfg: loadKitConfig(), trustDisclosed: true }));
+      assert.equal(result, false, out);
+      assert.match(out, /this folder is the home folder; run ak setup from a project folder/);
+      assert.doesNotMatch(out, /would init/);
+    }
+  } finally { process.chdir(cwd); }
+  assertUnchanged(beforeHome, HOME, 'a refused project setup writes nothing');
+});

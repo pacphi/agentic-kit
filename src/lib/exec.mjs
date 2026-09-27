@@ -33,8 +33,10 @@ const abortScope = new AsyncLocalStorage();
  * @template T @param {AbortSignal} signal @param {() => T} fn @returns {T} */
 export const withAbortSignal = (signal, fn) => abortScope.run(signal, fn);
 
+// `ak` too: the MCP launcher check asks the PATH `ak` (an npm shim on Windows)
+// for its help.
 const CMD_SHIMS = new Set([
-  'npm', 'npx', 'claude', 'codex', 'opencode', 'deja', 'ruflo', 'aqe', 'claude-flow',
+  'npm', 'npx', 'claude', 'codex', 'opencode', 'deja', 'ruflo', 'aqe', 'claude-flow', 'ak',
 ]);
 
 /** Build a shell-free invocation for `cmd`, trying Windows' shim extensions in
@@ -42,7 +44,8 @@ const CMD_SHIMS = new Set([
  *  accepted only when its sibling .ps1 and system PowerShell both exist.
  *  Falls back to the bare name with resolved:false when no safe target exists.
  *  Exported: the execution adapters spawn these CLIs directly (subprocess.mjs
- *  for claude/codex, opencode.mjs for the serve child) and must share the same
+ *  for claude/codex, opencode.mjs for the serve child, x/ruflo-mcp.mjs for the
+ *  Ruflo MCP launcher) and must share the same
  *  resolution `run()`/`have()` use, or readiness passes but launch ENOENTs on
  *  Windows (swarm review, #88). */
 export function resolveShim(cmd, args = [], { windows = isWindows, env = process.env } = {}) {

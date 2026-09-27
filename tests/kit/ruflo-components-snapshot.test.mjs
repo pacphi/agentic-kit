@@ -119,6 +119,22 @@ test('governance with zero audited calls in 24h is unknown, not active (ADR-0058
   assert.match(view.state.meaning, /No ruflo MCP tool calls have been audited in the last 24 hours, so enforcement has not been observed yet\./);
 });
 
+// ruvnet/ruflo#3415: Ruflo 3.46.0 wires the policy enforcer into both stdio entry
+// points (bin/cli.js, bin/mcp-server.js); 3.45.0 and earlier have no evaluateToolCall there.
+test('governance: the not-wired sentence applies below Ruflo 3.46.0 only', () => {
+  const unobserved = (rufloVersion) => byId(componentSnapshot({
+    cfg, rufloVersion,
+    evidence: evidence({ rufloVersion, governance: { audit: { audited: 0, refused: 0, reasons: [] } } }),
+    projection: projection(), now,
+  }), 'mcpGovernance').state.meaning;
+  const NOT_WIRED = /Ruflo before 3\.46\.0 does not apply the policy on stdio MCP launches/;
+  assert.match(unobserved('3.45.0'), NOT_WIRED);
+  assert.match(unobserved('3.44.0'), NOT_WIRED);
+  assert.doesNotMatch(unobserved('3.46.0'), NOT_WIRED);
+  assert.doesNotMatch(unobserved('3.46.1'), NOT_WIRED);
+  assert.doesNotMatch(unobserved('3.46.1'), /upstream request 6/);
+});
+
 test('governance with observed audit activity is active', () => {
   const snap = componentSnapshot({
     cfg, rufloVersion: '3.44.0',
@@ -214,7 +230,7 @@ test('turn-credit evidence line is omitted when the probe recorded nothing', () 
 test('governance unknown on ruflo 3.44.0 says stdio launches do not enforce the policy', () => {
   const snap = componentSnapshot({ cfg, rufloVersion: '3.44.0',
     evidence: evidence({ governance: { audit: null } }), projection: projection(), now });
-  assert.match(byId(snap, 'mcpGovernance').state.meaning, /do not enforce the policy on stdio MCP launches/);
+  assert.match(byId(snap, 'mcpGovernance').state.meaning, /does not apply the policy on stdio MCP launches/);
 });
 
 for (const decidedBy of ['env', 'enterprise-policy']) {

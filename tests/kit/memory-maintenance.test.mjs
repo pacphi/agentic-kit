@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { BACKUP_STALE_MS, memoryMaintenanceStatus } from '../../src/lib/memory-maintenance.mjs';
+import { BACKUP_STALE_MS, lastWorkerDeferral, memoryMaintenanceStatus } from '../../src/lib/memory-maintenance.mjs';
 import { projectDaemonAlive, rufloAutostartOff } from '../../src/lib/daemons.mjs';
 
 const NOW = Date.parse('2026-09-26T12:00:00.000Z');
@@ -148,4 +148,57 @@ test("rufloAutostartOff names the setting that stops Ruflo starting the daemon o
   fs.writeFileSync(path.join(root, 'claude-flow.config.json'), '{broken');
   fs.writeFileSync(path.join(root, '.claude', 'settings.json'), JSON.stringify({ claudeFlow: { daemon: { autoStart: true } } }));
   assert.equal(rufloAutostartOff(root, {}), null, 'true or unreadable config says nothing');
+});
+
+// ── why a live daemon has not run backup or distillation (3.46.1) ──────────
+// worker-daemon.js log() writes `[<ISO>] [INFO] <message>` to
+// <root>/.claude-flow/logs/daemon.log (:1874-1881); a resource deferral logs
+// `Worker <type> deferred: <reason>` (:1160) and every start logs
+// `Daemon started (PID: …` (:828). The log is append-only across daemons.
+function daemonLog(root, lines, { padBytes = 0 } = {}) {
+  const dir = path.join(root, '.claude-flow', 'logs');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'daemon.log');
+  fs.writeFileSync(file, `${'#'.repeat(padBytes)}${padBytes ? '\n' : ''}${lines.join('\n')}\n`);
+  return file;
+}
+const at = (ms) => new Date(ms).toISOString();
+
+test('the last resource deferral of backup or distillation is read from the daemon log', (t) => {
+  const root = project(t);
+  assert.equal(lastWorkerDeferral(root, { now: NOW }), null, 'no log, no deferral');
+  daemonLog(root, [
+    `[${at(NOW - 3 * HOUR)}] [INFO] Daemon started (PID: 42, CPUs: 16, workers: 7, maxCpuLoad: 28, minFreeMemoryPercent: 5%)`,
+    `[${at(NOW - 3 * HOUR + 360_000)}] [INFO] Worker consolidate deferred: Memory too low: 4.2% free`,
+    `[${at(NOW - 2 * HOUR)}] [INFO] Worker audit deferred: Memory too low: 4.0% free`,
+    `[${at(NOW - 2 * HOUR)}] [INFO] Worker consolidate deferred: Memory too low: 3.9% free`,
+    `[${at(NOW - HOUR)}] [INFO] Worker backup deferred: max concurrent (2) reached`,
+  ]);
+  assert.deepEqual(lastWorkerDeferral(root, { now: NOW }),
+    { worker: 'consolidate', reason: 'Memory too low: 3.9% free', at: NOW - 2 * HOUR, ageMs: 2 * HOUR },
+    'other workers and transient max-concurrent deferrals are not counted');
+});
+
+test('a deferral logged by an earlier daemon is history once a new daemon starts', (t) => {
+  const root = project(t);
+  daemonLog(root, [
+    `[${at(NOW - 5 * HOUR)}] [INFO] Worker backup deferred: CPU load too high: 30.00`,
+    `[${at(NOW - HOUR)}] [INFO] Daemon started (PID: 43, CPUs: 16, workers: 7, maxCpuLoad: 28, minFreeMemoryPercent: 0%)`,
+  ]);
+  assert.equal(lastWorkerDeferral(root, { now: NOW }), null);
+});
+
+test('only the tail of a large daemon log is read', (t) => {
+  const root = project(t);
+  daemonLog(root, [
+    `[${at(NOW - 10 * 60_000)}] [INFO] Worker backup deferred: CPU load too high: 30.00`,
+  ], { padBytes: 5 * 1024 * 1024 });
+  const found = lastWorkerDeferral(root, { now: NOW });
+  assert.equal(found.worker, 'backup');
+  assert.equal(found.reason, 'CPU load too high: 30.00');
+  daemonLog(root, [
+    `[${at(NOW - 10 * 60_000)}] [INFO] Worker backup deferred: CPU load too high: 30.00`,
+    '#'.repeat(128 * 1024),
+  ]);
+  assert.equal(lastWorkerDeferral(root, { now: NOW }), null, 'a line outside the last 64 KiB is not read');
 });

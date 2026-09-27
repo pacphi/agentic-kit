@@ -15,6 +15,13 @@
   },
   {
     "subsystem": "versions",
+    "level": "info",
+    "message": "Ruflo support window not yet known: run ak sync to record Ruflo's release dates",
+    "fix": null,
+    "repair": null
+  },
+  {
+    "subsystem": "versions",
     "level": "ok",
     "message": "agentic-qe 9.9.9 (latest known; cache; observed time unknown)",
     "fix": null,
@@ -172,8 +179,8 @@
     "subsystem": "mcp",
     "level": "warn",
     "message": "ruflo MCP not registered",
-    "fix": "setup/sync registers claude-flow at user scope",
-    "repair": "sync"
+    "fix": "put `ak` on PATH, then run `ak sync`",
+    "repair": "manual"
   },
   {
     "subsystem": "deja-vu",

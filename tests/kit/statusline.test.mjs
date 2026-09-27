@@ -1,19 +1,18 @@
-// fixStatusline's security-overlay injection — the stopgap for ruflo's fabricated
-// CVE counter (@claude-flow/cli funnel/local-signals.js getSecurityStatus: a hardcoded
-// `totalCves = 3` naming ruflo's OWN v3 roadmap items, with cvesFixed derived from
-// scans.length — a FILE count). Hermetic: a synthetic global-root fixture stands in for
-// the installed CLI, so the upstream-defect gate can be driven both ways without npm,
-// network, or a real ruflo install.
+// fixStatusline's injected blocks. Hermetic: a synthetic global-root fixture stands
+// in for the installed CLI, so no npm, network or real ruflo install is involved.
 //
-// The retirement test is the important one: the kit must STOP patching the moment
-// upstream ships a fix, without anyone editing a pinned version number here.
+// The CVE-counter overlay (the stopgap for ruvnet/ruflo#2694: a hardcoded
+// `totalCves = 3` with cvesFixed from scans.length) is retired: the fix shipped in
+// Ruflo 3.32.2, below the support window's floor. fixStatusline still strips an old
+// block for one release; it never injects one, even on a CLI that has the defect.
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { _setGlobalRootForTest } from '../../src/lib/paths.mjs';
-import { fixStatusline, upstreamCveCounterFabricated } from '../../src/lib/statusline.mjs';
+import { fixStatusline } from '../../src/lib/statusline.mjs';
+import statuslineSection from '../../src/commands/status/sections/statusline.mjs';
 import { tempDir } from './helpers/temp-dir.mjs';
 import { redirectToolState, spawnEnv } from './helpers/home-sandbox.mjs';
 
@@ -36,7 +35,7 @@ function generateStatusline() { return 'BINS:' + resolveCliBinCandidates().join(
 console.log(generateStatusline())
 `;
 
-// The buggy shape fixStatusline probes for; `fixed` models an upstream repair.
+// The ruvnet/ruflo#2694 defect shape (buggy) and its repair; fixStatusline ignores both now.
 const signalsSrc = (buggy) => (buggy
   ? 'export function getSecurityStatus(cwd) {\n  let cvesFixed = 0;\n  const totalCves = 3;\n  cvesFixed = Math.min(totalCves, scans.length);\n}\n'
   : 'export function getSecurityStatus(cwd) {\n  const findings = readScan(cwd);\n  return { status: findings.length ? "ISSUES" : "CLEAN" };\n}\n');
@@ -60,25 +59,45 @@ function fixture({ buggyUpstream, rufloVersion }) {
 
 const count = (s, re) => (s.match(re) || []).length;
 
-test('gate detects the fabricated CVE counter in a buggy CLI', () => {
-  fixture({ buggyUpstream: true });
-  assert.equal(upstreamCveCounterFabricated(), true);
-});
+// An old security block as an earlier ak injected it (ruvnet/ruflo#2694 stopgap).
+const OLD_SEC_BLOCK = [
+  '/* ruflo-sec:BEGIN */',
+  'try {',
+  '  if (typeof getStatuslineData === "function") {',
+  '    var _rufloOrigGetStatuslineData = getStatuslineData;',
+  '    getStatuslineData = function(){',
+  '      var d = _rufloOrigGetStatuslineData.apply(this, arguments);',
+  '      try { if (d) { d.security = rufloLocalSecurity(process.cwd(), d.security); d.promo = rufloHonestInsight(d.promo, d.security); } } catch(e){}',
+  '      return d;',
+  '    };',
+  '  }',
+  '} catch(e){}',
+  '/* ruflo-sec:END */',
+].join('\n');
 
-test('gate goes quiet once upstream repairs getSecurityStatus', () => {
-  fixture({ buggyUpstream: false });
-  assert.equal(upstreamCveCounterFabricated(), false);
-});
-
-test('overlay is injected while the upstream defect is present', () => {
+test('an old CVE overlay block is stripped and never re-injected, even on a CLI with the defect', () => {
   const { proj, sl } = fixture({ buggyUpstream: true });
+  fs.writeFileSync(sl, HOST.replace('let ver', `${OLD_SEC_BLOCK}\nlet ver`));
   const r = fixStatusline(proj);
-  assert.equal(r.securityOverlay, true);
+  assert.equal(r.applied, true);
+  assert.equal('securityOverlay' in r, false, 'the result no longer reports an overlay');
   const out = fs.readFileSync(sl, 'utf8');
-  assert.match(out, /ruflo-sec:BEGIN/);
-  assert.match(out, /function rufloLocalSecurity/);
-  assert.match(out, /d\.security = rufloLocalSecurity/);
-  assert.match(out, /d\.promo = rufloHonestInsight/);
+  assert.doesNotMatch(out, /ruflo-sec/);
+  assert.doesNotMatch(out, /rufloLocalSecurity|rufloHonestInsight/);
+  assert.match(out, /ruflo-seg:BEGIN/, 'the activation footer is injected');
+});
+
+test('status never reports a statusline/cve row, even on a CLI with the defect', async () => {
+  const { proj, sl } = fixture({ buggyUpstream: true });
+  fs.writeFileSync(sl, HOST.replace('let ver', `${OLD_SEC_BLOCK}\nlet ver`));
+  const rows = await statuslineSection.collect({ cfg: {}, cwd: proj });
+  assert.deepEqual(rows.filter((r) => r.subsystem === 'statusline/cve'), []);
+  assert.equal(rows.find((r) => r.subsystem === 'statusline').level, 'warn', 'the old block is drift sync removes');
+});
+
+test('the footer template no longer carries the CVE overlay functions', () => {
+  const footer = fs.readFileSync(new URL('../../src/templates/statusline-footer.cjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(footer, /function rufloLocalSecurity|function rufloHonestInsight/);
 });
 
 test('injected statusline is syntactically valid', () => {
@@ -92,7 +111,7 @@ test('injection is idempotent — repeated syncs never stack blocks', () => {
   fixStatusline(proj); fixStatusline(proj);
   const r3 = fixStatusline(proj);
   const out = fs.readFileSync(sl, 'utf8');
-  assert.equal(count(out, /ruflo-sec:BEGIN/g), 1);
+  assert.equal(count(out, /ruflo-sec:BEGIN/g), 0);
   assert.equal(count(out, /ruflo-seg:BEGIN/g), 1);
   assert.equal(count(out, /ruflo-bin:BEGIN/g), 1);
   assert.equal(r3.applied, false, 'a converged file must report no change');
@@ -106,11 +125,10 @@ test('injection is idempotent — repeated syncs never stack blocks', () => {
 // security overlay, precisely because the render path executed a stale npx copy
 // the gate never probed.
 
-test('bin wrapper is injected even when the security overlay is retired', () => {
-  // buggyUpstream:false = the exact state that bit us: CVE gate retired, bin path broken.
+test('bin wrapper is injected on a fixed CLI', () => {
+  // buggyUpstream:false = the exact state that bit us: CVE counter fixed, bin path broken.
   const { proj, sl } = fixture({ buggyUpstream: false });
-  const r = fixStatusline(proj);
-  assert.equal(r.securityOverlay, false, 'precondition: the gated overlay must be off');
+  fixStatusline(proj);
   const out = fs.readFileSync(sl, 'utf8');
   assert.match(out, /ruflo-bin:BEGIN/);
   assert.match(out, /function rufloRealCliBins/, 'footer helper the wrapper depends on');
@@ -137,23 +155,6 @@ test('bin wrapper is inert on a template without resolveCliBinCandidates', () =>
   fixStatusline(proj);
   const stdout = execFileSync(process.execPath, [sl], { cwd: proj, encoding: 'utf8', env: spawnEnv(path.join(path.dirname(proj), 'home')) });
   assert.match(stdout, /^x/, 'typeof guard: the wrapper must not break a template it does not fit');
-});
-
-// The self-retirement contract: no version pin, no manual cleanup step.
-test('overlay retires itself once upstream is fixed', () => {
-  const { proj, sl } = fixture({ buggyUpstream: true });
-  fixStatusline(proj);
-  assert.match(fs.readFileSync(sl, 'utf8'), /ruflo-sec:BEGIN/);
-
-  // Upstream ships the fix underneath us; the next sync must strip the stopgap.
-  const funnel = path.join(_globalRootOf(sl), 'ruflo', 'node_modules', '@claude-flow', 'cli', 'dist', 'src', 'funnel');
-  fs.writeFileSync(path.join(funnel, 'local-signals.js'), signalsSrc(false));
-
-  const r = fixStatusline(proj);
-  assert.equal(r.securityOverlay, false);
-  const out = fs.readFileSync(sl, 'utf8');
-  assert.equal(count(out, /ruflo-sec:BEGIN/g), 0, 'stopgap must be gone');
-  assert.match(out, /ruflo-seg:BEGIN/, 'the activation footer must survive');
 });
 
 // ── Ruflo owns the version its helper shows ──────────────────────────────────

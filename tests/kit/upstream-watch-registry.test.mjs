@@ -307,3 +307,17 @@ test('the audit record carries the Branch 4 decisions in decision format', () =>
     assert.ok(section.split(part).length - 1 >= 5, part);
   }
 });
+
+// ADR-0041 §7: the rolling Ruflo support window lives on the Ruflo dependency policy.
+test('the Ruflo dependency policy carries the rolling support window', () => {
+  const ruflo = document().dependencyPolicies.find((policy) => policy.dependency === 'ruflo');
+  assert.deepEqual({ n: ruflo.supportWindow?.newestMinors, d: ruflo.supportWindow?.minDays }, { n: 6, d: 30 });
+  assert.equal(typeof ruflo.supportWindow.basis, 'string');
+});
+
+test('an invalid support window invalidates the registry', () => {
+  const errors = errorsOf((doc) => {
+    doc.dependencyPolicies.find((policy) => policy.dependency === 'ruflo').supportWindow = { newestMinors: 0, minDays: 'x' };
+  });
+  assert.match(errors, /dependency policy 0 is invalid/);
+});

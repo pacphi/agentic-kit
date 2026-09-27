@@ -1,12 +1,12 @@
-// Four related statusline surfaces, none of which had their own try/catch in
-// the original monolith: the project footer + its CVE-counter overlay, the
-// Codex native line, and an opencode informational note. Grouped in one
+// Three related statusline surfaces, none of which had their own try/catch in
+// the original monolith: the project footer, the Codex native line, and an
+// opencode informational note. Grouped in one
 // section (they share the "statusline" family of subsystem tags) but split
 // into small functions so each stays readable and under the CC budget.
 import fs from 'node:fs';
 import * as paths from '../../../lib/paths.mjs';
 import {
-  upstreamCveCounterFabricated, fixStatusline, helperStampStale, statuslineVersionAhead,
+  fixStatusline, helperStampStale, statuslineVersionAhead,
   helperRefreshBlocker, bakedVersionManualFix,
 } from '../../../lib/statusline.mjs';
 import { statuslineDrift } from '../../../lib/codex-statusline.mjs';
@@ -21,7 +21,7 @@ function footerRows(cwd) {
   const hasFooter = slSrc.includes('ruflo-seg:BEGIN');
   // Drift is "would a sync CHANGE this file?", which fixStatusline's dry run answers
   // exactly. A marker-presence test alone cannot see CONTENT drift: after a kit upgrade
-  // revises the footer or the security overlay, the marker is still there, this row
+  // revises the footer or another injected block, the marker is still there, this row
   // reports 'ok', and — because sync builds its plan from rows carrying a `fix` — the
   // re-injection never runs and the stale block survives indefinitely. Observed live:
   // an updated overlay silently failed to land for exactly this reason.
@@ -41,20 +41,6 @@ function footerRows(cwd) {
         ? 'footer present but ruflo helper stamp is stale — next ruflo command wipes it'
         : 'activation footer present and current',
     (wouldChange || stampStale) ? 'sync refreshes helpers, then re-injects the footer' : null)];
-  // The CVE-counter overlay is tracked SEPARATELY from the footer: a footer-only
-  // check reports 'ok' while the statusline still renders ruflo's fabricated
-  // "⚠ 3 CVEs" (hardcoded totalCves, cvesFixed from a file count). Only warn while
-  // the upstream defect is actually present — once ruflo fixes getSecurityStatus
-  // the overlay is intentionally absent, and this row must go quiet on its own
-  // rather than nag for a patch that is no longer wanted.
-  if (upstreamCveCounterFabricated()) {
-    const patched = slSrc.includes('ruflo-sec:BEGIN');
-    rows.push(row('statusline/cve', patched ? 'ok' : 'warn',
-      patched
-        ? 'CVE counter overlaid with real scan results'
-        : 'statusline shows ruflo\'s fabricated CVE count (upstream defect)',
-      patched ? null : 'sync injects the security overlay'));
-  }
   rows.push(...versionRows(cwd));
   return rows;
 }

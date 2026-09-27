@@ -191,6 +191,8 @@ test('status outside a project names the launcher\'s user-level store instead of
   assert.equal(launcher.fix, null);
   assert.ok(launcher.message.includes(userStore(home)), launcher.message);
   assert.match(launcher.message, /home folder/);
+  assert.match(launcher.message, /Claude Code's and Codex's Ruflo launcher/);
+  assert.doesNotMatch(launcher.message, /unchanged/, 'Claude Code now starts through the launcher too (B3-D1)');
 });
 
 test('status reports the user-level store and stray stores outside projects, for information only', async (t) => {
@@ -205,9 +207,20 @@ test('status reports the user-level store and stray stores outside projects, for
   const store = rows.find((r) => /user-level store/.test(r.message));
   assert.ok(store.message.includes(userStore(home)));
   assert.match(store.message, /memory\.db: 3 active entries/);
+  assert.match(store.message, /Claude Code's and Codex's Ruflo launcher outside projects/);
   const strays = rows.filter((r) => /stray/.test(r.message));
   assert.equal(strays.length, 1, 'one row lists every stray store outside projects');
   assert.match(strays[0].message, /~\/\.swarm/);
   assert.match(strays[0].message, /2 under ~\/\.codex\/\.chatgpt-projects/);
   assert.match(strays[0].message, /leaves them in place/);
+});
+
+test('Claude mode from the home folder pins both memory variables to the user-level store', (t) => {
+  const home = sandbox(t);
+  const launch = rufloMcpLaunch(home, { RUFLO_INTELLIGENCE_MODE: 'fast' }, { cfg, rufloVersion: '3.46.1', home, host: 'claude' });
+  assert.equal(launch.location.kind, 'user');
+  assert.equal(launch.cwd, userStore(home));
+  assert.equal(launch.env.CLAUDE_FLOW_MEMORY_PATH, userStore(home));
+  assert.equal(launch.env.CLAUDE_FLOW_DB_PATH, path.join(userStore(home), 'memory.db'));
+  assert.equal(launch.env.RUFLO_INTELLIGENCE_MODE, 'fast');
 });

@@ -86,10 +86,11 @@ export function rufloMemoryLocation(cwd = process.cwd(), {
   return { kind: 'user', root: dir, dir, db: p.join(dir, 'memory.db'), reason };
 }
 
-/** The project root every ak memory contract pins: the launcher's root for a
- *  project or plain folder. Outside any usable folder (the user-level store's
- *  cases) it stays the repository root or folder, for the callers that are not
- *  the Codex launcher (Claude-side harvest and setup; a follow-up decision). */
+/** The project root the daemon lookup (status/sections/daemons.mjs) and
+ *  projectMemoryEnv pin: the launcher's root for a project or plain folder.
+ *  Outside any usable folder (the user-level store's cases) it stays the
+ *  repository root or folder. The launcher and harvest no longer use it: they
+ *  follow rufloMemoryLocation directly, and project setup refuses there. */
 export function memoryProjectRoot(cwd = process.cwd(), options = {}) {
   const location = rufloMemoryLocation(cwd, options);
   return location.kind === 'user' ? fs.realpathSync(paths.repoRoot(cwd) ?? cwd) : location.root;
@@ -100,26 +101,30 @@ export function projectMemoryEnv(cwd = process.cwd(), env = {}) {
   return { ...env, CLAUDE_FLOW_DB_PATH: paths.projectMemoryDb(root) };
 }
 
+/** The hosts the launcher serves. Codex gets ak's managed component env;
+ *  Claude Code receives component keys from its own settings env (ADR-0058
+ *  §3), so its mode sets only the memory location and ak's agent-browser
+ *  config (B3-D1). */
+export const LAUNCHER_HOSTS = Object.freeze(['codex', 'claude']);
+
 export function rufloMcpLaunch(cwd = process.cwd(), env = process.env, {
-  cfg = loadKitConfig(), rufloVersion = installedVersion('ruflo'), home = paths.home,
+  cfg = loadKitConfig(), rufloVersion = installedVersion('ruflo'), home = paths.home, host = 'codex',
 } = {}) {
+  if (!LAUNCHER_HOSTS.includes(host)) throw new Error(`unknown launcher host: ${host}`);
   const location = rufloMemoryLocation(cwd, { home, env });
   const root = location.root;
-  const rc = componentEnv(root, cfg, rufloVersion);
-  const merged = {
-    ...env,
-    ...managedAgentBrowserEnv({ enabled: cfg.agentBrowser !== false }),
-    ...rc,
-  };
+  const browser = managedAgentBrowserEnv({ enabled: cfg.agentBrowser !== false });
+  const rc = host === 'codex' ? componentEnv(root, cfg, rufloVersion) : {};
+  const merged = { ...env, ...browser, ...rc };
   // Governance is a project-scoped ak-owned key: when managed, ak either sets
   // it (valid policy) or actively clears a stale/inherited value (no/invalid
   // policy) — never leaves ruflo pointed at a policy file it can no longer
-  // see, which would make it fail closed on every tool call (when ruflo's
-  // enforcer is reachable; ruflo 3.44.0's stdio entry points do not reach it,
-  // see ADR-0058 upstream request 6). When governance
-  // is not managed, an inherited value is the user's own choice and is left
-  // untouched.
-  if (managedIntent(cfg, 'mcpGovernance') && supports(rufloVersion, componentById('mcpGovernance').minRuflo) && !(RC_KEYS.enforce in rc)) {
+  // see, which would make it fail closed on every tool call (ruflo 3.46.0 and
+  // newer enforce it on the stdio entry points, ruvnet/ruflo#3415; older
+  // versions never reach the enforcer there). When governance is not managed,
+  // an inherited value is the user's own choice and is left untouched. Claude
+  // mode never touches it: Claude's settings env owns the key there.
+  if (host === 'codex' && managedIntent(cfg, 'mcpGovernance') && supports(rufloVersion, componentById('mcpGovernance').minRuflo) && !(RC_KEYS.enforce in rc)) {
     delete merged[RC_KEYS.enforce];
   }
   // The user-level store has no project root to derive agentdb-memory.db

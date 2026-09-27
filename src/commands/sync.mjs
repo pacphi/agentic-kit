@@ -21,11 +21,16 @@ import { hostsWithLifecycle, lifecycleAdapterFor, lifecycleExecutionEnabled, det
 import { companionLifecycleFor } from '../lib/adapters/companion-lifecycle-registry.mjs';
 import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
+import { applyRufloDaemon } from '../lib/ruflo-daemon-config.mjs';
+import { cleanupProbeRows } from '../lib/memory-probe-cleanup.mjs';
+import { rufloMemoryLocation } from '../lib/ruflo-memory.mjs';
+import { installedRoutingVersion } from '../lib/ruflo-memory-contract.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { reconcileRufloComponents } from '../lib/ruflo-components/apply.mjs';
 import { RESTART_REMINDER } from './status/sections/ruflo-components.mjs';
 import { HOSTS, commandHosts, hostInstallState, hostExecutable, installHost, convergeProviderStack, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
-import { driftReport, selfDrift } from '../lib/versions.mjs';
+import { driftReport, installedVersion, selfDrift } from '../lib/versions.mjs';
+import { recordRufloReleaseDates } from '../lib/ruflo-support-window.mjs';
 import { drift as ruvnetBrainDrift } from '../lib/ruvnet-brain.mjs';
 import { RUVECTOR_PKG, managed as ruvectorManaged } from '../lib/ruvector.mjs';
 import { pruneNpxStale } from '../lib/npx.mjs';
@@ -102,9 +107,16 @@ export function recordApplyFailure(state, name, result) {
 /** Refresh every network-backed fact that can open an upgrade gate. Kept out
  *  of run() so adding one release boundary does not grow the command's already
  *  broad orchestration complexity. Sequential: these probes persist kit.json. */
-async function refreshPlanDrift(flags, fetchLatest, pkgRoot) {
+async function refreshPlanDrift(flags, fetchLatest, pkgRoot, releaseDatesRunner) {
   if (flags['dry-run'] || flags['no-upgrade']) return;
   await driftReport({ force: true, ...(fetchLatest ? { fetchLatest } : {}) });
+  // ADR-0041 §7: remember each Ruflo minor's first publish so `ak status` can
+  // compute the support window without a network call. A failed lookup keeps
+  // the old dates.
+  const cfg = loadKitConfig();
+  if (await recordRufloReleaseDates({ cfg, ...(releaseDatesRunner ? { runner: releaseDatesRunner } : {}) })) {
+    try { saveKitConfig(cfg); } catch { /* read-only envs: the next sync records them */ }
+  }
   // Self-update has its own TTL cache; refresh it before the collector decides
   // whether a self action exists. An apply-time refresh cannot open that gate.
   await selfDrift({ pkgRoot, force: true, ...(fetchLatest ? { fetchLatest } : {}) });
@@ -126,6 +138,12 @@ export const help = `ak sync — converge to good: upgrade + heal + verify
 Builds a plan from the same collector \`ak status\` uses, then applies it in
 order: upgrades first (they wipe native modules), then heals, then re-collects
 to prove convergence. Idempotent — safe to run any time. When in doubt, run this.
+Before planning, a sync that may upgrade (not --dry-run or --no-upgrade) reads
+the latest versions and Ruflo's release dates from npm; \`ak status\` uses the
+remembered dates for the Ruflo support window.
+In a Ruflo project, sync applies ak's daemon settings (flat keys in
+.claude-flow/config.json, start-on-use on unless kit.json rufloDaemon.autoStart
+is false) and restarts the project's daemon only if it was running.
 Only fixes a sync step performs are planned; a status row marked "→ manual:"
 (a command you run, a file you edit, a login) is never applied. A failing or
 warning one is counted as a manual step you must take; an info-level one is
@@ -372,11 +390,17 @@ export const SYNC_STEPS = [
       await ctx.step('mcp', async () => {
         const reg = await (ctx.registerMcp ?? mcpRegister)(ctx.cfg);
         preserved = reg.preserved ?? [];
+        if (reg.reason === 'ak-not-on-path') {
+          return { ok: false, detail: 'claude mcp registration skipped: `ak` is not on PATH, and the registration starts `ak x ruflo-mcp`; the existing registration was left in place' };
+        }
+        if (reg.reason === 'ak-launcher-outdated') {
+          return { ok: false, detail: 'claude mcp registration skipped: the `ak` on PATH predates `ak x ruflo-mcp --host`, which the registration starts; update it, then run ak sync (the existing registration was left in place)' };
+        }
         if (!reg.ok) {
           return { ok: false, detail: 'claude mcp registration failed; prior compatible registration was restored when possible' };
         }
         const { denied } = applyExclusions(ctx.cfg.mcp.excludeFamilies ?? []);
-        return { ok: true, detail: `claude-flow registered (user scope), ${denied} tool(s) denied per kit.json` };
+        return { ok: true, detail: `claude-flow registered (user scope, through ak x ruflo-mcp), ${denied} tool(s) denied per kit.json` };
       });
       // register() keeps a legacy entry ak did not write (ADR-0016); say so
       // with the manual command instead of implying a migration happened.
@@ -385,14 +409,54 @@ export const SYNC_STEPS = [
       }
     },
   },
+  // Decision B3-D2: remove ak's old setup probe rows once, from the current
+  // project's store and the user-level store (both files each: Ruflo's own
+  // delete leaves the AgentDB mirror, ruvnet/ruflo#3450). Each store is backed
+  // up first; the receipt and backups stay under the state folder, and
+  // kit.json records every cleaned file so it is never cleaned twice.
+  {
+    id: 'memory-probe-cleanup',
+    when: (subs) => subs.has('memory'),
+    run: (ctx) => ctx.step('memory-probe-cleanup', () => {
+      const location = rufloMemoryLocation(ctx.cwd);
+      const dirs = [...(location.kind === 'user' ? [] : [location.dir]), paths.userMemoryDir()];
+      const root = paths.memoryProbeCleanupDir();
+      const { receipt } = cleanupProbeRows(dirs, {
+        backupRoot: path.join(root, 'backups'), receiptDir: root, cleaned: ctx.cfg.cleanups.setupProbeRows,
+      });
+      if (!receipt) return { ok: true, detail: 'no old ak setup probe rows left' };
+      saveKitConfig(ctx.cfg);
+      const failed = receipt.stores.filter((store) => store.error);
+      const removed = receipt.stores.reduce((sum, store) => sum + store.deleted.length, 0);
+      const detail = `removed ${removed} old ak setup probe row${removed === 1 ? '' : 's'} (backup and receipt in ${root})`
+        + (failed.length ? `; could not clean ${failed.map((store) => `${store.file} (${store.error})`).join(', ')}` : '');
+      return { ok: failed.length === 0, detail };
+    }),
+  },
+  // Also after an upgrade: a Ruflo that crossed 3.46.0 no longer needs the
+  // idle key ak wrote (ruflo-daemon-config.mjs), so the same sync removes it.
   {
     id: 'daemons',
-    when: (subs) => subs.has('daemons'),
+    when: (subs) => subs.has('daemons') || subs.has('versions'),
     run: async (ctx) => {
       const stale = staleDaemons(await listDaemons({ cwd: ctx.cwd }));
       for (const r of reap(stale)) {
         (r.killed ? ok : warn)(`daemon pid=${r.pid}: ${r.killed ? 'reaped' : 'could not stop'}`);
       }
+      // Read the version now: the versions step may have just upgraded Ruflo.
+      const applied = await applyRufloDaemon(ctx.cwd, {
+        cfg: ctx.cfg, rufloVersion: installedRoutingVersion() ?? installedVersion('ruflo'),
+      });
+      if (!applied) return;
+      saveKitConfig(ctx.cfg);
+      const { config, autostart } = applied.result;
+      if (applied.result.changed) ok(`ruflo daemon settings: config ${config}, start-on-use ${autostart}`);
+      const { held } = applied.result;
+      if (held) {
+        warn(`.claude-flow/config.json is not ak-managed here (${held.invalid ? 'unreadable or not a JSON object' : 'a key holds your own value'}); `
+          + `left as is, and the daemon is not restarted for ${held.entries.map((e) => e.key).join(', ')}`);
+      }
+      if (applied.restarted) ok('ruflo daemon restarted so it reads its settings');
     },
   },
   // Managed companion convergence is independent from host lifecycle
@@ -560,9 +624,7 @@ export const SYNC_STEPS = [
   // footer with no re-inject planned.
   {
     id: 'statusline',
-    // 'statusline/cve': fixStatusline also injects the CVE-counter overlay
-    // that row promises (a planned overlay fix used to run no step at all).
-    when: (subs) => subs.has('statusline') || subs.has('statusline/cve') || subs.has('versions') || subs.has('providers'),
+    when: (subs) => subs.has('statusline') || subs.has('versions') || subs.has('providers'),
     run: async (ctx) => {
       // withProgress: fixStatusline blocks on a node subprocess (ruflo's helper
       // refresh, up to 30s). The interval can't animate through a synchronous
@@ -633,7 +695,7 @@ const TAIL_REPAIRS = new Set(['host-alignment']);
 // replace the statusline helper, so --skip statusline stops it too.
 // host-lifecycles answers per host instead (its loop checks ctx.skip).
 const STEP_SUBSYSTEMS = {
-  'codex-mcp-repair': ['codex-mcp'], 'aqe-rvf': ['aqe'], 'ruflo-helpers': ['versions', 'statusline'], 'host-lifecycles': [],
+  'codex-mcp-repair': ['codex-mcp'], 'aqe-rvf': ['aqe'], 'memory-probe-cleanup': ['memory'], 'ruflo-helpers': ['versions', 'statusline'], 'host-lifecycles': [],
 };
 const stepSubsystems = (s) => (Object.hasOwn(STEP_SUBSYSTEMS, s.id) ? STEP_SUBSYSTEMS[s.id] : [s.id]);
 
@@ -641,9 +703,9 @@ const stepSubsystems = (s) => (Object.hasOwn(STEP_SUBSYSTEMS, s.id) ? STEP_SUBSY
 // fails when a step's `when` names one missing here.
 const SYNC_SUBSYSTEMS = [
   'agent-browser', 'aqe', 'aqe-embedding', 'blocks', 'codex-context', 'codex-mcp', 'codex-statusline',
-  'daemons', 'deja-vu', 'host-alignment', 'hosts', 'mcp', 'natives', 'npx', 'providers', 'routing',
+  'daemons', 'deja-vu', 'host-alignment', 'hosts', 'mcp', 'memory', 'natives', 'npx', 'providers', 'routing',
   'ruflo-components', 'ruvector', 'ruvnet-brain', 'ruvnet-brain-nightly', 'scaffold-agents', 'security',
-  'self', 'statusline', 'statusline/cve', 'versions',
+  'self', 'statusline', 'versions',
 ];
 
 /** The names `ak sync --skip` accepts: SYNC_SUBSYSTEMS plus every lifecycle host. */
@@ -705,9 +767,8 @@ export function performingStepsFor(item, flags, cfg, skip = new Set()) {
 }
 
 /** Take --skip's items out of the plan: those of a skipped subsystem, and
- *  those only a skipped step performs (statusline/cve when statusline is
- *  skipped; a Codex MCP registration when providers is skipped) — running the
- *  rest could never repair them. */
+ *  those only a skipped step performs (a Codex MCP registration when
+ *  providers is skipped) — running the rest could never repair them. */
 export function splitSkipped(candidates, skip, flags, cfg) {
   if (!skip.size) return { plan: candidates, skipped: [] };
   const plan = []; const skipped = [];
@@ -941,6 +1002,7 @@ async function converge({
   flags,
   pkgRoot,
   fetchLatest,
+  releaseDatesRunner,
   dejaVuAdapter = companionLifecycleFor('deja-vu'),
   collectFn = collect,
   confirmCodexRepair = askCodexRepair,
@@ -961,7 +1023,7 @@ async function converge({
   // versions gate it needed to open). Dry-runs skip the refresh: it writes
   // kit.json, and --dry-run is pinned to touch nothing — so a dry-run
   // preview may be cache-stale by up to one TTL window.
-  await refreshPlanDrift(flags, fetchLatest, pkgRoot);
+  await refreshPlanDrift(flags, fetchLatest, pkgRoot, releaseDatesRunner);
   const rows = await collectFn({ pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions });
   result.needsYourAction = needsYourAction(rows);
   // Only fixes a sync step performs enter the plan (status/row.mjs repair

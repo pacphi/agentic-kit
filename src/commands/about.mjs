@@ -119,6 +119,15 @@ async function addRufloEdits(states) {
  * @param {{ pkgRoot?: string }} input
  * @returns {Promise<Map<string, { state: string, version: string|null, note: string|null, edits?: string[] }>>}
  */
+/** The security chip from the natives probes (injected so it stays a pure fact). */
+function securityChip({ aidefencePresent, rufloBuiltinDefence, securityPresent }) {
+  if (!securityPresent()) return absent();
+  if (aidefencePresent()) return installed(null);
+  return attention(rufloBuiltinDefence()
+    ? 'aidefence missing: defend uses the built-in engine; aidefence_* MCP tools unavailable'
+    : '@claude-flow/security present, aidefence missing');
+}
+
 async function detectPackaged({ pkgRoot }) {
   const states = new Map();
 
@@ -165,14 +174,12 @@ async function detectPackaged({ pkgRoot }) {
 
   // aidefence and @claude-flow/security are nested under global ruflo, not
   // global packages, so there is no version to read — presence is the whole
-  // fact ak has. Reporting the pair separately matters: security-without-
-  // aidefence is the state in which `security defend` silently does nothing.
+  // fact ak has. Reporting the pair separately matters: without aidefence,
+  // Ruflo 3.32.2+ defends with its built-in engine (ruvnet/ruflo#2670) but loses
+  // adaptive learning and the aidefence_* MCP tools; older Ruflo's defend
+  // silently did nothing.
   try {
-    const { aidefencePresent, securityPresent } = await import('../lib/natives.mjs');
-    const security = securityPresent();
-    if (security && aidefencePresent()) states.set('security', installed(null));
-    else if (security) states.set('security', attention('@claude-flow/security present, aidefence missing'));
-    else states.set('security', absent());
+    states.set('security', securityChip(await import('../lib/natives.mjs')));
   } catch (error) {
     states.set('security', unknown(reasonOf(error)));
   }

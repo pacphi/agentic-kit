@@ -5,11 +5,18 @@ import { codexMcpTopology, codexMcpRepairPlan, repairCodexMcpTopology } from './
 import { codexConfigPath } from './paths.mjs';
 import { saveKitConfig } from './config.mjs';
 
+// The two claude-flow forms Codex's Claude import copies from an ak Claude
+// Code registration; consent is remembered per form.
+const REMEMBERED_ALIAS_FORMS = new Map([
+  ['ruflo ["mcp","start"]', 'ruflo mcp start'],
+  ['ak ["x","ruflo-mcp","--host","claude"]', 'ak x ruflo-mcp --host claude'],
+]);
+
 function repairKey(entry) {
   if (entry?.scope !== 'user' || entry.file !== codexConfigPath()
-    || entry.repairKind !== 'legacy-ruflo' || entry.name !== 'claude-flow'
-    || entry.command !== 'ruflo' || JSON.stringify(entry.args) !== '["mcp","start"]') return null;
-  return `${entry.file}\nclaude-flow\nruflo mcp start`;
+    || entry.repairKind !== 'legacy-ruflo' || entry.name !== 'claude-flow') return null;
+  const form = REMEMBERED_ALIAS_FORMS.get(`${entry.command} ${JSON.stringify(entry.args)}`);
+  return form ? `${entry.file}\nclaude-flow\n${form}` : null;
 }
 
 function managedReplacement(cfg, topology) {

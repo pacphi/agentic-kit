@@ -10,6 +10,7 @@ import { maxVersion, releaseFacts } from './classify.mjs';
 const ID = /^([\w.-]+\/[\w.-]+)#([1-9]\d*)$/;
 const SHA = /^[0-9a-f]{7,40}$/;
 const REF = /^[\w./-]+$/;
+const VERSION = /^\d+\.\d+\.\d+(?:-[\w.]+)?$/;
 const NOT_FOUND = /HTTP 404|Not Found/i;
 const NO_MATCH = /No match found for version/;
 
@@ -112,13 +113,15 @@ export function createFetcher({ exec = run } = {}) {
       return { ref: null, contained: null };
     },
     /**
-     * The version of `name` the newest `chain[0]` installs, walking each
-     * manifest's dependencies (then optionalDependencies) down the chain and
-     * resolving every range to its highest published match with npm.
+     * The version of `name` the newest `chain[0]` installs (or `chain[0]` at
+     * `at`, such as the support-window floor), walking each manifest's
+     * dependencies (then optionalDependencies) down the chain and resolving
+     * every range to its highest published match with npm.
      */
-    async bundled(chain, name) {
+    async bundled(chain, name, at = null) {
       for (const pkg of [...chain, name]) if (!PACKAGE_NAME.test(pkg ?? '')) throw new Error(`not a package name: ${pkg}`);
-      const carrierVersion = await json('npm', ['view', chain[0], 'version', '--json']);
+      if (at !== null && !VERSION.test(at)) throw new Error(`not a version: ${at}`);
+      const carrierVersion = at ?? await json('npm', ['view', chain[0], 'version', '--json']);
       let [pkg, version] = [chain[0], carrierVersion];
       const trail = [`${pkg} ${version}`];
       const unresolved = (basis) => ({ carrier: chain[0], carrierVersion, version: null, basis });

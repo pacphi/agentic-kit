@@ -25,6 +25,12 @@ test('every component explains itself in plain language', () => {
   }
 });
 
+test('the governance explanation names the 3.46.0 stdio boundary (ruvnet/ruflo#3415)', () => {
+  const { does, benefit } = componentById('mcpGovernance').explain;
+  assert.match(does, /Ruflo 3\.46\.0 and newer apply the policy on the stdio MCP launches; older versions do not/);
+  assert.doesNotMatch(`${does} ${benefit}`, /3\.44\.0|upstream request 6|Ready when ruflo wires/);
+});
+
 test('learning profile lists all five profiles with their budgets', () => {
   assert.deepEqual(componentById('learningProfile').options.map((o) => o.value),
     ['real-time', 'balanced', 'research', 'edge', 'batch']);

@@ -1,12 +1,13 @@
 // harvest — the OPT-IN, FOREGROUND learning-WRITE path, through Ruflo's own verbs.
 //
 // ak facilitates what Ruflo does; it does not run a parallel copy. Harvest
-// therefore drives only Ruflo's CLI, from the project memory root and with the
-// project memory pin — the same launch contract every host uses — so a run from a
-// subdirectory never creates stores in that subdirectory:
+// therefore drives only Ruflo's CLI, from the store ak's launcher picks for the
+// folder (the repository root; outside any project, the one user-level store)
+// and with that store's memory pin — the same launch contract every host uses —
+// so a run from a subdirectory never creates stores in that subdirectory:
 //   1. `ruflo hooks post-task --task-id <id> --success true` — records the task
 //      outcome; Ruflo's hooks write their own memory store.
-//   2. opt-in (`--distill`): `ruflo memory distill run --db <root>/.swarm/memory.db`
+//   2. opt-in (`--distill`): `ruflo memory distill run --db <store>/memory.db`
 //      — Ruflo's memory distillation (its ADR-174): entries → episodes, reasoning
 //      patterns and causal edges. The daemon's consolidate worker runs the same
 //      pass on a schedule; this runs it once, now, in the foreground.
@@ -19,11 +20,28 @@
 //
 // NEVER starts a daemon, NEVER backgrounds anything. `runner` is injectable so
 // `ak x verify harvest` can drive it against an isolated temporary store.
+import fs from 'node:fs';
+import path from 'node:path';
 import { run } from './exec.mjs';
 import * as paths from './paths.mjs';
-import { memoryProjectRoot } from './ruflo-memory.mjs';
+import { rufloMemoryLocation } from './ruflo-memory.mjs';
 
 const DEFAULT_TASK_ID = 'ak-harvest';
+
+/** Where harvest runs and which store it pins: the store ak's launcher uses
+ *  from `cwd` (rufloMemoryLocation: the repository, else the folder, else the
+ *  one flat user-level store, B3-D1). An explicit `root` (verify's isolated
+ *  store) is a project root: `<root>/.swarm/memory.db`. */
+function harvestLocation(cwd, root) {
+  if (root) return { kind: 'project', root, dir: path.join(root, '.swarm'), db: paths.projectMemoryDb(root) };
+  return rufloMemoryLocation(cwd);
+}
+
+/** The memory pin for a location: the user-level store has no project root to
+ *  derive agentdb-memory.db from, so its memory root is pinned as well. */
+const memoryPin = (location) => (location.kind === 'user'
+  ? { CLAUDE_FLOW_MEMORY_PATH: location.dir, CLAUDE_FLOW_DB_PATH: location.db }
+  : { CLAUDE_FLOW_DB_PATH: location.db });
 
 // ANSI SGR stripper. The ESC byte is built via fromCharCode (not a literal
 // control char in a regex) so this stays clean under eslint no-control-regex.
@@ -58,7 +76,8 @@ export function distillSkipFailed(reason) {
 /** The ordered write steps, all Ruflo verbs. Each: { name, cmd, args, desc, timeout }.
  *  `root` overrides the project memory root derived from `cwd` (verify's
  *  isolated store, which must never resolve to an enclosing repository). */
-export function planHarvest({ cwd = process.cwd(), root = memoryProjectRoot(cwd), distill = false, taskId = DEFAULT_TASK_ID } = {}) {
+export function planHarvest({ cwd = process.cwd(), root = undefined, distill = false, taskId = DEFAULT_TASK_ID } = {}) {
+  const location = harvestLocation(cwd, root);
   const steps = [{
     name: 'record-outcome',
     cmd: 'ruflo',
@@ -70,8 +89,8 @@ export function planHarvest({ cwd = process.cwd(), root = memoryProjectRoot(cwd)
     steps.push({
       name: 'distill-memory',
       cmd: 'ruflo',
-      args: ['memory', 'distill', 'run', '--db', paths.projectMemoryDb(root)],
-      desc: "run Ruflo's memory distillation on the project store",
+      args: ['memory', 'distill', 'run', '--db', location.db],
+      desc: `run Ruflo's memory distillation on the ${location.kind === 'user' ? 'user-level' : 'project'} store`,
       timeout: 600_000,
     });
   }
@@ -88,23 +107,27 @@ export function planHarvest({ cwd = process.cwd(), root = memoryProjectRoot(cwd)
  *           env?: Record<string, string>, taskId?: string }} [o]
  */
 export async function runHarvest({
-  runner = run, cwd = process.cwd(), root = memoryProjectRoot(cwd), dryRun = false, distill = false, env = {}, taskId,
+  runner = run, cwd = process.cwd(), root = undefined, dryRun = false, distill = false, env = {}, taskId,
 } = {}) {
-  const steps = planHarvest({ root, distill, ...(taskId ? { taskId } : {}) });
+  const location = harvestLocation(cwd, root);
+  const steps = planHarvest({ cwd, root, distill, ...(taskId ? { taskId } : {}) });
 
   if (dryRun) {
     return {
-      ok: true, dryRun: true, root,
+      ok: true, dryRun: true, root: location.root,
       steps: steps.map((s) => ({
         name: s.name, ok: true, skipped: false, detail: `would run: ${s.cmd} ${s.args.join(' ')}`,
       })),
     };
   }
 
-  const runEnv = { ...env, CLAUDE_FLOW_DB_PATH: paths.projectMemoryDb(root) };
+  const runEnv = { ...env, ...memoryPin(location) };
+  if (location.kind === 'user') {
+    try { fs.mkdirSync(location.root, { recursive: true }); } catch { /* the runner reports a missing cwd */ }
+  }
   const results = [];
   for (const step of steps) {
-    const r = await runner(step.cmd, step.args, { timeout: step.timeout, cwd: root, env: runEnv });
+    const r = await runner(step.cmd, step.args, { timeout: step.timeout, cwd: location.root, env: runEnv });
     const exited = r.code === 0;
     const skip = exited && step.name === 'distill-memory'
       ? distillSkipReason(`${r.stdout || ''}\n${r.stderr || ''}`) : null;
@@ -114,5 +137,5 @@ export async function runHarvest({
         : skip ? `Ruflo skipped distillation: ${skip}` : step.desc;
     results.push({ name: step.name, ok: exited && !couldNotRun, skipped: !!skip && !couldNotRun, detail });
   }
-  return { ok: results.every((s) => s.ok), dryRun: false, root, steps: results };
+  return { ok: results.every((s) => s.ok), dryRun: false, root: location.root, steps: results };
 }

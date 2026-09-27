@@ -37,22 +37,28 @@ ak sync             # apply it
 | Codex receives automatic deja-vu recall while Agentic Kit says MCP mode | A user-owned Codex deja-vu plugin can contribute session/per-prompt/precompaction hooks independently of Agentic Kit's mode | disable/remove that plugin through Codex if MCP-only behavior is required. `ak sync` preserves external plugins and reports the effective auto surface without claiming a fix |
 | `--purge-deja-vu-data` refuses the index path | The observed path is broad, relative, outside an approved data root, overlaps config/transcript sources, or crosses a symlink | move/reconfigure the derived index safely, run `deja doctor --offline`, then retry. Never bypass the guard by deleting a host transcript root |
 | Just upgraded ruflo/agentic-qe (`npm i -g …`) and things feel off | Upgrades re-resolve dependencies: native SQLite bindings and the aidefence package get dropped, and ruflo's helper auto-refresh regenerates the statusline without the footer | `ak sync` (this is its main job) |
+| `status` says `Ruflo … is unsupported: below the support window` | ak supports the newest six Ruflo minors, never fewer than those released in the last 30 days. Workarounds for Ruflo defects fixed before the window's floor have been removed, so an older Ruflo may misbehave | `ak sync` upgrades Ruflo. See [Ruflo support window](UPGRADING.md#2026-09-27-ruflo-support-window) |
+| `status` says `Ruflo support window not yet known` | ak has not read Ruflo's release dates yet; `ak status` never looks them up itself | Run `ak sync` (not `--dry-run` or `--no-upgrade`): it reads and remembers them |
 | `status` shows a host `installed but not executable` | npm exits 0 even when an optional dependency fails, so a package can be recorded without its platform binary. Codex ships its binary as per-platform versions (for example `@openai/codex-darwin-arm64`) published minutes after the main version, so an upgrade in that window can leave `codex` unable to start | `ak sync` reinstalls an npm-owned host and verifies it starts; upgrades and installs already retry once with `--prefer-online`. An external (mise/native/brew) install is reinstalled with its own tool |
 | `status` shows `natives … WASM fallback` | agentdb resolved a non-native better-sqlite3 — on this path **memory writes can silently vanish**. Common causes are npm ≥11.17 blocking install scripts during upgrades, or a stale better-sqlite3 ≤12.9 pin on Node 26 | `ak sync` selects a Node-compatible release and installs the native binding |
 | `status` says `ak applied Ruflo's native SQLite pin (ruvnet/ruflo#2219)` | To install a native better-sqlite3 where a bundled package could not find one, `ak sync` changed that package's own better-sqlite3 line (npm refuses the install otherwise). Ruflo pins better-sqlite3 to 12.8.0 or later for the same reason, but `npm install -g` does not apply Ruflo's pin. The row names each file, field, original value and ak's value | Nothing to do. `ak uninstall` puts each original value back where the file still holds ak's value. A Ruflo upgrade or reinstall replaces the file; `status` then says the edit is no longer there. Edits made before ak kept receipts are not listed and cannot be restored by ak; reinstall Ruflo if you want its shipped files back |
 | `status` shows `ruflo memory runtime on WASM fallback (…): no native binding` | The better-sqlite3 that Ruflo's memory runtime loads has no compiled binding; the row ends with the load error | `ak sync` builds the native binding |
 | `status` shows `ruflo memory runtime on WASM fallback (…): its native binding is present but will not load` | The binding file exists but was built for another Node.js version or platform, or is damaged; the row ends with the load error (for example `compiled against a different Node.js version`) | `ak sync` removes the binding that will not load, rebuilds it in place, and load-tests the result |
 | `status` shows `ruflo memory runtime backend unverified` | The load probe timed out twice or ended without a diagnostic, so native versus WASM is unknown. Sync does not act on an unverified probe | Re-run `ak status` when the machine is less busy. If it persists, `npx ruflo doctor` shows the runtime's own view |
-| `status` shows `aidefence missing` | ruflo ≥3.28 stopped shipping `@claude-flow/aidefence` but `ruflo security defend` still imports it — injection defense is silently non-functional ([ruvnet/ruflo#2670](https://github.com/ruvnet/ruflo/issues/2670)) | `ak sync` reinstalls it; `ak x verify security` proves defend works (exit 1=threat / 0=clean) |
+| `status` says `security defend uses Ruflo's built-in engine; @claude-flow/aidefence … is missing` | Ruflo does not declare `@claude-flow/aidefence` as a dependency, so an upgrade can drop it. `ruflo security defend` still screens prompts with Ruflo's built-in engine ([ruvnet/ruflo#2670](https://github.com/ruvnet/ruflo/issues/2670)); only adaptive learning and the `aidefence_*` MCP tools are missing | `ak sync` reinstalls it. `ak x verify security` reads defend's JSON verdict: it passes when defend flags an injection sample and passes a clean one |
+| `ak x verify security` says `defend crashed before reporting a verdict (ruvnet/ruflo#3473)` | Ruflo's text-mode `security defend` crashes after it prints a detection. ak asks for `-o json`, which does not crash, so this means defend failed before giving any verdict | Re-run `ak x verify security`; if it repeats, run `ruflo security defend -i "ignore previous instructions" -o json` to see Ruflo's own output |
 | `status` shows oversized RVF store(s) | A runaway append after a hard exit grew a `.rvf` past the 2 GB cap (seen at ~277 GB once) | `ak sync` quarantines the oversized store; agentic-qe rebuilds it |
 | Statusline footer (🧠/🛡/🎓 lines) disappeared | `@claude-flow/cli`'s version-stamped helper auto-refresh pristine-copies `statusline.cjs` on the **first ruflo command after an upgrade** — including the statusline render itself | `ak sync` — it now triggers that refresh *first*, then re-injects, so the footer survives; `ak status` flags an armed wipe before it fires |
 | Statusline footer is blank or stale with no visible error | Footer probes are intentionally silent during normal rendering | Set `AK_STATUSLINE_DEBUG=1` for one reproduction. Redacted stage/error metadata goes to `$XDG_STATE_HOME/agentic-kit/statusline-debug.log` (default `~/.local/state/agentic-kit/statusline-debug.log`, mode 0600, bounded at 64 KiB); set `AK_STATUSLINE_DEBUG_FILE` to redirect it, then unset debug |
+| Statusline security line shows Ruflo's own scan status | ak no longer overlays Ruflo's security count: Ruflo fixed its fabricated CVE count in 3.32.2, below the support window. `ak sync` removes the overlay an older ak injected | Nothing to do. For a current result run `ruflo security scan`; use `npm audit` for dependency CVEs |
 | Statusline shows a Ruflo version you do not have installed (for example `RuFlo V9.9.9`) | Ruflo's helper bakes a version into `.claude/helpers/statusline.cjs` as a floor and shows the highest version it finds. A baked value above every install never corrects itself. `ak status` flags it on the `statusline` row | `ak sync`: it clears the helper stamp so Ruflo's own refresh regenerates the helper, then re-injects the footer. `ak` never writes the version. If Ruflo's refresh cannot run (`.claude/helpers/.LOCKED` or `RUFLO_HELPERS_LOCKED`), edit `let ver` in that file to the installed version or lower. A version newer than `ak status` can also come from a newer Ruflo copy the helper finds, such as the Claude plugin marketplace checkout. That is Ruflo's own choice and `ak` leaves it alone |
 | Codex's native status line did not change | Codex reads the user-wide setting when a session starts; an existing TUI may not hot-reload it | Exit and start a new Codex session; inspect ownership with `ak x statusline status` and drift with `ak status` |
 | The right side of Codex's status line is missing | Codex has one width-constrained native line | Widen the terminal or choose the compact preset with `ak x statusline codex native` |
 | Want the rich Ruflo/SONA/AQE display inside Codex | Codex currently accepts built-in status-line fields only, not a command-backed renderer | Keep the rich footer in Claude Code; see [Managed Codex status line](CODEX-STATUSLINE.md) for the current boundary |
 | Too many `⚙` daemons / stale daemons | One daemon per active project is normal (local-only workers, $0). Stale = workspace deleted or past the 12h TTL | `ak x daemon-gc --kill`; `sync` also reaps (and verifies the pid really is a ruflo daemon before killing) |
-| `status` warns that the memory backup is old, or `daemons` says none runs for this project | Ruflo backs up and distills project memory only inside the project's daemon, which ends itself after 12 hours. Ruflo's start-on-use is off when `.claude/settings.json` has `claudeFlow.daemon.autoStart: false` (`ruflo init` writes it; `ak setup` keeps it) | Run `ruflo daemon start` in the project root, or `ruflo memory backup` for a one-off copy; see [Memory backup and distillation](#memory-backup-and-distillation) |
+| `status` warns that the memory backup is old, or `daemons` says none runs for this project | Ruflo backs up and distills project memory only inside the project's daemon, which ends itself after 12 hours. Ruflo starts it again on the next `ruflo` command unless start-on-use is off (`claudeFlow.daemon.autoStart: false` in `.claude/settings.json`, which `ruflo init` writes) | `ak sync` turns start-on-use on unless `kit.json` has `rufloDaemon.autoStart: false`. Otherwise run `ruflo daemon start` in the project root, or `ruflo memory backup` for a one-off copy; see [Memory backup and distillation](#memory-backup-and-distillation) |
+| `daemons` warns that the daemon is running but deferred distillation or backup | The daemon skips a job while CPU load or free memory is past its threshold. On macOS it undercounts free memory ([ruvnet/ruflo#2935](https://github.com/ruvnet/ruflo/issues/2935)) | On macOS in a Ruflo repository, `ak sync` sets the threshold in `.claude-flow/config.json` and restarts the daemon. When that file is unreadable or holds your own value, or on other systems, the row is a manual step: set the flat key it names in that file, then run `ruflo daemon stop` and `ruflo daemon start` |
+| `daemons` warns that ak-managed daemon settings differ | The installed Ruflo needs different keys in `.claude-flow/config.json` (after an upgrade, or on a new project), or `ruflo init` turned start-on-use off again | `ak sync` |
 | `status` warns that `claude-flow.config.json` (or `.claude-flow/config.json`) points Ruflo memory away from the entries in `.swarm` | A command that saves Ruflo settings (`ruflo providers configure`, `ruflo config set`) created that file from Ruflo's defaults, whose `memory.persistPath` is `./data/memory` ([ruvnet/ruflo#3193](https://github.com/ruvnet/ruflo/issues/3193)). The MCP store and any `ruflo` command without ak's pin now look there | Set `memory.persistPath` to `".swarm"` in the file `status` names, or remove the key. `ak` does not edit a Ruflo configuration it did not write. `ak setup` and `ak sync` pin `.swarm` before registering providers, so they do not cause this |
 | Want to change which MCP tool families are callable | Exclusions are `permissions.deny` rules, persisted in kit.json | `ak x mcp pick` (re-runnable); `x mcp status` shows the inventory; `x mcp off` unregisters |
 | `status` says a legacy `ruflo`-keyed MCP registration is preserved | The entry is not the `ruflo mcp start` registration agentic-kit wrote (another path, `ruflo mcp`, a custom env key, or a project/local scope), so `ak sync` leaves it alone. With `claude-flow` also registered, Claude loads the Ruflo tools twice | Inspect it with `claude mcp get ruflo`, then run the command `status` prints (for example `claude mcp remove ruflo -s user`) if you don't need it |
@@ -66,7 +72,7 @@ ak sync             # apply it
 | `status` says an external `agent-browser` is outside Ruflo's range | You installed a newer `agent-browser` yourself. ak never replaces a user-managed install, so `sync` cannot clear this, and Ruflo's browser tools may not work with that version | Install a Ruflo-compatible `agent-browser` 0.27.x yourself, or set `agentBrowser: false` in `~/.config/agentic-kit/kit.json` to stop ak managing the executor (Ruflo MCP then no longer gets ak's trusted browser config or readiness checks) |
 | `status` lists a stray memory store | A tool wrote a store where this project's hosts do not read it, usually because it ran in another folder. ak only reports it | Nothing breaks. To keep its rows, inspect it read-only first; see [Stray memory stores](#stray-memory-stores) |
 | `status` shows a `memory-pin` warning | `CLAUDE_FLOW_DB_PATH` is pinned to a dead or foreign path, so every memory op targets the wrong DB ("Database not initialized" beside a healthy in-repo DB). The pin may be deliberate, so `sync` never touches it | repoint (or remove) the pin in `.claude/settings.local.json` `env` |
-| MCP tool governance stays `unknown` | Ruflo 3.44.0 and earlier do not route stdio MCP tool calls through their policy enforcer, so no audit records are written even though ak wrote the policy file and set `RUFLO_MCP_ENFORCE_POLICY=1` | Nothing to fix on your side; the component confirms once ruflo wires enforcement (ADR-0058 upstream request 6). A project whose `.harness/mcp-policy.json` is invalid shows `mcpGovernance: blocked` instead: restore a valid, ak-written file and run `ak sync`, which also removes the enforcement variable for that project until the file is fixed |
+| MCP tool governance stays `unknown` | No Ruflo MCP tool call was audited in the last 24 hours. Ruflo below 3.46.0 does not route stdio MCP tool calls through its policy enforcer, so no audit records are written there even though ak wrote the policy file and set `RUFLO_MCP_ENFORCE_POLICY=1` | Use a Ruflo MCP tool in the project; on Ruflo below 3.46.0 run `ak sync` to upgrade. A project whose `.harness/mcp-policy.json` is invalid shows `mcpGovernance: blocked` instead: restore a valid, ak-written file and run `ak sync`, which also removes the enforcement variable for that project until the file is fixed |
 | A [ruflo component](MANAGED-TOOLS.md#managed-ruflo-components) stays `applied, not verified` | Claude Code, Codex, and OpenCode read their environment only at process start-up, so a change setup or sync just made has not reached a running session yet | Restart Claude Code, Codex, and OpenCode, then run `ak status --refresh` to re-collect evidence with the new environment in effect |
 | Want to run `ak sync` but Claude/Codex/OpenCode sessions are open in other terminals | Upgrade-bearing syncs stop **all** ruflo daemons machine-wide and swap the global npm trees live sessions execute hooks/statusline/MCP calls from; even a no-upgrade sync can repair configuration or missing dependencies | `ak sync --dry-run` first; a `versions` row means idle the other sessions or use `ak sync --no-upgrade` (or `ak sync --skip versions` to hold back only the package upgrades); see [Running `ak sync` while sessions are live](UPGRADING.md#running-ak-sync-while-sessions-are-live) |
 | Suspicious token burn | Background automation vs interactive usage | ask Claude to run the **ruflo-token-audit** skill (deployed by `setup`) |
@@ -320,11 +326,23 @@ reason a store gets large. A file with no memory table yet is reported as empty.
 Some folders never get a store: the filesystem root, your home folder itself, a
 temporary root such as `/tmp`, and folders that belong to a tool (`~/.codex`,
 `~/.claude`, `~/.config`, `~/.local`, `~/.cache`, `~/Library/Application Support`,
-`%APPDATA%`). Codex often starts in one of these. Its Ruflo launcher (`ak x ruflo-mcp`)
-then uses one user-level store, `~/.claude-flow/memory`. Run from such a folder,
-`ak status` names that store instead of a project store. From anywhere, it reports
-the user-level store once it exists. Claude's own Ruflo registration does not use
-the launcher and is unchanged.
+`%APPDATA%`). Codex often starts in one of these. The Ruflo launcher that Claude Code
+and Codex both start (`ak x ruflo-mcp`) then uses one user-level store,
+`~/.claude-flow/memory`. Run from such a folder, `ak status` names that store instead
+of a project store. From anywhere, it reports the user-level store once it exists.
+
+### Old setup probe rows
+
+Earlier `ak setup` runs could leave rows with keys like `_setup/verify-12345-1700000000000`
+(namespace `_setup`, content `setup-verify`) in a store. Ruflo copies each write into
+`agentdb-memory.db` as well, and its own `memory delete` leaves that copy
+([ruvnet/ruflo#3450](https://github.com/ruvnet/ruflo/issues/3450)). `ak status` warns
+with the count per store, for the current project and the user-level store. `ak sync`
+backs up each affected file under `~/.local/state/agentic-kit/memory-probe-cleanup/backups/`
+(`%LOCALAPPDATA%\agentic-kit\memory-probe-cleanup\backups\` on Windows; with `VACUUM INTO`), deletes exactly those rows from both files, writes a receipt beside
+the backups, and records the store in `kit.json` so it never cleans it twice.
+`ak sync --dry-run` shows the counts first. Rows in other projects are cleaned when you
+run `ak sync` there.
 
 ### Stray memory stores
 
@@ -338,7 +356,7 @@ each one by owner, for information only. ak never moves, merges or deletes them.
 | `./agentdb.rvf` | AgentDB's RVF backend, which defaults to the working directory |
 | `./ruvector.db` | RuVector's default store (`ruvector mcp start`; `ruflo memory init` also creates one) |
 | A `.agentic-qe/` below the project root | AQE resolves a relative `AQE_MEMORY_PATH` against the folder a command or hook ran in |
-| `~/.swarm`, or `.swarm` folders under `~/.codex/.chatgpt-projects/` (reported from any project) | Ruflo ran with your home folder or a Codex ChatGPT project folder as its working directory, before Codex's launcher used the user-level store there |
+| `~/.swarm`, or `.swarm` folders under `~/.codex/.chatgpt-projects/` (reported from any project) | Ruflo ran with your home folder or a Codex ChatGPT project folder as its working directory, before ak's launcher used the user-level store there |
 
 Ruflo's rotated backups in `.swarm/backups/` are not strays. The search skips
 `node_modules`, `.git` and the contents of dot folders such as `.claude/worktrees`,
@@ -358,12 +376,30 @@ from the files Ruflo writes in `.claude-flow/metrics/` and the newest snapshot i
   runs for the project. A failed attempt is always a warning.
 - An old distillation is information only. A failed or corrupt run is a warning.
 - The `daemons` row is information, not ok, when the project has memory and no
-  daemon, and it names the setting that stops Ruflo starting one on use.
+  daemon. It says Ruflo starts one on the next `ruflo` command, or names the
+  setting that stops it.
+- The `daemons` row warns when a running daemon deferred backup or distillation
+  and has not run it since.
 
-The daemon ends itself after 12 hours, sooner if its workers stop running. `ak setup`
-starts one, but Ruflo's start-on-use is off in a project set up by `ruflo init` or
-`ak setup` (`claudeFlow.daemon.autoStart: false` in `.claude/settings.json`). Backups
-therefore stop within a day of setup unless you start the daemon again:
+The daemon ends itself after 12 hours. Ruflo starts a new one on the next `ruflo`
+command in the project unless start-on-use is off. `ruflo init` turns it off
+(`claudeFlow.daemon.autoStart: false` in `.claude/settings.json`); `ak setup` and
+`ak sync` turn it back on and keep the old value for `ak uninstall`. They also
+write the flat keys Ruflo's daemon needs in `.claude-flow/config.json`: a free-memory
+floor of 0 on macOS, where Ruflo undercounts free memory
+([ruvnet/ruflo#2935](https://github.com/ruvnet/ruflo/issues/2935)), and
+`daemon.idleSecs: 0` on Ruflo older than 3.46.0, whose daemon ended itself early
+([ruvnet/ruflo#3194](https://github.com/ruvnet/ruflo/issues/3194)). ak never uses
+`ruflo config set` for these. A file that is not a JSON object, or a key that holds your
+own value, is left alone, and `ak status` names the key to set yourself. ak writes these keys
+only in a repository Ruflo already treats as a project (it has `.swarm/memory.db`, a Ruflo
+config file, a `claudeFlow` block in `.claude/settings.json`, or a Ruflo server in `.mcp.json`),
+never in one that has just an empty `.claude-flow/` folder, since the file would make Ruflo
+start a daemon there.
+
+To leave start-on-use as Ruflo set it, add `"rufloDaemon": { "autoStart": false }`
+to `kit.json` and run `ak sync`; it puts back a value it changed. You can always
+start the daemon or take a backup yourself:
 
 ```bash
 ruflo daemon start          # in the project root; runs both workers until it ends

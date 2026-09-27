@@ -1,5 +1,5 @@
 // Ruflo memory outside any project (audit 2026-09-26 Addendum 2, problem 2).
-// Codex's launcher (`ak x ruflo-mcp`) sends a session started at the
+// ak's launcher (`ak x ruflo-mcp`, used by Claude Code and Codex) sends a session started at the
 // filesystem root, the home folder, a temporary root or inside a tool's own
 // folder to ONE user-level store (paths.userMemoryDir). This section reports
 // that store when it exists, and the stray stores such sessions left before:
@@ -8,7 +8,7 @@
 import * as paths from '../../../lib/paths.mjs';
 import { findUserStrayStores, memoryDirStatus } from '../../../lib/project-memory.mjs';
 import { homeRelative } from '../../../lib/ruflo-memory.mjs';
-import { formatBytes, storeMessage } from './project-memory.mjs';
+import { formatBytes, probeRowsRow, storeMessage } from './project-memory.mjs';
 import { row } from '../row.mjs';
 
 function strayRow(found, home, userDir) {
@@ -25,22 +25,25 @@ function strayRow(found, home, userDir) {
   const count = (atHome ? 1 : 0) + codex.length;
   const them = count === 1 ? 'it' : 'them';
   return row('memory', 'info', `${count} stray Ruflo store${count === 1 ? '' : 's'} outside any project: ${parts.join(' and ')}. `
-    + `Ruflo ran with those folders as its working directory; Codex's launcher now uses ${homeRelative(userDir, home)} there instead. `
+    + `Ruflo ran with those folders as its working directory; ak's launcher now uses ${homeRelative(userDir, home)} there instead. `
     + `ak reports ${them} only and leaves ${them} in place`
     + (found.complete ? '' : '; only the first 500 Codex project folders were checked'));
 }
 
 export default {
   id: 'user-memory',
-  async collect({ home = paths.home, env = process.env } = {}) {
+  /** @param {{ home?: string, env?: NodeJS.ProcessEnv, cfg?: any }} [ctx] */
+  async collect({ home = paths.home, env = process.env, cfg = undefined } = {}) {
     const rows = [];
     try {
       const dir = paths.userMemoryDir(home);
       for (const store of memoryDirStatus(dir).stores.filter((candidate) => candidate.present)) {
         rows.push(row('memory', 'info', store.readable
-          ? `user-level store ${dir} (Codex's Ruflo launcher outside projects): ${storeMessage(store)}`
+          ? `user-level store ${dir} (Claude Code's and Codex's Ruflo launcher outside projects): ${storeMessage(store)}`
           : `user-level store ${store.file} is unreadable; existing-corpus access unverified`));
       }
+      const probes = probeRowsRow(dir, cfg);
+      if (probes) rows.push(probes);
       const found = findUserStrayStores({ home, codexHome: env.CODEX_HOME || undefined });
       const stray = strayRow(found, home, dir);
       if (stray) rows.push(stray);

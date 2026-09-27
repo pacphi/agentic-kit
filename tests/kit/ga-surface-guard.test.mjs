@@ -231,7 +231,8 @@ test('GA-amended ADRs carry living-plan metadata', () => {
   const adrDir = path.join(ROOT, 'docs', 'adr');
   for (const file of markdownFiles(adrDir)) {
     if (file.endsWith(`${path.sep}README.md`)) continue;
-    const text = fs.readFileSync(file, 'utf8');
+    // CRLF-safe: a Windows checkout adds one character per line to the header.
+    const text = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
     if (!/ADR-0020|0020-ga-stable-surfaces/.test(text.slice(0, 1_200))) continue;
     assert.match(text.slice(0, 1_200), /- \*\*Updated:\*\* \d{4}-\d{2}-\d{2}/,
       `${path.relative(ROOT, file)} needs an Updated date`);

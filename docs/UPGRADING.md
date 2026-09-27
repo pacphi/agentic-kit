@@ -48,6 +48,32 @@ old hosts and origins, so the Footprint snapshot schema advances to v8. This bui
 snapshot as unreadable until you run **Full scan** in System or `ak system --deep`. It is never
 shown under the new rule. See [ADR-0060](adr/0060-session-surface-initiator-and-product-names.md) §3.
 
+## 2026-09-27: Ruflo support window
+
+ak supports the newest six Ruflo minor versions, and never fewer than the minors released in the
+last 30 days. The oldest supported minor is the window's floor (for example `3.39.0`). `ak status`
+shows a `versions` row for it:
+
+- **inside the support window**: your Ruflo is supported; the row names the floor and when ak last
+  read Ruflo's release dates.
+- **unsupported**: your Ruflo is below the floor. ak's workarounds for Ruflo defects fixed before
+  the floor are gone, so an older Ruflo may misbehave. Run `ak sync` to upgrade it.
+- **not yet known**: ak has not read Ruflo's release dates yet. Run `ak sync`.
+
+`ak status` never looks the dates up itself. A plain `ak sync` reads them from npm and remembers them
+in `kit.json` (`versionCheck.rufloMinors`); `ak sync --dry-run` and `ak sync --no-upgrade` do not.
+
+## 2026-09-27: ak keeps its MCP policy file out of git
+
+In a Ruflo repository where MCP tool governance is on, the next `ak sync` or `ak setup --project`
+adds two lines to the repository's `.git/info/exclude`: `# agentic-kit` and
+`/.harness/mcp-policy.json`. git then ignores the policy file ak writes. No tracked file changes:
+ak never edits `.gitignore` and never ignores the rest of `.harness/`. If you already committed
+ak's policy file, the line does not untrack it; run `git rm --cached .harness/mcp-policy.json` if
+you want it out. When ak removes its policy file (governance turned off, or `ak uninstall`), it
+removes the two lines too; a policy file you edited is yours, so ak leaves it and the lines. On Ruflo 3.46.0
+and newer the policy is enforced on the stdio MCP launches, so calls beyond the cap are refused.
+
 ## 2026-09-26: `ak sync`'s exit code ignores fixes you do by hand
 
 `ak sync` now exits 0 when everything it can repair has converged, even if a row whose fix you
@@ -73,6 +99,23 @@ rest. A Ruflo upgrade or reinstall replaces the edited files, and ak then forget
 made by earlier releases have no receipt: ak cannot show or restore them. Reinstall Ruflo if you
 want its shipped files back, then run `ak sync`.
 
+## 2026-09-27: Claude Code's Ruflo MCP starts through ak's launcher
+
+The next `ak sync` (or `ak setup`) replaces ak's user-scope `claude-flow` registration
+(`ruflo mcp start`) with `ak x ruflo-mcp --host claude`, the launcher Codex already uses. Claude
+Code sessions then use the same store as Codex: the repository's `.swarm` from any subfolder, and
+the user-level store `~/.claude-flow/memory` from your home folder, a temporary root or a tool's
+own folder. Ruflo also reads the repository's MCP policy file from a subfolder. A registration you
+wrote yourself (another command, scope or environment key) is left alone. The launcher must be on
+the `PATH` Claude Code starts with, and that `ak` must be a build whose launcher takes `--host`
+(ak checks `ak x ruflo-mcp --help`). If `ak` is not found, or it is an older install whose launcher
+has no `--host` option, sync keeps the old registration and says so, and `ak status` lists the step as yours: put `ak` on `PATH` (or update
+it), then run `ak sync`. Restart Claude Code to pick up the new registration.
+
+The same sync removes ak's old setup probe rows (`_setup/verify-…`) once, from both memory files of
+the current project and of the user-level store, after backing each file up (see
+[TROUBLESHOOTING](TROUBLESHOOTING.md#old-setup-probe-rows)).
+
 ## 2026-09-26: Codex's Ruflo memory outside a project
 
 Codex's Ruflo launcher (`ak x ruflo-mcp`) no longer creates a `.swarm` store at the filesystem
@@ -82,7 +125,7 @@ Sessions started there share one user-level store, `~/.claude-flow/memory`. Repo
 work folders keep their own `.swarm` as before. Earlier sessions may have left `~/.swarm` or
 `.swarm` folders under `~/.codex/.chatgpt-projects/`. `ak status` lists them for information and
 never moves or deletes them; inspect one read-only before you remove it. Restart Codex for a
-running Ruflo server to pick up the new location. Claude's own Ruflo registration is unchanged.
+running Ruflo server to pick up the new location.
 
 ## 2026-09-26: Registering a provider keeps Ruflo memory in `.swarm`
 

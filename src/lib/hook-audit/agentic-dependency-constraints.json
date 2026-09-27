@@ -33,7 +33,13 @@
       "evidenceRequired": ["installed-version", "affected-range", "minimal-reproduction", "expected-versus-observed", "artifact-digest"],
       "workaroundPolicy": "bounded, receipt-owned, version-gated, and never applied to generated runtime caches",
       "retestPolicy": "weekly, on observed release, and before managed upgrade",
-      "removalProof": "released artifact passes the host-neutral hook and lifecycle conformance suite"
+      "removalProof": "released artifact passes the host-neutral hook and lifecycle conformance suite",
+      "supportWindow": {
+        "newestMinors": 6,
+        "minDays": 30,
+        "basis": "first npm publish of each minor",
+        "unsupported": "ak status reports the installed Ruflo as unsupported and points to ak sync"
+      }
     },
     {
       "dependency": "agentic-qe",
@@ -168,14 +174,14 @@
       "id": "ruflo-3.38.21-init-suppression-flags",
       "dependency": "ruflo",
       "kind": "upstream-defect",
-      "affected": ["3.38.21"],
+      "affected": ["3.38.21", "3.39.x", "3.40.x", "3.41.x", "3.42.x", "3.43.x", "3.44.x", "3.45.x"],
       "issue": "https://github.com/ruvnet/ruflo/issues/3167",
       "issueState": "closed-at-last-verification",
       "primaryEvidence": "fresh empty-directory reproduction plus installed wrapper/init-handler artifact digests",
       "strategy": "retain the declared no-codex-detect/no-skills-sh flags and independently suppress optional projections with scripted format plus RUFLO_NO_SKILLS_SH=1; preserve unreceipted existing skills",
-      "versionGate": "apply to Ruflo 3.38.21; re-run the empty-directory filesystem proof for every later release",
+      "versionGate": "apply to Ruflo below 3.46.0 (flags honoured from 3.46.0, PR #3434)",
       "expiryPolicy": "retest within 14 days and on every Ruflo release",
-      "nextRetestAt": "2026-10-03",
+      "nextRetestAt": "2026-10-11",
       "sunsetWhen": "a released Ruflo build honors both CLI flags independently and together through the public ruflo wrapper",
       "notification": {
         "status": "published",
@@ -1004,16 +1010,17 @@
       "mapping": "mapped",
       "kitImpact": {
         "refs": ["closed-upstream review 2026-09-26"],
-        "files": ["docs/TROUBLESHOOTING.md", "src/commands/status/sections/security.mjs", "src/commands/x/verify.mjs", "src/lib/heal.mjs", "src/lib/natives.mjs", "src/templates/statusline-footer.cjs"]
+        "files": ["docs/TROUBLESHOOTING.md", "src/commands/about.mjs", "src/commands/status/sections/security.mjs", "src/commands/x/verify.mjs", "src/lib/heal.mjs", "src/lib/natives.mjs", "src/templates/statusline-footer.cjs"]
       },
-      "adjustment": "fix(security): stop reporting defend as non-functional when the installed CLI ships the built-in engine (3.32.2+). The status row, ak x verify, the footer alarm and the about text become warnings; keep healAidefence for the aidefence_* MCP tools and correct its detail text and docs/TROUBLESHOOTING.md.",
-      "status": "released",
+      "adjustment": "None: ak detects the built-in engine (security/builtin-aidefence.js, 3.32.2+) and reports a missing aidefence as a warning (status, ak x verify, about) with no footer alarm; healAidefence stays for adaptive learning and the aidefence_* MCP tools.",
+      "status": "adopted",
       "constraintIds": [],
       "history": [
         { "date": "2026-07-14", "event": "filed" },
         { "date": "2026-07-17", "event": "closed", "note": "completed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.32.2; the ak change is pending" }
+        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.32.2; the ak change is pending" },
+        { "date": "2026-09-27", "event": "adopted", "note": "status, verify, about and the footer recognise the built-in engine (confirmed in the installed 3.46.1 CLI: commands/security.js falls back to security/builtin-aidefence.js)" }
       ]
     },
     {
@@ -1027,16 +1034,17 @@
       "mapping": "mapped",
       "kitImpact": {
         "refs": ["closed-upstream review 2026-09-26"],
-        "files": ["src/lib/statusline.mjs", "src/templates/statusline-footer.cjs"]
+        "files": ["src/lib/statusline.mjs"]
       },
       "adjustment": "refactor(statusline): remove the retired CVE-counter overlay (SEC_WRAP, its gate, the status row, rufloLocalSecurity and rufloHonestInsight); keep SEC_WRAP_STRIP for one release. Conditional on declaring a Ruflo floor >= 3.32.2.",
-      "status": "released",
+      "status": "adopted",
       "constraintIds": [],
       "history": [
         { "date": "2026-07-16", "event": "filed" },
         { "date": "2026-07-17", "event": "closed", "note": "completed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.32.2; the ak change is pending" }
+        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.32.2; the ak change is pending" },
+        { "date": "2026-09-27", "event": "adopted", "note": "overlay removed; SEC_WRAP_STRIP kept one release; floor 3.39.0 >= 3.32.2; removal proof: statusline suites pass and a 3.46.1 statusline helper carrying an old block is stripped, passes node --check and converges on the second run" }
       ]
     },
     {
@@ -1097,7 +1105,8 @@
       "constraintIds": [],
       "history": [
         { "date": "2026-07-31", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "hosted probe run 36333572972 on Ruflo 3.46.1: 10/10 aborts by default and 10/10 with single-threaded ONNX Runtime sessions; mitigation disproven (issuecomment-5857781254)" }
       ]
     },
     {
@@ -1190,13 +1199,14 @@
         "files": ["src/commands/status/sections/scaffold-agents.mjs", "src/lib/scaffold.mjs"]
       },
       "adjustment": "fix(status): scaffold-agents advice names ruflo >= 3.38.2 instead of \"ruflo#2986 pending\"; keep the file probe and the delegation.",
-      "status": "released",
+      "status": "adopted",
       "constraintIds": [],
       "history": [
         { "date": "2026-08-12", "event": "filed" },
         { "date": "2026-08-12", "event": "closed", "note": "completed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.38.2; the ak change is pending" }
+        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.38.2; the ak change is pending" },
+        { "date": "2026-09-27", "event": "adopted", "note": "same ak change as ruvnet/ruflo#2986: the status note names 3.38.2, below the support window; removal proof: tests/kit/scaffold.test.mjs" }
       ]
     },
     {
@@ -1213,13 +1223,14 @@
         "files": ["src/commands/status/sections/scaffold-agents.mjs", "src/commands/sync.mjs", "src/lib/scaffold.mjs"]
       },
       "adjustment": "fix(status): scaffold-agents advice names ruflo >= 3.38.2 instead of \"ruflo#2986 pending\"; keep the file probe and the delegation.",
-      "status": "released",
+      "status": "adopted",
       "constraintIds": [],
       "history": [
         { "date": "2026-08-12", "event": "filed" },
         { "date": "2026-08-12", "event": "closed", "note": "merged" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.38.2; the ak change is pending" }
+        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.38.2; the ak change is pending" },
+        { "date": "2026-09-27", "event": "adopted", "note": "status note says the fix is in 3.38.2, below the support window (floor 3.39.0), and points to ak sync; file probe and delegation kept; removal proof: tests/kit/scaffold.test.mjs" }
       ]
     },
     {
@@ -1288,15 +1299,18 @@
       "kind": "issue",
       "title": "ADR-122 Phase 0 is marked shipped but ruflo doctor never reports agent-browser",
       "dependency": "ruflo",
-      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
-      "mapping": "unmapped",
-      "kitImpact": null,
-      "adjustment": null,
-      "status": "watching",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": "3.46.0" } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["no ak workaround; doctor row since 3.46.0 (PR #3441)"], "files": [] },
+      "adjustment": "none",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-02", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "closed", "note": "completed by PR #3441" },
+        { "date": "2026-09-26", "event": "released", "note": "PR #3441 in 3.46.0 (commands/doctor.js reports agent-browser CLI (ADR-122) in the @claude-flow/cli 3.46.0 tarball and the installed 3.46.1)" },
+        { "date": "2026-09-27", "event": "retired", "note": "ak carries no workaround; nothing in ak waits on it" }
       ]
     },
     {
@@ -1306,18 +1320,21 @@
       "kind": "issue",
       "title": "ruflo init 3.38.21 ignores --no-codex-detect and --no-skills-sh",
       "dependency": "ruflo",
-      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": "3.46.0" } },
       "mapping": "mapped",
       "kitImpact": {
         "refs": ["constraint ruflo-3.38.21-init-suppression-flags"],
-        "files": ["docs/HOST-SUPPORT.md", "docs/SETUP.md"]
+        "files": ["docs/HOST-SUPPORT.md", "docs/SETUP.md", "src/commands/setup.mjs"]
       },
-      "adjustment": "Once a released Ruflo honours --no-codex-detect and --no-skills-sh through the public wrapper, drop the scripted-format and RUFLO_NO_SKILLS_SH suppression and sunset the constraint.",
-      "status": "watching",
+      "adjustment": "ak setup passes the flags alone on Ruflo 3.46.0 and newer (rufloProjectInitInvocation) and keeps the scripted-format and RUFLO_NO_SKILLS_SH suppression below 3.46.0; the constraint sunsets when the support-window floor reaches 3.46.0.",
+      "status": "adopted",
       "constraintIds": ["ruflo-3.38.21-init-suppression-flags"],
       "history": [
         { "date": "2026-09-02", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "closed", "note": "completed by PR #3434" },
+        { "date": "2026-09-26", "event": "released", "note": "PR #3434 in 3.46.0 (confirmed in the @claude-flow/cli 3.46.0 tarball: commands/init.js reads codexDetect/skillsSh false)" },
+        { "date": "2026-09-27", "event": "adopted", "note": "removal proof on 3.46.1 through the public ruflo wrapper, one disposable HOME and empty folder each: --no-codex-detect alone left no .codex/ or AGENTS.md; --no-skills-sh alone left no .agents/skills/ruflo; both together left neither; a control run without them created both" }
       ]
     },
     {
@@ -1331,14 +1348,15 @@
       "mapping": "mapped",
       "kitImpact": {
         "refs": ["plan 5.1, audit 2026-09-26 (docs/audits/2026-09-26-issues-237-238-239-verification-and-decisions.md) addendum 2: memory pin before provider registration"],
-        "files": []
+        "files": ["src/commands/status/sections/project-memory.mjs", "src/lib/providers.mjs", "src/lib/ruflo-memory-config.mjs"]
       },
       "adjustment": "Once a released Ruflo honours the memory settings in .claude-flow/config.yaml, re-evaluate the memory pin written before provider registration.",
       "status": "watching",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-26", "event": "commented" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "released", "note": "PR #3420 in 3.46.0: the daemon parses config.yaml; memory settings in config.yaml are still not read (memory-initializer.js getMemoryRoot reads claude-flow.config.json and .claude-flow/config.json only, rechecked on 3.46.1), so ak keeps the memory pin; the issue stays open" }
       ]
     },
     {
@@ -1387,15 +1405,18 @@
       "kind": "issue",
       "title": "MCP policy enforcement (RUFLO_MCP_ENFORCE_POLICY / .harness/mcp-policy.json) is not reached by the stdio MCP entry points (follow-up to #3138)",
       "dependency": "ruflo",
-      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": "3.46.0" } },
       "mapping": "mapped",
-      "kitImpact": { "refs": ["ADR-0058 section 8, request 6"], "files": [] },
-      "adjustment": "Once a released Ruflo enforces MCP policy on stdio tools/call, ADR-0058 can report governance as enforced instead of inert on stdio entry points.",
-      "status": "watching",
+      "kitImpact": { "refs": ["ADR-0058 section 8, request 6"], "files": ["src/lib/ruflo-components/policy.mjs", "src/lib/ruflo-components/snapshot.mjs", "src/lib/ruflo-memory.mjs"] },
+      "adjustment": "None: ak reports governance as enforced on stdio from Ruflo 3.46.0 and keeps the not-wired explanation below it.",
+      "status": "adopted",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-24", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "closed", "note": "completed by PR #3423" },
+        { "date": "2026-09-26", "event": "released", "note": "PR #3423 in 3.46.0 (evaluateToolCall in bin/cli.js and bin/mcp-server.js of the @claude-flow/cli 3.46.0 tarball; 3.45.0 has none)" },
+        { "date": "2026-09-27", "event": "adopted", "note": "live proof on 3.46.1: ruflo mcp start with RUFLO_MCP_ENFORCE_POLICY=1 and ak's policy (cap 2) allowed two memory_stats calls, refused the third, and audited all three; from a subfolder with no .harness/ every call was refused (fails closed)" }
       ]
     },
     {
@@ -1590,13 +1611,14 @@
       "dependency": "ruflo",
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
       "mapping": "mapped",
-      "kitImpact": { "refs": ["lane G2: purge both memory stores"], "files": [] },
-      "adjustment": "Once a released Ruflo purges the AgentDB mirror with memory purge/delete, stop purging both stores from ak.",
+      "kitImpact": { "refs": ["lane G2: purge both memory stores", "B3-D2: one-time sync cleanup of ak's old setup probe rows from both stores"], "files": ["src/lib/memory-probe-cleanup.mjs", "src/commands/sync.mjs", "src/commands/status/sections/project-memory.mjs"] },
+      "adjustment": "Once a released Ruflo purges the AgentDB mirror with memory purge/delete, stop purging both stores from ak. The one-time probe-row cleanup (B3-D2) stays: it removes rows older ak versions left behind.",
       "status": "watching",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-26", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "watching", "note": "re-checked: still reproduces on 3.46.1 (memory delete tombstones memory.db only; the agentdb-memory.db mirror stays active)" }
       ]
     },
     {
@@ -1608,13 +1630,14 @@
       "dependency": "ruflo",
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
       "mapping": "mapped",
-      "kitImpact": { "refs": ["plan Branch 3 item 4: defend reporting tells a detection from the post-detection crash"], "files": [] },
-      "adjustment": "Once a released Ruflo prints every detected threat and exits with its own verdict, ak x verify security and the security status row read defend's exit code as the detection verdict instead of treating a crash after the header line as a detection.",
+      "kitImpact": { "refs": ["plan Branch 3 item 4: defend reporting tells a detection from the post-detection crash"], "files": ["src/commands/x/verify.mjs"] },
+      "adjustment": "verify reads `-o json`; text-mode crash is reported as a crash. Once a released Ruflo prints every detected threat and exits with its own verdict in text mode, nothing further is needed in ak.",
       "status": "watching",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-26", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "watching", "note": "re-checked: still reproduces on 3.46.1 (text mode: 2 threat(s) detected, then [ERROR] Cannot read properties of undefined (reading 'color'), exit 1); ak x verify security now reads the -o json verdict" }
       ]
     },
     {
@@ -2502,6 +2525,79 @@
         { "date": "2026-09-26", "event": "closed", "note": "completed (PR #3431)" },
         { "date": "2026-09-27", "event": "registered" },
         { "date": "2026-09-27", "event": "retired", "note": "closed upstream; cited by pacphi/agentic-kit#213 as context; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#3508",
+      "url": "https://github.com/ruvnet/ruflo/issues/3508",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "Read-only memory route/peek: which stores a cwd resolves to, their rows and last write, without creating anything",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": {"refs": ["investigation rf-route-peek-api (invited on pacphi/agentic-kit#213)"], "files": []},
+      "adjustment": "Once a released Ruflo ships a read-only memory peek, use it for memory health instead of ak reading both store files itself; never poll memory stats or the MCP status tools, which create stores.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "filed" },
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#3509",
+      "url": "https://github.com/ruvnet/ruflo/issues/3509",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "mcp-bridge: opt-in `codex` backend still launches `@openai/codex mcp-server`, which current Codex CLI no longer has",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "filed" },
+        { "date": "2026-09-27", "event": "registered" }
+      ],
+      "note": "Filed as a courtesy: ak never starts the chat-UI MCP bridge and runs Codex through codex exec, so nothing in ak waits on it."
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#753",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/753",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "Witness chain forks when two processes append at once. `append()` reads the tail and inserts it without a transaction, so `aqe audit verify --chain audit` reports BROKEN.",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": {"refs": ["investigation aqe-audit-chain", "Branch 5: stray-store merge runs with no other AQE writer"], "files": []},
+      "adjustment": "Once a released agentic-qe appends to the witness chain atomically, ak no longer needs to stop other AQE writers before merging stray stores.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "filed" },
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#754",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/754",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "RVF pattern index never binds when an embedder endpoint is configured, and `RUVECTOR_USE_RVF_PATTERN_STORE` cannot switch it off",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": {"refs": ["investigation aqe-rvf-flag-vector-space", "Branch 5: embedding verify says embedder verified, not pattern search working"], "files": []},
+      "adjustment": "Once a released agentic-qe binds the pattern index with a configured embedder, ak may report semantic pattern search as working after a live check.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "filed" },
+        { "date": "2026-09-27", "event": "registered" }
       ]
     }
   ]

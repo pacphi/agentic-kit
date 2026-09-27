@@ -184,8 +184,8 @@ memory durability fix, and the funnel toggle — get one card each in Overview >
 shows the state badge beside its plain-language meaning (and the action to take, when one
 applies), the current value and who controls it, an expandable "what it does" with its benefit,
 cost, and how to change it in `kit.json`, and the live evidence behind the state: which picker a
-`hooks route` probe reported, MCP calls audited and refused in the last 24 hours (zero on ruflo
-≤ 3.44.0, which does not yet enforce the policy on stdio launches; see
+`hooks route` probe reported, MCP calls audited and refused in the last 24 hours (zero on Ruflo
+below 3.46.0, which does not enforce the policy on stdio launches; see
 [ADR-0058](adr/0058-managed-ruflo-components.md)), whether the
 learning engine is loaded, or the funnel's deciding source. The panel header repeats the same
 count and ruflo version `ak status` reports, so the two never disagree. Encryption at rest shows

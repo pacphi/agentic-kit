@@ -8,6 +8,7 @@ import path from 'node:path';
 import { run } from '../exec.mjs';
 import { reconcileClaudeComponentEnv, reconcileMemoryPin } from '../claude-env-projection.mjs';
 import { reconcilePolicy } from './policy.mjs';
+import { receiptedDaemonRoots, releaseRufloDaemon } from '../ruflo-daemon-config.mjs';
 import { releaseFunnel, removeTypesafePackage, rufloProjectRoot, receiptedProjectRoots } from './apply.mjs';
 
 const OFF = Object.freeze({
@@ -49,6 +50,22 @@ function releaseProject(cfg, off, root, rufloVersion, lines) {
   return ok;
 }
 
+/** Put back what ak changed for Ruflo's daemon (ruflo-daemon-config.mjs) in
+ *  every receipted project; a project that is gone just drops its receipt. */
+function releaseDaemonSettings(cfg, lines) {
+  const receipts = cfg.rufloDaemon?.receipts ?? {};
+  let ok = true;
+  for (const root of receiptedDaemonRoots(cfg)) {
+    if (!fs.existsSync(root)) { delete receipts[root]; continue; }
+    const r = releaseRufloDaemon(root, receipts);
+    if (!r.ok) {
+      ok = false;
+      lines.push({ level: 'warn', text: `ruflo daemon settings ${root}: not released (${r.reason})` });
+    } else if (r.changed) lines.push({ level: 'ok', text: `ruflo daemon settings restored in ${root}` });
+  }
+  return ok;
+}
+
 /** @param {{cwd?: string, purge?: boolean, rufloVersion?: (string|null), runner?: typeof run, userSettingsFile?: string}} [options] */
 export async function releaseRufloComponents(cfg, options = {}) {
   const { cwd = process.cwd(), purge = false, rufloVersion = null, runner = run, userSettingsFile } = options;
@@ -64,6 +81,7 @@ export async function releaseRufloComponents(cfg, options = {}) {
   const roots = new Set(receiptedProjectRoots(cfg));
   if (here) roots.add(path.resolve(here));
   for (const root of roots) ok = releaseProject(cfg, off, root, rufloVersion, lines) && ok;
+  ok = releaseDaemonSettings(cfg, lines) && ok;
   if ((await releaseFunnel(cfg, { runner })).ok) lines.push({ level: 'info', text: 'funnel returned to ruflo\'s default' });
   if (purge) {
     const pkg = await removeTypesafePackage(cfg, { runner });

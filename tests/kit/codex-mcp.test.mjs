@@ -397,3 +397,11 @@ test('Codex MCP repair refuses symlinked config and preserves a stale generic ba
       'the repair-specific recovery copy captures immediate pre-repair bytes');
   } finally { rm(dir); rm(home); }
 });
+
+test('the launcher is recognised as a Ruflo transport in both host modes, and nothing looser', async () => {
+  const { isRufloMcpTransport } = await import('../../src/lib/ruflo-mcp-transport.mjs');
+  assert.equal(isRufloMcpTransport({ command: 'ak', args: ['x', 'ruflo-mcp'] }), true);
+  assert.equal(isRufloMcpTransport({ command: 'ak', args: ['x', 'ruflo-mcp', '--host', 'claude'] }), true);
+  assert.equal(isRufloMcpTransport({ command: 'ak', args: ['x', 'ruflo-mcp', '--host', 'codex'] }), false);
+  assert.equal(isRufloMcpTransport({ command: 'ak', args: ['x', 'ruflo-mcp', '--host'] }), false);
+});

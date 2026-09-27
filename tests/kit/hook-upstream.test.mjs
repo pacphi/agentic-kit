@@ -76,6 +76,13 @@ test('upstream registry separates valid shape, current evidence, and version app
   assert.match(rufloGuidance.notification.publishedUrl, /issues\/3153#issuecomment-5512219386$/);
 });
 
+test('the #3167 init suppression applies to Ruflo below 3.46.0 only (minor.x ranges)', () => {
+  const applicability = (version) => loadUpstreamConstraints({ file: registryFile, now, observedVersions: { ruflo: version } })
+    .constraints.find((entry) => entry.id === 'ruflo-3.38.21-init-suppression-flags').evidence.applicability;
+  for (const version of ['3.38.21', '3.39.0', '3.42.7', '3.45.0']) assert.equal(applicability(version), 'affected', version);
+  for (const version of ['3.46.0', '3.46.1', '3.4.1', '3.38.20']) assert.equal(applicability(version), 'not-affected', version);
+});
+
 test('future verification dates are invalid rather than falsely current', () => {
   withDocument((document) => {
     document.lastVerifiedAt = '2099-01-01';

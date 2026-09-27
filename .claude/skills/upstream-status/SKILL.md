@@ -41,7 +41,9 @@ dependency policies, constraints, and the `watch` list of upstream threads.
 
    For each item give the id, title, URL and a one-line reason: who replied and when, which
    release, or which ak change is pending. Give "Fixed upstream, not yet released",
-   "Waiting on upstream" and "Unmapped (no ak change recorded)" as counts only, unless asked.
+   "Released, waiting for the support window", "Waiting on upstream" and
+   "Unmapped (no ak change recorded)" as counts only, unless asked. A held item is not
+   dispatched: the oldest Ruflo in the support window (`supportWindow.floor`) predates its fix.
 4. Offer the next actions that fit:
    - Draft a reply to an upstream thread. Show the draft; do not post it.
    - Dispatch a released item: branch `upstream/<id>` from `main`, make the entry's `adjustment`

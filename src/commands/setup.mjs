@@ -14,7 +14,7 @@ import { fixStatusline, bakedVersionManualFix } from '../lib/statusline.mjs';
 import { reconcileGuidance } from '../lib/blocks.mjs';
 import { captureProjectGuidance, reconcileProjectGuidance } from '../lib/project-guidance.mjs';
 import {
-  register as mcpRegister, applyExclusions, registrationStatus, agentBrowserMcpConfigured,
+  register as mcpRegister, applyExclusions, registrationStatus, agentBrowserMcpConfigured, staleAkClaudeFlow,
   codexMcpTopology, codexMcpRepairPlan, repairCodexMcpTopology, legacyRufloRemovalCommands,
 } from '../lib/mcp.mjs';
 import { reconcileCodexMcp } from '../lib/codex-mcp-reconcile.mjs';
@@ -28,7 +28,7 @@ import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
 import { DEJA_VU_TARGETS } from '../lib/deja-vu.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { HOSTS, hostInstallState, installHost, migrateRetiredRoutesInConfig, printActivityRoutingTable, convergeProviderStack, applySetupHostFlags, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
-import { installedVersion } from '../lib/versions.mjs';
+import { cmpVersions, installedVersion } from '../lib/versions.mjs';
 import { aqeInitArguments } from '../lib/aqe-guidance.mjs';
 import { resolveAqeEmbedding } from '../lib/aqe-embedding-config.mjs';
 import { embeddingIntentFromFlags, embeddingSetupDisclosure } from '../lib/aqe-embedding-setup.mjs';
@@ -38,9 +38,11 @@ import * as rb from '../lib/ruvnet-brain.mjs';
 import { ensureAgentBrowser } from '../lib/agent-browser.mjs';
 import { readJson, writeJsonWithBackup } from '../lib/settings.mjs';
 import { findMemoryEntry, removeMemoryProbe } from '../lib/project-memory.mjs';
-import { projectMemoryEnv } from '../lib/ruflo-memory.mjs';
+import { projectMemoryEnv, rufloMemoryLocation } from '../lib/ruflo-memory.mjs';
 import { reconcileMemoryPin } from '../lib/claude-env-projection.mjs';
 import { reconcileRufloComponents } from '../lib/ruflo-components/apply.mjs';
+import { daemonIntent, reconcileRufloDaemon } from '../lib/ruflo-daemon-config.mjs';
+import { installedRoutingVersion } from '../lib/ruflo-memory-contract.mjs';
 import { componentResultReport } from './status/sections/ruflo-components.mjs';
 import {
   setupTrustManifest, trustManifestLines,
@@ -90,7 +92,10 @@ token-audit skill, merges the CLAUDE.md managed blocks, and offers MCP. Project
 scope auto-runs when .git exists in the current directory. Project setup runs
 \`ruflo init --full --force --no-global --no-codex-detect --no-skills-sh\` and
 the AQE initializer while preserving user-authored CLAUDE.md/AGENTS.md content
-and reconciling only sentinel-owned guidance. Details: docs/SETUP.md
+and reconciling only sentinel-owned guidance. Before starting Ruflo's project
+daemon it writes the flat daemon keys the installed Ruflo needs in
+.claude-flow/config.json and turns Ruflo's start-on-use on (kit.json
+rufloDaemon.autoStart: false leaves it alone). Details: docs/SETUP.md
 
 Usage: ak setup [options]
 
@@ -487,27 +492,36 @@ function printComponentResults(components) {
   for (const line of componentResultReport(components)) out[line.level](line.text);
 }
 
-export const RUFLO_PROJECT_INIT_ARGS = Object.freeze([
-  'init', '--full', '--force',
-  // Agentic-kit owns machine guidance and Codex host selection. These Ruflo
-  // escape hatches declare that boundary. --format json is also required on
-  // Ruflo 3.38.21 because its hyphenated boolean flags are registered but not
-  // observed by the init handler; scripted mode independently suppresses the
-  // two optional projections. The env is the second, documented skills.sh
-  // guard and keeps the boundary explicit when upstream fixes flag parsing.
-  '--no-global', '--no-codex-detect', '--no-skills-sh',
-  '--format', 'json',
-]);
+// Agentic-kit owns machine guidance and Codex host selection. These Ruflo
+// escape hatches declare that boundary.
+const RUFLO_INIT_OPT_OUTS = ['init', '--full', '--force', '--no-global', '--no-codex-detect', '--no-skills-sh'];
+// Ruflo honours the opt-out flags from 3.46.0 (ruvnet/ruflo#3167, PR #3434).
+const RUFLO_INIT_FLAGS_HONOURED = '3.46.0';
 
-export const RUFLO_PROJECT_INIT_ENV = Object.freeze({ RUFLO_NO_SKILLS_SH: '1' });
+/**
+ * The `ruflo init` invocation for project setup. From 3.46.0 the flags alone
+ * suffice. Below that (3.38.21 to 3.45.x) the hyphenated boolean flags are
+ * registered but not observed by the init handler, so `--format json`
+ * (scripted mode suppresses the Codex and skills.sh projections) and
+ * RUFLO_NO_SKILLS_SH=1 carry the boundary. An unknown version gets that
+ * older, safer form. Nothing parses init's output, so the format is free to change.
+ * @param {string|null|undefined} rufloVersion
+ * @returns {{ args: string[], env: Record<string, string> }}
+ */
+export function rufloProjectInitInvocation(rufloVersion) {
+  const honoured = typeof rufloVersion === 'string' && /^\d+\.\d+\.\d+/.test(rufloVersion)
+    && cmpVersions(rufloVersion, RUFLO_INIT_FLAGS_HONOURED) >= 0;
+  return honoured
+    ? { args: [...RUFLO_INIT_OPT_OUTS], env: {} }
+    : { args: [...RUFLO_INIT_OPT_OUTS, '--format', 'json'], env: { RUFLO_NO_SKILLS_SH: '1' } };
+}
 
 /** Step 1: initialize Ruflo project assets without overlapping agentic-kit's
  *  machine guidance, Codex adapter, or explicit skill projections. The caller
  *  restores/reconciles project guidance from its pre-init snapshot. */
 async function rufloProjectInit(root, permCtx) {
-  const init = await runCmd('ruflo', [...RUFLO_PROJECT_INIT_ARGS], {
-    cwd: root, timeout: 300_000, env: RUFLO_PROJECT_INIT_ENV,
-  });
+  const { args, env } = rufloProjectInitInvocation(installedRoutingVersion() ?? installedVersion('ruflo'));
+  const init = await runCmd('ruflo', args, { cwd: root, timeout: 300_000, env });
   (init.code === 0 ? ok : fail)('ruflo init --full');
   if (init.code !== 0) return false;
   const rufloUnexpected = removeUndisclosedPermissions(
@@ -557,20 +571,24 @@ async function activateProjectMemoryAndSwarm(root, env) {
     ? ok('swarm initialized (v3-mode)') : warn('ruflo swarm init failed');
 }
 
-/** Step 6: daemon — default-on, local-only workers (AI workers stay opt-in
- *  upstream); defensive: never let Claude Code auto-restart it (issue #3 RC3). */
-async function startProjectDaemon(root) {
-  const d = await runCmd('ruflo', ['daemon', 'start'], { cwd: root, timeout: 60_000 });
+/** Step 6: daemon. Ruflo's memory backup and distillation run only inside a
+ *  project's daemon, so ak writes the managed daemon settings first (the
+ *  daemon reads .claude-flow/config.json once, in its constructor:
+ *  worker-daemon.js:139-144, 3.46.1), turns on Ruflo's start-on-use unless
+ *  kit.json rufloDaemon.autoStart is false, then starts it (local-only
+ *  workers; AI workers stay opt-in upstream). */
+export async function startProjectDaemon(root, {
+  cfg, runner = runCmd, rufloVersion = installedRoutingVersion() ?? installedVersion('ruflo'), platform = process.platform,
+}) {
+  const intent = daemonIntent(cfg);
+  const r = reconcileRufloDaemon(root, { rufloVersion, platform, receipts: intent.receipts, autoStart: intent.autoStart });
+  if (r.config === 'written' || r.config === 'removed') ok(`ruflo daemon settings ${r.config} (.claude-flow/config.json, flat keys)`);
+  else if (r.config === 'user-managed') warn('.claude-flow/config.json is not ak-managed here (unreadable, or a key holds your own value); left as is');
+  if (r.autostart === 'enabled') ok('claudeFlow.daemon.autoStart → true (Ruflo starts the daemon on use; kit.json rufloDaemon.autoStart: false opts out)');
+  const d = await runner('ruflo', ['daemon', 'start'], { cwd: root, timeout: 60_000 });
   if (d.code === 0) {
     ok('daemon started (local-only workers; 12h TTL; AI workers opt-in: RUFLO_DAEMON_AI_WORKERS=1)');
   } else warn('daemon failed to start — try: ruflo daemon start');
-  const projSettingsFile = paths.projectSettings(root);
-  const ps = readJson(projSettingsFile);
-  if (ps?.claudeFlow?.daemon?.autoStart === true) {
-    ps.claudeFlow.daemon.autoStart = false;
-    writeJsonWithBackup(projSettingsFile, ps);
-    ok('claudeFlow.daemon.autoStart → false (explicit start only)');
-  }
 }
 
 /** Step 7: write-verification (store → actual on-disk row, then clean up).
@@ -711,6 +729,14 @@ export async function run_project({
 }) {
   const root = process.cwd();
   heading(`project setup — ${root}`);
+  // B3-D1: the filesystem root, the home folder, a temporary root or a tool's
+  // own folder is not a project: ak's launcher sends Ruflo there to the one
+  // user-level store, so a project init here would only leave stray stores.
+  const location = rufloMemoryLocation(root);
+  if (location.kind === 'user') {
+    fail(`this folder is ${location.reason}; run ak setup from a project folder`);
+    return false;
+  }
   if (!trustDisclosed) discloseSetupTrust(cfg, { project: true });
   if (flags['dry-run']) { info('dry-run: would init, sanitize, pin DB path, activate memory/swarm/daemon, verify, apply managed ruflo components'); return true; }
 
@@ -731,7 +757,8 @@ export async function run_project({
   saveKitConfig(cfg);
   const env = projectMemoryEnv(root);
   await activateProjectMemoryAndSwarm(root, env);
-  await startProjectDaemon(root);
+  await startProjectDaemon(root, { cfg });
+  saveKitConfig(cfg);
   await verifyProjectMemoryWrite(root, env);
   const aqeEnabled = !!(cfg.aqe && !flags['no-aqe']);
   reportProjectGuidance(reconcileProjectGuidance({ root, prior: priorGuidance, aqeEnabled }));
@@ -823,12 +850,17 @@ async function finalizeSetupGuidanceAndMcp(cfg, pkgRoot, flags) {
     flags.reconfigure
     || !existingMcp.claudeFlow
     || !agentBrowserMcpConfigured(existingMcp.effective.claudeFlow, cfg.agentBrowser !== false)
+    || staleAkClaudeFlow(existingMcp.effective.claudeFlow)
   );
   if (wantMcp && await ask('Register the ruflo MCP server at user scope (schemas load on demand)?', true, flags.yes)) {
     const reg = await mcpRegister(cfg);
     if (reg.ok) {
       const { denied } = applyExclusions(cfg.mcp.excludeFamilies ?? []);
       ok(`MCP registered${denied ? ` (${denied} tool(s) denied per kit.json)` : ''} — exclude families anytime: ak x mcp pick`);
+    } else if (reg.reason === 'ak-not-on-path') {
+      warn('Ruflo MCP not re-registered: `ak` is not on PATH, and the registration starts `ak x ruflo-mcp` — put ak on PATH, then run ak sync');
+    } else if (reg.reason === 'ak-launcher-outdated') {
+      warn('Ruflo MCP not re-registered: the `ak` on PATH predates `ak x ruflo-mcp --host`, which the registration starts — update it, then run ak sync');
     } else warn('claude mcp add failed — run: ak x mcp pick');
     for (const entry of reg.preserved) {
       warn(`custom 'ruflo' MCP registration preserved (${entry.scope} scope) — not agentic-kit's registration; if unwanted, remove it: ${legacyRufloRemovalCommands([entry.scope])}`);
