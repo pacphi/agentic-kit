@@ -10,6 +10,8 @@
 // the server itself (ADR-0058 §3).
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
+import { resolveShim } from '../../lib/exec.mjs';
+import { isWindows } from '../../lib/paths.mjs';
 import { LAUNCHER_HOSTS, rufloMcpLaunch } from '../../lib/ruflo-memory.mjs';
 import { fail } from '../../lib/output.mjs';
 
@@ -34,6 +36,15 @@ Examples:
   ak x ruflo-mcp                 start the stdio server (normally invoked by Codex)
   ak x ruflo-mcp --host claude   the same, as Claude Code's registration starts it`;
 
+/** How to start `spec.command`: on Windows `ruflo` is an npm .cmd shim that
+ *  CreateProcess cannot start, so it resolves through the launch env's PATH
+ *  exactly as run()/have() do (exec.mjs resolveShim), argv kept separate.
+ *  @param {{ command: string, args: string[], env: NodeJS.ProcessEnv }} spec
+ *  @param {{ windows?: boolean }} [options] */
+export function launchInvocation(spec, { windows = isWindows } = {}) {
+  return resolveShim(spec.command, spec.args, { windows, env: spec.env });
+}
+
 /** @param {{ flags?: { host?: string } }} [options] */
 export async function run({ flags = {} } = {}) {
   const host = flags.host ?? 'codex';
@@ -45,8 +56,13 @@ export async function run({ flags = {} } = {}) {
   if (spec.location.kind === 'user') {
     try { fs.mkdirSync(spec.cwd, { recursive: true }); } catch { /* spawn reports a missing cwd */ }
   }
+  const invocation = launchInvocation(spec);
+  if (!invocation.resolved) {
+    fail(`ak x ruflo-mcp: \`${spec.command}\` is not on PATH, or its .cmd shim lacks its .ps1 sibling or Windows PowerShell`);
+    return 1;
+  }
   return new Promise((resolve) => {
-    const child = spawn(spec.command, spec.args, {
+    const child = spawn(invocation.command, invocation.args, {
       cwd: spec.cwd,
       env: spec.env,
       stdio: 'inherit',

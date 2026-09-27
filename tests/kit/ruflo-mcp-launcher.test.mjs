@@ -12,6 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { launchInvocation } from '../../src/commands/x/ruflo-mcp.mjs';
 
 const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin/agentic-kit.mjs');
 const posixOnly = process.platform === 'win32' ? 'the fake ruflo is a POSIX shell script' : false;
@@ -73,4 +74,35 @@ test('ak x ruflo-mcp refuses an unknown --host with exit 2 and starts nothing', 
   assert.equal(r.status, 2, `${r.stdout}\n${r.stderr}`);
   assert.match(`${r.stdout}${r.stderr}`, /--host must be claude or codex/);
   assert.equal(fs.existsSync(out), false);
+});
+
+// Windows: `ruflo` is an npm .cmd shim that CreateProcess cannot start, so the
+// launcher must resolve it the way run()/have() do (exec.mjs resolveShim), or
+// readiness passes while every Claude Code and Codex launch ENOENTs.
+test('on Windows the launcher starts ruflo through the resolved shim, with argv kept separate', (t) => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ak-ruflo-mcp-shim-')));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const bin = path.join(root, 'bin');
+  const powershell = path.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  fs.mkdirSync(path.dirname(powershell), { recursive: true });
+  fs.mkdirSync(bin);
+  fs.writeFileSync(powershell, 'x');
+  fs.writeFileSync(path.join(bin, 'ruflo.cmd'), '@echo off\r\n');
+  fs.writeFileSync(path.join(bin, 'ruflo.ps1'), '# shim');
+  const spec = {
+    command: 'ruflo', args: ['mcp', 'start'], cwd: root,
+    env: { PATH: bin, PATHEXT: '.CMD', SystemRoot: root },
+  };
+  assert.deepEqual(launchInvocation(spec, { windows: true }), {
+    command: powershell,
+    args: [
+      '-NoLogo', '-NoProfile', '-NonInteractive',
+      '-ExecutionPolicy', 'Bypass', '-File', path.join(bin, 'ruflo.ps1'), 'mcp', 'start',
+    ],
+    resolved: true,
+  });
+  assert.equal(launchInvocation({ ...spec, env: { ...spec.env, PATH: root } }, { windows: true }).resolved, false,
+    'no ruflo on the launch PATH: nothing safe to start');
+  assert.deepEqual(launchInvocation(spec, { windows: false }),
+    { command: 'ruflo', args: ['mcp', 'start'], resolved: true }, 'POSIX starts the bare name');
 });

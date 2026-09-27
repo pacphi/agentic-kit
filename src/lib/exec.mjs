@@ -42,7 +42,8 @@ const CMD_SHIMS = new Set([
  *  accepted only when its sibling .ps1 and system PowerShell both exist.
  *  Falls back to the bare name with resolved:false when no safe target exists.
  *  Exported: the execution adapters spawn these CLIs directly (subprocess.mjs
- *  for claude/codex, opencode.mjs for the serve child) and must share the same
+ *  for claude/codex, opencode.mjs for the serve child, x/ruflo-mcp.mjs for the
+ *  Ruflo MCP launcher) and must share the same
  *  resolution `run()`/`have()` use, or readiness passes but launch ENOENTs on
  *  Windows (swarm review, #88). */
 export function resolveShim(cmd, args = [], { windows = isWindows, env = process.env } = {}) {
