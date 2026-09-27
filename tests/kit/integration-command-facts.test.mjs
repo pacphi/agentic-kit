@@ -1,7 +1,13 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { collectIntegrationFacts, commandHosts } from '../../src/lib/providers.mjs';
 import { HOST_REGISTRY } from '../../src/lib/adapters/index.mjs';
+import { redirectToolState } from './helpers/home-sandbox.mjs';
+
+// Code under test spawns the real `opencode` with process.env; keep its
+// state/data/cache/temp folders out of the developer's real ones.
+const toolState = redirectToolState('ak-integration-command-facts');
+after(() => toolState.restore());
 
 test('commands share one immutable normalized integration snapshot', async () => {
   const cfg = {

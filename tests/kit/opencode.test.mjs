@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -13,6 +13,12 @@ import {
 import { runLifecycle } from '../../src/lib/adapters/lifecycle.mjs';
 import { detectHosts } from '../../src/lib/providers.mjs';
 import { guidanceTargets, BUILTIN_BLOCKS } from '../../src/lib/blocks.mjs';
+import { redirectToolState } from './helpers/home-sandbox.mjs';
+
+// Code under test spawns the real `opencode` with process.env; keep its
+// state/data/cache/temp folders out of the developer's real ones.
+const toolState = redirectToolState('ak-opencode');
+after(() => toolState.restore());
 
 const tmp = (prefix) => fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 const rm = (d) => fs.rmSync(d, { recursive: true, force: true });

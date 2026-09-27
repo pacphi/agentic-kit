@@ -5,7 +5,7 @@
 // whose second rung had no API key was written, reported `ok`, and only failed
 // at QE-run time — far from the config that caused it. These tests pin the
 // credential layer and the write-time warning that consumes it.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -17,6 +17,12 @@ import {
   credentialGaps, detectAqeProviders, fallbackSource,
   applyAqeRouter, aqeRouterFile, collectIntegrationFacts,
 } from '../../src/lib/providers.mjs';
+import { redirectToolState } from './helpers/home-sandbox.mjs';
+
+// Code under test spawns the real `opencode` with process.env; keep its
+// state/data/cache/temp folders out of the developer's real ones.
+const toolState = redirectToolState('ak-provider-credentials');
+after(() => toolState.restore());
 
 // An env with NO provider credentials at all — the baseline every "absent" case
 // is measured against, so a key that happens to be exported on the developer's
