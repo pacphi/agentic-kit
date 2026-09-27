@@ -7,9 +7,24 @@ import path from 'node:path';
 import { UPSTREAM_REGISTRY_FILE, loadUpstreamConstraints } from '../../src/lib/hook-audit/upstream.mjs';
 
 const registryFile = UPSTREAM_REGISTRY_FILE;
-// The clock follows the registry's verification date, so a weekly re-verification is a data-only change.
-const { lastVerifiedAt } = JSON.parse(fs.readFileSync(registryFile, 'utf8'));
-const now = () => new Date(`${lastVerifiedAt}T12:00:00Z`);
+// State re-reads move lastCheckedAt (the tests' clock); only a conformance run moves lastVerifiedAt.
+const { lastVerifiedAt, lastCheckedAt } = JSON.parse(fs.readFileSync(registryFile, 'utf8'));
+const now = () => new Date(`${lastCheckedAt}T12:00:00Z`);
+// Evidence is current by definition on the day every constraint was re-verified.
+const verifiedNow = () => new Date(`${lastVerifiedAt}T12:00:00Z`);
+
+function withDocument(mutate, run) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-upstream-'));
+  try {
+    const document = JSON.parse(fs.readFileSync(registryFile, 'utf8'));
+    mutate(document);
+    const file = path.join(root, 'constraints.json');
+    fs.writeFileSync(file, JSON.stringify(document));
+    return run(file);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
 
 function globPattern(glob) {
   const source = glob.split(/(\*\*\/|\*\*|\*)/).map((part) => {
@@ -35,7 +50,7 @@ test('the registry ships with ak: the loader reads it from inside the published 
 
 test('upstream registry separates valid shape, current evidence, and version applicability', () => {
   const result = loadUpstreamConstraints({
-    file: registryFile, now, observedVersions: { ruflo: '3.38.17', 'agentic-qe': '3.14.0' },
+    file: registryFile, now: verifiedNow, observedVersions: { ruflo: '3.38.17', 'agentic-qe': '3.14.0' },
   });
   assert.equal(result.status, 'valid');
   assert.equal(result.registryStatus, 'valid');
@@ -62,17 +77,60 @@ test('upstream registry separates valid shape, current evidence, and version app
 });
 
 test('future verification dates are invalid rather than falsely current', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-upstream-'));
-  try {
-    const document = JSON.parse(fs.readFileSync(registryFile, 'utf8'));
+  withDocument((document) => {
     document.lastVerifiedAt = '2099-01-01';
+    document.lastCheckedAt = '2099-01-01';
     for (const constraint of document.constraints) constraint.nextRetestAt = '2099-01-02';
-    const file = path.join(root, 'constraints.json');
-    fs.writeFileSync(file, JSON.stringify(document));
+  }, (file) => {
     const result = loadUpstreamConstraints({ file, now });
     assert.equal(result.status, 'invalid');
     assert.match(result.errors.join('\n'), /cannot be in the future/);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
+test('the registry is schema 6 and records when state was last re-read', () => {
+  const document = JSON.parse(fs.readFileSync(registryFile, 'utf8'));
+  assert.equal(document.schemaVersion, 6);
+  assert.match(document.lastCheckedAt, /^\d{4}-\d{2}-\d{2}$/);
+  assert.ok(document.lastCheckedAt >= document.lastVerifiedAt);
+  assert.equal(loadUpstreamConstraints({ now }).lastCheckedAt, document.lastCheckedAt);
+});
+
+test('a state re-read past the retest date is stale evidence, not an invalid registry', () => {
+  withDocument((document) => {
+    document.lastVerifiedAt = '2026-09-20';
+    for (const constraint of document.constraints) constraint.nextRetestAt = '2026-09-27';
+    document.lastCheckedAt = '2026-10-04';
+  }, (file) => {
+    const result = loadUpstreamConstraints({ file, now: () => new Date('2026-10-04T12:00:00Z') });
+    assert.equal(result.registryStatus, 'valid', result.errors.join('\n'));
+    assert.equal(result.evidenceStatus, 'stale');
+    assert.ok(result.constraints.every((entry) => entry.evidence.status === 'stale'));
+  });
+});
+
+test('a fresh state re-read keeps the registry from going stale on its own', () => {
+  withDocument((document) => {
+    document.lastVerifiedAt = '2026-09-01';
+    for (const constraint of document.constraints) constraint.nextRetestAt = '2026-12-31';
+    document.lastCheckedAt = '2026-09-27';
+  }, (file) => {
+    // 26 days after lastVerifiedAt but 0 after lastCheckedAt: the 14-day rule uses lastCheckedAt.
+    const result = loadUpstreamConstraints({ file, now: () => new Date('2026-09-27T12:00:00Z') });
+    assert.equal(result.registryStatus, 'valid', result.errors.join('\n'));
+    assert.equal(result.evidenceStatus, 'current');
+  });
+});
+
+test('lastCheckedAt is a date, never in the future and never before lastVerifiedAt', () => {
+  for (const [value, message] of [[undefined, /lastCheckedAt must be an ISO date/], ['2099-01-01', /lastCheckedAt cannot be in the future/], ['2026-01-01', /lastCheckedAt precedes lastVerifiedAt/]]) {
+    withDocument((document) => { document.lastCheckedAt = value; }, (file) => {
+      const result = loadUpstreamConstraints({ file, now });
+      assert.equal(result.registryStatus, 'invalid');
+      assert.match(result.errors.join('\n'), message);
+    });
   }
+  withDocument((document) => { document.schemaVersion = 5; }, (file) => {
+    assert.match(loadUpstreamConstraints({ file, now }).errors.join('\n'), /unsupported upstream constraint schema/);
+  });
 });

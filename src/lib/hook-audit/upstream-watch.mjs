@@ -5,7 +5,8 @@
 
 export const WATCH_RELATIONS = ['filed', 'commented', 'referenced', 'tracking'];
 export const WATCH_STATUSES = ['watching', 'fixed-unreleased', 'released', 'dispatched', 'adopted', 'retired'];
-export const WATCH_HISTORY_EVENTS = ['filed', 'commented', 'closed', 'reopened', 'registered', ...WATCH_STATUSES];
+// `reviewed`: the maintainer read every comment up to the end of that day and none needs a reply.
+export const WATCH_HISTORY_EVENTS = ['filed', 'commented', 'closed', 'reopened', 'registered', 'reviewed', ...WATCH_STATUSES];
 const KINDS = ['issue', 'pr'];
 const DONE_STATES = ['closed-completed', 'merged'];
 const RELEASE_CHANNELS = ['npm', 'github-release'];
@@ -15,6 +16,12 @@ const ENTRY_KEYS = new Set([
 ]);
 const ID = /^([\w.-]+)\/([\w.-]+)#([1-9]\d*)$/;
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+const RELEASE_KEYS = new Set(['channel', 'name', 'minVersion', 'tagPattern', 'bundledBy']);
+// Shared with the watch tooling (scripts/upstream-watch/); the schema spells them identically.
+export const PACKAGE_NAME = /^[@A-Za-z0-9_][A-Za-z0-9_@./-]*$/;
+export const OWNER_REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+// A tag spelling such as rust-v{version}; the watcher substitutes the version.
+const TAG_PATTERN = /^[\w./-]*\{version\}[\w./-]*$/;
 const ISSUE_URL = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/(?:issues|pull)\/(\d+)$/;
 
 const text = (value) => typeof value === 'string' && value.trim() !== '';
@@ -38,8 +45,9 @@ function checkPolicy(policy, errors) {
     errors.push('watchPolicy.automatedReplyPatterns must be valid regular expressions');
   }
   const ledger = policy.ledger;
-  if (!isObject(ledger) || !/^[\w.-]+\/[\w.-]+$/.test(ledger.repo ?? '') || !text(ledger.issueTitle) || !/^[A-Z][A-Z-]+$/.test(ledger.sentinel ?? '')) {
-    errors.push('watchPolicy.ledger must name repo, issueTitle and an upper-case sentinel');
+  if (!isObject(ledger) || !OWNER_REPO.test(ledger.repo ?? '') || !Number.isInteger(ledger.issue) || ledger.issue < 1
+      || !text(ledger.issueTitle) || !/^[A-Z][A-Z-]+$/.test(ledger.sentinel ?? '')) {
+    errors.push('watchPolicy.ledger must name repo, issue, issueTitle and an upper-case sentinel');
   }
   const dispatch = policy.dispatch;
   if (!isObject(dispatch) || !/^[\w.-]+\/$/.test(dispatch.branchPrefix ?? '') || dispatch.pullRequest !== 'draft' || dispatch.merge !== 'never') {
@@ -59,6 +67,15 @@ function checkDoneWhen(doneWhen, kind, where, errors) {
   if (!isObject(release) || !RELEASE_CHANNELS.includes(release.channel) || !text(release.name)
       || !(release.minVersion === null || SEMVER.test(release.minVersion ?? ''))) {
     errors.push(`${where}: doneWhen.release must be null or { channel: npm|github-release, name, minVersion: null|semver }`);
+    return;
+  }
+  for (const key of Object.keys(release)) if (!RELEASE_KEYS.has(key)) errors.push(`${where}: doneWhen.release has unknown key ${key}`);
+  if (release.tagPattern !== undefined && !(typeof release.tagPattern === 'string' && TAG_PATTERN.test(release.tagPattern))) {
+    errors.push(`${where}: doneWhen.release.tagPattern must contain {version}`);
+  }
+  if (release.bundledBy !== undefined && !(Array.isArray(release.bundledBy) && release.bundledBy.length > 0
+      && release.bundledBy.every((pkg) => typeof pkg === 'string' && PACKAGE_NAME.test(pkg)))) {
+    errors.push(`${where}: doneWhen.release.bundledBy must list the carrier packages`);
   }
 }
 

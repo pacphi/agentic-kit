@@ -11,10 +11,15 @@ function detail(key, item) {
     }
     case 'released-actionable':
       return [
-        `released in ${item.release.version ?? 'a release'} (${item.release.date ?? 'date unknown'})${item.release.candidate ? '; candidate: confirm the fix is in it' : ''}`,
+        `released in ${item.release.version ?? 'a release'} (${item.release.date ?? 'date unknown'}); ${item.release.basis ?? 'first fixed version recorded in the registry'}`,
         `dispatch: branch ${item.dispatch.branch}, ${item.dispatch.pullRequest} pull request, merge ${item.dispatch.merge}`,
         `change: ${item.adjustment}`,
         `removal proof: ${item.dispatch.removalProof ?? 'none recorded for this dependency'}`,
+      ];
+    case 'release-unconfirmed':
+      return [
+        `${item.release.version} (${item.release.date}) is the first release after the fix not ruled out; ${item.release.basis}`,
+        `change once confirmed: ${item.adjustment}`,
       ];
     case 'workaround-carried':
       return [`status ${item.status}; branch ${item.dispatch?.branch ?? 'n/a'}`, `change: ${item.adjustment}`];
@@ -55,7 +60,7 @@ export function renderReport(report) {
   const watched = Object.entries(statuses).filter(([status]) => status !== 'retired').reduce((sum, [, count]) => sum + count, 0);
   const lines = [
     `Upstream watch · ${report.generatedAt.slice(0, 10)} · ${report.mode}${report.offlineReason ? ` (${report.offlineReason})` : ''}`,
-    `  registry ${report.registry.status}, last verified ${report.registry.lastVerifiedAt}; ${watched} watched, ${statuses.retired} retired`,
+    `  registry ${report.registry.status}, last checked ${report.registry.lastCheckedAt}, last verified ${report.registry.lastVerifiedAt}; ${watched} watched, ${statuses.retired} retired`,
   ];
   if (report.mode === 'offline') lines.push('  offline: only what the registry records; replies, closures and releases were not checked');
   for (const error of report.registry.errors) lines.push(`  registry error: ${error}`);

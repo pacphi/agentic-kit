@@ -3,13 +3,16 @@
 // happens here, so every rule is exercised from recorded fixtures.
 
 const DAY = 86_400_000;
-const PROCESSED = new Set(['fixed-unreleased', 'released', 'dispatched', 'adopted', 'retired']);
+// History events after which earlier upstream comments no longer need our reply:
+// a status change, or `reviewed` (read, nothing asked of ak). Staleness ignores them.
+const PROCESSED = new Set(['fixed-unreleased', 'released', 'dispatched', 'adopted', 'retired', 'reviewed']);
 const FIXED_STATUSES = new Set(['fixed-unreleased', 'released', 'dispatched', 'adopted']);
 const PENDING = new Set(['watching', 'fixed-unreleased']);
 
 export const GROUPS = [
   ['needs-reply', 'Needs our reply'],
   ['released-actionable', 'Released and actionable'],
+  ['release-unconfirmed', 'Released, fix not confirmed'],
   ['workaround-carried', 'Fixed upstream, ak still carries the workaround'],
   ['fixed-unreleased', 'Fixed upstream, not yet released'],
   ['reopened', 'Reopened upstream after ak recorded a fix'],
@@ -18,7 +21,7 @@ export const GROUPS = [
   ['not-planned', 'Closed upstream as not planned'],
   ['ready-to-retire', 'Ready to retire'],
   ['constraints-due', 'Constraints past their retest date'],
-  ['tracking', 'Tracking issues to migrate'],
+  ['tracking', 'Our tracking issues'],
   ['unmapped', 'Unmapped (no ak change recorded)'],
   ['unchecked', 'Could not check'],
 ];
@@ -50,6 +53,12 @@ export function compareVersions(a, b) {
   return 0;
 }
 
+/** The highest version by semver of `npm view <pkg>@<range> version --json` (a string or an array). */
+export function maxVersion(values) {
+  const list = [].concat(values ?? []).filter((value) => typeof value === 'string' && /^\d+\.\d+\.\d+/.test(value));
+  return list.sort(compareVersions).at(-1) ?? null;
+}
+
 /** Normalize `npm view <pkg> time dist-tags --json` or a GitHub releases list. */
 export function releaseFacts(channel, raw) {
   if (channel === 'npm') {
@@ -78,24 +87,137 @@ export function upstreamOf(thread) {
   };
 }
 
-/** Whether the fix has shipped, per the entry's doneWhen.release gate. */
-export function releaseState(entry, fixedAt, facts) {
+// How many releases after a fix are checked, oldest first, before the newest.
+const CONFIRM_LIMIT = 5;
+
+/**
+ * When the release walk starts: the merge of the fixing pull request, so an
+ * issue closed after the release that shipped its fix still finds it. A
+ * closing commit has no merge time; it closes the thread as it lands on the
+ * default branch, so the close time (`fixedAt`) stands.
+ */
+export function confirmationStart(fixedAt, confirmation) {
+  return confirmation?.changes?.[0]?.mergedAt ?? fixedAt;
+}
+
+/** Releases published after the fix, oldest first: stable only unless `latest` is a prerelease. */
+export function candidateVersions(fixedAt, facts, limit = Infinity) {
+  const prerelease = facts.latest?.includes('-');
+  return facts.versions
+    .filter((item) => item.publishedAt > fixedAt && (prerelease || !item.version.includes('-')))
+    .sort((a, b) => a.publishedAt.localeCompare(b.publishedAt))
+    .slice(0, limit);
+}
+
+// The candidate ak would install: `latest` when it is one, else the highest
+// version. A backport published after it on an older line is not it.
+function newestCandidate(candidates, facts) {
+  return candidates.find((item) => item.version === facts.latest)
+    ?? candidates.reduce((best, item) => (!best || compareVersions(item.version, best.version) > 0 ? item : best), null);
+}
+
+/**
+ * The next release whose tag to check, or null when the walk is done. The
+ * first CONFIRM_LIMIT candidates go oldest first, stopping at any that is not
+ * ruled out. If all of them lack the fix, the newest is checked; when it has
+ * the fix, the releases between go oldest first, so the released version is
+ * always the oldest containing one and a newer release never changes it.
+ */
+export function nextRelease(candidates, checks, facts, limit = CONFIRM_LIMIT) {
+  const seen = new Map(checks.map((check) => [check.version, check.contained]));
+  const step = (list) => {
+    for (const item of list) {
+      if (!seen.has(item.version)) return item;
+      if (seen.get(item.version) !== false) return null;
+    }
+    return undefined;
+  };
+  const first = step(candidates.slice(0, limit));
+  if (first !== undefined) return first;
+  const newest = newestCandidate(candidates, facts);
+  const at = candidates.indexOf(newest);
+  if (!newest || at < limit) return null;
+  if (!seen.has(newest.version)) return newest;
+  if (seen.get(newest.version) !== true) return null;
+  return step(candidates.slice(limit, at)) ?? null;
+}
+
+/** The tag names a release gate's version may carry upstream, in the order to try them. */
+export function tagRefs(gate, version) {
+  return gate.tagPattern ? [gate.tagPattern.replace('{version}', version)] : [`v${version}`, version];
+}
+
+const changeLabel = (change) => (change.pr ? `PR #${change.pr}` : `commit ${change.sha.slice(0, 7)}`);
+
+/**
+ * A package ak gets through another (AgentDB through Ruflo) is released only
+ * when the newest carrier installs a fixed version. `base` is the package's
+ * own release state; `bundle` is what the carrier resolves it to.
+ */
+function bundledState(gate, base, bundle) {
+  const unresolved = `could not resolve the ${gate.name} that ${gate.bundledBy[0]} bundles`;
+  // A failed resolution is "Could not check" whether or not the package's own release is confirmed.
+  if (!bundle && (base.released === true || base.released === 'unconfirmed')) {
+    return { released: null, basis: base.released === true ? unresolved : `${base.basis}; ${unresolved}`, version: null, date: null };
+  }
+  const carries = bundle ? `${bundle.carrier} ${bundle.carrierVersion} bundles ${gate.name} ${bundle.version ?? 'none'}` : null;
+  if (base.released === 'unconfirmed') return { ...base, basis: `${base.basis}; ${carries}` };
+  if (base.released !== true) return base;
+  if (!bundle.version || compareVersions(bundle.version, base.version) < 0) {
+    return { released: false, basis: `${carries}, before the fix in ${base.version}`, version: null, date: null };
+  }
+  // Version and date stay the fixed package's, so a new carrier release never changes the ledger line;
+  // the carrier that bundles it is reported beside them.
+  return { ...base, carrierVersion: bundle.carrierVersion, basis: `${base.basis}; ${carries}` };
+}
+
+/**
+ * Whether the fix has shipped, per the entry's doneWhen.release gate. Without
+ * a recorded first fixed version, a release counts only when it contains the
+ * merged fixing change (`confirmation`, from the fetcher); a release ak cannot
+ * prove is 'unconfirmed' and is never dispatched. A gate with `bundledBy`
+ * also needs the newest carrier to install the fixed version (`bundle`).
+ */
+export function releaseState(entry, fixedAt, facts, confirmation = null, bundle = null) {
+  const own = ownReleaseState(entry.doneWhen.release, fixedAt, facts, confirmation);
   const gate = entry.doneWhen.release;
+  return gate?.bundledBy ? bundledState(gate, own, bundle) : own;
+}
+
+function ownReleaseState(gate, fixedAt, facts, confirmation) {
   if (gate === null) return { released: true, basis: 'no release gate: closing is enough', version: null, date: day(fixedAt) };
   if (!facts) return { released: null, basis: `release facts for ${gate.name} unavailable`, version: null, date: null };
+  if (confirmation?.error) return { released: null, basis: `could not confirm the ${gate.name} release: ${confirmation.error}`, version: null, date: null };
   if (gate.minVersion) {
     const published = facts.versions.find((item) => item.version === gate.minVersion)?.publishedAt ?? fixedAt;
     return facts.latest && compareVersions(facts.latest, gate.minVersion) >= 0
       ? { released: true, basis: 'first fixed version recorded in the registry', version: gate.minVersion, date: day(published) }
       : { released: false, basis: `${gate.name} ${facts.latest ?? 'has no release'} predates ${gate.minVersion}`, version: null, date: null };
   }
-  const prerelease = facts.latest?.includes('-');
-  const after = facts.versions
-    .filter((item) => item.publishedAt > fixedAt && (prerelease || !item.version.includes('-')))
-    .sort((a, b) => a.publishedAt.localeCompare(b.publishedAt));
-  return after.length
-    ? { released: true, candidate: true, basis: 'first version published after the fix; confirm it contains the fix', version: after[0].version, date: day(after[0].publishedAt) }
-    : { released: false, basis: `no ${gate.name} release since the fix`, version: null, date: null };
+  const after = candidateVersions(confirmationStart(fixedAt, confirmation), facts);
+  if (!after.length) return { released: false, basis: `no ${gate.name} release since the fix`, version: null, date: null };
+  const change = confirmation?.changes?.[0] ?? null;
+  const checks = confirmation?.checks ?? [];
+  const found = new Map(checks.map((check) => [check.version, check]));
+  const newest = newestCandidate(after, facts);
+  if (change && found.get(newest.version)?.contained === false && checks.every((check) => check.contained === false)) {
+    return { released: false, basis: `none of the ${checks.length} ${gate.name} release(s) checked after the fix, ${newest.version} included, contains ${changeLabel(change)}`, version: null, date: null };
+  }
+  // The oldest release not ruled out: released when its tag contains the change, else unconfirmed.
+  const first = after.find((item) => found.get(item.version)?.contained !== false) ?? after[0];
+  const hit = found.get(first.version);
+  if (change && hit?.contained === true) {
+    return {
+      released: true, confirmed: true, version: first.version, date: day(first.publishedAt), change, ref: hit.ref,
+      basis: `merged ${changeLabel(change)} is in ${hit.ref}`,
+    };
+  }
+  return {
+    released: 'unconfirmed', version: first.version, date: day(first.publishedAt),
+    basis: change
+      ? `no tag found to prove ${changeLabel(change)} is in ${gate.name} ${first.version}`
+      : 'no merged pull request or commit closed the thread; confirm by hand and record minVersion',
+  };
 }
 
 function commentFacts(entry, thread, policy) {
@@ -124,7 +246,8 @@ function commentFacts(entry, thread, policy) {
   };
 }
 
-const lastHistoryDate = (entry) => entry.history.at(-1).date;
+// A `reviewed` line records reading, not a lifecycle change, so it never re-dates a ledger line.
+const lastHistoryDate = (entry) => entry.history.filter((item) => item.event !== 'reviewed').at(-1)?.date ?? entry.history.at(-1).date;
 
 function liveGroups(entry, up, facts, release, stale) {
   const groups = [];
@@ -137,6 +260,7 @@ function liveGroups(entry, up, facts, release, stale) {
   }
   if (up.fixed && PENDING.has(entry.status) && mapped) {
     if (release?.released === true) groups.push('released-actionable');
+    else if (release?.released === 'unconfirmed') groups.push('release-unconfirmed');
     else if (release?.released === false) groups.push('fixed-unreleased');
     else groups.push('unchecked');
   }
@@ -173,7 +297,7 @@ export function classifyEntry(entry, live, { policy, dependencyPolicies, now }) 
   }
   const up = upstreamOf(live.thread);
   const facts = commentFacts(entry, live.thread, policy);
-  const release = up.fixed && PENDING.has(entry.status) ? releaseState(entry, up.fixedAt, live.release) : null;
+  const release = up.fixed && PENDING.has(entry.status) ? releaseState(entry, up.fixedAt, live.release, live.confirmation ?? null, live.bundle ?? null) : null;
   const stale = up.state === 'open' && now.getTime() - Date.parse(facts.lastUpstreamActivityAt) >= policy.staleAfterDays * DAY;
   const groups = [...new Set([...liveGroups(entry, up, facts, release, stale), ...fromRegistry])];
   if (entry.relation === 'tracking') {
@@ -206,7 +330,7 @@ export function buildReport(registry, liveById, { now, offline = null, fetchErro
     generatedAt: now.toISOString(),
     mode: offline ? 'offline' : 'live',
     offlineReason: offline,
-    registry: { status: registry.registryStatus, errors: registry.errors ?? [], lastVerifiedAt: registry.lastVerifiedAt, statuses },
+    registry: { status: registry.registryStatus, errors: registry.errors ?? [], lastVerifiedAt: registry.lastVerifiedAt, lastCheckedAt: registry.lastCheckedAt, statuses },
     counts: Object.fromEntries(groups.map((group) => [group.key, group.items.length])),
     groups,
     entries,
@@ -242,7 +366,10 @@ export function ledgerEvents(report, registry, { since }) {
     else if (up?.state === 'closed' && up.closedAt > since) events.push(eventLine(sentinel, entry.id, 'closed', day(up.closedAt), { reason: up.reason }));
     if (entry.groups.includes('released-actionable')) {
       events.push(eventLine(sentinel, entry.id, 'released', entry.release.date, {
-        version: entry.release.version, candidate: entry.release.candidate ? 'yes' : null, branch: entry.dispatch.branch,
+        version: entry.release.version,
+        pr: entry.release.change?.pr ?? null,
+        commit: entry.release.change && !entry.release.change.pr ? entry.release.change.sha.slice(0, 7) : null,
+        branch: entry.dispatch.branch,
       }));
     }
     if (entry.groups.includes('reopened')) events.push(eventLine(sentinel, entry.id, 'reopened', entry.lastHistoryDate, { status: entry.status }));
@@ -252,7 +379,7 @@ export function ledgerEvents(report, registry, { since }) {
   for (const constraint of report.groups.find((group) => group.key === 'constraints-due').items) {
     events.push(eventLine(sentinel, constraint.id, 'retest-due', constraint.nextRetestAt));
   }
-  if (report.nothingToWatch) events.push(eventLine(sentinel, 'registry', 'idle', registry.lastVerifiedAt));
+  if (report.nothingToWatch) events.push(eventLine(sentinel, 'registry', 'idle', registry.lastCheckedAt));
   return events;
 }
 

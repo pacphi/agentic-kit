@@ -11,6 +11,26 @@ import { UPSTREAM_REGISTRY_FILE } from '../../src/lib/hook-audit/upstream.mjs';
 // Tracked paths whose upstream citations must be registered in `watch`.
 export const CITATION_DIRS = ['src', 'bin', 'claude', 'tests'];
 
+// User-facing documentation whose upstream citations must be registered too:
+// README.md and the top-level docs/*.md guides. CLI help lives in src/, which
+// CITATION_DIRS already covers. ADRs, audits, plans and research sit in
+// subfolders and are history, never scanned; these top-level files are
+// history too, so they are exempt by name.
+export const USER_DOC_EXEMPT = new Map([
+  ['docs/MODEL-PRICING-AUDIT.md', 'dated audit'],
+  ['docs/METAHARNESS-COMPANION-PROPOSAL.md', 'proposal'],
+  ['docs/USAGE-SCORECARD-METRICS.md', 'research reference'],
+]);
+
+/** README.md plus every top-level docs/*.md guide, minus the named exemptions. */
+export function userFacingDocs(root) {
+  const guides = fs.readdirSync(path.join(root, 'docs'), { withFileTypes: true })
+    .filter((item) => item.isFile() && item.name.endsWith('.md'))
+    .map((item) => `docs/${item.name}`)
+    .filter((file) => !USER_DOC_EXEMPT.has(file));
+  return ['README.md', ...guides.sort()];
+}
+
 // Watched owners; `null` watches every repository of that owner.
 const WATCHED = {
   ruvnet: null,

@@ -1,6 +1,7 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "lastVerifiedAt": "2026-09-27",
+  "lastCheckedAt": "2026-09-27",
   "recheckPolicy": {
     "cadence": "weekly-and-before-upgrade",
     "staleAfterDays": 14,
@@ -14,6 +15,7 @@
     "automatedReplyPatterns": ["^🤖 Automated acknowledg"],
     "ledger": {
       "repo": "pacphi/agentic-kit",
+      "issue": 243,
       "issueTitle": "Upstream watch",
       "sentinel": "UPSTREAM-WATCH"
     },
@@ -86,6 +88,24 @@
       "workaroundPolicy": "subscription execution stays default; separately billed provider routing requires explicit opt-in",
       "retestPolicy": "on routing-policy change, observed release, and before managed upgrade",
       "removalProof": "released router passes authorization and routing conformance"
+    },
+    {
+      "dependency": "claude-code",
+      "owner": "anthropics",
+      "issuePublication": "explicit-user-approval-required",
+      "evidenceRequired": ["installed-version", "reproduction", "official-docs-reference"],
+      "workaroundPolicy": "document the host limitation and bound agentic-kit-owned configuration; never patch Claude Code installs, plugin caches or remote-session sync",
+      "retestPolicy": "on a Claude Code release whose changelog names the thread, or when the thread closes",
+      "removalProof": "a released Claude Code reproduces the documented behavior as fixed in a disposable home"
+    },
+    {
+      "dependency": "opencode",
+      "owner": "anomalyco",
+      "issuePublication": "explicit-user-approval-required",
+      "evidenceRequired": ["installed-version", "reproduction"],
+      "workaroundPolicy": "document the host limitation and bound agentic-kit-owned configuration; never patch OpenCode installs",
+      "retestPolicy": "on an OpenCode release, or when the thread closes",
+      "removalProof": "a released OpenCode reproduces the documented behavior as fixed in a disposable home"
     }
   ],
   "constraints": [
@@ -316,10 +336,10 @@
       "kind": "issue",
       "title": "bug: -c 'mcp_servers={}' silently no-ops instead of clearing MCP servers",
       "dependency": "codex",
-      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "@openai/codex", "minVersion": null } },
-      "mapping": "unmapped",
-      "kitImpact": null,
-      "adjustment": null,
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "@openai/codex", "minVersion": null, "tagPattern": "rust-v{version}" } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["src/lib/host-health-connected.mjs"] },
+      "adjustment": "Once Codex clears the roster with -c mcp_servers={}, replace the per-server enabled=false overrides in the connected host check.",
       "status": "watching",
       "constraintIds": [],
       "history": [
@@ -334,14 +354,15 @@
       "kind": "issue",
       "title": "Allow custom status line plugins in Codex CLI",
       "dependency": "codex",
-      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "@openai/codex", "minVersion": null } },
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "@openai/codex", "minVersion": null, "tagPattern": "rust-v{version}" } },
       "mapping": "mapped",
       "kitImpact": { "refs": [], "files": ["src/lib/hosts.mjs"] },
       "adjustment": "Once Codex ships a command-backed status line, offer a command-backed footer instead of the fixed tui.status_line projection.",
-      "status": "watching",
+      "status": "retired",
       "constraintIds": [],
       "history": [
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "retired", "note": "the same request is watched through openai/codex#17827 (active); ak's Codex status-line adjustment moves there" }
       ]
     },
     {
@@ -351,7 +372,7 @@
       "kind": "issue",
       "title": "Customizable status line",
       "dependency": "codex",
-      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "@openai/codex", "minVersion": null } },
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "@openai/codex", "minVersion": null, "tagPattern": "rust-v{version}" } },
       "mapping": "mapped",
       "kitImpact": { "refs": [], "files": ["src/lib/hosts.mjs"] },
       "adjustment": "Once Codex ships a command-backed status line, offer a command-backed footer instead of the fixed tui.status_line projection.",
@@ -368,7 +389,7 @@
       "kind": "issue",
       "title": "Make skills metadata context budget configurable instead of hardcoded 2%",
       "dependency": "codex",
-      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "@openai/codex", "minVersion": null } },
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "@openai/codex", "minVersion": null, "tagPattern": "rust-v{version}" } },
       "mapping": "mapped",
       "kitImpact": { "refs": ["constraint codex-0.152.1-skill-context-budget"], "files": [] },
       "adjustment": "Once Codex releases configurable skill metadata budgeting with included/omitted telemetry, relax the per-host guidance budgets and sunset the constraint.",
@@ -389,7 +410,7 @@
       "doneWhen": { "state": "closed-completed", "release": null },
       "mapping": "mapped",
       "kitImpact": { "refs": [], "files": ["src/lib/hosts.mjs"] },
-      "adjustment": "None: closed as a duplicate; the request is watched through openai/codex#16921 and #17827.",
+      "adjustment": "None: closed as a duplicate; the request is watched through openai/codex#17827.",
       "status": "retired",
       "constraintIds": [],
       "history": [
@@ -408,7 +429,7 @@
       "doneWhen": { "state": "closed-completed", "release": null },
       "mapping": "mapped",
       "kitImpact": { "refs": [], "files": ["src/lib/hosts.mjs"] },
-      "adjustment": "None: closed as a duplicate; the request is watched through openai/codex#16921 and #17827.",
+      "adjustment": "None: closed as a duplicate; the request is watched through openai/codex#17827.",
       "status": "retired",
       "constraintIds": [],
       "history": [
@@ -716,14 +737,15 @@
       "title": "fix(rvf): preserve healthy stores behind stale locks",
       "dependency": "agentic-qe",
       "doneWhen": { "state": "merged", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
-      "mapping": "mapped",
-      "kitImpact": { "refs": ["lane C: live-lock busy rule", "pacphi/agentic-kit#240"], "files": [] },
-      "adjustment": "Partial fix for agentic-qe#574 (rethrows LockHeld). Once released and a live lock no longer surfaces FsyncFailed, remove the temporary busy rule and close pacphi/agentic-kit#240.",
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
       "status": "watching",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-26", "event": "registered" }
-      ]
+      ],
+      "note": "Context only: a partial fix for agentic-qe#574 (rethrows LockHeld). Its release alone does not prove a live lock no longer surfaces FsyncFailed, so agentic-qe#574 drives removing the busy rule and closing pacphi/agentic-kit#240."
     },
     {
       "id": "proffesor-for-testing/agentic-qe#734",
@@ -786,7 +808,7 @@
       "kind": "issue",
       "title": "CLI write commands exit 1 after committing: this.db.save is not a function",
       "dependency": "ruflo",
-      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentdb", "minVersion": null } },
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentdb", "minVersion": null, "bundledBy": ["ruflo", "@claude-flow/cli"] } },
       "mapping": "mapped",
       "kitImpact": { "refs": ["lane G3: stray-store reporting"], "files": [] },
       "adjustment": "Consumed through Ruflo's bundled AgentDB. Once a Ruflo release bundles the fix, stop treating a non-zero agentdb write exit as possibly committed.",
@@ -804,7 +826,7 @@
       "kind": "issue",
       "title": "CLI: skill/reflexion ignore --db and save it as record data; stats --db opens './--db'",
       "dependency": "ruflo",
-      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentdb", "minVersion": null } },
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentdb", "minVersion": null, "bundledBy": ["ruflo", "@claude-flow/cli"] } },
       "mapping": "mapped",
       "kitImpact": { "refs": ["lane G3: stray-store reporting"], "files": [] },
       "adjustment": "Consumed through Ruflo's bundled AgentDB. Once a Ruflo release bundles the fix, drop the stray-store report for databases created by the ignored --db flag.",
@@ -822,7 +844,7 @@
       "kind": "issue",
       "title": "AgentDB creates ruvector.db and agentdb.rvf in the process cwd instead of beside dbPath",
       "dependency": "ruflo",
-      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentdb", "minVersion": null } },
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentdb", "minVersion": null, "bundledBy": ["ruflo", "@claude-flow/cli"] } },
       "mapping": "mapped",
       "kitImpact": { "refs": ["lane G3: stray-store reporting"], "files": [] },
       "adjustment": "Consumed through Ruflo's bundled AgentDB. Once a Ruflo release bundles the fix, drop the cwd ruvector.db/agentdb.rvf stray-store report.",
@@ -843,7 +865,7 @@
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
       "mapping": "mapped",
       "kitImpact": { "refs": [], "files": ["src/lib/mcp.mjs"] },
-      "adjustment": "Once a released Ruflo filters MCP tools server-side, replace the permissions.deny tool-family gating in mcp.mjs.",
+      "adjustment": "Ruflo's mcp start --tools / CLAUDE_FLOW_MCP_TOOLS (released) narrows only the advertised tool schemas; execution stays registered. Once a released Ruflo also refuses execution of unselected tools, replace the permissions.deny tool-family gating in mcp.mjs; until then consider using --tools to cut schema overhead alongside the deny rules.",
       "status": "watching",
       "constraintIds": [],
       "history": [
@@ -1237,7 +1259,8 @@
       "constraintIds": ["ruflo-3.38.20-project-guidance-selector"],
       "history": [
         { "date": "2026-09-02", "event": "commented" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "reviewed", "note": "four comments by sparkling (2026-09-02 to 2026-09-03): scope corrections and revalidation for upstream; nothing asked of ak" }
       ]
     },
     {
@@ -1349,7 +1372,7 @@
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
       "mapping": "mapped",
       "kitImpact": { "refs": ["lane G2: memory-routing port", "pacphi/agentic-kit#213"], "files": [] },
-      "adjustment": "Once a released Ruflo routes MCP memory operations to the CLI database, retire the memory-routing port and close pacphi/agentic-kit#213.",
+      "adjustment": "The two stores are deliberate (ruvnet/ruflo#2786, encryption at rest); a unified path would be a red flag, not this fix. 3.41.1 fixed route identity. Once a released Ruflo gives existing separate corpora a tested preservation or migration outcome, retire the memory-routing port and close pacphi/agentic-kit#213.",
       "status": "watching",
       "constraintIds": [],
       "history": [
@@ -1917,14 +1940,15 @@
       "dependency": null,
       "doneWhen": { "state": "closed-completed", "release": null },
       "mapping": "mapped",
-      "kitImpact": { "refs": ["lane G2: memory-routing port"], "files": [] },
-      "adjustment": "The upstream remainder is watched as ruvnet/ruflo#3196; #213 closes when the memory-routing port merges.",
+      "kitImpact": { "refs": ["lane G2: memory-routing port", "read-only route/peek API request (to be filed upstream as its own issue)"], "files": [] },
+      "adjustment": "Closes when a released Ruflo gives existing separate corpora a tested preservation or migration outcome (ruvnet/ruflo#3196) and ak's backup, distill and purge gaps (ruvnet/ruflo#3446, #3450) are adopted; the route/peek API request is filed separately.",
       "status": "watching",
       "constraintIds": [],
-      "tracks": ["ruvnet/ruflo#3196"],
+      "tracks": ["ruvnet/ruflo#3196", "ruvnet/ruflo#3446", "ruvnet/ruflo#3450"],
       "history": [
         { "date": "2026-09-09", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "replied to the Ruflo maintainer and stuinfla: two stores are deliberate (ruvnet/ruflo#2786); 3.41.1 fixed route identity; open remainder is a tested preservation or migration outcome for separate corpora; a read-only route/peek API issue is still to be filed" }
       ]
     },
     {
@@ -1936,14 +1960,548 @@
       "dependency": null,
       "doneWhen": { "state": "closed-completed", "release": null },
       "mapping": "mapped",
-      "kitImpact": { "refs": ["decision 7", "lane C: live-lock busy rule"], "files": [] },
-      "adjustment": "Migrates into this registry: once the watcher is live, comment on #240 with links to the two watched entries and close it.",
+      "kitImpact": { "refs": ["decision 7", "lane C: live-lock busy rule"], "files": ["src/lib/aqe-readiness.mjs"] },
+      "adjustment": "Close #240 when a released agentic-qe no longer falls through to create after a live RVF lock (agentic-qe#574) and ak removes the temporary busy rule. agentic-qe#719 (partial fix: rethrows LockHeld) was released in 3.14.4 on 2026-09-27; whether that release alone clears FsyncFailed under a live lock is not yet verified.",
       "status": "watching",
       "constraintIds": [],
       "tracks": ["proffesor-for-testing/agentic-qe#574", "proffesor-for-testing/agentic-qe#719"],
       "history": [
         { "date": "2026-09-26", "event": "filed" },
         { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#2356",
+      "url": "https://github.com/ruvnet/ruflo/issues/2356",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "agent_execute requires its own LLM provider key — should delegate inference to the MCP host (e.g. Codex) via MCP sampling",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["docs/HOST-SUPPORT.md"] },
+      "adjustment": "Once a released Ruflo agent_execute delegates inference to the MCP host instead of requiring its own provider key, drop the HOST-SUPPORT.md caveat; ak run keeps executing the selected host directly until then.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#420",
+      "url": "https://github.com/ruvnet/ruflo/issues/420",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "Init Wipes Out Other MCPs in .MCP.json",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["docs/HOST-SUPPORT.md"] },
+      "adjustment": "Once a released Ruflo init keeps unrelated .mcp.json servers, drop the HOST-SUPPORT.md risk line.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#2638",
+      "url": "https://github.com/ruvnet/ruflo/issues/2638",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "ruflo init (CLAUDE.md) and codex init (AGENTS.md) generate divergent instruction templates — no lossless single source for dual projects",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["docs/HOST-SUPPORT.md"] },
+      "adjustment": "Once released Ruflo init generates Claude and Codex instructions from one source, drop the HOST-SUPPORT.md divergence risk line.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#2640",
+      "url": "https://github.com/ruvnet/ruflo/issues/2640",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "ruflo init bundle not deduped vs plugins: 100% agent+command overlap, 97% skills, hooks double-fire — violates ADR-128 Phase 2 'plugin is canonical' invariant",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["docs/HOST-SUPPORT.md"] },
+      "adjustment": "Once released Ruflo init stops duplicating plugin agents, skills and hooks, drop the HOST-SUPPORT.md duplication risk line.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#2854",
+      "url": "https://github.com/ruvnet/ruflo/issues/2854",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "Add a dual-host marketplace installer so Ruflo plugins stay aligned in Claude Code and Codex",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["docs/HOST-SUPPORT.md"] },
+      "adjustment": "Once a released Ruflo ships a dual-host marketplace installer, drop the HOST-SUPPORT.md parity risk line.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#528",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/528",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "`agentic-qe mcp` double-spawns the server (stdio:'inherit') and drops stdin → premature shutdown",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["docs/HOST-SUPPORT.md"] },
+      "adjustment": "Once a released agentic-qe mcp stops double-spawning the server, drop the HOST-SUPPORT.md risk link.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#532",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/532",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "init: platform installs are additive, not exclusive — always installs Claude Code surface; need per-platform/only mode",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["docs/HOST-SUPPORT.md"] },
+      "adjustment": "Once a released agentic-qe init offers an exclusive per-platform mode, drop the HOST-SUPPORT.md risk link.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#535",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/535",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "MCP smoke: pre-existing tool bugs (memory_delete no-op, cross_phase stats, GOAP maxSteps/plan lookup, test-gen quality, coherence text)",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["docs/HOST-SUPPORT.md"] },
+      "adjustment": "Once a released agentic-qe fixes the listed MCP tool bugs, drop the HOST-SUPPORT.md risk link.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "anthropics/claude-code#83643",
+      "url": "https://github.com/anthropics/claude-code/issues/83643",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "[BUG] Desktop remote sessions: plugin sync to ~/.claude/remote/plugins/ omits hooks/, so plugin hooks never fire",
+      "dependency": "claude-code",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "@anthropic-ai/claude-code", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["docs/HOST-SUPPORT.md"] },
+      "adjustment": "Once a released Claude Code syncs plugin hooks to Desktop remote sessions, drop the HOST-SUPPORT.md caveat.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "anthropics/claude-code#83953",
+      "url": "https://github.com/anthropics/claude-code/issues/83953",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "Project-scope hooks do not reach git worktrees: branch-local when tracked, absent entirely when `.claude/` is gitignored",
+      "dependency": "claude-code",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "@anthropic-ai/claude-code", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["docs/HOST-SUPPORT.md"] },
+      "adjustment": "Once a released Claude Code applies project hooks consistently in git worktrees, drop the HOST-SUPPORT.md caveat.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "openai/codex#19425",
+      "url": "https://github.com/openai/codex/issues/19425",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "Custom stdio MCP server discovered by /mcp but tools not exposed to Desktop threads",
+      "dependency": "codex",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "@openai/codex", "minVersion": null, "tagPattern": "rust-v{version}" } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["docs/HOST-SUPPORT.md"] },
+      "adjustment": "Once a released Codex exposes custom stdio MCP tools to Desktop threads, drop the HOST-SUPPORT.md caveat.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "openai/codex#30408",
+      "url": "https://github.com/openai/codex/issues/30408",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "MCP server processes leak: per-thread processes never cleaned up (9+ GB RSS)",
+      "dependency": "codex",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "@openai/codex", "minVersion": null, "tagPattern": "rust-v{version}" } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["docs/HOST-SUPPORT.md"] },
+      "adjustment": "Once a released Codex cleans up per-thread MCP server processes, drop the HOST-SUPPORT.md leak caveat.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "openai/codex#13386",
+      "url": "https://github.com/openai/codex/issues/13386",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "AGENTS.md is silently truncated and instructions near the end ignored",
+      "dependency": "codex",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "@openai/codex", "minVersion": null, "tagPattern": "rust-v{version}" } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["docs/HOST-SUPPORT.md"] },
+      "adjustment": "Once a released Codex stops silently truncating AGENTS.md, drop the HOST-SUPPORT.md truncation caveat; keep generated guidance concise either way.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "anomalyco/opencode#38266",
+      "url": "https://github.com/anomalyco/opencode/issues/38266",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "opencode serve: local stdio MCP connection silently dropped mid-session — tools become permanently unavailable",
+      "dependency": "opencode",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "opencode-ai", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["docs/HOST-SUPPORT.md"] },
+      "adjustment": "Once a released OpenCode keeps local stdio MCP connections alive under serve, drop the HOST-SUPPORT.md caveat.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "anomalyco/opencode#13715",
+      "url": "https://github.com/anomalyco/opencode/issues/13715",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "Permission asks from nested subagent sessions silently hang",
+      "dependency": "opencode",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "opencode-ai", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["docs/HOST-SUPPORT.md"] },
+      "adjustment": "Once a released OpenCode resolves nested subagent permission prompts, drop the HOST-SUPPORT.md caveat.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "anomalyco/opencode#33223",
+      "url": "https://github.com/anomalyco/opencode/issues/33223",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "Subagent permission rules are ignored, hence deny rules never applied",
+      "dependency": "opencode",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "opencode-ai", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["docs/HOST-SUPPORT.md"] },
+      "adjustment": "Once a released OpenCode applies subagent permission deny rules, drop the HOST-SUPPORT.md caveat.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "anomalyco/opencode#40348",
+      "url": "https://github.com/anomalyco/opencode/issues/40348",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "Global ~/.config/opencode/AGENTS.md rules are repeatedly forgotten (e.g. 'no auto-commit') across sessions",
+      "dependency": "opencode",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "opencode-ai", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["docs/HOST-SUPPORT.md"] },
+      "adjustment": "Once a released OpenCode keeps global AGENTS.md rules across sessions, drop the HOST-SUPPORT.md caveat.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#2360",
+      "url": "https://github.com/ruvnet/ruflo/issues/2360",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "Daemon self-terminating TTL + global status, honest HNSW/init footguns (carry-forward from pacphi/ruflo-machine-ref)",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["README.md"] },
+      "adjustment": "None: closed upstream; cited in README.md as background.",
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-06-12", "event": "closed", "note": "completed" },
+        { "date": "2026-09-27", "event": "registered" },
+        { "date": "2026-09-27", "event": "retired", "note": "closed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#2887",
+      "url": "https://github.com/ruvnet/ruflo/issues/2887",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "`agentdb_hierarchical-store` (MCP) returns `success:true` but persists NOTHING — silent data loss",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["docs/HOST-SUPPORT.md"] },
+      "adjustment": "None: closed upstream; cited in docs/HOST-SUPPORT.md as background.",
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-08-11", "event": "closed", "note": "completed" },
+        { "date": "2026-09-27", "event": "registered" },
+        { "date": "2026-09-27", "event": "retired", "note": "closed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#2661",
+      "url": "https://github.com/ruvnet/ruflo/issues/2661",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "[P0] Worktree daemon fanout exhausts Claude quota: add global scheduler, leases, and cost fuse",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["docs/UPGRADING.md"] },
+      "adjustment": "None: closed upstream; cited in docs/UPGRADING.md as background.",
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-07-18", "event": "closed", "note": "completed" },
+        { "date": "2026-09-27", "event": "registered" },
+        { "date": "2026-09-27", "event": "retired", "note": "closed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#615",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/615",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "security: supported local embedding install introduces four High npm audit findings",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["docs/HOST-SUPPORT.md"] },
+      "adjustment": "None: closed upstream; cited in docs/HOST-SUPPORT.md as background.",
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-08-30", "event": "closed", "note": "completed" },
+        { "date": "2026-09-27", "event": "registered" },
+        { "date": "2026-09-27", "event": "retired", "note": "closed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "stuinfla/ruvnet-brain#77",
+      "url": "https://github.com/stuinfla/ruvnet-brain/issues/77",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "[release regression] Keep the Brain bundle, Claude plugin, and Codex plugin in version lockstep",
+      "dependency": "ruvnet-brain",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["docs/HOST-SUPPORT.md"] },
+      "adjustment": "None: closed upstream; cited in docs/HOST-SUPPORT.md as background.",
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-08-07", "event": "closed", "note": "completed" },
+        { "date": "2026-09-27", "event": "registered" },
+        { "date": "2026-09-27", "event": "retired", "note": "closed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "stuinfla/ruvnet-brain#78",
+      "url": "https://github.com/stuinfla/ruvnet-brain/issues/78",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "[Codex] search_ruvnet disappears when tools/list waits on warmup past Codex startup timeout",
+      "dependency": "ruvnet-brain",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["docs/HOST-SUPPORT.md"] },
+      "adjustment": "None: closed upstream; cited in docs/HOST-SUPPORT.md as background.",
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-08-06", "event": "closed", "note": "completed" },
+        { "date": "2026-09-27", "event": "registered" },
+        { "date": "2026-09-27", "event": "retired", "note": "closed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "stuinfla/ruvnet-brain#84",
+      "url": "https://github.com/stuinfla/ruvnet-brain/issues/84",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "PreToolUse:Agent/Task hooks resolve ~140ms after tool_dispatch_end — cannot block subagent dispatch even when the hook is correct",
+      "dependency": "ruvnet-brain",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["docs/HOST-SUPPORT.md"] },
+      "adjustment": "None: closed upstream; cited in docs/HOST-SUPPORT.md as background.",
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-08-06", "event": "closed", "note": "completed" },
+        { "date": "2026-09-27", "event": "registered" },
+        { "date": "2026-09-27", "event": "retired", "note": "closed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "anthropics/claude-code#83675",
+      "url": "https://github.com/anthropics/claude-code/issues/83675",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "Custom statusLine never renders (built-in footer badge row works) — 2.1.220, macOS 15.6, native",
+      "dependency": "claude-code",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["docs/HOST-SUPPORT.md"] },
+      "adjustment": "None: closed as not planned; cited in docs/HOST-SUPPORT.md as background.",
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-06", "event": "closed", "note": "not_planned" },
+        { "date": "2026-09-27", "event": "registered" },
+        { "date": "2026-09-27", "event": "retired", "note": "closed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "openai/codex#14489",
+      "url": "https://github.com/openai/codex/issues/14489",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "Change `TokenCount` to not re-emit `last_token_usage` on rate-limit-only updates",
+      "dependency": "codex",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["docs/CODEX-USAGE-DIAGNOSTIC.md"] },
+      "adjustment": "None: closed as not planned; cited in docs/CODEX-USAGE-DIAGNOSTIC.md as background.",
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-04-18", "event": "closed", "note": "not_planned" },
+        { "date": "2026-09-27", "event": "registered" },
+        { "date": "2026-09-27", "event": "retired", "note": "closed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#2786",
+      "url": "https://github.com/ruvnet/ruflo/issues/2786",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "AgentDB silently fails to initialize when memory.db is encrypted-at-rest (CLAUDE_FLOW_ENCRYPT_AT_REST) — learningSystem/reasoningBank permanently null, no diagnostic surfaced",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["pacphi/agentic-kit#213: keep both memory stores"], "files": [] },
+      "adjustment": "None: the fix is the deliberate two-store design ak keeps (AgentDB has its own plaintext file so memory.db can be encrypted at rest).",
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-07-26", "event": "closed", "note": "completed" },
+        { "date": "2026-09-27", "event": "registered" },
+        { "date": "2026-09-27", "event": "retired", "note": "deliberate design: AgentDB keeps its own plaintext file for encryption at rest; ak keeps both stores" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#3143",
+      "url": "https://github.com/ruvnet/ruflo/issues/3143",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "memory bridge ignores later explicit dbPath values: first ControllerRegistry silently wins across project and user stores",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "registered" }
+      ],
+      "note": "Cited by pacphi/agentic-kit#213 as related context; ak carries nothing for it today."
+    },
+    {
+      "id": "ruvnet/ruflo#2889",
+      "url": "https://github.com/ruvnet/ruflo/issues/2889",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "Encryption-at-rest (RFE1) silently orphans the memory corpus after the #2786 agentdb-memory.db split",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "registered" }
+      ],
+      "note": "Cited by pacphi/agentic-kit#213 as related context; ak carries nothing for it today."
+    },
+    {
+      "id": "ruvnet/ruflo#3195",
+      "url": "https://github.com/ruvnet/ruflo/issues/3195",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "`doctor -c memory`'s candidate-file check only ever examines `memory.db`; it never adds `agentdb-memory.db` (the native controller store, #2786) as a candidate, so the structural health check can pass while the authority file it never looked at is corrupt",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "closed", "note": "completed (PR #3431)" },
+        { "date": "2026-09-27", "event": "registered" },
+        { "date": "2026-09-27", "event": "retired", "note": "closed upstream; cited by pacphi/agentic-kit#213 as context; nothing in ak waits on it" }
       ]
     }
   ]

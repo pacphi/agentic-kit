@@ -24,17 +24,20 @@ dependency policies, constraints, and the `watch` list of upstream threads.
 2. Give the counts first, in plain language, from `counts`. Leave out groups with zero items.
 3. Then list the action items with their links, one report group at a time, in this order
    (the report's group titles):
-   - "Could not check" first, each thread with its error from `fetchErrors`: nothing about it
-     is known;
+   - "Could not check" first, each thread with its error from `fetchErrors`. When the thread
+     itself could not be read nothing about it is known; when only its release could not be
+     confirmed, its other groups still hold;
    - "Needs our reply";
    - "Released and actionable";
+   - "Released, fix not confirmed": offer to confirm by hand and record `minVersion`; never
+     dispatch it;
    - "Fixed upstream, ak still carries the workaround";
    - "Reopened upstream after ak recorded a fix";
    - "Closed upstream as not planned";
    - "No upstream activity for the stale limit";
    - "Ready to retire";
    - "Constraints past their retest date";
-   - "Tracking issues to migrate".
+   - "Our tracking issues".
 
    For each item give the id, title, URL and a one-line reason: who replied and when, which
    release, or which ak change is pending. Give "Fixed upstream, not yet released",
@@ -52,8 +55,8 @@ dependency policies, constraints, and the `watch` list of upstream threads.
   comment on the ledger issue, push, open a pull request or merge without the maintainer's
   explicit confirmation of that specific action.
 - Never merge a dispatch pull request. The maintainer merges.
-- A "candidate" release is the first version published after the fix. Confirm the fix is in
-  it before dispatching.
+- A release is actionable only when it contains the merged fixing pull request or commit
+  (`release.basis` says which). An unconfirmed release is never dispatched.
 - Issue closure alone does not prove a fix (ADR-0041 §7).
 - For events since a date, run `node scripts/upstream-watch.mjs check --since <iso-date>`.
   Each line is a ledger line: `UPSTREAM-WATCH <id> <event> <date> …`.

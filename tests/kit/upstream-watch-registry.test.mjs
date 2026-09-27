@@ -8,16 +8,21 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { UPSTREAM_REGISTRY_FILE, loadUpstreamConstraints, loadUpstreamRegistry } from '../../src/lib/hook-audit/upstream.mjs';
+import * as watchPatterns from '../../src/lib/hook-audit/upstream-watch.mjs';
 import {
-  CITATION_DIRS, canonicalRepo, findCitations, scanCitations, unregisteredCitations,
+  CITATION_DIRS, USER_DOC_EXEMPT, canonicalRepo, findCitations, scanCitations, unregisteredCitations, userFacingDocs,
 } from '../../scripts/upstream-watch/citations.mjs';
 
 const document = () => JSON.parse(fs.readFileSync(UPSTREAM_REGISTRY_FILE, 'utf8'));
-// The clock follows the registry's verification date, so a weekly re-verification is a data-only change.
-const now = () => new Date(`${document().lastVerifiedAt}T12:00:00Z`);
+// The clock follows the registry's last state re-read, so a weekly re-check is a data-only change.
+const now = () => new Date(`${document().lastCheckedAt}T12:00:00Z`);
 const ids = (text) => findCitations(text).map((citation) => citation.id);
 // Synthetic fixture ids a test uses on purpose; each must still be cited where listed.
-const SYNTHETIC = new Map([['ruvnet/ruflo#9001', ['tests/kit/conformance-tiers.test.mjs']]]);
+const SYNTHETIC = new Map([
+  ['ruvnet/ruflo#9001', ['tests/kit/conformance-tiers.test.mjs']],
+  // A placeholder id in an example command, not a real thread.
+  ['ruvnet/ruflo#1234', ['docs/AUTHORING-HOST-ADAPTERS.md']],
+]);
 // The watch tooling's own tests and fixtures spell citations as data.
 const SELF_CITING = ['tests/kit/upstream-watch-', 'tests/fixtures/upstream-watch/'];
 
@@ -40,12 +45,27 @@ const errorsOf = (mutate) => withRegistry(mutate, (result) => result.errors.join
 test('the registry carries the watch list and stays valid for the hook audit', () => {
   const registry = loadUpstreamRegistry({ now });
   assert.equal(registry.registryStatus, 'valid', registry.errors.join('\n'));
+  // A second schema bump (another branch) must show up here rather than merge silently.
+  assert.equal(document().schemaVersion, 6);
   assert.ok(registry.watch.length > 60);
   assert.equal(registry.watchPolicy.staleAfterDays, 90);
   assert.equal(registry.watchPolicy.dispatch.merge, 'never');
   const constraints = loadUpstreamConstraints({ now });
   assert.equal(constraints.registryStatus, 'valid');
   assert.equal(constraints.watch, undefined, 'the hook audit projection does not carry the watch list');
+});
+
+test('the ledger is issue #243 in the ledger repository', () => {
+  const { ledger } = loadUpstreamRegistry({ now }).watchPolicy;
+  assert.deepEqual({ repo: ledger.repo, issue: ledger.issue, issueTitle: ledger.issueTitle }, { repo: 'pacphi/agentic-kit', issue: 243, issueTitle: 'Upstream watch' });
+  assert.match(errorsOf((doc) => { doc.watchPolicy.ledger.issue = 0; }), /watchPolicy\.ledger/);
+  assert.match(errorsOf((doc) => { delete doc.watchPolicy.ledger.issue; }), /watchPolicy\.ledger/);
+});
+
+test('ruflo#3153 records that its third-party comments were reviewed', () => {
+  const history = entry(document(), 'ruvnet/ruflo#3153').history;
+  assert.ok(history.some((item) => item.event === 'reviewed' && item.date === '2026-09-27' && /sparkling/.test(item.note)));
+  assert.equal(loadUpstreamRegistry({ now }).registryStatus, 'valid');
 });
 
 test('watch entries are rejected with their id when malformed', () => {
@@ -83,6 +103,49 @@ test('release gates, history order, duplicates and dependencies are checked', ()
   assert.match(errors, /duplicate/i);
 });
 
+test('a release gate may name its tag spelling', () => {
+  const errors = errorsOf((doc) => { entry(doc, 'ruvnet/ruflo#3194').doneWhen.release.tagPattern = 'v-no-placeholder'; });
+  assert.match(errors, /ruvnet\/ruflo#3194.*tagPattern/);
+  assert.match(errorsOf((doc) => { entry(doc, 'ruvnet/ruflo#3194').doneWhen.release.tagPatern = 'v{version}'; }), /ruvnet\/ruflo#3194.*release/);
+  const codex = document().watch.filter((item) => item.id.startsWith('openai/codex#') && item.doneWhen.release);
+  assert.ok(codex.length > 0);
+  assert.ok(codex.every((item) => item.doneWhen.release.tagPattern === 'rust-v{version}'));
+});
+
+test('AgentDB threads gate on what Ruflo bundles', () => {
+  const agentdb = document().watch.filter((item) => item.id.startsWith('ruvnet/agentdb#'));
+  assert.equal(agentdb.length, 3);
+  for (const item of agentdb) {
+    assert.equal(item.dependency, 'ruflo');
+    assert.deepEqual(item.doneWhen.release.bundledBy, ['ruflo', '@claude-flow/cli']);
+  }
+  const errors = errorsOf((doc) => { entry(doc, 'ruvnet/agentdb#26').doneWhen.release.bundledBy = []; });
+  assert.match(errors, /ruvnet\/agentdb#26.*bundledBy/);
+  assert.match(errorsOf((doc) => { entry(doc, 'ruvnet/agentdb#26').doneWhen.release.bundledBy = ['ruflo', 'x y']; }), /ruvnet\/agentdb#26.*bundledBy/);
+});
+
+test('package and owner/repo patterns are defined once, and the schema spells them the same', () => {
+  const schema = JSON.parse(fs.readFileSync('docs/schemas/agentic-dependency-constraints.schema.json', 'utf8'));
+  // The first `properties.<name>` found anywhere in the schema.
+  const property = (node, name) => {
+    if (!node || typeof node !== 'object') return null;
+    if (node.properties?.[name]) return node.properties[name];
+    for (const child of Object.values(node)) {
+      const found = property(child, name);
+      if (found) return found;
+    }
+    return null;
+  };
+  const { PACKAGE_NAME, OWNER_REPO } = watchPatterns;
+  assert.ok(PACKAGE_NAME instanceof RegExp && OWNER_REPO instanceof RegExp, 'exported from src/lib/hook-audit/upstream-watch.mjs');
+  assert.equal(new RegExp(property(schema, 'bundledBy').items.pattern).source, PACKAGE_NAME.source);
+  assert.equal(new RegExp(property(property(schema, 'ledger'), 'repo').pattern).source, OWNER_REPO.source);
+  const fetchSource = fs.readFileSync('scripts/upstream-watch/fetch.mjs', 'utf8');
+  for (const copy of ['[@\\w][\\w@./-]*', '/^[\\w.-]+\\/[\\w.-]+$/', PACKAGE_NAME.source, OWNER_REPO.source]) {
+    assert.ok(!fetchSource.includes(copy), `fetch.mjs imports the pattern instead of repeating ${copy}`);
+  }
+});
+
 test('constraints and watch entries point at each other', () => {
   const unlinked = errorsOf((doc) => { entry(doc, 'ruvnet/ruflo#3167').constraintIds = []; });
   assert.match(unlinked, /ruflo-3\.38\.21-init-suppression-flags.*ruvnet\/ruflo#3167/);
@@ -101,6 +164,51 @@ test('tracking entries live in the ledger repository and track registered thread
   assert.match(errors, /ruvnet\/ruflo#3194.*tracks/);
   const tracking = document().watch.filter((item) => item.relation === 'tracking').map((item) => item.id).sort();
   assert.deepEqual(tracking, ['pacphi/agentic-kit#213', 'pacphi/agentic-kit#240']);
+});
+
+test('the tracking issues carry their whole upstream remainder', () => {
+  const doc = document();
+  const t213 = entry(doc, 'pacphi/agentic-kit#213');
+  assert.deepEqual([...t213.tracks].sort(), ['ruvnet/ruflo#3196', 'ruvnet/ruflo#3446', 'ruvnet/ruflo#3450']);
+  assert.ok(t213.history.some((item) => item.event === 'commented' && item.date === '2026-09-27'));
+  for (const id of ['ruvnet/ruflo#2786', 'ruvnet/ruflo#3143', 'ruvnet/ruflo#2889', 'ruvnet/ruflo#3195']) assert.ok(entry(doc, id), id);
+  // Two stores are deliberate (ruflo#2786): a unified path would be a red flag, not the fix ak waits for.
+  assert.doesNotMatch(entry(doc, 'ruvnet/ruflo#3196').adjustment, /routes MCP memory operations to the CLI database/);
+  assert.match(entry(doc, 'ruvnet/ruflo#3196').adjustment, /preservation or migration/);
+  const t240 = entry(doc, 'pacphi/agentic-kit#240');
+  assert.deepEqual([...t240.tracks].sort(), ['proffesor-for-testing/agentic-qe#574', 'proffesor-for-testing/agentic-qe#719']);
+  assert.match(t240.adjustment, /agentic-qe#574/);
+  assert.ok(t240.kitImpact.files.includes('src/lib/aqe-readiness.mjs'));
+});
+
+// agentic-qe#719 is a partial fix for #574: releasing it alone must not dispatch removing the busy rule.
+test('the partial fix agentic-qe#719 is context only; agentic-qe#574 drives the dispatch', () => {
+  const doc = document();
+  const partial = entry(doc, 'proffesor-for-testing/agentic-qe#719');
+  assert.equal(partial.mapping, 'unmapped');
+  assert.equal(partial.adjustment, null);
+  assert.equal(partial.kitImpact, null);
+  assert.match(partial.note, /agentic-qe#574/);
+  const driver = entry(doc, 'proffesor-for-testing/agentic-qe#574');
+  assert.equal(driver.mapping, 'mapped');
+  assert.match(driver.adjustment, /busy rule/);
+});
+
+test('stale threads are mapped to what ak carries, or retired with a reason', () => {
+  const doc = document();
+  const clear = entry(doc, 'openai/codex#16045');
+  assert.equal(clear.mapping, 'mapped');
+  assert.deepEqual(clear.kitImpact.files, ['src/lib/host-health-connected.mjs']);
+  assert.equal(clear.status, 'watching');
+  const statusLine = entry(doc, 'openai/codex#16921');
+  assert.equal(statusLine.status, 'retired');
+  assert.match(statusLine.history.at(-1).note, /openai\/codex#17827/);
+  const watched = entry(doc, 'openai/codex#17827');
+  assert.equal(watched.status, 'watching');
+  assert.equal(watched.adjustment, statusLine.adjustment);
+  const groups = entry(doc, 'ruvnet/ruflo#952');
+  assert.equal(groups.status, 'watching');
+  assert.match(groups.adjustment, /execution/);
 });
 
 test('an invalid watch list makes the whole registry invalid for the hook audit too', () => {
@@ -132,8 +240,9 @@ test('findCitations recognizes URLs, qualified ids, aliases and continuations', 
   assert.deepEqual(ids('upstream #2221 and pacphi/agentic-kit#240 and @claude-flow/codex#1'), []);
 });
 
-test('every watched-repository thread cited in tracked source is registered', () => {
-  const citations = new Map([...scanCitations({ root: process.cwd(), dirs: CITATION_DIRS })]
+test('every watched-repository thread cited in tracked source or user-facing docs is registered', () => {
+  const dirs = [...CITATION_DIRS, ...userFacingDocs(process.cwd())];
+  const citations = new Map([...scanCitations({ root: process.cwd(), dirs })]
     .map(([id, files]) => [id, files.filter((file) => !SELF_CITING.some((prefix) => file.startsWith(prefix)))])
     .filter(([, files]) => files.length));
   const missing = unregisteredCitations(document().watch.map((item) => item.id), citations, SYNTHETIC);
@@ -142,6 +251,17 @@ test('every watched-repository thread cited in tracked source is registered', ()
   for (const [id, files] of SYNTHETIC) {
     for (const file of files) assert.ok((citations.get(id) ?? []).includes(file), `${id} is no longer cited in ${file}; drop it from SYNTHETIC`);
   }
+});
+
+test('user-facing docs are scanned; history and research are exempt by name', () => {
+  const docs = userFacingDocs(process.cwd());
+  assert.ok(docs.includes('README.md') && docs.includes('docs/HOST-SUPPORT.md') && docs.includes('docs/UPSTREAM-WATCH.md'));
+  for (const [file, reason] of USER_DOC_EXEMPT) {
+    assert.ok(!docs.includes(file), file);
+    assert.ok(fs.existsSync(file), `${file} no longer exists; drop its exemption`);
+    assert.match(reason, /\w/);
+  }
+  assert.ok(docs.every((file) => file === 'README.md' || /^docs\/[^/]+\.md$/.test(file)), 'only top-level guides; ADRs, audits, plans and research are history');
 });
 
 test('every kit file a watch entry names exists and still cites the thread', () => {
@@ -174,4 +294,16 @@ test('every upstream thread the audit record lists as filed is registered', () =
   assert.ok(filed.length >= 5, `found only ${filed.length} threads in Item 6`);
   const registered = new Set(document().watch.map((entry) => entry.id));
   assert.deepEqual(filed.filter((id) => !registered.has(id)), []);
+});
+
+test('the audit record carries the Branch 4 decisions in decision format', () => {
+  const audit = fs.readFileSync('docs/audits/2026-09-26-issues-237-238-239-verification-and-decisions.md', 'utf8').replace(/\r\n/g, '\n');
+  const start = audit.indexOf('## Branch 4 decisions');
+  assert.ok(start > 0);
+  const next = audit.indexOf('\n## ', start + 1);
+  const section = audit.slice(start, next === -1 ? undefined : next);
+  for (const id of ['B4-G1', 'B4-G2', 'B4-Q1', 'B4-Q2', 'B4-Q3']) assert.match(section, new RegExp(`### ${id} `));
+  for (const part of ['**The situation.**', '**The problem.**', '**What the user sees.**', '**What should be the case.**', '**The choices.**', '**Recommendation', '**Choice']) {
+    assert.ok(section.split(part).length - 1 >= 5, part);
+  }
 });

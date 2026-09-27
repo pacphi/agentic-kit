@@ -50,3 +50,11 @@ test('the skill names every report group the watcher can produce', () => {
   assert.deepEqual(missing, []);
   assert.match(claude, /fetchErrors/, 'an unchecked thread is reported with its error');
 });
+
+// #213 and #240 are already registry entries; nothing says they still migrate.
+test('tracking issues are named as ours, not as issues to migrate', () => {
+  assert.equal(Object.fromEntries(GROUPS).tracking, 'Our tracking issues');
+  for (const file of [...SKILLS, 'docs/UPSTREAM-WATCH.md']) {
+    assert.doesNotMatch(readText(file), /to migrate|migrates? here/i, file);
+  }
+});

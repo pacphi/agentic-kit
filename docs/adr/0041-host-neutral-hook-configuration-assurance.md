@@ -2,7 +2,11 @@
 
 - **Status:** Accepted; static assurance, transactional healing, bounded receipts, and read model implemented
 - **Date:** 2026-09-01
-- **Updated:** 2026-09-26 — §7: the registry ships inside `src/`, holds the watched upstream
+- **Updated:** 2026-09-27 — §7: schema 6 separates `lastCheckedAt` (state re-read) from
+  `lastVerifiedAt`/`nextRetestAt` (conformance); a release counts only when it contains the
+  merged fixing change; AgentDB fixes count when Ruflo bundles them; the guard covers
+  user-facing docs; the ledger is pacphi/agentic-kit#243
+- **Earlier update:** 2026-09-26 — §7: the registry ships inside `src/`, holds the watched upstream
   threads beside the constraints, and feeds the deterministic upstream watch, whose ledger is
   read from the routine's and our logins' comments only
 - **Earlier update:** 2026-09-09 — reconciled against repository source and tests for issue #211
@@ -199,23 +203,30 @@ does not prove a fix; an open issue does not by itself prove the installed versi
 affected.
 
 The same file is the only upstream registry. It ships beside its loader because the hook audit
-reads it at runtime. Schema 5 adds a watch policy and a watch list: every upstream issue or
-pull request ak filed, commented on, or cites in `src/`, `bin/`, `claude/` or `tests/`, plus
-ak's own tracking issues that migrate into it. Each watched thread names its dependency, whose
+reads it at runtime. Schema 6 holds a watch policy and a watch list: every upstream issue or
+pull request ak filed, commented on, or cites in `src/`, `bin/`, `claude/`, `tests/`,
+`README.md` or a top-level `docs/` guide (dated audits, proposals and research references are
+exempt by name), plus ak's own tracking issues. Schema 6 also keeps two dates apart:
+`lastCheckedAt` is the weekly state re-read (and the tests' clock), while `lastVerifiedAt` and
+each constraint's `nextRetestAt` move only after a conformance run. Each watched thread names its dependency, whose
 policy supplies the publication rule and the removal proof; what done means (closed as
 completed or merged, and the release channel and first fixed version when known); the ak files
 and plan references it affects; the adjustment ak makes; linked constraints; and dated history.
 Every constraint with an issue has a watch entry naming it, and an invalid watch list makes the
-whole registry invalid, for the hook audit too. A guard test fails when source cites a
-watched-repository thread the list lacks.
+whole registry invalid, for the hook audit too. A guard test fails when source or a user-facing
+doc cites a watched-repository thread the list lacks.
 
 A watched thread moves through `watching`, `fixed-unreleased`, `released`, `dispatched`,
 `adopted` and `retired`. The deterministic `scripts/upstream-watch.mjs` (maintainer tooling,
 not shipped) reads GitHub and npm and never writes. It reports replies we owe, released fixes
 ready for ak, workarounds ak still carries, stale threads (no upstream activity for 90 days),
 not-planned closures, retirement candidates, constraints past their retest date, and a registry
-with nothing left to watch. Its ledger lines, `UPSTREAM-WATCH <id> <event> <date> …`, go to one
-pinned, locked "Upstream watch" issue; the routine reads only its own and our logins' comments
+with nothing left to watch. A release counts only when its tag contains the merged pull request
+or commit that fixed the thread, or the registry records the first fixed version; a later
+release it cannot prove is reported as "fix not confirmed" and never dispatched. AgentDB, which
+ak gets through Ruflo, counts as released only when the newest Ruflo (npm `latest`) resolves to
+a fixed agentdb. Its ledger lines, `UPSTREAM-WATCH <id> <event> <date> …`, go to one
+pinned, locked "Upstream watch" issue (pacphi/agentic-kit#243); the routine reads only its own and our logins' comments
 there, so an exact line it recorded is never acted on twice and nobody else can suppress one. Dispatch of a released
 thread is a branch `upstream/<id>` and a draft pull request that makes the adjustment
 test-first and passes the dependency's removal proof. It never merges. Publishing upstream

@@ -4,12 +4,16 @@
 // thread with `gh` and `npm`, and prints a report or ledger event lines. It
 // never writes to GitHub, npm or the registry; acting on the output is the
 // maintainer's (or the routine's) job, under the registry's approval policy.
+// POSIX only: on Windows `npm` is a .cmd file that execFile cannot start
+// without a shell, and a shell would misread the caret ranges passed to npm.
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { loadUpstreamRegistry } from '../src/lib/hook-audit/upstream.mjs';
-import { buildReport, ledgerEvents, upstreamOf, withoutRecorded } from './upstream-watch/classify.mjs';
+import {
+  buildReport, candidateVersions, confirmationStart, ledgerEvents, nextRelease, tagRefs, upstreamOf, withoutRecorded,
+} from './upstream-watch/classify.mjs';
 import { createFetcher, mapLimit } from './upstream-watch/fetch.mjs';
 import { renderEvents, renderReport } from './upstream-watch/render.mjs';
 
@@ -53,6 +57,52 @@ export function parseArgs(argv) {
   return options;
 }
 
+// Without a recorded first fixed version, a release counts only when it
+// contains the merged fixing change: walk the releases published after that
+// change merged in the order nextRelease gives (oldest first, then the newest,
+// then the gap) until it finds the oldest release not ruled out.
+async function confirmReleases(entries, live, fetcher, concurrency, fetchErrors) {
+  await mapLimit(entries, concurrency, async (entry) => {
+    const state = live.get(entry.id);
+    try {
+      const changes = await fetcher.fixingChanges(entry.id);
+      const checks = [];
+      if (changes.length) {
+        const candidates = candidateVersions(confirmationStart(upstreamOf(state.thread).fixedAt, { changes }), state.release);
+        for (let item = nextRelease(candidates, checks, state.release); item; item = nextRelease(candidates, checks, state.release)) {
+          const found = await fetcher.contains(changes[0].repo, tagRefs(entry.doneWhen.release, item.version), changes[0].sha);
+          checks.push({ version: item.version, ...found });
+        }
+      }
+      state.confirmation = { changes, checks };
+    } catch (error) {
+      // The release is "Could not check"; the thread already read is kept, so its
+      // closed, reply and acknowledged lines are not lost.
+      state.confirmation = { changes: [], checks: [], error: error.message };
+      fetchErrors.push({ id: entry.id, error: error.message });
+    }
+  });
+}
+
+// What the newest carrier (Ruflo for AgentDB) installs, once per chain; a
+// failure leaves `bundle` unset, so the entry is "Could not check".
+async function resolveBundles(entries, live, fetcher, concurrency, fetchErrors) {
+  const keyOf = (gate) => [...gate.bundledBy, gate.name].join('>');
+  const chains = [...new Map(entries.map((entry) => [keyOf(entry.doneWhen.release), entry.doneWhen.release])).entries()];
+  const bundles = new Map();
+  await mapLimit(chains, concurrency, async ([key, gate]) => {
+    try {
+      bundles.set(key, await fetcher.bundled(gate.bundledBy, gate.name));
+    } catch (error) {
+      for (const entry of entries.filter((item) => keyOf(item.doneWhen.release) === key)) fetchErrors.push({ id: entry.id, error: error.message });
+    }
+  });
+  for (const entry of entries) {
+    const bundle = bundles.get(keyOf(entry.doneWhen.release));
+    if (bundle) live.get(entry.id).bundle = bundle;
+  }
+}
+
 async function collect(registry, fetcher, concurrency) {
   const active = registry.watch.filter((entry) => entry.status !== 'retired');
   const live = new Map();
@@ -80,6 +130,8 @@ async function collect(registry, fetcher, concurrency) {
   for (const entry of gated) {
     live.get(entry.id).release = facts.get(`${entry.doneWhen.release.channel}:${entry.doneWhen.release.name}`) ?? null;
   }
+  await confirmReleases(gated.filter((entry) => !entry.doneWhen.release.minVersion && live.get(entry.id).release), live, fetcher, concurrency, fetchErrors);
+  await resolveBundles(gated.filter((entry) => entry.doneWhen.release.bundledBy), live, fetcher, concurrency, fetchErrors);
   fetchErrors.sort((a, b) => a.id.localeCompare(b.id));
   return { live, fetchErrors };
 }
@@ -115,8 +167,12 @@ export async function main(argv, {
     return 0;
   }
   const events = offline ? [] : withoutRecorded(ledgerEvents(report, registry, { since: options.since }), ledgerText);
-  if (options.json) stdout.write(`${JSON.stringify({ since: options.since, offline, events }, null, 2)}\n`);
-  else stdout.write(offline ? `No events: ${offline}\n` : renderEvents(events));
+  if (options.json) stdout.write(`${JSON.stringify({ since: options.since, offline, events, fetchErrors }, null, 2)}\n`);
+  else {
+    // stdout stays ledger lines only; what could not be checked goes to stderr.
+    for (const item of fetchErrors) stderr.write(`Could not check ${item.id}: ${item.error}\n`);
+    stdout.write(offline ? `No events: ${offline}\n` : renderEvents(events));
+  }
   return 0;
 }
 

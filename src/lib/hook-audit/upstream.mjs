@@ -33,6 +33,19 @@ function affectedBy(version, ranges) {
     || (/^\d+\.x$/.test(range) && version.startsWith(`${range.slice(0, -1)}`)));
 }
 
+// lastCheckedAt is the last state re-read (issue states, npm releases);
+// lastVerifiedAt is the last date every constraint's retest was re-run.
+function checkDates(document, asOf, errors) {
+  const future = (value) => Date.parse(`${value}T00:00:00Z`) > asOf.getTime();
+  if (!validDate(document?.lastVerifiedAt)) errors.push('lastVerifiedAt must be an ISO date');
+  else if (future(document.lastVerifiedAt)) errors.push('lastVerifiedAt cannot be in the future');
+  if (!validDate(document?.lastCheckedAt)) errors.push('lastCheckedAt must be an ISO date');
+  else if (future(document.lastCheckedAt)) errors.push('lastCheckedAt cannot be in the future');
+  else if (validDate(document?.lastVerifiedAt) && document.lastCheckedAt < document.lastVerifiedAt) {
+    errors.push('lastCheckedAt precedes lastVerifiedAt');
+  }
+}
+
 function loadRegistry({
   file = defaultFile, observedVersions = {}, now = () => new Date(),
 } = {}) {
@@ -46,14 +59,10 @@ function loadRegistry({
   const document = source.document;
   const errors = [];
   const asOf = now();
-  if (document?.schemaVersion !== 5) errors.push('unsupported upstream constraint schema');
+  if (document?.schemaVersion !== 6) errors.push('unsupported upstream constraint schema');
   if (!Array.isArray(document?.constraints)) errors.push('constraints must be an array');
   if (!Array.isArray(document?.dependencyPolicies)) errors.push('dependencyPolicies must be an array');
-  if (!validDate(document?.lastVerifiedAt)) errors.push('lastVerifiedAt must be an ISO date');
-  if (validDate(document?.lastVerifiedAt)
-      && Date.parse(`${document.lastVerifiedAt}T00:00:00Z`) > asOf.getTime()) {
-    errors.push('lastVerifiedAt cannot be in the future');
-  }
+  checkDates(document, asOf, errors);
   if (!Number.isInteger(document?.recheckPolicy?.staleAfterDays) || document.recheckPolicy.staleAfterDays <= 0) {
     errors.push('recheckPolicy.staleAfterDays must be a positive integer');
   }
@@ -98,10 +107,11 @@ function loadRegistry({
     if (!valid) errors.push(`constraint ${index} is invalid`);
     return valid;
   }) : [];
-  const lastVerified = validDate(document?.lastVerifiedAt) ? Date.parse(`${document.lastVerifiedAt}T00:00:00Z`) : NaN;
+  // The staleness rule keys on the last state re-read; per-constraint retests key on nextRetestAt.
+  const lastChecked = validDate(document?.lastCheckedAt) ? Date.parse(`${document.lastCheckedAt}T00:00:00Z`) : NaN;
   const staleAfterMs = Number(document?.recheckPolicy?.staleAfterDays) * 86_400_000;
-  const registryStale = Number.isFinite(lastVerified) && Number.isFinite(staleAfterMs)
-    ? asOf.getTime() - lastVerified > staleAfterMs : true;
+  const registryStale = Number.isFinite(lastChecked) && Number.isFinite(staleAfterMs)
+    ? asOf.getTime() - lastChecked > staleAfterMs : true;
   const projected = constraints.map((entry) => {
     const observedVersion = observedVersions[entry.dependency] ?? null;
     const applicability = affectedBy(observedVersion, entry.affected);
@@ -140,6 +150,7 @@ function loadRegistry({
       registryStatus: errors.length ? 'invalid' : 'valid', evidenceStatus,
       source: publicSource(source),
       lastVerifiedAt: document?.lastVerifiedAt ?? null,
+      lastCheckedAt: document?.lastCheckedAt ?? null,
       recheckPolicy: document?.recheckPolicy ?? null,
       dependencyPolicies, constraints: projected, errors,
     },
