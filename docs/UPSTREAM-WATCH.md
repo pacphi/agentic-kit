@@ -76,7 +76,7 @@ node scripts/upstream-watch.mjs check --since <iso-date> [--ledger <file>] [--js
 | Needs our reply | A comment from someone else, not a bot, after our last word (a filed issue's body counts) and after the entry's last status change. Automated acknowledgements show as "acknowledged" instead. |
 | Released and actionable | Upstream fixed, a release contains the fix, the entry is `watching` or `fixed-unreleased`, and ak has an adjustment. Carries the dispatch branch and removal proof. With no recorded first fixed version, the first release after the fix is a **candidate**: confirm it contains the fix. |
 | Fixed upstream, ak still carries the workaround | The entry is `released` or `dispatched` and ak has an adjustment. |
-| Fixed upstream, not yet released | Upstream fixed, no release contains it, and the entry is `watching` or `fixed-unreleased`. |
+| Fixed upstream, not yet released | Upstream fixed, no release contains it, the entry is `watching` or `fixed-unreleased`, and ak has an adjustment. |
 | Reopened upstream | Open upstream while the entry says fixed, released, dispatched or adopted. |
 | Waiting on upstream | Open, not stale, and nobody is waiting on us. |
 | No upstream activity for 90+ days | Open, and nobody but us has written for `staleAfterDays`. |
@@ -85,6 +85,7 @@ node scripts/upstream-watch.mjs check --since <iso-date> [--ledger <file>] [--js
 | Constraints past their retest date | A constraint's `nextRetestAt` has passed. |
 | Tracking issues to migrate | Open `tracking` entries. |
 | Unmapped | No ak change recorded. |
+| Could not check | Reading the thread or the release failed; the report names the error. Nothing about the thread is known. |
 
 ## The ledger
 
