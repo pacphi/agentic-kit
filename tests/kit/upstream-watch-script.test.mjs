@@ -548,6 +548,16 @@ test('collect resolves each bundling chain once and reports a failure as "Could 
     assert.deepEqual(report.groups.find((group) => group.key === 'unchecked').items.map((item) => item.id), ['ruvnet/agentdb#26', 'ruvnet/agentdb#27']);
     assert.ok(report.fetchErrors.some((item) => /ETIMEDOUT/.test(item.error)));
   });
+  // Without a recorded minVersion (every live agentdb gate), a failed resolution is still "Could not check".
+  const unrecorded = entry('ruvnet/agentdb#28', { dependency: 'ruflo', doneWhen: { state: 'closed-completed', release: { ...gate, minVersion: null } } });
+  await withRegistryFile([unrecorded], async (file) => {
+    const failed = capture();
+    await main(['report', '--json', '--registry', file], { fetcher: fetcher(() => { throw new Error('npm view ruflo failed: ETIMEDOUT'); }), stdout: failed.stream, stderr: capture().stream, now: NOW });
+    const report = JSON.parse(failed.text());
+    assert.deepEqual(report.groups.find((group) => group.key === 'unchecked').items.map((item) => item.id), ['ruvnet/agentdb#28']);
+    assert.equal(report.counts['release-unconfirmed'], 0);
+    assert.match(report.entries.find((item) => item.id === 'ruvnet/agentdb#28').release.basis, /could not resolve the agentdb that ruflo bundles/);
+  });
 });
 
 function fixtureFetcher({ authenticated = true } = {}) {

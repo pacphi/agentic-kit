@@ -134,7 +134,8 @@ release produces a `released` line, so only a confirmed release is dispatched.
 
 A gate with `bundledBy` (AgentDB: `["ruflo", "@claude-flow/cli"]`) also resolves what the newest
 carrier installs: npm `latest` of the first package, then each manifest's dependency range down
-the chain, each resolved to its highest published match. The fix counts as released only when
+the chain, each resolved to its highest published match. A failed resolution is "Could not
+check", whether or not the fix itself was confirmed. The fix counts as released only when
 that version is at or after the fixed one. The `released` line's `version=` is then the fixed
 version of the bundled package, so a later carrier release repeats no line; the report's basis
 names the carrier version that bundles it.

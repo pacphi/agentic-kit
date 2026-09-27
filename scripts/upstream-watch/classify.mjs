@@ -112,10 +112,14 @@ const changeLabel = (change) => (change.pr ? `PR #${change.pr}` : `commit ${chan
  * own release state; `bundle` is what the carrier resolves it to.
  */
 function bundledState(gate, base, bundle) {
+  const unresolved = `could not resolve the ${gate.name} that ${gate.bundledBy[0]} bundles`;
+  // A failed resolution is "Could not check" whether or not the package's own release is confirmed.
+  if (!bundle && (base.released === true || base.released === 'unconfirmed')) {
+    return { released: null, basis: base.released === true ? unresolved : `${base.basis}; ${unresolved}`, version: null, date: null };
+  }
   const carries = bundle ? `${bundle.carrier} ${bundle.carrierVersion} bundles ${gate.name} ${bundle.version ?? 'none'}` : null;
-  if (base.released === 'unconfirmed') return { ...base, basis: `${base.basis}; ${carries ?? `what ${gate.bundledBy[0]} bundles is unknown`}` };
+  if (base.released === 'unconfirmed') return { ...base, basis: `${base.basis}; ${carries}` };
   if (base.released !== true) return base;
-  if (!bundle) return { released: null, basis: `could not resolve the ${gate.name} that ${gate.bundledBy[0]} bundles`, version: null, date: null };
   if (!bundle.version || compareVersions(bundle.version, base.version) < 0) {
     return { released: false, basis: `${carries}, before the fix in ${base.version}`, version: null, date: null };
   }
