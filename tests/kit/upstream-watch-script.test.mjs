@@ -257,6 +257,76 @@ test('the fetcher reads a thread and its paginated comments through gh api', asy
   await assert.rejects(fetcher.thread('ruvnet/ruflo#1'), /unexpected call/);
 });
 
+const confirmations = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'confirmations.json'), 'utf8'));
+
+test('fixingChanges keeps only merged pull requests into the default branch', async () => {
+  const { exec, calls } = fakeExec([
+    [/^gh api graphql .*number=3167/, { status: 0, stdout: JSON.stringify(confirmations.graphql['ruvnet/ruflo#3167']), stderr: '' }],
+  ]);
+  // #3167 also lists the unmerged PR #3373 among its closing references.
+  const changes = await createFetcher({ exec }).fixingChanges('ruvnet/ruflo#3167');
+  assert.deepEqual(changes, [{ repo: 'ruvnet/ruflo', pr: 3434, sha: '856249ed7e35e604fa58a3b93179570d7998b9d3' }]);
+  assert.ok(calls.every((call) => call.startsWith('gh api graphql')), 'read-only: graphql query only');
+});
+
+test('fixingChanges drops an off-branch merge and falls back to the closing commit', async () => {
+  const recorded = clone(confirmations.graphql['ruvnet/ruflo#3194']);
+  const issue = recorded.data.repository.issueOrPullRequest;
+  issue.closedByPullRequestsReferences.nodes[0].baseRefName = 'release/3.x';
+  issue.timelineItems.nodes = [{ closer: { __typename: 'Commit', oid: 'abc1234abc1234abc1234abc1234abc1234abc12' } }];
+  const { exec } = fakeExec([[/^gh api graphql/, { status: 0, stdout: JSON.stringify(recorded), stderr: '' }]]);
+  assert.deepEqual(await createFetcher({ exec }).fixingChanges('ruvnet/ruflo#3194'),
+    [{ repo: 'ruvnet/ruflo', pr: null, sha: 'abc1234abc1234abc1234abc1234abc1234abc12' }]);
+});
+
+test('fixingChanges: unmerged, off-branch or hand-closed threads have no fixing change', async () => {
+  const offBranch = clone(confirmations.graphql['ruvnet/ruflo#3194']);
+  const issue = offBranch.data.repository.issueOrPullRequest;
+  issue.closedByPullRequestsReferences.nodes[0].baseRefName = 'release/3.x';
+  issue.timelineItems.nodes[0].closer.baseRefName = 'release/3.x';
+  const byHand = clone(confirmations.graphql['ruvnet/ruflo#3194']);
+  byHand.data.repository.issueOrPullRequest.closedByPullRequestsReferences.nodes = [];
+  byHand.data.repository.issueOrPullRequest.timelineItems.nodes = [{ closer: null }];
+  const unmerged = clone(confirmations.graphql['ruvnet/ruflo#3167']);
+  unmerged.data.repository.issueOrPullRequest.closedByPullRequestsReferences.nodes.splice(1);
+  unmerged.data.repository.issueOrPullRequest.timelineItems.nodes = [];
+  const openPr = { data: { repository: { defaultBranchRef: { name: 'main' }, issueOrPullRequest: {
+    __typename: 'PullRequest', number: 3373, merged: false, baseRefName: 'main', mergeCommit: null, repository: { nameWithOwner: 'ruvnet/ruflo' },
+  } } } };
+  for (const recorded of [offBranch, byHand, unmerged, openPr]) {
+    const { exec } = fakeExec([[/^gh api graphql/, { status: 0, stdout: JSON.stringify(recorded), stderr: '' }]]);
+    assert.deepEqual(await createFetcher({ exec }).fixingChanges('ruvnet/ruflo#3194'), []);
+  }
+  const mergedPr = clone(openPr);
+  Object.assign(mergedPr.data.repository.issueOrPullRequest, { number: 3434, merged: true, mergeCommit: { oid: '856249ed7e35e604fa58a3b93179570d7998b9d3' } });
+  const { exec } = fakeExec([[/^gh api graphql/, { status: 0, stdout: JSON.stringify(mergedPr), stderr: '' }]]);
+  assert.deepEqual(await createFetcher({ exec }).fixingChanges('ruvnet/ruflo#3434'),
+    [{ repo: 'ruvnet/ruflo', pr: 3434, sha: '856249ed7e35e604fa58a3b93179570d7998b9d3' }]);
+});
+
+test('contains: behind or identical is contained, a missing tag is unknown, other failures throw', async () => {
+  const sha = '856249ed7e35e604fa58a3b93179570d7998b9d3';
+  const behind = JSON.stringify(confirmations.compare[`ruvnet/ruflo v3.46.0...${sha}`]);
+  const { exec, calls } = fakeExec([
+    [/compare\/v3\.46\.0\.\.\./, { status: 0, stdout: behind, stderr: '' }],
+    [/compare\/v3\.46\.1\.\.\./, { status: 0, stdout: JSON.stringify({ status: 'identical', ahead_by: 0, behind_by: 0 }), stderr: '' }],
+    [/compare\/v3\.45\.0\.\.\./, { status: 0, stdout: JSON.stringify({ status: 'ahead', ahead_by: 3, behind_by: 0 }), stderr: '' }],
+    [/compare\/v3\.44\.0\.\.\./, { status: 0, stdout: JSON.stringify({ status: 'diverged', ahead_by: 3, behind_by: 2 }), stderr: '' }],
+    [/compare\/(?:3\.46\.0|v9\.9\.9|9\.9\.9)\.\.\./, { status: 1, stdout: '', stderr: 'gh: Not Found (HTTP 404)' }],
+    [/compare\/v7\.7\.7\.\.\./, { status: 1, stdout: '', stderr: 'gh: API rate limit exceeded (HTTP 403)' }],
+  ]);
+  const fetcher = createFetcher({ exec });
+  assert.deepEqual(await fetcher.contains('ruvnet/ruflo', ['v3.46.0', '3.46.0'], sha), { ref: 'v3.46.0', contained: true });
+  assert.deepEqual(await fetcher.contains('ruvnet/ruflo', ['v3.46.1'], sha), { ref: 'v3.46.1', contained: true });
+  assert.deepEqual(await fetcher.contains('ruvnet/ruflo', ['v3.45.0'], sha), { ref: 'v3.45.0', contained: false });
+  assert.deepEqual(await fetcher.contains('ruvnet/ruflo', ['v3.44.0'], sha), { ref: 'v3.44.0', contained: false });
+  assert.deepEqual(await fetcher.contains('ruvnet/ruflo', ['v9.9.9', '9.9.9'], sha), { ref: null, contained: null });
+  await assert.rejects(fetcher.contains('ruvnet/ruflo', ['v7.7.7'], sha), /rate limit/);
+  await assert.rejects(fetcher.contains('ruvnet/ruflo', ['v1.0.0'], 'not-a-sha'), /not a commit/);
+  await assert.rejects(fetcher.contains('ruvnet/ruflo', ['v1.0.0;rm'], sha), /not a tag name/);
+  assert.ok(calls.every((call) => call.startsWith('gh api repos/ruvnet/ruflo/compare/')), 'read-only: compare only');
+});
+
 function fixtureFetcher({ authenticated = true } = {}) {
   return {
     auth: async () => (authenticated ? { ok: true } : { ok: false, message: 'gh is not authenticated; run `gh auth login`, then re-run.' }),

@@ -1,0 +1,167 @@
+{
+  "recordedAt": "2026-09-27",
+  "query": "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){defaultBranchRef{name} issueOrPullRequest(number:$number){__typename ... on Issue{closedByPullRequestsReferences(first:10,includeClosedPrs:true){nodes{number merged baseRefName mergeCommit{oid} repository{nameWithOwner}}} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{closer{__typename ... on Commit{oid} ... on PullRequest{number merged baseRefName mergeCommit{oid} repository{nameWithOwner}}}}}}} ... on PullRequest{number merged baseRefName mergeCommit{oid} repository{nameWithOwner}}}}}",
+  "graphql": {
+    "ruvnet/ruflo#3167": {
+      "data": {
+        "repository": {
+          "defaultBranchRef": {
+            "name": "main"
+          },
+          "issueOrPullRequest": {
+            "__typename": "Issue",
+            "closedByPullRequestsReferences": {
+              "nodes": [
+                {
+                  "number": 3373,
+                  "merged": false,
+                  "baseRefName": "main",
+                  "mergeCommit": null,
+                  "repository": {
+                    "nameWithOwner": "ruvnet/ruflo"
+                  }
+                },
+                {
+                  "number": 3434,
+                  "merged": true,
+                  "baseRefName": "main",
+                  "mergeCommit": {
+                    "oid": "856249ed7e35e604fa58a3b93179570d7998b9d3"
+                  },
+                  "repository": {
+                    "nameWithOwner": "ruvnet/ruflo"
+                  }
+                }
+              ]
+            },
+            "timelineItems": {
+              "nodes": [
+                {
+                  "closer": {
+                    "__typename": "PullRequest",
+                    "number": 3434,
+                    "merged": true,
+                    "baseRefName": "main",
+                    "mergeCommit": {
+                      "oid": "856249ed7e35e604fa58a3b93179570d7998b9d3"
+                    },
+                    "repository": {
+                      "nameWithOwner": "ruvnet/ruflo"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "ruvnet/ruflo#3194": {
+      "data": {
+        "repository": {
+          "defaultBranchRef": {
+            "name": "main"
+          },
+          "issueOrPullRequest": {
+            "__typename": "Issue",
+            "closedByPullRequestsReferences": {
+              "nodes": [
+                {
+                  "number": 3421,
+                  "merged": true,
+                  "baseRefName": "main",
+                  "mergeCommit": {
+                    "oid": "e45eeead28855b4f06b4afd184ffb408269ca2f8"
+                  },
+                  "repository": {
+                    "nameWithOwner": "ruvnet/ruflo"
+                  }
+                }
+              ]
+            },
+            "timelineItems": {
+              "nodes": [
+                {
+                  "closer": {
+                    "__typename": "PullRequest",
+                    "number": 3421,
+                    "merged": true,
+                    "baseRefName": "main",
+                    "mergeCommit": {
+                      "oid": "e45eeead28855b4f06b4afd184ffb408269ca2f8"
+                    },
+                    "repository": {
+                      "nameWithOwner": "ruvnet/ruflo"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "ruvnet/ruflo#3415": {
+      "data": {
+        "repository": {
+          "defaultBranchRef": {
+            "name": "main"
+          },
+          "issueOrPullRequest": {
+            "__typename": "Issue",
+            "closedByPullRequestsReferences": {
+              "nodes": [
+                {
+                  "number": 3423,
+                  "merged": true,
+                  "baseRefName": "main",
+                  "mergeCommit": {
+                    "oid": "9be73667dac2cca0697b37e2cb61a96bdea9450c"
+                  },
+                  "repository": {
+                    "nameWithOwner": "ruvnet/ruflo"
+                  }
+                }
+              ]
+            },
+            "timelineItems": {
+              "nodes": [
+                {
+                  "closer": {
+                    "__typename": "PullRequest",
+                    "number": 3423,
+                    "merged": true,
+                    "baseRefName": "main",
+                    "mergeCommit": {
+                      "oid": "9be73667dac2cca0697b37e2cb61a96bdea9450c"
+                    },
+                    "repository": {
+                      "nameWithOwner": "ruvnet/ruflo"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "compare": {
+    "ruvnet/ruflo v3.46.0...856249ed7e35e604fa58a3b93179570d7998b9d3": {
+      "ahead_by": 0,
+      "behind_by": 68,
+      "status": "behind"
+    },
+    "ruvnet/ruflo v3.46.0...e45eeead28855b4f06b4afd184ffb408269ca2f8": {
+      "ahead_by": 0,
+      "behind_by": 86,
+      "status": "behind"
+    },
+    "ruvnet/ruflo v3.46.0...9be73667dac2cca0697b37e2cb61a96bdea9450c": {
+      "ahead_by": 0,
+      "behind_by": 82,
+      "status": "behind"
+    }
+  }
+}

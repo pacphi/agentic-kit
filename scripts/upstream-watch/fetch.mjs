@@ -7,6 +7,33 @@ import { execFile } from 'node:child_process';
 import { releaseFacts } from './classify.mjs';
 
 const ID = /^([\w.-]+\/[\w.-]+)#([1-9]\d*)$/;
+const SHA = /^[0-9a-f]{7,40}$/;
+const REF = /^[\w./-]+$/;
+const NOT_FOUND = /HTTP 404|Not Found/i;
+
+// What closed a thread: its closing pull requests, else the ClosedEvent's closer.
+export const FIXING_CHANGES_QUERY = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){defaultBranchRef{name} issueOrPullRequest(number:$number){__typename ... on Issue{closedByPullRequestsReferences(first:10,includeClosedPrs:true){nodes{number merged baseRefName mergeCommit{oid} repository{nameWithOwner}}} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{closer{__typename ... on Commit{oid} ... on PullRequest{number merged baseRefName mergeCommit{oid} repository{nameWithOwner}}}}}}} ... on PullRequest{number merged baseRefName mergeCommit{oid} repository{nameWithOwner}}}}}`;
+
+/**
+ * The merged changes that fixed a thread, from the FIXING_CHANGES_QUERY answer.
+ * Only a pull request merged into the repository's default branch counts, so
+ * an unmerged or off-branch closing reference never confirms a release.
+ */
+function changesOf(repo, data) {
+  const branch = data?.defaultBranchRef?.name;
+  const node = data?.issueOrPullRequest;
+  const merged = (pr) => Boolean(pr?.merged && pr.mergeCommit?.oid && branch && pr.baseRefName === branch
+    && pr.repository?.nameWithOwner?.toLowerCase() === repo.toLowerCase());
+  const asChange = (pr) => ({ repo, pr: pr.number, sha: pr.mergeCommit.oid });
+  if (!node) return [];
+  if (node.__typename === 'PullRequest') return merged(node) ? [asChange(node)] : [];
+  const prs = (node.closedByPullRequestsReferences?.nodes ?? []).filter(merged).map(asChange);
+  if (prs.length) return prs;
+  const closer = node.timelineItems?.nodes?.at(-1)?.closer;
+  if (closer?.__typename === 'Commit' && SHA.test(closer.oid ?? '')) return [{ repo, pr: null, sha: closer.oid }];
+  if (closer?.__typename === 'PullRequest' && merged(closer)) return [asChange(closer)];
+  return [];
+}
 
 /** Run a command without a shell; resolves with its status and output, never rejects. */
 export function run(command, args) {
@@ -51,6 +78,36 @@ export function createFetcher({ exec = run } = {}) {
       const issue = await json('gh', ['api', `repos/${repo}/issues/${number}`]);
       const pages = await json('gh', ['api', '--paginate', '--slurp', `repos/${repo}/issues/${number}/comments?per_page=100`]);
       return { issue, comments: pages.flat() };
+    },
+    /** Merged pull requests (or the closing commit) that fixed a thread; empty when none qualifies. */
+    async fixingChanges(id) {
+      const [, repo, number] = ID.exec(id) ?? [];
+      if (!repo) throw new Error(`not an owner/repo#number id: ${id}`);
+      const [owner, name] = repo.split('/');
+      const answer = await json('gh', ['api', 'graphql', '-f', `query=${FIXING_CHANGES_QUERY}`, '-F', `owner=${owner}`, '-F', `name=${name}`, '-F', `number=${number}`]);
+      return changesOf(repo, answer?.data?.repository);
+    },
+    /**
+     * Whether the first existing tag in `refs` contains `sha`. A tag missing for
+     * every spelling is unknown (contained: null); any other failure throws, so
+     * a rate limit never reads as "not contained".
+     */
+    async contains(repo, refs, sha) {
+      if (!SHA.test(sha ?? '')) throw new Error(`not a commit: ${sha}`);
+      if (!/^[\w.-]+\/[\w.-]+$/.test(repo ?? '')) throw new Error(`not an owner/repo: ${repo}`);
+      for (const ref of refs) {
+        if (!REF.test(ref ?? '')) throw new Error(`not a tag name: ${ref}`);
+        const args = ['api', `repos/${repo}/compare/${ref}...${sha}`, '--jq', '{status:.status}'];
+        const result = await exec('gh', args);
+        if (result.status !== 0) {
+          if (NOT_FOUND.test(result.stderr ?? '')) continue;
+          throw new Error(`gh ${args.join(' ')} failed: ${(result.stderr || result.error?.message || 'no output').trim()}`);
+        }
+        const { status } = JSON.parse(result.stdout);
+        if (!['behind', 'identical', 'ahead', 'diverged'].includes(status)) throw new Error(`gh ${args.join(' ')} returned status ${status}`);
+        return { ref, contained: status === 'behind' || status === 'identical' };
+      }
+      return { ref: null, contained: null };
     },
     async release({ channel, name }) {
       if (!/^[@\w][\w@./-]*$/.test(name)) throw new Error(`not a package or repository name: ${name}`);
