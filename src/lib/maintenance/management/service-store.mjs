@@ -47,22 +47,24 @@ function sealedEnvelope(schema, payloadKey, payload) {
   return { ...base, integrity: { algorithm: 'sha256', digest: sha256(base) } };
 }
 
-/** Bound retained input before allocation and also reject growth/replacement while opening. */
+/** Bound retained input before allocation and also reject growth/replacement while opening.
+ *  Identity is compared as BigInt: Windows file IDs can exceed 2^53. */
 function readInventoryBytes(file, maxBytes, fsImpl) {
-  const before = fsImpl.lstatSync(file);
+  const before = fsImpl.lstatSync(file, { bigint: true });
   if (!before.isFile() || before.isSymbolicLink() || before.size > maxBytes) throw new Error('inventory input exceeds bounds');
   const fd = fsImpl.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
   try {
-    const stat = fsImpl.fstatSync(fd);
+    const stat = fsImpl.fstatSync(fd, { bigint: true });
     if (!stat.isFile() || stat.ino !== before.ino || stat.dev !== before.dev || stat.size > maxBytes) throw new Error('inventory input changed');
-    const buffer = Buffer.alloc(stat.size + 1);
+    const statSize = Number(stat.size); // bounded by maxBytes above
+    const buffer = Buffer.alloc(statSize + 1);
     let size = 0;
     while (size < buffer.length) {
       const bytes = fsImpl.readSync(fd, buffer, size, buffer.length - size, null);
       if (!bytes) break;
       size += bytes;
     }
-    if (size > stat.size) throw new Error('inventory input grew');
+    if (size > statSize) throw new Error('inventory input grew');
     return buffer.subarray(0, size);
   } finally { fsImpl.closeSync(fd); }
 }

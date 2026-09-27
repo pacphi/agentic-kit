@@ -164,7 +164,7 @@ function digestFile(baseDir, relative, { fsImpl, maxFileBytes }) {
   let realRoot;
   let realFile;
   try {
-    stat = fsImpl.lstatSync(filename);
+    stat = fsImpl.lstatSync(filename, { bigint: true }); // BigInt identity: Windows file IDs can exceed 2^53
     realRoot = fsImpl.realpathSync(baseDir);
     realFile = fsImpl.realpathSync(filename);
   } catch (error) {
@@ -182,7 +182,7 @@ function digestFile(baseDir, relative, { fsImpl, maxFileBytes }) {
   let descriptor;
   try {
     descriptor = fsImpl.openSync(filename, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
-    const opened = fsImpl.fstatSync(descriptor);
+    const opened = fsImpl.fstatSync(descriptor, { bigint: true });
     if (!opened.isFile() || opened.size > maxFileBytes) {
       throw new AdapterIntegrityError('hook-file-not-regular', `'${relative}' is not a bounded regular file`);
     }
@@ -192,16 +192,16 @@ function digestFile(baseDir, relative, { fsImpl, maxFileBytes }) {
     if (fsImpl.realpathSync(filename) !== realFile) {
       throw new AdapterIntegrityError('hook-file-changed', `'${relative}' changed path between inspection and open`);
     }
-    const bytes = Buffer.alloc(opened.size);
+    const bytes = Buffer.alloc(Number(opened.size)); // bounded by maxFileBytes above
     let offset = 0;
     while (offset < bytes.length) {
       const count = fsImpl.readSync(descriptor, bytes, offset, bytes.length - offset, offset);
       if (count === 0) break;
       offset += count;
     }
-    const after = fsImpl.fstatSync(descriptor);
+    const after = fsImpl.fstatSync(descriptor, { bigint: true });
     if (offset !== bytes.length || after.size !== opened.size || after.dev !== opened.dev
-        || after.ino !== opened.ino || after.mtimeMs !== opened.mtimeMs) {
+        || after.ino !== opened.ino || after.mtimeNs !== opened.mtimeNs) {
       throw new AdapterIntegrityError('hook-file-changed', `'${relative}' changed while it was read`);
     }
     return { sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length };

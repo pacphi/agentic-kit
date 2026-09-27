@@ -1388,8 +1388,10 @@ folders behind per run (`1fa55698`).
   assertion, a read of `env.PATH` on a copy of the Windows environment (stored as `Path`), and
   the telemetry replaced-file test, whose `ino++` mock leaves a Number file ID unchanged at or
   above 2^54 (and about half the time between 2^53 and 2^54). The
-  telemetry reader now compares file identity as BigInt. These fixes are proven on macOS with
-  simulated Windows inputs only.
+  telemetry reader now compares file identity as BigInt. Run 36341703517 then failed the
+  hook-audit replaced-source test on Windows Node 22 the same way, so every in-process
+  open-and-verify read now does too. These fixes are proven on macOS with simulated Windows
+  inputs only.
 - A test that rewrites `~/.claude.json` is reported, not failed, in a developer run; only a strict
   run (CI) fails it.
 
