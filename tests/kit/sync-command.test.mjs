@@ -684,6 +684,49 @@ test('--skip providers skips the codex-mcp fixes only the providers step perform
   assert.deepEqual(verdict.remaining, []);
 });
 
+// correctness-skip-leaves-subsystem-touched: a skipped subsystem stays
+// untouched even when a sibling step that serves it runs for another one.
+test('--skip codex-mcp and --skip routing reach into the providers step', async () => {
+  const step = sync.SYNC_STEPS.find((s) => s.id === 'providers');
+  const runWith = async (skip) => {
+    const seen = {};
+    const convergeProviders = async (cfg, cwd, options) => {
+      Object.assign(seen, options);
+      // The pipeline's documented contract: a disabled step still reports, with null.
+      for (const id of ['legacy-codex-mcp', 'ruflo-codex-mcp']) {
+        if (options.codexMcp === false) await options.reporter(id, null);
+      }
+      seen.retired = options.migrateRoutes ? options.migrateRoutes(cfg) : 'default';
+      return {};
+    };
+    await captureLog(() => step.run({
+      cfg: loadKitConfig(), cwd: PROJECT, skip: new Set(skip), state: {}, report: () => {}, convergeProviders,
+    }));
+    return seen;
+  };
+  const control = await runWith([]);
+  assert.equal(control.codexMcp, true, 'control: providers also converges the Codex MCP tables');
+  assert.equal(control.seedRoutes, true);
+  assert.equal(control.retired, 'default', 'control: retired routes are migrated');
+
+  const noCodex = await runWith(['codex-mcp']);
+  assert.equal(noCodex.codexMcp, false, '--skip codex-mcp must leave ~/.codex/config.toml alone');
+  assert.equal(noCodex.seedRoutes, true);
+
+  const noRouting = await runWith(['routing']);
+  assert.equal(noRouting.seedRoutes, false, '--skip routing must not seed routes');
+  assert.deepEqual(noRouting.retired, { changed: false, changes: [] }, '--skip routing must not rewrite retired routes');
+  assert.equal(noRouting.codexMcp, true);
+});
+
+test('--skip statusline also skips the helper refresh that can replace the statusline', () => {
+  const cfg = loadKitConfig();
+  const active = (skip) => sync.activeSteps(new Set(['versions']), FLAGS(), cfg, new Set(skip));
+  assert.ok(active([]).includes('ruflo-helpers'), 'control: an upgrade refreshes the generated helpers');
+  assert.ok(!active(['statusline']).includes('ruflo-helpers'));
+  assert.ok(active(['statusline']).includes('versions'), 'the upgrade itself still runs');
+});
+
 test('--skip opencode stops the lifecycle refresh an upgrade would trigger', async () => {
   const step = sync.SYNC_STEPS.find((s) => s.id === 'host-lifecycles');
   const cfg = { ...loadKitConfig(), integrations: { ...loadKitConfig().integrations, hosts: { claude: true, codex: false, opencode: true } } };

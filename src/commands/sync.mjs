@@ -131,8 +131,11 @@ A planned fix whose row is still there after the apply phase is reported as
 --skip leaves a subsystem out of this run only; kit.json is unchanged. Its
 plan items, the step it owns (even when another planned subsystem would
 trigger that step), and a fix only that step performs are all skipped, and
-none of them counts as a failure. A step shared by several subsystems (for
-example providers, which also serves routing) still runs for the others.
+none of them counts as a failure. A step shared by several subsystems still
+runs for the others but leaves the skipped one alone: with --skip codex-mcp
+the providers step writes no Codex MCP table, with --skip routing it seeds
+and rewrites no route, and --skip statusline also skips Ruflo's helper
+refresh after an upgrade (that refresh can replace the statusline helper).
 An unknown name is rejected with the list of names sync accepts.
 
 --json writes every human line (the plan, step results, prompts) to stderr
@@ -471,6 +474,7 @@ export const SYNC_STEPS = [
       // and persists every step; this reporter only decides what to print and
       // how, preserving sync's exact wording/gating per step.
       const reporter = (step, result) => {
+        if (!result) return; // a pipeline step this run turned off (codexMcp: false)
         if (step === 'hosts') { ctx.report('providers', result); return; }
         // heal per-activity routing: seed from defaults if dual-host only just
         // became eligible (e.g. aqe upgraded ≥3.13.1 since enablement), before
@@ -501,8 +505,16 @@ export const SYNC_STEPS = [
         }
         if (step === 'providers-api' && (result.changed || !result.ok)) ctx.report('providers (api)', result);
       };
-      await convergeProviderStack(ctx.cfg, ctx.cwd, {
+      // This step also serves codex-mcp and routing. When --skip names one of
+      // them, the step leaves it alone: no Codex MCP table is written, and no
+      // route is seeded or rewritten in kit.json (decision 5).
+      const skip = ctx.skip ?? new Set();
+      const routing = !skip.has('routing');
+      await (ctx.convergeProviders ?? convergeProviderStack)(ctx.cfg, ctx.cwd, {
         reporter,
+        codexMcp: !skip.has('codex-mcp'),
+        seedRoutes: routing,
+        ...(routing ? {} : { migrateRoutes: () => ({ changed: false, changes: [] }) }),
         runProviders: (fn) => withProgress('providers (api)', fn),
       });
     },
@@ -600,11 +612,15 @@ export const SYNC_STEPS = [
 // Repairs run() performs after SYNC_STEPS, on every run.
 const TAIL_REPAIRS = new Set(['host-alignment']);
 
-// The subsystem each step repairs, which is what --skip names. A step's id is
-// that subsystem unless listed here; host-lifecycles answers per host instead
-// (its loop checks ctx.skip), so no single subsystem owns it.
-const STEP_SUBSYSTEM = { 'codex-mcp-repair': 'codex-mcp', 'aqe-rvf': 'aqe', 'ruflo-helpers': 'versions', 'host-lifecycles': null };
-const stepSubsystem = (s) => (Object.hasOwn(STEP_SUBSYSTEM, s.id) ? STEP_SUBSYSTEM[s.id] : s.id);
+// The subsystems each step repairs or touches, which is what --skip names: a
+// step does not run when --skip names any of them. A step's id is its one
+// subsystem unless listed here. ruflo-helpers belongs to versions, and it can
+// replace the statusline helper, so --skip statusline stops it too.
+// host-lifecycles answers per host instead (its loop checks ctx.skip).
+const STEP_SUBSYSTEMS = {
+  'codex-mcp-repair': ['codex-mcp'], 'aqe-rvf': ['aqe'], 'ruflo-helpers': ['versions', 'statusline'], 'host-lifecycles': [],
+};
+const stepSubsystems = (s) => (Object.hasOwn(STEP_SUBSYSTEMS, s.id) ? STEP_SUBSYSTEMS[s.id] : [s.id]);
 
 // Every subsystem a plan item or step can name. tests/kit/sync-command.test.mjs
 // fails when a step's `when` names one missing here.
@@ -636,7 +652,7 @@ export function parseSkip(values) {
  *  not name the subsystem it repairs. Removing a skipped subsystem from the
  *  plan already stops the triggers it would derive (versions → natives …);
  *  this check stops a skipped step that another planned subsystem triggers. */
-const stepRuns = (s, subsystems, flags, cfg, skip) => !skip.has(stepSubsystem(s)) && s.when(subsystems, flags, cfg);
+const stepRuns = (s, subsystems, flags, cfg, skip) => !stepSubsystems(s).some((x) => skip.has(x)) && s.when(subsystems, flags, cfg);
 
 /** Ids of the steps that run for `subsystems` under --skip (for tests). */
 export function activeSteps(subsystems, flags, cfg, skip = new Set()) {

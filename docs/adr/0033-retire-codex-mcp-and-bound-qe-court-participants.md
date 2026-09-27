@@ -42,8 +42,8 @@
   stayed unmet. A planned sync fix whose status row is still present after the apply phase, or a
   planned subsystem that no sync step performs, is reported `unresolved:` and sync exits 1 (#237).
   Manual fixes never enter the plan, so they never fail sync (decision 9). `ak sync --skip
-  <subsystem>` leaves a subsystem out of one run; the proof reports it "skipped by request" and
-  never counts it as a failure. `ak sync --json` emits the verdict as one JSON object on stdout.
+  <subsystem>` leaves a subsystem out of one run, including the writes a shared step would make
+  for it; the proof reports it "skipped by request" and never counts it as a failure. `ak sync --json` emits the verdict as one JSON object on stdout.
   2026-09-26: the live participant-transport test runs its seats in a disposable Ruflo
   project and deletes it; run in the checkout, it had left 118 proof rows in the real MCP
   store. A read-only tripwire fails if any proof row reaches the checkout's memory.
@@ -123,7 +123,10 @@ seats. A successful Claude/Codex transport check therefore cannot be called a co
    are planned (ADR-0023 §11), so manual fixes and fix-less advisories never become unresolved.
    A subsystem named by `--skip` for one run is taken out of the plan together with the step it
    owns (on every trigger, including ones another planned subsystem derives) and any fix only that
-   step performs. Its rows are reported "skipped by request" and are neither unresolved nor failing.
+   step performs, judged per fix. A step shared with other subsystems still runs for them but leaves
+   the skipped one untouched: `--skip codex-mcp` and `--skip routing` stop the providers step's
+   Codex MCP writes and route seeding, and `--skip statusline` stops Ruflo's helper refresh. Its rows
+   are reported "skipped by request" and are neither unresolved nor failing.
    `--skip` accepts only the subsystems sync knows and never changes kit.json ownership.
    `ak sync --json` reports this verdict as one JSON object on stdout (`plan`, `steps`,
    `unresolved` with a reason per item, `skipped`, `converged`, `exitCode`) and sends every human
