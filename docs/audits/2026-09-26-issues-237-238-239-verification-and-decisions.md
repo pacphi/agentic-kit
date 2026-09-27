@@ -735,7 +735,8 @@ from `3505a29` (the Addendum 2 commit). Every SHA below is on that branch.
   Conflicts were resolved so that both sides' intent was kept. After each pick the integrator ran
   that pick's focused tests and ESLint.
 - **Stage 5** was written directly on the integrated branch.
-- **Commit count: 50**, not counting the commit that adds this section.
+- **Commit count: 50** at `737562c`, not counting the commit that adds this section. The eleven
+  later commits and the review fix wave are listed under "Plan items and commits".
   - 45 are cherry-picks, and each carries its `cherry picked from` line.
   - 4 were written in place for Stage 5.
   - 1 is an integrator fix, `259f075`.
@@ -852,6 +853,76 @@ this section's own.
 |---|---|---|
 | `test(system-summary): keep the deep-refresh test out of the real maintenance state` | `259f075` | Each kit test file was run alone with `XDG_STATE_HOME` redirected. Before the fix, system-summary was the only file that wrote any file there: 8 maintenance files. After the fix it passes 8/8 and writes nothing. |
 
+#### Stage 6 (upstream watch) and records
+
+These eleven commits landed after this section was first written. Addendum 3's plan changes map
+them to Stage 6 and the program plan. The Branch 0 Step 1 gate on `5764c51` checked them together
+and every gate passed (see the results table below), so the last column names the suite that covers
+each commit rather than a separate focused run.
+
+| Commit | SHA | Covered by |
+|---|---|---|
+| `docs(adr): propose ADR-0060 session surface, initiator and official product names` | `854576f` | markdownlint and the documentation guards |
+| `docs(audits): record Addendum 3 decisions for the remediation` | `d2a5241` | markdownlint and the documentation guards |
+| `fix(packaging): ship the upstream constraint registry with ak` | `24ddc42` | `build-check`: `npm pack` lists 522 files at `5764c51`, the registry included |
+| `feat(upstream): watch every upstream thread ak depends on` | `07c2694` | `upstream-watch-registry` |
+| `feat(upstream): deterministic upstream status check` | `47acb1b` | `upstream-watch-script` |
+| `feat(skills): upstream-status maintainer skill for Claude and Codex` | `3f0a7fe` | `upstream-watch-skill` |
+| `docs(upstream): one registry for constraints and watched threads` | `357f465` | markdownlint and the documentation guards |
+| `chore(upstream): re-verify constraints against 2026-09-26 evidence` | `de88fdd` | `upstream-watch-registry` and `hook-upstream` |
+| `test(upstream): derive test clocks from the registry's verification date` | `5d7698a` | `upstream-watch-registry` and `upstream-watch-script` |
+| `fix(upstream): one ledger line per upstream comment` | `184b14c` | `upstream-watch-script` |
+| `docs(plans): plan the remediation program across ten branches` | `5764c51` | markdownlint |
+
+#### Review fix wave (Branch 0 Step 2)
+
+An adversarial review of `3505a29..5764c51` in five dimensions (correctness, security, hermeticity,
+documentation and contracts), each finding checked by an independent refuter, confirmed 32
+findings. They were fixed test-first from `5764c51`, one commit per finding. The evidence is the
+focused run after the fix; the failing test was run first and seen to fail.
+
+| Finding | SHA | Focused evidence |
+|---|---|---|
+| A held Brain refresh erased by the sync that records it | `726df78`, `77faf7a` | new sync-level test; 86/86 across the Brain, heal, sync and setup suites |
+| `mcp.register: false` rows promising a sync repair | `430a82d` | 26/26; command suites 153/153 |
+| `--skip providers` leaving Codex MCP fixes unresolved | `539809e` | 75/75 |
+| `--skip` still writing through a shared step | `9f8925b` | 90/90 |
+| A temp-root project routed to the user-level memory store (and its Windows duplicate) | `f953146`, `fbb6507` | 54/54 |
+| The setup probe left in a redirected memory root | `675d6c4` | 40/40 |
+| Distillation that could not run counted as a pass | `b7e83c2` | 28/28 |
+| The upstream ledger trusting any commenter | `92e87c4` | 28/28 (a guard on the routine prompt) |
+| Stage 6 recorded as unimplemented on this branch | `e1abc37` | markdownlint |
+| The split Stage 6 table | `1115b24` | markdown-it renders one table |
+| The host-status test's fake codex on Windows | `472c71a` | 26/26 |
+| The unguarded stamp removal aborting sync | `f8e2e13` | 13/13 |
+| The blocked version repair not marked manual | `abee0fc` | 80/80 |
+| A crashed native probe reported as "exited 1" | `ee9eaa8` | 81 passed, 1 skipped |
+| About cards without the manual label | `babd9b1` | `dashboard-ui` 492/492 |
+| The skill omitting report groups | `f3e25d5` | 3/3 |
+| The report table omitting "Could not check" | `be257df` | markdownlint |
+| An inline AQE Codex entry called a warning | `e161d9b` | markdownlint |
+| The sweep's opened/commented split | `80dec49` | registry: 56 filed, 12 commented |
+| ADR-0033's decision citations | `c6103e5` | markdownlint |
+| Main help missing `--live`, `--skip` and `--json` | `d9c3b73` | cli-help 9/9 |
+| "now" in TROUBLESHOOTING | `9a45965` | markdownlint |
+| ruvnet/ruflo#3473 missing from the watch | `eb1b806` | 40/40 |
+| A second opencode guidance writer | `14cf2df` | 203/203; host suites 380/380 |
+| Proofs pinned to an enclosing repository's store | `54c116f` | 41/41; status-live 11/11 |
+| The abort comment's overclaim | `ad36ab2` | comment only |
+
+`f6a7856` links ruvnet/ruflo#3473 in Item 6; it answers no finding. The review also found that
+this section had no rows for the eleven later commits; the two tables above are that fix. Not
+changed in this wave:
+
+- Whether a fail-level manual row fails sync. Today it depends on whether anything else is planned;
+  choosing one rule is a maintainer decision, and the same class predates this branch.
+- Stopping the whole process tree on an abort. It needs Windows CI to prove; only the comment was
+  corrected.
+- Tests that leave temporary folders behind, and pre-existing tests that write into an enclosing
+  repository when `TMPDIR` is inside one. Both belong to the test-hermeticity branch.
+- A worktree `.claude` modification time that changed during the review. It came from concurrent
+  runs, and no user state changed.
+
 ### Full-suite results at each stage end
 
 #### Baseline on `847486c`
@@ -867,6 +938,8 @@ this section's own.
 | 22–32 | `7a21e7d` | 4,877 / 6 / 0 (4,883) | 92.81 / 82.16 / 92.20 | 7 of 7 pass |
 | Stage 4 | `c9c1987` | 4,982 / 6 / 0 (4,988) | 92.92 / 82.32 / 92.32 | 7 of 7 pass |
 | Stage 5 | `719b048` | 5,009 / 6 / 0 (5,015) | 92.99 / 82.37 / 92.44 | 7 of 7 pass |
+| Stage 6 and records | `5764c51` | 5,047 / 6 / 0 (5,053) | 92.95 / 82.22 / 92.34 | 7 of 7 pass |
+| Review fix wave | `fbb6507` | 5,067 / 6 / 0 (5,073) | 92.97 / 82.26 / 92.36 | 7 of 7 pass |
 
 #### Checks that passed at every stage end
 
@@ -874,9 +947,13 @@ this section's own.
 - ESLint reported 0 errors and no new warnings. Warning sets were compared by file, rule and message;
   there are 69 warnings at the tip.
 - The complexity-50 gate was clean.
-- markdownlint found 0 issues in 162 files.
+- markdownlint found 0 issues in 162 files (165 from `5764c51` on).
 - `build-check` passed.
-  - `npm pack` grew from 505 to 520 files as new runtime modules shipped.
+  - `npm pack` grew from 505 to 520 files as new runtime modules shipped, and lists 522 at
+    `5764c51` and after the review fix wave.
+- After the review fix wave, `npx eslint .` also reads the review's git-ignored scratch folder
+  (`.superpowers/`, copies of the repository and reproduction scripts) and reports errors only
+  there; with that folder ignored it reports 0 errors and the same 69 warnings as at `5764c51`.
 - Regenerating the status golden file changed nothing.
 - The main checkout stayed at `3505a29` with a clean tree.
 - The files watched by the tripwire from commit 0c did not change.
