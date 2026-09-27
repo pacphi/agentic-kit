@@ -13,7 +13,7 @@
 // A live daemon can still skip both jobs: it defers a worker while CPU load or
 // free memory is past its threshold, and on macOS the free-memory reading is
 // skewed low (ruvnet/ruflo#2935). The deferral row reads the daemon log
-// (memory-maintenance.mjs lastWorkerDeferral) and is dropped once the worker's
+// (memory-maintenance.mjs pendingDeferral) and is dropped once the worker's
 // own metrics file is newer.
 //
 // In a Ruflo repository, the drift row compares the project with what ak
@@ -26,7 +26,7 @@ import {
   listDaemons as listRufloDaemons, projectDaemonAlive, rufloAutostartOff, staleDaemons,
 } from '../../../lib/daemons.mjs';
 import { formatLiveCheckAge as ago } from '../../../lib/live-check-evidence.mjs';
-import { lastWorkerDeferral, memoryMaintenanceStatus } from '../../../lib/memory-maintenance.mjs';
+import { pendingDeferral } from '../../../lib/memory-maintenance.mjs';
 import * as paths from '../../../lib/paths.mjs';
 import { rufloProjectRoot } from '../../../lib/ruflo-components/apply.mjs';
 import { daemonDrift } from '../../../lib/ruflo-daemon-config.mjs';
@@ -59,18 +59,15 @@ const THRESHOLD_KEY = (reason) => (/^CPU load/.test(reason)
 
 /** A warning when this project's live daemon deferred backup or distillation
  *  and the job has not run since. */
-function deferralRow(root, { now, platform }) {
+function deferralRow(root, { cwd, now, platform }) {
   if (!root || !projectDaemonAlive(root)) return null;
-  const deferred = lastWorkerDeferral(root, { now });
+  const deferred = pendingDeferral(root, { now });
   if (!deferred) return null;
-  const status = memoryMaintenanceStatus(root, { now });
-  const lastRun = deferred.worker === 'backup' ? status.backup.lastAt
-    : status.distillation && now - status.distillation.ageMs;
-  if (Number.isFinite(lastRun) && lastRun >= deferred.at) return null;
   const macMemory = platform === 'darwin' && /^Memory too low/.test(deferred.reason);
   const message = `Ruflo's daemon is running but deferred ${JOB[deferred.worker]} ${ago(deferred.ageMs)}: ${deferred.reason}`
     + (macMemory ? ' (macOS free-memory gate, ruvnet/ruflo#2935)' : '');
-  return macMemory
+  // Sync manages daemon settings only in a Ruflo repository (applyRufloDaemon).
+  return macMemory && rufloProjectRoot(cwd)
     ? row('daemons', 'warn', message, "sync sets Ruflo's macOS memory threshold")
     : row('daemons', 'warn', message, `lower "${THRESHOLD_KEY(deferred.reason)}" (a flat key) in .claude-flow/config.json, `
       + 'then restart the daemon with `ruflo daemon stop` and `ruflo daemon start`', { repair: 'manual' });
@@ -105,7 +102,7 @@ export default {
         rows.push(row('daemons', 'ok',
           daemons.length ? `${daemons.length} running (one per active project is expected)` : 'none running'));
       }
-      const deferral = deferralRow(root, { now, platform });
+      const deferral = deferralRow(root, { cwd, now, platform });
       if (deferral) rows.push(deferral);
       const drift = driftRow(cwd, { loadConfig, rufloVersion, platform });
       if (drift) rows.push(drift);

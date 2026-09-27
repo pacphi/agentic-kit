@@ -77,8 +77,9 @@ test('stale daemons keep their warning and sync repair', async (t) => {
 const NOW = Date.parse('2026-09-27T12:00:00.000Z');
 const HOUR = 60 * 60 * 1000;
 
-function liveDaemonDeferring(t, lines) {
+function liveDaemonDeferring(t, lines, { git = true } = {}) {
   const cwd = project(t);
+  if (git) fs.mkdirSync(path.join(cwd, '.git'));
   fs.mkdirSync(path.join(cwd, '.claude-flow', 'logs'), { recursive: true });
   fs.writeFileSync(path.join(cwd, '.claude-flow', 'daemon.pid'), String(process.pid));
   fs.writeFileSync(path.join(cwd, '.claude-flow', 'logs', 'daemon.log'), `${lines.join('\n')}\n`);
@@ -163,4 +164,13 @@ test('no drift row outside a Ruflo repository', async (t) => {
   const cwd = project(t, { autoStart: false });
   const rows = await collect(cwd, { loadConfig: () => { throw new Error('kit.json must not be read here'); }, rufloVersion: '3.46.1', platform: 'darwin' });
   assert.equal(drift(rows), undefined);
+});
+
+test('outside a Ruflo repository the macOS deferral is a manual step: sync would not act there', async (t) => {
+  const cwd = liveDaemonDeferring(t, MEMORY_LOW, { git: false });
+  const row = deferral(await collect(cwd, { listDaemons: own(cwd), now: NOW, platform: 'darwin' }));
+  assert.equal(row.level, 'warn');
+  assert.equal(row.repair, 'manual');
+  assert.match(row.message, /ruvnet\/ruflo#2935/);
+  assert.match(row.fix, /daemon\.resourceThresholds\.minFreeMemoryPercent/);
 });

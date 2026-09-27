@@ -138,3 +138,14 @@ export function memoryMaintenanceStatus(root, { now = Date.now() } = {}) {
     mcpStoreBackup: mcpAt === null ? null : { ageMs: Math.max(0, now - mcpAt) },
   };
 }
+
+/** lastWorkerDeferral, unless that job has run since (its metrics file is
+ *  newer): the deferral a live daemon is still stuck on, or null. */
+export function pendingDeferral(root, { now = Date.now() } = {}) {
+  const deferred = lastWorkerDeferral(root, { now });
+  if (!deferred) return null;
+  const status = memoryMaintenanceStatus(root, { now });
+  const lastRun = deferred.worker === 'backup' ? status.backup.lastAt
+    : status.distillation && now - status.distillation.ageMs;
+  return Number.isFinite(lastRun) && lastRun >= deferred.at ? null : deferred;
+}

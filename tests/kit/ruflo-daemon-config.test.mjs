@@ -243,3 +243,20 @@ test('a live daemon still deferring for low memory after the floor is set is res
   assert.equal(r.restarted, true);
   assert.equal(calls.length, 2);
 });
+
+test('a daemon that deferred once and has since run the job is not restarted', async (t) => {
+  const root = rufloRepo(t);
+  const cfg = { rufloDaemon: { receipts: {} } };
+  reconcileRufloDaemon(root, { rufloVersion: '3.46.1', platform: 'darwin', receipts: cfg.rufloDaemon.receipts });
+  const deferredAt = Date.now() - 60 * 60_000;
+  fs.mkdirSync(path.join(root, '.claude-flow', 'logs'));
+  fs.writeFileSync(path.join(root, '.claude-flow', 'logs', 'daemon.log'),
+    `[${new Date(deferredAt).toISOString()}] [INFO] Worker consolidate deferred: Memory too low: 3.9% free\n`);
+  fs.mkdirSync(path.join(root, '.claude-flow', 'metrics'));
+  fs.writeFileSync(path.join(root, '.claude-flow', 'metrics', 'consolidation.json'),
+    JSON.stringify({ timestamp: new Date(deferredAt + 30 * 60_000).toISOString(), distillationEnabled: true }));
+  const { calls, runner } = recorder();
+  const r = await applyRufloDaemon(root, { cfg, rufloVersion: '3.46.1', platform: 'darwin', runner, alive: () => true });
+  assert.equal(r.restarted, false);
+  assert.deepEqual(calls, []);
+});

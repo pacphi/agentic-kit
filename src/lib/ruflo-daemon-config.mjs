@@ -36,7 +36,7 @@ import path from 'node:path';
 import { run } from './exec.mjs';
 import { projectDaemonAlive } from './daemons.mjs';
 import { writePrivateFileAtomic } from './file-write.mjs';
-import { lastWorkerDeferral } from './memory-maintenance.mjs';
+import { pendingDeferral } from './memory-maintenance.mjs';
 import { rufloProjectRoot } from './ruflo-components/apply.mjs';
 import { readJson, writeJsonWithBackup } from './settings.mjs';
 import { cmpVersions } from './versions.mjs';
@@ -220,7 +220,7 @@ export async function applyRufloDaemon(cwd, {
   const intent = daemonIntent(cfg);
   const result = reconcileRufloDaemon(root, { rufloVersion, platform, receipts: intent.receipts, autoStart: intent.autoStart, dryRun });
   const configChanged = result.config === 'written' || result.config === 'removed';
-  const stillDeferring = platform === 'darwin' && /^Memory too low/.test(lastWorkerDeferral(root)?.reason ?? '');
+  const stillDeferring = platform === 'darwin' && /^Memory too low/.test(pendingDeferral(root)?.reason ?? '');
   let restarted = false;
   if (!dryRun && (configChanged || stillDeferring) && alive(root)) {
     await runner('ruflo', ['daemon', 'stop'], { cwd: root, timeout: 60_000 });
