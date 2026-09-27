@@ -281,6 +281,15 @@ pnpm run lint:md
 pnpm run build
 ```
 
+`pnpm test` and `pnpm run test:ui` run through `scripts/run-tests.mjs`, which fingerprints
+`~/.config/agentic-kit`, `~/.local/state/agentic-kit` (or `%APPDATA%`/`%LOCALAPPDATA%` on
+Windows), the Claude/Codex/OpenCode guidance files ak manages, and this repository's `.claude`,
+`.swarm`, `.agentic-qe`, `.claude-flow` and `.harness` before and after the run. Any change fails
+the run and is listed by path. Files a live Claude Code, Ruflo or AQE session writes during the
+run are listed as "concurrent writers" and do not fail a local run; CI (or
+`AK_TRIPWIRE_STRICT=1`) fails on them too. `node scripts/run-tests.mjs exec -- <node args>`
+guards any single command the same way.
+
 ### Test Philosophy
 
 - TDD London School (mock-first)
