@@ -57,6 +57,59 @@ export function kbDir() {
   return process.env.RUVNET_BRAIN_KB || path.join(home, '.cache', 'ruvnet-brain', 'kb');
 }
 
+const LEGACY_SNAPSHOT = /^kb\.(?:bak-|install-preserved-)/;
+// Bounded so a pathological tree (a real one runs to thousands of files across
+// several GB) can't turn an already-degraded status/sync into a slow one; a
+// count-without-a-full-byte-total is still useful and this only ever runs
+// inside the reclaim-stuck branch (ADR-0061), not on every ordinary check.
+const LEGACY_SNAPSHOT_FILE_CAP = 20_000;
+
+function dirBytes(dir, budget) {
+  let bytes = 0;
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return { bytes: null, exhausted: false }; }
+  for (const entry of entries) {
+    if (budget.files-- <= 0) return { bytes, exhausted: true };
+    const full = path.join(dir, entry.name);
+    try {
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) {
+        const sub = dirBytes(full, budget);
+        if (sub.bytes != null) bytes += sub.bytes;
+        if (sub.exhausted) return { bytes, exhausted: true };
+      } else {
+        bytes += fs.statSync(full).size;
+      }
+    } catch { /* removed mid-walk, permission denied — best-effort */ }
+  }
+  return { bytes, exhausted: false };
+}
+
+/** Best-effort size of the legacy `kb.bak-` / `kb.install-preserved-` snapshot
+ *  directories forge-update's reclaim check can leave behind (ADR-0061) — the
+ *  disk cost of a reclaim-stuck hold, for the status row's remediation text.
+ *  `root` defaults to the Brain's cache dir (kbDir()'s parent); never throws.
+ *  `fileCap` is test-only (the real default protects an ordinary status/sync
+ *  call, not this function's contract). `exhausted: true` means the cap was
+ *  hit — bytes is a lower bound. */
+export function legacySnapshotBytes(root = path.dirname(kbDir()), { fileCap = LEGACY_SNAPSHOT_FILE_CAP } = {}) {
+  let names;
+  try { names = fs.readdirSync(root, { withFileTypes: true }); } catch { return { count: 0, bytes: null, exhausted: false }; }
+  const dirs = names.filter((e) => e.isDirectory() && LEGACY_SNAPSHOT.test(e.name));
+  const budget = { files: fileCap };
+  let bytes = 0;
+  let summed = false; // at least one dir actually contributed a real number
+  let exhausted = false;
+  for (const d of dirs) {
+    const r = dirBytes(path.join(root, d.name), budget);
+    if (r.bytes != null) { bytes += r.bytes; summed = true; }
+    if (r.exhausted) { exhausted = true; break; }
+  }
+  // dirs.length > 0 with every one unreadable must stay null, not a false "0
+  // bytes" — this row exists specifically to report disk cost honestly.
+  return { count: dirs.length, bytes: summed ? bytes : null, exhausted };
+}
+
 const pluginMarketplace = () =>
   path.join(claudeDir(), 'plugins', 'marketplaces', 'ruvnet-brain');
 const pluginCache = () => path.join(claudeDir(), 'plugins', 'cache', 'ruvnet-brain');

@@ -105,3 +105,71 @@ test('a successful install clears the held refresh', () => {
   assert.equal(cached.installedRelease, '4.3.28');
   assert.equal('heldRefresh' in cached, false);
 });
+
+// ADR-0061: forge-update's legacy-backup reclaim (issue #35) refuses to make
+// another full-KB rollback copy while old kb.bak-*/kb.install-preserved-*
+// snapshots remain. Verified 2026-09-27 that --update can never clear this —
+// only npx ruvnet-brain --uninstall (which never touches those snapshots) then
+// a fresh reinstall does. This is a *distinct* held refusal, not a new "held"
+// mechanism: it must still be recorded, still block sync from retrying, and
+// still clear on a real version change — only the offered `fix` text differs.
+const RECLAIM_STUCK = [
+  '  🧠  RuvNet Brain — refresh',
+  '    [forge-update] ERROR: unresolved rollback state exists; refusing to create another full-KB copy.',
+  '      kb.bak-2026-07-13T10-47-54-235Z: inventory is incomplete; refusing destructive reclaim',
+  '  Restore or reconcile that copy first, then re-run.',
+].join('\n');
+
+test('a reclaim-stuck refusal is held exactly like any other refusal', async () => {
+  const { r, held } = await refresh({ stderr: RECLAIM_STUCK });
+  assert.equal(r.ok, false);
+  assert.equal(held.length, 1);
+  assert.equal(held[0].latest, '4.3.28');
+  assert.match(held[0].detail, /unresolved rollback state exists/);
+});
+
+test('status gives a reclaim-stuck hold different, actionable remediation — and leaves every other hold alone', async () => {
+  seedBrain();
+  brain.recordHeldRefresh({
+    detail: '[forge-update] ERROR: unresolved rollback state exists; refusing to create another full-KB copy.',
+    latest: '4.3.28',
+  });
+  const stuck = brainReleaseRow(await brain.drift());
+  assert.equal(stuck.level, 'warn');
+  assert.equal(stuck.repair, 'manual', 'still never auto-run — a forced fresh install can itself be '
+    + 'refused for a Brain with private stores, after downloading the whole bundle (#237 §4)');
+  assert.match(stuck.fix, /npx ruvnet-brain --uninstall/);
+  assert.match(stuck.fix, /ak sync/);
+  assert.match(stuck.fix, /ruvnet-brain#335/);
+  assert.doesNotMatch(stuck.fix, /fix the cause, then run `npx ruvnet-brain --update`/,
+    'that instruction sends the user back into the exact same refusal forever');
+
+  // Regression guard: an ordinary (non-reclaim) held refusal is completely unaffected.
+  seedBrain();
+  brain.recordHeldRefresh({ detail: 'install stopped: private overlay preflight failed', latest: '4.3.28' });
+  const ordinary = brainReleaseRow(await brain.drift());
+  assert.match(ordinary.fix, /npx ruvnet-brain --update/);
+  assert.doesNotMatch(ordinary.fix, /--uninstall/);
+});
+
+test('after --uninstall, ak\'s existing install routing already takes the fresh path — no new logic needed', async () => {
+  // updaterPresent() is false once kb/forge-update.mjs is gone (that's what
+  // --uninstall removes); present() stays true (the plugin cache survives).
+  // installRuvnetBrain must fall to the pinned --force --version fresh-install
+  // branch, and a successful run must clear the hold, exactly as ADR-0061 §5 says.
+  const calls = [];
+  const r = await installRuvnetBrain({
+    runner: async (cmd, args) => { calls.push({ cmd, args }); return { code: 0, stdout: '', stderr: '' }; },
+    latestRelease: async () => ({ version: '4.3.29', releaseAssetAvailable: true }),
+    present: () => true,
+    updaterPresent: () => false,
+    releaseOnDisk: () => '4.3.29',
+    recordRelease: () => {},
+    recordRefusal: () => { throw new Error('a successful fresh install must not be held'); },
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.status, 'ok');
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].args.includes('--force'), 'a present install without an updater is a forced reinstall');
+  assert.ok(calls[0].args.includes('--version'), 'pinned to the resolved tag, never a bare latest');
+});

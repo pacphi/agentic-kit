@@ -330,6 +330,16 @@ const BRAIN_HINT = /^(?:Run|Fix:)\s.*\bnpx ruvnet-brain\b/i;
 // bundle's updater ("[forge-update] ERROR:", "refusing to update", missing
 // updater) — as opposed to a transient network or timeout failure.
 const BRAIN_REFUSAL = /install stopped:|\[forge-update\]\s*ERROR:|refusing to update|can't update:/i;
+// A specific, permanent subtype of BRAIN_REFUSAL (ADR-0061): forge-update's
+// legacy-backup reclaim (reclaimBackups(), upstream issue #35) refuses to
+// create another full-KB rollback copy while any kb.bak-*/kb.install-preserved-*
+// snapshot from a prior update remains unresolved. Verified 2026-09-27: retrying
+// --update can never clear this (the snapshots are never touched by --update),
+// but deleting kb/ (npx ruvnet-brain --uninstall) and reinstalling fresh takes a
+// different code path (obtainBundle(), not forge-update.mjs) that isn't blocked
+// by it — see stuinfla/ruvnet-brain#335. Exported so status can give this one
+// subtype of held refusal different, actionable remediation text.
+export const BRAIN_RECLAIM_STUCK = /unresolved rollback state exists|refusing to create another full-KB copy/i;
 
 /** Did the installer or updater refuse, rather than fail transiently? */
 export function brainRefused(result) {
