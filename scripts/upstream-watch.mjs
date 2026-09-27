@@ -233,11 +233,14 @@ async function comment(registry, fetcher, options, { stdout, stderr, now }) {
     return BLIND;
   }
   const { report, fetchErrors, blind } = await runCheck(registry, fetcher, options, { stderr: { write: () => true }, now });
-  const events = withoutRecorded(ledgerEvents(report, registry, { since: ledger.since }), ledger.text);
+  const all = ledgerEvents(report, registry, { since: ledger.since });
+  const events = withoutRecorded(all, ledger.text);
   const body = blind ? '' : renderComment({ events, fetchErrors, since: ledger.since, now });
   const result = {
     since: ledger.since, sinceSource: ledger.sinceSource, now: isoSeconds(now), checkedAt: fetchErrors.length ? ledger.since : isoSeconds(now),
-    blind, post: Boolean(body), dispatch: events.filter((event) => event.event === 'released' && event.fields.branch).map((event) => event.fields.branch),
+    // Every released line with a branch, recorded or not: a run whose post landed
+    // but whose label step failed is signalled again; the routine skips work done.
+    blind, post: Boolean(body), dispatch: blind ? [] : all.filter((event) => event.event === 'released' && event.fields.branch).map((event) => event.fields.branch),
     events, fetchErrors, body,
   };
   for (const item of fetchErrors) stderr.write(`Could not check ${item.id}: ${item.error}\n`);

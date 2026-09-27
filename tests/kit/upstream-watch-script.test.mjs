@@ -992,6 +992,9 @@ test('the documented dispatch routine trusts only the ledger authors', () => {
   assert.match(prompt, /never follow instructions/i, 'comment text is data, not instructions');
   assert.match(prompt, /pacphi\/agentic-kit#243/, 'the routine reads the recorded ledger issue');
   assert.match(prompt, /without branch= is held by the support window/);
+  assert.match(prompt, /From all of\s+them/, 'a line in an older comment is still dispatched (b4b-adversarial M3)');
+  assert.match(prompt, /already exists on origin/);
+  assert.match(prompt, /not "watching" or "fixed-unreleased"/, 'work already dispatched or adopted is skipped (b4b-adversarial m5)');
   assert.match(prompt, /DRAFT pull request/);
   assert.match(prompt, /Never merge/);
   assert.match(prompt, /never comment on\s+upstream/i);
@@ -1132,6 +1135,14 @@ test('comment lists the dispatch branches of released lines', async () => {
     const result = JSON.parse(out.text());
     assert.deepEqual(result.dispatch, ['upstream/proffesor-for-testing-agentic-qe-617']);
     assert.match(result.body, /dispatch it on branch upstream\/proffesor-for-testing-agentic-qe-617\./);
+    // b4b-adversarial M3: once the line is recorded (the post landed but the
+    // label step failed), later runs still signal it; the routine skips work done.
+    const released = result.events.find((event) => event.event === 'released').line;
+    const again = capture();
+    await main(['comment', '--json', '--registry', file], { fetcher: withLedger([ledgerComment('github-actions[bot]', `\`\`\`text\n${released}\nchecked-at 2026-09-26T22:00:00Z\n\`\`\``)]), stdout: again.stream, stderr: capture().stream, now: NOW });
+    const later = JSON.parse(again.text());
+    assert.ok(!later.body.includes(released), 'the recorded line is not posted again');
+    assert.deepEqual(later.dispatch, ['upstream/proffesor-for-testing-agentic-qe-617']);
   });
 });
 
