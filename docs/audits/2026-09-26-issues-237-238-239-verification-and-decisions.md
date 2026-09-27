@@ -1417,7 +1417,6 @@ branch:
 | 6.19 | `feat(upstream): registry of upstream issues and the ak changes they unblock` | Upstream watch |
 | 6.20 | `feat(upstream): deterministic upstream watch check` | Upstream watch |
 | 6.21 | `docs(upstream): the watch-and-dispatch routine, its ledger and its lifecycle` | Upstream watch |
-
 | 6.22 | `feat(versions): support a rolling window of Ruflo minors (n-5, at least 30 days)` | Support window |
 | 6.23 | `fix(security): stop reporting defend as non-functional when Ruflo ships the built-in engine` | ruflo#2670 review |
 | 6.24 | `refactor(heal): remove the AQE solver heal that never installs anything` | agentic-qe#617 review |
