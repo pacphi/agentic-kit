@@ -107,9 +107,9 @@ Code sessions then use the same store as Codex: the repository's `.swarm` from a
 the user-level store `~/.claude-flow/memory` from your home folder, a temporary root or a tool's
 own folder. Ruflo also reads the repository's MCP policy file from a subfolder. A registration you
 wrote yourself (another command, scope or environment key) is left alone. The launcher must be on
-the `PATH` Claude Code starts with, and that `ak` must be this version or newer. If `ak` is not
-found, or it is an older install whose launcher has no `--host` option, sync keeps the old
-registration and says so, and `ak status` lists the step as yours: put `ak` on `PATH` (or update
+the `PATH` Claude Code starts with, and that `ak` must be a build whose launcher takes `--host`
+(ak checks `ak x ruflo-mcp --help`). If `ak` is not found, or it is an older install whose launcher
+has no `--host` option, sync keeps the old registration and says so, and `ak status` lists the step as yours: put `ak` on `PATH` (or update
 it), then run `ak sync`. Restart Claude Code to pick up the new registration.
 
 The same sync removes ak's old setup probe rows (`_setup/verify-…`) once, from both memory files of
