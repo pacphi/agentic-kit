@@ -1347,14 +1347,15 @@
       "mapping": "mapped",
       "kitImpact": {
         "refs": ["plan 5.1, audit 2026-09-26 (docs/audits/2026-09-26-issues-237-238-239-verification-and-decisions.md) addendum 2: memory pin before provider registration"],
-        "files": []
+        "files": ["src/commands/status/sections/project-memory.mjs", "src/lib/providers.mjs", "src/lib/ruflo-memory-config.mjs"]
       },
       "adjustment": "Once a released Ruflo honours the memory settings in .claude-flow/config.yaml, re-evaluate the memory pin written before provider registration.",
       "status": "watching",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-26", "event": "commented" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "released", "note": "PR #3420 in 3.46.0: the daemon parses config.yaml; memory settings in config.yaml are still not read (memory-initializer.js getMemoryRoot reads claude-flow.config.json and .claude-flow/config.json only, rechecked on 3.46.1), so ak keeps the memory pin; the issue stays open" }
       ]
     },
     {
