@@ -1,7 +1,10 @@
 # ADR-0060 — Session surface, initiator and official product names
 
-- **Status:** Proposed (staged follow-on; nothing implemented)
+- **Status:** Proposed; §3 implemented for project discovery (2026-09-27), the rest staged follow-on
 - **Date:** 2026-09-26
+- **Updated:** 2026-09-27 — §3 implemented for project discovery and the System projects note:
+  imported copies give no project, host or origin and are counted. The ledger-derived source labels
+  (Cursor, Cowork) and the other views remain proposed.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0050](0050-dashboard-project-identity-and-context-reporting.md) (session origin
   rule, superseded in part by this record once accepted),
@@ -160,8 +163,9 @@ in full.
 ## Consequences
 
 - Usage, System → Projects, Maintenance facets, Intelligence designation (which today mixes Git
-  scope, origin and host in one enum) and the Runtime table change labels and counts. Twenty-three
-  project folders lose a false Desktop origin on this machine.
+  scope, origin and host in one enum) and the Runtime table change labels and counts. On this
+  machine 32 project folders lost a false Desktop origin when discovery began setting imports aside
+  (re-measured 2026-09-27; 23 on 2026-09-26).
 - The usage cache schema changes (new session fields); a rebuild is expected.
 - Tests that pin current names change together (inventory in the audit record, Addendum 3).
 - `CLAUDE_CODE_ENTRYPOINT` and the transcript format are internal to Claude Code and may change;
@@ -173,6 +177,10 @@ in full.
 - Whether "Cloud session" should appear at all in local views, given none was observed locally.
 - Whether the "on 3P" attribute is worth showing.
 - How ADR-0057's role lenses consume surface and initiator.
+- Whether a later turn inside an imported copy that is not itself an import (6 of 924 rollouts on
+  2026-09-27, with real token usage) counts as the importing app's own session. Decided 2026-09-27
+  (audit decision 12): it counts, excluded per turn in Branch 8
+  ([ADR-0052](0052-codex-usage-attribution.md), "Not done").
 
 ## Verification (when implemented)
 
@@ -182,4 +190,17 @@ fixture.
 
 ## Implementation status
 
-Not started. Staged as follow-on work in the audit record's Addendum 3.
+§3 is implemented for project discovery and the System projects note (2026-09-27): an imported copy
+gives no project, host or origin, and discovery counts it in `importedExcluded`. The per-source
+labels from the imports ledger, Runtime attribution and §1, §2 and §4–§6 remain follow-on work
+(the audit record's Addendum 3).
+
+Three views already show the smaller project counts but do not yet say how many imported copies were
+set aside; §3's "each view reports how many it excluded" is still owed for them:
+
+- the Intelligence census line (`src/lib/dashboard/client/intelligence.mjs`, which prints
+  `everSeen`; the server's `readCensus` in `src/lib/dashboard-server.mjs` drops `importedExcluded`);
+- the System → Projects liner (`sysProjectsLinerHtml` in
+  `src/lib/dashboard/client/system-projects.mjs`);
+- the `ak system` text output (`renderProjects` in `src/commands/system.mjs`, which prints only the
+  count; `ak system --json` carries `importedExcluded`).

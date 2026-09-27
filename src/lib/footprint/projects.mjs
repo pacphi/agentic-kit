@@ -612,7 +612,7 @@ function summarizeCatalog(rows, fsImpl) {
     const git = statNode(path.join(row.path, '.git'), { fsImpl });
     if (git.status !== UNKNOWN && (git.kind === 'dir' || git.kind === 'file')) gitRepos += 1;
   }
-  return { everSeen: rows.length, onDisk, gitRepos, unresolved: 0, complete: true };
+  return { everSeen: rows.length, onDisk, gitRepos, unresolved: 0, importedExcluded: 0, complete: true };
 }
 
 /** A `discoverProjectSources()` PAYLOAD rather than a plain catalog array.
@@ -684,6 +684,21 @@ function aggregateUnrecognized(rows) {
   };
 }
 
+/** The KPI counts a discovery payload carries; absent fields read as zero, so
+ *  an older payload (no `importedExcluded`) keeps rendering as it did. */
+function payloadCounts(payload) {
+  return {
+    everSeen: payload?.everSeen ?? 0,
+    onDisk: payload?.onDisk ?? 0,
+    gitRepos: payload?.gitRepos ?? 0,
+    unresolved: payload?.unresolved ?? 0,
+    importedExcluded: payload?.importedExcluded ?? 0,
+    complete: payload?.complete !== false,
+    method: payload?.method ?? null,
+    sources: payload?.sources ?? null,
+  };
+}
+
 /**
  * Resolve the project catalog `collectProjects` will measure, plus the
  * ever-seen / on-disk / git-repo counts that ride alongside it.
@@ -707,15 +722,7 @@ function resolveProjectCatalog({ projects, sources, discover, fsImpl }) {
     return {
       catalog,
       discoveryProjects: payload?.projects ?? [],
-      counts: {
-        everSeen: payload?.everSeen ?? 0,
-        onDisk: payload?.onDisk ?? 0,
-        gitRepos: payload?.gitRepos ?? 0,
-        unresolved: payload?.unresolved ?? 0,
-        complete: payload?.complete !== false,
-        method: payload?.method ?? null,
-        sources: payload?.sources ?? null,
-      },
+      counts: payloadCounts(payload),
       discoveryReason: null,
     };
   } catch (error) {
@@ -797,6 +804,7 @@ function buildProjectsSection({ asOf, out, eligible, selected, excluded, counts,
     onDisk: kpi(counts?.onDisk ?? 0),
     gitRepos: kpi(counts?.gitRepos ?? 0),
     unresolved: counts?.unresolved ?? 0,
+    importedExcluded: counts?.importedExcluded ?? 0,
     method: counts?.method ?? null,
     sources: counts?.sources ?? null,
     scanned: out.length,

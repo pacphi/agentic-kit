@@ -108,8 +108,9 @@ Project choices group beneath repositories only when shared Git metadata or the 
 contract establishes the association. A worktree remains its own selectable project. Folder/name
 headers, a Git/Worktree/Folder designation, and all detected language icons identify each choice.
 An independent **Session origin** facet can match Claude Desktop, Codex Desktop, or unclassified
-observations; Desktop origin never replaces repository membership. Facet counts are installations
-in matching projects, not numbers of sessions. Selecting several origins does not duplicate a
+observations; Desktop origin never replaces repository membership. Codex copies of Claude Code
+sessions imported by the ChatGPT desktop app never count as a Desktop origin. Facet counts are
+installations in matching projects, not numbers of sessions. Selecting several origins does not duplicate a
 placement. Exact root paths stay private; the public grouping uses opaque repository identities
 and bounded display labels.
 

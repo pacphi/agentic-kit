@@ -129,7 +129,8 @@ bounded label, evidence class and observation time; raw roots and common-directo
 private. Discovery's existing repository-key relationships retain their own provenance.
 
 Session origin is an independent overlapping project facet. Exact Claude/Codex Desktop declarations
-supply memberships; all other observations remain unclassified. Selecting either or both Desktop
+supply memberships, except in a Codex rollout imported from a Claude Code transcript, which supplies
+none (ADR-0060 §3); all other observations remain unclassified. Selecting either or both Desktop
 origins filters distinct placements in matching projects once. Focus node counts remain installation
 counts, and session-origin counts are copied once per project rather than summed per installed
 resource. Encoded-directory recovery is labelled a recovered-project sighting, not a verified

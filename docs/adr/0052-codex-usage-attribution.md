@@ -2,6 +2,9 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-19
+- **Updated:** 2026-09-27 — imported copies are also excluded from project discovery: they give no
+  project, host or Desktop origin, and the discovery scan counts them in `importedExcluded`
+  (ADR-0060 §3). The marker now lives in one leaf module shared by usage and discovery.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0009](0009-usage-scorecard-local-transcript-analytics.md),
   [ADR-0038](0038-consistent-cross-host-session-metrics.md),
@@ -117,6 +120,11 @@ out of aggregation, out of every yield statistic, and counted in
 `diagnostics.importedExcluded` (796 on the reference machine). Nothing is dropped
 silently. The record itself is still cached, so a rescan is cheap.
 
+Project discovery applies the same marker to each rollout's bounded head (256 KiB, 40 lines): an
+imported copy names no project, host or Desktop origin, and the scan reports how many it set aside
+(`importedExcluded`, 924 on the reference machine on 2026-09-27, every marker on the rollout's
+second line).
+
 ### 4. Cumulative counter restarts are summed, per event
 
 `total_token_usage` restarts from zero mid-file: 48 restarts across 33 files
@@ -196,6 +204,15 @@ subagent and previously dropped usage is now priced.
 - A subagent with no ordinals still reports no usage (decision 2).
 - One rollout carries `token_count`s but no agent message, so the pre-existing
   `partial-response-yield` warning remains.
+- Whole-rollout exclusion may drop real usage (open, plausible, 2026-09-27). On the reference
+  machine 6 of 924 imported rollouts carry a later turn that is not an import: one `task_started`
+  whose `turn_id` starts with `rollout-`, no `user_message` event, `role: user` response items in
+  five of the six (2 to 76 per file) and non-zero `token_count` usage (the per-file sum of
+  `last_token_usage.total_tokens` is about 8k to 449k). Both usage and discovery set the whole file
+  aside at the marker, so this usage is not counted. With no `user_message`, the turn may be
+  automatic (a compaction or title pass). Measured from counts only. Decided 2026-09-27 (audit
+  decision 12): Branch 8 excludes per turn instead of per file, so imported turns are never counted
+  and later turns are, after it establishes whether they are the user's work or an automatic pass.
 
 ## Verification
 

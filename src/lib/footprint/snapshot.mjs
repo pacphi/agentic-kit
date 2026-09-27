@@ -26,8 +26,10 @@ import { CARRIED_FORWARD, MEASURED } from './walk.mjs';
 /** Bump when a section's persisted SHAPE changes incompatibly. A snapshot
  *  written by a different version is not migrated and not guessed at — it
  *  reads as never-measured with an explicit reason, and the next deep scan
- *  replaces it. */
-export const SNAPSHOT_SCHEMA_VERSION = 7;
+ *  replaces it. v8: project rows no longer take a host or Desktop origin from
+ *  Codex copies of Claude Code transcripts (ADR-0060 §3), so a v7 row's
+ *  origins cannot be trusted. */
+export const SNAPSHOT_SCHEMA_VERSION = 8;
 
 /** The deep-tier sections, in collection order. This list is also the write
  *  filter — see the header note on the runtime census. A section absent from a

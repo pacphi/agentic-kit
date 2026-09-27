@@ -103,7 +103,8 @@ zero patterns can say *why* it reports zero rather than being indistinguishable 
 The native select groups choices as Git repositories, Git worktrees, User-level learning, and
 Other / unclassified, alphabetically within each group. Grouping uses `learningScope` and its
 evidence; only exact configured user-state roots qualify as user-level. Known Desktop declarations
-add Claude Desktop/Codex Desktop suffixes independently. `learningOrigins` is a union when census
+add Claude Desktop/Codex Desktop suffixes independently; a Codex rollout imported from a Claude Code
+transcript adds none, because discovery sets it aside (ADR-0060 §3). `learningOrigins` is a union when census
 rows fold to one identity. Sorting does not change selection keys or machine-wide totals. The
 picker remains visible when the selected project has no history, so the user can choose another.
 

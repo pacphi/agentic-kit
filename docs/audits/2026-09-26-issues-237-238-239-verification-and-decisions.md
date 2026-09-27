@@ -924,6 +924,19 @@ changed in this wave:
 - A worktree `.claude` modification time that changed during the review. It came from concurrent
   runs, and no user state changed.
 
+#### Remediation program Branch 1 (`fix/imported-rollout-origins`, 2026-09-27)
+
+Added after the fact. This branch was built from `be1c1d47` for the
+[remediation program](../superpowers/plans/2026-09-26-remediation-program.md), not on
+`integration/237-238`, and it is not merged. It implements ADR-0060 §3 for project discovery: a Codex
+rollout imported from a Claude Code transcript gives a folder no project, Codex host or Desktop
+origin, and discovery counts it in `importedExcluded`, which the System KPI note shows. A read-only
+count on this machine on 2026-09-27 found 924 imported rollouts (the 874 above was 2026-09-26) and
+32 folders whose Desktop origin came only from imports (23 above). Commits: `0c56f48f` (discovery),
+`a76738a4` (System note), `7e73a324` (ADR-0052), `bcdf9f89`, `c5f4e701`, then a review fix wave that
+advances the footprint snapshot schema to v8 so a snapshot taken before the change is not shown
+with the old origins. What remains is listed under Open items.
+
 ### Full-suite results at each stage end
 
 #### Baseline on `847486c`
@@ -1103,6 +1116,16 @@ Behavior that differs from, or goes beyond, the plan text.
   - To repair it:
     1. Run **Re-measure machine** in the dashboard's Maintenance area.
     2. Check that `locators.json` no longer mentions `/Users/someone`.
+- **Run a Full scan after Branch 1 lands.** The footprint snapshot schema moves to v8, so System
+  and the Maintenance session-origin facet show the Projects section as not measured until **Full
+  scan** or `ak system --deep` writes a new snapshot. Before that, the 49 folders the v7 snapshot
+  lists with a Codex Desktop origin include the false ones.
+- **Left open by Branch 1.** ADR-0060's status (it is still Proposed, and Branch 7 waits for its
+  acceptance). The Intelligence census line, the System → Projects liner and the `ak system` text
+  output show the smaller counts without the imported-copy count (ADR-0060 Implementation status).
+  6 of the 924 imported rollouts hold a later turn that is not an import and has real token usage,
+  which whole-rollout exclusion drops. The maintainer decided on 2026-09-27 to count them in
+  Branch 8 (decision 12 below).
 - **The dashboard server's hermeticity guard has a gap.** It fires only when a maintenance service
   is injected without a control root. A caller that injects only a System collector still gets the
   default maintenance service and management facade, and both write real state. This product-side
@@ -1466,7 +1489,8 @@ the raw value always kept, folders only as explanation, and one table of officia
 finding for current views: all 874 rollouts labelled `Codex Desktop` are Claude Code transcripts
 imported by the ChatGPT desktop app. Usage already excludes them (ADR-0052), but project discovery
 does not, so 23 project folders on this machine show a Desktop origin they never had. The work is
-staged as follow-on, starting with that exclusion.
+staged as follow-on, starting with that exclusion. (That exclusion is now implemented on Branch 1; see its entry under
+Implementation status.)
 
 ### Plan changes
 
@@ -1516,8 +1540,9 @@ the table: `24ddc42` (ships the constraint registry with ak, which the table did
 6.6 and 6.7 are Branch 6a's items 1–2; 6.8–6.16 are Branch 6b's items 1–9 and 6.17 its item 11.
 The order constraints above still hold across those branches.
 
-**Follow-on (not on this branch).** ADR-0060, beginning with removing imported copies from project
-discovery and origin views, then the shared surface vocabulary; pruning of ak's settings safety
+**Follow-on (not on this branch).** ADR-0060: removing imported copies from project discovery is
+done on Branch 1; saying how many were set aside in the Intelligence census line, the System →
+Projects liner and the `ak system` text output remains, then the shared surface vocabulary; pruning of ak's settings safety
 copies; the AQE audit-chain break; Cowork as a discovery source.
 
 ### Decision 10 — sync's exit code and hand-fix rows
@@ -1563,3 +1588,20 @@ and [UPGRADING](../UPGRADING.md) updated to match. When a failing manual row rem
 reads "converged — nothing left that sync can repair" rather than "no failing subsystems". A manual
 row of a subsystem named by `--skip` is listed under "needs your action" rather than "skipped by
 request".
+
+### Decisions 11 and 12 — imported copies (Branch 1, 2026-09-27)
+
+Both questions came from Branch 1 and were presented in the decision format above.
+
+**Decision 11 — folders named only by imported copies.** On this machine 5 folders appear only in
+Codex rollouts that the ChatGPT desktop app imported from Claude Code transcripts. With imports
+excluded from discovery, they leave the "ever seen" project count (113 → 108). The choices were to
+drop them, since an imported copy is not a session on this machine (ADR-0060 §3), or to credit the
+sighting to Claude Code. **Recommendation: drop them. Choice: drop them.**
+
+**Decision 12 — real turns inside imported copies.** 6 of the 924 imported rollouts hold later turns
+of real work in the ChatGPT desktop app, with token usage. Whole-rollout exclusion drops them from
+usage (ADR-0052) and from discovery. The choices were: exclude per turn in Branch 8, which owns the
+usage parsers; do it in Branch 1; or keep whole-rollout exclusion. **Recommendation: per turn, in
+Branch 8. Choice: per turn, in Branch 8.** Imported turns are never counted, and later real turns
+count as Codex usage in the ChatGPT desktop app and give their folder a genuine Desktop origin.

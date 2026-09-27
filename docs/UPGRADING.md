@@ -39,6 +39,15 @@ and supported `claude mcp serve` tool exposure are preserved. See
 [ADR-0051](adr/0051-supported-peer-delegation-and-host-realignment.md) for the policy,
 official source citations, authority boundaries and verification limits.
 
+## 2026-09-27: System snapshot v8 (imported Codex copies)
+
+When the ChatGPT desktop app imports a Claude Code transcript, it saves a copy as a Codex session.
+Project discovery no longer counts these copies: they give a folder no Codex host and no Desktop
+origin, and System says how many it set aside. A snapshot taken before this change still holds the
+old hosts and origins, so the Footprint snapshot schema advances to v8. This build reports a v7
+snapshot as unreadable until you run **Full scan** in System or `ak system --deep`. It is never
+shown under the new rule. See [ADR-0060](adr/0060-session-surface-initiator-and-product-names.md) §3.
+
 ## 2026-09-26: `ak sync`'s exit code ignores fixes you do by hand
 
 `ak sync` now exits 0 when everything it can repair has converged, even if a row whose fix you

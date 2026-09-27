@@ -232,6 +232,28 @@ test('the KPI band and every catalog card render identically from the summary an
   assert.deepEqual(fromSummary, fromFull);
 });
 
+test('the projects note says how many imported copies discovery set aside, and nothing when there are none', () => {
+  const noteFor = (extra) => {
+    const client = systemClient();
+    const projects = { everSeen: { value: 114 }, onDisk: { value: 90 }, gitRepos: { value: 60 }, unresolved: 0,
+      method: 'm', projects: [], ...extra };
+    client.readout.renderSysKpis({ ...fullPayload(1), projects });
+    return client.document.getElementById('sys-kpis-note').innerHTML;
+  };
+  const note = noteFor({ importedExcluded: 924 });
+  assert.match(note, /924 Codex copies of Claude Code sessions, imported by the ChatGPT desktop app, are not counted/);
+  assert.match(note, /are not counted; they are copies, and the original Claude Code session is counted where its transcript still exists\./);
+  const one = noteFor({ importedExcluded: 1 });
+  assert.match(one, /1 Codex copy of a Claude Code session, imported by the ChatGPT desktop app, is not counted; it is a copy, and the original Claude Code session is counted where its transcript still exists\./);
+  for (const text of [note, one]) {
+    assert.doesNotMatch(text, /already names its folder/, 'an import-only folder has no Claude transcript naming it');
+  }
+  for (const extra of [{}, { importedExcluded: 0 }]) {
+    const plain = noteFor(extra);
+    assert.doesNotMatch(plain, /imported|undefined/, 'an old snapshot or a zero renders exactly as before');
+  }
+});
+
 // ── The page reads the slim endpoint ────────────────────────────────────────
 
 test('loadSystem fetches /api/system/summary, deep refresh parameters included', async () => {

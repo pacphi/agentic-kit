@@ -639,7 +639,9 @@ session."
 A session cwd is only a discovery candidate; it does not confer project scope. If that cwd makes a
 candidate surface resolve to the same host, kind, and path as a user surface, the user occurrence
 wins and no project-pressure row is fabricated. One shared user surface carried by two hosts remains
-visible on both hosts.
+visible on both hosts. A Codex session that the ChatGPT desktop app imported from a Claude Code
+transcript is not a candidate at all: it adds no project, host or Desktop origin, and the Projects
+note under the System KPIs says how many were set aside.
 
 The measurement counts a physical artifact once and retains each host that discovers it as a
 separate consumer binding. It fingerprints bounded skill definitions and individual MCP

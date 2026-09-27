@@ -23,6 +23,7 @@ import { normalizeMode } from './usage-modes.mjs';
 import { provenanceOf } from './usage-provenance.mjs';
 import { promptSemantics } from './usage-prompt-semantics.mjs';
 import { observeUsageProject, usageSessionOrigin } from './usage-project-evidence.mjs';
+import { isCodexImportedLine } from './codex-import-marker.mjs';
 
 export { promptSemantics } from './usage-prompt-semantics.mjs';
 
@@ -1144,18 +1145,6 @@ function processCodexLine(rec, turns, stats, titleState, usageState, latState, m
   if (e.type !== 'event_msg') return;
   const replay = isCodexReplayLine(usageState.boundary, e);
   handleCodexEventMsg(rec, turns, stats, titleState, usageState, latState, decoded, rawPayload(e), ms, withTurns, replay);
-}
-
-/** Codex can import a Claude Code transcript as a thread. The host stamps such
- *  a rollout's turns `external-import-turn-N` (measured: 796 imports, every one
- *  carrying it from its first task_started, none of a native thread). The
- *  in-rollout marker is the signal — the host's imports file is deliberately
- *  not read, so detection works without it. */
-const CODEX_IMPORT_TURN_PREFIX = 'external-import-turn';
-
-function isCodexImportedLine(e) {
-  const turnId = e?.payload?.turn_id;
-  return typeof turnId === 'string' && turnId.startsWith(CODEX_IMPORT_TURN_PREFIX);
 }
 
 /** The record for an imported rollout: identity only. The conversation's real
