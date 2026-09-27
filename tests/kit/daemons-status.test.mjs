@@ -225,3 +225,13 @@ test('on macOS a deferral under a user-managed config.json is a manual step: syn
     assert.equal(fs.readFileSync(path.join(cwd, '.claude-flow', 'config.json'), 'utf8'), content, 'status writes nothing');
   }
 });
+
+// F5: a bare .claude-flow/ is not a Ruflo project (Ruflo 3.46.1
+// daemon-autostart.js:90-123), so status offers no daemon-settings sync there.
+test('a repository with only a bare .claude-flow folder gets no daemon-settings drift row', async (t) => {
+  const cwd = project(t, { memory: false });
+  fs.mkdirSync(path.join(cwd, '.git'));
+  fs.mkdirSync(path.join(cwd, '.claude-flow'));
+  const rows = await collect(cwd, { loadConfig: kit(), rufloVersion: '3.46.1', platform: 'darwin' });
+  assert.equal(drift(rows), undefined, JSON.stringify(rows));
+});

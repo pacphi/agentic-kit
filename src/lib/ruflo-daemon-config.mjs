@@ -49,6 +49,35 @@ export const MEMORY_FLOOR_KEY = 'daemon.resourceThresholds.minFreeMemoryPercent'
 export const DAEMON_CONFIG_RELATIVE = path.join('.claude-flow', 'config.json');
 const MAX_CONFIG_BYTES = 1024 * 1024;
 
+const readJsonObject = (file) => {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
+};
+
+/** Ruflo's own test for a Ruflo project (3.46.1 services/daemon-autostart.js:90-123,
+ *  isRufloProject): a durable marker, never a bare .claude-flow/ folder, which
+ *  Ruflo's startup migration can create by itself (the regression that
+ *  function's own comment describes). */
+export function durableRufloProject(root) {
+  const direct = [
+    ['.claude-flow', 'config.yaml'], ['.claude-flow', 'config.yml'], ['.claude-flow', 'config.json'],
+    ['claude-flow.config.json'], ['.swarm', 'memory.db'],
+  ];
+  if (direct.some((parts) => fs.existsSync(path.join(root, ...parts)))) return true;
+  const settings = readJsonObject(path.join(root, '.claude', 'settings.json'));
+  if (settings && typeof settings === 'object' && 'claudeFlow' in settings) return true;
+  const servers = readJsonObject(path.join(root, '.mcp.json'))?.mcpServers;
+  return !!servers && typeof servers === 'object' && ('ruflo' in servers || 'claude-flow' in servers);
+}
+
+/** The Ruflo project around `cwd` whose daemon settings ak manages: the
+ *  project-scope gate (rufloProjectRoot) AND a durable Ruflo marker. Writing
+ *  .claude-flow/config.json is itself such a marker, so ak must never write it
+ *  where Ruflo would not already start a daemon. */
+export function rufloDaemonProjectRoot(cwd) {
+  const root = rufloProjectRoot(cwd);
+  return root && durableRufloProject(root) ? root : null;
+}
+
 /** The flat keys ak wants in .claude-flow/config.json for this Ruflo and platform. */
 export function desiredDaemonKeys({ rufloVersion, platform }) {
   const keys = {};
@@ -218,7 +247,8 @@ export function daemonIntent(cfg) {
 
 /**
  * Sync: converge the Ruflo project around `cwd` (a git repository root with
- * .claude-flow/, the same gate as project-scope Ruflo components) and restart
+ * .claude-flow/, the same gate as project-scope Ruflo components, that also
+ * carries one of Ruflo's durable project markers) and restart
  * its live daemon when it runs with settings it read before this change, or is
  * still deferring work for low memory on macOS under a floor ak manages. A daemon that is not running
  * is left for Ruflo's start-on-use. Returns null outside a Ruflo project.
@@ -229,7 +259,7 @@ export function daemonIntent(cfg) {
 export async function applyRufloDaemon(cwd, {
   cfg, rufloVersion = null, platform = process.platform, runner = run, alive = projectDaemonAlive, dryRun = false,
 }) {
-  const root = rufloProjectRoot(cwd);
+  const root = rufloDaemonProjectRoot(cwd);
   if (!root) return null;
   const intent = daemonIntent(cfg);
   const result = reconcileRufloDaemon(root, { rufloVersion, platform, receipts: intent.receipts, autoStart: intent.autoStart, dryRun });

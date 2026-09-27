@@ -391,7 +391,11 @@ floor of 0 on macOS, where Ruflo undercounts free memory
 `daemon.idleSecs: 0` on Ruflo older than 3.46.0, whose daemon ended itself early
 ([ruvnet/ruflo#3194](https://github.com/ruvnet/ruflo/issues/3194)). ak never uses
 `ruflo config set` for these. A file that is not a JSON object, or a key that holds your
-own value, is left alone, and `ak status` names the key to set yourself.
+own value, is left alone, and `ak status` names the key to set yourself. ak writes these keys
+only in a repository Ruflo already treats as a project (it has `.swarm/memory.db`, a Ruflo
+config file, a `claudeFlow` block in `.claude/settings.json`, or a Ruflo server in `.mcp.json`),
+never in one that has just an empty `.claude-flow/` folder, since the file would make Ruflo
+start a daemon there.
 
 To leave start-on-use as Ruflo set it, add `"rufloDaemon": { "autoStart": false }`
 to `kit.json` and run `ak sync`; it puts back a value it changed. You can always

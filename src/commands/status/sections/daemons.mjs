@@ -30,9 +30,8 @@ import {
 import { formatLiveCheckAge as ago } from '../../../lib/live-check-evidence.mjs';
 import { pendingDeferral } from '../../../lib/memory-maintenance.mjs';
 import * as paths from '../../../lib/paths.mjs';
-import { rufloProjectRoot } from '../../../lib/ruflo-components/apply.mjs';
 import {
-  DAEMON_CONFIG_RELATIVE, MEMORY_FLOOR_KEY, daemonConfigHeld, daemonDrift,
+  DAEMON_CONFIG_RELATIVE, MEMORY_FLOOR_KEY, daemonConfigHeld, daemonDrift, rufloDaemonProjectRoot,
 } from '../../../lib/ruflo-daemon-config.mjs';
 import { memoryProjectRoot } from '../../../lib/ruflo-memory.mjs';
 import { installedRoutingVersion } from '../../../lib/ruflo-memory-contract.mjs';
@@ -98,7 +97,7 @@ export function heldRow(held) {
 /** The Ruflo repository around `cwd`, kit.json, and the keys its config.json
  *  keeps from ak (read once for the deferral and drift rows). */
 function rufloContext(cwd, { loadConfig, rufloVersion, platform }) {
-  const root = rufloProjectRoot(cwd);
+  const root = rufloDaemonProjectRoot(cwd);
   if (!root) return { root: null, cfg: null, held: null };
   const cfg = loadConfig();
   return { root, cfg, held: daemonConfigHeld(root, { cfg, rufloVersion, platform }) };

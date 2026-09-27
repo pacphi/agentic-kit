@@ -192,10 +192,13 @@ test('reconcile never spawns ruflo', (t) => {
 });
 
 // ── sync: converge the working project and restart a live daemon ───────────
+// A Ruflo repository: .git, .claude-flow/ and Ruflo's durable project store.
 function rufloRepo(t) {
   const root = tmpProject(t);
   fs.mkdirSync(path.join(root, '.git'));
   fs.mkdirSync(path.join(root, '.claude-flow'));
+  fs.mkdirSync(path.join(root, '.swarm'));
+  fs.writeFileSync(path.join(root, '.swarm', 'memory.db'), '');
   return root;
 }
 const recorder = () => {
@@ -274,5 +277,60 @@ test('a daemon deferring under a user-managed config.json is not restarted: sync
     assert.equal(r.restarted, false, content);
     assert.deepEqual(calls, [], content);
     assert.equal(fs.readFileSync(configFile(root), 'utf8'), content);
+  }
+});
+
+// F5 (Branch 3 fix round 2): Ruflo 3.46.1 treats a folder as a Ruflo project
+// only with a durable marker (services/daemon-autostart.js:90-123, isRufloProject):
+// .claude-flow/config.{yaml,yml,json}, claude-flow.config.json,
+// .swarm/memory.db, settings.json `claudeFlow`, or a ruflo/claude-flow server in
+// .mcp.json. A bare .claude-flow/ is not one: Ruflo's own startup migration can
+// create it (see that function's comment). Writing .claude-flow/config.json there would itself make
+// the folder a Ruflo project, so the next ruflo command would start a daemon.
+function bareRepo(t) {
+  const root = tmpProject(t);
+  fs.mkdirSync(path.join(root, '.git'));
+  fs.mkdirSync(path.join(root, '.claude-flow'));
+  return root;
+}
+
+test('a repository with only a bare .claude-flow folder is not a Ruflo project: sync writes nothing there', async (t) => {
+  const root = bareRepo(t);
+  const { calls, runner } = recorder();
+  const cfg = { rufloDaemon: { receipts: {} } };
+  assert.equal(await applyRufloDaemon(root, { cfg, rufloVersion: '3.46.1', platform: 'darwin', runner, alive: () => true }), null);
+  assert.equal(fs.existsSync(configFile(root)), false);
+  assert.deepEqual(calls, []);
+  assert.deepEqual(cfg.rufloDaemon.receipts, {});
+});
+
+test("each of Ruflo's durable markers makes the repository a Ruflo project", async (t) => {
+  const markers = {
+    'config.yaml': (root) => fs.writeFileSync(path.join(root, '.claude-flow', 'config.yaml'), ''),
+    'config.yml': (root) => fs.writeFileSync(path.join(root, '.claude-flow', 'config.yml'), ''),
+    'config.json': (root) => fs.writeFileSync(configFile(root), '{}'),
+    'claude-flow.config.json': (root) => fs.writeFileSync(path.join(root, 'claude-flow.config.json'), '{}'),
+    '.swarm/memory.db': (root) => {
+      fs.mkdirSync(path.join(root, '.swarm'));
+      fs.writeFileSync(path.join(root, '.swarm', 'memory.db'), '');
+    },
+    'settings claudeFlow': (root) => writeSettings(root, { claudeFlow: {} }),
+    '.mcp.json ruflo': (root) => fs.writeFileSync(path.join(root, '.mcp.json'), JSON.stringify({ mcpServers: { ruflo: {} } })),
+    '.mcp.json claude-flow': (root) => fs.writeFileSync(path.join(root, '.mcp.json'), JSON.stringify({ mcpServers: { 'claude-flow': {} } })),
+  };
+  for (const [name, mark] of Object.entries(markers)) {
+    const root = bareRepo(t);
+    mark(root);
+    const r = await applyRufloDaemon(root, { cfg: { rufloDaemon: { receipts: {} } }, rufloVersion: '3.46.1', platform: 'darwin', dryRun: true });
+    assert.equal(r?.root, root, name);
+  }
+  for (const [name, mark] of Object.entries({
+    'settings without claudeFlow': (root) => writeSettings(root, { env: {} }),
+    '.mcp.json without Ruflo': (root) => fs.writeFileSync(path.join(root, '.mcp.json'), JSON.stringify({ mcpServers: { other: {} } })),
+    'malformed .mcp.json': (root) => fs.writeFileSync(path.join(root, '.mcp.json'), '{'),
+  })) {
+    const root = bareRepo(t);
+    mark(root);
+    assert.equal(await applyRufloDaemon(root, { cfg: { rufloDaemon: { receipts: {} } }, rufloVersion: '3.46.1', platform: 'darwin', dryRun: true }), null, name);
   }
 });

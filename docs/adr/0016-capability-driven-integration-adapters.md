@@ -4,7 +4,7 @@
   [ADR-0020](0020-ga-stable-surfaces.md); closed-registry clause superseded by
   [ADR-0029](0029-host-adapter-extension-point.md)
 - **Date:** 2026-07-28
-- **Updated:** 2026-09-27 — daemon start-on-use, user-held keys; Claude via `ak x ruflo-mcp`; see below.
+- **Updated:** 2026-09-27 — daemon start-on-use, user-held keys, durable-marker gate; Claude via `ak x ruflo-mcp`; see below.
 - **Updated:** 2026-09-26 — one `legacyRufloDisposition` predicate, shared by status and
   `register()`, decides whether a legacy `ruflo` Claude registration is agentic-kit's own; any
   other user-scope form is reported as preserved with its manual removal command (#237).
@@ -315,7 +315,10 @@ a sync repair: sync writes ak's daemon settings (flat keys in `.claude-flow/conf
 start-on-use on unless `kit.json` `rufloDaemon.autoStart` is false, with receipts) and restarts only
 a daemon that was already running so it reads them. A `.claude-flow/config.json` that is unreadable,
 or holds the user's own value for a key ak wants, is left untouched. Status reports it as a manual
-row naming the key, and sync does not restart the daemon for that key. It states which
+row naming the key, and sync does not restart the daemon for that key. ak manages these settings
+only where Ruflo 3.46.1's own project test (`isRufloProject`) already holds: a durable marker, not
+a bare `.claude-flow/` folder, since writing `.claude-flow/config.json` is itself a marker and
+would make Ruflo start a daemon there (ruvnet/ruflo#2852). It states which
 interface reads which store (CLI `memory.db`, MCP `agentdb-memory.db` with the native bridge) only
 for the exact `@claude-flow/cli` release and platform where that was observed, and otherwise leaves
 routing unverified. Setup and `ak x verify memory` prove persistence by storing
