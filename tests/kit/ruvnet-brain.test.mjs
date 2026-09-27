@@ -6,7 +6,7 @@ import path from 'node:path';
 import {
   kbDir, present, installedVersion, installedReleaseOnDisk, classifyDrift,
   INSTALL_SPEC, INSTALL_ARGS, REPO, RELEASE_ASSET, releaseMetadata,
-  NIGHTLY_LABEL, nightlyAgentPlist, nightlyAgentPresent,
+  NIGHTLY_LABEL, nightlyAgentPlist, nightlyAgentPresent, legacySnapshotBytes,
 } from '../../src/lib/ruvnet-brain.mjs';
 import { brainReleaseRow } from '../../src/commands/status/sections/ruvnet-brain.mjs';
 import { BUILTIN_BLOCKS, detect } from '../../src/lib/blocks.mjs';
@@ -199,5 +199,53 @@ test('kit config: ruvnetBrain defaults true and round-trips a false override', (
   cfg.ruvnetBrain = false;
   saveKitConfig(cfg, f);
   assert.equal(loadKitConfig(f).ruvnetBrain, false, 'override persists');
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// ADR-0061: legacySnapshotBytes() — the disk-cost helper for a reclaim-stuck hold.
+test('legacySnapshotBytes: no cache root → count 0, bytes null, never throws', () => {
+  const missing = path.join(os.tmpdir(), 'rb-legacy-does-not-exist-' + Date.now());
+  assert.deepEqual(legacySnapshotBytes(missing), { count: 0, bytes: null, exhausted: false });
+});
+
+test('legacySnapshotBytes: ignores kb/ itself and anything not matching the legacy prefixes', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rb-legacy-none-'));
+  fs.mkdirSync(path.join(tmp, 'kb'));
+  fs.writeFileSync(path.join(tmp, 'kb', 'forge-mcp-all.mjs'), 'x'.repeat(1000));
+  fs.mkdirSync(path.join(tmp, 'versions'));
+  assert.deepEqual(legacySnapshotBytes(tmp), { count: 0, bytes: null, exhausted: false });
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('legacySnapshotBytes: sums bytes recursively across every kb.bak-*/kb.install-preserved-* dir', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rb-legacy-sum-'));
+  fs.mkdirSync(path.join(tmp, 'kb.bak-2026-07-13T10-00-00-000Z', 'nested'), { recursive: true });
+  fs.writeFileSync(path.join(tmp, 'kb.bak-2026-07-13T10-00-00-000Z', 'a.rvf'), 'x'.repeat(500));
+  fs.writeFileSync(path.join(tmp, 'kb.bak-2026-07-13T10-00-00-000Z', 'nested', 'b.rvf'), 'x'.repeat(250));
+  fs.mkdirSync(path.join(tmp, 'kb.install-preserved-abc123'));
+  fs.writeFileSync(path.join(tmp, 'kb.install-preserved-abc123', 'c.rvf'), 'x'.repeat(750));
+  fs.mkdirSync(path.join(tmp, 'kb')); // must not be counted
+  fs.writeFileSync(path.join(tmp, 'kb', 'forge-mcp-all.mjs'), 'x'.repeat(999_999));
+  const s = legacySnapshotBytes(tmp);
+  assert.equal(s.count, 2);
+  assert.equal(s.bytes, 500 + 250 + 750);
+  assert.equal(s.exhausted, false);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('legacySnapshotBytes: a file cap hit still reports a count and a lower-bound sum', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rb-legacy-cap-'));
+  const dir = path.join(tmp, 'kb.install-preserved-zzz');
+  fs.mkdirSync(dir);
+  for (let i = 0; i < 5; i += 1) fs.writeFileSync(path.join(dir, `f${i}.rvf`), 'x'.repeat(100));
+  const full = legacySnapshotBytes(tmp);
+  assert.equal(full.count, 1);
+  assert.equal(full.bytes, 500);
+  assert.equal(full.exhausted, false, 'cap not hit at the real default');
+
+  const capped = legacySnapshotBytes(tmp, { fileCap: 2 });
+  assert.equal(capped.count, 1, 'the dir is still counted even when its contents are only partly summed');
+  assert.equal(capped.exhausted, true);
+  assert.ok(capped.bytes < full.bytes, 'a lower bound, not the true total');
   fs.rmSync(tmp, { recursive: true, force: true });
 });
