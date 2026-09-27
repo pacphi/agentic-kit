@@ -176,7 +176,7 @@ export function rufloComponentsTrustGroup(cfg) {
   const gov = managedIntent(cfg, 'mcpGovernance');
   if (gov) {
     changes.push(change('rc-governance-file', 'project-file', 'project', '.harness/mcp-policy.json',
-      `policy file for ruflo's MCP governance (audit on, ${gov.maxCallsPerMinute} calls per minute); not yet enforced on stdio launches by ruflo ≤ 3.44.0`));
+      `policy file for ruflo's MCP governance (audit on, ${gov.maxCallsPerMinute} calls per minute); enforced on stdio launches by Ruflo 3.46.0 and newer; kept out of git with one line in the repository's .git/info/exclude`));
     changes.push(change('rc-governance-env', 'env', 'project', 'RUFLO_MCP_ENFORCE_POLICY=1',
       'enforced only against the policy file ak itself wrote; a project\'s own existing .harness/mcp-policy.json is left alone'));
   }

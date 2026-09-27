@@ -44,6 +44,64 @@ export function readPolicy(root) {
   } catch { return { state: 'invalid', source }; }
 }
 
+// Git reads info/exclude from the repository's common dir only, so for a linked
+// worktree (a `.git` file naming `gitdir:`) the line goes into the main
+// repository's info/exclude via that folder's `commondir` (gitrepository-layout).
+// Resolved by reading those two files; git itself is never spawned.
+export const POLICY_EXCLUDE_LINE = '/.harness/mcp-policy.json';
+const EXCLUDE_COMMENT = '# agentic-kit';
+
+function gitExcludeFile(root) {
+  let dir = path.resolve(root);
+  for (;;) {
+    const dotGit = path.join(dir, '.git');
+    let stat = null;
+    try { stat = fs.statSync(dotGit); } catch { /* keep walking */ }
+    if (stat) {
+      let gitDir = dotGit;
+      if (stat.isFile()) {
+        const m = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(dotGit, 'utf8'));
+        if (!m) return null;
+        gitDir = path.resolve(dir, m[1].trim());
+      }
+      let common = gitDir;
+      try { common = path.resolve(gitDir, fs.readFileSync(path.join(gitDir, 'commondir'), 'utf8').trim()); } catch { /* not linked */ }
+      // The pattern is anchored to the worktree top, so the policy must sit there.
+      return dir === path.resolve(root) ? path.join(common, 'info', 'exclude') : null;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+/** Keep ak's policy file out of git for this repository: 'added' | 'present' | 'no-git'. */
+export function excludeFromGit(root) {
+  const file = gitExcludeFile(root);
+  if (!file) return 'no-git';
+  let text = '';
+  try { text = fs.readFileSync(file, 'utf8'); } catch { /* created below */ }
+  if (text.split(/\r?\n/).includes(POLICY_EXCLUDE_LINE)) return 'present';
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const sep = text && !text.endsWith('\n') ? '\n' : '';
+  fs.writeFileSync(file, `${text}${sep}${EXCLUDE_COMMENT}\n${POLICY_EXCLUDE_LINE}\n`);
+  return 'added';
+}
+
+/** Remove only ak's line (and its comment just above it): 'removed' | 'absent' | 'no-git'. */
+export function unexcludeFromGit(root) {
+  const file = gitExcludeFile(root);
+  if (!file) return 'no-git';
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch { return 'absent'; }
+  const lines = text.split('\n');
+  const kept = lines.filter((line, i) => line !== POLICY_EXCLUDE_LINE
+    && !(line === EXCLUDE_COMMENT && lines[i + 1] === POLICY_EXCLUDE_LINE));
+  if (kept.length === lines.length) return 'absent';
+  fs.writeFileSync(file, kept.join('\n'));
+  return 'removed';
+}
+
 /** receipts: mutable map keyed by resolved project root → { sha256 } of the file ak wrote. */
 export function reconcilePolicy(root, intent, receipts, { dryRun = false } = {}) {
   const key = path.resolve(root);
@@ -54,17 +112,20 @@ export function reconcilePolicy(root, intent, receipts, { dryRun = false } = {})
     if (!owned) return { status: current.state === 'absent' ? 'absent' : 'user-managed', changed: false };
     if (current.state === 'absent') { delete receipts[key]; return { status: 'absent', changed: false }; }
     if (!ownedAndUnchanged) { delete receipts[key]; return { status: 'user-managed', changed: false }; }
-    if (!dryRun) { fs.rmSync(policyFile(root)); delete receipts[key]; }
-    return { status: 'removed', changed: true };
+    if (dryRun) return { status: 'removed', changed: true };
+    fs.rmSync(policyFile(root)); delete receipts[key];
+    return { status: 'removed', changed: true, gitExclude: unexcludeFromGit(root) };
   }
   const desired = renderPolicy(intent);
   if (current.state !== 'absent' && !owned) return { status: 'user-managed', changed: false };
   if (owned && current.state !== 'absent' && !ownedAndUnchanged) return { status: 'user-managed', changed: false };
-  if (current.source === desired) return { status: 'converged', changed: false };
-  if (!dryRun) {
-    fs.mkdirSync(path.dirname(policyFile(root)), { recursive: true });
-    writePrivateFileAtomic(policyFile(root), desired);
-    receipts[key] = { sha256: sha(desired) };
+  // ak's own file (written now, or converged from an earlier write) stays out of git.
+  if (current.source === desired) {
+    return dryRun ? { status: 'converged', changed: false } : { status: 'converged', changed: false, gitExclude: excludeFromGit(root) };
   }
-  return { status: 'written', changed: true };
+  if (dryRun) return { status: 'written', changed: true };
+  fs.mkdirSync(path.dirname(policyFile(root)), { recursive: true });
+  writePrivateFileAtomic(policyFile(root), desired);
+  receipts[key] = { sha256: sha(desired) };
+  return { status: 'written', changed: true, gitExclude: excludeFromGit(root) };
 }

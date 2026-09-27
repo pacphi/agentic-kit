@@ -42,6 +42,15 @@ test('trust group discloses every managed change with benefit, cost and opt-out'
   }
 });
 
+test('trust group discloses that ak keeps its policy file out of git, and the 3.46.0 boundary', () => {
+  const group = rufloComponentsTrustGroup({ rufloComponents: { mcpGovernance: { maxCallsPerMinute: 120 } } });
+  const text = trustManifestLines([group]).find((line) => line.includes('.harness/mcp-policy.json —'));
+  assert.ok(text, 'the policy-file line is disclosed');
+  assert.match(text, /\.git\/info\/exclude/);
+  assert.match(text, /Ruflo 3\.46\.0 and newer/);
+  assert.doesNotMatch(text, /3\.44\.0|\.gitignore/);
+});
+
 test('trust group omits opted-out components', () => {
   const group = rufloComponentsTrustGroup({
     rufloComponents: {

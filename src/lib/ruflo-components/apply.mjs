@@ -134,6 +134,11 @@ export function recordProjectReceipts(cfg, root) {
   (owned(cfg).projects ??= {})[path.resolve(root)] = true;
 }
 
+/** What reconcilePolicy did to the repository's .git/info/exclude, when it changed it. */
+const gitExcludeNote = (state) => ({
+  added: '; kept out of git (.git/info/exclude)', removed: '; .git/info/exclude line removed',
+})[state] ?? '';
+
 /** Every project root ak holds a receipt for: policy files, project env and memory pins. */
 export function receiptedProjectRoots(cfg) {
   const rc = cfg?.integrations?.ownership?.rufloComponents ?? {};
@@ -149,7 +154,7 @@ function releaseGovernanceEverywhere(cfg, { skip, rufloVersion }) {
     try {
       const p = reconcilePolicy(root, false, owned(cfg).policies ??= {});
       const env = reconcileClaudeComponentEnv(cfg, { projectRoot: root, rufloVersion, userScope: false });
-      results.push({ id: 'mcpGovernance', ok: env.ok, changed: p.changed || env.changed, detail: `${root}: policy ${p.status}` });
+      results.push({ id: 'mcpGovernance', ok: env.ok, changed: p.changed || env.changed, detail: `${root}: policy ${p.status}${gitExcludeNote(p.gitExclude)}` });
     } catch (error) {
       results.push({ id: 'mcpGovernance', ok: false, changed: false, detail: `${root}: ${(error?.message || String(error)).slice(0, 160)}` });
     }
@@ -181,7 +186,7 @@ function applyPolicy(cfg, projectRoot, dryRun, results, blocked) {
       ? { ...(cfg?.integrations?.ownership?.rufloComponents?.policies ?? {}) }
       : (owned(cfg).policies ??= {});
     const p = reconcilePolicy(projectRoot, managedIntent(cfg, 'mcpGovernance'), receipts, { dryRun });
-    results.push({ id: 'mcpGovernance', ok: true, changed: p.changed, detail: `policy ${p.status}` });
+    results.push({ id: 'mcpGovernance', ok: true, changed: p.changed, detail: `policy ${p.status}${gitExcludeNote(p.gitExclude)}` });
   } catch (error) {
     const detail = (error?.message || String(error)).slice(0, 160);
     blocked.mcpGovernance = detail;
