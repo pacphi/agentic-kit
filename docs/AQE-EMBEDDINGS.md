@@ -91,7 +91,9 @@ full-entry owner, preserving permissions, plugins and unrelated MCP entries.
 Its receipt remains compatible with normal `ak sync`. Conflicting user values and unsupported TOML forms
 are reported, never overwritten. Unrelated Codex keys, including dotted root keys such as
 `tui.status_line`, do not block the edit. An AQE registration written inline, as dotted keys, or
-with quoted or escaped names is reported as a conflict for manual configuration.
+with quoted or escaped names is reported as a conflict for manual configuration. `ak status`
+shows each conflict as a hand fix (`→ manual:`) naming the file; `ak sync` never edits it and does
+not fail because of it.
 Codex shell-environment policies are not edited.
 Higher-precedence Claude local/user registrations are checked for conflict.
 Setup relinquishes unchanged owned values before AQE regenerates its tables,

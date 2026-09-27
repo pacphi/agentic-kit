@@ -214,10 +214,9 @@ endpoint into that file.
 
 An AQE registration written inline (`agentic-qe = { … }` under `[mcp_servers]`, or
 `mcp_servers = { … }`) was previously read as absent and skipped silently. With a selected
-embedding backend it is now reported as a conflict: `ak status` shows an AQE embedding warning
-for that file, and `ak sync` leaves the entry alone, reports it `unresolved:` and exits 1 until
-it is rewritten (see [`ak sync` fails when a planned repair did not
-take](#2026-09-26-ak-sync-fails-when-a-planned-repair-did-not-take)). Run
+embedding backend it is now reported as a conflict: `ak status` shows it as a hand fix
+(`→ manual:`) naming the file, and `ak sync` leaves the entry alone and lists it under "needs your
+action" without failing. Run
 `ak x aqe-embedding status --json` to see the file and reason, then rewrite the entry as a
 `[mcp_servers.agentic-qe]` table.
 

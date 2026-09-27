@@ -1209,8 +1209,8 @@ Behavior that differs from, or goes beyond, the plan text.
 - **AQE embedding conflicts fail every sync.** An AQE embedding projection conflict gives the status
   row a sync fix that sync cannot perform, so on such a machine every `ak sync` exits 1. Commit 16
   made an inline Codex AQE registration, which was previously read as absent, a conflict. The upgrade
-  note calls this a "warning". This comes from reading the code and was not executed. The owner's
-  decision is needed on marking a conflict-only row `manual`.
+  note calls this a "warning". This comes from reading the code and was not executed. Resolved by
+  decision 13 (2026-09-27): a preserved conflict is a hand fix.
 - **The bare `ak` hint counts only rows with a fix.** A machine whose only warnings have
   `fix: null`, such as a stale backup or two memory stores, prints "0 item(s) need attention — run:
   ak sync".
@@ -2142,3 +2142,27 @@ guidance told the maintainer to move every `nextRetestAt` on a re-read.
   advertised schemas (`64750a89`).
 - Draft comments for #213, #240, codex#16045 and ruflo#952 are left for the controller; none is
   posted from this branch.
+
+### Decision 13 — AQE embedding conflicts and sync's exit code (2026-09-27)
+
+**The situation.** Since #230, ak preserves any AQE server entry it does not recognize as its own
+and reports it as a `conflict` rather than overwriting it. Since #241, `ak sync` re-checks after
+applying its plan and exits 1 when a repair it planned did not take.
+
+**The problem.** The AQE embedding status row offered "reconcile owned AQE embedding projections"
+as a sync repair whenever the projection was not converged, including when the only problem was a
+preserved conflict. Sync's reconcile never edits a conflict, so the re-check failed and every
+`ak sync` exited 1 on such a machine. It was found by reading the code; on the reference machine
+all four projections were converged on 2026-09-27.
+
+**What the user sees.** `ak sync` fails, run after run, on something it is designed never to touch.
+
+**What should be true.** Sync plans and judges only what it can repair; what it preserves is the
+user's to reconcile, and says so.
+
+**The choices.** A: a preserved conflict is a hand fix (`repair: 'manual'`) naming the file; changes
+and missing registrations sync can make stay a sync repair in their own row; decision 10 then lists
+the hand fix under "needs your action" without affecting the exit code. B: keep it a sync repair
+and accept the failing exit code until the user rewrites the entry.
+
+**Recommendation: A. Choice: A.** No upstream fix is involved; both rules are ak's own.
