@@ -140,6 +140,35 @@ test('a host that needs a login is a manual step — the hosts sync step install
   assert.equal(login.repair, 'manual');
 });
 
+// correctness-mcp-register-false-no-step: the mcp step runs only when
+// kit.json's mcp.register is true, so with registration unmanaged the mcp
+// rows must not promise a sync repair — or every sync fails on 'no-step'.
+test('with mcp.register false the mcp rows promise no sync repair, and sync does not fail on them', async () => {
+  const { mcpRows } = await import('../../src/commands/status/sections/mcp.mjs');
+  const snapshot = {
+    claudeFlow: true,
+    effective: { claudeFlow: { command: 'ruflo', args: ['mcp', 'start'] } }, // no managed browser env
+    claudeFlowScopes: ['user'],
+    denyCount: 0,
+    autoMigratableLegacyScopes: ['user'],
+    preservedLegacyScopes: [],
+  };
+  const unmanaged = mcpRows(snapshot, { agentBrowser: true, mcp: { register: false } });
+  const withFix = unmanaged.filter((r) => r.fix);
+  assert.equal(withFix.length, 2, `both drift rows still say what would fix them: ${JSON.stringify(unmanaged)}`);
+  assert.deepEqual(withFix.filter((r) => r.repair === 'sync'), [],
+    'no step registers or migrates MCP while mcp.register is false');
+  const managed = mcpRows(snapshot, { agentBrowser: true, mcp: { register: true } });
+  assert.equal(managed.filter((r) => r.repair === 'sync').length, 2, 'control: managed registration keeps its sync repairs');
+
+  seedHome(offlineKitConfig({ mcp: { register: false, excludeFamilies: [] } }));
+  const { result, out } = await inProject(() => captureLog(() => sync.run({
+    flags: FLAGS({ 'dry-run': false, 'no-upgrade': true }), pkgRoot: PKG_ROOT, collectFn: async () => unmanaged,
+  })));
+  assert.equal(result, 0, out);
+  assert.doesNotMatch(out, /unresolved/);
+});
+
 test('the CVE overlay fix is performed by the statusline step', () => {
   const cfg = loadKitConfig();
   const fired = sync.SYNC_STEPS.filter((s) => s.when(new Set(['statusline/cve']), { 'no-upgrade': false }, cfg))
