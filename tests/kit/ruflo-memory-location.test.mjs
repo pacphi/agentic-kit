@@ -118,6 +118,44 @@ test('tool-internal folders use the user-level store, Git repository or not', (t
   assert.equal(rufloMemoryLocation(appData, { home, platform: 'win32', env: { APPDATA: path.join(home, 'AppData', 'Roaming') } }).kind, 'user');
 });
 
+// Windows, simulated with path.win32 on any host (the Windows CI runner runs
+// the tests above with the real path module). The XDG-style folders are tool
+// folders there too: cross-platform CLIs keep them under %USERPROFILE%
+// (Claude Code's native installer uses ~\.local\bin, xdg-basedir tools use
+// ~\.config), and the ubiquitous language lists them for every platform.
+// Windows paths compare case-insensitively, so another spelling of the home
+// folder or of %TEMP% is still that folder.
+test('Windows path rules: XDG-style tool folders, case-insensitive home and temporary roots (path.win32)', () => {
+  const home = 'C:\\Users\\Me';
+  const local = 'C:\\Users\\Me\\AppData\\Local';
+  const env = { APPDATA: 'C:\\Users\\Me\\AppData\\Roaming', LOCALAPPDATA: local, TEMP: `${local}\\Temp`, TMP: `${local}\\Temp` };
+  const at = (cwd, extra = {}) => rufloMemoryLocation(cwd, { home, env: { ...env, ...extra }, platform: 'win32', p: path.win32 });
+  const userStore = 'C:\\Users\\Me\\.claude-flow\\memory';
+  for (const [cwd, reason] of [
+    ['C:\\Users\\Me\\.config\\opencode', /inside ~\/\.config,/],
+    ['C:\\Users\\Me\\.local\\share\\claude', /inside ~\/\.local,/],
+    ['C:\\Users\\Me\\.cache\\huggingface', /inside ~\/\.cache,/],
+    ['C:\\Users\\Me\\.codex\\.chatgpt-projects\\g-p-demo', /inside ~\/\.codex,/],
+    ['C:\\Users\\Me\\AppData\\Roaming\\Code', /inside ~\/AppData/],
+    ['c:\\users\\me\\.CONFIG\\opencode', /inside ~\/\.config,/],
+    ['c:\\users\\me', /the home folder/],
+    ['C:\\USERS\\ME\\APPDATA\\LOCAL\\TEMP', /temporary folder/],
+    ['D:\\', /filesystem root/],
+  ]) {
+    const location = at(cwd);
+    assert.equal(location.kind, 'user', cwd);
+    assert.match(location.reason, reason, cwd);
+    assert.deepEqual([location.dir, location.db], [userStore, `${userStore}\\memory.db`], cwd);
+  }
+  assert.equal(at('D:\\xdg\\config\\tool', { XDG_CONFIG_HOME: 'D:\\xdg\\config' }).kind, 'user', 'an XDG override counts on Windows too');
+
+  for (const cwd of ['C:\\Users\\Me\\AppData\\Local\\Temp\\agentic-kit-memory-x', 'c:\\users\\me\\appdata\\local\\temp\\agentic-kit-memory-x', 'D:\\work\\proj']) {
+    const location = at(cwd);
+    assert.equal(location.kind, 'folder', `${cwd}: ${location.reason}`);
+    assert.deepEqual([location.root, location.db], [cwd, `${cwd}\\.swarm\\memory.db`]);
+  }
+});
+
 test('a Git repository at the home folder does not pull a plain subfolder into ~/.swarm', (t) => {
   const home = sandbox(t);
   fs.mkdirSync(path.join(home, '.git'));

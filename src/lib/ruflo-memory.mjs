@@ -29,55 +29,61 @@ import { componentEnv, RC_KEYS, supports } from './ruflo-components/env.mjs';
 import { managedIntent } from './ruflo-components/config.mjs';
 import { componentById } from './ruflo-components/catalogue.mjs';
 
-const realOr = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
-const inside = (child, parent) => {
-  const rel = path.relative(parent, child);
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+// Every comparison goes through the path flavour `p` (the host's by default,
+// injectable so Windows rules are testable anywhere). path.relative applies
+// that platform's own rules, so on Windows `c:\users\me` and `C:\Users\Me`
+// are the same folder, as the filesystem treats them.
+const realOr = (p, file) => { try { return fs.realpathSync(file); } catch { return p.resolve(file); } };
+const same = (p, a, b) => p.relative(a, b) === '';
+const inside = (p, child, parent) => {
+  const rel = p.relative(parent, child);
+  return rel === '' || (!rel.startsWith('..') && !p.isAbsolute(rel));
 };
 /** `~/…` for a folder under the home folder, else the absolute path. */
-export function homeRelative(file, home = paths.home) {
-  const rel = path.relative(realOr(home), realOr(file));
-  return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? `~/${rel.split(path.sep).join('/')}` : file;
+export function homeRelative(file, home = paths.home, p = path) {
+  const rel = p.relative(realOr(p, home), realOr(p, file));
+  return rel && !rel.startsWith('..') && !p.isAbsolute(rel) ? `~/${rel.split(p.sep).join('/')}` : file;
 }
 
 /** Why `dir` (a real path) must not hold a Ruflo store, or null. A temporary
  *  root inside a tool folder (Windows' %TEMP% under %LOCALAPPDATA%, a TMPDIR
  *  under ~/.cache) does not make the disposable projects below it the tool's:
  *  the deeper boundary wins, so they keep their own store. */
-function unsuitableReason(dir, { home, env, platform }) {
-  if (path.dirname(dir) === dir) return 'the filesystem root';
-  if (dir === realOr(home)) return 'the home folder';
-  const temps = paths.tempRoots({ env, platform }).map(realOr);
-  if (temps.includes(dir)) return 'a temporary folder';
-  const tool = paths.toolInternalDirs({ home, env, platform }).find((folder) => {
-    const real = realOr(folder);
-    return inside(dir, real) && !temps.some((temp) => inside(temp, real) && inside(dir, temp));
+function unsuitableReason(dir, { home, env, platform, p }) {
+  if (p.dirname(dir) === dir) return 'the filesystem root';
+  if (same(p, dir, realOr(p, home))) return 'the home folder';
+  const temps = paths.tempRoots({ env, platform, p }).map((temp) => realOr(p, temp));
+  if (temps.some((temp) => same(p, dir, temp))) return 'a temporary folder';
+  const tool = paths.toolInternalDirs({ home, env, platform, p }).find((folder) => {
+    const real = realOr(p, folder);
+    return inside(p, dir, real) && !temps.some((temp) => inside(p, temp, real) && inside(p, dir, temp));
   });
-  return tool ? `inside ${homeRelative(tool, home)}, a tool's own folder` : null;
+  return tool ? `inside ${homeRelative(tool, home, p)}, a tool's own folder` : null;
 }
 
 /**
  * Where a Ruflo memory launch from `cwd` keeps its store:
  * `{ kind: 'project'|'folder'|'user', root, dir, db, reason }`. `root` is the
  * working directory the launch uses; `dir` holds memory.db and
- * agentdb-memory.db; `reason` says why a user-level store was chosen.
+ * agentdb-memory.db; `reason` says why a user-level store was chosen. `p` is
+ * the path flavour (tests pass path.win32 to apply Windows rules on any host).
  * @param {string} [cwd]
- * @param {{ home?: string, env?: Record<string, string|undefined>, platform?: string }} [options]
+ * @param {{ home?: string, env?: Record<string, string|undefined>, platform?: string, p?: typeof path }} [options]
  */
 export function rufloMemoryLocation(cwd = process.cwd(), {
-  home = paths.home, env = process.env, platform = process.platform,
+  home = paths.home, env = process.env, platform = process.platform, p = path,
 } = {}) {
-  const options = { home, env, platform };
+  const options = { home, env, platform, p };
   let reason = null;
-  for (const [kind, candidate] of [['project', paths.repoRoot(cwd)], ['folder', cwd]]) {
+  for (const [kind, candidate] of [['project', paths.repoRoot(cwd, p)], ['folder', cwd]]) {
     if (!candidate) continue;
-    const root = realOr(candidate);
+    const root = realOr(p, candidate);
     const why = unsuitableReason(root, options);
-    if (!why) return { kind, root, dir: path.join(root, '.swarm'), db: paths.projectMemoryDb(root), reason: null };
+    if (!why) return { kind, root, dir: p.join(root, '.swarm'), db: paths.projectMemoryDb(root, p), reason: null };
     reason ??= why;
   }
-  const dir = paths.userMemoryDir(home);
-  return { kind: 'user', root: dir, dir, db: path.join(dir, 'memory.db'), reason };
+  const dir = paths.userMemoryDir(home, p);
+  return { kind: 'user', root: dir, dir, db: p.join(dir, 'memory.db'), reason };
 }
 
 /** The project root every ak memory contract pins: the launcher's root for a
