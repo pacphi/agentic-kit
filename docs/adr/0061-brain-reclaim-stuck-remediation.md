@@ -14,7 +14,7 @@
 
 `ak sync` on this machine held a RuvNet Brain refresh (4.3.28 → 4.3.29) behind:
 
-```
+```text
 [forge-update] ERROR: unresolved rollback state exists; refusing to create another full-KB copy.
 ```
 
