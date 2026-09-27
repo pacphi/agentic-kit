@@ -32,7 +32,7 @@ A watch entry records:
 | `dependency` | The dependency policy that governs it. AgentDB threads use `ruflo`: ak gets AgentDB through Ruflo, so an AgentDB fix counts as released only when the newest Ruflo (npm `latest`, the newest version in the support window) installs a fixed agentdb (`doneWhen.release.bundledBy`). AgentDB publishes no tags, so a fix is confirmed by hand and recorded as `minVersion` until then. |
 | `doneWhen` | `closed-completed` or `merged`, plus the release channel, the first fixed version when known, the upstream tag spelling (`tagPattern`) when it is not `v<version>`, and the carrier chain (`bundledBy`) when ak gets the package through another. |
 | `mapping`, `kitImpact`, `adjustment` | Whether ak carries something for it, which files and plan or decision refs, and the change ak makes when it lands. |
-| `status`, `history` | Lifecycle status and dated events. |
+| `status`, `history` | Lifecycle status and dated events. A `reviewed` event (with a `note`) records that every comment up to that day was read and needs no reply. |
 | `constraintIds` | Constraints this thread backs. |
 
 ## Lifecycle
@@ -79,7 +79,7 @@ node scripts/upstream-watch.mjs check --since <iso-date> [--ledger <file>] [--js
 
 | Group | Rule |
 |---|---|
-| Needs our reply | A comment from someone else, not a bot, after our last word (a filed issue's body counts) and after the entry's last status change. Automated acknowledgements show as "acknowledged" instead. |
+| Needs our reply | A comment from someone else, not a bot, after our last word (a filed issue's body counts) and after the entry's last status change or `reviewed` history line (the maintainer read the thread and nothing needs a reply). Automated acknowledgements show as "acknowledged" instead. |
 | Released and actionable | Upstream fixed, and a published release contains the merged fixing pull request (or closing commit), checked against the repository's tag for that version, or the registry records the first fixed version (`minVersion`). The entry is `watching` or `fixed-unreleased` and ak has an adjustment. Carries the dispatch branch and removal proof. |
 | Released, fix not confirmed | A release came out after the fix, but ak could not prove it contains the fixing change (no merged pull request closed the thread, or no tag for that version). Confirm by hand and record `minVersion`. Never dispatched. |
 | Fixed upstream, ak still carries the workaround | The entry is `released` or `dispatched` and ak has an adjustment. |

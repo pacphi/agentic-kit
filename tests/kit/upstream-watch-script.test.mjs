@@ -61,6 +61,21 @@ test('a comment from someone else after our last word needs our reply', () => {
   assert.equal(result.replies.length, 4, 'only the comments after our 2026-09-02 comment');
 });
 
+test('a reviewed history line clears the comments before it, not later ones', () => {
+  const reviewed = entry('ruvnet/ruflo#3153', { relation: 'commented', history: [
+    { date: '2026-09-02', event: 'commented' }, { date: '2026-09-27', event: 'reviewed', note: 'four scope corrections; nothing asked of ak' },
+  ] });
+  const quiet = classifyEntry(reviewed, live('ruvnet/ruflo#3153'), context);
+  assert.ok(!quiet.groups.includes('needs-reply'));
+  assert.deepEqual(quiet.replies, []);
+  assert.equal(quiet.lastHistoryDate, '2026-09-02', 'reading a thread does not re-date its ledger lines');
+  const thread = clone(threads['ruvnet/ruflo#3153']);
+  thread.comments.push({ ...thread.comments.at(-1), id: 1, created_at: '2026-09-28T09:00:00Z', user: { login: 'sparkling', type: 'User' }, body: 'A question for agentic-kit?' });
+  const later = classifyEntry(reviewed, { thread }, { ...context, now: new Date('2026-09-29T00:00:00Z') });
+  assert.ok(later.groups.includes('needs-reply'));
+  assert.deepEqual(later.replies.map((reply) => reply.at), ['2026-09-28T09:00:00Z']);
+});
+
 test('an automated acknowledgement is shown as acknowledged, not as a reply we owe', () => {
   const result = classifyEntry(entry('stuinfla/ruvnet-brain#331', { dependency: 'ruvnet-brain' }), live('stuinfla/ruvnet-brain#331'), context);
   assert.deepEqual(result.replies, []);

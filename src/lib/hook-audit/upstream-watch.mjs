@@ -5,7 +5,8 @@
 
 export const WATCH_RELATIONS = ['filed', 'commented', 'referenced', 'tracking'];
 export const WATCH_STATUSES = ['watching', 'fixed-unreleased', 'released', 'dispatched', 'adopted', 'retired'];
-export const WATCH_HISTORY_EVENTS = ['filed', 'commented', 'closed', 'reopened', 'registered', ...WATCH_STATUSES];
+// `reviewed`: the maintainer read every comment up to the end of that day and none needs a reply.
+export const WATCH_HISTORY_EVENTS = ['filed', 'commented', 'closed', 'reopened', 'registered', 'reviewed', ...WATCH_STATUSES];
 const KINDS = ['issue', 'pr'];
 const DONE_STATES = ['closed-completed', 'merged'];
 const RELEASE_CHANNELS = ['npm', 'github-release'];

@@ -57,6 +57,12 @@ test('the ledger is issue #243 in the ledger repository', () => {
   assert.match(errorsOf((doc) => { delete doc.watchPolicy.ledger.issue; }), /watchPolicy\.ledger/);
 });
 
+test('ruflo#3153 records that its third-party comments were reviewed', () => {
+  const history = entry(document(), 'ruvnet/ruflo#3153').history;
+  assert.ok(history.some((item) => item.event === 'reviewed' && item.date === '2026-09-27' && /sparkling/.test(item.note)));
+  assert.equal(loadUpstreamRegistry({ now }).registryStatus, 'valid');
+});
+
 test('watch entries are rejected with their id when malformed', () => {
   const errors = errorsOf((doc) => {
     const item = entry(doc, 'ruvnet/ruflo#3194');

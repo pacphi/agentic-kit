@@ -3,7 +3,9 @@
 // happens here, so every rule is exercised from recorded fixtures.
 
 const DAY = 86_400_000;
-const PROCESSED = new Set(['fixed-unreleased', 'released', 'dispatched', 'adopted', 'retired']);
+// History events after which earlier upstream comments no longer need our reply:
+// a status change, or `reviewed` (read, nothing asked of ak). Staleness ignores them.
+const PROCESSED = new Set(['fixed-unreleased', 'released', 'dispatched', 'adopted', 'retired', 'reviewed']);
 const FIXED_STATUSES = new Set(['fixed-unreleased', 'released', 'dispatched', 'adopted']);
 const PENDING = new Set(['watching', 'fixed-unreleased']);
 
@@ -192,7 +194,8 @@ function commentFacts(entry, thread, policy) {
   };
 }
 
-const lastHistoryDate = (entry) => entry.history.at(-1).date;
+// A `reviewed` line records reading, not a lifecycle change, so it never re-dates a ledger line.
+const lastHistoryDate = (entry) => entry.history.filter((item) => item.event !== 'reviewed').at(-1)?.date ?? entry.history.at(-1).date;
 
 function liveGroups(entry, up, facts, release, stale) {
   const groups = [];

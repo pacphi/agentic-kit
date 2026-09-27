@@ -174,7 +174,7 @@
               "required": ["date", "event"],
               "properties": {
                 "date": { "type": "string", "format": "date" },
-                "event": { "enum": ["filed", "commented", "closed", "reopened", "registered", "watching", "fixed-unreleased", "released", "dispatched", "adopted", "retired"] },
+                "event": { "enum": ["filed", "commented", "closed", "reopened", "registered", "reviewed", "watching", "fixed-unreleased", "released", "dispatched", "adopted", "retired"] },
                 "note": { "type": "string" }
               }
             }

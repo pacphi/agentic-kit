@@ -1239,7 +1239,8 @@
       "constraintIds": ["ruflo-3.38.20-project-guidance-selector"],
       "history": [
         { "date": "2026-09-02", "event": "commented" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "reviewed", "note": "four comments by sparkling (2026-09-02 to 2026-09-03): scope corrections and revalidation for upstream; nothing asked of ak" }
       ]
     },
     {
