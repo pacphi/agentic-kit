@@ -210,8 +210,9 @@ subagent and previously dropped usage is now priced.
   five of the six (2 to 76 per file) and non-zero `token_count` usage (the per-file sum of
   `last_token_usage.total_tokens` is about 8k to 449k). Both usage and discovery set the whole file
   aside at the marker, so this usage is not counted. With no `user_message`, the turn may be
-  automatic (a compaction or title pass). Measured from counts only; whether to count such turns is
-  undecided (see ADR-0060 open questions).
+  automatic (a compaction or title pass). Measured from counts only. Decided 2026-09-27 (audit
+  decision 12): Branch 8 excludes per turn instead of per file, so imported turns are never counted
+  and later turns are, after it establishes whether they are the user's work or an automatic pass.
 
 ## Verification
 

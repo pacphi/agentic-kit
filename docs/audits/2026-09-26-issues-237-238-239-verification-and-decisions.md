@@ -1124,7 +1124,8 @@ Behavior that differs from, or goes beyond, the plan text.
   acceptance). The Intelligence census line, the System → Projects liner and the `ak system` text
   output show the smaller counts without the imported-copy count (ADR-0060 Implementation status).
   6 of the 924 imported rollouts hold a later turn that is not an import and has real token usage,
-  which whole-rollout exclusion drops; whether it counts is undecided (ADR-0052 "Not done").
+  which whole-rollout exclusion drops. The maintainer decided on 2026-09-27 to count them in
+  Branch 8 (decision 12 below).
 - **The dashboard server's hermeticity guard has a gap.** It fires only when a maintenance service
   is injected without a control root. A caller that injects only a System collector still gets the
   default maintenance service and management facade, and both write real state. This product-side
@@ -1587,3 +1588,20 @@ and [UPGRADING](../UPGRADING.md) updated to match. When a failing manual row rem
 reads "converged — nothing left that sync can repair" rather than "no failing subsystems". A manual
 row of a subsystem named by `--skip` is listed under "needs your action" rather than "skipped by
 request".
+
+### Decisions 11 and 12 — imported copies (Branch 1, 2026-09-27)
+
+Both questions came from Branch 1 and were presented in the decision format above.
+
+**Decision 11 — folders named only by imported copies.** On this machine 5 folders appear only in
+Codex rollouts that the ChatGPT desktop app imported from Claude Code transcripts. With imports
+excluded from discovery, they leave the "ever seen" project count (113 → 108). The choices were to
+drop them, since an imported copy is not a session on this machine (ADR-0060 §3), or to credit the
+sighting to Claude Code. **Recommendation: drop them. Choice: drop them.**
+
+**Decision 12 — real turns inside imported copies.** 6 of the 924 imported rollouts hold later turns
+of real work in the ChatGPT desktop app, with token usage. Whole-rollout exclusion drops them from
+usage (ADR-0052) and from discovery. The choices were: exclude per turn in Branch 8, which owns the
+usage parsers; do it in Branch 1; or keep whole-rollout exclusion. **Recommendation: per turn, in
+Branch 8. Choice: per turn, in Branch 8.** Imported turns are never counted, and later real turns
+count as Codex usage in the ChatGPT desktop app and give their folder a genuine Desktop origin.

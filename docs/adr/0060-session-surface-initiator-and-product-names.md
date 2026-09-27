@@ -178,8 +178,9 @@ in full.
 - Whether the "on 3P" attribute is worth showing.
 - How ADR-0057's role lenses consume surface and initiator.
 - Whether a later turn inside an imported copy that is not itself an import (6 of 924 rollouts on
-  2026-09-27, with real token usage) counts as the importing app's own session, or stays set aside
-  with the copy ([ADR-0052](0052-codex-usage-attribution.md), "Not done").
+  2026-09-27, with real token usage) counts as the importing app's own session. Decided 2026-09-27
+  (audit decision 12): it counts, excluded per turn in Branch 8
+  ([ADR-0052](0052-codex-usage-attribution.md), "Not done").
 
 ## Verification (when implemented)
 
