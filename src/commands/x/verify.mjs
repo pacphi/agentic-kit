@@ -16,7 +16,7 @@ import { probeAqeEmbeddings } from '../../lib/aqe-embedding-probe.mjs';
 import { aqeRoot } from '../../lib/paths.mjs';
 import { projectAqeDir } from '../../lib/paths.mjs';
 import { findMemoryEntry } from '../../lib/project-memory.mjs';
-import { projectMemoryEnv, rufloMcpLaunch } from '../../lib/ruflo-memory.mjs';
+import { rufloMcpLaunch } from '../../lib/ruflo-memory.mjs';
 import { callMcpTools } from '../../lib/mcp-tool-call.mjs';
 import { observeMemoryRoutes, describeMemoryRoutes } from '../../lib/memory-route-probe.mjs';
 import { loadKitConfig } from '../../lib/config.mjs';
@@ -156,11 +156,15 @@ async function verifyMemory({ observeRoutes = true } = {}) {
   const value = `memory-proof-${process.pid}-${Date.now()}`;
   // The native store follows the memory root (CLAUDE_FLOW_MEMORY_PATH), not the
   // DB-path pin: without an isolated root a user's own memory root would
-  // receive the proof rows. Ruflo's CLI does not read AGENTDB_PATH.
-  const env = projectMemoryEnv(tmp, {
+  // receive the proof rows. Ruflo's CLI does not read AGENTDB_PATH. Both pins
+  // are explicit: a temporary folder inside a Git checkout would make the
+  // derived project root the enclosing repository.
+  const swarm = path.join(fs.realpathSync(tmp), '.swarm');
+  const env = {
     RUFLO_DAEMON_AUTOSTART: '0',
-    CLAUDE_FLOW_MEMORY_PATH: path.join(fs.realpathSync(tmp), '.swarm'),
-  });
+    CLAUDE_FLOW_DB_PATH: path.join(swarm, 'memory.db'),
+    CLAUDE_FLOW_MEMORY_PATH: swarm,
+  };
   let stored = false;
   let purged = false;
   try {
@@ -367,15 +371,18 @@ export async function verifyHarvest({ runner = runCmd, haveCmd = have } = {}) {
   if (!(await haveCmd('ruflo'))) { fail('ruflo CLI not installed — cannot prove the harvest write path'); return false; }
   const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agentic-kit-harvest-')));
   const swarm = path.join(tmp, '.swarm');
-  const env = projectMemoryEnv(tmp, {
+  // Pinned explicitly: a temporary folder inside a Git checkout would make the
+  // derived project root the enclosing repository.
+  const env = {
     RUFLO_DAEMON_AUTOSTART: '0',
+    CLAUDE_FLOW_DB_PATH: path.join(swarm, 'memory.db'),
     CLAUDE_FLOW_MEMORY_PATH: swarm,
     AGENTDB_PATH: path.join(swarm, 'agentdb.db'),
-  });
+  };
   try {
     const init = await runner('ruflo', ['memory', 'init'], { cwd: tmp, env, timeout: 120_000 });
     if (init.code !== 0) { fail('ruflo memory init failed in the isolated store'); return false; }
-    const res = await runHarvest({ runner, cwd: tmp, distill: true, env });
+    const res = await runHarvest({ runner, cwd: tmp, root: tmp, distill: true, env });
     for (const s of res.steps) {
       if (s.skipped) warn(`${s.name}: ${s.detail}`);
       else (s.ok ? ok : fail)(`${s.name}: ${s.detail}`);

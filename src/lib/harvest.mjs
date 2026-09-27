@@ -21,7 +21,7 @@
 // `ak x verify harvest` can drive it against an isolated temporary store.
 import { run } from './exec.mjs';
 import * as paths from './paths.mjs';
-import { memoryProjectRoot, projectMemoryEnv } from './ruflo-memory.mjs';
+import { memoryProjectRoot } from './ruflo-memory.mjs';
 
 const DEFAULT_TASK_ID = 'ak-harvest';
 
@@ -55,9 +55,10 @@ export function distillSkipFailed(reason) {
   return !NOTHING_TO_DISTILL.some((re) => re.test(reason));
 }
 
-/** The ordered write steps, all Ruflo verbs. Each: { name, cmd, args, desc, timeout }. */
-export function planHarvest({ cwd = process.cwd(), distill = false, taskId = DEFAULT_TASK_ID } = {}) {
-  const root = memoryProjectRoot(cwd);
+/** The ordered write steps, all Ruflo verbs. Each: { name, cmd, args, desc, timeout }.
+ *  `root` overrides the project memory root derived from `cwd` (verify's
+ *  isolated store, which must never resolve to an enclosing repository). */
+export function planHarvest({ cwd = process.cwd(), root = memoryProjectRoot(cwd), distill = false, taskId = DEFAULT_TASK_ID } = {}) {
   const steps = [{
     name: 'record-outcome',
     cmd: 'ruflo',
@@ -80,16 +81,16 @@ export function planHarvest({ cwd = process.cwd(), distill = false, taskId = DEF
 /**
  * Execute the harvest from the project memory root. With dryRun:true it runs
  * NOTHING and returns the planned steps. `env` is merged under the project
- * memory pin (verify uses it to isolate every store in a temporary directory).
+ * memory pin, and `root` overrides the root derived from `cwd` (verify passes
+ * both to isolate every store in a temporary directory).
  * Returns { ok, dryRun, root, steps:[{name, ok, skipped, detail}] }.
- * @param {{ runner?: Function, cwd?: string, dryRun?: boolean, distill?: boolean,
+ * @param {{ runner?: Function, cwd?: string, root?: string, dryRun?: boolean, distill?: boolean,
  *           env?: Record<string, string>, taskId?: string }} [o]
  */
 export async function runHarvest({
-  runner = run, cwd = process.cwd(), dryRun = false, distill = false, env = {}, taskId,
+  runner = run, cwd = process.cwd(), root = memoryProjectRoot(cwd), dryRun = false, distill = false, env = {}, taskId,
 } = {}) {
-  const root = memoryProjectRoot(cwd);
-  const steps = planHarvest({ cwd: root, distill, ...(taskId ? { taskId } : {}) });
+  const steps = planHarvest({ root, distill, ...(taskId ? { taskId } : {}) });
 
   if (dryRun) {
     return {
@@ -100,7 +101,7 @@ export async function runHarvest({
     };
   }
 
-  const runEnv = projectMemoryEnv(root, env);
+  const runEnv = { ...env, CLAUDE_FLOW_DB_PATH: paths.projectMemoryDb(root) };
   const results = [];
   for (const step of steps) {
     const r = await runner(step.cmd, step.args, { timeout: step.timeout, cwd: root, env: runEnv });

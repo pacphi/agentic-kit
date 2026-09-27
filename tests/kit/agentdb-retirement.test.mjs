@@ -176,6 +176,36 @@ test('verify harvest fails when Ruflo could not distill', async () => {
   assert.equal(result, false, out);
 });
 
+// hermeticity-tmpdir-inside-repo-isolation: with the temporary folder inside a
+// Git checkout (TMPDIR=<repo>/.tmp through direnv), the proof must still pin
+// every store to its own temp dir, never the enclosing repository's store.
+test('verify harvest stays in its temp dir when the temporary folder is inside a repository', async (t) => {
+  seedHome();
+  const repo = sandboxProject('ak-harvest-enclosing'); // has a .git marker
+  const scratch = path.join(repo, '.tmp');
+  fs.mkdirSync(scratch);
+  const saved = { TMPDIR: process.env.TMPDIR, TEMP: process.env.TEMP, TMP: process.env.TMP };
+  for (const key of Object.keys(saved)) process.env[key] = scratch;
+  t.after(() => {
+    for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    rmrf(repo);
+  });
+  const calls = [];
+  const runner = async (cmd, args, opts) => { calls.push({ cmd, args, opts }); return { code: 0, stdout: '', stderr: '' }; };
+  const { result } = await captureLog(() => verify.verifyHarvest({ runner, haveCmd: async () => true }));
+  assert.equal(result, true);
+  const tmp = calls[0].opts.cwd;
+  assert.ok(tmp.startsWith(fs.realpathSync(scratch)), `the proof runs in its temp dir (got ${tmp})`);
+  const inside = (p) => typeof p === 'string' && p.startsWith(`${tmp}${path.sep}`);
+  for (const { args, opts } of calls) {
+    assert.equal(opts.cwd, tmp, `${args.join(' ')}: runs in the temp dir, not the enclosing repository`);
+    assert.ok(inside(opts.env.CLAUDE_FLOW_DB_PATH), `${args.join(' ')}: CLAUDE_FLOW_DB_PATH ${opts.env.CLAUDE_FLOW_DB_PATH}`);
+    const db = args[args.indexOf('--db') + 1];
+    if (args.includes('--db')) assert.ok(inside(db), `distill --db ${db}`);
+  }
+  assert.equal(fs.existsSync(path.join(repo, '.swarm')), false, 'nothing was created in the enclosing repository');
+});
+
 test('verify harvest isolates every memory path in its temp dir and never seeds agentdb', async () => {
   seedHome();
   const calls = [];
