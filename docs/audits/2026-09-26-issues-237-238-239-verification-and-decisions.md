@@ -1310,7 +1310,10 @@ nothing was pushed, released or posted. The inline "Fixed on `fix/test-hermetici
   per-user bases inside a sandbox home; `redirectToolState()` does the same for in-process tests
   whose code spawns OpenCode; `tempDir()` makes temporary folders that remove themselves.
   `tests/kit/spawn-env-guard.test.mjs` fails on a spread of `process.env` and on a
-  `child_process` call with no `env` option unless the line states why it inherits.
+  `child_process` call with no `env` option unless the line states why it inherits. On Windows
+  `spawnEnv` matches variable names case-insensitively and keeps the parent's spelling (`Path`).
+  UI tests start Chrome through `launchChrome()`, which gives the browser its own temp folder and
+  removes it on close.
 - **Product fixes found on the way.** The dashboard server refuses its default maintenance service
   and management facade when a test injects any collector without a control root. A closing health
   dialog no longer pulls focus off the next badge. The Maintenance results list is marked busy
@@ -1374,7 +1377,19 @@ folders behind per run (`1fa55698`).
 
 - Windows: the `%APPDATA%`/`%LOCALAPPDATA%` roots and the case-insensitive root merge have unit
   tests only.
-- The leftover check for `test:ui` on Linux and Windows, where Chromium may leave profile folders.
+- The leftover check for `test:ui` on Linux: the first CI run (36339702575) failed on 14
+  `com.google.Chrome.chrome_chrome_url_fetcher_.*` folders Chrome left in the suite temp root.
+  `launchChrome()` now moves Chrome's temp dir into a folder it removes; a green Linux `ui` job is
+  still to be seen. On macOS, Chrome reads `MAC_CHROMIUM_TMPDIR` rather than `TMPDIR` and
+  otherwise uses the per-user temp folder, where 681 such folders had built up; that is why local
+  runs never saw them. A local UI run without the helper exited 0 and added 11 folders there; with
+  it, none.
+- The first CI run also failed three tests on Windows: a POSIX-only separator in a runner
+  assertion, a read of `env.PATH` on a copy of the Windows environment (stored as `Path`), and
+  the telemetry replaced-file test, whose `ino++` mock leaves a Number file ID unchanged at or
+  above 2^54 (and about half the time between 2^53 and 2^54). The
+  telemetry reader now compares file identity as BigInt. These fixes are proven on macOS with
+  simulated Windows inputs only.
 - A test that rewrites `~/.claude.json` is reported, not failed, in a developer run; only a strict
   run (CI) fails it.
 

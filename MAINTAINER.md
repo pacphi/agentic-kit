@@ -272,7 +272,15 @@ Inside the suite, isolation comes from shared helpers:
   line that spreads `process.env` and on a `child_process` call with no `env` option (an
   implicit inherit), unless the line carries `spawn-env: inherits (<reason>)`. It reads
   source text: a call whose options object is built elsewhere needs the marker, and a call
-  through a local wrapper function is not seen.
+  through a local wrapper function is not seen. On Windows `spawnEnv()` matches variable
+  names case-insensitively and keeps the parent's spelling (the search path is usually
+  `Path`), so read a value from its result with `envValue()`.
+- `launchChrome()` (`tests/ui/helpers/launch-chrome.mjs`) starts the system Chrome for UI
+  tests with `TMPDIR`, `TEMP`, `TMP` and `MAC_CHROMIUM_TMPDIR` pointed at its own folder, and
+  removes that folder on `browser.close()`. Chrome leaves
+  `com.google.Chrome.chrome_chrome_url_fetcher_.*` folders in its temp dir, which on Linux
+  would otherwise fail the runner's leftover check. `tests/kit/ui-chrome-launch.test.mjs`
+  fails on a UI test that calls `chromium.launch` directly.
 - `redirectToolState()` (same file) moves the config, state, data, cache and temp bases for
   in-process tests whose code under test spawns real tools such as OpenCode.
 - `tempDir()` (`tests/kit/helpers/temp-dir.mjs`) makes temporary folders that are removed

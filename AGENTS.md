@@ -296,8 +296,9 @@ Code's own `~/.claude.json`) are listed as "concurrent writers" and do not fail 
 listed, and the runner refuses to start when that folder sits inside a git repository (point
 `TMPDIR` elsewhere). Tests make temporary folders with `tempDir()` from
 `tests/kit/helpers/temp-dir.mjs`, and spawned children get their environment from `spawnEnv()` in
-`tests/kit/helpers/home-sandbox.mjs`. `node scripts/run-tests.mjs exec -- <node args>` guards any
-single command the same way.
+`tests/kit/helpers/home-sandbox.mjs`. UI tests launch Chrome with `launchChrome()` from
+`tests/ui/helpers/launch-chrome.mjs`, which gives the browser its own temp folder and removes it on
+close. `node scripts/run-tests.mjs exec -- <node args>` guards any single command the same way.
 
 ### Test Philosophy
 
