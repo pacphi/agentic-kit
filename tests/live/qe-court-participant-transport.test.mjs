@@ -40,7 +40,7 @@ checkedPositiveInteger(timeoutMs, 'AK_QE_COURT_SEAT_TIMEOUT_MS');
 checkedPositiveInteger(trials, 'AK_QE_COURT_TRIALS');
 
 function fingerprint(dir) {
-  const result = spawnSync('git', ['status', '--porcelain=v1', '-z', '--untracked-files=all'], { cwd: dir, encoding: 'utf8' });
+  const result = spawnSync('git', ['status', '--porcelain=v1', '-z', '--untracked-files=all'], { cwd: dir, encoding: 'utf8' }); // spawn-env: inherits (read-only git status of a throwaway folder)
   assert.equal(result.status, 0, result.stderr);
   return result.stdout;
 }

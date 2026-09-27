@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { tempDir } from './helpers/temp-dir.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,7 +15,9 @@ function temporary(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-telemetry-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true })); return dir;
 }
-function cli(args) { return spawnSync(process.execPath, [fileURLToPath(bin), 'telemetry', ...args], { encoding: 'utf8' }); }
+// A throwaway home: `ak telemetry` must never reach the developer's real config or state.
+const HOME = tempDir('ak-telemetry-cli-home');
+function cli(args) { return spawnSync(process.execPath, [fileURLToPath(bin), 'telemetry', ...args], { encoding: 'utf8', env: spawnEnv(HOME) }); }
 
 test('should_advertiseTelemetry_when_requestingCommandHelp', () => {
   assert.match(cli(['--help']).stdout, /ak telemetry export/);

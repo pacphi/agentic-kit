@@ -149,12 +149,12 @@ test('Git workspace inspection reports tracked state without filenames or attrib
   const root = tempDir('ak-live-workspace');
   fs.mkdirSync(path.join(root, 'backend'), { recursive: true });
   // Exercise the real Git boundary in a disposable repository.
-  execFileSync('git', ['init', '-q', '-b', 'feature/workspace', root]);
-  execFileSync('git', ['-C', root, 'config', 'user.email', 'test@example.invalid']);
-  execFileSync('git', ['-C', root, 'config', 'user.name', 'Test']);
+  execFileSync('git', ['init', '-q', '-b', 'feature/workspace', root]); // spawn-env: inherits (git in a throwaway repository)
+  execFileSync('git', ['-C', root, 'config', 'user.email', 'test@example.invalid']); // spawn-env: inherits (git in a throwaway repository)
+  execFileSync('git', ['-C', root, 'config', 'user.name', 'Test']); // spawn-env: inherits (git in a throwaway repository)
   fs.writeFileSync(path.join(root, 'tracked.txt'), 'one\ntwo\n');
-  execFileSync('git', ['-C', root, 'add', 'tracked.txt']);
-  execFileSync('git', ['-C', root, 'commit', '-qm', 'fixture']);
+  execFileSync('git', ['-C', root, 'add', 'tracked.txt']); // spawn-env: inherits (git in a throwaway repository)
+  execFileSync('git', ['-C', root, 'commit', '-qm', 'fixture']); // spawn-env: inherits (git in a throwaway repository)
   fs.writeFileSync(path.join(root, 'tracked.txt'), 'one\nthree\nfour\n');
   fs.writeFileSync(path.join(root, 'untracked-secret.txt'), 'not counted\n');
   const workspace = await inspectGitWorkspace(path.join(root, 'backend'), {
@@ -228,7 +228,7 @@ test('Git workspace inspection ignores inherited repository-routing variables', 
   const redirected = path.join(root, 'redirected');
   for (const repository of [expected, redirected]) {
     fs.mkdirSync(repository);
-    execFileSync('git', ['init', '-q', '-b', path.basename(repository), repository]);
+    execFileSync('git', ['init', '-q', '-b', path.basename(repository), repository]); // spawn-env: inherits (git in a throwaway repository)
   }
   const priorDir = process.env.GIT_DIR;
   const priorTree = process.env.GIT_WORK_TREE;

@@ -62,7 +62,7 @@ test('a real child whose argv matches "daemon start" IS reaped', async (t) => {
   if (process.platform === 'win32') { t.skip('kill-true path exercised on POSIX only (CI timing)'); return; }
   // Spawn a keep-alive child whose ps args contain "daemon start" (extra argv
   // after -e lands in the command line), so the identity guard matches it.
-  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'daemon', 'start'], { stdio: 'ignore' });
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'daemon', 'start'], { stdio: 'ignore' }); // spawn-env: inherits (inert node sleeper, runs no kit code)
   t.after(() => { try { child.kill('SIGKILL'); } catch { /* already dead */ } });
   await new Promise((r) => setTimeout(r, 200)); // let it register in the ps table
   const [r] = reap([{ pid: child.pid, workspace: '/x' }]);

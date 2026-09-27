@@ -1,4 +1,6 @@
 import { test } from 'node:test';
+import { spawnEnv } from './helpers/home-sandbox.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +11,8 @@ import { isProhibitedLabel } from '../../src/lib/maintenance/management/model.mj
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const BIN = path.join(ROOT, 'bin', 'agentic-kit.mjs');
+// A throwaway home: the child must never reach the developer's real config or state.
+const HOME = tempDir('ak-maintain-cli-home');
 
 async function captureLogs(fn) {
   const lines = [];
@@ -264,14 +268,14 @@ function buildService(overrides = {}) {
 // ── Help surface ─────────────────────────────────────────────────────────────
 
 test('maintain is porcelain and its help advertises exact guarded actions', () => {
-  const help = spawnSync(process.execPath, [BIN, 'maintain', '--help'], { encoding: 'utf8' });
+  const help = spawnSync(process.execPath, [BIN, 'maintain', '--help'], { encoding: 'utf8', env: spawnEnv(HOME) });
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /ak maintain scan/);
   assert.match(help.stdout, /apply.*--plan.*--digest.*--actions.*--yes/i);
   assert.match(help.stdout, /ak maintain recover --receipt/i);
   assert.match(help.stdout, /recover is a read-only alias for audit/i);
   assert.match(help.stdout, /exactly one exact action id/i);
-  const rootHelp = spawnSync(process.execPath, [BIN, '--help'], { encoding: 'utf8' });
+  const rootHelp = spawnSync(process.execPath, [BIN, '--help'], { encoding: 'utf8', env: spawnEnv(HOME) });
   assert.match(rootHelp.stdout, /ak maintain/);
 });
 

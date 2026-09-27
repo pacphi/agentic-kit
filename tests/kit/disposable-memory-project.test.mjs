@@ -92,7 +92,7 @@ test('cleanup removes the whole project, and stops a daemon that holds its pidfi
   if (process.platform !== 'win32') {
     // A keep-alive child whose command line reads like a Ruflo daemon, so the
     // pid-reuse guard in daemons.mjs reap() lets cleanup stop it.
-    child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'daemon', 'start'], { stdio: 'ignore' });
+    child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'daemon', 'start'], { stdio: 'ignore' }); // spawn-env: inherits (inert node sleeper, runs no kit code)
     t.after(() => { try { child.kill('SIGKILL'); } catch { /* already gone */ } });
     await new Promise((resolve) => setTimeout(resolve, 200));
     fs.mkdirSync(path.join(project.root, '.claude-flow'));

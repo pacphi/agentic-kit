@@ -269,7 +269,10 @@ Inside the suite, isolation comes from shared helpers:
   path for tests that run machine-mutating commands in process.
 - `spawnEnv()` (same file) builds the environment for every spawned child, with all
   per-user bases inside a sandbox home. `tests/kit/spawn-env-guard.test.mjs` fails on a
-  spawn that inherits `process.env` without a marked reason.
+  line that spreads `process.env` and on a `child_process` call with no `env` option (an
+  implicit inherit), unless the line carries `spawn-env: inherits (<reason>)`. It reads
+  source text: a call whose options object is built elsewhere needs the marker, and a call
+  through a local wrapper function is not seen.
 - `redirectToolState()` (same file) moves the config, state, data, cache and temp bases for
   in-process tests whose code under test spawns real tools such as OpenCode.
 - `tempDir()` (`tests/kit/helpers/temp-dir.mjs`) makes temporary folders that are removed

@@ -15,7 +15,7 @@ import { execFileSync } from 'node:child_process';
 import { _setGlobalRootForTest } from '../../src/lib/paths.mjs';
 import { fixStatusline, upstreamCveCounterFabricated } from '../../src/lib/statusline.mjs';
 import { tempDir } from './helpers/temp-dir.mjs';
-import { redirectToolState } from './helpers/home-sandbox.mjs';
+import { redirectToolState, spawnEnv } from './helpers/home-sandbox.mjs';
 
 // The rendered footer caches ruflo-daemon-count.json and ruvnet-brain-kb-size.json
 // in os.tmpdir() for 30 s (src/lib/daemons.mjs, statusline-footer.cjs), shared with
@@ -84,7 +84,7 @@ test('overlay is injected while the upstream defect is present', () => {
 test('injected statusline is syntactically valid', () => {
   const { proj, sl } = fixture({ buggyUpstream: true });
   fixStatusline(proj);
-  execFileSync(process.execPath, ['--check', sl], { stdio: 'ignore' });   // throws on bad syntax
+  execFileSync(process.execPath, ['--check', sl], { stdio: 'ignore' }); // throws on bad syntax; spawn-env: inherits (syntax check only, runs nothing)
 });
 
 test('injection is idempotent — repeated syncs never stack blocks', () => {
@@ -123,7 +123,7 @@ test('bin wrapper prepends real bins ahead of upstream candidates at run time', 
   fs.mkdirSync(rufloBin, { recursive: true });
   fs.writeFileSync(path.join(rufloBin, 'ruflo.js'), '');
   fixStatusline(proj);
-  const stdout = execFileSync(process.execPath, [sl], { cwd: proj, encoding: 'utf8' });
+  const stdout = execFileSync(process.execPath, [sl], { cwd: proj, encoding: 'utf8', env: spawnEnv(path.join(path.dirname(proj), 'home')) });
   const real = stdout.indexOf(path.join(rufloBin, 'ruflo.js'));
   const orig = stdout.indexOf('/orig');
   assert.notEqual(real, -1, 'the on-disk bin upstream can never find must be a candidate');
@@ -135,7 +135,7 @@ test('bin wrapper is inert on a template without resolveCliBinCandidates', () =>
   const { proj, sl } = fixture({ buggyUpstream: false });
   fs.writeFileSync(sl, '#!/usr/bin/env node\nlet ver = "3.0.0";\nconsole.log("x")\n');
   fixStatusline(proj);
-  const stdout = execFileSync(process.execPath, [sl], { cwd: proj, encoding: 'utf8' });
+  const stdout = execFileSync(process.execPath, [sl], { cwd: proj, encoding: 'utf8', env: spawnEnv(path.join(path.dirname(proj), 'home')) });
   assert.match(stdout, /^x/, 'typeof guard: the wrapper must not break a template it does not fit');
 });
 

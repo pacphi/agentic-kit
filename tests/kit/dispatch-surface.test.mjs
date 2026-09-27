@@ -9,6 +9,8 @@
 // process.exit) during the test. The individual command modules, by contrast,
 // have no top-level side effects, so importing each one is safe.
 import { test } from 'node:test';
+import { spawnEnv } from './helpers/home-sandbox.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -73,16 +75,18 @@ for (const [name, modPath] of dispatchTable()) {
 // tools' failures. These spawn the REAL CLI (not an in-process import) because
 // the bug lived in bin/agentic-kit.mjs's own dispatch, not in any command module.
 const BIN_ARGV = [BIN];
+// A throwaway home: the child must never reach the developer's real config or state.
+const HOME = tempDir('ak-dispatch-home');
 for (const hostile of ['toString', '__proto__', 'constructor', 'hasOwnProperty']) {
   test(`"ak ${hostile}" is an unknown command, not a prototype-chain hit`, () => {
-    const r = spawnSync(process.execPath, [...BIN_ARGV, hostile], { encoding: 'utf8' });
+    const r = spawnSync(process.execPath, [...BIN_ARGV, hostile], { encoding: 'utf8', env: spawnEnv(HOME) });
     assert.equal(r.status, 2, `expected exit 2 (unknown command), got ${r.status}\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
     assert.match(r.stdout, /unknown command/, 'must print the normal "unknown command" message');
     assert.equal(r.stderr, '', `must never leak a stack trace to stderr for a typo'd command name, got: ${r.stderr}`);
   });
 
   test(`"ak x ${hostile}" is an unknown plumbing command, not a prototype-chain hit`, () => {
-    const r = spawnSync(process.execPath, [...BIN_ARGV, 'x', hostile], { encoding: 'utf8' });
+    const r = spawnSync(process.execPath, [...BIN_ARGV, 'x', hostile], { encoding: 'utf8', env: spawnEnv(HOME) });
     assert.equal(r.status, 2, `expected exit 2 (unknown plumbing command), got ${r.status}\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
     assert.match(r.stdout, /unknown plumbing command/, 'must print the normal "unknown plumbing command" message');
     assert.equal(r.stderr, '', `must never leak a stack trace to stderr for a typo'd plumbing command name, got: ${r.stderr}`);

@@ -1240,8 +1240,10 @@ Behavior that differs from, or goes beyond, the plan text.
   - The Claude statusLine classifier does not read managed settings.
   - A shell wrapper around the footer helper is classed as `custom`.
   - Other spawn tests inherited the developer's `XDG_*` variables. Fixed on `fix/test-hermeticity`:
-    spawned children get `spawnEnv(home)`, and a guard test fails on any spawn that neither uses it
-    nor states why it inherits.
+    spawned children that run kit code get `spawnEnv(home)`. A guard test fails on a line that
+    spreads `process.env`, and on a `child_process` call that passes no `env` option (so inherits
+    implicitly), unless the line states why it inherits. It reads source text: a call whose options
+    object is built elsewhere needs the marker, and a call through a local wrapper is not seen.
   - M1b is still open.
 - **ADR index.** In `docs/adr/README.md` the index table ends at ADR-0052; later ADRs appear only as
   bullets or sections. This predates the branch.

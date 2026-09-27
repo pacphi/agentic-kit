@@ -20,7 +20,7 @@ import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { sandboxHome, rmrf } from '../kit/helpers/home-sandbox.mjs';
 
-const hasRuflo = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['ruflo'], { stdio: 'ignore' }).status === 0;
+const hasRuflo = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['ruflo'], { stdio: 'ignore' }).status === 0; // spawn-env: inherits (PATH probe for an installed ruflo)
 // sandboxHome() also blanks PATH; the real `ruflo`, `git` and `npm` are needed, so PATH is restored.
 const realPath = process.env.PATH;
 const home = sandboxHome('ak-live-routing');

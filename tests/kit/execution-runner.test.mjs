@@ -1,4 +1,6 @@
 import { test } from 'node:test';
+import { spawnEnv } from './helpers/home-sandbox.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 import assert from 'node:assert/strict';
 import { EXECUTION_ADAPTERS, assertBuiltinAdaptersRoutable, executionAdapterFor } from '../../src/lib/execution/adapters.mjs';
 import { applyAdmitted, resetAdmitted } from '../../src/lib/adapters/admitted.mjs';
@@ -465,7 +467,7 @@ test('a fresh process imports the real execution adapters registry cleanly (cons
   const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
   const r = spawnSync(process.execPath, ['-e',
     "import('./src/lib/execution/adapters.mjs').then(() => console.log('in-sync'))",
-  ], { encoding: 'utf8', cwd: repo });
+  ], { encoding: 'utf8', cwd: repo, env: spawnEnv(tempDir('ak-exec-adapters-home')) });
   assert.equal(r.status, 0, `execution adapters module must import cleanly:\n${r.stderr}`);
   assert.match(r.stdout, /in-sync/);
 });

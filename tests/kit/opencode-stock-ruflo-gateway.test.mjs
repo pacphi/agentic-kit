@@ -36,7 +36,7 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function stockOpenCode() {
   if (process.env.AK_STOCK_OPENCODE_BIN) return process.env.AK_STOCK_OPENCODE_BIN;
   try {
-    return execFileSync('sh', ['-c', 'command -v opencode'], {
+    return execFileSync('sh', ['-c', 'command -v opencode'], { // spawn-env: inherits (PATH probe for an installed opencode)
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
   } catch {
@@ -46,7 +46,7 @@ function stockOpenCode() {
 
 function installedCommand(name) {
   try {
-    return execFileSync('sh', ['-c', `command -v ${name}`], {
+    return execFileSync('sh', ['-c', `command -v ${name}`], { // spawn-env: inherits (PATH probe for an installed tool)
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
   } catch {

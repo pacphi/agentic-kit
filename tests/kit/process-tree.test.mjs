@@ -43,7 +43,7 @@ test('POSIX tree signaling falls back to the direct child when no group exists',
 test('POSIX tree signaling terminates a detached wrapper and its descendant', {
   skip: process.platform === 'win32',
 }, async () => {
-  const wrapper = spawn(process.execPath, ['-e', [
+  const wrapper = spawn(process.execPath, ['-e', [ // spawn-env: inherits (inert node process tree, runs no kit code)
     "const {spawn}=require('node:child_process')",
     "const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'})",
     'console.log(child.pid)',
@@ -71,7 +71,7 @@ test('POSIX tree signaling terminates a detached wrapper and its descendant', {
 test('Windows tree signaling terminates a wrapper and its live descendant', {
   skip: process.platform !== 'win32',
 }, async () => {
-  const wrapper = spawn(process.execPath, ['-e', [
+  const wrapper = spawn(process.execPath, ['-e', [ // spawn-env: inherits (inert node process tree, runs no kit code)
     "const {spawn}=require('node:child_process')",
     "const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'})",
     'console.log(child.pid)',
