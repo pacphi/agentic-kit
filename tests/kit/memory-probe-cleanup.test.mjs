@@ -3,17 +3,18 @@
 // Ruflo 3.46.1 writes (id key namespace content type … status) plus AgentDB
 // tables in agentdb-memory.db; the backup and receipt folders are temporary
 // too, so no real store, state folder or kit.json is touched.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { sandboxHome, assertSandboxed } from './helpers/home-sandbox.mjs';
+import { sandboxHome, assertSandboxed, rmrf } from './helpers/home-sandbox.mjs';
 
 // The sync step writes its backup and receipt under the state folder and
 // records the cleanup in kit.json: both resolve inside this sandbox.
 const HOME = sandboxHome('ak-probe-cleanup');
+after(() => rmrf(HOME));
 const paths = await import('../../src/lib/paths.mjs');
 assertSandboxed(paths, HOME);
 const { findProbeRows, cleanupProbeRows, PROBE } = await import('../../src/lib/memory-probe-cleanup.mjs');

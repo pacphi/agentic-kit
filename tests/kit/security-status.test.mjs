@@ -3,13 +3,14 @@
 // so a missing aidefence is no longer "defend silently non-functional": only the
 // adaptive learning and the aidefence_* MCP tools are lost. The row must say so,
 // and keep the sync repair (healAidefence) that restores those.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fakeGlobalRoot, sandboxHome } from './helpers/home-sandbox.mjs';
+import { fakeGlobalRoot, sandboxHome, rmrf } from './helpers/home-sandbox.mjs';
 
 const HOME = sandboxHome('ak-security-status');
+after(() => rmrf(HOME));
 const paths = await import('../../src/lib/paths.mjs');
 const { default: security } = await import('../../src/commands/status/sections/security.mjs');
 const { rufloBuiltinDefence } = await import('../../src/lib/natives.mjs');

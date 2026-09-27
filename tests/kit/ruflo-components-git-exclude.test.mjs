@@ -12,13 +12,17 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { reconcilePolicy, excludeFromGit, POLICY_EXCLUDE_LINE } from '../../src/lib/ruflo-components/policy.mjs';
+import { spawnEnv } from './helpers/home-sandbox.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
+// git runs with a throwaway home, so the user's global config is never read.
+const GIT_HOME = tempDir('ak-git-exclude-home');
 const git = (cwd, ...args) => execFileSync('git', ['-c', 'user.name=ak', '-c', 'user.email=ak@example.invalid', ...args],
-  { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: {
-    ...process.env, GIT_CONFIG_NOSYSTEM: '1',
-    // The user's global config is kept out where /dev/null exists; `-c user.*` covers the rest.
+  { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: spawnEnv(GIT_HOME, {
+    GIT_CONFIG_NOSYSTEM: '1',
+    // Belt and braces where /dev/null exists; `-c user.*` covers the rest.
     ...(process.platform === 'win32' ? {} : { GIT_CONFIG_GLOBAL: os.devNull }),
-  } });
+  }) });
 const ignored = (cwd, rel) => {
   try { git(cwd, 'check-ignore', '-q', rel); return true; } catch { return false; }
 };

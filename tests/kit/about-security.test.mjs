@@ -1,13 +1,14 @@
 // `ak about aidefence`: with Ruflo's built-in defend engine (ruvnet/ruflo#2670,
 // 3.32.2+) a missing @claude-flow/aidefence costs the adaptive learning and the
 // aidefence_* MCP tools, not defend itself. The chip says exactly that.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fakeGlobalRoot, sandboxHome, captureLog } from './helpers/home-sandbox.mjs';
+import { fakeGlobalRoot, sandboxHome, captureLog, rmrf } from './helpers/home-sandbox.mjs';
 
 const HOME = sandboxHome('ak-about-security');
+after(() => rmrf(HOME));
 const paths = await import('../../src/lib/paths.mjs');
 const about = await import('../../src/commands/about.mjs');
 
