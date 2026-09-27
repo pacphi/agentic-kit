@@ -3,6 +3,7 @@
 - **Status:** Accepted; compatibility references amended by
   [ADR-0020](0020-ga-stable-surfaces.md)
 - **Date:** 2026-07-28
+- **Updated:** 2026-09-27 — Claude and Codex now use `ak x ruflo-mcp`; OpenCode's fallback is unchanged.
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Earlier update:** 2026-08-25
 - **Update note:** ADR-0032 implements project/provider-scoped OpenCode model discovery through a
@@ -176,7 +177,7 @@ module from every caller's point of view:
 
 - **`opencode.json` wiring** (`applyOpencode`): `mcp.claude-flow` (command
   `claude-flow-mcp` when the dedicated stdio bin is present — it answers `initialize`
-  directly — else `ruflo mcp start`, ak's claude/codex registration), `mcp.ruvnet-brain`
+  directly — else `ruflo mcp start`; Claude Code and Codex start Ruflo through `ak x ruflo-mcp`), `mcp.ruvnet-brain`
   (the stable-spine shim `~/.claude/ruvnet-brain/mcp/server.mjs`, which hot-swaps brain
   versions so the registration never needs rewriting), `skills.paths`, and
   `permission` allow-patterns for both separator spellings. A file that is not plain
