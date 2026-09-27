@@ -37,7 +37,7 @@ dependency policies, constraints, and the `watch` list of upstream threads.
    - "No upstream activity for the stale limit";
    - "Ready to retire";
    - "Constraints past their retest date";
-   - "Tracking issues to migrate".
+   - "Our tracking issues".
 
    For each item give the id, title, URL and a one-line reason: who replied and when, which
    release, or which ak change is pending. Give "Fixed upstream, not yet released",

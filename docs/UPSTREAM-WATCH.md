@@ -18,7 +18,8 @@ is the only upstream registry. It ships with ak because the hook audit reads it.
 - `watch`: every upstream issue or pull request ak filed, commented on, or cites in `src/`,
   `bin/`, `claude/`, `tests/`, `README.md` or a guide in `docs/` (dated audits, proposals and
   research references are exempt by name in `scripts/upstream-watch/citations.mjs`), plus ak's
-  own tracking issues that migrate here.
+  own tracking issues (pacphi/agentic-kit#213 and #240), each listing the upstream threads it
+  waits on.
 
 The [schema](schemas/agentic-dependency-constraints.schema.json) describes the shape; the
 loader (`src/lib/hook-audit/upstream.mjs`) also checks that each constraint's issue has a
@@ -31,7 +32,7 @@ A watch entry records:
 | Field | Meaning |
 |---|---|
 | `id`, `url`, `kind`, `title` | The thread (`owner/repo#n`, issue or pr). |
-| `relation` | `filed`, `commented`, `referenced` (cited, not ours) or `tracking` (our issue that migrates here; lists `tracks`). |
+| `relation` | `filed`, `commented`, `referenced` (cited, not ours) or `tracking` (our own issue that waits on upstream threads; lists them in `tracks`). |
 | `dependency` | The dependency policy that governs it. AgentDB threads use `ruflo`: ak gets AgentDB through Ruflo, so an AgentDB fix counts as released only when the newest Ruflo (npm `latest`, the newest version in the support window) installs a fixed agentdb (`doneWhen.release.bundledBy`). AgentDB publishes no tags, so a fix is confirmed by hand and recorded as `minVersion` until then. |
 | `doneWhen` | `closed-completed` or `merged`, plus the release channel, the first fixed version when known, the upstream tag spelling (`tagPattern`) when it is not `v<version>`, and the carrier chain (`bundledBy`) when ak gets the package through another. |
 | `mapping`, `kitImpact`, `adjustment` | Whether ak carries something for it, which files and plan or decision refs, and the change ak makes when it lands. |
@@ -95,7 +96,7 @@ node scripts/upstream-watch.mjs check --since <iso-date> [--ledger <file>] [--js
 | Closed upstream as not planned | Closed with reason `not_planned`. |
 | Ready to retire | `adopted`, or closed upstream with nothing in ak waiting on it. |
 | Constraints past their retest date | A constraint's `nextRetestAt` has passed. |
-| Tracking issues to migrate | Open `tracking` entries. |
+| Our tracking issues | Open `tracking` entries: our own issues waiting on the upstream threads they list. |
 | Unmapped | No ak change recorded. |
 | Could not check | Reading the thread, the release or its confirmation failed; the report names the error. When the thread itself could not be read, nothing about it is known; when only the release could not be confirmed, the thread's other groups and ledger lines still count. |
 

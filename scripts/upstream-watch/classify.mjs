@@ -21,7 +21,7 @@ export const GROUPS = [
   ['not-planned', 'Closed upstream as not planned'],
   ['ready-to-retire', 'Ready to retire'],
   ['constraints-due', 'Constraints past their retest date'],
-  ['tracking', 'Tracking issues to migrate'],
+  ['tracking', 'Our tracking issues'],
   ['unmapped', 'Unmapped (no ak change recorded)'],
   ['unchecked', 'Could not check'],
 ];
