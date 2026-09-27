@@ -1298,15 +1298,18 @@
       "kind": "issue",
       "title": "ADR-122 Phase 0 is marked shipped but ruflo doctor never reports agent-browser",
       "dependency": "ruflo",
-      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
-      "mapping": "unmapped",
-      "kitImpact": null,
-      "adjustment": null,
-      "status": "watching",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": "3.46.0" } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["no ak workaround; doctor row since 3.46.0 (PR #3441)"], "files": [] },
+      "adjustment": "none",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-02", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "closed", "note": "completed by PR #3441" },
+        { "date": "2026-09-26", "event": "released", "note": "PR #3441 in 3.46.0 (commands/doctor.js reports agent-browser CLI (ADR-122) in the @claude-flow/cli 3.46.0 tarball and the installed 3.46.1)" },
+        { "date": "2026-09-27", "event": "retired", "note": "ak carries no workaround; nothing in ak waits on it" }
       ]
     },
     {
