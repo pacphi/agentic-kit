@@ -32,6 +32,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
+import privateTmpdir from '../kit/helpers/private-tmpdir.cjs';
 import { chromium } from 'playwright';
 import { startDashboard } from '../../src/lib/dashboard-server.mjs';
 import { readIndex, readSession, maskSecrets } from '../../src/lib/usage-index.mjs';
@@ -62,6 +63,9 @@ import {
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
+// Fixture corpora, caches and the browser's own temp files land in a private
+// os.tmpdir() that is removed on exit (the suite runner fails on leftovers).
+privateTmpdir.usePrivateTmpdir('ak-dashboard-ui');
 const SHOTS = path.join(ROOT, '.ui-artifacts');
 
 const REAL = process.argv.includes('--real');

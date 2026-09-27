@@ -32,25 +32,52 @@ export const SUITES = {
 /**
  * @param {string[][]} commands argument vectors for process.execPath
  * @param {{ env?: NodeJS.ProcessEnv, repoRoot?: string, platform?: string, homedir?: string, log?: (s: string) => void }} [o]
- * @returns {number} exit code: the first failing command's, else 3 on a real-state change, else 0
+ * @returns {number} exit code: 2 when the suite temp root sits inside a git repository,
+ *   else the first failing command's, else 3 on a real-state change, else 4 on leftover
+ *   temp folders, else 0
  */
 export function runGuarded(commands, {
   env = process.env, repoRoot = REPO, platform = process.platform, homedir = os.homedir(), log = console.error,
 } = {}) {
+  // Every command runs with this run's own templated temp root: leftovers are then
+  // attributable to the run, and they fail it.
+  const tempRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ak-suite-')));
+  const enclosing = enclosingRepository(tempRoot);
+  if (enclosing) {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+    log(`the suite temp root ${tempRoot} is inside the git repository ${enclosing}; tests that probe "outside a `
+      + 'git repository" would write into it. Point TMPDIR outside any repository.');
+    return 2;
+  }
+  const childEnv = { ...env, TMPDIR: tempRoot, TEMP: tempRoot, TMP: tempRoot };
   const roots = realStateRoots({ env, platform, homedir, repoRoot });
   const before = snapshotRoots(roots);
   // One line before anything runs, so a CI log proves the tripwire executed.
   log(`real-state tripwire: watching ${roots.length} roots (${isStrict(env) ? 'strict' : 'developer'})`);
   let code = 0;
   for (const args of commands) {
-    const r = spawnSync(process.execPath, args, { cwd: repoRoot, env, stdio: 'inherit' });
+    const r = spawnSync(process.execPath, args, { cwd: repoRoot, env: childEnv, stdio: 'inherit' });
     if (r.error) { log(`could not run node ${args.join(' ')}: ${r.error.message}`); code = 1; break; }
     if (r.status !== 0) { code = r.status ?? 1; break; }
   }
+  const leftovers = fs.readdirSync(tempRoot).filter((name) => name !== 'node-compile-cache');
+  fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 3 });
+  if (leftovers.length) log(`temp folders left behind by the run (${leftovers.length}):\n  ${leftovers.join('\n  ')}`);
   const result = compareSnapshots(before, snapshotRoots(roots), { strict: isStrict(env) });
   const report = formatReport(result);
   if (report) log(report);
-  return code || (result.failing.length ? 3 : 0);
+  return code || (result.failing.length ? 3 : 0) || (leftovers.length ? 4 : 0);
+}
+
+/** The nearest folder at or above `dir` that holds a `.git` entry, or null. */
+function enclosingRepository(dir) {
+  for (let cur = dir, i = 0; i < 64; i++) {
+    if (fs.existsSync(path.join(cur, '.git'))) return cur;
+    const parent = path.dirname(cur);
+    if (parent === cur) return null;
+    cur = parent;
+  }
+  return null;
 }
 
 function main(argv) {

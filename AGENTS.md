@@ -287,8 +287,13 @@ Windows), the Claude/Codex/OpenCode guidance files ak manages, and this reposito
 `.swarm`, `.agentic-qe`, `.claude-flow` and `.harness` before and after the run. Any change fails
 the run and is listed by path. Files a live Claude Code, Ruflo or AQE session writes during the
 run are listed as "concurrent writers" and do not fail a local run; CI (or
-`AK_TRIPWIRE_STRICT=1`) fails on them too. `node scripts/run-tests.mjs exec -- <node args>`
-guards any single command the same way.
+`AK_TRIPWIRE_STRICT=1`) fails on them too. Every command also runs with `TMPDIR`/`TEMP`/`TMP`
+pointed at a fresh `ak-suite-*` folder: anything left in it afterwards fails the run and is
+listed, and the runner refuses to start when that folder sits inside a git repository (point
+`TMPDIR` elsewhere). Tests make temporary folders with `tempDir()` from
+`tests/kit/helpers/temp-dir.mjs`, and spawned children get their environment from `spawnEnv()` in
+`tests/kit/helpers/home-sandbox.mjs`. `node scripts/run-tests.mjs exec -- <node args>` guards any
+single command the same way.
 
 ### Test Philosophy
 

@@ -80,3 +80,22 @@ test('SUITES keeps the exact commands package.json ran before', async () => {
   assert.equal(pkg.scripts.test, 'node scripts/run-tests.mjs unit');
   assert.equal(pkg.scripts['test:ui'], 'node scripts/run-tests.mjs ui');
 });
+
+test('a leftover temp folder fails the run and is named', (t) => {
+  const { home, repo, env } = sandbox(t);
+  const leaky = stub(home, 'leaky.mjs', `import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
+    fs.mkdtempSync(path.join(os.tmpdir(), 'ak-leaky-'));`);
+  const r = spawnSync(process.execPath, [RUNNER, 'exec', '--repo', repo, '--', leaky], { env, encoding: 'utf8' });
+  assert.equal(r.status, 4, r.stderr);
+  assert.match(r.stderr, /ak-leaky-/);
+});
+
+test('the runner refuses a temp root inside a git repository', (t) => {
+  const { home, repo, env } = sandbox(t);
+  const inside = path.join(repo, 'tmp');
+  fs.mkdirSync(inside);
+  const ok = stub(home, 'ok.mjs', '');
+  const r = spawnSync(process.execPath, [RUNNER, 'exec', '--repo', repo, '--', ok], { env: { ...env, TMPDIR: inside, TEMP: inside, TMP: inside }, encoding: 'utf8' });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /inside the git repository/);
+});
