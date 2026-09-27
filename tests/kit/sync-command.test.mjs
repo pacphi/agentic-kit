@@ -229,7 +229,21 @@ test('--dry-run prints a plan and then changes nothing at all', async () => {
   assertUnchanged(beforeProject, PROJECT, '`ak sync --dry-run` must not touch the project');
 });
 
-test('the plan is exactly the rows status marked with a fix', async () => {
+/** A fake `ak` on PATH for `fn`: the mcp rows are sync repairs only when `ak`
+ *  resolves (register() refuses otherwise), and the sandbox PATH is empty.
+ *  /usr/bin:/bin ride along for the `which` probe. */
+async function withAkOnPath(fn) {
+  const bin = path.join(HOME, 'fake-bin-ak');
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(bin, 'ak'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'ak.cmd'), '@echo off\r\nexit /b 0\r\n');
+  fs.writeFileSync(path.join(bin, 'ak.ps1'), 'exit 0\r\n');
+  const prev = process.env.PATH;
+  process.env.PATH = [bin, '/usr/bin', '/bin'].join(path.delimiter);
+  try { return await fn(); } finally { process.env.PATH = prev; rmrf(bin); }
+}
+
+test('the plan is exactly the rows status marked with a fix', () => withAkOnPath(async () => {
   seedHome();
   const status = await import('../../src/commands/status.mjs');
   const expected = (await status.collect({ pkgRoot: PKG_ROOT, cwd: PROJECT })).filter((r) => r.fix);
@@ -241,7 +255,7 @@ test('the plan is exactly the rows status marked with a fix', async () => {
     assert.ok(planned.some((l) => l.includes(`[${r.subsystem}]`) && l.includes(r.fix)),
       `plan is missing [${r.subsystem}] ${r.fix}`);
   }
-});
+}));
 
 test('--no-upgrade drops version/self/brain upgrades but keeps the heals', async () => {
   // No ruflo in the global root → a `versions` row with a fix, which is the
@@ -257,10 +271,16 @@ test('--no-upgrade drops version/self/brain upgrades but keeps the heals', async
   assert.match(narrowed, /sync plan|nothing to do/, 'the remaining heals are still planned');
 });
 
-test('--no-upgrade still plans non-version heals (e.g. MCP registration)', async () => {
+test('--no-upgrade still plans non-version heals (e.g. MCP registration)', () => withAkOnPath(async () => {
   seedHome();
   const { out } = await dryRun({ 'no-upgrade': true });
   assert.match(out, /\[mcp\] setup\/sync registers claude-flow at user scope/);
+}));
+
+test('without ak on PATH the MCP registration is not planned: register() would refuse', async () => {
+  seedHome();
+  const { out } = await dryRun({ 'no-upgrade': true });
+  assert.doesNotMatch(out, /\[mcp\] setup\/sync registers claude-flow/);
 });
 
 // Controller ruling: a ruflo-components row asking for a ruflo UPGRADE

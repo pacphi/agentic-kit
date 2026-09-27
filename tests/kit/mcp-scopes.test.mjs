@@ -354,3 +354,46 @@ test('status names the store the launcher picks from this folder', (t) => {
   const outside = mcpSection.mcpRows(status, cfg, { cwd: home, home }).find((r) => /Claude Code's Ruflo MCP/.test(r.message));
   assert.match(outside.message, /from here it uses the user-level store .*\.claude-flow.memory \(this folder is the home folder\)/);
 });
+
+// Plan Task 4.2: register() refuses with 'ak-not-on-path' when it would write
+// a registration that starts `ak`, so every row whose sync fix goes through
+// that write is the user's step until `ak` resolves on PATH.
+const AK_OFF_PATH_FIX = 'put `ak` on PATH, then run `ak sync`';
+
+test('without ak on PATH, the rows whose fix re-registers claude-flow are manual steps', (t) => {
+  const { home, cwd } = fixture(t);
+  const settingsFile = path.join(home, 'settings.json');
+  const cfg = { mcp: { register: true }, agentBrowser: false };
+  fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({
+    mcpServers: { 'claude-flow': { command: 'ruflo', args: ['mcp', 'start'] } },
+  }));
+  const stale = mcpSection.mcpRows(registrationStatus({ cwd, home, settingsFile }), cfg, { cwd, home, akOnPath: false })
+    .find((r) => /does not start through `ak x ruflo-mcp`/.test(r.message));
+  assert.equal(stale.repair, 'manual');
+  assert.equal(stale.fix, AK_OFF_PATH_FIX);
+
+  const browserRow = mcpSection.mcpRows(registrationStatus({ cwd, home, settingsFile }),
+    { ...cfg, agentBrowser: true }, { cwd, home, akOnPath: false })
+    .find((r) => /agent-browser config/.test(r.message));
+  assert.equal(browserRow.repair, 'manual');
+  assert.equal(browserRow.fix, AK_OFF_PATH_FIX);
+
+  fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ mcpServers: {} }));
+  const missing = mcpSection.mcpRows(registrationStatus({ cwd, home, settingsFile }), cfg, { cwd, home, akOnPath: false })
+    .find((r) => /not registered/.test(r.message));
+  assert.equal(missing.repair, 'manual');
+  assert.equal(missing.fix, AK_OFF_PATH_FIX);
+});
+
+test('the mcp section looks ak up only when ak manages the registration', async (t) => {
+  const { home, cwd } = fixture(t);
+  const looked = [];
+  const haveFn = async (cmd) => { looked.push(cmd); return false; };
+  fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ mcpServers: {} }));
+  const status = () => registrationStatus({ cwd, home, settingsFile: path.join(home, 'settings.json') });
+  await mcpSection.default.collect({ cfg: { mcp: { register: false }, agentBrowser: false }, cwd, home, haveFn, status });
+  assert.deepEqual(looked, []);
+  const rows = await mcpSection.default.collect({ cfg: { mcp: { register: true }, agentBrowser: false }, cwd, home, haveFn, status });
+  assert.deepEqual(looked, ['ak']);
+  assert.equal(rows.find((r) => /not registered/.test(r.message)).fix, AK_OFF_PATH_FIX);
+});
