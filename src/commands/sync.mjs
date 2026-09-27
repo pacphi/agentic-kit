@@ -712,14 +712,17 @@ const repairKey = (r) => `${r.subsystem}\u0000${r.fix}`;
  *  never enter the plan, so they can never be unresolved. `remaining` holds
  *  everything else still failing: fail-level rows, a deja-vu row with a fix,
  *  and mutations that reported failure during this run. A subsystem --skip
- *  left out is never a failure: its failing rows join the skipped plan items
- *  in `skipped`, reported as "skipped by request". */
+ *  names is never a failure: its failing rows join the skipped plan items in
+ *  `skipped`, reported as "skipped by request". A plan item --skip took out of
+ *  another subsystem (a fix only a skipped step performs) is set aside by its
+ *  (subsystem, fix) alone, so that subsystem's other rows are still judged. */
 export function convergenceVerdict({ plan, after: collected, state, flags, cfg, skip = new Set(), skipped: skippedPlan = [] }) {
-  const left = new Set([...skip, ...skippedPlan.map((p) => p.subsystem)]);
+  const skippedKeys = new Set(skippedPlan.map(repairKey));
+  const setAside = (r) => skip.has(r.subsystem) || (!!r.fix && skippedKeys.has(repairKey(r)));
   const counts = (r) => r.level === 'fail' || (r.subsystem === 'deja-vu' && r.fix !== null);
-  const skipped = [...skippedPlan, ...collected.filter((r) => left.has(r.subsystem) && counts(r)
-    && !skippedPlan.some((p) => repairKey(p) === repairKey(r)))];
-  const after = collected.filter((r) => !left.has(r.subsystem));
+  const skipped = [...skippedPlan, ...collected.filter((r) => skip.has(r.subsystem) && counts(r)
+    && !skippedKeys.has(repairKey(r)))];
+  const after = collected.filter((r) => !setAside(r));
   const unresolved = [];
   for (const p of plan) {
     if (performingStepsFor(p, flags, cfg).length) continue;

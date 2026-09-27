@@ -684,6 +684,26 @@ test('--skip providers skips the codex-mcp fixes only the providers step perform
   assert.deepEqual(verdict.remaining, []);
 });
 
+// Follow-up (correctness-skip-providers-false-unresolved): a subsystem can now
+// be partly skipped. The verdict must still hold its planned fixes to their
+// promise; only the skipped (subsystem, fix) pairs are "skipped by request".
+test('a partly skipped subsystem still proves the fixes that stayed planned', () => {
+  const cfg = loadKitConfig();
+  const flags = FLAGS();
+  const recursive = { subsystem: 'codex-mcp', level: 'fail', message: 'recursive codex → codex mcp-server registration detected (user)',
+    fix: 'sync removes the exact recursive [mcp_servers.codex] table after confirmation (backed up)', repair: 'sync' };
+  const register = { subsystem: 'codex-mcp', level: 'warn', message: 'codex enabled but ruflo MCP not registered in codex',
+    fix: 'sync registers the ruflo MCP into codex', repair: 'sync' };
+  const skip = new Set(['providers']);
+  const { plan, skipped } = sync.splitSkipped([recursive, register], skip, flags, cfg);
+  assert.deepEqual(plan.map((p) => p.fix), [recursive.fix]);
+  const verdict = sync.convergenceVerdict({ plan, after: [recursive, register], state: { applyFailures: [] }, flags, cfg, skip, skipped });
+  assert.deepEqual(verdict.unresolved.map((u) => [u.fix, u.reason]), [[recursive.fix, 'not-converged']],
+    'a planned repair that did not take is unresolved, not "skipped by request"');
+  assert.deepEqual(verdict.remaining, []);
+  assert.deepEqual(verdict.skipped.map((r) => r.fix), [register.fix]);
+});
+
 // correctness-skip-leaves-subsystem-touched: a skipped subsystem stays
 // untouched even when a sibling step that serves it runs for another one.
 test('--skip codex-mcp and --skip routing reach into the providers step', async () => {
