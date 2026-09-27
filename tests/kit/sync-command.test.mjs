@@ -830,7 +830,7 @@ function oneJson(child) {
   return JSON.parse(child.stdout);
 }
 
-const SHAPE = ['plan', 'steps', 'unresolved', 'skipped', 'converged', 'exitCode'];
+const SHAPE = ['plan', 'steps', 'unresolved', 'skipped', 'needsYourAction', 'converged', 'exitCode'];
 
 test('--json: a run with an unresolved repair emits one JSON result and keeps human lines on stderr', () => {
   seedHome();

@@ -304,7 +304,10 @@ test('model refresh and diff hints remain advisory and never enter syncs executa
       flags: { 'dry-run': true, 'no-upgrade': true, json: false }, pkgRoot: PKG_ROOT,
     })));
   } finally { process.chdir(cwd); }
-  assert.doesNotMatch(out, /\[models\]/, 'sync must not claim it will execute advisory model actions');
+  // Decision 10: sync lists a manual row after its plan as needing your action.
+  const [plan, listed = ''] = out.split(/needs your action/);
+  assert.doesNotMatch(plan, /\[models\]/, 'sync must not claim it will execute advisory model actions');
+  assert.match(listed, /\[models\].*ak models refresh/, 'the advisory action is listed as yours to do');
 });
 
 test('a dry-run sync leaves the diverged policy byte-identical on disk', async () => {

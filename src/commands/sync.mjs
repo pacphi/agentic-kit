@@ -128,6 +128,11 @@ Only fixes a sync step performs are planned; a status row marked "→ manual:"
 A planned fix whose row is still there after the apply phase is reported as
 "unresolved: [subsystem] fix — reason", and sync exits 1.
 
+Sync's exit code reflects only what sync can repair. A failing or warning
+"→ manual:" row never changes the exit code or the converged verdict, with or
+without a plan; each one is listed after the verdict under "needs your
+action". \`ak status\` still reports overall health, those rows included.
+
 --skip leaves a subsystem out of this run only; kit.json is unchanged. Its
 plan items, the step it owns (even when another planned subsystem would
 trigger that step), and a fix only that step performs are all skipped, and
@@ -140,10 +145,12 @@ An unknown name is rejected with the list of names sync accepts.
 
 --json writes every human line (the plan, step results, prompts) to stderr
 and exactly one JSON object to stdout, pretty-printed as \`ak status --json\`:
-  { plan[], steps[{id, ok, detail}], unresolved[], skipped[], converged, exitCode }
+  { plan[], steps[{id, ok, detail}], unresolved[], skipped[],
+    needsYourAction[], converged, exitCode }
 plan and skipped items carry status's row fields (subsystem, level, message,
-fix, repair); each unresolved item has a reason: not-converged, no-step,
-failing, apply-failed, or declined. converged is null when the run stopped
+fix, repair); needsYourAction items carry subsystem, level, message and fix;
+each unresolved item has a reason: not-converged, no-step, failing,
+apply-failed, or declined. converged is null when the run stopped
 before a verdict (a dry run with a plan, a rejected flag, an error); an error
 also sets "error". The exit code equals exitCode.
 
@@ -711,7 +718,10 @@ const repairKey = (r) => `${r.subsystem}\u0000${r.fix}`;
  *  the apply phase, and any planned subsystem no step performs. Manual fixes
  *  never enter the plan, so they can never be unresolved. `remaining` holds
  *  everything else still failing: fail-level rows, a deja-vu row with a fix,
- *  and mutations that reported failure during this run. A subsystem --skip
+ *  and mutations that reported failure during this run. A row whose fix is
+ *  manual is never counted, whether or not there was a plan (decision 10):
+ *  sync's exit code reflects only what sync can repair, and the row is listed
+ *  under "needs your action" instead (see needsYourAction). A subsystem --skip
  *  names is never a failure: its failing rows join the skipped plan items in
  *  `skipped`, reported as "skipped by request". A plan item --skip took out of
  *  another subsystem (a fix only a skipped step performs) is set aside by its
@@ -719,7 +729,7 @@ const repairKey = (r) => `${r.subsystem}\u0000${r.fix}`;
 export function convergenceVerdict({ plan, after: collected, state, flags, cfg, skip = new Set(), skipped: skippedPlan = [] }) {
   const skippedKeys = new Set(skippedPlan.map(repairKey));
   const setAside = (r) => skip.has(r.subsystem) || (!!r.fix && skippedKeys.has(repairKey(r)));
-  const counts = (r) => r.level === 'fail' || (r.subsystem === 'deja-vu' && r.fix !== null);
+  const counts = (r) => r.repair !== 'manual' && (r.level === 'fail' || (r.subsystem === 'deja-vu' && r.fix !== null));
   const skipped = [...skippedPlan, ...collected.filter((r) => skip.has(r.subsystem) && counts(r)
     && !skippedKeys.has(repairKey(r)))];
   const after = collected.filter((r) => !setAside(r));
@@ -776,6 +786,22 @@ const publicRow = (r) => ({
  *  fail-level row), 'apply-failed' (a mutation reported failure), or
  *  'declined' (a Codex repair was not confirmed, so nothing was applied). */
 const publicIssue = (r) => ({ subsystem: r.subsystem, fix: r.fix ?? null, message: r.message, reason: r.reason ?? 'failing' });
+
+/** The fail- and warn-level rows whose fix is manual, as --json reports them
+ *  under `needsYourAction` (decision 10). Sync never performs these fixes, so
+ *  they never change its exit code or its converged verdict; it lists them. */
+export function needsYourAction(rows) {
+  return rows.filter((r) => r.repair === 'manual' && (r.level === 'fail' || r.level === 'warn'))
+    .map((r) => ({ subsystem: r.subsystem, level: r.level, message: r.message, fix: r.fix ?? null }));
+}
+
+/** Print the needs-your-action list once, after the verdict (or the plan). */
+function reportNeedsYourAction(items) {
+  if (!items.length) return;
+  console.log('');
+  console.log(bold('needs your action — ak sync does not perform these, and they do not change its exit code:'));
+  for (const r of items) (r.level === 'fail' ? fail : warn)(`[${r.subsystem}] ${r.message} → ${r.fix}`);
+}
 
 /** What one step printed, as a single line: no color, glyphs, or progress
  *  ticker (only the text after a line's last carriage return survives). */
@@ -839,11 +865,13 @@ async function humanOutputToStderr(fn) {
   }
 }
 
-/** Print the verdict; returns the exit code. */
-function reportVerdict({ unresolved, remaining, skipped }) {
+/** Print the verdict; returns the exit code. `manualFailing`: a fail-level
+ *  manual row remains, so "no failing subsystems" would be untrue. */
+function reportVerdict({ unresolved, remaining, skipped }, manualFailing = false) {
   for (const s of skipped) info(`skipped by request: [${s.subsystem}] ${s.fix ?? s.message}`);
   if (unresolved.length === 0 && remaining.length === 0) {
-    ok(bold(`converged — no failing subsystems${skipped.length ? ` (${skipped.length} skipped by request)` : ''}`));
+    const what = manualFailing ? 'nothing left that sync can repair' : 'no failing subsystems';
+    ok(bold(`converged — ${what}${skipped.length ? ` (${skipped.length} skipped by request)` : ''}`));
     info(dim('📊 dashboard: run `ak dashboard` → opens http://127.0.0.1:7431 (local, read-only)'));
     return 0;
   }
@@ -875,15 +903,17 @@ async function runTail({ cfg, cwd, flags, skip, state, codexRepairPlan, confirm,
 
 /** `ak sync`. Without --json it prints as it goes and returns the exit code.
  *  With --json every human line goes to stderr and stdout carries exactly one
- *  JSON object: { plan, steps, unresolved, skipped, converged, exitCode } (plus
- *  `error` when the run was rejected or threw). `converged` is true when
- *  nothing is left for sync to do, false when it ended with unresolved or
- *  failing items, and null when it stopped before a verdict (a dry run with a
- *  plan, a rejected flag, an error). */
+ *  JSON object: { plan, steps, unresolved, skipped, needsYourAction, converged,
+ *  exitCode } (plus `error` when the run was rejected or threw). `converged` is
+ *  true when nothing is left for sync to do, false when it ended with
+ *  unresolved or failing items, and null when it stopped before a verdict (a
+ *  dry run with a plan, a rejected flag, an error). Manual rows never decide
+ *  it; every run ends by listing them (needsYourAction). */
 export async function run(opts) {
-  const result = { plan: [], steps: [], unresolved: [], skipped: [], converged: null, exitCode: 0 };
+  const result = { plan: [], steps: [], unresolved: [], skipped: [], needsYourAction: [], converged: null, exitCode: 0 };
   if (!opts.flags.json) {
     result.exitCode = await converge(opts, result);
+    reportNeedsYourAction(result.needsYourAction);
     return result.exitCode;
   }
   await humanOutputToStderr(async (capture) => {
@@ -893,6 +923,7 @@ export async function run(opts) {
       fail(`ak sync: ${e?.stack ?? e}`);
       Object.assign(result, { converged: null, exitCode: 1, error: e?.message ?? String(e) });
     }
+    reportNeedsYourAction(result.needsYourAction);
   });
   console.log(JSON.stringify(result, null, 2));
   return result.exitCode;
@@ -924,6 +955,7 @@ async function converge({
   // preview may be cache-stale by up to one TTL window.
   await refreshPlanDrift(flags, fetchLatest, pkgRoot);
   const rows = await collectFn({ pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions });
+  result.needsYourAction = needsYourAction(rows);
   // Only fixes a sync step performs enter the plan (status/row.mjs repair
   // contract, #237). A manual fix — a command the user runs, a file they edit,
   // a login, an explicit model-lifecycle command — is named by `ak status` and
@@ -1004,6 +1036,7 @@ async function converge({
   // converge proof
   console.log('');
   const after = await collectFn({ pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions });
+  result.needsYourAction = needsYourAction(after);
 
   // health-history: append one post-heal snapshot so `status` can flag backslides
   // (learning shrank, native slots dropped, drift/security regressed) across syncs.
@@ -1035,7 +1068,7 @@ async function converge({
   const verdict = convergenceVerdict({ plan, after, state, flags, cfg, skip, skipped });
   result.unresolved = [...verdict.unresolved, ...verdict.remaining].map(publicIssue);
   result.skipped = verdict.skipped.map(publicRow);
-  const code = reportVerdict(verdict);
+  const code = reportVerdict(verdict, result.needsYourAction.some((r) => r.level === 'fail'));
   result.converged = code === 0;
   return code;
 }
