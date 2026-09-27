@@ -4,10 +4,10 @@
   [ADR-0020](0020-ga-stable-surfaces.md); closed-registry clause superseded by
   [ADR-0029](0029-host-adapter-extension-point.md)
 - **Date:** 2026-07-28
-- **Updated:** 2026-09-26 — one `legacyRufloDisposition` predicate decides whether a legacy
-  `ruflo`-keyed Claude registration is agentic-kit's own (user scope, `ruflo mcp start`, env limited
-  to `AGENT_BROWSER_CONFIG`); status and `register()` share it, so any other user-scope form is
-  reported as preserved with its manual removal command instead of a sync migration (#237).
+- **Updated:** 2026-09-27 — managed Ruflo daemon settings and start-on-use (project memory below).
+- **Updated:** 2026-09-26 — one `legacyRufloDisposition` predicate, shared by status and
+  `register()`, decides whether a legacy `ruflo` Claude registration is agentic-kit's own; any
+  other user-scope form is reported as preserved with its manual removal command (#237).
 - **Updated:** 2026-09-26 — project memory: route proof, gated routing claims, setup probe
   cleanup, stray stores, backup and distillation age, projects below a temp root; see
   "Amendment — 2026-09-26: project memory" at the end.
@@ -309,8 +309,11 @@ distillation stay Ruflo's jobs: status reads their age from Ruflo's own evidence
 and never runs either. Both daemon workers cover `memory.db` only, so an `agentdb-memory.db` gets
 an information row with the manual backup command. A backup older than 48 hours, or none, warns
 only when no daemon runs for the project, and the `daemons` row is information, not "ok", for a
-project with `memory.db` and no daemon, naming any setting that turns off Ruflo's start-on-use.
-Starting a daemon is never a sync repair. It states which
+project with `memory.db` and no daemon, saying Ruflo starts one on use or naming the setting that
+turns start-on-use off. A running daemon that deferred either job warns. Starting a daemon is never
+a sync repair: sync writes ak's daemon settings (flat keys in `.claude-flow/config.json`, and
+start-on-use on unless `kit.json` `rufloDaemon.autoStart` is false, with receipts) and restarts only
+a daemon that was already running so it reads them. It states which
 interface reads which store (CLI `memory.db`, MCP `agentdb-memory.db` with the native bridge) only
 for the exact `@claude-flow/cli` release and platform where that was observed, and otherwise leaves
 routing unverified. Setup and `ak x verify memory` prove persistence by storing

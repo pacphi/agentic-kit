@@ -55,7 +55,9 @@ ak sync             # apply it
 | The right side of Codex's status line is missing | Codex has one width-constrained native line | Widen the terminal or choose the compact preset with `ak x statusline codex native` |
 | Want the rich Ruflo/SONA/AQE display inside Codex | Codex currently accepts built-in status-line fields only, not a command-backed renderer | Keep the rich footer in Claude Code; see [Managed Codex status line](CODEX-STATUSLINE.md) for the current boundary |
 | Too many `⚙` daemons / stale daemons | One daemon per active project is normal (local-only workers, $0). Stale = workspace deleted or past the 12h TTL | `ak x daemon-gc --kill`; `sync` also reaps (and verifies the pid really is a ruflo daemon before killing) |
-| `status` warns that the memory backup is old, or `daemons` says none runs for this project | Ruflo backs up and distills project memory only inside the project's daemon, which ends itself after 12 hours. Ruflo's start-on-use is off when `.claude/settings.json` has `claudeFlow.daemon.autoStart: false` (`ruflo init` writes it; `ak setup` keeps it) | Run `ruflo daemon start` in the project root, or `ruflo memory backup` for a one-off copy; see [Memory backup and distillation](#memory-backup-and-distillation) |
+| `status` warns that the memory backup is old, or `daemons` says none runs for this project | Ruflo backs up and distills project memory only inside the project's daemon, which ends itself after 12 hours. Ruflo starts it again on the next `ruflo` command unless start-on-use is off (`claudeFlow.daemon.autoStart: false` in `.claude/settings.json`, which `ruflo init` writes) | `ak sync` turns start-on-use on unless `kit.json` has `rufloDaemon.autoStart: false`. Otherwise run `ruflo daemon start` in the project root, or `ruflo memory backup` for a one-off copy; see [Memory backup and distillation](#memory-backup-and-distillation) |
+| `daemons` warns that the daemon is running but deferred distillation or backup | The daemon skips a job while CPU load or free memory is past its threshold. On macOS it undercounts free memory ([ruvnet/ruflo#2935](https://github.com/ruvnet/ruflo/issues/2935)) | On macOS, `ak sync` sets the threshold in `.claude-flow/config.json` and restarts the daemon. Elsewhere, lower the flat key the row names in that file, then `ruflo daemon stop` and `ruflo daemon start` |
+| `daemons` warns that ak-managed daemon settings differ | The installed Ruflo needs different keys in `.claude-flow/config.json` (after an upgrade, or on a new project), or `ruflo init` turned start-on-use off again | `ak sync` |
 | `status` warns that `claude-flow.config.json` (or `.claude-flow/config.json`) points Ruflo memory away from the entries in `.swarm` | A command that saves Ruflo settings (`ruflo providers configure`, `ruflo config set`) created that file from Ruflo's defaults, whose `memory.persistPath` is `./data/memory` ([ruvnet/ruflo#3193](https://github.com/ruvnet/ruflo/issues/3193)). The MCP store and any `ruflo` command without ak's pin now look there | Set `memory.persistPath` to `".swarm"` in the file `status` names, or remove the key. `ak` does not edit a Ruflo configuration it did not write. `ak setup` and `ak sync` pin `.swarm` before registering providers, so they do not cause this |
 | Want to change which MCP tool families are callable | Exclusions are `permissions.deny` rules, persisted in kit.json | `ak x mcp pick` (re-runnable); `x mcp status` shows the inventory; `x mcp off` unregisters |
 | `status` says a legacy `ruflo`-keyed MCP registration is preserved | The entry is not the `ruflo mcp start` registration agentic-kit wrote (another path, `ruflo mcp`, a custom env key, or a project/local scope), so `ak sync` leaves it alone. With `claude-flow` also registered, Claude loads the Ruflo tools twice | Inspect it with `claude mcp get ruflo`, then run the command `status` prints (for example `claude mcp remove ruflo -s user`) if you don't need it |
@@ -361,12 +363,25 @@ from the files Ruflo writes in `.claude-flow/metrics/` and the newest snapshot i
   runs for the project. A failed attempt is always a warning.
 - An old distillation is information only. A failed or corrupt run is a warning.
 - The `daemons` row is information, not ok, when the project has memory and no
-  daemon, and it names the setting that stops Ruflo starting one on use.
+  daemon. It says Ruflo starts one on the next `ruflo` command, or names the
+  setting that stops it.
+- The `daemons` row warns when a running daemon deferred backup or distillation
+  and has not run it since.
 
-The daemon ends itself after 12 hours, sooner if its workers stop running. `ak setup`
-starts one, but Ruflo's start-on-use is off in a project set up by `ruflo init` or
-`ak setup` (`claudeFlow.daemon.autoStart: false` in `.claude/settings.json`). Backups
-therefore stop within a day of setup unless you start the daemon again:
+The daemon ends itself after 12 hours. Ruflo starts a new one on the next `ruflo`
+command in the project unless start-on-use is off. `ruflo init` turns it off
+(`claudeFlow.daemon.autoStart: false` in `.claude/settings.json`); `ak setup` and
+`ak sync` turn it back on and keep the old value for `ak uninstall`. They also
+write the flat keys Ruflo's daemon needs in `.claude-flow/config.json`: a free-memory
+floor of 0 on macOS, where Ruflo undercounts free memory
+([ruvnet/ruflo#2935](https://github.com/ruvnet/ruflo/issues/2935)), and
+`daemon.idleSecs: 0` on Ruflo older than 3.46.0, whose daemon ended itself early
+([ruvnet/ruflo#3194](https://github.com/ruvnet/ruflo/issues/3194)). ak never uses
+`ruflo config set` for these.
+
+To leave start-on-use as Ruflo set it, add `"rufloDaemon": { "autoStart": false }`
+to `kit.json` and run `ak sync`; it puts back a value it changed. You can always
+start the daemon or take a backup yourself:
 
 ```bash
 ruflo daemon start          # in the project root; runs both workers until it ends

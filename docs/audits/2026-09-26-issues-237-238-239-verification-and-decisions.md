@@ -1438,6 +1438,24 @@ was found). The daemon file must coexist with Addendum 2 Problem 1's memory pin 
 `claude-flow.config.json`: the daemon reads only `.claude-flow/config.json`, and memory resolution
 reads `claude-flow.config.json` first.
 
+**Implementation note (2026-09-27, Branch 3 slice 2, Ruflo 3.46.1).** Re-checked against 3.46.1:
+the #3194 idle fix shipped in 3.46.0 (`worker-daemon.js:1019-1024` counts idle from process start),
+so `daemon.idleSecs: 0` is written only below 3.46.0; #2935 is not fixed (`:165` darwin default 5%,
+`:589` `os.freemem()`), so macOS gets `daemon.resourceThresholds.minFreeMemoryPercent: 0`. The
+setup flip was at `setup.mjs:569-573`, and stopping it was not enough: `ruflo init` writes
+`autoStart: false` and start-on-use refuses on it (`daemon-autostart.js:56-88`), so ak now turns
+it to `true` under `kit.json` `rufloDaemon.autoStart` with a receipt that `ak uninstall` restores
+(`src/lib/ruflo-daemon-config.mjs`). Setup writes the settings before `ruflo daemon start`, since
+the daemon reads its file only in its constructor. Status adds a `daemons` warning when a live
+daemon deferred backup or distillation after its last start, and a drift row that `ak sync`
+repairs (sync restarts only a daemon that was running). Proof in a disposable home (`env -i`,
+`HOME` inside the scratch folder) on 3.46.1, macOS: after `ruflo daemon stop`, `ruflo memory
+store` started a new daemon that logged `Daemon config loaded from …/.claude-flow/config.json`
+and `minFreeMemoryPercent: 0%`; distillation ran 6 minutes later (`consolidation.json`
+`distillationEnabled: true`, `corrupt: false`) and backup at 10 minutes (`backup.json`
+`backedUp: true`, one snapshot in `.swarm/backups/`); `ak status` reported both ages. No real
+state changed.
+
 ### Item 2 — AQE scatters memory stores into subfolders
 
 **The situation.** AQE looks for its store by walking up from the working directory.
