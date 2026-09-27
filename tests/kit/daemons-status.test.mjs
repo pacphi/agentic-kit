@@ -174,3 +174,40 @@ test('outside a Ruflo repository the macOS deferral is a manual step: sync would
   assert.match(row.message, /ruvnet\/ruflo#2935/);
   assert.match(row.fix, /daemon\.resourceThresholds\.minFreeMemoryPercent/);
 });
+
+// A config.json ak cannot manage is left untouched, and status says so with
+// the key(s) the user has to set: sync would change nothing there.
+const held = (rows) => rows.find((r) => /\.claude-flow\/config\.json/.test(r.message) && /not ak-managed/.test(r.message));
+
+test('a malformed config.json is reported as a manual step naming the key, never a sync repair', async (t) => {
+  const cwd = rufloRepo(t);
+  fs.writeFileSync(path.join(cwd, '.claude-flow', 'config.json'), '{');
+  const rows = await collect(cwd, { loadConfig: kit(), rufloVersion: '3.46.1', platform: 'darwin' });
+  const row = held(rows);
+  assert.ok(row, JSON.stringify(rows));
+  assert.equal(row.level, 'warn');
+  assert.equal(row.repair, 'manual');
+  assert.match(row.message, /unreadable or not a JSON object/);
+  assert.match(row.fix, /daemon\.resourceThresholds\.minFreeMemoryPercent/);
+  assert.equal(rows.filter((r) => r.repair === 'sync').length, 0, JSON.stringify(rows));
+  assert.equal(fs.readFileSync(path.join(cwd, '.claude-flow', 'config.json'), 'utf8'), '{', 'status writes nothing');
+});
+
+test("a user's own value for a desired key is reported as a manual step naming the key and value", async (t) => {
+  const cwd = rufloRepo(t);
+  fs.writeFileSync(path.join(cwd, '.claude-flow', 'config.json'),
+    JSON.stringify({ 'daemon.resourceThresholds.minFreeMemoryPercent': 2 }));
+  const rows = await collect(cwd, { loadConfig: kit(), rufloVersion: '3.46.1', platform: 'darwin' });
+  const row = held(rows);
+  assert.ok(row, JSON.stringify(rows));
+  assert.equal(row.repair, 'manual');
+  assert.match(row.message, /"daemon\.resourceThresholds\.minFreeMemoryPercent": 2/);
+  assert.match(row.fix, /"daemon\.resourceThresholds\.minFreeMemoryPercent": 0/);
+  assert.equal(drift(rows), undefined, 'nothing for sync to apply');
+});
+
+test('a config.json is not reported when ak wants no keys here', async (t) => {
+  const cwd = rufloRepo(t);
+  fs.writeFileSync(path.join(cwd, '.claude-flow', 'config.json'), '{');
+  assert.equal(held(await collect(cwd, { loadConfig: kit(), rufloVersion: '3.46.1', platform: 'linux' })), undefined);
+});

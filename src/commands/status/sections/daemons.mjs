@@ -19,8 +19,10 @@
 // In a Ruflo repository, the drift row compares the project with what ak
 // manages for this Ruflo (ruflo-daemon-config.mjs): the flat keys in
 // .claude-flow/config.json and start-on-use in .claude/settings.json. Read
-// only; `ak sync` applies them.
+// only; `ak sync` applies them. A config.json ak cannot manage (unreadable, or
+// the user's own value for a wanted key) is a manual row naming the key.
 import fs from 'node:fs';
+import path from 'node:path';
 import { loadKitConfig } from '../../../lib/config.mjs';
 import {
   listDaemons as listRufloDaemons, projectDaemonAlive, rufloAutostartOff, staleDaemons,
@@ -29,7 +31,7 @@ import { formatLiveCheckAge as ago } from '../../../lib/live-check-evidence.mjs'
 import { pendingDeferral } from '../../../lib/memory-maintenance.mjs';
 import * as paths from '../../../lib/paths.mjs';
 import { rufloProjectRoot } from '../../../lib/ruflo-components/apply.mjs';
-import { daemonDrift } from '../../../lib/ruflo-daemon-config.mjs';
+import { DAEMON_CONFIG_RELATIVE, daemonConfigHeld, daemonDrift } from '../../../lib/ruflo-daemon-config.mjs';
 import { memoryProjectRoot } from '../../../lib/ruflo-memory.mjs';
 import { installedRoutingVersion } from '../../../lib/ruflo-memory-contract.mjs';
 import { installedVersion } from '../../../lib/versions.mjs';
@@ -73,12 +75,29 @@ function deferralRow(root, { cwd, now, platform }) {
       + 'then restart the daemon with `ruflo daemon stop` and `ruflo daemon start`', { repair: 'manual' });
 }
 
-function driftRow(cwd, { loadConfig, rufloVersion, platform }) {
+const RESTART = 'then restart the daemon with `ruflo daemon stop` and `ruflo daemon start`';
+const flatKeys = (entries, pick) => entries.map((e) => `"${e.key}": ${JSON.stringify(pick(e))}`).join(', ');
+
+/** A manual row for a config.json ak leaves alone (unreadable, or holding the
+ *  user's own value for a key ak wants): sync would change nothing there. */
+export function heldRow(held) {
+  const file = DAEMON_CONFIG_RELATIVE.split(path.sep).join('/');
+  const want = flatKeys(held.entries, (e) => e.want);
+  return held.invalid
+    ? row('daemons', 'warn', `${file} is not ak-managed: it is unreadable or not a JSON object, so ak leaves it untouched`,
+      `fix ${file} so it is a JSON object holding ${want} (flat keys), ${RESTART}`, { repair: 'manual' })
+    : row('daemons', 'warn', `${file} is not ak-managed: it holds your own ${flatKeys(held.entries, (e) => e.have)}, `
+      + 'so ak leaves it as is', `set ${want} (flat keys) in ${file} yourself, ${RESTART}`, { repair: 'manual' });
+}
+
+function driftRows(cwd, { loadConfig, rufloVersion, platform }) {
   const root = rufloProjectRoot(cwd);
-  if (!root) return null;
-  const parts = daemonDrift(root, { cfg: loadConfig(), rufloVersion, platform });
-  return parts && row('daemons', 'warn', `ak-managed daemon settings differ from what Ruflo ${rufloVersion ?? '(version unknown)'} `
-    + `needs: ${parts.join('; ')}`, "sync applies ak's Ruflo daemon settings");
+  if (!root) return [];
+  const cfg = loadConfig();
+  const held = daemonConfigHeld(root, { cfg, rufloVersion, platform });
+  const parts = daemonDrift(root, { cfg, rufloVersion, platform });
+  return [held && heldRow(held), parts && row('daemons', 'warn', `ak-managed daemon settings differ from what Ruflo ${rufloVersion ?? '(version unknown)'} `
+    + `needs: ${parts.join('; ')}`, "sync applies ak's Ruflo daemon settings")].filter(Boolean);
 }
 
 export default {
@@ -104,8 +123,7 @@ export default {
       }
       const deferral = deferralRow(root, { cwd, now, platform });
       if (deferral) rows.push(deferral);
-      const drift = driftRow(cwd, { loadConfig, rufloVersion, platform });
-      if (drift) rows.push(drift);
+      rows.push(...driftRows(cwd, { loadConfig, rufloVersion, platform }));
     } catch (e) {
       rows.push(row('daemons', 'warn', `daemon check unavailable: ${e.message}`));
     }

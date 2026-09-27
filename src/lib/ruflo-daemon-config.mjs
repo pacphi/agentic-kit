@@ -71,11 +71,18 @@ function readDaemonConfig(file) {
   }
 }
 
+/** A desired key ak leaves to the user: the file is unreadable (`invalid`),
+ *  or it holds the user's own value `have` instead of `want`.
+ *  @typedef {{ key: string, want: number, have?: unknown }} HeldKey
+ *  @typedef {{ invalid: boolean, entries: HeldKey[] } | null} HeldConfig */
+
 /** Plan the config.json edit: which owned keys to drop, which to set. */
 function planConfig(current, owned, desired) {
   const next = { ...current };
   const nextOwned = { ...owned };
-  let removed = false; let written = false; let conflict = false;
+  let removed = false; let written = false;
+  /** @type {HeldKey[]} */
+  const conflicts = [];
   for (const [key, value] of Object.entries(owned)) {
     if (Object.hasOwn(desired, key)) continue;
     if (next[key] === value) { delete next[key]; removed = true; }
@@ -85,27 +92,30 @@ function planConfig(current, owned, desired) {
     if (!Object.hasOwn(next, key)) { next[key] = value; nextOwned[key] = value; written = true; continue; }
     if (next[key] === value) continue; // ak's (receipt kept) or the user's own identical value
     if (Object.hasOwn(owned, key) && next[key] === owned[key]) { next[key] = value; nextOwned[key] = value; written = true; continue; }
-    conflict = true;
+    conflicts.push({ key, want: value, have: next[key] });
     delete nextOwned[key];
   }
-  return { next, nextOwned, removed, written, conflict };
+  return { next, nextOwned, removed, written, conflicts };
 }
 
 function reconcileConfig(root, receipt, desired, dryRun) {
   const file = path.join(root, DAEMON_CONFIG_RELATIVE);
   const owned = receipt.configKeys ?? {};
   const current = readDaemonConfig(file);
-  if (current.state === 'invalid') return { status: 'user-managed', changed: false };
+  if (current.state === 'invalid') {
+    const entries = Object.entries(desired).map(([key, want]) => ({ key, want }));
+    return { status: 'user-managed', changed: false, held: entries.length ? { invalid: true, entries } : null };
+  }
   if (current.state === 'absent') {
     receipt.configKeys = {};
     receipt.configCreated = false;
-    if (!Object.keys(desired).length) return { status: 'absent', changed: false };
+    if (!Object.keys(desired).length) return { status: 'absent', changed: false, held: null };
     if (!dryRun) {
       writePrivateFileAtomic(file, `${JSON.stringify(desired, null, 2)}\n`);
       receipt.configKeys = { ...desired };
       receipt.configCreated = true;
     }
-    return { status: 'written', changed: true };
+    return { status: 'written', changed: true, held: null };
   }
   const plan = planConfig(current.value, owned, desired);
   const changed = plan.written || plan.removed;
@@ -117,9 +127,10 @@ function reconcileConfig(root, receipt, desired, dryRun) {
     receipt.configCreated ??= false;
     if (changed && empty && receipt.configCreated === true) receipt.configCreated = false;
   }
-  if (plan.written) return { status: 'written', changed };
-  if (plan.removed) return { status: 'removed', changed };
-  return { status: plan.conflict ? 'user-managed' : 'converged', changed: false };
+  const held = plan.conflicts.length ? { invalid: false, entries: plan.conflicts } : null;
+  if (plan.written) return { status: 'written', changed, held };
+  if (plan.removed) return { status: 'removed', changed, held };
+  return { status: held ? 'user-managed' : 'converged', changed: false, held };
 }
 
 function reconcileAutostart(root, receipt, wanted, dryRun) {
@@ -158,7 +169,8 @@ const hasOwnership = (receipt) => Object.keys(receipt.configKeys ?? {}).length >
  * @param {{rufloVersion?: (string|null), platform?: string, receipts: Record<string, any>,
  *   autoStart?: boolean, dryRun?: boolean, desired?: Record<string, number>, runner?: unknown}} options
  *   `autoStart` is kit.json rufloDaemon.autoStart !== false; `runner` is accepted and never used.
- * @returns {{config: string, autostart: string, changed: boolean}}
+ * @returns {{config: string, autostart: string, changed: boolean, held: HeldConfig}}
+ *   `held` names the desired keys ak cannot manage here (null when none).
  */
 export function reconcileRufloDaemon(root, {
   rufloVersion = null, platform = process.platform, receipts, autoStart = true, dryRun = false,
@@ -172,7 +184,9 @@ export function reconcileRufloDaemon(root, {
     if (hasOwnership(receipt)) receipts[key] = receipt;
     else delete receipts[key];
   }
-  return { config: config.status, autostart: autostart.status, changed: config.changed || autostart.changed };
+  return {
+    config: config.status, autostart: autostart.status, changed: config.changed || autostart.changed, held: config.held,
+  };
 }
 
 /** Uninstall: drop every key ak wrote, delete a file ak created and left
@@ -227,6 +241,14 @@ export async function applyRufloDaemon(cwd, {
     restarted = (await runner('ruflo', ['daemon', 'start'], { cwd: root, timeout: 60_000 })).code === 0;
   }
   return { root, result, restarted };
+}
+
+/** Status: the desired keys a user-managed config.json keeps from ak (a dry run).
+ *  @returns {HeldConfig} */
+export function daemonConfigHeld(root, { cfg, rufloVersion = null, platform = process.platform }) {
+  const intent = daemonIntent(structuredClone(cfg ?? {}));
+  const receipts = structuredClone(intent.receipts);
+  return reconcileRufloDaemon(root, { rufloVersion, platform, receipts, autoStart: intent.autoStart, dryRun: true }).held;
 }
 
 /** Status: what a sync would change here, as phrases, or null when converged. */
