@@ -1190,9 +1190,9 @@ Behavior that differs from, or goes beyond, the plan text.
 
   There are no original values, so ak cannot show or restore these edits. The docs tell the user
   to reinstall Ruflo to get pristine files.
-- **Claude-side memory outside a project.** Claude's direct `ruflo mcp start` registration, and
-  Claude-side harvest and setup, still use `<cwd>/.swarm` outside a project. This is a follow-up
-  decision under Addendum 2.
+- **Claude-side memory outside a project.** Resolved by Branch 3 decision B3-D1 (below): Claude
+  Code's registration starts through `ak x ruflo-mcp --host claude`, and Claude-side harvest and
+  setup follow the same store rule (`518b4be8`, `8c91658d`, `8966a18c`).
 - **`ak x host --dry-run`.** The command declares `--dry-run` but never reads it; this is
   pre-existing. Its provider registration, and now the memory pin, run even with that flag.
 - **Status wording.** When both the repository root and the folder are unsuitable, the status reason
@@ -1227,11 +1227,14 @@ Behavior that differs from, or goes beyond, the plan text.
 - **Limits.** `readLimits` starts `codex app-server` whatever the Codex host setting says. This needs
   a policy decision.
 - **Memory.**
-  - Old `_setup/verify-*` rows in existing MCP stores: clean them up once, or leave them.
+  - Old `_setup/verify-*` rows in existing MCP stores. Resolved by B3-D2: `ak sync` removes them
+    once, with a backup and a receipt (`ec6c9367`).
   - AQE's relative `AQE_MEMORY_PATH`: file it upstream, or anchor it in ak's projection.
   - Observed routing evidence is macOS-only.
   - The two-store warning is permanent (N4).
-  - `ak setup` sets `daemon.autoStart: false`, so Ruflo's backups stop. This needs a decision.
+  - `ak setup` sets `daemon.autoStart: false`, so Ruflo's backups stop. Resolved by Addendum 3
+    Item 1: ak turns start-on-use on under `kit.json` `rufloDaemon.autoStart`, with a receipt
+    (`a9d59cd6`).
 - **Live.**
   - No real producer of a structured live-events file exists, so that path has fixture evidence only.
   - The plain-folder bind has not been observed on a real machine.
@@ -1454,7 +1457,12 @@ store` started a new daemon that logged `Daemon config loaded from …/.claude-f
 and `minFreeMemoryPercent: 0%`; distillation ran 6 minutes later (`consolidation.json`
 `distillationEnabled: true`, `corrupt: false`) and backup at 10 minutes (`backup.json`
 `backedUp: true`, one snapshot in `.swarm/backups/`); `ak status` reported both ages. No real
-state changed.
+state changed. Adversarial review found that sync also wrote `.claude-flow/config.json` on macOS
+in a repository with only a bare `.claude-flow/`. That file is one of Ruflo's durable project
+markers (`daemon-autostart.js:90-123`), so it turned the repository into a Ruflo project and
+re-opened ruvnet/ruflo#2852. ak now manages daemon settings only where such a marker already
+exists (`12773705`). A repository where an earlier build of this branch already wrote the file
+stays a Ruflo project.
 
 ### Item 2 — AQE scatters memory stores into subfolders
 
@@ -1855,10 +1863,10 @@ through `ak x ruflo-mcp`, in a Claude mode that sets only the memory location (c
 in Claude's settings env, ADR-0058 §3). B: keep `ruflo mcp start` and report the strays. C: write a
 per-project Claude registration.
 
-**Recommendation: A. Choice: A.** Implemented in `884b97bb` (the launcher's Claude mode,
-`--host claude`; an unknown host exits 2), `74a3cd20` (registration through the launcher: ak's
+**Recommendation: A. Choice: A.** Implemented in `518b4be8` (the launcher's Claude mode,
+`--host claude`; an unknown host exits 2), `8c91658d` (registration through the launcher: ak's
 earlier `ruflo mcp start` entry is replaced, any other form is kept, and nothing changes when `ak`
-is not on `PATH`; status names the store the launcher picks from here) and `950a3e60` (harvest
+is not on `PATH`; status names the store the launcher picks from here) and `8966a18c` (harvest
 follows the same rule; `ak setup --project` refuses outside a project). Proof in a disposable
 home: `claude` 2.1.283 starts user-scope stdio servers in the session folder (`claude mcp list`
 and a headless `claude -p` both started the server in `repo/sub/dir`); through the new
@@ -1866,6 +1874,14 @@ registration Ruflo started in `repo` with `CLAUDE_FLOW_DB_PATH=repo/.swarm/memor
 home folder in `~/.claude-flow/memory` with both memory variables pinned. With Ruflo 3.46.1 an MCP
 `memory_store` through `ak x ruflo-mcp --host claude` landed in `repo/.swarm/agentdb-memory.db`
 from `repo/sub/dir` and in the user-level store from the home folder; `repo/sub/dir` stayed empty.
+
+The adversarial review of this branch found two gaps, both fixed on it. First, the registration
+runs whatever `ak` Claude Code finds on `PATH`. ak 4.0.0-alpha.56, the released version, rejects
+`--host` (exit 2). ak now asks that `ak` for `ak x ruflo-mcp --help` and registers only when the
+help names `--host`; otherwise it keeps the old registration and status gives the manual step
+(`a4323cd1`). The hermetic Claude seat of `ak run` starts the running kit's own launcher. Second,
+Codex's Claude import copies the new `claude-flow` entry into Codex. ak now disables that copy in
+place, as it does the older alias (`57e05c31`).
 
 #### B3-D2 — old `_setup/verify-*` rows
 
@@ -1884,7 +1900,7 @@ probe rows remain in users' stores, and the mirror keeps them readable through M
 **The choices.** A: a one-time `ak sync` cleanup — preview, back up, delete only ak's exact probe
 keys from both stores, and write a receipt. B: report only. C: leave them.
 
-**Recommendation: A. Choice: A.** Implemented in `cfd4bcae`: status warns with the count per store
+**Recommendation: A. Choice: A.** Implemented in `ec6c9367`: status warns with the count per store
 folder (the current project and the user-level store); `ak sync` backs each affected file up with
 `VACUUM INTO` under the state folder, deletes exactly the matched ids from both files, writes a
 receipt, and records the file in `kit.json` `cleanups.setupProbeRows` so it is cleaned at most once.
@@ -1917,7 +1933,7 @@ issue only with approved text. B: keep the note as it is.
 controller ran it: run 36333572972 on Ruflo 3.46.1 aborted 10/10 by default and 10/10 with
 single-threaded ONNX sessions, so the mitigation is disproven. The approved comment is
 ruvnet/ruflo#2885 issuecomment-5857781254; the branch was deleted. The nightly note cites it
-(`d1e93c8d`), and `continue-on-error` stays.
+(`ceac98b2`), and `continue-on-error` stays.
 
 #### B3-D4 — Ruflo on this machine
 
