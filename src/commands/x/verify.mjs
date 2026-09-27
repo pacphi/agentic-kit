@@ -81,11 +81,22 @@ async function verifyLearning() {
 // interface is readable through the other (issue #213). The probe returns the
 // observation; the reporter below only warns, never fails: a known upstream
 // split is a warning and an unusable MCP server means "not observed", so the
-// suite's pass/fail stays about the CLI proof.
-export async function probeProjectMemoryRoutes(tmp, env, namespace, { observe = observeMemoryRoutes } = {}) {
+// suite's pass/fail stays about the CLI proof. The MCP server is pinned to the
+// isolated dir whatever the launcher decides for it (an enclosing repository,
+// or the user-level store), so the probe never writes a real store.
+export async function probeProjectMemoryRoutes(tmp, env, namespace, {
+  observe = observeMemoryRoutes, callMcp = callMcpTools,
+} = {}) {
   const value = `route-proof-${process.pid}-${Date.now()}`;
   const routeNamespace = `${namespace}-routes`;
-  const launch = rufloMcpLaunch(tmp, env);
+  const root = fs.realpathSync(tmp);
+  const swarm = path.join(root, '.swarm');
+  const base = rufloMcpLaunch(root, env);
+  const launch = {
+    ...base,
+    cwd: root,
+    env: { ...base.env, CLAUDE_FLOW_MEMORY_PATH: swarm, CLAUDE_FLOW_DB_PATH: path.join(swarm, 'memory.db') },
+  };
   const cliRun = (args) => runCmd('ruflo', args, { cwd: tmp, env, timeout: 120_000 });
   return observe({
     namespace: routeNamespace,
@@ -99,7 +110,7 @@ export async function probeProjectMemoryRoutes(tmp, env, namespace, { observe = 
         return { ok: r.code === 0 || missed, found: r.code === 0 && r.stdout.includes(value) };
       },
     },
-    mcp: (calls) => callMcpTools({ ...launch, calls, timeoutMs: 120_000 }),
+    mcp: (calls) => callMcp({ ...launch, calls, timeoutMs: 120_000 }),
     locate: (key) => {
       const store = findMemoryEntry(tmp, routeNamespace, key);
       return store ? path.basename(store.file) : null;

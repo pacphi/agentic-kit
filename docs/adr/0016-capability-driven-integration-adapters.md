@@ -9,7 +9,8 @@
   to `AGENT_BROWSER_CONFIG`); status and `register()` share it, so any other user-scope form is
   reported as preserved with its manual removal command instead of a sync migration (#237).
 - **Updated:** 2026-09-26 — project memory: route proof, gated routing claims, setup probe
-  cleanup, stray stores, backup and distillation age; see "Amendment — 2026-09-26: project
+  cleanup, stray stores, backup and distillation age, and a disposable project below a temporary
+  root keeping its own store; see "Amendment — 2026-09-26: project
   memory" at the end.
 - **Earlier update:** 2026-09-23 — the Claude memory pin is receipt-owned and removed by uninstall (ADR-0058).
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
@@ -639,7 +640,9 @@ work under ADR-0011's own validation requirements.
   store from the Git repository root, else the plain work folder. The filesystem root, the home
   folder itself, a temporary root, and a tool's own folder (`~/.codex`, `~/.claude`, `~/.config`,
   `~/.local`, `~/.cache`, `~/Library/Application Support`, `%APPDATA%`, and their environment
-  overrides) are never a store's home. A repository root there falls back to the plain folder, and
+  overrides) are never a store's home. A folder below a temporary root is ordinary work and keeps
+  its own store, even when the temporary root lies inside a tool's folder (Windows' `%TEMP%` under
+  `%LOCALAPPDATA%`). A repository root there falls back to the plain folder, and
   failing that, all such launches share one user-level store, `~/.claude-flow/memory`, pinned
   through both `CLAUDE_FLOW_MEMORY_PATH` and `CLAUDE_FLOW_DB_PATH`, with Ruflo started inside it.
   Ruflo defines no user-level memory store; ak follows Ruflo's user-level state folder

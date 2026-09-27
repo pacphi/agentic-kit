@@ -40,12 +40,19 @@ export function homeRelative(file, home = paths.home) {
   return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? `~/${rel.split(path.sep).join('/')}` : file;
 }
 
-/** Why `dir` (a real path) must not hold a Ruflo store, or null. */
+/** Why `dir` (a real path) must not hold a Ruflo store, or null. A temporary
+ *  root inside a tool folder (Windows' %TEMP% under %LOCALAPPDATA%, a TMPDIR
+ *  under ~/.cache) does not make the disposable projects below it the tool's:
+ *  the deeper boundary wins, so they keep their own store. */
 function unsuitableReason(dir, { home, env, platform }) {
   if (path.dirname(dir) === dir) return 'the filesystem root';
   if (dir === realOr(home)) return 'the home folder';
-  if (paths.tempRoots({ env, platform }).some((root) => realOr(root) === dir)) return 'a temporary folder';
-  const tool = paths.toolInternalDirs({ home, env, platform }).find((folder) => inside(dir, realOr(folder)));
+  const temps = paths.tempRoots({ env, platform }).map(realOr);
+  if (temps.includes(dir)) return 'a temporary folder';
+  const tool = paths.toolInternalDirs({ home, env, platform }).find((folder) => {
+    const real = realOr(folder);
+    return inside(dir, real) && !temps.some((temp) => inside(temp, real) && inside(dir, temp));
+  });
   return tool ? `inside ${homeRelative(tool, home)}, a tool's own folder` : null;
 }
 

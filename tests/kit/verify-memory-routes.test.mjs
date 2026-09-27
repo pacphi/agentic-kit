@@ -204,6 +204,27 @@ test('an exception while observing routes is a warning and never fails the suite
   assert.match(logs.out, /cross-interface routing not observed: launcher exploded/);
 });
 
+// security-verify-memory-user-store (defense in depth): whatever the launcher
+// decides for the probe's folder (an enclosing repository, the user-level
+// store), the route probe's MCP server runs in the probe's own directory.
+test('the route probe starts its MCP server pinned to the isolated directory', async (t) => {
+  rmrf(paths.configDir());
+  writeKitConfig(HOME, offlineKitConfig());
+  const repo = sandboxProject('ak-verify-routes-enclosing'); // has a .git marker
+  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(repo, 'agentic-kit-memory-')));
+  t.after(() => rmrf(repo));
+  let launch = null;
+  await verify.probeProjectMemoryRoutes(tmp, { KEEP: 'yes' }, 'ns', {
+    callMcp: async (spec) => { launch = spec; return []; },
+    observe: async ({ mcp }) => { await mcp([]); return {}; },
+  });
+  assert.ok(launch, 'the probe reached the MCP call');
+  assert.equal(launch.cwd, tmp, 'not the enclosing repository');
+  assert.equal(launch.env.CLAUDE_FLOW_MEMORY_PATH, path.join(tmp, '.swarm'));
+  assert.equal(launch.env.CLAUDE_FLOW_DB_PATH, path.join(tmp, '.swarm', 'memory.db'));
+  assert.equal(launch.env.KEEP, 'yes');
+});
+
 test('the quick live memory check proves the CLI round trip without starting an MCP server', posix, async () => {
   const cfg = offlineKitConfig();
   const checks = verify.liveChecksFor(cfg).filter((check) => check.id === 'memory');

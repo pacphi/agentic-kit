@@ -58,6 +58,32 @@ test('a disposable folder under the temporary root is a plain work folder (ak x 
   assert.equal(launch.env.CLAUDE_FLOW_MEMORY_PATH, undefined, 'a project launch adds no memory-root override');
 });
 
+// security-verify-memory-user-store: Windows' default %TEMP% lies inside
+// %LOCALAPPDATA% (a tool folder), and a POSIX TMPDIR can lie inside ~/.cache.
+// A disposable project below the temporary root is still ordinary work: it
+// must keep its own store, or ak x verify memory writes its proof rows into
+// the real user-level store.
+test('a disposable folder below a temporary root inside a tool folder keeps its own store', (t) => {
+  const home = sandbox(t);
+  const local = path.join(home, 'AppData', 'Local');
+  const winTemp = mkdir(path.join(local, 'Temp'));
+  const winScratch = mkdir(path.join(winTemp, 'agentic-kit-memory-x'));
+  const win = rufloMemoryLocation(winScratch, { home, platform: 'win32', env: { LOCALAPPDATA: local, TEMP: winTemp, TMP: winTemp } });
+  assert.equal(win.kind, 'folder', JSON.stringify(win));
+  assert.equal(win.root, winScratch);
+  assert.equal(rufloMemoryLocation(winTemp, { home, platform: 'win32', env: { LOCALAPPDATA: local, TEMP: winTemp } }).kind, 'user',
+    'the temporary root itself still routes to the user-level store');
+
+  const posixTemp = mkdir(path.join(home, '.cache', 'tmp'));
+  const scratch = mkdir(path.join(posixTemp, 'agentic-kit-memory-y'));
+  const env = { TMPDIR: posixTemp };
+  const launch = rufloMcpLaunch(scratch, env, { cfg, rufloVersion: '3.45.0', home });
+  assert.equal(launch.location.kind, 'folder', JSON.stringify(launch.location));
+  assert.equal(launch.cwd, scratch);
+  assert.equal(launch.env.CLAUDE_FLOW_DB_PATH, path.join(scratch, '.swarm', 'memory.db'));
+  assert.equal(launch.env.CLAUDE_FLOW_MEMORY_PATH, undefined);
+});
+
 test('the filesystem root, the home folder and a temporary root use the one user-level store', (t) => {
   const home = sandbox(t);
   for (const [cwd, reason] of [
