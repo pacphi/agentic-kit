@@ -162,3 +162,16 @@ test('every registered id is in a watched repository, spelled canonically', () =
   }).map((item) => item.id);
   assert.deepEqual(wrong, []);
 });
+
+// docs-04: an upstream issue ak files is watched from the day it is filed,
+// even before any source cites it (the citation guard cannot see it then).
+// The audit record's list of filed upstream evidence is the source of truth.
+test('every upstream thread the audit record lists as filed is registered', () => {
+  const audit = fs.readFileSync('docs/audits/2026-09-26-issues-237-238-239-verification-and-decisions.md', 'utf8');
+  const start = audit.indexOf('### Item 6 — new upstream evidence');
+  const item6 = audit.slice(start, audit.indexOf('\n### ', start + 1));
+  const filed = [...new Set(ids(item6))];
+  assert.ok(filed.length >= 5, `found only ${filed.length} threads in Item 6`);
+  const registered = new Set(document().watch.map((entry) => entry.id));
+  assert.deepEqual(filed.filter((id) => !registered.has(id)), []);
+});

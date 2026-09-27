@@ -1371,7 +1371,8 @@ All of them move into the upstream watch.
   (ruvnet/ruflo#2670, fixed in 3.32.2 with a built-in engine), a stale "#2986 pending" note, and
   codex#15451 closed without a fix (ak's wrapper stays). The review also found that
   `ruflo security defend` still crashes after a detection, so its exit code cannot distinguish a
-  detection from a crash; the maintainer approved filing it.
+  detection from a crash; the maintainer approved filing it, and it was filed as
+  [ruvnet/ruflo#3473](https://github.com/ruvnet/ruflo/issues/3473) and added to the upstream watch.
 - **Registry.** agentic-kit already keeps upstream constraints in
   `config/agentic-dependency-constraints.json` (ADR-0041 §7). The watch list extends that registry
   rather than adding a second one. The file is not in the npm package although shipped code reads

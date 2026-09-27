@@ -1577,6 +1577,24 @@
       ]
     },
     {
+      "id": "ruvnet/ruflo#3473",
+      "url": "https://github.com/ruvnet/ruflo/issues/3473",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "security defend crashes on every detected threat; exit 1 comes from the error handler",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["plan Branch 3 item 4: defend reporting tells a detection from the post-detection crash"], "files": [] },
+      "adjustment": "Once a released Ruflo prints every detected threat and exits with its own verdict, ak x verify security and the security status row read defend's exit code as the detection verdict instead of treating a crash after the header line as a detection.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "filed" },
+        { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
       "id": "ruvnet/RuVector#519",
       "url": "https://github.com/ruvnet/RuVector/issues/519",
       "relation": "filed",
