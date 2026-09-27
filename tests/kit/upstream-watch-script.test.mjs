@@ -318,6 +318,35 @@ test('a confirmation failure is "Could not check", never "not contained"', async
   });
 });
 
+test('a failed confirmation keeps the thread: check still emits its closed line', async () => {
+  const fetcher = {
+    auth: async () => ({ ok: true }),
+    thread: async (id) => closedThread(id, '2026-09-26T22:31:23Z'),
+    release: async () => rufloFacts,
+    fixingChanges: async () => { throw new Error('gh api graphql failed: API rate limit exceeded (HTTP 403)'); },
+    contains: async () => ({ ref: null, contained: null }),
+  };
+  await withRegistryFile([entry('ruvnet/ruflo#3194')], async (file) => {
+    const json = capture();
+    await main(['check', '--since', '2026-09-26T00:00:00Z', '--json', '--registry', file], { fetcher, stdout: json.stream, stderr: capture().stream, now: NOW });
+    const result = JSON.parse(json.text());
+    assert.deepEqual(result.events.map((event) => event.line), ['UPSTREAM-WATCH ruvnet/ruflo#3194 closed 2026-09-26 reason=completed']);
+    assert.match(result.fetchErrors[0].error, /rate limit/);
+    const report = capture();
+    await main(['report', '--json', '--registry', file], { fetcher, stdout: report.stream, stderr: capture().stream, now: NOW });
+    const target = JSON.parse(report.text()).entries.find((item) => item.id === 'ruvnet/ruflo#3194');
+    assert.ok(target.groups.includes('unchecked'));
+    assert.equal(target.release.released, null);
+    assert.match(target.release.basis, /could not confirm .*rate limit/);
+    assert.equal(target.upstream.state, 'closed', 'the thread already read is kept');
+    const text = capture();
+    const err = capture();
+    await main(['check', '--since', '2026-09-26T00:00:00Z', '--registry', file], { fetcher, stdout: text.stream, stderr: err.stream, now: NOW });
+    assert.ok(text.text().split('\n').filter(Boolean).every((line) => line.startsWith('UPSTREAM-WATCH ')), 'stdout stays ledger lines only');
+    assert.match(err.text(), /Could not check ruvnet\/ruflo#3194: .*rate limit/);
+  });
+});
+
 test('a closed fix no published release contains is fixed but unreleased', () => {
   const release = { channel: 'npm', name: 'agentic-qe', minVersion: '9.9.9' };
   const target = entry('proffesor-for-testing/agentic-qe#617', { doneWhen: { state: 'closed-completed', release } });

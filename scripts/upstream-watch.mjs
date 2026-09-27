@@ -74,7 +74,9 @@ async function confirmReleases(entries, live, fetcher, concurrency, fetchErrors)
       }
       state.confirmation = { changes, checks };
     } catch (error) {
-      state.error = error.message;
+      // The release is "Could not check"; the thread already read is kept, so its
+      // closed, reply and acknowledged lines are not lost.
+      state.confirmation = { changes: [], checks: [], error: error.message };
       fetchErrors.push({ id: entry.id, error: error.message });
     }
   });
@@ -163,8 +165,12 @@ export async function main(argv, {
     return 0;
   }
   const events = offline ? [] : withoutRecorded(ledgerEvents(report, registry, { since: options.since }), ledgerText);
-  if (options.json) stdout.write(`${JSON.stringify({ since: options.since, offline, events }, null, 2)}\n`);
-  else stdout.write(offline ? `No events: ${offline}\n` : renderEvents(events));
+  if (options.json) stdout.write(`${JSON.stringify({ since: options.since, offline, events, fetchErrors }, null, 2)}\n`);
+  else {
+    // stdout stays ledger lines only; what could not be checked goes to stderr.
+    for (const item of fetchErrors) stderr.write(`Could not check ${item.id}: ${item.error}\n`);
+    stdout.write(offline ? `No events: ${offline}\n` : renderEvents(events));
+  }
   return 0;
 }
 

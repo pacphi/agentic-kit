@@ -71,7 +71,9 @@ A constraint whose `nextRetestAt` has passed shows as stale evidence in the hook
 `scripts/upstream-watch.mjs` is maintainer tooling; it is not published. It reads GitHub with
 `gh api` and releases with `npm view` or GitHub releases, at most four calls at a time, and
 writes nothing. If `gh` is missing or signed out it says so and reports only what the registry
-records. It exits 0 unless the command line is wrong.
+records. It exits 0 unless the command line is wrong. `check` prints only ledger lines on stdout;
+each thread or release it could not check goes to stderr as `Could not check <id>: <error>`, and
+`check --json` lists them in `fetchErrors`.
 
 ```bash
 node scripts/upstream-watch.mjs report [--json]
@@ -95,7 +97,7 @@ node scripts/upstream-watch.mjs check --since <iso-date> [--ledger <file>] [--js
 | Constraints past their retest date | A constraint's `nextRetestAt` has passed. |
 | Tracking issues to migrate | Open `tracking` entries. |
 | Unmapped | No ak change recorded. |
-| Could not check | Reading the thread or the release failed; the report names the error. Nothing about the thread is known. |
+| Could not check | Reading the thread, the release or its confirmation failed; the report names the error. When the thread itself could not be read, nothing about it is known; when only the release could not be confirmed, the thread's other groups and ledger lines still count. |
 
 ## The ledger
 

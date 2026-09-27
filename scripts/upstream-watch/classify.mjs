@@ -187,6 +187,7 @@ export function releaseState(entry, fixedAt, facts, confirmation = null, bundle 
 function ownReleaseState(gate, fixedAt, facts, confirmation) {
   if (gate === null) return { released: true, basis: 'no release gate: closing is enough', version: null, date: day(fixedAt) };
   if (!facts) return { released: null, basis: `release facts for ${gate.name} unavailable`, version: null, date: null };
+  if (confirmation?.error) return { released: null, basis: `could not confirm the ${gate.name} release: ${confirmation.error}`, version: null, date: null };
   if (gate.minVersion) {
     const published = facts.versions.find((item) => item.version === gate.minVersion)?.publishedAt ?? fixedAt;
     return facts.latest && compareVersions(facts.latest, gate.minVersion) >= 0

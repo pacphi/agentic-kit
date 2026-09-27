@@ -24,8 +24,9 @@ dependency policies, constraints, and the `watch` list of upstream threads.
 2. Give the counts first, in plain language, from `counts`. Leave out groups with zero items.
 3. Then list the action items with their links, one report group at a time, in this order
    (the report's group titles):
-   - "Could not check" first, each thread with its error from `fetchErrors`: nothing about it
-     is known;
+   - "Could not check" first, each thread with its error from `fetchErrors`. When the thread
+     itself could not be read nothing about it is known; when only its release could not be
+     confirmed, its other groups still hold;
    - "Needs our reply";
    - "Released and actionable";
    - "Released, fix not confirmed": offer to confirm by hand and record `minVersion`; never
