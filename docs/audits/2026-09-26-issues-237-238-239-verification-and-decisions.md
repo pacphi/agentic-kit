@@ -1823,6 +1823,122 @@ usage parsers; do it in Branch 1; or keep whole-rollout exclusion. **Recommendat
 Branch 8. Choice: per turn, in Branch 8.** Imported turns are never counted, and later real turns
 count as Codex usage in the ChatGPT desktop app and give their folder a genuine Desktop origin.
 
+### Branch 3 decisions (2026-09-27)
+
+The maintainer made four decisions for Branch 3 (`feat/ruflo-support-window`) on 2026-09-27. Each
+is recorded here in the decision format above, with the commits that implement it.
+
+#### B3-D1 — Claude Code's Ruflo memory outside a project
+
+**The situation.** Codex reaches Ruflo through ak's launcher (`ak x ruflo-mcp`), which starts Ruflo
+at the Git repository root, else the folder, and uses one user-level store
+(`~/.claude-flow/memory`) from the filesystem root, the home folder, a temporary root or a tool's
+own folder (Addendum 2, Problem 2). Claude Code's user-scope registration was `ruflo mcp start`,
+which Claude Code starts in the session folder.
+
+**The problem.** From a subfolder, Ruflo's MCP memory derives `agentdb-memory.db` from
+`<cwd>/.swarm`, so a Claude session there wrote to a stray store; from the home folder it wrote to
+`~/.swarm`. Ruflo also reads `<cwd>/.harness/mcp-policy.json`, and from 3.46.0 it enforces that
+policy on stdio: with governance on, a Claude session opened in a subfolder had every Ruflo MCP
+call refused (proved on 3.46.1 in slice 3). Claude-side harvest used the repository or the folder
+itself, never the user-level store.
+
+**What the user sees.** The same question answered from different stores depending on where
+Claude Code was started, stray `.swarm` folders, and, with governance on, a Ruflo MCP that refuses
+every call from a subfolder.
+
+**What should be the case.** Claude Code follows the same store rule as Codex, and `ak status`
+says which store applies from the current folder.
+
+**The choices.** A: route Claude's user-level registration, and Claude-side harvest and setup,
+through `ak x ruflo-mcp`, in a Claude mode that sets only the memory location (component keys stay
+in Claude's settings env, ADR-0058 §3). B: keep `ruflo mcp start` and report the strays. C: write a
+per-project Claude registration.
+
+**Recommendation: A. Choice: A.** Implemented in `884b97bb` (the launcher's Claude mode,
+`--host claude`; an unknown host exits 2), `74a3cd20` (registration through the launcher: ak's
+earlier `ruflo mcp start` entry is replaced, any other form is kept, and nothing changes when `ak`
+is not on `PATH`; status names the store the launcher picks from here) and `950a3e60` (harvest
+follows the same rule; `ak setup --project` refuses outside a project). Proof in a disposable
+home: `claude` 2.1.283 starts user-scope stdio servers in the session folder (`claude mcp list`
+and a headless `claude -p` both started the server in `repo/sub/dir`); through the new
+registration Ruflo started in `repo` with `CLAUDE_FLOW_DB_PATH=repo/.swarm/memory.db`, and from the
+home folder in `~/.claude-flow/memory` with both memory variables pinned. With Ruflo 3.46.1 an MCP
+`memory_store` through `ak x ruflo-mcp --host claude` landed in `repo/.swarm/agentdb-memory.db`
+from `repo/sub/dir` and in the user-level store from the home folder; `repo/sub/dir` stayed empty.
+
+#### B3-D2 — old `_setup/verify-*` rows
+
+**The situation.** `ak setup` proves a memory write with a probe row (`_setup/verify-<pid>-<ms>`,
+content `setup-verify`, namespace `_setup`) and deletes it. Ruflo mirrors every CLI write into
+`agentdb-memory.db`; its own `memory delete` only tombstones the `memory.db` row and leaves the
+mirror active (ruvnet/ruflo#3450, reproduced again on 3.46.1).
+
+**The problem.** Older ak versions stopped at the first store that held the row (issue #213), so
+probe rows remain in users' stores, and the mirror keeps them readable through MCP.
+
+**What the user sees.** `_setup` rows in memory search results that the user never wrote.
+
+**What should be the case.** ak removes its own leftovers once, safely, and says what it did.
+
+**The choices.** A: a one-time `ak sync` cleanup — preview, back up, delete only ak's exact probe
+keys from both stores, and write a receipt. B: report only. C: leave them.
+
+**Recommendation: A. Choice: A.** Implemented in `cfd4bcae`: status warns with the count per store
+folder (the current project and the user-level store); `ak sync` backs each affected file up with
+`VACUUM INTO` under the state folder, deletes exactly the matched ids from both files, writes a
+receipt, and records the file in `kit.json` `cleanups.setupProbeRows` so it is cleaned at most once.
+A row counts only when its namespace, key pattern and content all match. Neither 3.46.1 schema has
+a foreign key or trigger on `memory_entries`. Disposable proof on 3.46.1: four rows in a project's
+two files (one of them tombstoned by `ruflo memory delete`, its mirror still active) and two in the
+user-level store were previewed by `ak sync --dry-run`, then removed by `ak sync`; the user's own
+row stayed, `quick_check` was `ok` on all four files, the backups held the rows, and a second run
+planned nothing. Real-data preview (read-only): this repository's `.swarm`, the user-level store
+(not present on this machine) and 34 other `.swarm` folders under `~/Development` hold no probe
+rows.
+
+#### B3-D3 — ruvnet/ruflo#2885 on macOS
+
+**The situation.** The nightly macOS job aborts inside Ruflo's neural training
+(ruvnet/ruflo#2885); a local test on 2026-09-26 was inconclusive.
+
+**The problem.** Whether single-threaded ONNX sessions avoid the abort could not be settled
+locally.
+
+**What the user sees.** A nightly job that fails on macOS and is allowed to fail.
+
+**What should be the case.** The nightly note states what is known, with evidence.
+
+**The choices.** A: a throwaway job on a hosted macOS arm64 runner, with and without the
+mitigation, about ten runs each, on a short-lived pushed branch deleted afterwards; comment on the
+issue only with approved text. B: keep the note as it is.
+
+**Recommendation: A. Choice: A** (the push of that branch was approved by this decision). The
+controller ran it: run 36333572972 on Ruflo 3.46.1 aborted 10/10 by default and 10/10 with
+single-threaded ONNX sessions, so the mitigation is disproven. The approved comment is
+ruvnet/ruflo#2885 issuecomment-5857781254; the branch was deleted. The nightly note cites it
+(`d1e93c8d`), and `continue-on-error` stays.
+
+#### B3-D4 — Ruflo on this machine
+
+**The situation.** Branch 3's real-data pass needs Ruflo 3.46.x.
+
+**The problem.** The plan assumed the machine was on an older Ruflo and would need an upgrade before
+that pass.
+
+**What the user sees.** Nothing; this decides the order of the real-data pass.
+
+**What should be the case.** The real pass runs on the version the fixes target, with the stores
+backed up.
+
+**The choices.** A: prove in disposable environments on 3.46.1 first, then back up `.swarm` and
+upgrade through the released `ak sync` right before the real pass. B: upgrade first.
+
+**Recommendation: A. Choice: A, then superseded the same day.** The machine already runs Ruflo
+3.46.1 (`ruflo --version` and the global npm package), so there is no upgrade step and the real-data
+pass runs on 3.46.1. Code paths for Ruflo below 3.46.0 are proven with fixtures and disposable
+installs only.
+
 ## Branch 4 decisions (2026-09-27)
 
 Asked at the start of Branch 4 (`feat/upstream-watch-live`) in the decision format of the

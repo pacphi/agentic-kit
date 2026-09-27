@@ -107,9 +107,9 @@ Official extension references: [Claude hooks](https://code.claude.com/docs/en/ho
 | Ruflo capability | Claude Code | Codex | OpenCode |
 | --- | --- | --- | --- |
 | Upstream host orientation | **Native:** primary/reference CLI surface | **Native + managed:** upstream backend/plugin pieces plus agentic-kit integration | **Managed:** no equivalent upstream backend flag |
-| Ruflo MCP tools | Native registration | Managed Ruflo MCP registration | Connected managed MCP; compact lazy `ak_ruflo_*` provider projection |
-| Ruflo browser executor | Process-scoped trusted agent-browser config | Same config inherited by `ak x ruflo-mcp` | Same config in the receipt-owned MCP environment |
-| Shared Ruflo memory | Same project store | Same project store | Same project store when pointed at the same Ruflo server |
+| Ruflo MCP tools | Managed user-scope registration through `ak x ruflo-mcp --host claude` | Managed Ruflo MCP registration through `ak x ruflo-mcp` | Connected managed MCP; compact lazy `ak_ruflo_*` provider projection |
+| Ruflo browser executor | Process-scoped trusted agent-browser config, set by the launcher | Same config inherited by `ak x ruflo-mcp` | Same config in the receipt-owned MCP environment |
+| Shared Ruflo memory | Same project store; the user-level store outside projects | Same project store; the user-level store outside projects | Same project store when pointed at the same Ruflo server |
 | Agents and skills | Upstream Claude assets | Codex-compatible skills/plugin assets and generated guidance | Receipt-owned lazy profile catalogue through one stock `ak-specialist`; stock skills loaded on demand |
 | Lifecycle hooks | Native Claude hooks | Codex hooks/plugin surfaces | OpenCode events translated by `ruflo-hooks.js` |
 | Inference-backend flag | `ENABLE_CLAUDE_CODE` | `ENABLE_CODEX` | None |

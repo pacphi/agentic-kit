@@ -248,13 +248,18 @@ never touches the plugin cache or Claude Code's plugin state. `ak status` reads
 enabled bundles to report known placement, hook, and skill portability problems.
 
 All enabled hosts converge on the same project-scoped Ruflo memory contract.
-Claude receives the absolute `CLAUDE_FLOW_DB_PATH` in project settings. Codex's
-user-scoped Ruflo MCP registration launches `ak x ruflo-mcp`, which derives the
-pin from the workspace at process start: the Git repository, else the folder
-itself. When Codex starts at the filesystem root, in the home folder itself, in a
-temporary root or inside a tool's own folder (`~/.codex`, `~/.claude`, `~/.config`,
-and similar), the launcher uses one user-level store, `~/.claude-flow/memory`,
-instead of creating `.swarm` there. OpenCode's managed MCP gateway and
+Claude receives the absolute `CLAUDE_FLOW_DB_PATH` in project settings. The
+user-scoped Ruflo MCP registrations of Claude Code (`ak x ruflo-mcp --host claude`)
+and Codex (`ak x ruflo-mcp`) start ak's launcher, which derives the pin from the
+workspace at process start: the Git repository, else the folder itself. Ruflo
+starts at that root, so a session opened in a subfolder uses the repository's
+store and MCP policy file. When a session starts at the filesystem root, in the
+home folder itself, in a temporary root or inside a tool's own folder (`~/.codex`,
+`~/.claude`, `~/.config`, and similar), the launcher uses one user-level store,
+`~/.claude-flow/memory`, instead of creating `.swarm` there. `ak x harvest`
+follows the same rule, and `ak setup --project` refuses in such a folder. The
+Claude registration needs `ak` on the `PATH` Claude Code starts with; without it,
+setup and sync leave the existing registration in place and say so. OpenCode's managed MCP gateway and
 lifecycle bridge receive its project directory and set the same absolute pin.
 Ruflo's MCP tools use `.swarm/agentdb-memory.db` beside the pinned
 `.swarm/memory.db`; that sibling is the native store, not configuration drift.

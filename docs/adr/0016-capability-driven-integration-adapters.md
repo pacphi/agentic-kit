@@ -4,7 +4,7 @@
   [ADR-0020](0020-ga-stable-surfaces.md); closed-registry clause superseded by
   [ADR-0029](0029-host-adapter-extension-point.md)
 - **Date:** 2026-07-28
-- **Updated:** 2026-09-27 — managed Ruflo daemon settings and start-on-use (project memory below).
+- **Updated:** 2026-09-27 — daemon start-on-use; Claude via `ak x ruflo-mcp` (B3-D1); see below.
 - **Updated:** 2026-09-26 — one `legacyRufloDisposition` predicate, shared by status and
   `register()`, decides whether a legacy `ruflo` Claude registration is agentic-kit's own; any
   other user-scope form is reported as preserved with its manual removal command (#237).
@@ -650,6 +650,11 @@ work under ADR-0011's own validation requirements.
   Ruflo defines no user-level memory store; ak follows Ruflo's user-level state folder
   `~/.claude-flow` by analogy. Status names the store the launcher uses from a folder that has no
   project store, reports the user-level store, and lists `~/.swarm` and
-  `~/.codex/.chatgpt-projects/*/.swarm` as strays for information only. Claude's direct
-  `ruflo mcp start` registration does not use the launcher; applying the same rule there is a
-  follow-up decision.
+  `~/.codex/.chatgpt-projects/*/.swarm` as strays for information only. Since 2026-09-27
+  (decision B3-D1) Claude Code uses the same launcher (`ak x ruflo-mcp --host claude`); its Claude
+  mode sets only the memory location and ak's agent-browser config. `register()` replaces ak's own
+  earlier `ruflo mcp start` entry, preserves any other form, and changes nothing when `ak` is not on
+  `PATH`. Harvest follows the same store rule, and `ak setup --project` refuses in a folder that
+  is not a project. `ak sync` also removes ak's old setup probe rows once, from both stores of the
+  current project and of the user-level store, after a `VACUUM INTO` backup, with a receipt
+  (decision B3-D2).

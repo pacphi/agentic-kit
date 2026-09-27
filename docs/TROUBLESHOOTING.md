@@ -326,11 +326,23 @@ reason a store gets large. A file with no memory table yet is reported as empty.
 Some folders never get a store: the filesystem root, your home folder itself, a
 temporary root such as `/tmp`, and folders that belong to a tool (`~/.codex`,
 `~/.claude`, `~/.config`, `~/.local`, `~/.cache`, `~/Library/Application Support`,
-`%APPDATA%`). Codex often starts in one of these. Its Ruflo launcher (`ak x ruflo-mcp`)
-then uses one user-level store, `~/.claude-flow/memory`. Run from such a folder,
-`ak status` names that store instead of a project store. From anywhere, it reports
-the user-level store once it exists. Claude's own Ruflo registration does not use
-the launcher and is unchanged.
+`%APPDATA%`). Codex often starts in one of these. The Ruflo launcher that Claude Code
+and Codex both start (`ak x ruflo-mcp`) then uses one user-level store,
+`~/.claude-flow/memory`. Run from such a folder, `ak status` names that store instead
+of a project store. From anywhere, it reports the user-level store once it exists.
+
+### Old setup probe rows
+
+Earlier `ak setup` runs could leave rows with keys like `_setup/verify-12345-1700000000000`
+(namespace `_setup`, content `setup-verify`) in a store. Ruflo copies each write into
+`agentdb-memory.db` as well, and its own `memory delete` leaves that copy
+([ruvnet/ruflo#3450](https://github.com/ruvnet/ruflo/issues/3450)). `ak status` warns
+with the count per store, for the current project and the user-level store. `ak sync`
+backs up each affected file under `~/.local/state/agentic-kit/memory-probe-cleanup/backups/`
+(`%LOCALAPPDATA%\agentic-kit\memory-probe-cleanup\backups\` on Windows; with `VACUUM INTO`), deletes exactly those rows from both files, writes a receipt beside
+the backups, and records the store in `kit.json` so it never cleans it twice.
+`ak sync --dry-run` shows the counts first. Rows in other projects are cleaned when you
+run `ak sync` there.
 
 ### Stray memory stores
 
@@ -344,7 +356,7 @@ each one by owner, for information only. ak never moves, merges or deletes them.
 | `./agentdb.rvf` | AgentDB's RVF backend, which defaults to the working directory |
 | `./ruvector.db` | RuVector's default store (`ruvector mcp start`; `ruflo memory init` also creates one) |
 | A `.agentic-qe/` below the project root | AQE resolves a relative `AQE_MEMORY_PATH` against the folder a command or hook ran in |
-| `~/.swarm`, or `.swarm` folders under `~/.codex/.chatgpt-projects/` (reported from any project) | Ruflo ran with your home folder or a Codex ChatGPT project folder as its working directory, before Codex's launcher used the user-level store there |
+| `~/.swarm`, or `.swarm` folders under `~/.codex/.chatgpt-projects/` (reported from any project) | Ruflo ran with your home folder or a Codex ChatGPT project folder as its working directory, before ak's launcher used the user-level store there |
 
 Ruflo's rotated backups in `.swarm/backups/` are not strays. The search skips
 `node_modules`, `.git` and the contents of dot folders such as `.claude/worktrees`,

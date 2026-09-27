@@ -99,6 +99,21 @@ rest. A Ruflo upgrade or reinstall replaces the edited files, and ak then forget
 made by earlier releases have no receipt: ak cannot show or restore them. Reinstall Ruflo if you
 want its shipped files back, then run `ak sync`.
 
+## 2026-09-27: Claude Code's Ruflo MCP starts through ak's launcher
+
+The next `ak sync` (or `ak setup`) replaces ak's user-scope `claude-flow` registration
+(`ruflo mcp start`) with `ak x ruflo-mcp --host claude`, the launcher Codex already uses. Claude
+Code sessions then use the same store as Codex: the repository's `.swarm` from any subfolder, and
+the user-level store `~/.claude-flow/memory` from your home folder, a temporary root or a tool's
+own folder. Ruflo also reads the repository's MCP policy file from a subfolder. A registration you
+wrote yourself (another command, scope or environment key) is left alone. The launcher must be on
+the `PATH` Claude Code starts with; if `ak` is not found, sync keeps the old registration and says
+so. Restart Claude Code to pick up the new registration.
+
+The same sync removes ak's old setup probe rows (`_setup/verify-…`) once, from both memory files of
+the current project and of the user-level store, after backing each file up (see
+[TROUBLESHOOTING](TROUBLESHOOTING.md#old-setup-probe-rows)).
+
 ## 2026-09-26: Codex's Ruflo memory outside a project
 
 Codex's Ruflo launcher (`ak x ruflo-mcp`) no longer creates a `.swarm` store at the filesystem
@@ -108,7 +123,7 @@ Sessions started there share one user-level store, `~/.claude-flow/memory`. Repo
 work folders keep their own `.swarm` as before. Earlier sessions may have left `~/.swarm` or
 `.swarm` folders under `~/.codex/.chatgpt-projects/`. `ak status` lists them for information and
 never moves or deletes them; inspect one read-only before you remove it. Restart Codex for a
-running Ruflo server to pick up the new location. Claude's own Ruflo registration is unchanged.
+running Ruflo server to pick up the new location.
 
 ## 2026-09-26: Registering a provider keeps Ruflo memory in `.swarm`
 
