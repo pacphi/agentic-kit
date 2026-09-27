@@ -885,7 +885,7 @@ focused run after the fix; the failing test was run first and seen to fail.
 |---|---|---|
 | A held Brain refresh erased by the sync that records it | `726df78`, `77faf7a` | new sync-level test; 86/86 across the Brain, heal, sync and setup suites |
 | `mcp.register: false` rows promising a sync repair | `430a82d` | 26/26; command suites 153/153 |
-| `--skip providers` leaving Codex MCP fixes unresolved | `539809e` | 75/75 |
+| `--skip providers` leaving Codex MCP fixes unresolved | `539809e`, `d0b728f` | 75/75; the follow-up, which still proves a partly skipped subsystem's planned fixes, 92/92 |
 | `--skip` still writing through a shared step | `9f8925b` | 90/90 |
 | A temp-root project routed to the user-level memory store (and its Windows duplicate) | `f953146`, `fbb6507` | 54/54 |
 | The setup probe left in a redirected memory root | `675d6c4` | 40/40 |
@@ -939,7 +939,7 @@ changed in this wave:
 | Stage 4 | `c9c1987` | 4,982 / 6 / 0 (4,988) | 92.92 / 82.32 / 92.32 | 7 of 7 pass |
 | Stage 5 | `719b048` | 5,009 / 6 / 0 (5,015) | 92.99 / 82.37 / 92.44 | 7 of 7 pass |
 | Stage 6 and records | `5764c51` | 5,047 / 6 / 0 (5,053) | 92.95 / 82.22 / 92.34 | 7 of 7 pass |
-| Review fix wave | `fbb6507` | 5,067 / 6 / 0 (5,073) | 92.97 / 82.26 / 92.36 | 7 of 7 pass |
+| Review fix wave | `d0b728f` | 5,068 / 6 / 0 (5,074) | 92.98 / 82.29 / 92.36 | 7 of 7 pass |
 
 #### Checks that passed at every stage end
 
