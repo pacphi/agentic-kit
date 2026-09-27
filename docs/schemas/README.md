@@ -13,4 +13,4 @@ platform durability, consent, or permission to execute an action.
 The plan and receipt schemas intentionally describe some nested fields more broadly than the
 runtime validator. Treat them as structural documentation, not a replacement for the executable
 validation and transaction protocol. Exact schema-version matching remains required: the
-upstream registry is schema 5.
+upstream registry is schema 6.

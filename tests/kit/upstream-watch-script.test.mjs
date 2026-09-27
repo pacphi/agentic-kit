@@ -18,8 +18,8 @@ const FIXTURES = path.resolve('tests/fixtures/upstream-watch');
 const threads = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'threads.json'), 'utf8')).threads;
 const npm = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'npm.json'), 'utf8')).packages;
 const loggedOut = fs.readFileSync(path.join(FIXTURES, 'gh-auth-status-logged-out.txt'), 'utf8');
-const { lastVerifiedAt } = JSON.parse(fs.readFileSync(UPSTREAM_REGISTRY_FILE, 'utf8'));
-const real = loadUpstreamRegistry({ now: () => new Date(`${lastVerifiedAt}T12:00:00Z`) });
+const { lastCheckedAt } = JSON.parse(fs.readFileSync(UPSTREAM_REGISTRY_FILE, 'utf8'));
+const real = loadUpstreamRegistry({ now: () => new Date(`${lastCheckedAt}T12:00:00Z`) });
 const NOW = new Date('2026-09-26T23:00:00Z');
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -37,7 +37,7 @@ function entry(id, overrides = {}) {
 
 function registryWith(watch, constraints = []) {
   return {
-    registryStatus: 'valid', errors: [], lastVerifiedAt: '2026-09-26', watchPolicy: clone(real.watchPolicy),
+    registryStatus: 'valid', errors: [], lastVerifiedAt: '2026-09-26', lastCheckedAt: '2026-09-26', watchPolicy: clone(real.watchPolicy),
     dependencyPolicies: real.dependencyPolicies, constraints, watch,
   };
 }
@@ -200,9 +200,11 @@ test('ledger events use the sentinel, stable dates, and skip lines already recor
 });
 
 test('nothing left to watch is reported once every entry is retired', () => {
-  const registry = registryWith([entry('ruvnet/ruflo#2239', { status: 'retired' })]);
+  // The idle line dates from the last state re-read, not the last conformance run.
+  const registry = { ...registryWith([entry('ruvnet/ruflo#2239', { status: 'retired' })]), lastVerifiedAt: '2026-09-20' };
   const report = buildReport(registry, new Map(), { now: NOW });
   assert.equal(report.nothingToWatch, true);
+  assert.equal(report.registry.lastCheckedAt, '2026-09-26');
   assert.deepEqual(ledgerEvents(report, registry, { since: NOW.toISOString() }).map((event) => event.line), ['UPSTREAM-WATCH registry idle 2026-09-26']);
 });
 
@@ -276,6 +278,7 @@ async function withRegistryFile(watch, run) {
     document.watch = watch;
     // Pin the verification window around NOW instead of inheriting the live registry's dates.
     document.lastVerifiedAt = '2026-09-26';
+    document.lastCheckedAt = '2026-09-26';
     for (const constraint of document.constraints) constraint.nextRetestAt = '2026-10-03';
     // Every constraint issue needs a watch entry; retired ones are never fetched.
     for (const constraint of document.constraints.filter((item) => item.issue)) {
@@ -323,6 +326,7 @@ test('report --json from recorded fixtures, then the plain-text report', async (
     assert.equal(await main(['report', '--registry', file], { fetcher: fixtureFetcher(), stdout: text.stream, stderr: capture().stream, now: NOW }), 0);
     const lines = text.text().split('\n');
     assert.match(lines[0], /^Upstream watch/);
+    assert.match(lines[1], /last checked 2026-09-26, last verified 2026-09-26/);
     assert.ok(text.text().indexOf('Needs our reply') < text.text().indexOf('https://github.com/ruvnet/ruflo/issues/3153'), 'counts come before items');
     assert.match(text.text(), /acknowledged by stuinfla/);
   });

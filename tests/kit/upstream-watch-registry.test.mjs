@@ -13,8 +13,8 @@ import {
 } from '../../scripts/upstream-watch/citations.mjs';
 
 const document = () => JSON.parse(fs.readFileSync(UPSTREAM_REGISTRY_FILE, 'utf8'));
-// The clock follows the registry's verification date, so a weekly re-verification is a data-only change.
-const now = () => new Date(`${document().lastVerifiedAt}T12:00:00Z`);
+// The clock follows the registry's last state re-read, so a weekly re-check is a data-only change.
+const now = () => new Date(`${document().lastCheckedAt}T12:00:00Z`);
 const ids = (text) => findCitations(text).map((citation) => citation.id);
 // Synthetic fixture ids a test uses on purpose; each must still be cited where listed.
 const SYNTHETIC = new Map([['ruvnet/ruflo#9001', ['tests/kit/conformance-tiers.test.mjs']]]);
@@ -40,6 +40,8 @@ const errorsOf = (mutate) => withRegistry(mutate, (result) => result.errors.join
 test('the registry carries the watch list and stays valid for the hook audit', () => {
   const registry = loadUpstreamRegistry({ now });
   assert.equal(registry.registryStatus, 'valid', registry.errors.join('\n'));
+  // A second schema bump (another branch) must show up here rather than merge silently.
+  assert.equal(document().schemaVersion, 6);
   assert.ok(registry.watch.length > 60);
   assert.equal(registry.watchPolicy.staleAfterDays, 90);
   assert.equal(registry.watchPolicy.dispatch.merge, 'never');

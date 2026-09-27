@@ -49,13 +49,19 @@ A watch entry records:
 The watcher does not change statuses. The maintainer, or a dispatch pull request, updates the
 entry and adds a dated `history` line.
 
-## Re-verifying constraints
+## Re-checking and re-verifying
 
-Weekly, and before a managed upgrade, re-check each constraint's issue state on GitHub and the
-released versions on npm. Update `issueState` where it changed, set `lastVerifiedAt` to the
-check date and every `nextRetestAt` one week later, and list what was not re-verified
-(reproductions, conformance, sunset conditions) in the commit body. The tests take their
-clock from `lastVerifiedAt`, so this is a data-only change.
+- **Re-check (weekly, and before a managed upgrade):** re-read each constraint's issue state on
+  GitHub and the released versions on npm. Update `issueState` where it changed and set
+  `lastCheckedAt` to the check date. Nothing else moves. The tests take their clock from
+  `lastCheckedAt`, so this is a data-only change.
+- **Re-verify (after a conformance run):** when a constraint's retest (its reproduction or
+  conformance proof) has been run again, move that constraint's `nextRetestAt`. When every
+  constraint has been re-run, also set `lastVerifiedAt` to that date. List in the commit body what
+  was run and what was not.
+
+A constraint whose `nextRetestAt` has passed shows as stale evidence in the hook audit and under
+"Constraints past their retest date"; the registry stays valid.
 
 ## The check
 

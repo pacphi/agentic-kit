@@ -4,10 +4,11 @@
   "title": "agentic-kit upstream registry: dependency constraints and watched upstream threads",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "lastVerifiedAt", "recheckPolicy", "watchPolicy", "dependencyPolicies", "constraints", "watch"],
+  "required": ["schemaVersion", "lastVerifiedAt", "lastCheckedAt", "recheckPolicy", "watchPolicy", "dependencyPolicies", "constraints", "watch"],
   "properties": {
-    "schemaVersion": { "const": 5 },
-    "lastVerifiedAt": { "type": "string", "format": "date" },
+    "schemaVersion": { "const": 6 },
+    "lastVerifiedAt": { "type": "string", "format": "date", "description": "Last date every constraint's retest (reproduction or conformance proof) was re-run." },
+    "lastCheckedAt": { "type": "string", "format": "date", "description": "Last state re-read (issue states, released versions); never before lastVerifiedAt." },
     "recheckPolicy": {
       "type": "object",
       "required": ["cadence", "staleAfterDays", "requirePrimarySource", "onObservedRelease", "beforeManagedUpgrade"],

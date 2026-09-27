@@ -380,6 +380,7 @@ function publicUpstream(upstream = {}) {
     registryStatus: upstream.registryStatus ?? null,
     evidenceStatus: upstream.evidenceStatus ?? null,
     lastVerifiedAt: upstream.lastVerifiedAt ?? null,
+    lastCheckedAt: upstream.lastCheckedAt ?? null,
     recheckPolicy: upstream.recheckPolicy ?? null,
     dependencyPolicies: upstream.dependencyPolicies ?? [],
     constraints: upstream.constraints ?? [],

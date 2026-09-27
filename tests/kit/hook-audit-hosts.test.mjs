@@ -122,8 +122,8 @@ test('host-neutral audit reports each provider and never proposes automatic trus
       codex: { codexHome: fx.codex, pluginCacheDir: path.join(fx.codex, 'plugins', 'cache') },
       claude: { claudeRoot: fx.claude, managedSettingsFile: null },
       opencode: { opencodeRoot: fx.opencode },
-      // The registry's own verification date, so re-verifying it never breaks this test.
-      upstream: { now: () => new Date(`${JSON.parse(fs.readFileSync(UPSTREAM_REGISTRY_FILE, 'utf8')).lastVerifiedAt}T12:00:00Z`) },
+      // The registry's own last state re-read, so re-checking it never breaks this test.
+      upstream: { now: () => new Date(`${JSON.parse(fs.readFileSync(UPSTREAM_REGISTRY_FILE, 'utf8')).lastCheckedAt}T12:00:00Z`) },
     });
 
     assert.deepEqual(report.hosts, ['codex', 'claude', 'opencode', 'external']);

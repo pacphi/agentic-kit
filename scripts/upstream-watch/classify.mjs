@@ -206,7 +206,7 @@ export function buildReport(registry, liveById, { now, offline = null, fetchErro
     generatedAt: now.toISOString(),
     mode: offline ? 'offline' : 'live',
     offlineReason: offline,
-    registry: { status: registry.registryStatus, errors: registry.errors ?? [], lastVerifiedAt: registry.lastVerifiedAt, statuses },
+    registry: { status: registry.registryStatus, errors: registry.errors ?? [], lastVerifiedAt: registry.lastVerifiedAt, lastCheckedAt: registry.lastCheckedAt, statuses },
     counts: Object.fromEntries(groups.map((group) => [group.key, group.items.length])),
     groups,
     entries,
@@ -252,7 +252,7 @@ export function ledgerEvents(report, registry, { since }) {
   for (const constraint of report.groups.find((group) => group.key === 'constraints-due').items) {
     events.push(eventLine(sentinel, constraint.id, 'retest-due', constraint.nextRetestAt));
   }
-  if (report.nothingToWatch) events.push(eventLine(sentinel, 'registry', 'idle', registry.lastVerifiedAt));
+  if (report.nothingToWatch) events.push(eventLine(sentinel, 'registry', 'idle', registry.lastCheckedAt));
   return events;
 }
 

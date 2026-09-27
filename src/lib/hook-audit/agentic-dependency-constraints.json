@@ -1,6 +1,7 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "lastVerifiedAt": "2026-09-27",
+  "lastCheckedAt": "2026-09-27",
   "recheckPolicy": {
     "cadence": "weekly-and-before-upgrade",
     "staleAfterDays": 14,

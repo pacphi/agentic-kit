@@ -55,7 +55,7 @@ export function renderReport(report) {
   const watched = Object.entries(statuses).filter(([status]) => status !== 'retired').reduce((sum, [, count]) => sum + count, 0);
   const lines = [
     `Upstream watch · ${report.generatedAt.slice(0, 10)} · ${report.mode}${report.offlineReason ? ` (${report.offlineReason})` : ''}`,
-    `  registry ${report.registry.status}, last verified ${report.registry.lastVerifiedAt}; ${watched} watched, ${statuses.retired} retired`,
+    `  registry ${report.registry.status}, last checked ${report.registry.lastCheckedAt}, last verified ${report.registry.lastVerifiedAt}; ${watched} watched, ${statuses.retired} retired`,
   ];
   if (report.mode === 'offline') lines.push('  offline: only what the registry records; replies, closures and releases were not checked');
   for (const error of report.registry.errors) lines.push(`  registry error: ${error}`);
