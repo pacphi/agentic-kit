@@ -31,8 +31,8 @@ test('a command that writes real state fails the run and the path is named', (t)
   const r = spawnSync(process.execPath, [RUNNER, 'exec', '--repo', repo, '--', leak], { env, encoding: 'utf8' });
   assert.equal(r.status, 3, r.stdout + r.stderr);
   assert.match(r.stderr, /real-state tripwire: watching \d+ roots \(strict\)/);
-  assert.match(r.stderr, /latest-scan\.json/);
-  assert.match(r.stderr, /maintenance\//);
+  // The report prints native absolute paths: backslashes on Windows.
+  assert.match(r.stderr, /[\\/]maintenance[\\/]latest-scan\.json/);
 });
 
 test('a write into the repository .claude fails the run', (t) => {
