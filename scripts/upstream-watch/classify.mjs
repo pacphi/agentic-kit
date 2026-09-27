@@ -90,6 +90,16 @@ export function upstreamOf(thread) {
 // How many releases after a fix are checked for the fixing change.
 const CONFIRM_LIMIT = 5;
 
+/**
+ * When the release walk starts: the merge of the fixing pull request, so an
+ * issue closed after the release that shipped its fix still finds it. A
+ * closing commit has no merge time; it closes the thread as it lands on the
+ * default branch, so the close time (`fixedAt`) stands.
+ */
+export function confirmationStart(fixedAt, confirmation) {
+  return confirmation?.changes?.[0]?.mergedAt ?? fixedAt;
+}
+
 /** Releases published after the fix, oldest first: stable only unless `latest` is a prerelease. */
 export function candidateVersions(fixedAt, facts, limit = CONFIRM_LIMIT) {
   const prerelease = facts.latest?.includes('-');
@@ -150,7 +160,7 @@ function ownReleaseState(gate, fixedAt, facts, confirmation) {
       ? { released: true, basis: 'first fixed version recorded in the registry', version: gate.minVersion, date: day(published) }
       : { released: false, basis: `${gate.name} ${facts.latest ?? 'has no release'} predates ${gate.minVersion}`, version: null, date: null };
   }
-  const after = candidateVersions(fixedAt, facts);
+  const after = candidateVersions(confirmationStart(fixedAt, confirmation), facts);
   if (!after.length) return { released: false, basis: `no ${gate.name} release since the fix`, version: null, date: null };
   const change = confirmation?.changes?.[0] ?? null;
   const checks = confirmation?.checks ?? [];

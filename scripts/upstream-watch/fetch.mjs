@@ -14,7 +14,7 @@ const NOT_FOUND = /HTTP 404|Not Found/i;
 const NO_MATCH = /No match found for version/;
 
 // What closed a thread: its closing pull requests, else the ClosedEvent's closer.
-export const FIXING_CHANGES_QUERY = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){defaultBranchRef{name} issueOrPullRequest(number:$number){__typename ... on Issue{closedByPullRequestsReferences(first:10,includeClosedPrs:true){nodes{number merged baseRefName mergeCommit{oid} repository{nameWithOwner}}} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{closer{__typename ... on Commit{oid} ... on PullRequest{number merged baseRefName mergeCommit{oid} repository{nameWithOwner}}}}}}} ... on PullRequest{number merged baseRefName mergeCommit{oid} repository{nameWithOwner}}}}}`;
+export const FIXING_CHANGES_QUERY = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){defaultBranchRef{name} issueOrPullRequest(number:$number){__typename ... on Issue{closedByPullRequestsReferences(first:10,includeClosedPrs:true){nodes{number merged mergedAt baseRefName mergeCommit{oid} repository{nameWithOwner}}} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{closer{__typename ... on Commit{oid} ... on PullRequest{number merged mergedAt baseRefName mergeCommit{oid} repository{nameWithOwner}}}}}}} ... on PullRequest{number merged mergedAt baseRefName mergeCommit{oid} repository{nameWithOwner}}}}}`;
 
 /**
  * The merged changes that fixed a thread, from the FIXING_CHANGES_QUERY answer.
@@ -26,13 +26,13 @@ function changesOf(repo, data) {
   const node = data?.issueOrPullRequest;
   const merged = (pr) => Boolean(pr?.merged && pr.mergeCommit?.oid && branch && pr.baseRefName === branch
     && pr.repository?.nameWithOwner?.toLowerCase() === repo.toLowerCase());
-  const asChange = (pr) => ({ repo, pr: pr.number, sha: pr.mergeCommit.oid });
+  const asChange = (pr) => ({ repo, pr: pr.number, sha: pr.mergeCommit.oid, mergedAt: pr.mergedAt ?? null });
   if (!node) return [];
   if (node.__typename === 'PullRequest') return merged(node) ? [asChange(node)] : [];
   const prs = (node.closedByPullRequestsReferences?.nodes ?? []).filter(merged).map(asChange);
   if (prs.length) return prs;
   const closer = node.timelineItems?.nodes?.at(-1)?.closer;
-  if (closer?.__typename === 'Commit' && SHA.test(closer.oid ?? '')) return [{ repo, pr: null, sha: closer.oid }];
+  if (closer?.__typename === 'Commit' && SHA.test(closer.oid ?? '')) return [{ repo, pr: null, sha: closer.oid, mergedAt: null }];
   if (closer?.__typename === 'PullRequest' && merged(closer)) return [asChange(closer)];
   return [];
 }

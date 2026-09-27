@@ -8,7 +8,7 @@ import path from 'node:path';
 
 import { UPSTREAM_REGISTRY_FILE, loadUpstreamRegistry } from '../../src/lib/hook-audit/upstream.mjs';
 import {
-  buildReport, candidateVersions, classifyEntry, compareVersions, ledgerEvents, maxVersion, releaseFacts, tagRefs, withoutRecorded,
+  buildReport, candidateVersions, classifyEntry, compareVersions, confirmationStart, ledgerEvents, maxVersion, releaseFacts, tagRefs, withoutRecorded,
 } from '../../scripts/upstream-watch/classify.mjs';
 import { createFetcher, mapLimit } from '../../scripts/upstream-watch/fetch.mjs';
 import { renderEvents, renderReport } from '../../scripts/upstream-watch/render.mjs';
@@ -129,7 +129,7 @@ const rufloFacts = { versions: [
   { version: '3.46.1', publishedAt: '2026-09-26T23:27:22.133Z' },
 ], latest: '3.46.1' };
 const closedThread = (id, closedAt) => ({ issue: { number: Number(id.split('#')[1]), state: 'closed', state_reason: 'completed', closed_at: closedAt, created_at: '2026-09-01T00:00:00Z', updated_at: closedAt, user: { login: 'pacphi' } }, comments: [] });
-const change = { repo: 'ruvnet/ruflo', pr: 3421, sha: 'e45eeead28855b4f06b4afd184ffb408269ca2f8' };
+const change = { repo: 'ruvnet/ruflo', pr: 3421, sha: 'e45eeead28855b4f06b4afd184ffb408269ca2f8', mergedAt: '2026-09-26T22:31:22Z' };
 
 test('a release is actionable only when it contains the merged fixing pull request', () => {
   const confirmation = { changes: [change], checks: [{ version: '3.46.0', ref: 'v3.46.0', contained: true }] };
@@ -168,6 +168,37 @@ test('a fix no checked release contains is fixed but unreleased', () => {
   assert.ok(result.groups.includes('fixed-unreleased'));
   assert.ok(!result.groups.includes('released-actionable'));
   assert.match(result.release.basis, /contains PR #3421/);
+});
+
+// Probe A: the fixing pull request merged before 3.46.0, but the issue was closed a day later.
+const closedLate = () => closedThread('ruvnet/ruflo#3194', '2026-09-27T22:00:00Z');
+
+test('the release walk starts when the fixing change merged, not when the issue closed', () => {
+  const confirmation = { changes: [change], checks: [{ version: '3.46.0', ref: 'v3.46.0', contained: true }] };
+  const result = classifyEntry(entry('ruvnet/ruflo#3194'), { thread: closedLate(), release: rufloFacts, confirmation }, context);
+  assert.ok(result.groups.includes('released-actionable'), JSON.stringify(result.release));
+  assert.equal(result.release.version, '3.46.0');
+  assert.equal(confirmationStart(result.upstream.fixedAt, confirmation), '2026-09-26T22:31:22Z');
+  assert.equal(confirmationStart('2026-09-27T22:00:00Z', { changes: [{ ...change, mergedAt: null }], checks: [] }), '2026-09-27T22:00:00Z', 'a closing commit: the close time');
+  assert.equal(confirmationStart('2026-09-27T22:00:00Z', null), '2026-09-27T22:00:00Z');
+});
+
+test('collect walks the releases after the fixing merge, even when the issue closed later', async () => {
+  const calls = [];
+  const fetcher = {
+    auth: async () => ({ ok: true }),
+    thread: async () => closedLate(),
+    release: async () => rufloFacts,
+    fixingChanges: async () => [change],
+    contains: async (repo, refs) => { calls.push(refs[0]); return { ref: refs[0], contained: true }; },
+  };
+  await withRegistryFile([entry('ruvnet/ruflo#3194')], async (file) => {
+    const out = capture();
+    await main(['report', '--json', '--registry', file], { fetcher, stdout: out.stream, stderr: capture().stream, now: new Date('2026-09-28T00:00:00Z') });
+    const report = JSON.parse(out.text());
+    assert.deepEqual(report.groups.find((group) => group.key === 'released-actionable').items.map((item) => item.version ?? item.release.version), ['3.46.0']);
+  });
+  assert.deepEqual(calls, ['v3.46.0']);
 });
 
 test('candidateVersions walks releases after the fix, oldest first, bounded', () => {
@@ -384,7 +415,7 @@ test('fixingChanges keeps only merged pull requests into the default branch', as
   ]);
   // #3167 also lists the unmerged PR #3373 among its closing references.
   const changes = await createFetcher({ exec }).fixingChanges('ruvnet/ruflo#3167');
-  assert.deepEqual(changes, [{ repo: 'ruvnet/ruflo', pr: 3434, sha: '856249ed7e35e604fa58a3b93179570d7998b9d3' }]);
+  assert.deepEqual(changes, [{ repo: 'ruvnet/ruflo', pr: 3434, sha: '856249ed7e35e604fa58a3b93179570d7998b9d3', mergedAt: '2026-09-26T22:31:21Z' }]);
   assert.ok(calls.every((call) => call.startsWith('gh api graphql')), 'read-only: graphql query only');
 });
 
@@ -395,7 +426,7 @@ test('fixingChanges drops an off-branch merge and falls back to the closing comm
   issue.timelineItems.nodes = [{ closer: { __typename: 'Commit', oid: 'abc1234abc1234abc1234abc1234abc1234abc12' } }];
   const { exec } = fakeExec([[/^gh api graphql/, { status: 0, stdout: JSON.stringify(recorded), stderr: '' }]]);
   assert.deepEqual(await createFetcher({ exec }).fixingChanges('ruvnet/ruflo#3194'),
-    [{ repo: 'ruvnet/ruflo', pr: null, sha: 'abc1234abc1234abc1234abc1234abc1234abc12' }]);
+    [{ repo: 'ruvnet/ruflo', pr: null, sha: 'abc1234abc1234abc1234abc1234abc1234abc12', mergedAt: null }], 'a closing commit lands when the thread closes');
 });
 
 test('fixingChanges: unmerged, off-branch or hand-closed threads have no fixing change', async () => {
@@ -417,10 +448,10 @@ test('fixingChanges: unmerged, off-branch or hand-closed threads have no fixing 
     assert.deepEqual(await createFetcher({ exec }).fixingChanges('ruvnet/ruflo#3194'), []);
   }
   const mergedPr = clone(openPr);
-  Object.assign(mergedPr.data.repository.issueOrPullRequest, { number: 3434, merged: true, mergeCommit: { oid: '856249ed7e35e604fa58a3b93179570d7998b9d3' } });
+  Object.assign(mergedPr.data.repository.issueOrPullRequest, { number: 3434, merged: true, mergedAt: '2026-09-26T22:31:21Z', mergeCommit: { oid: '856249ed7e35e604fa58a3b93179570d7998b9d3' } });
   const { exec } = fakeExec([[/^gh api graphql/, { status: 0, stdout: JSON.stringify(mergedPr), stderr: '' }]]);
   assert.deepEqual(await createFetcher({ exec }).fixingChanges('ruvnet/ruflo#3434'),
-    [{ repo: 'ruvnet/ruflo', pr: 3434, sha: '856249ed7e35e604fa58a3b93179570d7998b9d3' }]);
+    [{ repo: 'ruvnet/ruflo', pr: 3434, sha: '856249ed7e35e604fa58a3b93179570d7998b9d3', mergedAt: '2026-09-26T22:31:21Z' }]);
 });
 
 test('contains: behind or identical is contained, a missing tag is unknown, other failures throw', async () => {

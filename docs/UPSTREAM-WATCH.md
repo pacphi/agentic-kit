@@ -126,7 +126,9 @@ comment ends with `checked-at <time>`, the moment that run started `check`; the 
 Without a recorded `minVersion`, the check asks GitHub what closed the thread: pull requests
 merged into the repository's default branch (an unmerged or off-branch closing reference does not
 count), else the commit that closed it. It then compares that change with the tag of each release
-published after the fix, oldest first, at most five, and stops at the first tag that contains it.
+published after the pull request merged (for a closing commit, after the thread closed), so an
+issue closed after the release that shipped its fix still finds that release. It goes oldest
+first, at most five, and stops at the first tag that contains it.
 Tags are `v<version>` then `<version>`, or the gate's `tagPattern` (Codex: `rust-v{version}`). A
 tag missing for every spelling leaves the release unconfirmed; any other GitHub failure is "Could
 not check". When several pull requests closed a thread, the first is checked. Only a confirmed
