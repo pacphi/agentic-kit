@@ -18,7 +18,7 @@ function detail(key, item) {
       ];
     case 'release-unconfirmed':
       return [
-        `${item.release.version} (${item.release.date}) is the first release after the fix; ${item.release.basis}`,
+        `${item.release.version} (${item.release.date}) is the first release after the fix not ruled out; ${item.release.basis}`,
         `change once confirmed: ${item.adjustment}`,
       ];
     case 'workaround-carried':

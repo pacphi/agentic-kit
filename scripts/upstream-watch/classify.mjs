@@ -161,10 +161,13 @@ function ownReleaseState(gate, fixedAt, facts, confirmation) {
   if (change && checks.length === after.length && checks.every((check) => check.contained === false)) {
     return { released: false, basis: `none of the first ${after.length} ${gate.name} release(s) after the fix contains ${changeLabel(change)}`, version: null, date: null };
   }
+  // The first release not ruled out: an unknown check, else the first one never checked.
+  const open = checks.find((check) => check.contained === null);
+  const first = (open && after.find((item) => item.version === open.version)) ?? after[checks.length] ?? after[0];
   return {
-    released: 'unconfirmed', version: after[0].version, date: day(after[0].publishedAt),
+    released: 'unconfirmed', version: first.version, date: day(first.publishedAt),
     basis: change
-      ? `no tag found to prove ${changeLabel(change)} is in ${gate.name} ${after[0].version}`
+      ? `no tag found to prove ${changeLabel(change)} is in ${gate.name} ${first.version}`
       : 'no merged pull request or commit closed the thread; confirm by hand and record minVersion',
   };
 }

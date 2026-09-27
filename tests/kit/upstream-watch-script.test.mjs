@@ -149,6 +149,15 @@ test('without proof the first release after the fix is unconfirmed, not actionab
     assert.equal(result.release.version, '3.46.0');
     assert.equal(result.dispatch, null, 'an unconfirmed release is never dispatched');
   }
+  // 3.46.0 was shown not to contain the fix, so the release left unproven is 3.46.1.
+  const ruledOut = { changes: [change], checks: [{ version: '3.46.0', ref: 'v3.46.0', contained: false }, { version: '3.46.1', ref: null, contained: null }] };
+  const result = classifyEntry(entry('ruvnet/ruflo#3194'), { thread: closedThread('ruvnet/ruflo#3194', '2026-09-26T22:31:23Z'), release: rufloFacts, confirmation: ruledOut }, context);
+  assert.ok(result.groups.includes('release-unconfirmed'));
+  assert.equal(result.release.version, '3.46.1');
+  assert.equal(result.release.date, '2026-09-26');
+  assert.match(result.release.basis, /PR #3421 is in ruflo 3\.46\.1$/);
+  assert.match(renderReport(buildReport(registryWith([entry('ruvnet/ruflo#3194')]), new Map([['ruvnet/ruflo#3194', { thread: closedThread('ruvnet/ruflo#3194', '2026-09-26T22:31:23Z'), release: rufloFacts, confirmation: ruledOut }]]), { now: NOW })),
+    /3\.46\.1 \(2026-09-26\) is the first release after the fix not ruled out/);
 });
 
 test('a fix no checked release contains is fixed but unreleased', () => {
@@ -181,7 +190,7 @@ test('the released ledger line names the fixing pull request, never "candidate"'
   assert.match(ledgerEvents(committed, registry, { since: '2026-09-26T00:00:00Z' }).find((event) => event.event === 'released').line, / version=3\.46\.0 commit=abc1234 branch=/);
   const unconfirmed = buildReport(registry, new Map([['ruvnet/ruflo#3194', { thread: closedThread('ruvnet/ruflo#3194', '2026-09-26T22:31:23Z'), release: rufloFacts, confirmation: null }]]), { now: NOW });
   assert.ok(!ledgerEvents(unconfirmed, registry, { since: '2026-09-26T00:00:00Z' }).some((event) => event.event === 'released'), 'only a confirmed release is a released line');
-  assert.match(renderReport(unconfirmed), /Released, fix not confirmed[\s\S]*3\.46\.0 \(2026-09-26\) is the first release after the fix/);
+  assert.match(renderReport(unconfirmed), /Released, fix not confirmed[\s\S]*3\.46\.0 \(2026-09-26\) is the first release after the fix not ruled out/);
 });
 
 test('collect confirms through the fetcher with bounded, read-only calls', async () => {
