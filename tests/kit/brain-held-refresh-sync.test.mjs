@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import {
   sandboxHome, assertSandboxed, sandboxProject, writeKitConfig, offlineKitConfig, captureLog, rmrf,
 } from './helpers/home-sandbox.mjs';
+import { isolateProject } from './helpers/project-isolation.mjs';
 
 const HOME = sandboxHome('ak-brain-held-sync');
 const paths = await import('../../src/lib/paths.mjs');
@@ -24,6 +25,7 @@ const brain = await import('../../src/lib/ruvnet-brain.mjs');
 const { brainReleaseRow } = await import('../../src/commands/status/sections/ruvnet-brain.mjs');
 const { loadKitConfig } = await import('../../src/lib/config.mjs');
 assertSandboxed(paths, HOME);
+isolateProject('ak-brain-held-sync-cwd');
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const PROJECT = sandboxProject('ak-brain-held-sync');

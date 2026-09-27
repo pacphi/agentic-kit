@@ -277,7 +277,7 @@ function refreshFailure(r, { present, recordRefusal, tag }) {
  *  later (sync, setup) passes it, so the release stamp and a held refresh are
  *  written through that copy instead of being erased by the caller's next save. */
 export async function installRuvnetBrain({
-  cfg,
+  cfg = undefined,
   runner = run, latestRelease = rbLatestRelease, present = rbPresent,
   recordRelease = (tag) => rbRecord(tag, cfg),
   updaterPresent = rbUpdaterPresent, releaseOnDisk = rbReleaseOnDisk,
