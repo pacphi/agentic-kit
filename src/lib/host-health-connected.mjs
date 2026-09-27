@@ -105,7 +105,8 @@ async function codexIsolation(invoke) {
   if (listed.code !== 0 || !Array.isArray(servers) || servers.length > 200
     || servers.some(server => typeof server?.name !== 'string' || !/^[a-zA-Z0-9_-]{1,200}$/.test(server.name))) return null;
   // Codex's dotted CLI override parser treats quoted components literally,
-  // unlike a TOML file. Only validated bare keys are safe here.
+  // unlike a TOML file. Only validated bare keys are safe here. Codex ignores
+  // `-c mcp_servers={}` (openai/codex#16045), so each server is disabled by name.
   for (const server of servers) args.push('-c', `mcp_servers.${server.name}.enabled=false`);
   // Verify that the native effective roster actually honors the overrides.
   const verified = await invoke('codex', ['mcp', 'list', '--json', ...args]);

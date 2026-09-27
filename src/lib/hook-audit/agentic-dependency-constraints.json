@@ -337,9 +337,9 @@
       "title": "bug: -c 'mcp_servers={}' silently no-ops instead of clearing MCP servers",
       "dependency": "codex",
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "@openai/codex", "minVersion": null, "tagPattern": "rust-v{version}" } },
-      "mapping": "unmapped",
-      "kitImpact": null,
-      "adjustment": null,
+      "mapping": "mapped",
+      "kitImpact": { "refs": [], "files": ["src/lib/host-health-connected.mjs"] },
+      "adjustment": "Once Codex clears the roster with -c mcp_servers={}, replace the per-server enabled=false overrides in the connected host check.",
       "status": "watching",
       "constraintIds": [],
       "history": [
@@ -358,10 +358,11 @@
       "mapping": "mapped",
       "kitImpact": { "refs": [], "files": ["src/lib/hosts.mjs"] },
       "adjustment": "Once Codex ships a command-backed status line, offer a command-backed footer instead of the fixed tui.status_line projection.",
-      "status": "watching",
+      "status": "retired",
       "constraintIds": [],
       "history": [
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "retired", "note": "the same request is watched through openai/codex#17827 (active); ak's Codex status-line adjustment moves there" }
       ]
     },
     {
@@ -409,7 +410,7 @@
       "doneWhen": { "state": "closed-completed", "release": null },
       "mapping": "mapped",
       "kitImpact": { "refs": [], "files": ["src/lib/hosts.mjs"] },
-      "adjustment": "None: closed as a duplicate; the request is watched through openai/codex#16921 and #17827.",
+      "adjustment": "None: closed as a duplicate; the request is watched through openai/codex#17827.",
       "status": "retired",
       "constraintIds": [],
       "history": [
@@ -428,7 +429,7 @@
       "doneWhen": { "state": "closed-completed", "release": null },
       "mapping": "mapped",
       "kitImpact": { "refs": [], "files": ["src/lib/hosts.mjs"] },
-      "adjustment": "None: closed as a duplicate; the request is watched through openai/codex#16921 and #17827.",
+      "adjustment": "None: closed as a duplicate; the request is watched through openai/codex#17827.",
       "status": "retired",
       "constraintIds": [],
       "history": [
@@ -863,7 +864,7 @@
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
       "mapping": "mapped",
       "kitImpact": { "refs": [], "files": ["src/lib/mcp.mjs"] },
-      "adjustment": "Once a released Ruflo filters MCP tools server-side, replace the permissions.deny tool-family gating in mcp.mjs.",
+      "adjustment": "Ruflo's mcp start --tools / CLAUDE_FLOW_MCP_TOOLS (released) narrows only the advertised tool schemas; execution stays registered. Once a released Ruflo also refuses execution of unselected tools, replace the permissions.deny tool-family gating in mcp.mjs; until then consider using --tools to cut schema overhead alongside the deny rules.",
       "status": "watching",
       "constraintIds": [],
       "history": [

@@ -158,6 +158,23 @@ test('the tracking issues carry their whole upstream remainder', () => {
   assert.ok(t240.kitImpact.files.includes('src/lib/aqe-readiness.mjs'));
 });
 
+test('stale threads are mapped to what ak carries, or retired with a reason', () => {
+  const doc = document();
+  const clear = entry(doc, 'openai/codex#16045');
+  assert.equal(clear.mapping, 'mapped');
+  assert.deepEqual(clear.kitImpact.files, ['src/lib/host-health-connected.mjs']);
+  assert.equal(clear.status, 'watching');
+  const statusLine = entry(doc, 'openai/codex#16921');
+  assert.equal(statusLine.status, 'retired');
+  assert.match(statusLine.history.at(-1).note, /openai\/codex#17827/);
+  const watched = entry(doc, 'openai/codex#17827');
+  assert.equal(watched.status, 'watching');
+  assert.equal(watched.adjustment, statusLine.adjustment);
+  const groups = entry(doc, 'ruvnet/ruflo#952');
+  assert.equal(groups.status, 'watching');
+  assert.match(groups.adjustment, /execution/);
+});
+
 test('an invalid watch list makes the whole registry invalid for the hook audit too', () => {
   withRegistry((doc) => { entry(doc, 'ruvnet/ruflo#3194').status = 'done'; }, (result) => {
     assert.equal(result.registryStatus, 'invalid');

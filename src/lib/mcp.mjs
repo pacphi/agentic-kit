@@ -1,6 +1,7 @@
-// MCP registration + tool-family gating. Upstream has no server-side filter
-// (3.28: ~276 tools statically aggregated), so exclusions are exact-name
-// permissions.deny rules in ~/.claude/settings.json — see ruvnet/ruflo#952.
+// MCP registration + tool-family gating. Upstream's `mcp start --tools` /
+// CLAUDE_FLOW_MCP_TOOLS narrows only the advertised schemas; an unselected tool
+// can still be called, so exclusions are exact-name permissions.deny rules in
+// ~/.claude/settings.json — see ruvnet/ruflo#952.
 // Registration key is `claude-flow` (#2206), user scope.
 import fs from 'node:fs';
 import os from 'node:os';
