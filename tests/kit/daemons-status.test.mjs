@@ -33,18 +33,17 @@ test('project memory with no daemon for it is information naming the backup depe
   const [row] = await collect(project(t));
   assert.equal(row.level, 'info');
   assert.equal(row.fix, null, 'starting a daemon is a human decision, not a sync repair');
-  assert.match(row.message, /none running for this project/);
+  assert.match(row.message, /none running for this project yet; Ruflo starts it on the next `ruflo` command here/);
   assert.match(row.message, /backup/);
   assert.match(row.message, /distillation/);
-  assert.match(row.message, /`ruflo daemon start`/);
-  assert.doesNotMatch(row.message, /start-on-use/, 'no autostart setting found, so none is named');
+  assert.doesNotMatch(row.message, /start-on-use is off/, 'no autostart setting found, so none is named');
 });
 
 test("other projects' daemons do not cover this one", async (t) => {
   const other = { pid: 424242, workspace: '/elsewhere', ageSecs: 60, workspaceExists: true };
   const [row] = await collect(project(t), { listDaemons: async () => [other] });
   assert.equal(row.level, 'info');
-  assert.match(row.message, /^1 running, none for this project/);
+  assert.match(row.message, /^1 running, none for this project yet/);
 });
 
 test("this project's own live daemon keeps the row ok", async (t) => {
@@ -59,6 +58,7 @@ test("this project's own live daemon keeps the row ok", async (t) => {
 test('the row names the setting that keeps Ruflo from starting the daemon on use', async (t) => {
   const [row] = await collect(project(t, { autoStart: false }));
   assert.match(row.message, /start-on-use is off: \.claude\/settings\.json claudeFlow\.daemon\.autoStart: false/);
+  assert.match(row.message, /start one with `ruflo daemon start`/, 'with start-on-use off, the start command is named');
   assert.match(row.message, /ruflo init writes it and ak setup keeps it/);
   const [envRow] = await collect(project(t), { env: { RUFLO_DAEMON_AUTOSTART: '0' } });
   assert.match(envRow.message, /start-on-use is off: RUFLO_DAEMON_AUTOSTART/);
@@ -70,4 +70,58 @@ test('stale daemons keep their warning and sync repair', async (t) => {
   const [row] = await collect(project(t), { listDaemons: async () => [stale] });
   assert.equal(row.level, 'warn');
   assert.equal(row.fix, 'sync reaps stale daemons');
+});
+
+// ── a live daemon that defers backup or distillation (3.46.1) ──────────────
+const NOW = Date.parse('2026-09-27T12:00:00.000Z');
+const HOUR = 60 * 60 * 1000;
+
+function liveDaemonDeferring(t, lines) {
+  const cwd = project(t);
+  fs.mkdirSync(path.join(cwd, '.claude-flow', 'logs'), { recursive: true });
+  fs.writeFileSync(path.join(cwd, '.claude-flow', 'daemon.pid'), String(process.pid));
+  fs.writeFileSync(path.join(cwd, '.claude-flow', 'logs', 'daemon.log'), `${lines.join('\n')}\n`);
+  return cwd;
+}
+const own = (cwd) => async () => [{ pid: process.pid, workspace: cwd, ageSecs: 60, workspaceExists: true }];
+const deferral = (rows) => rows.find((r) => /deferred/.test(r.message));
+const MEMORY_LOW = [
+  `[${new Date(NOW - 3 * HOUR).toISOString()}] [INFO] Daemon started (PID: 42, CPUs: 16, workers: 7, maxCpuLoad: 28, minFreeMemoryPercent: 5%)`,
+  `[${new Date(NOW - 2 * HOUR).toISOString()}] [INFO] Worker consolidate deferred: Memory too low: 3.9% free`,
+];
+
+test('on macOS a live daemon deferring distillation for low memory warns, and sync sets the threshold', async (t) => {
+  const cwd = liveDaemonDeferring(t, MEMORY_LOW);
+  const rows = await collect(cwd, { listDaemons: own(cwd), now: NOW, platform: 'darwin' });
+  assert.equal(rows[0].level, 'ok', 'the running count stays');
+  const row = deferral(rows);
+  assert.deepEqual(row, {
+    subsystem: 'daemons', level: 'warn',
+    message: "Ruflo's daemon is running but deferred distillation 2h ago: Memory too low: 3.9% free (macOS free-memory gate, ruvnet/ruflo#2935)",
+    fix: "sync sets Ruflo's macOS memory threshold", repair: 'sync',
+  });
+});
+
+test('elsewhere the same deferral is a manual step naming the flat key', async (t) => {
+  const cwd = liveDaemonDeferring(t, MEMORY_LOW);
+  const row = deferral(await collect(cwd, { listDaemons: own(cwd), now: NOW, platform: 'linux' }));
+  assert.equal(row.level, 'warn');
+  assert.equal(row.repair, 'manual');
+  assert.doesNotMatch(row.message, /macOS/);
+  assert.match(row.fix, /daemon\.resourceThresholds\.minFreeMemoryPercent/);
+  assert.match(row.fix, /\.claude-flow\/config\.json/);
+});
+
+test('a deferral the worker has since recovered from is not reported', async (t) => {
+  const cwd = liveDaemonDeferring(t, MEMORY_LOW);
+  fs.mkdirSync(path.join(cwd, '.claude-flow', 'metrics'));
+  fs.writeFileSync(path.join(cwd, '.claude-flow', 'metrics', 'consolidation.json'),
+    JSON.stringify({ timestamp: new Date(NOW - HOUR).toISOString(), distillationEnabled: true }));
+  assert.equal(deferral(await collect(cwd, { listDaemons: own(cwd), now: NOW, platform: 'darwin' })), undefined);
+});
+
+test('no deferral row without a live daemon for this project', async (t) => {
+  const cwd = liveDaemonDeferring(t, MEMORY_LOW);
+  fs.writeFileSync(path.join(cwd, '.claude-flow', 'daemon.pid'), '0');
+  assert.equal(deferral(await collect(cwd, { now: NOW, platform: 'darwin' })), undefined);
 });

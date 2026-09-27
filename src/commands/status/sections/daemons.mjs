@@ -3,37 +3,80 @@
 // Ruflo's memory backup (at most daily, first about 10 min after start) and
 // distillation (every 30 min) run only as workers inside a project's daemon,
 // and the daemon ends itself (12 h TTL; 30 min with no worker activity;
-// worker-daemon.js, 3.45.0). So "none running" is not "ok" for a project
-// with a memory.db: nothing backs it up. That row is information with the start
-// command in its message, never a sync fix: starting a long-lived process is a
-// human decision. When Ruflo's start-on-use is off, the row names the setting.
+// worker-daemon.js:38-40, 3.46.1). So "none running" is not "ok" for a project
+// with a memory.db: nothing backs it up. That row is information, never a sync
+// fix: starting a long-lived process is a human decision. With Ruflo's
+// start-on-use on, the next `ruflo` command in the project starts it
+// (daemon-autostart.js ensureDaemonRunning, 3.46.1); when it is off, the row
+// names the setting and the start command.
+//
+// A live daemon can still skip both jobs: it defers a worker while CPU load or
+// free memory is past its threshold, and on macOS the free-memory reading is
+// skewed low (ruvnet/ruflo#2935). The deferral row reads the daemon log
+// (memory-maintenance.mjs lastWorkerDeferral) and is dropped once the worker's
+// own metrics file is newer.
 import fs from 'node:fs';
 import {
   listDaemons as listRufloDaemons, projectDaemonAlive, rufloAutostartOff, staleDaemons,
 } from '../../../lib/daemons.mjs';
+import { formatLiveCheckAge as ago } from '../../../lib/live-check-evidence.mjs';
+import { lastWorkerDeferral, memoryMaintenanceStatus } from '../../../lib/memory-maintenance.mjs';
 import * as paths from '../../../lib/paths.mjs';
 import { memoryProjectRoot } from '../../../lib/ruflo-memory.mjs';
 import { row } from '../row.mjs';
 
-function ownDaemonMissing(cwd, env, running) {
-  let root;
-  try { root = memoryProjectRoot(cwd); } catch { return null; }
-  if (!fs.existsSync(paths.projectMemoryDb(root)) || projectDaemonAlive(root)) return null;
+function projectRoot(cwd) {
+  try { return memoryProjectRoot(cwd); } catch { return null; }
+}
+
+function ownDaemonMissing(root, env, running) {
+  if (!root || !fs.existsSync(paths.projectMemoryDb(root)) || projectDaemonAlive(root)) return null;
+  const others = running ? `${running} running, none` : 'none running';
   const off = rufloAutostartOff(root, env);
-  const whoWrote = off?.startsWith('.claude/settings.json') ? ' (ruflo init writes it and ak setup keeps it)' : '';
-  return `${running ? `${running} running, none` : 'none running'} for this project: Ruflo's memory backup and `
+  if (!off) {
+    return `${others} for this project yet; Ruflo starts it on the next \`ruflo\` command here `
+      + '(its memory backup and distillation run only inside it)';
+  }
+  const whoWrote = off.startsWith('.claude/settings.json') ? ' (ruflo init writes it and ak setup keeps it)' : '';
+  return `${others} for this project: Ruflo's memory backup and `
     + 'distillation run only inside its daemon; start one with `ruflo daemon start`'
-    + (off ? `. Ruflo's start-on-use is off: ${off}${whoWrote}` : '');
+    + `. Ruflo's start-on-use is off: ${off}${whoWrote}`;
+}
+
+const JOB = { consolidate: 'distillation', backup: 'backup' };
+const THRESHOLD_KEY = (reason) => (/^CPU load/.test(reason)
+  ? 'daemon.resourceThresholds.maxCpuLoad' : 'daemon.resourceThresholds.minFreeMemoryPercent');
+
+/** A warning when this project's live daemon deferred backup or distillation
+ *  and the job has not run since. */
+function deferralRow(root, { now, platform }) {
+  if (!root || !projectDaemonAlive(root)) return null;
+  const deferred = lastWorkerDeferral(root, { now });
+  if (!deferred) return null;
+  const status = memoryMaintenanceStatus(root, { now });
+  const lastRun = deferred.worker === 'backup' ? status.backup.lastAt
+    : status.distillation && now - status.distillation.ageMs;
+  if (Number.isFinite(lastRun) && lastRun >= deferred.at) return null;
+  const macMemory = platform === 'darwin' && /^Memory too low/.test(deferred.reason);
+  const message = `Ruflo's daemon is running but deferred ${JOB[deferred.worker]} ${ago(deferred.ageMs)}: ${deferred.reason}`
+    + (macMemory ? ' (macOS free-memory gate, ruvnet/ruflo#2935)' : '');
+  return macMemory
+    ? row('daemons', 'warn', message, "sync sets Ruflo's macOS memory threshold")
+    : row('daemons', 'warn', message, `lower "${THRESHOLD_KEY(deferred.reason)}" (a flat key) in .claude-flow/config.json, `
+      + 'then restart the daemon with `ruflo daemon stop` and `ruflo daemon start`', { repair: 'manual' });
 }
 
 export default {
   id: 'daemons',
-  async collect({ cwd, listDaemons = listRufloDaemons, env = process.env }) {
+  async collect({
+    cwd, listDaemons = listRufloDaemons, env = process.env, now = Date.now(), platform = process.platform,
+  }) {
     const rows = [];
     try {
       const daemons = await listDaemons({ cwd });
       const stale = staleDaemons(daemons);
-      const missing = stale.length ? null : ownDaemonMissing(cwd, env, daemons.length);
+      const root = projectRoot(cwd);
+      const missing = stale.length ? null : ownDaemonMissing(root, env, daemons.length);
       if (stale.length) {
         rows.push(row('daemons', 'warn',
           `${daemons.length} running, ${stale.length} stale (orphaned or past TTL)`, 'sync reaps stale daemons'));
@@ -43,6 +86,8 @@ export default {
         rows.push(row('daemons', 'ok',
           daemons.length ? `${daemons.length} running (one per active project is expected)` : 'none running'));
       }
+      const deferral = deferralRow(root, { now, platform });
+      if (deferral) rows.push(deferral);
     } catch (e) {
       rows.push(row('daemons', 'warn', `daemon check unavailable: ${e.message}`));
     }
