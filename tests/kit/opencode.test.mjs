@@ -16,7 +16,7 @@ import { guidanceTargets, BUILTIN_BLOCKS } from '../../src/lib/blocks.mjs';
 import { redirectToolState } from './helpers/home-sandbox.mjs';
 
 // Code under test spawns the real `opencode` with process.env; keep its
-// state/data/cache/temp folders out of the developer's real ones.
+// config/state/data/cache/temp folders out of the developer's real ones.
 const toolState = redirectToolState('ak-opencode');
 after(() => toolState.restore());
 
