@@ -63,7 +63,18 @@
           "evidenceRequired": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
           "workaroundPolicy": { "type": "string" },
           "retestPolicy": { "type": "string" },
-          "removalProof": { "type": "string" }
+          "removalProof": { "type": "string" },
+          "supportWindow": {
+            "type": "object",
+            "description": "Rolling support window for this dependency (ADR-0041 §7; Ruflo only today): the newest newestMinors minors, never fewer than the minors first published within minDays. Its oldest minor's .0 is the floor: a workaround comes out only once the floor contains the fix, and an AgentDB fix delivered through Ruflo (bundledBy) only once the floor Ruflo bundles a fixed agentdb.",
+            "required": ["newestMinors", "minDays", "basis"],
+            "properties": {
+              "newestMinors": { "type": "integer", "minimum": 1, "description": "How many of the newest minors are always supported." },
+              "minDays": { "type": "integer", "minimum": 1, "description": "Every minor first published within this many days stays supported, even beyond newestMinors." },
+              "basis": { "type": "string", "description": "What dates a minor, for example the first npm publish of each minor." },
+              "unsupported": { "type": "string", "description": "What ak does when the installed version is older than the floor." }
+            }
+          }
         }
       }
     },
@@ -80,7 +91,7 @@
           "id": { "type": "string" },
           "dependency": { "type": "string" },
           "kind": { "type": "string" },
-          "affected": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
+          "affected": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" }, "description": "Affected versions of the constraint's dependency. Each range is an exact version (3.38.20), <major>.x (3.x) or <major>.<minor>.x (3.39.x, every patch of that minor, prereleases included). A package-qualified item such as agent-browser@0.27.x records a co-installed package for readers and never matches the installed version." },
           "issue": { "type": "string", "pattern": "^https://github\\.com/[^/]+/[^/]+/issues/[0-9]+$" },
           "releaseUrl": { "type": "string", "pattern": "^https://github\\.com/[^/]+/[^/]+/releases/tag/[A-Za-z0-9_.-]+$" },
           "issueState": { "enum": ["open-at-last-verification", "closed-at-last-verification"] },
@@ -138,7 +149,7 @@
                       "name": { "type": "string", "minLength": 1 },
                       "minVersion": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$" }] },
                       "tagPattern": { "type": "string", "pattern": "^[A-Za-z0-9_./-]*\\{version\\}[A-Za-z0-9_./-]*$", "description": "Upstream tag spelling for a version, for example rust-v{version}; default v{version} then {version}." },
-                      "bundledBy": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^[@A-Za-z0-9_][A-Za-z0-9_@./-]*$" }, "description": "Carrier chain from the package ak installs down to the parent of name; released only when the newest carrier installs a fixed version." }
+                      "bundledBy": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^[@A-Za-z0-9_][A-Za-z0-9_@./-]*$" }, "description": "Carrier chain from the package ak installs down to the parent of name; released only when the newest carrier installs a fixed version and, for a Ruflo carrier, the oldest supported Ruflo (supportWindow floor) does too." }
                     }
                   }
                 ]
