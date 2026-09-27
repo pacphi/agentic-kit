@@ -128,6 +128,9 @@ import { mntOpenInspector, mntCloseInspector } from './maintenance-inspector.mjs
 
   function renderMntResults(){
     var el=document.getElementById("mnt-results");if(!el)return;
+    // Busy while a query is in flight: assistive technology (and a test) can
+    // tell the rows on screen are about to be replaced.
+    el.setAttribute("aria-busy",mntInventoryBusy?"true":"false");
     if(mntInventoryError){
       el.innerHTML='<div class="mnt-empty">Inventory could not be read. <button type="button" class="mt-action" id="mnt-retry">Retry</button></div>';
       return;

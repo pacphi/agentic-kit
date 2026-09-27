@@ -1409,6 +1409,9 @@ async function main() {
   // incomplete-source fixture) so later requests see the new fixture without
   // a full page reload. ──
   let activeMaintenanceInventory = SENTINEL_FIXTURES.base();
+  // Holds the NEXT inventory response until released, so a check can order
+  // "focus a row" before "the list re-renders" on every run instead of by luck.
+  let holdNextInventory = null;
   // Simulates dashboard-server.mjs's refreshInventoryAfterProviderScan: the
   // server builds the inventory once Refresh evidence settles (MNT-DSC's
   // scanRequired contract), not only after a System full scan.
@@ -1479,6 +1482,7 @@ async function main() {
     const body = request.method() === 'POST' ? request.postDataJSON() : null;
 
     if (request.method() === 'GET' && pathname === '/api/maintenance/v2/inventory') {
+      if (holdNextInventory) { const gate = holdNextInventory; holdNextInventory = null; await gate; }
       const facets = {};
       for (const [key, value] of url.searchParams.entries()) {
         if (key.startsWith('facet.')) facets[key.slice(6)] = [...(facets[key.slice(6)] ?? []), value];
@@ -2398,8 +2402,21 @@ async function main() {
     await page.waitForFunction(() => document.querySelectorAll('#mnt-chips .mnt-chip').length === 0);
     await page.check('#mnt-facets input[data-mnt-facet="kind"][value="skill"]');
     await page.waitForSelector('#mnt-chips .mnt-chip');
+    const requestsBefore = maintenanceInventoryRequests.length;
+    let releaseInventory;
+    holdNextInventory = new Promise((resolve) => { releaseInventory = resolve; });
     await page.click('#mnt-clear-all');
     await page.waitForFunction(() => document.querySelectorAll('#mnt-chips .mnt-chip').length === 0);
+    const busyWhileHeld = await page.getAttribute('#mnt-results', 'aria-busy');
+    check('MNT-UX-007a: the results list is marked busy while its query is in flight',
+      busyWhileHeld === 'true', `aria-busy read ${JSON.stringify(busyWhileHeld)}`);
+    releaseInventory();
+    await page.waitForFunction(() => document.getElementById('mnt-results')?.getAttribute('aria-busy') === 'false');
+    // The gate holds only the NEXT request; if Clear all ever issues two, the
+    // unheld one could render first and make this check meaningless.
+    check('MNT-UX-007b: Clear all issues exactly one inventory query',
+      maintenanceInventoryRequests.length === requestsBefore + 1,
+      `inventory requests grew by ${maintenanceInventoryRequests.length - requestsBefore}`);
     check('MNT-UX-002: Clear all removes every active facet at once',
       (await page.evaluate(() => location.hash)).indexOf('facet.') < 0,
       'Clear all left a facet value in the URL');
@@ -2409,6 +2426,10 @@ async function main() {
     const rovingBefore = await page.$$eval('#mnt-results [data-mnt-plc]',
       (rows) => rows.map((row) => row.tabIndex));
     await page.keyboard.press('ArrowDown');
+    await page.waitForFunction(() => {
+      const rows = [...document.querySelectorAll('#mnt-results [data-mnt-plc]')];
+      return rows.length > 1 && document.activeElement === rows[1];
+    });
     const rovingAfter = await page.$$eval('#mnt-results [data-mnt-plc]',
       (rows) => rows.map((row) => row.tabIndex));
     check('MNT-UX-007: arrow keys move the roving tab stop without adding every row to the Tab order',
