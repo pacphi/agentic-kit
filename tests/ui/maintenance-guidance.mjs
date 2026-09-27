@@ -2,9 +2,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { renderPage } from '../../src/lib/dashboard/page.mjs';
 import { CSS } from '../../src/lib/dashboard/styles.mjs';
+
+const SHOTS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '.ui-artifacts');
 
 function source(name) {
   return fs.readFileSync(new URL('../../src/lib/dashboard/client/'+name+'.mjs', import.meta.url), 'utf8')
@@ -47,6 +51,7 @@ test('guidance has exclusive pills, host context, and no resource selector or op
   assert.match(await page.locator('#optional-test').innerText(), /Optional actions/);
   assert.equal(await page.locator('#optional-test [data-mnt-plan-gid="optional"]').count(), 1);
   assert.equal(await page.locator('#optional-test .mnt-dispositions').count(), 0);
-  await page.screenshot({ path: '/tmp/ak-guidance-current.png' });
+  fs.mkdirSync(SHOTS, { recursive: true });
+  await page.screenshot({ path: path.join(SHOTS, 'guidance-current.png') });
   assert.deepEqual(errors, []);
 });

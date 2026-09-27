@@ -1241,8 +1241,13 @@ Behavior that differs from, or goes beyond, the plan text.
   - M1b is still open.
 - **ADR index.** In `docs/adr/README.md` the index table ends at ADR-0052; later ADRs appear only as
   bullets or sections. This predates the branch.
-- **UI suite outside `test:ui`.** `tests/ui/maintenance-focus.mjs` fails "polyglot cards expose
-  labelled language badges" at `3505a29` too. That file is not part of `test:ui`.
+- **UI suite outside `test:ui`.** Resolved on `fix/test-hermeticity`. The polyglot-card check's
+  harness did not load `maintenance-cards`, so rendering threw `mntProjectKindBadge is not
+  defined` and no card appeared. It also still expected a three-icon cap and a "+2 more languages"
+  disclosure, which DDD-09 (`docs/audits/211-ddd-matrix.md`) and `docs/LANGUAGE-LOGOS.md` removed.
+  The check now loads the module, fails on any page error, and asserts every language icon inline,
+  no disclosure and no horizontal overflow at phone width. `maintenance-focus.mjs` and
+  `maintenance-guidance.mjs` now run in `test:ui`.
 
 #### Not run
 

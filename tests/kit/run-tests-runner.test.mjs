@@ -76,6 +76,10 @@ test('SUITES keeps the exact commands package.json ran before', async () => {
   assert.deepEqual(SUITES.unit.slice(1).map((a) => a[0]), ['statusline-segments', 'statusline-window-ledger',
     'statusline-brain', 'health-history', 'dashboard', 'admin-model', 'admin'].map((f) => `tests/${f}.test.cjs`));
   assert.equal(SUITES.ui[0][0], 'tests/ui/dashboard-ui.mjs');
+  assert.deepEqual(SUITES.ui[1], ['--test', 'tests/ui/dashboard-project-context.mjs', 'tests/ui/maintenance-projects.mjs',
+    'tests/ui/maintenance-host-alignment.mjs', 'tests/ui/intelligence-picker.mjs', 'tests/ui/usage-project-groups.mjs',
+    'tests/ui/context-coverage.mjs', 'tests/ui/host-readiness.mjs', 'tests/ui/maintenance-focus.mjs',
+    'tests/ui/maintenance-guidance.mjs']);
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   assert.equal(pkg.scripts.test, 'node scripts/run-tests.mjs unit');
   assert.equal(pkg.scripts['test:ui'], 'node scripts/run-tests.mjs ui');
