@@ -491,3 +491,30 @@ test('a failed typesafe package removal keeps kit.json under --purge', async () 
 });
 
 test.after(() => rmrf(HOME));
+
+// Branch 3, Task 2.2: uninstall puts back what ak changed for Ruflo's daemon
+// in every receipted project: the autoStart value and the flat keys (and the
+// .claude-flow/config.json ak created).
+test('uninstall restores autoStart and removes the managed daemon keys in receipted projects', async () => {
+  seedHome();
+  const { reconcileRufloDaemon } = await import('../../src/lib/ruflo-daemon-config.mjs');
+  const root = sandboxProject('ak-uninstall-daemon');
+  fs.mkdirSync(path.join(root, '.claude'), { recursive: true });
+  fs.writeFileSync(paths.projectSettings(root), JSON.stringify({ claudeFlow: { daemon: { autoStart: false } } }));
+  const receipts = {};
+  reconcileRufloDaemon(root, { rufloVersion: '3.45.0', platform: 'darwin', receipts });
+  writeKitConfig(HOME, { aqe: true, rufloDaemon: { autoStart: true, receipts } });
+  const elsewhere = sandboxProject('ak-uninstall-daemon-elsewhere');
+  const prior = process.cwd();
+  process.chdir(elsewhere);
+  let run;
+  try {
+    run = await captureLog(() => uninstall.run({ flags: { yes: true } }));
+  } finally { process.chdir(prior); }
+  assert.equal(JSON.parse(fs.readFileSync(paths.projectSettings(root), 'utf8')).claudeFlow.daemon.autoStart, false, run.out);
+  assert.equal(fs.existsSync(path.join(root, '.claude-flow', 'config.json')), false);
+  const kit = JSON.parse(fs.readFileSync(paths.kitConfigPath(), 'utf8'));
+  assert.deepEqual(kit.rufloDaemon.receipts, {}, 'receipts are dropped once released');
+  assert.match(run.out, /ruflo daemon settings restored/);
+  rmrf(root, elsewhere);
+});

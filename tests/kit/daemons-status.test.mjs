@@ -59,10 +59,11 @@ test('the row names the setting that keeps Ruflo from starting the daemon on use
   const [row] = await collect(project(t, { autoStart: false }));
   assert.match(row.message, /start-on-use is off: \.claude\/settings\.json claudeFlow\.daemon\.autoStart: false/);
   assert.match(row.message, /start one with `ruflo daemon start`/, 'with start-on-use off, the start command is named');
-  assert.match(row.message, /ruflo init writes it and ak setup keeps it/);
+  assert.match(row.message, /ruflo init writes it/);
+  assert.doesNotMatch(row.message, /ak setup keeps it/, 'ak no longer turns it off');
   const [envRow] = await collect(project(t), { env: { RUFLO_DAEMON_AUTOSTART: '0' } });
   assert.match(envRow.message, /start-on-use is off: RUFLO_DAEMON_AUTOSTART/);
-  assert.doesNotMatch(envRow.message, /ak setup keeps it/, 'the env opt-out is not something setup wrote');
+  assert.doesNotMatch(envRow.message, /ruflo init writes it/, 'the env opt-out is not something init wrote');
 });
 
 test('stale daemons keep their warning and sync repair', async (t) => {
@@ -124,4 +125,42 @@ test('no deferral row without a live daemon for this project', async (t) => {
   const cwd = liveDaemonDeferring(t, MEMORY_LOW);
   fs.writeFileSync(path.join(cwd, '.claude-flow', 'daemon.pid'), '0');
   assert.equal(deferral(await collect(cwd, { now: NOW, platform: 'darwin' })), undefined);
+});
+
+// ── ak-managed daemon settings drift (Task 2.2) ────────────────────────────
+function rufloRepo(t, { autoStart } = {}) {
+  const cwd = project(t, { autoStart });
+  fs.mkdirSync(path.join(cwd, '.git'));
+  fs.mkdirSync(path.join(cwd, '.claude-flow'), { recursive: true });
+  return cwd;
+}
+const drift = (rows) => rows.find((r) => /ak-managed daemon settings/.test(r.message));
+const kit = (rufloDaemon = {}) => () => ({ rufloDaemon: { receipts: {}, ...rufloDaemon } });
+
+test("init's autoStart:false in a Ruflo repository is drift that sync repairs", async (t) => {
+  const cwd = rufloRepo(t, { autoStart: false });
+  const rows = await collect(cwd, { loadConfig: kit(), rufloVersion: '3.46.1', platform: 'linux' });
+  const row = drift(rows);
+  assert.equal(row.level, 'warn');
+  assert.equal(row.repair, 'sync');
+  assert.equal(row.fix, "sync applies ak's Ruflo daemon settings");
+  assert.match(row.message, /differ from what Ruflo 3\.46\.1 needs/);
+  assert.match(row.message, /claudeFlow\.daemon\.autoStart/);
+  assert.equal(fs.existsSync(path.join(cwd, '.claude-flow', 'config.json')), false, 'status writes nothing');
+});
+
+test('on macOS a missing memory floor is drift; converged settings and an opt-out are not', async (t) => {
+  const cwd = rufloRepo(t);
+  const mac = drift(await collect(cwd, { loadConfig: kit(), rufloVersion: '3.46.1', platform: 'darwin' }));
+  assert.match(mac.message, /daemon\.resourceThresholds\.minFreeMemoryPercent/);
+  fs.writeFileSync(path.join(cwd, '.claude-flow', 'config.json'), JSON.stringify({ 'daemon.resourceThresholds.minFreeMemoryPercent': 0 }));
+  assert.equal(drift(await collect(cwd, { loadConfig: kit(), rufloVersion: '3.46.1', platform: 'darwin' })), undefined);
+  const optedOut = rufloRepo(t, { autoStart: false });
+  assert.equal(drift(await collect(optedOut, { loadConfig: kit({ autoStart: false }), rufloVersion: '3.46.1', platform: 'linux' })), undefined);
+});
+
+test('no drift row outside a Ruflo repository', async (t) => {
+  const cwd = project(t, { autoStart: false });
+  const rows = await collect(cwd, { loadConfig: () => { throw new Error('kit.json must not be read here'); }, rufloVersion: '3.46.1', platform: 'darwin' });
+  assert.equal(drift(rows), undefined);
 });

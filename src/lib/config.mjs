@@ -32,6 +32,10 @@ const DEFAULTS = {
   security: true,       // run the security verification surface by default
   harvest: false,       // opt-in learning-write (`ak x harvest`); off = never runs writes
   rufloComponents: structuredClone(RUFLO_COMPONENT_DEFAULTS), // ADR-0058 managed ruflo components
+  // Ruflo's project daemon (ruflo-daemon-config.mjs): autoStart false leaves
+  // .claude/settings.json claudeFlow.daemon.autoStart alone; receipts record
+  // what ak changed per project root, for uninstall.
+  rufloDaemon: { autoStart: true, receipts: {} },
   health: { ring: [] }, // persisted stack-health snapshot ring (see health-history.mjs)
   mcp: { register: true, excludeFamilies: [] },
   integrations: {
@@ -201,6 +205,7 @@ function withDefaults(config) {
     providers: { ...DEFAULTS.providers, ...config.providers },
     statusline: { ...DEFAULTS.statusline, ...config.statusline },
     rufloComponents: { ...structuredClone(RUFLO_COMPONENT_DEFAULTS), ...config.rufloComponents },
+    rufloDaemon: { ...structuredClone(DEFAULTS.rufloDaemon), ...config.rufloDaemon },
     maintenance: {
       ...structuredClone(DEFAULTS.maintenance),
       ...config.maintenance,

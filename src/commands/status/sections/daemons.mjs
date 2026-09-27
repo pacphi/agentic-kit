@@ -15,14 +15,24 @@
 // skewed low (ruvnet/ruflo#2935). The deferral row reads the daemon log
 // (memory-maintenance.mjs lastWorkerDeferral) and is dropped once the worker's
 // own metrics file is newer.
+//
+// In a Ruflo repository, the drift row compares the project with what ak
+// manages for this Ruflo (ruflo-daemon-config.mjs): the flat keys in
+// .claude-flow/config.json and start-on-use in .claude/settings.json. Read
+// only; `ak sync` applies them.
 import fs from 'node:fs';
+import { loadKitConfig } from '../../../lib/config.mjs';
 import {
   listDaemons as listRufloDaemons, projectDaemonAlive, rufloAutostartOff, staleDaemons,
 } from '../../../lib/daemons.mjs';
 import { formatLiveCheckAge as ago } from '../../../lib/live-check-evidence.mjs';
 import { lastWorkerDeferral, memoryMaintenanceStatus } from '../../../lib/memory-maintenance.mjs';
 import * as paths from '../../../lib/paths.mjs';
+import { rufloProjectRoot } from '../../../lib/ruflo-components/apply.mjs';
+import { daemonDrift } from '../../../lib/ruflo-daemon-config.mjs';
 import { memoryProjectRoot } from '../../../lib/ruflo-memory.mjs';
+import { installedRoutingVersion } from '../../../lib/ruflo-memory-contract.mjs';
+import { installedVersion } from '../../../lib/versions.mjs';
 import { row } from '../row.mjs';
 
 function projectRoot(cwd) {
@@ -37,7 +47,7 @@ function ownDaemonMissing(root, env, running) {
     return `${others} for this project yet; Ruflo starts it on the next \`ruflo\` command here `
       + '(its memory backup and distillation run only inside it)';
   }
-  const whoWrote = off.startsWith('.claude/settings.json') ? ' (ruflo init writes it and ak setup keeps it)' : '';
+  const whoWrote = off.startsWith('.claude/settings.json') ? ' (ruflo init writes it)' : '';
   return `${others} for this project: Ruflo's memory backup and `
     + 'distillation run only inside its daemon; start one with `ruflo daemon start`'
     + `. Ruflo's start-on-use is off: ${off}${whoWrote}`;
@@ -66,10 +76,19 @@ function deferralRow(root, { now, platform }) {
       + 'then restart the daemon with `ruflo daemon stop` and `ruflo daemon start`', { repair: 'manual' });
 }
 
+function driftRow(cwd, { loadConfig, rufloVersion, platform }) {
+  const root = rufloProjectRoot(cwd);
+  if (!root) return null;
+  const parts = daemonDrift(root, { cfg: loadConfig(), rufloVersion, platform });
+  return parts && row('daemons', 'warn', `ak-managed daemon settings differ from what Ruflo ${rufloVersion ?? '(version unknown)'} `
+    + `needs: ${parts.join('; ')}`, "sync applies ak's Ruflo daemon settings");
+}
+
 export default {
   id: 'daemons',
   async collect({
     cwd, listDaemons = listRufloDaemons, env = process.env, now = Date.now(), platform = process.platform,
+    loadConfig = loadKitConfig, rufloVersion = installedRoutingVersion() ?? installedVersion('ruflo'),
   }) {
     const rows = [];
     try {
@@ -88,6 +107,8 @@ export default {
       }
       const deferral = deferralRow(root, { now, platform });
       if (deferral) rows.push(deferral);
+      const drift = driftRow(cwd, { loadConfig, rufloVersion, platform });
+      if (drift) rows.push(drift);
     } catch (e) {
       rows.push(row('daemons', 'warn', `daemon check unavailable: ${e.message}`));
     }

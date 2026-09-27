@@ -21,11 +21,13 @@ import { hostsWithLifecycle, lifecycleAdapterFor, lifecycleExecutionEnabled, det
 import { companionLifecycleFor } from '../lib/adapters/companion-lifecycle-registry.mjs';
 import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
+import { applyRufloDaemon } from '../lib/ruflo-daemon-config.mjs';
+import { installedRoutingVersion } from '../lib/ruflo-memory-contract.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { reconcileRufloComponents } from '../lib/ruflo-components/apply.mjs';
 import { RESTART_REMINDER } from './status/sections/ruflo-components.mjs';
 import { HOSTS, commandHosts, hostInstallState, hostExecutable, installHost, convergeProviderStack, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
-import { driftReport, selfDrift } from '../lib/versions.mjs';
+import { driftReport, installedVersion, selfDrift } from '../lib/versions.mjs';
 import { recordRufloReleaseDates } from '../lib/ruflo-support-window.mjs';
 import { drift as ruvnetBrainDrift } from '../lib/ruvnet-brain.mjs';
 import { RUVECTOR_PKG, managed as ruvectorManaged } from '../lib/ruvector.mjs';
@@ -396,14 +398,26 @@ export const SYNC_STEPS = [
       }
     },
   },
+  // Also after an upgrade: a Ruflo that crossed 3.46.0 no longer needs the
+  // idle key ak wrote (ruflo-daemon-config.mjs), so the same sync removes it.
   {
     id: 'daemons',
-    when: (subs) => subs.has('daemons'),
+    when: (subs) => subs.has('daemons') || subs.has('versions'),
     run: async (ctx) => {
       const stale = staleDaemons(await listDaemons({ cwd: ctx.cwd }));
       for (const r of reap(stale)) {
         (r.killed ? ok : warn)(`daemon pid=${r.pid}: ${r.killed ? 'reaped' : 'could not stop'}`);
       }
+      // Read the version now: the versions step may have just upgraded Ruflo.
+      const applied = await applyRufloDaemon(ctx.cwd, {
+        cfg: ctx.cfg, rufloVersion: installedRoutingVersion() ?? installedVersion('ruflo'),
+      });
+      if (!applied) return;
+      saveKitConfig(ctx.cfg);
+      const { config, autostart } = applied.result;
+      if (applied.result.changed) ok(`ruflo daemon settings: config ${config}, start-on-use ${autostart}`);
+      if (config === 'user-managed') warn('.claude-flow/config.json is not ak-managed here (unreadable, or a key holds your own value); left as is');
+      if (applied.restarted) ok('ruflo daemon restarted so it reads its settings');
     },
   },
   // Managed companion convergence is independent from host lifecycle

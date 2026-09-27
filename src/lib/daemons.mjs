@@ -210,11 +210,12 @@ export function projectDaemonAlive(root) {
 }
 
 /** Why Ruflo will not start this project's daemon when a `ruflo` command runs
- *  there, or null. Mirrors daemon-autostart.js autostartDisabled (3.45.0, #3278):
+ *  there, or null. Mirrors daemon-autostart.js autostartDisabled (3.46.1:56-88, #3278):
  *  RUFLO_DAEMON_AUTOSTART=0|false|no|off, or `autostart`/`autoStart: false` in
  *  claude-flow.config.json `daemon` or .claude/settings.json `claudeFlow.daemon`.
- *  `ruflo init` writes the settings key false (init/settings-generator.js) and
- *  `ak setup` turns a true back to false. The result names the setting found. */
+ *  `ruflo init` writes the settings key false (init/settings-generator.js:123);
+ *  ak setup and sync turn it true unless kit.json rufloDaemon.autoStart is false
+ *  (ruflo-daemon-config.mjs). The result names the setting found. */
 export function rufloAutostartOff(root, env = process.env) {
   if (/^(0|false|no|off)$/i.test(env.RUFLO_DAEMON_AUTOSTART ?? '')) {
     return 'RUFLO_DAEMON_AUTOSTART is off in this environment';

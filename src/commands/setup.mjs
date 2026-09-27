@@ -41,6 +41,8 @@ import { findMemoryEntry, removeMemoryProbe } from '../lib/project-memory.mjs';
 import { projectMemoryEnv } from '../lib/ruflo-memory.mjs';
 import { reconcileMemoryPin } from '../lib/claude-env-projection.mjs';
 import { reconcileRufloComponents } from '../lib/ruflo-components/apply.mjs';
+import { daemonIntent, reconcileRufloDaemon } from '../lib/ruflo-daemon-config.mjs';
+import { installedRoutingVersion } from '../lib/ruflo-memory-contract.mjs';
 import { componentResultReport } from './status/sections/ruflo-components.mjs';
 import {
   setupTrustManifest, trustManifestLines,
@@ -557,20 +559,24 @@ async function activateProjectMemoryAndSwarm(root, env) {
     ? ok('swarm initialized (v3-mode)') : warn('ruflo swarm init failed');
 }
 
-/** Step 6: daemon — default-on, local-only workers (AI workers stay opt-in
- *  upstream); defensive: never let Claude Code auto-restart it (issue #3 RC3). */
-async function startProjectDaemon(root) {
-  const d = await runCmd('ruflo', ['daemon', 'start'], { cwd: root, timeout: 60_000 });
+/** Step 6: daemon. Ruflo's memory backup and distillation run only inside a
+ *  project's daemon, so ak writes the managed daemon settings first (the
+ *  daemon reads .claude-flow/config.json once, in its constructor:
+ *  worker-daemon.js:139-144, 3.46.1), turns on Ruflo's start-on-use unless
+ *  kit.json rufloDaemon.autoStart is false, then starts it (local-only
+ *  workers; AI workers stay opt-in upstream). */
+export async function startProjectDaemon(root, {
+  cfg, runner = runCmd, rufloVersion = installedRoutingVersion() ?? installedVersion('ruflo'), platform = process.platform,
+}) {
+  const intent = daemonIntent(cfg);
+  const r = reconcileRufloDaemon(root, { rufloVersion, platform, receipts: intent.receipts, autoStart: intent.autoStart });
+  if (r.config === 'written' || r.config === 'removed') ok(`ruflo daemon settings ${r.config} (.claude-flow/config.json, flat keys)`);
+  else if (r.config === 'user-managed') warn('.claude-flow/config.json is not ak-managed here (unreadable, or a key holds your own value); left as is');
+  if (r.autostart === 'enabled') ok('claudeFlow.daemon.autoStart → true (Ruflo starts the daemon on use; kit.json rufloDaemon.autoStart: false opts out)');
+  const d = await runner('ruflo', ['daemon', 'start'], { cwd: root, timeout: 60_000 });
   if (d.code === 0) {
     ok('daemon started (local-only workers; 12h TTL; AI workers opt-in: RUFLO_DAEMON_AI_WORKERS=1)');
   } else warn('daemon failed to start — try: ruflo daemon start');
-  const projSettingsFile = paths.projectSettings(root);
-  const ps = readJson(projSettingsFile);
-  if (ps?.claudeFlow?.daemon?.autoStart === true) {
-    ps.claudeFlow.daemon.autoStart = false;
-    writeJsonWithBackup(projSettingsFile, ps);
-    ok('claudeFlow.daemon.autoStart → false (explicit start only)');
-  }
 }
 
 /** Step 7: write-verification (store → actual on-disk row, then clean up).
@@ -731,7 +737,8 @@ export async function run_project({
   saveKitConfig(cfg);
   const env = projectMemoryEnv(root);
   await activateProjectMemoryAndSwarm(root, env);
-  await startProjectDaemon(root);
+  await startProjectDaemon(root, { cfg });
+  saveKitConfig(cfg);
   await verifyProjectMemoryWrite(root, env);
   const aqeEnabled = !!(cfg.aqe && !flags['no-aqe']);
   reportProjectGuidance(reconcileProjectGuidance({ root, prior: priorGuidance, aqeEnabled }));
