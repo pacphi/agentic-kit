@@ -62,6 +62,19 @@ test('the ledger is issue #243 in the ledger repository', () => {
   assert.match(errorsOf((doc) => { delete doc.watchPolicy.ledger.issue; }), /watchPolicy\.ledger/);
 });
 
+// Ledger writers are not "ours": watchPolicy.ours decides whose upstream
+// comment is our last word, so the workflow's bot login stays out of it.
+test('the ledger names who may write it, apart from our upstream logins', () => {
+  const policy = loadUpstreamRegistry({ now }).watchPolicy;
+  assert.deepEqual(policy.ledger.authors, ['pacphi', 'github-actions[bot]']);
+  assert.deepEqual(policy.ours, ['pacphi']);
+  assert.match(errorsOf((doc) => { delete doc.watchPolicy.ledger.authors; }), /watchPolicy\.ledger/);
+  assert.match(errorsOf((doc) => { doc.watchPolicy.ledger.authors = []; }), /watchPolicy\.ledger/);
+  const schema = JSON.parse(fs.readFileSync('docs/schemas/agentic-dependency-constraints.schema.json', 'utf8'));
+  const ledger = schema.properties.watchPolicy.properties.ledger;
+  assert.ok(ledger.required.includes('authors') && ledger.properties.authors.minItems === 1);
+});
+
 test('ruflo#3153 records that its third-party comments were reviewed', () => {
   const history = entry(document(), 'ruvnet/ruflo#3153').history;
   assert.ok(history.some((item) => item.event === 'reviewed' && item.date === '2026-09-27' && /sparkling/.test(item.note)));
