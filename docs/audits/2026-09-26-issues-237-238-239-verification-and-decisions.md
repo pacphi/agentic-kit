@@ -1301,7 +1301,9 @@ nothing was pushed, released or posted. The inline "Fixed on `fix/test-hermetici
   `~/.claude/settings.json`, `~/.claude.json`, `~/.codex/AGENTS.md`, `~/.codex/config.toml` and the
   OpenCode `AGENTS.md`; the repository's root `CLAUDE.md`, `AGENTS.md` and `.mcp.json`; and its
   `.claude`, `.swarm`, `.agentic-qe`, `.claude-flow` and `.harness` folders. Skills, agents and
-  plugin folders, `opencode.json`, the Hermes home and `~/.claude-flow/memory` are not watched.
+  plugin folders, `opencode.json`, the Hermes home and `~/.claude-flow/memory` are not watched;
+  the isolation helpers below keep tests away from them. When `CODEX_HOME` is set, its
+  `AGENTS.md` and `config.toml` are watched as well as `~/.codex`.
   Writers a live Claude Code, Ruflo or AQE session runs (including `~/.claude.json`) are listed but
   do not fail a local run; CI and `AK_TRIPWIRE_STRICT=1` fail on them.
 - **Isolation helpers.** `spawnEnv(home)` builds every spawned child's environment with all
@@ -1345,6 +1347,8 @@ folders behind per run (`1fa55698`).
 | `7d68c608` | test(opencode): say the tool-state redirect covers the config base too |
 | `6816b674` | fix(tripwire): watch the host and repo-root files ak writes and say what stays unwatched |
 | `916cf571` | test(spawn-env): fail on child_process calls that inherit process.env implicitly |
+| `520de5ac` | docs(audit): add the Branch 2 implementation status |
+| (this commit) | fix(tripwire): watch ~/.codex as well as CODEX_HOME and name the in-process helpers |
 
 ### Results
 

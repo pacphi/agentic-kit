@@ -58,6 +58,16 @@ test('CLAUDE_CONFIG_DIR moves settings.json but not ~/.claude.json, which Claude
   assert.ok(!dirs.includes('user-file:/home/dev/.claude/settings.json'));
 });
 
+test('CODEX_HOME adds its files without dropping ~/.codex, which is where ak writes (src/lib/paths.mjs:58-60)', () => {
+  const dirs = realStateRoots({
+    platform: 'linux', homedir: '/home/dev', repoRoot: '/src/kit', env: { CODEX_HOME: '/cx' },
+  }).map((r) => `${r.kind}:${r.dir}`);
+  for (const want of ['user-file:/cx/AGENTS.md', 'user-file:/cx/config.toml',
+    'user-file:/home/dev/.codex/AGENTS.md', 'user-file:/home/dev/.codex/config.toml']) {
+    assert.ok(dirs.includes(want), `missing ${want}`);
+  }
+});
+
 test('a rewritten repo-root guidance or MCP file is failing, even outside strict mode', (t) => {
   const home = tmp(t, 'ak-trip-repofile');
   const repo = path.join(home, 'repo');

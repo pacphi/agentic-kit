@@ -289,7 +289,7 @@ Windows), `~/.claude/CLAUDE.md`, `~/.claude/settings.json`, `~/.claude.json`,
 `.claude-flow` and `.harness` before and after the run. Any change fails the run and is listed
 by path. Other tool paths (skills, agents and plugin folders, `opencode.json`, the Hermes home,
 `~/.claude-flow/memory`) are not fingerprinted; `spawnEnv()` keeps spawned children away from
-them. Files a live Claude Code, Ruflo or AQE session writes during the run (including Claude
+them, and `sandboxHome()` and `redirectToolState()` do the same for in-process code. Files a live Claude Code, Ruflo or AQE session writes during the run (including Claude
 Code's own `~/.claude.json`) are listed as "concurrent writers" and do not fail a local run; CI
 (or `AK_TRIPWIRE_STRICT=1`) fails on them too. Every command also runs with
 `TMPDIR`/`TEMP`/`TMP` pointed at a fresh `ak-suite-*` folder: anything left in it afterwards fails the run and is

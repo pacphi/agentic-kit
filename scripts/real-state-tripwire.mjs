@@ -8,10 +8,11 @@
 // AGENTS.md and .mcp.json; and its .claude/.swarm/.agentic-qe/.claude-flow/
 // .harness folders. Not watched: skills, agents and plugin folders in those
 // homes, opencode.json, the Hermes home, ~/.claude-flow/memory and every other
-// tool path; spawnEnv() (tests/kit/helpers/home-sandbox.mjs) is what keeps
-// spawned children away from those. Four incidents wrote real state
-// (statusline version + env pins in the repo's .claude, the maintenance state,
-// a heal receipt); this turns the next one into a failure.
+// tool path. Tests are kept away from those by the helpers in
+// tests/kit/helpers/home-sandbox.mjs: spawnEnv() for spawned children,
+// sandboxHome() and redirectToolState() for in-process code. Four incidents
+// wrote real state (statusline version + env pins in the repo's .claude, the
+// maintenance state, a heal receipt); this turns the next one into a failure.
 // Imports only builtins: src/lib/paths.mjs snapshots os.homedir() at module
 // scope and must never be loaded here. Node 22.13+.
 import crypto from 'node:crypto';
@@ -53,7 +54,9 @@ export function realStateRoots({ env = process.env, platform = process.platform,
     ? env.APPDATA || p.join(homedir, 'AppData', 'Roaming')
     : env.XDG_CONFIG_HOME || p.join(homedir, '.config');
   const claudeHome = env.CLAUDE_CONFIG_DIR || p.join(homedir, '.claude');
-  const codexHome = env.CODEX_HOME || p.join(homedir, '.codex');
+  // ak writes ~/.codex (src/lib/paths.mjs:58-60); Codex itself honours CODEX_HOME.
+  // Watch both; the dedupe below collapses them when they are the same folder.
+  const codexHomes = [p.join(homedir, '.codex'), env.CODEX_HOME].filter(Boolean);
   const roots = [
     ...configBases.filter(Boolean).map((base) => ({ kind: 'config', dir: p.join(base, 'agentic-kit') })),
     ...stateBases.filter(Boolean).map((base) => ({ kind: 'state', dir: p.join(base, 'agentic-kit') })),
@@ -62,8 +65,7 @@ export function realStateRoots({ env = process.env, platform = process.platform,
     { kind: 'user-file', dir: p.join(claudeHome, 'CLAUDE.md') },
     { kind: 'user-file', dir: p.join(claudeHome, 'settings.json') },
     { kind: 'user-file', dir: p.join(homedir, '.claude.json') },
-    { kind: 'user-file', dir: p.join(codexHome, 'AGENTS.md') },
-    { kind: 'user-file', dir: p.join(codexHome, 'config.toml') },
+    ...codexHomes.flatMap((dir) => ['AGENTS.md', 'config.toml'].map((name) => ({ kind: 'user-file', dir: p.join(dir, name) }))),
     { kind: 'user-file', dir: p.join(primaryConfig, 'opencode', 'AGENTS.md') },
     // Project files ak writes at the repository root (src/lib/project-guidance.mjs,
     // the Codex AGENTS.md target in src/lib/blocks.mjs, .mcp.json in src/commands/setup.mjs).
