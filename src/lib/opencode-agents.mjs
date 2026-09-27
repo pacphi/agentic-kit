@@ -435,11 +435,28 @@ function agentReceiptDivergence(destDir, receiptMap) {
   });
 }
 
+/** Which stamp facts no longer match, in a fixed order: 'stamp' (none),
+ *  'source' (catalog source id), 'files' (projected file set), 'catalogue'
+ *  (lazy dispatcher vs full catalogue) and 'gateway' (managed gateway
+ *  families). The last two follow the lazy rUv gateway: while it is out of
+ *  date both read as off, so they change without any source change. */
+function agentStaleReasons({ stamp, source, filesDiverged, lazyCatalog, gatewayCapabilities }) {
+  if (!stamp) return ['stamp'];
+  const gateway = { ruflo: !!gatewayCapabilities.ruflo, aqe: !!gatewayCapabilities.aqe };
+  return [
+    stamp.source !== (source?.id ?? null) && 'source',
+    filesDiverged && 'files',
+    !!stamp.lazyCatalog !== !!lazyCatalog && 'catalogue',
+    !deepEqual(stamp.gateway ?? { ruflo: false, aqe: false }, gateway) && 'gateway',
+  ].filter(Boolean);
+}
+
 /** Assemble agentsStatus's final result object from its computed signals. */
 function agentsStatusResult({
   generatedCount, stamp, source, adoptionBlocked, adoptableFiles, stampAdoptable,
   contentDiverged, hasReceiptLedger, destDir, receiptMap, filesDiverged, lazyCatalog, gatewayCapabilities,
 }) {
+  const staleReasons = agentStaleReasons({ stamp, source, filesDiverged, lazyCatalog, gatewayCapabilities });
   return {
     count: generatedCount,
     stampedId: stamp?.source ?? null,
@@ -447,11 +464,8 @@ function agentsStatusResult({
     adoptable: !adoptionBlocked && (adoptableFiles.length > 0 || stampAdoptable),
     adoptionBlocked,
     modified: contentDiverged || (hasReceiptLedger && agentReceiptDivergence(destDir, receiptMap)),
-    stale: !stamp || stamp.source !== (source?.id ?? null) || filesDiverged
-      || !!stamp.lazyCatalog !== !!lazyCatalog
-      || !deepEqual(stamp.gateway ?? { ruflo: false, aqe: false }, {
-        ruflo: !!gatewayCapabilities.ruflo, aqe: !!gatewayCapabilities.aqe,
-      }),
+    stale: staleReasons.length > 0,
+    staleReasons,
   };
 }
 

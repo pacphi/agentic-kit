@@ -65,6 +65,25 @@ function artifactRow(subsystem, label, state, opts) {
   return okMessage ? row(subsystem, 'ok', okMessage) : null;
 }
 
+// A stale projection says which stamp fact diverged (opencode-agents.mjs
+// agentStaleReasons). Only a source change names both source ids; a projection
+// written for a gateway state that no longer holds names the gateway, since
+// its source did not change (Branch 0 real-machine pass, P4).
+function staleAgentsMessage(ag, gateway) {
+  const reasons = ag.staleReasons ?? [];
+  if (!reasons.length || reasons.includes('stamp') || reasons.includes('source')) {
+    return `${ag.count} agent projection files from ${ag.stampedId ?? 'unknown source'}, current source is ${ag.currentId ?? 'none'}`;
+  }
+  const causes = [];
+  if (reasons.includes('files')) causes.push('the projected file set changed on disk');
+  if (reasons.includes('catalogue') || reasons.includes('gateway')) {
+    causes.push(gateway.required && !gateway.current
+      ? 'they were written for the lazy rUv gateway, which is out of date'
+      : 'the gateway capabilities they were written for changed');
+  }
+  return `${ag.count} agent projection files from ${ag.currentId} are out of date: ${causes.join('; ')}`;
+}
+
 // The agents artifact doesn't fit the adoptable/foreign/absent/stale shape
 // above — its branches are counted-projection facts, not a single present/
 // current pair — so it keeps its own ladder, just lifted out of the mega
@@ -88,9 +107,7 @@ function opencodeAgentsRow({ ag, gateway, source }) {
     return row('opencode', 'info', `${ag.count} agent projection files include user edits — ak leaves those files alone`);
   }
   if (ag.stale) {
-    return row('opencode', 'warn',
-      `${ag.count} agent projection files from ${ag.stampedId ?? 'unknown source'}, current source is ${ag.currentId ?? 'none'}`,
-      'sync refreshes the agent projection');
+    return row('opencode', 'warn', staleAgentsMessage(ag, gateway), 'sync refreshes the agent projection');
   }
   return row('opencode', 'ok', lazyAgents
     ? `lazy specialist dispatcher current (${ag.currentId})`
