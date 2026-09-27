@@ -543,7 +543,8 @@ test('the fetcher explains an unauthenticated or missing gh plainly', async () =
 test('the fetcher reads a thread and its paginated comments through gh api', async () => {
   const fixture = threads['ruvnet/ruflo#3046'];
   const { exec, calls } = fakeExec([
-    [/issues\/3046\/comments/, { status: 0, stdout: JSON.stringify([fixture.comments.slice(0, 1), fixture.comments.slice(1)]), stderr: '' }],
+    // `--paginate --jq '.[]'` prints one comment per line across every page.
+    [/issues\/3046\/comments/, { status: 0, stdout: `${fixture.comments.map((comment) => JSON.stringify(comment)).join('\n')}\n`, stderr: '' }],
     [/issues\/3046$/, { status: 0, stdout: JSON.stringify(fixture.issue), stderr: '' }],
     [/^npm view agentic-qe/, { status: 0, stdout: JSON.stringify(npm['agentic-qe']), stderr: '' }],
   ]);
@@ -551,7 +552,9 @@ test('the fetcher reads a thread and its paginated comments through gh api', asy
   const thread = await fetcher.thread('ruvnet/ruflo#3046');
   assert.equal(thread.issue.number, 3046);
   assert.equal(thread.comments.length, fixture.comments.length);
-  assert.ok(calls.some((call) => call.includes('--paginate') && call.includes('--slurp')));
+  // gh 2.45 (apt on Ubuntu 24.04) has no --slurp; --jq '.[]' works on every gh 2.x.
+  const comments = calls.find((call) => call.includes('/comments'));
+  assert.ok(comments.includes('--paginate') && comments.includes("--jq .[]") && !comments.includes('--slurp'), comments);
   assert.equal((await fetcher.release({ channel: 'npm', name: 'agentic-qe' })).latest, '3.14.3');
   await assert.rejects(fetcher.thread('ruvnet/ruflo#1'), /unexpected call/);
 });

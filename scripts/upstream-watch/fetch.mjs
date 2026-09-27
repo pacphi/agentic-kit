@@ -79,8 +79,18 @@ export function createFetcher({ exec = run } = {}) {
       const [, repo, number] = ID.exec(id) ?? [];
       if (!repo) throw new Error(`not an owner/repo#number id: ${id}`);
       const issue = await json('gh', ['api', `repos/${repo}/issues/${number}`]);
-      const pages = await json('gh', ['api', '--paginate', '--slurp', `repos/${repo}/issues/${number}/comments?per_page=100`]);
-      return { issue, comments: pages.flat() };
+      return { issue, comments: await this.comments(repo, number) };
+    },
+    /**
+     * Every comment on an issue, across pages. `--jq '.[]'` prints one comment
+     * per line; `--slurp` would need gh 2.48, newer than apt's gh on Ubuntu 24.04.
+     */
+    async comments(repo, number) {
+      if (!OWNER_REPO.test(repo ?? '') || !/^[1-9]\d*$/.test(String(number))) throw new Error(`not an issue: ${repo}#${number}`);
+      const args = ['api', '--paginate', '--jq', '.[]', `repos/${repo}/issues/${number}/comments?per_page=100`];
+      const result = await exec('gh', args);
+      if (result.status !== 0) throw new Error(`gh ${args.join(' ')} failed: ${(result.stderr || result.error?.message || 'no output').trim()}`);
+      return result.stdout.split('\n').filter((line) => line.trim()).map((line) => JSON.parse(line));
     },
     /** Merged pull requests (or the closing commit) that fixed a thread; empty when none qualifies. */
     async fixingChanges(id) {
