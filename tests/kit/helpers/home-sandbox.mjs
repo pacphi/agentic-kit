@@ -67,18 +67,23 @@ export function spawnEnv(home, extra = {}) {
 
 /**
  * For in-process tests whose code under test spawns tools with process.env:
- * point XDG state/data/cache, LOCALAPPDATA and TMPDIR/TEMP/TMP at a fresh folder
- * under os.tmpdir(); restore() puts the old values back and removes it.
+ * point the config base (XDG_CONFIG_HOME, and APPDATA on Windows), XDG
+ * state/data/cache, LOCALAPPDATA and TMPDIR/TEMP/TMP at a fresh folder under
+ * os.tmpdir(); restore() puts the old values back and removes it. OpenCode
+ * creates <config>/opencode on start, so the config base must move too.
  * @param {string} prefix
  * @returns {{ base: string, restore: () => void }}
  */
 export function redirectToolState(prefix) {
   const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-tools-`)));
-  const keys = ['XDG_STATE_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'LOCALAPPDATA', 'TMPDIR', 'TEMP', 'TMP'];
+  const keys = ['XDG_CONFIG_HOME', 'APPDATA', 'XDG_STATE_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'LOCALAPPDATA',
+    'TMPDIR', 'TEMP', 'TMP'];
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
   const tmp = path.join(base, 'tmp');
   fs.mkdirSync(tmp);
+  const cfg = path.join(base, 'config');
   Object.assign(process.env, {
+    XDG_CONFIG_HOME: cfg, APPDATA: cfg,
     XDG_STATE_HOME: path.join(base, 'state'), XDG_DATA_HOME: path.join(base, 'data'),
     XDG_CACHE_HOME: path.join(base, 'cache'), LOCALAPPDATA: path.join(base, 'localappdata'),
     TMPDIR: tmp, TEMP: tmp, TMP: tmp,
