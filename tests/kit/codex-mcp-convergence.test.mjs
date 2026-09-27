@@ -317,3 +317,37 @@ test('the kit-managed browser env child is folded into the placeholder and Codex
   assert.equal(again.result, 0, again.out);
   assert.equal(fs.readFileSync(file, 'utf8'), source, 'a converged placeholder is left alone');
 });
+
+// F4 (Branch 3 fix round 2): Codex's Claude import copies Claude Code's
+// claude-flow entry by name. Since B3-D1 that entry is ak's launcher in
+// Claude mode, so a machine without the placeholder gains a second Ruflo
+// transport in Codex. ak recognizes its own launcher form under that name
+// and disables it in place, exactly like the older `ruflo mcp start` alias.
+test('an imported Claude launcher entry is disabled in place like the legacy alias', async () => {
+  const browser = managedAgentBrowserEnv().AGENT_BROWSER_CONFIG;
+  const imported = '[mcp_servers.claude-flow]\ncommand = "ak"\nargs = ["x", "ruflo-mcp", "--host", "claude"]\n'
+    + `\n[mcp_servers.claude-flow.env]\nAGENT_BROWSER_CONFIG = ${JSON.stringify(browser)}\n\n`;
+  for (const source of [canonical + imported + unrelated, canonical + imported.split('\n[mcp_servers.claude-flow.env]')[0] + '\n' + unrelated]) {
+    seed(source);
+    assert.equal(inspect().duplicateRuflo, true);
+    const result = await run({ yes: true });
+    assert.equal(result.result, 0, result.out);
+    const after = fs.readFileSync(file, 'utf8');
+    assert.ok(after.includes(LEGACY_RUFLO_PLACEHOLDER), after);
+    assert.doesNotMatch(after, /mcp_servers\.claude-flow\.env/, 'no orphaned child table');
+    assert.ok(after.includes(unrelated));
+    assert.equal(inspect().duplicateRuflo, false);
+    assert.equal(disabledAlias()?.enabled, false);
+  }
+  // The approval is remembered for this exact form, like the legacy alias's.
+  fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(LEGACY_RUFLO_PLACEHOLDER, imported.split('\n\n[mcp_servers')[0]));
+  const again = await run({ confirm: async () => { throw new Error('must reuse the remembered correction'); } });
+  assert.equal(again.result, 0, again.out);
+  assert.equal(inspect().duplicateRuflo, false);
+});
+
+test('a launcher entry for Codex under the claude-flow name stays the user\'s', () => {
+  seed(canonical + '[mcp_servers.claude-flow]\ncommand = "ak"\nargs = ["x", "ruflo-mcp"]\n');
+  assert.equal(inspect().duplicateRuflo, true);
+  assert.equal(inspect().registrations.find((entry) => entry.name === 'claude-flow').repairKind, null);
+});

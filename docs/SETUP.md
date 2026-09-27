@@ -146,8 +146,9 @@ their supported initializer arguments. AQE owns and updates its guidance block.
 Setup with Codex enabled inventories the effective user Codex MCP configuration
 even in machine-only mode. When project setup is active it inventories that
 project's Codex MCP configuration too. An exact recursive
-`[mcp_servers.codex]` entry and the exact deprecated `claude-flow` Ruflo
-transport are listed in the setup trust manifest, backed up, corrected only after
+`[mcp_servers.codex]` entry and an exact `claude-flow` Ruflo alias (the deprecated
+`ruflo mcp start` transport, or a copy of Claude Code's `ak x ruflo-mcp --host claude`
+registration that Codex's Claude import added) are listed in the setup trust manifest, backed up, corrected only after
 the setup confirmation (or `--yes`), and re-probed before setup may report
 success. The recursive entry is removed; the `claude-flow` alias is replaced by a
 disabled placeholder so Codex's Claude config import cannot add it back. A fresh recovery copy captures the immediate pre-repair bytes; symlinked

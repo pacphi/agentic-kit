@@ -281,14 +281,24 @@ function codexMcpSections(file, scope) {
     let repairKind = null;
     if (exactFields && !hasChildren && name === 'codex' && command === 'codex'
       && sameArgs(args, ['mcp-server'])) repairKind = 'recursive-codex';
-    if (exactFields && (!hasChildren || managedBrowserChild) && name === 'claude-flow' && command === 'ruflo'
-      && sameArgs(args, ['mcp', 'start'])) repairKind = 'legacy-ruflo';
+    if (exactFields && (!hasChildren || managedBrowserChild) && claudeFlowAlias({ name, command, args })) {
+      repairKind = 'legacy-ruflo';
+    }
     return [{
       name, scope, file, command, args, enabled, repairKind, regularFile,
       fingerprint: fingerprint(source.slice(header.index, bodyEnd)),
       start: header.index, end: blockEnd, source,
     }];
   });
+}
+
+/** A Codex `claude-flow` table that is a copy of an ak Claude Code
+ *  registration: ak's earlier `ruflo mcp start`, or, since B3-D1, ak's
+ *  launcher in Claude mode. Codex's Claude import copies Claude's servers by
+ *  name, so either form duplicates the canonical [mcp_servers.ruflo]. */
+function claudeFlowAlias({ name, command, args }) {
+  if (name !== 'claude-flow') return false;
+  return (command === 'ruflo' && sameArgs(args, ['mcp', 'start'])) || isAkLauncher({ command, args }, 'claude');
 }
 
 function codexMcpRegistrations(file, scope) {
@@ -357,7 +367,9 @@ export function codexMcpRepairPlan(topology) {
   }
   for (const entry of topology.rufloRegistrations.filter((candidate) =>
     candidate.regularFile && candidate.repairKind === 'legacy-ruflo')) {
-    add(entry, 'replaces the deprecated legacy Ruflo transport with canonical workspace-aware [mcp_servers.ruflo]');
+    add(entry, entry.command === 'ak'
+      ? 'disables a copy of Claude Code\'s claude-flow registration; canonical workspace-aware [mcp_servers.ruflo] serves Codex'
+      : 'replaces the deprecated legacy Ruflo transport with canonical workspace-aware [mcp_servers.ruflo]');
   }
   return targets;
 }
@@ -393,10 +405,7 @@ function validRepairTarget(target) {
     return target.name === 'codex' && target.command === 'codex'
       && sameArgs(target.args, ['mcp-server']);
   }
-  if (target.repairKind === 'legacy-ruflo') {
-    return target.name === 'claude-flow' && target.command === 'ruflo'
-      && sameArgs(target.args, ['mcp', 'start']);
-  }
+  if (target.repairKind === 'legacy-ruflo') return claudeFlowAlias(target);
   return false;
 }
 
