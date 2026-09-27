@@ -134,6 +134,38 @@ test('harvest runs from the project memory root with the project memory pin', as
   assert.equal(calls.length, 0, 'a dry run spawns nothing');
 });
 
+// B3-D1: from a folder that is not a project (the home folder, a temporary
+// root, a tool's own folder), harvest uses the one user-level store the
+// hosts' launcher uses there: flat, with no .swarm below it, and pinned
+// through both memory variables.
+test('harvest outside a project uses the user-level store the launcher uses', async () => {
+  const { memoryProjectRoot } = await import('../../src/lib/ruflo-memory.mjs');
+  const store = paths.userMemoryDir(paths.home);
+  const calls = [];
+  const runner = async (cmd, args, opts) => { calls.push({ cmd, args, opts }); return { code: 0, stdout: '', stderr: '' }; };
+  const res = await harvest.runHarvest({ runner, cwd: HOME, distill: true });
+  assert.equal(res.ok, true);
+  assert.equal(res.root, store);
+  for (const { opts } of calls) {
+    assert.equal(opts.cwd, store);
+    assert.equal(opts.env.CLAUDE_FLOW_DB_PATH, path.join(store, 'memory.db'), 'flat: no .swarm under the user-level store');
+    assert.equal(opts.env.CLAUDE_FLOW_MEMORY_PATH, store);
+  }
+  assert.deepEqual(calls[1].args, ['memory', 'distill', 'run', '--db', path.join(store, 'memory.db')]);
+  assert.deepEqual(harvest.planHarvest({ cwd: HOME, distill: true })[1].args.at(-1), path.join(store, 'memory.db'));
+  const dry = await harvest.runHarvest({ runner, cwd: HOME, dryRun: true });
+  assert.equal(dry.root, store);
+
+  calls.length = 0;
+  const sub = path.join(PROJECT, 'packages', 'other');
+  fs.mkdirSync(sub, { recursive: true });
+  await harvest.runHarvest({ runner, cwd: sub, distill: true });
+  assert.equal(calls[0].opts.cwd, PROJECT);
+  assert.equal(calls[0].opts.env.CLAUDE_FLOW_DB_PATH, paths.projectMemoryDb(PROJECT), 'a repository keeps <repo>/.swarm');
+  assert.equal(calls[0].opts.env.CLAUDE_FLOW_MEMORY_PATH, undefined);
+  assert.equal(memoryProjectRoot(HOME), fs.realpathSync(HOME), 'the daemons row for the home folder is unchanged');
+});
+
 // contracts-2: Ruflo's `memory distill run` exits 0 for every skip
 // (@claude-flow/cli 3.45.0 commands/memory-distill.js), including an
 // exception, a corrupt store and no native SQLite. Those mean distillation

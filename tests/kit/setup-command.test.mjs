@@ -810,3 +810,24 @@ test("project setup turns init's autoStart false on and records the old value", 
   assert.equal(cfg.rufloDaemon.receipts[path.resolve(project)].autostartBefore, false);
   rmrf(project);
 });
+
+// B3-D1: outside a project (the home folder, a temporary root, a tool's own
+// folder) there is no project to set up: ak's launcher uses the one
+// user-level store there, so `ak setup --project` refuses instead of running
+// `ruflo init` and creating .swarm/, .claude/ and a daemon in that folder.
+test('project setup from the home folder refuses before spawning anything', async () => {
+  seedHome();
+  const beforeHome = snapshot(HOME);
+  const cwd = process.cwd();
+  process.chdir(HOME);
+  try {
+    for (const dryRun of [false, true]) {
+      const { result, out } = await captureLog(() =>
+        setup.run_project({ flags: FLAGS({ project: true, yes: true, 'dry-run': dryRun }), cfg: loadKitConfig(), trustDisclosed: true }));
+      assert.equal(result, false, out);
+      assert.match(out, /this folder is the home folder; run ak setup from a project folder/);
+      assert.doesNotMatch(out, /would init/);
+    }
+  } finally { process.chdir(cwd); }
+  assertUnchanged(beforeHome, HOME, 'a refused project setup writes nothing');
+});

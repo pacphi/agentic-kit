@@ -86,10 +86,11 @@ export function rufloMemoryLocation(cwd = process.cwd(), {
   return { kind: 'user', root: dir, dir, db: p.join(dir, 'memory.db'), reason };
 }
 
-/** The project root every ak memory contract pins: the launcher's root for a
- *  project or plain folder. Outside any usable folder (the user-level store's
- *  cases) it stays the repository root or folder, for the callers that are not
- *  the Codex launcher (Claude-side harvest and setup; a follow-up decision). */
+/** The project root the daemon lookup (status/sections/daemons.mjs) and
+ *  projectMemoryEnv pin: the launcher's root for a project or plain folder.
+ *  Outside any usable folder (the user-level store's cases) it stays the
+ *  repository root or folder. The launcher and harvest no longer use it: they
+ *  follow rufloMemoryLocation directly, and project setup refuses there. */
 export function memoryProjectRoot(cwd = process.cwd(), options = {}) {
   const location = rufloMemoryLocation(cwd, options);
   return location.kind === 'user' ? fs.realpathSync(paths.repoRoot(cwd) ?? cwd) : location.root;

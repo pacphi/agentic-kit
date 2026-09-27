@@ -38,7 +38,7 @@ import * as rb from '../lib/ruvnet-brain.mjs';
 import { ensureAgentBrowser } from '../lib/agent-browser.mjs';
 import { readJson, writeJsonWithBackup } from '../lib/settings.mjs';
 import { findMemoryEntry, removeMemoryProbe } from '../lib/project-memory.mjs';
-import { projectMemoryEnv } from '../lib/ruflo-memory.mjs';
+import { projectMemoryEnv, rufloMemoryLocation } from '../lib/ruflo-memory.mjs';
 import { reconcileMemoryPin } from '../lib/claude-env-projection.mjs';
 import { reconcileRufloComponents } from '../lib/ruflo-components/apply.mjs';
 import { daemonIntent, reconcileRufloDaemon } from '../lib/ruflo-daemon-config.mjs';
@@ -729,6 +729,14 @@ export async function run_project({
 }) {
   const root = process.cwd();
   heading(`project setup — ${root}`);
+  // B3-D1: the filesystem root, the home folder, a temporary root or a tool's
+  // own folder is not a project: ak's launcher sends Ruflo there to the one
+  // user-level store, so a project init here would only leave stray stores.
+  const location = rufloMemoryLocation(root);
+  if (location.kind === 'user') {
+    fail(`this folder is ${location.reason}; run ak setup from a project folder`);
+    return false;
+  }
   if (!trustDisclosed) discloseSetupTrust(cfg, { project: true });
   if (flags['dry-run']) { info('dry-run: would init, sanitize, pin DB path, activate memory/swarm/daemon, verify, apply managed ruflo components'); return true; }
 
