@@ -127,7 +127,9 @@ Builds a plan from the same collector \`ak status\` uses, then applies it in
 order: upgrades first (they wipe native modules), then heals, then re-collects
 to prove convergence. Idempotent — safe to run any time. When in doubt, run this.
 Only fixes a sync step performs are planned; a status row marked "→ manual:"
-(a command you run, a file you edit, a login) is counted but never applied.
+(a command you run, a file you edit, a login) is never applied. A failing or
+warning one is counted as a manual step you must take; an info-level one is
+not.
 A planned fix whose row is still there after the apply phase is reported as
 "unresolved: [subsystem] fix — reason", and sync exits 1.
 

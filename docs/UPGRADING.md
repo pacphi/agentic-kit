@@ -48,7 +48,10 @@ depended on unrelated drift. Each failing or warning manual row is now listed af
 under "needs your action", and `ak sync --json` lists them in a `needsYourAction` array of
 `{ "subsystem", "level", "message", "fix" }`. When a failing manual row remains, the verdict reads
 "converged — nothing left that sync can repair". A job that relied on `ak sync` failing for such a
-row should read `needsYourAction`, or run `ak status`, which still reports overall health.
+row should read `needsYourAction`, or run `ak status`, which still reports overall health. An
+info-level manual row (for example, the AQE readiness reminder) is invisible to the manual-step
+note and to `needsYourAction` alike; if that is the only thing left, sync now reports "nothing to
+do — all subsystems healthy" instead of counting it as a manual step.
 
 ## 2026-09-26: ak records and reverses its edits inside Ruflo's install
 
