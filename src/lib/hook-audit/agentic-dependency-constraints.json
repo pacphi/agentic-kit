@@ -1,6 +1,6 @@
 {
   "schemaVersion": 5,
-  "lastVerifiedAt": "2026-09-26",
+  "lastVerifiedAt": "2026-09-27",
   "recheckPolicy": {
     "cadence": "weekly-and-before-upgrade",
     "staleAfterDays": 14,
@@ -1861,6 +1861,31 @@
       "history": [
         { "date": "2026-09-26", "event": "filed" },
         { "date": "2026-09-26", "event": "registered" }
+      ]
+    },
+    {
+      "id": "stuinfla/ruvnet-brain#335",
+      "url": "https://github.com/stuinfla/ruvnet-brain/issues/335",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "forge-update permanently stuck once kb.bak-*/kb.install-preserved-* accumulate; no reclaim/prune command exists",
+      "dependency": "ruvnet-brain",
+      "doneWhen": {
+        "state": "closed-completed",
+        "release": { "channel": "github-release", "name": "stuinfla/ruvnet-brain", "minVersion": null }
+      },
+      "mapping": "mapped",
+      "kitImpact": {
+        "refs": ["ADR-0061: brain reclaim-stuck remediation"],
+        "files": ["src/commands/status/sections/ruvnet-brain.mjs", "src/lib/heal.mjs"]
+      },
+      "adjustment": "Once a released Brain ships a reclaim/prune command, prefer it in the reclaim-stuck remediation text over the --uninstall + reinstall workaround (ADR-0061) — it is cheaper (no full re-download) and can reason about snapshots this session could not prove safe by hand.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "filed" },
+        { "date": "2026-09-27", "event": "commented" },
+        { "date": "2026-09-27", "event": "registered" }
       ]
     },
     {
