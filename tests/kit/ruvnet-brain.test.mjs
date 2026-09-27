@@ -249,3 +249,21 @@ test('legacySnapshotBytes: a file cap hit still reports a count and a lower-boun
   assert.ok(capped.bytes < full.bytes, 'a lower bound, not the true total');
   fs.rmSync(tmp, { recursive: true, force: true });
 });
+
+test('legacySnapshotBytes: an unreadable snapshot dir keeps bytes honestly null, not a false zero', {
+  skip: process.platform === 'win32' || process.getuid?.() === 0,
+}, () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rb-legacy-unreadable-'));
+  const dir = path.join(tmp, 'kb.bak-2026-07-01T00-00-00-000Z');
+  fs.mkdirSync(dir);
+  fs.writeFileSync(path.join(dir, 'a.rvf'), 'x'.repeat(100));
+  fs.chmodSync(dir, 0o000);
+  try {
+    const s = legacySnapshotBytes(tmp);
+    assert.equal(s.count, 1, 'the dir is still counted even though its contents cannot be read');
+    assert.equal(s.bytes, null, 'no real number could be summed — must not report a false 0');
+  } finally {
+    fs.chmodSync(dir, 0o755);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

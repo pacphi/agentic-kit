@@ -98,13 +98,16 @@ export function legacySnapshotBytes(root = path.dirname(kbDir()), { fileCap = LE
   const dirs = names.filter((e) => e.isDirectory() && LEGACY_SNAPSHOT.test(e.name));
   const budget = { files: fileCap };
   let bytes = 0;
+  let summed = false; // at least one dir actually contributed a real number
   let exhausted = false;
   for (const d of dirs) {
     const r = dirBytes(path.join(root, d.name), budget);
-    if (r.bytes != null) bytes += r.bytes;
+    if (r.bytes != null) { bytes += r.bytes; summed = true; }
     if (r.exhausted) { exhausted = true; break; }
   }
-  return { count: dirs.length, bytes: dirs.length ? bytes : null, exhausted };
+  // dirs.length > 0 with every one unreadable must stay null, not a false "0
+  // bytes" — this row exists specifically to report disk cost honestly.
+  return { count: dirs.length, bytes: summed ? bytes : null, exhausted };
 }
 
 const pluginMarketplace = () =>
