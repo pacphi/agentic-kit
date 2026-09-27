@@ -277,15 +277,17 @@ export async function verifySecurity({ runner = runCmd } = {}) {
  * The live embedding request against the selected backend — the check `ak x
  * verify aqe` runs and `ak status --live` reuses. `corpus` also reads the
  * project's stored provenance (read-only); --live skips it to stay quick.
- * @param {{cfg?:any,cwd?:string,corpus?:boolean}} [options]
+ * @param {{cfg?:any,cwd?:string,corpus?:boolean,probe?:typeof probeAqeEmbeddings}} [options]
  */
-export async function checkAqeEmbedding({ cfg = loadKitConfig(), cwd = process.cwd(), corpus = true } = {}) {
+export async function checkAqeEmbedding({ cfg = loadKitConfig(), cwd = process.cwd(), corpus = true, probe = probeAqeEmbeddings } = {}) {
   const resolved = resolveAqeEmbedding(cfg);
   const embedding = aqeEmbeddingConfiguration({ env: resolved.env });
   const backend = resolved.mode === 'in-process' || embedding.backend === 'in-process' ? 'in-process' : 'endpoint';
-  const live = await probeAqeEmbeddings({ packageRoot: aqeRoot(), env: resolved.env, backend,
+  const live = await probe({ packageRoot: aqeRoot(), env: resolved.env, backend,
     ...(corpus ? { corpusPath: path.join(projectAqeDir(cwd), 'memory.db') } : {}) });
-  (live.status === 'passed' ? ok : fail)(`live embedding request: ${live.status}; reason=${live.reason ?? 'none'}; dimension=${live.dimension ?? 'unknown'}`);
+  // A pass proves the embedder, not AQE's pattern index binding (agentic-qe#754).
+  if (live.status === 'passed') ok(`embedder verified: live embedding request passed; dimension=${live.dimension ?? 'unknown'}; AQE pattern index binding unverified (agentic-qe#754)`);
+  else fail(`live embedding request: ${live.status}; reason=${live.reason ?? 'none'}; dimension=${live.dimension ?? 'unknown'}`);
   return live;
 }
 

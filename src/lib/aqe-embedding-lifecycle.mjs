@@ -97,7 +97,8 @@ export async function prepareAqeEmbedding(cfg, {
   const evidence = await probe({ packageRoot, env: resolved.env, backend: resolved.mode });
   if (evidence.status === 'passed') {
     return { ok: true, changed, status: 'ok', evidence,
-      detail: 'synthetic embedding probe passed (384 dimensions); existing corpus compatibility remains separate' };
+      // agentic-qe#754: the embedder is proven, not AQE's pattern index binding.
+      detail: 'embedder verified (384 dimensions); AQE pattern index binding and existing corpus compatibility remain separate' };
   }
   const coaching = evidence.reason === 'endpoint-unreachable'
     ? await unreachableCoaching(resolved, ollamaInstalled) : AQE_EMBEDDING_COACHING;

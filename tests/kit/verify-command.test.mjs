@@ -356,4 +356,11 @@ test('aqeEmbeddingManaged: only an endpoint or in-process choice with AQE on', (
   assert.equal(live({ aqeEmbedding: { mode: 'unmanaged' } }), false);
 });
 
+test('a passing live embedding request says the embedder is verified, not the pattern index', async () => {
+  seedHome(offlineKitConfig({ aqeEmbedding: MANAGED_EMBEDDING }));
+  const probe = async () => ({ status: 'passed', reason: null, dimension: 384 });
+  const { out } = await captureLog(() => verify.checkAqeEmbedding({ cwd: PROJECT, corpus: false, probe }));
+  assert.match(out, /✓ embedder verified: live embedding request passed; dimension=384; AQE pattern index binding unverified \(agentic-qe#754\)/);
+});
+
 test.after(() => rmrf(HOME, PROJECT));

@@ -31,7 +31,9 @@ export function embeddingRows(cfg, cwd, resolved, backend, projection, {
       const evidenceLevel = liveCheckLevel(evidence);
       const level = !projection.ok ? 'warn' : evidenceLevel === 'ok' && fix ? 'info' : evidenceLevel;
       return row('aqe-embedding', level,
-        `${resolved.mode}; backend ${backend.status}; ${describeLiveCheck(evidence, { recheck: 'ak x verify aqe' })}; corpus compatibility unverified${projectionNote}`,
+        // A pass proves the embedder only: AQE 3.14.4 does not bind its pattern
+        // index to a configured embedder (agentic-qe#754), and the corpus is separate.
+        `${resolved.mode}; backend ${backend.status}; ${describeLiveCheck(evidence, { recheck: 'ak x verify aqe', passed: 'embedder verified' })}${evidence.status === 'passed' && !evidence.invalidated ? '; AQE pattern index binding unverified (agentic-qe#754)' : ''}; corpus compatibility unverified${projectionNote}`,
         fix);
     })();
   if (conflicts.length === 0) return [main];

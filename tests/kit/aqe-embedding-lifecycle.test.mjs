@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { prepareAqeEmbedding } from '../../src/lib/aqe-embedding-lifecycle.mjs';
 
 const local = { aqe: true, aqeEmbedding: { mode: 'endpoint', endpoint: 'http://127.0.0.1:11434', provisioning: 'ollama' } };
@@ -129,4 +131,26 @@ test('read-only verification can inspect an explicit ambient endpoint without en
     request: async () => assert.fail() });
   assert.equal(r.status, 'ok');
   assert.deepEqual(cfg, {});
+});
+
+// agentic-qe#754: a passing probe proves the embedder, not AQE's pattern index
+// binding (3.14.4 refuses to open its ANN index without runtime provenance).
+test('a passing probe says the embedder is verified, and names what stays separate', async () => {
+  const r = await prepareAqeEmbedding(local, { probe: pass, request: async () => ({ models: [{ name: 'Xenova/all-MiniLM-L6-v2:latest' }] }) });
+  assert.equal(r.ok, true);
+  assert.equal(r.detail, 'embedder verified (384 dimensions); AQE pattern index binding and existing corpus compatibility remain separate');
+});
+
+test('no src/ surface claims AQE pattern search works', () => {
+  const offenders = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (/\.(mjs|cjs|js)$/.test(entry.name)
+        && /pattern search (is )?working|semantic search (is )?ready/i.test(fs.readFileSync(full, 'utf8'))) offenders.push(full);
+    }
+  };
+  walk('src');
+  assert.deepEqual(offenders, []);
 });

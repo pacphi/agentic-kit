@@ -12,6 +12,7 @@
 - **Updated:** 2026-09-26 — one AQE MCP transport recognizer for Claude, Codex and OpenCode now accepts all of AQE's own start commands; see the amendment below (#237, audit decision 3)
 - **Updated:** 2026-09-26 — temporary: agentic-qe ≤ 3.14.3's live-owner contention sequence (lock warning, live-owner quarantine refusal, then `FsyncFailed` from its create attempt) classifies as busy, not a storage failure; removed when the AQE release carrying agentic-qe#719 is the kit floor ([#240](https://github.com/pacphi/agentic-kit/issues/240), audit decision 7)
 - **Updated:** 2026-09-27 — the recognizer accepts every plain npx spelling of AQE's server (optional `-y`/`--yes`; unversioned, `@latest` or an exact version), audit item 5 choice A
+- **Updated:** 2026-09-27 — a passing embedding check reads "embedder verified"; status, `ak x verify aqe` and setup say AQE's pattern index binding stays unverified (agentic-qe#754) and corpus compatibility stays separate
 - **Related:** [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),
   [September repair](../audits/2026-09-09-aqe-integration-repair.md)
 

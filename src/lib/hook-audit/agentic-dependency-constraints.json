@@ -2594,7 +2594,7 @@
       "dependency": "agentic-qe",
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
       "mapping": "mapped",
-      "kitImpact": {"refs": ["investigation aqe-rvf-flag-vector-space", "Branch 5: embedding verify says embedder verified, not pattern search working"], "files": []},
+      "kitImpact": {"refs": ["investigation aqe-rvf-flag-vector-space", "Branch 5: embedding verify says embedder verified, not pattern search working"], "files": ["src/commands/status/sections/aqe.mjs", "src/commands/x/verify.mjs", "src/lib/aqe-embedding-lifecycle.mjs"]},
       "adjustment": "Once a released agentic-qe binds the pattern index with a configured embedder, ak may report semantic pattern search as working after a live check.",
       "status": "watching",
       "constraintIds": [],

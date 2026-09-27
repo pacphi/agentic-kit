@@ -60,6 +60,13 @@ ak x aqe-embedding configure --aqe-embedding-mode in-process --yes
 ak x aqe-embedding configure --aqe-embedding-mode unmanaged --yes
 ```
 
+A passing check proves the embedder: ak sends synthetic text and gets a vector of
+the expected size back. It does not prove that AQE's pattern index uses that
+embedder. AQE 3.14.4 does not bind its pattern index when an embedder endpoint is
+configured ([agentic-qe#754](https://github.com/proffesor-for-testing/agentic-qe/issues/754)),
+so `ak status` reads "embedder verified; AQE pattern index binding unverified", and
+compatibility with vectors already stored in the project is a separate question.
+
 In-process transformers are an explicit security opt-in in AQE's published
 runtime. Consult the installed AQE guidance and dependency advisories before
 installing its optional package. Read-only verification never downloads weights;
