@@ -51,7 +51,7 @@ ak x aqe-embedding verify
 | Local Ollama | Recommended local, no-key setup | Downloads missing MiniLM and alias after consent; tests the selected service |
 | Existing endpoint | Shared or separately operated service | Preserves selection, projects configuration and tests synthetic text; never manages remote models |
 | In-process | Explicit upstream transformer-package opt-in | Tests the installed backend and existing cache; does not install the security-sensitive optional package |
-| Unmanaged | Operator owns configuration, or semantic learning is deferred | Restores only unchanged owned projection values; makes no semantic readiness claim |
+| Unmanaged | Operator owns configuration, or semantic learning is deferred | Restores only unchanged owned projection values; makes no semantic readiness claim; `ak x verify aqe` still runs and prints the embedding request but does not record its result for `ak status` |
 
 ```sh
 ak x aqe-embedding configure --aqe-embedding-endpoint https://embed.example --yes

@@ -311,8 +311,12 @@ test('an aqe proof stopped before the embedding request remembers no embedding r
   }
 });
 
+// A backend the kit manages (endpoint or in-process); the unreachable port keeps the
+// request from touching any real embedder.
+const MANAGED_EMBEDDING = { mode: 'endpoint', endpoint: 'http://127.0.0.1:9', provisioning: 'external' };
+
 test('the aqe proof remembers its live embedding request, keyed like status reads it', async () => {
-  seedHome();
+  seedHome(offlineKitConfig({ aqeEmbedding: MANAGED_EMBEDDING }));
   rmrf(evidence.liveCheckDir());
   const { out } = await runVerify(['aqe']);
   assert.match(out, /live embedding request: /);
@@ -322,6 +326,34 @@ test('the aqe proof remembers its live embedding request, keyed like status read
   assert.equal(got.source, 'verify');
   assert.equal(got.status, 'failed', 'no AQE runtime in the sandbox: the request cannot pass');
   assert.equal(got.invalidated, false);
+});
+
+// An unmanaged backend is probed and printed, but its failure is not the kit's
+// evidence: status would otherwise show a failure for a backend it does not own.
+for (const [label, extra] of [
+  ['an unmanaged AQE backend', { aqeEmbedding: { mode: 'unmanaged' } }],
+  ['no AQE embedding choice', {}],
+  ['AQE turned off', { aqe: false, aqeEmbedding: MANAGED_EMBEDDING }],
+]) {
+  test(`the aqe proof prints but does not remember the embedding request for ${label}`, async () => {
+    seedHome(offlineKitConfig(extra));
+    rmrf(evidence.liveCheckDir());
+    const { out } = await runVerify(['aqe']);
+    assert.match(out, /✗ live embedding request: unavailable/, 'the failed request is still printed');
+    assert.equal(evidence.readLiveCheck('aqe-embedding', {}), null);
+  });
+}
+
+test('aqeEmbeddingManaged: only an endpoint or in-process choice with AQE on', () => {
+  assert.equal(verify.aqeEmbeddingManaged({ aqeEmbedding: MANAGED_EMBEDDING }), true);
+  assert.equal(verify.aqeEmbeddingManaged({ aqeEmbedding: { mode: 'in-process' } }), true);
+  assert.equal(verify.aqeEmbeddingManaged({ aqeEmbedding: { mode: 'unmanaged' } }), false);
+  assert.equal(verify.aqeEmbeddingManaged({}), false);
+  assert.equal(verify.aqeEmbeddingManaged(undefined), false);
+  assert.equal(verify.aqeEmbeddingManaged({ aqe: false, aqeEmbedding: MANAGED_EMBEDDING }), false);
+  const live = (cfg) => verify.liveChecksFor(cfg).some((check) => check.id === 'aqe-embedding');
+  assert.equal(live({ aqeEmbedding: MANAGED_EMBEDDING }), true, 'status --live uses the same gate');
+  assert.equal(live({ aqeEmbedding: { mode: 'unmanaged' } }), false);
 });
 
 test.after(() => rmrf(HOME, PROJECT));

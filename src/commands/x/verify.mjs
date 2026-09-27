@@ -289,6 +289,11 @@ export async function checkAqeEmbedding({ cfg = loadKitConfig(), cwd = process.c
   return live;
 }
 
+/** Whether the kit manages AQE's embedding backend: AQE on and an endpoint or
+ *  in-process choice. Only then is a live embedding result the kit's evidence
+ *  (status shows it); an unmanaged backend is still probed and printed. */
+export const aqeEmbeddingManaged = (cfg) => cfg?.aqe !== false && !!cfg?.aqeEmbedding && cfg.aqeEmbedding.mode !== 'unmanaged';
+
 /** @param {{onEvidence?:(id:string, outcome:{status:string,reason:string|null})=>void}} [options] */
 async function verifyAqe({ onEvidence = () => {} } = {}) {
   heading('aqe — separate storage, embedding, and browser observations');
@@ -308,7 +313,7 @@ async function verifyAqe({ onEvidence = () => {} } = {}) {
   const browser = await probeAqeBrowser({ runner: runCmd });
   (browser.status === 'payload-present' ? ok : warn)(`optional browser: ${browser.status} (no browser launched)`);
   const live = await checkAqeEmbedding({ cfg, cwd: process.cwd() });
-  onEvidence('aqe-embedding', embeddingProbeOutcome(live));
+  if (aqeEmbeddingManaged(cfg)) onEvidence('aqe-embedding', embeddingProbeOutcome(live));
   if (live.corpus) console.log(JSON.stringify({ embeddingProvenance: live.corpus }));
   if (!['healthy', 'empty'].includes(live.corpus?.status)) warn('Corpus compatibility unverified or mismatched; preserve vectors and plan explicit migration');
   warn('Fleet execution, RVF owner health and checkpoint recovery remain separate proofs');
@@ -602,7 +607,7 @@ async function runRememberedSuite(name, fn, cfg) {
 const LIVE_CHECKS = Object.freeze([
   // Same gate as sync's embedding step: only a backend the kit manages (an
   // unmanaged install claims no semantic readiness; `ak x verify aqe` still probes it).
-  { id: 'aqe-embedding', applies: (cfg) => cfg.aqe !== false && !!cfg.aqeEmbedding && cfg.aqeEmbedding.mode !== 'unmanaged',
+  { id: 'aqe-embedding', applies: aqeEmbeddingManaged,
     run: async ({ cfg, cwd }) => embeddingProbeOutcome(await checkAqeEmbedding({ cfg, cwd, corpus: false })) },
   // Codex MCP discovery is explicit: Claude-only installations need no Codex.
   { id: 'mcp', applies: (cfg) => cfg.integrations?.hosts?.codex === true, run: ({ cwd }) => verifyMcp({ cwd }) },
