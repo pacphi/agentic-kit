@@ -292,11 +292,32 @@ const ACT_NOW = new Set(['released-actionable', 'workaround-carried']);
  * Ruflo (the support-window floor) contains the fix. Returns the hold, or
  * null when the floor is unknown, the fix version is unknown, or it is in.
  */
-function windowHold(entry, release, supportFloor) {
+function windowHold(entry, release, supportFloor, floorBundle = null) {
   const gate = entry.doneWhen?.release;
-  if (!supportFloor || entry.dependency !== 'ruflo' || gate?.name !== 'ruflo') return null;
+  if (!supportFloor || !gate) return null;
+  if (gate.bundledBy?.[0] === 'ruflo') return bundledHold(gate, release, supportFloor, floorBundle);
+  if (entry.dependency !== 'ruflo' || gate.name !== 'ruflo') return null;
   const needs = gate.minVersion ?? release?.version ?? null;
   return needs && compareVersions(needs, supportFloor) > 0 ? { floor: supportFloor, needs } : null;
+}
+
+/**
+ * Decision B3-D5: a fix delivered through Ruflo (AgentDB) waits until the
+ * oldest supported Ruflo bundles a fixed version (`floorBundle`, resolved
+ * like the newest carrier's). An unresolved floor never releases it.
+ */
+function bundledHold(gate, release, floor, floorBundle) {
+  const needs = release?.version ?? gate.minVersion ?? null;
+  if (!needs) return null;
+  const has = floorBundle ? floorBundle.version ?? 'none' : 'unknown';
+  if (floorBundle?.version && compareVersions(floorBundle.version, needs) >= 0) return null;
+  return { floor, needs: `${gate.name} ${needs}`, floorBundles: `${gate.name} ${has}` };
+}
+
+/** A newest-carrier release whose floor bundle could not be resolved is "Could not check", as the newest one is. */
+function floorChecked(gate, release, supportFloor, floorBundle) {
+  if (!supportFloor || gate?.bundledBy?.[0] !== 'ruflo' || release?.released !== true || floorBundle) return release;
+  return { released: null, basis: `could not resolve the ${gate.name} that ${gate.bundledBy[0]} ${supportFloor} bundles`, version: null, date: null };
 }
 
 /** Swap the act-now groups for `waiting-for-window` on a held entry. */
@@ -321,13 +342,15 @@ export function classifyEntry(entry, live, { policy, dependencyPolicies, now, su
   }
   const up = upstreamOf(live.thread);
   const facts = commentFacts(entry, live.thread, policy);
-  const release = up.fixed && PENDING.has(entry.status) ? releaseState(entry, up.fixedAt, live.release, live.confirmation ?? null, live.bundle ?? null) : null;
+  const release = up.fixed && PENDING.has(entry.status)
+    ? floorChecked(entry.doneWhen.release, releaseState(entry, up.fixedAt, live.release, live.confirmation ?? null, live.bundle ?? null), supportFloor, live.floorBundle ?? null)
+    : null;
   const stale = up.state === 'open' && now.getTime() - Date.parse(facts.lastUpstreamActivityAt) >= policy.staleAfterDays * DAY;
   const found = [...new Set([...liveGroups(entry, up, facts, release, stale), ...fromRegistry])];
   if (entry.relation === 'tracking') {
     for (const drop of ['waiting', 'stale']) if (found.includes(drop)) found.splice(found.indexOf(drop), 1);
   }
-  const { groups, hold } = applyHold(found, windowHold(entry, release, supportFloor));
+  const { groups, hold } = applyHold(found, windowHold(entry, release, supportFloor, live.floorBundle ?? null));
   const actionable = groups.includes('released-actionable') || groups.includes('workaround-carried');
   return {
     ...base, groups, upstream: up, release, stale, ...facts, ...(hold ? { window: hold } : {}),

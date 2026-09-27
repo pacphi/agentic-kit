@@ -85,23 +85,40 @@ async function confirmReleases(entries, live, fetcher, concurrency, fetchErrors)
   });
 }
 
-// What the newest carrier (Ruflo for AgentDB) installs, once per chain; a
-// failure leaves `bundle` unset, so the entry is "Could not check".
-async function resolveBundles(entries, live, fetcher, concurrency, fetchErrors) {
+// What the newest carrier (Ruflo for AgentDB) installs, or the carrier at `at`
+// (the support-window floor) into `floorBundle`, once per chain; a failure
+// leaves the field unset, so the entry is "Could not check".
+async function resolveBundles(entries, live, fetcher, concurrency, fetchErrors, { at = null, into = 'bundle' } = {}) {
   const keyOf = (gate) => [...gate.bundledBy, gate.name].join('>');
   const chains = [...new Map(entries.map((entry) => [keyOf(entry.doneWhen.release), entry.doneWhen.release])).entries()];
   const bundles = new Map();
   await mapLimit(chains, concurrency, async ([key, gate]) => {
     try {
-      bundles.set(key, await fetcher.bundled(gate.bundledBy, gate.name));
+      bundles.set(key, await fetcher.bundled(gate.bundledBy, gate.name, at));
     } catch (error) {
       for (const entry of entries.filter((item) => keyOf(item.doneWhen.release) === key)) fetchErrors.push({ id: entry.id, error: error.message });
     }
   });
   for (const entry of entries) {
     const bundle = bundles.get(keyOf(entry.doneWhen.release));
-    if (bundle) live.get(entry.id).bundle = bundle;
+    if (bundle) live.get(entry.id)[into] = bundle;
   }
+}
+
+/**
+ * Decision B3-D5: an AgentDB fix delivered through Ruflo waits, like a Ruflo
+ * fix, until the oldest supported Ruflo bundles it. Resolved for the entries
+ * the newest carrier was checked for, and for those the registry records as
+ * released with a first fixed version.
+ */
+async function resolveFloorBundles(registry, live, fetcher, floor, concurrency, fetchErrors) {
+  const entries = registry.watch.filter((entry) => {
+    const gate = entry.doneWhen?.release;
+    const state = live.get(entry.id);
+    if (entry.status === 'retired' || gate?.bundledBy?.[0] !== 'ruflo' || !state?.thread) return false;
+    return Boolean(state.bundle) || (['released', 'dispatched'].includes(entry.status) && Boolean(gate.minVersion));
+  });
+  await resolveBundles(entries, live, fetcher, concurrency, fetchErrors, { at: floor, into: 'floorBundle' });
 }
 
 async function collect(registry, fetcher, concurrency) {
@@ -187,6 +204,10 @@ export async function main(argv, {
   const { live, fetchErrors, facts } = offline
     ? { live: new Map(), fetchErrors: [], facts: new Map() } : await collect(registry, fetcher, options.concurrency);
   const floor = offline ? null : await supportFloor(registry, fetcher, facts, fetchErrors, now);
+  if (floor) {
+    await resolveFloorBundles(registry, live, fetcher, floor, options.concurrency, fetchErrors);
+    fetchErrors.sort((a, b) => a.id.localeCompare(b.id));
+  }
   const report = buildReport(registry, live, { now, offline, fetchErrors, supportFloor: floor });
   if (options.command === 'report') {
     stdout.write(options.json ? `${JSON.stringify(report, null, 2)}\n` : renderReport(report));
