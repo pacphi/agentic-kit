@@ -381,6 +381,13 @@ import { fmtNum, fmtTok } from './usage.mjs';
       note+=" "+esc(fmtNum(p.unresolved))+" path"+(p.unresolved===1?"":"s")
         +" could not be decoded, so both counts are floors.";
     }
+    var imported=typeof p.importedExcluded==="number"&&p.importedExcluded>0?p.importedExcluded:0;
+    if(imported){
+      note+=" "+esc(fmtNum(imported))+(imported===1
+        ?" Codex copy of a Claude Code session, imported by the ChatGPT desktop app, is not counted"
+        :" Codex copies of Claude Code sessions, imported by the ChatGPT desktop app, are not counted")
+        +"; the Claude Code transcript already names its folder.";
+    }
     if(p.truncated)note+=" The measured list is capped, so fewer rows than on-disk projects.";
     return note;
   }
