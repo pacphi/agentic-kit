@@ -201,6 +201,64 @@ test('collect walks the releases after the fixing merge, even when the issue clo
   assert.deepEqual(calls, ['v3.46.0']);
 });
 
+// Walk the releases through main with a fetcher whose tags contain the fix from `containing` on.
+async function walkReleases(facts, containing) {
+  const calls = [];
+  const fetcher = {
+    auth: async () => ({ ok: true }),
+    thread: async () => closedThread('ruvnet/ruflo#3194', '2026-01-01T00:00:00Z'),
+    release: async () => facts,
+    fixingChanges: async () => [{ ...change, mergedAt: '2026-01-01T00:00:00Z' }],
+    contains: async (repo, refs) => {
+      const version = refs[0].slice(1);
+      calls.push(version);
+      return { ref: refs[0], contained: containing.includes(version) };
+    },
+  };
+  let report;
+  await withRegistryFile([entry('ruvnet/ruflo#3194')], async (file) => {
+    const out = capture();
+    await main(['report', '--json', '--registry', file], { fetcher, stdout: out.stream, stderr: capture().stream, now: NOW });
+    report = JSON.parse(out.text());
+  });
+  return { calls, result: report.entries.find((item) => item.id === 'ruvnet/ruflo#3194') };
+}
+const releasesUpTo = (count, extra = []) => {
+  const versions = Array.from({ length: count }, (_, index) => ({ version: `1.0.${index + 1}`, publishedAt: `2026-02-${String(index + 1).padStart(2, '0')}T00:00:00Z` }));
+  return { versions: [...versions, ...extra], latest: versions.at(-1).version };
+};
+
+test('a fix first shipped after the first five releases is still found (probe B)', async () => {
+  const { calls, result } = await walkReleases(releasesUpTo(6), ['1.0.6']);
+  assert.ok(result.groups.includes('released-actionable'), JSON.stringify(result.release));
+  assert.equal(result.release.version, '1.0.6');
+  assert.deepEqual(calls, ['1.0.1', '1.0.2', '1.0.3', '1.0.4', '1.0.5', '1.0.6']);
+});
+
+test('past the window the released version is the oldest containing one, and stays so', async () => {
+  const later = ['1.0.7', '1.0.8', '1.0.9'];
+  const eight = await walkReleases(releasesUpTo(8), later);
+  assert.equal(eight.result.release.version, '1.0.7');
+  assert.deepEqual(eight.calls, ['1.0.1', '1.0.2', '1.0.3', '1.0.4', '1.0.5', '1.0.8', '1.0.6', '1.0.7'], 'the newest is checked, then the gap oldest first');
+  const nine = await walkReleases(releasesUpTo(9), later);
+  assert.equal(nine.result.release.version, '1.0.7', 'a newer release does not change the released line');
+});
+
+test('when the newest release lacks the fix, it is fixed but unreleased after one extra check', async () => {
+  const { calls, result } = await walkReleases(releasesUpTo(8), []);
+  assert.ok(result.groups.includes('fixed-unreleased'), JSON.stringify(result.release));
+  assert.deepEqual(calls, ['1.0.1', '1.0.2', '1.0.3', '1.0.4', '1.0.5', '1.0.8']);
+  assert.match(result.release.basis, /1\.0\.8/);
+});
+
+test('the newest release is the latest one, not a backport published after it', async () => {
+  // A backport on an older line is published last but is not what ak installs.
+  const facts = releasesUpTo(7, [{ version: '0.9.9', publishedAt: '2026-03-01T00:00:00Z' }]);
+  const { calls, result } = await walkReleases(facts, ['1.0.7']);
+  assert.equal(result.release.version, '1.0.7');
+  assert.deepEqual(calls, ['1.0.1', '1.0.2', '1.0.3', '1.0.4', '1.0.5', '1.0.7', '1.0.6']);
+});
+
 test('candidateVersions walks releases after the fix, oldest first, bounded', () => {
   assert.deepEqual(candidateVersions('2026-09-26T22:31:23Z', rufloFacts).map((item) => item.version), ['3.46.0', '3.46.1']);
   assert.equal(candidateVersions('2026-01-01T00:00:00Z', rufloFacts, 2).length, 2);

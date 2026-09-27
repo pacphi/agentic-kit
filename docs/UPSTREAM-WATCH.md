@@ -127,8 +127,12 @@ Without a recorded `minVersion`, the check asks GitHub what closed the thread: p
 merged into the repository's default branch (an unmerged or off-branch closing reference does not
 count), else the commit that closed it. It then compares that change with the tag of each release
 published after the pull request merged (for a closing commit, after the thread closed), so an
-issue closed after the release that shipped its fix still finds that release. It goes oldest
-first, at most five, and stops at the first tag that contains it.
+issue closed after the release that shipped its fix still finds that release. It checks the
+first five oldest first and stops at the first tag that does not rule the release out. When all
+five lack the fix, it checks the newest release (npm or GitHub `latest`, not a backport published
+after it); if that one has the fix, it walks the releases in between, oldest first. The released
+version is always the oldest containing release, so a newer release never changes the `released`
+line, and a fix no release has yet costs at most six checks a day.
 Tags are `v<version>` then `<version>`, or the gate's `tagPattern` (Codex: `rust-v{version}`). A
 tag missing for every spelling leaves the release unconfirmed; any other GitHub failure is "Could
 not check". When several pull requests closed a thread, the first is checked. Only a confirmed

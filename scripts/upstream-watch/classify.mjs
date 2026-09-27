@@ -87,7 +87,7 @@ export function upstreamOf(thread) {
   };
 }
 
-// How many releases after a fix are checked for the fixing change.
+// How many releases after a fix are checked, oldest first, before the newest.
 const CONFIRM_LIMIT = 5;
 
 /**
@@ -101,12 +101,45 @@ export function confirmationStart(fixedAt, confirmation) {
 }
 
 /** Releases published after the fix, oldest first: stable only unless `latest` is a prerelease. */
-export function candidateVersions(fixedAt, facts, limit = CONFIRM_LIMIT) {
+export function candidateVersions(fixedAt, facts, limit = Infinity) {
   const prerelease = facts.latest?.includes('-');
   return facts.versions
     .filter((item) => item.publishedAt > fixedAt && (prerelease || !item.version.includes('-')))
     .sort((a, b) => a.publishedAt.localeCompare(b.publishedAt))
     .slice(0, limit);
+}
+
+// The candidate ak would install: `latest` when it is one, else the highest
+// version. A backport published after it on an older line is not it.
+function newestCandidate(candidates, facts) {
+  return candidates.find((item) => item.version === facts.latest)
+    ?? candidates.reduce((best, item) => (!best || compareVersions(item.version, best.version) > 0 ? item : best), null);
+}
+
+/**
+ * The next release whose tag to check, or null when the walk is done. The
+ * first CONFIRM_LIMIT candidates go oldest first, stopping at any that is not
+ * ruled out. If all of them lack the fix, the newest is checked; when it has
+ * the fix, the releases between go oldest first, so the released version is
+ * always the oldest containing one and a newer release never changes it.
+ */
+export function nextRelease(candidates, checks, facts, limit = CONFIRM_LIMIT) {
+  const seen = new Map(checks.map((check) => [check.version, check.contained]));
+  const step = (list) => {
+    for (const item of list) {
+      if (!seen.has(item.version)) return item;
+      if (seen.get(item.version) !== false) return null;
+    }
+    return undefined;
+  };
+  const first = step(candidates.slice(0, limit));
+  if (first !== undefined) return first;
+  const newest = newestCandidate(candidates, facts);
+  const at = candidates.indexOf(newest);
+  if (!newest || at < limit) return null;
+  if (!seen.has(newest.version)) return newest;
+  if (seen.get(newest.version) !== true) return null;
+  return step(candidates.slice(limit, at)) ?? null;
 }
 
 /** The tag names a release gate's version may carry upstream, in the order to try them. */
@@ -164,20 +197,20 @@ function ownReleaseState(gate, fixedAt, facts, confirmation) {
   if (!after.length) return { released: false, basis: `no ${gate.name} release since the fix`, version: null, date: null };
   const change = confirmation?.changes?.[0] ?? null;
   const checks = confirmation?.checks ?? [];
-  const hit = checks.find((check) => check.contained === true);
-  if (change && hit) {
-    const published = after.find((item) => item.version === hit.version)?.publishedAt ?? null;
+  const found = new Map(checks.map((check) => [check.version, check]));
+  const newest = newestCandidate(after, facts);
+  if (change && found.get(newest.version)?.contained === false && checks.every((check) => check.contained === false)) {
+    return { released: false, basis: `none of the ${checks.length} ${gate.name} release(s) checked after the fix, ${newest.version} included, contains ${changeLabel(change)}`, version: null, date: null };
+  }
+  // The oldest release not ruled out: released when its tag contains the change, else unconfirmed.
+  const first = after.find((item) => found.get(item.version)?.contained !== false) ?? after[0];
+  const hit = found.get(first.version);
+  if (change && hit?.contained === true) {
     return {
-      released: true, confirmed: true, version: hit.version, date: day(published), change, ref: hit.ref,
+      released: true, confirmed: true, version: first.version, date: day(first.publishedAt), change, ref: hit.ref,
       basis: `merged ${changeLabel(change)} is in ${hit.ref}`,
     };
   }
-  if (change && checks.length === after.length && checks.every((check) => check.contained === false)) {
-    return { released: false, basis: `none of the first ${after.length} ${gate.name} release(s) after the fix contains ${changeLabel(change)}`, version: null, date: null };
-  }
-  // The first release not ruled out: an unknown check, else the first one never checked.
-  const open = checks.find((check) => check.contained === null);
-  const first = (open && after.find((item) => item.version === open.version)) ?? after[checks.length] ?? after[0];
   return {
     released: 'unconfirmed', version: first.version, date: day(first.publishedAt),
     basis: change

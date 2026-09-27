@@ -10,7 +10,7 @@ import { pathToFileURL } from 'node:url';
 
 import { loadUpstreamRegistry } from '../src/lib/hook-audit/upstream.mjs';
 import {
-  buildReport, candidateVersions, confirmationStart, ledgerEvents, tagRefs, upstreamOf, withoutRecorded,
+  buildReport, candidateVersions, confirmationStart, ledgerEvents, nextRelease, tagRefs, upstreamOf, withoutRecorded,
 } from './upstream-watch/classify.mjs';
 import { createFetcher, mapLimit } from './upstream-watch/fetch.mjs';
 import { renderEvents, renderReport } from './upstream-watch/render.mjs';
@@ -57,8 +57,8 @@ export function parseArgs(argv) {
 
 // Without a recorded first fixed version, a release counts only when it
 // contains the merged fixing change: walk the releases published after that
-// change merged, oldest first, and stop at the first that contains it or has
-// no tag to check.
+// change merged in the order nextRelease gives (oldest first, then the newest,
+// then the gap) until it finds the oldest release not ruled out.
 async function confirmReleases(entries, live, fetcher, concurrency, fetchErrors) {
   await mapLimit(entries, concurrency, async (entry) => {
     const state = live.get(entry.id);
@@ -66,10 +66,10 @@ async function confirmReleases(entries, live, fetcher, concurrency, fetchErrors)
       const changes = await fetcher.fixingChanges(entry.id);
       const checks = [];
       if (changes.length) {
-        for (const item of candidateVersions(confirmationStart(upstreamOf(state.thread).fixedAt, { changes }), state.release)) {
+        const candidates = candidateVersions(confirmationStart(upstreamOf(state.thread).fixedAt, { changes }), state.release);
+        for (let item = nextRelease(candidates, checks, state.release); item; item = nextRelease(candidates, checks, state.release)) {
           const found = await fetcher.contains(changes[0].repo, tagRefs(entry.doneWhen.release, item.version), changes[0].sha);
           checks.push({ version: item.version, ...found });
-          if (found.contained !== false) break;
         }
       }
       state.confirmation = { changes, checks };
