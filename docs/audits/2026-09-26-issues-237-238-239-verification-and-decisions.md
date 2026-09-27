@@ -920,7 +920,9 @@ changed in this wave:
 - Stopping the whole process tree on an abort. It needs Windows CI to prove; only the comment was
   corrected.
 - Tests that leave temporary folders behind, and pre-existing tests that write into an enclosing
-  repository when `TMPDIR` is inside one. Both belong to the test-hermeticity branch.
+  repository when `TMPDIR` is inside one. Both belong to the test-hermeticity branch. Fixed there:
+  tests remove their temporary folders, the suite runner fails on leftovers and refuses a temp root
+  inside a repository, and the two writers skip when they cannot leave a repository.
 - A worktree `.claude` modification time that changed during the review. It came from concurrent
   runs, and no user state changed.
 
@@ -1237,7 +1239,9 @@ Behavior that differs from, or goes beyond, the plan text.
 - **Usage.**
   - The Claude statusLine classifier does not read managed settings.
   - A shell wrapper around the footer helper is classed as `custom`.
-  - Other spawn tests still inherit the developer's `XDG_*` variables.
+  - Other spawn tests inherited the developer's `XDG_*` variables. Fixed on `fix/test-hermeticity`:
+    spawned children get `spawnEnv(home)`, and a guard test fails on any spawn that neither uses it
+    nor states why it inherits.
   - M1b is still open.
 - **ADR index.** In `docs/adr/README.md` the index table ends at ADR-0052; later ADRs appear only as
   bullets or sections. This predates the branch.
