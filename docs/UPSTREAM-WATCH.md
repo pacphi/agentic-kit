@@ -71,7 +71,11 @@ A constraint whose `nextRetestAt` has passed shows as stale evidence in the hook
 
 `scripts/upstream-watch.mjs` is maintainer tooling; it is not published. It reads GitHub with
 `gh api` and releases with `npm view` or GitHub releases, at most four calls at a time, and
-writes nothing. If `gh` is missing or signed out it says so and reports only what the registry
+writes nothing. It runs on macOS and Linux (the routine runs on Linux). On Windows, npm is a
+`.cmd` file, which Node refuses to start without a shell
+([Spawning `.bat` and `.cmd` files on Windows](https://nodejs.org/api/child_process.html#spawning-bat-and-cmd-files-on-windows)),
+so every npm-gated release would read "Could not check"; the script passes version ranges such as
+`^3.33.0` that `cmd.exe` would misread, so it does not add one. If `gh` is missing or signed out it says so and reports only what the registry
 records. It exits 0 unless the command line is wrong. `check` prints only ledger lines on stdout;
 each thread or release it could not check goes to stderr as `Could not check <id>: <error>`, and
 `check --json` lists them in `fetchErrors`.

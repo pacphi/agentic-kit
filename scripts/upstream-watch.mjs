@@ -4,6 +4,8 @@
 // thread with `gh` and `npm`, and prints a report or ledger event lines. It
 // never writes to GitHub, npm or the registry; acting on the output is the
 // maintainer's (or the routine's) job, under the registry's approval policy.
+// POSIX only: on Windows `npm` is a .cmd file that execFile cannot start
+// without a shell, and a shell would misread the caret ranges passed to npm.
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
