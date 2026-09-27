@@ -488,8 +488,9 @@ test('an AgentDB fix is released only when the newest Ruflo bundles a fixed agen
   assert.match(behind.release.basis, /ruflo 3\.46\.1 bundles agentdb 3\.0\.0-alpha\.20/);
   const bundled = classifyEntry(target, { thread, release: agentdb, bundle: { carrier: 'ruflo', carrierVersion: '3.47.0', version: '3.0.0-alpha.21', basis: 'x' } }, context);
   assert.ok(bundled.groups.includes('released-actionable'));
-  assert.equal(bundled.release.version, '3.47.0', 'the version is the Ruflo that ak installs');
-  assert.equal(bundled.release.fixedVersion, '3.0.0-alpha.21');
+  assert.equal(bundled.release.version, '3.0.0-alpha.21', 'the version is the fixed agentdb, which no Ruflo release changes');
+  assert.equal(bundled.release.carrierVersion, '3.47.0', 'the Ruflo that bundles it stays in the report');
+  assert.match(bundled.release.basis, /ruflo 3\.47\.0 bundles agentdb 3\.0\.0-alpha\.21/);
   assert.equal(bundled.release.date, '2026-10-01');
   const unknown = classifyEntry(target, { thread, release: agentdb, bundle: null }, context);
   assert.ok(unknown.groups.includes('unchecked'));
@@ -499,6 +500,19 @@ test('an AgentDB fix is released only when the newest Ruflo bundles a fixed agen
     { thread, release: agentdb, confirmation: { changes: [], checks: [] }, bundle: { carrier: 'ruflo', carrierVersion: '3.47.0', version: '3.0.0-alpha.21', basis: 'x' } }, context);
   assert.ok(unproven.groups.includes('release-unconfirmed'));
   assert.match(unproven.release.basis, /ruflo 3\.47\.0 bundles agentdb 3\.0\.0-alpha\.21/);
+});
+
+test('a new Ruflo release does not change an AgentDB released ledger line', () => {
+  const gate = { channel: 'npm', name: 'agentdb', minVersion: '3.0.0-alpha.21', bundledBy: ['ruflo', '@claude-flow/cli'] };
+  const registry = registryWith([entry('ruvnet/agentdb#26', { dependency: 'ruflo', doneWhen: { state: 'closed-completed', release: gate } })]);
+  const agentdb = { versions: [{ version: '3.0.0-alpha.21', publishedAt: '2026-10-01T00:00:00Z' }], latest: '3.0.0-alpha.21' };
+  const lineWith = (carrierVersion) => {
+    const bundle = { carrier: 'ruflo', carrierVersion, version: '3.0.0-alpha.21', basis: 'x' };
+    const report = buildReport(registry, new Map([['ruvnet/agentdb#26', { thread: closedThread('ruvnet/agentdb#26', '2026-09-30T00:00:00Z'), release: agentdb, bundle }]]), { now: NOW });
+    return ledgerEvents(report, registry, { since: '2026-09-26T00:00:00Z' }).find((event) => event.event === 'released').line;
+  };
+  assert.equal(lineWith('3.47.0'), 'UPSTREAM-WATCH ruvnet/agentdb#26 released 2026-10-01 version=3.0.0-alpha.21 branch=upstream/ruvnet-agentdb-26');
+  assert.equal(lineWith('3.47.1'), lineWith('3.47.0'), 'one recorded line covers every later Ruflo');
 });
 
 test('collect resolves each bundling chain once and reports a failure as "Could not check"', async () => {

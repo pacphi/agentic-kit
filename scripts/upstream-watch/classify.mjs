@@ -119,8 +119,9 @@ function bundledState(gate, base, bundle) {
   if (!bundle.version || compareVersions(bundle.version, base.version) < 0) {
     return { released: false, basis: `${carries}, before the fix in ${base.version}`, version: null, date: null };
   }
-  // The version is the carrier ak installs; the date stays the fixed package's, so the ledger line is stable.
-  return { ...base, version: bundle.carrierVersion, fixedVersion: base.version, basis: `${base.basis}; ${carries}` };
+  // Version and date stay the fixed package's, so a new carrier release never changes the ledger line;
+  // the carrier that bundles it is reported beside them.
+  return { ...base, carrierVersion: bundle.carrierVersion, basis: `${base.basis}; ${carries}` };
 }
 
 /**
