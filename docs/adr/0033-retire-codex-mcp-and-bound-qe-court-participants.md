@@ -133,7 +133,9 @@ seats. A successful Claude/Codex transport check therefore cannot be called a co
    step performs, judged per fix. A step shared with other subsystems still runs for them but leaves
    the skipped one untouched: `--skip codex-mcp` and `--skip routing` stop the providers step's
    Codex MCP writes and route seeding, and `--skip statusline` stops Ruflo's helper refresh. Its rows
-   are reported "skipped by request" and are neither unresolved nor failing.
+   are reported "skipped by request" and are neither unresolved nor failing. A skipped subsystem's
+   row whose fix is manual is the one exception: sync never performed that fix regardless of
+   `--skip`, so it is listed under "needs your action" instead of "skipped by request".
    `--skip` accepts only the subsystems sync knows and never changes kit.json ownership.
    `ak sync --json` reports this verdict as one JSON object on stdout (`plan`, `steps`,
    `unresolved` with a reason per item, `skipped`, `needsYourAction`, `converged`, `exitCode`) and

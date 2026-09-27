@@ -140,7 +140,10 @@ none of them counts as a failure. A step shared by several subsystems still
 runs for the others but leaves the skipped one alone: with --skip codex-mcp
 the providers step writes no Codex MCP table, with --skip routing it seeds
 and rewrites no route, and --skip statusline also skips Ruflo's helper
-refresh after an upgrade (that refresh can replace the statusline helper).
+refresh after an upgrade (that refresh can replace the statusline helper). A
+skipped subsystem's manual-fix row is the exception: sync never performed
+that fix anyway, so it is still listed under "needs your action" instead of
+"skipped by request".
 An unknown name is rejected with the list of names sync accepts.
 
 --json writes every human line (the plan, step results, prompts) to stderr
