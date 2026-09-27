@@ -50,6 +50,13 @@ test('the registry carries the watch list and stays valid for the hook audit', (
   assert.equal(constraints.watch, undefined, 'the hook audit projection does not carry the watch list');
 });
 
+test('the ledger is issue #243 in the ledger repository', () => {
+  const { ledger } = loadUpstreamRegistry({ now }).watchPolicy;
+  assert.deepEqual({ repo: ledger.repo, issue: ledger.issue, issueTitle: ledger.issueTitle }, { repo: 'pacphi/agentic-kit', issue: 243, issueTitle: 'Upstream watch' });
+  assert.match(errorsOf((doc) => { doc.watchPolicy.ledger.issue = 0; }), /watchPolicy\.ledger/);
+  assert.match(errorsOf((doc) => { delete doc.watchPolicy.ledger.issue; }), /watchPolicy\.ledger/);
+});
+
 test('watch entries are rejected with their id when malformed', () => {
   const errors = errorsOf((doc) => {
     const item = entry(doc, 'ruvnet/ruflo#3194');

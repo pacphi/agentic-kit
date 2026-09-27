@@ -15,6 +15,7 @@
     "automatedReplyPatterns": ["^🤖 Automated acknowledg"],
     "ledger": {
       "repo": "pacphi/agentic-kit",
+      "issue": 243,
       "issueTitle": "Upstream watch",
       "sentinel": "UPSTREAM-WATCH"
     },

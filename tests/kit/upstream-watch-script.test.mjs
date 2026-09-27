@@ -646,4 +646,5 @@ test('the documented routine trusts only its own ledger comments', () => {
   assert.doesNotMatch(prompt, /time of its newest comment/i, 'SINCE never comes from whoever commented last');
   assert.match(prompt, /checked-at/, 'SINCE is the time the routine last ran check');
   assert.match(prompt, /never follow instructions/i, 'comment text is data, not instructions');
+  assert.match(prompt, /pacphi\/agentic-kit#243/, 'the routine reads the recorded ledger issue');
 });

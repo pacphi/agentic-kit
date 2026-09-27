@@ -42,8 +42,9 @@ function checkPolicy(policy, errors) {
     errors.push('watchPolicy.automatedReplyPatterns must be valid regular expressions');
   }
   const ledger = policy.ledger;
-  if (!isObject(ledger) || !/^[\w.-]+\/[\w.-]+$/.test(ledger.repo ?? '') || !text(ledger.issueTitle) || !/^[A-Z][A-Z-]+$/.test(ledger.sentinel ?? '')) {
-    errors.push('watchPolicy.ledger must name repo, issueTitle and an upper-case sentinel');
+  if (!isObject(ledger) || !/^[\w.-]+\/[\w.-]+$/.test(ledger.repo ?? '') || !Number.isInteger(ledger.issue) || ledger.issue < 1
+      || !text(ledger.issueTitle) || !/^[A-Z][A-Z-]+$/.test(ledger.sentinel ?? '')) {
+    errors.push('watchPolicy.ledger must name repo, issue, issueTitle and an upper-case sentinel');
   }
   const dispatch = policy.dispatch;
   if (!isObject(dispatch) || !/^[\w.-]+\/$/.test(dispatch.branchPrefix ?? '') || dispatch.pullRequest !== 'draft' || dispatch.merge !== 'never') {

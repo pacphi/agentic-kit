@@ -31,9 +31,10 @@
         "ledger": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["repo", "issueTitle", "sentinel"],
+          "required": ["repo", "issue", "issueTitle", "sentinel"],
           "properties": {
             "repo": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+            "issue": { "type": "integer", "minimum": 1 },
             "issueTitle": { "type": "string", "minLength": 1 },
             "sentinel": { "type": "string", "pattern": "^[A-Z][A-Z-]+$" }
           }
