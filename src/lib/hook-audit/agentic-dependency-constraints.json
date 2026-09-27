@@ -2526,6 +2526,79 @@
         { "date": "2026-09-27", "event": "registered" },
         { "date": "2026-09-27", "event": "retired", "note": "closed upstream; cited by pacphi/agentic-kit#213 as context; nothing in ak waits on it" }
       ]
+    },
+    {
+      "id": "ruvnet/ruflo#3508",
+      "url": "https://github.com/ruvnet/ruflo/issues/3508",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "Read-only memory route/peek: which stores a cwd resolves to, their rows and last write, without creating anything",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": {"refs": ["investigation rf-route-peek-api (invited on pacphi/agentic-kit#213)"], "files": []},
+      "adjustment": "Once a released Ruflo ships a read-only memory peek, use it for memory health instead of ak reading both store files itself; never poll memory stats or the MCP status tools, which create stores.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "filed" },
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#3509",
+      "url": "https://github.com/ruvnet/ruflo/issues/3509",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "mcp-bridge: opt-in `codex` backend still launches `@openai/codex mcp-server`, which current Codex CLI no longer has",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "filed" },
+        { "date": "2026-09-27", "event": "registered" }
+      ],
+      "note": "Filed as a courtesy: ak never starts the chat-UI MCP bridge and runs Codex through codex exec, so nothing in ak waits on it."
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#753",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/753",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "Witness chain forks when two processes append at once. `append()` reads the tail and inserts it without a transaction, so `aqe audit verify --chain audit` reports BROKEN.",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": {"refs": ["investigation aqe-audit-chain", "Branch 5: stray-store merge runs with no other AQE writer"], "files": []},
+      "adjustment": "Once a released agentic-qe appends to the witness chain atomically, ak no longer needs to stop other AQE writers before merging stray stores.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "filed" },
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#754",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/754",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "RVF pattern index never binds when an embedder endpoint is configured, and `RUVECTOR_USE_RVF_PATTERN_STORE` cannot switch it off",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": {"refs": ["investigation aqe-rvf-flag-vector-space", "Branch 5: embedding verify says embedder verified, not pattern search working"], "files": []},
+      "adjustment": "Once a released agentic-qe binds the pattern index with a configured embedder, ak may report semantic pattern search as working after a live check.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "filed" },
+        { "date": "2026-09-27", "event": "registered" }
+      ]
     }
   ]
 }
