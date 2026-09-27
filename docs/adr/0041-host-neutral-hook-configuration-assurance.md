@@ -8,7 +8,7 @@
   user-facing docs; the ledger is pacphi/agentic-kit#243. The Ruflo dependency policy carries a
   rolling support window (newest six minors, at least 30 days); `ak status` reports a Ruflo below
   it as unsupported, and the watch holds a workaround removal until the window's floor contains
-  the fix
+  the fix; an AgentDB fix also waits until the floor Ruflo bundles a fixed agentdb (B3-D5)
 - **Earlier update:** 2026-09-26 — §7: the registry ships inside `src/`, holds the watched upstream
   threads beside the constraints, and feeds the deterministic upstream watch, whose ledger is
   read from the routine's and our logins' comments only
@@ -249,7 +249,8 @@ Old dates can only place the floor at or below the true one, so staleness never 
 "unsupported". The watch computes the same floor from the release dates it reads and holds a
 released Ruflo fix whose first fixed version is above the floor in "Released, waiting for the
 support window", with no dispatch: a workaround comes out only once the oldest supported Ruflo
-has the fix.
+has the fix. An AgentDB fix waits the same way until the floor Ruflo, resolved down the
+`bundledBy` chain like the newest one, bundles a fixed agentdb (decision B3-D5).
 
 ### 8. Runtime receipts are sibling evidence, not static audit proof
 

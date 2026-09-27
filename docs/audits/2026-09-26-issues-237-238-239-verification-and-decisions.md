@@ -1833,7 +1833,7 @@ count as Codex usage in the ChatGPT desktop app and give their folder a genuine 
 
 ### Branch 3 decisions (2026-09-27)
 
-The maintainer made four decisions for Branch 3 (`feat/ruflo-support-window`) on 2026-09-27. Each
+The maintainer made five decisions for Branch 3 (`feat/ruflo-support-window`) on 2026-09-27. Each
 is recorded here in the decision format above, with the commits that implement it.
 
 #### B3-D1 — Claude Code's Ruflo memory outside a project
@@ -1954,6 +1954,44 @@ upgrade through the released `ak sync` right before the real pass. B: upgrade fi
 3.46.1 (`ruflo --version` and the global npm package), so there is no upgrade step and the real-data
 pass runs on 3.46.1. Code paths for Ruflo below 3.46.0 are proven with fixtures and disposable
 installs only.
+
+#### B3-D5 — AgentDB fixes and the Ruflo support window
+
+Asked in Branch 3's second fix round and decided on 2026-09-27, after the four above.
+
+**The situation.** An AgentDB fix reaches ak only through Ruflo (`doneWhen.release.bundledBy`,
+decision B4-Q1): the watch counted it as released once the newest Ruflo installs a fixed agentdb.
+A Ruflo fix, in contrast, waits until the oldest Ruflo inside the support window (its floor,
+ADR-0041 §7) contains it (`windowHold` in the watch applied only to gates on the `ruflo` package).
+
+**The problem.** A user on the oldest supported Ruflo can still get the unfixed agentdb, yet the
+watch would report the AgentDB fix as released and actionable, and the workaround could come out
+for that user.
+
+**What the user sees.** A draft pull request that removes an AgentDB workaround ak still needs on
+an older supported Ruflo.
+
+**What should be the case.** AgentDB fixes follow the same support-window rule as Ruflo's own
+fixes.
+
+**The choices.**
+
+- **A. The oldest supported Ruflo.** An AgentDB fix counts as released only when the floor Ruflo
+  bundles a fixed agentdb, resolved the same way as the newest one (npm down the `bundledBy`
+  chain), with the same "Could not check" handling.
+- **B. The newest Ruflo**, as before.
+
+**Recommendation: A. Choice: A.** Implemented in `3023d5c4`: the watch resolves what the floor
+Ruflo bundles; until it bundles the fix the entry is "Released, waiting for the support window",
+with a `released` ledger line that carries no branch and that a newer Ruflo does not change. An
+entry already recorded as released waits the same way against its `minVersion`. A floor bundle
+that cannot be resolved is "Could not check", never released.
+
+**Limit.** npm resolves every range in the chain to its highest match, so the answer is what a
+fresh install of the floor Ruflo gets, not what a user who installed it when it shipped still has.
+Ruflo 3.39.0 depends on `@claude-flow/cli` `^3.33.0`, so on 2026-09-27 the floor resolved to
+`@claude-flow/cli` 3.46.1 and agentdb 3.0.0-alpha.20, the same as the newest Ruflo. The hold
+changes the answer only when the floor Ruflo's range excludes the fixed agentdb.
 
 ## Branch 4 decisions (2026-09-27)
 

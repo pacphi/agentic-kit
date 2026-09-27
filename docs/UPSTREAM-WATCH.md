@@ -33,7 +33,7 @@ A watch entry records:
 |---|---|
 | `id`, `url`, `kind`, `title` | The thread (`owner/repo#n`, issue or pr). |
 | `relation` | `filed`, `commented`, `referenced` (cited, not ours) or `tracking` (our own issue that waits on upstream threads; lists them in `tracks`). |
-| `dependency` | The dependency policy that governs it. AgentDB threads use `ruflo`: ak gets AgentDB through Ruflo, so an AgentDB fix counts as released only when the newest Ruflo (npm `latest`, the newest version in the support window) installs a fixed agentdb (`doneWhen.release.bundledBy`). AgentDB publishes no tags, so a fix is confirmed by hand and recorded as `minVersion` until then. |
+| `dependency` | The dependency policy that governs it. AgentDB threads use `ruflo`: ak gets AgentDB through Ruflo, so an AgentDB fix counts as released only when the newest Ruflo (npm `latest`) installs a fixed agentdb (`doneWhen.release.bundledBy`), and it waits for the support window until the oldest supported Ruflo does too. AgentDB publishes no tags, so a fix is confirmed by hand and recorded as `minVersion` until then. |
 | `doneWhen` | `closed-completed` or `merged`, plus the release channel, the first fixed version when known, the upstream tag spelling (`tagPattern`) when it is not `v<version>`, and the carrier chain (`bundledBy`) when ak gets the package through another. |
 | `mapping`, `kitImpact`, `adjustment` | Whether ak carries something for it, which files and plan or decision refs, and the change ak makes when it lands. |
 | `status`, `history` | Lifecycle status and dated events. A `reviewed` event (with a `note`) records that every comment up to the end of that UTC day was read and needs no reply. History carries dates, not times, so a comment posted later on the day of the review is covered too: record a review only after the day's comments are read, or on a later day. |
@@ -98,7 +98,7 @@ window.
 | Released and actionable | Upstream fixed, and a published release contains the merged fixing pull request (or closing commit), checked against the repository's tag for that version, or the registry records the first fixed version (`minVersion`). The entry is `watching` or `fixed-unreleased` and ak has an adjustment. Carries the dispatch branch and removal proof. |
 | Released, fix not confirmed | A release came out after the fix, but ak could not prove it contains the fixing change (no merged pull request closed the thread, or no tag for that version). Confirm by hand and record `minVersion`. Never dispatched. |
 | Fixed upstream, ak still carries the workaround | The entry is `released` or `dispatched` and ak has an adjustment. |
-| Released, waiting for the support window | A Ruflo entry that would be in one of the two groups above, but its first fixed version is above the Ruflo support window's floor (`supportWindow.floor` in the JSON report). No dispatch: the workaround stays until the oldest supported Ruflo has the fix. |
+| Released, waiting for the support window | A Ruflo entry that would be in one of the two groups above, but its first fixed version is above the Ruflo support window's floor (`supportWindow.floor` in the JSON report), or an AgentDB entry whose fixed agentdb the floor Ruflo does not yet bundle. No dispatch: the workaround stays until the oldest supported Ruflo has the fix. |
 | Fixed upstream, not yet released | Upstream fixed, no release contains it, the entry is `watching` or `fixed-unreleased`, and ak has an adjustment. |
 | Reopened upstream | Open upstream while the entry says fixed, released, dispatched or adopted. |
 | Waiting on upstream | Open, not stale, and nobody is waiting on us. |
@@ -162,6 +162,14 @@ check", whether or not the fix itself was confirmed. The fix counts as released 
 that version is at or after the fixed one. The `released` line's `version=` is then the fixed
 version of the bundled package, so a later carrier release repeats no line; the report's basis
 names the carrier version that bundles it.
+
+When the carrier is Ruflo, the fix must also reach the oldest supported Ruflo (the support
+window's floor). The check resolves the floor Ruflo's chain the same way, starting from that
+version instead of `latest`, for these entries and for AgentDB entries recorded as `released` or
+`dispatched` with a `minVersion`. Until the floor bundles a fixed version, the entry waits for
+the support window; if that resolution fails, the entry is "Could not check". Because every range
+resolves to its highest match, this is what a fresh install of the floor Ruflo gets: while the
+floor Ruflo's range reaches the newest `@claude-flow/cli`, the two answers are the same.
 
 ## Dispatch
 
