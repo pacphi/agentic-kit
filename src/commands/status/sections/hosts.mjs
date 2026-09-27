@@ -21,7 +21,7 @@ async function installedHostRows(h, st, primary, deps) {
     : auth.billing === 'metered' ? 'metered' : auth.billing;
   return [install, row('hosts', auth.mode === 'none' ? 'warn' : 'ok',
     `${h.id} auth: ${auth.mode} (${billing})${auth.source ? ` · ${auth.source}` : ''}${auth.note ? ` — ${auth.note}` : ''}`,
-    auth.mode === 'none' ? `${h.id} login` : null)];
+    auth.mode === 'none' ? `${h.id} login` : null, { repair: 'manual' })];
 }
 
 export default {

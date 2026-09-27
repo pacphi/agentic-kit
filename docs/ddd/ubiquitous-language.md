@@ -32,6 +32,9 @@ contradictory meaning.
 | Coverage statement | `complete`, `partial`, or `unsupported` audit reach plus concrete gaps; it is not a health or trust verdict |
 | Remediation proposal | Read-only action description classified as automatic-eligible, approval-required, prohibited, or upstream-required |
 | Upstream constraint | Versioned dependency issue, affected range, bounded local strategy, verification date, and objective sunset condition |
+| Watched upstream thread | Upstream issue or pull request in the upstream registry's watch list: what done means, the ak adjustment it unblocks, a lifecycle status from watching to retired, and dated history |
+| Upstream watch ledger | The pinned, locked "Upstream watch" issue; each event is one `UPSTREAM-WATCH <id> <event> <date>` line, only the routine's and our logins' comments count, and an exact line the routine recorded is never acted on twice |
+| Upstream dispatch | Draft pull request on `upstream/<id>` that makes a released thread's adjustment and passes its dependency's removal proof; the watcher never merges it |
 
 ## Context budget language
 
@@ -65,6 +68,10 @@ token estimates never become observed token evidence. An absent or incompatible 
 |------|---------|
 | Present | An executable, file, endpoint, or other surface was detected |
 | Enabled | Persisted user intent permits a host or integration to be used |
+| Managed by ak | Host management state: `kit.json` enables the host, so `ak` wires it and routes work to it; a management fact, never a health verdict |
+| Found, not managed | Host management state: the executable is on `PATH` but `ak` does not manage the host; still health-checked, with problems reported as information |
+| Not installed | Host management state: the executable is not on `PATH` and `ak` does not manage the host |
+| Participating host | Managed host that `ak`'s per-activity routing policy may target (dual-host routes, projected AQE agent routes, `ak run`); the AQE provider chain, qe-court configuration and Ruflo's own dual-mode skills are separate axes |
 | Authenticated | A host login or credential mechanism is known to be usable |
 | Configured | Required provider or projection configuration is present |
 | Reachable | A bounded probe successfully contacted its target |
@@ -73,8 +80,21 @@ token estimates never become observed token evidence. An absent or incompatible 
 | Evidence | Observation supporting a fact |
 | Provenance | Strength and origin of a fact: `observed`, `configured`, `inferred`, or `unknown` |
 | Unknown | The available evidence cannot establish a value; it does not mean false, zero, free, absent, or unreachable |
+| Live-check evidence | The last result of a live check (`passed`, `failed`, or `inconclusive`), with a bounded reason, its source (`sync`, `verify`, `status-live`), time, and an inputs key; status shows it with its age, marks it stale after a TTL, and marks it invalidated when the inputs key differs. Reading it never probes |
+| Quick live checks | The bounded, no-cost subset of `ak x verify` that `ak status --live` runs in parallel: AQE embedding request, Codex MCP handshake, provider wiring, security packages, deja-vu structure, temp-dir memory round trip; a timeout is `inconclusive` |
+| Memory route observation | What `ak x verify memory` reports after its CLI proof, in its throwaway project only: whether a key written through Ruflo's CLI is readable through MCP and the reverse, where each landed, and the MCP backend seen. A split is a warning and an unusable interface is "not observed"; it never fails the suite, is not part of the quick live checks, and says nothing about an existing corpus |
+| Observed routing pair | An exact `@claude-flow/cli` release and platform on which the memory route observation was recorded. Only for such a pair does status say which Ruflo interface reads which project-memory store; a neighbouring, prerelease or build-tagged version, or another platform, stays unverified |
+| Canonical memory store | `<root>/.swarm` for the root every ak memory launch contract pins (the repository root, else the folder, unless that is an unsuitable memory folder): `memory.db` and, with the native bridge, `agentdb-memory.db`. Status reports it from any subfolder, with each file's size, live WAL, largest namespace and how much of it is set to expire |
+| Unsuitable memory folder | A folder that never holds a Ruflo store: the filesystem root, the home folder itself, a temporary root (not the folders below it, even when the temporary root lies inside a tool's folder, as Windows' `%TEMP%` does), or anything inside a tool's own folder (`~/.codex`, `~/.claude`, `~/.config`, `~/.local`, `~/.cache`, `~/Library/Application Support`, `%APPDATA%`, `~/.claude-flow`, `~/.ruflo`, and their environment overrides) |
+| User-level memory store | `~/.claude-flow/memory`: the one store Codex's Ruflo launcher uses when it starts in an unsuitable memory folder, pinned through `CLAUDE_FLOW_MEMORY_PATH` and `CLAUDE_FLOW_DB_PATH`. Named after Ruflo's user-level state folder; Ruflo itself defines no user-level memory store. Status reports it and lists `~/.swarm` and `~/.codex/.chatgpt-projects/*/.swarm` as strays |
+| Stray memory store | A memory file this project's hosts do not read, traced to its owner: a Ruflo store under `.swarm/` other than the canonical pair and `.swarm/backups/`, or in a subfolder's `.swarm/`; `./agentdb.db`, `./agentdb.rvf` or `./ruvector.db`; or a `.agentic-qe/` below the project root. Status reports it for information only; ak never moves, merges or deletes it |
+| Memory root pin | A minimal `claude-flow.config.json` with `memory.persistPath: ".swarm"` that ak writes before registering a provider in a project with no Ruflo JSON configuration, so Ruflo's settings writer cannot create one from defaults that move memory to `./data/memory` (ruvnet/ruflo#3193). ak never writes it over an existing file and restores it if Ruflo changes it |
+| Memory maintenance age | How long ago Ruflo last backed up and distilled `memory.db`, read from the daemon's `.claude-flow/metrics/{backup,consolidation}.json` and the newest `.swarm/backups/memory-*.db`. Both are Ruflo daemon workers that ak monitors and never runs; neither covers `agentdb-memory.db`. A backup older than 48 hours warns only when no daemon runs for the project |
 | Ownership receipt | Exact record of a value written by `ak`, permitting narrow undo only while that value is unchanged |
+| Install-edit receipt | An ownership receipt for a change ak makes inside another tool's install (today only the natives heal's better-sqlite3 lines in a bundled `package.json`): file, field, original value, ak's value and time, written before the edit. *Applied* while the file holds ak's value, *superseded* once an upgrade or reinstall replaced it. Status and About show applied edits; `ak uninstall` restores only applied ones |
 | Drift | Current state differs from the last value written or expected by `ak` |
+| Repair contract | Who performs a status row's fix: `sync` (an `ak sync` step does it, so sync plans it) or `manual` (a human must; sync never plans it). A row without a fix has none |
+| Unresolved repair | A fix `ak sync` planned that did not take: its row is still present after the apply phase, or no sync step performs it. Sync reports it and exits 1. A subsystem left out with `--skip` is "skipped by request", never unresolved |
 | Companion data | User-owned index, notes, privacy state, imports, and source transcripts; invoking a managed companion does not transfer ownership to `ak` |
 | ObservationSpec | A bounded virtual-walk declaration: lexical root, contract version, budgets, pruning, accepted metadata, reducer, and one scan timestamp |
 | Observation forest | A scan-local lexical trie that routes each physical filesystem event to independent compatible ObservationSpecs without retaining a cross-scan file index |
@@ -100,6 +120,25 @@ missing price.
 
 `Dual-host` describes two enabled peer hosts, not an execution command and not evidence that two
 inference vendors served a workflow. Generalized execution belongs to `ak run`.
+
+## Session surface language (proposed)
+
+These terms are proposed by [ADR-0060](../adr/0060-session-surface-initiator-and-product-names.md)
+and not yet implemented. Until they are, the implemented contract is ADR-0050's **session origin**
+(`claude-desktop`, `codex-desktop` or `unknown`).
+
+| Term | Meaning |
+|------|---------|
+| Session surface | The product surface that started a session, read from the host's own declared field (Claude `entrypoint`; Codex `originator` with `source`) and shown by its official name, such as Claude Code CLI, Claude Desktop, ChatGPT desktop app · Codex, or Codex CLI |
+| Initiator | Who started a session: a person, automation (scripts, SDKs, non-interactive runs, CI), an agent (a subagent or reviewer spawned by another session), or an imported copy |
+| Imported session copy | A session one tool copied from another, such as a Claude Code transcript the ChatGPT desktop app imported as a Codex thread; excluded from usage, origin and project counts and reported as a count |
+| Raw surface value | The exact declared value a surface was derived from; always kept, and shown for any value the vocabulary does not recognize |
+| Tool workspace | A folder a tool creates for its own work outside the user's projects, such as `~/.codex/.chatgpt-projects/…` or `~/Documents/Codex/…`; an explanation attribute, never a surface |
+| Desktop application | Claude Desktop or the ChatGPT desktop app; an application that can start sessions, not a host |
+
+Say **session surface** for where a session came from; the Live event `surface` field (native, ruflo,
+aqe, plugin, skill, internal) names which component emitted an event and is a different concept.
+Never derive a surface from a folder, and never show "VS Code" for Codex `source="vscode"`.
 
 ## Model lifecycle language
 
@@ -241,6 +280,7 @@ and `GuidanceEntry` instead.
 | EvidenceAssertion | One field-local claim graded `verified`, `provider-declared`, or `inferred`, with a named authority, source reference, capture time, freshness, and completeness; there is no aggregate confidence score |
 | EvidenceScorecard | The strongest grade recorded per evidence field for one subject; a field nobody observed is omitted, never defaulted to a weaker grade |
 | SourceCoverage | One Discovery source's scan state, visited/estimated counts, completed/pending partitions, and factual limiting reason; never a resource disposition |
+| Not installed (Discovery source) | A curated host source whose root does not exist on this machine (`present:false`, Discovery-only); never scanned, never counted in SourceCoverage, and not a failure |
 | GuidanceEntry | One admitted, bounded outcome in exactly one of five lanes (Can apply here, Steps available, Decisions to make, Updates available, Recovery to finish), grounded by a provider capability, procedure, choice, candidate, or receipt audit |
 | RecommendationDisposition | Acknowledged, Snoozed, or Ignored exact candidate, recorded against one exact Guidance identity; invalidated by a stated premise change (expiry, candidate change, installed-version change, dependency change, source-fingerprint drift, or security-severity increase), never permanent |
 | InterruptionAudit | A read-only comparison of one receipt's recorded preimage or verified postimage with current provider evidence; may batch across receipts; never retries, replays, undoes, or mutates the resource |
@@ -267,7 +307,7 @@ engine still owns preflight, apply, verify, and receipt. See [Maintenance](maint
 | DirectoryEntry | One component's editorial identity: category, tagline, paragraph, links, icon, and a detection join key |
 | Editorial content | Authored, versioned prose and links — the part of a card that is true regardless of machine state |
 | Detection fact | An observed install/version/configured fact borrowed read-only from existing collectors, rendered only as chips |
-| State chip | The card element that renders detection facts (`installed v…` / `not installed — ak setup adds it` / `configured` / `unknown`) |
+| State chip | The card element that renders detection facts (`installed v…` / `not installed — ak setup adds it` / `configured` / `unknown`); host cards use the host management words (`Managed by ak` / `Found, not managed` / `Not installed`) |
 | Monogram tile | The honest icon for a component with no official mark: initials on a category-hued tile |
 | Register contract | The editorial writing rules (one ~50-word paragraph, plain language, active voice, no runtime claims, no superlatives) |
 | Parity gate | The test asserting managed-tools registry ↔ directory completeness in both directions |

@@ -39,6 +39,141 @@ and supported `claude mcp serve` tool exposure are preserved. See
 [ADR-0051](adr/0051-supported-peer-delegation-and-host-realignment.md) for the policy,
 official source citations, authority boundaries and verification limits.
 
+## 2026-09-26: `ak sync`'s exit code ignores fixes you do by hand
+
+`ak sync` now exits 0 when everything it can repair has converged, even if a row whose fix you
+must do yourself (`→ manual:` in `ak status`) is still failing. Before, such a row passed sync when
+nothing else was planned and failed it next to any unrelated planned fix, so a CI job's result
+depended on unrelated drift. Each failing or warning manual row is now listed after the verdict
+under "needs your action", and `ak sync --json` lists them in a `needsYourAction` array of
+`{ "subsystem", "level", "message", "fix" }`. When a failing manual row remains, the verdict reads
+"converged — nothing left that sync can repair". A job that relied on `ak sync` failing for such a
+row should read `needsYourAction`, or run `ak status`, which still reports overall health. An
+info-level manual row (for example, the AQE readiness reminder) is invisible to the manual-step
+note and to `needsYourAction` alike; if that is the only thing left, sync now reports "nothing to
+do — all subsystems healthy" instead of counting it as a manual step.
+
+## 2026-09-26: ak records and reverses its edits inside Ruflo's install
+
+When `ak sync` has to rewrite a better-sqlite3 line in a package inside Ruflo's install so the
+native binding can be installed, it now records the file, the field, the original value and its
+own value first, in `install-edits.json` in ak's state folder (`~/.local/state/agentic-kit/` by
+default). `ak status` and `ak about` show each edit that is still in place.
+`ak uninstall` puts the original value back where the file still holds ak's value, and reports the
+rest. A Ruflo upgrade or reinstall replaces the edited files, and ak then forgets the receipt. Edits
+made by earlier releases have no receipt: ak cannot show or restore them. Reinstall Ruflo if you
+want its shipped files back, then run `ak sync`.
+
+## 2026-09-26: Codex's Ruflo memory outside a project
+
+Codex's Ruflo launcher (`ak x ruflo-mcp`) no longer creates a `.swarm` store at the filesystem
+root, in your home folder itself, in a temporary root or inside a tool's own folder (`~/.codex`,
+`~/.claude`, `~/.config`, `~/.local`, `~/.cache`, `~/Library/Application Support`, `%APPDATA%`).
+Sessions started there share one user-level store, `~/.claude-flow/memory`. Repositories and plain
+work folders keep their own `.swarm` as before. Earlier sessions may have left `~/.swarm` or
+`.swarm` folders under `~/.codex/.chatgpt-projects/`. `ak status` lists them for information and
+never moves or deletes them; inspect one read-only before you remove it. Restart Codex for a
+running Ruflo server to pick up the new location. Claude's own Ruflo registration is unchanged.
+
+## 2026-09-26: Registering a provider keeps Ruflo memory in `.swarm`
+
+When `kit.json` lists providers and a project has no Ruflo JSON configuration
+(`claude-flow.config.json` or `.claude-flow/config.json`; `ruflo init` writes only
+`.claude-flow/config.yaml`), `ak setup`, `ak sync` and `ak host pick` now create a minimal
+`claude-flow.config.json` containing `memory.persistPath: ".swarm"` before running
+`ruflo providers configure`. Without it, Ruflo creates that file from its defaults, which point
+memory at `./data/memory` and hide the existing `.swarm` store
+([ruvnet/ruflo#3193](https://github.com/ruvnet/ruflo/issues/3193)). Commit the file or ignore it,
+as you prefer; Ruflo adds its provider entries to it. An existing Ruflo JSON configuration, or one
+named by `CLAUDE_FLOW_CONFIG`, is left alone. `ak status` warns when a Ruflo JSON configuration
+points memory away from a `.swarm` store that holds entries.
+
+## 2026-09-26: ak no longer installs a standalone agentdb
+
+AgentDB ships inside Ruflo, and Ruflo is its only writer. `ak setup` and `ak sync` no longer
+install or repin a separate global `agentdb` CLI, and `ak status` no longer shows an `agentdb`
+row. The dashboard's About card for agentdb takes its state from the `natives` row about Ruflo's
+bundled copy instead. Nothing is uninstalled for you. A leftover global is harmless; remove it with
+`npm uninstall -g agentdb` only if you do not use it yourself and no other package, such as
+`agentic-flow`, owns the `agentdb` command (`npm ls -g --depth=0` lists what is installed). An
+`agentdb` key in `kit.json` is kept and ignored.
+
+`ak x harvest` now runs only Ruflo commands from the project root: `ruflo hooks post-task`, plus
+`ruflo memory distill run` when you pass `--distill`. Its `--json` result no longer carries the
+`agentdb` or `harvested` fields; each step reports `ok`, `skipped` and `detail`, and the result
+names the project `root`. `ak x verify harvest` now fails when Ruflo is missing instead of
+skipping.
+
+## 2026-09-26: Status rows say who performs each fix
+
+Every `ak status --json` row (and each `/api/status` row) gains `repair`: `"sync"` when an
+`ak sync` step performs the row's `fix`, `"manual"` when you must do it yourself, and `null` when the
+row has no fix. `ak sync` plans only `"sync"` fixes and reports how many manual steps remain; text
+status prints a manual fix as `→ manual: …`. Scripts that treated every `fix` as sync work should
+filter on `repair`.
+
+Warnings that ask you to act now carry that step as a manual fix instead of inside the message. This
+covers the Brain plugin's unreviewed hooks and a refused Brain refresh, a missing AQE semantic
+backend, Codex context and plugin issues, an unreadable model inventory, Ruflo memory
+configuration and backups, unavailable external AQE intent, an invalid qe-court panel,
+agent-browser's external installs and browser payload, and Ruflo components waiting on a host
+restart. They are tagged `manual` on the dashboard and counted by `ak sync` and the bare `ak` hint.
+A script that read the instruction from `message` should read `fix`.
+
+## 2026-09-26: `ak sync --json` emits one JSON result
+
+`ak sync --json` was listed in the help but printed the ordinary human output. It now writes
+every human line (the plan, step results, prompts) to stderr and exactly one JSON object to
+stdout, pretty-printed like `ak status --json`:
+
+```json
+{ "plan": [], "steps": [], "unresolved": [], "skipped": [], "needsYourAction": [], "converged": true, "exitCode": 0 }
+```
+
+- `plan` and `skipped` items use the `ak status --json` row fields: `subsystem`, `level`,
+  `message`, `fix`, `repair`.
+- Each `steps` item is `{ "id", "ok", "detail" }` for a sync step that ran; `detail` is what the
+  step printed, or `null`.
+- Each `unresolved` item is `{ "subsystem", "fix", "message", "reason" }`. `reason` is one of
+  `not-converged`, `no-step`, `failing`, `apply-failed`, or `declined`.
+- Each `needsYourAction` item is `{ "subsystem", "level", "message", "fix" }`: a failing or
+  warning row whose fix you must do yourself. These never change `converged` or `exitCode`.
+- `converged` is `true` when nothing is left for sync to do, `false` when it ended with unresolved
+  items, and `null` when it stopped before a verdict: a dry run with a plan, a rejected flag, or an
+  error. A rejected flag or an error also adds `error`. The process exit code equals `exitCode`.
+
+A script that scraped stdout of `ak sync --json` for human lines should read stderr instead.
+
+## 2026-09-26: `ak sync` fails when a planned repair did not take
+
+After applying its plan, `ak sync` checks status again. If a row it planned to fix is still there
+with the same fix, or it planned a fix that no sync step performs, it prints
+`unresolved: [subsystem] fix — reason` and exits 1. Before, it printed "converged" and exited 0. A
+CI job or script that runs `ak sync` can now fail where it used to pass; the `unresolved:` line
+names what to look at. Manual fixes (`→ manual:` in `ak status`) are never planned and never fail
+sync. A Ruflo install that lacks its bundled agentdb now shows a manual reinstall on the `natives`
+row instead of a sync action that no step performed.
+
+## 2026-09-26: AQE embedding edits in Codex TOML
+
+Unrelated keys in Codex `config.toml`, such as `tui.status_line = ["model"]` or other
+dotted and quoted root keys, no longer stop ak from projecting the AQE embedding
+endpoint into that file.
+
+An AQE registration written inline (`agentic-qe = { … }` under `[mcp_servers]`, or
+`mcp_servers = { … }`) was previously read as absent and skipped silently. With a selected
+embedding backend it is now reported as a conflict: `ak status` shows an AQE embedding warning
+for that file, and `ak sync` leaves the entry alone, reports it `unresolved:` and exits 1 until
+it is rewritten (see [`ak sync` fails when a planned repair did not
+take](#2026-09-26-ak-sync-fails-when-a-planned-repair-did-not-take)). Run
+`ak x aqe-embedding status --json` to see the file and reason, then rewrite the entry as a
+`[mcp_servers.agentic-qe]` table.
+
+AQE entries started with `aqe mcp`, `agentic-qe mcp` or `aqe-v3 mcp` are now
+recognized on Claude, Codex and OpenCode, and OpenCode also accepts
+`npx -y agentic-qe@latest mcp`. With a selected embedding backend, ak now projects
+the endpoint into such entries instead of reporting an unrecognized transport.
+
 ## 2026-09-10: Remembered Codex MCP correction
 
 Claude Code's `claude-flow` registration and Codex's `ruflo` registration follow
@@ -272,7 +407,9 @@ runs last and applies from the next
 > inspect the named repairs: native-module, MCP, hook, and
 > configuration changes can affect running sessions. A `versions` row → either let the
 > other sessions reach a stopping point, or run `ak sync --no-upgrade` now (heals only —
-> skips the daemon stop and the npm swaps entirely) and do the full sync later. The armed
+> skips the daemon stop and the npm swaps entirely) and do the full sync later.
+> `ak sync --skip versions` is narrower: it holds back only the package upgrades and the
+> heals they trigger, and still refreshes RuvNet Brain and the kit itself. The armed
 > footer wipe in other open projects follows from the upgrade itself, not from sync — expect
 > it after any ruflo upgrade regardless of how you apply it.
 
@@ -395,7 +532,7 @@ ambidextrous dual-host experience (per-activity routing across Claude + Codex). 
 ```bash
 ak sync                              # 1. update the binary (+ heal everything)
 ak host pick --host claude,codex   # 2. opt in → wires dual-host
-ak host status                 # 3. verify: hosts "enabled, wired" + routing table
+ak host status                 # 3. verify: hosts "Managed by ak, wired" + routing table
 ```
 
 Step 1 gets the newer code onto disk. Step 2 is what actually turns dual-host on — it
@@ -434,9 +571,9 @@ machines), Codex's independent Ruflo/AQE access, legacy MCP retirement, and the 
 footer. These can drift with **no version change at all** —
 a kit update (or, on an npm-linked dev checkout, merely merging a PR that edits a
 `claude/*.md` template) revises the source of truth, and the rendered copies lag until the
-next `ak sync`. The nudge closes that window, using the exact drift definitions `ak status` uses (the two
-can never disagree) and stays quiet after `status`, `sync`, and `ak x reference`, which
-already show the same information.
+next `ak sync`. The nudge closes that window. For guidance blocks it reads the dry run of the
+same reconcile `ak sync` applies, as `ak status` does, so the three never disagree. It stays
+quiet after `status`, `sync`, and `ak x reference`, which already show the same information.
 
 ## Why `ak sync` pulled a prerelease
 

@@ -2,7 +2,10 @@
 
 - **Status:** Accepted; static assurance, transactional healing, bounded receipts, and read model implemented
 - **Date:** 2026-09-01
-- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
+- **Updated:** 2026-09-26 — §7: the registry ships inside `src/`, holds the watched upstream
+  threads beside the constraints, and feeds the deterministic upstream watch, whose ledger is
+  read from the routine's and our logins' comments only
+- **Earlier update:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Earlier update:** 2026-09-04
 - **Earlier update:** 2026-09-04 — proposed ADR-0048 groups hook findings under logical resources while
   preserving exact placement rows, evidence grades, and this ADR's independent healing authority;
@@ -184,7 +187,7 @@ to action.
 
 ### 7. Upstream constraints are lifecycle data
 
-`config/agentic-dependency-constraints.json` records dependency, affected versions,
+`src/lib/hook-audit/agentic-dependency-constraints.json` records dependency, affected versions,
 primary issue, independently tracked issue state, bounded strategy, verification date
 and an objective sunset condition. It is not a grant store and never authorizes a patch.
 
@@ -194,6 +197,30 @@ release automation observes a new version. A workaround is removed only after a 
 artifact passes the relevant host-neutral audit and conformance tests. Issue closure alone
 does not prove a fix; an open issue does not by itself prove the installed version is
 affected.
+
+The same file is the only upstream registry. It ships beside its loader because the hook audit
+reads it at runtime. Schema 5 adds a watch policy and a watch list: every upstream issue or
+pull request ak filed, commented on, or cites in `src/`, `bin/`, `claude/` or `tests/`, plus
+ak's own tracking issues that migrate into it. Each watched thread names its dependency, whose
+policy supplies the publication rule and the removal proof; what done means (closed as
+completed or merged, and the release channel and first fixed version when known); the ak files
+and plan references it affects; the adjustment ak makes; linked constraints; and dated history.
+Every constraint with an issue has a watch entry naming it, and an invalid watch list makes the
+whole registry invalid, for the hook audit too. A guard test fails when source cites a
+watched-repository thread the list lacks.
+
+A watched thread moves through `watching`, `fixed-unreleased`, `released`, `dispatched`,
+`adopted` and `retired`. The deterministic `scripts/upstream-watch.mjs` (maintainer tooling,
+not shipped) reads GitHub and npm and never writes. It reports replies we owe, released fixes
+ready for ak, workarounds ak still carries, stale threads (no upstream activity for 90 days),
+not-planned closures, retirement candidates, constraints past their retest date, and a registry
+with nothing left to watch. Its ledger lines, `UPSTREAM-WATCH <id> <event> <date> …`, go to one
+pinned, locked "Upstream watch" issue; the routine reads only its own and our logins' comments
+there, so an exact line it recorded is never acted on twice and nobody else can suppress one. Dispatch of a released
+thread is a branch `upstream/<id>` and a draft pull request that makes the adjustment
+test-first and passes the dependency's removal proof. It never merges. Publishing upstream
+keeps the `explicit-user-approval-required` rule. Operating detail:
+[UPSTREAM-WATCH.md](../UPSTREAM-WATCH.md).
 
 ### 8. Runtime receipts are sibling evidence, not static audit proof
 
@@ -314,7 +341,8 @@ Implemented in this decision:
 - Codex inline TOML and inline plugin-hook discovery;
 - material-field fingerprints, source containment, size bounds and command redaction;
 - explicit provider coverage gaps;
-- upstream constraint registry;
+- upstream constraint registry, shipped in `src/`, with the watch list of upstream threads, its
+  citation guard test and the deterministic `scripts/upstream-watch.mjs` check;
 - repeatable `--host` and `--host all` CLI selection;
 - adversarial cross-host fixtures and read-only tests.
 - post-open inode/path verification for every bounded source read;

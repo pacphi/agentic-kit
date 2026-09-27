@@ -96,7 +96,15 @@ separate from Vibium's Agentic-QE-owned cache visibility in System.
 The ruflo card carries a summary line ("ruflo components: 6 of 7 active") built from the same
 `ak status` row Overview > Runtime's panel header shows, so About and Runtime always agree. The
 line links to that panel; it appears only once `ak status` has reported the subsystem at least
-once.
+once. When ak has changed a better-sqlite3 line inside Ruflo's install to install the native
+binding, the card also shows the `natives` row that says so ("ak applied Ruflo's native SQLite
+pin"). That line never changes the card's chip.
+
+AgentDB ships inside Ruflo, and ak installs no separate copy, so `ak status` has no `agentdb`
+row. The agentdb card takes its chip from the `natives` row about Ruflo's bundled copy: native
+better-sqlite3 in its agentdb locations reads **installed**, the WebAssembly fallback reads **not
+working**, and a missing copy reads **needs attention**. The other `natives` rows are about other
+packages and do not change this chip. The version on the chip is the one Ruflo bundles.
 
 System's capability catalog counts both user/plugin surfaces and the project
 surfaces discovered by the host census. In particular, Codex project skills in
@@ -110,7 +118,9 @@ Each card carries an icon, the component name with a state chip, a plain-languag
 short paragraph explaining what the thing does for you, and a row of link pills — source (GitHub),
 package (npm), and public docs. Configured surfaces use the same card shape but swap the link pills
 for the command that manages them, because "where do I change this" is their equivalent of "where
-do I read more".
+do I read more". Host cards (Claude Code, Codex, OpenCode) show the host's management state —
+**Managed by ak**, **Found, not managed** or **Not installed** — from the same check the header
+badges use (see [Host health badges](#host-health-badges)).
 
 Two rules make the page trustworthy:
 
@@ -131,10 +141,13 @@ and `ak about --json` emits the entries with their detected state.
 
 Overview keeps status and routing in one health-first area:
 
-- **Summary** presents the overall verdict, attention items, and subsystem map.
-- **Hosts & Routing** presents execution-host health, the primary-host policy, per-activity routes,
-  escalation paths, and routed host models. A configured route is assignment intent, not evidence
-  of which inference provider served a particular session.
+- **Summary** presents the overall verdict, attention items, and subsystem map. A row's fix
+  shows an arrow when `ak sync` performs it and a `manual` tag when you must do it yourself
+  (sync never plans those).
+- **Hosts & Routing** presents host participation (which hosts ak manages and routes work to,
+  with a copyable command for any host that is not participating), execution-host health, the
+  primary-host policy, per-activity routes, escalation paths, and routed host models. A configured
+  route is assignment intent, not evidence of which inference provider served a particular session.
 - **Providers** presents inference-provider bindings and their configuration provenance. A
   registered provider is eligible configuration, not evidence that a request selected or used it.
   Direct Ruflo agents must explicitly select OpenRouter or Ollama together with a provider-native
@@ -142,7 +155,9 @@ Overview keeps status and routing in one health-first area:
   and served-model claims come from **Usage → Scorecard** evidence instead.
 - **Runtime** presents operational services, processes, MCP readiness, and cached
   context configuration with host-specific native controls. It also holds the read-only
-  "ruflo components" panel (below).
+  "ruflo components" panel (below) and, once any live check has run, a `live-checks` card
+  with each remembered result and its age. The dashboard never runs live checks itself;
+  `ak status --live`, `ak x verify` and `ak sync` record them.
 - **Intelligence** presents memory, learning, and quality-improvement signals machine-wide: an
   always-visible rollup folded across every project on this machine where memory or intelligence has
   been activated — a `.claude-flow`, `.agentic-qe` or `.swarm` directory, whichever host created it
@@ -294,6 +309,15 @@ fetched to draw it. When the arithmetic falls outside the window — a snapshot 
 it describes, or a browser clock that disagrees with the vendor's — the tick is omitted rather than
 pinned to either end, because a mark at 0% or 100% would state a position the data cannot support.
 The legend appears only when at least one row actually carries a tick.
+
+Claude's limits reach the dashboard only through the kit footer in the statusline a session runs,
+and a project's own statusLine takes precedence over your user-level one. When the Claude side is
+empty it says what your user-level statusLine is (none, the kit footer, each project's Ruflo
+helper, or a custom script) and what fills the panel, without showing the script's path.
+When the Codex side is empty it names why the last `codex app-server` request produced nothing —
+codex not found, could not start, exited early (with its exit code), timed out, refused the request,
+or answered without a plan window — and the next check to run. A stale Codex answer shown instead
+notes that its last refresh failed.
 
 ### Prompts
 
@@ -563,7 +587,9 @@ the same scan. Reuse is confined to that scan.
 Incomplete, older, differently rooted, or differently scoped evidence falls back to a fresh bounded
 walk rather than being treated as equivalent.
 
-Measurement views fetch once, then again only while a scan you started is running. Maintenance
+Measurement views fetch once, then again only while a scan you started is running (Runtime also
+refreshes on the header's poll clock). They read `GET /api/system/summary`, which carries only what
+the page draws; `GET /api/system` and `ak system --json` keep the complete payload. Maintenance
 loads when you open it, never on the shared status poll, and reads the last complete inventory;
 opening it checks no host provider and executes nothing. **Refresh evidence** on the Maintenance
 workspace is the explicit control that runs provider probes, and it rebuilds the Inventory
@@ -634,7 +660,8 @@ Maintenance opens on **Inventory** across all scopes and reads the last complete
 scans on open. Its four tabs are **Inventory**, **Guidance**, **Discovery**, and **Activity**; the
 Guidance and Activity tabs carry a count only when something is admitted or needs recovery.
 
-A fresh installation shows an empty Inventory and every automatic source as **Not scanned yet**.
+A fresh installation shows an empty Inventory and every installed automatic source as **Not
+scanned yet**; a host that is not installed reads **Not installed**.
 Two actions sit side by side above the tabs, each with its helper text: **Refresh evidence** runs
 provider probes on the saved measurement and rebuilds the inventory in seconds, and **Re-measure
 machine** walks the filesystem, then every discovery source, then refreshes evidence, which takes
@@ -708,7 +735,8 @@ added offer **Pause** and **Stop** while running, **Resume** and **Stop** while 
 scan** after a failure, and **Scan this root** if never run; stopping shows what would be affected
 and asks **Stop this source?**. Automatic sources carry no per-source control: each reads Not
 scanned yet with "measured by Re-measure machine", or Complete with "covered by the last
-measurement". A started
+measurement". A host source whose folder is not on this machine reads **Not installed** and is
+not counted in the progress sentence or the Inventory banner. A started
 source keeps running until it completes, pauses, stops, or fails. Host configuration sources skip
 transcript, session, log, and cache trees by name so they can complete.
 
@@ -882,10 +910,26 @@ machine-readable `datetime` attributes retain their original instant.
 
 ## Host health badges
 
-Claude, Codex and OpenCode use the same statuses: **OK**, **Attention**,
-**Checking**, **Unknown**, and **Disabled**. Click a badge for the qualification,
-check time, project and individual results. Keyboard users can focus the badge
-and press Enter; Escape closes the details and restores focus.
+Each host is in one of three management states, named the same way everywhere
+(badges, their details, About, Overview → Providers, Hosts & Routing, `ak status`
+and `ak host status`):
+
+- **Managed by ak**: `kit.json` enables the host, so ak wires it and routes work
+  to it. Its badge shows health: **OK**, **Attention**, **Checking** or **Unknown**.
+- **Found, not managed**: the host is installed, but ak does not manage it. It is
+  still checked automatically. Its badge shows the management state in a neutral
+  colour. Problems in its checks are information, never a warning, and ak's own
+  wiring check is marked FYI.
+- **Not installed**: the host is not on `PATH`, and ak does not manage it.
+
+(If the `PATH` lookup itself fails, an unmanaged host reads **Not managed**.)
+
+Click a badge for the management state, check time, project and individual
+results. For a host ak does not manage, the details say it is not participating
+and give a copyable command that adds it, such as `ak host pick --host claude,codex`.
+`--host` takes the complete list, so the command names every host already managed.
+The dashboard never runs it for you. Keyboard users can focus the badge and press
+Enter; Escape closes the details and restores focus.
 
 **Local OK** means the required local checks passed: executable launch,
 supported configuration and provider/model selection, applicable authentication
@@ -901,7 +945,8 @@ provider, model/default agent, and applicable credentials or local endpoint.
 Automatic checks do not invoke its config-debug command, which can install
 dependencies. Unresolved remote configuration and native overrides stay Unknown.
 
-**Check local setup** refreshes the local evidence. **Check connection** requires
+**Check again** refreshes the local evidence for any host. **Check connection**
+runs only for hosts managed by ak, and requires
 checking a confirmation box first: it sends one small provider request, using
 normal billing and native context. Native startup may initialize dependencies
 and update local cache/session files. Agent tools are restricted, and no repair

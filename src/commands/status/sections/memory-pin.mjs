@@ -17,7 +17,7 @@ export default {
       if (pin?.warn) {
         rows.push(row('memory-pin', 'warn',
           `CLAUDE_FLOW_DB_PATH pins ${pin.pinned} (${pin.reason})`,
-          'repoint it in .claude/settings.local.json env, or remove the pin'));
+          'repoint it in .claude/settings.local.json env, or remove the pin', { repair: 'manual' }));
       }
     } catch { /* pin check is best-effort — never blocks status */ }
     return rows;

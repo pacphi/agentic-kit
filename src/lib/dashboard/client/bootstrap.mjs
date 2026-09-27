@@ -182,7 +182,7 @@ import { loadRufloComponents } from './ruflo-components.mjs';
   }
   // System's sub-views ride the same secondary rail as Overview's, with the
   // same persistence and aria wiring. Footprint views filter one shared
-  // /api/system document. Maintenance alone lazily reads its separate bounded
+  // /api/system/summary document. Maintenance alone lazily reads its separate bounded
   // context when selected; it never triggers the deep scan behind Rescan.
   export function setSystemView(id,focus,skipHash){
     if(SYSTEM_VIEWS.indexOf(id)<0)return;

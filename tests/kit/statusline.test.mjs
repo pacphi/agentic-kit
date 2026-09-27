@@ -34,7 +34,7 @@ const signalsSrc = (buggy) => (buggy
   ? 'export function getSecurityStatus(cwd) {\n  let cvesFixed = 0;\n  const totalCves = 3;\n  cvesFixed = Math.min(totalCves, scans.length);\n}\n'
   : 'export function getSecurityStatus(cwd) {\n  const findings = readScan(cwd);\n  return { status: findings.length ? "ISSUES" : "CLEAN" };\n}\n');
 
-function fixture({ buggyUpstream }) {
+function fixture({ buggyUpstream, rufloVersion }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-sl-'));
   const proj = path.join(dir, 'proj');
   fs.mkdirSync(path.join(proj, '.claude', 'helpers'), { recursive: true });
@@ -44,6 +44,9 @@ function fixture({ buggyUpstream }) {
   const funnel = path.join(groot, 'ruflo', 'node_modules', '@claude-flow', 'cli', 'dist', 'src', 'funnel');
   fs.mkdirSync(funnel, { recursive: true });
   fs.writeFileSync(path.join(funnel, 'local-signals.js'), signalsSrc(buggyUpstream));
+  if (rufloVersion) {
+    fs.writeFileSync(path.join(groot, 'ruflo', 'package.json'), JSON.stringify({ name: 'ruflo', version: rufloVersion }));
+  }
   _setGlobalRootForTest(groot);
   return { proj, sl: path.join(proj, '.claude', 'helpers', 'statusline.cjs') };
 }
@@ -144,6 +147,34 @@ test('overlay retires itself once upstream is fixed', () => {
   const out = fs.readFileSync(sl, 'utf8');
   assert.equal(count(out, /ruflo-sec:BEGIN/g), 0, 'stopgap must be gone');
   assert.match(out, /ruflo-seg:BEGIN/, 'the activation footer must survive');
+});
+
+// ── Ruflo owns the version its helper shows ──────────────────────────────────
+// Ruflo bakes `let ver` into statusline.cjs as a FLOOR and, at render time, shows
+// the HIGHEST version among that floor and every install it can find. A value ak
+// wrote there never self-corrects when it is too high: a test fixture's fake
+// `ruflo: 9.9.9` leaked into a real project and its statusline read "RuFlo V9.9.9".
+// fixStatusline must leave the baked value exactly as Ruflo wrote it.
+
+for (const [label, rufloVersion] of [['higher (the 9.9.9 leak)', '9.9.9'], ['lower', '2.0.0']]) {
+  test(`fixStatusline keeps Ruflo's baked version when installed ruflo is ${label}`, () => {
+    const { proj, sl } = fixture({ buggyUpstream: false, rufloVersion });
+    const r = fixStatusline(proj);
+    const out = fs.readFileSync(sl, 'utf8');
+    assert.match(out, /let ver = "3\.0\.0";/, 'the helper\'s own baked version must survive injection');
+    assert.doesNotMatch(out, new RegExp(`let ver = "${rufloVersion.replace(/\./g, '\\.')}"`));
+    assert.match(out, /ruflo-seg:BEGIN/, 'the footer is still injected');
+    assert.equal(r.applied, true);
+  });
+}
+
+test('a converged helper stays converged when the installed ruflo version changes', () => {
+  const { proj, sl } = fixture({ buggyUpstream: false, rufloVersion: '9.9.9' });
+  fixStatusline(proj);
+  fs.writeFileSync(path.join(_globalRootOf(sl), 'ruflo', 'package.json'),
+    JSON.stringify({ name: 'ruflo', version: '3.45.0' }));
+  assert.equal(fixStatusline(proj, { dryRun: true }).applied, false,
+    'status must not report drift that only a version rewrite would "fix"');
 });
 
 // The fixture's groot sits next to the project dir: <tmp>/proj/... and <tmp>/groot.

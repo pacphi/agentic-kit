@@ -33,9 +33,7 @@ them.
    in the same version namespace: npm semver vs npm semver, GitHub release
    tag vs release tag. A comparison across namespaces can never converge
    (the appendix records the live case). "Latest" is not always npm-latest
-   either — agentdb's
-   authority is ruflo's *bundled* version, because a latest-chasing agentdb
-   is the store-corruption risk its coherence guard exists to prevent.
+   either — agent-browser's authority is Ruflo's compatibility range.
 
 4. **One drift story across all surfaces.** `ak status` rows, the statusline
    footer chips, and the dashboard (subsystem cards *and* the update banner)
@@ -58,17 +56,17 @@ them.
 
 | Tool | Install / update spec | Update owner | Installed version read from | Drift compared against | status / statusline / dashboard |
 | --- | --- | --- | --- | --- | --- |
-| **ruflo** | npm `ruflo@latest` | `ak sync` | disk: global `package.json` | npm `view latest` (TTL-cached) | row ✓ / upstream's own `RuFlo V<x>` header ✓ / card + banner ✓ |
+| **ruflo** | npm `ruflo@latest` | `ak sync` | disk: global `package.json` | npm `view latest` (TTL-cached) | row ✓ / upstream's own `RuFlo V<x>` header ✓ (ak never writes it; status flags a baked version above the install) / card + banner ✓ |
 | **agent-browser** | exact npm `0.27.0` on Node 22/23; `0.27.3` on Node 24+ | `ak sync`, only when receipt-owned; compatible external installs are disowned | disk: global `package.json` plus package-owned native executable | Ruflo's `>=0.27.0 <0.28.0` contract, not npm latest | row ✓ / n/a / About + System ✓; generic update banner excluded |
 | **agentic-qe** | npm `agentic-qe@latest` | `ak sync` | disk: global `package.json` (project-local fallback) | npm `view latest` (TTL-cached) | row ✓ / `Agentic QE V<x>` chip ✓ / card + banner ✓ |
 | **hosts** (Claude, Codex, OpenCode; OpenCode routes explicitly through `ak run`) | npm `@latest` — only when npm-managed | `ak sync` if npm-installed; **explicitly disowned** if brew/mise/native | disk: global `package.json`, else `--version` probe | npm latest for npm-managed only; external → `outdated:false` | row ✓ (version + method) / n/a / card + banner (npm-managed only) ✓ |
-| **agentdb** | npm, **pinned to ruflo's bundled version** — deliberately not latest | `ak sync` (repins on core skew) | disk: global `package.json` | ruflo's **bundled** copy (coherence), not npm latest — by design | row ✓ / n/a / card ✓; banner excluded (its authority isn't "latest") |
-| **ruvnet-brain** | npm `ruvnet-brain@latest` + `--version v<tag>` pin (never `github:` HEAD) | `ak sync`; the installer's own nightly self-updater is suppressed at install (`--no-nightly-prompt`) and disabled by sync if found (`ruvnet-brain-nightly` subsystem) | disk: KB `SOURCE.json → releaseTag`, falling back to ak's kit.json stamp for pre-stamping bundles | GitHub `releases/latest` tag (TTL-cached) | row ✓ / `V<tag>` chip ✓ / card + banner ✓ |
+| **agentdb** | none — ships inside ruflo; ak installs no separate copy | ruflo (its upgrade carries it); native bindings healed by `ak sync` (`natives`), which receipts any better-sqlite3 line it rewrites inside Ruflo's install (restored by `ak uninstall`) | disk: ruflo's bundled `agentdb/package.json` | none — not an ak update target | natives row ✓ / n/a / About card version ✓; banner excluded |
+| **ruvnet-brain** | npm `ruvnet-brain@latest` (never `github:` HEAD): an install with the bundle's own updater refreshes through `--update`; otherwise a `--version v<tag>`-pinned install | `ak sync`, stamping only the release then observed on disk; the installer's own nightly self-updater is suppressed at install (`--no-nightly-prompt`) and disabled by sync if found (`ruvnet-brain-nightly` subsystem) | disk: KB `SOURCE.json → releaseTag`, falling back to ak's kit.json stamp for pre-stamping bundles | GitHub `releases/latest` tag (TTL-cached) | row ✓ / `V<tag>` chip ✓ / card + banner ✓ |
 | **deja-vu** (opt-in companion) | npm `@vshulcz/deja-vu@latest`; v0.19.0 is the accepted contract baseline | `ak sync` only for an ak-receipted npm install; external binary/plugin installs are disowned | disk: global package plus bounded `deja version`; plugin or binary presence does not prove ownership | npm latest for owned npm; external → installed-only | content-free row / n/a / card + banner for owned npm drift |
 | **kit (self)** | npm, **pinned to the exact version drift saw** (`@pacphi/agentic-kit@<v>`) | `ak sync` (runs last — npm replaces the running code) | disk: running copy's `package.json` | npm `latest` (+ `next` for prereleases, TTL-cached) | row ✓ / n/a / header version + card + banner ✓ |
 
 Statusline "n/a" cells are by design: the footer decorates the activation rows
-it renders (ruflo / Agentic QE / brain) — hosts, agentdb, and the kit have no
+it renders (ruflo / Agentic QE / brain) — hosts and the kit have no
 footer row to decorate, and their versions live in `ak status` and the
 dashboard.
 
@@ -103,7 +101,8 @@ explicit index purge can still destroy imported-only material whose sole copy is
 Ruflo's current browser executor without making it a companion or installing another plugin/skill
 catalog. Its exact compatible package, native binary, trusted MCP-only config, and browser payload
 are separate facts. Existing compatible packages stay external; incompatible external packages
-are preserved. Normal detection never runs `agent-browser doctor` or launches Chrome. Package
+are preserved, and status lists the options: install a compatible 0.27.x yourself, or set
+`agentBrowser: false`. Normal detection never runs `agent-browser doctor` or launches Chrome. Package
 removal is receipt-gated, while browser/session/profile data is always preserved.
 
 ## Managed ruflo components
@@ -179,8 +178,8 @@ new session and ruflo's own check confirm it. See
   `selfDrift`), heals in `src/lib/heal.mjs` (`upgradePackage`, `selfUpdate`).
 - **hosts** — `src/lib/providers.mjs` (`hostInstallState`, `installHost`,
   `updateHost`, `hostDrift`).
-- **agentdb** — `src/lib/agentdb.mjs` (`coherence`), heal
-  `healAgentdb` (pins to the bundled version).
+- **agentdb** — `src/lib/agentdb.mjs` (`bundledVersion`, read-only). A standalone
+  global `agentdb` is not ak's: ak neither installs, repins, monitors nor removes it.
 - **agent-browser** — `src/lib/agent-browser.mjs` (Node-aware exact version,
   native verification, trusted MCP config, receipt-gated teardown); lifecycle
   rationale in [ADR-0043](adr/0043-managed-ruflo-browser-executor.md).

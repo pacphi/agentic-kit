@@ -1,6 +1,7 @@
 import { CSS } from './styles.mjs';
 import { JS } from './client.mjs';
 import { LIVE_CSS, LIVE_HTML, LIVE_JS } from './live-view.mjs';
+import { HOST_PARTICIPATION_HTML } from './host-participation-view.mjs';
 
 // ── Intelligence: machine-wide rollup + project picker ──────────────────────
 // Scoped to this file (not styles.mjs) since page.mjs is the only owner of
@@ -151,13 +152,14 @@ export function renderPage({ name, version }) {
   <p id="host-health-project"></p>
   <ul id="host-health-checks" class="health-checks"></ul>
   <p id="host-health-target"></p>
+  <p id="host-health-participation"></p>
   <h3>Connection check</h3>
   <p id="host-health-connection"></p>
   <p id="host-health-integrations"></p>
   <p id="host-health-eligibility"></p>
   <p class="health-disclosure">Sends one short request using your selected host and provider. Normal provider billing and native context usage apply. Native startup may initialize dependencies and update local cache or session files. Agent tools are restricted; this check does not repair your setup.</p>
   <label class="health-consent"><input type="checkbox" id="host-health-consent"> Run one connection check with these settings.</label>
-  <div class="health-actions"><button type="button" id="host-health-refresh">Check local setup</button><button type="button" id="host-health-connect" disabled>Check connection</button></div>
+  <div class="health-actions"><button type="button" id="host-health-refresh">Check again</button><button type="button" id="host-health-connect" disabled>Check connection</button></div>
   <p id="host-health-message" role="status" aria-live="polite"></p>
 </dialog>
 
@@ -336,6 +338,7 @@ export function renderPage({ name, version }) {
       <h2>Hosts &amp; routing</h2>
       <p>Enabled execution hosts, activity assignments, primary-host policy, and escalation paths.</p>
     </header>
+${HOST_PARTICIPATION_HTML}
     <div id="cards-hosts"></div>
     <section class="strip" id="routing" hidden>
       <div class="strip-head">
@@ -522,7 +525,7 @@ export function renderPage({ name, version }) {
     <section class="view" id="v-limits" role="tabpanel" aria-labelledby="usage-tab-limits" hidden>
       <div class="note"><span class="i">&#8505;</span><span>Utilization here is <b>vendor-reported</b> &mdash;
         the plan&rsquo;s own percentages, a denominator local transcripts cannot compute.
-        Claude&rsquo;s numbers arrive via the managed statusLine while a session runs; Codex&rsquo;s come from
+        Claude&rsquo;s numbers arrive through the kit footer in the statusLine a session runs; Codex&rsquo;s come from
         <b>codex app-server</b> using codex&rsquo;s own login. This panel reads no vendor credential.</span></div>
       <div class="two">
         <section class="strip">
@@ -713,7 +716,7 @@ export function renderPage({ name, version }) {
 
 ${LIVE_HTML}
 
-  <!-- SYSTEM (ADR-0025). Footprint views render from GET /api/system;
+  <!-- SYSTEM (ADR-0025). Footprint views render from GET /api/system/summary;
        Maintenance lazily reads its own report. The deep tier is NEVER scanned
        on open — the rail's Rescan button is the only trigger, and the freshness
        label states how old the figures are. -->

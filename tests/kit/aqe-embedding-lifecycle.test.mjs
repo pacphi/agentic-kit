@@ -47,6 +47,60 @@ test('missing service gives actionable incomplete setup instead of hash fallback
   assert.equal(probed, false);
 });
 
+// Node's fetch rejects a refused loopback connection with TypeError('fetch failed')
+// whose cause carries code ECONNREFUSED (an AggregateError when `localhost` resolves twice).
+const refused = () => new TypeError('fetch failed', {
+  cause: Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:11434'), { code: 'ECONNREFUSED' }),
+});
+
+test('an installed Ollama that refuses connections is reported as not running, not missing', async () => {
+  let probed = false;
+  const run = installed => prepareAqeEmbedding(local, {
+    probe: async () => { probed = true; }, request: async () => { throw refused(); },
+    ollamaInstalled: async () => installed,
+  });
+  const stopped = await run(true);
+  const missing = await run(false);
+  assert.equal(stopped.ok, false);
+  assert.equal(stopped.status, 'failed');
+  assert.match(stopped.detail, /Ollama is installed but not running at http:\/\/127\.0\.0\.1:11434/);
+  assert.match(stopped.detail, /ollama serve/);
+  assert.doesNotMatch(stopped.detail, /Install Ollama/);
+  assert.equal(missing.ok, false);
+  assert.match(missing.detail, /Install Ollama/);
+  assert.equal(probed, false);
+});
+
+test('the Ollama install check runs only after a refused connection', async () => {
+  let checked = 0;
+  const r = await prepareAqeEmbedding(local, { probe: pass,
+    request: async () => { throw new Error('local-service-request-failed'); },
+    ollamaInstalled: async () => { checked++; return true; } });
+  assert.equal(r.ok, false);
+  assert.equal(checked, 0);
+  assert.match(r.detail, /Install Ollama/);
+});
+
+test('read-only verification names a stopped Ollama when the selected local endpoint is unreachable', async () => {
+  const r = await prepareAqeEmbedding(local, { provision: false, request: async () => assert.fail(),
+    probe: async () => ({ status: 'failed', reason: 'endpoint-unreachable' }), ollamaInstalled: async () => true });
+  assert.equal(r.ok, false);
+  assert.match(r.detail, /endpoint-unreachable/);
+  assert.match(r.detail, /Ollama is installed but not running/);
+  assert.doesNotMatch(r.detail, /Install Ollama/);
+});
+
+test('an unreachable external endpoint never gets Ollama-specific guidance', async () => {
+  let checked = 0;
+  const cfg = { aqeEmbedding: { mode: 'endpoint', endpoint: 'https://embed.example' } };
+  const r = await prepareAqeEmbedding(cfg, { request: async () => assert.fail(),
+    probe: async () => ({ status: 'failed', reason: 'endpoint-unreachable' }),
+    ollamaInstalled: async () => { checked++; return true; } });
+  assert.equal(r.ok, false);
+  assert.equal(checked, 0);
+  assert.doesNotMatch(r.detail, /not running/);
+});
+
 test('external backends are never provisioned and failed semantic checks remain failed', async () => {
   const cfg = { aqeEmbedding: { mode: 'endpoint', endpoint: 'https://example.com' } };
   const r = await prepareAqeEmbedding(cfg, { request: async () => { throw Error('must not run'); },

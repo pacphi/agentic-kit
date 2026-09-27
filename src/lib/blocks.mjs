@@ -429,12 +429,10 @@ export async function guidanceFootprint(rows, targetName, resolveTemplate, { con
  *  currently-registered host produces) is left alone instead of being force-
  *  stripped from every real file — this module has no basis for treating an
  *  unrecognized target as "retired from here." Omitting `knownTargets`
- *  preserves the original unconditional behavior for every existing 2-arg call
- *  site (status.mjs, nudge.mjs, opencode.mjs — this refactor's edit boundary
- *  doesn't cover them; only `reconcileGuidance` below opts into the 3-arg
- *  form). For the registry as it ships today every row's `guidanceFiles` are
- *  already within the known-target universe, so this is a no-observable-change
- *  refinement, not a behavior change. */
+ *  preserves the original unconditional behavior for 2-arg callers.
+ *  `reconcileGuidance` below passes it, and `ak status` and the nudge read
+ *  guidance drift through `reconcileGuidance`, so a custom block scoped to a
+ *  target this machine does not have is left alone by every reader. */
 export function retiredForTarget(rows, targetName, knownTargets) {
   return rows
     .filter((r) => {
@@ -530,25 +528,35 @@ export function templateResolver(pkgRoot) {
 }
 
 /** Reconcile EVERY guidance target against the registry — the one loop
- *  `sync` (apply) and `setup`'s final pass both run, so the two commands can
- *  never drift. Per target: active rows upsert/strip per detector, and
- *  re-scoped rows are force-stripped (retiredForTarget). `context` carries the
- *  caller's flag signals for `flag` detectors (dualMode, opencodeEnabled).
- *  Returns [{name, label, changed}] where `changed` is a human-readable action
- *  summary ('' when the target was already in sync). */
-export async function reconcileGuidance({ cwd, cfg, pkgRoot, context = {}, dryRun = false }) {
+ *  `sync` (apply), `setup`'s final pass, and (as a dry run) `ak status` and the
+ *  post-command nudge all run, so no reader can disagree with the writer
+ *  (#237: status once rebuilt this loop without kit.json intent and reported
+ *  drift sync would never act on). Per target: active rows upsert/strip per
+ *  detector, and re-scoped rows are force-stripped (retiredForTarget).
+ *  `context` carries the caller's flag signals for `flag` detectors (dualMode,
+ *  opencodeEnabled); kit.json intent is merged over it. `targets` is a test
+ *  seam (defaults to guidanceTargets()). `only` limits the writes to the named
+ *  targets while every target still counts as known, so a command that owns one
+ *  file (ak host pick → opencode AGENTS.md) writes exactly what sync would.
+ *  Returns [{name, label, changed, results}] where `changed` is a human-readable
+ *  action summary ('' when the target was already in sync) and `results` is the
+ *  raw per-row syncBlocks output ({slug, action, present}), including
+ *  'missing-template'. */
+export async function reconcileGuidance({
+  cwd, cfg, pkgRoot, context = {}, dryRun = false, targets = guidanceTargets({ cwd, cfg }), only = null,
+}) {
   const rows = registry(cfg.customBlocks);
   const resolve = templateResolver(pkgRoot);
   const selectionContext = guidanceContextFromConfig(cfg, context);
   const out = [];
-  const targets = guidanceTargets({ cwd, cfg });
   const knownTargets = targets.map((t) => t.name);
   for (const t of targets) {
+    if (only && !only.includes(t.name)) continue;
     const treg = [...blocksForTarget(rows, t.name), ...retiredForTarget(rows, t.name, knownTargets)];
-    const res = await syncBlocks(t.file, treg, resolve, { context: selectionContext, dryRun });
-    const changed = res.filter((r) => r.action !== 'unchanged' && r.action !== 'skipped')
+    const results = await syncBlocks(t.file, treg, resolve, { context: selectionContext, dryRun });
+    const changed = results.filter((r) => r.action !== 'unchanged' && r.action !== 'skipped')
       .map((r) => `${r.slug} ${r.action}`).join(', ');
-    out.push({ name: t.name, label: t.label, changed });
+    out.push({ name: t.name, label: t.label, changed, results });
   }
   return out;
 }

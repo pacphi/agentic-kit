@@ -9,11 +9,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   sandboxHome, assertSandboxed, snapshot, assertUnchanged, captureLog, rmrf,
   sandboxProject, writeKitConfig, offlineKitConfig, fakeGlobalRoot,
 } from './helpers/home-sandbox.mjs';
+import { isolateProject } from './helpers/project-isolation.mjs';
 
 const HOME = sandboxHome('ak-sync');
 const paths = await import('../../src/lib/paths.mjs');
@@ -21,6 +23,7 @@ const sync = await import('../../src/commands/sync.mjs');
 const status = await import('../../src/commands/status.mjs');
 const { loadKitConfig } = await import('../../src/lib/config.mjs');
 assertSandboxed(paths, HOME);
+isolateProject('ak-sync-command');
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const PROJECT = sandboxProject('ak-sync');
@@ -341,9 +344,9 @@ test('an unconverged Claude projection puts ruflo-components in the sync plan', 
 });
 
 test('kit.json opt-outs keep their subsystems out of the plan entirely', async () => {
-  seedHome(offlineKitConfig({ security: false, agentdb: false, mcp: { register: false, excludeFamilies: [] } }));
+  seedHome(offlineKitConfig({ security: false, mcp: { register: false, excludeFamilies: [] } }));
   const { out } = await dryRun();
-  for (const off of ['[security]', '[agentdb]', '[mcp]']) {
+  for (const off of ['[security]', '[mcp]']) {
     assert.ok(!out.includes(off), `a disabled subsystem must never appear in the plan: ${off}`);
   }
 });
@@ -410,7 +413,7 @@ test('an oversized RVF store is planned as a quarantine', async () => {
 });
 
 test('every documented flag is declared in the parser options', () => {
-  for (const flag of ['dry-run', 'no-upgrade', 'yes', 'json']) {
+  for (const flag of ['dry-run', 'no-upgrade', 'yes', 'json', 'skip']) {
     assert.ok(flag in sync.options, `--${flag} is documented in help but not parseable`);
     assert.match(sync.help, new RegExp(`--${flag}\\b`), `--${flag} is parseable but undocumented`);
   }
@@ -444,6 +447,470 @@ test('a noninteractive Codex repair is disclosed but not applied without --yes',
   assertUnchanged(before, HOME, 'unapproved Codex repair must not mutate the sandbox');
 });
 
+test('the mcp step names a preserved custom legacy ruflo registration and its manual command', async () => {
+  seedHome(offlineKitConfig({ mcp: { register: true, excludeFamilies: [] } }));
+  const mcpStep = sync.SYNC_STEPS.find((s) => s.id === 'mcp');
+  const results = [];
+  const ctx = {
+    cfg: loadKitConfig(),
+    step: async (name, thunk) => { const r = await thunk(); results.push([name, r]); return r; },
+    registerMcp: async () => ({
+      ok: true, preserved: [{ name: 'ruflo', scope: 'user', command: '/opt/homebrew/bin/ruflo', args: ['mcp'] }],
+    }),
+  };
+  const { out } = await captureLog(() => mcpStep.run(ctx));
+  assert.equal(results[0][1].ok, true, 'claude-flow registration itself succeeded');
+  assert.match(out, /custom 'ruflo' MCP registration preserved \(user scope\)/);
+  assert.match(out, /claude mcp remove ruflo -s user/);
+});
+
+// ── promised repairs must converge (#237 §F) ─────────────────────────────────
+// A planned sync fix whose row is still there after the apply phase was
+// silently dropped from the verdict: sync printed "converged" and exited 0.
+// These runs stay hermetic: the planned subsystem is `aqe`, whose step
+// (healRvf) only scans the sandbox project's missing .agentic-qe directory.
+
+/** A collectFn that returns `first` for the plan and `after` for the proof. */
+function twoPhase(first, after) {
+  let calls = 0;
+  return async () => (calls++ === 0 ? first : after);
+}
+
+async function syncWith(collectFn, over = {}) {
+  const prior = process.cwd();
+  process.chdir(PROJECT);
+  try {
+    return await captureLog(() => sync.run({
+      flags: FLAGS({ 'no-upgrade': true, ...over }), pkgRoot: PKG_ROOT, collectFn,
+    }));
+  } finally { process.chdir(prior); }
+}
+
+const RVF_FIX = 'sync quarantines them (aqe rebuilds the store)';
+
+test('a planned sync repair still present after the apply phase is unresolved and fails sync', async () => {
+  seedHome();
+  const persisting = { subsystem: 'aqe', level: 'warn', message: 'store still oversized', fix: RVF_FIX, repair: 'sync' };
+  const { result, out } = await syncWith(twoPhase([persisting], [persisting]));
+  assert.equal(result, 1, out);
+  assert.match(out, /unresolved: \[aqe\] sync quarantines them \(aqe rebuilds the store\) — store still oversized/);
+  assert.doesNotMatch(out, /converged — no failing subsystems/);
+});
+
+test('a fixture row without a repair field is still held to its promise', async () => {
+  seedHome();
+  // The plan admits any fix that is not manual, so the proof must use the same test.
+  const legacy = { subsystem: 'aqe', level: 'warn', message: 'store still oversized', fix: RVF_FIX };
+  const { result, out } = await syncWith(twoPhase([legacy], [legacy]));
+  assert.equal(result, 1, out);
+  assert.match(out, /unresolved: \[aqe\]/);
+});
+
+test('a planned subsystem that no sync step performs is unresolved even when its row disappears', async () => {
+  seedHome();
+  const { result, out } = await syncWith(twoPhase([{
+    subsystem: 'sync-test-only-marker', level: 'warn', message: 'nothing handles this', fix: 'sync pretends to fix it',
+  }], []));
+  assert.equal(result, 1, out);
+  assert.match(out, /unresolved: \[sync-test-only-marker\] sync pretends to fix it — no sync step performs this repair/);
+  assert.doesNotMatch(out, /converged — no failing subsystems/);
+});
+
+test('manual fixes and preserved advisories never enter the plan and never fail sync', async () => {
+  seedHome();
+  const manual = {
+    subsystem: 'mcp', level: 'warn', message: "custom 'ruflo' MCP registration preserved (user scope)",
+    fix: 'claude mcp remove ruflo -s user', repair: 'manual',
+  };
+  const advisory = { subsystem: 'project-memory', level: 'warn', message: 'two preserved memory files', fix: null, repair: null };
+  const repaired = { subsystem: 'aqe', level: 'warn', message: 'store oversized', fix: RVF_FIX, repair: 'sync' };
+  const { result, out } = await syncWith(twoPhase([repaired, manual, advisory], [manual, advisory]));
+  assert.equal(result, 0, out);
+  assert.doesNotMatch(out, /• \[mcp\]/, 'a manual fix is never a plan item');
+  assert.doesNotMatch(out, /unresolved:/);
+  assert.match(out, /converged — no failing subsystems/);
+});
+
+test('which steps perform a subsystem: none for an unknown one, the tail for host alignment', () => {
+  const cfg = loadKitConfig();
+  const flags = FLAGS();
+  assert.deepEqual(sync.performingSteps('sync-test-only-marker', flags, cfg), []);
+  assert.deepEqual(sync.performingSteps('aqe', flags, cfg), ['aqe-rvf']);
+  assert.ok(sync.performingSteps('versions', flags, cfg).includes('natives'), 'an upgrade re-heals natives');
+  assert.ok(sync.performingSteps('host-alignment', flags, cfg).length > 0, 'alignHosts runs after every step');
+  assert.ok(!sync.performingSteps('memory-pin', flags, cfg).includes('host-lifecycles'),
+    'host-lifecycles runs every sync but only acts for a lifecycle host');
+});
+
+test('a real repair converges, and the next sync has nothing left to do', async () => {
+  seedHome(offlineKitConfig({ aqe: false }));
+  const aqeDir = paths.projectAqeDir(PROJECT);
+  fs.mkdirSync(aqeDir, { recursive: true });
+  fs.writeFileSync(path.join(aqeDir, 'brain.rvf'), 'x'.repeat(4096));
+  const prev = process.env.RUFLO_AQE_RVF_MAX_BYTES;
+  process.env.RUFLO_AQE_RVF_MAX_BYTES = '16';
+  const aqeSection = (await import('../../src/commands/status/sections/aqe.mjs')).default;
+  const collectAqe = async ({ cwd }) => aqeSection.collect({ cwd, cfg: loadKitConfig() });
+  try {
+    const first = await syncWith(collectAqe);
+    assert.equal(first.result, 0, first.out);
+    assert.match(first.out, /\[aqe\] sync quarantines them/);
+    assert.match(first.out, /converged — no failing subsystems/);
+    assert.ok(!fs.existsSync(path.join(aqeDir, 'brain.rvf')), 'the oversized store was quarantined');
+
+    const second = await syncWith(collectAqe);
+    assert.equal(second.result, 0, second.out);
+    assert.doesNotMatch(second.out, /sync plan/, 'a converged machine plans nothing');
+    // The only row left is the info-level "readiness unverified" reminder
+    // (repair: manual). It is invisible to the needs-your-action list, so the
+    // manual-step count that must agree with that list is zero (decision 10,
+    // review-sync-exit.md minor 4): sync reports the machine healthy outright.
+    assert.doesNotMatch(second.out, /item\(s\) need a manual step/);
+    assert.match(second.out, /nothing to do — all subsystems healthy/);
+  } finally {
+    if (prev === undefined) delete process.env.RUFLO_AQE_RVF_MAX_BYTES;
+    else process.env.RUFLO_AQE_RVF_MAX_BYTES = prev;
+    rmrf(aqeDir);
+  }
+});
+
+// ── --skip: one-run subsystem exclusions (decision D5) ───────────────────────
+
+test('--skip is a repeatable string option the CLI parser accepts', async () => {
+  const { parseArgs } = await import('node:util');
+  const { values } = parseArgs({
+    args: ['--skip', 'natives', '--skip', 'ruvnet-brain'], options: sync.options, strict: true,
+  });
+  assert.deepEqual(values.skip, ['natives', 'ruvnet-brain']);
+});
+
+test('--skip rejects an unknown subsystem, names the known ones, and runs nothing', async () => {
+  seedHome();
+  let collected = 0;
+  const { result, out } = await syncWith(async () => { collected++; return []; }, { skip: ['natvies'] });
+  assert.equal(result, 2, out);
+  assert.match(out, /unknown --skip subsystem 'natvies'/);
+  assert.match(out, /natives/, 'the error lists the names it accepts');
+  assert.equal(collected, 0, 'a rejected flag never reaches the collector');
+});
+
+test('--skip removes the plan item, says so, and keeps the rest of the plan', async () => {
+  seedHome();
+  const rows = [
+    { subsystem: 'aqe', level: 'fail', message: 'store oversized', fix: RVF_FIX, repair: 'sync' },
+    { subsystem: 'daemons', level: 'warn', message: 'stale daemons', fix: 'sync reaps stale daemons', repair: 'sync' },
+  ];
+  const { result, out } = await syncWith(async () => rows, { 'dry-run': true, skip: ['aqe'] });
+  assert.equal(result, 0, out);
+  const planned = out.split('\n').filter((l) => l.trim().startsWith('•'));
+  assert.equal(planned.length, 1, out);
+  assert.match(planned[0], /\[daemons\]/);
+  assert.match(out, /skipped by request: \[aqe\] sync quarantines them/);
+});
+
+test('--skip accepts a comma-separated list', async () => {
+  seedHome();
+  const rows = [
+    { subsystem: 'aqe', level: 'fail', message: 'store oversized', fix: RVF_FIX, repair: 'sync' },
+    { subsystem: 'daemons', level: 'warn', message: 'stale daemons', fix: 'sync reaps stale daemons', repair: 'sync' },
+  ];
+  const { result, out } = await syncWith(async () => rows, { 'dry-run': true, skip: ['aqe,daemons'] });
+  assert.equal(result, 0, out);
+  assert.doesNotMatch(out, /sync plan/);
+  assert.match(out, /skipped by request: \[daemons\]/);
+});
+
+test('when every planned item is skipped, sync never claims the machine is healthy', async () => {
+  seedHome();
+  const rows = [{ subsystem: 'aqe', level: 'fail', message: 'store oversized', fix: RVF_FIX, repair: 'sync' }];
+  const { result, out } = await syncWith(async () => rows, { skip: ['aqe'] });
+  assert.equal(result, 0, out);
+  assert.match(out, /nothing to do — 1 planned item\(s\) skipped by request/);
+  assert.doesNotMatch(out, /all subsystems healthy/);
+});
+
+test('a skipped subsystem runs no step and is never counted as a failure', async () => {
+  seedHome();
+  const oversized = { subsystem: 'aqe', level: 'fail', message: 'store oversized', fix: RVF_FIX, repair: 'sync' };
+  // npx's step only scans the sandbox npm cache; it keeps the apply phase
+  // running. aqe still fails afterwards, but it was skipped by request.
+  const npx = { subsystem: 'npx', level: 'warn', message: 'stale npx env', fix: 'sync prunes stale npx envs', repair: 'sync' };
+  const { result, out } = await syncWith(twoPhase([oversized, npx], [oversized]), { skip: ['aqe'] });
+  assert.equal(result, 0, out);
+  assert.match(out, /npx: no stale envs/, 'the step that was not skipped ran');
+  assert.doesNotMatch(out, /rvf:/, 'the aqe step never ran');
+  assert.doesNotMatch(out, /unresolved:|still failing:/);
+  assert.match(out, /skipped by request: \[aqe\]/);
+});
+
+test('--skip stops a step on its derived triggers too', () => {
+  const cfg = { ...loadKitConfig(), security: true };
+  const flags = FLAGS();
+  const active = (subs, skip) => sync.activeSteps(new Set(subs), flags, cfg, new Set(skip));
+  assert.ok(active(['versions'], []).includes('natives'), 'control: an upgrade re-heals natives');
+  assert.ok(!active(['versions', 'security'], ['natives']).includes('natives'), 'natives stays off on versions/security');
+  assert.ok(active(['versions', 'security'], ['natives']).includes('security'));
+  assert.ok(!active(['routing', 'codex-mcp'], ['providers']).includes('providers'), 'providers stays off on routing/codex-mcp');
+  assert.ok(!active(['versions'], ['statusline']).includes('statusline'));
+});
+
+test('a fix performed only by a skipped step is skipped with it, never unresolved', async () => {
+  seedHome();
+  const cve = { subsystem: 'statusline/cve', level: 'warn', message: 'fabricated CVE counter', fix: 'sync injects the security overlay', repair: 'sync' };
+  const { out } = await syncWith(async () => [cve], { 'dry-run': true, skip: ['statusline'] });
+  assert.doesNotMatch(out, /sync plan/, out);
+  assert.match(out, /skipped by request: \[statusline\/cve\]/);
+});
+
+// correctness-skip-providers-false-unresolved: the codex-mcp subsystem has
+// fixes of two kinds. Registering, migrating or retiring an MCP table is done
+// only by the providers step; removing a recursive table is done by
+// codex-mcp-repair. --skip providers must skip the first kind, not plan it.
+test('--skip providers skips the codex-mcp fixes only the providers step performs', () => {
+  const cfg = loadKitConfig();
+  const flags = FLAGS();
+  const codex = (fix, level = 'warn') => ({ subsystem: 'codex-mcp', level, message: 'm', fix, repair: 'sync' });
+  const providerOnly = [
+    codex('sync registers the ruflo MCP into codex'),
+    codex('sync migrates it to workspace-pinned project memory'),
+    codex('sync retires the legacy MCP entry'),
+  ];
+  const recursive = codex('sync removes the exact recursive [mcp_servers.codex] table after confirmation (backed up)', 'fail');
+  const { plan, skipped } = sync.splitSkipped([...providerOnly, recursive], new Set(['providers']), flags, cfg);
+  assert.deepEqual(skipped.map((p) => p.fix), providerOnly.map((p) => p.fix), 'nothing but the providers step performs these');
+  assert.deepEqual(plan.map((p) => p.fix), [recursive.fix], 'codex-mcp-repair still removes a recursive table');
+
+  const control = sync.splitSkipped(providerOnly, new Set(), flags, cfg);
+  assert.equal(control.plan.length, 3, 'control: without --skip they are planned');
+  const verdict = sync.convergenceVerdict({
+    plan: [], after: providerOnly, state: { applyFailures: [] }, flags, cfg, skip: new Set(['providers']), skipped,
+  });
+  assert.deepEqual(verdict.unresolved, [], 'a skipped fix is never unresolved');
+  assert.deepEqual(verdict.remaining, []);
+});
+
+// Follow-up (correctness-skip-providers-false-unresolved): a subsystem can now
+// be partly skipped. The verdict must still hold its planned fixes to their
+// promise; only the skipped (subsystem, fix) pairs are "skipped by request".
+test('a partly skipped subsystem still proves the fixes that stayed planned', () => {
+  const cfg = loadKitConfig();
+  const flags = FLAGS();
+  const recursive = { subsystem: 'codex-mcp', level: 'fail', message: 'recursive codex → codex mcp-server registration detected (user)',
+    fix: 'sync removes the exact recursive [mcp_servers.codex] table after confirmation (backed up)', repair: 'sync' };
+  const register = { subsystem: 'codex-mcp', level: 'warn', message: 'codex enabled but ruflo MCP not registered in codex',
+    fix: 'sync registers the ruflo MCP into codex', repair: 'sync' };
+  const skip = new Set(['providers']);
+  const { plan, skipped } = sync.splitSkipped([recursive, register], skip, flags, cfg);
+  assert.deepEqual(plan.map((p) => p.fix), [recursive.fix]);
+  const verdict = sync.convergenceVerdict({ plan, after: [recursive, register], state: { applyFailures: [] }, flags, cfg, skip, skipped });
+  assert.deepEqual(verdict.unresolved.map((u) => [u.fix, u.reason]), [[recursive.fix, 'not-converged']],
+    'a planned repair that did not take is unresolved, not "skipped by request"');
+  assert.deepEqual(verdict.remaining, []);
+  assert.deepEqual(verdict.skipped.map((r) => r.fix), [register.fix]);
+});
+
+// correctness-skip-leaves-subsystem-touched: a skipped subsystem stays
+// untouched even when a sibling step that serves it runs for another one.
+test('--skip codex-mcp and --skip routing reach into the providers step', async () => {
+  const step = sync.SYNC_STEPS.find((s) => s.id === 'providers');
+  const runWith = async (skip) => {
+    const seen = {};
+    const convergeProviders = async (cfg, cwd, options) => {
+      Object.assign(seen, options);
+      // The pipeline's documented contract: a disabled step still reports, with null.
+      for (const id of ['legacy-codex-mcp', 'ruflo-codex-mcp']) {
+        if (options.codexMcp === false) await options.reporter(id, null);
+      }
+      seen.retired = options.migrateRoutes ? options.migrateRoutes(cfg) : 'default';
+      return {};
+    };
+    await captureLog(() => step.run({
+      cfg: loadKitConfig(), cwd: PROJECT, skip: new Set(skip), state: {}, report: () => {}, convergeProviders,
+    }));
+    return seen;
+  };
+  const control = await runWith([]);
+  assert.equal(control.codexMcp, true, 'control: providers also converges the Codex MCP tables');
+  assert.equal(control.seedRoutes, true);
+  assert.equal(control.retired, 'default', 'control: retired routes are migrated');
+
+  const noCodex = await runWith(['codex-mcp']);
+  assert.equal(noCodex.codexMcp, false, '--skip codex-mcp must leave ~/.codex/config.toml alone');
+  assert.equal(noCodex.seedRoutes, true);
+
+  const noRouting = await runWith(['routing']);
+  assert.equal(noRouting.seedRoutes, false, '--skip routing must not seed routes');
+  assert.deepEqual(noRouting.retired, { changed: false, changes: [] }, '--skip routing must not rewrite retired routes');
+  assert.equal(noRouting.codexMcp, true);
+});
+
+test('--skip statusline also skips the helper refresh that can replace the statusline', () => {
+  const cfg = loadKitConfig();
+  const active = (skip) => sync.activeSteps(new Set(['versions']), FLAGS(), cfg, new Set(skip));
+  assert.ok(active([]).includes('ruflo-helpers'), 'control: an upgrade refreshes the generated helpers');
+  assert.ok(!active(['statusline']).includes('ruflo-helpers'));
+  assert.ok(active(['statusline']).includes('versions'), 'the upgrade itself still runs');
+});
+
+test('--skip opencode stops the lifecycle refresh an upgrade would trigger', async () => {
+  const step = sync.SYNC_STEPS.find((s) => s.id === 'host-lifecycles');
+  const cfg = { ...loadKitConfig(), integrations: { ...loadKitConfig().integrations, hosts: { claude: true, codex: false, opencode: true } } };
+  const run = (skip) => captureLog(() => step.run({ cfg, subsystems: new Set(['versions']), skip: new Set(skip), pkgRoot: PKG_ROOT }));
+  assert.match((await run([])).out, /opencode:/, 'control: an upgrade refreshes the opencode wiring');
+  assert.doesNotMatch((await run(['opencode'])).out, /opencode:/);
+});
+
+test('every subsystem a sync step answers to is a name --skip accepts', () => {
+  const known = new Set(sync.skippableSubsystems());
+  for (const step of sync.SYNC_STEPS) {
+    for (const [, name] of String(step.when).matchAll(/has\('([^']+)'\)/g)) {
+      assert.ok(known.has(name), `step ${step.id} fires on '${name}', which --skip does not accept`);
+    }
+  }
+  assert.ok(known.has('opencode'), 'lifecycle hosts are skippable');
+  assert.ok(known.has('host-alignment'), 'the post-step host alignment is skippable');
+  // Every opt-in managed, so each step's own enablement gate is open (ruvector
+  // is managed only while registered as a Claude MCP server).
+  seedHome();
+  fs.writeFileSync(paths.claudeUserMcpPath(), JSON.stringify({ mcpServers: { ruvector: { command: 'ruvector' } } }));
+  try {
+    const cfg = {
+      ...loadKitConfig(), agentBrowser: true, aqe: true, security: true, mcp: { register: true, excludeFamilies: [] },
+      codexContext: { owned: true }, statusline: { codex: { preset: 'census' } },
+      integrations: { ...loadKitConfig().integrations, hosts: { claude: true, codex: true, opencode: true } },
+    };
+    for (const name of known) {
+      assert.ok(sync.performingSteps(name, FLAGS(), cfg).length > 0, `--skip ${name} names nothing sync does`);
+    }
+  } finally {
+    rmrf(paths.claudeUserMcpPath());
+  }
+});
+
+// ── --json: exactly one JSON result on stdout (decision D6) ──────────────────
+// Each case runs sync in a child process so its real stdout and stderr can be
+// read apart: stdout must parse as ONE JSON value, and the human lines must
+// all be on stderr. The child inherits this file's sandboxed environment
+// (HOME, XDG_*, npm cache, and a PATH with nothing on it).
+
+const BIN = path.join(PKG_ROOT, 'bin', 'agentic-kit.mjs');
+const moduleUrl = (rel) => pathToFileURL(path.join(PKG_ROOT, rel)).href;
+
+/** Run sync.run({ flags }) in a child whose collector returns `first` for the
+ *  plan and `after` for the proof (or throws). */
+function syncChild({ first = [], after = [], flags = {}, throws = false }) {
+  const root = fakeGlobalRoot(HOME, { ruflo: '9.9.9', 'agentic-qe': '9.9.9' });
+  const script = `
+    const paths = await import(${JSON.stringify(moduleUrl('src/lib/paths.mjs'))});
+    paths._setGlobalRootForTest(${JSON.stringify(root)});
+    const sync = await import(${JSON.stringify(moduleUrl('src/commands/sync.mjs'))});
+    const { exitWhenFlushed } = await import(${JSON.stringify(moduleUrl('src/lib/output.mjs'))});
+    const first = ${JSON.stringify(first)};
+    const after = ${JSON.stringify(after)};
+    let calls = 0;
+    const collectFn = async () => {
+      ${throws ? "throw new Error('collector exploded');" : ''}
+      return calls++ === 0 ? first : after;
+    };
+    exitWhenFlushed(await sync.run({ flags: ${JSON.stringify(FLAGS({ 'no-upgrade': true, json: true, ...flags }))},
+      pkgRoot: ${JSON.stringify(PKG_ROOT)}, collectFn }));
+  `;
+  return spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    cwd: PROJECT, env: process.env, encoding: 'utf8', timeout: 120_000,
+  });
+}
+
+/** Run the real CLI (`node bin/agentic-kit.mjs sync …`) against a fake npm prefix. */
+function akSync(args) {
+  const root = fakeGlobalRoot(HOME, { ruflo: '9.9.9', 'agentic-qe': '9.9.9' });
+  return spawnSync(process.execPath, [BIN, 'sync', ...args], {
+    cwd: PROJECT, encoding: 'utf8', timeout: 120_000,
+    env: { ...process.env, npm_config_prefix: path.dirname(root) },
+  });
+}
+
+/** stdout must hold exactly one JSON value; JSON.parse rejects anything else. */
+function oneJson(child) {
+  assert.ok(child.stdout.trim().startsWith('{'), `stdout is not a JSON object:\n${child.stdout}\n--- stderr:\n${child.stderr}`);
+  return JSON.parse(child.stdout);
+}
+
+const SHAPE = ['plan', 'steps', 'unresolved', 'skipped', 'needsYourAction', 'converged', 'exitCode'];
+
+test('--json: a run with an unresolved repair emits one JSON result and keeps human lines on stderr', () => {
+  seedHome();
+  const persisting = { subsystem: 'aqe', level: 'warn', message: 'store still oversized', fix: RVF_FIX, repair: 'sync' };
+  const child = syncChild({ first: [persisting], after: [persisting] });
+  const out = oneJson(child);
+  assert.deepEqual(Object.keys(out), SHAPE);
+  assert.equal(child.status, 1, child.stderr);
+  assert.equal(out.exitCode, 1);
+  assert.equal(out.converged, false);
+  assert.deepEqual(out.plan, [{ subsystem: 'aqe', level: 'warn', message: 'store still oversized', fix: RVF_FIX, repair: 'sync' }]);
+  const rvf = out.steps.find((s) => s.id === 'aqe-rvf');
+  assert.ok(rvf, `the aqe step is listed: ${JSON.stringify(out.steps)}`);
+  assert.equal(rvf.ok, true);
+  assert.match(rvf.detail, /rvf: healthy/);
+  assert.deepEqual(out.unresolved, [{ subsystem: 'aqe', fix: RVF_FIX, message: 'store still oversized', reason: 'not-converged' }]);
+  assert.match(child.stderr, /sync plan \(1 action\(s\)\)/);
+  assert.match(child.stderr, /unresolved: \[aqe\]/);
+});
+
+test('--json: a converged run with a skip reports the skipped item and exit 0', () => {
+  seedHome();
+  const oversized = { subsystem: 'aqe', level: 'fail', message: 'store oversized', fix: RVF_FIX, repair: 'sync' };
+  const npx = { subsystem: 'npx', level: 'warn', message: 'stale npx env', fix: 'sync prunes stale npx envs', repair: 'sync' };
+  const child = syncChild({ first: [oversized, npx], after: [], flags: { skip: ['aqe'] } });
+  const out = oneJson(child);
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(out.exitCode, 0);
+  assert.equal(out.converged, true);
+  assert.deepEqual(out.plan.map((p) => p.subsystem), ['npx']);
+  assert.deepEqual(out.skipped.map((s) => s.subsystem), ['aqe']);
+  assert.deepEqual(out.unresolved, []);
+  assert.ok(out.steps.some((s) => s.id === 'npx' && s.ok), JSON.stringify(out.steps));
+  assert.ok(!out.steps.some((s) => s.id === 'aqe-rvf'), 'a skipped step is not listed as run');
+  assert.match(child.stderr, /converged — no failing subsystems/);
+});
+
+test('--json: an error still yields exactly one JSON result, with the error and exit 1', () => {
+  seedHome();
+  const child = syncChild({ throws: true });
+  const out = oneJson(child);
+  assert.equal(child.status, 1, child.stderr);
+  assert.equal(out.exitCode, 1);
+  assert.equal(out.converged, null, 'no verdict was reached');
+  assert.equal(out.error, 'collector exploded');
+  assert.match(child.stderr, /collector exploded/);
+});
+
+test('--json --dry-run through the real CLI: plan on stdout as JSON, the listing on stderr', () => {
+  seedHome();
+  const before = snapshot(PROJECT);
+  const child = akSync(['--json', '--dry-run']);
+  const out = oneJson(child);
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(Object.keys(out), SHAPE);
+  assert.equal(out.exitCode, 0);
+  assert.equal(out.converged, null, 'a dry run proves nothing');
+  assert.deepEqual(out.steps, []);
+  assert.ok(Array.isArray(out.plan) && out.plan.length > 0, 'the sandbox has something to plan');
+  assert.ok(out.plan.every((p) => p.subsystem && p.fix && p.repair === 'sync'), JSON.stringify(out.plan));
+  assert.match(child.stderr, /sync plan \(\d+ action\(s\)\)/);
+  assertUnchanged(before, PROJECT, '`ak sync --json --dry-run` must not touch the project');
+});
+
+test('--json with a rejected --skip still answers in JSON on stdout', () => {
+  seedHome();
+  const child = akSync(['--json', '--skip', 'natvies']);
+  const out = oneJson(child);
+  assert.equal(child.status, 2, child.stderr);
+  assert.equal(out.exitCode, 2);
+  assert.equal(out.converged, null);
+  assert.match(out.error, /unknown --skip subsystem 'natvies'/);
+  assert.match(child.stderr, /unknown --skip subsystem/);
+});
+
 test('failed heal results are retained for the final convergence proof', () => {
   const state = { applyFailures: [] };
   sync.recordApplyFailure(state, 'ruvnet-brain', { ok: false, status: 'failed', detail: 'network unavailable' });
@@ -465,6 +932,15 @@ test('a Ruflo version upgrade explicitly refreshes generated helpers before the 
   assert.ok(helpers < statusline, 'Ruflo may replace statusline.cjs, so helpers refresh first');
   assert.equal(sync.SYNC_STEPS[helpers].when(new Set(['versions'])), true);
   assert.equal(sync.SYNC_STEPS[helpers].when(new Set()), false);
+});
+
+// #237 §4: sync forced the fresh-install path onto every existing Brain. The
+// heal now chooses between the bundle's updater and an install from what is on
+// disk, so the step must not override that choice.
+test('the Brain sync step lets the heal choose update versus install', () => {
+  const brain = sync.SYNC_STEPS.find((step) => step.id === 'ruvnet-brain');
+  assert.ok(brain, 'sync keeps a Brain step');
+  assert.doesNotMatch(String(brain.run), /force/, 'no forced fresh install from sync');
 });
 
 // ── opencode convergence through a REAL sync ─────────────────────────────────

@@ -1,5 +1,5 @@
 // x host — frontier-host + LLM-provider detection and wiring.
-//   status (default) : detected CLIs, aqe provider, ruflo providers, what's wired
+//   status (default) : host management state, aqe provider, ruflo providers, what's wired
 //   pick             : choose enabled hosts / aqe provider / ruflo providers → persist → apply
 //   off              : reversible teardown (strip managed env keys)
 // Mirrors `ak x mcp`: detect → persist to kit.json → idempotent heal.
@@ -28,6 +28,9 @@ import {
   newlyEnabledHostTrustManifest, trustManifestLines,
 } from '../../lib/trust-manifest.mjs';
 import { have } from '../../lib/exec.mjs';
+import {
+  hostManagement, hostEnableCommand, HOST_MANAGEMENT_LABELS, NOT_PARTICIPATING,
+} from '../../lib/host-management.mjs';
 import {
   ok, warn, fail, info, dim, bold, yellow,
 } from '../../lib/output.mjs';
@@ -85,7 +88,9 @@ Host model — three managed hosts, all eligible for explicit activity routing:
 \`pick\` manages ALL THREE: enable/disable opencode here exactly like claude/codex.
 
 Subcommands:
-  status   (default) detected CLIs, aqe provider, ruflo providers, what's wired
+  status   (default) each host as Managed by ak, Found, not managed, or Not
+             installed (with the complete --host list that adds a found
+             host); aqe provider, ruflo providers, what's wired
   align    audit user/current-project host transports; --all-projects adds the
              bounded census, --project PATH adds a location. Preview by default;
              --apply offers backed-up correction; --yes approves noninteractively.
@@ -206,11 +211,13 @@ function printHostsSection({ cfg, hosts, scope }) {
   for (const h of HOSTS) {
     const d = hosts[h.id];
     const enabled = !!cfg.integrations.hosts[h.id];
-    const state = !d.present ? dim('not installed')
-      : !enabled ? 'installed, disabled'
-      : dflt ? 'enabled (default — ruflo default-on, no env written)'
-      : d.wired ? 'enabled, wired'
-      : 'enabled, not wired → ak sync';
+    // The management words every surface uses (ADR-0053, 2026-09-26).
+    const { label } = hostManagement({ enabled, present: d.present });
+    const state = !enabled ? (d.present ? label : dim(label))
+      : !d.present ? `${label}, not installed → ak sync`
+      : dflt ? `${label} (default — ruflo default-on, no env written)`
+      : d.wired ? `${label}, wired`
+      : `${label}, not wired → ak sync`;
     const tier = dim(`  · ${hostTierLabel(h.id)}`);
     // auth/billing axis — subscription ($0) vs metered key, per host.
     const auth = d.present ? hostAuthState(h.id, { present: true }) : null;
@@ -276,12 +283,14 @@ function printRufloProvidersSection({ cfg, providers }) {
 
 /** Closing summary — idle-but-installed hosts, and the dual-host tips. */
 function printHostSummarySection({ cfg, hosts }) {
-  const codexIdle = hosts.codex.present && !cfg.integrations.hosts.codex;
-  const ocIdle = hosts.opencode.present && !cfg.integrations.hosts.opencode;
+  // Found, not managed: the hint is the COMPLETE --host list (pick disables
+  // any enabled host left out), built from the current enabled set.
+  const idle = HOSTS.filter((h) => hosts[h.id]?.present && !cfg.integrations.hosts[h.id]);
   console.log('');
-  if (codexIdle) info('codex is installed but disabled — enable it with: ak host pick');
-  if (ocIdle) info('opencode is installed but disabled — enable it with: ak host pick --host claude,opencode');
-  if (!codexIdle && !ocIdle) ok('host/provider config reflects installed CLIs');
+  for (const h of idle) {
+    info(`${h.id}: ${HOST_MANAGEMENT_LABELS.found} — ${NOT_PARTICIPATING}; to include it: ${hostEnableCommand(cfg, h.id)}`);
+  }
+  if (!idle.length) ok('host/provider config reflects installed CLIs');
   printDualHostTips(cfg);
 }
 

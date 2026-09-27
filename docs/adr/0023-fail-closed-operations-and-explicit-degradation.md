@@ -1,7 +1,12 @@
 # ADR-0023 — Fail-closed mutations and explicit degraded operation evidence
 
 - **Status:** Implemented
-- **Updated:** 2026-09-20 — ADR-0055 adds qualified AQE embedding lifecycle evidence; ADR-0053 separates host health from usage-source diagnostics
+- **Updated:** 2026-09-26 — §11: every status fix declares who performs it (`repair: sync | manual`);
+  `ak sync` plans only fixes a sync step performs (#237); the Ruflo native runtime probe keeps its
+  load error and separates unavailable from inconclusive; sync's natives heal uses the same load
+  test (see the native runtime probe amendment); the heal receipts every edit it makes inside
+  another tool's install, and `ak uninstall` reverses it (see the install-edit receipts amendment)
+- **Earlier update:** 2026-09-20 — ADR-0055 adds qualified AQE embedding lifecycle evidence; ADR-0053 separates host health from usage-source diagnostics
 - **Earlier update:** 2026-08-26 — ADR-0035 applies fail-closed preflight, bounded evidence, and
   content-free degradation to the opt-in deja-vu companion
 - **Earlier update:** 2026-09-03 — ADR-0044 implements these fail-closed principles in the Maintenance
@@ -51,6 +56,49 @@ defect was losing the evidence needed to distinguish healthy, degraded, absent, 
 or mutating user state after a promised safety prerequisite failed.
 
 ## Decision
+
+### Native runtime probe amendment — 2026-09-26
+
+The load probe for the better-sqlite3 that Ruflo's memory runtime resolves returns one of three
+states. `native` means it loaded and answered `SELECT 1`. `unavailable` means the child reported the
+load error, which status shows with paths reduced to file names. `inconclusive` means no verdict: a
+timeout (retried once, and detected only through the probe's own abort signal), a crash, or a spawn
+error. Only `unavailable` asserts the WASM fallback and fails status. `inconclusive` is a warning
+with no sync fix. Status offers the sync fix only where the natives heal acts.
+
+Status and sync share this load test. The heal builds a binding whose file is missing. It
+load-tests a binding whose file is present and rebuilds it only when the probe returns
+`unavailable`, never on `inconclusive`. Before that rebuild it removes the old file, so the rebuild
+writes a new file instead of overwriting one that a running process may still have mapped. The
+rebuild succeeds only when the load test then passes; a rebuilt file that still will not load is a
+failed heal that reports the load error.
+
+### Install-edit receipts amendment — 2026-09-26
+
+The natives heal can change files inside another tool's install. When better-sqlite3 cannot be
+resolved from a bundled package at all, the heal installs a copy there. First it rewrites that
+package's own better-sqlite3 lines (`overrides`, `optionalDependencies`, `dependencies`), or npm
+fails with EOVERRIDE. The edit enforces Ruflo's own intent: Ruflo pins better-sqlite3 to 12.8.0 or
+later because AgentDB's optional `^11.8.1` has no Node 24 to 26 binaries (ruvnet/ruflo#2219). An
+`npm install -g ruflo` does not apply that `overrides` entry, because npm reads `overrides` only from
+the root project.
+
+Every such edit is recorded before `npm pkg set` runs. The receipt holds the file, the field, the
+original value, ak's value and the time, in ak's state folder (`install-edits.json`). A second edit
+to the same field keeps the original value. An edit is applied while the file still holds ak's value.
+Otherwise it is superseded, for example after Ruflo was upgraded or reinstalled. Each heal forgets
+superseded receipts before it edits anything. `ak status` reports applied edits as information
+("ak applied Ruflo's native SQLite pin (ruvnet/ruflo#2219)"), and `ak about` and the dashboard's
+ruflo card repeat the line. `ak uninstall` restores an original only where the file still holds ak's
+value, verifies it by reading the file again, and keeps the receipt of a restore that did not take.
+The edits made before this amendment have no receipts, so ak can neither show nor restore them.
+
+Option D was tested before choosing receipts and was not adopted: reinstall the same Ruflo version
+with the native build allowed, so that Ruflo's own pin applies. On Node 26.4.0 with npm 11.17.0,
+four disposable-prefix installs of ruflo 3.45.0 never applied Ruflo's `overrides`. Every context
+resolved a hoisted better-sqlite3 12.11.1. Only the run with `--foreground-scripts` ended native, via
+AgentDB's own postinstall rebuild. The two runs without it, and the one under npm's default script
+policy, left no binding although npm reported every install complete.
 
 ### AQE embedding amendment — 2026-09-20
 
@@ -246,9 +294,27 @@ names the non-host bytes it drops with their figure — so the bars still accoun
 donut beside them. A reader must never have to reconcile two panels and find the difference
 unexplained.
 
+### 11. A status fix declares who performs it (2026-09-26)
+
+An `ak status` row's `fix` once meant two things: in some rows "an `ak sync` step does this", in
+others "you must do this" (run `ak x verify aqe`, edit a pinned path, log in, remove a registration
+agentic-kit does not own). Sync planned every row with a fix, so an advisory row became a sync
+action that no step performed, and sync still reported convergence (#237).
+
+Every row now carries a repair contract beside its fix: `repair: 'sync'` (the default for a fix)
+means a `SYNC_STEPS` step whose `when` fires for that subsystem performs it; `repair: 'manual'`
+means a human must, and sync never plans it; a row without a fix has `repair: null`. Sync plans only
+`sync` fixes and counts manual ones instead of claiming "all subsystems healthy". Text status prints
+a manual fix as `→ manual: …`, the dashboard tags it `manual`, and `ak status --json` carries the
+field. A row whose repair depends on what sync can prove (a Codex recursive or duplicate MCP table)
+is `sync` only when sync's confirmed repair would clear it. A census test fails when a subsystem can
+emit a `sync` fix that no step handles.
+
 ## Consequences
 
 - A fallback can keep work available without being mislabeled healthy.
+- `ak sync` never plans, performs, or claims a fix that only a human can make; `ak status` says which
+  fixes are manual.
 - An unknown carries information, because nothing that is permanently unknowable is rendered as one.
 - A chart may exclude a category for legibility, but the panel says so and the excluded figure is
   still reachable.
@@ -269,11 +335,11 @@ unexplained.
 
 ## References
 
-- Implementation: `src/lib/{file-write,settings,blocks,sqlite,heal,output}.mjs`,
+- Implementation: `src/lib/{file-write,settings,blocks,sqlite,heal,natives,output}.mjs`,
   `src/lib/live/process-sessions.mjs`, `src/lib/{usage-index,usage-opencode,codex-state,trust-manifest}.mjs`,
-  `src/lib/dashboard/{page,client,styles}.mjs`,
+  `src/lib/dashboard/{page,client,styles}.mjs`, `src/commands/status/sections/natives.mjs`,
   `src/commands/{setup,sync}.mjs`, and `src/templates/statusline-footer.cjs`.
-- Tests: `tests/kit/{clean-machine-setup,heal-natives,sqlite,settings-config,blocks,
+- Tests: `tests/kit/{clean-machine-setup,heal-natives,natives-runtime,natives-probe,sqlite,settings-config,blocks,
   live-process-sessions,setup-command,trust-manifest,usage-index,usage-index-opencode}.test.mjs`,
   `tests/dashboard.test.cjs`, and `tests/statusline-segments.test.cjs`.
 - Clean-machine workflow: `.github/workflows/nightly.yml`.

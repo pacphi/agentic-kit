@@ -41,6 +41,10 @@ import { createHostReadinessReader } from './host-readiness.mjs';
 //                      or attaches to the single-flight deep scan and returns
 //                      immediately with progress state; `&trees=1|0` sets
 //                      whether that scan walks project working trees.
+//   GET /api/system/summary → the same read (same `?refresh=deep&trees=`)
+//                      with the catalog projected to what the System page
+//                      draws (dashboard/system-summary.mjs). The page and its
+//                      Runtime poll read this; /api/system stays complete.
 //
 // The status rows are gathered by SHELLING OUT to the installed CLI
 // (`node bin/agentic-kit.mjs status --json`) so we never duplicate status.mjs's
@@ -58,6 +62,7 @@ import { createHmac } from 'node:crypto';
 import { driftReport, selfDrift, installedVersion } from './versions.mjs';
 import { HOSTS, collectIntegrationFacts } from './providers.mjs';
 import { globalRoot } from './paths.mjs';
+import { bundledVersion as agentdbBundledVersion } from './agentdb.mjs';
 import { drift as ruvnetBrainDrift } from './ruvnet-brain.mjs';
 import { drift as ruvectorDrift, managed as ruvectorManaged } from './ruvector.mjs';
 import { loadKitConfig } from './config.mjs';
@@ -70,6 +75,7 @@ import { renderPage } from './dashboard/page.mjs';
 import { BASELINE_TRAILING_DAYS } from './usage-aggregate.mjs';
 import { requestRejection } from './dashboard/request-security.mjs';
 import { createMaintenanceDashboardApi } from './dashboard/maintenance-api.mjs';
+import { systemSummaryPayload } from './dashboard/system-summary.mjs';
 import {
   MAINTENANCE_MUTATION_ROUTES, MAINTENANCE_V2_MUTATION_ROUTES, maintenanceMutationRejection,
 } from './dashboard/maintenance-security.mjs';
@@ -480,9 +486,11 @@ async function cachedHostFacts(now) {
  *
  * driftReport only walks the globals whose upgrades are governed by npm-latest.
  * Other managed components are still knowable but sit outside it: a host
- * installed by mise/brew/the native installer; agent-browser and agentdb,
- * whose exact versions are selected for compatibility rather than npm-latest;
- * and aidefence, which ships inside ruflo's dependency tree.
+ * installed by mise/brew/the native installer; agent-browser, whose exact
+ * version is selected for compatibility rather than npm-latest; and agentdb
+ * and aidefence, which ship inside ruflo's dependency tree. agentdb reads
+ * Ruflo's bundled copy on purpose: a standalone global `agentdb` is not ak's
+ * (its install was retired) and may lag or belong to another package.
  *
  * Both fold in with `outdated: false` and no `latest`, which is inert for the
  * banner — `noticeHtml` renders only entries where `outdated` is true — while
@@ -512,7 +520,7 @@ export async function foldKnownVersions(drift, {
   const hosts = hostFacts ?? await cachedHostFacts(now);
   for (const host of HOSTS) add(host.pkg, hosts?.[host.id]?.version);
   add('agent-browser', installedVersionFn('agent-browser'));
-  add('agentdb', installedVersionFn('agentdb'));
+  add('agentdb', agentdbBundledVersion());
   add('@claude-flow/aidefence', bundledVersion('ruflo', '@claude-flow/aidefence'));
   return out;
 }
@@ -1927,7 +1935,9 @@ export function startDashboard({
     // only), so no transcript, prompt, or tool payload can reach this route to
     // leak. Delivery protections are otherwise identical to every route above
     // — loopback bind, per-session token auth, no-store, nosniff, zero egress.
-    async function handleSystem(req, res, query) {
+    // `project` shapes the answer for a route: identity for /api/system (the
+    // documented `ak system --json` shape), systemSummaryPayload for the page.
+    async function handleSystem(req, res, query, project = (payload) => payload) {
       try {
         const collector = await getSystem();
         // ORDER IS LOAD-BEARING: assemble the payload BEFORE starting a scan.
@@ -1957,7 +1967,7 @@ export function startDashboard({
           // scan block so this response reads "running", not "idle".
           if (typeof collector.scanState === 'function') payload.scan = collector.scanState();
         }
-        sendJson(res, 200, payload);
+        sendJson(res, 200, project(payload));
       } catch (e) {
         sendJson(res, 503, { error: 'system footprint unavailable', reason: String(e && e.message || e) });
       }
@@ -2068,6 +2078,7 @@ export function startDashboard({
       '/api/hooks': handleHooks,
       '/api/limits': handleLimits,
       '/api/system': handleSystem,
+      '/api/system/summary': (req, res, query) => handleSystem(req, res, query, systemSummaryPayload),
       '/api/maintenance': handleMaintenance,
       '/api/sessions': handleSessions,
     };

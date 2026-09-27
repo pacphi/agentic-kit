@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { run as runCmd, have } from '../../lib/exec.mjs';
+import { run as runCmd, have, withAbortSignal } from '../../lib/exec.mjs';
 import { aidefencePresent, securityPresent } from '../../lib/natives.mjs';
 import { scanRvf } from '../../lib/rvf.mjs';
 import { aqeEmbeddingConfiguration, classifyAqeStartup, probeAqeBrowser } from '../../lib/aqe-readiness.mjs';
@@ -16,32 +16,37 @@ import { probeAqeEmbeddings } from '../../lib/aqe-embedding-probe.mjs';
 import { aqeRoot } from '../../lib/paths.mjs';
 import { projectAqeDir } from '../../lib/paths.mjs';
 import { findMemoryEntry } from '../../lib/project-memory.mjs';
-import { projectMemoryEnv } from '../../lib/ruflo-memory.mjs';
+import { rufloMcpLaunch } from '../../lib/ruflo-memory.mjs';
+import { callMcpTools } from '../../lib/mcp-tool-call.mjs';
+import { observeMemoryRoutes, describeMemoryRoutes } from '../../lib/memory-route-probe.mjs';
 import { loadKitConfig } from '../../lib/config.mjs';
 import { HOSTS, collectIntegrationFacts, aqeRouterFile, aqeExternalProviderState, EXTERNAL_PROVIDERS_MIN_AQE } from '../../lib/providers.mjs';
 import { readJson } from '../../lib/settings.mjs';
 import { runHarvest } from '../../lib/harvest.mjs';
 import { runLifecycle } from '../../lib/adapters/lifecycle.mjs';
 import { companionLifecycleFor } from '../../lib/adapters/companion-lifecycle-registry.mjs';
-import { ok, warn, fail, heading } from '../../lib/output.mjs';
+import { ok, warn, fail, info, heading, captureOutput } from '../../lib/output.mjs';
+import { rememberLiveCheck, embeddingProbeOutcome } from '../../lib/live-check-evidence.mjs';
 
 export const options = { json: { type: 'boolean', default: false } };
 
 export const help = `ak x verify — deep proofs (slow; spawns real CLIs)
 
 Runs live end-to-end checks, not just presence probes. Pick one suite or run
-all (the default). Exit code is non-zero if any selected proof fails.
+all (the default). Exit code is non-zero if any selected proof fails. The result
+of the mcp, memory, security, providers and deja-vu suites, and of the aqe live
+embedding request, is remembered so \`ak status\` can show it with its age.
 
 Usage: ak x verify [suite]
 
 Suites:
   learning    train a cycle in a temp dir; assert patterns persist
-  memory      store/retrieve/purge in a temp dir; confirm the actual DB writer
+  memory      store/retrieve/purge in a temp dir; observe whether CLI and MCP see each other's writes
   security    packages load; defend flags injection / passes clean
   aqe         storage, embedding configuration/provenance, and browser payload
   mcp         initialize/tools-list for effective Codex AQE and Brain commands
   providers   kit config matches installed CLIs; ruflo/aqe see the wiring
-  harvest     seed real episodes, run the write path, assert real skills come back
+  harvest     record an outcome and distill through Ruflo, in an isolated store
   deja-vu     content-free structural proof of CLI, doctor, wiring, and index
   all         (default) run every suite
 
@@ -72,16 +77,94 @@ async function verifyLearning() {
   }
 }
 
-async function verifyMemory() {
-  heading('memory — store, retrieve, inspect the actual writer, and purge in an isolated dir');
+// Observe, in the isolated dir only, whether a write through one Ruflo
+// interface is readable through the other (issue #213). The probe returns the
+// observation; the reporter below only warns, never fails: a known upstream
+// split is a warning and an unusable MCP server means "not observed", so the
+// suite's pass/fail stays about the CLI proof. The MCP server is pinned to the
+// isolated dir whatever the launcher decides for it (an enclosing repository,
+// or the user-level store), so the probe never writes a real store.
+export async function probeProjectMemoryRoutes(tmp, env, namespace, {
+  observe = observeMemoryRoutes, callMcp = callMcpTools,
+} = {}) {
+  const value = `route-proof-${process.pid}-${Date.now()}`;
+  const routeNamespace = `${namespace}-routes`;
+  const root = fs.realpathSync(tmp);
+  const swarm = path.join(root, '.swarm');
+  const base = rufloMcpLaunch(root, env);
+  const launch = {
+    ...base,
+    cwd: root,
+    env: { ...base.env, CLAUDE_FLOW_MEMORY_PATH: swarm, CLAUDE_FLOW_DB_PATH: path.join(swarm, 'memory.db') },
+  };
+  const cliRun = (args) => runCmd('ruflo', args, { cwd: tmp, env, timeout: 120_000 });
+  return observe({
+    namespace: routeNamespace,
+    value,
+    cli: {
+      store: async (key, v) => (await cliRun(['memory', 'store', '-k', key, '--value', v, '-n', routeNamespace])).code === 0,
+      retrieve: async (key) => {
+        const r = await cliRun(['memory', 'retrieve', '-k', key, '-n', routeNamespace, '--value-only']);
+        // Only ruflo's own "Key not found" is a miss; any other failure is unknown.
+        const missed = r.code !== 0 && /key not found/i.test(`${r.stdout}${r.stderr}`);
+        return { ok: r.code === 0 || missed, found: r.code === 0 && r.stdout.includes(value) };
+      },
+    },
+    mcp: (calls) => callMcp({ ...launch, calls, timeoutMs: 120_000 }),
+    locate: (key) => {
+      const store = findMemoryEntry(tmp, routeNamespace, key);
+      return store ? path.basename(store.file) : null;
+    },
+  });
+}
+
+export async function observeProjectMemoryRoutes(tmp, env, namespace, deps) {
+  try {
+    const observation = await probeProjectMemoryRoutes(tmp, env, namespace, deps);
+    for (const { level, message } of describeMemoryRoutes(observation)) (level === 'ok' ? ok : warn)(message);
+  } catch (e) {
+    // An observation problem must never turn a working CLI proof into a failure.
+    warn(`cross-interface routing not observed: ${e.message}`);
+  }
+}
+
+// The CLI mirrors a `memory store` into memory.db and agentdb-memory.db, but a
+// default `ruflo memory purge` clears memory.db only and still reports success
+// (observed on 3.42.4 and 3.45.0), so the mirrored row outlives it. Say so, then
+// clear that store by the documented --path so the proof namespace never
+// outlives the isolated directory's contract.
+async function purgeProofNamespace(tmp, env, namespace, key) {
+  const purge = (extra = []) => runCmd('ruflo',
+    ['memory', 'purge', '--namespace', namespace, '--force', ...extra],
+    { cwd: tmp, env, timeout: 120_000 });
+  if ((await purge()).code !== 0) return false;
+  const residue = findMemoryEntry(tmp, namespace, key);
+  if (!residue) return true;
+  warn(`default purge left the proof row in ${path.basename(residue.file)} while reporting success; clearing it with --path`);
+  return (await purge(['--path', residue.file])).code === 0 && !findMemoryEntry(tmp, namespace, key);
+}
+
+/** `observeRoutes: false` keeps the quick `ak status --live` check to the CLI
+ *  proof: the route observation starts a real MCP server and can only add
+ *  warnings, which a live-check record does not carry. */
+async function verifyMemory({ observeRoutes = true } = {}) {
+  heading('memory — store, retrieve, locate the on-disk row, purge, and observe CLI/MCP routing in an isolated dir');
   if (!(await have('ruflo'))) { fail('ruflo CLI not installed — cannot prove project memory'); return false; }
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agentic-kit-memory-'));
   const namespace = `agentic-kit-verify-${process.pid}-${Date.now()}`;
   const key = 'roundtrip';
   const value = `memory-proof-${process.pid}-${Date.now()}`;
-  const env = projectMemoryEnv(tmp, {
+  // The native store follows the memory root (CLAUDE_FLOW_MEMORY_PATH), not the
+  // DB-path pin: without an isolated root a user's own memory root would
+  // receive the proof rows. Ruflo's CLI does not read AGENTDB_PATH. Both pins
+  // are explicit: a temporary folder inside a Git checkout would make the
+  // derived project root the enclosing repository.
+  const swarm = path.join(fs.realpathSync(tmp), '.swarm');
+  const env = {
     RUFLO_DAEMON_AUTOSTART: '0',
-  });
+    CLAUDE_FLOW_DB_PATH: path.join(swarm, 'memory.db'),
+    CLAUDE_FLOW_MEMORY_PATH: swarm,
+  };
   let stored = false;
   let purged = false;
   try {
@@ -106,12 +189,10 @@ async function verifyMemory() {
     if (!landed) { fail('stored value was not observable in either supported project DB'); return false; }
     ok(`on-disk row confirmed in ${path.basename(landed.file)} (${landed.kind})`);
 
-    const purge = await runCmd('ruflo',
-      ['memory', 'purge', '--namespace', namespace, '--force'],
-      { cwd: tmp, env, timeout: 120_000 });
-    purged = purge.code === 0 && !findMemoryEntry(tmp, namespace, key);
+    purged = await purgeProofNamespace(tmp, env, namespace, key);
     if (!purged) { fail('isolated namespace purge did not remove the proof row'); return false; }
     ok('isolated proof namespace purged');
+    if (observeRoutes) await observeProjectMemoryRoutes(tmp, env, namespace);
     return true;
   } catch (e) {
     fail(`memory verify error: ${e.message}`);
@@ -140,12 +221,30 @@ async function verifySecurity() {
   return good;
 }
 
-async function verifyAqe() {
+/**
+ * The live embedding request against the selected backend — the check `ak x
+ * verify aqe` runs and `ak status --live` reuses. `corpus` also reads the
+ * project's stored provenance (read-only); --live skips it to stay quick.
+ * @param {{cfg?:any,cwd?:string,corpus?:boolean}} [options]
+ */
+export async function checkAqeEmbedding({ cfg = loadKitConfig(), cwd = process.cwd(), corpus = true } = {}) {
+  const resolved = resolveAqeEmbedding(cfg);
+  const embedding = aqeEmbeddingConfiguration({ env: resolved.env });
+  const backend = resolved.mode === 'in-process' || embedding.backend === 'in-process' ? 'in-process' : 'endpoint';
+  const live = await probeAqeEmbeddings({ packageRoot: aqeRoot(), env: resolved.env, backend,
+    ...(corpus ? { corpusPath: path.join(projectAqeDir(cwd), 'memory.db') } : {}) });
+  (live.status === 'passed' ? ok : fail)(`live embedding request: ${live.status}; reason=${live.reason ?? 'none'}; dimension=${live.dimension ?? 'unknown'}`);
+  return live;
+}
+
+/** @param {{onEvidence?:(id:string, outcome:{status:string,reason:string|null})=>void}} [options] */
+async function verifyAqe({ onEvidence = () => {} } = {}) {
   heading('aqe — separate storage, embedding, and browser observations');
   const findings = scanRvf(projectAqeDir(process.cwd()));
   if (findings.length) { fail(`${findings.length} oversized RVF store(s) — run: ak sync`); return false; }
   ok('no oversized RVF stores detected (not a storage integrity proof)');
-  const resolved = resolveAqeEmbedding(loadKitConfig());
+  const cfg = loadKitConfig();
+  const resolved = resolveAqeEmbedding(cfg);
   const st = await runCmd('aqe', ['status'], { timeout: 120_000, env: resolved.env });
   const startup = classifyAqeStartup(st);
   (startup.status === 'observed' ? ok : startup.status === 'busy' ? warn : fail)(startup.reason);
@@ -156,10 +255,8 @@ async function verifyAqe() {
   if (resolved.ambientConflict) warn('Shell endpoint differs from saved intent; this Kit probe uses the saved choice');
   const browser = await probeAqeBrowser({ runner: runCmd });
   (browser.status === 'payload-present' ? ok : warn)(`optional browser: ${browser.status} (no browser launched)`);
-  const backend = resolved.mode === 'in-process' || embedding.backend === 'in-process' ? 'in-process' : 'endpoint';
-  const live = await probeAqeEmbeddings({ packageRoot: aqeRoot(), env: resolved.env, backend,
-    corpusPath: path.join(projectAqeDir(process.cwd()), 'memory.db') });
-  (live.status === 'passed' ? ok : fail)(`live embedding request: ${live.status}; reason=${live.reason ?? 'none'}; dimension=${live.dimension ?? 'unknown'}`);
+  const live = await checkAqeEmbedding({ cfg, cwd: process.cwd() });
+  onEvidence('aqe-embedding', embeddingProbeOutcome(live));
   if (live.corpus) console.log(JSON.stringify({ embeddingProvenance: live.corpus }));
   if (!['healthy', 'empty'].includes(live.corpus?.status)) warn('Corpus compatibility unverified or mismatched; preserve vectors and plan explicit migration');
   warn('Fleet execution, RVF owner health and checkpoint recovery remain separate proofs');
@@ -193,6 +290,20 @@ export async function verifyMcp({ runner = runCmd, probe = probeMcp, cwd = proce
   return good;
 }
 
+/** aqe's billing section reflects the host selector. `aqe health` auto-initializes
+ *  `.agentic-qe` (memory.db, patterns.rvf, witness keys) in its cwd (observed on
+ *  AQE 3.14.3), so a proof never runs it in a project AQE was not set up in. */
+async function checkAqeBillingSection(cwd) {
+  if (!fs.existsSync(projectAqeDir(cwd))) {
+    info('aqe billing/provider section not checked: agentic-qe is not initialized in this project');
+    return;
+  }
+  if (!(await have('aqe'))) return;
+  const h = await runCmd('aqe', ['health'], { timeout: 120_000 });
+  const seen = /LLM Billing|claude-code|provider|billing/i.test(h.stdout + h.stderr);
+  (seen ? ok : warn)('aqe health reports an LLM billing/provider section');
+}
+
 async function verifyProviders() {
   heading('providers — kit config matches installed CLIs; ruflo/aqe see the wiring');
   const cfg = loadKitConfig();
@@ -209,12 +320,7 @@ async function verifyProviders() {
     const list = await runCmd('ruflo', ['providers', 'list'], { timeout: 60_000 });
     (list.code === 0 ? ok : warn)(`ruflo providers list ${list.code === 0 ? 'ok' : 'unavailable'}`);
   }
-  // aqe billing section reflects the host selector
-  if (cfg.aqe !== false && await have('aqe')) {
-    const h = await runCmd('aqe', ['health'], { timeout: 120_000 });
-    const seen = /LLM Billing|claude-code|provider|billing/i.test(h.stdout + h.stderr);
-    (seen ? ok : warn)('aqe health reports an LLM billing/provider section');
-  }
+  if (cfg.aqe !== false) await checkAqeBillingSection(process.cwd());
   // aqe fallback chain: on-disk llm-config.json matches kit.json (order + ak-managed)
   const chain = cfg.providers?.aqeFallback ?? [];
   if (chain.length) {
@@ -254,35 +360,34 @@ async function verifyProviders() {
   return good;
 }
 
-async function verifyHarvest() {
-  heading('harvest — seed REAL episodes, run the write path, assert real skills come back');
-  if (!(await have('agentdb'))) { warn('agentdb CLI not installed — skipping harvest proof (run: ak sync)'); return true; }
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agentic-kit-harvest-'));
+/** Prove the harvest write path against an ISOLATED store. Every memory path
+ *  Ruflo or its bundled AgentDB can resolve points inside the temporary
+ *  directory: the CLI pin (CLAUDE_FLOW_DB_PATH), the memory root the native
+ *  bridge derives agentdb-memory.db from (CLAUDE_FLOW_MEMORY_PATH), and
+ *  AGENTDB_PATH. An inherited value of any of them would otherwise receive the
+ *  proof rows. Nothing is seeded: the proof is Ruflo's own verbs succeeding. */
+export async function verifyHarvest({ runner = runCmd, haveCmd = have } = {}) {
+  heading('harvest — record an outcome and distill, in an isolated store');
+  if (!(await haveCmd('ruflo'))) { fail('ruflo CLI not installed — cannot prove the harvest write path'); return false; }
+  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agentic-kit-harvest-')));
+  const swarm = path.join(tmp, '.swarm');
+  // Pinned explicitly: a temporary folder inside a Git checkout would make the
+  // derived project root the enclosing repository.
+  const env = {
+    RUFLO_DAEMON_AUTOSTART: '0',
+    CLAUDE_FLOW_DB_PATH: path.join(swarm, 'memory.db'),
+    CLAUDE_FLOW_MEMORY_PATH: swarm,
+    AGENTDB_PATH: path.join(swarm, 'agentdb.db'),
+  };
   try {
-    // Seed real episodes into agentdb's default store (./agentdb.db in cwd).
-    for (let i = 1; i <= 3; i++) {
-      const r = await runCmd('agentdb',
-        ['reflexion', 'store', `verify-ep-${i}`, 'implement_feature', '0.9', 'true', `did the work ${i}`],
-        { cwd: tmp, timeout: 120_000 });
-      if (r.code !== 0) { fail(`agentdb reflexion store failed: ${(r.stderr || '').slice(0, 140)}`); return false; }
+    const init = await runner('ruflo', ['memory', 'init'], { cwd: tmp, env, timeout: 120_000 });
+    if (init.code !== 0) { fail('ruflo memory init failed in the isolated store'); return false; }
+    const res = await runHarvest({ runner, cwd: tmp, root: tmp, distill: true, env });
+    for (const s of res.steps) {
+      if (s.skipped) warn(`${s.name}: ${s.detail}`);
+      else (s.ok ? ok : fail)(`${s.name}: ${s.detail}`);
     }
-    ok('seeded 3 real episodes via agentdb reflexion store');
-    // Run the REAL write path (no mock) with low thresholds so the seeds qualify.
-    const res = await runHarvest({ cwd: tmp, minAttempts: 1, minReward: 0.5, days: 365 });
-    const created = res.harvested?.skillsCreated ?? 0;
-    if (created > 0) {
-      ok(`harvest consolidated REAL skills: created ${created}` +
-        (res.harvested.avgReward != null ? ` (avg reward ${res.harvested.avgReward})` : ''));
-    } else {
-      const step = res.steps.find((s) => s.name === 'consolidate-skills');
-      fail(`harvest ran but consolidated 0 skills — ${step ? step.detail : 'no consolidate step'}`);
-      return false;
-    }
-    // Round-trip: the consolidated skill is searchable (real data back).
-    const search = await runCmd('agentdb', ['skill', 'search', 'implement', '5'], { cwd: tmp, timeout: 120_000 });
-    const found = /Found\s+([1-9]\d*)\s+matching/i.test(`${search.stdout}${search.stderr}`);
-    (found ? ok : warn)('agentdb skill search reads the consolidated skill back');
-    return true;
+    return res.ok;
   } catch (e) {
     fail(`harvest verify error: ${e.message}`);
     return false;
@@ -308,6 +413,9 @@ function hasDejaVuOwnership(cfg) {
   const own = cfg?.integrations?.ownership?.dejaVu;
   return plain(own) && (!!own.install || (plain(own.targets) && Object.keys(own.targets).length > 0));
 }
+
+/** Whether the deja-vu proof runs at all; when it does not, it reports a skip. */
+export const dejaVuProofApplies = (cfg) => cfg?.integrations?.tools?.dejaVu?.enabled === true || hasDejaVuOwnership(cfg);
 
 /** Package/CLI presence check — prints its verdict and returns whether it passed. */
 function checkDejaVuPackage(install) {
@@ -382,7 +490,7 @@ export async function verifyDejaVu({
 } = {}) {
   heading('deja-vu — content-free structural companion proof');
   const enabled = cfg?.integrations?.tools?.dejaVu?.enabled === true;
-  if (!enabled && !hasDejaVuOwnership(cfg)) {
+  if (!dejaVuProofApplies(cfg)) {
     warn('deja-vu disabled and unowned — skipped');
     return true;
   }
@@ -407,6 +515,101 @@ export async function verifyDejaVu({
   return finalizeDejaVuVerdict(result, packageGood, doctorGood, indexGood, targetsGood);
 }
 
+// Suites whose boolean verdict is remembered for `ak status` (decision 9a).
+// `aqe` remembers only its live embedding request, through onEvidence; the
+// slow learning/harvest proofs have no live-check id.
+const SUITE_EVIDENCE = Object.freeze({
+  mcp: 'mcp', memory: 'memory', security: 'security', providers: 'providers', 'deja-vu': 'deja-vu',
+});
+
+/** A suite's verdict as a live-check outcome: a pass, or a failure whose
+ *  reason is the first failure line the suite printed. A check that already
+ *  returns an outcome (the embedding request) keeps it. */
+function checkOutcome(result, entries, name) {
+  if (result && typeof result === 'object') return { status: result.status, reason: result.reason ?? null };
+  return result
+    ? { status: 'passed', reason: null }
+    : { status: 'failed', reason: entries.find((e) => e.level === 'fail')?.text ?? `${name} proof failed` };
+}
+
+/** Run one suite, printing as always, and remember its result for status. */
+async function runRememberedSuite(name, fn, cfg) {
+  const remember = (id, outcome) => rememberLiveCheck(id, outcome, { source: 'verify', cfg, cwd: process.cwd() });
+  const { result, entries } = await captureOutput(() => fn({ onEvidence: remember }), { echo: true });
+  const id = SUITE_EVIDENCE[name];
+  if (id && (id !== 'deja-vu' || dejaVuProofApplies(cfg))) remember(id, checkOutcome(result, entries, name));
+  return result;
+}
+
+// ── ak status --live (decision 9b) ──────────────────────────────────────────
+// The quick, free checks only, reusing the suites above: the AQE embedding
+// request, Codex MCP initialize/tools-list, provider wiring, the security
+// packages, deja-vu's structural proof and a temp-dir memory round trip. The
+// slow learning and harvest proofs and the paid host connection check are
+// never part of it.
+const LIVE_CHECKS = Object.freeze([
+  // Same gate as sync's embedding step: only a backend the kit manages (an
+  // unmanaged install claims no semantic readiness; `ak x verify aqe` still probes it).
+  { id: 'aqe-embedding', applies: (cfg) => cfg.aqe !== false && !!cfg.aqeEmbedding && cfg.aqeEmbedding.mode !== 'unmanaged',
+    run: async ({ cfg, cwd }) => embeddingProbeOutcome(await checkAqeEmbedding({ cfg, cwd, corpus: false })) },
+  // Codex MCP discovery is explicit: Claude-only installations need no Codex.
+  { id: 'mcp', applies: (cfg) => cfg.integrations?.hosts?.codex === true, run: ({ cwd }) => verifyMcp({ cwd }) },
+  { id: 'providers', applies: () => true, run: () => verifyProviders() },
+  { id: 'security', applies: (cfg) => cfg.security !== false, run: () => verifySecurity() },
+  { id: 'deja-vu', applies: (cfg) => dejaVuProofApplies(cfg), run: ({ cfg }) => verifyDejaVu({ cfg }) },
+  { id: 'memory', applies: () => true, run: () => verifyMemory({ observeRoutes: false }) },
+]);
+
+/** The live checks that apply to this configuration. */
+export const liveChecksFor = (cfg) => LIVE_CHECKS.filter((check) => check.applies(cfg ?? {}));
+
+export const LIVE_CHECK_TIMEOUT_MS = 60_000;
+const LIVE_CHECK_GRACE_MS = 5_000;
+function sleep(ms) {
+  let timer;
+  const done = new Promise((resolve) => { timer = setTimeout(resolve, ms, null); });
+  return { done, cancel: () => clearTimeout(timer) };
+}
+const duration = (ms) => (ms < 1000 ? `${ms} ms` : `${Math.round(ms / 1000)} s`);
+
+/** One check: output captured, child processes bound to its own abort signal.
+ *  Past the timeout it is inconclusive; its processes are aborted and it gets a
+ *  short grace to run its own cleanup (temp dirs) before status moves on. */
+async function runOneLiveCheck(check, ctx, { timeoutMs, graceMs }) {
+  const controller = new AbortController();
+  const started = Date.now();
+  const work = captureOutput(() => withAbortSignal(controller.signal, () => check.run(ctx)))
+    .then(({ result, entries }) => checkOutcome(result, entries, check.id),
+      () => ({ status: 'inconclusive', reason: 'the check could not run' }));
+  const deadline = sleep(timeoutMs);
+  let outcome = await Promise.race([work, deadline.done]);
+  deadline.cancel();
+  if (!outcome) {
+    controller.abort();
+    const grace = sleep(graceMs);
+    await Promise.race([work, grace.done]);
+    grace.cancel();
+    outcome = { status: 'inconclusive', reason: `no result within ${duration(timeoutMs)}` };
+  }
+  return { id: check.id, status: outcome.status, reason: outcome.reason ?? null, elapsedMs: Date.now() - started };
+}
+
+/**
+ * Run live checks in parallel, each under its own timeout, and remember every
+ * result as `status-live` evidence. Returns one `{id,status,reason,elapsedMs}`
+ * per check, in order.
+ * @param {{cfg?:any,cwd?:string,checks?:any[],timeoutMs?:number,graceMs?:number}} [options]
+ */
+export async function runLiveChecks({
+  cfg = loadKitConfig(), cwd = process.cwd(), checks = liveChecksFor(cfg),
+  timeoutMs = LIVE_CHECK_TIMEOUT_MS, graceMs = LIVE_CHECK_GRACE_MS,
+} = {}) {
+  const ctx = { cfg, cwd };
+  const results = await Promise.all(checks.map((check) => runOneLiveCheck(check, ctx, { timeoutMs, graceMs })));
+  for (const r of results) rememberLiveCheck(r.id, r, { source: 'status-live', cfg, cwd });
+  return results;
+}
+
 export async function run({ positionals }) {
   const which = positionals[0] ?? 'all';
   const suites = {
@@ -426,7 +629,8 @@ export async function run({ positionals }) {
     return 2;
   }
   let allGood = true;
-  for (const [, fn] of selected) allGood = (await fn()) && allGood;
+  const cfg = loadKitConfig();
+  for (const [name, fn] of selected) allGood = (await runRememberedSuite(name, fn, cfg)) && allGood;
   console.log('');
   (allGood ? ok : fail)(allGood ? 'all selected proofs passed' : 'verification failed — see above');
   return allGood ? 0 : 1;

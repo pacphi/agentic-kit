@@ -11,6 +11,7 @@ import {
   sandboxHome, assertSandboxed, captureLog, rmrf,
   sandboxProject, writeKitConfig, offlineKitConfig, fakeGlobalRoot,
 } from './helpers/home-sandbox.mjs';
+import { isolateProject } from './helpers/project-isolation.mjs';
 
 const HOME = sandboxHome('ak-drift-fresh');
 const paths = await import('../../src/lib/paths.mjs');
@@ -18,6 +19,7 @@ const { driftReport, KIT_PKG } = await import('../../src/lib/versions.mjs');
 const sync = await import('../../src/commands/sync.mjs');
 const { loadKitConfig } = await import('../../src/lib/config.mjs');
 assertSandboxed(paths, HOME);
+isolateProject('ak-drift-freshness');
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const PROJECT = sandboxProject('ak-drift-fresh');

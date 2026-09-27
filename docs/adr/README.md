@@ -369,7 +369,7 @@ as the history start), Claude sessions Codex imports are excluded and counted, c
 summed and each delta books on its own day and model, oversized rollouts are read by a bounded-memory
 streaming reader, and rollouts that still cannot be parsed are reported. Cache schema 23.
 
-- [ADR-0053 — Qualified host health and separate usage diagnostics](0053-host-setup-evidence-and-usage-diagnostics.md) — scoped local and connected health; usage acquisition remains separate.
+- [ADR-0053 — Qualified host health and separate usage diagnostics](0053-host-setup-evidence-and-usage-diagnostics.md) — scoped local and connected health; usage acquisition remains separate; amended 2026-09-26 to report host management (Managed by ak / Found, not managed / Not installed) apart from health.
 
 - [ADR-0054 — Vendor-neutral fleet evidence export](0054-fleet-evidence-export.md) — Implemented — versioned local snapshots, privacy allowlists and deterministic aggregation.
 
@@ -388,3 +388,10 @@ governance, the learning profile, turn-credit, the #2887 memory fix, and the fun
 state is shown with its meaning; settings reach Claude Code, Codex and OpenCode through one
 receipt-owned environment projection generalized from ADR-0055; `kit.json` `false` opts a
 component out.
+
+## ADR-0060 — Session surface, initiator and official product names
+
+[ADR-0060](0060-session-surface-initiator-and-product-names.md) (Proposed) derives a session's
+surface and initiator from the hosts' declared log fields, keeps every raw value, uses official
+product names (Claude Desktop, ChatGPT desktop app, Codex CLI, and others), and excludes imported
+session copies from every origin view.

@@ -32,6 +32,13 @@ export const RELEASE_ASSET = 'ruvnet-brain.zip';
  *  installer. ak owns brain updates (`ak sync`), so the self-updater must stay off. */
 export const INSTALL_SPEC = 'ruvnet-brain@latest';
 export const INSTALL_ARGS = ['--yes', '--no-stack', '--no-enhance', '--no-nightly-prompt', '--no-telemetry'];
+/** Refresh of an existing install. `--update` runs the bundle's own updater
+ *  (kb/forge-update.mjs: backup, verified apply, private stores preserved) and
+ *  dispatches before the installer reads `--version`, so it cannot be pinned.
+ *  The env disables the installer's fallback, a fresh `--force` install that
+ *  carries none of ak's opt-out flags (installer bin/install.mjs runUpdate). */
+export const UPDATE_ARGS = ['--update', '--no-nightly-prompt', '--no-telemetry'];
+export const UPDATE_ENV = Object.freeze({ RUVNET_BRAIN_NO_UPDATE_FALLBACK: '1' });
 
 /** The installer's nightly self-update LaunchAgent (macOS). Its label/path are the
  *  installer's own (`--enable-nightly` writes it; `--disable-nightly` removes it).
@@ -53,6 +60,13 @@ export function kbDir() {
 const pluginMarketplace = () =>
   path.join(claudeDir(), 'plugins', 'marketplaces', 'ruvnet-brain');
 const pluginCache = () => path.join(claudeDir(), 'plugins', 'cache', 'ruvnet-brain');
+
+/** Does the installed bundle ship its self-updater? The installer's `--update`
+ *  requires kb/forge-update.mjs and fails loudly without it, so this — not
+ *  present(), which the plugin cache alone satisfies — selects the update path. */
+export function updaterPresent() {
+  return fs.existsSync(path.join(kbDir(), 'forge-update.mjs'));
+}
 
 /** Installed? Mirrors the installer's own "alreadyInstalled" probe: the KB's
  *  forge-mcp-all.mjs entrypoint, or the user-scope plugin cache dir. */
@@ -147,9 +161,38 @@ export async function latestVersion(options) {
  *  install" in kit.json as the fallback for pre-stamping installs. */
 export function recordInstalledRelease(tag, cfg = loadKitConfig()) {
   if (!tag) return;
-  const cur = cfg.versionCheck?.ruvnetBrain ?? {};
+  // A release that landed ends any held refresh (see recordHeldRefresh).
+  const { heldRefresh: _cleared, ...cur } = cfg.versionCheck?.ruvnetBrain ?? {};
   cfg.versionCheck = { ...cfg.versionCheck, ruvnetBrain: { ...cur, installedRelease: String(tag).replace(/^v/, '') } };
   try { saveKitConfig(cfg); } catch { /* read-only envs: best-effort */ }
+}
+
+/** Hold a refused refresh. The installer or the bundle's updater refused (a
+ *  private-overlay preflight, a stale updater) or ran without landing anything;
+ *  re-running it on every sync cannot succeed and re-downloads the bundle. The
+ *  record keeps the causal text and the release pair it was refused for, in the
+ *  same resolution drift() uses (disk first, then ak's stamp); status stops
+ *  offering the refresh while that exact pair stands. */
+export function recordHeldRefresh({ detail, latest }, cfg = loadKitConfig()) {
+  if (!latest) return;
+  const cur = cfg.versionCheck?.ruvnetBrain ?? {};
+  const installed = installedReleaseOnDisk() ?? cur.installedRelease ?? null;
+  cfg.versionCheck = {
+    ...cfg.versionCheck,
+    ruvnetBrain: {
+      ...cur,
+      heldRefresh: { detail: String(detail ?? '').slice(0, 320), installed, latest: String(latest).replace(/^v/, ''), at: Date.now() },
+    },
+  };
+  try { saveKitConfig(cfg); } catch { /* read-only envs: best-effort */ }
+}
+
+/** The held refresh that still applies to this drift result, or null: only an
+ *  exact (installed, latest) match holds — either release changing is a new attempt. */
+export function activeHeldRefresh(b) {
+  const held = b?.heldRefresh;
+  if (!held || !b.latest) return null;
+  return held.latest === b.latest && (held.installed ?? null) === (b.installedRelease ?? null) ? held : null;
 }
 
 /** Pure drift classifier — both sides in the RELEASE-TAG namespace.
@@ -200,5 +243,6 @@ export async function drift({ force = false } = {}) {
     latestSource: fresh ? 'cache' : 'live',
     latestObservedAt,
     pluginVersion: installedVersion(),
+    heldRefresh: cached.heldRefresh ?? null,
   };
 }

@@ -4,6 +4,7 @@
 - **Release:** `4.0.0-alpha.50`; publication is verified through the matching GitHub release and npm registry artifact
 - **Date:** 2026-09-20
 - **Updated:** 2026-09-20 — record inclusion in `4.0.0-alpha.50`; replace setup-only badges with consistent local health and explicit provider connection checks for Claude, Codex and OpenCode
+- **Updated:** 2026-09-26 — amended: management (Managed by ak / Found, not managed / Not installed) is reported separately from health; every found host is checked automatically; "Disabled" is retired (see [Amendment — 2026-09-26](#amendment--2026-09-26-management-is-not-health))
 - **Amends:** [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md)
 - **Related:** [ADR-0041](0041-host-neutral-hook-configuration-assurance.md), [ADR-0051](0051-supported-peer-delegation-and-host-realignment.md)
 
@@ -28,7 +29,10 @@ Usage date ranges and Intelligence project selection do not change this scope.
 | Attention | A check established a concrete actionable failure |
 | Checking | A requested check is running |
 | Unknown | Required evidence is unsupported, ambiguous, inaccessible or timed out |
-| Disabled | Host is intentionally outside the enabled kit setup |
+
+These health statuses belong to hosts ak manages. A host ak does not manage shows
+its management state instead; see the 2026-09-26 amendment. (The former **Disabled**
+status is retired.)
 
 ### Local health
 
@@ -105,6 +109,59 @@ Usage keeps its original four `sourceHealth` fields and full diagnostics under
 Usage data sources. The historical scan's extra 90 days are disclosed. Those
 observations never drive the host health badges.
 
+## Amendment — 2026-09-26: management is not health
+
+**Context.** `kit.json` cannot tell "you chose to leave Codex out" from "you never
+changed the claude-only default", yet the badge called every unrouted host
+**Disabled**, "intentionally outside the enabled kit setup", and skipped even its
+free local checks. Meanwhile the Limits panel already spawned `codex app-server`
+for an unrouted Codex (`src/lib/quota.mjs`). A user whose Codex did half the spend
+saw Disabled, every check Unknown, and a "Check local setup" button that could not
+produce evidence (stuinfla #238, audit decision 1).
+
+**Decision.** Whether ak manages a host and whether the host is healthy are two
+facts, reported separately with the same words on every surface: the header badge,
+its details dialog, About (dashboard and `ak about`), Overview → Providers and the
+`ak status` rows, Overview → Hosts & Routing, and `ak host status`. The words come
+from one module, `src/lib/host-management.mjs`.
+
+| Management state | Meaning |
+| --- | --- |
+| Managed by ak | `kit.json` enables the host; ak wires it and routes work to it |
+| Found, not managed | The executable is on `PATH`, but ak does not manage the host |
+| Not installed | The executable is not on `PATH`, and ak does not manage the host |
+| Not managed | Fallback when the `PATH` lookup itself failed: neither "found" nor "not installed" is claimed |
+
+- **Every found host is checked automatically.** The four tool-level checks
+  (executable, configuration, provider/model selection, authentication setup) run
+  for every host, managed or not, under the same bounded subprocesses and 60-second
+  cache. `codex doctor` stays excluded for all hosts because it touches the network.
+- **Wiring is FYI for an unmanaged host.** The integration (transport alignment)
+  check is shown and marked FYI: ak was never asked to wire that host, so it does
+  not decide the host's tool status.
+- **Unmanaged-host problems are information.** A managed host's badge is its health
+  (OK, Attention, Checking, Unknown). Any other host's badge is its management word
+  in a neutral colour; a failed tool check is shown in the details but never raises
+  Attention, and `ak status` reports management as `info` rows with no `fix`.
+- **Participation.** ak routes work only to managed hosts: its per-activity routing
+  policy (dual-host routes, the AQE agent routes it projects, `ak run` pipelines)
+  prunes routes to any other host (`pruneRoutesForHosts`). The AQE provider chain,
+  qe-court's own configuration and Ruflo's dual-mode skills (which launch
+  `codex exec` directly) are separate and are not claimed. Hosts & Routing shows a
+  participation strip; for a host that is not participating, every surface offers a
+  copyable hint, never a button that edits configuration.
+- **The hint is the complete host list.** `ak host pick --host` replaces the enabled
+  set, so the hint names every currently enabled host (including admitted external
+  hosts) plus the one to add, for example `ak host pick --host claude,codex`.
+- **The paid connection check stays managed-only.** The local re-check button reads
+  **Check again** and runs for every host.
+
+**Consequences.** Automatic local checks now spawn at most the same bounded, read-only
+commands for up to three hosts per minute while the dashboard is open. The previous
+test "disabled hosts are neutral" is replaced by tests proving that unmanaged hosts
+are checked, never raise Attention, carry an FYI wiring row and a complete hint, and
+cannot start a connection check.
+
 ## Grounding
 
 - [Claude CLI and safe mode](https://code.claude.com/docs/en/cli-reference), [installation diagnostics](https://code.claude.com/docs/en/setup), and [model configuration](https://code.claude.com/docs/en/model-config).
@@ -123,6 +180,13 @@ state, desktop/mobile layouts and separation from usage diagnostics.
 
 No paid live inference is part of the test suite. Connected paths use deterministic
 native-boundary fixtures; real read-only preflight checks stop before inference.
+
+The 2026-09-26 amendment is covered by `tests/kit/host-management.test.mjs`,
+`tests/kit/host-readiness.test.mjs`, `tests/kit/host-readiness-probes.test.mjs`,
+`tests/kit/about-host-chips.test.mjs`, the providers rows in
+`tests/kit/status-command.test.mjs`, the `ak host status` spawn in
+`tests/kit/provider-cli.test.mjs`, and the browser checks in `tests/ui/host-readiness.mjs`
+(badges, details, participation strip, About host cards, 390 px layout).
 
 ### Implementation evidence — 2026-09-20
 

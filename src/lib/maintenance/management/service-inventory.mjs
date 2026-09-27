@@ -173,8 +173,13 @@ function loadReceipts(ctx) {
  * `discovery()`/`scanProgress()` (the Discovery panel), which correctly
  * describes them as covered by the provider check instead. */
 function projectionSourceCoverage(ctx, rawCoverage) {
+  // An automatic host source whose root does not exist on this machine
+  // (`present:false`, e.g. Hermes never installed) is dropped too: it is not
+  // installed, so it is neither "not scanned yet" nor a failure, and counting
+  // it would leave the Inventory banner permanently unclearable.
   const filesystemSourceIds = new Set(
-    ctx.listSources().filter((source) => source.filesystem !== false).map((source) => source.sourceId),
+    ctx.listSources().filter((source) => source.filesystem !== false && source.present !== false)
+      .map((source) => source.sourceId),
   );
   return rawCoverage
     .filter((entry) => filesystemSourceIds.has(entry.sourceId))

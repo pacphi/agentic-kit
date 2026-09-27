@@ -26,6 +26,7 @@ without redefining shared integration concepts.
 | Actor | An entity that initiates or owns an activity |
 | Activity | A bounded operation performed by an actor |
 | Presence lease | Observed proof that a host controller process exists; never proof of work |
+| Exact-folder match | The only way a process outside a Git repository may lease a transcript session: an in-memory HMAC of both sides' real folder path under the collector's random secret must be equal. Name-based project keys never suffice |
 | Meaningful activity | Semantic input, output, operation, or evaluation evidence attributable to an actor |
 | In-flight flow | A started and unfinished operation/relationship eligible for moving edge treatment |
 | Actor lens | Selectable view of an embedded actor inside its parent session; not a fabricated child session |
@@ -344,9 +345,19 @@ and confidence. It cannot contain prompt text, response text, tool arguments, ra
 ### `AdapterHealth` aggregate
 
 Kept separate because a source can fail without invalidating every live session. The current
-service records adapter `status` (`idle`, `ok`, `unavailable`, or `degraded`), file/event/error
-counts and a bounded error category. A richer health aggregate with checkpoint age and retry
-lifecycle remains a design extension, not a current serialized field set.
+service records adapter `status` (`idle`, `ok`, `no-events`, `awaiting-file`, `unavailable`, or
+`degraded`), file/event/error counts and a bounded error category. For file-tailed adapters
+(Claude, Codex, ruflo, agentic-qe) the status, the `files` count of tailed files, and the
+`readable`/`missing`/`unreadable` file gauges are recomputed from the tailed files after every
+reconciliation pass, never set by an individual event or incremented, so a collector restart
+cannot inflate them. Precedence is `degraded` (an unreadable file, or a file whose latest record was
+malformed or rejected) over `awaiting-file` (a registered file that does not exist yet) over
+`no-events` (readable, nothing accepted) over `ok`. `accepted` and `rejected` count records;
+`rejected` and `lastRejection` apply to structured sources only and carry a fixed reason code,
+never record content. A native record the adapter does not map is ignored, not rejected. A file
+created or recreated after tailing began is read from its first byte. A richer health aggregate
+with checkpoint age and retry lifecycle remains a design extension, not a current serialized
+field set.
 
 ## Canonical domain event
 
@@ -469,6 +480,9 @@ projection lifecycle: active → quiescent → expired
     context; they never enter graph snapshots, deltas, or replay.
 19. Content streams are keyed by host and session ID, server-masked, bounded, ephemeral, and
     destroyed after the last subscriber.
+20. A runtime process in a folder that is not a Git repository leases a session only through an
+    exact-folder match, and never becomes a runtime-only session. The folder correlator stays in
+    collector memory: never in events, snapshots, replay, the workspace store, or logs.
 
 ## Ports and source adapters
 
@@ -701,7 +715,7 @@ actor-kind geometry ([Graphics ARIA][graphics-aria]).
 | Event storm | Batch projection/client updates; collapse resource nodes |
 | Secret in unknown field | Field never enters allowlisted event |
 | Watch notification lost | Periodic stat/reconciliation discovers change |
-| All clients leave | Release SSE listeners; stop collectors after bounded idle delay |
+| All clients leave | Release SSE listeners; stop collectors after bounded idle delay; keep tail offsets so the next request resumes |
 | Transcript path escape or replacement | Realpath containment and identity recheck |
 | Transcript client falls behind | Bounded queue; emit gap/reset rather than an unbounded snapshot |
 | Encrypted reasoning | Drop at parser/DTO boundary because plaintext is unavailable |
@@ -711,8 +725,8 @@ actor-kind geometry ([Graphics ARIA][graphics-aria]).
 Tests are written against ports and fixtures before each adapter or lifecycle transition:
 
 1. **Contract tests:** event schema, action vocabulary, privacy allowlist, confidence ordering.
-2. **Tailer tests:** append, partial record, duplicate notification, rotation, truncation, fresh
-   bootstrap after restart, and symlink/containment rejection.
+2. **Tailer tests:** append, partial record, duplicate notification, rotation, truncation, resume
+   from retained offsets after an idle restart, and symlink/containment rejection.
 3. **Source-adapter fixtures:** known Claude, Codex, ruflo, agentic-qe, skill, plugin,
    and MCP records; unknown fields and schema generations.
 4. **Aggregate tests:** child-before-parent, conflict, terminal-state monotonicity, expiry, and
@@ -851,7 +865,10 @@ The implemented vertical slice lives in `src/lib/live/`, `src/lib/dashboard/`, a
 `dashboard-server.mjs` composition root. Defaults are:
 
 - 750 ms reconciliation interval;
-- 256 tailed files; explicit sources take priority and Claude/Codex divide the remainder;
+- 256 tailed files; explicit sources take priority and Claude/Codex divide the remainder. When a
+  host's share leaves files out, `acquisitionCoverage` is `complete: false` and `truncated: true`
+  with `omittedFiles` and per-host `sources` (`candidateFiles`, `returnedFiles`, `fileLimit`);
+  adapter health carries `candidateFiles`;
 - 100 projected sessions and 1,000 nodes per session;
 - 2,000 replay events;
 - 30-second quiescence and five-minute expiry;

@@ -3,6 +3,7 @@
 - Status: Implemented
 - Date: 2026-09-02
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
+- **Updated:** 2026-09-26 — the preserved out-of-range external install is reported with the user's options (install a Ruflo-compatible 0.27.x, or `agentBrowser: false`); still no sync fix (#237)
 - Updated: 2026-09-02 — Linux ARM64 converges without retrying an unavailable
   Chrome for Testing payload; project and host policy boundaries are unchanged
 - Context: issue #189 browser/runtime and capability-footprint verification

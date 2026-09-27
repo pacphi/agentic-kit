@@ -3,6 +3,7 @@
 // override comment for why this directory isn't run through the node lib.
 import { ABOUT_SECTIONS, LS_ABOUT_NUDGE, RANK, activeTab, esc, scrollToAboutSection, setTab } from './bootstrap.mjs';
 import { sourceHostIcon } from './usage.mjs';
+import { aboutHostChip } from './host-readiness.mjs';
 
   // ══ About area (ADR-0026) ══════════════════════════════════════════════════
   // Editorial content comes from the versioned directory below; runtime facts
@@ -24,6 +25,16 @@ import { sourceHostIcon } from './usage.mjs';
   //   versions  one package inside the shared "versions" subsystem, matched the
   //             same way, because that subsystem carries every managed package.
   //   subs      whole subsystems that belong to this component alone.
+  //   phrase    rows of one shared subsystem whose message carries a fixed
+  //             phrase. agentdb has no row of its own since ak retired its
+  //             standalone install: Ruflo bundles it, and the natives row about
+  //             that copy ("… agentdb location(s)": native, on the WASM
+  //             fallback, or missing) is the one status fact about it. The rest
+  //             of natives (agentic-qe's binding, Ruflo's memory runtime, ak's
+  //             install-edit receipts) is about other packages, and a pending
+  //             ruflo upgrade is not an agentdb problem, so neither joins.
+  //             natives.mjs agentdbLocationRow carries the phrase, and
+  //             tests/kit/about-agentdb-join.test.mjs holds the two together.
   // A component with NO entry here — or one whose rows are simply absent from
   // this payload — degrades to "state unknown". That is the honest reading: an
   // unjoined key is an unmeasured fact, never a satisfied one. The permission
@@ -34,7 +45,7 @@ import { sourceHostIcon } from './usage.mjs';
     "hosts.opencode":{host:"opencode"},
     "ruflo":{versions:"ruflo",subs:["ruflo-components"]},
     "agent-browser":{subs:["agent-browser"]},
-    "agentdb":{subs:["agentdb"]},
+    "agentdb":{phrase:{sub:"natives",text:"agentdb location"}},
     "deja-vu":{subs:["deja-vu"]},
     "agentic-qe":{subs:["aqe"],versions:"agentic-qe"},
     "security":{subs:["security"]},
@@ -61,10 +72,25 @@ import { sourceHostIcon } from './usage.mjs';
       if(join.host&&sub==="hosts"&&aboutLead(r.message,join.host))out.push(r);
       else if(join.versions&&sub==="versions"&&aboutLead(r.message,join.versions))out.push(r);
       else if(join.subs&&join.subs.indexOf(sub)>=0)out.push(r);
+      else if(join.phrase&&sub===join.phrase.sub
+        &&String(r.message||"").toLowerCase().indexOf(join.phrase.text)>=0)out.push(r);
     }
     return out;
   }
+  // Host cards read the management words the header pills use (ADR-0053,
+  // 2026-09-26). A host ak does not manage is a neutral fact with its enable
+  // hint; a managed host keeps the verdict of its status rows under the word
+  // "Managed by ak". Without a host-health report the row join stands alone.
   function aboutState(entry,data){
+    var st=aboutRowState(entry,data);
+    var join=ABOUT_JOIN[entry.detectionKey||entry.subsystem||""];
+    var hostChip=data&&join&&join.host?aboutHostChip(join.host,data.hostReadiness):null;
+    if(!hostChip)return st;
+    if(hostChip.state==="managed"){st.word=hostChip.word;return st;}
+    return {state:hostChip.state,word:hostChip.word,title:hostChip.word+(hostChip.detail?" — "+hostChip.detail:""),
+      detail:hostChip.detail?{level:"info",message:hostChip.detail,fix:null}:null};
+  }
+  function aboutRowState(entry,data){
     var configured=entry.category==="configured";
     if(!data||!Array.isArray(data.rows))
       return {state:"unknown",word:"state unknown",title:"the dashboard could not read /api/status",detail:null};
@@ -116,6 +142,19 @@ import { sourceHostIcon } from './usage.mjs';
     return '<span class="ab-tile ab-mg" style="background:var('+hue+')" aria-hidden="true">'
       +esc((icon&&icon.ref)||"?")+"</span>";
   }
+  // Audit 2026-09-26 Addendum 2, problem 3: ak's receipted edit inside Ruflo's
+  // install (the native SQLite pin, ruvnet/ruflo#2219) is shown on the ruflo
+  // card from the SAME natives row `ak status` prints. It is a fact, not a
+  // verdict, so it never changes the card's chip.
+  function aboutEditLine(entry,data){
+    if(entry.id!=="ruflo"||!data||!Array.isArray(data.rows))return "";
+    for(var ei=0;ei<data.rows.length;ei++){
+      var er=data.rows[ei];
+      if(er&&er.subsystem==="natives"&&/^ak applied Ruflo's native SQLite pin/.test(String(er.message||"")))
+        return '<div class="ab-manage">'+esc(er.message)+"</div>";
+    }
+    return "";
+  }
   function aboutCard(entry,data){
     var st=aboutState(entry,data),ver=aboutVersion(entry,data);
     // Release-tagged tools (the Brain) already record their leading "v"; npm
@@ -123,8 +162,11 @@ import { sourceHostIcon } from './usage.mjs';
     var chipText=st.word+(ver?" \u00b7 "+aboutVerLabel(ver.installed):"");
     var detail="";
     if(st.detail){
+      // A manual fix is tagged as on Overview (groups.mjs rowLine), so nobody
+      // reads it as something `ak sync` will do.
+      var tag=st.detail.repair==="manual"?' <span class="repair-tag">manual</span>':"";
       detail='<p class="ab-detail" data-level="'+esc(st.detail.level)+'">'+esc(st.detail.message)
-        +(st.detail.fix?' <code>'+esc(st.detail.fix)+"</code>":"")+"</p>";
+        +(st.detail.fix?tag+' <code>'+esc(st.detail.fix)+"</code>":"")+"</p>";
     }else if(ver&&ver.outdated&&ver.latest){
       detail='<p class="ab-detail">update available \u2014 '+esc(aboutVerLabel(ver.latest))+' <code>ak sync</code></p>';
     }
@@ -155,6 +197,7 @@ import { sourceHostIcon } from './usage.mjs';
       }
       if(rcRow)rcLink='<div class="ab-links"><a href="#" class="rc-link" data-go="runtime">'+esc(rcRow.message)+"</a></div>";
     }
+    rcLink+=aboutEditLine(entry,data);
     return '<article class="ab-card'+(entry.category==="kit"?" ab-wide":"")+'">'
       +'<div class="ab-head">'+aboutTile(entry.icon)
       +'<span class="ab-name"><b>'+esc(entry.name)+"</b>"

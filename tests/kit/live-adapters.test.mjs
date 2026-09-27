@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   adaptClaudeRecord, adaptCodexRecord, adaptCodexLedger, adaptStructuredEvent,
 } from '../../src/lib/live/index.mjs';
+import { structuredRecordRejection } from '../../src/lib/live/structured-adapter.mjs';
 
 const now = '2026-07-27T12:00:00Z';
 
@@ -185,6 +186,27 @@ test('structured adapter accepts bounded ruflo and AQE events only', () => {
   assert.equal(event.projectKey, 'project:aaaaaaaaaaaaaaaa');
   assert.ok(!JSON.stringify(event).includes('must not leak'));
   assert.deepEqual(adaptStructuredEvent({}, { surface: 'aqe' }), []);
+});
+
+test('structured rejection names the missing field without echoing record content', () => {
+  const surface = 'aqe';
+  const full = { sessionId: 's', agentId: 'a', action: 'gate.completed' };
+  assert.equal(structuredRecordRejection(full, { surface }), null);
+  assert.equal(structuredRecordRejection({ ...full, sessionId: undefined }, { surface }), 'missing-session-id');
+  assert.equal(structuredRecordRejection({ ...full, sessionId: undefined }, { surface, sessionId: 'configured' }), null,
+    'a source-configured session id satisfies the requirement');
+  assert.equal(structuredRecordRejection({ ...full, agentId: '' }, { surface }), 'missing-actor-id');
+  assert.equal(structuredRecordRejection({ sessionId: 's', agentId: 'a', secret: 'x' }, { surface }), 'missing-action');
+  assert.equal(structuredRecordRejection([1, 2], { surface }), 'not-an-object');
+  assert.equal(structuredRecordRejection('text', { surface }), 'not-an-object');
+  assert.equal(structuredRecordRejection(full, { surface: 'plugin' }), 'unsupported-surface');
+  for (const [record, options] of [
+    [{ ...full, sessionId: undefined }, { surface }], [{ ...full, agentId: '' }, { surface }],
+    [{ sessionId: 's', agentId: 'a' }, { surface }], [full, { surface: 'plugin' }],
+  ]) {
+    assert.deepEqual(adaptStructuredEvent(record, options), [],
+      'the adapter and the diagnostic share one acceptance rule');
+  }
 });
 
 test('AQE court evidence preserves leader and member execution hosts independently', () => {

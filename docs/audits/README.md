@@ -19,6 +19,16 @@ The September 9 sequence is explicitly cumulative:
 September 1–2 hook reports retain their then-verified host versions and exact-action boundaries;
 a later installed host version does not inherit those conformance results automatically.
 
+The [issues 237–239 verification and decisions](2026-09-26-issues-237-238-239-verification-and-decisions.md)
+record verifies an external report against `847486c` and captures the maintainer's nine
+decisions, two same-day addenda (AgentDB and Ruflo memory alignment; memory location and install
+transparency) with their decisions, the resulting remediation plan, and the implementation status
+of Stages 1–5 on the integration branch. A third addendum records later decisions (Ruflo daemon,
+AQE stores, verification, the refresh vocabulary, the upstream watch, the Ruflo support window and
+product names). Of its Stage 6, the upstream watch is implemented on the integration branch; the
+other items moved to the [remediation program plan](../superpowers/plans/2026-09-26-remediation-program.md),
+which names the branch for each.
+
 Machine-readable inventories here are observations, not executable policy, ownership receipts,
 release capabilities or permission to read additional host history. Issue-specific matrices state
 whether their review was semantic, structural, metadata-only, or actually reran executable checks.

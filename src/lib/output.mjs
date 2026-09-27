@@ -1,6 +1,7 @@
 // Terminal output helpers, mirroring the shell kit's ok/warn/fail/dim voice.
 // Color only on a TTY and when NO_COLOR is unset; --json callers collect
 // structured results instead of printing.
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { stripUnsafeChars } from './text-safety.mjs';
 
 const SGR_CODES = ['1;32', '1;33', '1;31', '1;36', '2', '1'];
@@ -57,11 +58,36 @@ export function sanitizeForTerminal(value) {
 
 const s = sanitizeForTerminal;
 
-export const ok = (msg) => console.log(`${green('✓')} ${s(msg)}`);
-export const warn = (msg) => console.log(`${yellow('⚠')}  ${s(msg)}`);
-export const fail = (msg) => console.log(`${red('✗')} ${s(msg)}`);
-export const info = (msg) => console.log(`${dim('ℹ')}  ${s(msg)}`);
-export const heading = (msg) => console.log(`\n${bold(s(msg))}`);
+// A live check that runs beside others (or whose verdict needs its first
+// failure line) captures the ok/warn/fail/info/heading lines it prints, scoped
+// by AsyncLocalStorage so parallel checks never mix their lines. `echo` also
+// prints them, as a sequential `ak x verify` run does.
+const captureScope = new AsyncLocalStorage();
+
+/**
+ * Run `fn`, collecting every line the helpers below emit inside it.
+ * @template T
+ * @param {() => Promise<T>|T} fn
+ * @param {{echo?:boolean}} [options]
+ * @returns {Promise<{result:T, entries:{level:string,text:string}[]}>}
+ */
+export async function captureOutput(fn, { echo = false } = {}) {
+  const scope = { entries: [], echo };
+  const result = await captureScope.run(scope, fn);
+  return { result, entries: scope.entries };
+}
+
+function emit(level, msg, line) {
+  const scope = captureScope.getStore();
+  if (scope) scope.entries.push({ level, text: s(msg) });
+  if (!scope || scope.echo) console.log(line);
+}
+
+export const ok = (msg) => emit('ok', msg, `${green('✓')} ${s(msg)}`);
+export const warn = (msg) => emit('warn', msg, `${yellow('⚠')}  ${s(msg)}`);
+export const fail = (msg) => emit('fail', msg, `${red('✗')} ${s(msg)}`);
+export const info = (msg) => emit('info', msg, `${dim('ℹ')}  ${s(msg)}`);
+export const heading = (msg) => emit('heading', msg, `\n${bold(s(msg))}`);
 
 /** Render a managed-operation result without collapsing degraded/skipped work
  * into a green success. Legacy `{ok, detail}` results remain supported. */

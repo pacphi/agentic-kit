@@ -43,7 +43,9 @@ Options:
   --no-open   don't auto-open the browser (just print the URL — for headless use)
   --live-source 'surface=path'
               observe an explicit structured JSONL source; repeatable.
-              surface is ruflo or aqe
+              surface is ruflo or aqe. It reads a file an existing producer
+              writes and does not turn on Ruflo/AQE event output; a file
+              that does not exist yet shows as "awaiting file" in Sources
 
 Examples:
   ak x dashboard              serve + open http://127.0.0.1:7431

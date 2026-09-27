@@ -2,7 +2,11 @@
 
 - **Status:** Accepted — implementation delivered 2026-09-05; Implemented withheld pending
   human-evaluation and cross-platform gates
-- **Updated:** 2026-09-20 — ADR-0054 consumer hardens retained inventory reads with compressed,
+- **Updated:** 2026-09-26 — a curated host source whose root is absent (host not installed) is
+  never scanned and never counted in coverage, the Discovery narrative or the Inventory banner;
+  Discovery shows it as not installed and an explicit start is refused with `SOURCE_NOT_PRESENT`
+  (#238 item 6). Existing acceptance gates remain outstanding.
+- **Earlier update:** 2026-09-20 — ADR-0054 consumer hardens retained inventory reads with compressed,
   uncompressed and decompression limits; existing acceptance gates remain outstanding.
 - **Earlier update:** 2026-09-08 — project language badges use locally bundled SVGs with
   name tooltips and accessible labels; ADR-0050 subsequently replaces the
@@ -280,6 +284,10 @@ last completed snapshot remains authoritative; partial work never replaces it. A
 run states its coverage exactly and never supports absence, uniqueness, complete-conflict,
 reclaimable-total, or Managed-action claims. Individually verified resources found so far may be
 shown with **Source scan incomplete** in technical details.
+
+Amendment (2026-09-26): a curated host source whose root does not exist is not installed, not
+incomplete. It is never scanned, counted in coverage, or allowed to block claims, and Discovery
+shows it as not installed. A root the user added keeps reporting a real failure when missing.
 
 No filesystem watcher or always-running daemon is added in v1. Passive local scans may run when the
 application starts or Maintenance opens, coalesced by freshness. Deep traversal, executable probes,

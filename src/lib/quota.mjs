@@ -29,9 +29,10 @@
 // `primary.windowDurationMins = 10080` (the weekly) and `secondary = null`.
 // Everything here therefore keys windows on their DURATION, never their slot.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { configDir } from './paths.mjs';
+import { configDir, claudeSettingsPath } from './paths.mjs';
 import { managedHostIds } from './adapters/registries.mjs';
 
 export const claudeLimitsFile = () => path.join(configDir(), 'claude-rate-limits.json');
@@ -101,6 +102,90 @@ export function normalizeClaudeLimits(raw) {
 export function readClaudeLimits({ file = claudeLimitsFile() } = {}) {
   try { return normalizeClaudeLimits(JSON.parse(fs.readFileSync(file, 'utf8'))); }
   catch { return null; }
+}
+
+// ── Claude tee channel (read-only; #238 M3) ─────────────────────────────────
+//
+// The tee exists only inside the kit footer that sync injects into a ruflo
+// statusline helper (it needs that template's own stdin reader). Whether an
+// empty Claude panel can ever fill therefore depends on which statusLine a
+// session runs, and Claude Code resolves that by precedence: managed, then
+// command line, then the project's .claude/settings.local.json, then its
+// .claude/settings.json, then the user's ~/.claude/settings.json
+// (code.claude.com/docs/en/settings). The dashboard cannot know which project
+// the next session starts in, so it classifies the USER-level statusLine, the
+// one every project without its own inherits, and lets the panel state the
+// precedence rule beside the class.
+//
+// Read-only and path-free: this reads the settings file and, at most, the
+// script files the command names (stat first; regular files under a size cap),
+// and returns ONLY a class — never the command or a path. No file is written,
+// so ADR-0010's single sanctioned channel is unchanged.
+
+/** Every class classifyClaudeTeeChannel can return. */
+export const CLAUDE_TEE_CHANNELS = Object.freeze(['none', 'kit-footer', 'project-helper', 'custom', 'unknown']);
+const KIT_FOOTER_MARKER = 'ruflo-seg:BEGIN';
+const MAX_STATUSLINE_SCRIPT_BYTES = 4 * 1024 * 1024;
+const MAX_STATUSLINE_SCRIPTS = 8;
+// A script the command names: double-quoted, single-quoted (both may hold
+// spaces), or a bare token. Only the JavaScript family, since the tee is JS.
+const STATUSLINE_SCRIPT_TOKEN = /"([^"]*?\.[cm]?js)"|'([^']*?\.[cm]?js)'|([^\s"'`;|&()=,]+?\.[cm]?js)(?![\w.])/g;
+const HOME_PREFIX = /^(?:~|\$HOME|\$\{HOME\}|%USERPROFILE%|%HOME%)(?=[\\/]|$)/;
+// The one project-relative script the kit injects into (fixStatusline).
+const PROJECT_HELPER_SUFFIX = '.claude/helpers/statusline.cjs';
+
+function statusLineScripts(command) {
+  const out = [];
+  for (const m of command.matchAll(STATUSLINE_SCRIPT_TOKEN)) {
+    const token = (m[1] ?? m[2] ?? m[3] ?? '').trim();
+    if (token && !out.includes(token)) out.push(token);
+    if (out.length >= MAX_STATUSLINE_SCRIPTS) break;
+  }
+  return out;
+}
+
+function scriptCarriesFooter(file, fsImpl) {
+  try {
+    const st = fsImpl.statSync(file);
+    if (!st.isFile() || st.size > MAX_STATUSLINE_SCRIPT_BYTES) return false;
+    return fsImpl.readFileSync(file, 'utf8').includes(KIT_FOOTER_MARKER);
+  } catch { return false; }
+}
+
+/** One named script → 'kit-footer' | 'project-helper' | 'custom'. A path that
+ *  stays relative (after home expansion) resolves against each session's
+ *  project, so only the helper the kit injects into can carry the footer. */
+function scriptChannel(token, { fsImpl, home }) {
+  const expanded = token.replace(HOME_PREFIX, () => home);
+  const projectRelative = /CLAUDE_PROJECT_DIR/.test(expanded) || /^\$\{?D\}?[\\/]/.test(expanded)
+    || !(path.isAbsolute(expanded) || path.win32.isAbsolute(expanded));
+  if (projectRelative) {
+    return expanded.replace(/\\/g, '/').endsWith(PROJECT_HELPER_SUFFIX) ? 'project-helper' : 'custom';
+  }
+  return scriptCarriesFooter(expanded, fsImpl) ? 'kit-footer' : 'custom';
+}
+
+/**
+ * Classify the user-level Claude statusLine by whether it can feed the quota
+ * tee: 'none' (no user-level statusLine), 'kit-footer' (its script carries the
+ * footer), 'project-helper' (it runs each project's ruflo helper, so it depends
+ * on the project), 'custom' (anything else: another script, an inline command,
+ * a missing file), or 'unknown' (the settings file exists but cannot be read).
+ *
+ * @param {{ settingsFile?: string, fsImpl?: any, home?: string }} [o]
+ * @returns {'none'|'kit-footer'|'project-helper'|'custom'|'unknown'}
+ */
+export function classifyClaudeTeeChannel({
+  settingsFile = claudeSettingsPath(), fsImpl = fs, home = os.homedir(),
+} = {}) {
+  let settings;
+  try { settings = JSON.parse(fsImpl.readFileSync(settingsFile, 'utf8')); }
+  catch (error) { return error?.code === 'ENOENT' ? 'none' : 'unknown'; }
+  const command = settings?.statusLine?.command;
+  if (typeof command !== 'string' || !command.trim()) return 'none';
+  const classes = statusLineScripts(command).map((token) => scriptChannel(token, { fsImpl, home }));
+  if (classes.includes('kit-footer')) return 'kit-footer';
+  return classes.includes('project-helper') ? 'project-helper' : 'custom';
 }
 
 // ── Codex (app-server) ──────────────────────────────────────────────────────
@@ -206,25 +291,45 @@ export function normalizeCodexLimits(resp, { fetchedAt = null } = {}) {
  * the cache for 10 days before this fix). Resolves the raw response object,
  * or null on any failure.
  */
-export function codexAppServerRateLimits({ timeoutMs = 15_000, spawnImpl = spawn, bin = 'codex' } = {}) {
+export function codexAppServerRateLimits(opts = {}) {
+  return codexAppServerExchange(opts).then((out) => out.result);
+}
+
+/** Every failure class codexAppServerExchange can report (#238 P4). */
+export const CODEX_UNAVAILABLE_REASONS = Object.freeze([
+  'not-installed', 'spawn-failed', 'exited', 'timeout', 'rpc-error', 'no-limit-windows',
+]);
+
+const spawnFailure = (error) => ({ reason: error?.code === 'ENOENT' ? 'not-installed' : 'spawn-failed' });
+
+/**
+ * The same exchange, keeping WHY it produced nothing: `{ result, failure }`
+ * where `failure` is null on an answer, else `{ reason }` plus `exitCode`
+ * (an early exit, e.g. 2 when a CLI rejects the flags) or `rpcCode` (a
+ * JSON-RPC error on the read). Only the class and a number are kept: stderr
+ * stays ignored and the vendor's error message is dropped, because it can
+ * carry account or path detail the dashboard has no business relaying.
+ */
+export function codexAppServerExchange({ timeoutMs = 15_000, spawnImpl = spawn, bin = 'codex' } = {}) {
   return new Promise((resolve) => {
     let child;
     try {
       child = spawnImpl(bin, ['-s', 'read-only', '-a', 'never', 'app-server'],
         { stdio: ['pipe', 'pipe', 'ignore'] });
-    } catch { resolve(null); return; }
+    } catch (error) { resolve({ result: null, failure: spawnFailure(error) }); return; }
     let buf = '';
     let settled = false;
-    const done = (value) => {
+    const done = (result, failure = null) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       try { child.kill(); } catch { /* already gone */ }
-      resolve(value);
+      resolve({ result, failure });
     };
-    const timer = setTimeout(() => done(null), timeoutMs);
-    child.on('error', () => done(null));
-    child.on('exit', () => done(null));
+    const timer = setTimeout(() => done(null, { reason: 'timeout' }), timeoutMs);
+    child.on('error', (error) => done(null, spawnFailure(error)));
+    child.on('exit', (code) => done(null, Number.isInteger(code)
+      ? { reason: 'exited', exitCode: code } : { reason: 'exited' }));
     child.stdout.on('data', (chunk) => {
       buf += String(chunk);
       let nl;
@@ -237,9 +342,11 @@ export function codexAppServerRateLimits({ timeoutMs = 15_000, spawnImpl = spawn
           try {
             child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'initialized' })}\n`);
             child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'account/rateLimits/read', params: {} })}\n`);
-          } catch { done(null); }
+          } catch (error) { done(null, spawnFailure(error)); }
         } else if (msg?.id === 2) {
-          done(msg.result && typeof msg.result === 'object' ? msg.result : null);
+          if (msg.result && typeof msg.result === 'object') done(msg.result);
+          else done(null, Number.isInteger(msg.error?.code)
+            ? { reason: 'rpc-error', rpcCode: msg.error.code } : { reason: 'rpc-error' });
         }
       }
     });
@@ -248,7 +355,7 @@ export function codexAppServerRateLimits({ timeoutMs = 15_000, spawnImpl = spawn
         jsonrpc: '2.0', id: 1, method: 'initialize',
         params: { clientInfo: { name: 'agentic-kit', title: 'agentic-kit dashboard', version: '0' } },
       })}\n`);
-    } catch { done(null); }
+    } catch (error) { done(null, spawnFailure(error)); }
   });
 }
 
@@ -259,19 +366,36 @@ export function codexAppServerRateLimits({ timeoutMs = 15_000, spawnImpl = spawn
  * answer (codex absent / logged out).
  *
  * @param {{ ttlMs?: number, cacheFile?: string, now?: number,
+ *           timeoutMs?: number, spawnImpl?: any, bin?: string }} [opts]
+ */
+export async function collectCodexLimits(opts = {}) {
+  return (await collectCodexLimitsDetailed(opts)).limits;
+}
+
+/**
+ * collectCodexLimits with the failure kept: `{ limits, unavailable }`.
+ * `unavailable` is null when the answer is fresh (from the app-server or the
+ * TTL cache), else the failure class of THIS refresh, including when a stale
+ * cache is served in its place, so the panel can say both "as of 3h ago"
+ * and why it is not newer.
+ *
+ * @param {{ ttlMs?: number, cacheFile?: string, now?: number,
  *           timeoutMs?: number, spawnImpl?: any, bin?: string }} [o]
  */
-export async function collectCodexLimits({
+export async function collectCodexLimitsDetailed({
   ttlMs = CODEX_TTL_MS, cacheFile = codexLimitsFile(), now = Date.now(),
   timeoutMs, spawnImpl, bin,
 } = {}) {
   let cached = null;
   try { cached = JSON.parse(fs.readFileSync(cacheFile, 'utf8')); } catch { /* first run */ }
-  if (cached && Number.isFinite(cached.fetchedAt) && now - cached.fetchedAt < ttlMs) return cached;
+  if (cached && Number.isFinite(cached.fetchedAt) && now - cached.fetchedAt < ttlMs) {
+    return { limits: cached, unavailable: null };
+  }
 
-  const resp = await codexAppServerRateLimits({ timeoutMs, spawnImpl, bin });
-  const fresh = normalizeCodexLimits(resp, { fetchedAt: now });
-  if (!fresh) return cached; // stale beats silent-nothing; null when never answered
+  const { result, failure } = await codexAppServerExchange({ timeoutMs, spawnImpl, bin });
+  const fresh = normalizeCodexLimits(result, { fetchedAt: now });
+  // stale beats silent-nothing; null when never answered
+  if (!fresh) return { limits: cached, unavailable: failure ?? { reason: 'no-limit-windows' } };
   try {
     fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
     const tmp = `${cacheFile}.${process.pid}.tmp`;
@@ -280,7 +404,7 @@ export async function collectCodexLimits({
     fs.writeFileSync(tmp, JSON.stringify(fresh), { mode: 0o600 });
     fs.renameSync(tmp, cacheFile);
   } catch { /* an unwritable cache costs a refetch, never the answer */ }
-  return fresh;
+  return { limits: fresh, unavailable: null };
 }
 
 // ── Unsupported hosts (F-10 labeling policy) ────────────────────────────────
@@ -309,19 +433,26 @@ export function unsupportedQuotaHosts({ enabledHosts = {} } = {}) {
  * model); Codex may spawn one vendor subprocess, TTL-bounded. `others` lists
  * any additional enabled host with no sanctioned quota channel (F-10);
  * omitting `enabledHosts` (the default) leaves it empty, so claude/codex
- * output is unchanged unless a caller opts in.
+ * output is unchanged unless a caller opts in. `claudeChannel` is the
+ * user-level statusLine's class (classifyClaudeTeeChannel), and
+ * `codexUnavailable` the failure class of the latest Codex refresh (null when
+ * the answer is fresh); both are siblings so `claude` and `codex` keep their
+ * null-or-data contracts.
  *
  * @param {{ now?: number, claudeFile?: string, codexCacheFile?: string, ttlMs?: number,
  *           timeoutMs?: number, spawnImpl?: any, bin?: string,
- *           enabledHosts?: Record<string, boolean> }} [o]
+ *           enabledHosts?: Record<string, boolean>,
+ *           claudeSettingsFile?: string, home?: string }} [o]
  */
 export async function readLimits({
   now = Date.now(), claudeFile, codexCacheFile, ttlMs, timeoutMs, spawnImpl, bin, enabledHosts,
+  claudeSettingsFile, home,
 } = {}) {
   const claude = readClaudeLimits({ file: claudeFile ?? claudeLimitsFile() });
-  const codex = await collectCodexLimits({
+  const claudeChannel = classifyClaudeTeeChannel({ settingsFile: claudeSettingsFile ?? claudeSettingsPath(), home });
+  const { limits: codex, unavailable: codexUnavailable } = await collectCodexLimitsDetailed({
     ttlMs, cacheFile: codexCacheFile ?? codexLimitsFile(), now, timeoutMs, spawnImpl, bin,
   });
   const others = unsupportedQuotaHosts({ enabledHosts });
-  return { generatedAt: new Date(now).toISOString(), claude, codex, others };
+  return { generatedAt: new Date(now).toISOString(), claude, claudeChannel, codex, codexUnavailable, others };
 }

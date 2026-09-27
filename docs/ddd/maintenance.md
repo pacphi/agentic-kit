@@ -219,6 +219,13 @@ Curated automatic sources (`claude-user`, `codex-user`, `opencode-user`, `hermes
 work before `saveSource` commits anything. Network shares, removable media, cloud placeholders, and
 host/WSL boundary crossing are excluded by default (`BOUNDARY_KINDS`).
 
+A curated host source whose root does not exist on this machine resolves with `present:false`
+(the host is not installed). It is never driven, so it cannot fail with `io-failure`; it is left
+out of the inventory's `sourceCoverage`, the Discovery narrative and its forbidden-claims check,
+and an explicit start is refused with `SOURCE_NOT_PRESENT`. Discovery still lists it, marked not
+installed. `present` is Discovery-only evidence and never enters `SourceCoverage`. A root the user
+added is not subject to this rule: a missing user root is scanned and reports its real failure.
+
 A scan (`discovery/orchestrator.mjs`) progresses through `SCAN_STATES` (`configured`, `queued`,
 `scanning`, `checkpointed`, `paused`, `complete`, `published`, `stopped`, `failed`) along the
 transitions `SCAN_TRANSITIONS` declares; reaching a work-slice boundary yields `checkpointed`, never

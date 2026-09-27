@@ -410,18 +410,21 @@ const hooksStub = ({ file, digest }) => async () => ({
 //     so the WORST of the pair has to drive the chip.
 //   · nothing emits a `permissions` row, so that card must degrade to unknown:
 //     an unjoined key is an unmeasured fact, never a satisfied one.
+//   · there is no `agentdb` row: ak retired the standalone agentdb, so the card
+//     joins the natives row about Ruflo's bundled copy ("agentdb location(s)"),
+//     while the failing memory-runtime row beside it must not join.
 const STATUS_STUB = async () => ({
   overall: 'warn',
   rows: [
     { subsystem: 'versions', level: 'ok', message: 'ruflo 4.0.0 (latest)', fix: null },
-    { subsystem: 'natives', level: 'fail', message: 'WASM fallback', fix: 'ak sync' },
+    { subsystem: 'natives', level: 'ok', message: 'native better-sqlite3 in 2 agentdb location(s)', fix: null },
+    { subsystem: 'natives', level: 'fail', message: 'ruflo memory runtime on WASM fallback (@claude-flow/memory): no native binding — no prebuilt binding for this platform', fix: 'sync builds the native binding', repair: 'sync' },
     { subsystem: 'learning', level: 'warn', message: 'no patterns yet', fix: null },
     { subsystem: 'hosts', level: 'ok', message: 'claude enabled and installed', fix: null },
     { subsystem: 'hosts', level: 'fail', message: 'codex enabled but not installed', fix: 'ak setup' },
     { subsystem: 'hosts', level: 'ok', message: 'opencode enabled and installed', fix: null },
-    { subsystem: 'agentdb', level: 'ok', message: 'store reachable', fix: null },
     { subsystem: 'agent-browser', level: 'ok', message: 'agent-browser 0.27.3 ready for Ruflo', fix: null },
-    { subsystem: 'aqe', level: 'warn', message: 'fleet has never been initialized', fix: 'aqe init' },
+    { subsystem: 'aqe', level: 'warn', message: 'fleet has never been initialized', fix: 'aqe init', repair: 'manual' },
     { subsystem: 'security', level: 'ok', message: 'scan clean', fix: null },
     { subsystem: 'ruvnet-brain', level: 'ok', message: 'knowledge base present', fix: null },
     { subsystem: 'self', level: 'ok', message: 'agentic-kit up to date', fix: null },
@@ -1154,7 +1157,7 @@ async function main() {
   // screens have room for it beside the content-width menu; narrow screens
   // give it a second row instead of stretching or squeezing the menu.
   const runningScanPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-  await runningScanPage.route(/\/api\/system(\?|$)/, (route) => route.fulfill({
+  await runningScanPage.route(/\/api\/system(\/summary)?(\?|$)/, (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify({
@@ -1879,7 +1882,7 @@ async function main() {
       await page.waitForSelector(`${sel}:not([hidden])`, { timeout: 8000 }).catch(() => {});
       if (tab === 'usage') await page.waitForTimeout(1200); // lazy fetch
       if (tab === 'live') await page.waitForTimeout(350); // segmented-thumb transition
-      // System fetches /api/system on first open. Waiting on a rendered KPI (not
+      // System fetches /api/system/summary on first open. Waiting on a rendered KPI (not
       // a timeout) means this cannot pass by screenshotting an empty grid.
       if (tab === 'system') await page.waitForSelector('#sys-kpis .sy-kpi', { timeout: 8000 }).catch(() => {});
       const text = await visibleText(page, sel);
@@ -2058,12 +2061,32 @@ async function main() {
     check('the managed agent-browser card carries its observed compatible version',
       /installed.*v0\.27\.3/i.test(String(aboutBy('agent-browser')?.chip)),
       `the agent-browser chip read ${JSON.stringify(aboutBy('agent-browser')?.chip)}`);
+    // P1 (Branch 0 real-machine pass): no `agentdb` status row exists since the
+    // standalone install was retired. The card reads the natives row about
+    // Ruflo's bundled copy, and the failing memory-runtime row beside it (a
+    // different package) must not turn it red.
+    const agentdbCard = aboutBy('agentdb');
+    check('the agentdb card reads Ruflo\'s bundled copy from its natives row, not "state unknown"',
+      agentdbCard?.state === 'ok' && /^installed/i.test(String(agentdbCard?.chip))
+        && /agentdb location/.test(String(agentdbCard?.reason))
+        && !/memory runtime/.test(String(agentdbCard?.reason)) && agentdbCard?.detail === null,
+      `the agentdb card read ${JSON.stringify(agentdbCard)}`);
     // One card, two status rows: the worst of the pair drives the chip, or
     // Codex's broken statusline would sit behind a green card.
     check('a card joining two subsystems takes the worse of the two',
       aboutBy('Statuslines')?.state === 'warn'
         && /codex statusline missing/i.test(String(aboutBy('Statuslines')?.detail)),
       `the Statuslines card read ${JSON.stringify(aboutBy('Statuslines'))}`);
+    // contracts-4: a manual fix reads as manual on its About card, as it does on
+    // Overview; a sync fix keeps a bare command.
+    const repairTags = await page.evaluate(() => Object.fromEntries(
+      [...document.querySelectorAll('#panel-about .ab-card')].map((card) => [
+        card.querySelector('.ab-name b')?.textContent.trim() || '',
+        card.querySelector('.ab-detail .repair-tag')?.textContent.trim() || null,
+      ])));
+    check('an About card labels a manual fix manual and leaves a sync fix unlabelled',
+      repairTags['agentic-qe'] === 'manual' && repairTags.Statuslines === null,
+      `About repair tags were ${JSON.stringify(repairTags)}`);
     // The standing example from the directory itself: `ak status` emits no
     // permissions row, so this chip must degrade rather than assume.
     check('an unjoined surface degrades to unknown instead of assuming configured',
@@ -2913,7 +2936,7 @@ async function main() {
     // itself is always the first read (reports running), every read after is
     // settled. This cannot race system-projects.mjs's own poll cadence and
     // mntPollSystemMeasurement's independent one against a Node-side timer.
-    await page.route(/\/api\/system(\?|$)/, (route) => {
+    await page.route(/\/api\/system(\/summary)?(\?|$)/, (route) => {
       const reqUrl = new URL(route.request().url());
       if (reqUrl.searchParams.get('refresh') === 'deep') remeasureDeepScanRequests += 1;
       remeasureSystemReadCount += 1;
@@ -2949,7 +2972,7 @@ async function main() {
       await page.isEnabled('#mnt-remeasure') && await page.isEnabled('[data-mnt-plan-plc]')
         && remeasureSystemReadCount === 2,
       `system reads: ${remeasureSystemReadCount}; operation: ${await page.textContent('#mnt-check-providers-status')}`);
-    await page.unroute(/\/api\/system(\?|$)/);
+    await page.unroute(/\/api\/system(\/summary)?(\?|$)/);
 
     // ── #system/catalog redirects to Maintenance Inventory (ADR-0048) ──
     await page.evaluate(() => { location.hash = '#system/catalog'; });
@@ -3171,7 +3194,7 @@ async function main() {
       }],
       complete: true,
     };
-    await page.route(/\/api\/system(\?|$)/, (route) => route.fulfill({
+    await page.route(/\/api\/system(\/summary)?(\?|$)/, (route) => route.fulfill({
       status: 200, contentType: 'application/json', body: JSON.stringify(FILTER_SYSTEM),
     }));
     await page.reload({ waitUntil: 'domcontentloaded' });
@@ -3455,7 +3478,7 @@ async function main() {
     // SYSTEM_STUB served again, the System area open, and its freshness label
     // populated. A bare reload would leave /api/system unfetched and the
     // staleness assertions reading an empty element.
-    await page.unroute(/\/api\/system(\?|$)/);
+    await page.unroute(/\/api\/system(\/summary)?(\?|$)/);
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.click('#tab-system');
     await page.waitForFunction(

@@ -23,6 +23,8 @@ ak dashboard \
 > OpenCode process presence is observed. What you don't get: ruflo and agentic-qe activity, which are never
 > auto-discovered and only appear once you register their event file
 > explicitly (see [Evidence and limitations](#evidence-and-limitations)).
+> `--live-source` reads a file that something else already writes. It does not make Ruflo or
+> agentic-qe produce events.
 
 Open `#observability/live` or `#observability/history`, for example
 `http://127.0.0.1:7431/#observability/live` — once the dashboard's per-session token is already in
@@ -31,8 +33,9 @@ their own. The Observability choices occupy the same fixed, left-aligned seconda
 Overview and Usage; see the [Dashboard guide](DASHBOARD.md). Collection starts
 lazily when the snapshot or event endpoint is first requested. Leaving the Observability
 tab closes that browser's event stream. After the last snapshot/SSE client
-leaves, collectors stop after 30 seconds by default and restart on the next
-request. Stopping the dashboard closes the live service and all clients.
+leaves, collectors stop after 30 seconds by default. The next request resumes each file where it
+stopped, so work written while nobody was watching still appears. Stopping the dashboard closes
+the live service and all clients.
 
 Model lifecycle is a separate read model under **Usage → Models**. It may consume bounded model ids
 already derived by the historical usage index, but it never consumes live transcript content
@@ -47,6 +50,10 @@ Observability has two navigation modes:
 
 - **Live** is the default. It shows only projects with a root session that has an unexpired process
   presence lease or fresh meaningful activity. If none qualify, it shows **0 projects**.
+  In a folder that is not a Git repository, a process leases a session only when its working
+  folder is exactly the folder the session's transcript records. Two folders with the same name
+  are never confused. Until such a session writes its transcript, it is listed only under
+  System → Runtime.
 - **History** shows only projects with at least one retained non-live root session. It never carries
   a current selection, live status, or motion across from Live.
 
@@ -103,7 +110,9 @@ empty History project. Historical rows never fill an empty Live mode.
 ## Reading the operations console
 
 - Claude and Codex sessions discovered newest-first from their local JSONL
-  stores and bootstrapped from bounded, metadata-only records.
+  stores and bootstrapped from bounded, metadata-only records. Operations written before Live
+  started watching are not drawn; a live session with none since then says when Live started
+  watching, and its session stream shows the earlier transcript.
 - Project-first session cards with a host glyph and name, independently
   evidenced inference provider/model when reported, lifecycle, freshness, and
   a concise workspace summary. The Claude Code, Codex, and OpenCode glyph identifies the execution
@@ -141,7 +150,8 @@ empty History project. Historical rows never fill an empty Live mode.
   its detail; transcript evidence remains tied to its actor.
 - Keyboard-selectable nodes, reduced-motion support, actor-specific geometry, a consultable
   **Legend / Help**, evidence-aware tooltips, and a **Pause live** control.
-- Sanitized adapter health showing status and aggregate file/event/error counts.
+- Sanitized adapter health under **Sources**, showing each adapter's status and aggregate
+  file/event/error counts. See [Source health](#source-health).
 
 The overview answers which project and host are involved, which inference
 provider is evidenced, whether the evidence is current, who is active, and
@@ -300,7 +310,13 @@ nodes per session by default, tails at most 256 files, and retains 2,000 events
 for resume. These are implementation bounds, not claims about the number of
 agents the underlying tools can run. Explicit `--live-source` files receive
 tailer slots first; Claude and Codex automatic discovery divide the remaining
-capacity.
+capacity. When a host has more transcripts than its share, Live tails the newest ones and
+says so: **Sources** shows `N files (newest of M)`, and `/api/live` reports
+`acquisitionCoverage.complete: false`, `truncated: true`, the number of files left out
+(`omittedFiles`), and per-host `sources` with `candidateFiles`, `returnedFiles`, and
+`fileLimit`. A session in an untailed file can still appear through process presence.
+`acquisitionCoverage.observedSince` is when Live first started watching; an idle stop and
+restart does not change it, because tailing resumes where it stopped.
 
 ## Evidence and limitations
 
@@ -322,7 +338,9 @@ The default dashboard automatically discovers Claude and Codex transcript files,
 supported controller processes, and reads the Codex state ledger. On macOS and Linux,
 process discovery is selected by the real numeric UID running the dashboard. It first reads
 only PID/parent/start/command columns, then requests full argv only for Node or known
-host-controller candidates from that selection. Separate OS accounts are outside the
+host-controller candidates from that selection. Executable paths that contain spaces are
+supported. A Claude Code session started from the Claude desktop app appears as its own session,
+not as part of the desktop app. Separate OS accounts are outside the
 intended survey; people sharing one login, a service running under that account, and a
 container sharing the host PID namespace remain inside the same numeric-UID boundary.
 Do not run the dashboard with `sudo`. Windows uses a process survey and bounded
@@ -339,8 +357,9 @@ Relative paths resolve from the directory where `ak dashboard` starts; absolute
 paths remain absolute. The parser rejects an unsupported/missing surface or an
 empty path, but registration does not prove that the file exists, is a regular
 file, is inside the current project, or is produced by the named subsystem.
-Unreadable/malformed sources degrade their adapter rather than crashing the
-dashboard. Only register a local file you trust the dashboard process to read.
+Registration also does not turn on event output: `--live-source` observes a file an
+existing producer writes. Unreadable/malformed sources degrade their adapter rather than
+crashing the dashboard. Only register a local file you trust the dashboard process to read.
 The structured adapter still constructs allowlisted events, so arbitrary JSON
 fields do not pass through to the browser.
 
@@ -362,6 +381,26 @@ name is preferred. When the source exposes only a generic kind, the UI says
 that the identity is generic or inferred; it does not invent a specialist
 name. “Running” means that supported lifecycle evidence is open and fresh, not
 that the dashboard has inspected an agent's private reasoning.
+
+### Source health
+
+**Sources** lists each adapter with a status, its tailed files, and event and error counts.
+
+| Status | Meaning |
+|--------|---------|
+| `ok` | Every tailed file is readable and the adapter has accepted at least one record |
+| `no events yet` | Every tailed file is readable, but no record has become an event yet |
+| `awaiting file` | At least one registered file does not exist yet. It is read from its first line once it appears |
+| `degraded` | A file is unreadable, or the latest record from a file was malformed or rejected |
+| `unavailable` | An optional source is not present on this machine, such as the Codex state ledger |
+| `idle` | Nothing is tailed for this adapter |
+
+The file count is the number of files tailed right now; it is recounted on every pass, so an
+idle stop and restart does not inflate it. When some files are not readable, the file count
+reads `N of M files readable`. A structured
+(ruflo or agentic-qe) record needs a session ID, an actor ID, and an action. A record missing one
+is counted as rejected, and the API reports which field was missing, never the record itself.
+The toggle counts `degraded` adapters as source issues and names sources that are awaiting a file.
 
 ## Privacy
 
@@ -434,6 +473,11 @@ unbounded content snapshot.
 | Many identical host session rows | Refresh after the current snapshot reconciles ledger hierarchy; root sessions and nested worker threads are counted separately |
 | Worker thread appears at top level | Its declared parent is not currently retained, so it remains navigable as an orphan rather than hiding evidence |
 | Ruflo or AQE absent | Their stores are not auto-discovered; register each JSONL file with `--live-source` |
+| Sources says `awaiting file` | The registered file does not exist. Check the path, and check that its producer is running; registration does not start one |
+| Sources says `N files (newest of M)` | Live tails only the newest transcripts per host within its file bound; older files are not followed. Switch to History for them |
+| Sources shows `rejected` records | The file's records lack a session ID, actor ID, or action, so they cannot become events |
+| A live session shows 0 operations | Live draws operations written after it started watching. Earlier operations appear in the session stream, not on the map |
+| A session in a non-Git folder is missing from Live | Its process and transcript must name the same folder. A session that has not written its transcript yet is listed under System → Runtime only |
 | Project name not reported | No supported metadata supplied a working directory; raw paths are never sent to the browser |
 | Node disappeared | Server projection or client visibility bounds evicted/collapsed it |
 | Connection interrupted | `EventSource` retries; a cursor miss or buffer overflow resets from a snapshot |

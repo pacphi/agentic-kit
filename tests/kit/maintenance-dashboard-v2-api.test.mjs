@@ -822,6 +822,29 @@ test('v2 scan start of a non-filesystem automatic source maps SOURCE_NOT_SCANNAB
   assert.deepEqual([starts, calls.map((call) => call.name)], [1, []], 'a refused start never reads progress or retries');
 });
 
+test('v2 scan start of an absent host source maps SOURCE_NOT_PRESENT to 409 saying it is not installed (M1)', async () => {
+  const refusal = Object.assign(new Error('hermes root missing at /Users/someone/.hermes'), { code: 'SOURCE_NOT_PRESENT' });
+  const { post } = harness({ management: stubManagement({ startScan: async () => { throw refusal; } }).facade });
+  const response = await post('/scans', { action: 'start', sourceId: SOURCE });
+  assert.equal(response.status, 409);
+  assert.deepEqual([response.body.code, response.body.effect], ['SOURCE_NOT_PRESENT', 'not-started']);
+  assert.match(response.body.error, /not installed on this machine/);
+  assert.equal(isProhibitedLabel(response.body.error), false, response.body.error);
+  assert.doesNotMatch(response.body.error, /\/Users\//, 'the refusal never echoes a path');
+});
+
+test('discovery and scan polling carry an absent host source as present:false through the public API (M1)', () => {
+  const coverage = [
+    { sourceId: SOURCE, state: 'complete', label: 'Claude', filesystem: true, present: true },
+    { sourceId: 'hermes-user', state: 'not-scanned', label: 'Hermes user configuration', filesystem: true, present: false },
+  ];
+  for (const payload of [publicDiscovery({ coverage }), publicScanProgress({ coverage })]) {
+    assert.deepEqual(payload.coverage.map((row) => row.present), [true, false]);
+  }
+  const automaticSources = [{ id: 'hermes-user', label: 'Hermes user configuration', enabled: true, filesystem: true, present: false }];
+  assert.equal(publicDiscovery({ automaticSources }).automaticSources[0].present, false);
+});
+
 test('partialSources projects the structured disclosure over the incomplete fixture and still accepts the legacy list (MNT-DSC-014/016)', () => {
   const fixture = SENTINEL_FIXTURES.incomplete();
   const page = runInventoryQuery(fixture, {});

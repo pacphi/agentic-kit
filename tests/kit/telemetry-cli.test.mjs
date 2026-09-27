@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { fixture, identity, now } from './helpers/telemetry.mjs';
 const storePath = '../../src/lib/telemetry/store.mjs';
@@ -69,11 +70,45 @@ test('should_degradeSourcesIndependently_when_usageReaderFails', async () => {
   assert.equal(snapshot.usage.state, 'unavailable');
   assert.equal(snapshot.maintenance.state, 'available');
 });
+/** A one-session OpenCode store (same minimal schema as usage-cli.test.mjs),
+ *  standing in for the real store a developer's shell points at. */
+function writeOpencodeStore(dataHome) {
+  const dir = path.join(dataHome, 'opencode');
+  fs.mkdirSync(dir, { recursive: true });
+  const db = new DatabaseSync(path.join(dir, 'opencode.db'));
+  const at = Date.now() - 120_000;
+  db.exec(`
+    CREATE TABLE session (id text PRIMARY KEY, parent_id text, directory text NOT NULL, title text NOT NULL,
+      time_created integer NOT NULL, time_updated integer NOT NULL);
+    CREATE TABLE message (id text PRIMARY KEY, session_id text NOT NULL,
+      time_created integer NOT NULL, time_updated integer NOT NULL, data text NOT NULL);
+    CREATE TABLE part (id text PRIMARY KEY, message_id text NOT NULL, session_id text NOT NULL,
+      time_created integer NOT NULL, time_updated integer NOT NULL, data text NOT NULL);
+  `);
+  db.prepare('INSERT INTO session VALUES (?, ?, ?, ?, ?, ?)').run('ses_outside', null, '/tmp/oc-proj', 'outside', at, at);
+  const insert = db.prepare('INSERT INTO message VALUES (?, ?, ?, ?, ?)');
+  insert.run('u1', 'ses_outside', at, at, JSON.stringify({ role: 'user', time: { created: at } }));
+  insert.run('a1', 'ses_outside', at + 10, at + 20, JSON.stringify({
+    role: 'assistant', modelID: 'kimi-k3', providerID: 'opencode',
+    tokens: { input: 10, output: 5, reasoning: 0, cache: { read: 0, write: 0 } }, cost: 0.01,
+    time: { created: at + 10, completed: at + 20 },
+  }));
+  db.close();
+}
 test('should_exportHermeticLocalEvidence_when_invokingRealCli', t => {
   const dir = temporary(t);
-  const env = { ...process.env, HOME: dir, USERPROFILE: dir, XDG_CONFIG_HOME: path.join(dir, 'config'),
-    XDG_STATE_HOME: path.join(dir, 'state'), APPDATA: path.join(dir, 'config'), LOCALAPPDATA: path.join(dir, 'state'),
-    CLAUDE_CONFIG_DIR: path.join(dir, '.claude') };
+  // A developer shell that exports XDG_DATA_HOME points OpenCode's store
+  // ($XDG_DATA_HOME/opencode/opencode.db) at real sessions. The product is
+  // right to follow it (usage-opencode.defaultOpencodeDbPath); the sandbox
+  // must override it, or the export absorbs them (same class as usage-cli).
+  const outside = temporary(t);
+  writeOpencodeStore(outside);
+  const shell = { ...process.env, XDG_DATA_HOME: outside };
+  // Pin every XDG base and drop the host-home overrides, as sandboxHome() does.
+  const env = { ...shell, HOME: dir, USERPROFILE: dir, XDG_CONFIG_HOME: path.join(dir, 'config'),
+    XDG_STATE_HOME: path.join(dir, 'state'), XDG_DATA_HOME: path.join(dir, 'data'), XDG_CACHE_HOME: path.join(dir, 'cache'),
+    APPDATA: path.join(dir, 'config'), LOCALAPPDATA: path.join(dir, 'state'), CLAUDE_CONFIG_DIR: path.join(dir, '.claude') };
+  for (const key of ['CODEX_HOME', 'HERMES_HOME']) delete env[key];
   const invoke = args => spawnSync(process.execPath, [fileURLToPath(bin), 'telemetry', ...args], { encoding: 'utf8', env });
   const first = invoke(['export']);
   assert.equal(first.status, 0, first.stderr);

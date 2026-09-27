@@ -27,22 +27,66 @@ test('known blockers are actionable, unsupported configuration is unassessed', (
   assert.equal(summarizeHostReadiness({ host: 'claude', enabled: true, setup: setup(), findings: [{ host: 'codex', code: 'retired-codex-mcp' }] }).status, 'ok');
 });
 
-test('explicit setup failure outranks missing evidence; disabled hosts are neutral', () => {
-  assert.equal(summarizeHostReadiness({ host: 'claude', enabled: true, setup: { installation: { state: 'fail', reason: 'Install host' } } }).status, 'attention');
-  assert.equal(summarizeHostReadiness({ host: 'claude', enabled: false, setup: setup() }).status, 'disabled');
+test('explicit setup failure outranks missing evidence on a managed host', () => {
+  const result = summarizeHostReadiness({ host: 'claude', enabled: true, setup: { installation: { state: 'fail', reason: 'Install host' } } });
+  assert.equal(result.status, 'attention');
+  assert.deepEqual(result.management, { state: 'managed', label: 'Managed by ak' });
+  assert.deepEqual(result.participation, { participating: true, hint: null });
 });
 
-test('reader skips disabled hosts, isolates failures, and expires observations without preserving green', async () => {
+// ADR-0053 amendment (2026-09-26): "not routed by ak" is a management fact, not
+// a health verdict. A found host is checked like any other; its tool problems
+// are information and never raise Attention, and ak's own wiring check is FYI.
+test('a found, unmanaged host reports its tool checks without warning', () => {
+  const hint = 'ak host pick --host claude,codex';
+  const ok = summarizeHostReadiness({ host: 'codex', enabled: false, setup: { ...setup(), presence: 'found' }, hint });
+  assert.equal(ok.status, 'unmanaged');
+  assert.equal(ok.label, 'Found, not managed');
+  assert.deepEqual(ok.management, { state: 'found', label: 'Found, not managed' });
+  assert.equal(ok.localStatus, 'ok');
+  assert.deepEqual(Object.keys(ok.checks).sort(), ['authentication', 'configuration', 'installation', 'integration', 'model']);
+  assert.equal(ok.checks.integration.fyi, true, 'ak was never asked to wire this host');
+  assert.equal(ok.canCheckConnection, false, 'the paid connection check stays managed-only');
+  assert.deepEqual(ok.participation, { participating: false, hint });
+
+  const broken = summarizeHostReadiness({ host: 'codex', enabled: false, hint,
+    setup: { ...setup(), presence: 'found', authentication: { state: 'fail', reason: 'Signed out' } },
+    findings: [{ host: 'codex', code: 'retired-codex-mcp' }] });
+  assert.equal(broken.status, 'unmanaged', 'unmanaged-host problems are information, never Attention');
+  assert.equal(broken.localStatus, 'attention', 'the tool problem is still reported');
+  assert.equal(broken.checks.integration.state, 'fail');
+  const wiringOnly = summarizeHostReadiness({ host: 'codex', enabled: false, hint,
+    setup: { ...setup(), presence: 'found' }, findings: [{ host: 'codex', code: 'retired-codex-mcp' }] });
+  assert.equal(wiringOnly.localStatus, 'ok', 'an FYI wiring finding does not decide tool health');
+});
+
+test('an absent unmanaged host reads Not installed; unestablished presence claims neither', () => {
+  const absent = summarizeHostReadiness({ host: 'opencode', enabled: false,
+    setup: { installation: { state: 'fail', reason: 'The host executable is not available on PATH.' }, presence: 'absent' } });
+  assert.equal(absent.status, 'not-installed');
+  assert.equal(absent.label, 'Not installed');
+  assert.equal(absent.management.state, 'not-installed');
+  const unassessed = summarizeHostReadiness({ host: 'opencode', enabled: false, setup: {} });
+  assert.equal(unassessed.status, 'unmanaged');
+  assert.deepEqual(unassessed.management, { state: 'unassessed', label: 'Not managed' });
+});
+
+test('reader checks every host, managed or not, and isolates failures without preserving green', async () => {
   let now = 1000, calls = 0, failed = false;
   const read = createHostReadinessReader({ cwd: '/project', now: () => now, cacheMs: 100,
     loadConfig: () => ({ integrations: { hosts: { claude: true, codex: true, opencode: false } } }),
     inspectAlignment: () => ({ findings: [] }),
-    snapshot: () => ({ key: 'source', complete: true }), probe: async ({ host, cwd }) => { calls++; assert.equal(cwd, '/project'); if (failed && host === 'codex') throw Error('SECRET'); return setup(); },
+    snapshot: () => ({ key: 'source', complete: true }), probe: async ({ host, cwd }) => { calls++; assert.equal(cwd, '/project'); if (failed && host === 'codex') throw Error('SECRET'); return { ...setup(), presence: 'found' }; },
   });
   const [first, same] = await Promise.all([read(), read()]);
   assert.deepEqual(same, first);
-  assert.equal(calls, 2);
-  assert.equal(first.hosts.opencode.status, 'disabled');
+  assert.equal(calls, 3, 'found hosts are checked automatically, not only managed ones');
+  assert.equal(first.hosts.opencode.status, 'unmanaged');
+  assert.equal(first.hosts.opencode.localStatus, 'ok');
+  assert.equal(first.hosts.opencode.canCheckConnection, false);
+  assert.match(first.hosts.opencode.connectionUnavailable, /managed by ak/);
+  assert.equal(first.hosts.opencode.participation.hint, 'ak host pick --host claude,codex,opencode');
+  assert.equal(first.hosts.codex.participation.participating, true);
   now += 101; failed = true;
   const next = await read();
   assert.equal(next.hosts.codex.status, 'unknown');
@@ -50,15 +94,29 @@ test('reader skips disabled hosts, isolates failures, and expires observations w
   assert.ok(!JSON.stringify(next).includes('SECRET'));
 });
 
-test('configuration changes invalidate cache immediately', async () => {
+test('configuration changes invalidate cache immediately and move a host out of management', async () => {
   let enabled = true, calls = 0;
   const read = createHostReadinessReader({ cwd: '/project',
     loadConfig: () => ({ integrations: { hosts: { codex: enabled } } }),
-    inspectAlignment: () => ({ findings: [] }), snapshot: () => ({ key: 'source', complete: true }), probe: async () => { calls++; return setup(); },
+    inspectAlignment: () => ({ findings: [] }), snapshot: () => ({ key: 'source', complete: true }), probe: async () => { calls++; return { ...setup(), presence: 'found' }; },
   });
   await read(); enabled = false;
-  assert.equal((await read()).hosts.codex.status, 'disabled');
-  assert.equal(calls, 1);
+  const after = await read();
+  assert.equal(after.hosts.codex.status, 'unmanaged');
+  assert.equal(after.hosts.codex.participation.hint, 'ak host pick --host codex');
+  assert.equal(calls, 6, 'the changed configuration re-ran every host check instead of reusing the cache');
+});
+
+test('a connection check is refused for a host ak does not manage', async () => {
+  let calls = 0;
+  const read = createHostReadinessReader({ cwd: '/project',
+    loadConfig: () => ({ integrations: { hosts: { claude: true, codex: false } } }),
+    inspectAlignment: () => ({ findings: [] }), snapshot: () => ({ key: 'source', complete: true }),
+    probe: async () => ({ ...setup(), presence: 'found' }), connectionProbe: async () => { calls++; return { state: 'pass', reason: 'Provider responded' }; },
+  });
+  const initial = await read();
+  await assert.rejects(read.checkConnection({ host: 'codex', confirm: true, evidenceKey: initial.hosts.codex.evidenceKey }), /prerequisites/);
+  assert.equal(calls, 0);
 });
 
 test('connected checks require deliberate confirmation and the exact fresh local evidence', async () => {

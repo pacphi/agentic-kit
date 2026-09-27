@@ -3,7 +3,13 @@
 - **Status:** Implemented; handoff transport amended by
   [ADR-0034](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0034-schema-native-handoffs-and-hermetic-seats.md)
 - **Date:** 2026-08-25
-- **Updated:** 2026-09-23
+- **Updated:** 2026-09-26 — the missing concrete Agentic-QE registration check runs only when AQE is
+  managed (`aqe` is not `false` in kit.json); an opted-out machine gets no AQE row or advice (#237);
+  sync's convergence proof fails a planned repair that did not take (#237), and `--skip` leaves a
+  subsystem out of one run (decision 5); the live participant-transport test runs its seats in a
+  disposable Ruflo project; sync's exit code reflects only what sync can repair, so a manual row
+  never flips it and is listed under "needs your action" (decision 10).
+- **Earlier update:** 2026-09-23
 - **Update note:** Initial implementation retires only receipt-owned legacy MCP state,
   diagnoses effective Codex MCP topology, extends POSIX cleanup to process groups, and adds
   fail-closed QE-Court readiness plus a reciprocal live participant-transport regression.
@@ -29,6 +35,21 @@
   undone within hours and every sync repeated the repair (14 repairs observed
   2026-09-04 → 2026-09-23). The placeholder keeps the name taken and is never itself a
   repair target.
+  2026-09-26: a Brain refresh that the installer or the bundle's updater refused, or that
+  ran without changing the installed release, is held: the status row keeps its cause and
+  the user's options but carries no sync action until the installed or latest release
+  changes (#237). Existing installs now refresh through the bundle's own updater.
+  2026-09-26: the convergence proof also covers a step that succeeded while its postcondition
+  stayed unmet. A planned sync fix whose status row is still present after the apply phase, or a
+  planned subsystem that no sync step performs, is reported `unresolved:` and sync exits 1 (#237).
+  Manual fixes never enter the plan, so they never fail sync (the repair contract, ADR-0023 §11).
+  `ak sync --skip <subsystem>` leaves a subsystem out of one run, including the writes a shared
+  step would make for it; the proof reports it "skipped by request" and never counts it as a
+  failure (decision 5). `ak sync --json` emits the verdict as one JSON object on stdout
+  (decision 6).
+  2026-09-26: the live participant-transport test runs its seats in a disposable Ruflo
+  project and deletes it; run in the checkout, it had left 118 proof rows in the real MCP
+  store. A read-only tripwire fails if any proof row reaches the checkout's memory.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0001](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0001-one-routing-policy-many-projections.md),
   [ADR-0006](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0006-primary-host-and-ambidextrous-mirroring.md),
@@ -71,8 +92,8 @@ seats. A successful Claude/Codex transport check therefore cannot be called a co
    user-owned entries remain preserved.
 3. Codex keeps one independent, workspace-aware Ruflo MCP registration. Agentic-QE continues to
    own its Codex platform/MCP integration. Agentic-kit detects recursive Codex self-registration,
-   missing concrete Agentic-QE registration, and duplicate Ruflo transports without rewriting
-   unowned Codex TOML.
+   missing concrete Agentic-QE registration (only while AQE is managed), and duplicate Ruflo
+   transports without rewriting unowned Codex TOML.
 4. OpenAI's Claude Code plugin is optional and user-owned. Agentic-kit may document and detect it,
    but does not silently install, enable, update, or remove it. A future managed App Server/plugin
    adapter requires a separate lifecycle, ownership, cancellation, and teardown decision.
@@ -95,6 +116,30 @@ seats. A successful Claude/Codex transport check therefore cannot be called a co
    requires the installer's exact `ruvnet-brain.zip` asset before prescribing a KB refresh. A
    missing asset is reported as an upstream deferral with no automatic action; an installer that
    was already launched still fails closed and preserves its causal error in convergence output.
+   A refresh the installer or updater refused is then held, with no sync action, until the
+   installed or latest release changes.
+9. Sync's convergence proof holds each planned repair to its promise, not only to its exit
+   status. After the apply phase it re-collects status; a row whose sync fix (same subsystem, same
+   fix) was planned and is still present is `unresolved`, and so is any planned subsystem that no
+   `SYNC_STEPS` step (or the post-step host alignment) performs. Either one fails sync with exit 1
+   next to the existing fail-level rows and recorded apply failures. Only fixes a sync step performs
+   are planned (ADR-0023 §11), so manual fixes and fix-less advisories never become unresolved.
+   Sync's exit code reflects only what sync can repair (decision 10): a fail- or warn-level row
+   whose fix is manual never flips the exit code or the converged verdict, whether or not the plan
+   is empty, and each one is listed after the verdict under "needs your action"; `ak status`
+   remains the overall-health answer.
+   A subsystem named by `--skip` for one run is taken out of the plan together with the step it
+   owns (on every trigger, including ones another planned subsystem derives) and any fix only that
+   step performs, judged per fix. A step shared with other subsystems still runs for them but leaves
+   the skipped one untouched: `--skip codex-mcp` and `--skip routing` stop the providers step's
+   Codex MCP writes and route seeding, and `--skip statusline` stops Ruflo's helper refresh. Its rows
+   are reported "skipped by request" and are neither unresolved nor failing. A skipped subsystem's
+   row whose fix is manual is the one exception: sync never performed that fix regardless of
+   `--skip`, so it is listed under "needs your action" instead of "skipped by request".
+   `--skip` accepts only the subsystems sync knows and never changes kit.json ownership.
+   `ak sync --json` reports this verdict as one JSON object on stdout (`plan`, `steps`,
+   `unresolved` with a reason per item, `skipped`, `needsYourAction`, `converged`, `exitCode`) and
+   sends every human line to stderr, so a script never parses progress text.
 
 ## Consequences
 
@@ -109,6 +154,8 @@ seats. A successful Claude/Codex transport check therefore cannot be called a co
 - A malformed upstream Brain release no longer creates an endless `ak sync` retry loop or rewrites
   a usable local Brain; the update becomes actionable automatically after a later release check sees
   the required bundle asset.
+- `ak sync` no longer reports "converged" while a repair it planned is still pending. A status row
+  whose fix no step can perform must be marked manual, or every sync fails on it.
 - ADR-0001's MCP projection is historical. ADR-0006's leadership decision, ADR-0016's ownership
   boundary, ADR-0018's worker lifecycle, and ADR-0020's stable execution surface remain in force.
 
@@ -116,9 +163,20 @@ seats. A successful Claude/Codex transport check therefore cannot be called a co
 
 - Unit tests cover receipt-owned retirement, preservation of user-owned state, concrete Codex MCP
   topology, fail-closed court artifact readiness, POSIX descendant cleanup, and orphan reporting.
-- `pnpm test:qe-court-live` runs one Claude-led and one Codex-led participant-transport trial.
-  `AK_QE_COURT_TRIALS=5` raises this to a reciprocal soak test on POSIX shells.
+- `pnpm test:qe-court-live` runs one Claude-led and one Codex-led participant-transport trial in a
+  disposable Ruflo project. `AK_QE_COURT_TRIALS=5` raises this to a reciprocal soak test on POSIX
+  shells.
 - `ak status` fails recursive self-MCP and reports missing Agentic-QE or duplicate Ruflo MCP state.
+- `tests/kit/sync-command.test.mjs` proves that a planned fix still present after the apply phase,
+  or planned with no performing step, fails sync; that manual rows and advisories never do; and
+  that a real repair converges and leaves the next sync nothing to do. The same file proves that
+  `--skip` rejects unknown names, removes a subsystem's plan items and its step on derived triggers,
+  and never turns a skipped subsystem into a failure. Its `--json` cases spawn sync and parse stdout
+  as one JSON value while the human text arrives on stderr, including a rejected flag and an error.
+  `tests/kit/sync-needs-your-action.test.mjs` proves that a manual fail row leaves sync converged
+  with exit 0 both alone and next to a planned fix that converges, that a sync repair that did not
+  take still exits 1, that the "needs your action" heading prints once, and that `--json` carries
+  `needsYourAction` on every path.
 
 ## References
 

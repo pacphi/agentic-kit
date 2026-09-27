@@ -73,10 +73,17 @@ export function groupRows(rows) {
   return groups;
 }
 
-/** One status row as an <li>: level dot + message + optional →fix. */
+/** One status row as an <li>: level dot + message + optional fix. A fix `ak
+ *  sync` performs keeps the arrow; a manual one (repair 'manual') is tagged so
+ *  nobody expects sync to do it. */
 export function rowLine(r) {
   const lvl = r.level || 'info';
-  const fix = r.fix ? ('<span class="row-fix"><span class="arrow">&rarr;</span><code>' + esc(r.fix) + '</code></span>') : '';
+  const manual = r.repair === 'manual';
+  const fix = r.fix
+    ? ('<span class="row-fix" data-repair="' + (manual ? 'manual' : 'sync') + '">'
+      + (manual ? '<span class="repair-tag">manual</span>' : '<span class="arrow">&rarr;</span>')
+      + '<code>' + esc(r.fix) + '</code></span>')
+    : '';
   return '<li class="row" data-level="' + esc(lvl) + '">'
     + '<span class="row-dot"></span>'
     + '<span class="row-msg">' + esc(r.message) + fix + '</span>'

@@ -1,5 +1,30 @@
 import { createLiveEvent } from './event-schema.mjs';
 
+const present = (value) => typeof value === 'string' && value !== '';
+const sessionIdOf = (record, sessionId) => record.sessionId ?? record.session_id ?? sessionId;
+const actorIdOf = (record) => record.agentId ?? record.agent_id ?? record.workerId ?? record.worker_id;
+const actionOf = (record) => record.action ?? record.event ?? record.type;
+
+/**
+ * Why a structured record cannot become a live event, as a fixed code, or
+ * null when it can. The code names the missing field and never echoes record
+ * content, so it is safe to show in adapter health. adaptStructuredEvent uses
+ * the same rule, so the diagnostic and the adapter cannot drift apart.
+ * @param {unknown} record
+ * @param {{ surface?: string, sessionId?: string }} [options]
+ * @returns {null | 'unsupported-surface' | 'not-an-object' | 'missing-session-id'
+ *   | 'missing-actor-id' | 'missing-action'}
+ */
+export function structuredRecordRejection(record, { surface, sessionId } = {}) {
+  if (!['ruflo', 'aqe'].includes(surface)) return 'unsupported-surface';
+  if (!record || typeof record !== 'object' || Array.isArray(record)) return 'not-an-object';
+  const fields = /** @type {Record<string, any>} */ (record);
+  if (!present(sessionIdOf(fields, sessionId))) return 'missing-session-id';
+  if (!present(actorIdOf(fields))) return 'missing-actor-id';
+  if (!present(actionOf(fields))) return 'missing-action';
+  return null;
+}
+
 /** Conservative adapter for structured ruflo/AQE hook events. */
 /**
  * @param {Record<string, any>} record
@@ -11,14 +36,13 @@ import { createLiveEvent } from './event-schema.mjs';
 export function adaptStructuredEvent(record, {
   surface, adapter, sessionId, observedAt, artifact, project, projectKey,
 } = {}) {
-  if (!['ruflo', 'aqe'].includes(surface) || !record || typeof record !== 'object') return [];
-  const sid = record.sessionId ?? record.session_id ?? sessionId;
-  const actorId = record.agentId ?? record.agent_id ?? record.workerId ?? record.worker_id;
-  const action = record.action ?? record.event ?? record.type;
+  if (structuredRecordRejection(record, { surface, sessionId })) return [];
+  const sid = sessionIdOf(record, sessionId);
+  const actorId = actorIdOf(record);
+  const action = actionOf(record);
   const actorHost = record.actorHost ?? record.actor_host
     ?? record.executionHost ?? record.execution_host ?? record.host;
   const sessionHost = record.sessionHost ?? record.session_host ?? record.host;
-  if (![sid, actorId, action].every((value) => typeof value === 'string' && value)) return [];
   return [createLiveEvent({
     // createLiveEvent already resolves input.host through the same policy
     // (known host, safely-shaped novel id, or 'unknown-host'); passing the

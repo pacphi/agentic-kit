@@ -54,6 +54,14 @@ ruflo memory delete -k "outdated-key" -n patterns
 ruflo memory cleanup            # remove stale/expired
 ```
 
+**Two memory stores.** A project can hold two corpora: `.swarm/memory.db` (what
+`ruflo memory ...` reads) and `.swarm/agentdb-memory.db` (what the MCP `memory_*`
+tools read and write when Ruflo's native bridge is active). A read through one does
+not cover the other, and a bare count from `memory list` describes one file. If a CLI
+search or retrieve finds nothing, or names an unread sibling store, repeat it with
+`--path <project>/.swarm/agentdb-memory.db` or use MCP `memory_search`. Never delete
+or merge either file. `ak x verify memory` shows the routing on this machine.
+
 **Use `--smart`** for query expansion + RRF + MMR + recency boosting.
 **Use `--build-hnsw`** the first time you search a populated namespace (one-time
 indexing; measure any speedup on your own corpus).
@@ -67,13 +75,17 @@ Node 22"). Don't store anything derivable from `git log` or current code.
 The configured `.swarm/memory.db` pin and Ruflo's native
 `.swarm/agentdb-memory.db` sibling have different roles. Do not infer lost writes
 from an empty table in only one file. First run `ak status` and
-`ak x verify memory`; the latter uses a disposable store/retrieve/delete probe to
-identify the active writer and verify persistence. Preserve existing databases.
+`ak x verify memory`; the latter runs a disposable store/retrieve/purge proof in a
+throwaway project and reports whether CLI and MCP see each other's writes there. It
+says nothing about an existing corpus. Preserve existing databases.
 
 Ruflo subprocesses must use the intended project directory. Agentic-kit writes
 an absolute `CLAUDE_FLOW_DB_PATH` for Claude and derives the same project pin in
 its Codex/OpenCode bridges. A literal `${CLAUDE_PROJECT_DIR}` in a settings value
-is not a substitute for the resolved path.
+is not a substitute for the resolved path. Codex sessions started outside a usable
+folder (the filesystem root, the home folder, a temporary root, or a tool's own
+folder such as `~/.codex`) share the user-level store `~/.claude-flow/memory`;
+`ak status` names the store that applies.
 
 Historical sql.js/WAL and native better-sqlite3 mismatches could produce stale or
 non-durable reads. A WAL file's size is not enough to diagnose the cause. Use
@@ -366,6 +378,11 @@ machine-wide budget above (defaults: 1 concurrent, 2/hour, 12/day; override with
 `RUFLO_AI_MAX_CONCURRENT` / `RUFLO_AI_MAX_PER_HOUR` / `RUFLO_AI_MAX_PER_DAY`).
 The daemon self-terminates after `RUFLO_DAEMON_TTL_SECS` (default 12h); the kit's
 `ak x daemon-gc` and shell auto-reaper remain as an independent backstop.
+Its workers also take Ruflo's memory backup (`.swarm/memory.db` only, at most daily)
+and distillation (every 30 min). Ruflo's start-on-use is off in a project where
+`.claude/settings.json` has `claudeFlow.daemon.autoStart: false` (`ruflo init` writes
+it, `ak setup` keeps it), so run `ruflo daemon start` to resume them; `ak status`
+shows when each last ran.
 
 ### Cleanup
 
@@ -394,8 +411,8 @@ For uninstalling ruflo from a project.
 
 | Var | Purpose |
 |---|---|
-| `CLAUDE_FLOW_DB_PATH` | Override memory DB path |
-| `CLAUDE_FLOW_MEMORY_PATH` | Memory dir (default `cwd/.swarm/`) |
+| `CLAUDE_FLOW_DB_PATH` | Override the DB file for `ruflo memory ...` (the MCP `memory_*` tools do not read it) |
+| `CLAUDE_FLOW_MEMORY_PATH` | Memory dir for both the CLI and MCP tools (default `cwd/.swarm/`) |
 | `CLAUDE_FLOW_MODE` | `v3` enables hierarchical-mesh |
 | `CLAUDE_FLOW_HOOKS_ENABLED` | Toggle hooks subsystem |
 | `CLAUDE_FLOW_ENCRYPT_AT_REST` | Enable session/memory encryption |
@@ -406,7 +423,7 @@ For uninstalling ruflo from a project.
 
 ```text
 Need to ... ?
-├─ Search past work / decisions      → ruflo memory search -q "..." --smart
+├─ Search past work / decisions      → ruflo memory search -q "..." --smart (empty? also --path .swarm/agentdb-memory.db)
 ├─ Store a decision/pattern          → ruflo memory store -k K --value V -n patterns
 ├─ Pick the right agent for a task   → ruflo route "task description"
 ├─ Run a security audit              → ruflo security scan && ruflo hooks worker dispatch -t audit

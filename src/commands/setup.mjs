@@ -10,12 +10,12 @@ import readline from 'node:readline/promises';
 import { run as runCmd, have } from '../lib/exec.mjs';
 import * as heal from '../lib/heal.mjs';
 import { manageCodexContext } from '../lib/codex-context.mjs';
-import { fixStatusline } from '../lib/statusline.mjs';
+import { fixStatusline, bakedVersionManualFix } from '../lib/statusline.mjs';
 import { reconcileGuidance } from '../lib/blocks.mjs';
 import { captureProjectGuidance, reconcileProjectGuidance } from '../lib/project-guidance.mjs';
 import {
   register as mcpRegister, applyExclusions, registrationStatus, agentBrowserMcpConfigured,
-  codexMcpTopology, codexMcpRepairPlan, repairCodexMcpTopology,
+  codexMcpTopology, codexMcpRepairPlan, repairCodexMcpTopology, legacyRufloRemovalCommands,
 } from '../lib/mcp.mjs';
 import { reconcileCodexMcp } from '../lib/codex-mcp-reconcile.mjs';
 import { alignHosts } from './x/host-align.mjs';
@@ -35,11 +35,9 @@ import { embeddingIntentFromFlags, embeddingSetupDisclosure } from '../lib/aqe-e
 import { prepareAqeEmbedding } from '../lib/aqe-embedding-lifecycle.mjs';
 import { reconcileAqeEmbeddingProjections } from '../lib/aqe-embedding-projection.mjs';
 import * as rb from '../lib/ruvnet-brain.mjs';
-import * as adb from '../lib/agentdb.mjs';
 import { ensureAgentBrowser } from '../lib/agent-browser.mjs';
 import { readJson, writeJsonWithBackup } from '../lib/settings.mjs';
-import { withDb } from '../lib/sqlite.mjs';
-import { findMemoryEntry } from '../lib/project-memory.mjs';
+import { findMemoryEntry, removeMemoryProbe } from '../lib/project-memory.mjs';
 import { projectMemoryEnv } from '../lib/ruflo-memory.mjs';
 import { reconcileMemoryPin } from '../lib/claude-env-projection.mjs';
 import { reconcileRufloComponents } from '../lib/ruflo-components/apply.mjs';
@@ -48,6 +46,7 @@ import {
   setupTrustManifest, trustManifestLines,
 } from '../lib/trust-manifest.mjs';
 import * as paths from '../lib/paths.mjs';
+import { setupSelectsProject, projectSetupHint } from '../lib/setup-scope.mjs';
 import { ok, warn, fail, info, heading, bold, dim, reportOutcome } from '../lib/output.mjs';
 
 const DEJA_VU = managedCompanionFor('deja-vu');
@@ -311,7 +310,7 @@ export function removeUndisclosedPermissions(file, before, authorized) {
   return unexpected;
 }
 
-/** Step 1: global packages (ruflo/agentic-qe/agentdb/ruvnet-brain). Returns
+/** Step 1: global packages (ruflo/agentic-qe/ruvnet-brain). Returns
  *  false only when the mandatory ruflo install itself fails. */
 async function installMachinePackages(cfg, flags) {
   // Ruflo's published browser package tries to install agent-browser itself
@@ -338,22 +337,11 @@ async function installMachinePackages(cfg, flags) {
       (r.ok ? ok : warn)(`agentic-qe: ${r.detail}`);
     } else ok(`agentic-qe ${installedVersion('agentic-qe')} present`);
   }
-  if (cfg.agentdb) {
-    const c = adb.coherence();
-    if (!c.present) {
-      info("installing agentdb globally (harvest write path; pinned to ruflo's bundled version)…");
-      const r = await heal.healAgentdb();
-      (r.ok ? ok : warn)(`agentdb: ${r.detail}`);
-    } else if (c.skew === 'core') {
-      const r = await heal.healAgentdb();
-      (r.ok ? ok : warn)(`agentdb: ${r.detail}`);
-    } else ok(`agentdb ${c.global} present (coherent with ruflo)`);
-  }
   if (cfg.ruvnetBrain) {
     if (!rb.present()) {
       if (await ask('Install the RuvNet Brain (~2 GB offline KB, powers the search_ruvnet MCP)?', true, flags.yes)) {
         info('installing ruvnet-brain via npx (downloads the KB — may take a while)…');
-        const r = await heal.installRuvnetBrain();
+        const r = await heal.installRuvnetBrain({ cfg });
         reportOutcome('ruvnet-brain', r);
       } else warn('ruvnet-brain skipped — install later with `ak sync` (or `ak setup --no-ruvnet-brain` to stop asking)');
     } else ok('ruvnet-brain present (refresh to the latest release with `ak sync`)');
@@ -586,25 +574,24 @@ async function startProjectDaemon(root) {
 }
 
 /** Step 7: write-verification (store → actual on-disk row, then clean up).
- *  Native memory integrations may select agentdb-memory.db beside the pinned
- *  compatibility DB. */
-async function verifyProjectMemoryWrite(root, env) {
+ *  The CLI mirrors the write into agentdb-memory.db under the memory root
+ *  (CLAUDE_FLOW_MEMORY_PATH, else a config persistPath, else <cwd>/.swarm).
+ *  The probe pins that root beside the pinned memory.db, so both copies land
+ *  in the stores cleanup checks even when the project's root is redirected;
+ *  this is the user's real corpus, so nothing of the probe may be left behind. */
+export async function verifyProjectMemoryWrite(root, env, { runner = runCmd } = {}) {
   const probeKey = `_setup/verify-${process.pid}-${Date.now()}`;
-  const stored = (await runCmd('ruflo', ['memory', 'store', '-k', probeKey, '--value', 'setup-verify', '-n', '_setup'], { cwd: root, env })).code === 0;
+  const probeEnv = { ...env, CLAUDE_FLOW_MEMORY_PATH: path.dirname(env?.CLAUDE_FLOW_DB_PATH ?? paths.projectMemoryDb(root)) };
+  const stored = (await runner('ruflo', ['memory', 'store', '-k', probeKey, '--value', 'setup-verify', '-n', '_setup'], { cwd: root, env: probeEnv })).code === 0;
   const landed = stored ? findMemoryEntry(root, '_setup', probeKey) : null;
-  if (landed) {
-    // Bound parameters, not interpolation. Delete only this disposable probe
-    // from the store that actually received it.
-    const cleanup = withDb(landed.file, (db) => {
-      db.prepare('DELETE FROM memory_entries WHERE namespace = ? AND key = ?').run('_setup', probeKey);
-      db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
-      return true;
-    }, { readonly: false });
-    if (cleanup.ok) ok(`memory write VERIFIED (store → ${path.basename(landed.file)} row confirmed)`);
-    else warn(`memory write verified, but probe cleanup ${cleanup.error.kind} — remove ${probeKey} from _setup manually`);
-  } else {
+  if (!landed) {
     fail('memory write verification FAILED — run: ak status / ruflo doctor -c memory');
+    return;
   }
+  const cleanup = removeMemoryProbe(root, '_setup', probeKey);
+  if (cleanup.failed.length) {
+    warn(`memory write verified, but probe cleanup failed in ${cleanup.failed.map((f) => `${path.basename(f.file)} (${f.kind})`).join(', ')} — remove ${probeKey} from _setup manually`);
+  } else ok(`memory write VERIFIED (store → ${path.basename(landed.file)} row confirmed)`);
 }
 
 function reportProjectGuidance(result) {
@@ -711,9 +698,12 @@ async function applyProjectProviderStack(cfg, root, migrateRoutes) {
  *  AQE/SONA segments won't render and `ak sync` is needed to heal it. */
 function healProjectStatusline(root) {
   const sl = fixStatusline(root);
-  if (sl.applied) ok(`statusline: footer injected (v${sl.version})`);
+  if (sl.applied) ok('statusline: footer injected');
   else if (sl.reason) warn(`statusline: ${sl.reason} — run \`ak sync\` to re-inject`);
   else ok('statusline: footer in sync');
+  if (sl.versionRepair === 'failed') {
+    warn(`statusline: shows Ruflo v${sl.versionAhead.baked}, installed v${sl.versionAhead.installed} — ${bakedVersionManualFix(sl.versionAhead.installed)}`);
+  }
 }
 
 export async function run_project({
@@ -835,10 +825,14 @@ async function finalizeSetupGuidanceAndMcp(cfg, pkgRoot, flags) {
     || !agentBrowserMcpConfigured(existingMcp.effective.claudeFlow, cfg.agentBrowser !== false)
   );
   if (wantMcp && await ask('Register the ruflo MCP server at user scope (schemas load on demand)?', true, flags.yes)) {
-    if (await mcpRegister(cfg)) {
+    const reg = await mcpRegister(cfg);
+    if (reg.ok) {
       const { denied } = applyExclusions(cfg.mcp.excludeFamilies ?? []);
       ok(`MCP registered${denied ? ` (${denied} tool(s) denied per kit.json)` : ''} — exclude families anytime: ak x mcp pick`);
     } else warn('claude mcp add failed — run: ak x mcp pick');
+    for (const entry of reg.preserved) {
+      warn(`custom 'ruflo' MCP registration preserved (${entry.scope} scope) — not agentic-kit's registration; if unwanted, remove it: ${legacyRufloRemovalCommands([entry.scope])}`);
+    }
   }
 }
 
@@ -890,8 +884,7 @@ export async function run({
     info(embeddingSetupDisclosure(cfg.aqeEmbedding));
   }
 
-  const inProject = flags.project
-    || (fs.existsSync(path.join(process.cwd(), '.git')) && process.cwd() !== paths.home);
+  const inProject = flags.project || setupSelectsProject(process.cwd());
   const willConfigureProject = inProject && !flags.minimal;
 
   // Apply host flags to the in-memory config before preflight so the manifest
@@ -941,7 +934,7 @@ export async function run({
   if (inProject && !flags.minimal) {
     if (!(await runtime.projectSetup({ flags, cfg, trustDisclosed: true }))) return 1;
   } else if (!flags.minimal) {
-    info('not inside a project (no .git here) — run `ak setup` from a repo to set one up');
+    info(`not inside a project (no .git here) — ${projectSetupHint(process.cwd(), 'set up')}`);
   }
   if (!flags['dry-run']) await runtime.finalizeSetup(cfg, pkgRoot, flags);
   if (!flags['dry-run'] && willConfigureProject && cfg.aqe !== false) {

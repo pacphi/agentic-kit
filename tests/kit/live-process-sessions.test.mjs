@@ -81,6 +81,107 @@ test('runtime survey classifies host services and desktop apps without retaining
     'classification emits an enum, never the potentially sensitive argv');
 });
 
+// macOS `ps -o comm=` prints the executable's full path, and many real paths
+// contain spaces (`Application Support`, `Visual Studio Code.app`). The Claude
+// desktop app hosts its own Claude Code CLI under such a path (#238 item 3).
+const DESKTOP_APP = '/Applications/Claude.app/Contents/MacOS/Claude';
+const DESKTOP_CLI = '/Users/me/Library/Application Support/Claude/claude-code/2.1.281/claude.app/Contents/MacOS/claude';
+
+test('the header survey keeps comm paths that contain spaces', () => {
+  const startedAt = 'Mon Aug  3 12:00:00 2026';
+  const rows = parseProcessHeaders([
+    `  100     1 ${startedAt}     /usr/local/bin/claude`,
+    `  200   300 ${startedAt}     ${DESKTOP_CLI}`,
+    `  300     1 ${startedAt}     ${DESKTOP_APP}`,
+    `  400     1 ${startedAt}     /Applications/Visual Studio Code.app/Contents/MacOS/Electron`,
+  ].join('\n'));
+  assert.deepEqual(rows.map((row) => row.pid), [100, 200, 300, 400]);
+  assert.equal(rows[1].executable, DESKTOP_CLI);
+  assert.equal(rows[3].executable, '/Applications/Visual Studio Code.app/Contents/MacOS/Electron');
+  assert.ok(rows.every((row) => row.command === ''), 'the header pass still retains no argv');
+});
+
+test('a Claude Code CLI hosted by the Claude desktop app is its own project session', async () => {
+  const startedAt = 'Mon Aug  3 12:00:00 2026';
+  const processRows = [
+    { pid: 300, ppid: 1, startedAt, executable: DESKTOP_APP, command: DESKTOP_APP },
+    { pid: 200, ppid: 300, startedAt, executable: DESKTOP_CLI, command: `${DESKTOP_CLI} --output-format stream-json` },
+    // The desktop app's own bundled service stays part of the app.
+    { pid: 310, ppid: 300, startedAt, executable: '/Applications/Claude.app/Contents/Resources/claude',
+      command: '/Applications/Claude.app/Contents/Resources/claude app-server' },
+  ];
+  const cwdByPid = new Map([[300, '/'], [200, '/repos/keel'], [310, '/']]);
+  const survey = await surveyHostProcesses({
+    platform: 'darwin', processRows, cwdByPid, metricsByPid: new Map(),
+    now: Date.parse(startedAt) + 60_000,
+  });
+  assert.deepEqual(survey.processes.map((entry) => ({ pid: entry.pid, kind: entry.controllerKind })), [
+    { pid: 200, kind: 'project-session' },
+    { pid: 300, kind: 'desktop-app' },
+  ], 'the desktop-hosted CLI is a root session; the app-service child still folds into the app');
+
+  const sessions = await listActiveHostSessions({
+    platform: 'darwin', processRows, cwdByPid, inspectWorkspace: async () => null,
+  });
+  assert.deepEqual(sessions.filter((session) => session.cwd === '/repos/keel')
+    .map((session) => ({ pid: session.pid, host: session.host })), [{ pid: 200, host: 'claude' }]);
+});
+
+test('a host CLI nested under an ordinary controller still folds into it', async () => {
+  const startedAt = 'Mon Aug  3 12:00:00 2026';
+  const processRows = [
+    { pid: 100, ppid: 1, startedAt, executable: '/usr/local/bin/claude', command: 'claude' },
+    { pid: 110, ppid: 100, startedAt, executable: DESKTOP_CLI, command: DESKTOP_CLI },
+  ];
+  const sessions = await listActiveHostSessions({
+    platform: 'darwin', processRows, inspectWorkspace: async () => null,
+    cwdByPid: new Map([[100, '/repos/keel'], [110, '/repos/keel']]),
+  });
+  assert.deepEqual(sessions.map((session) => session.pid), [100]);
+});
+
+test('a spaced executable path is argv[0], so helper arguments are read from the right slot', () => {
+  const spaced = '/Users/me/Library/Application Support/tools/codex';
+  assert.equal(hostFromCommand(`${spaced} mcp-server`, spaced), null,
+    'a Codex MCP server under a spaced path must not become a controller');
+  assert.equal(hostFromCommand(`${spaced} exec review`, spaced), 'codex');
+  const node = '/Users/me/Library/Application Support/runtime/bin/node';
+  assert.equal(hostFromCommand(`${node} /opt/bin/codex`, node), 'codex',
+    'a Node launcher under a spaced path still names its host script');
+  assert.equal(hostFromCommand(`${node} /opt/bin/codex mcp-server`, node), null);
+  assert.equal(hostFromCommand(`${spaced}-helper mcp-server`, spaced), 'codex',
+    'the argv[0] prefix must end at a word boundary, never mid-token');
+});
+
+test('the POSIX survey finds a desktop-hosted CLI end to end through ps output with spaces', async () => {
+  const startedAt = 'Mon Aug  3 12:00:00 2026';
+  const calls = [];
+  const execFileImpl = async (command, args) => {
+    calls.push({ command, args });
+    if (args.includes('pid=,ppid=,lstart=,comm=')) {
+      return { stdout: [
+        `  300     1 ${startedAt}     ${DESKTOP_APP}`,
+        `  200   300 ${startedAt}     ${DESKTOP_CLI}`,
+        `  400     1 ${startedAt}     /Applications/Visual Studio Code.app/Contents/MacOS/Electron`,
+      ].join('\n') };
+    }
+    if (args.includes('pid=,args=')) {
+      return { stdout: `  300 ${DESKTOP_APP}\n  200 ${DESKTOP_CLI} --output-format stream-json\n` };
+    }
+    throw new Error(`unexpected command: ${command} ${args.join(' ')}`);
+  };
+  const sessions = await listActiveHostSessions({
+    platform: 'darwin', uid: 501, execFileImpl,
+    cwdByPid: new Map([[300, '/'], [200, '/repos/keel']]),
+    inspectWorkspace: async () => null,
+  });
+  assert.deepEqual(sessions.map((session) => ({ pid: session.pid, host: session.host })), [
+    { pid: 200, host: 'claude' },
+    { pid: 300, host: 'claude' },
+  ]);
+  assert.equal(calls[1].args[1], '300,200', 'argv is still fetched only for host candidates');
+});
+
 test('workspace inspection is shared consistently across Claude, Codex, and OpenCode', async () => {
   const startedAt = 'Mon Aug  3 12:00:00 2026';
   const processRows = parseProcessList([

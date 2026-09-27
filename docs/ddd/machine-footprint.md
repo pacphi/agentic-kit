@@ -194,6 +194,7 @@ FootprintSnapshot  { asOf, completeness, install, runtime, storage, catalog, pro
 Delivery
   GET /api/system            → cheap tier + persisted snapshot (token auth, loopback, no egress)
   GET /api/system?refresh=deep → start-or-attach the single-flight deep scan
+  GET /api/system/summary    → the same read, catalog projected to what the System page draws
   ak system [--deep] [--json]  → the same collector, CLI-rendered
         |
         v
@@ -317,7 +318,10 @@ when a Git boundary is proven; otherwise it classifies host app services and des
 non-sensitive enum derived during the already-bounded argv probe, then distinguishes known host
 state, user home, filesystem root, and ordinary folders. Raw argv is discarded before the survey
 returns. This is why a Codex plugin service no longer appears as a fictitious `.codex` project and
-a desktop host at `/` no longer appears as `unknown`.
+a desktop host at `/` no longer appears as `unknown`. A Claude Code CLI that the Claude desktop app
+runs from its versioned `claude-code/<version>/claude.app` bundle is a project session, not the
+desktop app, and it is surveyed as its own controller instead of being folded into the app. The
+POSIX survey reads executable paths that contain spaces, such as `Application Support`.
 
 One field is honestly absent everywhere: the daemon **budget** state. `ruflo daemon budget` is a
 CLI with no local file this collector can read, so budget reports `unknown` with that reason
@@ -640,6 +644,12 @@ declarations and unclassified sightings. `countBasis` distinguishes transcript f
 sessions, recovered-project sightings and mixed observations; a recovered directory is not one
 verified session.
 
+**Proposed change ([ADR-0060](../adr/0060-session-surface-initiator-and-product-names.md)).**
+`sessionOrigins` is to be replaced by session surface and initiator, derived from the same declared
+fields but keeping every raw value. Imported session copies (Codex rollouts stamped
+`external-import-turn-*`) are to contribute no project sighting: on 2026-09-26 they gave 23 project
+folders a Desktop origin they never had.
+
 `project-identity.mjs` relates directories through canonical Git metadata and, for linked worktrees,
 a verified common directory plus backlink. It preserves unknown association when evidence is
 missing or unreadable; names and remote equality never associate independent clones. Discovery
@@ -700,7 +710,17 @@ functions. This containment is not evidence that total scan duration decreased.
 The System measurement routes stay GET-only: a Full scan re-measures local state and writes only this domain's own
 snapshot file — it mutates no user data.
 
-**A deep scan never runs on its own.** Opening the System area issues a plain `GET /api/system`;
+`GET /api/system` is the complete read model, the same shape as `ak system --json`.
+`GET /api/system/summary` is the page's read: the same payload (and the same `?refresh=deep` and
+`&trees=` parameters) with the catalog projected by `dashboard/system-summary.mjs` to an
+allow-list of catalog keys, and each item cut to its key, kind, name, hosts, source scopes, digest
+coverage, and distinct plugin providers (`presence[].provider` with `ref` and `version`). The
+catalog's repeated presence copies (`item.presence` details, `consumerBindings`, `artifacts`) grow
+with items × projects × hosts and are not drawn, so the page and its 30-second Runtime poll never
+download them. The projection is a Dashboard-delivery view; this domain's collector output is
+unchanged.
+
+**A deep scan never runs on its own.** Opening the System area issues a plain `GET /api/system/summary`;
 only **Full scan** adds `?refresh=deep`. A deep scan can cost minutes of I/O on a large corpus, and
 making the act of *looking* cost that is a worse trade than a stale figure that states
 how stale it is. Staleness is therefore surfaced rather than pre-empted: every deep-tier figure

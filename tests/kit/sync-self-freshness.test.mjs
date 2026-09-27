@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { sandboxHome, assertSandboxed, writeKitConfig, offlineKitConfig, captureLog } from './helpers/home-sandbox.mjs';
+import { isolateProject } from './helpers/project-isolation.mjs';
 
 const home = sandboxHome('ak-sync-self');
 const paths = await import('../../src/lib/paths.mjs');
@@ -13,6 +14,7 @@ const sync = await import('../../src/commands/sync.mjs');
 const selfSection = (await import('../../src/commands/status/sections/self.mjs')).default;
 const { selfDrift, KIT_PKG } = await import('../../src/lib/versions.mjs');
 assertSandboxed(paths, home);
+isolateProject('ak-sync-self-freshness');
 const pkgRoot = path.join(home, 'installed-kit');
 const project = path.join(home, 'project');
 fs.mkdirSync(pkgRoot, { recursive: true });

@@ -55,7 +55,7 @@ src/
     providers.mjs        # frontier-host + LLM-provider detect/wire (hosts, auth, MCP bridges, aqe router)
     routing.mjs          # pure dual-host routing policy: defaults, projections, primary-host swap
     qeCourt.mjs          # qe-court vendor-diversity panel helpers
-    agentdb.mjs          # agentdb CLI coherence (harvest write path)
+    agentdb.mjs          # Ruflo's bundled agentdb version (read-only; ak installs no copy)
     health-history.mjs   # regression ring appended by sync, read by status
     dashboard-server.mjs # loopback dashboard: observations plus guarded Maintenance actions
     admin-server.mjs     # maintainer admin: loopback server, per-session token auth, page assembly (ADR-0007)
@@ -107,7 +107,8 @@ docs/
 `docs/adr/0051-supported-peer-delegation-and-host-realignment.md`,
 `docs/adr/0054-fleet-evidence-export.md`, `docs/adr/0055-aqe-embedding-lifecycle.md`,
 `tests/live/aqe-external-provider-transport.test.mjs`,
-`tests/live/qe-court-participant-transport.test.mjs`,
+`tests/live/qe-court-participant-transport.test.mjs` (with its helper
+`tests/live/disposable-memory-project.mjs`),
 `tests/live/codex-context-contract.test.mjs`, and
 `docs/ddd/maintenance.md`, `docs/ddd/model-lifecycle-intelligence.md`. Generated workspace state under
 the shipped source trees is explicitly excluded. Nothing else ships — verify with
@@ -147,9 +148,14 @@ installer; never `github:`, which runs the unreleased default-branch HEAD) insta
 user-scope Claude Code plugin (the `search_ruvnet` MCP + hooks + a skill). So it gets a
 *parallel* lifecycle in `src/lib/ruvnet-brain.mjs`: `present()` probes disk,
 `latestVersion()`/`drift()` hit the GitHub releases API (TTL-cached in kit.json like
-`selfDrift`). setup/sync install via `heal.installRuvnetBrain()`, which resolves the
-latest release tag FIRST and pins the installer to it (`--version v<tag>`), so the
-bundle on disk is exactly the release ak stamps — no install-then-stamp race.
+`selfDrift`). setup/sync go through `heal.installRuvnetBrain()`, which chooses the path
+from disk: when the KB ships its own updater (`kb/forge-update.mjs`) it runs
+`--update --no-nightly-prompt --no-telemetry` with `RUVNET_BRAIN_NO_UPDATE_FALLBACK=1`
+(the installer's fallback is a fresh `--force` install without ak's opt-out flags); a
+present bundle without the updater gets a `--version v<tag>`-pinned `--force` reinstall;
+nothing installed gets a pinned fresh install. `--update` ignores `--version`, so every
+path stamps only the release it then observes on disk (`SOURCE.json` → `releaseTag`); an
+update that exits 0 with the release unchanged is `degraded` and stamps nothing.
 Toggle with the `ruvnetBrain` kit.json flag / `--no-ruvnet-brain`.
 
 > **Installer flag gotcha — `--yes` accepts *every* optional offer.** Audited live on the
@@ -191,7 +197,8 @@ Toggle with the `ruvnetBrain` kit.json flag / `--no-ruvnet-brain`.
 Running `ruflo init` / `aqe init` against *this* repo writes `.agentic-qe/`,
 `.claude/`, `.claude-flow/`, `.swarm/`, `.mcp.json`, `*.db`, `*.rvf`, `ruvector.db`.
 All are `.gitignore`d. **Never commit them.** If you see them staged, something
-generated them in-tree.
+generated them in-tree. The one authored exception is the `upstream-status` maintainer
+skill, tracked at `.claude/skills/upstream-status/` and `.agents/skills/upstream-status/`.
 
 ---
 
@@ -230,12 +237,23 @@ pnpm run lint:links:internal # requires lychee
 
 - `tests/kit/*.test.mjs` — the broad `node:test` suite, run with 70% line, branch, and
   function coverage floors.
-- Eight `.cjs` suites exercise statusline rendering, Brain display, AgentDB,
-  health history, harvest, dashboard, and admin behavior.
+- Seven `.cjs` suites exercise statusline rendering, Brain display, health history,
+  dashboard, and admin behavior.
 - `pnpm run build` validates the CLI load and dry-run package manifest, including
   forbidden generated/private paths.
 
 Run one suite while iterating: `node --test tests/kit/versions.test.mjs`.
+
+Test isolation has two halves. `sandboxHome()` (`tests/kit/helpers/home-sandbox.mjs`)
+redirects every home-relative path. Commands also write relative to the current
+directory, so any test file that calls `sync.run`, `setup.run*` or `uninstall.run` must
+call `isolateProject()` (`tests/kit/helpers/project-isolation.mjs`) once at module scope.
+It moves the file into a throwaway project and fails the file if the real repository's
+`.claude/settings.local.json`, `.claude/helpers/statusline.cjs`, `CLAUDE.md`, `AGENTS.md`
+(and a few other project files, or their `.ak-*`/`.agentic-kit-*` siblings) change.
+`tests/kit/project-isolation.test.mjs` fails when a new test file skips it. A live Claude
+Code or Ruflo session that edits those files in the same checkout during `pnpm test`
+also trips the guard; rerun with the session idle.
 
 CI additionally runs a **CLI smoke** against a sandboxed `HOME` (see `ci.yml`):
 `--version`, `--help --all`, `status --json` (asserts valid JSON + `overall`),
@@ -419,6 +437,16 @@ gh run rerun <run-id> --failed                        # re-run only failed jobs
 gh workflow run nightly.yml                           # force a live-drift check now
 gh run list --workflow=nightly.yml --limit 3
 ```
+
+### Upstream watch
+
+```bash
+node scripts/upstream-watch.mjs report                # counts, then action items with links
+node scripts/upstream-watch.mjs check --since 2026-09-26 --ledger ledger.md   # new ledger lines only
+```
+
+Read-only against GitHub and npm. The registry, lifecycle, ledger and daily routine are in
+[UPSTREAM-WATCH.md](docs/UPSTREAM-WATCH.md).
 
 ### Pull requests
 

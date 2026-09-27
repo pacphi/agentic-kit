@@ -6,6 +6,26 @@ import { row } from '../row.mjs';
 import { aqeEmbeddingConfiguration } from '../../../lib/aqe-readiness.mjs';
 import { resolveAqeEmbedding } from '../../../lib/aqe-embedding-config.mjs';
 import { inspectAqeEmbeddingProjections } from '../../../lib/aqe-embedding-projection.mjs';
+import {
+  readLiveCheck, liveCheckInputsKey, describeLiveCheck, liveCheckLevel,
+} from '../../../lib/live-check-evidence.mjs';
+
+/** The embedding row: configuration from disk, plus the last LIVE result that
+ *  `ak sync` or `ak x verify aqe` remembered (status itself never probes). */
+function embeddingRow(cfg, cwd, resolved, backend, projection) {
+  const fix = projection.changed || !projection.ok ? 'reconcile owned AQE embedding projections' : null;
+  const projectionNote = projection.ok ? '' : '; ' + projection.detail;
+  const evidence = readLiveCheck('aqe-embedding', { inputsKey: liveCheckInputsKey('aqe-embedding', { cfg, cwd }) });
+  if (!evidence) {
+    return row('aqe-embedding', projection.ok ? 'info' : 'warn',
+      `${resolved.mode}; backend ${backend.status}; live model and corpus compatibility unverified${projectionNote}`, fix);
+  }
+  const evidenceLevel = liveCheckLevel(evidence);
+  const level = !projection.ok ? 'warn' : evidenceLevel === 'ok' && fix ? 'info' : evidenceLevel;
+  return row('aqe-embedding', level,
+    `${resolved.mode}; backend ${backend.status}; ${describeLiveCheck(evidence, { recheck: 'ak x verify aqe' })}; corpus compatibility unverified${projectionNote}`,
+    fix);
+}
 
 export default {
   id: 'aqe',
@@ -15,11 +35,10 @@ export default {
       const resolved = resolveAqeEmbedding(cfg);
       const backend = aqeEmbeddingConfiguration({ env: resolved.env });
       const projection = inspectAqeEmbeddingProjections(cfg, cwd);
-      rows.push(row('aqe-embedding', projection.ok ? 'info' : 'warn',
-        `${resolved.mode}; backend ${backend.status}; live model and corpus compatibility unverified${projection.ok ? '' : '; ' + projection.detail}`,
-        projection.changed || !projection.ok ? 'reconcile owned AQE embedding projections' : null));
+      rows.push(embeddingRow(cfg, cwd, resolved, backend, projection));
       if (resolved.mode === 'unmanaged' && backend.status === 'missing-backend') {
-        rows.push(row('aqe-embedding', 'warn', 'semantic backend missing; choose one with ak x aqe-embedding configure'));
+        rows.push(row('aqe-embedding', 'warn', 'semantic backend missing',
+          'ak x aqe-embedding configure (choose a backend)', { repair: 'manual' }));
       }
     }
     const aqeDir = paths.projectAqeDir(cwd);
@@ -35,7 +54,8 @@ export default {
         `${findings.length} oversized RVF store(s) (runaway append) — quarantine before they eat the disk`,
         'sync quarantines them (aqe rebuilds the store)')];
     }
+    // A verification the user runs — sync has no step that performs it.
     return [...rows, row('aqe', 'info', 'agentic-qe initialized; no oversized RVF stores detected; runtime readiness unverified',
-      'run: ak x verify aqe')];
+      'run: ak x verify aqe', { repair: 'manual' })];
   },
 };

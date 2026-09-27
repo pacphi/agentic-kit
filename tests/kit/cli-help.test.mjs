@@ -80,3 +80,13 @@ test('removed dual/provider commands exit 2 and are omitted from help', () => {
   const all = ak('--help', '--all');
   assert.doesNotMatch(all.stdout, /^\s+ak x provider\s+/m);
 });
+
+// docs-10: the main help lists the same status and sync flags as README's
+// command block.
+test('ak --help lists status --live and sync --skip/--json', () => {
+  const top = ak('--help').stdout;
+  const line = (cmd) => top.split('\n').find((l) => new RegExp(`^\\s+ak ${cmd}\\s`).test(l)) ?? '';
+  assert.match(line('status'), /--live/);
+  assert.match(line('sync'), /--skip SUBSYSTEM/);
+  assert.match(line('sync'), /--json/);
+});

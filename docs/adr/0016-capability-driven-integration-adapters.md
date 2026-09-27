@@ -4,7 +4,14 @@
   [ADR-0020](0020-ga-stable-surfaces.md); closed-registry clause superseded by
   [ADR-0029](0029-host-adapter-extension-point.md)
 - **Date:** 2026-07-28
-- **Updated:** 2026-09-23 — the Claude memory pin is receipt-owned and removed by uninstall (ADR-0058).
+- **Updated:** 2026-09-26 — one `legacyRufloDisposition` predicate decides whether a legacy
+  `ruflo`-keyed Claude registration is agentic-kit's own (user scope, `ruflo mcp start`, env limited
+  to `AGENT_BROWSER_CONFIG`); status and `register()` share it, so any other user-scope form is
+  reported as preserved with its manual removal command instead of a sync migration (#237).
+- **Updated:** 2026-09-26 — project memory: route proof, gated routing claims, setup probe
+  cleanup, stray stores, backup and distillation age, projects below a temp root; see
+  "Amendment — 2026-09-26: project memory" at the end.
+- **Earlier update:** 2026-09-23 — the Claude memory pin is receipt-owned and removed by uninstall (ADR-0058).
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Earlier update:** 2026-09-02
 - **Update note:** Added read-only Codex plugin-hook compatibility facts,
@@ -290,11 +297,32 @@ for all Codex plugin tables.
 Project memory is also detected at fact level rather than inferred from package presence or a
 single historical filename. Current native Ruflo bridges can preserve a compatibility/sql.js (or
 encrypted) `.swarm/memory.db` while writing native plaintext rows to the sibling
-`.swarm/agentdb-memory.db`. When the native sibling exists it is the active writer; the
-compatibility store may coexist without representing drift. Read-only status identifies the active
-writer and counts observable entries. Setup and `ak x verify memory` prove persistence by storing
-a disposable row, locating it in the runtime-selected store, retrieving it through the real CLI,
-and removing it. File or package presence alone is never reported as a persistence proof.
+`.swarm/agentdb-memory.db`. The compatibility store may coexist with the native sibling without
+representing drift. Read-only status resolves the canonical store at `<root>/.swarm` for the root
+every launch contract pins (the repository root, else the folder), names both files and counts
+observable entries, with each file's size, live WAL, largest namespace and its expiry; a file with
+no `memory_entries` table yet is empty, not unreadable. Stray stores (a Ruflo store outside the
+canonical pair, `./agentdb.db`, `./agentdb.rvf`, `./ruvector.db`, a `.agentic-qe/` below the root)
+are listed by owner as information only, never as a warning or a sync fix. Backup and
+distillation stay Ruflo's jobs: status reads their age from Ruflo's own evidence (the daemon's
+`.claude-flow/metrics/{backup,consolidation}.json` and the newest `.swarm/backups/memory-*.db`)
+and never runs either. Both daemon workers cover `memory.db` only, so an `agentdb-memory.db` gets
+an information row with the manual backup command. A backup older than 48 hours, or none, warns
+only when no daemon runs for the project, and the `daemons` row is information, not "ok", for a
+project with `memory.db` and no daemon, naming any setting that turns off Ruflo's start-on-use.
+Starting a daemon is never a sync repair. It states which
+interface reads which store (CLI `memory.db`, MCP `agentdb-memory.db` with the native bridge) only
+for the exact `@claude-flow/cli` release and platform where that was observed, and otherwise leaves
+routing unverified. Setup and `ak x verify memory` prove persistence by storing
+a disposable row and locating it on disk (`ak x verify memory` also retrieves it through the real
+CLI), then remove it from every store that holds it, because the CLI mirrors a write into both
+files. Setup deletes its `_setup/verify-*` row from both files of the real project with bound
+parameters (Ruflo's `memory delete` only tombstones a row) and names any store it could not clean
+for manual removal. A default `ruflo memory purge` clears only `memory.db`, so `ak x verify memory`
+also clears its throwaway project's sibling store by `--path`. It then observes, in that isolated project only, whether a CLI write is readable
+through MCP and the reverse; a split is reported as a warning and an unusable MCP server as "not
+observed", never as a failure or as alignment. `ak status --live` runs only the CLI proof. File or
+package presence alone is never reported as a persistence proof.
 Claude carries the absolute compatibility path in project settings. Codex's user-scoped MCP entry
 uses an agentic-kit launcher that derives the same absolute pin from each runtime workspace;
 agentic-kit migrates only a legacy entry it previously registered and preserves user-owned Codex
@@ -307,7 +335,11 @@ project record in `~/.claude.json`, project entries from `.mcp.json`, and user e
 top-level `mcpServers` in `~/.claude.json`. Effective precedence is local, then project, then
 user. Registration status names every scope instead of flattening them. Agentic-kit owns and may
 auto-migrate only its legacy user-scoped registration; local and project registrations are
-observed and preserved because their authorship cannot be proven from presence alone.
+observed and preserved because their authorship cannot be proven from presence alone. The same
+holds for a user-scoped `ruflo` entry in any form agentic-kit never wrote (another command path,
+`ruflo mcp` without `start`, or a custom env key): status and registration share one ownership
+predicate, report the entry as preserved with its `claude mcp remove ruflo -s <scope>` command,
+and never plan a sync migration for it.
 
 Global npm installation policy is likewise one contract rather than a setup/heal split. Every
 agentic-kit-owned global npm install uses the shared reviewed lifecycle-script allowlist (including
@@ -580,3 +612,41 @@ The registries, lifecycle conformance suite, compatibility fixtures, consumer mi
 structural proving integrations are implemented and tested, so this ADR is **Accepted**. That
 status does not advance ADR-0011: local-model runtime evidence and usage behavior remain Proposed
 work under ADR-0011's own validation requirements.
+
+## Amendment — 2026-09-26: project memory
+
+- **Memory route verification (issue #213).** `ak x verify memory` observes CLI and MCP
+  project-memory routing in its isolated project and clears its proof row from every store there.
+- **Status routing claims (issue #213).** Status states the routing only for an observed Ruflo
+  release and platform.
+- **Setup probe cleanup (issue #213).** Setup removes its write probe from every store,
+  correcting the earlier "active writer" wording.
+- **Canonical and stray stores.** Status also names the canonical store at the pinned root with
+  each file's size, WAL, largest namespace and expiry, treats a store with no memory table as
+  empty, and reports stray stores for information only.
+- **Backup and distillation age.** Status reports the age of Ruflo's last memory backup and
+  distillation, and the `daemons` row is no longer "ok" when a project with memory has no daemon
+  to run them.
+- **Provider registration keeps the memory root (audit Addendum 2, problem 1).** Before
+  `ruflo providers configure` runs in a project with no Ruflo JSON configuration, ak writes a
+  minimal `claude-flow.config.json` pinning `memory.persistPath` to `.swarm`, because Ruflo would
+  otherwise create that file from defaults that point memory at `./data/memory`
+  (ruvnet/ruflo#3193). ak re-reads the memory setting after every call. A moved root is restored,
+  the remaining providers are skipped, and the step is degraded. An unwritable pin skips
+  registration. Status warns, with a manual fix, when a Ruflo JSON configuration points memory away
+  from a populated `.swarm` store.
+- **Codex memory outside a project (audit Addendum 2, problem 2).** `ak x ruflo-mcp` resolves its
+  store from the Git repository root, else the plain work folder. The filesystem root, the home
+  folder itself, a temporary root, and a tool's own folder (`~/.codex`, `~/.claude`, `~/.config`,
+  `~/.local`, `~/.cache`, `~/Library/Application Support`, `%APPDATA%`, and their environment
+  overrides) are never a store's home. A folder below a temporary root is ordinary work and keeps
+  its own store, even when the temporary root lies inside a tool's folder (Windows' `%TEMP%` under
+  `%LOCALAPPDATA%`). A repository root there falls back to the plain folder, and
+  failing that, all such launches share one user-level store, `~/.claude-flow/memory`, pinned
+  through both `CLAUDE_FLOW_MEMORY_PATH` and `CLAUDE_FLOW_DB_PATH`, with Ruflo started inside it.
+  Ruflo defines no user-level memory store; ak follows Ruflo's user-level state folder
+  `~/.claude-flow` by analogy. Status names the store the launcher uses from a folder that has no
+  project store, reports the user-level store, and lists `~/.swarm` and
+  `~/.codex/.chatgpt-projects/*/.swarm` as strays for information only. Claude's direct
+  `ruflo mcp start` registration does not use the launcher; applying the same rule there is a
+  follow-up decision.

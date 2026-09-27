@@ -5,10 +5,13 @@
 // being enabled (flag detector), so the agents targets stay unmanaged/quiet
 // until dual mode is on. retiredForTarget force-strips re-scoped blocks (the
 // migration path that clears the dual block from any project AGENTS.md).
-import path from 'node:path';
-import * as paths from '../../../lib/paths.mjs';
-import { registry, syncBlocks, blocksForTarget, retiredForTarget, guidanceTargets } from '../../../lib/blocks.mjs';
-import { bothHostsEnabled } from '../../../lib/providers.mjs';
+//
+// Drift is read from the writer's own dry run (blocks.mjs reconcileGuidance
+// with sync's exact context), never from a re-built loop: a status reader that
+// evaluates detectors with less kit.json intent than sync reports drift sync
+// will never act on (#237).
+import { reconcileGuidance } from '../../../lib/blocks.mjs';
+import { guidanceContext } from '../../../lib/providers.mjs';
 import { row } from '../row.mjs';
 
 export default {
@@ -16,26 +19,19 @@ export default {
   async collect({ cfg, cwd, pkgRoot }) {
     const rows = [];
     try {
-      const rowsReg = registry(cfg.customBlocks);
-      const resolve = (r) => (r.custom
-        ? (r.template.startsWith('~/') ? path.join(paths.home, r.template.slice(2)) : r.template)
-        : path.join(pkgRoot, 'claude', r.template));
-      const ctx = { flags: { dualMode: bothHostsEnabled(cfg), opencodeEnabled: !!cfg.integrations?.hosts?.opencode } };
-      for (const t of guidanceTargets({ cwd, cfg })) {
-        const treg = [...blocksForTarget(rowsReg, t.name), ...retiredForTarget(rowsReg, t.name)];
-        const res = await syncBlocks(t.file, treg, resolve, { dryRun: true, context: ctx });
-        const drift = res.filter((r) => r.action === 'upserted' || r.action === 'stripped');
-        const missing = res.filter((r) => r.action === 'missing-template');
+      for (const t of await reconcileGuidance({ cwd, cfg, pkgRoot, context: guidanceContext(cfg), dryRun: true })) {
+        const drift = t.results.filter((r) => r.action === 'upserted' || r.action === 'stripped');
+        const missing = t.results.filter((r) => r.action === 'missing-template');
         // The agents targets are unmanaged on single-host setups — stay quiet
         // unless there's actual drift (e.g. a block to strip after disabling dual
         // mode) or a missing template. Only the claude target always reports.
         if (t.name !== 'claude' && drift.length === 0 && missing.length === 0) continue;
         if (drift.length) {
           rows.push(row('blocks', 'warn',
-            `${drift.length} ${t.label} block(s) drifted: ${drift.map((d) => `${d.slug}→${d.action.replace('ped', 'p')}`).join(', ')}`,
+            `${drift.length} ${t.label} block(s) drifted: ${drift.map((d) => `${d.slug}→${d.action}`).join(', ')}`,
             'sync reconciles blocks'));
         } else {
-          rows.push(row('blocks', 'ok', `${t.label} managed blocks in sync (${res.length} in registry)`));
+          rows.push(row('blocks', 'ok', `${t.label} managed blocks in sync (${t.results.length} in registry)`));
         }
         for (const m of missing) rows.push(row('blocks', 'warn', `template missing for block '${m.slug}'`));
       }

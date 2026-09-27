@@ -29,6 +29,7 @@ ak sync             # apply it
 | An owned skill remains report-only | Catalog identity is weaker than removal authority; the tree lacks a complete current `agentic-kit.skill-tree-ownership/v1` receipt or contains drift, symlinks, special files, or a plugin-cache path | Preserve it. Only a complete recursive manifest, exact allowed root/current owner, and exact current shape/digest can authorize archive. Never promote an issue #198 entrypoint digest into tree ownership. |
 | Maintenance reports `partial-recovery-required` and blocks new changes | A provider effect may have happened, but the durable receipt cannot yet prove wholly preimage or wholly verified postimage | Run `ak maintain recover --receipt RECEIPT_ID --yes`. Recovery only inspects and reconciles; it never retries or rolls back. If state is mixed/drifted, a provider is missing, or refresh fails, repair that evidence problem and retry recovery. |
 | `ak sync` misses a newly published kit release | Older versions could plan from the kit's separate 24-hour self-update cache | Normal sync now refreshes the kit's own release channels before planning. Prerelease installs check `latest` and `next`; stable installs check `latest` only. `--dry-run` and `--no-upgrade` skip this forced refresh. Failed lookups retain eligible cached evidence without renewing its timestamp. |
+| `ak sync` ends with `unresolved: [subsystem] fix — …` and exits 1 | Sync ran its plan, but a row it planned to fix is still there with the same fix, or no sync step performs that fix. The step may have succeeded without reaching its goal | Run `ak status` and read that row: its message says what still stands. Fix the cause it names, or follow a `→ manual:` step, then run `ak sync` again. A `no sync step performs this repair` line is an agentic-kit defect; please report it |
 | `ak sync` launched from a checkout/local dependency created a global `ak` | The self-update step deliberately installs the resolved replacement globally and runs last | use `ak sync --no-upgrade` when the checkout or lockfile must remain authoritative |
 | Different users or Node versions see different global stacks | npm `-g` means the active prefix, which can be per-user and per-Node-version | standardize the Node manager/prefix per user; do not repair this with `sudo ak setup` |
 | `status` shows a deja-vu schema or capability warning | The CLI is older than 0.19.0, doctor JSON is missing/malformed/newer than schema 2, or an explicit enabled-host target is absent | update the owned installation with `ak sync`; update an external installation with its owner. Agentic Kit fails closed instead of guessing; see the [deja-vu runbook](DEJA-VU.md) |
@@ -38,29 +39,44 @@ ak sync             # apply it
 | Just upgraded ruflo/agentic-qe (`npm i -g …`) and things feel off | Upgrades re-resolve dependencies: native SQLite bindings and the aidefence package get dropped, and ruflo's helper auto-refresh regenerates the statusline without the footer | `ak sync` (this is its main job) |
 | `status` shows a host `installed but not executable` | npm exits 0 even when an optional dependency fails, so a package can be recorded without its platform binary. Codex ships its binary as per-platform versions (for example `@openai/codex-darwin-arm64`) published minutes after the main version, so an upgrade in that window can leave `codex` unable to start | `ak sync` reinstalls an npm-owned host and verifies it starts; upgrades and installs already retry once with `--prefer-online`. An external (mise/native/brew) install is reinstalled with its own tool |
 | `status` shows `natives … WASM fallback` | agentdb resolved a non-native better-sqlite3 — on this path **memory writes can silently vanish**. Common causes are npm ≥11.17 blocking install scripts during upgrades, or a stale better-sqlite3 ≤12.9 pin on Node 26 | `ak sync` selects a Node-compatible release and installs the native binding |
+| `status` says `ak applied Ruflo's native SQLite pin (ruvnet/ruflo#2219)` | To install a native better-sqlite3 where a bundled package could not find one, `ak sync` changed that package's own better-sqlite3 line (npm refuses the install otherwise). Ruflo pins better-sqlite3 to 12.8.0 or later for the same reason, but `npm install -g` does not apply Ruflo's pin. The row names each file, field, original value and ak's value | Nothing to do. `ak uninstall` puts each original value back where the file still holds ak's value. A Ruflo upgrade or reinstall replaces the file; `status` then says the edit is no longer there. Edits made before ak kept receipts are not listed and cannot be restored by ak; reinstall Ruflo if you want its shipped files back |
+| `status` shows `ruflo memory runtime on WASM fallback (…): no native binding` | The better-sqlite3 that Ruflo's memory runtime loads has no compiled binding; the row ends with the load error | `ak sync` builds the native binding |
+| `status` shows `ruflo memory runtime on WASM fallback (…): its native binding is present but will not load` | The binding file exists but was built for another Node.js version or platform, or is damaged; the row ends with the load error (for example `compiled against a different Node.js version`) | `ak sync` removes the binding that will not load, rebuilds it in place, and load-tests the result |
+| `status` shows `ruflo memory runtime backend unverified` | The load probe timed out twice or ended without a diagnostic, so native versus WASM is unknown. Sync does not act on an unverified probe | Re-run `ak status` when the machine is less busy. If it persists, `npx ruflo doctor` shows the runtime's own view |
 | `status` shows `aidefence missing` | ruflo ≥3.28 stopped shipping `@claude-flow/aidefence` but `ruflo security defend` still imports it — injection defense is silently non-functional ([ruvnet/ruflo#2670](https://github.com/ruvnet/ruflo/issues/2670)) | `ak sync` reinstalls it; `ak x verify security` proves defend works (exit 1=threat / 0=clean) |
 | `status` shows oversized RVF store(s) | A runaway append after a hard exit grew a `.rvf` past the 2 GB cap (seen at ~277 GB once) | `ak sync` quarantines the oversized store; agentic-qe rebuilds it |
 | Statusline footer (🧠/🛡/🎓 lines) disappeared | `@claude-flow/cli`'s version-stamped helper auto-refresh pristine-copies `statusline.cjs` on the **first ruflo command after an upgrade** — including the statusline render itself | `ak sync` — it now triggers that refresh *first*, then re-injects, so the footer survives; `ak status` flags an armed wipe before it fires |
 | Statusline footer is blank or stale with no visible error | Footer probes are intentionally silent during normal rendering | Set `AK_STATUSLINE_DEBUG=1` for one reproduction. Redacted stage/error metadata goes to `$XDG_STATE_HOME/agentic-kit/statusline-debug.log` (default `~/.local/state/agentic-kit/statusline-debug.log`, mode 0600, bounded at 64 KiB); set `AK_STATUSLINE_DEBUG_FILE` to redirect it, then unset debug |
+| Statusline shows a Ruflo version you do not have installed (for example `RuFlo V9.9.9`) | Ruflo's helper bakes a version into `.claude/helpers/statusline.cjs` as a floor and shows the highest version it finds. A baked value above every install never corrects itself. `ak status` flags it on the `statusline` row | `ak sync`: it clears the helper stamp so Ruflo's own refresh regenerates the helper, then re-injects the footer. `ak` never writes the version. If Ruflo's refresh cannot run (`.claude/helpers/.LOCKED` or `RUFLO_HELPERS_LOCKED`), edit `let ver` in that file to the installed version or lower. A version newer than `ak status` can also come from a newer Ruflo copy the helper finds, such as the Claude plugin marketplace checkout. That is Ruflo's own choice and `ak` leaves it alone |
 | Codex's native status line did not change | Codex reads the user-wide setting when a session starts; an existing TUI may not hot-reload it | Exit and start a new Codex session; inspect ownership with `ak x statusline status` and drift with `ak status` |
 | The right side of Codex's status line is missing | Codex has one width-constrained native line | Widen the terminal or choose the compact preset with `ak x statusline codex native` |
 | Want the rich Ruflo/SONA/AQE display inside Codex | Codex currently accepts built-in status-line fields only, not a command-backed renderer | Keep the rich footer in Claude Code; see [Managed Codex status line](CODEX-STATUSLINE.md) for the current boundary |
 | Too many `⚙` daemons / stale daemons | One daemon per active project is normal (local-only workers, $0). Stale = workspace deleted or past the 12h TTL | `ak x daemon-gc --kill`; `sync` also reaps (and verifies the pid really is a ruflo daemon before killing) |
+| `status` warns that the memory backup is old, or `daemons` says none runs for this project | Ruflo backs up and distills project memory only inside the project's daemon, which ends itself after 12 hours. Ruflo's start-on-use is off when `.claude/settings.json` has `claudeFlow.daemon.autoStart: false` (`ruflo init` writes it; `ak setup` keeps it) | Run `ruflo daemon start` in the project root, or `ruflo memory backup` for a one-off copy; see [Memory backup and distillation](#memory-backup-and-distillation) |
+| `status` warns that `claude-flow.config.json` (or `.claude-flow/config.json`) points Ruflo memory away from the entries in `.swarm` | A command that saves Ruflo settings (`ruflo providers configure`, `ruflo config set`) created that file from Ruflo's defaults, whose `memory.persistPath` is `./data/memory` ([ruvnet/ruflo#3193](https://github.com/ruvnet/ruflo/issues/3193)). The MCP store and any `ruflo` command without ak's pin now look there | Set `memory.persistPath` to `".swarm"` in the file `status` names, or remove the key. `ak` does not edit a Ruflo configuration it did not write. `ak setup` and `ak sync` pin `.swarm` before registering providers, so they do not cause this |
 | Want to change which MCP tool families are callable | Exclusions are `permissions.deny` rules, persisted in kit.json | `ak x mcp pick` (re-runnable); `x mcp status` shows the inventory; `x mcp off` unregisters |
+| `status` says a legacy `ruflo`-keyed MCP registration is preserved | The entry is not the `ruflo mcp start` registration agentic-kit wrote (another path, `ruflo mcp`, a custom env key, or a project/local scope), so `ak sync` leaves it alone. With `claude-flow` also registered, Claude loads the Ruflo tools twice | Inspect it with `claude mcp get ruflo`, then run the command `status` prints (for example `claude mcp remove ruflo -s user`) if you don't need it |
 | opencode: Ruflo/AQE are not connected, compact `ak_*` tools are missing, or `ak-specialist` is unavailable after `ak setup --opencode` / `ak sync` | opencode loads config, plugins, MCP servers, and agents **once at startup** — a running session never sees new wiring | quit and restart opencode; `ak status` shows MCP connectivity, compact gateway, lifecycle plugin, skill, and specialist state separately |
 | opencode: `status` says `opencode.json is not plain JSON` | opencode legally allows JSONC comments; ak refuses to rewrite a file it can't parse rather than normalize (and silently drop) your comments | hand-merge the ak entries (`mcp`, `skills.paths`, `permission`) per `docs/adr/0017-opencode-host.md`, or remove the comments and run `ak sync` |
 | opencode: `status` reports a later `opencode.jsonc` override | stock OpenCode loads that file after `opencode.json`, so it can shadow the exact MCP/permission values ak receipts; ak cannot verify JSONC without rewriting user comments | merge the Agentic Kit entries into the later file and remove the duplicate override, or keep the override and use direct user-managed wiring; ak preserves both files and does not deploy its gateway against ambiguous effective config |
 | opencode: an agent/skill/plugin file you created yourself keeps ak's version away | deploys are no-clobber: only exact receipt-matching bytes are repairable; an unreceipted or edited destination is user-owned and preserved (`status` reports it as `foreign`) | rename yours (or remove it and run `ak sync` to get ak's managed copy) |
 | opencode: `status` says `no ruflo catalog source` | the agent/skill catalog resolves override → `$RUFLO_REPO` → claude marketplace clone → `@claude-flow/cli` (direct, then nested under ruflo) — all missing | install ruflo (`ak setup` does), or point `integrations.ownership.opencode.catalogDir` / `$RUFLO_REPO` at a ruflo checkout |
-| `ruflo memory store` says OK but reads return nothing | Missing project pin, wrong working directory, or CLI and MCP selecting different files when both `.swarm/memory.db` and `.swarm/agentdb-memory.db` exist | `ak sync` can repair owned registration drift. `ak x verify memory` proves an isolated canary only; inspect existing-corpus routing separately as described below |
+| `ruflo memory store` says OK but reads return nothing | Missing project pin, wrong working directory, or CLI and MCP selecting different files when both `.swarm/memory.db` and `.swarm/agentdb-memory.db` exist | `ak sync` can repair owned registration drift. `ak x verify memory` observes CLI↔MCP routing in an isolated directory only; it cannot show access to an existing corpus, so follow the routing section below |
 | `status` shows a `codex-plugins` warning | A plugin is enabled in the wrong host, its newest cached hooks or skills fail a known Codex compatibility check, or `config.toml` cannot be inspected safely. The exact `codex@openai-codex` identity is a Claude Code companion and must not be enabled inside Codex | For a valid, regular `config.toml` and verified companion 1.0.6, preview the approval-required repair with `ak heal hooks --host codex`; it changes only that Codex entry, never Claude Code or the cache. Repair malformed TOML or merge symlink-managed config manually. For other plugin findings, open Codex `/plugins`, refresh or disable the named plugin, then start a new session. Setup and sync never rewrite Codex-owned plugin state |
+| `status` says an external `agent-browser` is outside Ruflo's range | You installed a newer `agent-browser` yourself. ak never replaces a user-managed install, so `sync` cannot clear this, and Ruflo's browser tools may not work with that version | Install a Ruflo-compatible `agent-browser` 0.27.x yourself, or set `agentBrowser: false` in `~/.config/agentic-kit/kit.json` to stop ak managing the executor (Ruflo MCP then no longer gets ak's trusted browser config or readiness checks) |
+| `status` lists a stray memory store | A tool wrote a store where this project's hosts do not read it, usually because it ran in another folder. ak only reports it | Nothing breaks. To keep its rows, inspect it read-only first; see [Stray memory stores](#stray-memory-stores) |
 | `status` shows a `memory-pin` warning | `CLAUDE_FLOW_DB_PATH` is pinned to a dead or foreign path, so every memory op targets the wrong DB ("Database not initialized" beside a healthy in-repo DB). The pin may be deliberate, so `sync` never touches it | repoint (or remove) the pin in `.claude/settings.local.json` `env` |
 | MCP tool governance stays `unknown` | Ruflo 3.44.0 and earlier do not route stdio MCP tool calls through their policy enforcer, so no audit records are written even though ak wrote the policy file and set `RUFLO_MCP_ENFORCE_POLICY=1` | Nothing to fix on your side; the component confirms once ruflo wires enforcement (ADR-0058 upstream request 6). A project whose `.harness/mcp-policy.json` is invalid shows `mcpGovernance: blocked` instead: restore a valid, ak-written file and run `ak sync`, which also removes the enforcement variable for that project until the file is fixed |
 | A [ruflo component](MANAGED-TOOLS.md#managed-ruflo-components) stays `applied, not verified` | Claude Code, Codex, and OpenCode read their environment only at process start-up, so a change setup or sync just made has not reached a running session yet | Restart Claude Code, Codex, and OpenCode, then run `ak status --refresh` to re-collect evidence with the new environment in effect |
-| Want to run `ak sync` but Claude/Codex/OpenCode sessions are open in other terminals | Upgrade-bearing syncs stop **all** ruflo daemons machine-wide and swap the global npm trees live sessions execute hooks/statusline/MCP calls from; even a no-upgrade sync can repair configuration or missing dependencies | `ak sync --dry-run` first; a `versions` row means idle the other sessions or use `ak sync --no-upgrade`; see [Running `ak sync` while sessions are live](UPGRADING.md#running-ak-sync-while-sessions-are-live) |
+| Want to run `ak sync` but Claude/Codex/OpenCode sessions are open in other terminals | Upgrade-bearing syncs stop **all** ruflo daemons machine-wide and swap the global npm trees live sessions execute hooks/statusline/MCP calls from; even a no-upgrade sync can repair configuration or missing dependencies | `ak sync --dry-run` first; a `versions` row means idle the other sessions or use `ak sync --no-upgrade` (or `ak sync --skip versions` to hold back only the package upgrades); see [Running `ak sync` while sessions are live](UPGRADING.md#running-ak-sync-while-sessions-are-live) |
 | Suspicious token burn | Background automation vs interactive usage | ask Claude to run the **ruflo-token-audit** skill (deployed by `setup`) |
 | Observability is empty or has no ruflo/AQE nodes | Live mode tails Claude/Codex records by default, while ruflo/AQE stores are not auto-discovered | open Observability before producing activity; switch to History for retained sessions; register a trusted JSONL file with repeatable `--live-source 'surface=path'`; see [Observability](https://github.com/pacphi/agentic-kit/blob/main/docs/OBSERVABILITY.md) |
+| Observability → Sources says `awaiting file`, `no events yet`, or shows rejected records for a `--live-source` | The registered file does not exist yet, exists but is empty, or holds records without a session ID, actor ID, and action. `--live-source` only reads a file something else writes | check the path and that its producer is running; a file that appears later is read from its first line. See [Source health](https://github.com/pacphi/agentic-kit/blob/main/docs/OBSERVABILITY.md#source-health) |
+| Observability → Live shows a running session with 0 operations | Live draws operations written after it started watching (the map says when); earlier operations are only in the transcript | select the session and read its session stream, or open History for the retained session. See [Observability](https://github.com/pacphi/agentic-kit/blob/main/docs/OBSERVABILITY.md#troubleshooting) |
+| A Claude Code or Codex session in a non-Git folder shows in System → Runtime but not in Observability → Live | Outside a Git repository, Live links a process to a session only when both name exactly the same folder; a session that has not written its transcript yet has nothing to link | send the session a prompt so its transcript exists; it then appears in Live while the process runs. See [Observability](https://github.com/pacphi/agentic-kit/blob/main/docs/OBSERVABILITY.md#troubleshooting) |
 | `status` shows `ruvnet-brain … not installed` | The RuvNet Brain (offline KB + `search_ruvnet` MCP) isn't on disk | `ak sync` (or `ak setup`) runs the installer; `npx ruvnet-brain --doctor` health-checks it |
+| `status` shows `ruvnet-brain-plugin … Automatic hooks differ from the reviewed … contract` | ak compares the Brain plugin's automatic hooks with the exact hook sets it has reviewed, and the installed Brain adds, removes or changes one. The row names each change. Brain 4.3.28 adds `capacity-aware-parallel-work`, which keeps running when the Brain is switched off; ak has not accepted it and has asked the Brain maintainer to change that | `ak sync` cannot review a hook, so the warning has no sync action. Keep it until an ak release reviews the change; or disable the whole Claude plugin with `claude plugin disable ruvnet-brain@ruvnet-brain` (this also removes `search_ruvnet` from Claude); or set `ruvnetBrain: false` in `kit.json` to stop ak managing and reporting the Brain (the hooks stay installed) |
+| `status` shows `ruvnet-brain … retained; the refresh to v… was refused` | The Brain's installer or its own updater refused the refresh (for example a private-overlay preflight), or ran without changing the installed release. The cause is on the Brain side, so `ak sync` stops retrying | Fix the named cause, then run `npx ruvnet-brain --update` yourself. `ak sync` tries again on its own once either the installed or the latest release changes. To stop ak managing the Brain, set `ruvnetBrain: false` in `kit.json` |
 | A heal says `degraded` while the tool is still usable | The native repair failed and a fallback or older artifact remains available; exit status is authoritative | Use the reported repair command/error. The operation will not render green or advance a version stamp until a later repair exits successfully |
 | Usage suddenly shows no data for one host, or a lower total than expected | Any of the four local sources (Claude/Codex transcript roots, OpenCode's SQLite store, the Codex thread ledger) can go absent, busy, corrupt, or query-incompatible; none of these are collapsed into an ordinary empty result | Inspect the branded host-icon pills in the dashboard's tabbar (top of every view, right-aligned — or `sourceHealth` in usage-index JSON) — one pill per host; the Codex pill folds its transcript-root and thread-ledger statuses together (worse status leads, both shown in the status side's tooltip). A degraded OpenCode scan retains in-window last-good cached sessions; repair the named source before treating zero as observed truth |
 | The OpenCode pill's tooltip warns `usage-not-reported:N`, or a local-model session reads $0 with unpriced messages | A local model server (LM Studio, Ollama, llama.cpp) finished N responses without reporting token counts or a cost. The responses are counted, their usage is unknown, and no price is invented for a local model | Expected for servers that do not report usage; `costEvidence.unpricedMessages` on the session names the unpriced messages. Turn on usage reporting in the server if it offers it |
@@ -68,6 +84,8 @@ ak sync             # apply it
 | Codex sessions, prompts or responses are far lower than the Codex app lists | Sessions Codex imported from Claude Code transcripts (turn ids `external-import-turn-N`) are not Codex activity and are excluded from every Codex figure; their real usage is under Claude | `sourceHealth.codex.diagnostics.importedExcluded` is the count. No action needed |
 | A Codex thread's tokens exceed the thread ledger's `tokens_used`, or a Codex subagent's are far below it | The ledger keeps only the last cumulative snapshot, so it omits everything before the host's counter restarted (the scorecard sums each segment). A forked subagent's rollout also replays its parent's history, which the ledger includes and the scorecard does not count | Expected; the scorecard is the more accurate figure in both directions |
 | Usage → Context says Input only, Partial coverage, Not recorded, or No sessions | The retained session has input evidence but no compatible runtime window. OpenCode records none, so its pressure is not measured. Claude transcripts record none either: Claude pressure needs the window the kit's statusline saw, written to `~/.config/agentic-kit/claude-context-windows/<session_id>.json` | For Claude, run `ak sync` so the updated statusline template is projected, then use Claude Code normally; new main sessions record their window and pair on the next dashboard refresh. On Windows the ledger lives under `%APPDATA%\agentic-kit` (the footer resolves the kit config dir exactly as `ak` does). That also repairs an earlier mismatch in which the statusline wrote the Claude rate-limits tee under `~/.config` where `ak` looked in `%APPDATA%`, so Windows Limits data can now appear after `ak sync`. Headless `claude -p` runs, subagent sessions and sessions from before the update stay Input only — nothing is backfilled or guessed. Let the current-schema one-time reparse complete; missing values render as an em dash. Do not substitute a published model maximum. Codex pressure appears only when its rollout recorded paired input/window evidence |
+| Usage → Limits says no Claude limit data and names a custom (or no) user-level statusLine | Claude Code sends limits only to the statusLine a session runs, and only the kit footer in a Ruflo helper writes them for ak. A project's own statusLine takes precedence over `~/.claude/settings.json`, so sessions in a project set up by ak still report; sessions anywhere else run your user-level script. The RuvNet Brain installer does not replace an existing user statusLine | Use Claude Code in a project set up with `ak setup --project` (run `ak sync` there if the footer is missing), on a Pro/Max plan; limits appear after the session's first response. Nothing needs to change in your user-level statusLine |
+| Usage → Limits says no Codex limit data, or a Codex note ends "last refresh failed" | The dashboard asks `codex app-server` for `account/rateLimits/read` and shows which step failed: codex not found on the dashboard's PATH, could not start, exited early (an outdated CLI can reject the read-only flags; the exit code is shown), timed out, refused the request (RPC error code shown), or answered without a plan window | Follow the check the panel names: the Codex host row in `ak status`, `codex --version`, or `codex login status`. Plan windows apply to a ChatGPT-plan sign-in; API-key use is billed at API rates |
 | A Context card says Not installed, Source unreadable, or No sessions for OpenCode, Codex or Claude | Not installed: the host's store was not found. Source unreadable: it exists but could not be read (the card shows the reason, e.g. `schema`), so an empty list does not mean no sessions ran. No sessions: readable, but nothing ran in the selected window | Not installed: nothing to do. Unreadable: repair the store or permission named in the reason (`ak status` shows the same source health). No sessions: widen the Usage window |
 | Inspect source says the Hook source changed | The audited file digest no longer matches the short-lived source reference | Close the dialog, refresh/reopen Hooks, and inspect the newly audited reference. Do not reuse an old path or assume the earlier finding still applies |
 | Usage → Hooks says runtime outcomes are unknown | The default read-only audit inspects configuration; native Claude/Codex/OpenCode executions do not feed the supervised-adapter receipt stream | Treat Stop diagnostics as configuration evidence only. Reproduce a failure from the host/upstream logs; do not read unknown as zero failures or run generated hooks from the dashboard |
@@ -94,9 +112,9 @@ ak sync             # apply it
 
 ## Existing memory corpus routing
 
-Ruflo 3.39.2 can select different stores through its CLI and MCP bridge. A passing
-`ak x verify memory` canary does not establish access to pre-existing records.
-`ak status` reports both files and leaves writer identity unverified.
+Ruflo's CLI and MCP tools can read different stores. A passing `ak x verify memory`
+does not establish access to pre-existing records. `ak status` reports both files;
+see [Ruflo memory stores and routing](#ruflo-memory-stores-and-routing).
 
 A snapshot test retrieved a known native-store record only when the CLI received
 the explicit native file path. For a record independently confirmed in that store,
@@ -120,10 +138,16 @@ Windows split-store behavior.
 ak x verify learning    # trains a cycle in an isolated dir; asserts patterns persist to disk
 ak x verify security    # packages load + defend flags a real injection sample
 ak x verify aqe         # agentic-qe genuinely on ruvector (no FsyncFailed)
-ak x verify harvest     # end-to-end learning-write path against real CLIs
+ak x verify harvest     # Ruflo's learning-write path (post-task + distill) in an isolated store
 ak x verify deja-vu     # compatible package/doctor, selected wiring, index state
 ak x verify all
 ```
+
+If `ak x verify aqe` warns that RVF is held by another live process, another AQE
+process (usually the AQE MCP server in an open Claude Code session) owns the store.
+That is contention, not a storage failure, even though agentic-qe 3.14.3 also prints
+`FsyncFailed` in this case ([#240](https://github.com/pacphi/agentic-kit/issues/240)).
+A `FsyncFailed` without the live-owner lines still fails verification.
 
 ## Known upstream gaps (not fixable by sync)
 
@@ -210,20 +234,54 @@ requires `name` and `description` and describes host skill discovery.
 
 Two files can contain different project corpora:
 
-- `.swarm/memory.db`, historically the compatibility store.
-- `.swarm/agentdb-memory.db`, the native bridge's default sibling.
+- `.swarm/memory.db` is read and written by `ruflo memory ...`. The CLI picks its
+  file from `--path`, then `CLAUDE_FLOW_DB_PATH`, then the memory root.
+- `.swarm/agentdb-memory.db` is used by the MCP `memory_*` tools through the
+  native bridge. It is derived from the memory root (`CLAUDE_FLOW_MEMORY_PATH`,
+  else `<cwd>/.swarm`), and `CLAUDE_FLOW_DB_PATH` is not consulted. Ruflo derives
+  it separately so an encrypted `memory.db` never reaches native SQLite.
 
-The filenames do not prove the active backend: native code can also open
-`memory.db`. Status now names the files and keeps backend/writer/routing unknown
-unless separately verified. File presence alone does not prove lost data or
-correct cross-client routing. `ak x verify memory` tests an isolated canary;
-it cannot establish access to an existing corpus.
+`ruflo memory init` may also sync a copy to `.claude/memory.db`; treat it as a third
+file when inventorying a project. File presence alone does not prove lost data or
+correct cross-client routing.
 
-Inspection of installed Ruflo 3.39.2 found a concrete path split: CLI memory
-commands pass a resolved `dbPath`, defaulting to `memory.db`; MCP calls omit that
-argument, and the native bridge defaults to `agentdb-memory.db`. Agentic-kit pins
-the project cwd and compatibility environment path, but that environment variable
-is not a universal native MCP filename override in this version.
+Agentic-kit pins the project cwd and a `CLAUDE_FLOW_DB_PATH` inside `<root>/.swarm`,
+so both interfaces land in the same directory. A pin anywhere else moves only the CLI:
+the MCP tools ignore it, and when `<cwd>/.swarm` is not initialized they fail with
+"Database not initialized" (seen on 3.42.4 and 3.45.0).
+
+The routing below is observed, not documented by Ruflo, and it changes between
+releases: on 3.39.2 a CLI write was not visible to MCP at all
+([results](audits/ruflo-memory-route-results.jsonl)). `ak status` therefore states it
+only for the exact `@claude-flow/cli` release and platform it was observed on,
+currently 3.42.4 and 3.45.0 on macOS, and keeps routing unverified everywhere else:
+
+- An MCP write is not visible to a CLI read. A CLI write is also written to
+  `agentdb-memory.db`, so MCP can read it.
+- Without the native bridge (the default on Windows, or after a bridge init failure)
+  MCP falls back to `memory.db` and the two interfaces can appear aligned.
+  `ak x verify memory` prints the MCP backend it saw.
+- CLI `retrieve`, `search` and `list` name the sibling store they did not read when
+  they can open it. A bare count still describes one file.
+- Neither interface reads both stores, so keys only in `memory.db` are invisible to
+  MCP and the reverse.
+
+A newer release is not evidence of a fix until `ak x verify memory` shows it.
+Maintainers can run `pnpm run test:ruflo-memory-live` to check the claim against the
+installed Ruflo.
+
+`ak setup` proves a memory write in the real project with a `_setup/verify-*` row and
+deletes that row from both files. If a store cannot be cleaned (for example, a live
+writer holds it), setup names the store and the key to remove by hand.
+
+`ak x verify memory` runs in a throwaway project with its own memory root. After its
+CLI store, retrieve and purge proof, it writes one key through the CLI and one through
+MCP, then reports which interface can read which and the MCP backend it saw. A split
+is a warning and an MCP server it cannot use is "not observed"; neither fails the
+suite. A default `ruflo memory purge` clears `memory.db` only and still reports
+success, so the suite clears the sibling of its own throwaway project with `--path`;
+do not do that to a live corpus without a backup and quiesced writers. None of this
+establishes access to an existing corpus. `ak status --live` runs only the CLI proof.
 
 For an intentional CLI lookup, choose the file explicitly after checking your
 installed `ruflo memory retrieve --help`:
@@ -240,19 +298,100 @@ inspect counts, schemas, and key presence without printing stored values.
 
 Preserve both files and their live WAL state. Do not delete the smaller file,
 globally repin the environment, or merge automatically: it may have unique keys,
-and writers may still be active. A durable upstream fix needs one path-resolution
-contract shared by CLI/MCP/backend selection, registries keyed by resolved path,
-and cross-process tests over existing disjoint corpora. Migration requires a
-separate, reviewed backup, conflict-resolution, and writer-quiescence procedure.
+and writers may still be active. Migration needs a separate, reviewed backup,
+conflict-resolution, and writer-quiescence procedure. Upstream tracking:
+[ruvnet/ruflo#3196](https://github.com/ruvnet/ruflo/issues/3196) and
+[pacphi/agentic-kit#213](https://github.com/pacphi/agentic-kit/issues/213).
 
 [Local investigation and upstream boundary](audits/plugin-memory-status-followup.md)
 records the source evidence and counts observed on 2026-09-09.
+
+### What `ak status` reports about memory
+
+`ak status` names the canonical store: `<root>/.swarm`, where `<root>` is the
+repository root (or the folder, outside a repository). Every host's Ruflo memory is
+pointed there, so a run from a subfolder reports the same store. For each file it
+shows the active entry count, the file and live WAL size, the largest namespace with
+its share, and whether its rows are set to expire. A namespace that grows without
+expiry (for example `commands`, written by Ruflo's `hooks post-command`) is the usual
+reason a store gets large. A file with no memory table yet is reported as empty.
+
+Some folders never get a store: the filesystem root, your home folder itself, a
+temporary root such as `/tmp`, and folders that belong to a tool (`~/.codex`,
+`~/.claude`, `~/.config`, `~/.local`, `~/.cache`, `~/Library/Application Support`,
+`%APPDATA%`). Codex often starts in one of these. Its Ruflo launcher (`ak x ruflo-mcp`)
+then uses one user-level store, `~/.claude-flow/memory`. Run from such a folder,
+`ak status` names that store instead of a project store. From anywhere, it reports
+the user-level store once it exists. Claude's own Ruflo registration does not use
+the launcher and is unchanged.
+
+### Stray memory stores
+
+A stray store is a memory file this project's hosts do not read. `ak status` lists
+each one by owner, for information only. ak never moves, merges or deletes them.
+
+| Stray | Usual owner |
+|---|---|
+| A `memory.db` or `agentdb-memory.db` under `.swarm/` other than the canonical pair (for example `.swarm/.swarm/agentdb-memory.db`), or in a subfolder's `.swarm/` | A Ruflo command that ran with that folder as its working directory. Ruflo derives the store path from the working directory |
+| `./agentdb.db` | The AgentDB CLI's default file |
+| `./agentdb.rvf` | AgentDB's RVF backend, which defaults to the working directory |
+| `./ruvector.db` | RuVector's default store (`ruvector mcp start`; `ruflo memory init` also creates one) |
+| A `.agentic-qe/` below the project root | AQE resolves a relative `AQE_MEMORY_PATH` against the folder a command or hook ran in |
+| `~/.swarm`, or `.swarm` folders under `~/.codex/.chatgpt-projects/` (reported from any project) | Ruflo ran with your home folder or a Codex ChatGPT project folder as its working directory, before Codex's launcher used the user-level store there |
+
+Ruflo's rotated backups in `.swarm/backups/` are not strays. The search skips
+`node_modules`, `.git` and the contents of dot folders such as `.claude/worktrees`,
+and says so when it stops early. Before you delete a stray, inspect it read-only
+as described above. It may hold rows that exist nowhere else.
+
+### Memory backup and distillation
+
+Ruflo, not ak, backs up and distills project memory. Both jobs are workers inside
+the project's Ruflo daemon. The backup worker writes a snapshot to `.swarm/backups/`
+(the last seven are kept) about 10 minutes after the daemon starts, then at most once
+a day. Distillation runs every 30 minutes. `ak status` shows when each last ran,
+from the files Ruflo writes in `.claude-flow/metrics/` and the newest snapshot in
+`.swarm/backups/`:
+
+- A backup older than 48 hours, or none at all, is a warning only when no daemon
+  runs for the project. A failed attempt is always a warning.
+- An old distillation is information only. A failed or corrupt run is a warning.
+- The `daemons` row is information, not ok, when the project has memory and no
+  daemon, and it names the setting that stops Ruflo starting one on use.
+
+The daemon ends itself after 12 hours, sooner if its workers stop running. `ak setup`
+starts one, but Ruflo's start-on-use is off in a project set up by `ruflo init` or
+`ak setup` (`claudeFlow.daemon.autoStart: false` in `.claude/settings.json`). Backups
+therefore stop within a day of setup unless you start the daemon again:
+
+```bash
+ruflo daemon start          # in the project root; runs both workers until it ends
+ruflo memory backup         # a one-off snapshot of .swarm/memory.db
+```
+
+Both jobs cover `.swarm/memory.db` only. Nothing in Ruflo backs up or distills
+`.swarm/agentdb-memory.db`, the store the MCP tools write. Back it up into its own
+folder, because rotation keeps only the newest snapshots in the destination:
+
+```bash
+ruflo memory backup --db .swarm/agentdb-memory.db --dir .swarm/backups/agentdb
+```
+
+This takes a consistent snapshot, WAL included, and leaves `memory.db`'s snapshots
+alone (checked on Ruflo 3.45.0). `ak status` shows the age of the newest one.
 
 ## AQE embedding backend unavailable or provenance unverified
 
 Run `ak x aqe-embedding status` to inspect the selected backend and projection
 conflicts, then `ak x aqe-embedding verify` for a synthetic backend proof. A local
 model can be restored with `ak x aqe-embedding prepare --yes` after selecting local
-Ollama. A different fingerprint or unknown corpus provenance requires separate
+Ollama. If sync or verify says Ollama is installed but not running, open the Ollama
+app or run `ollama serve`, then retry.
+A different fingerprint or unknown corpus provenance requires separate
 migration planning; do not delete RVF locks or relabel vectors.
 See [AQE embeddings](AQE-EMBEDDINGS.md) for the full recovery and environment guide.
+
+`ak status` does not contact the embedding service. Its `aqe-embedding` row shows the
+last live check from `ak sync`, `ak x verify aqe` or `ak status --live` with its age and
+reason. After you fix the service, run `ak status --live` (quick) or `ak x verify aqe` to
+replace an old failure.

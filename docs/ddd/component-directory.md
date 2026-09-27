@@ -201,7 +201,7 @@ normative and this table restates it for readers of this document.
 | DirectoryEntry | One component's editorial identity: category, tagline, paragraph, links, icon, and a detection join key |
 | Editorial content | Authored, versioned prose and links — the part of a card that is true regardless of machine state |
 | Detection fact | An observed install/version/configured fact borrowed read-only from existing collectors, rendered only as chips |
-| State chip | The card element that renders detection facts (`installed v…` / `not installed — ak setup adds it` / `configured` / `unknown`) |
+| State chip | The card element that renders detection facts (`installed v…` / `not installed — ak setup adds it` / `configured` / `unknown`); host cards use the host management words (`Managed by ak` / `Found, not managed` / `Not installed`, ADR-0053) |
 | Monogram tile | The honest icon for a component with no official mark: initials on a category-hued tile |
 | Register contract | The editorial writing rules (one ~50-word paragraph, plain language, no runtime claims, no superlatives) |
 | Parity gate | The test asserting managed-tools registry ↔ directory completeness in both directions |

@@ -8,12 +8,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { run } from './exec.mjs';
-import { rufloRoot, aqeRoot } from './paths.mjs';
-import { agentdbLocations, bsq3IsNative, bsq3Root, deriveBsq3Spec, selfSpecConflicts, rufloMemoryContexts, aidefencePresent } from './natives.mjs';
+import { rufloRoot, aqeRoot, installEditsPath } from './paths.mjs';
+import { pruneInstallEdits, recordInstallEdit } from './install-edits.mjs';
+import { agentdbLocations, bsq3IsNative, bsq3Root, deriveBsq3Spec, selfSpecConflicts, rufloMemoryContexts, aidefencePresent, probeBsq3Runtime } from './natives.mjs';
 import { KIT_PKG } from './versions.mjs';
 import { scanRvf, quarantine } from './rvf.mjs';
-import { INSTALL_SPEC, INSTALL_ARGS, RELEASE_ASSET as RB_RELEASE_ASSET, NIGHTLY_LABEL as RB_NIGHTLY_LABEL, nightlyAgentPlist as rbNightlyPlist, present as rbPresent, latestRelease as rbLatestRelease, recordInstalledRelease as rbRecord } from './ruvnet-brain.mjs';
-import { PKG as ADB_PKG, present as adbPresent, coherence as adbCoherence } from './agentdb.mjs';
+import {
+  INSTALL_SPEC, INSTALL_ARGS, UPDATE_ARGS as RB_UPDATE_ARGS, UPDATE_ENV as RB_UPDATE_ENV,
+  RELEASE_ASSET as RB_RELEASE_ASSET, NIGHTLY_LABEL as RB_NIGHTLY_LABEL, nightlyAgentPlist as rbNightlyPlist,
+  present as rbPresent, updaterPresent as rbUpdaterPresent, installedReleaseOnDisk as rbReleaseOnDisk,
+  latestRelease as rbLatestRelease, recordInstalledRelease as rbRecord, recordHeldRefresh as rbRecordHeld,
+} from './ruvnet-brain.mjs';
 import { globalInstallArgs, installGlobalCli } from './npm-global-install.mjs';
 
 // NB: `--allow-scripts` is rejected for project-scoped installs (EALLOWSCRIPTS,
@@ -49,8 +54,15 @@ const failTail = (r) =>
  *  3. install a copy into `dir` — only when better-sqlite3 is not resolvable
  *     from `dir` at all, so there is nothing in place to build.
  *
- *  `runner` is injectable so the ladder is testable without npm or a network. */
-export async function ensureNativeBsq3(dir, { runner = run } = {}) {
+ *  `runner` is injectable so the ladder is testable without npm or a network.
+ *
+ *  Every manifest edit is receipted first (install-edits.mjs; audit Addendum 2,
+ *  problem 3): file, field, original value, ak's value and time, written to
+ *  `ledger` BEFORE `npm pkg set`, so status and About can show it and
+ *  `ak uninstall` can put the original back.
+ *  @param {string} dir
+ *  @param {{ runner?: typeof run, ledger?: string, now?: () => number }} [options] */
+export async function ensureNativeBsq3(dir, { runner = run, ledger = installEditsPath(), now = Date.now } = {}) {
   let pkgRoot = bsq3Root(dir);
   if (!pkgRoot) {
     // Derive the spec from THIS tree's own overrides/deps: a hardcoded `@^12` is
@@ -69,6 +81,7 @@ export async function ensureNativeBsq3(dir, { runner = run } = {}) {
     // the still-stale `optionalDependencies`. All conflicting fields have to
     // move together before the install runs.
     for (const field of selfSpecConflicts(dir, spec)) {
+      recordInstallEdit({ file: path.join(dir, 'package.json'), section: field, name: 'better-sqlite3', to: spec, now }, { ledger });
       await runner('npm', ['pkg', 'set', `${field}.better-sqlite3=${spec}`], { cwd: dir, timeout: 30_000 });
     }
     const installed = await npmInstallInto(dir, `better-sqlite3@${spec}`, runner);
@@ -92,12 +105,48 @@ export async function ensureNativeBsq3(dir, { runner = run } = {}) {
   return { ok: false, how: failTail(r) };
 }
 
+/** Rebuild a binding FILE that exists but provably will not load (built for
+ *  another Node ABI or platform, or damaged). The file is removed first:
+ *  prebuild-install extracts over an existing file in place (tar-fs writes through
+ *  createWriteStream), and a Node process started before a Node upgrade can still
+ *  map the old file. A new file gets a new inode, and the ladder runs exactly as
+ *  for a missing binding. Success is the load test passing, not a file on disk. */
+async function rebuildUnloadable(dir, runner, ledger) {
+  const binding = path.join(bsq3Root(dir), 'build', 'Release', 'better_sqlite3.node');
+  try {
+    fs.rmSync(binding, { force: true });
+  } catch (e) {
+    return { ok: false, how: `FAILED (could not remove the binding that will not load: ${e.code ?? e.message})` };
+  }
+  const built = await ensureNativeBsq3(dir, { runner, ledger });
+  if (!built.ok) return built;
+  const after = await probeBsq3Runtime(dir, { runner });
+  if (after.state === 'native') return built;
+  if (after.state === 'unavailable') return { ok: false, how: `FAILED (rebuilt binding still does not load: ${after.reason})` };
+  return { ok: true, how: `${built.how}; load unverified (${after.reason})` };
+}
+
+/** One ruflo memory-runtime context. A missing binding file takes the build
+ *  ladder as before. A present file is load-tested, the same test status uses,
+ *  and rebuilt only when the probe proves it will not load (`unavailable`). An
+ *  `inconclusive` probe (timeout, crash) never triggers a rebuild in ruflo's tree. */
+async function healRuntimeContext(dir, runner, ledger) {
+  if (!bsq3IsNative(dir)) return (await ensureNativeBsq3(dir, { runner, ledger })).how;
+  const probe = await probeBsq3Runtime(dir, { runner });
+  if (probe.state === 'native') return null;
+  if (probe.state === 'inconclusive') return `load probe inconclusive (${probe.reason}), not rebuilt`;
+  return (await rebuildUnloadable(dir, runner, ledger)).how;
+}
+
 /** Native better-sqlite3 into every location the runtime resolves: the agentdb
  *  copies, agentic-qe, AND the ruflo memory-runtime contexts (@claude-flow/memory
  *  + /cli) — the copies `npx ruflo memory` actually loads. #45: healing only
  *  agentdb left ruflo's own memory on the WASM fallback (memory store failing)
- *  while status still read agentdb-native. `runner` injectable for hermetic tests. */
-export async function healNatives({ runner = run } = {}) {
+ *  while status still read agentdb-native. `runner` and the receipt `ledger`
+ *  are injectable for hermetic tests. Receipts whose files no longer hold ak's
+ *  value (Ruflo was upgraded or reinstalled) are forgotten first. */
+export async function healNatives({ runner = run, ledger = installEditsPath() } = {}) {
+  pruneInstallEdits({ ledger });
   const details = [];
   for (const dir of agentdbLocations()) {
     // Re-check right before installing: an upgrade earlier in the same sync
@@ -105,16 +154,18 @@ export async function healNatives({ runner = run } = {}) {
     // the 3.29.0 tree) between enumeration and heal.
     if (!fs.existsSync(dir)) continue;
     if (bsq3IsNative(dir)) continue;
-    details.push(`${dir}: ${(await ensureNativeBsq3(dir, { runner })).how}`);
+    details.push(`${dir}: ${(await ensureNativeBsq3(dir, { runner, ledger })).how}`);
   }
   if (fs.existsSync(aqeRoot()) && !bsq3IsNative(aqeRoot())) {
-    details.push(`agentic-qe: ${(await ensureNativeBsq3(aqeRoot(), { runner })).how}`);
+    details.push(`agentic-qe: ${(await ensureNativeBsq3(aqeRoot(), { runner, ledger })).how}`);
   }
   // ruflo memory runtime — missing contexts are already filtered out (older trees
-  // may lack either package, EC-2), so this is a silent no-op on them.
+  // may lack either package, EC-2), so this is a silent no-op on them. Sequential:
+  // both contexts can resolve one shared copy, and a rebuild for the first
+  // changes what the second one's probe sees.
   for (const { context, dir } of rufloMemoryContexts()) {
-    if (bsq3IsNative(dir)) continue;
-    details.push(`@claude-flow/${context}: ${(await ensureNativeBsq3(dir, { runner })).how}`);
+    const how = await healRuntimeContext(dir, runner, ledger);
+    if (how) details.push(`@claude-flow/${context}: ${how}`);
   }
   return { ok: !details.some((d) => d.includes('FAILED')), detail: details.join('; ') || 'already native everywhere' };
 }
@@ -181,20 +232,57 @@ export async function selfUpdate(version, { runner = run } = {}) {
   };
 }
 
-/** Install (or update to latest) the RuvNet Brain via its npx installer.
- *  The installer is idempotent and skips the ~2 GB download when the KB is
- *  already present — pass force:true to bypass that skip (used when a drift
- *  check saw a newer release). Runs `--no-stack --no-enhance`: ak already
- *  manages ruflo/RuVector and owns the CLAUDE.md grounding block. */
+/** Refresh an existing Brain through the bundle's own updater. `--update`
+ *  ignores `--version`, so success is judged by the release on disk, never by
+ *  the tag ak asked about: a changed release is stamped; an unchanged one is
+ *  `degraded` (the updater ran, nothing landed) and stamps nothing. A refusal or
+ *  a no-op is held (recordRefusal) so the next sync does not repeat it. */
+async function refreshBrainWithUpdater({ runner, present, recordRelease, recordRefusal, releaseOnDisk, tag }) {
+  const before = releaseOnDisk();
+  const r = await runner('npx', ['-y', INSTALL_SPEC, ...RB_UPDATE_ARGS],
+    { timeout: 900_000, env: { ...RB_UPDATE_ENV } });
+  if (r.code !== 0) return refreshFailure(r, { present, recordRefusal, tag });
+  const after = releaseOnDisk();
+  if (!after || after === before) {
+    const detail = `updater ran; installed release still ${before ? `v${before}` : 'unknown'}${tag ? ` (latest v${tag})` : ''}`;
+    recordRefusal({ detail, latest: tag });
+    return { ok: false, status: 'degraded', usable: true, detail };
+  }
+  recordRelease(after);
+  return { ok: true, status: 'ok', usable: true, detail: `updated to release v${after}` };
+}
+
+/** A failed refresh of an EXISTING install. A deliberate refusal by the
+ *  installer or updater is held for this release pair; anything else (a
+ *  network error, a timeout) stays retryable by the next sync. */
+function refreshFailure(r, { present, recordRefusal, tag }) {
+  const detail = brainInstallFailure(r);
+  if (brainRefused(r)) recordRefusal({ detail, latest: tag });
+  return { ok: false, status: 'failed', usable: present(), detail };
+}
+
+/** Install (or refresh) the RuvNet Brain. The heal, not its caller, chooses the
+ *  path from what is on disk:
+ *   · the bundle ships kb/forge-update.mjs → `--update` (the installer's own
+ *     refresh; a forced fresh install is refused for a Brain with private stores,
+ *     after downloading the whole bundle — #237 §4);
+ *   · a present bundle without the updater → pinned `--force` reinstall, the
+ *     only refresh a pre-updater bundle can take;
+ *   · nothing installed → pinned fresh install.
+ *  Every path stamps only the release observed on disk (SOURCE.json releaseTag);
+ *  a pinned install of a pre-stamping bundle falls back to the pinned tag.
+ *  Runs `--no-stack --no-enhance`: ak already manages ruflo/RuVector and owns
+ *  the CLAUDE.md grounding block.
+ *  `cfg`: the caller's in-memory kit config. A caller that saves its own copy
+ *  later (sync, setup) passes it, so the release stamp and a held refresh are
+ *  written through that copy instead of being erased by the caller's next save. */
 export async function installRuvnetBrain({
-  force = false, runner = run, latestRelease = rbLatestRelease,
-  present = rbPresent, recordRelease = rbRecord,
+  cfg = undefined,
+  runner = run, latestRelease = rbLatestRelease, present = rbPresent,
+  recordRelease = (tag) => rbRecord(tag, cfg),
+  updaterPresent = rbUpdaterPresent, releaseOnDisk = rbReleaseOnDisk,
+  recordRefusal = (refusal) => rbRecordHeld(refusal, cfg),
 } = {}) {
-  // Resolve the release tag FIRST and pin the installer to it (--version v<tag>),
-  // so the bundle that lands on disk is exactly the release ak stamps — the old
-  // install-then-stamp order left a window where a release published mid-install
-  // made the stamp disagree with disk. Offline (tag null): the installer's own
-  // latest logic applies and the stamp is best-effort afterwards, as before.
   const release = await latestRelease();
   const tag = release?.version ?? null;
   // Do not launch the installer for a release that cannot possibly land. Its
@@ -207,36 +295,57 @@ export async function installRuvnetBrain({
       detail: `release v${tag} is missing ${RB_RELEASE_ASSET}; automatic update is blocked upstream and the existing Brain was left unchanged`,
     };
   }
+  if (updaterPresent()) {
+    return refreshBrainWithUpdater({ runner, present, recordRelease, recordRefusal, releaseOnDisk, tag });
+  }
+  // Pin the installer to the resolved tag (--version v<tag>) so a release
+  // published mid-install cannot land something other than what was resolved.
+  const reinstall = present();
   const args = ['-y', INSTALL_SPEC, ...INSTALL_ARGS,
     ...(tag ? ['--version', `v${tag}`] : []),
-    ...(force ? ['--force'] : [])];
+    ...(reinstall ? ['--force'] : [])];
   const r = await runner('npx', args, { timeout: 900_000 });
-  if (r.code === 0) {
-    // Stamp the release-tag namespace so drift converges — the plugin's own
-    // semver never tracks the KB release, so we can't use it.
-    const stamped = tag ?? (await latestRelease())?.version ?? null;
-    if (stamped) recordRelease(stamped);
-    return {
-      ok: true, status: 'ok', usable: true,
-      detail: stamped ? `installed release v${stamped}` : 'installed (release tag unknown)',
-    };
+  if (r.code !== 0) {
+    // Presence after a non-zero exit can be a stale or partial prior install. It
+    // is useful evidence for `usable`, never proof that this install succeeded.
+    if (reinstall) return refreshFailure(r, { present, recordRefusal, tag });
+    return { ok: false, status: 'failed', usable: present(), detail: brainInstallFailure(r) };
   }
-  // Presence after a non-zero exit can be a stale or partial prior install. It
-  // is useful evidence for `usable`, never proof that this install succeeded.
+  const stamped = releaseOnDisk() ?? tag;
+  if (stamped) recordRelease(stamped);
   return {
-    ok: false, status: 'failed', usable: present(),
-    detail: brainInstallFailure(r),
+    ok: true, status: 'ok', usable: true,
+    detail: stamped ? `installed release v${stamped}` : 'installed (release tag unknown)',
   };
 }
 
-/** Prefer the installer's causal error over its generic closing reassurance.
- *  Newer updater failures write the release-asset error to stdout while the
- *  final "Nothing is left half-installed" footer lands on stderr. */
+// ANSI SGR/escape stripper for installer output (ESC built via fromCharCode so
+// the regex stays clean under eslint no-control-regex).
+const BRAIN_ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[A-Za-z]`, 'g');
+const BRAIN_CAUSAL = /\[forge-update\]\s*ERROR:|install stopped:|can't update:|HTTP\s+\d{3}|no matching .*\.zip asset/i;
+// The installer's remediation line after a refusal ("Run npx ruvnet-brain
+// --update so …", "Fix: re-run the installer — npx ruvnet-brain …").
+const BRAIN_HINT = /^(?:Run|Fix:)\s.*\bnpx ruvnet-brain\b/i;
+// Deliberate refusals by the installer (`die()` → "install stopped:") or the
+// bundle's updater ("[forge-update] ERROR:", "refusing to update", missing
+// updater) — as opposed to a transient network or timeout failure.
+const BRAIN_REFUSAL = /install stopped:|\[forge-update\]\s*ERROR:|refusing to update|can't update:/i;
+
+/** Did the installer or updater refuse, rather than fail transiently? */
+export function brainRefused(result) {
+  return BRAIN_REFUSAL.test(`${result?.stdout ?? ''}\n${result?.stderr ?? ''}`.replace(BRAIN_ANSI, ''));
+}
+
+/** Prefer the installer's causal error, plus its remediation hint, over its
+ *  generic closing reassurance. Newer updater failures write the release-asset
+ *  error to stdout while the final "Nothing is left half-installed" footer
+ *  lands on stderr. Terminal color codes never reach a status/sync detail. */
 export function brainInstallFailure(result) {
-  const lines = `${result?.stdout ?? ''}\n${result?.stderr ?? ''}`
+  const lines = `${result?.stdout ?? ''}\n${result?.stderr ?? ''}`.replace(BRAIN_ANSI, '')
     .split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const causal = lines.filter((line) => /\[forge-update\]\s*ERROR:|install stopped:|HTTP\s+\d{3}|no matching .*\.zip asset/i.test(line));
-  const chosen = causal.slice(-2).join(' | ') || lines.slice(-2).join(' ') || `exit ${result?.code ?? 1}`;
+  const causal = lines.filter((line) => BRAIN_CAUSAL.test(line)).slice(-2);
+  const hint = causal.length ? lines.filter((line) => BRAIN_HINT.test(line)).slice(-1) : [];
+  const chosen = [...causal, ...hint].join(' | ') || lines.slice(-2).join(' ') || `exit ${result?.code ?? 1}`;
   return chosen.slice(0, 320);
 }
 
@@ -261,32 +370,6 @@ export async function disableRuvnetBrainNightly({ runner = run } = {}) {
     return { ok: false, detail: `couldn't remove ${plist}: ${e.message} — remove it by hand or run \`npx ruvnet-brain --disable-nightly\`` };
   }
   return { ok: true, detail: 'nightly self-updater disabled (LaunchAgent removed; brain updates flow through ak sync)' };
-}
-
-/** Ensure the standalone agentdb CLI is present AND coherent with ruflo's
- *  bundled agentdb. Pins the global to the bundled version (not npm-latest) so
- *  the shared cognitive store never skews on the core version — a core skew is
- *  the corruption risk this heal exists to prevent. Idempotent: a no-op when
- *  already present and coherent. */
-export async function healAgentdb({
-  runner = run, coherence = adbCoherence, present = adbPresent,
-} = {}) {
-  const c = coherence();
-  // Already present and coherent (identical or prerelease-only diff) → nothing.
-  if (c.present && c.ok && c.skew !== 'core') {
-    return { ok: true, detail: `present ${c.global}${c.skew === 'prerelease' ? ` (bundled ${c.bundled}; prerelease diff ok)` : ' (coherent with ruflo)'}` };
-  }
-  // Pin to ruflo's bundled version; fall back to latest only when unknown.
-  const spec = c.target ? `${ADB_PKG}@${c.target}` : `${ADB_PKG}@latest`;
-  const r = await runner('npm', globalInstallArgs(spec), { timeout: 600_000 });
-  if (r.code !== 0) {
-    return {
-      ok: false, status: 'failed', usable: present(),
-      detail: (r.stderr || `exit ${r.code}`).trim().split('\n').slice(-2).join(' ').slice(0, 200),
-    };
-  }
-  const verb = !c.present ? 'installed' : 'repaired coherence →';
-  return { ok: true, status: 'ok', usable: true, detail: `${verb} ${c.target ?? 'latest'} (matches ruflo's bundled agentdb)` };
 }
 
 /** Stop all ruflo daemons before an upgrade (3.27+; best-effort). */

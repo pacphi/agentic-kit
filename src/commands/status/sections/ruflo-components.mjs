@@ -10,6 +10,7 @@ import { collectEvidence, writeEvidenceCache } from '../../../lib/ruflo-componen
 import { rufloComponentsEvidenceFile, rufloProjectRoot } from '../../../lib/ruflo-components/apply.mjs';
 
 const FIXABLE = new Set(['not-applied', 'drifted', 'needs-ruflo', 'blocked']);
+const RESTART_HOSTS = 'restart Claude Code, Codex and OpenCode, then run ak status --refresh';
 // 'blocked' reaches 'fail' (not 'warn') — controller ruling: a component ak
 // could not apply must count toward ak sync's post-heal convergence check
 // (`remaining = after.filter(r => r.level === 'fail' ...)` in sync.mjs), or a
@@ -30,8 +31,11 @@ export function rufloComponentRows(snapshot) {
   for (const c of snapshot.components) {
     const text = `${c.label} — ${c.state.label}: ${c.state.meaning}${c.state.action ? ` ${c.state.action}` : ''}`;
     rows.push({
-      ...row('ruflo-components', LEVEL(c.state.id), text,
-        FIXABLE.has(c.state.id) ? `sync applies ${c.label} (${c.state.action || 'reconcile'})` : null),
+      ...(FIXABLE.has(c.state.id)
+        ? row('ruflo-components', LEVEL(c.state.id), text, `sync applies ${c.label} (${c.state.action || 'reconcile'})`)
+        // Only a host restart confirms an applied value; that step is the user's.
+        : row('ruflo-components', LEVEL(c.state.id), text,
+          c.state.id === 'applied-unverified' ? RESTART_HOSTS : null, { repair: 'manual' })),
       state: c.state.id,
     });
   }

@@ -12,12 +12,13 @@ import {
   emptyLiveProjection, reduceLiveEvent, serializeLiveProjection, sweepLiveProjection,
 } from './projection.mjs';
 import { LiveReplayStream } from './replay-stream.mjs';
-import { adaptStructuredEvent } from './structured-adapter.mjs';
+import { adaptStructuredEvent, structuredRecordRejection } from './structured-adapter.mjs';
 import { canonicalSessionKey, resolveProjectIdentity } from './project-label.mjs';
+import { createFolderCorrelator } from './folder-correlator.mjs';
 import { workspaceFromSource } from './git-workspace.mjs';
 import { WorkspaceSnapshotStore } from './workspace-store.mjs';
 import {
-  bootstrapRecords, codexTranscriptId, discoverJsonl, discoverJsonlDetailed,
+  bootstrapRecords, codexTranscriptId, discoverJsonlDetailed,
 } from './native-transcript-discovery.mjs';
 
 // historySnapshot() is a one-shot on-demand scan, not a continuously-tailed
@@ -31,6 +32,20 @@ const HISTORY_DEFAULT_PAGE_SIZE = 100;
 const HISTORY_MAX_PAGE_SIZE = 250;
 const HISTORY_PAGE_TTL_MS = 60_000;
 const HISTORY_PAGE_CACHE_SIZE = 8;
+
+// Adapters fed by file tailers. Their health is recomputed from the tailed
+// files after every reconciliation pass instead of being set piecemeal.
+const TAILED_ADAPTERS = ['claude', 'codex', 'ruflo', 'aqe'];
+const STRUCTURED_ADAPTERS = ['ruflo', 'aqe'];
+
+function initialHealth(name) {
+  const base = { status: 'idle', files: 0, events: 0, errors: 0, lastError: null };
+  if (!TAILED_ADAPTERS.includes(name)) return base;
+  return {
+    ...base, readable: 0, missing: 0, unreadable: 0,
+    accepted: 0, rejected: 0, lastAcceptedAt: null, lastRejection: null,
+  };
+}
 
 /**
  * Coordinates bounded transcript tailers into one privacy-safe live projection.
@@ -52,6 +67,13 @@ export class LiveSessionsService {
   #runtimeSurvey = null;
   #workspaceStore = null;
   #historyPages = new Map();
+  #discovery = {};
+  #observedSince = null;
+  // Exact-folder matching for sessions outside a Git repository. All three
+  // stay in memory only: nothing here is published, persisted, or logged.
+  #folderOf = createFolderCorrelator();
+  #sourceCwds = new WeakMap(); // context → { cwd, canonical, folder }
+  #sessionFolders = new Map(); // sessionKey → correlator of its non-Git folder
 
   constructor(options = {}) {
     const roots = options.roots ?? {};
@@ -88,48 +110,68 @@ export class LiveSessionsService {
         options.workspaceFile ?? observabilityWorkspacePath(),
       );
     }
-    for (const name of ['claude', 'codex', 'ruflo', 'aqe', 'codex-state']) {
-      this.#health.set(name, { status: 'idle', files: 0, events: 0, errors: 0, lastError: null });
-    }
-    for (const name of ['opencode', 'runtime']) {
-      this.#health.set(name, { status: 'idle', files: 0, events: 0, errors: 0, lastError: null });
+    for (const name of [...TAILED_ADAPTERS, 'codex-state', 'opencode', 'runtime']) {
+      this.#health.set(name, initialHealth(name));
     }
   }
 
   start() {
     if (this.#started) return this;
     this.#started = true;
+    // Only the first start bootstraps metadata and follows new appends from
+    // the end. A start after an idle stop resumes every retained tailer at its
+    // offset, so work appended during the stop is replayed, and a file that
+    // appeared meanwhile is read from its first byte like any late file.
+    const initial = this.#observedSince == null;
+    if (initial) this.#observedSince = this.#options.now();
     this.#restoreWorkspaceHistory();
-    this.#reconcile(true);
+    this.#reconcile(initial);
     this.#timer = this.#options.setInterval(() => this.#reconcile(false), this.#options.intervalMs);
     this.#timer?.unref?.();
     return this;
   }
 
+  /**
+   * Stop following. Tailers keep their byte offsets, partial lines and
+   * session contexts so the next start() resumes instead of re-tailing from
+   * the end; they hold no descriptor or timer between passes.
+   */
   close() {
     if (this.#timer != null) this.#options.clearInterval(this.#timer);
     this.#timer = null;
     for (const tailer of this.#tailers.values()) tailer.close();
-    this.#tailers.clear();
-    this.#contexts.clear();
     this.#runtimeBindings.clear();
     this.#historyPages.clear();
     this.#started = false;
   }
 
   snapshot() {
+    const acquisitionCoverage = [...this.#contexts.values()].reduce((total, context) => {
+      const coverage = context.acquisitionCoverage;
+      if (!coverage) return total;
+      total.complete &&= coverage.complete;
+      total.truncated ||= coverage.truncated;
+      total.droppedLines += coverage.droppedLines;
+      total.pendingBytes += coverage.pendingBytes;
+      return total;
+    }, { complete: true, truncated: false, droppedLines: 0, pendingBytes: 0, omittedFiles: 0 });
+    // Operations written before observation began are not replayed (only
+    // session metadata is bootstrapped), so say when observation began.
+    acquisitionCoverage.observedSince = this.#observedSince;
+    // Native discovery tails only the newest files per host. When that bound
+    // leaves files out, coverage is incomplete and says how many.
+    acquisitionCoverage.sources = {};
+    for (const [adapter, discovered] of Object.entries(this.#discovery)) {
+      acquisitionCoverage.sources[adapter] = { ...discovered };
+      if (!discovered.truncated) continue;
+      acquisitionCoverage.complete = false;
+      acquisitionCoverage.truncated = true;
+      acquisitionCoverage.omittedFiles += Math.max(0, discovered.candidateFiles - discovered.returnedFiles);
+    }
     return {
       ...serializeLiveProjection(this.#projection),
       health: Object.fromEntries(this.#health),
-      acquisitionCoverage: [...this.#contexts.values()].reduce((total, context) => {
-        const coverage = context.acquisitionCoverage;
-        if (!coverage) return total;
-        total.complete &&= coverage.complete;
-        total.truncated ||= coverage.truncated;
-        total.droppedLines += coverage.droppedLines;
-        total.pendingBytes += coverage.pendingBytes;
-        return total;
-      }, { complete: true, truncated: false, droppedLines: 0, pendingBytes: 0 }),
+      acquisitionCoverage,
     };
   }
 
@@ -148,12 +190,13 @@ export class LiveSessionsService {
     for (const [file, tailer] of this.#tailers) {
       try {
         tailer.reconcile();
-        const context = this.#contexts.get(file);
-        this.#mark(context.adapter, { status: 'ok' });
       } catch (error) {
-        this.#error(this.#contexts.get(file)?.adapter ?? 'internal', error);
+        const context = this.#contexts.get(file);
+        if (context) context.fault = true;
+        this.#error(context?.adapter ?? 'internal', error);
       }
     }
+    this.#refreshSourceHealth();
     this.#ingestLedger();
     this.#scheduleRuntimeSessions();
     this.#projection = sweepLiveProjection(this.#projection, {
@@ -162,6 +205,12 @@ export class LiveSessionsService {
       expiryMs: this.#options.expiryMs,
       pendingExpiryMs: this.#options.pendingExpiryMs,
     });
+    // Folder correlators follow the bounded projection, not every session seen.
+    if (this.#sessionFolders.size > this.#options.maxSessions) {
+      for (const key of this.#sessionFolders.keys()) {
+        if (!this.#projection.sessions.has(key)) this.#sessionFolders.delete(key);
+      }
+    }
   }
 
   #discover(initial) {
@@ -184,12 +233,20 @@ export class LiveSessionsService {
     const codexLimit = nativeCapacity - claudeLimit;
     // Depth 3 reaches `<project>/<session>/subagents/agent-*.jsonl`; a session
     // delegating to workers stays observable while its own transcript is idle.
-    const claude = discoverJsonl(this.#options.roots.claude, {
+    const claudeDiscovery = discoverJsonlDetailed(this.#options.roots.claude, {
       maxDepth: 3, maxFiles: claudeLimit, accept: () => true,
     });
-    const codex = discoverJsonl(this.#options.roots.codex, {
+    const codexDiscovery = discoverJsonlDetailed(this.#options.roots.codex, {
       maxDepth: 4, maxFiles: codexLimit, accept: (name) => name.startsWith('rollout-'),
     });
+    // Keep what the bound left out, so coverage can say the window is capped
+    // instead of implying that no other session exists.
+    this.#discovery = {
+      claude: liveDiscoveryCoverage(claudeDiscovery, claudeLimit),
+      codex: liveDiscoveryCoverage(codexDiscovery, codexLimit),
+    };
+    const claude = claudeDiscovery.files;
+    const codex = codexDiscovery.files;
     // The bounded set is a moving window, not a startup-only choice. Replace
     // native tailers that fell out of the newest-file budget so an active
     // session created after the dashboard started can become observable.
@@ -199,8 +256,6 @@ export class LiveSessionsService {
       this.#tailers.get(file)?.close();
       this.#tailers.delete(file);
       this.#contexts.delete(file);
-      const current = this.#health.get(context.adapter);
-      this.#mark(context.adapter, { files: Math.max(0, (current?.files ?? 1) - 1) });
     }
     for (const file of claude) {
       this.#add(file, {
@@ -223,19 +278,28 @@ export class LiveSessionsService {
       // replayed records and into live tailing below.
       const bootstrap = { ...context, bootstrap: true };
       for (const record of bootstrapRecords(file, context.adapter)) {
-        this.#record(record, bootstrap, file);
+        this.#ingestRecord(record, bootstrap, file);
       }
       Object.assign(context, bootstrap, { bootstrap: false });
+      // The working directory was noted on the bootstrap copy; carry it over,
+      // since later records (a Codex tool call, say) do not repeat it.
+      const source = this.#sourceCwds.get(bootstrap);
+      if (source) this.#sourceCwds.set(context, source);
     }
-    const onRecord = (record) => this.#record(record, context, file);
-    const onError = (error) => this.#error(context.adapter, error);
+    const onRecord = (record) => this.#ingestRecord(record, context, file);
+    const onError = (error) => {
+      // An I/O failure is carried by the tailer's presence and clears when the
+      // file becomes readable again. A bad record stays a fault until a later
+      // record from the same file is accepted.
+      if (tailer.presence !== 'unreadable') context.fault = true;
+      this.#error(context.adapter, error);
+    };
     const tailer = new JsonlTailer(file, {
       onRecord, onError, startAtEnd: initial,
       onCoverage: (coverage) => { context.acquisitionCoverage = coverage; },
     });
     this.#tailers.set(file, tailer);
     this.#contexts.set(file, context);
-    this.#mark(context.adapter, { files: (this.#health.get(context.adapter)?.files ?? 0) + 1 });
   }
 
   /** Pure record → LiveEvent[] transformation, shared by the live tailer
@@ -249,6 +313,7 @@ export class LiveSessionsService {
       const identity = resolveProjectIdentity(explicitCwd);
       context.project = identity.label;
       context.projectKey = identity.key;
+      this.#noteSourceCwd(context, explicitCwd, identity.canonical);
       context.workspace = workspaceFromSource({
         cwd: explicitCwd,
         branch: record?.gitBranch ?? record?.payload?.git_branch ?? context.workspace?.branchLabel,
@@ -286,7 +351,100 @@ export class LiveSessionsService {
 
   #record(record, context, file) {
     const events = this.#buildEvents(record, context, file);
-    for (const event of events) this.#publish(event, context.adapter);
+    const folder = this.#transcriptFolder(context);
+    for (const event of events) {
+      this.#publish(event, context.adapter);
+      // undefined: this source has named no folder yet, so leave what is known.
+      if (folder) this.#sessionFolders.set(event.sessionKey, folder);
+      else if (folder === null) this.#sessionFolders.delete(event.sessionKey);
+    }
+    return events.length;
+  }
+
+  /** Remember a source's latest working directory without putting it on the context. */
+  #noteSourceCwd(context, cwd, canonical) {
+    if (this.#sourceCwds.get(context)?.cwd === cwd) return;
+    this.#sourceCwds.set(context, { cwd, canonical, folder: undefined });
+  }
+
+  /**
+   * The exact-folder correlator of a live transcript in a non-Git folder;
+   * null for a Git repository or a folder that no longer exists; undefined
+   * while the source has not named a folder. Computed once per working
+   * directory, only on the live path (History scans never need it).
+   */
+  #transcriptFolder(context) {
+    const source = this.#sourceCwds.get(context);
+    if (!source) return undefined;
+    if (source.canonical) return null;
+    if (source.folder === undefined) source.folder = this.#folderOf(source.cwd);
+    return source.folder;
+  }
+
+  /**
+   * Publish one parsed record and account for it in source health. A record
+   * that yields an event is accepted. A structured (ruflo/AQE) record that
+   * yields none is rejected with a fixed reason code, never its content. A
+   * native transcript record the adapter does not map is ignored by design.
+   */
+  #ingestRecord(record, context, file) {
+    const published = this.#record(record, context, file);
+    const current = this.#health.get(context.adapter) ?? {};
+    if (published > 0) {
+      context.fault = false;
+      this.#mark(context.adapter, {
+        accepted: (current.accepted ?? 0) + 1, lastAcceptedAt: this.#options.now(),
+      });
+    } else if (STRUCTURED_ADAPTERS.includes(context.adapter)) {
+      context.fault = true;
+      this.#mark(context.adapter, {
+        rejected: (current.rejected ?? 0) + 1,
+        lastRejection: structuredRecordRejection(record, {
+          surface: context.surface, sessionId: context.sessionId,
+        }) ?? 'not-an-event',
+      });
+    } else {
+      context.fault = false;
+    }
+  }
+
+  /**
+   * Recompute tailed-adapter health from the files themselves: how many are
+   * readable, missing or unreadable, and whether any file's latest record was
+   * bad. Precedence: degraded > awaiting-file > no-events > ok. A configured
+   * source whose file is absent is awaiting it (late creation is legitimate),
+   * never "ok".
+   */
+  #refreshSourceHealth() {
+    const tally = new Map(TAILED_ADAPTERS.map((name) => [name, {
+      sources: 0, readable: 0, missing: 0, unreadable: 0, faulted: 0,
+    }]));
+    for (const [file, context] of this.#contexts) {
+      const counts = tally.get(context.adapter);
+      if (!counts) continue;
+      counts.sources += 1;
+      const presence = this.#tailers.get(file)?.presence;
+      if (presence === 'readable') counts.readable += 1;
+      else if (presence === 'absent') counts.missing += 1;
+      else if (presence === 'unreadable') counts.unreadable += 1;
+      if (context.fault) counts.faulted += 1;
+    }
+    for (const [adapter, counts] of tally) {
+      const accepted = this.#health.get(adapter)?.accepted ?? 0;
+      let status = 'ok';
+      if (!counts.sources) status = 'idle';
+      else if (counts.unreadable || counts.faulted) status = 'degraded';
+      else if (counts.missing) status = 'awaiting-file';
+      else if (!accepted) status = 'no-events';
+      // `files` is a gauge of the files tailed right now, recounted every
+      // pass; incrementing it drifted upward on each idle stop and restart.
+      const discovered = this.#discovery[adapter];
+      this.#mark(adapter, {
+        status, files: counts.sources,
+        readable: counts.readable, missing: counts.missing, unreadable: counts.unreadable,
+        ...(discovered ? { candidateFiles: discovered.candidateFiles } : {}),
+      });
+    }
   }
 
   /**
@@ -433,8 +591,10 @@ export class LiveSessionsService {
         workspace: published.workspace,
       });
     }
+    // Status is not set here: tailed adapters recompute it once per pass, and
+    // the ledger and runtime adapters mark their own outcome after ingesting.
     const current = this.#health.get(adapter);
-    this.#mark(adapter, { status: 'ok', events: (current?.events ?? 0) + 1 });
+    this.#mark(adapter, { events: (current?.events ?? 0) + 1 });
   }
 
   #ingestLedger() {
@@ -491,7 +651,9 @@ export class LiveSessionsService {
       if (!item || !Number.isInteger(item.pid)
         || !['claude', 'codex', 'opencode'].includes(item.host)) continue;
       const identity = resolveProjectIdentity(item.cwd);
-      if (!identity.canonical || identity.label === 'unknown') continue;
+      const folder = this.#leaseFolder(item.cwd, identity);
+      if (folder === undefined) continue;
+      const sameFolder = (key) => folder === null || this.#sessionFolders.get(key) === folder;
       const runtimeKey = `${item.host}:${item.pid}:${item.startedAt ?? 'unreported'}`;
       seen.add(runtimeKey);
       const priorBinding = this.#runtimeBindings.get(runtimeKey);
@@ -500,7 +662,7 @@ export class LiveSessionsService {
       const synthetic = session?.id?.startsWith('runtime-');
       let rebound = false;
       if (!session || session.host !== item.host || session.projectKey !== identity.key
-        || terminal.has(session.status) || synthetic) {
+        || terminal.has(session.status) || synthetic || !sameFolder(sessionKey)) {
         const processStarted = Date.parse(item.startedAt ?? '');
         const candidateCutoff = Number.isFinite(processStarted)
           ? processStarted - 30_000
@@ -508,6 +670,7 @@ export class LiveSessionsService {
         const candidates = [...this.#projection.sessions.values()]
           .filter((candidate) => candidate.host === item.host
             && candidate.projectKey === identity.key
+            && sameFolder(candidate.key)
             && !candidate.parentSessionId
             && !candidate.id.startsWith('runtime-')
             && !terminal.has(candidate.status)
@@ -525,6 +688,11 @@ export class LiveSessionsService {
           session = candidate;
           sessionKey = candidate.key;
           rebound = synthetic;
+        } else if (folder !== null) {
+          // No unique same-folder transcript: no lease. A prior binding
+          // misses and quiesces like a vanished process.
+          seen.delete(runtimeKey);
+          continue;
         } else if (!session || terminal.has(session.status) || !synthetic) {
           session = null;
           const started = Date.parse(item.startedAt ?? '');
@@ -594,6 +762,20 @@ export class LiveSessionsService {
     this.#mark('runtime', { status: surveyHealthy ? 'ok' : 'degraded', files: active.length });
   }
 
+  /**
+   * What a runtime process may lease. A Git repository's key hashes its
+   * canonical root, so any same-key session may bind (null). A plain folder's
+   * key hashes only its name, so its process may lease a session only through
+   * an exact-folder match with that session's transcript, and never gets a
+   * runtime-only session keyed by a name: the folder's correlator. undefined
+   * means no lease is possible (unknown label, or the folder is gone).
+   */
+  #leaseFolder(cwd, identity) {
+    if (identity.label === 'unknown') return undefined;
+    if (identity.canonical) return null;
+    return this.#folderOf(cwd) ?? undefined;
+  }
+
   #dropRuntimeSynthetic(sessionKey) {
     if (!sessionKey || !this.#projection.sessions.has(sessionKey)) return;
     const sessions = new Map(this.#projection.sessions);
@@ -647,6 +829,16 @@ function compareHistorySessions(left, right) {
   return Date.parse(right.updatedAt ?? 0) - Date.parse(left.updatedAt ?? 0)
     || String(left.host ?? '').localeCompare(String(right.host ?? ''))
     || String(left.id ?? '').localeCompare(String(right.id ?? ''));
+}
+
+/** The live window's discovery bound per host; fileLimit is that host's share. */
+function liveDiscoveryCoverage(discovery, fileLimit) {
+  return {
+    candidateFiles: discovery.candidateCount,
+    returnedFiles: discovery.returnedCount,
+    fileLimit,
+    truncated: discovery.truncated,
+  };
 }
 
 function historyDiscoveryCoverage(discovery) {

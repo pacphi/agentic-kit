@@ -2,6 +2,8 @@
 // verify/uninstall). Those commands write into the developer's REAL home
 // (~/.claude/CLAUDE.md, ~/.config/agentic-kit/kit.json, ~/.claude.json, shell
 // rc files), so every test that exercises them must redirect the home first.
+// They also write relative to process.cwd(); that half is isolateProject() in
+// project-isolation.mjs.
 //
 // src/lib/paths.mjs snapshots os.homedir() at MODULE SCOPE, so the redirect
 // only works if it happens before that module is ever loaded. ESM hoists

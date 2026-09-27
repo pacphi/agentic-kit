@@ -377,7 +377,7 @@ test('runtime provider resolution is Claude-only across all live hosts', (t) => 
   assert.equal(providerFor('opencode'), null);
 });
 
-test('runtime leases require canonical Git repositories and expire after three missed surveys', (t) => {
+test('runtime leases require a Git repository or an exact-folder transcript match, and expire after three missed surveys', (t) => {
   const sb = sandbox();
   const repository = path.join(sb.dir, 'keel');
   const nonRepository = path.join(sb.dir, 'scratch');
@@ -511,6 +511,123 @@ test('runtime presence stays synthetic when same-repository transcript identity 
     .id.startsWith('runtime-'));
   assert.ok(sessions.filter((session) => session.id.startsWith('candidate-'))
     .every((session) => session.presence.state !== 'present'));
+});
+
+// Non-Git folders (#238 item 2, decision 2). A plain folder's project key is a
+// hash of its name only, so a process may lease a transcript session only when
+// both come from exactly the same folder.
+const plainFolderService = (t, sb, readActiveSessions, extra = {}) => {
+  let tick = null;
+  const options = {
+    roots: sb.roots, readCodexState: () => null, workspaceStore: null, runtimeScanMs: 0,
+    resolveClaudeProvider: () => null, readActiveSessions,
+    setInterval: (fn) => { tick = fn; return { unref() {} }; }, clearInterval: () => {},
+    now: () => '2026-09-25T01:16:00Z', ...extra,
+  };
+  // A workspace file means "use the real store", which needs no injected one.
+  if (extra.workspaceFile) delete options.workspaceStore;
+  const service = new LiveSessionsService(options);
+  t.after(() => { service.close(); fs.rmSync(sb.dir, { recursive: true, force: true }); });
+  return { service, tick: () => tick() };
+};
+const plainFolders = (sb) => {
+  const a = path.join(sb.dir, 'a', 'scratch');
+  const b = path.join(sb.dir, 'b', 'scratch');
+  fs.mkdirSync(a, { recursive: true });
+  fs.mkdirSync(b, { recursive: true });
+  fs.writeFileSync(path.join(sb.claude, 'S1.jsonl'), line({
+    type: 'user', sessionId: 'S1', cwd: a, timestamp: '2026-09-25T01:15:30Z',
+    message: { role: 'user', content: 'private prompt' },
+  }));
+  return { a, b };
+};
+const PROCESS_START = '2026-09-25T01:15:00Z';
+const sessionS1 = (service) => service.snapshot().sessions.find((session) => session.id === 'S1');
+
+test('a process in a non-Git folder leases the transcript session from exactly that folder', (t) => {
+  const sb = sandbox();
+  const { a } = plainFolders(sb);
+  const { service } = plainFolderService(t, sb,
+    () => [{ pid: 4242, host: 'claude', cwd: a, startedAt: PROCESS_START }]);
+  service.start();
+  assert.equal(sessionS1(service).presence.state, 'present', 'a waiting session in a plain folder stays in Live');
+  assert.deepEqual(service.snapshot().sessions.map((session) => session.id), ['S1'],
+    'the process is bound to its transcript, not shown as a second session');
+});
+
+test('a process in a same-named but different non-Git folder never leases the session', (t) => {
+  const sb = sandbox();
+  const { b } = plainFolders(sb);
+  const { service } = plainFolderService(t, sb,
+    () => [{ pid: 4242, host: 'claude', cwd: b, startedAt: PROCESS_START }]);
+  service.start();
+  assert.notEqual(sessionS1(service).presence.state, 'present', 'same basename is not the same folder');
+  assert.deepEqual(service.snapshot().sessions.map((session) => session.id), ['S1'],
+    'an unmatched plain-folder process gets no runtime-only session keyed by its name');
+});
+
+test('an exact-folder match compares real paths, so a symlinked cwd still matches', (t) => {
+  const sb = sandbox();
+  plainFolders(sb);
+  const alias = path.join(sb.dir, 'alias');
+  fs.symlinkSync(path.join(sb.dir, 'a'), alias, process.platform === 'win32' ? 'junction' : 'dir');
+  const { service } = plainFolderService(t, sb,
+    () => [{ pid: 4242, host: 'claude', cwd: path.join(alias, 'scratch'), startedAt: PROCESS_START }]);
+  service.start();
+  assert.equal(sessionS1(service).presence.state, 'present');
+});
+
+test('a bound plain-folder process that moves to a same-named folder loses the lease', (t) => {
+  const sb = sandbox();
+  const { a, b } = plainFolders(sb);
+  let cwd = a;
+  const { service, tick } = plainFolderService(t, sb,
+    () => [{ pid: 4242, host: 'claude', cwd, startedAt: PROCESS_START }]);
+  service.start();
+  assert.equal(sessionS1(service).presence.state, 'present');
+  cwd = b;
+  for (let survey = 0; survey < 3; survey++) tick();
+  assert.notEqual(sessionS1(service).presence.state, 'present',
+    'the prior binding is re-checked against the folder, not only the name-based project key');
+});
+
+test('a bootstrapped Codex session in a non-Git folder keeps its lease while records without a cwd stream in', (t) => {
+  const sb = sandbox();
+  const { a } = plainFolders(sb);
+  const id = '0199aaaa-bbbb-7ccc-8ddd-eeeeffff0003';
+  const file = path.join(sb.codex, `rollout-2026-09-25T01-15-30-${id}.jsonl`);
+  fs.writeFileSync(file, line({
+    type: 'session_meta', timestamp: '2026-09-25T01:15:30Z', payload: { id, cwd: a },
+  }));
+  const { service, tick } = plainFolderService(t, sb,
+    () => [{ pid: 5151, host: 'codex', cwd: a, startedAt: PROCESS_START }]);
+  service.start();
+  const presence = () => service.snapshot().sessions.find((session) => session.id === id).presence.state;
+  assert.equal(presence(), 'present', 'the folder learned during bootstrap binds the process');
+  fs.appendFileSync(file, functionCall('mid-turn'));
+  for (let survey = 0; survey < 3; survey++) tick();
+  assert.equal(toolNodes(service, id).length, 1, 'guard: the streamed record was ingested');
+  assert.equal(presence(), 'present', 'a record that carries no cwd does not forget the session folder');
+});
+
+test('the exact-folder correlator never reaches the snapshot, events, or workspace store', (t) => {
+  const sb = sandbox();
+  const { a } = plainFolders(sb);
+  const workspaceFile = path.join(sb.dir, 'observability-workspaces.json');
+  const { service, tick } = plainFolderService(t, sb,
+    () => [{ pid: 4242, host: 'claude', cwd: a, startedAt: PROCESS_START }], { workspaceFile });
+  const events = [];
+  service.subscribe((event) => events.push(event));
+  service.start();
+  tick();
+  assert.equal(sessionS1(service).presence.state, 'present');
+  assert.ok(fs.existsSync(workspaceFile), 'guard: the workspace store was written, so it is really checked');
+  const surfaces = [JSON.stringify(service.snapshot()), JSON.stringify(events),
+    JSON.stringify(service.replay()), fs.readFileSync(workspaceFile, 'utf8')];
+  for (const surface of surfaces) {
+    assert.doesNotMatch(surface, /[a-f0-9]{64}/, 'no keyed folder digest is published or persisted');
+    for (const fragment of [sb.dir, fs.realpathSync(sb.dir)]) assert.ok(!surface.includes(fragment));
+  }
 });
 
 test('runtime-only Claude sessions resolve provider identity without host inference', (t) => {
@@ -728,4 +845,340 @@ test('service coverage retains dropped-line evidence when a different source is 
   const coverage = service.snapshot().acquisitionCoverage;
   assert.equal(coverage.complete, false);
   assert.equal(coverage.droppedLines, 1);
+});
+
+test('live coverage is incomplete when the discovery file cap binds, and says how many were left out', (t) => {
+  const sb = sandbox();
+  for (let i = 0; i < 10; i++) {
+    const file = path.join(sb.claude, `session-${i}.jsonl`);
+    fs.writeFileSync(file, '');
+    fs.utimesSync(file, new Date(1_000 + i * 1_000), new Date(1_000 + i * 1_000));
+  }
+  fs.writeFileSync(path.join(sb.codex, 'rollout-2026-07-27T00-00-00-x1.jsonl'), '');
+  const service = new LiveSessionsService({
+    roots: sb.roots, maxFiles: 4, readCodexState: () => null, workspaceStore: null,
+    setInterval: () => ({ unref() {} }), clearInterval: () => {},
+    now: () => '2026-07-27T12:00:00Z',
+  });
+  t.after(() => { service.close(); fs.rmSync(sb.dir, { recursive: true, force: true }); });
+  service.start();
+  const coverage = service.snapshot().acquisitionCoverage;
+  assert.equal(coverage.complete, false, 'a capped window is not complete coverage');
+  assert.equal(coverage.truncated, true);
+  assert.equal(coverage.omittedFiles, 8);
+  assert.deepEqual(coverage.sources, {
+    claude: { candidateFiles: 10, returnedFiles: 2, fileLimit: 2, truncated: true },
+    codex: { candidateFiles: 1, returnedFiles: 1, fileLimit: 2, truncated: false },
+  });
+  const health = service.snapshot().health;
+  assert.equal(health.claude.files, 2);
+  assert.equal(health.claude.candidateFiles, 10, 'Sources can say the tailed files are the newest of more');
+  assert.equal(health.codex.candidateFiles, 1);
+});
+
+test('live coverage stays complete when every discovered file fits the cap', (t) => {
+  const sb = sandbox();
+  fs.writeFileSync(path.join(sb.claude, 'only.jsonl'), '');
+  const service = new LiveSessionsService({
+    roots: sb.roots, maxFiles: 4, readCodexState: () => null, workspaceStore: null,
+    setInterval: () => ({ unref() {} }), clearInterval: () => {},
+    now: () => '2026-07-27T12:00:00Z',
+  });
+  t.after(() => { service.close(); fs.rmSync(sb.dir, { recursive: true, force: true }); });
+  service.start();
+  const coverage = service.snapshot().acquisitionCoverage;
+  assert.equal(coverage.complete, true);
+  assert.equal(coverage.truncated, false);
+  assert.equal(coverage.omittedFiles, 0);
+});
+
+test('the files counter does not drift across idle stop and restart', (t) => {
+  const sb = sandbox();
+  for (let i = 0; i < 3; i++) fs.writeFileSync(path.join(sb.claude, `s${i}.jsonl`), '');
+  const service = new LiveSessionsService({
+    roots: sb.roots, maxFiles: 4, readCodexState: () => null, workspaceStore: null,
+    setInterval: () => ({ unref() {} }), clearInterval: () => {},
+    now: () => '2026-07-27T12:00:00Z',
+  });
+  t.after(() => { service.close(); fs.rmSync(sb.dir, { recursive: true, force: true }); });
+  const files = [];
+  for (let cycle = 0; cycle < 3; cycle++) {
+    service.start();
+    files.push(service.snapshot().health.claude.files);
+    service.close();
+  }
+  assert.deepEqual(files, [2, 2, 2], 'the dashboard reuses one service; each restart must recount, not add');
+});
+
+test('the files counter follows the moving newest-file window', (t) => {
+  const sb = sandbox();
+  let tick;
+  const add = (i) => {
+    const file = path.join(sb.claude, `s${i}.jsonl`);
+    fs.writeFileSync(file, '');
+    fs.utimesSync(file, new Date(1_000 + i * 1_000), new Date(1_000 + i * 1_000));
+  };
+  for (let i = 0; i < 3; i++) add(i);
+  const service = new LiveSessionsService({
+    roots: sb.roots, maxFiles: 4, readCodexState: () => null, workspaceStore: null,
+    setInterval: (fn) => { tick = fn; return { unref() {} }; }, clearInterval: () => {},
+    now: () => '2026-07-27T12:00:00Z',
+  });
+  t.after(() => { service.close(); fs.rmSync(sb.dir, { recursive: true, force: true }); });
+  service.start();
+  const seen = [service.snapshot().health.claude.files];
+  for (let i = 3; i < 6; i++) { add(i); tick(); seen.push(service.snapshot().health.claude.files); }
+  assert.deepEqual(seen, [2, 2, 2, 2]);
+});
+
+// Idle stop and restart (#238 item 4). The dashboard reuses one service: it
+// calls close() 30 s after the last Live client leaves and start() on the next
+// visit. A restart must resume every tailed file where it stopped.
+const idleService = (t, sb, extra = {}) => {
+  let tick = null;
+  const service = new LiveSessionsService({
+    roots: sb.roots, readCodexState: () => null, workspaceStore: null,
+    setInterval: (fn) => { tick = fn; return { unref() {} }; }, clearInterval: () => {},
+    now: () => '2026-09-25T01:16:00Z', ...extra,
+  });
+  t.after(() => { service.close(); fs.rmSync(sb.dir, { recursive: true, force: true }); });
+  const actions = [];
+  service.subscribe((event) => actions.push(event.action));
+  return { service, actions, tick: () => tick() };
+};
+const GAP_SESSION = '0199aaaa-bbbb-7ccc-8ddd-eeeeffff0002';
+const rolloutMeta = (id = GAP_SESSION) => line({
+  type: 'session_meta', timestamp: '2026-09-25T01:00:00Z', payload: { id, cwd: '/private/project' },
+});
+const functionCall = (callId) => line({
+  type: 'response_item', timestamp: '2026-09-25T01:15:01Z',
+  payload: { type: 'function_call', name: 'exec_command', call_id: callId, arguments: '{}' },
+});
+const toolNodes = (service, id = GAP_SESSION) => (service.snapshot().sessions
+  .find((session) => session.id === id)?.nodes ?? []).filter((node) => node.kind === 'tool');
+
+test('operations appended while Live is idle-stopped appear after restart', (t) => {
+  const sb = sandbox();
+  const file = path.join(sb.codex, `rollout-2026-09-25T01-00-00-${GAP_SESSION}.jsonl`);
+  fs.writeFileSync(file, rolloutMeta());
+  const { service, actions } = idleService(t, sb);
+  service.start();
+  service.close();
+  fs.appendFileSync(file, functionCall('during-gap'));
+  service.start();
+  assert.equal(toolNodes(service).length, 1, 'an operation appended during the idle stop must not be lost');
+  assert.equal(actions.filter((action) => action === 'session.discovered').length, 1,
+    'a restart resumes the tailed file; it does not rediscover the session');
+});
+
+test('a transcript created while Live is idle-stopped is read from its first byte on restart', (t) => {
+  const sb = sandbox();
+  const { service } = idleService(t, sb);
+  service.start();
+  service.close();
+  fs.writeFileSync(path.join(sb.codex, `rollout-2026-09-25T01-00-00-${GAP_SESSION}.jsonl`),
+    rolloutMeta() + functionCall('in-new-file'));
+  service.start();
+  assert.equal(toolNodes(service).length, 1, 'a file that appeared after observation began holds only new work');
+});
+
+test('a partial record at idle stop completes after restart', (t) => {
+  const sb = sandbox();
+  const file = path.join(sb.codex, `rollout-2026-09-25T01-00-00-${GAP_SESSION}.jsonl`);
+  fs.writeFileSync(file, rolloutMeta());
+  const { service, tick } = idleService(t, sb);
+  service.start();
+  const record = functionCall('split');
+  const half = Math.floor(record.length / 2);
+  fs.appendFileSync(file, record.slice(0, half));
+  tick();
+  service.close();
+  fs.appendFileSync(file, record.slice(half));
+  service.start();
+  assert.equal(toolNodes(service).length, 1, 'the buffered first half is kept across the stop');
+});
+
+test('live coverage says since when Live has been watching, across idle restarts', (t) => {
+  const sb = sandbox();
+  let now = '2026-09-25T01:00:00.000Z';
+  const { service } = idleService(t, sb, { now: () => now });
+  assert.equal(service.snapshot().acquisitionCoverage.observedSince, null, 'nothing is observed before start');
+  service.start();
+  assert.equal(service.snapshot().acquisitionCoverage.observedSince, '2026-09-25T01:00:00.000Z');
+  service.close();
+  now = '2026-09-25T02:00:00.000Z';
+  service.start();
+  assert.equal(service.snapshot().acquisitionCoverage.observedSince, '2026-09-25T01:00:00.000Z',
+    'offsets are kept across the idle stop, so observation is continuous');
+});
+
+// Structured-source health acceptance (#237 §E). Each case drives the real
+// service and tailer through a manual reconcile tick so every pass is explicit.
+const structuredService = (t, sources, extra = {}) => {
+  const sb = sandbox();
+  let tick = null;
+  const service = new LiveSessionsService({
+    roots: sb.roots, cwd: sb.dir, readCodexState: () => null, workspaceStore: null,
+    structuredSources: sources(sb.dir),
+    setInterval: (fn) => { tick = fn; return { unref() {} }; }, clearInterval: () => {},
+    now: () => '2026-09-26T12:00:00Z', ...extra,
+  });
+  t.after(() => { service.close(); fs.rmSync(sb.dir, { recursive: true, force: true }); });
+  service.start();
+  return { sb, service, tick: () => tick(), health: () => service.snapshot().health };
+};
+const record = (fields = {}) => line({
+  sessionId: 'qe-1', agentId: 'gate-1', action: 'gate.completed', status: 'completed', ...fields,
+});
+const canTestPermissions = process.platform !== 'win32' && process.getuid?.() !== 0;
+const pick = ({ status, files, readable, missing, unreadable, events, errors }) => ({
+  status, files, readable, missing, unreadable, events, errors,
+});
+
+test('an absent structured source reports awaiting file, never ok', (t) => {
+  const { health } = structuredService(t, (dir) => [{ surface: 'ruflo', file: path.join(dir, 'ruflo.jsonl') }]);
+  assert.deepEqual(pick(health().ruflo), {
+    status: 'awaiting-file', files: 1, readable: 0, missing: 1, unreadable: 0, events: 0, errors: 0,
+  });
+});
+
+test('an empty structured source is readable but reports no events yet', (t) => {
+  const { health } = structuredService(t, (dir) => {
+    fs.writeFileSync(path.join(dir, 'aqe.jsonl'), '');
+    return [{ surface: 'aqe', file: path.join(dir, 'aqe.jsonl') }];
+  });
+  assert.deepEqual(pick(health().aqe), {
+    status: 'no-events', files: 1, readable: 1, missing: 0, unreadable: 0, events: 0, errors: 0,
+  });
+});
+
+test('a valid structured record is accepted and makes the source ok', (t) => {
+  const { sb, tick, health } = structuredService(t, (dir) => {
+    fs.writeFileSync(path.join(dir, 'aqe.jsonl'), '');
+    return [{ surface: 'aqe', file: path.join(dir, 'aqe.jsonl') }];
+  });
+  fs.appendFileSync(path.join(sb.dir, 'aqe.jsonl'), record());
+  tick();
+  assert.equal(health().aqe.status, 'ok');
+  assert.equal(health().aqe.accepted, 1);
+  assert.equal(health().aqe.rejected, 0);
+  assert.equal(health().aqe.lastAcceptedAt, '2026-09-26T12:00:00Z');
+});
+
+test('a schema-invalid structured record is rejected with a reason and no record content', (t) => {
+  const { sb, tick, health } = structuredService(t, (dir) => {
+    fs.writeFileSync(path.join(dir, 'aqe.jsonl'), '');
+    return [{ surface: 'aqe', file: path.join(dir, 'aqe.jsonl') }];
+  });
+  fs.appendFileSync(path.join(sb.dir, 'aqe.jsonl'),
+    line({ sessionId: 'qe-1', agentId: 'gate-1', secret: 'PRIVATE BODY' }));
+  tick();
+  assert.equal(health().aqe.status, 'degraded', 'a source whose records are all rejected is not operational');
+  assert.equal(health().aqe.rejected, 1);
+  assert.equal(health().aqe.accepted, 0);
+  assert.equal(health().aqe.lastRejection, 'missing-action');
+  assert.ok(!JSON.stringify(health()).includes('PRIVATE BODY'));
+  fs.appendFileSync(path.join(sb.dir, 'aqe.jsonl'), record());
+  tick();
+  assert.equal(health().aqe.status, 'ok', 'a later accepted record restores the source');
+  assert.equal(health().aqe.rejected, 1, 'the rejection count is kept');
+});
+
+test('a malformed line keeps the source degraded within and after the same pass', (t) => {
+  const { sb, tick, health } = structuredService(t, (dir) => {
+    fs.writeFileSync(path.join(dir, 'ruflo.jsonl'), '');
+    return [{ surface: 'ruflo', file: path.join(dir, 'ruflo.jsonl') }];
+  });
+  fs.appendFileSync(path.join(sb.dir, 'ruflo.jsonl'), '{not json\n');
+  tick();
+  assert.equal(health().ruflo.status, 'degraded', 'ok must not overwrite the error from the same pass');
+  assert.equal(health().ruflo.errors, 1);
+  assert.equal(health().ruflo.lastError, 'invalid-json');
+  tick();
+  assert.equal(health().ruflo.status, 'degraded', 'nothing has been accepted since the error');
+  fs.appendFileSync(path.join(sb.dir, 'ruflo.jsonl'), record());
+  tick();
+  assert.equal(health().ruflo.status, 'ok');
+  assert.equal(health().ruflo.errors, 1);
+});
+
+test('an unreadable structured source is degraded with its error category', { skip: !canTestPermissions }, (t) => {
+  let file;
+  const { tick, health } = structuredService(t, (dir) => {
+    file = path.join(dir, 'aqe.jsonl');
+    fs.writeFileSync(file, record());
+    fs.chmodSync(file, 0o000);
+    return [{ surface: 'aqe', file }];
+  });
+  t.after(() => { try { fs.chmodSync(file, 0o600); } catch { /* removed */ } });
+  tick();
+  assert.deepEqual(pick(health().aqe), {
+    status: 'degraded', files: 1, readable: 0, missing: 0, unreadable: 1, events: 0, errors: 1,
+  });
+  assert.equal(health().aqe.lastError, 'EACCES');
+  fs.chmodSync(file, 0o600);
+  tick();
+  assert.equal(health().aqe.status, 'no-events', 'restored access clears the unreadable state');
+  assert.equal(health().aqe.readable, 1);
+});
+
+test('records in a structured source created after start are all ingested', (t) => {
+  const { sb, tick, health } = structuredService(t, (dir) => [{ surface: 'aqe', file: path.join(dir, 'late.jsonl') }]);
+  assert.equal(health().aqe.status, 'awaiting-file');
+  fs.writeFileSync(path.join(sb.dir, 'late.jsonl'),
+    record({ agentId: 'a1' }) + record({ agentId: 'a2' }) + record({ agentId: 'a3' }));
+  tick();
+  assert.equal(health().aqe.status, 'ok');
+  assert.equal(health().aqe.accepted, 3, 'late creation is legitimate; none of its records may be skipped');
+});
+
+test('removal, recreation, truncation, and rotation keep structured health truthful', (t) => {
+  const { sb, tick, health } = structuredService(t, (dir) => {
+    fs.writeFileSync(path.join(dir, 'ruflo.jsonl'), '');
+    return [{ surface: 'ruflo', file: path.join(dir, 'ruflo.jsonl') }];
+  });
+  const file = path.join(sb.dir, 'ruflo.jsonl');
+  fs.appendFileSync(file, record({ agentId: 'first' }));
+  tick();
+  assert.equal(health().ruflo.accepted, 1);
+
+  fs.rmSync(file);
+  tick();
+  assert.equal(health().ruflo.status, 'awaiting-file', 'a removed source is awaiting, not ok');
+  assert.equal(health().ruflo.missing, 1);
+  fs.writeFileSync(file, record({ agentId: 'recreated' }));
+  tick();
+  assert.equal(health().ruflo.status, 'ok');
+  assert.equal(health().ruflo.accepted, 2, 'the recreated file is read from its beginning');
+
+  fs.truncateSync(file, 0);
+  tick();
+  fs.appendFileSync(file, record({ agentId: 'after-truncation' }));
+  tick();
+  assert.equal(health().ruflo.accepted, 3);
+
+  fs.renameSync(file, `${file}.1`);
+  fs.writeFileSync(file, record({ agentId: 'rotated' }));
+  tick();
+  assert.equal(health().ruflo.accepted, 4);
+  assert.equal(health().ruflo.status, 'ok');
+});
+
+test('multiple structured sources report mixed health per surface', (t) => {
+  const { sb, tick, health } = structuredService(t, (dir) => {
+    fs.writeFileSync(path.join(dir, 'ruflo-a.jsonl'), '');
+    fs.writeFileSync(path.join(dir, 'aqe.jsonl'), '');
+    return [
+      { surface: 'ruflo', file: path.join(dir, 'ruflo-a.jsonl') },
+      { surface: 'ruflo', file: path.join(dir, 'ruflo-missing.jsonl') },
+      { surface: 'aqe', file: path.join(dir, 'aqe.jsonl') },
+    ];
+  });
+  fs.appendFileSync(path.join(sb.dir, 'ruflo-a.jsonl'), record());
+  fs.appendFileSync(path.join(sb.dir, 'aqe.jsonl'), record());
+  tick();
+  assert.deepEqual(pick(health().ruflo), {
+    status: 'awaiting-file', files: 2, readable: 1, missing: 1, unreadable: 0, events: 1, errors: 0,
+  }, 'one ingesting source must not hide a missing one');
+  assert.equal(health().aqe.status, 'ok');
 });

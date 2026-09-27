@@ -21,6 +21,8 @@ export const configDir = () => path.join(configBase(), 'agentic-kit');
 export const telemetryDir = () => path.join(configDir(), 'telemetry');
 export const hookHealingTransactionsDir = () => path.join(stateBase(), 'agentic-kit', 'hook-healing');
 export const maintenanceControlDir = () => path.join(stateBase(), 'agentic-kit', 'maintenance');
+/** Receipts for edits ak makes inside another tool's install (install-edits.mjs). */
+export const installEditsPath = () => path.join(stateBase(), 'agentic-kit', 'install-edits.json');
 /** The ruflo-era config dir — read-fallback for kit.json migration and the
  *  target of uninstall's legacy shell-kit cleanup. */
 export const legacyConfigDir = () => path.join(configBase(), 'ruflo');
@@ -68,11 +70,47 @@ export const opencodePluginsDir = () => path.join(opencodeDir(), 'plugins');
 export const opencodeAgentsDir = () => path.join(opencodeDir(), 'agents');
 export const opencodeSkillsDir = () => path.join(opencodeDir(), 'skills');
 
+/** The one user-level Ruflo memory store, for launches outside any usable
+ *  project folder (ruflo-memory.mjs rufloMemoryLocation). Ruflo defines no
+ *  user-level memory store; it keeps its user-level state in ~/.claude-flow
+ *  (@claude-flow/cli 3.45.0: memory/intelligence.js `~/.claude-flow/neural`,
+ *  update/rate-limiter.js, services/global-ai-budget.js, commands/daemon.js),
+ *  so ak's store follows that convention as ~/.claude-flow/memory. */
+export const userMemoryDir = (h = home, p = path) => p.join(h, '.claude-flow', 'memory');
+
+/** Folders that belong to a tool rather than to the user's work: a Ruflo
+ *  store is never created inside one. Environment overrides and the defaults
+ *  both count (a store under either is equally out of sight). The XDG-style
+ *  folders count on every platform: cross-platform CLIs keep them under the
+ *  Windows home too (Claude Code's native installer uses ~\.local\bin, tools
+ *  built on xdg-basedir use ~\.config). `p` is the path flavour, injectable so
+ *  Windows rules can be tested on any host (see globalRootCandidates). */
+export function toolInternalDirs({ home: h = home, env = process.env, platform = process.platform, p = path } = {}) {
+  const dirs = [
+    p.join(h, '.claude'), env.CLAUDE_CONFIG_DIR,
+    p.join(h, '.codex'), env.CODEX_HOME,
+    p.join(h, '.claude-flow'), p.join(h, '.ruflo'),
+    p.join(h, '.config'), env.XDG_CONFIG_HOME, p.join(h, '.local'), env.XDG_DATA_HOME,
+    env.XDG_STATE_HOME, p.join(h, '.cache'), env.XDG_CACHE_HOME,
+  ];
+  if (platform === 'win32') dirs.push(p.join(h, 'AppData'), env.APPDATA, env.LOCALAPPDATA);
+  if (platform === 'darwin') dirs.push(p.join(h, 'Library', 'Application Support'), p.join(h, 'Library', 'Caches'));
+  return [...new Set(dirs.filter(Boolean).map((dir) => p.resolve(dir)))];
+}
+
+/** The temporary roots themselves. A folder BELOW one (a disposable project)
+ *  is ordinary work and is not listed. */
+export function tempRoots({ env = process.env, platform = process.platform, p = path } = {}) {
+  const roots = [os.tmpdir(), env.TMPDIR, env.TEMP, env.TMP];
+  if (platform !== 'win32') roots.push('/tmp', '/var/tmp', '/private/tmp', '/private/var/tmp');
+  return [...new Set(roots.filter(Boolean).map((dir) => p.resolve(dir)))];
+}
+
 /** Per-project locations, relative to a project root. */
 export const projectSettings = (root) => path.join(root, '.claude', 'settings.json');
 export const projectSettingsLocal = (root) => path.join(root, '.claude', 'settings.local.json');
 export const projectStatusline = (root) => path.join(root, '.claude', 'helpers', 'statusline.cjs');
-export const projectMemoryDb = (root) => path.join(root, '.swarm', 'memory.db');
+export const projectMemoryDb = (root, p = path) => p.join(root, '.swarm', 'memory.db');
 export const projectAgentDbMemoryDb = (root) => path.join(root, '.swarm', 'agentdb-memory.db');
 export const projectClaudeFlowDir = (root) => path.join(root, '.claude-flow');
 export const projectAqeDir = (root) => path.join(root, '.agentic-qe');
@@ -165,11 +203,11 @@ export const npxCacheDir = () => {
  *  sends project-scoped env (ENABLE_* and AQE_LLM_PROVIDER) into the machine-wide
  *  user settings — while the sibling gates skip their project work — and the
  *  leak is then invisible/unreversible from the repo root. */
-export function repoRoot(cwd = process.cwd()) {
-  let dir = path.resolve(cwd);
+export function repoRoot(cwd = process.cwd(), p = path) {
+  let dir = p.resolve(cwd);
   for (let i = 0; i < 30; i++) {
-    if (fs.existsSync(path.join(dir, '.git'))) return dir;
-    const parent = path.dirname(dir);
+    if (fs.existsSync(p.join(dir, '.git'))) return dir;
+    const parent = p.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
   }

@@ -109,7 +109,7 @@ test('disabled and unowned deja-vu status is informational and calls no adapter 
   assert.deepEqual(calls, []);
   assert.deepEqual(rows, [{
     subsystem: 'deja-vu', level: 'info',
-    message: 'deja-vu disabled — package, host wiring, and history remain unprobed', fix: null,
+    message: 'deja-vu disabled — package, host wiring, and history remain unprobed', fix: null, repair: null,
   }]);
   assert.doesNotMatch(JSON.stringify(rows), /SENTINEL|\/Users\//);
 });
@@ -375,8 +375,8 @@ test('legacy invalid qe-court config is reported read-only and sync is not offer
     const qc = one(await collect(), 'qe-court');
     assert.equal(qc.level, 'warn');
     assert.match(qc.message, /writerIsNeverJuror/);
-    assert.match(qc.message, /agentic-qe >=3\.13\.3/);
-    assert.equal(qc.fix, null, 'ak sync no longer mutates upstream-owned qe-court routing');
+    assert.match(qc.fix, /agentic-qe >=3\.13\.3/);
+    assert.equal(qc.repair, 'manual', 'ak sync no longer mutates upstream-owned qe-court routing');
     assertUnchanged(before, path.dirname(qeCourtFile), 'status must leave legacy config untouched');
     assert.equal(fs.existsSync(`${qeCourtFile}.bak`), false);
   } finally {
@@ -389,7 +389,6 @@ test('legacy invalid qe-court config is reported read-only and sync is not offer
 // a surface the user deliberately switched off.
 for (const [key, value, subsystem, needle] of [
   ['security', false, 'security', /disabled/i],
-  ['agentdb', false, 'agentdb', /disabled/i],
 ]) {
   test(`kit.json ${key}:${value} yields an info row that sync will never act on`, async () => {
     seedHome(offlineKitConfig({ [key]: value }));
@@ -412,14 +411,28 @@ test('mcp.register:false yields an info row; the default yields an actionable wa
   assert.ok(on.fix);
 });
 
-test('a legacy ruflo-keyed MCP registration is reported as migratable drift', async () => {
+test("agentic-kit's own legacy ruflo-keyed MCP registration is reported as migratable drift", async () => {
+  seedHome();
+  fs.writeFileSync(paths.claudeUserMcpPath(),
+    JSON.stringify({ mcpServers: { ruflo: { command: 'ruflo', args: ['mcp', 'start'] } } }));
+  const rows = rowsFor(await collect(), 'mcp');
+  const legacy = rows.find((r) => r.message.includes('legacy'));
+  assert.ok(legacy, 'a legacy registration must surface');
+  assert.match(legacy.fix, /migrates it to claude-flow/);
+  fs.rmSync(paths.claudeUserMcpPath(), { force: true });
+});
+
+test('a legacy ruflo-keyed MCP registration in another form is reported as preserved, not migratable', async () => {
+  // #237 S1: register() never removes a shape agentic-kit did not write, so
+  // status must not plan a migration for it.
   seedHome();
   fs.writeFileSync(paths.claudeUserMcpPath(),
     JSON.stringify({ mcpServers: { ruflo: { command: 'ruflo' } } }));
   const rows = rowsFor(await collect(), 'mcp');
   const legacy = rows.find((r) => r.message.includes('legacy'));
   assert.ok(legacy, 'a legacy registration must surface');
-  assert.match(legacy.fix, /migrates it to claude-flow/);
+  assert.equal(legacy.fix, 'claude mcp remove ruflo -s user');
+  assert.equal(legacy.repair, 'manual', 'sync never removes it, so it must never plan it');
   fs.rmSync(paths.claudeUserMcpPath(), { force: true });
 });
 
@@ -434,6 +447,18 @@ test('a registered claude-flow MCP reports ok with the deny-rule count', async (
   assert.equal(row.level, 'ok');
   assert.match(row.message, /1 tool\(s\) denied/);
   fs.rmSync(paths.claudeUserMcpPath(), { force: true });
+});
+
+test('the AQE readiness hint is a manual step, never a sync plan item', async () => {
+  seedHome();
+  fs.mkdirSync(paths.projectAqeDir(PROJECT), { recursive: true });
+  try {
+    const hint = rowsFor(await collect(), 'aqe').find((r) => /ak x verify aqe/.test(r.fix ?? ''));
+    assert.ok(hint, 'the initialized-project hint must surface');
+    assert.equal(hint.repair, 'manual');
+  } finally {
+    rmrf(paths.projectAqeDir(PROJECT));
+  }
 });
 
 test('project-scope rows degrade to info in a project that was never set up', async () => {
@@ -459,8 +484,8 @@ test('an incompatible enabled Codex plugin warns without offering a sync mutatio
   const plugin = one(await collect(), 'codex-plugins');
   assert.equal(plugin.level, 'warn');
   assert.match(plugin.message, /unsupported top-level field\(s\): _note/);
-  assert.match(plugin.message, /Codex \/plugins/);
-  assert.equal(plugin.fix, null, 'sync must never rewrite Codex-owned plugin cache');
+  assert.match(plugin.fix, /Codex \/plugins/);
+  assert.equal(plugin.repair, 'manual', 'sync must never rewrite Codex-owned plugin cache');
 });
 
 test('status identifies the Claude companion when it is enabled inside Codex', async () => {
@@ -475,9 +500,9 @@ test('status identifies the Claude companion when it is enabled inside Codex', a
   const plugin = one(await collect(), 'codex-plugins');
   assert.equal(plugin.level, 'warn');
   assert.match(plugin.message, /Claude Code/);
-  assert.match(plugin.message, /ak heal hooks --host codex/);
-  assert.doesNotMatch(plugin.message, /refresh/);
-  assert.equal(plugin.fix, null, 'sync must never change user-owned Codex plugin enablement');
+  assert.match(plugin.fix, /ak heal hooks --host codex/);
+  assert.doesNotMatch(plugin.fix, /refresh/);
+  assert.equal(plugin.repair, 'manual', 'sync must never change user-owned Codex plugin enablement');
 });
 
 test('status reports malformed Codex config separately from plugin compatibility', async () => {
@@ -488,9 +513,9 @@ test('status reports malformed Codex config separately from plugin compatibility
   const plugin = one(await collect(), 'codex-plugins');
   assert.equal(plugin.level, 'warn');
   assert.match(plugin.message, /Codex config inspection issue/);
-  assert.match(plugin.message, /repair config\.toml/);
-  assert.doesNotMatch(plugin.message, /Codex \/plugins|plugin compatibility/);
-  assert.equal(plugin.fix, null);
+  assert.match(plugin.fix, /repair config\.toml/);
+  assert.doesNotMatch(`${plugin.message} ${plugin.fix}`, /Codex \/plugins|plugin compatibility/);
+  assert.equal(plugin.repair, 'manual');
 });
 
 test('status discloses both project-memory stores without asserting writer identity', async () => {
@@ -561,9 +586,72 @@ test('Codex MCP topology fails recursive self-registration and reports missing A
     assert.equal(rows.find((r) => /recursive codex/.test(r.message))?.level, 'fail');
     assert.equal(rows.find((r) => /agentic-qe MCP is not concretely/.test(r.message))?.level, 'warn');
     assert.equal(rows.find((r) => /duplicate Ruflo/.test(r.message))?.level, 'warn');
+    // Who repairs each: sync removes the exact recursive and legacy tables it
+    // can prove (codexMcpRepairPlan); Agentic-QE owns its own Codex registration.
+    assert.equal(rows.find((r) => /recursive codex/.test(r.message))?.repair, 'sync');
+    assert.equal(rows.find((r) => /duplicate Ruflo/.test(r.message))?.repair, 'sync');
+    assert.equal(rows.find((r) => /agentic-qe MCP is not concretely/.test(r.message))?.repair, 'manual');
   } finally {
     rmrf(path.join(PROJECT, '.codex'));
   }
+});
+
+test('Codex MCP topology marks custom recursive and duplicate registrations for manual review', async () => {
+  seedHome(offlineKitConfig({
+    integrations: { version: 3, hosts: { claude: true, codex: true, opencode: false }, bindings: [], ownership: {} },
+  }));
+  fs.mkdirSync(path.join(PROJECT, '.codex'), { recursive: true });
+  fs.writeFileSync(path.join(PROJECT, '.codex', 'config.toml'), [
+    '[mcp_servers.codex]', 'command = "codex"', 'args = ["mcp-server"]', 'startup_timeout_sec = 30',
+  ].join('\n'));
+  fs.mkdirSync(paths.codexDir(), { recursive: true });
+  fs.writeFileSync(paths.codexConfigPath(), [
+    '[mcp_servers.claude-flow]', 'command = "ruflo"', 'args = ["mcp", "start"]', '',
+    '[mcp_servers.claude-flow.env]', 'PRIVATE_DB = "keep"', '',
+    '[mcp_servers.ruflo]', 'command = "ak"', 'args = ["x", "ruflo-mcp"]',
+  ].join('\n'));
+  try {
+    const rows = rowsFor(await collect(), 'codex-mcp');
+    const recursive = rows.find((r) => /recursive codex/.test(r.message));
+    const duplicate = rows.find((r) => /duplicate Ruflo/.test(r.message));
+    assert.equal(recursive?.repair, 'manual', 'a table with extra fields is not provably ak-removable');
+    assert.equal(duplicate?.repair, 'manual', 'a duplicate carrying a user env is preserved by sync');
+    assert.doesNotMatch(duplicate.fix, /ak sync/, 'the manual fix must not send the user to a sync that will not act');
+  } finally {
+    rmrf(path.join(PROJECT, '.codex'));
+  }
+});
+
+test('a user-owned deprecated codex mcp-server entry is a manual removal', async () => {
+  seedHome(offlineKitConfig({
+    integrations: { version: 3, hosts: { claude: true, codex: true, opencode: false }, bindings: [], ownership: {} },
+  }));
+  fs.writeFileSync(path.join(PROJECT, '.mcp.json'), JSON.stringify({
+    mcpServers: { codex: { command: 'codex', args: ['mcp-server'] } },
+  }));
+  try {
+    const legacy = rowsFor(await collect(), 'codex-mcp').find((r) => /deprecated codex mcp-server/.test(r.message));
+    assert.ok(legacy, 'the deprecated projection must surface');
+    assert.match(legacy.fix, /claude mcp remove codex/);
+    assert.equal(legacy.repair, 'manual');
+  } finally {
+    rmrf(path.join(PROJECT, '.mcp.json'));
+  }
+});
+
+test('Codex MCP topology does not ask an aqe:false machine to register agentic-qe in Codex', async () => {
+  // #237 N1: with AQE opted out, `aqe platform setup codex` is advice for a
+  // tool the user declined; the topology rows must honor kit.json like the
+  // aqe section does.
+  seedHome(offlineKitConfig({
+    aqe: false,
+    integrations: { version: 3, hosts: { claude: true, codex: true, opencode: false }, bindings: [], ownership: {} },
+  }));
+  fs.mkdirSync(paths.codexDir(), { recursive: true });
+  fs.writeFileSync(paths.codexConfigPath(), '[mcp_servers.ruflo]\ncommand = "ak"\nargs = ["x", "ruflo-mcp"]\n');
+  const rows = rowsFor(await collect(), 'codex-mcp');
+  assert.ok(rows.length > 0, 'the Codex MCP section still reports its other checks');
+  assert.deepEqual(rows.filter((r) => /agentic-qe/.test(r.message) || /aqe platform setup/.test(r.fix ?? '')), []);
 });
 
 test('an initialized project reports its learned-pattern count', async () => {
@@ -763,6 +851,7 @@ test('enabled + JSONC config: refused honestly with a manual-merge fix, never a 
   assert.ok(oc, 'a JSONC-refused row must surface');
   assert.match(oc.message, /not plain JSON/);
   assert.match(oc.fix, /merge the ak wiring manually/);
+  assert.equal(oc.repair, 'manual', 'sync refuses to rewrite JSONC, so it must not plan this');
   // …and status left the file alone (read-only even here).
   assert.match(fs.readFileSync(ocJsonPath(), 'utf8'), /legal JSONC comment/);
 });
@@ -789,15 +878,32 @@ test('enabled + CLI absent: the hosts story, and no config-home probing beyond i
   assert.match(oc.fix, /sync installs opencode-ai/);
 });
 
-test('disabled + installed: complete opencode-row silence + the pick hint on providers', async () => {
+test('unmanaged + installed: complete opencode-row silence + the management row on providers', async () => {
   seedHome();
   const rows = await withOpencodeCli(() => collect());
   assert.equal(rowsFor(rows, 'opencode').length, 0,
-    'a disabled host claims no active wiring — no opencode rows at all');
-  const hint = rowsFor(rows, 'providers').find((r) => /opencode CLI installed but not enabled/.test(r.message));
-  assert.ok(hint, 'the providers row carries the adoption hint');
-  assert.match(hint.message, /ak host pick --host claude,opencode/);
-  assert.equal(hint.fix, null, 'advisory only — sync never opts a host in');
+    'an unmanaged host claims no active wiring — no opencode rows at all');
+  const providers = rowsFor(rows, 'providers');
+  const found = providers.find((r) => r.message.startsWith('opencode: Found, not managed'));
+  assert.ok(found, `the providers card names the management state: ${providers.map((r) => r.message)}`);
+  assert.match(found.message, /not participating/);
+  assert.match(found.message, /ak host pick --host claude,opencode/);
+  assert.equal(found.level, 'info', 'an unmanaged host is information, never a warning');
+  assert.equal(found.fix, null, 'advisory only — sync never opts a host in');
+  // ADR-0053 (2026-09-26): the same three states for every supported host.
+  assert.equal(providers.find((r) => r.message.startsWith('codex:'))?.message, 'codex: Not installed');
+  assert.match(providers.find((r) => r.message.startsWith('claude:'))?.message ?? '', /^claude: Managed by ak/);
+});
+
+test('the enable hint lists every enabled host, so following it never disables codex', async () => {
+  seedHome(offlineKitConfig({ integrations: { hosts: { claude: true, codex: true, opencode: false } } }));
+  const rows = await withOpencodeCli(() => collect());
+  const providers = rowsFor(rows, 'providers');
+  const found = providers.find((r) => r.message.startsWith('opencode: Found, not managed'));
+  assert.ok(found, `expected the opencode management row: ${providers.map((r) => r.message)}`);
+  assert.match(found.message, /ak host pick --host claude,codex,opencode/);
+  assert.equal(found.fix, null);
+  assert.match(providers.find((r) => r.message.startsWith('codex:'))?.message ?? '', /^codex: Managed by ak/);
 });
 
 test('--json carries the opencode rows with the same shape the dashboard consumes', async () => {

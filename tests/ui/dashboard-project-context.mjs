@@ -30,7 +30,7 @@ test('context and project grouping stay readable, keyboard operable and evidence
   const url=new URL(route.request().url());
   if(url.pathname==='/')return route.fulfill({contentType:'text/html',body:renderPage({name:'Dashboard fixture',version:'test'})});
   const body=url.pathname==='/api/status'?{overall:'ok',rows:[{subsystem:'codex-context',level:'ok',message:'configured',contextReport:report},{subsystem:'codex-context/model',level:'info',message:'legacy model'}]}:
-   url.pathname==='/api/system'?{projects,runtime:{},snapshot:null,scan:null}:{};
+   url.pathname==='/api/system/summary'?{projects,runtime:{},snapshot:null,scan:null}:{};
   return route.fulfill({contentType:'application/json',body:JSON.stringify(body)});
  });
  await page.emulateMedia({reducedMotion:'reduce',colorScheme:'dark'});

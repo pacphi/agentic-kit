@@ -1042,6 +1042,12 @@ from this ranking. Names and remotes alone do not establish eligibility.
 `dashboard/client/usage.mjs` (`renderScoreProjects`). The existing `byProject`
 aggregate remains available to other consumers, but does not establish Git identity.
 
+**Findings:** the `project-concentration` card ("*project* dominates your usage")
+ranks this same `gitProjects` projection, so its project, cost and session count
+match this list. Its percentage is that project's share of all API-equivalent
+spend in the window, including activity outside these rows. An older payload
+without `gitProjects` shows no concentration finding.
+
 **Population:** the overall Usage totals still include all recorded usage. They
 can exceed the sum of these ten Git-project rows. Missing identity remains in
 those totals; it is not guessed into this ranking. Older payloads without Git
@@ -1344,23 +1350,23 @@ both credential-free for ak:
   the `quota tee` block in `statusline-footer.cjs:35`. (The footer also appends the
   payload's `context_window_size` to a per-session change log for Usage → Context; that
   ledger is independent of `rate_limits` and is described in §23.) The dashboard reads the
-  tee via `normalizeClaudeLimits` (`quota.mjs:69`), which maps `five_hour` /
+  tee via `normalizeClaudeLimits` (`quota.mjs:70`), which maps `five_hour` /
   `seven_day` / `seven_day_<model>` keys to duration-labelled windows.
 - **Codex** — one `initialize` → `account/rateLimits/read` JSON-RPC exchange
-  with a spawned `codex app-server`, implemented by `codexAppServerRateLimits`
-  (`quota.mjs:209`) and TTL-cached
-  (`CODEX_TTL_MS`, `:43`) by
-`collectCodexLimits`, which makes that call
-  (`:264`). Lanes come from `rateLimitsByLimitId` in
-  `normalizeCodexLimits` (`:145`), including per-model pools and
+  with a spawned `codex app-server`, implemented by `codexAppServerExchange`
+  (`quota.mjs:313`) and TTL-cached
+  (`CODEX_TTL_MS`, `:44`) by
+`collectCodexLimitsDetailed`, which makes that call
+  (`:385`). Lanes come from `rateLimitsByLimitId` in
+  `normalizeCodexLimits` (`:230`), including per-model pools and
   rate-limit reset credits. A pool reported under both a named lane and the
   legacy generic `codex` lane — same duration, reset instant, and utilization —
-  is kept once, on the named lane (`dedupeGenericLane`, `:127-137`).
+  is kept once, on the named lane (`dedupeGenericLane`, `:212-222`).
 
 **The primary/secondary trap.** Codex's `primary` window is *not* reliably the
 5-hour window — a live `prolite` account reported `primary` with
 `windowDurationMins: 10080` (the weekly). Windows are therefore keyed and
-labelled by duration (`windowLabel`, `quota.mjs:51`), never by slot name. The
+labelled by duration (`windowLabel`, `quota.mjs:52`), never by slot name. The
 same rule applies to the historical snapshots parsed out of rollouts: the
 normalizer at `usage-parsers.mjs:866-884` keeps a flat `windows` list keyed by
 `window_minutes`.
@@ -1370,6 +1376,25 @@ renders "as of Nm ago" and a `stale` badge (Claude's tee is push-only, so it
 ages the moment sessions stop). The `/api/limits` route lives in
 `dashboard-server.mjs`; `renderLimits` and `limRow` in `dashboard/client.mjs`
 render and color each bar by proximity to its cap.
+
+**An empty side says why.** Only a statusline carrying the kit footer can tee, and Claude Code
+runs the statusLine with the highest precedence: a project's own `.claude/settings.local.json` or
+`.claude/settings.json` overrides the user's `~/.claude/settings.json`. `classifyClaudeTeeChannel`
+(`quota.mjs`) reads the user-level statusLine and the script it names, and `/api/limits` carries
+only its class as `claudeChannel`: `none`, `kit-footer`, `project-helper` (it runs each project's
+Ruflo helper), `custom` (another script, an inline command, or a missing file), or `unknown` (an
+unreadable settings file). No path leaves the server. An empty Claude panel then names the
+class and the fix: with a `custom` user-level statusLine, limits come only from sessions in a
+project set up with `ak setup --project`, whose footer `ak sync` keeps current.
+
+The Codex side keeps the failure class of its latest refresh as `codexUnavailable`: `not-installed`
+(no `codex` on the dashboard's PATH), `spawn-failed`, `exited` (with `exitCode`; an outdated CLI
+that rejects the read-only flags exits early), `timeout`, `rpc-error` (with the numeric `rpcCode`),
+or `no-limit-windows` (an answer with no usable window). It is `null` when the answer is fresh.
+Only the class and the number are kept; stderr and the vendor's message text are dropped. The
+empty panel names the cause and the next check (`ak status`, `codex --version`, or
+`codex login status`), and a stale answer shown in its place gets "last refresh failed" in its
+note.
 
 **Limit-aware findings.** `detectLimitInsights` (`usage-insights.mjs:967`)
 applies the same evidence rules as every other detector — vendor percentages

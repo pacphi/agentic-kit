@@ -12,9 +12,11 @@ export default {
     try {
       const { unavailableIntent } = providerExternalState(cfg, cwd);
       if (!unavailableIntent.length) return [];
+      // Sync cannot restore an absent admission or grant, so the remedy is manual.
       return [row('providers', 'warn',
-        `external AQE intent is unavailable (${unavailableIntent.join(', ')}) — restore its admission/host/grant, or retire only its dependent intent with `
-        + `\`ak host adapters revoke-grant ${unavailableIntent[0]} aqeProvider\``)];
+        `external AQE intent is unavailable (${unavailableIntent.join(', ')})`,
+        'restore its admission/host/grant, or retire only its dependent intent with '
+        + `\`ak host adapters revoke-grant ${unavailableIntent[0]} aqeProvider\``, { repair: 'manual' })];
     } catch (e) {
       return [row('providers', 'warn', `provider check unavailable: ${e.message}`)];
     }

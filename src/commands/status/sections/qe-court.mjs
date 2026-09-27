@@ -14,8 +14,8 @@ export default {
     if (!qc) return [];
     const violations = validateCourtConfig(qc);
     if (violations.length) {
-      return [row('qe-court', 'warn',
-        `qe-court panel invalid: ${violations.join(', ')} — regenerate with agentic-qe >=3.13.3 or choose different defense/jury vendors`)];
+      return [row('qe-court', 'warn', `qe-court panel invalid: ${violations.join(', ')}`,
+        'regenerate the config with agentic-qe >=3.13.3, or choose different defense/jury vendors', { repair: 'manual' })];
     }
     const readiness = qeCourtReadiness(qcRoot, { hosts: cfg?.integrations?.hosts });
     if (readiness.ready) {

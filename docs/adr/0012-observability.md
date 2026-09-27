@@ -2,8 +2,11 @@
 
 - **Status:** Implemented
 - **Date:** 2026-07-27
-- **Updated:** 2026-09-20 — ADR-0054 adds an explicit, offline, allowlisted fleet export boundary;
-  local analytics and dashboard collection semantics remain unchanged.
+- **Updated:** 2026-09-26 — live process survey, source health, discovery coverage, idle
+  restarts and exact-folder leases (#237 §E; #238 items 2–5); see "Amendment — 2026-09-26: live
+  acquisition" at the end.
+- **Earlier update:** 2026-09-20 — ADR-0054 adds an explicit, offline, allowlisted fleet export
+  boundary; local analytics and dashboard collection semantics remain unchanged.
 - **Earlier update:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Earlier update:** 2026-08-04
 - **GA surface:** Canonical naming and retired vocabulary follow
@@ -43,8 +46,22 @@
 **2026-08-03 runtime identity amendment:** transcript and ledger evidence remains the topology
 source, while an asynchronous two-second local process survey supplies observed liveness leases
 for top-level Claude Code, Codex, and OpenCode controllers on macOS and Linux. Nested host CLIs
-remain workers of their nearest controller. A runtime lease requires a canonical Git repository;
-three consecutive successful surveys without the controller quiesce it. Retained transcript
+remain workers of their nearest controller, with one exception (2026-09-26): a desktop app never
+absorbs a CLI session it hosts, so a Claude Code CLI launched from the Claude desktop app is its
+own controller, while the app's own services still fold into the app. The survey parses executable
+paths that contain spaces. A runtime lease requires a canonical Git repository or, since
+2026-09-26, an exact-folder match. A folder that is not a Git repository has a project key
+derived from its name only, so two `scratch` folders share it and a name-based join could attach
+one folder's process to the other's transcript. Its process may therefore lease a transcript
+session only when an HMAC of the process's real working folder, under a random secret each
+collector generates in memory at startup, equals the same HMAC of the folder the transcript
+records, and the folder exists. The
+correlator stays in collector memory; it is never written to events, snapshots, replay, the
+workspace store, API payloads, or logs, following
+[ADR-0053](0053-host-setup-evidence-and-usage-diagnostics.md)'s per-server-secret rule. Project keys
+are unchanged. A process in such a folder never becomes a runtime-only session, and a bound
+process whose folder changes loses the lease. Three consecutive successful surveys without the
+controller quiesce it. Retained transcript
 evidence may use a privacy-safe repository-label fallback when its former path no longer exists.
 Unresolved internal evidence is retained for later reconciliation but is never presented as an
 `unknown` workspace. Public project keys hash the canonical repository root when proven and never
@@ -200,7 +217,8 @@ ever justified ([RFC 6455][websocket]).
 When a cursor is outside retention, the server emits a reset instruction and the client fetches a
 fresh snapshot. Filesystem watches are hints, reinforced with stat polling and reconciliation.
 Tailers retain byte offsets, accept only newline-terminated records, tolerate partial writes, and
-reset safely after rotation or truncation.
+reset safely after rotation or truncation. A file that is absent when tailing begins, or that is
+removed and recreated, is read from its first byte when it appears (2026-09-26).
 
 ### 5. Present one coordinated Observability workspace with distinct scopes
 
@@ -358,7 +376,9 @@ Confidence is field-specific where provenance differs. Project, provider, model,
 relationship may independently be `observed`, `correlated`, `inferred`, `assumed`, or `planned`.
 The UI must not promote a host-based assumption to an observed provider claim.
 
-Collection bootstraps stable identity before following new appends. Sources are discovered
+Collection bootstraps stable identity before following new appends. Operations written before
+the first start are not replayed; `acquisitionCoverage.observedSince` records when observation
+began, and a live session with no operations drawn since then discloses it. Sources are discovered
 newest-first. Codex state and bounded metadata records hydrate project, provider, model, hierarchy,
 and lifecycle; Claude records hydrate sanitized project and safe runtime metadata. The graph plane
 never receives `cwd`, transcript paths, raw agent paths, prompt-derived titles, filenames, patches,
@@ -371,7 +391,10 @@ summaries under §7.
 Loopback binding and the dashboard's existing request validation apply to both endpoints. SSE
 listeners and response resources are released when clients disconnect. After the last client, the
 collector and tailers stop following a bounded idle delay (30 seconds by default); a new request
-restarts them safely. Dashboard shutdown cancels the timer and closes all resources.
+restarts them safely. The idle stop keeps each tailer's byte offset and partial line, so the
+restart resumes where it stopped and replays what was appended meanwhile; a file that appeared
+during the stop is read from its first byte (2026-09-26). Dashboard shutdown cancels the timer
+and closes all resources.
 
 ### 7. Use two isolated planes for topology and transcript content
 
@@ -627,3 +650,23 @@ Acceptance does not imply automatic knowledge of every upstream store:
 Its versioned snapshots preserve source coverage and whole-session selection semantics, omit
 transcript content, and aggregate by replacing each installation's prior snapshot. It neither
 turns the dashboard into a fleet service nor makes telemetry collection continuous.
+
+## Amendment — 2026-09-26: live acquisition
+
+- **Process survey (#238 item 3).** The POSIX process survey keeps executable paths that contain
+  spaces, and a Claude Code CLI hosted by the Claude desktop app is its own top-level controller
+  rather than a nested worker of the app (see the 2026-08-03 runtime identity amendment above).
+- **Source health (#237 §E).** Adapter health is recomputed from the tailed files each pass: a
+  registered source whose file is absent is `awaiting-file`, a readable source with nothing
+  accepted is `no-events`, and an unreadable file or a malformed or rejected latest record is
+  `degraded`; a file created after tailing began is read from its first byte (§4).
+- **Discovery coverage (#238 item 5).** Live acquisition coverage is incomplete when the per-host
+  discovery bound leaves files out and reports how many; the tailed-file count is recounted each
+  pass instead of growing on every idle restart.
+- **Idle restarts (#238 item 4).** An idle stop keeps every tailer's byte offset, so a restart
+  replays what was appended during the stop instead of re-tailing from the end, and a file that
+  appeared during the stop is read from its first byte; the snapshot says when observation began,
+  and a live session with no operations drawn since then says so (§6).
+- **Exact-folder leases (#238 item 2).** A runtime lease no longer requires a Git repository when
+  an exact-folder match joins the process to its transcript; see the 2026-08-03 runtime identity
+  amendment above.

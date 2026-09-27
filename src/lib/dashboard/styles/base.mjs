@@ -321,6 +321,10 @@ body.gated .band,body.gated .tabbar,body.gated main{display:none}
 .row-msg{min-width:0; word-break:break-word}
 .row-fix{display:block; margin-top:3px; color:var(--ink-dim); font-size:12px}
 .row-fix .arrow{color:var(--accent); margin-right:5px}
+.row-fix .repair-tag,.ab-detail .repair-tag{
+  display:inline-block; margin-right:6px; padding:0 5px; border:1px solid var(--line-2);
+  border-radius:4px; color:var(--ink-2); font-size:10.5px; letter-spacing:.03em; text-transform:uppercase;
+}
 .row-fix code{font-family:var(--mono); color:var(--ink-2); font-size:11.5px}
 
 /* ── overview status map ── */

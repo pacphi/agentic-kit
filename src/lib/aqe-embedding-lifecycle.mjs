@@ -4,8 +4,26 @@ import { aqeRoot } from './paths.mjs';
 import { probeAqeEmbeddings } from './aqe-embedding-probe.mjs';
 import { resolveAqeEmbedding, AQE_EMBEDDING_MODEL, OLLAMA_EMBEDDING_MODEL } from './aqe-embedding-config.mjs';
 import { aqeEmbeddingConfiguration } from './aqe-readiness.mjs';
+import { have } from './exec.mjs';
 
-export const AQE_EMBEDDING_COACHING = 'Recommended: local Ollama + MiniLM (no API key). Install Ollama from https://ollama.com/download and start it (ollama serve), then retry. Alternatives: select an existing compatible endpoint, explicitly opt into in-process transformers, or leave semantic learning unmanaged. No hash fallback is substituted.';
+const AQE_EMBEDDING_ALTERNATIVES = 'Alternatives: select an existing compatible endpoint, explicitly opt into in-process transformers, or leave semantic learning unmanaged. No hash fallback is substituted.';
+export const AQE_EMBEDDING_COACHING = `Recommended: local Ollama + MiniLM (no API key). Install Ollama from https://ollama.com/download and start it (ollama serve), then retry. ${AQE_EMBEDDING_ALTERNATIVES}`;
+
+// Printing the endpoint is safe: Ollama provisioning accepts only loopback HTTP
+// without credentials, query or fragment (ADR-0055).
+const ollamaNotRunning = endpoint => `Ollama is installed but not running at ${endpoint}. Start it (open the Ollama app, or run: ollama serve), then retry. ${AQE_EMBEDDING_ALTERNATIVES}`;
+
+// Node's fetch rejects a refused connection with TypeError('fetch failed'); its cause
+// (an AggregateError when `localhost` resolves to two addresses) carries the code.
+const connectionRefused = error => error?.cause?.code === 'ECONNREFUSED';
+
+/** Guidance for an unreachable selected local Ollama: "not running" only when the
+ * `ollama` command is installed, otherwise the install text. The install check
+ * runs only on this path, never for other failures or external endpoints. */
+async function unreachableCoaching(resolved, ollamaInstalled) {
+  return resolved.provisioning === 'ollama' && await ollamaInstalled()
+    ? ollamaNotRunning(resolved.endpoint) : AQE_EMBEDDING_COACHING;
+}
 
 async function ollamaRequest(endpoint, route, body) {
   const response = await fetch(new URL(route, endpoint), {
@@ -52,10 +70,10 @@ async function prepareLocalModel(request) {
 
 /** Explicit setup/sync mutation boundary, injectable external operations for tests.
  * @param {any} cfg
- * @param {{env?:NodeJS.ProcessEnv,packageRoot?:string,provision?:boolean,request?:(route:string,body?:any)=>Promise<any>,probe?:typeof probeAqeEmbeddings}} [options] */
+ * @param {{env?:NodeJS.ProcessEnv,packageRoot?:string,provision?:boolean,request?:(route:string,body?:any)=>Promise<any>,probe?:typeof probeAqeEmbeddings,ollamaInstalled?:()=>Promise<boolean>}} [options] */
 export async function prepareAqeEmbedding(cfg, {
   env = process.env, packageRoot = aqeRoot(), provision = true,
-  request, probe = probeAqeEmbeddings,
+  request, probe = probeAqeEmbeddings, ollamaInstalled = () => have('ollama'),
 } = {}) {
   const resolved = resolveAqeEmbedding(cfg, env);
   if (!provision && resolved.mode === 'unmanaged') {
@@ -70,14 +88,19 @@ export async function prepareAqeEmbedding(cfg, {
   if (provision && resolved.provisioning === 'ollama') {
     try {
       changed = await prepareLocalModel(request ?? ((route, body) => ollamaRequest(resolved.endpoint, route, body)));
-    } catch {
-      return { ok: false, changed, status: 'failed', detail: `Local embedding setup incomplete. ${AQE_EMBEDDING_COACHING}` };
+    } catch (error) {
+      // Only the refused-connection code is read; raw service text is never reflected.
+      const coaching = connectionRefused(error) ? await unreachableCoaching(resolved, ollamaInstalled) : AQE_EMBEDDING_COACHING;
+      return { ok: false, changed, status: 'failed', detail: `Local embedding setup incomplete. ${coaching}` };
     }
   }
   const evidence = await probe({ packageRoot, env: resolved.env, backend: resolved.mode });
-  return { ok: evidence.status === 'passed', changed,
-    status: evidence.status === 'passed' ? 'ok' : 'failed', evidence,
-    detail: evidence.status === 'passed'
-      ? 'synthetic embedding probe passed (384 dimensions); existing corpus compatibility remains separate'
-      : `Embedding setup incomplete: ${evidence.reason ?? evidence.status}. ${AQE_EMBEDDING_COACHING}` };
+  if (evidence.status === 'passed') {
+    return { ok: true, changed, status: 'ok', evidence,
+      detail: 'synthetic embedding probe passed (384 dimensions); existing corpus compatibility remains separate' };
+  }
+  const coaching = evidence.reason === 'endpoint-unreachable'
+    ? await unreachableCoaching(resolved, ollamaInstalled) : AQE_EMBEDDING_COACHING;
+  return { ok: false, changed, status: 'failed', evidence,
+    detail: `Embedding setup incomplete: ${evidence.reason ?? evidence.status}. ${coaching}` };
 }

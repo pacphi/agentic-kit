@@ -926,7 +926,10 @@ import { fmtNum, fmtTok, limAge, pct } from './usage.mjs';
     if(deep&&SYSTEM&&SYSTEM.scan)SYSTEM.scan.running=true;
     renderSystemFreshness();
     var q=deep?("?refresh=deep"+(trees==null?"":"&trees="+(trees?"1":"0"))):"";
-    return fetch("/api/system"+q,{cache:"no-store",headers:authHeaders()})
+    // The slim page read (#237 M4): the same payload with the catalog cut to
+    // what these views draw. /api/system stays the complete `ak system --json`
+    // shape for scripts; the page never needed its repeated presence copies.
+    return fetch("/api/system/summary"+q,{cache:"no-store",headers:authHeaders()})
       .then(function(r){return r.json();})
       .then(function(d){SYSTEM=d;})
       .catch(function(){SYSTEM={error:"the system footprint could not be read",scan:null,snapshot:null};})

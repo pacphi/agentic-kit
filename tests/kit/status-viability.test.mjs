@@ -19,6 +19,7 @@ import {
   sandboxHome, assertSandboxed, captureLog, rmrf, sandboxProject,
   writeKitConfig, offlineKitConfig, fakeGlobalRoot,
 } from './helpers/home-sandbox.mjs';
+import { isolateProject } from './helpers/project-isolation.mjs';
 
 const HOME = sandboxHome('ak-viability');
 const paths = await import('../../src/lib/paths.mjs');
@@ -28,6 +29,7 @@ const { appendModelSnapshot } = await import('../../src/lib/model-inventory/stor
 const { AQE_PROVIDER_CREDENTIALS, aqeProviderCredential, credentialGaps } = await import('../../src/lib/providers.mjs');
 const { DEFAULT_ROUTES, ACTIVITIES, seedActivityRoutes, divergedRoutes } = await import('../../src/lib/routing.mjs');
 assertSandboxed(paths, HOME);
+isolateProject('ak-status-viability');
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const PROJECT = sandboxProject('ak-viability');
@@ -302,7 +304,10 @@ test('model refresh and diff hints remain advisory and never enter syncs executa
       flags: { 'dry-run': true, 'no-upgrade': true, json: false }, pkgRoot: PKG_ROOT,
     })));
   } finally { process.chdir(cwd); }
-  assert.doesNotMatch(out, /\[models\]/, 'sync must not claim it will execute advisory model actions');
+  // Decision 10: sync lists a manual row after its plan as needing your action.
+  const [plan, listed = ''] = out.split(/needs your action/);
+  assert.doesNotMatch(plan, /\[models\]/, 'sync must not claim it will execute advisory model actions');
+  assert.match(listed, /\[models\].*ak models refresh/, 'the advisory action is listed as yours to do');
 });
 
 test('a dry-run sync leaves the diverged policy byte-identical on disk', async () => {

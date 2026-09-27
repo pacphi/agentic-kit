@@ -18,12 +18,12 @@ import self from './self.mjs';
 import natives from './natives.mjs';
 import memoryPin from './memory-pin.mjs';
 import projectMemory from './project-memory.mjs';
+import userMemory from './user-memory.mjs';
 import scaffoldAgents from './scaffold-agents.mjs';
 import npx from './npx.mjs';
 import security from './security.mjs';
 import learning from './learning.mjs';
 import aqe from './aqe.mjs';
-import agentdb from './agentdb.mjs';
 import agentBrowser from './agent-browser.mjs';
 import mcp from './mcp.mjs';
 import codexMcp from './codex-mcp.mjs';
@@ -41,12 +41,13 @@ import daemons from './daemons.mjs';
 import blocks from './blocks.mjs';
 import statusline from './statusline.mjs';
 import qeCourt from './qe-court.mjs';
+import liveChecks from './live-checks.mjs';
 
 // Everything up to and including codex-plugins — before the deja-vu /
 // host-detail / admitted-lifecycle calls that collect() makes directly.
 export const SECTIONS_BEFORE_HOST_DETAIL = [
   models, versions, ruvnetBrain, ruvector, rufloComponents, self, natives, memoryPin,
-  projectMemory, scaffoldAgents, npx, security, learning, aqe, agentdb, agentBrowser, mcp,
+  projectMemory, userMemory, scaffoldAgents, npx, security, learning, aqe, agentBrowser, mcp,
   codexMcp, codexPlugins, hostAlignment,
 ];
 
@@ -54,5 +55,5 @@ export const SECTIONS_BEFORE_HOST_DETAIL = [
 export const SECTIONS_AFTER_HOST_DETAIL = [
   hosts, providersStatus, providersExternalIntent, providersExternalProjection,
   providersRufloModels, providersLocalBindings, routing, daemons, blocks,
-  statusline, codexContext, context, qeCourt,
+  statusline, codexContext, context, qeCourt, liveChecks,
 ];

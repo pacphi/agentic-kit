@@ -10,6 +10,7 @@ import {
   sandboxHome, assertSandboxed, snapshot, assertUnchanged, captureLog, rmrf,
   writeKitConfig,
 } from './helpers/home-sandbox.mjs';
+import { isolateProject } from './helpers/project-isolation.mjs';
 
 const HOME = sandboxHome('ak-deja-teardown-verify');
 const paths = await import('../../src/lib/paths.mjs');
@@ -17,6 +18,7 @@ const uninstall = await import('../../src/commands/uninstall.mjs');
 const verify = await import('../../src/commands/x/verify.mjs');
 const { createDejaVuLifecycleAdapter } = await import('../../src/lib/adapters/deja-vu.mjs');
 assertSandboxed(paths, HOME);
+isolateProject('ak-deja-vu-teardown-verify');
 
 const doctor = (indexPath, extra = {}) => ({
   schema_version: 2,

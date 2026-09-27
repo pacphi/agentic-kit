@@ -2,7 +2,10 @@
 
 - **Status:** Implemented
 - **Date:** 2026-07-24
-- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
+- **Updated:** 2026-09-26 — `ak status` and the drift nudge read guidance drift from the
+  writer's dry run (`reconcileGuidance` with sync's context), so detectors see the same kit.json
+  intent and retired-row target universe as `ak sync` (#237).
+- **Earlier update:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Earlier update:** 2026-09-02
 - **Update note:** ADR-0023 made machine-guidance backups fail-closed and replacement atomic. Project
   setup now also preserves user-authored guidance, migrates the old unsentineled lean stub, and
@@ -113,7 +116,9 @@ cannot prevent every future upstream version from introducing a new, differently
   `AGENTS.md` — a follow-up commit that is expected and desired, not a regression.
 - Other machines self-heal: their next `ak sync` strips any project-`AGENTS.md` copy they
   carry. No cross-repo migration tooling is needed.
-- `sync` and `status` can no longer disagree about targets — they read the same helper.
+- `sync` and `status` can no longer disagree about targets — they read the same helper. Since
+  2026-09-26 they also cannot disagree about which blocks belong: `status` and the drift nudge
+  render from `reconcileGuidance`'s dry run instead of a re-built loop.
 - No behavior change on machines without `~/.codex`: same rows, same files, zero new writes.
 - Project setup no longer treats an upstream force-init result as authority to discard pre-existing
   user guidance; re-runs converge owned blocks and preserve foreign text.

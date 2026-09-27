@@ -40,9 +40,10 @@ const link = (kind, label, url) => Object.freeze({ kind, label, url });
 
 // detectionKey joins a packaged entry to the managed-tools detection facts. The keys are
 // heterogeneous because the facts are: hosts resolve through the host registry
-// (`hosts.<id>`), agentdb / agentic-qe / ruvnet-brain have their own `ak status`
-// subsystem row, aidefence is reported by the `security` row, and the kit reports as
-// `self`. `npmPackage` is carried alongside because the version chip's other source —
+// (`hosts.<id>`), agentic-qe / ruvnet-brain have their own `ak status` subsystem row,
+// agentdb (bundled inside Ruflo, no standalone install) is reported by the `natives` row
+// about its "agentdb location(s)", aidefence is reported by the `security` row, and the
+// kit reports as `self`. `npmPackage` is carried alongside because the version chip's other source —
 // the drift array — is keyed by package name, and deriving that from a link URL would be
 // a parsing trick rather than a stated fact. Configured surfaces have no detectionKey:
 // they are not packages, so they carry the status `subsystem` row their chip joins on
@@ -155,10 +156,11 @@ const ENTRIES = Object.freeze([
     name: 'agentdb',
     tagline: 'Where what your agents learn is stored.',
     paragraph:
-      'The store behind that memory: a single local file holding what agents recorded — '
+      'The store behind that memory: local files holding what agents recorded — '
       + 'decisions, state, and the reasons behind them — searchable by meaning as well as '
-      + 'by keyword, with the links between entries kept too. agentic-kit pins its version '
-      + 'to the one ruflo ships, so the two cannot drift apart.',
+      + 'by keyword, with the links between entries kept too. It ships inside ruflo, which '
+      + 'writes and reads it; agentic-kit installs no separate copy and shows the version '
+      + 'ruflo bundles.',
     links: Object.freeze([
       link('github', 'GitHub', 'https://github.com/ruvnet/agentdb'),
       link('npm', 'npm', 'https://www.npmjs.com/package/agentdb'),
@@ -334,10 +336,10 @@ const ENTRIES = Object.freeze([
     name: 'Background daemon',
     tagline: 'Local workers that keep things tidy between sessions.',
     paragraph:
-      'A background process ruflo runs between your sessions for upkeep — learning from '
-      + 'finished work, tidying up — staffed by local workers that cost nothing. Anything '
-      + 'that would spend money on a model stays opt-in, and each daemon expires on its '
-      + 'own. List or stop them with `ak x daemon-gc`.',
+      'A background process ruflo runs for upkeep: backing up project memory, distilling '
+      + 'what agents recorded, and learning from finished work, on local workers that cost '
+      + 'nothing. Paid model work stays opt-in. Each daemon ends on its own, so start one '
+      + 'with `ruflo daemon start` to keep backups going. List or stop them with `ak x daemon-gc`.',
     links: Object.freeze([]),
     icon: MONOGRAM('D', '--info'),
     subsystem: 'daemons',

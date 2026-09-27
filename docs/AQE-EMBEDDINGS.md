@@ -24,7 +24,10 @@ preserved and tested. Repeated setup does not redownload an existing model.
 The endpoint must produce valid 384-dimensional vectors with meaningful semantic
 ordering. A missing service, missing runtime or failed proof leaves setup
 incomplete with actionable guidance; it never substitutes hash vectors or prints
-a green completion message. Keep Ollama's model store on durable local storage.
+a green completion message. When the `ollama` command is installed but the
+selected local endpoint refuses connections, the guidance says Ollama is not
+running and asks you to start it rather than install it. Keep Ollama's model
+store on durable local storage.
 
 `--yes` accepts the disclosed setup plan. `--dry-run` makes no changes and does
 not contact or start a model service. The kit does not silently install a daemon.
@@ -80,10 +83,16 @@ agent sessions after changing MCP environments; existing processes retain their
 old environment and may retain an earlier failed initialization.
 
 Claude project MCP and hook settings and existing canonical Codex MCP tables
-have field-level receipts. OpenCode updates immediately through a narrow operation inside its existing
+have field-level receipts. On every host, ak edits only an AQE entry started by one
+of AQE's own commands: `aqe-mcp`, `aqe mcp`, `agentic-qe mcp`, `aqe-v3 mcp` or
+`npx -y agentic-qe@latest mcp` (npm `.cmd` shims included). Entries with other
+commands, flags or wrappers are reported as unrecognized and left unchanged. OpenCode updates immediately through a narrow operation inside its existing
 full-entry owner, preserving permissions, plugins and unrelated MCP entries.
 Its receipt remains compatible with normal `ak sync`. Conflicting user values and unsupported TOML forms
-are reported, never overwritten. Codex shell-environment policies are not edited.
+are reported, never overwritten. Unrelated Codex keys, including dotted root keys such as
+`tui.status_line`, do not block the edit. An AQE registration written inline, as dotted keys, or
+with quoted or escaped names is reported as a conflict for manual configuration.
+Codex shell-environment policies are not edited.
 Higher-precedence Claude local/user registrations are checked for conflict.
 Setup relinquishes unchanged owned values before AQE regenerates its tables,
 then reapplies the selected environment afterward.
@@ -92,7 +101,15 @@ then reapplies the selected environment afterward.
 
 `ak x aqe-embedding verify` proves the backend with synthetic text.
 `ak x verify aqe` also checks the current project's stored SQLite embedding
-provenance and reports storage observations. These are separate claims:
+provenance and reports storage observations.
+
+`ak status` and the dashboard never contact the service. They show the last live
+embedding request that `ak sync`, `ak x verify aqe` or `ak status --live` made,
+with its age: a failure is a warning with its reason, a pass is green for 24
+hours and then labelled stale. Selecting a different backend marks the old result
+as changed. `ak status --live` sends one synthetic request without reading the
+project corpus.
+These are separate claims:
 
 - A configured URL is not a running service or an installed model.
 - A backend pass does not certify old vectors or a complete QE fleet.

@@ -182,7 +182,18 @@ export const USAGE_CSS = `
 .source-pill[data-status="attention"] .sp-status{color:var(--warn)}
 button.source-pill{border:0;cursor:pointer;font:inherit;color:inherit}
 .source-pill[data-status="checking"] .sp-status{color:var(--accent)}
-.source-pill[data-status="disabled"] .sp-status{color:var(--ink-dim)}
+.source-pill[data-status="unmanaged"] .sp-status,.source-pill[data-status="not-installed"] .sp-status{color:var(--ink-dim)}
+.health-checks [data-info="true"][data-check-state="fail"] b{color:var(--ink-2)}
+.hp-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.hp-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:10px 14px;background:var(--panel);border-radius:10px;font-size:13px;color:var(--ink-2)}
+.hp-row b{color:var(--ink)}
+.hp-row .live-host{width:24px;height:24px;display:grid;place-items:center}
+.hp-row .live-host-icon{width:16px;height:16px}
+.hp-state{font-weight:600}
+.hp-row[data-management="managed"] .hp-state{color:var(--ok)}
+.hp-part{flex:1 1 280px;min-width:0;overflow-wrap:anywhere}
+.hp-part code,#host-health-participation code{font-family:var(--mono);font-size:12px;color:var(--ink);overflow-wrap:anywhere}
+.hp-copy{background:var(--panel-2);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:2px 8px;font:inherit;font-size:12px;cursor:pointer}
 .host-health-dialog{width:min(600px,calc(100vw - 32px));max-height:calc(100dvh - 40px);overflow:auto;box-sizing:border-box;background:var(--panel-2);color:var(--ink);border:1px solid var(--line);border-radius:16px;padding:24px}
 .host-health-dialog::backdrop{background:rgba(0,0,0,.65)}
 .health-dialog-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}

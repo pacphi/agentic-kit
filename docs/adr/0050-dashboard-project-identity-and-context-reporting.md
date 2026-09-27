@@ -2,7 +2,9 @@
 
 - **Status:** Implemented
 - **Date:** 2026-09-09
-- **Updated:** 2026-09-09 — scoped context-card network claims for issue #211
+- **Updated:** 2026-09-26 — the `project-concentration` Finding ranks `gitProjects`, not the
+  folder-label `byProject`, so it agrees with Score → Projects (#238 item 7)
+- **Earlier update:** 2026-09-09 — scoped context-card network claims for issue #211
 - **Related:** [ADR-0036](0036-dashboard-client-modularization-and-shared-loopback-server.md),
   [ADR-0048](0048-inventory-led-maintenance-resource-management.md)
 
@@ -193,6 +195,11 @@ checkout, and unclassified directories do not appear in the ranking. There are n
 expanded group lists or Desktop suffixes. Overall Usage totals retain activity
 excluded from these ten rows. Older payloads request a usage refresh instead of
 guessing Git membership from labels.
+
+Amendment (2026-09-26): the Usage **Findings** `project-concentration` card ranks the
+same `gitProjects` projection, so a finding and this panel never report different
+cost or sessions for one project and window. Its share keeps the whole window's
+spend as the denominator and says so; without `gitProjects` it stays silent.
 
 Usage index schema 20 rebuilds the derived cache once to recover metadata missing
 from the previous release. This reads retained records without changing originals.

@@ -24,16 +24,17 @@ import { opaqueId } from './model.mjs';
 
 const DEFAULT_MAX_SLICES = Infinity;
 
-/** Per-curated-source-id `filesystem` classification (true for the
- * filesystem host sources and `projects`, false for runtimes/package
- * managers/Ollama/providers), independent of whether the source is
- * currently enabled: resolved as if every automatic source were enabled, so
- * a DISABLED source still reports its true nature rather than silently
- * defaulting. `projects` never appears in the probe's own output (it only
- * expands against configured exact/collection roots, deliberately left
- * empty here) and is correctly left to the `true` default below — its
- * expansion is always a filesystem walk. */
-function automaticSourceFilesystemById(ctx) {
+/** Per-curated-source-id facts: `filesystem` (true for the filesystem host
+ * sources and `projects`, false for runtimes/package managers/Ollama/
+ * providers) and `present` (false only for a host source whose root does not
+ * exist on this machine, e.g. Hermes never installed). Independent of
+ * whether the source is currently enabled: resolved as if every automatic
+ * source were enabled, so a DISABLED source still reports its true nature
+ * rather than silently defaulting. `projects` never appears in the probe's
+ * own output (it only expands against configured exact/collection roots,
+ * deliberately left empty here) and is correctly left to the defaults below
+ * — its expansion is always a filesystem walk of roots the user chose. */
+function automaticSourceFactsById(ctx) {
   const probeConfiguration = {
     automaticSources: AUTOMATIC_SOURCES.map((source) => ({ ...source, enabled: true })),
     exactProjects: [], collectionRoots: [], exclusions: [],
@@ -41,11 +42,11 @@ function automaticSourceFilesystemById(ctx) {
   const probed = resolveAutomaticSourceRoots({
     configuration: probeConfiguration, paths: ctx.paths, platform: ctx.platform, fsImpl: ctx.fsImpl, installationKey: ctx.installationKey,
   });
-  const byOpaqueId = new Map(probed.map((source) => [source.sourceId, source.filesystem]));
+  const byOpaqueId = new Map(probed.map((source) => [source.sourceId, source]));
   const byRawId = new Map();
   for (const source of AUTOMATIC_SOURCES) {
-    const opaque = opaqueId('src', { automatic: source.id }, ctx.installationKey);
-    byRawId.set(source.id, byOpaqueId.get(opaque) ?? true);
+    const probe = byOpaqueId.get(opaqueId('src', { automatic: source.id }, ctx.installationKey));
+    byRawId.set(source.id, { filesystem: probe?.filesystem ?? true, present: probe?.present !== false });
   }
   return byRawId;
 }
@@ -72,10 +73,12 @@ export function discovery(ctx) {
   return function discoveryOverview() {
     const configuration = readDiscoveryConfiguration({ loadConfig: ctx.loadConfig });
     const progress = scanProgress(ctx)();
-    const filesystemById = automaticSourceFilesystemById(ctx);
+    const factsById = automaticSourceFactsById(ctx);
     return {
       automaticSources: configuration.automaticSources.map((source) => ({
-        ...source, filesystem: filesystemById.get(source.id) ?? true,
+        ...source,
+        filesystem: factsById.get(source.id)?.filesystem ?? true,
+        present: factsById.get(source.id)?.present ?? true,
       })),
       exactProjects: configuration.exactProjects,
       collectionRoots: configuration.collectionRoots,
@@ -197,21 +200,39 @@ function scanFailures(ctx) {
  * slice runs synchronously inside the `start`/`resume` call, so the caller
  * observes real progress immediately; every later slice runs after a yield. */
 function scannableSources(ctx) {
-  return ctx.listSources().filter((source) => source.filesystem !== false && source.root);
+  return ctx.listSources().filter((source) => source.filesystem !== false && source.root && source.present !== false);
 }
 
-/** An explicitly named source must be a filesystem source with a root: the
- * non-filesystem automatic sources (runtimes, package managers, Ollama,
- * providers) are covered by the provider check and the machine measurement,
- * never by a discovery walk. Refusing here (code SOURCE_NOT_SCANNABLE) keeps
- * the API and CLI from ever reporting a "scan" of nothing. */
+/** An automatic host source whose root does not exist on this machine (the
+ * host was never installed here) has nothing to scan and nothing missing:
+ * it is never driven (so it can never fail with ENOENT → io-failure) and is
+ * never counted in coverage totals, the Discovery narrative, or the
+ * Inventory banner. It stays listed in Discovery as not installed. Only the
+ * curated host sources carry `present:false`; a root the user added keeps
+ * being scanned, because a missing user root is a real failure to report. */
+const isAbsentSource = (source) => source.present === false;
+
+/** An explicitly named source must be a filesystem source with a root that
+ * exists: the non-filesystem automatic sources (runtimes, package managers,
+ * Ollama, providers) are covered by the provider check and the machine
+ * measurement, never by a discovery walk (code SOURCE_NOT_SCANNABLE), and an
+ * absent host root has nothing to walk (code SOURCE_NOT_PRESENT). Refusing
+ * here keeps the API and CLI from ever reporting a "scan" of nothing. */
 function assertScannable(ctx, ids) {
   if (!ids) return;
+  const sources = ctx.listSources();
+  const absent = new Set(sources.filter((source) => source.filesystem !== false && isAbsentSource(source))
+    .map((source) => source.sourceId));
   const scannable = new Set(scannableSources(ctx).map((source) => source.sourceId));
-  const refused = ids.filter((id) => !scannable.has(id));
+  const refused = ids.filter((id) => !scannable.has(id) && !absent.has(id));
   if (refused.length) {
     throw Object.assign(new Error('This source is covered by the provider check and machine measurement, not by a discovery scan.'),
       { code: 'SOURCE_NOT_SCANNABLE', sourceIds: refused });
+  }
+  const notPresent = ids.filter((id) => absent.has(id));
+  if (notPresent.length) {
+    throw Object.assign(new Error('This source is not installed on this machine, so there is nothing to scan.'),
+      { code: 'SOURCE_NOT_PRESENT', sourceIds: notPresent });
   }
 }
 
@@ -338,13 +359,17 @@ function mergedCoverage(ctx) {
   // sources are refused at `assertScannable`/`scannableSources`), so the
   // lookup and its `true` default are correct for every row shape.
   const filesystemBySourceId = new Map(sources.map((source) => [source.sourceId, source.filesystem !== false]));
+  // `present` is Discovery-panel-only too: false marks an automatic host
+  // source whose root is not on this machine (see `isAbsentSource`).
+  const absentSourceIds = new Set(sources.filter(isAbsentSource).map((source) => source.sourceId));
   const rows = [...live, ...lastGood, ...neverRun];
   return rows.map((entry) => {
     const filesystem = filesystemBySourceId.get(entry.sourceId) ?? true;
+    const present = !absentSourceIds.has(entry.sourceId);
     if (failures.has(entry.sourceId) && entry.state === 'scanning') {
-      return { ...entry, state: 'failed', limitingReason: failures.get(entry.sourceId), filesystem };
+      return { ...entry, state: 'failed', limitingReason: failures.get(entry.sourceId), filesystem, present };
     }
-    return { ...entry, filesystem };
+    return { ...entry, filesystem, present };
   });
 }
 
@@ -357,7 +382,10 @@ function mergedCoverage(ctx) {
 export function scanProgress(ctx) {
   return function scanProgressCall() {
     const coverage = mergedCoverage(ctx);
-    const filesystemCoverage = coverage.filter((entry) => entry.filesystem !== false);
+    // Counted coverage: filesystem sources that exist here. An absent host
+    // root stays in `coverage` (Discovery lists it as not installed) but
+    // never enters the totals, the narrative, or the claims it blocks.
+    const filesystemCoverage = coverage.filter((entry) => entry.filesystem !== false && entry.present !== false);
     return {
       coverage,
       progress: ctx.orchestrator().progress(),

@@ -10,16 +10,18 @@ export default {
     try {
       const plugins = inspectCodexPlugins();
       if (plugins.issues.length) {
+        // Codex owns plugin state, so every remedy here is the user's (manual).
         if (plugins.configIssues?.length) {
           rows.push(row('codex-plugins', 'warn',
-            `Codex config inspection issue: ${plugins.configIssues[0]}; repair config.toml, then rerun ak status before changing plugin state`));
+            `Codex config inspection issue: ${plugins.configIssues[0]}`,
+            'repair config.toml, then rerun ak status before changing plugin state', { repair: 'manual' }));
         } else {
           const remediation = plugins.placementIssues?.length
             ? 'run ak heal hooks --host codex to preview an exact disablement, or disable it in Codex /plugins, then start a new session'
             : 'open Codex /plugins to refresh or disable it, then start a new session';
           rows.push(row('codex-plugins', 'warn',
-            `${plugins.issues.length} Codex plugin compatibility issue(s): ${plugins.issues[0]}; `
-            + remediation));
+            `${plugins.issues.length} Codex plugin compatibility issue(s): ${plugins.issues[0]}`,
+            remediation, { repair: 'manual' }));
         }
       } else if (plugins.enabled.length) {
         const versions = plugins.plugins.map((plugin) => `${plugin.ref} (${plugin.version})`).join(', ');

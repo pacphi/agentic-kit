@@ -1103,6 +1103,33 @@ import { renderUsage } from './usage-orchestrators.mjs';
       +'<span class="msub mono">'+esc(sub||resetTxt(resetSec))+"</span></div>";
   }
 
+  // An empty Claude panel is explained by WHICH statusLine a session runs
+  // (#238 M3): the tee lives only in the kit footer. The server sends the
+  // user-level statusLine's class (claudeChannel, never its path); the copy
+  // states Claude Code's precedence rule, because a project's own statusLine
+  // overrides the user-level one — which is how a footer-carrying project
+  // still fills this panel when the user-level script cannot. An unknown or
+  // missing class (an older server) gets the generic sentence.
+  var CLAUDE_PRECEDENCE="a project&rsquo;s own statusLine takes precedence over your user-level one";
+  var CLAUDE_SETUP="Set a project up with <code>ak setup --project</code> (<code>ak sync</code> keeps its footer current), then run a Pro/Max session there.";
+  var CLAUDE_EMPTY={
+    "kit-footer":"your user-level statusLine carries the kit footer, so limits arrive after the first response "
+      +"of a Claude Code session on a Pro/Max plan. Run one session, then revisit.",
+    "custom":"your user-level statusLine runs a custom script without the kit footer, so it does not report limits "
+      +"to ak. They arrive only from sessions in projects whose own statusLine carries the footer: "+CLAUDE_PRECEDENCE+". "+CLAUDE_SETUP,
+    "none":"you have no user-level statusLine, so only sessions in projects whose own statusLine carries the kit footer "
+      +"report limits. "+CLAUDE_SETUP,
+    "project-helper":"your user-level statusLine runs each project&rsquo;s own ruflo helper, so limits arrive from sessions "
+      +"in projects where that helper carries the kit footer. Run <code>ak sync</code> in such a project to re-inject it, "
+      +"then run a Pro/Max session there."
+  };
+  function claudeEmptyHtml(channel){
+    var why=Object.prototype.hasOwnProperty.call(CLAUDE_EMPTY,channel)?CLAUDE_EMPTY[channel]
+      :"it arrives while a Claude Code session on a Pro/Max plan runs a statusline that carries the kit footer; "
+        +CLAUDE_PRECEDENCE+", so a project set up with <code>ak setup --project</code> reports even when yours does not.";
+    return '<div class="empty">no Claude limit data yet &mdash; '+why+"</div>";
+  }
+
   // renderLimits was one CC-28 function mixing the Claude window, the Codex
   // lane, and the insights panel. Split by region; each keeps its original
   // logic verbatim, so the rendered DOM is unchanged.
@@ -1121,10 +1148,39 @@ import { renderUsage } from './usage-orchestrators.mjs';
       }).join("")+(paced?PACE_LEGEND:"");
     }else{
       if(cn)cn.textContent="no data";
-      claudeEl.innerHTML='<div class="empty">no Claude limit data yet &mdash; it arrives while a Claude Code session runs '
-        +"with the kit's managed statusline (Pro/Max plans only). Run one session, then revisit.</div>";
+      claudeEl.innerHTML=claudeEmptyHtml(LIMITS.claudeChannel);
     }
 
+  }
+
+  // Why the latest Codex refresh produced nothing (#238 P4). The server keeps
+  // only the failure class and a number (exit or JSON-RPC code) — never stderr
+  // or vendor text — and the panel names the cause instead of guessing
+  // "not installed, not logged in, or did not answer". Unknown classes (a
+  // newer server) fall back to that generic sentence.
+  function codexCode(n){return Number.isInteger(n)?String(n):"";}
+  var CODEX_WHY={
+    "not-installed":function(){return "the codex CLI was not found on the dashboard&rsquo;s PATH, so app-server could not start. "
+      +"Check the Codex host row in <code>ak status</code>.";},
+    "spawn-failed":function(){return "codex app-server could not be started. Check the Codex host row in <code>ak status</code>.";},
+    "exited":function(u){var c=codexCode(u.exitCode);return "codex app-server exited before answering"+(c?" (exit code "+c+")":"")
+      +". An outdated codex CLI can reject the read-only flags; check <code>codex --version</code> and the Codex host row in <code>ak status</code>.";},
+    "timeout":function(){return "codex app-server did not answer in time. It is asked again on the next refresh.";},
+    "rpc-error":function(u){var c=codexCode(u.rpcCode);return "codex app-server refused the rate-limit request"+(c?" (RPC error "+c+")":"")
+      +", for example when codex is not signed in. Run <code>codex login status</code>.";},
+    "no-limit-windows":function(){return "codex answered but reported no plan limit window. Plan windows apply to a ChatGPT-plan "
+      +"sign-in; API-key use is billed at API rates. <code>codex login status</code> shows which one codex uses.";}
+  };
+  var CODEX_FAILED_SHORT={"not-installed":"codex not found","spawn-failed":"could not start","timeout":"timed out",
+    "no-limit-windows":"no plan windows"};
+  function codexWhy(u){
+    return u&&Object.prototype.hasOwnProperty.call(CODEX_WHY,u.reason)?CODEX_WHY[u.reason](u):null;
+  }
+  function codexFailedShort(u){
+    if(!u||!Object.prototype.hasOwnProperty.call(CODEX_WHY,u.reason))return "";
+    var c=u.reason==="exited"?codexCode(u.exitCode):u.reason==="rpc-error"?codexCode(u.rpcCode):"";
+    var label=u.reason==="exited"?"exited":u.reason==="rpc-error"?"refused (RPC)":CODEX_FAILED_SHORT[u.reason];
+    return " · last refresh failed: "+label+(c?" (code "+c+")":"");
   }
 
   function renderLimitsCodex(){
@@ -1132,7 +1188,8 @@ import { renderUsage } from './usage-orchestrators.mjs';
     var x=LIMITS.codex;
     var xn=document.getElementById("u-lim-codex-note");
     if(x&&x.lanes&&x.lanes.length){
-      if(xn)xn.textContent=(x.planType?("plan "+x.planType+" · "):"")+"app-server · "+limAge(x.fetchedAt);
+      if(xn)xn.textContent=(x.planType?("plan "+x.planType+" · "):"")+"app-server · "+limAge(x.fetchedAt)
+        +codexFailedShort(LIMITS.codexUnavailable);
       var html="",paced=false;
       for(var i=0;i<x.lanes.length;i++){
         var lane=x.lanes[i];
@@ -1153,8 +1210,8 @@ import { renderUsage } from './usage-orchestrators.mjs';
       codexEl.innerHTML=html;
     }else{
       if(xn)xn.textContent="no data";
-      codexEl.innerHTML='<div class="empty">no Codex limit data &mdash; codex is not installed, not logged in, '
-        +"or app-server did not answer.</div>";
+      codexEl.innerHTML='<div class="empty">no Codex limit data &mdash; '
+        +(codexWhy(LIMITS.codexUnavailable)||"codex is not installed, not logged in, or app-server did not answer.")+"</div>";
     }
 
   }

@@ -42,6 +42,8 @@ function makeAgg(o = {}) {
     },
     byDay: o.byDay ?? {}, byModel: o.byModel ?? {}, byProvider: o.byProvider ?? {},
     byProject: o.byProject ?? {}, byCategory: o.byCategory ?? {},
+    // Absent unless given: an older cached aggregate has no gitProjects.
+    ...(o.gitProjects ? { gitProjects: o.gitProjects } : {}),
     promptsByHost: o.promptsByHost ?? {}, promptBaselines: o.promptBaselines ?? {},
     promptStatsByDay: o.promptStatsByDay ?? {},
     punchcard: o.punchcard ?? {}, projectTree: [], sessions, insights: [],
@@ -373,19 +375,17 @@ test('spend-trend needs at least two days of history', () => {
   assert.equal(fired(agg, 'spend-trend'), false);
 });
 
-// project-concentration. Five projects, so `alpha` can be the largest while still
-// sitting under the 22% floor — with two projects the top is always over half.
+// project-concentration ranks `gitProjects` (repository identity, the same basis
+// as Score → Projects), never the folder-label `byProject`. Five projects, so
+// `alpha` can be the largest while still sitting under the 22% floor — with two
+// projects the top is always over half.
+const gitProject = (label, cost, sessions) => ({ key: `repository:${label}`, label, cost, sessions, minutes: 10, tokens: 1 });
 const projectAgg = (topCost) => {
   const rest = (100 - topCost) / 4;
   return makeAgg({
     sessions: [session({ cost: 100 })],
-    byProject: {
-      alpha: { tokens: 1, cost: topCost, sessions: 5, minutes: 10 },
-      beta: { tokens: 1, cost: rest, sessions: 5, minutes: 10 },
-      gamma: { tokens: 1, cost: rest, sessions: 5, minutes: 10 },
-      delta: { tokens: 1, cost: rest, sessions: 5, minutes: 10 },
-      epsilon: { tokens: 1, cost: rest, sessions: 5, minutes: 10 },
-    },
+    gitProjects: [gitProject('alpha', topCost, 5), ...['beta', 'gamma', 'delta', 'epsilon']
+      .map((label) => gitProject(label, rest, 5))],
   });
 };
 
@@ -403,9 +403,38 @@ test('project-concentration: 23% of spend fires', () => {
 test('project-concentration survives a single-project window', () => {
   const agg = makeAgg({
     sessions: [session({ cost: 100 })],
+    gitProjects: [gitProject('alpha', 100, 5)],
+  });
+  const ins = byId(detectInsights(agg), 'project-concentration');
+  assert.ok(ins);
+  assert.match(ins.evidence, /only Git project/);
+});
+
+// M2 (#238 item 7): the finding and Score → Projects must agree for the same
+// project and window. byProject folds clones, plain folders, vanished repos and
+// sessions with no evidence under one folder label; gitProjects does not.
+test('project-concentration reports the repository-identity cost and sessions, not the folder label rollup', () => {
+  const agg = makeAgg({
+    sessions: [session({ cost: 466 })],
+    byProject: { 'ruvnet-brain': { tokens: 1, cost: 400, sessions: 7, minutes: 10 } },
+    gitProjects: [gitProject('ruvnet-brain', 350, 4), gitProject('other', 40, 1)],
+  });
+  const ins = byId(detectInsights(agg), 'project-concentration');
+  assert.ok(ins);
+  assert.match(ins.title, /ruvnet-brain/);
+  assert.match(ins.finding, /\$350/);
+  assert.match(ins.finding, /\b4 sessions\b/);
+  assert.doesNotMatch(ins.finding, /\$400|\b7 sessions\b/);
+  assert.match(ins.finding, /of all API-equivalent spend in this window/);
+  assert.match(ins.evidence, /other at \$40/);
+});
+
+test('project-concentration stays silent without repository identity, even when byProject is lopsided', () => {
+  const agg = makeAgg({
+    sessions: [session({ cost: 100 })],
     byProject: { alpha: { tokens: 1, cost: 100, sessions: 5, minutes: 10 } },
   });
-  assert.ok(byId(detectInsights(agg), 'project-concentration'));
+  assert.equal(fired(agg, 'project-concentration'), false);
 });
 
 // classify-coverage
@@ -556,6 +585,7 @@ function kitchenSink() {
       alpha: { tokens: 1, cost: 1_400, sessions: 7, minutes: 300 },
       beta: { tokens: 1, cost: 600, sessions: 3, minutes: 100 },
     },
+    gitProjects: [gitProject('alpha', 1_400, 7), gitProject('beta', 600, 3)],
     byCategory: {
       'Feature build': { sessions: 3, cost: 1_500, minutes: 200 },
       'Docs & writing': { sessions: 3, cost: 30, minutes: 30 },

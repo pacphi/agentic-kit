@@ -640,6 +640,22 @@ test('a not-scanned source renders its SOURCE_COVERAGE_LABELS label, never the r
   assert.doesNotMatch(progress.text, /Ollama: not-scanned/);
 });
 
+test('an absent host source reads Not installed, with no start hint the service would refuse (M1)', async () => {
+  const absent = { sourceId: 'src_hermesAbsent000000000000', label: 'Hermes user configuration', state: 'not-scanned', present: false };
+  const management = buildManagement({
+    discovery: () => ({
+      ...discoveryResult,
+      automaticSources: [{ id: 'claude-user', enabled: true, present: true }, { id: 'hermes-user', enabled: true, present: false }],
+      coverage: [...discoveryResult.coverage, absent],
+    }),
+  });
+  const discovery = await captureLogs(() => run({ flags: {}, positionals: ['discovery'], deps: { management } }));
+  assert.match(discovery.text, /hermes-user: enabled \(not installed on this machine\)/);
+  assert.match(discovery.text, /Hermes user configuration: Not installed/);
+  assert.doesNotMatch(discovery.text, /src_hermesAbsent/);
+  assert.doesNotMatch(discovery.text, /claude-user: enabled \(not installed/);
+});
+
 // ── sources ──────────────────────────────────────────────────────────────────
 
 test('sources add without --yes previews and does not save', async () => {

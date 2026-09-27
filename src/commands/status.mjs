@@ -1,6 +1,7 @@
 // ak status — read-only dashboard. Each row: subsystem, level, message,
-// and (for drift) what `sync` would do. --json emits the raw rows; --hint
-// (set by bare invocation) appends exactly one suggested next action.
+// and (for drift) a fix plus who performs it (`repair`: 'sync' or 'manual',
+// see status/row.mjs). --json emits the raw rows; --hint (set by bare
+// invocation) appends exactly one suggested next action.
 import { glyph, dim, bold, warn } from '../lib/output.mjs';
 import { loadRing, detectRegression } from '../lib/health-history.mjs';
 import { loadKitConfig } from '../lib/config.mjs';
@@ -18,13 +19,18 @@ export const options = {
   deep: { type: 'boolean', default: false },
   hint: { type: 'boolean', default: false },
   refresh: { type: 'boolean', default: false },
+  live: { type: 'boolean', default: false },
 };
 
 export const help = `ak status — read-only dashboard of what's true and what's drifted
 
 Prints one row per subsystem (versions, natives, security, learning, providers,
-…). Read-only: it never changes anything. A bare \`ak\` runs this plus one
-suggested next action.
+…). Without --live it is read-only: it changes nothing and runs no live check;
+it shows the last result \`ak sync\`, \`ak x verify\` or \`ak status --live\`
+remembered, with its age. A bare \`ak\` runs this plus one suggested next action.
+A row's "→" fix is what \`ak sync\` performs; "→ manual:" marks a step you run
+yourself (sync never plans it). --json rows carry the same distinction as
+\`repair\`: "sync", "manual", or null when there is no fix.
 
 Usage: ak status [options]
 
@@ -32,11 +38,25 @@ Options:
   --deep      run the slower probes (spawns CLIs) for a fuller picture
   --json      emit the raw rows as JSON (suppresses the drift nudge)
   --refresh   re-probe ruflo component evidence
+  --live      first run the quick, free live checks from \`ak x verify\` in
+              parallel (AQE embedding request for a kit-managed backend, Codex
+              MCP when Codex is enabled, provider wiring, security packages,
+              deja-vu when enabled, and a memory round trip in a temp dir), each
+              bounded by a timeout that reads inconclusive; remembers the
+              results. A failed check is a warning, so the exit code is unchanged
 
 Examples:
   ak status           quick dashboard
   ak status --deep    thorough check
+  ak status --live    run the quick live checks, then report
   ak status --json    machine-readable rows`;
+
+/** `--live`: the quick, free `ak x verify` checks, loaded only when asked for
+ *  so plain status never pays for the verify suites. */
+async function runDefaultLiveChecks({ cfg, cwd }) {
+  const { runLiveChecks, liveChecksFor } = await import('./x/verify.mjs');
+  return runLiveChecks({ cfg, cwd, checks: liveChecksFor(cfg) });
+}
 
 // Generalizes the HOST_DETAIL_RENDERERS contract (status/host-detail.mjs) to
 // every section: a section owns its own error handling when it needs an
@@ -89,13 +109,17 @@ export async function collect({
   return rows;
 }
 
-export async function run({ flags, pkgRoot }) {
+export async function run({ flags, pkgRoot, runLive = runDefaultLiveChecks }) {
+  // Live checks run BEFORE collect(), never inside it: the dashboard calls
+  // collect() and must stay probe-free.
+  if (flags.live && !flags.json) console.log(dim('running live checks (quick, free; each bounded by a timeout)…'));
+  const live = flags.live ? await runLive({ cfg: loadKitConfig(), cwd: process.cwd() }) : null;
   const rows = await collect({ pkgRoot, refresh: !!flags.refresh });
   const worst = rows.some((r) => r.level === 'fail') ? 'fail'
     : rows.some((r) => r.level === 'warn') ? 'warn' : 'ok';
 
   if (flags.json) {
-    console.log(JSON.stringify({ overall: worst, rows }, null, 2));
+    console.log(JSON.stringify({ overall: worst, rows, ...(live ? { live } : {}) }, null, 2));
     return worst === 'fail' ? 1 : 0;
   }
 
@@ -104,17 +128,25 @@ export async function run({ flags, pkgRoot }) {
   for (const r of rows) {
     const label = r.subsystem === last ? ' '.repeat(r.subsystem.length) : r.subsystem;
     last = r.subsystem;
-    console.log(`  ${glyph(r.level)} ${label.padEnd(11)} ${r.message}${r.fix ? dim(`  → ${r.fix}`) : ''}`);
+    // A manual fix is labelled so nobody expects `ak sync` to perform it.
+    const fix = r.fix ? dim(`  → ${r.repair === 'manual' ? 'manual: ' : ''}${r.fix}`) : '';
+    console.log(`  ${glyph(r.level)} ${label.padEnd(11)} ${r.message}${fix}`);
   }
 
   // health-history: alarm on any backslide since the previous sync snapshot.
   for (const reg of detectRegression(loadRing(loadKitConfig()))) warn(`regression: ${reg.message}`);
 
   if (flags.hint) {
-    const actionable = rows.filter((r) => r.fix);
+    const bySync = rows.filter((r) => r.fix && r.repair !== 'manual');
+    const manual = rows.filter((r) => r.fix && r.repair === 'manual');
     console.log('');
     if (worst === 'ok') console.log(`${glyph('ok')} all healthy — nothing to do`);
-    else console.log(`${actionable.length} item(s) need attention — run: ${bold('ak sync')}${worst === 'fail' ? '' : dim('  (or --dry-run to preview)')}`);
+    else if (!bySync.length && manual.length) {
+      console.log(`${manual.length} item(s) need attention — run the "→ manual:" step(s) above yourself; ak sync does not perform them`);
+    } else {
+      const more = manual.length ? dim(` · ${manual.length} more need a manual step (→ manual:)`) : '';
+      console.log(`${bySync.length} item(s) need attention — run: ${bold('ak sync')}${worst === 'fail' ? '' : dim('  (or --dry-run to preview)')}${more}`);
+    }
     console.log(dim('📊 ak dashboard — open the local web dashboard (http://127.0.0.1:7431)'));
   }
   return worst === 'fail' ? 1 : 0;

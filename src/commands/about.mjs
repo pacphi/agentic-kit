@@ -6,15 +6,19 @@
 // in both surfaces, or one of them shipped text nobody signed off on.
 //
 // The editorial/detection split survives the port. Prose comes from the
-// directory and never claims runtime state; the state chip is the only place a
-// runtime fact appears, and it is fed by collectors that ALREADY EXIST — the
-// version primitives `ak status` itself calls, and `ak status`'s own rows for
-// the configured surfaces. This command adds no probe of its own. When a
+// directory and never claims runtime state; the state chip is the runtime fact,
+// and it is fed by collectors that ALREADY EXIST — the version primitives
+// `ak status` itself calls, and `ak status`'s own rows for the configured
+// surfaces. One measured line may sit beside the ruflo chip: an applied
+// install-edit receipt, read from the same ledger the `natives` status row reads
+// (ADR-0026 amendment 2026-09-26). It never changes the chip. This command adds
+// no probe of its own. When a
 // detection source fails the chip degrades to `state unknown — <reason>` and the
 // entry still renders: an unmeasured component is never drawn as absent
 // (ADR-0023 / component-directory invariants 2 and 3).
 import { heading, dim, bold, glyph, green, yellow } from '../lib/output.mjs';
 import { CATEGORY_ORDER, directoryEntries } from '../lib/dashboard/about-directory.mjs';
+import { hostManagement, HOST_MANAGEMENT_LABELS } from '../lib/host-management.mjs';
 
 export const options = {
   json: { type: 'boolean', default: false },
@@ -68,6 +72,43 @@ const skipped = () => ({ state: 'skipped', version: null, note: 'detection skipp
 const reasonOf = (error) => String(error?.message ?? error);
 
 /**
+ * A host chip in the management words every host surface uses (ADR-0053,
+ * 2026-09-26): an installed host ak does not manage is "Found, not managed",
+ * never a bare "installed", and an absent unmanaged host is not told ak adds
+ * it. `enabled` null (kit.json unreadable) keeps the plain presence chip.
+ * @param {{ method: string, version?: string|null }} install
+ * @param {boolean|null} enabled
+ */
+export function hostAboutState(install, enabled) {
+  const present = install.method !== 'absent';
+  const base = present
+    // An externally-installed host (mise, brew, a native installer) is
+    // present and ak says so — while naming the owner, because ak does not
+    // manage its updates (MANAGED-TOOLS "honest disowning").
+    ? installed(install.version, install.method === 'external' ? 'external install — self-managed' : null)
+    : absent();
+  if (enabled == null) return base;
+  return { ...base, management: hostManagement({ enabled: enabled === true, present }).state };
+}
+
+/**
+ * Audit 2026-09-26 Addendum 2, problem 3: an edit ak made inside Ruflo's
+ * install (the native SQLite pin Ruflo itself intends, ruvnet/ruflo#2219)
+ * rides beside the ruflo chip as its own `edits` field. The chip stays the
+ * install fact. Local reads only: the receipt ledger and the manifests it names.
+ * @param {Map<string, Record<string, any>>} states
+ */
+async function addRufloEdits(states) {
+  try {
+    const { installEditStatus, rufloEditNotes } = await import('../lib/install-edits.mjs');
+    const { rufloRoot } = await import('../lib/paths.mjs');
+    const notes = rufloEditNotes(installEditStatus(), { rufloRoot: rufloRoot() });
+    const current = states.get('ruflo');
+    if (notes.length && current) states.set('ruflo', { ...current, edits: notes });
+  } catch { /* no ledger or no npm global root: the chip stands alone */ }
+}
+
+/**
  * State chips for the packaged entries, from the primitives `ak status` already
  * calls. Each source is guarded independently so one unavailable collector
  * degrades one chip, never the page. Network-free by construction: every call
@@ -76,23 +117,22 @@ const reasonOf = (error) => String(error?.message ?? error);
  * installed" is a local question and About asks nothing else.
  *
  * @param {{ pkgRoot?: string }} input
- * @returns {Promise<Map<string, { state: string, version: string|null, note: string|null }>>}
+ * @returns {Promise<Map<string, { state: string, version: string|null, note: string|null, edits?: string[] }>>}
  */
 async function detectPackaged({ pkgRoot }) {
   const states = new Map();
 
   try {
     const { HOSTS, hostInstallState } = await import('../lib/providers.mjs');
+    let hostsEnabled = null;
+    try {
+      const { loadKitConfig } = await import('../lib/config.mjs');
+      hostsEnabled = loadKitConfig().integrations?.hosts ?? null;
+    } catch { /* management unknown: chips keep plain presence */ }
     for (const host of HOSTS) {
       try {
         const state = await hostInstallState(host);
-        states.set(`hosts.${host.id}`, state.method === 'absent'
-          ? absent()
-          // An externally-installed host (mise, brew, a native installer) is
-          // present and ak says so — while naming the owner, because ak does
-          // not manage its updates (MANAGED-TOOLS "honest disowning").
-          : installed(state.version,
-            state.method === 'external' ? 'external install — self-managed' : null));
+        states.set(`hosts.${host.id}`, hostAboutState(state, hostsEnabled ? hostsEnabled[host.id] === true : null));
       } catch (error) {
         states.set(`hosts.${host.id}`, unknown(reasonOf(error)));
       }
@@ -111,10 +151,14 @@ async function detectPackaged({ pkgRoot }) {
     }
   }
 
+  await addRufloEdits(states);
+
+  // agentdb ships inside Ruflo; ak installs no separate copy, so the chip
+  // reports the bundled version and never a stray standalone global.
   try {
-    const { coherence } = await import('../lib/agentdb.mjs');
-    const c = coherence();
-    states.set('agentdb', c.present ? installed(c.global) : absent());
+    const { bundledVersion } = await import('../lib/agentdb.mjs');
+    const version = bundledVersion();
+    states.set('agentdb', version ? installed(version, 'bundled inside Ruflo') : absent());
   } catch (error) {
     states.set('agentdb', unknown(reasonOf(error)));
   }
@@ -180,8 +224,14 @@ function detectConfigured(rows) {
 }
 
 /** The chip's rendered text. `installed` without a version is a real state —
- *  some components are nested packages with no manifest ak may read. */
-function chipText(state) {
+ *  some components are nested packages with no manifest ak may read. A host
+ *  chip carrying `management` reads the shared host-management words. */
+export function chipText(state) {
+  if (state.management) {
+    const label = HOST_MANAGEMENT_LABELS[state.management];
+    if (state.state === 'installed') return state.version ? `${label} · v${state.version}` : label;
+    return state.management === 'managed' ? `${label} · not installed — ak sync installs it` : label;
+  }
   if (state.state === 'installed') return state.version ? `installed · v${state.version}` : 'installed';
   if (state.state === 'absent') return 'not installed — ak setup adds it';
   if (state.state === 'configured') return 'configured';
@@ -190,7 +240,9 @@ function chipText(state) {
   return `state unknown — ${state.note}`;
 }
 
-const chipLevel = (state) => (state.state === 'installed' || state.state === 'configured' ? 'ok'
+// A host ak does not manage is a neutral fact, neither a success nor a warning.
+const chipLevel = (state) => (state.management && state.management !== 'managed' ? 'none'
+  : state.state === 'installed' || state.state === 'configured' ? 'ok'
   : state.state === 'attention' || state.state === 'unknown' ? 'warn' : 'none');
 
 function paint(state, text) {
@@ -219,6 +271,7 @@ function renderEntry(entry, state, width) {
   console.log(`${indent}${dim(entry.tagline)}`);
   for (const line of wrap(entry.paragraph, body)) console.log(`${indent}${line}`);
   for (const link of entry.links) console.log(`${indent}${dim(link.label.padEnd(6))} ${link.url}`);
+  for (const note of state.edits ?? []) console.log(`${indent}${dim('edit'.padEnd(6))} ${note}`);
   if (entry.manage) console.log(`${indent}${dim('manage'.padEnd(6))} ${entry.manage}`);
   console.log('');
 }

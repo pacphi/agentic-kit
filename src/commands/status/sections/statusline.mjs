@@ -5,7 +5,10 @@
 // into small functions so each stays readable and under the CC budget.
 import fs from 'node:fs';
 import * as paths from '../../../lib/paths.mjs';
-import { upstreamCveCounterFabricated, fixStatusline, helperStampStale } from '../../../lib/statusline.mjs';
+import {
+  upstreamCveCounterFabricated, fixStatusline, helperStampStale, statuslineVersionAhead,
+  helperRefreshBlocker, bakedVersionManualFix,
+} from '../../../lib/statusline.mjs';
 import { statuslineDrift } from '../../../lib/codex-statusline.mjs';
 import { row } from '../row.mjs';
 
@@ -52,7 +55,26 @@ function footerRows(cwd) {
         : 'statusline shows ruflo\'s fabricated CVE count (upstream defect)',
       patched ? null : 'sync injects the security overlay'));
   }
+  rows.push(...versionRows(cwd));
   return rows;
+}
+
+// Ruflo's helper renders the HIGHEST of its baked floor and every install it
+// finds, so a baked version above everything installed shows a Ruflo version
+// that is not installed, forever. Sync repairs it only through Ruflo's own
+// helper refresh; when that refresh cannot run here the repair is manual.
+function versionRows(cwd) {
+  let ahead = null;
+  try { ahead = statuslineVersionAhead(cwd); } catch { /* best-effort */ }
+  if (!ahead) return [];
+  const shows = `statusline shows Ruflo v${ahead.baked}, but installed ruflo is v${ahead.installed}`;
+  const blocker = helperRefreshBlocker(cwd);
+  if (blocker) {
+    return [row('statusline', 'warn', `${shows}; ruflo's helper refresh cannot regenerate it (${blocker})`,
+      bakedVersionManualFix(ahead.installed), { repair: 'manual' })];
+  }
+  return [row('statusline', 'warn', shows,
+    'sync regenerates the helper through ruflo\'s own refresh, then re-injects the footer')];
 }
 
 // Codex has a native user-scoped line, but no command-backed rich renderer.

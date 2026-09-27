@@ -4,9 +4,16 @@
 // Seats run hermetic (ADR-0034) and hand off over the schema-native transport;
 // a protocol failure persists its redacted raw final-message tail so the next
 // #108-class defect arrives with evidence, not just a category.
+//
+// The seats run in a disposable Ruflo project, never in this checkout: their
+// MCP writes land in that project's own store, and deleting the project is the
+// cleanup. Running in the checkout once left 118 rows in 30 ak-qe-court-live-*
+// namespaces of the real MCP store, because a default `ruflo memory purge`
+// clears memory.db only (audit 2026-09-26, H D7). A read-only tripwire checks
+// that no proof key reached the checkout's stores.
 import { randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -15,9 +22,12 @@ import { DatabaseSync } from 'node:sqlite';
 import { executionAdapterFor } from '../../src/lib/execution/adapters.mjs';
 import { executeRunPlan } from '../../src/lib/execution/runner.mjs';
 import { findMemoryEntry } from '../../src/lib/project-memory.mjs';
-import { projectMemoryEnv } from '../../src/lib/ruflo-memory.mjs';
+import { memoryProjectRoot } from '../../src/lib/ruflo-memory.mjs';
+import {
+  createDisposableMemoryProject, leakedProofKeys, withProcessEnv,
+} from './disposable-memory-project.mjs';
 
-const cwd = process.cwd();
+const checkout = process.cwd();
 const timeoutMs = Number(process.env.AK_QE_COURT_SEAT_TIMEOUT_MS ?? 120_000);
 const trials = Number(process.env.AK_QE_COURT_TRIALS ?? 1);
 const debugLog = join(tmpdir(), `ak-qe-court-debug-${process.pid}.jsonl`);
@@ -29,21 +39,15 @@ function checkedPositiveInteger(value, label) {
 checkedPositiveInteger(timeoutMs, 'AK_QE_COURT_SEAT_TIMEOUT_MS');
 checkedPositiveInteger(trials, 'AK_QE_COURT_TRIALS');
 
-function run(command, args, options = {}) {
-  return spawnSync(command, args, { cwd, encoding: 'utf8', ...options });
-}
-
-function fingerprint() {
-  const result = run('git', ['status', '--porcelain=v1', '-z', '--untracked-files=all']);
+function fingerprint(dir) {
+  const result = spawnSync('git', ['status', '--porcelain=v1', '-z', '--untracked-files=all'], { cwd: dir, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   return result.stdout;
 }
 
-function memory(commandArgs) {
-  return run('ruflo', ['memory', ...commandArgs], {
-    env: projectMemoryEnv(cwd, process.env),
-  });
-}
+// Runtime state the stack writes into the project on its own (memory stores,
+// Ruflo/AQE/Claude runtime folders) is not a seat edit; anything else is.
+const RUNTIME_ARTIFACTS = ['.swarm/', '.claude-flow/', '.claude/', '.agentic-qe/', '*.db', '*.db-*', '*.rvf', '*.rvf.lock'];
 
 function profile(leader, trial, namespace, evidence) {
   const follower = leader === 'claude' ? 'codex' : 'claude';
@@ -128,20 +132,24 @@ function capturingAdapters(captured, evidence) {
 test('Claude-led and Codex-led qe-court participant transports terminate cleanly', {
   timeout: timeoutMs * trials * 12,
 }, async () => {
-  const before = fingerprint();
-  const oldDbPath = process.env.CLAUDE_FLOW_DB_PATH;
-  process.env.CLAUDE_FLOW_DB_PATH = projectMemoryEnv(cwd).CLAUDE_FLOW_DB_PATH;
+  const checkoutBefore = fingerprint(checkout);
+  const project = await createDisposableMemoryProject({ prefix: 'ak-qe-court-live-' });
+  const proofs = [];
+  const leaks = [];
   try {
-    for (let trial = 1; trial <= trials; trial++) {
-      for (const leader of ['claude', 'codex']) {
-        const namespace = `ak-qe-court-live-${process.pid}-${Date.now()}-${leader}-${trial}`;
-        const evidence = new Map();
-        const captured = new Map();
-        try {
+    writeFileSync(join(project.root, '.gitignore'), `${RUNTIME_ARTIFACTS.join('\n')}\n`);
+    const projectBefore = fingerprint(project.root);
+    await withProcessEnv(project.env, async () => {
+      for (let trial = 1; trial <= trials; trial++) {
+        for (const leader of ['claude', 'codex']) {
+          const namespace = `ak-qe-court-live-${process.pid}-${Date.now()}-${leader}-${trial}`;
+          const evidence = new Map();
+          const captured = new Map();
           const plan = profile(leader, trial, namespace, evidence);
+          proofs.push({ namespace, keys: [...evidence.values()].map(({ key }) => key) });
           const results = await executeRunPlan(plan, {
             adapters: capturingAdapters(captured, evidence),
-            cwd,
+            cwd: project.root,
             timeoutMs,
             maxConcurrent: 1,
           });
@@ -157,8 +165,8 @@ test('Claude-led and Codex-led qe-court participant transports terminate cleanly
             assert.ok(handoff, `${workerId} did not produce a validated handoff`);
             assert.match(handoff.outcome, new RegExp(expected.value),
               `${workerId} did not retrieve its private Ruflo proof value`);
-            const landed = findMemoryEntry(cwd, namespace, expected.key);
-            assert.ok(landed, `${workerId} reported a proof that did not land in project memory`);
+            const landed = findMemoryEntry(project.root, namespace, expected.key);
+            assert.ok(landed, `${workerId} reported a proof that did not land in the disposable project's memory`);
             const db = new DatabaseSync(landed.file, { readOnly: true });
             try {
               const columns = new Set(db.prepare('PRAGMA table_info(memory_entries)').all().map((column) => column.name));
@@ -170,14 +178,18 @@ test('Claude-led and Codex-led qe-court participant transports terminate cleanly
               assert.equal(row?.payload, expected.value, `${workerId} project-memory value differs from its proof`);
             } finally { db.close(); }
           }
-        } finally {
-          memory(['purge', '--namespace', namespace, '--force']);
         }
       }
-    }
+    });
+    assert.equal(fingerprint(project.root), projectBefore, 'live participant seats edited files in their project');
   } finally {
-    if (oldDbPath === undefined) delete process.env.CLAUDE_FLOW_DB_PATH;
-    else process.env.CLAUDE_FLOW_DB_PATH = oldDbPath;
+    // Read-only, and done even when a seat failed: a leak matters either way.
+    const realRoot = memoryProjectRoot(checkout);
+    leaks.push(...proofs.flatMap(({ namespace, keys }) =>
+      leakedProofKeys(realRoot, namespace, keys).map((key) => `${namespace}/${key}`)));
+    if (leaks.length) console.error(`proof rows reached this checkout's memory; remove them by hand: ${leaks.join(', ')}`);
+    project.cleanup();
   }
-  assert.equal(fingerprint(), before, 'live participant transports mutated the repository');
+  assert.deepEqual(leaks, [], "proof rows reached this checkout's memory");
+  assert.equal(fingerprint(checkout), checkoutBefore, 'live participant transports mutated the repository');
 });

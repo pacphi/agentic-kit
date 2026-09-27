@@ -270,6 +270,16 @@ provider or `RUFLO_PROVIDER` still outranks it. OpenRouter registered by `ak` al
 `OLLAMA_BASE_URL` remains the environment override. `ak` surfaces a degraded warning when the
 installed Ruflo is older than 3.38.8.
 
+Registering a provider never moves project memory. In a project with no Ruflo JSON configuration,
+`ruflo providers configure` would create `claude-flow.config.json` from Ruflo's defaults, whose
+`memory.persistPath` is `./data/memory`
+([ruvnet/ruflo#3193](https://github.com/ruvnet/ruflo/issues/3193)). Whether registration runs from
+`ak setup`, `ak sync` or `ak host pick`, `ak` first writes a minimal
+`claude-flow.config.json` with `memory.persistPath: ".swarm"`, and Ruflo adds its keys to it. After
+each registration `ak` re-reads the memory setting. If Ruflo changed it, `ak` puts it back, skips the
+remaining providers, and reports the step as degraded. An existing Ruflo JSON configuration, or a
+file named by `CLAUDE_FLOW_CONFIG`, is used as it is.
+
 For a direct Ruflo agent using an OpenRouter-vended model, the complete user path is:
 
 ```bash
@@ -400,7 +410,8 @@ Three checks establish different facts; do not collapse them:
    content hash, then `ak host adapters grant <name> aqeProvider` must succeed.
 2. `ak x verify providers` proves admission plus the exact project declaration, ownership receipt,
    default, fallback, and override projection. It deliberately warns that this is not a served
-   model response.
+   model response. It reads AQE's billing section (`aqe health`) only in a project where
+   `.agentic-qe` exists, because `aqe health` initializes a store where it runs.
 3. Release proof starts fresh AQE CLI and MCP processes, lists the external id through
    `aqe llm providers --json`, invokes the real `test_generate_enhanced` MCP tool, and requires the
    served completion to carry the fixture's provider and model markers:
@@ -507,9 +518,11 @@ AK_QE_COURT_TRIALS=5 pnpm test:qe-court-live  # POSIX soak
 ```
 
 Each seat performs an MCP-native Ruflo memory store→retrieve round trip, emits the exact returned
-value in a validated bounded handoff, and must terminate within its absolute deadline. The check
-independently confirms the stored project-memory value and fails on repository mutation or
-orphaned state.
+value in a validated bounded handoff, and must terminate within its absolute deadline. The seats
+run in a disposable Ruflo project (its own Git repository and memory root, with Ruflo's daemon
+start-on-use off) that is deleted afterwards, so their rows never reach your project's memory. The
+check independently confirms the stored value in that project, and fails on a file edit there,
+repository mutation, orphaned state, or any proof row found in the checkout's memory.
 Full court parity remains blocked until Agentic-QE ships a supported host-neutral runner and a
 self-contained Codex QE-Court projection.
 

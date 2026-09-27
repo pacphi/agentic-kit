@@ -11,6 +11,7 @@
 // Instead, its sibling .ps1 shim runs through Windows PowerShell's `-File`
 // interface, preserving every caller argument as a separate argv element.
 import { execFile, spawn } from 'node:child_process';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { promisify } from 'node:util';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,6 +19,19 @@ import { isWindows } from './paths.mjs';
 
 const pexecFile = promisify(execFile);
 const MAX_EXEC_BUFFER = 16 * 1024 * 1024;
+
+// A caller that bounds work it does not own (a live check under `ak status
+// --live` running an unmodified `ak x verify` suite) scopes an AbortSignal
+// here; every run() inside the scope that passes no signal of its own uses it,
+// so a timed-out check's direct child processes stop and its own cleanup still
+// runs. The abort signals only that direct child: a process it started keeps
+// running (on Windows a .cmd shim's child is PowerShell, so the ruflo or aqe
+// node process behind it survives the abort).
+const abortScope = new AsyncLocalStorage();
+
+/** Run `fn` with `signal` as the default abort signal for run() calls in it.
+ * @template T @param {AbortSignal} signal @param {() => T} fn @returns {T} */
+export const withAbortSignal = (signal, fn) => abortScope.run(signal, fn);
 
 const CMD_SHIMS = new Set([
   'npm', 'npx', 'claude', 'codex', 'opencode', 'deja', 'ruflo', 'aqe', 'claude-flow',
@@ -78,14 +92,16 @@ export function resolveShim(cmd, args = [], { windows = isWindows, env = process
 }
 
 /** Normalize whatever a failed spawn threw into `run()`'s never-throws shape.
- *  A signal kill (the timeout path below) leaves `err.code` null, which lands
- *  on 1 — non-zero, so a caller reading only the code can never mistake a
- *  killed run's partial stdout for a completed one. */
+ *  A signal kill (the timeout path below, or a crash) leaves `err.code` null,
+ *  which lands on 1 — non-zero, so a caller reading only the code can never
+ *  mistake a killed run's partial stdout for a completed one. The signal
+ *  itself is kept as `signal` so a caller can name the real cause. */
 function failureResult(err, stdout = '', stderr = '') {
   return {
     code: typeof err.code === 'number' ? err.code : 1,
     stdout: err.stdout ?? stdout ?? '',
     stderr: err.stderr || stderr || String(err.message ?? err),
+    ...(err.signal ? { signal: err.signal } : {}),
   };
 }
 
@@ -104,6 +120,20 @@ function killGroup(child) {
     }
   } catch { /* no process group, or it is already gone — fall through */ }
   try { child.kill('SIGKILL'); } catch { /* already reaped */ }
+}
+
+/** Kill a spawned child and everything it started. Shared by the MCP stdio
+ *  clients (discovery probe, tool calls) so their teardown cannot drift apart.
+ *  POSIX children must have been spawned `detached` so they lead their own
+ *  process group (killGroup, the same kill run()'s timeout path uses); Windows
+ *  uses `taskkill /T /F`, falling back to the direct child when taskkill
+ *  cannot start. Nothing is spawned without a pid, and an already-exited
+ *  process is not an error. run() keeps its own kill unchanged. */
+export function killProcessTree(child, { platform = process.platform, spawnFn = spawn } = {}) {
+  if (platform !== 'win32') { killGroup(child); return; }
+  if (typeof child.pid !== 'number' || child.pid <= 0) return;
+  const killer = spawnFn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', shell: false });
+  killer.on('error', () => { try { child.kill('SIGKILL'); } catch { /* already reaped */ } });
 }
 
 /** Accumulate one child stream, capped at `maxBuffer` — `execFile` applies its
@@ -189,7 +219,7 @@ export async function run(cmd, args = [], opts = {}) {
     const execOpts = {
       encoding: 'utf8',
       timeout: opts.timeout ?? 120_000,
-      signal: opts.signal,
+      signal: opts.signal ?? abortScope.getStore(),
       maxBuffer: Number.isFinite(opts.maxBuffer) && opts.maxBuffer > 0
         ? Math.min(Math.floor(opts.maxBuffer), MAX_EXEC_BUFFER) : MAX_EXEC_BUFFER,
       cwd: opts.cwd,

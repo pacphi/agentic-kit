@@ -16,6 +16,7 @@ import {
 const HOME = sandboxHome('ak-verify');
 const paths = await import('../../src/lib/paths.mjs');
 const verify = await import('../../src/commands/x/verify.mjs');
+const evidence = await import('../../src/lib/live-check-evidence.mjs');
 assertSandboxed(paths, HOME);
 
 const PROJECT = sandboxProject('ak-verify');
@@ -146,11 +147,12 @@ test('the providers suite fails on aqe fallback-chain drift between kit.json and
   assert.match(out, /aqe fallback chain drift/);
 });
 
-test('the harvest suite skips (does not fail) when the agentdb CLI is absent', async () => {
+test('the harvest suite fails (never skips to a pass) when the ruflo CLI is absent', async () => {
   seedHome();
   const { result, out } = await runVerify(['harvest']);
-  assert.equal(result, 0, 'an unavailable optional dependency is a skip, not a failed proof');
-  assert.match(out, /agentdb CLI not installed — skipping harvest proof/);
+  assert.equal(result, 1, 'harvest drives only Ruflo verbs, so no ruflo means no proof');
+  assert.match(out, /ruflo CLI not installed — cannot prove the harvest write path/);
+  assert.doesNotMatch(out, /agentdb/, 'the retired standalone CLI is never probed');
 });
 
 test('`all` runs every suite and fails if any single proof failed', async () => {
@@ -163,11 +165,68 @@ test('`all` runs every suite and fails if any single proof failed', async () => 
   assert.match(out, /verification failed — see above/);
 });
 
-test('verify writes nothing into HOME', async () => {
+test('verify writes nothing into HOME except the results it remembers for status', async () => {
   seedHome();
+  rmrf(evidence.liveCheckDir());
   const before = snapshot(HOME);
   await runVerify([]);
-  assertUnchanged(before, HOME, '`ak x verify` proves things; it must not change them');
+  const stateRel = path.relative(HOME, evidence.liveCheckDir());
+  const after = snapshot(HOME);
+  const changed = [...after.keys()].filter((k) => before.get(k) !== after.get(k));
+  const outside = changed.filter((k) => !k.startsWith(stateRel) && !stateRel.startsWith(k.replace(/\/$/, '')));
+  assert.deepEqual(outside, [], '`ak x verify` proves things; its only write is the live-check evidence store');
+  assert.ok(changed.some((k) => k.startsWith(`${stateRel}${path.sep}security.json`)),
+    'the failed security proof must be remembered for ak status');
+});
+
+test('a failed proof is remembered for status with its first failure as the reason', async () => {
+  seedHome();
+  rmrf(evidence.liveCheckDir());
+  await runVerify(['security']);
+  const got = evidence.readLiveCheck('security', {});
+  assert.equal(got.status, 'failed');
+  assert.equal(got.source, 'verify');
+  assert.equal(got.reason, '@claude-flow/security missing');
+});
+
+test('a skipped deja-vu proof is not remembered as a pass', async () => {
+  seedHome();
+  rmrf(evidence.liveCheckDir());
+  const { result, out } = await runVerify(['deja-vu']);
+  assert.equal(result, 0);
+  assert.match(out, /deja-vu disabled and unowned — skipped/);
+  assert.equal(evidence.readLiveCheck('deja-vu', {}), null);
+});
+
+test('an aqe proof stopped before the embedding request remembers no embedding result', async () => {
+  seedHome();
+  rmrf(evidence.liveCheckDir());
+  const aqeDir = paths.projectAqeDir(PROJECT);
+  fs.mkdirSync(aqeDir, { recursive: true });
+  fs.writeFileSync(path.join(aqeDir, 'brain.rvf'), 'x'.repeat(4096));
+  const prev = process.env.RUFLO_AQE_RVF_MAX_BYTES;
+  process.env.RUFLO_AQE_RVF_MAX_BYTES = '16';
+  try {
+    assert.equal((await runVerify(['aqe'])).result, 1);
+    assert.equal(evidence.readLiveCheck('aqe-embedding', {}), null);
+  } finally {
+    if (prev === undefined) delete process.env.RUFLO_AQE_RVF_MAX_BYTES;
+    else process.env.RUFLO_AQE_RVF_MAX_BYTES = prev;
+    rmrf(aqeDir);
+  }
+});
+
+test('the aqe proof remembers its live embedding request, keyed like status reads it', async () => {
+  seedHome();
+  rmrf(evidence.liveCheckDir());
+  const { out } = await runVerify(['aqe']);
+  assert.match(out, /live embedding request: /);
+  const cfg = JSON.parse(fs.readFileSync(paths.kitConfigPath(), 'utf8'));
+  const got = evidence.readLiveCheck('aqe-embedding', {
+    inputsKey: evidence.liveCheckInputsKey('aqe-embedding', { cfg, cwd: PROJECT }) });
+  assert.equal(got.source, 'verify');
+  assert.equal(got.status, 'failed', 'no AQE runtime in the sandbox: the request cannot pass');
+  assert.equal(got.invalidated, false);
 });
 
 test.after(() => rmrf(HOME, PROJECT));

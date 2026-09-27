@@ -5,7 +5,7 @@
 // real machine's kit.json or ~/.claude — src/lib/paths.mjs's configBase()
 // reads APPDATA (not XDG_CONFIG_HOME) on win32, so both must be set or the
 // sandbox is silently bypassed there.
-import { test, after } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -19,22 +19,16 @@ import { validateAdapterManifest } from '../../src/lib/adapters/manifest.mjs';
 import { hashAdapterContent } from '../../src/lib/adapters/integrity.mjs';
 import { recordConsent } from '../../src/lib/adapters/consent.mjs';
 import { grantCapability, recordTierResult } from '../../src/lib/adapters/grants.mjs';
+import { guardRealRepository } from './helpers/project-isolation.mjs';
+import { resolveShim } from '../../src/lib/exec.mjs';
 
 // Tripwire (#137): a spawned `ak x host pick` whose cwd falls back to the test
 // process's cwd writes PROJECT-scoped config (.claude/settings.local.json,
 // .agentic-qe/llm-config.json) into the REAL repository the suite runs from —
-// HOME sandboxing cannot catch that class of leak. Record the real cwd's state
-// at module load and prove it byte-identical when the suite ends.
-const REAL_PROJECT_FILES = ['.claude/settings.local.json', '.agentic-qe/llm-config.json']
-  .map((rel) => path.resolve(process.cwd(), rel));
-const readOrNull = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
-const realProjectBefore = REAL_PROJECT_FILES.map(readOrNull);
-after(() => {
-  REAL_PROJECT_FILES.forEach((f, i) => {
-    assert.equal(readOrNull(f), realProjectBefore[i],
-      `${f} was modified by this suite — a spawned ak command leaked out of the sandbox (cwd not anchored to the sandbox project?)`);
-  });
-});
+// HOME sandboxing cannot catch that class of leak. The shared guard records the
+// real repository's project files at module load and proves them byte-identical
+// when the suite ends.
+guardRealRepository();
 
 const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin/agentic-kit.mjs');
 
@@ -108,6 +102,34 @@ test('ak host status preserves key presence without exposing the key value', () 
   assert.equal(payload.providers.openai.keyPresent, true);
   assert.equal(payload.providers.openai.credentialPresent, true);
   assert.equal(json.stdout.includes(secret), false);
+  rm(home, project);
+});
+
+// ADR-0053 (2026-09-26): the terminal reads the same three management states as
+// the dashboard, and the enable hint is the COMPLETE --host list.
+test('ak host status names managed, found-not-managed, and not-installed hosts', () => {
+  const { home, project } = sandbox({ hosts: { claude: true, codex: false } });
+  const bin = path.join(home, 'fake-bin');
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(bin, 'codex'), '#!/bin/sh\necho "codex-cli 0.1.0"\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'codex.cmd'), '@echo off\r\necho codex-cli 0.1.0\r\n');
+  fs.writeFileSync(path.join(bin, 'codex.ps1'), 'Write-Output "codex-cli 0.1.0"\r\n');
+  // hermeticity-provider-cli-windows-shim: on Windows a bare name resolves to a
+  // .cmd only beside its .ps1 (resolveShim), so the fixture must work there too.
+  const systemRoot = path.join(home, 'fake-windows');
+  const powershell = path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  fs.mkdirSync(path.dirname(powershell), { recursive: true });
+  fs.writeFileSync(powershell, '');
+  assert.equal(resolveShim('codex', [], {
+    windows: true, env: { PATH: bin, PATHEXT: '.COM;.EXE;.BAT;.CMD', SystemRoot: systemRoot },
+  }).resolved, true, 'the fake codex must be found on Windows as well');
+  const r = ak(['host', 'status'], { cwd: project, home, env: { PATH: [bin, '/usr/bin', '/bin'].join(path.delimiter) } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^\s*claude\s.*Managed by ak/m);
+  assert.match(r.stdout, /^\s*codex\s.*Found, not managed/m);
+  assert.match(r.stdout, /not participating.*ak host pick --host claude,codex\b/);
+  assert.match(r.stdout, /^\s*opencode\s.*Not installed/m);
+  assert.doesNotMatch(r.stdout, /installed, disabled/);
   rm(home, project);
 });
 

@@ -26,6 +26,7 @@ import path from 'node:path';
 import {
   sandboxHome, assertSandboxed, captureLog, rmrf, writeKitConfig, offlineKitConfig, fakeGlobalRoot,
 } from './helpers/home-sandbox.mjs';
+import { isolateProject } from './helpers/project-isolation.mjs';
 
 const HOME = sandboxHome('ak-external-lifecycle');
 const paths = await import('../../src/lib/paths.mjs');
@@ -37,6 +38,11 @@ const { validateAdapterManifest } = await import('../../src/lib/adapters/manifes
 const { applyAdmitted, resetAdmitted } = await import('../../src/lib/adapters/admitted.mjs');
 const { registerAdmittedLifecycle, lifecycleAdapterFor } = await import('../../src/lib/adapters/lifecycle-registry.mjs');
 assertSandboxed(paths, HOME);
+// Every command below writes relative to process.cwd(): with the fake
+// `ruflo: '9.9.9'` global root, an unanchored sync.run rewrote the real
+// repository's statusline to "RuFlo V9.9.9" and uninstall.run released the
+// real project's memory pin.
+isolateProject('ak-external-lifecycle');
 
 const PKG_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../..');
 const FLAG = 'AK_EXPERIMENTAL_HOST_ADAPTERS';

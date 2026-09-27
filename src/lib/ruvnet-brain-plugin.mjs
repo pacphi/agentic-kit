@@ -77,8 +77,10 @@ export function inspectClaudeBrainPlugin({ claudeRoot = claudeDir() } = {}) {
     if (!object(hooks)) throw new Error('invalid hooks');
     result.hookEvents = Object.keys(hooks);
     const contract = brainHookContract(result.payloadVersion, hooks);
-    if (!contract.qualified) result.issues.push(contract.issue);
-    else {
+    if (!contract.qualified) {
+      result.issues.push(contract.issue);
+      result.hookDelta = contract.delta; // null when no reviewed contract applies
+    } else {
       result.hookContract = contract.contract;
       if (result.payloadVersion === '4.3.17') payloadFile(root, 'scripts/hook-shim.mjs');
     }

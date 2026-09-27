@@ -13,6 +13,7 @@ import {
   sandboxHome, assertSandboxed, snapshot, assertUnchanged, captureLog, rmrf,
   sandboxProject, writeKitConfig, offlineKitConfig, fakeGlobalRoot,
 } from './helpers/home-sandbox.mjs';
+import { isolateProject } from './helpers/project-isolation.mjs';
 import { HOST_REGISTRY } from '../../src/lib/adapters/registries.mjs';
 
 const HOME = sandboxHome('ak-setup');
@@ -21,6 +22,7 @@ const setup = await import('../../src/commands/setup.mjs');
 const { loadKitConfig } = await import('../../src/lib/config.mjs');
 const { codexMcpTopology, repairCodexMcpTopology } = await import('../../src/lib/mcp.mjs');
 assertSandboxed(paths, HOME);
+isolateProject('ak-setup-command');
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const FLAGS = (over = {}) => ({
@@ -603,6 +605,7 @@ test('a git repo cwd auto-selects project scope; a bare directory does not', asy
     const outside = await captureLog(() =>
       setup.run({ flags: FLAGS({ 'dry-run': true }), pkgRoot: PKG_ROOT }));
     assert.match(outside.out, /not inside a project \(no \.git here\)/);
+    assert.match(outside.out, /`ak setup --project`/, 'name the command that sets this folder up (#237 N3)');
     assert.ok(!outside.out.includes('project setup —'));
   } finally { process.chdir(cwd); }
   rmrf(project);

@@ -29,7 +29,7 @@ checks the minimum 22.13.0 runtime. See [Node SQLite history](https://nodejs.org
 
 Installing the package is low impact: agentic-kit has zero runtime dependencies and
 publishes its CLI, source/templates, and selected documentation. Running `ak setup`
-is intentionally broader. It can install Ruflo, AQE, AgentDB, and enabled host CLIs
+is intentionally broader. It can install Ruflo (AgentDB ships inside it), AQE, and enabled host CLIs
 globally; install the user-level RuvNet Brain; update current-user guidance and MCP
 configuration; optionally install the deja-vu transcript companion after an explicit
 `--with-deja-vu`; and initialize the current project.
@@ -219,7 +219,7 @@ against Node and npm. They are not the supported machine-management contract.
 | Surface | Package install only | `ak setup` machine/user phase | `ak setup` project phase |
 | --- | --- | --- | --- |
 | agentic-kit package | Local/cache/global according to npm method | No separate change unless later self-updated | None |
-| Ruflo, AQE, AgentDB | None | Installed/repaired in the active npm global prefix | Project assets initialized from those versions |
+| Ruflo (with its bundled AgentDB), AQE | None | Installed/repaired in the active npm global prefix | Project assets initialized from those versions |
 | Claude/Codex/OpenCode CLI | None | Missing enabled hosts may be installed globally; external installs are reused | Host-specific project wiring may be generated |
 | `~/.config/agentic-kit/kit.json` | None | Created/updated for the current OS user | Choices are read and project routing may be materialized |
 | Model inventory and private scope key | None | Created only by an explicit `ak models refresh` | Scope is stored as a keyed non-identifying fingerprint; the owner-only cache can retain exact model ids for explicit CLI evidence, while the authenticated Dashboard uses the owner-visible read model and masks secret-shaped values |
@@ -263,6 +263,9 @@ workspace when that identity can be established.
 - Cache npm, the Brain, and an opted-in deja-vu index only when their size,
   plaintext content, retention, and trust models are acceptable.
 - Avoid `ak sync` self-update in a lockfile-controlled job; use `--no-upgrade`.
+- Read the result with `ak sync --json`: stdout is one JSON object whose `exitCode` matches
+  the process exit code, and the human log goes to stderr. Fixes you must do by hand never
+  fail the job; failing or warning ones are listed in `needsYourAction`.
 - Never persist provider credentials in the repository or image layer.
 - HOME, XDG, and npm-prefix isolation protects files but does not isolate the
   process table. Prefer a private PID namespace. A container using the host PID
@@ -290,6 +293,7 @@ existing project, commit or back up first and review the exact mutation contract
 | Update the global package manually | `npm install -g @pacphi/agentic-kit@next` | Active npm prefix |
 | Update/heal the managed stack | `ak sync` | Global tools, current-user config, current project |
 | Heal without package upgrades | `ak sync --no-upgrade` | Configuration and native repairs; missing enabled dependencies may still be installed |
+| Heal everything except one subsystem | `ak sync --skip ruvnet-brain` | This run only; repeat `--skip` (or comma-separate) for more; kit.json is unchanged |
 | Remove a local dependency | `npm uninstall @pacphi/agentic-kit` | Current package/workspace |
 | Remove the global runner only | `npm uninstall -g @pacphi/agentic-kit` | Active npm prefix; leaves setup-created state |
 | Remove managed integration state | `ak uninstall` | User/project state selected by its flags |
