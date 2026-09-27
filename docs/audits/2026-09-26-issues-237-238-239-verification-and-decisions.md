@@ -1173,10 +1173,10 @@ Behavior that differs from, or goes beyond, the plan text.
     removes the busy rule.
   - Replies posted on 2026-09-27 with approval: the registry link on #240 and status questions
     on openai/codex#16045 and ruvnet/ruflo#952; #213 needed no second comment.
-    Each needs the maintainer's go-ahead.
   - Five newly registered threads are stale and not yet triaged: ruvnet/ruflo#2356 and #420, and
     agentic-qe#528, #532 and #535.
-  - The three released Ruflo items (ruvnet/ruflo#3167, #3194, #3415) wait for dispatch.
+  - Of the three released Ruflo items, Branch 3 adopted ruvnet/ruflo#3167 and #3415;
+    ruvnet/ruflo#3194 waits for the support window's floor to reach 3.46.0.
 - **The dashboard server's hermeticity guard has a gap.** It fires only when a maintenance service
   is injected without a control root. A caller that injects only a System collector still gets the
   default maintenance service and management facade, and both write real state. This product-side

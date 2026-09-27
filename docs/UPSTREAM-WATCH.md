@@ -215,9 +215,17 @@ is something to post it checks that the body is non-empty, starts with the code 
 `checked-at` line, posts it on the ledger issue, and reads the posted length back. While any
 `released` line carries `branch=` (whether posted today or earlier), it then removes and re-adds
 the `upstream-dispatch` label on the ledger issue, which fires the dispatch routine; a signal
-lost to a failed step is sent again the next day, and the routine skips work already done. A blind run fails the job, so GitHub notifies
-the maintainer; a partial failure only shows in the job summary and the comment. On a pull
-request that changes the watch, a read-only `preview` job runs the same check without posting.
+lost to a failed step is sent again the next day, and the routine skips work already done.
+
+A blind run fails the job. GitHub sends a failed scheduled run's notification to the user who
+last changed the `cron` line, and disables a public repository's scheduled workflows after 60
+days without repository activity
+([`schedule`](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)).
+A partial failure shows only in the job summary and in the comment's last sentence, and keeps the
+start where it was; a thread that fails every day therefore keeps the window growing until it
+reads again or its entry is retired, so a "Could not check" sentence that repeats needs a look.
+On a pull request that changes the watch, a read-only `preview` job runs the same check without
+posting.
 
 ## The dispatch routine
 
