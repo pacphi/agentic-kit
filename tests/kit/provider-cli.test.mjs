@@ -20,6 +20,7 @@ import { hashAdapterContent } from '../../src/lib/adapters/integrity.mjs';
 import { recordConsent } from '../../src/lib/adapters/consent.mjs';
 import { grantCapability, recordTierResult } from '../../src/lib/adapters/grants.mjs';
 import { guardRealRepository } from './helpers/project-isolation.mjs';
+import { resolveShim } from '../../src/lib/exec.mjs';
 
 // Tripwire (#137): a spawned `ak x host pick` whose cwd falls back to the test
 // process's cwd writes PROJECT-scoped config (.claude/settings.local.json,
@@ -112,6 +113,16 @@ test('ak host status names managed, found-not-managed, and not-installed hosts',
   fs.mkdirSync(bin, { recursive: true });
   fs.writeFileSync(path.join(bin, 'codex'), '#!/bin/sh\necho "codex-cli 0.1.0"\n', { mode: 0o755 });
   fs.writeFileSync(path.join(bin, 'codex.cmd'), '@echo off\r\necho codex-cli 0.1.0\r\n');
+  fs.writeFileSync(path.join(bin, 'codex.ps1'), 'Write-Output "codex-cli 0.1.0"\r\n');
+  // hermeticity-provider-cli-windows-shim: on Windows a bare name resolves to a
+  // .cmd only beside its .ps1 (resolveShim), so the fixture must work there too.
+  const systemRoot = path.join(home, 'fake-windows');
+  const powershell = path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  fs.mkdirSync(path.dirname(powershell), { recursive: true });
+  fs.writeFileSync(powershell, '');
+  assert.equal(resolveShim('codex', [], {
+    windows: true, env: { PATH: bin, PATHEXT: '.COM;.EXE;.BAT;.CMD', SystemRoot: systemRoot },
+  }).resolved, true, 'the fake codex must be found on Windows as well');
   const r = ak(['host', 'status'], { cwd: project, home, env: { PATH: [bin, '/usr/bin', '/bin'].join(path.delimiter) } });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /^\s*claude\s.*Managed by ak/m);
