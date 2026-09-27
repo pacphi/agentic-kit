@@ -25,12 +25,15 @@ export function aqeEmbeddingConfiguration({ packageRoot = aqeRoot(), env = proce
 }
 
 // TEMPORARY (remove once fixed upstream; tracked by pacphi/agentic-kit#240): on a live
-// RVF lock, agentic-qe <= 3.14.3 logs the busy warning, then falls through to a create
-// attempt that fails with FsyncFailed; store and lock are untouched (agentic-qe#574,
-// partial fix in PR #719). Only that exact sequence is contention. The middle line is
-// emitted solely by AQE's live-owner quarantine refusal, so a bare FsyncFailed, or a
-// lock warning plus FsyncFailed without it, still fails below. Remove this rule and
-// its test when the AQE release carrying #719 (or an equivalent fix) is the kit floor.
+// RVF lock, agentic-qe 3.14.3 logs the busy warning, then falls through to a create
+// attempt that fails with FsyncFailed; store and lock are untouched (agentic-qe#574).
+// 3.14.4 carries agentic-qe#719, a partial fix (it rethrows LockHeld); whether 3.14.4
+// still emits this sequence is unverified, so the rule stays for it. Only that exact
+// sequence is contention.
+// The middle line is emitted solely by AQE's live-owner quarantine refusal, so a bare
+// FsyncFailed, or a lock warning plus FsyncFailed without it, still fails below. The rule
+// has no version gate. Remove it and its test when a released agentic-qe fixes
+// agentic-qe#574 and that release is the kit floor; #719 alone does not remove it.
 const LIVE_OWNER_CONTENTION = [
   /is locked by a live process/,
   /is unusable but its lock is held by a live process/,

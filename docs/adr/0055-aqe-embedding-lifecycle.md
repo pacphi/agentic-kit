@@ -10,9 +10,10 @@
 - **Updated:** 2026-09-26 — the Codex TOML editor decodes table and key names with one shared TOML key decoder; unrelated root and `[mcp_servers]` assignments no longer block the edit, and inline, dotted or quoted AQE registrations are reported as conflicts instead of absent (#237)
 - **Updated:** 2026-09-27 — a preserved conflict is a hand fix (`repair: 'manual'`) naming the file, never a sync repair, so it no longer fails every `ak sync`; changes and missing registrations stay sync repairs in their own row (audit decision 13)
 - **Updated:** 2026-09-26 — one AQE MCP transport recognizer for Claude, Codex and OpenCode now accepts all of AQE's own start commands; see the amendment below (#237, audit decision 3)
-- **Updated:** 2026-09-26 — temporary: agentic-qe ≤ 3.14.3's live-owner contention sequence (lock warning, live-owner quarantine refusal, then `FsyncFailed` from its create attempt) classifies as busy, not a storage failure; removed when the AQE release carrying agentic-qe#719 is the kit floor ([#240](https://github.com/pacphi/agentic-kit/issues/240), audit decision 7)
+- **Updated:** 2026-09-26 — temporary: agentic-qe ≤ 3.14.3's live-owner contention sequence (lock warning, live-owner quarantine refusal, then `FsyncFailed` from its create attempt) classifies as busy, not a storage failure; removed when a released agentic-qe fixes agentic-qe#574 and that release is the kit floor (agentic-qe#719, in 3.14.4, is a partial fix and does not remove it) ([#240](https://github.com/pacphi/agentic-kit/issues/240), audit decision 7)
 - **Updated:** 2026-09-27 — the recognizer accepts every plain npx spelling of AQE's server (optional `-y`/`--yes`; unversioned, `@latest` or an exact version), audit item 5 choice A
 - **Updated:** 2026-09-27 — a passing embedding check reads "embedder verified"; status, `ak x verify aqe` and setup say AQE's pattern index binding stays unverified (agentic-qe#754) and corpus compatibility stays separate
+- **Updated:** 2026-09-27 — the busy rule's removal condition is agentic-qe#574 fixed in a released agentic-qe that is the kit floor; agentic-qe#719 (carried by 3.14.4) is only a partial fix
 - **Related:** [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),
   [September repair](../audits/2026-09-09-aqe-integration-repair.md)
 
