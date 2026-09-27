@@ -199,7 +199,7 @@ responses = Σ over included sessions of session.responses
 - `responses` accumulation: Claude increments once per API message id — every
   transcript line of one message counts once, the last line's usage winning
   (`usage-parsers.mjs:661-696`); Codex increments per `agent_message` event
-  (`usage-parsers.mjs:1008-1013`).
+  (`usage-parsers.mjs:1021-1025`).
 - Totals: `totals.responses += s.responses` per included session
 (`usage-aggregate.mjs:928`).
 - Render: `kpi("sessions", fmtNum(t.sessions), fmtNum(t.responses)+" assistant
@@ -836,7 +836,7 @@ byDay[day].sessionsActive = count of distinct sessions with any usage row that d
 
 **Source:** the day key is the row's own `row.day`, computed once at parse
 time as **local calendar day**, not UTC
-(`usage-parsers.mjs:35`/`usage-parsers.mjs:1185` call `localDay(at)`) — so a
+(`usage-parsers.mjs:35`/`usage-parsers.mjs:1174` call `localDay(at)`) — so a
 session that runs from 23:58 local to 00:05 local has its session count attributed
 to the day its *first* usage row landed on (test:
 `tests/kit/usage-index.test.mjs:738`, "a session that opens before midnight
@@ -926,7 +926,7 @@ punchcard[dow + "-" + hour] += 1   per assistant/agent_message response, at its 
 **Source:** incremented once per Claude API message (all of a message's
 transcript lines are one hit)
 (`usage-parsers.mjs:42`, keyed by this call: `punchKey(at)`) and once per Codex
-`agent_message` (`usage-parsers.mjs:1008-1013`), merged into the window-level
+`agent_message` (`usage-parsers.mjs:1021-1025`), merged into the window-level
 `punchcard` object per session (`usage-aggregate.mjs:943-1007`). Cell intensity is
 linear against the single busiest cell in the window:
 `v = pcMax ? n/pcMax : 0` (`dashboard/client.mjs`) — this is a

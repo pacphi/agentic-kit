@@ -75,7 +75,7 @@ Each line has a top-level `type`. The parser (`parseClaude`,
 | "ai-title" | The model-written session title (`usage-parsers.mjs:768`) — preferred over the first-prompt fallback |
 | `user` | A user-**role** turn — which is *not* the same as "the human"; see §3. On a turn that passes isHumanPrompt, also its `permissionMode` — the session's permission posture, read on the person's own turn only (`usage-parsers.mjs:593-609`) — and the opening of the response-latency window |
 | `assistant` | One content block of a model message: `model` id, the message's `usage` token counts (repeated on every block's line, so counted once per `message.id`, else `requestId`, last line winning), `tool_use` blocks (`usage-parsers.mjs:661-743`) |
-| any | Side-band fields read regardless of type: `attributionSkill`/`attributionPlugin` (`usage-parsers.mjs:758-759`), `isSidechain` (`usage-parsers.mjs:760-763`), `cwd` for project derivation |
+| any | Side-band fields read regardless of type: `attributionSkill`/`attributionPlugin` (`usage-parsers.mjs:770-771`), `isSidechain` (`usage-parsers.mjs:772-773`), `cwd` for project derivation |
 
 A real assistant completion also closes two pieces of per-entry evidence the
 transcript does not state outright. It **closes the latency window** the
@@ -139,7 +139,10 @@ Three rollout shapes are handled before any of that:
   no `thread_source`, `input_tokens: 0`). The parser stops at the first such line and
   returns an identity-only record marked `imported`; the scan keeps it out of
   Codex sessions, prompts, responses and yield diagnostics and counts it in
-  `importedExcluded`. The real conversation is in the Claude transcript.
+  `importedExcluded`. The real conversation is in the Claude transcript. Project
+  discovery reads the same marker in each rollout's head and leaves the rollout out
+  of projects, hosts and Desktop origins, counting it in the discovery scan's
+  `importedExcluded`.
 * **Forked subagents.** A forked subagent's rollout replays its parent's history
   before its own turns. Every envelope carries an `ordinal`; the replay ends at
   `subagent_history_start_ordinal` when some event lies at or beyond it, else at the

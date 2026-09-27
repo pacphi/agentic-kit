@@ -2,6 +2,9 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-19
+- **Updated:** 2026-09-27 — imported copies are also excluded from project discovery: they give no
+  project, host or Desktop origin, and the discovery scan counts them in `importedExcluded`
+  (ADR-0060 §3). The marker now lives in one leaf module shared by usage and discovery.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0009](0009-usage-scorecard-local-transcript-analytics.md),
   [ADR-0038](0038-consistent-cross-host-session-metrics.md),
@@ -116,6 +119,11 @@ without the imports file. Parsing stops at the first such line; the record is ke
 out of aggregation, out of every yield statistic, and counted in
 `diagnostics.importedExcluded` (796 on the reference machine). Nothing is dropped
 silently. The record itself is still cached, so a rescan is cheap.
+
+Project discovery applies the same marker to each rollout's bounded head (256 KiB, 40 lines): an
+imported copy names no project, host or Desktop origin, and the scan reports how many it set aside
+(`importedExcluded`, 924 on the reference machine on 2026-09-27, every marker on the rollout's
+second line).
 
 ### 4. Cumulative counter restarts are summed, per event
 

@@ -644,11 +644,14 @@ declarations and unclassified sightings. `countBasis` distinguishes transcript f
 sessions, recovered-project sightings and mixed observations; a recovered directory is not one
 verified session.
 
+Imported session copies are not sightings. A Codex rollout stamped `external-import-turn-*` is a
+Claude Code transcript that the ChatGPT desktop app imported; the Claude transcript already names
+its folder. Discovery skips it before reading its cwd, so it adds no project, host or Session
+origin, and counts it in `importedExcluded` (per host scan and in total). `complete` is unaffected.
+
 **Proposed change ([ADR-0060](../adr/0060-session-surface-initiator-and-product-names.md)).**
 `sessionOrigins` is to be replaced by session surface and initiator, derived from the same declared
-fields but keeping every raw value. Imported session copies (Codex rollouts stamped
-`external-import-turn-*`) are to contribute no project sighting: on 2026-09-26 they gave 23 project
-folders a Desktop origin they never had.
+fields but keeping every raw value.
 
 `project-identity.mjs` relates directories through canonical Git metadata and, for linked worktrees,
 a verified common directory plus backlink. It preserves unknown association when evidence is

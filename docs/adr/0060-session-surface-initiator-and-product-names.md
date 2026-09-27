@@ -1,7 +1,10 @@
 # ADR-0060 — Session surface, initiator and official product names
 
-- **Status:** Proposed (staged follow-on; nothing implemented)
+- **Status:** Proposed (staged follow-on)
 - **Date:** 2026-09-26
+- **Updated:** 2026-09-27 — §3 implemented for project discovery and the System projects note:
+  imported copies give no project, host or origin and are counted. The ledger-derived source labels
+  (Cursor, Cowork) and the other views remain proposed.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0050](0050-dashboard-project-identity-and-context-reporting.md) (session origin
   rule, superseded in part by this record once accepted),
@@ -182,4 +185,7 @@ fixture.
 
 ## Implementation status
 
-Not started. Staged as follow-on work in the audit record's Addendum 3.
+§3 is implemented for project discovery and the System projects note (2026-09-27): an imported copy
+gives no project, host or origin, and discovery counts it in `importedExcluded`. The per-source
+labels from the imports ledger, Runtime attribution and §1, §2 and §4–§6 remain follow-on work
+(the audit record's Addendum 3).
