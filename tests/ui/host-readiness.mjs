@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { launchChrome } from './helpers/launch-chrome.mjs';
 import { renderPage } from '../../src/lib/dashboard/page.mjs';
 import { esc } from '../../src/lib/dashboard/groups.mjs';
 
@@ -21,7 +21,7 @@ const report = () => ({ checkedAt: '2026-09-20T10:00:00Z', scope: 'Dashboard lau
   }])) });
 
 test('all hosts have qualified OK, accessible details and explicitly confirmed connection checks', async t => {
-  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  const browser = await launchChrome();
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const errors = [], requests = [];
@@ -107,7 +107,7 @@ const unmanagedReport = () => {
 };
 
 test('unmanaged hosts read their management state everywhere, with information-only checks and a complete enable hint', async t => {
-  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  const browser = await launchChrome();
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const errors = [], requests = [];
@@ -192,7 +192,7 @@ test('unmanaged hosts read their management state everywhere, with information-o
 });
 
 test('a dialog close that lands after the user moved on does not steal focus back', async t => {
-  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  const browser = await launchChrome();
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const errors = [];

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { launchChrome } from './helpers/launch-chrome.mjs';
 import { renderPage } from '../../src/lib/dashboard/page.mjs';
 import { CSS } from '../../src/lib/dashboard/styles.mjs';
 import { baseInventory } from '../fixtures/maintenance/management-fixtures.mjs';
@@ -17,7 +17,7 @@ test('focus browser progressively narrows to exact installations and preserves f
  const inventory=structuredClone(baseInventory()),requests=[],errors=[];
  const skillResources=inventory.resources.filter(r=>r.kind==='skill');
  for(const resource of skillResources)resource.presentationFamilyId=skillResources[0].resourceId;
- const browser=await chromium.launch({channel:'chrome',headless:true});t.after(()=>browser.close());
+ const browser=await launchChrome();t.after(()=>browser.close());
  const page=await browser.newPage({viewport:{width:1440,height:1050}});page.on('pageerror',e=>errors.push(e.message));
  const markup=renderPage({name:'Fixture',version:'test'}).match(/<section class="mnt-panel mnt-inventory"[\s\S]*?<\/section>/)[0];
  await page.route('http://maintenance.test/**',async route=>{
@@ -86,7 +86,7 @@ test('focus browser progressively narrows to exact installations and preserves f
 });
 
 test('polyglot cards show every language as a labelled, wrapping icon with no disclosure',async(t)=>{
- const browser=await chromium.launch({channel:'chrome',headless:true});t.after(()=>browser.close());
+ const browser=await launchChrome();t.after(()=>browser.close());
  const page=await browser.newPage({viewport:{width:1100,height:650}});
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
  const languages=[['rust','Rust'],['typescript','TypeScript'],['javascript','JavaScript'],['python','Python'],['java','Java']].map(([id,name])=>({id,name,evidence:'source'}));

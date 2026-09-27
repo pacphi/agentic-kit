@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { launchChrome } from './helpers/launch-chrome.mjs';
 import { renderPage } from '../../src/lib/dashboard/page.mjs';
 import { CSS } from '../../src/lib/dashboard/styles.mjs';
 
@@ -16,7 +16,7 @@ function source(name) {
     .replace(/\bexport (?=(?:function|var)\b)/g, '');
 }
 test('guidance has exclusive pills, host context, and no resource selector or optional removal advice', async (t) => {
-  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  const browser = await launchChrome();
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1360, height: 1000 } });
   const errors = [];

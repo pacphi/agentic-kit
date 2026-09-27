@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { chromium } from 'playwright';
+import { launchChrome } from './helpers/launch-chrome.mjs';
 
 // Optional source checkout supports isolated implementation/test workers.
 const pageModule = process.env.AK_UI_SOURCE_ROOT
@@ -23,7 +23,7 @@ const projects = [
 ];
 
 test('Intelligence picker labels every learning location with the inventory designation', async t => {
-  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  const browser = await launchChrome();
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1360, height: 980 } });
   const errors = [], requests = [];
@@ -88,7 +88,7 @@ test('Intelligence picker labels every learning location with the inventory desi
 });
 
 test('Intelligence table keeps every learning location in one filterable inventory with stable KPIs', async t => {
-  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  const browser = await launchChrome();
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1360, height: 980 } });
   const errors = [];

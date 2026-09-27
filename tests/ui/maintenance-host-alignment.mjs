@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { chromium } from 'playwright';
+import { launchChrome } from './helpers/launch-chrome.mjs';
 import { renderPage } from '../../src/lib/dashboard/page.mjs';
 import { CSS } from '../../src/lib/dashboard/styles.mjs';
 import { buildManagementInventory } from '../../src/lib/maintenance/management/projection.mjs';
@@ -31,7 +31,7 @@ test('Host alignment view filters User and Project rows and offers exact registr
     detections: new Map([['host-alignment', facts]]) }).inventory;
   assert.ok(inventory.guidanceEntries.some(entry => entry.lane === 'apply'), JSON.stringify(inventory.guidanceEntries));
   const markup = renderPage({ name: 'Fixture', version: 'test' }).match(/<section class="mnt-panel mnt-inventory"[\s\S]*?<\/section>/)[0];
-  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  const browser = await launchChrome();
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1360, height: 1000 } });
   const errors = [];

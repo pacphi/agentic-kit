@@ -33,7 +33,7 @@ import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
 import privateTmpdir from '../kit/helpers/private-tmpdir.cjs';
-import { chromium } from 'playwright';
+import { launchChrome } from './helpers/launch-chrome.mjs';
 import { startDashboard } from '../../src/lib/dashboard-server.mjs';
 import { readIndex, readSession, maskSecrets } from '../../src/lib/usage-index.mjs';
 import { modelIdentityKey } from '../../src/lib/model-inventory/contracts.mjs';
@@ -1155,7 +1155,7 @@ async function main() {
     + `&sort=lifecycle&direction=asc&relevance=relevant&snapshotId=${encodeURIComponent(modelSnapshotId)}`,
   { headers: modelHeaders }).then((response) => response.json());
 
-  const browser = await chromium.launch({ channel: 'chrome', headless: !HEADED });
+  const browser = await launchChrome({ headless: !HEADED });
 
   // A running full scan carries a long phase/count/elapsed sentence. Wide
   // screens have room for it beside the content-width menu; narrow screens
