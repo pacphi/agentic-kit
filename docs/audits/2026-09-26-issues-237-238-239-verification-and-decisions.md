@@ -1281,6 +1281,99 @@ Behavior that differs from, or goes beyond, the plan text.
 - The end gates from "Gates" above: AQE coverage-gap analysis and an adversarial review of the full
   diff.
 
+## Implementation status (fix/test-hermeticity)
+
+This section records Branch 2 of the remediation program
+(`docs/superpowers/plans/2026-09-26-remediation-program.md`, "Branch 2: fix/test-hermeticity") on
+the local branch `fix/test-hermeticity`, built from `be1c1d47`. The code-level plan is
+`docs/superpowers/plans/2026-09-27-branch-2-test-hermeticity.md`. The branch is not merged, and
+nothing was pushed, released or posted. The inline "Fixed on `fix/test-hermeticity`" notes under
+"Open items" above point here.
+
+### What it built
+
+- **Guarded runner.** `pnpm test` and `pnpm run test:ui` run through `scripts/run-tests.mjs`. It
+  snapshots real user state before and after the run with `scripts/real-state-tripwire.mjs`, runs
+  every command with `TMPDIR`/`TEMP`/`TMP` pointed at a fresh `ak-suite-*` folder, and exits 3 on a
+  changed path, 4 on a leftover temporary folder and 2 when that folder is inside a git repository.
+  `node scripts/run-tests.mjs exec -- <node args>` guards a single command.
+- **Watched paths.** ak's config and state folders (XDG and Windows bases); `~/.claude/CLAUDE.md`,
+  `~/.claude/settings.json`, `~/.claude.json`, `~/.codex/AGENTS.md`, `~/.codex/config.toml` and the
+  OpenCode `AGENTS.md`; the repository's root `CLAUDE.md`, `AGENTS.md` and `.mcp.json`; and its
+  `.claude`, `.swarm`, `.agentic-qe`, `.claude-flow` and `.harness` folders. Skills, agents and
+  plugin folders, `opencode.json`, the Hermes home and `~/.claude-flow/memory` are not watched.
+  Writers a live Claude Code, Ruflo or AQE session runs (including `~/.claude.json`) are listed but
+  do not fail a local run; CI and `AK_TRIPWIRE_STRICT=1` fail on them.
+- **Isolation helpers.** `spawnEnv(home)` builds every spawned child's environment with all
+  per-user bases inside a sandbox home; `redirectToolState()` does the same for in-process tests
+  whose code spawns OpenCode; `tempDir()` makes temporary folders that remove themselves.
+  `tests/kit/spawn-env-guard.test.mjs` fails on a spread of `process.env` and on a
+  `child_process` call with no `env` option unless the line states why it inherits.
+- **Product fixes found on the way.** The dashboard server refuses its default maintenance service
+  and management facade when a test injects any collector without a control root. A closing health
+  dialog no longer pulls focus off the next badge. The Maintenance results list is marked busy
+  while an inventory query runs.
+
+### Plan item 5 replaced
+
+Plan item 5 ("create temporary folders from a template", because macOS `mktemp -d` ignores
+`TMPDIR`) did not apply: no test uses shell `mktemp`, and Node's `fs.mkdtempSync(os.tmpdir())`
+honours `TMPDIR`. The branch replaced it with the runner's own `ak-suite-*` temporary root and the
+leftover failure (`7608295c`), plus `tempDir()` for the 59 test files that left more than 700
+folders behind per run (`1fa55698`).
+
+### Commits
+
+| SHA | Title |
+| --- | --- |
+| `5821f233` | docs(plan): Branch 2 test hermeticity code-level plan |
+| `6a7f87e8` | test(guard): fingerprint real user state on every platform |
+| `9782be1e` | test(guard): fail the suite when real user state changes |
+| `a67d2842` | fix(dashboard): refuse default maintenance and management services in injected test servers |
+| `35371328` | test(env): stop spawn tests inheriting the developer's XDG_* variables |
+| `43f235fc` | test(opencode): stop six tests creating $XDG_STATE_HOME/opencode |
+| `1fa55698` | test(temp): remove every temporary folder a test creates |
+| `7608295c` | test(runner): run the suite in its own temporary folder and fail on leftovers |
+| `23f947b5` | test(isolation): never write an enclosing repository from a temp project |
+| `6841f5b9` | test(live): run the memory-routing live test in a disposable home |
+| `4cfb7dbe` | test(ui): check polyglot cards against all-language wrapping and run both Maintenance specs in test:ui |
+| `da94a5ea` | fix(dashboard): keep a closing health dialog from pulling focus off the next badge |
+| `3fac1601` | fix(maintenance): mark the results list busy while an inventory query runs |
+| `b98f18d7` | docs(audit): record Branch 2 hermeticity fixes |
+| `35761c1b` | test(opencode): keep the three in-process tests out of the real config base |
+| `3fea2b1c` | docs(maintainer): describe the guarded test runner and isolation helpers |
+| `7d68c608` | test(opencode): say the tool-state redirect covers the config base too |
+| `6816b674` | fix(tripwire): watch the host and repo-root files ak writes and say what stays unwatched |
+| `916cf571` | test(spawn-env): fail on child_process calls that inherit process.env implicitly |
+
+### Results
+
+- **Gate 1 at `7d68c608` (2026-09-27), plain `node --test` as the program gate set runs it.** Kit
+  suite on Node 26.4.0, twice: 5141 tests, 5135 pass, 0 fail, 6 skipped (Windows-only tests). Node
+  22.22.3: 5134 pass, 0 fail, 7 skipped (the seventh is the stock-OpenCode test, which finds no
+  OpenCode under `mise exec`). Coverage 93.82 lines, 82.44 branches, 93.02 functions (threshold
+  70). The seven `.cjs` suites, `tsc`, both ESLint runs (0 errors), markdownlint (0 issues in 167
+  files), `build-check`, `dashboard-ui` (495 passed) and the seven UI specs all passed.
+- **Through the runner at `7d68c608` (adversarial review).** `node scripts/run-tests.mjs unit` exited
+  0 on Node 26.4.0, 24.20.0 and 22.22.3 with no changed path and no leftover folder;
+  `node scripts/run-tests.mjs ui` exited 0 with `dashboard-ui` 495 passed and 14 UI tests passed. A
+  probe that wrote into a watched root failed the run with exit 3 and named both paths.
+- **Through the runner after the review fixes (`916cf571`).** `node scripts/run-tests.mjs unit` on
+  Node 26.4.0 exited 0: 5145 tests, 5139 pass, 0 fail, 6 skipped; coverage 93.81 / 82.43 / 93.02;
+  the seven `.cjs` suites passed. It watched 20 roots and listed one concurrent writer,
+  `~/.claude.json`, rewritten by the Claude Code session running alongside it.
+- **Fingerprint.** The program's `fingerprint.sh` output was identical before and after each gate-1
+  pass, across both passes and across the whole gate set; identical across all four adversarial
+  runner runs; and identical before and after the post-fix runner run above.
+
+### Not proven
+
+- Windows: the `%APPDATA%`/`%LOCALAPPDATA%` roots and the case-insensitive root merge have unit
+  tests only.
+- The leftover check for `test:ui` on Linux and Windows, where Chromium may leave profile folders.
+- A test that rewrites `~/.claude.json` is reported, not failed, in a developer run; only a strict
+  run (CI) fails it.
+
 ## Addendum 3 — daemon, stray stores, verification, upstream watch and product names (same day)
 
 The implementation lanes returned seven further findings, and the maintainer asked two new
