@@ -21,6 +21,11 @@ function detail(key, item) {
         `${item.release.version} (${item.release.date}) is the first release after the fix not ruled out; ${item.release.basis}`,
         `change once confirmed: ${item.adjustment}`,
       ];
+    case 'waiting-for-window':
+      return [
+        `fixed in ${item.window.needs}; the oldest supported Ruflo is ${item.window.floor}, so ak keeps the workaround until the support window's floor reaches ${item.window.needs}`,
+        `change: ${item.adjustment}`,
+      ];
     case 'workaround-carried':
       return [`status ${item.status}; branch ${item.dispatch?.branch ?? 'n/a'}`, `change: ${item.adjustment}`];
     case 'fixed-unreleased':

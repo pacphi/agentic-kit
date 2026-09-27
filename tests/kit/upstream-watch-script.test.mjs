@@ -197,7 +197,7 @@ test('collect walks the releases after the fixing merge, even when the issue clo
     await main(['report', '--json', '--registry', file], { fetcher, stdout: out.stream, stderr: capture().stream, now: new Date('2026-09-28T00:00:00Z') });
     const report = JSON.parse(out.text());
     assert.deepEqual(report.groups.find((group) => group.key === 'released-actionable').items.map((item) => item.version ?? item.release.version), ['3.46.0']);
-  });
+  }, { supportWindow: false });
   assert.deepEqual(calls, ['v3.46.0']);
 });
 
@@ -220,7 +220,7 @@ async function walkReleases(facts, containing) {
     const out = capture();
     await main(['report', '--json', '--registry', file], { fetcher, stdout: out.stream, stderr: capture().stream, now: NOW });
     report = JSON.parse(out.text());
-  });
+  }, { supportWindow: false });
   return { calls, result: report.entries.find((item) => item.id === 'ruvnet/ruflo#3194') };
 }
 const releasesUpTo = (count, extra = []) => {
@@ -296,7 +296,7 @@ test('collect confirms through the fetcher with bounded, read-only calls', async
     await main(['report', '--json', '--registry', file], { fetcher, stdout: out.stream, stderr: capture().stream, now: NOW });
     const report = JSON.parse(out.text());
     assert.deepEqual(report.groups.find((group) => group.key === 'released-actionable').items.map((item) => item.id), ['ruvnet/ruflo#3194']);
-  });
+  }, { supportWindow: false });
   assert.deepEqual(calls, ['changes ruvnet/ruflo#3194', 'contains v3.46.0'], 'stops at the first containing version');
 });
 
@@ -382,6 +382,68 @@ test('a merged pull request is fixed; reopened and not-planned threads are calle
   const notPlanned = classifyEntry(entry('openai/codex#20140', { relation: 'referenced', mapping: 'unmapped', kitImpact: null, adjustment: null }), { thread }, context);
   assert.ok(notPlanned.groups.includes('not-planned'));
   assert.ok(notPlanned.groups.includes('ready-to-retire'));
+});
+
+// ADR-0041 §7: a workaround comes out only once the oldest supported Ruflo has the fix.
+test('a released Ruflo fix above the support-window floor waits for the window', () => {
+  const gated = (minVersion) => entry('ruvnet/ruflo#3167', {
+    status: 'released', history: [{ date: '2026-09-26', event: 'registered' }, { date: '2026-09-26', event: 'released' }],
+    doneWhen: { state: 'closed-completed', release: { channel: 'npm', name: 'ruflo', minVersion } },
+  });
+  const windowed = { ...context, supportFloor: '3.39.0' };
+  const held = classifyEntry(gated('3.46.0'), null, windowed);
+  assert.ok(held.groups.includes('waiting-for-window'), held.groups.join(','));
+  assert.ok(!held.groups.includes('workaround-carried'));
+  assert.equal(held.dispatch, null);
+  assert.deepEqual(held.window, { floor: '3.39.0', needs: '3.46.0' });
+  const ready = classifyEntry(gated('3.32.2'), null, windowed);
+  assert.ok(!ready.groups.includes('waiting-for-window'));
+  assert.match(ready.dispatch.branch, /^upstream\/ruvnet-ruflo-3167$/);
+  const unknownFloor = classifyEntry(gated('3.46.0'), null, context);
+  assert.ok(!unknownFloor.groups.includes('waiting-for-window'), 'no remembered floor: nothing is held');
+});
+
+test('a release confirmed from the fixing change is held for the window too', () => {
+  const confirmation = { changes: [change], checks: [{ version: '3.46.0', ref: 'v3.46.0', contained: true }] };
+  const registry = registryWith([entry('ruvnet/ruflo#3194')]);
+  const report = buildReport(registry, new Map([['ruvnet/ruflo#3194', { thread: closedThread('ruvnet/ruflo#3194', '2026-09-26T22:31:23Z'), release: rufloFacts, confirmation }]]),
+    { now: NOW, supportFloor: '3.41.0' });
+  const held = report.entries[0];
+  assert.ok(held.groups.includes('waiting-for-window'), held.groups.join(','));
+  assert.ok(!held.groups.includes('released-actionable'));
+  assert.deepEqual(held.window, { floor: '3.41.0', needs: '3.46.0' });
+  assert.equal(held.dispatch, null);
+  const line = ledgerEvents(report, registry, { since: '2026-09-26T00:00:00Z' }).find((event) => event.event === 'released').line;
+  assert.equal(line, 'UPSTREAM-WATCH ruvnet/ruflo#3194 released 2026-09-26 version=3.46.0 pr=3421');
+});
+
+test('a newly released Ruflo fix above the floor records the release without a dispatch branch', () => {
+  const pending = entry('ruvnet/ruflo#2986', {
+    kind: 'pr', doneWhen: { state: 'merged', release: { channel: 'npm', name: 'ruflo', minVersion: '3.38.2' } },
+  });
+  const registry = registryWith([pending]);
+  const report = buildReport(registry, new Map([['ruvnet/ruflo#2986', live('ruvnet/ruflo#2986', releaseFacts('npm', npm.ruflo))]]),
+    { now: NOW, supportFloor: '3.30.0' });
+  const held = report.entries[0];
+  assert.deepEqual(held.groups.filter((group) => ['released-actionable', 'waiting-for-window'].includes(group)), ['waiting-for-window']);
+  assert.equal(report.counts['waiting-for-window'], 1);
+  const released = ledgerEvents(report, registry, { since: '2026-09-25T00:00:00Z' }).find((event) => event.event === 'released');
+  assert.match(released.line, /released \S+ version=3\.38\.2$/);
+  assert.match(renderReport(report), /Released, waiting for the support window[\s\S]*oldest supported Ruflo is 3\.30\.0/);
+});
+
+test('the watch computes the support-window floor from the npm release dates it fetches', async () => {
+  const fixed = entry('ruvnet/ruflo#3167', {
+    status: 'released', doneWhen: { state: 'closed-completed', release: { channel: 'npm', name: 'ruflo', minVersion: '9.0.0' } },
+  });
+  await withRegistryFile([fixed], async (file) => {
+    const out = capture();
+    const fetcher = { ...fixtureFetcher(), thread: async () => { throw new Error('offline thread'); } };
+    assert.equal(await main(['report', '--json', '--registry', file], { fetcher, stdout: out.stream, stderr: capture().stream, now: NOW }), 0);
+    const report = JSON.parse(out.text());
+    assert.match(report.supportWindow.floor, /^3\.\d+\.0$/);
+    assert.ok(report.entries.find((item) => item.id === 'ruvnet/ruflo#3167').groups.includes('waiting-for-window'));
+  });
 });
 
 test('the report counts groups, lists constraints past retest and never watches retired entries', () => {
@@ -695,11 +757,14 @@ function fixtureFetcher({ authenticated = true } = {}) {
   };
 }
 
-async function withRegistryFile(watch, run) {
+// `supportWindow: false` drops the Ruflo support window, so a test about
+// release confirmation is not also held for the window (ADR-0041 §7).
+async function withRegistryFile(watch, run, { supportWindow = true } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-watch-cli-'));
   try {
     const document = JSON.parse(fs.readFileSync(UPSTREAM_REGISTRY_FILE, 'utf8'));
     document.watch = watch;
+    if (!supportWindow) for (const policy of document.dependencyPolicies) delete policy.supportWindow;
     // Pin the verification window around NOW instead of inheriting the live registry's dates.
     document.lastVerifiedAt = '2026-09-26';
     document.lastCheckedAt = '2026-09-26';
