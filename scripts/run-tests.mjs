@@ -50,6 +50,7 @@ export function runGuarded(commands, {
       + 'git repository" would write into it. Point TMPDIR outside any repository.');
     return 2;
   }
+  /** @type {NodeJS.ProcessEnv} */
   const childEnv = { ...env, TMPDIR: tempRoot, TEMP: tempRoot, TMP: tempRoot };
   // Tests assert on plain text; a shell's FORCE_COLOR (Claude Code sets 3)
   // colours console.log into pipes and, beside NO_COLOR, adds a Node warning.
