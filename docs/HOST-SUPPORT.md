@@ -132,8 +132,8 @@ The dated upstream risk inventory includes:
   ([#2638](https://github.com/ruvnet/ruflo/issues/2638));
 - init and plugin installation can duplicate assets or hooks
   ([#2640](https://github.com/ruvnet/ruflo/issues/2640));
-- published 3.38.21 ignores its Codex/skills init opt-out flags
-  ([#3167](https://github.com/ruvnet/ruflo/issues/3167));
+- Ruflo below 3.46.0 ignores its Codex/skills init opt-out flags, so `ak setup` adds scripted
+  mode and `RUFLO_NO_SKILLS_SH=1` there ([#3167](https://github.com/ruvnet/ruflo/issues/3167));
 - dual-host marketplace parity remains incomplete
   ([#2854](https://github.com/ruvnet/ruflo/issues/2854)); and
 - hierarchical AgentDB writes can report success without durable persistence

@@ -1648,6 +1648,30 @@ Item 1's `daemon.idleSecs` override is therefore needed only for supported versi
 ADR-0058's governance, the Brain/agent-browser doctor row and the init flags need re-verification
 against 3.46.0 before Stage 6 builds on them.
 
+**Implementation note (2026-09-27, Branch 3 slice 3, Ruflo 3.46.1).** Each fix was confirmed in the
+`@claude-flow/cli` 3.46.0 tarball and the installed 3.46.1, then adopted:
+
+- #3415: a disposable project with ak's policy capped at 2 calls, `ruflo mcp start` and
+  `RUFLO_MCP_ENFORCE_POLICY=1` allowed two `memory_stats` calls, refused the third and audited all
+  three. From a subfolder with no `.harness/` every call was refused (fails closed); that Claude
+  Code subfolder exposure stays open until the launcher's Claude mode (Branch 3 slice 4). ak's
+  "not enforced" boundary moved from 3.44.0 to below 3.46.0.
+- #3167: through the public `ruflo` wrapper, each variant in its own disposable home and empty
+  folder, `--no-codex-detect` alone left no `.codex/` or `AGENTS.md`, `--no-skills-sh` alone left no
+  `.agents/skills/ruflo`, and both together left neither; a control run without them created both.
+  `ak setup` passes the flags alone from 3.46.0 and keeps scripted mode and `RUFLO_NO_SKILLS_SH=1`
+  below it, since 3.39 to 3.45 are inside the support window.
+- #3166 needed nothing in ak and is retired. #3193 is recorded as partly released: the daemon reads
+  `config.yaml`, the memory root still does not, so ak keeps its memory pin.
+- #2670: status, `ak x verify security`, `ak about` and the footer recognise Ruflo's built-in defend
+  engine. `ak x verify security` reads defend's `-o json` verdict and reports the #3473 text-mode
+  crash as a crash, never as a detection.
+- `.harness/`: ak keeps only its own `.harness/mcp-policy.json` out of git through the repository's
+  `info/exclude` (ADR-0058 §5). Agentic-QE commits its own `.harness/mcp-policy.json`, so ignoring
+  the folder, or editing `.gitignore`, would hide other tools' intended files.
+- #2885: the hosted probe (run 36333572972) aborted 10/10 with and without single-threaded ONNX
+  Runtime sessions; the nightly note cites it and the step stays non-blocking.
+
 ### Retroactive upstream sweep and reactions
 
 A search of every issue and pull request the maintainer opened or commented on outside their own

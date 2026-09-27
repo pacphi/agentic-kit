@@ -117,7 +117,7 @@ version supports; `ak status` reports the real state, never a bare label.
 | --- | --- | --- | --- |
 | Typesafe agent picker | on | 3.43.0 | global `@ruvector/typesafe` package + `CLAUDE_FLOW_ROUTER_TYPESAFE=1` |
 | MiniLM agent picker | on | 3.44.0 | `CLAUDE_FLOW_ROUTER_EMBEDDER=minilm` |
-| MCP tool governance | on; 120 calls/min, audit on | 3.42.0 | project `.harness/mcp-policy.json` + project-scoped `RUFLO_MCP_ENFORCE_POLICY=1` (not yet enforced on stdio launches by ruflo ≤ 3.44.0) |
+| MCP tool governance | on; 120 calls/min, audit on | 3.42.0 | project `.harness/mcp-policy.json` + project-scoped `RUFLO_MCP_ENFORCE_POLICY=1` (enforced on stdio launches from Ruflo 3.46.0) |
 | Learning profile | `balanced` | 3.42.1 | `RUFLO_INTELLIGENCE_MODE=balanced` |
 | MetaHarness turn-credit | on | 3.36.0 | nothing to apply; ak confirms ruflo's bundled dependency resolves |
 | Memory durability fix (#2887) | on | 3.36.0 | nothing to apply; ak confirms `@claude-flow/memory` ≥ 3.0.0-alpha.22 |
@@ -144,10 +144,12 @@ components in the same settings file. If you delete a value ak set, `ak status` 
 
 The governance policy file is enforced only when it carries ak's own `_about` marker; a
 project's own pre-existing `.harness/mcp-policy.json` is left alone and reported `user-managed`.
-Ruflo 3.44.0 and earlier do not apply the policy on the stdio MCP launches Claude Code, Codex and
-OpenCode use (ADR-0058 upstream request 6): ak writes the file and the variable so they are ready
-when ruflo wires enforcement, and the component reports `unknown` until then, because no audit
-records appear.
+Ruflo 3.46.0 and newer apply the policy on the stdio MCP launches Claude Code, Codex and OpenCode
+use: calls beyond the cap are refused and every call is audited. Older Ruflo does not apply it on
+those launches, so there the component reports `unknown`, because no audit records appear. ak
+keeps its own policy file out of git with one line in the repository's `.git/info/exclude`
+(never `.gitignore`, and never the whole `.harness/` folder, which other tools use for files they
+commit); removing the policy removes that line.
 
 Every state `ak status`, `ak setup`, and the dashboard show carries its meaning and, where one
 applies, the fix:

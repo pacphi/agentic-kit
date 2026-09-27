@@ -176,10 +176,11 @@ The project guidance result is defined by ownership, not by which initializer ra
 Agentic-QE's `BEGIN AGENTIC-QE CODEX` block is owned by Agentic-QE, not by this merge engine. Setup
 uses a bounded compatibility guard and reconciles around AQE initialization, but does not claim
 arbitrary AQE content. Ruflo is called with `--no-global`, `--no-codex-detect`, and
-`--no-skills-sh` to declare the machine/Codex ownership boundary. Published Ruflo 3.38.21 does not
-honor the two hyphenated skill flags ([ruflo #3167](https://github.com/ruvnet/ruflo/issues/3167)),
-so agentic-kit additionally uses scripted `--format json` mode and `RUFLO_NO_SKILLS_SH=1`; both
-independently suppress the optional projections in that release. Existing unreceipted skills
+`--no-skills-sh` to declare the machine/Codex ownership boundary. Ruflo below 3.46.0 does not
+honor the two hyphenated flags ([ruflo #3167](https://github.com/ruvnet/ruflo/issues/3167)), so
+on those versions agentic-kit also uses scripted `--format json` mode and `RUFLO_NO_SKILLS_SH=1`;
+both independently suppress the optional projections. On Ruflo 3.46.0 and newer the flags alone
+are passed. Existing unreceipted skills
 remain review-only. A future upgrade may remove a stale projection only when its path and
 last-written digest are receipt-owned and the file is still unchanged. Generated settings, skills,
 agents and hooks remain subject to the upstream ownership and overwrite warnings in the table above.
