@@ -1370,7 +1370,7 @@
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
       "mapping": "mapped",
       "kitImpact": { "refs": ["lane G2: memory-routing port", "pacphi/agentic-kit#213"], "files": [] },
-      "adjustment": "Once a released Ruflo routes MCP memory operations to the CLI database, retire the memory-routing port and close pacphi/agentic-kit#213.",
+      "adjustment": "The two stores are deliberate (ruvnet/ruflo#2786, encryption at rest); a unified path would be a red flag, not this fix. 3.41.1 fixed route identity. Once a released Ruflo gives existing separate corpora a tested preservation or migration outcome, retire the memory-routing port and close pacphi/agentic-kit#213.",
       "status": "watching",
       "constraintIds": [],
       "history": [
@@ -1938,14 +1938,15 @@
       "dependency": null,
       "doneWhen": { "state": "closed-completed", "release": null },
       "mapping": "mapped",
-      "kitImpact": { "refs": ["lane G2: memory-routing port"], "files": [] },
-      "adjustment": "The upstream remainder is watched as ruvnet/ruflo#3196; #213 closes when the memory-routing port merges.",
+      "kitImpact": { "refs": ["lane G2: memory-routing port", "read-only route/peek API request (to be filed upstream as its own issue)"], "files": [] },
+      "adjustment": "Closes when a released Ruflo gives existing separate corpora a tested preservation or migration outcome (ruvnet/ruflo#3196) and ak's backup, distill and purge gaps (ruvnet/ruflo#3446, #3450) are adopted; the route/peek API request is filed separately.",
       "status": "watching",
       "constraintIds": [],
-      "tracks": ["ruvnet/ruflo#3196"],
+      "tracks": ["ruvnet/ruflo#3196", "ruvnet/ruflo#3446", "ruvnet/ruflo#3450"],
       "history": [
         { "date": "2026-09-09", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "replied to the Ruflo maintainer and stuinfla: two stores are deliberate (ruvnet/ruflo#2786); 3.41.1 fixed route identity; open remainder is a tested preservation or migration outcome for separate corpora; a read-only route/peek API issue is still to be filed" }
       ]
     },
     {
@@ -1957,8 +1958,8 @@
       "dependency": null,
       "doneWhen": { "state": "closed-completed", "release": null },
       "mapping": "mapped",
-      "kitImpact": { "refs": ["decision 7", "lane C: live-lock busy rule"], "files": [] },
-      "adjustment": "Migrates into this registry: once the watcher is live, comment on #240 with links to the two watched entries and close it.",
+      "kitImpact": { "refs": ["decision 7", "lane C: live-lock busy rule"], "files": ["src/lib/aqe-readiness.mjs"] },
+      "adjustment": "Close #240 when a released agentic-qe no longer falls through to create after a live RVF lock (agentic-qe#574) and ak removes the temporary busy rule. agentic-qe#719 (partial fix: rethrows LockHeld) was released in 3.14.4 on 2026-09-27; whether that release alone clears FsyncFailed under a live lock is not yet verified.",
       "status": "watching",
       "constraintIds": [],
       "tracks": ["proffesor-for-testing/agentic-qe#574", "proffesor-for-testing/agentic-qe#719"],
@@ -2425,6 +2426,80 @@
         { "date": "2026-04-18", "event": "closed", "note": "not_planned" },
         { "date": "2026-09-27", "event": "registered" },
         { "date": "2026-09-27", "event": "retired", "note": "closed upstream; nothing in ak waits on it" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#2786",
+      "url": "https://github.com/ruvnet/ruflo/issues/2786",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "AgentDB silently fails to initialize when memory.db is encrypted-at-rest (CLAUDE_FLOW_ENCRYPT_AT_REST) — learningSystem/reasoningBank permanently null, no diagnostic surfaced",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["pacphi/agentic-kit#213: keep both memory stores"], "files": [] },
+      "adjustment": "None: the fix is the deliberate two-store design ak keeps (AgentDB has its own plaintext file so memory.db can be encrypted at rest).",
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-07-26", "event": "closed", "note": "completed" },
+        { "date": "2026-09-27", "event": "registered" },
+        { "date": "2026-09-27", "event": "retired", "note": "deliberate design: AgentDB keeps its own plaintext file for encryption at rest; ak keeps both stores" }
+      ]
+    },
+    {
+      "id": "ruvnet/ruflo#3143",
+      "url": "https://github.com/ruvnet/ruflo/issues/3143",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "memory bridge ignores later explicit dbPath values: first ControllerRegistry silently wins across project and user stores",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "registered" }
+      ],
+      "note": "Cited by pacphi/agentic-kit#213 as related context; ak carries nothing for it today."
+    },
+    {
+      "id": "ruvnet/ruflo#2889",
+      "url": "https://github.com/ruvnet/ruflo/issues/2889",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "Encryption-at-rest (RFE1) silently orphans the memory corpus after the #2786 agentdb-memory.db split",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "registered" }
+      ],
+      "note": "Cited by pacphi/agentic-kit#213 as related context; ak carries nothing for it today."
+    },
+    {
+      "id": "ruvnet/ruflo#3195",
+      "url": "https://github.com/ruvnet/ruflo/issues/3195",
+      "relation": "referenced",
+      "kind": "issue",
+      "title": "`doctor -c memory`'s candidate-file check only ever examines `memory.db`; it never adds `agentdb-memory.db` (the native controller store, #2786) as a candidate, so the structural health check can pass while the authority file it never looked at is corrupt",
+      "dependency": "ruflo",
+      "doneWhen": { "state": "closed-completed", "release": null },
+      "mapping": "unmapped",
+      "kitImpact": null,
+      "adjustment": null,
+      "status": "retired",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-26", "event": "closed", "note": "completed (PR #3431)" },
+        { "date": "2026-09-27", "event": "registered" },
+        { "date": "2026-09-27", "event": "retired", "note": "closed upstream; cited by pacphi/agentic-kit#213 as context; nothing in ak waits on it" }
       ]
     }
   ]

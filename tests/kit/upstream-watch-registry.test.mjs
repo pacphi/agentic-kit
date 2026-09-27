@@ -143,6 +143,21 @@ test('tracking entries live in the ledger repository and track registered thread
   assert.deepEqual(tracking, ['pacphi/agentic-kit#213', 'pacphi/agentic-kit#240']);
 });
 
+test('the tracking issues carry their whole upstream remainder', () => {
+  const doc = document();
+  const t213 = entry(doc, 'pacphi/agentic-kit#213');
+  assert.deepEqual([...t213.tracks].sort(), ['ruvnet/ruflo#3196', 'ruvnet/ruflo#3446', 'ruvnet/ruflo#3450']);
+  assert.ok(t213.history.some((item) => item.event === 'commented' && item.date === '2026-09-27'));
+  for (const id of ['ruvnet/ruflo#2786', 'ruvnet/ruflo#3143', 'ruvnet/ruflo#2889', 'ruvnet/ruflo#3195']) assert.ok(entry(doc, id), id);
+  // Two stores are deliberate (ruflo#2786): a unified path would be a red flag, not the fix ak waits for.
+  assert.doesNotMatch(entry(doc, 'ruvnet/ruflo#3196').adjustment, /routes MCP memory operations to the CLI database/);
+  assert.match(entry(doc, 'ruvnet/ruflo#3196').adjustment, /preservation or migration/);
+  const t240 = entry(doc, 'pacphi/agentic-kit#240');
+  assert.deepEqual([...t240.tracks].sort(), ['proffesor-for-testing/agentic-qe#574', 'proffesor-for-testing/agentic-qe#719']);
+  assert.match(t240.adjustment, /agentic-qe#574/);
+  assert.ok(t240.kitImpact.files.includes('src/lib/aqe-readiness.mjs'));
+});
+
 test('an invalid watch list makes the whole registry invalid for the hook audit too', () => {
   withRegistry((doc) => { entry(doc, 'ruvnet/ruflo#3194').status = 'done'; }, (result) => {
     assert.equal(result.registryStatus, 'invalid');
