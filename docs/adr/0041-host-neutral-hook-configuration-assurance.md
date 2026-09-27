@@ -3,7 +3,8 @@
 - **Status:** Accepted; static assurance, transactional healing, bounded receipts, and read model implemented
 - **Date:** 2026-09-01
 - **Updated:** 2026-09-26 — §7: the registry ships inside `src/`, holds the watched upstream
-  threads beside the constraints, and feeds the deterministic upstream watch
+  threads beside the constraints, and feeds the deterministic upstream watch, whose ledger is
+  read from the routine's and our logins' comments only
 - **Earlier update:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Earlier update:** 2026-09-04
 - **Earlier update:** 2026-09-04 — proposed ADR-0048 groups hook findings under logical resources while
@@ -214,7 +215,8 @@ not shipped) reads GitHub and npm and never writes. It reports replies we owe, r
 ready for ak, workarounds ak still carries, stale threads (no upstream activity for 90 days),
 not-planned closures, retirement candidates, constraints past their retest date, and a registry
 with nothing left to watch. Its ledger lines, `UPSTREAM-WATCH <id> <event> <date> …`, go to one
-pinned "Upstream watch" issue; an exact line is never acted on twice. Dispatch of a released
+pinned, locked "Upstream watch" issue; the routine reads only its own and our logins' comments
+there, so an exact line it recorded is never acted on twice and nobody else can suppress one. Dispatch of a released
 thread is a branch `upstream/<id>` and a draft pull request that makes the adjustment
 test-first and passes the dependency's removal proof. It never merges. Publishing upstream
 keeps the `explicit-user-approval-required` rule. Operating detail:
