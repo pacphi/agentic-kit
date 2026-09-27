@@ -22,6 +22,8 @@ import { companionLifecycleFor } from '../lib/adapters/companion-lifecycle-regis
 import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
 import { listDaemons, staleDaemons, reap } from '../lib/daemons.mjs';
 import { applyRufloDaemon } from '../lib/ruflo-daemon-config.mjs';
+import { cleanupProbeRows } from '../lib/memory-probe-cleanup.mjs';
+import { rufloMemoryLocation } from '../lib/ruflo-memory.mjs';
 import { installedRoutingVersion } from '../lib/ruflo-memory-contract.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { reconcileRufloComponents } from '../lib/ruflo-components/apply.mjs';
@@ -404,6 +406,30 @@ export const SYNC_STEPS = [
       }
     },
   },
+  // Decision B3-D2: remove ak's old setup probe rows once, from the current
+  // project's store and the user-level store (both files each: Ruflo's own
+  // delete leaves the AgentDB mirror, ruvnet/ruflo#3450). Each store is backed
+  // up first; the receipt and backups stay under the state folder, and
+  // kit.json records every cleaned file so it is never cleaned twice.
+  {
+    id: 'memory-probe-cleanup',
+    when: (subs) => subs.has('memory'),
+    run: (ctx) => ctx.step('memory-probe-cleanup', () => {
+      const location = rufloMemoryLocation(ctx.cwd);
+      const dirs = [...(location.kind === 'user' ? [] : [location.dir]), paths.userMemoryDir()];
+      const root = paths.memoryProbeCleanupDir();
+      const { receipt } = cleanupProbeRows(dirs, {
+        backupRoot: path.join(root, 'backups'), receiptDir: root, cleaned: ctx.cfg.cleanups.setupProbeRows,
+      });
+      if (!receipt) return { ok: true, detail: 'no old ak setup probe rows left' };
+      saveKitConfig(ctx.cfg);
+      const failed = receipt.stores.filter((store) => store.error);
+      const removed = receipt.stores.reduce((sum, store) => sum + store.deleted.length, 0);
+      const detail = `removed ${removed} old ak setup probe row${removed === 1 ? '' : 's'} (backup and receipt in ${root})`
+        + (failed.length ? `; could not clean ${failed.map((store) => `${store.file} (${store.error})`).join(', ')}` : '');
+      return { ok: failed.length === 0, detail };
+    }),
+  },
   // Also after an upgrade: a Ruflo that crossed 3.46.0 no longer needs the
   // idle key ak wrote (ruflo-daemon-config.mjs), so the same sync removes it.
   {
@@ -662,7 +688,7 @@ const TAIL_REPAIRS = new Set(['host-alignment']);
 // replace the statusline helper, so --skip statusline stops it too.
 // host-lifecycles answers per host instead (its loop checks ctx.skip).
 const STEP_SUBSYSTEMS = {
-  'codex-mcp-repair': ['codex-mcp'], 'aqe-rvf': ['aqe'], 'ruflo-helpers': ['versions', 'statusline'], 'host-lifecycles': [],
+  'codex-mcp-repair': ['codex-mcp'], 'aqe-rvf': ['aqe'], 'memory-probe-cleanup': ['memory'], 'ruflo-helpers': ['versions', 'statusline'], 'host-lifecycles': [],
 };
 const stepSubsystems = (s) => (Object.hasOwn(STEP_SUBSYSTEMS, s.id) ? STEP_SUBSYSTEMS[s.id] : [s.id]);
 
@@ -670,7 +696,7 @@ const stepSubsystems = (s) => (Object.hasOwn(STEP_SUBSYSTEMS, s.id) ? STEP_SUBSY
 // fails when a step's `when` names one missing here.
 const SYNC_SUBSYSTEMS = [
   'agent-browser', 'aqe', 'aqe-embedding', 'blocks', 'codex-context', 'codex-mcp', 'codex-statusline',
-  'daemons', 'deja-vu', 'host-alignment', 'hosts', 'mcp', 'natives', 'npx', 'providers', 'routing',
+  'daemons', 'deja-vu', 'host-alignment', 'hosts', 'mcp', 'memory', 'natives', 'npx', 'providers', 'routing',
   'ruflo-components', 'ruvector', 'ruvnet-brain', 'ruvnet-brain-nightly', 'scaffold-agents', 'security',
   'self', 'statusline', 'versions',
 ];

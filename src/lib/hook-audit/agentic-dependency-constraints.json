@@ -1611,13 +1611,14 @@
       "dependency": "ruflo",
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
       "mapping": "mapped",
-      "kitImpact": { "refs": ["lane G2: purge both memory stores"], "files": [] },
-      "adjustment": "Once a released Ruflo purges the AgentDB mirror with memory purge/delete, stop purging both stores from ak.",
+      "kitImpact": { "refs": ["lane G2: purge both memory stores", "B3-D2: one-time sync cleanup of ak's old setup probe rows from both stores"], "files": ["src/lib/memory-probe-cleanup.mjs", "src/commands/sync.mjs", "src/commands/status/sections/project-memory.mjs"] },
+      "adjustment": "Once a released Ruflo purges the AgentDB mirror with memory purge/delete, stop purging both stores from ak. The one-time probe-row cleanup (B3-D2) stays: it removes rows older ak versions left behind.",
       "status": "watching",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-26", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "watching", "note": "re-checked: still reproduces on 3.46.1 (memory delete tombstones memory.db only; the agentdb-memory.db mirror stays active)" }
       ]
     },
     {

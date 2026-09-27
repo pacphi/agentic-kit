@@ -8,7 +8,7 @@
 import * as paths from '../../../lib/paths.mjs';
 import { findUserStrayStores, memoryDirStatus } from '../../../lib/project-memory.mjs';
 import { homeRelative } from '../../../lib/ruflo-memory.mjs';
-import { formatBytes, storeMessage } from './project-memory.mjs';
+import { formatBytes, probeRowsRow, storeMessage } from './project-memory.mjs';
 import { row } from '../row.mjs';
 
 function strayRow(found, home, userDir) {
@@ -32,7 +32,8 @@ function strayRow(found, home, userDir) {
 
 export default {
   id: 'user-memory',
-  async collect({ home = paths.home, env = process.env } = {}) {
+  /** @param {{ home?: string, env?: NodeJS.ProcessEnv, cfg?: any }} [ctx] */
+  async collect({ home = paths.home, env = process.env, cfg = undefined } = {}) {
     const rows = [];
     try {
       const dir = paths.userMemoryDir(home);
@@ -41,6 +42,8 @@ export default {
           ? `user-level store ${dir} (Claude Code's and Codex's Ruflo launcher outside projects): ${storeMessage(store)}`
           : `user-level store ${store.file} is unreadable; existing-corpus access unverified`));
       }
+      const probes = probeRowsRow(dir, cfg);
+      if (probes) rows.push(probes);
       const found = findUserStrayStores({ home, codexHome: env.CODEX_HOME || undefined });
       const stray = strayRow(found, home, dir);
       if (stray) rows.push(stray);
