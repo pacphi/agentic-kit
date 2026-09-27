@@ -118,6 +118,25 @@ missing price.
 `Dual-host` describes two enabled peer hosts, not an execution command and not evidence that two
 inference vendors served a workflow. Generalized execution belongs to `ak run`.
 
+## Session surface language (proposed)
+
+These terms are proposed by [ADR-0060](../adr/0060-session-surface-initiator-and-product-names.md)
+and not yet implemented. Until they are, the implemented contract is ADR-0050's **session origin**
+(`claude-desktop`, `codex-desktop` or `unknown`).
+
+| Term | Meaning |
+|------|---------|
+| Session surface | The product surface that started a session, read from the host's own declared field (Claude `entrypoint`; Codex `originator` with `source`) and shown by its official name, such as Claude Code CLI, Claude Desktop, ChatGPT desktop app · Codex, or Codex CLI |
+| Initiator | Who started a session: a person, automation (scripts, SDKs, non-interactive runs, CI), an agent (a subagent or reviewer spawned by another session), or an imported copy |
+| Imported session copy | A session one tool copied from another, such as a Claude Code transcript the ChatGPT desktop app imported as a Codex thread; excluded from usage, origin and project counts and reported as a count |
+| Raw surface value | The exact declared value a surface was derived from; always kept, and shown for any value the vocabulary does not recognize |
+| Tool workspace | A folder a tool creates for its own work outside the user's projects, such as `~/.codex/.chatgpt-projects/…` or `~/Documents/Codex/…`; an explanation attribute, never a surface |
+| Desktop application | Claude Desktop or the ChatGPT desktop app; an application that can start sessions, not a host |
+
+Say **session surface** for where a session came from; the Live event `surface` field (native, ruflo,
+aqe, plugin, skill, internal) names which component emitted an event and is a different concept.
+Never derive a surface from a folder, and never show "VS Code" for Codex `source="vscode"`.
+
 ## Model lifecycle language
 
 These terms define ADR-0032's implemented contract; its record is marked Implemented.

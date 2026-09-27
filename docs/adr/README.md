@@ -388,3 +388,10 @@ governance, the learning profile, turn-credit, the #2887 memory fix, and the fun
 state is shown with its meaning; settings reach Claude Code, Codex and OpenCode through one
 receipt-owned environment projection generalized from ADR-0055; `kit.json` `false` opts a
 component out.
+
+## ADR-0060 — Session surface, initiator and official product names
+
+[ADR-0060](0060-session-surface-initiator-and-product-names.md) (Proposed) derives a session's
+surface and initiator from the hosts' declared log fields, keeps every raw value, uses official
+product names (Claude Desktop, ChatGPT desktop app, Codex CLI, and others), and excludes imported
+session copies from every origin view.
