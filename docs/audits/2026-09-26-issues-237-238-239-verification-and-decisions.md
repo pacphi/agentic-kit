@@ -1118,3 +1118,313 @@ Behavior that differs from, or goes beyond, the plan text.
 - External link checking.
 - The end gates from "Gates" above: AQE coverage-gap analysis and an adversarial review of the full
   diff.
+
+## Addendum 3 — daemon, stray stores, verification, upstream watch and product names (same day)
+
+The implementation lanes returned seven further findings, and the maintainer asked two new
+questions: how to tell where sessions came from, and how to keep upstream issues watched without a
+person. Each finding was presented in the decision format above. Evidence was observed on Ruflo /
+`@claude-flow/cli` 3.45.0, agentic-qe 3.14.3, npm 11.17.0 and macOS (arm64).
+
+### Item 1 — Ruflo's backups and distillation are not running
+
+**The situation.** Ruflo's daemon runs a daily memory backup and a 30-minute distillation
+(`services/worker-daemon.js:31-39`). Ruflo starts the daemon on any command only when auto-start is
+allowed; its own `init` writes `claudeFlow.daemon.autoStart: false` (`init/settings-generator.js:123`)
+and `ak setup` starts the daemon once, turning a `true` back to `false` (`src/commands/setup.mjs:575-585`).
+AI workers are opt-in since Ruflo #2661, so these local workers spend no tokens.
+
+**The problem.** Even when started, the daemon stops itself about 60 seconds later: its idle check
+uses each worker's last-run time restored from the previous run (`worker-daemon.js:671-679, 1016,
+1027-1038`, ruvnet/ruflo#3194). This repository's daemon log shows 915 starts and 859 idle
+shutdowns; the last backup ran on 2026-09-10 and the last distillation on 2026-09-11. On macOS the
+daemon also defers work for "low memory" because `os.freemem()` excludes reclaimable cache
+("3.9% free", ruvnet/ruflo#2935). Ruflo's supported settings are flat keys in
+`.claude-flow/config.json` (`daemon.idleSecs`, `daemon.resourceThresholds.minFreeMemoryPercent`).
+`ruflo config set` must not be used to write them: in a disposable project it wrote a full default
+configuration to `claude-flow.config.json`, including `memory.persistPath: "./data/memory"`, after
+which `ruflo memory store` failed with "Database not initialized"; the key it wrote never reached the
+daemon, and a value of `0` was rejected.
+
+**What the user sees.** Nothing: no backups, no distillation, and no status row saying so.
+
+**What should be the case.** In managed projects, backup and distillation run, and `ak status` says
+when each last ran.
+
+**The choices.** A: turn auto-start on and add a status row. A+: A, plus a minimal ak-managed
+`.claude-flow/config.json` with flat keys only (`daemon.idleSecs: 0` until #3194 is fixed; a lower
+macOS memory threshold until #2935 is fixed), never written through `ruflo config set`, proven in a
+disposable project, and removed by version once Ruflo ships the fixes. C: ak runs Ruflo's backup and
+distillation commands itself during sync. D: no change.
+
+**Recommendation: A+. Choice: A+** (first chosen as A, then revised when the idle-shutdown defect
+was found). The daemon file must coexist with Addendum 2 Problem 1's memory pin in
+`claude-flow.config.json`: the daemon reads only `.claude-flow/config.json`, and memory resolution
+reads `claude-flow.config.json` first.
+
+### Item 2 — AQE scatters memory stores into subfolders
+
+**The situation.** AQE looks for its store by walking up from the working directory.
+
+**The problem.** A command started in a subfolder first creates `<cwd>/.agentic-qe`, then finds it
+(agentic-qe#735). This repository holds nine such stores: about 70 patterns each, mostly AQE's
+starter set, and 0–66 captured experiences each (about 99 in total). `AQE_PROJECT_ROOT` makes AQE use
+the root (`dist/kernel/project-root.js:42-45`). AQE's own merge tool, `aqe brain export` / `aqe brain
+import`, aborts on these stores with `UNIQUE constraint failed: qe_patterns.name, qe_patterns.qe_domain,
+qe_patterns.pattern_type` for every strategy while its dry run reports no conflicts. Removing
+duplicate patterns from a scratch copy first works: on copies, the root went from 314 to 370
+patterns and from 4,623 to 4,689 experiences, with integrity and foreign-key checks clean. The root
+store's audit chain was already broken at entry 135 before any merge.
+
+**What the user sees.** Learning split across folders; stray folders in the repository.
+
+**What should be the case.** One AQE store per project, whatever folder a command starts in.
+
+**The choices.** A: pin an absolute `AQE_PROJECT_ROOT` in `.claude/settings.local.json` and the
+Codex launcher, and list strays in status. B: make `AQE_MEMORY_PATH` absolute only. C: wait for
+upstream. D: status warning only. For existing strays: merge then archive; archive only; delete after
+backup; or archive now and merge after the upstream fix.
+
+**Recommendation: A, with merge then archive. Choice: A, with merge then archive.** The merge
+action previews, backs up the root, merges each stray through AQE's own export and import after
+removing duplicate patterns from a scratch copy, verifies counts and integrity, and moves the stray
+into a dated backup folder.
+
+### Item 3 — `ak x verify providers` writes where it runs
+
+**The situation and problem.** It runs `aqe health` and `ruflo providers list` in the current folder
+(`src/commands/x/verify.mjs:207,214`), creating an AQE store there, and reads AQE's router file from
+the current folder (`:220,227`), reporting false drift from subfolders.
+
+**What should be the case.** Verification only reads, and always checks the project root.
+
+**The choices.** A: resolve the project root, run there with item 2's pin, read from the root, skip
+project checks outside a project, and test that no store is created. B: run in a temporary folder.
+C: drop the `aqe health` check. D: no change.
+
+**Recommendation: A. Choice: A.**
+
+### Item 4 — `ak status --deep` does nothing
+
+**The situation and problem.** `--deep` is declared and documented (`src/commands/status.mjs:18,32`)
+but never read. Decision 9's `--live` now does what it promised, while `ak system --deep` and
+`ak maintain scan --deep` mean "re-measure the machine" and `ak usage prompts --deep` means "show
+prompt text".
+
+**Maintainer direction.** Revisit every way ak scans and measures so the CLI and the dashboard use
+one vocabulary and, preferably, one flag; carry no legacy behaviour.
+
+**What the inventory found.** 34 CLI entry points and 21 dashboard routes, controls and timers perform
+11 distinct operations: read recorded evidence, incremental local re-read, quick local re-probe, heavy
+Ruflo component re-probe, network metadata lookup, free live round trip, paid inference, full machine
+re-measure, discovery walk, inventory rebuild, and configuration re-seed. `--deep` has four meanings
+(none on `status`; re-measure on `system`; re-measure first on `maintain`; reveal prompt text on
+`usage prompts`), and "refresh" names about ten operations, including `ak host refresh`, which only
+rewrites routing. "Full scan" and "Re-measure machine" start the same server chain, while their CLI
+counterparts differ. Plain `ak status`, and every 30-second dashboard poll through
+`ak status --json`, spawns host `--version`, native load tests and a cached `npm view`, against its
+"read-only" help and a code comment (`src/lib/dashboard-server.mjs:463-467`). The same live suites are
+called "quick, free" (`status --live`) and "slow" (`x verify`); the security suite also runs
+`ruflo security secrets` in the current folder. Results are recorded unevenly across about fifteen
+staleness windows in two directories and process memory. Plain defects: `ak x verify all` omits `mcp`
+and ignores `--json`; the main help lists stale flags; `ak maintain recipes refresh` can never succeed;
+`sync --skip versions` still performs the online lookup; two GET routes start work; two documented UI
+messages do not exist; the documentation misdescribes the Maintenance poll.
+
+**The choices.** Flag shape: `--refresh[=live|machine]`; `--check[=live|machine]`; or separate
+consistently named flags. Plain reads: re-check only expired evidence and compute dashboard status
+in-process; never probe without `--refresh`; or keep probing and say so. Evidence: one store that every
+check records to; or separate stores with aligned wording. `ak x verify`: fold into
+`--refresh=live`; or keep it as an expert command.
+
+**Recommendation and choice: `--refresh[=live|machine]`; re-check only expired evidence; one
+store; fold `ak x verify` into `--refresh=live`.** The design:
+
+| Strength | Does | Replaces |
+|---|---|---|
+| (none) | Shows recorded results with their age; re-collects quick local evidence only when it has expired | today's probing plain status |
+| `--refresh` | Re-runs every local check, the online version lookup, and the Maintenance evidence and inventory | `status --refresh`, `maintain scan [--refresh-inventory]`, "Refresh evidence", "Check again" |
+| `--refresh=live` | Adds live round trips; `--only <test>` selects one; slow proofs run only when named | `status --live`, `ak x verify` |
+| `--refresh=machine` | Adds the full machine re-measure, with project trees as an option on both surfaces | `system --deep`, `maintain scan --deep`, "Full scan", "Re-measure machine" |
+
+The paid connection check is never a strength of `--refresh`; it stays a separate consent-gated action
+with a CLI twin. Operations that are not refreshes are renamed: `ak host refresh` →
+`ak host reset-routes`; `ak usage prompts --deep` → `--show-text`; the dashboard header's
+"↻ refresh now" → "↻ Reload". The dashboard offers one Refresh control with the same three strengths,
+running the same server operation as the CLI and reporting its stages the same way.
+
+### Item 5 — plain npx spellings of AQE's server are not recognized
+
+**The situation and problem.** Decision 3's shared rule accepts npx only as
+`npx -y agentic-qe@latest mcp`. AQE's own code and changelog also use `npx --yes agentic-qe mcp` and
+`npx agentic-qe mcp`, and pinned versions are common; npm assumes `--yes` when standard input is not
+a terminal (`npm-exec.md:29`), so all of them start the same server.
+
+**The choices.** A: accept `npx [-y|--yes] agentic-qe[@latest|@<exact version>] mcp` with no other
+arguments. B: keep the rule. C: loose matching (rejected before).
+
+**Recommendation: A. Choice: A.**
+
+### Item 6 — new upstream evidence
+
+**Choice: file and comment.** Filed on 2026-09-26, each with a disposable-environment reproduction
+and the installed versions:
+
+- [ruvnet/ruflo#3450](https://github.com/ruvnet/ruflo/issues/3450): `memory purge` and `memory delete`
+  leave the AgentDB mirror, so purged data stays readable through MCP.
+- [ruvnet/ruflo#3449](https://github.com/ruvnet/ruflo/issues/3449): `config set` cannot configure the
+  daemon (wrong file, nested keys, a value of 0 rejected); the memory-root relocation it shares with
+  #3193 is linked there.
+- [proffesor-for-testing/agentic-qe#736](https://github.com/proffesor-for-testing/agentic-qe/issues/736):
+  `brain import` aborts on the pattern uniqueness constraint while `--dry-run` reports no conflicts.
+- Evidence comments on [ruvnet/ruflo#3194](https://github.com/ruvnet/ruflo/issues/3194#issuecomment-5850006786)
+  (idle self-shutdown on 3.45.0) and
+  [ruvnet/ruflo#2935](https://github.com/ruvnet/ruflo/issues/2935#issuecomment-5850007657) (macOS
+  memory gate on 3.45.0).
+
+The #3194 reproduction also showed that a background `ruflo daemon start --ttl <n>` drops the numeric
+value and runs with the 12-hour default; it shares #3449's parsing cause and is described there.
+
+Held back: MCP `memory_store` rejecting a custom database path (needs a clean reproduction); the
+broken AQE audit chain (needs investigation); AQE's `RUVECTOR_USE_RVF_PATTERN_STORE` switch having no
+effect because `initFeatureFlagsFromEnv()` is never called (ak does not use the switch); and AQE
+refusing to store pattern embeddings in a fresh home with `VECTOR_SPACE_UNVERIFIED` (possibly
+intended).
+
+### Item 7 — leftover files from the test incident
+
+**Choice: delete the three incident files.** Done on 2026-09-26: the memory-pin backup (identical to
+the restored settings), the intermediate AQE backup and the damaged copy. ak keeps a new safety copy on
+every settings write and never prunes them; undo uses receipts, not these copies
+(`src/lib/owned-env-projection.mjs:138-155`). Pruning is a follow-up.
+
+### Upstream watch and dispatch
+
+**The situation.** Upstream fixes were tracked through issues a person had to watch; one release
+watcher routine kept running daily for a release that shipped months earlier.
+
+**Maintainer direction.** An agent watches upstream issues and dispatches the matching ak change;
+each event is recorded; stale watchers are cleaned up.
+
+**Choices made.**
+
+- A repository registry of watched upstream items: the upstream issue, what "fixed" means (closed
+  and released), the ak workaround it affects, and the change ak makes when it lands. A test fails
+  when source code cites an upstream issue missing from the registry.
+- A deterministic check script (GitHub and npm) reporting maintainer activity, questions addressed to
+  us, fixed-but-unreleased, released, and reopened.
+- A daily cloud routine on this repository that runs the script, exits on quiet days, and on
+  "released" creates `upstream/<id>`, makes the registered change test-first, runs the checks, pushes,
+  and opens a draft pull request. It never merges.
+- A pinned "Upstream watch" issue records one comment per event, with a machine-readable line that also
+  prevents repeated actions; each dispatch pull request updates the registry entry.
+- Each entry moves from watching to fixed-unreleased, released, dispatched, adopted and retired; the
+  watcher proposes retirement itself, flags 90 days without upstream activity and upstream
+  "not planned" closures, and reports when nothing is left to watch. There is one watcher: #240 and
+  the upstream remainder of #213 move into the registry when it goes live.
+- The routine is created after the registry reaches `main`. The stale release watcher routine was
+  disabled on 2026-09-26.
+
+### Ruflo support window
+
+**The situation.** ak declares no minimum Ruflo version; it installs the latest release and gates
+features one by one. A review of the ten closed upstream issues ak still cites found that removing
+workarounds such as the retired CVE overlay (ruvnet/ruflo#2694, fixed in 3.32.2) is a policy change
+without a floor. Ruflo ships minors in bursts (3.43.0–3.46.0 between 2026-09-23 and 2026-09-26; no
+new minor between 3.38.0 on 2026-08-11 and 3.39.0 on 2026-09-08), so a window counted in minors alone
+swings from days to months.
+
+**The choices.** n-3 minors (3.43.0+ today, three days); n-5 minors (3.41.0+, sixteen days); n-5
+minors but never less than the minors released in the last 30 days (3.39.0+); or no floor.
+
+**Choice: n-5 minors, never less than 30 days, rolling** (first chosen as n-3, then widened). Below
+the window, `ak status` reports the version as unsupported and points to `ak sync`. The watcher
+proposes removing a workaround once the oldest supported version contains its upstream fix. The
+policy is recorded with the Ruflo dependency policy in the constraint registry.
+
+### Ruflo 3.46.0 (released 2026-09-26)
+
+3.46.0 closed ruvnet/ruflo#3194 (PR #3421, stale daemon state), #3415 (PR #3423, MCP policy
+enforcement in the stdio launchers), #3166 (PR #3441, agent-browser doctor check) and #3167 (PR #3434,
+init opt-out flags), and merged the YAML configuration fix for #3193 (PR #3420; the issue remains open).
+Item 1's `daemon.idleSecs` override is therefore needed only for supported versions below 3.46.0, and
+ADR-0058's governance, the Brain/agent-browser doctor row and the init flags need re-verification
+against 3.46.0 before Stage 6 builds on them.
+
+### Retroactive upstream sweep and reactions
+
+A search of every issue and pull request the maintainer opened or commented on outside their own
+repositories found 68 threads on agentic-kit's upstreams (51 opened, 17 commented): Ruflo 23 open and
+12 closed, Agentic QE 4 and 10, RuVector 1 and 9, AgentDB 3 open, RuvNet Brain 3 open, Codex 2 and 1.
+All of them move into the upstream watch.
+
+- **Waiting on us.** ruvnet/ruflo#3046 asked which backend boundary downstream tools want; the
+  maintainer's answer (a discovered manifest and subprocess protocol, per ADR-0029) was posted.
+  ruvnet/ruflo#2885's triage asked for a macOS arm64 test of single-threaded ONNX Runtime sessions;
+  the test was run in a disposable project.
+- **Closed upstream but still cited by ak.** A read-only review of ten such items found one
+  unconditional removal (the AQE solver heal, agentic-qe#617), one removal that needs the support
+  window (the CVE overlay, ruvnet/ruflo#2694), wording and gate fixes for the security check
+  (ruvnet/ruflo#2670, fixed in 3.32.2 with a built-in engine), a stale "#2986 pending" note, and
+  codex#15451 closed without a fix (ak's wrapper stays). The review also found that
+  `ruflo security defend` still crashes after a detection, so its exit code cannot distinguish a
+  detection from a crash; the maintainer approved filing it.
+- **Registry.** agentic-kit already keeps upstream constraints in
+  `config/agentic-dependency-constraints.json` (ADR-0041 §7). The watch list extends that registry
+  rather than adding a second one. The file is not in the npm package although shipped code reads
+  it, so installed copies run the hook audit without constraints; that is fixed with the watch.
+
+### Session origin and product names (staged)
+
+The maintainer asked whether sessions started from Claude Desktop or the ChatGPT app can be told
+apart from Claude Code and Codex sessions, and asked for official product names throughout.
+[ADR-0060](../adr/0060-session-surface-initiator-and-product-names.md) (Proposed) records the
+findings and the proposed model: a session surface and an initiator derived from declared log fields,
+the raw value always kept, folders only as explanation, and one table of official names. The key
+finding for current views: all 874 rollouts labelled `Codex Desktop` are Claude Code transcripts
+imported by the ChatGPT desktop app. Usage already excludes them (ADR-0052), but project discovery
+does not, so 23 project folders on this machine show a Desktop origin they never had. The work is
+staged as follow-on, starting with that exclusion.
+
+### Plan changes
+
+**Stage 6 — daemon, AQE stores, verification and upstream watch** runs after Stage 5 on the integrated
+branch:
+
+| # | Commit | Addresses |
+|---|---|---|
+| 6.1 | `feat(status): show whether Ruflo's backup and distillation are running` | Item 1 |
+| 6.2 | `feat(ruflo-daemon): enable auto-start with Ruflo's supported daemon settings` | Item 1 |
+| 6.3 | `fix(aqe): pin AQE to the project root and list stray stores` | Item 2 |
+| 6.4 | `feat(aqe): merge stray AQE stores into the project store, then archive them` | Item 2 |
+| 6.5 | `fix(verify): run provider checks from the project root without writing` | Item 3 |
+| 6.6 | `refactor(evidence): one evidence store for every remembered check` | Item 4 |
+| 6.7 | `perf(status): re-check only expired evidence; compute dashboard status in-process` | Item 4 |
+| 6.8 | `feat(refresh): one --refresh flag with live and machine strengths across status, system and maintain` | Item 4 |
+| 6.9 | `refactor(verify): fold ak x verify into ak status --refresh=live` | Item 4 |
+| 6.10 | `feat(dashboard): one Refresh control with the CLI's three strengths; Reload re-reads the view` | Item 4 |
+| 6.11 | `feat(host): consent-gated connection check from the CLI` | Item 4 |
+| 6.12 | `refactor(cli): rename operations that are not refreshes` | Item 4 |
+| 6.13 | `fix(security-check): scan the project folder and say so` | Item 4 |
+| 6.14 | `fix(sync): --skip versions also skips the online version lookup` | Item 4 |
+| 6.15 | `fix(dashboard): start scans with POST requests` | Item 4 |
+| 6.16 | `refactor(maintain): remove recipe refresh until a registry exists` | Item 4 |
+| 6.17 | `docs: align help, README and dashboard docs with the refresh vocabulary` | Item 4 |
+| 6.18 | `fix(aqe): recognize every plain npx spelling of AQE's server` | Item 5 |
+| 6.19 | `feat(upstream): registry of upstream issues and the ak changes they unblock` | Upstream watch |
+| 6.20 | `feat(upstream): deterministic upstream watch check` | Upstream watch |
+| 6.21 | `docs(upstream): the watch-and-dispatch routine, its ledger and its lifecycle` | Upstream watch |
+
+| 6.22 | `feat(versions): support a rolling window of Ruflo minors (n-5, at least 30 days)` | Support window |
+| 6.23 | `fix(security): stop reporting defend as non-functional when Ruflo ships the built-in engine` | ruflo#2670 review |
+| 6.24 | `refactor(heal): remove the AQE solver heal that never installs anything` | agentic-qe#617 review |
+| 6.25 | `refactor(statusline): remove the retired CVE-counter overlay` | ruflo#2694 review, after 6.22 |
+| 6.26 | `docs(status): drop the stale "#2986 pending" note` | ruflo#2986 review |
+
+6.1 precedes 6.2; 6.2 gates the idle override to versions below 3.46.0; 6.3 precedes 6.4 and 6.5, which use the root pin; 6.5 precedes 6.9, which moves the
+verification code; 6.6 precedes 6.7–6.9; 6.8 precedes 6.10; 6.19 precedes 6.20. The `ak x verify`
+defects (`all` omitting `mcp`, unread `--json`) are resolved by 6.9 rather than patched in place.
+
+**Follow-on (not on this branch).** ADR-0060, beginning with removing imported copies from project
+discovery and origin views, then the shared surface vocabulary; pruning of ak's settings safety
+copies; the AQE audit-chain break; Cowork as a discovery source.

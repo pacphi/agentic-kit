@@ -22,8 +22,10 @@ a later installed host version does not inherit those conformance results automa
 The [issues 237–239 verification and decisions](2026-09-26-issues-237-238-239-verification-and-decisions.md)
 record verifies an external report against `847486c` and captures the maintainer's nine
 decisions, two same-day addenda (AgentDB and Ruflo memory alignment; memory location and install
-transparency) with their decisions, and the resulting remediation plan; it authorizes that plan but is not evidence that any of it is
-implemented.
+transparency) with their decisions, the resulting remediation plan, and the implementation status
+of Stages 1–5 on the integration branch. A third addendum records later decisions (Ruflo daemon,
+AQE stores, verification, the refresh vocabulary, the upstream watch, the Ruflo support window and
+product names); its Stage 6 is planned, not implemented.
 
 Machine-readable inventories here are observations, not executable policy, ownership receipts,
 release capabilities or permission to read additional host history. Issue-specific matrices state
