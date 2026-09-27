@@ -22,6 +22,8 @@ export const PACKAGE_NAME = /^[@A-Za-z0-9_][A-Za-z0-9_@./-]*$/;
 export const OWNER_REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 // A tag spelling such as rust-v{version}; the watcher substitutes the version.
 const TAG_PATTERN = /^[\w./-]*\{version\}[\w./-]*$/;
+// A user or app login; apps comment as `<name>[bot]` (the workflow token as github-actions[bot]).
+const GITHUB_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\[bot\])?$/;
 const ISSUE_URL = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/(?:issues|pull)\/(\d+)$/;
 
 const text = (value) => typeof value === 'string' && value.trim() !== '';
@@ -46,8 +48,9 @@ function checkPolicy(policy, errors) {
   }
   const ledger = policy.ledger;
   if (!isObject(ledger) || !OWNER_REPO.test(ledger.repo ?? '') || !Number.isInteger(ledger.issue) || ledger.issue < 1
-      || !text(ledger.issueTitle) || !/^[A-Z][A-Z-]+$/.test(ledger.sentinel ?? '')) {
-    errors.push('watchPolicy.ledger must name repo, issue, issueTitle and an upper-case sentinel');
+      || !text(ledger.issueTitle) || !/^[A-Z][A-Z-]+$/.test(ledger.sentinel ?? '')
+      || !Array.isArray(ledger.authors) || ledger.authors.length === 0 || !ledger.authors.every((login) => GITHUB_LOGIN.test(login ?? ''))) {
+    errors.push('watchPolicy.ledger must name repo, issue, issueTitle, an upper-case sentinel and the GitHub logins that write it (authors)');
   }
   const dispatch = policy.dispatch;
   if (!isObject(dispatch) || !/^[\w.-]+\/$/.test(dispatch.branchPrefix ?? '') || dispatch.pullRequest !== 'draft' || dispatch.merge !== 'never') {

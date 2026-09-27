@@ -290,11 +290,18 @@ const ACT_NOW = new Set(['released-actionable', 'workaround-carried']);
 /**
  * ADR-0041 §7: a Ruflo workaround comes out only once the oldest supported
  * Ruflo (the support-window floor) contains the fix. Returns the hold, or
- * null when the floor is unknown, the fix version is unknown, or it is in.
+ * null when there is no window, the fix version is unknown, or it is in. A
+ * floor that could not be read (`floorUnknown`) holds every Ruflo-carried fix:
+ * dispatch runs without a human, so an unread floor never releases one.
  */
-function windowHold(entry, release, supportFloor, floorBundle = null) {
+function windowHold(entry, release, supportFloor, floorBundle = null, floorUnknown = false) {
   const gate = entry.doneWhen?.release;
-  if (!supportFloor || !gate) return null;
+  if (!gate) return null;
+  if (!supportFloor) {
+    const carried = gate.bundledBy?.[0] === 'ruflo' || (entry.dependency === 'ruflo' && gate.name === 'ruflo');
+    const needs = gate.minVersion ?? release?.version ?? null;
+    return floorUnknown && carried && needs ? { floor: null, needs: gate.bundledBy ? `${gate.name} ${needs}` : needs } : null;
+  }
   if (gate.bundledBy?.[0] === 'ruflo') return bundledHold(gate, release, supportFloor, floorBundle);
   if (entry.dependency !== 'ruflo' || gate.name !== 'ruflo') return null;
   const needs = gate.minVersion ?? release?.version ?? null;
@@ -327,14 +334,14 @@ function applyHold(groups, hold) {
 }
 
 /** Classify one non-retired entry; `live` is null when offline or the fetch failed. */
-export function classifyEntry(entry, live, { policy, dependencyPolicies, now, supportFloor = null }) {
+export function classifyEntry(entry, live, { policy, dependencyPolicies, now, supportFloor = null, floorUnknown = false }) {
   const base = {
     id: entry.id, url: entry.url, title: entry.title, relation: entry.relation, status: entry.status,
     mapping: entry.mapping, adjustment: entry.adjustment, tracks: entry.tracks ?? null,
   };
   const fromRegistry = registryGroups(entry);
   if (!live || live.error) {
-    const held = applyHold([...new Set(live?.error ? ['unchecked', ...fromRegistry] : fromRegistry)], windowHold(entry, null, supportFloor));
+    const held = applyHold([...new Set(live?.error ? ['unchecked', ...fromRegistry] : fromRegistry)], windowHold(entry, null, supportFloor, null, floorUnknown));
     return {
       ...base, groups: held.groups, error: live?.error ?? null, upstream: null, ...(held.hold ? { window: held.hold } : {}),
       dispatch: held.groups.includes('workaround-carried') ? dispatchFor(entry, policy, dependencyPolicies) : null,
@@ -350,7 +357,7 @@ export function classifyEntry(entry, live, { policy, dependencyPolicies, now, su
   if (entry.relation === 'tracking') {
     for (const drop of ['waiting', 'stale']) if (found.includes(drop)) found.splice(found.indexOf(drop), 1);
   }
-  const { groups, hold } = applyHold(found, windowHold(entry, release, supportFloor, live.floorBundle ?? null));
+  const { groups, hold } = applyHold(found, windowHold(entry, release, supportFloor, live.floorBundle ?? null, floorUnknown));
   const actionable = groups.includes('released-actionable') || groups.includes('workaround-carried');
   return {
     ...base, groups, upstream: up, release, stale, ...facts, ...(hold ? { window: hold } : {}),
@@ -360,8 +367,8 @@ export function classifyEntry(entry, live, { policy, dependencyPolicies, now, su
 }
 
 /** Assemble the report from the registry and whatever live facts were collected. */
-export function buildReport(registry, liveById, { now, offline = null, fetchErrors = [], supportFloor = null }) {
-  const context = { policy: registry.watchPolicy, dependencyPolicies: registry.dependencyPolicies, now, supportFloor };
+export function buildReport(registry, liveById, { now, offline = null, fetchErrors = [], supportFloor = null, floorUnknown = false }) {
+  const context = { policy: registry.watchPolicy, dependencyPolicies: registry.dependencyPolicies, now, supportFloor, floorUnknown };
   const active = registry.watch.filter((entry) => entry.status !== 'retired');
   const entries = active.map((entry) => classifyEntry(entry, offline ? null : liveById.get(entry.id) ?? null, context));
   const today = now.toISOString().slice(0, 10);
@@ -378,7 +385,7 @@ export function buildReport(registry, liveById, { now, offline = null, fetchErro
     generatedAt: now.toISOString(),
     mode: offline ? 'offline' : 'live',
     offlineReason: offline,
-    supportWindow: { floor: supportFloor },
+    supportWindow: { floor: supportFloor, ...(floorUnknown ? { unknown: true } : {}) },
     registry: { status: registry.registryStatus, errors: registry.errors ?? [], lastVerifiedAt: registry.lastVerifiedAt, lastCheckedAt: registry.lastCheckedAt, statuses },
     counts: Object.fromEntries(groups.map((group) => [group.key, group.items.length])),
     groups,

@@ -12,6 +12,7 @@ import {
 } from '../../scripts/upstream-watch/classify.mjs';
 import { createFetcher, mapLimit } from '../../scripts/upstream-watch/fetch.mjs';
 import { renderEvents, renderReport } from '../../scripts/upstream-watch/render.mjs';
+import { readLedger, renderComment, sentence } from '../../scripts/upstream-watch/ledger.mjs';
 import { main } from '../../scripts/upstream-watch.mjs';
 
 const FIXTURES = path.resolve('tests/fixtures/upstream-watch');
@@ -532,10 +533,16 @@ function fakeExec(responses) {
 }
 
 test('the fetcher explains an unauthenticated or missing gh plainly', async () => {
-  const signedOut = createFetcher({ exec: fakeExec([[/^gh auth status/, { status: 1, stdout: '', stderr: loggedOut }]]).exec });
-  const auth = await signedOut.auth();
+  // `gh auth status` calls an injected or installation token invalid while
+  // `gh api` works with it (cloud routine run cse_01Xb8wcBL8h335pxUeQ9sbnQ),
+  // so the probe is a call any token can make.
+  const { exec: signedOutExec, calls } = fakeExec([[/^gh api rate_limit/, { status: 4, stdout: '', stderr: loggedOut }]]);
+  const auth = await createFetcher({ exec: signedOutExec }).auth();
   assert.equal(auth.ok, false);
-  assert.match(auth.message, /gh auth login/);
+  assert.match(auth.message, /gh auth login|GH_TOKEN/);
+  assert.ok(calls.every((call) => !call.startsWith('gh auth')), calls.join('\n'));
+  const tokenOnly = createFetcher({ exec: fakeExec([[/^gh api rate_limit/, { status: 0, stdout: '5000\n', stderr: '' }]]).exec });
+  assert.deepEqual(await tokenOnly.auth(), { ok: true });
   const missing = createFetcher({ exec: async () => ({ status: null, stdout: '', stderr: '', error: Object.assign(new Error('spawn gh ENOENT'), { code: 'ENOENT' }) }) });
   assert.match((await missing.auth()).message, /not installed/);
 });
@@ -543,7 +550,8 @@ test('the fetcher explains an unauthenticated or missing gh plainly', async () =
 test('the fetcher reads a thread and its paginated comments through gh api', async () => {
   const fixture = threads['ruvnet/ruflo#3046'];
   const { exec, calls } = fakeExec([
-    [/issues\/3046\/comments/, { status: 0, stdout: JSON.stringify([fixture.comments.slice(0, 1), fixture.comments.slice(1)]), stderr: '' }],
+    // `--paginate --jq '.[]'` prints one comment per line across every page.
+    [/issues\/3046\/comments/, { status: 0, stdout: `${fixture.comments.map((comment) => JSON.stringify(comment)).join('\n')}\n`, stderr: '' }],
     [/issues\/3046$/, { status: 0, stdout: JSON.stringify(fixture.issue), stderr: '' }],
     [/^npm view agentic-qe/, { status: 0, stdout: JSON.stringify(npm['agentic-qe']), stderr: '' }],
   ]);
@@ -551,7 +559,9 @@ test('the fetcher reads a thread and its paginated comments through gh api', asy
   const thread = await fetcher.thread('ruvnet/ruflo#3046');
   assert.equal(thread.issue.number, 3046);
   assert.equal(thread.comments.length, fixture.comments.length);
-  assert.ok(calls.some((call) => call.includes('--paginate') && call.includes('--slurp')));
+  // gh 2.45 (apt on Ubuntu 24.04) has no --slurp; --jq '.[]' works on every gh 2.x.
+  const comments = calls.find((call) => call.includes('/comments'));
+  assert.ok(comments.includes('--paginate') && comments.includes("--jq .[]") && !comments.includes('--slurp'), comments);
   assert.equal((await fetcher.release({ channel: 'npm', name: 'agentic-qe' })).latest, '3.14.3');
   await assert.rejects(fetcher.thread('ruvnet/ruflo#1'), /unexpected call/);
 });
@@ -831,7 +841,8 @@ test('collect resolves each bundling chain once and reports a failure as "Could 
     const report = JSON.parse(failed.text());
     assert.deepEqual(report.groups.find((group) => group.key === 'unchecked').items.map((item) => item.id), ['ruvnet/agentdb#26', 'ruvnet/agentdb#27']);
     assert.ok(report.fetchErrors.some((item) => /ETIMEDOUT/.test(item.error)));
-  });
+  // Its fake npm has no Ruflo release dates, so no window floor; this test is about the chain.
+  }, { supportWindow: false });
   // Without a recorded minVersion (every live agentdb gate), a failed resolution is still "Could not check".
   const unrecorded = entry('ruvnet/agentdb#28', { dependency: 'ruflo', doneWhen: { state: 'closed-completed', release: { ...gate, minVersion: null } } });
   await withRegistryFile([unrecorded], async (file) => {
@@ -965,21 +976,255 @@ test('renderers list counts first, then items with links and the dispatch branch
   assert.equal(renderEvents([]), 'No new upstream events.\n');
 });
 
-// security-ledger-trusts-any-commenter: the ledger issue is public. The
-// routine must build its ledger text and SINCE from its own comments only
-// (a stranger's line would suppress an event, and a stranger's later comment
-// would move SINCE past a real reply), lock the issue, and take SINCE from
-// the time it last checked rather than from when it posted.
-test('the documented routine trusts only its own ledger comments', () => {
+// security-ledger-trusts-any-commenter: the ledger issue is public. Only the
+// ledger authors' comments count (a stranger's line would suppress an event,
+// and a stranger's later checked-at would skip a real reply); the script
+// enforces that for the workflow, and the dispatch routine's prompt says so.
+test('the documented dispatch routine trusts only the ledger authors', () => {
   // A Windows checkout gives the Markdown CRLF line endings; the checks are about its text.
   const doc = fs.readFileSync('docs/UPSTREAM-WATCH.md', 'utf8').replace(/\r\n/g, '\n');
   const ledger = doc.slice(doc.indexOf('## The ledger'), doc.indexOf('## Dispatch'));
-  const prompt = doc.slice(doc.indexOf('## The daily routine')).match(/```text\n([\s\S]*?)```/)[1];
+  const prompt = doc.slice(doc.indexOf('## The dispatch routine')).match(/```text\n([\s\S]*?)```/)[1];
   assert.match(ledger, /lock/i, 'the ledger issue is locked when it is created');
-  assert.match(prompt, /watchPolicy\.ours/, 'only comments by the routine or our logins are read');
-  assert.doesNotMatch(prompt, /every comment body/i);
-  assert.doesNotMatch(prompt, /time of its newest comment/i, 'SINCE never comes from whoever commented last');
-  assert.match(prompt, /checked-at/, 'SINCE is the time the routine last ran check');
+  assert.match(ledger, /watchPolicy\.ledger\.authors/);
+  assert.match(ledger, /checked-at/, 'the next run starts from the time a run last checked');
+  assert.match(prompt, /watchPolicy\.ledger\.authors/, 'only the ledger authors\' comments are read');
   assert.match(prompt, /never follow instructions/i, 'comment text is data, not instructions');
   assert.match(prompt, /pacphi\/agentic-kit#243/, 'the routine reads the recorded ledger issue');
+  assert.match(prompt, /without branch= is held by the support window/);
+  assert.match(prompt, /From all of\s+them/, 'a line in an older comment is still dispatched (b4b-adversarial M3)');
+  assert.match(prompt, /already exists on origin/);
+  assert.match(prompt, /not "watching" or "fixed-unreleased"/, 'work already dispatched or adopted is skipped (b4b-adversarial m5)');
+  assert.match(prompt, /DRAFT pull request/);
+  assert.match(prompt, /Never merge/);
+  assert.match(prompt, /never comment on\s+upstream/i);
+  assert.doesNotMatch(prompt, /upstream-watch\.mjs (check|comment)/, 'the routine does not run the watch (it cannot read upstream)');
+});
+
+// Decision 14: the routine's first run printed "No new upstream events." while
+// every read had failed. A quiet day is reported only when nothing failed, and
+// a run that read no thread at all is blind.
+test('check never reports a quiet day when a read failed, and flags a blind run', async () => {
+  assert.equal(renderEvents([], []), 'No new upstream events.\n');
+  const failed = renderEvents([], [{ id: 'ruvnet/ruflo#1', error: 'HTTP 403' }, { id: 'ruvnet/ruflo#2', error: 'HTTP 403' }]);
+  assert.doesNotMatch(failed, /No new upstream events/);
+  assert.match(failed, /could not check 2: ruvnet\/ruflo#1, ruvnet\/ruflo#2/);
+  const broken = { ...fixtureFetcher(), thread: async (id) => { if (id === 'ruvnet/ruflo#3153') throw new Error('HTTP 403'); return clone(threads[id]); } };
+  await withRegistryFile([entry('ruvnet/ruflo#3153', { relation: 'commented' })], async (file) => {
+    const text = capture();
+    await main(['check', '--since', '2026-09-26T00:00:00Z', '--registry', file], { fetcher: broken, stdout: text.stream, stderr: capture().stream, now: NOW });
+    assert.doesNotMatch(text.text(), /No new upstream events/);
+    const json = capture();
+    await main(['check', '--since', '2026-09-26T00:00:00Z', '--json', '--registry', file], { fetcher: broken, stdout: json.stream, stderr: capture().stream, now: NOW });
+    assert.equal(JSON.parse(json.text()).blind, true);
+  });
+  await withRegistryFile([entry('ruvnet/ruflo#3153', { relation: 'commented' }), entry('ruvnet/ruflo#3046', { relation: 'commented' })], async (file) => {
+    const json = capture();
+    await main(['check', '--since', '2026-09-26T00:00:00Z', '--json', '--registry', file], { fetcher: broken, stdout: json.stream, stderr: capture().stream, now: NOW });
+    const result = JSON.parse(json.text());
+    assert.equal(result.blind, false, 'one thread read is not blind');
+    assert.ok(result.fetchErrors.some((item) => item.id === 'ruvnet/ruflo#3153'));
+  });
+  const offline = capture();
+  await withRegistryFile([entry('ruvnet/ruflo#3153')], async (file) => {
+    await main(['check', '--since', '2026-09-26T00:00:00Z', '--json', '--registry', file], { fetcher: fixtureFetcher({ authenticated: false }), stdout: offline.stream, stderr: capture().stream, now: NOW });
+  });
+  assert.equal(JSON.parse(offline.text()).blind, true, 'gh unusable is blind');
+});
+
+// Decision 14: the scheduled workflow posts the script's comment as-is, so
+// which ledger comments count, where the check starts and the text are all
+// decided here, not by a model.
+const ledgerComment = (login, body) => ({ user: { login }, body });
+const withLedger = (comments, base = fixtureFetcher()) => ({ ...base, comments: async () => clone(comments) });
+
+test('the ledger counts only its authors for both the start time and the recorded lines', () => {
+  const authors = ['pacphi', 'github-actions[bot]'];
+  const ledger = readLedger([
+    ledgerComment('github-actions[bot]', '```text\nUPSTREAM-WATCH a#1 stale 2026-01-01\nchecked-at 2026-09-20T14:00:05Z\n```'),
+    ledgerComment('Mallory', '```text\nUPSTREAM-WATCH a#2 stale 2026-01-01\nchecked-at 2026-09-26T22:00:00Z\n```'),
+    ledgerComment('PACPHI', 'checked-at 2026-09-19T00:00:00Z\r\n'),
+  ], authors, NOW);
+  assert.equal(ledger.since, '2026-09-20T14:00:05Z');
+  assert.equal(ledger.comments, 2);
+  assert.match(ledger.text, /a#1 stale/);
+  assert.doesNotMatch(ledger.text, /a#2/);
+  assert.deepEqual(readLedger([], authors, NOW), { text: '', comments: 0, since: '2026-09-19T23:00:00Z', sinceSource: 'default' });
+});
+
+test('every ledger event has a plain sentence', () => {
+  const at = (event, fields = {}, id = 'ruvnet/ruflo#1') => sentence({ id, event, date: '2026-09-27', fields });
+  assert.equal(at('reply', { by: 'someone', at: '10:00:00Z' }), 'someone commented on `ruvnet/ruflo#1` on 2026-09-27 at 10:00:00Z; check whether it needs our reply.');
+  assert.match(at('acknowledged', { by: 'bot' }), /automated acknowledgement/);
+  assert.equal(at('closed', { reason: 'completed' }), '`ruvnet/ruflo#1` was closed upstream on 2026-09-27 (completed).');
+  assert.match(at('merged'), /merged upstream on 2026-09-27/);
+  assert.match(at('released', { version: '3.47.0', pr: 12, branch: 'upstream/ruvnet-ruflo-1' }), /\(pull request `#12`\) is released in 3\.47\.0 \(2026-09-27\); dispatch it on branch `upstream\/ruvnet-ruflo-1`\./);
+  assert.match(at('released', { version: '3.47.0', commit: 'abc1234' }), /\(commit `abc1234`\).*keeps its workaround/);
+  assert.match(at('reopened', { status: 'released' }), /open upstream again while the registry says released/);
+  assert.match(at('stale'), /no upstream activity since 2026-09-27/);
+  assert.match(at('retire-proposed'), /can be retired/);
+  assert.match(at('retest-due', {}, 'ruflo-hooks-1'), /^Constraint `ruflo-hooks-1` was due for a retest on 2026-09-27\.$/);
+  assert.match(at('idle', {}, 'registry'), /nothing is left to watch/);
+});
+
+test('the comment ends its block with the next start, kept when a read failed', () => {
+  const events = [{ id: 'a#1', event: 'stale', date: '2026-01-01', fields: {}, line: 'UPSTREAM-WATCH a#1 stale 2026-01-01' }];
+  const ok = renderComment({ events, fetchErrors: [], since: '2026-09-20T14:00:05Z', now: NOW });
+  assert.ok(ok.startsWith('```text\nUPSTREAM-WATCH a#1 stale 2026-01-01\nchecked-at 2026-09-26T23:00:00Z\n```\n\n- `a#1` has had no upstream activity'), ok);
+  const partial = renderComment({ events, fetchErrors: [{ id: 'b#2', error: 'HTTP 502' }], since: '2026-09-20T14:00:05Z', now: NOW });
+  assert.match(partial, /\nchecked-at 2026-09-20T14:00:05Z\n```/);
+  assert.match(partial, /Could not check `b#2`; the next run checks again from 2026-09-20T14:00:05Z\./);
+  assert.equal(renderComment({ events: [], fetchErrors: [], since: 'x', now: NOW }), '');
+});
+
+test('comment reads the ledger, drops recorded lines and prints the body to post', async () => {
+  await withRegistryFile([entry('ruvnet/ruflo#3153', { relation: 'commented' })], async (file) => {
+    const first = capture();
+    await main(['check', '--since', '2026-09-03T00:00:00Z', '--registry', file], { fetcher: fixtureFetcher(), stdout: first.stream, stderr: capture().stream, now: NOW });
+    const lines = first.text().trim().split('\n');
+    assert.ok(lines.length >= 1 && lines.every((line) => line.startsWith('UPSTREAM-WATCH ')), lines.join('\n'));
+    // Ours: an older start and no lines. A stranger: every line and a later
+    // start, which must change neither the start nor what is posted.
+    const comments = [
+      ledgerComment('github-actions[bot]', '```text\nchecked-at 2026-09-03T00:00:00Z\n```'),
+      ledgerComment('mallory', `\`\`\`text\n${lines.join('\n')}\nchecked-at 2026-09-26T22:59:00Z\n\`\`\``),
+    ];
+    const out = capture();
+    const code = await main(['comment', '--json', '--registry', file], { fetcher: withLedger(comments), stdout: out.stream, stderr: capture().stream, now: NOW });
+    assert.equal(code, 0);
+    const result = JSON.parse(out.text());
+    assert.equal(result.since, '2026-09-03T00:00:00Z');
+    assert.equal(result.checkedAt, '2026-09-26T23:00:00Z');
+    assert.deepEqual([result.post, result.blind], [true, false]);
+    for (const line of lines) assert.ok(result.body.includes(line), line);
+    // A line our own ledger already holds is not posted again.
+    const recorded = [ledgerComment('pacphi', `\`\`\`text\n${lines.join('\n')}\nchecked-at 2026-09-03T00:00:00Z\n\`\`\``)];
+    const again = capture();
+    await main(['comment', '--json', '--registry', file], { fetcher: withLedger(recorded), stdout: again.stream, stderr: capture().stream, now: NOW });
+    assert.deepEqual([JSON.parse(again.text()).post, JSON.parse(again.text()).body], [false, '']);
+    const text = capture();
+    await main(['comment', '--registry', file], { fetcher: withLedger(comments), stdout: text.stream, stderr: capture().stream, now: NOW });
+    assert.equal(text.text(), result.body);
+  });
+});
+
+test('comment prints nothing on a quiet day and exits 3 when blind', async () => {
+  await withRegistryFile([entry('ruvnet/ruflo#3153', { relation: 'commented' })], async (file) => {
+    const quiet = capture();
+    await main(['comment', '--json', '--registry', file], { fetcher: withLedger([ledgerComment('pacphi', 'checked-at 2026-09-26T22:00:00Z')]), stdout: quiet.stream, stderr: capture().stream, now: NOW });
+    const result = JSON.parse(quiet.text());
+    assert.deepEqual([result.post, result.body, result.dispatch], [false, '', []]);
+    const blind = { ...withLedger([]), thread: async () => { throw new Error('HTTP 403'); } };
+    const err = capture();
+    assert.equal(await main(['comment', '--registry', file], { fetcher: blind, stdout: capture().stream, stderr: err.stream, now: NOW }), 3);
+    assert.match(err.text(), /Could not check ruvnet\/ruflo#3153/);
+    const offline = withLedger([], fixtureFetcher({ authenticated: false }));
+    assert.equal(await main(['comment', '--registry', file], { fetcher: offline, stdout: capture().stream, stderr: capture().stream, now: NOW }), 3);
+    const noLedger = { ...fixtureFetcher(), comments: async () => { throw new Error('HTTP 404'); } };
+    const failed = capture();
+    assert.equal(await main(['comment', '--registry', file], { fetcher: noLedger, stdout: failed.stream, stderr: capture().stream, now: NOW }), 3, 'without the ledger nothing can be deduplicated');
+    assert.equal(failed.text(), '');
+  });
+});
+
+test('comment lists the dispatch branches of released lines', async () => {
+  const release = { channel: 'npm', name: 'agentic-qe', minVersion: '3.13.10' };
+  await withRegistryFile([entry('proffesor-for-testing/agentic-qe#617', { doneWhen: { state: 'closed-completed', release } })], async (file) => {
+    const out = capture();
+    await main(['comment', '--json', '--registry', file], { fetcher: withLedger([]), stdout: out.stream, stderr: capture().stream, now: NOW });
+    const result = JSON.parse(out.text());
+    assert.deepEqual(result.dispatch, ['upstream/proffesor-for-testing-agentic-qe-617']);
+    assert.match(result.body, /dispatch it on branch `upstream\/proffesor-for-testing-agentic-qe-617`\./);
+    // b4b-adversarial M3: once the line is recorded (the post landed but the
+    // label step failed), later runs still signal it; the routine skips work done.
+    const released = result.events.find((event) => event.event === 'released').line;
+    const again = capture();
+    await main(['comment', '--json', '--registry', file], { fetcher: withLedger([ledgerComment('github-actions[bot]', `\`\`\`text\n${released}\nchecked-at 2026-09-26T22:00:00Z\n\`\`\``)]), stdout: again.stream, stderr: capture().stream, now: NOW });
+    const later = JSON.parse(again.text());
+    assert.ok(!later.body.includes(released), 'the recorded line is not posted again');
+    assert.deepEqual(later.dispatch, ['upstream/proffesor-for-testing-agentic-qe-617']);
+  });
+});
+
+// b4b-adversarial M1: a token that reads only the ledger's own repository (the
+// cloud session's failure) still reads our tracking issues; that run is blind.
+test('a run that reads only the ledger repository is blind', async () => {
+  const own = entry('pacphi/agentic-kit#240', { relation: 'tracking', dependency: null, tracks: ['ruvnet/ruflo#3153'], doneWhen: { state: 'closed-completed', release: null } });
+  const scoped = { ...withLedger([]), thread: async (id) => {
+    if (id.startsWith('pacphi/agentic-kit#')) return { issue: { number: 240, state: 'open', title: 't', user: { login: 'pacphi' }, created_at: '2026-09-20T00:00:00Z', updated_at: '2026-09-20T00:00:00Z', comments: 0 }, comments: [] };
+    throw new Error('HTTP 403');
+  } };
+  await withRegistryFile([own, entry('ruvnet/ruflo#3153', { relation: 'commented' })], async (file) => {
+    const out = capture();
+    assert.equal(await main(['comment', '--json', '--registry', file], { fetcher: scoped, stdout: out.stream, stderr: capture().stream, now: NOW }), 3);
+    const result = JSON.parse(out.text());
+    assert.equal(result.registry, undefined, 'the registry is valid');
+    assert.equal(result.blind, true);
+  });
+});
+
+// b4b-adversarial m2: the workflow reads the same JSON shape on every failure.
+test('comment on an invalid registry is blind with the usual JSON shape', async () => {
+  await withRegistryFile([entry('ruvnet/ruflo#3153', { status: 'done' })], async (file) => {
+    const out = capture();
+    assert.equal(await main(['comment', '--json', '--registry', file], { fetcher: withLedger([]), stdout: out.stream, stderr: capture().stream, now: NOW }), 3);
+    const result = JSON.parse(out.text());
+    assert.deepEqual([result.blind, result.post, result.body, result.dispatch, result.events, result.fetchErrors], [true, false, '', [], [], []]);
+    assert.match(result.error, /registry/);
+  });
+});
+
+// b4b-adversarial M2: a failed read of Ruflo's release dates leaves the
+// support-window floor unknown. The workflow dispatches without a human, so
+// an unknown floor holds every Ruflo-carried fix instead of releasing it.
+test('an unknown support-window floor holds Ruflo-carried fixes', async () => {
+  const confirmation = { changes: [change], checks: [{ version: '3.46.0', ref: 'v3.46.0', contained: true }] };
+  const registry = registryWith([entry('ruvnet/ruflo#3194')]);
+  const liveMap = new Map([['ruvnet/ruflo#3194', { thread: closedThread('ruvnet/ruflo#3194', '2026-09-26T22:31:23Z'), release: rufloFacts, confirmation }]]);
+  const report = buildReport(registry, liveMap, { now: NOW, supportFloor: null, floorUnknown: true });
+  const held = report.entries[0];
+  assert.ok(held.groups.includes('waiting-for-window'), held.groups.join(','));
+  assert.equal(held.dispatch, null);
+  assert.deepEqual(held.window, { floor: null, needs: '3.46.0' });
+  assert.match(renderReport(report), /the oldest supported Ruflo could not be read/);
+  const line = ledgerEvents(report, registry, { since: '2026-09-26T00:00:00Z' }).find((event) => event.event === 'released').line;
+  assert.doesNotMatch(line, /branch=/);
+  // No window policy at all still holds nothing.
+  assert.ok(!buildReport(registry, liveMap, { now: NOW }).entries[0].groups.includes('waiting-for-window'));
+  // The script marks the floor unknown when Ruflo's release dates cannot be read.
+  const failing = { ...fixtureFetcher(), release: async ({ name }) => { if (name === 'ruflo') throw new Error('npm view ruflo failed: ETIMEDOUT'); return releaseFacts('npm', npm[name]); } };
+  await withRegistryFile([entry('ruvnet/ruflo#3153', { relation: 'commented' })], async (file) => {
+    const out = capture();
+    await main(['report', '--json', '--registry', file], { fetcher: failing, stdout: out.stream, stderr: capture().stream, now: NOW });
+    assert.deepEqual(JSON.parse(out.text()).supportWindow, { floor: null, unknown: true });
+  });
+});
+
+// b4b-adversarial m1: plain `owner/repo#n` or `#n` in the sentences would
+// autolink (a bare #3421 points at this repository) and mention upstream threads.
+test('the sentences keep thread ids and pull request numbers out of autolinks', () => {
+  const text = sentence({ id: 'ruvnet/ruflo#3194', event: 'released', date: '2026-09-26', fields: { version: '3.46.0', pr: 3421, branch: 'upstream/ruvnet-ruflo-3194' } });
+  assert.equal(text, 'The fix for `ruvnet/ruflo#3194` (pull request `#3421`) is released in 3.46.0 (2026-09-26); dispatch it on branch `upstream/ruvnet-ruflo-3194`.');
+  const events = [{ id: 'a/b#1', event: 'stale', date: '2026-01-01', fields: {}, line: 'UPSTREAM-WATCH a/b#1 stale 2026-01-01' }];
+  const body = renderComment({ events, fetchErrors: [{ id: 'c/d#2', error: 'x' }], since: '2026-09-20T00:00:00Z', now: NOW });
+  const prose = body.slice(body.indexOf('```\n\n') + 5);
+  assert.doesNotMatch(prose.replace(/`[^`]*`/g, ''), /#\d/, prose);
+});
+
+// b4b-adversarial m7: GitHub rejects a comment over 65,536 characters; a body
+// that never fits would fail every day. Lines that do not fit wait for the next run.
+test('a comment too long for GitHub posts what fits and keeps the start', () => {
+  const events = Array.from({ length: 3000 }, (_, index) => ({ id: `owner/repo#${index + 1}`, event: 'stale', date: '2026-01-01', fields: {}, line: `UPSTREAM-WATCH owner/repo#${index + 1} stale 2026-01-01` }));
+  const body = renderComment({ events, fetchErrors: [], since: '2026-09-20T00:00:00Z', now: NOW });
+  assert.ok(body.length <= 60_000, String(body.length));
+  assert.match(body, /\nchecked-at 2026-09-20T00:00:00Z\n```/, 'the next run reads the same window');
+  assert.match(body, /\d+ more lines? (is|are) posted by the next run\./);
+  assert.ok(body.includes(events[0].line) && !body.includes(events.at(-1).line));
+});
+
+// b4b-adversarial m4: a mistyped future checked-at would silence every reply
+// until that date.
+test('a checked-at in the future is ignored', () => {
+  const ledger = readLedger([ledgerComment('pacphi', 'checked-at 2027-01-01T00:00:00Z\nchecked-at 2026-09-20T00:00:00Z')], ['pacphi'], NOW);
+  assert.equal(ledger.since, '2026-09-20T00:00:00Z');
 });

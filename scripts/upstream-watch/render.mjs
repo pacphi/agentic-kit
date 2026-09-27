@@ -23,7 +23,9 @@ function detail(key, item) {
       ];
     case 'waiting-for-window':
       return [
-        item.window.floorBundles
+        !item.window.floor
+          ? `fixed in ${item.window.needs}; the oldest supported Ruflo could not be read, so ak keeps the workaround until a check reads the support window`
+          : item.window.floorBundles
           ? `fixed in ${item.window.needs}; the oldest supported Ruflo, ${item.window.floor}, bundles ${item.window.floorBundles}, so ak keeps the workaround until the support window's floor bundles the fix`
           : `fixed in ${item.window.needs}; the oldest supported Ruflo is ${item.window.floor}, so ak keeps the workaround until the support window's floor reaches ${item.window.needs}`,
         `change: ${item.adjustment}`,
@@ -86,6 +88,10 @@ export function renderReport(report) {
   return `${lines.join('\n')}\n`;
 }
 
-export function renderEvents(events) {
-  return events.length ? `${events.map((event) => event.line).join('\n')}\n` : 'No new upstream events.\n';
+// A quiet day is reported only when every read succeeded: "no events" from a
+// run that could not read a thread says nothing about that thread.
+export function renderEvents(events, fetchErrors = []) {
+  if (events.length) return `${events.map((event) => event.line).join('\n')}\n`;
+  if (!fetchErrors.length) return 'No new upstream events.\n';
+  return `No new events from the threads checked; could not check ${fetchErrors.length}: ${fetchErrors.map((item) => item.id).join(', ')}.\n`;
 }

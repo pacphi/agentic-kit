@@ -33,7 +33,7 @@ contradictory meaning.
 | Remediation proposal | Read-only action description classified as automatic-eligible, approval-required, prohibited, or upstream-required |
 | Upstream constraint | Versioned dependency issue, affected range, bounded local strategy, verification date, and objective sunset condition |
 | Watched upstream thread | Upstream issue or pull request in the upstream registry's watch list: what done means, the ak adjustment it unblocks, a lifecycle status from watching to retired, and dated history |
-| Upstream watch ledger | The pinned, locked "Upstream watch" issue (pacphi/agentic-kit#243); each event is one `UPSTREAM-WATCH <id> <event> <date>` line, only the routine's and our logins' comments count, and an exact line the routine recorded is never acted on twice |
+| Upstream watch ledger | The pinned, locked "Upstream watch" issue (pacphi/agentic-kit#243); each event is one `UPSTREAM-WATCH <id> <event> <date>` line, posted daily by the upstream watch workflow; only comments by the ledger authors (`watchPolicy.ledger.authors`) count, and an exact line already recorded is never acted on twice |
 | Confirmed release | A published version whose tag contains the merged pull request or commit that fixed a watched thread (or the recorded first fixed version); only a confirmed release is dispatched |
 | Reviewed thread | A watch entry with a dated `reviewed` history line: its comments up to that day were read and need no reply |
 | Upstream dispatch | Draft pull request on `upstream/<id>` that makes a released thread's adjustment and passes its dependency's removal proof; the watcher never merges it |

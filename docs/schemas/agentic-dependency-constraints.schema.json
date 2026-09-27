@@ -31,12 +31,18 @@
         "ledger": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["repo", "issue", "issueTitle", "sentinel"],
+          "required": ["repo", "issue", "issueTitle", "sentinel", "authors"],
           "properties": {
             "repo": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
             "issue": { "type": "integer", "minimum": 1 },
             "issueTitle": { "type": "string", "minLength": 1 },
-            "sentinel": { "type": "string", "pattern": "^[A-Z][A-Z-]+$" }
+            "sentinel": { "type": "string", "pattern": "^[A-Z][A-Z-]+$" },
+            "authors": {
+              "description": "GitHub logins whose ledger comments count; the workflow comments as github-actions[bot]. Separate from ours, which decides whose upstream comment is our last word.",
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string", "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\\[bot\\])?$" }
+            }
           }
         },
         "dispatch": {

@@ -103,3 +103,13 @@ test('the runner refuses a temp root inside a git repository', (t) => {
   assert.equal(r.status, 2);
   assert.match(r.stderr, /inside the git repository/);
 });
+
+// Tests assert on plain text. A developer shell's FORCE_COLOR (Claude Code sets
+// FORCE_COLOR=3) colours console.log even into a pipe and, with NO_COLOR, makes
+// Node print a warning into captured output; the suite runs without it.
+test('the suite runs without the shell FORCE_COLOR', (t) => {
+  const { home, repo, env } = sandbox(t);
+  const probe = stub(home, 'colour.mjs', `process.exit(process.env.FORCE_COLOR === undefined ? 0 : 7);`);
+  const r = spawnSync(process.execPath, [RUNNER, 'exec', '--repo', repo, '--', probe], { env: { ...env, FORCE_COLOR: '3' }, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+});

@@ -1163,17 +1163,20 @@ Behavior that differs from, or goes beyond, the plan text.
   which whole-rollout exclusion drops. The maintainer decided on 2026-09-27 to count them in
   Branch 8 (decision 12 below).
 - **Left open by Branch 4.**
-  - The daily routine is not created. It is created after Branch 4 reaches `main` (B4-G2),
-    from the prompt in [UPSTREAM-WATCH.md](../UPSTREAM-WATCH.md).
+  - The daily routine was created on 2026-09-27 and disabled after its first run was blind;
+    decision 14 moved the watch to a scheduled GitHub Actions workflow and left the routine only
+    dispatch. It is re-enabled with its dispatch-only prompt and label trigger after Branch 4b
+    reaches `main` ([UPSTREAM-WATCH.md](../UPSTREAM-WATCH.md)).
   - The dispatch rehearsal on agentic-qe#617 (a draft pull request) is deferred to after the
-    routine exists.
+    dispatch routine is re-enabled.
   - pacphi/agentic-kit#240 stays open until a released agentic-qe fixes agentic-qe#574 and ak
     removes the busy rule.
-  - The draft replies for #213, #240, openai/codex#16045 and ruvnet/ruflo#952 are not posted.
-    Each needs the maintainer's go-ahead.
+  - Replies posted on 2026-09-27 with approval: the registry link on #240 and status questions
+    on openai/codex#16045 and ruvnet/ruflo#952; #213 needed no second comment.
   - Five newly registered threads are stale and not yet triaged: ruvnet/ruflo#2356 and #420, and
     agentic-qe#528, #532 and #535.
-  - The three released Ruflo items (ruvnet/ruflo#3167, #3194, #3415) wait for dispatch.
+  - Of the three released Ruflo items, Branch 3 adopted ruvnet/ruflo#3167 and #3415;
+    ruvnet/ruflo#3194 waits for the support window's floor to reach 3.46.0.
 - **The dashboard server's hermeticity guard has a gap.** It fires only when a maintenance service
   is injected without a control root. A caller that injects only a System collector still gets the
   default maintenance service and management facade, and both write real state. This product-side
@@ -2166,3 +2169,47 @@ the hand fix under "needs your action" without affecting the exit code. B: keep 
 and accept the failing exit code until the user rewrites the entry.
 
 **Recommendation: A. Choice: A.** No upstream fix is involved; both rules are ak's own.
+
+### Decision 14 — the upstream watch runs on GitHub Actions (2026-09-27)
+
+**The situation.** After Branch 4 merged, the daily cloud routine ran the watch: it read the
+ledger comments, ran `check`, and wrote the ledger comment and its sentences itself.
+
+**The problem.** Its first run (session `cse_01Xb8wcBL8h335pxUeQ9sbnQ`) was blind. A cloud
+session reaches only the repositories attached to it, so every upstream read returned HTTP 403;
+the sandbox had no `gh`, and apt's `gh` 2.45 lacks the `--slurp` flag the script used; `gh auth
+status` called the session's token invalid while `gh api` worked with it. The script still
+printed "No new upstream events.", the phrase the routine's prompt treats as "stop". The routine
+stopped safely, but only because the model noticed.
+
+**What the user sees.** A watch that reports a quiet day when it read nothing.
+
+**What should be true.** The watch reads every public upstream thread, never calls a failed day
+quiet, and posts a ledger whose text does not depend on a model.
+
+**The choices.** A: run the watch as a scheduled GitHub Actions workflow in this repository (its
+token reads public repositories and can comment on the ledger issue), move the comment's text into
+the script, and keep the cloud routine only for dispatch, which needs just this repository. B:
+give the routine broader repository access and a newer `gh`, and keep it as the watcher.
+
+**Recommendation: A. Choice: A.** Branch 4b (`feat/upstream-watch-actions`) built it:
+`comment` renders the ledger comment and exits 3 when blind; `check` names what it could not
+check instead of reporting a quiet day; `gh` is probed with `gh api rate_limit` and comment
+pages are read without `--slurp`; the ledger's writers are `watchPolicy.ledger.authors`
+(the maintainer and `github-actions[bot]`), apart from `watchPolicy.ours`, which decides whose
+upstream comment is our last word. The routine `trig_01LmNVKJ4K86joHPvvPtc7yx` stays disabled
+until its dispatch-only prompt and trigger are set.
+
+The maintainer settled three details on 2026-09-27:
+
+- **4b-A schedule.** The workflow ships with its daily schedule (`0 14 * * *`) and a manual run;
+  the first manual run after merge proves it can comment on the locked ledger issue.
+- **4b-B a run with no new event and failed reads.** It posts nothing. The job fails only when the
+  run is blind (`gh` cannot reach GitHub, the ledger cannot be read, or no watched thread could
+  be); a partial failure shows in the job summary, and `checked-at` does not advance.
+- **4b-C how dispatch starts.** The workflow re-applies the `upstream-dispatch` label on the ledger
+  issue only when a `released` line carries `branch=`; a GitHub trigger on that label fires the
+  routine, so the routine runs only when there is work.
+
+Not yet proven: that `github-actions[bot]` can comment on the locked issue (first manual run), and
+that a label applied with the workflow token reaches the routine's trigger (first dispatch).

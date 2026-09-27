@@ -1,0 +1,120 @@
+name: upstream-watch
+
+# The upstream watch (docs/UPSTREAM-WATCH.md, decision 14). The script decides
+# everything: which ledger comments count, where the check starts, and the
+# comment's text. This workflow only posts that text on the ledger issue and
+# labels the issue when a released fix is ready to dispatch, which fires the
+# dispatch routine. No model runs here.
+
+on:
+  schedule:
+    - cron: '0 14 * * *'
+  workflow_dispatch:
+    inputs:
+      post:
+        description: Post the ledger comment (off = preview in the job summary only)
+        type: boolean
+        default: true
+  pull_request:
+    paths:
+      - scripts/upstream-watch.mjs
+      - scripts/upstream-watch/**
+      - src/lib/hook-audit/**
+      - .github/workflows/upstream-watch.yml
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: src/lib/hook-audit/agentic-dependency-constraints.json
+  DISPATCH_LABEL: upstream-dispatch
+
+jobs:
+  # Read-only proof on a pull request that the workflow token reads the
+  # upstream threads and the ledger. Never posts.
+  preview:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Check (read-only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          node scripts/upstream-watch.mjs comment --json > watch.json 2> errors.txt
+          code=$?
+          set -e
+          {
+            echo "## Upstream watch preview (exit $code)"
+            jq -r '"events \(.events | length), could not check \(.fetchErrors | length), blind \(.blind), would post \(.post), dispatch \(.dispatch | join(", "))"' watch.json
+            echo; echo '```text'; cat errors.txt; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$code"
+
+  watch:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+    concurrency:
+      group: upstream-watch
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      POST: ${{ github.event_name == 'schedule' || inputs.post }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Check
+        id: check
+        run: |
+          set +e
+          node scripts/upstream-watch.mjs comment --json > watch.json 2> errors.txt
+          code=$?
+          set -e
+          {
+            echo "## Upstream watch (exit $code)"
+            jq -r '"since \(.since) (\(.sinceSource)), events \(.events | length), could not check \(.fetchErrors | length), blind \(.blind), post \(.post), dispatch \(.dispatch | join(", "))"' watch.json
+            echo; echo '```text'; cat errors.txt; echo '```'
+            jq -r '.body' watch.json
+          } >> "$GITHUB_STEP_SUMMARY"
+          # 3 = blind: gh unusable, the ledger unreadable, or no thread read.
+          exit "$code"
+      - name: Post the ledger comment
+        if: env.POST == 'true'
+        run: |
+          [ "$(jq -r '.post' watch.json)" = true ] || { echo 'Nothing to post.'; exit 0; }
+          issue=$(jq -r '.watchPolicy.ledger.issue' "$REGISTRY")
+          repo=$(jq -r '.watchPolicy.ledger.repo' "$REGISTRY")
+          jq -r '.body' watch.json > body.md
+          test -s body.md
+          [ "$(head -n 1 body.md)" = '```text' ]
+          grep -q '^checked-at ' body.md
+          url=$(gh issue comment "$issue" --repo "$repo" --body-file body.md)
+          echo "Posted $url"
+          id=${url##*issuecomment-}
+          length=$(gh api "repos/$repo/issues/comments/$id" --jq '.body | length')
+          echo "Posted length $length (file $(wc -c < body.md))"
+          [ "$length" -gt 0 ]
+      - name: Signal the dispatch routine
+        if: env.POST == 'true'
+        run: |
+          [ "$(jq -r '.dispatch | length' watch.json)" -gt 0 ] || { echo 'Nothing to dispatch.'; exit 0; }
+          issue=$(jq -r '.watchPolicy.ledger.issue' "$REGISTRY")
+          repo=$(jq -r '.watchPolicy.ledger.repo' "$REGISTRY")
+          gh label create "$DISPATCH_LABEL" --repo "$repo" --color 5319e7 \
+            --description 'The upstream watch has a released fix to dispatch' --force
+          # Remove, then add: a label already present would fire no new event.
+          gh issue edit "$issue" --repo "$repo" --remove-label "$DISPATCH_LABEL" || true
+          gh issue edit "$issue" --repo "$repo" --add-label "$DISPATCH_LABEL"
