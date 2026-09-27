@@ -2,11 +2,33 @@
 // on disk, drift via GitHub releases, TTL-cached like `self`)
 import {
   activeHeldRefresh, drift as ruvnetBrainDrift, nightlyAgentPresent as rbNightlyPresent,
-  NIGHTLY_LABEL as RB_NIGHTLY_LABEL,
+  NIGHTLY_LABEL as RB_NIGHTLY_LABEL, legacySnapshotBytes,
 } from '../../../lib/ruvnet-brain.mjs';
+import { BRAIN_RECLAIM_STUCK } from '../../../lib/heal.mjs';
 import { row } from '../row.mjs';
 import { inspectClaudeBrainPlugin } from '../../../lib/ruvnet-brain-plugin.mjs';
 import { releaseObservationLabel } from '../../../lib/versions.mjs';
+
+/** ADR-0061: one sentence naming the legacy-snapshot cost of a reclaim-stuck
+ *  hold, best-effort — never lets a formatting/fs edge case break the row. */
+function legacySnapshotNote() {
+  try {
+    const s = legacySnapshotBytes();
+    if (!s.count) return '';
+    const gb = s.bytes != null ? ` (~${(s.bytes / 1024 ** 3).toFixed(1)}GB${s.exhausted ? '+' : ''})` : '';
+    return ` and does not free ${s.count} legacy snapshot dir(s)${gb} still on disk`;
+  } catch {
+    return '';
+  }
+}
+
+/** ADR-0061: --update can never clear this refusal (the legacy snapshots it is
+ *  stuck on are never touched by --update); --uninstall + reinstall verified to. */
+function reclaimStuckFix() {
+  return '`npx ruvnet-brain --uninstall` (removes only the KB bundle) then `ak sync` reinstalls fresh '
+    + `and clears the version block${legacySnapshotNote()} — see upstream stuinfla/ruvnet-brain#335; `
+    + 'or set "ruvnetBrain": false in kit.json to stop ak managing the Brain';
+}
 
 // What a user can do about an unreviewed Brain hook change. ak cannot review a
 // hook for them, so the options are a manual fix, never a sync one (P5, Branch 0
@@ -66,11 +88,14 @@ export function brainReleaseRow(b) {
     // re-downloads the bundle, so sync does not act on the row until either
     // release changes; the options are the user's, as a manual fix.
     const have = b.installedRelease ? `release v${b.installedRelease}` : 'the existing unversioned install';
+    const fix = BRAIN_RECLAIM_STUCK.test(held.detail)
+      ? reclaimStuckFix()
+      : 'fix the cause, then run `npx ruvnet-brain --update`; or set "ruvnetBrain": false in kit.json '
+        + 'to stop ak managing the Brain';
     return row('ruvnet-brain', 'warn',
       `ruvnet-brain ${have} retained; the refresh to v${b.latest} was refused (${held.detail}). `
       + 'ak sync will not retry it until either release changes',
-    'fix the cause, then run `npx ruvnet-brain --update`; or set "ruvnetBrain": false in kit.json '
-      + 'to stop ak managing the Brain', { repair: 'manual' });
+      fix, { repair: 'manual' });
   }
   if (b.outdated) {
     const have = b.installedRelease ? `release v${b.installedRelease}` : 'present (unversioned install)';
