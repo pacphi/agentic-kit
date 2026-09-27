@@ -31,7 +31,9 @@ import { formatLiveCheckAge as ago } from '../../../lib/live-check-evidence.mjs'
 import { pendingDeferral } from '../../../lib/memory-maintenance.mjs';
 import * as paths from '../../../lib/paths.mjs';
 import { rufloProjectRoot } from '../../../lib/ruflo-components/apply.mjs';
-import { DAEMON_CONFIG_RELATIVE, daemonConfigHeld, daemonDrift } from '../../../lib/ruflo-daemon-config.mjs';
+import {
+  DAEMON_CONFIG_RELATIVE, MEMORY_FLOOR_KEY, daemonConfigHeld, daemonDrift,
+} from '../../../lib/ruflo-daemon-config.mjs';
 import { memoryProjectRoot } from '../../../lib/ruflo-memory.mjs';
 import { installedRoutingVersion } from '../../../lib/ruflo-memory-contract.mjs';
 import { installedVersion } from '../../../lib/versions.mjs';
@@ -60,8 +62,10 @@ const THRESHOLD_KEY = (reason) => (/^CPU load/.test(reason)
   ? 'daemon.resourceThresholds.maxCpuLoad' : 'daemon.resourceThresholds.minFreeMemoryPercent');
 
 /** A warning when this project's live daemon deferred backup or distillation
- *  and the job has not run since. */
-function deferralRow(root, { cwd, now, platform }) {
+ *  and the job has not run since. Sync sets the macOS threshold only in a
+ *  Ruflo repository whose config.json ak can manage for that key; otherwise
+ *  a sync would change nothing and only restart the daemon. */
+function deferralRow(root, { now, platform, ruflo }) {
   if (!root || !projectDaemonAlive(root)) return null;
   const deferred = pendingDeferral(root, { now });
   if (!deferred) return null;
@@ -69,7 +73,8 @@ function deferralRow(root, { cwd, now, platform }) {
   const message = `Ruflo's daemon is running but deferred ${JOB[deferred.worker]} ${ago(deferred.ageMs)}: ${deferred.reason}`
     + (macMemory ? ' (macOS free-memory gate, ruvnet/ruflo#2935)' : '');
   // Sync manages daemon settings only in a Ruflo repository (applyRufloDaemon).
-  return macMemory && rufloProjectRoot(cwd)
+  const floorHeld = ruflo.held?.entries.some((e) => e.key === MEMORY_FLOOR_KEY);
+  return macMemory && ruflo.root && !floorHeld
     ? row('daemons', 'warn', message, "sync sets Ruflo's macOS memory threshold")
     : row('daemons', 'warn', message, `lower "${THRESHOLD_KEY(deferred.reason)}" (a flat key) in .claude-flow/config.json, `
       + 'then restart the daemon with `ruflo daemon stop` and `ruflo daemon start`', { repair: 'manual' });
@@ -90,11 +95,17 @@ export function heldRow(held) {
       + 'so ak leaves it as is', `set ${want} (flat keys) in ${file} yourself, ${RESTART}`, { repair: 'manual' });
 }
 
-function driftRows(cwd, { loadConfig, rufloVersion, platform }) {
+/** The Ruflo repository around `cwd`, kit.json, and the keys its config.json
+ *  keeps from ak (read once for the deferral and drift rows). */
+function rufloContext(cwd, { loadConfig, rufloVersion, platform }) {
   const root = rufloProjectRoot(cwd);
-  if (!root) return [];
+  if (!root) return { root: null, cfg: null, held: null };
   const cfg = loadConfig();
-  const held = daemonConfigHeld(root, { cfg, rufloVersion, platform });
+  return { root, cfg, held: daemonConfigHeld(root, { cfg, rufloVersion, platform }) };
+}
+
+function driftRows({ root, cfg, held }, { rufloVersion, platform }) {
+  if (!root) return [];
   const parts = daemonDrift(root, { cfg, rufloVersion, platform });
   return [held && heldRow(held), parts && row('daemons', 'warn', `ak-managed daemon settings differ from what Ruflo ${rufloVersion ?? '(version unknown)'} `
     + `needs: ${parts.join('; ')}`, "sync applies ak's Ruflo daemon settings")].filter(Boolean);
@@ -121,9 +132,10 @@ export default {
         rows.push(row('daemons', 'ok',
           daemons.length ? `${daemons.length} running (one per active project is expected)` : 'none running'));
       }
-      const deferral = deferralRow(root, { cwd, now, platform });
+      const ruflo = rufloContext(cwd, { loadConfig, rufloVersion, platform });
+      const deferral = deferralRow(root, { now, platform, ruflo });
       if (deferral) rows.push(deferral);
-      rows.push(...driftRows(cwd, { loadConfig, rufloVersion, platform }));
+      rows.push(...driftRows(ruflo, { rufloVersion, platform }));
     } catch (e) {
       rows.push(row('daemons', 'warn', `daemon check unavailable: ${e.message}`));
     }

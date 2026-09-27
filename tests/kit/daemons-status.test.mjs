@@ -94,7 +94,7 @@ const MEMORY_LOW = [
 
 test('on macOS a live daemon deferring distillation for low memory warns, and sync sets the threshold', async (t) => {
   const cwd = liveDaemonDeferring(t, MEMORY_LOW);
-  const rows = await collect(cwd, { listDaemons: own(cwd), now: NOW, platform: 'darwin' });
+  const rows = await collect(cwd, { listDaemons: own(cwd), now: NOW, platform: 'darwin', loadConfig: kit(), rufloVersion: '3.46.1' });
   assert.equal(rows[0].level, 'ok', 'the running count stays');
   const row = deferral(rows);
   assert.deepEqual(row, {
@@ -210,4 +210,18 @@ test('a config.json is not reported when ak wants no keys here', async (t) => {
   const cwd = rufloRepo(t);
   fs.writeFileSync(path.join(cwd, '.claude-flow', 'config.json'), '{');
   assert.equal(held(await collect(cwd, { loadConfig: kit(), rufloVersion: '3.46.1', platform: 'linux' })), undefined);
+});
+
+test('on macOS a deferral under a user-managed config.json is a manual step: sync would only restart the daemon', async (t) => {
+  for (const content of ['{', JSON.stringify({ 'daemon.resourceThresholds.minFreeMemoryPercent': 2 })]) {
+    const cwd = liveDaemonDeferring(t, MEMORY_LOW);
+    fs.writeFileSync(path.join(cwd, '.claude-flow', 'config.json'), content);
+    const rows = await collect(cwd, { listDaemons: own(cwd), now: NOW, platform: 'darwin', loadConfig: kit(), rufloVersion: '3.46.1' });
+    const row = deferral(rows);
+    assert.equal(row.repair, 'manual', content);
+    assert.match(row.message, /ruvnet\/ruflo#2935/);
+    assert.match(row.fix, /daemon\.resourceThresholds\.minFreeMemoryPercent/);
+    assert.match(row.fix, /\.claude-flow\/config\.json/);
+    assert.equal(fs.readFileSync(path.join(cwd, '.claude-flow', 'config.json'), 'utf8'), content, 'status writes nothing');
+  }
 });

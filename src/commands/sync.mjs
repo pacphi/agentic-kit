@@ -448,7 +448,11 @@ export const SYNC_STEPS = [
       saveKitConfig(ctx.cfg);
       const { config, autostart } = applied.result;
       if (applied.result.changed) ok(`ruflo daemon settings: config ${config}, start-on-use ${autostart}`);
-      if (config === 'user-managed') warn('.claude-flow/config.json is not ak-managed here (unreadable, or a key holds your own value); left as is');
+      const { held } = applied.result;
+      if (held) {
+        warn(`.claude-flow/config.json is not ak-managed here (${held.invalid ? 'unreadable or not a JSON object' : 'a key holds your own value'}); `
+          + `left as is, and the daemon is not restarted for ${held.entries.map((e) => e.key).join(', ')}`);
+      }
       if (applied.restarted) ok('ruflo daemon restarted so it reads its settings');
     },
   },

@@ -220,7 +220,7 @@ export function daemonIntent(cfg) {
  * Sync: converge the Ruflo project around `cwd` (a git repository root with
  * .claude-flow/, the same gate as project-scope Ruflo components) and restart
  * its live daemon when it runs with settings it read before this change, or is
- * still deferring work for low memory on macOS. A daemon that is not running
+ * still deferring work for low memory on macOS under a floor ak manages. A daemon that is not running
  * is left for Ruflo's start-on-use. Returns null outside a Ruflo project.
  * @param {string} cwd
  * @param {{cfg: any, rufloVersion?: (string|null), platform?: string, runner?: typeof run,
@@ -234,7 +234,11 @@ export async function applyRufloDaemon(cwd, {
   const intent = daemonIntent(cfg);
   const result = reconcileRufloDaemon(root, { rufloVersion, platform, receipts: intent.receipts, autoStart: intent.autoStart, dryRun });
   const configChanged = result.config === 'written' || result.config === 'removed';
-  const stillDeferring = platform === 'darwin' && /^Memory too low/.test(pendingDeferral(root)?.reason ?? '');
+  // A config.json that keeps the floor from ak (unreadable, or the user's own
+  // value) changed nothing a restart would pick up.
+  const floorHeld = result.held?.entries.some((e) => e.key === MEMORY_FLOOR_KEY) ?? false;
+  const stillDeferring = platform === 'darwin' && !floorHeld
+    && /^Memory too low/.test(pendingDeferral(root)?.reason ?? '');
   let restarted = false;
   if (!dryRun && (configChanged || stillDeferring) && alive(root)) {
     await runner('ruflo', ['daemon', 'stop'], { cwd: root, timeout: 60_000 });

@@ -260,3 +260,19 @@ test('a daemon that deferred once and has since run the job is not restarted', a
   assert.equal(r.restarted, false);
   assert.deepEqual(calls, []);
 });
+
+test('a daemon deferring under a user-managed config.json is not restarted: sync changed nothing it reads', async (t) => {
+  for (const content of ['{', JSON.stringify({ 'daemon.resourceThresholds.minFreeMemoryPercent': 2 })]) {
+    const root = rufloRepo(t);
+    fs.writeFileSync(configFile(root), content);
+    fs.mkdirSync(path.join(root, '.claude-flow', 'logs'));
+    fs.writeFileSync(path.join(root, '.claude-flow', 'logs', 'daemon.log'),
+      `[${new Date().toISOString()}] [INFO] Worker consolidate deferred: Memory too low: 3.9% free\n`);
+    const { calls, runner } = recorder();
+    const r = await applyRufloDaemon(root, { cfg: { rufloDaemon: { receipts: {} } }, rufloVersion: '3.46.1', platform: 'darwin', runner, alive: () => true });
+    assert.equal(r.result.config, 'user-managed', content);
+    assert.equal(r.restarted, false, content);
+    assert.deepEqual(calls, [], content);
+    assert.equal(fs.readFileSync(configFile(root), 'utf8'), content);
+  }
+});
