@@ -190,3 +190,13 @@ fixture.
 gives no project, host or origin, and discovery counts it in `importedExcluded`. The per-source
 labels from the imports ledger, Runtime attribution and §1, §2 and §4–§6 remain follow-on work
 (the audit record's Addendum 3).
+
+Three views already show the smaller project counts but do not yet say how many imported copies were
+set aside; §3's "each view reports how many it excluded" is still owed for them:
+
+- the Intelligence census line (`src/lib/dashboard/client/intelligence.mjs`, which prints
+  `everSeen`; the server's `readCensus` in `src/lib/dashboard-server.mjs` drops `importedExcluded`);
+- the System → Projects liner (`sysProjectsLinerHtml` in
+  `src/lib/dashboard/client/system-projects.mjs`);
+- the `ak system` text output (`renderProjects` in `src/commands/system.mjs`, which prints only the
+  count; `ak system --json` carries `importedExcluded`).
