@@ -25,6 +25,16 @@ import { aboutHostChip } from './host-readiness.mjs';
   //   versions  one package inside the shared "versions" subsystem, matched the
   //             same way, because that subsystem carries every managed package.
   //   subs      whole subsystems that belong to this component alone.
+  //   phrase    rows of one shared subsystem whose message carries a fixed
+  //             phrase. agentdb has no row of its own since ak retired its
+  //             standalone install: Ruflo bundles it, and the natives row about
+  //             that copy ("… agentdb location(s)": native, on the WASM
+  //             fallback, or missing) is the one status fact about it. The rest
+  //             of natives (agentic-qe's binding, Ruflo's memory runtime, ak's
+  //             install-edit receipts) is about other packages, and a pending
+  //             ruflo upgrade is not an agentdb problem, so neither joins.
+  //             natives.mjs agentdbLocationRow carries the phrase, and
+  //             tests/kit/about-agentdb-join.test.mjs holds the two together.
   // A component with NO entry here — or one whose rows are simply absent from
   // this payload — degrades to "state unknown". That is the honest reading: an
   // unjoined key is an unmeasured fact, never a satisfied one. The permission
@@ -35,7 +45,7 @@ import { aboutHostChip } from './host-readiness.mjs';
     "hosts.opencode":{host:"opencode"},
     "ruflo":{versions:"ruflo",subs:["ruflo-components"]},
     "agent-browser":{subs:["agent-browser"]},
-    "agentdb":{subs:["agentdb"]},
+    "agentdb":{phrase:{sub:"natives",text:"agentdb location"}},
     "deja-vu":{subs:["deja-vu"]},
     "agentic-qe":{subs:["aqe"],versions:"agentic-qe"},
     "security":{subs:["security"]},
@@ -62,6 +72,8 @@ import { aboutHostChip } from './host-readiness.mjs';
       if(join.host&&sub==="hosts"&&aboutLead(r.message,join.host))out.push(r);
       else if(join.versions&&sub==="versions"&&aboutLead(r.message,join.versions))out.push(r);
       else if(join.subs&&join.subs.indexOf(sub)>=0)out.push(r);
+      else if(join.phrase&&sub===join.phrase.sub
+        &&String(r.message||"").toLowerCase().indexOf(join.phrase.text)>=0)out.push(r);
     }
     return out;
   }

@@ -410,16 +410,19 @@ const hooksStub = ({ file, digest }) => async () => ({
 //     so the WORST of the pair has to drive the chip.
 //   · nothing emits a `permissions` row, so that card must degrade to unknown:
 //     an unjoined key is an unmeasured fact, never a satisfied one.
+//   · there is no `agentdb` row: ak retired the standalone agentdb, so the card
+//     joins the natives row about Ruflo's bundled copy ("agentdb location(s)"),
+//     while the failing memory-runtime row beside it must not join.
 const STATUS_STUB = async () => ({
   overall: 'warn',
   rows: [
     { subsystem: 'versions', level: 'ok', message: 'ruflo 4.0.0 (latest)', fix: null },
-    { subsystem: 'natives', level: 'fail', message: 'WASM fallback', fix: 'ak sync' },
+    { subsystem: 'natives', level: 'ok', message: 'native better-sqlite3 in 2 agentdb location(s)', fix: null },
+    { subsystem: 'natives', level: 'fail', message: 'ruflo memory runtime on WASM fallback (@claude-flow/memory): no native binding — no prebuilt binding for this platform', fix: 'sync builds the native binding', repair: 'sync' },
     { subsystem: 'learning', level: 'warn', message: 'no patterns yet', fix: null },
     { subsystem: 'hosts', level: 'ok', message: 'claude enabled and installed', fix: null },
     { subsystem: 'hosts', level: 'fail', message: 'codex enabled but not installed', fix: 'ak setup' },
     { subsystem: 'hosts', level: 'ok', message: 'opencode enabled and installed', fix: null },
-    { subsystem: 'agentdb', level: 'ok', message: 'store reachable', fix: null },
     { subsystem: 'agent-browser', level: 'ok', message: 'agent-browser 0.27.3 ready for Ruflo', fix: null },
     { subsystem: 'aqe', level: 'warn', message: 'fleet has never been initialized', fix: 'aqe init', repair: 'manual' },
     { subsystem: 'security', level: 'ok', message: 'scan clean', fix: null },
@@ -2058,6 +2061,16 @@ async function main() {
     check('the managed agent-browser card carries its observed compatible version',
       /installed.*v0\.27\.3/i.test(String(aboutBy('agent-browser')?.chip)),
       `the agent-browser chip read ${JSON.stringify(aboutBy('agent-browser')?.chip)}`);
+    // P1 (Branch 0 real-machine pass): no `agentdb` status row exists since the
+    // standalone install was retired. The card reads the natives row about
+    // Ruflo's bundled copy, and the failing memory-runtime row beside it (a
+    // different package) must not turn it red.
+    const agentdbCard = aboutBy('agentdb');
+    check('the agentdb card reads Ruflo\'s bundled copy from its natives row, not "state unknown"',
+      agentdbCard?.state === 'ok' && /^installed/i.test(String(agentdbCard?.chip))
+        && /agentdb location/.test(String(agentdbCard?.reason))
+        && !/memory runtime/.test(String(agentdbCard?.reason)) && agentdbCard?.detail === null,
+      `the agentdb card read ${JSON.stringify(agentdbCard)}`);
     // One card, two status rows: the worst of the pair drives the chip, or
     // Codex's broken statusline would sit behind a green card.
     check('a card joining two subsystems takes the worse of the two',

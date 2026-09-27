@@ -100,6 +100,12 @@ once. When ak has changed a better-sqlite3 line inside Ruflo's install to instal
 binding, the card also shows the `natives` row that says so ("ak applied Ruflo's native SQLite
 pin"). That line never changes the card's chip.
 
+AgentDB ships inside Ruflo, and ak installs no separate copy, so `ak status` has no `agentdb`
+row. The agentdb card takes its chip from the `natives` row about Ruflo's bundled copy: native
+better-sqlite3 in its agentdb locations reads **installed**, the WebAssembly fallback reads **not
+working**, and a missing copy reads **needs attention**. The other `natives` rows are about other
+packages and do not change this chip. The version on the chip is the one Ruflo bundles.
+
 System's capability catalog counts both user/plugin surfaces and the project
 surfaces discovered by the host census. In particular, Codex project skills in
 `.agents/skills` are distinct evidence from user `~/.codex/skills` and enabled

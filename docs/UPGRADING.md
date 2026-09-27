@@ -78,7 +78,8 @@ points memory away from a `.swarm` store that holds entries.
 
 AgentDB ships inside Ruflo, and Ruflo is its only writer. `ak setup` and `ak sync` no longer
 install or repin a separate global `agentdb` CLI, and `ak status` no longer shows an `agentdb`
-row. Nothing is uninstalled for you. A leftover global is harmless; remove it with
+row. The dashboard's About card for agentdb takes its state from the `natives` row about Ruflo's
+bundled copy instead. Nothing is uninstalled for you. A leftover global is harmless; remove it with
 `npm uninstall -g agentdb` only if you do not use it yourself and no other package, such as
 `agentic-flow`, owns the `agentdb` command (`npm ls -g --depth=0` lists what is installed). An
 `agentdb` key in `kit.json` is kept and ignored.

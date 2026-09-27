@@ -40,9 +40,10 @@ const link = (kind, label, url) => Object.freeze({ kind, label, url });
 
 // detectionKey joins a packaged entry to the managed-tools detection facts. The keys are
 // heterogeneous because the facts are: hosts resolve through the host registry
-// (`hosts.<id>`), agentdb / agentic-qe / ruvnet-brain have their own `ak status`
-// subsystem row, aidefence is reported by the `security` row, and the kit reports as
-// `self`. `npmPackage` is carried alongside because the version chip's other source —
+// (`hosts.<id>`), agentic-qe / ruvnet-brain have their own `ak status` subsystem row,
+// agentdb (bundled inside Ruflo, no standalone install) is reported by the `natives` row
+// about its "agentdb location(s)", aidefence is reported by the `security` row, and the
+// kit reports as `self`. `npmPackage` is carried alongside because the version chip's other source —
 // the drift array — is keyed by package name, and deriving that from a link URL would be
 // a parsing trick rather than a stated fact. Configured surfaces have no detectionKey:
 // they are not packages, so they carry the status `subsystem` row their chip joins on
