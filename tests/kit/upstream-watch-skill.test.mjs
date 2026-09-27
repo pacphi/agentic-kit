@@ -8,15 +8,25 @@ import fs from 'node:fs';
 import { GROUPS } from '../../scripts/upstream-watch/classify.mjs';
 
 const SKILLS = ['.claude/skills/upstream-status/SKILL.md', '.agents/skills/upstream-status/SKILL.md'];
+// .gitattributes checks both copies out with LF everywhere; reading them as
+// LF keeps these content checks independent of a clone made without it.
+const readText = (file) => fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
 const ignored = (file) => spawnSync('git', ['check-ignore', '-q', '--no-index', file]).status === 0;
 
 test('Claude and Codex get the same upstream-status skill', () => {
-  const [claude, codex] = SKILLS.map((file) => fs.readFileSync(file, 'utf8'));
+  const [claude, codex] = SKILLS.map(readText);
   assert.equal(codex, claude);
   assert.match(claude, /^---\nname: upstream-status\ndescription: .+\n---\n/);
   assert.match(claude, /node scripts\/upstream-watch\.mjs report --json/);
   assert.match(claude, /explicit-user-approval-required/);
   assert.match(claude, /never (post|push|merge)/i);
+});
+
+test('both skill copies check out with LF line endings on every platform', () => {
+  for (const file of SKILLS) {
+    const out = spawnSync('git', ['check-attr', 'eol', '--', file], { encoding: 'utf8' });
+    assert.match(out.stdout, /: eol: lf$/m, `${file} must be pinned to LF in .gitattributes`);
+  }
 });
 
 test('only the two skill folders are exempt from the generated-file ignores', () => {
@@ -35,7 +45,7 @@ test('only the two skill folders are exempt from the generated-file ignores', ()
 // the watcher could not check (or a fixed but unreleased one) is never left
 // out of the maintainer's summary.
 test('the skill names every report group the watcher can produce', () => {
-  const claude = fs.readFileSync(SKILLS[0], 'utf8');
+  const claude = readText(SKILLS[0]);
   const missing = GROUPS.map(([, title]) => title).filter((title) => !claude.includes(`"${title}"`));
   assert.deepEqual(missing, []);
   assert.match(claude, /fetchErrors/, 'an unchecked thread is reported with its error');

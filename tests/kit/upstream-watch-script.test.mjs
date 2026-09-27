@@ -374,7 +374,8 @@ test('renderers list counts first, then items with links and the dispatch branch
 // would move SINCE past a real reply), lock the issue, and take SINCE from
 // the time it last checked rather than from when it posted.
 test('the documented routine trusts only its own ledger comments', () => {
-  const doc = fs.readFileSync('docs/UPSTREAM-WATCH.md', 'utf8');
+  // A Windows checkout gives the Markdown CRLF line endings; the checks are about its text.
+  const doc = fs.readFileSync('docs/UPSTREAM-WATCH.md', 'utf8').replace(/\r\n/g, '\n');
   const ledger = doc.slice(doc.indexOf('## The ledger'), doc.indexOf('## Dispatch'));
   const prompt = doc.slice(doc.indexOf('## The daily routine')).match(/```text\n([\s\S]*?)```/)[1];
   assert.match(ledger, /lock/i, 'the ledger issue is locked when it is created');
