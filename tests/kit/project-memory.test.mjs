@@ -158,13 +158,21 @@ function seedRuflo(file, rows) {
 
 test('a store reports its file and WAL size, its largest namespace, and how much of it expires', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-memory-size-'));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // One hook that closes the test's own databases before removing the folder:
+  // after-hooks run in the order they were added, and Windows will not remove
+  // a folder while a connection still holds its files open. The removal has no retries, so on Windows it also proves that
+  // projectMemoryStatus closed its own read-only connection.
+  const open = [];
+  t.after(() => {
+    for (const db of open) db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
   const file = path.join(root, '.swarm', 'agentdb-memory.db');
   seedRuflo(file, [['commands'], ['commands'], ['commands', 'active', Date.now() + 60_000], ['commands', 'deleted'], ['decisions'], [null]]);
   // Hold a writer open with checkpoints off, so a live -wal exists as it does
   // beside a running MCP server.
   const writer = new DatabaseSync(file);
-  t.after(() => writer.close());
+  open.push(writer);
   writer.exec('PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;');
   writer.prepare("INSERT INTO memory_entries VALUES ('w', 'kw', 'commands', 'v', 'active', NULL)").run();
 
