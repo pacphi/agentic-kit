@@ -339,7 +339,6 @@ export const SYNC_STEPS = [
     when: (subs, flags, cfg) => (subs.has('security') || subs.has('versions')) && cfg.security !== false,
     run: async (ctx) => {
       await ctx.step('aidefence', () => heal.healAidefence());
-      await ctx.step('aqe solver', () => heal.healAqeSolver());
     },
   },
   // natives LAST among the npm-tree mutations. Every agentdb location resolves up

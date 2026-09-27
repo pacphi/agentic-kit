@@ -13,8 +13,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  brainInstallFailure, ensureNativeBsq3, healAqeSolver, healNatives, installRuvnetBrain,
+  brainInstallFailure, ensureNativeBsq3, healNatives, installRuvnetBrain,
 } from '../../src/lib/heal.mjs';
+import * as heal from '../../src/lib/heal.mjs';
+import { SYNC_STEPS } from '../../src/commands/sync.mjs';
 import { bsq3IsNative } from '../../src/lib/natives.mjs';
 import { _setGlobalRootForTest } from '../../src/lib/paths.mjs';
 import { tempDir } from './helpers/temp-dir.mjs';
@@ -593,41 +595,21 @@ test('brain failures drop ANSI color and keep the installer remediation hint', (
   assert.doesNotMatch(detail, /Nothing is left half-installed/);
 });
 
-test('AQE solver: the unpublished native is never install-attempted and the TS fallback is reported as the implementation (#135)', async () => {
-  const root = tempDir('ak-solver');
-  fs.mkdirSync(path.join(root, 'agentic-qe'), { recursive: true });
-  _setGlobalRootForTest(root);
-  try {
-    // upstream declared the package not-installable (agentic-qe#617/#620) —
-    // any npm invocation here is a regression to the pre-#620 behavior.
-    const r = await healAqeSolver({
-      runner: async () => { throw new Error('must not shell out for @ruvector/solver-node'); },
-    });
-    assert.equal(r.ok, true);
-    assert.equal(r.status, 'ok', 'expected state, not a warning');
-    assert.equal(r.usable, true, 'the TypeScript fallback is the implementation');
-    assert.match(r.detail, /unpublished upstream/);
-    assert.doesNotMatch(r.detail, /FAILED|npm error/, 'no error tail for a by-design state');
-  } finally {
-    _setGlobalRootForTest(null);
-    fs.rmSync(root, { recursive: true, force: true });
-  }
+// agentic-qe#617/#620: the native solver was never published and upstream made the
+// TypeScript solver the implementation, so the report-only solver step is gone.
+test('AQE solver: the heal that never installs anything is removed (agentic-qe#617)', () => {
+  assert.equal(heal.healAqeSolver, undefined);
 });
 
-test('AQE solver: a native already present on disk is still detected and reported', async () => {
-  const root = tempDir('ak-solver-present');
-  const probe = path.join(root, 'agentic-qe', 'node_modules', '@ruvector', 'solver-node');
-  fs.mkdirSync(probe, { recursive: true });
-  fs.writeFileSync(path.join(probe, 'package.json'), '{"name":"@ruvector/solver-node"}');
-  _setGlobalRootForTest(root);
-  try {
-    const r = await healAqeSolver({
-      runner: async () => { throw new Error('must not shell out'); },
-    });
-    assert.equal(r.status, 'ok');
-    assert.equal(r.detail, 'already present');
-  } finally {
-    _setGlobalRootForTest(null);
-    fs.rmSync(root, { recursive: true, force: true });
-  }
+test('AQE solver: the sync security step lists no aqe solver', async () => {
+  const step = SYNC_STEPS.find((s) => s.id === 'security');
+  assert.ok(step, 'the security step exists');
+  const names = [];
+  await step.run({ step: async (name) => { names.push(name); }, report: () => {} });
+  assert.deepEqual(names, ['aidefence']);
+});
+
+test('AQE solver: setup reports no aqe solver line', () => {
+  const setup = fs.readFileSync(new URL('../../src/commands/setup.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(setup, /aqe solver|healAqeSolver/);
 });

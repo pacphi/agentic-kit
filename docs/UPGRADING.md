@@ -39,6 +39,12 @@ and supported `claude mcp serve` tool exposure are preserved. See
 [ADR-0051](adr/0051-supported-peer-delegation-and-host-realignment.md) for the policy,
 official source citations, authority boundaries and verification limits.
 
+## 2026-09-27: No more `aqe solver` line in setup and sync
+
+`ak setup` and `ak sync` no longer print an `aqe solver` line. AQE's native solver package was
+never published, and AQE made its TypeScript solver the implementation (agentic-qe#617, released
+in 3.13.10), so the step only ever reported that state and never installed anything. Nothing to do.
+
 ## 2026-09-27: System snapshot v8 (imported Codex copies)
 
 When the ChatGPT desktop app imports a Claude Code transcript, it saves a copy as a Codex session.

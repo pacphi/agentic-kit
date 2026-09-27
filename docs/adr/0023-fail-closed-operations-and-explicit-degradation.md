@@ -6,6 +6,7 @@
   load error and separates unavailable from inconclusive; sync's natives heal uses the same load
   test (see the native runtime probe amendment); the heal receipts every edit it makes inside
   another tool's install, and `ak uninstall` reverses it (see the install-edit receipts amendment)
+- **Updated:** 2026-09-27 — the report-only AQE solver heal is removed (agentic-qe#617/#620: the native was never published and the TypeScript solver is the implementation); the solver example in §1 and Context item 1 is historical
 - **Earlier update:** 2026-09-20 — ADR-0055 adds qualified AQE embedding lifecycle evidence; ADR-0053 separates host health from usage-source diagnostics
 - **Earlier update:** 2026-08-26 — ADR-0035 applies fail-closed preflight, bounded evidence, and
   content-free degradation to the opt-in deja-vu companion
@@ -114,7 +115,8 @@ installations remain unmanaged until selection, and explicit opt-out is preserve
 Managed heals use `ok`, `degraded`, `failed`, or `skipped` status, independently of whether an old
 artifact or fallback remains usable. `usable` records that secondary fact. A nonzero Brain installer
 exit is failed even when an older KB marker remains; only exit zero records the installed release.
-The AQE TypeScript solver fallback is usable but degraded. Setup and sync share one renderer, so a
+(Historical: the AQE TypeScript solver fallback was reported usable but degraded; that report-only
+heal was removed on 2026-09-27.) Setup and sync share one renderer, so a
 degraded result is never shown with a green success glyph.
 
 ### 2. SQLite failures remain classified through the helper boundary

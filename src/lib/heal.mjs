@@ -177,24 +177,6 @@ export async function healAidefence() {
   return { ok: aidefencePresent(), detail: r.code === 0 ? 'installed (adaptive learning and aidefence_* MCP tools)' : r.stderr.slice(0, 200) };
 }
 
-/** Optional native sublinear solver for agentic-qe (best-effort). */
-export async function healAqeSolver() {
-  if (!fs.existsSync(aqeRoot())) {
-    return { ok: true, status: 'skipped', usable: false, detail: 'agentic-qe not installed' };
-  }
-  const probe = path.join(aqeRoot(), 'node_modules', '@ruvector', 'solver-node', 'package.json');
-  if (fs.existsSync(probe)) return { ok: true, status: 'ok', usable: true, detail: 'already present' };
-  // The native accelerator was never published to npm, and upstream resolved
-  // its own half by documenting the TypeScript solver as the implementation
-  // (agentic-qe#617 → #620, shipped in aqe 3.13.10). Attempting the install
-  // would only manufacture a 404 warning for a by-design state (#135). The
-  // probe above still detects a native that arrives by any other route.
-  return {
-    ok: true, status: 'ok', usable: true,
-    detail: 'native solver unpublished upstream (agentic-qe#617) — TypeScript fallback is the implementation (<50K nodes)',
-  };
-}
-
 /** Quarantine oversized (runaway-append) RVF stores in a project — the one RVF
  *  failure mode left to the kit. Lock/corruption handling is agentic-qe's own
  *  job since 3.12.3; see src/lib/rvf.mjs for the history. */

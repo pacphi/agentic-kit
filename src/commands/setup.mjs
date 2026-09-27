@@ -362,7 +362,6 @@ async function healMachineSecuritySurface(cfg) {
   reportOutcome('natives', await heal.healNatives());
   if (cfg.security !== false) reportOutcome('aidefence', await heal.healAidefence());
   else info('security surface skipped (kit.json security:false — re-enable by removing the key)');
-  if (cfg.aqe) reportOutcome('aqe solver', await heal.healAqeSolver());
 }
 
 /** Step 3: token-audit skill → ~/.claude/skills. */

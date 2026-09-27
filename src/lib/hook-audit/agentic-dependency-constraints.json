@@ -556,16 +556,17 @@
       "mapping": "mapped",
       "kitImpact": {
         "refs": ["closed-upstream review 2026-09-26"],
-        "files": ["src/lib/heal.mjs", "tests/kit/heal-natives.test.mjs"]
+        "files": ["tests/kit/heal-natives.test.mjs"]
       },
-      "adjustment": "refactor(heal): drop the report-only AQE solver step (healAqeSolver and its calls in setup and sync). If kept, probe @ruvector/solver and drop \"<50K nodes\".",
-      "status": "released",
+      "adjustment": "Done: the report-only AQE solver step is removed (healAqeSolver and its calls in setup and sync).",
+      "status": "adopted",
       "constraintIds": [],
       "history": [
         { "date": "2026-08-05", "event": "filed" },
         { "date": "2026-08-06", "event": "closed", "note": "completed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.13.10; the ak change is pending" }
+        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.13.10; the ak change is pending" },
+        { "date": "2026-09-27", "event": "adopted", "note": "healAqeSolver removed from heal, sync and setup; proof: tests/kit/heal-natives.test.mjs 'AQE solver' tests" }
       ]
     },
     {
@@ -579,15 +580,16 @@
       "mapping": "mapped",
       "kitImpact": {
         "refs": ["closed-upstream review 2026-09-26"],
-        "files": ["src/lib/heal.mjs", "tests/kit/heal-natives.test.mjs"]
+        "files": ["tests/kit/heal-natives.test.mjs"]
       },
-      "adjustment": "Same change as agentic-qe#617: drop the report-only AQE solver step.",
-      "status": "released",
+      "adjustment": "Done with agentic-qe#617: the report-only AQE solver step is removed.",
+      "status": "adopted",
       "constraintIds": [],
       "history": [
         { "date": "2026-08-06", "event": "closed", "note": "merged" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.13.10; the ak change is pending" }
+        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.13.10; the ak change is pending" },
+        { "date": "2026-09-27", "event": "adopted", "note": "healAqeSolver removed from heal, sync and setup; proof: tests/kit/heal-natives.test.mjs 'AQE solver' tests" }
       ]
     },
     {
