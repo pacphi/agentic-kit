@@ -1605,3 +1605,153 @@ usage (ADR-0052) and from discovery. The choices were: exclude per turn in Branc
 usage parsers; do it in Branch 1; or keep whole-rollout exclusion. **Recommendation: per turn, in
 Branch 8. Choice: per turn, in Branch 8.** Imported turns are never counted, and later real turns
 count as Codex usage in the ChatGPT desktop app and give their folder a genuine Desktop origin.
+
+## Branch 4 decisions (2026-09-27)
+
+Asked at the start of Branch 4 (`feat/upstream-watch-live`) in the decision format of the
+Decision walkthrough; the maintainer's choices are recorded as given in the program ledger.
+Commits are on that branch.
+
+### B4-G1 — the ledger issue
+
+**The situation.** The upstream watch writes one line per event (`UPSTREAM-WATCH <id> <event>
+<date>`) to a single ledger issue in `pacphi/agentic-kit`, and the daily routine reads it back so
+that a recorded line is never acted on twice.
+
+**The problem.** The ledger issue did not exist, and the registry named it only by title
+(`watchPolicy.ledger.issueTitle`). A title search can match the wrong issue, and anyone can open
+an issue with that title in a public repository.
+
+**What the user sees.** Nothing yet: without the issue the routine has nowhere to record events,
+so no ledger history exists.
+
+**What should be the case.** One pinned, locked issue that only collaborators can comment on,
+named by number in the registry.
+
+**The choices.**
+
+- **A. Create, pin and lock it now**, and record its number in the registry.
+- **B. Create it together with the daily routine** (the previous plan in UPSTREAM-WATCH.md).
+
+**Recommendation: A.** The number can then be validated and tested before the routine exists.
+
+**Choice: A.** Created, pinned and locked as
+[pacphi/agentic-kit#243](https://github.com/pacphi/agentic-kit/issues/243) ("Upstream watch").
+`watchPolicy.ledger.issue` records 243; the loader and schema require it (`40d7d6d6`), and the
+routine prompt opens that issue directly.
+
+### B4-G2 — when the daily routine is created
+
+**The situation.** The routine runs `check` daily, posts new ledger lines and dispatches each
+`released` line as a draft pull request.
+
+**The problem.** Before this branch, `releaseState` called the first version published after a
+fix a "candidate" and reported it as released and actionable without proving it contains the
+fix.
+
+**What the user sees.** A routine created on that code would open draft pull requests for fixes
+that may not be in any release.
+
+**What should be the case.** The routine dispatches only fixes a release provably contains.
+
+**The choices.**
+
+- **A. Create the routine now.** It starts recording at once, but dispatches unconfirmed fixes.
+- **B. Create it after Branch 4 merges to `main`.**
+
+**Recommendation: B.** A routine that dispatches unconfirmed fixes produces work that has to be
+thrown away.
+
+**Choice: B.** The routine is created after this branch reaches `main`. Release confirmation
+landed in `04a91d83` and `46a92249`: a release counts only when its tag contains the merged
+fixing pull request or commit, and an unprovable later release goes to the new group "Released,
+fix not confirmed", which is never dispatched.
+
+### B4-Q1 — AgentDB under the Ruflo policy
+
+**The situation.** ak does not install AgentDB directly. Ruflo brings it in
+(`ruflo` → `@claude-flow/cli` → `agentdb`, an optional dependency with a caret range).
+
+**The problem.** The three AgentDB entries (ruvnet/agentdb#26, #27, #28) gated on npm `agentdb`
+itself, so an agentdb publish alone would read as released even when no Ruflo release installs
+it. AgentDB also publishes no git tags, so its fixes cannot be confirmed from a tag.
+
+**What the user sees.** A dispatch for an AgentDB fix that ak cannot use until Ruflo picks it up.
+
+**What should be the case.** An AgentDB fix counts as released only when the Ruflo ak installs
+resolves to a fixed agentdb.
+
+**The choices.**
+
+- **A. A separate AgentDB dependency policy**, gated on npm `agentdb`.
+- **B. Keep AgentDB under the Ruflo policy, gated on what Ruflo bundles.**
+
+**Recommendation: B.** It matches how ak actually receives AgentDB.
+
+**Choice: B.** Released only when the newest Ruflo in the support window (npm `latest`) installs
+a fixed agentdb, resolved through npm down the `bundledBy` chain (`7f92e1d9`). Because AgentDB
+has no tags, its fixes are confirmed by hand and recorded as `minVersion`.
+
+### B4-Q2 — widening the citation guard
+
+**The situation.** A guard test fails when tracked source (`src/`, `bin/`, `claude/`, `tests/`)
+cites an upstream thread the watch list does not register.
+
+**The problem.** User-facing docs cited 26 unregistered threads (README.md, HOST-SUPPORT.md,
+UPGRADING.md, CODEX-USAGE-DIAGNOSTIC.md), so the caveats they describe were never re-checked.
+
+**What the user sees.** Host and upgrade guidance that can keep warning about a bug long after
+upstream fixed it, or miss that it was closed as not planned.
+
+**What should be the case.** Every upstream thread a user-facing doc relies on is watched.
+
+**The choices.**
+
+- **A. Source only** (unchanged).
+- **B. All of `docs/`**, including ADRs, audits, plans and research.
+- **C. User-facing docs only:** README, `docs/*.md` guides and CLI help; history exempt.
+
+**Recommendation: C.** History documents cite threads as record, not as live guidance.
+
+**Choice: C.** README.md and every top-level `docs/*.md` guide are scanned; CLI help already
+lives in `src/`. ADRs, audits, research and plans sit in subfolders and are exempt as history;
+three top-level history files are exempt by name (`MODEL-PRICING-AUDIT.md`,
+`METAHARNESS-COMPANION-PROPOSAL.md`, `USAGE-SCORECARD-METRICS.md`). The 26 threads are
+registered, 17 watching and 9 retired, with two new dependency policies, `claude-code` and
+`opencode` (`9cd9c582`). `ruvnet/ruflo#1234` is a placeholder in an example command.
+
+### B4-Q3 — checked versus verified dates
+
+**The situation.** One date, `lastVerifiedAt`, served as the weekly state re-read, the tests'
+clock and the conformance date.
+
+**The problem.** A weekly re-read moved a date that claims conformance was re-run, and the
+guidance told the maintainer to move every `nextRetestAt` on a re-read.
+
+**What the user sees.** A registry that looks freshly verified when only issue states were read.
+
+**What should be the case.** "We re-read the state" and "we re-ran the proof" are separate dates.
+
+**The choices.**
+
+- **A. Keep one date.**
+- **B. Split them:** `lastCheckedAt` for the re-read, `lastVerifiedAt` and `nextRetestAt` only
+  after a conformance run.
+
+**Recommendation: B.**
+
+**Choice: B.** Schema 6, migrated in place with `lastCheckedAt: 2026-09-27` and
+`lastVerifiedAt` unchanged (`60eb8f3c`). The tests take their clock from `lastCheckedAt`.
+
+### Also settled on Branch 4
+
+- The report group "Released, fix not confirmed" (B4-G2 above).
+- A `reviewed` history event: the maintainer read a thread's comments up to that day and none
+  needs a reply. ruvnet/ruflo#3153 records it for four comments by sparkling (`38080846`).
+- #213 and #240 carry their whole upstream remainder; ruflo#3196 now waits for a tested
+  preservation or migration outcome, not a unified path (`81a1bc80`).
+- Stale threads: openai/codex#16045 is mapped to the connected host check; openai/codex#16921 is
+  retired as watched through #17827; ruvnet/ruflo#952 records that `--tools` narrows only the
+  advertised schemas (`1587eafa`).
+- Draft comments for #213, #240, codex#16045 and ruflo#952 are left for the controller; none is
+  posted from this branch.

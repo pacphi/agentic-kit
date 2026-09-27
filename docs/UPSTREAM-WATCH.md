@@ -152,10 +152,11 @@ Ask Claude Code or Codex for "upstream status" in this repository. The `upstream
 and the action items with links, and offers to draft a reply, dispatch a released item or
 update the registry. It never posts, pushes or merges without explicit confirmation.
 
-## The daily routine (create after this reaches `main`)
+## The daily routine (created after the watch's release confirmation reaches `main`)
 
 There is one watcher: a claude.ai cloud routine on this repository. The tracking issues
-pacphi/agentic-kit#240 and pacphi/agentic-kit#213 migrate into the registry once it is live. The maintainer creates the routine, and that
+pacphi/agentic-kit#240 and #213 are registry entries (`relation: tracking`) listing the upstream
+threads they wait on. The maintainer creates the routine, and that
 authorizes exactly its writes in this repository: ledger comments, `upstream/*` branches and
 draft pull requests. It never comments upstream and never merges.
 

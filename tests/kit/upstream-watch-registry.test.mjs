@@ -259,3 +259,15 @@ test('every upstream thread the audit record lists as filed is registered', () =
   const registered = new Set(document().watch.map((entry) => entry.id));
   assert.deepEqual(filed.filter((id) => !registered.has(id)), []);
 });
+
+test('the audit record carries the Branch 4 decisions in decision format', () => {
+  const audit = fs.readFileSync('docs/audits/2026-09-26-issues-237-238-239-verification-and-decisions.md', 'utf8').replace(/\r\n/g, '\n');
+  const start = audit.indexOf('## Branch 4 decisions');
+  assert.ok(start > 0);
+  const next = audit.indexOf('\n## ', start + 1);
+  const section = audit.slice(start, next === -1 ? undefined : next);
+  for (const id of ['B4-G1', 'B4-G2', 'B4-Q1', 'B4-Q2', 'B4-Q3']) assert.match(section, new RegExp(`### ${id} `));
+  for (const part of ['**The situation.**', '**The problem.**', '**What the user sees.**', '**What should be the case.**', '**The choices.**', '**Recommendation', '**Choice']) {
+    assert.ok(section.split(part).length - 1 >= 5, part);
+  }
+});
