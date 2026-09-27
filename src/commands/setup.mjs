@@ -574,12 +574,15 @@ async function startProjectDaemon(root) {
 }
 
 /** Step 7: write-verification (store → actual on-disk row, then clean up).
- *  The CLI mirrors the write into agentdb-memory.db beside the pinned
- *  memory.db, so the probe is removed from every store that holds it; this is
- *  the user's real corpus, so nothing of the probe may be left behind. */
+ *  The CLI mirrors the write into agentdb-memory.db under the memory root
+ *  (CLAUDE_FLOW_MEMORY_PATH, else a config persistPath, else <cwd>/.swarm).
+ *  The probe pins that root beside the pinned memory.db, so both copies land
+ *  in the stores cleanup checks even when the project's root is redirected;
+ *  this is the user's real corpus, so nothing of the probe may be left behind. */
 export async function verifyProjectMemoryWrite(root, env, { runner = runCmd } = {}) {
   const probeKey = `_setup/verify-${process.pid}-${Date.now()}`;
-  const stored = (await runner('ruflo', ['memory', 'store', '-k', probeKey, '--value', 'setup-verify', '-n', '_setup'], { cwd: root, env })).code === 0;
+  const probeEnv = { ...env, CLAUDE_FLOW_MEMORY_PATH: path.dirname(env?.CLAUDE_FLOW_DB_PATH ?? paths.projectMemoryDb(root)) };
+  const stored = (await runner('ruflo', ['memory', 'store', '-k', probeKey, '--value', 'setup-verify', '-n', '_setup'], { cwd: root, env: probeEnv })).code === 0;
   const landed = stored ? findMemoryEntry(root, '_setup', probeKey) : null;
   if (!landed) {
     fail('memory write verification FAILED — run: ak status / ruflo doctor -c memory');
