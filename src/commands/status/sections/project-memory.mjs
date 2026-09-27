@@ -105,8 +105,8 @@ function orphanedStoreRow(root, memory) {
   const files = populated.map((store) => path.basename(store.file)).join(', ');
   return row('memory', 'warn', `${setting.name} sets ${setting.key} to "${setting.value}", which points Ruflo memory away from `
     + `the ${entries} entr${entries === 1 ? 'y' : 'ies'} in .swarm (${files}): Ruflo's MCP store and any \`ruflo\` command run here `
-    + `without ak's pin look there instead. To point Ruflo back, set ${setting.key} to "${MEMORY_ROOT_PIN}" in that file, `
-    + `or remove the key (${MEMORY_ROOT_UPSTREAM})`);
+    + `without ak's pin look there instead (${MEMORY_ROOT_UPSTREAM})`,
+  `set ${setting.key} to "${MEMORY_ROOT_PIN}" in ${setting.name}, or remove the key`, { repair: 'manual' });
 }
 
 function backupRow({ lastAt, ageMs, stale, failed }, daemon, now) {
@@ -120,7 +120,8 @@ function backupRow({ lastAt, ageMs, stale, failed }, daemon, now) {
     return row('memory', 'info', `${last ?? 'no memory.db backup recorded yet'}; this project's daemon is running and takes the next one`);
   }
   return row('memory', 'warn', `${last ?? 'no memory.db backup recorded'}; Ruflo backs it up at most daily and only while this project's `
-    + 'daemon runs, and none is running: start one with `ruflo daemon start`, or run `ruflo memory backup` from the project root');
+    + 'daemon runs, and none is running',
+  'from the project root, start the daemon with `ruflo daemon start` or run `ruflo memory backup`', { repair: 'manual' });
 }
 
 function distillRow(distillation, daemon) {

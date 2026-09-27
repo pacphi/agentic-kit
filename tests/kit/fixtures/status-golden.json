@@ -150,9 +150,9 @@
   {
     "subsystem": "aqe-embedding",
     "level": "warn",
-    "message": "semantic backend missing; choose one with ak x aqe-embedding configure",
-    "fix": null,
-    "repair": null
+    "message": "semantic backend missing",
+    "fix": "ak x aqe-embedding configure (choose a backend)",
+    "repair": "manual"
   },
   {
     "subsystem": "aqe",

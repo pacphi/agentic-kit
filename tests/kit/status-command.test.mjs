@@ -375,8 +375,8 @@ test('legacy invalid qe-court config is reported read-only and sync is not offer
     const qc = one(await collect(), 'qe-court');
     assert.equal(qc.level, 'warn');
     assert.match(qc.message, /writerIsNeverJuror/);
-    assert.match(qc.message, /agentic-qe >=3\.13\.3/);
-    assert.equal(qc.fix, null, 'ak sync no longer mutates upstream-owned qe-court routing');
+    assert.match(qc.fix, /agentic-qe >=3\.13\.3/);
+    assert.equal(qc.repair, 'manual', 'ak sync no longer mutates upstream-owned qe-court routing');
     assertUnchanged(before, path.dirname(qeCourtFile), 'status must leave legacy config untouched');
     assert.equal(fs.existsSync(`${qeCourtFile}.bak`), false);
   } finally {
@@ -484,8 +484,8 @@ test('an incompatible enabled Codex plugin warns without offering a sync mutatio
   const plugin = one(await collect(), 'codex-plugins');
   assert.equal(plugin.level, 'warn');
   assert.match(plugin.message, /unsupported top-level field\(s\): _note/);
-  assert.match(plugin.message, /Codex \/plugins/);
-  assert.equal(plugin.fix, null, 'sync must never rewrite Codex-owned plugin cache');
+  assert.match(plugin.fix, /Codex \/plugins/);
+  assert.equal(plugin.repair, 'manual', 'sync must never rewrite Codex-owned plugin cache');
 });
 
 test('status identifies the Claude companion when it is enabled inside Codex', async () => {
@@ -500,9 +500,9 @@ test('status identifies the Claude companion when it is enabled inside Codex', a
   const plugin = one(await collect(), 'codex-plugins');
   assert.equal(plugin.level, 'warn');
   assert.match(plugin.message, /Claude Code/);
-  assert.match(plugin.message, /ak heal hooks --host codex/);
-  assert.doesNotMatch(plugin.message, /refresh/);
-  assert.equal(plugin.fix, null, 'sync must never change user-owned Codex plugin enablement');
+  assert.match(plugin.fix, /ak heal hooks --host codex/);
+  assert.doesNotMatch(plugin.fix, /refresh/);
+  assert.equal(plugin.repair, 'manual', 'sync must never change user-owned Codex plugin enablement');
 });
 
 test('status reports malformed Codex config separately from plugin compatibility', async () => {
@@ -513,9 +513,9 @@ test('status reports malformed Codex config separately from plugin compatibility
   const plugin = one(await collect(), 'codex-plugins');
   assert.equal(plugin.level, 'warn');
   assert.match(plugin.message, /Codex config inspection issue/);
-  assert.match(plugin.message, /repair config\.toml/);
-  assert.doesNotMatch(plugin.message, /Codex \/plugins|plugin compatibility/);
-  assert.equal(plugin.fix, null);
+  assert.match(plugin.fix, /repair config\.toml/);
+  assert.doesNotMatch(`${plugin.message} ${plugin.fix}`, /Codex \/plugins|plugin compatibility/);
+  assert.equal(plugin.repair, 'manual');
 });
 
 test('status discloses both project-memory stores without asserting writer identity', async () => {

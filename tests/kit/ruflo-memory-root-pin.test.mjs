@@ -157,11 +157,12 @@ test('status warns when a Ruflo JSON configuration points memory away from a pop
   const orphan = rows.find((r) => /points Ruflo memory/.test(r.message));
   assert.ok(orphan, 'the orphaned store is reported');
   assert.equal(orphan.level, 'warn');
-  assert.equal(orphan.fix, null, 'a manual decision: ak never edits a configuration it did not write');
+  assert.equal(orphan.repair, 'manual', 'a manual decision: ak never edits a configuration it did not write');
   assert.match(orphan.message, /claude-flow\.config\.json/);
   assert.match(orphan.message, /\.\/data\/memory/);
   assert.match(orphan.message, /1 entry/);
-  assert.match(orphan.message, /"\.swarm"/, 'names the value that points Ruflo back');
+  assert.match(orphan.fix, /"\.swarm"/, 'names the value that points Ruflo back');
+  assert.match(orphan.fix, /claude-flow\.config\.json/, 'names the file to edit');
   assert.match(orphan.message, /ruvnet\/ruflo#3193/);
 });
 

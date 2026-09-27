@@ -98,6 +98,14 @@ row has no fix. `ak sync` plans only `"sync"` fixes and reports how many manual 
 status prints a manual fix as `→ manual: …`. Scripts that treated every `fix` as sync work should
 filter on `repair`.
 
+Warnings that ask you to act now carry that step as a manual fix instead of inside the message. This
+covers the Brain plugin's unreviewed hooks and a refused Brain refresh, a missing AQE semantic
+backend, Codex context and plugin issues, an unreadable model inventory, Ruflo memory
+configuration and backups, unavailable external AQE intent, an invalid qe-court panel,
+agent-browser's external installs and browser payload, and Ruflo components waiting on a host
+restart. They are tagged `manual` on the dashboard and counted by `ak sync` and the bare `ak` hint.
+A script that read the instruction from `message` should read `fix`.
+
 ## 2026-09-26: `ak sync --json` emits one JSON result
 
 `ak sync --json` was listed in the help but printed the ordinary human output. It now writes

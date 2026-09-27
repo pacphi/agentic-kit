@@ -102,8 +102,10 @@ test('Brain should disclose both missing commands and retired hooks in a disable
 
 // Decision 4 of the 2026-09-26 audit: the 4.3.28 warning was permanent and said
 // neither what changed nor what the user could do. It stays a warning with no
-// sync action (no 4.3.28 contract), but names the added hook and the options.
-test('an unreviewed Brain hook delta names the hook and the user options, never a sync action', (t) => {
+// sync action (no 4.3.28 contract), but names the added hook, and its options are
+// a manual fix (P5, Branch 0 real-machine pass): tagged manual on Overview and
+// About, and counted by the bare `ak` hint.
+test('an unreviewed Brain hook delta names the hook and gives the user options as a manual fix, never a sync action', (t) => {
   const f = fixture(t);
   f.registry([{ ...f.record, version: '4.3.28' }]);
   f.write(path.join(f.payload, '.claude-plugin/plugin.json'), { name: 'ruvnet-brain', version: '4.3.28' });
@@ -122,10 +124,12 @@ test('an unreviewed Brain hook delta names the hook and the user options, never 
   } });
   const [row] = brainPluginRows(f.inspect());
   assert.equal(row.level, 'warn');
-  assert.equal(row.fix, null, 'ak sync cannot review a hook, so it must never plan this row');
+  assert.equal(row.repair, 'manual', 'ak sync cannot review a hook, so it must never plan this row');
   assert.match(row.message, /adds UserPromptSubmit capacity-aware-parallel-work/);
-  assert.match(row.message, /claude plugin disable ruvnet-brain@ruvnet-brain/);
-  assert.match(row.message, /"ruvnetBrain": false/);
+  assert.match(row.message, /until an ak release reviews the change/);
+  assert.match(row.fix, /claude plugin disable ruvnet-brain@ruvnet-brain/);
+  assert.match(row.fix, /"ruvnetBrain": false/);
+  assert.doesNotMatch(row.message, /claude plugin disable/, 'the options live in the fix, not twice');
 });
 
 test('Brain should reject ambiguous registrations and paths outside the managed cache', (t) => {

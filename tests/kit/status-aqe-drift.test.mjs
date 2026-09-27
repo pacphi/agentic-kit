@@ -180,8 +180,8 @@ test('unavailable external intent names a manual remedy instead of an impossible
   const unavailable = providerRows.find((entry) => /external AQE intent is unavailable \(hermes\)/.test(entry.message));
   assert.ok(unavailable, providerRows.map((entry) => entry.message).join('\n'));
   assert.equal(unavailable.level, 'warn');
-  assert.equal(unavailable.fix, null, 'sync cannot restore an absent grant, so this is not a sync plan item');
-  assert.match(unavailable.message, /revoke-grant hermes aqeProvider/);
+  assert.equal(unavailable.repair, 'manual', 'sync cannot restore an absent grant, so this is not a sync plan item');
+  assert.match(unavailable.fix, /revoke-grant hermes aqeProvider/);
   assert.equal(providerRows.some((entry) => entry.fix === 'sync re-applies provider env + aqe router'), false,
     'a clean disk plus unavailable intent must not prescribe the non-converging sync loop');
 });

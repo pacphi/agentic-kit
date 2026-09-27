@@ -75,7 +75,8 @@ test('a refused Brain refresh stays held after the ak sync that recorded it', {
     assert.ok(held, 'the hold recorded during sync must still be in kit.json after sync returns');
     assert.equal(held.latest, '4.3.28');
     assert.equal(held.installed, '4.3.22');
-    assert.equal(brainReleaseRow(await brain.drift()).fix, null, 'the next status must not offer the refused refresh');
+    assert.equal(brainReleaseRow(await brain.drift()).repair, 'manual',
+      'the next status must not offer the refused refresh as a sync repair');
 
     const second = await captureLog(() => sync.run({ flags, pkgRoot: PKG_ROOT, fetchLatest: async () => null, collectFn }));
     assert.equal(second.result, 0, 'with the refresh held, the next sync has nothing to apply');

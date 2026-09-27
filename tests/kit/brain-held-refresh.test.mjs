@@ -85,11 +85,11 @@ test('status holds the refresh as blocked, names the cause and the options, unti
 
   const blocked = brainReleaseRow(await brain.drift());
   assert.equal(blocked.level, 'warn');
-  assert.equal(blocked.fix, null, 'sync must not re-run a refused refresh');
+  assert.equal(blocked.repair, 'manual', 'sync must not re-run a refused refresh; the options are the user\'s');
   assert.match(blocked.message, /v4\.3\.28/);
   assert.match(blocked.message, /private overlay preflight failed/);
-  assert.match(blocked.message, /npx ruvnet-brain --update/);
-  assert.match(blocked.message, /"ruvnetBrain": false/);
+  assert.match(blocked.fix, /npx ruvnet-brain --update/);
+  assert.match(blocked.fix, /"ruvnetBrain": false/);
 
   const newer = brainReleaseRow({ ...(await brain.drift()), latest: '4.3.29' });
   assert.equal(newer.fix, 'sync refreshes the KB', 'a new release is a new attempt');

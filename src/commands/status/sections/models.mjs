@@ -5,10 +5,11 @@ import { row } from '../row.mjs';
 
 export default {
   id: 'models',
-  async collect() {
+  // readStore is a test seam; status passes its shared context, which has none.
+  async collect({ readStore = readModelStore } = {}) {
     const rows = [];
     try {
-      const snapshot = latestSnapshot(readModelStore());
+      const snapshot = latestSnapshot(readStore());
       if (!snapshot) rows.push(row('models', 'info', 'no local model inventory yet; run `ak models refresh` explicitly'));
       else {
         const health = summarizeModelHealth(snapshot);
@@ -17,7 +18,7 @@ export default {
         rows.push(row('models', health.level, health.message, health.fix, { repair: 'manual' }));
       }
     } catch (error) {
-      rows.push(row('models', 'warn', `model inventory unavailable: ${error.message}; run \`ak models refresh\` explicitly`));
+      rows.push(row('models', 'warn', `model inventory unavailable: ${error.message}`, 'ak models refresh', { repair: 'manual' }));
     }
     return rows;
   },

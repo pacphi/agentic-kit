@@ -17,16 +17,16 @@ function externalPackage(t, version) {
   t.after(() => { _setGlobalRootForTest(null); fs.rmSync(root, { recursive: true, force: true }); });
 }
 
-test('an out-of-range external agent-browser lists the options without a sync fix', async t => {
+test('an out-of-range external agent-browser lists the options as a manual fix, never a sync fix', async t => {
   externalPackage(t, '0.38.1');
   const [row] = await section.collect({ cfg: { agentBrowser: true } });
   assert.equal(row.level, 'warn');
-  assert.equal(row.fix, null, 'a preserved external install is never planned by sync');
+  assert.equal(row.repair, 'manual', 'a preserved external install is never planned by sync');
   assert.match(row.message, /external agent-browser 0\.38\.1 is outside Ruflo >=0\.27\.0 <0\.28\.0; preserved/);
   assert.match(row.message, /Ruflo's browser tools may not work/);
-  assert.match(row.message, /install a Ruflo-compatible agent-browser 0\.27\.x yourself/);
-  assert.match(row.message, /set agentBrowser: false in kit\.json/);
-  assert.match(row.message, /trusted browser config/, 'says what opting out gives up');
+  assert.match(row.fix, /install a Ruflo-compatible agent-browser 0\.27\.x yourself/);
+  assert.match(row.fix, /set agentBrowser: false in kit\.json/);
+  assert.match(row.fix, /trusted browser config/, 'says what opting out gives up');
 });
 
 test('opting out reports the executor as disabled', async t => {

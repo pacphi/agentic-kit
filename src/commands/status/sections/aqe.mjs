@@ -37,7 +37,8 @@ export default {
       const projection = inspectAqeEmbeddingProjections(cfg, cwd);
       rows.push(embeddingRow(cfg, cwd, resolved, backend, projection));
       if (resolved.mode === 'unmanaged' && backend.status === 'missing-backend') {
-        rows.push(row('aqe-embedding', 'warn', 'semantic backend missing; choose one with ak x aqe-embedding configure'));
+        rows.push(row('aqe-embedding', 'warn', 'semantic backend missing',
+          'ak x aqe-embedding configure (choose a backend)', { repair: 'manual' }));
       }
     }
     const aqeDir = paths.projectAqeDir(cwd);

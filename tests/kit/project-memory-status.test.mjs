@@ -28,7 +28,9 @@ test('memory status never treats file presence as a proven writer and checks bot
   assert.ok(dual.some((r) => /two project memory stores/.test(r.message)));
   assert.ok(dual.some((r) => /--path/.test(r.message)));
   assert.ok(dual.some((r) => /preserve both/.test(r.message)));
-  assert.ok(dual.every((r) => r.level !== 'ok' && r.fix === null));
+  // Nothing here is for sync: the backup row's remedy (start the daemon or back
+  // up by hand) is the user's, marked manual.
+  assert.ok(dual.every((r) => r.level !== 'ok' && r.repair !== 'sync'));
 });
 
 function dualStoreProject(t) {
@@ -253,11 +255,11 @@ test('a stale backup with no daemon for this project warns and names both remedi
   const rows = await section.collect({ cwd: maintained(t, { backupAgoMs: 16 * 24 * HOUR, distillAgoMs: 15 * 24 * HOUR }), now: NOW });
   const backup = backupRow(rows);
   assert.equal(backup.level, 'warn');
-  assert.equal(backup.fix, null);
+  assert.equal(backup.repair, 'manual');
   assert.match(backup.message, /last memory\.db backup 16d ago/);
   assert.match(backup.message, /only while this project's daemon runs/);
-  assert.match(backup.message, /`ruflo daemon start`/);
-  assert.match(backup.message, /`ruflo memory backup`/);
+  assert.match(backup.fix, /ruflo daemon start/);
+  assert.match(backup.fix, /ruflo memory backup/);
   const distill = distillRow(rows);
   assert.equal(distill.level, 'info', 'an old distillation alone is not a warning');
   assert.match(distill.message, /15d ago.*no daemon is running/);

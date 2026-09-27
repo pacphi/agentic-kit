@@ -9,11 +9,15 @@ import { inspectClaudeBrainPlugin } from '../../../lib/ruvnet-brain-plugin.mjs';
 import { releaseObservationLabel } from '../../../lib/versions.mjs';
 
 // What a user can do about an unreviewed Brain hook change. ak cannot review a
-// hook for them, so this is guidance in the message and never a sync `fix`.
-const HOOK_DELTA_OPTIONS = 'Options: keep it (this warning stays until an ak release reviews the change; '
-  + 'the Brain maintainer is asked to make added hooks honor the off switch); disable the whole Claude '
-  + 'plugin with `claude plugin disable ruvnet-brain@ruvnet-brain` (this also removes search_ruvnet from '
-  + 'Claude); or set "ruvnetBrain": false in kit.json so ak stops managing and reporting the Brain '
+// hook for them, so the options are a manual fix, never a sync one (P5, Branch 0
+// real-machine pass: without a fix the row had no manual tag and no count).
+// Only an ak release that reviews the change, or "ruvnetBrain": false, clears the
+// warning; the static check reads the payload whether or not the plugin is enabled.
+const HOOK_DELTA_NOTE = 'this warning stays until an ak release reviews the change '
+  + '(the Brain maintainer is asked to make added hooks honor the off switch)';
+const HOOK_DELTA_FIX = 'choose: keep the hooks; disable the whole Claude plugin with '
+  + '`claude plugin disable ruvnet-brain@ruvnet-brain` (this also removes search_ruvnet from Claude); '
+  + 'or set "ruvnetBrain": false in kit.json so ak stops managing and reporting the Brain '
   + '(the hooks stay installed)';
 
 export function brainPluginRows(state) {
@@ -24,7 +28,8 @@ export function brainPluginRows(state) {
   const summary = `Claude user Brain plugin ${selected} (${enabled}; project overrides and runtime unverified)`;
   const detail = state.issues.length ? state.issues.join('; ') : 'selected payload passes static checks';
   return [row('ruvnet-brain-plugin', state.issues.length ? 'warn' : 'info',
-    `${summary}; ${detail}${state.hookDelta ? `. ${HOOK_DELTA_OPTIONS}` : ''}`)];
+    `${summary}; ${detail}${state.hookDelta ? `; ${HOOK_DELTA_NOTE}` : ''}`,
+    state.hookDelta ? HOOK_DELTA_FIX : null, { repair: 'manual' })];
 }
 
 /** One status row for the installed/release state. A GitHub tag without the
@@ -58,13 +63,14 @@ export function brainReleaseRow(b) {
   if (held) {
     // The installer or the bundle's updater refused this exact pair (or ran
     // without landing anything). Re-running it on every sync cannot succeed and
-    // re-downloads the bundle, so the row is deliberately non-actionable until
-    // either release changes; the options are the user's.
+    // re-downloads the bundle, so sync does not act on the row until either
+    // release changes; the options are the user's, as a manual fix.
     const have = b.installedRelease ? `release v${b.installedRelease}` : 'the existing unversioned install';
     return row('ruvnet-brain', 'warn',
       `ruvnet-brain ${have} retained; the refresh to v${b.latest} was refused (${held.detail}). `
-      + 'ak sync will not retry it until either release changes. Options: fix the cause, then run '
-      + '`npx ruvnet-brain --update`; or set "ruvnetBrain": false in kit.json to stop ak managing the Brain');
+      + 'ak sync will not retry it until either release changes',
+    'fix the cause, then run `npx ruvnet-brain --update`; or set "ruvnetBrain": false in kit.json '
+      + 'to stop ak managing the Brain', { repair: 'manual' });
   }
   if (b.outdated) {
     const have = b.installedRelease ? `release v${b.installedRelease}` : 'present (unversioned install)';
