@@ -11,6 +11,7 @@
 - **Updated:** 2026-09-27 — a preserved conflict is a hand fix (`repair: 'manual'`) naming the file, never a sync repair, so it no longer fails every `ak sync`; changes and missing registrations stay sync repairs in their own row (audit decision 13)
 - **Updated:** 2026-09-26 — one AQE MCP transport recognizer for Claude, Codex and OpenCode now accepts all of AQE's own start commands; see the amendment below (#237, audit decision 3)
 - **Updated:** 2026-09-26 — temporary: agentic-qe ≤ 3.14.3's live-owner contention sequence (lock warning, live-owner quarantine refusal, then `FsyncFailed` from its create attempt) classifies as busy, not a storage failure; removed when the AQE release carrying agentic-qe#719 is the kit floor ([#240](https://github.com/pacphi/agentic-kit/issues/240), audit decision 7)
+- **Updated:** 2026-09-27 — the recognizer accepts every plain npx spelling of AQE's server (optional `-y`/`--yes`; unversioned, `@latest` or an exact version), audit item 5 choice A
 - **Related:** [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),
   [September repair](../audits/2026-09-09-aqe-integration-repair.md)
 
@@ -145,7 +146,9 @@ AQE's own programs, started exactly as AQE starts its MCP server. One recognizer
 - `aqe-mcp` with no arguments;
 - `aqe`, `agentic-qe` or `aqe-v3` with exactly `mcp` (one CLI whose `mcp` command starts
   the same server);
-- `npx` with exactly `-y agentic-qe@latest mcp`;
+- `npx` with an optional single `-y`/`--yes`, then `agentic-qe` unversioned, `@latest` or an
+  exact version (`@3.14.4`, `@3.15.0-rc.1`), then exactly `mcp` (version ranges, other
+  dist-tags, scoped look-alikes and `--package` forms are preserved);
 - npm's `.cmd` shims of these, matched case-insensitively on Windows.
 
 Any other command, extra flag, subcommand or wrapper is reported as an unrecognized

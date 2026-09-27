@@ -221,8 +221,8 @@ action" without failing. Run
 `[mcp_servers.agentic-qe]` table.
 
 AQE entries started with `aqe mcp`, `agentic-qe mcp` or `aqe-v3 mcp` are now
-recognized on Claude, Codex and OpenCode, and OpenCode also accepts
-`npx -y agentic-qe@latest mcp`. With a selected embedding backend, ak now projects
+recognized on Claude, Codex and OpenCode, as is every plain npx spelling:
+`npx [-y|--yes] agentic-qe[@latest|@<exact version>] mcp`. With a selected embedding backend, ak now projects
 the endpoint into such entries instead of reporting an unrecognized transport.
 
 ## 2026-09-10: Remembered Codex MCP correction

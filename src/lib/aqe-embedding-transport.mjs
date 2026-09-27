@@ -5,10 +5,15 @@ import path from 'node:path';
 // widening the #230 allow-list). Accepted: AQE's own programs started exactly as AQE
 // starts its MCP server. `aqe`, `agentic-qe` and `aqe-v3` are one CLI whose `mcp`
 // command starts the same server as `aqe-mcp` (agentic-qe package.json `bin`,
-// dist/cli/commands/mcp.js). Extra flags, subcommands and wrappers stay user-owned.
+// dist/cli/commands/mcp.js). Every plain npx spelling of the package counts too: an
+// optional single `-y`/`--yes`, then `agentic-qe` unversioned, `@latest` or an exact
+// version (`@3.14.4`, `@3.15.0-rc.1`), then `mcp` and nothing else. Ranges, other
+// dist-tags, scoped look-alikes, `--package` forms, extra flags, subcommands and
+// wrappers stay user-owned.
 const MCP_PROGRAM = 'aqe-mcp';
 const CLI_PROGRAMS = new Set(['aqe', 'agentic-qe', 'aqe-v3']);
-const NPX_ARGS = ['-y', 'agentic-qe@latest', 'mcp'];
+const NPX_PACKAGE = /^agentic-qe(?:@(?:latest|\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?))?$/;
+const NPX_YES = new Set(['-y', '--yes']);
 
 // npm installs `.cmd` shims on Windows; Windows file names are case-insensitive.
 function programName(command, platform) {
@@ -26,7 +31,12 @@ export function recognizedAqeTransport(command, args = [], { platform = process.
   const program = programName(command, platform);
   if (program === MCP_PROGRAM) return args.length === 0;
   if (CLI_PROGRAMS.has(program)) return exactly(args, ['mcp']);
-  return program === 'npx' && exactly(args, NPX_ARGS);
+  return program === 'npx' && npxStartsAqe(args);
+}
+
+function npxStartsAqe(args) {
+  const rest = NPX_YES.has(args[0]) ? args.slice(1) : args;
+  return rest.length === 2 && NPX_PACKAGE.test(rest[0]) && rest[1] === 'mcp';
 }
 
 /** OpenCode stores the program and its arguments as one array.
