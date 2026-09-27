@@ -46,13 +46,17 @@ test('POSIX tree signaling terminates a detached wrapper and its descendant', {
   const wrapper = spawn(process.execPath, ['-e', [ // spawn-env: inherits (inert node process tree, runs no kit code)
     "const {spawn}=require('node:child_process')",
     "const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'})",
-    'console.log(child.pid)',
+    // Not console.log: FORCE_COLOR colours a number even into a pipe.
+    "process.stdout.write(child.pid+'\\n')",
     'setInterval(()=>{},1000)',
   ].join(';')], { detached: true, stdio: ['ignore', 'pipe', 'ignore'] });
-  const [chunk] = await once(wrapper.stdout, 'data');
-  const descendantPid = Number(String(chunk).trim());
-  assert.ok(Number.isInteger(descendantPid) && descendantPid > 0);
+  // Everything after spawn sits inside try, so a failed read cannot orphan the
+  // wrapper (a live detached child keeps the test runner from exiting).
+  let descendantPid = null;
   try {
+    const [chunk] = await once(wrapper.stdout, 'data');
+    descendantPid = Number(String(chunk).trim());
+    assert.ok(Number.isInteger(descendantPid) && descendantPid > 0, JSON.stringify(String(chunk)));
     const wrapperClosed = once(wrapper, 'close');
     assert.equal(await signalProcessTree(wrapper, 'SIGTERM'), true);
     await wrapperClosed;
@@ -64,7 +68,7 @@ test('POSIX tree signaling terminates a detached wrapper and its descendant', {
     assert.equal(gone, true, 'descendant process was reaped after the group signal');
   } finally {
     try { process.kill(-wrapper.pid, 'SIGKILL'); } catch { /* already stopped */ }
-    try { process.kill(descendantPid, 'SIGKILL'); } catch { /* already stopped */ }
+    if (descendantPid > 0) try { process.kill(descendantPid, 'SIGKILL'); } catch { /* already stopped */ }
   }
 });
 
@@ -74,13 +78,15 @@ test('Windows tree signaling terminates a wrapper and its live descendant', {
   const wrapper = spawn(process.execPath, ['-e', [ // spawn-env: inherits (inert node process tree, runs no kit code)
     "const {spawn}=require('node:child_process')",
     "const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'})",
-    'console.log(child.pid)',
+    // Not console.log: FORCE_COLOR colours a number even into a pipe.
+    "process.stdout.write(child.pid+'\\n')",
     'setInterval(()=>{},1000)',
   ].join(';')], { stdio: ['ignore', 'pipe', 'ignore'] });
-  const [chunk] = await once(wrapper.stdout, 'data');
-  const descendantPid = Number(String(chunk).trim());
-  assert.ok(Number.isInteger(descendantPid) && descendantPid > 0);
+  let descendantPid = null;
   try {
+    const [chunk] = await once(wrapper.stdout, 'data');
+    descendantPid = Number(String(chunk).trim());
+    assert.ok(Number.isInteger(descendantPid) && descendantPid > 0, JSON.stringify(String(chunk)));
     // Register before awaiting taskkill: older Node releases can emit `close`
     // while signalProcessTree is still awaiting taskkill.exe.
     const wrapperClosed = once(wrapper, 'close');
@@ -99,6 +105,6 @@ test('Windows tree signaling terminates a wrapper and its live descendant', {
     assert.throws(() => process.kill(descendantPid, 0), /ESRCH|no such process/i);
   } finally {
     if (wrapper.exitCode == null) wrapper.kill('SIGKILL');
-    try { process.kill(descendantPid, 'SIGKILL'); } catch { /* already stopped */ }
+    if (descendantPid > 0) try { process.kill(descendantPid, 'SIGKILL'); } catch { /* already stopped */ }
   }
 });
