@@ -9,7 +9,7 @@ import path from 'node:path';
 
 import { UPSTREAM_REGISTRY_FILE, loadUpstreamConstraints, loadUpstreamRegistry } from '../../src/lib/hook-audit/upstream.mjs';
 import {
-  CITATION_DIRS, canonicalRepo, findCitations, scanCitations, unregisteredCitations,
+  CITATION_DIRS, USER_DOC_EXEMPT, canonicalRepo, findCitations, scanCitations, unregisteredCitations, userFacingDocs,
 } from '../../scripts/upstream-watch/citations.mjs';
 
 const document = () => JSON.parse(fs.readFileSync(UPSTREAM_REGISTRY_FILE, 'utf8'));
@@ -17,7 +17,11 @@ const document = () => JSON.parse(fs.readFileSync(UPSTREAM_REGISTRY_FILE, 'utf8'
 const now = () => new Date(`${document().lastCheckedAt}T12:00:00Z`);
 const ids = (text) => findCitations(text).map((citation) => citation.id);
 // Synthetic fixture ids a test uses on purpose; each must still be cited where listed.
-const SYNTHETIC = new Map([['ruvnet/ruflo#9001', ['tests/kit/conformance-tiers.test.mjs']]]);
+const SYNTHETIC = new Map([
+  ['ruvnet/ruflo#9001', ['tests/kit/conformance-tiers.test.mjs']],
+  // A placeholder id in an example command, not a real thread.
+  ['ruvnet/ruflo#1234', ['docs/AUTHORING-HOST-ADAPTERS.md']],
+]);
 // The watch tooling's own tests and fixtures spell citations as data.
 const SELF_CITING = ['tests/kit/upstream-watch-', 'tests/fixtures/upstream-watch/'];
 
@@ -168,8 +172,9 @@ test('findCitations recognizes URLs, qualified ids, aliases and continuations', 
   assert.deepEqual(ids('upstream #2221 and pacphi/agentic-kit#240 and @claude-flow/codex#1'), []);
 });
 
-test('every watched-repository thread cited in tracked source is registered', () => {
-  const citations = new Map([...scanCitations({ root: process.cwd(), dirs: CITATION_DIRS })]
+test('every watched-repository thread cited in tracked source or user-facing docs is registered', () => {
+  const dirs = [...CITATION_DIRS, ...userFacingDocs(process.cwd())];
+  const citations = new Map([...scanCitations({ root: process.cwd(), dirs })]
     .map(([id, files]) => [id, files.filter((file) => !SELF_CITING.some((prefix) => file.startsWith(prefix)))])
     .filter(([, files]) => files.length));
   const missing = unregisteredCitations(document().watch.map((item) => item.id), citations, SYNTHETIC);
@@ -178,6 +183,17 @@ test('every watched-repository thread cited in tracked source is registered', ()
   for (const [id, files] of SYNTHETIC) {
     for (const file of files) assert.ok((citations.get(id) ?? []).includes(file), `${id} is no longer cited in ${file}; drop it from SYNTHETIC`);
   }
+});
+
+test('user-facing docs are scanned; history and research are exempt by name', () => {
+  const docs = userFacingDocs(process.cwd());
+  assert.ok(docs.includes('README.md') && docs.includes('docs/HOST-SUPPORT.md') && docs.includes('docs/UPSTREAM-WATCH.md'));
+  for (const [file, reason] of USER_DOC_EXEMPT) {
+    assert.ok(!docs.includes(file), file);
+    assert.ok(fs.existsSync(file), `${file} no longer exists; drop its exemption`);
+    assert.match(reason, /\w/);
+  }
+  assert.ok(docs.every((file) => file === 'README.md' || /^docs\/[^/]+\.md$/.test(file)), 'only top-level guides; ADRs, audits, plans and research are history');
 });
 
 test('every kit file a watch entry names exists and still cites the thread', () => {

@@ -1,8 +1,8 @@
 # Upstream watch
 
-agentic-kit depends on fixes in Ruflo, Agentic QE, AgentDB, RuVector, RuvNet Brain, Codex and
-agent-browser. The upstream watch tracks every upstream thread ak relies on, says when a fix
-is ready for ak, and records each event once.
+agentic-kit depends on fixes in Ruflo, Agentic QE, AgentDB, RuVector, RuvNet Brain, Codex,
+Claude Code, OpenCode and agent-browser. The upstream watch tracks every upstream thread ak
+relies on, says when a fix is ready for ak, and records each event once.
 
 ## One registry
 
@@ -16,12 +16,15 @@ is the only upstream registry. It ships with ak because the hook audit reads it.
 - `watchPolicy`: our GitHub logins, the stale limit (90 days), automated-reply patterns, the
   ledger issue and its sentinel, and the dispatch rules.
 - `watch`: every upstream issue or pull request ak filed, commented on, or cites in `src/`,
-  `bin/`, `claude/` or `tests/`, plus ak's own tracking issues that migrate here.
+  `bin/`, `claude/`, `tests/`, `README.md` or a guide in `docs/` (dated audits, proposals and
+  research references are exempt by name in `scripts/upstream-watch/citations.mjs`), plus ak's
+  own tracking issues that migrate here.
 
 The [schema](schemas/agentic-dependency-constraints.schema.json) describes the shape; the
 loader (`src/lib/hook-audit/upstream.mjs`) also checks that each constraint's issue has a
-watch entry naming it. `tests/kit/upstream-watch-registry.test.mjs` fails when source cites a
-watched-repository thread the list lacks, or when a file an entry names no longer cites it.
+watch entry naming it. `tests/kit/upstream-watch-registry.test.mjs` fails when source or a
+user-facing doc cites a watched-repository thread the list lacks, or when a file an entry names
+no longer cites it.
 
 A watch entry records:
 
