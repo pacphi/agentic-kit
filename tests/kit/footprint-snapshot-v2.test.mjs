@@ -8,13 +8,13 @@ import {
   readSnapshot, SNAPSHOT_SCHEMA_VERSION, writeSnapshot,
 } from '../../src/lib/footprint/snapshot.mjs';
 
-test('hosted-project population evidence invalidates earlier footprint snapshots instead of guessing', (t) => {
+test('discovery that sets imported Codex copies aside invalidates earlier footprint snapshots instead of guessing', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-footprint-snapshot-v3-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const file = path.join(root, 'snapshot.json');
 
-  assert.equal(SNAPSHOT_SCHEMA_VERSION, 7);
-  for (const schemaVersion of [1, 2, 3, 4, 5, 6]) {
+  assert.equal(SNAPSHOT_SCHEMA_VERSION, 8);
+  for (const schemaVersion of [1, 2, 3, 4, 5, 6, 7]) {
     fs.writeFileSync(file, `${JSON.stringify({ schemaVersion, asOf: 10, sections: { catalog: {} } })}\n`);
     const old = readSnapshot({ file });
     assert.equal(old.present, false);
@@ -25,6 +25,6 @@ test('hosted-project population evidence invalidates earlier footprint snapshots
   assert.equal(written.ok, true);
   const current = readSnapshot({ file });
   assert.equal(current.present, true);
-  assert.equal(current.schemaVersion, 7);
+  assert.equal(current.schemaVersion, 8);
   assert.equal(current.sections.catalog.asOf, 20);
 });
