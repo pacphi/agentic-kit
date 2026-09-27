@@ -393,6 +393,9 @@ export const SYNC_STEPS = [
         if (reg.reason === 'ak-not-on-path') {
           return { ok: false, detail: 'claude mcp registration skipped: `ak` is not on PATH, and the registration starts `ak x ruflo-mcp`; the existing registration was left in place' };
         }
+        if (reg.reason === 'ak-launcher-outdated') {
+          return { ok: false, detail: 'claude mcp registration skipped: the `ak` on PATH predates `ak x ruflo-mcp --host`, which the registration starts; update it, then run ak sync (the existing registration was left in place)' };
+        }
         if (!reg.ok) {
           return { ok: false, detail: 'claude mcp registration failed; prior compatible registration was restored when possible' };
         }

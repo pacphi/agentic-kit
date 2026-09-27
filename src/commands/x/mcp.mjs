@@ -71,6 +71,7 @@ export async function run({ flags, positionals }) {
     }
     const reg = await register();
     if (reg.reason === 'ak-not-on-path') { fail('`ak` is not on PATH; the registration starts `ak x ruflo-mcp --host claude`'); return 1; }
+    if (reg.reason === 'ak-launcher-outdated') { fail('the `ak` on PATH predates `ak x ruflo-mcp --host claude`, which the registration starts; update it first'); return 1; }
     if (!reg.ok) { fail('claude mcp add failed — is the claude CLI on PATH?'); return 1; }
     ok('claude-flow registered at user scope (starts through ak x ruflo-mcp)');
     const scoped = registrationStatus({ cwd: process.cwd() });

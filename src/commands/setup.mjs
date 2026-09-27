@@ -859,6 +859,8 @@ async function finalizeSetupGuidanceAndMcp(cfg, pkgRoot, flags) {
       ok(`MCP registered${denied ? ` (${denied} tool(s) denied per kit.json)` : ''} — exclude families anytime: ak x mcp pick`);
     } else if (reg.reason === 'ak-not-on-path') {
       warn('Ruflo MCP not re-registered: `ak` is not on PATH, and the registration starts `ak x ruflo-mcp` — put ak on PATH, then run ak sync');
+    } else if (reg.reason === 'ak-launcher-outdated') {
+      warn('Ruflo MCP not re-registered: the `ak` on PATH predates `ak x ruflo-mcp --host`, which the registration starts — update it, then run ak sync');
     } else warn('claude mcp add failed — run: ak x mcp pick');
     for (const entry of reg.preserved) {
       warn(`custom 'ruflo' MCP registration preserved (${entry.scope} scope) — not agentic-kit's registration; if unwanted, remove it: ${legacyRufloRemovalCommands([entry.scope])}`);

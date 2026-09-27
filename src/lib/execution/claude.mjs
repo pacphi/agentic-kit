@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { createJsonlSummaryCapture, createSubprocessExecutionAdapter } from './subprocess.mjs';
 import { HANDOFF_REQUEST_STRUCTURED, HANDOFF_SCHEMA_TEXT, parseHandoffText } from './handoff.mjs';
 
@@ -15,8 +16,15 @@ import { HANDOFF_REQUEST_STRUCTURED, HANDOFF_SCHEMA_TEXT, parseHandoffText } fro
 // the one seat with no flag after them). Every variadic flag is therefore
 // followed by another flag token, and the block ends on single-value
 // `--settings`, which consumes exactly one argument and so guards the prompt.
+// The one server is started through the running kit's own launcher (Claude
+// mode), not the `ak` on PATH: a PATH `ak` can be an older install that
+// rejects `--host`, and the seat exists only while this kit runs it.
+const KIT_BIN = fileURLToPath(new URL('../../../bin/agentic-kit.mjs', import.meta.url));
+const HERMETIC_MCP = JSON.stringify({ mcpServers: { ruflo: {
+  command: process.execPath, args: [KIT_BIN, 'x', 'ruflo-mcp', '--host', 'claude'],
+} } });
 const HERMETIC_FLAGS = Object.freeze([
-  '--strict-mcp-config', '--mcp-config', '{"mcpServers":{"ruflo":{"command":"ak","args":["x","ruflo-mcp","--host","claude"]}}}',
+  '--strict-mcp-config', '--mcp-config', HERMETIC_MCP,
   '--allowedTools', 'mcp__ruflo',
   '--settings', '{"disableAllHooks":true}',
 ]);

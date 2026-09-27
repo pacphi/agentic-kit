@@ -229,15 +229,16 @@ test('--dry-run prints a plan and then changes nothing at all', async () => {
   assertUnchanged(beforeProject, PROJECT, '`ak sync --dry-run` must not touch the project');
 });
 
-/** A fake `ak` on PATH for `fn`: the mcp rows are sync repairs only when `ak`
- *  resolves (register() refuses otherwise), and the sandbox PATH is empty.
- *  /usr/bin:/bin ride along for the `which` probe. */
+/** A fake `ak` on PATH for `fn`: the mcp rows are sync repairs only when the
+ *  PATH `ak` can run the launcher (register() refuses otherwise), and the
+ *  sandbox PATH is empty. It answers the launcher check's `--help` with the
+ *  `--host` option. /usr/bin:/bin ride along for the `which` probe. */
 async function withAkOnPath(fn) {
   const bin = path.join(HOME, 'fake-bin-ak');
   fs.mkdirSync(bin, { recursive: true });
-  fs.writeFileSync(path.join(bin, 'ak'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-  fs.writeFileSync(path.join(bin, 'ak.cmd'), '@echo off\r\nexit /b 0\r\n');
-  fs.writeFileSync(path.join(bin, 'ak.ps1'), 'exit 0\r\n');
+  fs.writeFileSync(path.join(bin, 'ak'), '#!/bin/sh\necho "  --host <claude|codex>"\nexit 0\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'ak.cmd'), '@echo off\r\necho   --host ^<claude^|codex^>\r\nexit /b 0\r\n');
+  fs.writeFileSync(path.join(bin, 'ak.ps1'), "Write-Output '  --host <claude|codex>'\r\nexit 0\r\n");
   const prev = process.env.PATH;
   process.env.PATH = [bin, '/usr/bin', '/bin'].join(path.delimiter);
   try { return await fn(); } finally { process.env.PATH = prev; rmrf(bin); }

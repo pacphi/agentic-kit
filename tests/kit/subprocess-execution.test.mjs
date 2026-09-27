@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createClaudeExecutionAdapter as createRealClaudeExecutionAdapter } from '../../src/lib/execution/claude.mjs';
@@ -337,8 +338,12 @@ test('hermetic seats isolate what each host allows, without any permission bypas
   assert.ok(claudeArgs.includes('--strict-mcp-config'));
   const mcp = claudeArgs.indexOf('--mcp-config');
   assert.match(claudeArgs[mcp + 1], /"ruflo"/);
-  assert.deepEqual(JSON.parse(claudeArgs[mcp + 1]).mcpServers.ruflo,
-    { command: 'ak', args: ['x', 'ruflo-mcp', '--host', 'claude'] }, 'the seat starts Ruflo through the launcher\'s Claude mode');
+  // The seat starts Ruflo through the running kit's own launcher (Claude
+  // mode), never a PATH `ak` that may predate `--host`.
+  assert.deepEqual(JSON.parse(claudeArgs[mcp + 1]).mcpServers.ruflo, {
+    command: process.execPath,
+    args: [fileURLToPath(new URL('../../bin/agentic-kit.mjs', import.meta.url)), 'x', 'ruflo-mcp', '--host', 'claude'],
+  }, 'the seat starts Ruflo through the running kit\'s launcher in Claude mode');
   const allowed = claudeArgs.indexOf('--allowedTools');
   assert.equal(claudeArgs[allowed + 1], 'mcp__ruflo');
   assert.ok(!claudeArgs.includes('--bare'), 'bare mode would silently switch billing off the subscription');

@@ -258,8 +258,9 @@ home folder itself, in a temporary root or inside a tool's own folder (`~/.codex
 `~/.claude`, `~/.config`, and similar), the launcher uses one user-level store,
 `~/.claude-flow/memory`, instead of creating `.swarm` there. `ak x harvest`
 follows the same rule, and `ak setup --project` refuses in such a folder. The
-Claude registration needs `ak` on the `PATH` Claude Code starts with; without it,
-setup and sync leave the existing registration in place and say so. OpenCode's managed MCP gateway and
+Claude registration needs `ak` on the `PATH` Claude Code starts with, at a version whose
+launcher takes `--host` (ak checks `ak x ruflo-mcp --help`); otherwise setup and sync leave
+the existing registration in place and say so. OpenCode's managed MCP gateway and
 lifecycle bridge receive its project directory and set the same absolute pin.
 Ruflo's MCP tools use `.swarm/agentdb-memory.db` beside the pinned
 `.swarm/memory.db`; that sibling is the native store, not configuration drift.

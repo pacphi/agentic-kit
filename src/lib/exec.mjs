@@ -33,8 +33,10 @@ const abortScope = new AsyncLocalStorage();
  * @template T @param {AbortSignal} signal @param {() => T} fn @returns {T} */
 export const withAbortSignal = (signal, fn) => abortScope.run(signal, fn);
 
+// `ak` too: the MCP launcher check asks the PATH `ak` (an npm shim on Windows)
+// for its help.
 const CMD_SHIMS = new Set([
-  'npm', 'npx', 'claude', 'codex', 'opencode', 'deja', 'ruflo', 'aqe', 'claude-flow',
+  'npm', 'npx', 'claude', 'codex', 'opencode', 'deja', 'ruflo', 'aqe', 'claude-flow', 'ak',
 ]);
 
 /** Build a shell-free invocation for `cmd`, trying Windows' shim extensions in
