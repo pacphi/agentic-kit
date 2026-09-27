@@ -32,12 +32,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { startDashboard as realStartDashboard } from '../../src/lib/dashboard-server.mjs';
 import { readMachineWideIntel } from '../../src/lib/dashboard/intel-history.mjs';
 import { resolveProjectIdentity } from '../../src/lib/live/project-label.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 const STUB_STATUS = { overall: 'ok', rows: [], drift: [] };
 
@@ -126,7 +126,7 @@ function fixtureProject(root, name, {
   return { path: dir, label: name, source: 'registry', learningScope: 'repository' };
 }
 
-const tempRoot = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ak-dash-intel-'));
+const tempRoot = () => tempDir('ak-dash-intel');
 
 test('picker metadata survives the cached API catalog without changing selection or learning history', async (t) => {
   const root = tempRoot();

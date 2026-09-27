@@ -1,12 +1,15 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { sandboxHome, sandboxProject, snapshot, assertUnchanged, captureLog } from './helpers/home-sandbox.mjs';
+import { sandboxHome, sandboxProject, snapshot, assertUnchanged, captureLog, rmrf } from './helpers/home-sandbox.mjs';
 
 const sandbox = sandboxHome('ak-host-alignment');
+after(() => rmrf(sandbox));
 const project = sandboxProject('ak-host-alignment');
+after(() => rmrf(project));
 const other = sandboxProject('ak-host-alignment-other');
+after(() => rmrf(other));
 const { run } = await import('../../src/commands/run.mjs');
 const legacy = { command: 'codex', args: ['mcp-server'] };
 const modern = { type: 'http', url: 'https://example.com/mcp' };

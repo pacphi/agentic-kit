@@ -3,7 +3,7 @@
 // does it) or 'manual' (a human must). `ak sync` plans only 'sync' fixes, so a
 // row sync cannot act on never enters its plan, and the census below proves
 // every subsystem that can emit a 'sync' fix has a sync step that runs for it.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -15,6 +15,7 @@ import {
 import { isolateProject } from './helpers/project-isolation.mjs';
 
 const HOME = sandboxHome('ak-repair-contract');
+after(() => rmrf(HOME));
 const paths = await import('../../src/lib/paths.mjs');
 const { row } = await import('../../src/commands/status/row.mjs');
 const sync = await import('../../src/commands/sync.mjs');
@@ -27,6 +28,7 @@ isolateProject('ak-repair-contract-cwd');
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const PROJECT = sandboxProject('ak-repair-contract');
+after(() => rmrf(PROJECT));
 paths._setGlobalRootForTest(fakeGlobalRoot(HOME, { ruflo: '9.9.9', 'agentic-qe': '9.9.9' }));
 
 function seedHome(cfg = offlineKitConfig()) {

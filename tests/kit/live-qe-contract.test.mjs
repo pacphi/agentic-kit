@@ -1,13 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import {
   createLiveEvent, JsonlTailer, emptyLiveProjection, reduceLiveEvent,
 } from '../../src/lib/live/index.mjs';
 import { LIVE_CSS, LIVE_HTML, LIVE_JS } from '../../src/lib/dashboard/live-view.mjs';
 import { renderPage } from '../../src/lib/dashboard/page.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 const observedAt = '2026-07-27T12:00:00Z';
 const PAGE_HTML = renderPage({ name: 'agentic-kit', version: 'test' });
@@ -37,7 +37,7 @@ test('canonical event serialization is a closed allowlist under arbitrary extra 
 });
 
 test('JSONL tailing preserves a UTF-8 record split across byte-level appends', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-utf8-'));
+  const dir = tempDir('ak-live-utf8');
   const file = path.join(dir, 'events.jsonl');
   const bytes = Buffer.from(`${JSON.stringify({ label: 'agent 🐝' })}\n`);
   const split = bytes.indexOf(Buffer.from('🐝')) + 2;

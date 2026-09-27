@@ -1,13 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildIndex, _resetForTest } from '../../src/lib/usage-index.mjs';
 import { costOf, priceFor, PRICES_AS_OF } from '../../src/lib/pricing.mjs';
 import { classify } from '../../src/lib/usage-classify.mjs';
 import { detectInsights } from '../../src/lib/usage-insights.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 // ADR-0009 follow-up decision 4 — the `deps` seam, executed for real.
 //
@@ -39,7 +39,7 @@ const SEVERITIES = new Set(['warn', 'info', 'ok']);
  * $-free, which would leave the `impact` contract's number branch untested.
  */
 function corpus() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-deps-'));
+  const dir = tempDir('ak-deps');
   fs.cpSync(FIXTURES, path.join(dir, 'corpus'), { recursive: true });
   const proj = path.join(dir, 'corpus', 'claude', '-Users-me-proj');
 

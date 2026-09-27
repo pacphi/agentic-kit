@@ -20,10 +20,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { _setGlobalRootForTest } from '../../src/lib/paths.mjs';
 import { helperStampStale, refreshRufloHelpers, runHelperRefresh, fixStatusline } from '../../src/lib/statusline.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 // Minimal host: just the shapes fixStatusline keys off, runnable post-injection.
 const HOST = `#!/usr/bin/env node
@@ -82,7 +82,7 @@ const REFRESH_BODIES = { faithful: FAKE_REFRESH, throws: THROWING_REFRESH, hangs
   blocked: BLOCKED_REFRESH, noop: NOOP_REFRESH, global: GLOBAL_REFRESH };
 
 function fixture({ cliVersion = '3.32.7', stamp, refreshModule } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-stamp-'));
+  const dir = tempDir('ak-stamp');
   const proj = path.join(dir, 'proj');
   const helpers = path.join(proj, '.claude', 'helpers');
   fs.mkdirSync(helpers, { recursive: true });

@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { JsonlTailer } from '../../src/lib/live/index.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 const tempFile = () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-'));
+  const dir = tempDir('ak-live');
   return path.join(dir, 'events.jsonl');
 };
 
@@ -147,7 +147,7 @@ test('an unreadable file is reported once, even when it has no new bytes', { ski
 });
 
 test('a path that is not a regular file is unreadable, never opened', (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-'));
+  const dir = tempDir('ak-live');
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const errors = [];
   const tailer = new JsonlTailer(dir, { onRecord: () => {}, onError: (error) => errors.push(error.code) });

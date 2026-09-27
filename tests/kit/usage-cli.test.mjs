@@ -4,16 +4,16 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { MODES } from '../../src/lib/usage-modes.mjs';
 import { spawnEnv } from './helpers/home-sandbox.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin/agentic-kit.mjs');
 
 function sandbox() {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-usage-cli-'));
+  const home = tempDir('ak-usage-cli');
   const cfg = path.join(home, '.config');
   const bin = path.join(home, 'bin');
   const sentinel = path.join(home, 'npm-was-called');

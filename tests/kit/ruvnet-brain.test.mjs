@@ -11,6 +11,7 @@ import {
 import { brainReleaseRow } from '../../src/commands/status/sections/ruvnet-brain.mjs';
 import { BUILTIN_BLOCKS, detect } from '../../src/lib/blocks.mjs';
 import { loadKitConfig, saveKitConfig } from '../../src/lib/config.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 const withEnv = (key, value, fn) => {
   const prev = process.env[key];
@@ -83,7 +84,7 @@ test('an announced release without a bundle stays visible but is not an ak sync 
 
 test('installedReleaseOnDisk reads SOURCE.json releaseTag — validated, v-stripped, null-safe', () => {
   const writeSource = (body) => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rb-src-'));
+    const tmp = tempDir('rb-src');
     if (body !== null) fs.writeFileSync(path.join(tmp, 'SOURCE.json'), body);
     return tmp;
   };
@@ -114,7 +115,7 @@ test('nightly self-updater detection: label/plist fixed, present() is darwin-gat
 });
 
 test('present() is true when the KB entrypoint exists (forge-mcp-all.mjs)', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rb-kb-'));
+  const tmp = tempDir('rb-kb');
   fs.writeFileSync(path.join(tmp, 'forge-mcp-all.mjs'), '// stub');
   withEnv('RUVNET_BRAIN_KB', tmp, () => {
     assert.equal(present(), true);
@@ -177,7 +178,7 @@ test('BUILTIN_BLOCKS prefers managed Brain intent and keeps the KB probe as fall
     flags: { claudeEnabled: true, ruvnetBrainEnabled: false },
   }), false, 'persisted opt-out wins over filesystem presence');
   // dir detector: true when the target exists, false when absent
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rb-det-'));
+  const tmp = tempDir('rb-det');
   assert.equal(await detect({ type: 'dir', target: tmp }), true);
   assert.equal(await detect({ type: 'dir', target: path.join(tmp, 'nope') }), false);
   fs.rmSync(tmp, { recursive: true, force: true });
@@ -192,7 +193,7 @@ test('the ruvnet-brain-reference template ships and is self-sentineled', () => {
 });
 
 test('kit config: ruvnetBrain defaults true and round-trips a false override', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rb-cfg-'));
+  const tmp = tempDir('rb-cfg');
   const f = path.join(tmp, 'kit.json');
   assert.equal(loadKitConfig(f).ruvnetBrain, true, 'default is on');
   const cfg = loadKitConfig(f);
@@ -209,7 +210,7 @@ test('legacySnapshotBytes: no cache root → count 0, bytes null, never throws',
 });
 
 test('legacySnapshotBytes: ignores kb/ itself and anything not matching the legacy prefixes', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rb-legacy-none-'));
+  const tmp = tempDir('rb-legacy-none');
   fs.mkdirSync(path.join(tmp, 'kb'));
   fs.writeFileSync(path.join(tmp, 'kb', 'forge-mcp-all.mjs'), 'x'.repeat(1000));
   fs.mkdirSync(path.join(tmp, 'versions'));
@@ -218,7 +219,7 @@ test('legacySnapshotBytes: ignores kb/ itself and anything not matching the lega
 });
 
 test('legacySnapshotBytes: sums bytes recursively across every kb.bak-*/kb.install-preserved-* dir', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rb-legacy-sum-'));
+  const tmp = tempDir('rb-legacy-sum');
   fs.mkdirSync(path.join(tmp, 'kb.bak-2026-07-13T10-00-00-000Z', 'nested'), { recursive: true });
   fs.writeFileSync(path.join(tmp, 'kb.bak-2026-07-13T10-00-00-000Z', 'a.rvf'), 'x'.repeat(500));
   fs.writeFileSync(path.join(tmp, 'kb.bak-2026-07-13T10-00-00-000Z', 'nested', 'b.rvf'), 'x'.repeat(250));
@@ -234,7 +235,7 @@ test('legacySnapshotBytes: sums bytes recursively across every kb.bak-*/kb.insta
 });
 
 test('legacySnapshotBytes: a file cap hit still reports a count and a lower-bound sum', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rb-legacy-cap-'));
+  const tmp = tempDir('rb-legacy-cap');
   const dir = path.join(tmp, 'kb.install-preserved-zzz');
   fs.mkdirSync(dir);
   for (let i = 0; i < 5; i += 1) fs.writeFileSync(path.join(dir, `f${i}.rvf`), 'x'.repeat(100));
@@ -253,7 +254,7 @@ test('legacySnapshotBytes: a file cap hit still reports a count and a lower-boun
 test('legacySnapshotBytes: an unreadable snapshot dir keeps bytes honestly null, not a false zero', {
   skip: process.platform === 'win32' || process.getuid?.() === 0,
 }, () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rb-legacy-unreadable-'));
+  const tmp = tempDir('rb-legacy-unreadable');
   const dir = path.join(tmp, 'kb.bak-2026-07-01T00-00-00-000Z');
   fs.mkdirSync(dir);
   fs.writeFileSync(path.join(dir, 'a.rvf'), 'x'.repeat(100));

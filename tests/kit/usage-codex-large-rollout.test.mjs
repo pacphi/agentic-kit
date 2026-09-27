@@ -11,6 +11,7 @@ import { buildIndex, _resetForTest } from '../../src/lib/usage-index.mjs';
 import { parseCodex } from '../../src/lib/usage-parsers.mjs';
 import { openCodexRollout } from '../../src/lib/codex-rollout-reader.mjs';
 import { Rollout, usage, codexSandbox, stubDeps, forkedSubagent } from './helpers/codex-rollout.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 const NOW = Date.parse('2026-07-25T12:00:00.000Z');
 const opts = (sb, extra = {}) => ({
@@ -18,7 +19,7 @@ const opts = (sb, extra = {}) => ({
 });
 
 function tmpFile(body, name = 'rollout.jsonl') {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-codex-reader-'));
+  const dir = tempDir('ak-codex-reader');
   const file = path.join(dir, name);
   fs.writeFileSync(file, body);
   return file;

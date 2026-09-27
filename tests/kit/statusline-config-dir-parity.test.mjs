@@ -12,6 +12,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnEnv } from './helpers/home-sandbox.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 // A bare absolute path is not a valid ESM specifier on Windows (`D:` parses as a URL
@@ -38,7 +39,7 @@ function realConfigDir(platform, env, home) {
   });
 }
 
-const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-parity-home-'));
+const home = tempDir('ak-parity-home');
 const CASES = [
   ['win32 with APPDATA', 'win32', { APPDATA: '/w/AppData', XDG_CONFIG_HOME: '/x' }],
   ['win32 without APPDATA', 'win32', {}],

@@ -1,8 +1,9 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { sandboxHome } from './helpers/home-sandbox.mjs';
+import { sandboxHome, rmrf } from './helpers/home-sandbox.mjs';
 
-sandboxHome('ak-sync-host-repair');
+const SANDBOX_HOME = sandboxHome('ak-sync-host-repair');
+after(() => rmrf(SANDBOX_HOME));
 const sync = await import('../../src/commands/sync.mjs');
 
 const hostsStep = sync.SYNC_STEPS.find((s) => s.id === 'hosts');

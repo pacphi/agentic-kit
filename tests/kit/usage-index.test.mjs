@@ -2,7 +2,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -18,6 +17,7 @@ import {
   aggregate, percentileFromBuckets, modelFamily,
   LAT_BUCKET_EDGES as AGG_LAT_EDGES, LEN_BUCKET_EDGES as AGG_LEN_EDGES,
 } from '../../src/lib/usage-aggregate.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(HERE, '..', 'fixtures', 'usage');
@@ -30,7 +30,7 @@ const NOW = Date.parse('2026-07-25T12:00:00.000Z');
 /** Copy the fixture corpus into a throwaway tmpdir; return injectable roots +
  *  a cache path. Nothing here ever touches ~/.claude, ~/.codex or ~/.config. */
 function sandbox() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-usage-'));
+  const dir = tempDir('ak-usage');
   fs.cpSync(FIXTURES, path.join(dir, 'corpus'), { recursive: true });
   return {
     dir,
@@ -63,7 +63,7 @@ const byId = (agg, id) => agg.sessions.find((s) => s.id === id);
 /** A sandbox with NO fixture corpus — for engaged-time tests that need a single
  *  session's arithmetic to be the whole of the answer. */
 function soloSandbox() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-usage-solo-'));
+  const dir = tempDir('ak-usage-solo');
   const claude = path.join(dir, 'claude', '-Users-me-proj');
   fs.mkdirSync(claude, { recursive: true });
   return {
@@ -926,7 +926,7 @@ test('the window excludes sessions older than `days`', async () => {
 
 test('an empty corpus yields a zeroed Aggregate rather than throwing', async () => {
   _resetForTest();
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-usage-empty-'));
+  const dir = tempDir('ak-usage-empty');
   const agg = await buildIndex({
     days: 14, now: NOW, deps: deps(),
     roots: { claude: path.join(dir, 'nope'), codex: path.join(dir, 'also-nope') },
@@ -967,7 +967,7 @@ test('buildIndex reports ok claude/codex root health when the transcript roots e
 
 test('an unreadable Claude root degrades rather than silently reading as zero sessions', async () => {
   _resetForTest();
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-usage-unreadable-'));
+  const dir = tempDir('ak-usage-unreadable');
   const claudeRoot = path.join(dir, 'claude-is-a-file');
   fs.writeFileSync(claudeRoot, 'not a directory'); // readdirSync on this throws ENOTDIR, not ENOENT
   const agg = await buildIndex({

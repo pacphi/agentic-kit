@@ -17,7 +17,7 @@
 // In-process against the sandboxed HOME (see helpers/home-sandbox.mjs) —
 // `pick()` must NEVER touch the real HOME (the historic #137 trap: a spawned
 // pick() with an undefined cwd wrote into the real repository).
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -27,6 +27,7 @@ import {
 import { isolateProject } from './helpers/project-isolation.mjs';
 
 const HOME = sandboxHome('ak-routing-retirement');
+after(() => rmrf(HOME));
 const paths = await import('../../src/lib/paths.mjs');
 const host = await import('../../src/commands/x/host.mjs');
 const setup = await import('../../src/commands/setup.mjs');
@@ -106,6 +107,7 @@ function seedKitConfig(cfg) {
 
 test('ak host pick heals a retired seeded route instead of leaving it for the next sync', async () => {
   const project = sandboxProject('ak-pick-retirement');
+  after(() => rmrf(project));
   seedKitConfig(baseCfg({ testing: { host: 'claude', model: 'retired-model-x', provenance: 'seeded' } }));
   const { migrate, calls } = fakeMigrateThatRetires('testing', 'retired-model-x', 'replacement-model');
 
@@ -124,6 +126,7 @@ test('ak host pick heals a retired seeded route instead of leaving it for the ne
 
 test('ak host pick reports (but never rewrites) a user pin on a retired model', async () => {
   const project = sandboxProject('ak-pick-retirement-user-pin');
+  after(() => rmrf(project));
   seedKitConfig(baseCfg({ testing: { host: 'claude', model: 'retired-model-x', provenance: 'user' } }));
   const calls = [];
   const migrate = (cfg) => {
@@ -160,6 +163,7 @@ const withProjectCli = (fn) => withFakePath(['ruflo', 'claude'], fn);
 
 test('ak setup --project heals a retired seeded route instead of leaving it for the next sync', async () => {
   const project = sandboxProject('ak-setup-retirement');
+  after(() => rmrf(project));
   const cwd = process.cwd();
   process.chdir(project);
   const { migrate, calls } = fakeMigrateThatRetires('testing', 'retired-model-x', 'replacement-model');

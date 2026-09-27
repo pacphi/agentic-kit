@@ -5,7 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { enabledPluginRefs, inspectCodexPlugins } from '../../src/lib/codex-plugins.mjs';
 
-const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-codex-plugins-'));
+// One level below the temp folder: the traversal test resolves `cache/../../outside-market`,
+// which must land inside this test's own folder, never in os.tmpdir() itself.
+const ROOT = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ak-codex-plugins-')), 'codex');
+fs.mkdirSync(ROOT);
 const configFile = path.join(ROOT, 'config.toml');
 const cacheDir = path.join(ROOT, 'cache');
 
@@ -263,7 +266,7 @@ test('known Codex runtime-output incompatibilities are version-bounded advisorie
   assert.deepEqual(inspect().issues, [], 'a later release is not presumed broken');
 });
 
-test.after(() => fs.rmSync(ROOT, { recursive: true, force: true }));
+test.after(() => fs.rmSync(path.dirname(ROOT), { recursive: true, force: true }));
 
 test('Codex skill display names may contain capitals and differ from directory names', () => {
   fs.rmSync(cacheDir, { recursive: true, force: true });

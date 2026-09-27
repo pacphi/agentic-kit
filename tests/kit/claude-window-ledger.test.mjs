@@ -1,17 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import {
   readClaudeWindowLog, statClaudeWindowLedger, windowAt, claudeWindowLedgerPath,
   WINDOW_LEAD_TOLERANCE_MS, MAX_LEDGER_BYTES,
 } from '../../src/lib/claude-window-ledger.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 const SID = '0f8fad5b-d9cb-469f-a165-70867728950e';
 
 function configDirWith(sessionId, content) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-window-reader-'));
+  const dir = tempDir('ak-window-reader');
   const ledger = path.join(dir, 'claude-context-windows');
   fs.mkdirSync(ledger, { recursive: true });
   if (content !== undefined) {

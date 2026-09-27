@@ -4,13 +4,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { codexStateDb, readCodexState } from '../../src/lib/codex-state.mjs';
 import { applyCodexLedger } from '../../src/lib/usage-index.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ak-codex-state-'));
+const tmp = () => tempDir('ak-codex-state');
 
 /** Build a fixture ledger shaped like the real state_5.sqlite (verified live
  *  2026-07-31: threads has id/thread_source/source/model/git_branch/tokens_used

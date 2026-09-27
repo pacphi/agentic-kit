@@ -7,7 +7,7 @@
 // back to PATH/dir/always probes and reported drift sync would never act on —
 // in both directions. Each scenario converges CLAUDE.md with sync's exact call,
 // then asks all three readers.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -17,6 +17,7 @@ import {
 } from './helpers/home-sandbox.mjs';
 
 const HOME = sandboxHome('ak-blocks-parity');
+after(() => rmrf(HOME));
 const paths = await import('../../src/lib/paths.mjs');
 const { reconcileGuidance, upsertBlock, stripBlock, BEGIN } = await import('../../src/lib/blocks.mjs');
 const blocksSection = (await import('../../src/commands/status/sections/blocks.mjs')).default;
@@ -27,6 +28,7 @@ assertSandboxed(paths, HOME);
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const PROJECT = sandboxProject('ak-blocks-parity');
+after(() => rmrf(PROJECT));
 const SANDBOX_PATH = process.env.PATH;
 
 /** Fresh machine guidance + kit.json, then sync's exact (writing) reconcile. */

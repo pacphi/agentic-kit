@@ -4,16 +4,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import {
   CONFORMANCE_TIERS, TIER_GRANTS,
   recordTierResult, recordTierGate, recordTierFailure, grantCapability, revokeGrants, revokeCapability,
   grantsFor, grantedCapabilitiesFor, gatedTiersFor,
 } from '../../src/lib/adapters/grants.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 function tempFile() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-adapter-grants-'));
+  const dir = tempDir('ak-adapter-grants');
   return path.join(dir, 'adapter-grants.json');
 }
 
@@ -166,7 +166,7 @@ test("revokeGrants on prototype-chain names ('constructor', '__proto__', 'toStri
 });
 
 test('corrupt or missing file tolerance: grantsFor null, grantedCapabilitiesFor {}, gatedTiersFor []', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-adapter-grants-corrupt-'));
+  const dir = tempDir('ak-adapter-grants-corrupt');
   const missing = path.join(dir, 'does-not-exist.json');
   assert.equal(grantsFor('acme', { file: missing }), null);
   assert.deepEqual(grantedCapabilitiesFor('acme', HASH_A, { file: missing }), {});

@@ -1,7 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import {
   adaptClaudeTranscriptRecord,
@@ -9,10 +8,11 @@ import {
   TranscriptStreams,
 } from '../../src/lib/live/index.mjs';
 import { waitUntil } from './helpers/wait-until.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
 
 const line = (value) => `${JSON.stringify(value)}\n`;
 const sandbox = () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-transcript-'));
+  const dir = tempDir('ak-transcript');
   const claude = path.join(dir, 'claude', 'project');
   const codex = path.join(dir, 'codex', '2026', '07', '27');
   fs.mkdirSync(claude, { recursive: true });
