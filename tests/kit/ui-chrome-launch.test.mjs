@@ -44,7 +44,8 @@ test('launchChrome gives Chrome its own temp folder and removes it, fetcher left
   assert.equal(seen.headless, false, 'caller options win');
   const dir = seen.env.TMPDIR;
   for (const key of ['TEMP', 'TMP', 'MAC_CHROMIUM_TMPDIR']) assert.equal(seen.env[key], dir, key);
-  assert.equal(path.dirname(dir), fs.realpathSync(os.tmpdir()));
+  const fold = (p) => (process.platform === 'win32' ? p.toLowerCase() : p); // drive-letter case varies on Windows
+  assert.equal(fold(path.dirname(dir)), fold(fs.realpathSync(os.tmpdir())));
   assert.ok(Object.keys(seen.env).some((k) => k.toUpperCase() === 'PATH'), 'the browser keeps its search path');
   fs.mkdirSync(path.join(dir, 'com.google.Chrome.chrome_chrome_url_fetcher_.AbC123'));
   await browser.close();
