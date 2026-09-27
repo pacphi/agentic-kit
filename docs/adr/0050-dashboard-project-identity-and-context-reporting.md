@@ -2,9 +2,13 @@
 
 - **Status:** Implemented
 - **Date:** 2026-09-09
-- **Updated:** 2026-09-26 — the `project-concentration` Finding ranks `gitProjects`, not the
-  folder-label `byProject`, so it agrees with Score → Projects (#238 item 7)
-- **Earlier update:** 2026-09-09 — scoped context-card network claims for issue #211
+- **Updated:** 2026-09-27 — a Codex rollout the ChatGPT desktop app imported from a Claude Code
+  transcript gives no session origin, even though it declares `Codex Desktop`
+  ([ADR-0052](0052-codex-usage-attribution.md) §3,
+  [ADR-0060](0060-session-surface-initiator-and-product-names.md) §3)
+- **Earlier updates:** 2026-09-26 — the `project-concentration` Finding ranks `gitProjects`, not
+  the folder-label `byProject`, so it agrees with Score → Projects (#238 item 7); 2026-09-09 —
+  scoped context-card network claims for issue #211
 - **Related:** [ADR-0036](0036-dashboard-client-modularization-and-shared-loopback-server.md),
   [ADR-0048](0048-inventory-led-maintenance-resource-management.md)
 
@@ -34,6 +38,9 @@ Session origin comes from bounded transcript metadata, separate from the existin
 - Claude `entrypoint`: `claude-desktop`, `claude-desktop-3p`, `remote_desktop`.
 - Codex `session_meta.originator`: `Codex Desktop`, `codex_work_desktop`.
 - Everything else, including ambiguous SDK and VS Code markers: unknown.
+
+A Codex rollout whose turns carry the `external-import-turn` marker is a copy of a Claude Code
+transcript, not a Codex session. It supplies no origin, whatever its `originator` says.
 
 These are source declarations, not attestation of the initiating application.
 Claude's installed 2.1.266 runtime maps those entrypoints to Claude Desktop;
