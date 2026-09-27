@@ -240,6 +240,44 @@ test('convergenceVerdict never counts a manual row, with or without a plan', () 
     ['memory-pin'], 'control: a fail row without a manual fix still counts');
 });
 
+test('a manual fail row never hides a recorded apply failure for its own subsystem', () => {
+  // Minor 3 (review-sync-exit.md): a manual row's subsystem is exactly the
+  // subsystem a synthetic apply-failed entry names, so the `!remaining.some(...)`
+  // guards in convergenceVerdict must add that entry even though `counts()`
+  // already excludes the manual row itself from `remaining`.
+  const cfg = loadKitConfig();
+  const flags = FLAGS();
+  const cases = [
+    {
+      manual: row('providers', 'fail', 'external intent unavailable', 'revoke the grant yourself', { repair: 'manual' }),
+      state: { applyFailures: [], aqeRouterApplyFailure: 'boom' },
+      expected: { subsystem: 'providers', message: 'AQE router apply failed: boom', reason: 'apply-failed' },
+    },
+    {
+      manual: row('codex-mcp', 'fail', 'recursive Codex registration you own', 'remove it yourself', { repair: 'manual' }),
+      state: { applyFailures: [], codexRepairFailure: 'Codex MCP repair was declined mid-run' },
+      expected: { subsystem: 'codex-mcp', message: 'Codex MCP repair was declined mid-run', reason: 'apply-failed' },
+    },
+    {
+      manual: row('deja-vu', 'fail', 'index owned outside the kit', 'rebuild it yourself', { repair: 'manual' }),
+      state: { applyFailures: [], dejaVuApplyFailed: true },
+      expected: { subsystem: 'deja-vu', message: 'companion lifecycle apply failed', reason: 'apply-failed' },
+    },
+  ];
+  for (const { manual, state, expected } of cases) {
+    const withFailure = sync.convergenceVerdict({ plan: [], after: [manual], state, flags, cfg });
+    assert.deepEqual(withFailure.unresolved, [], expected.subsystem);
+    assert.deepEqual(withFailure.remaining, [expected],
+      `${expected.subsystem}: the manual row must not mask its subsystem's recorded apply failure`);
+
+    const withoutFailure = sync.convergenceVerdict({
+      plan: [], after: [manual], state: { applyFailures: [] }, flags, cfg,
+    });
+    assert.deepEqual(withoutFailure.remaining, [],
+      `${expected.subsystem}: with no apply failure recorded, the manual row alone still stays out of remaining`);
+  }
+});
+
 test('a skipped subsystem\'s manual row is not "skipped by request": sync never does it anyway', () => {
   const verdict = sync.convergenceVerdict({
     plan: [RVF_WARN], after: [MANUAL_FAIL], state: { applyFailures: [] }, flags: FLAGS(), cfg: loadKitConfig(),
