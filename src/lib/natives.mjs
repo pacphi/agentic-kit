@@ -208,17 +208,26 @@ export async function probeBsq3Runtime(dir, { runner = run, timeoutMs = PROBE_TI
     // Timeout evidence comes from this signal alone: run() folds a killed child
     // into the same {code:1} as any other failure, and stderr words prove nothing.
     // run()'s own timeout is a backstop that must never fire first.
-    const signal = AbortSignal.timeout(timeoutMs);
+    // Not AbortSignal.timeout(): its timer is unref'd, so the probe's own deadline
+    // would not keep the process alive while an attempt waits, and a caller whose
+    // runner holds no handle would exit mid-probe. This timer is ref'd and is
+    // cleared as soon as the attempt settles, so a fast probe leaves none behind.
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
+    }, timeoutMs);
     let r;
     try {
-      r = await runner('node', ['-e', RUNTIME_PROBE, dir], { cwd: dir, timeout: timeoutMs + 1000, signal });
+      r = await runner('node', ['-e', RUNTIME_PROBE, dir], { cwd: dir, timeout: timeoutMs + 1000, signal: controller.signal });
     } catch (error) {
       r = { code: 1, stderr: String(error?.message ?? error) };
+    } finally {
+      clearTimeout(timer);
     }
     if (r.code === 0) return { ok: true, state: 'native', attempts: attempt };
     const cause = loadFailure(r.stderr);
     if (cause) return { ok: false, state: 'unavailable', attempts: attempt, reason: cause };
-    if (!signal.aborted) return { ok: false, state: 'inconclusive', attempts: attempt, reason: undiagnosed(r) };
+    if (!controller.signal.aborted) return { ok: false, state: 'inconclusive', attempts: attempt, reason: undiagnosed(r) };
     if (attempt >= PROBE_ATTEMPTS) {
       return { ok: false, state: 'inconclusive', attempts: attempt, reason: `native probe timed out after ${attempt} attempts` };
     }

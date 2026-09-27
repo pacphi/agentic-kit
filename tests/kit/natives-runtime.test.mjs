@@ -219,6 +219,28 @@ test('probeBsq3Runtime retries a timed-out probe once, then reports inconclusive
   }
 });
 
+/** Ref'd timers only: an unref'd one (AbortSignal.timeout's) is not listed. */
+const refdTimers = () => process.getActiveResourcesInfo().filter((r) => r === 'Timeout').length;
+
+test('probeBsq3Runtime keeps the process alive while an attempt waits on its deadline', async () => {
+  // Node 22's test runner cancels a test once nothing holds the loop open; 24 and
+  // 26 do not, so count the probe's own ref'd timer to pin this on every Node.
+  const pending = [];
+  const baseline = refdTimers();
+  const hang = hangingRunner([]);
+  const runner = (cmd, args, opts) => { pending.push(refdTimers()); return hang(cmd, args, opts); };
+  await probeBsq3Runtime('/x', { runner, timeoutMs: 20 });
+  assert.equal(pending.length, 2);
+  for (const count of pending) assert.ok(count > baseline, `a ref'd deadline timer while the attempt waits (${count} vs ${baseline})`);
+});
+
+test('probeBsq3Runtime clears its deadline timer once the attempt settles', async () => {
+  const baseline = refdTimers();
+  const r = await probeBsq3Runtime('/x', { runner: async () => ({ code: 0, stdout: '', stderr: '' }), timeoutMs: 60_000 });
+  assert.equal(r.state, 'native');
+  assert.equal(refdTimers(), baseline, 'no deadline timer outlives a probe that answered in time');
+});
+
 test('probeBsq3Runtime passes when the retry after a timeout loads', async () => {
   const calls = [];
   const hang = hangingRunner(calls);
