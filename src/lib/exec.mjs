@@ -89,14 +89,16 @@ export function resolveShim(cmd, args = [], { windows = isWindows, env = process
 }
 
 /** Normalize whatever a failed spawn threw into `run()`'s never-throws shape.
- *  A signal kill (the timeout path below) leaves `err.code` null, which lands
- *  on 1 — non-zero, so a caller reading only the code can never mistake a
- *  killed run's partial stdout for a completed one. */
+ *  A signal kill (the timeout path below, or a crash) leaves `err.code` null,
+ *  which lands on 1 — non-zero, so a caller reading only the code can never
+ *  mistake a killed run's partial stdout for a completed one. The signal
+ *  itself is kept as `signal` so a caller can name the real cause. */
 function failureResult(err, stdout = '', stderr = '') {
   return {
     code: typeof err.code === 'number' ? err.code : 1,
     stdout: err.stdout ?? stdout ?? '',
     stderr: err.stderr || stderr || String(err.message ?? err),
+    ...(err.signal ? { signal: err.signal } : {}),
   };
 }
 

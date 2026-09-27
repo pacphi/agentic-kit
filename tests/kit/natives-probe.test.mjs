@@ -69,3 +69,18 @@ test('real probe: a wrong SELECT 1 row is unavailable', async () => {
     assert.match(r.reason, /SELECT 1/);
   } finally { f.cleanup(); }
 });
+
+// contracts-6: a binding that crashes the probe is still inconclusive (by
+// design: an abort can be ruvnet/ruflo#2885's exit-time crash), but the reason
+// names the signal instead of claiming the probe "exited 1".
+test('real probe: a binding that crashes the probe names the signal', {
+  skip: process.platform === 'win32' ? 'POSIX signals' : false,
+}, async () => {
+  const f = fixture("process.kill(process.pid, 'SIGSEGV')");
+  try {
+    const r = await probeBsq3Runtime(f.dir);
+    assert.equal(r.state, 'inconclusive');
+    assert.match(r.reason, /SIGSEGV/);
+    assert.doesNotMatch(r.reason, /exited 1/);
+  } finally { f.cleanup(); }
+});

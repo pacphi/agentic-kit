@@ -186,11 +186,14 @@ function loadFailure(stderr) {
   } catch { return null; } // malformed output proves nothing: inconclusive
 }
 
-/** Why a probe without a load verdict ended. run() reports a crashed or killed
- *  child as execFile's "Command failed: <the probe source>", which is not a cause. */
+/** Why a probe without a load verdict ended. A child killed by a signal (a
+ *  crashing binding) is named by that signal. run() reports a crashed or killed
+ *  child as execFile's "Command failed: <the probe source>", which is not a
+ *  cause, and Node's crash banners ("----- Native stack trace -----") are not either. */
 function undiagnosed(r) {
+  if (r.signal) return `native probe was killed by ${r.signal}`;
   const line = String(r.stderr ?? '').split('\n').map((l) => l.trim())
-    .find((l) => l && !l.startsWith('Command failed:'));
+    .find((l) => l && !l.startsWith('Command failed:') && !/^-{3,}.*-{3,}$/.test(l));
   return line ? conciseLoadError(line) : `native probe exited ${r.code} without a diagnostic`;
 }
 
