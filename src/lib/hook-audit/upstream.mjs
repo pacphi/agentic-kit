@@ -27,6 +27,16 @@ function validDate(value) {
     && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 }
 
+// Optional rolling support window on a dependency policy (ADR-0041 §7):
+// the newest N minors, never fewer than those first published within minDays.
+function validSupportWindow(window) {
+  if (window === undefined) return true;
+  const positive = (value) => Number.isInteger(value) && value > 0;
+  return Boolean(window) && typeof window === 'object'
+    && positive(window.newestMinors) && positive(window.minDays)
+    && typeof window.basis === 'string';
+}
+
 function affectedBy(version, ranges) {
   if (typeof version !== 'string' || !version || version === 'unknown') return null;
   return ranges.some((range) => range === version
@@ -75,7 +85,8 @@ function loadRegistry({
         && Array.isArray(entry.evidenceRequired)
         && typeof entry.workaroundPolicy === 'string'
         && typeof entry.retestPolicy === 'string'
-        && typeof entry.removalProof === 'string';
+        && typeof entry.removalProof === 'string'
+        && validSupportWindow(entry.supportWindow);
       if (valid && policyNames.has(entry.dependency)) errors.push(`dependency policy ${index} duplicates ${entry.dependency}`);
       if (valid) policyNames.add(entry.dependency);
       if (!valid) errors.push(`dependency policy ${index} is invalid`);

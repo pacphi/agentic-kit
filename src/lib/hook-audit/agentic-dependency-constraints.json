@@ -33,7 +33,13 @@
       "evidenceRequired": ["installed-version", "affected-range", "minimal-reproduction", "expected-versus-observed", "artifact-digest"],
       "workaroundPolicy": "bounded, receipt-owned, version-gated, and never applied to generated runtime caches",
       "retestPolicy": "weekly, on observed release, and before managed upgrade",
-      "removalProof": "released artifact passes the host-neutral hook and lifecycle conformance suite"
+      "removalProof": "released artifact passes the host-neutral hook and lifecycle conformance suite",
+      "supportWindow": {
+        "newestMinors": 6,
+        "minDays": 30,
+        "basis": "first npm publish of each minor",
+        "unsupported": "ak status reports the installed Ruflo as unsupported and points to ak sync"
+      }
     },
     {
       "dependency": "agentic-qe",
