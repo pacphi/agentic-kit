@@ -263,7 +263,9 @@ function refreshHelpersBeforeInjection(root) {
   let stamp = null;
   if (clearStamp) {
     try { stamp = fs.readFileSync(stampFile, 'utf8'); } catch { /* absent: nothing to restore */ }
-    fs.rmSync(stampFile, { force: true });
+    // A folder ak cannot write leaves the stamp in place; Ruflo's refresh then
+    // skips, and the repair is reported as failed below instead of aborting sync.
+    try { fs.rmSync(stampFile, { force: true }); } catch { /* reported as a failed repair */ }
   }
   refreshRufloHelpers(root);
   if (!ahead) return { versionRepair: null, versionAhead: null };

@@ -167,6 +167,20 @@ test('a blocked refresh restores the stamp and reports the repair as failed', ()
   assert.match(fx.read('statusline.cjs'), /ruflo-seg:BEGIN/, 'the footer is still injected');
 });
 
+// contracts-5: a helpers folder ak cannot remove the stamp from must not
+// abort sync; the repair is reported as failed and the footer still lands.
+test('a stamp that cannot be removed reports a failed repair instead of throwing', {
+  skip: process.platform === 'win32' || process.getuid?.() === 0 ? 'needs POSIX folder permissions as a non-root user' : false,
+}, (t) => {
+  const fx = fixture();
+  fs.chmodSync(fx.helpers, 0o555);
+  t.after(() => fs.chmodSync(fx.helpers, 0o755));
+  const r = fixStatusline(fx.proj);
+  assert.equal(r.versionRepair, 'failed');
+  assert.equal(fx.read('.helpers-version'), CLI_VERSION, 'the stamp is untouched');
+  assert.match(fx.read('statusline.cjs'), /ruflo-seg:BEGIN/, 'the footer is still injected');
+});
+
 test('dryRun never clears the stamp', () => {
   const fx = fixture();
   const r = fixStatusline(fx.proj, { dryRun: true });
