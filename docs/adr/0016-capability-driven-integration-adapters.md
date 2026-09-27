@@ -9,9 +9,8 @@
   to `AGENT_BROWSER_CONFIG`); status and `register()` share it, so any other user-scope form is
   reported as preserved with its manual removal command instead of a sync migration (#237).
 - **Updated:** 2026-09-26 — project memory: route proof, gated routing claims, setup probe
-  cleanup, stray stores, backup and distillation age, and a disposable project below a temporary
-  root keeping its own store; see "Amendment — 2026-09-26: project
-  memory" at the end.
+  cleanup, stray stores, backup and distillation age, projects below a temp root; see
+  "Amendment — 2026-09-26: project memory" at the end.
 - **Earlier update:** 2026-09-23 — the Claude memory pin is receipt-owned and removed by uninstall (ADR-0058).
 - **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Earlier update:** 2026-09-02
