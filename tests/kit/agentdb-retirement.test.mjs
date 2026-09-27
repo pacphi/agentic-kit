@@ -132,6 +132,50 @@ test('harvest runs from the project memory root with the project memory pin', as
   assert.equal(calls.length, 0, 'a dry run spawns nothing');
 });
 
+// contracts-2: Ruflo's `memory distill run` exits 0 for every skip
+// (@claude-flow/cli 3.45.0 commands/memory-distill.js), including an
+// exception, a corrupt store and no native SQLite. Those mean distillation
+// could not run, so harvest and verify harvest must fail on them; only
+// "nothing to distill yet" skips stay a warning.
+const distillOutput = (reason) => `Memory Distillation (ADR-174)\n\u001b[33mskipped: ${reason}\u001b[39m\n`;
+const distillRunner = (reason) => async (_cmd, args) => ({
+  code: 0, stdout: args.includes('distill') ? distillOutput(reason) : 'ok', stderr: '',
+});
+
+test('a distillation Ruflo could not run fails harvest; nothing to distill stays a warning', async () => {
+  for (const reason of [
+    'error: SQLITE_CORRUPT: database disk image is malformed',
+    'memory DB reports corruption — run recoverMemoryDatabase first',
+    'better-sqlite3 unavailable',
+  ]) {
+    const res = await harvest.runHarvest({ runner: distillRunner(reason), cwd: PROJECT, distill: true });
+    const step = res.steps.find((s) => s.name === 'distill-memory');
+    assert.equal(res.ok, false, reason);
+    assert.equal(step.ok, false, reason);
+    assert.equal(step.skipped, false, `${reason}: a failure, not a skip`);
+    assert.match(step.detail, new RegExp(reason.slice(0, 12)));
+  }
+  for (const reason of ['no-db', 'no memory_entries', 'target table episodes missing (agentdb schema not initialised)']) {
+    const res = await harvest.runHarvest({ runner: distillRunner(reason), cwd: PROJECT, distill: true });
+    const step = res.steps.find((s) => s.name === 'distill-memory');
+    assert.equal(res.ok, true, reason);
+    assert.equal(step.skipped, true, reason);
+  }
+});
+
+test('the skip reason is read from Ruflo\'s skip line only, not from a provenance tier', () => {
+  assert.equal(harvest.distillSkipReason(distillOutput('no memory_entries')), 'no memory_entries');
+  assert.equal(harvest.distillSkipReason('Distilled 12 entries\nBy Provenance\n  - skipped: 3\n'), null);
+});
+
+test('verify harvest fails when Ruflo could not distill', async () => {
+  seedHome();
+  const { result, out } = await captureLog(() => verify.verifyHarvest({
+    runner: distillRunner('better-sqlite3 unavailable'), haveCmd: async () => true,
+  }));
+  assert.equal(result, false, out);
+});
+
 test('verify harvest isolates every memory path in its temp dir and never seeds agentdb', async () => {
   seedHome();
   const calls = [];

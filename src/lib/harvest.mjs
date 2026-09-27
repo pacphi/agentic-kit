@@ -33,11 +33,26 @@ const stripAnsi = (s) => String(s == null ? '' : s).replace(ANSI, '');
 const failTail = (r) =>
   `FAILED (${stripAnsi(r.stderr || `exit ${r.code}`).trim().split('\n').slice(-2).join(' ').slice(0, 200)})`;
 
-/** Ruflo's distill command reports a no-op pass as `skipped: <reason>` and
- *  exits 0 (commands/memory-distill.js). Surface the reason, never "done". */
+/** Ruflo's distill command reports every skipped pass as a `skipped: <reason>`
+ *  line and exits 0 (commands/memory-distill.js). Surface the reason, never
+ *  "done". Only a line that starts with it counts: a result list can hold
+ *  a "skipped: <n>" entry of its own. */
 export function distillSkipReason(out) {
-  const m = stripAnsi(out).match(/skipped:\s*(.+)/i);
+  const m = stripAnsi(out).match(/^skipped:\s*(.+)$/im);
   return m ? m[1].trim().slice(0, 200) : null;
+}
+
+// The skip reasons that mean "nothing to distill yet" (@claude-flow/cli 3.45.0
+// services/memory-distillation.js): no store, no entries, or AgentDB's target
+// tables not created yet. Every fresh store takes the last path, including
+// `ak x verify harvest`'s isolated one, so it stays a warning. Any other
+// reason (an exception, a corrupt store, no native SQLite, a judge this run
+// did not enable) means distillation could not run.
+const NOTHING_TO_DISTILL = [/^no-db$/, /^no memory_entries$/, /^target table \S+ missing\b/];
+
+/** Whether a distill skip reason means Ruflo could not run the pass. */
+export function distillSkipFailed(reason) {
+  return !NOTHING_TO_DISTILL.some((re) => re.test(reason));
 }
 
 /** The ordered write steps, all Ruflo verbs. Each: { name, cmd, args, desc, timeout }. */
@@ -89,12 +104,14 @@ export async function runHarvest({
   const results = [];
   for (const step of steps) {
     const r = await runner(step.cmd, step.args, { timeout: step.timeout, cwd: root, env: runEnv });
-    const okStep = r.code === 0;
-    const skip = okStep && step.name === 'distill-memory'
+    const exited = r.code === 0;
+    const skip = exited && step.name === 'distill-memory'
       ? distillSkipReason(`${r.stdout || ''}\n${r.stderr || ''}`) : null;
-    const detail = !okStep ? failTail(r)
-      : skip ? `Ruflo skipped distillation: ${skip}` : step.desc;
-    results.push({ name: step.name, ok: okStep, skipped: !!skip, detail });
+    const couldNotRun = !!skip && distillSkipFailed(skip);
+    const detail = !exited ? failTail(r)
+      : couldNotRun ? `FAILED (Ruflo could not distill: ${skip})`
+        : skip ? `Ruflo skipped distillation: ${skip}` : step.desc;
+    results.push({ name: step.name, ok: exited && !couldNotRun, skipped: !!skip && !couldNotRun, detail });
   }
   return { ok: results.every((s) => s.ok), dryRun: false, root, steps: results };
 }
