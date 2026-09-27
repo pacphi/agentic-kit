@@ -100,8 +100,9 @@ node scripts/upstream-watch.mjs comment [--json]
 
 The Ruflo support window (the newest six minors, never fewer than those released in the last
 30 days; `supportWindow` on the Ruflo dependency policy, ADR-0041 §7) comes from the npm release
-dates the check reads. When they cannot be read, or `gh` is signed out, nothing is held for the
-window.
+dates the check reads. When they cannot be read, every Ruflo-carried fix (Ruflo's own and
+AgentDB's) waits for the support window, so its `released` line carries no `branch=` and nothing
+is dispatched until a check reads the window again. When `gh` is signed out nothing is checked.
 
 `report` gives counts, then these groups (a thread can be in more than one):
 

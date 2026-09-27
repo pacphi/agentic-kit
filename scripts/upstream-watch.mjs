@@ -168,7 +168,8 @@ async function collect(registry, fetcher, concurrency) {
 /**
  * ADR-0041 §7: the oldest supported Ruflo, from the npm release dates the
  * watch reads anyway (reused when a gate already fetched them). Null when the
- * registry carries no window or npm could not be read; nothing is held then.
+ * registry carries no window or npm could not be read; in the second case the
+ * report marks the floor unknown and holds every Ruflo-carried fix.
  */
 async function supportFloor(registry, fetcher, facts, fetchErrors, now) {
   const window = registry.dependencyPolicies.find((policy) => policy.dependency === 'ruflo')?.supportWindow;
@@ -201,7 +202,9 @@ async function runCheck(registry, fetcher, options, { stderr, now }) {
     await resolveFloorBundles(registry, live, fetcher, floor, options.concurrency, fetchErrors);
     fetchErrors.sort((a, b) => a.id.localeCompare(b.id));
   }
-  const report = buildReport(registry, live, { now, offline, fetchErrors, supportFloor: floor });
+  // A window policy whose floor could not be read holds Ruflo-carried fixes.
+  const floorUnknown = !offline && !floor && Boolean(registry.dependencyPolicies.find((policy) => policy.dependency === 'ruflo')?.supportWindow);
+  const report = buildReport(registry, live, { now, offline, fetchErrors, supportFloor: floor, floorUnknown });
   return { report, offline, fetchErrors, blind };
 }
 

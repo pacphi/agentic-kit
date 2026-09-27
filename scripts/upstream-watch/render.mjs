@@ -23,7 +23,9 @@ function detail(key, item) {
       ];
     case 'waiting-for-window':
       return [
-        item.window.floorBundles
+        !item.window.floor
+          ? `fixed in ${item.window.needs}; the oldest supported Ruflo could not be read, so ak keeps the workaround until a check reads the support window`
+          : item.window.floorBundles
           ? `fixed in ${item.window.needs}; the oldest supported Ruflo, ${item.window.floor}, bundles ${item.window.floorBundles}, so ak keeps the workaround until the support window's floor bundles the fix`
           : `fixed in ${item.window.needs}; the oldest supported Ruflo is ${item.window.floor}, so ak keeps the workaround until the support window's floor reaches ${item.window.needs}`,
         `change: ${item.adjustment}`,

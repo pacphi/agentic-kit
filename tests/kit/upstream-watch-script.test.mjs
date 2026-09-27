@@ -841,7 +841,8 @@ test('collect resolves each bundling chain once and reports a failure as "Could 
     const report = JSON.parse(failed.text());
     assert.deepEqual(report.groups.find((group) => group.key === 'unchecked').items.map((item) => item.id), ['ruvnet/agentdb#26', 'ruvnet/agentdb#27']);
     assert.ok(report.fetchErrors.some((item) => /ETIMEDOUT/.test(item.error)));
-  });
+  // Its fake npm has no Ruflo release dates, so no window floor; this test is about the chain.
+  }, { supportWindow: false });
   // Without a recorded minVersion (every live agentdb gate), a failed resolution is still "Could not check".
   const unrecorded = entry('ruvnet/agentdb#28', { dependency: 'ruflo', doneWhen: { state: 'closed-completed', release: { ...gate, minVersion: null } } });
   await withRegistryFile([unrecorded], async (file) => {
@@ -1159,5 +1160,31 @@ test('comment on an invalid registry is blind with the usual JSON shape', async 
     const result = JSON.parse(out.text());
     assert.deepEqual([result.blind, result.post, result.body, result.dispatch, result.events, result.fetchErrors], [true, false, '', [], [], []]);
     assert.match(result.error, /registry/);
+  });
+});
+
+// b4b-adversarial M2: a failed read of Ruflo's release dates leaves the
+// support-window floor unknown. The workflow dispatches without a human, so
+// an unknown floor holds every Ruflo-carried fix instead of releasing it.
+test('an unknown support-window floor holds Ruflo-carried fixes', async () => {
+  const confirmation = { changes: [change], checks: [{ version: '3.46.0', ref: 'v3.46.0', contained: true }] };
+  const registry = registryWith([entry('ruvnet/ruflo#3194')]);
+  const liveMap = new Map([['ruvnet/ruflo#3194', { thread: closedThread('ruvnet/ruflo#3194', '2026-09-26T22:31:23Z'), release: rufloFacts, confirmation }]]);
+  const report = buildReport(registry, liveMap, { now: NOW, supportFloor: null, floorUnknown: true });
+  const held = report.entries[0];
+  assert.ok(held.groups.includes('waiting-for-window'), held.groups.join(','));
+  assert.equal(held.dispatch, null);
+  assert.deepEqual(held.window, { floor: null, needs: '3.46.0' });
+  assert.match(renderReport(report), /the oldest supported Ruflo could not be read/);
+  const line = ledgerEvents(report, registry, { since: '2026-09-26T00:00:00Z' }).find((event) => event.event === 'released').line;
+  assert.doesNotMatch(line, /branch=/);
+  // No window policy at all still holds nothing.
+  assert.ok(!buildReport(registry, liveMap, { now: NOW }).entries[0].groups.includes('waiting-for-window'));
+  // The script marks the floor unknown when Ruflo's release dates cannot be read.
+  const failing = { ...fixtureFetcher(), release: async ({ name }) => { if (name === 'ruflo') throw new Error('npm view ruflo failed: ETIMEDOUT'); return releaseFacts('npm', npm[name]); } };
+  await withRegistryFile([entry('ruvnet/ruflo#3153', { relation: 'commented' })], async (file) => {
+    const out = capture();
+    await main(['report', '--json', '--registry', file], { fetcher: failing, stdout: out.stream, stderr: capture().stream, now: NOW });
+    assert.deepEqual(JSON.parse(out.text()).supportWindow, { floor: null, unknown: true });
   });
 });
