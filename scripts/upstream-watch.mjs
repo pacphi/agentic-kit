@@ -151,7 +151,8 @@ async function collect(registry, fetcher, concurrency) {
   await confirmReleases(gated.filter((entry) => !entry.doneWhen.release.minVersion && live.get(entry.id).release), live, fetcher, concurrency, fetchErrors);
   await resolveBundles(gated.filter((entry) => entry.doneWhen.release.bundledBy), live, fetcher, concurrency, fetchErrors);
   fetchErrors.sort((a, b) => a.id.localeCompare(b.id));
-  return { live, fetchErrors, facts };
+  const blind = active.length > 0 && active.every((entry) => !live.get(entry.id).thread);
+  return { live, fetchErrors, facts, blind };
 }
 
 /**
@@ -201,8 +202,9 @@ export async function main(argv, {
   const auth = await fetcher.auth();
   const offline = auth.ok ? null : auth.message;
   if (offline) stderr.write(`${offline}\n`);
-  const { live, fetchErrors, facts } = offline
-    ? { live: new Map(), fetchErrors: [], facts: new Map() } : await collect(registry, fetcher, options.concurrency);
+  // Blind: gh is unusable, or not one watched thread could be read.
+  const { live, fetchErrors, facts, blind } = offline
+    ? { live: new Map(), fetchErrors: [], facts: new Map(), blind: true } : await collect(registry, fetcher, options.concurrency);
   const floor = offline ? null : await supportFloor(registry, fetcher, facts, fetchErrors, now);
   if (floor) {
     await resolveFloorBundles(registry, live, fetcher, floor, options.concurrency, fetchErrors);
@@ -214,11 +216,11 @@ export async function main(argv, {
     return 0;
   }
   const events = offline ? [] : withoutRecorded(ledgerEvents(report, registry, { since: options.since }), ledgerText);
-  if (options.json) stdout.write(`${JSON.stringify({ since: options.since, offline, events, fetchErrors }, null, 2)}\n`);
+  if (options.json) stdout.write(`${JSON.stringify({ since: options.since, offline, blind, events, fetchErrors }, null, 2)}\n`);
   else {
     // stdout stays ledger lines only; what could not be checked goes to stderr.
     for (const item of fetchErrors) stderr.write(`Could not check ${item.id}: ${item.error}\n`);
-    stdout.write(offline ? `No events: ${offline}\n` : renderEvents(events));
+    stdout.write(offline ? `No events: ${offline}\n` : renderEvents(events, fetchErrors));
   }
   return 0;
 }

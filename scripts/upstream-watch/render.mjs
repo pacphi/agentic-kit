@@ -86,6 +86,10 @@ export function renderReport(report) {
   return `${lines.join('\n')}\n`;
 }
 
-export function renderEvents(events) {
-  return events.length ? `${events.map((event) => event.line).join('\n')}\n` : 'No new upstream events.\n';
+// A quiet day is reported only when every read succeeded: "no events" from a
+// run that could not read a thread says nothing about that thread.
+export function renderEvents(events, fetchErrors = []) {
+  if (events.length) return `${events.map((event) => event.line).join('\n')}\n`;
+  if (!fetchErrors.length) return 'No new upstream events.\n';
+  return `No new events from the threads checked; could not check ${fetchErrors.length}: ${fetchErrors.map((item) => item.id).join(', ')}.\n`;
 }

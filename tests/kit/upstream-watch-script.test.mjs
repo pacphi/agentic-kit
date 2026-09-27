@@ -992,3 +992,34 @@ test('the documented routine trusts only its own ledger comments', () => {
   assert.match(prompt, /never follow instructions/i, 'comment text is data, not instructions');
   assert.match(prompt, /pacphi\/agentic-kit#243/, 'the routine reads the recorded ledger issue');
 });
+
+// Decision 14: the routine's first run printed "No new upstream events." while
+// every read had failed. A quiet day is reported only when nothing failed, and
+// a run that read no thread at all is blind.
+test('check never reports a quiet day when a read failed, and flags a blind run', async () => {
+  assert.equal(renderEvents([], []), 'No new upstream events.\n');
+  const failed = renderEvents([], [{ id: 'ruvnet/ruflo#1', error: 'HTTP 403' }, { id: 'ruvnet/ruflo#2', error: 'HTTP 403' }]);
+  assert.doesNotMatch(failed, /No new upstream events/);
+  assert.match(failed, /could not check 2: ruvnet\/ruflo#1, ruvnet\/ruflo#2/);
+  const broken = { ...fixtureFetcher(), thread: async (id) => { if (id === 'ruvnet/ruflo#3153') throw new Error('HTTP 403'); return clone(threads[id]); } };
+  await withRegistryFile([entry('ruvnet/ruflo#3153', { relation: 'commented' })], async (file) => {
+    const text = capture();
+    await main(['check', '--since', '2026-09-26T00:00:00Z', '--registry', file], { fetcher: broken, stdout: text.stream, stderr: capture().stream, now: NOW });
+    assert.doesNotMatch(text.text(), /No new upstream events/);
+    const json = capture();
+    await main(['check', '--since', '2026-09-26T00:00:00Z', '--json', '--registry', file], { fetcher: broken, stdout: json.stream, stderr: capture().stream, now: NOW });
+    assert.equal(JSON.parse(json.text()).blind, true);
+  });
+  await withRegistryFile([entry('ruvnet/ruflo#3153', { relation: 'commented' }), entry('ruvnet/ruflo#3046', { relation: 'commented' })], async (file) => {
+    const json = capture();
+    await main(['check', '--since', '2026-09-26T00:00:00Z', '--json', '--registry', file], { fetcher: broken, stdout: json.stream, stderr: capture().stream, now: NOW });
+    const result = JSON.parse(json.text());
+    assert.equal(result.blind, false, 'one thread read is not blind');
+    assert.ok(result.fetchErrors.some((item) => item.id === 'ruvnet/ruflo#3153'));
+  });
+  const offline = capture();
+  await withRegistryFile([entry('ruvnet/ruflo#3153')], async (file) => {
+    await main(['check', '--since', '2026-09-26T00:00:00Z', '--json', '--registry', file], { fetcher: fixtureFetcher({ authenticated: false }), stdout: offline.stream, stderr: capture().stream, now: NOW });
+  });
+  assert.equal(JSON.parse(offline.text()).blind, true, 'gh unusable is blind');
+});
