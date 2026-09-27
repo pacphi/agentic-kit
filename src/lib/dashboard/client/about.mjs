@@ -150,8 +150,11 @@ import { aboutHostChip } from './host-readiness.mjs';
     var chipText=st.word+(ver?" \u00b7 "+aboutVerLabel(ver.installed):"");
     var detail="";
     if(st.detail){
+      // A manual fix is tagged as on Overview (groups.mjs rowLine), so nobody
+      // reads it as something `ak sync` will do.
+      var tag=st.detail.repair==="manual"?' <span class="repair-tag">manual</span>':"";
       detail='<p class="ab-detail" data-level="'+esc(st.detail.level)+'">'+esc(st.detail.message)
-        +(st.detail.fix?' <code>'+esc(st.detail.fix)+"</code>":"")+"</p>";
+        +(st.detail.fix?tag+' <code>'+esc(st.detail.fix)+"</code>":"")+"</p>";
     }else if(ver&&ver.outdated&&ver.latest){
       detail='<p class="ab-detail">update available \u2014 '+esc(aboutVerLabel(ver.latest))+' <code>ak sync</code></p>';
     }

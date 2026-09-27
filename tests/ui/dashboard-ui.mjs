@@ -421,7 +421,7 @@ const STATUS_STUB = async () => ({
     { subsystem: 'hosts', level: 'ok', message: 'opencode enabled and installed', fix: null },
     { subsystem: 'agentdb', level: 'ok', message: 'store reachable', fix: null },
     { subsystem: 'agent-browser', level: 'ok', message: 'agent-browser 0.27.3 ready for Ruflo', fix: null },
-    { subsystem: 'aqe', level: 'warn', message: 'fleet has never been initialized', fix: 'aqe init' },
+    { subsystem: 'aqe', level: 'warn', message: 'fleet has never been initialized', fix: 'aqe init', repair: 'manual' },
     { subsystem: 'security', level: 'ok', message: 'scan clean', fix: null },
     { subsystem: 'ruvnet-brain', level: 'ok', message: 'knowledge base present', fix: null },
     { subsystem: 'self', level: 'ok', message: 'agentic-kit up to date', fix: null },
@@ -2064,6 +2064,16 @@ async function main() {
       aboutBy('Statuslines')?.state === 'warn'
         && /codex statusline missing/i.test(String(aboutBy('Statuslines')?.detail)),
       `the Statuslines card read ${JSON.stringify(aboutBy('Statuslines'))}`);
+    // contracts-4: a manual fix reads as manual on its About card, as it does on
+    // Overview; a sync fix keeps a bare command.
+    const repairTags = await page.evaluate(() => Object.fromEntries(
+      [...document.querySelectorAll('#panel-about .ab-card')].map((card) => [
+        card.querySelector('.ab-name b')?.textContent.trim() || '',
+        card.querySelector('.ab-detail .repair-tag')?.textContent.trim() || null,
+      ])));
+    check('an About card labels a manual fix manual and leaves a sync fix unlabelled',
+      repairTags['agentic-qe'] === 'manual' && repairTags.Statuslines === null,
+      `About repair tags were ${JSON.stringify(repairTags)}`);
     // The standing example from the directory itself: `ak status` emits no
     // permissions row, so this chip must degrade rather than assume.
     check('an unjoined surface degrades to unknown instead of assuming configured',
