@@ -63,6 +63,17 @@ shows a `versions` row for it:
 `ak status` never looks the dates up itself. A plain `ak sync` reads them from npm and remembers them
 in `kit.json` (`versionCheck.rufloMinors`); `ak sync --dry-run` and `ak sync --no-upgrade` do not.
 
+## 2026-09-27: ak keeps its MCP policy file out of git
+
+In a Ruflo repository where MCP tool governance is on, the next `ak sync` or `ak setup --project`
+adds two lines to the repository's `.git/info/exclude`: `# agentic-kit` and
+`/.harness/mcp-policy.json`. git then ignores the policy file ak writes. No tracked file changes:
+ak never edits `.gitignore` and never ignores the rest of `.harness/`. If you already committed
+ak's policy file, the line does not untrack it; run `git rm --cached .harness/mcp-policy.json` if
+you want it out. When ak removes its policy file (governance turned off, or `ak uninstall`), it
+removes the two lines too; a policy file you edited is yours, so ak leaves it and the lines. On Ruflo 3.46.0
+and newer the policy is enforced on the stdio MCP launches, so calls beyond the cap are refused.
+
 ## 2026-09-26: `ak sync`'s exit code ignores fixes you do by hand
 
 `ak sync` now exits 0 when everything it can repair has converged, even if a row whose fix you
