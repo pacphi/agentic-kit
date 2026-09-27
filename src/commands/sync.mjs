@@ -72,20 +72,23 @@ export function lifecycleRefreshRequired(subsystems, hostId) {
 }
 
 /** Print the plan, or why there is none, the items --skip took out of it, and
- *  the count of manual steps sync leaves to the user (status/row.mjs repair
- *  contract). With manual or skipped items left, an empty plan is never
- *  reported as "all subsystems healthy". Returns false when there is nothing
- *  to apply. */
-function announcePlan(plan, manual, skipped) {
-  const manualNote = `${manual.length} item(s) need a manual step — \`ak status\` shows them as "→ manual:"`;
+ *  the count of manual steps sync leaves to the user — the same failing/warning
+ *  rows `needsYourAction` lists after the verdict, so this count and that list
+ *  can never disagree (decision 10). An info-level manual row (e.g. the AQE
+ *  readiness reminder) is invisible to this note; `ak status` still shows it.
+ *  With a plan, skipped items, or a needs-your-action row left, an empty plan
+ *  is never reported as "all subsystems healthy". Returns false when there is
+ *  nothing to apply. */
+function announcePlan(plan, needsAction, skipped) {
+  const manualNote = `${needsAction.length} item(s) need a manual step — sync lists them below`;
   if (plan.length) {
     console.log(bold(`sync plan (${plan.length} action(s)):`));
     for (const p of plan) console.log(`  • [${p.subsystem}] ${p.fix} ${dim(`— because: ${p.message}`)}`);
   } else if (skipped.length) info(`nothing to do — ${skipped.length} planned item(s) skipped by request`);
-  else if (manual.length) info(`nothing sync can do — ${manualNote}`);
+  else if (needsAction.length) info(`nothing sync can do — ${manualNote}`);
   else ok('nothing to do — all subsystems healthy');
   for (const s of skipped) info(dim(`skipped by request: [${s.subsystem}] ${s.fix}`));
-  if (manual.length && (plan.length || skipped.length)) info(dim(manualNote));
+  if (needsAction.length && (plan.length || skipped.length)) info(dim(manualNote));
   return plan.length > 0;
 }
 
@@ -961,9 +964,11 @@ async function converge({
   result.needsYourAction = needsYourAction(rows);
   // Only fixes a sync step performs enter the plan (status/row.mjs repair
   // contract, #237). A manual fix — a command the user runs, a file they edit,
-  // a login, an explicit model-lifecycle command — is named by `ak status` and
-  // counted below, but sync never plans or claims it.
-  const manual = rows.filter((r) => r.fix && r.repair === 'manual');
+  // a login, an explicit model-lifecycle command — is named by `ak status`,
+  // but sync never plans or claims it. Its failing/warning rows are
+  // `needsYourAction` (above), which also drives announcePlan's manual-step
+  // count below; an info-level manual row (e.g. the AQE readiness reminder)
+  // is silently excluded from both.
   const candidates = rows.filter((r) => r.fix && r.repair !== 'manual')
     .filter((r) => !(flags['no-upgrade'] && ['versions', 'self', 'ruvnet-brain', 'ruvector'].includes(r.subsystem)))
     // A ruflo-components row asking for a ruflo UPGRADE (state 'needs-ruflo') gets the
@@ -981,7 +986,7 @@ async function converge({
   const { plan, skipped } = splitSkipped(candidates, skip, flags, cfg);
   result.plan = plan.map(publicRow);
   result.skipped = skipped.map(publicRow);
-  if (!announcePlan(plan, manual, skipped)) {
+  if (!announcePlan(plan, result.needsYourAction, skipped)) {
     result.converged = true;
     return 0;
   }

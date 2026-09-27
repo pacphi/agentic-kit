@@ -152,12 +152,37 @@ test('a manual warn row is listed too, and the healthy verdict wording stays whe
   assert.match(text.out, /\[codex-context\] Codex context file is not ak-owned/);
 });
 
-test('an info-level manual row is counted as a manual step but not listed as needing your action', async () => {
+test('an info-level manual row alone is invisible to the manual-step note: sync reports the machine healthy', async () => {
   seedHome();
   const text = await syncText(twoPhase([MANUAL_INFO]));
   assert.equal(text.result, 0, text.out);
-  assert.match(text.out, /nothing sync can do — 1 item\(s\) need a manual step/);
+  assert.match(text.out, /nothing to do — all subsystems healthy/, text.out);
+  assert.doesNotMatch(text.out, /item\(s\) need a manual step/, 'an info row is not a "needs your action" item, so it never seeds the count');
   assert.doesNotMatch(text.out, HEADING);
+});
+
+// ── minor 4: the manual-step count and the needs-your-action list must agree ─
+
+test('the manual-step note counts only the failing/warning rows the heading lists, never an info row next to them', async () => {
+  seedHome();
+  const text = await syncText(twoPhase([MANUAL_FAIL, MANUAL_INFO]));
+  assert.equal(text.result, 0, text.out);
+  assert.match(text.out, /nothing sync can do — 1 item\(s\) need a manual step/, text.out);
+  const heading = text.out.slice(text.out.search(HEADING));
+  assert.equal((heading.match(/\[memory-pin\]|\[aqe\]/g) ?? []).length, 1, `exactly one row must follow the heading:\n${text.out}`);
+  assert.match(heading, /\[memory-pin\]/);
+});
+
+test('the dim manual-step note next to a real plan also excludes the info row from its count', async () => {
+  seedHome();
+  const text = await syncText(twoPhase([MANUAL_FAIL, MANUAL_INFO, RVF_WARN], [MANUAL_FAIL, MANUAL_INFO]));
+  assert.equal(text.result, 0, text.out);
+  assert.match(text.out, /1 item\(s\) need a manual step/, text.out);
+  assert.doesNotMatch(text.out, /2 item\(s\) need a manual step/, text.out);
+
+  const { child, out } = syncJson({ first: [MANUAL_FAIL, MANUAL_INFO, RVF_WARN], after: [MANUAL_FAIL, MANUAL_INFO] });
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(out.needsYourAction, [listed(MANUAL_FAIL)], 'the info row never joins the list the count must match');
 });
 
 // ── scenario C: a sync-repairable fail row that does not converge ────────────

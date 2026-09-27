@@ -561,7 +561,12 @@ test('a real repair converges, and the next sync has nothing left to do', async 
     const second = await syncWith(collectAqe);
     assert.equal(second.result, 0, second.out);
     assert.doesNotMatch(second.out, /sync plan/, 'a converged machine plans nothing');
-    assert.match(second.out, /nothing sync can do — 1 item\(s\) need a manual step/);
+    // The only row left is the info-level "readiness unverified" reminder
+    // (repair: manual). It is invisible to the needs-your-action list, so the
+    // manual-step count that must agree with that list is zero (decision 10,
+    // review-sync-exit.md minor 4): sync reports the machine healthy outright.
+    assert.doesNotMatch(second.out, /item\(s\) need a manual step/);
+    assert.match(second.out, /nothing to do — all subsystems healthy/);
   } finally {
     if (prev === undefined) delete process.env.RUFLO_AQE_RVF_MAX_BYTES;
     else process.env.RUFLO_AQE_RVF_MAX_BYTES = prev;

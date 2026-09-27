@@ -80,12 +80,32 @@ test('sync plans sync fixes and never plans manual ones', async () => {
   assert.match(out, /1 item\(s\) need a manual step/);
 });
 
-test('with only manual fixes left, sync neither plans them nor claims everything is healthy', async () => {
+test('with only an info-level manual fix left, sync plans nothing and reports the machine healthy', async () => {
+  // Decision 10's needs-your-action list holds only failing/warning manual
+  // rows (sync.mjs's needsYourAction), and the manual-step note must count
+  // exactly that list (review-sync-exit.md, minor 4) — an info row like this
+  // readiness reminder is invisible to both, so it never manual-steps a
+  // convergence.
   seedHome();
   const { result, out } = await inProject(() => captureLog(() => sync.run({
     flags: FLAGS(), pkgRoot: PKG_ROOT,
     collectFn: async () => [
       row('aqe', 'info', 'readiness unverified', 'run: ak x verify aqe', { repair: 'manual' }),
+    ],
+  })));
+  assert.equal(result, 0);
+  assert.doesNotMatch(out, /sync plan/);
+  assert.doesNotMatch(out, /item\(s\) need a manual step/);
+  assert.match(out, /nothing to do — all subsystems healthy/);
+});
+
+test('with only a failing manual fix left, sync neither plans it nor claims everything is healthy', async () => {
+  seedHome();
+  const { result, out } = await inProject(() => captureLog(() => sync.run({
+    flags: FLAGS(), pkgRoot: PKG_ROOT,
+    collectFn: async () => [
+      row('memory-pin', 'fail', 'CLAUDE_FLOW_DB_PATH pins a missing store',
+        'repoint it in .claude/settings.local.json env, or remove the pin', { repair: 'manual' }),
     ],
   })));
   assert.equal(result, 0);
