@@ -1357,7 +1357,7 @@ against 3.46.0 before Stage 6 builds on them.
 ### Retroactive upstream sweep and reactions
 
 A search of every issue and pull request the maintainer opened or commented on outside their own
-repositories found 68 threads on agentic-kit's upstreams (51 opened, 17 commented): Ruflo 23 open and
+repositories found 68 threads on agentic-kit's upstreams (56 opened, 12 commented): Ruflo 23 open and
 12 closed, Agentic QE 4 and 10, RuVector 1 and 9, AgentDB 3 open, RuvNet Brain 3 open, Codex 2 and 1.
 All of them move into the upstream watch.
 
