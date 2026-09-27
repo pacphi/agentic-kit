@@ -158,6 +158,19 @@ test('should_rejectReplacedFiles_when_openedInodeDiffers', async t => {
   t.mock.method(fs, 'fstatSync', (...args) => { const stat = original(...args); stat.ino++; return stat; });
   assert.throws(() => readJsonFile(file), /bounds/);
 });
+// NTFS file IDs carry a sequence number in the top 16 bits, so they can exceed
+// 2^53: as Numbers, two files one record apart read as the same inode.
+test('should_rejectReplacedFiles_when_fileIdsExceedDoublePrecision', async t => {
+  const { readJsonFile } = await import(storePath); const file = path.join(temporary(t), 'data.json');
+  fs.writeFileSync(file, '{}');
+  const ntfsId = (index) => (64n << 48n) + index;
+  const withIno = (stat, ino, opts) => { stat.ino = opts?.bigint ? ino : Number(ino); return stat; };
+  const lstat = fs.lstatSync; const fstat = fs.fstatSync;
+  t.mock.method(fs, 'lstatSync', (p, opts) => withIno(lstat(p, opts), ntfsId(12344n), opts));
+  t.mock.method(fs, 'fstatSync', (fd, opts) => withIno(fstat(fd, opts), ntfsId(12345n), opts));
+  assert.equal(Number(ntfsId(12344n)), Number(ntfsId(12345n)), 'the two IDs collide as Numbers');
+  assert.throws(() => readJsonFile(file), /bounds/);
+});
 test('should_rejectPublicIdentityDirectory_when_permissionsAreLoose', { skip: process.platform === 'win32' }, async t => {
   const { readOrCreateIdentity } = await import(storePath); const dir = temporary(t); fs.chmodSync(dir, 0o755);
   assert.throws(() => readOrCreateIdentity(dir), /private/);

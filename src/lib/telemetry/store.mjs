@@ -3,25 +3,28 @@ import path from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { MAX_FILE_BYTES } from './schema.mjs';
 
-/** Read only bounded regular files; refuse final-component links and detect replacement races. */
+/** Read only bounded regular files; refuse final-component links and detect replacement races.
+ *  Identity is compared as BigInt: Windows file IDs can exceed 2^53, where two
+ *  different files can read as the same Number inode. */
 export function readJsonDocument(file, maxBytes = MAX_FILE_BYTES) {
   const absolute = path.resolve(file);
-  const before = fs.lstatSync(absolute);
+  const before = fs.lstatSync(absolute, { bigint: true });
   if (!before.isFile() || before.isSymbolicLink() || before.size > maxBytes) throw new Error('Telemetry file exceeds safe bounds');
   const fd = fs.openSync(absolute, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
   try {
-    const stat = fs.fstatSync(fd);
+    const stat = fs.fstatSync(fd, { bigint: true });
     if (!stat.isFile() || stat.ino !== before.ino || stat.dev !== before.dev || stat.size > maxBytes) {
       throw new Error('Telemetry file exceeds safe bounds');
     }
-    const buffer = Buffer.alloc(Math.min(stat.size + 1, maxBytes + 1));
+    const statSize = Number(stat.size); // bounded by maxBytes above
+    const buffer = Buffer.alloc(Math.min(statSize + 1, maxBytes + 1));
     let size = 0;
     while (size < buffer.length) {
       const n = fs.readSync(fd, buffer, size, buffer.length - size, null);
       if (!n) break;
       size += n;
     }
-    if (size > maxBytes || size > stat.size) throw new Error('Telemetry file exceeds safe bounds');
+    if (size > maxBytes || size > statSize) throw new Error('Telemetry file exceeds safe bounds');
     try { return { value: JSON.parse(buffer.subarray(0, size).toString('utf8')), bytes: size }; }
     catch { throw new Error('Invalid telemetry JSON'); }
   } finally { fs.closeSync(fd); }
