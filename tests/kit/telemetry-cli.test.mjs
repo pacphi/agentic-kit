@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { fixture, identity, now } from './helpers/telemetry.mjs';
+import { spawnEnv } from './helpers/home-sandbox.mjs';
 const storePath = '../../src/lib/telemetry/store.mjs';
 const bin = new URL('../../bin/agentic-kit.mjs', import.meta.url);
 function temporary(t) {
@@ -103,12 +104,11 @@ test('should_exportHermeticLocalEvidence_when_invokingRealCli', t => {
   // must override it, or the export absorbs them (same class as usage-cli).
   const outside = temporary(t);
   writeOpencodeStore(outside);
-  const shell = { ...process.env, XDG_DATA_HOME: outside };
-  // Pin every XDG base and drop the host-home overrides, as sandboxHome() does.
-  const env = { ...shell, HOME: dir, USERPROFILE: dir, XDG_CONFIG_HOME: path.join(dir, 'config'),
+  // spawnEnv drops the inherited XDG_DATA_HOME (and every other per-user base)
+  // and pins each one inside the sandbox; the decoy store proves it.
+  const env = spawnEnv(dir, { XDG_CONFIG_HOME: path.join(dir, 'config'),
     XDG_STATE_HOME: path.join(dir, 'state'), XDG_DATA_HOME: path.join(dir, 'data'), XDG_CACHE_HOME: path.join(dir, 'cache'),
-    APPDATA: path.join(dir, 'config'), LOCALAPPDATA: path.join(dir, 'state'), CLAUDE_CONFIG_DIR: path.join(dir, '.claude') };
-  for (const key of ['CODEX_HOME', 'HERMES_HOME']) delete env[key];
+    APPDATA: path.join(dir, 'config'), LOCALAPPDATA: path.join(dir, 'state'), CLAUDE_CONFIG_DIR: path.join(dir, '.claude') });
   const invoke = args => spawnSync(process.execPath, [fileURLToPath(bin), 'telemetry', ...args], { encoding: 'utf8', env });
   const first = invoke(['export']);
   assert.equal(first.status, 0, first.stderr);
@@ -181,8 +181,8 @@ test('should_readRetainedMaintenance_when_exportingOffline', t => {
   const root = path.join(state, 'agentic-kit', 'maintenance', 'transactions');
   fs.mkdirSync(path.join(root, 'mnt-corrupt'), { recursive: true, mode: 0o700 });
   const result = spawnSync(process.execPath, [fileURLToPath(bin), 'telemetry', 'export'], { encoding: 'utf8',
-    env: { ...process.env, HOME: dir, USERPROFILE: dir, XDG_CONFIG_HOME: path.join(dir, 'config'),
-      XDG_STATE_HOME: state, LOCALAPPDATA: state, APPDATA: path.join(dir, 'config'), CLAUDE_CONFIG_DIR: path.join(dir, '.claude') } });
+    env: spawnEnv(dir, { XDG_CONFIG_HOME: path.join(dir, 'config'),
+      XDG_STATE_HOME: state, LOCALAPPDATA: state, APPDATA: path.join(dir, 'config'), CLAUDE_CONFIG_DIR: path.join(dir, '.claude') }) });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout).maintenance.receipts[0].status, 'unknown-recovery-required');
 });

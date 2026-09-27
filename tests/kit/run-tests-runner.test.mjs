@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { spawnEnv } from './helpers/home-sandbox.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const RUNNER = path.join(ROOT, 'scripts', 'run-tests.mjs');
@@ -15,11 +16,8 @@ function sandbox(t) {
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const repo = path.join(home, 'repo');
   fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
-  const env = { ...process.env, HOME: home, USERPROFILE: home,
-    XDG_CONFIG_HOME: path.join(home, '.config'), XDG_STATE_HOME: path.join(home, '.local', 'state'),
-    XDG_DATA_HOME: path.join(home, '.local', 'share'), XDG_CACHE_HOME: path.join(home, '.cache'),
-    APPDATA: path.join(home, 'AppData', 'Roaming'), LOCALAPPDATA: path.join(home, 'AppData', 'Local'), CI: 'true' };
-  for (const key of ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'AK_TRIPWIRE_STRICT']) delete env[key];
+  const env = spawnEnv(home, { APPDATA: path.join(home, 'AppData', 'Roaming'), CI: 'true' });
+  delete env.AK_TRIPWIRE_STRICT;
   return { home, repo, env };
 }
 

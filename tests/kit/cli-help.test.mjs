@@ -1,14 +1,18 @@
 // CLI help + dispatch — spawns the real bin. The load-bearing guarantee here
 // is that `--help` is intercepted BEFORE run(), so mutating commands
 // (setup, sync, uninstall) never fire on `ak <cmd> --help`.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { spawnEnv, sandboxProject, rmrf } from './helpers/home-sandbox.mjs';
 
 const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin/agentic-kit.mjs');
-const ak = (...args) => spawnSync(process.execPath, [BIN, ...args], { encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } });
+// A throwaway home: `--help` must never reach the developer's real config or state.
+const HOME = sandboxProject('ak-cli-help');
+after(() => rmrf(HOME));
+const ak = (...args) => spawnSync(process.execPath, [BIN, ...args], { encoding: 'utf8', env: spawnEnv(HOME, { NO_COLOR: '1' }) });
 
 test('setup --help shows help and does NOT run setup', () => {
   const r = ak('setup', '--help');

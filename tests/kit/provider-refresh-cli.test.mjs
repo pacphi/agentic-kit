@@ -5,6 +5,7 @@
 // (unlike `pick`, which can trigger installs). Everything is redirected at a
 // throwaway HOME — see provider-cli.test.mjs for why all four env vars matter.
 import { test } from 'node:test';
+import { spawnEnv } from './helpers/home-sandbox.mjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -51,12 +52,12 @@ const readKit = (home) =>
 
 function ak(args, { cwd, home, env = {} }) {
   const cfgDir = path.join(home, '.config');
-  const clean = { ...process.env };
+  const clean = spawnEnv(home, { NO_COLOR: '1', XDG_CONFIG_HOME: cfgDir, APPDATA: cfgDir });
   for (const k of ALL_CREDENTIAL_ENV) delete clean[k];
   const r = spawnSync(process.execPath, [BIN, ...args], {
     encoding: 'utf8',
     cwd,
-    env: { ...clean, NO_COLOR: '1', HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: cfgDir, APPDATA: cfgDir, ...env },
+    env: { ...clean, ...env },
   });
   return { ...r, all: `${r.stdout}${r.stderr}` };
 }

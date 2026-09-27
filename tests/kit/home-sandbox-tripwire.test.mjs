@@ -30,7 +30,7 @@ function runChild(t, body) {
     ${body}
   `;
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
-    env: { ...process.env, ...hostile }, encoding: 'utf8',
+    env: { ...process.env, ...hostile }, encoding: 'utf8', // spawn-env: inherits (the hostile inherited env is what this test exercises)
   });
   return { ...r, outside };
 }

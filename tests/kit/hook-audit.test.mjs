@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { spawnEnv } from './helpers/home-sandbox.mjs';
 
 import { auditCodexHooks } from '../../src/lib/hook-audit/index.mjs';
 
@@ -348,7 +349,7 @@ test('enabled-plugin discovery failures are counted and make CLI JSON exit nonze
 
     const result = spawnSync(process.execPath, [path.join(repoRoot, 'bin', 'agentic-kit.mjs'), 'audit', 'hooks', '--json'], {
       cwd: fx.project,
-      env: { ...process.env, CODEX_HOME: fx.codexHome },
+      env: spawnEnv(path.join(fx.root, 'home'), { CODEX_HOME: fx.codexHome }),
       encoding: 'utf8',
     });
     assert.equal(result.status, 1, result.stderr || result.stdout);
@@ -415,7 +416,7 @@ test('ak audit hooks exposes the read-only audit as a porcelain command', () => 
   try {
     const result = spawnSync(process.execPath, [path.join(repoRoot, 'bin', 'agentic-kit.mjs'), 'audit', 'hooks', '--json'], {
       cwd: fx.project,
-      env: { ...process.env, CODEX_HOME: fx.codexHome },
+      env: spawnEnv(path.join(fx.root, 'home'), { CODEX_HOME: fx.codexHome }),
       encoding: 'utf8',
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -432,7 +433,7 @@ test('ak audit hooks human output is not followed by the generic network drift n
   try {
     const result = spawnSync(process.execPath, [path.join(repoRoot, 'bin', 'agentic-kit.mjs'), 'audit', 'hooks'], {
       cwd: fx.project,
-      env: { ...process.env, CODEX_HOME: fx.codexHome },
+      env: spawnEnv(path.join(fx.root, 'home'), { CODEX_HOME: fx.codexHome }),
       encoding: 'utf8',
       timeout: 3_000,
     });

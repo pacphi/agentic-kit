@@ -22,6 +22,78 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+/** Environment keys that point a child at real per-user state. */
+export const INHERITED_STATE_KEYS = ['HOME', 'USERPROFILE', 'XDG_CONFIG_HOME', 'XDG_STATE_HOME', 'XDG_DATA_HOME',
+  'XDG_CACHE_HOME', 'APPDATA', 'LOCALAPPDATA', 'TMPDIR', 'TEMP', 'TMP', 'CLAUDE_CONFIG_DIR', 'CODEX_HOME',
+  'HERMES_HOME', 'CLAUDE_FLOW_DB_PATH', 'CLAUDE_FLOW_MEMORY_PATH', 'npm_config_cache'];
+
+/**
+ * Overrides that place every per-user base inside `home`.
+ * @param {string} home
+ * @returns {Record<string, string>}
+ */
+export function sandboxEnvFor(home) {
+  const cfg = path.join(home, '.config');
+  const tmp = path.join(home, 'tmp');
+  return {
+    HOME: home, USERPROFILE: home,
+    XDG_CONFIG_HOME: cfg, APPDATA: cfg,
+    XDG_STATE_HOME: path.join(home, '.local', 'state'),
+    XDG_DATA_HOME: path.join(home, '.local', 'share'),
+    XDG_CACHE_HOME: path.join(home, '.cache'),
+    LOCALAPPDATA: path.join(home, 'AppData', 'Local'),
+    TMPDIR: tmp, TEMP: tmp, TMP: tmp,
+    // npm injects its resolved cache path into lifecycle scripts. Without this
+    // override, otherwise-isolated status/setup runs inspect the developer's
+    // real `_npx` cache and vary with host upgrade cruft.
+    npm_config_cache: path.join(home, '.npm'),
+  };
+}
+
+/**
+ * The environment for a spawned child: process.env minus INHERITED_STATE_KEYS,
+ * plus sandboxEnvFor(home), plus `extra` (last wins). PATH is kept. Creates
+ * `home/tmp` so the child's os.tmpdir() exists.
+ * @param {string} home
+ * @param {Record<string, string|undefined>} [extra]
+ * @returns {Record<string, string|undefined>}
+ */
+export function spawnEnv(home, extra = {}) {
+  const base = { ...process.env }; // spawn-env: inherits (the one sanctioned copy; state keys are removed below)
+  for (const key of INHERITED_STATE_KEYS) delete base[key];
+  fs.mkdirSync(path.join(home, 'tmp'), { recursive: true });
+  return { ...base, ...sandboxEnvFor(home), ...extra };
+}
+
+/**
+ * For in-process tests whose code under test spawns tools with process.env:
+ * point XDG state/data/cache, LOCALAPPDATA and TMPDIR/TEMP/TMP at a fresh folder
+ * under os.tmpdir(); restore() puts the old values back and removes it.
+ * @param {string} prefix
+ * @returns {{ base: string, restore: () => void }}
+ */
+export function redirectToolState(prefix) {
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-tools-`)));
+  const keys = ['XDG_STATE_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'LOCALAPPDATA', 'TMPDIR', 'TEMP', 'TMP'];
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  const tmp = path.join(base, 'tmp');
+  fs.mkdirSync(tmp);
+  Object.assign(process.env, {
+    XDG_STATE_HOME: path.join(base, 'state'), XDG_DATA_HOME: path.join(base, 'data'),
+    XDG_CACHE_HOME: path.join(base, 'cache'), LOCALAPPDATA: path.join(base, 'localappdata'),
+    TMPDIR: tmp, TEMP: tmp, TMP: tmp,
+  });
+  return {
+    base,
+    restore() {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key]; else process.env[key] = value;
+      }
+      fs.rmSync(base, { recursive: true, force: true, maxRetries: 3 });
+    },
+  };
+}
+
 /**
  * Redirect every home-relative kit path at a throwaway directory.
  * @param {string} prefix mkdtemp prefix, for readable leftovers on failure
@@ -29,25 +101,17 @@ import path from 'node:path';
  */
 export function sandboxHome(prefix) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}-home-`));
-  const cfg = path.join(home, '.config');
-  fs.mkdirSync(cfg, { recursive: true });
-  process.env.HOME = home;
-  process.env.USERPROFILE = home;
-  process.env.XDG_CONFIG_HOME = cfg;
-  process.env.APPDATA = cfg;
+  fs.mkdirSync(path.join(home, '.config'), { recursive: true });
   // A developer shell may export the other XDG bases (and the host-home overrides)
   // to REAL directories; paths.mjs prefers them over HOME, so each one is pinned
   // inside the sandbox or removed. The state base holds ak's evidence cache and
   // maintenance journal, so leaving it inherited writes the real machine.
-  process.env.XDG_STATE_HOME = path.join(home, '.local', 'state');
-  process.env.XDG_DATA_HOME = path.join(home, '.local', 'share');
-  process.env.XDG_CACHE_HOME = path.join(home, '.cache');
-  process.env.LOCALAPPDATA = path.join(home, 'AppData', 'Local');
+  // The temp keys are left alone: moving os.tmpdir() here would move every later
+  // mkdtempSync of the calling file into this home.
+  const bases = sandboxEnvFor(home);
+  for (const key of ['TMPDIR', 'TEMP', 'TMP']) delete bases[key];
+  Object.assign(process.env, bases);
   for (const key of ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'HERMES_HOME']) delete process.env[key];
-  // npm injects its resolved cache path into lifecycle scripts. Without
-  // overriding it here, `npm test` lets otherwise-isolated status/setup tests
-  // inspect the developer's real `_npx` cache and vary with host upgrade cruft.
-  process.env.npm_config_cache = path.join(home, '.npm');
   process.env.NO_COLOR = '1';
   // Nothing invokable on PATH: every exec.run() spawn ENOENTs immediately, so
   // these tests never launch a real claude/npm/ruflo/aqe and never depend on

@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { snapshot } from './helpers/home-sandbox.mjs';
+import { snapshot, spawnEnv } from './helpers/home-sandbox.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const BIN = path.join(ROOT, 'bin', 'agentic-kit.mjs');
@@ -18,13 +18,8 @@ test('clean-machine setup preview is hermetic and discloses every auto-approve r
   const noBin = path.join(root, 'no-such-bin');
   fs.mkdirSync(path.join(home, '.config'), { recursive: true });
   fs.mkdirSync(path.join(project, '.git'), { recursive: true });
-  const beforeHome = snapshot(home);
-  const beforeProject = snapshot(project);
-  const env = {
-    ...process.env,
-    HOME: home, USERPROFILE: home,
-    XDG_CONFIG_HOME: path.join(home, '.config'),
-    XDG_STATE_HOME: path.join(home, '.local', 'state'),
+  // spawnEnv creates home/tmp, so the env is built before the snapshots.
+  const env = spawnEnv(home, {
     APPDATA: path.join(home, 'AppData', 'Roaming'),
     npm_config_prefix: prefix,
     npm_config_cache: path.join(root, 'npm-cache'),
@@ -32,7 +27,9 @@ test('clean-machine setup preview is hermetic and discloses every auto-approve r
     PATH: noBin,
     NO_COLOR: '1',
     AQE_EMBEDDER_ENDPOINT: '', AQE_EMBEDDER_TOKEN: '',
-  };
+  });
+  const beforeHome = snapshot(home);
+  const beforeProject = snapshot(project);
   const run = spawnSync(process.execPath, [BIN, 'setup', '--project', '--dry-run', '--yes'], {
     cwd: project, env, encoding: 'utf8', timeout: 30_000,
   });
@@ -55,13 +52,8 @@ test('clean-machine noninteractive trust requires --yes and declines without mut
   const project = path.join(root, 'project');
   fs.mkdirSync(path.join(home, '.config'), { recursive: true });
   fs.mkdirSync(path.join(project, '.git'), { recursive: true });
-  const beforeHome = snapshot(home);
-  const beforeProject = snapshot(project);
-  const env = {
-    ...process.env,
-    HOME: home, USERPROFILE: home,
-    XDG_CONFIG_HOME: path.join(home, '.config'),
-    XDG_STATE_HOME: path.join(home, '.local', 'state'),
+  // spawnEnv creates home/tmp, so the env is built before the snapshots.
+  const env = spawnEnv(home, {
     APPDATA: path.join(home, 'AppData', 'Roaming'),
     npm_config_prefix: path.join(root, 'npm-prefix'),
     npm_config_cache: path.join(root, 'npm-cache'),
@@ -69,7 +61,9 @@ test('clean-machine noninteractive trust requires --yes and declines without mut
     PATH: path.join(root, 'no-such-bin'),
     NO_COLOR: '1',
     AQE_EMBEDDER_ENDPOINT: '', AQE_EMBEDDER_TOKEN: '',
-  };
+  });
+  const beforeHome = snapshot(home);
+  const beforeProject = snapshot(project);
   const run = spawnSync(process.execPath, [BIN, 'setup', '--project'], {
     cwd: project, env, encoding: 'utf8', timeout: 30_000,
   });

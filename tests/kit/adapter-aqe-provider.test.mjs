@@ -21,7 +21,7 @@ import {
   runAdmittedAqeProvider,
   runAdmittedAqeProviderProbe,
 } from '../../src/lib/adapters/aqe-provider.mjs';
-import { sandboxConfigBase } from './helpers/home-sandbox.mjs';
+import { sandboxConfigBase, spawnEnv } from './helpers/home-sandbox.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -502,7 +502,7 @@ test('hidden CLI transport never emits failure or drift diagnostics on stdout', 
       '--expect-hash', 'a'.repeat(64), '--project-root', ROOT,
     ], {
       cwd: ROOT,
-      env: { ...process.env, HOME: home, AK_EXPERIMENTAL_HOST_ADAPTERS: '1' },
+      env: spawnEnv(home, { AK_EXPERIMENTAL_HOST_ADAPTERS: '1' }),
       input: 'prompt',
       encoding: 'utf8',
       timeout: 10_000,

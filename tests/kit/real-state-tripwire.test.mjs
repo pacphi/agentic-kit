@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import {
   REPO_STATE_DIRS, realStateRoots, snapshotRoots, compareSnapshots, isStrict, formatReport,
 } from '../../scripts/real-state-tripwire.mjs';
+import { spawnEnv } from './helpers/home-sandbox.mjs';
 
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', 'real-state-tripwire.mjs');
 const tmp = (t, prefix) => {
@@ -129,9 +130,7 @@ test('the CLI snapshot/compare pair exits 3 and names the changed path', (t) => 
   const home = tmp(t, 'ak-trip-cli');
   const repo = path.join(home, 'repo');
   fs.mkdirSync(repo);
-  const env = { ...process.env, HOME: home, USERPROFILE: home, CI: 'true',
-    XDG_CONFIG_HOME: path.join(home, '.config'), XDG_STATE_HOME: path.join(home, '.local', 'state'),
-    APPDATA: path.join(home, 'AppData', 'Roaming'), LOCALAPPDATA: path.join(home, 'AppData', 'Local') };
+  const env = spawnEnv(home, { CI: 'true', APPDATA: path.join(home, 'AppData', 'Roaming') });
   const out = path.join(home, 'before.json');
   const snap = spawnSync(process.execPath, [CLI, 'snapshot', out, '--repo', repo], { env, encoding: 'utf8' });
   assert.equal(snap.status, 0, snap.stderr);

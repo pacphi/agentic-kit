@@ -13,6 +13,7 @@
 // directory happened not to change.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnEnv } from './helpers/home-sandbox.mjs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
@@ -51,16 +52,11 @@ test('ak setup --dry-run never invokes npm (the drift nudge is skipped)', { skip
     const r = spawnSync(process.execPath, [BIN, 'setup', '--dry-run', '--project'], {
       encoding: 'utf8',
       cwd: project,
-      env: {
-        ...process.env,
+      env: spawnEnv(home, {
         NO_COLOR: '1',
-        HOME: home,
-        USERPROFILE: home,
-        XDG_CONFIG_HOME: path.join(home, '.config'),
-        APPDATA: path.join(home, '.config'),
         // The fake shim first so it wins over any real npm already on PATH.
         PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH}`,
-      },
+      }),
     });
     assert.equal(r.status, 0, `expected a clean dry-run exit, got ${r.status}\nstdout: ${r.stdout}\nstderr: ${r.stderr}`);
     assert.match(r.stdout, /dry-run/, 'must reach the dry-run path, not fail before it');

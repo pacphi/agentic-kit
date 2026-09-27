@@ -18,7 +18,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  sandboxHome, assertSandboxed, captureLog, rmrf, sandboxProject, writeKitConfig, offlineKitConfig, fakeGlobalRoot,
+  sandboxHome, assertSandboxed, captureLog, rmrf, sandboxProject, writeKitConfig, offlineKitConfig, fakeGlobalRoot, spawnEnv,
 } from './helpers/home-sandbox.mjs';
 import { isolateProject } from './helpers/project-isolation.mjs';
 
@@ -95,7 +95,7 @@ function syncJson({ first = [], after = first, flags = {}, throws = false }) {
       pkgRoot: ${JSON.stringify(PKG_ROOT)}, collectFn }));
   `;
   const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
-    cwd: PROJECT, env: process.env, encoding: 'utf8', timeout: 120_000,
+    cwd: PROJECT, env: spawnEnv(HOME), encoding: 'utf8', timeout: 120_000,
   });
   assert.ok(child.stdout.trim().startsWith('{'), `stdout is not a JSON object:\n${child.stdout}\n--- stderr:\n${child.stderr}`);
   return { child, out: JSON.parse(child.stdout) };

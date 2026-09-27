@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { MODES } from '../../src/lib/usage-modes.mjs';
+import { spawnEnv } from './helpers/home-sandbox.mjs';
 
 const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin/agentic-kit.mjs');
 
@@ -180,11 +181,8 @@ function ak(args, sb, extra = {}) {
     encoding: 'utf8',
     // Keep every CLI run hermetic from the repository that launched the test.
     cwd: sb.cwd ?? sb.home,
-    env: {
-      ...process.env,
+    env: spawnEnv(sb.home, {
       NO_COLOR: '1',
-      HOME: sb.home,
-      USERPROFILE: sb.home,
       XDG_CONFIG_HOME: sb.cfg,
       APPDATA: sb.cfg,
       // The opencode transcript store is found at `$XDG_DATA_HOME/opencode/`
@@ -197,7 +195,7 @@ function ak(args, sb, extra = {}) {
       PATH: `${sb.bin}${path.delimiter}${process.env.PATH ?? ''}`,
       OPENROUTER_MANAGEMENT_KEY: '',
       ...extra,
-    },
+    }),
   });
 }
 

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnEnv } from './helpers/home-sandbox.mjs';
 
 const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin/agentic-kit.mjs');
 
@@ -16,15 +17,12 @@ function sandbox() {
   return {
     home,
     project,
-    env: {
-      ...process.env,
+    env: spawnEnv(home, {
       NO_COLOR: '1',
-      HOME: home,
-      USERPROFILE: home,
       XDG_CONFIG_HOME: config,
       APPDATA: config,
       PATH: path.join(home, 'no-such-bin'),
-    },
+    }),
   };
 }
 
