@@ -166,7 +166,14 @@ export function wireHostHealth(){
     document.getElementById('host-health-message').textContent='';renderHealthDialog();dialog.showModal();
   });
   document.getElementById('host-health-close').addEventListener('click',function(){dialog.close();});
-  dialog.addEventListener('close',function(){var button=region.querySelector('[data-health-host="'+HEALTH_HOST+'"]');if(button)button.focus();});
+  // Return focus to the badge that opened the dialog, but only while focus is
+  // still in the dialog or nowhere. `close` is a queued task: a fast keyboard
+  // sequence may already have moved focus to another badge.
+  dialog.addEventListener('close',function(){
+    var active=document.activeElement;
+    if(active&&active!==document.body&&!dialog.contains(active))return;
+    var button=region.querySelector('[data-health-host="'+HEALTH_HOST+'"]');if(button)button.focus();
+  });
   document.getElementById('host-health-consent').addEventListener('change',function(event){HEALTH_ACK=event.target.checked&&healthRow()?healthRow().evidenceKey:null;renderHealthDialog();});
   document.getElementById('host-health-refresh').addEventListener('click',function(){runHealthCheck(false);});
   document.getElementById('host-health-connect').addEventListener('click',function(){runHealthCheck(true);});
