@@ -69,11 +69,14 @@ export function createFetcher({ exec = run } = {}) {
     return JSON.parse(result.stdout);
   };
   return {
+    // `gh auth status` calls an Actions or proxy-injected GH_TOKEN invalid while
+    // `gh api` accepts it, so the probe is a read any token may make.
     async auth() {
-      const result = await exec('gh', ['auth', 'status']);
+      const result = await exec('gh', ['api', 'rate_limit', '--jq', '.rate.limit']);
       if (result.error?.code === 'ENOENT') return { ok: false, message: 'gh is not installed; install the GitHub CLI to check upstream threads.' };
       if (result.status === 0) return { ok: true };
-      return { ok: false, message: 'gh is not authenticated; run `gh auth login`, then re-run.' };
+      const reason = String(result.stderr || result.error?.message || '').trim().split('\n')[0];
+      return { ok: false, message: `gh cannot reach GitHub${reason ? ` (${reason})` : ''}; run \`gh auth login\` or set GH_TOKEN, then re-run.` };
     },
     async thread(id) {
       const [, repo, number] = ID.exec(id) ?? [];

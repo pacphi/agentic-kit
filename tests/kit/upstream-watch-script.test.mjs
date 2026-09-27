@@ -532,10 +532,16 @@ function fakeExec(responses) {
 }
 
 test('the fetcher explains an unauthenticated or missing gh plainly', async () => {
-  const signedOut = createFetcher({ exec: fakeExec([[/^gh auth status/, { status: 1, stdout: '', stderr: loggedOut }]]).exec });
-  const auth = await signedOut.auth();
+  // `gh auth status` calls an injected or installation token invalid while
+  // `gh api` works with it (cloud routine run cse_01Xb8wcBL8h335pxUeQ9sbnQ),
+  // so the probe is a call any token can make.
+  const { exec: signedOutExec, calls } = fakeExec([[/^gh api rate_limit/, { status: 4, stdout: '', stderr: loggedOut }]]);
+  const auth = await createFetcher({ exec: signedOutExec }).auth();
   assert.equal(auth.ok, false);
-  assert.match(auth.message, /gh auth login/);
+  assert.match(auth.message, /gh auth login|GH_TOKEN/);
+  assert.ok(calls.every((call) => !call.startsWith('gh auth')), calls.join('\n'));
+  const tokenOnly = createFetcher({ exec: fakeExec([[/^gh api rate_limit/, { status: 0, stdout: '5000\n', stderr: '' }]]).exec });
+  assert.deepEqual(await tokenOnly.auth(), { ok: true });
   const missing = createFetcher({ exec: async () => ({ status: null, stdout: '', stderr: '', error: Object.assign(new Error('spawn gh ENOENT'), { code: 'ENOENT' }) }) });
   assert.match((await missing.auth()).message, /not installed/);
 });
