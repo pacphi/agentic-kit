@@ -342,11 +342,17 @@ test('the footer no longer defines the CVE overlay functions', () => {
 // and wrong. Fixture trees are used so these hold regardless of what this machine has.
 console.log('\naidefence segment (alarm-only inversion)');
 
-const rufloTree = ({ aidefence }) => {
+const rufloTree = ({ aidefence, builtin = false }) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ad-'));
   const root = path.join(dir, 'ruflo');
   fs.mkdirSync(root, { recursive: true });
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'ruflo', version: '3.32.0' }));
+  if (builtin) {
+    // Ruflo 3.32.2+ (ruvnet/ruflo#2670): `security defend` falls back to this engine.
+    const engine = path.join(root, 'node_modules', '@claude-flow', 'cli', 'dist', 'src', 'security');
+    fs.mkdirSync(engine, { recursive: true });
+    fs.writeFileSync(path.join(engine, 'builtin-aidefence.js'), 'export {};\n');
+  }
   if (aidefence) {
     const ad = path.join(root, 'node_modules', '@claude-flow', 'aidefence');
     fs.mkdirSync(ad, { recursive: true });
@@ -401,6 +407,16 @@ test('aidefence missing → the alarm renders, with no 🛡 and a named fix', ()
   absent(out, '🛡');
 });
 
+test('aidefence missing but Ruflo ships the built-in engine → "builtin", not "off"', () => {
+  assert(rufloAidefenceState(rufloTree({ aidefence: false, builtin: true })) === 'builtin');
+});
+
+test('built-in engine present → no alarm (defend works without aidefence)', () => {
+  const out = renderWithRufloRoot(rufloTree({ aidefence: false, builtin: true }));
+  absent(out, 'aidefence');
+  absent(out, 'prompt-injection');
+});
+
 test('unresolvable ruflo → silent (a probe miss must never fail loud and wrong)', () => {
   const out = renderWithRufloRoot('');
   absent(out, 'aidefence');
@@ -408,7 +424,7 @@ test('unresolvable ruflo → silent (a probe miss must never fail loud and wrong
 
 // Test-quality Finding 5: bump deliberately when adding/removing a test —
 // see admin-model.test.cjs's identical guard for the full rationale.
-const EXPECTED = 31;
+const EXPECTED = 33;
 if (passed + failed !== EXPECTED) {
   console.error(`\nPLAN MISMATCH: expected ${EXPECTED} tests, ran ${passed + failed}`);
   process.exit(1);

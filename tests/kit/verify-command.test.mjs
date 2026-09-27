@@ -75,6 +75,101 @@ test('the security suite calls out the aidefence gap by name and stops early', a
   } finally { rmrf(secDir); }
 });
 
+// Ruflo 3.32.2+ ships a built-in defend engine (ruvnet/ruflo#2670), and in
+// 3.46.1 text-mode defend still crashes after it detects a threat
+// (ruvnet/ruflo#3473). verify reads the `-o json` verdict, so a detection is
+// reported from the verdict and a crash as a crash, never a pass.
+const DEFEND_FIXTURES = new URL('../fixtures/ruflo-defend/', import.meta.url);
+const fixture = (name) => fs.readFileSync(new URL(name, DEFEND_FIXTURES), 'utf8');
+
+test('parseDefendVerdict reads the recorded 3.46.1 JSON verdicts and rejects the text-mode crash', () => {
+  assert.deepEqual(verify.parseDefendVerdict(fixture('threat.json.txt')), { safe: false, threats: 2 });
+  assert.deepEqual(verify.parseDefendVerdict(fixture('clean.json.txt')), { safe: true, threats: 0 });
+  assert.equal(verify.parseDefendVerdict(fixture('threat-crash.txt')), null);
+  assert.equal(verify.parseDefendVerdict(''), null);
+  assert.equal(verify.parseDefendVerdict('{"safe": "no"}'), null, 'a non-boolean safe is not a verdict');
+});
+
+function securityTree({ aidefence = false, builtin = true } = {}) {
+  const cf = path.join(paths.rufloNodeModules(), '@claude-flow');
+  const made = [];
+  const pkg = (name) => {
+    fs.mkdirSync(path.join(cf, name), { recursive: true });
+    fs.writeFileSync(path.join(cf, name, 'package.json'), JSON.stringify({ name: `@claude-flow/${name}` }));
+    made.push(path.join(cf, name));
+  };
+  pkg('security');
+  if (aidefence) pkg('aidefence');
+  if (builtin) {
+    const dir = path.join(cf, 'cli', 'dist', 'src', 'security');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'builtin-aidefence.js'), 'export {};\n');
+    made.push(path.join(cf, 'cli'));
+  }
+  return () => made.forEach((dir) => rmrf(dir));
+}
+
+/** A runner that answers `security defend` from fixtures, by input. */
+function defendRunner({ threat, clean }) {
+  const calls = [];
+  const runner = async (cmd, args) => {
+    calls.push([cmd, ...args]);
+    if (args[0] === 'security' && args[1] === 'defend') {
+      const input = args[args.indexOf('-i') + 1];
+      return /Ignore all previous/.test(input) ? threat : clean;
+    }
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  return { runner, calls };
+}
+
+test('verifySecurity reports a detection from the JSON verdict when only the built-in engine is present', async () => {
+  seedHome();
+  const cleanup = securityTree({ aidefence: false, builtin: true });
+  try {
+    const { runner, calls } = defendRunner({
+      threat: { code: 1, stdout: fixture('threat.json.txt'), stderr: '' },
+      clean: { code: 0, stdout: fixture('clean.json.txt'), stderr: '' },
+    });
+    const { result, out } = await captureLog(() => verify.verifySecurity({ runner }));
+    assert.equal(result, true, out);
+    assert.match(out, /defend: flags injection \(2 threats\), passes clean/);
+    assert.match(out, /aidefence missing: defend uses Ruflo's built-in engine/);
+    const defends = calls.filter((c) => c[2] === 'defend');
+    assert.equal(defends.length, 2, 'aidefence absent no longer returns early');
+    for (const c of defends) assert.deepEqual(c.slice(-2), ['-o', 'json']);
+  } finally { cleanup(); }
+});
+
+test('verifySecurity reports the post-detection crash (ruvnet/ruflo#3473) as a crash and fails', async () => {
+  seedHome();
+  const cleanup = securityTree({ aidefence: true, builtin: true });
+  try {
+    const { runner } = defendRunner({
+      threat: { code: 1, stdout: fixture('threat-crash.txt'), stderr: '' },
+      clean: { code: 0, stdout: fixture('clean.json.txt'), stderr: '' },
+    });
+    const { result, out } = await captureLog(() => verify.verifySecurity({ runner }));
+    assert.equal(result, false);
+    assert.match(out, /defend crashed before reporting a verdict \(ruvnet\/ruflo#3473\)/);
+    assert.doesNotMatch(out, /defend: flags injection/);
+  } finally { cleanup(); }
+});
+
+test('verifySecurity fails when the clean input is flagged', async () => {
+  seedHome();
+  const cleanup = securityTree({ aidefence: true, builtin: true });
+  try {
+    const { runner } = defendRunner({
+      threat: { code: 1, stdout: fixture('threat.json.txt'), stderr: '' },
+      clean: { code: 1, stdout: fixture('threat.json.txt'), stderr: '' },
+    });
+    const { result, out } = await captureLog(() => verify.verifySecurity({ runner }));
+    assert.equal(result, false);
+    assert.match(out, /defend ambiguous/);
+  } finally { cleanup(); }
+});
+
 test('the learning suite fails honestly when ruflo cannot be run', async () => {
   seedHome();
   const { result, out } = await runVerify(['learning']);

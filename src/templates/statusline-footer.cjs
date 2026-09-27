@@ -378,13 +378,13 @@ function rufloProofSegment(ctx){
 //      shields meaning different things read as one duplicated thing. The alarm
 //      carries no 🛡 at all, so it can never be confused with the scan shield.
 //
-// Still load-bearing, not decoration: @claude-flow/aidefence is NOT a declared
-// dependency of ruflo or @claude-flow/cli (verified still true on 3.32.0) while
-// `security defend` imports it (ruvnet/ruflo#2670). It is present ONLY because the
-// kit's healAidefence npm-installs it into rufloRoot(). A plain `npm i -g ruflo`
-// can therefore silently remove your injection defense — and under the old polarity
-// that catastrophe was signalled by a line quietly VANISHING, which is ambiguous
-// (off? probe threw? forgot to look?). Now the dangerous state is the loud one.
+// Still load-bearing on old Ruflo only: @claude-flow/aidefence is NOT a declared
+// dependency of ruflo or @claude-flow/cli, and before 3.32.2 `security defend`
+// needed it (ruvnet/ruflo#2670), so a plain `npm i -g ruflo` silently removed your
+// injection defense. From 3.32.2 defend falls back to a built-in engine
+// (security/builtin-aidefence.js), so a missing aidefence costs only adaptive
+// learning and the aidefence_* MCP tools: state "builtin", no alarm (ak status
+// still reports it as a warning with the sync repair).
 //
 // FAIL-SAFE POLARITY (the reason for the two-step probe): alarm only on POSITIVE
 // evidence of absence — we located a ruflo install AND aidefence is not inside it.
@@ -690,7 +690,8 @@ function rufloRealCliBins(cwd){
   } catch(e){ rufloStatuslineDebug("ruflo-bin-probe", e); return []; }
 }
 // Three states, not two — the distinction IS the fail-safe. "off" is asserted only on
-// positive evidence: a real ruflo install that does not contain aidefence. Anything we
+// positive evidence: a real ruflo install with neither aidefence nor the built-in engine
+// ("builtin" is a fourth, silent state on Ruflo 3.32.2+). Anything we
 // cannot verify is "unknown" and stays silent, because a false "your injection defense
 // is off" would be exactly the fabricated-alarm bug this footer exists to correct.
 // @claude-flow/security is auth/validation primitives, not detection — probing it
@@ -700,7 +701,11 @@ function rufloAidefenceState(rufloRoot){
     var fs = require("fs"), path = require("path");
     if (!rufloRoot || !fs.existsSync(path.join(rufloRoot, "package.json"))) return "unknown";
     var ad = path.join(rufloRoot, "node_modules", "@claude-flow", "aidefence", "package.json");
-    return fs.existsSync(ad) ? "on" : "off";
+    if (fs.existsSync(ad)) return "on";
+    // Ruflo 3.32.2+ ships a built-in defend engine (ruvnet/ruflo#2670): without
+    // aidefence, defend still screens prompts, so there is nothing to alarm about.
+    var builtin = path.join(rufloRoot, "node_modules", "@claude-flow", "cli", "dist", "src", "security", "builtin-aidefence.js");
+    return fs.existsSync(builtin) ? "builtin" : "off";
   } catch(e){ rufloStatuslineDebug("aidefence-probe", e); return "unknown"; }
 }
 /* ruflo-seg:END */

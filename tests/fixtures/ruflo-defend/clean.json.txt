@@ -1,0 +1,9 @@
+
+🛡️ AIDefence - AI Manipulation Defense System
+───────────────────────────────────────────────────────
+{
+  "safe": true,
+  "threats": [],
+  "piiFound": false,
+  "detectionTimeMs": 0.7958749999999952
+}

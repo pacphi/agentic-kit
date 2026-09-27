@@ -1,0 +1,7 @@
+
+🛡️ AIDefence - AI Manipulation Defense System
+───────────────────────────────────────────────────────
+
+⚠️ 2 threat(s) detected:
+
+[ERROR] Cannot read properties of undefined (reading 'color')

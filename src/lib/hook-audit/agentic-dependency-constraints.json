@@ -1010,16 +1010,17 @@
       "mapping": "mapped",
       "kitImpact": {
         "refs": ["closed-upstream review 2026-09-26"],
-        "files": ["docs/TROUBLESHOOTING.md", "src/commands/status/sections/security.mjs", "src/commands/x/verify.mjs", "src/lib/heal.mjs", "src/lib/natives.mjs", "src/templates/statusline-footer.cjs"]
+        "files": ["docs/TROUBLESHOOTING.md", "src/commands/about.mjs", "src/commands/status/sections/security.mjs", "src/commands/x/verify.mjs", "src/lib/heal.mjs", "src/lib/natives.mjs", "src/templates/statusline-footer.cjs"]
       },
-      "adjustment": "fix(security): stop reporting defend as non-functional when the installed CLI ships the built-in engine (3.32.2+). The status row, ak x verify, the footer alarm and the about text become warnings; keep healAidefence for the aidefence_* MCP tools and correct its detail text and docs/TROUBLESHOOTING.md.",
-      "status": "released",
+      "adjustment": "None: ak detects the built-in engine (security/builtin-aidefence.js, 3.32.2+) and reports a missing aidefence as a warning (status, ak x verify, about) with no footer alarm; healAidefence stays for adaptive learning and the aidefence_* MCP tools.",
+      "status": "adopted",
       "constraintIds": [],
       "history": [
         { "date": "2026-07-14", "event": "filed" },
         { "date": "2026-07-17", "event": "closed", "note": "completed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.32.2; the ak change is pending" }
+        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.32.2; the ak change is pending" },
+        { "date": "2026-09-27", "event": "adopted", "note": "status, verify, about and the footer recognise the built-in engine (confirmed in the installed 3.46.1 CLI: commands/security.js falls back to security/builtin-aidefence.js)" }
       ]
     },
     {
@@ -1617,13 +1618,14 @@
       "dependency": "ruflo",
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
       "mapping": "mapped",
-      "kitImpact": { "refs": ["plan Branch 3 item 4: defend reporting tells a detection from the post-detection crash"], "files": [] },
-      "adjustment": "Once a released Ruflo prints every detected threat and exits with its own verdict, ak x verify security and the security status row read defend's exit code as the detection verdict instead of treating a crash after the header line as a detection.",
+      "kitImpact": { "refs": ["plan Branch 3 item 4: defend reporting tells a detection from the post-detection crash"], "files": ["src/commands/x/verify.mjs"] },
+      "adjustment": "verify reads `-o json`; text-mode crash is reported as a crash. Once a released Ruflo prints every detected threat and exits with its own verdict in text mode, nothing further is needed in ak.",
       "status": "watching",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-26", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "watching", "note": "re-checked: still reproduces on 3.46.1 (text mode: 2 threat(s) detected, then [ERROR] Cannot read properties of undefined (reading 'color'), exit 1); ak x verify security now reads the -o json verdict" }
       ]
     },
     {

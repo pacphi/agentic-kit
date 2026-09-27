@@ -1,0 +1,36 @@
+
+🛡️ AIDefence - AI Manipulation Defense System
+───────────────────────────────────────────────────────
+{
+  "safe": false,
+  "threats": [
+    {
+      "id": "threat-1790530294575-16172s",
+      "type": "instruction_override",
+      "severity": "critical",
+      "confidence": 0.99,
+      "pattern": "\\b(ignore|disregard|forget|override)(?:\\s+\\S+){0,6}\\s+(instructions?|prompts?|rules?|context|system\\s*-?\\s*prompts?)\\b",
+      "description": "Override-verb → noun within 0..4-modifier window (ADR-118)",
+      "location": {
+        "start": 0,
+        "end": 62
+      },
+      "detectedAt": "2026-09-27T17:31:34.575Z"
+    },
+    {
+      "id": "threat-1790530294575-wzw7cx",
+      "type": "context_manipulation",
+      "severity": "high",
+      "confidence": 0.99,
+      "pattern": "\\[system\\]|\\{system\\}|system\\s+prompt",
+      "description": "System prompt reference",
+      "location": {
+        "start": 49,
+        "end": 62
+      },
+      "detectedAt": "2026-09-27T17:31:34.575Z"
+    }
+  ],
+  "piiFound": false,
+  "detectionTimeMs": 1.3573750000000047
+}
