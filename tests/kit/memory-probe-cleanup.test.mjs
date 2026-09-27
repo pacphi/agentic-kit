@@ -137,12 +137,15 @@ test('a store already recorded as cleaned is never cleaned again', (t) => {
 
 test('the delete succeeds while another connection holds the store open in WAL mode', (t) => {
   const { dir, backupRoot, receiptDir } = fixture(t);
+  // Closed in the test body: after-hooks run in registration order, so the fixture's
+  // folder removal would otherwise run first, which Windows refuses for an open file.
   const holder = new DatabaseSync(path.join(dir, 'memory.db'));
-  t.after(() => holder.close());
-  holder.prepare('SELECT count(*) AS n FROM memory_entries').get();
-  const { receipt } = cleanupProbeRows([dir], { backupRoot, receiptDir, now: NOW });
-  assert.ok(receipt.stores.every((s) => !s.error), JSON.stringify(receipt.stores));
-  assert.equal(holder.prepare('SELECT count(*) AS n FROM memory_entries WHERE key = ?').get(PROBE_KEY).n, 0);
+  try {
+    holder.prepare('SELECT count(*) AS n FROM memory_entries').get();
+    const { receipt } = cleanupProbeRows([dir], { backupRoot, receiptDir, now: NOW });
+    assert.ok(receipt.stores.every((s) => !s.error), JSON.stringify(receipt.stores));
+    assert.equal(holder.prepare('SELECT count(*) AS n FROM memory_entries WHERE key = ?').get(PROBE_KEY).n, 0);
+  } finally { holder.close(); }
 });
 
 test('the AgentDB store stays consistent after the delete', (t) => {
