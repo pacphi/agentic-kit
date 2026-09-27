@@ -51,6 +51,9 @@ export function runGuarded(commands, {
     return 2;
   }
   const childEnv = { ...env, TMPDIR: tempRoot, TEMP: tempRoot, TMP: tempRoot };
+  // Tests assert on plain text; a shell's FORCE_COLOR (Claude Code sets 3)
+  // colours console.log into pipes and, beside NO_COLOR, adds a Node warning.
+  delete childEnv.FORCE_COLOR;
   const roots = realStateRoots({ env, platform, homedir, repoRoot });
   const before = snapshotRoots(roots);
   // One line before anything runs, so a CI log proves the tripwire executed.

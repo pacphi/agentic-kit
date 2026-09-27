@@ -294,7 +294,8 @@ Code's own `~/.claude.json`) are listed as "concurrent writers" and do not fail 
 (or `AK_TRIPWIRE_STRICT=1`) fails on them too. Every command also runs with
 `TMPDIR`/`TEMP`/`TMP` pointed at a fresh `ak-suite-*` folder: anything left in it afterwards fails the run and is
 listed, and the runner refuses to start when that folder sits inside a git repository (point
-`TMPDIR` elsewhere). Tests make temporary folders with `tempDir()` from
+`TMPDIR` elsewhere). The runner also drops `FORCE_COLOR` (Claude Code shells set it), because
+tests read plain text from pipes. Tests make temporary folders with `tempDir()` from
 `tests/kit/helpers/temp-dir.mjs`, and spawned children get their environment from `spawnEnv()` in
 `tests/kit/helpers/home-sandbox.mjs`. UI tests launch Chrome with `launchChrome()` from
 `tests/ui/helpers/launch-chrome.mjs`, which gives the browser its own temp folder and removes it on
