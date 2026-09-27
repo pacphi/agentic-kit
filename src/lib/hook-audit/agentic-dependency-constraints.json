@@ -1400,15 +1400,18 @@
       "kind": "issue",
       "title": "MCP policy enforcement (RUFLO_MCP_ENFORCE_POLICY / .harness/mcp-policy.json) is not reached by the stdio MCP entry points (follow-up to #3138)",
       "dependency": "ruflo",
-      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": null } },
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "ruflo", "minVersion": "3.46.0" } },
       "mapping": "mapped",
-      "kitImpact": { "refs": ["ADR-0058 section 8, request 6"], "files": [] },
-      "adjustment": "Once a released Ruflo enforces MCP policy on stdio tools/call, ADR-0058 can report governance as enforced instead of inert on stdio entry points.",
-      "status": "watching",
+      "kitImpact": { "refs": ["ADR-0058 section 8, request 6"], "files": ["src/lib/ruflo-components/policy.mjs", "src/lib/ruflo-components/snapshot.mjs", "src/lib/ruflo-memory.mjs"] },
+      "adjustment": "None: ak reports governance as enforced on stdio from Ruflo 3.46.0 and keeps the not-wired explanation below it.",
+      "status": "adopted",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-24", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "closed", "note": "completed by PR #3423" },
+        { "date": "2026-09-26", "event": "released", "note": "PR #3423 in 3.46.0 (evaluateToolCall in bin/cli.js and bin/mcp-server.js of the @claude-flow/cli 3.46.0 tarball; 3.45.0 has none)" },
+        { "date": "2026-09-27", "event": "adopted", "note": "live proof on 3.46.1: ruflo mcp start with RUFLO_MCP_ENFORCE_POLICY=1 and ak's policy (cap 2) allowed two memory_stats calls, refused the third, and audited all three; from a subfolder with no .harness/ every call was refused (fails closed)" }
       ]
     },
     {

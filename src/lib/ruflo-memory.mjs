@@ -114,11 +114,10 @@ export function rufloMcpLaunch(cwd = process.cwd(), env = process.env, {
   // Governance is a project-scoped ak-owned key: when managed, ak either sets
   // it (valid policy) or actively clears a stale/inherited value (no/invalid
   // policy) — never leaves ruflo pointed at a policy file it can no longer
-  // see, which would make it fail closed on every tool call (when ruflo's
-  // enforcer is reachable; ruflo 3.44.0's stdio entry points do not reach it,
-  // see ADR-0058 upstream request 6). When governance
-  // is not managed, an inherited value is the user's own choice and is left
-  // untouched.
+  // see, which would make it fail closed on every tool call (ruflo 3.46.0 and
+  // newer enforce it on the stdio entry points, ruvnet/ruflo#3415; older
+  // versions never reach the enforcer there). When governance is not managed,
+  // an inherited value is the user's own choice and is left untouched.
   if (managedIntent(cfg, 'mcpGovernance') && supports(rufloVersion, componentById('mcpGovernance').minRuflo) && !(RC_KEYS.enforce in rc)) {
     delete merged[RC_KEYS.enforce];
   }
