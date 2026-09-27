@@ -204,6 +204,14 @@ subagent and previously dropped usage is now priced.
 - A subagent with no ordinals still reports no usage (decision 2).
 - One rollout carries `token_count`s but no agent message, so the pre-existing
   `partial-response-yield` warning remains.
+- Whole-rollout exclusion may drop real usage (open, plausible, 2026-09-27). On the reference
+  machine 6 of 924 imported rollouts carry a later turn that is not an import: one `task_started`
+  whose `turn_id` starts with `rollout-`, no `user_message` event, `role: user` response items in
+  five of the six (2 to 76 per file) and non-zero `token_count` usage (the per-file sum of
+  `last_token_usage.total_tokens` is about 8k to 449k). Both usage and discovery set the whole file
+  aside at the marker, so this usage is not counted. With no `user_message`, the turn may be
+  automatic (a compaction or title pass). Measured from counts only; whether to count such turns is
+  undecided (see ADR-0060 open questions).
 
 ## Verification
 
