@@ -6,6 +6,7 @@ import { manageCodexContext } from '../lib/codex-context.mjs';
 import readline from 'node:readline/promises';
 import { collect } from './status.mjs';
 import { row } from './status/row.mjs';
+import { CODEX_MCP_PROVIDER_FIXES } from './status/sections/codex-mcp.mjs';
 import { stripUnsafeChars } from '../lib/text-safety.mjs';
 import * as heal from '../lib/heal.mjs';
 import { have } from '../lib/exec.mjs';
@@ -658,15 +659,30 @@ export function performingSteps(subsystem, flags, cfg, skip = new Set()) {
   return steps;
 }
 
+// Fixes that fewer steps perform than their subsystem's steps: of the
+// codex-mcp fixes, registering, migrating and retiring an MCP table is done
+// only by the providers step (codex-mcp-repair removes recursive tables).
+const PROVIDER_ONLY_FIXES = new Set(Object.values(CODEX_MCP_PROVIDER_FIXES));
+const narrowPerformers = (item) => (item.subsystem === 'codex-mcp' && PROVIDER_ONLY_FIXES.has(item.fix) ? ['providers'] : null);
+
+/** performingSteps for one plan item: its subsystem's steps, narrowed to the
+ *  ones that perform this particular fix. */
+export function performingStepsFor(item, flags, cfg, skip = new Set()) {
+  const steps = performingSteps(item.subsystem, flags, cfg, skip);
+  const only = narrowPerformers(item);
+  return only ? steps.filter((s) => only.includes(s)) : steps;
+}
+
 /** Take --skip's items out of the plan: those of a skipped subsystem, and
  *  those only a skipped step performs (statusline/cve when statusline is
- *  skipped) — running the rest could never repair them. */
+ *  skipped; a Codex MCP registration when providers is skipped) — running the
+ *  rest could never repair them. */
 export function splitSkipped(candidates, skip, flags, cfg) {
   if (!skip.size) return { plan: candidates, skipped: [] };
   const plan = []; const skipped = [];
   for (const p of candidates) {
-    const onlySkippedSteps = () => performingSteps(p.subsystem, flags, cfg).length > 0
-      && performingSteps(p.subsystem, flags, cfg, skip).length === 0;
+    const onlySkippedSteps = () => performingStepsFor(p, flags, cfg).length > 0
+      && performingStepsFor(p, flags, cfg, skip).length === 0;
     (skip.has(p.subsystem) || onlySkippedSteps() ? skipped : plan).push(p);
   }
   return { plan, skipped };
@@ -690,7 +706,7 @@ export function convergenceVerdict({ plan, after: collected, state, flags, cfg, 
   const after = collected.filter((r) => !left.has(r.subsystem));
   const unresolved = [];
   for (const p of plan) {
-    if (performingSteps(p.subsystem, flags, cfg).length) continue;
+    if (performingStepsFor(p, flags, cfg).length) continue;
     unresolved.push({ subsystem: p.subsystem, fix: p.fix, message: `no sync step performs this repair (${p.message})`, reason: 'no-step' });
   }
   // Same test the plan used to admit a fix, so a row cannot enter the plan

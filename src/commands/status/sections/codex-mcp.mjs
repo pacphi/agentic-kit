@@ -10,13 +10,23 @@ import {
 import { have } from '../../../lib/exec.mjs';
 import { row } from '../row.mjs';
 
+/** The codex-mcp fixes that only sync's providers step performs
+ *  (convergeProviderStack's retireCodexMcp and ensureRufloMcpInCodex). The
+ *  codex-mcp-repair step removes recursive tables only, so `ak sync --skip
+ *  providers` skips these fixes rather than planning them. */
+export const CODEX_MCP_PROVIDER_FIXES = Object.freeze({
+  retireLegacy: 'sync retires the legacy MCP entry',
+  migrateRuflo: 'sync migrates it to workspace-pinned project memory',
+  registerRuflo: 'sync registers the ruflo MCP into codex',
+});
+
 function legacyProjectionRows(cfg, cwd) {
   try {
     const { registered, owned } = codexMcpStatus(cfg, cwd);
     if (registered) {
       return [owned
         ? row('codex-mcp', 'warn', 'deprecated codex mcp-server registered — agentic-kit-owned',
-          'sync retires the legacy MCP entry')
+          CODEX_MCP_PROVIDER_FIXES.retireLegacy)
         : row('codex-mcp', 'warn', 'deprecated codex mcp-server registered — user-owned; preserved',
           'claude mcp remove codex -s project', { repair: 'manual' })];
     }
@@ -36,7 +46,7 @@ async function rufloIntegrationRows(cfg) {
     if (registered && owned && !workspacePinned) {
       return [row('codex-mcp', 'warn',
         'ak-owned ruflo MCP in codex uses the legacy cwd-only launcher',
-        'sync migrates it to workspace-pinned project memory')];
+        CODEX_MCP_PROVIDER_FIXES.migrateRuflo)];
     }
     if (registered) {
       return [row('codex-mcp', 'ok',
@@ -44,7 +54,7 @@ async function rufloIntegrationRows(cfg) {
     }
     if (await have('codex')) {
       return [row('codex-mcp', 'warn', 'codex enabled but ruflo MCP not registered in codex',
-        'sync registers the ruflo MCP into codex')];
+        CODEX_MCP_PROVIDER_FIXES.registerRuflo)];
     }
     return [];
   } catch (e) {

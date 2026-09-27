@@ -657,6 +657,33 @@ test('a fix performed only by a skipped step is skipped with it, never unresolve
   assert.match(out, /skipped by request: \[statusline\/cve\]/);
 });
 
+// correctness-skip-providers-false-unresolved: the codex-mcp subsystem has
+// fixes of two kinds. Registering, migrating or retiring an MCP table is done
+// only by the providers step; removing a recursive table is done by
+// codex-mcp-repair. --skip providers must skip the first kind, not plan it.
+test('--skip providers skips the codex-mcp fixes only the providers step performs', () => {
+  const cfg = loadKitConfig();
+  const flags = FLAGS();
+  const codex = (fix, level = 'warn') => ({ subsystem: 'codex-mcp', level, message: 'm', fix, repair: 'sync' });
+  const providerOnly = [
+    codex('sync registers the ruflo MCP into codex'),
+    codex('sync migrates it to workspace-pinned project memory'),
+    codex('sync retires the legacy MCP entry'),
+  ];
+  const recursive = codex('sync removes the exact recursive [mcp_servers.codex] table after confirmation (backed up)', 'fail');
+  const { plan, skipped } = sync.splitSkipped([...providerOnly, recursive], new Set(['providers']), flags, cfg);
+  assert.deepEqual(skipped.map((p) => p.fix), providerOnly.map((p) => p.fix), 'nothing but the providers step performs these');
+  assert.deepEqual(plan.map((p) => p.fix), [recursive.fix], 'codex-mcp-repair still removes a recursive table');
+
+  const control = sync.splitSkipped(providerOnly, new Set(), flags, cfg);
+  assert.equal(control.plan.length, 3, 'control: without --skip they are planned');
+  const verdict = sync.convergenceVerdict({
+    plan: [], after: providerOnly, state: { applyFailures: [] }, flags, cfg, skip: new Set(['providers']), skipped,
+  });
+  assert.deepEqual(verdict.unresolved, [], 'a skipped fix is never unresolved');
+  assert.deepEqual(verdict.remaining, []);
+});
+
 test('--skip opencode stops the lifecycle refresh an upgrade would trigger', async () => {
   const step = sync.SYNC_STEPS.find((s) => s.id === 'host-lifecycles');
   const cfg = { ...loadKitConfig(), integrations: { ...loadKitConfig().integrations, hosts: { claude: true, codex: false, opencode: true } } };
