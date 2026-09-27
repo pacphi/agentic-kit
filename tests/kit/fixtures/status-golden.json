@@ -15,6 +15,13 @@
   },
   {
     "subsystem": "versions",
+    "level": "info",
+    "message": "Ruflo support window not yet known: run ak sync to record Ruflo's release dates",
+    "fix": null,
+    "repair": null
+  },
+  {
+    "subsystem": "versions",
     "level": "ok",
     "message": "agentic-qe 9.9.9 (latest known; cache; observed time unknown)",
     "fix": null,

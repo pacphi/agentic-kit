@@ -26,6 +26,7 @@ import { reconcileRufloComponents } from '../lib/ruflo-components/apply.mjs';
 import { RESTART_REMINDER } from './status/sections/ruflo-components.mjs';
 import { HOSTS, commandHosts, hostInstallState, hostExecutable, installHost, convergeProviderStack, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
 import { driftReport, selfDrift } from '../lib/versions.mjs';
+import { recordRufloReleaseDates } from '../lib/ruflo-support-window.mjs';
 import { drift as ruvnetBrainDrift } from '../lib/ruvnet-brain.mjs';
 import { RUVECTOR_PKG, managed as ruvectorManaged } from '../lib/ruvector.mjs';
 import { pruneNpxStale } from '../lib/npx.mjs';
@@ -102,9 +103,16 @@ export function recordApplyFailure(state, name, result) {
 /** Refresh every network-backed fact that can open an upgrade gate. Kept out
  *  of run() so adding one release boundary does not grow the command's already
  *  broad orchestration complexity. Sequential: these probes persist kit.json. */
-async function refreshPlanDrift(flags, fetchLatest, pkgRoot) {
+async function refreshPlanDrift(flags, fetchLatest, pkgRoot, releaseDatesRunner) {
   if (flags['dry-run'] || flags['no-upgrade']) return;
   await driftReport({ force: true, ...(fetchLatest ? { fetchLatest } : {}) });
+  // ADR-0041 §7: remember each Ruflo minor's first publish so `ak status` can
+  // compute the support window without a network call. A failed lookup keeps
+  // the old dates.
+  const cfg = loadKitConfig();
+  if (await recordRufloReleaseDates({ cfg, ...(releaseDatesRunner ? { runner: releaseDatesRunner } : {}) })) {
+    try { saveKitConfig(cfg); } catch { /* read-only envs: the next sync records them */ }
+  }
   // Self-update has its own TTL cache; refresh it before the collector decides
   // whether a self action exists. An apply-time refresh cannot open that gate.
   await selfDrift({ pkgRoot, force: true, ...(fetchLatest ? { fetchLatest } : {}) });
@@ -941,6 +949,7 @@ async function converge({
   flags,
   pkgRoot,
   fetchLatest,
+  releaseDatesRunner,
   dejaVuAdapter = companionLifecycleFor('deja-vu'),
   collectFn = collect,
   confirmCodexRepair = askCodexRepair,
@@ -961,7 +970,7 @@ async function converge({
   // versions gate it needed to open). Dry-runs skip the refresh: it writes
   // kit.json, and --dry-run is pinned to touch nothing — so a dry-run
   // preview may be cache-stale by up to one TTL window.
-  await refreshPlanDrift(flags, fetchLatest, pkgRoot);
+  await refreshPlanDrift(flags, fetchLatest, pkgRoot, releaseDatesRunner);
   const rows = await collectFn({ pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions });
   result.needsYourAction = needsYourAction(rows);
   // Only fixes a sync step performs enter the plan (status/row.mjs repair
