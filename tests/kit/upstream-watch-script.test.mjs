@@ -1054,26 +1054,26 @@ test('the ledger counts only its authors for both the start time and the recorde
 
 test('every ledger event has a plain sentence', () => {
   const at = (event, fields = {}, id = 'ruvnet/ruflo#1') => sentence({ id, event, date: '2026-09-27', fields });
-  assert.equal(at('reply', { by: 'someone', at: '10:00:00Z' }), 'someone commented on ruvnet/ruflo#1 on 2026-09-27 at 10:00:00Z; check whether it needs our reply.');
+  assert.equal(at('reply', { by: 'someone', at: '10:00:00Z' }), 'someone commented on `ruvnet/ruflo#1` on 2026-09-27 at 10:00:00Z; check whether it needs our reply.');
   assert.match(at('acknowledged', { by: 'bot' }), /automated acknowledgement/);
-  assert.equal(at('closed', { reason: 'completed' }), 'ruvnet/ruflo#1 was closed upstream on 2026-09-27 (completed).');
+  assert.equal(at('closed', { reason: 'completed' }), '`ruvnet/ruflo#1` was closed upstream on 2026-09-27 (completed).');
   assert.match(at('merged'), /merged upstream on 2026-09-27/);
-  assert.match(at('released', { version: '3.47.0', pr: 12, branch: 'upstream/ruvnet-ruflo-1' }), /\(pull request #12\) is released in 3\.47\.0 \(2026-09-27\); dispatch it on branch upstream\/ruvnet-ruflo-1\./);
-  assert.match(at('released', { version: '3.47.0', commit: 'abc1234' }), /\(commit abc1234\).*keeps its workaround/);
+  assert.match(at('released', { version: '3.47.0', pr: 12, branch: 'upstream/ruvnet-ruflo-1' }), /\(pull request `#12`\) is released in 3\.47\.0 \(2026-09-27\); dispatch it on branch `upstream\/ruvnet-ruflo-1`\./);
+  assert.match(at('released', { version: '3.47.0', commit: 'abc1234' }), /\(commit `abc1234`\).*keeps its workaround/);
   assert.match(at('reopened', { status: 'released' }), /open upstream again while the registry says released/);
   assert.match(at('stale'), /no upstream activity since 2026-09-27/);
   assert.match(at('retire-proposed'), /can be retired/);
-  assert.match(at('retest-due', {}, 'ruflo-hooks-1'), /^Constraint ruflo-hooks-1 was due for a retest on 2026-09-27\.$/);
+  assert.match(at('retest-due', {}, 'ruflo-hooks-1'), /^Constraint `ruflo-hooks-1` was due for a retest on 2026-09-27\.$/);
   assert.match(at('idle', {}, 'registry'), /nothing is left to watch/);
 });
 
 test('the comment ends its block with the next start, kept when a read failed', () => {
   const events = [{ id: 'a#1', event: 'stale', date: '2026-01-01', fields: {}, line: 'UPSTREAM-WATCH a#1 stale 2026-01-01' }];
   const ok = renderComment({ events, fetchErrors: [], since: '2026-09-20T14:00:05Z', now: NOW });
-  assert.ok(ok.startsWith('```text\nUPSTREAM-WATCH a#1 stale 2026-01-01\nchecked-at 2026-09-26T23:00:00Z\n```\n\n- a#1 has had no upstream activity'), ok);
+  assert.ok(ok.startsWith('```text\nUPSTREAM-WATCH a#1 stale 2026-01-01\nchecked-at 2026-09-26T23:00:00Z\n```\n\n- `a#1` has had no upstream activity'), ok);
   const partial = renderComment({ events, fetchErrors: [{ id: 'b#2', error: 'HTTP 502' }], since: '2026-09-20T14:00:05Z', now: NOW });
   assert.match(partial, /\nchecked-at 2026-09-20T14:00:05Z\n```/);
-  assert.match(partial, /Could not check b#2; the next run checks again from 2026-09-20T14:00:05Z\./);
+  assert.match(partial, /Could not check `b#2`; the next run checks again from 2026-09-20T14:00:05Z\./);
   assert.equal(renderComment({ events: [], fetchErrors: [], since: 'x', now: NOW }), '');
 });
 
@@ -1134,7 +1134,7 @@ test('comment lists the dispatch branches of released lines', async () => {
     await main(['comment', '--json', '--registry', file], { fetcher: withLedger([]), stdout: out.stream, stderr: capture().stream, now: NOW });
     const result = JSON.parse(out.text());
     assert.deepEqual(result.dispatch, ['upstream/proffesor-for-testing-agentic-qe-617']);
-    assert.match(result.body, /dispatch it on branch upstream\/proffesor-for-testing-agentic-qe-617\./);
+    assert.match(result.body, /dispatch it on branch `upstream\/proffesor-for-testing-agentic-qe-617`\./);
     // b4b-adversarial M3: once the line is recorded (the post landed but the
     // label step failed), later runs still signal it; the routine skips work done.
     const released = result.events.find((event) => event.event === 'released').line;
@@ -1198,4 +1198,33 @@ test('an unknown support-window floor holds Ruflo-carried fixes', async () => {
     await main(['report', '--json', '--registry', file], { fetcher: failing, stdout: out.stream, stderr: capture().stream, now: NOW });
     assert.deepEqual(JSON.parse(out.text()).supportWindow, { floor: null, unknown: true });
   });
+});
+
+// b4b-adversarial m1: plain `owner/repo#n` or `#n` in the sentences would
+// autolink (a bare #3421 points at this repository) and mention upstream threads.
+test('the sentences keep thread ids and pull request numbers out of autolinks', () => {
+  const text = sentence({ id: 'ruvnet/ruflo#3194', event: 'released', date: '2026-09-26', fields: { version: '3.46.0', pr: 3421, branch: 'upstream/ruvnet-ruflo-3194' } });
+  assert.equal(text, 'The fix for `ruvnet/ruflo#3194` (pull request `#3421`) is released in 3.46.0 (2026-09-26); dispatch it on branch `upstream/ruvnet-ruflo-3194`.');
+  const events = [{ id: 'a/b#1', event: 'stale', date: '2026-01-01', fields: {}, line: 'UPSTREAM-WATCH a/b#1 stale 2026-01-01' }];
+  const body = renderComment({ events, fetchErrors: [{ id: 'c/d#2', error: 'x' }], since: '2026-09-20T00:00:00Z', now: NOW });
+  const prose = body.slice(body.indexOf('```\n\n') + 5);
+  assert.doesNotMatch(prose.replace(/`[^`]*`/g, ''), /#\d/, prose);
+});
+
+// b4b-adversarial m7: GitHub rejects a comment over 65,536 characters; a body
+// that never fits would fail every day. Lines that do not fit wait for the next run.
+test('a comment too long for GitHub posts what fits and keeps the start', () => {
+  const events = Array.from({ length: 3000 }, (_, index) => ({ id: `owner/repo#${index + 1}`, event: 'stale', date: '2026-01-01', fields: {}, line: `UPSTREAM-WATCH owner/repo#${index + 1} stale 2026-01-01` }));
+  const body = renderComment({ events, fetchErrors: [], since: '2026-09-20T00:00:00Z', now: NOW });
+  assert.ok(body.length <= 60_000, String(body.length));
+  assert.match(body, /\nchecked-at 2026-09-20T00:00:00Z\n```/, 'the next run reads the same window');
+  assert.match(body, /\d+ more lines? (is|are) posted by the next run\./);
+  assert.ok(body.includes(events[0].line) && !body.includes(events.at(-1).line));
+});
+
+// b4b-adversarial m4: a mistyped future checked-at would silence every reply
+// until that date.
+test('a checked-at in the future is ignored', () => {
+  const ledger = readLedger([ledgerComment('pacphi', 'checked-at 2027-01-01T00:00:00Z\nchecked-at 2026-09-20T00:00:00Z')], ['pacphi'], NOW);
+  assert.equal(ledger.since, '2026-09-20T00:00:00Z');
 });

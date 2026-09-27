@@ -152,8 +152,11 @@ the moment that run started, followed by one plain sentence per line. The next r
 the newest such time, so a reply that arrives while a run is posting is still seen. When a thread
 or release could not be read, the block ends with the previous `checked-at` time instead and a
 sentence names what could not be checked, so the next run looks at the same window again; the
-lines already posted are dropped, so nothing is acted on twice. A run with no new line posts
-nothing.
+lines already posted are dropped, so nothing is acted on twice. Lines that would push a comment
+past 60,000 characters (GitHub's limit is 65,536) wait for the next run the same way. A
+`checked-at` later than the run's own time is ignored. Thread ids, pull request numbers and
+branches in the sentences are code spans, so they neither autolink nor mention upstream
+threads. A run with no new line posts nothing.
 
 ## Confirming a release
 
