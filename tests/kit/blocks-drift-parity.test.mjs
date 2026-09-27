@@ -135,3 +135,34 @@ test('a real stale block is reported as stripped (not "stripp") by status', asyn
     '1 CLAUDE.md block(s) drifted: ruflo-aqe-reference→stripped');
   assert.deepEqual(nudge, ['1 CLAUDE.md block(s)']);
 });
+
+// contracts-1: `ak host pick` / `ak host off` / setup write the opencode
+// AGENTS.md through reconcileOpencodeGuidance. It must reach the same answer
+// as sync's writer, or pick and sync flip the Brain block back and forth.
+test('the opencode guidance written by host pick is what sync would write', async () => {
+  const { reconcileOpencodeGuidance } = await import('../../src/lib/opencode.mjs');
+  const opencodeFor = async (extra) => {
+    const hosts = { claude: true, codex: false, opencode: true };
+    await converge(hosts, extra);
+    fs.mkdirSync(paths.opencodeDir(), { recursive: true });
+    const cfg = loadKitConfig();
+    await reconcileOpencodeGuidance({ pkgRoot: PKG_ROOT, cfg, cwd: PROJECT, enabled: true });
+    const writer = await reconcileGuidance({
+      cwd: PROJECT, cfg, pkgRoot: PKG_ROOT, context: guidanceContext(cfg), dryRun: true,
+    });
+    return writer.find((t) => t.name === 'agents-opencode');
+  };
+  const kb = path.join(HOME, '.cache', 'ruvnet-brain', 'kb');
+  try {
+    // A: the Brain is managed but its KB is not downloaded yet.
+    rmrf(kb);
+    const managed = await opencodeFor({ ruvnetBrain: true });
+    assert.equal(managed?.changed, '', `sync would still change: ${managed?.changed}`);
+    // B: the Brain is opted out while a user-owned KB folder exists.
+    fs.mkdirSync(kb, { recursive: true });
+    const optedOut = await opencodeFor({ ruvnetBrain: false });
+    assert.equal(optedOut?.changed, '', `sync would still change: ${optedOut?.changed}`);
+  } finally {
+    rmrf(kb, paths.opencodeDir());
+  }
+});

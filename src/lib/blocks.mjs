@@ -535,13 +535,15 @@ export function templateResolver(pkgRoot) {
  *  detector, and re-scoped rows are force-stripped (retiredForTarget).
  *  `context` carries the caller's flag signals for `flag` detectors (dualMode,
  *  opencodeEnabled); kit.json intent is merged over it. `targets` is a test
- *  seam (defaults to guidanceTargets()).
+ *  seam (defaults to guidanceTargets()). `only` limits the writes to the named
+ *  targets while every target still counts as known, so a command that owns one
+ *  file (ak host pick → opencode AGENTS.md) writes exactly what sync would.
  *  Returns [{name, label, changed, results}] where `changed` is a human-readable
  *  action summary ('' when the target was already in sync) and `results` is the
  *  raw per-row syncBlocks output ({slug, action, present}), including
  *  'missing-template'. */
 export async function reconcileGuidance({
-  cwd, cfg, pkgRoot, context = {}, dryRun = false, targets = guidanceTargets({ cwd, cfg }),
+  cwd, cfg, pkgRoot, context = {}, dryRun = false, targets = guidanceTargets({ cwd, cfg }), only = null,
 }) {
   const rows = registry(cfg.customBlocks);
   const resolve = templateResolver(pkgRoot);
@@ -549,6 +551,7 @@ export async function reconcileGuidance({
   const out = [];
   const knownTargets = targets.map((t) => t.name);
   for (const t of targets) {
+    if (only && !only.includes(t.name)) continue;
     const treg = [...blocksForTarget(rows, t.name), ...retiredForTarget(rows, t.name, knownTargets)];
     const results = await syncBlocks(t.file, treg, resolve, { context: selectionContext, dryRun });
     const changed = results.filter((r) => r.action !== 'unchanged' && r.action !== 'skipped')

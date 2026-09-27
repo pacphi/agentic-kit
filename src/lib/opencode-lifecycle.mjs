@@ -3,9 +3,8 @@
 // out of opencode.mjs (ADR-0037's file-size gate) — behavior and export
 // names are unchanged; opencode.mjs re-exports the externally-consumed
 // names so no import path elsewhere in the repo needed to change.
-import path from 'node:path';
 import * as paths from './paths.mjs';
-import { registry, syncBlocks, blocksForTarget, retiredForTarget, guidanceTargets } from './blocks.mjs';
+import { reconcileGuidance, guidanceTargets } from './blocks.mjs';
 import {
   opencodeOwnership, mutableOpencodeOwnership, applyOpencode, undoOpencode,
   opencodeArtifactReceiptState, managedGatewayMcp, opencodeConverged, normalizeManaged,
@@ -294,22 +293,16 @@ export const OPENCODE_LIFECYCLE_ADAPTER = createOpencodeLifecycleAdapter();
  *  converges guidance the same way sync's blocks branch does (codex-review r3).
  *  @param {{ pkgRoot: string, cfg: any, cwd?: string, enabled: boolean }} opts */
 export async function reconcileOpencodeGuidance({ pkgRoot, cfg, cwd = process.cwd(), enabled }) {
-  const target = guidanceTargets({ cwd }).find((t) => t.name === 'agents-opencode');
-  if (!target) return { ok: true, changed: false, detail: 'no opencode config home — guidance skipped' };
-  const rows = registry(cfg.customBlocks);
-  const resolve = (r) => (r.custom
-    ? (r.template.startsWith('~/') ? path.join(paths.home, r.template.slice(2)) : r.template)
-    : path.join(pkgRoot, 'claude', r.template));
-  const ctx = {
-    flags: {
-      dualMode: !!cfg.integrations?.hosts?.claude && !!cfg.integrations?.hosts?.codex,
-      opencodeEnabled: enabled,
-    },
-  };
-  const treg = [...blocksForTarget(rows, 'agents-opencode'), ...retiredForTarget(rows, 'agents-opencode')];
-  const res = await syncBlocks(target.file, treg, resolve, { context: ctx });
-  const changed = res.filter((r) => r.action !== 'unchanged' && r.action !== 'skipped')
-    .map((r) => `${r.slug} ${r.action}`);
-  return { ok: true, changed: changed.length > 0, detail: changed.length ? `guidance: ${changed.join(', ')}` : 'guidance in sync' };
+  const targets = guidanceTargets({ cwd });
+  if (!targets.some((t) => t.name === 'agents-opencode')) {
+    return { ok: true, changed: false, detail: 'no opencode config home — guidance skipped' };
+  }
+  // Sync's own writer, limited to this one file: the same kit.json intent
+  // (Brain, AQE, hosts) and the same known targets, so this command writes
+  // exactly what `ak sync` would and the two never flip a block back and forth.
+  // `enabled` is the opencode state this command is converging to.
+  const intent = { ...cfg, integrations: { ...cfg.integrations, hosts: { ...cfg.integrations?.hosts, opencode: enabled } } };
+  const [res] = await reconcileGuidance({ cwd, cfg: intent, pkgRoot, targets, only: ['agents-opencode'] });
+  return { ok: true, changed: !!res.changed, detail: res.changed ? `guidance: ${res.changed}` : 'guidance in sync' };
 }
 
