@@ -1277,6 +1277,9 @@ and the installed versions:
   #3193 is linked there.
 - [proffesor-for-testing/agentic-qe#736](https://github.com/proffesor-for-testing/agentic-qe/issues/736):
   `brain import` aborts on the pattern uniqueness constraint while `--dry-run` reports no conflicts.
+- [ruvnet/ruflo#3473](https://github.com/ruvnet/ruflo/issues/3473): `security defend` crashes on every
+  detected threat, so its exit 1 comes from the error handler and cannot tell a detection from a
+  crash (the defend item of the closed-upstream review below; still present in 3.46.1).
 - Evidence comments on [ruvnet/ruflo#3194](https://github.com/ruvnet/ruflo/issues/3194#issuecomment-5850006786)
   (idle self-shutdown on 3.45.0) and
   [ruvnet/ruflo#2935](https://github.com/ruvnet/ruflo/issues/2935#issuecomment-5850007657) (macOS
