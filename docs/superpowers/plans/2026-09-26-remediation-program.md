@@ -127,10 +127,10 @@ Investigations (file upstream only with a reproduction and the maintainer's appr
 
 Mostly operations; the code shipped in Wave 0.
 
-- [ ] With the go-ahead: create the pinned "Upstream watch" issue and the daily cloud routine from `docs/UPSTREAM-WATCH.md` (proposed 14:00 UTC); record their ids in the registry.
-- [ ] Migrate pacphi/agentic-kit#240 and #213's upstream remainder into the registry; comment with the registry link; close #240 when ruvnet/ruflo and agentic-qe#574 status allows.
-- [ ] Code (unit commits, test-first): confirm "candidate" releases by mapping merged pull requests' closing references; decide and implement the open questions (a separate AgentDB dependency policy; widening the guard to `docs/`; whether `lastVerifiedAt` waits for a conformance run).
-- [ ] Rehearse one dispatch end to end on a real released item (agentic-qe#617) as a draft pull request.
+- [ ] With the go-ahead: create the pinned "Upstream watch" issue and the daily cloud routine from `docs/UPSTREAM-WATCH.md` (proposed 14:00 UTC); record their ids in the registry. *The ledger issue is pacphi/agentic-kit#243, recorded in the registry; the routine is created after Branch 4 reaches `main` (B4-G2).*
+- [ ] Migrate pacphi/agentic-kit#240 and #213's upstream remainder into the registry; comment with the registry link; close #240 when ruvnet/ruflo and agentic-qe#574 status allows. *Migrated; the comments are drafted, not posted; #240 stays open on agentic-qe#574.*
+- [x] Code (unit commits, test-first): confirm "candidate" releases by mapping merged pull requests' closing references; decide and implement the open questions (a separate AgentDB dependency policy; widening the guard to `docs/`; whether `lastVerifiedAt` waits for a conformance run).
+- [ ] Rehearse one dispatch end to end on a real released item (agentic-qe#617) as a draft pull request. *Deferred until the routine exists.*
 
 Replies owed now: #213 (answer the Ruflo maintainer's two comments and stuinfla's local-evidence comment: the two stores are deliberate for encryption at rest; the watch tracks published behavior only); ruvnet/ruflo#3153 (read the four third-party comments; reply only if they ask something of us). Stale threads with no upstream activity for 90+ days (openai/codex#16045, #16921, ruvnet/ruflo#952): for each, re-check whether ak still depends on it, then either ask for a status once or retire the entry.
 

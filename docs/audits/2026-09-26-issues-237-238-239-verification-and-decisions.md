@@ -937,6 +937,40 @@ count on this machine on 2026-09-27 found 924 imported rollouts (the 874 above w
 advances the footprint snapshot schema to v8 so a snapshot taken before the change is not shown
 with the old origins. What remains is listed under Open items.
 
+#### Remediation program Branch 4 (`feat/upstream-watch-live`, 2026-09-27)
+
+Added after the fact, like Branch 1: built on `main` (rebased onto `5f5ca175`) for the
+[remediation program](../superpowers/plans/2026-09-26-remediation-program.md), not merged. The
+decisions are under "Branch 4 decisions" below.
+
+- **Release confirmation:** a release counts only when its tag contains the merged fixing pull
+  request or closing commit (`72c5c016`, `d91f2638`). The walk starts when that pull request
+  merged, not when the issue closed (`5b325df9`). After five releases without the fix it checks
+  the newest (`latest`) and, when that has the fix, the releases in between, so the released
+  version is always the oldest containing one (`2007194c`). A failed confirmation is "Could not
+  check" for the release only; the thread's closed, reply and acknowledged lines are kept, and
+  `check` reports what it could not check on stderr and in `--json` (`b6780df4`).
+- **Registry:** schema 6 splits `lastCheckedAt` from `lastVerifiedAt` (`520b3616`); AgentDB gates
+  on what Ruflo bundles (`f3744125`); the ledger is pacphi/agentic-kit#243 (`9203a4af`); a
+  `reviewed` history event clears the reply queue for that UTC day (`b641f097`); every thread
+  user-facing docs cite is registered (`1b0c6199`); #213 and #240 carry their upstream remainder
+  (`29f93dfc`) and report as "Our tracking issues" (`680f3cb8`); the three stale threads are
+  mapped, retired or queried (`64750a89`). agentic-qe#719, a partial fix for agentic-qe#574, is
+  context only, so its release (3.14.4) dispatches nothing; #574 drives removing the busy rule
+  (`b498db80`).
+- **Review fixes:** `8fad8e20`, `f4af45f8`, `6e4722d2`, `66976d75` (first review), then the
+  commits above from the adversarial review.
+- **Live check on 2026-09-27** (read-only, after these commits): ruvnet/ruflo#3167, #3194 and
+  #3415 are released and actionable in 3.46.0 (their fixing pull requests #3434, #3421 and
+  #3423). Ruflo 3.46.1 is the current release. Nothing could not be checked; nothing needs a
+  reply.
+- **Rulings, not changes:** a `reviewed` line covers its whole UTC day, because history carries
+  dates only; this is documented rather than given a time (`fefca3df`). ruvnet/ruflo#3153 has no
+  comment after 2026-09-03, so nothing was missed. The watch runs on macOS and Linux only (npm
+  is a `.cmd` file on Windows; `040f6b8a`). No `hermes-agent` dependency policy is added until a
+  Hermes Agent thread is first cited: none is today, and the loader then names the missing policy
+  (`dependency hermes-agent has no dependency policy`).
+
 ### Full-suite results at each stage end
 
 #### Baseline on `847486c`
@@ -1126,6 +1160,18 @@ Behavior that differs from, or goes beyond, the plan text.
   6 of the 924 imported rollouts hold a later turn that is not an import and has real token usage,
   which whole-rollout exclusion drops. The maintainer decided on 2026-09-27 to count them in
   Branch 8 (decision 12 below).
+- **Left open by Branch 4.**
+  - The daily routine is not created. It is created after Branch 4 reaches `main` (B4-G2),
+    from the prompt in [UPSTREAM-WATCH.md](../UPSTREAM-WATCH.md).
+  - The dispatch rehearsal on agentic-qe#617 (a draft pull request) is deferred to after the
+    routine exists.
+  - pacphi/agentic-kit#240 stays open until a released agentic-qe fixes agentic-qe#574 and ak
+    removes the busy rule.
+  - The draft replies for #213, #240, openai/codex#16045 and ruvnet/ruflo#952 are not posted.
+    Each needs the maintainer's go-ahead.
+  - Five newly registered threads are stale and not yet triaged: ruvnet/ruflo#2356 and #420, and
+    agentic-qe#528, #532 and #535.
+  - The three released Ruflo items (ruvnet/ruflo#3167, #3194, #3415) wait for dispatch.
 - **The dashboard server's hermeticity guard has a gap.** It fires only when a maintenance service
   is injected without a control root. A caller that injects only a System collector still gets the
   default maintenance service and management facade, and both write real state. This product-side
@@ -1637,7 +1683,7 @@ named by number in the registry.
 
 **Choice: A.** Created, pinned and locked as
 [pacphi/agentic-kit#243](https://github.com/pacphi/agentic-kit/issues/243) ("Upstream watch").
-`watchPolicy.ledger.issue` records 243; the loader and schema require it (`40d7d6d6`), and the
+`watchPolicy.ledger.issue` records 243; the loader and schema require it (`9203a4af`), and the
 routine prompt opens that issue directly.
 
 ### B4-G2 — when the daily routine is created
@@ -1663,7 +1709,7 @@ that may not be in any release.
 thrown away.
 
 **Choice: B.** The routine is created after this branch reaches `main`. Release confirmation
-landed in `04a91d83` and `46a92249`: a release counts only when its tag contains the merged
+landed in `72c5c016` and `d91f2638`: a release counts only when its tag contains the merged
 fixing pull request or commit, and an unprovable later release goes to the new group "Released,
 fix not confirmed", which is never dispatched.
 
@@ -1689,7 +1735,7 @@ resolves to a fixed agentdb.
 **Recommendation: B.** It matches how ak actually receives AgentDB.
 
 **Choice: B.** Released only when the newest Ruflo in the support window (npm `latest`) installs
-a fixed agentdb, resolved through npm down the `bundledBy` chain (`7f92e1d9`). Because AgentDB
+a fixed agentdb, resolved through npm down the `bundledBy` chain (`f3744125`). Because AgentDB
 has no tags, its fixes are confirmed by hand and recorded as `minVersion`.
 
 ### B4-Q2 — widening the citation guard
@@ -1718,7 +1764,7 @@ lives in `src/`. ADRs, audits, research and plans sit in subfolders and are exem
 three top-level history files are exempt by name (`MODEL-PRICING-AUDIT.md`,
 `METAHARNESS-COMPANION-PROPOSAL.md`, `USAGE-SCORECARD-METRICS.md`). The 26 threads are
 registered, 17 watching and 9 retired, with two new dependency policies, `claude-code` and
-`opencode` (`9cd9c582`). `ruvnet/ruflo#1234` is a placeholder in an example command.
+`opencode` (`1b0c6199`). `ruvnet/ruflo#1234` is a placeholder in an example command.
 
 ### B4-Q3 — checked versus verified dates
 
@@ -1741,17 +1787,17 @@ guidance told the maintainer to move every `nextRetestAt` on a re-read.
 **Recommendation: B.**
 
 **Choice: B.** Schema 6, migrated in place with `lastCheckedAt: 2026-09-27` and
-`lastVerifiedAt` unchanged (`60eb8f3c`). The tests take their clock from `lastCheckedAt`.
+`lastVerifiedAt` unchanged (`520b3616`). The tests take their clock from `lastCheckedAt`.
 
 ### Also settled on Branch 4
 
 - The report group "Released, fix not confirmed" (B4-G2 above).
 - A `reviewed` history event: the maintainer read a thread's comments up to that day and none
-  needs a reply. ruvnet/ruflo#3153 records it for four comments by sparkling (`38080846`).
+  needs a reply. ruvnet/ruflo#3153 records it for four comments by sparkling (`b641f097`).
 - #213 and #240 carry their whole upstream remainder; ruflo#3196 now waits for a tested
-  preservation or migration outcome, not a unified path (`81a1bc80`).
+  preservation or migration outcome, not a unified path (`29f93dfc`).
 - Stale threads: openai/codex#16045 is mapped to the connected host check; openai/codex#16921 is
   retired as watched through #17827; ruvnet/ruflo#952 records that `--tools` narrows only the
-  advertised schemas (`1587eafa`).
+  advertised schemas (`64750a89`).
 - Draft comments for #213, #240, codex#16045 and ruflo#952 are left for the controller; none is
   posted from this branch.
