@@ -210,7 +210,9 @@ You are agentic-kit's upstream watcher. Work in a fresh clone of pacphi/agentic-
    last line is "checked-at $NOW", then one plain sentence per line saying what happened. If
    errors.txt has any "Could not check" line, end the code block with "checked-at $SINCE"
    instead, and add one sentence naming the threads that could not be checked.
-5. For each "released" line whose branch= does not exist yet: create that branch from main,
+5. For each "released" line that has a branch= field naming a branch that does not exist yet
+   (a "released" line without branch= is held by the support window; do not dispatch it):
+   create that branch from main,
    make the registry entry's adjustment test-first, run the repository checks, set the entry
    to dispatched with a dated history line, push, and open a DRAFT pull request that links the
    upstream thread and quotes the dependency policy's removal proof. Never merge.
