@@ -136,9 +136,13 @@ dotted and quoted root keys, no longer stop ak from projecting the AQE embedding
 endpoint into that file.
 
 An AQE registration written inline (`agentic-qe = { … }` under `[mcp_servers]`, or
-`mcp_servers = { … }`) was previously read as absent and skipped silently. It is now reported as a conflict, so `ak status` and `ak sync` show an AQE
-embedding warning for that file. Run `ak x aqe-embedding status --json` to see the
-file and reason, then rewrite the entry as a `[mcp_servers.agentic-qe]` table.
+`mcp_servers = { … }`) was previously read as absent and skipped silently. With a selected
+embedding backend it is now reported as a conflict: `ak status` shows an AQE embedding warning
+for that file, and `ak sync` leaves the entry alone, reports it `unresolved:` and exits 1 until
+it is rewritten (see [`ak sync` fails when a planned repair did not
+take](#2026-09-26-ak-sync-fails-when-a-planned-repair-did-not-take)). Run
+`ak x aqe-embedding status --json` to see the file and reason, then rewrite the entry as a
+`[mcp_servers.agentic-qe]` table.
 
 AQE entries started with `aqe mcp`, `agentic-qe mcp` or `aqe-v3 mcp` are now
 recognized on Claude, Codex and OpenCode, and OpenCode also accepts
