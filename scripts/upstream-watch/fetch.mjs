@@ -4,13 +4,13 @@
 // no call here writes to GitHub or npm.
 import { execFile } from 'node:child_process';
 
+import { OWNER_REPO, PACKAGE_NAME } from '../../src/lib/hook-audit/upstream-watch.mjs';
 import { maxVersion, releaseFacts } from './classify.mjs';
 
 const ID = /^([\w.-]+\/[\w.-]+)#([1-9]\d*)$/;
 const SHA = /^[0-9a-f]{7,40}$/;
 const REF = /^[\w./-]+$/;
 const NOT_FOUND = /HTTP 404|Not Found/i;
-const PACKAGE = /^[@\w][\w@./-]*$/;
 const NO_MATCH = /No match found for version/;
 
 // What closed a thread: its closing pull requests, else the ClosedEvent's closer.
@@ -96,7 +96,7 @@ export function createFetcher({ exec = run } = {}) {
      */
     async contains(repo, refs, sha) {
       if (!SHA.test(sha ?? '')) throw new Error(`not a commit: ${sha}`);
-      if (!/^[\w.-]+\/[\w.-]+$/.test(repo ?? '')) throw new Error(`not an owner/repo: ${repo}`);
+      if (!OWNER_REPO.test(repo ?? '')) throw new Error(`not an owner/repo: ${repo}`);
       for (const ref of refs) {
         if (!REF.test(ref ?? '')) throw new Error(`not a tag name: ${ref}`);
         const args = ['api', `repos/${repo}/compare/${ref}...${sha}`, '--jq', '{status:.status}'];
@@ -117,7 +117,7 @@ export function createFetcher({ exec = run } = {}) {
      * resolving every range to its highest published match with npm.
      */
     async bundled(chain, name) {
-      for (const pkg of [...chain, name]) if (!PACKAGE.test(pkg ?? '')) throw new Error(`not a package name: ${pkg}`);
+      for (const pkg of [...chain, name]) if (!PACKAGE_NAME.test(pkg ?? '')) throw new Error(`not a package name: ${pkg}`);
       const carrierVersion = await json('npm', ['view', chain[0], 'version', '--json']);
       let [pkg, version] = [chain[0], carrierVersion];
       const trail = [`${pkg} ${version}`];
@@ -138,7 +138,7 @@ export function createFetcher({ exec = run } = {}) {
       return { carrier: chain[0], carrierVersion, version, basis: trail.join(' → ') };
     },
     async release({ channel, name }) {
-      if (!PACKAGE.test(name)) throw new Error(`not a package or repository name: ${name}`);
+      if (!PACKAGE_NAME.test(name)) throw new Error(`not a package or repository name: ${name}`);
       if (channel === 'npm') return releaseFacts('npm', await json('npm', ['view', name, 'time', 'dist-tags', '--json']));
       return releaseFacts('github-release', await json('gh', ['api', `repos/${name}/releases?per_page=100`]));
     },

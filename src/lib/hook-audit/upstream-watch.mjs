@@ -17,7 +17,9 @@ const ENTRY_KEYS = new Set([
 const ID = /^([\w.-]+)\/([\w.-]+)#([1-9]\d*)$/;
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const RELEASE_KEYS = new Set(['channel', 'name', 'minVersion', 'tagPattern', 'bundledBy']);
-const PACKAGE = /^[@\w][\w@./-]*$/;
+// Shared with the watch tooling (scripts/upstream-watch/); the schema spells them identically.
+export const PACKAGE_NAME = /^[@A-Za-z0-9_][A-Za-z0-9_@./-]*$/;
+export const OWNER_REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 // A tag spelling such as rust-v{version}; the watcher substitutes the version.
 const TAG_PATTERN = /^[\w./-]*\{version\}[\w./-]*$/;
 const ISSUE_URL = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/(?:issues|pull)\/(\d+)$/;
@@ -43,7 +45,7 @@ function checkPolicy(policy, errors) {
     errors.push('watchPolicy.automatedReplyPatterns must be valid regular expressions');
   }
   const ledger = policy.ledger;
-  if (!isObject(ledger) || !/^[\w.-]+\/[\w.-]+$/.test(ledger.repo ?? '') || !Number.isInteger(ledger.issue) || ledger.issue < 1
+  if (!isObject(ledger) || !OWNER_REPO.test(ledger.repo ?? '') || !Number.isInteger(ledger.issue) || ledger.issue < 1
       || !text(ledger.issueTitle) || !/^[A-Z][A-Z-]+$/.test(ledger.sentinel ?? '')) {
     errors.push('watchPolicy.ledger must name repo, issue, issueTitle and an upper-case sentinel');
   }
@@ -72,7 +74,7 @@ function checkDoneWhen(doneWhen, kind, where, errors) {
     errors.push(`${where}: doneWhen.release.tagPattern must contain {version}`);
   }
   if (release.bundledBy !== undefined && !(Array.isArray(release.bundledBy) && release.bundledBy.length > 0
-      && release.bundledBy.every((pkg) => typeof pkg === 'string' && PACKAGE.test(pkg)))) {
+      && release.bundledBy.every((pkg) => typeof pkg === 'string' && PACKAGE_NAME.test(pkg)))) {
     errors.push(`${where}: doneWhen.release.bundledBy must list the carrier packages`);
   }
 }

@@ -77,20 +77,15 @@ test('upstream registry separates valid shape, current evidence, and version app
 });
 
 test('future verification dates are invalid rather than falsely current', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-upstream-'));
-  try {
-    const document = JSON.parse(fs.readFileSync(registryFile, 'utf8'));
+  withDocument((document) => {
     document.lastVerifiedAt = '2099-01-01';
     document.lastCheckedAt = '2099-01-01';
     for (const constraint of document.constraints) constraint.nextRetestAt = '2099-01-02';
-    const file = path.join(root, 'constraints.json');
-    fs.writeFileSync(file, JSON.stringify(document));
+  }, (file) => {
     const result = loadUpstreamConstraints({ file, now });
     assert.equal(result.status, 'invalid');
     assert.match(result.errors.join('\n'), /cannot be in the future/);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
+  });
 });
 
 test('the registry is schema 6 and records when state was last re-read', () => {

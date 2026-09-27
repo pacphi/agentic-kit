@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { UPSTREAM_REGISTRY_FILE, loadUpstreamConstraints, loadUpstreamRegistry } from '../../src/lib/hook-audit/upstream.mjs';
+import * as watchPatterns from '../../src/lib/hook-audit/upstream-watch.mjs';
 import {
   CITATION_DIRS, USER_DOC_EXEMPT, canonicalRepo, findCitations, scanCitations, unregisteredCitations, userFacingDocs,
 } from '../../scripts/upstream-watch/citations.mjs';
@@ -121,6 +122,28 @@ test('AgentDB threads gate on what Ruflo bundles', () => {
   const errors = errorsOf((doc) => { entry(doc, 'ruvnet/agentdb#26').doneWhen.release.bundledBy = []; });
   assert.match(errors, /ruvnet\/agentdb#26.*bundledBy/);
   assert.match(errorsOf((doc) => { entry(doc, 'ruvnet/agentdb#26').doneWhen.release.bundledBy = ['ruflo', 'x y']; }), /ruvnet\/agentdb#26.*bundledBy/);
+});
+
+test('package and owner/repo patterns are defined once, and the schema spells them the same', () => {
+  const schema = JSON.parse(fs.readFileSync('docs/schemas/agentic-dependency-constraints.schema.json', 'utf8'));
+  // The first `properties.<name>` found anywhere in the schema.
+  const property = (node, name) => {
+    if (!node || typeof node !== 'object') return null;
+    if (node.properties?.[name]) return node.properties[name];
+    for (const child of Object.values(node)) {
+      const found = property(child, name);
+      if (found) return found;
+    }
+    return null;
+  };
+  const { PACKAGE_NAME, OWNER_REPO } = watchPatterns;
+  assert.ok(PACKAGE_NAME instanceof RegExp && OWNER_REPO instanceof RegExp, 'exported from src/lib/hook-audit/upstream-watch.mjs');
+  assert.equal(new RegExp(property(schema, 'bundledBy').items.pattern).source, PACKAGE_NAME.source);
+  assert.equal(new RegExp(property(property(schema, 'ledger'), 'repo').pattern).source, OWNER_REPO.source);
+  const fetchSource = fs.readFileSync('scripts/upstream-watch/fetch.mjs', 'utf8');
+  for (const copy of ['[@\\w][\\w@./-]*', '/^[\\w.-]+\\/[\\w.-]+$/', PACKAGE_NAME.source, OWNER_REPO.source]) {
+    assert.ok(!fetchSource.includes(copy), `fetch.mjs imports the pattern instead of repeating ${copy}`);
+  }
 });
 
 test('constraints and watch entries point at each other', () => {
