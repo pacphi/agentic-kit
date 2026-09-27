@@ -30,7 +30,7 @@ A watch entry records:
 | `id`, `url`, `kind`, `title` | The thread (`owner/repo#n`, issue or pr). |
 | `relation` | `filed`, `commented`, `referenced` (cited, not ours) or `tracking` (our issue that migrates here; lists `tracks`). |
 | `dependency` | The dependency policy that governs it. AgentDB threads use `ruflo`: ak gets AgentDB through Ruflo. |
-| `doneWhen` | `closed-completed` or `merged`, plus the release channel and the first fixed version when known. |
+| `doneWhen` | `closed-completed` or `merged`, plus the release channel, the first fixed version when known, and the upstream tag spelling (`tagPattern`) when it is not `v<version>`. |
 | `mapping`, `kitImpact`, `adjustment` | Whether ak carries something for it, which files and plan or decision refs, and the change ak makes when it lands. |
 | `status`, `history` | Lifecycle status and dated events. |
 | `constraintIds` | Constraints this thread backs. |
@@ -80,7 +80,8 @@ node scripts/upstream-watch.mjs check --since <iso-date> [--ledger <file>] [--js
 | Group | Rule |
 |---|---|
 | Needs our reply | A comment from someone else, not a bot, after our last word (a filed issue's body counts) and after the entry's last status change. Automated acknowledgements show as "acknowledged" instead. |
-| Released and actionable | Upstream fixed, a release contains the fix, the entry is `watching` or `fixed-unreleased`, and ak has an adjustment. Carries the dispatch branch and removal proof. With no recorded first fixed version, the first release after the fix is a **candidate**: confirm it contains the fix. |
+| Released and actionable | Upstream fixed, and a published release contains the merged fixing pull request (or closing commit), checked against the repository's tag for that version, or the registry records the first fixed version (`minVersion`). The entry is `watching` or `fixed-unreleased` and ak has an adjustment. Carries the dispatch branch and removal proof. |
+| Released, fix not confirmed | A release came out after the fix, but ak could not prove it contains the fixing change (no merged pull request closed the thread, or no tag for that version). Confirm by hand and record `minVersion`. Never dispatched. |
 | Fixed upstream, ak still carries the workaround | The entry is `released` or `dispatched` and ak has an adjustment. |
 | Fixed upstream, not yet released | Upstream fixed, no release contains it, the entry is `watching` or `fixed-unreleased`, and ak has an adjustment. |
 | Reopened upstream | Open upstream while the entry says fixed, released, dispatched or adopted. |
@@ -106,7 +107,8 @@ UPSTREAM-WATCH <id> <event> <yyyy-mm-dd> [key=value ...]
 ```
 
 Events: `reply` and `acknowledged` (with `by=` and the comment's `at=` time, so each comment is
-its own line), `closed`, `merged`, `released`, `reopened`, `stale`,
+its own line), `closed`, `merged`, `released` (with `version=`, and `pr=` or `commit=` naming the
+fixing change when the release was confirmed from it), `reopened`, `stale`,
 `retire-proposed`, `retest-due` (constraint id) and `idle` (id `registry`, nothing left to
 watch). `check --since` limits replies, acknowledgements, closures and merges to activity after
 `--since`. The other events repeat while their condition holds, dated by the upstream fact, so
@@ -115,6 +117,17 @@ so an exact line the routine recorded is never acted on twice. The file holds on
 routine's own comments: a line someone else posted would suppress a real event. Each posted
 comment ends with `checked-at <time>`, the moment that run started `check`; the next run's
 `--since` is the newest such time, so a reply that arrives while a run is posting is still seen.
+
+## Confirming a release
+
+Without a recorded `minVersion`, the check asks GitHub what closed the thread: pull requests
+merged into the repository's default branch (an unmerged or off-branch closing reference does not
+count), else the commit that closed it. It then compares that change with the tag of each release
+published after the fix, oldest first, at most five, and stops at the first tag that contains it.
+Tags are `v<version>` then `<version>`, or the gate's `tagPattern` (Codex: `rust-v{version}`). A
+tag missing for every spelling leaves the release unconfirmed; any other GitHub failure is "Could
+not check". When several pull requests closed a thread, the first is checked. Only a confirmed
+release produces a `released` line, so only a confirmed release is dispatched.
 
 ## Dispatch
 

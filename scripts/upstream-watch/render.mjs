@@ -11,10 +11,15 @@ function detail(key, item) {
     }
     case 'released-actionable':
       return [
-        `released in ${item.release.version ?? 'a release'} (${item.release.date ?? 'date unknown'})${item.release.candidate ? '; candidate: confirm the fix is in it' : ''}`,
+        `released in ${item.release.version ?? 'a release'} (${item.release.date ?? 'date unknown'}); ${item.release.basis ?? 'first fixed version recorded in the registry'}`,
         `dispatch: branch ${item.dispatch.branch}, ${item.dispatch.pullRequest} pull request, merge ${item.dispatch.merge}`,
         `change: ${item.adjustment}`,
         `removal proof: ${item.dispatch.removalProof ?? 'none recorded for this dependency'}`,
+      ];
+    case 'release-unconfirmed':
+      return [
+        `${item.release.version} (${item.release.date}) is the first release after the fix; ${item.release.basis}`,
+        `change once confirmed: ${item.adjustment}`,
       ];
     case 'workaround-carried':
       return [`status ${item.status}; branch ${item.dispatch?.branch ?? 'n/a'}`, `change: ${item.adjustment}`];

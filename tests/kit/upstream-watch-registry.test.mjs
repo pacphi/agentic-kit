@@ -85,6 +85,15 @@ test('release gates, history order, duplicates and dependencies are checked', ()
   assert.match(errors, /duplicate/i);
 });
 
+test('a release gate may name its tag spelling', () => {
+  const errors = errorsOf((doc) => { entry(doc, 'ruvnet/ruflo#3194').doneWhen.release.tagPattern = 'v-no-placeholder'; });
+  assert.match(errors, /ruvnet\/ruflo#3194.*tagPattern/);
+  assert.match(errorsOf((doc) => { entry(doc, 'ruvnet/ruflo#3194').doneWhen.release.tagPatern = 'v{version}'; }), /ruvnet\/ruflo#3194.*release/);
+  const codex = document().watch.filter((item) => item.id.startsWith('openai/codex#') && item.doneWhen.release);
+  assert.ok(codex.length > 0);
+  assert.ok(codex.every((item) => item.doneWhen.release.tagPattern === 'rust-v{version}'));
+});
+
 test('constraints and watch entries point at each other', () => {
   const unlinked = errorsOf((doc) => { entry(doc, 'ruvnet/ruflo#3167').constraintIds = []; });
   assert.match(unlinked, /ruflo-3\.38\.21-init-suppression-flags.*ruvnet\/ruflo#3167/);

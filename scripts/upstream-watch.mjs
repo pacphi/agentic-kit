@@ -9,7 +9,9 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { loadUpstreamRegistry } from '../src/lib/hook-audit/upstream.mjs';
-import { buildReport, ledgerEvents, upstreamOf, withoutRecorded } from './upstream-watch/classify.mjs';
+import {
+  buildReport, candidateVersions, ledgerEvents, tagRefs, upstreamOf, withoutRecorded,
+} from './upstream-watch/classify.mjs';
 import { createFetcher, mapLimit } from './upstream-watch/fetch.mjs';
 import { renderEvents, renderReport } from './upstream-watch/render.mjs';
 
@@ -53,6 +55,30 @@ export function parseArgs(argv) {
   return options;
 }
 
+// Without a recorded first fixed version, a release counts only when it
+// contains the merged fixing change: walk the releases after the fix, oldest
+// first, and stop at the first that contains it or has no tag to check.
+async function confirmReleases(entries, live, fetcher, concurrency, fetchErrors) {
+  await mapLimit(entries, concurrency, async (entry) => {
+    const state = live.get(entry.id);
+    try {
+      const changes = await fetcher.fixingChanges(entry.id);
+      const checks = [];
+      if (changes.length) {
+        for (const item of candidateVersions(upstreamOf(state.thread).fixedAt, state.release)) {
+          const found = await fetcher.contains(changes[0].repo, tagRefs(entry.doneWhen.release, item.version), changes[0].sha);
+          checks.push({ version: item.version, ...found });
+          if (found.contained !== false) break;
+        }
+      }
+      state.confirmation = { changes, checks };
+    } catch (error) {
+      state.error = error.message;
+      fetchErrors.push({ id: entry.id, error: error.message });
+    }
+  });
+}
+
 async function collect(registry, fetcher, concurrency) {
   const active = registry.watch.filter((entry) => entry.status !== 'retired');
   const live = new Map();
@@ -80,6 +106,7 @@ async function collect(registry, fetcher, concurrency) {
   for (const entry of gated) {
     live.get(entry.id).release = facts.get(`${entry.doneWhen.release.channel}:${entry.doneWhen.release.name}`) ?? null;
   }
+  await confirmReleases(gated.filter((entry) => !entry.doneWhen.release.minVersion && live.get(entry.id).release), live, fetcher, concurrency, fetchErrors);
   fetchErrors.sort((a, b) => a.id.localeCompare(b.id));
   return { live, fetchErrors };
 }

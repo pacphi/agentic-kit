@@ -15,6 +15,9 @@ const ENTRY_KEYS = new Set([
 ]);
 const ID = /^([\w.-]+)\/([\w.-]+)#([1-9]\d*)$/;
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+const RELEASE_KEYS = new Set(['channel', 'name', 'minVersion', 'tagPattern']);
+// A tag spelling such as rust-v{version}; the watcher substitutes the version.
+const TAG_PATTERN = /^[\w./-]*\{version\}[\w./-]*$/;
 const ISSUE_URL = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/(?:issues|pull)\/(\d+)$/;
 
 const text = (value) => typeof value === 'string' && value.trim() !== '';
@@ -59,6 +62,11 @@ function checkDoneWhen(doneWhen, kind, where, errors) {
   if (!isObject(release) || !RELEASE_CHANNELS.includes(release.channel) || !text(release.name)
       || !(release.minVersion === null || SEMVER.test(release.minVersion ?? ''))) {
     errors.push(`${where}: doneWhen.release must be null or { channel: npm|github-release, name, minVersion: null|semver }`);
+    return;
+  }
+  for (const key of Object.keys(release)) if (!RELEASE_KEYS.has(key)) errors.push(`${where}: doneWhen.release has unknown key ${key}`);
+  if (release.tagPattern !== undefined && !(typeof release.tagPattern === 'string' && TAG_PATTERN.test(release.tagPattern))) {
+    errors.push(`${where}: doneWhen.release.tagPattern must contain {version}`);
   }
 }
 

@@ -10,6 +10,7 @@ const PENDING = new Set(['watching', 'fixed-unreleased']);
 export const GROUPS = [
   ['needs-reply', 'Needs our reply'],
   ['released-actionable', 'Released and actionable'],
+  ['release-unconfirmed', 'Released, fix not confirmed'],
   ['workaround-carried', 'Fixed upstream, ak still carries the workaround'],
   ['fixed-unreleased', 'Fixed upstream, not yet released'],
   ['reopened', 'Reopened upstream after ak recorded a fix'],
@@ -78,8 +79,32 @@ export function upstreamOf(thread) {
   };
 }
 
-/** Whether the fix has shipped, per the entry's doneWhen.release gate. */
-export function releaseState(entry, fixedAt, facts) {
+// How many releases after a fix are checked for the fixing change.
+const CONFIRM_LIMIT = 5;
+
+/** Releases published after the fix, oldest first: stable only unless `latest` is a prerelease. */
+export function candidateVersions(fixedAt, facts, limit = CONFIRM_LIMIT) {
+  const prerelease = facts.latest?.includes('-');
+  return facts.versions
+    .filter((item) => item.publishedAt > fixedAt && (prerelease || !item.version.includes('-')))
+    .sort((a, b) => a.publishedAt.localeCompare(b.publishedAt))
+    .slice(0, limit);
+}
+
+/** The tag names a release gate's version may carry upstream, in the order to try them. */
+export function tagRefs(gate, version) {
+  return gate.tagPattern ? [gate.tagPattern.replace('{version}', version)] : [`v${version}`, version];
+}
+
+const changeLabel = (change) => (change.pr ? `PR #${change.pr}` : `commit ${change.sha.slice(0, 7)}`);
+
+/**
+ * Whether the fix has shipped, per the entry's doneWhen.release gate. Without
+ * a recorded first fixed version, a release counts only when it contains the
+ * merged fixing change (`confirmation`, from the fetcher); a release ak cannot
+ * prove is 'unconfirmed' and is never dispatched.
+ */
+export function releaseState(entry, fixedAt, facts, confirmation = null) {
   const gate = entry.doneWhen.release;
   if (gate === null) return { released: true, basis: 'no release gate: closing is enough', version: null, date: day(fixedAt) };
   if (!facts) return { released: null, basis: `release facts for ${gate.name} unavailable`, version: null, date: null };
@@ -89,13 +114,27 @@ export function releaseState(entry, fixedAt, facts) {
       ? { released: true, basis: 'first fixed version recorded in the registry', version: gate.minVersion, date: day(published) }
       : { released: false, basis: `${gate.name} ${facts.latest ?? 'has no release'} predates ${gate.minVersion}`, version: null, date: null };
   }
-  const prerelease = facts.latest?.includes('-');
-  const after = facts.versions
-    .filter((item) => item.publishedAt > fixedAt && (prerelease || !item.version.includes('-')))
-    .sort((a, b) => a.publishedAt.localeCompare(b.publishedAt));
-  return after.length
-    ? { released: true, candidate: true, basis: 'first version published after the fix; confirm it contains the fix', version: after[0].version, date: day(after[0].publishedAt) }
-    : { released: false, basis: `no ${gate.name} release since the fix`, version: null, date: null };
+  const after = candidateVersions(fixedAt, facts);
+  if (!after.length) return { released: false, basis: `no ${gate.name} release since the fix`, version: null, date: null };
+  const change = confirmation?.changes?.[0] ?? null;
+  const checks = confirmation?.checks ?? [];
+  const hit = checks.find((check) => check.contained === true);
+  if (change && hit) {
+    const published = after.find((item) => item.version === hit.version)?.publishedAt ?? null;
+    return {
+      released: true, confirmed: true, version: hit.version, date: day(published), change, ref: hit.ref,
+      basis: `merged ${changeLabel(change)} is in ${hit.ref}`,
+    };
+  }
+  if (change && checks.length === after.length && checks.every((check) => check.contained === false)) {
+    return { released: false, basis: `none of the first ${after.length} ${gate.name} release(s) after the fix contains ${changeLabel(change)}`, version: null, date: null };
+  }
+  return {
+    released: 'unconfirmed', version: after[0].version, date: day(after[0].publishedAt),
+    basis: change
+      ? `no tag found to prove ${changeLabel(change)} is in ${gate.name} ${after[0].version}`
+      : 'no merged pull request or commit closed the thread; confirm by hand and record minVersion',
+  };
 }
 
 function commentFacts(entry, thread, policy) {
@@ -137,6 +176,7 @@ function liveGroups(entry, up, facts, release, stale) {
   }
   if (up.fixed && PENDING.has(entry.status) && mapped) {
     if (release?.released === true) groups.push('released-actionable');
+    else if (release?.released === 'unconfirmed') groups.push('release-unconfirmed');
     else if (release?.released === false) groups.push('fixed-unreleased');
     else groups.push('unchecked');
   }
@@ -173,7 +213,7 @@ export function classifyEntry(entry, live, { policy, dependencyPolicies, now }) 
   }
   const up = upstreamOf(live.thread);
   const facts = commentFacts(entry, live.thread, policy);
-  const release = up.fixed && PENDING.has(entry.status) ? releaseState(entry, up.fixedAt, live.release) : null;
+  const release = up.fixed && PENDING.has(entry.status) ? releaseState(entry, up.fixedAt, live.release, live.confirmation ?? null) : null;
   const stale = up.state === 'open' && now.getTime() - Date.parse(facts.lastUpstreamActivityAt) >= policy.staleAfterDays * DAY;
   const groups = [...new Set([...liveGroups(entry, up, facts, release, stale), ...fromRegistry])];
   if (entry.relation === 'tracking') {
@@ -242,7 +282,10 @@ export function ledgerEvents(report, registry, { since }) {
     else if (up?.state === 'closed' && up.closedAt > since) events.push(eventLine(sentinel, entry.id, 'closed', day(up.closedAt), { reason: up.reason }));
     if (entry.groups.includes('released-actionable')) {
       events.push(eventLine(sentinel, entry.id, 'released', entry.release.date, {
-        version: entry.release.version, candidate: entry.release.candidate ? 'yes' : null, branch: entry.dispatch.branch,
+        version: entry.release.version,
+        pr: entry.release.change?.pr ?? null,
+        commit: entry.release.change && !entry.release.change.pr ? entry.release.change.sha.slice(0, 7) : null,
+        branch: entry.dispatch.branch,
       }));
     }
     if (entry.groups.includes('reopened')) events.push(eventLine(sentinel, entry.id, 'reopened', entry.lastHistoryDate, { status: entry.status }));

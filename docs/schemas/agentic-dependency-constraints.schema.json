@@ -135,7 +135,8 @@
                     "properties": {
                       "channel": { "enum": ["npm", "github-release"] },
                       "name": { "type": "string", "minLength": 1 },
-                      "minVersion": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$" }] }
+                      "minVersion": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$" }] },
+                      "tagPattern": { "type": "string", "pattern": "^[A-Za-z0-9_./-]*\\{version\\}[A-Za-z0-9_./-]*$", "description": "Upstream tag spelling for a version, for example rust-v{version}; default v{version} then {version}." }
                     }
                   }
                 ]

@@ -8,7 +8,7 @@ import path from 'node:path';
 
 import { UPSTREAM_REGISTRY_FILE, loadUpstreamRegistry } from '../../src/lib/hook-audit/upstream.mjs';
 import {
-  buildReport, classifyEntry, compareVersions, ledgerEvents, releaseFacts, withoutRecorded,
+  buildReport, candidateVersions, classifyEntry, compareVersions, ledgerEvents, releaseFacts, tagRefs, withoutRecorded,
 } from '../../scripts/upstream-watch/classify.mjs';
 import { createFetcher, mapLimit } from '../../scripts/upstream-watch/fetch.mjs';
 import { renderEvents, renderReport } from '../../scripts/upstream-watch/render.mjs';
@@ -108,11 +108,101 @@ test('a fix in a published release with a pending ak change is released and acti
   assert.match(result.dispatch.removalProof, /conformance/);
 });
 
-test('without a recorded first fixed version the first release after the fix is only a candidate', () => {
-  const result = classifyEntry(entry('proffesor-for-testing/agentic-qe#617'), live('proffesor-for-testing/agentic-qe#617', agenticQe), context);
+const rufloFacts = { versions: [
+  { version: '3.45.0', publishedAt: '2026-09-24T22:54:53.174Z' },
+  { version: '3.46.0', publishedAt: '2026-09-26T22:34:55.241Z' },
+  { version: '3.46.1', publishedAt: '2026-09-26T23:27:22.133Z' },
+], latest: '3.46.1' };
+const closedThread = (id, closedAt) => ({ issue: { number: Number(id.split('#')[1]), state: 'closed', state_reason: 'completed', closed_at: closedAt, created_at: '2026-09-01T00:00:00Z', updated_at: closedAt, user: { login: 'pacphi' } }, comments: [] });
+const change = { repo: 'ruvnet/ruflo', pr: 3421, sha: 'e45eeead28855b4f06b4afd184ffb408269ca2f8' };
+
+test('a release is actionable only when it contains the merged fixing pull request', () => {
+  const confirmation = { changes: [change], checks: [{ version: '3.46.0', ref: 'v3.46.0', contained: true }] };
+  const result = classifyEntry(entry('ruvnet/ruflo#3194'), { thread: closedThread('ruvnet/ruflo#3194', '2026-09-26T22:31:23Z'), release: rufloFacts, confirmation }, context);
   assert.ok(result.groups.includes('released-actionable'));
-  assert.equal(result.release.candidate, true);
-  assert.equal(result.release.version, '3.13.10');
+  assert.equal(result.release.confirmed, true);
+  assert.equal(result.release.version, '3.46.0');
+  assert.equal(result.release.date, '2026-09-26');
+  assert.equal(result.release.change.pr, 3421);
+  assert.match(result.release.basis, /PR #3421 is in v3\.46\.0/);
+});
+
+test('without proof the first release after the fix is unconfirmed, not actionable', () => {
+  for (const confirmation of [null, { changes: [], checks: [] }, { changes: [change], checks: [{ version: '3.46.0', ref: null, contained: null }] }]) {
+    const result = classifyEntry(entry('ruvnet/ruflo#3194'), { thread: closedThread('ruvnet/ruflo#3194', '2026-09-26T22:31:23Z'), release: rufloFacts, confirmation }, context);
+    assert.deepEqual(result.groups.filter((group) => /^(released|release|fixed)/.test(group)), ['release-unconfirmed'], JSON.stringify(confirmation));
+    assert.equal(result.release.version, '3.46.0');
+    assert.equal(result.dispatch, null, 'an unconfirmed release is never dispatched');
+  }
+});
+
+test('a fix no checked release contains is fixed but unreleased', () => {
+  const confirmation = { changes: [change], checks: [
+    { version: '3.46.0', ref: 'v3.46.0', contained: false }, { version: '3.46.1', ref: 'v3.46.1', contained: false },
+  ] };
+  const result = classifyEntry(entry('ruvnet/ruflo#3194'), { thread: closedThread('ruvnet/ruflo#3194', '2026-09-26T22:31:23Z'), release: rufloFacts, confirmation }, context);
+  assert.ok(result.groups.includes('fixed-unreleased'));
+  assert.ok(!result.groups.includes('released-actionable'));
+  assert.match(result.release.basis, /contains PR #3421/);
+});
+
+test('candidateVersions walks releases after the fix, oldest first, bounded', () => {
+  assert.deepEqual(candidateVersions('2026-09-26T22:31:23Z', rufloFacts).map((item) => item.version), ['3.46.0', '3.46.1']);
+  assert.equal(candidateVersions('2026-01-01T00:00:00Z', rufloFacts, 2).length, 2);
+  const withPrerelease = { versions: [...rufloFacts.versions, { version: '3.47.0-alpha.1', publishedAt: '2026-09-25T00:00:00Z' }], latest: '3.46.1' };
+  assert.deepEqual(candidateVersions('2026-09-24T00:00:00Z', withPrerelease).map((item) => item.version), ['3.45.0', '3.46.0', '3.46.1'], 'stable only while latest is stable');
+  assert.deepEqual(tagRefs({ channel: 'npm', name: 'ruflo', minVersion: null }, '3.46.0'), ['v3.46.0', '3.46.0']);
+  assert.deepEqual(tagRefs({ channel: 'npm', name: '@openai/codex', minVersion: null, tagPattern: 'rust-v{version}' }, '0.153.4'), ['rust-v0.153.4']);
+});
+
+test('the released ledger line names the fixing pull request, never "candidate"', () => {
+  const confirmation = { changes: [change], checks: [{ version: '3.46.0', ref: 'v3.46.0', contained: true }] };
+  const registry = registryWith([entry('ruvnet/ruflo#3194')]);
+  const report = buildReport(registry, new Map([['ruvnet/ruflo#3194', { thread: closedThread('ruvnet/ruflo#3194', '2026-09-26T22:31:23Z'), release: rufloFacts, confirmation }]]), { now: NOW });
+  const line = ledgerEvents(report, registry, { since: '2026-09-26T00:00:00Z' }).find((event) => event.event === 'released').line;
+  assert.equal(line, 'UPSTREAM-WATCH ruvnet/ruflo#3194 released 2026-09-26 version=3.46.0 pr=3421 branch=upstream/ruvnet-ruflo-3194');
+  const byCommit = { changes: [{ repo: 'ruvnet/ruflo', pr: null, sha: 'abc1234abc1234abc1234abc1234abc1234abc12' }], checks: [{ version: '3.46.0', ref: 'v3.46.0', contained: true }] };
+  const committed = buildReport(registry, new Map([['ruvnet/ruflo#3194', { thread: closedThread('ruvnet/ruflo#3194', '2026-09-26T22:31:23Z'), release: rufloFacts, confirmation: byCommit }]]), { now: NOW });
+  assert.match(ledgerEvents(committed, registry, { since: '2026-09-26T00:00:00Z' }).find((event) => event.event === 'released').line, / version=3\.46\.0 commit=abc1234 branch=/);
+  const unconfirmed = buildReport(registry, new Map([['ruvnet/ruflo#3194', { thread: closedThread('ruvnet/ruflo#3194', '2026-09-26T22:31:23Z'), release: rufloFacts, confirmation: null }]]), { now: NOW });
+  assert.ok(!ledgerEvents(unconfirmed, registry, { since: '2026-09-26T00:00:00Z' }).some((event) => event.event === 'released'), 'only a confirmed release is a released line');
+  assert.match(renderReport(unconfirmed), /Released, fix not confirmed[\s\S]*3\.46\.0 \(2026-09-26\) is the first release after the fix/);
+});
+
+test('collect confirms through the fetcher with bounded, read-only calls', async () => {
+  const calls = [];
+  const fetcher = {
+    auth: async () => ({ ok: true }),
+    thread: async (id) => closedThread(id, '2026-09-26T22:31:23Z'),
+    release: async () => rufloFacts,
+    fixingChanges: async (id) => { calls.push(`changes ${id}`); return [change]; },
+    contains: async (repo, refs) => { calls.push(`contains ${refs[0]}`); return { ref: refs[0], contained: refs[0] === 'v3.46.0' }; },
+  };
+  await withRegistryFile([entry('ruvnet/ruflo#3194')], async (file) => {
+    const out = capture();
+    await main(['report', '--json', '--registry', file], { fetcher, stdout: out.stream, stderr: capture().stream, now: NOW });
+    const report = JSON.parse(out.text());
+    assert.deepEqual(report.groups.find((group) => group.key === 'released-actionable').items.map((item) => item.id), ['ruvnet/ruflo#3194']);
+  });
+  assert.deepEqual(calls, ['changes ruvnet/ruflo#3194', 'contains v3.46.0'], 'stops at the first containing version');
+});
+
+test('a confirmation failure is "Could not check", never "not contained"', async () => {
+  const fetcher = {
+    auth: async () => ({ ok: true }),
+    thread: async (id) => closedThread(id, '2026-09-26T22:31:23Z'),
+    release: async () => rufloFacts,
+    fixingChanges: async () => [change],
+    contains: async () => { throw new Error('gh api repos/ruvnet/ruflo/compare failed: API rate limit exceeded (HTTP 403)'); },
+  };
+  await withRegistryFile([entry('ruvnet/ruflo#3194')], async (file) => {
+    const out = capture();
+    await main(['report', '--json', '--registry', file], { fetcher, stdout: out.stream, stderr: capture().stream, now: NOW });
+    const report = JSON.parse(out.text());
+    assert.deepEqual(report.groups.find((group) => group.key === 'unchecked').items.map((item) => item.id), ['ruvnet/ruflo#3194']);
+    assert.equal(report.counts['fixed-unreleased'], 0);
+    assert.match(report.fetchErrors[0].error, /rate limit/);
+  });
 });
 
 test('a closed fix no published release contains is fixed but unreleased', () => {
@@ -135,9 +225,14 @@ test('a registry status change covers the comments before it', () => {
 });
 
 test('a merged pull request is fixed; reopened and not-planned threads are called out', () => {
-  const merged = classifyEntry(entry('ruvnet/ruflo#2986', { kind: 'pr', relation: 'filed' }), live('ruvnet/ruflo#2986', releaseFacts('npm', npm.ruflo)), context);
+  const ruflo = releaseFacts('npm', npm.ruflo);
+  const merged = classifyEntry(entry('ruvnet/ruflo#2986', { kind: 'pr', relation: 'filed' }), live('ruvnet/ruflo#2986', ruflo), context);
   assert.equal(merged.upstream.fixed, true);
-  assert.ok(merged.groups.includes('released-actionable'));
+  assert.ok(merged.groups.includes('release-unconfirmed'), 'without a confirmation the release is unconfirmed');
+  const first = candidateVersions(merged.upstream.fixedAt, ruflo)[0].version;
+  const confirmation = { changes: [{ repo: 'ruvnet/ruflo', pr: 2986, sha: '0123456789abcdef0123456789abcdef01234567' }], checks: [{ version: first, ref: `v${first}`, contained: true }] };
+  const confirmed = classifyEntry(entry('ruvnet/ruflo#2986', { kind: 'pr', relation: 'filed' }), { ...live('ruvnet/ruflo#2986', ruflo), confirmation }, context);
+  assert.ok(confirmed.groups.includes('released-actionable'));
   const reopened = classifyEntry(entry('ruvnet/ruflo#2885', { status: 'released' }), live('ruvnet/ruflo#2885'), context);
   assert.ok(reopened.groups.includes('reopened'));
   const thread = clone(threads['openai/codex#20140']);
@@ -338,6 +433,8 @@ function fixtureFetcher({ authenticated = true } = {}) {
       if (!npm[name]) throw new Error(`no fixture for ${name}`);
       return releaseFacts('npm', npm[name]);
     },
+    fixingChanges: async () => [],
+    contains: async () => ({ ref: null, contained: null }),
   };
 }
 
