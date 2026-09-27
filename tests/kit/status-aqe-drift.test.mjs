@@ -21,6 +21,7 @@ const status = await import('../../src/commands/status.mjs');
 const { loadKitConfig } = await import('../../src/lib/config.mjs');
 const { applyAqeRouter, aqeRouterFile, managedEnv, settingsTarget } = await import('../../src/lib/providers.mjs');
 const { seedActivityRoutes } = await import('../../src/lib/routing.mjs');
+const { repoRoot } = paths;
 assertSandboxed(paths, HOME);
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -98,8 +99,12 @@ test('foreign agentOverrides entries and key order are the writer\'s merge domai
   assert.equal(row.level, 'ok', `preserved foreign entry / merge order is not drift: ${row.message}`);
 });
 
-test('outside a git project, status never reports router drift sync refuses to manage', async () => {
+test('outside a git project, status never reports router drift sync refuses to manage', async (t) => {
   const nowhere = tempDir('ak-drift-noproj');
+  // With TMPDIR inside a git repository this folder is not 'outside' one, and the
+  // status/sync paths would write that enclosing repository's .claude/.agentic-qe.
+  const enclosing = repoRoot(nowhere);
+  if (enclosing) { t.skip(`TMPDIR is inside the git repository ${enclosing}; this case would write into it`); return; }
   seedHome(dualHostCfg({
     routes: seedActivityRoutes(),
     aqeFallback: [{ provider: 'claude-code', models: ['claude-opus-4-8'] }],

@@ -6,6 +6,7 @@ import path from 'node:path';
 import { inspectAqeEmbeddingProjections as inspect, reconcileAqeEmbeddingProjections as reconcile,
   prepareAqeEmbeddingInitialization } from '../../src/lib/aqe-embedding-projection.mjs';
 import { applyOpencode, opencodeConverged } from '../../src/lib/opencode-core.mjs';
+import { repoRoot } from '../../src/lib/paths.mjs';
 const inspectAqeEmbeddingProjections = (cfg, cwd, opts = {}) => inspect(cfg, cwd, { claudeUserFile: path.join(cwd, 'claude-user.json'), ...opts });
 const reconcileAqeEmbeddingProjections = (cfg, cwd, opts = {}) => reconcile(cfg, cwd, { claudeUserFile: path.join(cwd, 'claude-user.json'), ...opts });
 
@@ -200,6 +201,10 @@ test('reports explicit user scope conflict and refuses malformed precedence evid
 test('outside a git repository no project target is required or written', t => {
   const { cwd, cfg } = fixture(t);
   fs.rmSync(path.join(cwd, '.git'), { recursive: true });
+  // With TMPDIR inside a git repository the fixture is not 'outside' one, and the
+  // reconcile would write that enclosing repository's .claude/.agentic-qe.
+  const enclosing = repoRoot(cwd);
+  if (enclosing) { t.skip(`TMPDIR is inside the git repository ${enclosing}; this case would write into it`); return; }
   cfg.integrations.hosts = { claude: true, codex: true };
   const codexHome = path.join(cwd, 'codex-home');
   fs.mkdirSync(codexHome);
@@ -215,6 +220,10 @@ test('outside a git repository no project target is required or written', t => {
 test('outside a git repository a previously owned stray value is relinquished', t => {
   const { cwd, write, cfg } = fixture(t);
   fs.rmSync(path.join(cwd, '.git'), { recursive: true });
+  // With TMPDIR inside a git repository the fixture is not 'outside' one, and the
+  // reconcile would write that enclosing repository's .claude/.agentic-qe.
+  const enclosing = repoRoot(cwd);
+  if (enclosing) { t.skip(`TMPDIR is inside the git repository ${enclosing}; this case would write into it`); return; }
   const file = write('.claude/settings.local.json', { env: { AQE_EMBEDDER_ENDPOINT: cfg.aqeEmbedding.endpoint } });
   write('.claude/settings.local.json.agentic-kit-aqe-embedding.json', {
     version: 1, before: { present: false }, after: { present: true, value: cfg.aqeEmbedding.endpoint }, pending: false,

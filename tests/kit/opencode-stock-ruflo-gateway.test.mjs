@@ -325,6 +325,10 @@ test(`stock OpenCode keeps Ruflo and Agentic QE connected with ${compactProjecti
   fs.mkdirSync(fakeBin, { recursive: true });
   fs.mkdirSync(configDir, { recursive: true });
   fs.mkdirSync(workspace, { recursive: true });
+  // Its own repository: from a .git-less workspace under a TMPDIR inside a git
+  // repository, OpenCode edited the enclosing package.json, created
+  // package-lock.json and replaced node_modules (Branch 0 review-hermeticity.md).
+  fs.mkdirSync(path.join(workspace, '.git'));
   if (!installedRuv) {
     writeFakeMcp(path.join(fakeBin, 'claude-flow-mcp'));
     writeFakeMcp(path.join(fakeBin, 'aqe-mcp'));
