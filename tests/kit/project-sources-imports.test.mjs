@@ -148,3 +148,10 @@ test('the usage origin of an imported head is unknown and says why', () => {
   assert.equal(parsed.session.imported, true);
   assert.equal(parsed.session.sessionOrigin.origin, 'unknown');
 });
+
+test('the usage origin never applies the Codex marker to a Claude transcript', () => {
+  const claudeHead = JSON.stringify({
+    cwd: '/p', sessionId: 's', entrypoint: 'claude-desktop', payload: { turn_id: 'external-import-turn-1' },
+  });
+  assert.deepEqual(usageSessionOrigin(claudeHead, 'claude'), { origin: 'claude-desktop', evidence: 'entrypoint:claude-desktop' });
+});
