@@ -2,7 +2,9 @@
 
 - **Status:** Accepted; static assurance, transactional healing, bounded receipts, read model, and the Ruflo support window implemented
 - **Date:** 2026-09-01
-- **Updated:** 2026-09-27 — §7: schema 6 separates `lastCheckedAt` (state re-read) from
+- **Updated:** 2026-09-27 — §7: a scheduled GitHub Actions workflow runs the watch and posts
+  the script's ledger comment; the cloud routine only dispatches (decision 14)
+- **Earlier update:** 2026-09-27 — §7: schema 6 separates `lastCheckedAt` (state re-read) from
   `lastVerifiedAt`/`nextRetestAt` (conformance); a release counts only when it contains the
   merged fixing change; AgentDB fixes count when Ruflo bundles them; the guard covers
   user-facing docs; the ledger is pacphi/agentic-kit#243. The Ruflo dependency policy carries a
@@ -229,10 +231,13 @@ or commit that fixed the thread, or the registry records the first fixed version
 release it cannot prove is reported as "fix not confirmed" and never dispatched. AgentDB, which
 ak gets through Ruflo, counts as released only when the newest Ruflo (npm `latest`) resolves to
 a fixed agentdb. Its ledger lines, `UPSTREAM-WATCH <id> <event> <date> …`, go to one
-pinned, locked "Upstream watch" issue (pacphi/agentic-kit#243); the routine reads only its own and our logins' comments
-there, so an exact line it recorded is never acted on twice and nobody else can suppress one. Dispatch of a released
-thread is a branch `upstream/<id>` and a draft pull request that makes the adjustment
-test-first and passes the dependency's removal proof. It never merges. Publishing upstream
+pinned, locked "Upstream watch" issue (pacphi/agentic-kit#243). A scheduled GitHub Actions
+workflow posts them; the script reads only the comments of the ledger's authors
+(`watchPolicy.ledger.authors`), so an exact line it recorded is never acted on twice and nobody
+else can suppress one, and it writes the comment itself, so no model decides what the ledger says.
+Dispatch of a released thread is a branch `upstream/<id>` and a draft pull request that makes the
+adjustment test-first and passes the dependency's removal proof; a cloud routine does it when the
+workflow labels the ledger issue. It never merges. Publishing upstream
 keeps the `explicit-user-approval-required` rule. Operating detail:
 [UPSTREAM-WATCH.md](../UPSTREAM-WATCH.md).
 

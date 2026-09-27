@@ -483,9 +483,12 @@ gh run list --workflow=nightly.yml --limit 3
 ```bash
 node scripts/upstream-watch.mjs report                # counts, then action items with links
 node scripts/upstream-watch.mjs check --since 2026-09-26 --ledger ledger.md   # new ledger lines only
+node scripts/upstream-watch.mjs comment               # the ledger comment the daily workflow would post
+gh workflow run upstream-watch.yml -f post=false      # run the daily workflow now, summary only
 ```
 
-Read-only against GitHub and npm. The registry, lifecycle, ledger and daily routine are in
+The script is read-only against GitHub and npm; the `upstream-watch` workflow posts its comment
+on the ledger issue daily. The registry, lifecycle, ledger, workflow and dispatch routine are in
 [UPSTREAM-WATCH.md](docs/UPSTREAM-WATCH.md).
 
 ### Pull requests

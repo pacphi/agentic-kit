@@ -44,3 +44,9 @@ test('the scheduled job posts the checked body once and signals dispatch by labe
   assert.ok(watch.indexOf('--add-label') > post, 'the dispatch label follows the comment it points at');
   assert.ok(watch.indexOf('--remove-label') < watch.indexOf('--add-label'), 'a label already present is removed first so the add is a new event');
 });
+
+test('the dispatch label is the one the docs give the routine', () => {
+  const label = /DISPATCH_LABEL: ([\w-]+)/.exec(text)[1];
+  const doc = fs.readFileSync('docs/UPSTREAM-WATCH.md', 'utf8');
+  assert.ok(doc.includes(`\`${label}\``), `docs/UPSTREAM-WATCH.md names the ${label} label`);
+});
