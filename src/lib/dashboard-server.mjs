@@ -974,6 +974,25 @@ function sendTranscriptJson(res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
+/** Collectors a caller injects instead of the real ones. A server given any of
+ *  them is a test or an embedder with fakes; its DEFAULT maintenance service and
+ *  management facade would still write the user's real control root
+ *  (~/.local/state/agentic-kit/maintenance), which is how the system-summary
+ *  test overwrote real state (audit 2026-09-26, Open items). */
+const INJECTABLE_COLLECTORS = ['fetchStatus', 'usage', 'limits', 'hooks', 'live', 'transcripts', 'intelWatch',
+  'discoverProjects', 'machineWideIntel', 'models', 'system', 'hostReadiness'];
+
+function refusesDefaultState(opts) {
+  if (opts.maintenance !== undefined) return false;
+  if (opts.maintenanceOptions?.controlRoot !== undefined) return false;
+  return INJECTABLE_COLLECTORS.some((key) => opts[key] !== undefined);
+}
+
+const HERMETIC_REFUSAL = 'dashboard: refusing the default maintenance service — collectors were injected, so it would '
+  + 'write the real state directory; inject `maintenance` or pass maintenanceOptions.controlRoot';
+
+export const __test = { refusesDefaultState };
+
 /** Lazily bind the machine-footprint collector (ADR-0025), for the same reason
  *  lazyUsage is lazy: the System area pulls in five walkers plus the runtime
  *  survey, and a panel that never opens that tab must not pay for them. One
@@ -988,10 +1007,15 @@ function sendTranscriptJson(res, status, payload) {
  *  injected facade means the caller owns that composition; the server never
  *  wraps an owner-private facade (real control root, real kit.json) around
  *  it on its own — such a server answers 503 on every v2 route. */
-function managementProvider({ management, maintenance, managementOptions, maintenanceOptions, getMaintenance, getSystem }) {
+function managementProvider({
+  management, maintenance, managementOptions, maintenanceOptions, getMaintenance, getSystem, refused = false,
+}) {
   if (typeof management === 'function') return management;
   if (management) return async () => management;
   if (maintenance && Object.keys(managementOptions).length === 0) return async () => null;
+  // Injected collectors without a control root: the default facade would write
+  // the user's real state directory, so the v2 routes answer 503 instead.
+  if (refused && managementOptions.controlRoot === undefined) return async () => null;
   // The facade shares the maintenance service's private root and clock unless
   // managementOptions says otherwise, so both read and write one control dir.
   const shared = Object.fromEntries(['controlRoot', 'fsImpl', 'now']
@@ -1064,6 +1088,11 @@ export function startDashboard({
   discoverProjects, machineWideIntel, models, modelScopeKey, system, systemOptions = {},
   maintenance, maintenanceOptions = {}, management, managementOptions = {}, hostReadiness,
 } = {}) {
+  const refused = refusesDefaultState({
+    fetchStatus, usage, limits, hooks, live, transcripts, intelWatch, discoverProjects, machineWideIntel,
+    models, system, hostReadiness, maintenance, maintenanceOptions,
+  });
+  let refusalLogged = false;
   const provide = fetchStatus || shellOutStatus(cwd);
   const getHostReadiness = hostReadiness ?? (fetchStatus ? async () => null : createHostReadinessReader({ cwd }));
   const usageApi = usage || lazyUsage();
@@ -1121,6 +1150,11 @@ export function startDashboard({
   // machine. Like every expensive panel, construction remains lazy.
   const provideMaintenance = typeof maintenance === 'function'
     ? maintenance : maintenance ? async () => maintenance : async () => {
+      if (refused) {
+        // Logged here because refreshMaintenanceAfterSystem swallows errors.
+        if (!refusalLogged) { refusalLogged = true; console.error(HERMETIC_REFUSAL); }
+        throw new TypeError(HERMETIC_REFUSAL);
+      }
       const [{ createMaintenanceService }, collector] = await Promise.all([
         import('./maintenance/service.mjs'), getSystem(),
       ]);
@@ -1141,7 +1175,7 @@ export function startDashboard({
   // opening the dashboard never touches owner-private management stores. When
   // it cannot be built, every v2 route answers 503 and v1 keeps working.
   const provideManagement = managementProvider({
-    management, maintenance, managementOptions, maintenanceOptions, getMaintenance, getSystem,
+    management, maintenance, managementOptions, maintenanceOptions, getMaintenance, getSystem, refused,
   });
   // ONE facade instance for the whole server: the API's v2 routes and the
   // post-scan inventory refresh below must share in-memory state (preview

@@ -1175,7 +1175,8 @@ Behavior that differs from, or goes beyond, the plan text.
 - **The dashboard server's hermeticity guard has a gap.** It fires only when a maintenance service
   is injected without a control root. A caller that injects only a System collector still gets the
   default maintenance service and management facade, and both write real state. This product-side
-  follow-up is not fixed here.
+  follow-up is not fixed here. Fixed on `fix/test-hermeticity`: a server given any injected
+  collector refuses the default maintenance service and facade unless a control root is passed.
 
 #### From Stage 5
 
