@@ -136,7 +136,8 @@
                       "channel": { "enum": ["npm", "github-release"] },
                       "name": { "type": "string", "minLength": 1 },
                       "minVersion": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$" }] },
-                      "tagPattern": { "type": "string", "pattern": "^[A-Za-z0-9_./-]*\\{version\\}[A-Za-z0-9_./-]*$", "description": "Upstream tag spelling for a version, for example rust-v{version}; default v{version} then {version}." }
+                      "tagPattern": { "type": "string", "pattern": "^[A-Za-z0-9_./-]*\\{version\\}[A-Za-z0-9_./-]*$", "description": "Upstream tag spelling for a version, for example rust-v{version}; default v{version} then {version}." },
+                      "bundledBy": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^[@A-Za-z0-9_][A-Za-z0-9_@./-]*$" }, "description": "Carrier chain from the package ak installs down to the parent of name; released only when the newest carrier installs a fixed version." }
                     }
                   }
                 ]

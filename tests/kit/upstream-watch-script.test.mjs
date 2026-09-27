@@ -8,7 +8,7 @@ import path from 'node:path';
 
 import { UPSTREAM_REGISTRY_FILE, loadUpstreamRegistry } from '../../src/lib/hook-audit/upstream.mjs';
 import {
-  buildReport, candidateVersions, classifyEntry, compareVersions, ledgerEvents, releaseFacts, tagRefs, withoutRecorded,
+  buildReport, candidateVersions, classifyEntry, compareVersions, ledgerEvents, maxVersion, releaseFacts, tagRefs, withoutRecorded,
 } from '../../scripts/upstream-watch/classify.mjs';
 import { createFetcher, mapLimit } from '../../scripts/upstream-watch/fetch.mjs';
 import { renderEvents, renderReport } from '../../scripts/upstream-watch/render.mjs';
@@ -422,6 +422,96 @@ test('contains: behind or identical is contained, a missing tag is unknown, othe
   assert.ok(calls.every((call) => call.startsWith('gh api repos/ruvnet/ruflo/compare/')), 'read-only: compare only');
 });
 
+test('bundled resolves the agentdb version the newest Ruflo installs', async () => {
+  const manifests = {
+    'ruflo@3.46.1': { name: 'ruflo', version: '3.46.1', dependencies: { '@claude-flow/cli': '^3.33.0' } },
+    '@claude-flow/cli@3.46.1': { name: '@claude-flow/cli', version: '3.46.1', dependencies: {}, optionalDependencies: { agentdb: '^3.0.0-alpha.17' } },
+  };
+  const { exec, calls } = fakeExec([
+    [/^npm view ruflo version --json$/, { status: 0, stdout: '"3.46.1"', stderr: '' }],
+    [/^npm view ruflo@3\.46\.1 --json$/, { status: 0, stdout: JSON.stringify(manifests['ruflo@3.46.1']), stderr: '' }],
+    [/^npm view @claude-flow\/cli@\^3\.33\.0 version --json$/, { status: 0, stdout: '["3.45.0","3.46.0","3.46.1"]', stderr: '' }],
+    [/^npm view @claude-flow\/cli@3\.46\.1 --json$/, { status: 0, stdout: JSON.stringify(manifests['@claude-flow/cli@3.46.1']), stderr: '' }],
+    [/^npm view agentdb@\^3\.0\.0-alpha\.17 version --json$/, { status: 0, stdout: '["3.0.0-alpha.9","3.0.0-alpha.20","3.0.0-alpha.17"]', stderr: '' }],
+  ]);
+  const result = await createFetcher({ exec }).bundled(['ruflo', '@claude-flow/cli'], 'agentdb');
+  assert.deepEqual(result, { carrier: 'ruflo', carrierVersion: '3.46.1', version: '3.0.0-alpha.20', basis: 'ruflo 3.46.1 → @claude-flow/cli 3.46.1 → agentdb 3.0.0-alpha.20' });
+  assert.ok(calls.every((call) => call.startsWith('npm view ')), 'read-only: npm view only');
+});
+
+test('a single npm range match is a bare string; a missing dependency is reported, not thrown', async () => {
+  assert.equal(maxVersion('3.0.0-alpha.20'), '3.0.0-alpha.20');
+  assert.equal(maxVersion(['3.0.0-alpha.9', '3.0.0-alpha.20']), '3.0.0-alpha.20');
+  assert.equal(maxVersion([]), null);
+  const { exec } = fakeExec([
+    [/^npm view ruflo version --json$/, { status: 0, stdout: '"9.0.0"', stderr: '' }],
+    [/^npm view ruflo@9\.0\.0 --json$/, { status: 0, stdout: JSON.stringify({ name: 'ruflo', version: '9.0.0', dependencies: {} }), stderr: '' }],
+  ]);
+  const result = await createFetcher({ exec }).bundled(['ruflo', '@claude-flow/cli'], 'agentdb');
+  assert.equal(result.version, null);
+  assert.match(result.basis, /ruflo 9\.0\.0 does not depend on @claude-flow\/cli/);
+  const noMatch = fakeExec([
+    [/^npm view ruflo version --json$/, { status: 0, stdout: '"3.46.1"', stderr: '' }],
+    [/^npm view ruflo@3\.46\.1 --json$/, { status: 0, stdout: JSON.stringify({ name: 'ruflo', version: '3.46.1', dependencies: { agentdb: '^99.0.0' } }), stderr: '' }],
+    [/^npm view agentdb@\^99\.0\.0 version --json$/, { status: 1, stdout: '', stderr: 'npm error code E404\nnpm error 404 No match found for version ^99.0.0' }],
+  ]);
+  const none = await createFetcher({ exec: noMatch.exec }).bundled(['ruflo'], 'agentdb');
+  assert.equal(none.version, null);
+  assert.match(none.basis, /no published agentdb satisfies \^99\.0\.0/);
+  const offline = fakeExec([[/^npm view ruflo version --json$/, { status: 1, stdout: '', stderr: 'npm error code ENOTFOUND' }]]);
+  await assert.rejects(createFetcher({ exec: offline.exec }).bundled(['ruflo'], 'agentdb'), /ENOTFOUND/);
+  await assert.rejects(createFetcher({ exec: offline.exec }).bundled(['ruflo;rm'], 'agentdb'), /not a package name/);
+});
+
+test('an AgentDB fix is released only when the newest Ruflo bundles a fixed agentdb', () => {
+  const gate = { channel: 'npm', name: 'agentdb', minVersion: '3.0.0-alpha.21', bundledBy: ['ruflo', '@claude-flow/cli'] };
+  const target = entry('ruvnet/agentdb#26', { dependency: 'ruflo', doneWhen: { state: 'closed-completed', release: gate } });
+  const agentdb = { versions: [{ version: '3.0.0-alpha.21', publishedAt: '2026-10-01T00:00:00Z' }], latest: '3.0.0-alpha.21' };
+  const thread = closedThread('ruvnet/agentdb#26', '2026-09-30T00:00:00Z');
+  const behind = classifyEntry(target, { thread, release: agentdb, bundle: { carrier: 'ruflo', carrierVersion: '3.46.1', version: '3.0.0-alpha.20', basis: 'x' } }, context);
+  assert.ok(behind.groups.includes('fixed-unreleased'));
+  assert.match(behind.release.basis, /ruflo 3\.46\.1 bundles agentdb 3\.0\.0-alpha\.20/);
+  const bundled = classifyEntry(target, { thread, release: agentdb, bundle: { carrier: 'ruflo', carrierVersion: '3.47.0', version: '3.0.0-alpha.21', basis: 'x' } }, context);
+  assert.ok(bundled.groups.includes('released-actionable'));
+  assert.equal(bundled.release.version, '3.47.0', 'the version is the Ruflo that ak installs');
+  assert.equal(bundled.release.fixedVersion, '3.0.0-alpha.21');
+  assert.equal(bundled.release.date, '2026-10-01');
+  const unknown = classifyEntry(target, { thread, release: agentdb, bundle: null }, context);
+  assert.ok(unknown.groups.includes('unchecked'));
+  // An agentdb publish alone (no recorded or confirmed fixed version) never counts as released.
+  const open = { ...gate, minVersion: null };
+  const unproven = classifyEntry(entry('ruvnet/agentdb#26', { dependency: 'ruflo', doneWhen: { state: 'closed-completed', release: open } }),
+    { thread, release: agentdb, confirmation: { changes: [], checks: [] }, bundle: { carrier: 'ruflo', carrierVersion: '3.47.0', version: '3.0.0-alpha.21', basis: 'x' } }, context);
+  assert.ok(unproven.groups.includes('release-unconfirmed'));
+  assert.match(unproven.release.basis, /ruflo 3\.47\.0 bundles agentdb 3\.0\.0-alpha\.21/);
+});
+
+test('collect resolves each bundling chain once and reports a failure as "Could not check"', async () => {
+  const gate = { channel: 'npm', name: 'agentdb', minVersion: '3.0.0-alpha.21', bundledBy: ['ruflo', '@claude-flow/cli'] };
+  const agentdbEntry = (id) => entry(id, { dependency: 'ruflo', doneWhen: { state: 'closed-completed', release: gate } });
+  const agentdb = { versions: [{ version: '3.0.0-alpha.21', publishedAt: '2026-09-26T00:00:00Z' }], latest: '3.0.0-alpha.21' };
+  const calls = [];
+  const fetcher = (result) => ({
+    auth: async () => ({ ok: true }),
+    thread: async (id) => closedThread(id, '2026-09-25T00:00:00Z'),
+    release: async () => agentdb,
+    fixingChanges: async () => [],
+    contains: async () => ({ ref: null, contained: null }),
+    bundled: async (chain, name) => { calls.push(`${chain.join('>')}>${name}`); return result(); },
+  });
+  await withRegistryFile([agentdbEntry('ruvnet/agentdb#26'), agentdbEntry('ruvnet/agentdb#27')], async (file) => {
+    const out = capture();
+    await main(['report', '--json', '--registry', file], { fetcher: fetcher(() => ({ carrier: 'ruflo', carrierVersion: '3.47.0', version: '3.0.0-alpha.21', basis: 'x' })), stdout: out.stream, stderr: capture().stream, now: NOW });
+    assert.deepEqual(JSON.parse(out.text()).groups.find((group) => group.key === 'released-actionable').items.map((item) => item.id), ['ruvnet/agentdb#26', 'ruvnet/agentdb#27']);
+    assert.deepEqual(calls, ['ruflo>@claude-flow/cli>agentdb'], 'one resolution per chain');
+    const failed = capture();
+    await main(['report', '--json', '--registry', file], { fetcher: fetcher(() => { throw new Error('npm view ruflo failed: ETIMEDOUT'); }), stdout: failed.stream, stderr: capture().stream, now: NOW });
+    const report = JSON.parse(failed.text());
+    assert.deepEqual(report.groups.find((group) => group.key === 'unchecked').items.map((item) => item.id), ['ruvnet/agentdb#26', 'ruvnet/agentdb#27']);
+    assert.ok(report.fetchErrors.some((item) => /ETIMEDOUT/.test(item.error)));
+  });
+});
+
 function fixtureFetcher({ authenticated = true } = {}) {
   return {
     auth: async () => (authenticated ? { ok: true } : { ok: false, message: 'gh is not authenticated; run `gh auth login`, then re-run.' }),
@@ -435,6 +525,7 @@ function fixtureFetcher({ authenticated = true } = {}) {
     },
     fixingChanges: async () => [],
     contains: async () => ({ ref: null, contained: null }),
+    bundled: async () => null,
   };
 }
 

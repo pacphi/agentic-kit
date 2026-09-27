@@ -29,8 +29,8 @@ A watch entry records:
 |---|---|
 | `id`, `url`, `kind`, `title` | The thread (`owner/repo#n`, issue or pr). |
 | `relation` | `filed`, `commented`, `referenced` (cited, not ours) or `tracking` (our issue that migrates here; lists `tracks`). |
-| `dependency` | The dependency policy that governs it. AgentDB threads use `ruflo`: ak gets AgentDB through Ruflo. |
-| `doneWhen` | `closed-completed` or `merged`, plus the release channel, the first fixed version when known, and the upstream tag spelling (`tagPattern`) when it is not `v<version>`. |
+| `dependency` | The dependency policy that governs it. AgentDB threads use `ruflo`: ak gets AgentDB through Ruflo, so an AgentDB fix counts as released only when the newest Ruflo (npm `latest`, the newest version in the support window) installs a fixed agentdb (`doneWhen.release.bundledBy`). AgentDB publishes no tags, so a fix is confirmed by hand and recorded as `minVersion` until then. |
+| `doneWhen` | `closed-completed` or `merged`, plus the release channel, the first fixed version when known, the upstream tag spelling (`tagPattern`) when it is not `v<version>`, and the carrier chain (`bundledBy`) when ak gets the package through another. |
 | `mapping`, `kitImpact`, `adjustment` | Whether ak carries something for it, which files and plan or decision refs, and the change ak makes when it lands. |
 | `status`, `history` | Lifecycle status and dated events. |
 | `constraintIds` | Constraints this thread backs. |
@@ -128,6 +128,12 @@ Tags are `v<version>` then `<version>`, or the gate's `tagPattern` (Codex: `rust
 tag missing for every spelling leaves the release unconfirmed; any other GitHub failure is "Could
 not check". When several pull requests closed a thread, the first is checked. Only a confirmed
 release produces a `released` line, so only a confirmed release is dispatched.
+
+A gate with `bundledBy` (AgentDB: `["ruflo", "@claude-flow/cli"]`) also resolves what the newest
+carrier installs: npm `latest` of the first package, then each manifest's dependency range down
+the chain, each resolved to its highest published match. The fix counts as released only when
+that version is at or after the fixed one; the `released` line's `version=` is then the carrier's
+version, the one ak installs.
 
 ## Dispatch
 

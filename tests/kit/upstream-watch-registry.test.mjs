@@ -94,6 +94,18 @@ test('a release gate may name its tag spelling', () => {
   assert.ok(codex.every((item) => item.doneWhen.release.tagPattern === 'rust-v{version}'));
 });
 
+test('AgentDB threads gate on what Ruflo bundles', () => {
+  const agentdb = document().watch.filter((item) => item.id.startsWith('ruvnet/agentdb#'));
+  assert.equal(agentdb.length, 3);
+  for (const item of agentdb) {
+    assert.equal(item.dependency, 'ruflo');
+    assert.deepEqual(item.doneWhen.release.bundledBy, ['ruflo', '@claude-flow/cli']);
+  }
+  const errors = errorsOf((doc) => { entry(doc, 'ruvnet/agentdb#26').doneWhen.release.bundledBy = []; });
+  assert.match(errors, /ruvnet\/agentdb#26.*bundledBy/);
+  assert.match(errorsOf((doc) => { entry(doc, 'ruvnet/agentdb#26').doneWhen.release.bundledBy = ['ruflo', 'x y']; }), /ruvnet\/agentdb#26.*bundledBy/);
+});
+
 test('constraints and watch entries point at each other', () => {
   const unlinked = errorsOf((doc) => { entry(doc, 'ruvnet/ruflo#3167').constraintIds = []; });
   assert.match(unlinked, /ruflo-3\.38\.21-init-suppression-flags.*ruvnet\/ruflo#3167/);

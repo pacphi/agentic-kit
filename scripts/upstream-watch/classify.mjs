@@ -51,6 +51,12 @@ export function compareVersions(a, b) {
   return 0;
 }
 
+/** The highest version by semver of `npm view <pkg>@<range> version --json` (a string or an array). */
+export function maxVersion(values) {
+  const list = [].concat(values ?? []).filter((value) => typeof value === 'string' && /^\d+\.\d+\.\d+/.test(value));
+  return list.sort(compareVersions).at(-1) ?? null;
+}
+
 /** Normalize `npm view <pkg> time dist-tags --json` or a GitHub releases list. */
 export function releaseFacts(channel, raw) {
   if (channel === 'npm') {
@@ -99,13 +105,36 @@ export function tagRefs(gate, version) {
 const changeLabel = (change) => (change.pr ? `PR #${change.pr}` : `commit ${change.sha.slice(0, 7)}`);
 
 /**
+ * A package ak gets through another (AgentDB through Ruflo) is released only
+ * when the newest carrier installs a fixed version. `base` is the package's
+ * own release state; `bundle` is what the carrier resolves it to.
+ */
+function bundledState(gate, base, bundle) {
+  const carries = bundle ? `${bundle.carrier} ${bundle.carrierVersion} bundles ${gate.name} ${bundle.version ?? 'none'}` : null;
+  if (base.released === 'unconfirmed') return { ...base, basis: `${base.basis}; ${carries ?? `what ${gate.bundledBy[0]} bundles is unknown`}` };
+  if (base.released !== true) return base;
+  if (!bundle) return { released: null, basis: `could not resolve the ${gate.name} that ${gate.bundledBy[0]} bundles`, version: null, date: null };
+  if (!bundle.version || compareVersions(bundle.version, base.version) < 0) {
+    return { released: false, basis: `${carries}, before the fix in ${base.version}`, version: null, date: null };
+  }
+  // The version is the carrier ak installs; the date stays the fixed package's, so the ledger line is stable.
+  return { ...base, version: bundle.carrierVersion, fixedVersion: base.version, basis: `${base.basis}; ${carries}` };
+}
+
+/**
  * Whether the fix has shipped, per the entry's doneWhen.release gate. Without
  * a recorded first fixed version, a release counts only when it contains the
  * merged fixing change (`confirmation`, from the fetcher); a release ak cannot
- * prove is 'unconfirmed' and is never dispatched.
+ * prove is 'unconfirmed' and is never dispatched. A gate with `bundledBy`
+ * also needs the newest carrier to install the fixed version (`bundle`).
  */
-export function releaseState(entry, fixedAt, facts, confirmation = null) {
+export function releaseState(entry, fixedAt, facts, confirmation = null, bundle = null) {
+  const own = ownReleaseState(entry.doneWhen.release, fixedAt, facts, confirmation);
   const gate = entry.doneWhen.release;
+  return gate?.bundledBy ? bundledState(gate, own, bundle) : own;
+}
+
+function ownReleaseState(gate, fixedAt, facts, confirmation) {
   if (gate === null) return { released: true, basis: 'no release gate: closing is enough', version: null, date: day(fixedAt) };
   if (!facts) return { released: null, basis: `release facts for ${gate.name} unavailable`, version: null, date: null };
   if (gate.minVersion) {
@@ -213,7 +242,7 @@ export function classifyEntry(entry, live, { policy, dependencyPolicies, now }) 
   }
   const up = upstreamOf(live.thread);
   const facts = commentFacts(entry, live.thread, policy);
-  const release = up.fixed && PENDING.has(entry.status) ? releaseState(entry, up.fixedAt, live.release, live.confirmation ?? null) : null;
+  const release = up.fixed && PENDING.has(entry.status) ? releaseState(entry, up.fixedAt, live.release, live.confirmation ?? null, live.bundle ?? null) : null;
   const stale = up.state === 'open' && now.getTime() - Date.parse(facts.lastUpstreamActivityAt) >= policy.staleAfterDays * DAY;
   const groups = [...new Set([...liveGroups(entry, up, facts, release, stale), ...fromRegistry])];
   if (entry.relation === 'tracking') {

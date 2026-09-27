@@ -4,12 +4,14 @@
 // no call here writes to GitHub or npm.
 import { execFile } from 'node:child_process';
 
-import { releaseFacts } from './classify.mjs';
+import { maxVersion, releaseFacts } from './classify.mjs';
 
 const ID = /^([\w.-]+\/[\w.-]+)#([1-9]\d*)$/;
 const SHA = /^[0-9a-f]{7,40}$/;
 const REF = /^[\w./-]+$/;
 const NOT_FOUND = /HTTP 404|Not Found/i;
+const PACKAGE = /^[@\w][\w@./-]*$/;
+const NO_MATCH = /No match found for version/;
 
 // What closed a thread: its closing pull requests, else the ClosedEvent's closer.
 export const FIXING_CHANGES_QUERY = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){defaultBranchRef{name} issueOrPullRequest(number:$number){__typename ... on Issue{closedByPullRequestsReferences(first:10,includeClosedPrs:true){nodes{number merged baseRefName mergeCommit{oid} repository{nameWithOwner}}} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{closer{__typename ... on Commit{oid} ... on PullRequest{number merged baseRefName mergeCommit{oid} repository{nameWithOwner}}}}}}} ... on PullRequest{number merged baseRefName mergeCommit{oid} repository{nameWithOwner}}}}}`;
@@ -109,8 +111,34 @@ export function createFetcher({ exec = run } = {}) {
       }
       return { ref: null, contained: null };
     },
+    /**
+     * The version of `name` the newest `chain[0]` installs, walking each
+     * manifest's dependencies (then optionalDependencies) down the chain and
+     * resolving every range to its highest published match with npm.
+     */
+    async bundled(chain, name) {
+      for (const pkg of [...chain, name]) if (!PACKAGE.test(pkg ?? '')) throw new Error(`not a package name: ${pkg}`);
+      const carrierVersion = await json('npm', ['view', chain[0], 'version', '--json']);
+      let [pkg, version] = [chain[0], carrierVersion];
+      const trail = [`${pkg} ${version}`];
+      const unresolved = (basis) => ({ carrier: chain[0], carrierVersion, version: null, basis });
+      for (const next of [...chain.slice(1), name]) {
+        const manifest = await json('npm', ['view', `${pkg}@${version}`, '--json']);
+        const range = manifest?.dependencies?.[next] ?? manifest?.optionalDependencies?.[next];
+        if (!range) return unresolved(`${pkg} ${version} does not depend on ${next}`);
+        const args = ['view', `${next}@${range}`, 'version', '--json'];
+        const result = await exec('npm', args);
+        if (result.status !== 0 && NO_MATCH.test(result.stderr ?? '')) return unresolved(`no published ${next} satisfies ${range}`);
+        if (result.status !== 0) throw new Error(`npm ${args.join(' ')} failed: ${(result.stderr || result.error?.message || 'no output').trim()}`);
+        const resolved = maxVersion(JSON.parse(result.stdout || 'null'));
+        if (!resolved) return unresolved(`no published ${next} satisfies ${range}`);
+        [pkg, version] = [next, resolved];
+        trail.push(`${pkg} ${version}`);
+      }
+      return { carrier: chain[0], carrierVersion, version, basis: trail.join(' → ') };
+    },
     async release({ channel, name }) {
-      if (!/^[@\w][\w@./-]*$/.test(name)) throw new Error(`not a package or repository name: ${name}`);
+      if (!PACKAGE.test(name)) throw new Error(`not a package or repository name: ${name}`);
       if (channel === 'npm') return releaseFacts('npm', await json('npm', ['view', name, 'time', 'dist-tags', '--json']));
       return releaseFacts('github-release', await json('gh', ['api', `repos/${name}/releases?per_page=100`]));
     },

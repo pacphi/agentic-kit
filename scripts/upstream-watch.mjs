@@ -79,6 +79,25 @@ async function confirmReleases(entries, live, fetcher, concurrency, fetchErrors)
   });
 }
 
+// What the newest carrier (Ruflo for AgentDB) installs, once per chain; a
+// failure leaves `bundle` unset, so the entry is "Could not check".
+async function resolveBundles(entries, live, fetcher, concurrency, fetchErrors) {
+  const keyOf = (gate) => [...gate.bundledBy, gate.name].join('>');
+  const chains = [...new Map(entries.map((entry) => [keyOf(entry.doneWhen.release), entry.doneWhen.release])).entries()];
+  const bundles = new Map();
+  await mapLimit(chains, concurrency, async ([key, gate]) => {
+    try {
+      bundles.set(key, await fetcher.bundled(gate.bundledBy, gate.name));
+    } catch (error) {
+      for (const entry of entries.filter((item) => keyOf(item.doneWhen.release) === key)) fetchErrors.push({ id: entry.id, error: error.message });
+    }
+  });
+  for (const entry of entries) {
+    const bundle = bundles.get(keyOf(entry.doneWhen.release));
+    if (bundle) live.get(entry.id).bundle = bundle;
+  }
+}
+
 async function collect(registry, fetcher, concurrency) {
   const active = registry.watch.filter((entry) => entry.status !== 'retired');
   const live = new Map();
@@ -107,6 +126,7 @@ async function collect(registry, fetcher, concurrency) {
     live.get(entry.id).release = facts.get(`${entry.doneWhen.release.channel}:${entry.doneWhen.release.name}`) ?? null;
   }
   await confirmReleases(gated.filter((entry) => !entry.doneWhen.release.minVersion && live.get(entry.id).release), live, fetcher, concurrency, fetchErrors);
+  await resolveBundles(gated.filter((entry) => entry.doneWhen.release.bundledBy), live, fetcher, concurrency, fetchErrors);
   fetchErrors.sort((a, b) => a.id.localeCompare(b.id));
   return { live, fetchErrors };
 }

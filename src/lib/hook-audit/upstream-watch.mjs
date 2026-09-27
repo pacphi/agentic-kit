@@ -15,7 +15,8 @@ const ENTRY_KEYS = new Set([
 ]);
 const ID = /^([\w.-]+)\/([\w.-]+)#([1-9]\d*)$/;
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
-const RELEASE_KEYS = new Set(['channel', 'name', 'minVersion', 'tagPattern']);
+const RELEASE_KEYS = new Set(['channel', 'name', 'minVersion', 'tagPattern', 'bundledBy']);
+const PACKAGE = /^[@\w][\w@./-]*$/;
 // A tag spelling such as rust-v{version}; the watcher substitutes the version.
 const TAG_PATTERN = /^[\w./-]*\{version\}[\w./-]*$/;
 const ISSUE_URL = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/(?:issues|pull)\/(\d+)$/;
@@ -67,6 +68,10 @@ function checkDoneWhen(doneWhen, kind, where, errors) {
   for (const key of Object.keys(release)) if (!RELEASE_KEYS.has(key)) errors.push(`${where}: doneWhen.release has unknown key ${key}`);
   if (release.tagPattern !== undefined && !(typeof release.tagPattern === 'string' && TAG_PATTERN.test(release.tagPattern))) {
     errors.push(`${where}: doneWhen.release.tagPattern must contain {version}`);
+  }
+  if (release.bundledBy !== undefined && !(Array.isArray(release.bundledBy) && release.bundledBy.length > 0
+      && release.bundledBy.every((pkg) => typeof pkg === 'string' && PACKAGE.test(pkg)))) {
+    errors.push(`${where}: doneWhen.release.bundledBy must list the carrier packages`);
   }
 }
 
