@@ -1,6 +1,6 @@
 # ADR-0060 — Session surface, initiator and official product names
 
-- **Status:** Proposed (staged follow-on)
+- **Status:** Proposed; §3 implemented for project discovery (2026-09-27), the rest staged follow-on
 - **Date:** 2026-09-26
 - **Updated:** 2026-09-27 — §3 implemented for project discovery and the System projects note:
   imported copies give no project, host or origin and are counted. The ledger-derived source labels
@@ -163,8 +163,9 @@ in full.
 ## Consequences
 
 - Usage, System → Projects, Maintenance facets, Intelligence designation (which today mixes Git
-  scope, origin and host in one enum) and the Runtime table change labels and counts. Twenty-three
-  project folders lose a false Desktop origin on this machine.
+  scope, origin and host in one enum) and the Runtime table change labels and counts. On this
+  machine 32 project folders lost a false Desktop origin when discovery began setting imports aside
+  (re-measured 2026-09-27; 23 on 2026-09-26).
 - The usage cache schema changes (new session fields); a rebuild is expected.
 - Tests that pin current names change together (inventory in the audit record, Addendum 3).
 - `CLAUDE_CODE_ENTRYPOINT` and the transcript format are internal to Claude Code and may change;

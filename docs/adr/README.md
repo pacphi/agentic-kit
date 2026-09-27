@@ -391,7 +391,8 @@ component out.
 
 ## ADR-0060 — Session surface, initiator and official product names
 
-[ADR-0060](0060-session-surface-initiator-and-product-names.md) (Proposed) derives a session's
-surface and initiator from the hosts' declared log fields, keeps every raw value, uses official
-product names (Claude Desktop, ChatGPT desktop app, Codex CLI, and others), and excludes imported
-session copies from every origin view.
+[ADR-0060](0060-session-surface-initiator-and-product-names.md) (Proposed; §3 implemented for
+project discovery) derives a session's surface and initiator from the hosts' declared log fields,
+keeps every raw value, uses official product names (Claude Desktop, ChatGPT desktop app, Codex CLI,
+and others), and excludes imported session copies from every origin view. Project discovery already
+sets imported copies aside and counts them; the other decisions remain proposed.

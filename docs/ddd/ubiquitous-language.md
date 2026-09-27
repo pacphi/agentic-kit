@@ -121,11 +121,12 @@ missing price.
 `Dual-host` describes two enabled peer hosts, not an execution command and not evidence that two
 inference vendors served a workflow. Generalized execution belongs to `ak run`.
 
-## Session surface language (proposed)
+## Session surface language (mostly proposed)
 
-These terms are proposed by [ADR-0060](../adr/0060-session-surface-initiator-and-product-names.md)
-and not yet implemented. Until they are, the implemented contract is ADR-0050's **session origin**
-(`claude-desktop`, `codex-desktop` or `unknown`).
+These terms are proposed by [ADR-0060](../adr/0060-session-surface-initiator-and-product-names.md).
+Only **Imported session copy** is implemented so far, and only in usage and project discovery. For
+the rest, the implemented contract is ADR-0050's **session origin** (`claude-desktop`,
+`codex-desktop` or `unknown`), which an imported copy never supplies.
 
 | Term | Meaning |
 |------|---------|
