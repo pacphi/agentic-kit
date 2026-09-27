@@ -22,12 +22,23 @@ dependency policies, constraints, and the `watch` list of upstream threads.
    - If `mode` is `offline`, say why (`offlineReason`, usually: run `gh auth login`) and that only
      what the registry records is shown.
 2. Give the counts first, in plain language, from `counts`. Leave out groups with zero items.
-3. Then list the action items with their links, in this order: needs our reply; released and
-   actionable; fixed upstream but ak still carries the workaround; reopened; closed not planned;
-   no upstream activity for the stale limit; ready to retire; constraints past their retest
-   date; tracking issues to migrate. For each item give the id, title, URL and a one-line
-   reason: who replied and when, which release, or which ak change is pending. Give "waiting"
-   and "unmapped" as counts only, unless asked.
+3. Then list the action items with their links, one report group at a time, in this order
+   (the report's group titles):
+   - "Could not check" first, each thread with its error from `fetchErrors`: nothing about it
+     is known;
+   - "Needs our reply";
+   - "Released and actionable";
+   - "Fixed upstream, ak still carries the workaround";
+   - "Reopened upstream after ak recorded a fix";
+   - "Closed upstream as not planned";
+   - "No upstream activity for the stale limit";
+   - "Ready to retire";
+   - "Constraints past their retest date";
+   - "Tracking issues to migrate".
+
+   For each item give the id, title, URL and a one-line reason: who replied and when, which
+   release, or which ak change is pending. Give "Fixed upstream, not yet released",
+   "Waiting on upstream" and "Unmapped (no ak change recorded)" as counts only, unless asked.
 4. Offer the next actions that fit:
    - Draft a reply to an upstream thread. Show the draft; do not post it.
    - Dispatch a released item: branch `upstream/<id>` from `main`, make the entry's `adjustment`
