@@ -39,6 +39,7 @@ import { defaultOpencodeDbPath } from '../usage-opencode.mjs';
 import { presenceOf, statNode, UNKNOWN, walkTree } from './walk.mjs';
 import { inspectProjectIdentity } from './project-identity.mjs';
 import { transcriptSessionOrigin } from './session-origin.mjs';
+import { isImportedCodexRollout } from '../codex-import-marker.mjs';
 
 /** Hosts in the order every payload lists them. */
 export const PROJECT_SOURCE_HOSTS = Object.freeze(['claude', 'codex', 'opencode']);
@@ -267,6 +268,7 @@ export function scanTranscriptCwds(root, host, {
     unreadable: 0,
     unresolved: 0,
     recoveredFromDirName: 0,
+    importedExcluded: 0,
     sightings: [],
     truncated: Boolean(result.truncated),
     truncatedBy: result.truncatedBy ?? null,
@@ -284,6 +286,7 @@ export function scanTranscriptCwds(root, host, {
   let withoutCwd = 0;
   let empty = 0;
   let unreadable = 0;
+  let importedExcluded = 0;
 
   for (const { file, mtimeMs } of files) {
     let group = null;
@@ -298,6 +301,11 @@ export function scanTranscriptCwds(root, host, {
     const lines = readHead(file, { fsImpl, headBytes, maxLines });
     if (lines === null) { unreadable += 1; continue; }
     if (lines.length === 0) { empty += 1; continue; }
+    // An imported copy of a Claude Code transcript is not a Codex session: it
+    // names the folder the Claude session ran in and declares the ChatGPT
+    // desktop app as originator. It gives no project, host or origin and is
+    // counted, never dropped silently (ADR-0052 §3, ADR-0060 §3).
+    if (host === 'codex' && isImportedCodexRollout(lines)) { importedExcluded += 1; continue; }
     const cwd = firstCwd(lines, host);
     if (!cwd) { withoutCwd += 1; continue; }
     withCwd += 1;
@@ -327,6 +335,7 @@ export function scanTranscriptCwds(root, host, {
     unreadable,
     unresolved,
     recoveredFromDirName,
+    importedExcluded,
     sightings,
     // Transcripts we could not read, and project directories whose path could
     // not be recovered, both mean the project list is a floor.
@@ -419,11 +428,13 @@ function gitPresence(projectPath, fsImpl) {
  *                     exists: boolean, isGitRepo: boolean, lastSeenMs: number|null,
  *                     sessions: number }>,
  *   everSeen: number, onDisk: number, gitRepos: number, unresolved: number,
- *   complete: boolean, method: string,
+ *   importedExcluded: number, complete: boolean, method: string,
  *   sources: Record<'claude'|'codex'|'opencode', object>,
  * }} `everSeen` counts projects INCLUDING vanished ones; `onDisk` counts the
  *   measurable subset. `complete: false` means at least one transcript or
  *   project directory could not be resolved, so both counts are lower bounds.
+ *   `importedExcluded` counts Codex rollouts that are imported copies of Claude
+ *   Code transcripts, which name no project.
  */
 export function discoverProjectSources({
   claudeRoot = path.join(claudeDir(), 'projects'),
@@ -510,6 +521,8 @@ export function discoverProjectSources({
 
   const unresolved = PROJECT_SOURCE_HOSTS
     .reduce((total, host) => total + (sources[host]?.unresolved ?? 0), 0);
+  const importedExcluded = PROJECT_SOURCE_HOSTS
+    .reduce((total, host) => total + (sources[host]?.importedExcluded ?? 0), 0);
   return {
     asOf,
     projects,
@@ -517,6 +530,7 @@ export function discoverProjectSources({
     onDisk: projects.filter((project) => project.exists).length,
     gitRepos: projects.filter((project) => project.isGitRepo).length,
     unresolved,
+    importedExcluded,
     complete: PROJECT_SOURCE_HOSTS.every((host) => sources[host]?.complete !== false),
     method: PROJECT_SOURCE_METHOD,
     sources,
