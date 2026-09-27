@@ -283,12 +283,16 @@ pnpm run build
 
 `pnpm test` and `pnpm run test:ui` run through `scripts/run-tests.mjs`, which fingerprints
 `~/.config/agentic-kit`, `~/.local/state/agentic-kit` (or `%APPDATA%`/`%LOCALAPPDATA%` on
-Windows), the Claude/Codex/OpenCode guidance files ak manages, and this repository's `.claude`,
-`.swarm`, `.agentic-qe`, `.claude-flow` and `.harness` before and after the run. Any change fails
-the run and is listed by path. Files a live Claude Code, Ruflo or AQE session writes during the
-run are listed as "concurrent writers" and do not fail a local run; CI (or
-`AK_TRIPWIRE_STRICT=1`) fails on them too. Every command also runs with `TMPDIR`/`TEMP`/`TMP`
-pointed at a fresh `ak-suite-*` folder: anything left in it afterwards fails the run and is
+Windows), `~/.claude/CLAUDE.md`, `~/.claude/settings.json`, `~/.claude.json`,
+`~/.codex/AGENTS.md`, `~/.codex/config.toml`, the OpenCode `AGENTS.md`, this repository's root
+`CLAUDE.md`, `AGENTS.md` and `.mcp.json`, and its `.claude`, `.swarm`, `.agentic-qe`,
+`.claude-flow` and `.harness` before and after the run. Any change fails the run and is listed
+by path. Other tool paths (skills, agents and plugin folders, `opencode.json`, the Hermes home,
+`~/.claude-flow/memory`) are not fingerprinted; `spawnEnv()` keeps spawned children away from
+them. Files a live Claude Code, Ruflo or AQE session writes during the run (including Claude
+Code's own `~/.claude.json`) are listed as "concurrent writers" and do not fail a local run; CI
+(or `AK_TRIPWIRE_STRICT=1`) fails on them too. Every command also runs with
+`TMPDIR`/`TEMP`/`TMP` pointed at a fresh `ak-suite-*` folder: anything left in it afterwards fails the run and is
 listed, and the runner refuses to start when that folder sits inside a git repository (point
 `TMPDIR` elsewhere). Tests make temporary folders with `tempDir()` from
 `tests/kit/helpers/temp-dir.mjs`, and spawned children get their environment from `spawnEnv()` in

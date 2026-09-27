@@ -1,9 +1,17 @@
 #!/usr/bin/env node
 // scripts/real-state-tripwire.mjs
-// Real-state tripwire: fingerprints every folder a test could write on the
-// developer's machine and names each path that changed. Four incidents wrote
-// real state (statusline version + env pins in the repo's .claude, the
-// maintenance state, a heal receipt); this turns the next one into a failure.
+// Real-state tripwire: fingerprints the real-state locations ak writes on the
+// developer's machine and names each path that changed. Watched: ak's config
+// and state folders; the files ak sync/setup write in other tools' homes
+// (~/.claude/CLAUDE.md and settings.json, ~/.claude.json, ~/.codex/AGENTS.md and
+// config.toml, the OpenCode AGENTS.md); the repository's root CLAUDE.md,
+// AGENTS.md and .mcp.json; and its .claude/.swarm/.agentic-qe/.claude-flow/
+// .harness folders. Not watched: skills, agents and plugin folders in those
+// homes, opencode.json, the Hermes home, ~/.claude-flow/memory and every other
+// tool path; spawnEnv() (tests/kit/helpers/home-sandbox.mjs) is what keeps
+// spawned children away from those. Four incidents wrote real state
+// (statusline version + env pins in the repo's .claude, the maintenance state,
+// a heal receipt); this turns the next one into a failure.
 // Imports only builtins: src/lib/paths.mjs snapshots os.homedir() at module
 // scope and must never be loaded here. Node 22.13+.
 import crypto from 'node:crypto';
@@ -13,6 +21,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const REPO_STATE_DIRS = ['.claude', '.swarm', '.agentic-qe', '.claude-flow', '.harness'];
+export const REPO_ROOT_FILES = ['CLAUDE.md', 'AGENTS.md', '.mcp.json'];
+const SINGLE_FILE_KINDS = new Set(['user-file', 'repo-file']);
 
 /** Writers a live Claude Code / Ruflo / AQE session runs concurrently with a
  *  developer's test run. Excluded from failure only outside strict mode, and
@@ -24,6 +34,7 @@ export const CONCURRENT_WRITERS = [
   { kind: 'repo', pattern: /^\.swarm(\/|$)/, writer: 'Ruflo hooks and daemon of a live session' },
   { kind: 'repo', pattern: /^\.agentic-qe\/(?!llm-config\.json)/, writer: 'AQE hooks of a live session' },
   { kind: 'repo', pattern: /^\.claude-flow\/(?!config\.json$)/, writer: 'Ruflo hooks and statusline caches of a live session' },
+  { kind: 'user-file', pattern: /^\.claude\.json$/, writer: 'Claude Code session state in ~/.claude.json (https://code.claude.com/docs/en/settings)' },
 ];
 
 export function isStrict(env = process.env) {
@@ -41,14 +52,22 @@ export function realStateRoots({ env = process.env, platform = process.platform,
   const primaryConfig = platform === 'win32'
     ? env.APPDATA || p.join(homedir, 'AppData', 'Roaming')
     : env.XDG_CONFIG_HOME || p.join(homedir, '.config');
+  const claudeHome = env.CLAUDE_CONFIG_DIR || p.join(homedir, '.claude');
+  const codexHome = env.CODEX_HOME || p.join(homedir, '.codex');
   const roots = [
     ...configBases.filter(Boolean).map((base) => ({ kind: 'config', dir: p.join(base, 'agentic-kit') })),
     ...stateBases.filter(Boolean).map((base) => ({ kind: 'state', dir: p.join(base, 'agentic-kit') })),
     ...REPO_STATE_DIRS.map((name) => ({ kind: 'repo', dir: p.join(repoRoot, name), prefix: name })),
-    // ak-managed guidance files in other tools' homes (sync/setup write them).
-    { kind: 'user-file', dir: p.join(env.CLAUDE_CONFIG_DIR || p.join(homedir, '.claude'), 'CLAUDE.md') },
-    { kind: 'user-file', dir: p.join(env.CODEX_HOME || p.join(homedir, '.codex'), 'AGENTS.md') },
+    // Files ak sync/setup write in other tools' homes (src/lib/paths.mjs:39-60).
+    { kind: 'user-file', dir: p.join(claudeHome, 'CLAUDE.md') },
+    { kind: 'user-file', dir: p.join(claudeHome, 'settings.json') },
+    { kind: 'user-file', dir: p.join(homedir, '.claude.json') },
+    { kind: 'user-file', dir: p.join(codexHome, 'AGENTS.md') },
+    { kind: 'user-file', dir: p.join(codexHome, 'config.toml') },
     { kind: 'user-file', dir: p.join(primaryConfig, 'opencode', 'AGENTS.md') },
+    // Project files ak writes at the repository root (src/lib/project-guidance.mjs,
+    // the Codex AGENTS.md target in src/lib/blocks.mjs, .mcp.json in src/commands/setup.mjs).
+    ...REPO_ROOT_FILES.map((name) => ({ kind: 'repo-file', dir: p.join(repoRoot, name) })),
   ];
   const seen = new Set();
   return roots.filter((root) => {
@@ -96,7 +115,7 @@ export function snapshotRoots(roots) {
   const out = new Map();
   for (const root of roots) {
     if (!fs.existsSync(root.dir)) { out.set(`absent:${root.dir}`, { root, rel: '', type: 'absent-root' }); continue; }
-    if (root.kind === 'user-file') { record(out, root, path.basename(root.dir), root.dir); continue; }
+    if (SINGLE_FILE_KINDS.has(root.kind)) { record(out, root, path.basename(root.dir), root.dir); continue; }
     // The root itself is an entry, so a run that CREATES ~/.local/state/agentic-kit
     // (even empty) is reported as `+ <root>/`.
     out.set(root.dir, { root, rel: root.prefix ? `${root.prefix}/` : './', type: 'dir' });

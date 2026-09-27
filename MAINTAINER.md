@@ -245,9 +245,10 @@ pnpm run lint:links:internal # requires lychee
 Run one suite while iterating: `node --test tests/kit/versions.test.mjs`.
 
 `pnpm test` and `pnpm run test:ui` run through `scripts/run-tests.mjs`, a guard around the
-suite. It fingerprints real user state (ak's config and state folders, the host guidance files
-ak manages, and this repository's `.claude`, `.swarm`, `.agentic-qe`, `.claude-flow` and
-`.harness`) before and after the run, and points `TMPDIR`/`TEMP`/`TMP` at a fresh
+suite. It fingerprints real user state (ak's config and state folders, the Claude Code, Codex
+CLI and OpenCode files ak writes in their homes, this repository's root `CLAUDE.md`, `AGENTS.md`
+and `.mcp.json`, and its `.claude`, `.swarm`, `.agentic-qe`, `.claude-flow` and `.harness`)
+before and after the run, and points `TMPDIR`/`TEMP`/`TMP` at a fresh
 `ak-suite-*` folder. Its exit code tells you what went wrong:
 
 | Exit | Meaning |
