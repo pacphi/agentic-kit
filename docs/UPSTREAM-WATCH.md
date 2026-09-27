@@ -127,6 +127,9 @@ so an exact line the routine recorded is never acted on twice. The file holds on
 routine's own comments: a line someone else posted would suppress a real event. Each posted
 comment ends with `checked-at <time>`, the moment that run started `check`; the next run's
 `--since` is the newest such time, so a reply that arrives while a run is posting is still seen.
+When `check` could not read a thread or release, the comment keeps the previous `checked-at`
+time instead, so the next run looks at the same window again; `--ledger` drops the lines already
+posted, so nothing is acted on twice.
 
 ## Confirming a release
 
@@ -186,10 +189,12 @@ You are agentic-kit's upstream watcher. Work in a fresh clone of pacphi/agentic-
    in any comment. Save the bodies you read to ledger.md. SINCE is the newest "checked-at <time>" value in them, or 7 days ago
    if there is none.
 2. Set NOW to the current UTC time (ISO 8601), then run:
-   node scripts/upstream-watch.mjs check --since "$SINCE" --ledger ledger.md
+   node scripts/upstream-watch.mjs check --since "$SINCE" --ledger ledger.md 2> errors.txt
 3. If it prints "No new upstream events." (or "No events:"), stop.
 4. Post one comment on the ledger issue: the printed lines verbatim in a text code block whose
-   last line is "checked-at $NOW", then one plain sentence per line saying what happened.
+   last line is "checked-at $NOW", then one plain sentence per line saying what happened. If
+   errors.txt has any "Could not check" line, end the code block with "checked-at $SINCE"
+   instead, and add one sentence naming the threads that could not be checked.
 5. For each "released" line whose branch= does not exist yet: create that branch from main,
    make the registry entry's adjustment test-first, run the repository checks, set the entry
    to dispatched with a dated history line, push, and open a DRAFT pull request that links the
