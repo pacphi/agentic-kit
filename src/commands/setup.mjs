@@ -14,7 +14,7 @@ import { fixStatusline, bakedVersionManualFix } from '../lib/statusline.mjs';
 import { reconcileGuidance } from '../lib/blocks.mjs';
 import { captureProjectGuidance, reconcileProjectGuidance } from '../lib/project-guidance.mjs';
 import {
-  register as mcpRegister, applyExclusions, registrationStatus, agentBrowserMcpConfigured,
+  register as mcpRegister, applyExclusions, registrationStatus, agentBrowserMcpConfigured, staleAkClaudeFlow,
   codexMcpTopology, codexMcpRepairPlan, repairCodexMcpTopology, legacyRufloRemovalCommands,
 } from '../lib/mcp.mjs';
 import { reconcileCodexMcp } from '../lib/codex-mcp-reconcile.mjs';
@@ -842,12 +842,15 @@ async function finalizeSetupGuidanceAndMcp(cfg, pkgRoot, flags) {
     flags.reconfigure
     || !existingMcp.claudeFlow
     || !agentBrowserMcpConfigured(existingMcp.effective.claudeFlow, cfg.agentBrowser !== false)
+    || staleAkClaudeFlow(existingMcp.effective.claudeFlow)
   );
   if (wantMcp && await ask('Register the ruflo MCP server at user scope (schemas load on demand)?', true, flags.yes)) {
     const reg = await mcpRegister(cfg);
     if (reg.ok) {
       const { denied } = applyExclusions(cfg.mcp.excludeFamilies ?? []);
       ok(`MCP registered${denied ? ` (${denied} tool(s) denied per kit.json)` : ''} — exclude families anytime: ak x mcp pick`);
+    } else if (reg.reason === 'ak-not-on-path') {
+      warn('Ruflo MCP not re-registered: `ak` is not on PATH, and the registration starts `ak x ruflo-mcp` — put ak on PATH, then run ak sync');
     } else warn('claude mcp add failed — run: ak x mcp pick');
     for (const entry of reg.preserved) {
       warn(`custom 'ruflo' MCP registration preserved (${entry.scope} scope) — not agentic-kit's registration; if unwanted, remove it: ${legacyRufloRemovalCommands([entry.scope])}`);

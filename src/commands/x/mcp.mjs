@@ -69,8 +69,10 @@ export async function run({ flags, positionals }) {
       rl.close();
       exclude = answer.split(',').map((s) => s.trim()).filter(Boolean);
     }
-    if (!(await register()).ok) { fail('claude mcp add failed — is the claude CLI on PATH?'); return 1; }
-    ok('claude-flow registered at user scope');
+    const reg = await register();
+    if (reg.reason === 'ak-not-on-path') { fail('`ak` is not on PATH; the registration starts `ak x ruflo-mcp --host claude`'); return 1; }
+    if (!reg.ok) { fail('claude mcp add failed — is the claude CLI on PATH?'); return 1; }
+    ok('claude-flow registered at user scope (starts through ak x ruflo-mcp)');
     const scoped = registrationStatus({ cwd: process.cwd() });
     if (scoped.preservedLegacyScopes.length) {
       warn(`legacy 'ruflo' registration remains at ${scoped.preservedLegacyScopes.join(', ')} scope; inspect with \`claude mcp get ruflo\`, then remove it explicitly if unwanted: ${legacyRufloRemovalCommands(scoped.preservedLegacyScopes)}`);

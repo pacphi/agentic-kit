@@ -11,6 +11,10 @@ import * as mcpLib from '../../src/lib/mcp.mjs';
 import * as mcpSection from '../../src/commands/status/sections/mcp.mjs';
 import { agentBrowserConfigPath } from '../../src/lib/paths.mjs';
 
+// register() refuses when `ak` is not on PATH (the registration starts it);
+// every test injects the lookup so none depends on the machine's PATH.
+const akOnPath = async (bin) => bin === 'ak';
+
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-mcp-scopes-'));
   const home = path.join(root, 'home');
@@ -80,6 +84,7 @@ test('a user-scoped legacy key remains the only automatically migratable scope',
 test('Claude registration scopes the trusted browser config to the Ruflo MCP child', async () => {
   const calls = [];
   const { ok } = await register({ agentBrowser: true }, {
+    haveFn: akOnPath,
     runner: async (bin, args) => { calls.push([bin, args]); return { code: 0, stdout: '', stderr: '' }; },
     inspect: () => ({ registrations: [{
       name: 'ruflo', scope: 'user', command: 'ruflo', args: ['mcp', 'start'], env: {},
@@ -90,7 +95,7 @@ test('Claude registration scopes the trusted browser config to the Ruflo MCP chi
   assert.deepEqual(calls[1], ['claude', [
     'mcp', 'add', 'claude-flow', '-s', 'user',
     '-e', `AGENT_BROWSER_CONFIG=${agentBrowserConfigPath()}`,
-    '--', 'ruflo', 'mcp', 'start',
+    '--', 'ak', 'x', 'ruflo-mcp', '--host', 'claude',
   ]]);
   assert.equal(agentBrowserMcpConfigured({ env: { AGENT_BROWSER_CONFIG: agentBrowserConfigPath() } }), true);
   assert.equal(agentBrowserMcpConfigured({ env: {} }), false);
@@ -99,6 +104,7 @@ test('Claude registration scopes the trusted browser config to the Ruflo MCP chi
 test('Claude registration safely replaces the prior canonical claude-flow entry', async () => {
   const calls = [];
   const { ok } = await register({ agentBrowser: true }, {
+    haveFn: akOnPath,
     runner: async (bin, args) => { calls.push([bin, args]); return { code: 0, stdout: '', stderr: '' }; },
     inspect: () => ({ registrations: [{
       name: 'claude-flow', scope: 'user', command: 'ruflo', args: ['mcp', 'start'], env: {},
@@ -110,7 +116,7 @@ test('Claude registration safely replaces the prior canonical claude-flow entry'
     ['claude', [
       'mcp', 'add', 'claude-flow', '-s', 'user',
       '-e', `AGENT_BROWSER_CONFIG=${agentBrowserConfigPath()}`,
-      '--', 'ruflo', 'mcp', 'start',
+      '--', 'ak', 'x', 'ruflo-mcp', '--host', 'claude',
     ]],
   ]);
 });
@@ -121,6 +127,7 @@ test('Claude registration safely replaces the prior canonical claude-flow entry'
 test('Claude registration preserves a user registration carrying a ruflo component env key', async () => {
   const calls = [];
   const { ok } = await register({ agentBrowser: true }, {
+    haveFn: akOnPath,
     runner: async (bin, args) => { calls.push([bin, args]); return { code: 0, stdout: '', stderr: '' }; },
     inspect: () => ({ registrations: [{
       name: 'claude-flow', scope: 'user', command: 'ruflo', args: ['mcp', 'start'],
@@ -134,6 +141,7 @@ test('Claude registration preserves a user registration carrying a ruflo compone
 test('Claude registration preserves a canonical entry carrying a foreign env key alongside a component key', async () => {
   const calls = [];
   const { ok } = await register({ agentBrowser: true }, {
+    haveFn: akOnPath,
     runner: async (bin, args) => { calls.push([bin, args]); return { code: 0, stdout: '', stderr: '' }; },
     inspect: () => ({ registrations: [{
       name: 'claude-flow', scope: 'user', command: 'ruflo', args: ['mcp', 'start'],
@@ -147,6 +155,7 @@ test('Claude registration preserves a canonical entry carrying a foreign env key
 test('Claude registration preserves a conflicting user-owned claude-flow entry', async () => {
   const calls = [];
   const { ok } = await register({ agentBrowser: true }, {
+    haveFn: akOnPath,
     runner: async (bin, args) => { calls.push([bin, args]); return { code: 0, stdout: '', stderr: '' }; },
     inspect: () => ({ registrations: [{
       name: 'claude-flow', scope: 'user', command: 'custom-wrapper', args: [], env: {},
@@ -162,6 +171,7 @@ test('Claude registration restores the prior canonical entry if replacement fail
     name: 'claude-flow', scope: 'user', command: 'ruflo', args: ['mcp', 'start'], env: {},
   };
   const { ok } = await register({ agentBrowser: true }, {
+    haveFn: akOnPath,
     runner: async (bin, args) => {
       calls.push([bin, args]);
       if (args[0] === 'mcp' && args[1] === 'add' && args.includes('AGENT_BROWSER_CONFIG=' + agentBrowserConfigPath())) {
@@ -205,6 +215,7 @@ for (const [label, shape] of Object.entries(PRESERVED_LEGACY_SHAPES)) {
 
     const calls = [];
     const result = await register({ agentBrowser: false }, {
+    haveFn: akOnPath,
       runner: recordingRunner(calls), inspect: () => claudeMcpTopology({ cwd, home }),
     });
     assert.equal(result.ok, true, 'claude-flow is still registered');
@@ -234,6 +245,7 @@ test("ak's own legacy 'ruflo mcp start' registration is still migrated (control)
 
   const calls = [];
   const result = await register({ agentBrowser: false }, {
+    haveFn: akOnPath,
     runner: recordingRunner(calls), inspect: () => claudeMcpTopology({ cwd, home }),
   });
   assert.deepEqual(result, { ok: true, preserved: [] });
@@ -257,4 +269,88 @@ test('a project-scope legacy entry is reported with its manual command, never a 
     .find((r) => /legacy 'ruflo'/.test(r.message));
   assert.equal(legacyRow.fix, 'claude mcp remove ruflo -s project');
   assert.equal(legacyRow.repair, 'manual');
+});
+
+// B3-D1: Claude Code's Ruflo MCP starts through ak's launcher, so a session in
+// a subfolder or outside any project uses the same store rule as Codex.
+const LAUNCHER = { command: 'ak', args: ['x', 'ruflo-mcp', '--host', 'claude'] };
+
+test('an already-launcher registration with the managed browser config makes no calls', async () => {
+  const calls = [];
+  const result = await register({ agentBrowser: true }, {
+    haveFn: akOnPath, runner: recordingRunner(calls),
+    inspect: () => ({ registrations: [{
+      name: 'claude-flow', scope: 'user', ...LAUNCHER, env: { AGENT_BROWSER_CONFIG: agentBrowserConfigPath() },
+    }] }),
+  });
+  assert.deepEqual(result, { ok: true, preserved: [] });
+  assert.deepEqual(calls, []);
+});
+
+test('the launcher registration is replaced when the browser config changes, and a user env key preserves it', async () => {
+  const calls = [];
+  const replaced = await register({ agentBrowser: false }, {
+    haveFn: akOnPath, runner: recordingRunner(calls),
+    inspect: () => ({ registrations: [{
+      name: 'claude-flow', scope: 'user', ...LAUNCHER, env: { AGENT_BROWSER_CONFIG: agentBrowserConfigPath() },
+    }] }),
+  });
+  assert.equal(replaced.ok, true);
+  assert.deepEqual(calls, [
+    ['claude', ['mcp', 'remove', 'claude-flow', '-s', 'user']],
+    ['claude', ['mcp', 'add', 'claude-flow', '-s', 'user', '--', 'ak', 'x', 'ruflo-mcp', '--host', 'claude']],
+  ]);
+  const kept = [];
+  const preserved = await register({ agentBrowser: true }, {
+    haveFn: akOnPath, runner: recordingRunner(kept),
+    inspect: () => ({ registrations: [{
+      name: 'claude-flow', scope: 'user', ...LAUNCHER, env: { MY_KEY: 'mine' },
+    }] }),
+  });
+  assert.equal(preserved.ok, false);
+  assert.deepEqual(kept, []);
+});
+
+test('register refuses without touching anything when ak is not on PATH', async () => {
+  const calls = [];
+  const result = await register({ agentBrowser: true }, {
+    haveFn: async () => false, runner: recordingRunner(calls),
+    inspect: () => ({ registrations: [{
+      name: 'claude-flow', scope: 'user', command: 'ruflo', args: ['mcp', 'start'], env: {},
+    }] }),
+  });
+  assert.deepEqual(result, { ok: false, reason: 'ak-not-on-path', preserved: [] });
+  assert.deepEqual(calls, []);
+});
+
+test('status asks sync to move ak\'s old ruflo mcp start registration onto the launcher', (t) => {
+  const { home, cwd } = fixture(t);
+  fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({
+    mcpServers: { 'claude-flow': { command: 'ruflo', args: ['mcp', 'start'] } },
+  }));
+  const status = registrationStatus({ cwd, home, settingsFile: path.join(home, 'settings.json') });
+  const rows = mcpSection.mcpRows(status, { mcp: { register: true }, agentBrowser: false }, { cwd, home });
+  const stale = rows.find((r) => /does not start through `ak x ruflo-mcp`/.test(r.message));
+  assert.ok(stale, JSON.stringify(rows));
+  assert.equal(stale.level, 'warn');
+  assert.equal(stale.repair, 'sync');
+  const unmanaged = mcpSection.mcpRows(status, { mcp: { register: false }, agentBrowser: false }, { cwd, home })
+    .find((r) => /does not start through `ak x ruflo-mcp`/.test(r.message));
+  assert.equal(unmanaged.repair, 'manual', 'with registration off, sync never re-registers');
+});
+
+test('status names the store the launcher picks from this folder', (t) => {
+  const { home, cwd } = fixture(t);
+  fs.mkdirSync(path.join(cwd, '.git'));
+  fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({
+    mcpServers: { 'claude-flow': LAUNCHER },
+  }));
+  const status = registrationStatus({ cwd, home, settingsFile: path.join(home, 'settings.json') });
+  const cfg = { mcp: { register: true }, agentBrowser: false };
+  const here = mcpSection.mcpRows(status, cfg, { cwd, home }).find((r) => /Claude Code's Ruflo MCP/.test(r.message));
+  assert.equal(here.level, 'ok');
+  assert.equal(here.message, "Claude Code's Ruflo MCP starts through `ak x ruflo-mcp`; from here it uses "
+    + `${path.join(fs.realpathSync(cwd), '.swarm')}`);
+  const outside = mcpSection.mcpRows(status, cfg, { cwd: home, home }).find((r) => /Claude Code's Ruflo MCP/.test(r.message));
+  assert.match(outside.message, /from here it uses the user-level store .*\.claude-flow.memory \(this folder is the home folder\)/);
 });

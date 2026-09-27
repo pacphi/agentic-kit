@@ -8,7 +8,7 @@
 // The canonical store is `<root>/.swarm` for the root every ak launch contract
 // pins (rufloMemoryLocation: the repository root, else the folder), so a status
 // run from a subfolder reports the same store the hosts use. Outside any usable
-// folder, one row names the user-level store Codex's launcher uses instead. Size, WAL, the
+// folder, one row names the user-level store the hosts' launcher uses instead. Size, WAL, the
 // largest namespace and its expiry come from a read-only query; stray stores
 // (project-memory.mjs findStrayMemoryStores) are information only, never a
 // warning or a sync fix: ak leaves them in place, and a warning with no way to
@@ -153,10 +153,9 @@ function maintenanceRows(root, memory, now) {
 // Outside any usable folder (the filesystem root, the home folder, a temporary
 // root, a tool's own folder) there is no project store to describe, and
 // walking such a folder for strays would be slow and meaningless: name the
-// store Codex's launcher uses from here instead (user-memory.mjs reports it).
-const launcherRow = (location) => row('memory', 'info', `no project here: this folder is ${location.reason}, so Codex's Ruflo `
-  + `launcher (\`ak x ruflo-mcp\`) uses the user-level store ${location.dir} instead of creating .swarm here. `
-  + 'Claude\'s own Ruflo registration is unchanged');
+// store the hosts' launcher uses from here instead (user-memory.mjs reports it).
+const launcherRow = (location) => row('memory', 'info', `no project here: this folder is ${location.reason}, so Claude Code's and `
+  + `Codex's Ruflo launcher (\`ak x ruflo-mcp\`) uses the user-level store ${location.dir} instead of creating .swarm here`);
 
 export default {
   id: 'memory',

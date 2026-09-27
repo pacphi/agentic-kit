@@ -191,6 +191,8 @@ test('status outside a project names the launcher\'s user-level store instead of
   assert.equal(launcher.fix, null);
   assert.ok(launcher.message.includes(userStore(home)), launcher.message);
   assert.match(launcher.message, /home folder/);
+  assert.match(launcher.message, /Claude Code's and Codex's Ruflo launcher/);
+  assert.doesNotMatch(launcher.message, /unchanged/, 'Claude Code now starts through the launcher too (B3-D1)');
 });
 
 test('status reports the user-level store and stray stores outside projects, for information only', async (t) => {
@@ -205,6 +207,7 @@ test('status reports the user-level store and stray stores outside projects, for
   const store = rows.find((r) => /user-level store/.test(r.message));
   assert.ok(store.message.includes(userStore(home)));
   assert.match(store.message, /memory\.db: 3 active entries/);
+  assert.match(store.message, /Claude Code's and Codex's Ruflo launcher outside projects/);
   const strays = rows.filter((r) => /stray/.test(r.message));
   assert.equal(strays.length, 1, 'one row lists every stray store outside projects');
   assert.match(strays[0].message, /~\/\.swarm/);

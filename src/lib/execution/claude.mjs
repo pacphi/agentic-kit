@@ -16,7 +16,7 @@ import { HANDOFF_REQUEST_STRUCTURED, HANDOFF_SCHEMA_TEXT, parseHandoffText } fro
 // followed by another flag token, and the block ends on single-value
 // `--settings`, which consumes exactly one argument and so guards the prompt.
 const HERMETIC_FLAGS = Object.freeze([
-  '--strict-mcp-config', '--mcp-config', '{"mcpServers":{"ruflo":{"command":"ak","args":["x","ruflo-mcp"]}}}',
+  '--strict-mcp-config', '--mcp-config', '{"mcpServers":{"ruflo":{"command":"ak","args":["x","ruflo-mcp","--host","claude"]}}}',
   '--allowedTools', 'mcp__ruflo',
   '--settings', '{"disableAllHooks":true}',
 ]);

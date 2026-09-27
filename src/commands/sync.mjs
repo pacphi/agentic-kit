@@ -388,11 +388,14 @@ export const SYNC_STEPS = [
       await ctx.step('mcp', async () => {
         const reg = await (ctx.registerMcp ?? mcpRegister)(ctx.cfg);
         preserved = reg.preserved ?? [];
+        if (reg.reason === 'ak-not-on-path') {
+          return { ok: false, detail: 'claude mcp registration skipped: `ak` is not on PATH, and the registration starts `ak x ruflo-mcp`; the existing registration was left in place' };
+        }
         if (!reg.ok) {
           return { ok: false, detail: 'claude mcp registration failed; prior compatible registration was restored when possible' };
         }
         const { denied } = applyExclusions(ctx.cfg.mcp.excludeFamilies ?? []);
-        return { ok: true, detail: `claude-flow registered (user scope), ${denied} tool(s) denied per kit.json` };
+        return { ok: true, detail: `claude-flow registered (user scope, through ak x ruflo-mcp), ${denied} tool(s) denied per kit.json` };
       });
       // register() keeps a legacy entry ak did not write (ADR-0016); say so
       // with the manual command instead of implying a migration happened.

@@ -1,5 +1,5 @@
 // Ruflo memory outside any project (audit 2026-09-26 Addendum 2, problem 2).
-// Codex's launcher (`ak x ruflo-mcp`) sends a session started at the
+// ak's launcher (`ak x ruflo-mcp`, used by Claude Code and Codex) sends a session started at the
 // filesystem root, the home folder, a temporary root or inside a tool's own
 // folder to ONE user-level store (paths.userMemoryDir). This section reports
 // that store when it exists, and the stray stores such sessions left before:
@@ -25,7 +25,7 @@ function strayRow(found, home, userDir) {
   const count = (atHome ? 1 : 0) + codex.length;
   const them = count === 1 ? 'it' : 'them';
   return row('memory', 'info', `${count} stray Ruflo store${count === 1 ? '' : 's'} outside any project: ${parts.join(' and ')}. `
-    + `Ruflo ran with those folders as its working directory; Codex's launcher now uses ${homeRelative(userDir, home)} there instead. `
+    + `Ruflo ran with those folders as its working directory; ak's launcher now uses ${homeRelative(userDir, home)} there instead. `
     + `ak reports ${them} only and leaves ${them} in place`
     + (found.complete ? '' : '; only the first 500 Codex project folders were checked'));
 }
@@ -38,7 +38,7 @@ export default {
       const dir = paths.userMemoryDir(home);
       for (const store of memoryDirStatus(dir).stores.filter((candidate) => candidate.present)) {
         rows.push(row('memory', 'info', store.readable
-          ? `user-level store ${dir} (Codex's Ruflo launcher outside projects): ${storeMessage(store)}`
+          ? `user-level store ${dir} (Claude Code's and Codex's Ruflo launcher outside projects): ${storeMessage(store)}`
           : `user-level store ${store.file} is unreadable; existing-corpus access unverified`));
       }
       const found = findUserStrayStores({ home, codexHome: env.CODEX_HOME || undefined });
