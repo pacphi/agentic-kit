@@ -70,8 +70,8 @@ function versionRows(cwd) {
   const shows = `statusline shows Ruflo v${ahead.baked}, but installed ruflo is v${ahead.installed}`;
   const blocker = helperRefreshBlocker(cwd);
   if (blocker) {
-    return [row('statusline', 'warn',
-      `${shows}; ruflo's helper refresh cannot regenerate it (${blocker}) — ${bakedVersionManualFix(ahead.installed)}`)];
+    return [row('statusline', 'warn', `${shows}; ruflo's helper refresh cannot regenerate it (${blocker})`,
+      bakedVersionManualFix(ahead.installed), { repair: 'manual' })];
   }
   return [row('statusline', 'warn', shows,
     'sync regenerates the helper through ruflo\'s own refresh, then re-injects the footer')];

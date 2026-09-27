@@ -127,9 +127,18 @@ test('with ruflo\'s refresh locked, status names the manual edit instead of plan
   const rows = await statuslineSection.collect({ cfg: {}, cwd: proj });
   const hit = rows.find((r) => /v9\.9\.9/.test(r.message));
   assert.ok(hit, JSON.stringify(rows));
-  assert.equal(hit.fix, null, 'sync cannot perform this repair, so it must not plan it');
+  // contracts-3: the manual edit is the row's fix, marked manual, so sync never
+  // plans it and --json and the dashboard label it.
+  assert.equal(hit.repair, 'manual', 'sync cannot perform this repair, so it must not plan it');
+  assert.match(hit.fix ?? '', /let ver/);
   assert.match(hit.message, /\.LOCKED/);
-  assert.match(hit.message, /let ver/);
+});
+
+test('with ruflo\'s refresh locked, the drift nudge does not send the user to ak sync for the version', async () => {
+  const { proj, helpers } = fixture();
+  fs.writeFileSync(path.join(helpers, '.LOCKED'), '');
+  const lines = await localDrift({ cwd: proj, cfg: {}, targets: [] });
+  assert.ok(!lines.includes('statusline Ruflo version'), JSON.stringify(lines));
 });
 
 test('the drift nudge names the statusline Ruflo version too', async () => {
