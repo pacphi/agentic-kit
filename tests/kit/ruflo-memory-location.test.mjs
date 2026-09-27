@@ -211,3 +211,13 @@ test('status reports the user-level store and stray stores outside projects, for
   assert.match(strays[0].message, /2 under ~\/\.codex\/\.chatgpt-projects/);
   assert.match(strays[0].message, /leaves them in place/);
 });
+
+test('Claude mode from the home folder pins both memory variables to the user-level store', (t) => {
+  const home = sandbox(t);
+  const launch = rufloMcpLaunch(home, { RUFLO_INTELLIGENCE_MODE: 'fast' }, { cfg, rufloVersion: '3.46.1', home, host: 'claude' });
+  assert.equal(launch.location.kind, 'user');
+  assert.equal(launch.cwd, userStore(home));
+  assert.equal(launch.env.CLAUDE_FLOW_MEMORY_PATH, userStore(home));
+  assert.equal(launch.env.CLAUDE_FLOW_DB_PATH, path.join(userStore(home), 'memory.db'));
+  assert.equal(launch.env.RUFLO_INTELLIGENCE_MODE, 'fast');
+});
