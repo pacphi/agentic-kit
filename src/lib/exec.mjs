@@ -23,7 +23,10 @@ const MAX_EXEC_BUFFER = 16 * 1024 * 1024;
 // A caller that bounds work it does not own (a live check under `ak status
 // --live` running an unmodified `ak x verify` suite) scopes an AbortSignal
 // here; every run() inside the scope that passes no signal of its own uses it,
-// so a timed-out check's child processes stop and its own cleanup still runs.
+// so a timed-out check's direct child processes stop and its own cleanup still
+// runs. The abort signals only that direct child: a process it started keeps
+// running (on Windows a .cmd shim's child is PowerShell, so the ruflo or aqe
+// node process behind it survives the abort).
 const abortScope = new AsyncLocalStorage();
 
 /** Run `fn` with `signal` as the default abort signal for run() calls in it.
