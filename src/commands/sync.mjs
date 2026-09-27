@@ -134,6 +134,9 @@ export const help = `ak sync — converge to good: upgrade + heal + verify
 Builds a plan from the same collector \`ak status\` uses, then applies it in
 order: upgrades first (they wipe native modules), then heals, then re-collects
 to prove convergence. Idempotent — safe to run any time. When in doubt, run this.
+Before planning, a sync that may upgrade (not --dry-run or --no-upgrade) reads
+the latest versions and Ruflo's release dates from npm; \`ak status\` uses the
+remembered dates for the Ruflo support window.
 Only fixes a sync step performs are planned; a status row marked "→ manual:"
 (a command you run, a file you edit, a login) is never applied. A failing or
 warning one is counted as a manual step you must take; an info-level one is

@@ -48,6 +48,21 @@ old hosts and origins, so the Footprint snapshot schema advances to v8. This bui
 snapshot as unreadable until you run **Full scan** in System or `ak system --deep`. It is never
 shown under the new rule. See [ADR-0060](adr/0060-session-surface-initiator-and-product-names.md) §3.
 
+## 2026-09-27: Ruflo support window
+
+ak supports the newest six Ruflo minor versions, and never fewer than the minors released in the
+last 30 days. The oldest supported minor is the window's floor (for example `3.39.0`). `ak status`
+shows a `versions` row for it:
+
+- **inside the support window**: your Ruflo is supported; the row names the floor and when ak last
+  read Ruflo's release dates.
+- **unsupported**: your Ruflo is below the floor. ak's workarounds for Ruflo defects fixed before
+  the floor are gone, so an older Ruflo may misbehave. Run `ak sync` to upgrade it.
+- **not yet known**: ak has not read Ruflo's release dates yet. Run `ak sync`.
+
+`ak status` never looks the dates up itself. A plain `ak sync` reads them from npm and remembers them
+in `kit.json` (`versionCheck.rufloMinors`); `ak sync --dry-run` and `ak sync --no-upgrade` do not.
+
 ## 2026-09-26: `ak sync`'s exit code ignores fixes you do by hand
 
 `ak sync` now exits 0 when everything it can repair has converged, even if a row whose fix you

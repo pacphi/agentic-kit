@@ -51,6 +51,9 @@ host set plus source digests and exact version facts.
 - `HealingTransaction`: private backups, explicit authorization, action journal,
   verification evidence and guarded rollback state.
 - `UpstreamConstraint`: dependency range, issue state, local strategy and sunset proof.
+- `SupportWindow`: on a dependency policy (Ruflo today), the newest N minors, never fewer than
+  those first published within M days. The window's floor decides when a released upstream fix
+  can replace an ak workaround (ADR-0041 §7).
 
 ## Provider contract
 

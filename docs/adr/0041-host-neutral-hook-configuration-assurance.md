@@ -1,11 +1,14 @@
 # ADR-0041 — Host-neutral hook configuration assurance
 
-- **Status:** Accepted; static assurance, transactional healing, bounded receipts, and read model implemented
+- **Status:** Accepted; static assurance, transactional healing, bounded receipts, read model, and the Ruflo support window implemented
 - **Date:** 2026-09-01
 - **Updated:** 2026-09-27 — §7: schema 6 separates `lastCheckedAt` (state re-read) from
   `lastVerifiedAt`/`nextRetestAt` (conformance); a release counts only when it contains the
   merged fixing change; AgentDB fixes count when Ruflo bundles them; the guard covers
-  user-facing docs; the ledger is pacphi/agentic-kit#243
+  user-facing docs; the ledger is pacphi/agentic-kit#243. The Ruflo dependency policy carries a
+  rolling support window (newest six minors, at least 30 days); `ak status` reports a Ruflo below
+  it as unsupported, and the watch holds a workaround removal until the window's floor contains
+  the fix
 - **Earlier update:** 2026-09-26 — §7: the registry ships inside `src/`, holds the watched upstream
   threads beside the constraints, and feeds the deterministic upstream watch, whose ledger is
   read from the routine's and our logins' comments only
@@ -232,6 +235,21 @@ thread is a branch `upstream/<id>` and a draft pull request that makes the adjus
 test-first and passes the dependency's removal proof. It never merges. Publishing upstream
 keeps the `explicit-user-approval-required` rule. Operating detail:
 [UPSTREAM-WATCH.md](../UPSTREAM-WATCH.md).
+
+**Ruflo support window (2026-09-27).** ak supports the newest six Ruflo minors, and never fewer
+than the minors first published in the last 30 days: the floor is the older of the sixth-newest
+minor and the oldest minor released in those 30 days, as `<major>.<minor>.0`. The rule lives on
+the Ruflo dependency policy as `supportWindow` (`newestMinors`, `minDays`, `basis`: the first
+stable npm publish of each minor); the loader validates it when present. The evidence is each
+minor's first publish date, which only `ak sync` records (`npm view ruflo time --json`, on a sync
+that upgrades) in `kit.json` as `versionCheck.rufloMinors`. `ak status` computes the window from
+that memory and never calls the network: below the floor it reports the installed Ruflo as
+unsupported and points to `ak sync`; with no remembered dates it says the window is not yet known.
+Old dates can only place the floor at or below the true one, so staleness never produces a false
+"unsupported". The watch computes the same floor from the release dates it reads and holds a
+released Ruflo fix whose first fixed version is above the floor in "Released, waiting for the
+support window", with no dispatch: a workaround comes out only once the oldest supported Ruflo
+has the fix.
 
 ### 8. Runtime receipts are sibling evidence, not static audit proof
 

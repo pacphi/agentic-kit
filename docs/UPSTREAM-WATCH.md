@@ -85,6 +85,11 @@ node scripts/upstream-watch.mjs report [--json]
 node scripts/upstream-watch.mjs check --since <iso-date> [--ledger <file>] [--json]
 ```
 
+The Ruflo support window (the newest six minors, never fewer than those released in the last
+30 days; `supportWindow` on the Ruflo dependency policy, ADR-0041 §7) comes from the npm release
+dates the check reads. When they cannot be read, or `gh` is signed out, nothing is held for the
+window.
+
 `report` gives counts, then these groups (a thread can be in more than one):
 
 | Group | Rule |
@@ -93,6 +98,7 @@ node scripts/upstream-watch.mjs check --since <iso-date> [--ledger <file>] [--js
 | Released and actionable | Upstream fixed, and a published release contains the merged fixing pull request (or closing commit), checked against the repository's tag for that version, or the registry records the first fixed version (`minVersion`). The entry is `watching` or `fixed-unreleased` and ak has an adjustment. Carries the dispatch branch and removal proof. |
 | Released, fix not confirmed | A release came out after the fix, but ak could not prove it contains the fixing change (no merged pull request closed the thread, or no tag for that version). Confirm by hand and record `minVersion`. Never dispatched. |
 | Fixed upstream, ak still carries the workaround | The entry is `released` or `dispatched` and ak has an adjustment. |
+| Released, waiting for the support window | A Ruflo entry that would be in one of the two groups above, but its first fixed version is above the Ruflo support window's floor (`supportWindow.floor` in the JSON report). No dispatch: the workaround stays until the oldest supported Ruflo has the fix. |
 | Fixed upstream, not yet released | Upstream fixed, no release contains it, the entry is `watching` or `fixed-unreleased`, and ak has an adjustment. |
 | Reopened upstream | Open upstream while the entry says fixed, released, dispatched or adopted. |
 | Waiting on upstream | Open, not stale, and nobody is waiting on us. |
@@ -122,7 +128,8 @@ fixing change when the release was confirmed from it), `reopened`, `stale`,
 `retire-proposed`, `retest-due` (constraint id) and `idle` (id `registry`, nothing left to
 watch). `check --since` limits replies, acknowledgements, closures and merges to activity after
 `--since`. The other events repeat while their condition holds, dated by the upstream fact, so
-the same fact always gives the same line. `--ledger <file>` drops any line already in that file,
+the same fact always gives the same line. A `released` line for a fix held for the support
+window has no `branch=` field; the line with one appears once the window's floor contains the fix. `--ledger <file>` drops any line already in that file,
 so an exact line the routine recorded is never acted on twice. The file holds only the
 routine's own comments: a line someone else posted would suppress a real event. Each posted
 comment ends with `checked-at <time>`, the moment that run started `check`; the next run's
@@ -158,7 +165,7 @@ names the carrier version that bundles it.
 
 ## Dispatch
 
-For a `released` line: branch `upstream/<id>` (for example `upstream/ruvnet-ruflo-3194`) from
+For a `released` line with a `branch=` field: branch `upstream/<id>` (for example `upstream/ruvnet-ruflo-3194`) from
 `main`, make the entry's `adjustment` test-first, pass the dependency policy's `removalProof`,
 set the entry to `dispatched` with a dated history line, and open a **draft** pull request that
 links the upstream thread. Nothing merges it but the maintainer.
