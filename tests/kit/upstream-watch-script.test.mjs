@@ -1133,3 +1133,31 @@ test('comment lists the dispatch branches of released lines', async () => {
     assert.match(result.body, /dispatch it on branch upstream\/proffesor-for-testing-agentic-qe-617\./);
   });
 });
+
+// b4b-adversarial M1: a token that reads only the ledger's own repository (the
+// cloud session's failure) still reads our tracking issues; that run is blind.
+test('a run that reads only the ledger repository is blind', async () => {
+  const own = entry('pacphi/agentic-kit#240', { relation: 'tracking', dependency: null, tracks: ['ruvnet/ruflo#3153'], doneWhen: { state: 'closed-completed', release: null } });
+  const scoped = { ...withLedger([]), thread: async (id) => {
+    if (id.startsWith('pacphi/agentic-kit#')) return { issue: { number: 240, state: 'open', title: 't', user: { login: 'pacphi' }, created_at: '2026-09-20T00:00:00Z', updated_at: '2026-09-20T00:00:00Z', comments: 0 }, comments: [] };
+    throw new Error('HTTP 403');
+  } };
+  await withRegistryFile([own, entry('ruvnet/ruflo#3153', { relation: 'commented' })], async (file) => {
+    const out = capture();
+    assert.equal(await main(['comment', '--json', '--registry', file], { fetcher: scoped, stdout: out.stream, stderr: capture().stream, now: NOW }), 3);
+    const result = JSON.parse(out.text());
+    assert.equal(result.registry, undefined, 'the registry is valid');
+    assert.equal(result.blind, true);
+  });
+});
+
+// b4b-adversarial m2: the workflow reads the same JSON shape on every failure.
+test('comment on an invalid registry is blind with the usual JSON shape', async () => {
+  await withRegistryFile([entry('ruvnet/ruflo#3153', { status: 'done' })], async (file) => {
+    const out = capture();
+    assert.equal(await main(['comment', '--json', '--registry', file], { fetcher: withLedger([]), stdout: out.stream, stderr: capture().stream, now: NOW }), 3);
+    const result = JSON.parse(out.text());
+    assert.deepEqual([result.blind, result.post, result.body, result.dispatch, result.events, result.fetchErrors], [true, false, '', [], [], []]);
+    assert.match(result.error, /registry/);
+  });
+});

@@ -156,7 +156,12 @@ async function collect(registry, fetcher, concurrency) {
   await confirmReleases(gated.filter((entry) => !entry.doneWhen.release.minVersion && live.get(entry.id).release), live, fetcher, concurrency, fetchErrors);
   await resolveBundles(gated.filter((entry) => entry.doneWhen.release.bundledBy), live, fetcher, concurrency, fetchErrors);
   fetchErrors.sort((a, b) => a.id.localeCompare(b.id));
-  const blind = active.length > 0 && active.every((entry) => !live.get(entry.id).thread);
+  // Blind judges upstream threads only: a token scoped to the ledger's own
+  // repository still reads our tracking issues there while every upstream read fails.
+  const own = `${registry.watchPolicy.ledger.repo.toLowerCase()}#`;
+  const upstream = active.filter((entry) => !entry.id.toLowerCase().startsWith(own));
+  const judged = upstream.length ? upstream : active;
+  const blind = judged.length > 0 && judged.every((entry) => !live.get(entry.id).thread);
   return { live, fetchErrors, facts, blind };
 }
 
@@ -200,6 +205,8 @@ async function runCheck(registry, fetcher, options, { stderr, now }) {
   return { report, offline, fetchErrors, blind };
 }
 
+const blindResult = (error) => ({ blind: true, post: false, error, events: [], fetchErrors: [], dispatch: [], body: '' });
+
 /**
  * The ledger comment (decision 14): read our ledger comments, check from the
  * newest `checked-at` in them, and print the body to post, or nothing. The
@@ -219,7 +226,7 @@ async function comment(registry, fetcher, options, { stdout, stderr, now }) {
   }
   if (failure) {
     stderr.write(`${failure}\n`);
-    if (options.json) stdout.write(`${JSON.stringify({ blind: true, post: false, error: failure, events: [], fetchErrors: [], dispatch: [], body: '' }, null, 2)}\n`);
+    if (options.json) stdout.write(`${JSON.stringify(blindResult(failure), null, 2)}\n`);
     return BLIND;
   }
   const { report, fetchErrors, blind } = await runCheck(registry, fetcher, options, { stderr: { write: () => true }, now });
@@ -253,9 +260,15 @@ export async function main(argv, {
   const registry = loadUpstreamRegistry({ ...(options.registry ? { file: path.resolve(options.registry) } : {}), now: () => now });
   if (registry.registryStatus !== 'valid') {
     stderr.write(`upstream registry is ${registry.registryStatus ?? registry.status}:\n${registry.errors.map((error) => `  ${error}`).join('\n')}\n`);
-    stdout.write(options.json ? `${JSON.stringify({ registry: { status: registry.registryStatus ?? registry.status, errors: registry.errors } }, null, 2)}\n` : 'No report: the upstream registry is not valid.\n');
-    // The scheduled comment run must not pass quietly on a broken registry.
-    return options.command === 'comment' ? BLIND : 0;
+    const status = { status: registry.registryStatus ?? registry.status, errors: registry.errors };
+    // The scheduled comment run must not pass quietly on a broken registry, and
+    // the workflow reads one JSON shape whatever failed.
+    if (options.command === 'comment') {
+      if (options.json) stdout.write(`${JSON.stringify({ ...blindResult(`upstream registry is ${status.status}`), registry: status }, null, 2)}\n`);
+      return BLIND;
+    }
+    stdout.write(options.json ? `${JSON.stringify({ registry: status }, null, 2)}\n` : 'No report: the upstream registry is not valid.\n');
+    return 0;
   }
   if (options.command === 'comment') return comment(registry, fetcher, options, { stdout, stderr, now });
   const { report, offline, fetchErrors, blind } = await runCheck(registry, fetcher, options, { stderr, now });
