@@ -341,7 +341,7 @@ async function installMachinePackages(cfg, flags) {
     if (!rb.present()) {
       if (await ask('Install the RuvNet Brain (~2 GB offline KB, powers the search_ruvnet MCP)?', true, flags.yes)) {
         info('installing ruvnet-brain via npx (downloads the KB — may take a while)…');
-        const r = await heal.installRuvnetBrain();
+        const r = await heal.installRuvnetBrain({ cfg });
         reportOutcome('ruvnet-brain', r);
       } else warn('ruvnet-brain skipped — install later with `ak sync` (or `ak setup --no-ruvnet-brain` to stop asking)');
     } else ok('ruvnet-brain present (refresh to the latest release with `ak sync`)');

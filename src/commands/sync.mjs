@@ -271,7 +271,9 @@ export const SYNC_STEPS = [
   {
     id: 'ruvnet-brain',
     when: (subs, flags) => subs.has('ruvnet-brain') && !flags['no-upgrade'],
-    run: (ctx) => ctx.step('ruvnet-brain', () => heal.installRuvnetBrain()),
+    // Through sync's own cfg: sync saves that object later in this run, which
+    // would otherwise erase the release stamp or held refresh the heal records.
+    run: (ctx) => ctx.step('ruvnet-brain', () => heal.installRuvnetBrain({ cfg: ctx.cfg })),
   },
   // ruvector: an unmanaged global users wire up as an MCP server by hand. Only
   // ever UPGRADED — status emits no row (and so no plan entry) when it is absent,

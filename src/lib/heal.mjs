@@ -272,11 +272,16 @@ function refreshFailure(r, { present, recordRefusal, tag }) {
  *  Every path stamps only the release observed on disk (SOURCE.json releaseTag);
  *  a pinned install of a pre-stamping bundle falls back to the pinned tag.
  *  Runs `--no-stack --no-enhance`: ak already manages ruflo/RuVector and owns
- *  the CLAUDE.md grounding block. */
+ *  the CLAUDE.md grounding block.
+ *  `cfg`: the caller's in-memory kit config. A caller that saves its own copy
+ *  later (sync, setup) passes it, so the release stamp and a held refresh are
+ *  written through that copy instead of being erased by the caller's next save. */
 export async function installRuvnetBrain({
+  cfg,
   runner = run, latestRelease = rbLatestRelease, present = rbPresent,
-  recordRelease = rbRecord, updaterPresent = rbUpdaterPresent, releaseOnDisk = rbReleaseOnDisk,
-  recordRefusal = rbRecordHeld,
+  recordRelease = (tag) => rbRecord(tag, cfg),
+  updaterPresent = rbUpdaterPresent, releaseOnDisk = rbReleaseOnDisk,
+  recordRefusal = (refusal) => rbRecordHeld(refusal, cfg),
 } = {}) {
   const release = await latestRelease();
   const tag = release?.version ?? null;
