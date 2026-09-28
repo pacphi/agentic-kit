@@ -7,6 +7,7 @@ import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { run } from './exec.mjs';
 import { isWindows, home } from './paths.mjs';
+import { readEvidence, writeEvidence, stableInputsKey } from './evidence.mjs';
 
 const alive = (pid) => {
   try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
@@ -57,9 +58,29 @@ function daemonFromWorkspace(ws) {
   };
 }
 
+// A live process-table snapshot, not a per-cwd fact (ps/Get-CimInstance both
+// enumerate every process on the machine); the TTL is short because a daemon
+// can start or die within minutes, so a stale answer is wrong quickly rather
+// than merely outdated.
+const DAEMON_SWEEP_MAX_AGE_MS = 5 * 60_000;
+const DAEMON_SWEEP_INPUTS_KEY = stableInputsKey({ kind: 'daemon-sweep' });
+
 /** Fallback sweep of the process table for `cli.js daemon start` processes the
- *  registries don't know about. Returns [{pid, workspace}]. */
-async function processSweep() {
+ *  registries don't know about. Returns [{pid, workspace}].
+ *
+ *  `refresh` (default true, so every non-status caller keeps its unconditional
+ *  spawn) lets `refresh: false` reuse a still-fresh sweep (evidence kind
+ *  'daemon-sweep', id 'machine', 5-minute TTL) instead of spawning `ps`/CIM
+ *  again. */
+async function processSweep({ refresh = true, source = 'status-refresh', record = true } = {}) {
+  if (!refresh) {
+    const cached = readEvidence('daemon-sweep', 'machine', {
+      inputsKey: DAEMON_SWEEP_INPUTS_KEY, maxAgeMs: DAEMON_SWEEP_MAX_AGE_MS,
+    });
+    if (cached && !cached.stale && !cached.invalidated) {
+      return /** @type {{found: Array<{pid: number, workspace: string|null, ageSecs: number|null, workspaceExists: boolean}>}} */ (cached.result).found;
+    }
+  }
   const found = [];
   if (isWindows) {
     const r = await run('powershell', ['-NoProfile', '-Command',
@@ -70,6 +91,11 @@ async function processSweep() {
     for (const line of r.stdout.split('\n')) {
       if (line.includes('cli.js daemon start')) parseSweepLine(line, found);
     }
+  }
+  if (record) {
+    writeEvidence('daemon-sweep', 'machine', {
+      source, inputsKey: DAEMON_SWEEP_INPUTS_KEY, inputs: { kind: 'daemon-sweep' }, result: { found },
+    });
   }
   return found;
 }
@@ -180,8 +206,13 @@ export function parseSweepLine(line, found) {
   });
 }
 
-/** All running ruflo daemons, deduped by pid. */
-export async function listDaemons({ cwd = process.cwd() } = {}) {
+/** All running ruflo daemons, deduped by pid. `refresh`/`record`/`source`
+ *  thread straight into processSweep() — the registryWorkspaces()/pidfile
+ *  loop above it is already spawn-free (file reads only) and stays
+ *  unconditional. */
+export async function listDaemons({
+  cwd = process.cwd(), refresh = true, record = true, source = 'status-refresh',
+} = {}) {
   const byPid = new Map();
   const workspaces = registryWorkspaces();
   workspaces.add(cwd); // the project we're standing in
@@ -191,7 +222,7 @@ export async function listDaemons({ cwd = process.cwd() } = {}) {
       if (d) byPid.set(d.pid, d);
     } catch { /* no pidfile here */ }
   }
-  for (const d of await processSweep()) {
+  for (const d of await processSweep({ refresh, record, source })) {
     if (!byPid.has(d.pid)) byPid.set(d.pid, d);
   }
   return [...byPid.values()];
