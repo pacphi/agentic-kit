@@ -23,11 +23,20 @@ import { row } from '../row.mjs';
 // never a `fix`: opting a host in is a deliberate `ak host pick`, which sync
 // never does. The hint names the COMPLETE --host list (pick disables any
 // enabled host left out of it), built from the current enabled set.
-async function hostManagementRows(cfg, dflt) {
+//
+// `integrationFacts` (from providers.mjs's detectHosts, already computed once
+// per collect() and evidence-cached — Task 5) carries `.present` for every
+// host regardless of enablement, so this reuses that fact instead of a second
+// `have(h.bin)` probe of the exact same PATH question; `have` stays as a
+// fallback only for a caller that passes no integrationFacts at all (a direct
+// test/library call, not the status.mjs path).
+async function hostManagementRows(cfg, dflt, integrationFacts) {
   const rows = [];
   for (const h of HOSTS) {
     const enabled = cfg.integrations?.hosts?.[h.id] === true;
-    const { state, label } = hostManagement({ enabled, present: enabled ? null : await have(h.bin) });
+    const present = enabled ? null
+      : integrationFacts?.hosts?.[h.id]?.present ?? await have(h.bin);
+    const { state, label } = hostManagement({ enabled, present });
     const tail = state === 'managed' && dflt ? ' (default host)'
       : state === 'found' ? ` — ${NOT_PARTICIPATING}; to include it: ${hostEnableCommand(cfg, h.id)}` : '';
     rows.push(row('providers', 'info', `${h.id}: ${label}${tail}`));
@@ -65,7 +74,7 @@ function credentialChainRow(cfg, unavailableExternalSet) {
 
 export default {
   id: 'providers',
-  async collect({ cfg, cwd }) {
+  async collect({ cfg, cwd, integrationFacts }) {
     const rows = [];
     try {
       const { file, scope } = settingsTarget(cwd);
@@ -77,7 +86,7 @@ export default {
         const credRow = credentialChainRow(cfg, unavailableIntentSet);
         if (credRow) rows.push(credRow);
       }
-      rows.push(...(await hostManagementRows(cfg, dflt)));
+      rows.push(...(await hostManagementRows(cfg, dflt, integrationFacts)));
     } catch (e) {
       rows.push(row('providers', 'warn', `provider check unavailable: ${e.message}`));
     }
