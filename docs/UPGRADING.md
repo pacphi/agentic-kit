@@ -96,6 +96,18 @@ directory); run them from the project root.
 
 Stores AQE already created in subfolders stay where they are until you merge them (next section).
 
+## 2026-09-28: ak prunes redundant settings safety copies
+
+Before writing a value into a settings file it manages (Ruflo components' env, the memory pin,
+AQE's embedding-endpoint settings across Claude, Codex and OpenCode — not the AQE project-root pin
+above, which keeps its own newest-only rule), ak keeps a `<file>.ak-<tag>-backup.<uuid>` copy of
+what was there. After a write, ak removes an older copy of that same file and tag only when the
+copy it just made and the write's receipt already prove the older one redundant: every owned
+value in it matches the newest copy or the receipt, and its bytes are exactly what ak's own
+editor would write back. A copy still holding the user's own formatting, values, or anything the
+newest copy and receipt do not already account for is never removed. See
+[ADR-0058](adr/0058-managed-ruflo-components.md) §3.
+
 ## 2026-09-27: `ak x aqe-store` merges stray AQE stores
 
 `ak status` now shows stray AQE stores (a `.agentic-qe` folder with a `memory.db` below the project

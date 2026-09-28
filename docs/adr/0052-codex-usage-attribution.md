@@ -11,7 +11,7 @@
   tool activity) — but its usage is still not counted: the aggregate builds a session row only for a
   record with at least one response (`usage-aggregate.mjs`'s `buildSessionRows`), so the file's 176,326
   tokens never reach any total regardless of the explanation. The advisory is right in substance;
-  classification is unchanged. Replaces the "Not done" bullet below.
+  classification is unchanged. Extends the "Not done" bullet below with the measured counts.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0009](0009-usage-scorecard-local-transcript-analytics.md),
   [ADR-0038](0038-consistent-cross-host-session-metrics.md),

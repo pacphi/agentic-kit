@@ -105,6 +105,12 @@ Branch 9's own files are listed per task; the pre-flight table checks each again
 
 ## Tasks (Branch 9)
 
+### Closing this branch (maintainer, 2026-09-28)
+
+Tasks 1–4 shipped on this branch. Tasks 5–14, the "Added scope" items N-1–N-5, and everything in
+"Deferred until 6b merges" move to the next remediation program; this plan's text stays their
+source when that program picks them up.
+
 Order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 11 → 12 → 13 → 14. Hard dependencies: 2 before 3 (Task 3 may reuse Task 2's wording); 10 before 11, 12 and 13; 11 before 12 (same files); 13 after every task that runs focused tests (the census changes while the branch runs); 14 last. Run the full gate set (common brief) after Tasks 8, 12 and 14.
 
 ### Task 1: M1b — a failed source stays failed in Discovery after a restart
