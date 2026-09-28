@@ -88,6 +88,11 @@ test('each Codex failure class renders its own cause and next check', () => {
     [{ reason: 'timeout' }, /did not answer in time/, /next refresh/],
     [{ reason: 'rpc-error', rpcCode: -32600 }, /refused the rate-limit request \(RPC error -32600\)/, /codex login status/],
     [{ reason: 'no-limit-windows' }, /reported no plan limit window/, /API-key/],
+    // B6b-D1: presence-gated reasons (providers.mjs recordedHostPresence) —
+    // no app-server call was ever attempted for either, so their copy
+    // describes absence/staleness of host evidence, not a refresh failure.
+    [{ reason: 'host-not-found' }, /not installed on this machine/, /quota is not requested/],
+    [{ reason: 'host-unconfirmed' }, /not checked for Codex/, /status check finds it/],
   ];
   for (const [codexUnavailable, cause, next] of cases) {
     const html = codexText({ codexUnavailable });

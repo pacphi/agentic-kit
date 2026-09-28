@@ -510,12 +510,17 @@ test('readLimits carries the Claude tee channel class beside an unchanged claude
 });
 
 test('readLimits carries why Codex limits are unavailable beside an unchanged codex field', async () => {
+  // codexPresence: () => 'found' pins this test to the app-server failure-class
+  // propagation it exercises (unaffected by this task): whether the spawn is
+  // even attempted is Branch 6b Task 1's presence gate, covered on its own in
+  // tests/kit/quota-codex-presence.test.mjs.
   const out = await readLimits({
     now: 1000, claudeFile: path.join(tmp(), 'absent.json'),
     codexCacheFile: path.join(tmp(), 'codex.json'), claudeSettingsFile: path.join(tmp(), 'settings.json'),
     spawnImpl: scriptedSpawn(() => null, {
       onSpawn: (c) => c.emit('error', Object.assign(new Error('spawn codex ENOENT'), { code: 'ENOENT' })),
     }),
+    codexPresence: () => 'found',
   });
   assert.equal(out.codex, null);
   assert.deepEqual(out.codexUnavailable, { reason: 'not-installed' });
@@ -523,6 +528,7 @@ test('readLimits carries why Codex limits are unavailable beside an unchanged co
     now: 1000, claudeFile: path.join(tmp(), 'absent.json'),
     codexCacheFile: path.join(tmp(), 'codex.json'), claudeSettingsFile: path.join(tmp(), 'settings.json'),
     spawnImpl: fakeSpawn(CODEX_RESP),
+    codexPresence: () => 'found',
   });
   assert.equal(ok.codexUnavailable, null);
 });

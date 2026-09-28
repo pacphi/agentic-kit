@@ -231,8 +231,31 @@ const HOST_SETUP_MAX_AGE_MS = 6 * 3600_000;
  * executable bits) in `fs` just to compute a cache key is a much bigger
  * undertaking than this trade-off warrants, and "the PATH string changed"
  * already catches the overwhelmingly common real-world case at zero cost. */
-function hostSetupInputsKey(host, env = process.env) {
+export function hostSetupInputsKey(host, env = process.env) {
   return stableInputsKey({ id: host.id, bin: host.bin, pkg: host.pkg, PATH: env.PATH ?? '' });
+}
+
+/** Presence from the LAST recorded `host-setup` evidence (detectHosts, written
+ *  on every `/api/status` poll for EVERY host in HOSTS — managed or not), never
+ *  a fresh probe (B6b-D1). A caller that needs to know whether it is safe to
+ *  spawn a host-mediated read (e.g. the Limits panel asking Codex for its
+ *  quota) calls this instead of `have`/`detectHosts`/`hostInstallState`/
+ *  `hostExecutable` — those all spawn. Absent, stale (> HOST_SETUP_MAX_AGE_MS)
+ *  or invalidated (PATH changed since) evidence is 'unconfirmed', not 'not-found':
+ *  ak genuinely does not know yet, and a caller must not treat that as either
+ *  a positive or a negative answer.
+ *  @param {string} hostId
+ *  @param {{ env?: NodeJS.ProcessEnv, now?: number }} [o]
+ *  @returns {'found'|'not-found'|'unconfirmed'} */
+export function recordedHostPresence(hostId, { env = process.env, now } = {}) {
+  const host = HOSTS.find((h) => h.id === hostId);
+  if (!host) return 'unconfirmed';
+  const rec = readEvidence('host-setup', hostId, {
+    inputsKey: hostSetupInputsKey(host, env), maxAgeMs: HOST_SETUP_MAX_AGE_MS, now,
+  });
+  if (!rec || rec.stale || rec.invalidated) return 'unconfirmed';
+  const result = /** @type {{present: boolean, version: string|null}} */ (rec.result);
+  return result?.present === true ? 'found' : 'not-found';
 }
 
 /** Version from `<bin> --version` — hosts install via many managers (mise, npm,
