@@ -164,10 +164,14 @@ async function fetchSelfCandidate(tags, cachedBest, fetchLatest) {
  *  `last` is restamped, so the next lookup waits one TTL window; `observedAt`
  *  keeps when the recorded best was seen (a record written before it existed
  *  takes the previous `last`). A partial answer that leaves a cached candidate
- *  winning renews nothing. */
-function selfRecord(cached, { best, observed, answered }, now = Date.now()) {
+ *  winning renews nothing. Neither does a failure when the recorded best is
+ *  one this install cannot use (a `next` candidate on a stable install): such
+ *  a record is never fresh, so a restamp would only rewrite kit.json on every
+ *  call, and dropping the candidate would make an empty record look fresh and
+ *  stop the lookup for a TTL window once the registry is back. */
+function selfRecord(cached, usable, { best, observed, answered }, now = Date.now()) {
   if (observed) return { last: now, best, observedAt: now };
-  if (answered) return null;
+  if (answered || (cached?.best && !usable)) return null;
   return { ...cached, last: now, observedAt: cached?.observedAt ?? cached?.last };
 }
 
@@ -175,7 +179,7 @@ function selfRecord(cached, { best, observed, answered }, now = Date.now()) {
  *  Returns the winning candidate. */
 async function lookUpSelf(cfg, cached, { tags, cachedBest, fetchLatest, record }) {
   const candidate = await fetchSelfCandidate(tags, cachedBest, fetchLatest);
-  const entry = record ? selfRecord(cached, candidate) : null;
+  const entry = record ? selfRecord(cached, cachedBest, candidate) : null;
   if (entry) {
     cfg.versionCheck = { ...cfg.versionCheck, self: entry };
     try { saveKitConfig(cfg); } catch { /* read-only envs: next call re-fetches */ }

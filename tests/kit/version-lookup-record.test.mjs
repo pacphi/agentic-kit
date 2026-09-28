@@ -279,6 +279,55 @@ test("after a restamp, a dry run's offline line still gives the age of the recor
   assert.match(out, /versions not checked online \(offline or timed out\); this plan uses the versions ak recorded 2d ago/, out);
 });
 
+test("a restamped record that was never observed makes the dry run's offline line say nothing is recorded", async () => {
+  seed();
+  const cfg = loadKitConfig();
+  cfg.versionCheck = { ttlHours: 24, last: null, seen: {} };
+  writeKitConfig(HOME, cfg);
+  await driftReport({ fetchLatest: async () => null });
+  await selfDrift({ pkgRoot: PKG_ROOT, fetchLatest: async () => null });
+  const restamped = loadKitConfig().versionCheck;
+  assert.ok(restamped.last > 0 && restamped.self.last > 0, 'both failed lookups restamped last');
+  const { lookUpPlanVersions } = await import('../../src/commands/sync/plan-versions.mjs');
+  const offlineLine = async (skip) => (await captureLog(() => lookUpPlanVersions({
+    flags: { 'dry-run': true }, skip: new Set(skip), pkgRoot: PKG_ROOT, fetchLatest: async () => null,
+    releaseDatesRunner: async () => ({ code: 1, stdout: '', stderr: 'offline (test)' }),
+  }))).out;
+  const NONE = /versions not checked online \(offline or timed out\); ak has recorded none, so this plan shows no version upgrades/;
+  for (const [part, skip] of [['versions', ['self']], ['self', ['versions']]]) {
+    const out = await offlineLine(skip);
+    assert.match(out, NONE, `${part}: ${out}`);
+    assert.doesNotMatch(out, /recorded just now/, part);
+  }
+});
+
+test("a Brain or ruvector record holding only last makes the dry run's offline line say nothing is recorded", async () => {
+  seed();
+  // What a failed first lookup writes (see 'a first failed lookup with nothing
+  // recorded writes only last'); ruvector's is expired, so the dry run looks
+  // it up again.
+  const cfg = loadKitConfig();
+  cfg.ruvnetBrain = true;
+  cfg.versionCheck.ruvnetBrain = { last: Date.now() };
+  cfg.versionCheck.ruvector = { last: STALE };
+  writeKitConfig(HOME, cfg);
+  fs.writeFileSync(paths.claudeUserMcpPath(), JSON.stringify({ mcpServers: { ruvector: { command: 'ruvector' } } }));
+  const { lookUpPlanVersions } = await import('../../src/commands/sync/plan-versions.mjs');
+  const ALL = ['versions', 'self', 'ruvnet-brain', 'ruvector'];
+  try {
+    const lines = {};
+    for (const part of ['ruvnet-brain', 'ruvector']) {
+      lines[part] = (await captureLog(() => lookUpPlanVersions({
+        flags: { 'dry-run': true }, skip: new Set(ALL.filter((p) => p !== part)), pkgRoot: PKG_ROOT,
+        fetchLatest: async () => null, brainDrift: async () => ({ latestSource: 'cache-fallback' }),
+      }))).out;
+    }
+    const claimsARecord = Object.entries(lines)
+      .filter(([, out]) => !/versions not checked online \(offline or timed out\); ak has recorded none/.test(out));
+    assert.deepEqual(claimsARecord, []);
+  } finally { rmrf(paths.claudeUserMcpPath()); }
+});
+
 test('ruvector drift with cacheOnly reads the recorded latest with no lookup and no write', async () => {
   seed();
   const before = kitJsonText();

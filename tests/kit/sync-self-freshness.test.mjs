@@ -125,6 +125,26 @@ test('stable installs reject cached next-channel candidates when latest is unava
   assert.equal(result.outdated, false);
 });
 
+test('a stable install whose record holds only a next-channel candidate is not rewritten on every offline lookup', async (t) => {
+  seed('4.0.0');
+  const cfg = loadKitConfig();
+  cfg.versionCheck.self = { last: 1, best: { version: '5.0.0-alpha.1', tag: 'next' } };
+  writeKitConfig(home, cfg);
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => (now += 1000)); // each call would restamp a different time
+  let text = fs.readFileSync(paths.kitConfigPath(), 'utf8');
+  let writes = 0;
+  for (let i = 0; i < 3; i += 1) {
+    const result = await selfDrift({ pkgRoot, fetchLatest: async () => null });
+    assert.equal(result.latest, null, 'a next-channel candidate never reaches a stable install');
+    const after = fs.readFileSync(paths.kitConfigPath(), 'utf8');
+    if (after !== text) writes += 1;
+    text = after;
+  }
+  assert.ok(writes <= 1, `${writes} kit.json writes for 3 offline lookups`);
+  assert.deepEqual(loadKitConfig().versionCheck.self.best, { version: '5.0.0-alpha.1', tag: 'next' });
+});
+
 test('successful registry observations supersede cached versions even after a channel rollback', async () => {
   seed();
   const cfg = loadKitConfig();

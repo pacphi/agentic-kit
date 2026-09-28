@@ -168,14 +168,20 @@ const newest = (stamps) => {
   return finite.length ? Math.max(...finite) : undefined;
 };
 
+/** A record's `last`, when it stands for an observation: only a record that
+ *  holds a latest. A failed lookup restamps `last` even when nothing was ever
+ *  seen, and that time must not read as "recorded just now". */
+const lastIfRecorded = (record, holdsLatest) => (holdsLatest ? record?.last : undefined);
+
 /** When kit.json says each part's recorded latest was observed. A failed
  *  lookup restamps `last` too, so `last` is only the fallback for a record
  *  written before `observedAt` existed. */
 const RECORDED_AT = {
-  versions: (vc) => newest(Object.values(vc?.observedAt ?? {})) ?? vc?.last,
-  self: (vc) => vc?.self?.observedAt ?? vc?.self?.last,
-  'ruvnet-brain': (vc) => vc?.ruvnetBrain?.observedAt ?? vc?.ruvnetBrain?.last,
-  ruvector: (vc) => vc?.ruvector?.observedAt ?? vc?.ruvector?.last,
+  versions: (vc) => newest(Object.values(vc?.observedAt ?? {}))
+    ?? lastIfRecorded(vc, Object.keys(vc?.seen ?? {}).length > 0),
+  self: (vc) => vc?.self?.observedAt ?? lastIfRecorded(vc?.self, !!vc?.self?.best),
+  'ruvnet-brain': (vc) => vc?.ruvnetBrain?.observedAt ?? lastIfRecorded(vc?.ruvnetBrain, !!vc?.ruvnetBrain?.latest),
+  ruvector: (vc) => vc?.ruvector?.observedAt ?? lastIfRecorded(vc?.ruvector, !!vc?.ruvector?.latest),
 };
 
 /** The line a dry run prints when every lookup it made failed. The age is
