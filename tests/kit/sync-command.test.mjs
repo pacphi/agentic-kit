@@ -567,6 +567,43 @@ test('manual fixes and preserved advisories never enter the plan and never fail 
   assert.match(out, /converged — no failing subsystems/);
 });
 
+// ADR-0063: the plan read never records (record: false), the converge proof
+// does (record: true), and neither forces a refresh. versionEvidence carries
+// cache-only version results for the parts --skip names; a sync that skips
+// none of them hands both reads an empty one.
+const MARKER = { subsystem: 'sync-test-only-marker', level: 'warn', message: 'marker row', fix: 'no sync step performs this' };
+
+test('the plan read and the converge proof get exactly these collect() arguments', async () => {
+  seedHome();
+  const calls = [];
+  await syncWith(async (args) => { calls.push(args); return args.record ? [] : [MARKER]; });
+  assert.equal(calls.length, 2);
+  const expected = (record) => ({
+    pkgRoot: PKG_ROOT, cwd: PROJECT, dejaVuAdapter: calls[0].dejaVuAdapter,
+    dejaVuPlanOptions: { allowUpgrade: false }, record, versionEvidence: {},
+  });
+  assert.deepEqual(calls[0], expected(false));
+  assert.deepEqual(calls[1], expected(true));
+  assert.equal(calls[1].dejaVuAdapter, calls[0].dejaVuAdapter);
+});
+
+test('with --skip versions both reads get cache-only drift, re-read after the apply phase', async () => {
+  seedHome(offlineKitConfig(), { ruflo: '9.9.8', 'agentic-qe': '9.9.9' });
+  const calls = [];
+  await syncWith(async (args) => {
+    calls.push(args);
+    // Stand-in for an apply phase that changed what is installed.
+    if (!args.record) paths._setGlobalRootForTest(fakeGlobalRoot(HOME, { ruflo: '9.9.9', 'agentic-qe': '9.9.9' }));
+    return args.record ? [] : [MARKER];
+  }, { skip: ['versions'] });
+  assert.equal(calls.length, 2);
+  const ruflo = (call) => call.versionEvidence.drift.find((r) => r.pkg === 'ruflo');
+  assert.deepEqual(Object.keys(calls[0].versionEvidence), ['drift']);
+  assert.deepEqual(Object.keys(calls[1].versionEvidence), ['drift']);
+  assert.equal(ruflo(calls[0]).installed, '9.9.8');
+  assert.equal(ruflo(calls[1]).installed, '9.9.9', 'the proof re-reads installed versions after the apply phase');
+});
+
 test('which steps perform a subsystem: none for an unknown one, the tail for host alignment', () => {
   const cfg = loadKitConfig();
   const flags = FLAGS();

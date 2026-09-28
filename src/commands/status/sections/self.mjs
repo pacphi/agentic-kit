@@ -4,10 +4,12 @@ import { row } from '../row.mjs';
 
 export default {
   id: 'self',
-  async collect({ pkgRoot, refresh = false }) {
+  // A self drift the caller already holds (versionEvidence: ak sync's
+  // cache-only read when --skip names self, ADR-0063) is used as given.
+  async collect({ pkgRoot, refresh = false, versionEvidence }) {
     const rows = [];
     try {
-      const s = await selfDrift({ pkgRoot, force: refresh });
+      const s = versionEvidence?.self ?? await selfDrift({ pkgRoot, force: refresh });
       if (s.outdated) {
         rows.push(row('self', 'warn',
           `kit ${s.installed} installed, ${s.latest} available (${s.tag} tag)`,

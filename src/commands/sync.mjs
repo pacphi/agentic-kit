@@ -30,8 +30,7 @@ import { reconcileRufloComponents } from '../lib/ruflo-components/apply.mjs';
 import { RESTART_REMINDER } from './status/sections/ruflo-components.mjs';
 import { HOSTS, commandHosts, hostInstallState, hostExecutable, installHost, collectIntegrationFacts, convergeProviderStack, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
 import { driftReport, installedVersion, selfDrift } from '../lib/versions.mjs';
-import { recordRufloReleaseDates } from '../lib/ruflo-support-window.mjs';
-import { drift as ruvnetBrainDrift } from '../lib/ruvnet-brain.mjs';
+import { refreshPlanVersions, skippedVersionEvidence } from './sync/plan-versions.mjs';
 import { RUVECTOR_PKG, managed as ruvectorManaged } from '../lib/ruvector.mjs';
 import { pruneNpxStale } from '../lib/npx.mjs';
 import { runScaffoldAgentsFix } from '../lib/scaffold.mjs';
@@ -105,38 +104,17 @@ export function recordApplyFailure(state, name, result) {
   if (result?.ok === false) state.applyFailures.push({ name, detail: result.detail || `exit ${result.status || 'failed'}` });
 }
 
-/** Refresh every network-backed fact that can open an upgrade gate. Kept out
- *  of run() so adding one release boundary does not grow the command's already
- *  broad orchestration complexity. Sequential: these probes persist kit.json. */
-async function refreshPlanDrift(flags, fetchLatest, pkgRoot, releaseDatesRunner) {
-  if (flags['dry-run'] || flags['no-upgrade']) return;
-  await driftReport({ force: true, ...(fetchLatest ? { fetchLatest } : {}) });
-  // ADR-0041 §7: remember each Ruflo minor's first publish so `ak status` can
-  // compute the support window without a network call. A failed lookup keeps
-  // the old dates.
-  const cfg = loadKitConfig();
-  if (await recordRufloReleaseDates({ cfg, ...(releaseDatesRunner ? { runner: releaseDatesRunner } : {}) })) {
-    try { saveKitConfig(cfg); } catch { /* read-only envs: the next sync records them */ }
-  }
-  // Self-update has its own TTL cache; refresh it before the collector decides
-  // whether a self action exists. An apply-time refresh cannot open that gate.
-  await selfDrift({ pkgRoot, force: true, ...(fetchLatest ? { fetchLatest } : {}) });
-  // Brain releases have a second executability fact beyond the tag: the
-  // required ruvnet-brain.zip asset. A tag-only release is not actionable.
-  if (loadKitConfig().ruvnetBrain) await ruvnetBrainDrift({ force: true });
-}
-
 /** Force host install/launch/setup evidence fresh before the plan is built,
  *  so a row that has not yet gone STALE (host-setup's 6h TTL) but is simply
  *  WRONG — a host repaired or broken since it was last recorded — can never
  *  hide a needed fix from the plan, or hide that a fix already landed. Kept
- *  narrow and separate from `refreshPlanDrift`: forcing every evidence-gated
+ *  narrow and separate from `refreshPlanVersions`: forcing every evidence-gated
  *  kind fresh here (by passing `refresh: true` to the plan's own `collect()`
  *  call) was tried and reverted — it broke `--dry-run`'s "touches nothing"
  *  contract for `ruflo-component` evidence and defeated this branch's own
  *  warm-cache design for kinds that don't need it. Dry-runs skip this: it
  *  persists evidence, and --dry-run is pinned to touch nothing — same
- *  cache-staleness trade `refreshPlanDrift` already makes for version drift. */
+ *  cache-staleness trade `refreshPlanVersions` already makes for version drift. */
 async function refreshPlanHosts(flags, cwd) {
   if (flags['dry-run']) return;
   const cfg = loadKitConfig();
@@ -190,6 +168,8 @@ refresh after an upgrade (that refresh can replace the statusline helper). A
 skipped subsystem's manual-fix row is the exception: sync never performed
 that fix anyway, so it is still listed under "needs your action" instead of
 "skipped by request".
+--skip versions, self or ruvnet-brain also leaves that part's online version
+lookup out: the plan reads the latest versions ak last recorded for it.
 An unknown name is rejected with the list of names sync accepts.
 
 --json writes every human line (the plan, step results, prompts) to stderr
@@ -1042,6 +1022,7 @@ async function converge({
   pkgRoot,
   fetchLatest,
   releaseDatesRunner,
+  brainDrift,
   dejaVuAdapter = companionLifecycleFor('deja-vu'),
   collectFn = collect,
   refreshHosts = refreshPlanHosts,
@@ -1062,8 +1043,9 @@ async function converge({
   // never reaches the plan (the old force at apply time sat behind the very
   // versions gate it needed to open). Dry-runs skip the refresh: it writes
   // kit.json, and --dry-run is pinned to touch nothing — so a dry-run
-  // preview may be cache-stale by up to one TTL window.
-  await refreshPlanDrift(flags, fetchLatest, pkgRoot, releaseDatesRunner);
+  // preview may be cache-stale by up to one TTL window. A part --skip names
+  // is never looked up; both reads below get its recorded versions instead.
+  const { versionEvidence } = await refreshPlanVersions({ flags, skip, pkgRoot, fetchLatest, releaseDatesRunner, brainDrift });
   // Same reasoning, narrower scope: a NOT-YET-STALE host-install-method/
   // host-launch/host-setup row can still be wrong (a host repaired or broken
   // since it was last recorded), and unlike version drift this cannot be
@@ -1085,7 +1067,7 @@ async function converge({
   // converge proof below — and a plain `ak status` right after — see the
   // post-repair state, not what was cached before it.
   const rows = await collectFn({
-    pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions, record: false,
+    pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions, record: false, versionEvidence,
   });
   result.needsYourAction = needsYourAction(rows);
   // Only fixes a sync step performs enter the plan (status/row.mjs repair
@@ -1173,10 +1155,13 @@ async function converge({
   // they changed anything). Unlike the plan read, this one DOES persist
   // (record: true): it is the last thing this run computes, so a cache-miss
   // probe it triggers is worth keeping — a plain `ak status` immediately
-  // afterward then reuses it instead of re-probing on its own.
+  // afterward then reuses it instead of re-probing on its own. Skipped
+  // version parts are re-read from the cache here, never taken from the plan
+  // read: the apply phase may have changed what is installed.
   console.log('');
+  const afterEvidence = await skippedVersionEvidence({ skip, pkgRoot });
   const after = await collectFn({
-    pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions, record: true,
+    pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions, record: true, versionEvidence: afterEvidence,
   });
   result.needsYourAction = needsYourAction(after);
 
@@ -1201,7 +1186,7 @@ async function converge({
         const n = nativesStatus();
         return (n?.locations?.filter((l) => l.native).length ?? 0) + (n?.aqe?.native ? 1 : 0);
       })(),
-      driftOutdated: (await driftReport()).some((r) => !r.installed || r.outdated),
+      driftOutdated: (afterEvidence.drift ?? await driftReport()).some((r) => !r.installed || r.outdated),
       securityPresent: securityPresent(),
     });
     saveKitConfig(cfg);

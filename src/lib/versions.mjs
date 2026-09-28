@@ -31,6 +31,11 @@ export async function latestVersion(pkg, tag = 'latest', { runner = run, timeout
   return isValidSemver(value) ? value : null;
 }
 
+/** A `fetchLatest` that never touches the network: every lookup answers
+ *  "unknown". driftReport and selfDrift then report what kit.json recorded and
+ *  save nothing, because no lookup succeeded. */
+export const cachedOnlyLatest = async () => null;
+
 /** Semver compare, prerelease-aware (4.0.0 > 4.0.0-alpha.1 > 4.0.0-alpha.0).
  *  Exported for tests. */
 export function cmpVersions(a, b) {

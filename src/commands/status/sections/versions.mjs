@@ -20,10 +20,15 @@ function supportWindowRow(installed, cfg, now) {
 
 export default {
   id: 'versions',
-  async collect({ drift = driftReport, loadConfig = loadKitConfig, now = Date.now, refresh = false } = {}) {
+  // Drift rows and a kit.json copy the caller already holds (versionEvidence:
+  // ak sync's cache-only read when --skip names versions, ADR-0063) are used
+  // as given; refresh does not apply to them.
+  /** @param {{ drift?: typeof driftReport, loadConfig?: () => any, now?: () => number, refresh?: boolean,
+   *   versionEvidence?: { drift?: any[], cfg?: any } }} [ctx] */
+  async collect({ drift = driftReport, loadConfig = loadKitConfig, now = Date.now, refresh = false, versionEvidence } = {}) {
     const rows = [];
     try {
-      for (const r of await drift({ force: refresh })) {
+      for (const r of versionEvidence?.drift ?? await drift({ force: refresh })) {
         if (!r.installed) {
           rows.push(row('versions', r.pkg === 'ruflo' ? 'fail' : 'warn',
             `${r.pkg} not installed globally`, 'setup installs it'));
@@ -34,7 +39,7 @@ export default {
           rows.push(row('versions', r.latest ? 'ok' : 'info',
             `${r.pkg} ${r.installed}${r.latest ? ` (latest known; ${releaseObservationLabel(r)})` : ' (release metadata unavailable)'}`));
         }
-        if (r.pkg === 'ruflo' && r.installed) rows.push(supportWindowRow(r.installed, loadConfig(), now()));
+        if (r.pkg === 'ruflo' && r.installed) rows.push(supportWindowRow(r.installed, versionEvidence?.cfg ?? loadConfig(), now()));
       }
     } catch (e) {
       rows.push(row('versions', 'warn', `version check unavailable: ${e.message}`));

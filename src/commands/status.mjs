@@ -138,7 +138,11 @@ async function runSections(sections, ctx, rows) {
   }
 }
 
-/** @param {{ pkgRoot?: string, cwd?: string, dejaVuAdapter?: any, dejaVuPlanOptions?: Record<string, any>, refresh?: boolean, record?: boolean }} opts */
+/** `versionEvidence` carries version results a caller already holds (ak sync's
+ *  cache-only reads for the parts --skip names, ADR-0063); the versions, self
+ *  and ruvnet-brain sections use them instead of looking up their own.
+ *  @param {{ pkgRoot?: string, cwd?: string, dejaVuAdapter?: any, dejaVuPlanOptions?: Record<string, any>, refresh?: boolean, record?: boolean,
+ *   versionEvidence?: { drift?: any[], self?: any, brain?: any, cfg?: any } }} opts */
 export async function collect({
   pkgRoot,
   cwd = process.cwd(),
@@ -146,6 +150,7 @@ export async function collect({
   dejaVuPlanOptions = {},
   refresh = false,
   record = true,
+  versionEvidence,
 }) {
   const rows = [];
   const cfg = loadKitConfig();
@@ -168,7 +173,7 @@ export async function collect({
     cwd, cfg, refresh, record, source,
   });
   const ctx = {
-    cfg, cwd, pkgRoot, integrationFacts, refresh, record, source,
+    cfg, cwd, pkgRoot, integrationFacts, refresh, record, source, versionEvidence,
   };
 
   await runSections(SECTIONS_BEFORE_HOST_DETAIL, ctx, rows);

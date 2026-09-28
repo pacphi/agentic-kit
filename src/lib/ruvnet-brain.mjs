@@ -261,12 +261,35 @@ export function classifyDrift({ present: isPresent, installedRelease, latest }) 
   return { present: true, outdated, unversioned, installedRelease: installedRelease ?? null, latest: latest ?? null };
 }
 
+/** The release kit.json recorded, whatever its age. */
+const recordedRelease = (cached) => ({
+  latest: cached.latest ?? null,
+  latestObservedAt: cached.last ?? null,
+  releaseAssetAvailable: cached.releaseAssetAvailable ?? null,
+});
+
+/** Look the latest release up on GitHub and record the answer in kit.json. */
+async function lookUpRelease(cfg, cached) {
+  const release = await latestRelease();
+  const latest = release?.version ?? null;
+  const releaseAssetAvailable = release?.releaseAssetAvailable ?? null;
+  // Preserve installedRelease across the cache write.
+  cfg.versionCheck = {
+    ...cfg.versionCheck,
+    ruvnetBrain: { ...cached, last: Date.now(), latest, releaseAssetAvailable },
+  };
+  try { saveKitConfig(cfg); } catch { /* read-only envs: next call re-fetches */ }
+  return { latest, latestObservedAt: latest ? Date.now() : null, releaseAssetAvailable };
+}
+
 /** Presence + release drift, TTL-cached in kit.json (mirrors selfDrift in
  *  versions.mjs) so status/nudge hit GitHub at most once per window. force=true
  *  bypasses the cache. Installed side resolves disk-first: the bundle's own
  *  SOURCE.json releaseTag when stamped, else ak's kit.json record — the same
- *  order the statusline uses, so `ak status` and the footer can never disagree. */
-export async function drift({ force = false } = {}) {
+ *  order the statusline uses, so `ak status` and the footer can never disagree.
+ *  cacheOnly=true reports the recorded release whatever its age, with no
+ *  network and no write (`ak sync --skip ruvnet-brain`, ADR-0063). */
+export async function drift({ force = false, cacheOnly = false } = {}) {
   const cfg = loadKitConfig();
   const ttlMs = (cfg.versionCheck?.ttlHours ?? 24) * 3600_000;
   const cached = cfg.versionCheck?.ruvnetBrain ?? {};
@@ -274,26 +297,13 @@ export async function drift({ force = false } = {}) {
   // this collector and is forbidden to write. A real sync force-refreshes this
   // metadata before collection; ordinary status waits for the normal TTL.
   const fresh = !force && cached.last && Date.now() - cached.last < ttlMs;
-  let latest = fresh ? cached.latest ?? null : null;
-  let latestObservedAt = fresh ? cached.last : null;
-  let releaseAssetAvailable = fresh ? cached.releaseAssetAvailable ?? null : null;
-  if (!fresh) {
-    const release = await latestRelease();
-    latest = release?.version ?? null;
-    latestObservedAt = latest ? Date.now() : null;
-    releaseAssetAvailable = release?.releaseAssetAvailable ?? null;
-    // Preserve installedRelease across the cache write.
-    cfg.versionCheck = {
-      ...cfg.versionCheck,
-      ruvnetBrain: { ...cached, last: Date.now(), latest, releaseAssetAvailable },
-    };
-    try { saveKitConfig(cfg); } catch { /* read-only envs: next call re-fetches */ }
-  }
+  const { latest, latestObservedAt, releaseAssetAvailable } = fresh || cacheOnly
+    ? recordedRelease(cached) : await lookUpRelease(cfg, cached);
   const installedRelease = installedReleaseOnDisk() ?? cached.installedRelease ?? null;
   return {
     ...classifyDrift({ present: present(), installedRelease, latest }),
     releaseAssetAvailable,
-    latestSource: fresh ? 'cache' : 'live',
+    latestSource: fresh ? 'cache' : cacheOnly ? 'cache-fallback' : 'live',
     latestObservedAt,
     pluginVersion: installedVersion(),
     heldRefresh: cached.heldRefresh ?? null,
