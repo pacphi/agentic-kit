@@ -15,9 +15,9 @@
 //
 // Processes of other users are not examined, the same limit lsof has without
 // root. The caller's own PID is excluded.
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { run } from './exec.mjs';
 
 /** Parse `lsof -Fpcn` output into `[{ pid, command, files }]`. */
 export function parseLsofHolders(output) {
@@ -42,12 +42,25 @@ export function parseLsofHolders(output) {
 /** @typedef {{ pid: number, command: string, files: string[] }} StoreHolder */
 /** @typedef {{ holders: StoreHolder[], method: 'lsof'|'proc'|'census', complete: boolean, error?: string }} HolderResult */
 
+/** execFile with the exit status as lsof gave it: exec.mjs `run()` turns a
+ *  silent exit 1 ("none of these files is open") into a message on stderr,
+ *  which reads like a failed look. A missing lsof keeps its ENOENT.
+ *  @returns {Promise<{ code: number|string, stdout: string, stderr: string }>} */
+export const rawRun = (cmd, args, { timeout = 30_000 } = {}) => new Promise((resolve) => {
+  execFile(cmd, args, { encoding: 'utf8', timeout, maxBuffer: 16 * 1024 * 1024, shell: false }, (error, stdout, stderr) => {
+    if (!error) { resolve({ code: 0, stdout, stderr }); return; }
+    const code = typeof error.code === 'number' || typeof error.code === 'string' ? error.code : 1;
+    const spawnFailed = typeof error.code === 'string';
+    resolve({ code, stdout: stdout ?? '', stderr: spawnFailed ? String(error.message) : (stderr ?? '') });
+  });
+});
+
 const exists = (file) => { try { fs.statSync(file); return true; } catch { return false; } };
 const real = (file) => { try { return fs.realpathSync(file); } catch { return path.resolve(file); } };
 
 /** @returns {Promise<HolderResult>} */
-async function viaLsof(files, runner, self) {
-  const result = await runner('lsof', ['-n', '-w', '-Fpcn', '--', ...files], { timeout: 30_000 });
+async function viaLsof(files, runner, self, lsof) {
+  const result = await runner(lsof, ['-n', '-w', '-Fpcn', '--', ...files], { timeout: 30_000 });
   const stdout = typeof result?.stdout === 'string' ? result.stdout : '';
   const stderr = String(result?.stderr ?? '').trim();
   // lsof exits 1 with no output at all when none of the files is open. Exit 1
@@ -114,13 +127,13 @@ const defaultSessions = async (options) => {
 /**
  * Processes holding any of `files` open.
  * @param {string[]} files
- * @param {{ platform?: NodeJS.Platform, runner?: typeof run, procRoot?: string, root?: string,
+ * @param {{ platform?: NodeJS.Platform, runner?: typeof rawRun, lsof?: string, procRoot?: string, root?: string,
  *   listSessions?: (options: { platform: NodeJS.Platform }) => Promise<Array<{ pid: number, host: string, cwd?: string }>>,
  *   self?: number, uid?: number }} [options]
  * @returns {Promise<HolderResult>}
  */
 export async function storeHolders(files, {
-  platform = process.platform, runner = run, procRoot = '/proc', root, listSessions = defaultSessions,
+  platform = process.platform, runner = rawRun, lsof = 'lsof', procRoot = '/proc', root, listSessions = defaultSessions,
   self = process.pid, uid = process.getuid?.(),
 } = {}) {
   if (platform === 'win32') return viaCensus(root ?? path.win32.dirname(files[0] ?? '.'), listSessions, self);
@@ -130,5 +143,5 @@ export async function storeHolders(files, {
     const found = viaProc(present, procRoot, self, uid);
     if (found) return found;
   }
-  return viaLsof(present, runner, self);
+  return viaLsof(present, runner, self, lsof);
 }

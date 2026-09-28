@@ -144,3 +144,20 @@ test('a real child process holding the store open is reported', { skip: !haveLso
   assert.ok(result.holders.some((h) => h.pid === child.pid), JSON.stringify(result));
   assert.ok(!result.holders.some((h) => h.pid === process.pid), 'the caller is excluded');
 });
+
+test('real lsof: a file nobody holds is a complete answer with no holders', { skip: !haveLsof, timeout: 20_000 }, async (t) => {
+  const dir = tempDir('ak-holders-real-none', t);
+  const db = path.join(dir, 'memory.db');
+  fs.writeFileSync(db, 'x');
+  const result = await storeHolders([db], { platform: 'darwin' });
+  assert.deepEqual(result, { holders: [], method: 'lsof', complete: true });
+});
+
+test('real lsof missing from PATH: incomplete, not "no holders"', { skip: process.platform === 'win32', timeout: 20_000 }, async (t) => {
+  const dir = tempDir('ak-holders-real-nolsof', t);
+  const db = path.join(dir, 'memory.db');
+  fs.writeFileSync(db, 'x');
+  const result = await storeHolders([db], { platform: 'darwin', lsof: path.join(dir, 'no-such-lsof') });
+  assert.equal(result.complete, false);
+  assert.match(result.error, /ENOENT/);
+});
