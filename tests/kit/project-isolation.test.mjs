@@ -34,7 +34,7 @@ function fakeRepo(t) {
 }
 
 test('the guard covers the files a leaked sync, setup or uninstall has written', () => {
-  for (const rel of ['.claude/settings.local.json', '.claude/helpers/statusline.cjs', 'CLAUDE.md', 'AGENTS.md']) {
+  for (const rel of ['.claude/settings.local.json', '.claude/helpers/statusline.cjs', 'CLAUDE.md', 'AGENTS.md', '.mcp.json', '.codex/config.toml']) {
     assert.ok(GUARDED_FILES.includes(rel), `${rel} must be guarded`);
   }
 });

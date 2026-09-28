@@ -186,6 +186,25 @@ test('stray stores are reported for information only, grouped by owner, with no 
   ];
   for (const pattern of expectations) assert.ok(strays.some((r) => pattern.test(r.message)), `${pattern}`);
   assert.ok(strays.every((r) => /leaves|report/.test(r.message)), 'each row says ak does not touch it');
+  const aqe = strays.find((r) => /stray AQE/.test(r.message));
+  assert.match(aqe.message, /without ak's pin to the project root/);
+  assert.match(aqe.message, /AQE_PROJECT_ROOT, AQE_MEMORY_PATH and AQE_STORAGE_PATH/);
+});
+
+test('stray AQE stores with a memory.db are a hand fix naming the merge command; empty folders stay information', async (t) => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-memory-aqe-merge-'));
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  for (const dir of ['docs', 'docker']) fs.mkdirSync(path.join(cwd, dir, '.agentic-qe'), { recursive: true });
+  fs.writeFileSync(path.join(cwd, 'docs', '.agentic-qe', 'memory.db'), '');
+  const rows = await section.collect({ cwd });
+  const aqe = rows.filter((r) => /stray AQE/.test(r.message));
+  assert.equal(aqe.length, 1, JSON.stringify(aqe));
+  assert.equal(aqe[0].level, 'warn');
+  assert.equal(aqe[0].fix, 'ak x aqe-store merge --dry-run');
+  assert.equal(aqe[0].repair, 'manual');
+  assert.match(aqe[0].message, /2 stray AQE stores.*docker\/\.agentic-qe.*docs\/\.agentic-qe/);
+  assert.match(aqe[0].message, /ak x aqe-store merge/);
+  assert.doesNotMatch(aqe[0].message, /leaves them in place/);
 });
 
 test('a project with no memory store still reports stray stores and keeps the single setup hint otherwise', async (t) => {

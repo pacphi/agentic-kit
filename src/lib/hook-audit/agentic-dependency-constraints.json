@@ -212,57 +212,17 @@
       }
     },
     {
-      "id": "agentic-qe-3.13-external-provider-contract",
-      "dependency": "agentic-qe",
-      "kind": "upstream-capability-gap",
-      "affected": ["3.13.10", "3.13.11", "3.13.12"],
-      "issue": "https://github.com/proffesor-for-testing/agentic-qe/issues/628",
-      "issueState": "closed-at-last-verification",
-      "primaryEvidence": "upstream issue, v3.14.0 release receipt, and local external-provider conformance",
-      "strategy": "retain honest external-provider attribution and use the released declarative provider contract only after local conformance",
-      "versionGate": "applies only to the listed pre-3.14 releases; 3.14.0 requires its own conformance rather than inheriting closure",
-      "expiryPolicy": "retest within 14 days; do not silently extend stale evidence",
-      "nextRetestAt": "2026-10-03",
-      "sunsetWhen": "v3.14.0 or later passes the live external-provider participant and advisor conformance tests",
-      "notification": {
-        "status": "published",
-        "publishedAt": "2026-08-21T08:25:12Z",
-        "publishedUrl": "https://github.com/proffesor-for-testing/agentic-qe/issues/628",
-        "requiredFields": ["minimalReproduction", "expected", "observed", "hostVersions", "dependencyVersion", "evidenceDigests", "boundedWorkaround", "expiry", "removalProof"]
-      }
-    },
-    {
-      "id": "agentic-qe-3.14.0-stop-hook-generator",
-      "dependency": "agentic-qe",
-      "kind": "upstream-defect",
-      "affected": ["3.14.0"],
-      "issue": "https://github.com/proffesor-for-testing/agentic-qe/issues/654",
-      "issueState": "closed-at-last-verification",
-      "primaryEvidence": "AQE PR #661 merged 2026-09-06; 3.14.1 released 2026-09-07; installed generator inspected 2026-09-09. Existing project artifacts require separate content-bound conformance.",
-      "strategy": "Use content-bound backup-preserving project migrations for reviewed generated artifacts; packaged 3.14.1 checkpoint pre-delete remains a separate artifact discrepancy.",
-      "versionGate": "Historical 3.14.0 generator defect fixed in 3.14.1; inspect generated project bytes independently of current package version.",
-      "expiryPolicy": "retest within 14 days and on every Agentic-QE release",
-      "nextRetestAt": "2026-10-03",
-      "sunsetWhen": "a released Agentic-QE generator uses a deterministic runner, correct host-native timeout units, and passes offline Stop conformance",
-      "notification": {
-        "status": "published",
-        "publishedAt": "2026-09-02T15:21:20Z",
-        "publishedUrl": "https://github.com/proffesor-for-testing/agentic-qe/issues/654",
-        "requiredFields": ["minimalReproduction", "expected", "observed", "hostVersions", "dependencyVersion", "evidenceDigests", "boundedWorkaround", "expiry", "removalProof"]
-      }
-    },
-    {
       "id": "agentic-qe-3.14.0-codex-guidance-policy",
       "dependency": "agentic-qe",
       "kind": "upstream-capability-gap",
       "affected": ["3.14.0"],
       "issue": "https://github.com/proffesor-for-testing/agentic-qe/issues/655",
       "issueState": "closed-at-last-verification",
-      "primaryEvidence": "AQE PR #661 merged 2026-09-06; 3.14.1 released 2026-09-07; installed generator inspected 2026-09-09. Existing project artifacts require separate content-bound conformance.",
+      "primaryEvidence": "AQE PR #661 merged 2026-09-06; 3.14.1 released 2026-09-07; installed generator inspected 2026-09-09. Existing project artifacts require separate content-bound conformance. Conformance on ak's own path (aqe init --auto --with-codex --codex-guidance full|compact|none through the aqe command, agentic-qe 3.14.4, 2026-09-27) failed, so the constraint is kept: full writes no block when AGENTS.md already exists (0 owned bytes; the --json receipt reports the requested policy, not the effective one); compact adds 6 bytes outside its sentinel; resolvePackageRoot() misses the package through the aqe bin symlink, so no Codex hooks or skills install and platform verify fails 4 checks yet exits 0; platform setup codex fails with 'Module not found in bundle' and exits 0.",
       "strategy": "Use released --codex-guidance full|compact|none on 3.14.1+; preserve AQE sentinel ownership and verify actual owned bytes.",
       "versionGate": "Historical 3.14.0 generator defect fixed in 3.14.1; inspect generated project bytes independently of current package version.",
       "expiryPolicy": "retest within 14 days and on every Agentic-QE release",
-      "nextRetestAt": "2026-10-03",
+      "nextRetestAt": "2026-10-11",
       "sunsetWhen": "a released Agentic-QE build independently selects full/compact/none Codex guidance and passes preservation, idempotency, and receipt conformance",
       "notification": {
         "status": "published",
@@ -327,13 +287,14 @@
         "files": ["docs/adr/0034-schema-native-handoffs-and-hermetic-seats.md", "src/lib/execution/codex.mjs"]
       },
       "adjustment": "None: closed 2026-04-03 as model behaviour without a fix; parseHandoffText is the validation wrapper the maintainer recommended. Re-probe --output-schema with MCP on Codex upgrades (last probed on 0.149.1).",
-      "status": "adopted",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-04-03", "event": "closed", "note": "completed" },
         { "date": "2026-08-26", "event": "commented" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-26", "event": "adopted", "note": "ak relies on the upstream resolution" }
+        { "date": "2026-09-26", "event": "adopted", "note": "ak relies on the upstream resolution" },
+        { "date": "2026-09-27", "event": "retired", "note": "adopted in ak and closed upstream; nothing left to watch (the upstream watch proposed retiring it)" }
       ]
     },
     {
@@ -445,7 +406,25 @@
         { "date": "2026-09-26", "event": "retired", "note": "closed duplicate upstream; nothing in ak waits on it" }
       ]
     },
-    {
+{
+      "id": "proffesor-for-testing/agentic-qe#561",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/561",
+      "relation": "commented",
+      "kind": "issue",
+      "title": "qe-browser CI: flaky Vibium smoke/eval checks (httpbin.org rate-limiting) + vibium dependency version mismatch",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": { "refs": ["vibium reported as AQE-owned (managed: false, updateOwner agentic-qe)"], "files": ["src/lib/footprint/install.mjs"] },
+      "adjustment": "None required by ak: it reports vibium as AQE-owned in src/lib/footprint/install.mjs. Watch for AQE aligning its vibium versions (bundled ^0.1.2 vs the global vibium aqe init installs) or making vibium optional.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "commented", "note": "https://github.com/proffesor-for-testing/agentic-qe/issues/561#issuecomment-5861446264" },
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+        {
       "id": "proffesor-for-testing/agentic-qe#563",
       "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/563",
       "relation": "filed",
@@ -459,13 +438,14 @@
         "files": ["docs/TROUBLESHOOTING.md", "src/lib/adapters/grants.mjs", "tests/kit/adapter-grants.test.mjs", "tests/kit/host-adapters-cli.test.mjs"]
       },
       "adjustment": "None: the workaround was already removed; remaining citations are comments and format examples.",
-      "status": "adopted",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-07-14", "event": "filed" },
         { "date": "2026-07-17", "event": "closed", "note": "completed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-26", "event": "adopted", "note": "ak relies on the fix (first released in 3.12.3)" }
+        { "date": "2026-09-26", "event": "adopted", "note": "ak relies on the fix (first released in 3.12.3)" },
+        { "date": "2026-09-27", "event": "retired", "note": "adopted in ak and closed upstream; nothing left to watch (the upstream watch proposed retiring it)" }
       ]
     },
     {
@@ -479,12 +459,13 @@
       "mapping": "mapped",
       "kitImpact": { "refs": ["closed-upstream review 2026-09-26"], "files": ["src/lib/rvf.mjs"] },
       "adjustment": "None: the fix for agentic-qe#563; the rvf.mjs comment records the removed workaround.",
-      "status": "adopted",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-07-17", "event": "closed", "note": "merged" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-26", "event": "adopted", "note": "ak relies on the fix (first released in 3.12.3)" }
+        { "date": "2026-09-26", "event": "adopted", "note": "ak relies on the fix (first released in 3.12.3)" },
+        { "date": "2026-09-27", "event": "retired", "note": "adopted in ak and closed upstream; nothing left to watch (the upstream watch proposed retiring it)" }
       ]
     },
     {
@@ -522,7 +503,8 @@
       "constraintIds": [],
       "history": [
         { "date": "2026-09-26", "event": "commented" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "#719 fixed FsyncFailed; a small fall-through remains (issuecomment-5863219357)" }
       ]
     },
     {
@@ -556,16 +538,18 @@
       "mapping": "mapped",
       "kitImpact": {
         "refs": ["closed-upstream review 2026-09-26"],
-        "files": ["src/lib/heal.mjs", "tests/kit/heal-natives.test.mjs"]
+        "files": ["tests/kit/heal-natives.test.mjs"]
       },
-      "adjustment": "refactor(heal): drop the report-only AQE solver step (healAqeSolver and its calls in setup and sync). If kept, probe @ruvector/solver and drop \"<50K nodes\".",
-      "status": "released",
+      "adjustment": "Done: the report-only AQE solver step is removed (healAqeSolver and its calls in setup and sync).",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-08-05", "event": "filed" },
         { "date": "2026-08-06", "event": "closed", "note": "completed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.13.10; the ak change is pending" }
+        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.13.10; the ak change is pending" },
+        { "date": "2026-09-27", "event": "adopted", "note": "healAqeSolver removed from heal, sync and setup; proof: tests/kit/heal-natives.test.mjs 'AQE solver' tests" },
+        { "date": "2026-09-27", "event": "retired", "note": "adopted in ak and closed upstream; nothing left to watch (the upstream watch proposed retiring it)" }
       ]
     },
     {
@@ -579,15 +563,17 @@
       "mapping": "mapped",
       "kitImpact": {
         "refs": ["closed-upstream review 2026-09-26"],
-        "files": ["src/lib/heal.mjs", "tests/kit/heal-natives.test.mjs"]
+        "files": ["tests/kit/heal-natives.test.mjs"]
       },
-      "adjustment": "Same change as agentic-qe#617: drop the report-only AQE solver step.",
-      "status": "released",
+      "adjustment": "Done with agentic-qe#617: the report-only AQE solver step is removed.",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-08-06", "event": "closed", "note": "merged" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.13.10; the ak change is pending" }
+        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.13.10; the ak change is pending" },
+        { "date": "2026-09-27", "event": "adopted", "note": "healAqeSolver removed from heal, sync and setup; proof: tests/kit/heal-natives.test.mjs 'AQE solver' tests" },
+        { "date": "2026-09-27", "event": "retired", "note": "adopted in ak and closed upstream; nothing left to watch (the upstream watch proposed retiring it)" }
       ]
     },
     {
@@ -600,18 +586,20 @@
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.0" } },
       "mapping": "mapped",
       "kitImpact": {
-        "refs": ["constraint agentic-qe-3.13-external-provider-contract"],
+        "refs": ["constraint agentic-qe-3.13-external-provider-contract (sunset 2026-09-27)"],
         "files": ["docs/HOST-ADAPTER-FREEZE-CHECKLIST.md", "docs/adr/0029-host-adapter-extension-point.md", "src/lib/adapters/admission.mjs", "src/lib/providers.mjs", "tests/live/aqe-external-provider-transport.test.mjs"]
       },
-      "adjustment": "Run the live external-provider participant and advisor conformance (tests/live/aqe-external-provider-transport.test.mjs) on 3.14.0+ before sunsetting constraint agentic-qe-3.13-external-provider-contract. Also cited as \"issue #628\".",
-      "status": "released",
-      "constraintIds": ["agentic-qe-3.13-external-provider-contract"],
+      "adjustment": "Done: constraint agentic-qe-3.13-external-provider-contract sunset after the live external-provider participant and advisor conformance (tests/live/aqe-external-provider-transport.test.mjs) passed on 3.14.4. Also cited as \"issue #628\".",
+      "status": "retired",
+      "constraintIds": [],
       "history": [
         { "date": "2026-08-16", "event": "filed" },
         { "date": "2026-08-27", "event": "commented" },
         { "date": "2026-08-31", "event": "closed", "note": "completed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.14.0; the ak change is pending" }
+        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.14.0; the ak change is pending" },
+        { "date": "2026-09-27", "event": "adopted", "note": "constraint sunset: tests/live/aqe-external-provider-transport.test.mjs passed on agentic-qe 3.14.4 (advisor without fallback, generation with explicit fallback, CLI and MCP) under env -i with no provider API key; the proof now refuses to run while any *_API_KEY is set" },
+        { "date": "2026-09-27", "event": "retired", "note": "adopted in ak and closed upstream; nothing left to watch (the upstream watch proposed retiring it)" }
       ]
     },
     {
@@ -664,17 +652,19 @@
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.1" } },
       "mapping": "mapped",
       "kitImpact": {
-        "refs": ["constraint agentic-qe-3.14.0-stop-hook-generator", "closed-upstream review 2026-09-26"],
-        "files": ["docs/HOOKS.md", "docs/TROUBLESHOOTING.md", "tests/kit/hook-read-model.test.mjs"]
+        "refs": ["constraint agentic-qe-3.14.0-stop-hook-generator (sunset 2026-09-27)", "closed-upstream review 2026-09-26"],
+        "files": ["docs/HOOKS.md", "docs/TROUBLESHOOTING.md", "src/lib/hook-presentation.mjs", "tests/kit/hook-read-model.test.mjs", "tests/live/aqe-stop-hook-conformance.test.mjs"]
       },
-      "adjustment": "Keep the hook-audit detectors for projects generated by 3.14.0. Run offline Stop conformance on 3.14.1+ before sunsetting constraint agentic-qe-3.14.0-stop-hook-generator.",
-      "status": "released",
-      "constraintIds": ["agentic-qe-3.14.0-stop-hook-generator"],
+      "adjustment": "Done: constraint agentic-qe-3.14.0-stop-hook-generator sunset after the offline Stop conformance (tests/live/aqe-stop-hook-conformance.test.mjs) passed on 3.14.4. The hook-audit detectors and the reviewed-copy migration stay for projects generated by 3.14.0; their findings no longer link an upstream issue.",
+      "status": "retired",
+      "constraintIds": [],
       "history": [
         { "date": "2026-09-02", "event": "filed" },
         { "date": "2026-09-06", "event": "closed", "note": "completed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.14.1; the ak change is pending" }
+        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.14.1; the ak change is pending" },
+        { "date": "2026-09-27", "event": "adopted", "note": "constraint sunset: tests/live/aqe-stop-hook-conformance.test.mjs passed on agentic-qe 3.14.4 (aqe init --auto --minimal: every Claude hook runs node, timeouts 3-60 s; the three Stop hooks exit 0 in 84-117 ms offline with npx off PATH)" },
+        { "date": "2026-09-27", "event": "retired", "note": "adopted in ak and closed upstream; nothing left to watch (the upstream watch proposed retiring it)" }
       ]
     },
     {
@@ -687,14 +677,15 @@
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.1" } },
       "mapping": "mapped",
       "kitImpact": { "refs": ["constraint agentic-qe-3.14.0-codex-guidance-policy"], "files": [] },
-      "adjustment": "Run the --codex-guidance preservation, idempotency and receipt conformance on 3.14.1+ before sunsetting constraint agentic-qe-3.14.0-codex-guidance-policy.",
+      "adjustment": "Keep constraint agentic-qe-3.14.0-codex-guidance-policy: the 2026-09-27 conformance on 3.14.4 failed. On each Agentic-QE release run AK_AQE_CONFORMANCE=1 node --test tests/live/aqe-codex-guidance-conformance.test.mjs; sunset the constraint when it passes without its todo.",
       "status": "released",
       "constraintIds": ["agentic-qe-3.14.0-codex-guidance-policy"],
       "history": [
         { "date": "2026-09-02", "event": "filed" },
         { "date": "2026-09-06", "event": "closed", "note": "completed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.14.1; the ak change is pending" }
+        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.14.1; the ak change is pending" },
+        { "date": "2026-09-27", "event": "reviewed", "note": "Branch 5 conformance on ak's path (full aqe init --auto --with-codex --codex-guidance full|compact|none through the aqe command, agentic-qe 3.14.4, sandboxed): FAIL, constraint kept. full: no block when AGENTS.md exists and platform verify reports detected=none; compact and none select correctly and are idempotent, but compact adds 6 bytes outside its sentinel; through the aqe bin resolvePackageRoot() misses the package, so no Codex hooks or skills install; platform verify exits 0 on failed checks; platform setup codex: Module not found in bundle. Evidence: Branch 5 report b5-655-conformance; upstream issue drafted, not filed" }
       ]
     },
     {
@@ -728,12 +719,13 @@
       "mapping": "mapped",
       "kitImpact": { "refs": [], "files": ["src/lib/hook-remediation/aqe-artifacts.mjs", "src/templates/aqe-lifecycle/README.md"] },
       "adjustment": "None: cited as the release evidence for migrating artifacts generated by 3.14.0.",
-      "status": "adopted",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-06", "event": "closed", "note": "merged" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-26", "event": "adopted", "note": "ak relies on the fix (first released in 3.14.1)" }
+        { "date": "2026-09-26", "event": "adopted", "note": "ak relies on the fix (first released in 3.14.1)" },
+        { "date": "2026-09-27", "event": "retired", "note": "adopted in ak and closed upstream; nothing left to watch (the upstream watch proposed retiring it)" }
       ]
     },
     {
@@ -747,10 +739,11 @@
       "mapping": "unmapped",
       "kitImpact": null,
       "adjustment": null,
-      "status": "watching",
+      "status": "retired",
       "constraintIds": [],
       "history": [
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "retired", "note": "merged and released in 3.14.4; context only: agentic-qe#574, tracked by pacphi/agentic-kit#240, drives removing the busy rule" }
       ],
       "note": "Context only: a partial fix for agentic-qe#574 (rethrows LockHeld). Its release alone does not prove a live lock no longer surfaces FsyncFailed, so agentic-qe#574 drives removing the busy rule and closing pacphi/agentic-kit#240."
     },
@@ -769,7 +762,8 @@
       "constraintIds": [],
       "history": [
         { "date": "2026-09-26", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "3.14.4 fixes A, B and E; C and D remain (issuecomment-5863194807)" }
       ]
     },
     {
@@ -781,13 +775,15 @@
       "dependency": "agentic-qe",
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
       "mapping": "mapped",
-      "kitImpact": { "refs": ["plan 6.3, addendum 3: AQE_PROJECT_ROOT pin"], "files": [] },
-      "adjustment": "Once a released agentic-qe resolves the project root from subfolders, drop the AQE_PROJECT_ROOT pin.",
+      "kitImpact": { "refs": ["plan 6.3, addendum 3: AQE_PROJECT_ROOT pin", "Branch 5 decisions B5-D1, B5-D1a, B5-D1b"], "files": ["src/lib/aqe-project-pin.mjs"] },
+      "adjustment": "Once a released agentic-qe resolves its project root, memory database and storage folder from a subfolder, drop the pin of AQE_PROJECT_ROOT, AQE_MEMORY_PATH and AQE_STORAGE_PATH (src/lib/aqe-project-pin.mjs; decisions B5-D1, B5-D1a, B5-D1b).",
       "status": "watching",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-26", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "reviewed", "note": "Branch 5 pins all three keys: on 3.14.4 dist/learning/embedder-identity-store.js getMemoryDbPath() uses AQE_MEMORY_PATH or <cwd>/.agentic-qe/memory.db and never reads AQE_PROJECT_ROOT, and dist/init/token-bootstrap.js resolves AQE_STORAGE_PATH ?? '.agentic-qe' against the cwd; with all three pinned a subfolder run created nothing there (Slice 0 case c, Slice B proof)" },
+        { "date": "2026-09-27", "event": "commented", "note": "3.14.4 re-test with the pin table, review notes for PR #741; refs agentic-qe#758 (issuecomment-5863178438)" }
       ]
     },
     {
@@ -799,13 +795,15 @@
       "dependency": "agentic-qe",
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
       "mapping": "mapped",
-      "kitImpact": { "refs": ["plan 6.4, addendum 3: duplicate pruning before brain import"], "files": [] },
-      "adjustment": "Once a released agentic-qe imports stores that share patterns, drop the duplicate pruning ak runs before brain import.",
+      "kitImpact": { "refs": ["plan 6.4, addendum 3: duplicate pruning before brain import", "Branch 5 Task 0.2: no prune step on 3.14.4"], "files": ["src/lib/aqe-store-merge.mjs"] },
+      "adjustment": "None on 3.14.4: brain import skips shared patterns as conflicts without aborting, so the stray-store merge runs no duplicate pruning (src/lib/aqe-store-merge.mjs). If a later release aborts again, the merge's rehearsal fails before the real import; add a prune step then.",
       "status": "watching",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-26", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "reviewed", "note": "agentic-qe 3.14.4 (Branch 5 Task 0.2): importing a store that shares 70 patterns by (name, qe_domain, pattern_type) gave Imported 74, Skipped 140, Conflicts 140 (3 imported once its witness rows were deleted), no abort, PRAGMA integrity_check ok and foreign_key_check empty; --dry-run and the real import agree" },
+        { "date": "2026-09-27", "event": "commented", "note": "fixed on 3.14.4, fine to close; refs agentic-qe#759 (issuecomment-5863185231)" }
       ]
     },
     {
@@ -931,13 +929,14 @@
       "mapping": "mapped",
       "kitImpact": { "refs": [], "files": ["src/lib/paths.mjs", "src/templates/statusline-footer.cjs"] },
       "adjustment": "None: ak's global-root resolution follows the fix (npm root -g is authoritative). Cited as \"upstream #2221\".",
-      "status": "adopted",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-05-29", "event": "filed" },
         { "date": "2026-05-29", "event": "closed", "note": "completed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-26", "event": "adopted", "note": "ak relies on the upstream resolution" }
+        { "date": "2026-09-26", "event": "adopted", "note": "ak relies on the upstream resolution" },
+        { "date": "2026-09-27", "event": "retired", "note": "adopted in ak and closed upstream; nothing left to watch (the upstream watch proposed retiring it)" }
       ]
     },
     {
@@ -951,13 +950,14 @@
       "mapping": "mapped",
       "kitImpact": { "refs": [], "files": ["src/tools/improvement-eval.mjs"] },
       "adjustment": "None: improvement-eval checks that route feedback persists (fixed in ruflo 3.10.6). Cited as \"#2222\".",
-      "status": "adopted",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-05-29", "event": "filed" },
         { "date": "2026-05-29", "event": "closed", "note": "completed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-26", "event": "adopted", "note": "ak relies on the fix (first released in 3.10.6)" }
+        { "date": "2026-09-26", "event": "adopted", "note": "ak relies on the fix (first released in 3.10.6)" },
+        { "date": "2026-09-27", "event": "retired", "note": "adopted in ak and closed upstream; nothing left to watch (the upstream watch proposed retiring it)" }
       ]
     },
     {
@@ -971,13 +971,14 @@
       "mapping": "mapped",
       "kitImpact": { "refs": ["closed-upstream review 2026-09-26"], "files": ["src/templates/statusline-footer.cjs"] },
       "adjustment": "None: the statusline-footer comment is accurate and nothing depends on it.",
-      "status": "adopted",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-05-29", "event": "filed" },
         { "date": "2026-05-29", "event": "closed", "note": "completed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-26", "event": "adopted", "note": "ak relies on the fix (first released in 3.10.11)" }
+        { "date": "2026-09-26", "event": "adopted", "note": "ak relies on the fix (first released in 3.10.11)" },
+        { "date": "2026-09-27", "event": "retired", "note": "adopted in ak and closed upstream; nothing left to watch (the upstream watch proposed retiring it)" }
       ]
     },
     {
@@ -1014,14 +1015,15 @@
         "files": ["docs/TROUBLESHOOTING.md", "src/commands/about.mjs", "src/commands/status/sections/security.mjs", "src/commands/x/verify.mjs", "src/lib/heal.mjs", "src/lib/natives.mjs", "src/templates/statusline-footer.cjs"]
       },
       "adjustment": "None: ak detects the built-in engine (security/builtin-aidefence.js, 3.32.2+) and reports a missing aidefence as a warning (status, ak x verify, about) with no footer alarm; healAidefence stays for adaptive learning and the aidefence_* MCP tools.",
-      "status": "adopted",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-07-14", "event": "filed" },
         { "date": "2026-07-17", "event": "closed", "note": "completed" },
         { "date": "2026-09-26", "event": "registered" },
         { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.32.2; the ak change is pending" },
-        { "date": "2026-09-27", "event": "adopted", "note": "status, verify, about and the footer recognise the built-in engine (confirmed in the installed 3.46.1 CLI: commands/security.js falls back to security/builtin-aidefence.js)" }
+        { "date": "2026-09-27", "event": "adopted", "note": "status, verify, about and the footer recognise the built-in engine (confirmed in the installed 3.46.1 CLI: commands/security.js falls back to security/builtin-aidefence.js)" },
+        { "date": "2026-09-27", "event": "retired", "note": "adopted in ak and closed upstream; nothing left to watch (the upstream watch proposed retiring it)" }
       ]
     },
     {
@@ -1038,14 +1040,15 @@
         "files": ["src/lib/statusline.mjs"]
       },
       "adjustment": "refactor(statusline): remove the retired CVE-counter overlay (SEC_WRAP, its gate, the status row, rufloLocalSecurity and rufloHonestInsight); keep SEC_WRAP_STRIP for one release. Conditional on declaring a Ruflo floor >= 3.32.2.",
-      "status": "adopted",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-07-16", "event": "filed" },
         { "date": "2026-07-17", "event": "closed", "note": "completed" },
         { "date": "2026-09-26", "event": "registered" },
         { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.32.2; the ak change is pending" },
-        { "date": "2026-09-27", "event": "adopted", "note": "overlay removed; SEC_WRAP_STRIP kept one release; floor 3.39.0 >= 3.32.2; removal proof: statusline suites pass and a 3.46.1 statusline helper carrying an old block is stripped, passes node --check and converges on the second run" }
+        { "date": "2026-09-27", "event": "adopted", "note": "overlay removed; SEC_WRAP_STRIP kept one release; floor 3.39.0 >= 3.32.2; removal proof: statusline suites pass and a 3.46.1 statusline helper carrying an old block is stripped, passes node --check and converges on the second run" },
+        { "date": "2026-09-27", "event": "retired", "note": "adopted in ak and closed upstream; nothing left to watch (the upstream watch proposed retiring it)" }
       ]
     },
     {
@@ -1107,7 +1110,8 @@
       "history": [
         { "date": "2026-07-31", "event": "filed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-27", "event": "commented", "note": "hosted probe run 36333572972 on Ruflo 3.46.1: 10/10 aborts by default and 10/10 with single-threaded ONNX Runtime sessions; mitigation disproven (issuecomment-5857781254)" }
+        { "date": "2026-09-27", "event": "commented", "note": "hosted probe run 36333572972 on Ruflo 3.46.1: 10/10 aborts by default and 10/10 with single-threaded ONNX Runtime sessions; mitigation disproven (issuecomment-5857781254)" },
+        { "date": "2026-09-27", "event": "commented", "note": "3.47.0 status, transformers 3.x / ONNX Runtime 1.21 lead, fix approaches; 11/11 nightly aborts in the continue-on-error step (issuecomment-5863246672)" }
       ]
     },
     {
@@ -1177,13 +1181,14 @@
         "files": ["docs/PROVIDERS.md", "src/commands/setup.mjs", "src/lib/adapters/grants.mjs", "tests/kit/adapter-grants.test.mjs", "tests/kit/host-adapters-cli.test.mjs"]
       },
       "adjustment": "None while ak declares no Ruflo floor: providers.mjs gates on 3.38.8, the first fixed release. Drop the gate if ak declares ruflo >= 3.38.8.",
-      "status": "adopted",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-08-11", "event": "commented" },
         { "date": "2026-08-12", "event": "closed", "note": "completed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-26", "event": "adopted", "note": "ak relies on the fix (first released in 3.38.8)" }
+        { "date": "2026-09-26", "event": "adopted", "note": "ak relies on the fix (first released in 3.38.8)" },
+        { "date": "2026-09-27", "event": "retired", "note": "adopted in ak and closed upstream; nothing left to watch (the upstream watch proposed retiring it)" }
       ]
     },
     {
@@ -1200,14 +1205,15 @@
         "files": ["src/commands/status/sections/scaffold-agents.mjs", "src/lib/scaffold.mjs"]
       },
       "adjustment": "fix(status): scaffold-agents advice names ruflo >= 3.38.2 instead of \"ruflo#2986 pending\"; keep the file probe and the delegation.",
-      "status": "adopted",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-08-12", "event": "filed" },
         { "date": "2026-08-12", "event": "closed", "note": "completed" },
         { "date": "2026-09-26", "event": "registered" },
         { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.38.2; the ak change is pending" },
-        { "date": "2026-09-27", "event": "adopted", "note": "same ak change as ruvnet/ruflo#2986: the status note names 3.38.2, below the support window; removal proof: tests/kit/scaffold.test.mjs" }
+        { "date": "2026-09-27", "event": "adopted", "note": "same ak change as ruvnet/ruflo#2986: the status note names 3.38.2, below the support window; removal proof: tests/kit/scaffold.test.mjs" },
+        { "date": "2026-09-27", "event": "retired", "note": "adopted in ak and closed upstream; nothing left to watch (the upstream watch proposed retiring it)" }
       ]
     },
     {
@@ -1224,14 +1230,15 @@
         "files": ["src/commands/status/sections/scaffold-agents.mjs", "src/commands/sync.mjs", "src/lib/scaffold.mjs"]
       },
       "adjustment": "fix(status): scaffold-agents advice names ruflo >= 3.38.2 instead of \"ruflo#2986 pending\"; keep the file probe and the delegation.",
-      "status": "adopted",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-08-12", "event": "filed" },
         { "date": "2026-08-12", "event": "closed", "note": "merged" },
         { "date": "2026-09-26", "event": "registered" },
         { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.38.2; the ak change is pending" },
-        { "date": "2026-09-27", "event": "adopted", "note": "status note says the fix is in 3.38.2, below the support window (floor 3.39.0), and points to ak sync; file probe and delegation kept; removal proof: tests/kit/scaffold.test.mjs" }
+        { "date": "2026-09-27", "event": "adopted", "note": "status note says the fix is in 3.38.2, below the support window (floor 3.39.0), and points to ak sync; file probe and delegation kept; removal proof: tests/kit/scaffold.test.mjs" },
+        { "date": "2026-09-27", "event": "retired", "note": "adopted in ak and closed upstream; nothing left to watch (the upstream watch proposed retiring it)" }
       ]
     },
     {
@@ -1253,7 +1260,8 @@
       "history": [
         { "date": "2026-08-16", "event": "filed" },
         { "date": "2026-09-26", "event": "commented" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "supplement to the reporting standard (issuecomment-5863257920)" }
       ]
     },
     {
@@ -1290,7 +1298,8 @@
       "constraintIds": ["ruflo-3.38.20-stop-output-contract"],
       "history": [
         { "date": "2026-09-02", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "looks fixed for new projects; asked about the legacy file (issuecomment-5863263708)" }
       ]
     },
     {
@@ -1328,14 +1337,15 @@
         "files": ["docs/HOST-SUPPORT.md", "docs/SETUP.md", "src/commands/setup.mjs"]
       },
       "adjustment": "ak setup passes the flags alone on Ruflo 3.46.0 and newer (rufloProjectInitInvocation) and keeps the scripted-format and RUFLO_NO_SKILLS_SH suppression below 3.46.0; the constraint sunsets when the support-window floor reaches 3.46.0.",
-      "status": "adopted",
+      "status": "retired",
       "constraintIds": ["ruflo-3.38.21-init-suppression-flags"],
       "history": [
         { "date": "2026-09-02", "event": "filed" },
         { "date": "2026-09-26", "event": "registered" },
         { "date": "2026-09-26", "event": "closed", "note": "completed by PR #3434" },
         { "date": "2026-09-26", "event": "released", "note": "PR #3434 in 3.46.0 (confirmed in the @claude-flow/cli 3.46.0 tarball: commands/init.js reads codexDetect/skillsSh false)" },
-        { "date": "2026-09-27", "event": "adopted", "note": "removal proof on 3.46.1 through the public ruflo wrapper, one disposable HOME and empty folder each: --no-codex-detect alone left no .codex/ or AGENTS.md; --no-skills-sh alone left no .agents/skills/ruflo; both together left neither; a control run without them created both" }
+        { "date": "2026-09-27", "event": "adopted", "note": "removal proof on 3.46.1 through the public ruflo wrapper, one disposable HOME and empty folder each: --no-codex-detect alone left no .codex/ or AGENTS.md; --no-skills-sh alone left no .agents/skills/ruflo; both together left neither; a control run without them created both" },
+        { "date": "2026-09-27", "event": "retired", "note": "adopted in ak and closed upstream; nothing left to watch (the upstream watch proposed retiring it)" }
       ]
     },
     {
@@ -1410,14 +1420,15 @@
       "mapping": "mapped",
       "kitImpact": { "refs": ["ADR-0058 section 8, request 6"], "files": ["src/lib/ruflo-components/policy.mjs", "src/lib/ruflo-components/snapshot.mjs", "src/lib/ruflo-memory.mjs"] },
       "adjustment": "None: ak reports governance as enforced on stdio from Ruflo 3.46.0 and keeps the not-wired explanation below it.",
-      "status": "adopted",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-24", "event": "filed" },
         { "date": "2026-09-26", "event": "registered" },
         { "date": "2026-09-26", "event": "closed", "note": "completed by PR #3423" },
         { "date": "2026-09-26", "event": "released", "note": "PR #3423 in 3.46.0 (evaluateToolCall in bin/cli.js and bin/mcp-server.js of the @claude-flow/cli 3.46.0 tarball; 3.45.0 has none)" },
-        { "date": "2026-09-27", "event": "adopted", "note": "live proof on 3.46.1: ruflo mcp start with RUFLO_MCP_ENFORCE_POLICY=1 and ak's policy (cap 2) allowed two memory_stats calls, refused the third, and audited all three; from a subfolder with no .harness/ every call was refused (fails closed)" }
+        { "date": "2026-09-27", "event": "adopted", "note": "live proof on 3.46.1: ruflo mcp start with RUFLO_MCP_ENFORCE_POLICY=1 and ak's policy (cap 2) allowed two memory_stats calls, refused the third, and audited all three; from a subfolder with no .harness/ every call was refused (fails closed)" },
+        { "date": "2026-09-27", "event": "retired", "note": "adopted in ak and closed upstream; nothing left to watch (the upstream watch proposed retiring it)" }
       ]
     },
     {
@@ -1435,7 +1446,8 @@
       "constraintIds": [],
       "history": [
         { "date": "2026-09-24", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "supplement to the reporting standard (issuecomment-5863269629)" }
       ]
     },
     {
@@ -1453,7 +1465,8 @@
       "constraintIds": [],
       "history": [
         { "date": "2026-09-24", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "thanks for PR #3472, verification plan, impact (issuecomment-5863277587)" }
       ]
     },
     {
@@ -1471,7 +1484,8 @@
       "constraintIds": [],
       "history": [
         { "date": "2026-09-24", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "supplement to the reporting standard (issuecomment-5863282103)" }
       ]
     },
     {
@@ -1489,7 +1503,8 @@
       "constraintIds": [],
       "history": [
         { "date": "2026-09-24", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "answered from the Codex CLI source (issuecomment-5863289657)" }
       ]
     },
     {
@@ -1575,11 +1590,12 @@
       "mapping": "unmapped",
       "kitImpact": null,
       "adjustment": null,
-      "status": "watching",
+      "status": "retired",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-26", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "retired", "note": "closed completed upstream; nothing in ak waits on it" }
       ]
     },
     {
@@ -1932,7 +1948,8 @@
       "history": [
         { "date": "2026-09-27", "event": "filed" },
         { "date": "2026-09-27", "event": "commented" },
-        { "date": "2026-09-27", "event": "registered" }
+        { "date": "2026-09-27", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "4.3.34 check, code pointers, fix approaches (issuecomment-5863313107)" }
       ]
     },
     {
@@ -2543,7 +2560,8 @@
       "constraintIds": [],
       "history": [
         { "date": "2026-09-27", "event": "filed" },
-        { "date": "2026-09-27", "event": "registered" }
+        { "date": "2026-09-27", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "supplement to the reporting standard (issuecomment-5863297204)" }
       ]
     },
     {
@@ -2561,7 +2579,8 @@
       "constraintIds": [],
       "history": [
         { "date": "2026-09-27", "event": "filed" },
-        { "date": "2026-09-27", "event": "registered" }
+        { "date": "2026-09-27", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "supplement to the reporting standard (issuecomment-5863304724)" }
       ],
       "note": "Filed as a courtesy: ak never starts the chat-UI MCP bridge and runs Codex through codex exec, so nothing in ak waits on it."
     },
@@ -2574,13 +2593,15 @@
       "dependency": "agentic-qe",
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
       "mapping": "mapped",
-      "kitImpact": {"refs": ["investigation aqe-audit-chain", "Branch 5: stray-store merge runs with no other AQE writer"], "files": []},
+      "kitImpact": {"refs": ["investigation aqe-audit-chain", "Branch 5: stray-store merge runs with no other AQE writer"], "files": ["src/lib/aqe-store-holders.mjs", "src/lib/aqe-store-merge.mjs"]},
       "adjustment": "Once a released agentic-qe appends to the witness chain atomically, ak no longer needs to stop other AQE writers before merging stray stores.",
       "status": "watching",
       "constraintIds": [],
       "history": [
         { "date": "2026-09-27", "event": "filed" },
-        { "date": "2026-09-27", "event": "registered" }
+        { "date": "2026-09-27", "event": "registered" },
+        { "date": "2026-09-27", "event": "reviewed", "note": "Branch 5: ak x aqe-store merge finds the processes holding the root or a stray store by open file (lsof, /proc; the host-session census on Windows) before its backup, its real import and its archive, and refuses while any holds one; there is no force" },
+        { "date": "2026-09-27", "event": "commented", "note": "still reproduces on 3.14.4, with impact; refs agentic-qe#759 (issuecomment-5863202746)" }
       ]
     },
     {
@@ -2592,8 +2613,99 @@
       "dependency": "agentic-qe",
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
       "mapping": "mapped",
-      "kitImpact": {"refs": ["investigation aqe-rvf-flag-vector-space", "Branch 5: embedding verify says embedder verified, not pattern search working"], "files": []},
+      "kitImpact": {"refs": ["investigation aqe-rvf-flag-vector-space", "Branch 5: embedding verify says embedder verified, not pattern search working"], "files": ["src/commands/status/sections/aqe.mjs", "src/commands/x/verify.mjs", "src/lib/aqe-embedding-lifecycle.mjs"]},
       "adjustment": "Once a released agentic-qe binds the pattern index with a configured embedder, ak may report semantic pattern search as working after a live check.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "filed" },
+        { "date": "2026-09-27", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "still reproduces on 3.14.4, with impact (issuecomment-5863212811)" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#755",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/755",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "`aqe init --with-codex` installs no Codex hooks or skills when run through the `aqe` bin (global install)",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": {"refs": ["Branch 5: ak setup names the Codex hooks and skills only when they exist, otherwise warns", "#655 conformance on ak's path (constraint agentic-qe-3.14.0-codex-guidance-policy)"], "files": ["src/lib/aqe-guidance.mjs", "tests/live/aqe-codex-guidance-conformance.test.mjs"]},
+      "adjustment": "Once a released agentic-qe installs its Codex hooks and skills through the aqe command, ak setup's warning stops on its own (it checks the files); run the #655 conformance strictly toward the constraint's sunset.",
+      "status": "watching",
+      "constraintIds": ["agentic-qe-3.14.0-codex-guidance-policy"],
+      "history": [
+        { "date": "2026-09-27", "event": "filed" },
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#756",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/756",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "`--codex-guidance` on an existing AGENTS.md: `full` is not applied, and a `---` separator accumulates outside the AQE block",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": {"refs": ["#655 conformance on ak's path (constraint agentic-qe-3.14.0-codex-guidance-policy)"], "files": ["tests/live/aqe-codex-guidance-conformance.test.mjs"]},
+      "adjustment": "Once a released agentic-qe applies full on an existing AGENTS.md and writes nothing outside its sentinel, run the #655 conformance strictly; if it passes, sunset the constraint and drop the conformance todo.",
+      "status": "watching",
+      "constraintIds": ["agentic-qe-3.14.0-codex-guidance-policy"],
+      "history": [
+        { "date": "2026-09-27", "event": "filed" },
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#757",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/757",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "`aqe platform setup <platform>` fails for every platform: \"Module not found in bundle: ../../init/<name>-installer.js\"",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": {"refs": ["ak runs aqe init --with-codex, not platform setup", "the codex-mcp status row's manual fix names aqe platform setup codex (src/commands/status/sections/codex-mcp.mjs)"], "files": []},
+      "adjustment": "none: ak does not run platform setup; once fixed, the codex-mcp status row's manual fix (aqe platform setup codex --overwrite --with-ruflo) works as written.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "filed" },
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#758",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/758",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "CLI exits 0 even when a command set `process.exitCode = 1` (`platform verify`, `plugin install/remove`, `hooks` task provenance)",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": {"refs": ["#655 conformance reads the [fail] lines of aqe platform verify codex, not its exit code"], "files": ["tests/live/aqe-codex-guidance-conformance.test.mjs"]},
+      "adjustment": "none: the #655 conformance reads the [fail] lines of aqe platform verify codex, so it already catches a failed check; once fixed, the exit code agrees with them.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "filed" },
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#759",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/759",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "`brain import` copies the source's `witness_chain` rows with their original `prev_hash`, so the target's audit chain verifies as BROKEN",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": {"refs": ["Branch 5: ak x aqe-store merge deletes each stray copy's witness_chain rows before export (the archived stray keeps them)"], "files": ["src/lib/aqe-store-merge.mjs"]},
+      "adjustment": "Once a released agentic-qe imports witness rows without breaking the target chain, ak x aqe-store merge can stop deleting the stray copy's witness_chain rows before export.",
       "status": "watching",
       "constraintIds": [],
       "history": [

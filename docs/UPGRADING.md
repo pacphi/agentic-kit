@@ -39,6 +39,78 @@ and supported `claude mcp serve` tool exposure are preserved. See
 [ADR-0051](adr/0051-supported-peer-delegation-and-host-realignment.md) for the policy,
 official source citations, authority boundaries and verification limits.
 
+## 2026-09-27: AQE is pinned to the project root
+
+AQE used to create a new `.agentic-qe` store in whatever folder a command, hook or MCP server
+started in. `ak sync` and `ak setup` now pin AQE to the project root in projects that have
+`.agentic-qe`, with three absolute values:
+
+- `AQE_PROJECT_ROOT` — the repository root
+- `AQE_MEMORY_PATH` — `<root>/.agentic-qe/memory.db`
+- `AQE_STORAGE_PATH` — `<root>/.agentic-qe`
+
+They go into the `env` of `.claude/settings.local.json`, the `agentic-qe` entry of `.mcp.json`
+(only when it starts AQE's own server), and two tables of the project's `.codex/config.toml`:
+`[mcp_servers.agentic-qe.env]` and `[shell_environment_policy.set]` (the environment Codex gives
+the commands and hooks it runs; pinned when the table exists or AQE is registered in that file).
+Your user-level `~/.codex/config.toml` is never pinned, and neither is a `.mcp.json` or project
+`.codex/config.toml` that git tracks: a committed absolute path would point your teammates' AQE at a
+path that does not exist on their machines. `ak status` names such a file in an `aqe-pin` hand fix;
+keep it out of git (`git rm --cached`, then `.gitignore`) and run `ak sync` if you want it pinned.
+`.claude/settings.local.json` is always pinned. Each file gets a receipt beside it
+(`<file>.agentic-kit-aqe-pin.json`; the shell table's is
+`.codex/config.toml.agentic-kit-aqe-shell-pin.json`), and `ak uninstall` puts back what was there
+before, removing a table or a `settings.local.json` that ak created and left empty. ak keeps its
+newest backup of each file (`<file>.ak-aqe-pin-backup.<id>`). AQE's relative
+`AQE_MEMORY_PATH = ".agentic-qe/memory.db"` in either Codex table is replaced, also after
+`aqe init` writes it back, and restored on uninstall. The relative value AQE writes into
+`.claude/settings.json` stays: Claude Code gives `settings.local.json` precedence.
+
+A value you set yourself is kept. `ak status` then shows an `aqe-pin` row that names the file for
+you to fix by hand. A pin copied from another checkout names that checkout's root: remove the
+three keys from the named file, then run `ak sync` in this checkout. Restart Claude Code, Codex
+and OpenCode sessions so they pick up the new environment. After the pin, `aqe status` and
+`aqe health` print "not initialized" when run from a subfolder (AQE checks the working
+directory); run them from the project root.
+
+Stores AQE already created in subfolders stay where they are until you merge them (next section).
+
+## 2026-09-27: `ak x aqe-store` merges stray AQE stores
+
+`ak status` now shows stray AQE stores (a `.agentic-qe` folder with a `memory.db` below the project
+root) as a hand fix. `ak x aqe-store status`, or `ak x aqe-store merge` without `--yes`, previews
+what a merge would do. It opens no store in place, but it is not free: it copies the whole project
+store and every stray store into ak's state folder, and runs `aqe init --auto --minimal` and
+`aqe learning stats` in a scratch folder there to find AQE's starter patterns (the init runs
+`npm exec ruflo --version`, which may reach the npm registry). It removes the copies when it
+finishes. It also reports a project store that already fails SQLite's integrity or foreign-key
+check, and an earlier merge that was interrupted during its import.
+
+With every Claude Code, Codex and OpenCode session in the project closed,
+`ak x aqe-store merge --yes`:
+
+- backs up the project store;
+- rehearses AQE's own export and import on copies;
+- imports each stray's patterns and captured experiences into the project store;
+- moves each whole stray folder to `~/.local/state/agentic-kit/aqe-store-merge/<time>/archive/`
+  (`%LOCALAPPDATA%\agentic-kit\aqe-store-merge\` on Windows), beside the backup and a
+  `receipt.json`.
+
+It needs agentic-qe 3.14.4 or later and refuses while any process holds a store, or when it
+cannot tell; there is no `--force`. A store that changes after the merge copied it stops the merge
+before its import, or, during the import, stays in place. A nested repository or a worktree inside
+the checkout keeps its own store and is skipped. Audit-trail rows and the AQE starter patterns the
+project store lacks are not imported; they stay in the archive. To identify the starter patterns, the merge builds a fresh AQE store in its scratch
+folder with your project's AQE embedder, so the embedder must be reachable (for Ollama, start it
+first). ak keeps the archive until you delete it; see
+[TROUBLESHOOTING](TROUBLESHOOTING.md#restore-an-aqe-store-from-the-merge-archive) to restore one.
+
+## 2026-09-27: No more `aqe solver` line in setup and sync
+
+`ak setup` and `ak sync` no longer print an `aqe solver` line. AQE's native solver package was
+never published, and AQE made its TypeScript solver the implementation (agentic-qe#617, released
+in 3.13.10), so the step only ever reported that state and never installed anything. Nothing to do.
+
 ## 2026-09-27: System snapshot v8 (imported Codex copies)
 
 When the ChatGPT desktop app imports a Claude Code transcript, it saves a copy as a Codex session.
@@ -221,8 +293,8 @@ action" without failing. Run
 `[mcp_servers.agentic-qe]` table.
 
 AQE entries started with `aqe mcp`, `agentic-qe mcp` or `aqe-v3 mcp` are now
-recognized on Claude, Codex and OpenCode, and OpenCode also accepts
-`npx -y agentic-qe@latest mcp`. With a selected embedding backend, ak now projects
+recognized on Claude, Codex and OpenCode, as is every plain npx spelling:
+`npx [-y|--yes] agentic-qe[@latest|@<exact version>] mcp`. With a selected embedding backend, ak now projects
 the endpoint into such entries instead of reporting an unrecognized transport.
 
 ## 2026-09-10: Remembered Codex MCP correction

@@ -34,6 +34,8 @@ export const GUARDED_FILES = [
   '.agentic-qe/llm-config.json',
   'CLAUDE.md',
   'AGENTS.md',
+  '.mcp.json',
+  '.codex/config.toml',
 ];
 
 // `<file>.ak-<tag>-backup.<uuid>` / `-tmp.<uuid>` (owned-env-projection.mjs and

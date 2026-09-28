@@ -38,6 +38,13 @@ test-*.log
 !/.agents/skills/upstream-status/
 .codex/
 .mcp.json
+# ak's receipts and backups beside the gitignored .mcp.json (AQE pin: aqe-project-pin.mjs;
+# AQE embedding: aqe-embedding-projection.mjs). The ones beside .claude/ and .codex/ files
+# are already covered by those folders.
+.mcp.json.agentic-kit-aqe-pin.json
+.mcp.json.ak-aqe-pin-backup.*
+.mcp.json.agentic-kit-aqe-embedding.json
+.mcp.json.ak-aqe-backup.*
 ruvector.db
 *.db
 CLAUDE.md.backup

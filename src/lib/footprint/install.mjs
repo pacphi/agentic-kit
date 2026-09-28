@@ -245,6 +245,9 @@ export function managedTools({ pkgRoot = null, globalRootDir = null } = {}) {
  * install/update as companions. They share HostInstallation's measurement
  * shape so System can expose their version/method/bytes, while `managed:false`
  * and updateOwner keep lifecycle ownership honest. */
+// Vibium is AQE's browser runtime: agentic-qe declares it and `aqe init` installs
+// it globally, so ak reports it as AQE-owned (agentic-qe#561 tracks AQE's
+// vibium version mismatch and a possible move to optional).
 export function observedRuntimeTools({ globalRootDir = null } = {}) {
   const npmRoot = (pkg) => npmPackageRoot(globalRootDir, pkg);
   return [

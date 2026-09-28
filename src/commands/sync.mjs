@@ -46,6 +46,7 @@ import { confirmCodexMcpRepairs, reconcileCodexMcp } from '../lib/codex-mcp-reco
 import { alignHosts } from './x/host-align.mjs';
 import { prepareAqeEmbedding } from '../lib/aqe-embedding-lifecycle.mjs';
 import { reconcileAqeEmbeddingProjections } from '../lib/aqe-embedding-projection.mjs';
+import { reconcileAqePin, recordAqePinProject } from '../lib/aqe-project-pin.mjs';
 import { rememberLiveCheck, embeddingCheckOutcome } from '../lib/live-check-evidence.mjs';
 
 async function askCodexRepair(question) {
@@ -339,7 +340,6 @@ export const SYNC_STEPS = [
     when: (subs, flags, cfg) => (subs.has('security') || subs.has('versions')) && cfg.security !== false,
     run: async (ctx) => {
       await ctx.step('aidefence', () => heal.healAidefence());
-      await ctx.step('aqe solver', () => heal.healAqeSolver());
     },
   },
   // natives LAST among the npm-tree mutations. Every agentdb location resolves up
@@ -676,6 +676,19 @@ export const SYNC_STEPS = [
       recordApplyFailure(ctx.state, 'aqe-embedding', projection);
     },
   },
+  // B5-D1: pin AQE to the project root (three absolute keys, receipted) so a
+  // command, hook or MCP server started in a subfolder uses the root's store.
+  // Remembered in kit.json so `ak uninstall` can release it from any folder.
+  {
+    id: 'aqe-pin',
+    when: (subs, flags, cfg) => cfg.aqe !== false && subs.has('aqe-pin'),
+    run: async (ctx) => {
+      const pin = reconcileAqePin(ctx.cfg, ctx.cwd);
+      ctx.report('AQE project pin', pin);
+      recordApplyFailure(ctx.state, 'aqe-pin', pin);
+      if (recordAqePinProject(ctx.cfg, pin.root)) saveKitConfig(ctx.cfg);
+    },
+  },
   {
     id: 'self',
     when: (subs, flags) => subs.has('self') && !flags['no-upgrade'],
@@ -702,7 +715,7 @@ const stepSubsystems = (s) => (Object.hasOwn(STEP_SUBSYSTEMS, s.id) ? STEP_SUBSY
 // Every subsystem a plan item or step can name. tests/kit/sync-command.test.mjs
 // fails when a step's `when` names one missing here.
 const SYNC_SUBSYSTEMS = [
-  'agent-browser', 'aqe', 'aqe-embedding', 'blocks', 'codex-context', 'codex-mcp', 'codex-statusline',
+  'agent-browser', 'aqe', 'aqe-embedding', 'aqe-pin', 'blocks', 'codex-context', 'codex-mcp', 'codex-statusline',
   'daemons', 'deja-vu', 'host-alignment', 'hosts', 'mcp', 'memory', 'natives', 'npx', 'providers', 'routing',
   'ruflo-components', 'ruvector', 'ruvnet-brain', 'ruvnet-brain-nightly', 'scaffold-agents', 'security',
   'self', 'statusline', 'versions',

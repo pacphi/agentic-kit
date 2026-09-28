@@ -1,0 +1,704 @@
+CREATE TABLE schema_version (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    version INTEGER NOT NULL,
+    migrated_at TEXT DEFAULT (datetime('now'))
+  );
+CREATE TABLE kv_store (
+    key TEXT NOT NULL,
+    namespace TEXT NOT NULL,
+    value TEXT NOT NULL,
+    expires_at INTEGER,
+    created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
+    PRIMARY KEY (namespace, key)
+  );
+CREATE INDEX idx_kv_namespace ON kv_store(namespace);
+CREATE INDEX idx_kv_expires ON kv_store(expires_at) WHERE expires_at IS NOT NULL;
+CREATE TABLE vectors (
+    id TEXT PRIMARY KEY,
+    namespace TEXT NOT NULL DEFAULT 'default',
+    embedding BLOB NOT NULL,
+    dimensions INTEGER NOT NULL,
+    metadata TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+CREATE INDEX idx_vectors_namespace ON vectors(namespace);
+CREATE INDEX idx_vectors_dimensions ON vectors(dimensions);
+CREATE TABLE rl_q_values (
+    id TEXT PRIMARY KEY,
+    algorithm TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    state_key TEXT NOT NULL,
+    action_key TEXT NOT NULL,
+    q_value REAL NOT NULL DEFAULT 0.0,
+    visits INTEGER NOT NULL DEFAULT 0,
+    last_reward REAL,
+    domain TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(algorithm, agent_id, state_key, action_key)
+  );
+CREATE INDEX idx_qvalues_agent ON rl_q_values(agent_id);
+CREATE INDEX idx_qvalues_algorithm ON rl_q_values(algorithm);
+CREATE INDEX idx_qvalues_state ON rl_q_values(agent_id, state_key);
+CREATE INDEX idx_qvalues_domain ON rl_q_values(domain);
+CREATE INDEX idx_qvalues_updated ON rl_q_values(updated_at);
+CREATE TABLE goap_goals (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    conditions TEXT NOT NULL,
+    priority INTEGER DEFAULT 3,
+    qe_domain TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+CREATE TABLE goap_actions (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    agent_type TEXT NOT NULL,
+    preconditions TEXT NOT NULL,
+    effects TEXT NOT NULL,
+    cost REAL DEFAULT 1.0,
+    estimated_duration_ms INTEGER,
+    success_rate REAL DEFAULT 1.0,
+    execution_count INTEGER DEFAULT 0,
+    category TEXT NOT NULL,
+    qe_domain TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    -- A14: real domain API method binding (kernel.getDomainAPI(qe_domain)[method](params)).
+    -- method/implemented are NULL/0 for actions with no real backing yet —
+    -- GOAPExecutor must report those as "not implemented", never simulate them.
+    method TEXT,
+    params TEXT,
+    implemented INTEGER DEFAULT 0
+  );
+CREATE TABLE goap_plans (
+    id TEXT PRIMARY KEY,
+    goal_id TEXT,
+    initial_state TEXT NOT NULL,
+    goal_state TEXT NOT NULL,
+    action_sequence TEXT NOT NULL,
+    total_cost REAL,
+    estimated_duration_ms INTEGER,
+    status TEXT DEFAULT 'pending',
+    reused_from TEXT,
+    similarity_score REAL,
+    created_at TEXT DEFAULT (datetime('now')),
+    executed_at TEXT,
+    completed_at TEXT,
+    FOREIGN KEY (goal_id) REFERENCES goap_goals(id)
+  );
+CREATE TABLE goap_plan_signatures (
+    id TEXT PRIMARY KEY,
+    plan_id TEXT NOT NULL UNIQUE,
+    goal_hash TEXT NOT NULL,
+    state_vector TEXT NOT NULL,
+    action_sequence TEXT NOT NULL,
+    total_cost REAL NOT NULL,
+    success_rate REAL DEFAULT 1.0,
+    usage_count INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+CREATE TABLE goap_execution_steps (
+    id TEXT PRIMARY KEY,
+    plan_id TEXT NOT NULL,
+    execution_id TEXT NOT NULL,
+    action_id TEXT NOT NULL,
+    step_order INTEGER NOT NULL,
+    world_state_before TEXT,
+    world_state_after TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    retries INTEGER DEFAULT 0,
+    started_at TEXT,
+    duration_ms INTEGER,
+    agent_id TEXT,
+    agent_output TEXT,
+    error_message TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+    -- Deliberately no FK to goap_plans/goap_actions: PlanExecutor.execute()
+    -- can legitimately run an ad-hoc GOAPPlan/GOAPAction that was never
+    -- saved via savePlan()/addAction() (e.g. programmatic orchestration
+    -- bypassing the A* planner). unified-memory.ts enables the
+    -- foreign_keys pragma, so an enforced FK here would reject that
+    -- entirely legitimate usage, not just catch real corruption.
+  );
+CREATE INDEX idx_goap_actions_category ON goap_actions(category);
+CREATE INDEX idx_goap_actions_agent ON goap_actions(agent_type);
+CREATE INDEX idx_goap_plans_status ON goap_plans(status);
+CREATE INDEX idx_goap_sig_goal ON goap_plan_signatures(goal_hash);
+CREATE INDEX idx_goap_exec_steps_plan ON goap_execution_steps(plan_id);
+CREATE INDEX idx_goap_exec_steps_action ON goap_execution_steps(action_id);
+CREATE TABLE concept_nodes (
+    id TEXT PRIMARY KEY,
+    concept_type TEXT NOT NULL,
+    content TEXT NOT NULL,
+    embedding BLOB,
+    activation_level REAL DEFAULT 0.0,
+    last_activated TEXT,
+    pattern_id TEXT,
+    metadata TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+CREATE TABLE concept_edges (
+    id TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    target TEXT NOT NULL,
+    weight REAL NOT NULL DEFAULT 1.0,
+    edge_type TEXT NOT NULL,
+    evidence INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (source) REFERENCES concept_nodes(id) ON DELETE CASCADE,
+    FOREIGN KEY (target) REFERENCES concept_nodes(id) ON DELETE CASCADE
+  );
+CREATE TABLE dream_cycles (
+    id TEXT PRIMARY KEY,
+    start_time TEXT NOT NULL,
+    end_time TEXT,
+    duration_ms INTEGER,
+    concepts_processed INTEGER DEFAULT 0,
+    associations_found INTEGER DEFAULT 0,
+    insights_generated INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'running',
+    error TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+CREATE TABLE dream_insights (
+    id TEXT PRIMARY KEY,
+    cycle_id TEXT NOT NULL,
+    insight_type TEXT NOT NULL,
+    source_concepts TEXT NOT NULL,
+    description TEXT NOT NULL,
+    novelty_score REAL DEFAULT 0.5,
+    confidence_score REAL DEFAULT 0.5,
+    actionable INTEGER DEFAULT 0,
+    applied INTEGER DEFAULT 0,
+    suggested_action TEXT,
+    pattern_id TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (cycle_id) REFERENCES dream_cycles(id) ON DELETE CASCADE
+  );
+CREATE INDEX idx_concept_type ON concept_nodes(concept_type);
+CREATE INDEX idx_concept_activation ON concept_nodes(activation_level);
+CREATE INDEX idx_concept_pattern ON concept_nodes(pattern_id);
+CREATE INDEX idx_edge_source ON concept_edges(source);
+CREATE INDEX idx_edge_target ON concept_edges(target);
+CREATE INDEX idx_edge_type ON concept_edges(edge_type);
+CREATE INDEX idx_edge_weight ON concept_edges(weight DESC);
+CREATE INDEX idx_insight_cycle ON dream_insights(cycle_id);
+CREATE INDEX idx_dream_status ON dream_cycles(status);
+CREATE TABLE qe_patterns (
+    id TEXT PRIMARY KEY,
+    pattern_type TEXT NOT NULL,
+    qe_domain TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    confidence REAL DEFAULT 0.5,
+    usage_count INTEGER DEFAULT 0,
+    success_rate REAL DEFAULT 0.0,
+    quality_score REAL DEFAULT 0.0,
+    tier TEXT DEFAULT 'short-term',
+    template_json TEXT,
+    context_json TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    last_used_at TEXT,
+    successful_uses INTEGER DEFAULT 0,
+    tokens_used INTEGER,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    latency_ms REAL,
+    reusable INTEGER DEFAULT 0,
+    reuse_count INTEGER DEFAULT 0,
+    average_token_savings REAL DEFAULT 0,
+    total_tokens_saved INTEGER
+  );
+CREATE TABLE qe_pattern_embeddings (
+    pattern_id TEXT PRIMARY KEY,
+    embedding BLOB NOT NULL,
+    dimension INTEGER NOT NULL,
+    model TEXT DEFAULT 'all-MiniLM-L6-v2',
+    space_id TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (pattern_id) REFERENCES qe_patterns(id) ON DELETE CASCADE
+  );
+CREATE TABLE qe_pattern_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pattern_id TEXT NOT NULL,
+    success INTEGER NOT NULL,
+    metrics_json TEXT,
+    feedback TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+CREATE TABLE sqlite_sequence(name,seq);
+CREATE TABLE qe_trajectories (
+    id TEXT PRIMARY KEY,
+    task TEXT NOT NULL,
+    agent TEXT,
+    domain TEXT,
+    started_at TEXT DEFAULT (datetime('now')),
+    ended_at TEXT,
+    success INTEGER,
+    steps_json TEXT,
+    metadata_json TEXT
+  );
+CREATE TABLE embeddings (
+    key TEXT NOT NULL,
+    namespace TEXT NOT NULL,
+    vector BLOB NOT NULL,
+    dimension INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    timestamp INTEGER NOT NULL,
+    quantization TEXT NOT NULL,
+    metadata TEXT,
+    access_count INTEGER DEFAULT 1,
+    last_access INTEGER NOT NULL,
+    PRIMARY KEY (key, namespace)
+  );
+CREATE TABLE execution_results (
+    id TEXT PRIMARY KEY,
+    plan_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    steps_completed INTEGER DEFAULT 0,
+    steps_failed INTEGER DEFAULT 0,
+    total_duration_ms INTEGER DEFAULT 0,
+    final_world_state TEXT,
+    error_message TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+CREATE TABLE executed_steps (
+    id TEXT PRIMARY KEY,
+    execution_id TEXT NOT NULL,
+    plan_id TEXT NOT NULL,
+    action_id TEXT NOT NULL,
+    step_order INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    retries INTEGER DEFAULT 0,
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    duration_ms INTEGER,
+    agent_id TEXT,
+    agent_output TEXT,
+    world_state_before TEXT,
+    world_state_after TEXT,
+    error_message TEXT,
+    FOREIGN KEY (execution_id) REFERENCES execution_results(id)
+  );
+CREATE VIRTUAL TABLE qe_patterns_fts USING fts5(
+    name, description, pattern_type, qe_domain,
+    content='qe_patterns',
+    content_rowid='rowid'
+  )
+/* qe_patterns_fts(name,description,pattern_type,qe_domain) */;
+CREATE TABLE 'qe_patterns_fts_data'(id INTEGER PRIMARY KEY, block BLOB);
+CREATE TABLE 'qe_patterns_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID;
+CREATE TABLE 'qe_patterns_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB);
+CREATE TABLE 'qe_patterns_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID;
+CREATE TRIGGER qe_patterns_fts_insert AFTER INSERT ON qe_patterns BEGIN
+    INSERT INTO qe_patterns_fts(rowid, name, description, pattern_type, qe_domain)
+    VALUES (new.rowid, new.name, new.description, new.pattern_type, new.qe_domain);
+  END;
+CREATE TRIGGER qe_patterns_fts_delete AFTER DELETE ON qe_patterns BEGIN
+    INSERT INTO qe_patterns_fts(qe_patterns_fts, rowid, name, description, pattern_type, qe_domain)
+    VALUES ('delete', old.rowid, old.name, old.description, old.pattern_type, old.qe_domain);
+  END;
+CREATE TRIGGER qe_patterns_fts_update AFTER UPDATE ON qe_patterns BEGIN
+    INSERT INTO qe_patterns_fts(qe_patterns_fts, rowid, name, description, pattern_type, qe_domain)
+    VALUES ('delete', old.rowid, old.name, old.description, old.pattern_type, old.qe_domain);
+    INSERT INTO qe_patterns_fts(rowid, name, description, pattern_type, qe_domain)
+    VALUES (new.rowid, new.name, new.description, new.pattern_type, new.qe_domain);
+  END;
+CREATE INDEX idx_qe_patterns_domain ON qe_patterns(qe_domain);
+CREATE INDEX idx_qe_patterns_type ON qe_patterns(pattern_type);
+CREATE INDEX idx_qe_patterns_tier ON qe_patterns(tier);
+CREATE INDEX idx_qe_patterns_quality ON qe_patterns(quality_score DESC);
+CREATE INDEX idx_qe_pattern_embeddings_space ON qe_pattern_embeddings(space_id);
+CREATE INDEX idx_qe_usage_pattern ON qe_pattern_usage(pattern_id);
+CREATE INDEX idx_qe_trajectories_domain ON qe_trajectories(domain);
+CREATE INDEX idx_embeddings_namespace ON embeddings(namespace);
+CREATE INDEX idx_embeddings_timestamp ON embeddings(timestamp);
+CREATE INDEX idx_execution_results_plan ON execution_results(plan_id);
+CREATE INDEX idx_execution_results_status ON execution_results(status);
+CREATE INDEX idx_executed_steps_execution ON executed_steps(execution_id);
+CREATE INDEX idx_executed_steps_action ON executed_steps(action_id);
+CREATE TABLE mincut_snapshots (
+    id TEXT PRIMARY KEY,
+    timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+    vertex_count INTEGER NOT NULL,
+    edge_count INTEGER NOT NULL,
+    total_weight REAL NOT NULL DEFAULT 0.0,
+    is_connected INTEGER NOT NULL DEFAULT 1,
+    component_count INTEGER NOT NULL DEFAULT 1,
+    vertices_json TEXT NOT NULL,
+    edges_json TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+CREATE TABLE mincut_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+    mincut_value REAL NOT NULL,
+    vertex_count INTEGER NOT NULL,
+    edge_count INTEGER NOT NULL,
+    algorithm TEXT NOT NULL DEFAULT 'weighted-degree',
+    duration_ms INTEGER,
+    snapshot_id TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (snapshot_id) REFERENCES mincut_snapshots(id) ON DELETE SET NULL
+  );
+CREATE TABLE mincut_weak_vertices (
+    id TEXT PRIMARY KEY,
+    vertex_id TEXT NOT NULL,
+    weighted_degree REAL NOT NULL,
+    risk_score REAL NOT NULL,
+    reason TEXT NOT NULL,
+    domain TEXT,
+    vertex_type TEXT NOT NULL,
+    suggestions_json TEXT,
+    detected_at TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved_at TEXT,
+    snapshot_id TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (snapshot_id) REFERENCES mincut_snapshots(id) ON DELETE SET NULL
+  );
+CREATE TABLE mincut_alerts (
+    id TEXT PRIMARY KEY,
+    severity TEXT NOT NULL,
+    message TEXT NOT NULL,
+    mincut_value REAL NOT NULL,
+    threshold REAL NOT NULL,
+    affected_vertices_json TEXT,
+    remediations_json TEXT,
+    acknowledged INTEGER DEFAULT 0,
+    acknowledged_at TEXT,
+    acknowledged_by TEXT,
+    timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+CREATE TABLE mincut_healing_actions (
+    id TEXT PRIMARY KEY,
+    action_type TEXT NOT NULL,
+    action_params_json TEXT NOT NULL,
+    success INTEGER NOT NULL,
+    mincut_before REAL NOT NULL,
+    mincut_after REAL NOT NULL,
+    improvement REAL NOT NULL DEFAULT 0.0,
+    error_message TEXT,
+    duration_ms INTEGER NOT NULL,
+    triggered_by TEXT,
+    snapshot_before_id TEXT,
+    snapshot_after_id TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (snapshot_before_id) REFERENCES mincut_snapshots(id) ON DELETE SET NULL,
+    FOREIGN KEY (snapshot_after_id) REFERENCES mincut_snapshots(id) ON DELETE SET NULL
+  );
+CREATE TABLE mincut_observations (
+    id TEXT PRIMARY KEY,
+    iteration INTEGER NOT NULL,
+    mincut_value REAL NOT NULL,
+    weak_vertex_count INTEGER NOT NULL DEFAULT 0,
+    weak_vertices_json TEXT,
+    snapshot_id TEXT,
+    prediction_json TEXT,
+    actual_vs_predicted_diff REAL,
+    timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (snapshot_id) REFERENCES mincut_snapshots(id) ON DELETE SET NULL
+  );
+CREATE INDEX idx_mincut_history_timestamp ON mincut_history(timestamp DESC);
+CREATE INDEX idx_mincut_history_value ON mincut_history(mincut_value);
+CREATE INDEX idx_mincut_weak_vertex ON mincut_weak_vertices(vertex_id);
+CREATE INDEX idx_mincut_weak_risk ON mincut_weak_vertices(risk_score DESC);
+CREATE INDEX idx_mincut_weak_resolved ON mincut_weak_vertices(resolved_at);
+CREATE INDEX idx_mincut_alerts_severity ON mincut_alerts(severity);
+CREATE INDEX idx_mincut_alerts_ack ON mincut_alerts(acknowledged);
+CREATE INDEX idx_mincut_healing_type ON mincut_healing_actions(action_type);
+CREATE INDEX idx_mincut_healing_success ON mincut_healing_actions(success);
+CREATE INDEX idx_mincut_observations_iter ON mincut_observations(iteration);
+CREATE TABLE hypergraph_nodes (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,  -- 'function', 'module', 'test', 'file', 'class'
+    name TEXT NOT NULL,
+    file_path TEXT,
+    line_start INTEGER,
+    line_end INTEGER,
+    complexity REAL,
+    coverage REAL,
+    metadata TEXT,  -- JSON
+    embedding BLOB,  -- Vector embedding
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+CREATE TABLE hypergraph_edges (
+    id TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL REFERENCES hypergraph_nodes(id),
+    target_id TEXT NOT NULL REFERENCES hypergraph_nodes(id),
+    type TEXT NOT NULL,  -- 'calls', 'imports', 'tests', 'depends_on', 'covers'
+    weight REAL DEFAULT 1.0,
+    properties TEXT,  -- JSON
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(source_id, target_id, type)
+  );
+CREATE INDEX idx_hg_nodes_type ON hypergraph_nodes(type);
+CREATE INDEX idx_hg_nodes_file ON hypergraph_nodes(file_path);
+CREATE INDEX idx_hg_nodes_name ON hypergraph_nodes(name);
+CREATE INDEX idx_hg_edges_source ON hypergraph_edges(source_id);
+CREATE INDEX idx_hg_edges_target ON hypergraph_edges(target_id);
+CREATE INDEX idx_hg_edges_type ON hypergraph_edges(type);
+CREATE TABLE sona_patterns (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    state_embedding BLOB,
+    action_embedding BLOB,
+    action_type TEXT NOT NULL,
+    action_value TEXT,
+    outcome_reward REAL NOT NULL DEFAULT 0.0,
+    outcome_success INTEGER NOT NULL DEFAULT 0,
+    outcome_quality REAL NOT NULL DEFAULT 0.0,
+    confidence REAL DEFAULT 0.5,
+    usage_count INTEGER DEFAULT 0,
+    success_count INTEGER DEFAULT 0,
+    failure_count INTEGER DEFAULT 0,
+    metadata TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    last_used_at TEXT
+  );
+CREATE INDEX idx_sona_patterns_type ON sona_patterns(type);
+CREATE INDEX idx_sona_patterns_domain ON sona_patterns(domain);
+CREATE INDEX idx_sona_patterns_confidence ON sona_patterns(confidence DESC);
+CREATE INDEX idx_sona_patterns_updated ON sona_patterns(updated_at DESC);
+CREATE TABLE test_outcomes (
+    id TEXT PRIMARY KEY,
+    test_id TEXT NOT NULL,
+    test_name TEXT NOT NULL,
+    generated_by TEXT NOT NULL,
+    pattern_id TEXT,
+    framework TEXT NOT NULL,
+    language TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    passed INTEGER NOT NULL,
+    error_message TEXT,
+    coverage_lines REAL DEFAULT 0,
+    coverage_branches REAL DEFAULT 0,
+    coverage_functions REAL DEFAULT 0,
+    mutation_score REAL,
+    execution_time_ms REAL NOT NULL,
+    flaky INTEGER DEFAULT 0,
+    flakiness_score REAL,
+    maintainability_score REAL NOT NULL,
+    complexity REAL,
+    lines_of_code INTEGER,
+    assertion_count INTEGER,
+    file_path TEXT,
+    source_file_path TEXT,
+    metadata_json TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+CREATE INDEX idx_test_outcomes_pattern ON test_outcomes(pattern_id);
+CREATE INDEX idx_test_outcomes_agent ON test_outcomes(generated_by);
+CREATE INDEX idx_test_outcomes_domain ON test_outcomes(domain);
+CREATE INDEX idx_test_outcomes_created ON test_outcomes(created_at);
+CREATE TABLE routing_outcomes (
+    id TEXT PRIMARY KEY,
+    task_json TEXT NOT NULL,
+    decision_json TEXT NOT NULL,
+    used_agent TEXT NOT NULL,
+    followed_recommendation INTEGER NOT NULL,
+    success INTEGER NOT NULL,
+    quality_score REAL NOT NULL,
+    duration_ms REAL NOT NULL,
+    error TEXT,
+    model_tier TEXT,
+    advisor_consultation_json TEXT,
+    -- ADR-095: routing exploration telemetry
+    exploration INTEGER NOT NULL DEFAULT 0,
+    criticality REAL,
+    q_weight REAL,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+CREATE INDEX idx_routing_outcomes_agent ON routing_outcomes(used_agent);
+CREATE INDEX idx_routing_outcomes_created ON routing_outcomes(created_at);
+CREATE INDEX idx_routing_outcomes_tier ON routing_outcomes(model_tier);
+CREATE INDEX idx_routing_outcomes_exploration ON routing_outcomes(exploration);
+CREATE TABLE coverage_sessions (
+    id TEXT PRIMARY KEY,
+    target_path TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    technique TEXT NOT NULL,
+    before_lines REAL DEFAULT 0,
+    before_branches REAL DEFAULT 0,
+    before_functions REAL DEFAULT 0,
+    after_lines REAL DEFAULT 0,
+    after_branches REAL DEFAULT 0,
+    after_functions REAL DEFAULT 0,
+    tests_generated INTEGER DEFAULT 0,
+    tests_passed INTEGER DEFAULT 0,
+    gaps_json TEXT,
+    duration_ms REAL NOT NULL,
+    started_at TEXT NOT NULL,
+    completed_at TEXT NOT NULL,
+    context_json TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+CREATE INDEX idx_coverage_sessions_technique ON coverage_sessions(technique);
+CREATE INDEX idx_coverage_sessions_agent ON coverage_sessions(agent_id);
+CREATE INDEX idx_coverage_sessions_created ON coverage_sessions(created_at);
+CREATE TABLE qe_pattern_nulls (
+    id TEXT PRIMARY KEY,
+    pattern_id TEXT NOT NULL REFERENCES qe_patterns(id),
+    context_fingerprint TEXT NOT NULL,
+    failure_mode TEXT NOT NULL,
+    trajectory_ref TEXT,
+    evidence_class TEXT NOT NULL DEFAULT 'EXECUTED'
+      CHECK (evidence_class IN ('EXECUTED','STATIC','INFERRED','CONJECTURE')),
+    consolidated_count INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE (pattern_id, context_fingerprint)
+  );
+CREATE INDEX idx_pattern_nulls_pattern ON qe_pattern_nulls(pattern_id);
+CREATE INDEX idx_pattern_nulls_context ON qe_pattern_nulls(context_fingerprint);
+CREATE INDEX idx_goap_exec_steps_execution ON goap_execution_steps(execution_id);
+CREATE TABLE learning_evidence_manifests (
+    id TEXT PRIMARY KEY,
+    trajectory_id TEXT,
+    trajectory_hash TEXT,
+    manifest_hash TEXT NOT NULL UNIQUE,
+    task_family TEXT NOT NULL,
+    task_identity TEXT,
+    run_identity TEXT,
+    correlation_group TEXT,
+    dedupe_fingerprint TEXT,
+    revision TEXT,
+    environment TEXT,
+    outcome TEXT NOT NULL CHECK (outcome IN ('verified-success','verified-failure','unknown')),
+    oracle_refs_json TEXT NOT NULL DEFAULT '[]',
+    source_kind TEXT NOT NULL CHECK (source_kind IN ('executed','static','human-reviewed','inferred')),
+    process_signals_json TEXT NOT NULL DEFAULT '{}',
+    manifest_version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+CREATE TABLE learning_evidence_segments (
+    id TEXT NOT NULL,
+    manifest_id TEXT NOT NULL REFERENCES learning_evidence_manifests(id) ON DELETE RESTRICT,
+    segment_order INTEGER NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('observe','decide','act','verify','recover','other')),
+    contribution TEXT NOT NULL CHECK (contribution IN ('causal','supporting','irrelevant','harmful','unknown')),
+    evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+    admit_for_learning INTEGER NOT NULL CHECK (admit_for_learning IN (0,1)),
+    reasons_json TEXT NOT NULL DEFAULT '[]',
+    content_hash TEXT,
+    PRIMARY KEY (manifest_id, id),
+    UNIQUE (manifest_id, segment_order)
+  );
+CREATE TABLE learning_segment_edges (
+    manifest_id TEXT NOT NULL,
+    parent_segment_id TEXT NOT NULL,
+    child_segment_id TEXT NOT NULL,
+    edge_kind TEXT NOT NULL DEFAULT 'depends-on',
+    PRIMARY KEY (manifest_id, parent_segment_id, child_segment_id, edge_kind),
+    FOREIGN KEY (manifest_id, parent_segment_id)
+      REFERENCES learning_evidence_segments(manifest_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (manifest_id, child_segment_id)
+      REFERENCES learning_evidence_segments(manifest_id, id) ON DELETE RESTRICT,
+    CHECK (parent_segment_id <> child_segment_id)
+  );
+CREATE TABLE learning_evidence_admissions (
+    id TEXT PRIMARY KEY,
+    manifest_id TEXT NOT NULL REFERENCES learning_evidence_manifests(id) ON DELETE RESTRICT,
+    decision_seq INTEGER NOT NULL CHECK (decision_seq > 0),
+    disposition TEXT NOT NULL CHECK (disposition IN ('admitted','rejected','review-required','legacy-unknown')),
+    reason_codes_json TEXT NOT NULL DEFAULT '[]',
+    assessor_kind TEXT NOT NULL CHECK (assessor_kind IN ('executed','static','human-reviewed','inferred')),
+    evidence_class TEXT NOT NULL CHECK (evidence_class IN ('EXECUTED','STATIC','INFERRED','CONJECTURE')),
+    policy_version TEXT,
+    policy_hash TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (manifest_id, decision_seq)
+  );
+CREATE TABLE pattern_manifest_lineage (
+    pattern_id TEXT NOT NULL REFERENCES qe_patterns(id) ON DELETE RESTRICT,
+    manifest_id TEXT NOT NULL REFERENCES learning_evidence_manifests(id) ON DELETE RESTRICT,
+    pattern_version_id TEXT,
+    use_kind TEXT NOT NULL CHECK (use_kind IN ('candidate-source','promotion-support','rejection','rollback','legacy-context')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (pattern_id, manifest_id, use_kind)
+  );
+CREATE TABLE pattern_segment_lineage (
+    pattern_id TEXT NOT NULL REFERENCES qe_patterns(id) ON DELETE RESTRICT,
+    manifest_id TEXT NOT NULL,
+    segment_id TEXT NOT NULL,
+    pattern_version_id TEXT,
+    use_kind TEXT NOT NULL CHECK (use_kind IN ('candidate-source','promotion-support','rejection','rollback')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (pattern_id, manifest_id, segment_id, use_kind),
+    FOREIGN KEY (manifest_id, segment_id)
+      REFERENCES learning_evidence_segments(manifest_id, id) ON DELETE RESTRICT
+  );
+CREATE INDEX idx_learning_manifest_trajectory ON learning_evidence_manifests(trajectory_id);
+CREATE INDEX idx_learning_manifest_task ON learning_evidence_manifests(task_family);
+CREATE INDEX idx_learning_manifest_dedupe ON learning_evidence_manifests(dedupe_fingerprint);
+CREATE INDEX idx_learning_manifest_correlation ON learning_evidence_manifests(correlation_group);
+CREATE INDEX idx_learning_manifest_outcome ON learning_evidence_manifests(outcome, source_kind);
+CREATE INDEX idx_learning_admission_manifest ON learning_evidence_admissions(manifest_id, decision_seq DESC);
+CREATE INDEX idx_pattern_manifest_lineage_manifest ON pattern_manifest_lineage(manifest_id);
+CREATE INDEX idx_pattern_segment_lineage_manifest ON pattern_segment_lineage(manifest_id, segment_id);
+CREATE TRIGGER learning_manifests_no_update BEFORE UPDATE ON learning_evidence_manifests
+  BEGIN SELECT RAISE(ABORT, 'learning evidence manifests are append-only'); END;
+CREATE TRIGGER learning_manifests_no_delete BEFORE DELETE ON learning_evidence_manifests
+  BEGIN SELECT RAISE(ABORT, 'learning evidence manifests are append-only'); END;
+CREATE TRIGGER learning_segments_no_update BEFORE UPDATE ON learning_evidence_segments
+  BEGIN SELECT RAISE(ABORT, 'learning evidence segments are append-only'); END;
+CREATE TRIGGER learning_segments_no_delete BEFORE DELETE ON learning_evidence_segments
+  BEGIN SELECT RAISE(ABORT, 'learning evidence segments are append-only'); END;
+CREATE TRIGGER learning_edges_no_update BEFORE UPDATE ON learning_segment_edges
+  BEGIN SELECT RAISE(ABORT, 'learning evidence edges are append-only'); END;
+CREATE TRIGGER learning_edges_no_delete BEFORE DELETE ON learning_segment_edges
+  BEGIN SELECT RAISE(ABORT, 'learning evidence edges are append-only'); END;
+CREATE TRIGGER learning_admissions_no_update BEFORE UPDATE ON learning_evidence_admissions
+  BEGIN SELECT RAISE(ABORT, 'learning evidence admissions are append-only'); END;
+CREATE TRIGGER learning_admissions_no_delete BEFORE DELETE ON learning_evidence_admissions
+  BEGIN SELECT RAISE(ABORT, 'learning evidence admissions are append-only'); END;
+CREATE UNIQUE INDEX idx_patterns_unique_name_domain_type
+          ON qe_patterns(name, qe_domain, pattern_type)
+      ;
+CREATE TABLE witness_chain (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        prev_hash TEXT NOT NULL, action_hash TEXT NOT NULL, action_type TEXT NOT NULL,
+        action_data TEXT, timestamp TEXT NOT NULL, actor TEXT NOT NULL,
+        hash_algo TEXT DEFAULT 'sha256', signature TEXT, signer_key_id TEXT
+      );
+CREATE INDEX idx_witness_action_type ON witness_chain(action_type);
+CREATE INDEX idx_witness_timestamp ON witness_chain(timestamp);
+CREATE INDEX idx_witness_actor ON witness_chain(actor);
+CREATE TABLE witness_chain_archive (
+        id INTEGER PRIMARY KEY,
+        prev_hash TEXT NOT NULL, action_hash TEXT NOT NULL, action_type TEXT NOT NULL,
+        action_data TEXT, timestamp TEXT NOT NULL, actor TEXT NOT NULL,
+        hash_algo TEXT DEFAULT 'sha256', signature TEXT, signer_key_id TEXT,
+        archived_at TEXT NOT NULL
+      );
+CREATE TABLE captured_experiences (
+            id TEXT PRIMARY KEY,
+            task TEXT NOT NULL,
+            agent TEXT NOT NULL,
+            domain TEXT NOT NULL DEFAULT '',
+            success INTEGER NOT NULL DEFAULT 0,
+            quality REAL NOT NULL DEFAULT 0.5,
+            duration_ms INTEGER NOT NULL DEFAULT 0,
+            model_tier INTEGER,
+            routing_json TEXT,
+            steps_json TEXT,
+            result_json TEXT,
+            error TEXT,
+            started_at TEXT NOT NULL DEFAULT (datetime('now')),
+            completed_at TEXT NOT NULL DEFAULT (datetime('now')),
+            source TEXT DEFAULT 'middleware'
+          , application_count INTEGER DEFAULT 0, avg_token_savings REAL DEFAULT 0, embedding BLOB, embedding_dimension INTEGER, tags TEXT, last_applied_at TEXT, consolidated_into TEXT DEFAULT NULL, consolidation_count INTEGER DEFAULT 1, quality_updated_at TEXT DEFAULT NULL, reuse_success_count INTEGER DEFAULT 0, reuse_failure_count INTEGER DEFAULT 0);
+CREATE INDEX idx_captured_exp_domain ON captured_experiences(domain);
+CREATE INDEX idx_captured_exp_success ON captured_experiences(success);
+CREATE INDEX idx_captured_exp_agent ON captured_experiences(agent);
+CREATE INDEX idx_captured_exp_completed ON captured_experiences(completed_at DESC);

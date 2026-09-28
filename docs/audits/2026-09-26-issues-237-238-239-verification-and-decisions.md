@@ -973,6 +973,55 @@ decisions are under "Branch 4 decisions" below.
   Hermes Agent thread is first cited: none is today, and the loader then names the missing policy
   (`dependency hermes-agent has no dependency policy`).
 
+#### Remediation program Branch 5 (`fix/aqe-store-integrity`, 2026-09-27)
+
+Added after the fact, like Branch 1: built on `main` (rebased onto `88e26999`) for the
+[remediation program](../superpowers/plans/2026-09-26-remediation-program.md), not merged. The
+decisions are under "Branch 5 decisions" below; the design is
+[ADR-0062](../adr/0062-aqe-project-store-integrity.md).
+
+- **Independent fixes (Addendum 3 items 5 and 6, decisions 3 and 7):** every plain npx spelling of
+  AQE's server is recognized (`1925fecc`); the report-only AQE solver heal is removed
+  (`eb6755d0`); no evidence is recorded for an unmanaged AQE backend (`f35d371c`); a passing check
+  says "embedder verified" and names agentic-qe#754 (`ce097df7`); agentic-qe#574 is the busy rule's
+  removal condition (`5eec3a0d`).
+- **Pin (item 2, B5-D1, B5-D1a, B5-D1b):** three absolute keys in four project targets under
+  receipts (`0296c6c9`, `abe3d75e`, `4ab63ed5`, `f0da2f6c`).
+- **Verify from the root (item 3):** `2f13f043`. Its title says "without writing": that means the
+  project store's database files. `aqe health` still creates `witness-keys/` in the root store
+  folder when it is missing (ADR-0062 §2).
+- **Merge (item 2, B5-D2 to B5-D5):** holders (`38ef6b44`, `f770c1f9`, `f84e97e8`), merge and
+  archive (`60618326`, `55848973`), the status row's hand fix (`9442e831`), AQE's starter patterns
+  left out (`a69f2729`).
+- **Constraint sunsets:** agentic-qe-3.13-external-provider-contract (#628, `9fdac7c0`) and
+  agentic-qe-3.14.0-stop-hook-generator (#654, `e2e9c61c`) after their conformance runs on 3.14.4.
+  agentic-qe-3.14.0-codex-guidance-policy (#655) stays: its conformance on ak's own path (full
+  `aqe init --auto --with-codex --codex-guidance full|compact|none` through the `aqe` command,
+  3.14.4, sandboxed) fails. `full` writes no block when `AGENTS.md` exists; `compact` adds bytes
+  outside its sentinel; through the `aqe` bin symlink AQE's `resolvePackageRoot()` misses its
+  package, so no Codex hooks or skills install (not `--minimal`, as first recorded); `platform
+  verify` exits 0 on failed checks; `aqe platform setup codex` fails with "Module not found in
+  bundle: ../../init/codex-installer.js". The evidence is on the constraint and its watch entry
+  (`63107d07`), and the opt-in `tests/live/aqe-codex-guidance-conformance.test.mjs` proves the
+  sunset once a release passes (`52bfa713`).
+- **Adversarial review fixes:** a killed or timed-out holder check refuses (`482b1ea5`); the stray
+  search stops at nested repositories (`3fbcc97c`); AQE's re-init value is taken back under the
+  receipt (`a37edf2a`); a release leaves no table, file or backup pile behind (`88e76e71`); files
+  git tracks are never pinned (`70d7b070`, maintainer decision B5-M5); the root is checked before
+  any backup (`77c795e5`); stores are fingerprinted at copy time and re-checked before the import
+  and each move (`a4980a7d`); an `applying` receipt precedes the real import (`0d1e6075`); starter
+  patterns the root holds keep their usage, and every `*pattern_id` reference is handled
+  (`e11de134`); experiences the root holds are counted (`cb2ec3c8`); a partial cross-device move is
+  reported as such (`9e6e36e9`); the restore steps are ordered and say what they discard
+  (`cf99937d`); `ak setup` names AQE's Codex hooks and skills only when they exist (`742021e0`).
+  AQE's database-free mode was checked against the pin and needs no change (ADR-0062 §1).
+- **Registry:** Branch 5 evidence on agentic-qe#735, #736 and #753, agentic-qe#561 registered, and
+  the 20 threads the watch proposed retiring retired (`76696c76`).
+- **Live preview on 2026-09-27** (read-only copies): the nine strays would add 0 patterns and 99
+  experiences to the root (363 patterns, 5,333 → 5,432 experiences), with 70 starter patterns left
+  out of each. A merge refuses now: the maintainer's two AQE MCP servers hold the root store. The
+  merge itself is the maintainer's step with the released build.
+
 ### Full-suite results at each stage end
 
 #### Baseline on `847486c`
@@ -1226,13 +1275,16 @@ Behavior that differs from, or goes beyond, the plan text.
   - With an unwritable evidence store, `ak status --live --json` can print a non-JSON warning on
     stdout.
   - `--deep` is declared but never read.
-  - `ak x verify aqe` records failures of an unmanaged backend.
+  - `ak x verify aqe` records failures of an unmanaged backend. Resolved by Remediation program
+    Branch 5: evidence is recorded only for a managed backend (`aqeEmbeddingManaged`, `f35d371c`).
 - **Limits.** `readLimits` starts `codex app-server` whatever the Codex host setting says. This needs
   a policy decision.
 - **Memory.**
   - Old `_setup/verify-*` rows in existing MCP stores. Resolved by B3-D2: `ak sync` removes them
     once, with a backup and a receipt (`ec6c9367`).
-  - AQE's relative `AQE_MEMORY_PATH`: file it upstream, or anchor it in ak's projection.
+  - AQE's relative `AQE_MEMORY_PATH`: file it upstream, or anchor it in ak's projection. Resolved
+    by B5-D1: ak pins it, `AQE_PROJECT_ROOT` and `AQE_STORAGE_PATH` as absolute paths
+    (`0296c6c9`, `4ab63ed5`); the upstream evidence is agentic-qe#735 (ADR-0062).
   - Observed routing evidence is macOS-only.
   - The two-store warning is permanent (N4).
   - `ak setup` sets `daemon.autoStart: false`, so Ruflo's backups stop. Resolved by Addendum 3
@@ -2213,3 +2265,190 @@ The maintainer settled three details on 2026-09-27:
 
 Not yet proven: that `github-actions[bot]` can comment on the locked issue (first manual run), and
 that a label applied with the workflow token reaches the routine's trigger (first dispatch).
+
+**4b-C amended (2026-09-27).** A routine's GitHub trigger supports only pull request and release
+events ([Supported events](https://code.claude.com/docs/en/routines#supported-events)); an issue
+label cannot fire it, so the second open point above cannot hold. Choice: the dispatch routine
+runs on its own daily schedule at 15:07 UTC (`7 15 * * *`, after the 14:00 watch), reads the
+ledger, and stops quickly when no line qualifies. The workflow keeps re-applying the
+`upstream-dispatch` label as a marker for people reading the issue; it fires nothing.
+
+## Branch 5 decisions (2026-09-27)
+
+Asked during Branch 5 (`fix/aqe-store-integrity`) in the decision format of the Decision
+walkthrough; the maintainer's choices are recorded as given in the program ledger. Commits are on
+that branch; the design is [ADR-0062](../adr/0062-aqe-project-store-integrity.md).
+
+### B5-D1 — what the pin covers
+
+**The situation.** Addendum 3 item 2 chose to pin an absolute `AQE_PROJECT_ROOT` so AQE stops
+making stores in subfolders.
+
+**The problem.** AQE 3.14.4 reads `AQE_PROJECT_ROOT` only in `dist/kernel/project-root.js`. Its
+memory database path (`dist/learning/embedder-identity-store.js`) uses `AQE_MEMORY_PATH` or
+`<cwd>/.agentic-qe/memory.db` and creates the folder, and `aqe init` writes a relative
+`AQE_MEMORY_PATH`. A root pin alone still leaves a store in the subfolder.
+
+**What the user sees.** New `.agentic-qe` folders in subfolders, and learning the project's
+sessions never read.
+
+**What should be the case.** Every AQE command, hook and MCP server in the project uses the root's
+store.
+
+**The choices.**
+
+- **A.** Pin `AQE_PROJECT_ROOT` and an absolute `AQE_MEMORY_PATH` in `.claude/settings.local.json`,
+  the `.mcp.json` AQE entry and the project `.codex/config.toml`, replacing AQE's own relative value
+  under a receipt; never the user-level Codex configuration.
+- **B.** Pin the root only and wait for agentic-qe#735.
+
+**Recommendation: A.** It closes the path the code shows, with receipts `ak uninstall` restores.
+
+**Choice: A.** `0296c6c9`.
+
+### B5-D1a — a third key
+
+**The situation.** With the root and memory path pinned (Slice 0 case c), AQE still created an
+empty `<cwd>/.agentic-qe` from every CLI command, the MCP server and the hook shim.
+
+**The problem.** `dist/init/token-bootstrap.js` resolves `AQE_STORAGE_PATH ?? '.agentic-qe'`
+against the working directory.
+
+**What the user sees.** Empty `.agentic-qe` folders in subfolders, which later tools read as
+stores.
+
+**What should be the case.** Nothing AQE-owned appears in a subfolder.
+
+**The choices.**
+
+- **A.** Pin an absolute `AQE_STORAGE_PATH=<root>/.agentic-qe` as a third key, same targets and
+  receipt.
+- **B.** Accept empty folders.
+
+**Recommendation: A.** With all three keys pinned nothing appeared in the subfolder.
+
+**Choice: A.** `0296c6c9`.
+
+### B5-D1b — a fourth target
+
+**The situation.** Codex applies the project `.codex/config.toml` `[shell_environment_policy.set]`
+table to the commands and hooks it runs, and that table held AQE's relative
+`AQE_MEMORY_PATH = ".agentic-qe/memory.db"` after the pin.
+
+**The problem.** A Codex-run command or hook in a subfolder would still resolve the memory path
+there.
+
+**What the user sees.** Stray stores from Codex sessions despite the pin.
+
+**What should be the case.** The same three keys wherever Codex starts AQE.
+
+**The choices.**
+
+- **A.** Pin the three keys in that table too (when it exists or AQE is registered in the file),
+  under its own receipt, with the same rule for AQE's relative value and for foreign values.
+- **B.** Leave the table alone.
+
+**Recommendation: A.** One receipt holds one table's keys, so the table gets its own receipt
+(`.codex/config.toml.agentic-kit-aqe-shell-pin.json`).
+
+**Choice: A.** `4ab63ed5`.
+
+### B5-D2 — how a merge starts
+
+**The situation.** Addendum 3 item 2 chose to merge the existing stray stores, then archive them.
+
+**The problem.** A merge moves learned data and must refuse while AQE writes. As a sync step it
+would run on every `ak sync`, where refusing is the common case.
+
+**What the user sees.** Either a sync that fails until sessions close, or a merge nobody asked
+for.
+
+**What should be the case.** A merge the user starts, with a preview first.
+
+**The choices.**
+
+- **A.** Its own command, `ak x aqe-store merge` (a dry run unless `--yes`; `--json`), with
+  `ak x aqe-store status` as the preview; the stray-store status row is a hand fix naming it.
+- **B.** A sync step.
+
+**Recommendation: A.**
+
+**Choice: A.** `60618326`, `9442e831`.
+
+### B5-D3 — another AQE writer during a merge
+
+**The situation.** Claude Code, Codex and OpenCode sessions run AQE MCP servers and hooks that
+write the store at any time.
+
+**The problem.** AQE takes no lock a merge could wait on, and two processes appending to the
+witness chain fork it (agentic-qe#753).
+
+**What the user sees.** A merge racing a live session could leave a store the audit chain calls
+broken.
+
+**What should be the case.** A merge never runs beside another writer.
+
+**The choices.**
+
+- **A.** Find holders by open file (macOS `lsof`, Linux `/proc` with an `lsof` fallback), check
+  before the backup, the real import and the archive, refuse and list each holder; on Windows run
+  only when no host session is open for the project and treat a failed rename as a holder; no
+  `--force`.
+- **B.** The same with a `--force`.
+
+**Recommendation: A.**
+
+**Choice: A.** `38ef6b44`, `f770c1f9`.
+
+### B5-D4 — where merged strays go
+
+**The situation.** After a merge the stray folders still hold their data, their audit trail and
+their `witness-keys/`.
+
+**The problem.** Imported `witness_chain` rows break the root's audit chain at the first appended
+row (Slice 0). AQE restores any `memory*.db` over 1 MB it finds in a `.agentic-qe` folder when
+`memory.db` is missing (`dist/kernel/unified-memory.js`), so a backup there could come back as the
+live store.
+
+**What the user sees.** Nothing, until an audit fails or an old store reappears.
+
+**What should be the case.** The strays are kept whole and out of AQE's reach, and the audit
+chain stays intact.
+
+**The choices.**
+
+- **A.** Move each whole stray folder to `<state>/agentic-kit/aqe-store-merge/<time>/archive/`
+  beside a `VACUUM INTO` backup of the root and a receipt; do not import audit-trail rows; keep
+  the archive until the user deletes it; TROUBLESHOOTING gives restore steps.
+- **B.** Delete the strays after a backup.
+
+**Recommendation: A.**
+
+**Choice: A.** `60618326`.
+
+### B5-D5 — AQE's starter patterns
+
+**The situation.** Every stray carries the 70 starter patterns AQE seeds into a new store; the
+root holds only 14 of them.
+
+**The problem.** A merge would add 56 starter patterns the root no longer has. The data at stake is
+99 experiences and the strays' own patterns.
+
+**What the user sees.** The project store regrows AQE's starter set with every merge.
+
+**What should be the case.** A merge brings over what AQE learned in the subfolder, not what it
+seeded there.
+
+**The choices.**
+
+- **A.** Skip AQE's starter patterns: identify them by `(name, qe_domain, pattern_type)` against a
+  fresh store built in scratch at merge time, report the count skipped, keep them in the archive;
+  no opt-in flag.
+- **B.** Ask on each merge.
+- **C.** Import them.
+
+**Recommendation: A.** AQE seeds the set on first start and its cross-domain part depends on the
+embedder, so a fresh store is the only faithful source (ADR-0062 §6).
+
+**Choice: A.** The maintainer first chose B, then asked to see the options again and chose A.
+`a69f2729`.

@@ -91,14 +91,20 @@ function transportAssignment(text, transport, rest) {
   }
 }
 
-export function aqeTomlEnvironment(source) {
+/** The AQE registration's env table in a Codex TOML file. `keys` are the env keys the
+ *  caller manages (the embedding projection: AQE_EMBEDDER_ENDPOINT; the project pin:
+ *  AQE_PROJECT_ROOT, AQE_MEMORY_PATH, AQE_STORAGE_PATH). `current`/`replace` serve the
+ *  first key; `get`/`render` serve every key.
+ *  @param {string|null} source @param {string[]} [keys] */
+export function aqeTomlEnvironment(source, keys = [KEY]) {
   if (source === null) return { missing: true };
   const structure = inspectCodexTomlStructure(source);
   if (!structure.valid) throw new Error('unsupported Codex TOML preserved');
   let table = '';
   let base = null;
   let env = null;
-  let endpoint = null;
+  /** @type {Record<string, {start: number, end: number, value: string}>} */
+  const found = {};
   const transport = { command: null, args: null };
   const seenTables = new Set();
   for (const line of structure.lines) {
@@ -119,19 +125,124 @@ export function aqeTomlEnvironment(source) {
     // Inside the AQE tables, dotted/quoted keys can alias a managed field: refuse.
     if (!/^[A-Za-z0-9_-]+\s*=/.test(text)) throw new Error('dotted or quoted TOML assignments require manual embedding configuration');
     if (table === BASE) transportAssignment(text, transport, source.slice(line.start));
-    if (table === ENV && new RegExp(`^${KEY}\\s*=`).test(text)) {
-      if (endpoint) throw new Error('duplicate AQE endpoint');
-      endpoint = { ...line, value: scalar(text, KEY) };
-    }
+    if (table !== ENV) continue;
+    const key = keys.find((k) => new RegExp(`^${k}\\s*=`).test(text));
+    if (!key) continue;
+    if (found[key]) throw new Error(key === KEY ? 'duplicate AQE endpoint' : `duplicate AQE ${key}`);
+    found[key] = { start: line.start, end: line.end, value: scalar(text, key) };
   }
   if (!base) return { missing: true };
   if (!recognizedAqeTransport(transport.command, transport.args ?? [])) throw new Error('unrecognized AQE MCP transport preserved');
-  return { current: endpoint ? { present: true, value: endpoint.value } : { present: false }, replace(next) {
-    const nl = source.includes('\r\n') ? '\r\n' : '\n';
-    const replacement = next.present ? `${KEY} = ${JSON.stringify(next.value)}${nl}` : '';
-    if (endpoint) return source.slice(0, endpoint.start) + replacement + source.slice(endpoint.end);
-    if (!next.present) return source;
-    if (env) return source.slice(0, env.end) + (env.text.endsWith('\n') || source[env.end - 1] === '\n' ? '' : nl) + replacement + source.slice(env.end);
-    return source + (source.endsWith('\n') ? nl : nl + nl) + `[${ENV}]${nl}${replacement}`;
-  } };
+  const get = (key) => (found[key] ? { present: true, value: found[key].value } : { present: false });
+  const render = (nextStates, options) => renderEnv(source, env, found, nextStates, ENV, options);
+  return { current: get(keys[0]), get, render, replace: (next) => render({ [keys[0]]: next }), containerPresent: !!env };
+}
+
+/** Remove the `[header]` table when nothing but blank lines is left in it (a table ak
+ *  added, released again). Reaching the end of the file, the blank line ak put before it
+ *  goes too, so the file ends as it did before ak added the table. */
+function dropEmptyTable(text, header) {
+  const lines = text.split(/(?<=\n)/);
+  const at = lines.findIndex((l) => l.trim() === `[${header}]`);
+  if (at < 0) return text;
+  let end = at + 1;
+  while (end < lines.length && lines[end].trim() === '') end += 1;
+  if (end < lines.length && !lines[end].trimStart().startsWith('[')) return text;
+  let start = at;
+  if (end === lines.length && start > 0 && lines[start - 1].trim() === '') start -= 1;
+  return lines.slice(0, start).join('') + lines.slice(end).join('');
+}
+
+/** Replace, remove or append each key's line; new keys go after the env table header,
+ *  or into a new `[header]` table at the end. Edits apply from the last offset back.
+ *  `dropEmptyContainer`: remove the table when the edits leave it empty. */
+function renderEnv(source, env, found, nextStates, header, { dropEmptyContainer = false } = {}) {
+  const nl = source.includes('\r\n') ? '\r\n' : '\n';
+  const line = (key, next) => (next.present ? `${key} = ${JSON.stringify(next.value)}${nl}` : '');
+  const edits = [];
+  let added = '';
+  for (const [key, next] of Object.entries(nextStates)) {
+    if (found[key]) edits.push({ start: found[key].start, end: found[key].end, text: line(key, next) });
+    else added += line(key, next);
+  }
+  let out = source;
+  for (const edit of edits.sort((a, b) => b.start - a.start)) out = out.slice(0, edit.start) + edit.text + out.slice(edit.end);
+  if (!added) return dropEmptyContainer ? dropEmptyTable(out, header) : out;
+  if (env) {
+    const bare = !(env.text.endsWith('\n') || source[env.end - 1] === '\n');
+    return out.slice(0, env.end) + (bare ? nl : '') + added + out.slice(env.end);
+  }
+  return out + (out.endsWith('\n') ? nl : nl + nl) + `[${header}]${nl}${added}`;
+}
+
+const SHELL = 'shell_environment_policy';
+const SHELL_SET = `${SHELL}.set`;
+
+/** Classify a table header for the shell editor: the `[shell_environment_policy.set]`
+ *  table, its `[shell_environment_policy]` parent, AQE's Codex registration, or unrelated.
+ *  Other shapes of the shell policy tables are refused, never guessed. */
+function shellTableKind(text) {
+  const header = /^\s*\[(\[?)(.*?)\]\]?\s*(?:#.*)?$/.exec(text);
+  if (!header) throw new Error('unsupported TOML header');
+  const { segments, rest, complete } = tomlKeySegments(header[2]);
+  if (segments[0] === 'mcp_servers' && segments[1] === 'agentic-qe' && segments.length === 2 && !header[1]) return 'registration';
+  if (segments[0] !== SHELL) return 'unrelated';
+  if (header[1] || !complete || rest !== '' || segments.length > 2 || (segments.length === 2 && segments[1] !== 'set')) {
+    throw new Error('unsupported shell environment table encoding preserved');
+  }
+  return segments.length === 1 ? SHELL : SHELL_SET;
+}
+
+/** Outside the set table, an assignment that could define it (`shell_environment_policy.set...`
+ *  at the root, `set = {...}` or `set.X` under the parent) is refused. */
+function refuseShellAlias(table, text) {
+  if (table !== '' && table !== SHELL) return;
+  const { segments } = tomlKeySegments(text);
+  const keyPath = table === '' ? segments : [SHELL, ...segments];
+  if (keyPath[0] === SHELL && (keyPath.length === 1 || keyPath[1] === 'set')) {
+    throw new Error('inline or dotted shell environment requires manual configuration');
+  }
+}
+
+/** B5-D1b: the project Codex config's `[shell_environment_policy.set]` table, which Codex
+ *  applies to the commands it runs (hooks included). Present only when that table exists or
+ *  AQE's Codex registration (`[mcp_servers.agentic-qe]`) is in the file; a registration
+ *  without the table gets a new table at the end. The MCP transport is not consulted: the
+ *  shell table does not depend on how the server starts.
+ *  @param {string|null} source @param {string[]} keys */
+export function shellEnvironmentSet(source, keys) {
+  if (source === null) return { missing: true };
+  const structure = inspectCodexTomlStructure(source);
+  if (!structure.valid) throw new Error('unsupported Codex TOML preserved');
+  let table = '';
+  let set = null;
+  let registration = false;
+  /** @type {Record<string, {start: number, end: number, value: string}>} */
+  const found = {};
+  const seen = new Set();
+  for (const line of structure.lines) {
+    if (!line.live) continue;
+    if (isTomlTableLine(line.text)) {
+      table = shellTableKind(line.text);
+      if (table === 'registration') registration = true;
+      if (table === SHELL || table === SHELL_SET) {
+        if (seen.has(table)) throw new Error('duplicate TOML table preserved');
+        seen.add(table);
+      }
+      if (table === SHELL_SET) set = line;
+      continue;
+    }
+    const text = line.text.trim();
+    if (!text || text.startsWith('#')) continue;
+    if (table !== SHELL_SET) { refuseShellAlias(table, text); continue; }
+    // Inside the set table, a dotted or quoted key can alias a managed one: refuse.
+    if (!/^[A-Za-z0-9_-]+\s*=/.test(text)) throw new Error('dotted or quoted shell environment keys require manual configuration');
+    const key = keys.find((k) => new RegExp(`^${k}\\s*=`).test(text));
+    if (!key) continue;
+    if (found[key]) throw new Error(`duplicate shell environment ${key}`);
+    found[key] = { start: line.start, end: line.end, value: scalar(text, key) };
+  }
+  if (!set && !registration) return { missing: true };
+  const get = (key) => (found[key] ? { present: true, value: found[key].value } : { present: false });
+  return { get, render: (nextStates, options) => renderEnv(source, set, found, nextStates, SHELL_SET, options), containerPresent: !!set };
 }

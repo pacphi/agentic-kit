@@ -10,7 +10,8 @@ test('a live lock does not hide an independent storage error', () => {
 // exact stderr agentic-qe 3.14.3 emits when a healthy patterns.rvf is held by a live
 // owner (captured from a fixture; store and lock bytes were unchanged). The FsyncFailed
 // comes from a create attempt AQE should not make (agentic-qe#574). Remove this test
-// when the AQE release carrying agentic-qe#719 (or an equivalent fix) is the kit's floor.
+// when a released agentic-qe fixes agentic-qe#574 and that release is the kit's floor;
+// agentic-qe#719 (in 3.14.4) is a partial fix and does not remove it.
 const LIVE_OWNER_CONTENTION = [
   '[RVF] /p/.agentic-qe/patterns.rvf is locked by a live process (pid 70149) — not breaking the lock; degrading to SQLite for this run.',
   '[RVF] /p/.agentic-qe/patterns.rvf is unusable but its lock is held by a live process — leaving it alone and degrading to SQLite for this run.',

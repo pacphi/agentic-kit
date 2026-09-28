@@ -3,8 +3,9 @@ name: upstream-watch
 # The upstream watch (docs/UPSTREAM-WATCH.md, decision 14). The script decides
 # everything: which ledger comments count, where the check starts, and the
 # comment's text. This workflow only posts that text on the ledger issue and
-# labels the issue when a released fix is ready to dispatch, which fires the
-# dispatch routine. No model runs here.
+# labels the issue when a released fix is ready to dispatch. The label is a
+# marker for people reading the issue; the dispatch routine runs on its own
+# daily schedule and reads the ledger. No model runs here.
 
 on:
   schedule:
@@ -107,7 +108,7 @@ jobs:
           length=$(gh api "repos/$repo/issues/comments/$id" --jq '.body | length')
           echo "Posted length $length (file $(wc -c < body.md))"
           [ "$length" -gt 0 ]
-      - name: Signal the dispatch routine
+      - name: Mark the ledger issue for dispatch
         if: env.POST == 'true'
         run: |
           [ "$(jq -r '.dispatch | length' watch.json)" -gt 0 ] || { echo 'Nothing to dispatch.'; exit 0; }
@@ -115,6 +116,6 @@ jobs:
           repo=$(jq -r '.watchPolicy.ledger.repo' "$REGISTRY")
           gh label create "$DISPATCH_LABEL" --repo "$repo" --color 5319e7 \
             --description 'The upstream watch has a released fix to dispatch' --force
-          # Remove, then add: a label already present would fire no new event.
+          # Remove, then add, so the issue's timeline shows the latest run that found work.
           gh issue edit "$issue" --repo "$repo" --remove-label "$DISPATCH_LABEL" || true
           gh issue edit "$issue" --repo "$repo" --add-label "$DISPATCH_LABEL"

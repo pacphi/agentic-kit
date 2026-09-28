@@ -276,5 +276,27 @@ test('the stray search is bounded and says when it stopped early', (t) => {
   const deep = findStrayMemoryStores(root);
   assert.equal(deep.complete, true);
   assert.deepEqual(deep.strays, [], 'folders deeper than the depth bound are not searched');
-  assert.deepEqual(findStrayMemoryStores(path.join(root, 'missing')), { strays: [], complete: true, visited: 0 });
+  assert.deepEqual(findStrayMemoryStores(path.join(root, 'missing')), { strays: [], complete: true, visited: 0, nestedRepositories: [] });
+});
+
+test('the stray search stops at a nested repository or an in-checkout worktree: their stores are their own', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-stray-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, '.git'));
+  fs.mkdirSync(path.join(root, '.agentic-qe'));
+  fs.mkdirSync(path.join(root, 'docs', '.agentic-qe'), { recursive: true });
+  // A nested repository (or submodule checkout): .git is a folder.
+  fs.mkdirSync(path.join(root, 'packages', 'api', '.git'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'packages', 'api', '.agentic-qe'));
+  fs.mkdirSync(path.join(root, 'packages', 'api', 'sub', '.agentic-qe'), { recursive: true });
+  touch(root, 'packages/api/.swarm/agentdb-memory.db');
+  // A worktree created inside the checkout: .git is a file.
+  fs.mkdirSync(path.join(root, 'wt', 'feature', '.agentic-qe'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'wt', 'feature', '.git'), 'gitdir: ../../.git/worktrees/feature\n');
+  // A root dot folder that is its own repository.
+  fs.mkdirSync(path.join(root, '.tools', '.git'), { recursive: true });
+  fs.mkdirSync(path.join(root, '.tools', '.agentic-qe'));
+  const { strays, nestedRepositories } = findStrayMemoryStores(root);
+  assert.deepEqual(strays.map((stray) => `${stray.kind} ${stray.path}`), ['aqe docs/.agentic-qe']);
+  assert.deepEqual(nestedRepositories, ['.tools', 'packages/api', 'wt/feature']);
 });

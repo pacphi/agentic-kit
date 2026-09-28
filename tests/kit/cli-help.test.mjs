@@ -40,7 +40,7 @@ test('mutating commands intercept both --help and -h before running', () => {
 test('every command exposes an Examples section in its help', () => {
   for (const cmd of [['setup'], ['status'], ['sync'], ['usage'], ['run'], ['dashboard'], ['uninstall'],
     ['host'], ['x', 'mcp'], ['x', 'host'],
-    ['x', 'verify'], ['x', 'reference'], ['x', 'daemon-gc']]) {
+    ['x', 'verify'], ['x', 'reference'], ['x', 'daemon-gc'], ['x', 'aqe-store']]) {
     const r = ak(...cmd, '--help');
     assert.equal(r.status, 0, `${cmd.join(' ')} exit`);
     assert.match(r.stdout, /Examples:/, `${cmd.join(' ')} examples`);

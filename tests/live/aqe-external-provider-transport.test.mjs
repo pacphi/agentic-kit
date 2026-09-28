@@ -26,6 +26,10 @@ const MODEL_ID = 'proof-model';
 const COMPLETION = 'LIVE_AQE_628_OK';
 const AQE_BIN = process.env.AQE_BIN ?? 'aqe';
 const REQUIRED_AQE = [3, 14, 1];
+// The proof's provider is the local hook below. With a real provider key in the
+// inherited environment AQE could reach a paid provider instead, so the proof
+// refuses to start; run it under `env -i PATH="$PATH" HOME=<scratch>`.
+const PROVIDER_KEYS = Object.keys(process.env).filter((name) => /_API_KEY$/i.test(name)).sort();
 
 function versionTuple(text) {
   const match = String(text).match(/(\d+)\.(\d+)\.(\d+)/);
@@ -240,6 +244,10 @@ async function mcpGenerate({ cwd, env, advisorOnly = false }) {
 test('Agentic-QE 3.14.1+ serves advisors without fallback and generation with explicit fallback', {
   timeout: 240_000,
 }, async (t) => {
+  if (PROVIDER_KEYS.length) {
+    assert.fail(`refusing to run: provider API key(s) in the environment (${PROVIDER_KEYS.join(', ')}); `
+      + 'run this proof under env -i PATH="$PATH" HOME=<scratch> TMPDIR=<scratch> so no real provider can be reached');
+  }
   const version = runAqe(['--version']);
   assert.equal(version.status, 0, `AQE is required for this live proof: ${version.stderr}`);
   const actualVersion = versionTuple(version.stdout);

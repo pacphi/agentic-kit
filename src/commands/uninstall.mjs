@@ -12,6 +12,7 @@ import { stripBlock, BEGIN, BUILTIN_BLOCKS } from '../lib/blocks.mjs';
 import { unregister } from '../lib/mcp.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { releaseRufloComponents } from '../lib/ruflo-components/teardown.mjs';
+import { releaseAqePins } from '../lib/aqe-project-pin.mjs';
 import { installedVersion } from '../lib/versions.mjs';
 import { runLifecycle } from '../lib/adapters/lifecycle.mjs';
 import { hostsWithLifecycle, lifecycleAdapterFor, lifecycleExecutionEnabled, isBuiltinHost } from '../lib/adapters/lifecycle-registry.mjs';
@@ -447,6 +448,21 @@ async function stepRufloComponents(ctx) {
   saveKitConfig(ctx.cfg);
 }
 
+// B5-D1: put back the AQE pin's before-state (AQE's own relative AQE_MEMORY_PATH
+// included) in every project kit.json recorded and in this one. Before any
+// kit.json purge, like the step above.
+function stepAqePin(ctx) {
+  if (ctx.dry) {
+    info('[dry-run] remove the AQE project pin (AQE_PROJECT_ROOT, AQE_MEMORY_PATH, AQE_STORAGE_PATH) where ak wrote it');
+    return;
+  }
+  const report = { ok, warn, info };
+  const result = releaseAqePins(ctx.cfg, { cwd: process.cwd() });
+  for (const line of result.lines) report[line.level](line.text);
+  if (!result.ok) ctx.state.ownershipTeardownOk = false;
+  saveKitConfig(ctx.cfg);
+}
+
 function stepPurgeArtifacts(ctx) {
   for (const [label, file] of [
     ['model inventory cache', modelInventoryPath()], ['model scope key', modelScopeKeyPath()],
@@ -605,6 +621,7 @@ export const UNINSTALL_STEPS = [
   { id: 'deja-vu', when: () => true, run: stepDejaVu },
   { id: 'host-lifecycles', when: () => true, run: stepHostLifecycles },
   { id: 'agent-browser', when: () => true, run: stepAgentBrowser },
+  { id: 'aqe-pin', when: () => true, run: stepAqePin },
   { id: 'ruflo-components', when: () => true, run: stepRufloComponents },
   { id: 'purge-artifacts', when: (ctx) => ctx.flags.purge, run: stepPurgeArtifacts },
   {

@@ -999,6 +999,11 @@ test('the documented dispatch routine trusts only the ledger authors', () => {
   assert.match(prompt, /Never merge/);
   assert.match(prompt, /never comment on\s+upstream/i);
   assert.doesNotMatch(prompt, /upstream-watch\.mjs (check|comment)/, 'the routine does not run the watch (it cannot read upstream)');
+  // 4b-C amended: the routine runs on a daily schedule, not on the label.
+  assert.match(prompt, /You run daily after the upstream watch workflow/);
+  assert.match(prompt, /stop quickly/, 'a day with nothing to dispatch ends at once');
+  assert.doesNotMatch(prompt, /labelled/, 'no label starts the routine');
+  assert.match(prompt, /never change labels/);
 });
 
 // Decision 14: the routine's first run printed "No new upstream events." while

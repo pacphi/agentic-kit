@@ -21,6 +21,10 @@
   which sets only the memory location (and ak's agent-browser config); component keys still come
   from Claude's settings env (§3, decision B3-D1). Ruflo starts at the repository root, so a
   session opened in a subfolder reads the root's policy file.
+- **Updated:** 2026-09-27 — the owned-env engine (§3) gains two opt-ins that only the AQE pin uses
+  (ADR-0062): the receipt records a file or table ak created, and a release that leaves it empty
+  removes it; older backups are pruned to the newest. An `adoptable` value is also taken back when
+  ak already owned the key. The Ruflo component projections are unchanged.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md) (value-precise ownership),
   [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md) (explicit degradation),

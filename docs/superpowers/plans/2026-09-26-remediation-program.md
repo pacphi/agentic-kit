@@ -167,7 +167,7 @@ After Branches 3 and 5.
 1. `refactor(evidence): one evidence store for every remembered check` — one record shape and age rule for live checks, Ruflo component checks, host checks and scans; every check records (including `ak x aqe-embedding verify`, setup proofs and sync).
 2. `perf(status): re-check only expired evidence; compute dashboard status in-process` — the dashboard stops spawning `ak status --json` per poll; an assertion pins the processes started per poll.
 3. `fix(dashboard): stop writing Maintenance preferences on every poll tick`.
-4. New ADR-0061 (Proposed → Accepted): the refresh vocabulary and evidence store; supersedes ADR-0048's two scan controls and amends ADR-0025 §5 and ADR-0055's live-check evidence.
+4. New ADR-0063 (Proposed → Accepted; ADR-0061 is the RuvNet Brain reclaim record and ADR-0062 is Branch 5's AQE project store integrity): the refresh vocabulary and evidence store; supersedes ADR-0048's two scan controls and amends ADR-0025 §5 and ADR-0055's live-check evidence.
 
 ### Branch 6b: `feat/one-refresh-flag`
 

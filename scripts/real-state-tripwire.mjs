@@ -5,7 +5,7 @@
 // and state folders; the files ak sync/setup write in other tools' homes
 // (~/.claude/CLAUDE.md and settings.json, ~/.claude.json, ~/.codex/AGENTS.md and
 // config.toml, the OpenCode AGENTS.md); the repository's root CLAUDE.md,
-// AGENTS.md and .mcp.json; and its .claude/.swarm/.agentic-qe/.claude-flow/
+// AGENTS.md, .mcp.json and .codex/config.toml (the AQE pin); and its .claude/.swarm/.agentic-qe/.claude-flow/
 // .harness folders. Not watched: skills, agents and plugin folders in those
 // homes, opencode.json, the Hermes home, ~/.claude-flow/memory and every other
 // tool path. Tests are kept away from those by the helpers in
@@ -22,7 +22,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const REPO_STATE_DIRS = ['.claude', '.swarm', '.agentic-qe', '.claude-flow', '.harness'];
-export const REPO_ROOT_FILES = ['CLAUDE.md', 'AGENTS.md', '.mcp.json'];
+export const REPO_ROOT_FILES = ['CLAUDE.md', 'AGENTS.md', '.mcp.json', '.codex/config.toml'];
 const SINGLE_FILE_KINDS = new Set(['user-file', 'repo-file']);
 
 /** Writers a live Claude Code / Ruflo / AQE session runs concurrently with a
@@ -68,7 +68,8 @@ export function realStateRoots({ env = process.env, platform = process.platform,
     ...codexHomes.flatMap((dir) => ['AGENTS.md', 'config.toml'].map((name) => ({ kind: 'user-file', dir: p.join(dir, name) }))),
     { kind: 'user-file', dir: p.join(primaryConfig, 'opencode', 'AGENTS.md') },
     // Project files ak writes at the repository root (src/lib/project-guidance.mjs,
-    // the Codex AGENTS.md target in src/lib/blocks.mjs, .mcp.json in src/commands/setup.mjs).
+    // the Codex AGENTS.md target in src/lib/blocks.mjs, .mcp.json in src/commands/setup.mjs,
+    // .mcp.json and .codex/config.toml in src/lib/aqe-project-pin.mjs).
     ...REPO_ROOT_FILES.map((name) => ({ kind: 'repo-file', dir: p.join(repoRoot, name) })),
   ];
   const seen = new Set();

@@ -126,8 +126,12 @@ export function removeMemoryProbe(root, namespace, key) {
 }
 
 // Stray stores: memory files this project's hosts never read, each traced to
-// its owner in the 2026-09-26 audit (docs/audits). Report only: ak never moves,
-// merges or deletes them. Kinds:
+// its owner in the 2026-09-26 audit (docs/audits). This scan only reports.
+// The one exception is the aqe kind: `ak x aqe-store merge --yes`
+// (aqe-store-merge.mjs, ADR-0062) merges a stray AQE store into the project
+// store and moves the whole folder to ak's state archive, after its holder,
+// backup and rehearsal checks. ak never moves, merges or deletes the other
+// kinds. Kinds:
 //   ruflo       memory.db/agentdb-memory.db anywhere under .swarm/ except the
 //               canonical pair and Ruflo's own .swarm/backups/, or a .swarm/
 //               store in a subfolder (a Ruflo command ran with that folder as
@@ -140,7 +144,10 @@ export function removeMemoryProbe(root, namespace, key) {
 //               relative AQE_MEMORY_PATH against the folder it runs in)
 // Bounded: at most `maxDirs` folders listed and `maxDepth` levels deep; dot
 // folders (other checkouts under .claude/worktrees, .git) and node_modules are
-// never walked, only a root dot folder's own markers are checked.
+// never walked, only a root dot folder's own markers are checked. A folder that
+// holds `.git` (nested repository, submodule, worktree inside the checkout) is
+// another repository: neither it nor anything below it is searched; it is
+// listed in `nestedRepositories`.
 const RUFLO_STORE_FILES = Object.freeze(['memory.db', 'agentdb-memory.db']);
 const ROOT_STRAYS = Object.freeze([['agentdb.db', 'agentdb-cli'], ['agentdb.rvf', 'agentdb-rvf'], ['ruvector.db', 'ruvector']]);
 
@@ -149,8 +156,9 @@ const isFile = (file) => { try { return fs.lstatSync(file).isFile(); } catch { r
 const storeBytes = (file) => (fileBytes(file) ?? 0) + (fileBytes(`${file}-wal`) ?? 0);
 
 export function findStrayMemoryStores(root, { maxDepth = 4, maxDirs = 2000 } = {}) {
-  if (!isDirectory(root)) return { strays: [], complete: true, visited: 0 };
+  if (!isDirectory(root)) return { strays: [], complete: true, visited: 0, nestedRepositories: [] };
   const found = new Map();
+  const nestedRepositories = [];
   let visited = 0;
   let complete = true;
   const add = (kind, file, sizeBytes) => {
@@ -180,11 +188,20 @@ export function findStrayMemoryStores(root, { maxDepth = 4, maxDirs = 2000 } = {
       else if (entry.isDirectory() && depth < maxDepth && !(depth === 0 && entry.name === 'backups')) walkSwarm(full, depth + 1);
     }
   };
+  // A folder holding `.git` (a folder: nested repository or submodule; a file:
+  // a worktree inside the checkout) is another repository: its stores are its
+  // own, and ak's pin makes its `.agentic-qe` that repository's store (review M3).
+  const otherRepository = (full) => {
+    try { fs.lstatSync(path.join(full, '.git')); } catch { return false; }
+    nestedRepositories.push(path.relative(root, full).split(path.sep).join('/'));
+    return true;
+  };
   const walk = (dir, depth) => {
     const entries = list(dir);
     for (const entry of entries ?? []) {
       if (!entry.isDirectory()) continue;
       const full = path.join(dir, entry.name);
+      if (entry.name !== '.git' && otherRepository(full)) continue;
       if (entry.name.startsWith('.')) {
         // .swarm's own subtree is walked separately; only its AQE marker here.
         if (depth === 0 && entry.name !== '.git') checkMarkers(full, { ruflo: entry.name !== '.swarm' });
@@ -204,7 +221,7 @@ export function findStrayMemoryStores(root, { maxDepth = 4, maxDirs = 2000 } = {
   if (isDirectory(path.join(root, '.swarm'))) walkSwarm(path.join(root, '.swarm'), 0);
   walk(root, 0);
   const strays = [...found.values()].sort((a, b) => a.path.localeCompare(b.path));
-  return { strays, complete, visited };
+  return { strays, complete, visited, nestedRepositories: nestedRepositories.sort() };
 }
 
 // Stray Ruflo stores outside any project (audit 2026-09-26 Addendum 2,

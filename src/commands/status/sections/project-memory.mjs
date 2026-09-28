@@ -12,7 +12,9 @@
 // largest namespace and its expiry come from a read-only query; stray stores
 // (project-memory.mjs findStrayMemoryStores) are information only, never a
 // warning or a sync fix: ak leaves them in place, and a warning with no way to
-// resolve it would stay amber forever (#237/#238 comments, audit N4).
+// resolve it would stay amber forever (#237/#238 comments, audit N4). The
+// exception is a stray AQE store with a memory.db: `ak x aqe-store merge`
+// resolves it, so it is a warning with that command as a hand fix.
 //
 // Backup and distillation ages come from what Ruflo's daemon workers and
 // `ruflo memory backup` write (memory-maintenance.mjs). A backup older than
@@ -21,6 +23,7 @@
 // the daemon ends itself on its TTL, so that would be amber forever. Both jobs
 // cover memory.db only, so an agentdb-memory.db gets an information row with
 // the manual backup command (upstream gap).
+import fs from 'node:fs';
 import path from 'node:path';
 import { projectDaemonAlive } from '../../../lib/daemons.mjs';
 import { formatLiveCheckAge as ago } from '../../../lib/live-check-evidence.mjs';
@@ -78,15 +81,27 @@ const STRAY_ROWS = [
   ['agentdb-rvf', (s) => `stray store ${listed(s)} (${sized(s)}): AgentDB's RVF backend default in the working directory; ${reportOnly(s)}`],
   ['ruvector', (s) => `stray store ${listed(s)} (${sized(s)}): RuVector's default store in the working directory; ${reportOnly(s)}`],
   ['aqe', (s) => `${s.length} stray AQE store${s.length === 1 ? '' : 's'} below the project root: ${listed(s)}; `
-    + `AQE resolves a relative AQE_MEMORY_PATH against the folder a command or hook ran in (this project's is ./.agentic-qe); ${reportOnly(s)}`],
+    + `AQE made ${them(s)} when a command, hook or MCP server started in that folder without ak's pin to the project root `
+    + `(ak sync pins AQE_PROJECT_ROOT, AQE_MEMORY_PATH and AQE_STORAGE_PATH); ${aqeOutcome(s)}`],
 ];
+
+// A stray AQE folder with a memory.db holds learning the hosts never read, and
+// `ak x aqe-store merge` resolves it: a hand fix, not a sync step (B5-D2). A
+// folder without memory.db has nothing to merge and stays information.
+const mergeable = (strays) => strays.some((stray) => fs.existsSync(path.join(stray.file, 'memory.db')));
+const aqeOutcome = (strays) => (mergeable(strays)
+  ? '`ak x aqe-store merge` moves their patterns and experiences into the project store and archives the folders'
+  : reportOnly(strays));
 
 function strayRows(root) {
   const { strays, complete, visited } = findStrayMemoryStores(root);
   const rows = [];
   for (const [kind, message] of STRAY_ROWS) {
     const matching = strays.filter((stray) => stray.kind === kind);
-    if (matching.length) rows.push(row('memory', 'info', message(matching)));
+    if (!matching.length) continue;
+    if (kind === 'aqe' && mergeable(matching)) {
+      rows.push(row('memory', 'warn', message(matching), 'ak x aqe-store merge --dry-run', { repair: 'manual' }));
+    } else rows.push(row('memory', 'info', message(matching)));
   }
   if (!complete) rows.push(row('memory', 'info', `stray-store search stopped after ${visited} folders; deeper folders were not checked`));
   return rows;

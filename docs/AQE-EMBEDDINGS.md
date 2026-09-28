@@ -51,7 +51,7 @@ ak x aqe-embedding verify
 | Local Ollama | Recommended local, no-key setup | Downloads missing MiniLM and alias after consent; tests the selected service |
 | Existing endpoint | Shared or separately operated service | Preserves selection, projects configuration and tests synthetic text; never manages remote models |
 | In-process | Explicit upstream transformer-package opt-in | Tests the installed backend and existing cache; does not install the security-sensitive optional package |
-| Unmanaged | Operator owns configuration, or semantic learning is deferred | Restores only unchanged owned projection values; makes no semantic readiness claim |
+| Unmanaged | Operator owns configuration, or semantic learning is deferred | Restores only unchanged owned projection values; makes no semantic readiness claim; `ak x verify aqe` still runs and prints the embedding request but does not record its result for `ak status` |
 
 ```sh
 ak x aqe-embedding configure --aqe-embedding-endpoint https://embed.example --yes
@@ -59,6 +59,13 @@ ak x aqe-embedding configure --aqe-embedding-endpoint unix:/absolute/embedder.so
 ak x aqe-embedding configure --aqe-embedding-mode in-process --yes
 ak x aqe-embedding configure --aqe-embedding-mode unmanaged --yes
 ```
+
+A passing check proves the embedder: ak sends synthetic text and gets a vector of
+the expected size back. It does not prove that AQE's pattern index uses that
+embedder. AQE 3.14.4 does not bind its pattern index when an embedder endpoint is
+configured ([agentic-qe#754](https://github.com/proffesor-for-testing/agentic-qe/issues/754)),
+so `ak status` reads "embedder verified; AQE pattern index binding unverified", and
+compatibility with vectors already stored in the project is a separate question.
 
 In-process transformers are an explicit security opt-in in AQE's published
 runtime. Consult the installed AQE guidance and dependency advisories before
@@ -84,9 +91,9 @@ old environment and may retain an earlier failed initialization.
 
 Claude project MCP and hook settings and existing canonical Codex MCP tables
 have field-level receipts. On every host, ak edits only an AQE entry started by one
-of AQE's own commands: `aqe-mcp`, `aqe mcp`, `agentic-qe mcp`, `aqe-v3 mcp` or
-`npx -y agentic-qe@latest mcp` (npm `.cmd` shims included). Entries with other
-commands, flags or wrappers are reported as unrecognized and left unchanged. OpenCode updates immediately through a narrow operation inside its existing
+of AQE's own commands: `aqe-mcp`, `aqe mcp`, `agentic-qe mcp`, `aqe-v3 mcp`, or
+`npx [-y|--yes] agentic-qe[@latest|@<exact version>] mcp` (npm `.cmd` shims included).
+Entries with other commands, version ranges, dist-tags, flags or wrappers are reported as unrecognized and left unchanged. OpenCode updates immediately through a narrow operation inside its existing
 full-entry owner, preserving permissions, plugins and unrelated MCP entries.
 Its receipt remains compatible with normal `ak sync`. Conflicting user values and unsupported TOML forms
 are reported, never overwritten. Unrelated Codex keys, including dotted root keys such as

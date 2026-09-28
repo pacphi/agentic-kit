@@ -161,30 +161,43 @@ test('adapter records retain their concrete host identity and unknown runtime st
   assert.equal(model.summary.executions, 0);
 });
 
-test('upstream findings get a link only from the exact published constraint', () => {
-  const file = '/workspace/project/.claude/settings.json';
-  const model = buildHookDashboardReadModel({
+function upstreamModel({ code, dependency, owner, constraint }) {
+  const file = '/workspace/project/.codex/hooks.json';
+  return buildHookDashboardReadModel({
     audit: { reports: { claude: { sources: [], summary: {}, coverage: { status: 'partial', gaps: [] },
       records: [{
-        occurrenceId: 'aqe-1', behaviorFingerprint: 'aqe-b', host: 'claude', event: 'Stop', type: 'command',
+        occurrenceId: 'up-1', behaviorFingerprint: 'up-b', host: 'claude', event: 'Stop', type: 'command',
         matcher: '', handler: {}, command: {}, timeout: null, sideEffects: [], selected: null,
         source: { file, sourceKind: 'project', owner: 'project-owner' },
-        diagnostics: [{ code: 'aqe-npx-hot-path-fallback', severity: 'warning', category: 'reliability' }],
+        diagnostics: [{ code, severity: 'warning', category: 'reliability' }],
       }],
-      plan: [{ diagnostic: 'aqe-npx-hot-path-fallback', target: file, classification: 'upstream-required',
-        upstream: { dependency: 'agentic-qe', owner: 'proffesor-for-testing/agentic-qe' } }],
+      plan: [{ diagnostic: code, target: file, classification: 'upstream-required', upstream: { dependency, owner } }],
     } } },
-    healingPlan: { upstream: { constraints: [{
-      id: 'agentic-qe-3.14.0-stop-hook-generator', dependency: 'agentic-qe',
-      notification: { status: 'published', publishedUrl: 'https://github.com/proffesor-for-testing/agentic-qe/issues/654' },
-    }] } },
+    healingPlan: { upstream: { constraints: [constraint] } },
   });
+}
 
-  assert.equal(model.findings[0].placements[0].owner, 'proffesor-for-testing/agentic-qe');
-  assert.deepEqual(model.findings[0].placements[0].action, {
-    actionId: 'agentic-qe-3.14.0-stop-hook-generator', classification: 'upstream-required',
-    label: 'View upstream issue', href: 'https://github.com/proffesor-for-testing/agentic-qe/issues/654',
+test('upstream findings get a link only from the exact published constraint', () => {
+  const model = upstreamModel({
+    code: 'ruflo-codex-stop-output-not-json', dependency: 'ruflo', owner: 'ruvnet/ruflo',
+    constraint: { id: 'ruflo-3.38.20-stop-output-contract', dependency: 'ruflo',
+      notification: { status: 'published', publishedUrl: 'https://github.com/ruvnet/ruflo/issues/3163' } },
   });
+  assert.equal(model.findings[0].placements[0].owner, 'ruvnet/ruflo');
+  assert.deepEqual(model.findings[0].placements[0].action, {
+    actionId: 'ruflo-3.38.20-stop-output-contract', classification: 'upstream-required',
+    label: 'View upstream issue', href: 'https://github.com/ruvnet/ruflo/issues/3163',
+  });
+});
+
+test('after the agentic-qe#654 sunset an AQE generator finding links no upstream issue, even from a stale plan', () => {
+  const model = upstreamModel({
+    code: 'aqe-npx-hot-path-fallback', dependency: 'agentic-qe', owner: 'proffesor-for-testing/agentic-qe',
+    constraint: { id: 'agentic-qe-3.14.0-stop-hook-generator', dependency: 'agentic-qe',
+      notification: { status: 'published', publishedUrl: 'https://github.com/proffesor-for-testing/agentic-qe/issues/654' } },
+  });
+  assert.equal(model.findings[0].placements[0].owner, 'proffesor-for-testing/agentic-qe');
+  assert.equal(model.findings[0].placements[0].action, null);
 });
 
 test('hook read model bounds hostile receipt values and uses stable outcome vocabulary', () => {

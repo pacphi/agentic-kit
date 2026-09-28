@@ -82,7 +82,9 @@ design and are recorded as gated, not as failures:
 - `aqeProvider` is no longer an upstream freeze ceiling: Agentic-QE 3.13.12 shipped
   `externalProviders` for [#628](https://github.com/proffesor-for-testing/agentic-qe/issues/628).
   An adapter still must declare `aqe.provider`, pass the real `aqe-provider` tier at its current
-  content hash, and receive an explicit `aqeProvider` grant.
+  content hash, and receive an explicit `aqeProvider` grant. The kit's compatibility constraint for
+  #628 is retired: the live proof `tests/live/aqe-external-provider-transport.test.mjs` passes on
+  Agentic-QE 3.14.4 with no provider API key in its environment (it refuses to run with one).
 - `statusline` runtime rendering (no `ak` render surface for a third-party TUI yet).
 - Grant *consumption* last-mile: selecting an external host as primary, and a `commandStatusline`
   runtime reader.

@@ -107,6 +107,8 @@ docs/
 `docs/adr/0051-supported-peer-delegation-and-host-realignment.md`,
 `docs/adr/0054-fleet-evidence-export.md`, `docs/adr/0055-aqe-embedding-lifecycle.md`,
 `tests/live/aqe-external-provider-transport.test.mjs`,
+`tests/live/aqe-stop-hook-conformance.test.mjs`, `tests/live/aqe-codex-guidance-conformance.test.mjs`
+(opt-in AQE conformance: `pnpm test:aqe-stop-hook-live`, `pnpm test:aqe-codex-guidance-live`),
 `tests/live/qe-court-participant-transport.test.mjs` (with its helper
 `tests/live/disposable-memory-project.mjs`),
 `tests/live/codex-context-contract.test.mjs`, and

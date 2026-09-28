@@ -204,14 +204,15 @@ const SOURCE_LABEL = { sync: 'ak sync', verify: 'ak x verify', 'status-live': 'a
  * One status clause for a remembered result. An invalidated result shows no
  * verdict or reason: it describes a configuration that no longer applies.
  * @param {ReturnType<typeof readLiveCheck>} evidence
- * @param {{recheck:string}} options  the command that re-runs this check
+ * @param {{recheck:string, passed?:string}} options  the command that re-runs this check; how a pass reads
  */
-export function describeLiveCheck(evidence, { recheck }) {
+export function describeLiveCheck(evidence, { recheck, passed = 'last live check passed' }) {
   const age = formatLiveCheckAge(evidence.ageMs);
   if (evidence.invalidated) return `configuration changed since the last live check (${age}); re-check with ${recheck}`;
   const reason = evidence.status !== 'passed' && evidence.reason ? `: ${evidence.reason}` : '';
   const stale = evidence.stale ? `; stale, re-check with ${recheck}` : '';
-  return `last live check ${evidence.status} ${age} (${SOURCE_LABEL[evidence.source]})${reason}${stale}`;
+  const what = evidence.status === 'passed' ? passed : `last live check ${evidence.status}`;
+  return `${what} ${age} (${SOURCE_LABEL[evidence.source]})${reason}${stale}`;
 }
 
 /**

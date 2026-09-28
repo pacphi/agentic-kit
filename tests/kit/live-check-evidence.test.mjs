@@ -170,8 +170,9 @@ test('status shows a remembered failure as a warning with its age and reason', a
 test('status shows a fresh remembered pass as ok with its age', async () => {
   const r = await embeddingRow({ record: { status: 'passed' } });
   assert.equal(r.level, 'ok');
-  assert.match(r.message, /last live check passed 5m ago \(ak sync\)/);
-  assert.match(r.message, /corpus compatibility unverified/, 'a backend pass never certifies the corpus');
+  assert.match(r.message, /; embedder verified 5m ago \(ak sync\); AQE pattern index binding unverified \(agentic-qe#754\); corpus compatibility unverified$/,
+    'a backend pass proves the embedder only: never the pattern index (agentic-qe#754) or the corpus');
+  assert.doesNotMatch(r.message, /last live check passed/);
 });
 
 test('a stale pass is not green; a stale failure stays a warning', async () => {
