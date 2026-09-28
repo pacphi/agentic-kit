@@ -26,8 +26,17 @@ const BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 const SHA = /^[0-9a-f]{40}$/;
 
+/**
+ * @typedef {{ status: number | null, stdout: string, stderr: string, error: Error | null }} ExecResult
+ * @typedef {(command: string, args: string[], options?: { input?: string | null, cwd?: string, env?: NodeJS.ProcessEnv }) => Promise<ExecResult>} Exec
+ */
+
 /** Run a command without a shell, feeding `input` on stdin; resolves with its status and output,
- *  never rejects. `env` is passed through to spawn(); omitted, the child inherits process.env. */
+ *  never rejects. `env` is passed through to spawn(); omitted, the child inherits process.env.
+ * @param {string} command
+ * @param {string[]} args
+ * @param {{ input?: string | null, cwd?: string, env?: NodeJS.ProcessEnv }} [options]
+ * @returns {Promise<ExecResult>} */
 export function runWithInput(command, args, { input = null, cwd, env } = {}) {
   return new Promise((resolve) => {
     const child = spawn(command, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -48,7 +57,8 @@ export function toRecord(event, recordedAt) {
 }
 
 export function parseRecords(text) {
-  return String(text).split('\n').map((line, index) => [line, index + 1]).filter(([line]) => line.trim())
+  return String(text).split('\n').map((line, index) => /** @type {[string, number]} */ ([line, index + 1]))
+    .filter(([line]) => line.trim())
     .map(([line, number]) => {
       let parsed;
       try { parsed = JSON.parse(line); } catch { throw new Error(`${LEDGER_FILE} line ${number} is not JSON`); }
@@ -59,6 +69,7 @@ export function parseRecords(text) {
 
 export const serializeRecords = (records) => records.map((item) => JSON.stringify(item)).join('\n') + (records.length ? '\n' : '');
 
+/** @param {{ exec?: Exec, cwd?: string, remote?: string }} [options] */
 export function createLedgerStore({ exec = runWithInput, cwd = process.cwd(), remote = 'origin' } = {}) {
   const git = async (args, input = null) => {
     const result = await exec('git', args, { input, cwd });
