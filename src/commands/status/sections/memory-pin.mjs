@@ -19,7 +19,8 @@ export function aqePinRows(cfg, cwd) {
   const pin = reconcileAqePin(cfg, cwd, { dryRun: true });
   if (!pin.root || !pin.active) return [];
   const rows = [];
-  const drift = pin.findings.filter((f) => f.changed);
+  // A tracked file's pending change is a release, which its hand-fix row below covers.
+  const drift = pin.findings.filter((f) => f.changed && f.status !== 'tracked');
   // A file can have keys to write and a preserved key at once: it shows in both rows.
   const held = pin.findings.filter((f) => f.status === 'conflict' || f.conflicts.length);
   if (drift.length) {

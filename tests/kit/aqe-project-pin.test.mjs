@@ -415,7 +415,7 @@ test('git-tracked .mcp.json and .codex/config.toml are skipped and shown as a ha
   assert.ok(!rows.some((r) => r.subsystem === 'aqe-pin' && r.repair === 'sync'), JSON.stringify(rows));
 });
 
-test('a pin ak wrote before the file was tracked is released under its receipt', { skip: !haveGit }, (t) => {
+test('a pin ak wrote before the file was tracked is released under its receipt', { skip: !haveGit }, async (t) => {
   const { root, write, cfg } = project(t);
   fs.rmSync(path.join(root, '.git'), { recursive: true });
   git(root, ['init', '-q']);
@@ -424,6 +424,10 @@ test('a pin ak wrote before the file was tracked is released under its receipt',
   reconcileAqePin(cfg, root);
   assert.ok(fs.readFileSync(mcp, 'utf8').includes('AQE_PROJECT_ROOT'), 'untracked in a repository: pinned as before');
   git(root, ['add', '--', '.mcp.json']);
+  // Before the release, status shows the tracked hand fix, never a "not pinned" sync row.
+  const rows = await memoryPin.collect({ cwd: root, cfg });
+  assert.ok(rows.some((r) => r.subsystem === 'aqe-pin' && r.repair === 'manual' && /tracked/.test(r.message)), JSON.stringify(rows));
+  assert.ok(!rows.some((r) => r.subsystem === 'aqe-pin' && r.repair === 'sync' && /\.mcp\.json/.test(r.message)), JSON.stringify(rows));
   const result = reconcileAqePin(cfg, root);
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.deepEqual(json(mcp), JSON.parse(original));
