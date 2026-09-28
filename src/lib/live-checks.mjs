@@ -687,8 +687,9 @@ async function runOneLiveCheck(check, ctx, { timeoutMs, graceMs }) {
  * id with `source` as its provenance. A named check that does not apply (a
  * backend the kit does not manage, a deja-vu it does not own) runs and
  * reports, but its result is not the kit's evidence and is not remembered.
- * Returns one `{ id, status, reason, elapsedMs, entries }` per check, in order;
- * `entries` are the lines the check printed, for the renderer.
+ * Returns one `{ id, status, reason, elapsedMs, entries, applies }` per check,
+ * in order; `entries` are the lines the check printed, for the renderer, and
+ * `applies` is false for a named check that does not apply.
  * @param {{ cfg?: any, cwd?: string, only?: string[], checks?: any[], timeoutMs?: number,
  *   graceMs?: number, source?: string }} [options]
  */
@@ -698,11 +699,13 @@ export async function runLiveChecks({
 } = {}) {
   const remember = (id, outcome) => rememberLiveCheck(id, outcome, { source, cfg, cwd });
   const ctx = { cfg, cwd, onEvidence: remember };
-  const results = await Promise.all(checks.map((check) => runOneLiveCheck(check, ctx,
-    { timeoutMs: timeoutMs ?? check.timeoutMs ?? QUICK_TIMEOUT_MS, graceMs })));
+  const results = await Promise.all(checks.map(async (check) => ({
+    ...(await runOneLiveCheck(check, ctx, { timeoutMs: timeoutMs ?? check.timeoutMs ?? QUICK_TIMEOUT_MS, graceMs })),
+    applies: check.applies?.(cfg ?? {}) ?? true,
+  })));
   checks.forEach((check, i) => {
     const evidenceId = check.evidenceId === undefined ? check.id : check.evidenceId;
-    if (evidenceId && (check.applies?.(cfg ?? {}) ?? true)) remember(evidenceId, results[i]);
+    if (evidenceId && results[i].applies) remember(evidenceId, results[i]);
   });
   return results;
 }

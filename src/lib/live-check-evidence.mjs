@@ -27,9 +27,11 @@ import { writeEvidence, readEvidence } from './evidence.mjs';
 import { stripUnsafeChars } from './text-safety.mjs';
 import { resolveAqeEmbedding } from './aqe-embedding-config.mjs';
 import { warn } from './output.mjs';
+// The checks whose results are remembered: the quick, free live checks. One
+// list, owned by the refresh vocabulary (a constants-only import).
+import { LIVE_CHECK_IDS } from './refresh.mjs';
 
-/** The checks whose results are remembered: the quick, free live checks. */
-export const LIVE_CHECK_IDS = Object.freeze(['aqe-embedding', 'mcp', 'providers', 'security', 'deja-vu', 'memory']);
+export { LIVE_CHECK_IDS };
 const STATUSES = new Set(['passed', 'failed', 'inconclusive']);
 /** The sources a record is written with, and the ones it may still be read with. */
 const WRITE_SOURCES = new Set(['sync', 'status-refresh-live']);

@@ -51,7 +51,8 @@ const texts = (result) => result.entries.map((e) => e.text).join('\n');
 test('the quick checks and the slow proofs are two named lists', () => {
   assert.deepEqual(live.LIVE_CHECK_IDS, ['aqe-embedding', 'mcp', 'providers', 'security', 'deja-vu', 'memory']);
   assert.deepEqual(live.SLOW_PROOF_IDS, ['learning', 'harvest', 'aqe', 'memory-routes']);
-  assert.deepEqual(live.LIVE_CHECK_IDS, evidence.LIVE_CHECK_IDS, 'every quick check has its own evidence id');
+  assert.equal(live.LIVE_CHECK_IDS, evidence.LIVE_CHECK_IDS,
+    'one list: every quick check has its own evidence id, and the evidence store names no other');
 });
 
 test('--only splits comma lists, keeps order and drops repeats', () => {
@@ -108,8 +109,13 @@ test('without --only the quick checks that apply run; mcp runs whenever Codex is
 
 test('--only runs exactly the named checks, even one that does not apply', async () => {
   seedHome(offlineKitConfig({ integrations: { hosts: { claude: true, codex: false } } }));
+  rmrf(evidence.liveCheckDir());
   const results = await runOnly(['mcp', 'security']);
   assert.deepEqual(results.map((r) => r.id), ['mcp', 'security'], 'in the order named');
+  assert.deepEqual(results.map((r) => [r.id, r.applies]), [['mcp', false], ['security', true]],
+    'each result says whether the check applies to this setup');
+  assert.equal(evidence.readLiveCheck('mcp', {}), null, 'a check that does not apply is not remembered');
+  assert.equal(evidence.readLiveCheck('security', {}).status, 'failed');
   await assert.rejects(live.runLiveChecks({ cfg: loadKitConfig(), cwd: PROJECT, only: ['nope'] }), TypeError);
 });
 
@@ -135,7 +141,7 @@ const SECURITY_FAILED = {
   ],
 };
 
-async function runStatus(flags, results) {
+async function runStatus(flags, results, overrides = {}) {
   seedHome();
   const calls = [];
   const deps = {
@@ -144,6 +150,7 @@ async function runStatus(flags, results) {
     management: { refreshInventory: async () => ({}), rebuildAfterMeasurement: async () => ({}) },
     runLive: async (options) => { calls.push(options); return results; },
     collect: async () => HEALTHY.map((r) => ({ ...r })),
+    ...overrides,
   };
   const refreshStages = cliRefreshStages({ cwd: PROJECT, pkgRoot: PKG_ROOT, deps });
   const { result, out } = await captureLog(() => status.run({ flags, pkgRoot: PKG_ROOT, deps: { refreshStages } }));
@@ -165,6 +172,56 @@ test('--only decides the exit code: 1 when a named check fails, 0 when it passes
 test('without --only a failed live check is a warning and leaves the exit code at 0', async () => {
   const { code, out } = await runStatus({ refresh: 'live' }, [SECURITY_FAILED]);
   assert.equal(code, 0, out);
+});
+
+const SECURITY_PASSED = { id: 'security', status: 'passed', reason: null, elapsedMs: 3_000, entries: [] };
+const FAILING_ROW = { subsystem: 'natives', level: 'fail', message: 'native runtime missing', fix: null, repair: null };
+
+test('with --only a failing row still prints and reaches --json, but only the named checks set the exit code', async () => {
+  const collect = async () => [...HEALTHY, FAILING_ROW].map((r) => ({ ...r }));
+  const human = await runStatus({ refresh: 'live', only: ['security'] }, [SECURITY_PASSED], { collect });
+  assert.equal(human.code, 0, human.out);
+  assert.match(human.out, /native runtime missing/, 'the failing row is still shown');
+  const json = await runStatus({ refresh: 'live', only: ['security'], json: true }, [SECURITY_PASSED], { collect });
+  assert.equal(json.code, 0);
+  assert.equal(JSON.parse(json.out).overall, 'fail');
+  const unnamed = await runStatus({ refresh: 'live' }, [SECURITY_PASSED], { collect });
+  assert.equal(unnamed.code, 1, 'without --only a failing row sets the exit code, as always');
+});
+
+test('with --only a failed refresh stage still shows in --json, but only the named checks set the exit code', async () => {
+  const maintenance = { scan: async () => { throw new Error('provider scan exploded'); } };
+  const { code, out } = await runStatus({ refresh: 'live', only: ['security'], json: true }, [SECURITY_PASSED], { maintenance });
+  assert.equal(code, 0, out);
+  const { refresh } = JSON.parse(out);
+  assert.equal(refresh.ok, false);
+  const stage = refresh.stages.find((s) => s.id === 'maintenance');
+  assert.deepEqual([stage.state, stage.detail], ['failed', 'provider scan exploded']);
+  const unnamed = await runStatus({ refresh: 'live', json: true }, [SECURITY_PASSED], { maintenance });
+  assert.equal(unnamed.code, 1, 'without --only a failed stage sets the exit code, as always');
+});
+
+test('with --only a named check that never ran is not a pass: exit 1', async () => {
+  const runLive = async () => { throw new Error('the live checks could not start'); };
+  const human = await runStatus({ refresh: 'live', only: ['security'] }, [], { runLive });
+  assert.equal(human.code, 1, human.out);
+  assert.match(human.out, /Running live checks failed \(\d+ ms\): the live checks could not start/);
+  const json = await runStatus({ refresh: 'live', only: ['security'], json: true }, [], { runLive });
+  assert.equal(json.code, 1);
+  assert.equal(JSON.parse(json.out).refresh.stages.find((s) => s.id === 'live').state, 'failed');
+});
+
+test('a named check that does not apply says on its line that its result is not remembered', async () => {
+  const { out } = await runStatus({ refresh: 'live', only: ['mcp', 'security'] }, [
+    { id: 'mcp', status: 'failed', reason: 'effective Codex MCP inventory unavailable', elapsedMs: 20, entries: [], applies: false },
+    { id: 'security', status: 'passed', reason: null, elapsedMs: 30, entries: [], applies: true },
+  ]);
+  assert.match(out, /^⚠ {2}mcp failed \(20 ms\) — effective Codex MCP inventory unavailable; not remembered: this check does not apply to your setup$/m);
+  assert.match(out, /^✓ security passed \(30 ms\)$/m, 'a check that applies says nothing more');
+  const skipped = await runStatus({ refresh: 'live', only: ['deja-vu'] }, [
+    { id: 'deja-vu', status: 'passed', reason: null, elapsedMs: 2, entries: [], applies: false },
+  ]);
+  assert.match(skipped.out, /^✓ deja-vu passed \(2 ms\) — not remembered: this check does not apply to your setup$/m);
 });
 
 test('one line per check; with --only each check\'s own lines are indented under it', async () => {

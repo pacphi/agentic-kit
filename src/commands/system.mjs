@@ -420,6 +420,11 @@ function report({ flags, snapshot, refresh, now }) {
 export async function run({
   flags, positionals = [], pkgRoot, deps = {},
 }) {
+  // --only is shared with ak status, but system never renders live results,
+  // so the checks' exit rule (ADR-0063) has nothing to report here.
+  if (flags.only != null && [].concat(flags.only).length > 0) {
+    return usageError('--only applies to ak status --refresh=live; ak system does not report live checks');
+  }
   const request = refreshRequestFromFlags(flags);
   if ('error' in request) return usageError(request.error);
 

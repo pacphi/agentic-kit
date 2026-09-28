@@ -80,6 +80,19 @@ test('--project-trees without --refresh=machine is a usage error', async () => {
   assert.deepEqual(collector.calls, []);
 });
 
+test('--only is refused: ak system reports no live checks, and the message names ak status', async () => {
+  for (const flags of [{ refresh: 'live', only: ['security'] }, { only: ['security'] }, { refresh: '', only: ['memory'] }]) {
+    const collector = fakeCollector();
+    let staged = false;
+    const refreshStages = new Proxy({}, { get: () => { staged = true; return async () => ({ ok: true }); } });
+    const r = await captureLog(() => system.run({ flags, deps: { collector, refreshStages } }));
+    assert.equal(r.result, 2, JSON.stringify(flags));
+    assert.match(r.out, /^✗ ak system: --only applies to ak status --refresh=live; ak system does not report live checks$/m);
+    assert.deepEqual(collector.calls, [], 'nothing is read or measured');
+    assert.equal(staged, false, 'no refresh stage runs');
+  }
+});
+
 test('a refresh takes no positional; a strength name gets the one-token spelling hint', async () => {
   const collector = fakeCollector();
   const stray = await captureLog(() => system.run({

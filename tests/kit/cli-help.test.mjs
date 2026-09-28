@@ -132,5 +132,6 @@ test('ak status --help documents --only: every check and slow proof, and its exi
   }
   assert.match(flat, /deja-vu content-free structural proof/);
   assert.match(flat, /slow proofs run only when named/i);
-  assert.match(flat, /with --only, the exit code is 1 when a named check fails or is inconclusive/i);
+  assert.match(flat, /with --only, only the named checks decide the exit code: 1 when one failed, was inconclusive or did not run/i);
+  assert.match(flat, /rows and stage failures still print and appear in --json/i);
 });

@@ -95,8 +95,9 @@ when it applies. learning and harvest are never remembered.
 
 The exit code is 1 when a row fails or a refresh stage fails, and 2 for a
 usage error. A failed live check is a warning and leaves the exit code as it
-was; with --only, the exit code is 1 when a named check fails or is
-inconclusive.
+was. With --only, only the named checks decide the exit code: 1 when one
+failed, was inconclusive or did not run, else 0; rows and stage failures still
+print and appear in --json.
 
 Examples:
   ak status                    quick dashboard
@@ -210,11 +211,15 @@ async function refreshedRows({ request, stages, pkgRoot, onStage }) {
 
 const entryGlyph = (level) => (level === 'info' ? dim('ℹ') : glyph(level));
 
+const NOT_REMEMBERED = 'not remembered: this check does not apply to your setup';
+
 /** One line per live check; with --only, the lines each check printed are
- *  indented under it (its heading is the check line itself). */
+ *  indented under it (its heading is the check line itself). A named check
+ *  that does not apply says its result was not remembered. */
 function printLiveChecks(results, { detail }) {
-  for (const { id, status, reason, elapsedMs = 0, entries = [] } of results) {
-    (status === 'passed' ? ok : warn)(`${id} ${status} (${formatElapsed(elapsedMs)})${reason ? ` — ${reason}` : ''}`);
+  for (const { id, status, reason, elapsedMs = 0, entries = [], applies } of results) {
+    const notes = [reason, applies === false ? NOT_REMEMBERED : null].filter(Boolean).join('; ');
+    (status === 'passed' ? ok : warn)(`${id} ${status} (${formatElapsed(elapsedMs)})${notes ? ` — ${notes}` : ''}`);
     if (!detail) continue;
     for (const { level, text } of entries) {
       if (level !== 'heading') console.log(`    ${entryGlyph(level)} ${sanitizeForTerminal(text)}`);
@@ -288,12 +293,16 @@ const refreshSummary = ({ strength, ok, stages }) => ({
  *  result at all). */
 const namedCheckFailed = (only, live) => only.some((id) => live?.find((r) => r.id === id)?.status !== 'passed');
 
-/** Print the rows (or the one JSON object) and return the exit code: 1 when a
- *  row fails, a refresh stage failed, or a check `--only` named did not pass;
- *  else 0. Without --only a failed live check is a warning only. */
+/** Print the rows (or the one JSON object) and return the exit code. With
+ *  --only the named checks alone decide it: 1 when one did not pass, else 0
+ *  (rows and failed stages still print and reach --json). Without it: 1 when a
+ *  row fails or a refresh stage failed, else 0; a failed live check is a
+ *  warning only. */
 function report(flags, { rows, refresh = null, live = null }, { only = [] } = {}) {
   const worst = worstLevel(rows);
-  const code = worst === 'fail' || (refresh && !refresh.ok) || namedCheckFailed(only, live) ? 1 : 0;
+  const code = only.length > 0
+    ? (namedCheckFailed(only, live) ? 1 : 0)
+    : (worst === 'fail' || (refresh && !refresh.ok) ? 1 : 0);
 
   if (flags.json) {
     console.log(JSON.stringify({
