@@ -70,6 +70,15 @@ function defaultOnError(id, e) {
   return row(id, 'warn', `${id} check unavailable: ${e.message}`);
 }
 
+/** The worst level across every row: 'fail' if any row failed, else 'warn' if
+ *  any warned, else 'ok'. Shared by `run()`'s own exit-code decision and by
+ *  dashboard-server.mjs's in-process /api/status provider, which has no CLI
+ *  process around it to derive an exit code from. */
+export function worstLevel(rows) {
+  return rows.some((r) => r.level === 'fail') ? 'fail'
+    : rows.some((r) => r.level === 'warn') ? 'warn' : 'ok';
+}
+
 async function runSections(sections, ctx, rows) {
   for (const section of sections) {
     try {
@@ -139,8 +148,7 @@ export async function run({ flags, pkgRoot, runLive = runDefaultLiveChecks }) {
   if (flags.live && !flags.json) console.log(dim('running live checks (quick, free; each bounded by a timeout)…'));
   const live = flags.live ? await runLive({ cfg: loadKitConfig(), cwd: process.cwd() }) : null;
   const rows = await collect({ pkgRoot, refresh: !!flags.refresh });
-  const worst = rows.some((r) => r.level === 'fail') ? 'fail'
-    : rows.some((r) => r.level === 'warn') ? 'warn' : 'ok';
+  const worst = worstLevel(rows);
 
   if (flags.json) {
     console.log(JSON.stringify({ overall: worst, rows, ...(live ? { live } : {}) }, null, 2));
