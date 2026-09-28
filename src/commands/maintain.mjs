@@ -896,7 +896,7 @@ function refreshVerbError(verb, flags) {
     if (REFRESH_STRENGTHS.includes(verb) && !(verb in DISPATCH)) return `unexpected argument '${verb}' — write --refresh=${verb}`;
     return '--refresh applies to ak maintain report; run it first, then this verb';
   }
-  if (flags.only != null && [].concat(flags.only).length > 0) return '--only applies to ak status --refresh=live';
+  if (flags.only != null && [].concat(flags.only).length > 0) return '--only applies to ak maintain report --refresh=live';
   if (flags['project-trees'] === true) return '--project-trees needs --refresh=machine';
   return null;
 }

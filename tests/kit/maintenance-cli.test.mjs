@@ -316,7 +316,7 @@ test('--only with a verb other than report is a usage error, not a silently igno
     flags: { only: ['mcp'] }, positionals: ['inventory'], deps: { management },
   }));
   assert.equal(result.code, 2);
-  assert.match(result.text, /--only applies to ak status --refresh=live/);
+  assert.match(result.text, /--only applies to ak maintain report --refresh=live/);
   assert.deepEqual(management.calls, []);
 });
 
