@@ -400,6 +400,27 @@ test('the mcp section looks ak up only when ak manages the registration', async 
   assert.equal(rows.find((r) => /not registered/.test(r.message)).fix, AK_OFF_PATH_FIX);
 });
 
+// Task 7: the mcp section's collect() threads refresh/record into
+// launcherCheck() (claudeLauncherUnavailable, evidence-gated) so a plain
+// `ak status` (refresh: false) stays cache-first while `--refresh` forces it,
+// mirroring hosts.mjs's Task 5 precedent.
+test('the mcp section threads refresh/record into launcherCheck, defaulting to a plain-status-shaped call', async (t) => {
+  const { home, cwd } = fixture(t);
+  const seen = [];
+  const launcherCheck = async (opts) => { seen.push(opts); return 'ak-not-on-path'; };
+  fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ mcpServers: {} }));
+  const status = () => registrationStatus({ cwd, home, settingsFile: path.join(home, 'settings.json') });
+  const cfg = { mcp: { register: true }, agentBrowser: false };
+  await mcpSection.default.collect({ cfg, cwd, home, launcherCheck, status });
+  assert.deepEqual(seen.at(-1), { refresh: false, record: true, source: 'status' },
+    'omitted refresh/record/source default to a plain status call');
+  await mcpSection.default.collect({
+    cfg, cwd, home, launcherCheck, status, refresh: true, record: false, source: 'status-refresh',
+  });
+  assert.deepEqual(seen.at(-1), { refresh: true, record: false, source: 'status-refresh' },
+    'explicit refresh/record/source thread straight through');
+});
+
 // F1 (Branch 3 fix round 2): an `ak` on PATH older than the launcher's
 // `--host` option cannot start `ak x ruflo-mcp --host claude` (it exits 2 on
 // the unknown option), so being on PATH is not enough. The check asks the PATH
@@ -418,11 +439,16 @@ test('the launcher check refuses an ak on PATH that predates --host', async () =
   const probes = [];
   const probe = (stdout, code = 0) => async (command, args) => { probes.push([command, ...args]); return { code, stdout, stderr: '' }; };
   const current = (await import('../../src/commands/x/ruflo-mcp.mjs')).help;
-  assert.equal(await mcpLib.claudeLauncherUnavailable({ haveFn: async () => false, probe: probe(current) }), 'ak-not-on-path');
+  // record: false — this test is about the DECISION (a real probe every
+  // time, via the default refresh: true), not about evidence persistence
+  // (covered by tests/kit/ak-launcher-evidence.test.mjs), and it runs with no
+  // HOME/XDG sandbox of its own.
+  const check = (opts) => mcpLib.claudeLauncherUnavailable({ ...opts, record: false });
+  assert.equal(await check({ haveFn: async () => false, probe: probe(current) }), 'ak-not-on-path');
   assert.deepEqual(probes, [], 'no probe without ak on PATH');
-  assert.equal(await mcpLib.claudeLauncherUnavailable({ haveFn: akOnPath, probe: probe(OLD_LAUNCHER_HELP) }), 'ak-launcher-outdated');
-  assert.equal(await mcpLib.claudeLauncherUnavailable({ haveFn: akOnPath, probe: probe(current, 1) }), 'ak-launcher-outdated');
-  assert.equal(await mcpLib.claudeLauncherUnavailable({ haveFn: akOnPath, probe: probe(current) }), null);
+  assert.equal(await check({ haveFn: akOnPath, probe: probe(OLD_LAUNCHER_HELP) }), 'ak-launcher-outdated');
+  assert.equal(await check({ haveFn: akOnPath, probe: probe(current, 1) }), 'ak-launcher-outdated');
+  assert.equal(await check({ haveFn: akOnPath, probe: probe(current) }), null);
   assert.deepEqual(probes.at(-1), ['ak', 'x', 'ruflo-mcp', '--help']);
 });
 

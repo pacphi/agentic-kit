@@ -15,6 +15,7 @@ import { managedAgentBrowserEnv } from './agent-browser.mjs';
 import { isAkLauncher, isRufloMcpTransport, LAUNCHER_ARGS } from './ruflo-mcp-transport.mjs';
 import { retiredCodexTransport } from './host-alignment.mjs';
 import { findTomlStringArray } from './codex-toml-safety.mjs';
+import { readEvidence, writeEvidence, stableInputsKey } from './evidence.mjs';
 
 /** Enumerate MCP tool names from the installed package's mcp-tools modules,
  *  grouped by name prefix (family). Returns Map<family, string[]>. */
@@ -561,17 +562,46 @@ export function rufloCodexMcpStatus(cfg, { home = os.homedir() } = {}) {
   };
 }
 
+const AK_LAUNCHER_EVIDENCE_MAX_AGE_MS = 6 * 3600_000;
+
 /** Why Claude Code could not start ak's launcher from PATH, or null.
  *  The registration runs whatever `ak` Claude Code finds on PATH, which may be
  *  an older install than the kit writing it: ak before the Claude mode
  *  rejects `--host` (exit 2, "Unknown option"). Its launcher help names
  *  `--host` only once the option exists, and `--help` is answered before the
  *  command runs, so asking is side-effect free.
+ *
+ *  `refresh` (default true, so a bare call keeps its unconditional probe)
+ *  lets `refresh: false` reuse a still-fresh answer (evidence kind
+ *  'ak-launcher', id 'machine', 6h TTL, invalidated by a PATH change) instead
+ *  of spawning `which ak` (and `ak x ruflo-mcp --help` when `ak` is present)
+ *  again.
  *  @returns {Promise<null | 'ak-not-on-path' | 'ak-launcher-outdated'>} */
-export async function claudeLauncherUnavailable({ haveFn = have, probe = run } = {}) {
-  if (!(await haveFn('ak'))) return 'ak-not-on-path';
-  const help = await probe('ak', ['x', 'ruflo-mcp', '--help']);
-  return help.code === 0 && /--host\b/.test(help.stdout ?? '') ? null : 'ak-launcher-outdated';
+export async function claudeLauncherUnavailable({
+  haveFn = have, probe = run, refresh = true, source = 'status-refresh', record = true,
+} = {}) {
+  const inputsKey = stableInputsKey({ PATH: process.env.PATH ?? '' });
+  if (!refresh) {
+    const cached = readEvidence('ak-launcher', 'machine', {
+      inputsKey, maxAgeMs: AK_LAUNCHER_EVIDENCE_MAX_AGE_MS,
+    });
+    if (cached && !cached.stale && !cached.invalidated) {
+      return /** @type {{reason: null | 'ak-not-on-path' | 'ak-launcher-outdated'}} */ (cached.result).reason;
+    }
+  }
+  let reason;
+  if (!(await haveFn('ak'))) {
+    reason = 'ak-not-on-path';
+  } else {
+    const help = await probe('ak', ['x', 'ruflo-mcp', '--help']);
+    reason = help.code === 0 && /--host\b/.test(help.stdout ?? '') ? null : 'ak-launcher-outdated';
+  }
+  if (record) {
+    writeEvidence('ak-launcher', 'machine', {
+      source, inputsKey, inputs: { PATH: process.env.PATH ?? '' }, result: { reason },
+    });
+  }
+  return reason;
 }
 
 /** Register claude-flow at user scope through ak's launcher
