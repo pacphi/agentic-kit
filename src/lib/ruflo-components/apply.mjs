@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { run } from '../exec.mjs';
 import * as paths from '../paths.mjs';
+import { evidenceFile } from '../evidence.mjs';
 import { installedVersion } from '../versions.mjs';
 import { globalInstallArgs } from '../npm-global-install.mjs';
 import { reconcileClaudeComponentEnv, CLAUDE_RC_RECEIPT, MEMORY_PIN_RECEIPT } from '../claude-env-projection.mjs';
@@ -28,10 +29,10 @@ const owned = (cfg) => {
   return cfg.integrations.ownership.rufloComponents;
 };
 
-/** Evidence cache location, beside `maintenanceControlDir()` in the same state base
- *  (`<stateBase>/agentic-kit/ruflo-components-evidence.json`). */
-export const rufloComponentsEvidenceFile = () =>
-  path.join(path.dirname(paths.maintenanceControlDir()), 'ruflo-components-evidence.json');
+/** Evidence cache location, under the shared evidence directory
+ *  (`<stateBase>/agentic-kit/evidence/ruflo-component/machine.json`). `collectEvidence()` is one
+ *  joint machine-wide probe, not per-component, hence the fixed 'machine' id. */
+export const rufloComponentsEvidenceFile = () => evidenceFile('ruflo-component', 'machine');
 
 /** Controller ruling: a ruflo PROJECT is not merely "any ancestor .git" — ADR-0058
  *  defines it as a git repository root that ALSO has a `.claude-flow/` directory.
