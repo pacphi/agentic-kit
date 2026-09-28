@@ -633,7 +633,9 @@ work under ADR-0011's own validation requirements.
   each file's size, WAL, largest namespace and expiry, treats a store with no memory table as
   empty, and reports stray stores for information only. Exception (2026-09-27): a stray AQE store
   with a `memory.db` is a hand fix naming `ak x aqe-store merge --dry-run`, which merges it into the
-  project store and archives it ([ADR-0062](0062-aqe-project-store-integrity.md)).
+  project store and archives it ([ADR-0062](0062-aqe-project-store-integrity.md)). The stray
+  search stops at a folder holding `.git` (a nested repository, submodule or worktree inside the
+  checkout): its stores are that repository's own.
 - **Backup and distillation age.** Status reports the age of Ruflo's last memory backup and
   distillation, and the `daemons` row is no longer "ok" when a project with memory has no daemon
   to run them.

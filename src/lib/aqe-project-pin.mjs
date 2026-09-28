@@ -18,6 +18,10 @@
 // at a path that does not exist on their machines. A pin ak wrote before the file
 // was tracked is released under its receipt; status shows a hand fix naming the
 // file. `.claude/settings.local.json` (never shared) is always pinned.
+// AQE's database-free mode (`aqe init --no-database`, AQE_MEMORY_BACKEND=memory)
+// still creates `.agentic-qe/config.yaml`, so the pin applies there too; its unified
+// memory ignores AQE_MEMORY_PATH in that mode (dist/kernel/unified-memory.js:140-143),
+// and a disposable 3.14.4 run with the pin created no memory.db (ADR-0062 §1).
 // Upstream: agentic-qe#735 (a subfolder run creates and adopts its own store);
 // once a released AQE resolves the project root from subfolders, the pin can go.
 import { spawnSync } from 'node:child_process';

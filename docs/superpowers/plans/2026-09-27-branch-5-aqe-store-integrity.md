@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development (recommended) or superpowers:executing-plans. Steps use checkbox (`- [ ]`) syntax.
 
-**Goal:** One AQE store per project, whatever folder a command, hook or MCP server starts in; the existing stray AQE stores merged into it safely and then archived; `ak x verify` checking providers from the project root without writing; every plain npx spelling of AQE's server recognized; the AQE solver heal that installs nothing removed; no failure evidence recorded for an unmanaged AQE embedding backend; "embedder verified" instead of claims about pattern search (agentic-qe#754); agentic-qe#574 named as the busy rule's driver; constraints #628, #654 and #655 sunset after their conformance runs.
+**Goal:** One AQE store per project, whatever folder a command, hook or MCP server starts in; the existing stray AQE stores merged into it safely and then archived; `ak x verify` checking providers from the project root without writing; every plain npx spelling of AQE's server recognized; the AQE solver heal that installs nothing removed; no failure evidence recorded for an unmanaged AQE embedding backend; "embedder verified" instead of claims about pattern search (agentic-qe#754); agentic-qe#574 named as the busy rule's driver; constraints #628 and #654 sunset after their conformance runs; #655 kept because its conformance on ak's path fails on 3.14.4 (evidence on the constraint, opt-in live test ready for the sunset).
 
 **Architecture:** Four slices in the worktree `../agentic-kit-b5`, each by a fresh implementer, one unit commit per behavior change, test first. AQE facts come from the installed 3.14.4 source (`AQE/` = `$(npm root -g)/agentic-qe`). Store-touching behavior is proven only in disposable environments; the only real-machine step for implementers is a read-only preview on copies. The real merge of the nine stray stores is the controller's pass with the released build.
 
@@ -49,7 +49,7 @@
 | 6 | Unmanaged backend evidence | `verifyAqe` records `onEvidence('aqe-embedding', …)` unconditionally (`verify.mjs:311`); `--live` gates it (`:605`) | |
 | 7 | #754 wording | pass wording overclaims: `status/sections/aqe.mjs:34`, `src/lib/aqe-embedding-lifecycle.mjs:100`, `docs/AQE-EMBEDDINGS.md:49-58` | registry #754 `kitImpact` |
 | 8 | #574 as busy-rule driver | ADR-0055:13, `src/lib/aqe-readiness.mjs:29-33`, `tests/kit/aqe-verification.test.mjs:12-13` name #719, which 3.14.4 carries while #574 is open | |
-| 9 | Sunsets #628, #654, #655 | closed upstream; #628 has `tests/live/aqe-external-provider-transport.test.mjs` (inherits `process.env` at :306); #654/#655 have no conformance test; removal also empties `constraintIds` and updates `tests/kit/hook-upstream.test.mjs:66-72`, `tests/kit/hook-read-model.test.mjs:178-185`, `src/lib/hook-presentation.mjs:78-83` | `--codex-guidance` in 3.14.4 (`AQE/dist/cli/commands/platform.js:190`) |
+| 9 | Sunsets #628, #654; #655 kept (its conformance fails on 3.14.4) | closed upstream; #628 has `tests/live/aqe-external-provider-transport.test.mjs` (inherits `process.env` at :306); #654/#655 have no conformance test; removal also empties `constraintIds` and updates `tests/kit/hook-upstream.test.mjs:66-72`, `tests/kit/hook-read-model.test.mjs:178-185`, `src/lib/hook-presentation.mjs:78-83` | `--codex-guidance` in 3.14.4 (`AQE/dist/cli/commands/platform.js:190`) |
 
 ## File structure
 
@@ -217,10 +217,10 @@ Per constraint one commit `chore(upstream): sunset <constraint id> after its con
 - [ ] New opt-in `tests/live/aqe-stop-hook-conformance.test.mjs` (`AK_AQE_CONFORMANCE=1`): in a disposable project `aqe init --auto` (3.14.4) produces hook commands without `npx`/`npm exec` and timeouts in seconds (none ≥ 1000); the Stop hook exits 0 within budget offline (`npm_config_offline=true`, PATH without `npx`).
 - [ ] Remove `agentic-qe-3.14.0-stop-hook-generator`; `upstreamConstraintIdFor` (`src/lib/hook-presentation.mjs:78-83`) returns `null` for those codes; the migration proposal for 3.14.0-generated artifacts is unchanged (pin in `tests/kit/hook-read-model.test.mjs`); update `tests/kit/hook-upstream.test.mjs:66-70`.
 
-### Task 9.3: agentic-qe#655
+### Task 9.3: agentic-qe#655 (kept, not sunset)
 
-- [ ] New opt-in `tests/live/aqe-codex-guidance-conformance.test.mjs`: for `full`, `compact`, `none`, `aqe init --auto --with-codex --codex-guidance <m>` twice is byte-identical, preserves user text outside AQE's sentinel, and `aqe platform verify --codex-guidance <m>` passes (`AQE/dist/cli/commands/platform.js:283-303`).
-- [ ] Remove `agentic-qe-3.14.0-codex-guidance-policy`; update `tests/kit/hook-upstream.test.mjs:71-72`.
+- [x] New opt-in `tests/live/aqe-codex-guidance-conformance.test.mjs`: for `full`, `compact`, `none`, `aqe init --auto --with-codex --codex-guidance <m>` through the `aqe` command twice is byte-identical, preserves user text outside AQE's sentinel, reports its owned bytes, and `aqe platform verify --codex-guidance <m>` passes (`AQE/dist/cli/commands/platform.js:283-303`). On 3.14.4 every mode fails, so each is a todo naming the defects; `AK_AQE_CONFORMANCE_STRICT=1` runs it strictly.
+- [x] Keep `agentic-qe-3.14.0-codex-guidance-policy` (maintainer decision 2026-09-27): the conformance on ak's path failed; the constraint and its watch entry record the evidence and a new retest date. Remove it, and update `tests/kit/hook-upstream.test.mjs:71-72`, only after the strict run passes.
 
 ### Task 10: `chore(upstream): record Branch 5 evidence for agentic-qe#735, #736, #753, #754`
 

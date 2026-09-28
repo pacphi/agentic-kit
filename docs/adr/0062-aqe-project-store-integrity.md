@@ -2,6 +2,10 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-27
+- **Updated:** 2026-09-27 — adversarial review fixes: no pin in files git tracks (B5-M5), AQE's
+  re-init value taken back, clean release; holder checks that time out refuse; nested repositories
+  are not strays; stores fingerprinted at copy time; root checked before backup; applying receipt;
+  starter patterns the root holds keep their usage
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md) (project memory status and
   stray stores), [ADR-0055](0055-aqe-embedding-lifecycle.md) (the AQE embedding projections this
@@ -57,15 +61,35 @@ They go into four targets:
    it runs. It is pinned when the table exists or AQE is registered in the file.
 
 The pin applies only inside a repository whose root has a `.agentic-qe` folder. The user-level
-`~/.codex/config.toml` is never pinned, because it serves every project.
+`~/.codex/config.toml` is never pinned, because it serves every project. A target file git tracks
+(`.mcp.json`, the project `.codex/config.toml`; `git ls-files --error-unmatch`) is not pinned
+either (maintainer decision B5-M5): a committed absolute path would point teammates' AQE at a path
+that does not exist on their machines. A pin ak wrote before the file was tracked is released under
+its receipt, and the `aqe-pin` status row is a hand fix naming the file.
+`.claude/settings.local.json` is always pinned. Outside git, and for untracked files, the pin
+applies as described.
 
 Each target has a receipt (`<file>.agentic-kit-aqe-pin.json`; the shell table has its own,
 `.codex/config.toml.agentic-kit-aqe-shell-pin.json`, because one receipt holds one table's keys).
-`ak uninstall` restores what the receipts recorded. AQE's own relative `AQE_MEMORY_PATH` is
-replaced under the receipt. Any other value ak did not write is kept, and the `aqe-pin` status row
-reports it as a hand fix naming the file. A pin naming another checkout's root (a copied
+`ak uninstall` restores what the receipts recorded; a table or a `settings.local.json` that ak
+created and that the release leaves empty is removed, and ak keeps only its newest pin backup per
+file. AQE's own relative `AQE_MEMORY_PATH` is replaced under the receipt, also when AQE writes it
+back over ak's value (`aqe init --auto` after an AQE upgrade rewrites its Codex tables). AQE writes
+no `AQE_STORAGE_PATH` into a config file, so that key has no AQE default to take back. Any other
+value ak did not write is kept, and the `aqe-pin` status row reports it as a hand fix naming the
+file. A pin naming another checkout's root (a copied
 `.claude/settings.local.json`) warns the same way. `ak setup` releases the pin around its own
 `aqe init` and writes it again afterwards.
+
+AQE's database-free mode (`aqe init --no-database`, agentic-qe#533) sets
+`AQE_MEMORY_BACKEND=memory` and still creates `.agentic-qe/config.yaml`, so the pin applies there
+too. That is safe: the unified memory ignores `AQE_MEMORY_PATH` in that mode
+(`dist/kernel/unified-memory.js:140-143`). In a disposable 3.14.4 project, `aqe health`,
+`aqe learning stats` and the MCP server's `tools/list`, from the root and from a subfolder with the
+pin, created no `memory.db` anywhere; without the pin the subfolder run created
+`sub/.agentic-qe`. The one reader that ignores the backend, the endpoint embedder's identity store
+(`dist/learning/embedder-identity-store.js`), opens `<cwd>/.agentic-qe/memory.db` without the pin,
+so the pin moves that file to the root rather than creating it.
 
 ### 2. Check providers from the root without writing
 
@@ -81,13 +105,22 @@ checks are skipped, and the command says so.
 `--yes`; `--dry-run` wins over `--yes`, and `--json` prints one object. The command is not a sync
 step. The stray-store status row is a hand fix naming `ak x aqe-store merge --dry-run`.
 
+The stray search stops at a folder that holds `.git` (a nested repository, a submodule, or a
+worktree inside the checkout): that folder's `.agentic-qe` is its own repository's store, and the
+preview reports it as skipped.
+
 The merge runs these steps in order:
 
 1. **Preview.** It copies the root and each stray store (`memory.db`, `-wal`, `-shm`) into
-   `<run>/scratch` and counts there; no real store is opened, not even read-only. For each stray it
-   reports patterns, experiences, audit-trail rows, patterns already in the root, AQE starter
-   patterns left out, and the root's counts after a merge. A folder without `memory.db` is skipped
-   and reported.
+   `<run>/scratch` and counts there; no real store is opened, not even read-only. It records a
+   fingerprint of each store as it copies it: the size and mtime of every file in a stray folder,
+   and of the root's `memory.db` and a non-empty `-wal` (the backup's own read-only open creates an
+   empty `-wal` and a `-shm` there). It runs `integrity_check` and `foreign_key_check` on the
+   root's copy; a root that already fails refuses the merge before anything is written, naming the
+   check. For each stray it reports patterns, experiences, audit-trail rows, patterns and
+   experiences already in the root, AQE starter patterns left out and those the root holds, and the
+   root's counts after a merge. A folder without `memory.db` is skipped and reported, and so is an
+   earlier run whose receipt still says `applying`.
 2. **Writers.** Refuse while any process holds the root or a stray store (§4).
 3. **Backup.** `VACUUM INTO <run>/backup/root-memory.db`.
 4. **Rehearsal.** On a copy of that backup, for each stray copy:
@@ -100,13 +133,20 @@ The merge runs these steps in order:
    `foreign_key_check` empty. AQE runs with its working directory and `AQE_PROJECT_ROOT` in the
    scratch folder. No duplicate-pruning step runs, because 3.14.4 skips shared patterns
    (agentic-qe#736).
-5. **Apply.** Check writers again, then run the same imports into the real root store, and check
-   the counts against the rehearsal. On a mismatch it stops, leaves the strays and prints the
-   backup and how to restore it. It never overwrites the live root automatically.
-6. **Archive.** Check writers again, then move each whole stray folder (§5).
+5. **Apply.** Check writers again, and compare every fingerprint: a store that changed since its
+   copy stops the merge here (the holder checks only see files open at that instant, and the
+   exports come from the copies). Write the receipt with status `applying`, then run the same
+   imports into the real root store, and check the counts against the rehearsal. On a mismatch it
+   stops, leaves the strays and prints the backup and how to restore it. It never overwrites the
+   live root automatically.
+6. **Archive.** Check writers again, then move each whole stray folder (§5). A stray whose
+   fingerprint changed during the import stays in place and is reported: its data may be newer
+   than the copy.
 7. **Receipt.** Write `<run>/receipt.json`: AQE version, holder method, before and after counts,
-   the backup, the starter set, per stray the audit-trail rows and starter patterns left out, and
-   what was archived or left in place.
+   the backup, the starter set, per stray the audit-trail rows, starter patterns left out and held
+   by the root, experiences the root already held, and what was archived or left in place. An
+   `applying` receipt left by an interrupted run is reported by `status` until a later merge of the
+   same root completes and marks it `interrupted`.
 
 The merge needs AQE 3.14.4 or later, read from the `aqe --version` it runs. A preview removes its
 scratch folder; a successful merge removes `scratch/` and keeps the backup, archive and receipt; a
@@ -117,7 +157,8 @@ failure keeps everything.
 The merge finds holders by open file: `lsof -Fpcn` on macOS, `/proc/*/fd` on Linux (lsof as a
 fallback), for the current user's processes. It checks before the backup, before the real import
 and before the archive. It refuses while any process holds a store, or when the check could not
-complete, and lists each holder by PID and command. On Windows it runs only when the host-session
+complete (lsof missing, failed, or ended by a timeout or a signal; a `/proc` fd link that cannot
+be read falls back to lsof), and lists each holder by PID and command. On Windows it runs only when the host-session
 census finds no Claude Code, Codex or OpenCode session in the project, and a failed folder rename
 (`EBUSY`, `EPERM`) leaves that stray in place and reports it. There is no `--force`: AQE's writers
 take no lock the merge could wait on (agentic-qe#753).
@@ -128,7 +169,8 @@ Each stray `.agentic-qe` folder moves whole to
 `<state>/agentic-kit/aqe-store-merge/<ISO time>/archive/<slug>/.agentic-qe`, beside the root backup
 and the receipt. A slug never names a folder `.agentic-qe`: `docs/research/v5` becomes
 `docs--research--v5`, and `.claude` becomes `dot-claude`. Across filesystems it copies, compares
-every file's name and size, then removes the source.
+every file's name and size, then removes the source; a removal that fails part-way is reported as
+partially moved, naming the complete archive copy and the files left behind.
 
 Audit-trail (`witness_chain`) rows are not imported; they stay in the archive with the store's
 `witness-keys/`. ak keeps the archive until the user deletes it.
@@ -160,9 +202,12 @@ So at merge time ak builds a fresh store in `<run>/scratch/seed`:
   `.claude/settings.json`, then the `.mcp.json` AQE entry.
 
 That store's patterns are the starter set, matched by `(name, qe_domain, pattern_type)`. Each
-stray's scratch copy loses them before export, together with the rows that must reference them
-(a `pattern_id` that is `NOT NULL` or a foreign key to `qe_patterns`). Nullable references such as
-`concept_nodes` stay. When the fresh store cannot be built or holds no patterns (AQE stores none
+stray's scratch copy loses the starter patterns the root does not hold before export, together
+with the rows that must reference them (a `*pattern_id` column that is `NOT NULL` or a foreign key
+to `qe_patterns`, `pattern_relationships.target_pattern_id` included); nullable references such as
+`concept_nodes.pattern_id` are cleared. A starter pattern the root already holds stays in the
+export: AQE's import keeps the root's pattern and remaps the stray's usage and lineage rows onto it
+(`dist/integrations/ruvector/brain-shared.js` `mergeGenericRow`, `remapPatternReferences`). When the fresh store cannot be built or holds no patterns (AQE stores none
 without a working embedder), the merge refuses before the backup. There is no opt-in flag. The
 archived strays keep their starter patterns.
 
@@ -174,8 +219,11 @@ archived strays keep their starter patterns.
   The merge refuses today, because the maintainer's two AQE MCP servers hold the root store.
 - After the pin, `aqe status` and `aqe health` print "not initialized" from a subfolder, because
   AQE checks the working directory (`dist/cli/index.js:140-152`). Run them from the root.
-- The merge's preview starts AQE twice in a scratch folder, and its `aqe init` runs
-  `npm exec ruflo --version`.
+- `ak x aqe-store status` is not free: it copies the whole root store and every stray store into
+  ak's state folder, runs `aqe init --auto --minimal` and `aqe learning stats --json` there (the
+  init runs `npm exec ruflo --version`, which may reach the npm registry; without an endpoint
+  embedder AQE's in-process embedder may download its model, not verified), and removes the copies
+  when it finishes.
 
 ## Removal conditions
 
@@ -194,4 +242,9 @@ Branch `fix/aqe-store-integrity`:
 - verify from the root: `2f13f043`;
 - holders: `38ef6b44`, `f770c1f9`, `f84e97e8`;
 - merge: `60618326`, `55848973`, `9442e831`;
-- starter patterns: `a69f2729`.
+- starter patterns: `a69f2729`;
+- adversarial review fixes: `482b1ea5` (holder timeout), `3fbcc97c` (nested repositories),
+  `a37edf2a` (AQE re-init), `88e76e71` (release leftovers), `70d7b070` (tracked files, B5-M5),
+  `77c795e5` (root checks first), `a4980a7d` (fingerprints), `0d1e6075` (applying receipt),
+  `e11de134` (starter usage, relationships), `cb2ec3c8` (experiences in the root), `9e6e36e9`
+  (partial move), `cf99937d` (restore steps), `742021e0` (`ak setup` Codex message).

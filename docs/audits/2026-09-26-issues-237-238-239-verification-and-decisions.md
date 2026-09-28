@@ -987,16 +987,34 @@ decisions are under "Branch 5 decisions" below; the design is
   removal condition (`5eec3a0d`).
 - **Pin (item 2, B5-D1, B5-D1a, B5-D1b):** three absolute keys in four project targets under
   receipts (`0296c6c9`, `abe3d75e`, `4ab63ed5`, `f0da2f6c`).
-- **Verify from the root (item 3):** `2f13f043`.
+- **Verify from the root (item 3):** `2f13f043`. Its title says "without writing": that means the
+  project store's database files. `aqe health` still creates `witness-keys/` in the root store
+  folder when it is missing (ADR-0062 §2).
 - **Merge (item 2, B5-D2 to B5-D5):** holders (`38ef6b44`, `f770c1f9`, `f84e97e8`), merge and
   archive (`60618326`, `55848973`), the status row's hand fix (`9442e831`), AQE's starter patterns
   left out (`a69f2729`).
 - **Constraint sunsets:** agentic-qe-3.13-external-provider-contract (#628, `9fdac7c0`) and
   agentic-qe-3.14.0-stop-hook-generator (#654, `e2e9c61c`) after their conformance runs on 3.14.4.
-  agentic-qe-3.14.0-codex-guidance-policy (#655) stays: under `aqe init --minimal` its
-  conformance fails (`platform verify codex` reports missing Codex hooks and skills, and
-  `--codex-guidance full` writes no guidance), and `aqe platform setup codex` fails on 3.14.4 with
-  "Module not found in bundle: ../../init/codex-installer.js".
+  agentic-qe-3.14.0-codex-guidance-policy (#655) stays: its conformance on ak's own path (full
+  `aqe init --auto --with-codex --codex-guidance full|compact|none` through the `aqe` command,
+  3.14.4, sandboxed) fails. `full` writes no block when `AGENTS.md` exists; `compact` adds bytes
+  outside its sentinel; through the `aqe` bin symlink AQE's `resolvePackageRoot()` misses its
+  package, so no Codex hooks or skills install (not `--minimal`, as first recorded); `platform
+  verify` exits 0 on failed checks; `aqe platform setup codex` fails with "Module not found in
+  bundle: ../../init/codex-installer.js". The evidence is on the constraint and its watch entry
+  (`63107d07`), and the opt-in `tests/live/aqe-codex-guidance-conformance.test.mjs` proves the
+  sunset once a release passes (`52bfa713`).
+- **Adversarial review fixes:** a killed or timed-out holder check refuses (`482b1ea5`); the stray
+  search stops at nested repositories (`3fbcc97c`); AQE's re-init value is taken back under the
+  receipt (`a37edf2a`); a release leaves no table, file or backup pile behind (`88e76e71`); files
+  git tracks are never pinned (`70d7b070`, maintainer decision B5-M5); the root is checked before
+  any backup (`77c795e5`); stores are fingerprinted at copy time and re-checked before the import
+  and each move (`a4980a7d`); an `applying` receipt precedes the real import (`0d1e6075`); starter
+  patterns the root holds keep their usage, and every `*pattern_id` reference is handled
+  (`e11de134`); experiences the root holds are counted (`cb2ec3c8`); a partial cross-device move is
+  reported as such (`9e6e36e9`); the restore steps are ordered and say what they discard
+  (`cf99937d`); `ak setup` names AQE's Codex hooks and skills only when they exist (`742021e0`).
+  AQE's database-free mode was checked against the pin and needs no change (ADR-0062 §1).
 - **Registry:** Branch 5 evidence on agentic-qe#735, #736 and #753, agentic-qe#561 registered, and
   the 20 threads the watch proposed retiring retired (`76696c76`).
 - **Live preview on 2026-09-27** (read-only copies): the nine strays would add 0 patterns and 99
