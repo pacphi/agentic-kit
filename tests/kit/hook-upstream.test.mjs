@@ -63,11 +63,9 @@ test('upstream registry separates valid shape, current evidence, and version app
   assert.equal(blocked.evidence.applicability, 'affected');
   const brain = result.constraints.find((entry) => entry.dependency === 'ruvnet-brain');
   assert.equal(brain, undefined);
-  const stop = result.constraints.find((entry) => entry.id === 'agentic-qe-3.14.0-stop-hook-generator');
-  assert.equal(stop.notification.status, 'published');
-  assert.equal(stop.notification.approvalRequired, false);
-  assert.match(stop.notification.publishedUrl, /issues\/654$/);
-  assert.equal(stop.notificationDraft, null);
+  // Sunset 2026-09-27: AQE 3.14.4 passed the offline Stop conformance
+  // (tests/live/aqe-stop-hook-conformance.test.mjs).
+  assert.equal(result.constraints.find((entry) => entry.id === 'agentic-qe-3.14.0-stop-hook-generator'), undefined);
   const guidance = result.constraints.find((entry) => entry.id === 'agentic-qe-3.14.0-codex-guidance-policy');
   assert.equal(guidance.notification.status, 'published');
   assert.match(guidance.notification.publishedUrl, /issues\/655$/);
