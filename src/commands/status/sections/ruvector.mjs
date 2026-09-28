@@ -13,7 +13,7 @@ import { row } from '../row.mjs';
 
 export default {
   id: 'ruvector',
-  async collect({ cfg }) {
+  async collect({ cfg, refresh = false }) {
     const rows = [];
     if (!ruvectorRegistered()) return rows;
     if (cfg.ruvector === false) {
@@ -21,7 +21,7 @@ export default {
       return rows;
     }
     try {
-      const rv = await ruvectorDrift();
+      const rv = await ruvectorDrift({ force: refresh });
       if (rv.present && rv.outdated) {
         rows.push(row('ruvector', 'warn',
           `ruvector CLI ${rv.installed} installed, ${rv.latest} available`, 'sync upgrades the ruvector CLI'));

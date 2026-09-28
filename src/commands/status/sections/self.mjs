@@ -4,10 +4,10 @@ import { row } from '../row.mjs';
 
 export default {
   id: 'self',
-  async collect({ pkgRoot }) {
+  async collect({ pkgRoot, refresh = false }) {
     const rows = [];
     try {
-      const s = await selfDrift({ pkgRoot });
+      const s = await selfDrift({ pkgRoot, force: refresh });
       if (s.outdated) {
         rows.push(row('self', 'warn',
           `kit ${s.installed} installed, ${s.latest} available (${s.tag} tag)`,
