@@ -2167,7 +2167,7 @@ all retained days. The report contains:
 6. headless share and host interplay.
 
 The default command is offline and read-only. `--json` emits the same
-deterministic payload. `--deep` is the one explicit text-bearing mode: it rereads
+deterministic payload. `--show-text` is the one explicit text-bearing mode: it rereads
 local transcripts, joins matching prompt hashes, masks the excerpts, writes nothing,
 and prints them only to the terminal or the command's JSON result.
 

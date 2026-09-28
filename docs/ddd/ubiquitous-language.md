@@ -364,8 +364,10 @@ runtime state is a chip word, never a prose word. See
 
 - `ak host` and `ak x host` manage execution hosts and routing; they do not redefine inference
   providers.
-- `ak system [--deep] [--json]` renders the Machine footprint collector; `ak about [--category]
-  [--json]` renders the Component directory. Both are read-only twins of a dashboard area.
+- `ak system [--refresh[=live|machine]] [--project-trees] [--json]` renders the Machine footprint
+  collector; `ak about [--category] [--json]` renders the Component directory. Plain `ak system` is
+  the read-only twin of its dashboard area — `ak about` stays read-only always; `ak system
+  --refresh` is not read-only, since it refreshes Maintenance evidence and rebuilds the inventory.
 - `ak models` is the read-only model inventory, refresh, diff, explain, and plan family. Route
   mutation remains `ak host pick`; there is no accepted `ak models apply`.
 - `kit.json.integrations.hosts` records enabled hosts. Top-level `routing` records `version`,

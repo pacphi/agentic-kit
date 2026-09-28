@@ -196,7 +196,7 @@ Delivery
   GET /api/system?refresh=deep → start-or-attach the single-flight deep scan
   GET /api/system/summary    → the same read, catalog/storage/install/projects/consumers each
                                 projected to what the System page draws
-  ak system [--deep] [--json]  → the same collector, CLI-rendered
+  ak system [--refresh[=live|machine]] [--project-trees] [--json]  → the same collector, CLI-rendered
         |
         v
   Machine Footprint destinations under System:
