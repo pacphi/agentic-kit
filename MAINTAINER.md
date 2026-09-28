@@ -449,6 +449,9 @@ Notes:
 
 - `release.yml` is **independent of `ci.yml`** — it runs its own test gate on the
   tagged commit. A green `main` CI is reassurance, not a precondition for release.
+- Every job stops after **30 minutes** (`timeout-minutes: 30`); the upstream-watch jobs
+  use shorter limits (15 and 20). The Windows test legs are the slowest and usually
+  finish in under 20 minutes, so a job that reaches the limit is stuck, not slow.
 - A nightly failure may be upstream drift, a runner/network problem, or a kit defect.
   Inspect the failing step and captured evidence before assigning a cause.
 - Dependabot PRs carry `dependencies` (+ `ci`) labels; merge like any PR after CI.
