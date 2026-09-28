@@ -355,10 +355,14 @@ function removeRunScratch(o, dir) {
 }
 
 function strayStores(root) {
-  const found = findStrayMemoryStores(root).strays.filter((stray) => stray.kind === 'aqe');
+  const scan = findStrayMemoryStores(root);
+  const found = scan.strays.filter((stray) => stray.kind === 'aqe');
   const slugs = new Set();
   const strays = [];
-  const skipped = [];
+  // A nested repository or a worktree inside the checkout keeps its own store (review M3).
+  const skipped = (scan.nestedRepositories ?? [])
+    .filter((relative) => fs.existsSync(path.join(root, ...relative.split('/'), '.agentic-qe')))
+    .map((relative) => ({ path: relative, reason: 'its own repository; its .agentic-qe is that repository\'s store' }));
   for (const stray of found) {
     if (!fs.existsSync(path.join(stray.file, 'memory.db'))) { skipped.push({ path: stray.path, reason: 'no memory.db' }); continue; }
     let slug = archiveSlug(stray.path);

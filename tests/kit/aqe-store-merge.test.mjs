@@ -333,6 +333,22 @@ test('no project store at the root refuses and says how to create one', async (t
   assert.match(result.reason, /no project store/);
 });
 
+test('a nested repository\'s or in-checkout worktree\'s own store is never merged or moved (review M3)', async (t) => {
+  const p = project(t);
+  buildStore(path.join(p.root, 'packages', 'api', '.agentic-qe'), { patterns: ['N'], experiences: ['n1'] });
+  fs.mkdirSync(path.join(p.root, 'packages', 'api', '.git'));
+  buildStore(path.join(p.root, 'wt', 'feature', '.agentic-qe'), { patterns: ['W'] });
+  fs.writeFileSync(path.join(p.root, 'wt', 'feature', '.git'), 'gitdir: ../../.git/worktrees/feature\n');
+  const result = await mergeAqeStores(p.root, base(p, { apply: true, runner: fakeAqe().runner, holders: noHolders }));
+  assert.equal(result.status, 'merged', JSON.stringify(result.reason));
+  assert.deepEqual(result.strays.map((s) => s.path), ['.agentic-qe/.agentic-qe', 'docs/.agentic-qe']);
+  assert.deepEqual(names(p.rootDb), ['A', 'B', 'C', 'D']);
+  for (const own of ['packages/api/.agentic-qe/memory.db', 'wt/feature/.agentic-qe/memory.db']) {
+    assert.ok(fs.existsSync(path.join(p.root, own)), `${own} stays where its repository keeps it`);
+  }
+  assert.deepEqual(result.skipped.filter((s) => /own repository/.test(s.reason)).map((s) => s.path), ['packages/api', 'wt/feature']);
+});
+
 // ---- AQE's starter patterns (decision B5-D5) ---------------------------------
 
 /** project() plus AQE starter patterns S1, S2 in the strays (the root has none of
