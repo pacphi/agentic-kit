@@ -12,7 +12,7 @@ import { reconcileAqePin } from '../../../lib/aqe-project-pin.mjs';
 import { row } from '../row.mjs';
 
 const KEYS = 'AQE_PROJECT_ROOT, AQE_MEMORY_PATH and AQE_STORAGE_PATH';
-const files = (findings) => [...new Set(findings.map((f) => f.file))].join(', ');
+const files = (findings) => [...new Set(findings.map((f) => f.where ?? f.file))].join(', ');
 
 /** @param {any} cfg @param {string} cwd */
 export function aqePinRows(cfg, cwd) {
@@ -25,7 +25,7 @@ export function aqePinRows(cfg, cwd) {
   if (drift.length) {
     const stale = drift.find((f) => f.foreignRoot && !f.conflicts.length);
     rows.push(row('aqe-pin', 'warn', stale
-      ? `AQE pin in ${stale.file} names another root (${stale.foreignRoot}); AQE would use that checkout's store`
+      ? `AQE pin in ${stale.where ?? stale.file} names another root (${stale.foreignRoot}); AQE would use that checkout's store`
       : `AQE is not pinned to this project's root in ${files(drift)}: a command, hook or MCP server started in a subfolder creates its own .agentic-qe there`,
     `pin ${KEYS} to ${pin.root}`));
   }

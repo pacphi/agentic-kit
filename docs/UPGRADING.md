@@ -50,11 +50,14 @@ started in. `ak sync` and `ak setup` now pin AQE to the project root in projects
 - `AQE_STORAGE_PATH` — `<root>/.agentic-qe`
 
 They go into the `env` of `.claude/settings.local.json`, the `agentic-qe` entry of `.mcp.json`
-(only when it starts AQE's own server) and the `[mcp_servers.agentic-qe.env]` table of the
-project's `.codex/config.toml`. Your user-level `~/.codex/config.toml` is never pinned. Each file
-gets a receipt beside it (`<file>.agentic-kit-aqe-pin.json`), and `ak uninstall` puts back what
-was there before. AQE's own relative `AQE_MEMORY_PATH = ".agentic-qe/memory.db"` in the Codex
-table is replaced, and restored on uninstall. The relative value AQE writes into
+(only when it starts AQE's own server), and two tables of the project's `.codex/config.toml`:
+`[mcp_servers.agentic-qe.env]` and `[shell_environment_policy.set]` (the environment Codex gives
+the commands and hooks it runs; pinned when the table exists or AQE is registered in that file).
+Your user-level `~/.codex/config.toml` is never pinned. Each file gets a receipt beside it
+(`<file>.agentic-kit-aqe-pin.json`; the shell table's is
+`.codex/config.toml.agentic-kit-aqe-shell-pin.json`), and `ak uninstall` puts back what was there
+before. AQE's relative `AQE_MEMORY_PATH = ".agentic-qe/memory.db"` in either Codex table is
+replaced, and restored on uninstall. The relative value AQE writes into
 `.claude/settings.json` stays: Claude Code gives `settings.local.json` precedence.
 
 A value you set yourself is kept. `ak status` then shows an `aqe-pin` row that names the file for

@@ -1,19 +1,23 @@
-// B5-D1/B5-D1a: AQE is pinned to the project root with three absolute values
+// B5-D1/B5-D1a/B5-D1b: AQE is pinned to the project root with three absolute values
 // (AQE_PROJECT_ROOT, AQE_MEMORY_PATH, AQE_STORAGE_PATH) in the three project
-// files, each under a receipt. Every test runs in its own temporary project.
+// files, each under a receipt; the project Codex config holds two targets (the
+// agentic-qe env table and [shell_environment_policy.set]). Every test runs in its
+// own temporary project.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { tempDir } from './helpers/temp-dir.mjs';
 import {
-  desiredAqePin, reconcileAqePin, AQE_PIN_RECEIPT, releaseAqePins, recordAqePinProject,
+  desiredAqePin, reconcileAqePin, AQE_PIN_RECEIPT, AQE_SHELL_PIN_RECEIPT, releaseAqePins, recordAqePinProject,
 } from '../../src/lib/aqe-project-pin.mjs';
 import memoryPin from '../../src/commands/status/sections/memory-pin.mjs';
 
 const CODEX_AQE = '[mcp_servers.agentic-qe]\ncommand = "aqe-mcp"\nstartup_timeout_sec = 30\n\n'
   + '[mcp_servers.agentic-qe.env]\nAQE_MEMORY_PATH = ".agentic-qe/memory.db"\nAQE_V3_MODE = "true"\n\n'
-  + '[shell_environment_policy.set]\nAQE_MEMORY_PATH = ".agentic-qe/memory.db"\n';
+  + '[shell_environment_policy]\ninherit = "core"\n\n'
+  + '[shell_environment_policy.set]\nAQE_MEMORY_PATH = ".agentic-qe/memory.db"\nAQE_V3_MODE = "true"\n';
+const SHELL_TABLE = '[shell_environment_policy.set]';
 
 function project(t, { aqe = true, codex = true } = {}) {
   const root = tempDir('ak-aqe-pin', t);
@@ -68,22 +72,103 @@ test('all three targets gain the absolute pin with receipts; a second run change
   const toml = fs.readFileSync(codex, 'utf8');
   for (const [key, value] of Object.entries(want)) assert.ok(toml.includes(`${key} = ${JSON.stringify(value)}`), `${key} in ${toml}`);
   for (const file of [settings, mcp, codex]) assert.ok(fs.existsSync(`${file}${AQE_PIN_RECEIPT}`), `${file} receipt`);
+  assert.ok(fs.existsSync(`${codex}${AQE_SHELL_PIN_RECEIPT}`), 'shell table receipt');
+  const shell = toml.slice(toml.indexOf(SHELL_TABLE));
+  for (const [key, value] of Object.entries(want)) assert.ok(shell.includes(`${key} = ${JSON.stringify(value)}`), `${key} in ${shell}`);
+  assert.equal(first.findings.length, 4, JSON.stringify(first.findings));
   const second = reconcileAqePin(cfg, root);
   assert.equal(second.changed, false, JSON.stringify(second.findings));
   assert.ok(second.findings.every((f) => f.status === 'converged'), JSON.stringify(second.findings));
 });
 
-test('AQE\'s own relative AQE_MEMORY_PATH in the project Codex env is replaced under the receipt, and the shell table is untouched', (t) => {
+test('AQE\'s own relative AQE_MEMORY_PATH in both project Codex tables is replaced under the receipts; other keys stay', (t) => {
   const { root, write, cfg } = project(t);
   const codex = write('.codex/config.toml', CODEX_AQE);
-  reconcileAqePin(cfg, root);
+  const result = reconcileAqePin(cfg, root);
+  assert.equal(result.ok, true, JSON.stringify(result));
   const toml = fs.readFileSync(codex, 'utf8');
-  const envTable = toml.slice(toml.indexOf('[mcp_servers.agentic-qe.env]'), toml.indexOf('[shell_environment_policy.set]'));
-  assert.ok(envTable.includes(`AQE_MEMORY_PATH = ${JSON.stringify(path.join(root, '.agentic-qe', 'memory.db'))}`), envTable);
+  const absolute = `AQE_MEMORY_PATH = ${JSON.stringify(path.join(root, '.agentic-qe', 'memory.db'))}`;
+  const envTable = toml.slice(toml.indexOf('[mcp_servers.agentic-qe.env]'), toml.indexOf('[shell_environment_policy]'));
+  assert.ok(envTable.includes(absolute), envTable);
   assert.ok(!envTable.includes('".agentic-qe/memory.db"'), envTable);
-  assert.ok(toml.endsWith('[shell_environment_policy.set]\nAQE_MEMORY_PATH = ".agentic-qe/memory.db"\n'), toml);
+  const shell = toml.slice(toml.indexOf(SHELL_TABLE));
+  assert.ok(shell.includes(absolute), shell);
+  assert.ok(!shell.includes('".agentic-qe/memory.db"'), shell);
+  assert.ok(shell.includes('AQE_V3_MODE = "true"'), shell);
+  assert.ok(toml.includes('[shell_environment_policy]\ninherit = "core"\n\n'), toml);
   const receipt = json(`${codex}${AQE_PIN_RECEIPT}`);
   assert.deepEqual(receipt.keys.AQE_MEMORY_PATH.before, { present: true, value: '.agentic-qe/memory.db' });
+  const shellReceipt = json(`${codex}${AQE_SHELL_PIN_RECEIPT}`);
+  assert.deepEqual(shellReceipt.keys.AQE_MEMORY_PATH.before, { present: true, value: '.agentic-qe/memory.db' });
+  assert.deepEqual(shellReceipt.keys.AQE_PROJECT_ROOT.before, { present: false });
+  const second = reconcileAqePin(cfg, root);
+  assert.equal(second.changed, false, JSON.stringify(second.findings));
+  assert.equal(fs.readFileSync(codex, 'utf8'), toml);
+});
+
+test('the shell table is pinned when it exists even without an AQE registration, and never created from nothing', (t) => {
+  const { root, write, cfg } = project(t);
+  const only = '[shell_environment_policy.set]\nAQE_MEMORY_PATH = ".agentic-qe/memory.db"\nOTHER = "1"\n';
+  const codex = write('.codex/config.toml', only);
+  reconcileAqePin(cfg, root);
+  const toml = fs.readFileSync(codex, 'utf8');
+  for (const [key, value] of Object.entries(pinOf(root))) assert.ok(toml.includes(`${key} = ${JSON.stringify(value)}`), toml);
+  assert.ok(toml.includes('OTHER = "1"'), toml);
+  assert.equal(reconcileAqePin(cfg, root, { enabled: false }).ok, true);
+  assert.equal(fs.readFileSync(codex, 'utf8'), only);
+  const bare = project(t);
+  const plain = bare.write('.codex/config.toml', 'model = "x"\n');
+  reconcileAqePin(bare.cfg, bare.root);
+  assert.equal(fs.readFileSync(plain, 'utf8'), 'model = "x"\n');
+  assert.equal(fs.existsSync(`${plain}${AQE_SHELL_PIN_RECEIPT}`), false);
+});
+
+test('with AQE\'s Codex registration and no shell table, a shell table is added and removed again on release', (t) => {
+  const { root, write, cfg } = project(t);
+  const source = '[mcp_servers.agentic-qe]\ncommand = "aqe-mcp"\n';
+  const codex = write('.codex/config.toml', source);
+  reconcileAqePin(cfg, root);
+  const toml = fs.readFileSync(codex, 'utf8');
+  const shell = toml.slice(toml.indexOf(SHELL_TABLE));
+  assert.ok(shell.startsWith(SHELL_TABLE), toml);
+  for (const [key, value] of Object.entries(pinOf(root))) assert.ok(shell.includes(`${key} = ${JSON.stringify(value)}`), shell);
+  reconcileAqePin(cfg, root, { enabled: false });
+  const released = fs.readFileSync(codex, 'utf8');
+  assert.ok(!released.includes('AQE_PROJECT_ROOT'), released);
+});
+
+test('a foreign shell-table value is preserved and reported as a hand fix naming the file', async (t) => {
+  const { root, write, cfg } = project(t);
+  const source = '[mcp_servers.agentic-qe]\ncommand = "aqe-mcp"\n\n[shell_environment_policy.set]\nAQE_MEMORY_PATH = "/elsewhere/memory.db"\n';
+  const codex = write('.codex/config.toml', source);
+  const result = reconcileAqePin(cfg, root);
+  assert.equal(result.ok, true);
+  const toml = fs.readFileSync(codex, 'utf8');
+  assert.ok(toml.slice(toml.indexOf(SHELL_TABLE)).includes('AQE_MEMORY_PATH = "/elsewhere/memory.db"'), toml);
+  const shellFinding = result.findings.find((f) => f.kind === 'shell');
+  assert.ok(shellFinding.conflicts.some((c) => c.key === 'AQE_MEMORY_PATH'), JSON.stringify(shellFinding));
+  const rows = await memoryPin.collect({ cwd: root, cfg });
+  const hand = rows.find((r) => r.repair === 'manual' && r.subsystem === 'aqe-pin');
+  assert.ok(hand, JSON.stringify(rows));
+  assert.match(hand.fix, /\.codex\/config\.toml \[shell_environment_policy\.set\]/);
+});
+
+test('an inline or dotted shell environment set is preserved as a hand fix, never rewritten', (t) => {
+  for (const source of [
+    '[mcp_servers.agentic-qe]\ncommand = "aqe-mcp"\n\n[shell_environment_policy]\nset = { AQE_MEMORY_PATH = ".agentic-qe/memory.db" }\n',
+    'shell_environment_policy.set.AQE_MEMORY_PATH = ".agentic-qe/memory.db"\n\n[mcp_servers.agentic-qe]\ncommand = "aqe-mcp"\n',
+    '[mcp_servers.agentic-qe]\ncommand = "aqe-mcp"\n\n[shell_environment_policy.set]\n"AQE_MEMORY_PATH" = ".agentic-qe/memory.db"\n',
+  ]) {
+    const { root, write, cfg } = project(t);
+    const codex = write('.codex/config.toml', source);
+    const result = reconcileAqePin(cfg, root);
+    assert.equal(result.ok, true);
+    const shellFinding = result.findings.find((f) => f.kind === 'shell');
+    assert.equal(shellFinding.status, 'conflict', source);
+    const toml = fs.readFileSync(codex, 'utf8');
+    assert.ok(toml.includes('.agentic-qe/memory.db'), toml);
+    assert.equal(fs.existsSync(`${codex}${AQE_SHELL_PIN_RECEIPT}`), false);
+  }
 });
 
 test('releasing the pin restores the receipted before-state, AQE\'s relative value included', (t) => {
@@ -97,17 +182,20 @@ test('releasing the pin restores the receipted before-state, AQE\'s relative val
   assert.deepEqual(json(mcp), JSON.parse(before[1]));
   assert.equal(fs.readFileSync(codex, 'utf8'), before[2]);
   for (const file of [settings, mcp, codex]) assert.equal(fs.existsSync(`${file}${AQE_PIN_RECEIPT}`), false);
+  assert.equal(fs.existsSync(`${codex}${AQE_SHELL_PIN_RECEIPT}`), false);
 });
 
 test('ak uninstall releases the pin in every recorded project, from any folder', (t) => {
   const { root, write, cfg } = project(t);
-  const { settings } = seedAll(write);
+  const { settings, codex } = seedAll(write);
   reconcileAqePin(cfg, root);
   recordAqePinProject(cfg, root);
   const elsewhere = tempDir('ak-aqe-pin-elsewhere', t);
   const result = releaseAqePins(cfg, { cwd: elsewhere });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.deepEqual(json(settings).env, { KEEP: 'x' });
+  assert.equal(fs.readFileSync(codex, 'utf8'), CODEX_AQE, 'both Codex tables restored, AQE\'s relative values included');
+  assert.equal(fs.existsSync(`${codex}${AQE_SHELL_PIN_RECEIPT}`), false);
   assert.deepEqual(cfg.integrations.ownership.aqePin.projects, {});
 });
 

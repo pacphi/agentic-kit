@@ -6,19 +6,22 @@
 // dist/init/token-bootstrap.js). A command, hook or MCP server started in a
 // subfolder therefore made its own `.agentic-qe` there. ak writes all three as
 // absolute paths into the project's `.claude/settings.local.json` env, the
-// `.mcp.json` agentic-qe entry (recognized transports only) and the project
-// `.codex/config.toml` agentic-qe env, each under a receipt. AQE's own relative
-// AQE_MEMORY_PATH is replaced under the receipt; any other value ak did not write
-// is preserved and reported as a hand fix. The user-level Codex config is never
-// pinned (it serves every project).
+// `.mcp.json` agentic-qe entry (recognized transports only), the project
+// `.codex/config.toml` agentic-qe env and (B5-D1b) that file's
+// `[shell_environment_policy.set]` table, which Codex applies to the commands and
+// hooks it runs; each under a receipt (the shell table has its own, since one
+// receipt holds one table's keys). AQE's own relative AQE_MEMORY_PATH is replaced
+// under the receipt; any other value ak did not write is preserved and reported as
+// a hand fix. The user-level Codex config is never pinned (it serves every project).
 import fs from 'node:fs';
 import path from 'node:path';
-import { aqeTomlEnvironment } from './aqe-embedding-toml.mjs';
+import { aqeTomlEnvironment, shellEnvironmentSet } from './aqe-embedding-toml.mjs';
 import { recognizedAqeTransport, parseEmbeddingJson } from './aqe-embedding-transport.mjs';
 import { planOwnedEnv, applyOwnedEnv, jsonTopLevelEnvEditor, readRegularConfig } from './owned-env-projection.mjs';
 import { projectAqeDir, repoRoot } from './paths.mjs';
 
 export const AQE_PIN_RECEIPT = '.agentic-kit-aqe-pin.json';
+export const AQE_SHELL_PIN_RECEIPT = '.agentic-kit-aqe-shell-pin.json';
 export const AQE_PIN_KEYS = Object.freeze(['AQE_PROJECT_ROOT', 'AQE_MEMORY_PATH', 'AQE_STORAGE_PATH']);
 /** The relative value `aqe init` writes (agentic-qe dist/init/settings-merge.js,
  *  platform-config-generator.js); ak replaces it under the receipt. */
@@ -61,20 +64,24 @@ const EDITORS = {
   settings: (source) => jsonTopLevelEnvEditor(source),
   mcp: mcpServerEnvEditor,
   toml: (source) => aqeTomlEnvironment(source, [...AQE_PIN_KEYS]),
+  shell: (source) => shellEnvironmentSet(source, [...AQE_PIN_KEYS]),
 };
 
 const adoptable = (key, current) => key === 'AQE_MEMORY_PATH' && current.value === AQE_OWN_MEMORY_PATH;
 
 function targets(cfg, root, active) {
   const hosts = cfg?.integrations?.hosts ?? { claude: true };
+  const codex = path.join(root, '.codex', 'config.toml');
   const list = [
     { file: path.join(root, '.claude', 'settings.local.json'), kind: 'settings', host: !!hosts.claude },
     { file: path.join(root, '.mcp.json'), kind: 'mcp', host: !!hosts.claude },
-    { file: path.join(root, '.codex', 'config.toml'), kind: 'toml', host: !!hosts.codex },
+    { file: codex, kind: 'toml', host: !!hosts.codex },
+    { file: codex, kind: 'shell', host: !!hosts.codex, receipt: AQE_SHELL_PIN_RECEIPT, where: `${codex} [shell_environment_policy.set]` },
   ];
   return list
-    .map((t) => ({ file: t.file, kind: t.kind, boundary: root, enabled: active && t.host }))
-    .filter((t) => t.enabled || fs.existsSync(`${t.file}${AQE_PIN_RECEIPT}`));
+    .map((t) => ({ file: t.file, kind: t.kind, receipt: t.receipt ?? AQE_PIN_RECEIPT, where: t.where ?? t.file,
+      boundary: root, enabled: active && t.host }))
+    .filter((t) => t.enabled || fs.existsSync(`${t.file}${t.receipt}`));
 }
 
 const isAbsoluteAny = (value) => typeof value === 'string' && (path.posix.isAbsolute(value) || path.win32.isAbsolute(value));
@@ -98,12 +105,12 @@ function currentValues(target) {
 function reconcileTarget(target, desired, dryRun) {
   const wanted = Object.fromEntries(AQE_PIN_KEYS.map((k) => [k, { present: true, value: desired[k] }]));
   const current = currentValues(target);
-  /** @type {{file: string, kind: string, current: Record<string, string>, foreignRoot: string|null, reason: string|null}} */
-  const base = { file: target.file, kind: target.kind, current, foreignRoot: foreignRootOf(current, desired), reason: null };
+  /** @type {{file: string, kind: string, where: string, current: Record<string, string>, foreignRoot: string|null, reason: string|null}} */
+  const base = { file: target.file, kind: target.kind, where: target.where, current, foreignRoot: foreignRootOf(current, desired), reason: null };
   let plan;
   try {
     plan = planOwnedEnv(target, wanted, {
-      receiptSuffix: AQE_PIN_RECEIPT, format: 'multi', editorFor: EDITORS[target.kind], adoptable,
+      receiptSuffix: target.receipt, format: 'multi', editorFor: EDITORS[target.kind], adoptable,
     });
   } catch (error) {
     // Planning refused the whole file (unrecognized transport, invalid or non-regular
@@ -134,8 +141,8 @@ export function reconcileAqePin(cfg, cwd = process.cwd(), { dryRun = false, enab
   const ok = findings.every((f) => f.status !== 'failed');
   const changed = findings.some((f) => f.changed);
   const preserved = findings.filter((f) => f.status === 'conflict' || f.conflicts.length);
-  const detail = !ok ? `AQE pin not written: ${findings.filter((f) => f.status === 'failed').map((f) => `${f.file} (${f.reason})`).join(', ')}`
-    : preserved.length ? `AQE pin: ak preserved values it does not own in ${preserved.map((f) => f.file).join(', ')}`
+  const detail = !ok ? `AQE pin not written: ${findings.filter((f) => f.status === 'failed').map((f) => `${f.where} (${f.reason})`).join(', ')}`
+    : preserved.length ? `AQE pin: ak preserved values it does not own in ${preserved.map((f) => f.where).join(', ')}`
       : changed ? `AQE ${active ? 'pinned to' : 'pin released in'} ${root}` : 'AQE pin converged';
   return { ok, changed, root, active, desired, findings, detail };
 }
