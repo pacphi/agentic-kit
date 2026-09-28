@@ -294,7 +294,8 @@ is "not observed"; neither fails the suite. A default `ruflo memory purge` clear
 `memory.db` only and still reports success, so the suite clears the sibling of its
 own throwaway project with `--path`; do not do that to a live corpus without a
 backup and quiesced writers. None of this establishes access to an existing corpus.
-A plain `ak status --refresh=live` runs only the CLI proof.
+A plain `ak status --refresh=live` (its quick `memory` check) runs only the CLI store, retrieve
+and purge proof — no MCP tool calls, no routing observation.
 
 For an intentional CLI lookup, choose the file explicitly after checking your
 installed `ruflo memory retrieve --help`:
