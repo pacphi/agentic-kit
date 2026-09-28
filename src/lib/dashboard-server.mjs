@@ -46,10 +46,10 @@ import { createHostReadinessReader } from './host-readiness.mjs';
 //                      draws (dashboard/system-summary.mjs). The page and its
 //                      Runtime poll read this; /api/system stays complete.
 //
-// The status rows are gathered by SHELLING OUT to the installed CLI
-// (`node bin/agentic-kit.mjs status --json`) so we never duplicate status.mjs's
-// collector logic and never touch the shared seam files. `fetchStatus` can be
-// injected (tests, embedding) to bypass the shell-out.
+// The status rows are gathered by calling status.mjs's own collect() IN
+// PROCESS — safe only because the evidence store (ADR-0063) made a warm-cache
+// `collect({ refresh: false })` genuinely spawn-free. `fetchStatus` can still
+// be injected (tests, embedding) to bypass that call entirely.
 //
 // startDashboard() NEVER detaches — the caller runs it foreground and calls
 // close() on SIGINT.
@@ -57,8 +57,8 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execFile } from 'node:child_process';
 import { createHmac } from 'node:crypto';
+import { collect as statusCollect, worstLevel } from '../commands/status.mjs';
 import { driftReport, selfDrift, installedVersion } from './versions.mjs';
 import { HOSTS, collectIntegrationFacts } from './providers.mjs';
 import { globalRoot } from './paths.mjs';
@@ -136,25 +136,36 @@ const DASH_CSP = [
   "frame-ancestors 'none'",
 ].join('; ');
 
-/** Default status provider: shell out to the installed CLI and parse its JSON.
- *  Resilient — a spawn/parse failure resolves to an honest empty payload rather
- *  than rejecting, so /api/status always answers with valid JSON. */
-function shellOutStatus(cwd) {
+// `execFile`'s subprocess boundary used to give status collection a hard
+// timeout and a throwaway process for free. In-process, a hung probe would
+// otherwise hang THIS request (or the whole event loop) indefinitely, so this
+// is the same 30s bound `shellOutStatus` used to pass to `execFile`.
+const STATUS_TIMEOUT_MS = 30_000;
+
+/** Default status provider: call status.mjs's own collect() in process, on a
+ *  warm cache (refresh:false — the evidence store, ADR-0063, made this
+ *  genuinely spawn-free). Resilient — a collection failure, or one that never
+ *  settles within STATUS_TIMEOUT_MS, resolves to an honest empty payload rather than
+ *  rejecting or hanging the server, so /api/status always answers with valid
+ *  JSON. */
+function inProcessStatus(cwd) {
   return () => new Promise((resolve) => {
-    execFile(
-      process.execPath,
-      [path.join(PKG_ROOT, 'bin', 'agentic-kit.mjs'), 'status', '--json'],
-      { cwd, timeout: 30_000, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, NO_COLOR: '1' } },
-      (err, stdout) => {
-        try {
-          const parsed = JSON.parse(stdout);
-          if (parsed && Array.isArray(parsed.rows)) return resolve(parsed);
-          throw new Error('unexpected shape');
-        } catch {
-          resolve({ overall: 'unknown', rows: [], error: err ? String(err.message || err) : 'status --json unparseable' });
-        }
-      },
-    );
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve({ overall: 'unknown', rows: [], error: 'status collection timed out' });
+    }, STATUS_TIMEOUT_MS);
+    timer.unref?.();
+    statusCollect({ pkgRoot: PKG_ROOT, cwd, refresh: false })
+      .then((rows) => ({ overall: worstLevel(rows), rows }))
+      .catch((e) => ({ overall: 'unknown', rows: [], error: String(e?.message ?? e) }))
+      .then((result) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(result);
+      });
   });
 }
 
@@ -1093,7 +1104,7 @@ export function startDashboard({
     models, system, hostReadiness, maintenance, maintenanceOptions,
   });
   let refusalLogged = false;
-  const provide = fetchStatus || shellOutStatus(cwd);
+  const provide = fetchStatus || inProcessStatus(cwd);
   const getHostReadiness = hostReadiness ?? (fetchStatus ? async () => null : createHostReadinessReader({ cwd }));
   const usageApi = usage || lazyUsage();
   const getHooks = createHookDashboardReader({ hooks, cacheMs: hookCacheMs });

@@ -17,7 +17,7 @@ import {
 } from '../../src/lib/heal.mjs';
 import * as heal from '../../src/lib/heal.mjs';
 import { SYNC_STEPS } from '../../src/commands/sync.mjs';
-import { bsq3IsNative } from '../../src/lib/natives.mjs';
+import { bsq3IsNative, rufloRuntimeNatives } from '../../src/lib/natives.mjs';
 import { _setGlobalRootForTest } from '../../src/lib/paths.mjs';
 import { tempDir } from './helpers/temp-dir.mjs';
 
@@ -386,6 +386,28 @@ test('healNatives leaves a present binding that loads alone', async () => {
     const r = await healNatives({ runner });
     assert.deepEqual(calls.filter((c) => c.cmd === 'npm'), []);
     assert.deepEqual(r, { ok: true, detail: 'already native everywhere' });
+  } finally { cleanup(); }
+});
+
+// ── Task 4: a repair's evidence round-trips into a subsequent status read ───
+
+test('healNatives\'s repair evidence round-trips through rufloRuntimeNatives({ refresh: false }) without a second spawn', async () => {
+  const { pkg, cleanup } = presentBindingTree();
+  try {
+    const { runner } = probeAndNpm(pkg);
+    const r = await healNatives({ runner });
+    assert.equal(r.ok, true, 'the repair itself succeeded');
+
+    let spawned = false;
+    const rt = await rufloRuntimeNatives({
+      refresh: false,
+      runner: async () => { spawned = true; return { code: 0, stdout: '', stderr: '' }; },
+    });
+    assert.equal(spawned, false, 'the repair already recorded evidence a plain status read reuses');
+    const cli = rt.contexts.find((c) => c.context === 'cli');
+    assert.ok(cli, 'the healed context is present');
+    assert.equal(cli.state, 'native');
+    assert.equal(cli.ok, true);
   } finally { cleanup(); }
 });
 

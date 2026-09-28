@@ -8,9 +8,9 @@ import { row } from '../row.mjs';
 const DEFAULT_DEPS = { installState: hostInstallState, executable: hostExecutable, authState: hostAuthState };
 
 // Install row + auth row for a host that is on disk.
-async function installedHostRows(h, st, primary, deps) {
+async function installedHostRows(h, st, primary, deps, refresh, record, source) {
   const label = `${h.id} ${st.version ?? ''} (${st.method}${st.method === 'external' ? ' — self-managed' : ''})`;
-  const launch = st.method === 'npm' ? await deps.executable(h) : { ok: true, detail: null };
+  const launch = st.method === 'npm' ? await deps.executable(h, { refresh, record, source }) : { ok: true, detail: null };
   const install = launch.ok ? row('hosts', 'ok', label)
     : row('hosts', primary ? 'fail' : 'warn', `${label} installed but not executable: ${launch.detail}`,
       `sync reinstalls ${h.pkg}`);
@@ -26,8 +26,13 @@ async function installedHostRows(h, st, primary, deps) {
 
 export default {
   id: 'hosts',
-  /** @param {{ cfg: any, integrationFacts: any, hostDeps?: Partial<typeof DEFAULT_DEPS> }} ctx */
-  async collect({ cfg, integrationFacts, hostDeps = {} }) {
+  /** @param {{ cfg: any, integrationFacts: any, refresh?: boolean, record?: boolean, hostDeps?: Partial<typeof DEFAULT_DEPS> }} ctx */
+  async collect({
+    cfg, integrationFacts, refresh = false, record = true, hostDeps = {},
+  }) {
+    // Accurate provenance, matching status.mjs's own `source` computation:
+    // 'status-refresh' only when this call actually asked for a refresh.
+    const source = refresh ? 'status-refresh' : 'status';
     const deps = { ...DEFAULT_DEPS, ...hostDeps };
     const rows = [];
     try {
@@ -37,12 +42,12 @@ export default {
         if (!cfg.integrations.hosts[h.id]) continue;
         const primary = h.id === primaryHost;
         const st = integrationFacts.hosts[h.id]?.present === false
-          ? { method: 'absent', version: null } : await deps.installState(h);
+          ? { method: 'absent', version: null } : await deps.installState(h, { refresh, record, source });
         if (st.method === 'absent') {
           rows.push(row('hosts', primary ? 'fail' : 'warn',
             `${h.id} enabled but not installed${primary ? ' (primary)' : ''}`, `sync installs ${h.pkg}`));
         } else {
-          rows.push(...await installedHostRows(h, st, primary, deps));
+          rows.push(...await installedHostRows(h, st, primary, deps, refresh, record, source));
         }
       }
     } catch (e) {

@@ -194,7 +194,8 @@ FootprintSnapshot  { asOf, completeness, install, runtime, storage, catalog, pro
 Delivery
   GET /api/system            → cheap tier + persisted snapshot (token auth, loopback, no egress)
   GET /api/system?refresh=deep → start-or-attach the single-flight deep scan
-  GET /api/system/summary    → the same read, catalog projected to what the System page draws
+  GET /api/system/summary    → the same read, catalog/storage/install/projects/consumers each
+                                projected to what the System page draws
   ak system [--deep] [--json]  → the same collector, CLI-rendered
         |
         v
@@ -716,13 +717,17 @@ snapshot file — it mutates no user data.
 
 `GET /api/system` is the complete read model, the same shape as `ak system --json`.
 `GET /api/system/summary` is the page's read: the same payload (and the same `?refresh=deep` and
-`&trees=` parameters) with the catalog projected by `dashboard/system-summary.mjs` to an
-allow-list of catalog keys, and each item cut to its key, kind, name, hosts, source scopes, digest
-coverage, and distinct plugin providers (`presence[].provider` with `ref` and `version`). The
-catalog's repeated presence copies (`item.presence` details, `consumerBindings`, `artifacts`) grow
-with items × projects × hosts and are not drawn, so the page and its 30-second Runtime poll never
-download them. The projection is a Dashboard-delivery view; this domain's collector output is
-unchanged.
+`&trees=` parameters) with `catalog`, `storage`, `install`, `projects` and `consumers` each
+projected by `dashboard/system-summary.mjs` to an allow-list of keys — the catalog's items cut to
+key, kind, name, hosts, source scopes, digest coverage, and distinct plugin providers
+(`presence[].provider` with `ref` and `version`); storage's category/host/project/session tree cut
+to key, label, bytes and children; a measured project row's per-tool native-addon lists and
+per-project framework/dependency stack detection dropped entirely (never rendered). The catalog's
+repeated presence copies (`item.presence` details, `consumerBindings`, `artifacts`) grow with
+items × projects × hosts and are not drawn, so the page and its 30-second Runtime poll never
+download them; the other four sections carried the same shape of excess and were the majority of
+the endpoint's real-machine bytes once the catalog alone was slimmed. The projection is a
+Dashboard-delivery view; this domain's collector output is unchanged.
 
 **A deep scan never runs on its own.** Opening the System area issues a plain `GET /api/system/summary`;
 only **Full scan** adds `?refresh=deep`. A deep scan can cost minutes of I/O on a large corpus, and

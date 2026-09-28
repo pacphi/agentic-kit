@@ -108,3 +108,33 @@ test('polyglot cards show every language as a labelled, wrapping icon with no di
  await page.setViewportSize({width:390,height:844});
  assert.equal(await page.evaluate(()=>globalThis.document.documentElement.scrollWidth>globalThis.innerWidth),false,'icons wrap instead of overflowing');
 });
+
+test('loadMaintenanceWorkspace on repeated poll ticks only saves preferences when the view actually changed',async(t)=>{
+ const saves=[];
+ const browser=await launchChrome();t.after(()=>browser.close());
+ const page=await browser.newPage();
+ await page.route('http://maintenance.test/**',async route=>{
+  const url=new URL(route.request().url());
+  if(url.pathname.endsWith('/preferences')){
+   if(route.request().method()==='GET')return route.fulfill({contentType:'application/json',body:'{}'});
+   saves.push(JSON.parse(route.request().postData()||'{}'));
+   return route.fulfill({contentType:'application/json',body:'{"ok":true}'});
+  }
+  return route.fulfill({contentType:'text/html',body:'<!doctype html><html><body></body></html>'});
+ });
+ await page.goto('http://maintenance.test/');
+ await page.addScriptTag({content:`
+  function authHeaders(){return {};}
+  function esc(v){return String(v);}
+  function ago(){return '';}
+  ${source('maintenance-workspace')}
+ `});
+ await page.evaluate(()=>globalThis.loadMaintenanceWorkspace(true));
+ assert.equal(saves.length,1,'the initial load saves the loaded view once');
+ await page.evaluate(()=>globalThis.loadMaintenanceWorkspace(true));
+ assert.equal(saves.length,1,'an unchanged view on a repeat poll tick issues no extra POST');
+ await page.evaluate(()=>{globalThis.location.hash='#system/maintenance/inventory?sort=name';});
+ await page.evaluate(()=>globalThis.loadMaintenanceWorkspace(true));
+ assert.equal(saves.length,2,'a genuinely changed view issues a second POST');
+ assert.equal(saves[1].lastView.sort,'name');
+});

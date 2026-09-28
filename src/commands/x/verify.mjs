@@ -387,7 +387,7 @@ export async function verifyProviders({ cwd = process.cwd(), runner = runCmd, ha
   const home = aqeHome(cwd);
   let good = true;
   // enabled hosts must actually be installed
-  const hosts = (await collectIntegrationFacts({ cwd: home.dir, cfg })).hosts;
+  const hosts = (await collectIntegrationFacts({ cwd: home.dir, cfg, source: 'verify' })).hosts;
   for (const h of HOSTS) {
     if (!cfg.integrations?.hosts?.[h.id]) continue;
     if (hosts[h.id].present) ok(`host '${h.id}' enabled and installed${hosts[h.id].version ? ` (v${hosts[h.id].version})` : ''}`);

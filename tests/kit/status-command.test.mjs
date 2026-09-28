@@ -277,13 +277,29 @@ test('deja-vu status warns for recognized component degradation and stale-readon
   assert.ok(!rows.some((entry) => entry.level === 'ok' && /doctor schema/.test(entry.message)));
 });
 
-test('collect() writes nothing to HOME or the project', async () => {
+test('collect() writes nothing to HOME or the project, beyond its own probe-result evidence cache', async () => {
   seedHome();
+  rmrf(paths.evidenceDir());
   const beforeHome = snapshot(HOME);
   const beforeProject = snapshot(PROJECT);
   await collect();
-  assertUnchanged(beforeHome, HOME, '`ak status` must be strictly read-only (HOME)');
+  // Branch 6a Task 5: a plain status collect() call (refresh:false, the
+  // default) still probes for real on a cache miss/stale/first run (Ruling
+  // A) and records the result — so a LATER plain status call can reuse it.
+  // That write lands only under the shared evidence store, never anywhere
+  // else in HOME or the project.
+  const evidenceRel = path.relative(HOME, paths.evidenceDir());
+  assertUnchanged(beforeHome, HOME, '`ak status` must be strictly read-only (HOME) outside its own evidence cache',
+    { ignore: [evidenceRel] });
   assertUnchanged(beforeProject, PROJECT, '`ak status` must be strictly read-only (project)');
+});
+
+test('worstLevel: fail beats warn beats ok; empty is ok', () => {
+  const lvl = (level) => ({ subsystem: 'x', level, message: 'm', fix: null, repair: null });
+  assert.equal(status.worstLevel([lvl('ok'), lvl('warn'), lvl('fail')]), 'fail');
+  assert.equal(status.worstLevel([lvl('ok'), lvl('info'), lvl('warn')]), 'warn');
+  assert.equal(status.worstLevel([lvl('ok'), lvl('info'), lvl('ok')]), 'ok');
+  assert.equal(status.worstLevel([]), 'ok');
 });
 
 test('every row carries the documented shape', async () => {
@@ -310,6 +326,65 @@ test('ruflo provider intent never claims registration alone is routed execution'
   assert.match(intent.message, /openrouter:z-ai\/glm-5\.2/);
   assert.match(intent.message, /direct agents must select provider \+ model/);
   assert.doesNotMatch(intent.message, /routable|executed successfully/);
+});
+
+// Branch 6a Task 9: dashboard-server.mjs now calls collect() in process, and
+// a live dashboard server can be asked (via its per-request `cwd`) for a
+// project other than its own launch cwd. Every cwd-sensitive section must
+// resolve against the PASSED cwd, never a silent process.cwd() fallback.
+test('collect({ cwd }) resolves the providers/daemons sections against the PASSED cwd, not process.cwd()', async () => {
+  seedHome(offlineKitConfig({
+    providers: { models: [{ id: 'openrouter', model: 'z-ai/glm-5.2' }] },
+  }));
+  const elsewhere = sandboxProject('ak-status-cwd-elsewhere');
+  fs.mkdirSync(path.join(PROJECT, '.swarm'), { recursive: true });
+  fs.writeFileSync(path.join(PROJECT, '.swarm', 'memory.db'), '');
+  fs.mkdirSync(path.join(PROJECT, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(PROJECT, '.claude', 'settings.local.json'),
+    JSON.stringify({ env: { ENABLE_CLAUDE_CODE: 'true', ENABLE_CODEX: 'false' } }));
+
+  const scoped = (rows) => ['providers', 'daemons'].flatMap((s) => rowsFor(rows, s));
+  const providerMsg = (rows) => rows.find((r) => r.subsystem === 'providers'
+    && (r.message.startsWith('wired') || r.message.startsWith('provider config')))?.message;
+  const daemonMsg = (rows) => rows.find((r) => r.subsystem === 'daemons' && /none running/.test(r.message))?.message;
+
+  try {
+    const baseline = scoped(await status.collect({ pkgRoot: PKG_ROOT, cwd: PROJECT }));
+
+    // Known-good anchor, not just internal consistency: a bug that reads the
+    // SAME wrong cwd for both calls below would still pass a bare
+    // diverged-equals-baseline comparison, so pin the baseline itself to the
+    // fact PROJECT's own files describe.
+    assert.equal(providerMsg(baseline), 'wired: claude (project)',
+      `providers row must reflect PROJECT's own settings.local.json: ${JSON.stringify(baseline)}`);
+    assert.match(daemonMsg(baseline) ?? '', /for this project yet/,
+      `daemons row must reflect PROJECT's own .swarm/memory.db: ${JSON.stringify(baseline)}`);
+
+    // Sanity/RED-baseline: PROJECT (has .swarm/memory.db + a matching
+    // settings.local.json) and `elsewhere` (has neither) must genuinely
+    // produce different providers/daemons rows — otherwise the assertion
+    // below would pass even if cwd were silently ignored.
+    const forElsewhere = scoped(await status.collect({ pkgRoot: PKG_ROOT, cwd: elsewhere }));
+    assert.notDeepEqual(forElsewhere, baseline,
+      'fixture sanity: PROJECT and elsewhere must differ, or this test cannot catch a real cwd regression');
+
+    // The real assertion: process.cwd() genuinely at `elsewhere`, but the cwd
+    // PARAMETER still says PROJECT — the result must still match the baseline.
+    const prevCwd = process.cwd();
+    process.chdir(elsewhere);
+    let diverged;
+    try {
+      diverged = scoped(await status.collect({ pkgRoot: PKG_ROOT, cwd: PROJECT }));
+    } finally {
+      process.chdir(prevCwd);
+    }
+    assert.deepStrictEqual(diverged, baseline,
+      'providers/daemons rows must reflect the PASSED cwd, not process.cwd() — a mismatch means one of these '
+      + 'sections silently fell back to process.cwd()');
+  } finally {
+    rmrf(path.join(PROJECT, '.swarm'), path.join(PROJECT, '.claude', 'settings.local.json'));
+    fs.rmSync(elsewhere, { recursive: true, force: true });
+  }
 });
 
 test('a missing global ruflo is a FAIL with a fix; a present one is ok', async () => {

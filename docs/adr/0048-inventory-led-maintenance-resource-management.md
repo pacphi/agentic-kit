@@ -2,7 +2,14 @@
 
 - **Status:** Accepted — implementation delivered 2026-09-05; Implemented withheld pending
   human-evaluation and cross-platform gates
-- **Updated:** 2026-09-26 — a curated host source whose root is absent (host not installed) is
+- **Updated:** 2026-09-28 — [ADR-0063](0063-evidence-store-and-refresh-vocabulary.md) records the
+  unified evidence-cache age rule and directory layout behind `ak status`'s current, interim
+  `--refresh` boolean (ruflo-components, native runtime, host setup, deja-vu, version drift,
+  npm-global-root, daemon-sweep, ak-launcher); it is the precursor to, but does not itself
+  implement, this ADR's eventual `--refresh=live`/`--refresh=machine` split — the **Refresh
+  evidence** and **Re-measure machine** controls, their scan-store backing (`scan-store.mjs`), and
+  their UI are unchanged (remediation program, branch 6a).
+- **Earlier update:** 2026-09-26 — a curated host source whose root is absent (host not installed) is
   never scanned and never counted in coverage, the Discovery narrative or the Inventory banner;
   Discovery shows it as not installed and an explicit start is refused with `SOURCE_NOT_PRESENT`
   (#238 item 6). Existing acceptance gates remain outstanding.

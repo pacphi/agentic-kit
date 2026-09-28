@@ -39,6 +39,27 @@ and supported `claude mcp serve` tool exposure are preserved. See
 [ADR-0051](adr/0051-supported-peer-delegation-and-host-realignment.md) for the policy,
 official source citations, authority boundaries and verification limits.
 
+## 2026-09-28: One evidence cache for `ak status`'s local checks
+
+`ak status`, `ak sync`, and the dashboard now share one evidence cache
+(`<state>/agentic-kit/evidence/`) for native runtime, host setup, deja-vu, version drift,
+npm-global-root, the daemon sweep, and the ak launcher check, each with its own age rule.
+Right after upgrading to this release the cache is cold. Native runtime, host setup,
+host-install-method, host-launch, deja-vu, npm-global-root, the daemon sweep, and the ak launcher
+check each probe once on their first use after the upgrade and record what they find — a normal
+row, possibly a moment slower on that one check, never a placeholder state. This is expected and
+needs no action. Two rows read differently until their own next refresh, unchanged by this
+release: ruflo-component rows read `unknown` until `ak sync` or `ak status --refresh` (see
+[MANAGED-TOOLS.md](MANAGED-TOOLS.md#managed-ruflo-components)); the remembered live-check rows
+(`ak x verify`'s suites) simply don't appear until `ak sync`, `ak x verify`, or `ak status --live`
+records one.
+
+The old, now-orphaned storage locations — `<stateBase>/agentic-kit/live-checks/` (pre-dating this
+release) and `<stateBase>/agentic-kit/ruflo-components-evidence.json` (also pre-dating this
+release) — are simply abandoned, not migrated. They are inert; delete them by hand or leave them.
+
+`--refresh`'s name and default did not change; its scope grew (see [ADR-0063](adr/0063-evidence-store-and-refresh-vocabulary.md)).
+
 ## 2026-09-27: AQE is pinned to the project root
 
 AQE used to create a new `.agentic-qe` store in whatever folder a command, hook or MCP server

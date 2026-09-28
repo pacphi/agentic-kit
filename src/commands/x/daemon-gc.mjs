@@ -47,10 +47,14 @@ export async function run({ flags }) {
     return 0;
   }
   if (stale.length && flags.kill) {
-    for (const r of reap(stale)) {
+    const reaped = reap(stale);
+    for (const r of reaped) {
       if (r.killed) ok(`stopped stale daemon pid=${r.pid} ${dim(r.workspace ?? '')}`);
       else warn(`could not stop pid=${r.pid} (already exited?)`);
     }
+    // Refresh daemon-sweep evidence so a later read sees the daemons that are
+    // actually still alive, not the pre-reap list.
+    if (reaped.some((r) => r.killed)) await listDaemons({ refresh: true, record: true, source: 'daemon-gc' });
   } else if (stale.length) {
     for (const d of stale) {
       warn(`stale daemon pid=${d.pid} ${dim(d.workspace ?? '(unknown workspace)')} ${dim(d.workspaceExists ? `age ${d.ageSecs}s > TTL` : 'workspace gone')}`);

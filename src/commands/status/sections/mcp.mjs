@@ -105,9 +105,12 @@ function registerWouldWrite(mcp, cfg) {
 
 export default {
   id: 'mcp',
-  async collect({ cfg, cwd, home = paths.home, launcherCheck = claudeLauncherUnavailable, status = registrationStatus }) {
+  async collect({
+    cfg, cwd, home = paths.home, launcherCheck = claudeLauncherUnavailable, status = registrationStatus,
+    refresh = false, record = true, source = 'status',
+  }) {
     const mcp = status({ cwd });
-    const launcher = registerWouldWrite(mcp, cfg) ? await launcherCheck() : null;
+    const launcher = registerWouldWrite(mcp, cfg) ? await launcherCheck({ refresh, record, source }) : null;
     return mcpRows(mcp, cfg, { cwd, home, launcher });
   },
 };

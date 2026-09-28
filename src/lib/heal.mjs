@@ -10,7 +10,7 @@ import path from 'node:path';
 import { run } from './exec.mjs';
 import { rufloRoot, aqeRoot, installEditsPath } from './paths.mjs';
 import { pruneInstallEdits, recordInstallEdit } from './install-edits.mjs';
-import { agentdbLocations, bsq3IsNative, bsq3Root, deriveBsq3Spec, selfSpecConflicts, rufloMemoryContexts, aidefencePresent, probeBsq3Runtime } from './natives.mjs';
+import { agentdbLocations, bsq3IsNative, bsq3Root, deriveBsq3Spec, selfSpecConflicts, rufloMemoryContexts, aidefencePresent, probeBsq3Runtime, recordNativeRuntimeEvidence } from './natives.mjs';
 import { KIT_PKG } from './versions.mjs';
 import { scanRvf, quarantine } from './rvf.mjs';
 import {
@@ -129,13 +129,28 @@ async function rebuildUnloadable(dir, runner, ledger) {
 /** One ruflo memory-runtime context. A missing binding file takes the build
  *  ladder as before. A present file is load-tested, the same test status uses,
  *  and rebuilt only when the probe proves it will not load (`unavailable`). An
- *  `inconclusive` probe (timeout, crash) never triggers a rebuild in ruflo's tree. */
-async function healRuntimeContext(dir, runner, ledger) {
-  if (!bsq3IsNative(dir)) return (await ensureNativeBsq3(dir, { runner, ledger })).how;
+ *  `inconclusive` probe (timeout, crash) never triggers a rebuild in ruflo's tree.
+ *  Whatever the FINAL state turns out to be is recorded as evidence, so a plain
+ *  `ak status` right after `ak sync` shows the repaired state without needing a
+ *  second `--refresh` (ADR-0063). */
+async function healRuntimeContext({ context, dir }, runner, ledger) {
+  if (!bsq3IsNative(dir)) {
+    const built = await ensureNativeBsq3(dir, { runner, ledger });
+    recordNativeRuntimeEvidence(context, dir, await probeBsq3Runtime(dir, { runner }));
+    return built.how;
+  }
   const probe = await probeBsq3Runtime(dir, { runner });
-  if (probe.state === 'native') return null;
-  if (probe.state === 'inconclusive') return `load probe inconclusive (${probe.reason}), not rebuilt`;
-  return (await rebuildUnloadable(dir, runner, ledger)).how;
+  if (probe.state === 'native') {
+    recordNativeRuntimeEvidence(context, dir, probe);
+    return null;
+  }
+  if (probe.state === 'inconclusive') {
+    recordNativeRuntimeEvidence(context, dir, probe);
+    return `load probe inconclusive (${probe.reason}), not rebuilt`;
+  }
+  const rebuilt = await rebuildUnloadable(dir, runner, ledger);
+  recordNativeRuntimeEvidence(context, dir, await probeBsq3Runtime(dir, { runner }));
+  return rebuilt.how;
 }
 
 /** Native better-sqlite3 into every location the runtime resolves: the agentdb
@@ -164,7 +179,7 @@ export async function healNatives({ runner = run, ledger = installEditsPath() } 
   // both contexts can resolve one shared copy, and a rebuild for the first
   // changes what the second one's probe sees.
   for (const { context, dir } of rufloMemoryContexts()) {
-    const how = await healRuntimeContext(dir, runner, ledger);
+    const how = await healRuntimeContext({ context, dir }, runner, ledger);
     if (how) details.push(`@claude-flow/${context}: ${how}`);
   }
   return { ok: !details.some((d) => d.includes('FAILED')), detail: details.join('; ') || 'already native everywhere' };

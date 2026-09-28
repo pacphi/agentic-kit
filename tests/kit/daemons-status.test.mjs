@@ -29,6 +29,21 @@ test('no project memory: none running stays ok', async (t) => {
     [{ subsystem: 'daemons', level: 'ok', message: 'none running', fix: null, repair: null }]);
 });
 
+// Task 7: collect() threads refresh/record/source into the listDaemons()
+// call (gating processSweep's `ps` spawn), mirroring hosts.mjs's Task 5
+// precedent, so a plain `ak status` stays cache-first while `--refresh`
+// forces a fresh sweep.
+test('collect() threads refresh/record/source into listDaemons, defaulting to a plain-status-shaped call', async (t) => {
+  const seen = [];
+  const probe = async (opts) => { seen.push(opts); return []; };
+  await collect(project(t), { listDaemons: probe });
+  assert.deepEqual(seen.at(-1), { cwd: seen.at(-1).cwd, refresh: false, record: true, source: 'status' });
+  await collect(project(t), {
+    listDaemons: probe, refresh: true, record: false, source: 'status-refresh',
+  });
+  assert.deepEqual(seen.at(-1), { cwd: seen.at(-1).cwd, refresh: true, record: false, source: 'status-refresh' });
+});
+
 test('project memory with no daemon for it is information naming the backup dependency and the start command', async (t) => {
   const [row] = await collect(project(t));
   assert.equal(row.level, 'info');

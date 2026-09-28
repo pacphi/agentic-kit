@@ -246,6 +246,28 @@ import { ago } from './intelligence.mjs';
   }
 
   // ── Preferences (owner-private; URL state overrides it on load, MNT-PRV-006) ─
+  // Last view object successfully persisted via mntSavePreferences, so a poll
+  // tick that finds nothing changed skips the write entirely (avoids
+  // rewriting preferences.json every ~30s while the Maintenance tab is open).
+  var mntLastSavedView=null;
+  function mntDeepEqual(a,b){
+    if(a===b)return true;
+    if(!a||!b||typeof a!=="object"||typeof b!=="object")return false;
+    if(Array.isArray(a)!==Array.isArray(b))return false;
+    if(Array.isArray(a)){
+      if(a.length!==b.length)return false;
+      for(var i=0;i<a.length;i++)if(!mntDeepEqual(a[i],b[i]))return false;
+      return true;
+    }
+    var ak=Object.keys(a),bk=Object.keys(b);
+    if(ak.length!==bk.length)return false;
+    for(var j=0;j<ak.length;j++){
+      var k=ak[j];
+      if(!Object.prototype.hasOwnProperty.call(b,k))return false;
+      if(!mntDeepEqual(a[k],b[k]))return false;
+    }
+    return true;
+  }
   export function mntLoadPreferences(){
     return mntGet("/api/maintenance/v2/preferences").then(function(data){
       MNT.preferences=data&&typeof data==="object"?data:{};
@@ -396,8 +418,14 @@ import { ago } from './intelligence.mjs';
       return null;
     }).then(function(){
       mntSyncHash();
-      mntSavePreferences({
-        lastView:{scope:MNT.scope,view:MNT.view,sort:MNT.sort,facets:MNT.facets,search:MNT.search},
+      var currentView={scope:MNT.scope,view:MNT.view,sort:MNT.sort,facets:MNT.facets,search:MNT.search};
+      if(mntDeepEqual(currentView,mntLastSavedView))return;
+      // mntSavePreferences swallows a failed POST and resolves to `undefined`
+      // (see its .catch above) — only a defined (successful) result advances
+      // mntLastSavedView, so a failed save retries on the next poll tick
+      // instead of silently giving up.
+      return mntSavePreferences({lastView:currentView}).then(function(result){
+        if(result!==undefined)mntLastSavedView=currentView;
       });
     });
   }

@@ -132,6 +132,25 @@ test('every child_process call in tests/ passes an env option or carries the mar
   assert.deepEqual(offenders, [], `pass env: spawnEnv(home) from tests/kit/helpers/home-sandbox.mjs, or mark a deliberate exception:\n  ${offenders.join('\n  ')}`);
 });
 
+// The in-process twin of the rules above: on win32 paths.mjs reads APPDATA
+// (config) and LOCALAPPDATA (state), never XDG_*, so a test that redirects
+// only the XDG_* variable before running kit code writes the real Windows
+// profile while passing on Linux and macOS.
+const WINDOWS_TWINS = [['XDG_CONFIG_HOME', 'APPDATA'], ['XDG_STATE_HOME', 'LOCALAPPDATA']];
+const assigns = (code, key) => new RegExp(String.raw`process\.env\.${key}\s*=(?!=)`).test(code);
+
+test('a test that redirects an XDG_* base in-process also redirects its Windows twin', () => {
+  const offenders = [];
+  for (const file of files(TESTS)) {
+    if (file === SELF) continue;
+    const code = codeOnly(fs.readFileSync(file, 'utf8'));
+    for (const [xdg, win] of WINDOWS_TWINS) {
+      if (assigns(code, xdg) && !assigns(code, win)) offenders.push(`${path.relative(TESTS, file)}: sets ${xdg} but not ${win}`);
+    }
+  }
+  assert.deepEqual(offenders, [], `set the Windows twin to the same folder (and restore it):\n  ${offenders.join('\n  ')}`);
+});
+
 test('the implicit-inheritance scan sees bare, aliased and required calls and skips strings and nested calls', () => {
   const src = [
     "import { spawnSync, execFileSync as run } from 'node:child_process';",

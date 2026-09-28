@@ -50,6 +50,19 @@ function clonePreferences(preferences) {
   return JSON.parse(JSON.stringify(preferences));
 }
 
+function deepEqual(a, b) {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) {
+    return a.length === b.length && a.every((value, index) => deepEqual(value, b[index]));
+  }
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  return aKeys.length === bKeys.length
+    && aKeys.every((key) => Object.prototype.hasOwnProperty.call(b, key) && deepEqual(a[key], b[key]));
+}
+
 function assertRetention(retention) {
   if (retention == null) return;
   const { maxSummaries, maxAgeDays } = retention;
@@ -85,6 +98,7 @@ export function createPreferencesStore({ root, fsImpl = fs } = /** @type {any} *
       preferredShellByEnvironment: { ...current.preferredShellByEnvironment, ...(partial.preferredShellByEnvironment ?? {}) },
       retention: { ...current.retention, ...(partial.retention ?? {}) },
     };
+    if (deepEqual(next, current)) return next;
     writeAll(root, next, fsImpl);
     return next;
   }

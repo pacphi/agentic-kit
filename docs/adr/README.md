@@ -406,3 +406,14 @@ The merge moves stray AQE stores into the project store with AQE's own export an
 leaves out audit-trail rows and AQE's starter patterns. It refuses while any process holds a
 store, with no force, and archives each whole stray folder in ak's state beside a backup and a
 receipt.
+
+## ADR-0063 — One evidence store and the refresh vocabulary
+
+[ADR-0063](0063-evidence-store-and-refresh-vocabulary.md) (Accepted) gives `ak status`'s local
+probes — native runtime, host setup, deja-vu, version drift, npm-global-root, the daemon sweep, and
+the ak launcher check — one shared envelope, one age rule per kind, and a `{refresh, record,
+source}` contract. A plain `ak status` and the dashboard's poll now spawn nothing when evidence is
+fresh (measured: 14 spawns cold, 0 warm, byte-identical payload), `--refresh` forces a live
+re-probe, and `record` controls only whether a fresh probe's result is persisted. It is the
+interim, no-suffix groundwork for Branch 6b's eventual `--refresh[=live|machine]` split; Maintenance's
+own scan controls and inventory store are untouched.

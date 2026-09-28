@@ -6,6 +6,7 @@ import { glyph, dim, bold, warn } from '../lib/output.mjs';
 import { loadRing, detectRegression } from '../lib/health-history.mjs';
 import { loadKitConfig } from '../lib/config.mjs';
 import { collectIntegrationFacts } from '../lib/providers.mjs';
+import { globalRoot } from '../lib/paths.mjs';
 import { companionLifecycleFor } from '../lib/adapters/companion-lifecycle-registry.mjs';
 import { row } from './status/row.mjs';
 import { renderHostDetailRows, admittedLifecycleFallbackRows } from './status/host-detail.mjs';
@@ -25,9 +26,11 @@ export const options = {
 export const help = `ak status — read-only dashboard of what's true and what's drifted
 
 Prints one row per subsystem (versions, natives, security, learning, providers,
-…). Without --live it is read-only: it changes nothing and runs no live check;
-it shows the last result \`ak sync\`, \`ak x verify\` or \`ak status --live\`
-remembered, with its age. A bare \`ak\` runs this plus one suggested next action.
+…). Without --live it changes no configuration and runs no live check; it
+shows the last result \`ak sync\`, \`ak x verify\` or \`ak status --live\`
+remembered, with its age. It may refresh its own local evidence cache under
+\`<state>/agentic-kit/evidence/\` so later checks stay fast. A bare \`ak\` runs
+this plus one suggested next action.
 A row's "→" fix is what \`ak sync\` performs; "→ manual:" marks a step you run
 yourself (sync never plans it). --json rows carry the same distinction as
 \`repair\`: "sync", "manual", or null when there is no fix.
@@ -37,7 +40,9 @@ Usage: ak status [options]
 Options:
   --deep      run the slower probes (spawns CLIs) for a fuller picture
   --json      emit the raw rows as JSON (suppresses the drift nudge)
-  --refresh   re-probe ruflo component evidence
+  --refresh   re-probe cached evidence (ruflo components, native runtime, host
+              setup, deja-vu, version drift, and the rest of the checks a
+              plain \`ak status\` reuses from a fresh cache)
   --live      first run the quick, free live checks from \`ak x verify\` in
               parallel (AQE embedding request for a kit-managed backend, Codex
               MCP when Codex is enabled, provider wiring, security packages,
@@ -67,6 +72,15 @@ function defaultOnError(id, e) {
   return row(id, 'warn', `${id} check unavailable: ${e.message}`);
 }
 
+/** The worst level across every row: 'fail' if any row failed, else 'warn' if
+ *  any warned, else 'ok'. Shared by `run()`'s own exit-code decision and by
+ *  dashboard-server.mjs's in-process /api/status provider, which has no CLI
+ *  process around it to derive an exit code from. */
+export function worstLevel(rows) {
+  return rows.some((r) => r.level === 'fail') ? 'fail'
+    : rows.some((r) => r.level === 'warn') ? 'warn' : 'ok';
+}
+
 async function runSections(sections, ctx, rows) {
   for (const section of sections) {
     try {
@@ -77,22 +91,43 @@ async function runSections(sections, ctx, rows) {
   }
 }
 
+/** @param {{ pkgRoot?: string, cwd?: string, dejaVuAdapter?: any, dejaVuPlanOptions?: Record<string, any>, refresh?: boolean, record?: boolean }} opts */
 export async function collect({
   pkgRoot,
   cwd = process.cwd(),
   dejaVuAdapter = companionLifecycleFor('deja-vu'),
   dejaVuPlanOptions = {},
   refresh = false,
+  record = true,
 }) {
   const rows = [];
   const cfg = loadKitConfig();
-  const integrationFacts = await collectIntegrationFacts({ cwd, cfg });
-  const ctx = { cfg, cwd, pkgRoot, integrationFacts, refresh };
+  // Accurate provenance: 'status-refresh' only when the caller actually asked
+  // for a refresh — a plain status call recording evidence should not claim
+  // to be a refresh it never performed.
+  const source = refresh ? 'status-refresh' : 'status';
+  // globalRoot() defaults refresh:false/record:false (paths.mjs: it is the
+  // single most transitively-called function in the codebase, reached from
+  // dozens of non-status contexts that must never persist evidence as a side
+  // effect). Warming its in-process memo HERE, once, with THIS call's real
+  // refresh/record, is what lets every other bare `globalRoot()` call below
+  // (however deep — natives, versions, providers, daemons, …) reuse the memo
+  // for free while still letting a plain `ak status` persist for a later
+  // process to reuse, and `--refresh` force a fresh read. A throw here (no
+  // npm, no resolvable fallback) is swallowed: the sections that actually
+  // need the value report it individually rather than failing the whole row set.
+  try { globalRoot({ refresh, record, source }); } catch { /* reported per-section */ }
+  const integrationFacts = await collectIntegrationFacts({
+    cwd, cfg, refresh, record, source,
+  });
+  const ctx = {
+    cfg, cwd, pkgRoot, integrationFacts, refresh, record, source,
+  };
 
   await runSections(SECTIONS_BEFORE_HOST_DETAIL, ctx, rows);
 
   rows.push(...(await collectDejaVuRows({
-    cfg, adapter: dejaVuAdapter, planOptions: dejaVuPlanOptions,
+    cfg, adapter: dejaVuAdapter, planOptions: dejaVuPlanOptions, refresh, record, source,
   })));
 
   // Per-host status DETAIL rows (opencode.json wiring, lifecycle bridge,
@@ -115,8 +150,7 @@ export async function run({ flags, pkgRoot, runLive = runDefaultLiveChecks }) {
   if (flags.live && !flags.json) console.log(dim('running live checks (quick, free; each bounded by a timeout)…'));
   const live = flags.live ? await runLive({ cfg: loadKitConfig(), cwd: process.cwd() }) : null;
   const rows = await collect({ pkgRoot, refresh: !!flags.refresh });
-  const worst = rows.some((r) => r.level === 'fail') ? 'fail'
-    : rows.some((r) => r.level === 'warn') ? 'warn' : 'ok';
+  const worst = worstLevel(rows);
 
   if (flags.json) {
     console.log(JSON.stringify({ overall: worst, rows, ...(live ? { live } : {}) }, null, 2));

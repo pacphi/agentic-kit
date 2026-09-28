@@ -9,13 +9,23 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  deriveBsq3Spec, rufloMemoryContexts, rufloRuntimeNatives, dbPathPinStatus, probeBsq3Runtime,
+  deriveBsq3Spec, rufloMemoryContexts, rufloRuntimeNatives, dbPathPinStatus, probeBsq3Runtime, bsq3IsNative,
 } from '../../src/lib/natives.mjs';
 import * as nativesSection from '../../src/commands/status/sections/natives.mjs';
 import { _setGlobalRootForTest } from '../../src/lib/paths.mjs';
+import { evidenceDir, readEvidence, writeEvidence, stableInputsKey } from '../../src/lib/evidence.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
+
+// Task 4: rufloRuntimeNatives now reads/writes evidence under the kit state dir
+// (evidenceDir()) when refresh:false. Redirect the state base for this whole
+// file so those reads/writes never touch this machine's real evidence store —
+// mirrors tests/kit/heal-natives.test.mjs's XDG_STATE_HOME/LOCALAPPDATA redirect.
+process.env.XDG_STATE_HOME = tempDir('ak-natives-runtime-state');
+process.env.LOCALAPPDATA = process.env.XDG_STATE_HOME;
 
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p));
 const rm = (d) => fs.rmSync(d, { recursive: true, force: true });
+const resetEvidence = () => rm(evidenceDir());
 
 function writePkg(dir, pkg) {
   fs.mkdirSync(dir, { recursive: true });
@@ -374,6 +384,155 @@ test('rufloRuntimeNatives reports not-installed and never spawns when ruflo is a
   assert.deepEqual(rt.contexts, []);
   assert.equal(spawned, false, 'no child process when there is nothing to probe');
   _setGlobalRootForTest(null); rm(g);
+});
+
+// ── Task 4: evidence-backed refresh (Ruling A/B) ────────────────────────────
+
+/** Seed a fresh, matching evidence record for one context, as a real probe +
+ *  writeEvidence would leave it. */
+function seedEvidence(context, dir, result, { now } = {}) {
+  writeEvidence('native-runtime', context, {
+    source: 'test',
+    inputsKey: stableInputsKey({ dir, native: bsq3IsNative(dir) }),
+    inputs: { dir, native: bsq3IsNative(dir) },
+    result: { ok: true, state: 'native', attempts: 1, reason: null, bindingPresent: bsq3IsNative(dir), ...result },
+  }, { now });
+}
+
+test('rufloRuntimeNatives({ refresh: false }) reuses fresh, matching evidence and never spawns', async () => {
+  const { nm, cleanup } = fakeGlobalTree();
+  resetEvidence();
+  for (const context of ['memory', 'cli']) {
+    seedEvidence(context, path.join(nm, '@claude-flow', context));
+  }
+  let spawned = false;
+  const rt = await rufloRuntimeNatives({ refresh: false, runner: async () => { spawned = true; return { code: 0, stdout: '', stderr: '' }; } });
+  assert.equal(spawned, false, 'fresh, matching cached evidence: no spawn');
+  assert.equal(rt.installed, true);
+  for (const c of rt.contexts) {
+    assert.equal(c.ok, true);
+    assert.equal(c.state, 'native');
+    assert.equal(c.attempts, 1);
+  }
+  cleanup();
+  resetEvidence();
+});
+
+test('rufloRuntimeNatives({ refresh: true }) spawns and writes evidence a later refresh:false read can reuse', async () => {
+  const { nm, cleanup } = fakeGlobalTree({ contexts: ['memory'] });
+  resetEvidence();
+  const dir = path.join(nm, '@claude-flow', 'memory');
+  let spawned = false;
+  const rt = await rufloRuntimeNatives({
+    refresh: true,
+    runner: async () => { spawned = true; return { code: 0, stdout: '', stderr: '' }; },
+  });
+  assert.equal(spawned, true, 'refresh:true always probes');
+  assert.equal(rt.contexts[0].state, 'native');
+  const record = readEvidence('native-runtime', 'memory', { inputsKey: stableInputsKey({ dir, native: bsq3IsNative(dir) }) });
+  assert.ok(record, 'evidence was written after the probe');
+  assert.equal(record.result.ok, true);
+  assert.equal(record.result.state, 'native');
+  cleanup();
+  resetEvidence();
+});
+
+test('rufloRuntimeNatives({ refresh: false }) re-probes when cached evidence is older than 6h', async () => {
+  const { nm, cleanup } = fakeGlobalTree({ contexts: ['memory'] });
+  resetEvidence();
+  const dir = path.join(nm, '@claude-flow', 'memory');
+  seedEvidence('memory', dir, {}, { now: Date.now() - 7 * 3600_000 });
+  let spawned = false;
+  const rt = await rufloRuntimeNatives({
+    refresh: false,
+    runner: async () => { spawned = true; return { code: 0, stdout: '', stderr: '' }; },
+  });
+  assert.equal(spawned, true, 'evidence older than the 6h window must not suppress the probe');
+  assert.equal(rt.contexts[0].state, 'native');
+  cleanup();
+  resetEvidence();
+});
+
+test('rufloRuntimeNatives({ refresh: false }) re-probes when bsq3IsNative(dir) changed (invalidated inputsKey)', async () => {
+  const { nm, cleanup } = fakeGlobalTree({ contexts: ['memory'] });
+  resetEvidence();
+  const dir = path.join(nm, '@claude-flow', 'memory');
+  // Evidence recorded while no binding was present at all.
+  writeEvidence('native-runtime', 'memory', {
+    source: 'test',
+    inputsKey: stableInputsKey({ dir, native: false }),
+    inputs: { dir, native: false },
+    result: { ok: false, state: 'unavailable', attempts: 1, reason: 'no binding', bindingPresent: false },
+  });
+  // A binding now exists: bsq3IsNative(dir) flips, so the freshly computed
+  // inputsKey no longer matches the cached record's.
+  const bsq3 = path.join(dir, 'node_modules', 'better-sqlite3');
+  fs.mkdirSync(path.join(bsq3, 'build', 'Release'), { recursive: true });
+  fs.writeFileSync(path.join(bsq3, 'package.json'), JSON.stringify({ name: 'better-sqlite3' }));
+  fs.writeFileSync(path.join(bsq3, 'build', 'Release', 'better_sqlite3.node'), '');
+  let spawned = false;
+  const rt = await rufloRuntimeNatives({
+    refresh: false,
+    runner: async () => { spawned = true; return { code: 0, stdout: '', stderr: '' }; },
+  });
+  assert.equal(spawned, true, 'a changed bsq3IsNative(dir) result invalidates the cached inputsKey');
+  assert.equal(rt.contexts[0].state, 'native');
+  cleanup();
+  resetEvidence();
+});
+
+test('rufloRuntimeNatives({ refresh: false }) probes when there is no cached evidence yet (first run)', async () => {
+  const { cleanup } = fakeGlobalTree({ contexts: ['memory'] });
+  resetEvidence();
+  let spawned = false;
+  const rt = await rufloRuntimeNatives({
+    refresh: false,
+    runner: async () => { spawned = true; return { code: 0, stdout: '', stderr: '' }; },
+  });
+  assert.equal(spawned, true, 'no cached evidence at all: probes');
+  assert.equal(rt.contexts[0].state, 'native');
+  cleanup();
+  resetEvidence();
+});
+
+// The status section's collect() has no injectable runner, so these two tests
+// prove the `refresh` flag actually threads through by breaking PATH (a real
+// probe then fails fast with ENOENT instead of hanging) and observing whether
+// cached evidence was honored (refresh:false) or ignored (refresh:true).
+test('status natives collect({ refresh: false }) reuses fresh cached evidence — no real probe runs', async () => {
+  const { nm, cleanup } = fakeGlobalTree();
+  resetEvidence();
+  for (const context of ['memory', 'cli']) {
+    seedEvidence(context, path.join(nm, '@claude-flow', context));
+  }
+  const prevPath = process.env.PATH;
+  process.env.PATH = path.join(nm, 'no-such-bin'); // a real probe would ENOENT immediately
+  try {
+    const rows = await nativesSection.default.collect({ refresh: false });
+    assert.ok(rows.some((r) => r.level === 'ok' && /ruflo memory runtime native/.test(r.message)),
+      'the ok row came from cached evidence, not a (broken-PATH) real probe');
+  } finally {
+    process.env.PATH = prevPath;
+    cleanup();
+    resetEvidence();
+  }
+});
+
+test('status natives collect({ refresh: true }) always re-probes, ignoring fresh cached evidence', async () => {
+  const { nm, cleanup } = fakeGlobalTree({ contexts: ['memory'] });
+  resetEvidence();
+  seedEvidence('memory', path.join(nm, '@claude-flow', 'memory'));
+  const prevPath = process.env.PATH;
+  process.env.PATH = path.join(nm, 'no-such-bin');
+  try {
+    const rows = await nativesSection.default.collect({ refresh: true });
+    assert.ok(rows.some((r) => r.level === 'warn' && /unverified/.test(r.message)),
+      'refresh:true ran a real (broken-PATH) probe instead of trusting the fresh cache');
+  } finally {
+    process.env.PATH = prevPath;
+    cleanup();
+    resetEvidence();
+  }
 });
 
 // ── FR-5: dbPathPinStatus ───────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { run, have } from '../exec.mjs';
 import { installedVersion, latestVersion, cmpVersions, isValidSemver } from '../versions.mjs';
+import { stableInputsKey, readEvidence, writeEvidence } from '../evidence.mjs';
 import {
   DEJA_VU_BIN,
   DEJA_VU_MIN_VERSION,
@@ -16,6 +17,7 @@ const HOST_BINS = Object.freeze({ claude: 'claude', codex: 'codex', opencode: 'o
 const MODES = Object.freeze(['mcp', 'auto']);
 const DOCTOR_TIMEOUT_MS = 10_000;
 const LATEST_TIMEOUT_MS = 5_000;
+const DETECT_MAX_AGE_MS = 6 * 3600_000;
 const plain = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const boolOrNull = (value) => typeof value === 'boolean' ? value : null;
 const hashOrNull = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)
@@ -387,9 +389,19 @@ export function createDejaVuLifecycleAdapter(defaults = {}) {
 
   const detect = async (request = {}) => {
     const cfg = request.cfg ?? {};
+    const refresh = request.refresh ?? true;
+    const source = request.source ?? 'status-refresh';
+    const record = request.record ?? true;
     const desired = intent(cfg);
     const ownership = readOwnership(cfg);
     if (!desired.enabled && !hasOwnership(ownership)) return disabledFacts(desired);
+    const inputsKey = stableInputsKey({
+      desired, ownershipKeys: Object.keys(ownership?.targets ?? {}), PATH: process.env.PATH ?? '',
+    });
+    if (!refresh) {
+      const cached = readEvidence('companion-lifecycle', 'deja-vu', { inputsKey, maxAgeMs: DETECT_MAX_AGE_MS });
+      if (cached && !cached.stale && !cached.invalidated) return /** @type {any} */ (cached.result);
+    }
     const [binaryPresent, npmVersion, ...hostPresence] = await Promise.all([
       haveFn(DEJA_VU_BIN),
       packageVersionFn(DEJA_VU_PACKAGE),
@@ -416,6 +428,11 @@ export function createDejaVuLifecycleAdapter(defaults = {}) {
     };
     const error = computeDetectError(binaryPresent, doctor, ownedUpgradeCanRepair);
     if (error) facts.error = error;
+    if (record) {
+      writeEvidence('companion-lifecycle', 'deja-vu', {
+        source, inputsKey, inputs: { desired, PATH: process.env.PATH ?? '' }, result: facts,
+      });
+    }
     return facts;
   };
 

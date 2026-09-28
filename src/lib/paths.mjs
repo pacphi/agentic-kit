@@ -2,8 +2,10 @@
 // asks this one; nothing else may compute a home-relative or global-npm path.
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import { writePrivateFileAtomic } from './file-write.mjs';
 
 const home = os.homedir();
 const isWindows = process.platform === 'win32';
@@ -25,6 +27,8 @@ export const maintenanceControlDir = () => path.join(stateBase(), 'agentic-kit',
 export const memoryProbeCleanupDir = () => path.join(stateBase(), 'agentic-kit', 'memory-probe-cleanup');
 /** Backups, archived stray AQE stores and receipts of `ak x aqe-store merge` (aqe-store-merge.mjs). */
 export const aqeStoreMergeDir = () => path.join(stateBase(), 'agentic-kit', 'aqe-store-merge');
+/** Shared evidence envelope store: live checks, ruflo-components, and other per-id evidence. */
+export const evidenceDir = () => path.join(stateBase(), 'agentic-kit', 'evidence');
 /** Receipts for edits ak makes inside another tool's install (install-edits.mjs). */
 export const installEditsPath = () => path.join(stateBase(), 'agentic-kit', 'install-edits.json');
 /** The ruflo-era config dir — read-fallback for kit.json migration and the
@@ -165,13 +169,108 @@ export function resolveGlobalRoot(execPath = process.execPath, env = process.env
   return null;
 }
 
+const GLOBAL_ROOT_EVIDENCE_MAX_AGE_MS = 24 * 3600_000;
+
+// paths.mjs cannot import src/lib/evidence.mjs's readEvidence/writeEvidence:
+// evidence.mjs itself imports paths.mjs for evidenceDir() (`export const
+// evidenceDir = paths.evidenceDir`), and paths.mjs is the module almost every
+// real entry point loads first — a minimal repro confirms whichever of the
+// pair is entered FIRST throws "Cannot access '...' before initialization" on
+// that line the moment the other imports back (a `const` read of a binding
+// the peer hasn't assigned yet). This local envelope writes the exact same
+// on-disk shape (kind/id.json under evidenceDir(), the same record fields) so
+// nothing downstream needs to know it isn't the shared helper — it just
+// avoids the require cycle.
+function globalRootEvidenceFile() {
+  return path.join(evidenceDir(), 'npm-global-root', 'machine.json');
+}
+
+/** Exported so tests can compute the same key without duplicating (and
+ *  risking drifting from) this hashing logic — mirrors `_setGlobalRootForTest`
+ *  as a small, deliberate test-support surface. */
+export function globalRootInputsKey(env = process.env) {
+  const normalized = {
+    execPath: process.execPath, PATH: env.PATH ?? '', npm_config_prefix: env.npm_config_prefix ?? '',
+  };
+  return crypto.createHash('sha256').update(JSON.stringify(normalized)).digest('hex').slice(0, 16);
+}
+
+function readGlobalRootEvidence(inputsKey) {
+  let record;
+  try {
+    record = JSON.parse(fs.readFileSync(globalRootEvidenceFile(), 'utf8'));
+  } catch {
+    return null;
+  }
+  if (!record || typeof record !== 'object' || record.version !== 1) return null;
+  if (record.inputsKey !== inputsKey) return null;
+  const checkedAtMs = Date.parse(record.checkedAt);
+  if (!Number.isFinite(checkedAtMs) || Date.now() - checkedAtMs > GLOBAL_ROOT_EVIDENCE_MAX_AGE_MS) return null;
+  return typeof record.result?.path === 'string' ? record.result.path : null;
+}
+
+function writeGlobalRootEvidence(inputsKey, resolvedPath, source) {
+  const record = {
+    version: 1,
+    kind: 'npm-global-root',
+    id: 'machine',
+    source,
+    checkedAt: new Date().toISOString(),
+    inputsKey,
+    inputs: { execPath: process.execPath },
+    result: { path: resolvedPath },
+  };
+  try {
+    writePrivateFileAtomic(globalRootEvidenceFile(), `${JSON.stringify(record)}\n`);
+  } catch {
+    // Best-effort cache: a failed write just means the next call probes again.
+  }
+}
+
 let _globalRoot = null;
-/** npm's global node_modules. Cached per process. Derivation order mirrors
- *  upstream #2221: `npm root -g` is authoritative; execPath-derived candidates
- *  cover environments where npm itself is missing from PATH — which is not as
- *  rare as it reads, since every sandboxed test and hook runs that way. */
-export function globalRoot() {
-  if (_globalRoot) return _globalRoot;
+/** npm's global node_modules. Cached per process AND across processes via the
+ *  evidence store (kind 'npm-global-root', 24h TTL — this fact is stable
+ *  enough on a given machine that a stale answer is low-risk, and it is
+ *  invalidated the moment PATH/npm_config_prefix/execPath change). Derivation
+ *  order mirrors upstream #2221: `npm root -g` is authoritative; execPath-
+ *  derived candidates cover environments where npm itself is missing from
+ *  PATH — which is not as rare as it reads, since every sandboxed test and
+ *  hook runs that way.
+ *
+ *  `refresh` DEFAULTS TO FALSE here (unlike every other evidence-gated check
+ *  in this branch, which defaults to `true`): this function had no gating
+ *  concept before, was always spawn-on-every-call regardless of caller, and
+ *  every existing call site invokes it bare (`globalRoot()`) — so a
+ *  cache-first default is what closes the gap for all of them for free,
+ *  without needing every caller updated. Pass `refresh: true` for a call site
+ *  that genuinely needs a forced fresh read.
+ *
+ *  `record` ALSO DEFAULTS TO FALSE here (the opposite of every other
+ *  evidence-gated check in this branch, whose libraries are reached only from
+ *  status.mjs's own collect() tree). globalRoot() is instead the single most
+ *  transitively-called function in the codebase — installedVersion(),
+ *  rufloRoot(), aqeRoot(), rufloCliPkgRoot() and dozens of their own callers
+ *  all route through a bare `globalRoot()` with zero args, in setup, sync,
+ *  uninstall, heal, audit and every test that touches any of them. A
+ *  record-defaults-true design would make evidence writes a silent side
+ *  effect of nearly any ak invocation (or test), including reads sync's own
+ *  `record: false` plan-computation pass never intended to persist anything
+ *  (that flag can't reach globalRoot(): versions.mjs, which calls
+ *  installedVersion() → globalRoot(), is a separate call path this exception
+ *  does not thread `record` through — see ADR-0063).
+ *  Persisting is instead the responsibility of the one caller that actually
+ *  owns the branch's `refresh`/`record` contract end-to-end — status.mjs's
+ *  collect() warms the in-process memo once, with the real refresh/record,
+ *  right after loadKitConfig() — so every other bare `globalRoot()` call in
+ *  that same process (however deep) reuses the memo for free and never
+ *  itself decides whether to write. */
+export function globalRoot({ refresh = false, record = false, source = 'status' } = {}) {
+  if (_globalRoot && !refresh) return _globalRoot;
+  const inputsKey = globalRootInputsKey();
+  if (!refresh) {
+    const cached = readGlobalRootEvidence(inputsKey);
+    if (cached) { _globalRoot = cached; return _globalRoot; }
+  }
   try {
     _globalRoot = execFileSync('npm', ['root', '-g'], {
       encoding: 'utf8',
@@ -182,6 +281,7 @@ export function globalRoot() {
     _globalRoot = resolveGlobalRoot();
   }
   if (!_globalRoot) throw new Error('cannot determine npm global root (is npm installed?)');
+  if (record) writeGlobalRootEvidence(inputsKey, _globalRoot, source);
   return _globalRoot;
 }
 

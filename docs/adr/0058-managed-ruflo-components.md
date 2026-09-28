@@ -25,6 +25,12 @@
   (ADR-0062): the receipt records a file or table ak created, and a release that leaves it empty
   removes it; older backups are pruned to the newest. An `adoptable` value is also taken back when
   ak already owned the key. The Ruflo component projections are unchanged.
+- **Updated:** 2026-09-28 — the evidence cache (`ruflo-components/evidence.mjs`'s `collectEvidence()`
+  result) is now stored under the shared `<stateBase>/agentic-kit/evidence/ruflo-component/machine.json`
+  layout, moved from `<stateBase>/agentic-kit/ruflo-components-evidence.json`; it still does NOT
+  route through the generic evidence envelope's `readEvidence`/`writeEvidence` — only its storage
+  location moved, its own 15-minute producer TTL / 24-hour display-staleness rule is unchanged. See
+  [ADR-0063](0063-evidence-store-and-refresh-vocabulary.md) (remediation program, branch 6a task 3)
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md) (value-precise ownership),
   [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md) (explicit degradation),

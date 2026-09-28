@@ -115,10 +115,13 @@ export default {
   async collect({
     cwd, listDaemons = listRufloDaemons, env = process.env, now = Date.now(), platform = process.platform,
     loadConfig = loadKitConfig, rufloVersion = installedRoutingVersion() ?? installedVersion('ruflo'),
+    refresh = false, record = true, source = 'status',
   }) {
     const rows = [];
     try {
-      const daemons = await listDaemons({ cwd });
+      const daemons = await listDaemons({
+        cwd, refresh, record, source,
+      });
       const stale = staleDaemons(daemons);
       const root = projectRoot(cwd);
       const missing = stale.length ? null : ownDaemonMissing(root, env, daemons.length);

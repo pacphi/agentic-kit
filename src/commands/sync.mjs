@@ -28,7 +28,7 @@ import { installedRoutingVersion } from '../lib/ruflo-memory-contract.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { reconcileRufloComponents } from '../lib/ruflo-components/apply.mjs';
 import { RESTART_REMINDER } from './status/sections/ruflo-components.mjs';
-import { HOSTS, commandHosts, hostInstallState, hostExecutable, installHost, convergeProviderStack, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
+import { HOSTS, commandHosts, hostInstallState, hostExecutable, installHost, collectIntegrationFacts, convergeProviderStack, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
 import { driftReport, installedVersion, selfDrift } from '../lib/versions.mjs';
 import { recordRufloReleaseDates } from '../lib/ruflo-support-window.mjs';
 import { drift as ruvnetBrainDrift } from '../lib/ruvnet-brain.mjs';
@@ -126,6 +126,28 @@ async function refreshPlanDrift(flags, fetchLatest, pkgRoot, releaseDatesRunner)
   if (loadKitConfig().ruvnetBrain) await ruvnetBrainDrift({ force: true });
 }
 
+/** Force host install/launch/setup evidence fresh before the plan is built,
+ *  so a row that has not yet gone STALE (host-setup's 6h TTL) but is simply
+ *  WRONG — a host repaired or broken since it was last recorded — can never
+ *  hide a needed fix from the plan, or hide that a fix already landed. Kept
+ *  narrow and separate from `refreshPlanDrift`: forcing every evidence-gated
+ *  kind fresh here (by passing `refresh: true` to the plan's own `collect()`
+ *  call) was tried and reverted — it broke `--dry-run`'s "touches nothing"
+ *  contract for `ruflo-component` evidence and defeated this branch's own
+ *  warm-cache design for kinds that don't need it. Dry-runs skip this: it
+ *  persists evidence, and --dry-run is pinned to touch nothing — same
+ *  cache-staleness trade `refreshPlanDrift` already makes for version drift. */
+async function refreshPlanHosts(flags, cwd) {
+  if (flags['dry-run']) return;
+  const cfg = loadKitConfig();
+  for (const h of HOSTS) {
+    if (!cfg.integrations?.hosts?.[h.id]) continue;
+    const st = await hostInstallState(h, { refresh: true, record: true, source: 'sync' });
+    if (st.method === 'npm') await hostExecutable(h, { refresh: true, record: true, source: 'sync' });
+  }
+  await collectIntegrationFacts({ cwd, cfg, refresh: true, record: true, source: 'sync' });
+}
+
 export const options = {
   'dry-run': { type: 'boolean', default: false },
   'no-upgrade': { type: 'boolean', default: false },
@@ -213,6 +235,7 @@ Examples:
 // (`dejaVuApplyFailed`, `aqeRouterApplyFailure`) the final convergence check
 // needs — the only state that survives past its own step.
 const HOST_LIFECYCLE = { installState: hostInstallState, executable: hostExecutable, install: installHost };
+const DAEMON_LIFECYCLE = { list: listDaemons, reap };
 
 /** A host package's CLI must start after an upgrade, not just extract. */
 export function hostUpgradeOptions(pkg) {
@@ -245,11 +268,28 @@ export const SYNC_STEPS = [
     when: (subs) => subs.has('hosts'),
     run: async (ctx) => {
       const { installState, executable, install } = { ...HOST_LIFECYCLE, ...ctx.hostLifecycle };
+      let repaired = false;
       for (const h of commandHosts()) {
         if (!ctx.cfg.integrations.hosts[h.id]) continue;
         const { method } = await installState(h);
-        if (method === 'absent') await ctx.step(`install ${h.id}`, () => install(h.id));
-        else if (method === 'npm' && !(await executable(h)).ok) await ctx.step(`repair ${h.id}`, () => install(h.id));
+        let r = null;
+        if (method === 'absent') r = await ctx.step(`install ${h.id}`, () => install(h.id));
+        else if (method === 'npm' && !(await executable(h)).ok) r = await ctx.step(`repair ${h.id}`, () => install(h.id));
+        if (r?.ok) {
+          repaired = true;
+          // `installState` above already recorded the PRE-repair evidence;
+          // re-probe now so a plain `ak status` (or this sync's own converge
+          // proof) sees the just-installed/repaired state, not that stale row.
+          const fresh = await installState(h, { refresh: true, record: true, source: 'sync' });
+          if (fresh.method === 'npm') await executable(h, { refresh: true, record: true, source: 'sync' });
+        }
+      }
+      // host-setup covers every host in one call; refresh it once after the
+      // loop, not per host, once anything actually changed.
+      if (repaired) {
+        await (ctx.collectHostFacts ?? collectIntegrationFacts)({
+          cwd: ctx.cwd, cfg: ctx.cfg, refresh: true, record: true, source: 'sync',
+        });
       }
     },
   },
@@ -439,10 +479,16 @@ export const SYNC_STEPS = [
     id: 'daemons',
     when: (subs) => subs.has('daemons') || subs.has('versions'),
     run: async (ctx) => {
-      const stale = staleDaemons(await listDaemons({ cwd: ctx.cwd }));
-      for (const r of reap(stale)) {
+      const { list, reap: reapFn } = { ...DAEMON_LIFECYCLE, ...ctx.daemonLifecycle };
+      const stale = staleDaemons(await list({ cwd: ctx.cwd }));
+      const reaped = reapFn(stale);
+      for (const r of reaped) {
         (r.killed ? ok : warn)(`daemon pid=${r.pid}: ${r.killed ? 'reaped' : 'could not stop'}`);
       }
+      // The list() call above already recorded the pre-reap process list as
+      // daemon-sweep evidence; refresh it so a later read sees the daemons
+      // that are actually still alive, not the ones just killed.
+      if (reaped.some((r) => r.killed)) await list({ cwd: ctx.cwd, refresh: true, record: true, source: 'sync' });
       // Read the version now: the versions step may have just upgraded Ruflo.
       const applied = await applyRufloDaemon(ctx.cwd, {
         cfg: ctx.cfg, rufloVersion: installedRoutingVersion() ?? installedVersion('ruflo'),
@@ -1018,6 +1064,7 @@ async function converge({
   releaseDatesRunner,
   dejaVuAdapter = companionLifecycleFor('deja-vu'),
   collectFn = collect,
+  refreshHosts = refreshPlanHosts,
   confirmCodexRepair = askCodexRepair,
   inspectCodexTopology = codexMcpTopology,
   repairCodexTopology = repairCodexMcpTopology,
@@ -1037,7 +1084,29 @@ async function converge({
   // kit.json, and --dry-run is pinned to touch nothing — so a dry-run
   // preview may be cache-stale by up to one TTL window.
   await refreshPlanDrift(flags, fetchLatest, pkgRoot, releaseDatesRunner);
-  const rows = await collectFn({ pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions });
+  // Same reasoning, narrower scope: a NOT-YET-STALE host-install-method/
+  // host-launch/host-setup row can still be wrong (a host repaired or broken
+  // since it was last recorded), and unlike version drift this cannot be
+  // fixed with a blanket `refresh: true` on the collect() below — collect()
+  // threads one `refresh` flag into every evidence-gated kind it reads
+  // (native-runtime, ruflo-components, npm-global-root, daemon-sweep, …), and
+  // forcing all of them fresh here would both defeat the warm-cache design
+  // this branch exists for and — confirmed empirically — break `--dry-run`'s
+  // "touches nothing" contract (`ruflo-component` evidence is written on a
+  // forced refresh regardless of `record`, since it does not route through
+  // the generic envelope's `record` gate; see ADR-0063). So only the host
+  // facts are force-refreshed here, narrowly, before the plan is read.
+  await refreshHosts(flags, cwd);
+  // Plan-computation read only — never persists evidence as a side effect of
+  // building the plan (ADR-0063: sync doing work the plan didn't announce).
+  // Real probes/heals below still record via their own calls, several of
+  // them (host install/repair above, and the daemon reap step) explicitly
+  // re-recording fresh evidence right after a mutation, so this run's own
+  // converge proof below — and a plain `ak status` right after — see the
+  // post-repair state, not what was cached before it.
+  const rows = await collectFn({
+    pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions, record: false,
+  });
   result.needsYourAction = needsYourAction(rows);
   // Only fixes a sync step performs enter the plan (status/row.mjs repair
   // contract, #237). A manual fix — a command the user runs, a file they edit,
@@ -1118,9 +1187,17 @@ async function converge({
   await runTail({ cfg, cwd, flags, skip, state, codexRepairPlan, traced,
     confirm: confirmCodexRepair, inspect: inspectCodexTopology, repair: repairCodexTopology });
 
-  // converge proof
+  // Converge proof — a re-read of current state, not a new probe/heal, so it
+  // relies on the same mutation-site re-recording as the plan read (the host
+  // and daemon steps above already refreshed their own evidence the moment
+  // they changed anything). Unlike the plan read, this one DOES persist
+  // (record: true): it is the last thing this run computes, so a cache-miss
+  // probe it triggers is worth keeping — a plain `ak status` immediately
+  // afterward then reuses it instead of re-probing on its own.
   console.log('');
-  const after = await collectFn({ pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions });
+  const after = await collectFn({
+    pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions, record: true,
+  });
   result.needsYourAction = needsYourAction(after);
 
   // health-history: append one post-heal snapshot so `status` can flag backslides

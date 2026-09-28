@@ -108,11 +108,11 @@ export function brainReleaseRow(b) {
 
 export default {
   id: 'ruvnet-brain',
-  async collect({ cfg }) {
+  async collect({ cfg, refresh = false }) {
     const rows = [];
     if (!cfg.ruvnetBrain) return rows;
     try {
-      const b = await ruvnetBrainDrift();
+      const b = await ruvnetBrainDrift({ force: refresh });
       rows.push(brainReleaseRow(b));
     } catch (e) {
       rows.push(row('ruvnet-brain', 'warn', `ruvnet-brain check unavailable: ${e.message}`));

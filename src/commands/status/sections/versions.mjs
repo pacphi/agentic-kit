@@ -20,10 +20,10 @@ function supportWindowRow(installed, cfg, now) {
 
 export default {
   id: 'versions',
-  async collect({ drift = driftReport, loadConfig = loadKitConfig, now = Date.now } = {}) {
+  async collect({ drift = driftReport, loadConfig = loadKitConfig, now = Date.now, refresh = false } = {}) {
     const rows = [];
     try {
-      for (const r of await drift()) {
+      for (const r of await drift({ force: refresh })) {
         if (!r.installed) {
           rows.push(row('versions', r.pkg === 'ruflo' ? 'fail' : 'warn',
             `${r.pkg} not installed globally`, 'setup installs it'));

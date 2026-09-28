@@ -75,6 +75,11 @@ async function run({ yes = false, confirm = async () => false, collectFn = rows,
   try {
     return await captureLog(() => sync.run({
       pkgRoot, flags: { 'no-upgrade': true, yes, 'dry-run': false }, collectFn,
+      // Real host-evidence work sync now does ahead of the plan; irrelevant
+      // to this file's Codex-MCP-topology focus, and it would otherwise write
+      // evidence even on a declined repair, which some tests here assert
+      // leaves the sandbox byte-for-byte unchanged.
+      refreshHosts: async () => {},
       confirmCodexRepair: confirm, inspectCodexTopology: inspect, repairCodexTopology: repairFn,
     }));
   } finally { process.chdir(previous); }

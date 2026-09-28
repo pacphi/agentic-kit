@@ -146,13 +146,16 @@ function dejaIndexRows(facts, { enabled, hasOperation }) {
  * path, command output, signature, transcript metadata, or plugin payload is
  * copied into a row. A fix is attached only when the same adapter plan contains
  * an operation that can perform it.
- * @param {{cfg?:any,adapter?:any,planOptions?:Record<string,any>}} [options]
+ * @param {{cfg?:any,adapter?:any,planOptions?:Record<string,any>,refresh?:boolean,record?:boolean,source?:string}} [options]
  */
 export async function collectDejaVuRows(options = {}) {
   const {
     cfg,
     adapter = companionLifecycleFor('deja-vu'),
     planOptions = {},
+    refresh = false,
+    record = true,
+    source,
   } = options;
   const desired = cfg?.integrations?.tools?.dejaVu;
   const enabled = desired?.enabled === true;
@@ -166,7 +169,7 @@ export async function collectDejaVuRows(options = {}) {
   }
 
   try {
-    const facts = await adapter.detect({ cfg });
+    const facts = await adapter.detect({ cfg, refresh, record, source });
     const plan = await adapter.plan({ cfg, facts, options: planOptions });
     const operations = Array.isArray(plan?.operations) ? plan.operations : [];
     const actionable = !facts?.error && !plan?.error;
