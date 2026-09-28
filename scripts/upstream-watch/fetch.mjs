@@ -160,3 +160,26 @@ export function createFetcher({ exec = run } = {}) {
     },
   };
 }
+
+/**
+ * Retry each method of `fetcher` except `auth` after each delay in turn; the
+ * last error is thrown. `record` uses it so a transient GitHub or npm failure
+ * does not fail the scheduled run (spec 2026-09-28).
+ */
+export function retrying(fetcher, { delays = [2000, 10_000], sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }) } = {}) {
+  const wrapped = { ...fetcher };
+  for (const [name, method] of Object.entries(fetcher)) {
+    if (name === 'auth' || typeof method !== 'function') continue;
+    wrapped[name] = async (...args) => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await method.apply(fetcher, args);
+        } catch (error) {
+          if (attempt >= delays.length) throw error;
+          await sleep(delays[attempt]);
+        }
+      }
+    };
+  }
+  return wrapped;
+}

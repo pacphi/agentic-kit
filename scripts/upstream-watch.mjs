@@ -12,15 +12,21 @@ import { pathToFileURL } from 'node:url';
 import { loadUpstreamRegistry } from '../src/lib/hook-audit/upstream.mjs';
 import { computeSupportWindow, minorFirstPublished } from '../src/lib/ruflo-support-window.mjs';
 import {
-  buildReport, candidateVersions, confirmationStart, ledgerEvents, nextRelease, tagRefs, upstreamOf,
+  buildReport, candidateVersions, confirmationStart, ledgerEvents, nextRelease, tagRefs, upstreamOf, withoutRecorded,
 } from './upstream-watch/classify.mjs';
-import { createFetcher, mapLimit } from './upstream-watch/fetch.mjs';
+import { createDispatcher, dispatch } from './upstream-watch/dispatch.mjs';
+import { createFetcher, mapLimit, retrying } from './upstream-watch/fetch.mjs';
+import { createLedgerStore, toRecord } from './upstream-watch/ledger-branch.mjs';
+import { isoSeconds, renderNotice, sentence } from './upstream-watch/ledger.mjs';
 import { renderEvents, renderReport } from './upstream-watch/render.mjs';
 
 const USAGE = `usage: node scripts/upstream-watch.mjs report [--json] [--concurrency <1-16>] [--registry <file>]
        node scripts/upstream-watch.mjs check --since <iso-date> [--json] [--concurrency <1-16>] [--registry <file>]
+       node scripts/upstream-watch.mjs record [--since <iso-date>] [--dry-run] [--json] [--concurrency <1-16>] [--registry <file>]
 `;
 const PENDING = new Set(['watching', 'fixed-unreleased']);
+// record exits BLIND when gh, the registry, the ledger branch or every upstream thread is unreadable.
+const BLIND = 3;
 
 class UsageError extends Error {}
 
@@ -34,8 +40,8 @@ function sinceValue(value) {
 
 export function parseArgs(argv) {
   const [command, ...rest] = argv;
-  if (!['report', 'check'].includes(command)) throw new UsageError(command ? `unknown command ${command}` : 'missing command');
-  const options = { command, json: false, concurrency: 4, since: null, registry: null };
+  if (!['report', 'check', 'record'].includes(command)) throw new UsageError(command ? `unknown command ${command}` : 'missing command');
+  const options = { command, json: false, concurrency: 4, since: null, registry: null, dryRun: false };
   for (let index = 0; index < rest.length; index++) {
     const flag = rest[index];
     const value = () => {
@@ -46,7 +52,8 @@ export function parseArgs(argv) {
     if (flag === '--json') options.json = true;
     else if (flag === '--concurrency') options.concurrency = Number(value());
     else if (flag === '--registry') options.registry = value();
-    else if (flag === '--since' && command === 'check') options.since = sinceValue(value());
+    else if (flag === '--dry-run' && command === 'record') options.dryRun = true;
+    else if (flag === '--since' && ['check', 'record'].includes(command)) options.since = sinceValue(value());
     else throw new UsageError(`unknown option ${flag}`);
   }
   if (!Number.isInteger(options.concurrency) || options.concurrency < 1 || options.concurrency > 16) {
@@ -201,8 +208,73 @@ async function runCheck(registry, fetcher, options, { stderr, now }) {
   return { report, offline, fetchErrors, blind };
 }
 
+const WEEK = 7 * 86_400_000;
+
+function blindRecord(error, { stdout, stderr, json }, extra = {}) {
+  stderr.write(`${error}\n`);
+  const result = { blind: true, error, records: [], fetchErrors: [], dispatchErrors: [], parent: null, commit: null, notice: { post: false, body: '' }, ...extra };
+  if (json) stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  return BLIND;
+}
+
+/**
+ * The scheduled run (spec 2026-09-28): read the ledger branch, check from its
+ * window, fire the dispatch routine for new dispatch work, and build one local
+ * commit when there are new records. Never pushes; the workflow does.
+ */
+async function record(registry, fetcher, options, { stdout, stderr, now, ledgerStore, dispatcher, sleep }) {
+  const { repo, ledger: { branch, sentinel }, notify: { mention } } = registry.watchPolicy;
+  const io = { stdout, stderr, json: options.json };
+  if (options.since && Date.parse(options.since) > now.getTime()) {
+    stderr.write(`--since is in the future\n${USAGE}`);
+    return 2;
+  }
+  const auth = await fetcher.auth();
+  if (!auth.ok) return blindRecord(auth.message, io);
+  let ledger;
+  try {
+    ledger = await ledgerStore.read(branch, { now });
+  } catch (error) {
+    return blindRecord(`Could not read the ledger branch ${branch}: ${error.message}`, io);
+  }
+  const since = options.since ?? ledger.checkedAt ?? isoSeconds(now.getTime() - WEEK);
+  const sinceSource = options.since ? 'flag' : ledger.checkedAt ? 'ledger' : 'default';
+  const { report, fetchErrors, blind } = await runCheck(registry, retrying(fetcher, { sleep }), options, { stderr: { write: () => true }, now });
+  if (blind) return blindRecord('Not one upstream thread could be read.', io, { fetchErrors });
+  const runAt = isoSeconds(now);
+  const recorded = ledger.records.map((item) => item.line).join('\n');
+  const all = ledgerEvents(report, registry, { since });
+  const released = all.filter((event) => event.event === 'released' && event.fields.branch);
+  const fired = options.dryRun ? { records: [], errors: [] }
+    : await dispatch({ released, records: ledger.records, dispatcher, repo, sentinel, now, recordedAt: runAt });
+  const records = [...withoutRecorded(all, recorded).map((event) => toRecord(event, runAt)), ...fired.records];
+  const checkedAt = fetchErrors.length ? (ledger.checkedAt ?? since) : runAt;
+  let commit = null;
+  if (!options.dryRun && records.length) {
+    try {
+      commit = await ledgerStore.build({
+        parent: ledger.commit, records: [...ledger.records, ...records], checkedAt,
+        subject: `upstream-watch: ${records.length} new ${records.length === 1 ? 'record' : 'records'}`,
+        sentences: records.map(sentence),
+      });
+    } catch (error) {
+      return blindRecord(`Could not build the ledger commit: ${error.message}`, io, { fetchErrors, dispatchErrors: fired.errors });
+    }
+  }
+  const body = renderNotice({ records, mention, date: runAt.slice(0, 10) });
+  const result = {
+    since, sinceSource, checkedAt, blind: false, records, fetchErrors, dispatchErrors: fired.errors,
+    parent: ledger.commit, commit, notice: { post: Boolean(body), body },
+  };
+  for (const item of fetchErrors) stderr.write(`Could not check ${item.id}: ${item.error}\n`);
+  for (const item of fired.errors) stderr.write(`Dispatch ${item.id}: ${item.error}\n`);
+  stdout.write(options.json ? `${JSON.stringify(result, null, 2)}\n` : records.length ? `${records.map((item) => item.line).join('\n')}\n` : 'No new records.\n');
+  return 0;
+}
+
 export async function main(argv, {
-  fetcher = createFetcher(), stdout = process.stdout, stderr = process.stderr, now = new Date(),
+  fetcher = createFetcher(), ledgerStore = createLedgerStore(), dispatcher = createDispatcher(),
+  sleep = undefined, stdout = process.stdout, stderr = process.stderr, now = new Date(),
 } = {}) {
   let options;
   try {
@@ -216,9 +288,13 @@ export async function main(argv, {
   if (registry.registryStatus !== 'valid') {
     stderr.write(`upstream registry is ${registry.registryStatus ?? registry.status}:\n${registry.errors.map((error) => `  ${error}`).join('\n')}\n`);
     const status = { status: registry.registryStatus ?? registry.status, errors: registry.errors };
+    if (options.command === 'record') {
+      return blindRecord(`upstream registry is ${status.status}`, { stdout, stderr, json: options.json }, { registry: status });
+    }
     stdout.write(options.json ? `${JSON.stringify({ registry: status }, null, 2)}\n` : 'No report: the upstream registry is not valid.\n');
     return 0;
   }
+  if (options.command === 'record') return record(registry, fetcher, options, { stdout, stderr, now, ledgerStore, dispatcher, sleep });
   const { report, offline, fetchErrors, blind } = await runCheck(registry, fetcher, options, { stderr, now });
   if (options.command === 'report') {
     stdout.write(options.json ? `${JSON.stringify(report, null, 2)}\n` : renderReport(report));
