@@ -1037,7 +1037,12 @@ async function converge({
   // kit.json, and --dry-run is pinned to touch nothing — so a dry-run
   // preview may be cache-stale by up to one TTL window.
   await refreshPlanDrift(flags, fetchLatest, pkgRoot, releaseDatesRunner);
-  const rows = await collectFn({ pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions });
+  // Plan-computation read only — never persists evidence as a side effect of
+  // building the plan (Branch 0 S3/F7: sync doing work the plan didn't
+  // announce). Real probes/heals below still record via their own calls.
+  const rows = await collectFn({
+    pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions, record: false,
+  });
   result.needsYourAction = needsYourAction(rows);
   // Only fixes a sync step performs enter the plan (status/row.mjs repair
   // contract, #237). A manual fix — a command the user runs, a file they edit,
@@ -1118,9 +1123,12 @@ async function converge({
   await runTail({ cfg, cwd, flags, skip, state, codexRepairPlan, traced,
     confirm: confirmCodexRepair, inspect: inspectCodexTopology, repair: repairCodexTopology });
 
-  // converge proof
+  // converge proof — a re-read of current state, not a new probe/heal, so
+  // this must not persist evidence either (same reasoning as the plan read).
   console.log('');
-  const after = await collectFn({ pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions });
+  const after = await collectFn({
+    pkgRoot, cwd, dejaVuAdapter, dejaVuPlanOptions, record: false,
+  });
   result.needsYourAction = needsYourAction(after);
 
   // health-history: append one post-heal snapshot so `status` can flag backslides

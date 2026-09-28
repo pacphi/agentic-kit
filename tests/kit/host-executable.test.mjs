@@ -108,8 +108,8 @@ test('hosts status section threads refresh into both installState and executable
     },
   });
   assert.deepEqual(calls, [
-    ['installState', 'codex', { refresh: true }],
-    ['executable', 'codex', { refresh: true }],
+    ['installState', 'codex', { refresh: true, record: true }],
+    ['executable', 'codex', { refresh: true, record: true }],
   ]);
 });
 
@@ -122,7 +122,7 @@ test('hosts status section defaults refresh to false when the caller omits it', 
       authState: () => ({ mode: 'oauth', billing: 'subscription', source: null, note: null }),
     },
   });
-  assert.deepEqual(calls, [{ refresh: false }, { refresh: false }]);
+  assert.deepEqual(calls, [{ refresh: false, record: true }, { refresh: false, record: true }]);
 });
 
 test('hosts status fails a recorded npm install whose binary cannot start', async () => {

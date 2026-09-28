@@ -248,7 +248,7 @@ async function hostVersion(bin) {
  *   'npm'      — an npm global copy exists (we may update it)
  *   'external' — on PATH but not the npm global copy (mise/native/brew — advise only)
  *   'absent'   — not installed at all (we may install it) */
-export async function hostInstallState(host, { refresh = true, source = 'status-refresh' } = {}) {
+export async function hostInstallState(host, { refresh = true, source = 'status-refresh', record = true } = {}) {
   const inputsKey = hostSetupInputsKey(host);
   if (!refresh) {
     const cached = readEvidence('host-install-method', host.id, { inputsKey, maxAgeMs: HOST_SETUP_MAX_AGE_MS });
@@ -260,9 +260,11 @@ export async function hostInstallState(host, { refresh = true, source = 'status-
   const result = npmVer ? { method: 'npm', version: npmVer }
     : (await have(host.bin)) ? { method: 'external', version: await hostVersion(host.bin) }
       : { method: 'absent', version: null };
-  writeEvidence('host-install-method', host.id, {
-    source, inputsKey, inputs: { PATH: process.env.PATH ?? '', bin: host.bin }, result,
-  });
+  if (record) {
+    writeEvidence('host-install-method', host.id, {
+      source, inputsKey, inputs: { PATH: process.env.PATH ?? '', bin: host.bin }, result,
+    });
+  }
   return result;
 }
 
@@ -270,7 +272,7 @@ export async function hostInstallState(host, { refresh = true, source = 'status-
  *  its package.json alone, which survives a missing platform binary (e.g.
  *  @openai/codex without @openai/codex-darwin-arm64). Local spawn, no network.
  *  Returns { ok, detail } where detail is the most telling error line. */
-export async function hostExecutable(host, { runner = run, refresh = true, source = 'status-refresh' } = {}) {
+export async function hostExecutable(host, { runner = run, refresh = true, source = 'status-refresh', record = true } = {}) {
   const inputsKey = hostSetupInputsKey(host);
   if (!refresh) {
     const cached = readEvidence('host-launch', host.id, { inputsKey, maxAgeMs: HOST_SETUP_MAX_AGE_MS });
@@ -287,9 +289,11 @@ export async function hostExecutable(host, { runner = run, refresh = true, sourc
     const detail = lines.find((line) => /^[A-Za-z]*Error\b/.test(line)) ?? lines[0] ?? `exit ${r.code}`;
     result = { ok: false, detail: detail.slice(0, 160) };
   }
-  writeEvidence('host-launch', host.id, {
-    source, inputsKey, inputs: { PATH: process.env.PATH ?? '', bin: host.bin }, result,
-  });
+  if (record) {
+    writeEvidence('host-launch', host.id, {
+      source, inputsKey, inputs: { PATH: process.env.PATH ?? '', bin: host.bin }, result,
+    });
+  }
   return result;
 }
 
@@ -344,9 +348,9 @@ export async function installHost(id, { runner = run, sleep } = {}) {
 /** Detect installed hosts + whether they are currently wired on in `cwd`.
  *  `opts.opencodeConfigFile` is a test seam for the config-file wired probe.
  *  @param {string} [cwd]
- *  @param {{ opencodeConfigFile?: string, refresh?: boolean, source?: string }} [opts] */
+ *  @param {{ opencodeConfigFile?: string, refresh?: boolean, source?: string, record?: boolean }} [opts] */
 export async function detectHosts(cwd = process.cwd(), {
-  opencodeConfigFile, refresh = true, source = 'status-refresh',
+  opencodeConfigFile, refresh = true, source = 'status-refresh', record = true,
 } = {}) {
   const env = currentEnv(cwd);
   const out = {};
@@ -362,9 +366,11 @@ export async function detectHosts(cwd = process.cwd(), {
     } else {
       present = await have(h.bin);
       version = present ? await hostVersion(h.bin) : null;
-      writeEvidence('host-setup', h.id, {
-        source, inputsKey, inputs: { PATH: process.env.PATH ?? '', bin: h.bin }, result: { present, version },
-      });
+      if (record) {
+        writeEvidence('host-setup', h.id, {
+          source, inputsKey, inputs: { PATH: process.env.PATH ?? '', bin: h.bin }, result: { present, version },
+        });
+      }
     }
     out[h.id] = {
       present,
@@ -390,11 +396,14 @@ export function detectProviders({ env = process.env } = {}) {
   return out;
 }
 
-/** One immutable command-facing snapshot of host, provider and binding truth. */
+/** One immutable command-facing snapshot of host, provider and binding truth.
+ *  @param {{ cwd?: string, cfg?: any, env?: NodeJS.ProcessEnv, refresh?: boolean, record?: boolean, source?: string }} [opts] */
 export async function collectIntegrationFacts({
-  cwd = process.cwd(), cfg = null, env = process.env, refresh = true,
+  cwd = process.cwd(), cfg = null, env = process.env, refresh = true, record = true, source,
 } = {}) {
-  const detectedHosts = await detectHosts(cwd, { refresh });
+  // `source` is passed through as-is (including undefined) so detectHosts'
+  // own default ('status-refresh') still applies when a caller omits it.
+  const detectedHosts = await detectHosts(cwd, { refresh, record, source });
   const detectedProviders = detectProviders({ env });
   for (const adapter of PROVIDER_REGISTRY) {
     if (detectedProviders[adapter.id]) continue;

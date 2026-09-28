@@ -20,7 +20,7 @@ import {
   detectHosts, hostInstallState, collectIntegrationFacts, HOSTS,
 } from '../../src/lib/providers.mjs';
 import {
-  evidenceDir, writeEvidence, stableInputsKey,
+  evidenceDir, evidenceFile, writeEvidence, stableInputsKey,
 } from '../../src/lib/evidence.mjs';
 import { _setGlobalRootForTest } from '../../src/lib/paths.mjs';
 import { tempDir } from './helpers/temp-dir.mjs';
@@ -222,6 +222,56 @@ test('collectIntegrationFacts({ refresh: true }) (its default) threads through a
     const facts = await collectIntegrationFacts({ cwd: process.cwd(), cfg: null });
     for (const h of HOSTS) {
       assert.equal(facts.hosts[h.id].present, false, `${h.id}: default refresh:true must ignore the cache`);
+    }
+  });
+  resetEvidence();
+});
+
+// ── Task 4/5 joint fix: `record` suppresses persistence, never the probe ────
+// (`sync.mjs`'s plan-computation reads pass `record: false` so a cold-cache
+// probe never writes evidence as a side effect of merely building the plan.)
+
+test('detectHosts({ refresh: true, record: false }) still probes and returns live results, but writes no evidence', async () => {
+  resetEvidence();
+  await withDeterministicAbsence(async () => {
+    const out = await detectHosts(process.cwd(), { refresh: true, record: false });
+    for (const h of HOSTS) {
+      assert.equal(out[h.id].present, false, `${h.id}: the probe itself must still run and return a real result`);
+      assert.equal(fs.existsSync(evidenceFile('host-setup', h.id)), false, `${h.id}: record:false must not write evidence`);
+    }
+  });
+  resetEvidence();
+});
+
+test('detectHosts({ refresh: true, record: true }) (the default) still writes evidence as before', async () => {
+  resetEvidence();
+  await withDeterministicAbsence(async () => {
+    const out = await detectHosts(process.cwd(), { refresh: true });
+    for (const h of HOSTS) {
+      assert.equal(out[h.id].present, false);
+      assert.equal(fs.existsSync(evidenceFile('host-setup', h.id)), true, `${h.id}: record defaults to true and writes evidence`);
+    }
+  });
+  resetEvidence();
+});
+
+test('hostInstallState({ refresh: true, record: false }) still probes and returns live results, but writes no evidence', async () => {
+  resetEvidence();
+  await withDeterministicAbsence(async () => {
+    const st = await hostInstallState(claude, { refresh: true, record: false });
+    assert.deepEqual(st, { method: 'absent', version: null }, 'the probe itself must still run and return a real result');
+    assert.equal(fs.existsSync(evidenceFile('host-install-method', claude.id)), false, 'record:false must not write evidence');
+  });
+  resetEvidence();
+});
+
+test('collectIntegrationFacts({ record: false }) threads record:false through to detectHosts (no evidence written)', async () => {
+  resetEvidence();
+  await withDeterministicAbsence(async () => {
+    const facts = await collectIntegrationFacts({ cwd: process.cwd(), cfg: null, record: false });
+    for (const h of HOSTS) {
+      assert.equal(facts.hosts[h.id].present, false, `${h.id}: the probe itself must still run`);
+      assert.equal(fs.existsSync(evidenceFile('host-setup', h.id)), false, `${h.id}: record:false must thread through`);
     }
   });
   resetEvidence();

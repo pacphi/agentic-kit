@@ -77,22 +77,32 @@ async function runSections(sections, ctx, rows) {
   }
 }
 
+/** @param {{ pkgRoot?: string, cwd?: string, dejaVuAdapter?: any, dejaVuPlanOptions?: Record<string, any>, refresh?: boolean, record?: boolean }} opts */
 export async function collect({
   pkgRoot,
   cwd = process.cwd(),
   dejaVuAdapter = companionLifecycleFor('deja-vu'),
   dejaVuPlanOptions = {},
   refresh = false,
+  record = true,
 }) {
   const rows = [];
   const cfg = loadKitConfig();
-  const integrationFacts = await collectIntegrationFacts({ cwd, cfg, refresh });
-  const ctx = { cfg, cwd, pkgRoot, integrationFacts, refresh };
+  // Accurate provenance: 'status-refresh' only when the caller actually asked
+  // for a refresh — a plain status call recording evidence should not claim
+  // to be a refresh it never performed.
+  const source = refresh ? 'status-refresh' : 'status';
+  const integrationFacts = await collectIntegrationFacts({
+    cwd, cfg, refresh, record, source,
+  });
+  const ctx = {
+    cfg, cwd, pkgRoot, integrationFacts, refresh, record, source,
+  };
 
   await runSections(SECTIONS_BEFORE_HOST_DETAIL, ctx, rows);
 
   rows.push(...(await collectDejaVuRows({
-    cfg, adapter: dejaVuAdapter, planOptions: dejaVuPlanOptions, refresh,
+    cfg, adapter: dejaVuAdapter, planOptions: dejaVuPlanOptions, refresh, record, source,
   })));
 
   // Per-host status DETAIL rows (opencode.json wiring, lifecycle bridge,

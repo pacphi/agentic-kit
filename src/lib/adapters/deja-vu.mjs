@@ -391,6 +391,7 @@ export function createDejaVuLifecycleAdapter(defaults = {}) {
     const cfg = request.cfg ?? {};
     const refresh = request.refresh ?? true;
     const source = request.source ?? 'status-refresh';
+    const record = request.record ?? true;
     const desired = intent(cfg);
     const ownership = readOwnership(cfg);
     if (!desired.enabled && !hasOwnership(ownership)) return disabledFacts(desired);
@@ -427,9 +428,11 @@ export function createDejaVuLifecycleAdapter(defaults = {}) {
     };
     const error = computeDetectError(binaryPresent, doctor, ownedUpgradeCanRepair);
     if (error) facts.error = error;
-    writeEvidence('companion-lifecycle', 'deja-vu', {
-      source, inputsKey, inputs: { desired, PATH: process.env.PATH ?? '' }, result: facts,
-    });
+    if (record) {
+      writeEvidence('companion-lifecycle', 'deja-vu', {
+        source, inputsKey, inputs: { desired, PATH: process.env.PATH ?? '' }, result: facts,
+      });
+    }
     return facts;
   };
 

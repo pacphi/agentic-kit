@@ -249,16 +249,18 @@ export async function probeBsq3Runtime(dir, { runner = run, timeoutMs = PROBE_TI
  *  file is present) still match, spawning nothing; otherwise (no cached
  *  evidence, it is stale/invalidated, or `refresh: true`) it probes as before
  *  and records the result for the next `refresh: false` read. */
-export async function rufloRuntimeNatives({ runner = run, refresh = true, source = 'status-refresh' } = {}) {
+export async function rufloRuntimeNatives({
+  runner = run, refresh = true, source = 'status-refresh', record = true,
+} = {}) {
   let installed;
   try { installed = fs.existsSync(rufloRoot()); } catch { installed = false; }
   if (!installed) return { installed: false, contexts: [] };
   const contexts = await Promise.all(rufloMemoryContexts().map(async ({ context, dir }) => {
     const inputsKey = stableInputsKey({ dir, native: bsq3IsNative(dir) });
     if (!refresh) {
-      const record = readEvidence('native-runtime', context, { inputsKey, maxAgeMs: RUNTIME_EVIDENCE_MAX_AGE_MS });
-      if (record && !record.stale && !record.invalidated) {
-        const cached = /** @type {{ok: boolean, state: string, attempts: number, reason: string|null, bindingPresent: boolean}} */ (record.result);
+      const cachedRecord = readEvidence('native-runtime', context, { inputsKey, maxAgeMs: RUNTIME_EVIDENCE_MAX_AGE_MS });
+      if (cachedRecord && !cachedRecord.stale && !cachedRecord.invalidated) {
+        const cached = /** @type {{ok: boolean, state: string, attempts: number, reason: string|null, bindingPresent: boolean}} */ (cachedRecord.result);
         return {
           context, dir,
           ok: cached.ok,
@@ -271,10 +273,12 @@ export async function rufloRuntimeNatives({ runner = run, refresh = true, source
     }
     const res = await probeBsq3Runtime(dir, { runner });
     const result = { context, dir, ...res, bindingPresent: bsq3IsNative(dir) };
-    writeEvidence('native-runtime', context, {
-      source, inputsKey, inputs: { dir, native: bsq3IsNative(dir) },
-      result: { ok: res.ok, state: res.state, attempts: res.attempts, reason: res.reason ?? null, bindingPresent: bsq3IsNative(dir) },
-    });
+    if (record) {
+      writeEvidence('native-runtime', context, {
+        source, inputsKey, inputs: { dir, native: bsq3IsNative(dir) },
+        result: { ok: res.ok, state: res.state, attempts: res.attempts, reason: res.reason ?? null, bindingPresent: bsq3IsNative(dir) },
+      });
+    }
     return result;
   }));
   return { installed: true, contexts };

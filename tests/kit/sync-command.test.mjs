@@ -226,14 +226,11 @@ test('--dry-run prints a plan and then changes nothing at all', async () => {
   const { result, out } = await dryRun();
   assert.equal(result, 0, '`--dry-run` always exits 0 — it only reports');
   assert.match(out, /sync plan \(\d+ action\(s\)\):/);
-  // Branch 6a Task 5: --dry-run's plan is computed from status.mjs's collect(),
-  // which still probes on a cache miss (Ruling A) and records the result to
-  // the shared evidence store — the same cache a later plain `ak status`
-  // reuses. That write is confined to the evidence store; every other path
-  // stays untouched.
-  const evidenceRel = path.relative(HOME, paths.evidenceDir());
-  assertUnchanged(beforeHome, HOME, '`ak sync --dry-run` must not touch HOME outside its own evidence cache',
-    { ignore: [evidenceRel] });
+  // Branch 6a Task 4/5 joint fix: sync's plan-computation reads (both the plan
+  // build and the post-heal convergence re-check) call collect() with
+  // record:false, so probing on a cache miss never persists evidence — the
+  // sync/dry-run plan is a read, not a write (Branch 0 S3/F7).
+  assertUnchanged(beforeHome, HOME, '`ak sync --dry-run` must not touch HOME, including the evidence cache');
   assertUnchanged(beforeProject, PROJECT, '`ak sync --dry-run` must not touch the project');
 });
 
