@@ -138,7 +138,14 @@ read or parsed with its reason (`unparsedFiles`, `unparsedReasons`, warning
 token-bearing files but zero normalized responses is degraded as
 `parse-yield-zero`, and a root where only some token-bearing files yield
 responses is degraded as `parse-yield-partial`, rather than reported as healthy
-empty or complete usage.
+empty or complete usage. Both degradations name a real gap in the totals, not
+just a diagnostic one: the aggregate only turns a parsed record into a session
+row when it has at least one response (`usage-aggregate.mjs`'s
+`buildSessionRows`), so a token-bearing rollout with zero normalized responses
+contributes no prompts, responses, tokens, or cost anywhere in the scorecard —
+its evidence is visible solely as the diagnostic counters and warning named
+above, however that rollout ended (an aborted turn, a tool-only turn, or
+anything else the transcript records).
 
 The additive `sourceHealth.<host>.diagnostics.common` envelope makes coverage
 comparable without pretending the hosts have the same wire format: it reports
