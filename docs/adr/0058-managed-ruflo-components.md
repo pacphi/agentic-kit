@@ -31,6 +31,10 @@
   route through the generic evidence envelope's `readEvidence`/`writeEvidence` — only its storage
   location moved, its own 15-minute producer TTL / 24-hour display-staleness rule is unchanged. See
   [ADR-0063](0063-evidence-store-and-refresh-vocabulary.md) (remediation program, branch 6a task 3)
+- **Updated:** 2026-09-28 — the owned-env engine (§3) now removes an older backup copy after a
+  write only when the copy just made and the new receipt provably hold everything it held; a full
+  release, a dry run and a converged file remove nothing, and the AQE pin keeps its newest-copy
+  rule (ADR-0062).
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0016](0016-capability-driven-integration-adapters.md) (value-precise ownership),
   [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md) (explicit degradation),
@@ -186,9 +190,12 @@ The projection engine is ADR-0055's `aqe-embedding-projection.mjs` generalized f
 to a set of keys: per-file receipts with a pending guard, a preimage check before writing, a
 backup copy, atomic writes, JSON and TOML editors, conflicts preserved rather than
 overwritten, repository-root scoping for project targets, and one planning function shared by
-inspection and reconciliation. A conflicting key is preserved and reported on its own; the
-engine still writes the file's other keys, and only a file-level problem (invalid JSON, a
-pending receipt, a non-regular file) refuses the whole file. AQE's single-key receipts keep
+inspection and reconciliation. After a write records its receipt, an older backup copy with the
+same tag is removed only when the copy just made plus that receipt provably hold everything it
+held (`redundantBackups` states the rule; anything unproven, a symbolic link, another user's file
+or a copy directly in the home folder is kept). A conflicting key is preserved and reported on
+its own; the engine still writes the file's other keys, and only a file-level problem (invalid
+JSON, a pending receipt, a non-regular file) refuses the whole file. AQE's single-key receipts keep
 refusing the file on a conflict. AQE's embedding endpoint becomes one client of the engine and
 keeps its behaviour and tests. The engine does not reuse `provider-ownership.mjs`, whose
 sidecar receipts remain for provider variables.

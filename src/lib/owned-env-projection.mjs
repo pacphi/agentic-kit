@@ -1,7 +1,9 @@
 // ADR-0058 §3: ADR-0055's single-key AQE receipt engine, generalized to a set of keys.
 // Same guarantees: regular files only, preimage check, backup copy, atomic replace,
-// pending-receipt guard, foreign and user-edited values preserved.
+// pending-receipt guard, foreign and user-edited values preserved. An older backup copy
+// is removed only when the newest copy and the receipt provably hold everything it held.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { writePrivateFileAtomic } from './file-write.mjs';
@@ -71,6 +73,8 @@ const emptyDocument = (text) => ['', '{}'].includes(String(text).trim());
  *   The single-key AQE embedding receipt (ADR-0055) passes no `adoptable`.
  *   `trackCreated` (multi-key only) records in the receipt whether ak created the file or
  *   the editor's table; the release that leaves them empty removes them again.
+ *   A plan that changes the file also carries `editorFor(text)`, this projection's editor
+ *   bound to the target, so a backup copy can be read the way the file itself is.
  */
 export function planOwnedEnv(target, desired, { receiptSuffix, format = 'multi', editorFor, adoptable = () => false, trackCreated }) {
   const fmt = format === 'multi' ? {} : format;
@@ -114,7 +118,8 @@ export function planOwnedEnv(target, desired, { receiptSuffix, format = 'multi',
   if (!envChanged && !receiptDropped) return { file, status: 'converged', changed: false, keys, conflicts };
   const created = createdBy({ trackCreated, single: fmt.single }, receipt, source, editor);
   return { file, boundary: target.boundary, status: 'drift', changed: true, source, receiptSource, receiptFile,
-    ...rendered(editor, nextStates, nextReceipt, created), created, nextReceipt, format: fmt, keys, conflicts };
+    ...rendered(editor, nextStates, nextReceipt, created), created, nextReceipt, format: fmt, keys, conflicts,
+    editorFor: (text) => editorFor(text, target) };
 }
 
 /** What ak created: the file (absent before its first write) and the editor's table. */
@@ -189,12 +194,121 @@ function pruneBackups(file, backupTag, keep) {
   }
 }
 
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const isCopyName = (name, prefix) => name.startsWith(prefix) && UUID_V4.test(name.slice(prefix.length));
+const sameState = (a, b) => plain(a) && plain(b) && a.present === b.present && (!a.present || a.value === b.value);
+
+/** False for the home folder itself, a filesystem root, or a folder that cannot be resolved:
+ *  no copy is ever removed there. Compared as given, as resolved, and by device and inode. */
+function prunableFolder(dir, homedir) {
+  if (!homedir) return false;
+  try {
+    const own = [path.resolve(dir), fs.realpathSync.native(dir)];
+    if (own.some((d) => path.parse(d).root === d)) return false;
+    const home = [path.resolve(homedir)];
+    try { home.push(fs.realpathSync.native(homedir)); } catch { /* an absent home matches by name only */ }
+    if (own.some((d) => home.includes(d))) return false;
+    const a = fs.statSync(dir, { bigint: true });
+    let b = null;
+    try { b = fs.statSync(homedir, { bigint: true }); } catch { /* as above */ }
+    return !(b && a.dev === b.dev && a.ino === b.ino);
+  } catch { return false; }
+}
+
+/** One backup copy read with the projection's editor: the owned keys' values, and the rest
+ *  of the file rendered with every owned key absent. Null when it is not a regular file of
+ *  the current user (POSIX; Windows has no uid) or does not parse. */
+function readCopy(file, editorFor, owned, uid) {
+  try {
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.isSymbolicLink() || (uid !== undefined && stat.uid !== uid)) return null;
+    const text = readRegularConfig(file);
+    if (text === null) return null;
+    const editor = editorFor(text);
+    if (!editor || editor.missing) return null;
+    const values = Object.fromEntries(owned.map((key) => [key, editor.get(key)]));
+    // A fresh editor: rendering changes the editor's document.
+    const rest = editorFor(text).render(Object.fromEntries(owned.map((key) => [key, ABSENT])));
+    return typeof rest === 'string' ? { values, rest } : null;
+  } catch { return null; }
+}
+
+function provenRedundant(copy, newest, receipt, owned) {
+  if (!copy || copy.rest !== newest.rest) return false;
+  return owned.every((key) => [newest.values[key], receipt[key]?.before, receipt[key]?.after]
+    .some((state) => sameState(copy.values[key], state)));
+}
+
+/**
+ * The older backup copies of `plan.file` that the copy just made (`newest`) and the receipt
+ * this write recorded (`plan.nextReceipt`) make redundant, as absolute paths (ADR-0058 §3).
+ * It decides only; it removes nothing.
+ *
+ * Let N be `newest`, which is never removed, and K the owned keys: the receipt's keys plus
+ * every key the plan decided (`plan.keys`). An older copy B of the file with the same tag is
+ * redundant only when all of these hold:
+ * 1. B is a regular file (lstat), not a symbolic link, named exactly
+ *    `<basename>.ak-<tag>-backup.<uuid v4>` in the file's own folder, owned by the current
+ *    user (POSIX uid; skipped on Windows, which has none), and that folder is neither the
+ *    home folder nor a filesystem root.
+ * 2. B and N both parse with the projection's own editor (`plan.editorFor`).
+ * 3. B and N rendered with every key in K absent are byte-identical: nothing of the user's
+ *    differs. The JSON editors re-serialize the document, so whitespace alone is not a
+ *    difference there; the TOML editors keep the rest of the text as written.
+ * 4. For every key in K, B's value is N's value, the receipt's `before`, the receipt's
+ *    `after`, or absent where the receipt's `before` is absent. A key K holds without a
+ *    receipt entry (a foreign value ak preserves) allows only N's value.
+ * A write that deletes the receipt (a full release) leaves no proof, so nothing is redundant.
+ *
+ * Deliberately conservative: a copy holding an intermediate ak value, one that is neither
+ * the receipt's first `before` nor its current `after`, is kept. The receipt does not record
+ * the values ak wrote in between, so nothing proves the value was ak's; keeping it is by
+ * design, not a gap. Anything else that cannot be proven keeps the copy too: a copy that does
+ * not parse, any difference outside K, or an owned value none of N and the receipt holds.
+ * @param {any} plan
+ * @param {{newest: string|null, backupTag: string, homedir?: string, uid?: number}} options
+ *   `homedir` and `uid` default to this user's; tests inject them.
+ * @returns {string[]}
+ */
+export function redundantBackups(plan, { newest, backupTag, homedir = os.homedir(), uid = process.getuid?.() }) {
+  const receipt = plan?.nextReceipt ?? {};
+  if (!newest || typeof plan?.editorFor !== 'function' || Object.keys(receipt).length === 0) return [];
+  const dir = path.dirname(path.resolve(plan.file));
+  const prefix = `${path.basename(plan.file)}.ak-${backupTag}-backup.`;
+  if (!prunableFolder(dir, homedir)) return [];
+  if (path.dirname(path.resolve(newest)) !== dir || !isCopyName(path.basename(newest), prefix)) return [];
+  const owned = [...new Set([...Object.keys(receipt), ...Object.keys(plan.keys ?? {})])];
+  const latest = readCopy(path.resolve(newest), plan.editorFor, owned, uid);
+  if (!latest) return [];
+  let names;
+  try { names = fs.readdirSync(dir); } catch { return []; }
+  return names
+    .filter((name) => name !== path.basename(newest) && isCopyName(name, prefix))
+    .map((name) => path.join(dir, name))
+    .filter((file) => provenRedundant(readCopy(file, plan.editorFor, owned, uid), latest, receipt, owned));
+}
+
+/** Remove what `redundantBackups` proves redundant, one regular file per unlink. A copy
+ *  that is no longer a regular file, or cannot be removed (Windows EBUSY/EPERM), stays. */
+function pruneRedundantBackups(plan, options) {
+  let files;
+  try { files = redundantBackups(plan, options); } catch { return; }
+  for (const file of files) {
+    try {
+      const stat = fs.lstatSync(file);
+      if (stat.isFile() && !stat.isSymbolicLink()) fs.unlinkSync(file);
+    } catch { /* kept */ }
+  }
+}
+
 function assertCurrent(file, source) {
   if (readRegularConfig(file) !== source) throw new Error('configuration changed after inspection; retry');
 }
 
 /** @param {any} plan @param {{backupTag: string, keepBackups?: number}} options `keepBackups`
- *  prunes this projection's older backups of the file (default: keep all). */
+ *  keeps only this projection's newest backups of the file (the AQE pin, ADR-0062). Without
+ *  it, a write that records a receipt removes the older copies `redundantBackups` proves
+ *  redundant, and nothing else. */
 export function applyOwnedEnv(plan, { backupTag, keepBackups }) {
   const { file, source, after, receiptFile, nextReceipt, format } = plan;
   checkDirectories(file, plan.boundary);
@@ -213,7 +327,11 @@ export function applyOwnedEnv(plan, { backupTag, keepBackups }) {
     if (keepBackups !== undefined) pruneBackups(file, backupTag, 0);
     return;
   }
-  if (source !== null) fs.copyFileSync(file, `${file}.ak-${backupTag}-backup.${randomUUID()}`, fs.constants.COPYFILE_EXCL);
+  let newest = null;
+  if (source !== null) {
+    newest = `${file}.ak-${backupTag}-backup.${randomUUID()}`;
+    fs.copyFileSync(file, newest, fs.constants.COPYFILE_EXCL);
+  }
   if (Object.keys(pendingKeys).length) writePrivateFileAtomic(receiptFile, serializeReceipt(pendingKeys, format, true, plan.created));
   const tmp = `${file}.ak-${backupTag}-tmp.${randomUUID()}`;
   try {
@@ -224,6 +342,7 @@ export function applyOwnedEnv(plan, { backupTag, keepBackups }) {
   if (hasKeys) writePrivateFileAtomic(receiptFile, serializeReceipt(nextReceipt, format, false, plan.created));
   else if (fs.existsSync(receiptFile)) fs.unlinkSync(receiptFile);
   if (keepBackups !== undefined) pruneBackups(file, backupTag, keepBackups);
+  else if (hasKeys && newest) pruneRedundantBackups(plan, { newest, backupTag });
 }
 
 /** Claude settings files: `env` is a top-level object. */
