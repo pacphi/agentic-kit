@@ -127,6 +127,29 @@ Two documented-but-absent UI strings/behaviours Task 13 fixes (they are wrong to
 
 ---
 
+## Execution after the 2026-09-28 restructure (binding; supersedes R16's split)
+
+The maintainer folded 6c back into this branch (decision M-6): one pull request carries the whole refresh vocabulary. Execution order: Tasks 1–12 → 6c-1 → 6c-2 → 6c-3 → Task 13 together with 6c-4 (one docs task; the vocabulary guard covers CLI and dashboard spellings) → Task 14 together with 6c-5 (one ADR task, including the supersessions of the dashboard controls). The 6c text below was verified against `31a1a39b`, so its implementers re-verify every file:line first. Run the branch gate after 6c-3 and after the final task.
+
+Carry-ins assigned by rulings in the SDD ledger (each task's implementer does these too):
+
+- **Task 10:**
+  - `ak maintain <verb> --only …` and `--project-trees` without `--refresh` are usage errors (exit 2); today they are silently ignored.
+  - `refreshedReport` builds `deps.service ?? createMaintenanceService()` even when `deps.refreshStages` is injected. Guard it the way `cliRefreshStages` guards a half-injected maintenance/management pair.
+- **Task 11:**
+  - A try/catch around `refreshPlanHosts` in `sync.mjs` that reports a failed probe.
+  - `driftReport` and `selfDrift` (`versions.mjs`) follow the same failed-lookup rule as the Brain and ruvector: on total failure, keep the cached values and restamp the TTL stamp, but never under `record: false` or a cache-only read. Today an offline dashboard retries them on every poll.
+  - The real (non-dry) sync test inside `withOpencodeCli` (`tests/kit/sync-command.test.mjs` ~1093) puts `/usr/bin` on PATH without injected version lookups. Inject them, so no test can query the real npm registry.
+- **Task 12:** `reset-routes` in `ak host`'s help misaligns its column. Use the `check-connection` pattern: the name on its own line, the description on the next.
+- **Task 13:**
+  - Drop "(R17)" from three test assertion messages (`host-cli-migration.test.mjs` ~48, `provider-refresh-cli.test.mjs` ~244, `usage-cli.test.mjs` ~586).
+  - Replace the ledger-only labels "B6b-D1" / "Branch 6b Task 1" in source and test comments with a reference to ADR-0010's update.
+  - Remove the remaining `ak x verify` mentions in `src/` comments: `exec.mjs`, `output.mjs`, `harvest.mjs`, `ruflo-memory.mjs`, `mcp-tool-call.mjs`, `status/sections/project-memory.mjs`, and the registry's `adjustment` field.
+- **Task 14:**
+  - ADR-0063's sentence that says `setup.mjs` was extended, then lists `ak setup` as unaffected.
+  - The dry-run preview (R8) and its host-evidence limitation.
+  - The failed-lookup rule: keep the cached value, restamp the TTL stamp, and record `observedAt` for the observation time.
+
 ## Tasks (Branch 6b)
 
 Order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 11 → 12 → 13 → 14. Hard dependencies: 2 before 3, 4 and 13 (and before all of 6c — the audit's 6.8 → 6.10 rule: flag syntax before the dashboard control); 4 before 7 (the moved module); 5 → 6 → 12 (all edit `x/host.mjs`); 3 before 10 (both edit `maintain.mjs`); 8 → 9 → 11 (all edit `sync.mjs`); 13 before 14. Nothing in 6b depends on 6c. Run the branch gate set (common brief) after Tasks 4, 9 and 14.
