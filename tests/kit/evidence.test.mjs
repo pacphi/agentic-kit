@@ -24,8 +24,16 @@ test('evidenceFile returns kind/id.json path in evidence dir', () => {
   const file = evidence.evidenceFile('aqe', 'v1.2.3');
   assert.ok(file.startsWith(evidence.evidenceDir()), 'must be under evidence dir');
   assert.ok(file.endsWith('.json'), 'must be json');
-  assert.ok(file.includes('aqe'), 'must include kind');
-  assert.ok(file.includes('v1.2.3') || file.includes('v1_2_3'), 'must include id (sanitized)');
+  assert.ok(file.includes(path.join('aqe', 'v1.2.3.json')), 'must include kind/id.json structure');
+});
+
+test('evidenceFile sanitizes id by replacing path separators and unsafe chars', () => {
+  const file = evidence.evidenceFile('test-kind', '@claude-flow/memory');
+  assert.ok(file.endsWith(path.join('test-kind', '@claude-flow_memory.json')), 'must replace / with _');
+
+  const fileTraversal = evidence.evidenceFile('kind', 'a/b\\c:d');
+  assert.ok(fileTraversal.endsWith(path.join('kind', 'a_b_c_d.json')), 'must replace /, \\, : with _');
+  assert.ok(!fileTraversal.includes('a/b'), 'must not preserve path separators in id');
 });
 
 test('stableInputsKey produces a stable, short hash for objects and arrays', () => {

@@ -2,6 +2,11 @@
 // One JSON file per kind/id under `<stateBase>/agentic-kit/evidence/`.
 // Each record carries metadata (checkedAt, inputsKey, source) and a generic result payload.
 // An inputsKey invalidates the record when configuration changes; ageMs marks it stale.
+//
+// This module establishes a NEW filesystem naming convention for evidence: kind/sanitized-id.json.
+// Existing evidence stores (live-check-evidence.mjs, ruflo-components/evidence.mjs) use different
+// patterns; this convention is introduced here for generic evidence storage to safely handle
+// arbitrary id values (e.g., scoped package names like @claude-flow/memory contain forward slashes).
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,13 +26,19 @@ import { writePrivateFileAtomic } from './file-write.mjs';
 
 export const evidenceDir = paths.evidenceDir;
 
-// Sanitize id by replacing path separators and null bytes with underscores
+/** Sanitize id for filesystem use by replacing unsafe characters (/, \, :, NUL) with underscores.
+ * This is the filesystem naming convention established by this module for arbitrary id values.
+ * @param {string} id
+ * @returns {string}
+ */
 function sanitizeId(id) {
   return String(id ?? '').replace(/[/\\:\0]/g, '_');
 }
 
 /**
  * Path to the evidence file for a given kind/id.
+ * Format: <evidenceDir>/<kind>/<sanitized-id>.json
+ * The sanitizeId convention replaces /, \, :, NUL with _ to ensure safe filesystem naming.
  * @param {string} kind
  * @param {string} id
  * @returns {string}
