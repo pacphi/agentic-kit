@@ -55,24 +55,26 @@ test('the registry carries the watch list and stays valid for the hook audit', (
   assert.equal(constraints.watch, undefined, 'the hook audit projection does not carry the watch list');
 });
 
-test('the ledger is issue #243 in the ledger repository', () => {
-  const { ledger } = loadUpstreamRegistry({ now }).watchPolicy;
-  assert.deepEqual({ repo: ledger.repo, issue: ledger.issue, issueTitle: ledger.issueTitle }, { repo: 'pacphi/agentic-kit', issue: 243, issueTitle: 'Upstream watch' });
-  assert.match(errorsOf((doc) => { doc.watchPolicy.ledger.issue = 0; }), /watchPolicy\.ledger/);
-  assert.match(errorsOf((doc) => { delete doc.watchPolicy.ledger.issue; }), /watchPolicy\.ledger/);
-});
-
-// Ledger writers are not "ours": watchPolicy.ours decides whose upstream
-// comment is our last word, so the workflow's bot login stays out of it.
-test('the ledger names who may write it, apart from our upstream logins', () => {
+// Spec 2026-09-28: the ledger is a branch, notices mention one login, and the
+// home repository (formerly ledger.repo) holds our tracking issues.
+test('the watch policy names the home repository, the ledger branch and whom a notice mentions', () => {
   const policy = loadUpstreamRegistry({ now }).watchPolicy;
-  assert.deepEqual(policy.ledger.authors, ['pacphi', 'github-actions[bot]']);
+  assert.equal(policy.repo, 'pacphi/agentic-kit');
+  assert.deepEqual(policy.ledger, { branch: 'upstream-watch-ledger', sentinel: 'UPSTREAM-WATCH' });
+  assert.deepEqual(policy.notify, { mention: 'pacphi' });
   assert.deepEqual(policy.ours, ['pacphi']);
-  assert.match(errorsOf((doc) => { delete doc.watchPolicy.ledger.authors; }), /watchPolicy\.ledger/);
-  assert.match(errorsOf((doc) => { doc.watchPolicy.ledger.authors = []; }), /watchPolicy\.ledger/);
+  assert.match(errorsOf((doc) => { delete doc.watchPolicy.repo; }), /watchPolicy\.repo/);
+  assert.match(errorsOf((doc) => { doc.watchPolicy.ledger.branch = 'upstream/ledger'; }), /watchPolicy\.ledger/, 'the ledger is not a dispatch branch');
+  assert.match(errorsOf((doc) => { doc.watchPolicy.ledger.branch = '../main'; }), /watchPolicy\.ledger/);
+  assert.match(errorsOf((doc) => { doc.watchPolicy.ledger.issue = 243; }), /watchPolicy\.ledger/, 'the issue ledger fields are gone');
+  assert.match(errorsOf((doc) => { doc.watchPolicy.notify.mention = 'github-actions[bot]'; }), /watchPolicy\.notify/);
+  assert.match(errorsOf((doc) => { delete doc.watchPolicy.notify; }), /watchPolicy\.notify/);
   const schema = JSON.parse(fs.readFileSync('docs/schemas/agentic-dependency-constraints.schema.json', 'utf8'));
-  const ledger = schema.properties.watchPolicy.properties.ledger;
-  assert.ok(ledger.required.includes('authors') && ledger.properties.authors.minItems === 1);
+  const watchPolicy = schema.properties.watchPolicy;
+  assert.ok(watchPolicy.required.includes('repo') && watchPolicy.required.includes('notify'));
+  assert.deepEqual(watchPolicy.properties.ledger.required, ['branch', 'sentinel']);
+  assert.deepEqual(watchPolicy.properties.notify.required, ['mention']);
+  assert.equal(watchPolicy.properties.ledger.properties.authors, undefined);
 });
 
 test('ruflo#3153 records that its third-party comments were reviewed', () => {
@@ -152,7 +154,7 @@ test('package and owner/repo patterns are defined once, and the schema spells th
   const { PACKAGE_NAME, OWNER_REPO } = watchPatterns;
   assert.ok(PACKAGE_NAME instanceof RegExp && OWNER_REPO instanceof RegExp, 'exported from src/lib/hook-audit/upstream-watch.mjs');
   assert.equal(new RegExp(property(schema, 'bundledBy').items.pattern).source, PACKAGE_NAME.source);
-  assert.equal(new RegExp(property(property(schema, 'ledger'), 'repo').pattern).source, OWNER_REPO.source);
+  assert.equal(new RegExp(property(schema, 'repo').pattern).source, OWNER_REPO.source);
   const fetchSource = fs.readFileSync('scripts/upstream-watch/fetch.mjs', 'utf8');
   for (const copy of ['[@\\w][\\w@./-]*', '/^[\\w.-]+\\/[\\w.-]+$/', PACKAGE_NAME.source, OWNER_REPO.source]) {
     assert.ok(!fetchSource.includes(copy), `fetch.mjs imports the pattern instead of repeating ${copy}`);
@@ -168,7 +170,7 @@ test('constraints and watch entries point at each other', () => {
   assert.match(unknown, /ruvnet\/ruflo#3194.*no-such-constraint/);
 });
 
-test('tracking entries live in the ledger repository and track registered threads', () => {
+test('tracking entries live in the home repository and track registered threads', () => {
   const errors = errorsOf((doc) => {
     entry(doc, 'pacphi/agentic-kit#240').tracks.push('ruvnet/ruflo#1');
     entry(doc, 'ruvnet/ruflo#3194').tracks = ['ruvnet/ruflo#3196'];

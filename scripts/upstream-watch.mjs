@@ -6,26 +6,20 @@
 // maintainer's (or the routine's) job, under the registry's approval policy.
 // POSIX only: on Windows `npm` is a .cmd file that execFile cannot start
 // without a shell, and a shell would misread the caret ranges passed to npm.
-import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { loadUpstreamRegistry } from '../src/lib/hook-audit/upstream.mjs';
 import { computeSupportWindow, minorFirstPublished } from '../src/lib/ruflo-support-window.mjs';
 import {
-  buildReport, candidateVersions, confirmationStart, ledgerEvents, nextRelease, tagRefs, upstreamOf, withoutRecorded,
+  buildReport, candidateVersions, confirmationStart, ledgerEvents, nextRelease, tagRefs, upstreamOf,
 } from './upstream-watch/classify.mjs';
 import { createFetcher, mapLimit } from './upstream-watch/fetch.mjs';
-import { isoSeconds, readLedger, renderComment } from './upstream-watch/ledger.mjs';
 import { renderEvents, renderReport } from './upstream-watch/render.mjs';
 
 const USAGE = `usage: node scripts/upstream-watch.mjs report [--json] [--concurrency <1-16>] [--registry <file>]
-       node scripts/upstream-watch.mjs check --since <iso-date> [--ledger <file>] [--json] [--concurrency <1-16>] [--registry <file>]
-       node scripts/upstream-watch.mjs comment [--json] [--concurrency <1-16>] [--registry <file>]
+       node scripts/upstream-watch.mjs check --since <iso-date> [--json] [--concurrency <1-16>] [--registry <file>]
 `;
-// comment exits BLIND when it could read nothing (gh unusable, the ledger, or
-// every watched thread), so the scheduled workflow fails visibly (decision 14).
-const BLIND = 3;
 const PENDING = new Set(['watching', 'fixed-unreleased']);
 
 class UsageError extends Error {}
@@ -40,8 +34,8 @@ function sinceValue(value) {
 
 export function parseArgs(argv) {
   const [command, ...rest] = argv;
-  if (!['report', 'check', 'comment'].includes(command)) throw new UsageError(command ? `unknown command ${command}` : 'missing command');
-  const options = { command, json: false, concurrency: 4, since: null, ledger: null, registry: null };
+  if (!['report', 'check'].includes(command)) throw new UsageError(command ? `unknown command ${command}` : 'missing command');
+  const options = { command, json: false, concurrency: 4, since: null, registry: null };
   for (let index = 0; index < rest.length; index++) {
     const flag = rest[index];
     const value = () => {
@@ -53,7 +47,6 @@ export function parseArgs(argv) {
     else if (flag === '--concurrency') options.concurrency = Number(value());
     else if (flag === '--registry') options.registry = value();
     else if (flag === '--since' && command === 'check') options.since = sinceValue(value());
-    else if (flag === '--ledger' && command === 'check') options.ledger = value();
     else throw new UsageError(`unknown option ${flag}`);
   }
   if (!Number.isInteger(options.concurrency) || options.concurrency < 1 || options.concurrency > 16) {
@@ -156,9 +149,9 @@ async function collect(registry, fetcher, concurrency) {
   await confirmReleases(gated.filter((entry) => !entry.doneWhen.release.minVersion && live.get(entry.id).release), live, fetcher, concurrency, fetchErrors);
   await resolveBundles(gated.filter((entry) => entry.doneWhen.release.bundledBy), live, fetcher, concurrency, fetchErrors);
   fetchErrors.sort((a, b) => a.id.localeCompare(b.id));
-  // Blind judges upstream threads only: a token scoped to the ledger's own
-  // repository still reads our tracking issues there while every upstream read fails.
-  const own = `${registry.watchPolicy.ledger.repo.toLowerCase()}#`;
+  // Blind judges upstream threads only: a token scoped to the home repository
+  // still reads our tracking issues there while every upstream read fails.
+  const own = `${registry.watchPolicy.repo.toLowerCase()}#`;
   const upstream = active.filter((entry) => !entry.id.toLowerCase().startsWith(own));
   const judged = upstream.length ? upstream : active;
   const blind = judged.length > 0 && judged.every((entry) => !live.get(entry.id).thread);
@@ -208,56 +201,12 @@ async function runCheck(registry, fetcher, options, { stderr, now }) {
   return { report, offline, fetchErrors, blind };
 }
 
-const blindResult = (error) => ({ blind: true, post: false, error, events: [], fetchErrors: [], dispatch: [], body: '' });
-
-/**
- * The ledger comment (decision 14): read our ledger comments, check from the
- * newest `checked-at` in them, and print the body to post, or nothing. The
- * scheduled workflow posts it as-is; the script itself writes nothing.
- */
-async function comment(registry, fetcher, options, { stdout, stderr, now }) {
-  const { repo, issue, authors } = registry.watchPolicy.ledger;
-  const auth = await fetcher.auth();
-  let ledger = null;
-  let failure = auth.ok ? null : auth.message;
-  if (!failure) {
-    try {
-      ledger = readLedger(await fetcher.comments(repo, issue), authors, now);
-    } catch (error) {
-      failure = `Could not read the ledger ${repo}#${issue}: ${error.message}`;
-    }
-  }
-  if (failure) {
-    stderr.write(`${failure}\n`);
-    if (options.json) stdout.write(`${JSON.stringify(blindResult(failure), null, 2)}\n`);
-    return BLIND;
-  }
-  const { report, fetchErrors, blind } = await runCheck(registry, fetcher, options, { stderr: { write: () => true }, now });
-  const all = ledgerEvents(report, registry, { since: ledger.since });
-  const events = withoutRecorded(all, ledger.text);
-  const body = blind ? '' : renderComment({ events, fetchErrors, since: ledger.since, now });
-  const result = {
-    since: ledger.since, sinceSource: ledger.sinceSource, now: isoSeconds(now), checkedAt: fetchErrors.length ? ledger.since : isoSeconds(now),
-    // Every released line with a branch, recorded or not: a run whose post landed
-    // but whose label step failed is signalled again; the routine skips work done.
-    blind, post: Boolean(body), dispatch: blind ? [] : all.filter((event) => event.event === 'released' && event.fields.branch).map((event) => event.fields.branch),
-    events, fetchErrors, body,
-  };
-  for (const item of fetchErrors) stderr.write(`Could not check ${item.id}: ${item.error}\n`);
-  stdout.write(options.json ? `${JSON.stringify(result, null, 2)}\n` : body);
-  return blind ? BLIND : 0;
-}
-
 export async function main(argv, {
   fetcher = createFetcher(), stdout = process.stdout, stderr = process.stderr, now = new Date(),
 } = {}) {
   let options;
-  let ledgerText = null;
   try {
     options = parseArgs(argv);
-    if (options.ledger) {
-      try { ledgerText = fs.readFileSync(options.ledger, 'utf8'); } catch (error) { throw new UsageError(`cannot read --ledger ${options.ledger}: ${error.code ?? error.message}`); }
-    }
   } catch (error) {
     if (!(error instanceof UsageError)) throw error;
     stderr.write(`${error.message}\n${USAGE}`);
@@ -267,22 +216,15 @@ export async function main(argv, {
   if (registry.registryStatus !== 'valid') {
     stderr.write(`upstream registry is ${registry.registryStatus ?? registry.status}:\n${registry.errors.map((error) => `  ${error}`).join('\n')}\n`);
     const status = { status: registry.registryStatus ?? registry.status, errors: registry.errors };
-    // The scheduled comment run must not pass quietly on a broken registry, and
-    // the workflow reads one JSON shape whatever failed.
-    if (options.command === 'comment') {
-      if (options.json) stdout.write(`${JSON.stringify({ ...blindResult(`upstream registry is ${status.status}`), registry: status }, null, 2)}\n`);
-      return BLIND;
-    }
     stdout.write(options.json ? `${JSON.stringify({ registry: status }, null, 2)}\n` : 'No report: the upstream registry is not valid.\n');
     return 0;
   }
-  if (options.command === 'comment') return comment(registry, fetcher, options, { stdout, stderr, now });
   const { report, offline, fetchErrors, blind } = await runCheck(registry, fetcher, options, { stderr, now });
   if (options.command === 'report') {
     stdout.write(options.json ? `${JSON.stringify(report, null, 2)}\n` : renderReport(report));
     return 0;
   }
-  const events = offline ? [] : withoutRecorded(ledgerEvents(report, registry, { since: options.since }), ledgerText);
+  const events = offline ? [] : ledgerEvents(report, registry, { since: options.since });
   if (options.json) stdout.write(`${JSON.stringify({ since: options.since, offline, blind, events, fetchErrors }, null, 2)}\n`);
   else {
     // stdout stays ledger lines only; what could not be checked goes to stderr.

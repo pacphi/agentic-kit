@@ -23,26 +23,33 @@
     "watchPolicy": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["ours", "staleAfterDays", "automatedReplyPatterns", "ledger", "dispatch"],
+      "required": ["repo", "ours", "staleAfterDays", "automatedReplyPatterns", "ledger", "notify", "dispatch"],
       "properties": {
+        "repo": {
+          "description": "The home repository: where tracking entries live, which the blind judgment leaves out, and which the watch's API calls address.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        },
         "ours": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
         "staleAfterDays": { "type": "integer", "minimum": 1 },
         "automatedReplyPatterns": { "type": "array", "items": { "type": "string", "format": "regex" } },
         "ledger": {
+          "description": "The ledger: events.ndjson on this orphan branch; each line starts with the sentinel.",
           "type": "object",
           "additionalProperties": false,
-          "required": ["repo", "issue", "issueTitle", "sentinel", "authors"],
+          "required": ["branch", "sentinel"],
           "properties": {
-            "repo": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
-            "issue": { "type": "integer", "minimum": 1 },
-            "issueTitle": { "type": "string", "minLength": 1 },
-            "sentinel": { "type": "string", "pattern": "^[A-Z][A-Z-]+$" },
-            "authors": {
-              "description": "GitHub logins whose ledger comments count; the workflow comments as github-actions[bot]. Separate from ours, which decides whose upstream comment is our last word.",
-              "type": "array",
-              "minItems": 1,
-              "items": { "type": "string", "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\\[bot\\])?$" }
-            }
+            "branch": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+            "sentinel": { "type": "string", "pattern": "^[A-Z][A-Z-]+$" }
+          }
+        },
+        "notify": {
+          "description": "The GitHub user a notice (a commit comment on the ledger commit) mentions.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mention"],
+          "properties": {
+            "mention": { "type": "string", "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$" }
           }
         },
         "dispatch": {
