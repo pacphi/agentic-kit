@@ -770,7 +770,7 @@ export function formatRoutingTable(cfg) {
     lines.push(`  ${act.padEnd(18)} ${r.host.padEnd(7)} ${(r.model ?? '').padEnd(24)} ${src}${tag}${esc}${div}`);
   }
   if (Object.keys(diverged).length) {
-    lines.push(dim(`  ${Object.keys(diverged).length} seeded route(s) diverge from current defaults — review with: ak host refresh`));
+    lines.push(dim(`  ${Object.keys(diverged).length} seeded route(s) diverge from current defaults — review with: ak host reset-routes`));
   }
   return lines.join('\n');
 }

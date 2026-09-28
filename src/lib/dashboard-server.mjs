@@ -418,7 +418,7 @@ export function routingPayload(cfg = loadKitConfig()) {
     //                 the row shows what will actually run. Actionable but not a
     //                 choice.
     //   diverged    — a seeded route the defaults moved past. A trade to weigh,
-    //                 cleared only by an explicit `ak x host refresh`.
+    //                 cleared only by an explicit `ak host reset-routes`.
     const diverged = new Map(divergedRoutes(policy).map((d) => [d.activity, d]));
     return {
       primaryHost: cfg.routing?.primaryHost ?? 'claude',

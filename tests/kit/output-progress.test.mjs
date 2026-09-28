@@ -195,7 +195,7 @@ test('SEC-5: a consumer that opens the pipe and never reads it still exits, boun
 // ESC/BEL/NUL bytes to the terminal, and captured every one of them with
 // stdout redirected to a FILE: the bytes land in the file and fire when it is
 // later `cat`'d. The stores now reject such text at rest; this is the last
-// line, and the only one covering `--deep`'s raw transcript text.
+// line, and the only one covering `--show-text`'s raw transcript text.
 //
 // The forbidden ranges are spelled out HERE, independently of the module's
 // own list, so narrowing that list fails this test rather than agreeing with
@@ -254,7 +254,7 @@ test('SEC-2: every print helper actually APPLIES the sanitizer, not just exports
   // The gap this closes: the tests above prove `sanitizeForTerminal` works,
   // and the end-to-end CLI test proves a hostile STORE never reaches stdout —
   // but the store gate drops those entries before printing, so neither test
-  // fails if the helpers stop calling the sanitizer. `--deep` prints raw
+  // fails if the helpers stop calling the sanitizer. `--show-text` prints raw
   // transcript text that no store gate ever sees, so the wiring itself has to
   // be pinned.
   const hostile = `payload ${ESC}[2J${ESC}[1;1H${ESC}]0;PWNED${BEL} tail`;

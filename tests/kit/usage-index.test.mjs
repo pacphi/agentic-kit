@@ -292,7 +292,7 @@ test('maskSecrets tolerates non-string input', () => {
 // Reachable because `maskSecrets` runs on the FULL, untruncated turn body:
 // the parsers do not cap turn text, and MAX_TURN_CHARS is applied after the
 // mask, not before. A single planted prompt turn of a few hundred KB of
-// token-like text hung `ak usage prompts --deep`, and opening that session in
+// token-like text hung `ak usage prompts --show-text`, and opening that session in
 // the dashboard hung the server's request handler.
 //
 // The fix bounds the key-NAME runs on either side of the alternation. A real

@@ -203,7 +203,7 @@ import { fmtNum, kpi } from './usage.mjs';
         var cNote=r.diverged.currentNote?(" | current: "+r.diverged.currentNote):"";
         flag='<span class="r-flag" data-kind="diverged" title="'
           +esc("the default has moved to "+r.diverged.defaultModel+dNote+cNote
-            +". Neither is automatically better. Run: ak x host refresh — to adopt the default.")
+            +". Neither is automatically better. Run: ak host reset-routes — to adopt the default.")
           +'">default: '+esc(r.diverged.defaultModel)+"</span>";
       }
       html+='<div class="r-row">'

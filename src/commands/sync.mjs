@@ -609,7 +609,7 @@ export const SYNC_STEPS = [
           return;
         }
         // Retire withdrawn models from the persisted policy. Distinct from
-        // divergence (which stays an explicit `ak x host refresh` decision): a
+        // divergence (which stays an explicit `ak host reset-routes` decision): a
         // retired model stops answering, so leaving it named on disk is a
         // scheduled failure. Only seeded entries are rewritten; a user pin is
         // reported and left alone.

@@ -88,7 +88,7 @@ export const MAX_TURN_CHARS = 40_000;
  *  remaining input. Measured here before the fix, on a run of secret-shaped
  *  words: 40 KB in 137 ms, 200 KB in 3.4 s, 400 KB in 13.8 s. `maskSecrets`
  *  runs on the FULL untruncated turn body, so a single planted transcript turn
- *  of a few hundred KB hung `ak usage prompts --deep`, and opening that
+ *  of a few hundred KB hung `ak usage prompts --show-text`, and opening that
  *  session in the dashboard hung the server's request handler. Bounded, the
  *  same 400 KB masks in well under a millisecond.
  *

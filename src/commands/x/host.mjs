@@ -55,7 +55,7 @@ export const options = {
   'aqe-fallback': { type: 'string' }, // 'claude-code:model1,model2;openai:gpt-5.6'  ('none' clears)
   provider: { type: 'string' },      // csv of ruflo API providers, optional id:model (openai:gpt-5.6)
   route: { type: 'string', multiple: true }, // repeatable: 'activity:host[:model]' per-activity routing override
-  activity: { type: 'string' },      // refresh: csv of activities to re-seed (default = prompt)
+  activity: { type: 'string' },      // reset-routes: csv of activities to re-seed (default = prompt)
   'expect-hash': { type: 'string' }, // adapters trust: required sha256 pin when --yes resolves a non-file source
   timeout: { type: 'string' },       // adapters conformance: outer ms budget override (default: manifest's own execution.run.hook.timeoutMs, else 120000)
   dev: { type: 'boolean', default: false }, // adapters conformance: run without persisting evidence/grants
@@ -96,9 +96,9 @@ Subcommands:
              --apply offers backed-up correction; --yes approves noninteractively.
              Preserves Ruflo dual-mode workers and AQE native provider routing.
   pick     choose hosts / aqe provider / ruflo providers → persist → apply
-  refresh  re-seed routes whose seeded pin diverges from the current defaults
-             (per-activity, opt-in; user pins are never touched, and \`ak sync\`
-             never does this for you)
+  reset-routes re-seed routes whose seeded pin diverges from the current
+             defaults (per-activity, opt-in; user pins are never touched, and
+             \`ak sync\` never does this for you)
   off      reversible teardown (reset to claude-only; strip managed env keys)
   check-connection <claude|codex|opencode>
              consent-gated paid connection check, the dashboard dialog's CLI
@@ -140,7 +140,7 @@ Options (pick, all optional — omit for interactive):
                                  implementation, testing, review, security-scan,
                                  security-analysis, documentation, debugging,
                                  packaging, release
-  --activity <csv>             refresh: which activities to re-seed (default: prompt)
+  --activity <csv>             reset-routes: which activities to re-seed (default: prompt)
   --yes                        accept defaults without prompting
 
 Enabling a host prints its host trust manifest before kit.json or host config
@@ -159,7 +159,7 @@ Examples:
   ak host pick --host claude,codex,opencode
   ak host pick --host claude       disable codex + opencode; preserve user config
   ak host pick --route 'testing:claude:claude-sonnet-5'
-  ak host refresh --activity architecture,design
+  ak host reset-routes --activity architecture,design
   ak host off
   ak host check-connection codex --dry-run`;
 
@@ -183,12 +183,12 @@ export async function run({ flags, positionals, pkgRoot }) {
   if (sub === 'status') return status({ flags, cwd });
   if (sub === 'off') return off({ cwd, pkgRoot });
   if (sub === 'pick') return pick({ flags, cwd, pkgRoot });
-  if (sub === 'refresh') return refresh({ flags, cwd });
+  if (sub === 'reset-routes') return resetRoutes({ flags, cwd });
   if (sub === 'align') return (await import('./host-align.mjs')).run({ flags });
   if (sub === 'adapters') return (await import('./host-adapters.mjs')).run({ flags, positionals: positionals.slice(1) });
   if (sub === 'check-connection') return (await import('./host-connection.mjs')).run({ flags, positionals: positionals.slice(1) });
 
-  fail(`unknown host subcommand: ${sub} (status|pick|refresh|off|check-connection|adapters|align)`);
+  fail(`unknown host subcommand: ${sub} (status|pick|reset-routes|off|check-connection|adapters|align)`);
   return 2;
 }
 
@@ -361,7 +361,7 @@ function printQeCourtStatus(cwd) {
  *  newer default is not uniformly better — on routine work it can cost 2-3× the
  *  agentic turns for the same result (#55). Only `provenance: 'seeded'` entries are
  *  eligible; a user pin survives even when named. */
-async function refresh({ flags, cwd }) {
+async function resetRoutes({ flags, cwd }) {
   const cfg = loadKitConfig();
   const policy = cfg.routing?.routes ?? {};
   const diverged = divergedRoutes(policy);
@@ -391,18 +391,18 @@ async function refresh({ flags, cwd }) {
     picked = diverged.map((d) => d.activity);
   } else {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    const ans = (await rl.question(`refresh which activities? (comma-separated, "all", blank = none) [${diverged.map((d) => d.activity).join(',')}]: `)).trim();
+    const ans = (await rl.question(`reset which activities? (comma-separated, "all", blank = none) [${diverged.map((d) => d.activity).join(',')}]: `)).trim();
     rl.close();
-    if (!ans) { info('nothing refreshed — routes left as they are'); return 0; }
+    if (!ans) { info('no routes reset — routes left as they are'); return 0; }
     picked = ans.toLowerCase() === 'all'
       ? diverged.map((d) => d.activity)
       : ans.split(',').map((s) => s.trim()).filter((a) => diverged.some((d) => d.activity === a));
   }
-  if (!picked.length) { info('nothing refreshed — routes left as they are'); return 0; }
+  if (!picked.length) { info('no routes reset — routes left as they are'); return 0; }
 
   cfg.routing.routes = refreshSeededRoutes(policy, { activities: picked });
   saveKitConfig(cfg);
-  ok(`refreshed ${picked.length} route(s): ${picked.join(', ')}`);
+  ok(`reset ${picked.length} route(s) to the current defaults: ${picked.join(', ')}`);
   const router = applyAqeRouter(cfg, cwd);
   (router.ok ? ok : warn)(`aqe router: ${router.detail}`);
   printActivityRoutingTable(cfg);
