@@ -2,7 +2,10 @@
 
 - **Status:** Accepted (experimental contract)
 - **Date:** 2026-08-15
-- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
+- **Updated:** 2026-09-27 — the kit's agentic-qe#628 compatibility constraint is sunset: the live
+  external-provider proof (advisor without fallback, generation with explicit fallback, CLI and MCP)
+  passed on Agentic-QE 3.14.4 and now refuses to run while any `*_API_KEY` is set
+- **Earlier update:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Earlier update:** 2026-08-26
 - **Update note:** [ADR-0031](0031-capability-graduation-and-upstream-requests.md) amends this ADR's
   "permanent caps" framing. The block on *self-declaring* `canBePrimary` / `aqeProvider` /

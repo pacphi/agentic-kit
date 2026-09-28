@@ -212,26 +212,6 @@
       }
     },
     {
-      "id": "agentic-qe-3.13-external-provider-contract",
-      "dependency": "agentic-qe",
-      "kind": "upstream-capability-gap",
-      "affected": ["3.13.10", "3.13.11", "3.13.12"],
-      "issue": "https://github.com/proffesor-for-testing/agentic-qe/issues/628",
-      "issueState": "closed-at-last-verification",
-      "primaryEvidence": "upstream issue, v3.14.0 release receipt, and local external-provider conformance",
-      "strategy": "retain honest external-provider attribution and use the released declarative provider contract only after local conformance",
-      "versionGate": "applies only to the listed pre-3.14 releases; 3.14.0 requires its own conformance rather than inheriting closure",
-      "expiryPolicy": "retest within 14 days; do not silently extend stale evidence",
-      "nextRetestAt": "2026-10-03",
-      "sunsetWhen": "v3.14.0 or later passes the live external-provider participant and advisor conformance tests",
-      "notification": {
-        "status": "published",
-        "publishedAt": "2026-08-21T08:25:12Z",
-        "publishedUrl": "https://github.com/proffesor-for-testing/agentic-qe/issues/628",
-        "requiredFields": ["minimalReproduction", "expected", "observed", "hostVersions", "dependencyVersion", "evidenceDigests", "boundedWorkaround", "expiry", "removalProof"]
-      }
-    },
-    {
       "id": "agentic-qe-3.14.0-stop-hook-generator",
       "dependency": "agentic-qe",
       "kind": "upstream-defect",
@@ -602,18 +582,19 @@
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.0" } },
       "mapping": "mapped",
       "kitImpact": {
-        "refs": ["constraint agentic-qe-3.13-external-provider-contract"],
+        "refs": ["constraint agentic-qe-3.13-external-provider-contract (sunset 2026-09-27)"],
         "files": ["docs/HOST-ADAPTER-FREEZE-CHECKLIST.md", "docs/adr/0029-host-adapter-extension-point.md", "src/lib/adapters/admission.mjs", "src/lib/providers.mjs", "tests/live/aqe-external-provider-transport.test.mjs"]
       },
-      "adjustment": "Run the live external-provider participant and advisor conformance (tests/live/aqe-external-provider-transport.test.mjs) on 3.14.0+ before sunsetting constraint agentic-qe-3.13-external-provider-contract. Also cited as \"issue #628\".",
-      "status": "released",
-      "constraintIds": ["agentic-qe-3.13-external-provider-contract"],
+      "adjustment": "Done: constraint agentic-qe-3.13-external-provider-contract sunset after the live external-provider participant and advisor conformance (tests/live/aqe-external-provider-transport.test.mjs) passed on 3.14.4. Also cited as \"issue #628\".",
+      "status": "adopted",
+      "constraintIds": [],
       "history": [
         { "date": "2026-08-16", "event": "filed" },
         { "date": "2026-08-27", "event": "commented" },
         { "date": "2026-08-31", "event": "closed", "note": "completed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.14.0; the ak change is pending" }
+        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.14.0; the ak change is pending" },
+        { "date": "2026-09-27", "event": "adopted", "note": "constraint sunset: tests/live/aqe-external-provider-transport.test.mjs passed on agentic-qe 3.14.4 (advisor without fallback, generation with explicit fallback, CLI and MCP) under env -i with no provider API key; the proof now refuses to run while any *_API_KEY is set" }
       ]
     },
     {
