@@ -58,7 +58,8 @@ jobs:
           set -e
           {
             echo "## Upstream watch preview (exit $code)"
-            jq -r '"since \(.since) (\(.sinceSource)), new records \(.records | length), could not check \(.fetchErrors | length), blind \(.blind), notice \(.notice.post)"' watch.json
+            jq -r '"since \(.since) (\(.sinceSource)), new records \(.records | length), could not check \(.fetchErrors | length), blind \(.blind), notice \(.notice.post), would fire \(.wouldFire | length)"' watch.json
+            jq -r '(.wouldFire // [])[] | "- would fire \(.id) \(.version) \(.branch)"' watch.json
             echo; echo '```text'; cat errors.txt; echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$code"
@@ -101,11 +102,13 @@ jobs:
           set -e
           {
             echo "## Upstream watch (exit $code)"
-            jq -r '"since \(.since) (\(.sinceSource)), new records \(.records | length), could not check \(.fetchErrors | length), dispatch errors \(.dispatchErrors | length), blind \(.blind), commit \(.commit // "none")"' watch.json
+            jq -r '"since \(.since) (\(.sinceSource)), new records \(.records | length), could not check \(.fetchErrors | length), dispatch errors \(.dispatchErrors | length), blind \(.blind), commit \(.commit // "none"), would fire \(.wouldFire | length)"' watch.json
+            jq -r '(.wouldFire // [])[] | "- would fire \(.id) \(.version) \(.branch)"' watch.json
             echo; echo '```text'; cat errors.txt; echo '```'
             jq -r '.notice.body' watch.json
           } >> "$GITHUB_STEP_SUMMARY"
-          # 3 = blind: gh unusable, the registry invalid, the ledger unreadable, or no upstream thread read.
+          # 3 = blind: gh unusable, the registry invalid, the ledger unreadable, no upstream thread read,
+          # or a ledger commit that could not be built.
           exit "$code"
       - name: Push the ledger commit
         if: env.RECORD == 'true'

@@ -44,6 +44,24 @@ test('the scheduled job records, pushes, notifies and then judges, in that order
   assert.match(text, /LEDGER_BRANCH: upstream-watch-ledger/);
 });
 
+test('the verdict fails the job on a read error or a dispatch error', () => {
+  const watch = job('watch');
+  const verdict = watch.slice(watch.indexOf('name: Verdict'));
+  assert.match(verdict, /\[ "\$\(jq '\(\.fetchErrors \| length\) \+ \(\.dispatchErrors \| length\)' watch\.json\)" -eq 0 \]/);
+  assert.doesNotMatch(verdict, /^\s+if:/m, 'the verdict runs on dry runs too');
+});
+
+test('both summaries say how many routine sessions a run would start, and which', () => {
+  const preview = job('preview');
+  const watch = job('watch');
+  const record = watch.slice(watch.indexOf('name: Record'), watch.indexOf('name: Push the ledger commit'));
+  for (const [name, step] of [['preview', preview], ['record', record]]) {
+    assert.match(step, /would fire \\\(\.wouldFire \| length\)/, name);
+    assert.match(step, /jq -r '\(\.wouldFire \/\/ \[\]\)\[\] \| "- would fire \\\(\.id\) \\\(\.version\) \\\(\.branch\)"' watch\.json/, name);
+  }
+  assert.match(record, /# 3 = blind: [^\n]*\n\s*# or a ledger commit that could not be built\./);
+});
+
 test('the trigger token reaches only the Record step, and the since input never meets the shell unquoted', () => {
   const watch = job('watch');
   assert.equal(text.split('secrets.UPSTREAM_DISPATCH_TOKEN').length - 1, 1, 'one reference');
