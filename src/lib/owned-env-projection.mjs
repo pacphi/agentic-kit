@@ -60,9 +60,12 @@ function serializeReceipt(keys, format, pending) {
 /**
  * @param {{file: string, boundary: string, enabled: boolean, required?: boolean}} target
  * @param {Record<string, {present: boolean, value?: string}>} desired
- * @param {{receiptSuffix: string, format?: 'multi' | {single: string}, editorFor: Function}} options
+ * @param {{receiptSuffix: string, format?: 'multi' | {single: string}, editorFor: Function,
+ *   adoptable?: (key: string, current: {present: boolean, value?: string}) => boolean}} options
+ *   `adoptable` names an unowned value ak may replace under its receipt (the receipt keeps
+ *   it as `before`, so a release puts it back); every other unowned value stays a conflict.
  */
-export function planOwnedEnv(target, desired, { receiptSuffix, format = 'multi', editorFor }) {
+export function planOwnedEnv(target, desired, { receiptSuffix, format = 'multi', editorFor, adoptable = () => false }) {
   const fmt = format === 'multi' ? {} : format;
   const { file } = target;
   const receiptFile = `${file}${receiptSuffix}`;
@@ -85,7 +88,7 @@ export function planOwnedEnv(target, desired, { receiptSuffix, format = 'multi',
   for (const key of new Set([...Object.keys(wanted), ...ownedKeys])) {
     const owned = receipt?.keys?.[key];
     const want = wanted[key] ?? ABSENT;
-    const d = decideKey(editor.get(key), owned, want, Boolean(fmt.single));
+    const d = decideKey(editor.get(key), owned, want, Boolean(fmt.single), (current) => adoptable(key, current));
     keys[key] = d.state;
     if (d.conflict) {
       // Single-key receipts (AQE) keep ADR-0055's refuse-the-file contract; the multi-key
@@ -108,13 +111,14 @@ export function planOwnedEnv(target, desired, { receiptSuffix, format = 'multi',
 
 /** One key's outcome: `state` for reporting, `next` when ak writes it, `conflict` when a
  *  value ak does not own (or a user edit of one it did) is preserved. */
-function decideKey(current, owned, want, single) {
+function decideKey(current, owned, want, single, adopt = (/** @type {any} */ _current) => false) {
   if (owned && !current.present && !single) {
     // ak's value was deleted: restore it while wanted (nothing of the user's is
     // overwritten), otherwise there is nothing left to release.
     return want.present ? { state: 'restore', next: want } : { state: 'converged', next: ABSENT };
   }
   if (owned && !same(current, owned.after)) return { state: 'user-edited', conflict: 'user-edited value preserved' };
+  if (!owned && current.present && want.present && !same(current, want) && adopt(current)) return { state: 'write', next: want };
   if (!owned && current.present && !(want.present && same(current, want))) {
     return { state: 'foreign', conflict: 'conflicting unmanaged value preserved' };
   }

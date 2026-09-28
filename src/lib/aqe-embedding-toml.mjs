@@ -91,14 +91,20 @@ function transportAssignment(text, transport, rest) {
   }
 }
 
-export function aqeTomlEnvironment(source) {
+/** The AQE registration's env table in a Codex TOML file. `keys` are the env keys the
+ *  caller manages (the embedding projection: AQE_EMBEDDER_ENDPOINT; the project pin:
+ *  AQE_PROJECT_ROOT, AQE_MEMORY_PATH, AQE_STORAGE_PATH). `current`/`replace` serve the
+ *  first key; `get`/`render` serve every key.
+ *  @param {string|null} source @param {string[]} [keys] */
+export function aqeTomlEnvironment(source, keys = [KEY]) {
   if (source === null) return { missing: true };
   const structure = inspectCodexTomlStructure(source);
   if (!structure.valid) throw new Error('unsupported Codex TOML preserved');
   let table = '';
   let base = null;
   let env = null;
-  let endpoint = null;
+  /** @type {Record<string, {start: number, end: number, value: string}>} */
+  const found = {};
   const transport = { command: null, args: null };
   const seenTables = new Set();
   for (const line of structure.lines) {
@@ -119,19 +125,36 @@ export function aqeTomlEnvironment(source) {
     // Inside the AQE tables, dotted/quoted keys can alias a managed field: refuse.
     if (!/^[A-Za-z0-9_-]+\s*=/.test(text)) throw new Error('dotted or quoted TOML assignments require manual embedding configuration');
     if (table === BASE) transportAssignment(text, transport, source.slice(line.start));
-    if (table === ENV && new RegExp(`^${KEY}\\s*=`).test(text)) {
-      if (endpoint) throw new Error('duplicate AQE endpoint');
-      endpoint = { ...line, value: scalar(text, KEY) };
-    }
+    if (table !== ENV) continue;
+    const key = keys.find((k) => new RegExp(`^${k}\\s*=`).test(text));
+    if (!key) continue;
+    if (found[key]) throw new Error(key === KEY ? 'duplicate AQE endpoint' : `duplicate AQE ${key}`);
+    found[key] = { start: line.start, end: line.end, value: scalar(text, key) };
   }
   if (!base) return { missing: true };
   if (!recognizedAqeTransport(transport.command, transport.args ?? [])) throw new Error('unrecognized AQE MCP transport preserved');
-  return { current: endpoint ? { present: true, value: endpoint.value } : { present: false }, replace(next) {
-    const nl = source.includes('\r\n') ? '\r\n' : '\n';
-    const replacement = next.present ? `${KEY} = ${JSON.stringify(next.value)}${nl}` : '';
-    if (endpoint) return source.slice(0, endpoint.start) + replacement + source.slice(endpoint.end);
-    if (!next.present) return source;
-    if (env) return source.slice(0, env.end) + (env.text.endsWith('\n') || source[env.end - 1] === '\n' ? '' : nl) + replacement + source.slice(env.end);
-    return source + (source.endsWith('\n') ? nl : nl + nl) + `[${ENV}]${nl}${replacement}`;
-  } };
+  const get = (key) => (found[key] ? { present: true, value: found[key].value } : { present: false });
+  const render = (nextStates) => renderEnv(source, env, found, nextStates);
+  return { current: get(keys[0]), get, render, replace: (next) => render({ [keys[0]]: next }) };
+}
+
+/** Replace, remove or append each key's line; new keys go after the env table header,
+ *  or into a new env table at the end. Edits apply from the last offset back. */
+function renderEnv(source, env, found, nextStates) {
+  const nl = source.includes('\r\n') ? '\r\n' : '\n';
+  const line = (key, next) => (next.present ? `${key} = ${JSON.stringify(next.value)}${nl}` : '');
+  const edits = [];
+  let added = '';
+  for (const [key, next] of Object.entries(nextStates)) {
+    if (found[key]) edits.push({ start: found[key].start, end: found[key].end, text: line(key, next) });
+    else added += line(key, next);
+  }
+  let out = source;
+  for (const edit of edits.sort((a, b) => b.start - a.start)) out = out.slice(0, edit.start) + edit.text + out.slice(edit.end);
+  if (!added) return out;
+  if (env) {
+    const bare = !(env.text.endsWith('\n') || source[env.end - 1] === '\n');
+    return out.slice(0, env.end) + (bare ? nl : '') + added + out.slice(env.end);
+  }
+  return out + (out.endsWith('\n') ? nl : nl + nl) + `[${ENV}]${nl}${added}`;
 }

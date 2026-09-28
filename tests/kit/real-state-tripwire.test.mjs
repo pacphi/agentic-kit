@@ -33,6 +33,7 @@ test('POSIX roots: XDG bases, their defaults, the repo state folders and ak-owne
     'user-file:/home/dev/.claude/settings.json', 'user-file:/home/dev/.claude.json',
     'user-file:/home/dev/.codex/config.toml',
     'repo-file:/src/kit/CLAUDE.md', 'repo-file:/src/kit/AGENTS.md', 'repo-file:/src/kit/.mcp.json',
+    'repo-file:/src/kit/.codex/config.toml',
   ]) assert.ok(dirs.includes(want), `missing ${want} in ${dirs.join(', ')}`);
 });
 

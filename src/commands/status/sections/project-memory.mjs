@@ -78,7 +78,8 @@ const STRAY_ROWS = [
   ['agentdb-rvf', (s) => `stray store ${listed(s)} (${sized(s)}): AgentDB's RVF backend default in the working directory; ${reportOnly(s)}`],
   ['ruvector', (s) => `stray store ${listed(s)} (${sized(s)}): RuVector's default store in the working directory; ${reportOnly(s)}`],
   ['aqe', (s) => `${s.length} stray AQE store${s.length === 1 ? '' : 's'} below the project root: ${listed(s)}; `
-    + `AQE resolves a relative AQE_MEMORY_PATH against the folder a command or hook ran in (this project's is ./.agentic-qe); ${reportOnly(s)}`],
+    + `AQE made ${them(s)} when a command, hook or MCP server started in that folder without ak's pin to the project root `
+    + `(ak sync pins AQE_PROJECT_ROOT, AQE_MEMORY_PATH and AQE_STORAGE_PATH); ${reportOnly(s)}`],
 ];
 
 function strayRows(root) {

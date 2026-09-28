@@ -145,3 +145,24 @@ test('a v1 single-key receipt written by the old AQE engine is read and released
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), {});
   assert.equal(fs.existsSync(`${file}.agentic-kit-aqe-embedding.json`), false);
 });
+
+test('an adoptable unowned value is replaced under the receipt and restored on release', (t) => {
+  const { file, target } = fixture(t, { env: { P: '.rel/value' } });
+  const adoptable = (key, current) => key === 'P' && current.value === '.rel/value';
+  const plan = planOwnedEnv(target, want({ P: '/abs/value' }), { ...opts, adoptable });
+  assert.equal(plan.keys.P, 'write');
+  applyOwnedEnv(plan, { backupTag: 'test' });
+  assert.deepEqual(env(file), { P: '/abs/value' });
+  assert.deepEqual(JSON.parse(fs.readFileSync(`${file}.test-receipt.json`, 'utf8')).keys.P.before, { present: true, value: '.rel/value' });
+  const release = planOwnedEnv(target, want({ P: null }), { ...opts, adoptable });
+  applyOwnedEnv(release, { backupTag: 'test' });
+  assert.deepEqual(env(file), { P: '.rel/value' });
+});
+
+test('without an adoptable rule the same unowned value stays a preserved conflict', (t) => {
+  const { file, target } = fixture(t, { env: { P: '.rel/value' } });
+  const plan = planOwnedEnv(target, want({ P: '/abs/value' }), opts);
+  assert.equal(plan.keys.P, 'foreign');
+  assert.equal(plan.changed, false);
+  assert.deepEqual(env(file), { P: '.rel/value' });
+});

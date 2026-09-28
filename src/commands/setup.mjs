@@ -34,6 +34,7 @@ import { resolveAqeEmbedding } from '../lib/aqe-embedding-config.mjs';
 import { embeddingIntentFromFlags, embeddingSetupDisclosure } from '../lib/aqe-embedding-setup.mjs';
 import { prepareAqeEmbedding } from '../lib/aqe-embedding-lifecycle.mjs';
 import { reconcileAqeEmbeddingProjections } from '../lib/aqe-embedding-projection.mjs';
+import { reconcileAqePin, recordAqePinProject } from '../lib/aqe-project-pin.mjs';
 import * as rb from '../lib/ruvnet-brain.mjs';
 import { ensureAgentBrowser } from '../lib/agent-browser.mjs';
 import { readJson, writeJsonWithBackup } from '../lib/settings.mjs';
@@ -630,8 +631,12 @@ async function initProjectAgenticQe(root, cfg, flags, permCtx) {
   // Relinquish only unchanged owned values before AQE regenerates its tables.
   const relinquish = reconcileAqeEmbeddingProjections({ ...cfg, aqeEmbedding: { mode: 'unmanaged' } }, root);
   if (!relinquish.ok) { reportOutcome('AQE embedding pre-init', relinquish); return false; }
+  // Same for the AQE pin: AQE's init rewrites its own env entries (B5-D1).
+  const unpinned = reconcileAqePin(cfg, root, { enabled: false });
+  if (!unpinned.ok) { reportOutcome('AQE pin pre-init', unpinned); return false; }
   const aqe = await runCmd('aqe', args, { cwd: root, timeout: 300_000, env: resolveAqeEmbedding(cfg).env });
   (aqe.code === 0 ? ok : warn)(`agentic-qe initialized${withCodex ? ' (+ codex skills)' : ''}`);
+  pinProjectAqe(cfg, root);
   const aqeUnexpected = removeUndisclosedPermissions(
     permCtx.permissionsFile, permCtx.permissionsBefore, permCtx.authorizedPermissions,
   );
@@ -640,6 +645,16 @@ async function initProjectAgenticQe(root, cfg, flags, permCtx) {
     return false;
   }
   return aqe.code === 0;
+}
+
+/** B5-D1: pin AQE to this project's root (three absolute keys, receipted), so a
+ *  command, hook or MCP server started in a subfolder uses the root's store. */
+function pinProjectAqe(cfg, root) {
+  const pin = reconcileAqePin(cfg, root);
+  if (!pin.ok) warn(`AQE pin not written: ${pin.detail}`);
+  else if (pin.findings.some((f) => f.status === 'conflict' || f.conflicts.length)) warn(pin.detail);
+  else if (pin.changed) ok(`AQE pinned to ${pin.root} (AQE_PROJECT_ROOT, AQE_MEMORY_PATH, AQE_STORAGE_PATH)`);
+  if (recordAqePinProject(cfg, pin.root)) saveKitConfig(cfg);
 }
 
 /** The 'aqe-router' step's own report, plus the activity-routing table print

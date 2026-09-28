@@ -94,3 +94,35 @@ test('a key escape that is not a Unicode scalar value gives an honest encoding r
     assert.throws(() => aqeTomlEnvironment(`${key}.x = 1\n${AQE}`), /unsupported TOML key encoding/);
   }
 });
+
+// B5-D1: the project pin edits several keys of the same AQE env table at once.
+test('several AQE env keys are read and written together, leaving other tables alone', () => {
+  const shell = '[shell_environment_policy.set]\nAQE_MEMORY_PATH = ".agentic-qe/memory.db"\n';
+  const source = '[mcp_servers.agentic-qe]\ncommand = "aqe-mcp"\n\n[mcp_servers.agentic-qe.env]\nAQE_MEMORY_PATH = ".agentic-qe/memory.db"\nAQE_V3_MODE = "true"\n\n' + shell;
+  const keys = ['AQE_PROJECT_ROOT', 'AQE_MEMORY_PATH', 'AQE_STORAGE_PATH'];
+  const editor = aqeTomlEnvironment(source, keys);
+  assert.deepEqual(editor.get('AQE_MEMORY_PATH'), { present: true, value: '.agentic-qe/memory.db' });
+  assert.deepEqual(editor.get('AQE_PROJECT_ROOT'), { present: false });
+  const next = editor.render({
+    AQE_PROJECT_ROOT: { present: true, value: '/p' },
+    AQE_MEMORY_PATH: { present: true, value: '/p/.agentic-qe/memory.db' },
+    AQE_STORAGE_PATH: { present: true, value: '/p/.agentic-qe' },
+  });
+  assert.ok(next.endsWith(shell), next);
+  const again = aqeTomlEnvironment(next, keys);
+  assert.deepEqual(keys.map((k) => again.get(k).value), ['/p', '/p/.agentic-qe/memory.db', '/p/.agentic-qe']);
+  assert.match(next, /AQE_V3_MODE = "true"/);
+  const back = again.render({
+    AQE_PROJECT_ROOT: { present: false },
+    AQE_MEMORY_PATH: { present: true, value: '.agentic-qe/memory.db' },
+    AQE_STORAGE_PATH: { present: false },
+  });
+  assert.equal(back, source);
+});
+
+test('several keys go into a new env table when the registration has none', () => {
+  const source = '[mcp_servers.agentic-qe]\ncommand = "aqe-mcp"\n';
+  const editor = aqeTomlEnvironment(source, ['A_KEY', 'B_KEY']);
+  const next = editor.render({ A_KEY: { present: true, value: '1' }, B_KEY: { present: true, value: '2' } });
+  assert.equal(next, source + '\n[mcp_servers.agentic-qe.env]\nA_KEY = "1"\nB_KEY = "2"\n');
+});

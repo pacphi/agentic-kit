@@ -39,6 +39,33 @@ and supported `claude mcp serve` tool exposure are preserved. See
 [ADR-0051](adr/0051-supported-peer-delegation-and-host-realignment.md) for the policy,
 official source citations, authority boundaries and verification limits.
 
+## 2026-09-27: AQE is pinned to the project root
+
+AQE used to create a new `.agentic-qe` store in whatever folder a command, hook or MCP server
+started in. `ak sync` and `ak setup` now pin AQE to the project root in projects that have
+`.agentic-qe`, with three absolute values:
+
+- `AQE_PROJECT_ROOT` — the repository root
+- `AQE_MEMORY_PATH` — `<root>/.agentic-qe/memory.db`
+- `AQE_STORAGE_PATH` — `<root>/.agentic-qe`
+
+They go into the `env` of `.claude/settings.local.json`, the `agentic-qe` entry of `.mcp.json`
+(only when it starts AQE's own server) and the `[mcp_servers.agentic-qe.env]` table of the
+project's `.codex/config.toml`. Your user-level `~/.codex/config.toml` is never pinned. Each file
+gets a receipt beside it (`<file>.agentic-kit-aqe-pin.json`), and `ak uninstall` puts back what
+was there before. AQE's own relative `AQE_MEMORY_PATH = ".agentic-qe/memory.db"` in the Codex
+table is replaced, and restored on uninstall. The relative value AQE writes into
+`.claude/settings.json` stays: Claude Code gives `settings.local.json` precedence.
+
+A value you set yourself is kept. `ak status` then shows an `aqe-pin` row that names the file for
+you to fix by hand. A pin copied from another checkout names that checkout's root: remove the
+three keys from the named file, then run `ak sync` in this checkout. Restart Claude Code, Codex
+and OpenCode sessions so they pick up the new environment. After the pin, `aqe status` and
+`aqe health` print "not initialized" when run from a subfolder (AQE checks the working
+directory); run them from the project root.
+
+Stores AQE already created in subfolders stay where they are. `ak status` lists them.
+
 ## 2026-09-27: No more `aqe solver` line in setup and sync
 
 `ak setup` and `ak sync` no longer print an `aqe solver` line. AQE's native solver package was
