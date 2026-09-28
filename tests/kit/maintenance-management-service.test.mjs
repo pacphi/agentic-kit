@@ -1036,6 +1036,12 @@ test('M1b: a failed collection-root source reports failed in Discovery after a r
   assert.equal(row.state, 'failed');
   assert.equal(row.label, 'Collection root', 'the Discovery row still carries its label after a restart');
 
+  // A fresh refresh after the restart persists a NEW inventory snapshot built
+  // from the just-restarted orchestrator's own coverage() (service-inventory
+  // .mjs's gatherAndProject), so this banner read is itself sensitive to the
+  // restart bug — unlike reading the snapshot `first` already persisted
+  // before the restart, which would agree regardless of this fix.
+  await restarted.service.refreshInventory();
   const page = restarted.service.inventory({});
   assert.equal(page.partialSources.total, 1, 'the Inventory banner must agree with the Discovery panel');
   assert.ok(page.partialSources.entries.some((entry) => entry.sourceId === sourceId && entry.state === 'failed'));

@@ -576,6 +576,32 @@ test('M1b: a later successful scan wins over an earlier failure after a restart'
   assert.equal(row.state, 'complete');
 });
 
+test('M1b: a newer failure summary wins over a stale complete last-good snapshot — a root that scanned fine, then vanished', async (t) => {
+  const dir = fixture(t);
+  const root = fixture(t);
+  buildLargeTree(root, { dirs: 1, filesPerDir: 1 });
+  const first = control(root, dir);
+  const [published] = await first.orchestrator.start({ sourceIds: [SOURCE.sourceId] });
+  assert.equal(published.scanState, 'published');
+  assert.equal(first.lastGoodStore.current().length, 1, 'the successful scan must have written a last-good snapshot');
+
+  // The root disappears after the successful scan (unmounted, deleted, …).
+  fs.rmSync(root, { recursive: true, force: true });
+  const second = control(root, dir); // fresh in-memory records; replans since none exist yet
+  const [failed] = await second.orchestrator.start({ sourceIds: [SOURCE.sourceId] });
+  assert.equal(failed.scanState, 'failed');
+
+  // A further restart must report the NEWER failure, not the still-present
+  // but now-stale complete last-good snapshot from before the root vanished
+  // — this is the case the summary-before-last-good ordering in
+  // coverageForSource exists for.
+  const third = control(root, dir);
+  const [row] = third.orchestrator.coverage();
+  assert.equal(row.state, 'failed');
+  assert.equal(row.limitingReason, 'io-failure');
+  assert.equal(third.lastGoodStore.current().length, 1, 'the earlier last-good snapshot is still on disk, but must not override the newer failure');
+});
+
 test('M1b: with no history the restart falls back to the last-good row (retention edge)', async (t) => {
   const dir = fixture(t);
   const root = fixture(t);
