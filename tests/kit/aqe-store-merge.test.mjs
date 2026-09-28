@@ -731,4 +731,12 @@ test('status reports an interrupted merge until a later merge completes (review 
   assert.equal(resolved.resolvedBy, merged.runId);
   const after = await mergeAqeStores(p.root, base(p, { apply: false, runner: fakeAqe().runner, holders: noHolders, now: Date.UTC(2026, 8, 28) }));
   assert.deepEqual(after.interrupted, []);
+  // A receipt that recorded no backup never prints "null" as a path.
+  const bare = path.join(p.mergeDir, '2026-09-26T11-00-00-000Z');
+  fs.mkdirSync(bare, { recursive: true });
+  fs.writeFileSync(path.join(bare, 'receipt.json'), JSON.stringify({ root: p.root, runId: '2026-09-26T11-00-00-000Z', status: 'applying' }));
+  const { out: noBackup } = await capture(() => cli.run({ flags: {}, positionals: ['status'], cwd: p.root, merge }));
+  assert.match(noBackup, /2026-09-26T11-00-00-000Z/);
+  assert.doesNotMatch(noBackup, /null/);
+  assert.match(noBackup, /no backup was recorded/);
 });

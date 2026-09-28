@@ -510,7 +510,8 @@ function writeReceipt(result, extra) {
 function rootRefusal(root, store) {
   if (store.problem) {
     return `the project store ${path.join(root, '.agentic-qe', 'memory.db')} already fails ${store.problem}, before any merge; `
-      + 'a merge checks the same on its result, so it would fail; nothing was written (repair the store with AQE first)';
+      + 'a merge checks the same on its result, so it would fail; nothing was written. If a session was writing the store '
+      + 'while the preview copied it, the copy may be torn: close the sessions and run it again; otherwise repair the store with AQE first';
   }
   if (store.readable) return null;
   if (store.error === 'absent') return `no project store at ${path.join(root, '.agentic-qe', 'memory.db')}; run \`aqe init\` in ${root} (or \`ak setup --project\`) first`;

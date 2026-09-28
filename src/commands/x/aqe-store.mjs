@@ -130,7 +130,8 @@ function printOutcome(result) {
 function printInterrupted(result) {
   for (const run of result.interrupted ?? []) {
     warn(`an earlier merge (${run.runId}) was interrupted during its import: the project store may hold part of its strays. `
-      + `Running the merge again finishes it (AQE skips what the root already holds); to undo it instead, ${restoreSteps(run.backup, result.root)}. Receipt: ${run.receipt}`);
+      + `Running the merge again finishes it (AQE skips what the root already holds); `
+      + `${run.backup ? `to undo it instead, ${restoreSteps(run.backup, result.root)}` : 'no backup was recorded for it, so it cannot be undone from the archive'}. Receipt: ${run.receipt}`);
   }
 }
 
