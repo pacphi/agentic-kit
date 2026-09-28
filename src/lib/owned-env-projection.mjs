@@ -62,8 +62,10 @@ function serializeReceipt(keys, format, pending) {
  * @param {Record<string, {present: boolean, value?: string}>} desired
  * @param {{receiptSuffix: string, format?: 'multi' | {single: string}, editorFor: Function,
  *   adoptable?: (key: string, current: {present: boolean, value?: string}) => boolean}} options
- *   `adoptable` names an unowned value ak may replace under its receipt (the receipt keeps
- *   it as `before`, so a release puts it back); every other unowned value stays a conflict.
+ *   `adoptable` names a value ak may replace under its receipt (the receipt keeps it as
+ *   `before`, so a release puts it back), whether ak owned the key before or not (the
+ *   tool re-wrote its own default); every other unowned or edited value stays a conflict.
+ *   The single-key AQE embedding receipt (ADR-0055) passes no `adoptable`.
  */
 export function planOwnedEnv(target, desired, { receiptSuffix, format = 'multi', editorFor, adoptable = () => false }) {
   const fmt = format === 'multi' ? {} : format;
@@ -116,6 +118,12 @@ function decideKey(current, owned, want, single, adopt = (/** @type {any} */ _cu
     // ak's value was deleted: restore it while wanted (nothing of the user's is
     // overwritten), otherwise there is nothing left to release.
     return want.present ? { state: 'restore', next: want } : { state: 'converged', next: ABSENT };
+  }
+  if (owned && current.present && !same(current, owned.after) && adopt(current)) {
+    // The tool's own default came back (e.g. AQE re-init after an upgrade rewrote
+    // its table): take it back while wanted; on release leave it as the tool
+    // wrote it. The receipt keeps its first `before` (review M4).
+    return want.present ? { state: 'write', next: want } : { state: 'converged', next: current };
   }
   if (owned && !same(current, owned.after)) return { state: 'user-edited', conflict: 'user-edited value preserved' };
   if (!owned && current.present && want.present && !same(current, want) && adopt(current)) return { state: 'write', next: want };

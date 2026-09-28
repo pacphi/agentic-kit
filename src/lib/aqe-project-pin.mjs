@@ -25,8 +25,11 @@ import { projectAqeDir, repoRoot } from './paths.mjs';
 export const AQE_PIN_RECEIPT = '.agentic-kit-aqe-pin.json';
 export const AQE_SHELL_PIN_RECEIPT = '.agentic-kit-aqe-shell-pin.json';
 export const AQE_PIN_KEYS = Object.freeze(['AQE_PROJECT_ROOT', 'AQE_MEMORY_PATH', 'AQE_STORAGE_PATH']);
-/** The relative value `aqe init` writes (agentic-qe dist/init/settings-merge.js,
- *  platform-config-generator.js); ak replaces it under the receipt. */
+/** The relative value `aqe init` writes (agentic-qe dist/init/settings-merge.js:142,
+ *  platform-config-generator.js:147,188); ak replaces it under the receipt, also when AQE
+ *  writes it back over ak's value (re-init after an upgrade, review M4). AQE writes no
+ *  AQE_STORAGE_PATH into any config (3.14.4 sets '.agentic-qe' only in its daemon's
+ *  process env, init/phases/10-workers.js:169), so that key has no AQE default to adopt. */
 const AQE_OWN_MEMORY_PATH = '.agentic-qe/memory.db';
 
 const plain = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);

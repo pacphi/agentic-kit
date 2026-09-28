@@ -171,6 +171,42 @@ test('an inline or dotted shell environment set is preserved as a hand fix, neve
   }
 });
 
+test('AQE re-init after an upgrade puts its relative AQE_MEMORY_PATH back: ak takes it back under the receipt (review M4)', async (t) => {
+  const { root, write, cfg } = project(t);
+  const { settings, codex } = seedAll(write);
+  const original = fs.readFileSync(codex, 'utf8');
+  reconcileAqePin(cfg, root);
+  // AQE's mergeExistingTomlConfig (AQE/dist/init/codex-installer.js:316-330) drops the
+  // agentic-qe tables and appends its own with the relative value; settings-merge.js:142
+  // writes the same value into Claude settings.
+  const absolute = JSON.stringify(path.join(root, '.agentic-qe', 'memory.db'));
+  fs.writeFileSync(codex, fs.readFileSync(codex, 'utf8').replaceAll(`AQE_MEMORY_PATH = ${absolute}`, 'AQE_MEMORY_PATH = ".agentic-qe/memory.db"'));
+  const doc = json(settings); doc.env.AQE_MEMORY_PATH = '.agentic-qe/memory.db';
+  fs.writeFileSync(settings, JSON.stringify(doc, null, 2) + '\n');
+  const again = reconcileAqePin(cfg, root);
+  assert.equal(again.ok, true, JSON.stringify(again));
+  assert.deepEqual(again.findings.flatMap((f) => f.conflicts), [], 'AQE\'s own value is not a user edit');
+  const toml = fs.readFileSync(codex, 'utf8');
+  assert.ok(!toml.includes('".agentic-qe/memory.db"'), toml);
+  assert.equal(json(settings).env.AQE_MEMORY_PATH, path.join(root, '.agentic-qe', 'memory.db'));
+  assert.deepEqual(json(`${codex}${AQE_PIN_RECEIPT}`).keys.AQE_MEMORY_PATH.before, { present: true, value: '.agentic-qe/memory.db' }, 'the receipt keeps the first before-state');
+  const rows = await memoryPin.collect({ cwd: root, cfg });
+  assert.ok(!rows.some((r) => r.subsystem === 'aqe-pin' && r.repair === 'manual'), JSON.stringify(rows));
+  // Released right after such a re-init, the file is AQE's again with no receipt left.
+  fs.writeFileSync(codex, fs.readFileSync(codex, 'utf8').replaceAll(`AQE_MEMORY_PATH = ${absolute}`, 'AQE_MEMORY_PATH = ".agentic-qe/memory.db"'));
+  const released = reconcileAqePin(cfg, root, { enabled: false });
+  assert.equal(released.ok, true, JSON.stringify(released));
+  assert.equal(fs.readFileSync(codex, 'utf8'), original);
+  assert.equal(fs.existsSync(`${codex}${AQE_PIN_RECEIPT}`), false);
+  // Any other value is still a user edit, preserved.
+  reconcileAqePin(cfg, root);
+  const edited = json(settings); edited.env.AQE_MEMORY_PATH = '/mine/memory.db';
+  fs.writeFileSync(settings, JSON.stringify(edited, null, 2) + '\n');
+  const kept = reconcileAqePin(cfg, root);
+  assert.ok(kept.findings.some((f) => f.conflicts.some((c) => /user-edited/.test(c.reason))), JSON.stringify(kept.findings));
+  assert.equal(json(settings).env.AQE_MEMORY_PATH, '/mine/memory.db');
+});
+
 test('releasing the pin restores the receipted before-state, AQE\'s relative value included', (t) => {
   const { root, write, cfg } = project(t);
   const { settings, mcp, codex } = seedAll(write);
