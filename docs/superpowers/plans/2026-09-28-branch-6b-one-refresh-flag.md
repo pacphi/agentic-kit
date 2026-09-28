@@ -127,6 +127,15 @@ Two documented-but-absent UI strings/behaviours Task 13 fixes (they are wrong to
 
 ---
 
+## Closing this branch (maintainer, 2026-09-28; supersedes the restructure below)
+
+The maintainer asked to bring this branch to a close at a natural breaking point. The dashboard tasks 6c-1 to 6c-5 move to the next remediation program. Tasks 13 and 14 run in their CLI-only form, as R16 specified:
+
+- **Task 13:** the vocabulary guard covers CLI spellings only. Dashboard docs keep today's control names and state the new CLI equivalents beside them, as current fact.
+- **Task 14:** records only what the CLI work made true. ADR-0063 gets a "Delivered" section and an "Ahead" section that names the dashboard half. No dashboard control is superseded yet.
+
+The carry-ins listed below for Tasks 13 and 14 still apply, except the ones that belong to the dashboard half.
+
 ## Execution after the 2026-09-28 restructure (binding; supersedes R16's split)
 
 The maintainer folded 6c back into this branch (decision M-6): one pull request carries the whole refresh vocabulary. Execution order: Tasks 1–12 → 6c-1 → 6c-2 → 6c-3 → Task 13 together with 6c-4 (one docs task; the vocabulary guard covers CLI and dashboard spellings) → Task 14 together with 6c-5 (one ADR task, including the supersessions of the dashboard controls). The 6c text below was verified against `31a1a39b`, so its implementers re-verify every file:line first. Run the branch gate after 6c-3 and after the final task.
