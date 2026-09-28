@@ -199,8 +199,9 @@ const isCopyName = (name, prefix) => name.startsWith(prefix) && UUID_V4.test(nam
 const sameState = (a, b) => plain(a) && plain(b) && a.present === b.present && (!a.present || a.value === b.value);
 
 /** False for the home folder itself, a filesystem root, or a folder that cannot be resolved:
- *  no copy is ever removed there. Compared as given, as resolved, and by device and inode. */
-function prunableFolder(dir, homedir) {
+ *  no copy is ever removed there. Compared as given, as resolved, and by device and inode.
+ *  @param {string} dir @param {string} homedir @returns {boolean} */
+export function prunableFolder(dir, homedir) {
   if (!homedir) return false;
   try {
     const own = [path.resolve(dir), fs.realpathSync.native(dir)];
@@ -215,9 +216,10 @@ function prunableFolder(dir, homedir) {
   } catch { return false; }
 }
 
-/** One backup copy read with the projection's editor: the owned keys' values, and the rest
- *  of the file rendered with every owned key absent. Null when it is not a regular file of
- *  the current user (POSIX; Windows has no uid) or does not parse. */
+/** One backup copy read with the projection's editor: the owned keys' values, the rest of
+ *  the file rendered with every owned key absent, and whether the editor writes the copy's
+ *  own values back to exactly its bytes (`canonical`). Null when it is not a regular file
+ *  of the current user (POSIX; Windows has no uid) or does not parse. */
 function readCopy(file, editorFor, owned, uid) {
   try {
     const stat = fs.lstatSync(file);
@@ -227,14 +229,15 @@ function readCopy(file, editorFor, owned, uid) {
     const editor = editorFor(text);
     if (!editor || editor.missing) return null;
     const values = Object.fromEntries(owned.map((key) => [key, editor.get(key)]));
-    // A fresh editor: rendering changes the editor's document.
+    // Fresh editors: rendering changes the editor's document.
+    const canonical = editorFor(text).render(values) === text;
     const rest = editorFor(text).render(Object.fromEntries(owned.map((key) => [key, ABSENT])));
-    return typeof rest === 'string' ? { values, rest } : null;
+    return typeof rest === 'string' ? { values, rest, canonical } : null;
   } catch { return null; }
 }
 
 function provenRedundant(copy, newest, receipt, owned) {
-  if (!copy || copy.rest !== newest.rest) return false;
+  if (!copy || !copy.canonical || copy.rest !== newest.rest) return false;
   return owned.every((key) => [newest.values[key], receipt[key]?.before, receipt[key]?.after]
     .some((state) => sameState(copy.values[key], state)));
 }
@@ -253,8 +256,10 @@ function provenRedundant(copy, newest, receipt, owned) {
  *    home folder nor a filesystem root.
  * 2. B and N both parse with the projection's own editor (`plan.editorFor`).
  * 3. B and N rendered with every key in K absent are byte-identical: nothing of the user's
- *    differs. The JSON editors re-serialize the document, so whitespace alone is not a
- *    difference there; the TOML editors keep the rest of the text as written.
+ *    differs. And B's bytes are exactly what the editor writes back from B's own parse: a
+ *    copy whose bytes the editor would not write back (the user's own formatting, number
+ *    spelling, integers beyond 2^53, duplicate keys, escapes) is never redundant, because
+ *    rendering loses what only those bytes record.
  * 4. For every key in K, B's value is N's value, the receipt's `before`, the receipt's
  *    `after`, or absent where the receipt's `before` is absent. A key K holds without a
  *    receipt entry (a foreign value ak preserves) allows only N's value.
