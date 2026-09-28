@@ -115,8 +115,10 @@ Two record kinds are new, both written by `record` itself:
 
 ### Registry
 
-`watchPolicy.ledger` becomes `{ "branch": "upstream-watch-ledger", "sentinel": "UPSTREAM-WATCH" }`
-and a new `watchPolicy.notify` is `{ "mention": "pacphi" }`. The fields `ledger.repo`,
+`watchPolicy.ledger` becomes `{ "branch": "upstream-watch-ledger", "sentinel": "UPSTREAM-WATCH" }`,
+a new `watchPolicy.notify` is `{ "mention": "pacphi" }`, and `ledger.repo` moves to
+`watchPolicy.repo` (`"pacphi/agentic-kit"`): the home repository, where tracking entries live,
+which the blind judgment leaves out, and which the watch's own API calls address. The fields
 `ledger.issue`, `ledger.issueTitle` and `ledger.authors` are removed from the registry, the schema
 (`docs/schemas/agentic-dependency-constraints.schema.json`) and the validation in
 `src/lib/hook-audit/upstream-watch.mjs`. `ledger.branch` must be a valid branch name that does not
