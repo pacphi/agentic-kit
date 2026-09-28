@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { tempDir } from './helpers/temp-dir.mjs';
-import { parseLsofHolders, storeHolders } from '../../src/lib/aqe-store-holders.mjs';
+import { parseLsofHolders, storeHolders, rawRun } from '../../src/lib/aqe-store-holders.mjs';
 
 const lsofRunner = (stdout, code = 0) => async (cmd, args) => {
   assert.equal(cmd, 'lsof');
@@ -160,4 +160,49 @@ test('real lsof missing from PATH: incomplete, not "no holders"', { skip: proces
   const result = await storeHolders([db], { platform: 'darwin', lsof: path.join(dir, 'no-such-lsof') });
   assert.equal(result.complete, false);
   assert.match(result.error, /ENOENT/);
+});
+
+// Review M1: a timed-out or signal-killed lsof is a failed look, never "no holders".
+test('an lsof killed by a signal or a timeout is incomplete, never "no holders"', async (t) => {
+  const dir = tempDir('ak-holders-killed', t);
+  const db = path.join(dir, 'memory.db');
+  fs.writeFileSync(db, 'x');
+  for (const killed of [
+    { code: null, killed: true, signal: 'SIGTERM', stdout: '', stderr: '' },
+    { code: 1, signal: 'SIGKILL', stdout: '', stderr: '' },
+    { code: 'SIGNAL', stdout: '', stderr: '' },
+  ]) {
+    const result = await storeHolders([db], { platform: 'darwin', runner: async () => killed });
+    assert.equal(result.complete, false, JSON.stringify(killed));
+    assert.deepEqual(result.holders, []);
+    assert.match(result.error, /lsof/);
+  }
+});
+
+test('rawRun reports a timed-out command as killed, not as a plain exit 1', { skip: process.platform === 'win32', timeout: 20_000 }, async (t) => {
+  const dir = tempDir('ak-holders-slow', t);
+  const slow = path.join(dir, 'slow-lsof');
+  fs.writeFileSync(slow, '#!/bin/sh\nsleep 5\n', { mode: 0o755 });
+  const result = await rawRun(slow, [], { timeout: 300 });
+  assert.notEqual(result.code, 1, JSON.stringify(result));
+  assert.equal(result.signal, 'SIGTERM');
+  const db = path.join(dir, 'memory.db');
+  fs.writeFileSync(db, 'x');
+  const holders = await storeHolders([db], { platform: 'darwin', lsof: slow, runner: (cmd, args) => rawRun(cmd, args, { timeout: 300 }) });
+  assert.equal(holders.complete, false, JSON.stringify(holders));
+});
+
+test('Linux: an fd link that cannot be read (not one that vanished) falls back to lsof', { skip: process.platform === 'win32' || process.getuid?.() === 0 }, async (t) => {
+  const dir = tempDir('ak-holders-proc-noexec', t);
+  const db = path.join(dir, 'memory.db');
+  fs.writeFileSync(db, 'x');
+  const proc = path.join(dir, 'proc');
+  fakeProc(proc, { 900: { comm: 'node', fds: { 3: db } } });
+  const fdDir = path.join(proc, '900', 'fd');
+  fs.chmodSync(fdDir, 0o444); // listable, but its links cannot be read
+  let result;
+  try { result = await storeHolders([db], { platform: 'linux', procRoot: proc, runner: lsofRunner(`p900\ncnode\nn${db}\n`) }); }
+  finally { fs.chmodSync(fdDir, 0o755); }
+  assert.equal(result.method, 'lsof', JSON.stringify(result));
+  assert.deepEqual(result.holders.map((h) => h.pid), [900]);
 });

@@ -44,14 +44,20 @@ export function parseLsofHolders(output) {
 
 /** execFile with the exit status as lsof gave it: exec.mjs `run()` turns a
  *  silent exit 1 ("none of these files is open") into a message on stderr,
- *  which reads like a failed look. A missing lsof keeps its ENOENT.
- *  @returns {Promise<{ code: number|string, stdout: string, stderr: string }>} */
+ *  which reads like a failed look. A missing lsof keeps its ENOENT. A run that
+ *  a timeout or a signal ended keeps `signal` and never reads as exit 1: its
+ *  empty output is not an answer (review M1; exec.mjs failureResult states the
+ *  same rule).
+ *  @returns {Promise<{ code: number|string|null, stdout: string, stderr: string, signal?: string|null, killed?: boolean }>} */
 export const rawRun = (cmd, args, { timeout = 30_000 } = {}) => new Promise((resolve) => {
   execFile(cmd, args, { encoding: 'utf8', timeout, maxBuffer: 16 * 1024 * 1024, shell: false }, (error, stdout, stderr) => {
     if (!error) { resolve({ code: 0, stdout, stderr }); return; }
-    const code = typeof error.code === 'number' || typeof error.code === 'string' ? error.code : 1;
-    const spawnFailed = typeof error.code === 'string';
-    resolve({ code, stdout: stdout ?? '', stderr: spawnFailed ? String(error.message) : (stderr ?? '') });
+    if (typeof error.code === 'string') { resolve({ code: error.code, stdout: stdout ?? '', stderr: String(error.message) }); return; }
+    if (error.killed || error.signal || typeof error.code !== 'number') {
+      resolve({ code: null, killed: !!error.killed, signal: error.signal ?? null, stdout: stdout ?? '', stderr: stderr ?? '' });
+      return;
+    }
+    resolve({ code: error.code, stdout: stdout ?? '', stderr: stderr ?? '' });
   });
 });
 
@@ -64,9 +70,15 @@ async function viaLsof(files, runner, self, lsof) {
   const stdout = typeof result?.stdout === 'string' ? result.stdout : '';
   const stderr = String(result?.stderr ?? '').trim();
   // lsof exits 1 with no output at all when none of the files is open. Exit 1
-  // with a message (e.g. `spawn lsof ENOENT`) is a failed look, not an answer.
-  const answered = result?.code === 0 || stdout.trim() || (result?.code === 1 && !stderr);
-  if (!answered) return { holders: [], method: 'lsof', complete: false, error: stderr || 'lsof failed' };
+  // with a message (e.g. `spawn lsof ENOENT`) is a failed look, not an answer;
+  // so is a run a timeout or a signal ended, whatever it printed, and a run
+  // without a numeric exit status (review M1).
+  if (result?.killed || result?.signal || typeof result?.code !== 'number') {
+    const why = result?.signal ? `lsof ended by ${result.signal}` : result?.killed ? 'lsof timed out' : stderr || 'lsof ended without an exit status';
+    return { holders: [], method: 'lsof', complete: false, error: why };
+  }
+  const answered = result.code === 0 || stdout.trim() || (result.code === 1 && !stderr);
+  if (!answered) return { holders: [], method: 'lsof', complete: false, error: stderr || `lsof failed (exit ${result.code})` };
   return { holders: parseLsofHolders(stdout).filter((holder) => holder.pid !== self), method: 'lsof', complete: true };
 }
 
@@ -90,7 +102,10 @@ function viaProc(files, procRoot, self, uid) {
     const held = [];
     for (const fd of fds) {
       let target;
-      try { target = fs.readlinkSync(path.join(base, 'fd', fd)); } catch { continue; }
+      try { target = fs.readlinkSync(path.join(base, 'fd', fd)); } catch (error) {
+        if (error?.code === 'ENOENT') continue; // closed while we looked
+        return null; // a link we cannot read may be a holder: ask lsof (review M1)
+      }
       const file = wanted.get(target);
       if (file && !held.includes(file)) held.push(file);
     }
