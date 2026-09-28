@@ -256,7 +256,8 @@ let _globalRoot = null;
  *  effect of nearly any ak invocation (or test), including reads sync's own
  *  `record: false` plan-computation pass never intended to persist anything
  *  (that flag can't reach globalRoot(): versions.mjs, which calls
- *  installedVersion() → globalRoot(), is out of this task's scope to touch).
+ *  installedVersion() → globalRoot(), is a separate call path this exception
+ *  does not thread `record` through — see ADR-0063).
  *  Persisting is instead the responsibility of the one caller that actually
  *  owns the branch's `refresh`/`record` contract end-to-end — status.mjs's
  *  collect() warms the in-process memo once, with the real refresh/record,

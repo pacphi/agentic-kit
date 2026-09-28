@@ -47,8 +47,8 @@ import { createHostReadinessReader } from './host-readiness.mjs';
 //                      Runtime poll read this; /api/system stays complete.
 //
 // The status rows are gathered by calling status.mjs's own collect() IN
-// PROCESS (Branch 6a Task 9 — safe only because Tasks 1-7 made a warm-cache
-// `collect({ refresh: false })` genuinely spawn-free). `fetchStatus` can still
+// PROCESS — safe only because the evidence store (ADR-0063) made a warm-cache
+// `collect({ refresh: false })` genuinely spawn-free. `fetchStatus` can still
 // be injected (tests, embedding) to bypass that call entirely.
 //
 // startDashboard() NEVER detaches — the caller runs it foreground and calls
@@ -143,9 +143,9 @@ const DASH_CSP = [
 const STATUS_TIMEOUT_MS = 30_000;
 
 /** Default status provider: call status.mjs's own collect() in process, on a
- *  warm cache (refresh:false — Tasks 1-7 made this genuinely spawn-free).
- *  Resilient — a collection failure, or one that never settles within
- *  STATUS_TIMEOUT_MS, resolves to an honest empty payload rather than
+ *  warm cache (refresh:false — the evidence store, ADR-0063, made this
+ *  genuinely spawn-free). Resilient — a collection failure, or one that never
+ *  settles within STATUS_TIMEOUT_MS, resolves to an honest empty payload rather than
  *  rejecting or hanging the server, so /api/status always answers with valid
  *  JSON. */
 function inProcessStatus(cwd) {

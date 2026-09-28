@@ -132,7 +132,7 @@ async function rebuildUnloadable(dir, runner, ledger) {
  *  `inconclusive` probe (timeout, crash) never triggers a rebuild in ruflo's tree.
  *  Whatever the FINAL state turns out to be is recorded as evidence, so a plain
  *  `ak status` right after `ak sync` shows the repaired state without needing a
- *  second `--refresh` (Task 4). */
+ *  second `--refresh` (ADR-0063). */
 async function healRuntimeContext({ context, dir }, runner, ledger) {
   if (!bsq3IsNative(dir)) {
     const built = await ensureNativeBsq3(dir, { runner, ledger });

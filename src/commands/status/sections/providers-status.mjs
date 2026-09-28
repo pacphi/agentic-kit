@@ -25,7 +25,7 @@ import { row } from '../row.mjs';
 // enabled host left out of it), built from the current enabled set.
 //
 // `integrationFacts` (from providers.mjs's detectHosts, already computed once
-// per collect() and evidence-cached — Task 5) carries `.present` for every
+// per collect() and evidence-cached — ADR-0063) carries `.present` for every
 // host regardless of enablement, so this reuses that fact instead of a second
 // `have(h.bin)` probe of the exact same PATH question; `have` stays as a
 // fallback only for a caller that passes no integrationFacts at all (a direct

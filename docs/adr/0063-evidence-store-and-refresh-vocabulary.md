@@ -96,10 +96,17 @@ still forces a real `refresh`/`record` when the user asked for one.
   use cached evidence when `!stale && !invalidated`; otherwise probe and record, whether or not
   `refresh` was requested. `refresh: true` always forces a fresh probe.
 - **Ruling B** — every new `refresh`/`record` parameter defaults to today's always-probe,
-  always-persist behavior, so no existing caller (sync, heal, `ak x verify`, `ak setup`, the
-  post-command drift nudge) needed a code change to keep working exactly as before. Only
+  always-persist behavior, so no existing caller (heal, `ak x verify`, `ak setup`, the
+  post-command drift nudge) needed a code change merely to keep working exactly as before. Only
   `status.mjs`'s `collect()` and `dashboard-server.mjs`'s in-process call (Task 9) pass `refresh`
-  explicitly as `false`.
+  explicitly as `false`, to prefer a fast warm-cache read. `sync.mjs`'s two internal `collect()`
+  calls (building its plan, and its post-heal convergence re-check) do NOT pass `refresh` at all —
+  a blanket `refresh: true` on either was tried in a later final-branch review round and reverted;
+  see "The `record` parameter" below for why, and for the narrower mechanism (`refreshPlanHosts`)
+  that fixes the same underlying gap without it. They do differ from each other on `record`: the
+  plan read passes `record: false` (still a read, never a write, as planning must be), while the
+  converge proof passes `record: true`, so a cache-miss probe it triggers is worth keeping — a
+  plain `ak status` immediately after `ak sync` reuses it instead of re-probing on its own.
 - **Ruling C** — the zero-spawn test guards the real boundary (every `node:child_process` entry
   point: `spawn`, `execFile`, `execFileSync`, `spawnSync`, plus `execSync`/`fork` added defensively
   by Task 8a), not a single library's `exec.mjs` wrapper, since ~30 files spawn directly.
@@ -115,10 +122,44 @@ controlling **only** whether a fresh probe's result gets persisted — never whe
 itself runs. This was added in a joint Task 4/5 fix round after `sync.mjs`'s `converge()` was
 found to write evidence as a side effect of its own internal plan-computation `status.collect()`
 calls (building its plan, and its post-heal convergence re-check), both before the `--dry-run`
-early return — matching Branch 0's S3/F7 "sync doing work the plan didn't announce" theme. Both of
-`sync.mjs`'s internal calls now pass `record: false`. Every other caller (`ak status`, the
-dashboard poll, `ak status --refresh`, `ak sync`'s own direct host-management calls, `ak x
-verify`, `ak setup`) keeps `record: true` and persists as designed.
+early return — matching this ADR's own "sync doing work the plan didn't announce" theme. That
+round made both of `sync.mjs`'s internal calls pass `record: false` and left their `refresh`
+argument unset (the collector's own default, `false`), which closed the unannounced-write gap but
+opened a different one: because neither call forced a fresh probe, `ak sync`'s own converge proof
+could read back a cache written *before* a repair this same run had just applied, so a host or
+daemon sync had just fixed could still show as failing — the exact defect a later final-branch
+review round found and fixed.
+
+That review round first tried adding `refresh: true` to **both** of `sync.mjs`'s internal
+`collect()` calls, on the theory that it would parallel `refreshPlanDrift`'s existing unconditional
+`force: true` for version drift. It was reverted: `collect()` threads one `refresh` flag into
+*every* evidence-gated kind it reads, not just the host/daemon ones the bug was actually about, and
+forcing all of them fresh from `sync.mjs` broke two things in practice — `ruflo-component` evidence
+(which does not route through the generic envelope's `record` gate at all; see "What is
+deliberately not folded into this store" below) got written even under `--dry-run` with
+`record: false`, and several existing tests that inject a fixed `_globalRoot` via
+`paths.mjs`'s `_setGlobalRootForTest` broke, because `refresh: true` bypasses `globalRoot()`'s
+in-memory memo (`if (_globalRoot && !refresh) return _globalRoot;`) and forces a real `npm root -g`
+regardless of what a caller had set. Both failures were real evidence the mechanism was wrong, not
+just test friction to route around.
+
+The shipped fix is narrower. `sync.mjs` gained `refreshPlanHosts(flags, cwd)`, a sibling to the
+pre-existing `refreshPlanDrift`: before the plan is read, it force-refreshes ONLY the host-related
+evidence (`hostInstallState`/`hostExecutable` for every enabled host, then one
+`collectIntegrationFacts` call for `host-setup`), each with `record: true` and `source: 'sync'`,
+and — like `refreshPlanDrift` — it is skipped entirely under `--dry-run` (same cache-staleness
+trade-off `--dry-run` already accepts for version drift). The plan-read and converge-proof
+`collect()` calls themselves keep `refresh` unset (the collector's own default, `false`); only
+their `record` differs — the plan read stays `record: false` (still a read, never a write), and
+the converge proof now passes `record: true`, so a cache-miss probe it triggers is worth keeping.
+Separately, and doing most of the actual work: the direct host-management and daemon-reap call
+sites that mutate machine state (`sync.mjs`'s `hosts` and `daemons` steps, `setup.mjs`'s
+`installEnabledAbsentHosts`, `x/host.mjs`'s `installPickAbsentHosts`, `x/daemon-gc.mjs`'s `run`)
+were extended in the same final-review round to re-probe and re-record their own evidence
+immediately after a successful install/repair/reap — closing the "recorded before the repair,
+never after" half of the bug at its source, rather than relying solely on a later forced re-read to
+paper over it. Every other caller (`ak status`, the dashboard poll, `ak status --refresh`, `ak x
+verify`, `ak setup`) keeps `record: true` and persists as designed, unaffected by any of this.
 
 ### The `source` field
 
@@ -256,8 +297,13 @@ spawn-free. Two hazards a subprocess boundary used to absorb for free, now handl
 
 Measured, real numbers (Task 9's `dashboard-status-cost.test.mjs`, folding in the plan's originally
 separate "Task 8b"): a cold-cache `/api/status` poll spawned **14** processes and returned **11,581**
-response bytes; a second, warm-cache poll spawned **zero** processes and returned a **byte-identical**
-11,581-byte payload. This is the branch's proof that the Review Focus item the whole remediation
+response bytes; a second, warm-cache poll spawned **zero** processes and returned an
+**11,581-byte** payload — byte-identical on the machine that measured it. The test itself does not
+enforce exact byte equality: it asserts the warm response stays within a budget of 10% of the cold
+response's size or 2,048 bytes, whichever is larger (`tests/kit/dashboard-status-cost.test.mjs`),
+generous enough to absorb in-process cache growth across polls without masking a real leak; the
+byte-identical figure above is an observed data point on this run, not the guarantee the test
+enforces. This is the branch's proof that the Review Focus item the whole remediation
 program was scoped around — a 30-second dashboard poll spawning processes on every tick — is
 closed. The "zero" figure is measured *after* filtering one documented, named exception: version-drift's
 `npm view` lookups, whose own `kit.json`-based cache (unchanged by this branch, see above) only
@@ -370,7 +416,8 @@ rule with this ADR's evidence store — they do not, yet.
 ### Positive
 
 - A plain `ak status` and the dashboard's 30-second poll no longer spawn processes on every call —
-  the originating Review Focus item is closed and measured (14 → 0 spawns; byte-identical payload).
+  the originating Review Focus item is closed and measured (14 → 0 spawns; the warm payload stayed
+  within the cost test's byte-size budget of the cold one).
 - One age rule, one directory layout, and one parameter contract (`refresh`/`record`/`source`) for
   every new local-probe evidence kind, instead of each check inventing its own caching (or none).
 - `--refresh` now actually reaches every local probe `ak status` performs, not just
