@@ -23,10 +23,12 @@ import { renderEvents, renderReport } from './upstream-watch/render.mjs';
 const USAGE = `usage: node scripts/upstream-watch.mjs report [--json] [--concurrency <1-16>] [--registry <file>]
        node scripts/upstream-watch.mjs check --since <iso-date> [--json] [--concurrency <1-16>] [--registry <file>]
        node scripts/upstream-watch.mjs record [--since <iso-date>] [--dry-run] [--json] [--concurrency <1-16>] [--registry <file>]
+       node scripts/upstream-watch.mjs ledger [--id <owner/repo#n>] [--event <name>] [--since <iso-date>] [--json] [--registry <file>]
 `;
 const PENDING = new Set(['watching', 'fixed-unreleased']);
 // record exits BLIND when gh, the registry, the ledger branch or every upstream thread is unreadable.
 const BLIND = 3;
+const LEDGER_EVENTS = ['reply', 'acknowledged', 'closed', 'merged', 'released', 'reopened', 'stale', 'retire-proposed', 'retest-due', 'idle', 'fired', 'dispatch-pr'];
 
 class UsageError extends Error {}
 
@@ -40,8 +42,8 @@ function sinceValue(value) {
 
 export function parseArgs(argv) {
   const [command, ...rest] = argv;
-  if (!['report', 'check', 'record'].includes(command)) throw new UsageError(command ? `unknown command ${command}` : 'missing command');
-  const options = { command, json: false, concurrency: 4, since: null, registry: null, dryRun: false };
+  if (!['report', 'check', 'record', 'ledger'].includes(command)) throw new UsageError(command ? `unknown command ${command}` : 'missing command');
+  const options = { command, json: false, concurrency: 4, since: null, registry: null, dryRun: false, id: null, event: null };
   for (let index = 0; index < rest.length; index++) {
     const flag = rest[index];
     const value = () => {
@@ -53,7 +55,12 @@ export function parseArgs(argv) {
     else if (flag === '--concurrency') options.concurrency = Number(value());
     else if (flag === '--registry') options.registry = value();
     else if (flag === '--dry-run' && command === 'record') options.dryRun = true;
-    else if (flag === '--since' && ['check', 'record'].includes(command)) options.since = sinceValue(value());
+    else if (flag === '--since' && ['check', 'record', 'ledger'].includes(command)) options.since = sinceValue(value());
+    else if (flag === '--id' && command === 'ledger') options.id = value();
+    else if (flag === '--event' && command === 'ledger') {
+      options.event = value();
+      if (!LEDGER_EVENTS.includes(options.event)) throw new UsageError(`--event must be one of ${LEDGER_EVENTS.join(', ')}`);
+    }
     else throw new UsageError(`unknown option ${flag}`);
   }
   if (!Number.isInteger(options.concurrency) || options.concurrency < 1 || options.concurrency > 16) {
@@ -208,6 +215,33 @@ async function runCheck(registry, fetcher, options, { stderr, now }) {
   return { report, offline, fetchErrors, blind };
 }
 
+async function lastRunOf(fetcher, repo, now) {
+  if (typeof fetcher.lastRun !== 'function') return null;
+  try {
+    const run = await fetcher.lastRun(repo);
+    return run ? { at: run.at, ageHours: Math.round((now.getTime() - Date.parse(run.at)) / 360_000) / 10, url: run.url } : null;
+  } catch (error) {
+    return { error: error.message };
+  }
+}
+
+async function ledgerQuery(registry, options, { stdout, stderr, now, ledgerStore }) {
+  const { branch } = registry.watchPolicy.ledger;
+  let ledger;
+  try {
+    ledger = await ledgerStore.read(branch, { now });
+  } catch (error) {
+    stderr.write(`Could not read the ledger branch ${branch}: ${error.message}\n`);
+    return BLIND;
+  }
+  const day = options.since?.slice(0, 10);
+  const matches = ledger.records.filter((item) => (!options.id || item.id === options.id)
+    && (!options.event || item.event === options.event) && (!day || item.date >= day));
+  if (options.json) stdout.write(`${JSON.stringify({ commit: ledger.commit, checkedAt: ledger.checkedAt, records: matches }, null, 2)}\n`);
+  else stdout.write(matches.length ? `${matches.map((item) => item.line).join('\n')}\n` : 'No matching records.\n');
+  return 0;
+}
+
 const WEEK = 7 * 86_400_000;
 
 function blindRecord(error, { stdout, stderr, json }, extra = {}) {
@@ -295,8 +329,10 @@ export async function main(argv, {
     return 0;
   }
   if (options.command === 'record') return record(registry, fetcher, options, { stdout, stderr, now, ledgerStore, dispatcher, sleep });
+  if (options.command === 'ledger') return ledgerQuery(registry, options, { stdout, stderr, now, ledgerStore });
   const { report, offline, fetchErrors, blind } = await runCheck(registry, fetcher, options, { stderr, now });
   if (options.command === 'report') {
+    if (!offline) report.lastRun = await lastRunOf(fetcher, registry.watchPolicy.repo, now);
     stdout.write(options.json ? `${JSON.stringify(report, null, 2)}\n` : renderReport(report));
     return 0;
   }

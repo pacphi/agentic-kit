@@ -72,6 +72,12 @@ export function renderReport(report) {
     `  registry ${report.registry.status}, last checked ${report.registry.lastCheckedAt}, last verified ${report.registry.lastVerifiedAt}; ${watched} watched, ${statuses.retired} retired`,
   ];
   if (report.mode === 'offline') lines.push('  offline: only what the registry records; replies, closures and releases were not checked');
+  if (report.lastRun?.at) {
+    lines.push(`  last successful watch run ${report.lastRun.at} (${report.lastRun.ageHours} hours ago)`);
+    if (report.lastRun.ageHours > 48) lines.push('  warning: the watch has not succeeded for more than 48 hours');
+  } else if (report.lastRun?.error) {
+    lines.push(`  warning: the last successful watch run could not be read (${report.lastRun.error})`);
+  }
   for (const error of report.registry.errors) lines.push(`  registry error: ${error}`);
   if (report.nothingToWatch) lines.push('  nothing left to watch: every upstream thread is retired');
   const width = Math.max(...report.groups.map((group) => group.label.length));

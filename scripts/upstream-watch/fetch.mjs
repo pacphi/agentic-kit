@@ -153,6 +153,13 @@ export function createFetcher({ exec = run } = {}) {
       }
       return { carrier: chain[0], carrierVersion, version, basis: trail.join(' → ') };
     },
+    /** The last successful upstream watch run in `repo`, or null when there is none. */
+    async lastRun(repo) {
+      if (!OWNER_REPO.test(repo ?? '')) throw new Error(`not an owner/repo: ${repo}`);
+      const answer = await json('gh', ['api', `repos/${repo}/actions/workflows/upstream-watch.yml/runs?status=success&per_page=1`]);
+      const run = answer?.workflow_runs?.[0];
+      return run ? { at: run.run_started_at, url: run.html_url } : null;
+    },
     async release({ channel, name }) {
       if (!PACKAGE_NAME.test(name)) throw new Error(`not a package or repository name: ${name}`);
       if (channel === 'npm') return releaseFacts('npm', await json('npm', ['view', name, 'time', 'dist-tags', '--json']));
