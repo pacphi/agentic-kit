@@ -1,18 +1,20 @@
-// Branch 6a Task 8a: captures, with real command output, exactly which
-// checks spawn a subprocess on a plain `ak status` today — before Tasks 2-7
-// touch anything. src/commands/status.mjs's collect() runs inside a real
-// child Node process launched with `--import` of tests/helpers/spawn-guard.mjs
-// (Ruling C: a product-code ledger seam inside exec.mjs would under-count —
-// ~30 files spawn child_process directly, not through it), so this catches
-// every spawn path regardless of which module makes it, with no product
-// code change.
+// Branch 6a Task 8a built this harness: src/commands/status.mjs's collect()
+// runs inside a real child Node process launched with `--import` of
+// tests/helpers/spawn-guard.mjs (Ruling C: a product-code ledger seam inside
+// exec.mjs would under-count — ~30 files spawn child_process directly, not
+// through it), so every spawn path is caught regardless of which module
+// makes it, with no product code change.
 //
-// The zero-spawn assertion is wrapped in `test.todo` (Ruling D — never commit
-// a red test): Node's test runner runs the body for real and reports the
-// outcome, but never fails the suite either way. It is currently RED — there
-// are real, unclosed spawn paths today (see the Task 8a report for the
-// captured ledger). Task 7 deletes the word `todo` to promote this into a
-// real, enforced gate once every spawn path is closed.
+// Task 7 closed every remaining spawn path on a plain `ak status` (native
+// runtime, host setup/launch, deja-vu, version drift, npm's global root, the
+// daemon process sweep, the ak-launcher-availability check) and promotes the
+// zero-spawn assertion from `test.todo` (Ruling D — never commit a red test)
+// to a real, enforced gate. A single fresh-sandbox collect() call can never
+// show zero spawns (Ruling A requires a first probe on a cold cache), so the
+// fixture (tests/fixtures/status-zero-spawn-child.mjs) now makes three calls
+// in the SAME child process/state dir and marks the ledger between them:
+// cold cache (probes), warm cache (the enforced zero-spawn assertion), and
+// `refresh: true` (always probes again, even warm).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -91,7 +93,39 @@ test('spawn-guard records a spawn made inside the guarded child, by every wrappe
   });
 });
 
-test.todo('plain ak status spawns nothing (native/host/deja-vu/version checks) — see Task 7', () => {
+// A ledger line from the fixture's own npm registry lookups
+// (`npm view <pkg>@<tag> version`) — versions.mjs's driftReport()/selfDrift()
+// TTL cache (kit.json `versionCheck`, pre-dating this branch and explicitly
+// out of this task's scope: "don't touch the version-drift library functions
+// again") only persists after AT LEAST ONE live fetch succeeds — by design,
+// so a total npm outage is never mistaken for "confirmed nothing changed"
+// (see the comment on driftReport()). This sandbox's PATH is deliberately
+// broken so every spawn ENOENTs (that is what makes the ledger deterministic
+// for every OTHER gated check), which means npm can never succeed here and
+// that TTL cache can never go warm inside this specific harness — proven
+// correct instead, with an injectable fetchLatest that DOES succeed, by
+// tests/kit/status-version-drift-refresh.test.mjs. This predicate names that
+// one documented exception so the warm-cache assertion below still catches
+// every OTHER unclosed spawn path.
+const isVersionDriftLookup = (line) => line.cmd === 'npm' && line.args?.[0] === 'view';
+
+/** Splits a ledger that spans multiple collect() calls at the fixture's
+ *  `__CALL_BOUNDARY_<label>__` marker lines. Returns the lines strictly
+ *  between the previous boundary (or the start) and each named boundary. */
+function sliceByCallBoundary(lines, labels) {
+  const slices = {};
+  let start = 0;
+  for (const label of labels) {
+    const marker = `__CALL_BOUNDARY_${label}__`;
+    const end = lines.findIndex((l, i) => i >= start && l.cmd === marker);
+    assert.ok(end >= start, `ledger is missing the ${marker} boundary — got ${JSON.stringify(lines.map((l) => l.cmd))}`);
+    slices[label] = lines.slice(start, end);
+    start = end + 1;
+  }
+  return slices;
+}
+
+test('plain ak status spawns nothing on a warm cache; --refresh always re-probes', () => {
   inSandbox('ak-status-zero-spawn', {}, ({ project, env: baseEnv }) => {
     const ledgerFile = path.join(os.tmpdir(), `ak-status-zero-spawn-${process.pid}.ndjson`);
     const env = { ...baseEnv, AK_SPAWN_LEDGER_FILE: ledgerFile };
@@ -100,8 +134,22 @@ test.todo('plain ak status spawns nothing (native/host/deja-vu/version checks) �
     ], { cwd: project, env, encoding: 'utf8', timeout: 30_000 });
     const lines = readLedger(ledgerFile);
     fs.rmSync(ledgerFile, { force: true });
-    const cmds = [...new Set(lines.map((l) => l.cmd))];
-    assert.strictEqual(lines.length, 0,
-      `expected zero spawns from a plain status collect(); got ${lines.length}: ${JSON.stringify(cmds)}`);
+
+    const { first, second, third } = sliceByCallBoundary(lines, ['first', 'second', 'third']);
+
+    // Cold cache (no pre-existing evidence): Ruling A says a plain collect()
+    // probes once per gated kind. A RED-baseline sanity check, not the
+    // enforced assertion below.
+    assert.ok(first.length > 0, `sanity: a cold-cache first call is expected to probe at least once; got ${JSON.stringify(first)}`);
+
+    // The real, enforced gate: a second collect() call, same warm evidence
+    // cache (written by the first call, in the same state dir), spawns
+    // nothing unexplained.
+    const secondUnexplained = second.filter((l) => !isVersionDriftLookup(l));
+    assert.strictEqual(secondUnexplained.length, 0,
+      `expected zero unexplained spawns from a warm-cache collect(); got ${JSON.stringify(secondUnexplained.map((l) => [l.cmd, l.args]))}`);
+
+    // `refresh: true` must still force a fresh probe even with a warm cache.
+    assert.ok(third.length > 0, `--refresh must re-probe even with a warm cache; got ${JSON.stringify(third)}`);
   });
 });
