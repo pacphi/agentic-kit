@@ -336,11 +336,19 @@ for (const [label, extra] of [
   ['AQE turned off', { aqe: false, aqeEmbedding: MANAGED_EMBEDDING }],
 ]) {
   test(`the aqe proof prints but does not remember the embedding request for ${label}`, async () => {
-    seedHome(offlineKitConfig(extra));
-    rmrf(evidence.liveCheckDir());
-    const { out } = await runVerify(['aqe']);
-    assert.match(out, /✗ live embedding request: unavailable/, 'the failed request is still printed');
-    assert.equal(evidence.readLiveCheck('aqe-embedding', {}), null);
+    // A developer shell may export AQE_EMBEDDER_* (the result then reads
+    // "unavailable" instead of "not-configured"); the test owns its environment.
+    const saved = Object.fromEntries(Object.keys(process.env).filter((key) => key.startsWith('AQE_EMBEDDER_')).map((key) => [key, process.env[key]]));
+    for (const key of Object.keys(saved)) delete process.env[key];
+    try {
+      seedHome(offlineKitConfig(extra));
+      rmrf(evidence.liveCheckDir());
+      const { out } = await runVerify(['aqe']);
+      assert.match(out, /✗ live embedding request: (unavailable|not-configured)/, 'the failed request is still printed');
+      assert.equal(evidence.readLiveCheck('aqe-embedding', {}), null);
+    } finally {
+      Object.assign(process.env, saved);
+    }
   });
 }
 
