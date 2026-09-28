@@ -87,10 +87,23 @@ test('removed dual/provider commands exit 2 and are omitted from help', () => {
 
 // docs-10: the main help lists the same status and sync flags as README's
 // command block.
-test('ak --help lists status --live and sync --skip/--json', () => {
+test('ak --help lists status --refresh[=live|machine] and sync --skip/--json', () => {
   const top = ak('--help').stdout;
   const line = (cmd) => top.split('\n').find((l) => new RegExp(`^\\s+ak ${cmd}\\s`).test(l)) ?? '';
-  assert.match(line('status'), /--live/);
+  assert.match(line('status'), /\[--json\] \[--refresh\[=live\|machine\]\]/);
+  assert.doesNotMatch(line('status'), /--live|--deep/);
   assert.match(line('sync'), /--skip SUBSYSTEM/);
   assert.match(line('sync'), /--json/);
+});
+
+test('ak status --help documents the three refresh strengths, their stages and the exit rule', () => {
+  const r = ak('status', '--help');
+  assert.equal(r.status, 0);
+  for (const text of ['--refresh[=live|machine]', '--refresh=live', '--refresh=machine', '--project-trees',
+    'Measuring the machine', 'Refreshing Maintenance evidence', 'Rebuilding the inventory', 'Running live checks',
+    'Re-checking local evidence and versions']) {
+    assert.ok(r.stdout.includes(text), `status help names ${text}`);
+  }
+  assert.match(r.stdout, /exit code (?:is )?1/);
+  assert.doesNotMatch(r.stdout, /--live\b|--deep\b/, 'only the current spellings');
 });

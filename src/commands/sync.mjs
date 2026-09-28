@@ -39,7 +39,7 @@ import { nativesStatus, securityPresent } from '../lib/natives.mjs';
 import { readJson } from '../lib/settings.mjs';
 import { appendToConfig } from '../lib/health-history.mjs';
 import * as paths from '../lib/paths.mjs';
-import { ok, warn, fail, info, bold, dim, withProgress, reportOutcome } from '../lib/output.mjs';
+import { ok, warn, fail, info, bold, dim, withProgress, reportOutcome, humanOutputToStderr } from '../lib/output.mjs';
 import { applyCodexStatusline, projectionFor } from '../lib/codex-statusline.mjs';
 import { ensureAgentBrowser } from '../lib/agent-browser.mjs';
 import { confirmCodexMcpRepairs, reconcileCodexMcp } from '../lib/codex-mcp-reconcile.mjs';
@@ -971,26 +971,6 @@ function stepTracer(state, result, capture) {
     }
   };
   return { traced, report, markFailed };
-}
-
-/** Under --json, send everything written to stdout during `fn` (ok/warn/fail/
- *  info lines, the plan listing, prompts, progress) to stderr instead, and
- *  let the step tracer collect it while `capture.chunks` is set. stdout is
- *  restored even when `fn` throws, so the one JSON result lands on it alone. */
-async function humanOutputToStderr(fn) {
-  const stdoutWrite = process.stdout.write;
-  const capture = { chunks: null };
-  // stderr.write is looked up on every call, so a caller's own wrapper still sees it.
-  const toStderr = (...args) => {
-    capture.chunks?.push(String(args[0]));
-    return Reflect.apply(process.stderr.write, process.stderr, args);
-  };
-  process.stdout.write = /** @type {typeof process.stdout.write} */ (/** @type {unknown} */ (toStderr));
-  try {
-    return await fn(capture);
-  } finally {
-    process.stdout.write = stdoutWrite;
-  }
 }
 
 /** Print the verdict; returns the exit code. `manualFailing`: a fail-level

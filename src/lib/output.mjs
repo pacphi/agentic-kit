@@ -144,6 +144,26 @@ export async function withProgress(label, thunk, {
   }
 }
 
+/** Under --json, send everything written to stdout during `fn` (ok/warn/fail/
+ *  info lines, the plan listing, prompts, progress) to stderr instead, and
+ *  let the step tracer collect it while `capture.chunks` is set. stdout is
+ *  restored even when `fn` throws, so the one JSON result lands on it alone. */
+export async function humanOutputToStderr(fn) {
+  const stdoutWrite = process.stdout.write;
+  const capture = { chunks: null };
+  // stderr.write is looked up on every call, so a caller's own wrapper still sees it.
+  const toStderr = (...args) => {
+    capture.chunks?.push(String(args[0]));
+    return Reflect.apply(process.stderr.write, process.stderr, args);
+  };
+  process.stdout.write = /** @type {typeof process.stdout.write} */ (/** @type {unknown} */ (toStderr));
+  try {
+    return await fn(capture);
+  } finally {
+    process.stdout.write = stdoutWrite;
+  }
+}
+
 /** How long the drain below is allowed to take before the process exits
  *  anyway. Security review SEC-5 (MEDIUM): the exit used to sit inside two
  *  nested write callbacks with no timeout and no fallback, so a consumer that
