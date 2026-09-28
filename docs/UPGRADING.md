@@ -99,9 +99,10 @@ Stores AQE already created in subfolders stay where they are until you merge the
 ## 2026-09-28: ak prunes redundant settings safety copies
 
 Before writing a value into a settings file it manages (Ruflo components' env, the memory pin,
-AQE's embedding-endpoint settings across Claude, Codex and OpenCode — not the AQE project-root pin
-above, which keeps its own newest-only rule), ak keeps a `<file>.ak-<tag>-backup.<uuid>` copy of
-what was there. After a write, ak removes an older copy of that same file and tag only when the
+AQE's embedding-endpoint settings in Claude's and Codex's configuration — not the AQE
+project-root pin above, which keeps its own newest-only rule), ak keeps a
+`<file>.ak-<tag>-backup.<uuid>` copy of what was there. After a write, ak removes an older copy
+of that same file and tag only when the
 copy it just made and the write's receipt already prove the older one redundant: every owned
 value in it matches the newest copy or the receipt, and its bytes are exactly what ak's own
 editor would write back. A copy still holding the user's own formatting, values, or anything the
