@@ -3,7 +3,7 @@
 > Drafted by a read-only planning pass against the `refactor/evidence-store` worktree at
 > `f3106a8c` (main tip, v4.0.0-alpha.58). Executed with superpowers:subagent-driven-development.
 
-**Spec:** [docs/superpowers/plans/2026-09-26-remediation-program.md](../2026-09-26-remediation-program.md)
+**Spec:** [docs/superpowers/plans/2026-09-26-remediation-program.md](2026-09-26-remediation-program.md)
 (Wave 3, Branch 6a), the
 [237-239 audit record](../../audits/2026-09-26-issues-237-238-239-verification-and-decisions.md)
 (Decision 9; Addendum 3 Item 4), [ADR-0062](../../adr/0062-aqe-project-store-integrity.md),
