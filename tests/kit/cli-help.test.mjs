@@ -40,7 +40,7 @@ test('mutating commands intercept both --help and -h before running', () => {
 test('every command exposes an Examples section in its help', () => {
   for (const cmd of [['setup'], ['status'], ['sync'], ['usage'], ['run'], ['dashboard'], ['uninstall'],
     ['host'], ['x', 'mcp'], ['x', 'host'],
-    ['x', 'verify'], ['x', 'reference'], ['x', 'daemon-gc'], ['x', 'aqe-store']]) {
+    ['x', 'reference'], ['x', 'daemon-gc'], ['x', 'aqe-store']]) {
     const r = ak(...cmd, '--help');
     assert.equal(r.status, 0, `${cmd.join(' ')} exit`);
     assert.match(r.stdout, /Examples:/, `${cmd.join(' ')} examples`);
@@ -71,6 +71,18 @@ test('unknown plumbing command exits 2 and prints the plumbing index', () => {
   const r = ak('x', 'bogus');
   assert.equal(r.status, 2);
   assert.match(r.stdout, /unknown plumbing command: bogus/);
+});
+
+test('ak x verify is gone: the generic unknown plumbing command error, and no help line', () => {
+  const generic = ak('x', 'bogus').stdout;
+  for (const args of [['x', 'verify'], ['x', 'verify', 'security'], ['x', 'verify', '--help']]) {
+    const r = ak(...args);
+    assert.equal(r.status, 2, `${args.join(' ')} exit`);
+    assert.match(r.stdout, /^✗ unknown plumbing command: verify$/m);
+    assert.equal(r.stdout.replace('command: verify', 'command: bogus'), generic,
+      'exactly the error any unknown name gets: no alias, no hint');
+  }
+  assert.doesNotMatch(ak('--help', '--all').stdout, /\bx verify\b/);
 });
 
 test('removed dual/provider commands exit 2 and are omitted from help', () => {
@@ -107,5 +119,18 @@ test('ak status --help documents the three refresh strengths, their stages and t
   assert.match(r.stdout, /exit code (?:is )?1/);
   assert.match(r.stdout.replace(/\s+/g, ' '), /with --refresh the JSON also lists each stage under "refresh", no stage lines print/,
     'the --json help says what a refresh prints under --json');
-  assert.doesNotMatch(r.stdout, /--live\b|--deep\b/, 'only the current spellings');
+  assert.doesNotMatch(r.stdout, /--live\b|--deep\b|\bx verify\b/, 'only the current spellings');
+});
+
+test('ak status --help documents --only: every check and slow proof, and its exit rule', () => {
+  const r = ak('status', '--help');
+  assert.equal(r.status, 0);
+  const flat = r.stdout.replace(/\s+/g, ' ');
+  assert.match(flat, /--only CHECK/);
+  for (const id of ['aqe-embedding', 'mcp', 'providers', 'security', 'deja-vu', 'memory', 'learning', 'harvest', 'aqe', 'memory-routes']) {
+    assert.match(r.stdout, new RegExp(`^\\s+${id}\\s{2,}\\S`, 'm'), `status help describes the ${id} check`);
+  }
+  assert.match(flat, /deja-vu content-free structural proof/);
+  assert.match(flat, /slow proofs run only when named/i);
+  assert.match(flat, /with --only, the exit code is 1 when a named check fails or is inconclusive/i);
 });

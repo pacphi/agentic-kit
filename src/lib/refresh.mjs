@@ -15,7 +15,16 @@ export const REFRESH_STRENGTHS = Object.freeze(['local', 'live', 'machine']);
 export const REFRESH_OPTIONS = Object.freeze({
   refresh: { type: 'string' },
   'project-trees': { type: 'boolean', default: false },
+  only: { type: 'string', multiple: true },
 });
+
+/** The names `--only` accepts (ADR-0055): the quick, free live checks the
+ *  live stage runs by default, and the slow proofs that run only when named.
+ *  They live here, not in live-checks.mjs, so a usage error is caught without
+ *  loading the checks; live-checks.mjs re-exports them. */
+export const LIVE_CHECK_IDS = Object.freeze(['aqe-embedding', 'mcp', 'providers', 'security', 'deja-vu', 'memory']);
+export const SLOW_PROOF_IDS = Object.freeze(['learning', 'harvest', 'aqe', 'memory-routes']);
+const CHECK_NAMES = new Set([...LIVE_CHECK_IDS, ...SLOW_PROOF_IDS]);
 
 /** The stage table, in run order; `runsAt` lists the strengths that run each
  *  stage. `local` runs last so its status rows include fresh live results. */
@@ -48,8 +57,25 @@ export function normalizeBareRefresh(args) {
 }
 
 /**
+ * The checks `--only` names: comma lists split, blanks dropped, repeats kept
+ * once, in the order named. Returns an error for an unknown name.
+ * @param {string|string[]|undefined} raw
+ * @returns {{ only: string[] } | { error: string }}
+ */
+function onlyFromFlag(raw) {
+  const only = [...new Set([].concat(raw).flatMap((value) => String(value).split(','))
+    .map((name) => name.trim()).filter(Boolean))];
+  if (only.length === 0) return { error: '--only needs a check name' };
+  const unknown = only.find((name) => !CHECK_NAMES.has(name));
+  if (unknown === undefined) return { only };
+  return { error: `--only: unknown check '${unknown}'; the live checks are ${LIVE_CHECK_IDS.join(', ')}; `
+    + `the slow proofs are ${SLOW_PROOF_IDS.join(', ')}` };
+}
+
+/**
  * The refresh a command was asked for. `refresh: true` (a programmatic
  * caller) is the bare strength, like `--refresh` and `--refresh=local`.
+ * `--only` names live checks, so it needs the `live` strength.
  * @param {Record<string, any>} [flags]
  * @returns {{ strength: null|'local'|'live'|'machine', projectTrees: boolean, only: string[] } | { error: string }}
  */
@@ -63,7 +89,10 @@ export function refreshRequestFromFlags(flags = {}) {
   }
   const projectTrees = flags['project-trees'] === true;
   if (projectTrees && strength !== 'machine') return { error: '--project-trees needs --refresh=machine' };
-  return { strength, projectTrees, only: [] };
+  if (flags.only == null || (Array.isArray(flags.only) && flags.only.length === 0)) return { strength, projectTrees, only: [] };
+  if (strength !== 'live') return { error: '--only needs --refresh=live' };
+  const named = onlyFromFlag(flags.only);
+  return 'error' in named ? named : { strength, projectTrees, only: named.only };
 }
 
 /**
@@ -192,10 +221,10 @@ export function cliRefreshStages({ cwd = process.cwd(), pkgRoot, deps = {} }) {
         : await facade.refreshInventory({ deep: false });
       return { ok: true, detail: null, result };
     },
-    async live() {
+    async live({ only }) {
       const { loadKitConfig } = await import('./config.mjs');
-      const runLive = deps.runLive ?? (await import('../commands/x/verify.mjs')).runLiveChecks;
-      const results = await runLive({ cfg: loadKitConfig(), cwd });
+      const runLive = deps.runLive ?? (await import('./live-checks.mjs')).runLiveChecks;
+      const results = await runLive({ cfg: loadKitConfig(), cwd, only });
       return { ok: true, detail: liveSummary(results), result: results };
     },
     async local() {
@@ -207,7 +236,7 @@ export function cliRefreshStages({ cwd = process.cwd(), pkgRoot, deps = {} }) {
 }
 
 /** "40 ms", "3 s", "2 min 5 s". */
-function formatElapsed(ms) {
+export function formatElapsed(ms) {
   const whole = Math.max(0, Math.round(ms));
   if (whole < 1000) return `${whole} ms`;
   const seconds = Math.round(whole / 1000);

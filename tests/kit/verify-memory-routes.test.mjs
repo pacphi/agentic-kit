@@ -1,4 +1,5 @@
-// `ak x verify memory` must observe CLI↔MCP routing (issue #213) and report it
+// The memory-routes proof (`ak status --refresh=live --only memory-routes`)
+// must observe CLI↔MCP routing (issue #213) and report it
 // as an observation: a known upstream split is a warning, an unusable MCP
 // server is "not observed", and neither may fail an otherwise-working suite.
 // A fake `ruflo` on PATH models the shapes with real SQLite files. Its `split`
@@ -90,7 +91,7 @@ if (argv[0] === 'mcp') {
 const HOME = sandboxHome('ak-verify-routes');
 after(() => rmrf(HOME));
 const paths = await import('../../src/lib/paths.mjs');
-const verify = await import('../../src/commands/x/verify.mjs');
+const verify = await import('../../src/lib/live-checks.mjs');
 assertSandboxed(paths, HOME);
 const PROJECT = sandboxProject('ak-verify-routes');
 after(() => rmrf(PROJECT));
@@ -124,11 +125,11 @@ async function withFakeRuflo(mode, fn) {
   }
 }
 
-const verifyMemoryWith = (mode) => withFakeRuflo(mode, () => captureLog(() => verify.run({ positionals: ['memory'] })));
+const verifyMemoryWith = (mode) => withFakeRuflo(mode, () => captureLog(() => verify.verifyMemory()));
 
 test('the observed ruflo split passes the suite, clears the mirrored proof row, and reports where the MCP write landed', posix, async () => {
   const { result, out, calls } = await verifyMemoryWith('split');
-  assert.equal(result, 0, out);
+  assert.equal(result, true, out);
   assert.match(out, /default purge left the proof row in agentdb-memory\.db/);
   assert.match(out, /isolated proof namespace purged/, 'the sibling is cleared explicitly, so the proof still leaves nothing behind');
   assert.ok(calls.includes('mcp start'), 'the route observation talks to the real MCP entry point');
@@ -139,7 +140,7 @@ test('the observed ruflo split passes the suite, clears the mirrored proof row, 
 
 test('an aligned ruflo reports observed route identity and no warning', posix, async () => {
   const { result, out } = await verifyMemoryWith('aligned');
-  assert.equal(result, 0, out);
+  assert.equal(result, true, out);
   assert.match(out, /see each other's writes in an isolated test project \(MCP backend: fake-bridge\)/);
   assert.doesNotMatch(out, /not visible/);
   assert.doesNotMatch(out, /purge left/);
@@ -147,7 +148,7 @@ test('an aligned ruflo reports observed route identity and no warning', posix, a
 
 test('an unusable MCP server is "not observed" and does not fail the suite', posix, async () => {
   const { result, out } = await verifyMemoryWith('mcp-down');
-  assert.equal(result, 0, out);
+  assert.equal(result, true, out);
   assert.match(out, /cross-interface routing not observed/);
   assert.doesNotMatch(out, /see each other's writes/);
 });
@@ -158,7 +159,7 @@ test('the isolated proof never writes into a user-set memory root', posix, async
   process.env.CLAUDE_FLOW_MEMORY_PATH = decoy;
   try {
     const { result, out } = await verifyMemoryWith('split');
-    assert.equal(result, 0, out);
+    assert.equal(result, true, out);
     assert.deepEqual(fs.readdirSync(decoy), [], 'the proof leaked rows into the user memory root');
   } finally {
     if (saved === undefined) delete process.env.CLAUDE_FLOW_MEMORY_PATH; else process.env.CLAUDE_FLOW_MEMORY_PATH = saved;
@@ -168,27 +169,27 @@ test('the isolated proof never writes into a user-set memory root', posix, async
 
 test('a failing default purge fails the suite', posix, async () => {
   const { result, out } = await verifyMemoryWith('purge-fails');
-  assert.equal(result, 1, out);
+  assert.equal(result, false, out);
   assert.match(out, /purge did not remove the proof row/);
 });
 
 test('a --path purge that cannot clear the sibling fails the suite instead of claiming cleanup', posix, async () => {
   const { result, out } = await verifyMemoryWith('purge-broken');
-  assert.equal(result, 1, out);
+  assert.equal(result, false, out);
   assert.match(out, /purge did not remove the proof row/);
   assert.doesNotMatch(out, /isolated proof namespace purged/);
 });
 
 test('a CLI retrieve that errors for another reason is "not observed", not a split', posix, async () => {
   const { result, out } = await verifyMemoryWith('retrieve-db-error');
-  assert.equal(result, 0, out);
+  assert.equal(result, true, out);
   assert.match(out, /not observed \(ruflo memory retrieve failed\)/);
   assert.doesNotMatch(out, /MCP write is not visible/);
 });
 
 test('a CLI retrieve that exits 0 without the value is a miss, not visibility', posix, async () => {
   const { result, out } = await verifyMemoryWith('retrieve-exit0-miss');
-  assert.equal(result, 0, out);
+  assert.equal(result, true, out);
   assert.match(out, /MCP write is not visible to a CLI read/);
 });
 
@@ -237,5 +238,16 @@ test('the quick live memory check proves the CLI round trip without starting an 
   }));
   assert.equal(results[0].status, 'passed', JSON.stringify(results[0]));
   assert.ok(calls.some((c) => c === 'memory purge'), 'the proof row is purged');
-  assert.ok(!calls.includes('mcp start'), 'the live check stays quick: routing is observed only by ak x verify memory');
+  assert.ok(!calls.includes('mcp start'), 'the live check stays quick: routing is observed only by the memory-routes proof');
+});
+
+test('--only memory-routes runs the memory proof with the route observation and remembers it as memory', posix, async () => {
+  const cfg = offlineKitConfig();
+  const { results, calls } = await withFakeRuflo('aligned', async () => ({
+    results: await verify.runLiveChecks({ cfg, cwd: PROJECT, only: ['memory-routes'] }),
+  }));
+  assert.equal(results[0].id, 'memory-routes');
+  assert.equal(results[0].status, 'passed', JSON.stringify(results[0]));
+  assert.ok(calls.includes('mcp start'), 'the named proof observes CLI↔MCP routing');
+  assert.ok(results[0].entries.some((e) => /see each other's writes/.test(e.text)), JSON.stringify(results[0].entries));
 });

@@ -72,8 +72,8 @@ const echo = (key) => ({ name: 'echo', arguments: { key } });
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const serverPid = (f) => Number(fs.readFileSync(path.join(f.dir, 'server.pid'), 'utf8'));
 
-// A caller that removes the server's folder right after the call (ak x verify
-// memory does) must not race a server that is still shutting down: on
+// A caller that removes the server's folder right after the call (the
+// memory-routes proof does) must not race a server that is still shutting down: on
 // Windows that removal fails with EPERM. So the server is gone, not merely
 // signalled, when callMcpTools returns, whichever way the session ended.
 for (const [label, mode, calls, status] of [

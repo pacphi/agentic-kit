@@ -32,7 +32,7 @@ after(() => rmrf(home));
 // The disposable project sets its own; nothing is inherited.
 for (const key of Object.keys(process.env)) if (/^(RUFLO_|CLAUDE_FLOW_)/.test(key)) delete process.env[key];
 const paths = await import('../../src/lib/paths.mjs');
-const { probeProjectMemoryRoutes } = await import('../../src/commands/x/verify.mjs');
+const { probeProjectMemoryRoutes } = await import('../../src/lib/live-checks.mjs');
 const { installedRoutingVersion, memoryRoutingObserved } = await import('../../src/lib/ruflo-memory-contract.mjs');
 const { createDisposableMemoryProject } = await import('./disposable-memory-project.mjs');
 

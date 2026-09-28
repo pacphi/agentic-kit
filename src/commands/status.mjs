@@ -3,10 +3,11 @@
 // see status/row.mjs). --json emits the raw rows; --hint (set by bare
 // invocation) appends exactly one suggested next action. --refresh[=live|machine]
 // runs the shared refresh stages first (ADR-0063) and reports the rows its
-// local re-check collected.
-import { glyph, dim, bold, warn, fail, humanOutputToStderr } from '../lib/output.mjs';
+// local re-check collected; --only names the live checks to run (ADR-0055).
+import { glyph, dim, bold, ok, warn, fail, humanOutputToStderr, sanitizeForTerminal } from '../lib/output.mjs';
 import {
   REFRESH_OPTIONS, REFRESH_STRENGTHS, refreshRequestFromFlags, runRefresh, cliRefreshStages, printRefreshStage,
+  formatElapsed,
 } from '../lib/refresh.mjs';
 import { loadRing, detectRegression } from '../lib/health-history.mjs';
 import { loadKitConfig } from '../lib/config.mjs';
@@ -30,8 +31,8 @@ export const help = `ak status — read-only dashboard of what's true and what's
 
 Prints one row per subsystem (versions, natives, security, learning, providers,
 …). Without --refresh it changes no configuration and runs no live check; it
-shows the last result \`ak sync\`, \`ak x verify\` or \`ak status --refresh=live\`
-remembered, with its age. It may refresh its own local evidence cache under
+shows the last result \`ak sync\` or \`ak status --refresh=live\` remembered,
+with its age. It may refresh its own local evidence cache under
 \`<state>/agentic-kit/evidence/\` so later checks stay fast. A bare \`ak\` runs
 this plus one suggested next action.
 A row's "→" fix is what \`ak sync\` performs; "→ manual:" marks a step you run
@@ -39,15 +40,21 @@ yourself (sync never plans it). --json rows carry the same distinction as
 \`repair\`: "sync", "manual", or null when there is no fix.
 
 Usage: ak status [--json] [--refresh[=live|machine]] [--project-trees]
+                 [--only CHECK[,CHECK...]]
 
 Options:
   --json                    emit the raw rows as JSON (suppresses the drift
                             nudge); with --refresh the JSON also lists each
                             stage under "refresh", no stage lines print, and
-                            anything a stage itself prints goes to stderr
+                            anything a stage itself prints goes to stderr;
+                            with --refresh=live it also carries "live", each
+                            check's result and the lines it printed
   --refresh[=live|machine]  refresh first, then report (the strengths below)
   --project-trees           with --refresh=machine: also measure the working
                             trees of your projects
+  --only CHECK[,CHECK...]   with --refresh=live: run exactly these checks
+                            (comma-separated or repeated) instead of the quick
+                            set, and print each check's own lines under it
 
 Refresh strengths (each runs its stages in this order, one line per stage):
   --refresh          Refreshing Maintenance evidence, Rebuilding the inventory,
@@ -56,12 +63,9 @@ Refresh strengths (each runs its stages in this order, one line per stage):
                      components, native runtime, host setup, deja-vu, version
                      drift and the rest)
   --refresh=live     the same, plus Running live checks before the re-check:
-                     the quick, free checks (AQE embedding request for a
-                     kit-managed backend, Codex MCP when Codex is enabled,
-                     provider wiring, security packages, deja-vu when enabled,
-                     and a memory round trip in a temp dir) in parallel, each
-                     bounded by a timeout that reads inconclusive; the results
-                     are remembered
+                     the quick, free checks below that apply, in parallel,
+                     each bounded by a minute that reads inconclusive, one
+                     line per check; the results are remembered
   --refresh=machine  Measuring the machine first (minutes: it walks the disk),
                      then the --refresh stages, rebuilding the inventory from
                      the new measurement; it runs no live checks
@@ -69,15 +73,40 @@ The Maintenance and inventory stages save what they find under
 \`<state>/agentic-kit/maintenance/\`. A failed machine measurement skips those
 two stages; the local re-check always runs.
 
+Live checks (quick and free):
+  aqe-embedding  the AQE live embedding request (a backend the kit manages)
+  mcp            Codex MCP initialize/tools-list (when Codex is enabled)
+  providers      kit config matches installed CLIs; ruflo/aqe see the wiring
+                 (checked from the project root, whatever folder you run in)
+  security       security packages load; defend flags injection, passes clean
+  deja-vu        content-free structural proof of CLI, doctor, wiring and
+                 index (when deja-vu is enabled or ak owns it)
+  memory         store, retrieve and purge a value in a temporary folder
+Slow proofs run only when named with --only, up to six minutes each:
+  learning       train a cycle in a temporary folder; assert patterns persist
+  harvest        record an outcome and distill through Ruflo, in an isolated
+                 store
+  aqe            storage, embedding configuration and provenance, and the
+                 browser payload
+  memory-routes  the memory round trip, plus whether CLI and MCP see each
+                 other's writes (remembered as the memory check)
+A named check runs even when it would not apply; its result is remembered only
+when it applies. learning and harvest are never remembered.
+
 The exit code is 1 when a row fails or a refresh stage fails, and 2 for a
 usage error. A failed live check is a warning and leaves the exit code as it
-was.
+was; with --only, the exit code is 1 when a named check fails or is
+inconclusive.
 
 Examples:
   ak status                    quick dashboard
   ak status --refresh          re-check the cached evidence, then report
   ak status --refresh=live     also run the quick live checks, then report
   ak status --refresh=machine  also measure the machine (slow), then report
+  ak status --refresh=live --only security,memory
+                               run two checks; exit 1 unless both pass
+  ak status --refresh=live --only learning
+                               the slow learning proof
   ak status --json             machine-readable rows`;
 
 // Generalizes the HOST_DETAIL_RENDERERS contract (status/host-detail.mjs) to
@@ -179,12 +208,49 @@ async function refreshedRows({ request, stages, pkgRoot, onStage }) {
   return { rows, refresh, live };
 }
 
+const entryGlyph = (level) => (level === 'info' ? dim('ℹ') : glyph(level));
+
+/** One line per live check; with --only, the lines each check printed are
+ *  indented under it (its heading is the check line itself). */
+function printLiveChecks(results, { detail }) {
+  for (const { id, status, reason, elapsedMs = 0, entries = [] } of results) {
+    (status === 'passed' ? ok : warn)(`${id} ${status} (${formatElapsed(elapsedMs)})${reason ? ` — ${reason}` : ''}`);
+    if (!detail) continue;
+    for (const { level, text } of entries) {
+      if (level !== 'heading') console.log(`    ${entryGlyph(level)} ${sanitizeForTerminal(text)}`);
+    }
+  }
+}
+
+/** The human renderer: the shared stage lines, with the live checks' own
+ *  lines printed under the live stage's line. The live stage is wrapped to
+ *  keep its results, which the stage events do not carry. */
+function humanStages(stages, { only }) {
+  if (typeof stages.live !== 'function') return { stages, onStage: printRefreshStage };
+  let results = null;
+  const live = async (ctx) => {
+    const outcome = await stages.live(ctx);
+    results = outcome?.result;
+    return outcome;
+  };
+  const onStage = (event) => {
+    printRefreshStage(event);
+    if (event.id === 'live' && event.state === 'done' && Array.isArray(results)) {
+      printLiveChecks(results, { detail: only.length > 0 });
+    }
+  };
+  return { stages: { ...stages, live }, onStage };
+}
+
 /** Under --json with a refresh, every human line (stage output, warnings)
  *  goes to stderr while the stages run, so stdout carries one JSON object. */
 async function runRefreshed({ flags, pkgRoot, request, deps }) {
   const stages = deps.refreshStages ?? cliRefreshStages({ cwd: process.cwd(), pkgRoot });
-  if (!flags.json) return report(flags, await refreshedRows({ request, stages, pkgRoot, onStage: printRefreshStage }));
-  return report(flags, await humanOutputToStderr(() => refreshedRows({ request, stages, pkgRoot, onStage: undefined })));
+  if (!flags.json) {
+    const human = humanStages(stages, request);
+    return report(flags, await refreshedRows({ request, pkgRoot, ...human }), request);
+  }
+  return report(flags, await humanOutputToStderr(() => refreshedRows({ request, stages, pkgRoot, onStage: undefined })), request);
 }
 
 /** A refresh takes no positional. `ak status --refresh live` parses as a bare
@@ -218,11 +284,16 @@ const refreshSummary = ({ strength, ok, stages }) => ({
   strength, ok, stages: stages.map(({ id, label, state, detail, elapsedMs }) => ({ id, label, state, detail, elapsedMs })),
 });
 
+/** Whether a check `--only` named did not pass (failed, inconclusive, or no
+ *  result at all). */
+const namedCheckFailed = (only, live) => only.some((id) => live?.find((r) => r.id === id)?.status !== 'passed');
+
 /** Print the rows (or the one JSON object) and return the exit code: 1 when a
- *  row fails or a refresh stage failed, else 0. */
-function report(flags, { rows, refresh = null, live = null }) {
+ *  row fails, a refresh stage failed, or a check `--only` named did not pass;
+ *  else 0. Without --only a failed live check is a warning only. */
+function report(flags, { rows, refresh = null, live = null }, { only = [] } = {}) {
   const worst = worstLevel(rows);
-  const code = worst === 'fail' || (refresh && !refresh.ok) ? 1 : 0;
+  const code = worst === 'fail' || (refresh && !refresh.ok) || namedCheckFailed(only, live) ? 1 : 0;
 
   if (flags.json) {
     console.log(JSON.stringify({

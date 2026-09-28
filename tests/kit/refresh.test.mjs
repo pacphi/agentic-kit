@@ -34,6 +34,7 @@ test('the strengths, options and stage table are the shared vocabulary', () => {
   assert.deepEqual(REFRESH_OPTIONS, {
     refresh: { type: 'string' },
     'project-trees': { type: 'boolean', default: false },
+    only: { type: 'string', multiple: true },
   });
   assert.deepEqual(REFRESH_STAGES.map(({ id, label, runsAt }) => [id, label, runsAt]), [
     ['machine', 'Measuring the machine', ['machine']],
@@ -234,8 +235,14 @@ test('cliRefreshStages: live runs the live checks with this config and cwd; loca
   const [, liveOptions] = calls[2];
   assert.equal(liveOptions.cwd, PROJECT);
   assert.deepEqual(liveOptions.cfg, loadKitConfig(), 'the live checks read the kit config, as `ak status` always passed it');
+  assert.deepEqual(liveOptions.only, [], 'no names: the quick checks that apply');
   assert.equal(outcome.stages.find((s) => s.id === 'live').result, live);
   assert.equal(outcome.ok, true, 'a failed live check is a finding, not a failed stage');
+
+  const named = fakeDeps();
+  await runRefresh({ strength: 'live', only: ['security', 'learning'], stages: cliRefreshStages({ cwd: PROJECT, pkgRoot: PKG_ROOT, deps: named.deps }) });
+  assert.deepEqual(named.calls.find(([name]) => name === 'runLive')[1].only, ['security', 'learning'],
+    'the live stage runs exactly the named checks');
 });
 
 test('cliRefreshStages refuses a Maintenance service or facade injected without the other', () => {

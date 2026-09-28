@@ -1,5 +1,5 @@
-// Live-check evidence (decision 9a, #237 S4): `ak sync` and `ak x verify`
-// remember what their live checks found, and the read-only `ak status` shows
+// Live-check evidence (decision 9a, #237 S4): `ak sync` and
+// `ak status --refresh=live` remember what their live checks found, and the read-only `ak status` shows
 // that result with its age instead of never learning it. Status itself never
 // probes, a configuration change invalidates a result, and an old result is
 // labelled stale rather than trusted.
@@ -16,6 +16,7 @@ const HOME = sandboxHome('ak-live-evidence');
 delete process.env.AQE_EMBEDDER_ENDPOINT;
 const paths = await import('../../src/lib/paths.mjs');
 const evidence = await import('../../src/lib/live-check-evidence.mjs');
+const { writeEvidence } = await import('../../src/lib/evidence.mjs');
 const aqeSection = (await import('../../src/commands/status/sections/aqe.mjs')).default;
 const { SYNC_STEPS } = await import('../../src/commands/sync.mjs');
 assertSandboxed(paths, HOME);
@@ -62,7 +63,7 @@ test('no recorded result reads as null, and a corrupt file never throws', () => 
 
 test('a changed configuration invalidates the result instead of hiding it', () => {
   reset();
-  evidence.recordLiveCheck({ id: 'providers', status: 'passed', source: 'verify', inputsKey: 'before' }, { now: NOW });
+  evidence.recordLiveCheck({ id: 'providers', status: 'passed', source: 'status-refresh-live', inputsKey: 'before' }, { now: NOW });
   const got = evidence.readLiveCheck('providers', { inputsKey: 'after', now: NOW + MINUTE });
   assert.equal(got.invalidated, true);
   assert.equal(got.status, 'passed');
@@ -70,7 +71,7 @@ test('a changed configuration invalidates the result instead of hiding it', () =
 
 test('a result older than the TTL is stale', () => {
   reset();
-  evidence.recordLiveCheck({ id: 'security', status: 'passed', source: 'verify', inputsKey: 'k' }, { now: NOW });
+  evidence.recordLiveCheck({ id: 'security', status: 'passed', source: 'status-refresh-live', inputsKey: 'k' }, { now: NOW });
   assert.equal(evidence.readLiveCheck('security', { inputsKey: 'k', now: NOW + evidence.LIVE_CHECK_TTL_MS + 1 }).stale, true);
   assert.equal(evidence.readLiveCheck('security', { inputsKey: 'k', now: NOW + 10 * MINUTE, ttlMs: 5 * MINUTE }).stale, true);
   assert.equal(evidence.readLiveCheck('security', { inputsKey: 'k', now: NOW + MINUTE }).stale, false);
@@ -81,13 +82,17 @@ test('the record boundary rejects unknown ids, statuses and sources', () => {
   assert.throws(() => evidence.recordLiveCheck({ id: '../../etc', status: 'passed', source: 'sync', inputsKey: 'k' }), TypeError);
   assert.throws(() => evidence.recordLiveCheck({ id: 'mcp', status: 'green', source: 'sync', inputsKey: 'k' }), TypeError);
   assert.throws(() => evidence.recordLiveCheck({ id: 'mcp', status: 'passed', source: 'dashboard', inputsKey: 'k' }), TypeError);
+  for (const retired of ['verify', 'status-live']) {
+    assert.throws(() => evidence.recordLiveCheck({ id: 'mcp', status: 'passed', source: retired, inputsKey: 'k' }), TypeError,
+      `nothing records under the retired source ${retired}`);
+  }
   assert.equal(fs.existsSync(evidence.liveCheckDir()), false, 'a rejected record writes nothing');
 });
 
 test('a stored reason is stripped of control characters and bounded', () => {
   reset();
   const esc = String.fromCharCode(27);
-  evidence.recordLiveCheck({ id: 'memory', status: 'failed', source: 'verify', inputsKey: 'k',
+  evidence.recordLiveCheck({ id: 'memory', status: 'failed', source: 'status-refresh-live', inputsKey: 'k',
     reason: `${esc}[2Jbad‮ ${'x'.repeat(500)}` }, { now: NOW });
   const got = evidence.readLiveCheck('memory', { inputsKey: 'k', now: NOW });
   assert.ok(!got.reason.includes(esc) && !got.reason.includes('‮'));
@@ -96,7 +101,7 @@ test('a stored reason is stripped of control characters and bounded', () => {
 
 test('reading evidence never writes', () => {
   reset();
-  evidence.recordLiveCheck({ id: 'mcp', status: 'passed', source: 'verify', inputsKey: 'old' }, { now: NOW });
+  evidence.recordLiveCheck({ id: 'mcp', status: 'passed', source: 'status-refresh-live', inputsKey: 'old' }, { now: NOW });
   const before = snapshot(HOME);
   evidence.readLiveCheck('mcp', { inputsKey: 'new', now: NOW + 3 * evidence.LIVE_CHECK_TTL_MS });
   assertUnchanged(before, HOME, 'status reads evidence read-only, even when it is invalidated or stale');
@@ -107,7 +112,7 @@ test('a write that cannot land reports false instead of throwing', () => {
   fs.mkdirSync(path.dirname(evidence.liveCheckDir()), { recursive: true });
   fs.writeFileSync(evidence.liveCheckDir(), 'a file where the directory should be');
   try {
-    assert.equal(evidence.recordLiveCheck({ id: 'mcp', status: 'passed', source: 'verify', inputsKey: 'k' }), false);
+    assert.equal(evidence.recordLiveCheck({ id: 'mcp', status: 'passed', source: 'status-refresh-live', inputsKey: 'k' }), false);
   } finally { rmrf(evidence.liveCheckDir()); }
 });
 
@@ -132,6 +137,21 @@ test('every id has a key builder that never throws', () => {
   const withoutCodex = offlineKitConfig({ integrations: { hosts: { claude: true, codex: false } } });
   assert.notEqual(evidence.liveCheckInputsKey('mcp', { cfg, cwd: PROJECT }),
     evidence.liveCheckInputsKey('mcp', { cfg: withoutCodex, cwd: PROJECT }), 'toggling a host invalidates the MCP result');
+});
+
+test('a result recorded by an earlier live check still reads back, labelled without naming a command', () => {
+  reset();
+  for (const source of ['verify', 'status-live']) {
+    writeEvidence('live-check', 'security', { source, inputsKey: 'k', inputs: null,
+      result: { status: 'failed', reason: 'defend ambiguous' } }, { now: NOW });
+    const got = evidence.readLiveCheck('security', { inputsKey: 'k', now: NOW + 3 * MINUTE });
+    assert.equal(got.source, source);
+    assert.equal(evidence.describeLiveCheck(got, { recheck: 'ak status --refresh=live' }),
+      'last live check failed 3m ago (an earlier live check): defend ambiguous');
+  }
+  evidence.recordLiveCheck({ id: 'security', status: 'passed', source: 'status-refresh-live', inputsKey: 'k' }, { now: NOW });
+  assert.equal(evidence.describeLiveCheck(evidence.readLiveCheck('security', { inputsKey: 'k', now: NOW + 3 * MINUTE }),
+    { recheck: 'ak status --refresh=live' }), 'last live check passed 3m ago (ak status --refresh=live)');
 });
 
 test('ages read in human units', () => {
@@ -192,7 +212,7 @@ test('a result from a different configuration is reported as invalidated', async
   const r = await embeddingRow({ record: { status: 'failed', reason: 'endpoint-unreachable', inputsKey: 'from-another-config' } });
   assert.equal(r.level, 'info');
   assert.match(r.message, /configuration changed since the last live check/);
-  assert.match(r.message, /ak x verify aqe/);
+  assert.match(r.message, /re-check with ak status --refresh=live --only aqe/);
   assert.doesNotMatch(r.message, /endpoint-unreachable/, 'an invalidated reason must not be presented as current');
 });
 

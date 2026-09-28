@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { aqeEmbeddingConfiguration, classifyAqeStartup, probeAqeBrowser } from '../../src/lib/aqe-readiness.mjs';
 import { probeMcp } from '../../src/lib/mcp-probe.mjs';
-import { verifyMcp } from '../../src/commands/x/verify.mjs';
+import { verifyMcp } from '../../src/lib/live-checks.mjs';
 
 test('missing transformer package is distinct from endpoint configuration and live readiness', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aqe-config-test-'));

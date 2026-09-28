@@ -45,7 +45,7 @@ test('a Git repository and a plain work folder keep their own .swarm', (t) => {
   assert.equal(rufloMemoryLocation(plain, { home }).root, plain);
 });
 
-test('a disposable folder under the temporary root is a plain work folder (ak x verify memory stays isolated)', (t) => {
+test('a disposable folder under the temporary root is a plain work folder (the memory proof stays isolated)', (t) => {
   const home = sandbox(t);
   const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ak-verify-like-')));
   t.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
@@ -61,7 +61,7 @@ test('a disposable folder under the temporary root is a plain work folder (ak x 
 // security-verify-memory-user-store: Windows' default %TEMP% lies inside
 // %LOCALAPPDATA% (a tool folder), and a POSIX TMPDIR can lie inside ~/.cache.
 // A disposable project below the temporary root is still ordinary work: it
-// must keep its own store, or ak x verify memory writes its proof rows into
+// must keep its own store, or the memory proof writes its proof rows into
 // the real user-level store.
 test('a disposable folder below a temporary root inside a tool folder keeps its own store', (t) => {
   const home = sandbox(t);

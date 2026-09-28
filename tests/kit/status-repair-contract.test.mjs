@@ -92,7 +92,7 @@ test('with only an info-level manual fix left, sync plans nothing and reports th
   const { result, out } = await inProject(() => captureLog(() => sync.run({
     flags: FLAGS(), pkgRoot: PKG_ROOT,
     collectFn: async () => [
-      row('aqe', 'info', 'readiness unverified', 'run: ak x verify aqe', { repair: 'manual' }),
+      row('aqe', 'info', 'readiness unverified', 'run: ak status --refresh=live --only aqe', { repair: 'manual' }),
     ],
   })));
   assert.equal(result, 0);

@@ -8,9 +8,9 @@
 // path and, with the native bridge, use agentdb-memory.db only. So a CLI write is
 // visible to MCP and an MCP write is not visible to a CLI read.
 // Evidence:
-//   3.42.4 darwin — `ak x verify memory` and hand-run cross-process probes, plus
+//   3.42.4 darwin — the memory-routes proof and hand-run cross-process probes, plus
 //     that release's source (2026-09-20).
-//   3.45.0 darwin — the verify suite's own environment in a disposable project
+//   3.45.0 darwin — the memory-routes proof's own environment in a disposable project
 //     (2026-09-26): CLI store → both files; MCP store → agentdb-memory.db, backend
 //     "sqlite (bridge, brute-force cosine)"; MCP read of the CLI key found it; CLI
 //     read of the MCP key "Key not found" plus Ruflo's warning naming the unread
@@ -20,7 +20,8 @@
 // neighbouring releases are NOT inferred. Without the native bridge (default on
 // Windows, or after an init failure) MCP falls back to memory.db, which is why
 // the claim names the bridge and why Windows and Linux are unobserved.
-// Add a pair only after `ak x verify memory` shows the same routing there.
+// Add a pair only after `ak status --refresh=live --only memory-routes` shows
+// the same routing there.
 // scripts/ruflo-memory-routing-repro.mjs reproduces it through the public CLI and
 // MCP server only, for an upstream-shareable record.
 import { installedVersion } from './versions.mjs';
@@ -48,6 +49,6 @@ export function twoStoreMessage(cliVersion, platform = process.platform) {
   }
   return 'two project memory stores coexist; preserve both. With the native bridge, CLI memory commands read '
     + 'memory.db and MCP memory tools use agentdb-memory.db, so a read through one does not cover the other; '
-    + 'CLI --path selects the other store. `ak x verify memory` observes this for the installed Ruflo. '
+    + 'CLI --path selects the other store. `ak status --refresh=live --only memory-routes` observes this for the installed Ruflo. '
     + 'See Troubleshooting: Ruflo memory stores and routing';
 }

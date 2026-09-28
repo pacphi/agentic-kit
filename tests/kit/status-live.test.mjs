@@ -1,5 +1,5 @@
 // `ak status --refresh=live` (decision 9b, #237 S4; ADR-0063): an opt-in run of
-// the quick, free `ak x verify` checks — the same functions, no second copy — in parallel, each
+// the quick, free live checks (src/lib/live-checks.mjs) in parallel, each
 // under its own timeout (a timeout reads inconclusive, never failed), recorded
 // in the live-check evidence store. Plain `ak status` and the dashboard never
 // run them; they show the remembered results with their age.
@@ -18,7 +18,7 @@ const HOME = sandboxHome('ak-status-live');
 delete process.env.AQE_EMBEDDER_ENDPOINT;
 const paths = await import('../../src/lib/paths.mjs');
 const evidence = await import('../../src/lib/live-check-evidence.mjs');
-const verify = await import('../../src/commands/x/verify.mjs');
+const verify = await import('../../src/lib/live-checks.mjs');
 const status = await import('../../src/commands/status.mjs');
 const refresh = await import('../../src/lib/refresh.mjs');
 const { loadKitConfig } = await import('../../src/lib/config.mjs');
@@ -49,7 +49,7 @@ test('the default set is the quick, free checks that apply to this configuration
   }
 });
 
-test('checks run in parallel and their results are remembered as status-live', async () => {
+test('checks run in parallel and their results are remembered as status-refresh-live', async () => {
   reset();
   let started = 0;
   let release;
@@ -66,7 +66,7 @@ test('checks run in parallel and their results are remembered as status-live', a
   assert.equal(out, '', 'check output is captured, not printed into the status table');
   const security = evidence.readLiveCheck('security', {
     inputsKey: evidence.liveCheckInputsKey('security', { cfg, cwd: PROJECT }) });
-  assert.equal(security.source, 'status-live');
+  assert.equal(security.source, 'status-refresh-live');
   assert.equal(security.status, 'failed');
   assert.equal(security.invalidated, false);
   assert.equal(evidence.readLiveCheck('memory', {}).status, 'passed');
@@ -150,7 +150,7 @@ test('the provider check never initializes AQE in a project that has none', { sk
 test('the live-checks section shows only remembered results, each with its age', async () => {
   reset();
   assert.deepEqual(await liveSection.collect({ cfg, cwd: PROJECT }), [], 'no evidence, no rows');
-  const record = (id, status, reason, at = Date.now() - 3 * 60_000) => evidence.recordLiveCheck({ id, status, reason, source: 'status-live',
+  const record = (id, status, reason, at = Date.now() - 3 * 60_000) => evidence.recordLiveCheck({ id, status, reason, source: 'status-refresh-live',
     inputsKey: evidence.liveCheckInputsKey(id, { cfg, cwd: PROJECT }) }, { now: at });
   record('security', 'failed', '@claude-flow/security missing');
   record('memory', 'passed', null);
@@ -158,13 +158,13 @@ test('the live-checks section shows only remembered results, each with its age',
   const rows = await liveSection.collect({ cfg, cwd: PROJECT });
   assert.deepEqual(rows.map((r) => [r.subsystem, r.level, r.fix]),
     [['live-checks', 'warn', null], ['live-checks', 'ok', null]], 'aqe-embedding stays in its own row');
-  assert.match(rows[0].message, /^security: last live check failed 3m ago \(ak status --live\): @claude-flow\/security missing$/);
+  assert.match(rows[0].message, /^security: last live check failed 3m ago \(ak status --refresh=live\): @claude-flow\/security missing$/);
   assert.match(rows[1].message, /^memory: last live check passed 3m ago/);
 });
 
 test('a result the configuration no longer matches points at the live refresh', async () => {
   reset();
-  evidence.recordLiveCheck({ id: 'memory', status: 'passed', reason: null, source: 'status-live', inputsKey: 'another-configuration' });
+  evidence.recordLiveCheck({ id: 'memory', status: 'passed', reason: null, source: 'status-refresh-live', inputsKey: 'another-configuration' });
   const [memory] = await liveSection.collect({ cfg, cwd: PROJECT });
   assert.match(memory.message, /^memory: configuration changed since the last live check \(just now\); re-check with ak status --refresh=live$/);
 });
@@ -219,7 +219,7 @@ test('status --refresh=live runs the checks before the local re-check, so the ro
   const runLive = async ({ cfg: seen, cwd }) => {
     seenCfg = seen;
     assert.equal(cwd, fs.realpathSync(PROJECT));
-    evidence.recordLiveCheck({ id: 'security', status: 'failed', reason: 'defend ambiguous', source: 'status-live',
+    evidence.recordLiveCheck({ id: 'security', status: 'failed', reason: 'defend ambiguous', source: 'status-refresh-live',
       inputsKey: evidence.liveCheckInputsKey('security', { cfg: seen, cwd }) });
     return [{ id: 'security', status: 'failed', reason: 'defend ambiguous', elapsedMs: 5 }];
   };
@@ -227,7 +227,7 @@ test('status --refresh=live runs the checks before the local re-check, so the ro
   assert.deepEqual(seenCfg, loadKitConfig(), 'the live checks get the kit config');
   assert.match(out, /^Running live checks…\n✓ Running live checks \(\d+ ms\): 1 failed$/m,
     'the start of the live checks is announced, then their result');
-  assert.match(out, /security: last live check failed just now \(ak status --live\): defend ambiguous/);
+  assert.match(out, /security: last live check failed just now \(ak status --refresh=live\): defend ambiguous/);
   assert.equal(result, failedRows(out), 'a failed live check is a warning; only a failing row sets the exit code');
 });
 

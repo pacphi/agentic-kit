@@ -1,13 +1,18 @@
-// Live-check evidence (decision 9a of the 2026-09-26 audit, #237 S4): the one
-// store for what a LIVE check last found. `ak sync`'s embedding step and the
-// `ak x verify` suites write it; the read-only `ak status` (and the dashboard,
-// which renders status rows) read it and show each result with its age.
-// Status never probes to fill it.
+// Live-check evidence (decision 9a of the 2026-09-26 audit, #237 S4; ADR-0055):
+// the one store for what a LIVE check last found. `ak sync`'s embedding step
+// and `ak status --refresh=live` write it; a plain `ak status` (and the
+// dashboard, which renders status rows) reads it and shows each result with
+// its age. Status never probes to fill it.
 //
 // One small JSON file per check id under `<stateBase>/agentic-kit/evidence/live-check/`,
 // via the shared evidence envelope (evidence.mjs). Per-id files mean two
-// processes recording different checks at once (a sync and a verify, or the
-// parallel checks of `ak status --live`) cannot lose each other's results.
+// processes recording different checks at once (a sync and a live refresh, or
+// the parallel checks of one live refresh) cannot lose each other's results.
+//
+// A record's `source` says what wrote it: `sync` or `status-refresh-live`.
+// Records written before the live checks moved into `ak status --refresh=live`
+// carry `verify` or `status-live`; they still read back (they expire within a
+// day) and are labelled "an earlier live check", but nothing writes them.
 //
 // A record carries an `inputsKey`: a short hash of the configuration (and, for
 // package-bound checks, the installed ruflo version) the check ran against.
@@ -26,7 +31,9 @@ import { warn } from './output.mjs';
 /** The checks whose results are remembered: the quick, free live checks. */
 export const LIVE_CHECK_IDS = Object.freeze(['aqe-embedding', 'mcp', 'providers', 'security', 'deja-vu', 'memory']);
 const STATUSES = new Set(['passed', 'failed', 'inconclusive']);
-const SOURCES = new Set(['sync', 'verify', 'status-live']);
+/** The sources a record is written with, and the ones it may still be read with. */
+const WRITE_SOURCES = new Set(['sync', 'status-refresh-live']);
+const SOURCES = new Set([...WRITE_SOURCES, 'verify', 'status-live']);
 /** Same window as ADR-0058's evidence (EVIDENCE_STALE_MS in ruflo-components/evidence.mjs). */
 export const LIVE_CHECK_TTL_MS = 24 * 3600_000;
 const REASON_MAX = 200;
@@ -52,7 +59,7 @@ function cleanReason(reason) {
 /**
  * Remember one live-check result. Invalid input is a programming error and
  * throws; an unwritable store returns false (the caller says so) and never
- * fails the sync or verify that produced the result.
+ * fails the sync or live refresh that produced the result.
  * @param {{id:string,status:string,reason?:string|null,source:string,inputsKey:string}} result
  * @param {{now?:number}} [options]
  * @returns {boolean}
@@ -60,7 +67,7 @@ function cleanReason(reason) {
 export function recordLiveCheck({ id, status, reason = null, source, inputsKey }, { now = Date.now() } = {}) {
   assertKnownId(id);
   if (!STATUSES.has(status)) throw new TypeError(`unknown live check status: ${String(status).slice(0, 40)}`);
-  if (!SOURCES.has(source)) throw new TypeError(`unknown live check source: ${String(source).slice(0, 40)}`);
+  if (!WRITE_SOURCES.has(source)) throw new TypeError(`unknown live check source: ${String(source).slice(0, 40)}`);
   if (typeof inputsKey !== 'string' || !inputsKey) throw new TypeError('live check inputsKey is required');
   return writeEvidence('live-check', id,
     { source, inputsKey, inputs: null, result: { status, reason: cleanReason(reason) } }, { now });
@@ -160,7 +167,7 @@ export function embeddingCheckOutcome(result) {
   return { status: 'failed', reason: result.evidence?.reason ?? (firstSentence(result.detail) || 'embedding setup incomplete') };
 }
 
-/** A `probeAqeEmbeddings` result as a live-check outcome (verify's reading). */
+/** A `probeAqeEmbeddings` result as a live-check outcome (the live checks' reading). */
 export function embeddingProbeOutcome(live) {
   return live?.status === 'passed'
     ? { status: 'passed', reason: null }
@@ -194,7 +201,10 @@ export function formatLiveCheckAge(ms) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-const SOURCE_LABEL = { sync: 'ak sync', verify: 'ak x verify', 'status-live': 'ak status --live' };
+const EARLIER = 'an earlier live check';
+const SOURCE_LABEL = {
+  sync: 'ak sync', 'status-refresh-live': 'ak status --refresh=live', verify: EARLIER, 'status-live': EARLIER,
+};
 
 /**
  * One status clause for a remembered result. An invalidated result shows no

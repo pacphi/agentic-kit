@@ -57,7 +57,6 @@ const PLUMBING = Object.assign(Object.create(null), {
   'skills': () => import('../src/commands/x/skills.mjs'),
   'codex-context': () => import('../src/commands/x/codex-context.mjs'),
   'statusline': () => import('../src/commands/x/statusline.mjs'),
-  'verify': () => import('../src/commands/x/verify.mjs'),
 });
 
 const HELP = `agentic-kit — machine-level setup, healing, and verification for ruflo + agentic-qe
@@ -106,7 +105,6 @@ Plumbing (power users) — each takes --help:
   ak x skills plan             read-only project skill evidence + remediation plan
   ak x codex-context [status|max|off]   manage native Codex context capacities
   ak x statusline [status|codex native|codex extended|codex off]   manage Codex's native user status line
-  ak x verify [learning|security|aqe|providers|harvest|all]   deep proofs (slow, spawns real CLIs)
   ak x improvement-eval [...]  causal self-improvement eval (route Q-learner)`;
 
 /** True if the arg list is asking for help rather than an action. */

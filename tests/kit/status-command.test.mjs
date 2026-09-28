@@ -529,7 +529,7 @@ test('the AQE readiness hint is a manual step, never a sync plan item', async ()
   seedHome();
   fs.mkdirSync(paths.projectAqeDir(PROJECT), { recursive: true });
   try {
-    const hint = rowsFor(await collect(), 'aqe').find((r) => /ak x verify aqe/.test(r.fix ?? ''));
+    const hint = rowsFor(await collect(), 'aqe').find((r) => /ak status --refresh=live --only aqe/.test(r.fix ?? ''));
     assert.ok(hint, 'the initialized-project hint must surface');
     assert.equal(hint.repair, 'manual');
   } finally {
