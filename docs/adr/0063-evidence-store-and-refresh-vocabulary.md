@@ -103,7 +103,7 @@ still forces a real `refresh`/`record` when the user asked for one.
   `installEnabledAbsentHosts` was separately extended, in the same final-review round, to re-probe
   and re-record `host-install-method`/`host-setup` evidence immediately after a successful install
   (`hostInstallState(h, { refresh: true, record: true, source: 'setup' })` and
-  `collectIntegrationFacts({ cwd, cfg, refresh: true, record: true, source: 'setup' })`,
+  `collectIntegrationFacts({ cfg, refresh: true, record: true, source: 'setup' })`,
   `setup.mjs:398,407`) — see "The `record` parameter" below for the same pattern applied to sync's
   and `x/host.mjs`'s own install/repair/reap call sites. Only `status.mjs`'s `collect()` and
   `dashboard-server.mjs`'s in-process call (Task 9) pass `refresh`
@@ -401,21 +401,26 @@ state is measured by the controller, not invented by a task).
 Branch 6b (`feat/one-refresh-flag`) replaced the interim boolean above with the flag syntax this
 ADR originally deferred, folded `ak x verify` into it, and closed several vocabulary/wiring gaps
 the [issues 237–239 audit](../audits/2026-09-26-issues-237-238-239-verification-and-decisions.md)'s
-Item 4 named. It is CLI-only (maintainer decision M-11): the dashboard's own controls are
-untouched — see "Ahead: the dashboard half" below.
+Item 4 named. It closed CLI-only: the dashboard's own controls are untouched, and the dashboard
+half of this work moved to the next remediation program — see
+[the branch 6b plan](../superpowers/plans/2026-09-28-branch-6b-one-refresh-flag.md)'s "Closing
+this branch" section, and "Ahead: the dashboard half" below.
 
 - **One flag, three strengths, one ordered stage table** — `--refresh[=live|machine]` across `ak
   status`, `ak system` and `ak maintain [report]`; see "The `--refresh` flag's three strengths"
   above for `REFRESH_STAGES`, its run order and the failed-`machine`-skips-`maintenance`/`inventory`
   dependency rule, and `runRefresh`/`cliRefreshStages` (`src/lib/refresh.mjs`) for the shared
   runner every one of the three commands calls.
-- **`--only <check>,...`** selects exactly the named live checks or slow proofs instead of the
-  quick default set, and is the only way a slow proof (`learning`, `harvest`, the full `aqe`
-  proof, `memory-routes`) runs; a named check that does not apply to the configuration still runs
-  and reports, but its result is not remembered. Without `--only`, a failed live check stays a
-  warning and the exit code follows the rows and stages alone; with `--only`, the exit code is 1
-  when any named check did not pass — `failed`, `inconclusive`, or no result at all (its status
-  was never `'passed'`) — else 0 (`status.mjs`'s `namedCheckFailed`).
+- **`--only <check>,...` is `ak status`'s alone.** It selects exactly the named live checks or
+  slow proofs instead of the quick default set, and is the only way a slow proof (`learning`,
+  `harvest`, the full `aqe` proof, `memory-routes`) runs; a named check that does not apply to the
+  configuration still runs and reports, but its result is not remembered. Without `--only`, a
+  failed live check stays a warning and the exit code follows the rows and stages alone; with
+  `--only`, the exit code is 1 when any named check did not pass — `failed`, `inconclusive`, or no
+  result at all (its status was never `'passed'`) — else 0 (`status.mjs`'s `namedCheckFailed`).
+  `ak system` and `ak maintain` both refuse a non-empty `--only` outright (exit 2): neither
+  renders live-check results or reports their verdict, so accepting the flag would silently run
+  past a failed named check.
   A refresh stage that fails makes `ak status`, `ak system` and `ak maintain` exit 1; a usage
   error is exit 2 everywhere the flag is accepted.
 - **The live-check fold and its source labels.** `ak x verify` is retired; its checks
@@ -428,7 +433,7 @@ untouched — see "Ahead: the dashboard half" below.
   status --refresh=live"; a row recorded before this branch under the retired `verify` or
   `status-live` source ids still reads back, labelled "an earlier live check" — the label never
   names a retired command (`live-check-evidence.mjs`'s `SOURCE_LABEL`).
-- **The Codex quota presence gate.** `/api/limits` and `ak status` ask `codex app-server` for its
+- **The Codex quota presence gate.** `/api/limits` asks `codex app-server` for its
   quota only when the last recorded `host-setup` evidence says Codex was found
   (`quota.mjs`'s `readLimits`, via `recordedHostPresence` in `providers.mjs`) — never by probing.
   `not-found` and `unconfirmed` (no record, older than 6h, or recorded under a different `PATH`)
@@ -458,8 +463,9 @@ untouched — see "Ahead: the dashboard half" below.
 - **The renames.** `ak host refresh` → `ak host reset-routes` (it only re-seeds routing, never a
   refresh); `ak usage prompts --deep` → `--show-text`; `ak status --deep`/`--live`, `ak system
   --deep` and `ak maintain scan`/`--deep`/`--refresh-inventory` are retired, with no alias and no
-  hint (maintainer decision B6b-D3) — a retired spelling gets the parser's generic
-  unknown-command/unknown-option error.
+  hint (Ruling R17 of
+  [the branch 6b plan](../superpowers/plans/2026-09-28-branch-6b-one-refresh-flag.md)) — a
+  retired spelling gets the parser's generic unknown-command/unknown-option error.
 - **The recipe-refresh removal.** Every user-reachable path to a recipe-registry refresh (the
   `ak maintain recipes` sub-verb, its v2 route and allowlist entry, the facade method, and the
   service options that existed only for it) is removed; `ak maintain recipes` now supports only
@@ -481,8 +487,10 @@ untouched — see "Ahead: the dashboard half" below.
 
 ## Ahead: the dashboard half
 
-6b closed CLI-only (maintainer decision M-11). The dashboard's own controls are unchanged by this
-branch and remain future work for the next remediation program:
+6b closed CLI-only — see
+[the branch 6b plan](../superpowers/plans/2026-09-28-branch-6b-one-refresh-flag.md)'s "Closing
+this branch" section. The dashboard's own controls are unchanged by this branch and remain future
+work for the next remediation program:
 
 - One dashboard **Refresh** control offering the same three strengths the CLI now has, and a
   **Reload** control that only re-reads the current view.
@@ -529,8 +537,9 @@ controls, their backing code, or their UI themselves; see "Delivered in 6b" abov
    cached.last` on failure (`:70`); `ruvnet-brain.mjs`'s `drift()` does the same
    (`:288`, `recordedRelease()`); `versions.mjs`'s `driftReport()`'s `lookUpLatest()` restamps
    `observedAt` from the prior `last` only for packages that were never individually observed
-   (`:82`); its `selfDrift()`'s `selfRecord()` restamps only on a *total* failure with a usable
-   cached candidate — a partial answer, or a failure with no usable cached candidate, saves
+   (`:82`); its `selfDrift()`'s `selfRecord()` restamps on a *total* failure, including one with no
+   cached candidate at all — only a partial answer (something answered live but did not win), or a
+   total failure whose cached candidate is unusable (a `next` candidate on a stable install), saves
    nothing (`:172-176`). None of the four applies this rule under `record: false` (`ak sync
    --dry-run`, ADR-0063's own `record` parameter) or a cache-only read (`cacheOnly: true`, `ak
    sync --skip <part>`): both skip the network and the write entirely, by design.
@@ -571,9 +580,13 @@ controls, their backing code, or their UI themselves; see "Delivered in 6b" abov
   status call, the exact problem this branch closes), and is stated precisely in `ak status
   --help` rather than left as an imprecise "it changes nothing" claim. `ak sync --dry-run` is not
   an example of this: its plan-read `collect()` call and (as of Branch 6b) every online version
-  lookup it previews all pass `record: false`, so a dry run today writes nothing at all — proven by
-  a whole-HOME/whole-project byte-for-byte snapshot comparison in
-  `tests/kit/sync-command.test.mjs`. `ak x verify` is retired; its replacement,
+  lookup it previews all pass `record: false`, so a dry run writes no evidence under
+  `<state>/agentic-kit/` — proven by a whole-HOME/whole-project byte-for-byte snapshot comparison
+  in `tests/kit/sync-command.test.mjs`. It is not silent at the OS level, though: `previewPlanVersions`
+  (`src/commands/sync/plan-versions.mjs`, Ruling R8) creates a per-run npm cache under the OS temp
+  folder for its redirected `npm view` calls and removes it in a `finally` block once the lookups
+  are done; a crash between those two points can leave one `ak-sync-preview-npm-*` folder behind.
+  `ak x verify` is retired; its replacement,
   `ak status --refresh=live`, is an explicit refresh, not a read, and its writes are the point,
   not a surprise.
 - The `record`-defaults-`false` exception for `npm-global-root` is a real asymmetry a future

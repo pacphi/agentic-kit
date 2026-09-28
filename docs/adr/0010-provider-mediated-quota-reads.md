@@ -1,13 +1,15 @@
 # ADR-0010 — Provider-mediated quota reads (the Limits view)
 
 - **Updated:** 2026-09-28 — Codex's quota is requested only when the last recorded `host-setup`
-  evidence says Codex was found (B6b-D1), never by probing: `readLimits` (`src/lib/quota.mjs`)
-  reads `recordedHostPresence('codex', …)` (`src/lib/providers.mjs`), and both `/api/limits` and
-  `ak status` go through it. `not-found` and `unconfirmed` presence (no record, older than 6h, or
-  recorded under a different `PATH`) each skip the `codex app-server` spawn and set
-  `codexUnavailable.reason` to `host-not-found` or `host-unconfirmed`; the last cached Codex
-  figure, if any, is still served with its age either way (remediation program, branch 6b; see
-  [ADR-0063](0063-evidence-store-and-refresh-vocabulary.md))
+  evidence says Codex was found (Ruling R9 of
+  [the branch 6b plan](../superpowers/plans/2026-09-28-branch-6b-one-refresh-flag.md)), never by
+  probing: `readLimits` (`src/lib/quota.mjs`) reads `recordedHostPresence('codex', …)`
+  (`src/lib/providers.mjs`), and `/api/limits` goes through it — its only caller
+  (`dashboard-server.mjs:1142`); `ak status` does not import `quota.mjs`. `not-found` and
+  `unconfirmed` presence (no record, older than 6h, or recorded under a different `PATH`) each
+  skip the `codex app-server` spawn and set `codexUnavailable.reason` to `host-not-found` or
+  `host-unconfirmed`; the last cached Codex figure, if any, is still served with its age either
+  way (remediation program, branch 6b; see [ADR-0063](0063-evidence-store-and-refresh-vocabulary.md))
 - **Updated:** 2026-09-26 — the Limits view names why either side is empty: a read-only,
   path-free class of the user-level statusLine for Claude, and the failure class of the last
   app-server request for Codex (#238)
