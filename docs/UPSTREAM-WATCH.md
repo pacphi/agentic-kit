@@ -260,3 +260,35 @@ there is nothing to dispatch; then stop quickly. Work in a fresh clone of pacphi
 4. Take no other action. Never comment on any issue, never change labels, and never comment on
    upstream repositories.
 ```
+
+## Reporting upstream
+
+Every upstream issue ak files, and every substantive comment it adds, gives the upstream
+maintainers what they need to act on it. The tone is friendly, supportive and appreciative:
+these projects are maintained with care, and a clear, kind report has the best chance of
+being considered and fixed.
+
+Each report has five parts:
+
+1. **Problem**: what happens and what should happen, in plain words.
+2. **System info**: OS name, version and architecture; Node and npm versions; the upstream
+   package version; and every other tool involved with its version (for example Claude Code,
+   Codex CLI, OpenCode, Ruflo and agentic-kit).
+3. **Steps to reproduce**: minimal, copy-pasteable steps in a disposable folder, with the
+   expected and the actual output (trimmed). Re-run them just before posting.
+4. **Proposed fix approaches**: one or more, with file and function pointers, offered as
+   suggestions.
+5. **Impact**: first for the upstream project's own users of that feature, then for downstream
+   integrators such as agentic-kit.
+
+Before filing:
+
+- File one issue per root cause. Two symptoms with one cause are one issue; one symptom with
+  two causes is two.
+- Search open and closed issues and pull requests for duplicates, and link related threads.
+  When a report exists, add what it lacks as a comment there instead of filing a new one.
+- The maintainer approves the exact text before anything is posted.
+
+After posting, read the posted issue or comment back and check it matches the approved text.
+Then register the thread in the watch the same day (`relation` `filed` or `commented`, with a
+dated `history` line), so its replies and its release are tracked from the start.
