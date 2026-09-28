@@ -46,28 +46,33 @@ function parseReceipt(source, format) {
   for (const entry of Object.values(value.keys)) {
     if (!validState(entry?.before) || !validState(entry?.after)) throw new Error('invalid ownership receipt preserved');
   }
-  return { keys: value.keys };
+  const created = plain(value.created) ? { ...(value.created.file === true ? { file: true } : {}), ...(value.created.table === true ? { table: true } : {}) } : {};
+  return { keys: value.keys, created };
 }
 
-function serializeReceipt(keys, format, pending) {
+function serializeReceipt(keys, format, pending, created) {
   if (format.single) {
     const entry = keys[format.single];
     return JSON.stringify({ version: 1, before: entry.before, after: entry.after, pending }) + '\n';
   }
-  return JSON.stringify({ version: 2, keys, pending }) + '\n';
+  return JSON.stringify({ version: 2, keys, pending, ...(created && Object.keys(created).length ? { created } : {}) }) + '\n';
 }
+
+const emptyDocument = (text) => ['', '{}'].includes(String(text).trim());
 
 /**
  * @param {{file: string, boundary: string, enabled: boolean, required?: boolean}} target
  * @param {Record<string, {present: boolean, value?: string}>} desired
  * @param {{receiptSuffix: string, format?: 'multi' | {single: string}, editorFor: Function,
- *   adoptable?: (key: string, current: {present: boolean, value?: string}) => boolean}} options
+ *   adoptable?: (key: string, current: {present: boolean, value?: string}) => boolean, trackCreated?: boolean}} options
  *   `adoptable` names a value ak may replace under its receipt (the receipt keeps it as
  *   `before`, so a release puts it back), whether ak owned the key before or not (the
  *   tool re-wrote its own default); every other unowned or edited value stays a conflict.
  *   The single-key AQE embedding receipt (ADR-0055) passes no `adoptable`.
+ *   `trackCreated` (multi-key only) records in the receipt whether ak created the file or
+ *   the editor's table; the release that leaves them empty removes them again.
  */
-export function planOwnedEnv(target, desired, { receiptSuffix, format = 'multi', editorFor, adoptable = () => false }) {
+export function planOwnedEnv(target, desired, { receiptSuffix, format = 'multi', editorFor, adoptable = () => false, trackCreated = false }) {
   const fmt = format === 'multi' ? {} : format;
   const { file } = target;
   const receiptFile = `${file}${receiptSuffix}`;
@@ -107,8 +112,16 @@ export function planOwnedEnv(target, desired, { receiptSuffix, format = 'multi',
   const envChanged = Object.entries(nextStates).some(([key, next]) => !same(editor.get(key), next));
   const receiptDropped = [...ownedKeys].some((key) => !(key in nextReceipt));
   if (!envChanged && !receiptDropped) return { file, status: 'converged', changed: false, keys, conflicts };
+  const prior = receipt?.created ?? {};
+  const created = trackCreated && !fmt.single ? {
+    ...(prior.file || source === null ? { file: true } : {}),
+    ...(prior.table || editor.containerPresent === false ? { table: true } : {}),
+  } : undefined;
+  const releasing = Object.keys(nextReceipt).length === 0;
+  const after = editor.render(nextStates, { dropEmptyContainer: !!(releasing && created?.table) });
+  const removeFile = !!(releasing && created?.file && emptyDocument(after));
   return { file, boundary: target.boundary, status: 'drift', changed: true, source, receiptSource, receiptFile,
-    after: editor.render(nextStates), nextReceipt, format: fmt, keys, conflicts };
+    after, removeFile, created, nextReceipt, format: fmt, keys, conflicts };
 }
 
 /** One key's outcome: `state` for reporting, `next` when ak writes it, `conflict` when a
@@ -143,28 +156,56 @@ export function pendingReceiptKeys(plan) {
   return { ...prior, ...plan.nextReceipt };
 }
 
+/** Delete this projection's backups of `file` beyond the newest `keep` (ak's own files
+ *  only: `<name>.ak-<tag>-backup.<uuid>`). */
+function pruneBackups(file, backupTag, keep) {
+  const dir = path.dirname(file);
+  const prefix = `${path.basename(file)}.ak-${backupTag}-backup.`;
+  let names;
+  try { names = fs.readdirSync(dir).filter((name) => name.startsWith(prefix)); } catch { return; }
+  const byAge = names.map((name) => {
+    try { return { name, mtime: fs.lstatSync(path.join(dir, name)).mtimeMs }; } catch { return null; }
+  }).filter(Boolean).sort((a, b) => b.mtime - a.mtime || b.name.localeCompare(a.name));
+  for (const { name } of byAge.slice(keep)) {
+    try { fs.unlinkSync(path.join(dir, name)); } catch { /* best effort: a backup ak cannot remove stays */ }
+  }
+}
+
 function assertCurrent(file, source) {
   if (readRegularConfig(file) !== source) throw new Error('configuration changed after inspection; retry');
 }
 
-export function applyOwnedEnv(plan, { backupTag }) {
+/** @param {any} plan @param {{backupTag: string, keepBackups?: number}} options `keepBackups`
+ *  prunes this projection's older backups of the file (default: keep all). */
+export function applyOwnedEnv(plan, { backupTag, keepBackups }) {
   const { file, source, after, receiptFile, nextReceipt, format } = plan;
   checkDirectories(file, plan.boundary);
   assertCurrent(file, source);
   assertCurrent(receiptFile, plan.receiptSource);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  if (source !== null) fs.copyFileSync(file, `${file}.ak-${backupTag}-backup.${randomUUID()}`, fs.constants.COPYFILE_EXCL);
   const hasKeys = Object.keys(nextReceipt).length > 0;
   const pendingKeys = pendingReceiptKeys(plan);
-  if (Object.keys(pendingKeys).length) writePrivateFileAtomic(receiptFile, serializeReceipt(pendingKeys, format, true));
+  if (plan.removeFile) {
+    // ak created this file and the release leaves it empty: remove it, its receipt and
+    // this projection's backups of it (they only ever held ak's own keys).
+    if (Object.keys(pendingKeys).length) writePrivateFileAtomic(receiptFile, serializeReceipt(pendingKeys, format, true, plan.created));
+    assertCurrent(file, source);
+    fs.unlinkSync(file);
+    if (fs.existsSync(receiptFile)) fs.unlinkSync(receiptFile);
+    if (keepBackups !== undefined) pruneBackups(file, backupTag, 0);
+    return;
+  }
+  if (source !== null) fs.copyFileSync(file, `${file}.ak-${backupTag}-backup.${randomUUID()}`, fs.constants.COPYFILE_EXCL);
+  if (Object.keys(pendingKeys).length) writePrivateFileAtomic(receiptFile, serializeReceipt(pendingKeys, format, true, plan.created));
   const tmp = `${file}.ak-${backupTag}-tmp.${randomUUID()}`;
   try {
     fs.writeFileSync(tmp, after, { flag: 'wx', mode: source === null ? 0o600 : fs.statSync(file).mode & 0o777 });
     assertCurrent(file, source);
     fs.renameSync(tmp, file);
   } finally { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); }
-  if (hasKeys) writePrivateFileAtomic(receiptFile, serializeReceipt(nextReceipt, format, false));
+  if (hasKeys) writePrivateFileAtomic(receiptFile, serializeReceipt(nextReceipt, format, false, plan.created));
   else if (fs.existsSync(receiptFile)) fs.unlinkSync(receiptFile);
+  if (keepBackups !== undefined) pruneBackups(file, backupTag, keepBackups);
 }
 
 /** Claude settings files: `env` is a top-level object. */

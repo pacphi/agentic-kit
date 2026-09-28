@@ -134,13 +134,29 @@ export function aqeTomlEnvironment(source, keys = [KEY]) {
   if (!base) return { missing: true };
   if (!recognizedAqeTransport(transport.command, transport.args ?? [])) throw new Error('unrecognized AQE MCP transport preserved');
   const get = (key) => (found[key] ? { present: true, value: found[key].value } : { present: false });
-  const render = (nextStates) => renderEnv(source, env, found, nextStates, ENV);
-  return { current: get(keys[0]), get, render, replace: (next) => render({ [keys[0]]: next }) };
+  const render = (nextStates, options) => renderEnv(source, env, found, nextStates, ENV, options);
+  return { current: get(keys[0]), get, render, replace: (next) => render({ [keys[0]]: next }), containerPresent: !!env };
+}
+
+/** Remove the `[header]` table when nothing but blank lines is left in it (a table ak
+ *  added, released again). Reaching the end of the file, the blank line ak put before it
+ *  goes too, so the file ends as it did before ak added the table. */
+function dropEmptyTable(text, header) {
+  const lines = text.split(/(?<=\n)/);
+  const at = lines.findIndex((l) => l.trim() === `[${header}]`);
+  if (at < 0) return text;
+  let end = at + 1;
+  while (end < lines.length && lines[end].trim() === '') end += 1;
+  if (end < lines.length && !lines[end].trimStart().startsWith('[')) return text;
+  let start = at;
+  if (end === lines.length && start > 0 && lines[start - 1].trim() === '') start -= 1;
+  return lines.slice(0, start).join('') + lines.slice(end).join('');
 }
 
 /** Replace, remove or append each key's line; new keys go after the env table header,
- *  or into a new `[header]` table at the end. Edits apply from the last offset back. */
-function renderEnv(source, env, found, nextStates, header) {
+ *  or into a new `[header]` table at the end. Edits apply from the last offset back.
+ *  `dropEmptyContainer`: remove the table when the edits leave it empty. */
+function renderEnv(source, env, found, nextStates, header, { dropEmptyContainer = false } = {}) {
   const nl = source.includes('\r\n') ? '\r\n' : '\n';
   const line = (key, next) => (next.present ? `${key} = ${JSON.stringify(next.value)}${nl}` : '');
   const edits = [];
@@ -151,7 +167,7 @@ function renderEnv(source, env, found, nextStates, header) {
   }
   let out = source;
   for (const edit of edits.sort((a, b) => b.start - a.start)) out = out.slice(0, edit.start) + edit.text + out.slice(edit.end);
-  if (!added) return out;
+  if (!added) return dropEmptyContainer ? dropEmptyTable(out, header) : out;
   if (env) {
     const bare = !(env.text.endsWith('\n') || source[env.end - 1] === '\n');
     return out.slice(0, env.end) + (bare ? nl : '') + added + out.slice(env.end);
@@ -228,5 +244,5 @@ export function shellEnvironmentSet(source, keys) {
   }
   if (!set && !registration) return { missing: true };
   const get = (key) => (found[key] ? { present: true, value: found[key].value } : { present: false });
-  return { get, render: (nextStates) => renderEnv(source, set, found, nextStates, SHELL_SET) };
+  return { get, render: (nextStates, options) => renderEnv(source, set, found, nextStates, SHELL_SET, options), containerPresent: !!set };
 }

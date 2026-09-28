@@ -132,9 +132,61 @@ test('with AQE\'s Codex registration and no shell table, a shell table is added 
   const shell = toml.slice(toml.indexOf(SHELL_TABLE));
   assert.ok(shell.startsWith(SHELL_TABLE), toml);
   for (const [key, value] of Object.entries(pinOf(root))) assert.ok(shell.includes(`${key} = ${JSON.stringify(value)}`), shell);
+  assert.ok(toml.includes('[mcp_servers.agentic-qe.env]'), 'the env table is added too');
+  reconcileAqePin(cfg, root, { enabled: false });
+  // Review minor 1/2: both tables ak added are gone again, byte for byte.
+  assert.equal(fs.readFileSync(codex, 'utf8'), source);
+});
+
+test('a table ak added keeps its header on release when the user wrote into it', (t) => {
+  const { root, write, cfg } = project(t);
+  const source = '[mcp_servers.agentic-qe]\ncommand = "aqe-mcp"\n';
+  const codex = write('.codex/config.toml', source);
+  reconcileAqePin(cfg, root);
+  fs.appendFileSync(codex, 'MINE = "1"\n');
   reconcileAqePin(cfg, root, { enabled: false });
   const released = fs.readFileSync(codex, 'utf8');
+  assert.ok(released.includes(`${SHELL_TABLE}\nMINE = "1"\n`), released);
   assert.ok(!released.includes('AQE_PROJECT_ROOT'), released);
+});
+
+test('a settings.local.json ak created is removed on release when nothing else is in it; one the user had stays', (t) => {
+  const { root, cfg } = project(t, { codex: false });
+  const settings = path.join(root, '.claude', 'settings.local.json');
+  reconcileAqePin(cfg, root);
+  assert.deepEqual(json(settings).env, pinOf(root));
+  reconcileAqePin(cfg, root, { enabled: false });
+  assert.equal(fs.existsSync(settings), false, 'no {} file left behind');
+  assert.deepEqual(fs.readdirSync(path.join(root, '.claude')), [], 'no receipt or backup left behind');
+  reconcileAqePin(cfg, root);
+  const doc = json(settings); doc.permissions = { allow: [] };
+  fs.writeFileSync(settings, JSON.stringify(doc, null, 2) + '\n');
+  reconcileAqePin(cfg, root, { enabled: false });
+  assert.deepEqual(json(settings), { permissions: { allow: [] } }, 'a file with the user\'s own content stays');
+  const kept = project(t, { codex: false });
+  const own = kept.write('.claude/settings.local.json', '{}\n');
+  reconcileAqePin(kept.cfg, kept.root);
+  reconcileAqePin(kept.cfg, kept.root, { enabled: false });
+  assert.equal(fs.readFileSync(own, 'utf8'), '{}\n', 'a file ak did not create is never removed');
+});
+
+test('ak keeps at most its newest pin backup per file (review minor 3)', (t) => {
+  const { root, write, cfg } = project(t);
+  const { settings, mcp, codex } = seedAll(write);
+  for (let i = 0; i < 3; i += 1) {
+    reconcileAqePin(cfg, root);
+    const doc = json(settings); doc.env[`N${i}`] = 'x'; delete doc.env.AQE_PROJECT_ROOT;
+    fs.writeFileSync(settings, JSON.stringify(doc, null, 2) + '\n');
+  }
+  reconcileAqePin(cfg, root, { enabled: false });
+  for (const file of [settings, mcp, codex]) {
+    const backups = fs.readdirSync(path.dirname(file)).filter((name) => name.startsWith(`${path.basename(file)}.ak-aqe-pin-backup.`));
+    assert.ok(backups.length <= 1, `${file}: ${backups.join(', ')}`);
+  }
+  const other = `${settings}.ak-aqe-backup.keep`;
+  fs.writeFileSync(other, 'another projection\'s backup');
+  reconcileAqePin(cfg, root);
+  assert.ok(fs.existsSync(other), 'only the pin\'s own backups are pruned');
 });
 
 test('a foreign shell-table value is preserved and reported as a hand fix naming the file', async (t) => {

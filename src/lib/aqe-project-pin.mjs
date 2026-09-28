@@ -115,7 +115,7 @@ function reconcileTarget(target, desired, dryRun) {
   let plan;
   try {
     plan = planOwnedEnv(target, wanted, {
-      receiptSuffix: target.receipt, format: 'multi', editorFor: EDITORS[target.kind], adoptable,
+      receiptSuffix: target.receipt, format: 'multi', editorFor: EDITORS[target.kind], adoptable, trackCreated: true,
     });
   } catch (error) {
     // Planning refused the whole file (unrecognized transport, invalid or non-regular
@@ -123,7 +123,7 @@ function reconcileTarget(target, desired, dryRun) {
     return { ...base, status: 'conflict', changed: false, keys: {}, conflicts: [], reason: error.message };
   }
   if (plan.changed && !dryRun) {
-    try { applyOwnedEnv(plan, { backupTag: 'aqe-pin' }); } catch (error) {
+    try { applyOwnedEnv(plan, { backupTag: 'aqe-pin', keepBackups: 1 }); } catch (error) {
       return { ...base, status: 'failed', changed: false, keys: plan.keys ?? {}, conflicts: plan.conflicts ?? [], reason: error.message };
     }
   }
