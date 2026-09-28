@@ -349,6 +349,26 @@ test('a nested repository\'s or in-checkout worktree\'s own store is never merge
   assert.deepEqual(result.skipped.filter((s) => /own repository/.test(s.reason)).map((s) => s.path), ['packages/api', 'wt/feature']);
 });
 
+test('a root that already fails a check refuses before anything is written, naming the check (review minor 7)', async (t) => {
+  const p = project(t);
+  const db = new DatabaseSync(p.rootDb);
+  db.exec('PRAGMA foreign_keys = OFF');
+  db.prepare('INSERT INTO qe_pattern_nulls (id, pattern_id, context_fingerprint, failure_mode) VALUES (?, ?, ?, ?)').run('orphan', 'no-such-pattern', 'fp', 'none');
+  db.close();
+  const before = snapshot(p.root);
+  const preview = await mergeAqeStores(p.root, base(p, { apply: false, runner: fakeAqe().runner, holders: noHolders }));
+  assert.match(preview.refusal, /foreign_key_check/);
+  assert.match(preview.refusal, /project store/);
+  const { runner, calls } = fakeAqe();
+  const result = await mergeAqeStores(p.root, base(p, { apply: true, runner, holders: noHolders, now: Date.UTC(2026, 8, 27, 16) }));
+  assert.equal(result.status, 'refused');
+  assert.match(result.reason, /foreign_key_check: 1 violation/);
+  assert.equal(result.backup, null, 'no backup piles up');
+  assert.equal(fs.existsSync(path.join(p.mergeDir, result.runId)), false, 'nothing written in state');
+  assert.equal(calls.filter((c) => c.args[0] === 'brain').length, 0);
+  assert.deepEqual(snapshot(p.root), before);
+});
+
 // ---- AQE's starter patterns (decision B5-D5) ---------------------------------
 
 /** project() plus AQE starter patterns S1, S2 in the strays (the root has none of

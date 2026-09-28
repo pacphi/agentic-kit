@@ -138,7 +138,11 @@ function strayFiles(dir) {
 // ---- 1 preview ------------------------------------------------------------
 
 function preview(root, strays, scratch, openDb, seedKeys) {
-  const rootCopy = readStore(copyStore(path.join(root, '.agentic-qe'), path.join(scratch, 'root')), openDb);
+  const rootFile = copyStore(path.join(root, '.agentic-qe'), path.join(scratch, 'root'));
+  const rootCopy = readStore(rootFile, openDb);
+  // Checked on the copy before any backup (review minor 7): a root that already
+  // fails would fail every rehearsal and leave a backup per retry.
+  const rootProblem = rootCopy.readable ? checkStore(rootFile, openDb) : null;
   const inRoot = new Set(rootCopy.keys);
   const known = new Set(rootCopy.keys);
   const ids = new Set(rootCopy.experiences);
@@ -159,7 +163,7 @@ function preview(root, strays, scratch, openDb, seedKeys) {
     return entry;
   });
   return {
-    rootStore: { ...counts(rootCopy), readable: rootCopy.readable, ...(rootCopy.error ? { error: rootCopy.error } : {}) },
+    rootStore: { ...counts(rootCopy), readable: rootCopy.readable, ...(rootCopy.error ? { error: rootCopy.error } : {}), ...(rootProblem ? { problem: rootProblem } : {}) },
     strays: rows, expected: { patterns: known.size, experiences: ids.size },
   };
 }
@@ -402,6 +406,10 @@ function writeReceipt(result, extra) {
 }
 
 function rootRefusal(root, store) {
+  if (store.problem) {
+    return `the project store ${path.join(root, '.agentic-qe', 'memory.db')} already fails ${store.problem}, before any merge; `
+      + 'a merge checks the same on its result, so it would fail; nothing was written (repair the store with AQE first)';
+  }
   if (store.readable) return null;
   if (store.error === 'absent') return `no project store at ${path.join(root, '.agentic-qe', 'memory.db')}; run \`aqe init\` in ${root} (or \`ak setup --project\`) first`;
   return `the root store copy is unreadable (${store.error})`;
@@ -482,7 +490,7 @@ export async function mergeAqeStores(root, options = {}) {
     const unreadable = seen.strays.filter((s) => !s.readable).map((s) => s.path);
     if (!o.apply) {
       removeRunScratch(o, dir);
-      return { ...result, status: 'preview', refusal: first.refusal ?? tooOld ?? starterRefusal(starters) };
+      return { ...result, status: 'preview', refusal: first.refusal ?? tooOld ?? (seen.rootStore.problem ? rootRefusal(root, seen.rootStore) : null) ?? starterRefusal(starters) };
     }
     const refusal = first.refusal ?? tooOld
       ?? rootRefusal(root, seen.rootStore)
