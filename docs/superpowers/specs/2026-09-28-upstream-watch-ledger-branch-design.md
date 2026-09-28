@@ -1,6 +1,6 @@
 # Upstream watch ledger on an orphan branch — design
 
-- **Status:** Draft for maintainer review (revision 2; revision 1 proposed a named ref, a daily
+- **Status:** Approved by the maintainer 2026-09-28 (revision 2; revision 1 proposed a named ref, a daily
   heartbeat commit and a digest on #243)
 - **Date:** 2026-09-28
 - **Branch:** `feat/upstream-watch-ledger-ref` (worktree `../agentic-kit-ledger-ref`, from `31a1a39b`)
@@ -74,8 +74,9 @@ permissions `contents: write` and `issues: write`:
 | A `github-actions[bot]` issue assigned to the owner | notification, reason `assign` |
 | A `github-actions[bot]` issue comment mentioning the owner | notification, reason `mention` |
 
-All three notifications reached the owner's GitHub inbox within about 10 seconds. Email and phone
-delivery follow the owner's notification settings. Commit comments need only `contents: read`
+All three notifications reached the owner's GitHub inbox within about 10 seconds, and the
+maintainer confirmed all three also arrived by email. Phone delivery follows the owner's
+notification settings. Commit comments need only `contents: read`
 ([permissions table](https://docs.github.com/en/rest/authentication/permissions-required-for-github-apps)).
 
 ## Data model
@@ -363,6 +364,6 @@ All offline, with fixtures and injected `exec` and `fetch`:
   the next run fires again.
 - **A disconnected GitHub account** turns the routine off after 72 hours; what the trigger then
   returns is unverified. A failed trigger call fails the job, so it cannot pass silently.
-- **Email and phone delivery** of the notice follow the maintainer's GitHub notification settings;
-  the probe proved inbox delivery only.
+- **Phone delivery** of the notice follows the maintainer's GitHub notification settings; the
+  probe proved inbox and email delivery.
 - **Commit comments are public**, like everything else in this repository.
