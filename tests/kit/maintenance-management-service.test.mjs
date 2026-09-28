@@ -129,8 +129,14 @@ const HERMETIC_PROVIDER_OPTIONS = Object.freeze({
  * model snapshots never leak into the projected inventory). */
 function buildHarness(t, {
   footprint = lightpandaFootprint(), discovery = {}, paths = null, env = {}, collectorRead = null, walk = undefined,
+  controlRoot: providedControlRoot = null,
 } = {}) {
-  const controlRoot = fixtureRoot(t);
+  // A caller simulating a restart (M1b) passes the SAME controlRoot a prior
+  // buildHarness() call returned: every store below is derived from it, so a
+  // fresh service instance over it has the prior run's durable state (scan
+  // history, last-good snapshots, kit.json is NOT durable here — the caller
+  // must repeat `discovery` too) but no in-memory orchestrator record.
+  const controlRoot = providedControlRoot ?? fixtureRoot(t);
   let currentFootprint = footprint;
   let currentNow = NOW_MS;
   let config = {
@@ -1004,6 +1010,35 @@ test('M1: a fresh instance counts only present roots as not scanned, and refuses
     () => h.service.startScan({ sourceId: hermesId }),
     (error) => error.code === 'SOURCE_NOT_PRESENT' && error.sourceIds.includes(hermesId),
   );
+});
+
+// ── M1b: a failed Discovery source stays failed in Discovery after a restart ──
+
+test('M1b: a failed collection-root source reports failed in Discovery after a restart, and the Inventory banner agrees', async (t) => {
+  const controlRoot = fixtureRoot(t);
+  const missingRoot = path.join(controlRoot, 'no-such-collection-root');
+  const sourceId = opaqueId('src', { kind: 'collection-root', root: missingRoot }, INSTALLATION_KEY);
+  const discovery = { collectionRoots: [{ root: missingRoot, sourceId, maxDepth: null, includeNetwork: false }] };
+
+  const first = buildHarness(t, { controlRoot, discovery });
+  await first.service.rebuildAfterMeasurement();
+  const firstRow = first.service.discovery().coverage.find((entry) => entry.sourceId === sourceId);
+  assert.equal(firstRow.state, 'failed');
+
+  // Simulate a restart: a fresh service instance over the SAME controlRoot.
+  // kit.json is an in-memory closure in this harness (not a real file), so
+  // the caller repeats the same `discovery` configuration a real restart
+  // would re-read from the real kit.json.
+  const restarted = buildHarness(t, { controlRoot, discovery });
+  const d = restarted.service.discovery();
+  const row = d.coverage.find((entry) => entry.sourceId === sourceId);
+  assert.ok(row, 'the failed source must still be listed, never silently dropped');
+  assert.equal(row.state, 'failed');
+  assert.equal(row.label, 'Collection root', 'the Discovery row still carries its label after a restart');
+
+  const page = restarted.service.inventory({});
+  assert.equal(page.partialSources.total, 1, 'the Inventory banner must agree with the Discovery panel');
+  assert.ok(page.partialSources.entries.some((entry) => entry.sourceId === sourceId && entry.state === 'failed'));
 });
 
 // ── ACT-001: activity aggregates receipts, dispositions, and scan history ──

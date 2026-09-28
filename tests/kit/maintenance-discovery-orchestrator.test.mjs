@@ -540,6 +540,72 @@ test('a failed source can be retried: a later successful drive still reaches com
   assert.equal(retried.scanState, 'published');
 });
 
+// ── M1b: a failed source stays failed in Discovery after a restart ────────
+
+test('M1b: a failed source reports failed after a restart, not not-scanned', async (t) => {
+  const dir = fixture(t);
+  const missing = path.join(dir, 'no-such-root');
+  const first = control(missing, dir);
+  await first.orchestrator.start({ sourceIds: [SOURCE.sourceId] });
+  assert.equal(first.orchestrator.coverage()[0].state, 'failed');
+
+  // Simulate a process restart: a brand-new orchestrator instance, same
+  // durable stores, no in-memory record carried over.
+  const restarted = control(missing, dir);
+  const [row] = restarted.orchestrator.coverage();
+  assert.equal(row.state, 'failed');
+  assert.equal(row.limitingReason, 'io-failure');
+  assert.equal(row.label, SOURCE.label, 'the restored row still carries its label');
+});
+
+test('M1b: a later successful scan wins over an earlier failure after a restart', async (t) => {
+  const dir = fixture(t);
+  const parent = fixture(t);
+  const root = path.join(parent, 'appears-later');
+  const first = control(root, dir);
+  const [failed] = await first.orchestrator.start({ sourceIds: [SOURCE.sourceId] });
+  assert.equal(failed.scanState, 'failed');
+
+  fs.mkdirSync(root);
+  fs.writeFileSync(path.join(root, 'file.txt'), 'x');
+  const [retried] = await first.orchestrator.start({ sourceIds: [SOURCE.sourceId] });
+  assert.equal(retried.scanState, 'published');
+
+  const restarted = control(root, dir);
+  const [row] = restarted.orchestrator.coverage();
+  assert.equal(row.state, 'complete');
+});
+
+test('M1b: with no history the restart falls back to the last-good row (retention edge)', async (t) => {
+  const dir = fixture(t);
+  const root = fixture(t);
+  buildLargeTree(root, { dirs: 1, filesPerDir: 1 });
+  const first = control(root, dir);
+  const [published] = await first.orchestrator.start({ sourceIds: [SOURCE.sourceId] });
+  assert.equal(published.scanState, 'published');
+  assert.deepEqual(first.historyStore.clearHistory(), { removed: 1, kept: 0 });
+
+  const restarted = control(root, dir);
+  const [row] = restarted.orchestrator.coverage();
+  assert.equal(row.state, 'complete');
+});
+
+test('M1b: a user stop is not restored; a re-enrolled source starts not-scanned', async (t) => {
+  const dir = fixture(t);
+  const root = fixture(t);
+  buildLargeTree(root); // wide enough that maxSlices:1 checkpoints rather than completing (see J4)
+  const first = control(root, dir);
+  const [afterOne] = await first.orchestrator.start({ sourceIds: [SOURCE.sourceId], maxSlices: 1 });
+  assert.equal(afterOne.scanState, 'checkpointed', 'must still be mid-scan, never last-good, when the stop below fires');
+  const stopped = first.orchestrator.stop({ sourceId: SOURCE.sourceId, confirmed: true });
+  assert.equal(stopped.removed, true);
+  assert.equal(first.lastGoodStore.current().length, 0, 'a stopped-before-complete source never reached the last-good store');
+
+  const restarted = control(root, dir);
+  const [row] = restarted.orchestrator.coverage();
+  assert.equal(row.state, 'not-scanned', 'a confirmed user stop must never be restored as failed/stopped after a restart');
+});
+
 test('pause() on a non-pausable source throws with code SOURCE_NOT_PAUSABLE', async (t) => {
   const controlDir = fixture(t);
   const root = fixture(t);
