@@ -29,7 +29,7 @@ import test from 'node:test';
 const ENABLED = process.env.AK_AQE_CONFORMANCE === '1';
 const STRICT = process.env.AK_AQE_CONFORMANCE_STRICT === '1';
 const AQE_BIN = process.env.AQE_BIN ?? 'aqe';
-const KNOWN_DEFECTS = 'agentic-qe 3.14.4 (upstream issue drafted, not yet filed): --codex-guidance full writes no block when AGENTS.md '
+const KNOWN_DEFECTS = 'agentic-qe 3.14.4 (agentic-qe#755, agentic-qe#756, agentic-qe#758): --codex-guidance full writes no block when AGENTS.md '
   + 'already exists; compact adds bytes outside its sentinel; through the aqe command resolvePackageRoot() misses the package, so '
   + 'no Codex hooks or skills install and platform verify fails; platform verify exits 0 on failed checks';
 const BEGIN = '<!-- BEGIN AGENTIC-QE CODEX -->';

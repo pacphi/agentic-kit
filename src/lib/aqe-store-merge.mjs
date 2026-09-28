@@ -27,7 +27,7 @@
 //   3 backup    VACUUM INTO <run>/backup/root-memory.db.
 //   4 rehearse  on a copy of that backup: per stray copy, delete its
 //               witness_chain rows (appended unlinked they break the root's
-//               audit chain; Branch 5 Task 0.2) and the starter patterns the
+//               audit chain; Branch 5 Task 0.2, agentic-qe#759) and the starter patterns the
 //               root does not hold, with the rows that must reference them (a
 //               *pattern_id column that is NOT NULL or a foreign key to
 //               qe_patterns: embeddings, usage, null results, lineage,

@@ -503,7 +503,8 @@
       "constraintIds": [],
       "history": [
         { "date": "2026-09-26", "event": "commented" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "#719 fixed FsyncFailed; a small fall-through remains (issuecomment-5863219357)" }
       ]
     },
     {
@@ -761,7 +762,8 @@
       "constraintIds": [],
       "history": [
         { "date": "2026-09-26", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "3.14.4 fixes A, B and E; C and D remain (issuecomment-5863194807)" }
       ]
     },
     {
@@ -780,7 +782,8 @@
       "history": [
         { "date": "2026-09-26", "event": "filed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-27", "event": "reviewed", "note": "Branch 5 pins all three keys: on 3.14.4 dist/learning/embedder-identity-store.js getMemoryDbPath() uses AQE_MEMORY_PATH or <cwd>/.agentic-qe/memory.db and never reads AQE_PROJECT_ROOT, and dist/init/token-bootstrap.js resolves AQE_STORAGE_PATH ?? '.agentic-qe' against the cwd; with all three pinned a subfolder run created nothing there (Slice 0 case c, Slice B proof)" }
+        { "date": "2026-09-27", "event": "reviewed", "note": "Branch 5 pins all three keys: on 3.14.4 dist/learning/embedder-identity-store.js getMemoryDbPath() uses AQE_MEMORY_PATH or <cwd>/.agentic-qe/memory.db and never reads AQE_PROJECT_ROOT, and dist/init/token-bootstrap.js resolves AQE_STORAGE_PATH ?? '.agentic-qe' against the cwd; with all three pinned a subfolder run created nothing there (Slice 0 case c, Slice B proof)" },
+        { "date": "2026-09-27", "event": "commented", "note": "3.14.4 re-test with the pin table, review notes for PR #741; refs agentic-qe#758 (issuecomment-5863178438)" }
       ]
     },
     {
@@ -799,7 +802,8 @@
       "history": [
         { "date": "2026-09-26", "event": "filed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-27", "event": "reviewed", "note": "agentic-qe 3.14.4 (Branch 5 Task 0.2): importing a store that shares 70 patterns by (name, qe_domain, pattern_type) gave Imported 74, Skipped 140, Conflicts 140 (3 imported once its witness rows were deleted), no abort, PRAGMA integrity_check ok and foreign_key_check empty; --dry-run and the real import agree" }
+        { "date": "2026-09-27", "event": "reviewed", "note": "agentic-qe 3.14.4 (Branch 5 Task 0.2): importing a store that shares 70 patterns by (name, qe_domain, pattern_type) gave Imported 74, Skipped 140, Conflicts 140 (3 imported once its witness rows were deleted), no abort, PRAGMA integrity_check ok and foreign_key_check empty; --dry-run and the real import agree" },
+        { "date": "2026-09-27", "event": "commented", "note": "fixed on 3.14.4, fine to close; refs agentic-qe#759 (issuecomment-5863185231)" }
       ]
     },
     {
@@ -1106,7 +1110,8 @@
       "history": [
         { "date": "2026-07-31", "event": "filed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-27", "event": "commented", "note": "hosted probe run 36333572972 on Ruflo 3.46.1: 10/10 aborts by default and 10/10 with single-threaded ONNX Runtime sessions; mitigation disproven (issuecomment-5857781254)" }
+        { "date": "2026-09-27", "event": "commented", "note": "hosted probe run 36333572972 on Ruflo 3.46.1: 10/10 aborts by default and 10/10 with single-threaded ONNX Runtime sessions; mitigation disproven (issuecomment-5857781254)" },
+        { "date": "2026-09-27", "event": "commented", "note": "3.47.0 status, transformers 3.x / ONNX Runtime 1.21 lead, fix approaches; 11/11 nightly aborts in the continue-on-error step (issuecomment-5863246672)" }
       ]
     },
     {
@@ -1255,7 +1260,8 @@
       "history": [
         { "date": "2026-08-16", "event": "filed" },
         { "date": "2026-09-26", "event": "commented" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "supplement to the reporting standard (issuecomment-5863257920)" }
       ]
     },
     {
@@ -1292,7 +1298,8 @@
       "constraintIds": ["ruflo-3.38.20-stop-output-contract"],
       "history": [
         { "date": "2026-09-02", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "looks fixed for new projects; asked about the legacy file (issuecomment-5863263708)" }
       ]
     },
     {
@@ -1439,7 +1446,8 @@
       "constraintIds": [],
       "history": [
         { "date": "2026-09-24", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "supplement to the reporting standard (issuecomment-5863269629)" }
       ]
     },
     {
@@ -1457,7 +1465,8 @@
       "constraintIds": [],
       "history": [
         { "date": "2026-09-24", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "thanks for PR #3472, verification plan, impact (issuecomment-5863277587)" }
       ]
     },
     {
@@ -1475,7 +1484,8 @@
       "constraintIds": [],
       "history": [
         { "date": "2026-09-24", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "supplement to the reporting standard (issuecomment-5863282103)" }
       ]
     },
     {
@@ -1493,7 +1503,8 @@
       "constraintIds": [],
       "history": [
         { "date": "2026-09-24", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "answered from the Codex CLI source (issuecomment-5863289657)" }
       ]
     },
     {
@@ -1937,7 +1948,8 @@
       "history": [
         { "date": "2026-09-27", "event": "filed" },
         { "date": "2026-09-27", "event": "commented" },
-        { "date": "2026-09-27", "event": "registered" }
+        { "date": "2026-09-27", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "4.3.34 check, code pointers, fix approaches (issuecomment-5863313107)" }
       ]
     },
     {
@@ -2548,7 +2560,8 @@
       "constraintIds": [],
       "history": [
         { "date": "2026-09-27", "event": "filed" },
-        { "date": "2026-09-27", "event": "registered" }
+        { "date": "2026-09-27", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "supplement to the reporting standard (issuecomment-5863297204)" }
       ]
     },
     {
@@ -2566,7 +2579,8 @@
       "constraintIds": [],
       "history": [
         { "date": "2026-09-27", "event": "filed" },
-        { "date": "2026-09-27", "event": "registered" }
+        { "date": "2026-09-27", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "supplement to the reporting standard (issuecomment-5863304724)" }
       ],
       "note": "Filed as a courtesy: ak never starts the chat-UI MCP bridge and runs Codex through codex exec, so nothing in ak waits on it."
     },
@@ -2586,7 +2600,8 @@
       "history": [
         { "date": "2026-09-27", "event": "filed" },
         { "date": "2026-09-27", "event": "registered" },
-        { "date": "2026-09-27", "event": "reviewed", "note": "Branch 5: ak x aqe-store merge finds the processes holding the root or a stray store by open file (lsof, /proc; the host-session census on Windows) before its backup, its real import and its archive, and refuses while any holds one; there is no force" }
+        { "date": "2026-09-27", "event": "reviewed", "note": "Branch 5: ak x aqe-store merge finds the processes holding the root or a stray store by open file (lsof, /proc; the host-session census on Windows) before its backup, its real import and its archive, and refuses while any holds one; there is no force" },
+        { "date": "2026-09-27", "event": "commented", "note": "still reproduces on 3.14.4, with impact; refs agentic-qe#759 (issuecomment-5863202746)" }
       ]
     },
     {
@@ -2600,6 +2615,97 @@
       "mapping": "mapped",
       "kitImpact": {"refs": ["investigation aqe-rvf-flag-vector-space", "Branch 5: embedding verify says embedder verified, not pattern search working"], "files": ["src/commands/status/sections/aqe.mjs", "src/commands/x/verify.mjs", "src/lib/aqe-embedding-lifecycle.mjs"]},
       "adjustment": "Once a released agentic-qe binds the pattern index with a configured embedder, ak may report semantic pattern search as working after a live check.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "filed" },
+        { "date": "2026-09-27", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "still reproduces on 3.14.4, with impact (issuecomment-5863212811)" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#755",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/755",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "`aqe init --with-codex` installs no Codex hooks or skills when run through the `aqe` bin (global install)",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": {"refs": ["Branch 5: ak setup names the Codex hooks and skills only when they exist, otherwise warns", "#655 conformance on ak's path (constraint agentic-qe-3.14.0-codex-guidance-policy)"], "files": ["src/lib/aqe-guidance.mjs", "tests/live/aqe-codex-guidance-conformance.test.mjs"]},
+      "adjustment": "Once a released agentic-qe installs its Codex hooks and skills through the aqe command, ak setup's warning stops on its own (it checks the files); run the #655 conformance strictly toward the constraint's sunset.",
+      "status": "watching",
+      "constraintIds": ["agentic-qe-3.14.0-codex-guidance-policy"],
+      "history": [
+        { "date": "2026-09-27", "event": "filed" },
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#756",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/756",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "`--codex-guidance` on an existing AGENTS.md: `full` is not applied, and a `---` separator accumulates outside the AQE block",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": {"refs": ["#655 conformance on ak's path (constraint agentic-qe-3.14.0-codex-guidance-policy)"], "files": ["tests/live/aqe-codex-guidance-conformance.test.mjs"]},
+      "adjustment": "Once a released agentic-qe applies full on an existing AGENTS.md and writes nothing outside its sentinel, run the #655 conformance strictly; if it passes, sunset the constraint and drop the conformance todo.",
+      "status": "watching",
+      "constraintIds": ["agentic-qe-3.14.0-codex-guidance-policy"],
+      "history": [
+        { "date": "2026-09-27", "event": "filed" },
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#757",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/757",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "`aqe platform setup <platform>` fails for every platform: \"Module not found in bundle: ../../init/<name>-installer.js\"",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": {"refs": ["ak runs aqe init --with-codex, not platform setup", "the codex-mcp status row's manual fix names aqe platform setup codex (src/commands/status/sections/codex-mcp.mjs)"], "files": []},
+      "adjustment": "none: ak does not run platform setup; once fixed, the codex-mcp status row's manual fix (aqe platform setup codex --overwrite --with-ruflo) works as written.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "filed" },
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#758",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/758",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "CLI exits 0 even when a command set `process.exitCode = 1` (`platform verify`, `plugin install/remove`, `hooks` task provenance)",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": {"refs": ["#655 conformance reads the [fail] lines of aqe platform verify codex, not its exit code"], "files": ["tests/live/aqe-codex-guidance-conformance.test.mjs"]},
+      "adjustment": "none: the #655 conformance reads the [fail] lines of aqe platform verify codex, so it already catches a failed check; once fixed, the exit code agrees with them.",
+      "status": "watching",
+      "constraintIds": [],
+      "history": [
+        { "date": "2026-09-27", "event": "filed" },
+        { "date": "2026-09-27", "event": "registered" }
+      ]
+    },
+    {
+      "id": "proffesor-for-testing/agentic-qe#759",
+      "url": "https://github.com/proffesor-for-testing/agentic-qe/issues/759",
+      "relation": "filed",
+      "kind": "issue",
+      "title": "`brain import` copies the source's `witness_chain` rows with their original `prev_hash`, so the target's audit chain verifies as BROKEN",
+      "dependency": "agentic-qe",
+      "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": null } },
+      "mapping": "mapped",
+      "kitImpact": {"refs": ["Branch 5: ak x aqe-store merge deletes each stray copy's witness_chain rows before export (the archived stray keeps them)"], "files": ["src/lib/aqe-store-merge.mjs"]},
+      "adjustment": "Once a released agentic-qe imports witness rows without breaking the target chain, ak x aqe-store merge can stop deleting the stray copy's witness_chain rows before export.",
       "status": "watching",
       "constraintIds": [],
       "history": [
