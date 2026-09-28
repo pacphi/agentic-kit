@@ -6,7 +6,7 @@
 // before any command loads, so its only static import is the output helpers.
 // Status, the live checks, the machine collector, Maintenance and the kit
 // config load lazily, inside the CLI stage set, when a stage actually runs.
-import { ok, warn, info, withProgress } from './output.mjs';
+import { ok, warn, info, dim, withProgress } from './output.mjs';
 
 /** Internal strength names: `local` is the bare `--refresh`. */
 export const REFRESH_STRENGTHS = Object.freeze(['local', 'live', 'machine']);
@@ -149,13 +149,17 @@ function liveSummary(results) {
  * The CLI's stages over one shared collector, Maintenance service and
  * management facade, each built on first use (as the dashboard does). `deps`
  * may inject `collector`, `maintenance`, `management`, `collect` (status's row
- * collector) and `runLive` (the live checks). An injected `maintenance` whose
- * control root is not the default needs an injected `management` too, or the
- * facade would write to the default root.
+ * collector) and `runLive` (the live checks). `maintenance` and `management`
+ * are injected together or not at all: either one built by default uses the
+ * default control root, so a caller that replaced only the other half would
+ * still write real state (the dashboard refuses the same composition).
  * @param {{ cwd?: string, pkgRoot?: string, deps?: Record<string, any> }} options
  * @returns {Record<string, (ctx: any) => Promise<{ ok: boolean, detail?: string|null, result?: any }>>}
  */
 export function cliRefreshStages({ cwd = process.cwd(), pkgRoot, deps = {} }) {
+  if ((deps.maintenance == null) !== (deps.management == null)) {
+    throw new TypeError('cliRefreshStages: inject maintenance and management together, or neither');
+  }
   const collector = once(async () => deps.collector
     ?? (await import('./footprint/index.mjs')).createSystemCollector({ cwd }));
   const maintenance = once(async () => deps.maintenance
@@ -212,12 +216,15 @@ function formatElapsed(ms) {
 
 /**
  * The CLI renderer for `onStage`: one line per finished stage. A failed stage
- * is a warning line; the command's exit code reports the failure.
- * @param {{ label: string, state: string, detail?: string|null, elapsedMs?: number }} event
+ * is a warning line; the command's exit code reports the failure. The live
+ * checks can take a minute with nothing else on screen, so their start gets a
+ * dim line of its own (the machine stages show an elapsed-time ticker instead).
+ * @param {{ id?: string, label: string, state: string, detail?: string|null, elapsedMs?: number }} event
  */
-export function printRefreshStage({ label, state, detail = null, elapsedMs = 0 }) {
+export function printRefreshStage({ id, label, state, detail = null, elapsedMs = 0 }) {
   const tail = detail ? `: ${detail}` : '';
-  if (state === 'done') ok(`${label} (${formatElapsed(elapsedMs)})${tail}`);
+  if (state === 'running' && id === 'live') console.log(dim(`${label}…`));
+  else if (state === 'done') ok(`${label} (${formatElapsed(elapsedMs)})${tail}`);
   else if (state === 'failed') warn(`${label} failed (${formatElapsed(elapsedMs)})${tail}`);
   else if (state === 'skipped') info(`${label} skipped${tail}`);
 }

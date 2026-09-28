@@ -856,7 +856,10 @@ const akStatus = (...args) => spawnSync(process.execPath, [BIN, 'status', ...arg
   cwd: PROJECT, env: spawnEnv(HOME, { NO_COLOR: '1' }), encoding: 'utf8', timeout: 120_000,
 });
 
-test('--refresh --json prints one JSON object that lists each stage in order; stage lines go to stderr', () => {
+/** A line printRefreshStage would print, in any state. */
+const STAGE_LINE = /^(?:[✓⚠ℹ] +)?(?:Measuring the machine|Refreshing Maintenance evidence|Rebuilding the inventory|Running live checks|Re-checking local evidence and versions)\b/m;
+
+test('--refresh --json prints one JSON object that lists each stage in order; no stage lines, stage output on stderr', () => {
   seedHome();
   const child = statusChild({ refresh: '', json: true });
   const parsed = oneJson(child);
@@ -874,8 +877,9 @@ test('--refresh --json prints one JSON object that lists each stage in order; st
   }
   assert.equal(parsed.refresh.stages[0].label, 'Refreshing Maintenance evidence');
   assert.equal(parsed.refresh.stages[0].detail, 'checked 1 of 1 providers');
-  assert.match(child.stderr, /maintenance evidence \(fake\)/);
+  assert.match(child.stderr, /^✓ maintenance evidence \(fake\)$/m, 'what a stage itself prints goes to stderr');
   assert.match(child.stderr, /inventory rebuilt \(fake\)/);
+  assert.doesNotMatch(child.stderr, STAGE_LINE, 'the per-stage lines are not printed under --json');
 });
 
 test('--refresh=live --json stays one JSON object when a live result cannot be remembered', () => {
@@ -886,6 +890,7 @@ test('--refresh=live --json stays one JSON object when a live result cannot be r
   assert.deepEqual(parsed.live, [{ id: 'memory', status: 'passed', reason: null, elapsedMs: 9 }]);
   assert.deepEqual(parsed.refresh.stages.map(({ id }) => id), ['maintenance', 'inventory', 'live', 'local']);
   assert.match(child.stderr, /memory: could not remember this live check result; ak status will not show it/);
+  assert.doesNotMatch(`${child.stdout}${child.stderr}`, STAGE_LINE, 'no live start line and no stage lines under --json');
 });
 
 test('a failed refresh stage exits 1; a failed machine stage skips maintenance and inventory', () => {
@@ -898,6 +903,36 @@ test('a failed refresh stage exits 1; a failed machine stage skips maintenance a
     [['machine', 'failed'], ['maintenance', 'skipped'], ['inventory', 'skipped'], ['local', 'done']]);
   assert.equal(parsed.refresh.stages[0].detail, 'walk failed');
   assert.equal(parsed.overall, 'ok', 'the rows themselves are healthy; the exit code comes from the refresh');
+});
+
+test('--refresh=machine --json on a terminal keeps the elapsed-time ticker off stdout', () => {
+  // The machine stages run under withProgress, whose ticker writes to stdout
+  // whenever stdout is a terminal; under --json that write must land on stderr.
+  const script = `
+    process.stdout.isTTY = true;
+    const status = await import(${JSON.stringify(moduleUrl('src/commands/status.mjs'))});
+    const refresh = await import(${JSON.stringify(moduleUrl('src/lib/refresh.mjs'))});
+    const { exitWhenFlushed } = await import(${JSON.stringify(moduleUrl('src/lib/output.mjs'))});
+    const wait = () => new Promise((resolve) => setTimeout(resolve, 20));
+    const deps = {
+      collector: { refreshDeep: async () => { await wait(); return { ok: true, persisted: { ok: true } }; } },
+      maintenance: { scan: async () => ({ scan: {} }) },
+      management: { refreshInventory: async () => ({}), rebuildAfterMeasurement: async () => { await wait(); return {}; } },
+      collect: async () => [{ subsystem: 'versions', level: 'ok', message: 'fake versions row', fix: null, repair: null }],
+    };
+    const refreshStages = refresh.cliRefreshStages({ cwd: process.cwd(), pkgRoot: ${JSON.stringify(PKG_ROOT)}, deps });
+    exitWhenFlushed(await status.run({ flags: { refresh: 'machine', json: true }, positionals: [],
+      pkgRoot: ${JSON.stringify(PKG_ROOT)}, deps: { refreshStages } }));
+  `;
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    cwd: PROJECT, env: spawnEnv(HOME, { NO_COLOR: '1' }), encoding: 'utf8', timeout: 120_000,
+  });
+  const parsed = oneJson(child);
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(parsed.refresh.stages.map(({ id, state }) => [id, state]),
+    [['machine', 'done'], ['maintenance', 'done'], ['inventory', 'done'], ['local', 'done']]);
+  assert.match(child.stderr, /⏳ Measuring the machine/);
+  assert.match(child.stderr, /⏳ Rebuilding the inventory/);
 });
 
 test('a failed local re-check falls back to the plain rows and says so', () => {
@@ -941,10 +976,31 @@ test('plain status runs no refresh stage', async () => {
   const refreshStages = new Proxy({}, { get: () => async () => { calls += 1; return { ok: true }; } });
   const cwd = process.cwd();
   process.chdir(PROJECT);
+  let r;
   try {
-    await captureLog(() => status.run({ flags: {}, pkgRoot: PKG_ROOT, deps: { refreshStages } }));
+    r = await captureLog(() => status.run({ flags: {}, positionals: ['extra'], pkgRoot: PKG_ROOT, deps: { refreshStages } }));
   } finally { process.chdir(cwd); }
   assert.equal(calls, 0);
+  assert.notEqual(r.result, 2, 'plain status still ignores a positional, as it always has');
+});
+
+test('a refresh with a stray argument is a usage error that names the one-token spelling', async () => {
+  let calls = 0;
+  const refreshStages = new Proxy({}, { get: () => async () => { calls += 1; return { ok: true }; } });
+  const runWith = (positionals) => captureLog(() => status.run({
+    flags: { refresh: '' }, positionals, pkgRoot: PKG_ROOT, deps: { refreshStages },
+  }));
+  const spaced = await runWith(['live']);
+  assert.equal(spaced.result, 2);
+  assert.equal(spaced.out, "✗ ak status: unexpected argument 'live' — write --refresh=live");
+  const other = await runWith(['report']);
+  assert.equal(other.result, 2);
+  assert.equal(other.out, "✗ ak status: unexpected argument 'report'");
+  assert.equal(calls, 0, 'no stage runs');
+
+  const cli = akStatus('--refresh', 'machine');
+  assert.equal(cli.status, 2, cli.stdout + cli.stderr);
+  assert.match(cli.stdout, /^✗ ak status: unexpected argument 'machine' — write --refresh=machine$/m);
 });
 
 test('the retired --deep and --live get the parser\'s generic unknown-option error', () => {

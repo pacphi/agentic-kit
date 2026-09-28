@@ -105,5 +105,7 @@ test('ak status --help documents the three refresh strengths, their stages and t
     assert.ok(r.stdout.includes(text), `status help names ${text}`);
   }
   assert.match(r.stdout, /exit code (?:is )?1/);
+  assert.match(r.stdout.replace(/\s+/g, ' '), /with --refresh the JSON also lists each stage under "refresh", no stage lines print/,
+    'the --json help says what a refresh prints under --json');
   assert.doesNotMatch(r.stdout, /--live\b|--deep\b/, 'only the current spellings');
 });

@@ -225,7 +225,8 @@ test('status --refresh=live runs the checks before the local re-check, so the ro
   };
   const { out, result } = await runStatus({ refresh: 'live' }, runLive);
   assert.deepEqual(seenCfg, loadKitConfig(), 'the live checks get the kit config');
-  assert.match(out, /✓ Running live checks/);
+  assert.match(out, /^Running live checks…\n✓ Running live checks \(\d+ ms\): 1 failed$/m,
+    'the start of the live checks is announced, then their result');
   assert.match(out, /security: last live check failed just now \(ak status --live\): defend ambiguous/);
   assert.equal(result, failedRows(out), 'a failed live check is a warning; only a failing row sets the exit code');
 });

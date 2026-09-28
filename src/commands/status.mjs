@@ -6,7 +6,7 @@
 // local re-check collected.
 import { glyph, dim, bold, warn, fail, humanOutputToStderr } from '../lib/output.mjs';
 import {
-  REFRESH_OPTIONS, refreshRequestFromFlags, runRefresh, cliRefreshStages, printRefreshStage,
+  REFRESH_OPTIONS, REFRESH_STRENGTHS, refreshRequestFromFlags, runRefresh, cliRefreshStages, printRefreshStage,
 } from '../lib/refresh.mjs';
 import { loadRing, detectRegression } from '../lib/health-history.mjs';
 import { loadKitConfig } from '../lib/config.mjs';
@@ -42,8 +42,9 @@ Usage: ak status [--json] [--refresh[=live|machine]] [--project-trees]
 
 Options:
   --json                    emit the raw rows as JSON (suppresses the drift
-                            nudge); with --refresh the stage lines go to stderr
-                            and the JSON also lists each stage under "refresh"
+                            nudge); with --refresh the JSON also lists each
+                            stage under "refresh", no stage lines print, and
+                            anything a stage itself prints goes to stderr
   --refresh[=live|machine]  refresh first, then report (the strengths below)
   --project-trees           with --refresh=machine: also measure the working
                             trees of your projects
@@ -186,15 +187,30 @@ async function runRefreshed({ flags, pkgRoot, request, deps }) {
   return report(flags, await humanOutputToStderr(() => refreshedRows({ request, stages, pkgRoot, onStage: undefined })));
 }
 
-/** @param {{ flags: Record<string, any>, pkgRoot?: string, deps?: { refreshStages?: Record<string, Function> } }} input */
-export async function run({ flags, pkgRoot, deps = {} }) {
+/** A refresh takes no positional. `ak status --refresh live` parses as a bare
+ *  refresh plus the argument `live`, so it is refused rather than silently
+ *  run at the wrong strength; a strength name gets its one-token spelling. */
+function strayArgumentError(positionals) {
+  const [first] = positionals;
+  if (first === undefined) return null;
+  const spelling = REFRESH_STRENGTHS.includes(first) ? ` — write --refresh=${first}` : '';
+  return `unexpected argument '${first}'${spelling}`;
+}
+
+/** @param {{ flags: Record<string, any>, positionals?: string[], pkgRoot?: string,
+ *   deps?: { refreshStages?: Record<string, Function> } }} input */
+export async function run({ flags, positionals = [], pkgRoot, deps = {} }) {
   const request = refreshRequestFromFlags(flags);
-  if ('error' in request) {
-    fail(`ak status: ${request.error}`);
-    return 2;
-  }
-  if (request.strength) return runRefreshed({ flags, pkgRoot, request, deps });
-  return report(flags, { rows: await collect({ pkgRoot, refresh: false }) });
+  if ('error' in request) return usageError(request.error);
+  if (!request.strength) return report(flags, { rows: await collect({ pkgRoot, refresh: false }) });
+  const stray = strayArgumentError(positionals);
+  if (stray) return usageError(stray);
+  return runRefreshed({ flags, pkgRoot, request, deps });
+}
+
+function usageError(message) {
+  fail(`ak status: ${message}`);
+  return 2;
 }
 
 /** The JSON summary of a refresh: each stage without its result. */

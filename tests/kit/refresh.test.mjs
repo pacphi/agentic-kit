@@ -159,8 +159,9 @@ test('runRefresh refuses an unknown strength or a missing stage', async () => {
   await assert.rejects(runRefresh({ strength: 'local', stages: partial }), /local/);
 });
 
-test('the refresh operation can never reach the paid connection check (R7)', () => {
-  // 6c-1 adds src/lib/dashboard/refresh-api.mjs to this list.
+test('the refresh operation never references the paid connection check', () => {
+  // Every module that runs refresh stages belongs in this list, including any
+  // future server-side refresh module.
   for (const file of [REFRESH_SOURCE]) {
     const source = fs.readFileSync(file, 'utf8');
     assert.doesNotMatch(source, /checkConnection|host-health-connected/, file);
@@ -237,6 +238,21 @@ test('cliRefreshStages: live runs the live checks with this config and cwd; loca
   assert.equal(outcome.ok, true, 'a failed live check is a finding, not a failed stage');
 });
 
+test('cliRefreshStages refuses a Maintenance service or facade injected without the other', () => {
+  // Either half built by default would use the default control root, so a
+  // caller that swapped in the other half would still write real state.
+  const { deps } = fakeDeps();
+  const { management: _management, ...maintenanceOnly } = deps;
+  const { maintenance: _maintenance, ...managementOnly } = deps;
+  for (const half of [maintenanceOnly, managementOnly]) {
+    assert.throws(() => cliRefreshStages({ cwd: PROJECT, pkgRoot: PKG_ROOT, deps: half }),
+      { name: 'TypeError', message: /maintenance and management/ });
+  }
+  const { maintenance: _m, management: _g, ...neither } = deps;
+  assert.doesNotThrow(() => cliRefreshStages({ cwd: PROJECT, pkgRoot: PKG_ROOT, deps: neither }),
+    'a shared collector alone is fine: both halves are then built over it, together');
+});
+
 // ── the CLI renderer ─────────────────────────────────────────────────────────
 
 test('printRefreshStage prints one line per finished stage', async () => {
@@ -245,6 +261,10 @@ test('printRefreshStage prints one line per finished stage', async () => {
     printRefreshStage({ id: 'maintenance', label, state: 'running', detail: null, elapsedMs: 0 });
   });
   assert.equal(out, '', 'a running stage prints nothing');
+  const started = await captureLog(() => {
+    printRefreshStage({ id: 'live', label: 'Running live checks', state: 'running', detail: null, elapsedMs: 0 });
+  });
+  assert.equal(started.out, 'Running live checks…', 'the live checks take up to a minute, so their start is announced');
   const line = async (event) => (await captureLog(() => printRefreshStage({ id: 'maintenance', label, ...event }))).out;
   assert.match(await line({ state: 'done', detail: null, elapsedMs: 3_200 }), /^✓ Refreshing Maintenance evidence \(3 s\)$/);
   assert.match(await line({ state: 'done', detail: 'checked 2 of 3 providers', elapsedMs: 40 }),
