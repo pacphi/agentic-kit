@@ -262,15 +262,20 @@ test('`all` runs every suite and fails if any single proof failed', async () => 
 
 test('verify writes nothing into HOME except the results it remembers for status', async () => {
   seedHome();
-  rmrf(evidence.liveCheckDir());
+  rmrf(paths.evidenceDir());
   const before = snapshot(HOME);
   await runVerify([]);
-  const stateRel = path.relative(HOME, evidence.liveCheckDir());
+  // Branch 6a Task 5: `ak x verify` also reaches collectIntegrationFacts()
+  // (providers.mjs), which now caches its host-presence probe alongside the
+  // live-check store, under the same shared evidence directory — the
+  // allowlist widens from the live-check subdir to the whole evidence store.
+  const stateRel = path.relative(HOME, paths.evidenceDir());
+  const liveCheckRel = path.relative(HOME, evidence.liveCheckDir());
   const after = snapshot(HOME);
   const changed = [...after.keys()].filter((k) => before.get(k) !== after.get(k));
   const outside = changed.filter((k) => !k.startsWith(stateRel) && !stateRel.startsWith(k.replace(/\/$/, '')));
-  assert.deepEqual(outside, [], '`ak x verify` proves things; its only write is the live-check evidence store');
-  assert.ok(changed.some((k) => k.startsWith(`${stateRel}${path.sep}security.json`)),
+  assert.deepEqual(outside, [], '`ak x verify` proves things; its only write is the evidence cache (live-check + host detection)');
+  assert.ok(changed.some((k) => k.startsWith(`${liveCheckRel}${path.sep}security.json`)),
     'the failed security proof must be remembered for ak status');
 });
 

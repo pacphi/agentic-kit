@@ -86,7 +86,7 @@ export async function collect({
 }) {
   const rows = [];
   const cfg = loadKitConfig();
-  const integrationFacts = await collectIntegrationFacts({ cwd, cfg });
+  const integrationFacts = await collectIntegrationFacts({ cwd, cfg, refresh });
   const ctx = { cfg, cwd, pkgRoot, integrationFacts, refresh };
 
   await runSections(SECTIONS_BEFORE_HOST_DETAIL, ctx, rows);

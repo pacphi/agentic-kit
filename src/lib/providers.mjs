@@ -47,6 +47,7 @@ import { projectedAqeExternalProviders } from './adapters/aqe-provider.mjs';
 import { applyAqeRouter, aqeRouterDrift, undoAqeRouter } from './aqe-router.mjs';
 import { installGlobalCli } from './npm-global-install.mjs';
 import { guardRufloMemoryRoot, MEMORY_ROOT_UPSTREAM } from './ruflo-memory-config.mjs';
+import { stableInputsKey, readEvidence, writeEvidence } from './evidence.mjs';
 
 // The AQE-router convergence pipeline itself lives in aqe-router.mjs
 // (ADR-0037); re-exported here so every existing `./providers.mjs` import
@@ -222,6 +223,17 @@ export const MANAGED_ENV_KEYS = [
 ];
 
 const VERSION_RE = /(\d+\.\d+\.\d+[^\s)]*)/;
+const HOST_SETUP_MAX_AGE_MS = 6 * 3600_000;
+
+/** Spawn-free cache key for host presence/version/install/launch evidence.
+ * Deliberately coarse — keys on the raw PATH string, not a resolved-and-
+ * stat'd binary path: reimplementing `which`'s resolution (PATHEXT, symlinks,
+ * executable bits) in `fs` just to compute a cache key is a much bigger
+ * undertaking than this trade-off warrants, and "the PATH string changed"
+ * already catches the overwhelmingly common real-world case at zero cost. */
+function hostSetupInputsKey(host, env = process.env) {
+  return stableInputsKey({ id: host.id, bin: host.bin, pkg: host.pkg, PATH: env.PATH ?? '' });
+}
 
 /** Version from `<bin> --version` — hosts install via many managers (mise, npm,
  *  standalone), so we ask the CLI rather than read a global package.json. */
@@ -236,23 +248,49 @@ async function hostVersion(bin) {
  *   'npm'      — an npm global copy exists (we may update it)
  *   'external' — on PATH but not the npm global copy (mise/native/brew — advise only)
  *   'absent'   — not installed at all (we may install it) */
-export async function hostInstallState(host) {
+export async function hostInstallState(host, { refresh = true, source = 'status-refresh' } = {}) {
+  const inputsKey = hostSetupInputsKey(host);
+  if (!refresh) {
+    const cached = readEvidence('host-install-method', host.id, { inputsKey, maxAgeMs: HOST_SETUP_MAX_AGE_MS });
+    if (cached && !cached.stale && !cached.invalidated) {
+      return /** @type {{method: string, version: string|null}} */ (cached.result);
+    }
+  }
   const npmVer = installedVersion(host.pkg);
-  if (npmVer) return { method: 'npm', version: npmVer };
-  if (await have(host.bin)) return { method: 'external', version: await hostVersion(host.bin) };
-  return { method: 'absent', version: null };
+  const result = npmVer ? { method: 'npm', version: npmVer }
+    : (await have(host.bin)) ? { method: 'external', version: await hostVersion(host.bin) }
+      : { method: 'absent', version: null };
+  writeEvidence('host-install-method', host.id, {
+    source, inputsKey, inputs: { PATH: process.env.PATH ?? '', bin: host.bin }, result,
+  });
+  return result;
 }
 
 /** Does the installed launcher actually start? An npm install is recorded by
  *  its package.json alone, which survives a missing platform binary (e.g.
  *  @openai/codex without @openai/codex-darwin-arm64). Local spawn, no network.
  *  Returns { ok, detail } where detail is the most telling error line. */
-export async function hostExecutable(host, { runner = run } = {}) {
+export async function hostExecutable(host, { runner = run, refresh = true, source = 'status-refresh' } = {}) {
+  const inputsKey = hostSetupInputsKey(host);
+  if (!refresh) {
+    const cached = readEvidence('host-launch', host.id, { inputsKey, maxAgeMs: HOST_SETUP_MAX_AGE_MS });
+    if (cached && !cached.stale && !cached.invalidated) {
+      return /** @type {{ok: boolean, detail: string|null}} */ (cached.result);
+    }
+  }
   const r = await runner(host.bin, ['--version'], { timeout: 15_000 });
-  if (r.code === 0) return { ok: true, detail: null };
-  const lines = `${r.stderr || ''}\n${r.stdout || ''}`.split('\n').map((line) => line.trim()).filter(Boolean);
-  const detail = lines.find((line) => /^[A-Za-z]*Error\b/.test(line)) ?? lines[0] ?? `exit ${r.code}`;
-  return { ok: false, detail: detail.slice(0, 160) };
+  let result;
+  if (r.code === 0) {
+    result = { ok: true, detail: null };
+  } else {
+    const lines = `${r.stderr || ''}\n${r.stdout || ''}`.split('\n').map((line) => line.trim()).filter(Boolean);
+    const detail = lines.find((line) => /^[A-Za-z]*Error\b/.test(line)) ?? lines[0] ?? `exit ${r.code}`;
+    result = { ok: false, detail: detail.slice(0, 160) };
+  }
+  writeEvidence('host-launch', host.id, {
+    source, inputsKey, inputs: { PATH: process.env.PATH ?? '', bin: host.bin }, result,
+  });
+  return result;
 }
 
 /** How a host is AUTHENTICATED (distinct from how it's installed) — the axis that
@@ -305,15 +343,32 @@ export async function installHost(id, { runner = run, sleep } = {}) {
 
 /** Detect installed hosts + whether they are currently wired on in `cwd`.
  *  `opts.opencodeConfigFile` is a test seam for the config-file wired probe.
- *  @param {string} [cwd] @param {{ opencodeConfigFile?: string }} [opts] */
-export async function detectHosts(cwd = process.cwd(), { opencodeConfigFile } = {}) {
+ *  @param {string} [cwd]
+ *  @param {{ opencodeConfigFile?: string, refresh?: boolean, source?: string }} [opts] */
+export async function detectHosts(cwd = process.cwd(), {
+  opencodeConfigFile, refresh = true, source = 'status-refresh',
+} = {}) {
   const env = currentEnv(cwd);
   const out = {};
   for (const h of HOSTS) {
-    const present = await have(h.bin);
+    const inputsKey = hostSetupInputsKey(h);
+    const cached = !refresh
+      ? readEvidence('host-setup', h.id, { inputsKey, maxAgeMs: HOST_SETUP_MAX_AGE_MS })
+      : null;
+    let present;
+    let version;
+    if (cached && !cached.stale && !cached.invalidated) {
+      ({ present, version } = /** @type {{present: boolean, version: string|null}} */ (cached.result));
+    } else {
+      present = await have(h.bin);
+      version = present ? await hostVersion(h.bin) : null;
+      writeEvidence('host-setup', h.id, {
+        source, inputsKey, inputs: { PATH: process.env.PATH ?? '', bin: h.bin }, result: { present, version },
+      });
+    }
     out[h.id] = {
       present,
-      version: present ? await hostVersion(h.bin) : null,
+      version,
       // config-file hosts (enableEnv: null) have no env to be "wired" in —
       // their wired state is the presence of the ak-managed server entry in
       // the host's own config (opencode.json mcp.claude-flow), read
@@ -337,9 +392,9 @@ export function detectProviders({ env = process.env } = {}) {
 
 /** One immutable command-facing snapshot of host, provider and binding truth. */
 export async function collectIntegrationFacts({
-  cwd = process.cwd(), cfg = null, env = process.env,
+  cwd = process.cwd(), cfg = null, env = process.env, refresh = true,
 } = {}) {
-  const detectedHosts = await detectHosts(cwd);
+  const detectedHosts = await detectHosts(cwd, { refresh });
   const detectedProviders = detectProviders({ env });
   for (const adapter of PROVIDER_REGISTRY) {
     if (detectedProviders[adapter.id]) continue;

@@ -215,12 +215,22 @@ const walk = (dir, base, out) => {
 export const snapshot = (dir) => walk(dir, dir, new Map());
 
 /** Assert a tree is byte-for-byte what it was, naming every added/removed/
- *  modified path — the load-bearing assertion behind every `--dry-run` test. */
-export function assertUnchanged(before, dir, message) {
+ *  modified path — the load-bearing assertion behind every `--dry-run` test.
+ *  `opts.ignore` is a list of relative-path prefixes (as `snapshot()` keys,
+ *  e.g. from `path.relative(dir, someSubdir)`) excluded from the diff — for a
+ *  deliberate, documented side-channel write (Branch 6a Task 5: the shared
+ *  evidence probe cache) a caller still wants every OTHER path covered for.
+ * @param {Map<string,string>} before
+ * @param {string} dir
+ * @param {string} message
+ * @param {{ ignore?: string[] }} [opts] */
+export function assertUnchanged(before, dir, message, { ignore = [] } = {}) {
   const after = snapshot(dir);
+  const isIgnored = (k) => ignore.some((prefix) => k.startsWith(prefix) || prefix.startsWith(k.replace(/\/$/, '')));
   const diffs = [];
-  for (const k of after.keys()) if (!before.has(k)) diffs.push(`+ ${k}`);
+  for (const k of after.keys()) if (!before.has(k) && !isIgnored(k)) diffs.push(`+ ${k}`);
   for (const [k, v] of before) {
+    if (isIgnored(k)) continue;
     if (!after.has(k)) diffs.push(`- ${k}`);
     else if (after.get(k) !== v) diffs.push(`~ ${k}`);
   }

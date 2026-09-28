@@ -220,12 +220,20 @@ test('deja-vu sync never applies an already-healthy external package and wiring'
 
 test('--dry-run prints a plan and then changes nothing at all', async () => {
   seedHome();
+  rmrf(paths.evidenceDir());
   const beforeHome = snapshot(HOME);
   const beforeProject = snapshot(PROJECT);
   const { result, out } = await dryRun();
   assert.equal(result, 0, '`--dry-run` always exits 0 — it only reports');
   assert.match(out, /sync plan \(\d+ action\(s\)\):/);
-  assertUnchanged(beforeHome, HOME, '`ak sync --dry-run` must not touch HOME');
+  // Branch 6a Task 5: --dry-run's plan is computed from status.mjs's collect(),
+  // which still probes on a cache miss (Ruling A) and records the result to
+  // the shared evidence store — the same cache a later plain `ak status`
+  // reuses. That write is confined to the evidence store; every other path
+  // stays untouched.
+  const evidenceRel = path.relative(HOME, paths.evidenceDir());
+  assertUnchanged(beforeHome, HOME, '`ak sync --dry-run` must not touch HOME outside its own evidence cache',
+    { ignore: [evidenceRel] });
   assertUnchanged(beforeProject, PROJECT, '`ak sync --dry-run` must not touch the project');
 });
 

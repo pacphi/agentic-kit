@@ -277,12 +277,20 @@ test('deja-vu status warns for recognized component degradation and stale-readon
   assert.ok(!rows.some((entry) => entry.level === 'ok' && /doctor schema/.test(entry.message)));
 });
 
-test('collect() writes nothing to HOME or the project', async () => {
+test('collect() writes nothing to HOME or the project, beyond its own probe-result evidence cache', async () => {
   seedHome();
+  rmrf(paths.evidenceDir());
   const beforeHome = snapshot(HOME);
   const beforeProject = snapshot(PROJECT);
   await collect();
-  assertUnchanged(beforeHome, HOME, '`ak status` must be strictly read-only (HOME)');
+  // Branch 6a Task 5: a plain status collect() call (refresh:false, the
+  // default) still probes for real on a cache miss/stale/first run (Ruling
+  // A) and records the result — so a LATER plain status call can reuse it.
+  // That write lands only under the shared evidence store, never anywhere
+  // else in HOME or the project.
+  const evidenceRel = path.relative(HOME, paths.evidenceDir());
+  assertUnchanged(beforeHome, HOME, '`ak status` must be strictly read-only (HOME) outside its own evidence cache',
+    { ignore: [evidenceRel] });
   assertUnchanged(beforeProject, PROJECT, '`ak status` must be strictly read-only (project)');
 });
 
