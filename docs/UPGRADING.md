@@ -44,9 +44,15 @@ official source citations, authority boundaries and verification limits.
 `ak status`, `ak sync`, and the dashboard now share one evidence cache
 (`<state>/agentic-kit/evidence/`) for native runtime, host setup, deja-vu, version drift,
 npm-global-root, the daemon sweep, and the ak launcher check, each with its own age rule.
-Right after upgrading to this release the cache is cold, so the first `ak status`, `ak sync`, or
-`--refresh` may show a row as "unchecked" or take a moment for a one-time re-probe while it warms.
-This is expected and needs no action; every later check reuses the cache until it ages out.
+Right after upgrading to this release the cache is cold. Native runtime, host setup,
+host-install-method, host-launch, deja-vu, npm-global-root, the daemon sweep, and the ak launcher
+check each probe once on their first use after the upgrade and record what they find — a normal
+row, possibly a moment slower on that one check, never a placeholder state. This is expected and
+needs no action. Two rows read differently until their own next refresh, unchanged by this
+release: ruflo-component rows read `unknown` until `ak sync` or `ak status --refresh` (see
+[MANAGED-TOOLS.md](MANAGED-TOOLS.md#managed-ruflo-components)); the remembered live-check rows
+(`ak x verify`'s suites) simply don't appear until `ak sync`, `ak x verify`, or `ak status --live`
+records one.
 
 The old, now-orphaned storage locations — `<stateBase>/agentic-kit/live-checks/` (pre-dating this
 release) and `<stateBase>/agentic-kit/ruflo-components-evidence.json` (also pre-dating this

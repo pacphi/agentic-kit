@@ -61,11 +61,14 @@ to absorb for free).
   already had, so every kind computes its cache key and its human-readable age the same way.
 - The `inputs` field stores the actual object the key was hashed from, not just the hash, so a
   later branch can answer "what was the world like when this was recorded" without a schema
-  change. As of this branch only `live-check` populates `inputs` (and passes `null` — Task 2
-  deliberately did not attempt to reconstruct per-check input objects from the old, hash-only
-  shape); every other kind's `writeEvidence` call passes `inputs: undefined`/omits it. The field
-  exists in the envelope and is exercised by round-trip tests; today no kind other than
-  `live-check` stores a real value in it.
+  change. Every kind populates it with the real object it hashed: `ak-launcher` stores
+  `{PATH}`; `host-setup`/`host-install-method`/`host-launch` store `{PATH, bin}`; `native-runtime`
+  stores `{dir, native}`; `companion-lifecycle` stores `{desired, PATH}`; `daemon-sweep` stores a
+  fixed marker (`{kind: 'daemon-sweep'}`, since a process-table sweep has no natural per-call
+  input); the hand-written `npm-global-root` envelope stores `{execPath}` (a narrower subset than
+  the `PATH`/`npm_config_prefix`-inclusive object its own `inputsKey` is hashed from). The one
+  exception is `live-check`, which passes `inputs: null` — Task 2 deliberately did not attempt to
+  reconstruct per-check input objects from the old, hash-only shape it migrated from.
 
 ### The kind table (what is real today, not the plan's original guess)
 
@@ -181,14 +184,16 @@ the one piece of this ADR's design most likely to surprise a future reader.
   directory layout, one age rule per kind) required. This was Task 3's controller ruling, applied
   exactly as given.
 - **`npm-global-root`** — see the exception above; separate code, same on-disk shape.
-- **`src/lib/host-health-evidence.mjs`** (ADR-0053's setup proofs — `detectHosts`'s connected-host
-  health check, distinct from the `host-setup`/`host-install-method`/`host-launch` kinds this
-  branch *did* migrate) — not touched by any task on this branch. `git log` on this file since
-  Task 1's baseline commit shows zero commits from this branch. This is a known, deliberate gap for
-  a later branch, not a silent omission: the original program-plan's item 1 named `ak x
-  aqe-embedding verify`, setup proofs, and sync as things that "must record," and the branch plan
-  explicitly flagged this file as needing either folding-in or an explicit stated-reason exclusion.
-  No task folded it in; recording the exclusion here satisfies that requirement.
+- **`src/lib/host-health-evidence.mjs`** — not touched by any task on this branch (`git log` on
+  this file since Task 1's baseline commit shows zero commits from this branch). It is not itself a
+  persisted evidence store: it is `createHostHealthSnapshot`, an HMAC-based input-fingerprint
+  helper that `host-readiness.mjs` (the paid host connection-check proof named above) uses only to
+  invalidate its own in-memory local-health cache — it never writes to disk. This is a known,
+  deliberate gap for a later branch to decide whether it belongs in this store at all, not a silent
+  omission: the original program-plan's item 1 named `ak x aqe-embedding verify`, setup proofs, and
+  sync as things that "must record," and the branch plan explicitly flagged this file as needing
+  either folding-in or an explicit stated-reason exclusion. No task folded it in; recording the
+  exclusion here satisfies that requirement.
 
 ### `ak x aqe-embedding verify` — a correction to the original plan's assumption
 
@@ -214,9 +219,19 @@ Today `--refresh` covers ruflo-component evidence (pre-existing, unchanged by th
 native-runtime/host-setup/companion-lifecycle (Tasks 4–5), version-drift (Task 6), and
 npm-global-root/daemon-sweep/ak-launcher/the deduped host-presence check (Task 7's sweep). This is
 the interim, no-suffix tier of Branch 6b's eventual `--refresh[=live|machine]` split; this branch
-builds only the boolean groundwork that split will sit on, not the flag syntax itself. `--refresh`
-and `--live` are orthogonal: `--refresh` never runs a live (network-round-trip) check, and `--live`
-never re-probes the local evidence kinds this ADR describes.
+builds only the boolean groundwork that split will sit on, not the flag syntax itself.
+
+`--refresh` and `--live` are separate flags, but not perfectly independent in effect. `--refresh`
+never itself triggers a live (network-round-trip) check: `status.mjs`'s `run()` calls
+`collect({ refresh: !!flags.refresh })` and the `--live` suite as two unrelated steps, and neither
+threads into the other. The converse does not hold, though: `--live`'s own `providers` check
+(`verifyProviders` in `x/verify.mjs`, unchanged by this branch) calls
+`collectIntegrationFacts({ cwd, cfg })` with no `refresh` argument, so it defaults to `refresh:
+true` (Ruling B) and always re-probes and persists `host-setup` evidence as a side effect of
+`--live` — regardless of whether `--refresh` was also passed. This is pre-existing behavior this
+branch did not change (Task 4/5's fix round found this exact call site and confirmed it already
+defaulted correctly, so no code change was needed there); it means `--live` is not purely additive
+to `--refresh`'s local-probe question the way the flag names might suggest.
 
 ### The dashboard poll's two cost fixes (Tasks 9 and 10)
 
@@ -295,10 +310,11 @@ state is measured by the controller, not invented by a task).
 
 - The shared evidence envelope, its age rule, and the `{refresh, record, source}` contract
   (`src/lib/evidence.mjs`).
-- Nine evidence kinds using it (`live-check`, `native-runtime`, `host-setup`,
-  `host-install-method`, `host-launch`, `companion-lifecycle`, `npm-global-root`, `daemon-sweep`,
-  `ak-launcher`), plus `ruflo-component`'s storage relocated under the same directory without
-  routing through the generic envelope, plus version-drift's pre-existing `kit.json` TTL cache
+- Eight evidence kinds using the generic envelope directly (`live-check`, `native-runtime`,
+  `host-setup`, `host-install-method`, `host-launch`, `companion-lifecycle`, `daemon-sweep`,
+  `ak-launcher`), plus two more kinds (`ruflo-component`, `npm-global-root`) whose storage moved
+  under the same shared `evidence/` directory without routing through the generic envelope — ten
+  evidence-kind directories in total — plus version-drift's pre-existing `kit.json` TTL cache
   correctly wired to `--refresh`.
 - A plain `ak status`/dashboard poll that spawns zero processes on a warm cache (measured: 14 → 0
   spawns), a dashboard poll that writes zero preference-store bytes when the view hasn't changed,
@@ -368,7 +384,7 @@ rule with this ADR's evidence store — they do not, yet.
   directory: the generic envelope (`evidence.mjs`) and `npm-global-root`'s hand-written,
   byte-compatible-but-separate local envelope in `paths.mjs`. A future reader who assumes every
   file under `evidence/` was written by `readEvidence`/`writeEvidence` will be wrong for two of the
-  nine directories (`npm-global-root` and `ruflo-component`).
+  ten directories (`npm-global-root` and `ruflo-component`).
 - `ak status`, `ak sync --dry-run`, and `ak x verify` are no longer *literally* read-only in the
   strictest sense: a cold evidence cache means a first run under any of them writes a small,
   private, inert cache file under `<state>/agentic-kit/evidence/`. This is intended (the

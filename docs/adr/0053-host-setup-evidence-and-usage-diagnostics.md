@@ -7,9 +7,10 @@
 - **Updated:** 2026-09-26 — amended: management (Managed by ak / Found, not managed / Not installed) is reported separately from health; every found host is checked automatically; "Disabled" is retired (see [Amendment — 2026-09-26](#amendment--2026-09-26-management-is-not-health))
 - **Updated:** 2026-09-28 — host setup checks (`detectHosts`/`hostInstallState`/`hostExecutable`)
   are now persisted evidence with an age rule (6h, invalidated by a PATH/package change), not
-  process-memory-only as this ADR originally describes; `src/lib/host-health-evidence.mjs`'s own
-  connection-check proof (the badge this ADR is about) is unaffected — it stays in-process,
-  unpersisted, 15-minute-capped, consent-gated, untouched by this branch. See
+  process-memory-only as this ADR originally describes; `host-readiness.mjs`'s own connection-check
+  proof (the health badge this ADR is about) is unaffected — it stays in-process, unpersisted,
+  15-minute-capped, consent-gated, untouched by this branch (its `host-health-evidence.mjs`
+  input-fingerprint helper, used only to invalidate that in-memory cache, is also untouched). See
   [ADR-0063](0063-evidence-store-and-refresh-vocabulary.md) (remediation program, branch 6a tasks 5 and 7)
 - **Amends:** [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md)
 - **Related:** [ADR-0041](0041-host-neutral-hook-configuration-assurance.md), [ADR-0051](0051-supported-peer-delegation-and-host-realignment.md)
