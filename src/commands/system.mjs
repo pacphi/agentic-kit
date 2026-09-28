@@ -3,44 +3,61 @@
 // The CLI twin of the dashboard's System area, driving the SAME composed
 // collector (src/lib/footprint/index.mjs) over the same two tiers. Reading is
 // cheap and always safe: the live process census, the individually-known files,
-// and whatever the last deep scan persisted, carried forward with THAT scan's
-// timestamp. The expensive walk runs only under --deep, only when a human asked
-// for it — never on open, never on a nudge (the nudge just says the figures are
-// getting old).
+// and whatever the last machine measurement persisted, carried forward with
+// THAT measurement's timestamp. The expensive walk runs only under
+// --refresh=machine, through the shared refresh stages (ADR-0063), only when a
+// human asked for it — never on open, never on a nudge (the nudge just says the
+// figures are getting old).
 //
 // Every number on this page is a Measurement, and this file's whole job is to
 // render one honestly. A measured zero prints as 0 because it IS zero. An
 // unmeasured quantity prints the reason it is missing and NEVER a 0 (ADR-0023,
 // machine-footprint invariant 2). A capped or partially-degraded walk prints
 // with a `>=` because what it measured is a floor, not a total.
-import { heading, info, ok, warn, dim, bold, withProgress } from '../lib/output.mjs';
+import {
+  heading, info, warn, fail, dim, bold, humanOutputToStderr,
+} from '../lib/output.mjs';
 import { createSystemCollector } from '../lib/footprint/index.mjs';
 import { UNKNOWN } from '../lib/footprint/walk.mjs';
+import {
+  REFRESH_OPTIONS, REFRESH_STRENGTHS, refreshRequestFromFlags, runRefresh, cliRefreshStages, printRefreshStage,
+} from '../lib/refresh.mjs';
 
 export const options = {
   json: { type: 'boolean', default: false },
-  deep: { type: 'boolean', default: false },
+  ...REFRESH_OPTIONS,
 };
 
 export const help = `ak system — what this stack occupies on your machine
 
 Reads the cheap tier by default: the live agent-process census, the files that
-grow fastest between scans, and the last deep scan's figures carried forward with
-the date they were taken. --deep re-walks install trees, storage, the cross-host
-catalog, and every discovered project, then persists the result.
+grow fastest between measurements, and the last machine measurement's figures
+carried forward with the date they were taken. --refresh=machine re-walks
+install trees, storage, the cross-host catalog, and every discovered project,
+then persists the result; --project-trees also measures the working trees of
+your own projects. A bare --refresh (or --refresh=live) refreshes Maintenance
+evidence and the inventory, then reprints this same snapshot — see
+ak status --help for the shared stages and strengths.
 
 Usage:
-  ak system [options]
+  ak system [--refresh[=live|machine]] [--project-trees] [--json]
 
 Options:
-  --deep    re-run the full scan now (minutes on a large machine), then persist it
-  --json    emit the snapshot payload verbatim — the same shape /api/system serves
+  --refresh[=live|machine]  refresh first, then report (see above)
+  --project-trees           with --refresh=machine: also measure the working
+                            trees of your projects
+  --json                    emit the snapshot payload verbatim — the same
+                            shape /api/system serves; with --refresh it also
+                            carries "refresh": each stage's outcome, and stage
+                            lines go to stderr instead of stdout
+
+The exit code is 1 when a refresh stage fails, and 2 for a usage error.
 
 Examples:
-  ak system              install totals, runtime census, storage, catalog, projects
-  ak system --deep       re-measure everything, then print it
-  ak system --json       machine-readable snapshot (no scan)
-  ak system --deep --json  re-measure, then emit the fresh snapshot`;
+  ak system                    install totals, runtime census, storage, catalog, projects
+  ak system --refresh=machine  re-measure everything, then print it
+  ak system --json             machine-readable snapshot (no refresh)
+  ak system --refresh=machine --json  re-measure, then emit the fresh snapshot`;
 
 const UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
 
@@ -121,9 +138,9 @@ const field = (label, value) => console.log(`  ${dim(label.padEnd(16))}${value}`
 
 /** A deep section's provenance. Every figure inside it was taken at one instant
  *  and every one of them reads back as `carried-forward` (the section is always
- *  served from the persisted snapshot, even microseconds after --deep wrote it),
- *  so the scan date is stated ONCE here instead of on all several hundred lines
- *  — invariant 3 satisfied without burying the figures. */
+ *  served from the persisted snapshot, even microseconds after --refresh=machine
+ *  wrote it), so the scan date is stated ONCE here instead of on all several
+ *  hundred lines — invariant 3 satisfied without burying the figures. */
 function deepHeading(name, section) {
   const asOf = section?.asOf;
   return heading(`${name}${Number.isFinite(asOf) ? dim(`  — measured ${fmtStamp(asOf)}`) : ''}`);
@@ -137,10 +154,10 @@ function renderSummary(snapshot) {
   const present = knownFiles?.nodes?.filter((node) => node.presence === 'present').length ?? 0;
   field('known files', `${present}/${knownFiles?.nodes?.length ?? 0} present`);
   if (!snap?.present) {
-    field('deep scan', dim(`never run — ${snap?.reason ?? 'no snapshot'}`));
+    field('machine measurement', dim(`never run — ${snap?.reason ?? 'no snapshot'}`));
   } else {
     const missing = snap.completeness?.missing ?? [];
-    field('deep scan', `${fmtStamp(snap.asOf)} (${fmtDuration(snap.ageMs)} ago)`
+    field('machine measurement', `${fmtStamp(snap.asOf)} (${fmtDuration(snap.ageMs)} ago)`
       + (missing.length ? dim(` · ${missing.join(', ')} not measured`) : ''));
   }
 }
@@ -148,7 +165,7 @@ function renderSummary(snapshot) {
 function renderInstall(install) {
   deepHeading('Install', install);
   if (!install) {
-    info(dim('not measured yet — run: ak system --deep'));
+    info(dim('not measured yet — run: ak system --refresh=machine'));
     return;
   }
   field('tools present', meas(install.totals?.toolsPresent));
@@ -234,7 +251,7 @@ function renderRuntime(runtime) {
 function renderStorage(storage) {
   deepHeading('Storage', storage);
   if (!storage) {
-    info(dim('not measured yet — run: ak system --deep'));
+    info(dim('not measured yet — run: ak system --refresh=machine'));
     return;
   }
   field('total', `${meas(storage.totals?.bytes, fmtBytes)} · ${meas(storage.totals?.files)} files`);
@@ -300,7 +317,7 @@ function renderCatalogPressure(catalog) {
 function renderCatalog(catalog) {
   deepHeading('Catalog', catalog);
   if (!catalog) {
-    info(dim('not measured yet — run: ak system --deep'));
+    info(dim('not measured yet — run: ak system --refresh=machine'));
     return;
   }
   const kinds = catalog.kinds ?? [];
@@ -323,7 +340,7 @@ function renderCatalog(catalog) {
 function renderProjects(projects, now) {
   deepHeading('Projects', projects);
   if (!projects) {
-    info(dim('not measured yet — run: ak system --deep'));
+    info(dim('not measured yet — run: ak system --refresh=machine'));
     return;
   }
   field('discovered', `${meas(projects.count)}${projects.truncated ? dim(' · list truncated') : ''}`);
@@ -340,55 +357,51 @@ function renderProjects(projects, now) {
   sink.report();
 }
 
-/** The staleness nudge — the ONLY thing that ever suggests a rescan. It never
- *  triggers one: a deep walk costs minutes, so it stays a human's decision. */
+/** The staleness nudge — the ONLY thing that ever suggests a re-measure. It
+ *  never triggers one: a machine measurement costs minutes, so it stays a
+ *  human's decision. */
 function renderNudge(snap) {
   if (!snap?.present) {
-    info(`no deep scan on this machine yet — run: ${bold('ak system --deep')}`);
+    info(`no machine measurement yet — run: ${bold('ak system --refresh=machine')}`);
   } else if (snap.stale) {
-    warn(`deep figures are ${fmtDuration(snap.ageMs)} old — refresh with: ${bold('ak system --deep')}`);
+    warn(`machine figures are ${fmtDuration(snap.ageMs)} old — refresh with: ${bold('ak system --refresh=machine')}`);
   }
 }
 
-/**
- * @param {{ flags: Record<string, any>,
- *           deps?: { collector?: ReturnType<typeof createSystemCollector>,
- *                    cwd?: string, now?: () => number } }} input
- */
-export async function run({ flags, deps = {} }) {
-  const collector = deps.collector ?? createSystemCollector({ cwd: deps.cwd ?? process.cwd() });
-  const now = deps.now ?? Date.now;
+/** A refresh takes no positional. `ak system --refresh live` parses as a bare
+ *  refresh plus the argument `live`, so it is refused rather than silently
+ *  run at the wrong strength; a strength name gets its one-token spelling. */
+function strayArgumentError(positionals) {
+  const [first] = positionals;
+  if (first === undefined) return null;
+  const spelling = REFRESH_STRENGTHS.includes(first) ? ` — write --refresh=${first}` : '';
+  return `unexpected argument '${first}'${spelling}`;
+}
 
-  let scan = null;
-  if (flags.deep) {
-    // refreshDeep never rejects by contract; it reports failure in its result so
-    // a partly-completed scan still yields the sections that DID finish.
-    scan = await withProgress('deep scan', () => collector.refreshDeep(), {
-      // The ticker owns a stdout line via \r-rewrites — it must never interleave
-      // with a --json payload.
-      tty: process.stdout.isTTY && !flags.json,
-    });
-  }
+function usageError(message) {
+  fail(`ak system: ${message}`);
+  return 2;
+}
 
-  // The collector assembles the deep sections by spread, so the inferred return
-  // type cannot name install/storage/catalog/projects. The wire shape is the
-  // contract (ADR-0025); widening here reads it without restating it.
-  /** @type {Record<string, any>} */
-  const snapshot = await collector.read();
+/** The JSON summary of a refresh: each stage without its result (mirrors
+ *  status.mjs — every command that takes --refresh reports the shared
+ *  stages the same way). */
+const refreshSummary = ({ strength, ok, stages }) => ({
+  strength, ok, stages: stages.map(({ id, label, state, detail, elapsedMs }) => ({ id, label, state, detail, elapsedMs })),
+});
+
+/** Print the snapshot (or the one JSON object) and return the exit code: 1
+ *  when a refresh stage failed, else 0. */
+function report({ flags, snapshot, refresh, now }) {
+  const code = refresh && !refresh.ok ? 1 : 0;
 
   if (flags.json) {
-    console.log(JSON.stringify(snapshot, null, 2));
-    return scan && !scan.ok ? 1 : 0;
+    const payload = refresh ? { ...snapshot, refresh: refreshSummary(refresh) } : snapshot;
+    console.log(JSON.stringify(payload, null, 2));
+    return code;
   }
 
   renderSummary(snapshot);
-  if (scan) {
-    if (scan.ok) ok(`deep scan complete in ${fmtDuration(snapshot.scan?.durationMs ?? 0)}`);
-    else warn(`deep scan failed: ${scan.error}`);
-    // A scan that measured everything but could not write the file is still a
-    // successful measurement — say which of the two happened.
-    if (scan.ok && scan.error) warn(scan.error);
-  }
   renderInstall(snapshot.install);
   renderRuntime(snapshot.runtime);
   renderStorage(snapshot.storage);
@@ -396,5 +409,44 @@ export async function run({ flags, deps = {} }) {
   renderProjects(snapshot.projects, now());
   console.log('');
   renderNudge(snapshot.snapshot);
-  return scan && !scan.ok ? 1 : 0;
+  return code;
+}
+
+/**
+ * @param {{ flags: Record<string, any>, positionals?: string[], pkgRoot?: string,
+ *           deps?: { collector?: ReturnType<typeof createSystemCollector>, cwd?: string,
+ *                    now?: () => number, refreshStages?: Record<string, (ctx: any) => Promise<any>> } }} input
+ */
+export async function run({
+  flags, positionals = [], pkgRoot, deps = {},
+}) {
+  const request = refreshRequestFromFlags(flags);
+  if ('error' in request) return usageError(request.error);
+
+  const cwd = deps.cwd ?? process.cwd();
+  const collector = deps.collector ?? createSystemCollector({ cwd });
+  const now = deps.now ?? Date.now;
+
+  if (!request.strength) {
+    // The collector assembles the deep sections by spread, so the inferred
+    // return type cannot name install/storage/catalog/projects. The wire
+    // shape is the contract (ADR-0025); widening here reads it without
+    // restating it.
+    /** @type {Record<string, any>} */
+    const snapshot = await collector.read();
+    return report({ flags, snapshot, refresh: null, now });
+  }
+
+  const stray = strayArgumentError(positionals);
+  if (stray) return usageError(stray);
+
+  // The command's own collector, so the read below sees exactly what the
+  // refresh's `machine` stage just persisted.
+  const stages = deps.refreshStages ?? cliRefreshStages({ cwd, pkgRoot, deps: { collector } });
+  const refresh = flags.json
+    ? await humanOutputToStderr(() => runRefresh({ ...request, stages, onStage: undefined }))
+    : await runRefresh({ ...request, stages, onStage: printRefreshStage });
+  /** @type {Record<string, any>} */
+  const snapshot = await collector.read();
+  return report({ flags, snapshot, refresh, now });
 }

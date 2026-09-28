@@ -1,13 +1,18 @@
 // ADR-0048 — `ak maintain` v2: inventory-led evidence, guidance, discovery,
 // activity, interruption audit/reconciliation, and guarded one-action plans,
-// layered over the existing read-only-scan / immutable-plan / apply / undo
-// engine (v1). `deps.service` is the v1 `createMaintenanceService()` and
-// keeps `scan|plan|apply|undo` working exactly as before; `deps.management`
-// is the ADR-0048 facade (`createManagementService()` from
+// layered over the existing immutable-plan / apply / undo engine (v1).
+// `deps.service` is the v1 `createMaintenanceService()` and keeps
+// `plan|apply|undo` working exactly as before; `deps.management` is the
+// ADR-0048 facade (`createManagementService()` from
 // `../lib/maintenance/management/service.mjs`), imported lazily so a plain
-// `ak maintain scan` never pays for modules it does not need.
-import { heading, info, warn, dim, ok } from '../lib/output.mjs';
+// `ak maintain` never pays for modules it does not need. `report` (the
+// default verb) reads `service.report()`; `--refresh[=live|machine]` runs
+// the shared refresh stages first (ADR-0063, `../lib/refresh.mjs`).
+import { heading, info, warn, dim, ok, humanOutputToStderr } from '../lib/output.mjs';
 import { createMaintenanceService } from '../lib/maintenance/service.mjs';
+import {
+  REFRESH_OPTIONS, REFRESH_STRENGTHS, refreshRequestFromFlags, runRefresh, cliRefreshStages, printRefreshStage,
+} from '../lib/refresh.mjs';
 import {
   SCOPE_LENSES, CURATED_VIEWS, SORT_ORDERS, FACETS, GUIDANCE_LANES, GUIDANCE_LANE_LABELS,
   SHELLS, DISPOSITION_KINDS, RECONCILE_OUTCOMES, RECONCILE_OUTCOME_LABELS,
@@ -15,13 +20,14 @@ import {
   SCOPE_LABELS, SOURCE_TYPES, SOURCE_COVERAGE_LABELS,
 } from '../lib/maintenance/management/model.mjs';
 
+const REPORT_VERB = 'report';
+
 const ADDABLE_SOURCE_KINDS = SOURCE_TYPES.filter((kind) => kind !== 'automatic');
 const AK_MAINTAIN_JSON_SCHEMA = 'ak-maintain/v2';
 
 export const options = {
   json: { type: 'boolean', default: false },
-  deep: { type: 'boolean', default: false },
-  'refresh-inventory': { type: 'boolean', default: false },
+  ...REFRESH_OPTIONS,
   project: { type: 'string' },
   findings: { type: 'string' },
   'safety-class': { type: 'string' },
@@ -68,7 +74,7 @@ placement and one action — no batching. Apply, undo, reconcile, and
 disposition require explicit, exact confirmation with --yes.
 
 Usage:
-  ak maintain scan [--deep] [--refresh-inventory] [--json]
+  ak maintain [report] [--refresh[=live|machine]] [--project-trees] [--json]
   ak maintain inventory [--scope S] [--view V] [--facet name=value ...]
                          [--search TEXT] [--sort ORDER] [--cursor TOKEN] [--limit N] [--json]
   ak maintain show --placement ID [--reveal] [--json]
@@ -81,7 +87,7 @@ Usage:
   ak maintain sources exclude --path PATH [--recursive] [--json]
   ak maintain sources unexclude --exclusion ID [--json]
   ak maintain scans [--json]
-  ak maintain scans start [--source ID,...] [--deep] [--json]   (waits for the final state)
+  ak maintain scans start [--source ID,...] [--json]   (waits for the final state)
   ak maintain scans pause|resume --source ID [--json]
   ak maintain scans stop --source ID [--yes] [--json]
   ak maintain activity [--json]
@@ -99,8 +105,11 @@ Usage:
 
 Options:
   --json                    emit the complete DTO exactly as returned by the facade
-  --deep                    explicitly refresh the System deep scan before reading
-  --refresh-inventory       rebuild the Inventory from the collector after scanning
+  --refresh[=live|machine]  with report (the default verb): refresh first, then
+                            report (see ak status --help for the shared stages
+                            and strengths)
+  --project-trees           with --refresh=machine: also measure the working
+                            trees of your projects
   --scope S                 system|machine|user|project|across
   --view V                  a curated Inventory view
   --facet name=value        repeatable facet filter (kind, scope, guidance, ...)
@@ -139,6 +148,8 @@ Options:
   --yes                     explicit confirmation for a write
 
 Examples:
+  ak maintain                          findings from the last measurement
+  ak maintain --refresh=machine        re-measure the machine, then report
   ak maintain inventory --search lightpanda --json
   ak maintain show --placement plc_lightpanda --json
   ak maintain guidance --lane steps
@@ -161,12 +172,9 @@ Compatibility:
   recipes accept always requires --version; recipes withdraw's --version is
   optional and defaults to the active, else the most recently staged, version.
   scans start/pause/resume drive a discovery scan in the background and wait
-  for it to reach a final state before printing progress. Automatic sources
-  that are not a filesystem walk (runtimes, package managers, Ollama,
-  providers) are measured by "ak maintain scan --deep", not by scans start —
-  naming one with --source is refused. A host source whose folder is not on
-  this machine reads "Not installed", is never scanned or counted, and is
-  refused by --source too.`;
+  for it to reach a final state before printing progress. A host source whose
+  folder is not on this machine reads "Not installed", is never scanned or
+  counted, and is refused by --source too.`;
 
 // ── Small parsing helpers ───────────────────────────────────────────────────
 
@@ -231,10 +239,12 @@ async function resolveManagement(deps) {
   return createManagementService();
 }
 
-// ── Legacy v1 verbs: scan / plan / apply / undo (byte-for-byte JSON contract) ─
+// ── report: read-only findings from the last measurement, optionally ───────
+// preceded by a refresh (ADR-0063). `plan / apply / undo` (byte-for-byte
+// JSON contract) follow below, unchanged.
 
-function renderScan(model) {
-  heading('Maintenance — read-only findings');
+function renderReport(model) {
+  heading('Maintenance — findings from the last measurement');
   info(`Evidence: ${model.freshness.status} · ${model.freshness.completeness}`);
   info(`${model.summary.updatesReady} updates ready · ${model.summary.safeCleanup} safe cleanup · `
     + `${model.summary.needsReview} needs review · ${model.summary.unsupportedOrBlocked} blocked`);
@@ -244,29 +254,51 @@ function renderScan(model) {
   if (!model.findings.length) info(dim('No maintenance findings in the measured evidence.'));
 }
 
-function renderRefreshedInventory(value) {
-  if (!value) return;
-  const parts = [value.inventoryId, value.capturedAt].filter(Boolean);
-  info(`Inventory refreshed${parts.length ? ` · ${parts.join(' · ')}` : ''}`);
+/** The JSON summary of a refresh: each stage without its result — the same
+ *  shape `ak status`/`ak system` carry, so every command that takes the flag
+ *  reports it the same way. */
+const refreshSummary = ({ strength, ok: succeeded, stages }) => ({
+  strength, ok: succeeded, stages: stages.map(({ id, label, state, detail, elapsedMs }) => ({ id, label, state, detail, elapsedMs })),
+});
+
+/** The collector/facade `--refresh` needs when no test bypasses it with
+ *  `deps.refreshStages`: the SAME Maintenance service `service.report()`
+ *  reads back from afterward, so the `maintenance` stage's write and the
+ *  read that follows it are never two unrelated instances that only happen
+ *  to share a control root. */
+async function defaultStages({ pkgRoot, deps, service }) {
+  const cwd = deps.cwd ?? process.cwd();
+  const collector = deps.collector ?? (await import('../lib/footprint/index.mjs')).createSystemCollector({ cwd });
+  const management = deps.management
+    ?? (await import('../lib/maintenance/management/service.mjs')).createManagementService({ collector, maintenance: service });
+  return cliRefreshStages({ cwd, pkgRoot, deps: { collector, maintenance: service, management } });
 }
 
-async function dispatchScan({ flags, deps }) {
+/** `--refresh` before `report`. `deps.refreshStages` (tests) bypasses
+ *  `defaultStages` entirely, so an injected fake never triggers a real
+ *  collector or facade construction. */
+async function refreshedReport({ flags, request, pkgRoot, deps }) {
   const service = deps.service ?? createMaintenanceService();
-  const scanResult = await service.scan({ deep: flags.deep === true });
-  if (flags['refresh-inventory'] !== true) {
-    return { verb: 'scan', result: scanResult, rawJson: true, render: renderScan };
-  }
-  const management = await resolveManagement(deps);
-  // `--deep` is a machine measurement: walk every discovery source to a
-  // terminal state, then rebuild, exactly as the dashboard's Re-measure does.
-  const inventoryResult = flags.deep === true && typeof management.rebuildAfterMeasurement === 'function'
-    ? (await management.rebuildAfterMeasurement()).inventory
-    : await management.refreshInventory({ deep: flags.deep === true });
+  const stages = deps.refreshStages ?? await defaultStages({ pkgRoot, deps, service });
+  const refresh = flags.json
+    ? await humanOutputToStderr(() => runRefresh({ ...request, stages, onStage: undefined }))
+    : await runRefresh({ ...request, stages, onStage: printRefreshStage });
+  const model = await service.report();
   return {
-    verb: 'scan',
-    result: { scan: scanResult, inventory: inventoryResult },
-    render: (value) => { renderScan(value.scan); renderRefreshedInventory(value.inventory); },
+    verb: 'report', result: { ...model, refresh: refreshSummary(refresh) }, rawJson: true,
+    refreshFailed: !refresh.ok, render: renderReport,
   };
+}
+
+async function dispatchReport({ flags, pkgRoot, deps }) {
+  const request = refreshRequestFromFlags(flags);
+  if ('error' in request) return usageError(request.error);
+  if (!request.strength) {
+    const service = deps.service ?? createMaintenanceService();
+    const result = await service.report();
+    return { verb: 'report', result, rawJson: true, render: renderReport };
+  }
+  return refreshedReport({ flags, request, pkgRoot, deps });
 }
 
 function renderPlan(plan) {
@@ -294,7 +326,6 @@ async function dispatchPlan({ flags, deps }) {
   }
   const service = deps.service ?? createMaintenanceService();
   const result = await service.plan({
-    deep: flags.deep === true,
     findingIds,
     project: flags.project ?? null,
     ...(flags['safety-class'] ? { safetyClass: flags['safety-class'] } : {}),
@@ -444,7 +475,7 @@ function renderWhatCanIAccomplish(value) {
 function renderInspector(inspector) {
   if (inspector?.scanRequired === true) {
     heading('Maintenance placement');
-    info(dim('No inventory has been captured yet. Run: ak maintain scan --refresh-inventory.'));
+    info(dim('No inventory has been captured yet. Run: ak maintain --refresh.'));
     return;
   }
   heading(`Maintenance placement — ${inspector.whatIsThis.displayName}`);
@@ -660,9 +691,7 @@ function renderScanProgress(result) {
 
 async function scansStart(flags, management) {
   const sourceIds = flags.source ? csvIds(flags.source) : undefined;
-  const result = await management.startScan(compact({
-    sourceIds, deep: flags.deep === true ? true : undefined,
-  }));
+  const result = await management.startScan(compact({ sourceIds }));
   // The facade drives each started source to a terminal state in the
   // background; the CLI waits for exactly the sources it just requested (or
   // every in-flight scan, when --source was omitted) so it can report a
@@ -819,7 +848,7 @@ async function dispatchPreferences({ flags, deps }) {
 // ── Dispatch table and entrypoint ───────────────────────────────────────────
 
 const DISPATCH = Object.freeze({
-  scan: dispatchScan,
+  report: dispatchReport,
   inventory: dispatchInventory,
   show: dispatchShow,
   guidance: dispatchGuidance,
@@ -846,23 +875,41 @@ function emit(outcome, json) {
   outcome.render?.(outcome.result);
 }
 
+/** `--refresh` is accepted only with `report` (explicit or default); any other
+ *  verb carrying it is a usage error (R5). `--refresh <strength>` (no `=`)
+ *  leaves the strength as a stray positional — `normalizeBareRefresh` in
+ *  refresh.mjs rewrites only the exact `--refresh` token, never the value
+ *  after it — so that specific mistake gets the one-token spelling hint
+ *  instead of the generic "unknown verb" message. */
+function refreshVerbError(verb, flags) {
+  if (flags.refresh === undefined || verb === REPORT_VERB) return null;
+  if (REFRESH_STRENGTHS.includes(verb) && !(verb in DISPATCH)) return `unexpected argument '${verb}' — write --refresh=${verb}`;
+  return '--refresh applies to ak maintain report; run it first, then this verb';
+}
+
 /** CLI adapter over the ADR-0048 Maintenance management facade (v2 verbs) and
- * the shared v1 Maintenance application service (`scan|plan|apply|undo`,
- * unchanged). `deps.service` stubs the v1 service; `deps.management` stubs
- * the ADR-0048 facade (`createManagementService()`), so tests never touch a
- * real filesystem or provider.
- * @param {{ flags: Record<string, any>, positionals: string[], deps?: { service?: any, management?: any } }} input */
-export async function run({ flags, positionals, deps = {} }) {
-  const verb = positionals[0] ?? 'scan';
+ * the shared v1 Maintenance application service (`report|plan|apply|undo`,
+ * unchanged apart from `report`). `deps.service` stubs the v1 service;
+ * `deps.management` stubs the ADR-0048 facade (`createManagementService()`),
+ * so tests never touch a real filesystem or provider.
+ * @param {{ flags: Record<string, any>, positionals: string[], pkgRoot?: string,
+ *   deps?: { service?: any, management?: any } }} input */
+export async function run({ flags, positionals, pkgRoot, deps = {} }) {
+  const verb = positionals[0] ?? REPORT_VERB;
+  const refreshError = refreshVerbError(verb, flags);
+  if (refreshError) { warn(refreshError); return 2; }
   const handler = DISPATCH[verb];
   if (!handler || positionals.length > 2) {
     warn(`usage: ak maintain ${Object.keys(DISPATCH).join('|')} [options]`);
     return 2;
   }
   try {
-    const outcome = await handler({ flags, sub: positionals[1] ?? null, positionals, deps });
+    const outcome = await handler({
+      flags, sub: positionals[1] ?? null, positionals, pkgRoot, deps,
+    });
     if (outcome.usageError) { warn(outcome.usageError); return 2; }
     emit(outcome, flags.json === true);
+    if (outcome.refreshFailed) return 1;
     return outcome.result?.ok === false ? 2 : 0;
   } catch (error) {
     warn(error?.message ?? String(error));

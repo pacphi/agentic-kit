@@ -131,7 +131,8 @@ export function saveSource(ctx) {
   };
 }
 
-/** After a machine measurement (System Full scan / `ak maintain scan --deep`):
+/** After a machine measurement (`ak system --refresh=machine` /
+ * `ak maintain --refresh=machine`):
  * drive every filesystem source's discovery walk to a terminal state, wait
  * for them, then rebuild the inventory so coverage and project evidence are
  * part of it. This is the one "re-measure" path the workspace exposes. */

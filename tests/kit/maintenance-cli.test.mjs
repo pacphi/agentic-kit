@@ -252,6 +252,7 @@ function buildService(overrides = {}) {
   const calls = [];
   return {
     calls,
+    async report() { calls.push({ method: 'report', args: [] }); return overrides.report ?? readModel; },
     async scan(options) { calls.push({ method: 'scan', args: [options] }); return overrides.scan ?? readModel; },
     async plan(options) { calls.push({ method: 'plan', args: [options] }); return overrides.plan ?? executablePlan; },
     async apply(options) {
@@ -270,60 +271,109 @@ function buildService(overrides = {}) {
 test('maintain is porcelain and its help advertises exact guarded actions', () => {
   const help = spawnSync(process.execPath, [BIN, 'maintain', '--help'], { encoding: 'utf8', env: spawnEnv(HOME) });
   assert.equal(help.status, 0, help.stderr);
-  assert.match(help.stdout, /ak maintain scan/);
+  assert.match(help.stdout, /ak maintain \[report\] \[--refresh\[=live\|machine\]\]/);
   assert.match(help.stdout, /apply.*--plan.*--digest.*--actions.*--yes/i);
   assert.match(help.stdout, /ak maintain recover --receipt/i);
   assert.match(help.stdout, /recover is a read-only alias for audit/i);
   assert.match(help.stdout, /exactly one exact action id/i);
+  assert.doesNotMatch(help.stdout, /--deep\b|--refresh-inventory\b|ak maintain scan\b/, 'only the current spellings');
   const rootHelp = spawnSync(process.execPath, [BIN, '--help'], { encoding: 'utf8', env: spawnEnv(HOME) });
   assert.match(rootHelp.stdout, /ak maintain/);
 });
 
-// ── Legacy v1 verbs: scan / plan / apply / undo stay byte-for-byte (MNT-ACT-001) ─
+// ── report: read-only findings, optionally preceded by --refresh (ADR-0063) ──
+// `plan / apply / undo` stay byte-for-byte (MNT-ACT-001), below.
 
-test('scan delegates deep explicitly and emits the read DTO as JSON', async () => {
+test('bare invocation calls service.report and never service.scan', async () => {
   const service = buildService();
-  const result = await captureLogs(() => run({
-    flags: { json: true, deep: true }, positionals: ['scan'], deps: { service },
-  }));
+  const result = await captureLogs(() => run({ flags: { json: true }, positionals: [], deps: { service } }));
   assert.equal(result.code, 0);
-  assert.deepEqual(service.calls, [{ method: 'scan', args: [{ deep: true }] }]);
+  assert.deepEqual(service.calls, [{ method: 'report', args: [] }]);
   assert.equal(JSON.parse(result.text).mode, 'read-only');
 });
 
-test('scan --refresh-inventory (non-deep) calls management.refreshInventory after the provider scan', async () => {
+test('the removed scan verb is the parser\'s generic unknown-verb error', async () => {
   const service = buildService();
-  const management = buildManagement();
-  const result = await captureLogs(() => run({
-    flags: { json: true, 'refresh-inventory': true },
-    positionals: ['scan'], deps: { service, management },
-  }));
-  assert.equal(result.code, 0);
-  assert.deepEqual(service.calls, [{ method: 'scan', args: [{ deep: false }] }]);
-  assert.deepEqual(management.calls, [{ method: 'refreshInventory', args: [{ deep: false }] }]);
-  const parsed = JSON.parse(result.text);
-  assert.equal(parsed.schema, 'ak-maintain/v2');
-  assert.equal(parsed.result.scan.mode, 'read-only');
-  assert.equal(parsed.result.inventory.inventoryId, inventoryPage.inventoryId);
+  const result = await captureLogs(() => run({ flags: {}, positionals: ['scan'], deps: { service } }));
+  assert.equal(result.code, 2);
+  assert.deepEqual(service.calls, []);
+  assert.doesNotMatch(result.text, /is now|renamed|retired|no longer/i, 'no alias and no hint');
 });
 
-test('scan --deep --refresh-inventory calls management.rebuildAfterMeasurement, not refreshInventory', async () => {
-  const service = buildService();
+test('--refresh with a verb other than report is a usage error naming report', async () => {
   const management = buildManagement();
   const result = await captureLogs(() => run({
-    flags: { json: true, deep: true, 'refresh-inventory': true },
-    positionals: ['scan'], deps: { service, management },
+    flags: { refresh: '' }, positionals: ['inventory'], deps: { management },
+  }));
+  assert.equal(result.code, 2);
+  assert.match(result.text, /--refresh applies to ak maintain report; run it first, then this verb/);
+  assert.deepEqual(management.calls, []);
+});
+
+test('a bare --refresh with a stray strength positional (missing "=") names the one-token spelling', async () => {
+  for (const strength of ['live', 'machine']) {
+    const result = await captureLogs(() => run({ flags: { refresh: '' }, positionals: [strength], deps: {} }));
+    assert.equal(result.code, 2);
+    assert.match(result.text, new RegExp(`unexpected argument '${strength}' — write --refresh=${strength}`));
+  }
+});
+
+test('report --refresh runs the shared stages in order, then reads service.report(); JSON carries a refresh summary', async () => {
+  const service = buildService();
+  const calls = [];
+  const refreshStages = {
+    maintenance: async () => { calls.push('maintenance'); return { ok: true, detail: 'checked 1 of 1 providers' }; },
+    inventory: async () => { calls.push('inventory'); return { ok: true }; },
+    local: async () => { calls.push('local'); return { ok: true }; },
+  };
+  const result = await captureLogs(() => run({
+    flags: { json: true, refresh: '' }, positionals: ['report'], deps: { service, refreshStages },
   }));
   assert.equal(result.code, 0);
-  assert.deepEqual(service.calls, [{ method: 'scan', args: [{ deep: true }] }]);
-  // A machine measurement (--deep) drives every discovery source to a
-  // terminal state and rebuilds in one call; the CLI never calls
-  // refreshInventory directly in this path.
-  assert.deepEqual(management.calls, [{ method: 'rebuildAfterMeasurement', args: [] }]);
+  assert.deepEqual(calls, ['maintenance', 'inventory', 'local']);
+  assert.deepEqual(service.calls, [{ method: 'report', args: [] }]);
   const parsed = JSON.parse(result.text);
-  assert.equal(parsed.schema, 'ak-maintain/v2');
-  assert.equal(parsed.result.scan.mode, 'read-only');
-  assert.equal(parsed.result.inventory.inventoryId, inventoryPage.inventoryId);
+  assert.equal(parsed.mode, 'read-only');
+  assert.equal(parsed.refresh.strength, 'local');
+  assert.equal(parsed.refresh.ok, true);
+  assert.deepEqual(parsed.refresh.stages.map(({ id }) => id), ['maintenance', 'inventory', 'local']);
+});
+
+test('a failed refresh stage exits 1, not 2, and still reports the last measurement', async () => {
+  const service = buildService();
+  const refreshStages = {
+    maintenance: async () => ({ ok: false, detail: 'provider scan exploded' }),
+    inventory: async () => ({ ok: true }),
+    local: async () => ({ ok: true }),
+  };
+  const result = await captureLogs(() => run({
+    flags: { json: true, refresh: '' }, positionals: [], deps: { service, refreshStages },
+  }));
+  assert.equal(result.code, 1);
+  assert.equal(JSON.parse(result.text).refresh.ok, false);
+  assert.deepEqual(service.calls, [{ method: 'report', args: [] }], 'report still reads the last measurement');
+});
+
+test('plain report never runs a refresh stage (no --refresh)', async () => {
+  let calls = 0;
+  const refreshStages = new Proxy({}, { get: () => async () => { calls += 1; return { ok: true }; } });
+  const service = buildService();
+  await run({ flags: {}, positionals: [], deps: { service, refreshStages } });
+  assert.equal(calls, 0);
+  assert.deepEqual(service.calls, [{ method: 'report', args: [] }]);
+});
+
+test('the retired --deep and --refresh-inventory flags get the parser\'s generic unknown-option error', () => {
+  for (const flag of ['--deep', '--refresh-inventory']) {
+    const r = spawnSync(process.execPath, [BIN, 'maintain', flag], { encoding: 'utf8', env: spawnEnv(HOME) });
+    assert.equal(r.status, 2, `${flag}: ${r.stdout}${r.stderr}`);
+    const error = r.stdout.split('\n').find((l) => l.includes('Unknown option')) ?? '';
+    assert.match(error, new RegExp(`^✗ ak maintain: Unknown option '${flag}'\\. To specify a positional argument`));
+    // The error line itself carries no alias or hint (the help dump printed
+    // alongside it legitimately says "no longer" about the unrelated
+    // `recover` verb, so only the error line is checked here).
+    assert.doesNotMatch(error, /did you mean|is now|renamed|retired|no longer/i, 'no alias and no hint');
+  }
 });
 
 test('plan passes exact finding selection and emits an immutable-plan envelope', async () => {
@@ -336,7 +386,7 @@ test('plan passes exact finding selection and emits an immutable-plan envelope',
     positionals: ['plan'], deps: { service },
   }));
   assert.equal(result.code, 0);
-  assert.deepEqual(service.calls, [{ method: 'plan', args: [{ deep: false, findingIds: ['a', 'b'], project: '/repo' }] }]);
+  assert.deepEqual(service.calls, [{ method: 'plan', args: [{ findingIds: ['a', 'b'], project: '/repo' }] }]);
   assert.equal(JSON.parse(result.text).planId, 'plan-a');
 });
 
@@ -347,7 +397,7 @@ test('executable plan persistence is explicit', async () => {
   }));
   assert.equal(result.code, 0);
   assert.deepEqual(service.calls, [{
-    method: 'plan', args: [{ deep: false, findingIds: ['a'], project: null, executable: true, persist: true }],
+    method: 'plan', args: [{ findingIds: ['a'], project: null, executable: true, persist: true }],
   }]);
 });
 
@@ -748,13 +798,15 @@ test('scans alone reports progress; pause/resume dispatch exactly; stop previews
 test('scans start awaits management.awaitScans after startScan to report the final state', async () => {
   const management = buildManagement();
   const result = await captureLogs(() => run({
-    flags: { source: 'src_a,src_b', deep: true }, positionals: ['scans', 'start'], deps: { management },
+    flags: { source: 'src_a,src_b' }, positionals: ['scans', 'start'], deps: { management },
   }));
   assert.equal(result.code, 0);
   // The CLI's own parsed --source list is what it awaits, not a field read
   // back off startScan's result (startScan returns no requestedSourceIds).
+  // A machine measurement is now `ak maintain --refresh=machine`, not a
+  // `--deep` flag on `scans start` — startScan never carries one.
   assert.deepEqual(management.calls, [
-    { method: 'startScan', args: [{ sourceIds: ['src_a', 'src_b'], deep: true }] },
+    { method: 'startScan', args: [{ sourceIds: ['src_a', 'src_b'] }] },
     { method: 'awaitScans', args: [{ sourceIds: ['src_a', 'src_b'] }] },
   ]);
 });
@@ -864,7 +916,7 @@ test('preferences reads without --set and saves parsed key=value pairs with --se
 // ── Sweeps: no prohibited label, no path leak (MNT-EVD-006/008, MNT-PRV-004/005) ─
 
 const SWEEP_CASES = [
-  ['scan', ['scan'], {}, { service: () => buildService() }],
+  ['report', [], {}, { service: () => buildService() }],
   ['inventory', ['inventory'], {}, { management: () => buildManagement() }],
   ['show', ['show'], { placement: FIXTURE_PLACEMENT_ID }, { management: () => buildManagement() }],
   ['guidance', ['guidance'], {}, { management: () => buildManagement() }],
