@@ -1,8 +1,8 @@
-// refresh-vocabulary-guard.test.mjs — Branch 6b Task 13 (R16, R17, R18): no
+// refresh-vocabulary-guard.test.mjs — ADR-0063 (the refresh vocabulary): no
 // retired CLI spelling from before the one-refresh-flag vocabulary may
 // reappear in help text, README, docs, or the installed `claude/` guidance.
 //
-// Scope (R18): src/** (comments included — they must describe current CLI
+// Scope: src/** (comments included — they must describe current CLI
 // behaviour), bin/**, claude/**, README.md, and docs/**/*.md except
 // docs/adr/, docs/audits/, docs/superpowers/, and docs/research/ (history
 // lives there and may still name retired spellings). In
@@ -10,12 +10,12 @@
 // watch[].history[].note strings are skipped — every other string, including
 // `adjustment`, is scanned like any other source text.
 //
-// CLI patterns only (R16): the dashboard's own retired spellings ("Full
+// CLI patterns only: the dashboard's own retired spellings ("Full
 // scan", "Refresh evidence", "Re-measure machine", "Check again", "refresh
 // now") are out of this guard's scope until the dashboard half of this work
 // lands in a later branch (see docs/superpowers/plans/2026-09-28-branch-6b-
 // one-refresh-flag.md, "Closing this branch"). This guard never asserts an
-// UPGRADING section or an old -> new table exists (R17 forbids both).
+// UPGRADING section or an old -> new table exists (no legacy, no hints).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -45,6 +45,19 @@ const RETIRED_CLI_PATTERNS = [
   // a plain English sentence never matches.
   { label: 'ak host …|refresh (enumerated verb list)', pattern: /\bhost\s+[a-z][\w-]*(?:\s*\\?\|\s*[a-z][\w-]*)*\s*\\?\|\s*refresh\b/g },
   { label: 'ak x verify …|… (enumerated suite list)', pattern: /\bverify\s+(?:learning|security|aqe|providers|harvest|deja-vu|memory)\s*\\?\|/g },
+  // A bracketed usage line (`system [--deep] [--json]`, `status [--json]
+  // [--live]`) puts other bracketed options between the command word and the
+  // retired flag, defeating the tight adjacency patterns above — this is
+  // exactly how four current-state docs kept `--deep`/`--live` past the
+  // original guard. These tolerate any number of single-line bracketed groups
+  // (and an optional leading `[`) between the command word and the retired
+  // flag.
+  { label: 'ak status/system […] --deep|--live (bracketed options before the flag)',
+    pattern: /\b(?:status|system)\s+(?:\[[^\]\n]*\]\s*)*\[?--(?:deep|live)\b/g },
+  // `ak usage prompts --deep` behind unrelated prose on the same line (the
+  // USAGE-SCORECARD-METRICS.md line the original guard missed had no direct
+  // `prompts --deep` adjacency at all).
+  { label: 'ak usage prompts …--deep (flag anywhere on the same line)', pattern: /\bprompts\b[^\n]*\[?--deep\b/g },
 ];
 
 function lineOf(text, offset) {
