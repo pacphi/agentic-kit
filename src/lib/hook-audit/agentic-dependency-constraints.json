@@ -218,11 +218,11 @@
       "affected": ["3.14.0"],
       "issue": "https://github.com/proffesor-for-testing/agentic-qe/issues/655",
       "issueState": "closed-at-last-verification",
-      "primaryEvidence": "AQE PR #661 merged 2026-09-06; 3.14.1 released 2026-09-07; installed generator inspected 2026-09-09. Existing project artifacts require separate content-bound conformance.",
+      "primaryEvidence": "AQE PR #661 merged 2026-09-06; 3.14.1 released 2026-09-07; installed generator inspected 2026-09-09. Existing project artifacts require separate content-bound conformance. Conformance on ak's own path (aqe init --auto --with-codex --codex-guidance full|compact|none through the aqe command, agentic-qe 3.14.4, 2026-09-27) failed, so the constraint is kept: full writes no block when AGENTS.md already exists (0 owned bytes; the --json receipt reports the requested policy, not the effective one); compact adds 6 bytes outside its sentinel; resolvePackageRoot() misses the package through the aqe bin symlink, so no Codex hooks or skills install and platform verify fails 4 checks yet exits 0; platform setup codex fails with 'Module not found in bundle' and exits 0.",
       "strategy": "Use released --codex-guidance full|compact|none on 3.14.1+; preserve AQE sentinel ownership and verify actual owned bytes.",
       "versionGate": "Historical 3.14.0 generator defect fixed in 3.14.1; inspect generated project bytes independently of current package version.",
       "expiryPolicy": "retest within 14 days and on every Agentic-QE release",
-      "nextRetestAt": "2026-10-03",
+      "nextRetestAt": "2026-10-11",
       "sunsetWhen": "a released Agentic-QE build independently selects full/compact/none Codex guidance and passes preservation, idempotency, and receipt conformance",
       "notification": {
         "status": "published",
@@ -676,14 +676,15 @@
       "doneWhen": { "state": "closed-completed", "release": { "channel": "npm", "name": "agentic-qe", "minVersion": "3.14.1" } },
       "mapping": "mapped",
       "kitImpact": { "refs": ["constraint agentic-qe-3.14.0-codex-guidance-policy"], "files": [] },
-      "adjustment": "Run the --codex-guidance preservation, idempotency and receipt conformance on 3.14.1+ before sunsetting constraint agentic-qe-3.14.0-codex-guidance-policy.",
+      "adjustment": "Keep constraint agentic-qe-3.14.0-codex-guidance-policy: the 2026-09-27 conformance on 3.14.4 failed. On each Agentic-QE release run AK_AQE_CONFORMANCE=1 node --test tests/live/aqe-codex-guidance-conformance.test.mjs; sunset the constraint when it passes without its todo.",
       "status": "released",
       "constraintIds": ["agentic-qe-3.14.0-codex-guidance-policy"],
       "history": [
         { "date": "2026-09-02", "event": "filed" },
         { "date": "2026-09-06", "event": "closed", "note": "completed" },
         { "date": "2026-09-26", "event": "registered" },
-        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.14.1; the ak change is pending" }
+        { "date": "2026-09-26", "event": "released", "note": "fix first released in 3.14.1; the ak change is pending" },
+        { "date": "2026-09-27", "event": "reviewed", "note": "Branch 5 conformance on ak's path (full aqe init --auto --with-codex --codex-guidance full|compact|none through the aqe command, agentic-qe 3.14.4, sandboxed): FAIL, constraint kept. full: no block when AGENTS.md exists and platform verify reports detected=none; compact and none select correctly and are idempotent, but compact adds 6 bytes outside its sentinel; through the aqe bin resolvePackageRoot() misses the package, so no Codex hooks or skills install; platform verify exits 0 on failed checks; platform setup codex: Module not found in bundle. Evidence: Branch 5 report b5-655-conformance; upstream issue drafted, not filed" }
       ]
     },
     {
