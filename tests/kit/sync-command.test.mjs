@@ -22,6 +22,8 @@ const paths = await import('../../src/lib/paths.mjs');
 const sync = await import('../../src/commands/sync.mjs');
 const status = await import('../../src/commands/status.mjs');
 const { loadKitConfig } = await import('../../src/lib/config.mjs');
+const { HOSTS, hostInstallState } = await import('../../src/lib/providers.mjs');
+const { writeEvidence, stableInputsKey } = await import('../../src/lib/evidence.mjs');
 assertSandboxed(paths, HOME);
 isolateProject('ak-sync-command');
 
@@ -226,10 +228,13 @@ test('--dry-run prints a plan and then changes nothing at all', async () => {
   const { result, out } = await dryRun();
   assert.equal(result, 0, '`--dry-run` always exits 0 — it only reports');
   assert.match(out, /sync plan \(\d+ action\(s\)\):/);
-  // Branch 6a Task 4/5 joint fix: sync's plan-computation reads (both the plan
-  // build and the post-heal convergence re-check) call collect() with
-  // record:false, so probing on a cache miss never persists evidence — the
-  // sync/dry-run plan is a read, not a write (Branch 0 S3/F7).
+  // ADR-0063: sync's plan-computation read calls collect() with record:false,
+  // so probing on a cache miss never persists evidence — the dry-run plan is
+  // a read, not a write. `refreshPlanHosts()` (real host-evidence work sync
+  // now does before the plan, to catch a not-yet-stale but wrong row) is
+  // itself skipped under --dry-run for the same reason. The post-heal
+  // convergence re-check does persist (record: true) but is never reached
+  // here — --dry-run returns before any step, including that re-check, runs.
   assertUnchanged(beforeHome, HOME, '`ak sync --dry-run` must not touch HOME, including the evidence cache');
   assertUnchanged(beforeProject, PROJECT, '`ak sync --dry-run` must not touch the project');
 });
@@ -462,6 +467,11 @@ test('a noninteractive Codex repair is disclosed but not applied without --yes',
   try {
     result = await captureLog(() => sync.run({
       flags: FLAGS({ 'no-upgrade': true }), pkgRoot: PKG_ROOT,
+      // refreshHosts is real host-evidence work sync now does before the plan
+      // read even exists to matter here (collectFn below is fully synthetic);
+      // no-op it so the sandbox stays byte-for-byte untouched, same as the
+      // real collectFn is bypassed for this test.
+      refreshHosts: async () => {},
       collectFn: async () => [{
         subsystem: 'codex-mcp', level: 'fail', message: 'recursive Codex registration',
         fix: 'remove the recursive Codex MCP registration',
@@ -1123,6 +1133,38 @@ test('enabled + absent CLI: the install is attempted by hosts, the wiring is ski
   const { out } = await realSync();
   assert.match(out, /opencode: enabled but CLI not installed — wiring skipped/);
   assert.ok(!fs.existsSync(ocHome()), 'the config home is never fabricated for an absent host');
+});
+
+// final-review fix: a real (non-dry-run) sync forces host evidence fresh
+// BEFORE the plan is read (refreshPlanHosts), so a cached row that has not
+// yet gone stale (host-setup's 6h TTL) but is simply WRONG — here, claude
+// went from "absent" to "on PATH" since it was last recorded — can never
+// hide that from the plan, and the persisted evidence itself is corrected
+// too (not just what happens to print).
+test('sync (non-dry) force-refreshes host evidence too, so a fresh-but-wrong cache cannot hide a host that changed', async () => {
+  const catalog = seedCatalog();
+  seedHome(syncCfg(catalog), { ruflo: '9.9.9' });
+  paths._setGlobalRootForTest(fakeSyncRoot());
+  const claudeHost = HOSTS.find((h) => h.id === 'claude');
+  const { out, after } = await withOpencodeCli(async () => {
+    // Stale-but-fresh: a cache that has not yet hit its 6h TTL, claiming
+    // claude is still absent — even though withOpencodeCli's fake `claude`
+    // binary is on PATH right now (a real probe would see it as 'external').
+    writeEvidence('host-install-method', claudeHost.id, {
+      source: 'test',
+      inputsKey: stableInputsKey({ id: claudeHost.id, bin: claudeHost.bin, pkg: claudeHost.pkg, PATH: process.env.PATH ?? '' }),
+      inputs: { PATH: process.env.PATH ?? '', bin: claudeHost.bin },
+      result: { method: 'absent', version: null },
+    });
+    const syncResult = await realSync();
+    // Read the persisted evidence while the fake `claude` bin is still on
+    // PATH — a read after PATH is restored would invalidate the inputsKey
+    // and re-probe against a DIFFERENT PATH, proving nothing about this fix.
+    return { ...syncResult, after: await hostInstallState(claudeHost, { refresh: false }) };
+  });
+  assert.doesNotMatch(out, /claude enabled but not installed/,
+    'the plan must reflect the just-refreshed host state, not the stale-but-fresh cache');
+  assert.equal(after.method, 'external', 'the persisted evidence itself must be corrected, not just what the plan happened to print');
 });
 
 test('disabled + installed: no wiring writes, and enablement-gated guidance is stripped — user config untouched', async () => {

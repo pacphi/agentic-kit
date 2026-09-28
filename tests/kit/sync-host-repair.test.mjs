@@ -9,13 +9,15 @@ const sync = await import('../../src/commands/sync.mjs');
 const hostsStep = sync.SYNC_STEPS.find((s) => s.id === 'hosts');
 const cfg = { integrations: { hosts: { claude: false, codex: true, opencode: false } } };
 
-async function runHosts(lifecycle) {
+async function runHosts(lifecycle, { collectHostFacts = async () => {} } = {}) {
   const steps = [];
   const installs = [];
-  await hostsStep.run({ cfg, hostLifecycle: {
-    ...lifecycle,
-    install: async (id) => { installs.push(id); return { ok: true, detail: 'installed' }; },
-  }, step: async (label, fn) => { steps.push(label); return fn(); } });
+  await hostsStep.run({
+    cfg, collectHostFacts, hostLifecycle: {
+      ...lifecycle,
+      install: async (id) => { installs.push(id); return { ok: true, detail: 'installed' }; },
+    }, step: async (label, fn) => { steps.push(label); return fn(); },
+  });
   return { steps, installs };
 }
 
@@ -55,4 +57,67 @@ test('the hosts step runs before Codex MCP repair and the provider stack that us
 test('the versions step verifies host CLIs it upgrades', () => {
   assert.equal(sync.hostUpgradeOptions('@openai/codex').bin, 'codex');
   assert.deepEqual(sync.hostUpgradeOptions('ruflo'), {});
+});
+
+// ── final-review fix: re-record evidence after a repair succeeds ───────────
+// The Important finding: `installState()` at the top of the loop records the
+// PRE-repair evidence; without a re-probe after `install()` succeeds, that
+// stale row is the last thing written — a later `ak status`/this sync's own
+// converge proof would see the host as still broken/absent. Mutation-tested:
+// deleting the `installState`/`executable`/`collectHostFacts` re-probe block
+// in src/commands/sync.mjs's 'hosts' step turns the first assertion below red
+// (the second `installState` call, and the `collectHostFacts` call, never
+// happen) while leaving every other test in this file green.
+
+test('a successful repair re-probes and re-records host evidence with source "sync"', async () => {
+  const installStateCalls = [];
+  const executableCalls = [];
+  let n = 0;
+  const installState = async (h, opts) => {
+    n += 1;
+    installStateCalls.push(opts);
+    // Stateful: absent before install(), npm after — mirrors a real repair.
+    return n === 1 ? { method: 'absent', version: null } : { method: 'npm', version: '0.156.1' };
+  };
+  const executable = async (h, opts) => { executableCalls.push(opts); return { ok: true, detail: null }; };
+  const collectHostFactsCalls = [];
+  const r = await runHosts(
+    { installState, executable },
+    { collectHostFacts: async (opts) => collectHostFactsCalls.push(opts) },
+  );
+  assert.deepEqual(r.steps, ['install codex']);
+  assert.equal(installStateCalls.length, 2, 'installState is called once to plan, once again to re-record after install');
+  assert.deepEqual(installStateCalls[1], { refresh: true, record: true, source: 'sync' },
+    'the re-probe forces a fresh read and persists it as this repair\'s own evidence');
+  assert.equal(executableCalls.length, 1, 'the post-repair method is npm, so the launcher is re-probed too');
+  assert.deepEqual(executableCalls[0], { refresh: true, record: true, source: 'sync' });
+  assert.equal(collectHostFactsCalls.length, 1, 'host-setup facts are refreshed once after the loop, not per host');
+  assert.deepEqual(collectHostFactsCalls[0], { cwd: undefined, cfg, refresh: true, record: true, source: 'sync' });
+});
+
+test('an install that stays npm-external after repair never re-probes the launcher', async () => {
+  const executableCalls = [];
+  let n = 0;
+  const installState = async () => {
+    n += 1;
+    return n === 1 ? { method: 'npm', version: '0.1.0' } : { method: 'external', version: '0.2.0' };
+  };
+  const executable = async (h, opts) => { executableCalls.push(opts); return n === 1 ? { ok: false, detail: 'boom' } : { ok: true, detail: null }; };
+  await runHosts({ installState, executable });
+  // Only the PLAN-time executable probe (n===1, the one that decides a
+  // repair is needed) — the post-repair re-probe is skipped because the
+  // fresh method is no longer 'npm'.
+  assert.equal(executableCalls.length, 1);
+});
+
+test('no repair, no re-record: an already-healthy host never calls collectHostFacts', async () => {
+  const collectHostFactsCalls = [];
+  await runHosts(
+    {
+      installState: async () => ({ method: 'npm', version: '0.156.1' }),
+      executable: async () => ({ ok: true, detail: null }),
+    },
+    { collectHostFacts: async (opts) => collectHostFactsCalls.push(opts) },
+  );
+  assert.equal(collectHostFactsCalls.length, 0, 'nothing changed, so host-setup facts are not force-refreshed');
 });

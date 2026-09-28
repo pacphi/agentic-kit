@@ -27,7 +27,7 @@ import { managedCompanionFor } from '../lib/adapters/companion-registry.mjs';
 import { renderApplyReport } from '../lib/adapters/lifecycle-render.mjs';
 import { DEJA_VU_TARGETS } from '../lib/deja-vu.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
-import { HOSTS, hostInstallState, installHost, migrateRetiredRoutesInConfig, printActivityRoutingTable, convergeProviderStack, applySetupHostFlags, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
+import { HOSTS, hostInstallState, installHost, collectIntegrationFacts, migrateRetiredRoutesInConfig, printActivityRoutingTable, convergeProviderStack, applySetupHostFlags, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
 import { cmpVersions, installedVersion } from '../lib/versions.mjs';
 import { aqeInitArguments, aqeInitReport } from '../lib/aqe-guidance.mjs';
 import { resolveAqeEmbedding } from '../lib/aqe-embedding-config.mjs';
@@ -382,6 +382,7 @@ function deployTokenAuditSkill(pkgRoot) {
  *  and `ak host pick`'s own host-install loops; the interactive confirmation
  *  here (vs. their unconditional install) is this command's own UX. */
 async function installEnabledAbsentHosts(cfg, flags) {
+  let installed = false;
   for (const h of HOSTS) {
     if (!cfg.integrations?.hosts?.[h.id]) continue;
     const st = await hostInstallState(h);
@@ -389,11 +390,21 @@ async function installEnabledAbsentHosts(cfg, flags) {
       if (await ask(`${h.id} CLI not found — install ${h.pkg} globally?`, true, flags.yes)) {
         const r = await installHost(h.id);
         (r.ok ? ok : warn)(`${h.id}: ${r.detail}`);
+        if (r.ok) {
+          installed = true;
+          // hostInstallState() above already recorded the pre-install
+          // 'absent' evidence; re-probe now so a subsequent `ak status`
+          // doesn't read that stale row back.
+          await hostInstallState(h, { refresh: true, record: true, source: 'setup' });
+        }
       } else warn(`${h.id} not installed — enable/install later with: ak host pick`);
     } else {
       ok(`${h.id} ${st.version ?? ''} present (${st.method}${st.method === 'external' ? ' — self-managed' : ''})`);
     }
   }
+  // host-setup covers every host in one call; refresh it once after the
+  // loop, not per host, once anything actually changed.
+  if (installed) await collectIntegrationFacts({ cfg, refresh: true, record: true, source: 'setup' });
 }
 
 /** Step 6b: host lifecycle wiring — connected MCPs, compact lazy gateway,
