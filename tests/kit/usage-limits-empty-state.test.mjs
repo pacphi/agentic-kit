@@ -116,3 +116,19 @@ test('a stale Codex answer served after a failed refresh says the refresh failed
   const fresh = renderLimitsWith(empty({ codex, codexUnavailable: null }));
   assert.doesNotMatch(fresh['u-lim-codex-note'].textContent, /refresh failed/);
 });
+
+// Fix round 1: a cached figure served under a presence-gated reason (no spawn
+// was ever attempted) must say "not refreshed", never "last refresh failed" —
+// that phrase implies an attempt that did not happen.
+test('a cached Codex figure served under a presence-gated reason says "not refreshed", never "failed"', () => {
+  const codex = { provider: 'codex', fetchedAt: Date.now() - 3_600_000, planType: 'plus',
+    lanes: [{ id: 'codex', name: 'codex', windows: [{ label: 'weekly', usedPercent: 40, windowMinutes: 10080 }] }] };
+  const notFound = renderLimitsWith(empty({ codex, codexUnavailable: { reason: 'host-not-found' } }));
+  assert.match(notFound['u-lim-codex'].innerHTML, /class="mrow"/, 'the cached meters still render');
+  assert.match(notFound['u-lim-codex-note'].textContent, /not refreshed: codex not found/);
+  assert.doesNotMatch(notFound['u-lim-codex-note'].textContent, /failed/);
+
+  const unconfirmed = renderLimitsWith(empty({ codex, codexUnavailable: { reason: 'host-unconfirmed' } }));
+  assert.match(unconfirmed['u-lim-codex-note'].textContent, /not refreshed: not checked yet/);
+  assert.doesNotMatch(unconfirmed['u-lim-codex-note'].textContent, /failed/);
+});
