@@ -72,7 +72,7 @@ const emptyDocument = (text) => ['', '{}'].includes(String(text).trim());
  *   `trackCreated` (multi-key only) records in the receipt whether ak created the file or
  *   the editor's table; the release that leaves them empty removes them again.
  */
-export function planOwnedEnv(target, desired, { receiptSuffix, format = 'multi', editorFor, adoptable = () => false, trackCreated = false }) {
+export function planOwnedEnv(target, desired, { receiptSuffix, format = 'multi', editorFor, adoptable = () => false, trackCreated }) {
   const fmt = format === 'multi' ? {} : format;
   const { file } = target;
   const receiptFile = `${file}${receiptSuffix}`;
@@ -112,33 +112,51 @@ export function planOwnedEnv(target, desired, { receiptSuffix, format = 'multi',
   const envChanged = Object.entries(nextStates).some(([key, next]) => !same(editor.get(key), next));
   const receiptDropped = [...ownedKeys].some((key) => !(key in nextReceipt));
   if (!envChanged && !receiptDropped) return { file, status: 'converged', changed: false, keys, conflicts };
+  const created = createdBy({ trackCreated, single: fmt.single }, receipt, source, editor);
+  return { file, boundary: target.boundary, status: 'drift', changed: true, source, receiptSource, receiptFile,
+    ...rendered(editor, nextStates, nextReceipt, created), created, nextReceipt, format: fmt, keys, conflicts };
+}
+
+/** What ak created: the file (absent before its first write) and the editor's table. */
+function createdBy({ trackCreated, single }, receipt, source, editor) {
+  if (!trackCreated || single) return undefined;
   const prior = receipt?.created ?? {};
-  const created = trackCreated && !fmt.single ? {
+  return {
     ...(prior.file || source === null ? { file: true } : {}),
     ...(prior.table || editor.containerPresent === false ? { table: true } : {}),
-  } : undefined;
+  };
+}
+
+/** The new file content; a full release drops an empty table ak created and removes an
+ *  empty file ak created. */
+function rendered(editor, nextStates, nextReceipt, created) {
   const releasing = Object.keys(nextReceipt).length === 0;
   const after = editor.render(nextStates, { dropEmptyContainer: !!(releasing && created?.table) });
-  const removeFile = !!(releasing && created?.file && emptyDocument(after));
-  return { file, boundary: target.boundary, status: 'drift', changed: true, source, receiptSource, receiptFile,
-    after, removeFile, created, nextReceipt, format: fmt, keys, conflicts };
+  return { after, removeFile: !!(releasing && created?.file && emptyDocument(after)) };
 }
 
 /** One key's outcome: `state` for reporting, `next` when ak writes it, `conflict` when a
  *  value ak does not own (or a user edit of one it did) is preserved. */
-function decideKey(current, owned, want, single, adopt = (/** @type {any} */ _current) => false) {
-  if (owned && !current.present && !single) {
+/** An owned key whose value is no longer ak's, or null when it still is. */
+function ownedDrift(current, owned, want, single, adopt) {
+  if (!current.present && !single) {
     // ak's value was deleted: restore it while wanted (nothing of the user's is
     // overwritten), otherwise there is nothing left to release.
     return want.present ? { state: 'restore', next: want } : { state: 'converged', next: ABSENT };
   }
-  if (owned && current.present && !same(current, owned.after) && adopt(current)) {
+  if (same(current, owned.after)) return null;
+  if (current.present && adopt(current)) {
     // The tool's own default came back (e.g. AQE re-init after an upgrade rewrote
     // its table): take it back while wanted; on release leave it as the tool
     // wrote it. The receipt keeps its first `before` (review M4).
     return want.present ? { state: 'write', next: want } : { state: 'converged', next: current };
   }
-  if (owned && !same(current, owned.after)) return { state: 'user-edited', conflict: 'user-edited value preserved' };
+  return { state: 'user-edited', conflict: 'user-edited value preserved' };
+}
+
+function decideKey(current, owned, want, single, adopt = (/** @type {any} */ _current) => false) {
+  const drift = owned ? ownedDrift(current, owned, want, single, adopt) : null;
+  if (drift) return drift;
   if (!owned && current.present && want.present && !same(current, want) && adopt(current)) return { state: 'write', next: want };
   if (!owned && current.present && !(want.present && same(current, want))) {
     return { state: 'foreign', conflict: 'conflicting unmanaged value preserved' };

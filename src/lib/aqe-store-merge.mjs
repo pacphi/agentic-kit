@@ -602,10 +602,8 @@ export async function mergeAqeStores(root, options = {}) {
       removeRunScratch(o, dir);
       return { ...result, status: 'preview', refusal: first.refusal ?? tooOld ?? (seen.rootStore.problem ? rootRefusal(root, seen.rootStore) : null) ?? starterRefusal(starters) };
     }
-    const refusal = first.refusal ?? tooOld
-      ?? rootRefusal(root, seen.rootStore)
-      ?? (unreadable.length ? `unreadable stray store copies: ${unreadable.join(', ')}` : null)
-      ?? starterRefusal(starters);
+    const refusal = [first.refusal, tooOld, rootRefusal(root, seen.rootStore),
+      unreadable.length ? `unreadable stray store copies: ${unreadable.join(', ')}` : null, starterRefusal(starters)].find(Boolean);
     if (refusal) { removeRunScratch(o, dir); return { ...result, status: 'refused', reason: refusal }; }
     result = await applyMerge(o, root, result, seen.strays, starters.keys, { fingerprints, rootKeys });
   } catch (error) {
