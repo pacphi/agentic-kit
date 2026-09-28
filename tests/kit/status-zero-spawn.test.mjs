@@ -87,9 +87,13 @@ test('spawn-guard records a spawn made inside the guarded child, by every wrappe
     ], { cwd: project, env, encoding: 'utf8' });
     const lines = readLedger(ledgerFile);
     fs.rmSync(ledgerFile, { force: true });
-    assert.strictEqual(lines.length, 4, `expected 4 ledger lines (spawnSync/execFileSync/execSync/fork), got ${JSON.stringify(lines)}`);
-    assert.ok(lines.some((l) => l.cmd === forkTarget), 'fork() records the module path as cmd');
-    assert.ok(lines.filter((l) => l.cmd === process.execPath).length === 2, 'spawnSync and execFileSync both record process.execPath');
+    // Each wrapped form by name, not an exact total: execSync goes through a
+    // platform shell, and only its own record is what this test is about.
+    const got = JSON.stringify(lines);
+    assert.strictEqual(lines.filter((l) => l.cmd === process.execPath).length, 2,
+      `spawnSync and execFileSync both record process.execPath; got ${got}`);
+    assert.ok(lines.some((l) => l.cmd === 'true'), `execSync records its command; got ${got}`);
+    assert.ok(lines.some((l) => l.cmd === forkTarget), `fork() records the module path as cmd; got ${got}`);
     assert.ok(lines.every((l) => typeof l.at === 'string' && !Number.isNaN(Date.parse(l.at))), 'every line has an ISO timestamp');
   });
 });
