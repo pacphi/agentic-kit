@@ -626,6 +626,9 @@ export async function verifyProjectMemoryWrite(root, env, { runner = runCmd } = 
 function reportProjectGuidance(result) {
   if (result.action === 'removed-generated') {
     ok('project guidance: removed initializer-only CLAUDE.md (machine guidance remains authoritative)');
+  } else if (result.action === 'migrated-prose-pointer') {
+    ok(`project guidance: added a reliable @AGENTS.md import alongside a stale prose pointer `
+      + `(${result.bytes} bounded bytes) — the old sentence is preserved`);
   } else if (result.action !== 'unchanged') {
     ok(`project guidance: ${result.action} (${result.bytes} bounded bytes)`);
   }

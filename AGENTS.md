@@ -204,6 +204,30 @@ Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `chore`
 Do not add a `Co-Authored-By` trailer unless the repository explicitly
 configures and authorizes that attribution.
 
+### Issue Titles
+
+GitHub issue titles use the same Conventional Commits types as commit
+messages, lowercase, followed by a colon and a lowercase description
+(proper nouns excepted):
+
+```text
+<type>: <description>
+```
+
+Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `chore`,
+plus two repo-specific extensions used only for issues:
+
+- `tracking` — an issue that exists to track status on something outside
+  this repo's control (an upstream fix, a multi-part readiness checklist),
+  not to request local work directly.
+- `research` — an open investigation or design question without a known
+  fix yet.
+
+When an internal reference collides with the type's own colon (e.g. a
+quoted status or a sub-item id), use an em dash instead of a second colon:
+`fix: dashboard session stream stuck on "CONNECTING" — capture a browser
+network trace`.
+
 ## Security
 
 ### Critical Rules

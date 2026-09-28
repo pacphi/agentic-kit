@@ -7,9 +7,14 @@ import {
   AQE_GUARD_SLUG,
   PROJECT_GUIDANCE_SLUG,
   captureProjectGuidance,
+  hasStaleAgentsPointer,
   legacyLeanProjectGuidance,
+  migrateStaleAgentsPointer,
   reconcileProjectGuidance,
 } from '../../src/lib/project-guidance.mjs';
+
+const STALE_PROSE = "Read [AGENTS.md](AGENTS.md) for the repository's commands, ownership, "
+  + 'collaboration, and validation rules.\n';
 
 const fixture = (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-project-guidance-'));
@@ -94,6 +99,71 @@ test('repeat reconciliation is byte-idempotent and converges duplicate managed b
   simulateUpstreams(root);
   reconcileProjectGuidance({ root, prior: finalPrior, aqeEnabled: true });
   assert.equal(fs.readFileSync(path.join(root, 'CLAUDE.md'), 'utf8'), converged);
+});
+
+test('a stale prose AGENTS.md pointer gets the reliable import added alongside it', (t) => {
+  const root = fixture(t);
+  fs.writeFileSync(path.join(root, 'CLAUDE.md'), `## Repository workflow\n\n${STALE_PROSE}`);
+  fs.writeFileSync(path.join(root, 'AGENTS.md'), '# Rules\n');
+  const prior = captureProjectGuidance(root);
+  simulateUpstreams(root);
+
+  reconcileProjectGuidance({ root, prior, aqeEnabled: false });
+  const content = fs.readFileSync(path.join(root, 'CLAUDE.md'), 'utf8');
+  assert.match(content, /Read \[AGENTS\.md\]/, 'original prose is preserved, never deleted');
+  assert.match(content, new RegExp(`BEGIN ${PROJECT_GUIDANCE_SLUG}[\\s\\S]*@AGENTS\\.md[\\s\\S]*END ${PROJECT_GUIDANCE_SLUG}`));
+});
+
+test('repeated setup reconciliation of a stale prose pointer is idempotent', (t) => {
+  const root = fixture(t);
+  fs.writeFileSync(path.join(root, 'CLAUDE.md'), `## Repository workflow\n\n${STALE_PROSE}`);
+  fs.writeFileSync(path.join(root, 'AGENTS.md'), '# Rules\n');
+
+  const firstPrior = captureProjectGuidance(root);
+  simulateUpstreams(root);
+  reconcileProjectGuidance({ root, prior: firstPrior, aqeEnabled: false });
+  const once = fs.readFileSync(path.join(root, 'CLAUDE.md'), 'utf8');
+  assert.equal((once.match(new RegExp(`BEGIN ${PROJECT_GUIDANCE_SLUG}`, 'g')) ?? []).length, 1);
+
+  const secondPrior = captureProjectGuidance(root);
+  simulateUpstreams(root);
+  reconcileProjectGuidance({ root, prior: secondPrior, aqeEnabled: false });
+  const twice = fs.readFileSync(path.join(root, 'CLAUDE.md'), 'utf8');
+  assert.equal(twice, once, 'a second run neither re-appends nor drifts the file');
+  assert.equal((twice.match(/Read \[AGENTS\.md\]/g) ?? []).length, 1, 'the prose is never duplicated either');
+});
+
+test('hasStaleAgentsPointer never fires without AGENTS.md, with a reliable import already present, or once migrated', () => {
+  assert.equal(hasStaleAgentsPointer(STALE_PROSE, { agentsExisted: false }), false, 'nothing to point at');
+  assert.equal(hasStaleAgentsPointer(`@AGENTS.md\n\n${STALE_PROSE}`, { agentsExisted: true }), false,
+    'a bare @AGENTS.md import already loads reliably');
+  assert.equal(hasStaleAgentsPointer('# Just a project overview, no pointer at all', { agentsExisted: true }), false);
+  assert.equal(hasStaleAgentsPointer(STALE_PROSE, { agentsExisted: true }), true);
+});
+
+test('ak sync path (migrateStaleAgentsPointer) migrates an already-set-up project additively and idempotently', (t) => {
+  const root = fixture(t);
+  fs.writeFileSync(path.join(root, 'CLAUDE.md'), `## Repository workflow\n\n${STALE_PROSE}`);
+  fs.writeFileSync(path.join(root, 'AGENTS.md'), '# Rules\n');
+
+  const first = migrateStaleAgentsPointer(root);
+  assert.equal(first.action, 'migrated-prose-pointer');
+  const once = fs.readFileSync(path.join(root, 'CLAUDE.md'), 'utf8');
+  assert.match(once, /Read \[AGENTS\.md\]/);
+  assert.equal((once.match(new RegExp(`BEGIN ${PROJECT_GUIDANCE_SLUG}`, 'g')) ?? []).length, 1);
+
+  const second = migrateStaleAgentsPointer(root);
+  assert.equal(second.action, 'unchanged', 're-running sync must not append or merge again');
+  assert.equal(fs.readFileSync(path.join(root, 'CLAUDE.md'), 'utf8'), once);
+});
+
+test('migrateStaleAgentsPointer is a no-op without a CLAUDE.md or without an AGENTS.md', (t) => {
+  const root = fixture(t);
+  assert.equal(migrateStaleAgentsPointer(root).action, 'unchanged', 'no CLAUDE.md to migrate');
+
+  fs.writeFileSync(path.join(root, 'CLAUDE.md'), `## Repository workflow\n\n${STALE_PROSE}`);
+  assert.equal(migrateStaleAgentsPointer(root).action, 'unchanged', 'no AGENTS.md to point at');
+  assert.equal(fs.readFileSync(path.join(root, 'CLAUDE.md'), 'utf8'), `## Repository workflow\n\n${STALE_PROSE}`);
 });
 
 test('disabling AQE strips only the agentic-kit guard and preserves user prior art', (t) => {
