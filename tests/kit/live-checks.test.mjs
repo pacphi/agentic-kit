@@ -370,6 +370,85 @@ test('verifySecurity fails when the clean input is flagged', async () => {
   } finally { cleanup(); }
 });
 
+// The secrets scan must find the project, not whatever folder `ak status`
+// happens to run in: it always scans the repository root, passed as `cwd`
+// (never as a path argument, so no Windows path passes through `.cmd` shim
+// quoting), and prints which folder it scanned.
+const DEFEND_PASSES_CLEANLY = {
+  threat: { code: 1, stdout: fixture('threat.json.txt'), stderr: '' },
+  clean: { code: 0, stdout: fixture('clean.json.txt'), stderr: '' },
+};
+
+/** Like defendRunner, but also answers `security secrets` and records every
+ *  call's opts so the secrets scan's cwd and args can be asserted. */
+function securityRunner({ threat, clean, secrets = { code: 0, stdout: '', stderr: '' } }) {
+  const calls = [];
+  const runner = async (cmd, args, opts = {}) => {
+    calls.push({ cmd, args, opts });
+    if (args[0] === 'security' && args[1] === 'defend') {
+      const input = args[args.indexOf('-i') + 1];
+      return /Ignore all previous/.test(input) ? threat : clean;
+    }
+    if (args[0] === 'security' && args[1] === 'secrets') return secrets;
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  return { runner, calls };
+}
+
+test('verifySecurity scans the repository root from a subfolder, and says which folder', async () => {
+  seedHome();
+  const cleanup = securityTree({ aidefence: true, builtin: true });
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-checks-secrets-')));
+  fs.mkdirSync(path.join(root, '.git'));
+  const sub = path.join(root, 'sub');
+  fs.mkdirSync(sub);
+  try {
+    const { runner, calls } = securityRunner(DEFEND_PASSES_CLEANLY);
+    const { result, out } = await captureLog(() => live.verifySecurity({ runner, cwd: sub }));
+    assert.equal(result, true, out);
+    const secretsCall = calls.find((c) => c.args[0] === 'security' && c.args[1] === 'secrets');
+    assert.ok(secretsCall, 'the secrets scan runs from a subfolder too');
+    assert.equal(secretsCall.opts.cwd, root, 'the repository root travels as cwd, not as an argument');
+    assert.deepEqual(secretsCall.args, ['security', 'secrets', '--path', '.']);
+    assert.equal(secretsCall.opts.timeout, 120_000);
+    assert.ok(out.includes(`secrets scan of ${root}: no secrets found`), out);
+  } finally { cleanup(); rmrf(root); }
+});
+
+test('verifySecurity skips the secrets scan and says so outside a repository', async (t) => {
+  seedHome();
+  const cleanup = securityTree({ aidefence: true, builtin: true });
+  const bare = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-checks-nosecrets-')));
+  t.after(() => rmrf(bare));
+  // With TMPDIR itself inside a Git checkout this folder would not be 'outside'
+  // one; check with repoRoot itself rather than assume the layout.
+  const enclosing = paths.repoRoot(bare);
+  if (enclosing) { t.skip(`TMPDIR is inside the git repository ${enclosing}; this case would scan it`); cleanup(); return; }
+  try {
+    const { runner, calls } = securityRunner(DEFEND_PASSES_CLEANLY);
+    const { result, out } = await captureLog(() => live.verifySecurity({ runner, cwd: bare }));
+    assert.equal(result, true, out);
+    assert.match(out, /secrets scan skipped: not inside a repository/);
+    assert.ok(!calls.some((c) => c.args[0] === 'security' && c.args[1] === 'secrets'),
+      'not inside a repository: the runner is never called for the secrets scan');
+  } finally { cleanup(); }
+});
+
+test('a non-zero secrets exit is reported with warn but never flips the verdict', async () => {
+  seedHome();
+  const cleanup = securityTree({ aidefence: true, builtin: true });
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ak-live-checks-secretsfail-')));
+  fs.mkdirSync(path.join(root, '.git'));
+  try {
+    const { runner } = securityRunner({ ...DEFEND_PASSES_CLEANLY, secrets: { code: 2, stdout: '', stderr: 'boom' } });
+    const { result, out } = await captureLog(() => live.verifySecurity({ runner, cwd: root }));
+    assert.equal(result, true, 'a failing secrets scan warns; it never flips the verdict, which depends only on the packages and defend');
+    assert.ok(out.includes(
+      `secrets scan of ${root} reported findings or could not run (exit 2) — run: ruflo security secrets --path . in ${root}`,
+    ), out);
+  } finally { cleanup(); rmrf(root); }
+});
+
 test('the learning proof runs only when named, fails honestly without ruflo, and records nothing', async () => {
   seedHome();
   rmrf(evidence.liveCheckDir());
