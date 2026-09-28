@@ -390,7 +390,7 @@ function git(root, args) {
   const result = spawnSync('git', args, { cwd: root, encoding: 'utf8', env: gitEnv(root) });
   assert.equal(result.status, 0, result.stderr);
 }
-const haveGit = spawnSync('git', ['--version'], { stdio: 'ignore' }).status === 0;
+const haveGit = spawnSync('git', ['--version'], { stdio: 'ignore', env: { PATH: process.env.PATH } }).status === 0;
 
 test('git-tracked .mcp.json and .codex/config.toml are skipped and shown as a hand fix; settings.local.json is pinned', { skip: !haveGit }, async (t) => {
   const { root, write, cfg } = project(t);
