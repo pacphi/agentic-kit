@@ -111,7 +111,8 @@ test('sync (non-dry) force-refreshes drift BEFORE building the plan, so a fresh-
 });
 
 // ADR-0041 §7: the forced lookup is where Ruflo's release dates are
-// remembered; a dry run touches nothing, and `ak status` never looks them up.
+// remembered; a dry run looks them up for its preview but records nothing,
+// and `ak status` never looks them up.
 test('a non-dry sync remembers Ruflo release dates for the support window; a dry run does not', async () => {
   const time = { created: '2020-01-01T00:00:00Z', '3.45.0': '2026-09-24T22:54:53Z', '3.46.0': '2026-09-26T22:34:55Z' };
   const calls = [];
@@ -125,9 +126,10 @@ test('a non-dry sync remembers Ruflo release dates for the support window; a dry
 
   seedHome({ last: 1, seen: { ruflo: '9.9.9', 'agentic-qe': '9.9.9' } });
   await syncWith(FLAGS({ 'dry-run': true }));
-  assert.deepEqual(calls, []);
+  assert.deepEqual(calls, ['npm view ruflo time --json'], 'the dry run previews the lookup');
   assert.equal(loadKitConfig().versionCheck.rufloMinors, undefined);
 
+  calls.length = 0;
   await syncWith(FLAGS());
   assert.deepEqual(calls, ['npm view ruflo time --json']);
   const remembered = loadKitConfig().versionCheck.rufloMinors;

@@ -154,7 +154,8 @@ shows a `versions` row for it:
 - **not yet known**: ak has not read Ruflo's release dates yet. Run `ak sync`.
 
 `ak status` never looks the dates up itself. A plain `ak sync` reads them from npm and remembers them
-in `kit.json` (`versionCheck.rufloMinors`); `ak sync --dry-run` and `ak sync --no-upgrade` do not.
+in `kit.json` (`versionCheck.rufloMinors`). `ak sync --dry-run` reads them for its preview and
+remembers nothing; `ak sync --no-upgrade` does not read them.
 
 ## 2026-09-27: ak keeps its MCP policy file out of git
 

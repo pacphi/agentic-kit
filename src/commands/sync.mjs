@@ -30,7 +30,7 @@ import { reconcileRufloComponents } from '../lib/ruflo-components/apply.mjs';
 import { RESTART_REMINDER } from './status/sections/ruflo-components.mjs';
 import { HOSTS, commandHosts, hostInstallState, hostExecutable, installHost, collectIntegrationFacts, convergeProviderStack, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
 import { driftReport, installedVersion, selfDrift } from '../lib/versions.mjs';
-import { refreshPlanVersions, skippedVersionEvidence } from './sync/plan-versions.mjs';
+import { lookUpPlanVersions, skippedVersionEvidence } from './sync/plan-versions.mjs';
 import { RUVECTOR_PKG, managed as ruvectorManaged } from '../lib/ruvector.mjs';
 import { pruneNpxStale } from '../lib/npx.mjs';
 import { runScaffoldAgentsFix } from '../lib/scaffold.mjs';
@@ -108,13 +108,13 @@ export function recordApplyFailure(state, name, result) {
  *  so a row that has not yet gone STALE (host-setup's 6h TTL) but is simply
  *  WRONG — a host repaired or broken since it was last recorded — can never
  *  hide a needed fix from the plan, or hide that a fix already landed. Kept
- *  narrow and separate from `refreshPlanVersions`: forcing every evidence-gated
+ *  narrow and separate from `lookUpPlanVersions`: forcing every evidence-gated
  *  kind fresh here (by passing `refresh: true` to the plan's own `collect()`
  *  call) was tried and reverted — it broke `--dry-run`'s "touches nothing"
  *  contract for `ruflo-component` evidence and defeated this branch's own
  *  warm-cache design for kinds that don't need it. Dry-runs skip this: it
- *  persists evidence, and --dry-run is pinned to touch nothing — same
- *  cache-staleness trade `refreshPlanVersions` already makes for version drift. */
+ *  persists evidence, and --dry-run is pinned to touch nothing, so a dry run
+ *  reads host evidence as last recorded (it expires after 6 h). */
 async function refreshPlanHosts(flags, cwd) {
   if (flags['dry-run']) return;
   const cfg = loadKitConfig();
@@ -139,9 +139,12 @@ export const help = `ak sync — converge to good: upgrade + heal + verify
 Builds a plan from the same collector \`ak status\` uses, then applies it in
 order: upgrades first (they wipe native modules), then heals, then re-collects
 to prove convergence. Idempotent — safe to run any time. When in doubt, run this.
-Before planning, a sync that may upgrade (not --dry-run or --no-upgrade) reads
-the latest versions and Ruflo's release dates from npm; \`ak status\` uses the
-remembered dates for the Ruflo support window.
+Before planning, a sync that may upgrade (not --no-upgrade) looks up the latest
+versions and Ruflo's release dates online; \`ak status\` uses the remembered
+dates for the Ruflo support window. --dry-run makes the same lookups and
+records nothing: its npm lookups use a temporary npm cache it removes
+afterwards. A dry run reads host evidence as ak last recorded it (it expires
+after 6 h).
 In a Ruflo project, sync applies ak's daemon settings (flat keys in
 .claude-flow/config.json, start-on-use on unless kit.json rufloDaemon.autoStart
 is false) and restarts the project's daemon only if it was running.
@@ -168,8 +171,8 @@ refresh after an upgrade (that refresh can replace the statusline helper). A
 skipped subsystem's manual-fix row is the exception: sync never performed
 that fix anyway, so it is still listed under "needs your action" instead of
 "skipped by request".
---skip versions, self or ruvnet-brain also leaves that part's online version
-lookup out: the plan reads the latest versions ak last recorded for it.
+--skip versions, self, ruvnet-brain or ruvector also leaves that part's online
+version lookup out: the plan reads the latest versions ak last recorded for it.
 An unknown name is rejected with the list of names sync accepts.
 
 --json writes every human line (the plan, step results, prompts) to stderr
@@ -186,7 +189,8 @@ also sets "error". The exit code equals exitCode.
 Usage: ak sync [options]
 
 Options:
-  --dry-run            print the plan and stop; change nothing
+  --dry-run            print the plan and stop; like a real sync it checks
+                       the latest versions online first, and records nothing
   --no-upgrade         heal only; don't upgrade ruflo/aqe/kit versions
   --skip SUBSYSTEM     leave SUBSYSTEM out of this run (repeatable, or
                        comma-separated: --skip natives,ruvnet-brain)
@@ -1023,6 +1027,7 @@ async function converge({
   fetchLatest,
   releaseDatesRunner,
   brainDrift,
+  tmpRoot,
   dejaVuAdapter = companionLifecycleFor('deja-vu'),
   collectFn = collect,
   refreshHosts = refreshPlanHosts,
@@ -1041,11 +1046,12 @@ async function converge({
   // #134: draw the plan from CURRENT drift, not the TTL cache — a cache
   // stamped before an upstream release claims "all current" and the upgrade
   // never reaches the plan (the old force at apply time sat behind the very
-  // versions gate it needed to open). Dry-runs skip the refresh: it writes
-  // kit.json, and --dry-run is pinned to touch nothing — so a dry-run
-  // preview may be cache-stale by up to one TTL window. A part --skip names
-  // is never looked up; both reads below get its recorded versions instead.
-  const { versionEvidence } = await refreshPlanVersions({ flags, skip, pkgRoot, fetchLatest, releaseDatesRunner, brainDrift });
+  // versions gate it needed to open). A dry run makes the same lookups and
+  // records nothing; the plan read below gets their results. A part --skip
+  // names is never looked up; both reads below get its recorded versions.
+  const { versionEvidence } = await lookUpPlanVersions({
+    flags, skip, pkgRoot, fetchLatest, releaseDatesRunner, brainDrift, tmpRoot,
+  });
   // Same reasoning, narrower scope: a NOT-YET-STALE host-install-method/
   // host-launch/host-setup row can still be wrong (a host repaired or broken
   // since it was last recorded), and unlike version drift this cannot be

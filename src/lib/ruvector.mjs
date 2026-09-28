@@ -41,19 +41,28 @@ export function classifyDrift({ installed, latest }) {
 /** Installed-vs-latest, TTL-cached in kit.json alongside the other version
  *  windows, so status/dashboard hit npm at most once per window. force=true
  *  bypasses the cache. Skips the network entirely when ruvector is absent —
- *  an unmanaged tool must not cost a probe. */
-export async function drift({ force = false } = {}) {
+ *  an unmanaged tool must not cost a probe. A failed lookup never erases a
+ *  good one: the recorded latest is reported as a cache fallback and `last`
+ *  is left alone, so the next call retries. cacheOnly=true reports the
+ *  recorded latest with no network and no write (`ak sync --skip ruvector`);
+ *  record=false looks it up without saving it (`ak sync --dry-run`, ADR-0063).
+ *  @param {{ force?: boolean, cacheOnly?: boolean, record?: boolean,
+ *   fetchLatest?: (pkg: string, tag?: string) => Promise<string | null> }} [opts] */
+export async function drift({ force = false, cacheOnly = false, record = true, fetchLatest = latestVersion } = {}) {
   const installed = installedVersion(RUVECTOR_PKG);
   if (!installed) return classifyDrift({ installed: null, latest: null });
   const cfg = loadKitConfig();
   const ttlMs = (cfg.versionCheck?.ttlHours ?? 24) * 3600_000;
   const cached = cfg.versionCheck?.ruvector ?? {};
   const fresh = !force && cached.last && Date.now() - cached.last < ttlMs;
-  let latest = fresh ? cached.latest ?? null : null;
-  if (!fresh) {
-    latest = await latestVersion(RUVECTOR_PKG);
+  const recorded = (latestSource) => ({ ...classifyDrift({ installed, latest: cached.latest ?? null }), latestSource });
+  if (fresh) return recorded('cache');
+  if (cacheOnly) return recorded('cache-fallback');
+  const latest = await fetchLatest(RUVECTOR_PKG);
+  if (!latest) return recorded('cache-fallback');
+  if (record) {
     cfg.versionCheck = { ...cfg.versionCheck, ruvector: { last: Date.now(), latest } };
     try { saveKitConfig(cfg); } catch { /* read-only envs: next call re-fetches */ }
   }
-  return classifyDrift({ installed, latest });
+  return { ...classifyDrift({ installed, latest }), latestSource: 'live' };
 }

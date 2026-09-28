@@ -261,25 +261,31 @@ export function classifyDrift({ present: isPresent, installedRelease, latest }) 
   return { present: true, outdated, unversioned, installedRelease: installedRelease ?? null, latest: latest ?? null };
 }
 
-/** The release kit.json recorded, whatever its age. */
-const recordedRelease = (cached) => ({
+/** The release kit.json recorded, whatever its age, labelled with its source. */
+const recordedRelease = (cached, latestSource) => ({
   latest: cached.latest ?? null,
   latestObservedAt: cached.last ?? null,
   releaseAssetAvailable: cached.releaseAssetAvailable ?? null,
+  latestSource,
 });
 
-/** Look the latest release up on GitHub and record the answer in kit.json. */
-async function lookUpRelease(cfg, cached) {
-  const release = await latestRelease();
-  const latest = release?.version ?? null;
-  const releaseAssetAvailable = release?.releaseAssetAvailable ?? null;
-  // Preserve installedRelease across the cache write.
-  cfg.versionCheck = {
-    ...cfg.versionCheck,
-    ruvnetBrain: { ...cached, last: Date.now(), latest, releaseAssetAvailable },
-  };
-  try { saveKitConfig(cfg); } catch { /* read-only envs: next call re-fetches */ }
-  return { latest, latestObservedAt: latest ? Date.now() : null, releaseAssetAvailable };
+/** Look the latest release up on GitHub; with `record`, save the answer in
+ *  kit.json. A failed lookup never erases a good one: it reports the recorded
+ *  release as a cache fallback and leaves `last` alone, so the next call
+ *  retries. */
+async function lookUpRelease(cfg, cached, { record, fetchImpl }) {
+  const release = await latestRelease(fetchImpl ? { fetchImpl } : {});
+  if (!release) return recordedRelease(cached, 'cache-fallback');
+  const { version: latest, releaseAssetAvailable } = release;
+  if (record) {
+    // Preserve installedRelease across the cache write.
+    cfg.versionCheck = {
+      ...cfg.versionCheck,
+      ruvnetBrain: { ...cached, last: Date.now(), latest, releaseAssetAvailable },
+    };
+    try { saveKitConfig(cfg); } catch { /* read-only envs: next call re-fetches */ }
+  }
+  return { latest, latestObservedAt: Date.now(), releaseAssetAvailable, latestSource: 'live' };
 }
 
 /** Presence + release drift, TTL-cached in kit.json (mirrors selfDrift in
@@ -288,23 +294,25 @@ async function lookUpRelease(cfg, cached) {
  *  SOURCE.json releaseTag when stamped, else ak's kit.json record — the same
  *  order the statusline uses, so `ak status` and the footer can never disagree.
  *  cacheOnly=true reports the recorded release whatever its age, with no
- *  network and no write (`ak sync --skip ruvnet-brain`, ADR-0063). */
-export async function drift({ force = false, cacheOnly = false } = {}) {
+ *  network and no write (`ak sync --skip ruvnet-brain`, ADR-0063).
+ *  record=false looks the release up without saving it (`ak sync --dry-run`).
+ *  @param {{ force?: boolean, cacheOnly?: boolean, record?: boolean, fetchImpl?: typeof fetch }} [opts] */
+export async function drift({ force = false, cacheOnly = false, record = true, fetchImpl } = {}) {
   const cfg = loadKitConfig();
   const ttlMs = (cfg.versionCheck?.ttlHours ?? 24) * 3600_000;
   const cached = cfg.versionCheck?.ruvnetBrain ?? {};
-  // Do not invalidate a pre-asset-probe cache here: `ak sync --dry-run` reaches
-  // this collector and is forbidden to write. A real sync force-refreshes this
-  // metadata before collection; ordinary status waits for the normal TTL.
+  // Do not invalidate a pre-asset-probe cache here: a real sync force-refreshes
+  // this metadata before collection; ordinary status waits for the normal TTL.
   const fresh = !force && cached.last && Date.now() - cached.last < ttlMs;
-  const { latest, latestObservedAt, releaseAssetAvailable } = fresh || cacheOnly
-    ? recordedRelease(cached) : await lookUpRelease(cfg, cached);
+  const observed = fresh ? recordedRelease(cached, 'cache')
+    : cacheOnly ? recordedRelease(cached, 'cache-fallback')
+      : await lookUpRelease(cfg, cached, { record, fetchImpl });
   const installedRelease = installedReleaseOnDisk() ?? cached.installedRelease ?? null;
   return {
-    ...classifyDrift({ present: present(), installedRelease, latest }),
-    releaseAssetAvailable,
-    latestSource: fresh ? 'cache' : cacheOnly ? 'cache-fallback' : 'live',
-    latestObservedAt,
+    ...classifyDrift({ present: present(), installedRelease, latest: observed.latest }),
+    releaseAssetAvailable: observed.releaseAssetAvailable,
+    latestSource: observed.latestSource,
+    latestObservedAt: observed.latestObservedAt,
     pluginVersion: installedVersion(),
     heldRefresh: cached.heldRefresh ?? null,
   };

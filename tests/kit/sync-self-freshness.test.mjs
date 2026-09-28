@@ -54,17 +54,30 @@ test('normal sync discovers and schedules a self-update hidden by a fresh stale-
   assert.equal(loadKitConfig().versionCheck.self.best.version, '4.0.0-alpha.50');
 });
 
-for (const mode of ['dry-run', 'no-upgrade']) {
-  test(`${mode} does not force registry refresh or change the fresh self cache`, async () => {
-    seed();
-    const before = fs.readFileSync(paths.kitConfigPath(), 'utf8');
-    let lookups = 0;
-    const { result } = await run({ flags: flags({ [mode]: true }), fetchLatest: async () => { lookups++; return '4.0.0-alpha.50'; } });
-    assert.equal(result, 0);
-    assert.equal(lookups, 0);
-    assert.equal(fs.readFileSync(paths.kitConfigPath(), 'utf8'), before);
+test('no-upgrade does not force registry refresh or change the fresh self cache', async () => {
+  seed();
+  const before = fs.readFileSync(paths.kitConfigPath(), 'utf8');
+  let lookups = 0;
+  const { result } = await run({ flags: flags({ 'no-upgrade': true }), fetchLatest: async () => { lookups++; return '4.0.0-alpha.50'; } });
+  assert.equal(result, 0);
+  assert.equal(lookups, 0);
+  assert.equal(fs.readFileSync(paths.kitConfigPath(), 'utf8'), before);
+});
+
+test('dry-run looks the kit up online and plans the self-update, but leaves the fresh self cache unchanged', async () => {
+  seed();
+  const before = fs.readFileSync(paths.kitConfigPath(), 'utf8');
+  const tags = [];
+  const { result, out } = await run({
+    flags: flags({ 'dry-run': true }),
+    fetchLatest: async (pkg, tag) => { if (pkg === KIT_PKG) tags.push(tag); return pkg === KIT_PKG ? '4.0.0-alpha.50' : null; },
+    releaseDatesRunner: async () => ({ code: 1, stdout: '', stderr: '' }),
   });
-}
+  assert.equal(result, 0);
+  assert.deepEqual(tags, ['latest', 'next']);
+  assert.match(out, /\[self\].*kit 4\.0\.0-alpha\.49 installed, 4\.0\.0-alpha\.50 available/);
+  assert.equal(fs.readFileSync(paths.kitConfigPath(), 'utf8'), before);
+});
 
 test('stable installations refresh only latest and do not enter the prerelease channel', async () => {
   seed('4.0.0');

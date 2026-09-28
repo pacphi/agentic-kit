@@ -21,8 +21,8 @@ function supportWindowRow(installed, cfg, now) {
 export default {
   id: 'versions',
   // Drift rows and a kit.json copy the caller already holds (versionEvidence:
-  // ak sync's cache-only read when --skip names versions, ADR-0063) are used
-  // as given; refresh does not apply to them.
+  // what ak sync looked up or read from the cache, ADR-0063) are used as
+  // given; refresh does not apply to them.
   /** @param {{ drift?: typeof driftReport, loadConfig?: () => any, now?: () => number, refresh?: boolean,
    *   versionEvidence?: { drift?: any[], cfg?: any } }} [ctx] */
   async collect({ drift = driftReport, loadConfig = loadKitConfig, now = Date.now, refresh = false, versionEvidence } = {}) {

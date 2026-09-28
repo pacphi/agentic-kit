@@ -1,15 +1,15 @@
-// `ak sync --skip versions` (and `--skip self`, `--skip ruvnet-brain`) leaves
-// that part's online version lookup out of the run as well (ADR-0063): the
-// forced pre-plan lookup is not made, and the plan read and the converge proof
-// use what ak recorded instead of fetching on an expired TTL. A sync that skips
-// nothing still makes every forced lookup first.
+// `ak sync --skip versions` (and `--skip self`, `--skip ruvnet-brain`,
+// `--skip ruvector`) leaves that part's online version lookup out of the run as
+// well (ADR-0063): the forced pre-plan lookup is not made, and the plan read and
+// the converge proof use what ak recorded instead of fetching on an expired TTL.
+// A sync that skips nothing still makes every forced lookup first.
 //
 // Every lookup path is observed: the forced lookups through the injected
 // fetchLatest/releaseDatesRunner/brainDrift; the sections' own reads through a
-// fake `npm` on PATH that logs its arguments and exits 1 (POSIX only), and a
-// global `fetch` stub for the Brain's GitHub release lookup. A failing fake
-// lookup saves nothing, so kit.json's versionCheck can be compared byte for
-// byte.
+// fake `npm` on PATH that logs its arguments (POSIX only), and a global `fetch`
+// stub for the Brain's GitHub release lookup. The fakes answer a NEWER version
+// for the part a test skips, so a lookup that leaked would record it and the
+// byte comparison of that part's kit.json record would fail.
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -27,6 +27,7 @@ const { KIT_PKG } = await import('../../src/lib/versions.mjs');
 const versionsSection = (await import('../../src/commands/status/sections/versions.mjs')).default;
 const selfSection = (await import('../../src/commands/status/sections/self.mjs')).default;
 const brainSection = (await import('../../src/commands/status/sections/ruvnet-brain.mjs')).default;
+const ruvectorSection = (await import('../../src/commands/status/sections/ruvector.mjs')).default;
 assertSandboxed(paths, HOME);
 isolateProject('ak-sync-skip-versions');
 
@@ -42,8 +43,9 @@ after(() => {
   rmrf(HOME, PROJECT);
 });
 
-/** kit.json whose version caches all expired two days ago, so a plain read would fetch. */
-function seed({ ruvnetBrain = false } = {}) {
+/** kit.json whose version caches all expired two days ago, so a plain read
+ *  would fetch. `ruvector` also installs and registers a ruvector CLI. */
+function seed({ ruvnetBrain = false, ruvector = false } = {}) {
   fs.mkdirSync(PKG_ROOT, { recursive: true });
   fs.writeFileSync(path.join(PKG_ROOT, 'package.json'), JSON.stringify({ name: KIT_PKG, version: '4.0.0' }));
   const cfg = offlineKitConfig({ ruvnetBrain });
@@ -53,39 +55,65 @@ function seed({ ruvnetBrain = false } = {}) {
     seen: { ruflo: '9.9.9', 'agentic-qe': '9.9.9' },
     self: { last: TWO_DAYS_AGO, best: { version: '4.0.0', tag: 'latest' } },
     ruvnetBrain: { last: TWO_DAYS_AGO, latest: '4.3.28', releaseAssetAvailable: true },
+    ruvector: { last: TWO_DAYS_AGO, latest: '1.5.0' },
   };
   writeKitConfig(HOME, cfg);
-  paths._setGlobalRootForTest(fakeGlobalRoot(HOME, { ruflo: '9.9.9', 'agentic-qe': '9.9.9' }));
+  const pkgs = { ruflo: '9.9.9', 'agentic-qe': '9.9.9', ...(ruvector ? { ruvector: '1.2.0' } : {}) };
+  paths._setGlobalRootForTest(fakeGlobalRoot(HOME, pkgs));
+  fs.mkdirSync(path.dirname(paths.claudeUserMcpPath()), { recursive: true });
+  if (ruvector) {
+    fs.writeFileSync(paths.claudeUserMcpPath(),
+      JSON.stringify({ mcpServers: { ruvector: { command: 'npx', args: ['-y', 'ruvector', 'mcp', 'start'] } } }));
+  } else {
+    fs.rmSync(paths.claudeUserMcpPath(), { force: true });
+  }
 }
 
 const versionCheckText = () => JSON.stringify(loadKitConfig().versionCheck);
+/** The bytes kit.json holds for one part's version record. */
+const recordText = (part) => JSON.stringify(loadKitConfig().versionCheck?.[part]);
 const kitJsonText = () => fs.readFileSync(paths.kitConfigPath(), 'utf8');
 
 const MARKER = {
   subsystem: 'sync-test-only-marker', level: 'warn', message: 'marker row', fix: 'no sync step performs this',
 };
 
-/** A collectFn that runs the three real version sections with the arguments
+/** A collectFn that runs the four real version sections with the arguments
  *  sync passes, then plans one marker row that no step performs (so the apply
  *  phase does no work and the converge proof still runs). */
 function versionSectionsCollect(calls) {
   return async (args) => {
     calls.push(args);
     const ctx = { ...args, cfg: loadKitConfig(), refresh: false };
-    for (const section of [versionsSection, selfSection, brainSection]) await section.collect(ctx);
+    for (const section of [versionsSection, selfSection, brainSection, ruvectorSection]) await section.collect(ctx);
     return args.record ? [] : [MARKER];
   };
 }
 
-/** Run `fn` with a fake failing `npm` on PATH and a recording `fetch` stub. */
-async function observingLookups(fn) {
+/** The versions the fakes answer: newer than what seed() recorded. */
+const NEWER = { ruflo: '9.9.10', 'agentic-qe': '9.9.10', [KIT_PKG]: '4.1.0', ruvector: '1.6.0' };
+const NEWER_BRAIN = { tag_name: 'v4.3.29', assets: [{ name: 'ruvnet-brain.zip', browser_download_url: 'x' }] };
+
+/** Run `fn` with a fake `npm` on PATH that logs its arguments and answers
+ *  `npm view <pkg>@latest version` for the packages in `answers` (any other
+ *  call exits 1), and a recording `fetch` stub that answers `brainRelease`
+ *  (or fails without one). */
+async function observingLookups(fn, { answers = {}, brainRelease = null } = {}) {
   const bin = fs.mkdtempSync(path.join(HOME, 'fakebin-npm-'));
   const log = path.join(bin, 'npm.log');
-  if (POSIX) fs.writeFileSync(path.join(bin, 'npm'), `#!/bin/sh\necho "$*" >> "${log}"\nexit 1\n`, { mode: 0o755 });
+  const cases = Object.entries(answers).map(([pkg, v]) => `  "view ${pkg}@latest version") echo ${v} ;;`);
+  if (POSIX) {
+    fs.writeFileSync(path.join(bin, 'npm'),
+      ['#!/bin/sh', `echo "$*" >> "${log}"`, 'case "$*" in', ...cases, '  *) exit 1 ;;', 'esac', ''].join('\n'),
+      { mode: 0o755 });
+  }
   const fetched = [];
   const saved = { path: process.env.PATH, fetch: globalThis.fetch, cwd: process.cwd() };
   process.env.PATH = bin;
-  globalThis.fetch = async (url) => { fetched.push(String(url)); return { ok: false, json: async () => ({}) }; };
+  globalThis.fetch = async (url) => {
+    fetched.push(String(url));
+    return brainRelease ? { ok: true, json: async () => brainRelease } : { ok: false, json: async () => ({}) };
+  };
   process.chdir(PROJECT);
   try {
     const result = await fn();
@@ -98,21 +126,22 @@ async function observingLookups(fn) {
   }
 }
 
-/** A real (or dry) sync with every lookup observed. */
-function observedSync(flags) {
+/** A real (or dry) sync with every lookup observed. The injected forced
+ *  lookup answers `latest[pkg]` (null for a package not in it). */
+function observedSync(flags, { latest = {}, ...fakes } = {}) {
   const calls = { fetchLatest: [], releaseDates: 0, brainDrift: [], collect: [] };
   return observingLookups(async () => {
     const { result, out } = await captureLog(() => sync.run({
       flags: { 'dry-run': false, 'no-upgrade': false, yes: true, json: false, ...flags },
       pkgRoot: PKG_ROOT,
-      fetchLatest: async (pkg) => { calls.fetchLatest.push(pkg); return null; },
+      fetchLatest: async (pkg) => { calls.fetchLatest.push(pkg); return latest[pkg] ?? null; },
       releaseDatesRunner: async () => { calls.releaseDates += 1; return { code: 1, stdout: '', stderr: '' }; },
       brainDrift: async (opts) => { calls.brainDrift.push(opts); return {}; },
       refreshHosts: async () => {},
       collectFn: versionSectionsCollect(calls.collect),
     }));
     return { result, out, calls };
-  });
+  }, fakes);
 }
 
 const npmViews = (npm, pkg) => npm.filter((line) => line.startsWith(`view ${pkg}@`));
@@ -120,7 +149,11 @@ const npmViews = (npm, pkg) => npm.filter((line) => line.startsWith(`view ${pkg}
 test('--skip versions makes no forced or plan-time lookup for ruflo/agentic-qe and records nothing', async () => {
   seed();
   const before = versionCheckText();
-  const { calls, npm, out } = await observedSync({ skip: ['versions'] });
+  // Newer ruflo/agentic-qe everywhere, so a leaked versions lookup would record
+  // them; the kit's own (unskipped) lookup answers nothing, so it records nothing.
+  const { ruflo, 'agentic-qe': aqe } = NEWER;
+  const { calls, npm, out } = await observedSync({ skip: ['versions'] },
+    { latest: { ruflo, 'agentic-qe': aqe }, answers: { ruflo, 'agentic-qe': aqe } });
   assert.equal(calls.collect.length, 2, `the plan read and the converge proof both ran\n${out}`);
   assert.deepEqual(calls.fetchLatest.filter((pkg) => pkg === 'ruflo' || pkg === 'agentic-qe'), []);
   assert.equal(calls.releaseDates, 0, "Ruflo's release dates are part of the versions lookup");
@@ -133,19 +166,42 @@ test('--skip versions makes no forced or plan-time lookup for ruflo/agentic-qe a
 
 test('--skip self makes no lookup for the kit itself', async () => {
   seed();
-  const { calls, npm, out } = await observedSync({ skip: ['self'] });
+  const before = recordText('self');
+  const { calls, npm, out } = await observedSync({ skip: ['self'] },
+    { latest: NEWER, answers: { [KIT_PKG]: NEWER[KIT_PKG] } });
   assert.equal(calls.collect.length, 2, out);
   assert.deepEqual(calls.fetchLatest.filter((pkg) => pkg === KIT_PKG), []);
   if (POSIX) assert.deepEqual(npmViews(npm, KIT_PKG), []);
   assert.ok(calls.fetchLatest.includes('ruflo'), 'the versions lookup still runs: only self was skipped');
+  assert.equal(recordText('self'), before, "kit.json's self record is byte-identical");
 });
 
 test('--skip ruvnet-brain makes no Brain release lookup', async () => {
   seed({ ruvnetBrain: true });
-  const { calls, fetched, out } = await observedSync({ skip: ['ruvnet-brain'] });
+  const before = recordText('ruvnetBrain');
+  const { calls, fetched, out } = await observedSync({ skip: ['ruvnet-brain'] }, { brainRelease: NEWER_BRAIN });
   assert.equal(calls.collect.length, 2, out);
   assert.deepEqual(calls.brainDrift.filter((opts) => opts?.force === true), []);
   assert.deepEqual(fetched, [], 'the plan read and the proof read the recorded Brain release');
+  assert.equal(recordText('ruvnetBrain'), before, "kit.json's Brain record is byte-identical");
+});
+
+test('--skip ruvector makes no ruvector lookup', async () => {
+  seed({ ruvector: true });
+  const before = recordText('ruvector');
+  const { calls, npm, out } = await observedSync({ skip: ['ruvector'] }, { answers: { ruvector: NEWER.ruvector } });
+  assert.equal(calls.collect.length, 2, out);
+  if (POSIX) assert.deepEqual(npmViews(npm, 'ruvector'), [], 'neither the plan read nor the proof looks ruvector up');
+  assert.equal(recordText('ruvector'), before, "kit.json's ruvector record is byte-identical");
+});
+
+test('an unskipped ruvector on an expired cache is still looked up by a real sync', {
+  skip: POSIX ? false : 'POSIX shell fake npm',
+}, async () => {
+  seed({ ruvector: true });
+  const { npm, out } = await observedSync({}, { answers: { ruvector: NEWER.ruvector } });
+  assert.ok(npmViews(npm, 'ruvector').length > 0, out);
+  assert.equal(loadKitConfig().versionCheck.ruvector.latest, NEWER.ruvector);
 });
 
 test('a sync that skips nothing makes every forced lookup before it plans', async () => {
@@ -160,10 +216,13 @@ test('a sync that skips nothing makes every forced lookup before it plans', asyn
 test('a dry run with --skip versions reads the recorded versions and writes nothing', async () => {
   seed();
   const before = kitJsonText();
-  const { result, calls, npm, out } = await observedSync({ 'dry-run': true, skip: ['versions'] });
+  const { result, calls, npm, out } = await observedSync({ 'dry-run': true, skip: ['versions'] },
+    { latest: NEWER, answers: NEWER });
   assert.equal(result, 0, out);
   assert.equal(calls.collect.length, 1, 'a dry run stops after the plan');
-  assert.deepEqual(calls.fetchLatest, [], 'a dry run makes no forced lookup');
+  assert.deepEqual(calls.fetchLatest.filter((pkg) => pkg === 'ruflo' || pkg === 'agentic-qe'), []);
+  assert.equal(calls.releaseDates, 0);
+  assert.ok(calls.fetchLatest.includes(KIT_PKG), 'the dry run previews the parts --skip did not name');
   if (POSIX) assert.deepEqual([...npmViews(npm, 'ruflo'), ...npmViews(npm, 'agentic-qe')], []);
   assert.equal(kitJsonText(), before);
 });
@@ -203,6 +262,17 @@ test('the self section uses the self drift it is given', async () => {
   if (POSIX) assert.deepEqual(npm, []);
 });
 
+test('the ruvector section uses the ruvector drift it is given', async () => {
+  seed({ ruvector: true });
+  const { rows, npm } = await observingLookups(async () => ({
+    rows: await ruvectorSection.collect({
+      cfg: {}, versionEvidence: { ruvector: { present: true, outdated: true, installed: '1.2.0', latest: '1.6.0' } },
+    }),
+  }), { answers: { ruvector: '9.9.9' } });
+  assert.match(rows[0].message, /ruvector CLI 1\.2\.0 installed, 1\.6\.0 available/);
+  if (POSIX) assert.deepEqual(npm, []);
+});
+
 test('the ruvnet-brain section uses the Brain drift it is given', async () => {
   seed({ ruvnetBrain: true });
   const brain = {
@@ -220,24 +290,28 @@ test('the ruvnet-brain section uses the Brain drift it is given', async () => {
 
 test('skipped parts get cache-only evidence: no network, no write', async () => {
   const { skippedVersionEvidence } = await import('../../src/commands/sync/plan-versions.mjs');
-  seed({ ruvnetBrain: true });
+  seed({ ruvnetBrain: true, ruvector: true });
   const before = kitJsonText();
   const { evidence, npm, fetched } = await observingLookups(async () => ({
-    evidence: await skippedVersionEvidence({ skip: new Set(['versions', 'self', 'ruvnet-brain']), pkgRoot: PKG_ROOT }),
-  }));
+    evidence: await skippedVersionEvidence({
+      skip: new Set(['versions', 'self', 'ruvnet-brain', 'ruvector']), pkgRoot: PKG_ROOT,
+    }),
+  }), { answers: NEWER, brainRelease: NEWER_BRAIN });
   assert.deepEqual(evidence.drift.map((r) => [r.pkg, r.latest, r.latestSource]),
     [['ruflo', '9.9.9', 'cache-fallback'], ['agentic-qe', '9.9.9', 'cache-fallback']]);
   assert.equal(evidence.self.latest, '4.0.0');
   assert.equal(evidence.brain.latest, '4.3.28');
   assert.equal(evidence.brain.latestSource, 'cache-fallback');
+  assert.deepEqual([evidence.ruvector.installed, evidence.ruvector.latest, evidence.ruvector.latestSource],
+    ['1.2.0', '1.5.0', 'cache-fallback']);
   if (POSIX) assert.deepEqual(npm, []);
   assert.deepEqual(fetched, []);
   assert.equal(kitJsonText(), before);
 });
 
-test('no skipped part means no evidence, and the Brain is read only when ak manages it', async () => {
+test('no skipped part means no evidence; the Brain and ruvector are read only when ak manages them', async () => {
   const { skippedVersionEvidence } = await import('../../src/commands/sync/plan-versions.mjs');
   seed();
   assert.deepEqual(await skippedVersionEvidence({ skip: new Set(), pkgRoot: PKG_ROOT }), {});
-  assert.deepEqual(await skippedVersionEvidence({ skip: new Set(['ruvnet-brain']), pkgRoot: PKG_ROOT }), {});
+  assert.deepEqual(await skippedVersionEvidence({ skip: new Set(['ruvnet-brain', 'ruvector']), pkgRoot: PKG_ROOT }), {});
 });

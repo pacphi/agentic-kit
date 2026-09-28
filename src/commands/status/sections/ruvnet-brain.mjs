@@ -108,8 +108,8 @@ export function brainReleaseRow(b) {
 
 export default {
   id: 'ruvnet-brain',
-  // A Brain drift the caller already holds (versionEvidence: ak sync's
-  // cache-only read when --skip names ruvnet-brain, ADR-0063) is used as given.
+  // A Brain drift the caller already holds (versionEvidence: what ak sync
+  // looked up or read from the cache, ADR-0063) is used as given.
   async collect({ cfg, refresh = false, versionEvidence }) {
     const rows = [];
     if (!cfg.ruvnetBrain) return rows;

@@ -139,10 +139,11 @@ async function runSections(sections, ctx, rows) {
 }
 
 /** `versionEvidence` carries version results a caller already holds (ak sync's
- *  cache-only reads for the parts --skip names, ADR-0063); the versions, self
- *  and ruvnet-brain sections use them instead of looking up their own.
+ *  cache-only reads for the parts --skip names, and its --dry-run preview,
+ *  ADR-0063); the versions, self, ruvnet-brain and ruvector sections use them
+ *  instead of looking up their own.
  *  @param {{ pkgRoot?: string, cwd?: string, dejaVuAdapter?: any, dejaVuPlanOptions?: Record<string, any>, refresh?: boolean, record?: boolean,
- *   versionEvidence?: { drift?: any[], self?: any, brain?: any, cfg?: any } }} opts */
+ *   versionEvidence?: { drift?: any[], self?: any, brain?: any, ruvector?: any, cfg?: any } }} opts */
 export async function collect({
   pkgRoot,
   cwd = process.cwd(),

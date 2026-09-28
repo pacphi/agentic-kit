@@ -72,8 +72,11 @@ const newer = (a, b) => cmpVersions(a, b) > 0;
  *  window (cached in kit.json); force=true bypasses the cache. A failed probe
  *  falls back to the cached value per package, and a run where EVERY probe
  *  failed neither overwrites `seen` nor stamps `last` — clobbering good data
- *  with nulls would suppress upgrade detection for a whole TTL window (#134). */
-export async function driftReport({ force = false, fetchLatest = latestVersion } = {}) {
+ *  with nulls would suppress upgrade detection for a whole TTL window (#134).
+ *  record=false reports what the lookup found without saving it (`ak sync
+ *  --dry-run`, ADR-0063).
+ *  @param {{ force?: boolean, record?: boolean, fetchLatest?: (pkg: string, tag?: string) => Promise<string | null> }} [opts] */
+export async function driftReport({ force = false, record = true, fetchLatest = latestVersion } = {}) {
   const cfg = loadKitConfig();
   const ttlMs = (cfg.versionCheck?.ttlHours ?? 24) * 3600_000;
   const fresh = !force && cfg.versionCheck?.last && Date.now() - cfg.versionCheck.last < ttlMs;
@@ -97,7 +100,7 @@ export async function driftReport({ force = false, fetchLatest = latestVersion }
       if (v) { succeeded += 1; live.add(p); observedAt[p] = Date.now(); }
       latest[p] = v ?? cached[p] ?? null;
     }
-    if (succeeded > 0) {
+    if (succeeded > 0 && record) {
       cfg.versionCheck = { ...cfg.versionCheck, last: Date.now(), seen: latest, observedAt };
       try { saveKitConfig(cfg); } catch { /* read-only envs: nudge just re-fetches */ }
     }
@@ -148,8 +151,9 @@ async function fetchSelfCandidate(tags, cachedBest, fetchLatest) {
  *  prereleases publish there, so `latest` alone would never see them; the
  *  higher of latest/next wins. Cached in kit.json alongside versionCheck.
  *  Failed lookups preserve eligible cached evidence without renewing its TTL.
- *  @param {{ pkgRoot?: string, force?: boolean, fetchLatest?: typeof latestVersion }} [opts] */
-export async function selfDrift({ pkgRoot, force = false, fetchLatest = latestVersion } = {}) {
+ *  record=false reports what the lookup found without saving it.
+ *  @param {{ pkgRoot?: string, force?: boolean, record?: boolean, fetchLatest?: typeof latestVersion }} [opts] */
+export async function selfDrift({ pkgRoot, force = false, record = true, fetchLatest = latestVersion } = {}) {
   let installed = null;
   try {
     installed = JSON.parse(fs.readFileSync(path.join(pkgRoot, 'package.json'), 'utf8')).version;
@@ -166,7 +170,7 @@ export async function selfDrift({ pkgRoot, force = false, fetchLatest = latestVe
   if (!fresh) {
     const candidate = await fetchSelfCandidate(tags, cachedBest, fetchLatest);
     best = candidate.best;
-    if (candidate.observed) {
+    if (candidate.observed && record) {
       cfg.versionCheck = { ...cfg.versionCheck, self: { last: Date.now(), best } };
       try { saveKitConfig(cfg); } catch { /* read-only envs: next call re-fetches */ }
     }

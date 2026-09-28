@@ -4,8 +4,8 @@ import { row } from '../row.mjs';
 
 export default {
   id: 'self',
-  // A self drift the caller already holds (versionEvidence: ak sync's
-  // cache-only read when --skip names self, ADR-0063) is used as given.
+  // A self drift the caller already holds (versionEvidence: what ak sync
+  // looked up or read from the cache, ADR-0063) is used as given.
   async collect({ pkgRoot, refresh = false, versionEvidence }) {
     const rows = [];
     try {
