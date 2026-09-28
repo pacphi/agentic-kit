@@ -14,7 +14,8 @@ import { resolveAqeEmbedding } from '../../lib/aqe-embedding-config.mjs';
 import { aqeVerificationPassed } from '../../lib/aqe-verification.mjs';
 import { probeAqeEmbeddings } from '../../lib/aqe-embedding-probe.mjs';
 import { aqeRoot } from '../../lib/paths.mjs';
-import { projectAqeDir } from '../../lib/paths.mjs';
+import { projectAqeDir, repoRoot } from '../../lib/paths.mjs';
+import { desiredAqePin } from '../../lib/aqe-project-pin.mjs';
 import { findMemoryEntry } from '../../lib/project-memory.mjs';
 import { rufloMcpLaunch } from '../../lib/ruflo-memory.mjs';
 import { callMcpTools } from '../../lib/mcp-tool-call.mjs';
@@ -45,7 +46,8 @@ Suites:
   security    packages load; defend flags injection / passes clean
   aqe         storage, embedding configuration/provenance, and browser payload
   mcp         initialize/tools-list for effective Codex AQE and Brain commands
-  providers   kit config matches installed CLIs; ruflo/aqe see the wiring
+  providers   kit config matches installed CLIs; ruflo/aqe see the wiring (checked from
+              the project root, whatever folder you run it in)
   harvest     record an outcome and distill through Ruflo, in an isolated store
   deja-vu     content-free structural proof of CLI, doctor, wiring, and index
   all         (default) run every suite
@@ -296,15 +298,23 @@ export async function checkAqeEmbedding({ cfg = loadKitConfig(), cwd = process.c
  *  (status shows it); an unmanaged backend is still probed and printed. */
 export const aqeEmbeddingManaged = (cfg) => cfg?.aqe !== false && !!cfg?.aqeEmbedding && cfg.aqeEmbedding.mode !== 'unmanaged';
 
-/** @param {{onEvidence?:(id:string, outcome:{status:string,reason:string|null})=>void}} [options] */
-async function verifyAqe({ onEvidence = () => {} } = {}) {
+/** Where a verify suite runs AQE: the repository root, pinned there (B5-D1) so an
+ *  AQE call never creates a store in the folder `ak x verify` started in. Outside a
+ *  repository, the folder itself with no pin. */
+function aqeHome(cwd) {
+  const root = repoRoot(cwd);
+  return root === null ? { root: null, dir: cwd, pin: {} } : { root, dir: root, pin: desiredAqePin(root) };
+}
+
+/** @param {{onEvidence?:(id:string, outcome:{status:string,reason:string|null})=>void, cwd?:string, runner?:typeof runCmd, probe?:typeof probeAqeEmbeddings, cfg?:any}} [options] */
+export async function verifyAqe({ onEvidence = () => {}, cwd = process.cwd(), runner = runCmd, probe = probeAqeEmbeddings, cfg = loadKitConfig() } = {}) {
   heading('aqe — separate storage, embedding, and browser observations');
-  const findings = scanRvf(projectAqeDir(process.cwd()));
+  const home = aqeHome(cwd);
+  const findings = scanRvf(projectAqeDir(home.dir));
   if (findings.length) { fail(`${findings.length} oversized RVF store(s) — run: ak sync`); return false; }
   ok('no oversized RVF stores detected (not a storage integrity proof)');
-  const cfg = loadKitConfig();
   const resolved = resolveAqeEmbedding(cfg);
-  const st = await runCmd('aqe', ['status'], { timeout: 120_000, env: resolved.env });
+  const st = await runner('aqe', ['status'], { cwd: home.dir, timeout: 120_000, env: { ...resolved.env, ...home.pin } });
   const startup = classifyAqeStartup(st);
   (startup.status === 'observed' ? ok : startup.status === 'busy' ? warn : fail)(startup.reason);
   const embedding = aqeEmbeddingConfiguration({ env: resolved.env });
@@ -312,9 +322,9 @@ async function verifyAqe({ onEvidence = () => {} } = {}) {
   (configured ? warn : fail)(`embedding backend: ${embedding.status}; selected mode ${resolved.mode}`);
   if (!configured) warn('Select a semantic backend with ak x aqe-embedding configure; no hash fallback');
   if (resolved.ambientConflict) warn('Shell endpoint differs from saved intent; this Kit probe uses the saved choice');
-  const browser = await probeAqeBrowser({ runner: runCmd });
+  const browser = await probeAqeBrowser({ runner });
   (browser.status === 'payload-present' ? ok : warn)(`optional browser: ${browser.status} (no browser launched)`);
-  const live = await checkAqeEmbedding({ cfg, cwd: process.cwd() });
+  const live = await checkAqeEmbedding({ cfg, cwd: home.dir, probe });
   if (aqeEmbeddingManaged(cfg)) onEvidence('aqe-embedding', embeddingProbeOutcome(live));
   if (live.corpus) console.log(JSON.stringify({ embeddingProvenance: live.corpus }));
   if (!['healthy', 'empty'].includes(live.corpus?.status)) warn('Corpus compatibility unverified or mismatched; preserve vectors and plan explicit migration');
@@ -351,46 +361,65 @@ export async function verifyMcp({ runner = runCmd, probe = probeMcp, cwd = proce
 
 /** aqe's billing section reflects the host selector. `aqe health` auto-initializes
  *  `.agentic-qe` (memory.db, patterns.rvf, witness keys) in its cwd (observed on
- *  AQE 3.14.3), so a proof never runs it in a project AQE was not set up in. */
-async function checkAqeBillingSection(cwd) {
-  if (!fs.existsSync(projectAqeDir(cwd))) {
+ *  AQE 3.14.3), so a proof never runs it in a project AQE was not set up in. It runs
+ *  in the root, pinned there, with AQE's in-memory backend (AQE_MEMORY_BACKEND=memory,
+ *  agentic-qe dist/kernel/unified-memory.js): the billing section still prints and
+ *  the project's memory.db is not opened (3.14.4; it still creates witness-keys/ in
+ *  a store that has none). */
+async function checkAqeBillingSection(root, { runner, haveCmd }) {
+  if (!fs.existsSync(projectAqeDir(root))) {
     info('aqe billing/provider section not checked: agentic-qe is not initialized in this project');
     return;
   }
-  if (!(await have('aqe'))) return;
-  const h = await runCmd('aqe', ['health'], { timeout: 120_000 });
+  if (!(await haveCmd('aqe'))) return;
+  const h = await runner('aqe', ['health'], { cwd: root, timeout: 120_000, env: { ...desiredAqePin(root), AQE_MEMORY_BACKEND: 'memory' } });
   const seen = /LLM Billing|claude-code|provider|billing/i.test(h.stdout + h.stderr);
   (seen ? ok : warn)('aqe health reports an LLM billing/provider section');
 }
 
-async function verifyProviders() {
+/** Provider wiring, checked from the repository root that holds `cwd` (Task 5.1):
+ *  the AQE router file and external providers are the root's, and every `aqe` and
+ *  `ruflo` call runs in the root with the AQE pin. Outside a repository the project
+ *  checks are skipped.
+ *  @param {{cwd?:string, runner?:typeof runCmd, haveCmd?:typeof have, cfg?:any}} [options] */
+export async function verifyProviders({ cwd = process.cwd(), runner = runCmd, haveCmd = have, cfg = loadKitConfig() } = {}) {
   heading('providers — kit config matches installed CLIs; ruflo/aqe see the wiring');
-  const cfg = loadKitConfig();
+  const home = aqeHome(cwd);
   let good = true;
   // enabled hosts must actually be installed
-  const hosts = (await collectIntegrationFacts({ cwd: process.cwd(), cfg })).hosts;
+  const hosts = (await collectIntegrationFacts({ cwd: home.dir, cfg })).hosts;
   for (const h of HOSTS) {
     if (!cfg.integrations?.hosts?.[h.id]) continue;
     if (hosts[h.id].present) ok(`host '${h.id}' enabled and installed${hosts[h.id].version ? ` (v${hosts[h.id].version})` : ''}`);
     else { fail(`host '${h.id}' enabled in kit.json but not on PATH`); good = false; }
   }
   // ruflo sees its provider list
-  if (await have('ruflo')) {
-    const list = await runCmd('ruflo', ['providers', 'list'], { timeout: 60_000 });
+  if (await haveCmd('ruflo')) {
+    const list = await runner('ruflo', ['providers', 'list'], { cwd: home.dir, timeout: 60_000, env: home.pin });
     (list.code === 0 ? ok : warn)(`ruflo providers list ${list.code === 0 ? 'ok' : 'unavailable'}`);
   }
-  if (cfg.aqe !== false) await checkAqeBillingSection(process.cwd());
+  if (home.root === null) {
+    info('project checks skipped: not inside a repository (AQE billing, fallback chain and external providers are per project)');
+    return good;
+  }
+  return (await verifyProjectProviders(home.root, cfg, { runner, haveCmd })) && good;
+}
+
+/** The per-project half of verifyProviders, against the repository root. */
+async function verifyProjectProviders(root, cfg, { runner, haveCmd }) {
+  let good = true;
+  if (cfg.aqe !== false) await checkAqeBillingSection(root, { runner, haveCmd });
   // aqe fallback chain: on-disk llm-config.json matches kit.json (order + ak-managed)
   const chain = cfg.providers?.aqeFallback ?? [];
   if (chain.length) {
-    const disk = readJson(aqeRouterFile(process.cwd()));
+    const disk = readJson(aqeRouterFile(root));
     const diskOrder = (disk?.fallbackChain?.entries ?? []).map((e) => e.provider).join(' → ');
     const want = chain.map((e) => e.provider).join(' → ');
     if (disk?._managedBy === 'agentic-kit' && diskOrder === want) ok(`aqe fallback chain on disk matches kit.json (${want})`);
     else { fail(`aqe fallback chain drift — disk="${diskOrder}" want="${want}" (run: ak sync)`); good = false; }
   }
-  const disk = readJson(aqeRouterFile(process.cwd()), {}) ?? {};
-  const external = aqeExternalProviderState(disk, { projectRoot: process.cwd() });
+  const disk = readJson(aqeRouterFile(root), {}) ?? {};
+  const external = aqeExternalProviderState(disk, { projectRoot: root });
   if (external.desired.length || external.stale.length) {
     if (!external.supported) {
       fail(`external AQE providers require agentic-qe >=${EXTERNAL_PROVIDERS_MIN_AQE}`);
@@ -613,7 +642,7 @@ const LIVE_CHECKS = Object.freeze([
     run: async ({ cfg, cwd }) => embeddingProbeOutcome(await checkAqeEmbedding({ cfg, cwd, corpus: false })) },
   // Codex MCP discovery is explicit: Claude-only installations need no Codex.
   { id: 'mcp', applies: (cfg) => cfg.integrations?.hosts?.codex === true, run: ({ cwd }) => verifyMcp({ cwd }) },
-  { id: 'providers', applies: () => true, run: () => verifyProviders() },
+  { id: 'providers', applies: () => true, run: ({ cfg, cwd }) => verifyProviders({ cfg, cwd }) },
   { id: 'security', applies: (cfg) => cfg.security !== false, run: () => verifySecurity() },
   { id: 'deja-vu', applies: (cfg) => dejaVuProofApplies(cfg), run: ({ cfg }) => verifyDejaVu({ cfg }) },
   { id: 'memory', applies: () => true, run: () => verifyMemory({ observeRoutes: false }) },
