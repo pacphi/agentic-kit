@@ -28,7 +28,7 @@ test('a pull request only previews, with a read-only token', () => {
   assert.match(preview, /upstream-watch\.mjs comment --json/);
 });
 
-test('the scheduled job posts the checked body once and signals dispatch by label', () => {
+test('the scheduled job posts the checked body once and marks dispatch work by label', () => {
   const watch = job('watch');
   assert.match(watch, /if: github\.event_name != 'pull_request'/);
   assert.match(watch, /permissions:\n\s+contents: read\n\s+issues: write\n/);
@@ -42,11 +42,21 @@ test('the scheduled job posts the checked body once and signals dispatch by labe
   assert.equal(watch.split('gh issue comment').length - 1, 1, 'one comment per run');
   assert.match(watch.slice(post), /repos\/\$repo\/issues\/comments\/\$id/, 'the posted length is read back');
   assert.ok(watch.indexOf('--add-label') > post, 'the dispatch label follows the comment it points at');
-  assert.ok(watch.indexOf('--remove-label') < watch.indexOf('--add-label'), 'a label already present is removed first so the add is a new event');
+  assert.ok(watch.indexOf('--remove-label') < watch.indexOf('--add-label'), 'a label already present is removed first so the issue shows the latest run that found work');
 });
 
-test('the dispatch label is the one the docs give the routine', () => {
+// 4b-C amended (decision 14): routine GitHub triggers support only pull request and
+// release events, so the label is a visible marker and the routine runs on a schedule.
+test('the docs name the dispatch label as a marker, and the routine runs on its own daily schedule', () => {
   const label = /DISPATCH_LABEL: ([\w-]+)/.exec(text)[1];
-  const doc = fs.readFileSync('docs/UPSTREAM-WATCH.md', 'utf8');
-  assert.ok(doc.includes(`\`${label}\``), `docs/UPSTREAM-WATCH.md names the ${label} label`);
+  const doc = fs.readFileSync('docs/UPSTREAM-WATCH.md', 'utf8').replace(/\r\n/g, '\n');
+  const daily = doc.slice(doc.indexOf('## The daily workflow'), doc.indexOf('## The dispatch routine'));
+  const routine = doc.slice(doc.indexOf('## The dispatch routine'));
+  assert.ok(daily.includes(`\`${label}\``), `docs/UPSTREAM-WATCH.md names the ${label} label`);
+  assert.match(daily, /only a marker/, 'the label is a visible marker');
+  assert.match(daily, /fires nothing/);
+  assert.doesNotMatch(doc, /fires the dispatch routine/);
+  assert.match(routine, /\*\*Trigger:\*\* a daily schedule at 15:07 UTC \(`7 15 \* \* \*`\)/);
+  assert.match(routine, /code\.claude\.com\/docs\/en\/routines#supported-events/, 'the trigger limit is cited');
+  assert.doesNotMatch(text, /which fires the\s+(#\s+)?dispatch routine/, 'the workflow no longer claims the label fires the routine');
 });

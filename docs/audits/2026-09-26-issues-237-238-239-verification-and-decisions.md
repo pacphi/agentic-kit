@@ -2213,3 +2213,10 @@ The maintainer settled three details on 2026-09-27:
 
 Not yet proven: that `github-actions[bot]` can comment on the locked issue (first manual run), and
 that a label applied with the workflow token reaches the routine's trigger (first dispatch).
+
+**4b-C amended (2026-09-27).** A routine's GitHub trigger supports only pull request and release
+events ([Supported events](https://code.claude.com/docs/en/routines#supported-events)); an issue
+label cannot fire it, so the second open point above cannot hold. Choice: the dispatch routine
+runs on its own daily schedule at 15:07 UTC (`7 15 * * *`, after the 14:00 watch), reads the
+ledger, and stops quickly when no line qualifies. The workflow keeps re-applying the
+`upstream-dispatch` label as a marker for people reading the issue; it fires nothing.

@@ -2,7 +2,10 @@
 
 - **Status:** Accepted; static assurance, transactional healing, bounded receipts, read model, and the Ruflo support window implemented
 - **Date:** 2026-09-01
-- **Updated:** 2026-09-27 — §7: a scheduled GitHub Actions workflow runs the watch and posts
+- **Updated:** 2026-09-27 — §7: the dispatch routine runs on its own daily schedule; the
+  `upstream-dispatch` label is only a visible marker (routine GitHub triggers support only pull
+  request and release events; decision 14, 4b-C amended)
+- **Earlier update:** 2026-09-27 — §7: a scheduled GitHub Actions workflow runs the watch and posts
   the script's ledger comment; the cloud routine only dispatches (decision 14)
 - **Earlier update:** 2026-09-27 — §7: schema 6 separates `lastCheckedAt` (state re-read) from
   `lastVerifiedAt`/`nextRetestAt` (conformance); a release counts only when it contains the
@@ -236,8 +239,8 @@ workflow posts them; the script reads only the comments of the ledger's authors
 (`watchPolicy.ledger.authors`), so an exact line it recorded is never acted on twice and nobody
 else can suppress one, and it writes the comment itself, so no model decides what the ledger says.
 Dispatch of a released thread is a branch `upstream/<id>` and a draft pull request that makes the
-adjustment test-first and passes the dependency's removal proof; a cloud routine does it when the
-workflow labels the ledger issue. It never merges. Publishing upstream
+adjustment test-first and passes the dependency's removal proof; a cloud routine does it on its
+own daily schedule, after the watch, reading the ledger. It never merges. Publishing upstream
 keeps the `explicit-user-approval-required` rule. Operating detail:
 [UPSTREAM-WATCH.md](../UPSTREAM-WATCH.md).
 
