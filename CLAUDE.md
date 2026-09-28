@@ -2,12 +2,11 @@
 
 # agentic-kit
 
-## Repository workflow
+<!-- BEGIN agentic-kit-project-guidance -->
+@AGENTS.md
+<!-- END agentic-kit-project-guidance -->
 
-Read [AGENTS.md](AGENTS.md) for the repository's commands, ownership, collaboration,
-and validation rules. The CLI runs directly from `bin/agentic-kit.mjs`; installed
-Ruflo/AQE services are integration dependencies, not proof of a running swarm.
-Use the smallest permitted topology for the task and isolated worktrees for writers.
-
+<!-- BEGIN agentic-kit-aqe-init-guard -->
 ## Agentic QE v3
-<!-- managed by agentic-kit — aqe init skips regeneration when this sentinel is present -->
+<!-- Compatibility guard only; Agentic-QE owns its generated host guidance. -->
+<!-- END agentic-kit-aqe-init-guard -->
