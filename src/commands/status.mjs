@@ -26,9 +26,11 @@ export const options = {
 export const help = `ak status — read-only dashboard of what's true and what's drifted
 
 Prints one row per subsystem (versions, natives, security, learning, providers,
-…). Without --live it is read-only: it changes nothing and runs no live check;
-it shows the last result \`ak sync\`, \`ak x verify\` or \`ak status --live\`
-remembered, with its age. A bare \`ak\` runs this plus one suggested next action.
+…). Without --live it changes no configuration and runs no live check; it
+shows the last result \`ak sync\`, \`ak x verify\` or \`ak status --live\`
+remembered, with its age. It may refresh its own local evidence cache under
+\`<state>/agentic-kit/evidence/\` so later checks stay fast. A bare \`ak\` runs
+this plus one suggested next action.
 A row's "→" fix is what \`ak sync\` performs; "→ manual:" marks a step you run
 yourself (sync never plans it). --json rows carry the same distinction as
 \`repair\`: "sync", "manual", or null when there is no fix.
