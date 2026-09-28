@@ -369,6 +369,64 @@ test('a root that already fails a check refuses before anything is written, nami
   assert.deepEqual(snapshot(p.root), before);
 });
 
+// Review M2: a store written between the preview copy and the move must not lose rows.
+/** Wrap a fake runner: run `hook(call)` before the call it names. */
+const hooked = (inner, when, hook) => async (cmd, args, opts) => {
+  if (when(args, opts)) { hook(); when = () => false; }
+  return inner(cmd, args, opts);
+};
+const realImport = (p) => (args) => args[1] === 'import' && args.includes(p.rootDb) && !args.includes('--dry-run');
+const lastRehearsalImport = (p) => { let n = 0; return (args) => args[1] === 'import' && !args.includes(p.rootDb) && !args.includes('--dry-run') && ++n === 2; };
+const writeTo = (file) => () => {
+  const db = new DatabaseSync(file);
+  db.prepare('INSERT INTO captured_experiences (id, task, agent) VALUES (?, ?, ?)').run(`late-${Math.random()}`, 'task', 'agent');
+  db.close();
+};
+
+test('a root written after the preview copied it stops before the real import (review M2)', async (t) => {
+  const p = project(t);
+  const { runner, calls } = fakeAqe();
+  const result = await mergeAqeStores(p.root, base(p, { apply: true, holders: noHolders,
+    runner: hooked(runner, lastRehearsalImport(p), writeTo(p.rootDb)) }));
+  assert.equal(result.status, 'refused', JSON.stringify(result.reason));
+  assert.match(result.reason, /project store changed since/);
+  assert.ok(!calls.some((c) => c.args.includes(p.rootDb)), 'no import into the real root');
+  assert.ok(fs.existsSync(path.join(p.root, 'docs', '.agentic-qe', 'memory.db')), 'the strays stay');
+});
+
+test('a stray written after the preview copied it stops before the real import and is named (review M2)', async (t) => {
+  const p = project(t);
+  const { runner, calls } = fakeAqe();
+  const result = await mergeAqeStores(p.root, base(p, { apply: true, holders: noHolders,
+    runner: hooked(runner, lastRehearsalImport(p), writeTo(path.join(p.root, 'docs', '.agentic-qe', 'memory.db'))) }));
+  assert.equal(result.status, 'refused', JSON.stringify(result.reason));
+  assert.match(result.reason, /docs\/\.agentic-qe changed since/);
+  assert.ok(!calls.some((c) => c.args.includes(p.rootDb)), 'no import into the real root');
+});
+
+test('a stray written during the real import is left in place with its reason; the others move (review M2)', async (t) => {
+  const p = project(t);
+  const { runner } = fakeAqe();
+  const docsDb = path.join(p.root, 'docs', '.agentic-qe', 'memory.db');
+  const result = await mergeAqeStores(p.root, base(p, { apply: true, holders: noHolders,
+    runner: hooked(runner, realImport(p), writeTo(docsDb)) }));
+  assert.equal(result.status, 'merged', JSON.stringify(result.reason));
+  assert.deepEqual(result.archived.map((s) => s.path), ['.agentic-qe/.agentic-qe']);
+  assert.equal(result.leftInPlace.length, 1);
+  assert.equal(result.leftInPlace[0].path, 'docs/.agentic-qe');
+  assert.match(result.leftInPlace[0].reason, /changed since it was copied/);
+  assert.match(result.leftInPlace[0].reason, /newer than the copy/);
+  assert.ok(fs.existsSync(docsDb), 'the changed stray stays where it is');
+});
+
+test('the backup\'s own read of the root is not mistaken for a writer (review M2)', async (t) => {
+  const p = project(t);
+  // No -wal or -shm beside the root yet: opening it for the backup creates both.
+  for (const name of ['memory.db-wal', 'memory.db-shm']) assert.equal(fs.existsSync(path.join(p.root, '.agentic-qe', name)), false);
+  const result = await mergeAqeStores(p.root, base(p, { apply: true, runner: fakeAqe().runner, holders: noHolders }));
+  assert.equal(result.status, 'merged', JSON.stringify(result.reason));
+});
+
 // ---- AQE's starter patterns (decision B5-D5) ---------------------------------
 
 /** project() plus AQE starter patterns S1, S2 in the strays (the root has none of

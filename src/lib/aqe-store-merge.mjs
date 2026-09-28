@@ -38,12 +38,16 @@
 //               clean. AQE 3.14.4 skips shared patterns as conflicts without
 //               pruning (Task 0.2), so no agentic-qe#736 prune step runs.
 //               The archived strays keep their starter patterns.
-//   5 apply     writers again, then the same imports into the real root; its
-//               counts must equal the rehearsal's. On a mismatch: stop, leave
-//               the strays, print the backup and how to restore it.
+//   5 apply     writers again, and every store must look as it did when the
+//               preview copied it (fingerprint: size and mtime of each file; the
+//               holder checks only see files open at that instant, review M2);
+//               a change stops here. Then the same imports into the real root;
+//               its counts must equal the rehearsal's. On a mismatch: stop,
+//               leave the strays, print the backup and how to restore it.
 //   6 archive   writers again; move each whole stray folder to
 //               <run>/archive/<slug>/.agentic-qe (copy, check, remove across
-//               filesystems; on Windows a failed rename leaves that stray).
+//               filesystems; on Windows a failed rename leaves that stray). A
+//               stray that changed since its copy stays in place, reported.
 //   7 receipt   <run>/receipt.json.
 // <run> = <state>/agentic-kit/aqe-store-merge/<ISO time>. Nothing ak writes
 // lies inside any .agentic-qe folder: AQE restores any memory*.db over 1 MB it
@@ -129,6 +133,31 @@ function checkStore(file, openDb) {
   return null;
 }
 
+/** What a store looked like when the preview copied it (review M2): every file of a
+ *  stray folder (the whole folder moves) with size and mtime; for the root only
+ *  memory.db and a non-empty -wal, since the backup's own read-only open creates an
+ *  empty -wal and a -shm there (the -shm holds no data). */
+function fingerprint(dir, { root = false } = {}) {
+  const out = [];
+  const walk = (d) => {
+    let entries;
+    try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const full = path.join(d, entry.name);
+      if (entry.isDirectory()) { if (!root) walk(full); continue; }
+      let st;
+      try { st = fs.lstatSync(full); } catch { continue; }
+      const relative = path.relative(dir, full);
+      if (root && (!STORE_FILES.includes(relative) || relative === 'memory.db-shm' || (relative === 'memory.db-wal' && st.size === 0))) continue;
+      out.push(`${relative}:${st.size}:${st.mtimeMs}`);
+    }
+  };
+  walk(dir);
+  return out.sort().join('\n');
+}
+
+const CHANGED = 'changed since it was copied for this merge; its data may be newer than the copy';
+
 function strayFiles(dir) {
   try {
     return fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => path.join(dir, e.name));
@@ -138,6 +167,7 @@ function strayFiles(dir) {
 // ---- 1 preview ------------------------------------------------------------
 
 function preview(root, strays, scratch, openDb, seedKeys) {
+  const fingerprints = { root: fingerprint(path.join(root, '.agentic-qe'), { root: true }), strays: new Map() };
   const rootFile = copyStore(path.join(root, '.agentic-qe'), path.join(scratch, 'root'));
   const rootCopy = readStore(rootFile, openDb);
   // Checked on the copy before any backup (review minor 7): a root that already
@@ -147,6 +177,7 @@ function preview(root, strays, scratch, openDb, seedKeys) {
   const known = new Set(rootCopy.keys);
   const ids = new Set(rootCopy.experiences);
   const rows = strays.map((stray) => {
+    fingerprints.strays.set(stray.file, fingerprint(stray.file));
     const copy = copyStore(stray.file, path.join(scratch, 'strays', stray.slug));
     const store = readStore(copy, openDb);
     const kept = store.keys.filter((key) => !seedKeys.has(key));
@@ -164,8 +195,17 @@ function preview(root, strays, scratch, openDb, seedKeys) {
   });
   return {
     rootStore: { ...counts(rootCopy), readable: rootCopy.readable, ...(rootCopy.error ? { error: rootCopy.error } : {}), ...(rootProblem ? { problem: rootProblem } : {}) },
-    strays: rows, expected: { patterns: known.size, experiences: ids.size },
+    strays: rows, expected: { patterns: known.size, experiences: ids.size }, fingerprints,
   };
+}
+
+/** The first store that changed since the preview copied it, as a refusal, or null. */
+function changedSinceCopy(root, rows, fingerprints) {
+  if (fingerprint(path.join(root, '.agentic-qe'), { root: true }) !== fingerprints.root) {
+    return 'the project store changed since the preview copied it (a writer ran in between)';
+  }
+  const stray = rows.find((row) => fingerprint(row.dir) !== fingerprints.strays.get(row.dir));
+  return stray ? `${stray.path} ${CHANGED}` : null;
 }
 
 /** The AQE_EMBEDDER_* keys the project's hosts give AQE: Claude Code's
@@ -328,10 +368,14 @@ function moveAcrossDevices(from, to) {
   fs.rmSync(from, { recursive: true });
 }
 
-function archive(o, rows, runDir) {
+function archive(o, rows, runDir, fingerprints) {
   const archived = [];
   const leftInPlace = [];
   for (const stray of rows) {
+    if (fingerprint(stray.dir) !== fingerprints.strays.get(stray.dir)) {
+      leftInPlace.push({ path: stray.path, reason: `${CHANGED}; run ak x aqe-store merge --yes again to merge what it gained` });
+      continue;
+    }
     const to = path.join(runDir, 'archive', stray.slug, '.agentic-qe');
     assertOutsideAqe(path.dirname(to));
     fs.mkdirSync(path.dirname(to), { recursive: true });
@@ -419,7 +463,7 @@ const restoreText = (backup, root) => `with every Claude Code, Codex and OpenCod
   + `${path.join(root, '.agentic-qe', 'memory.db')} and delete memory.db-wal and memory.db-shm beside it`;
 
 /** Steps 3-7, after the preview and the first writer check passed. */
-async function applyMerge(o, root, result, rows, seedKeys) {
+async function applyMerge(o, root, result, rows, seedKeys, fingerprints) {
   const scratch = path.join(result.dir, 'scratch');
   const real = path.join(root, '.agentic-qe', 'memory.db');
   result.backup = path.join(result.dir, 'backup', 'root-memory.db');
@@ -440,6 +484,8 @@ async function applyMerge(o, root, result, rows, seedKeys) {
 
   const second = await writersCheck(o, root, rows);
   if (second.refusal) return { ...result, status: 'refused', reason: `${second.refusal} (stopped before the real import; nothing was changed)` };
+  const changed = changedSinceCopy(root, rows, fingerprints);
+  if (changed) return { ...result, status: 'refused', reason: `${changed}; stopped before the real import, nothing was changed; run the merge again` };
   const applied = await importAll(o, rows, real, { cwd: root, env: desiredAqePin(root) });
   const done = { ...result, after: applied.counts };
   if (applied.problem || !sameCounts(applied.counts, rehearsed.counts)) {
@@ -449,7 +495,7 @@ async function applyMerge(o, root, result, rows, seedKeys) {
 
   const third = await writersCheck(o, root, rows, { withRoot: false });
   if (third.refusal) return { ...done, status: 'refused', reason: `${third.refusal} (the stores were merged; run it again to archive the strays)` };
-  const moved = archive(o, rows, result.dir);
+  const moved = archive(o, rows, result.dir, fingerprints);
   fs.rmSync(scratch, { recursive: true, force: true });
   return { ...done, ...moved, status: 'merged' };
 }
@@ -483,7 +529,7 @@ export async function mergeAqeStores(root, options = {}) {
     const scratch = path.join(dir, 'scratch');
     const tooOld = versionRefusal(o.aqeVersion);
     const starters = tooOld ? { keys: new Set(), source: null, error: tooOld } : await starterSet(o, root, scratch);
-    const seen = preview(root, strays, scratch, o.openDb, starters.keys);
+    const { fingerprints, ...seen } = preview(root, strays, scratch, o.openDb, starters.keys);
     const first = await writersCheck(o, root, strays);
     const seeds = { patterns: starters.keys.size, source: starters.source, ...(starters.error ? { error: starters.error } : {}) };
     result = { ...result, ...seen, holders: first.found, seeds };
@@ -497,7 +543,7 @@ export async function mergeAqeStores(root, options = {}) {
       ?? (unreadable.length ? `unreadable stray store copies: ${unreadable.join(', ')}` : null)
       ?? starterRefusal(starters);
     if (refusal) { removeRunScratch(o, dir); return { ...result, status: 'refused', reason: refusal }; }
-    result = await applyMerge(o, root, result, seen.strays, starters.keys);
+    result = await applyMerge(o, root, result, seen.strays, starters.keys, fingerprints);
   } catch (error) {
     result = { ...result, status: 'failed', reason: String(error?.message ?? error),
       ...(result.backup ? { restore: restoreText(result.backup, root) } : {}) };
