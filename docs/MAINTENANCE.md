@@ -281,14 +281,12 @@ remembered per entry.
 Procedures come from signed recipes. The built-in catalogue is signed with a bundled publisher key,
 which is tamper evidence for the local store rather than a secret.
 
-Recipe refresh is not offered: no installation has a registry configured, so the CLI verb, the
-dashboard route, and the service options that existed only for it were removed rather than kept
-unreachable. The recipe store's verified-staging function stays as the library a future registry
-calls: it would fetch only over HTTPS from an allowlisted host, bound redirects to three and keep
-them in the allowlist, cap the response at 256 KiB, and verify every recipe's expected publisher,
-digest, and signature chain before producing a diff and a pending queue; each recipe would be
-accepted by id and version, and a withdrawn recipe creates no new Guidance. Until a registry exists,
-the built-in catalogue is what you get.
+Recipe refresh is not offered: no installation has a registry configured. The recipe store's
+verified-staging function is the library a future registry calls: it fetches only over HTTPS from an
+allowlisted host, bounds redirects to three and keeps them in the allowlist, caps the response at
+256 KiB, and verifies every recipe's expected publisher, digest, and signature chain before
+producing a diff and a pending queue; each recipe is accepted by id and version, and a withdrawn
+recipe creates no new Guidance. Until a registry exists, the built-in catalogue is what you get.
 
 ## Discovery
 

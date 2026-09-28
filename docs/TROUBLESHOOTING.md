@@ -153,7 +153,7 @@ ak status --refresh=live --only security        # packages load + defend flags a
 ak status --refresh=live --only aqe             # agentic-qe genuinely on ruvector (no FsyncFailed)
 ak status --refresh=live --only harvest         # Ruflo's learning-write path (post-task + distill) in an isolated store
 ak status --refresh=live --only deja-vu         # compatible package/doctor, selected wiring, index state
-ak status --refresh=live --only learning,harvest,aqe,memory-routes,security,deja-vu,memory,providers,mcp,aqe-embedding
+ak status --refresh=live --only learning,harvest,aqe,memory-routes,security,deja-vu,providers,mcp,aqe-embedding
 ```
 
 If `ak status --refresh=live --only aqe` warns that RVF is held by another live process, another AQE
