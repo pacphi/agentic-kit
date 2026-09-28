@@ -310,6 +310,26 @@ test('--refresh with a verb other than report is a usage error naming report', a
   assert.deepEqual(management.calls, []);
 });
 
+test('--only with a verb other than report is a usage error, not a silently ignored flag', async () => {
+  const management = buildManagement();
+  const result = await captureLogs(() => run({
+    flags: { only: ['mcp'] }, positionals: ['inventory'], deps: { management },
+  }));
+  assert.equal(result.code, 2);
+  assert.match(result.text, /--only applies to ak status --refresh=live/);
+  assert.deepEqual(management.calls, []);
+});
+
+test('--project-trees with a verb other than report is a usage error, not a silently ignored flag', async () => {
+  const management = buildManagement();
+  const result = await captureLogs(() => run({
+    flags: { 'project-trees': true }, positionals: ['inventory'], deps: { management },
+  }));
+  assert.equal(result.code, 2);
+  assert.match(result.text, /--project-trees needs --refresh=machine/);
+  assert.deepEqual(management.calls, []);
+});
+
 test('a bare --refresh with a stray strength positional (missing "=") names the one-token spelling', async () => {
   for (const strength of ['live', 'machine']) {
     const result = await captureLogs(() => run({ flags: { refresh: '' }, positionals: [strength], deps: {} }));
@@ -361,6 +381,17 @@ test('plain report never runs a refresh stage (no --refresh)', async () => {
   await run({ flags: {}, positionals: [], deps: { service, refreshStages } });
   assert.equal(calls, 0);
   assert.deepEqual(service.calls, [{ method: 'report', args: [] }]);
+});
+
+test('--refresh refuses an injected refreshStages without a matching injected service, before any stage runs', async () => {
+  let calls = 0;
+  const refreshStages = new Proxy({}, { get: () => async () => { calls += 1; return { ok: true }; } });
+  const result = await captureLogs(() => run({
+    flags: { json: true, refresh: '' }, positionals: ['report'], deps: { refreshStages },
+  }));
+  assert.equal(result.code, 2);
+  assert.match(result.text, /inject deps\.service alongside deps\.refreshStages, or neither/);
+  assert.equal(calls, 0, 'no refresh stage ran before the guard fired');
 });
 
 test('the retired --deep and --refresh-inventory flags get the parser\'s generic unknown-option error', () => {

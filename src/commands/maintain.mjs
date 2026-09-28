@@ -276,8 +276,15 @@ async function defaultStages({ pkgRoot, deps, service }) {
 
 /** `--refresh` before `report`. `deps.refreshStages` (tests) bypasses
  *  `defaultStages` entirely, so an injected fake never triggers a real
- *  collector or facade construction. */
+ *  collector or facade construction — but `service.report()` below always
+ *  reads back through `deps.service`, so injecting `refreshStages` alone
+ *  would still read a real Maintenance service. Half-injecting either half
+ *  is refused, the same way `cliRefreshStages` refuses a half-injected
+ *  maintenance/management pair. */
 async function refreshedReport({ flags, request, pkgRoot, deps }) {
+  if (deps.refreshStages != null && deps.service == null) {
+    throw new TypeError('refreshedReport: inject deps.service alongside deps.refreshStages, or neither');
+  }
   const service = deps.service ?? createMaintenanceService();
   const stages = deps.refreshStages ?? await defaultStages({ pkgRoot, deps, service });
   const refresh = flags.json
@@ -871,16 +878,24 @@ function emit(outcome, json) {
   outcome.render?.(outcome.result);
 }
 
-/** `--refresh` is accepted only with `report` (explicit or default); any other
- *  verb carrying it is a usage error (R5). `--refresh <strength>` (no `=`)
+/** `--refresh`, `--only` and `--project-trees` are accepted only with
+ *  `report` (explicit or default); any other verb carrying one is a usage
+ *  error, not a silently ignored flag. `--refresh <strength>` (no `=`)
  *  leaves the strength as a stray positional — `normalizeBareRefresh` in
  *  refresh.mjs rewrites only the exact `--refresh` token, never the value
  *  after it — so that specific mistake gets the one-token spelling hint
- *  instead of the generic "unknown verb" message. */
+ *  instead of the generic "unknown verb" message. `report` validates its own
+ *  `--only`/`--project-trees` combinations through `refreshRequestFromFlags`,
+ *  so this function never inspects them for that verb. */
 function refreshVerbError(verb, flags) {
-  if (flags.refresh === undefined || verb === REPORT_VERB) return null;
-  if (REFRESH_STRENGTHS.includes(verb) && !(verb in DISPATCH)) return `unexpected argument '${verb}' — write --refresh=${verb}`;
-  return '--refresh applies to ak maintain report; run it first, then this verb';
+  if (verb === REPORT_VERB) return null;
+  if (flags.refresh !== undefined) {
+    if (REFRESH_STRENGTHS.includes(verb) && !(verb in DISPATCH)) return `unexpected argument '${verb}' — write --refresh=${verb}`;
+    return '--refresh applies to ak maintain report; run it first, then this verb';
+  }
+  if (flags.only != null && [].concat(flags.only).length > 0) return '--only applies to ak status --refresh=live';
+  if (flags['project-trees'] === true) return '--project-trees needs --refresh=machine';
+  return null;
 }
 
 /** CLI adapter over the ADR-0048 Maintenance management facade (v2 verbs) and
