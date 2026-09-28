@@ -35,19 +35,45 @@ test('ledger filters by id, event and date, as lines or JSON', async () => {
   });
 });
 
-test('the fetcher reads the last successful watch run from the Actions API', async () => {
+const at = (id, event, date, recordedAt) => ({ ...rec(id, event, date), recordedAt });
+const WRITTEN = [at('a/b#1', 'reply', '2026-09-20', '2026-09-25T14:17:00Z'), at('a/b#1', 'stale', '2026-09-24', '2026-09-24T14:17:00Z'), at('c/d#2', 'released', '2026-09-25', '2026-09-25T14:17:00Z')];
+const written = { read: async () => ({ commit: 'c'.repeat(40), records: WRITTEN, checkedAt: '2026-09-25T14:17:00Z' }), build: async () => { throw new Error('not called'); } };
+
+test('ledger --recorded-since filters on when a record was written; --since on its date', async () => {
+  await withRegistryFile(watch(), async (file) => {
+    assert.equal((await query(file, ['--recorded-since', '2026-09-25T14:17:00Z'], written)).out, `${WRITTEN[0].line}\n${WRITTEN[2].line}\n`);
+    assert.equal((await query(file, ['--recorded-since', '2026-09-25T16:17:00+02:00'], written)).out, `${WRITTEN[0].line}\n${WRITTEN[2].line}\n`, 'compared as times');
+    assert.equal((await query(file, ['--recorded-since', '2026-09-25T14:17:01Z'], written)).out, 'No matching records.\n');
+    assert.equal((await query(file, ['--since', '2026-09-24'], written)).out, `${WRITTEN[1].line}\n${WRITTEN[2].line}\n`);
+    assert.equal((await query(file, ['--recorded-since', '2026-09-24', '--event', 'stale'], written)).out, `${WRITTEN[1].line}\n`);
+    const bad = await query(file, ['--recorded-since', 'yesterday'], written);
+    assert.equal(bad.code, 2);
+    assert.match(bad.err, /--recorded-since must be an ISO date or date-time/);
+  });
+});
+
+test('--recorded-since belongs to ledger only', async () => {
+  await withRegistryFile(watch(), async (file) => {
+    const err = capture();
+    assert.equal(await main(['check', '--since', '2026-09-24', '--recorded-since', '2026-09-24', '--registry', file], { fetcher: fixtureFetcher(), stdout: capture().stream, stderr: err.stream, now: NOW }), 2);
+    assert.match(err.text(), /unknown option --recorded-since/);
+  });
+});
+
+test('the fetcher reads the last successful scheduled watch run from the Actions API', async () => {
   const calls = [];
   const exec = async (command, args) => {
     calls.push([command, ...args]);
     return { status: 0, stdout: JSON.stringify({ workflow_runs: [{ run_started_at: '2026-10-01T14:21:00Z', html_url: 'https://github.com/pacphi/agentic-kit/actions/runs/1' }] }), stderr: '' };
   };
   assert.deepEqual(await createFetcher({ exec }).lastRun('pacphi/agentic-kit'), { at: '2026-10-01T14:21:00Z', url: 'https://github.com/pacphi/agentic-kit/actions/runs/1' });
-  assert.deepEqual(calls[0], ['gh', 'api', 'repos/pacphi/agentic-kit/actions/workflows/upstream-watch.yml/runs?status=success&per_page=1']);
+  // Scheduled runs only: pull request previews and manual dry runs also succeed.
+  assert.deepEqual(calls[0], ['gh', 'api', 'repos/pacphi/agentic-kit/actions/workflows/upstream-watch.yml/runs?status=success&event=schedule&per_page=1']);
   const none = async () => ({ status: 0, stdout: '{"workflow_runs":[]}', stderr: '' });
   assert.equal(await createFetcher({ exec: none }).lastRun('pacphi/agentic-kit'), null);
 });
 
-test('report shows the last successful run and warns after 48 hours or when unknown', async () => {
+test('report shows the last successful scheduled run and warns after 48 hours, when unknown or when there is none', async () => {
   await withRegistryFile(watch(), async (file) => {
     const run = async (lastRun) => {
       const fetcher = { ...fixtureFetcher(), lastRun };
@@ -59,12 +85,15 @@ test('report shows the last successful run and warns after 48 hours or when unkn
     };
     const fresh = await run(async () => ({ at: '2026-09-26T01:18:00Z', url: 'u' }));
     assert.deepEqual(fresh.report.lastRun, { at: '2026-09-26T01:18:00Z', ageHours: 21.7, url: 'u' });
-    assert.match(fresh.text, /last successful watch run 2026-09-26T01:18:00Z \(21\.7 hours ago\)/);
+    assert.match(fresh.text, /last successful scheduled watch run 2026-09-26T01:18:00Z \(21\.7 hours ago\)/);
     assert.doesNotMatch(fresh.text, /warning/);
     const stale = await run(async () => ({ at: '2026-09-24T14:21:00Z', url: 'u' }));
     assert.match(stale.text, /warning: the watch has not succeeded for more than 48 hours/);
     const unknown = await run(async () => { throw new Error('HTTP 403'); });
     assert.deepEqual(unknown.report.lastRun, { error: 'HTTP 403' });
-    assert.match(unknown.text, /warning: the last successful watch run could not be read \(HTTP 403\)/);
+    assert.match(unknown.text, /warning: the last successful scheduled watch run could not be read \(HTTP 403\)/);
+    const none = await run(async () => null);
+    assert.equal(none.report.lastRun, null);
+    assert.match(none.text, /\n {2}warning: no successful scheduled watch run found\n/);
   });
 });

@@ -153,10 +153,14 @@ export function createFetcher({ exec = run } = {}) {
       }
       return { carrier: chain[0], carrierVersion, version, basis: trail.join(' → ') };
     },
-    /** The last successful upstream watch run in `repo`, or null when there is none. */
+    /**
+     * The last successful scheduled upstream watch run in `repo`, or null when
+     * there is none. Pull request previews and manual dry runs also succeed, so
+     * only scheduled runs show that the watch is alive.
+     */
     async lastRun(repo) {
       if (!OWNER_REPO.test(repo ?? '')) throw new Error(`not an owner/repo: ${repo}`);
-      const answer = await json('gh', ['api', `repos/${repo}/actions/workflows/upstream-watch.yml/runs?status=success&per_page=1`]);
+      const answer = await json('gh', ['api', `repos/${repo}/actions/workflows/upstream-watch.yml/runs?status=success&event=schedule&per_page=1`]);
       const run = answer?.workflow_runs?.[0];
       return run ? { at: run.run_started_at, url: run.html_url } : null;
     },

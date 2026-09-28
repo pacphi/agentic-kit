@@ -72,11 +72,14 @@ export function renderReport(report) {
     `  registry ${report.registry.status}, last checked ${report.registry.lastCheckedAt}, last verified ${report.registry.lastVerifiedAt}; ${watched} watched, ${statuses.retired} retired`,
   ];
   if (report.mode === 'offline') lines.push('  offline: only what the registry records; replies, closures and releases were not checked');
+  // lastRun is undefined offline (not checked) and null when no scheduled run has succeeded.
   if (report.lastRun?.at) {
-    lines.push(`  last successful watch run ${report.lastRun.at} (${report.lastRun.ageHours} hours ago)`);
+    lines.push(`  last successful scheduled watch run ${report.lastRun.at} (${report.lastRun.ageHours} hours ago)`);
     if (report.lastRun.ageHours > 48) lines.push('  warning: the watch has not succeeded for more than 48 hours');
   } else if (report.lastRun?.error) {
-    lines.push(`  warning: the last successful watch run could not be read (${report.lastRun.error})`);
+    lines.push(`  warning: the last successful scheduled watch run could not be read (${report.lastRun.error})`);
+  } else if (report.lastRun === null) {
+    lines.push('  warning: no successful scheduled watch run found');
   }
   for (const error of report.registry.errors) lines.push(`  registry error: ${error}`);
   if (report.nothingToWatch) lines.push('  nothing left to watch: every upstream thread is retired');

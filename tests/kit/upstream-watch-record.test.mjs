@@ -65,7 +65,20 @@ test('a released fix fires the routine with its id, version and branch, and the 
     assert.deepEqual(dispatcher.fired, ['proffesor-for-testing/agentic-qe#617 3.13.10 upstream/proffesor-for-testing-agentic-qe-617']);
     assert.match(result.notice.body, /^@pacphi upstream watch: /);
     assert.match(result.notice.body, /Routine session: https:\/\/claude\.ai\/code\/session_new/);
+    assert.match(result.notice.body, /\nThe full record: `node scripts\/upstream-watch\.mjs ledger --recorded-since 2026-09-26T23:00:00Z`\n$/);
     assert.deepEqual(result.dispatchErrors, []);
+    assert.deepEqual(result.wouldFire, [], 'a real run lists nothing it would fire');
+  });
+});
+
+test('ledger commit sentences reference no issue or pull request; the notice keeps its ids', async () => {
+  const release = { channel: 'npm', name: 'agentic-qe', minVersion: '3.13.10' };
+  await withRegistryFile([entry('proffesor-for-testing/agentic-qe#617', { doneWhen: { state: 'closed-completed', release } }), entry('ruvnet/ruflo#3153', { relation: 'commented' })], async (file) => {
+    const { result, ledgerStore } = await record(file, ['--since', '2026-09-03T00:00:00Z']);
+    const { sentences } = ledgerStore.built[0];
+    assert.ok(sentences.length >= 2 && sentences.some((text) => text.includes('proffesor-for-testing/agentic-qe no. 617')), sentences.join('\n'));
+    for (const text of sentences) assert.doesNotMatch(text, /#\d/, text);
+    assert.match(result.notice.body, /`proffesor-for-testing\/agentic-qe#617`/);
   });
 });
 
@@ -102,19 +115,38 @@ test('a read that fails once is retried and counts as read', async () => {
   });
 });
 
-test('dry run fires nothing and builds nothing', async () => {
+test('dry run fires nothing and builds nothing, and lists what would fire', async () => {
   const release = { channel: 'npm', name: 'agentic-qe', minVersion: '3.13.10' };
   await withRegistryFile([entry('proffesor-for-testing/agentic-qe#617', { doneWhen: { state: 'closed-completed', release } })], async (file) => {
     const { result, ledgerStore, dispatcher } = await record(file, ['--dry-run']);
     assert.deepEqual([dispatcher.fired, ledgerStore.built, result.commit], [[], [], null]);
     assert.ok(result.records.some((item) => item.event === 'released'));
+    assert.ok(!result.records.some((item) => item.event === 'fired'));
+    assert.deepEqual(result.wouldFire, [{ id: 'proffesor-for-testing/agentic-qe#617', version: '3.13.10', branch: 'upstream/proffesor-for-testing-agentic-qe-617' }]);
+    const out = capture();
+    await main(['record', '--dry-run', '--registry', file], { fetcher: fixtureFetcher(), ledgerStore: memoryLedger(), dispatcher: fakeDispatcher(), sleep: noSleep, stdout: out.stream, stderr: capture().stream, now: NOW });
+    assert.match(out.text(), /\nWould fire proffesor-for-testing\/agentic-qe#617 3\.13\.10 upstream\/proffesor-for-testing-agentic-qe-617\n$/);
+  });
+});
+
+test('a ledger commit that cannot be built after a firing keeps the session links', async () => {
+  const release = { channel: 'npm', name: 'agentic-qe', minVersion: '3.13.10' };
+  await withRegistryFile([entry('proffesor-for-testing/agentic-qe#617', { doneWhen: { state: 'closed-completed', release } })], async (file) => {
+    const failing = { read: async () => ({ commit: null, records: [], checkedAt: null }), build: async () => { throw new Error('git hash-object failed: disk full'); } };
+    const { code, result, err, dispatcher } = await record(file, [], { ledgerStore: failing });
+    assert.equal(code, 3);
+    assert.equal(dispatcher.fired.length, 1);
+    assert.match(result.error, /Could not build the ledger commit: git hash-object failed: disk full/);
+    assert.deepEqual(result.fired.map((item) => [item.event, item.fields.session]), [['fired', 'https://claude.ai/code/session_new']]);
+    assert.deepEqual(result.wouldFire, []);
+    assert.match(err, /Fired proffesor-for-testing\/agentic-qe#617 before the ledger commit failed: session https:\/\/claude\.ai\/code\/session_new/);
   });
 });
 
 test('record is blind (exit 3) when gh, the ledger, the registry or every upstream thread fails', async () => {
   await withRegistryFile([entry('ruvnet/ruflo#3153', { relation: 'commented' })], async (file) => {
     const offline = await record(file, [], { fetcher: fixtureFetcher({ authenticated: false }) });
-    assert.deepEqual([offline.code, offline.result.blind, offline.ledgerStore.built], [3, true, []]);
+    assert.deepEqual([offline.code, offline.result.blind, offline.ledgerStore.built, offline.result.wouldFire, offline.result.fired], [3, true, [], [], []]);
     const broken = { read: async () => { throw new Error('events.ndjson line 2 is not JSON'); }, build: async () => { throw new Error('not called'); } };
     const unreadable = await record(file, [], { ledgerStore: broken });
     assert.equal(unreadable.code, 3);

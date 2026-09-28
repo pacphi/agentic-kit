@@ -7,6 +7,13 @@ const code = (value) => `\`${value}\``;
 
 export const isoSeconds = (date) => new Date(date).toISOString().replace(/\.\d{3}Z$/, 'Z');
 
+/**
+ * A sentence for a ledger commit message. A commit message is plain text, and
+ * GitHub turns `owner/repo#n` or `#n` there into a "referenced" entry on that
+ * thread, code span or not, so ids are written `owner/repo no. n` and `no. n`.
+ */
+export const commitSafe = (text) => String(text).replace(/([\w.-]+\/[\w.-]+)#(\d+)/g, '$1 no. $2').replace(/#(\d+)/g, 'no. $1');
+
 /** One plain sentence per ledger line. */
 export function sentence(event) {
   const { date, fields } = event;
@@ -63,15 +70,16 @@ export const isActionRecord = (record) => Boolean(ACTION[record.event]?.(record)
 
 /**
  * The commit comment that notifies the maintainer: a mention, one sentence per
- * action record, and how to query the rest. Empty when nothing needs them.
+ * action record, and how to query every record of the run (`recordedAt`, its
+ * time). Empty when nothing needs them.
  */
-export function renderNotice({ records, mention, date }) {
+export function renderNotice({ records, mention, date, recordedAt }) {
   const items = records.filter(isActionRecord);
   if (!items.length) return '';
   const sessions = new Map(records.filter((item) => item.event === 'fired').map((item) => [item.id, item.fields.session]));
   const bullets = items.map((item) => `- ${sentence(item)}${item.event === 'released' && sessions.has(item.id) ? ` Routine session: ${sessions.get(item.id)}` : ''}`);
   const head = `@${mention} upstream watch: ${items.length} ${items.length === 1 ? 'item needs' : 'items need'} you (${date}).`;
-  const foot = `The full record: \`node scripts/upstream-watch.mjs ledger --since ${date}\``;
+  const foot = `The full record: \`node scripts/upstream-watch.mjs ledger --recorded-since ${recordedAt}\``;
   for (let count = bullets.length; count > 0; count--) {
     const more = bullets.length - count;
     const body = `${[head, '', ...bullets.slice(0, count), ...(more ? ['', `${more} more; see the ledger.`] : []), '', foot].join('\n')}\n`;

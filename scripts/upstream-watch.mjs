@@ -17,13 +17,13 @@ import {
 import { createDispatcher, dispatch } from './upstream-watch/dispatch.mjs';
 import { createFetcher, mapLimit, retrying } from './upstream-watch/fetch.mjs';
 import { createLedgerStore, toRecord } from './upstream-watch/ledger-branch.mjs';
-import { isoSeconds, renderNotice, sentence } from './upstream-watch/ledger.mjs';
+import { commitSafe, isoSeconds, renderNotice, sentence } from './upstream-watch/ledger.mjs';
 import { renderEvents, renderReport } from './upstream-watch/render.mjs';
 
 const USAGE = `usage: node scripts/upstream-watch.mjs report [--json] [--concurrency <1-16>] [--registry <file>]
        node scripts/upstream-watch.mjs check --since <iso-date> [--json] [--concurrency <1-16>] [--registry <file>]
        node scripts/upstream-watch.mjs record [--since <iso-date>] [--dry-run] [--json] [--concurrency <1-16>] [--registry <file>]
-       node scripts/upstream-watch.mjs ledger [--id <owner/repo#n>] [--event <name>] [--since <iso-date>] [--json] [--registry <file>]
+       node scripts/upstream-watch.mjs ledger [--id <owner/repo#n>] [--event <name>] [--since <iso-date>] [--recorded-since <iso-date>] [--json] [--registry <file>]
 `;
 const PENDING = new Set(['watching', 'fixed-unreleased']);
 // record exits BLIND when gh, the registry, the ledger branch or every upstream thread is unreadable.
@@ -32,10 +32,10 @@ const LEDGER_EVENTS = ['reply', 'acknowledged', 'closed', 'merged', 'released', 
 
 class UsageError extends Error {}
 
-function sinceValue(value) {
+function sinceValue(value, flag = '--since') {
   const time = Date.parse(value);
   if (!/^\d{4}-\d{2}-\d{2}(?:T[\d:.]+(?:Z|[+-]\d{2}:\d{2}))?$/.test(value) || !Number.isFinite(time)) {
-    throw new UsageError('--since must be an ISO date or date-time');
+    throw new UsageError(`${flag} must be an ISO date or date-time`);
   }
   return new Date(time).toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
@@ -43,7 +43,7 @@ function sinceValue(value) {
 export function parseArgs(argv) {
   const [command, ...rest] = argv;
   if (!['report', 'check', 'record', 'ledger'].includes(command)) throw new UsageError(command ? `unknown command ${command}` : 'missing command');
-  const options = { command, json: false, concurrency: 4, since: null, registry: null, dryRun: false, id: null, event: null };
+  const options = { command, json: false, concurrency: 4, since: null, recordedSince: null, registry: null, dryRun: false, id: null, event: null };
   for (let index = 0; index < rest.length; index++) {
     const flag = rest[index];
     const value = () => {
@@ -56,6 +56,7 @@ export function parseArgs(argv) {
     else if (flag === '--registry') options.registry = value();
     else if (flag === '--dry-run' && command === 'record') options.dryRun = true;
     else if (flag === '--since' && ['check', 'record', 'ledger'].includes(command)) options.since = sinceValue(value());
+    else if (flag === '--recorded-since' && command === 'ledger') options.recordedSince = sinceValue(value(), flag);
     else if (flag === '--id' && command === 'ledger') options.id = value();
     else if (flag === '--event' && command === 'ledger') {
       options.event = value();
@@ -234,9 +235,12 @@ async function ledgerQuery(registry, options, { stdout, stderr, now, ledgerStore
     stderr.write(`Could not read the ledger branch ${branch}: ${error.message}\n`);
     return BLIND;
   }
+  // --since selects by the event's date; --recorded-since by when the run wrote it.
   const day = options.since?.slice(0, 10);
+  const written = options.recordedSince ? Date.parse(options.recordedSince) : null;
   const matches = ledger.records.filter((item) => (!options.id || item.id === options.id)
-    && (!options.event || item.event === options.event) && (!day || item.date >= day));
+    && (!options.event || item.event === options.event) && (!day || item.date >= day)
+    && (written === null || Date.parse(item.recordedAt) >= written));
   if (options.json) stdout.write(`${JSON.stringify({ commit: ledger.commit, checkedAt: ledger.checkedAt, records: matches }, null, 2)}\n`);
   else stdout.write(matches.length ? `${matches.map((item) => item.line).join('\n')}\n` : 'No matching records.\n');
   return 0;
@@ -246,7 +250,9 @@ const WEEK = 7 * 86_400_000;
 
 function blindRecord(error, { stdout, stderr, json }, extra = {}) {
   stderr.write(`${error}\n`);
-  const result = { blind: true, error, records: [], fetchErrors: [], dispatchErrors: [], parent: null, commit: null, notice: { post: false, body: '' }, ...extra };
+  const result = {
+    blind: true, error, records: [], fetchErrors: [], dispatchErrors: [], wouldFire: [], fired: [], parent: null, commit: null, notice: { post: false, body: '' }, ...extra,
+  };
   if (json) stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   return BLIND;
 }
@@ -254,7 +260,8 @@ function blindRecord(error, { stdout, stderr, json }, extra = {}) {
 /**
  * The scheduled run (spec 2026-09-28): read the ledger branch, check from its
  * window, fire the dispatch routine for new dispatch work, and build one local
- * commit when there are new records. Never pushes; the workflow does.
+ * commit when there are new records. Never pushes; the workflow does. A dry
+ * run makes the same read-only dispatch checks and lists what would fire.
  */
 async function record(registry, fetcher, options, { stdout, stderr, now, ledgerStore, dispatcher, sleep }) {
   const { repo, ledger: { branch, sentinel }, notify: { mention } } = registry.watchPolicy;
@@ -279,8 +286,7 @@ async function record(registry, fetcher, options, { stdout, stderr, now, ledgerS
   const recorded = ledger.records.map((item) => item.line).join('\n');
   const all = ledgerEvents(report, registry, { since });
   const released = all.filter((event) => event.event === 'released' && event.fields.branch);
-  const fired = options.dryRun ? { records: [], errors: [] }
-    : await dispatch({ released, records: ledger.records, dispatcher, repo, sentinel, now, recordedAt: runAt });
+  const fired = await dispatch({ released, records: ledger.records, dispatcher, repo, sentinel, now, recordedAt: runAt, dryRun: options.dryRun });
   const records = [...withoutRecorded(all, recorded).map((event) => toRecord(event, runAt)), ...fired.records];
   const checkedAt = fetchErrors.length ? (ledger.checkedAt ?? since) : runAt;
   let commit = null;
@@ -289,20 +295,24 @@ async function record(registry, fetcher, options, { stdout, stderr, now, ledgerS
       commit = await ledgerStore.build({
         parent: ledger.commit, records: [...ledger.records, ...records], checkedAt,
         subject: `upstream-watch: ${records.length} new ${records.length === 1 ? 'record' : 'records'}`,
-        sentences: records.map(sentence),
+        sentences: records.map((item) => commitSafe(sentence(item))),
       });
     } catch (error) {
-      return blindRecord(`Could not build the ledger commit: ${error.message}`, io, { fetchErrors, dispatchErrors: fired.errors });
+      // The routine already ran for these; without the commit the next run fires again.
+      const sessions = fired.records.filter((item) => item.event === 'fired');
+      for (const item of sessions) stderr.write(`Fired ${item.id} before the ledger commit failed: session ${item.fields.session}\n`);
+      return blindRecord(`Could not build the ledger commit: ${error.message}`, io, { fetchErrors, dispatchErrors: fired.errors, fired: sessions });
     }
   }
-  const body = renderNotice({ records, mention, date: runAt.slice(0, 10) });
+  const body = renderNotice({ records, mention, date: runAt.slice(0, 10), recordedAt: runAt });
   const result = {
-    since, sinceSource, checkedAt, blind: false, records, fetchErrors, dispatchErrors: fired.errors,
+    since, sinceSource, checkedAt, blind: false, records, fetchErrors, dispatchErrors: fired.errors, wouldFire: fired.wouldFire,
     parent: ledger.commit, commit, notice: { post: Boolean(body), body },
   };
   for (const item of fetchErrors) stderr.write(`Could not check ${item.id}: ${item.error}\n`);
   for (const item of fired.errors) stderr.write(`Dispatch ${item.id}: ${item.error}\n`);
-  stdout.write(options.json ? `${JSON.stringify(result, null, 2)}\n` : records.length ? `${records.map((item) => item.line).join('\n')}\n` : 'No new records.\n');
+  const lines = [...records.map((item) => item.line), ...fired.wouldFire.map((item) => `Would fire ${item.id} ${item.version} ${item.branch}`)];
+  stdout.write(options.json ? `${JSON.stringify(result, null, 2)}\n` : lines.length ? `${lines.join('\n')}\n` : 'No new records.\n');
   return 0;
 }
 
