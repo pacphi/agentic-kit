@@ -2,7 +2,12 @@
 
 - **Status:** Accepted — implementation delivered 2026-09-05; Implemented withheld pending
   human-evaluation and cross-platform gates
-- **Updated:** 2026-09-28 — [ADR-0063](0063-evidence-store-and-refresh-vocabulary.md) records the
+- **Updated:** 2026-09-28 — closes this ADR's §8 gap: a curated or added source's real failure now
+  survives a process restart too. `coverage()` restores `failed` (or a non-user `stopped` limit)
+  from the newest scan-history summary when there is no live record and no later complete
+  snapshot, so Discovery and the Inventory banner no longer fall back to reporting a restarted
+  source as "not scanned" (M1b; remediation program, branch 9, `f351f2b6`).
+- **Earlier update:** 2026-09-28 — [ADR-0063](0063-evidence-store-and-refresh-vocabulary.md) records the
   unified evidence-cache age rule and directory layout behind `ak status`'s current, interim
   `--refresh` boolean (ruflo-components, native runtime, host setup, deja-vu, version drift,
   npm-global-root, daemon-sweep, ak-launcher); it is the precursor to, but does not itself

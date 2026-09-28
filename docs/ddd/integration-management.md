@@ -172,6 +172,10 @@ User or external drift is preserved.
 Receipts never authorize deletion of sibling keys, containing tables, external executables, or
 credential values.
 
+A safety copy ak makes before writing a file is not a receipt: it is removed only when the copy just
+made and the receipt provably hold everything it held (ADR-0058 §3; the AQE project-root pin keeps
+only its newest copy instead, ADR-0062).
+
 For a companion, an upstream wiring ledger is observation rather than an ak receipt. Ordinary undo
 removes exact receipt-owned projections; package removal is a separate scope; data purge is a third,
 destructive scope. External packages/plugins and user-owned index, notes, policy, privacy state,

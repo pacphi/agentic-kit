@@ -1022,6 +1022,52 @@ decisions are under "Branch 5 decisions" below; the design is
   out of each. A merge refuses now: the maintainer's two AQE MCP servers hold the root store. The
   merge itself is the maintainer's step with the released build.
 
+#### Remediation program Branch 9 (`fix/follow-ups`, 2026-09-28)
+
+Built from `82d1211b` (#253; main was at v4.0.0-alpha.59, `b84b5a7e`, immediately before it) for the
+[remediation program](../superpowers/plans/2026-09-26-remediation-program.md), in parallel with
+Branch 6b; not merged. The plan is
+[docs/superpowers/plans/2026-09-28-branch-9-follow-ups.md](../superpowers/plans/2026-09-28-branch-9-follow-ups.md).
+The maintainer closed the branch after its first four tasks (2026-09-28); Tasks 5–14, the
+added-scope items N-1–N-5 and everything in that plan's "Deferred until 6b merges" table move to
+the next remediation program.
+
+- **M1b fixed.** `coverage()` now reads the scan-history store once per call and restores a
+  source's `failed` state (or a non-user `stopped` limit) from its newest terminal history summary
+  when there is no live record and no later `complete` snapshot, so Discovery and the Inventory
+  banner both report the same failure after a restart instead of falling back to `not-scanned`
+  (`src/lib/maintenance/discovery/orchestrator.mjs`; `f351f2b6`, hardened by `cb52cb9e`).
+- **N5 wording fixed.** The Context host card now renders "Partial data" for a Codex source
+  `degraded` with a `parse-yield-*` reason, instead of "Source unreadable" for a source that was,
+  in fact, read (`src/lib/dashboard/context-host-card.mjs`; `bd116d9c`).
+- **N5 census.** A read-only census over the real Codex corpus (1,714 rollouts, 734 token-bearing,
+  0 read/parse errors) found exactly 1 gap file (token evidence, zero normalized responses). It is
+  explained by a cached fact (`session.aborts > 0`, tool activity), but its 176,326 tokens are
+  still not counted: `usage-aggregate.mjs`'s `buildSessionRows` never builds a session row for a
+  record with zero responses, so no explanation makes the tokens reach a total. Outcome B under the
+  branch's rule (docs only, no schema change): the advisory's classification is unchanged and right
+  in substance; `docs/USAGE-SCORECARD-METRICS.md` and ADR-0052 now state what it counts (`3721451f`).
+- **Item 7 pruned.** ak now removes an older `.ak-<tag>-backup.<uuid>` safety copy of a settings
+  file only when the copy it just made and that write's receipt already prove the older copy
+  redundant, and only when the older copy's bytes are exactly what the projection's own editor
+  would write back — never a copy still carrying the user's own formatting, values, or anything
+  outside that proof (`src/lib/owned-env-projection.mjs`'s `redundantBackups`/
+  `pruneRedundantBackups`; `ecdb5e86`, the round-trip guard added in `75082442`). ADR-0058 §3 and
+  `docs/ddd/integration-management.md` record the rule; `docs/UPGRADING.md` states it for users.
+  AQE's project-root pin keeps its separate newest-only rule (ADR-0062) unchanged.
+
+Moves to the next remediation program: Tasks 5 (About install-edit render test), 6 (relative
+`XDG_*` handling), 7 (the tripwire's live-session writers), 8 (re-record seams for `x daemon-gc`
+and `setup`), 9 (durable references instead of task/fix-round labels in comments), 10–12
+(test-temp-folder research, owner records and collection, the focused-run mode), 13 (the temp-folder
+backlog list); the added-scope items N-1 (busy-rule reproduction, #574/#240), N-2
+(`HOST-SUPPORT.md` corrections), N-3 (ruflo#2885 trace hook), N-4 (CI timeout) and N-5
+(upstream-watch minors deferred from #253); and every item in the plan's "Deferred until 6b merges"
+table (the N4 two-store acknowledgment, the hook-contract acknowledgment behind open question OQ-1,
+the ADR index table, the status-wording composition, the `x/host.mjs` re-record seam, de-labelling
+the Task 9 comment-label allowlist, and the deja-vu skipped-check wording) — each needs a file
+Branch 6b owns or edits in parallel.
+
 ### Full-suite results at each stage end
 
 #### Baseline on `847486c`
@@ -1302,7 +1348,7 @@ Behavior that differs from, or goes beyond, the plan text.
     spreads `process.env`, and on a `child_process` call that passes no `env` option (so inherits
     implicitly), unless the line states why it inherits. It reads source text: a call whose options
     object is built elsewhere needs the marker, and a call through a local wrapper is not seen.
-  - M1b is still open.
+  - M1b was open; fixed on Remediation program Branch 9 (above).
 - **ADR index.** In `docs/adr/README.md` the index table ends at ADR-0052; later ADRs appear only as
   bullets or sections. This predates the branch.
 - **UI suite outside `test:ui`.** Resolved on `fix/test-hermeticity`. The polyglot-card check's

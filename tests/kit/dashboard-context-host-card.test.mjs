@@ -93,6 +93,22 @@ test('empty state: unreadable store carries the health reason and does not claim
   assert.match(html, /does not mean no sessions ran/);
 });
 
+test('empty state: partly read Codex source with parse-yield reason says Partial data', () => {
+  const html = contextHostCard('codex', EMPTY, { health: { status: 'degraded', reason: 'parse-yield-partial' } });
+  assert.match(html, /Partial data/);
+  assert.match(html, /were read/);
+  assert.match(html, /some yielded/);
+  assert.doesNotMatch(html, /Source unreadable/);
+});
+
+test('empty state: fully failed Codex parse (parse-yield-zero) says none yielded, not some', () => {
+  const html = contextHostCard('codex', EMPTY, { health: { status: 'degraded', reason: 'parse-yield-zero' } });
+  assert.match(html, /Partial data/);
+  assert.match(html, /None of the Codex session files that carry token usage yielded a response ak could parse/);
+  assert.doesNotMatch(html, /some yielded/);
+  assert.doesNotMatch(html, /Source unreadable/);
+});
+
 test('empty state: with no health supplied the original wording is kept', () => {
   assert.match(contextHostCard('opencode', EMPTY, {}), /No sessions in the selected timeframe\./);
   assert.match(contextHostCard('opencode', EMPTY), /No sessions in the selected timeframe\./);

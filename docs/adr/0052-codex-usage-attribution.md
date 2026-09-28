@@ -5,6 +5,13 @@
 - **Updated:** 2026-09-27 — imported copies are also excluded from project discovery: they give no
   project, host or Desktop origin, and the discovery scan counts them in `importedExcluded`
   (ADR-0060 §3). The marker now lives in one leaf module shared by usage and discovery.
+- **Updated:** 2026-09-28 — measured the partial-response-yield advisory on the reference machine's real
+  Codex corpus (1,714 rollouts, 734 token-bearing, 1 gap file carrying token evidence but zero
+  normalized responses). The one gap file IS explained by a cached fact (`session.aborts > 0`, and
+  tool activity) — but its usage is still not counted: the aggregate builds a session row only for a
+  record with at least one response (`usage-aggregate.mjs`'s `buildSessionRows`), so the file's 176,326
+  tokens never reach any total regardless of the explanation. The advisory is right in substance;
+  classification is unchanged. Extends the "Not done" bullet below with the measured counts.
 - **Deciders:** agentic-kit maintainers
 - **Related:** [ADR-0009](0009-usage-scorecard-local-transcript-analytics.md),
   [ADR-0038](0038-consistent-cross-host-session-metrics.md),
@@ -203,7 +210,13 @@ subagent and previously dropped usage is now priced.
 - The cause of counter restarts is unknown (decision 4).
 - A subagent with no ordinals still reports no usage (decision 2).
 - One rollout carries `token_count`s but no agent message, so the pre-existing
-  `partial-response-yield` warning remains.
+  `partial-response-yield` warning remains — measured on the reference machine (2026-09-28): of 1,714
+  Codex rollouts (734 token-bearing), exactly 1 is such a gap file. It is explained by a cached fact
+  (`session.aborts > 0`, tool-only activity) but that does not change what is counted: the aggregate
+  never builds a session row for a record with zero responses (`usage-aggregate.mjs`'s
+  `buildSessionRows`), so the file's usage (176,326 tokens, its own `last_token_usage.total_tokens`
+  sum across its `token_count` events) reaches no total either way. Counting that usage, or
+  documenting the shape more precisely, is left to the usage-accuracy branch.
 - Whole-rollout exclusion may drop real usage (open, plausible, 2026-09-27). On the reference
   machine 6 of 924 imported rollouts carry a later turn that is not an import: one `task_started`
   whose `turn_id` starts with `rollout-`, no `user_message` event, `role: user` response items in
