@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { sandboxHome, assertSandboxed } from './helpers/home-sandbox.mjs';
+import { sandboxHome, assertSandboxed, rmrf } from './helpers/home-sandbox.mjs';
 
 const HOME = sandboxHome('ak-ruflo-components-evidence-location');
 const paths = await import('../../src/lib/paths.mjs');
@@ -14,3 +14,5 @@ test('rufloComponentsEvidenceFile relocates under the shared evidence/ruflo-comp
     `expected the shared evidence layout, got: ${file}`);
   assert.notEqual(path.basename(file), 'ruflo-components-evidence.json');
 });
+
+test.after(() => rmrf(HOME));
