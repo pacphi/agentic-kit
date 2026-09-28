@@ -38,7 +38,7 @@ const tables = (db) => new Set(db.prepare("SELECT name FROM sqlite_master WHERE 
 const readJsonl = (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
 
 /** The fake `aqe`: brain export/import over JSONL, recording each call. */
-function fakeAqe({ underImportInto = null } = {}) {
+function fakeAqe({ underImportInto = null, version = '3.14.4' } = {}) {
   const calls = [];
   const runner = async (cmd, args, opts) => {
     calls.push({ cmd, args, cwd: opts?.cwd, env: opts?.env });
@@ -85,6 +85,7 @@ function fakeAqe({ underImportInto = null } = {}) {
       db.close();
       return { code: 0, stdout: `Import complete.\n  Imported:  ${imported}\n  Skipped:   ${skipped}\n  Conflicts: ${skipped}\n`, stderr: '' };
     }
+    if (args[0] === '--version') return { code: 0, stdout: `${version}\n`, stderr: '' };
     return { code: 1, stdout: '', stderr: `unexpected aqe call ${args.join(' ')}` };
   };
   return { runner, calls };
@@ -195,6 +196,17 @@ test('an AQE older than 3.14.4 refuses', async (t) => {
   const result = await mergeAqeStores(p.root, base(p, { apply: true, runner: fakeAqe().runner, holders: noHolders, aqeVersion: '3.14.3' }));
   assert.equal(result.status, 'refused');
   assert.match(result.reason, /3\.14\.4/);
+});
+
+test('the AQE version comes from the aqe the merge runs, not from npm\'s global tree', async (t) => {
+  const p = project(t);
+  const { runner } = fakeAqe({ version: '3.14.3' });
+  const options = base(p, { apply: true, runner, holders: noHolders });
+  delete options.aqeVersion;
+  const result = await mergeAqeStores(p.root, options);
+  assert.equal(result.aqeVersion, '3.14.3');
+  assert.equal(result.status, 'refused');
+  assert.match(result.reason, /3\.14\.3 is older than 3\.14\.4/);
 });
 
 test('--yes merges, keeps the audit trail out, archives whole folders beside a backup and a receipt', async (t) => {

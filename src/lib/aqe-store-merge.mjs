@@ -40,7 +40,7 @@ import { withDb } from './sqlite.mjs';
 import { findStrayMemoryStores } from './project-memory.mjs';
 import { storeHolders } from './aqe-store-holders.mjs';
 import { desiredAqePin } from './aqe-project-pin.mjs';
-import { cmpVersions, installedVersion } from './versions.mjs';
+import { cmpVersions } from './versions.mjs';
 
 /** @typedef {{ root: string, status?: 'nothing'|'preview'|'refused'|'failed'|'merged', runId: string|null, dir: string|null,
  *   aqeVersion: string|null, skipped: Array<{ path: string, reason: string }>, backup: string|null,
@@ -272,6 +272,13 @@ function strayStores(root) {
   return { strays, skipped };
 }
 
+/** The version of the `aqe` on PATH, the one that runs the import (npm's
+ *  global tree can be another install, or redirected by npm_config_prefix). */
+async function aqeCliVersion(runner) {
+  const result = await runner('aqe', ['--version'], { env: quiet, timeout: 60_000 });
+  return result.code === 0 ? /\b(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\b/.exec(String(result.stdout))?.[1] ?? null : null;
+}
+
 function versionRefusal(version) {
   if (!version) return `agentic-qe is not installed; install agentic-qe ${MIN_AQE_VERSION} or later first`;
   if (cmpVersions(version, MIN_AQE_VERSION) < 0) return `agentic-qe ${version} is older than ${MIN_AQE_VERSION}, the first release this merge was proven with; upgrade it first (ak sync)`;
@@ -352,8 +359,8 @@ export async function mergeAqeStores(root, options = {}) {
     apply: false, mergeDir: paths.aqeStoreMergeDir(), now: Date.now(), platform: process.platform, runner: run,
     holders: storeHolders, openDb: withDb, rename: fs.renameSync, ...options,
   };
-  if (!('aqeVersion' in options)) o.aqeVersion = installedVersion('agentic-qe');
   const { strays, skipped } = strayStores(root);
+  if (strays.length && !('aqeVersion' in options)) o.aqeVersion = await aqeCliVersion(o.runner);
   /** @type {MergeResult} */
   const base = { root, runId: null, dir: null, aqeVersion: o.aqeVersion, skipped, backup: null, archived: [], leftInPlace: [] };
   if (!strays.length) return { ...base, status: 'nothing', strays: [], expected: null, holders: null };
