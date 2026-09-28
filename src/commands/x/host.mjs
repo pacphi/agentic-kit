@@ -100,6 +100,9 @@ Subcommands:
              (per-activity, opt-in; user pins are never touched, and \`ak sync\`
              never does this for you)
   off      reversible teardown (reset to claude-only; strip managed env keys)
+  check-connection <claude|codex|opencode>
+             consent-gated paid connection check, the dashboard dialog's CLI
+             twin; needs --yes or a y/N prompt; --dry-run previews it
   adapters record hash-pinned consent for external host-adapter manifests
              (experimental — set AK_EXPERIMENTAL_HOST_ADAPTERS=1; revoke
              always works, list/trust need the flag)
@@ -157,7 +160,8 @@ Examples:
   ak host pick --host claude       disable codex + opencode; preserve user config
   ak host pick --route 'testing:claude:claude-sonnet-5'
   ak host refresh --activity architecture,design
-  ak host off`;
+  ak host off
+  ak host check-connection codex --dry-run`;
 
 /** Stamp provenance onto chain entries. 'suggested' = ak proposed it and the
  *  user pressed enter; 'user' = they typed it. Only 'suggested' entries are
@@ -180,16 +184,11 @@ export async function run({ flags, positionals, pkgRoot }) {
   if (sub === 'off') return off({ cwd, pkgRoot });
   if (sub === 'pick') return pick({ flags, cwd, pkgRoot });
   if (sub === 'refresh') return refresh({ flags, cwd });
-  if (sub === 'align') {
-    const { run: align } = await import('./host-align.mjs');
-    return align({ flags });
-  }
-  if (sub === 'adapters') {
-    const { run: runHostAdapters } = await import('./host-adapters.mjs');
-    return runHostAdapters({ flags, positionals: positionals.slice(1) });
-  }
+  if (sub === 'align') return (await import('./host-align.mjs')).run({ flags });
+  if (sub === 'adapters') return (await import('./host-adapters.mjs')).run({ flags, positionals: positionals.slice(1) });
+  if (sub === 'check-connection') return (await import('./host-connection.mjs')).run({ flags, positionals: positionals.slice(1) });
 
-  fail(`unknown host subcommand: ${sub} (status|pick|refresh|off|adapters|align)`);
+  fail(`unknown host subcommand: ${sub} (status|pick|refresh|off|check-connection|adapters|align)`);
   return 2;
 }
 

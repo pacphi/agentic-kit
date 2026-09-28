@@ -77,7 +77,7 @@ Usage (ak = alias of agentic-kit):
   ak audit hooks     read-only host-neutral hook inventory + remediation plan [--host HOST] [--json]
   ak heal hooks      dry-run hook healing plan; explicit apply/verify/undo     [--host HOST] [--json]
   ak run             execute a host-neutral activity pipeline  [template "task"] [--dry-run]
-  ak host            manage agent hosts, routing, and provider bindings  [status|pick|refresh|off]
+  ak host            manage agent hosts, routing, and provider bindings  [status|pick|refresh|off|check-connection]
   ak uninstall       leave cleanly                                      [--this-project] [--purge]
 
   When in doubt: ak sync
@@ -100,7 +100,7 @@ Plumbing (power users) — each takes --help:
   ak x dashboard [--port N]    local health and guarded maintenance dashboard (localhost only)
   ak x harvest [--dry-run]     opt-in learning-write: replay experiences into the substrate
   ak x mcp [status|pick|off]   MCP registration + tool-family deny rules
-  ak x host [status|pick|refresh|off]   manage hosts, routing, and provider bindings
+  ak x host [status|pick|refresh|off|check-connection]   manage hosts, routing, and provider bindings
   ak x reference [diff|sync]   CLAUDE.md managed-block inspection/reconcile
   ak x skills plan             read-only project skill evidence + remediation plan
   ak x codex-context [status|max|off]   manage native Codex context capacities
