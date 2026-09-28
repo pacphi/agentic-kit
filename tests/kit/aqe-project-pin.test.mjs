@@ -203,7 +203,8 @@ test('a foreign shell-table value is preserved and reported as a hand fix naming
   const rows = await memoryPin.collect({ cwd: root, cfg });
   const hand = rows.find((r) => r.repair === 'manual' && r.subsystem === 'aqe-pin');
   assert.ok(hand, JSON.stringify(rows));
-  assert.match(hand.fix, /\.codex\/config\.toml \[shell_environment_policy\.set\]/);
+  // Native separators on Windows: the fix names the file as the user's OS writes it.
+  assert.match(hand.fix, /\.codex[\\/]config\.toml \[shell_environment_policy\.set\]/);
 });
 
 test('an inline or dotted shell environment set is preserved as a hand fix, never rewritten', (t) => {
@@ -404,13 +405,13 @@ test('git-tracked .mcp.json and .codex/config.toml are skipped and shown as a ha
   assert.deepEqual([mcp, codex].map((f) => fs.readFileSync(f, 'utf8')), before, 'tracked files are not written');
   for (const f of [mcp, codex]) assert.equal(fs.existsSync(`${f}${AQE_PIN_RECEIPT}`), false);
   assert.deepEqual(json(settings).env, { KEEP: 'x', ...pinOf(root) }, 'settings.local.json is always pinned');
-  const tracked = result.findings.filter((f) => f.status === 'tracked').map((f) => path.relative(root, f.file));
+  const tracked = result.findings.filter((f) => f.status === 'tracked').map((f) => path.relative(root, f.file).split(path.sep).join('/'));
   assert.deepEqual([...new Set(tracked)].sort(), ['.codex/config.toml', '.mcp.json']);
   const rows = await memoryPin.collect({ cwd: root, cfg });
   const hand = rows.find((r) => r.subsystem === 'aqe-pin' && r.repair === 'manual' && /tracked/.test(r.message));
   assert.ok(hand, JSON.stringify(rows));
   assert.match(hand.message, /\.mcp\.json/);
-  assert.match(hand.message, /\.codex\/config\.toml/);
+  assert.match(hand.message, /\.codex[\\/]config\.toml/);
   assert.match(`${hand.message} ${hand.fix}`, /does not exist on (their|teammates')/);
   assert.ok(!rows.some((r) => r.subsystem === 'aqe-pin' && r.repair === 'sync'), JSON.stringify(rows));
 });
