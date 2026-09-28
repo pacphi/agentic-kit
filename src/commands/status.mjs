@@ -4,7 +4,7 @@
 // invocation) appends exactly one suggested next action. --refresh[=live|machine]
 // runs the shared refresh stages first (ADR-0063) and reports the rows its
 // local re-check collected; --only names the live checks to run (ADR-0055).
-import { glyph, dim, bold, ok, warn, fail, humanOutputToStderr, sanitizeForTerminal } from '../lib/output.mjs';
+import { glyph, dim, bold, ok, warn, fail, humanOutputToStderr, reportFailure, sanitizeForTerminal } from '../lib/output.mjs';
 import {
   REFRESH_OPTIONS, REFRESH_STRENGTHS, refreshRequestFromFlags, runRefresh, cliRefreshStages, printRefreshStage,
   formatElapsed,
@@ -97,7 +97,9 @@ The exit code is 1 when a row fails or a refresh stage fails, and 2 for a
 usage error. A failed live check is a warning and leaves the exit code as it
 was. With --only, only the named checks decide the exit code: 1 when one
 failed, was inconclusive or did not run, else 0; rows and stage failures still
-print and appear in --json.
+print and appear in --json. With --json, a usage error or an error is still
+one JSON object on stdout, { error, exitCode }, plus "recovery" (the commands
+that move it aside) when kit.json cannot be read; the message goes to stderr.
 
 Examples:
   ak status                    quick dashboard
@@ -278,15 +280,17 @@ function strayArgumentError(positionals) {
  *   deps?: { refreshStages?: Record<string, Function> } }} input */
 export async function run({ flags, positionals = [], pkgRoot, deps = {} }) {
   const request = refreshRequestFromFlags(flags);
-  if ('error' in request) return usageError(request.error);
+  if ('error' in request) return usageError(flags, request.error);
   if (!request.strength) return report(flags, { rows: await collect({ pkgRoot, refresh: false }) });
   const stray = strayArgumentError(positionals);
-  if (stray) return usageError(stray);
+  if (stray) return usageError(flags, stray);
   return runRefreshed({ flags, pkgRoot, request, deps });
 }
 
-function usageError(message) {
-  fail(`ak status: ${message}`);
+/** A usage error: exit 2. Under --json stdout carries one JSON object,
+ *  `{ error, exitCode: 2 }`, and the message goes to stderr. */
+function usageError(flags, message) {
+  reportFailure({ json: flags.json === true, payload: { error: message, exitCode: 2 }, human: () => fail(`ak status: ${message}`) });
   return 2;
 }
 

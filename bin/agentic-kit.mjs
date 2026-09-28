@@ -4,7 +4,7 @@
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { fail, dim, exitWhenFlushed } from '../src/lib/output.mjs';
+import { fail, dim, exitWhenFlushed, reportFailure } from '../src/lib/output.mjs';
 import { nodeRuntimeError } from '../src/lib/node-runtime.mjs';
 import { normalizeBareRefresh } from '../src/lib/refresh.mjs';
 
@@ -115,6 +115,14 @@ const wantsHelp = (args) => args.includes('--help') || args.includes('-h');
  *  takes one the exact token becomes `--refresh=` before parsing. */
 const refreshArgs = (mod, args) => (mod.options?.refresh?.type === 'string' ? normalizeBareRefresh(args) : args);
 
+/** A command's own help, or its flag list when it has none. */
+const commandHelp = (cmd, mod) => mod.help ?? `ak ${cmd} — flags: ${
+  Object.keys(mod.options ?? {}).map((o) => `--${o}`).join(' ') || '(none)'}`;
+
+/** True once the command's options parsed with --json set, so a fatal error
+ *  reported after that point still answers with one JSON object. */
+let jsonRequested = false;
+
 async function main() {
   const argv = process.argv.slice(2);
   let cmd = argv[0];
@@ -164,8 +172,7 @@ async function main() {
   // Per-command help — intercepted BEFORE run() so mutating commands
   // (setup, sync, uninstall) never fire on `ak <cmd> --help`.
   if (wantsHelp(rest)) {
-    console.log(mod.help ?? `ak ${cmd} — flags: ${
-      Object.keys(mod.options ?? {}).map((o) => `--${o}`).join(' ') || '(none)'}`);
+    console.log(commandHelp(cmd, mod));
     return 0;
   }
 
@@ -186,12 +193,19 @@ async function main() {
       console.error('Telemetry failed: invalid command options.');
       return 2;
     }
-    fail(`ak ${cmd}: ${err.message}`);
-    console.log(mod.help ?? `ak ${cmd} — flags: ${
-      Object.keys(mod.options ?? {}).map((o) => `--${o}`).join(' ') || '(none)'}`);
+    // Under --json a rejected option still answers with one JSON object (the
+    // command's own empty result when it defines one, as `ak sync` does); the
+    // message and the help go to stderr. A retired spelling gets the parser's
+    // generic message, with no hint (ADR-0063).
+    reportFailure({
+      json: Boolean(mod.options?.json) && rest.includes('--json'),
+      payload: mod.jsonUsageError?.(err.message) ?? { error: err.message, exitCode: 2 },
+      human: () => { fail(`ak ${cmd}: ${err.message}`); console.log(commandHelp(cmd, mod)); },
+    });
     return 2;
   }
   const { values, positionals } = parsed;
+  jsonRequested = values.json === true;
 
   // Experimental host-adapter bootstrap (Wave 4, adapter door) — the single
   // place every command passes through. Gated on the env var BEFORE anything
@@ -247,28 +261,25 @@ async function main() {
   return code ?? 0;
 }
 
-const shellQuote = (value) => process.platform === 'win32'
-  ? `'${String(value).replaceAll("'", "''")}'`
-  : `'${String(value).replaceAll("'", "'\"'\"'")}'`;
-
-function reportFatal(err) {
-  if (err?.name === 'KitConfigError' && typeof err.configPath === 'string') {
-    const backup = `${err.configPath}.invalid`;
-    fail(err.message);
-    console.log('Recovery (the original is preserved):');
-    if (process.platform === 'win32') {
-      console.log(`  Move-Item -LiteralPath ${shellQuote(err.configPath)} -Destination ${shellQuote(backup)}`);
-    } else {
-      console.log(`  mv -- ${shellQuote(err.configPath)} ${shellQuote(backup)}`);
-    }
-    console.log('  ak status');
-    console.log(`Then compare ${backup} with the regenerated defaults and restore only the intended values.`);
-    return;
-  }
-  fail(err?.stack ?? String(err));
+/** A command that threw. An unreadable kit.json gets its recovery commands;
+ *  anything else its stack. Under --json stdout carries one JSON object,
+ *  `{ error, exitCode: 1 }` plus `recovery` for kit.json, and the human lines
+ *  go to stderr. The config module loads here, not at startup, so the bin
+ *  stays cheap to start. */
+async function reportFatal(err) {
+  const config = await import('../src/lib/config.mjs').catch(() => null);
+  const recovery = config?.configErrorRecovery(err) ?? null;
+  reportFailure({
+    json: jsonRequested,
+    payload: { error: err?.message ?? String(err), exitCode: 1, ...(recovery ? { recovery } : {}) },
+    human: () => {
+      fail(recovery ? err.message : err?.stack ?? String(err));
+      for (const line of recovery ? config.configRecoveryLines(recovery) : []) console.log(line);
+    },
+  });
 }
 
 main().then(
   (code) => exitWhenFlushed(code),
-  (err) => { reportFatal(err); exitWhenFlushed(1); },
+  (err) => reportFatal(err).finally(() => exitWhenFlushed(1)),
 );

@@ -25,7 +25,7 @@ import { applyRufloDaemon } from '../lib/ruflo-daemon-config.mjs';
 import { cleanupProbeRows } from '../lib/memory-probe-cleanup.mjs';
 import { rufloMemoryLocation } from '../lib/ruflo-memory.mjs';
 import { installedRoutingVersion } from '../lib/ruflo-memory-contract.mjs';
-import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
+import { loadKitConfig, saveKitConfig, configErrorRecovery, configRecoveryLines } from '../lib/config.mjs';
 import { reconcileRufloComponents } from '../lib/ruflo-components/apply.mjs';
 import { RESTART_REMINDER } from './status/sections/ruflo-components.mjs';
 import { HOSTS, commandHosts, hostInstallState, hostExecutable, installHost, collectIntegrationFacts, convergeProviderStack, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
@@ -190,8 +190,10 @@ plan and skipped items carry status's row fields (subsystem, level, message,
 fix, repair); needsYourAction items carry subsystem, level, message and fix;
 each unresolved item has a reason: not-converged, no-step, failing,
 apply-failed, or declined. converged is null when the run stopped
-before a verdict (a dry run with a plan, a rejected flag, an error); an error
-also sets "error". The exit code equals exitCode.
+before a verdict (a dry run with a plan, a rejected flag, an error); a
+rejected flag or an error also sets "error", and an unreadable kit.json also
+sets "recovery": { backup, commands[], note }, the commands that move it
+aside. The exit code equals exitCode.
 
 Usage: ak sync [options]
 
@@ -965,9 +967,11 @@ function stepTracer(state, result, capture) {
 }
 
 /** Print the verdict; returns the exit code. `manualFailing`: a fail-level
- *  manual row remains, so "no failing subsystems" would be untrue. */
-function reportVerdict({ unresolved, remaining, skipped }, manualFailing = false) {
-  for (const s of skipped) info(`skipped by request: [${s.subsystem}] ${s.fix ?? s.message}`);
+ *  manual row remains, so "no failing subsystems" would be untrue. A skipped
+ *  item announcePlan already printed (`announced`) is not printed again. */
+function reportVerdict({ unresolved, remaining, skipped }, manualFailing, announced) {
+  const said = new Set(announced.map(repairKey));
+  for (const s of skipped.filter((r) => !said.has(repairKey(r)))) info(`skipped by request: [${s.subsystem}] ${s.fix ?? s.message}`);
   if (unresolved.length === 0 && remaining.length === 0) {
     const what = manualFailing ? 'nothing left that sync can repair' : 'no failing subsystems';
     ok(bold(`converged — ${what}${skipped.length ? ` (${skipped.length} skipped by request)` : ''}`));
@@ -1000,6 +1004,12 @@ async function runTail({ cfg, cwd, flags, skip, state, codexRepairPlan, confirm,
   }
 }
 
+const emptyResult = () => ({ plan: [], steps: [], unresolved: [], skipped: [], needsYourAction: [], converged: null, exitCode: 0 });
+
+/** The --json answer to an invocation the CLI parser rejected: the result
+ *  shape with nothing run, exit 2 (the audit record's Decision 6). */
+export const jsonUsageError = (message) => ({ ...emptyResult(), exitCode: 2, error: message });
+
 /** `ak sync`. Without --json it prints as it goes and returns the exit code.
  *  With --json every human line goes to stderr and stdout carries exactly one
  *  JSON object: { plan, steps, unresolved, skipped, needsYourAction, converged,
@@ -1007,9 +1017,10 @@ async function runTail({ cfg, cwd, flags, skip, state, codexRepairPlan, confirm,
  *  true when nothing is left for sync to do, false when it ended with
  *  unresolved or failing items, and null when it stopped before a verdict (a
  *  dry run with a plan, a rejected flag, an error). Manual rows never decide
- *  it; every run ends by listing them (needsYourAction). */
+ *  it; every run ends by listing them (needsYourAction). An unreadable kit.json
+ *  also adds `recovery`, the commands that set it aside (config.mjs). */
 export async function run(opts) {
-  const result = { plan: [], steps: [], unresolved: [], skipped: [], needsYourAction: [], converged: null, exitCode: 0 };
+  const result = emptyResult();
   if (!opts.flags.json) {
     result.exitCode = await converge(opts, result);
     reportNeedsYourAction(result.needsYourAction);
@@ -1019,8 +1030,10 @@ export async function run(opts) {
     try {
       result.exitCode = await converge(opts, result, capture);
     } catch (e) {
-      fail(`ak sync: ${e?.stack ?? e}`);
-      Object.assign(result, { converged: null, exitCode: 1, error: e?.message ?? String(e) });
+      const recovery = configErrorRecovery(e);
+      fail(`ak sync: ${recovery ? e.message : e?.stack ?? e}`);
+      for (const line of recovery ? configRecoveryLines(recovery) : []) console.log(line);
+      Object.assign(result, { converged: null, exitCode: 1, error: e?.message ?? String(e) }, recovery ? { recovery } : {});
     }
     reportNeedsYourAction(result.needsYourAction);
   });
@@ -1208,7 +1221,7 @@ async function converge({
   const verdict = convergenceVerdict({ plan, after, state, flags, cfg, skip, skipped });
   result.unresolved = [...verdict.unresolved, ...verdict.remaining].map(publicIssue);
   result.skipped = verdict.skipped.map(publicRow);
-  const code = reportVerdict(verdict, result.needsYourAction.some((r) => r.level === 'fail'));
+  const code = reportVerdict(verdict, result.needsYourAction.some((r) => r.level === 'fail'), skipped);
   result.converged = code === 0;
   return code;
 }

@@ -721,6 +721,27 @@ test('a skipped subsystem runs no step and is never counted as a failure', async
   assert.match(out, /skipped by request: \[aqe\]/);
 });
 
+// A skipped item is announced once, with the plan; the verdict does not repeat
+// it. Without --no-upgrade, so the ruvnet-brain row reaches the plan at all.
+const BRAIN_ROW = { subsystem: 'ruvnet-brain', level: 'warn', message: 'ruvnet-brain release v4.3.29 available', fix: 'sync refreshes the KB', repair: 'sync' };
+const NPX_ROW = { subsystem: 'npx', level: 'warn', message: 'stale npx env', fix: 'sync prunes stale npx envs', repair: 'sync' };
+const brainSkippedLines = (out) => out.match(/skipped by request: \[ruvnet-brain\]/g) ?? [];
+
+test('--skip ruvnet-brain prints its skipped line once', async () => {
+  seedHome();
+  const prior = process.cwd();
+  process.chdir(PROJECT);
+  try {
+    const { result, out } = await captureLog(() => sync.run({
+      flags: FLAGS({ skip: ['ruvnet-brain'], yes: true }), pkgRoot: PKG_ROOT, collectFn: twoPhase([BRAIN_ROW, NPX_ROW], []),
+      fetchLatest: async () => null, releaseDatesRunner: async () => ({ code: 1, stdout: '', stderr: 'offline (test)' }),
+    }));
+    assert.equal(result, 0, out);
+    assert.match(out, /converged — no failing subsystems \(1 skipped by request\)/);
+    assert.equal(brainSkippedLines(out).length, 1, out);
+  } finally { process.chdir(prior); }
+});
+
 // A host probe that throws while sync refreshes host evidence before planning
 // is reported, naming the host, and the sync goes on with the next host and
 // with the plan (which then reads that host as ak last recorded it).
@@ -983,6 +1004,16 @@ test('--json: a converged run with a skip reports the skipped item and exit 0', 
   assert.ok(out.steps.some((s) => s.id === 'npx' && s.ok), JSON.stringify(out.steps));
   assert.ok(!out.steps.some((s) => s.id === 'aqe-rvf'), 'a skipped step is not listed as run');
   assert.match(child.stderr, /converged — no failing subsystems/);
+});
+
+test('--json --skip ruvnet-brain keeps the skipped item in the JSON and prints its line once', () => {
+  seedHome();
+  const child = syncChild({ first: [BRAIN_ROW, NPX_ROW], after: [], flags: { 'no-upgrade': false, yes: true, skip: ['ruvnet-brain'] } });
+  const out = oneJson(child);
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(out.skipped, [BRAIN_ROW]);
+  assert.deepEqual(out.plan.map((p) => p.subsystem), ['npx']);
+  assert.equal(brainSkippedLines(child.stderr).length, 1, child.stderr);
 });
 
 test('--json: an error still yields exactly one JSON result, with the error and exit 1', () => {

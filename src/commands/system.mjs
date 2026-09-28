@@ -15,7 +15,7 @@
 // machine-footprint invariant 2). A capped or partially-degraded walk prints
 // with a `>=` because what it measured is a floor, not a total.
 import {
-  heading, info, warn, fail, dim, bold, humanOutputToStderr,
+  heading, info, warn, fail, dim, bold, humanOutputToStderr, reportFailure,
 } from '../lib/output.mjs';
 import { createSystemCollector } from '../lib/footprint/index.mjs';
 import { UNKNOWN } from '../lib/footprint/walk.mjs';
@@ -52,6 +52,9 @@ Options:
                             lines go to stderr instead of stdout
 
 The exit code is 1 when a refresh stage fails, and 2 for a usage error.
+With --json, a usage error or an error is still one JSON object on stdout,
+{ error, exitCode }, plus "recovery" (the commands that move it aside) when
+kit.json cannot be read; the message goes to stderr.
 
 Examples:
   ak system                    install totals, runtime census, storage, catalog, projects
@@ -378,8 +381,10 @@ function strayArgumentError(positionals) {
   return `unexpected argument '${first}'${spelling}`;
 }
 
-function usageError(message) {
-  fail(`ak system: ${message}`);
+/** A usage error: exit 2. Under --json stdout carries one JSON object,
+ *  `{ error, exitCode: 2 }`, and the message goes to stderr. */
+function usageError(flags, message) {
+  reportFailure({ json: flags.json === true, payload: { error: message, exitCode: 2 }, human: () => fail(`ak system: ${message}`) });
   return 2;
 }
 
@@ -423,10 +428,10 @@ export async function run({
   // --only is shared with ak status, but system never renders live results,
   // so the checks' exit rule (ADR-0063) has nothing to report here.
   if (flags.only != null && [].concat(flags.only).length > 0) {
-    return usageError('--only applies to ak status --refresh=live; ak system does not report live checks');
+    return usageError(flags, '--only applies to ak status --refresh=live; ak system does not report live checks');
   }
   const request = refreshRequestFromFlags(flags);
-  if ('error' in request) return usageError(request.error);
+  if ('error' in request) return usageError(flags, request.error);
 
   const cwd = deps.cwd ?? process.cwd();
   const collector = deps.collector ?? createSystemCollector({ cwd });
@@ -443,7 +448,7 @@ export async function run({
   }
 
   const stray = strayArgumentError(positionals);
-  if (stray) return usageError(stray);
+  if (stray) return usageError(flags, stray);
 
   // The command's own collector, so the read below sees exactly what the
   // refresh's `machine` stage just persisted.

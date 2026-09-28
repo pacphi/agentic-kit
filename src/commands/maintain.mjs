@@ -8,7 +8,7 @@
 // `ak maintain` never pays for modules it does not need. `report` (the
 // default verb) reads `service.report()`; `--refresh[=live|machine]` runs
 // the shared refresh stages first (ADR-0063, `../lib/refresh.mjs`).
-import { heading, info, warn, dim, ok, humanOutputToStderr } from '../lib/output.mjs';
+import { heading, info, warn, dim, ok, humanOutputToStderr, reportFailure } from '../lib/output.mjs';
 import { createMaintenanceService } from '../lib/maintenance/service.mjs';
 import {
   REFRESH_OPTIONS, REFRESH_STRENGTHS, refreshRequestFromFlags, runRefresh, cliRefreshStages, printRefreshStage,
@@ -104,7 +104,9 @@ Usage:
   ak maintain preferences [--set key=value ...] [--json]
 
 Options:
-  --json                    emit the complete DTO exactly as returned by the facade
+  --json                    emit the complete DTO exactly as returned by the facade;
+                            a refused request (exit 2) prints { error, exitCode }
+                            and its message goes to stderr
   --refresh[=live|machine]  with report (the default verb): refresh first, then
                             report (see ak status --help for the shared stages
                             and strengths)
@@ -908,22 +910,28 @@ function refreshVerbError(verb, flags) {
 export async function run({ flags, positionals, pkgRoot, deps = {} }) {
   const verb = positionals[0] ?? REPORT_VERB;
   const refreshError = refreshVerbError(verb, flags);
-  if (refreshError) { warn(refreshError); return 2; }
+  if (refreshError) return reportUsage(flags, refreshError);
   const handler = DISPATCH[verb];
   if (!handler || positionals.length > 2) {
-    warn(`usage: ak maintain ${Object.keys(DISPATCH).join('|')} [options]`);
-    return 2;
+    return reportUsage(flags, `usage: ak maintain ${Object.keys(DISPATCH).join('|')} [options]`);
   }
   try {
     const outcome = await handler({
       flags, sub: positionals[1] ?? null, positionals, pkgRoot, deps,
     });
-    if (outcome.usageError) { warn(outcome.usageError); return 2; }
+    if (outcome.usageError) return reportUsage(flags, outcome.usageError);
     emit(outcome, flags.json === true);
     if (outcome.refreshFailed) return 1;
     return outcome.result?.ok === false ? 2 : 0;
   } catch (error) {
-    warn(error?.message ?? String(error));
-    return 2;
+    return reportUsage(flags, error?.message ?? String(error));
   }
+}
+
+/** Every exit-2 refusal `run` makes goes through here. Under --json stdout
+ *  carries one JSON object, `{ error, exitCode: 2 }`, and the warning goes to
+ *  stderr. */
+function reportUsage(flags, message) {
+  reportFailure({ json: flags.json === true, payload: { error: message, exitCode: 2 }, human: () => warn(message) });
+  return 2;
 }

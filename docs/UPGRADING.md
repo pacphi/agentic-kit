@@ -286,7 +286,9 @@ stdout, pretty-printed like `ak status --json`:
   warning row whose fix you must do yourself. These never change `converged` or `exitCode`.
 - `converged` is `true` when nothing is left for sync to do, `false` when it ended with unresolved
   items, and `null` when it stopped before a verdict: a dry run with a plan, a rejected flag, or an
-  error. A rejected flag or an error also adds `error`. The process exit code equals `exitCode`.
+  error. A rejected flag or an error also adds `error`, and an unreadable kit.json also adds
+  `recovery` (`backup`, `commands`, `note`): the commands that move it aside. The process exit
+  code equals `exitCode`.
 
 A script that scraped stdout of `ak sync --json` for human lines should read stderr instead.
 
