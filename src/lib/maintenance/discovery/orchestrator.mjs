@@ -178,7 +178,10 @@ function remainingEntryBudget(ceilingEntries, visited) {
 /**
  * @typedef {{ write: (checkpoint: object) => object, read: (scanId: string) => object|null,
  *   remove: (scanId: string) => void, list: () => string[] }} CheckpointStore
- * @typedef {{ recordSummary: (summary: object) => any }} HistoryStore
+ * @typedef {{ recordSummary: (summary: object) => any,
+ *   list: (options?: {environmentId?: string}) => Array<{sourceId: string, environmentId: string,
+ *     state: string, completedAt: string, visited?: number, limitingReason?: string|null,
+ *     ceiling?: string|null}> }} HistoryStore
  * @typedef {{ write: (entry: object) => boolean,
  *   current: () => Array<{sourceId: string, environmentId: string}> }} LastGoodStore
  * @typedef {{ writeProjects: (sourceId: string, projects: object[]) => void,
@@ -482,20 +485,57 @@ export function createScanOrchestrator({
   }
 
   /** A configured source with no live record — never started, paused, or
-   *  stopped in this process — falls back to its last PUBLISHED evidence, or
-   *  else a zeroed `not-scanned` row (QE defect D3): coverage() must report
-   *  EVERY configured source, never silently omit one that has not run yet. */
-  function coverageForSource(source) {
+   *  stopped in this process (e.g. right after a restart, when `records` is
+   *  empty again) — first restores its latest terminal history summary when
+   *  that summary is itself a failure, or a stop at a limit other than the
+   *  user's own request (audit finding M1b): a real failure must read the
+   *  same on the Discovery panel and the Inventory banner both before and
+   *  after a restart, since both read this same `coverage()`. A user stop is
+   *  deliberately NOT restored — confirming a stop already unenrolls the
+   *  source, so a later re-enrollment must start clean. Anything else (no
+   *  summary, or a `published` summary that supersedes an earlier failure)
+   *  falls back to the last PUBLISHED evidence, or else a zeroed
+   *  `not-scanned` row (QE defect D3): coverage() must report EVERY
+   *  configured source, never silently omit one that has not run yet. */
+  function coverageForSource(source, summaryBySource) {
     const record = records.get(source.sourceId);
     if (record) return coverageFor(toCoverageRecord(record));
+    const summary = summaryBySource?.get(`${source.environmentId}:${source.sourceId}`);
+    if (summary && (summary.state === 'failed' || (summary.state === 'stopped' && summary.limitingReason !== 'stopped-by-user'))) {
+      return coverageFor({
+        ...toCoverageRecord(initRecord(source)),
+        scanState: summary.state,
+        visited: summary.visited ?? 0,
+        limitingReason: summary.limitingReason ?? null,
+        ceiling: summary.ceiling ?? null,
+      });
+    }
     const persisted = lastGoodStore?.current()
       .find((entry) => entry.sourceId === source.sourceId && entry.environmentId === source.environmentId);
     if (persisted) return persisted;
     return coverageFor(toCoverageRecord(initRecord(source)));
   }
 
+  /** Index the newest terminal summary per `(environmentId, sourceId)` from
+   *  the history store, read once per `coverage()` call rather than once per
+   *  source (M1b). `historyStore.list()` is already ascending by
+   *  `completedAt` with ties in recording order, so `>=` (not `>`) keeps the
+   *  most-recently-recorded summary on a same-millisecond tie — a later
+   *  successful scan must win over an earlier failure even when both
+   *  complete within the same clock tick. */
+  function newestSummaryBySource() {
+    const bySource = new Map();
+    for (const summary of historyStore?.list() ?? []) {
+      const key = `${summary.environmentId}:${summary.sourceId}`;
+      const existing = bySource.get(key);
+      if (!existing || Date.parse(summary.completedAt) >= Date.parse(existing.completedAt)) bySource.set(key, summary);
+    }
+    return bySource;
+  }
+
   function coverage() {
-    return resolveSources().map((source) => coverageForSource(source));
+    const summaryBySource = newestSummaryBySource();
+    return resolveSources().map((source) => coverageForSource(source, summaryBySource));
   }
 
   /** Path-free discovered projects for one source (MNT-DSC repository

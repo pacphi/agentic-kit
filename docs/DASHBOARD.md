@@ -359,11 +359,12 @@ input, and pressure only where a window exists) instead of blending them in.
 
 A percentage is rendered only when input and window were observed together for that session.
 The cards distinguish **Input only**, **Partial coverage**, **Unpaired data**,
-**Not recorded**, **Measured**, **Unavailable**, **No sessions**, **Not installed** and
-**Source unreadable**. The last three separate an empty card into a host with no data on this
-machine, one whose store exists but could not be read (with the reason), and one that is installed
-and readable but ran nothing in the window. Missing token/window values render as an em dash. A
-pressure meter appears only for a measured value, and each card explains its coverage gap.
+**Not recorded**, **Measured**, **Unavailable**, **No sessions**, **Not installed**,
+**Partial data** and **Source unreadable**. The last four separate an empty card into a host with
+no data on this machine, one that was partly read (some or all session files yielded no response ak
+could parse), one whose store exists but could not be read at all (with the reason), and one that
+is installed and readable but ran nothing in the window. Missing token/window values render as an
+em dash. A pressure meter appears only for a measured value, and each card explains its coverage gap.
 
 Each card's pressure area is keyboard-focusable and carries a tooltip (shown on hover; the same text
 is exposed to assistive technology) stating that host's formula and evidence source. Codex divides
