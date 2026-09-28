@@ -125,7 +125,7 @@ test('Windows: a census that fails is reported, not read as "no sessions"', asyn
   assert.match(result.error, /survey failed/);
 });
 
-const haveLsof = process.platform !== 'win32' && spawnSync('lsof', ['-v'], { stdio: 'ignore' }).error === undefined;
+const haveLsof = process.platform !== 'win32' && spawnSync('lsof', ['-v'], { stdio: 'ignore', env: { PATH: process.env.PATH } }).error === undefined;
 
 test('a real child process holding the store open is reported', { skip: !haveLsof, timeout: 20_000 }, async (t) => {
   const dir = tempDir('ak-holders-real', t);
@@ -133,7 +133,7 @@ test('a real child process holding the store open is reported', { skip: !haveLso
   fs.writeFileSync(db, 'x');
   const child = spawn(process.execPath, ['-e',
     `const fs=require('node:fs');const fd=fs.openSync(${JSON.stringify(db)},'r');process.stdout.write('open\\n');setTimeout(()=>fs.closeSync(fd),15000);`],
-  { stdio: ['ignore', 'pipe', 'ignore'] });
+  { stdio: ['ignore', 'pipe', 'ignore'], env: { PATH: process.env.PATH } });
   t.after(() => { try { child.kill('SIGKILL'); } catch { /* exited */ } });
   await new Promise((resolve, reject) => {
     child.stdout.once('data', resolve);
