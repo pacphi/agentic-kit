@@ -104,6 +104,9 @@ const USAGE_ERRORS = [
   [['system', '--json', '--project-trees'], /--project-trees needs --refresh=machine/],
   [['maintain', '--json', '--refresh=bogus'], /--refresh=bogus is not a refresh strength/],
   [['maintain', '--json', '--refresh', 'live'], /unexpected argument 'live'/],
+  // `report --refresh=live --only …` is refused too, not silently accepted
+  // and ignored — `--only` is `ak status`'s alone.
+  [['maintain', '--json', '--refresh=live', '--only', 'security'], /--only applies to ak status --refresh=live/],
   [['maintain', 'inventory', '--json', '--refresh'], /--refresh applies to ak maintain report/],
   [['maintain', 'inventory', '--json', '--project-trees'], /--project-trees needs --refresh=machine/],
   [['maintain', 'bogus', '--json'], /usage: ak maintain/],

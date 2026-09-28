@@ -292,6 +292,35 @@ test('bare invocation calls service.report and never service.scan', async () => 
   assert.equal(JSON.parse(result.text).mode, 'read-only');
 });
 
+// A bare `ak maintain` on an unmeasured machine used to print only the
+// generic label ("Run Maintenance scan"), naming no command — the first
+// thing a new user saw invited the retired `ak maintain scan` verb.
+// `renderReport` now also prints the scan-required finding's own
+// `nextAction.steps[0]`, the exact command.
+test('bare report on an unmeasured machine also prints the exact refresh command', async () => {
+  const scanRequiredModel = {
+    schemaVersion: 1, mode: 'control-plane', capabilities: { plan: false, apply: false, undo: false },
+    asOf: null, freshness: { asOf: null, ageMs: null, status: 'unknown', completeness: 'partial', gaps: [] },
+    sourceFingerprint: null,
+    summary: { updatesReady: 0, safeCleanup: 0, needsReview: 1, unsupportedOrBlocked: 0, recentChanges: 0 },
+    findings: [{
+      id: 'maintenance-finding-scan-required', state: 'unreadable-partial', bucket: 'needsReview',
+      resource: { id: 'system:maintenance-scan', kind: 'system-evidence', name: 'Maintenance scan' },
+      nextAction: {
+        operation: 'scan', label: 'Run Maintenance scan',
+        steps: ['Run `ak maintain --refresh=machine` to measure the machine.', 'Return to Maintenance when the scan completes.'],
+      },
+    }],
+    receipts: [],
+  };
+  const service = buildService({ report: scanRequiredModel });
+  const result = await captureLogs(() => run({ flags: {}, positionals: [], deps: { service } }));
+  assert.equal(result.code, 0);
+  assert.match(result.text, /Maintenance scan: unreadable-partial · Run Maintenance scan/);
+  assert.match(result.text, /Run `ak maintain --refresh=machine` to measure the machine\./,
+    'names the exact command, not only the generic label');
+});
+
 test('the removed scan verb is the parser\'s generic unknown-verb error', async () => {
   const service = buildService();
   const result = await captureLogs(() => run({ flags: {}, positionals: ['scan'], deps: { service } }));
@@ -310,14 +339,38 @@ test('--refresh with a verb other than report is a usage error naming report', a
   assert.deepEqual(management.calls, []);
 });
 
-test('--only with a verb other than report is a usage error, not a silently ignored flag', async () => {
+test('--only is refused for a verb other than report — it belongs to ak status --refresh=live', async () => {
   const management = buildManagement();
   const result = await captureLogs(() => run({
     flags: { only: ['mcp'] }, positionals: ['inventory'], deps: { management },
   }));
   assert.equal(result.code, 2);
-  assert.match(result.text, /--only applies to ak maintain report --refresh=live/);
+  assert.match(result.text, /--only applies to ak status --refresh=live; ak maintain does not report live checks/);
   assert.deepEqual(management.calls, []);
+});
+
+// `report --refresh=live --only X` used to accept the flag, run the live
+// checks, and exit 0 regardless of a failed named check — `ak maintain`
+// never renders live-check results or reports their verdict. `--only` is
+// refused for `report` too, before any refresh stage runs.
+test('--only is refused with the report verb too, even with --refresh=live, before any stage runs', async () => {
+  const service = buildService();
+  const result = await captureLogs(() => run({
+    flags: { refresh: 'live', only: ['security'] }, positionals: ['report'], deps: { service },
+  }));
+  assert.equal(result.code, 2);
+  assert.match(result.text, /--only applies to ak status --refresh=live; ak maintain does not report live checks/);
+  assert.deepEqual(service.calls, [], 'no refresh stage and no report read ran before the refusal');
+});
+
+test('--only is refused on the default (bare) verb the same way', async () => {
+  const service = buildService();
+  const result = await captureLogs(() => run({
+    flags: { refresh: 'live', only: ['security'] }, positionals: [], deps: { service },
+  }));
+  assert.equal(result.code, 2);
+  assert.match(result.text, /--only applies to ak status --refresh=live; ak maintain does not report live checks/);
+  assert.deepEqual(service.calls, []);
 });
 
 test('--project-trees with a verb other than report is a usage error, not a silently ignored flag', async () => {

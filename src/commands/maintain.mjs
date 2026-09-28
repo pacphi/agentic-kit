@@ -246,6 +246,13 @@ async function resolveManagement(deps) {
 // preceded by a refresh (ADR-0063). `plan / apply / undo` (byte-for-byte
 // JSON contract) follow below, unchanged.
 
+// The scan-required finding's own label names no command ("Run Maintenance
+// scan"), so a bare `ak maintain` on an unmeasured machine used to show
+// nothing else — a new user's first hint invited the retired `ak maintain
+// scan` verb. Its `nextAction.steps[0]` spells out the exact command
+// (service.mjs's `scanRequiredModel`); print it alongside the label.
+const SCAN_REQUIRED_FINDING_ID = 'maintenance-finding-scan-required';
+
 function renderReport(model) {
   heading('Maintenance — findings from the last measurement');
   info(`Evidence: ${model.freshness.status} · ${model.freshness.completeness}`);
@@ -253,6 +260,9 @@ function renderReport(model) {
     + `${model.summary.needsReview} needs review · ${model.summary.unsupportedOrBlocked} blocked`);
   for (const finding of model.findings) {
     info(`${finding.resource.name}: ${finding.state} · ${finding.nextAction.label}`);
+    if (finding.id === SCAN_REQUIRED_FINDING_ID && finding.nextAction.steps?.length) {
+      info(dim(`  ${finding.nextAction.steps[0]}`));
+    }
   }
   if (!model.findings.length) info(dim('No maintenance findings in the measured evidence.'));
 }
@@ -268,10 +278,12 @@ const refreshSummary = ({ strength, ok: succeeded, stages }) => ({
  *  `deps.refreshStages`: the SAME Maintenance service `service.report()`
  *  reads back from afterward, so the `maintenance` stage's write and the
  *  read that follows it are never two unrelated instances that only happen
- *  to share a control root. */
-async function defaultStages({ pkgRoot, deps, service }) {
+ *  to share a control root. `collector` is `refreshedReport`'s — built once
+ *  there and threaded through here — so the `machine`/`inventory` stages,
+ *  the management facade, and `service` (via its own `collector` option) all
+ *  read and write through the one instance, never a second cold one. */
+async function defaultStages({ pkgRoot, deps, collector, service }) {
   const cwd = deps.cwd ?? process.cwd();
-  const collector = deps.collector ?? (await import('../lib/footprint/index.mjs')).createSystemCollector({ cwd });
   const management = deps.management
     ?? (await import('../lib/maintenance/management/service.mjs')).createManagementService({ collector, maintenance: service });
   return cliRefreshStages({ cwd, pkgRoot, deps: { collector, maintenance: service, management } });
@@ -283,13 +295,20 @@ async function defaultStages({ pkgRoot, deps, service }) {
  *  reads back through `deps.service`, so injecting `refreshStages` alone
  *  would still read a real Maintenance service. Half-injecting either half
  *  is refused, the same way `cliRefreshStages` refuses a half-injected
- *  maintenance/management pair. */
+ *  maintenance/management pair. The collector is built here, once — same as
+ *  `system.mjs`'s `run()` — and handed to `createMaintenanceService` when
+ *  `deps.service` is absent, so the service the `maintenance` stage scans
+ *  through and the collector the `machine`/`inventory` stages and the
+ *  management facade read through are one shared instance, not two that
+ *  merely happen to agree today. */
 async function refreshedReport({ flags, request, pkgRoot, deps }) {
   if (deps.refreshStages != null && deps.service == null) {
     throw new TypeError('refreshedReport: inject deps.service alongside deps.refreshStages, or neither');
   }
-  const service = deps.service ?? createMaintenanceService();
-  const stages = deps.refreshStages ?? await defaultStages({ pkgRoot, deps, service });
+  const cwd = deps.cwd ?? process.cwd();
+  const collector = deps.collector ?? (await import('../lib/footprint/index.mjs')).createSystemCollector({ cwd });
+  const service = deps.service ?? createMaintenanceService({ collector });
+  const stages = deps.refreshStages ?? await defaultStages({ pkgRoot, deps, collector, service });
   const refresh = flags.json
     ? await humanOutputToStderr(() => runRefresh({ ...request, stages, onStage: undefined }))
     : await runRefresh({ ...request, stages, onStage: printRefreshStage });
@@ -881,25 +900,29 @@ function emit(outcome, json) {
   outcome.render?.(outcome.result);
 }
 
-/** `--refresh`, `--only` and `--project-trees` are accepted only with
- *  `report` (explicit or default); any other verb carrying one is a usage
- *  error, not a silently ignored flag. `--refresh <strength>` (no `=`)
+/** `--refresh` and `--project-trees` are accepted only with `report`
+ *  (explicit or default); any other verb carrying one is a usage error, not
+ *  a silently ignored flag. `--only` is refused earlier, in `run()`, for
+ *  every verb including `report` — `ak maintain` never renders live-check
+ *  results or reports their verdict, so it is never this function's flag to
+ *  validate (see the comment in `run()`). `--refresh <strength>` (no `=`)
  *  leaves the strength as a stray positional — `normalizeBareRefresh` in
  *  refresh.mjs rewrites only the exact `--refresh` token, never the value
  *  after it — so that specific mistake gets the one-token spelling hint
  *  instead of the generic "unknown verb" message. `report` validates its own
- *  `--only`/`--project-trees` combinations through `refreshRequestFromFlags`,
- *  so this function never inspects them for that verb. */
+ *  `--project-trees` combination through `refreshRequestFromFlags`, so this
+ *  function never inspects it for that verb. */
 function refreshVerbError(verb, flags) {
   if (verb === REPORT_VERB) return null;
   if (flags.refresh !== undefined) {
     if (REFRESH_STRENGTHS.includes(verb) && !(verb in DISPATCH)) return `unexpected argument '${verb}' — write --refresh=${verb}`;
     return '--refresh applies to ak maintain report; run it first, then this verb';
   }
-  if (flags.only != null && [].concat(flags.only).length > 0) return '--only applies to ak maintain report --refresh=live';
   if (flags['project-trees'] === true) return '--project-trees needs --refresh=machine';
   return null;
 }
+
+const ONLY_IS_STATUS_ONLY = '--only applies to ak status --refresh=live; ak maintain does not report live checks';
 
 /** CLI adapter over the ADR-0048 Maintenance management facade (v2 verbs) and
  * the shared v1 Maintenance application service (`report|plan|apply|undo`,
@@ -910,6 +933,15 @@ function refreshVerbError(verb, flags) {
  *   deps?: { service?: any, management?: any } }} input */
 export async function run({ flags, positionals, pkgRoot, deps = {} }) {
   const verb = positionals[0] ?? REPORT_VERB;
+  // `--only` belongs to `ak status --refresh=live` (mirrors `ak system`'s own
+  // refusal): unlike `ak status`, `ak maintain` never renders live-check
+  // results or exits by their verdict, so `report --refresh=live --only X`
+  // would otherwise accept the flag while silently running right past a
+  // failed named check (see ADR-0063's `--only` bullet). Refused for every
+  // verb, including the default `report`, before any refresh runs.
+  if (flags.only != null && [].concat(flags.only).length > 0) {
+    return reportUsage(flags, ONLY_IS_STATUS_ONLY);
+  }
   const refreshError = refreshVerbError(verb, flags);
   if (refreshError) return reportUsage(flags, refreshError);
   const handler = DISPATCH[verb];
