@@ -67,7 +67,30 @@ and OpenCode sessions so they pick up the new environment. After the pin, `aqe s
 `aqe health` print "not initialized" when run from a subfolder (AQE checks the working
 directory); run them from the project root.
 
-Stores AQE already created in subfolders stay where they are. `ak status` lists them.
+Stores AQE already created in subfolders stay where they are until you merge them (next section).
+
+## 2026-09-27: `ak x aqe-store` merges stray AQE stores
+
+`ak status` now shows stray AQE stores (a `.agentic-qe` folder with a `memory.db` below the project
+root) as a hand fix. `ak x aqe-store status`, or `ak x aqe-store merge` without `--yes`, previews
+what a merge would do. It works on copies and opens no store in place.
+
+With every Claude Code, Codex and OpenCode session in the project closed,
+`ak x aqe-store merge --yes`:
+
+- backs up the project store;
+- rehearses AQE's own export and import on copies;
+- imports each stray's patterns and captured experiences into the project store;
+- moves each whole stray folder to `~/.local/state/agentic-kit/aqe-store-merge/<time>/archive/`
+  (`%LOCALAPPDATA%\agentic-kit\aqe-store-merge\` on Windows), beside the backup and a
+  `receipt.json`.
+
+It needs agentic-qe 3.14.4 or later and refuses while any process holds a store; there is no
+`--force`. Audit-trail rows and AQE's starter patterns are not imported; they stay in the
+archive. To identify the starter patterns, the merge builds a fresh AQE store in its scratch
+folder with your project's AQE embedder, so the embedder must be reachable (for Ollama, start it
+first). ak keeps the archive until you delete it; see
+[TROUBLESHOOTING](TROUBLESHOOTING.md#restore-an-aqe-store-from-the-merge-archive) to restore one.
 
 ## 2026-09-27: No more `aqe solver` line in setup and sync
 

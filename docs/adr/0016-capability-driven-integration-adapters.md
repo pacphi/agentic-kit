@@ -4,7 +4,7 @@
   [ADR-0020](0020-ga-stable-surfaces.md); closed-registry clause superseded by
   [ADR-0029](0029-host-adapter-extension-point.md)
 - **Date:** 2026-07-28
-- **Updated:** 2026-09-27 — daemon start-on-use, user-held keys, durable-marker gate; Claude via `ak x ruflo-mcp`; see below.
+- **Updated:** 2026-09-27 — daemon start-on-use, user-held keys, durable-marker gate; Claude via `ak x ruflo-mcp`; AQE strays (0062).
 - **Updated:** 2026-09-26 — one `legacyRufloDisposition` predicate, shared by status and
   `register()`, decides whether a legacy `ruflo` Claude registration is agentic-kit's own; any
   other user-scope form is reported as preserved with its manual removal command (#237).
@@ -631,7 +631,9 @@ work under ADR-0011's own validation requirements.
   correcting the earlier "active writer" wording.
 - **Canonical and stray stores.** Status also names the canonical store at the pinned root with
   each file's size, WAL, largest namespace and expiry, treats a store with no memory table as
-  empty, and reports stray stores for information only.
+  empty, and reports stray stores for information only. Exception (2026-09-27): a stray AQE store
+  with a `memory.db` is a hand fix naming `ak x aqe-store merge --dry-run`, which merges it into the
+  project store and archives it ([ADR-0062](0062-aqe-project-store-integrity.md)).
 - **Backup and distillation age.** Status reports the age of Ruflo's last memory backup and
   distillation, and the `daemons` row is no longer "ok" when a project with memory has no daemon
   to run them.

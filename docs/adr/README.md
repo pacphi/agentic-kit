@@ -396,3 +396,13 @@ project discovery) derives a session's surface and initiator from the hosts' dec
 keeps every raw value, uses official product names (Claude Desktop, ChatGPT desktop app, Codex CLI,
 and others), and excludes imported session copies from every origin view. Project discovery already
 sets imported copies aside and counts them; the other decisions remain proposed.
+
+## ADR-0062 — AQE project store integrity
+
+[ADR-0062](0062-aqe-project-store-integrity.md) (Accepted) pins AQE to the project root with three
+absolute keys (`AQE_PROJECT_ROOT`, `AQE_MEMORY_PATH`, `AQE_STORAGE_PATH`) in four project targets
+under receipts, checks providers from the root without writing, and adds `ak x aqe-store merge`.
+The merge moves stray AQE stores into the project store with AQE's own export and import, and
+leaves out audit-trail rows and AQE's starter patterns. It refuses while any process holds a
+store, with no force, and archives each whole stray folder in ak's state beside a backup and a
+receipt.

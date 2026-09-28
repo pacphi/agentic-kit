@@ -20,7 +20,8 @@ project root; the project's hosts never read it.
 Usage: ak x aqe-store [status|merge] [options]
 
   status   preview: patterns and experiences per stray, how many the root
-           already has, the root's counts after a merge, and which processes
+           already has, how many are AQE starter patterns (left out), the
+           root's counts after a merge, and which processes
            hold the stores (read from copies; no store is opened in place)
   merge    the same preview (a dry run) unless --yes; with --yes:
            1. refuses while any process holds the root or a stray store
@@ -29,14 +30,15 @@ Usage: ak x aqe-store [status|merge] [options]
            2. backs up the root store (VACUUM INTO)
            3. rehearses AQE's own brain export/import on copies and checks the
               counts, integrity and foreign keys
-           AQE's starter patterns are left out: ak builds a fresh AQE store in
-           its scratch folder (aqe init --minimal, then aqe learning stats,
-           with the project's AQE embedder) and skips every stray pattern with
-           the same name, domain and type. Without that set it refuses.
            4. imports into the root store and checks the counts again
            5. moves each whole stray folder into the archive
            Audit-trail (witness_chain) rows are not imported; they stay in the
            archive. A folder without memory.db is skipped and reported.
+           AQE's starter patterns are not imported either: ak builds a fresh
+           AQE store in its scratch folder (aqe init --minimal, then aqe
+           learning stats, with the project's AQE embedder) and skips every
+           stray pattern with the same name, domain and type. Without that set
+           it refuses.
 
 Options:
   --yes       apply the merge (merge only)
@@ -48,6 +50,8 @@ Backup, archive and receipt.json go to
 (<state> = $XDG_STATE_HOME or ~/.local/state; %LOCALAPPDATA% on Windows), never
 inside a .agentic-qe folder. ak keeps them until you delete them. A preview
 removes its scratch copies when it finishes; a failed merge keeps them.
+Restore steps: docs/TROUBLESHOOTING.md, "Restore an AQE store from the merge
+archive". Needs agentic-qe 3.14.4 or later.
 
 Examples:
   ak x aqe-store status              preview what a merge would do

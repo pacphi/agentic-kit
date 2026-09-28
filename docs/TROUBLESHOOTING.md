@@ -348,7 +348,9 @@ run `ak sync` there.
 ### Stray memory stores
 
 A stray store is a memory file this project's hosts do not read. `ak status` lists
-each one by owner, for information only. ak never moves, merges or deletes them.
+each one by owner, for information only. ak never moves, merges or deletes them, with
+one exception: a stray AQE store with a `memory.db` is a hand fix, and
+`ak x aqe-store merge` merges it into the project store and archives it (below).
 
 | Stray | Usual owner |
 |---|---|
@@ -356,13 +358,47 @@ each one by owner, for information only. ak never moves, merges or deletes them.
 | `./agentdb.db` | The AgentDB CLI's default file |
 | `./agentdb.rvf` | AgentDB's RVF backend, which defaults to the working directory |
 | `./ruvector.db` | RuVector's default store (`ruvector mcp start`; `ruflo memory init` also creates one) |
-| A `.agentic-qe/` below the project root | AQE resolves a relative `AQE_MEMORY_PATH` against the folder a command or hook ran in |
+| A `.agentic-qe/` below the project root | An AQE command, hook or MCP server that started in that folder before ak pinned AQE to the project root. AQE resolves its memory and storage paths against the working directory |
 | `~/.swarm`, or `.swarm` folders under `~/.codex/.chatgpt-projects/` (reported from any project) | Ruflo ran with your home folder or a Codex ChatGPT project folder as its working directory, before ak's launcher used the user-level store there |
 
 Ruflo's rotated backups in `.swarm/backups/` are not strays. The search skips
 `node_modules`, `.git` and the contents of dot folders such as `.claude/worktrees`,
 and says so when it stops early. Before you delete a stray, inspect it read-only
 as described above. It may hold rows that exist nowhere else.
+
+### Merge stray AQE stores
+
+`ak x aqe-store status` shows, for each stray AQE store, its patterns and captured experiences,
+how many patterns the project store already has, how many are AQE's starter patterns (never
+imported), and which processes hold a store. Close every Claude Code, Codex and OpenCode session
+in the project (their AQE MCP servers and hooks write the store), then run
+`ak x aqe-store merge --yes`.
+
+| The merge says | Why | Fix |
+|---|---|---|
+| `refused: N process(es) hold the AQE stores: PID …` | A session's AQE MCP server or hook has a store open. AQE takes no lock a merge could wait on | Close the named processes' sessions and run it again. There is no `--force` |
+| `could not check which processes hold the AQE stores` | `lsof` is missing or failed (macOS, Linux) | Install `lsof`, or run it where it works |
+| `could not build AQE's starter pattern set` | The fresh AQE store the merge builds in its scratch folder holds no patterns, usually because the project's AQE embedder is unreachable | Start the embedder (for Ollama, `ollama serve`) and run it again |
+| `merge failed: … count mismatch …` | The project store changed during the merge, or AQE imported fewer rows than the rehearsal | The strays stay in place. Restore the project store from the backup the message names (steps below) if you want the state before the merge |
+| `left in place: … EBUSY` (Windows) | A process still held that folder | Close it and run the merge again |
+
+#### Restore an AQE store from the merge archive
+
+Each merge keeps `<state>/agentic-kit/aqe-store-merge/<time>/` until you delete it (`<state>` is
+`$XDG_STATE_HOME` or `~/.local/state`; `%LOCALAPPDATA%` on Windows). It contains:
+
+- `backup/root-memory.db`: the project store before the merge;
+- `archive/<folder>/.agentic-qe`: each merged stray folder, whole;
+- `receipt.json`: where each came from and the counts.
+
+With every Claude Code, Codex and OpenCode session in the project closed:
+
+1. **Undo the merge.** Copy `backup/root-memory.db` over `<project>/.agentic-qe/memory.db`, and
+   delete `memory.db-wal` and `memory.db-shm` beside it.
+2. **Put a stray back.** Move `archive/<folder>/.agentic-qe` back to the path `receipt.json` lists
+   for it (for example `archive/docs--research--v5/.agentic-qe` to `docs/research/v5/.agentic-qe`).
+   The project pin keeps AQE from writing to it again.
+3. **Delete the archive** once you no longer need it. ak never deletes it.
 
 ### Memory backup and distillation
 

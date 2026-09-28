@@ -152,6 +152,12 @@ The dated upstream risk inventory includes:
 | Default route projection | Yes | Yes | No |
 | QE-Court routed seat | Full routed role | Supported, with the integrated stall risk below | May call QE tools, but cannot be an AQE provider-backed seat |
 | Subscription-provider embeddings | Not supported | Not supported | Not applicable |
+| One project store (AQE pin) | `.claude/settings.local.json` env and the `.mcp.json` AQE entry | The project `.codex/config.toml` AQE MCP env and `[shell_environment_policy.set]` | Not pinned (agentic-kit does not set up AQE for OpenCode) |
+
+Agentic-kit pins `AQE_PROJECT_ROOT`, `AQE_MEMORY_PATH` and `AQE_STORAGE_PATH` to the project root,
+so an AQE command, hook or MCP server started in a subfolder uses the project's store instead of
+creating its own. `ak x aqe-store merge` merges stores AQE made in subfolders before the pin
+([ADR-0062](adr/0062-aqe-project-store-integrity.md)).
 
 The OpenCode boundary is precise: AQE can provision OpenCode agents, skills, MCP,
 and permissions, but OpenCode is not a built-in AQE LLM-provider type. Agentic-kit

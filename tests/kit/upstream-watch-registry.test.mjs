@@ -334,3 +334,16 @@ test('an invalid support window invalidates the registry', () => {
   });
   assert.match(errors, /dependency policy 0 is invalid/);
 });
+
+test('the audit record carries the Branch 5 decisions in decision format', () => {
+  const audit = fs.readFileSync('docs/audits/2026-09-26-issues-237-238-239-verification-and-decisions.md', 'utf8').replace(/\r\n/g, '\n');
+  const start = audit.indexOf('## Branch 5 decisions');
+  assert.ok(start > 0);
+  const next = audit.indexOf('\n## ', start + 1);
+  const section = audit.slice(start, next === -1 ? undefined : next);
+  const ids = ['B5-D1', 'B5-D1a', 'B5-D1b', 'B5-D2', 'B5-D3', 'B5-D4', 'B5-D5'];
+  for (const id of ids) assert.match(section, new RegExp(`### ${id} `));
+  for (const part of ['**The situation.**', '**The problem.**', '**What the user sees.**', '**What should be the case.**', '**The choices.**', '**Recommendation', '**Choice']) {
+    assert.ok(section.split(part).length - 1 >= ids.length, part);
+  }
+});
