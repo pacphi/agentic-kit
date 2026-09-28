@@ -48,7 +48,10 @@
 //               <run>/archive/<slug>/.agentic-qe (copy, check, remove across
 //               filesystems; on Windows a failed rename leaves that stray). A
 //               stray that changed since its copy stays in place, reported.
-//   7 receipt   <run>/receipt.json.
+//   7 receipt   <run>/receipt.json, first written with status "applying" right
+//               before the real import (review minor 8): a run interrupted
+//               there leaves it, and status reports it until a later merge of
+//               the same root completes (that marks it "interrupted").
 // <run> = <state>/agentic-kit/aqe-store-merge/<ISO time>. Nothing ak writes
 // lies inside any .agentic-qe folder: AQE restores any memory*.db over 1 MB it
 // finds there when memory.db is missing (AQE/dist/kernel/unified-memory.js).
@@ -68,7 +71,8 @@ import { cmpVersions } from './versions.mjs';
  *   archived: Array<{ path: string, to: string }>, leftInPlace: Array<{ path: string, reason: string }>,
  *   strays?: any[], expected?: { patterns: number, experiences: number }|null, holders?: any, rootStore?: any,
  *   reason?: string, refusal?: string|null, restore?: string, receipt?: string, after?: { patterns: number, experiences: number }|null,
- *   seeds?: { patterns: number, source: string|null, error?: string } }} MergeResult */
+ *   seeds?: { patterns: number, source: string|null, error?: string },
+ *   interrupted?: Array<{ runId: string, receipt: string, backup: string|null }> }} MergeResult */
 
 export const MIN_AQE_VERSION = '3.14.4';
 const STORE_FILES = ['memory.db', 'memory.db-wal', 'memory.db-shm'];
@@ -434,6 +438,32 @@ function versionRefusal(version) {
   return null;
 }
 
+/** Earlier runs for this root whose receipt still says "applying": interrupted during
+ *  the real import (review minor 8). */
+function interruptedRuns(mergeDir, root, currentRunId = null) {
+  let names;
+  try { names = fs.readdirSync(mergeDir); } catch { return []; }
+  const runs = [];
+  for (const name of names.sort()) {
+    if (name === currentRunId) continue;
+    const file = path.join(mergeDir, name, 'receipt.json');
+    let receipt;
+    try { receipt = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { continue; }
+    if (receipt?.status === 'applying' && receipt.root === root) runs.push({ runId: receipt.runId ?? name, receipt: file, backup: receipt.backup ?? null });
+  }
+  return runs;
+}
+
+/** A completed merge of the same root supersedes the interrupted ones. */
+function resolveInterrupted(runs, runId) {
+  for (const run of runs) {
+    try {
+      const receipt = JSON.parse(fs.readFileSync(run.receipt, 'utf8'));
+      fs.writeFileSync(run.receipt, `${JSON.stringify({ ...receipt, status: 'interrupted', resolvedBy: runId }, null, 2)}\n`);
+    } catch { /* left as it was; status keeps reporting it */ }
+  }
+}
+
 function writeReceipt(result, extra) {
   const file = path.join(result.dir, 'receipt.json');
   assertOutsideAqe(file);
@@ -459,7 +489,7 @@ function rootRefusal(root, store) {
   return `the root store copy is unreadable (${store.error})`;
 }
 
-const restoreText = (backup, root) => `with every Claude Code, Codex and OpenCode session in this project closed, copy ${backup} over `
+export const restoreSteps = (backup, root) => `with every Claude Code, Codex and OpenCode session in this project closed, copy ${backup} over `
   + `${path.join(root, '.agentic-qe', 'memory.db')} and delete memory.db-wal and memory.db-shm beside it`;
 
 /** Steps 3-7, after the preview and the first writer check passed. */
@@ -486,10 +516,11 @@ async function applyMerge(o, root, result, rows, seedKeys, fingerprints) {
   if (second.refusal) return { ...result, status: 'refused', reason: `${second.refusal} (stopped before the real import; nothing was changed)` };
   const changed = changedSinceCopy(root, rows, fingerprints);
   if (changed) return { ...result, status: 'refused', reason: `${changed}; stopped before the real import, nothing was changed; run the merge again` };
+  writeReceipt({ ...result, status: 'applying' }, { before: { patterns: result.rootStore.patterns, experiences: result.rootStore.experiences }, after: null });
   const applied = await importAll(o, rows, real, { cwd: root, env: desiredAqePin(root) });
   const done = { ...result, after: applied.counts };
   if (applied.problem || !sameCounts(applied.counts, rehearsed.counts)) {
-    return { ...done, status: 'failed', restore: restoreText(result.backup, root),
+    return { ...done, status: 'failed', restore: restoreSteps(result.backup, root),
       reason: `${applied.problem ?? `count mismatch after the import: rehearsal ${JSON.stringify(rehearsed.counts)}, root ${JSON.stringify(applied.counts)}`}; the strays were left in place` };
   }
 
@@ -516,8 +547,9 @@ export async function mergeAqeStores(root, options = {}) {
   };
   const { strays, skipped } = strayStores(root);
   if (strays.length && !('aqeVersion' in options)) o.aqeVersion = await aqeCliVersion(o.runner);
+  const interrupted = interruptedRuns(path.resolve(o.mergeDir), root);
   /** @type {MergeResult} */
-  const base = { root, runId: null, dir: null, aqeVersion: o.aqeVersion, skipped, backup: null, archived: [], leftInPlace: [] };
+  const base = { root, runId: null, dir: null, aqeVersion: o.aqeVersion, skipped, backup: null, archived: [], leftInPlace: [], interrupted };
   if (!strays.length) return { ...base, status: 'nothing', strays: [], expected: null, holders: null };
 
   const runId = stampOf(o.now);
@@ -546,11 +578,12 @@ export async function mergeAqeStores(root, options = {}) {
     result = await applyMerge(o, root, result, seen.strays, starters.keys, fingerprints);
   } catch (error) {
     result = { ...result, status: 'failed', reason: String(error?.message ?? error),
-      ...(result.backup ? { restore: restoreText(result.backup, root) } : {}) };
+      ...(result.backup ? { restore: restoreSteps(result.backup, root) } : {}) };
   }
   if (result.backup) {
     const before = { patterns: result.rootStore.patterns, experiences: result.rootStore.experiences };
     result.receipt = writeReceipt(result, { before, after: result.after ?? null });
   }
+  if (result.status === 'merged' && interrupted.length) { resolveInterrupted(interrupted, runId); result.interrupted = []; }
   return result;
 }

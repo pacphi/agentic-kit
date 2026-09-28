@@ -1,7 +1,7 @@
 // ak x aqe-store — preview and merge stray AQE stores (decision B5-D2): its
 // own command, not a sync step, because it moves learned data and refuses
 // while any AQE writer is open. The work is in src/lib/aqe-store-merge.mjs.
-import { mergeAqeStores } from '../../lib/aqe-store-merge.mjs';
+import { mergeAqeStores, restoreSteps } from '../../lib/aqe-store-merge.mjs';
 import { repoRoot } from '../../lib/paths.mjs';
 import { ok, warn, fail, info } from '../../lib/output.mjs';
 
@@ -111,6 +111,13 @@ function printOutcome(result) {
   return 1;
 }
 
+function printInterrupted(result) {
+  for (const run of result.interrupted ?? []) {
+    warn(`an earlier merge (${run.runId}) was interrupted during its import: the project store may hold part of its strays. `
+      + `Running the merge again finishes it (AQE skips what the root already holds); to undo it instead, ${restoreSteps(run.backup, result.root)}. Receipt: ${run.receipt}`);
+  }
+}
+
 /** @param {{ flags?: any, positionals?: string[], cwd?: string, merge?: typeof mergeAqeStores }} options */
 export async function run({ flags = {}, positionals = [], cwd = process.cwd(), merge = mergeAqeStores }) {
   const action = positionals[0] ?? 'status';
@@ -130,6 +137,7 @@ export async function run({ flags = {}, positionals = [], cwd = process.cwd(), m
     console.log(JSON.stringify(result));
     return ['refused', 'failed'].includes(result.status) || result.leftInPlace?.length ? 1 : 0;
   }
+  printInterrupted(result);
   if (result.status === 'nothing') {
     ok(`no stray AQE store below ${root}${result.skipped.length ? ` (${result.skipped.map((s) => `${s.path}: ${s.reason}`).join(', ')})` : ''}`);
     return 0;

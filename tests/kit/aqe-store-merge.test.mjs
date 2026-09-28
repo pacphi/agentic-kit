@@ -427,6 +427,21 @@ test('the backup\'s own read of the root is not mistaken for a writer (review M2
   assert.equal(result.status, 'merged', JSON.stringify(result.reason));
 });
 
+test('a receipt marked applying exists before the real import, so an interrupted run is visible (review minor 8)', async (t) => {
+  const p = project(t);
+  const { runner } = fakeAqe();
+  let during = null;
+  const result = await mergeAqeStores(p.root, base(p, { apply: true, holders: noHolders,
+    runner: hooked(runner, realImport(p), () => {
+      const dir = fs.readdirSync(p.mergeDir)[0];
+      during = JSON.parse(fs.readFileSync(path.join(p.mergeDir, dir, 'receipt.json'), 'utf8'));
+    }) }));
+  assert.equal(result.status, 'merged', JSON.stringify(result.reason));
+  assert.equal(during?.status, 'applying');
+  assert.equal(during.backup, result.backup);
+  assert.equal(JSON.parse(fs.readFileSync(result.receipt, 'utf8')).status, 'merged');
+});
+
 // ---- AQE's starter patterns (decision B5-D5) ---------------------------------
 
 /** project() plus AQE starter patterns S1, S2 in the strays (the root has none of
@@ -587,4 +602,27 @@ test('outside a repository the command says so and exits 1', async (t) => {
   const { code, out } = await capture(() => cli.run({ flags: {}, positionals: ['status'], cwd: dir, merge: async () => { throw new Error('not called'); } }));
   assert.equal(code, 1);
   assert.match(out, /not inside a repository/);
+});
+
+test('status reports an interrupted merge until a later merge completes (review minor 8)', async (t) => {
+  const p = project(t);
+  const old = path.join(p.mergeDir, '2026-09-26T10-00-00-000Z');
+  fs.mkdirSync(path.join(old, 'backup'), { recursive: true });
+  fs.writeFileSync(path.join(old, 'backup', 'root-memory.db'), 'x');
+  fs.writeFileSync(path.join(old, 'receipt.json'), JSON.stringify({ root: p.root, runId: '2026-09-26T10-00-00-000Z', status: 'applying', backup: path.join(old, 'backup', 'root-memory.db') }));
+  const merge = (root, options) => mergeAqeStores(root, { ...options, ...base(p, { apply: false }), runner: fakeAqe().runner, holders: noHolders });
+  const { out } = await capture(() => cli.run({ flags: {}, positionals: ['status'], cwd: p.root, merge }));
+  assert.match(out, /interrupted/);
+  assert.match(out, /2026-09-26T10-00-00-000Z/);
+  assert.match(out, /root-memory\.db/);
+  const other = project(t);
+  const elsewhere = await mergeAqeStores(other.root, base(p, { apply: false, runner: fakeAqe().runner, holders: noHolders }));
+  assert.deepEqual(elsewhere.interrupted, [], 'another project\'s receipt is not this project\'s');
+  const merged = await mergeAqeStores(p.root, base(p, { apply: true, runner: fakeAqe().runner, holders: noHolders }));
+  assert.equal(merged.status, 'merged', JSON.stringify(merged.reason));
+  const resolved = JSON.parse(fs.readFileSync(path.join(old, 'receipt.json'), 'utf8'));
+  assert.equal(resolved.status, 'interrupted');
+  assert.equal(resolved.resolvedBy, merged.runId);
+  const after = await mergeAqeStores(p.root, base(p, { apply: false, runner: fakeAqe().runner, holders: noHolders, now: Date.UTC(2026, 8, 28) }));
+  assert.deepEqual(after.interrupted, []);
 });
