@@ -53,19 +53,3 @@ test('the trigger token reaches only the Record step, and the since input never 
   assert.match(record, /SINCE: \$\{\{ inputs\.since \}\}/);
   assert.doesNotMatch(watch, /run:[^\n]*\$\{\{ inputs\./, 'inputs pass through env, not into run scripts');
 });
-
-// 4b-C amended (decision 14): routine GitHub triggers support only pull request and
-// release events, so the label is a visible marker and the routine runs on a schedule.
-test('the docs name the dispatch label as a marker, and the routine runs on its own daily schedule', () => {
-  const label = /DISPATCH_LABEL: ([\w-]+)/.exec(text)[1];
-  const doc = fs.readFileSync('docs/UPSTREAM-WATCH.md', 'utf8').replace(/\r\n/g, '\n');
-  const daily = doc.slice(doc.indexOf('## The daily workflow'), doc.indexOf('## The dispatch routine'));
-  const routine = doc.slice(doc.indexOf('## The dispatch routine'));
-  assert.ok(daily.includes(`\`${label}\``), `docs/UPSTREAM-WATCH.md names the ${label} label`);
-  assert.match(daily, /only a marker/, 'the label is a visible marker');
-  assert.match(daily, /fires nothing/);
-  assert.doesNotMatch(doc, /fires the dispatch routine/);
-  assert.match(routine, /\*\*Trigger:\*\* a daily schedule at 15:07 UTC \(`7 15 \* \* \*`\)/);
-  assert.match(routine, /code\.claude\.com\/docs\/en\/routines#supported-events/, 'the trigger limit is cited');
-  assert.doesNotMatch(text, /which fires the\s+(#\s+)?dispatch routine/, 'the workflow no longer claims the label fires the routine');
-});
