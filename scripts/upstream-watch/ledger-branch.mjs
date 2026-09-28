@@ -56,6 +56,10 @@ export function toRecord(event, recordedAt) {
   return { line: event.line, id: event.id, event: event.event, date: event.date, fields, recordedAt };
 }
 
+const isUtc = (value) => typeof value === 'string' && ISO.test(value) && Number.isFinite(Date.parse(value));
+const isRecord = (parsed) => ['id', 'event', 'date'].every((key) => typeof parsed[key] === 'string')
+  && Boolean(parsed.fields) && typeof parsed.fields === 'object' && !Array.isArray(parsed.fields) && isUtc(parsed.recordedAt);
+
 export function parseRecords(text) {
   return String(text).split('\n').map((line, index) => /** @type {[string, number]} */ ([line, index + 1]))
     .filter(([line]) => line.trim())
@@ -63,6 +67,7 @@ export function parseRecords(text) {
       let parsed;
       try { parsed = JSON.parse(line); } catch { throw new Error(`${LEDGER_FILE} line ${number} is not JSON`); }
       if (!parsed || typeof parsed.line !== 'string' || !parsed.line.trim()) throw new Error(`${LEDGER_FILE} line ${number} has no ledger line`);
+      if (!isRecord(parsed)) throw new Error(`${LEDGER_FILE} line ${number} is not a ledger record`);
       return parsed;
     });
 }
@@ -81,12 +86,13 @@ export function createLedgerStore({ exec = runWithInput, cwd = process.cwd(), re
     async read(branch, { now = new Date() } = {}) {
       if (!BRANCH.test(branch ?? '')) throw new Error(`not a branch name: ${branch}`);
       const tracking = `refs/remotes/${remote}/${branch}`;
+      // Exit 2 means no such branch; git's message would be translated on some machines.
+      const listed = await exec('git', ['ls-remote', '--exit-code', '--heads', remote, branch], { cwd });
+      if (listed.status === 2) return { commit: null, records: [], checkedAt: null };
+      if (listed.status !== 0) throw new Error(`git ls-remote ${remote} ${branch} failed: ${(listed.stderr || listed.error?.message || 'no output').trim()}`);
       // Full depth: a shallow fetch would mark a maintainer's full clone shallow.
       const fetched = await exec('git', ['fetch', '--no-tags', remote, `+refs/heads/${branch}:${tracking}`], { cwd });
-      if (fetched.status !== 0) {
-        if (/couldn't find remote ref/i.test(fetched.stderr ?? '')) return { commit: null, records: [], checkedAt: null };
-        throw new Error(`git fetch ${remote} ${branch} failed: ${(fetched.stderr || fetched.error?.message || 'no output').trim()}`);
-      }
+      if (fetched.status !== 0) throw new Error(`git fetch ${remote} ${branch} failed: ${(fetched.stderr || fetched.error?.message || 'no output').trim()}`);
       const commit = (await git(['rev-parse', '--verify', `${tracking}^{commit}`])).trim();
       const records = parseRecords(await git(['show', `${commit}:${LEDGER_FILE}`]));
       const trailer = (await git(['log', '-1', '--format=%(trailers:key=Checked-At,valueonly)', commit])).trim();

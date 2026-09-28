@@ -40,27 +40,45 @@ test('records round-trip through ndjson and a malformed line names its number', 
   assert.throws(() => parseRecords('{"id":"x"}\n'), /events\.ndjson line 1 has no ledger line/);
 });
 
-test('an absent ledger branch reads as an empty ledger', async () => {
-  const { exec, calls } = fakeExec([{ status: 128, stderr: "fatal: couldn't find remote ref refs/heads/upstream-watch-ledger\n" }]);
-  const ledger = await createLedgerStore({ exec, cwd: '/repo' }).read('upstream-watch-ledger', { now: NOW });
-  assert.deepEqual(ledger, { commit: null, records: [], checkedAt: null });
-  assert.deepEqual(calls[0].args, ['fetch', '--no-tags', 'origin', '+refs/heads/upstream-watch-ledger:refs/remotes/origin/upstream-watch-ledger']);
+test('a record without its id, event, date, fields or UTC recordedAt is not a ledger record', () => {
+  const good = record('UPSTREAM-WATCH a 1');
+  const broken = [
+    { ...good, id: undefined }, { ...good, event: 3 }, { ...good, date: null }, { ...good, fields: undefined },
+    { ...good, fields: [] }, { ...good, fields: 'x=1' }, { ...good, recordedAt: undefined },
+    { ...good, recordedAt: '2026-09-28' }, { ...good, recordedAt: '2026-09-28T14:17:00+02:00' }, { ...good, recordedAt: '2026-13-45T99:17:00Z' },
+  ];
+  for (const item of broken) {
+    assert.throws(() => parseRecords(`${JSON.stringify(good)}\n${JSON.stringify(item)}\n`), /events\.ndjson line 2 is not a ledger record/, JSON.stringify(item));
+  }
+  assert.deepEqual(parseRecords(`${JSON.stringify(good)}\n`), [good]);
 });
 
-test('any other fetch failure throws', async () => {
-  const { exec } = fakeExec([{ status: 128, stderr: 'fatal: unable to access: HTTP 403\n' }]);
-  await assert.rejects(createLedgerStore({ exec }).read('upstream-watch-ledger', { now: NOW }), /git fetch origin upstream-watch-ledger failed: fatal: unable to access/);
+// ls-remote's exit code, not git's (translatable) message, says the branch is absent.
+test('an absent ledger branch reads as an empty ledger without a fetch', async () => {
+  const { exec, calls } = fakeExec([{ status: 2 }]);
+  const ledger = await createLedgerStore({ exec, cwd: '/repo' }).read('upstream-watch-ledger', { now: NOW });
+  assert.deepEqual(ledger, { commit: null, records: [], checkedAt: null });
+  assert.deepEqual(calls.map((call) => call.args), [['ls-remote', '--exit-code', '--heads', 'origin', 'upstream-watch-ledger']]);
+});
+
+test('a failed ls-remote or fetch throws', async () => {
+  const lookup = fakeExec([{ status: 128, stderr: 'fatal: unable to access: HTTP 403\n' }]);
+  await assert.rejects(createLedgerStore({ exec: lookup.exec }).read('upstream-watch-ledger', { now: NOW }), /git ls-remote origin upstream-watch-ledger failed: fatal: unable to access/);
+  assert.equal(lookup.calls.length, 1);
+  const { exec, calls } = fakeExec([{ status: 0, stdout: `${'a'.repeat(40)}\trefs/heads/upstream-watch-ledger\n` }, { status: 128, stderr: "fatal: couldn't find remote ref refs/heads/upstream-watch-ledger\n" }]);
+  await assert.rejects(createLedgerStore({ exec }).read('upstream-watch-ledger', { now: NOW }), /git fetch origin upstream-watch-ledger failed: fatal: couldn't find remote ref/);
+  assert.deepEqual(calls[1].args, ['fetch', '--no-tags', 'origin', '+refs/heads/upstream-watch-ledger:refs/remotes/origin/upstream-watch-ledger']);
 });
 
 test('read returns the tip, the records and a past Checked-At; a future Checked-At is absent', async () => {
   const sha = 'a'.repeat(40);
   const body = serializeRecords([record('UPSTREAM-WATCH a 1')]);
-  const answers = (trailer) => [{}, { stdout: `${sha}\n` }, { stdout: body }, { stdout: `${trailer}\n` }];
+  const answers = (trailer) => [{ stdout: `${sha}\trefs/heads/upstream-watch-ledger\n` }, {}, { stdout: `${sha}\n` }, { stdout: body }, { stdout: `${trailer}\n` }];
   const past = fakeExec(answers('2026-09-28T14:17:00Z'));
   const ledger = await createLedgerStore({ exec: past.exec }).read('upstream-watch-ledger', { now: NOW });
   assert.deepEqual(ledger, { commit: sha, records: [record('UPSTREAM-WATCH a 1')], checkedAt: '2026-09-28T14:17:00Z' });
-  assert.deepEqual(past.calls.map((call) => call.args[0]), ['fetch', 'rev-parse', 'show', 'log']);
-  assert.deepEqual(past.calls[2].args, ['show', `${sha}:events.ndjson`]);
+  assert.deepEqual(past.calls.map((call) => call.args[0]), ['ls-remote', 'fetch', 'rev-parse', 'show', 'log']);
+  assert.deepEqual(past.calls[3].args, ['show', `${sha}:events.ndjson`]);
   const future = fakeExec(answers('2026-10-02T00:00:00Z'));
   assert.equal((await createLedgerStore({ exec: future.exec }).read('upstream-watch-ledger', { now: NOW })).checkedAt, null);
   const garbage = fakeExec(answers('yesterday'));
