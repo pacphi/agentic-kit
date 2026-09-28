@@ -414,7 +414,8 @@ untouched — see "Ahead: the dashboard half" below.
   proof, `memory-routes`) runs; a named check that does not apply to the configuration still runs
   and reports, but its result is not remembered. Without `--only`, a failed live check stays a
   warning and the exit code follows the rows and stages alone; with `--only`, the exit code is 1
-  when any named check is `failed` or `inconclusive`, else 0 (`status.mjs`'s `namedCheckFailed`).
+  when any named check did not pass — `failed`, `inconclusive`, or no result at all (its status
+  was never `'passed'`) — else 0 (`status.mjs`'s `namedCheckFailed`).
   A refresh stage that fails makes `ak status`, `ak system` and `ak maintain` exit 1; a usage
   error is exit 2 everywhere the flag is accepted.
 - **The live-check fold and its source labels.** `ak x verify` is retired; its checks
