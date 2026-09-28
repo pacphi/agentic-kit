@@ -149,7 +149,27 @@ test('plain ak status spawns nothing on a warm cache; --refresh always re-probes
     assert.strictEqual(secondUnexplained.length, 0,
       `expected zero unexplained spawns from a warm-cache collect(); got ${JSON.stringify(secondUnexplained.map((l) => [l.cmd, l.args]))}`);
 
-    // `refresh: true` must still force a fresh probe even with a warm cache.
-    assert.ok(third.length > 0, `--refresh must re-probe even with a warm cache; got ${JSON.stringify(third)}`);
+    // `refresh: true` must still force a fresh probe even with a warm cache —
+    // specifically for the kinds THIS task gated, not merely "something
+    // spawned": versions.mjs's `npm view` lookups spawn unconditionally
+    // regardless of refresh (the second call's ledger already contains them,
+    // filtered above), so `third.length > 0` alone would still pass even if
+    // `refresh: true` silently stopped reaching globalRoot()/processSweep()/
+    // claudeLauncherUnavailable() specifically. Assert each of this task's
+    // own re-probes by name instead.
+    const hasCall = (lines, cmd, argsPrefix) => lines.some((l) => l.cmd === cmd
+      && argsPrefix.every((a, i) => l.args?.[i] === a));
+    const thirdExplained = third.filter((l) => !isVersionDriftLookup(l));
+    for (const [cmd, argsPrefix, why] of [
+      ['npm', ['root', '-g'], 'globalRoot()'],
+      ['which', ['claude'], 'detectHosts() (Task 5)'],
+      ['which', ['codex'], 'detectHosts() (Task 5)'],
+      ['which', ['opencode'], 'detectHosts() (Task 5)'],
+      ['which', ['ak'], 'claudeLauncherUnavailable()'],
+      ['ps', ['-eo', 'pid=,args='], 'processSweep()'],
+    ]) {
+      assert.ok(hasCall(thirdExplained, cmd, argsPrefix),
+        `--refresh must re-probe ${why} (${cmd} ${argsPrefix.join(' ')}); got ${JSON.stringify(thirdExplained.map((l) => [l.cmd, l.args]))}`);
+    }
   });
 });

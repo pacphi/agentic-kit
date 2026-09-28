@@ -25,6 +25,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   globalRoot, globalRootInputsKey, _setGlobalRootForTest,
 } from '../../src/lib/paths.mjs';
@@ -35,6 +36,8 @@ import { tempDir } from './helpers/temp-dir.mjs';
 
 process.env.XDG_STATE_HOME = tempDir('ak-global-root-evidence-state');
 process.env.LOCALAPPDATA = process.env.XDG_STATE_HOME;
+
+const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 const rm = (d) => fs.rmSync(d, { recursive: true, force: true });
 const resetEvidence = () => rm(evidenceDir());
@@ -130,5 +133,65 @@ test('a bare globalRoot() call resolves but writes no evidence (record defaults 
     assert.equal(fs.existsSync(evidenceFile('npm-global-root', 'machine')), false,
       'record defaults to false: only status.mjs\'s own warming call opts in');
   });
+  resetEvidence();
+});
+
+// Regression guard for the design in status.mjs's collect(): persistence for
+// this evidence kind is entirely collect()'s responsibility (it is the one
+// caller that warms globalRoot()'s memo with a real refresh/record), NOT an
+// incidental property of "nothing else happens to call globalRoot() first".
+// If a future change adds a bare globalRoot() call anywhere ahead of
+// collect()'s own warming line in the same process, this proves the design
+// still holds: a bare call never persists, whether it runs before collect()
+// (cold memo, no evidence yet), right after it (memo-hit), or later still
+// with a cold memo but warm evidence (cache-hit) — only collect()'s explicit
+// `record: true` call, once, ever writes anything. `withBrokenPath` is not
+// reused here because its `finally` would run before an async body settles.
+test("collect() alone persists npm-global-root evidence; a bare globalRoot() call never does, before or after it", async () => {
+  resetEvidence();
+  const prevPath = process.env.PATH;
+  const prevConfigHome = process.env.XDG_CONFIG_HOME;
+  process.env.PATH = path.join(os.tmpdir(), 'ak-global-root-collect-no-such-bin');
+  process.env.XDG_CONFIG_HOME = tempDir('ak-global-root-collect-config');
+  _setGlobalRootForTest(null);
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-global-root-collect-cwd-'));
+  try {
+    // Simulates a hypothetical future call path reaching globalRoot() BEFORE
+    // status.mjs's collect() ever runs.
+    globalRoot();
+    assert.equal(fs.existsSync(evidenceFile('npm-global-root', 'machine')), false,
+      'a bare globalRoot() call never persists, even as the very first call in the process');
+    _setGlobalRootForTest(null);
+
+    const { collect } = await import('../../src/commands/status.mjs');
+    await collect({
+      pkgRoot: PKG_ROOT, cwd, refresh: false, record: true,
+    });
+    const inputsKey = globalRootInputsKey();
+    const record1 = readEvidence('npm-global-root', 'machine', { inputsKey });
+    assert.ok(record1, "collect()'s own warming call is what persists the evidence");
+    const checkedAt1 = record1.checkedAt;
+
+    // Memo now warm (set by collect()'s warming call): a bare call hits the
+    // memo and does not write again.
+    globalRoot();
+    assert.equal(readEvidence('npm-global-root', 'machine', { inputsKey }).checkedAt, checkedAt1,
+      'a bare globalRoot() call after collect() does not persist again (memo-hit)');
+
+    // Memo dropped again but evidence still warm: a bare call reuses the
+    // cache (refresh:false default) but STILL never writes — the cache-hit
+    // return happens before the `if (record)` line is ever reached, same as
+    // the memo-hit path above.
+    _setGlobalRootForTest(null);
+    globalRoot();
+    assert.equal(readEvidence('npm-global-root', 'machine', { inputsKey }).checkedAt, checkedAt1,
+      'a bare globalRoot() call never persists, memo warm or cold — only collect() opts in');
+  } finally {
+    process.env.PATH = prevPath;
+    if (prevConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = prevConfigHome;
+    _setGlobalRootForTest(null);
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
   resetEvidence();
 });
