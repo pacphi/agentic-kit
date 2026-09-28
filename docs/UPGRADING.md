@@ -439,9 +439,9 @@ user's agentic-kit state directory. Existing System snapshot files remain read-o
 Catalog schema v4 is still refreshed with `ak system --refresh=machine`. `ak sync` neither selects
 nor executes Maintenance findings.
 
-Browser refresh now reads the saved Maintenance report without polling providers. Use **Scan now**
-or `ak maintain --refresh` for current provider/version evidence. A successful System deep rescan
-also chains one Maintenance scan after the snapshot is persisted.
+Browser refresh now reads the saved Maintenance report without polling providers. Use **Refresh
+evidence** or `ak maintain --refresh` for current provider/version evidence. A successful System
+deep rescan also chains one Maintenance scan after the snapshot is persisted.
 
 The first provider set is intentionally narrower than the inventory. Claude plugin disable,
 update, and remove; exact Codex plugin/MCP removal; exact receipt-owned skill archive; one bounded

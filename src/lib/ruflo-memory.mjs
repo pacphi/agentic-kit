@@ -6,7 +6,7 @@
 // the cwd to the project root and the pin sits in <root>/.swarm
 // (@claude-flow/cli memory-initializer.js resolveDbPath/getMemoryRoot and
 // memory-bridge.js getAgentDbPath, 3.45.0). `ak status --refresh=live --only
-// memory` observes which interface sees which write.
+// memory-routes` observes which interface sees which write.
 //
 // Where the store lives (audit 2026-09-26 Addendum 2, problem 2): the Git
 // repository root; else the plain work folder itself; but never the filesystem
@@ -18,8 +18,8 @@
 // CLAUDE_FLOW_DB_PATH, with Ruflo started inside it so cwd-relative files
 // (AgentDB's agentdb.rvf, RuVector's ruvector.db) land beside it. A temporary
 // root means the root itself: a disposable project below it (the `ak status
-// --refresh=live --only memory` sandbox) is a plain work folder and keeps its
-// own store.
+// --refresh=live --only memory-routes` sandbox) is a plain work folder and
+// keeps its own store.
 import fs from 'node:fs';
 import path from 'node:path';
 import * as paths from './paths.mjs';

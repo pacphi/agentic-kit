@@ -37,6 +37,14 @@ const RETIRED_CLI_PATTERNS = [
   { label: 'ak host refresh', pattern: /\bhost\s+refresh\b/g },
   { label: 'ak usage prompts --deep', pattern: /\bprompts\s+--deep\b/g },
   { label: 'ak maintain recipes refresh', pattern: /\brecipes\s+refresh\b/g },
+  // Enumerated `a|b|c` verb lists (e.g. `host status|pick|refresh|off`,
+  // `verify learning|security|...`) defeat the command-then-flag adjacency
+  // patterns above: the retired verb sits behind other verbs, not directly
+  // after `host`/`x`. These require the specific retired verb to sit inside
+  // a `|`-separated chain (tight or spaced, markdown-escaped `\|` or not) so
+  // a plain English sentence never matches.
+  { label: 'ak host …|refresh (enumerated verb list)', pattern: /\bhost\s+[a-z][\w-]*(?:\s*\\?\|\s*[a-z][\w-]*)*\s*\\?\|\s*refresh\b/g },
+  { label: 'ak x verify …|… (enumerated suite list)', pattern: /\bverify\s+(?:learning|security|aqe|providers|harvest|deja-vu|memory)\s*\\?\|/g },
 ];
 
 function lineOf(text, offset) {

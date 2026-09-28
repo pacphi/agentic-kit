@@ -67,7 +67,7 @@ ak sync             # apply it
 | opencode: `status` reports a later `opencode.jsonc` override | stock OpenCode loads that file after `opencode.json`, so it can shadow the exact MCP/permission values ak receipts; ak cannot verify JSONC without rewriting user comments | merge the Agentic Kit entries into the later file and remove the duplicate override, or keep the override and use direct user-managed wiring; ak preserves both files and does not deploy its gateway against ambiguous effective config |
 | opencode: an agent/skill/plugin file you created yourself keeps ak's version away | deploys are no-clobber: only exact receipt-matching bytes are repairable; an unreceipted or edited destination is user-owned and preserved (`status` reports it as `foreign`) | rename yours (or remove it and run `ak sync` to get ak's managed copy) |
 | opencode: `status` says `no ruflo catalog source` | the agent/skill catalog resolves override → `$RUFLO_REPO` → claude marketplace clone → `@claude-flow/cli` (direct, then nested under ruflo) — all missing | install ruflo (`ak setup` does), or point `integrations.ownership.opencode.catalogDir` / `$RUFLO_REPO` at a ruflo checkout |
-| `ruflo memory store` says OK but reads return nothing | Missing project pin, wrong working directory, or CLI and MCP selecting different files when both `.swarm/memory.db` and `.swarm/agentdb-memory.db` exist | `ak sync` can repair owned registration drift. `ak status --refresh=live --only memory` observes CLI↔MCP routing in an isolated directory only; it cannot show access to an existing corpus, so follow the routing section below |
+| `ruflo memory store` says OK but reads return nothing | Missing project pin, wrong working directory, or CLI and MCP selecting different files when both `.swarm/memory.db` and `.swarm/agentdb-memory.db` exist | `ak sync` can repair owned registration drift. `ak status --refresh=live --only memory-routes` observes CLI↔MCP routing in an isolated directory only; it cannot show access to an existing corpus, so follow the routing section below |
 | `status` shows a `codex-plugins` warning | A plugin is enabled in the wrong host, its newest cached hooks or skills fail a known Codex compatibility check, or `config.toml` cannot be inspected safely. The exact `codex@openai-codex` identity is a Claude Code companion and must not be enabled inside Codex | For a valid, regular `config.toml` and verified companion 1.0.6, preview the approval-required repair with `ak heal hooks --host codex`; it changes only that Codex entry, never Claude Code or the cache. Repair malformed TOML or merge symlink-managed config manually. For other plugin findings, open Codex `/plugins`, refresh or disable the named plugin, then start a new session. Setup and sync never rewrite Codex-owned plugin state |
 | `status` says an external `agent-browser` is outside Ruflo's range | You installed a newer `agent-browser` yourself. ak never replaces a user-managed install, so `sync` cannot clear this, and Ruflo's browser tools may not work with that version | Install a Ruflo-compatible `agent-browser` 0.27.x yourself, or set `agentBrowser: false` in `~/.config/agentic-kit/kit.json` to stop ak managing the executor (Ruflo MCP then no longer gets ak's trusted browser config or readiness checks) |
 | `status` lists a stray memory store | A tool wrote a store where this project's hosts do not read it, usually because it ran in another folder. ak only reports it | Nothing breaks. To keep its rows, inspect it read-only first; see [Stray memory stores](#stray-memory-stores) |
@@ -121,7 +121,7 @@ ak sync             # apply it
 ## Existing memory corpus routing
 
 Ruflo's CLI and MCP tools can read different stores. A passing
-`ak status --refresh=live --only memory` does not establish access to pre-existing
+`ak status --refresh=live --only memory-routes` does not establish access to pre-existing
 records. `ak status` reports both files;
 see [Ruflo memory stores and routing](#ruflo-memory-stores-and-routing).
 
@@ -149,10 +149,9 @@ up to six minutes each:
 
 ```bash
 ak status --refresh=live --only learning        # trains a cycle in an isolated dir; asserts patterns persist to disk
-ak status --refresh=live --only security        # packages load + defend flags a real injection sample
 ak status --refresh=live --only aqe             # agentic-qe genuinely on ruvector (no FsyncFailed)
 ak status --refresh=live --only harvest         # Ruflo's learning-write path (post-task + distill) in an isolated store
-ak status --refresh=live --only deja-vu         # compatible package/doctor, selected wiring, index state
+ak status --refresh=live --only memory-routes   # CLI/MCP routing observation, remembered as the memory check
 ak status --refresh=live --only learning,harvest,aqe,memory-routes,security,deja-vu,providers,mcp,aqe-embedding
 ```
 
@@ -273,13 +272,13 @@ currently 3.42.4 and 3.45.0 on macOS, and keeps routing unverified everywhere el
   `agentdb-memory.db`, so MCP can read it.
 - Without the native bridge (the default on Windows, or after a bridge init failure)
   MCP falls back to `memory.db` and the two interfaces can appear aligned.
-  `ak status --refresh=live --only memory` prints the MCP backend it saw.
+  `ak status --refresh=live --only memory-routes` prints the MCP backend it saw.
 - CLI `retrieve`, `search` and `list` name the sibling store they did not read when
   they can open it. A bare count still describes one file.
 - Neither interface reads both stores, so keys only in `memory.db` are invisible to
   MCP and the reverse.
 
-A newer release is not evidence of a fix until `ak status --refresh=live --only memory` shows it.
+A newer release is not evidence of a fix until `ak status --refresh=live --only memory-routes` shows it.
 Maintainers can run `pnpm run test:ruflo-memory-live` to check the claim against the
 installed Ruflo.
 
@@ -287,7 +286,7 @@ installed Ruflo.
 deletes that row from both files. If a store cannot be cleaned (for example, a live
 writer holds it), setup names the store and the key to remove by hand.
 
-`ak status --refresh=live --only memory` runs in a throwaway project with its own
+`ak status --refresh=live --only memory-routes` runs in a throwaway project with its own
 memory root. After its CLI store, retrieve and purge proof, it writes one key
 through the CLI and one through MCP, then reports which interface can read which
 and the MCP backend it saw. A split is a warning and an MCP server it cannot use

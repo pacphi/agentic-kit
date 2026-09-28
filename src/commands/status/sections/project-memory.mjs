@@ -3,7 +3,7 @@
 // Presence cannot establish the active writer or CLI/MCP routing; which
 // interface reads which file is stated only for an observed Ruflo release and
 // platform (ruflo-memory-contract.mjs). The isolated `ak status --refresh=live
-// --only memory` proof does not prove access to an existing corpus.
+// --only memory-routes` proof does not prove access to an existing corpus.
 //
 // The canonical store is `<root>/.swarm` for the root every ak launch contract
 // pins (rufloMemoryLocation: the repository root, else the folder), so a status

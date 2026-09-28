@@ -90,7 +90,7 @@ ak setup        first-time setup — machine and/or the project you're standing 
                 [--codex] [--opencode] [--primary-host claude|codex] [--with-deja-vu]
                 [--deja-vu-mode mcp|auto] [--no-deja-vu] [--project] [--minimal]
                 [--yes] [--no-aqe] [--no-security] [--reconfigure]
-ak status       read-only dashboard: what's true, what's drifted   [--json] [--deep] [--live]
+ak status       read-only dashboard: what's true, what's drifted   [--json] [--refresh[=live|machine]]
 ak sync         converge to good: upgrade + heal + verify          [--dry-run] [--no-upgrade]
                 [--skip SUBSYSTEM] [--json]
 ak dashboard    open the local web dashboard (auto-opens your browser)
@@ -99,15 +99,16 @@ ak admin        maintainer-only telemetry admin (localhost; GitHub/npm egress)
                 [--port N] [--no-open]
 ak about        what each installed component is and why it's there
 ak system       machine footprint: install size, runtime, storage, catalog, projects
-                [--deep] [--json]
-ak maintain     inventory, guidance, discovery, guarded one-action plans
-                inventory | show | guidance | discovery | sources | scans | activity | audit | reconcile | plan | apply | undo
+                [--refresh[=live|machine]] [--json]
+ak maintain     findings, guidance, discovery, guarded one-action plans
+                [report] [--refresh[=live|machine]] | inventory | show | guidance | discovery |
+                sources | scans | activity | audit | reconcile | plan | apply | undo
 ak usage        offline scorecard, prompt patterns, and provider account cache
                 status | score | prompts | refresh openrouter
 ak models       inspect model lifecycle evidence and swap impact
                 status | refresh | diff | explain | plan
 ak host         manage execution hosts, routing, and provider bindings
-                status | pick | refresh | off
+                status | pick | reset-routes | off | check-connection
 ak audit hooks  read-only hook inventory across Codex, Claude, OpenCode, and adapters
 ak audit context read-only managed-guidance, skill-metadata, MCP-registration, and window evidence
 ak heal hooks   deterministic dry-run repair plan; explicit apply, verify, undo, recover
@@ -160,9 +161,11 @@ and current platform limits.
 </details>
 
 Power-user mechanisms live under `ak x …` (`daemon-gc`, `harvest`,
-`mcp pick|off`, `host status|pick|refresh|off`, `reference diff|sync`,
-`statusline status|codex native|extended|off`,
-`verify learning|security|aqe|providers|harvest`, `improvement-eval`) — see `ak --help --all`.
+`mcp status|pick|off`, `host status|pick|reset-routes|off|check-connection`, `reference diff|sync`,
+`statusline status|codex native|codex extended|codex off`,
+`improvement-eval`) — see `ak --help --all`. Named checks and slow proofs (`learning`, `security`,
+`aqe`, `providers`, `harvest`, `deja-vu`, `memory`, `memory-routes`, `mcp`, `aqe-embedding`) run
+through `ak status --refresh=live --only CHECK`.
 
 One of those is worth calling out:
 

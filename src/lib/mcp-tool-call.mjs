@@ -9,9 +9,9 @@
 // taskkill runs as its own process, and until the server tree is gone it
 // holds its working directory and any database it opened, so a caller that
 // removes the fixture folder right away (ak status --refresh=live --only
-// memory) fails with
-// EPERM. Waiting for 'close' rather than 'exit' also waits for a child the
-// server started that inherited the pipe (a cmd shim's node process).
+// memory-routes) fails with EPERM. Waiting for 'close' rather than 'exit'
+// also waits for a child the server started that inherited the pipe (a cmd
+// shim's node process).
 import { spawn } from 'node:child_process';
 import { resolveShim, killProcessTree } from './exec.mjs';
 

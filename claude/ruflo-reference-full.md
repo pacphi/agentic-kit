@@ -60,7 +60,7 @@ tools read and write when Ruflo's native bridge is active). A read through one d
 not cover the other, and a bare count from `memory list` describes one file. If a CLI
 search or retrieve finds nothing, or names an unread sibling store, repeat it with
 `--path <project>/.swarm/agentdb-memory.db` or use MCP `memory_search`. Never delete
-or merge either file. `ak status --refresh=live --only memory` shows the routing on this machine.
+or merge either file. `ak status --refresh=live --only memory-routes` shows the routing on this machine.
 
 **Use `--smart`** for query expansion + RRF + MMR + recency boosting.
 **Use `--build-hnsw`** the first time you search a populated namespace (one-time
@@ -75,7 +75,7 @@ Node 22"). Don't store anything derivable from `git log` or current code.
 The configured `.swarm/memory.db` pin and Ruflo's native
 `.swarm/agentdb-memory.db` sibling have different roles. Do not infer lost writes
 from an empty table in only one file. First run `ak status` and
-`ak status --refresh=live --only memory`; the latter runs a disposable store/retrieve/purge proof in a
+`ak status --refresh=live --only memory-routes`; the latter runs a disposable store/retrieve/purge proof in a
 throwaway project and reports whether CLI and MCP see each other's writes there. It
 says nothing about an existing corpus. Preserve existing databases.
 
