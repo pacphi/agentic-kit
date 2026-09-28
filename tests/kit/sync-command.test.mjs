@@ -39,12 +39,17 @@ function seedHome(cfg = offlineKitConfig(), pkgs = {}) {
   paths._setGlobalRootForTest(fakeGlobalRoot(HOME, pkgs));
 }
 
-/** Run `ak sync --dry-run …` from the sandbox project and return its output. */
+/** Run `ak sync --dry-run …` from the sandbox project and return its output.
+ *  The dry run's version lookups answer nothing: some tests put /usr/bin on
+ *  PATH, where a real npm would otherwise query the registry. */
 async function dryRun(over = {}) {
   const cwd = process.cwd();
   process.chdir(PROJECT);
   try {
-    return await captureLog(() => sync.run({ flags: FLAGS({ 'dry-run': true, ...over }), pkgRoot: PKG_ROOT }));
+    return await captureLog(() => sync.run({
+      flags: FLAGS({ 'dry-run': true, ...over }), pkgRoot: PKG_ROOT,
+      fetchLatest: async () => null, releaseDatesRunner: async () => ({ code: 1, stdout: '', stderr: 'offline (test)' }),
+    }));
   } finally { process.chdir(cwd); }
 }
 

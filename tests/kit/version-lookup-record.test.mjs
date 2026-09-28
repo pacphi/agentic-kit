@@ -4,8 +4,11 @@
 //   (`ak sync --dry-run`'s preview).
 // - A failed lookup never erases a good one: when the Brain's GitHub release
 //   or ruvector's npm lookup answers nothing, the recorded latest (and the
-//   Brain's asset fact) stays in kit.json, `last` is not restamped so the next
-//   call retries, and the drift reports the recorded value as a cache fallback.
+//   Brain's asset fact) stays in kit.json and the drift reports it as a cache
+//   fallback. `last` is restamped: retried once per TTL window (`force` retries
+//   sooner), so an offline `ak status` or dashboard poll does not wait on the
+//   lookup every time. `observedAt` keeps when the recorded latest was actually
+//   seen, so no label claims the failed attempt observed it.
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -102,50 +105,91 @@ test('a successful lookup is still recorded by default', async () => {
   assert.equal(saved.ruvnetBrain.latest, '4.3.29');
   assert.equal(saved.ruvnetBrain.installedRelease, '4.3.22', 'the install record survives the cache write');
   assert.ok(saved.ruvnetBrain.last > STALE);
+  assert.equal(saved.ruvnetBrain.observedAt, saved.ruvnetBrain.last, 'a successful lookup is an observation');
   assert.equal(saved.ruvector.latest, '1.6.0');
   assert.ok(saved.ruvector.last > STALE);
+  assert.equal(saved.ruvector.observedAt, saved.ruvector.last);
 });
+
+/** Remove the Brain and ruvector records, as on a machine that never looked them up. */
+function dropRecords() {
+  const cfg = loadKitConfig();
+  delete cfg.versionCheck.ruvnetBrain;
+  delete cfg.versionCheck.ruvector;
+  writeKitConfig(HOME, cfg);
+}
 
 // ── a failed lookup never erases a good one ──────────────────────────────────
 
 for (const [name, fetchImpl] of [['a network failure', failingFetch], ['a refused request', rateLimited]]) {
-  test(`a forced Brain lookup that fails (${name}) keeps the recorded release and does not restamp last`, async () => {
+  test(`a forced Brain lookup that fails (${name}) keeps the recorded release and restamps last`, async () => {
     seed();
-    const before = kitJsonText();
     const d = await brain.drift({ force: true, fetchImpl });
-    assert.equal(kitJsonText(), before, "kit.json's latest, asset fact and last are unchanged");
+    const saved = loadKitConfig().versionCheck.ruvnetBrain;
+    assert.deepEqual([saved.latest, saved.releaseAssetAvailable, saved.installedRelease], ['4.3.28', true, '4.3.22'],
+      "kit.json keeps the recorded latest, its asset fact and the install record");
+    assert.ok(saved.last > STALE, 'last is restamped, so the next lookup waits one TTL window');
+    assert.equal(saved.observedAt, STALE, 'when the recorded latest was actually seen');
     assert.deepEqual([d.latest, d.releaseAssetAvailable, d.latestSource, d.latestObservedAt, d.outdated],
       ['4.3.28', true, 'cache-fallback', STALE, true]);
   });
 }
 
-test('an expired Brain cache whose lookup fails is retried on the next call', async () => {
+test('an expired Brain cache whose lookup fails is not retried within the TTL; force retries it', async () => {
   seed();
   let calls = 0;
   const fetchImpl = async () => { calls += 1; throw new Error('offline (test)'); };
   await brain.drift({ fetchImpl });
   const d = await brain.drift({ fetchImpl });
-  assert.equal(calls, 2, 'last was not restamped, so the cache stays expired');
-  assert.equal(d.latest, '4.3.28');
-  assert.equal(loadKitConfig().versionCheck.ruvnetBrain.last, STALE);
+  assert.equal(calls, 1, 'the restamped cache is fresh again');
+  assert.deepEqual([d.latestSource, d.latest, d.latestObservedAt], ['cache', '4.3.28', STALE],
+    'the label still names when the latest was observed, not the failed attempt');
+  const forced = await brain.drift({ force: true, fetchImpl });
+  assert.equal(calls, 2, '--refresh forces a retry');
+  assert.equal(forced.latestObservedAt, STALE, 'a repeated failure carries the observation time forward');
+  assert.equal(loadKitConfig().versionCheck.ruvnetBrain.observedAt, STALE);
 });
 
-test('a forced ruvector lookup that fails keeps the recorded latest and does not restamp last', async () => {
+test('a forced ruvector lookup that fails keeps the recorded latest and restamps last', async () => {
   seed();
-  const before = kitJsonText();
   const d = await ruvector.drift({ force: true, fetchLatest: async () => null });
-  assert.equal(kitJsonText(), before);
+  const saved = loadKitConfig().versionCheck.ruvector;
+  assert.equal(saved.latest, '1.5.0');
+  assert.ok(saved.last > STALE);
+  assert.equal(saved.observedAt, STALE);
   assert.deepEqual([d.installed, d.latest, d.latestSource, d.outdated], ['1.2.0', '1.5.0', 'cache-fallback', true]);
 });
 
-test('an expired ruvector cache whose lookup fails is retried on the next call', async () => {
+test('an expired ruvector cache whose lookup fails is not retried within the TTL; force retries it', async () => {
   seed();
   let calls = 0;
   const fetchLatest = async () => { calls += 1; return null; };
   await ruvector.drift({ fetchLatest });
-  await ruvector.drift({ fetchLatest });
+  const d = await ruvector.drift({ fetchLatest });
+  assert.equal(calls, 1);
+  assert.deepEqual([d.latestSource, d.latest], ['cache', '1.5.0']);
+  await ruvector.drift({ force: true, fetchLatest });
   assert.equal(calls, 2);
-  assert.equal(loadKitConfig().versionCheck.ruvector.last, STALE);
+  assert.equal(loadKitConfig().versionCheck.ruvector.observedAt, STALE);
+});
+
+test('a failed lookup with record:false writes nothing, for the Brain and ruvector', async () => {
+  seed();
+  const before = kitJsonText();
+  const b = await brain.drift({ force: true, record: false, fetchImpl: failingFetch });
+  const r = await ruvector.drift({ force: true, record: false, fetchLatest: async () => null });
+  assert.equal(kitJsonText(), before);
+  assert.deepEqual([b.latest, b.latestSource, r.latest, r.latestSource], ['4.3.28', 'cache-fallback', '1.5.0', 'cache-fallback']);
+});
+
+test('a first failed lookup with nothing recorded writes only last', async () => {
+  seed();
+  dropRecords();
+  await brain.drift({ fetchImpl: failingFetch });
+  await ruvector.drift({ fetchLatest: async () => null });
+  const saved = loadKitConfig().versionCheck;
+  assert.deepEqual(Object.keys(saved.ruvnetBrain), ['last']);
+  assert.deepEqual(Object.keys(saved.ruvector), ['last']);
 });
 
 test('ruvector drift with cacheOnly reads the recorded latest with no lookup and no write', async () => {

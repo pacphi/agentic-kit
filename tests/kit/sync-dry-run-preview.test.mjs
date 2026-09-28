@@ -47,14 +47,14 @@ const kitJsonText = () => fs.readFileSync(paths.kitConfigPath(), 'utf8');
 /** kit.json whose versions were recorded `age` ago: ruflo and agentic-qe at
  *  `seen`, the kit at 4.0.0. Optional Brain and ruvector records. Returns the
  *  fake npm global root. */
-function seed({ age = HOUR, seen = { ruflo: '9.9.9', 'agentic-qe': '9.9.9' }, brain, ruvector } = {}) {
+function seed({ age = HOUR, selfAge = age, seen = { ruflo: '9.9.9', 'agentic-qe': '9.9.9' }, brain, ruvector } = {}) {
   fs.mkdirSync(PKG_ROOT, { recursive: true });
   fs.writeFileSync(path.join(PKG_ROOT, 'package.json'), JSON.stringify({ name: KIT_PKG, version: '4.0.0' }));
   const at = Date.now() - age;
   const cfg = offlineKitConfig({ ruvnetBrain: !!brain });
   cfg.versionCheck = {
     ttlHours: 24, last: at, seen, observedAt: { ruflo: at, 'agentic-qe': at },
-    self: { last: at, best: { version: '4.0.0', tag: 'latest' } },
+    self: { last: Date.now() - selfAge, best: { version: '4.0.0', tag: 'latest' } },
     ...(brain ? { ruvnetBrain: { last: at, ...brain } } : {}),
     ...(ruvector ? { ruvector: { last: at, ...ruvector } } : {}),
   };
@@ -292,4 +292,55 @@ test('a dry run whose --skip leaves nothing to look up says nothing about being 
   assert.equal(run.result, 0, run.out);
   assert.equal(lookups, 0);
   assert.doesNotMatch(run.out, NOT_CHECKED);
+});
+
+test('the offline line gives the age of the parts it could not check', async () => {
+  seed({ age: HOUR, selfAge: 48 * HOUR });
+  const onlySelf = await syncLines({
+    flags: DRY({ skip: ['versions'] }), fetchLatest: async () => null, collectFn: versionSectionsCollect,
+  });
+  assert.match(onlySelf.out, /this plan uses the versions ak recorded 2d ago/, onlySelf.out);
+  const both = await syncLines({
+    flags: DRY(), fetchLatest: async () => null, releaseDatesRunner: failedDates, collectFn: versionSectionsCollect,
+  });
+  assert.match(both.out, /this plan uses the versions ak recorded up to 2d ago/, both.out);
+});
+
+// ── the temporary npm cache ───────────────────────────────────────────────────
+
+test('no temporary folder is made when no npm lookup will run', async () => {
+  const { previewPlanVersions } = await import('../../src/commands/sync/plan-versions.mjs');
+  seed();
+  const tmpRoot = path.join(HOME, 'no-such-parent', 'tmp');
+  const { online } = await previewPlanVersions({
+    pkgRoot: PKG_ROOT, fetchLatest: async () => null, releaseDatesRunner: failedDates, tmpRoot,
+  });
+  assert.equal(online, false);
+  assert.equal(fs.existsSync(tmpRoot), false, 'mkdtemp under a missing folder would have thrown');
+});
+
+test('a lookup that throws still leaves no temporary folder behind', async () => {
+  const { previewPlanVersions } = await import('../../src/commands/sync/plan-versions.mjs');
+  seed({ brain: { latest: '4.3.28', releaseAssetAvailable: true } });
+  const tmpRoot = fs.mkdtempSync(path.join(HOME, 'preview-throw-'));
+  let made = false;
+  await assert.rejects(previewPlanVersions({
+    pkgRoot: PKG_ROOT, tmpRoot,
+    // The real npm runner makes the folder on its first lookup (npm itself is absent from the sandbox PATH).
+    brainDrift: async () => { made = fs.readdirSync(tmpRoot).length === 1; throw new Error('brain lookup exploded'); },
+  }), /brain lookup exploded/);
+  assert.equal(made, true, 'the npm lookups made the folder before the throw');
+  assert.deepEqual(fs.readdirSync(tmpRoot), [], 'finally removed it');
+});
+
+test('a folder that cannot be removed does not fail the preview', async (t) => {
+  const { previewPlanVersions } = await import('../../src/commands/sync/plan-versions.mjs');
+  seed();
+  const tmpRoot = fs.mkdtempSync(path.join(HOME, 'preview-rm-'));
+  t.mock.method(fs, 'rmSync', () => { throw new Error('EBUSY (test)'); });
+  const { versionEvidence, online } = await previewPlanVersions({ pkgRoot: PKG_ROOT, tmpRoot });
+  t.mock.restoreAll();
+  assert.equal(online, false);
+  assert.ok(Array.isArray(versionEvidence.drift), 'the preview still returns its evidence');
+  assert.equal(fs.readdirSync(tmpRoot).length, 1, 'the folder stays; nothing else is attempted');
 });

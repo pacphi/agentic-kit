@@ -86,69 +86,99 @@ export async function refreshPlanVersions({
   return { versionEvidence };
 }
 
-/** An npm runner whose cache lives in `dir`, so a lookup writes nothing under
- *  ~/.npm; the user's .npmrc registry and proxy still apply. */
-const npmCachedIn = (dir) => (cmd, args, opts = {}) => run(cmd, args, {
-  ...opts,
-  env: { ...opts.env, npm_config_cache: dir, npm_config_logs_max: '0', npm_config_update_notifier: 'false' },
-});
+/** An npm runner whose cache lives in a folder under `tmpRoot`, made on its
+ *  first use, so a lookup writes nothing under ~/.npm; the user's .npmrc
+ *  registry and proxy still apply. `remove()` deletes that folder once the
+ *  lookups are done; a failed removal never fails the preview. */
+function previewNpm(tmpRoot) {
+  let dir = null;
+  const runner = (cmd, args, opts = {}) => {
+    dir ??= fs.mkdtempSync(path.join(tmpRoot, 'ak-sync-preview-npm-'));
+    return run(cmd, args, {
+      ...opts,
+      env: { ...opts.env, npm_config_cache: dir, npm_config_logs_max: '0', npm_config_update_notifier: 'false' },
+    });
+  };
+  const remove = () => {
+    if (!dir) return;
+    try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 }); } catch { /* left for the OS temp cleaner */ }
+  };
+  return { runner, remove };
+}
 
 /**
  * `ak sync --dry-run`: the lookups a real sync makes before it plans, in the
  * same order, recording nothing (`record: false`; Ruflo's release dates land
  * in a copy of kit.json). ruvector is read the way a real sync's plan read
  * does: looked up once its cache has expired. Every `npm view` keeps its cache
- * in a folder under `tmpRoot`, removed once the lookups are done. With
- * --no-upgrade a real sync makes no lookup, so every part is read from the
- * cache. `online` is true when a lookup answered, false when every lookup
- * made failed, and null when none was made.
+ * in a folder under `tmpRoot`, made only when an npm lookup runs and removed
+ * once the lookups are done. With --no-upgrade a real sync makes no lookup, so
+ * every part is read from the cache. `online` is true when a lookup answered,
+ * false when every lookup made failed, and null when none was made;
+ * `lookedUp` names the parts whose lookup was made.
  * @param {{ flags?: Record<string, any>, skip?: Set<string>, pkgRoot?: string,
  *   fetchLatest?: (pkg: string, tag?: string) => Promise<string | null>,
  *   releaseDatesRunner?: typeof run, brainDrift?: typeof ruvnetBrainDrift, tmpRoot?: string }} input
  * @returns {Promise<{ versionEvidence: { drift?: any[], self?: any, brain?: any, ruvector?: any, cfg?: any },
- *   online: boolean | null }>}
+ *   online: boolean | null, lookedUp: Set<string> }>}
  */
 export async function previewPlanVersions({
   flags = {}, skip = new Set(), pkgRoot, fetchLatest, releaseDatesRunner, brainDrift = ruvnetBrainDrift,
   tmpRoot = os.tmpdir(),
 }) {
   if (flags['no-upgrade']) {
-    return { versionEvidence: await skippedVersionEvidence({ skip: VERSION_PARTS, pkgRoot }), online: null };
+    return {
+      versionEvidence: await skippedVersionEvidence({ skip: VERSION_PARTS, pkgRoot }), online: null, lookedUp: new Set(),
+    };
   }
   /** @type {{ drift?: any[], self?: any, brain?: any, ruvector?: any, cfg?: any }} */
   const versionEvidence = await skippedVersionEvidence({ skip, pkgRoot });
-  const tally = { asked: 0, answered: 0 };
-  const count = (answered) => { tally.asked += 1; if (answered) tally.answered += 1; };
-  const dir = fs.mkdtempSync(path.join(tmpRoot, 'ak-sync-preview-npm-'));
-  const npm = npmCachedIn(dir);
-  const fetchOne = fetchLatest ?? ((pkg, tag) => latestVersion(pkg, tag, { runner: npm }));
-  const lookUp = async (pkg, tag) => { const version = await fetchOne(pkg, tag); count(!!version); return version; };
+  const lookedUp = new Set();
+  let answered = false;
+  const note = (part, ok) => { lookedUp.add(part); answered ||= ok; };
+  const npm = previewNpm(tmpRoot);
+  const fetchOne = fetchLatest ?? ((pkg, tag) => latestVersion(pkg, tag, { runner: npm.runner }));
+  const lookUpFor = (part) => async (pkg, tag) => { const version = await fetchOne(pkg, tag); note(part, !!version); return version; };
   try {
     if (!skip.has('versions')) {
-      versionEvidence.drift = await driftReport({ force: true, record: false, fetchLatest: lookUp });
+      versionEvidence.drift = await driftReport({ force: true, record: false, fetchLatest: lookUpFor('versions') });
       const cfg = structuredClone(loadKitConfig());
-      count(await recordRufloReleaseDates({ cfg, runner: releaseDatesRunner ?? npm }));
+      note('versions', await recordRufloReleaseDates({ cfg, runner: releaseDatesRunner ?? npm.runner }));
       versionEvidence.cfg = cfg;
     }
-    if (!skip.has('self')) versionEvidence.self = await selfDrift({ pkgRoot, force: true, record: false, fetchLatest: lookUp });
+    if (!skip.has('self')) {
+      versionEvidence.self = await selfDrift({ pkgRoot, force: true, record: false, fetchLatest: lookUpFor('self') });
+    }
     if (!skip.has('ruvnet-brain') && brainManaged()) {
       versionEvidence.brain = await brainDrift({ force: true, record: false });
-      count(versionEvidence.brain?.latestSource === 'live');
+      note('ruvnet-brain', versionEvidence.brain?.latestSource === 'live');
     }
     if (!skip.has('ruvector') && ruvectorManaged()) {
-      versionEvidence.ruvector = await ruvectorDrift({ record: false, fetchLatest: lookUp });
+      versionEvidence.ruvector = await ruvectorDrift({ record: false, fetchLatest: lookUpFor('ruvector') });
     }
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+    npm.remove();
   }
-  return { versionEvidence, online: tally.asked ? tally.answered > 0 : null };
+  return { versionEvidence, online: lookedUp.size ? answered : null, lookedUp };
 }
 
-/** The line a dry run prints when every lookup it made failed. */
-function notCheckedOnlineNote(cfg = loadKitConfig(), now = Date.now()) {
-  const last = cfg.versionCheck?.last;
-  const plan = Number.isFinite(last) && last > 0
-    ? `this plan uses the versions ak recorded ${describeAge(now - last)}`
+/** When kit.json says each part's recorded latest was observed. */
+const RECORDED_AT = {
+  versions: (vc) => vc?.last,
+  self: (vc) => vc?.self?.last,
+  'ruvnet-brain': (vc) => vc?.ruvnetBrain?.observedAt ?? vc?.ruvnetBrain?.last,
+  ruvector: (vc) => vc?.ruvector?.observedAt ?? vc?.ruvector?.last,
+};
+
+/** The line a dry run prints when every lookup it made failed. The age is
+ *  that of the parts it could not check: theirs when they share one, else the
+ *  oldest ("up to"). */
+function notCheckedOnlineNote(parts, cfg = loadKitConfig(), now = Date.now()) {
+  const stamps = [...parts].map((part) => RECORDED_AT[part](cfg.versionCheck))
+    .filter((at) => Number.isFinite(at) && at > 0);
+  const ages = new Set(stamps.map((at) => describeAge(now - at)));
+  const plan = stamps.length
+    ? `this plan uses the versions ak recorded ${ages.size > 1 ? 'up to ' : ''}${describeAge(now - Math.min(...stamps))}`
     : 'ak has recorded none, so this plan shows no version upgrades';
   return `versions not checked online (offline or timed out); ${plan}`;
 }
@@ -162,6 +192,6 @@ function notCheckedOnlineNote(cfg = loadKitConfig(), now = Date.now()) {
 export async function lookUpPlanVersions(input) {
   if (!input.flags['dry-run']) return refreshPlanVersions(input);
   const preview = await previewPlanVersions(input);
-  if (preview.online === false) info(notCheckedOnlineNote());
+  if (preview.online === false) info(notCheckedOnlineNote(preview.lookedUp));
   return preview;
 }

@@ -261,31 +261,36 @@ export function classifyDrift({ present: isPresent, installedRelease, latest }) 
   return { present: true, outdated, unversioned, installedRelease: installedRelease ?? null, latest: latest ?? null };
 }
 
-/** The release kit.json recorded, whatever its age, labelled with its source. */
+/** The release kit.json recorded, whatever its age, labelled with its source.
+ *  `observedAt` is when that release was actually seen; records written
+ *  before it existed fall back to `last`. */
 const recordedRelease = (cached, latestSource) => ({
   latest: cached.latest ?? null,
-  latestObservedAt: cached.last ?? null,
+  latestObservedAt: cached.observedAt ?? cached.last ?? null,
   releaseAssetAvailable: cached.releaseAssetAvailable ?? null,
   latestSource,
 });
 
 /** Look the latest release up on GitHub; with `record`, save the answer in
- *  kit.json. A failed lookup never erases a good one: it reports the recorded
- *  release as a cache fallback and leaves `last` alone, so the next call
- *  retries. */
+ *  kit.json. A failed lookup never erases a good one: it keeps the recorded
+ *  release (and when it was observed) and reports it as a cache fallback. It
+ *  still restamps `last`, so the next lookup waits one TTL window (`force`
+ *  retries sooner) instead of every status read waiting on it again. */
 async function lookUpRelease(cfg, cached, { record, fetchImpl }) {
   const release = await latestRelease(fetchImpl ? { fetchImpl } : {});
-  if (!release) return recordedRelease(cached, 'cache-fallback');
-  const { version: latest, releaseAssetAvailable } = release;
-  if (record) {
-    // Preserve installedRelease across the cache write.
-    cfg.versionCheck = {
-      ...cfg.versionCheck,
-      ruvnetBrain: { ...cached, last: Date.now(), latest, releaseAssetAvailable },
-    };
+  const now = Date.now();
+  const save = (entry) => {
+    // The spread keeps installedRelease and heldRefresh across the cache write.
+    cfg.versionCheck = { ...cfg.versionCheck, ruvnetBrain: { ...cached, last: now, ...entry } };
     try { saveKitConfig(cfg); } catch { /* read-only envs: next call re-fetches */ }
+  };
+  if (!release) {
+    if (record) save({ observedAt: cached.observedAt ?? cached.last });
+    return recordedRelease(cached, 'cache-fallback');
   }
-  return { latest, latestObservedAt: Date.now(), releaseAssetAvailable, latestSource: 'live' };
+  const { version: latest, releaseAssetAvailable } = release;
+  if (record) save({ observedAt: now, latest, releaseAssetAvailable });
+  return { latest, latestObservedAt: now, releaseAssetAvailable, latestSource: 'live' };
 }
 
 /** Presence + release drift, TTL-cached in kit.json (mirrors selfDrift in

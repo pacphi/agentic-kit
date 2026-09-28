@@ -42,10 +42,12 @@ export function classifyDrift({ installed, latest }) {
  *  windows, so status/dashboard hit npm at most once per window. force=true
  *  bypasses the cache. Skips the network entirely when ruvector is absent —
  *  an unmanaged tool must not cost a probe. A failed lookup never erases a
- *  good one: the recorded latest is reported as a cache fallback and `last`
- *  is left alone, so the next call retries. cacheOnly=true reports the
- *  recorded latest with no network and no write (`ak sync --skip ruvector`);
- *  record=false looks it up without saving it (`ak sync --dry-run`, ADR-0063).
+ *  good one: the recorded latest (and `observedAt`, when it was seen) stays
+ *  and is reported as a cache fallback, and `last` is restamped so the next
+ *  lookup waits one TTL window (`force` retries sooner). cacheOnly=true
+ *  reports the recorded latest with no network and no write (`ak sync --skip
+ *  ruvector`); record=false looks it up without saving anything (`ak sync
+ *  --dry-run`, ADR-0063).
  *  @param {{ force?: boolean, cacheOnly?: boolean, record?: boolean,
  *   fetchLatest?: (pkg: string, tag?: string) => Promise<string | null> }} [opts] */
 export async function drift({ force = false, cacheOnly = false, record = true, fetchLatest = latestVersion } = {}) {
@@ -59,10 +61,15 @@ export async function drift({ force = false, cacheOnly = false, record = true, f
   if (fresh) return recorded('cache');
   if (cacheOnly) return recorded('cache-fallback');
   const latest = await fetchLatest(RUVECTOR_PKG);
-  if (!latest) return recorded('cache-fallback');
-  if (record) {
-    cfg.versionCheck = { ...cfg.versionCheck, ruvector: { last: Date.now(), latest } };
+  const now = Date.now();
+  const save = (entry) => {
+    cfg.versionCheck = { ...cfg.versionCheck, ruvector: { ...entry, last: now } };
     try { saveKitConfig(cfg); } catch { /* read-only envs: next call re-fetches */ }
+  };
+  if (!latest) {
+    if (record) save({ ...cached, observedAt: cached.observedAt ?? cached.last });
+    return recorded('cache-fallback');
   }
+  if (record) save({ latest, observedAt: now });
   return { ...classifyDrift({ installed, latest }), latestSource: 'live' };
 }
