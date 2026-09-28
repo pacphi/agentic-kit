@@ -30,10 +30,16 @@ const divergedConfig = () => offlineKitConfig({
   },
 });
 
-function sandbox(cfg = offlineKitConfig()) {
+/** Registers its own cleanup with `t.after` immediately after each mkdtemp
+ *  (the house pattern — see tests/kit/codex-usage-diagnostic.test.mjs), so a
+ *  failing assertion still removes the fixture instead of leaving
+ *  `ak-host-dry-{home,proj}-*` behind under the OS temp dir. */
+function sandbox(t, cfg = offlineKitConfig()) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-host-dry-home-'));
+  t.after(() => rmrf(home));
   writeKitConfig(home, cfg);
   const project = sandboxProject('ak-host-dry');
+  t.after(() => rmrf(project));
   const env = spawnEnv(home, {
     NO_COLOR: '1',
     XDG_CONFIG_HOME: path.join(home, '.config'),
@@ -53,8 +59,8 @@ function ak(sb, ...args) {
 
 const readKit = (home) => fs.readFileSync(path.join(home, '.config', 'agentic-kit', 'kit.json'), 'utf8');
 
-test('ak host pick --dry-run previews and writes nothing', () => {
-  const sb = sandbox();
+test('ak host pick --dry-run previews and writes nothing', (t) => {
+  const sb = sandbox(t);
   const beforeHome = snapshot(sb.home);
   const beforeProject = snapshot(sb.project);
   const beforeKit = readKit(sb.home);
@@ -66,41 +72,68 @@ test('ak host pick --dry-run previews and writes nothing', () => {
   assert.equal(readKit(sb.home), beforeKit, 'kit.json is untouched');
   assertUnchanged(beforeHome, sb.home, '`ak host pick --dry-run` must not touch HOME');
   assertUnchanged(beforeProject, sb.project, '`ak host pick --dry-run` must not touch the project');
-  rmrf(sb.home, sb.project);
 });
 
-test('ak host pick --dry-run never prompts (no TTY, no --yes, still exits clean)', () => {
-  const sb = sandbox();
+test('ak host pick --dry-run never prompts (no TTY, no --yes, still exits clean)', (t) => {
+  const sb = sandbox(t);
   const r = ak(sb, 'host', 'pick', '--host', 'claude,codex', '--dry-run');
   assert.equal(r.status, 0, r.all);
   assert.match(r.all, /dry run/i);
-  rmrf(sb.home, sb.project);
 });
 
-test('bare ak host pick --dry-run (no other flag) never opens the interactive prompt', () => {
-  const sb = sandbox();
+test('bare ak host pick --dry-run (no other flag) never opens the interactive prompt', (t) => {
+  const sb = sandbox(t);
   const r = ak(sb, 'host', 'pick', '--dry-run');
   assert.equal(r.status, 0, r.all);
   assert.match(r.all, /dry run/i);
   assert.doesNotMatch(r.all, /Enable which ruflo host/);
-  rmrf(sb.home, sb.project);
 });
 
-test('ak host off --dry-run previews and writes nothing', () => {
-  const sb = sandbox(divergedConfig());
+test('bare ak host pick --dry-run discloses it is previewing the current configuration', (t) => {
+  const sb = sandbox(t);
+  const r = ak(sb, 'host', 'pick', '--dry-run');
+  assert.equal(r.status, 0, r.all);
+  assert.match(r.all, /previewing the current configuration/i);
+  assert.match(r.all, /interactive `ak host pick`/i);
+});
+
+test('ak host pick --dry-run with an explicit --host does not carry the previewing-current disclosure', (t) => {
+  const sb = sandbox(t);
+  const r = ak(sb, 'host', 'pick', '--host', 'claude,codex', '--dry-run', '--yes');
+  assert.equal(r.status, 0, r.all);
+  assert.doesNotMatch(r.all, /previewing the current configuration/i);
+});
+
+test('ak host pick --dry-run --json carries previewOfCurrent, true only with no explicit choice', (t) => {
+  const sb = sandbox(t);
+  const bare = ak(sb, 'host', 'pick', '--dry-run', '--json');
+  assert.equal(bare.status, 0, bare.all);
+  const bareJson = JSON.parse(bare.stdout);
+  assert.equal(bareJson.dryRun, true);
+  assert.equal(bareJson.previewOfCurrent, true);
+  assert.doesNotMatch(bare.stdout, /previewing the current configuration/i, 'the disclosure is a field under --json, never text');
+
+  const explicit = ak(sb, 'host', 'pick', '--host', 'claude,codex', '--dry-run', '--yes', '--json');
+  assert.equal(explicit.status, 0, explicit.all);
+  const explicitJson = JSON.parse(explicit.stdout);
+  assert.equal(explicitJson.previewOfCurrent, false);
+});
+
+test('ak host off --dry-run previews and writes nothing', (t) => {
+  const sb = sandbox(t, divergedConfig());
   const beforeHome = snapshot(sb.home);
   const beforeProject = snapshot(sb.project);
   const r = ak(sb, 'host', 'off', '--dry-run');
   assert.equal(r.status, 0, r.all);
   assert.match(r.all, /dry run/i);
   assert.match(r.all, /would disable/i);
+  assert.match(r.all, /would reconcile the opencode AGENTS\.md guidance blocks/i, 'the guidance-file strip step must be listed too');
   assertUnchanged(beforeHome, sb.home, '`ak host off --dry-run` must not touch HOME');
   assertUnchanged(beforeProject, sb.project, '`ak host off --dry-run` must not touch the project');
-  rmrf(sb.home, sb.project);
 });
 
-test('ak host reset-routes --dry-run --yes previews the activities it would reset and writes nothing', () => {
-  const sb = sandbox(divergedConfig());
+test('ak host reset-routes --dry-run --yes previews the activities it would reset and writes nothing', (t) => {
+  const sb = sandbox(t, divergedConfig());
   const beforeHome = snapshot(sb.home);
   const beforeProject = snapshot(sb.project);
   const r = ak(sb, 'host', 'reset-routes', '--dry-run', '--yes');
@@ -110,36 +143,32 @@ test('ak host reset-routes --dry-run --yes previews the activities it would rese
   assert.match(r.all, /architecture/);
   assertUnchanged(beforeHome, sb.home, '`ak host reset-routes --dry-run` must not touch HOME');
   assertUnchanged(beforeProject, sb.project, '`ak host reset-routes --dry-run` must not touch the project');
-  rmrf(sb.home, sb.project);
 });
 
-test('ak host reset-routes --dry-run never prompts, even with no --activity and no --yes', () => {
-  const sb = sandbox(divergedConfig());
+test('ak host reset-routes --dry-run never prompts, even with no --activity and no --yes', (t) => {
+  const sb = sandbox(t, divergedConfig());
   const r = ak(sb, 'host', 'reset-routes', '--dry-run');
   assert.equal(r.status, 0, r.all);
   assert.match(r.all, /dry run/i);
   assert.doesNotMatch(r.all, /reset which activities\?/);
-  rmrf(sb.home, sb.project);
 });
 
-test('ak host reset-routes --dry-run with nothing diverged is the existing no-op message', () => {
-  const sb = sandbox();
+test('ak host reset-routes --dry-run with nothing diverged is the existing no-op message', (t) => {
+  const sb = sandbox(t);
   const r = ak(sb, 'host', 'reset-routes', '--dry-run');
   assert.equal(r.status, 0, r.all);
   assert.match(r.all, /no seeded routes diverge/i);
-  rmrf(sb.home, sb.project);
 });
 
-test('ak host adapters list --dry-run refuses: adapters has no preview', () => {
-  const sb = sandbox();
+test('ak host adapters list --dry-run refuses: adapters has no preview', (t) => {
+  const sb = sandbox(t);
   const r = ak(sb, 'host', 'adapters', 'list', '--dry-run');
   assert.equal(r.status, 2, r.all);
   assert.match(r.all, /ak host adapters has no preview; run it without --dry-run/);
-  rmrf(sb.home, sb.project);
 });
 
-test('the reset-routes subcommand help documents the name and description on separate, aligned lines', () => {
-  const sb = sandbox();
+test('the reset-routes subcommand help documents the name and description on separate, aligned lines', (t) => {
+  const sb = sandbox(t);
   const r = ak(sb, 'host', '--help');
   assert.equal(r.status, 0, r.all);
   const lines = r.stdout.split('\n');
@@ -151,11 +180,10 @@ test('the reset-routes subcommand help documents the name and description on sep
   // column — reset-routes must match it exactly, not just start indented.
   const otherContinuation = lines.find((l) => /^ {13}installed \(with the complete/.test(l));
   assert.ok(otherContinuation, 'fixture assumption: status\' continuation line is at column 13');
-  rmrf(sb.home, sb.project);
 });
 
-test('ak host --help documents --dry-run for pick, off and reset-routes', () => {
-  const sb = sandbox();
+test('ak host --help documents --dry-run for pick, off and reset-routes', (t) => {
+  const sb = sandbox(t);
   const r = ak(sb, 'host', '--help');
   assert.equal(r.status, 0, r.all);
   const pickBlock = r.stdout.slice(r.stdout.indexOf('  pick'), r.stdout.indexOf('  reset-routes'));
@@ -164,7 +192,6 @@ test('ak host --help documents --dry-run for pick, off and reset-routes', () => 
   assert.match(resetBlock, /--dry-run/);
   const offBlock = r.stdout.slice(r.stdout.indexOf('  off'), r.stdout.indexOf('  check-connection'));
   assert.match(offBlock, /--dry-run/);
-  rmrf(sb.home, sb.project);
 });
 
 test('DEFAULT_ROUTES fixture sanity: architecture has a current default distinct from the seeded pin', () => {
