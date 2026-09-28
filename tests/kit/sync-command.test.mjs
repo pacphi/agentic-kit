@@ -924,7 +924,8 @@ function syncChild({ first = [], after = [], flags = {}, throws = false }) {
       return calls++ === 0 ? first : after;
     };
     exitWhenFlushed(await sync.run({ flags: ${JSON.stringify(FLAGS({ 'no-upgrade': true, json: true, ...flags }))},
-      pkgRoot: ${JSON.stringify(PKG_ROOT)}, collectFn }));
+      pkgRoot: ${JSON.stringify(PKG_ROOT)}, collectFn,
+      fetchLatest: async () => null, releaseDatesRunner: async () => ({ code: 1, stdout: '', stderr: 'offline (test)' }) }));
   `;
   return spawnSync(process.execPath, ['--input-type=module', '-e', script], {
     cwd: PROJECT, env: spawnEnv(HOME), encoding: 'utf8', timeout: 120_000,
@@ -1124,11 +1125,17 @@ function syncCfg(catalog) {
   });
 }
 
+/** A real sync from the sandbox project. Its version lookups answer nothing:
+ *  withOpencodeCli puts /usr/bin on PATH, where a real npm would otherwise
+ *  query the registry. */
 async function realSync() {
   const cwd = process.cwd();
   process.chdir(PROJECT);
   try {
-    return await captureLog(() => sync.run({ flags: FLAGS(), pkgRoot: PKG_ROOT }));
+    return await captureLog(() => sync.run({
+      flags: FLAGS(), pkgRoot: PKG_ROOT,
+      fetchLatest: async () => null, releaseDatesRunner: async () => ({ code: 1, stdout: '', stderr: 'offline (test)' }),
+    }));
   } finally { process.chdir(cwd); }
 }
 
