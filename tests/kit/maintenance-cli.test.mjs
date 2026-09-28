@@ -236,7 +236,6 @@ function buildManagement(overrides = {}) {
     recordDisposition: { ok: true, status: 'recorded' },
     planAction: executablePlan,
     recipes: recipesResult,
-    refreshRecipes: { ok: true, status: 'refreshed' },
     acceptRecipe: { ok: true, status: 'accepted' },
     withdrawRecipe: { ok: true, status: 'withdrawn' },
     preferences: preferencesResult,
@@ -276,7 +275,8 @@ test('maintain is porcelain and its help advertises exact guarded actions', () =
   assert.match(help.stdout, /ak maintain recover --receipt/i);
   assert.match(help.stdout, /recover is a read-only alias for audit/i);
   assert.match(help.stdout, /exactly one exact action id/i);
-  assert.doesNotMatch(help.stdout, /--deep\b|--refresh-inventory\b|ak maintain scan\b/, 'only the current spellings');
+  assert.match(help.stdout, /ak maintain recipes list\|accept\|withdraw/);
+  assert.doesNotMatch(help.stdout, /--deep\b|--refresh-inventory\b|ak maintain scan\b|recipes[^\n]*refresh/, 'only the current spellings');
   const rootHelp = spawnSync(process.execPath, [BIN, '--help'], { encoding: 'utf8', env: spawnEnv(HOME) });
   assert.match(rootHelp.stdout, /ak maintain/);
 });
@@ -880,7 +880,7 @@ test('receipt --export --include-local-paths without --acknowledge-warning is a 
 
 // ── recipes / preferences ────────────────────────────────────────────────────
 
-test('recipes list|refresh|accept|withdraw dispatch exactly and validate required flags', async () => {
+test('recipes list|accept|withdraw dispatch exactly and validate required flags', async () => {
   const management = buildManagement();
   const badAccept = await captureLogs(() => run({ flags: {}, positionals: ['recipes', 'accept'], deps: { management } }));
   assert.equal(badAccept.code, 2);
@@ -888,7 +888,6 @@ test('recipes list|refresh|accept|withdraw dispatch exactly and validate require
   assert.equal(badWithdraw.code, 2);
   assert.deepEqual(management.calls, []);
   await run({ flags: {}, positionals: ['recipes'], deps: { management } });
-  await run({ flags: { yes: true }, positionals: ['recipes', 'refresh'], deps: { management } });
   await run({ flags: { recipe: 'rcp_a', version: '2', yes: true }, positionals: ['recipes', 'accept'], deps: { management } });
   await run({ flags: { recipe: 'rcp_a', version: '1', yes: true }, positionals: ['recipes', 'withdraw'], deps: { management } });
   // withdraw's --version is optional: the facade defaults it to the active,
@@ -896,11 +895,19 @@ test('recipes list|refresh|accept|withdraw dispatch exactly and validate require
   await run({ flags: { recipe: 'rcp_b', yes: true }, positionals: ['recipes', 'withdraw'], deps: { management } });
   assert.deepEqual(management.calls, [
     { method: 'recipes', args: [] },
-    { method: 'refreshRecipes', args: [{ confirmed: true }] },
     { method: 'acceptRecipe', args: [{ recipeId: 'rcp_a', recipeVersion: '2', confirmed: true }] },
     { method: 'withdrawRecipe', args: [{ recipeId: 'rcp_a', recipeVersion: '1', confirmed: true }] },
     { method: 'withdrawRecipe', args: [{ recipeId: 'rcp_b', confirmed: true }] },
   ]);
+});
+
+test('the removed recipes refresh subverb is the parser\'s generic unknown-subverb error', async () => {
+  const management = buildManagement();
+  const result = await captureLogs(() => run({ flags: { yes: true }, positionals: ['recipes', 'refresh'], deps: { management } }));
+  assert.equal(result.code, 2);
+  assert.match(result.text, /usage: ak maintain recipes list\|accept\|withdraw \[options\]/);
+  assert.deepEqual(management.calls, []);
+  assert.doesNotMatch(result.text, /is now|renamed|retired|no longer/i, 'no alias and no hint');
 });
 
 test('preferences reads without --set and saves parsed key=value pairs with --set', async () => {
@@ -941,7 +948,6 @@ const SWEEP_CASES = [
   ['undo', ['undo'], { receipt: FIXTURE_RECEIPT_ID, yes: true }, { service: () => buildService() }],
   ['recover', ['recover'], { receipt: FIXTURE_RECEIPT_ID }, { management: () => buildManagement() }],
   ['recipes list', ['recipes'], {}, { management: () => buildManagement() }],
-  ['recipes refresh', ['recipes', 'refresh'], { yes: true }, { management: () => buildManagement() }],
   ['recipes accept', ['recipes', 'accept'], { recipe: 'rcp_a', version: '1', yes: true }, { management: () => buildManagement() }],
   ['preferences read', ['preferences'], {}, { management: () => buildManagement() }],
   ['preferences set', ['preferences'], { set: ['lastView=all'] }, { management: () => buildManagement() }],

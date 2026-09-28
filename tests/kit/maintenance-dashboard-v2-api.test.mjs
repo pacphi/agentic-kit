@@ -151,14 +151,6 @@ function stubManagement(overrides = {}) {
     })),
     prepareUndo: record('prepareUndo', ({ receiptId }) => ({ receiptId, undoable: true, actionCount: 1, summary: 'Restore the recorded preimage.' })),
     undo: record('undo', ({ receiptId }) => ({ ok: true, status: 'rolled-back', receipt: { id: receiptId, status: 'rolled-back' } })),
-    refreshRecipes: record('refreshRecipes', {
-      diff: [{
-        recipeId: 'r1', from: null,
-        to: { recipeVersion: '2', privilegeRequirement: 'none', networkRequirement: 'required', operation: 'reinstall-dependency' },
-        addsPrivilege: false, addsNetwork: true, addsOperation: true,
-      }],
-      pending: [{ ...BUILTIN_RECIPES[0], state: 'pending-acceptance' }],
-    }),
     acceptRecipe: record('acceptRecipe', { ...BUILTIN_RECIPES[0], state: 'active' }),
     withdrawRecipe: record('withdrawRecipe', { ...BUILTIN_RECIPES[0], state: 'withdrawn' }),
     preferences: record('preferences', {
@@ -315,7 +307,6 @@ test('v2 POST routes call exactly the documented facade method with the document
     ['/reconcile/preview', { receiptId: RECEIPT, outcome: 'record-no-change' }, 'auditInterruption', { receiptIds: [RECEIPT] }],
     ['/plans', { placementId: APPLY_PLACEMENT, guidanceId: APPLY_GUIDANCE }, 'planAction', { placementId: APPLY_PLACEMENT, guidanceId: APPLY_GUIDANCE }],
     ['/undo', { receiptId: 'mnt-applied', preview: true }, 'prepareUndo', { receiptId: 'mnt-applied' }],
-    ['/recipes/refresh', { confirm: true }, 'refreshRecipes', { confirmed: true }],
     ['/recipes/accept', { recipeId: 'reinstall-lightpanda-homebrew', recipeVersion: '1', confirm: true }, 'acceptRecipe', { recipeId: 'reinstall-lightpanda-homebrew', recipeVersion: '1', confirmed: true }],
     ['/recipes/withdraw', { recipeId: 'reinstall-lightpanda-homebrew', confirm: true }, 'withdrawRecipe', { recipeId: 'reinstall-lightpanda-homebrew', confirmed: true }],
     ['/recipes/withdraw', { recipeId: 'reinstall-lightpanda-homebrew', recipeVersion: '1', confirm: true }, 'withdrawRecipe', { recipeId: 'reinstall-lightpanda-homebrew', recipeVersion: '1', confirmed: true }],
@@ -407,7 +398,6 @@ test('v2 body grammar rejects surplus keys, wrong types, path inputs, and unboun
     ['/plans', { findingIds: ['finding-a'] }],
     ['/apply', { capability: 'x'.repeat(43), confirm: false }], ['/apply', { capability: 'x'.repeat(43), confirm: true, actionIds: ['a'] }],
     ['/undo', { receiptId: '../x', preview: true }],
-    ['/recipes/refresh', {}], ['/recipes/refresh', { confirm: true, url: 'https://example.test' }],
     ['/recipes/accept', { recipeId: 'r1', confirm: true }], ['/recipes/accept', { recipeId: 'r 1', recipeVersion: '1', confirm: true }],
     ['/recipes/withdraw', { recipeId: 'r1', recipeVersion: 'v 1', confirm: true }],
     ['/preferences', {}], ['/preferences', { theme: 'dark' }], ['/preferences', { lastView: { scope: 'galaxy' } }],

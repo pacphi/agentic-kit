@@ -453,9 +453,12 @@ test('dashboard HTTP serves the ADR-0048 v2 routes behind the same loopback, tok
   assertNoPrivateTransport(applied.body);
   assert.equal((await rawRequest(server, `${V2}/apply`, { method: 'POST', body: { capability: planned.body.capability, confirm: true } })).status, 409, 'one-use');
 
-  // Unknown v2 POST paths are not on the mutation allowlist at all.
+  // Unknown v2 POST paths are not on the mutation allowlist at all. Recipe
+  // refresh has no user-reachable path (no registry exists to refresh from),
+  // so it answers 405 like any other unknown method or route.
   assert.equal((await rawRequest(server, `${V2}/other`, { method: 'POST', body: {} })).status, 405);
   assert.equal((await rawRequest(server, `${V2}/inventory`, { method: 'POST', body: {} })).status, 405);
+  assert.equal((await rawRequest(server, `${V2}/recipes/refresh`, { method: 'POST', body: {} })).status, 405);
 });
 
 test('dashboard HTTP answers 503 on every v2 route when no management facade can be composed, while v1 keeps working', async (t) => {

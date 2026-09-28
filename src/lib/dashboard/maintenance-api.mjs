@@ -687,14 +687,6 @@ const RECIPE = T.obj({
   packageManagerAndRange: T.text(120), shell: T.oneOf(SHELLS), triggerCondition: T.text(80), dependencyRequirement: T.text(120),
   expectedEffect: T.text(500), preservedResources: T.list(T.text(200), 20), verification: T.text(500), invalidation: T.text(300),
 });
-const RECIPE_REFRESH = T.obj({
-  diff: T.list(T.obj({
-    recipeId: T.text(120), from: T.obj(RECIPE_VERSION_FACTS), to: T.obj(RECIPE_VERSION_FACTS),
-    addsPrivilege: T.bool, addsNetwork: T.bool, addsOperation: T.bool,
-  }), 200),
-  pending: T.list(RECIPE, 200),
-});
-
 function boundRows(groups, max) {
   let remaining = max;
   return groups.flatMap((group) => {
@@ -735,7 +727,6 @@ export function publicPreferences(preferences) { return projectNode(PREFERENCES,
 /** The ONLY projection that returns an exact path (MNT-PRV-005). */
 export function publicReveal(locator) { return projectNode(REVEAL, locator) ?? {}; }
 export function publicRecipe(recipe) { return projectNode(RECIPE, recipe) ?? {}; }
-export function publicRecipeRefresh(result) { return projectNode(RECIPE_REFRESH, result) ?? {}; }
 
 /** Sanitized export: paths survive ONLY when the facade confirms the warned
  *  choice through `pathsIncluded: true` (MNT-RCV-011/012). */
@@ -1056,7 +1047,6 @@ export function createMaintenanceDashboardApi({
     plans: createPlanV2,
     apply: (facade, body) => applyWith(facade, body, 'v2'),
     undo: (facade, body) => (body.preview ? previewUndoWith(facade, body, 'v2') : undoWith(facade, body, 'v2')),
-    recipesRefresh: async (facade) => [200, publicRecipeRefresh(await facade.refreshRecipes({ confirmed: true }))],
     recipesAccept: async (facade, body) => [200, { recipe: publicRecipe(await facade.acceptRecipe({
       recipeId: body.recipeId, recipeVersion: body.recipeVersion, confirmed: true,
     })) }],

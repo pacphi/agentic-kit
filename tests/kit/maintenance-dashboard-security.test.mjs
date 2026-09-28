@@ -106,8 +106,14 @@ test('maintenance v2 route table matches every allowlisted path exactly and bind
   }
   assert.equal(matchMaintenanceV2Route('POST', `${V2}/inventory`), null);
   assert.equal(matchMaintenanceV2Route('POST', `${V2}/placements/${placementId}`), null);
-  assert.equal(MAINTENANCE_V2_ROUTES.length, 30);
-  assert.equal(MAINTENANCE_V2_MUTATION_ROUTES.size, 21);
+  // Recipe refresh has no user-reachable path (no registry exists to refresh
+  // from): the route is gone, not merely unmatched, so it answers 405 exactly
+  // like any other unknown method or route (dashboard-server.mjs's mutation
+  // allowlist gate never sees it as a mutation route).
+  assert.equal(matchMaintenanceV2Route('POST', `${V2}/recipes/refresh`), null);
+  assert.equal(isMaintenanceMutationRoute(`${V2}/recipes/refresh`), false);
+  assert.equal(MAINTENANCE_V2_ROUTES.length, 29);
+  assert.equal(MAINTENANCE_V2_MUTATION_ROUTES.size, 20);
   for (const route of MAINTENANCE_V2_MUTATION_ROUTES) {
     assert.equal(matchMaintenanceV2Route('POST', route)?.name !== undefined, true, route);
     assert.equal(isMaintenanceMutationRoute(route), true);

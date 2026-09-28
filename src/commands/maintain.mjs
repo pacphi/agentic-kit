@@ -100,7 +100,7 @@ Usage:
   ak maintain apply --plan ID --digest SHA256 --actions ID --yes [--json]
   ak maintain undo --receipt ID --yes [--json]
   ak maintain recover --receipt ID [--json]
-  ak maintain recipes list|refresh|accept|withdraw [--recipe ID [--version V] --yes] [--json]
+  ak maintain recipes list|accept|withdraw [--recipe ID [--version V] --yes] [--json]
   ak maintain preferences [--set key=value ...] [--json]
 
 Options:
@@ -817,13 +817,9 @@ async function dispatchRecipes({ flags, sub, deps }) {
     const result = await management.recipes();
     return { verb: 'recipes', result, render: renderRecipes };
   }
-  if (sub === 'refresh') {
-    const result = await management.refreshRecipes({ confirmed: flags.yes === true });
-    return { verb: 'recipes', result, render: (value) => renderMutation(value, 'recipes refresh') };
-  }
   if (sub === 'accept') return recipesAccept(flags, management);
   if (sub === 'withdraw') return recipesWithdraw(flags, management);
-  return usageError('usage: ak maintain recipes list|refresh|accept|withdraw [options]');
+  return usageError('usage: ak maintain recipes list|accept|withdraw [options]');
 }
 
 function renderPreferences(result) {

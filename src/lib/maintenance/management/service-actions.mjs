@@ -56,21 +56,6 @@ export function undo(ctx) {
   return function undoCall(input) { return ctx.maintenance.undo(input); };
 }
 
-/** `refreshRecipes({ confirmed })` — fetches candidate recipe updates from
- * the configured, allowlisted registry and stages them as
- * `pending-acceptance` (never activates anything). Requires a
- * `recipeRegistry` to have been configured at service construction; the
- * built-in catalogue needs no refresh. */
-export function refreshRecipes(ctx) {
-  return async function refreshRecipesCall({ confirmed = false } = {}) {
-    if (confirmed !== true) throw new Error('Explicit confirmation is required to refresh the recipe catalogue.');
-    if (!ctx.recipeRegistry) throw new Error('no recipe registry is configured for this installation.');
-    return ctx.recipeStore.refreshRecipes({
-      fetchImpl: ctx.fetchImpl, registry: ctx.recipeRegistry, current: ctx.recipeStore.listRecipes(),
-    });
-  };
-}
-
 export function acceptRecipe(ctx) {
   return function acceptRecipeCall({ recipeId, recipeVersion, confirmed = false }) {
     if (confirmed !== true) throw new Error('Explicit confirmation is required to accept a recipe.');

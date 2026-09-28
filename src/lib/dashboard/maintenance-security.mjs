@@ -47,7 +47,6 @@ export const MAINTENANCE_V2_ROUTES = Object.freeze([
   { name: 'plans', method: 'POST', pattern: new RegExp(`^${V2}/plans$`) },
   { name: 'apply', method: 'POST', pattern: new RegExp(`^${V2}/apply$`) },
   { name: 'undo', method: 'POST', pattern: new RegExp(`^${V2}/undo$`) },
-  { name: 'recipesRefresh', method: 'POST', pattern: new RegExp(`^${V2}/recipes/refresh$`) },
   { name: 'recipesAccept', method: 'POST', pattern: new RegExp(`^${V2}/recipes/accept$`) },
   { name: 'recipesWithdraw', method: 'POST', pattern: new RegExp(`^${V2}/recipes/withdraw$`) },
   { name: 'preferences', method: 'GET', pattern: new RegExp(`^${V2}/preferences$`) },
@@ -383,7 +382,6 @@ const V2_BODIES = Object.freeze({
   plans: shape('plan', { placementId: required(check.opaque('plc')), guidanceId: required(check.opaque('gid')) }),
   apply: (value) => confirmedBody(value, 'apply'),
   undo: undoBody,
-  recipesRefresh: shape('recipe refresh', { confirm: required(check.literalTrue()) }),
   recipesAccept: shape('recipe acceptance', {
     recipeId: required(check.publicId()), recipeVersion: required(check.token(40)), confirm: required(check.literalTrue()),
   }),
