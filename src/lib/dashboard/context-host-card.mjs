@@ -64,10 +64,15 @@ export function contextHostCard(host, fold, ctx) {
     if (status === 'degraded') {
       const reason = ctx.health.reason || '';
       // When a Codex source was partly read (parse-yield-*), distinguish from truly unreadable stores.
+      // parse-yield-zero: NONE of the token-bearing files yielded a parseable response. Every
+      // other parse-yield-* reason: only SOME did (usage-index.mjs's finalizeCodexHealth).
       if (reason.startsWith('parse-yield-')) {
+        const sentence = reason === 'parse-yield-zero'
+          ? 'None of the ' + label + ' session files that carry token usage yielded a response ak could parse'
+          : label + ' session files were read, but some yielded no response ak could parse';
         return {
           label: 'Partial data',
-          reason: label + ' session files were read, but some yielded no response ak could parse (' + reason + '), so an empty list here does not mean no sessions ran.',
+          reason: sentence + ' (' + reason + '), so an empty list here does not mean no sessions ran.',
         };
       }
       return {

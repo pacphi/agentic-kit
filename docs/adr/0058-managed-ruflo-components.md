@@ -193,7 +193,8 @@ backup copy, atomic writes, JSON and TOML editors, conflicts preserved rather th
 overwritten, repository-root scoping for project targets, and one planning function shared by
 inspection and reconciliation. After a write records its receipt, an older backup copy with the
 same tag is removed only when the copy just made plus that receipt provably hold everything it
-held (`redundantBackups` states the rule): it must be named exactly
+held (`redundantBackups` states the rule; the AQE project-root pin keeps only its newest copy
+instead, ADR-0062): it must be named exactly
 `<file>.ak-<tag>-backup.<uuid v4>` and its bytes must be exactly what the projection's editor
 writes back from its own parse, so a copy in the user's own formatting is never removed, and
 anything unproven, a symbolic link, another user's file, or a copy directly in the home folder

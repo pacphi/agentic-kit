@@ -97,6 +97,15 @@ test('empty state: partly read Codex source with parse-yield reason says Partial
   const html = contextHostCard('codex', EMPTY, { health: { status: 'degraded', reason: 'parse-yield-partial' } });
   assert.match(html, /Partial data/);
   assert.match(html, /were read/);
+  assert.match(html, /some yielded/);
+  assert.doesNotMatch(html, /Source unreadable/);
+});
+
+test('empty state: fully failed Codex parse (parse-yield-zero) says none yielded, not some', () => {
+  const html = contextHostCard('codex', EMPTY, { health: { status: 'degraded', reason: 'parse-yield-zero' } });
+  assert.match(html, /Partial data/);
+  assert.match(html, /None of the Codex session files that carry token usage yielded a response ak could parse/);
+  assert.doesNotMatch(html, /some yielded/);
   assert.doesNotMatch(html, /Source unreadable/);
 });
 

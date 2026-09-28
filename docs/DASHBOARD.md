@@ -358,7 +358,7 @@ A percentage is rendered only when input and window were observed together for t
 The cards distinguish **Input only**, **Partial coverage**, **Unpaired data**,
 **Not recorded**, **Measured**, **Unavailable**, **No sessions**, **Not installed**,
 **Partial data** and **Source unreadable**. The last four separate an empty card into a host with
-no data on this machine, one that was partly read (some session files yielded no response ak
+no data on this machine, one that was partly read (some or all session files yielded no response ak
 could parse), one whose store exists but could not be read at all (with the reason), and one that
 is installed and readable but ran nothing in the window. Missing token/window values render as an
 em dash. A pressure meter appears only for a measured value, and each card explains its coverage gap.

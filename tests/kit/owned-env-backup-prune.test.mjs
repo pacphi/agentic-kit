@@ -81,6 +81,53 @@ test('a write that deletes the receipt removes nothing; the next write removes w
   assert.deepEqual(copiesOf(local, 'memory-pin'), [newest]);
 });
 
+// Minor 2 (b9 final review): the full-release guards (`hasKeys &&` in applyOwnedEnv and the
+// empty-receipt early return in redundantBackups) are not incidental — pin them directly rather
+// than relying on a scenario where the only older copy is unprovable for an unrelated reason.
+test('a byte-identical copy named as a memory-pin backup survives a full release', () => {
+  const root = project();
+  const local = writeJson(paths.projectSettingsLocal(root), { permissions: { allow: [] } });
+  assert.equal(reconcileMemoryPin(root).ok, true);
+  // Byte-identical to the file exactly as it stands now: the release's own newest copy will
+  // hold these same bytes, so only the full-release guard — not non-redundancy — can be what
+  // keeps this copy.
+  const planted = `${local}.ak-memory-pin-backup.${randomUUID()}`;
+  fs.copyFileSync(local, planted);
+  assert.equal(reconcileMemoryPin(root, { enabled: false }).changed, true);
+  assert.equal(fs.existsSync(planted), true, 'the planted copy survives the full release');
+});
+
+// Ordering: the prune must run only after the final receipt write lands, so an interrupted
+// final write proves nothing and a redundant older copy is never removed. `pendingKeys` always
+// includes every key of `nextReceipt`, so both the pending (pending:true) and final
+// (pending:false) receipt writes target the same file; only the second is made to fail here.
+test('a redundant older copy survives when the final receipt write fails (the prune never runs before it)', () => {
+  const root = project();
+  const local = writeJson(paths.projectSettingsLocal(root), { env: { KEEP: 'x' } });
+  const receiptFile = `${local}.ak-test-receipt.json`;
+  assert.equal(run(root, { A: '1' }).changed, true);
+  // A copy identical to the file as it now stands: the next write's own newest copy will match
+  // it exactly, so a normal, uninterrupted write would prove it redundant and remove it.
+  const leftover = `${local}.ak-test-backup.${randomUUID()}`;
+  fs.copyFileSync(local, leftover);
+  const originalRename = fs.renameSync;
+  fs.renameSync = (src, dest, ...rest) => {
+    if (dest === receiptFile && fs.readFileSync(src, 'utf8').includes('"pending":false')) {
+      throw Object.assign(new Error('simulated failure of the final receipt write'), { code: 'EISDIR' });
+    }
+    return originalRename(src, dest, ...rest);
+  };
+  try {
+    assert.throws(() => run(root, { A: '2' }), /simulated failure of the final receipt write/);
+  } finally {
+    fs.renameSync = originalRename;
+  }
+  assert.match(fs.readFileSync(receiptFile, 'utf8'), /"pending":true/,
+    'the pending receipt write ran; only the final one was made to fail');
+  assert.equal(fs.existsSync(leftover), true,
+    'the copy the final receipt write would have proven redundant survives because that write never completed');
+});
+
 test('a copy holding a user key that a later user edit removed is kept', () => {
   const root = project();
   const local = writeJson(paths.projectSettingsLocal(root), { env: { KEEP: 'x', OLD: 'mine' } });
