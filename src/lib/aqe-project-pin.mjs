@@ -13,6 +13,8 @@
 // receipt holds one table's keys). AQE's own relative AQE_MEMORY_PATH is replaced
 // under the receipt; any other value ak did not write is preserved and reported as
 // a hand fix. The user-level Codex config is never pinned (it serves every project).
+// Upstream: agentic-qe#735 (a subfolder run creates and adopts its own store);
+// once a released AQE resolves the project root from subfolders, the pin can go.
 import fs from 'node:fs';
 import path from 'node:path';
 import { aqeTomlEnvironment, shellEnvironmentSet } from './aqe-embedding-toml.mjs';
