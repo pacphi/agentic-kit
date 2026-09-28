@@ -110,6 +110,20 @@ test('build refuses a bad parent or time before running git', async () => {
   assert.equal(calls.length, 0);
 });
 
+// Regression for a CI-only failure (ubuntu-latest, node 26): a child that
+// exits before draining a large stdin payload closes the pipe's read end
+// mid-write. Without an error listener on child.stdin, the resulting EPIPE
+// is an unhandled stream error — an uncaughtException that can surface async,
+// after whichever test happens to be running at that moment already ended.
+// A payload past the OS pipe buffer (~64KB) forces the write to block on
+// drain long enough for the child's exit to land mid-write, every run.
+test('runWithInput resolves cleanly when the child exits before consuming a large stdin payload', async () => {
+  const bigInput = 'x'.repeat(2 * 1024 * 1024);
+  const result = await runWithInput(process.execPath, ['-e', 'process.exit(0)'], { input: bigInput });
+  assert.equal(result.error, null);
+  assert.equal(typeof result.status, 'number');
+});
+
 test('round trip through a real bare repository: absent, first commit, second commit', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-ledger-branch-'));
   const home = path.join(root, 'home');
