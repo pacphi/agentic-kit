@@ -151,8 +151,10 @@ test("collect() alone persists npm-global-root evidence; a bare globalRoot() cal
   resetEvidence();
   const prevPath = process.env.PATH;
   const prevConfigHome = process.env.XDG_CONFIG_HOME;
+  const prevAppData = process.env.APPDATA;
   process.env.PATH = path.join(os.tmpdir(), 'ak-global-root-collect-no-such-bin');
   process.env.XDG_CONFIG_HOME = tempDir('ak-global-root-collect-config');
+  process.env.APPDATA = process.env.XDG_CONFIG_HOME;
   _setGlobalRootForTest(null);
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-global-root-collect-cwd-'));
   try {
@@ -190,6 +192,8 @@ test("collect() alone persists npm-global-root evidence; a bare globalRoot() cal
     process.env.PATH = prevPath;
     if (prevConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
     else process.env.XDG_CONFIG_HOME = prevConfigHome;
+    if (prevAppData === undefined) delete process.env.APPDATA;
+    else process.env.APPDATA = prevAppData;
     _setGlobalRootForTest(null);
     fs.rmSync(cwd, { recursive: true, force: true });
   }
