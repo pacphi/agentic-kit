@@ -126,8 +126,12 @@ export function removeMemoryProbe(root, namespace, key) {
 }
 
 // Stray stores: memory files this project's hosts never read, each traced to
-// its owner in the 2026-09-26 audit (docs/audits). Report only: ak never moves,
-// merges or deletes them. Kinds:
+// its owner in the 2026-09-26 audit (docs/audits). This scan only reports.
+// The one exception is the aqe kind: `ak x aqe-store merge --yes`
+// (aqe-store-merge.mjs, ADR-0062) merges a stray AQE store into the project
+// store and moves the whole folder to ak's state archive, after its holder,
+// backup and rehearsal checks. ak never moves, merges or deletes the other
+// kinds. Kinds:
 //   ruflo       memory.db/agentdb-memory.db anywhere under .swarm/ except the
 //               canonical pair and Ruflo's own .swarm/backups/, or a .swarm/
 //               store in a subfolder (a Ruflo command ran with that folder as

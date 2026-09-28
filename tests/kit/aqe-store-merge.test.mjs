@@ -37,12 +37,28 @@ function buildStore(dir, { patterns = [], experiences = [], witness = 0 } = {}) 
 const tables = (db) => new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name));
 const readJsonl = (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
 
-/** The fake `aqe`: brain export/import over JSONL, recording each call. */
-function fakeAqe({ underImportInto = null, version = '3.14.4' } = {}) {
+/** The fake `aqe`: brain export/import over JSONL, recording each call. `init`
+ *  lays out an empty store at AQE_MEMORY_PATH and `learning stats` seeds it
+ *  with `seeds` the way AQE's reasoning bank does on its first start
+ *  (AQE/dist/learning/qe-reasoning-bank.js:147-160). */
+function fakeAqe({ underImportInto = null, version = '3.14.4', seeds = ['S1', 'S2'], initCode = 0 } = {}) {
   const calls = [];
   const runner = async (cmd, args, opts) => {
     calls.push({ cmd, args, cwd: opts?.cwd, env: opts?.env });
     const flag = (name) => args[args.indexOf(name) + 1];
+    if (args[0] === 'init') {
+      if (initCode) return { code: initCode, stdout: '', stderr: 'init exploded' };
+      buildStore(path.dirname(opts.env.AQE_MEMORY_PATH), { experiences: null });
+      return { code: 0, stdout: 'AQE initialized\n', stderr: '' };
+    }
+    if (args[0] === 'learning' && args[1] === 'stats') {
+      const db = new DatabaseSync(opts.env.AQE_MEMORY_PATH);
+      for (const name of seeds) {
+        db.prepare('INSERT INTO qe_patterns (id, pattern_type, qe_domain, domain, name) VALUES (?, ?, ?, ?, ?)').run(`seed-${name}`, 'workflow', 'test-generation', 'test', name);
+      }
+      db.close();
+      return { code: 0, stdout: JSON.stringify({ totalPatterns: seeds.length }), stderr: '' };
+    }
     if (args[0] === 'brain' && args[1] === 'export') {
       const out = flag('-o');
       fs.mkdirSync(out, { recursive: true });
@@ -143,7 +159,7 @@ test('dry run: previews from copies, opens no real store, writes nothing outside
   const result = await mergeAqeStores(p.root, base(p, { apply: false, runner, holders: noHolders, openDb }));
   assert.equal(result.status, 'preview');
   assert.deepEqual(snapshot(p.root), before, 'the project is untouched');
-  assert.equal(calls.length, 0, 'no aqe import in a dry run');
+  assert.equal(calls.filter((c) => c.args[0] === 'brain').length, 0, 'no aqe export or import in a dry run');
   assert.ok(opened.length >= 3);
   const runDir = path.join(p.mergeDir, result.runId);
   assert.ok(opened.every((file) => file.startsWith(path.join(runDir, 'scratch') + path.sep)), JSON.stringify(opened));
@@ -176,7 +192,7 @@ test('a holder at the first check refuses before any backup and lists it', async
   assert.match(result.reason, /4242/);
   assert.match(result.reason, /npm exec agentic-qe mcp/);
   assert.match(result.reason, /Claude Code, Codex and OpenCode/);
-  assert.equal(calls.length, 0);
+  assert.equal(calls.filter((c) => c.args[0] === 'brain').length, 0);
   assert.equal(result.backup, null);
   assert.deepEqual(snapshot(p.root), before);
   assert.equal(fs.existsSync(path.join(p.mergeDir, result.runId)), false);
@@ -240,7 +256,7 @@ test('--yes merges, keeps the audit trail out, archives whole folders beside a b
     [['.agentic-qe/.agentic-qe', 1, 0], ['docs/.agentic-qe', 3, 0]]);
   const real = calls.filter((c) => c.args[1] === 'import' && c.args.includes(p.rootDb));
   assert.ok(real.length >= 2 && real.every((c) => c.cwd === p.root && c.env.AQE_PROJECT_ROOT === fs.realpathSync(p.root)));
-  const scratch = calls.filter((c) => !c.args.includes(p.rootDb));
+  const scratch = calls.filter((c) => c.args[0] === 'brain' && !c.args.includes(p.rootDb));
   assert.ok(scratch.every((c) => !String(c.env.AQE_STORAGE_PATH).split(path.sep).includes('.agentic-qe')), 'AQE writes no .agentic-qe in ak state');
   const again = await mergeAqeStores(p.root, base(p, { apply: true, runner, holders: noHolders, now: Date.UTC(2026, 8, 27, 13) }));
   assert.equal(again.status, 'nothing');
@@ -317,6 +333,114 @@ test('no project store at the root refuses and says how to create one', async (t
   assert.match(result.reason, /no project store/);
 });
 
+// ---- AQE's starter patterns (decision B5-D5) ---------------------------------
+
+/** project() plus AQE starter patterns S1, S2 in the strays (the root has none of
+ *  them, like the real root), rows that hard-reference S1 in docs (an embedding,
+ *  a usage row, a null-result row), and the project's embedder endpoint. */
+function projectWithSeeds(t, { embedder = 'settings' } = {}) {
+  const p = project(t);
+  const add = (dir, names) => {
+    const db = new DatabaseSync(path.join(p.root, dir, 'memory.db'));
+    for (const name of names) {
+      db.prepare('INSERT INTO qe_patterns (id, pattern_type, qe_domain, domain, name) VALUES (?, ?, ?, ?, ?)').run(`${dir}-${name}`, 'workflow', 'test-generation', 'test', name);
+    }
+    return db;
+  };
+  const docs = add('docs/.agentic-qe', ['S1', 'S2']);
+  docs.prepare('INSERT INTO qe_pattern_embeddings (pattern_id, embedding, dimension) VALUES (?, ?, ?)').run('docs/.agentic-qe-S1', Buffer.alloc(4), 1);
+  docs.prepare('INSERT INTO qe_pattern_usage (pattern_id, success) VALUES (?, ?)').run('docs/.agentic-qe-S1', 1);
+  docs.prepare('INSERT INTO qe_pattern_nulls (id, pattern_id, context_fingerprint, failure_mode) VALUES (?, ?, ?, ?)').run('n1', 'docs/.agentic-qe-S1', 'fp', 'none');
+  docs.close();
+  add('.agentic-qe/.agentic-qe', ['S1']).close();
+  if (embedder === 'settings') {
+    fs.mkdirSync(path.join(p.root, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(p.root, '.claude', 'settings.local.json'), JSON.stringify({ env: { AQE_EMBEDDER_ENDPOINT: 'http://embed.test', OTHER: 'x' } }));
+  } else if (embedder === 'mcp') {
+    fs.writeFileSync(path.join(p.root, '.mcp.json'), JSON.stringify({ mcpServers: { 'agentic-qe': { command: 'aqe-mcp', env: { AQE_EMBEDDER_ENDPOINT: 'http://mcp-embed.test' } } } }));
+  }
+  return p;
+}
+
+const names = (file) => withDb(file, (db) => db.prepare('SELECT name FROM qe_patterns ORDER BY name').all().map((r) => r.name)).value;
+
+test('AQE starter patterns: the set comes from a fresh store in scratch, built with the project\'s embedder', async (t) => {
+  const p = projectWithSeeds(t);
+  const { runner, calls } = fakeAqe();
+  const result = await mergeAqeStores(p.root, base(p, { apply: false, runner, holders: noHolders }));
+  assert.equal(result.status, 'preview');
+  assert.equal(result.refusal, null);
+  assert.deepEqual(result.seeds, { patterns: 2, source: '.claude/settings.local.json' });
+  const build = calls.filter((c) => c.args[0] !== 'brain');
+  assert.deepEqual(build.map((c) => c.args), [['init', '--auto', '--minimal'], ['learning', 'stats', '--json']]);
+  const seedDir = path.join(p.mergeDir, result.runId, 'scratch', 'seed');
+  for (const c of build) {
+    assert.equal(c.cwd, seedDir);
+    assert.equal(c.env.AQE_PROJECT_ROOT, seedDir);
+    assert.equal(c.env.AQE_MEMORY_PATH, path.join(seedDir, '.agentic-qe', 'memory.db'));
+    assert.equal(c.env.AQE_STORAGE_PATH, path.join(seedDir, '.agentic-qe'));
+    assert.ok(c.env.npm_config_prefix.startsWith(seedDir + path.sep), 'never the user\'s global npm prefix');
+    assert.equal(c.env.AQE_EMBEDDER_ENDPOINT, 'http://embed.test');
+    assert.equal(c.env.OTHER, undefined, 'only the embedder keys are taken from the project');
+  }
+  assert.equal(fs.existsSync(path.join(p.mergeDir, result.runId)), false, 'the preview removes the fresh store with its scratch');
+});
+
+test('AQE starter patterns: the embedder falls back to the project .mcp.json registration', async (t) => {
+  const p = projectWithSeeds(t, { embedder: 'mcp' });
+  const { runner, calls } = fakeAqe();
+  const result = await mergeAqeStores(p.root, base(p, { apply: false, runner, holders: noHolders }));
+  assert.equal(result.seeds.source, '.mcp.json');
+  assert.ok(calls.filter((c) => c.args[0] === 'init').every((c) => c.env.AQE_EMBEDDER_ENDPOINT === 'http://mcp-embed.test'));
+});
+
+test('AQE starter patterns are counted per stray and left out of the expected root', async (t) => {
+  const p = projectWithSeeds(t);
+  const result = await mergeAqeStores(p.root, base(p, { apply: false, runner: fakeAqe().runner, holders: noHolders }));
+  const docs = result.strays.find((s) => s.path === 'docs/.agentic-qe');
+  const nested = result.strays.find((s) => s.path === '.agentic-qe/.agentic-qe');
+  // Strays are read in path order: .agentic-qe/.agentic-qe brings C and D first.
+  assert.deepEqual([nested.patterns, nested.seedPatterns, nested.newPatterns], [3, 1, 2]);
+  assert.deepEqual([docs.patterns, docs.seedPatterns, docs.newPatterns], [4, 2, 0]);
+  assert.deepEqual(result.expected, { patterns: 4, experiences: 2 }, 'A, B, C, D: no starter pattern');
+});
+
+test('--yes leaves AQE starter patterns and their rows out of the root; the archive keeps them', async (t) => {
+  const p = projectWithSeeds(t);
+  const result = await mergeAqeStores(p.root, base(p, { apply: true, runner: fakeAqe().runner, holders: noHolders }));
+  assert.equal(result.status, 'merged', JSON.stringify(result.reason));
+  assert.deepEqual(names(p.rootDb), ['A', 'B', 'C', 'D']);
+  assert.equal(count(p.rootDb, 'qe_pattern_nulls'), 0);
+  const runDir = path.join(p.mergeDir, result.runId);
+  assert.deepEqual(names(path.join(runDir, 'archive', 'docs', '.agentic-qe', 'memory.db')), ['B', 'C', 'S1', 'S2'], 'the archived stray is whole');
+  assert.equal(count(path.join(runDir, 'archive', 'docs', '.agentic-qe', 'memory.db'), 'qe_pattern_nulls'), 1);
+  const receipt = JSON.parse(fs.readFileSync(result.receipt, 'utf8'));
+  assert.deepEqual(receipt.seedSet, { patterns: 2, source: '.claude/settings.local.json' });
+  assert.deepEqual(receipt.strays.map((s) => [s.path, s.seedPatternsSkipped]), [['.agentic-qe/.agentic-qe', 1], ['docs/.agentic-qe', 2]]);
+});
+
+test('no starter set (an empty fresh store) refuses the merge before any backup, and the preview says why', async (t) => {
+  const p = projectWithSeeds(t);
+  const empty = fakeAqe({ seeds: [] });
+  const preview = await mergeAqeStores(p.root, base(p, { apply: false, runner: empty.runner, holders: noHolders }));
+  assert.match(preview.refusal, /starter pattern/);
+  assert.match(preview.refusal, /no starter patterns/);
+  const result = await mergeAqeStores(p.root, base(p, { apply: true, runner: empty.runner, holders: noHolders, now: Date.UTC(2026, 8, 27, 15) }));
+  assert.equal(result.status, 'refused');
+  assert.match(result.reason, /starter pattern/);
+  assert.equal(result.backup, null);
+  assert.equal(empty.calls.filter((c) => c.args[0] === 'brain').length, 0);
+  assert.equal(fs.existsSync(path.join(p.mergeDir, result.runId)), false);
+});
+
+test('a failed fresh-store build refuses the merge and names the failure', async (t) => {
+  const p = projectWithSeeds(t);
+  const result = await mergeAqeStores(p.root, base(p, { apply: true, runner: fakeAqe({ initCode: 1 }).runner, holders: noHolders }));
+  assert.equal(result.status, 'refused');
+  assert.match(result.reason, /aqe init/);
+  assert.match(result.reason, /init exploded/);
+});
+
 // ---- the command ----------------------------------------------------------
 
 const cli = await import('../../src/commands/x/aqe-store.mjs');
@@ -360,6 +484,7 @@ test('ak x aqe-store status prints the preview for a real fixture project', asyn
   assert.match(out, /docs\/\.agentic-qe: 2 patterns \(1 already in the root\), 1 experience/);
   assert.match(out, /after the merge the root would hold 4 patterns and 2 experiences/);
   assert.match(out, /docker\/\.agentic-qe: skipped \(no memory\.db\)/);
+  assert.match(out, /AQE starter set: 2 patterns/);
   assert.match(out, /ak x aqe-store merge --yes/);
 });
 

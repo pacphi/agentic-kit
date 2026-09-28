@@ -29,6 +29,10 @@ Usage: ak x aqe-store [status|merge] [options]
            2. backs up the root store (VACUUM INTO)
            3. rehearses AQE's own brain export/import on copies and checks the
               counts, integrity and foreign keys
+           AQE's starter patterns are left out: ak builds a fresh AQE store in
+           its scratch folder (aqe init --minimal, then aqe learning stats,
+           with the project's AQE embedder) and skips every stray pattern with
+           the same name, domain and type. Without that set it refuses.
            4. imports into the root store and checks the counts again
            5. moves each whole stray folder into the archive
            Audit-trail (witness_chain) rows are not imported; they stay in the
@@ -55,7 +59,8 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 function strayLine(stray) {
   if (!stray.readable) return `${stray.path}: copy unreadable (${stray.error}); a live writer may have torn it`;
-  return `${stray.path}: ${plural(stray.patterns, 'pattern')} (${stray.alreadyInRoot} already in the root), `
+  const seeds = stray.seedPatterns ? `, ${plural(stray.seedPatterns, 'AQE starter pattern')} left out` : '';
+  return `${stray.path}: ${plural(stray.patterns, 'pattern')} (${stray.alreadyInRoot} already in the root${seeds}), `
     + `${plural(stray.experiences, 'experience')}, ${plural(stray.witnessRows, 'audit-trail row')} (not imported)`;
 }
 
@@ -70,6 +75,9 @@ function holdersLine(found) {
 function printPreview(result) {
   info(`AQE ${result.aqeVersion ?? 'not installed'}; project store ${result.root}/.agentic-qe/memory.db: `
     + `${result.rootStore.readable ? `${plural(result.rootStore.patterns, 'pattern')}, ${plural(result.rootStore.experiences, 'experience')}` : `unreadable copy (${result.rootStore.error})`}`);
+  if (result.seeds && !result.seeds.error) {
+    console.log(`AQE starter set: ${plural(result.seeds.patterns, 'pattern')} from a fresh store (embedder from ${result.seeds.source}); a merge leaves them out`);
+  }
   for (const stray of result.strays) console.log(`  ${strayLine(stray)}`);
   for (const skipped of result.skipped) console.log(`  ${skipped.path}: skipped (${skipped.reason})`);
   console.log(`after the merge the root would hold ${plural(result.expected.patterns, 'pattern')} and ${plural(result.expected.experiences, 'experience')}`);

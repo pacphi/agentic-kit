@@ -7,7 +7,19 @@
 //   1 preview   copy the root and every stray store (memory.db, -wal, -shm)
 //               into <run>/scratch and count there. A real store is never
 //               opened for a preview, not even read-only (a WAL open touches
-//               -shm). A dry run stops here and removes its scratch.
+//               -shm). AQE's starter patterns (decision B5-D5) come from a
+//               fresh store AQE builds in <run>/scratch/seed: `aqe init --auto
+//               --minimal` lays it out and `aqe learning stats --json` starts
+//               the reasoning bank, which seeds 22 static patterns
+//               (AQE/dist/learning/pretrained-patterns.js:15) and their
+//               cross-domain copies named "<name> (from <domain>)"
+//               (pattern-promotion.js:198), keeping those whose embedding is
+//               not too close to a target-domain pattern (:183-190). The copies
+//               depend on the embedder, so the build takes the project's
+//               AQE_EMBEDDER_* keys; `aqe init` alone seeds nothing
+//               (AQE/dist/init/phases/05-learning.js:76-97). Seeds are matched
+//               by (name, qe_domain, pattern_type); no starter set = refuse. A
+//               dry run stops here and removes its scratch.
 //   2 writers   refuse while any process holds the root or a stray store, or
 //               when that cannot be checked (aqe-store-holders.mjs; on Windows
 //               the census stands in). No force: AQE's writers take no lock a
@@ -15,12 +27,17 @@
 //   3 backup    VACUUM INTO <run>/backup/root-memory.db.
 //   4 rehearse  on a copy of that backup: per stray copy, delete its
 //               witness_chain rows (appended unlinked they break the root's
-//               audit chain; Branch 5 Task 0.2), `aqe brain export --format
+//               audit chain; Branch 5 Task 0.2) and its starter patterns with
+//               the rows that must reference them (a pattern_id column that is
+//               NOT NULL or a foreign key to qe_patterns: embeddings, usage,
+//               null results, lineage; nullable references such as
+//               concept_nodes stay), `aqe brain export --format
 //               jsonl`, `aqe brain import --dry-run`, then the import. Counts
 //               must equal the preview's union by (name, qe_domain,
 //               pattern_type) and experience id; integrity and foreign keys
 //               clean. AQE 3.14.4 skips shared patterns as conflicts without
 //               pruning (Task 0.2), so no agentic-qe#736 prune step runs.
+//               The archived strays keep their starter patterns.
 //   5 apply     writers again, then the same imports into the real root; its
 //               counts must equal the rehearsal's. On a mismatch: stop, leave
 //               the strays, print the backup and how to restore it.
@@ -46,11 +63,13 @@ import { cmpVersions } from './versions.mjs';
  *   aqeVersion: string|null, skipped: Array<{ path: string, reason: string }>, backup: string|null,
  *   archived: Array<{ path: string, to: string }>, leftInPlace: Array<{ path: string, reason: string }>,
  *   strays?: any[], expected?: { patterns: number, experiences: number }|null, holders?: any, rootStore?: any,
- *   reason?: string, refusal?: string|null, restore?: string, receipt?: string, after?: { patterns: number, experiences: number }|null }} MergeResult */
+ *   reason?: string, refusal?: string|null, restore?: string, receipt?: string, after?: { patterns: number, experiences: number }|null,
+ *   seeds?: { patterns: number, source: string|null, error?: string } }} MergeResult */
 
 export const MIN_AQE_VERSION = '3.14.4';
 const STORE_FILES = ['memory.db', 'memory.db-wal', 'memory.db-shm'];
 const AQE_TIMEOUT_MS = 10 * 60_000;
+const EMBEDDER_KEY = /^AQE_EMBEDDER_/;
 const CLOSE_SESSIONS = 'close the Claude Code, Codex and OpenCode sessions in this project (their AQE MCP servers and hooks write the store), then run it again';
 
 /** Archive folder name for a stray at `relative` (e.g. `docs/.agentic-qe`):
@@ -118,7 +137,7 @@ function strayFiles(dir) {
 
 // ---- 1 preview ------------------------------------------------------------
 
-function preview(root, strays, scratch, openDb) {
+function preview(root, strays, scratch, openDb, seedKeys) {
   const rootCopy = readStore(copyStore(path.join(root, '.agentic-qe'), path.join(scratch, 'root')), openDb);
   const inRoot = new Set(rootCopy.keys);
   const known = new Set(rootCopy.keys);
@@ -126,14 +145,16 @@ function preview(root, strays, scratch, openDb) {
   const rows = strays.map((stray) => {
     const copy = copyStore(stray.file, path.join(scratch, 'strays', stray.slug));
     const store = readStore(copy, openDb);
+    const kept = store.keys.filter((key) => !seedKeys.has(key));
     const entry = {
       path: stray.path, dir: stray.file, slug: stray.slug, copy, readable: store.readable, ...(store.error ? { error: store.error } : {}),
       patterns: store.keys.length, experiences: store.experiences.length, witnessRows: store.witnessRows,
       alreadyInRoot: store.keys.filter((key) => inRoot.has(key)).length,
-      newPatterns: store.keys.filter((key) => !known.has(key)).length,
+      seedPatterns: store.keys.length - kept.length,
+      newPatterns: kept.filter((key) => !known.has(key)).length,
       newExperiences: store.experiences.filter((id) => !ids.has(id)).length,
     };
-    for (const key of store.keys) known.add(key);
+    for (const key of kept) known.add(key);
     for (const id of store.experiences) ids.add(id);
     return entry;
   });
@@ -142,6 +163,50 @@ function preview(root, strays, scratch, openDb) {
     strays: rows, expected: { patterns: known.size, experiences: ids.size },
   };
 }
+
+/** The AQE_EMBEDDER_* keys the project's hosts give AQE: Claude Code's
+ *  settings (local, then shared), then the project AQE MCP registration. */
+export function projectEmbedderEnv(root) {
+  /** @type {Array<[string, (doc: any) => any]>} */
+  const sources = [
+    ['.claude/settings.local.json', (doc) => doc?.env],
+    ['.claude/settings.json', (doc) => doc?.env],
+    ['.mcp.json', (doc) => doc?.mcpServers?.['agentic-qe']?.env],
+  ];
+  for (const [relative, pick] of sources) {
+    let env;
+    try { env = pick(JSON.parse(fs.readFileSync(path.join(root, relative), 'utf8'))); } catch { continue; }
+    if (!env || typeof env !== 'object' || Array.isArray(env)) continue;
+    const keys = Object.entries(env).filter(([key, value]) => EMBEDDER_KEY.test(key) && typeof value === 'string');
+    if (keys.length) return { env: Object.fromEntries(keys), source: relative };
+  }
+  return { env: {}, source: 'inherited environment' };
+}
+
+/** AQE's starter patterns, from a fresh store AQE builds in <scratch>/seed. */
+async function starterSet(o, root, scratch) {
+  const dir = path.join(scratch, 'seed');
+  fs.mkdirSync(dir, { recursive: true });
+  const store = path.join(dir, '.agentic-qe', 'memory.db');
+  const embedder = projectEmbedderEnv(root);
+  const context = { cwd: dir, env: {
+    ...embedder.env, AQE_PROJECT_ROOT: dir, AQE_MEMORY_PATH: store, AQE_STORAGE_PATH: path.dirname(store),
+    npm_config_prefix: path.join(dir, 'npm-global'), npm_config_cache: path.join(dir, 'npm-cache'),
+  } };
+  const none = (error) => ({ keys: new Set(), source: embedder.source, error });
+  try {
+    await aqe(o, ['init', '--auto', '--minimal'], context);
+    await aqe(o, ['learning', 'stats', '--json'], context);
+  } catch (error) { return none(String(error?.message ?? error)); }
+  const fresh = readStore(store, o.openDb);
+  if (!fresh.readable) return none(`cannot read the fresh store (${fresh.error})`);
+  if (!fresh.keys.length) return none(`the fresh store holds no starter patterns; AQE stores none without a working embedder (embedder from ${embedder.source})`);
+  return { keys: new Set(fresh.keys), source: embedder.source };
+}
+
+const starterRefusal = (seeds) => (seeds.error
+  ? `could not build AQE's starter pattern set (${seeds.error}); without it a merge would import AQE's starter patterns again`
+  : null);
 
 // ---- 2 writers --------------------------------------------------------------
 
@@ -185,9 +250,41 @@ function dropWitnessRows(file, openDb) {
   return result.value;
 }
 
-async function exportStrays(o, rows, scratch, scratchEnv) {
+/** Does `table` hold rows that must reference a qe_patterns row? */
+function referencesPattern(db, table) {
+  const column = db.prepare(`PRAGMA table_info("${table.replaceAll('"', '""')}")`).all().find((c) => c.name === 'pattern_id');
+  if (!column) return false;
+  return !!column.notnull || db.prepare(`PRAGMA foreign_key_list("${table.replaceAll('"', '""')}")`).all().some((fk) => fk.table === 'qe_patterns');
+}
+
+/** Delete AQE's starter patterns, and the rows that must reference them, from a
+ *  stray's scratch copy (B5-D5). Returns the number of patterns removed. */
+function dropStarterPatterns(file, seedKeys, openDb) {
+  const result = openDb(file, (db) => {
+    if (!seedKeys.size || !hasTable(db, 'qe_patterns')) return 0;
+    const ids = db.prepare('SELECT id, name, qe_domain, pattern_type FROM qe_patterns').all()
+      .filter((row) => seedKeys.has(patternKey(row))).map((row) => row.id);
+    if (!ids.length) return 0;
+    const dependents = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name <> 'qe_patterns'").all()
+      .map((row) => String(row.name)).filter((table) => referencesPattern(db, table));
+    db.exec('BEGIN');
+    try {
+      for (const id of ids) {
+        for (const table of dependents) db.prepare(`DELETE FROM "${table.replaceAll('"', '""')}" WHERE pattern_id = ?`).run(id);
+        db.prepare('DELETE FROM qe_patterns WHERE id = ?').run(id);
+      }
+      db.exec('COMMIT');
+    } catch (error) { db.exec('ROLLBACK'); throw error; }
+    return ids.length;
+  }, { readonly: false });
+  if (!result.ok) throw new Error(`cannot leave AQE's starter patterns out of ${file} (${result.error.kind}: ${result.error.message})`);
+  return result.value;
+}
+
+async function exportStrays(o, rows, scratch, scratchEnv, seedKeys) {
   for (const stray of rows) {
     stray.witnessRowsNotImported = dropWitnessRows(stray.copy, o.openDb);
+    stray.seedPatternsSkipped = dropStarterPatterns(stray.copy, seedKeys, o.openDb);
     stray.export = path.join(scratch, 'export', stray.slug);
     await aqe(o, ['brain', 'export', '--db', stray.copy, '--format', 'jsonl', '-o', stray.export], scratchEnv);
   }
@@ -290,10 +387,10 @@ function writeReceipt(result, extra) {
   assertOutsideAqe(file);
   fs.writeFileSync(file, `${JSON.stringify({
     root: result.root, runId: result.runId, status: result.status, aqeVersion: result.aqeVersion,
-    holderMethod: result.holders?.method ?? null, backup: result.backup, ...extra,
+    holderMethod: result.holders?.method ?? null, backup: result.backup, ...extra, seedSet: result.seeds ?? null,
     strays: result.strays.map((s) => ({
       path: s.path, patterns: s.patterns, experiences: s.experiences, alreadyInRoot: s.alreadyInRoot,
-      witnessRowsNotImported: s.witnessRowsNotImported ?? 0, prunedPatterns: 0,
+      witnessRowsNotImported: s.witnessRowsNotImported ?? 0, seedPatternsSkipped: s.seedPatternsSkipped ?? s.seedPatterns ?? 0, prunedPatterns: 0,
     })),
     archived: result.archived, leftInPlace: result.leftInPlace,
   }, null, 2)}\n`);
@@ -310,7 +407,7 @@ const restoreText = (backup, root) => `with every Claude Code, Codex and OpenCod
   + `${path.join(root, '.agentic-qe', 'memory.db')} and delete memory.db-wal and memory.db-shm beside it`;
 
 /** Steps 3-7, after the preview and the first writer check passed. */
-async function applyMerge(o, root, result, rows) {
+async function applyMerge(o, root, result, rows, seedKeys) {
   const scratch = path.join(result.dir, 'scratch');
   const real = path.join(root, '.agentic-qe', 'memory.db');
   result.backup = path.join(result.dir, 'backup', 'root-memory.db');
@@ -323,7 +420,7 @@ async function applyMerge(o, root, result, rows) {
   fs.mkdirSync(path.dirname(rehearsal), { recursive: true });
   fs.copyFileSync(result.backup, rehearsal);
   const scratchEnv = { cwd: scratch, env: { AQE_PROJECT_ROOT: scratch, AQE_MEMORY_PATH: rehearsal, AQE_STORAGE_PATH: path.join(scratch, 'aqe-state') } };
-  await exportStrays(o, rows, scratch, scratchEnv);
+  await exportStrays(o, rows, scratch, scratchEnv, seedKeys);
   const rehearsed = await importAll(o, rows, rehearsal, scratchEnv);
   if (rehearsed.problem || !sameCounts(rehearsed.counts, result.expected)) {
     return { ...result, status: 'failed', reason: rehearsed.problem ?? `rehearsal count mismatch: expected ${JSON.stringify(result.expected)}, got ${JSON.stringify(rehearsed.counts)}; nothing was changed` };
@@ -371,16 +468,24 @@ export async function mergeAqeStores(root, options = {}) {
   /** @type {MergeResult} */
   let result = { ...base, runId, dir };
   try {
-    const seen = preview(root, strays, path.join(dir, 'scratch'), o.openDb);
+    const scratch = path.join(dir, 'scratch');
+    const tooOld = versionRefusal(o.aqeVersion);
+    const starters = tooOld ? { keys: new Set(), source: null, error: tooOld } : await starterSet(o, root, scratch);
+    const seen = preview(root, strays, scratch, o.openDb, starters.keys);
     const first = await writersCheck(o, root, strays);
-    result = { ...result, ...seen, holders: first.found };
+    const seeds = { patterns: starters.keys.size, source: starters.source, ...(starters.error ? { error: starters.error } : {}) };
+    result = { ...result, ...seen, holders: first.found, seeds };
     const unreadable = seen.strays.filter((s) => !s.readable).map((s) => s.path);
-    if (!o.apply) { removeRunScratch(o, dir); return { ...result, status: 'preview', refusal: first.refusal }; }
-    const refusal = first.refusal ?? versionRefusal(o.aqeVersion)
+    if (!o.apply) {
+      removeRunScratch(o, dir);
+      return { ...result, status: 'preview', refusal: first.refusal ?? tooOld ?? starterRefusal(starters) };
+    }
+    const refusal = first.refusal ?? tooOld
       ?? rootRefusal(root, seen.rootStore)
-      ?? (unreadable.length ? `unreadable stray store copies: ${unreadable.join(', ')}` : null);
+      ?? (unreadable.length ? `unreadable stray store copies: ${unreadable.join(', ')}` : null)
+      ?? starterRefusal(starters);
     if (refusal) { removeRunScratch(o, dir); return { ...result, status: 'refused', reason: refusal }; }
-    result = await applyMerge(o, root, result, seen.strays);
+    result = await applyMerge(o, root, result, seen.strays, starters.keys);
   } catch (error) {
     result = { ...result, status: 'failed', reason: String(error?.message ?? error),
       ...(result.backup ? { restore: restoreText(result.backup, root) } : {}) };
