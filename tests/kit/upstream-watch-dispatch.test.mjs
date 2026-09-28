@@ -58,6 +58,11 @@ test('a firing within three days waits; after three days it fires again; after t
   assert.deepEqual(spent.calls.fire, []);
   assert.equal(failed.errors.length, 1);
   assert.match(failed.errors[0].error, /did not complete after 2 firings; see https:\/\/claude\.ai\/code\/session_a and https:\/\/claude\.ai\/code\/session_b/);
+  const tooSoon = fakeDispatcher();
+  const stillFailed = await run(tooSoon, [fired('2026-09-20T14:17:00Z', 'https://claude.ai/code/session_a'), fired('2026-10-01T14:17:00Z', 'https://claude.ai/code/session_b')]);
+  assert.deepEqual(tooSoon.calls.fire, []);
+  assert.equal(stillFailed.errors.length, 1);
+  assert.match(stillFailed.errors[0].error, /did not complete after 2 firings; see https:\/\/claude\.ai\/code\/session_a and https:\/\/claude\.ai\/code\/session_b/);
 });
 
 test('a failed trigger call is an error and records nothing', async () => {

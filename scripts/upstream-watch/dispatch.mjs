@@ -57,12 +57,12 @@ export async function dispatch({ released, records, dispatcher, repo, sentinel, 
     try {
       if (await dispatcher.branchExists(branch)) continue;
       const firings = recordsOf(event.id, 'fired');
-      const newest = Math.max(...firings.map((item) => Date.parse(item.recordedAt)), 0);
-      if (newest && now.getTime() - newest < REFIRE_AFTER_DAYS * DAY) continue;
       if (firings.length >= MAX_FIRES) {
         errors.push({ id: event.id, error: `dispatch did not complete after ${firings.length} firings; see ${firings.map((item) => item.fields.session).join(' and ')}` });
         continue;
       }
+      const newest = Math.max(...firings.map((item) => Date.parse(item.recordedAt)), 0);
+      if (newest && now.getTime() - newest < REFIRE_AFTER_DAYS * DAY) continue;
       const session = await dispatcher.fire(`${event.id} ${version} ${branch}`);
       out.push(toRecord(eventLine(sentinel, event.id, 'fired', today, { branch, session }), recordedAt));
     } catch (error) {
