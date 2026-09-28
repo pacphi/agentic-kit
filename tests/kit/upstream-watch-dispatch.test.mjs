@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { eventLine } from '../../scripts/upstream-watch/classify.mjs';
-import { FIRE_HEADERS, FIRE_URL, createDispatcher, dispatch } from '../../scripts/upstream-watch/dispatch.mjs';
+import { FIRE_HEADERS, FIRE_URL, SAME_REPO_PR, createDispatcher, dispatch } from '../../scripts/upstream-watch/dispatch.mjs';
 
 const NOW = new Date('2026-10-02T14:17:00Z');
 const RECORDED_AT = '2026-10-02T14:17:00Z';
@@ -26,7 +26,8 @@ function fakeDispatcher({ exists = false, pr = null, session = 'https://claude.a
     fire: async (text) => { calls.fire.push(text); if (fireError) throw new Error(fireError); return session; },
   };
 }
-const run = (dispatcher, records = []) => dispatch({ released: [released], records, dispatcher, repo: 'pacphi/agentic-kit', sentinel: 'UPSTREAM-WATCH', now: NOW, recordedAt: RECORDED_AT });
+const run = (dispatcher, records = [], { dryRun, list = [released] } = {}) => dispatch({ released: list, records, dispatcher, repo: 'pacphi/agentic-kit', sentinel: 'UPSTREAM-WATCH', now: NOW, recordedAt: RECORDED_AT, dryRun });
+const NOTHING = { records: [], errors: [], wouldFire: [] };
 
 test('a released fix without a branch fires once and is recorded with its session', async () => {
   const dispatcher = fakeDispatcher();
@@ -42,12 +43,12 @@ test('an existing branch is never fired, and a closed dispatch pull request stay
   const dispatcher = fakeDispatcher({ exists: true, pr: null });
   const result = await run(dispatcher, [fired('2026-09-20T14:17:00Z')]);
   assert.deepEqual(dispatcher.calls.fire, []);
-  assert.deepEqual(result, { records: [], errors: [] });
+  assert.deepEqual(result, NOTHING);
 });
 
 test('a firing within three days waits; after three days it fires again; after two it fails', async () => {
   const recent = fakeDispatcher();
-  assert.deepEqual(await run(recent, [fired('2026-10-01T14:17:00Z')]), { records: [], errors: [] });
+  assert.deepEqual(await run(recent, [fired('2026-10-01T14:17:00Z')]), NOTHING);
   assert.deepEqual(recent.calls.fire, []);
   const later = fakeDispatcher();
   const second = await run(later, [fired('2026-09-28T14:17:00Z')]);
@@ -71,6 +72,30 @@ test('a failed trigger call is an error and records nothing', async () => {
   assert.deepEqual(result.errors, [{ id: ID, error: 'UPSTREAM_DISPATCH_TOKEN is not set' }]);
 });
 
+test('a dry run lists what would fire, calls no trigger and records no firing', async () => {
+  const dispatcher = fakeDispatcher();
+  const result = await run(dispatcher, [], { dryRun: true });
+  assert.deepEqual(dispatcher.calls.fire, []);
+  assert.deepEqual(dispatcher.calls.exists, [BRANCH], 'the branch check still runs');
+  assert.deepEqual(result, { records: [], errors: [], wouldFire: [{ id: ID, version: '3.13.10', branch: BRANCH }] });
+  const spent = await run(fakeDispatcher(), [fired('2026-09-20T14:17:00Z', 'https://claude.ai/code/session_a'), fired('2026-09-25T14:17:00Z', 'https://claude.ai/code/session_b')], { dryRun: true });
+  assert.deepEqual([spent.wouldFire, spent.errors.length], [[], 1], 'the firing limit is still an error');
+  const lookup = fakeDispatcher({ exists: true, pr: 261 });
+  const pr = await run(lookup, [fired('2026-10-01T14:17:00Z')], { dryRun: true });
+  assert.deepEqual(lookup.calls.pr, [['pacphi/agentic-kit', BRANCH]]);
+  assert.deepEqual([pr.records.map((item) => item.event), pr.wouldFire], [['dispatch-pr'], []]);
+  assert.deepEqual((await run(fakeDispatcher())).wouldFire, [], 'a real run lists nothing it would fire');
+});
+
+test('a fired record without fields is an error for its id, not a crash', async () => {
+  const malformed = { line: `UPSTREAM-WATCH ${ID} fired 2026-10-01`, id: ID, event: 'fired', date: '2026-10-01', recordedAt: '2026-10-01T14:17:00Z' };
+  const dispatcher = fakeDispatcher({ exists: true, pr: 261 });
+  const result = await run(dispatcher, [malformed], { list: [] });
+  assert.deepEqual(result.records, []);
+  assert.equal(result.errors.length, 1);
+  assert.equal(result.errors[0].id, ID);
+});
+
 test('a fired branch with an open pull request records dispatch-pr once', async () => {
   const dispatcher = fakeDispatcher({ exists: true, pr: 261 });
   const result = await run(dispatcher, [fired('2026-10-01T14:17:00Z')]);
@@ -79,7 +104,7 @@ test('a fired branch with an open pull request records dispatch-pr once', async 
   assert.equal(result.records[0].line, `UPSTREAM-WATCH ${ID} dispatch-pr 2026-10-02 branch=${BRANCH} pr=261`);
   const done = { ...result.records[0] };
   const again = fakeDispatcher({ exists: true, pr: 261 });
-  assert.deepEqual(await run(again, [fired('2026-10-01T14:17:00Z'), done]), { records: [], errors: [] });
+  assert.deepEqual(await run(again, [fired('2026-10-01T14:17:00Z'), done]), NOTHING);
   assert.deepEqual(again.calls.pr, []);
 });
 
@@ -96,6 +121,10 @@ test('the trigger call sends the payload with the documented headers and never p
   assert.equal(FIRE_HEADERS['anthropic-beta'], 'experimental-cc-routine-2026-04-01');
   assert.equal(FIRE_HEADERS['anthropic-version'], '2023-06-01');
   assert.deepEqual(JSON.parse(requests[0].init.body), { text: `${ID} 3.13.10 ${BRANCH}` });
+  assert.ok(requests[0].init.signal instanceof AbortSignal, 'the call carries a timeout signal');
+  assert.equal(requests[0].init.signal.aborted, false);
+  const hung = async () => { throw new DOMException('The operation was aborted due to timeout', 'TimeoutError'); };
+  await assert.rejects(createDispatcher({ fetchImpl: hung, env }).fire('x'), /aborted due to timeout/);
   const refused = async () => ({ status: 401, json: async () => ({ error: 'no' }) });
   const error = await createDispatcher({ fetchImpl: refused, env }).fire('x').catch((failure) => failure);
   assert.match(error.message, /HTTP 401/);
@@ -118,8 +147,20 @@ test('branch and pull request lookups use git and gh without a shell', async () 
   assert.equal(await dispatcher.branchExists('upstream/missing'), false);
   assert.equal(await dispatcher.openPullRequest('pacphi/agentic-kit', BRANCH), 261);
   assert.deepEqual(calls[0], ['git', 'ls-remote', '--exit-code', '--heads', 'origin', BRANCH]);
-  assert.deepEqual(calls[2], ['gh', 'pr', 'list', '--repo', 'pacphi/agentic-kit', '--head', BRANCH, '--state', 'open', '--json', 'number', '--jq', '.[0].number // empty']);
+  assert.deepEqual(calls[2], ['gh', 'pr', 'list', '--repo', 'pacphi/agentic-kit', '--head', BRANCH, '--state', 'open', '--json', 'number,isCrossRepository', '--jq', SAME_REPO_PR]);
   await assert.rejects(dispatcher.branchExists('main'), /not a dispatch branch/);
   const broken = createDispatcher({ exec: async () => ({ status: 128, stdout: '', stderr: 'fatal: no remote' }) });
   await assert.rejects(broken.branchExists(BRANCH), /fatal: no remote/);
+});
+
+// `--head` matches the branch name in any fork, so gh filters out pull
+// requests from other repositories before taking the first number.
+test('a pull request from a fork is never taken for the dispatch pull request', async () => {
+  assert.equal(SAME_REPO_PR, '[.[] | select(.isCrossRepository | not)][0].number // empty');
+  assert.match(SAME_REPO_PR, /select\(\.isCrossRepository \| not\)/);
+  const calls = [];
+  // Only a fork's pull request is open on the branch: gh's --jq leaves nothing.
+  const forkOnly = async (command, args) => { calls.push([command, ...args]); return { status: 0, stdout: '\n', stderr: '' }; };
+  assert.equal(await createDispatcher({ exec: forkOnly }).openPullRequest('pacphi/agentic-kit', BRANCH), null);
+  assert.deepEqual(calls[0].slice(-4), ['--json', 'number,isCrossRepository', '--jq', SAME_REPO_PR]);
 });
