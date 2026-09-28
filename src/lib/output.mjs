@@ -61,7 +61,7 @@ const s = sanitizeForTerminal;
 // A live check that runs beside others (or whose verdict needs its first
 // failure line) captures the ok/warn/fail/info/heading lines it prints, scoped
 // by AsyncLocalStorage so parallel checks never mix their lines. `echo` also
-// prints them, as a sequential `ak x verify` run does.
+// prints them, as a sequential `ak status --refresh=live` run does.
 const captureScope = new AsyncLocalStorage();
 
 /**

@@ -1015,7 +1015,7 @@
         "refs": ["closed-upstream review 2026-09-26"],
         "files": ["docs/TROUBLESHOOTING.md", "src/commands/about.mjs", "src/commands/status/sections/security.mjs", "src/lib/live-checks.mjs", "src/lib/heal.mjs", "src/lib/natives.mjs", "src/templates/statusline-footer.cjs"]
       },
-      "adjustment": "None: ak detects the built-in engine (security/builtin-aidefence.js, 3.32.2+) and reports a missing aidefence as a warning (status, ak x verify, about) with no footer alarm; healAidefence stays for adaptive learning and the aidefence_* MCP tools.",
+      "adjustment": "None: ak detects the built-in engine (security/builtin-aidefence.js, 3.32.2+) and reports a missing aidefence as a warning (status, live checks, about) with no footer alarm; healAidefence stays for adaptive learning and the aidefence_* MCP tools.",
       "status": "retired",
       "constraintIds": [],
       "history": [

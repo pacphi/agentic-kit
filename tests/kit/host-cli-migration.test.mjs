@@ -45,7 +45,7 @@ test('top-level ak host is the canonical management command', () => {
   assert.match(result.stdout, /pick\s+/);
   assert.match(result.stdout, /reset-routes\s+/);
   assert.match(result.stdout, /off\s+/);
-  assert.doesNotMatch(result.stdout, /\brefresh\b/, 'no legacy spelling (R17)');
+  assert.doesNotMatch(result.stdout, /\brefresh\b/, 'no legacy spelling');
   assert.doesNotMatch(output(result), /deprecated/i);
 });
 

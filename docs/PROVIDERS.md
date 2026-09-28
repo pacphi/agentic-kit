@@ -408,7 +408,7 @@ Three checks establish different facts; do not collapse them:
 
 1. `ak host adapters conformance <name>` must pass the real `aqe-provider` tier at the current
    content hash, then `ak host adapters grant <name> aqeProvider` must succeed.
-2. `ak x verify providers` proves admission plus the exact project declaration, ownership receipt,
+2. `ak status --refresh=live --only providers` proves admission plus the exact project declaration, ownership receipt,
    default, fallback, and override projection. It deliberately warns that this is not a served
    model response. It checks the repository that holds the current folder, from its root, even
    when you run it in a subfolder; outside a repository it skips these project checks and says so.
@@ -541,7 +541,7 @@ Defaults (all overridable; your edits are marked `custom` and never re-seeded):
 *(packaging & release are `ak`-added — ruflo ships templates for feature/security/refactor only.)*
 
 Implementation and testing escalate to `claude-opus-5-5`. Routes seeded before a default
-changes are reported as diverged and keep their model until you run `ak x host refresh`.
+changes are reported as diverged and keep their model until you run `ak host reset-routes`.
 
 **Retired Codex models.** `ak` has no automatic Codex retirement substitutions as of 2026-08-25.
 The current [OpenAI API model catalog](https://developers.openai.com/api/docs/models/all) still lists
@@ -554,7 +554,7 @@ a user-pinned route is reported, never rewritten (still routed to the replacemen
 
 `claude-opus-4-8` is **not** retired — it carries no deprecation notice and stays pinnable. It is
 merely no longer the default, which `ak status` reports as routing *divergence*: a trade for you to
-weigh, cleared with `ak x host refresh` if you want the newer default.
+weigh, cleared with `ak host reset-routes` if you want the newer default.
 
 **Configured model examples.** The route defaults above are policy choices, not a
 benchmark or entitlement guarantee. Use `ak models refresh` and `ak models status` to

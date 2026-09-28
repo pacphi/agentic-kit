@@ -453,7 +453,7 @@ Both gaps are disclosed at grant time, and both are `ak`-local work rather than 
 they will light up without needing anything from you. What works end-to-end today includes
 `activity-routing` and, on Agentic-QE 3.13.12+, an earned `aqeProvider`: a real provider hook,
 project-only declaration/default, fallback and activity-route projection, plus precise ownership
-receipts. `ak x verify providers` proves that configuration but honestly does not claim a served
+receipts. `ak status --refresh=live --only providers` proves that configuration but honestly does not claim a served
 model response; release proof must also exercise a fresh AQE CLI/MCP process.
 
 ## 9. The freeze, and why you matter

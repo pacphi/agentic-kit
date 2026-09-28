@@ -1,4 +1,4 @@
-// Branch 6b Task 1 (B6b-D1): the Limits panel's /api/limits route must ask
+// ADR-0010: the Limits panel's /api/limits route must ask
 // Codex for its quota ONLY when Codex is known to be present — never as a
 // side effect of merely opening the dashboard. `readLimits` (quota.mjs) now
 // gates the app-server spawn on `recordedHostPresence('codex')`
@@ -120,7 +120,7 @@ test('evidence recorded under another PATH: no spawn, host-unconfirmed', async (
 test('found but unmanaged (kit.json hosts.codex false): still asked', async () => {
   seedCodexPresence(true);
   const spy = spawnSpy();
-  // B6b-D1: presence, not kit.json management state, decides. enabledHosts
+  // ADR-0010: presence, not kit.json management state, decides. enabledHosts
   // only drives the F-10 "others" labeling — readLimits reads no kit.json.
   const r = await callLimits({ spawnImpl: spy.impl, enabledHosts: { codex: false } });
   assert.equal(spy.calls.length, 1, 'an unmanaged-but-present codex is still asked for its quota');

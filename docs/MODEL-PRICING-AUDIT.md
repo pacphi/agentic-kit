@@ -41,7 +41,7 @@ which the estimator does not model.
   GPT-6 Astra ↔ Opus 5.5 (reasoning; Astra also pairs with Fable 5.1), GPT-6
   Luna ↔ Haiku 4.5 (fast). A Codex-driven seed runs reasoning work on Astra.
 - Routes seeded before this change are reported as diverged and keep their model
-  until `ak x host refresh`.
+  until `ak host reset-routes`.
 - Not added as retirements: OpenAI's Codex docs retire GPT-5.4 / 5.4 Mini
   (2026-08-31) and GPT-5.5 (2026-10-14) for ChatGPT sign-in, but the API still
   serves them, so a read-time substitution would override API-key users' pins.

@@ -51,7 +51,7 @@ ak x aqe-embedding verify
 | Local Ollama | Recommended local, no-key setup | Downloads missing MiniLM and alias after consent; tests the selected service |
 | Existing endpoint | Shared or separately operated service | Preserves selection, projects configuration and tests synthetic text; never manages remote models |
 | In-process | Explicit upstream transformer-package opt-in | Tests the installed backend and existing cache; does not install the security-sensitive optional package |
-| Unmanaged | Operator owns configuration, or semantic learning is deferred | Restores only unchanged owned projection values; makes no semantic readiness claim; `ak x verify aqe` still runs and prints the embedding request but does not record its result for `ak status` |
+| Unmanaged | Operator owns configuration, or semantic learning is deferred | Restores only unchanged owned projection values; makes no semantic readiness claim; `ak status --refresh=live --only aqe-embedding` still runs and prints the embedding request but does not record its result for `ak status` |
 
 ```sh
 ak x aqe-embedding configure --aqe-embedding-endpoint https://embed.example --yes
@@ -109,14 +109,14 @@ then reapplies the selected environment afterward.
 ## Reading verification results
 
 `ak x aqe-embedding verify` proves the backend with synthetic text.
-`ak x verify aqe` also checks the current project's stored SQLite embedding
+`ak status --refresh=live --only aqe` also checks the current project's stored SQLite embedding
 provenance and reports storage observations.
 
 `ak status` and the dashboard never contact the service. They show the last live
-embedding request that `ak sync`, `ak x verify aqe` or `ak status --live` made,
-with its age: a failure is a warning with its reason, a pass is green for 24
+embedding request that `ak sync`, `ak status --refresh=live --only aqe`, or a plain
+`ak status --refresh=live` made, with its age: a failure is a warning with its reason, a pass is green for 24
 hours and then labelled stale. Selecting a different backend marks the old result
-as changed. `ak status --live` sends one synthetic request without reading the
+as changed. `ak status --refresh=live` sends one synthetic request without reading the
 project corpus.
 These are separate claims:
 

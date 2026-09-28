@@ -237,7 +237,7 @@ export function hostSetupInputsKey(host, env = process.env) {
 
 /** Presence from the LAST recorded `host-setup` evidence (detectHosts, written
  *  on every `/api/status` poll for EVERY host in HOSTS — managed or not), never
- *  a fresh probe (B6b-D1). A caller that needs to know whether it is safe to
+ *  a fresh probe (ADR-0010). A caller that needs to know whether it is safe to
  *  spawn a host-mediated read (e.g. the Limits panel asking Codex for its
  *  quota) calls this instead of `have`/`detectHosts`/`hostInstallState`/
  *  `hostExecutable` — those all spawn. Absent, stale (> HOST_SETUP_MAX_AGE_MS)

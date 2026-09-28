@@ -241,7 +241,7 @@ test('reset-routes is advertised as a subcommand, and the retired `refresh` spel
   const { home, project } = sandbox({ hosts: { claude: true } });
   const help = ak(['x', 'host', '--help'], { cwd: project, home });
   assert.match(help.all, /reset-routes/, 'the opt-in path must be discoverable');
-  assert.doesNotMatch(help.all, /\brefresh\b/, 'no legacy spelling in help (R17)');
+  assert.doesNotMatch(help.all, /\brefresh\b/, 'no legacy spelling in help');
   const bad = ak(['x', 'host', 'bogus'], { cwd: project, home });
   assert.match(bad.all, /status\|pick\|reset-routes\|off/);
 

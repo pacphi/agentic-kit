@@ -1137,7 +1137,7 @@ export function startDashboard({
   // Whether Codex itself is even asked is NOT decided here: readLimits's own
   // default (providers.mjs recordedHostPresence, reading the host-setup
   // evidence detectHosts already records for every host on each /api/status
-  // poll) decides, and this route never overrides it with a probe (B6b-D1).
+  // poll) decides, and this route never overrides it with a probe (ADR-0010).
   const provideLimits = limits || (async () => {
     const { readLimits } = await import('./quota.mjs');
     return readLimits({ enabledHosts: loadKitConfig().integrations.hosts });

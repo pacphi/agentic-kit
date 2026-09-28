@@ -746,7 +746,7 @@ nothing to leak.
 
 The CLI twin (`ak system`) renders the same collector output, `--json` emitting the collector's
 payload verbatim, following the one-collector-two-surfaces precedent of the usage scorecard.
-`ak system --deep` is the terminal spelling of **Full scan** and writes the same snapshot.
+`ak system --refresh=machine` is the terminal spelling of **Full scan** and writes the same snapshot.
 
 ## Invariants
 

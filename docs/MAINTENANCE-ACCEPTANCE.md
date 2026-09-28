@@ -156,8 +156,10 @@ human, assistive-technology and reference-platform gates still need their own ev
   per-environment remembered default.
 - **MNT-ACT-018:** All named package managers meet the capability matrix and release-model-specific
   N-3 policy before their procedures appear.
-- **MNT-ACT-019:** Recipe refresh verifies allowlist, publisher, signature, digest, schema, response,
-  and redirects; activation of new operations or privilege requires acceptance.
+- **MNT-ACT-019:** Recipe refresh is not offered until a registry is configured; the recipe store's
+  verified-staging function still enforces the allowlist, publisher, signature, digest, schema,
+  response, and redirect checks a future registry would use, and activation of new operations or
+  privilege requires acceptance.
 - **MNT-ACT-020:** Withdrawn recipes stay in history but create no new Guidance.
 
 ## Models

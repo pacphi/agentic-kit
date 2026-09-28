@@ -446,7 +446,7 @@ export function unsupportedQuotaHosts({ enabledHosts = {} } = {}) {
  * model); Codex may spawn one vendor subprocess, TTL-bounded, and ONLY when
  * the last recorded `host-setup` evidence (providers.mjs `recordedHostPresence`,
  * written by `detectHosts` on every `/api/status` poll for every host —
- * managed or not, B6b-D1) says the codex CLI was found — recent evidence, not
+ * managed or not, ADR-0010) says the codex CLI was found — recent evidence, not
  * a fresh probe: this function never spawns `which`/`codex --version` itself.
  * Presence `'not-found'`/`'unconfirmed'` serves the last cached answer (if
  * any) with `codexUnavailable` naming which, and skips the spawn entirely.

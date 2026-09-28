@@ -64,14 +64,15 @@ automatic source reads **Not scanned yet** (a host that is not installed reads *
 text:
 
 - **Refresh evidence** runs provider probes on the saved measurement and rebuilds the inventory.
-  It takes seconds. The CLI equivalent is `ak maintain scan --refresh-inventory`.
+  It takes seconds. The CLI equivalent is `ak maintain --refresh`.
 - **Re-measure machine** walks the filesystem to re-measure installs, storage, projects, and every
   discovery source, then refreshes evidence. It takes minutes. The CLI equivalent is
-  `ak maintain scan --deep --refresh-inventory`.
+  `ak maintain --refresh=machine`.
 
 Both controls run provider probes: Re-measure machine includes the Refresh evidence stage. While either action
-runs, both buttons are disabled, the status line says what is running ("Refreshing evidence…" or
-"Re-measuring the machine… this can take minutes."), and apply, undo, and record are refused. If
+runs, both buttons are disabled, the status line names what is running ("Refreshing evidence…";
+during Re-measure machine, each phase in turn, from "Preparing measurement…" through "Machine
+measured · refreshing evidence…"), and apply, undo, and record are refused. If
 the work does not finish, the previous evidence is kept. The inventory build runs after the probes
 settle and can take a few seconds on a large footprint; the empty state reads **Building the
 inventory…** until the rows appear, and **The last inventory build did not complete** with a short
@@ -280,12 +281,14 @@ remembered per entry.
 Procedures come from signed recipes. The built-in catalogue is signed with a bundled publisher key,
 which is tamper evidence for the local store rather than a secret.
 
-`recipes refresh` fetches a registry only when one is configured for the installation, and only
-over HTTPS from an allowlisted host. Redirects are bounded to three and must stay in the allowlist,
-the response must fit in 256 KiB, every recipe must match the expected publisher, and its digest and
-signature chain are verified. Refresh produces a diff and a pending queue; each recipe is accepted by
-id and version, and a withdrawn recipe creates no new Guidance. The stock CLI and dashboard have no
-registry configured, so refresh reports that plainly and the built-in catalogue is what you get.
+Recipe refresh is not offered: no installation has a registry configured, so the CLI verb, the
+dashboard route, and the service options that existed only for it were removed rather than kept
+unreachable. The recipe store's verified-staging function stays as the library a future registry
+calls: it would fetch only over HTTPS from an allowlisted host, bound redirects to three and keep
+them in the allowlist, cap the response at 256 KiB, and verify every recipe's expected publisher,
+digest, and signature chain before producing a diff and a pending queue; each recipe would be
+accepted by id and version, and a withdrawn recipe creates no new Guidance. Until a registry exists,
+the built-in catalogue is what you get.
 
 ## Discovery
 
@@ -459,7 +462,7 @@ ak maintain undo --receipt RECEIPT_ID --yes
 Undo needs the recorded provider and version, a reversible or compensating operation, and an exact
 current postimage. If anything changed after apply, undo refuses instead of overwriting the new
 state. If no inventory has been built yet, plan and apply refuse with `SCAN_REQUIRED`; choose
-**Refresh evidence** or run `ak maintain scan --refresh-inventory` first. If a placement cannot be
+**Refresh evidence** or run `ak maintain --refresh` first. If a placement cannot be
 bound to an exact executable finding, they refuse with `PLACEMENT_FINDING_UNRESOLVED`.
 
 Rollback classes are separate from safety: **reversible** (the provider restores and verifies the
@@ -541,7 +544,7 @@ transaction applies; follow the verb-specific options below.
 
 | Verb | What it does |
 |------|--------------|
-| `scan [--deep] [--refresh-inventory]` | Runs the provider check on the saved System inventory; `--refresh-inventory` rebuilds the Inventory afterwards (the dashboard's **Refresh evidence**). With `--deep` it re-measures System first and walks every discovery source to completion before rebuilding (the dashboard's **Re-measure machine**). |
+| `[report] [--refresh[=live\|machine]] [--project-trees]` | `report` (the default verb) reads the last measurement. A bare `--refresh` refreshes Maintenance evidence and rebuilds the Inventory first (the dashboard's **Refresh evidence**); `--refresh=machine` re-measures System first and walks every discovery source to completion before rebuilding (the dashboard's **Re-measure machine**); `--project-trees` with `--refresh=machine` also measures your projects' working trees. |
 | `inventory [--scope S] [--view V] [--facet name=value ...] [--search TEXT] [--sort ORDER] [--cursor TOKEN] [--limit N]` | Queries placements. |
 | `show --placement ID [--reveal]` | Prints the inspector; `--reveal` prints the exact, owner-only path. |
 | `guidance [--lane LANE]` | Lists admitted Guidance entries and per-lane counts. |
@@ -553,7 +556,7 @@ transaction applies; follow the verb-specific options below.
 | `sources exclude --path PATH [--recursive]` | Adds an exclusion. |
 | `sources unexclude --exclusion ID` | Removes an exclusion. |
 | `scans` | Prints scan progress. |
-| `scans start [--source ID,...] [--deep]` | Starts scans for the named roots, or every installed filesystem source, and waits for their final state. A non-filesystem automatic source is refused with `SOURCE_NOT_SCANNABLE`; a host source that is not installed is refused with `SOURCE_NOT_PRESENT`. |
+| `scans start [--source ID,...]` | Starts scans for the named roots, or every installed filesystem source, and waits for their final state. A non-filesystem automatic source is refused with `SOURCE_NOT_SCANNABLE`; a host source that is not installed is refused with `SOURCE_NOT_PRESENT`. |
 | `scans pause\|resume --source ID` | Pauses or resumes one source. |
 | `scans stop --source ID [--yes]` | Shows the affected resources; `--yes` stops the source. |
 | `activity` | Prints the six Activity groups. |
@@ -566,7 +569,7 @@ transaction applies; follow the verb-specific options below.
 | `apply --plan ID --digest SHA256 --actions ID --yes` | Applies exactly one action. |
 | `undo --receipt ID --yes` | Undoes one eligible receipt. |
 | `recover --receipt ID` | Read-only alias for `audit`. |
-| `recipes list\|refresh\|accept\|withdraw [--recipe ID --version V --yes]` | Manages the recipe catalogue. |
+| `recipes list\|accept\|withdraw [--recipe ID --version V --yes]` | Manages the recipe catalogue. Refresh is not offered until a registry exists (see Recipe trust, above). |
 | `preferences [--set key=value ...]` | Reads or saves owner-private preferences. |
 
 Two sentinel flows, end to end:
@@ -664,7 +667,6 @@ POST /api/maintenance/v2/reconcile
 POST /api/maintenance/v2/plans
 POST /api/maintenance/v2/apply
 POST /api/maintenance/v2/undo
-POST /api/maintenance/v2/recipes/refresh
 POST /api/maintenance/v2/recipes/accept
 POST /api/maintenance/v2/recipes/withdraw
 GET  /api/maintenance/v2/preferences
@@ -703,7 +705,6 @@ The accepted request bodies are exact; surplus keys are rejected:
 | audit | `{"receiptIds":["mnt-…"]}`, 1..20 unique ids |
 | reconcile/preview | `{"receiptId":"mnt-…","outcome":"record-no-change"\|"record-completed"\|"record-restored"}` |
 | reconcile | `{"capability":"TOKEN","confirm":true,"typedPhrase":"RECORD"}` |
-| recipes/refresh | `{"confirm":true}` |
 | recipes/accept | `{"recipeId":"ID","recipeVersion":"V","confirm":true}` |
 | recipes/withdraw | `{"recipeId":"ID","recipeVersion":"V","confirm":true}`; `recipeVersion` is optional |
 | preferences | `{"lastView":{…},"preferredShellByEnvironment":{"env_…":"zsh"},"retention":{…}}`; at least one key |

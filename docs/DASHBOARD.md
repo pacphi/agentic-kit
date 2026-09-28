@@ -157,7 +157,7 @@ Overview keeps status and routing in one health-first area:
   context configuration with host-specific native controls. It also holds the read-only
   "ruflo components" panel (below) and, once any live check has run, a `live-checks` card
   with each remembered result and its age. The dashboard never runs live checks itself;
-  `ak status --live`, `ak x verify` and `ak sync` record them.
+  `ak status --refresh=live` and `ak sync` record them.
 - **Intelligence** presents memory, learning, and quality-improvement signals machine-wide: an
   always-visible rollup folded across every project on this machine where memory or intelligence has
   been activated — a `.claude-flow`, `.agentic-qe` or `.swarm` directory, whichever host created it
@@ -314,10 +314,13 @@ Claude's limits reach the dashboard only through the kit footer in the statuslin
 and a project's own statusLine takes precedence over your user-level one. When the Claude side is
 empty it says what your user-level statusLine is (none, the kit footer, each project's Ruflo
 helper, or a custom script) and what fills the panel, without showing the script's path.
-When the Codex side is empty it names why the last `codex app-server` request produced nothing —
-codex not found, could not start, exited early (with its exit code), timed out, refused the request,
-or answered without a plan window — and the next check to run. A stale Codex answer shown instead
-notes that its last refresh failed.
+When the Codex side is empty it names why: either a `codex app-server` request was made and
+produced nothing — could not start, exited early (with its exit code), timed out, refused the
+request, or answered without a plan window — and the next check to run, or Codex was never asked
+because ak's last host check found it absent (**not refreshed: codex not found**) or has not
+checked recently enough to know (**not refreshed: not checked yet**), in which case its quota is
+requested once a status check finds Codex. A stale Codex answer shown instead notes that its last
+refresh failed, unless it was never attempted, which the same "not refreshed" label distinguishes.
 
 ### Prompts
 
@@ -572,7 +575,7 @@ cached briefly.
 Everything else comes from the **Full scan**—the dashboard name for the deep tier—which walks
 install trees, retained-data roots, host catalog surfaces, and the eligible hosted-repository
 population. That is real I/O and can take minutes on a large machine, so it runs **only when you
-press Full scan** (or run `ak system --deep`). Opening the tab never triggers it. Production runs
+press Full scan** (or run `ak system --refresh=machine`). Opening the tab never triggers it. Production runs
 the synchronous collectors in one worker thread so the page can report phases and remain usable
 while they run. Its status names the current phase, bounded count when available, and elapsed time.
 Worker containment does not claim that the filesystem work itself completes faster.
@@ -590,13 +593,14 @@ walk rather than being treated as equivalent.
 Measurement views fetch once, then again only while a scan you started is running (Runtime also
 refreshes on the header's poll clock). They read `GET /api/system/summary`, which carries only what
 the page draws; `GET /api/system` and `ak system --json` keep the complete payload. Maintenance
-loads when you open it, never on the shared status poll, and reads the last complete inventory;
-opening it checks no host provider and executes nothing. **Refresh evidence** on the Maintenance
-workspace is the explicit control that runs provider probes, and it rebuilds the Inventory
-afterwards; **Re-measure machine** beside it runs the System Full scan, walks every discovery source
-to completion, then refreshes evidence. Full scan from the System rail chains the same provider
-check after the snapshot is persisted. `ak maintain scan --refresh-inventory` and
-`ak maintain scan --deep --refresh-inventory` are the CLI equivalents.
+loads when you open it, and also reloads on the shared status poll while it stays the open view
+(and no measurement or provider check is already running), reading the last complete inventory each
+time; opening it checks no host provider and executes nothing. **Refresh evidence** on the
+Maintenance workspace is the explicit control that runs provider probes, and it rebuilds the
+Inventory afterwards; **Re-measure machine** beside it runs the System Full scan, walks every
+discovery source to completion, then refreshes evidence. Full scan from the System rail chains the
+same provider check after the snapshot is persisted. `ak maintain --refresh` and
+`ak maintain --refresh=machine` are the CLI equivalents.
 
 ### Session identity and local time
 
@@ -667,10 +671,12 @@ scanned yet**; a host that is not installed reads **Not installed**.
 Two actions sit side by side above the tabs, each with its helper text: **Refresh evidence** runs
 provider probes on the saved measurement and rebuilds the inventory in seconds, and **Re-measure
 machine** walks the filesystem, then every discovery source, then refreshes evidence, which takes
-minutes. Choose Refresh evidence to build the inventory; `ak maintain scan --refresh-inventory`
-does the same from a terminal. While either runs, both buttons are disabled, the status line says
-what is running ("Refreshing evidence…" or "Re-measuring the machine… this can take minutes."), and
-apply, undo, and record are refused; if the work does not finish, the previous evidence is kept.
+minutes. Choose Refresh evidence to build the inventory; `ak maintain --refresh`
+does the same from a terminal, together with the local status checks. While either runs, both
+buttons are disabled, the status line names what is running ("Refreshing evidence…"; during
+Re-measure machine, each phase in turn, from "Preparing measurement…" through "Machine measured ·
+refreshing evidence…"), and apply, undo, and record are refused; if the work does not finish, the
+previous evidence is kept.
 After the probes settle the inventory builds in the background: the empty state reads **Building
 the inventory…** until rows appear, or names the reason if the build did not complete.
 
@@ -780,8 +786,8 @@ ranked at 0 B, and roots that could not be read say so with their reason.
 not a filter. One large repository can outweigh every shared cache combined, and a chart
 containing it is a chart of one repository — so the ranking says, in the panel, that they were
 left out. Turning the chip on starts a new Full scan that walks them (and turning it off starts
-one that does not); it is disabled while a scan is running. `ak system --deep` scans without
-project trees.
+one that does not); it is disabled while a scan is running. `ak system --refresh=machine` scans
+without project trees; add `--project-trees` to include them.
 
 ### Two reclaimable tiers, never one total
 
@@ -849,8 +855,8 @@ only when a composition supplies project roots.
 The runtime census omits the Ruflo daemon-budget field because it has no supported
 local source. Use Ruflo's own budget command; no dashboard number is inferred.
 
-`ak system` prints the same collector output in a terminal, `ak system --deep` runs the scan, and
-`ak system --json` emits the payload verbatim. See
+`ak system` prints the same collector output in a terminal, `ak system --refresh=machine` runs
+the scan, and `ak system --json` emits the payload verbatim. See
 [Machine footprint](https://github.com/pacphi/agentic-kit/blob/main/docs/ddd/machine-footprint.md) and
 [ADR-0025](https://github.com/pacphi/agentic-kit/blob/main/docs/adr/0025-machine-footprint-metrics.md) for the full model and its invariants.
 

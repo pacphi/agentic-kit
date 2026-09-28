@@ -512,7 +512,7 @@ test('readLimits carries the Claude tee channel class beside an unchanged claude
 test('readLimits carries why Codex limits are unavailable beside an unchanged codex field', async () => {
   // codexPresence: () => 'found' pins this test to the app-server failure-class
   // propagation it exercises (unaffected by this task): whether the spawn is
-  // even attempted is Branch 6b Task 1's presence gate, covered on its own in
+  // even attempted is ADR-0010's presence gate, covered on its own in
   // tests/kit/quota-codex-presence.test.mjs.
   const out = await readLimits({
     now: 1000, claudeFile: path.join(tmp(), 'absent.json'),

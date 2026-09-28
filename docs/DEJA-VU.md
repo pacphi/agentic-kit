@@ -144,7 +144,7 @@ ak status
 ak status --json
 ak sync --dry-run
 ak sync
-ak x verify deja-vu
+ak status --refresh=live --only deja-vu
 ```
 
 - `status` is read-only. It runs the v0.19.0 offline doctor contract, inspects host wiring
@@ -155,7 +155,7 @@ ak x verify deja-vu
 - `sync --dry-run` shows owned package, wiring, and index repairs without applying them.
 - `sync` updates an Agentic Kit-owned npm installation through npm, never through `deja update`.
   It changes only receipt-owned wiring and verifies observed state afterward.
-- `ak x verify deja-vu` performs the deeper companion proof. It checks the compatible package and
+- `ak status --refresh=live --only deja-vu` performs the deeper companion proof. It checks the compatible package and
   CLI, doctor schema and health, selected host wiring and auto capabilities, and index state. It
   does not issue a recall/search query or retrieve transcript-derived content. Any deep index
   damage check remains bounded and content-free.

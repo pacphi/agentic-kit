@@ -583,7 +583,7 @@ test('ak usage --help documents prompts, its windows, and what --show-text print
   // The one thing a reader must not have to discover by accident.
   assert.match(result.stdout, /CONTAIN PROMPT TEXT/,
     '--show-text --json puts prompt text in the payload; the help must say so before someone redirects it');
-  assert.doesNotMatch(result.stdout, /--deep\b/, 'no legacy spelling in help (R17)');
+  assert.doesNotMatch(result.stdout, /--deep\b/, 'no legacy spelling in help');
   assert.equal(fs.existsSync(sb.sentinel), false);
   fs.rmSync(sb.home, { recursive: true, force: true });
 });

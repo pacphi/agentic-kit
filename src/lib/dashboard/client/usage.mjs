@@ -1184,7 +1184,7 @@ import { renderUsage } from './usage-orchestrators.mjs';
     if(!u||!Object.prototype.hasOwnProperty.call(CODEX_WHY,u.reason))return "";
     var c=u.reason==="exited"?codexCode(u.exitCode):u.reason==="rpc-error"?codexCode(u.rpcCode):"";
     var label=u.reason==="exited"?"exited":u.reason==="rpc-error"?"refused (RPC)":CODEX_FAILED_SHORT[u.reason];
-    // host-not-found/host-unconfirmed never attempted a refresh (B6b-D1's
+    // host-not-found/host-unconfirmed never attempted a refresh (ADR-0010's
     // presence gate skipped the spawn entirely) — "last refresh failed" would
     // be false; every other reason DID attempt one.
     var prefix=(u.reason==="host-not-found"||u.reason==="host-unconfirmed")?" · not refreshed: ":" · last refresh failed: ";
