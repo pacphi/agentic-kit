@@ -45,7 +45,7 @@ function codexInstall(root) {
 /** What `ak setup` says after `aqe init`: Codex hooks and skills only when they exist.
  *  AQE 3.14.4 run through its `aqe` command installs neither: its Codex installer finds
  *  its packaged files only when started as `node dist/cli/bundle.js`
- *  (codex-installer.js resolvePackageRoot; upstream report pending).
+ *  (codex-installer.js resolvePackageRoot; agentic-qe#755).
  *  @param {{ code: number, withCodex: boolean, root: string, version?: string|null }} run */
 export function aqeInitReport({ code, withCodex, root, version }) {
   const level = code === 0 ? 'ok' : 'warn';
@@ -56,5 +56,5 @@ export function aqeInitReport({ code, withCodex, root, version }) {
   const none = !hooks && missing.length === AQE_CODEX_SKILLS.length;
   return { level: 'warn', text: `agentic-qe initialized, but AQE ${version ?? '(unknown version)'} did not install `
     + `${none ? 'its Codex hooks or skills' : `all its Codex ${gaps.join(' and ')}`}: run through the aqe command, AQE's Codex installer `
-    + `cannot find its own packaged files (an AQE defect; upstream report pending)${none ? ` (missing: ${AQE_CODEX_SKILLS.join(', ')})` : ''}` };
+    + `cannot find its own packaged files (an AQE defect, agentic-qe#755)${none ? ` (missing: ${AQE_CODEX_SKILLS.join(', ')})` : ''}` };
 }

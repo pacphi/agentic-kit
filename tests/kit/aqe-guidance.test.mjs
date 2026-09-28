@@ -65,7 +65,8 @@ test('default and explicit policies persist idempotently without losing user pre
 
 // setup.mjs said "agentic-qe initialized (+ codex skills)" whenever --with-codex was
 // passed; AQE 3.14.4 run as `aqe` installs no Codex hooks or skills (its installer
-// resolves its package root only from `node dist/cli/bundle.js`), so say what is there.
+// resolves its package root only from `node dist/cli/bundle.js`, agentic-qe#755),
+// so say what is there and name the upstream issue.
 function codexProject(t, { hooks = false, skills = [] } = {}) {
   const root = tempDir('ak-aqe-codex-report', t);
   if (hooks) {
@@ -85,10 +86,12 @@ test('aqe init report: Codex hooks and skills are named only when they are there
   assert.doesNotMatch(none.text, /\+ codex skills/i);
   assert.match(none.text, /AQE 3\.14\.4 did not install its Codex hooks or skills/);
   assert.match(none.text, /aqe-plan-quality/);
-  assert.match(none.text, /upstream/);
+  assert.match(none.text, /agentic-qe#755/);
+  assert.doesNotMatch(none.text, /pending/);
   const some = aqeInitReport({ code: 0, withCodex: true, root: codexProject(t, { hooks: true, skills: ['aqe-research'] }), version: '3.14.4' });
   assert.equal(some.level, 'warn');
   assert.match(some.text, /missing: aqe-plan-quality, aqe-plan-work, aqe-review-quality, aqe-test-change/);
+  assert.match(some.text, /agentic-qe#755/);
   assert.deepEqual(aqeInitReport({ code: 0, withCodex: false, root: codexProject(t), version: '3.14.4' }), { level: 'ok', text: 'agentic-qe initialized' });
   assert.equal(aqeInitReport({ code: 1, withCodex: false, root: codexProject(t), version: '3.14.4' }).level, 'warn');
 });
