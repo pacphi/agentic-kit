@@ -2,7 +2,10 @@
 
 - **Status:** Accepted; static assurance, transactional healing, bounded receipts, read model, and the Ruflo support window implemented
 - **Date:** 2026-09-01
-- **Updated:** 2026-09-27 — §7: the dispatch routine runs on its own daily schedule; the
+- **Updated:** 2026-09-28 — §7: the ledger is `events.ndjson` on the orphan branch
+  `upstream-watch-ledger`, committed only on days with new records; notices are commit comments
+  that mention the maintainer; the workflow fires the dispatch routine's API trigger (decision 15)
+- **Earlier update:** 2026-09-27 — §7: the dispatch routine runs on its own daily schedule; the
   `upstream-dispatch` label is only a visible marker (routine GitHub triggers support only pull
   request and release events; decision 14, 4b-C amended)
 - **Earlier update:** 2026-09-27 — §7: a scheduled GitHub Actions workflow runs the watch and posts
@@ -233,14 +236,15 @@ with nothing left to watch. A release counts only when its tag contains the merg
 or commit that fixed the thread, or the registry records the first fixed version; a later
 release it cannot prove is reported as "fix not confirmed" and never dispatched. AgentDB, which
 ak gets through Ruflo, counts as released only when the newest Ruflo (npm `latest`) resolves to
-a fixed agentdb. Its ledger lines, `UPSTREAM-WATCH <id> <event> <date> …`, go to one
-pinned, locked "Upstream watch" issue (pacphi/agentic-kit#243). A scheduled GitHub Actions
-workflow posts them; the script reads only the comments of the ledger's authors
-(`watchPolicy.ledger.authors`), so an exact line it recorded is never acted on twice and nobody
-else can suppress one, and it writes the comment itself, so no model decides what the ledger says.
-Dispatch of a released thread is a branch `upstream/<id>` and a draft pull request that makes the
-adjustment test-first and passes the dependency's removal proof; a cloud routine does it on its
-own daily schedule, after the watch, reading the ledger. It never merges. Publishing upstream
+a fixed agentdb. Its ledger lines, `UPSTREAM-WATCH <id> <event> <date> …`, are recorded in
+`events.ndjson` on the orphan branch `upstream-watch-ledger`, one commit per day with new records.
+A scheduled GitHub Actions workflow runs the script, which decides the records and the notice
+text, so no model decides what the ledger says, and an exact line already recorded is never
+recorded or acted on twice. When a new record needs the maintainer, the workflow comments on that
+ledger commit as `github-actions[bot]`, mentioning them. Dispatch of a released thread is a branch
+`upstream/<id>` and a draft pull request that makes the adjustment test-first and passes the
+dependency's removal proof; a cloud routine does it when the workflow fires its API trigger, and
+each firing is recorded. It never merges. Publishing upstream
 keeps the `explicit-user-approval-required` rule. Operating detail:
 [UPSTREAM-WATCH.md](../UPSTREAM-WATCH.md).
 

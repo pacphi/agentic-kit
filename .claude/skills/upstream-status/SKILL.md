@@ -1,6 +1,6 @@
 ---
 name: upstream-status
-description: Report agentic-kit's outstanding upstream status from its upstream registry (threads filed, commented on or cited in Ruflo, Agentic QE, AgentDB, RuVector, RuvNet Brain, Codex and agent-browser). Use when the maintainer asks for an upstream report, upstream status, what is waiting on upstream, or which upstream fixes are ready.
+description: Report agentic-kit's outstanding upstream status from its upstream registry (threads filed, commented on or cited in Ruflo, Agentic QE, AgentDB, RuVector, RuvNet Brain, Codex, Claude Code, OpenCode and agent-browser). Use when the maintainer asks for an upstream report, upstream status, what is waiting on upstream, or which upstream fixes are ready.
 ---
 
 # Upstream status
@@ -21,7 +21,9 @@ dependency policies, constraints, and the `watch` list of upstream threads.
    - If `registry.status` is not `valid`, report `registry.errors` and stop.
    - If `mode` is `offline`, say why (`offlineReason`, usually: run `gh auth login`) and that only
      what the registry records is shown.
-2. Give the counts first, in plain language, from `counts`. Leave out groups with zero items.
+2. Give the counts first, in plain language, from `counts`. Leave out groups with zero items. Then
+   say when the watch last succeeded (`lastRun`); say so plainly when it is more than 48 hours ago
+   or unknown.
 3. Then list the action items with their links, one report group at a time, in this order
    (the report's group titles):
    - "Could not check" first, each thread with its error from `fetchErrors`. When the thread
@@ -54,7 +56,7 @@ dependency policies, constraints, and the `watch` list of upstream threads.
 ## Rules
 
 - The registry's publication policy is `explicit-user-approval-required`. Never post upstream,
-  comment on the ledger issue, push, open a pull request or merge without the maintainer's
+  comment on a ledger commit, push, open a pull request or merge without the maintainer's
   explicit confirmation of that specific action.
 - Never merge a dispatch pull request. The maintainer merges.
 - A release is actionable only when it contains the merged fixing pull request or commit
@@ -62,5 +64,6 @@ dependency policies, constraints, and the `watch` list of upstream threads.
 - Issue closure alone does not prove a fix (ADR-0041 §7).
 - For events since a date, run `node scripts/upstream-watch.mjs check --since <iso-date>`.
   Each line is a ledger line: `UPSTREAM-WATCH <id> <event> <date> …`.
+- For what the ledger recorded (history questions), run `node scripts/upstream-watch.mjs ledger [--id <owner/repo#n>] [--since <iso-date>]`.
 
 Details: `docs/UPSTREAM-WATCH.md`.

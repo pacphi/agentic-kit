@@ -483,15 +483,17 @@ gh run list --workflow=nightly.yml --limit 3
 ### Upstream watch
 
 ```bash
-node scripts/upstream-watch.mjs report                # counts, then action items with links
-node scripts/upstream-watch.mjs check --since 2026-09-26 --ledger ledger.md   # new ledger lines only
-node scripts/upstream-watch.mjs comment               # the ledger comment the daily workflow would post
-gh workflow run upstream-watch.yml -f post=false      # run the daily workflow now, summary only
+node scripts/upstream-watch.mjs report                     # counts, last run, then action items with links
+node scripts/upstream-watch.mjs check --since 2026-09-26   # ledger lines for activity since then
+node scripts/upstream-watch.mjs record --dry-run           # what the daily workflow would record and notify
+node scripts/upstream-watch.mjs ledger --since 2026-09-26  # what the ledger recorded
+gh workflow run upstream-watch.yml -f record=false         # run the daily workflow now, summary only
 ```
 
-The script is read-only against GitHub and npm; the `upstream-watch` workflow posts its comment
-on the ledger issue daily. The registry, lifecycle, ledger, workflow and dispatch routine are in
-[UPSTREAM-WATCH.md](docs/UPSTREAM-WATCH.md).
+`report`, `check` and `ledger` only read. `record` fires the dispatch routine when a fix is
+released and builds a local ledger commit, which the `upstream-watch` workflow pushes to the
+`upstream-watch-ledger` branch daily, commenting on it when something needs you. The registry,
+lifecycle, ledger, workflow and dispatch routine are in [UPSTREAM-WATCH.md](docs/UPSTREAM-WATCH.md).
 
 ### Pull requests
 

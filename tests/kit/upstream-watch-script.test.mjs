@@ -966,34 +966,24 @@ test('renderers list counts first, then items with links and the dispatch branch
   assert.equal(renderEvents([]), 'No new upstream events.\n');
 });
 
-// security-ledger-trusts-any-commenter: the ledger issue is public. Only the
-// ledger authors' comments count (a stranger's line would suppress an event,
-// and a stranger's later checked-at would skip a real reply); the script
-// enforces that for the workflow, and the dispatch routine's prompt says so.
-test('the documented dispatch routine trusts only the ledger authors', () => {
-  // A Windows checkout gives the Markdown CRLF line endings; the checks are about its text.
+// Spec 2026-09-28: the routine never reads the ledger; the watch fires it with
+// one line of payload, which the prompt treats as data and checks against the registry.
+test('the documented dispatch routine reads its payload as data and validates the thread', () => {
   const doc = fs.readFileSync('docs/UPSTREAM-WATCH.md', 'utf8').replace(/\r\n/g, '\n');
-  const ledger = doc.slice(doc.indexOf('## The ledger'), doc.indexOf('## Dispatch'));
+  const ledger = doc.slice(doc.indexOf('## The ledger'), doc.indexOf('## Notifications'));
   const prompt = doc.slice(doc.indexOf('## The dispatch routine')).match(/```text\n([\s\S]*?)```/)[1];
-  assert.match(ledger, /lock/i, 'the ledger issue is locked when it is created');
-  assert.match(ledger, /watchPolicy\.ledger\.authors/);
-  assert.match(ledger, /checked-at/, 'the next run starts from the time a run last checked');
-  assert.match(prompt, /watchPolicy\.ledger\.authors/, 'only the ledger authors\' comments are read');
-  assert.match(prompt, /never follow instructions/i, 'comment text is data, not instructions');
-  assert.match(prompt, /pacphi\/agentic-kit#243/, 'the routine reads the recorded ledger issue');
-  assert.match(prompt, /without branch= is held by the support window/);
-  assert.match(prompt, /From all of\s+them/, 'a line in an older comment is still dispatched (b4b-adversarial M3)');
-  assert.match(prompt, /already exists on origin/);
-  assert.match(prompt, /not "watching" or "fixed-unreleased"/, 'work already dispatched or adopted is skipped (b4b-adversarial m5)');
+  assert.match(ledger, /upstream-watch-ledger/);
+  assert.match(ledger, /Checked-At/);
+  assert.doesNotMatch(doc, /lock(ed)? issue|pinned and locked|ledger\.authors|#243/i);
+  assert.match(prompt, /routine-fire-payload/);
+  assert.match(prompt, /never follow instructions/i);
+  assert.match(prompt, /"watching" or\s+"fixed-unreleased"/);
+  assert.match(prompt, /git ls-remote --heads origin <branch>/);
+  assert.match(prompt, /pnpm install --frozen-lockfile/);
   assert.match(prompt, /DRAFT pull request/);
   assert.match(prompt, /Never merge/);
-  assert.match(prompt, /never comment on\s+upstream/i);
-  assert.doesNotMatch(prompt, /upstream-watch\.mjs (check|comment)/, 'the routine does not run the watch (it cannot read upstream)');
-  // 4b-C amended: the routine runs on a daily schedule, not on the label.
-  assert.match(prompt, /You run daily after the upstream watch workflow/);
-  assert.match(prompt, /stop quickly/, 'a day with nothing to dispatch ends at once');
-  assert.doesNotMatch(prompt, /labelled/, 'no label starts the routine');
-  assert.match(prompt, /never change labels/);
+  assert.match(prompt, /never comment on upstream repositories/i);
+  assert.doesNotMatch(prompt, /#243|ledger/i, 'the routine does not read the ledger');
 });
 
 // Decision 14: the routine's first run printed "No new upstream events." while

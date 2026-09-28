@@ -134,14 +134,14 @@ reads a registry of another shape.
 The only code that reads or builds ledger commits. Every git call goes through an injectable
 `exec` (as in `fetch.mjs`), with argument vectors and no shell.
 
-- `readLedger({ exec, branch })`: `git fetch --no-tags --depth=1 origin +refs/heads/<branch>:refs/remotes/origin/<branch>`,
-  then `git show origin/<branch>:events.ndjson` and the tip's `Checked-At` trailer. A remote
-  without the branch gives an empty ledger. Any other failure, or a line that is not valid JSON or
-  lacks `line`, throws (with the line number); the caller treats it as blind.
-- `buildCommit({ exec, parent, records, readme, checkedAt, sentences })`: blobs with
-  `git hash-object -w --stdin`, the tree with `git mktree`, the commit with `git commit-tree`
-  (`-p <parent>` when there is one). Returns the commit id. It changes no ref, index or working
-  tree.
+- `createLedgerStore({ exec, cwd, remote })` returns `read(branch, { now })`: `git fetch --no-tags
+  origin +refs/heads/<branch>:refs/remotes/origin/<branch>` at full depth (a shallow fetch would
+  mark a maintainer's full clone shallow), then `git show <commit>:events.ndjson` and the tip's
+  `Checked-At` trailer. An absent branch is an empty ledger; any other failure or a malformed line
+  throws.
+- ... and `build({ parent, records, checkedAt, subject, sentences })`: blobs with
+  `git hash-object -w --stdin`, the tree with `git mktree`, the commit with `git commit-tree`.
+  Returns the commit id. It changes no ref, index or working tree.
 
 ### `scripts/upstream-watch/dispatch.mjs` (new)
 
@@ -232,7 +232,7 @@ notice ends with `node scripts/upstream-watch.mjs ledger --since <date>`.
   Steps:
   1. **Record:** `record --json [--since]` → `watch.json` and the job summary; exit 3 fails here.
   2. **Push:** when `commit` is set, `git push origin <commit>:refs/heads/upstream-watch-ledger`.
-  3. **Notify:** when `notice.post`, `gh api repos/<repo>/commits/<commit>/comments -f body=@-`.
+  3. **Notify:** when `notice.post`, `gh api repos/<repo>/commits/<commit>/comments -F body=@notice.md`.
   4. **Verdict:** fail the job when `fetchErrors` or `dispatchErrors` is non-empty, listing them.
 - No `issues` permission, no issue step, no label step.
 

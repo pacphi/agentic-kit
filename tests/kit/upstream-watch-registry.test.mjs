@@ -349,3 +349,14 @@ test('the audit record carries the Branch 5 decisions in decision format', () =>
     assert.ok(section.split(part).length - 1 >= ids.length, part);
   }
 });
+
+test('the audit record carries decision 15 in decision format', () => {
+  const audit = fs.readFileSync('docs/audits/2026-09-26-issues-237-238-239-verification-and-decisions.md', 'utf8').replace(/\r\n/g, '\n');
+  const start = audit.indexOf('## Decision 15 ');
+  assert.ok(start > 0);
+  const section = audit.slice(start);
+  for (const part of ['**The situation.**', '**The problem.**', '**What the user sees.**', '**What should be true.**', '**The choices.**', '**Recommendation: A. Choice: A.**']) assert.ok(section.includes(part), part);
+  assert.match(section, /upstream-watch-ledger/);
+  const decision14 = audit.slice(audit.indexOf('### Decision 14'), audit.indexOf('## Branch 5 decisions'));
+  assert.match(decision14, /\*\*Superseded in part \(2026-09-28\)\.\*\* Decision 15/);
+});
