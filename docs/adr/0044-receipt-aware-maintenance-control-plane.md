@@ -2,7 +2,11 @@
 
 - **Status:** Implemented
 - **Date:** 2026-09-03
-- **Updated:** 2026-09-09 — reconciled against repository source and tests for issue #211
+- **Updated:** 2026-09-28 — the CLI verb for the explicit scan this ADR's v1 `ak maintain scan`
+  contract describes is now `ak maintain --refresh[=machine]` (the exact `?refresh=scan` dashboard
+  route below is unaffected — that half of the vocabulary belongs to a later remediation program's
+  dashboard work; see [ADR-0063](0063-evidence-store-and-refresh-vocabulary.md))
+- **Earlier update:** 2026-09-09 — reconciled against repository source and tests for issue #211
 - **Earlier update:** 2026-09-03 — issue #200 delivered the control plane, bounded providers, dashboard
   action boundary, durable receipts, guarded undo, fail-closed interruption recovery, prescriptive
   relationship findings, and resilient dashboard loading

@@ -124,7 +124,7 @@ recorded reason. The 3.39.1 security attempt is covered by the corrective
 
 The Windows bridge change in 3.39.2 clarifies the backend label; it does not
 repair wrong-corpus fallback or the native allocation abort. Kit's
-[`verifyMemory()`](../../src/commands/x/verify.mjs) usefully identifies which
+[`verifyMemory()`](../../src/lib/live-checks.mjs) usefully identifies which
 of two databases receives its isolated canary, but accepts either and does
 not test an existing live key. This is a verification gap, not a reproduction
 of data loss on this macOS machine.

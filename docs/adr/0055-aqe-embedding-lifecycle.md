@@ -16,6 +16,15 @@
 - **Updated:** 2026-09-27 — the busy rule's removal condition is agentic-qe#574 fixed in a released agentic-qe that is the kit floor; agentic-qe#719 (carried by 3.14.4) is only a partial fix
 - **Updated:** 2026-09-27 — beside these projections, `ak sync` and `ak setup` pin AQE to the project root (absolute `AQE_PROJECT_ROOT`, `AQE_MEMORY_PATH`, `AQE_STORAGE_PATH`) in `.claude/settings.local.json`, the recognized `.mcp.json` entry and both AQE tables of the project `.codex/config.toml`, under receipts from the same owned-env engine; a file git tracks is not pinned, and AQE's own relative `AQE_MEMORY_PATH` is taken back even after an AQE re-init. Stray AQE stores are merged and archived by `ak x aqe-store merge`. See [ADR-0062](0062-aqe-project-store-integrity.md) (remediation Branch 5, B5-D1 to B5-D5, B5-M5)
 - **Updated:** 2026-09-28 — live-check evidence storage relocated from `<stateBase>/agentic-kit/live-checks/<id>.json` to the shared `<stateBase>/agentic-kit/evidence/live-check/<id>.json` layout; this ADR's own live-check BEHAVIOR (TTL, statuses, remembered-check display) is unchanged, only where the evidence file lives. `ak x aqe-embedding verify` (distinct from `ak x verify`'s `aqe-embedding` row) does not persist evidence either way — it is a one-shot, unpersisted synthetic-backend proof. See [ADR-0063](0063-evidence-store-and-refresh-vocabulary.md) (remediation program, branch 6a task 2)
+- **Updated:** 2026-09-28 — `ak x verify` is retired; its live checks (this ADR's own quick
+  `aqe-embedding` check among them) run only as `ak status --refresh=live`'s live stage, and the
+  full `aqe` proof runs with `--only aqe`. A live-check evidence row now carries the source id
+  `status-refresh-live`, labelled "ak status --refresh=live"; a row recorded before this rename
+  under the retired `verify`/`status-live` source ids still reads back, labelled "an earlier live
+  check" — the label never names a retired command. Evidence ids are unchanged: `memory-routes`
+  still records under the `memory` id, and the full `aqe` proof still records only its embedding
+  request under `aqe-embedding` (remediation program, branch 6b; see
+  [ADR-0063](0063-evidence-store-and-refresh-vocabulary.md))
 - **Related:** [ADR-0023](0023-fail-closed-operations-and-explicit-degradation.md),
   [September repair](../audits/2026-09-09-aqe-integration-repair.md)
 
@@ -117,8 +126,9 @@ remote model downloads cannot accidentally configure a separate CommonJS instanc
 ## Amendment 2026-09-26: remembered live checks
 
 `ak status` reads configuration only, so it reported "configured-unverified" while
-`ak sync` failed the live request (#237). Sync's embedding step, `ak x verify aqe`
-and the other quick verify suites now record each live result (passed, failed or
+`ak sync` failed the live request (#237). Sync's embedding step, the quick `aqe-embedding` check
+(run via `ak status --refresh=live`, or on its own with `--only aqe-embedding`) and the other quick
+live checks now record each live result (passed, failed or
 inconclusive; a short reason; the source; the time) in a per-check evidence file
 under the kit's state directory, keyed by a hash of the selected backend. Status
 and the dashboard show that result with its age and never probe. A failed result
@@ -128,15 +138,16 @@ until a new check shows otherwise. A different backend selection marks the resul
 as changed instead of presenting it as current. This follows ADR-0058's evidence
 cache. A backend pass still does not certify the corpus.
 
-Plain status stays probe-free. `ak status --live` is the explicit opt-in: before
-collecting rows it runs the quick, free `ak x verify` checks (the same functions,
-not a copy) in parallel: the embedding request without the corpus read (only for a
+Plain status stays probe-free. `ak status --refresh=live` is the explicit opt-in: before
+collecting rows it runs the quick, free live checks (`src/lib/live-checks.mjs`, the same
+functions, not a copy) in parallel: the embedding request without the corpus read (only for a
 backend the kit manages, the same gate as sync), Codex MCP initialize/tools-list
 when Codex is enabled, provider wiring, the security
 packages, deja-vu's structural proof when enabled, and a memory round trip in a
 temporary directory. Each has a timeout; a timeout or a check that cannot run is
 `inconclusive`, never failed. The slow learning and harvest proofs and the paid
-host connection check are excluded, and the dashboard refresh never runs them.
+host connection check are excluded from this default set (the slow proofs, and the full `aqe`
+proof, run only when named with `--only`), and the dashboard refresh never runs them.
 The provider check runs `aqe health` only where `.agentic-qe` already exists:
 AQE 3.14.3 auto-initializes a store (memory.db, patterns.rvf, witness keys) in the
 directory it runs in, and a diagnostic must not set AQE up in a project.

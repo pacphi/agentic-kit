@@ -7,6 +7,9 @@
   test (see the native runtime probe amendment); the heal receipts every edit it makes inside
   another tool's install, and `ak uninstall` reverses it (see the install-edit receipts amendment)
 - **Updated:** 2026-09-27 — the report-only AQE solver heal is removed (agentic-qe#617/#620: the native was never published and the TypeScript solver is the implementation); the solver example in §1 and Context item 1 is historical
+- **Updated:** 2026-09-28 — §11's manual-fix example is retired: the current spelling for that fix
+  is `ak status --refresh=live --only aqe` (`ak x verify aqe` no longer exists; remediation
+  program, branch 6b; see [ADR-0063](0063-evidence-store-and-refresh-vocabulary.md))
 - **Earlier update:** 2026-09-20 — ADR-0055 adds qualified AQE embedding lifecycle evidence; ADR-0053 separates host health from usage-source diagnostics
 - **Earlier update:** 2026-08-26 — ADR-0035 applies fail-closed preflight, bounded evidence, and
   content-free degradation to the opt-in deja-vu companion
