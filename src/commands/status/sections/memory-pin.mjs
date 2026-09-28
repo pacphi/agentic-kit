@@ -20,9 +20,10 @@ export function aqePinRows(cfg, cwd) {
   if (!pin.root || !pin.active) return [];
   const rows = [];
   const drift = pin.findings.filter((f) => f.changed);
-  const held = pin.findings.filter((f) => !f.changed && (f.status === 'conflict' || f.conflicts.length));
+  // A file can have keys to write and a preserved key at once: it shows in both rows.
+  const held = pin.findings.filter((f) => f.status === 'conflict' || f.conflicts.length);
   if (drift.length) {
-    const stale = drift.find((f) => f.foreignRoot);
+    const stale = drift.find((f) => f.foreignRoot && !f.conflicts.length);
     rows.push(row('aqe-pin', 'warn', stale
       ? `AQE pin in ${stale.file} names another root (${stale.foreignRoot}); AQE would use that checkout's store`
       : `AQE is not pinned to this project's root in ${files(drift)}: a command, hook or MCP server started in a subfolder creates its own .agentic-qe there`,

@@ -115,6 +115,12 @@ test('any other different value is preserved and reported as a hand fix naming t
   const { root, write, cfg } = project(t);
   const settings = write('.claude/settings.local.json', { env: { AQE_MEMORY_PATH: '/elsewhere/memory.db' } });
   const before = fs.readFileSync(settings, 'utf8');
+  // Before the first sync the same file also has keys to write: both rows show.
+  const pending = await memoryPin.collect({ cwd: root, cfg });
+  assert.ok(pending.some((r) => r.repair === 'sync' && r.subsystem === 'aqe-pin'), JSON.stringify(pending));
+  const early = pending.find((r) => r.repair === 'manual' && r.subsystem === 'aqe-pin');
+  assert.ok(early, JSON.stringify(pending));
+  assert.match(early.fix, /settings\.local\.json/);
   const result = reconcileAqePin(cfg, root);
   assert.equal(result.ok, true, 'a preserved value is a hand fix, not a failed sync (decision 13)');
   assert.equal(json(settings).env.AQE_MEMORY_PATH, '/elsewhere/memory.db');
