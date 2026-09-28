@@ -488,6 +488,30 @@ Queued "for Branch 9" in the ledger but not in the program plan's item list or M
 - Five stale doc-cited threads and `HOST-SUPPORT.md` risk lines (line 120).
 - Branch 0 P6 observations (line 34).
 
+## Added scope (maintainer, 2026-09-28)
+
+These five items join this branch. Each task below verifies its premise first, then works test-first.
+
+- **N-1 — Busy rule (#574 → #240). Now.**
+  - Build the #240 reproduction in a disposable environment: `aqe init --minimal`, with npm prefix and `MISE_*` inside `$T`. Hold the store's RVF lock with a live process, then start AQE and record whether `FsyncFailed`/`0x0303` still follows the live-lock warning.
+  - Run it on macOS locally, against agentic-qe 3.14.4.
+  - Run it on Linux through a CI job on this branch's pushed PR (the controller holds standing push authority). A `workflow_dispatch` or a job step in `ci.yml` is fine, as long as it's removed or gated before merge.
+  - Only if neither platform shows `FsyncFailed`: remove the temporary busy rule in `src/lib/aqe-readiness.mjs` (test-first), and update the registry entry `proffesor-for-testing/agentic-qe#574` (`adjustment`, `status`, and a dated history note) and ADR-0062 if it cites the rule. The controller closes #240 after merge, with the evidence.
+  - Otherwise: keep the rule and post the evidence to #240. The text goes to the maintainer first only if it's an upstream post; #240 is our own issue.
+- **N-2 — `docs/HOST-SUPPORT.md` (~:175-177). Now.**
+  - Remove the risk links for agentic-qe #528 and #532, and mark both as adopted at 3.14.4.
+  - Reword the #535 link to name only what still fails.
+  - Verify each against agentic-qe 3.14.4 release notes and the registry before writing.
+- **N-3 — ruflo#2885 trace hook. After 6b merges** (6b edits `nightly.yml`).
+  - Add vidaunited's `trace-ort.mjs` hook to the nightly macOS live step, and capture its log as an artifact.
+  - The post on ruflo#2885 is an upstream post: the controller shows the maintainer the exact text before posting.
+- **N-4 — CI timeout. Now.**
+  - Add `timeout-minutes` to the `test` job in `.github/workflows/ci.yml`, so a stuck runner fails instead of hanging.
+  - Size the value from recent run durations (the Windows test jobs take about 9–11 min), with headroom.
+- **N-5 — Upstream-watch minors deferred from PR #253 (M7, M8, M10, plus 12 smaller). After 6b merges** (6b edits the constraint registry).
+  - The list comes from the maintainer or the session that owned #253. It's not on disk here.
+  - Scope is exactly these minors. The rest of the upstream watch stays as the maintainer left it.
+
 ## Open questions for the maintainer
 
 **OQ-1 — Item 6 (a per-machine acknowledgment for hook-contract changes).**
