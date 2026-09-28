@@ -35,7 +35,15 @@ export function aqePinRows(cfg, cwd) {
       + 'likely copied from another checkout; ak preserves values it did not write',
     `remove ${KEYS} from ${files(foreign)}, then re-run ak sync in this checkout`, { repair: 'manual' }));
   }
-  const other = held.filter((f) => !f.foreignRoot);
+  const tracked = pin.findings.filter((f) => f.status === 'tracked');
+  const trackedFiles = [...new Set(tracked.map((f) => f.file))].join(', ');
+  if (tracked.length) {
+    rows.push(row('aqe-pin', 'warn', `AQE is not pinned in ${trackedFiles}: tracked by git, and a committed absolute path `
+      + 'would point teammates\' AQE at a path that does not exist on their machines; an AQE server or command those files start from a subfolder can still create its own .agentic-qe there',
+    `keep ${trackedFiles} out of git (git rm --cached, then .gitignore) and re-run ak sync, or start sessions from ${pin.root}; `
+      + '.claude/settings.local.json stays pinned for Claude Code', { repair: 'manual' }));
+  }
+  const other = held.filter((f) => !f.foreignRoot && f.status !== 'tracked');
   if (other.length) {
     const reasons = other.flatMap((f) => (f.reason ? [f.reason] : f.conflicts.map((c) => c.reason)));
     rows.push(row('aqe-pin', 'warn', `ak preserved AQE pin values it does not own in ${files(other)} (${reasons.join('; ')})`,

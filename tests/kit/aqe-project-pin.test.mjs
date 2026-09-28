@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { tempDir } from './helpers/temp-dir.mjs';
 import {
   desiredAqePin, reconcileAqePin, AQE_PIN_RECEIPT, AQE_SHELL_PIN_RECEIPT, releaseAqePins, recordAqePinProject,
@@ -380,4 +381,51 @@ test('an unrecognized AQE transport in .mcp.json is preserved as a hand fix', (t
   const finding = result.findings.find((f) => f.file === mcp);
   assert.equal(finding.status, 'conflict');
   assert.match(finding.reason, /unrecognized AQE MCP transport/);
+});
+
+// Maintainer decision B5-M5 (review M5): a pin target git tracks is never pinned; a
+// committed absolute path would point teammates' AQE at a path their machines lack.
+const gitEnv = (home) => ({ PATH: process.env.PATH, HOME: home, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' });
+function git(root, args) {
+  const result = spawnSync('git', args, { cwd: root, encoding: 'utf8', env: gitEnv(root) });
+  assert.equal(result.status, 0, result.stderr);
+}
+const haveGit = spawnSync('git', ['--version'], { stdio: 'ignore' }).status === 0;
+
+test('git-tracked .mcp.json and .codex/config.toml are skipped and shown as a hand fix; settings.local.json is pinned', { skip: !haveGit }, async (t) => {
+  const { root, write, cfg } = project(t);
+  fs.rmSync(path.join(root, '.git'), { recursive: true });
+  git(root, ['init', '-q']);
+  const { settings, mcp, codex } = seedAll(write);
+  git(root, ['add', '--', '.mcp.json', '.codex/config.toml']);
+  const before = [mcp, codex].map((f) => fs.readFileSync(f, 'utf8'));
+  const result = reconcileAqePin(cfg, root);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual([mcp, codex].map((f) => fs.readFileSync(f, 'utf8')), before, 'tracked files are not written');
+  for (const f of [mcp, codex]) assert.equal(fs.existsSync(`${f}${AQE_PIN_RECEIPT}`), false);
+  assert.deepEqual(json(settings).env, { KEEP: 'x', ...pinOf(root) }, 'settings.local.json is always pinned');
+  const tracked = result.findings.filter((f) => f.status === 'tracked').map((f) => path.relative(root, f.file));
+  assert.deepEqual([...new Set(tracked)].sort(), ['.codex/config.toml', '.mcp.json']);
+  const rows = await memoryPin.collect({ cwd: root, cfg });
+  const hand = rows.find((r) => r.subsystem === 'aqe-pin' && r.repair === 'manual' && /tracked/.test(r.message));
+  assert.ok(hand, JSON.stringify(rows));
+  assert.match(hand.message, /\.mcp\.json/);
+  assert.match(hand.message, /\.codex\/config\.toml/);
+  assert.match(`${hand.message} ${hand.fix}`, /does not exist on (their|teammates')/);
+  assert.ok(!rows.some((r) => r.subsystem === 'aqe-pin' && r.repair === 'sync'), JSON.stringify(rows));
+});
+
+test('a pin ak wrote before the file was tracked is released under its receipt', { skip: !haveGit }, (t) => {
+  const { root, write, cfg } = project(t);
+  fs.rmSync(path.join(root, '.git'), { recursive: true });
+  git(root, ['init', '-q']);
+  const { mcp } = seedAll(write);
+  const original = fs.readFileSync(mcp, 'utf8');
+  reconcileAqePin(cfg, root);
+  assert.ok(fs.readFileSync(mcp, 'utf8').includes('AQE_PROJECT_ROOT'), 'untracked in a repository: pinned as before');
+  git(root, ['add', '--', '.mcp.json']);
+  const result = reconcileAqePin(cfg, root);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(json(mcp), JSON.parse(original));
+  assert.equal(fs.existsSync(`${mcp}${AQE_PIN_RECEIPT}`), false);
 });

@@ -652,7 +652,7 @@ async function initProjectAgenticQe(root, cfg, flags, permCtx) {
 function pinProjectAqe(cfg, root) {
   const pin = reconcileAqePin(cfg, root);
   if (!pin.ok) warn(`AQE pin not written: ${pin.detail}`);
-  else if (pin.findings.some((f) => f.status === 'conflict' || f.conflicts.length)) warn(pin.detail);
+  else if (pin.findings.some((f) => f.status === 'conflict' || f.status === 'tracked' || f.conflicts.length)) warn(pin.detail);
   else if (pin.changed) ok(`AQE pinned to ${pin.root} (AQE_PROJECT_ROOT, AQE_MEMORY_PATH, AQE_STORAGE_PATH)`);
   if (recordAqePinProject(cfg, pin.root)) saveKitConfig(cfg);
 }
