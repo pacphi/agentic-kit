@@ -202,6 +202,66 @@ test('invalidation is permanent: once marked, a record stays invalidated even if
 
 // ── Preferences (MNT-PRV-006/007) ───────────────────────────────────────────
 
+/** Real fs, with writeFileSync (writePrivateFileAtomic's actual write seam,
+ *  see src/lib/file-write.mjs) wrapped to count calls without changing its
+ *  behavior — used to prove savePreferences skips the write when nothing
+ *  about the computed preferences actually changed. */
+function countingFsImpl() {
+  let writes = 0;
+  return {
+    impl: new Proxy(fs, {
+      get(target, prop) {
+        if (prop === 'writeFileSync') {
+          return (...args) => { writes += 1; return target.writeFileSync(...args); };
+        }
+        const value = target[prop];
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    }),
+    get writes() { return writes; },
+  };
+}
+
+test('savePreferences with an unchanged lastView does not touch the write seam', (t) => {
+  const root = tempRoot(t);
+  const spy = countingFsImpl();
+  const store = createPreferencesStore({ root, fsImpl: spy.impl });
+
+  const first = store.savePreferences({ lastView: { scope: 'user', view: 'updates', sort: 'name', facets: { kind: ['skill'] }, search: 'x' } });
+  assert.equal(spy.writes, 1, 'a genuinely new lastView writes once');
+
+  const writesAfterFirst = spy.writes;
+  const second = store.savePreferences({ lastView: { scope: 'user', view: 'updates', sort: 'name', facets: { kind: ['skill'] }, search: 'x' } });
+  assert.equal(spy.writes, writesAfterFirst, 'an identical lastView does not write again');
+  assert.deepEqual(second, first);
+});
+
+test('savePreferences with a genuinely different lastView writes once', (t) => {
+  const root = tempRoot(t);
+  const spy = countingFsImpl();
+  const store = createPreferencesStore({ root, fsImpl: spy.impl });
+
+  store.savePreferences({ lastView: { scope: 'user', view: 'updates', sort: 'name' } });
+  const writesAfterFirst = spy.writes;
+  const next = store.savePreferences({ lastView: { scope: 'user', view: 'updates', sort: 'recently-changed' } });
+  assert.equal(spy.writes, writesAfterFirst + 1, 'a changed lastView field writes again');
+  assert.equal(next.lastView.sort, 'recently-changed');
+});
+
+test('setPreferredShell with an unchanged shell for an environment does not write; a changed one does', (t) => {
+  const root = tempRoot(t);
+  const spy = countingFsImpl();
+  const store = createPreferencesStore({ root, fsImpl: spy.impl });
+
+  store.setPreferredShell('env-a', 'zsh');
+  const writesAfterFirst = spy.writes;
+  store.setPreferredShell('env-a', 'zsh');
+  assert.equal(spy.writes, writesAfterFirst, 'an unchanged shell does not write again');
+
+  store.setPreferredShell('env-a', 'bash');
+  assert.equal(spy.writes, writesAfterFirst + 1, 'a changed shell writes again');
+});
+
 test('preferences default to across/all/guidance-first with empty facets', (t) => {
   const root = tempRoot(t);
   const store = createPreferencesStore({ root });
