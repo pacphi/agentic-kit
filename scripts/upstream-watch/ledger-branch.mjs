@@ -26,10 +26,11 @@ const BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 const SHA = /^[0-9a-f]{40}$/;
 
-/** Run a command without a shell, feeding `input` on stdin; resolves with its status and output, never rejects. */
-export function runWithInput(command, args, { input = null, cwd } = {}) {
+/** Run a command without a shell, feeding `input` on stdin; resolves with its status and output,
+ *  never rejects. `env` is passed through to spawn(); omitted, the child inherits process.env. */
+export function runWithInput(command, args, { input = null, cwd, env } = {}) {
   return new Promise((resolve) => {
-    const child = spawn(command, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(command, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     child.stdout.setEncoding('utf8').on('data', (chunk) => { stdout += chunk; });

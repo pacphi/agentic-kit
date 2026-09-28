@@ -9,8 +9,9 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
-  LEDGER_FILE, LEDGER_README, createLedgerStore, parseRecords, serializeRecords, toRecord,
+  LEDGER_FILE, LEDGER_README, createLedgerStore, parseRecords, runWithInput, serializeRecords, toRecord,
 } from '../../scripts/upstream-watch/ledger-branch.mjs';
+import { spawnEnv } from './helpers/home-sandbox.mjs';
 
 const NOW = new Date('2026-09-29T14:20:00Z');
 const record = (line, extra = {}) => ({ line, id: 'ruvnet/ruflo#1', event: 'stale', date: '2026-01-01', fields: {}, recordedAt: '2026-09-28T14:17:00Z', ...extra });
@@ -93,8 +94,16 @@ test('build refuses a bad parent or time before running git', async () => {
 
 test('round trip through a real bare repository: absent, first commit, second commit', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ak-ledger-branch-'));
+  const home = path.join(root, 'home');
+  fs.mkdirSync(home, { recursive: true });
+  // git runs with a throwaway home, so the developer's global config (for
+  // example commit.gpgSign, which commit-tree honors) is never read.
+  const env = spawnEnv(home, {
+    GIT_CONFIG_NOSYSTEM: '1',
+    ...(process.platform === 'win32' ? {} : { GIT_CONFIG_GLOBAL: os.devNull }),
+  });
   const git = (cwd, ...args) => {
-    const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
+    const result = spawnSync('git', args, { cwd, encoding: 'utf8', env });
     assert.equal(result.status, 0, `git ${args.join(' ')}: ${result.stderr}`);
     return result.stdout.trim();
   };
@@ -106,7 +115,10 @@ test('round trip through a real bare repository: absent, first commit, second co
     git(work, 'config', 'user.name', 'test');
     git(work, 'config', 'user.email', 'test@example.invalid');
     git(work, 'remote', 'add', 'origin', origin);
-    const store = createLedgerStore({ cwd: work });
+    const store = createLedgerStore({
+      cwd: work,
+      exec: (command, args, options) => runWithInput(command, args, { ...options, env }),
+    });
     assert.deepEqual(await store.read('upstream-watch-ledger', { now: NOW }), { commit: null, records: [], checkedAt: null });
     const first = await store.build({ parent: null, records: [record('UPSTREAM-WATCH a 1')], checkedAt: '2026-09-28T14:17:00Z', subject: 'upstream-watch: 1 new record', sentences: ['First.'] });
     git(work, 'push', '-q', 'origin', `${first}:refs/heads/upstream-watch-ledger`);
