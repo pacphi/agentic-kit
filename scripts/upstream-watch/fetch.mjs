@@ -153,10 +153,44 @@ export function createFetcher({ exec = run } = {}) {
       }
       return { carrier: chain[0], carrierVersion, version, basis: trail.join(' → ') };
     },
+    /**
+     * The last successful scheduled upstream watch run in `repo`, or null when
+     * there is none. Pull request previews and manual dry runs also succeed, so
+     * only scheduled runs show that the watch is alive.
+     */
+    async lastRun(repo) {
+      if (!OWNER_REPO.test(repo ?? '')) throw new Error(`not an owner/repo: ${repo}`);
+      const answer = await json('gh', ['api', `repos/${repo}/actions/workflows/upstream-watch.yml/runs?status=success&event=schedule&per_page=1`]);
+      const run = answer?.workflow_runs?.[0];
+      return run ? { at: run.run_started_at, url: run.html_url } : null;
+    },
     async release({ channel, name }) {
       if (!PACKAGE_NAME.test(name)) throw new Error(`not a package or repository name: ${name}`);
       if (channel === 'npm') return releaseFacts('npm', await json('npm', ['view', name, 'time', 'dist-tags', '--json']));
       return releaseFacts('github-release', await json('gh', ['api', `repos/${name}/releases?per_page=100`]));
     },
   };
+}
+
+/**
+ * Retry each method of `fetcher` except `auth` after each delay in turn; the
+ * last error is thrown. `record` uses it so a transient GitHub or npm failure
+ * does not fail the scheduled run (spec 2026-09-28).
+ */
+export function retrying(fetcher, { delays = [2000, 10_000], sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }) } = {}) {
+  const wrapped = { ...fetcher };
+  for (const [name, method] of Object.entries(fetcher)) {
+    if (name === 'auth' || typeof method !== 'function') continue;
+    wrapped[name] = async (...args) => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await method.apply(fetcher, args);
+        } catch (error) {
+          if (attempt >= delays.length) throw error;
+          await sleep(delays[attempt]);
+        }
+      }
+    };
+  }
+  return wrapped;
 }

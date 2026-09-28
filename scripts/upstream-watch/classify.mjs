@@ -395,7 +395,7 @@ export function buildReport(registry, liveById, { now, offline = null, fetchErro
   };
 }
 
-function eventLine(sentinel, id, event, date, fields = {}) {
+export function eventLine(sentinel, id, event, date, fields = {}) {
   const extra = Object.entries(fields).filter(([, value]) => value != null).map(([key, value]) => `${key}=${value}`);
   return { id, event, date, fields, line: [sentinel, id, event, date, ...extra].join(' ') };
 }
