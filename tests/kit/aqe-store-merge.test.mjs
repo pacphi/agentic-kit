@@ -473,6 +473,20 @@ test('a receipt marked applying exists before the real import, so an interrupted
   assert.equal(JSON.parse(fs.readFileSync(result.receipt, 'utf8')).status, 'merged');
 });
 
+test('experiences whose id the root already holds are counted as skipped in the preview and receipt (review minor 6)', async (t) => {
+  const p = project(t);
+  const docs = new DatabaseSync(path.join(p.root, 'docs', '.agentic-qe', 'memory.db'));
+  docs.prepare('INSERT INTO captured_experiences (id, task, agent) VALUES (?, ?, ?)').run('e1', 'a different task', 'agent');
+  docs.close();
+  const preview = await mergeAqeStores(p.root, base(p, { apply: false, runner: fakeAqe().runner, holders: noHolders }));
+  const row = preview.strays.find((s) => s.path === 'docs/.agentic-qe');
+  assert.deepEqual([row.experiences, row.experiencesInRoot, row.newExperiences], [2, 1, 1]);
+  const result = await mergeAqeStores(p.root, base(p, { apply: true, runner: fakeAqe().runner, holders: noHolders, now: Date.UTC(2026, 8, 27, 18) }));
+  assert.equal(result.status, 'merged', JSON.stringify(result.reason));
+  const receipt = JSON.parse(fs.readFileSync(result.receipt, 'utf8'));
+  assert.equal(receipt.strays.find((s) => s.path === 'docs/.agentic-qe').experiencesInRoot, 1);
+});
+
 // ---- AQE's starter patterns (decision B5-D5) ---------------------------------
 
 /** project() plus AQE starter patterns S1, S2 in the strays (the root has none of
@@ -657,6 +671,7 @@ test('ak x aqe-store status prints the preview for a real fixture project', asyn
   const { code, out } = await capture(() => cli.run({ flags: {}, positionals: ['status'], cwd: p.root, merge }));
   assert.equal(code, 0);
   assert.match(out, /docs\/\.agentic-qe: 2 patterns \(1 already in the root\), 1 experience/);
+  assert.match(out, /0 already in the root, skipped/);
   assert.match(out, /after the merge the root would hold 4 patterns and 2 experiences/);
   assert.match(out, /docker\/\.agentic-qe: skipped \(no memory\.db\)/);
   assert.match(out, /AQE starter set: 2 patterns/);

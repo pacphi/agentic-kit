@@ -68,7 +68,8 @@ function strayLine(stray) {
   const seeds = (stray.seedPatterns ? `, ${plural(stray.seedPatterns, 'AQE starter pattern')} left out` : '')
     + (stray.seedPatternsInRoot ? `, ${plural(stray.seedPatternsInRoot, 'starter pattern')} the root holds (usage merged onto it)` : '');
   return `${stray.path}: ${plural(stray.patterns, 'pattern')} (${stray.alreadyInRoot} already in the root${seeds}), `
-    + `${plural(stray.experiences, 'experience')}, ${plural(stray.witnessRows, 'audit-trail row')} (not imported)`;
+    + `${plural(stray.experiences, 'experience')} (${stray.experiencesInRoot ?? 0} already in the root, skipped), `
+    + `${plural(stray.witnessRows, 'audit-trail row')} (not imported)`;
 }
 
 function holdersLine(found) {

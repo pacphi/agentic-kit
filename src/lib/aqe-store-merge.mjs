@@ -183,6 +183,7 @@ function preview(root, strays, scratch, openDb, seedKeys) {
   const inRoot = new Set(rootCopy.keys);
   const known = new Set(rootCopy.keys);
   const ids = new Set(rootCopy.experiences);
+  const rootExperiences = new Set(rootCopy.experiences);
   const rows = strays.map((stray) => {
     fingerprints.strays.set(stray.file, fingerprint(stray.file));
     const copy = copyStore(stray.file, path.join(scratch, 'strays', stray.slug));
@@ -196,6 +197,8 @@ function preview(root, strays, scratch, openDb, seedKeys) {
       seedPatterns: store.keys.length - kept.length - seedsInRoot, seedPatternsInRoot: seedsInRoot,
       newPatterns: kept.filter((key) => !known.has(key)).length,
       newExperiences: store.experiences.filter((id) => !ids.has(id)).length,
+      // AQE's import (skip-conflicts) skips an id the root holds even when its content differs.
+      experiencesInRoot: store.experiences.filter((id) => rootExperiences.has(id)).length,
     };
     for (const key of kept) known.add(key);
     for (const id of store.experiences) ids.add(id);
@@ -490,7 +493,7 @@ function writeReceipt(result, extra) {
     strays: result.strays.map((s) => ({
       path: s.path, patterns: s.patterns, experiences: s.experiences, alreadyInRoot: s.alreadyInRoot,
       witnessRowsNotImported: s.witnessRowsNotImported ?? 0, seedPatternsSkipped: s.seedPatternsSkipped ?? s.seedPatterns ?? 0,
-      seedPatternsInRoot: s.seedPatternsInRoot ?? 0, prunedPatterns: 0,
+      seedPatternsInRoot: s.seedPatternsInRoot ?? 0, experiencesInRoot: s.experiencesInRoot ?? 0, prunedPatterns: 0,
     })),
     archived: result.archived, leftInPlace: result.leftInPlace,
   }, null, 2)}\n`);
