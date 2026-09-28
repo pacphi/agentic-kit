@@ -69,7 +69,12 @@ function seed({ ruvnetBrain = false, ruvector = false } = {}) {
   }
 }
 
-const versionCheckText = () => JSON.stringify(loadKitConfig().versionCheck);
+/** The bytes kit.json holds for the versions part: the whole version record
+ *  but the kit's own (`self`), which a sync looks up unless --skip self. */
+const versionsPartText = () => {
+  const { self: _self, ...rest } = loadKitConfig().versionCheck;
+  return JSON.stringify(rest);
+};
 /** The bytes kit.json holds for one part's version record. */
 const recordText = (part) => JSON.stringify(loadKitConfig().versionCheck?.[part]);
 const kitJsonText = () => fs.readFileSync(paths.kitConfigPath(), 'utf8');
@@ -148,9 +153,11 @@ const npmViews = (npm, pkg) => npm.filter((line) => line.startsWith(`view ${pkg}
 
 test('--skip versions makes no forced or plan-time lookup for ruflo/agentic-qe and records nothing', async () => {
   seed();
-  const before = versionCheckText();
+  const before = versionsPartText();
+  const selfBefore = loadKitConfig().versionCheck.self;
   // Newer ruflo/agentic-qe everywhere, so a leaked versions lookup would record
-  // them; the kit's own (unskipped) lookup answers nothing, so it records nothing.
+  // them. The kit's own (unskipped) lookup answers nothing, so its record keeps
+  // the recorded best and only its `last` is restamped (versions.mjs).
   const { ruflo, 'agentic-qe': aqe } = NEWER;
   const { calls, npm, out } = await observedSync({ skip: ['versions'] },
     { latest: { ruflo, 'agentic-qe': aqe }, answers: { ruflo, 'agentic-qe': aqe } });
@@ -161,7 +168,8 @@ test('--skip versions makes no forced or plan-time lookup for ruflo/agentic-qe a
     assert.deepEqual([...npmViews(npm, 'ruflo'), ...npmViews(npm, 'agentic-qe')], [],
       'neither the plan read nor the converge proof may fetch on the expired cache');
   }
-  assert.equal(versionCheckText(), before, "kit.json's versionCheck is byte-identical");
+  assert.equal(versionsPartText(), before, "kit.json's versions record is byte-identical");
+  assert.deepEqual(loadKitConfig().versionCheck.self.best, selfBefore.best, 'the failed kit lookup keeps its recorded best');
 });
 
 test('--skip self makes no lookup for the kit itself', async () => {

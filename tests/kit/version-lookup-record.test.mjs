@@ -3,17 +3,21 @@
 // - `record: false` looks the version up and reports it without saving kit.json
 //   (`ak sync --dry-run`'s preview).
 // - A failed lookup never erases a good one: when the Brain's GitHub release
-//   or ruvector's npm lookup answers nothing, the recorded latest (and the
-//   Brain's asset fact) stays in kit.json and the drift reports it as a cache
-//   fallback. `last` is restamped: retried once per TTL window (`force` retries
-//   sooner), so an offline `ak status` or dashboard poll does not wait on the
-//   lookup every time. `observedAt` keeps when the recorded latest was actually
-//   seen, so no label claims the failed attempt observed it.
+//   or ruvector's npm lookup answers nothing, or every npm lookup of the
+//   managed packages (driftReport) or of the kit itself (selfDrift) does, the
+//   recorded latest (and the Brain's asset fact) stays in kit.json and the
+//   drift reports it as a cache fallback. `last` is restamped: retried once per
+//   TTL window (`force` retries sooner), so an offline `ak status` or dashboard
+//   poll does not wait on the lookup every time. `observedAt` keeps when the
+//   recorded latest was actually seen, so no label claims the failed attempt
+//   observed it. `record: false` and a cache-only read never write.
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { sandboxHome, assertSandboxed, rmrf, writeKitConfig, offlineKitConfig, fakeGlobalRoot } from './helpers/home-sandbox.mjs';
+import {
+  sandboxHome, assertSandboxed, rmrf, writeKitConfig, offlineKitConfig, fakeGlobalRoot, captureLog,
+} from './helpers/home-sandbox.mjs';
 
 const HOME = sandboxHome('ak-version-lookup-record');
 const paths = await import('../../src/lib/paths.mjs');
@@ -190,6 +194,89 @@ test('a first failed lookup with nothing recorded writes only last', async () =>
   const saved = loadKitConfig().versionCheck;
   assert.deepEqual(Object.keys(saved.ruvnetBrain), ['last']);
   assert.deepEqual(Object.keys(saved.ruvector), ['last']);
+});
+
+// ── driftReport and selfDrift follow the same rule on a total failure ────────
+
+test('an expired version cache whose every lookup fails keeps seen, restamps last, and waits one TTL window', async () => {
+  seed();
+  let calls = 0;
+  const fetchLatest = async () => { calls += 1; return null; };
+  const first = await driftReport({ fetchLatest });
+  assert.equal(calls, 2, 'ruflo and agentic-qe were looked up');
+  assert.deepEqual(first.map((r) => [r.pkg, r.latest, r.latestSource]),
+    [['ruflo', '9.9.9', 'cache-fallback'], ['agentic-qe', '9.9.9', 'cache-fallback']]);
+  const saved = loadKitConfig().versionCheck;
+  assert.deepEqual(saved.seen, { ruflo: '9.9.9', 'agentic-qe': '9.9.9' }, 'the recorded versions stay');
+  assert.ok(saved.last > STALE, 'last is restamped, so the next lookup waits one TTL window');
+  assert.deepEqual(saved.observedAt, { ruflo: STALE, 'agentic-qe': STALE }, 'when the recorded versions were actually seen');
+  const second = await driftReport({ fetchLatest });
+  assert.equal(calls, 2, 'a plain call within the TTL makes no lookup');
+  assert.deepEqual(second.map((r) => [r.latestSource, r.latestObservedAt]), [['cache', STALE], ['cache', STALE]],
+    'the label still names when the versions were observed, not the failed attempt');
+  await driftReport({ force: true, fetchLatest });
+  assert.equal(calls, 4, 'force retries');
+  assert.deepEqual(loadKitConfig().versionCheck.observedAt, { ruflo: STALE, 'agentic-qe': STALE });
+});
+
+test('an expired self cache whose every lookup fails keeps the recorded best, restamps last, and waits one TTL window', async () => {
+  seed();
+  let calls = 0;
+  const fetchLatest = async () => { calls += 1; return null; };
+  const first = await selfDrift({ pkgRoot: PKG_ROOT, fetchLatest });
+  assert.equal(calls, 1, 'a stable install looks up latest only');
+  assert.equal(first.latest, '4.0.0');
+  const saved = loadKitConfig().versionCheck.self;
+  assert.deepEqual(saved.best, { version: '4.0.0', tag: 'latest' });
+  assert.ok(saved.last > STALE);
+  assert.equal(saved.observedAt, STALE, 'when the recorded best was actually seen');
+  assert.equal((await selfDrift({ pkgRoot: PKG_ROOT, fetchLatest })).latest, '4.0.0');
+  assert.equal(calls, 1, 'a plain call within the TTL makes no lookup');
+  await selfDrift({ pkgRoot: PKG_ROOT, force: true, fetchLatest });
+  assert.equal(calls, 2, 'force retries');
+  assert.equal(loadKitConfig().versionCheck.self.observedAt, STALE);
+});
+
+test('a successful self lookup records when it was observed', async () => {
+  seed();
+  await selfDrift({ pkgRoot: PKG_ROOT, force: true, fetchLatest: async () => '4.1.0' });
+  const saved = loadKitConfig().versionCheck.self;
+  assert.deepEqual(saved.best, { version: '4.1.0', tag: 'latest' });
+  assert.equal(saved.observedAt, saved.last);
+});
+
+test('a total failure with record:false writes nothing, for driftReport and selfDrift', async () => {
+  seed();
+  const before = kitJsonText();
+  const drift = await driftReport({ force: true, record: false, fetchLatest: async () => null });
+  const self = await selfDrift({ pkgRoot: PKG_ROOT, force: true, record: false, fetchLatest: async () => null });
+  assert.equal(kitJsonText(), before);
+  assert.deepEqual(drift.map((r) => r.latestSource), ['cache-fallback', 'cache-fallback']);
+  assert.equal(self.latest, '4.0.0');
+});
+
+test('driftReport and selfDrift with cacheOnly read the recorded versions with no lookup and no write', async () => {
+  seed();
+  const before = kitJsonText();
+  const noLookup = async () => { throw new Error('cacheOnly must not look up'); };
+  const drift = await driftReport({ cacheOnly: true, fetchLatest: noLookup });
+  const self = await selfDrift({ pkgRoot: PKG_ROOT, cacheOnly: true, fetchLatest: noLookup });
+  assert.equal(kitJsonText(), before);
+  assert.deepEqual(drift.map((r) => [r.pkg, r.latest, r.latestSource]),
+    [['ruflo', '9.9.9', 'cache-fallback'], ['agentic-qe', '9.9.9', 'cache-fallback']]);
+  assert.equal(self.latest, '4.0.0');
+});
+
+test("after a restamp, a dry run's offline line still gives the age of the recorded versions", async () => {
+  seed();
+  await driftReport({ fetchLatest: async () => null });
+  await selfDrift({ pkgRoot: PKG_ROOT, fetchLatest: async () => null });
+  const { lookUpPlanVersions } = await import('../../src/commands/sync/plan-versions.mjs');
+  const { out } = await captureLog(() => lookUpPlanVersions({
+    flags: { 'dry-run': true }, pkgRoot: PKG_ROOT, fetchLatest: async () => null,
+    releaseDatesRunner: async () => ({ code: 1, stdout: '', stderr: 'offline (test)' }),
+  }));
+  assert.match(out, /versions not checked online \(offline or timed out\); this plan uses the versions ak recorded 2d ago/, out);
 });
 
 test('ruvector drift with cacheOnly reads the recorded latest with no lookup and no write', async () => {

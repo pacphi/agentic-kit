@@ -215,6 +215,9 @@ test('plain status never runs a live check', async () => {
 test('status --refresh=live runs the checks before the local re-check, so the rows show them', async () => {
   writeKitConfig(HOME, cfg);
   reset();
+  // The config on disk when the checks run. The local re-check after them may
+  // restamp a failed version lookup's `last` (versions.mjs), so it is read now.
+  const onDisk = loadKitConfig();
   let seenCfg;
   const runLive = async ({ cfg: seen, cwd }) => {
     seenCfg = seen;
@@ -224,7 +227,7 @@ test('status --refresh=live runs the checks before the local re-check, so the ro
     return [{ id: 'security', status: 'failed', reason: 'defend ambiguous', elapsedMs: 5 }];
   };
   const { out, result } = await runStatus({ refresh: 'live' }, runLive);
-  assert.deepEqual(seenCfg, loadKitConfig(), 'the live checks get the kit config');
+  assert.deepEqual(seenCfg, onDisk, 'the live checks get the kit config');
   assert.match(out, /^Running live checks…\n✓ Running live checks \(\d+ ms\): 1 failed$/m,
     'the start of the live checks is announced, then their result');
   assert.match(out, /security: last live check failed just now \(ak status --refresh=live\): defend ambiguous/);

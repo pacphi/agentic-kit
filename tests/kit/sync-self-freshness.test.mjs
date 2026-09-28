@@ -89,16 +89,18 @@ test('stable installations refresh only latest and do not enter the prerelease c
   assert.deepEqual(tags, ['latest']);
 });
 
-test('failed forced self lookups preserve known updates and do not renew the cache TTL', async () => {
+test('failed forced self lookups preserve known updates and restamp last, keeping when the update was seen', async () => {
   seed();
   const cfg = loadKitConfig();
   cfg.versionCheck.self = { last: 1, best: { version: '4.0.0-alpha.50', tag: 'next' } };
   writeKitConfig(home, cfg);
-  const before = fs.readFileSync(paths.kitConfigPath(), 'utf8');
   const result = await selfDrift({ pkgRoot, force: true, fetchLatest: async () => null });
   assert.equal(result.latest, '4.0.0-alpha.50');
   assert.equal(result.outdated, true);
-  assert.equal(fs.readFileSync(paths.kitConfigPath(), 'utf8'), before);
+  const saved = loadKitConfig().versionCheck.self;
+  assert.deepEqual(saved.best, { version: '4.0.0-alpha.50', tag: 'next' });
+  assert.ok(saved.last > 1, 'the next lookup waits one TTL window');
+  assert.equal(saved.observedAt, 1);
 });
 
 test('a failed next lookup retains its cached candidate without claiming a fresh observation', async () => {

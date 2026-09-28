@@ -15,7 +15,7 @@ import path from 'node:path';
 import { run } from '../../lib/exec.mjs';
 import { describeAge } from '../../lib/evidence.mjs';
 import { info } from '../../lib/output.mjs';
-import { driftReport, selfDrift, cachedOnlyLatest, latestVersion } from '../../lib/versions.mjs';
+import { driftReport, selfDrift, latestVersion } from '../../lib/versions.mjs';
 import { recordRufloReleaseDates } from '../../lib/ruflo-support-window.mjs';
 import { drift as ruvnetBrainDrift } from '../../lib/ruvnet-brain.mjs';
 import { drift as ruvectorDrift, managed as ruvectorManaged } from '../../lib/ruvector.mjs';
@@ -48,8 +48,8 @@ async function refreshRufloReleaseDates(releaseDatesRunner) {
  */
 export async function skippedVersionEvidence({ skip, pkgRoot }) {
   const evidence = {};
-  if (skip.has('versions')) evidence.drift = await driftReport({ fetchLatest: cachedOnlyLatest });
-  if (skip.has('self')) evidence.self = await selfDrift({ pkgRoot, fetchLatest: cachedOnlyLatest });
+  if (skip.has('versions')) evidence.drift = await driftReport({ cacheOnly: true });
+  if (skip.has('self')) evidence.self = await selfDrift({ pkgRoot, cacheOnly: true });
   if (skip.has('ruvnet-brain') && brainManaged()) evidence.brain = await ruvnetBrainDrift({ cacheOnly: true });
   if (skip.has('ruvector') && ruvectorManaged()) evidence.ruvector = await ruvectorDrift({ cacheOnly: true });
   return evidence;
@@ -162,10 +162,18 @@ export async function previewPlanVersions({
   return { versionEvidence, online: lookedUp.size ? answered : null, lookedUp };
 }
 
-/** When kit.json says each part's recorded latest was observed. */
+/** The newest finite timestamp among `stamps`, or undefined. */
+const newest = (stamps) => {
+  const finite = stamps.filter((at) => Number.isFinite(at));
+  return finite.length ? Math.max(...finite) : undefined;
+};
+
+/** When kit.json says each part's recorded latest was observed. A failed
+ *  lookup restamps `last` too, so `last` is only the fallback for a record
+ *  written before `observedAt` existed. */
 const RECORDED_AT = {
-  versions: (vc) => vc?.last,
-  self: (vc) => vc?.self?.last,
+  versions: (vc) => newest(Object.values(vc?.observedAt ?? {})) ?? vc?.last,
+  self: (vc) => vc?.self?.observedAt ?? vc?.self?.last,
   'ruvnet-brain': (vc) => vc?.ruvnetBrain?.observedAt ?? vc?.ruvnetBrain?.last,
   ruvector: (vc) => vc?.ruvector?.observedAt ?? vc?.ruvector?.last,
 };
