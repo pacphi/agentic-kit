@@ -103,7 +103,11 @@ function printOutcome(result) {
     ok(`merged ${plural(result.strays.length, 'stray store')} into ${result.root}/.agentic-qe/memory.db `
       + `(${plural(result.after.patterns, 'pattern')}, ${plural(result.after.experiences, 'experience')})`);
     for (const moved of result.archived) console.log(`  archived ${moved.path} → ${moved.to}`);
-    for (const left of result.leftInPlace) warn(`left in place: ${left.path} (${left.reason}); close what holds it and run ak x aqe-store merge --yes again`);
+    for (const left of result.leftInPlace) {
+      warn(left.reason.startsWith('partially moved')
+        ? `${left.path}: ${left.reason}; close what holds it, then delete what is left of ${left.path} by hand`
+        : `left in place: ${left.path} (${left.reason}); close what holds it and run ak x aqe-store merge --yes again`);
+    }
     console.log(`backup: ${result.backup}`);
     console.log(`receipt: ${result.receipt}`);
     return result.leftInPlace.length ? 1 : 0;

@@ -344,6 +344,27 @@ test('a move across filesystems copies, checks every file and size, then removes
   assert.equal(fs.existsSync(path.join(p.root, 'docs', '.agentic-qe')), false);
 });
 
+test('a move across filesystems whose source removal fails part-way says what remains (review minor 10)', async (t) => {
+  const p = project(t);
+  const rename = () => { throw Object.assign(new Error('cross-device'), { code: 'EXDEV' }); };
+  const remove = (dir) => {
+    if (dir.includes(`${path.sep}docs${path.sep}`)) {
+      fs.unlinkSync(path.join(dir, 'patterns.rvf'));
+      throw Object.assign(new Error('resource busy'), { code: 'EBUSY' });
+    }
+    fs.rmSync(dir, { recursive: true });
+  };
+  const result = await mergeAqeStores(p.root, base(p, { apply: true, runner: fakeAqe().runner, holders: noHolders, rename, remove }));
+  assert.equal(result.status, 'merged', JSON.stringify(result.reason));
+  const docs = result.leftInPlace.find((s) => s.path === 'docs/.agentic-qe');
+  assert.ok(docs, JSON.stringify(result.leftInPlace));
+  assert.match(docs.reason, /^partially moved: /);
+  assert.match(docs.reason, /memory\.db/, 'names what remains');
+  assert.doesNotMatch(docs.reason, /patterns\.rvf/, 'not what is gone');
+  assert.match(docs.reason, /EBUSY/);
+  assert.ok(docs.reason.includes(path.join(p.mergeDir, result.runId, 'archive', 'docs', '.agentic-qe')), 'names the complete archive copy');
+});
+
 test('a stray copy that cannot be read is reported in the preview and refuses the merge', async (t) => {
   const p = project(t);
   fs.writeFileSync(path.join(p.root, 'docs', '.agentic-qe', 'memory.db'), 'not a database, as a copy torn by a live writer can be');

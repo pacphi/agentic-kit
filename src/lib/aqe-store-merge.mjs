@@ -385,11 +385,17 @@ function listTree(dir) {
   return out.sort();
 }
 
-function moveAcrossDevices(from, to) {
+function moveAcrossDevices(from, to, remove) {
   fs.cpSync(from, to, { recursive: true, preserveTimestamps: true, errorOnExist: true, force: false });
   const want = listTree(from).join('\n');
   if (listTree(to).join('\n') !== want) throw Object.assign(new Error('copied archive differs from the source'), { code: 'ECOPY' });
-  fs.rmSync(from, { recursive: true });
+  try { remove(from); } catch (error) {
+    // The archive copy is complete; part of the source may already be gone (review minor 10).
+    let remains = [];
+    try { remains = listTree(from).map((entry) => entry.replace(/:\d+$/, '')); } catch { /* gone after all */ }
+    throw Object.assign(new Error(`partially moved: the archive copy at ${to} is complete, but removing the source failed `
+      + `(${error?.code ?? 'error'}: ${error?.message}) and left ${remains.length ? remains.join(', ') : 'an empty folder'}`), { code: 'EPARTIAL' });
+  }
 }
 
 function archive(o, rows, runDir, fingerprints) {
@@ -406,12 +412,13 @@ function archive(o, rows, runDir, fingerprints) {
     try {
       try { o.rename(stray.dir, to); } catch (error) {
         if (error?.code !== 'EXDEV') throw error;
-        moveAcrossDevices(stray.dir, to);
+        moveAcrossDevices(stray.dir, to, o.remove);
       }
       archived.push({ path: stray.path, to });
     } catch (error) {
       const busy = ['EBUSY', 'EPERM', 'EACCES'].includes(error?.code);
-      leftInPlace.push({ path: stray.path, reason: busy ? `${error.code}: a process still holds it` : `${error?.code ?? 'error'}: ${error?.message}` });
+      leftInPlace.push({ path: stray.path, reason: error?.code === 'EPARTIAL' ? error.message
+        : busy ? `${error.code}: a process still holds it` : `${error?.code ?? 'error'}: ${error?.message}` });
     }
   }
   return { archived, leftInPlace };
@@ -557,14 +564,14 @@ async function applyMerge(o, root, result, rows, seedKeys, { fingerprints, rootK
  * `<root>/.agentic-qe/memory.db`.
  * @param {string} root the project root (repoRoot)
  * @param {{ apply?: boolean, mergeDir?: string, now?: number, platform?: NodeJS.Platform, runner?: typeof run,
- *   holders?: typeof storeHolders, openDb?: typeof withDb, rename?: (from: string, to: string) => void,
+ *   holders?: typeof storeHolders, openDb?: typeof withDb, rename?: (from: string, to: string) => void, remove?: (dir: string) => void,
  *   aqeVersion?: string|null }} [options]
  * @returns {Promise<MergeResult>}
  */
 export async function mergeAqeStores(root, options = {}) {
   const o = {
     apply: false, mergeDir: paths.aqeStoreMergeDir(), now: Date.now(), platform: process.platform, runner: run,
-    holders: storeHolders, openDb: withDb, rename: fs.renameSync, ...options,
+    holders: storeHolders, openDb: withDb, rename: fs.renameSync, remove: (dir) => fs.rmSync(dir, { recursive: true }), ...options,
   };
   const { strays, skipped } = strayStores(root);
   if (strays.length && !('aqeVersion' in options)) o.aqeVersion = await aqeCliVersion(o.runner);
