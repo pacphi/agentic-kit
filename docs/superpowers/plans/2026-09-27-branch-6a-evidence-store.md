@@ -349,6 +349,99 @@ assumed, before deciding what (if anything) to cut.
   `ak status --help` text in `status.mjs` (the `--refresh` description should note it now covers
   hosts/natives/deja-vu/version checks, not only ruflo components).
 
+## Rulings folded in after an advisor pass (before Tasks 4/5/8a were dispatched)
+
+- **Ruling A — plain status/dashboard DOES re-collect an expired process-shaped check, on a long
+  age window; it does not wait forever for `--refresh`.** Item 4's own table says plain status
+  "re-collects quick local evidence only when it has expired"; Decision 9's "status never probes"
+  and guardrail 5's "the dashboard's regular refresh stays non-live" are both about *live* (network
+  round-trip) checks, not quick local subprocess checks. Tasks 4, 5a, 5b therefore do **not** gate
+  the native-runtime/host-setup/companion-lifecycle probe behind `refresh` alone: the read path is
+  "use cached evidence when `!stale && !invalidated`; otherwise probe and record, whether or not
+  `refresh` was requested." `refresh: true` (from `ak status --refresh`, sync, heal, verify, setup)
+  always forces a fresh probe; `refresh: false` (plain status/dashboard) only skips the probe when
+  the existing record is still within its `maxAgeMs` and its `inputsKey` still matches. Each kind's
+  `maxAgeMs` is measured in hours (native-runtime and host-setup: 6h; companion-lifecycle: 6h) —
+  long enough that a 30-second poll never re-probes twice in the same sitting, short enough that a
+  newly installed host or a rebuilt native binding resolves itself within the same working session
+  without requiring `--refresh`. Task 8's zero-spawn assertions become: **zero spawns when
+  evidence is fresh; exactly one spawn per kind when its evidence is stale, invalidated, or
+  missing; a second consecutive poll immediately after the first spawns zero.** This still clears
+  the Review Focus bar (today every poll spawns every kind, unconditionally).
+- **Ruling B — the new `{ refresh }`/`{ probe }` parameters default to today's always-probe
+  behavior, so no existing caller changes without an explicit code change.** `rufloRuntimeNatives`,
+  `hostInstallState`, `driftReport` (and the `ruvector.mjs`/`ruvnet-brain.mjs` equivalents) default
+  their new parameter to `true` — sync, heal, `ak x verify`, `ak setup`, and the post-command nudge
+  call these functions with no changes and keep spawning exactly as before. Only `status.mjs`'s
+  `collect()` and `dashboard-server.mjs`'s in-process call (Task 9) pass the parameter explicitly
+  as `false`, which (per Ruling A) still probes when evidence is stale/invalidated/missing. Tasks
+  4, 5, 6 each enumerate and confirm their non-status callers (`sync.mjs`, `heal.mjs`,
+  `x/verify.mjs`, `setup.mjs`) still probe unconditionally, as an explicit review-checklist item.
+- **Ruling C — the spawn-ledger seam moves out of `src/lib/exec.mjs`.** A repo-wide check
+  (`grep -rln "child_process" src/`) found ~30 files spawning directly (`host-health-connected.mjs`,
+  `quota.mjs`, `daemons.mjs`, `mcp-probe.mjs`, `execution/subprocess.mjs`, `execution/opencode.mjs`,
+  the template `.cjs`/`.js` files run inside hooks, and more) — a ledger seam inside `exec.mjs`'s
+  `run()` would under-count and let the zero-spawn test pass vacuously on any check that spawns a
+  different way. Task 8a therefore has **no product-code change**: `spawn-ledger.mjs` is dropped
+  entirely, and Task 9's `src/lib/exec.mjs` note about `spawn-ledger.mjs` is removed. Instead,
+  `tests/kit/status-zero-spawn.test.mjs` runs `status.collect()` inside a child Node process
+  launched with `--import` of a test-only preload module (`tests/helpers/spawn-guard.mjs`, new)
+  that monkey-patches `node:child_process`'s `spawn`, `execFile`, `execFileSync` and `spawnSync` to
+  append `{cmd, args, at}` to a ledger file named by an env var the test sets. This catches every
+  spawn path regardless of which module makes it, needs no production code, and works identically
+  for Task 8b's dashboard-as-child assertion (start the dashboard server itself as the child with
+  the same preload).
+- **Ruling D — never commit a red test.** The gate-every-2-3-tasks ruling above means a committed,
+  currently-failing `status-zero-spawn.test.mjs` would break every gate run between 8a and the
+  point Task 7's sweep turns it green, and would break bisect. Task 8a commits the test as
+  `test.todo(...)` (or behind an opt-in env var, e.g. only asserted when
+  `process.env.AK_EXPECT_SPAWN_FREE === '1'`), with the RED run's actual output (naming every
+  offender: native-runtime, host-setup ×N hosts, companion-lifecycle, version-drift ×3) captured
+  verbatim in the implementer's report, not in a committed failing test. Task 7 flips it to a real,
+  enforced assertion once the sweep is complete. This mirrors Branch 5's own precedent for the
+  #655 conformance test (`todo`, per `progress.md`'s Branch 5 entries).
+
+### Non-blocking notes folded in for task dispatch prompts / reviewer lenses
+
+- **Program-plan item 1 coverage gap.** Item 1 says every check records, "including
+  `ak x aqe-embedding verify`, setup proofs and sync." No task above yet touches
+  `src/lib/host-health-evidence.mjs` (ADR-0053's setup proofs) or confirms `src/commands/x/
+  aqe-embedding.mjs` writes through the shared envelope. Task 2 (or a small Task 2b) must either
+  fold `host-health-evidence.mjs` onto `evidence.mjs` the same way live-checks and ruflo-components
+  were, or add it explicitly to the "deliberately not folded in" list in ADR-0063 with a stated
+  reason — not silence. Confirm `x/aqe-embedding.mjs verify` already goes through
+  `live-check-evidence.mjs` (Task 2's move covers it) before assuming it's covered.
+- **Task 5a's `inputsKey`.** "Resolved PATH binary path + mtime" must be computed with a pure
+  `fs`/`path` PATH scan (mirroring however `have()` already resolves a binary, or a new pure
+  helper) — if computing the key itself shells out to `which`/`command -v`, plain status can never
+  compute the key without spawning, which defeats the whole point.
+- **Task 9 hazards**, now that `collect()` runs inside a long-lived server process instead of a
+  disposable child: wrap each section's call with try/catch and a timeout (a thrown section used
+  to only kill a short-lived child; it must not crash the dashboard server); assert every path
+  computation actually honors the passed `cwd` and never falls back to `process.cwd()`; no section
+  may call `process.chdir` or set `process.exitCode`, and no section may cache module-level state
+  across requests for a different `cwd`/project. Add a fixture test asserting the in-process JSON
+  is byte-for-byte identical to `ak status --json`'s CLI output for the same fixture (`run()` may
+  post-process beyond what `collect()` returns).
+- **Decided spawns on other dashboard routes are the poll's real baseline, not zero.** Decision 1's
+  automatic tool-level checks for an unmanaged host, and `readLimits` starting `codex app-server`
+  regardless of the Codex host setting, are existing, decided behavior on other routes. Task 8b's
+  dashboard-cost assertion pins *this branch's* poll route's spawn count against its own prior
+  baseline; Task 9 must not remove or alter those other routes' behavior.
+- **Task 12's doc list also needs `docs/UPGRADING.md`**: a cold evidence cache right after an
+  upgrade (rows read "unchecked" until the next `ak sync`/`--refresh`) and the now-orphaned
+  `<stateBase>/agentic-kit/live-checks/` and `ruflo-components-evidence.json` files (no migration
+  shim, per Tasks 2/3) both belong in the upgrade notes, not only the ADR.
+- **Task 10**: confirm `lastView`'s shape carries no timestamp field before relying on deep-equal —
+  a timestamp in the compared object would make the equality check never match and silently
+  reintroduce the every-tick write it's meant to remove.
+- **Task 11 Step 1** runs on the real machine, so the controller runs it directly (not a dispatched
+  agent) per the real-state rules, with a tripwire snapshot before and after.
+- **Model selection is mandatory per dispatch** (per the skill): Task 1 and same-shape mechanical
+  edits (2, 3, 10) → cheap/fast model; Tasks 4, 5, 6, 7, 9 (multi-file integration, the spawn-guard
+  seam, in-process hazards) → standard model with judgment; the final whole-branch review →
+  the most capable available model.
+
 ## Open decisions to ask the maintainer first
 
 None block this branch. One planner call is recorded here rather than escalated:
