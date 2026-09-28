@@ -1,21 +1,24 @@
 name: upstream-watch
 
-# The upstream watch (docs/UPSTREAM-WATCH.md, decision 14). The script decides
-# everything: which ledger comments count, where the check starts, and the
-# comment's text. This workflow only posts that text on the ledger issue and
-# labels the issue when a released fix is ready to dispatch. The label is a
-# marker for people reading the issue; the dispatch routine runs on its own
-# daily schedule and reads the ledger. No model runs here.
+# The upstream watch (docs/UPSTREAM-WATCH.md, decision 15). The script decides
+# everything: the window, the new records, the dispatch firings and the notice
+# text. This workflow pushes the ledger commit the script built, posts the
+# notice as a commit comment on it, and fails the run when a read or a
+# dispatch failed. No model runs here.
 
 on:
   schedule:
-    - cron: '0 14 * * *'
+    - cron: '17 14 * * *'
   workflow_dispatch:
     inputs:
-      post:
-        description: Post the ledger comment (off = preview in the job summary only)
+      record:
+        description: Record, notify and dispatch (off = dry run in the job summary only)
         type: boolean
         default: true
+      since:
+        description: Start of the window (ISO date), for the first run or recovery
+        type: string
+        default: ''
   pull_request:
     paths:
       - scripts/upstream-watch.mjs
@@ -27,34 +30,35 @@ permissions:
   contents: read
 
 env:
-  REGISTRY: src/lib/hook-audit/agentic-dependency-constraints.json
-  DISPATCH_LABEL: upstream-dispatch
+  LEDGER_BRANCH: upstream-watch-ledger
 
 jobs:
   # Read-only proof on a pull request that the workflow token reads the
-  # upstream threads and the ledger. Never posts.
+  # upstream threads and the ledger branch. Never pushes, comments or fires.
   preview:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
+      actions: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
-      - name: Check (read-only)
+      - name: Record (dry run)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set +e
-          node scripts/upstream-watch.mjs comment --json > watch.json 2> errors.txt
+          node scripts/upstream-watch.mjs record --dry-run --json > watch.json 2> errors.txt
           code=$?
           set -e
           {
             echo "## Upstream watch preview (exit $code)"
-            jq -r '"events \(.events | length), could not check \(.fetchErrors | length), blind \(.blind), would post \(.post), dispatch \(.dispatch | join(", "))"' watch.json
+            jq -r '"since \(.since) (\(.sinceSource)), new records \(.records | length), could not check \(.fetchErrors | length), blind \(.blind), notice \(.notice.post)"' watch.json
             echo; echo '```text'; cat errors.txt; echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$code"
@@ -62,60 +66,63 @@ jobs:
   watch:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
-      contents: read
-      issues: write
+      contents: write
+      actions: read
+      pull-requests: read
     concurrency:
       group: upstream-watch
       cancel-in-progress: false
     env:
       GH_TOKEN: ${{ github.token }}
-      POST: ${{ github.event_name == 'schedule' || inputs.post }}
+      RECORD: ${{ github.event_name == 'schedule' || inputs.record }}
+      GIT_AUTHOR_NAME: github-actions[bot]
+      GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+      GIT_COMMITTER_NAME: github-actions[bot]
+      GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
-      - name: Check
-        id: check
+      - name: Record
+        env:
+          SINCE: ${{ inputs.since }}
+          UPSTREAM_DISPATCH_ROUTINE: trig_01LmNVKJ4K86joHPvvPtc7yx
+          UPSTREAM_DISPATCH_TOKEN: ${{ secrets.UPSTREAM_DISPATCH_TOKEN }}
         run: |
+          args=(record --json)
+          [ "$RECORD" = true ] || args+=(--dry-run)
+          [ -z "$SINCE" ] || args+=(--since "$SINCE")
           set +e
-          node scripts/upstream-watch.mjs comment --json > watch.json 2> errors.txt
+          node scripts/upstream-watch.mjs "${args[@]}" > watch.json 2> errors.txt
           code=$?
           set -e
           {
             echo "## Upstream watch (exit $code)"
-            jq -r '"since \(.since) (\(.sinceSource)), events \(.events | length), could not check \(.fetchErrors | length), blind \(.blind), post \(.post), dispatch \(.dispatch | join(", "))"' watch.json
+            jq -r '"since \(.since) (\(.sinceSource)), new records \(.records | length), could not check \(.fetchErrors | length), dispatch errors \(.dispatchErrors | length), blind \(.blind), commit \(.commit // "none")"' watch.json
             echo; echo '```text'; cat errors.txt; echo '```'
-            jq -r '.body' watch.json
+            jq -r '.notice.body' watch.json
           } >> "$GITHUB_STEP_SUMMARY"
-          # 3 = blind: gh unusable, the ledger unreadable, or no thread read.
+          # 3 = blind: gh unusable, the registry invalid, the ledger unreadable, or no upstream thread read.
           exit "$code"
-      - name: Post the ledger comment
-        if: env.POST == 'true'
+      - name: Push the ledger commit
+        if: env.RECORD == 'true'
         run: |
-          [ "$(jq -r '.post' watch.json)" = true ] || { echo 'Nothing to post.'; exit 0; }
-          issue=$(jq -r '.watchPolicy.ledger.issue' "$REGISTRY")
-          repo=$(jq -r '.watchPolicy.ledger.repo' "$REGISTRY")
-          jq -r '.body' watch.json > body.md
-          test -s body.md
-          [ "$(head -n 1 body.md)" = '```text' ]
-          grep -q '^checked-at ' body.md
-          url=$(gh issue comment "$issue" --repo "$repo" --body-file body.md)
-          echo "Posted $url"
-          id=${url##*issuecomment-}
-          length=$(gh api "repos/$repo/issues/comments/$id" --jq '.body | length')
-          echo "Posted length $length (file $(wc -c < body.md))"
-          [ "$length" -gt 0 ]
-      - name: Mark the ledger issue for dispatch
-        if: env.POST == 'true'
+          commit=$(jq -r '.commit // empty' watch.json)
+          [ -n "$commit" ] || { echo 'No new records.'; exit 0; }
+          git push origin "$commit:refs/heads/$LEDGER_BRANCH"
+      - name: Notify
+        if: env.RECORD == 'true'
         run: |
-          [ "$(jq -r '.dispatch | length' watch.json)" -gt 0 ] || { echo 'Nothing to dispatch.'; exit 0; }
-          issue=$(jq -r '.watchPolicy.ledger.issue' "$REGISTRY")
-          repo=$(jq -r '.watchPolicy.ledger.repo' "$REGISTRY")
-          gh label create "$DISPATCH_LABEL" --repo "$repo" --color 5319e7 \
-            --description 'The upstream watch has a released fix to dispatch' --force
-          # Remove, then add, so the issue's timeline shows the latest run that found work.
-          gh issue edit "$issue" --repo "$repo" --remove-label "$DISPATCH_LABEL" || true
-          gh issue edit "$issue" --repo "$repo" --add-label "$DISPATCH_LABEL"
+          [ "$(jq -r '.notice.post' watch.json)" = true ] || { echo 'Nothing needs the maintainer.'; exit 0; }
+          commit=$(jq -r '.commit' watch.json)
+          jq -r '.notice.body' watch.json > notice.md
+          test -s notice.md
+          gh api "repos/$GITHUB_REPOSITORY/commits/$commit/comments" -F body=@notice.md --jq .html_url
+      - name: Verdict
+        run: |
+          jq -r '.fetchErrors[] | "Could not check \(.id): \(.error)"' watch.json
+          jq -r '.dispatchErrors[] | "Dispatch \(.id): \(.error)"' watch.json
+          [ "$(jq '(.fetchErrors | length) + (.dispatchErrors | length)' watch.json)" -eq 0 ]

@@ -14,35 +14,44 @@ const job = (name) => {
   return next < 0 ? text.slice(start) : text.slice(start, start + 1 + next);
 };
 
-test('the watch runs daily at 14:00 UTC and on demand', () => {
-  assert.match(text, /schedule:\n\s+- cron: '0 14 \* \* \*'/);
-  assert.match(text, /workflow_dispatch:/);
+test('the watch runs daily off the hour and on demand, read-only by default', () => {
+  assert.match(text, /schedule:\n\s+- cron: '17 14 \* \* \*'/);
+  assert.match(text, /workflow_dispatch:\n\s+inputs:\n\s+record:/);
+  assert.match(text, /\n\s+since:\n\s+description:/);
   assert.match(text, /^permissions:\n {2}contents: read\n/m, 'the workflow default is read-only');
+  assert.doesNotMatch(text, /issues: write|gh issue|gh label|DISPATCH_LABEL|upstream-watch\.mjs comment/);
 });
 
-test('a pull request only previews, with a read-only token', () => {
+test('a pull request only previews with a dry run and a read-only token', () => {
   const preview = job('preview');
   assert.match(preview, /if: github\.event_name == 'pull_request'/);
-  assert.match(preview, /permissions:\n\s+contents: read\n/);
-  assert.doesNotMatch(preview, /issues: write|gh issue|gh label/);
-  assert.match(preview, /upstream-watch\.mjs comment --json/);
+  assert.match(preview, /permissions:\n\s+contents: read\n\s+actions: read\n\s+pull-requests: read\n/);
+  assert.match(preview, /upstream-watch\.mjs record --dry-run --json/);
+  assert.doesNotMatch(preview, /git push|commits\/.*\/comments|UPSTREAM_DISPATCH_TOKEN/);
 });
 
-test('the scheduled job posts the checked body once and marks dispatch work by label', () => {
+test('the scheduled job records, pushes, notifies and then judges, in that order', () => {
   const watch = job('watch');
   assert.match(watch, /if: github\.event_name != 'pull_request'/);
-  assert.match(watch, /permissions:\n\s+contents: read\n\s+issues: write\n/);
+  assert.match(watch, /permissions:\n\s+contents: write\n\s+actions: read\n\s+pull-requests: read\n/);
   assert.match(watch, /concurrency:\n\s+group: upstream-watch\n\s+cancel-in-progress: false/);
-  assert.match(watch, /GH_TOKEN: \$\{\{ github\.token \}\}/);
-  const post = watch.indexOf('gh issue comment');
-  for (const guard of ['test -s body.md', "[ \"$(head -n 1 body.md)\" = '```text' ]", "grep -q '^checked-at ' body.md"]) {
-    const at = watch.indexOf(guard);
-    assert.ok(at > 0 && at < post, `${guard} runs before posting`);
-  }
-  assert.equal(watch.split('gh issue comment').length - 1, 1, 'one comment per run');
-  assert.match(watch.slice(post), /repos\/\$repo\/issues\/comments\/\$id/, 'the posted length is read back');
-  assert.ok(watch.indexOf('--add-label') > post, 'the dispatch label follows the comment it points at');
-  assert.ok(watch.indexOf('--remove-label') < watch.indexOf('--add-label'), 'a label already present is removed first so the issue shows the latest run that found work');
+  const order = ['name: Record', 'name: Push the ledger commit', 'name: Notify', 'name: Verdict'].map((step) => watch.indexOf(step));
+  assert.ok(order.every((at) => at > 0), order.join(','));
+  assert.deepEqual([...order].sort((a, b) => a - b), order, 'record, push, notify, verdict');
+  assert.match(watch, /git push origin "\$commit:refs\/heads\/\$LEDGER_BRANCH"/);
+  assert.match(watch, /gh api "repos\/\$GITHUB_REPOSITORY\/commits\/\$commit\/comments" -F body=@notice\.md/);
+  assert.match(watch, /GIT_AUTHOR_NAME: github-actions\[bot\]/);
+  assert.match(text, /LEDGER_BRANCH: upstream-watch-ledger/);
+});
+
+test('the trigger token reaches only the Record step, and the since input never meets the shell unquoted', () => {
+  const watch = job('watch');
+  assert.equal(text.split('secrets.UPSTREAM_DISPATCH_TOKEN').length - 1, 1, 'one reference');
+  const record = watch.slice(watch.indexOf('name: Record'), watch.indexOf('name: Push the ledger commit'));
+  assert.match(record, /UPSTREAM_DISPATCH_TOKEN: \$\{\{ secrets\.UPSTREAM_DISPATCH_TOKEN \}\}/);
+  assert.match(record, /UPSTREAM_DISPATCH_ROUTINE: trig_01LmNVKJ4K86joHPvvPtc7yx/);
+  assert.match(record, /SINCE: \$\{\{ inputs\.since \}\}/);
+  assert.doesNotMatch(watch, /run:[^\n]*\$\{\{ inputs\./, 'inputs pass through env, not into run scripts');
 });
 
 // 4b-C amended (decision 14): routine GitHub triggers support only pull request and
