@@ -36,8 +36,10 @@ carried forward with the date they were taken. --refresh=machine re-walks
 install trees, storage, the cross-host catalog, and every discovered project,
 then persists the result; --project-trees also measures the working trees of
 your own projects. A bare --refresh (or --refresh=live) refreshes Maintenance
-evidence and the inventory, then reprints this same snapshot — see
-ak status --help for the shared stages and strengths.
+evidence and the inventory, then re-checks local status — including the
+online version lookups — before reprinting this same snapshot; --refresh=live
+also runs the live checks first — see ak status --help for the shared stages
+and strengths.
 
 Usage:
   ak system [--refresh[=live|machine]] [--project-trees] [--json]
