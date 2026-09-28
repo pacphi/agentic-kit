@@ -517,8 +517,12 @@ function rootRefusal(root, store) {
   return `the root store copy is unreadable (${store.error})`;
 }
 
-export const restoreSteps = (backup, root) => `with every Claude Code, Codex and OpenCode session in this project closed, copy ${backup} over `
-  + `${path.join(root, '.agentic-qe', 'memory.db')} and delete memory.db-wal and memory.db-shm beside it`;
+export const restoreSteps = (backup, root) => {
+  const db = path.join(root, '.agentic-qe', 'memory.db');
+  return `close every Claude Code, Codex and OpenCode session in this project (their AQE servers and hooks write the store), `
+    + `then delete ${db}-wal and ${db}-shm, then copy ${backup} over ${db}, with nothing opening the store in between; `
+    + 'this discards every write made to the project store after the backup, the merge\'s and any other';
+};
 
 /** Steps 3-7, after the preview and the first writer check passed. */
 async function applyMerge(o, root, result, rows, seedKeys, { fingerprints, rootKeys }) {

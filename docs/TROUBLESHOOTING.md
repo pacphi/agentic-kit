@@ -393,8 +393,10 @@ Each merge keeps `<state>/agentic-kit/aqe-store-merge/<time>/` until you delete 
 
 With every Claude Code, Codex and OpenCode session in the project closed:
 
-1. **Undo the merge.** Copy `backup/root-memory.db` over `<project>/.agentic-qe/memory.db`, and
-   delete `memory.db-wal` and `memory.db-shm` beside it.
+1. **Undo the merge.** Delete `memory.db-wal` and `memory.db-shm` in `<project>/.agentic-qe/`,
+   then copy `backup/root-memory.db` over `<project>/.agentic-qe/memory.db`, with nothing opening
+   the store in between. This discards every write made to the project store after the backup,
+   not only the merge's.
 2. **Put a stray back.** Move `archive/<folder>/.agentic-qe` back to the path `receipt.json` lists
    for it (for example `archive/docs--research--v5/.agentic-qe` to `docs/research/v5/.agentic-qe`).
    The project pin keeps AQE from writing to it again.

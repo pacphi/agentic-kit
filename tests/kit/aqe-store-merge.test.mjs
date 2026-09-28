@@ -315,6 +315,10 @@ test('a count mismatch after the real import stops before archive, leaves the st
   assert.ok(fs.existsSync(path.join(p.root, '.agentic-qe', '.agentic-qe', 'memory.db')));
   assert.equal(fs.existsSync(path.join(p.mergeDir, result.runId, 'archive')), false);
   assert.ok(result.restore.includes(result.backup), result.restore);
+  // Review minor 9: the order, and what a restore discards.
+  const order = ['close', 'delete', 'memory.db-wal', 'copy'].map((word) => result.restore.indexOf(word));
+  assert.ok(order.every((at) => at >= 0) && order[0] < order[1] && order[1] < order[3] && order[2] < order[3], result.restore);
+  assert.match(result.restore, /discards every write made to the project store after the backup/);
   assert.ok(fs.existsSync(result.receipt), 'a failed apply still leaves its receipt');
 });
 
