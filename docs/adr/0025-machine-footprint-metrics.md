@@ -4,7 +4,9 @@
 - **Updated:** 2026-09-28 — `GET /api/system/summary`'s allow-list projection now also covers
   `storage`, `install`, `projects` and `consumers` (previously only `catalog` was projected; the
   other four passed through unfiltered and were ~76% of the endpoint's real-machine bytes).
-  `GET /api/system` and `ak system --json` are unchanged (remediation program, branch 6a task 11).
+  `GET /api/system` and `ak system --json` are unchanged (remediation program, branch 6a task 11);
+  see [ADR-0063](0063-evidence-store-and-refresh-vocabulary.md) for the evidence-store design this
+  measurement and the rest of branch 6a were done under.
 - **Earlier update:** 2026-09-26 — the System page reads `GET /api/system/summary`, the same payload
   with the catalog projected to what the page draws; `GET /api/system` and `ak system --json` are
   unchanged (#237, decision 8).
