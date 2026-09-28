@@ -10,6 +10,7 @@
 // the shared refresh stages first (ADR-0063, `../lib/refresh.mjs`).
 import { heading, info, warn, dim, ok, humanOutputToStderr, reportFailure } from '../lib/output.mjs';
 import { createMaintenanceService } from '../lib/maintenance/service.mjs';
+import { configErrorRecovery } from '../lib/config.mjs';
 import {
   REFRESH_OPTIONS, REFRESH_STRENGTHS, refreshRequestFromFlags, runRefresh, cliRefreshStages, printRefreshStage,
 } from '../lib/refresh.mjs';
@@ -924,6 +925,9 @@ export async function run({ flags, positionals, pkgRoot, deps = {} }) {
     if (outcome.refreshFailed) return 1;
     return outcome.result?.ok === false ? 2 : 0;
   } catch (error) {
+    // An unreadable kit.json is not a refused request: the CLI reports it with
+    // its recovery commands and exit 1, as for every other command.
+    if (configErrorRecovery(error)) throw error;
     return reportUsage(flags, error?.message ?? String(error));
   }
 }

@@ -73,6 +73,16 @@ test('a retired spelling under --json gets the generic unknown-option error, wit
   }
 });
 
+test('a --json after the -- terminator is a positional, so a rejected option answers in text', () => {
+  for (const cmd of ['sync', 'status']) {
+    const child = ak([cmd, '--bogus', '--', '--json']);
+    assert.equal(child.status, 2, child.stderr);
+    assert.doesNotMatch(child.stdout.trim(), /^\{/, `${cmd}: stdout is not JSON`);
+    assert.match(child.stdout, new RegExp(`ak ${cmd}: Unknown option '--bogus'`));
+    assert.match(child.stdout, new RegExp(`Usage: ak ${cmd}`));
+  }
+});
+
 test('without --json a rejected option still prints the message and help on stdout', () => {
   const child = ak(['status', '--bogus']);
   assert.equal(child.status, 2);
@@ -158,6 +168,21 @@ test('ak status --json with an invalid kit.json answers with the same recovery, 
     assert.deepEqual(out.recovery, sync.recovery);
     assert.match(child.stderr, /Recovery \(the original is preserved\):/);
     assert.ok(child.stderr.includes(out.recovery.commands[0]));
+  });
+});
+
+// `discovery` reads kit.json (its discovery intent); the default `report` verb
+// does not, so an invalid kit.json does not stop it.
+test('ak maintain discovery --json with an invalid kit.json answers with the recovery, exit 1, not a usage refusal', () => {
+  withInvalidKitJson(() => {
+    const child = ak(['maintain', 'discovery', '--json']);
+    const out = oneJson(child);
+    assert.equal(child.status, 1, child.stderr);
+    assert.deepEqual(Object.keys(out), ['error', 'exitCode', 'recovery']);
+    assert.equal(out.exitCode, 1);
+    assert.match(out.error, /invalid kit config/);
+    assert.match(out.recovery.commands[0], RECOVERY_COMMAND);
+    assert.match(child.stderr, /Recovery \(the original is preserved\):/);
   });
 });
 

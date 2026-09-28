@@ -115,6 +115,10 @@ const wantsHelp = (args) => args.includes('--help') || args.includes('-h');
  *  takes one the exact token becomes `--refresh=` before parsing. */
 const refreshArgs = (mod, args) => (mod.options?.refresh?.type === 'string' ? normalizeBareRefresh(args) : args);
 
+/** The tokens before a `--` terminator: everything after it is a positional,
+ *  never an option (a `--json` there does not ask for JSON). */
+const optionTokens = (args) => (args.includes('--') ? args.slice(0, args.indexOf('--')) : args);
+
 /** A command's own help, or its flag list when it has none. */
 const commandHelp = (cmd, mod) => mod.help ?? `ak ${cmd} — flags: ${
   Object.keys(mod.options ?? {}).map((o) => `--${o}`).join(' ') || '(none)'}`;
@@ -198,7 +202,7 @@ async function main() {
     // message and the help go to stderr. A retired spelling gets the parser's
     // generic message, with no hint (ADR-0063).
     reportFailure({
-      json: Boolean(mod.options?.json) && rest.includes('--json'),
+      json: Boolean(mod.options?.json) && optionTokens(rest).includes('--json'),
       payload: mod.jsonUsageError?.(err.message) ?? { error: err.message, exitCode: 2 },
       human: () => { fail(`ak ${cmd}: ${err.message}`); console.log(commandHelp(cmd, mod)); },
     });
