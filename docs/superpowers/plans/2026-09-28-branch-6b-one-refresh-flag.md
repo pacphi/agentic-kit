@@ -396,7 +396,8 @@ For a real sync that skips nothing, `versionEvidence` is empty and the sections 
 **Files:**
 
 - Modify: `src/lib/versions.mjs:71-99,147-175` — `driftReport({ …, record = true })`, `selfDrift({ …, record = true })`: `record: false` skips `saveKitConfig`.
-- Modify: `src/lib/ruvnet-brain.mjs:269-290` — `drift({ force, record = true, fetchImpl })`; `record: false` skips the save (and `latestRelease` gets the injected `fetchImpl`).
+- Modify: `src/lib/ruvnet-brain.mjs:269-290` — `drift({ force, record = true, fetchImpl })`; `record: false` skips the save (and `latestRelease` gets the injected `fetchImpl`); a failed fetch keeps the cached `latest` (see "A failed lookup never erases a good one" below).
+- Modify: `src/lib/ruvector.mjs:45` — the same failed-fetch rule for `drift()`.
 - Modify: `src/commands/sync/plan-versions.mjs` — `previewPlanVersions({ skip, pkgRoot, fetchLatest, releaseDatesRunner, brainDrift, tmpRoot = os.tmpdir() })`.
 - Modify: `src/commands/sync.mjs` — under `--dry-run`, call `previewPlanVersions` instead of `refreshPlanVersions` and pass its `versionEvidence` to the plan read; help text (`:164-166,209`): "`--dry-run  print the plan and stop; like a real sync it checks the latest versions online first, and records nothing`".
 - Test: `tests/kit/sync-dry-run-preview.test.mjs` (new).
@@ -408,6 +409,8 @@ For a real sync that skips nothing, `versionEvidence` is empty and the sections 
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Run to verify it passes,** plus `tests/kit/sync-command.test.mjs` (its strict dry-run hermeticity test must still pass), `tests/kit/sync-skip-versions.test.mjs tests/kit/versions*.test.mjs tests/kit/ruvnet-brain*.test.mjs`, the line probe, then the gate set.
 - [ ] **Step 5: Commit.**
+
+**A failed lookup never erases a good one (maintainer decision, 2026-09-28).** `drift()` in `src/lib/ruvnet-brain.mjs:269-290` and `src/lib/ruvector.mjs:45` today saves `latest: null` with a fresh `last` timestamp when a forced fetch fails. That hides the last known latest version for a full TTL window, and every `ak status --refresh` forces the fetch. Fix both in this task, test-first: when the fetch returns nothing, keep the cached `latest` (and `releaseAssetAvailable`) and do not restamp `last`, so the next call retries. Tests: seed a cached `latest`; a forced fetch that returns `null` leaves `kit.json`'s value and `last` unchanged and the returned drift still reports the cached `latest`. Do the same for `ruvector.mjs`.
 
 **Known limitation to state in the help and ADR-0063, not fix:** a dry run still reads host evidence from the cache (`refreshPlanHosts` persists, so it stays skipped under `--dry-run`, `sync.mjs:140-149`); host evidence expires in 6 h.
 
