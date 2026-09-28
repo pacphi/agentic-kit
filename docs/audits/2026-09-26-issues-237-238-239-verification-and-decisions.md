@@ -2273,6 +2273,10 @@ runs on its own daily schedule at 15:07 UTC (`7 15 * * *`, after the 14:00 watch
 ledger, and stops quickly when no line qualifies. The workflow keeps re-applying the
 `upstream-dispatch` label as a marker for people reading the issue; it fires nothing.
 
+**Superseded in part (2026-09-28).** Decision 15 moves the ledger to an orphan branch, notifies
+by commit comment and fires the routine on demand; the ledger issue, the `upstream-dispatch`
+label and the routine's daily schedule are gone.
+
 ## Branch 5 decisions (2026-09-27)
 
 Asked during Branch 5 (`fix/aqe-store-integrity`) in the decision format of the Decision
@@ -2452,3 +2456,34 @@ embedder, so a fresh store is the only faithful source (ADR-0062 §6).
 
 **Choice: A.** The maintainer first chose B, then asked to see the options again and chose A.
 `a69f2729`.
+
+## Decision 15 — the upstream watch ledger moves to an orphan branch (2026-09-28)
+
+**The situation.** Decision 14's workflow ran the watch and posted new ledger lines as a comment
+on the pinned, locked issue #243; the dispatch routine read that issue every day at 15:07 UTC.
+
+**The problem.** The first scheduled run (36432957846) read every thread, then failed to post: the
+workflow token cannot comment on a locked issue. The routine read one page of 100 comments, oldest
+first; GitHub stops comments on an issue at 2,500; the routine could not tell a failed watch from
+a quiet day; and the ledger's correctness depended on which commenters count.
+
+**What the user sees.** A watch that never recorded anything, an issue that would stay open for
+good, and a routine that runs every day to find nothing.
+
+**What should be true.** A durable, queryable record in git; a notification only when something
+needs the maintainer; no lingering issue and no commit on a quiet day; claude.ai used only when
+there is dispatch work.
+
+**The choices.** A: `events.ndjson` on an orphan branch, committed only on days with new records,
+a `github-actions[bot]` commit comment that mentions the maintainer, and the workflow firing the
+routine's API trigger with the thread in the payload. B: the same on a named ref outside
+`refs/heads`. C: no ledger, and a weekly summary of the open action items. D: one assigned issue
+per action item. E: keep posting digests on #243, closed.
+
+**Recommendation: A. Choice: A.** An adversarial Claude review and an adversarial Codex review
+both preferred a branch to a named ref (browsable, fetched by clones, a proven push path). A probe
+in a throwaway repository (run 36451224053) showed that the job token pushes the branch and that a
+`github-actions[bot]` commit comment mentioning the owner notifies them (reason `mention`, and by
+email). Each firing is recorded as a `fired` line, so a routine that fails is fired again at most
+once; the Actions API's last successful run replaces a daily heartbeat commit; #243 closes. Design:
+`docs/superpowers/specs/2026-09-28-upstream-watch-ledger-branch-design.md`.

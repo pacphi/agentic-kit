@@ -24,6 +24,9 @@ export const OWNER_REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const TAG_PATTERN = /^[\w./-]*\{version\}[\w./-]*$/;
 // A user or app login; apps comment as `<name>[bot]` (the workflow token as github-actions[bot]).
 const GITHUB_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\[bot\])?$/;
+// A ledger branch name: no slashes, so it can never be a dispatch branch (`upstream/...`).
+const LEDGER_BRANCH = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const LEDGER_KEYS = ['branch', 'sentinel'];
 const ISSUE_URL = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/(?:issues|pull)\/(\d+)$/;
 
 const text = (value) => typeof value === 'string' && value.trim() !== '';
@@ -39,19 +42,32 @@ function validPattern(value) {
   try { new RegExp(value, 'u'); return true; } catch { return false; }
 }
 
+// The ledger names only a branch (no slash, so it can never collide with a
+// dispatch branch) and an upper-case sentinel; nothing else.
+function checkLedger(ledger, errors) {
+  if (!isObject(ledger) || !LEDGER_BRANCH.test(ledger.branch ?? '') || String(ledger.branch).endsWith('.lock')
+      || !/^[A-Z][A-Z-]+$/.test(ledger.sentinel ?? '') || Object.keys(ledger).some((key) => !LEDGER_KEYS.includes(key))) {
+    errors.push('watchPolicy.ledger must name only a branch (no slash) and an upper-case sentinel');
+  }
+}
+
+// The notice mentions one human GitHub login, never a bot.
+function checkNotify(notify, errors) {
+  if (!isObject(notify) || !GITHUB_LOGIN.test(notify.mention ?? '') || String(notify.mention).endsWith('[bot]')) {
+    errors.push('watchPolicy.notify.mention must be the GitHub user a notice mentions');
+  }
+}
+
 function checkPolicy(policy, errors) {
   if (!isObject(policy)) return errors.push('watchPolicy must be an object');
+  if (!OWNER_REPO.test(policy.repo ?? '')) errors.push('watchPolicy.repo must name the home repository as owner/repo');
   if (!texts(policy.ours) || policy.ours.length === 0) errors.push('watchPolicy.ours must list our GitHub logins');
   if (!Number.isInteger(policy.staleAfterDays) || policy.staleAfterDays <= 0) errors.push('watchPolicy.staleAfterDays must be a positive integer');
   if (!texts(policy.automatedReplyPatterns) || !policy.automatedReplyPatterns.every(validPattern)) {
     errors.push('watchPolicy.automatedReplyPatterns must be valid regular expressions');
   }
-  const ledger = policy.ledger;
-  if (!isObject(ledger) || !OWNER_REPO.test(ledger.repo ?? '') || !Number.isInteger(ledger.issue) || ledger.issue < 1
-      || !text(ledger.issueTitle) || !/^[A-Z][A-Z-]+$/.test(ledger.sentinel ?? '')
-      || !Array.isArray(ledger.authors) || ledger.authors.length === 0 || !ledger.authors.every((login) => GITHUB_LOGIN.test(login ?? ''))) {
-    errors.push('watchPolicy.ledger must name repo, issue, issueTitle, an upper-case sentinel and the GitHub logins that write it (authors)');
-  }
+  checkLedger(policy.ledger, errors);
+  checkNotify(policy.notify, errors);
   const dispatch = policy.dispatch;
   if (!isObject(dispatch) || !/^[\w.-]+\/$/.test(dispatch.branchPrefix ?? '') || dispatch.pullRequest !== 'draft' || dispatch.merge !== 'never') {
     errors.push('watchPolicy.dispatch must use a branchPrefix, draft pull requests and merge never');
@@ -111,7 +127,7 @@ function checkHistory(history, where, errors) {
 function checkRelation(entry, repo, where, context, errors) {
   if (!WATCH_RELATIONS.includes(entry.relation)) return errors.push(`${where}: relation must be one of ${WATCH_RELATIONS.join(', ')}`);
   if (entry.relation === 'tracking') {
-    if (repo !== context.ledgerRepo) errors.push(`${where}: a tracking entry must live in the ledger repository`);
+    if (repo !== context.homeRepo) errors.push(`${where}: a tracking entry must live in the home repository (watchPolicy.repo)`);
     if (!texts(entry.tracks) || entry.tracks.length === 0) errors.push(`${where}: a tracking entry must list the threads it tracks`);
     if (entry.dependency !== null) errors.push(`${where}: a tracking entry has no dependency`);
     return;
@@ -164,7 +180,7 @@ export function validateWatch(document, { policyNames, constraintIds, constraint
   const errors = [];
   checkPolicy(document?.watchPolicy, errors);
   if (!Array.isArray(document?.watch)) return { watchPolicy: null, watch: [], errors: [...errors, 'watch must be an array'] };
-  const context = { policyNames, constraintIds, ledgerRepo: document.watchPolicy?.ledger?.repo };
+  const context = { policyNames, constraintIds, homeRepo: document.watchPolicy?.repo };
   const seen = new Set();
   for (const entry of document.watch) {
     const key = String(entry?.id).toLowerCase();
