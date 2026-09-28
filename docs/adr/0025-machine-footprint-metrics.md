@@ -1,8 +1,12 @@
 # ADR-0025 — Machine footprint: infrastructure metrics for install, runtime, storage, and catalog
 
 - **Status:** Implemented
-- **Updated:** 2026-09-26 — the System page reads `GET /api/system/summary`, the same payload with
-  the catalog projected to what the page draws; `GET /api/system` and `ak system --json` are
+- **Updated:** 2026-09-28 — `GET /api/system/summary`'s allow-list projection now also covers
+  `storage`, `install`, `projects` and `consumers` (previously only `catalog` was projected; the
+  other four passed through unfiltered and were ~76% of the endpoint's real-machine bytes).
+  `GET /api/system` and `ak system --json` are unchanged (remediation program, branch 6a task 11).
+- **Earlier update:** 2026-09-26 — the System page reads `GET /api/system/summary`, the same payload
+  with the catalog projected to what the page draws; `GET /api/system` and `ak system --json` are
   unchanged (#237, decision 8).
 - **Earlier update:** 2026-09-08 — installed tools preserve measured executable locations
   for private path reveal, with PATH resolution and bounded package-manifest fallback;
@@ -318,12 +322,16 @@ silent "Other" slice into a to-do list a release can close.
   trees that were never walked cannot be un-hidden client-side.
 - `ak system [--deep] [--json]` — CLI parity sharing the same collector, following the
   usage-scorecard precedent of one collector behind both surfaces.
-- `GET /api/system/summary` (amendment, 2026-09-26) — the page's read: the same payload and
-  parameters with the catalog projected to an allow-list of keys and items cut to what the page
-  draws (including `presence[].provider`). The full catalog repeats each presence fact in five
-  places and grows with items × projects × hosts; the page used about 0.4% of its item bytes and
-  the Runtime view re-fetched it every 30 seconds. `GET /api/system` stays the complete
-  `ak system --json` shape for scripts.
+- `GET /api/system/summary` (amendment, 2026-09-26; extended 2026-09-28) — the page's read: the
+  same payload and parameters with `catalog`, `storage`, `install`, `projects` and `consumers` each
+  projected to an allow-list of keys and items cut to what the page draws (including
+  `presence[].provider`). The full catalog repeats each presence fact in five places and grows with
+  items × projects × hosts; the page used about 0.4% of its item bytes and the Runtime view
+  re-fetched it every 30 seconds. The other four sections carry the same shape of excess (a deep
+  storage tree with `path`/`presence`/`files` at every node, a per-tool native-addon list, a
+  per-project framework/dependency stack detection never rendered) and were the majority of the
+  endpoint's real-machine bytes once the catalog alone was slimmed. `GET /api/system` stays the
+  complete `ak system --json` shape for scripts.
 
 ### 6. Read-only; reclaimables are advisory, in two safety tiers
 
