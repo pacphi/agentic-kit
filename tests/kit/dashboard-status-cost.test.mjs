@@ -18,7 +18,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnEnv, sandboxProject, writeKitConfig, offlineKitConfig } from './helpers/home-sandbox.mjs';
 import {
-  startGuardedDashboard, getJson, markLedgerBoundary, readLedger, sliceByCallBoundary, isVersionDriftLookup,
+  startGuardedDashboard, stopGuardedDashboard, getJson, markLedgerBoundary, readLedger, sliceByCallBoundary,
+  isVersionDriftLookup,
 } from './helpers/dashboard-child-server.mjs';
 
 test('two 30s-poll-tick /api/status requests: the second starts no processes and transfers no more data than the first', async () => {
@@ -69,7 +70,7 @@ test('two 30s-poll-tick /api/status requests: the second starts no processes and
       `second /api/status response (${second.bytes} bytes) exceeds the first (${first.bytes} bytes) `
       + `by more than the ${budget}-byte budget — possible in-process cache growth/leak across polls`);
   } finally {
-    child?.kill();
+    await stopGuardedDashboard(child);
     fs.rmSync(ledgerFile, { force: true });
     fs.rmSync(home, { recursive: true, force: true });
     fs.rmSync(project, { recursive: true, force: true });

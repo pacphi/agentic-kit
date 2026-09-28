@@ -16,11 +16,12 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(HERE, '..', '..', '..');
-export const SPAWN_GUARD = path.resolve(PKG_ROOT, 'tests', 'helpers', 'spawn-guard.mjs');
+// `--import` takes a module URL: a bare Windows path parses as a `d:` scheme.
+const SPAWN_GUARD_URL = pathToFileURL(path.resolve(PKG_ROOT, 'tests', 'helpers', 'spawn-guard.mjs')).href;
 const CHILD_FIXTURE = path.resolve(PKG_ROOT, 'tests', 'fixtures', 'dashboard-status-child.mjs');
 
 /**
@@ -31,7 +32,7 @@ const CHILD_FIXTURE = path.resolve(PKG_ROOT, 'tests', 'fixtures', 'dashboard-sta
  */
 export function startGuardedDashboard({ cwd, env }) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [`--import=${SPAWN_GUARD}`, CHILD_FIXTURE, cwd], {
+    const child = spawn(process.execPath, [`--import=${SPAWN_GUARD_URL}`, CHILD_FIXTURE, cwd], {
       cwd, env, stdio: ['ignore', 'pipe', 'pipe'],
     });
     let out = '';
@@ -53,6 +54,17 @@ export function startGuardedDashboard({ cwd, env }) {
       if (!settled) reject(new Error(`dashboard child exited before READY (code ${code}): ${errOut || out}`));
     });
   });
+}
+
+/** Stops the child and waits until it has exited, so the caller can delete its
+ *  cwd: Windows refuses to remove a running process's working directory. */
+export async function stopGuardedDashboard(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise((resolve) => child.once('exit', resolve));
+  child.kill('SIGTERM');
+  const force = setTimeout(() => { if (child.exitCode === null) child.kill('SIGKILL'); }, 2_000);
+  await exited;
+  clearTimeout(force);
 }
 
 /** GET a route off the guarded child, returning the parsed JSON and the raw

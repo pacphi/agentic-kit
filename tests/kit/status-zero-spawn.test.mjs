@@ -21,12 +21,13 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnEnv, sandboxProject } from './helpers/home-sandbox.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(HERE, '..', '..');
-const SPAWN_GUARD = path.resolve(PKG_ROOT, 'tests', 'helpers', 'spawn-guard.mjs');
+// `--import` takes a module URL: a bare Windows path parses as a `d:` scheme.
+const SPAWN_GUARD_URL = pathToFileURL(path.resolve(PKG_ROOT, 'tests', 'helpers', 'spawn-guard.mjs')).href;
 const FIXTURE = path.resolve(PKG_ROOT, 'tests', 'fixtures', 'status-zero-spawn-child.mjs');
 
 function readLedger(file) {
@@ -61,7 +62,7 @@ test('spawn-guard is a no-op when AK_SPAWN_LEDGER_FILE is unset', () => {
     // patched child_process regardless of the env var — assert the function
     // ITSELF is untouched (native name `spawn`, not our wrapper's `patched`).
     const out = execFileSync(process.execPath, [
-      `--import=${SPAWN_GUARD}`, '-e', "process.stdout.write(require('node:child_process').spawn.name)",
+      `--import=${SPAWN_GUARD_URL}`, '-e', "process.stdout.write(require('node:child_process').spawn.name)",
     ], { cwd: project, env, encoding: 'utf8' });
     assert.strictEqual(out, 'spawn', 'node:child_process.spawn is left untouched when AK_SPAWN_LEDGER_FILE is unset');
   });
@@ -82,7 +83,7 @@ test('spawn-guard records a spawn made inside the guarded child, by every wrappe
       'process.exit(0);', // do not wait on the forked grandchild's IPC channel
     ].join(' ');
     execFileSync(process.execPath, [
-      `--import=${SPAWN_GUARD}`, '-e', script,
+      `--import=${SPAWN_GUARD_URL}`, '-e', script,
     ], { cwd: project, env, encoding: 'utf8' });
     const lines = readLedger(ledgerFile);
     fs.rmSync(ledgerFile, { force: true });
@@ -130,7 +131,7 @@ test('plain ak status spawns nothing on a warm cache; --refresh always re-probes
     const ledgerFile = path.join(os.tmpdir(), `ak-status-zero-spawn-${process.pid}.ndjson`);
     const env = { ...baseEnv, AK_SPAWN_LEDGER_FILE: ledgerFile };
     execFileSync(process.execPath, [
-      `--import=${SPAWN_GUARD}`, FIXTURE, PKG_ROOT, project,
+      `--import=${SPAWN_GUARD_URL}`, FIXTURE, PKG_ROOT, project,
     ], { cwd: project, env, encoding: 'utf8', timeout: 30_000 });
     const lines = readLedger(ledgerFile);
     fs.rmSync(ledgerFile, { force: true });
@@ -160,14 +161,24 @@ test('plain ak status spawns nothing on a warm cache; --refresh always re-probes
     const hasCall = (lines, cmd, argsPrefix) => lines.some((l) => l.cmd === cmd
       && argsPrefix.every((a, i) => l.args?.[i] === a));
     const thirdExplained = third.filter((l) => !isVersionDriftLookup(l));
-    for (const [cmd, argsPrefix, why] of [
-      ['npm', ['root', '-g'], 'globalRoot()'],
-      ['which', ['claude'], 'detectHosts() (Task 5)'],
-      ['which', ['codex'], 'detectHosts() (Task 5)'],
-      ['which', ['opencode'], 'detectHosts() (Task 5)'],
-      ['which', ['ak'], 'claudeLauncherUnavailable()'],
-      ['ps', ['-eo', 'pid=,args='], 'processSweep()'],
-    ]) {
+    // On Windows have() resolves a binary through resolveShim() without
+    // spawning, so detectHosts() and claudeLauncherUnavailable() leave no line
+    // in a spawn ledger there (Linux and macOS CI enforce those re-probes), and
+    // the daemon sweep runs PowerShell instead of ps.
+    const reprobes = process.platform === 'win32'
+      ? [
+        ['npm', ['root', '-g'], 'globalRoot()'],
+        ['powershell', ['-NoProfile', '-Command'], 'processSweep()'],
+      ]
+      : [
+        ['npm', ['root', '-g'], 'globalRoot()'],
+        ['which', ['claude'], 'detectHosts()'],
+        ['which', ['codex'], 'detectHosts()'],
+        ['which', ['opencode'], 'detectHosts()'],
+        ['which', ['ak'], 'claudeLauncherUnavailable()'],
+        ['ps', ['-eo', 'pid=,args='], 'processSweep()'],
+      ];
+    for (const [cmd, argsPrefix, why] of reprobes) {
       assert.ok(hasCall(thirdExplained, cmd, argsPrefix),
         `--refresh must re-probe ${why} (${cmd} ${argsPrefix.join(' ')}); got ${JSON.stringify(thirdExplained.map((l) => [l.cmd, l.args]))}`);
     }

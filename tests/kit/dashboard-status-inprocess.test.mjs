@@ -21,7 +21,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnEnv, sandboxProject, writeKitConfig, offlineKitConfig } from './helpers/home-sandbox.mjs';
 import {
-  startGuardedDashboard, getJson, markLedgerBoundary, readLedger, sliceByCallBoundary, isVersionDriftLookup,
+  startGuardedDashboard, stopGuardedDashboard, getJson, markLedgerBoundary, readLedger, sliceByCallBoundary,
+  isVersionDriftLookup,
 } from './helpers/dashboard-child-server.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -98,7 +99,7 @@ test('GET /api/status (no injected fetchStatus) spawns nothing on the SECOND req
     assert.strictEqual(secondUnexplained.length, 0,
       `expected zero unexplained spawns from a warm-cache /api/status request; got ${JSON.stringify(secondUnexplained.map((l) => [l.cmd, l.args]))}`);
   } finally {
-    child?.kill();
+    await stopGuardedDashboard(child);
     fs.rmSync(ledgerFile, { force: true });
     cleanup(home, project);
   }
@@ -134,7 +135,7 @@ test('GET /api/status (in-process) carries the same {overall, rows} `ak status -
       'the dashboard\'s in-process rows must be identical (up to timestamp fields) to what the real CLI\'s '
       + 'collect()-backed run() emits — a mismatch here means run() post-processes something beyond what collect() itself returns');
   } finally {
-    child?.kill();
+    await stopGuardedDashboard(child);
     cleanup(home, project);
   }
 });
