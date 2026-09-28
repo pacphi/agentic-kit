@@ -1,11 +1,22 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import {
   companionLifecycleFor,
   companionsWithLifecycle,
 } from '../../src/lib/adapters/companion-lifecycle-registry.mjs';
 import { createDejaVuLifecycleAdapter } from '../../src/lib/adapters/deja-vu.mjs';
 import { runLifecycle } from '../../src/lib/adapters/lifecycle.mjs';
+import { evidenceDir, writeEvidence, stableInputsKey } from '../../src/lib/evidence.mjs';
+import { tempDir } from './helpers/temp-dir.mjs';
+
+// Task 5 Part 2: detect() now reads/writes evidence under the kit state dir
+// (evidenceDir()) when refresh:false. Redirect the state base for this whole
+// file so those reads/writes never touch this machine's real evidence store —
+// mirrors tests/kit/natives-runtime.test.mjs's Task 4 redirect.
+process.env.XDG_STATE_HOME = tempDir('ak-deja-vu-lifecycle-state');
+process.env.LOCALAPPDATA = process.env.XDG_STATE_HOME;
+const resetEvidence = () => fs.rmSync(evidenceDir(), { recursive: true, force: true });
 
 const baseDoctor = () => ({
   schema_version: 2,
@@ -393,4 +404,163 @@ test('undo removes verified target before exact owned npm package and never touc
     ['deja', 'uninstall', 'claude-code', '--no-guidance', '--no-index'],
     ['npm', 'uninstall', '-g', '@vshulcz/deja-vu', '--no-audit', '--no-fund'],
   ]);
+});
+
+// ── detect() refresh caching (Branch 6a Task 5 Part 2) ──────────────────────
+// Ruling A: 6h max age. Ruling B: `refresh` defaults to true, so every caller
+// other than status's plain-status path (collectDejaVuRows) keeps probing
+// unconditionally — including detect()'s own internal reuse inside plan()
+// and the operation executors' post-mutation verification calls.
+
+const emptyTargets = () => Object.fromEntries(['claude', 'codex', 'opencode'].map((host) => [host, {
+  direct: { mcp: false, auto: false }, projection: { mcp: null, auto: null }, plugin: { present: false, auto: false },
+}]));
+
+/** Mirrors detect()'s own inputsKey formula (src/lib/adapters/deja-vu.mjs)
+ *  exactly, so seeded evidence matches (or deliberately mismatches) what a
+ *  real call would compute. */
+function dejaVuInputsKey(cfg) {
+  const value = cfg?.integrations?.tools?.dejaVu ?? {};
+  const desired = {
+    enabled: value.enabled === true,
+    mode: ['mcp', 'auto'].includes(value.mode) ? value.mode : 'mcp',
+    hosts: Array.isArray(value.hosts) ? [...value.hosts] : [],
+    indexOnSetup: value.indexOnSetup !== false,
+  };
+  const ownership = cfg?.integrations?.ownership?.dejaVu;
+  return stableInputsKey({ desired, ownershipKeys: Object.keys(ownership?.targets ?? {}), PATH: process.env.PATH ?? '' });
+}
+
+/** An adapter whose every probe (runner/haveFn/packageVersionFn/observer) is
+ *  counted, for asserting zero-spawn directly — unlike fakeEnvironment()'s
+ *  `calls`, which only records `runner` invocations. */
+function instrumentedAdapter() {
+  const probeCalls = [];
+  const adapter = createDejaVuLifecycleAdapter({
+    runner: async (cmd, args) => { probeCalls.push(['runner', cmd, ...(Array.isArray(args) ? args : [])]); return { code: 0, stdout: '{}', stderr: '' }; },
+    haveFn: async (bin) => { probeCalls.push(['have', bin]); return false; },
+    packageVersionFn: async () => { probeCalls.push(['packageVersion']); return null; },
+    latestVersionFn: async () => '0.19.0',
+    targetObserver: async () => { probeCalls.push(['observer']); return emptyTargets(); },
+    clock: () => '2026-09-28T00:00:00.000Z',
+  });
+  return { adapter, probeCalls };
+}
+
+function freshMarkerFacts(cfg) {
+  const value = cfg.integrations.tools.dejaVu;
+  return {
+    desired: { enabled: true, mode: value.mode, hosts: [...value.hosts], indexOnSetup: true },
+    install: {
+      binaryPresent: true, npmPresent: true, version: '9.9.9-cache-marker',
+      supported: true, ownership: 'agentic-kit', receiptState: 'current',
+    },
+    doctor: { state: 'ok', reason: null, schemaVersion: 2, health: { state: 'ok', storeIssues: 0, sqlite: 'ok', policy: 'default', sync: 'ok' } },
+    index: { state: 'ok', staleStores: 0 },
+    targets: emptyTargets(),
+  };
+}
+
+function seedDejaVuEvidence(cfg, result, opts = {}) {
+  writeEvidence('companion-lifecycle', 'deja-vu', {
+    source: 'test', inputsKey: dejaVuInputsKey(cfg),
+    inputs: { desired: result.desired, PATH: process.env.PATH ?? '' },
+    result,
+  }, opts);
+}
+
+test('detect({ refresh: false }) reuses fresh cached evidence and probes nothing', async () => {
+  resetEvidence();
+  const cfg = config();
+  const { adapter, probeCalls } = instrumentedAdapter();
+  const marker = freshMarkerFacts(cfg);
+  seedDejaVuEvidence(cfg, marker);
+  const facts = await adapter.detect({ cfg, refresh: false });
+  assert.deepEqual(facts, marker);
+  assert.deepEqual(probeCalls, [], 'fresh, matching cached evidence: no probe of any kind');
+  resetEvidence();
+});
+
+test('detect({ refresh: true }) always probes, ignoring fresh cached evidence', async () => {
+  resetEvidence();
+  const cfg = config();
+  const { adapter, probeCalls } = instrumentedAdapter();
+  seedDejaVuEvidence(cfg, freshMarkerFacts(cfg));
+  const facts = await adapter.detect({ cfg, refresh: true });
+  assert.notEqual(facts.install.version, '9.9.9-cache-marker', 'refresh:true must ignore the cache and probe for real');
+  assert.ok(probeCalls.length > 0, 'refresh:true must probe');
+  resetEvidence();
+});
+
+test('detect({ refresh: false }) probes when there is no cached evidence yet (first run)', async () => {
+  resetEvidence();
+  const cfg = config();
+  const { adapter, probeCalls } = instrumentedAdapter();
+  await adapter.detect({ cfg, refresh: false });
+  assert.ok(probeCalls.length > 0, 'no cached evidence at all: must probe');
+  resetEvidence();
+});
+
+test('detect({ refresh: false }) re-probes when cached evidence is older than 6h', async () => {
+  resetEvidence();
+  const cfg = config();
+  const { adapter, probeCalls } = instrumentedAdapter();
+  seedDejaVuEvidence(cfg, freshMarkerFacts(cfg), { now: Date.now() - 7 * 3600_000 });
+  await adapter.detect({ cfg, refresh: false });
+  assert.ok(probeCalls.length > 0, 'evidence older than the 6h window must not suppress the probe');
+  resetEvidence();
+});
+
+test('detect({ refresh: false }) re-probes when the desired intent changed (invalidated inputsKey)', async () => {
+  resetEvidence();
+  const cfg = config();
+  const { adapter, probeCalls } = instrumentedAdapter();
+  // Evidence recorded for a different desired mode ('auto' instead of 'mcp').
+  writeEvidence('companion-lifecycle', 'deja-vu', {
+    source: 'test',
+    inputsKey: dejaVuInputsKey(config('auto')),
+    inputs: { desired: { enabled: true, mode: 'auto', hosts: ['claude'], indexOnSetup: true }, PATH: process.env.PATH ?? '' },
+    result: freshMarkerFacts(cfg),
+  });
+  await adapter.detect({ cfg, refresh: false });
+  assert.ok(probeCalls.length > 0, 'a changed desired intent invalidates the cached inputsKey');
+  resetEvidence();
+});
+
+test('detect({ refresh: false }) never evidence-caches the disabled/unowned result', async () => {
+  resetEvidence();
+  const { adapter, probeCalls } = instrumentedAdapter();
+  const cfg = config();
+  cfg.integrations.tools.dejaVu.enabled = false;
+  const facts = await adapter.detect({ cfg, refresh: false });
+  assert.equal(facts.doctor.reason, 'integration-disabled');
+  assert.deepEqual(probeCalls, [], 'disabled/unowned is already free — no probe expected');
+  // Nothing was written either: a second refresh:false call still takes the
+  // disabled short-circuit rather than serving a phantom cached record.
+  const again = await adapter.detect({ cfg, refresh: false });
+  assert.deepEqual(again, facts);
+  resetEvidence();
+});
+
+// The case Ruling B exists for: an internal post-mutation verification call
+// must never trust evidence a PRIOR (unrelated) status-refresh call wrote,
+// even though that evidence is still well within the 6h freshness window.
+test('a fresh status-cached detect() never leaks into apply()\'s post-mutation re-verification (Ruling B)', async () => {
+  resetEvidence();
+  const env = fakeEnvironment();
+  const cfg = config();
+  // Simulate a plain `ak status` immediately before `ak sync`: writes fresh,
+  // matching evidence reflecting the PRE-mutation (nothing installed) state.
+  const preStatus = await env.adapter.detect({ cfg, refresh: false });
+  assert.equal(preStatus.install.binaryPresent, false);
+
+  // If execute()'s internal `detect({ ...request, cfg })` re-verification
+  // calls wrongly honored that still-fresh cache instead of probing for
+  // real, they would see the stale "nothing wired" facts after the mutation
+  // and fail every operation closed.
+  const result = await runLifecycle({ adapter: env.adapter, action: 'apply', cfg });
+  assert.equal(result.ok, true, 'apply must observe its own mutations, not the pre-mutation status cache');
+  assert.equal(cfg.integrations.ownership.dejaVu.install.written.version, '0.19.0');
+  assert.equal(cfg.integrations.ownership.dejaVu.targets.claude.mode, 'mcp');
+  resetEvidence();
 });

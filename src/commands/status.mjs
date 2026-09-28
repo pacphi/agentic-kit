@@ -92,7 +92,7 @@ export async function collect({
   await runSections(SECTIONS_BEFORE_HOST_DETAIL, ctx, rows);
 
   rows.push(...(await collectDejaVuRows({
-    cfg, adapter: dejaVuAdapter, planOptions: dejaVuPlanOptions,
+    cfg, adapter: dejaVuAdapter, planOptions: dejaVuPlanOptions, refresh,
   })));
 
   // Per-host status DETAIL rows (opencode.json wiring, lifecycle bridge,
