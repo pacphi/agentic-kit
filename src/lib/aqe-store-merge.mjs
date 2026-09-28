@@ -27,11 +27,14 @@
 //   3 backup    VACUUM INTO <run>/backup/root-memory.db.
 //   4 rehearse  on a copy of that backup: per stray copy, delete its
 //               witness_chain rows (appended unlinked they break the root's
-//               audit chain; Branch 5 Task 0.2) and its starter patterns with
-//               the rows that must reference them (a pattern_id column that is
-//               NOT NULL or a foreign key to qe_patterns: embeddings, usage,
-//               null results, lineage; nullable references such as
-//               concept_nodes stay), `aqe brain export --format
+//               audit chain; Branch 5 Task 0.2) and the starter patterns the
+//               root does not hold, with the rows that must reference them (a
+//               *pattern_id column that is NOT NULL or a foreign key to
+//               qe_patterns: embeddings, usage, null results, lineage,
+//               relationships by source or target); nullable references such
+//               as concept_nodes.pattern_id are cleared. Starter patterns the
+//               root holds stay in the export: AQE skips them and remaps their
+//               usage onto the root's pattern. Then `aqe brain export --format
 //               jsonl`, `aqe brain import --dry-run`, then the import. Counts
 //               must equal the preview's union by (name, qe_domain,
 //               pattern_type) and experience id; integrity and foreign keys
@@ -185,11 +188,12 @@ function preview(root, strays, scratch, openDb, seedKeys) {
     const copy = copyStore(stray.file, path.join(scratch, 'strays', stray.slug));
     const store = readStore(copy, openDb);
     const kept = store.keys.filter((key) => !seedKeys.has(key));
+    const seedsInRoot = store.keys.filter((key) => seedKeys.has(key) && inRoot.has(key)).length;
     const entry = {
       path: stray.path, dir: stray.file, slug: stray.slug, copy, readable: store.readable, ...(store.error ? { error: store.error } : {}),
       patterns: store.keys.length, experiences: store.experiences.length, witnessRows: store.witnessRows,
       alreadyInRoot: store.keys.filter((key) => inRoot.has(key)).length,
-      seedPatterns: store.keys.length - kept.length,
+      seedPatterns: store.keys.length - kept.length - seedsInRoot, seedPatternsInRoot: seedsInRoot,
       newPatterns: kept.filter((key) => !known.has(key)).length,
       newExperiences: store.experiences.filter((id) => !ids.has(id)).length,
     };
@@ -199,7 +203,7 @@ function preview(root, strays, scratch, openDb, seedKeys) {
   });
   return {
     rootStore: { ...counts(rootCopy), readable: rootCopy.readable, ...(rootCopy.error ? { error: rootCopy.error } : {}), ...(rootProblem ? { problem: rootProblem } : {}) },
-    strays: rows, expected: { patterns: known.size, experiences: ids.size }, fingerprints,
+    strays: rows, expected: { patterns: known.size, experiences: ids.size }, fingerprints, rootKeys: inRoot,
   };
 }
 
@@ -298,27 +302,40 @@ function dropWitnessRows(file, openDb) {
   return result.value;
 }
 
-/** Does `table` hold rows that must reference a qe_patterns row? */
-function referencesPattern(db, table) {
-  const column = db.prepare(`PRAGMA table_info("${table.replaceAll('"', '""')}")`).all().find((c) => c.name === 'pattern_id');
-  if (!column) return false;
-  return !!column.notnull || db.prepare(`PRAGMA foreign_key_list("${table.replaceAll('"', '""')}")`).all().some((fk) => fk.table === 'qe_patterns');
+const quoted = (name) => `"${String(name).replaceAll('"', '""')}"`;
+
+/** The columns of `table` that name a qe_patterns row (pattern_id, source_pattern_id,
+ *  target_pattern_id, ...: the columns AQE's import remaps, brain-shared.js
+ *  remapPatternReferences). `required`: NOT NULL or a foreign key to qe_patterns, so a
+ *  row pointing at a left-out pattern goes; otherwise the reference is cleared. */
+function patternReferences(db, table) {
+  const fks = db.prepare(`PRAGMA foreign_key_list(${quoted(table)})`).all();
+  return db.prepare(`PRAGMA table_info(${quoted(table)})`).all()
+    .filter((c) => /(^|_)pattern_id$/.test(c.name))
+    .map((c) => ({ table, column: String(c.name), required: !!c.notnull || fks.some((fk) => fk.table === 'qe_patterns' && fk.from === c.name) }));
 }
 
-/** Delete AQE's starter patterns, and the rows that must reference them, from a
- *  stray's scratch copy (B5-D5). Returns the number of patterns removed. */
-function dropStarterPatterns(file, seedKeys, openDb) {
+/** Delete AQE's starter patterns the root does not hold, and the rows that must
+ *  reference them, from a stray's scratch copy (B5-D5); nullable references to them
+ *  are cleared (review minor 5). Seeds the root already holds stay: AQE's import skips
+ *  them and remaps their usage and lineage onto the root's pattern (review minor 4).
+ *  Returns the number of patterns removed. */
+function dropStarterPatterns(file, seedKeys, rootKeys, openDb) {
   const result = openDb(file, (db) => {
     if (!seedKeys.size || !hasTable(db, 'qe_patterns')) return 0;
     const ids = db.prepare('SELECT id, name, qe_domain, pattern_type FROM qe_patterns').all()
-      .filter((row) => seedKeys.has(patternKey(row))).map((row) => row.id);
+      .filter((row) => seedKeys.has(patternKey(row)) && !rootKeys.has(patternKey(row))).map((row) => row.id);
     if (!ids.length) return 0;
-    const dependents = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name <> 'qe_patterns'").all()
-      .map((row) => String(row.name)).filter((table) => referencesPattern(db, table));
+    const references = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name <> 'qe_patterns'").all()
+      .flatMap((row) => patternReferences(db, String(row.name)));
     db.exec('BEGIN');
     try {
       for (const id of ids) {
-        for (const table of dependents) db.prepare(`DELETE FROM "${table.replaceAll('"', '""')}" WHERE pattern_id = ?`).run(id);
+        for (const ref of references) {
+          db.prepare(ref.required
+            ? `DELETE FROM ${quoted(ref.table)} WHERE ${quoted(ref.column)} = ?`
+            : `UPDATE ${quoted(ref.table)} SET ${quoted(ref.column)} = NULL WHERE ${quoted(ref.column)} = ?`).run(id);
+        }
         db.prepare('DELETE FROM qe_patterns WHERE id = ?').run(id);
       }
       db.exec('COMMIT');
@@ -329,10 +346,10 @@ function dropStarterPatterns(file, seedKeys, openDb) {
   return result.value;
 }
 
-async function exportStrays(o, rows, scratch, scratchEnv, seedKeys) {
+async function exportStrays(o, rows, scratch, scratchEnv, seedKeys, rootKeys) {
   for (const stray of rows) {
     stray.witnessRowsNotImported = dropWitnessRows(stray.copy, o.openDb);
-    stray.seedPatternsSkipped = dropStarterPatterns(stray.copy, seedKeys, o.openDb);
+    stray.seedPatternsSkipped = dropStarterPatterns(stray.copy, seedKeys, rootKeys, o.openDb);
     stray.export = path.join(scratch, 'export', stray.slug);
     await aqe(o, ['brain', 'export', '--db', stray.copy, '--format', 'jsonl', '-o', stray.export], scratchEnv);
   }
@@ -472,7 +489,8 @@ function writeReceipt(result, extra) {
     holderMethod: result.holders?.method ?? null, backup: result.backup, ...extra, seedSet: result.seeds ?? null,
     strays: result.strays.map((s) => ({
       path: s.path, patterns: s.patterns, experiences: s.experiences, alreadyInRoot: s.alreadyInRoot,
-      witnessRowsNotImported: s.witnessRowsNotImported ?? 0, seedPatternsSkipped: s.seedPatternsSkipped ?? s.seedPatterns ?? 0, prunedPatterns: 0,
+      witnessRowsNotImported: s.witnessRowsNotImported ?? 0, seedPatternsSkipped: s.seedPatternsSkipped ?? s.seedPatterns ?? 0,
+      seedPatternsInRoot: s.seedPatternsInRoot ?? 0, prunedPatterns: 0,
     })),
     archived: result.archived, leftInPlace: result.leftInPlace,
   }, null, 2)}\n`);
@@ -493,7 +511,7 @@ export const restoreSteps = (backup, root) => `with every Claude Code, Codex and
   + `${path.join(root, '.agentic-qe', 'memory.db')} and delete memory.db-wal and memory.db-shm beside it`;
 
 /** Steps 3-7, after the preview and the first writer check passed. */
-async function applyMerge(o, root, result, rows, seedKeys, fingerprints) {
+async function applyMerge(o, root, result, rows, seedKeys, { fingerprints, rootKeys }) {
   const scratch = path.join(result.dir, 'scratch');
   const real = path.join(root, '.agentic-qe', 'memory.db');
   result.backup = path.join(result.dir, 'backup', 'root-memory.db');
@@ -506,7 +524,7 @@ async function applyMerge(o, root, result, rows, seedKeys, fingerprints) {
   fs.mkdirSync(path.dirname(rehearsal), { recursive: true });
   fs.copyFileSync(result.backup, rehearsal);
   const scratchEnv = { cwd: scratch, env: { AQE_PROJECT_ROOT: scratch, AQE_MEMORY_PATH: rehearsal, AQE_STORAGE_PATH: path.join(scratch, 'aqe-state') } };
-  await exportStrays(o, rows, scratch, scratchEnv, seedKeys);
+  await exportStrays(o, rows, scratch, scratchEnv, seedKeys, rootKeys);
   const rehearsed = await importAll(o, rows, rehearsal, scratchEnv);
   if (rehearsed.problem || !sameCounts(rehearsed.counts, result.expected)) {
     return { ...result, status: 'failed', reason: rehearsed.problem ?? `rehearsal count mismatch: expected ${JSON.stringify(result.expected)}, got ${JSON.stringify(rehearsed.counts)}; nothing was changed` };
@@ -561,7 +579,7 @@ export async function mergeAqeStores(root, options = {}) {
     const scratch = path.join(dir, 'scratch');
     const tooOld = versionRefusal(o.aqeVersion);
     const starters = tooOld ? { keys: new Set(), source: null, error: tooOld } : await starterSet(o, root, scratch);
-    const { fingerprints, ...seen } = preview(root, strays, scratch, o.openDb, starters.keys);
+    const { fingerprints, rootKeys, ...seen } = preview(root, strays, scratch, o.openDb, starters.keys);
     const first = await writersCheck(o, root, strays);
     const seeds = { patterns: starters.keys.size, source: starters.source, ...(starters.error ? { error: starters.error } : {}) };
     result = { ...result, ...seen, holders: first.found, seeds };
@@ -575,7 +593,7 @@ export async function mergeAqeStores(root, options = {}) {
       ?? (unreadable.length ? `unreadable stray store copies: ${unreadable.join(', ')}` : null)
       ?? starterRefusal(starters);
     if (refusal) { removeRunScratch(o, dir); return { ...result, status: 'refused', reason: refusal }; }
-    result = await applyMerge(o, root, result, seen.strays, starters.keys, fingerprints);
+    result = await applyMerge(o, root, result, seen.strays, starters.keys, { fingerprints, rootKeys });
   } catch (error) {
     result = { ...result, status: 'failed', reason: String(error?.message ?? error),
       ...(result.backup ? { restore: restoreSteps(result.backup, root) } : {}) };

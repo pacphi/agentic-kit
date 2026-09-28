@@ -34,11 +34,13 @@ Usage: ak x aqe-store [status|merge] [options]
            5. moves each whole stray folder into the archive
            Audit-trail (witness_chain) rows are not imported; they stay in the
            archive. A folder without memory.db is skipped and reported.
-           AQE's starter patterns are not imported either: ak builds a fresh
-           AQE store in its scratch folder (aqe init --minimal, then aqe
-           learning stats, with the project's AQE embedder) and skips every
-           stray pattern with the same name, domain and type. Without that set
-           it refuses.
+           AQE's starter patterns the root lacks are not imported either: ak
+           builds a fresh AQE store in its scratch folder (aqe init --minimal,
+           then aqe learning stats, with the project's AQE embedder) and leaves
+           out every stray pattern with the same name, domain and type, with
+           the rows that point at it. A starter pattern the root holds is left
+           to AQE, which keeps the root's and merges its usage. Without that
+           set it refuses.
 
 Options:
   --yes       apply the merge (merge only)
@@ -63,7 +65,8 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 function strayLine(stray) {
   if (!stray.readable) return `${stray.path}: copy unreadable (${stray.error}); a live writer may have torn it`;
-  const seeds = stray.seedPatterns ? `, ${plural(stray.seedPatterns, 'AQE starter pattern')} left out` : '';
+  const seeds = (stray.seedPatterns ? `, ${plural(stray.seedPatterns, 'AQE starter pattern')} left out` : '')
+    + (stray.seedPatternsInRoot ? `, ${plural(stray.seedPatternsInRoot, 'starter pattern')} the root holds (usage merged onto it)` : '');
   return `${stray.path}: ${plural(stray.patterns, 'pattern')} (${stray.alreadyInRoot} already in the root${seeds}), `
     + `${plural(stray.experiences, 'experience')}, ${plural(stray.witnessRows, 'audit-trail row')} (not imported)`;
 }

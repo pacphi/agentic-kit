@@ -34,6 +34,13 @@ function buildStore(dir, { patterns = [], experiences = [], witness = 0 } = {}) 
   fs.writeFileSync(path.join(dir, 'patterns.rvf'), 'rvf');
 }
 
+// AQE 3.14.4 creates this table on demand (AQE/dist/integrations/ruvector/brain-table-ddl.js:163-167).
+const RELATIONSHIPS_DDL = `CREATE TABLE IF NOT EXISTS pattern_relationships (
+    id TEXT PRIMARY KEY, source_pattern_id TEXT NOT NULL,
+    target_pattern_id TEXT NOT NULL, relationship_type TEXT NOT NULL,
+    similarity_score REAL, created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (source_pattern_id) REFERENCES qe_patterns(id) ON DELETE CASCADE
+  )`;
 const tables = (db) => new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name));
 const readJsonl = (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
 
@@ -69,6 +76,9 @@ function fakeAqe({ underImportInto = null, version = '3.14.4', seeds = ['S1', 'S
       dump('qe_patterns', 'patterns.jsonl');
       dump('captured_experiences', 'captured-experiences.jsonl');
       dump('witness_chain', 'witness-chain.jsonl');
+      dump('qe_pattern_usage', 'pattern-usage.jsonl');
+      dump('pattern_relationships', 'pattern-relationships.jsonl');
+      dump('concept_nodes', 'concept-nodes.jsonl');
       db.close();
       fs.writeFileSync(path.join(out, 'manifest.json'), '{}');
       return { code: 0, stdout: 'Export complete.\n', stderr: '' };
@@ -83,10 +93,31 @@ function fakeAqe({ underImportInto = null, version = '3.14.4', seeds = ['S1', 'S
       if (!tables(db).has('captured_experiences')) for (const s of EXPERIENCE_DDL) db.exec(s);
       let patterns = readJsonl(path.join(input, 'patterns.jsonl'));
       if (underImportInto && target === underImportInto) patterns = patterns.slice(0, -1);
+      // AQE keeps the root's id for a pattern it already holds and remaps the
+      // stray's child rows onto it (brain-shared.js mergeGenericRow, remapPatternReferences).
+      const ids = new Map();
       for (const p of patterns) {
         const r = db.prepare('INSERT OR IGNORE INTO qe_patterns (id, pattern_type, qe_domain, domain, name) VALUES (?, ?, ?, ?, ?)')
           .run(p.id, p.pattern_type, p.qe_domain, p.domain, p.name);
         if (r.changes) imported += 1; else skipped += 1;
+        const kept = db.prepare('SELECT id FROM qe_patterns WHERE name = ? AND qe_domain = ? AND pattern_type = ?').get(p.name, p.qe_domain, p.pattern_type);
+        ids.set(p.id, kept?.id ?? p.id);
+      }
+      const remap = (id) => (id === null || id === undefined ? id : ids.get(id) ?? id);
+      for (const u of readJsonl(path.join(input, 'pattern-usage.jsonl'))) {
+        const pid = remap(u.pattern_id);
+        if (!db.prepare('SELECT 1 FROM qe_pattern_usage WHERE pattern_id = ? AND created_at = ?').get(pid, u.created_at)) {
+          db.prepare('INSERT INTO qe_pattern_usage (pattern_id, success, created_at) VALUES (?, ?, ?)').run(pid, u.success, u.created_at);
+        }
+      }
+      const relationships = readJsonl(path.join(input, 'pattern-relationships.jsonl'));
+      if (relationships.length) db.exec(RELATIONSHIPS_DDL);
+      for (const r of relationships) {
+        db.prepare('INSERT OR IGNORE INTO pattern_relationships (id, source_pattern_id, target_pattern_id, relationship_type) VALUES (?, ?, ?, ?)')
+          .run(r.id, remap(r.source_pattern_id), remap(r.target_pattern_id), r.relationship_type);
+      }
+      for (const c of readJsonl(path.join(input, 'concept-nodes.jsonl'))) {
+        db.prepare('INSERT OR IGNORE INTO concept_nodes (id, concept_type, content, pattern_id) VALUES (?, ?, ?, ?)').run(c.id, c.concept_type, c.content, remap(c.pattern_id));
       }
       for (const e of readJsonl(path.join(input, 'captured-experiences.jsonl'))) {
         const r = db.prepare('INSERT OR IGNORE INTO captured_experiences (id, task, agent) VALUES (?, ?, ?)').run(e.id, e.task, e.agent);
@@ -526,6 +557,41 @@ test('--yes leaves AQE starter patterns and their rows out of the root; the arch
   const receipt = JSON.parse(fs.readFileSync(result.receipt, 'utf8'));
   assert.deepEqual(receipt.seedSet, { patterns: 2, source: '.claude/settings.local.json' });
   assert.deepEqual(receipt.strays.map((s) => [s.path, s.seedPatternsSkipped]), [['.agentic-qe/.agentic-qe', 1], ['docs/.agentic-qe', 2]]);
+});
+
+test('starter patterns the root already holds are imported for AQE to skip, so their usage reaches the root (review minor 4/5)', async (t) => {
+  const p = projectWithSeeds(t);
+  const root = new DatabaseSync(p.rootDb);
+  root.prepare('INSERT INTO qe_patterns (id, pattern_type, qe_domain, domain, name) VALUES (?, ?, ?, ?, ?)').run('proj-S1', 'workflow', 'test-generation', 'test', 'S1');
+  root.close();
+  const docs = new DatabaseSync(path.join(p.root, 'docs', '.agentic-qe', 'memory.db'));
+  docs.prepare('INSERT INTO qe_pattern_usage (pattern_id, success, created_at) VALUES (?, ?, ?)').run('docs/.agentic-qe-S2', 0, '2026-09-20');
+  docs.exec(RELATIONSHIPS_DDL);
+  const rel = docs.prepare('INSERT INTO pattern_relationships (id, source_pattern_id, target_pattern_id, relationship_type) VALUES (?, ?, ?, ?)');
+  rel.run('r-to-s1', 'docs-C', 'docs/.agentic-qe-S1', 'similar');
+  rel.run('r-to-s2', 'docs-C', 'docs/.agentic-qe-S2', 'similar');
+  const node = docs.prepare('INSERT INTO concept_nodes (id, concept_type, content, pattern_id) VALUES (?, ?, ?, ?)');
+  node.run('n-s1', 'pattern', 'x', 'docs/.agentic-qe-S1');
+  node.run('n-s2', 'pattern', 'y', 'docs/.agentic-qe-S2');
+  docs.close();
+  const preview = await mergeAqeStores(p.root, base(p, { apply: false, runner: fakeAqe().runner, holders: noHolders }));
+  const row = preview.strays.find((s) => s.path === 'docs/.agentic-qe');
+  assert.deepEqual([row.seedPatterns, row.seedPatternsInRoot], [1, 1], 'S2 left out; S1 already in the root');
+  assert.deepEqual(preview.expected, { patterns: 5, experiences: 2 });
+  const result = await mergeAqeStores(p.root, base(p, { apply: true, runner: fakeAqe().runner, holders: noHolders, now: Date.UTC(2026, 8, 27, 17) }));
+  assert.equal(result.status, 'merged', JSON.stringify(result.reason));
+  assert.deepEqual(names(p.rootDb), ['A', 'B', 'C', 'D', 'S1']);
+  const got = withDb(p.rootDb, (db) => ({
+    usage: db.prepare('SELECT pattern_id FROM qe_pattern_usage ORDER BY pattern_id').all().map((r) => r.pattern_id),
+    rels: db.prepare('SELECT id, target_pattern_id FROM pattern_relationships ORDER BY id').all().map((r) => [r.id, r.target_pattern_id]),
+    nodes: db.prepare('SELECT id, pattern_id FROM concept_nodes ORDER BY id').all().map((r) => [r.id, r.pattern_id]),
+  })).value;
+  assert.deepEqual(got.usage, ['proj-S1'], 'the usage of a seed the root holds follows onto the root\'s pattern; S2\'s is left out');
+  assert.deepEqual(got.rels, [['r-to-s1', 'proj-S1']], 'a relationship whose target is a left-out seed is left out');
+  assert.deepEqual(got.nodes, [['n-s1', 'proj-S1'], ['n-s2', null]], 'a nullable reference to a left-out seed is cleared');
+  const receipt = JSON.parse(fs.readFileSync(result.receipt, 'utf8'));
+  const docsReceipt = receipt.strays.find((s) => s.path === 'docs/.agentic-qe');
+  assert.deepEqual([docsReceipt.seedPatternsSkipped, docsReceipt.seedPatternsInRoot], [1, 1]);
 });
 
 test('no starter set (an empty fresh store) refuses the merge before any backup, and the preview says why', async (t) => {
