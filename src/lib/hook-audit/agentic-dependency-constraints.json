@@ -313,7 +313,9 @@
       "constraintIds": [],
       "history": [
         { "date": "2026-08-26", "event": "commented" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "on 0.157.1 the mcp_servers={} override still lists the server as enabled, while per-server enabled=false works; asked which is the supported way (issuecomment-5858790999)" },
+        { "date": "2026-09-28", "event": "commented", "note": "still a silent no-op on 0.158.0 (three releases now); asked whether replace semantics or per-server disabling is the supported path (issuecomment-5878392424)" }
       ]
     },
     {
@@ -887,6 +889,7 @@
       "history": [
         { "date": "2026-07-14", "event": "commented" },
         { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "on 3.46.1 --tools narrows only the advertised list and tools/call still runs unselected tools; asked whether --tools completes the request (issuecomment-5858795813)" },
         { "date": "2026-09-28", "event": "commented", "note": "live repro on 3.47.1: tools/list is narrowed but tools/call still runs an unselected tool; proposed a selection check at tools/call (issuecomment-5878242945)" }
       ]
     },
@@ -1122,6 +1125,7 @@
       "history": [
         { "date": "2026-07-31", "event": "filed" },
         { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-26", "event": "commented", "note": "tested the single-threaded ONNX Runtime mitigation on Apple Silicon: inconclusive, the abort does not reproduce locally (issuecomment-5850382245)" },
         { "date": "2026-09-27", "event": "commented", "note": "hosted probe run 36333572972 on Ruflo 3.46.1: 10/10 aborts by default and 10/10 with single-threaded ONNX Runtime sessions; mitigation disproven (issuecomment-5857781254)" },
         { "date": "2026-09-27", "event": "commented", "note": "3.47.0 status, transformers 3.x / ONNX Runtime 1.21 lead, fix approaches; 11/11 nightly aborts in the continue-on-error step (issuecomment-5863246672)" },
         { "date": "2026-09-28", "event": "commented", "note": "thanked vidaunited for the trace hook; 12 of 12 macOS nightly aborts on 3.47.0, with a new WASM backend line before the abort (issuecomment-5878044230)" }
@@ -1418,8 +1422,11 @@
       "status": "watching",
       "constraintIds": [],
       "history": [
-        { "date": "2026-09-26", "event": "commented" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-09", "event": "commented", "note": "confirmed independently on 3.39.2 from a read-only look at both project stores (issuecomment-5606621769)" },
+        { "date": "2026-09-20", "event": "commented", "note": "cross-process evidence on 3.42.4 plus four adjacent findings (issuecomment-5747730591)" },
+        { "date": "2026-09-26", "event": "commented", "note": "new detail on the CLI-to-AgentDB mirror, confirmed on 3.45.0 (issuecomment-5849260721)" },
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "still reproduces on 3.46.1 with a non-default CLAUDE_FLOW_DB_PATH; exact mechanism and two worse variants (issuecomment-5858784847)" }
       ]
     },
     {
@@ -2024,7 +2031,8 @@
       "tracks": ["proffesor-for-testing/agentic-qe#574", "proffesor-for-testing/agentic-qe#719"],
       "history": [
         { "date": "2026-09-26", "event": "filed" },
-        { "date": "2026-09-26", "event": "registered" }
+        { "date": "2026-09-26", "event": "registered" },
+        { "date": "2026-09-27", "event": "commented", "note": "moved the upstream part of this tracker to the watch registry; agentic-qe 3.14.4 carries PR 719, not yet verified to stop FsyncFailed under a live lock (issuecomment-5858567140)" }
       ]
     },
     {
