@@ -34,6 +34,7 @@ jobs:
   changes:
     name: detect relevant changes
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     outputs:
       maintainer: ${{ steps.filter.outputs.maintainer || 'true' }}
       consumer: ${{ steps.filter.outputs.consumer || 'true' }}
@@ -63,6 +64,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.maintainer == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -91,6 +93,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.consumer == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
