@@ -29,7 +29,7 @@ import { DEJA_VU_TARGETS } from '../lib/deja-vu.mjs';
 import { loadKitConfig, saveKitConfig } from '../lib/config.mjs';
 import { HOSTS, hostInstallState, installHost, migrateRetiredRoutesInConfig, printActivityRoutingTable, convergeProviderStack, applySetupHostFlags, guidanceContext, reportRetiredRouteChanges } from '../lib/providers.mjs';
 import { cmpVersions, installedVersion } from '../lib/versions.mjs';
-import { aqeInitArguments } from '../lib/aqe-guidance.mjs';
+import { aqeInitArguments, aqeInitReport } from '../lib/aqe-guidance.mjs';
 import { resolveAqeEmbedding } from '../lib/aqe-embedding-config.mjs';
 import { embeddingIntentFromFlags, embeddingSetupDisclosure } from '../lib/aqe-embedding-setup.mjs';
 import { prepareAqeEmbedding } from '../lib/aqe-embedding-lifecycle.mjs';
@@ -635,7 +635,8 @@ async function initProjectAgenticQe(root, cfg, flags, permCtx) {
   const unpinned = reconcileAqePin(cfg, root, { enabled: false });
   if (!unpinned.ok) { reportOutcome('AQE pin pre-init', unpinned); return false; }
   const aqe = await runCmd('aqe', args, { cwd: root, timeout: 300_000, env: resolveAqeEmbedding(cfg).env });
-  (aqe.code === 0 ? ok : warn)(`agentic-qe initialized${withCodex ? ' (+ codex skills)' : ''}`);
+  const report = aqeInitReport({ code: aqe.code, withCodex, root, version: installedVersion('agentic-qe') });
+  (report.level === 'ok' ? ok : warn)(report.text);
   pinProjectAqe(cfg, root);
   const aqeUnexpected = removeUndisclosedPermissions(
     permCtx.permissionsFile, permCtx.permissionsBefore, permCtx.authorizedPermissions,
