@@ -721,6 +721,39 @@ test('a skipped subsystem runs no step and is never counted as a failure', async
   assert.match(out, /skipped by request: \[aqe\]/);
 });
 
+// A host probe that throws while sync refreshes host evidence before planning
+// is reported, naming the host, and the sync goes on with the next host and
+// with the plan (which then reads that host as ak last recorded it).
+test('a host probe that fails before planning is reported by name and the sync continues', async () => {
+  seedHome(offlineKitConfig({
+    integrations: { version: 2, hosts: { claude: true, codex: true, opencode: false }, bindings: [] },
+    routing: { version: 1, primaryHost: 'claude', routes: {} },
+  }));
+  const probed = [];
+  const probes = {
+    installState: async (h) => {
+      probed.push(h.id);
+      if (h.id === 'claude') throw new Error('claude probe exploded');
+      return { method: 'external' };
+    },
+    executable: async () => ({ ok: true }),
+    collectFacts: async () => { throw new Error('host setup probe exploded'); },
+  };
+  const prior = process.cwd();
+  process.chdir(PROJECT);
+  try {
+    const { result, out } = await captureLog(() => sync.run({
+      flags: FLAGS({ 'no-upgrade': true }), pkgRoot: PKG_ROOT, collectFn: async () => [],
+      refreshHosts: (flags, cwd) => sync.refreshPlanHosts(flags, cwd, probes),
+    }));
+    assert.equal(result, 0, out);
+    assert.deepEqual(probed, ['claude', 'codex'], 'the next host is still probed');
+    assert.match(out, /⚠.*claude.*claude probe exploded/);
+    assert.match(out, /⚠.*host setup.*host setup probe exploded/);
+    assert.match(out, /nothing to do — all subsystems healthy/, 'the sync went on to plan');
+  } finally { process.chdir(prior); }
+});
+
 test('--skip stops a step on its derived triggers too', () => {
   const cfg = { ...loadKitConfig(), security: true };
   const flags = FLAGS();

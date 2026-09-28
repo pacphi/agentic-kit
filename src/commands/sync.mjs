@@ -114,16 +114,23 @@ export function recordApplyFailure(state, name, result) {
  *  contract for `ruflo-component` evidence and defeated this branch's own
  *  warm-cache design for kinds that don't need it. Dry-runs skip this: it
  *  persists evidence, and --dry-run is pinned to touch nothing, so a dry run
- *  reads host evidence as last recorded (it expires after 6 h). */
-async function refreshPlanHosts(flags, cwd) {
+ *  reads host evidence as last recorded (it expires after 6 h). A probe that
+ *  throws is reported by host and the sync goes on; the plan then reads that
+ *  host as ak last recorded it. `probes` replaces the probes (tests). */
+export async function refreshPlanHosts(flags, cwd, probes = {}) {
   if (flags['dry-run']) return;
+  const { installState, executable, collectFacts } = { ...HOST_LIFECYCLE, collectFacts: collectIntegrationFacts, ...probes };
+  const fresh = { refresh: true, record: true, source: 'sync' };
+  const guarded = (what, probe) => Promise.resolve().then(probe).catch((e) => warn(
+    `${what}: could not re-check before planning (${e?.message ?? e}); the plan uses what ak last recorded`));
   const cfg = loadKitConfig();
   for (const h of HOSTS) {
     if (!cfg.integrations?.hosts?.[h.id]) continue;
-    const st = await hostInstallState(h, { refresh: true, record: true, source: 'sync' });
-    if (st.method === 'npm') await hostExecutable(h, { refresh: true, record: true, source: 'sync' });
+    await guarded(`host ${h.id}`, async () => {
+      if ((await installState(h, fresh)).method === 'npm') await executable(h, fresh);
+    });
   }
-  await collectIntegrationFacts({ cwd, cfg, refresh: true, record: true, source: 'sync' });
+  await guarded('host setup', () => collectFacts({ cwd, cfg, ...fresh }));
 }
 
 export const options = {
