@@ -6,6 +6,7 @@ import { glyph, dim, bold, warn } from '../lib/output.mjs';
 import { loadRing, detectRegression } from '../lib/health-history.mjs';
 import { loadKitConfig } from '../lib/config.mjs';
 import { collectIntegrationFacts } from '../lib/providers.mjs';
+import { globalRoot } from '../lib/paths.mjs';
 import { companionLifecycleFor } from '../lib/adapters/companion-lifecycle-registry.mjs';
 import { row } from './status/row.mjs';
 import { renderHostDetailRows, admittedLifecycleFallbackRows } from './status/host-detail.mjs';
@@ -37,7 +38,9 @@ Usage: ak status [options]
 Options:
   --deep      run the slower probes (spawns CLIs) for a fuller picture
   --json      emit the raw rows as JSON (suppresses the drift nudge)
-  --refresh   re-probe ruflo component evidence
+  --refresh   re-probe cached evidence (ruflo components, native runtime, host
+              setup, deja-vu, version drift, and the rest of the checks a
+              plain \`ak status\` reuses from a fresh cache)
   --live      first run the quick, free live checks from \`ak x verify\` in
               parallel (AQE embedding request for a kit-managed backend, Codex
               MCP when Codex is enabled, provider wiring, security packages,
@@ -92,6 +95,17 @@ export async function collect({
   // for a refresh — a plain status call recording evidence should not claim
   // to be a refresh it never performed.
   const source = refresh ? 'status-refresh' : 'status';
+  // globalRoot() defaults refresh:false/record:false (paths.mjs: it is the
+  // single most transitively-called function in the codebase, reached from
+  // dozens of non-status contexts that must never persist evidence as a side
+  // effect). Warming its in-process memo HERE, once, with THIS call's real
+  // refresh/record, is what lets every other bare `globalRoot()` call below
+  // (however deep — natives, versions, providers, daemons, …) reuse the memo
+  // for free while still letting a plain `ak status` persist for a later
+  // process to reuse, and `--refresh` force a fresh read. A throw here (no
+  // npm, no resolvable fallback) is swallowed: the sections that actually
+  // need the value report it individually rather than failing the whole row set.
+  try { globalRoot({ refresh, record, source }); } catch { /* reported per-section */ }
   const integrationFacts = await collectIntegrationFacts({
     cwd, cfg, refresh, record, source,
   });
