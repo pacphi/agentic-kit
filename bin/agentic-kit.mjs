@@ -45,6 +45,7 @@ const PLUMBING = Object.assign(Object.create(null), {
   'aqe-embedding': () => import('../src/commands/x/aqe-embedding.mjs'),
   'admin': () => import('../src/commands/x/admin.mjs'),
   'aqe-provider': () => import('../src/commands/x/aqe-provider.mjs'),
+  'aqe-store': () => import('../src/commands/x/aqe-store.mjs'),
   'daemon-gc': () => import('../src/commands/x/daemon-gc.mjs'),
   'dashboard': () => import('../src/commands/x/dashboard.mjs'),
   'harvest': () => import('../src/commands/x/harvest.mjs'),
@@ -93,6 +94,7 @@ const HELP_ALL = `${HELP}
 
 Plumbing (power users) — each takes --help:
   ak x aqe-embedding [status|configure|prepare|verify]   AQE semantic backend lifecycle
+  ak x aqe-store [status|merge] [--yes]   merge stray AQE stores into the project store, then archive them
   ak x admin [--port N]        maintainer-only telemetry admin (localhost; GitHub/npm egress)
   ak x daemon-gc [--kill]      list/stop stale ruflo daemons
   ak x dashboard [--port N]    local health and guarded maintenance dashboard (localhost only)
@@ -218,7 +220,7 @@ async function main() {
   // setup and host own complete mutation/reporting flows. Running the generic
   // nudge after a declined trust preflight could write version-cache state and
   // violate their "before any changes" boundary.
-  if (!values.json && !values['dry-run'] && !['sync', 'usage', 'telemetry', 'models', 'setup', 'host', 'audit', 'heal', 'maintain', 'ruflo-mcp', 'aqe-provider', 'aqe-embedding'].includes(cmd)) {
+  if (!values.json && !values['dry-run'] && !['sync', 'usage', 'telemetry', 'models', 'setup', 'host', 'audit', 'heal', 'maintain', 'ruflo-mcp', 'aqe-provider', 'aqe-embedding', 'aqe-store'].includes(cmd)) {
     try {
       const { driftReport } = await import('../src/lib/versions.mjs');
       for (const r of await driftReport()) {

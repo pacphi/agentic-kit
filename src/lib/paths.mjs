@@ -23,6 +23,8 @@ export const hookHealingTransactionsDir = () => path.join(stateBase(), 'agentic-
 export const maintenanceControlDir = () => path.join(stateBase(), 'agentic-kit', 'maintenance');
 /** Backups and receipts of the one-time setup probe-row cleanup (memory-probe-cleanup.mjs). */
 export const memoryProbeCleanupDir = () => path.join(stateBase(), 'agentic-kit', 'memory-probe-cleanup');
+/** Backups, archived stray AQE stores and receipts of `ak x aqe-store merge` (aqe-store-merge.mjs). */
+export const aqeStoreMergeDir = () => path.join(stateBase(), 'agentic-kit', 'aqe-store-merge');
 /** Receipts for edits ak makes inside another tool's install (install-edits.mjs). */
 export const installEditsPath = () => path.join(stateBase(), 'agentic-kit', 'install-edits.json');
 /** The ruflo-era config dir — read-fallback for kit.json migration and the
