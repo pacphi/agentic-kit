@@ -340,17 +340,34 @@ function printRows(rows) {
   }
 }
 
-/** --hint: exactly one suggested next action. */
-function printHint(rows, worst) {
+/** --hint: exactly one suggested next action, as the lines to print (pure —
+ *  no console I/O, so a test can assert on content without capturing
+ *  stdout). A row at warn/fail with no fix at all — `ak sync` cannot touch
+ *  it and there is no manual step either — is counted separately: when
+ *  every warn/fail row is like that, the hint names the count and says so,
+ *  never suggesting `ak sync` for nothing it would touch; when some rows do
+ *  have a fix, the no-fix count is appended to whichever message applies. */
+export function hintLines(rows, worst) {
   const bySync = rows.filter((r) => r.fix && r.repair !== 'manual');
   const manual = rows.filter((r) => r.fix && r.repair === 'manual');
-  console.log('');
-  if (worst === 'ok') console.log(`${glyph('ok')} all healthy — nothing to do`);
-  else if (!bySync.length && manual.length) {
-    console.log(`${manual.length} item(s) need attention — run the "→ manual:" step(s) above yourself; ak sync does not perform them`);
+  const noFix = rows.filter((r) => (r.level === 'warn' || r.level === 'fail') && !r.fix);
+  const lines = [''];
+  if (worst === 'ok') {
+    lines.push(`${glyph('ok')} all healthy — nothing to do`);
+  } else if (!bySync.length && !manual.length) {
+    lines.push(`${noFix.length} item(s) need attention and have no automatic fix — see the rows above`);
+  } else if (!bySync.length && manual.length) {
+    const more = noFix.length ? dim(` · ${noFix.length} more have no fix (see above)`) : '';
+    lines.push(`${manual.length} item(s) need attention — run the "→ manual:" step(s) above yourself; ak sync does not perform them${more}`);
   } else {
-    const more = manual.length ? dim(` · ${manual.length} more need a manual step (→ manual:)`) : '';
-    console.log(`${bySync.length} item(s) need attention — run: ${bold('ak sync')}${worst === 'fail' ? '' : dim('  (or --dry-run to preview)')}${more}`);
+    const manualMore = manual.length ? dim(` · ${manual.length} more need a manual step (→ manual:)`) : '';
+    const noFixMore = noFix.length ? dim(` · ${noFix.length} more have no fix (see above)`) : '';
+    lines.push(`${bySync.length} item(s) need attention — run: ${bold('ak sync')}${worst === 'fail' ? '' : dim('  (or --dry-run to preview)')}${manualMore}${noFixMore}`);
   }
-  console.log(dim('📊 ak dashboard — open the local web dashboard (http://127.0.0.1:7431)'));
+  lines.push(dim('📊 ak dashboard — open the local web dashboard (http://127.0.0.1:7431)'));
+  return lines;
+}
+
+function printHint(rows, worst) {
+  for (const line of hintLines(rows, worst)) console.log(line);
 }
