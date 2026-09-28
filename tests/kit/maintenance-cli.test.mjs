@@ -373,6 +373,29 @@ test('--only is refused on the default (bare) verb the same way', async () => {
   assert.deepEqual(service.calls, []);
 });
 
+// The --only refusal must not overreach: `--refresh=live` WITHOUT `--only`
+// stays valid — it runs the live stage (its summary folded into the stage
+// table, same as any other stage) and reads the report normally.
+test('--refresh=live without --only stays valid: runs the live stage and reads service.report()', async () => {
+  const service = buildService();
+  const calls = [];
+  const refreshStages = {
+    maintenance: async () => { calls.push('maintenance'); return { ok: true }; },
+    inventory: async () => { calls.push('inventory'); return { ok: true }; },
+    live: async () => { calls.push('live'); return { ok: true, detail: '2 passed' }; },
+    local: async () => { calls.push('local'); return { ok: true }; },
+  };
+  const result = await captureLogs(() => run({
+    flags: { json: true, refresh: 'live' }, positionals: ['report'], deps: { service, refreshStages },
+  }));
+  assert.equal(result.code, 0);
+  assert.deepEqual(calls, ['maintenance', 'inventory', 'live', 'local']);
+  assert.deepEqual(service.calls, [{ method: 'report', args: [] }]);
+  const parsed = JSON.parse(result.text);
+  assert.equal(parsed.refresh.strength, 'live');
+  assert.equal(parsed.refresh.ok, true);
+});
+
 test('--project-trees with a verb other than report is a usage error, not a silently ignored flag', async () => {
   const management = buildManagement();
   const result = await captureLogs(() => run({

@@ -295,18 +295,24 @@ async function defaultStages({ pkgRoot, deps, collector, service }) {
  *  reads back through `deps.service`, so injecting `refreshStages` alone
  *  would still read a real Maintenance service. Half-injecting either half
  *  is refused, the same way `cliRefreshStages` refuses a half-injected
- *  maintenance/management pair. The collector is built here, once — same as
- *  `system.mjs`'s `run()` — and handed to `createMaintenanceService` when
- *  `deps.service` is absent, so the service the `maintenance` stage scans
- *  through and the collector the `machine`/`inventory` stages and the
- *  management facade read through are one shared instance, not two that
- *  merely happen to agree today. */
+ *  maintenance/management pair. When `deps.refreshStages` is NOT injected,
+ *  the collector is built here, once — same as `system.mjs`'s `run()` — and
+ *  handed to `createMaintenanceService` when `deps.service` is absent, so
+ *  the service the `maintenance` stage scans through and the collector the
+ *  `machine`/`inventory` stages and the management facade read through are
+ *  one shared instance, not two that merely happen to agree today. Building
+ *  it is skipped outright when `refreshStages` is injected: the guard above
+ *  already guarantees `deps.service` is present in that case, so nothing
+ *  downstream would read it — building it anyway would import
+ *  `footprint/index.mjs` and construct a real collector from an otherwise
+ *  fully-injected, hermetic test. */
 async function refreshedReport({ flags, request, pkgRoot, deps }) {
   if (deps.refreshStages != null && deps.service == null) {
     throw new TypeError('refreshedReport: inject deps.service alongside deps.refreshStages, or neither');
   }
   const cwd = deps.cwd ?? process.cwd();
-  const collector = deps.collector ?? (await import('../lib/footprint/index.mjs')).createSystemCollector({ cwd });
+  const collector = deps.refreshStages != null ? undefined
+    : deps.collector ?? (await import('../lib/footprint/index.mjs')).createSystemCollector({ cwd });
   const service = deps.service ?? createMaintenanceService({ collector });
   const stages = deps.refreshStages ?? await defaultStages({ pkgRoot, deps, collector, service });
   const refresh = flags.json
