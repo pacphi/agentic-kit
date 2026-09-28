@@ -242,7 +242,11 @@ async function main() {
   // setup and host own complete mutation/reporting flows. Running the generic
   // nudge after a declined trust preflight could write version-cache state and
   // violate their "before any changes" boundary.
-  if (!values.json && !values['dry-run'] && !['sync', 'usage', 'telemetry', 'models', 'setup', 'host', 'audit', 'heal', 'maintain', 'ruflo-mcp', 'aqe-provider', 'aqe-embedding', 'aqe-store'].includes(cmd)) {
+  // Also skipped when the command itself refused to run (exit code 2, a
+  // parser or command-level usage error): a rejected `ak status --refresh=bogus`
+  // never got as far as doing anything, so it must not spend network calls a
+  // parse error never used to.
+  if (code !== 2 && !values.json && !values['dry-run'] && !['sync', 'usage', 'telemetry', 'models', 'setup', 'host', 'audit', 'heal', 'maintain', 'ruflo-mcp', 'aqe-provider', 'aqe-embedding', 'aqe-store'].includes(cmd)) {
     try {
       const { driftReport } = await import('../src/lib/versions.mjs');
       for (const r of await driftReport()) {
